@@ -9,13 +9,12 @@ export default async function handler(req, res) {
     GEMINI_API_KEY
   } = process.env;
 
-  // Webhook Doğrulama (GET isteği Meta tarafından webhook bağlanırken atılır)
   if (req.method === 'GET') {
     const mode = req.query['hub.mode'];
     const token = req.query['hub.verify_token'];
     const challenge = req.query['hub.challenge'];
 
-    if (mode === 'subscribe' && token === META_VERIFY_TOKEN) {
+    if (mode === 'subscribe' && token === 'baskent_wp_secret_token_123') {
       console.log('✅ Webhook Meta tarafından doğrulandı!');
       return res.status(200).send(challenge);
     } else {
