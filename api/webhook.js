@@ -2,7 +2,7 @@ import axios from 'axios';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 export default async function handler(req, res) {
-  const META_ACCESS_TOKEN = process.env.META_ACCESS_TOKEN || 'EAAMEZBSqN8IQBRT3ZACGcprC6ZCOz4rO0FMlW8r61YTBTHMZBSMTqSP4tTZBEvyao6rRymhXbRinkk9obpWSdAbZAZC1pyOYcRyZBHxP0lL2ZASxEyJcRZBWFRUiiZAo6byaIiJy4PTgXX1mR78uLzlS99oFOvCPAuqVNerPXQZCz6ZCZB0l8MZCmPislYMUVZARzfO3iZCgFNicRf27POe2PmW2iVy3nRkUso2QIUvfqyZAz2jkUQ43PtWTgj10ks6JDZBdltiQ7pLY84Mao38KwRy7ijwzEDF9JoXIvJXpD2fn9OVqKIZD';
+  const META_ACCESS_TOKEN = process.env.META_ACCESS_TOKEN || 'EAAMEZBSqN8IQBRRF3R7utZCv3cZBAKnE1WjNsYQmpZBnRJf1hgoEHiI938L0QbONhmxCsp4QlteKvH9ypiUMSZAJpOt6PFW28vWZBpAVG8SIgSCQrJpB6Em9IHWL1F5ZAm3K8ZAw2p98nDpeifS7AmJFXkmxogKCK3KkXhOcfB8u5SZA7Vt75BbErykMggkIuuxEoaBBnxHZAAmLSjoFJAOV8c9iPu43CwF3SwuivZAa43JgDra30ZCLbymaBFUNsVNiN5AJAjiYHX3m9yzER7HLGRrvLimzQ1u3i9hDLVhJ7wZDZD';
   const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID || '1072536945944841';
   const GEMINI_API_KEY = process.env.GEMINI_API_KEY || 'AIzaSyDzm4tgEs8Z7HAAyL6GfeckH1-NdLyUNR0';
 
@@ -42,7 +42,9 @@ export default async function handler(req, res) {
           const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
           const model = genAI.getGenerativeModel({
             model: "gemini-1.5-flash",
-            systemInstruction: `Sen Başkent Üniversitesi Konya Hastanesi adına çalışan profesyonel bir hasta danışmanısın.
+            systemInstruction: {
+              role: "system",
+              parts: [{ text: `Sen Başkent Üniversitesi Konya Hastanesi adına çalışan profesyonel bir hasta danışmanısın.
 
 TEMEL GÖREVİN:
 - Gelen mesajlara hızlı, güven veren ve profesyonel şekilde cevap vermek
@@ -172,7 +174,8 @@ Her konuşmayı şu noktaya getir:
 
 Eğer kullanıcı kısa ve net yazıyorsa → hızlıca randevuya yönlendir
 Eğer kullanıcı uzun yazıyorsa → önce anla, sonra yönlendir
-Eğer kullanıcı sadece "fiyat?" yazdıysa → direkt randevuya çek`
+Eğer kullanıcı sadece "fiyat?" yazdıysa → direkt randevuya çek` }]
+            }
           });
           
           let botResponse = "";
