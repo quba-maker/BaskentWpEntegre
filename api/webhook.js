@@ -2,11 +2,8 @@ import axios from 'axios';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 export default async function handler(req, res) {
-  const {
-    META_ACCESS_TOKEN,
-    META_VERIFY_TOKEN,
-    PHONE_NUMBER_ID
-  } = process.env;
+  const META_ACCESS_TOKEN = process.env.META_ACCESS_TOKEN || 'EAAMEZBSqN8IQBRT3ZACGcprC6ZCOz4rO0FMlW8r61YTBTHMZBSMTqSP4tTZBEvyao6rRymhXbRinkk9obpWSdAbZAZC1pyOYcRyZBHxP0lL2ZASxEyJcRZBWFRUiiZAo6byaIiJy4PTgXX1mR78uLzlS99oFOvCPAuqVNerPXQZCz6ZCZB0l8MZCmPislYMUVZARzfO3iZCgFNicRf27POe2PmW2iVy3nRkUso2QIUvfqyZAz2jkUQ43PtWTgj10ks6JDZBdltiQ7pLY84Mao38KwRy7ijwzEDF9JoXIvJXpD2fn9OVqKIZD';
+  const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID || '1072536945944841';
   const GEMINI_API_KEY = process.env.GEMINI_API_KEY || 'AIzaSyDzm4tgEs8Z7HAAyL6GfeckH1-NdLyUNR0';
 
   if (req.method === 'GET') {
