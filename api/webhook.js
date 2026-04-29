@@ -1,4 +1,4 @@
-import axios from 'axios';
+SİŞimport axios from 'axios';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 export default async function handler(req, res) {
