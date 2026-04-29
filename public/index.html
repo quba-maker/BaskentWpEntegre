@@ -27,6 +27,7 @@
     <div class="logo"><div class="logo-icon">🏥</div><span>Başkent WP Bot</span></div>
     <div class="nav-items">
       <button class="nav-btn active" data-page="dashboard">📊 Dashboard</button>
+      <button class="nav-btn" data-page="leads">🎯 Leads</button>
       <button class="nav-btn" data-page="conversations">💬 Konuşmalar</button>
       <button class="nav-btn" data-page="training">🤖 Bot Eğitimi</button>
       <button class="nav-btn" data-page="bulk">📢 Toplu Mesaj</button>
@@ -50,7 +51,35 @@
       <div class="card"><h2>Son Mesajlar</h2><div id="recent-messages" class="message-list"></div></div>
     </div>
 
-    <!-- KONUŞMALAR + CRM -->
+    <!-- LEADS PIPELINE -->
+    <div id="page-leads" class="page">
+      <h1>🎯 Lead Pipeline</h1>
+      <div class="stats-grid">
+        <div class="stat-card"><div class="stat-value" id="lead-today">0</div><div class="stat-label">Bugün Lead</div></div>
+        <div class="stat-card"><div class="stat-value" id="lead-total">0</div><div class="stat-label">Toplam Lead</div></div>
+        <div class="stat-card"><div class="stat-value" id="lead-contacted">0</div><div class="stat-label">İletişime Geçildi</div></div>
+        <div class="stat-card" style="border-color:#22c55e"><div class="stat-value" id="lead-appointed" style="color:#22c55e">0</div><div class="stat-label">Randevu Aldı</div></div>
+      </div>
+      <div class="lead-filters">
+        <select id="lead-filter-stage" onchange="loadLeads()">
+          <option value="all">Tüm Aşamalar</option>
+          <option value="new">📥 Yeni</option>
+          <option value="contacted">📱 İletişime Geçildi</option>
+          <option value="responded">💬 Cevap Verdi</option>
+          <option value="interested">🔥 İlgili</option>
+          <option value="appointed">📅 Randevu Aldı</option>
+          <option value="arrived">✈️ Geldi</option>
+          <option value="treated">✅ Tedavi Oldu</option>
+          <option value="cold">❄️ Soğuk</option>
+        </select>
+        <select id="lead-filter-tag" onchange="loadLeads()">
+          <option value="">Tüm Etiketler</option>
+        </select>
+      </div>
+      <div id="lead-list" class="lead-list"></div>
+    </div>
+
+    <!-- KONUŞMALAR -->
     <div id="page-conversations" class="page">
       <h1>Konuşmalar</h1>
       <div class="conversations-layout">
@@ -177,13 +206,49 @@ const API='/api/panel'; let AUTH_TOKEN=localStorage.getItem('panel_auth')||''; l
 function doLogin(){AUTH_TOKEN=document.getElementById('login-pass').value;localStorage.setItem('panel_auth',AUTH_TOKEN);checkAuth()}
 async function checkAuth(){try{const r=await fetch(API+'?action=dashboard',{headers:{Authorization:'Bearer '+AUTH_TOKEN}});if(r.ok){document.getElementById('login-screen').style.display='none';document.getElementById('main-app').style.display='flex';loadDashboard()}else{document.getElementById('login-screen').style.display='flex';document.getElementById('main-app').style.display='none';document.getElementById('login-error').textContent=AUTH_TOKEN?'Şifre yanlış!':''}}catch(e){document.getElementById('login-error').textContent='Bağlantı hatası'}}
 
-document.querySelectorAll('.nav-btn').forEach(b=>{b.addEventListener('click',()=>{document.querySelectorAll('.nav-btn').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));b.classList.add('active');document.getElementById('page-'+b.dataset.page).classList.add('active');({dashboard:loadDashboard,conversations:loadConversations,training:loadPrompt,templates:loadTemplates,analytics:loadAnalytics,settings:loadSettings,bulk:loadBulk})[b.dataset.page]?.()})});
+document.querySelectorAll('.nav-btn').forEach(b=>{b.addEventListener('click',()=>{document.querySelectorAll('.nav-btn').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));b.classList.add('active');document.getElementById('page-'+b.dataset.page).classList.add('active');({dashboard:loadDashboard,leads:loadLeads,conversations:loadConversations,training:loadPrompt,templates:loadTemplates,analytics:loadAnalytics,settings:loadSettings,bulk:loadBulk})[b.dataset.page]?.()})});
 
 function toast(m,t='success'){const el=document.getElementById('toast');el.textContent=m;el.className='toast show '+t;setTimeout(()=>el.className='toast',3000)}
 async function api(a,m='GET',b=null){const o={method:m,headers:{'Content-Type':'application/json',Authorization:'Bearer '+AUTH_TOKEN}};if(b)o.body=JSON.stringify(b);const r=await fetch(API+'?action='+a,o);if(r.status===401){document.getElementById('login-screen').style.display='flex';document.getElementById('main-app').style.display='none';return null}return r.json()}
 
 // DASHBOARD
 async function loadDashboard(){const d=await api('dashboard');if(!d)return;document.getElementById('stat-today').textContent=d.todayMessages;document.getElementById('stat-total').textContent=d.totalMessages;document.getElementById('stat-conversations').textContent=d.activeConversations;document.getElementById('stat-human').textContent=d.humanConversations||0;document.getElementById('recent-messages').innerHTML=(d.recentMessages||[]).map(m=>`<div class="msg-item ${m.direction}"><span class="msg-phone">${m.direction==='in'?'📩':'📤'} ${m.phone_number}</span><span class="msg-text">${m.content.substring(0,80)}</span><span class="msg-time">${new Date(m.created_at).toLocaleString('tr-TR')}</span></div>`).join('')||'<p class="empty">Henüz mesaj yok</p>'}
+
+// LEADS
+const stageLabels={new:'📥 Yeni',contacted:'📱 İletişim',responded:'💬 Cevap',interested:'🔥 İlgili',appointed:'📅 Randevu',arrived:'✈️ Geldi',treated:'✅ Tedavi',cold:'❄️ Soğuk'};
+const stageColors={new:'#3b82f6',contacted:'#8b5cf6',responded:'#06b6d4',interested:'#f59e0b',appointed:'#22c55e',arrived:'#10b981',treated:'#059669',cold:'#6b7280'};
+
+async function loadLeads(){
+  const stats=await api('lead-stats');
+  if(stats){document.getElementById('lead-today').textContent=stats.todayLeads;document.getElementById('lead-total').textContent=stats.totalLeads;
+  const stageMap={};(stats.byStage||[]).forEach(s=>stageMap[s.stage]=+s.count);
+  document.getElementById('lead-contacted').textContent=stageMap.contacted||0;document.getElementById('lead-appointed').textContent=stageMap.appointed||0}
+  
+  // Etiket filtresini doldur
+  allTags=await api('tags')||[];
+  const tagSel=document.getElementById('lead-filter-tag');
+  const curVal=tagSel.value;tagSel.innerHTML='<option value="">Tüm Etiketler</option>'+allTags.map(t=>`<option value="${t.name}">${t.name}</option>`).join('');tagSel.value=curVal;
+
+  const stage=document.getElementById('lead-filter-stage').value;
+  const tag=document.getElementById('lead-filter-tag').value;
+  let url='leads';if(stage&&stage!=='all')url+=`&stage=${stage}`;if(tag)url+=`&tag=${tag}`;
+  const leads=await api(url);if(!leads)return;
+  document.getElementById('lead-list').innerHTML=leads.map(l=>{let tags=[];try{tags=JSON.parse(l.tags||'[]')}catch(e){}
+  return`<div class="lead-card">
+    <div class="lead-header"><strong>${l.patient_name||'İsimsiz'}</strong><span class="lead-stage" style="background:${stageColors[l.stage]||'#555'}">${stageLabels[l.stage]||l.stage}</span></div>
+    <div class="lead-info">📱 ${l.phone_number||'-'} · 📧 ${l.email||'-'} · 🏙 ${l.city||'-'}</div>
+    <div class="lead-info">📋 ${l.form_name||'-'}</div>
+    <div class="conv-tags">${tags.map(t=>`<span class="tag-badge">${t}</span>`).join('')}</div>
+    <div class="lead-info">${l.created_at?'⏰ '+new Date(l.created_at).toLocaleString('tr-TR'):''}</div>
+    <div class="lead-actions">
+      <select onchange="updateLeadStage(${l.id},this.value)" style="width:auto;margin:0">
+        ${Object.entries(stageLabels).map(([k,v])=>`<option value="${k}" ${l.stage===k?'selected':''}>${v}</option>`).join('')}
+      </select>
+      <button class="btn btn-primary btn-sm" onclick="window.open('https://wa.me/${l.phone_number}','_blank')">📱 WhatsApp</button>
+    </div>
+  </div>`}).join('')||'<p class="empty">Lead bulunamadı</p>'}
+
+async function updateLeadStage(id,stage){await api('update-lead','POST',{id,stage});toast('✅ Aşama güncellendi');loadLeads()}
 
 // KONUŞMALAR
 async function loadConversations(){const list=await api('conversations');if(!list)return;allTags=await api('tags')||[];document.getElementById('conversation-list').innerHTML=list.map(c=>{let tags='';try{tags=JSON.parse(c.tags||'[]').map(t=>`<span class="tag-badge">${t}</span>`).join('')}catch(e){}return`<div class="conv-item ${c.status==='human'?'conv-human':''}" onclick="loadChat('${c.phone_number}')"><div class="conv-phone">${c.status==='human'?'👤':'📱'} ${c.patient_name||c.phone_number}</div><div class="conv-meta">${c.message_count} mesaj · ${new Date(c.last_message_at).toLocaleString('tr-TR')}</div><div class="conv-tags">${tags}</div><div class="conv-preview">${c.last_message?c.last_message.substring(0,50):''}</div></div>`}).join('')||'<p class="empty">Henüz konuşma yok</p>'}

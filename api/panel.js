@@ -151,6 +151,35 @@ export default async function handler(req, res) {
       return res.json({ daily, topPhones, modelUsage, hourly, tagStats });
     }
 
+    // LEADS
+    if (action === 'leads') {
+      const { stage, tag } = req.query;
+      let leads;
+      if (stage && stage !== 'all') leads = await sql`SELECT * FROM leads WHERE stage = ${stage} ORDER BY created_at DESC`;
+      else if (tag) leads = await sql`SELECT * FROM leads WHERE tags LIKE ${'%' + tag + '%'} ORDER BY created_at DESC`;
+      else leads = await sql`SELECT * FROM leads ORDER BY created_at DESC LIMIT 100`;
+      return res.json(leads);
+    }
+
+    // LEAD AŞAMA GÜNCELLE
+    if (action === 'update-lead' && req.method === 'POST') {
+      const { id, stage, notes } = req.body;
+      if (stage) await sql`UPDATE leads SET stage = ${stage} WHERE id = ${id}`;
+      if (notes !== undefined) await sql`UPDATE leads SET notes = ${notes} WHERE id = ${id}`;
+      if (stage === 'responded') await sql`UPDATE leads SET responded_at = NOW() WHERE id = ${id}`;
+      return res.json({ success: true });
+    }
+
+    // LEAD İSTATİSTİK
+    if (action === 'lead-stats') {
+      const byStage = await sql`SELECT stage, COUNT(*) as count FROM leads GROUP BY stage`;
+      const byCampaign = await sql`SELECT form_name, COUNT(*) as count, stage FROM leads GROUP BY form_name, stage ORDER BY form_name`;
+      const byTag = await sql`SELECT tags, COUNT(*) as count FROM leads GROUP BY tags ORDER BY count DESC`;
+      const today = await sql`SELECT COUNT(*) as count FROM leads WHERE created_at >= CURRENT_DATE`;
+      const total = await sql`SELECT COUNT(*) as count FROM leads`;
+      return res.json({ byStage, byCampaign, byTag, todayLeads: today[0].count, totalLeads: total[0].count });
+    }
+
     return res.status(400).json({ error: 'Geçersiz action' });
   } catch (error) {
     console.error('Panel API hatası:', error);

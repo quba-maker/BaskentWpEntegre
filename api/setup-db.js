@@ -38,6 +38,16 @@ export default async function handler(req, res) {
       color VARCHAR(7) DEFAULT '#3b82f6', created_at TIMESTAMP DEFAULT NOW()
     )`;
 
+    await sql`CREATE TABLE IF NOT EXISTS leads (
+      id SERIAL PRIMARY KEY, phone_number VARCHAR(20),
+      patient_name VARCHAR(100), email VARCHAR(200), city VARCHAR(100),
+      form_id VARCHAR(50), form_name VARCHAR(200), ad_id VARCHAR(50),
+      leadgen_id VARCHAR(50) UNIQUE, tags TEXT DEFAULT '[]',
+      raw_data TEXT DEFAULT '{}', stage VARCHAR(20) DEFAULT 'new',
+      contacted_at TIMESTAMP, responded_at TIMESTAMP, notes TEXT DEFAULT '',
+      created_at TIMESTAMP DEFAULT NOW()
+    )`;
+
     // Yeni sütunları ekle (varsa hata vermez)
     try { await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS tags TEXT DEFAULT '[]'`; } catch(e) {}
     try { await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS notes TEXT DEFAULT ''`; } catch(e) {}
