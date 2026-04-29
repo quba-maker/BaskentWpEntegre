@@ -1,4 +1,5 @@
 import { neon } from '@neondatabase/serverless';
+import axios from 'axios';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -115,6 +116,26 @@ export default async function handler(req, res) {
         GROUP BY hour ORDER BY hour
       `;
       return res.json({ daily, byDirection, topPhones, modelUsage, hourly });
+    }
+
+    // MESAJ GÖNDER (panelden WhatsApp'a)
+    if (action === 'send-message' && req.method === 'POST') {
+      const { phone, message } = req.body;
+      const META_ACCESS_TOKEN = process.env.META_ACCESS_TOKEN;
+      const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
+
+      await axios({
+        method: 'POST',
+        url: `https://graph.facebook.com/v25.0/${PHONE_NUMBER_ID}/messages`,
+        headers: { Authorization: `Bearer ${META_ACCESS_TOKEN}` },
+        data: { messaging_product: 'whatsapp', to: phone, type: 'text', text: { body: message } }
+      });
+
+      // Mesajı veritabanına kaydet
+      await sql`INSERT INTO messages (phone_number, direction, content, model_used) VALUES (${phone}, 'out', ${message}, 'panel')`;
+      await sql`UPDATE conversations SET last_message_at = NOW(), message_count = message_count + 1 WHERE phone_number = ${phone}`;
+
+      return res.json({ success: true });
     }
 
     return res.status(400).json({ error: 'Geçersiz action' });

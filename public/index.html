@@ -63,6 +63,10 @@
             </div>
           </div>
           <div id="chat-messages" class="chat-messages"></div>
+          <div id="chat-input-area" class="chat-input-area" style="display:none">
+            <input type="text" id="chat-input" placeholder="Mesaj yazın..." onkeydown="if(event.key==='Enter')sendPanelMessage()">
+            <button class="btn btn-primary" onclick="sendPanelMessage()">📤 Gönder</button>
+          </div>
         </div>
       </div>
     </div>
@@ -228,6 +232,7 @@ async function loadChat(phone) {
   currentPhone = phone;
   document.getElementById('chat-title').textContent = '📱 ' + phone;
   document.getElementById('chat-actions').style.display = 'flex';
+  document.getElementById('chat-input-area').style.display = 'flex';
   const msgs = await api('conversation-detail&phone=' + phone); if (!msgs) return;
   document.getElementById('chat-messages').innerHTML = msgs.map(m =>
     `<div class="chat-bubble ${m.direction}">
@@ -243,6 +248,18 @@ async function setConvStatus(status) {
   await api('conversation-status', 'POST', { phone: currentPhone, status });
   toast(status === 'human' ? '👤 İnsan müdahalesi aktif — Bot bu hastaya cevap vermeyecek' : '🤖 Bot tekrar aktif');
   loadConversations();
+}
+
+async function sendPanelMessage() {
+  const input = document.getElementById('chat-input');
+  const msg = input.value.trim();
+  if (!msg || !currentPhone) return;
+  input.value = '';
+  try {
+    await api('send-message', 'POST', { phone: currentPhone, message: msg });
+    toast('📤 Mesaj gönderildi!');
+    loadChat(currentPhone);
+  } catch (e) { toast('❌ Gönderilemedi: ' + e.message, 'error'); }
 }
 
 // BOT EĞİTİMİ
