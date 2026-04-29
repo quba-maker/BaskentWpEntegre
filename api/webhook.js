@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 export default async function handler(req, res) {
-  const META_ACCESS_TOKEN = 'EAAMEZBSqN8IQBRRF3R7utZCv3cZBAKnE1WjNsYQmpZBnRJf1hgoEHiI938L0QbONhmxCsp4QlteKvH9ypiUMSZAJpOt6PFW28vWZBpAVG8SIgSCQrJpB6Em9IHWL1F5ZAm3K8ZAw2p98nDpeifS7AmJFXkmxogKCK3KkXhOcfB8u5SZA7Vt75BbErykMggkIuuxEoaBBnxHZAAmLSjoFJAOV8c9iPu43CwF3SwuivZAa43JgDra30ZCLbymaBFUNsVNiN5AJAjiYHX3m9yzER7HLGRrvLimzQ1u3i9hDLVhJ7wZDZD';
+  const META_ACCESS_TOKEN = 'EAAMEZBSqN8IQBRaEQW7klEPc3RaPp9mPIFnfB5ZAkepCfCJ4ZCypR49fHexmX2Q1kC1lYTlcWgprZCxbLGp49JCCjVaBM5tCJjeZB4c1Byu1erFOXhrwdfWVckIPEySCld91rWioEQ9sEb8hkbHym9SvHLQZAkZCg3IzyG04b6lLtWEGGG2A7LrzyoTBNAkYAB9JS0LWjVPn4yZCDtJsIzcKKyhAUVNOM1151ZBLEtlmeHtPB2f506r2icqhk2N2CejoU6CZAkxhg25NZAlGvwVxMGuzz5MmxF3RwIUScKEqQZDZD';
   const PHONE_NUMBER_ID = '1072536945944841';
   const GEMINI_API_KEY = 'AIzaSyCe0Ry9shUtYRRkYscq0HcY_IKtZV5hyQg';
 
@@ -91,10 +91,8 @@ Her konuşmayı randevu almaya yönlendir.`;
 
           // Sırayla denenecek modeller
           const models = [
-            'gemini-2.0-flash',
-            'gemini-2.0-flash-001',
-            'gemini-2.0-flash-lite',
-            'gemini-2.5-flash'
+            'gemini-2.5-flash',
+            'gemini-2.5-flash-lite'
           ];
 
           let botResponse = "";
