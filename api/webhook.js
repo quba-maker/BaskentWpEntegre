@@ -42,9 +42,7 @@ export default async function handler(req, res) {
           const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
           const model = genAI.getGenerativeModel({
             model: "gemini-1.5-flash",
-            systemInstruction: {
-              role: "system",
-              parts: [{ text: `Sen Başkent Üniversitesi Konya Hastanesi adına çalışan profesyonel bir hasta danışmanısın.
+            systemInstruction: `Sen Başkent Üniversitesi Konya Hastanesi adına çalışan profesyonel bir hasta danışmanısın.
 
 TEMEL GÖREVİN:
 - Gelen mesajlara hızlı, güven veren ve profesyonel şekilde cevap vermek
@@ -174,8 +172,7 @@ Her konuşmayı şu noktaya getir:
 
 Eğer kullanıcı kısa ve net yazıyorsa → hızlıca randevuya yönlendir
 Eğer kullanıcı uzun yazıyorsa → önce anla, sonra yönlendir
-Eğer kullanıcı sadece "fiyat?" yazdıysa → direkt randevuya çek` }]
-            }
+Eğer kullanıcı sadece "fiyat?" yazdıysa → direkt randevuya çek`
           });
           
           let botResponse = "";
