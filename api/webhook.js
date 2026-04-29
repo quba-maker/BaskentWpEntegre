@@ -116,6 +116,19 @@ export default async function handler(req, res) {
           const primaryModel = await getSetting('ai_model', 'gemini-2.5-flash-lite');
           const models = [primaryModel, 'gemini-2.5-flash'];
 
+          // Konuşma geçmişini al (dil tutarlılığı için)
+          let history = [];
+          if (sql) {
+            try {
+              const prev = await sql`SELECT direction, content FROM messages WHERE phone_number = ${phone} ORDER BY created_at DESC LIMIT 20`;
+              history = prev.reverse().map(m => ({
+                role: m.direction === 'in' ? 'user' : 'model',
+                parts: [{ text: m.content }]
+              }));
+            } catch (e) {}
+          }
+          history.push({ role: 'user', parts: [{ text: text }] });
+
           let botResponse = "";
           let usedModel = "";
           let aiSuccess = false;
@@ -129,9 +142,9 @@ export default async function handler(req, res) {
                 headers: { 'Content-Type': 'application/json' },
                 data: {
                   systemInstruction: {
-                    parts: [{ text: `MUTLAK KURAL: Hasta hangi dilde yazıyorsa O DİLDE cevap ver. Arapça mesaja Arapça, Rusça mesaja Rusça, İngilizce mesaja İngilizce, Almanca mesaja Almanca cevap ver. Türkçe SADECE hasta Türkçe yazdığında kullan. Bu kural her şeyin üstündedir.\n\n${systemPrompt}` }]
+                    parts: [{ text: `MUTLAK KURAL: Hasta hangi dilde yazıyorsa O DİLDE cevap ver. Kısa mesajlarda (evet, hayır, when, no vb.) önceki mesajların dilini kullan. Arapça konuşmada Arapça devam et, İngilizce konuşmada İngilizce devam et. Türkçe SADECE hasta Türkçe yazdığında kullan.\n\n${systemPrompt}` }]
                   },
-                  contents: [{ role: 'user', parts: [{ text: text }] }],
+                  contents: history,
                   generationConfig: { temperature: 0.7, maxOutputTokens: 1024 }
                 },
                 timeout: 15000
