@@ -9,7 +9,7 @@
 </head>
 <body>
 
-<!-- LOGIN EKRANI -->
+<!-- LOGIN -->
 <div id="login-screen" class="login-screen">
   <div class="login-card">
     <div class="login-logo">🏥</div>
@@ -21,7 +21,7 @@
   </div>
 </div>
 
-<!-- ANA UYGULAMA -->
+<!-- APP -->
 <div class="app" id="main-app" style="display:none">
   <nav class="sidebar">
     <div class="logo"><div class="logo-icon">🏥</div><span>Başkent WP Bot</span></div>
@@ -29,6 +29,7 @@
       <button class="nav-btn active" data-page="dashboard">📊 Dashboard</button>
       <button class="nav-btn" data-page="conversations">💬 Konuşmalar</button>
       <button class="nav-btn" data-page="training">🤖 Bot Eğitimi</button>
+      <button class="nav-btn" data-page="bulk">📢 Toplu Mesaj</button>
       <button class="nav-btn" data-page="templates">📋 Şablonlar</button>
       <button class="nav-btn" data-page="analytics">📈 Analitik</button>
       <button class="nav-btn" data-page="settings">⚙️ Ayarlar</button>
@@ -49,7 +50,7 @@
       <div class="card"><h2>Son Mesajlar</h2><div id="recent-messages" class="message-list"></div></div>
     </div>
 
-    <!-- KONUŞMALAR -->
+    <!-- KONUŞMALAR + CRM -->
     <div id="page-conversations" class="page">
       <h1>Konuşmalar</h1>
       <div class="conversations-layout">
@@ -58,14 +59,31 @@
           <div class="chat-header">
             <h2 id="chat-title">Bir konuşma seçin</h2>
             <div id="chat-actions" class="chat-actions" style="display:none">
-              <button class="btn btn-warning" onclick="setConvStatus('human')">👤 İnsan Devreye Al</button>
-              <button class="btn btn-success" onclick="setConvStatus('active')">🤖 Bota Geri Ver</button>
+              <button class="btn btn-warning" onclick="setConvStatus('human')">👤 İnsan</button>
+              <button class="btn btn-success" onclick="setConvStatus('active')">🤖 Bot</button>
+              <button class="btn btn-secondary" onclick="toggleCRM()">📝 CRM</button>
             </div>
+          </div>
+          <!-- CRM Panel -->
+          <div id="crm-panel" class="crm-panel" style="display:none">
+            <div class="crm-grid">
+              <div><label>Hasta Adı</label><input type="text" id="crm-name" placeholder="İsim giriniz"></div>
+              <div><label>Etiketler</label><div id="crm-tags" class="crm-tags"></div></div>
+              <div><label>Notlar</label><textarea id="crm-notes" rows="2" placeholder="Not ekleyin..."></textarea></div>
+            </div>
+            <button class="btn btn-primary" onclick="saveCRM()">💾 Kaydet</button>
           </div>
           <div id="chat-messages" class="chat-messages"></div>
           <div id="chat-input-area" class="chat-input-area" style="display:none">
             <input type="text" id="chat-input" placeholder="Mesaj yazın..." onkeydown="if(event.key==='Enter')sendPanelMessage()">
-            <button class="btn btn-primary" onclick="sendPanelMessage()">📤 Gönder</button>
+            <button class="btn btn-primary" onclick="sendPanelMessage()">📤</button>
+            <button class="btn btn-secondary" onclick="toggleMedia()">📎</button>
+          </div>
+          <div id="media-panel" class="media-panel" style="display:none">
+            <select id="media-type"><option value="image">🖼 Resim</option><option value="document">📄 Belge</option><option value="video">🎥 Video</option></select>
+            <input type="text" id="media-url" placeholder="Medya URL'si (https://...)">
+            <input type="text" id="media-caption" placeholder="Açıklama (opsiyonel)">
+            <button class="btn btn-primary" onclick="sendMedia()">📤 Gönder</button>
           </div>
         </div>
       </div>
@@ -76,33 +94,47 @@
       <h1>Bot Eğitimi</h1>
       <div class="card">
         <h2>Sistem Promptu</h2>
-        <p class="hint">Bot'un davranışını belirleyen ana talimat. Değiştirip kaydedin, bot anında güncellenir.</p>
+        <p class="hint">Bot'un davranışını değiştirin. Kaydedin, bot anında güncellenir.</p>
         <textarea id="prompt-editor" rows="18" placeholder="Yükleniyor..."></textarea>
         <div class="card-actions">
           <button class="btn btn-primary" onclick="savePrompt()">💾 Kaydet</button>
-          <button class="btn btn-secondary" onclick="resetPrompt()">🔄 Varsayılana Dön</button>
+          <button class="btn btn-secondary" onclick="resetPrompt()">🔄 Sıfırla</button>
         </div>
+      </div>
+    </div>
+
+    <!-- TOPLU MESAJ -->
+    <div id="page-bulk" class="page">
+      <h1>📢 Toplu Mesaj Gönder</h1>
+      <div class="card">
+        <h2>Hedef Kitle</h2>
+        <select id="bulk-tag"><option value="__all__">🌍 Tüm Hastalar</option></select>
+        <h2 style="margin-top:16px">Mesaj</h2>
+        <textarea id="bulk-message" rows="4" placeholder="Toplu gönderilecek mesaj..."></textarea>
+        <div id="bulk-preview" class="hint"></div>
+        <button class="btn btn-primary" onclick="sendBulk()">📢 Gönder</button>
+        <div id="bulk-result"></div>
       </div>
     </div>
 
     <!-- ŞABLONLAR -->
     <div id="page-templates" class="page">
-      <h1>Hızlı Cevap Şablonları</h1>
+      <h1>Şablonlar</h1>
       <div class="card">
-        <h2>Yeni Şablon Ekle</h2>
+        <h2>Yeni Şablon</h2>
         <input type="text" id="tpl-title" placeholder="Şablon adı">
-        <select id="tpl-category"><option value="genel">Genel</option><option value="randevu">Randevu</option><option value="fiyat">Fiyat</option><option value="bilgi">Bilgi</option></select>
-        <textarea id="tpl-content" rows="3" placeholder="Şablon içeriği..."></textarea>
+        <select id="tpl-category"><option value="genel">Genel</option><option value="randevu">Randevu</option><option value="fiyat">Fiyat</option></select>
+        <textarea id="tpl-content" rows="3" placeholder="İçerik..."></textarea>
         <button class="btn btn-primary" onclick="addTemplate()">➕ Ekle</button>
       </div>
-      <div class="card"><h2>Mevcut Şablonlar</h2><div id="template-list"></div></div>
+      <div class="card"><h2>Mevcut</h2><div id="template-list"></div></div>
     </div>
 
     <!-- ANALİTİK -->
     <div id="page-analytics" class="page">
-      <h1>Analitik & Raporlar</h1>
+      <h1>Analitik</h1>
       <div class="stats-grid cols-2">
-        <div class="card"><h2>Son 7 Gün Mesaj Grafiği</h2><div id="chart-daily" class="chart-container"></div></div>
+        <div class="card"><h2>Son 7 Gün</h2><div id="chart-daily" class="chart-container"></div></div>
         <div class="card"><h2>Saatlik Yoğunluk</h2><div id="chart-hourly" class="chart-container"></div></div>
       </div>
       <div class="stats-grid cols-2">
@@ -117,25 +149,21 @@
       <div class="card">
         <h2>Yapay Zeka Modeli</h2>
         <select id="model-select" onchange="saveModel()">
-          <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite (En ucuz)</option>
-          <option value="gemini-2.5-flash">Gemini 2.5 Flash (Dengeli)</option>
-          <option value="gemini-2.5-pro">Gemini 2.5 Pro (En akıllı - Pahalı)</option>
+          <option value="gemini-2.5-flash-lite">Flash Lite (En ucuz)</option>
+          <option value="gemini-2.5-flash">Flash (Dengeli)</option>
+          <option value="gemini-2.5-pro">Pro (Akıllı - Pahalı)</option>
         </select>
       </div>
       <div class="card">
-        <h2>Çalışma Saatleri</h2>
-        <label class="toggle"><input type="checkbox" id="hours-enabled" onchange="saveHours()"><span>Mesai dışı otomatik mesaj aktif</span></label>
-        <div class="hours-inputs">
-          <input type="time" id="hours-start" value="09:00" onchange="saveHours()">
-          <span>—</span>
-          <input type="time" id="hours-end" value="18:00" onchange="saveHours()">
-        </div>
-        <textarea id="hours-message" rows="2" placeholder="Mesai dışı mesajı..." onchange="saveHours()"></textarea>
+        <h2>Etiket Yönetimi</h2>
+        <div class="tag-add"><input type="text" id="new-tag" placeholder="Yeni etiket adı"><input type="color" id="new-tag-color" value="#3b82f6" style="width:50px;height:38px;padding:2px"><button class="btn btn-primary" onclick="addTag()">Ekle</button></div>
+        <div id="tag-list"></div>
       </div>
       <div class="card">
-        <h2>Panel Şifresi</h2>
-        <p class="hint">Paneli korumak için şifre. Vercel → Settings → Environment Variables → PANEL_PASSWORD ekleyin.</p>
-        <p>Mevcut şifre: Vercel'de <code>PANEL_PASSWORD</code> olarak ayarlanır.</p>
+        <h2>Çalışma Saatleri</h2>
+        <label class="toggle"><input type="checkbox" id="hours-enabled" onchange="saveHours()"><span>Mesai dışı mesaj aktif</span></label>
+        <div class="hours-inputs"><input type="time" id="hours-start" value="09:00" onchange="saveHours()"><span>—</span><input type="time" id="hours-end" value="18:00" onchange="saveHours()"></div>
+        <textarea id="hours-message" rows="2" placeholder="Mesai dışı mesajı..." onchange="saveHours()"></textarea>
       </div>
     </div>
   </main>
@@ -144,201 +172,64 @@
 <div id="toast" class="toast"></div>
 
 <script>
-const API = '/api/panel';
-let AUTH_TOKEN = localStorage.getItem('panel_auth') || '';
-let currentPhone = '';
+const API='/api/panel'; let AUTH_TOKEN=localStorage.getItem('panel_auth')||''; let currentPhone=''; let allTags=[];
 
-// AUTH
-function doLogin() {
-  AUTH_TOKEN = document.getElementById('login-pass').value;
-  localStorage.setItem('panel_auth', AUTH_TOKEN);
-  checkAuth();
-}
+function doLogin(){AUTH_TOKEN=document.getElementById('login-pass').value;localStorage.setItem('panel_auth',AUTH_TOKEN);checkAuth()}
+async function checkAuth(){try{const r=await fetch(API+'?action=dashboard',{headers:{Authorization:'Bearer '+AUTH_TOKEN}});if(r.ok){document.getElementById('login-screen').style.display='none';document.getElementById('main-app').style.display='flex';loadDashboard()}else{document.getElementById('login-screen').style.display='flex';document.getElementById('main-app').style.display='none';document.getElementById('login-error').textContent=AUTH_TOKEN?'Şifre yanlış!':''}}catch(e){document.getElementById('login-error').textContent='Bağlantı hatası'}}
 
-async function checkAuth() {
-  try {
-    const r = await fetch(API + '?action=dashboard', { headers: { Authorization: 'Bearer ' + AUTH_TOKEN } });
-    if (r.ok) {
-      document.getElementById('login-screen').style.display = 'none';
-      document.getElementById('main-app').style.display = 'flex';
-      loadDashboard();
-    } else {
-      document.getElementById('login-screen').style.display = 'flex';
-      document.getElementById('main-app').style.display = 'none';
-      document.getElementById('login-error').textContent = AUTH_TOKEN ? 'Şifre yanlış!' : '';
-    }
-  } catch (e) {
-    document.getElementById('login-error').textContent = 'Bağlantı hatası';
-  }
-}
+document.querySelectorAll('.nav-btn').forEach(b=>{b.addEventListener('click',()=>{document.querySelectorAll('.nav-btn').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));b.classList.add('active');document.getElementById('page-'+b.dataset.page).classList.add('active');({dashboard:loadDashboard,conversations:loadConversations,training:loadPrompt,templates:loadTemplates,analytics:loadAnalytics,settings:loadSettings,bulk:loadBulk})[b.dataset.page]?.()})});
 
-// NAV
-document.querySelectorAll('.nav-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-    btn.classList.add('active');
-    document.getElementById('page-' + btn.dataset.page).classList.add('active');
-    const loaders = { dashboard: loadDashboard, conversations: loadConversations, training: loadPrompt, templates: loadTemplates, analytics: loadAnalytics, settings: loadSettings };
-    if (loaders[btn.dataset.page]) loaders[btn.dataset.page]();
-  });
-});
-
-function toast(msg, type = 'success') {
-  const t = document.getElementById('toast');
-  t.textContent = msg; t.className = 'toast show ' + type;
-  setTimeout(() => t.className = 'toast', 3000);
-}
-
-async function api(action, method = 'GET', body = null) {
-  const o = { method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + AUTH_TOKEN } };
-  if (body) o.body = JSON.stringify(body);
-  const r = await fetch(API + '?action=' + action, o);
-  if (r.status === 401) { document.getElementById('login-screen').style.display = 'flex'; document.getElementById('main-app').style.display = 'none'; return null; }
-  return r.json();
-}
+function toast(m,t='success'){const el=document.getElementById('toast');el.textContent=m;el.className='toast show '+t;setTimeout(()=>el.className='toast',3000)}
+async function api(a,m='GET',b=null){const o={method:m,headers:{'Content-Type':'application/json',Authorization:'Bearer '+AUTH_TOKEN}};if(b)o.body=JSON.stringify(b);const r=await fetch(API+'?action='+a,o);if(r.status===401){document.getElementById('login-screen').style.display='flex';document.getElementById('main-app').style.display='none';return null}return r.json()}
 
 // DASHBOARD
-async function loadDashboard() {
-  const d = await api('dashboard'); if (!d) return;
-  document.getElementById('stat-today').textContent = d.todayMessages;
-  document.getElementById('stat-total').textContent = d.totalMessages;
-  document.getElementById('stat-conversations').textContent = d.activeConversations;
-  document.getElementById('stat-human').textContent = d.humanConversations || 0;
-  const s = await api('settings');
-  document.getElementById('recent-messages').innerHTML = (d.recentMessages || []).map(m =>
-    `<div class="msg-item ${m.direction}">
-      <span class="msg-phone">${m.direction === 'in' ? '📩' : '📤'} ${m.phone_number}</span>
-      <span class="msg-text">${m.content.substring(0, 80)}${m.content.length > 80 ? '…' : ''}</span>
-      <span class="msg-time">${new Date(m.created_at).toLocaleString('tr-TR')}</span>
-    </div>`
-  ).join('') || '<p class="empty">Henüz mesaj yok</p>';
-}
+async function loadDashboard(){const d=await api('dashboard');if(!d)return;document.getElementById('stat-today').textContent=d.todayMessages;document.getElementById('stat-total').textContent=d.totalMessages;document.getElementById('stat-conversations').textContent=d.activeConversations;document.getElementById('stat-human').textContent=d.humanConversations||0;document.getElementById('recent-messages').innerHTML=(d.recentMessages||[]).map(m=>`<div class="msg-item ${m.direction}"><span class="msg-phone">${m.direction==='in'?'📩':'📤'} ${m.phone_number}</span><span class="msg-text">${m.content.substring(0,80)}</span><span class="msg-time">${new Date(m.created_at).toLocaleString('tr-TR')}</span></div>`).join('')||'<p class="empty">Henüz mesaj yok</p>'}
 
 // KONUŞMALAR
-async function loadConversations() {
-  const list = await api('conversations'); if (!list) return;
-  document.getElementById('conversation-list').innerHTML = list.map(c =>
-    `<div class="conv-item ${c.status === 'human' ? 'conv-human' : ''}" onclick="loadChat('${c.phone_number}')">
-      <div class="conv-phone">${c.status === 'human' ? '👤' : '📱'} ${c.phone_number}</div>
-      <div class="conv-meta">${c.message_count} mesaj · ${new Date(c.last_message_at).toLocaleString('tr-TR')}</div>
-      <div class="conv-preview">${c.last_message ? c.last_message.substring(0, 50) : ''}</div>
-      ${c.status === 'human' ? '<span class="badge-human">İnsan Müdahalesi</span>' : ''}
-    </div>`
-  ).join('') || '<p class="empty">Henüz konuşma yok</p>';
-}
+async function loadConversations(){const list=await api('conversations');if(!list)return;allTags=await api('tags')||[];document.getElementById('conversation-list').innerHTML=list.map(c=>{let tags='';try{tags=JSON.parse(c.tags||'[]').map(t=>`<span class="tag-badge">${t}</span>`).join('')}catch(e){}return`<div class="conv-item ${c.status==='human'?'conv-human':''}" onclick="loadChat('${c.phone_number}')"><div class="conv-phone">${c.status==='human'?'👤':'📱'} ${c.patient_name||c.phone_number}</div><div class="conv-meta">${c.message_count} mesaj · ${new Date(c.last_message_at).toLocaleString('tr-TR')}</div><div class="conv-tags">${tags}</div><div class="conv-preview">${c.last_message?c.last_message.substring(0,50):''}</div></div>`}).join('')||'<p class="empty">Henüz konuşma yok</p>'}
 
-async function loadChat(phone) {
-  currentPhone = phone;
-  document.getElementById('chat-title').textContent = '📱 ' + phone;
-  document.getElementById('chat-actions').style.display = 'flex';
-  document.getElementById('chat-input-area').style.display = 'flex';
-  const msgs = await api('conversation-detail&phone=' + phone); if (!msgs) return;
-  document.getElementById('chat-messages').innerHTML = msgs.map(m =>
-    `<div class="chat-bubble ${m.direction}">
-      <div class="bubble-content">${m.content}</div>
-      <div class="bubble-meta">${m.model_used ? '🤖 ' + m.model_used : ''} ${new Date(m.created_at).toLocaleTimeString('tr-TR')}</div>
-    </div>`
-  ).join('');
-  const el = document.getElementById('chat-messages'); el.scrollTop = el.scrollHeight;
-}
+async function loadChat(phone){currentPhone=phone;document.getElementById('chat-title').textContent='📱 '+phone;document.getElementById('chat-actions').style.display='flex';document.getElementById('chat-input-area').style.display='flex';document.getElementById('crm-panel').style.display='none';const msgs=await api('conversation-detail&phone='+phone);if(!msgs)return;document.getElementById('chat-messages').innerHTML=msgs.map(m=>`<div class="chat-bubble ${m.direction}"><div class="bubble-content">${m.media_url?`<a href="${m.media_url}" target="_blank">📎 ${m.media_type}</a><br>`:''}${m.content}</div><div class="bubble-meta">${m.model_used?'🤖 '+m.model_used:''} ${new Date(m.created_at).toLocaleTimeString('tr-TR')}</div></div>`).join('');const el=document.getElementById('chat-messages');el.scrollTop=el.scrollHeight}
 
-async function setConvStatus(status) {
-  if (!currentPhone) return;
-  await api('conversation-status', 'POST', { phone: currentPhone, status });
-  toast(status === 'human' ? '👤 İnsan müdahalesi aktif — Bot bu hastaya cevap vermeyecek' : '🤖 Bot tekrar aktif');
-  loadConversations();
-}
+async function toggleCRM(){const p=document.getElementById('crm-panel');if(p.style.display==='none'){p.style.display='block';const data=await api('get-patient&phone='+currentPhone);if(data){document.getElementById('crm-name').value=data.patient_name||'';document.getElementById('crm-notes').value=data.notes||'';let patientTags=[];try{patientTags=JSON.parse(data.tags||'[]')}catch(e){}renderCRMTags(patientTags)}}else p.style.display='none'}
 
-async function sendPanelMessage() {
-  const input = document.getElementById('chat-input');
-  const msg = input.value.trim();
-  if (!msg || !currentPhone) return;
-  input.value = '';
-  try {
-    await api('send-message', 'POST', { phone: currentPhone, message: msg });
-    toast('📤 Mesaj gönderildi!');
-    loadChat(currentPhone);
-  } catch (e) { toast('❌ Gönderilemedi: ' + e.message, 'error'); }
-}
+function renderCRMTags(selected=[]){document.getElementById('crm-tags').innerHTML=allTags.map(t=>`<label class="tag-check" style="border-color:${t.color}"><input type="checkbox" value="${t.name}" ${selected.includes(t.name)?'checked':''}><span style="color:${t.color}">${t.name}</span></label>`).join('')}
+
+async function saveCRM(){const tags=Array.from(document.querySelectorAll('#crm-tags input:checked')).map(i=>i.value);await api('update-patient','POST',{phone:currentPhone,patient_name:document.getElementById('crm-name').value,tags:JSON.stringify(tags),notes:document.getElementById('crm-notes').value});toast('✅ Hasta bilgisi kaydedildi');loadConversations()}
+
+async function setConvStatus(s){if(!currentPhone)return;await api('conversation-status','POST',{phone:currentPhone,status:s});toast(s==='human'?'👤 İnsan müdahalesi aktif':'🤖 Bot aktif');loadConversations()}
+
+async function sendPanelMessage(){const i=document.getElementById('chat-input');const m=i.value.trim();if(!m||!currentPhone)return;i.value='';try{await api('send-message','POST',{phone:currentPhone,message:m});toast('📤 Gönderildi');loadChat(currentPhone)}catch(e){toast('❌ Hata','error')}}
+
+function toggleMedia(){const p=document.getElementById('media-panel');p.style.display=p.style.display==='none'?'flex':'none'}
+async function sendMedia(){const url=document.getElementById('media-url').value;const type=document.getElementById('media-type').value;const cap=document.getElementById('media-caption').value;if(!url||!currentPhone)return toast('URL gerekli','error');await api('send-media','POST',{phone:currentPhone,media_url:url,media_type:type,caption:cap});document.getElementById('media-url').value='';document.getElementById('media-caption').value='';document.getElementById('media-panel').style.display='none';toast('📤 Medya gönderildi');loadChat(currentPhone)}
 
 // BOT EĞİTİMİ
-async function loadPrompt() {
-  const s = await api('settings'); if (!s) return;
-  document.getElementById('prompt-editor').value = s.system_prompt || '';
-}
-async function savePrompt() {
-  await api('settings', 'POST', { key: 'system_prompt', value: document.getElementById('prompt-editor').value });
-  toast('✅ Prompt kaydedildi!');
-}
-async function resetPrompt() {
-  if (!confirm('Varsayılan prompta dönmek istediğinize emin misiniz?')) return;
-  document.getElementById('prompt-editor').value = `Sen Başkent Üniversitesi Konya Hastanesi'nde çalışan gerçek bir hasta danışmanısın.\nÖNEMLİ: Her mesaja "Merhaba" diye BAŞLAMA. Samimi, kısa (2-3 cümle), doğal yaz.\nFiyat ASLA verme, randevuya yönlendir. Kullanıcının dilinde cevap ver.`;
-  savePrompt();
-}
+async function loadPrompt(){const s=await api('settings');if(s)document.getElementById('prompt-editor').value=s.system_prompt||''}
+async function savePrompt(){await api('settings','POST',{key:'system_prompt',value:document.getElementById('prompt-editor').value});toast('✅ Prompt kaydedildi')}
+async function resetPrompt(){if(!confirm('Sıfırlansın mı?'))return;document.getElementById('prompt-editor').value='Sen Başkent Üniversitesi Konya Hastanesi danışmanısın. Samimi, kısa, doğal yaz. Fiyat verme, randevuya yönlendir.';savePrompt()}
+
+// TOPLU MESAJ
+async function loadBulk(){allTags=await api('tags')||[];const sel=document.getElementById('bulk-tag');sel.innerHTML='<option value="__all__">🌍 Tüm Hastalar</option>'+allTags.map(t=>`<option value="${t.name}">${t.name}</option>`).join('')}
+async function sendBulk(){const tag=document.getElementById('bulk-tag').value;const msg=document.getElementById('bulk-message').value;if(!msg)return toast('Mesaj yazın','error');if(!confirm(`"${tag==='__all__'?'Tüm hastalar':tag}" grubuna toplu mesaj gönderilecek. Onaylıyor musunuz?`))return;const r=await api('bulk-message','POST',{tag,message:msg});if(r)document.getElementById('bulk-result').innerHTML=`<div class="card" style="margin-top:12px;border-color:#4ade80">✅ ${r.sent} kişiye gönderildi${r.failed?' · ❌ '+r.failed+' başarısız':''}</div>`}
 
 // ŞABLONLAR
-async function loadTemplates() {
-  const list = await api('templates'); if (!list) return;
-  document.getElementById('template-list').innerHTML = list.map(t =>
-    `<div class="template-item"><div class="tpl-header"><strong>${t.title}</strong><span class="tpl-cat">${t.category}</span><button class="btn-sm btn-danger" onclick="deleteTemplate(${t.id})">🗑</button></div><div class="tpl-content">${t.content}</div></div>`
-  ).join('') || '<p class="empty">Henüz şablon yok</p>';
-}
-async function addTemplate() {
-  const t = document.getElementById('tpl-title').value, c = document.getElementById('tpl-content').value, cat = document.getElementById('tpl-category').value;
-  if (!t || !c) return toast('Başlık ve içerik zorunlu', 'error');
-  await api('templates', 'POST', { title: t, content: c, category: cat });
-  document.getElementById('tpl-title').value = ''; document.getElementById('tpl-content').value = '';
-  loadTemplates(); toast('✅ Şablon eklendi');
-}
-async function deleteTemplate(id) {
-  if (!confirm('Silmek istediğinize emin misiniz?')) return;
-  await api('templates&id=' + id, 'DELETE'); loadTemplates(); toast('🗑 Silindi');
-}
+async function loadTemplates(){const list=await api('templates');if(!list)return;document.getElementById('template-list').innerHTML=list.map(t=>`<div class="template-item"><div class="tpl-header"><strong>${t.title}</strong><span class="tpl-cat">${t.category}</span><button class="btn-sm btn-danger" onclick="deleteTemplate(${t.id})">🗑</button></div><div class="tpl-content">${t.content}</div></div>`).join('')||'<p class="empty">Şablon yok</p>'}
+async function addTemplate(){const t=document.getElementById('tpl-title').value,c=document.getElementById('tpl-content').value,cat=document.getElementById('tpl-category').value;if(!t||!c)return toast('Zorunlu alanlar','error');await api('templates','POST',{title:t,content:c,category:cat});document.getElementById('tpl-title').value='';document.getElementById('tpl-content').value='';loadTemplates();toast('✅ Eklendi')}
+async function deleteTemplate(id){if(!confirm('Silinsin mi?'))return;await api('templates&id='+id,'DELETE');loadTemplates();toast('🗑 Silindi')}
 
 // ANALİTİK
-async function loadAnalytics() {
-  const d = await api('analytics'); if (!d) return;
-
-  // Günlük grafik
-  const maxDaily = Math.max(...(d.daily || []).map(x => Number(x.count)), 1);
-  document.getElementById('chart-daily').innerHTML = (d.daily || []).map(x => {
-    const pct = (Number(x.count) / maxDaily * 100);
-    const day = new Date(x.date).toLocaleDateString('tr-TR', { weekday: 'short', day: 'numeric' });
-    return `<div class="bar-group"><div class="bar" style="height:${pct}%"><span class="bar-val">${x.count}</span></div><div class="bar-label">${day}</div></div>`;
-  }).join('') || '<p class="empty">Veri yok</p>';
-
-  // Saatlik grafik
-  const maxH = Math.max(...(d.hourly || []).map(x => Number(x.count)), 1);
-  document.getElementById('chart-hourly').innerHTML = (d.hourly || []).map(x => {
-    const pct = (Number(x.count) / maxH * 100);
-    return `<div class="bar-group"><div class="bar bar-green" style="height:${pct}%"><span class="bar-val">${x.count}</span></div><div class="bar-label">${x.hour}:00</div></div>`;
-  }).join('') || '<p class="empty">Veri yok</p>';
-
-  // En aktif hastalar
-  document.getElementById('top-phones').innerHTML = (d.topPhones || []).map((p, i) =>
-    `<div class="rank-item"><span class="rank">#${i + 1}</span><span>📱 ${p.phone_number}</span><span class="rank-count">${p.count} mesaj</span></div>`
-  ).join('') || '<p class="empty">Veri yok</p>';
-
-  // Model kullanımı
-  document.getElementById('model-usage').innerHTML = (d.modelUsage || []).map(m =>
-    `<div class="rank-item"><span>🤖 ${m.model_used}</span><span class="rank-count">${m.count} kullanım</span></div>`
-  ).join('') || '<p class="empty">Veri yok</p>';
-}
+async function loadAnalytics(){const d=await api('analytics');if(!d)return;const mx=Math.max(...(d.daily||[]).map(x=>+x.count),1);document.getElementById('chart-daily').innerHTML=(d.daily||[]).map(x=>`<div class="bar-group"><div class="bar" style="height:${+x.count/mx*100}%"><span class="bar-val">${x.count}</span></div><div class="bar-label">${new Date(x.date).toLocaleDateString('tr-TR',{weekday:'short',day:'numeric'})}</div></div>`).join('')||'<p class="empty">Veri yok</p>';const mh=Math.max(...(d.hourly||[]).map(x=>+x.count),1);document.getElementById('chart-hourly').innerHTML=(d.hourly||[]).map(x=>`<div class="bar-group"><div class="bar bar-green" style="height:${+x.count/mh*100}%"><span class="bar-val">${x.count}</span></div><div class="bar-label">${x.hour}:00</div></div>`).join('')||'<p class="empty">Veri yok</p>';document.getElementById('top-phones').innerHTML=(d.topPhones||[]).map((p,i)=>`<div class="rank-item"><span class="rank">#${i+1}</span><span>📱 ${p.phone_number}</span><span class="rank-count">${p.count} mesaj</span></div>`).join('')||'<p class="empty">Veri yok</p>';document.getElementById('model-usage').innerHTML=(d.modelUsage||[]).map(m=>`<div class="rank-item"><span>🤖 ${m.model_used}</span><span class="rank-count">${m.count}</span></div>`).join('')||'<p class="empty">Veri yok</p>'}
 
 // AYARLAR
-async function loadSettings() {
-  const s = await api('settings'); if (!s) return;
-  document.getElementById('model-select').value = s.ai_model || 'gemini-2.5-flash-lite';
-  if (s.working_hours) { try { const h = JSON.parse(s.working_hours); document.getElementById('hours-enabled').checked = h.enabled; document.getElementById('hours-start').value = h.start; document.getElementById('hours-end').value = h.end; document.getElementById('hours-message').value = h.offMessage || ''; } catch(e) {} }
-}
-async function saveModel() { await api('settings', 'POST', { key: 'ai_model', value: document.getElementById('model-select').value }); toast('✅ Model güncellendi'); }
-async function saveHours() {
-  await api('settings', 'POST', { key: 'working_hours', value: JSON.stringify({ enabled: document.getElementById('hours-enabled').checked, start: document.getElementById('hours-start').value, end: document.getElementById('hours-end').value, offMessage: document.getElementById('hours-message').value }) });
-  toast('✅ Çalışma saatleri güncellendi');
-}
+async function loadSettings(){const s=await api('settings');if(!s)return;document.getElementById('model-select').value=s.ai_model||'gemini-2.5-flash-lite';if(s.working_hours){try{const h=JSON.parse(s.working_hours);document.getElementById('hours-enabled').checked=h.enabled;document.getElementById('hours-start').value=h.start;document.getElementById('hours-end').value=h.end;document.getElementById('hours-message').value=h.offMessage||''}catch(e){}}loadTagList()}
+async function saveModel(){await api('settings','POST',{key:'ai_model',value:document.getElementById('model-select').value});toast('✅ Model güncellendi')}
+async function saveHours(){await api('settings','POST',{key:'working_hours',value:JSON.stringify({enabled:document.getElementById('hours-enabled').checked,start:document.getElementById('hours-start').value,end:document.getElementById('hours-end').value,offMessage:document.getElementById('hours-message').value})});toast('✅ Güncellendi')}
 
-// BAŞLANGIÇ
+// ETİKETLER
+async function loadTagList(){allTags=await api('tags')||[];document.getElementById('tag-list').innerHTML=allTags.map(t=>`<div class="rank-item"><span class="tag-badge" style="background:${t.color}">${t.name}</span><button class="btn-sm btn-danger" onclick="deleteTag(${t.id})">🗑</button></div>`).join('')||'<p class="empty">Etiket yok</p>'}
+async function addTag(){const n=document.getElementById('new-tag').value;const c=document.getElementById('new-tag-color').value;if(!n)return toast('İsim girin','error');await api('tags','POST',{name:n,color:c});document.getElementById('new-tag').value='';loadTagList();toast('✅ Etiket eklendi')}
+async function deleteTag(id){if(!confirm('Silinsin mi?'))return;await api('tags&id='+id,'DELETE');loadTagList();toast('🗑 Silindi')}
+
 checkAuth();
 </script>
 </body>
