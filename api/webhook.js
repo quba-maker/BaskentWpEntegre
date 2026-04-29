@@ -128,7 +128,9 @@ export default async function handler(req, res) {
                 url: `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
                 headers: { 'Content-Type': 'application/json' },
                 data: {
-                  contents: [{ role: 'user', parts: [{ text: `${systemPrompt}\n\nKRİTİK KURAL: Hastanın mesajı hangi dildeyse (Arapça, Rusça, İngilizce, Almanca, Kazakça vb.) MUTLAKA o dilde cevap ver. Asla Türkçe'ye çevirme.\n\n---\nHasta Mesajı: ${text}` }] }],
+                  contents: [
+                    { role: 'user', parts: [{ text: `SEN ÇOK DİLLİ BİR HASTA DANIŞMANISIN. EN ÖNEMLİ KURAL: Hastanın yazdığı dili tespit et ve SADECE O DİLDE cevap ver. Hasta Arapça yazdıysa Arapça, Rusça yazdıysa Rusça, Almanca yazdıysa Almanca, İngilizce yazdıysa İngilizce cevap ver. Türkçe SADECE hasta Türkçe yazdığında kullan.\n\n${systemPrompt}\n\n---\nHasta Mesajı: ${text}` }] }
+                  ],
                   generationConfig: { temperature: 0.7, maxOutputTokens: 1024 }
                 },
                 timeout: 15000
