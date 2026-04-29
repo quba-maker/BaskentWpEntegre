@@ -25,7 +25,7 @@ export default async function handler(req, res) {
       const today = await sql`SELECT COUNT(*) as c FROM messages WHERE created_at >= CURRENT_DATE`;
       const active = await sql`SELECT COUNT(*) as c FROM conversations WHERE status = 'active'`;
       const human = await sql`SELECT COUNT(*) as c FROM conversations WHERE status = 'human'`;
-      const recent = await sql`SELECT * FROM messages ORDER BY created_at DESC LIMIT 15`;
+      const recent = await sql`SELECT m.*, c.patient_name FROM messages m LEFT JOIN conversations c ON m.phone_number = c.phone_number ORDER BY m.created_at DESC LIMIT 15`;
       return res.json({ totalMessages: total[0].c, todayMessages: today[0].c, activeConversations: active[0].c, humanConversations: human[0].c, recentMessages: recent });
     }
 
