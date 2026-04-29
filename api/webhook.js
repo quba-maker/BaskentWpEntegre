@@ -9,48 +9,56 @@ export default async function handler(req, res) {
 
   const sql = DATABASE_URL ? neon(DATABASE_URL) : null;
 
-  // Prompt'u veritabanından oku (yoksa varsayılanı kullan)
-  async function getSystemPrompt() {
-    if (sql) {
-      try {
-        const result = await sql`SELECT value FROM settings WHERE key = 'system_prompt'`;
-        if (result.length > 0) return result[0].value;
-      } catch (e) {
-        console.error('DB prompt okuma hatası:', e.message);
-      }
-    }
-    return getDefaultPrompt();
+  // Ayar oku
+  async function getSetting(key, fallback = null) {
+    if (!sql) return fallback;
+    try {
+      const r = await sql`SELECT value FROM settings WHERE key = ${key}`;
+      return r.length > 0 ? r[0].value : fallback;
+    } catch (e) { return fallback; }
   }
 
-  // Model ayarını veritabanından oku
-  async function getModelSetting() {
-    if (sql) {
-      try {
-        const result = await sql`SELECT value FROM settings WHERE key = 'ai_model'`;
-        if (result.length > 0) return result[0].value;
-      } catch (e) {
-        console.error('DB model okuma hatası:', e.message);
-      }
-    }
-    return 'gemini-2.5-flash-lite';
-  }
-
-  // Mesajı veritabanına kaydet
-  async function saveMessage(phoneNumber, direction, content, modelUsed = null) {
+  // Mesajı kaydet
+  async function saveMessage(phone, dir, content, model = null) {
     if (!sql) return;
     try {
-      await sql`INSERT INTO messages (phone_number, direction, content, model_used) VALUES (${phoneNumber}, ${direction}, ${content}, ${modelUsed})`;
-      
-      // Konuşmayı güncelle veya oluştur
-      const existing = await sql`SELECT id FROM conversations WHERE phone_number = ${phoneNumber}`;
-      if (existing.length > 0) {
-        await sql`UPDATE conversations SET last_message_at = NOW(), message_count = message_count + 1 WHERE phone_number = ${phoneNumber}`;
+      await sql`INSERT INTO messages (phone_number, direction, content, model_used) VALUES (${phone}, ${dir}, ${content}, ${model})`;
+      const ex = await sql`SELECT id FROM conversations WHERE phone_number = ${phone}`;
+      if (ex.length > 0) {
+        await sql`UPDATE conversations SET last_message_at = NOW(), message_count = message_count + 1 WHERE phone_number = ${phone}`;
       } else {
-        await sql`INSERT INTO conversations (phone_number, message_count) VALUES (${phoneNumber}, 1)`;
+        await sql`INSERT INTO conversations (phone_number, message_count) VALUES (${phone}, 1)`;
       }
-    } catch (e) {
-      console.error('DB kayıt hatası:', e.message);
-    }
+    } catch (e) { console.error('DB kayıt hatası:', e.message); }
+  }
+
+  // Çalışma saatleri kontrolü
+  function isWorkingHours(settings) {
+    try {
+      const h = JSON.parse(settings);
+      if (!h.enabled) return { working: true };
+      const now = new Date();
+      const tr = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Istanbul' }));
+      const hour = tr.getHours();
+      const min = tr.getMinutes();
+      const current = hour * 60 + min;
+      const [sh, sm] = h.start.split(':').map(Number);
+      const [eh, em] = h.end.split(':').map(Number);
+      const start = sh * 60 + sm;
+      const end = eh * 60 + em;
+      if (current >= start && current <= end) return { working: true };
+      return { working: false, message: h.offMessage || 'Mesai saatlerimiz dışındasınız. En kısa sürede dönüş yapacağız.' };
+    } catch (e) { return { working: true }; }
+  }
+
+  // WhatsApp mesaj gönder
+  async function sendWhatsApp(phone, text) {
+    await axios({
+      method: 'POST',
+      url: `https://graph.facebook.com/v25.0/${PHONE_NUMBER_ID}/messages`,
+      headers: { Authorization: `Bearer ${META_ACCESS_TOKEN}` },
+      data: { messaging_product: 'whatsapp', to: phone, type: 'text', text: { body: text } }
+    });
   }
 
   // GET - Webhook doğrulama
@@ -58,132 +66,106 @@ export default async function handler(req, res) {
     const mode = req.query['hub.mode'];
     const token = req.query['hub.verify_token'];
     const challenge = req.query['hub.challenge'];
-
     if (mode === 'subscribe' && token === 'baskent_wp_secret_token_123') {
-      console.log('✅ Webhook Meta tarafından doğrulandı!');
+      console.log('✅ Webhook doğrulandı!');
       return res.status(200).send(challenge);
-    } else {
-      return res.status(403).json({ error: 'Doğrulama başarısız' });
     }
+    return res.status(403).json({ error: 'Doğrulama başarısız' });
   }
 
-  // POST - Gelen mesajları işle
+  // POST - Mesaj işle
   if (req.method === 'POST') {
     const body = req.body;
-
     if (body.object) {
       if (
-        body.entry &&
-        body.entry[0].changes &&
-        body.entry[0].changes[0] &&
-        body.entry[0].changes[0].value.messages &&
-        body.entry[0].changes[0].value.messages[0]
+        body.entry?.[0]?.changes?.[0]?.value?.messages?.[0]
       ) {
-        const phoneNumber = body.entry[0].changes[0].value.contacts[0].wa_id;
+        const phone = body.entry[0].changes[0].value.contacts[0].wa_id;
         const message = body.entry[0].changes[0].value.messages[0];
 
         if (message.type === 'text') {
-          const textMessage = message.text.body;
-          console.log(`📩 Yeni Mesaj (${phoneNumber}): ${textMessage}`);
+          const text = message.text.body;
+          console.log(`📩 Yeni Mesaj (${phone}): ${text}`);
+          await saveMessage(phone, 'in', text);
 
-          // Gelen mesajı kaydet
-          await saveMessage(phoneNumber, 'in', textMessage);
+          // Canlı müdahale kontrolü
+          if (sql) {
+            try {
+              const conv = await sql`SELECT status FROM conversations WHERE phone_number = ${phone}`;
+              if (conv.length > 0 && conv[0].status === 'human') {
+                console.log(`👤 İnsan müdahalesi aktif: ${phone} - Bot cevap vermiyor`);
+                return res.status(200).send('EVENT_RECEIVED');
+              }
+            } catch (e) {}
+          }
 
-          // Prompt ve model ayarını DB'den oku
-          const systemPrompt = await getSystemPrompt();
-          const primaryModel = await getModelSetting();
+          // Çalışma saatleri kontrolü
+          const hoursConfig = await getSetting('working_hours', '{"enabled":false}');
+          const hours = isWorkingHours(hoursConfig);
+          if (!hours.working) {
+            await saveMessage(phone, 'out', hours.message, 'mesai-disi');
+            try {
+              await sendWhatsApp(phone, hours.message);
+              console.log(`🕐 Mesai dışı yanıt gönderildi: ${phone}`);
+            } catch (e) { console.error('❌ Mesaj hatası:', e.response?.data || e.message); }
+            return res.status(200).send('EVENT_RECEIVED');
+          }
 
+          // Prompt ve model al
+          const systemPrompt = await getSetting('system_prompt', getDefaultPrompt());
+          const primaryModel = await getSetting('ai_model', 'gemini-2.5-flash-lite');
           const models = [primaryModel, 'gemini-2.5-flash'];
 
           let botResponse = "";
           let usedModel = "";
           let aiSuccess = false;
 
-          for (const modelName of models) {
+          for (const model of models) {
             try {
-              console.log(`🤖 Deneniyor: ${modelName}`);
-              const geminiResponse = await axios({
+              console.log(`🤖 Deneniyor: ${model}`);
+              const r = await axios({
                 method: 'POST',
-                url: `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GEMINI_API_KEY}`,
+                url: `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
                 headers: { 'Content-Type': 'application/json' },
                 data: {
-                  contents: [{
-                    role: 'user',
-                    parts: [{ text: `${systemPrompt}\n\n---\nHasta Mesajı: ${textMessage}` }]
-                  }],
-                  generationConfig: {
-                    temperature: 0.7,
-                    maxOutputTokens: 1024
-                  }
+                  contents: [{ role: 'user', parts: [{ text: `${systemPrompt}\n\n---\nHasta Mesajı: ${text}` }] }],
+                  generationConfig: { temperature: 0.7, maxOutputTokens: 1024 }
                 },
                 timeout: 15000
               });
-
-              if (geminiResponse.data?.candidates?.[0]?.content?.parts?.[0]?.text) {
-                botResponse = geminiResponse.data.candidates[0].content.parts[0].text;
-                usedModel = modelName;
-                console.log(`✅ Yapay Zeka cevabı alındı (${modelName})`);
+              if (r.data?.candidates?.[0]?.content?.parts?.[0]?.text) {
+                botResponse = r.data.candidates[0].content.parts[0].text;
+                usedModel = model;
+                console.log(`✅ Cevap alındı (${model})`);
                 aiSuccess = true;
                 break;
               }
             } catch (e) {
-              console.error(`❌ ${modelName} hatası:`, e.response?.data?.error?.message || e.message);
+              console.error(`❌ ${model} hatası:`, e.response?.data?.error?.message || e.message);
             }
           }
 
           if (!aiSuccess) {
-            botResponse = "Merhaba, Başkent Üniversitesi Konya Hastanesi'ne ilginiz için teşekkür ederiz. Size en iyi şekilde yardımcı olabilmemiz için sizi en kısa sürede yetkili arkadaşımız arayacaktır.";
+            botResponse = "Merhaba, Başkent Üniversitesi Konya Hastanesi'ne ilginiz için teşekkür ederiz. Yetkili arkadaşımız size en kısa sürede dönüş yapacaktır.";
             usedModel = "fallback";
           }
 
-          // Bot cevabını kaydet
-          await saveMessage(phoneNumber, 'out', botResponse, usedModel);
-
+          await saveMessage(phone, 'out', botResponse, usedModel);
           try {
-            await axios({
-              method: 'POST',
-              url: `https://graph.facebook.com/v25.0/${PHONE_NUMBER_ID}/messages`,
-              headers: {
-                Authorization: `Bearer ${META_ACCESS_TOKEN}`,
-              },
-              data: {
-                messaging_product: 'whatsapp',
-                to: phoneNumber,
-                type: 'text',
-                text: { body: botResponse }
-              }
-            });
-            console.log(`📤 Yanıt gönderildi: ${phoneNumber}`);
-          } catch (error) {
-            console.error('❌ Mesaj gönderilirken hata oluştu:', error.response?.data || error.message);
-          }
+            await sendWhatsApp(phone, botResponse);
+            console.log(`📤 Yanıt gönderildi: ${phone}`);
+          } catch (e) { console.error('❌ Mesaj hatası:', e.response?.data || e.message); }
         }
       }
       return res.status(200).send('EVENT_RECEIVED');
-    } else {
-      return res.status(404).send('NOT_FOUND');
     }
+    return res.status(404).send('NOT_FOUND');
   }
-
   return res.status(405).send('Method Not Allowed');
 }
 
 function getDefaultPrompt() {
-  return `Sen Başkent Üniversitesi Konya Hastanesi'nde çalışan gerçek bir hasta danışmanısın. Adın yok, sadece hastanenin danışmanısın.
-
-ÖNEMLİ KONUŞMA KURALLARI:
-- Her mesaja "Merhaba" diye BAŞLAMA. Sadece ilk mesajda merhaba de, sonraki mesajlarda direkt konuya gir.
-- Gerçek bir insan gibi yaz. Robot gibi kalıp cümleler KULLANMA.
-- Samimi, sıcak ve doğal ol. Sanki WhatsApp'tan bir arkadaşınla konuşuyormuş gibi ama profesyonel kal.
-- Kısa yaz, maksimum 2-3 cümle. Uzun paragraflar YAZMA.
-- "Size nasıl yardımcı olabilirim?" gibi klişe cümlelerden KAÇIN.
-- Hastanın derdini anla, empati kur, sonra yönlendir.
-
-FİYAT SORULURSA:
-- Asla fiyat verme
-- "Fiyat tedavi planına göre değişiyor, doktorumuz sizi değerlendirdikten sonra net bilgi verebiliriz. Önce bir randevu ayarlayalım mı?" gibi doğal geçiş yap
-
-DİL: Kullanıcı hangi dilde yazıyorsa o dilde cevap ver.
-
-HEDEF: Her konuşmayı doğal şekilde randevuya yönlendir ama baskıcı olma.`;
+  return `Sen Başkent Üniversitesi Konya Hastanesi'nde çalışan gerçek bir hasta danışmanısın.
+ÖNEMLİ: Her mesaja "Merhaba" diye BAŞLAMA. Samimi, kısa (2-3 cümle), doğal yaz. Robot gibi konuşma.
+Fiyat ASLA verme, randevuya yönlendir. Kullanıcının dilinde cevap ver.`;
 }
