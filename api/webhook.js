@@ -88,6 +88,11 @@ export default async function handler(req, res) {
           console.log(`📩 Yeni Mesaj (${phone}): ${text}`);
           await saveMessage(phone, 'in', text);
 
+          // Hasta cevap verdi, takip sayacını sıfırla
+          if (sql) {
+            try { await sql`UPDATE conversations SET follow_up_count = 0 WHERE phone_number = ${phone}`; } catch(e) {}
+          }
+
           // Canlı müdahale kontrolü
           if (sql) {
             try {
