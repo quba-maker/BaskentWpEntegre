@@ -3,7 +3,7 @@ import axios from 'axios';
 export default async function handler(req, res) {
   const META_ACCESS_TOKEN = 'EAAMEZBSqN8IQBRRF3R7utZCv3cZBAKnE1WjNsYQmpZBnRJf1hgoEHiI938L0QbONhmxCsp4QlteKvH9ypiUMSZAJpOt6PFW28vWZBpAVG8SIgSCQrJpB6Em9IHWL1F5ZAm3K8ZAw2p98nDpeifS7AmJFXkmxogKCK3KkXhOcfB8u5SZA7Vt75BbErykMggkIuuxEoaBBnxHZAAmLSjoFJAOV8c9iPu43CwF3SwuivZAa43JgDra30ZCLbymaBFUNsVNiN5AJAjiYHX3m9yzER7HLGRrvLimzQ1u3i9hDLVhJ7wZDZD';
   const PHONE_NUMBER_ID = '1072536945944841';
-  const GEMINI_API_KEY = 'AIzaSyBBI54hC9g6MCPCwsEWcqR0q_UEH1RY3T8';
+  const GEMINI_API_KEY = 'AIzaSyCe0Ry9shUtYRRkYscq0HcY_IKtZV5hyQg';
 
   if (req.method === 'GET') {
     const mode = req.query['hub.mode'];
