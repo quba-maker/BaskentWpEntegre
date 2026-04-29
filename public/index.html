@@ -295,7 +295,20 @@ async function loadTagList(){allTags=await api('tags')||[];document.getElementBy
 async function addTag(){const n=document.getElementById('new-tag').value;const c=document.getElementById('new-tag-color').value;if(!n)return toast('İsim girin','error');await api('tags','POST',{name:n,color:c});document.getElementById('new-tag').value='';loadTagList();toast('✅ Etiket eklendi')}
 async function deleteTag(id){if(!confirm('Silinsin mi?'))return;await api('tags&id='+id,'DELETE');loadTagList();toast('🗑 Silindi')}
 
+// OTOMATİK YENİLEME (5 saniyede bir)
+let autoRefresh;
+function startAutoRefresh() {
+  if (autoRefresh) clearInterval(autoRefresh);
+  autoRefresh = setInterval(() => {
+    const activePage = document.querySelector('.page.active')?.id;
+    if (activePage === 'page-dashboard') loadDashboard();
+    else if (activePage === 'page-conversations' && currentPhone) loadChat(currentPhone);
+    else if (activePage === 'page-leads') loadLeads();
+  }, 5000);
+}
+
 checkAuth();
+startAutoRefresh();
 </script>
 </body>
 </html>
