@@ -112,7 +112,7 @@ Her konuşmayı randevu almaya yönlendir.`;
                   }],
                   generationConfig: {
                     temperature: 0.7,
-                    maxOutputTokens: 300
+                    maxOutputTokens: 1024
                   }
                 },
                 timeout: 10000
