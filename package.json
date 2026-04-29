@@ -1,0 +1,17 @@
+{
+  "name": "baskent-wp-bot",
+  "version": "1.0.0",
+  "description": "WhatsApp Bot for Baskent",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.7.0",
+    "axios": "^1.6.8",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2"
+  }
+}
