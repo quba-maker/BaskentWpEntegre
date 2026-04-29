@@ -4,7 +4,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 export default async function handler(req, res) {
   const META_ACCESS_TOKEN = 'EAAMEZBSqN8IQBRRF3R7utZCv3cZBAKnE1WjNsYQmpZBnRJf1hgoEHiI938L0QbONhmxCsp4QlteKvH9ypiUMSZAJpOt6PFW28vWZBpAVG8SIgSCQrJpB6Em9IHWL1F5ZAm3K8ZAw2p98nDpeifS7AmJFXkmxogKCK3KkXhOcfB8u5SZA7Vt75BbErykMggkIuuxEoaBBnxHZAAmLSjoFJAOV8c9iPu43CwF3SwuivZAa43JgDra30ZCLbymaBFUNsVNiN5AJAjiYHX3m9yzER7HLGRrvLimzQ1u3i9hDLVhJ7wZDZD';
   const PHONE_NUMBER_ID = '1072536945944841';
-  const GEMINI_API_KEY = 'AIzaSyDzm4tgEs8Z7HAAyL6GfeckH1-NdLyUNR0';
+  const GEMINI_API_KEY = 'AIzaSyBBI54hC9g6MCPCwsEWcqR0q_UEH1RY3T8';
 
   if (req.method === 'GET') {
     const mode = req.query['hub.mode'];
@@ -40,7 +40,7 @@ export default async function handler(req, res) {
 
           // Gemini Yapay Zeka Entegrasyonu
           const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-          const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+          const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
           const systemPrompt = `Sen Başkent Üniversitesi Konya Hastanesi adına çalışan profesyonel bir hasta danışmanısın.
 
