@@ -86,24 +86,25 @@ export default async function handler(req, res) {
 
               console.log(`👤 Lead: ${name} | 📱 ${phone} | 🏷 ${tags.join(', ')} | 📋 Form: ${formName}`);
 
-              // Veritabanına kaydet
-              if (sql && phone) {
+              // Veritabanına kaydet (telefon boş olsa bile)
+              const savePhone = phone || `lead_${leadgenId}`;
+              if (sql) {
                 try {
                   // Leads tablosuna ekle
                   await sql`INSERT INTO leads (
                     phone_number, patient_name, email, city, form_id, form_name, ad_id,
                     leadgen_id, tags, raw_data, stage
                   ) VALUES (
-                    ${phone}, ${name}, ${email}, ${city}, ${formId}, ${formName}, ${adId},
+                    ${savePhone}, ${name}, ${email}, ${city}, ${formId}, ${formName}, ${adId},
                     ${leadgenId}, ${JSON.stringify(tags)}, ${JSON.stringify(fields)}, 'new'
                   )`;
 
                   // Conversations tablosuna da ekle
-                  const existing = await sql`SELECT id FROM conversations WHERE phone_number = ${phone}`;
+                  const existing = await sql`SELECT id FROM conversations WHERE phone_number = ${savePhone}`;
                   if (existing.length === 0) {
-                    await sql`INSERT INTO conversations (phone_number, patient_name, tags, status) VALUES (${phone}, ${name}, ${JSON.stringify(tags)}, 'active')`;
+                    await sql`INSERT INTO conversations (phone_number, patient_name, tags, status) VALUES (${savePhone}, ${name}, ${JSON.stringify(tags)}, 'active')`;
                   } else {
-                    await sql`UPDATE conversations SET patient_name = ${name}, tags = ${JSON.stringify(tags)} WHERE phone_number = ${phone}`;
+                    await sql`UPDATE conversations SET patient_name = ${name}, tags = ${JSON.stringify(tags)} WHERE phone_number = ${savePhone}`;
                   }
                 } catch (e) { console.error('DB kayıt hatası:', e.message); }
               }
