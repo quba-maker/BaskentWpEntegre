@@ -44,6 +44,14 @@ export default async function handler(req, res) {
       return res.json(msgs);
     }
 
+    // MESAJLARI SİL
+    if (action === 'delete-messages' && req.method === 'POST') {
+      const { phone } = req.body;
+      await sql`DELETE FROM messages WHERE phone_number = ${phone}`;
+      await sql`UPDATE conversations SET message_count = 0 WHERE phone_number = ${phone}`;
+      return res.json({ success: true });
+    }
+
     // HASTA BİLGİSİ GÜNCELLE (CRM)
     if (action === 'update-patient' && req.method === 'POST') {
       const { phone, patient_name, tags, notes } = req.body;

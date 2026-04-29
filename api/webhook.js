@@ -142,7 +142,7 @@ export default async function handler(req, res) {
                 headers: { 'Content-Type': 'application/json' },
                 data: {
                   systemInstruction: {
-                    parts: [{ text: `MUTLAK KURAL: Hasta hangi dilde yazıyorsa O DİLDE cevap ver. Kısa mesajlarda (evet, hayır, when, no vb.) önceki mesajların dilini kullan. Arapça konuşmada Arapça devam et, İngilizce konuşmada İngilizce devam et. Türkçe SADECE hasta Türkçe yazdığında kullan.\n\n${systemPrompt}` }]
+                    parts: [{ text: `${systemPrompt}\n\n#LANGUAGE DETECTION - THIS OVERRIDES EVERYTHING:\nDetect the language of the LAST user message ONLY. Respond ENTIRELY in that detected language. Do NOT look at previous messages to determine language. If the last message is in Arabic, respond in Arabic. If in English, respond in English. If in Russian, respond in Russian. If in Turkish, respond in Turkish. NEVER mix languages. NEVER default to Turkish unless the user wrote in Turkish.` }]
                   },
                   contents: history,
                   generationConfig: { temperature: 0.7, maxOutputTokens: 1024 }

@@ -91,6 +91,7 @@
               <button class="btn btn-warning" onclick="setConvStatus('human')">👤 İnsan</button>
               <button class="btn btn-success" onclick="setConvStatus('active')">🤖 Bot</button>
               <button class="btn btn-secondary" onclick="toggleCRM()">📝 CRM</button>
+              <button class="btn btn-danger" onclick="deleteMessages()">🗑 Sil</button>
             </div>
           </div>
           <!-- CRM Panel -->
@@ -262,6 +263,8 @@ function renderCRMTags(selected=[]){document.getElementById('crm-tags').innerHTM
 async function saveCRM(){const tags=Array.from(document.querySelectorAll('#crm-tags input:checked')).map(i=>i.value);await api('update-patient','POST',{phone:currentPhone,patient_name:document.getElementById('crm-name').value,tags:JSON.stringify(tags),notes:document.getElementById('crm-notes').value});toast('✅ Hasta bilgisi kaydedildi');loadConversations()}
 
 async function setConvStatus(s){if(!currentPhone)return;await api('conversation-status','POST',{phone:currentPhone,status:s});toast(s==='human'?'👤 İnsan müdahalesi aktif':'🤖 Bot aktif');loadConversations()}
+
+async function deleteMessages(){if(!currentPhone)return;if(!confirm('Bu konuşmanın tüm mesajları silinecek. Emin misiniz?'))return;await api('delete-messages','POST',{phone:currentPhone});toast('🗑 Mesajlar silindi');loadChat(currentPhone)}
 
 async function sendPanelMessage(){const i=document.getElementById('chat-input');const m=i.value.trim();if(!m||!currentPhone)return;i.value='';try{await api('send-message','POST',{phone:currentPhone,message:m});toast('📤 Gönderildi');loadChat(currentPhone)}catch(e){toast('❌ Hata','error')}}
 
