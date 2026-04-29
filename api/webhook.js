@@ -1,10 +1,59 @@
 import axios from 'axios';
+import { neon } from '@neondatabase/serverless';
 
 export default async function handler(req, res) {
   const META_ACCESS_TOKEN = process.env.META_ACCESS_TOKEN;
   const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
   const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+  const DATABASE_URL = process.env.DATABASE_URL;
 
+  const sql = DATABASE_URL ? neon(DATABASE_URL) : null;
+
+  // Prompt'u veritabanından oku (yoksa varsayılanı kullan)
+  async function getSystemPrompt() {
+    if (sql) {
+      try {
+        const result = await sql`SELECT value FROM settings WHERE key = 'system_prompt'`;
+        if (result.length > 0) return result[0].value;
+      } catch (e) {
+        console.error('DB prompt okuma hatası:', e.message);
+      }
+    }
+    return getDefaultPrompt();
+  }
+
+  // Model ayarını veritabanından oku
+  async function getModelSetting() {
+    if (sql) {
+      try {
+        const result = await sql`SELECT value FROM settings WHERE key = 'ai_model'`;
+        if (result.length > 0) return result[0].value;
+      } catch (e) {
+        console.error('DB model okuma hatası:', e.message);
+      }
+    }
+    return 'gemini-2.5-flash-lite';
+  }
+
+  // Mesajı veritabanına kaydet
+  async function saveMessage(phoneNumber, direction, content, modelUsed = null) {
+    if (!sql) return;
+    try {
+      await sql`INSERT INTO messages (phone_number, direction, content, model_used) VALUES (${phoneNumber}, ${direction}, ${content}, ${modelUsed})`;
+      
+      // Konuşmayı güncelle veya oluştur
+      const existing = await sql`SELECT id FROM conversations WHERE phone_number = ${phoneNumber}`;
+      if (existing.length > 0) {
+        await sql`UPDATE conversations SET last_message_at = NOW(), message_count = message_count + 1 WHERE phone_number = ${phoneNumber}`;
+      } else {
+        await sql`INSERT INTO conversations (phone_number, message_count) VALUES (${phoneNumber}, 1)`;
+      }
+    } catch (e) {
+      console.error('DB kayıt hatası:', e.message);
+    }
+  }
+
+  // GET - Webhook doğrulama
   if (req.method === 'GET') {
     const mode = req.query['hub.mode'];
     const token = req.query['hub.verify_token'];
@@ -18,6 +67,7 @@ export default async function handler(req, res) {
     }
   }
 
+  // POST - Gelen mesajları işle
   if (req.method === 'POST') {
     const body = req.body;
 
@@ -36,36 +86,17 @@ export default async function handler(req, res) {
           const textMessage = message.text.body;
           console.log(`📩 Yeni Mesaj (${phoneNumber}): ${textMessage}`);
 
-          const systemPrompt = `Sen Başkent Üniversitesi Konya Hastanesi'nde çalışan gerçek bir hasta danışmanısın. Adın yok, sadece hastanenin danışmanısın.
+          // Gelen mesajı kaydet
+          await saveMessage(phoneNumber, 'in', textMessage);
 
-ÖNEMLİ KONUŞMA KURALLARI:
-- Her mesaja "Merhaba" diye BAŞLAMA. Sadece ilk mesajda merhaba de, sonraki mesajlarda direkt konuya gir.
-- Gerçek bir insan gibi yaz. Robot gibi kalıp cümleler KULLANMA.
-- Samimi, sıcak ve doğal ol. Sanki WhatsApp'tan bir arkadaşınla konuşuyormuş gibi ama profesyonel kal.
-- Kısa yaz, maksimum 2-3 cümle. Uzun paragraflar YAZMA.
-- "Size nasıl yardımcı olabilirim?" gibi klişe cümlelerden KAÇIN.
-- Hastanın derdini anla, empati kur, sonra yönlendir.
+          // Prompt ve model ayarını DB'den oku
+          const systemPrompt = await getSystemPrompt();
+          const primaryModel = await getModelSetting();
 
-DOĞAL CEVAP ÖRNEKLERİ:
-- "Geçmiş olsun, bel fıtığı gerçekten zorlu bir süreç. Doktorlarımız bu konuda çok deneyimli, sizi bir değerlendirmeye alalım mı?"
-- "Anlıyorum sizi. Net bilgi için doktorumuzun sizi görmesi en doğrusu olur. Hangi gün müsaitsiniz?"
-- "Tabii ki yardımcı olalım! Randevu için uygun gününüzü söylerseniz hemen ayarlayalım."
-
-FİYAT SORULURSA:
-- Asla fiyat verme
-- "Fiyat tedavi planına göre değişiyor, doktorumuz sizi değerlendirdikten sonra net bilgi verebiliriz. Önce bir randevu ayarlayalım mı?" gibi doğal geçiş yap
-
-DİL: Kullanıcı hangi dilde yazıyorsa o dilde cevap ver.
-
-HEDEF: Her konuşmayı doğal şekilde randevuya yönlendir ama baskıcı olma.`;
-
-          // Sırayla denenecek modeller
-          const models = [
-            'gemini-2.5-flash-lite',
-            'gemini-2.5-flash'
-          ];
+          const models = [primaryModel, 'gemini-2.5-flash'];
 
           let botResponse = "";
+          let usedModel = "";
           let aiSuccess = false;
 
           for (const modelName of models) {
@@ -85,11 +116,12 @@ HEDEF: Her konuşmayı doğal şekilde randevuya yönlendir ama baskıcı olma.`
                     maxOutputTokens: 1024
                   }
                 },
-                timeout: 10000
+                timeout: 15000
               });
 
               if (geminiResponse.data?.candidates?.[0]?.content?.parts?.[0]?.text) {
                 botResponse = geminiResponse.data.candidates[0].content.parts[0].text;
+                usedModel = modelName;
                 console.log(`✅ Yapay Zeka cevabı alındı (${modelName})`);
                 aiSuccess = true;
                 break;
@@ -101,7 +133,11 @@ HEDEF: Her konuşmayı doğal şekilde randevuya yönlendir ama baskıcı olma.`
 
           if (!aiSuccess) {
             botResponse = "Merhaba, Başkent Üniversitesi Konya Hastanesi'ne ilginiz için teşekkür ederiz. Size en iyi şekilde yardımcı olabilmemiz için sizi en kısa sürede yetkili arkadaşımız arayacaktır.";
+            usedModel = "fallback";
           }
+
+          // Bot cevabını kaydet
+          await saveMessage(phoneNumber, 'out', botResponse, usedModel);
 
           try {
             await axios({
@@ -130,4 +166,24 @@ HEDEF: Her konuşmayı doğal şekilde randevuya yönlendir ama baskıcı olma.`
   }
 
   return res.status(405).send('Method Not Allowed');
+}
+
+function getDefaultPrompt() {
+  return `Sen Başkent Üniversitesi Konya Hastanesi'nde çalışan gerçek bir hasta danışmanısın. Adın yok, sadece hastanenin danışmanısın.
+
+ÖNEMLİ KONUŞMA KURALLARI:
+- Her mesaja "Merhaba" diye BAŞLAMA. Sadece ilk mesajda merhaba de, sonraki mesajlarda direkt konuya gir.
+- Gerçek bir insan gibi yaz. Robot gibi kalıp cümleler KULLANMA.
+- Samimi, sıcak ve doğal ol. Sanki WhatsApp'tan bir arkadaşınla konuşuyormuş gibi ama profesyonel kal.
+- Kısa yaz, maksimum 2-3 cümle. Uzun paragraflar YAZMA.
+- "Size nasıl yardımcı olabilirim?" gibi klişe cümlelerden KAÇIN.
+- Hastanın derdini anla, empati kur, sonra yönlendir.
+
+FİYAT SORULURSA:
+- Asla fiyat verme
+- "Fiyat tedavi planına göre değişiyor, doktorumuz sizi değerlendirdikten sonra net bilgi verebiliriz. Önce bir randevu ayarlayalım mı?" gibi doğal geçiş yap
+
+DİL: Kullanıcı hangi dilde yazıyorsa o dilde cevap ver.
+
+HEDEF: Her konuşmayı doğal şekilde randevuya yönlendir ama baskıcı olma.`;
 }
