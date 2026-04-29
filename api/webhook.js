@@ -1,5 +1,4 @@
 import axios from 'axios';
-import { GoogleGenerativeAI } from '@google/generative-ai';
 
 export default async function handler(req, res) {
   const META_ACCESS_TOKEN = 'EAAMEZBSqN8IQBRRF3R7utZCv3cZBAKnE1WjNsYQmpZBnRJf1hgoEHiI938L0QbONhmxCsp4QlteKvH9ypiUMSZAJpOt6PFW28vWZBpAVG8SIgSCQrJpB6Em9IHWL1F5ZAm3K8ZAw2p98nDpeifS7AmJFXkmxogKCK3KkXhOcfB8u5SZA7Vt75BbErykMggkIuuxEoaBBnxHZAAmLSjoFJAOV8c9iPu43CwF3SwuivZAa43JgDra30ZCLbymaBFUNsVNiN5AJAjiYHX3m9yzER7HLGRrvLimzQ1u3i9hDLVhJ7wZDZD';
@@ -19,7 +18,6 @@ export default async function handler(req, res) {
     }
   }
 
-  // Gelen Mesajları Karşılama (POST isteği)
   if (req.method === 'POST') {
     const body = req.body;
 
@@ -38,10 +36,6 @@ export default async function handler(req, res) {
           const textMessage = message.text.body;
           console.log(`📩 Yeni Mesaj (${phoneNumber}): ${textMessage}`);
 
-          // Gemini Yapay Zeka Entegrasyonu
-          const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-          const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-
           const systemPrompt = `Sen Başkent Üniversitesi Konya Hastanesi adına çalışan profesyonel bir hasta danışmanısın.
 
 TEMEL GÖREVİN:
@@ -50,7 +44,7 @@ TEMEL GÖREVİN:
 - Kısa ve net bilgi vermek
 - ASLA fiyat vermemek
 - Konuşmayı randevu almaya yönlendirmek
-- Hastayı Konya’ya gelmeye ikna etmek
+- Hastayı Konya'ya gelmeye ikna etmek
 
 KONUŞMA TARZI:
 - Samimi ama profesyonel
@@ -63,15 +57,12 @@ DİL:
 - Kullanıcının yazdığı dilde cevap ver (Türkçe, İngilizce, Arapça vb.)
 - Eğer dil belirsizse Türkçe başla
 
----
-
 KRİTİK KURALLAR:
 
 1. FİYAT YASAĞI:
 - Hiçbir durumda fiyat verme
-- Fiyat sorulursa:
-  → "Net fiyat için doktor değerlendirmesi gerekmektedir" şeklinde cevap ver
-  → Konuyu hemen randevuya bağla
+- Fiyat sorulursa: "Net fiyat için doktor değerlendirmesi gerekmektedir" şeklinde cevap ver
+- Konuyu hemen randevuya bağla
 
 2. KISA CEVAP:
 - Maksimum 3-4 cümle
@@ -80,48 +71,13 @@ KRİTİK KURALLAR:
 
 3. YÖNLENDİRME:
 - Her konuşma sonunda bir aksiyon iste:
-  → "Sizi randevuya yönlendirelim"
-  → "Uygun gününüzü paylaşabilir misiniz?"
+  "Sizi randevuya yönlendirelim" veya "Uygun gününüzü paylaşabilir misiniz?"
 
 4. GÜVEN OLUŞTUR:
-- Hastane kurumsal gücünü hissettir:
-  → Uzman doktorlar
-  → Gelişmiş teknoloji
-  → Kişiye özel tedavi
+- Hastane kurumsal gücünü hissettir: Uzman doktorlar, Gelişmiş teknoloji, Kişiye özel tedavi
 
-5. KONYA’YA İKNA:
-- Şehir dışı / yurtdışı hastalar için:
-  → Süreç kolaylığı
-  → Havalimanı ulaşımı
-  → Destek hizmetleri
-  → Güvenli tedavi süreci
-
----
-
-HASTA ANALİZİ:
-Her mesajda şunu anlamaya çalış:
-- Ne istiyor? (fiyat / bilgi / randevu)
-- Aciliyeti var mı?
-- Kararsız mı?
-- Sadece araştırma mı yapıyor?
-
----
-
-CEVAP STRATEJİSİ:
-1. Hasta fiyat sorarsa: Fiyatı reddet, Sebep açıkla, Randevuya yönlendir
-2. Hasta bilgi isterse: Kısa bilgi ver, Detaya girme, "Size özel değerlendirelim" de
-3. Hasta kararsızsa: Güven ver, Süreci basit anlat, Randevuya çek
-4. Hasta direkt randevu isterse: Hızlı aksiyon al, Tarih iste, İletişim bilgisi iste
-
----
-
-ÖRNEK CEVAP YAPISI:
-"Merhaba, ilginiz için teşekkür ederiz. 
-[Konuya kısa cevap]
-Net değerlendirme için doktorumuzun sizi görmesi gerekir. 
-Size uygun bir randevu oluşturalım mı?"
-
----
+5. KONYA'YA İKNA:
+- Şehir dışı / yurtdışı hastalar için: Süreç kolaylığı, Havalimanı ulaşımı, Destek hizmetleri
 
 YASAKLAR:
 - Fiyat verme
@@ -131,19 +87,52 @@ YASAKLAR:
 - Tıbbi riskleri yok sayma
 
 HEDEF:
-Her konuşmayı şu noktaya getir:
-👉 "Randevu alalım"
+Her konuşmayı randevu almaya yönlendir.`;
 
------------------
-Hasta Mesajı: ${textMessage}`;
+          // Sırayla denenecek modeller
+          const models = [
+            'gemini-2.0-flash',
+            'gemini-2.0-flash-001',
+            'gemini-2.0-flash-lite',
+            'gemini-2.5-flash'
+          ];
 
           let botResponse = "";
-          try {
-            const result = await model.generateContent(systemPrompt);
-            botResponse = result.response.text();
-          } catch (e) {
-            console.error("Yapay Zeka Hatası:", e);
-            botResponse = "Şu an sistemimde kısa süreli bir yoğunluk var, sorunuzu not aldım, yetkili arkadaşım size birazdan dönüş yapacaktır.";
+          let aiSuccess = false;
+
+          for (const modelName of models) {
+            try {
+              console.log(`🤖 Deneniyor: ${modelName}`);
+              const geminiResponse = await axios({
+                method: 'POST',
+                url: `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GEMINI_API_KEY}`,
+                headers: { 'Content-Type': 'application/json' },
+                data: {
+                  contents: [{
+                    role: 'user',
+                    parts: [{ text: `${systemPrompt}\n\n---\nHasta Mesajı: ${textMessage}` }]
+                  }],
+                  generationConfig: {
+                    temperature: 0.7,
+                    maxOutputTokens: 300
+                  }
+                },
+                timeout: 10000
+              });
+
+              if (geminiResponse.data?.candidates?.[0]?.content?.parts?.[0]?.text) {
+                botResponse = geminiResponse.data.candidates[0].content.parts[0].text;
+                console.log(`✅ Yapay Zeka cevabı alındı (${modelName})`);
+                aiSuccess = true;
+                break;
+              }
+            } catch (e) {
+              console.error(`❌ ${modelName} hatası:`, e.response?.data?.error?.message || e.message);
+            }
+          }
+
+          if (!aiSuccess) {
+            botResponse = "Merhaba, Başkent Üniversitesi Konya Hastanesi'ne ilginiz için teşekkür ederiz. Size en iyi şekilde yardımcı olabilmemiz için sizi en kısa sürede yetkili arkadaşımız arayacaktır.";
           }
 
           try {
@@ -157,9 +146,7 @@ Hasta Mesajı: ${textMessage}`;
                 messaging_product: 'whatsapp',
                 to: phoneNumber,
                 type: 'text',
-                text: {
-                  body: botResponse
-                }
+                text: { body: botResponse }
               }
             });
             console.log(`📤 Yanıt gönderildi: ${phoneNumber}`);
