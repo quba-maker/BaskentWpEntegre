@@ -274,7 +274,7 @@ async function sendMedia(){const url=document.getElementById('media-url').value;
 // BOT EĞİTİMİ
 async function loadPrompt(){const s=await api('settings');if(s)document.getElementById('prompt-editor').value=s.system_prompt||''}
 async function savePrompt(){await api('settings','POST',{key:'system_prompt',value:document.getElementById('prompt-editor').value});toast('✅ Prompt kaydedildi')}
-async function resetPrompt(){if(!confirm('Sıfırlansın mı?'))return;document.getElementById('prompt-editor').value='Sen Başkent Üniversitesi Konya Hastanesi danışmanısın. Samimi, kısa, doğal yaz. Fiyat verme, randevuya yönlendir.';savePrompt()}
+async function resetPrompt(){if(!confirm('Sıfırlansın mı?'))return;const d=await api('default-prompt');if(d&&d.prompt){document.getElementById('prompt-editor').value=d.prompt;savePrompt();toast('✅ Varsayılan prompt yüklendi')}}
 
 // TOPLU MESAJ
 async function loadBulk(){allTags=await api('tags')||[];const sel=document.getElementById('bulk-tag');sel.innerHTML='<option value="__all__">🌍 Tüm Hastalar</option>'+allTags.map(t=>`<option value="${t.name}">${t.name}</option>`).join('')}
