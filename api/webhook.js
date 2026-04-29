@@ -136,7 +136,7 @@ Her konuşmayı şu noktaya getir:
 
 -----------------
 Hasta Mesajı: ${textMessage}`;
-          
+
           let botResponse = "";
           try {
             const result = await model.generateContent(systemPrompt);
