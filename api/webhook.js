@@ -61,8 +61,8 @@ HEDEF: Her konuşmayı doğal şekilde randevuya yönlendir ama baskıcı olma.`
 
           // Sırayla denenecek modeller
           const models = [
-            'gemini-2.5-flash',
-            'gemini-2.5-flash-lite'
+            'gemini-2.5-pro',
+            'gemini-2.5-flash'
           ];
 
           let botResponse = "";
