@@ -173,6 +173,22 @@ export default async function handler(req, res) {
       else leads = await sql`SELECT * FROM leads ORDER BY created_at DESC LIMIT 100`;
       return res.json(leads);
     }
+    
+    if (action === 'debug_db') {
+       try {
+         const dummyId = String(Date.now());
+         await sql`INSERT INTO leads (
+            phone_number, patient_name, email, city, form_id, form_name, ad_id, leadgen_id, tags, raw_data, stage
+         ) VALUES (
+            'test_123', '<test lead: dummy data for full_name>', '<test lead: dummy data for email>', '<test lead: dummy data for city>', '1505866894451965', 'Gurbetçiler Form Randevu-Kardiyoloji', '<test lead: dummy data for ad_id>',
+            ${dummyId}, '["Genel"]', '{}', 'new'
+         )`;
+         return res.json({ success: true, message: 'DB Insert worked fine' });
+       } catch(e) {
+         return res.json({ success: false, error: e.message, hint: 'This is the error blocking leads.' });
+       }
+    }
+
 
     // LEAD AŞAMA GÜNCELLE
     if (action === 'update-lead' && req.method === 'POST') {
