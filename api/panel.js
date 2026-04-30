@@ -5,6 +5,7 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Cache-Control', 'no-store, max-age=0');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   const authHeader = req.headers.authorization;
@@ -177,13 +178,25 @@ export default async function handler(req, res) {
     if (action === 'debug_db') {
        try {
          const dummyId = String(Date.now());
+         const savePhone = 'test_' + dummyId.slice(-10);
+         const name = '<test lead: dummy data for full_name>';
+         const tags = ['Genel'];
+         
          await sql`INSERT INTO leads (
             phone_number, patient_name, email, city, form_id, form_name, ad_id, leadgen_id, tags, raw_data, stage
          ) VALUES (
-            'test_123', '<test lead: dummy data for full_name>', '<test lead: dummy data for email>', '<test lead: dummy data for city>', '1505866894451965', 'Gurbetçiler Form Randevu-Kardiyoloji', '<test lead: dummy data for ad_id>',
-            ${dummyId}, '["Genel"]', '{}', 'new'
-         )`;
-         return res.json({ success: true, message: 'DB Insert worked fine' });
+            ${savePhone}, ${name}, '<test lead: dummy data for email>', '<test lead: dummy data for city>', '1505866894451965', 'Gurbetçiler Form Randevu-Kardiyoloji', '<test lead: dummy data for ad_id>',
+            ${dummyId}, ${JSON.stringify(tags)}, '{}', 'new'
+         ) ON CONFLICT (leadgen_id) DO UPDATE SET phone_number = ${savePhone}, patient_name = ${name}, stage = 'new'`;
+         
+         const existing = await sql`SELECT id FROM conversations WHERE phone_number = ${savePhone}`;
+         if (existing.length === 0) {
+           await sql`INSERT INTO conversations (phone_number, patient_name, tags, status) VALUES (${savePhone}, ${name}, ${JSON.stringify(tags)}, 'active')`;
+         } else {
+           await sql`UPDATE conversations SET patient_name = ${name}, tags = ${JSON.stringify(tags)} WHERE phone_number = ${savePhone}`;
+         }
+
+         return res.json({ success: true, message: 'DB Insert worked fine for leads AND conversations' });
        } catch(e) {
          return res.json({ success: false, error: e.message, hint: 'This is the error blocking leads.' });
        }
