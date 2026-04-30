@@ -235,7 +235,7 @@ async function loadLeads(){
   let url='leads';if(stage&&stage!=='all')url+=`&stage=${stage}`;if(tag)url+=`&tag=${tag}`;
   const leads=await api(url);if(!leads)return;
   let tableHTML = `<div style="overflow-x:auto;">
-    <table class="data-table">
+    <table class="data-table" style="min-width: max-content;">
       <thead>
         <tr>
           <th>Tarih</th>
@@ -243,16 +243,37 @@ async function loadLeads(){
           <th>Telefon</th>
           <th>Kampanya</th>
           <th>Etiketler</th>
-          <th>Aşama</th>
-          <th>İşlem</th>
-        </tr>
-      </thead>
-      <tbody>`;
+          <th>Aşama</th>`;
+          
+  // raw_data içindeki tüm dinamik soru başlıklarını bulalım (isim, telefon vb. standart olanları hariç tutalım)
+  const excludedKeys = ['full_name', 'phone_number', 'email', 'city', 'isim', 'telefon', 'ad', 'name', 'phone'];
+  const dynamicCols = new Set();
+  leads.forEach(l => {
+    try {
+      const raw = JSON.parse(l.raw_data || '{}');
+      Object.keys(raw).forEach(k => {
+        if (!excludedKeys.includes(k.toLowerCase())) dynamicCols.add(k);
+      });
+    } catch(e){}
+  });
+  const customCols = Array.from(dynamicCols);
+  
+  // Dinamik sütun başlıklarını ekle
+  customCols.forEach(col => {
+    // Sütun adını güzelleştir (alt tireleri boşluk yap, baş harfleri büyüt)
+    const niceColName = col.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    tableHTML += `<th>${niceColName}</th>`;
+  });
+
+  tableHTML += `<th>İşlem</th></tr></thead><tbody>`;
   
   tableHTML += leads.map(l => {
     let tags = [];
+    let raw = {};
     try { tags = JSON.parse(l.tags || '[]'); } catch(e){}
-    return `<tr>
+    try { raw = JSON.parse(l.raw_data || '{}'); } catch(e){}
+    
+    let rowHTML = `<tr>
       <td style="white-space:nowrap;color:#888;font-size:0.85em;">${l.created_at ? new Date(l.created_at).toLocaleString('tr-TR') : '-'}</td>
       <td><strong>${l.patient_name || 'İsimsiz'}</strong></td>
       <td>${l.phone_number || '-'}</td>
@@ -262,11 +283,18 @@ async function loadLeads(){
         <select onchange="updateLeadStage(${l.id},this.value)" style="margin:0;padding:4px 8px;font-size:0.85em;background:${stageColors[l.stage] || '#333'};color:#fff;border:none;border-radius:4px;">
           ${Object.entries(stageLabels).map(([k,v]) => `<option value="${k}" ${l.stage === k ? 'selected' : ''}>${v}</option>`).join('')}
         </select>
-      </td>
-      <td>
+      </td>`;
+      
+    // Dinamik sütun verilerini ekle
+    customCols.forEach(col => {
+      rowHTML += `<td style="max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:0.85em;" title="${raw[col] || '-'}">${raw[col] || '-'}</td>`;
+    });
+      
+    rowHTML += `<td>
         <button class="btn btn-primary" style="padding:4px 10px;font-size:0.85em;" onclick="window.open('https://wa.me/${String(l.phone_number).replace(/\\D/g, '')}','_blank')">WhatsApp</button>
       </td>
     </tr>`;
+    return rowHTML;
   }).join('');
   
   tableHTML += `</tbody></table></div>`;
