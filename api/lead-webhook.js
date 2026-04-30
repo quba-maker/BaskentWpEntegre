@@ -88,8 +88,12 @@ export default async function handler(req, res) {
 
               console.log(`👤 Lead: ${name} | 📱 ${phone} | 🏷 ${tags.join(', ')} | 📋 Form: ${formName}`);
 
-              // Veritabanına kaydet (telefon boş olsa bile)
-              const savePhone = phone || `test_${String(Date.now()).slice(-10)}`;
+              // Veritabanına kaydet (telefon boş olsa bile veya dummy data ise)
+              let savePhone = phone || `test_${String(Date.now()).slice(-10)}`;
+              if (savePhone.length > 20) {
+                 savePhone = `test_${String(Date.now()).slice(-10)}`;
+              }
+
               if (sql) {
                 try {
                   // Leads tablosuna ekle (aynı leadgen_id varsa güncelle)
