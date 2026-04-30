@@ -30,7 +30,9 @@ export default async function handler(req, res) {
         for (const entry of body.entry) {
           for (const change of entry.changes || []) {
             if (change.field === 'leadgen') {
-              const leadgenId = change.value.leadgen_id;
+              let leadgenId = change.value.leadgen_id;
+              // Test verisi aynı ID gönderiyor, benzersiz yap
+              if (/^4+$/.test(leadgenId)) leadgenId = `${leadgenId}_${Date.now()}`;
               const formId = change.value.form_id;
               const adId = change.value.ad_id || null;
               const createdTime = change.value.created_time;
@@ -90,14 +92,15 @@ export default async function handler(req, res) {
               const savePhone = phone || `lead_${leadgenId}`;
               if (sql) {
                 try {
-                  // Leads tablosuna ekle
+                  // Leads tablosuna ekle (aynı leadgen_id varsa güncelle)
                   await sql`INSERT INTO leads (
                     phone_number, patient_name, email, city, form_id, form_name, ad_id,
                     leadgen_id, tags, raw_data, stage
                   ) VALUES (
                     ${savePhone}, ${name}, ${email}, ${city}, ${formId}, ${formName}, ${adId},
                     ${leadgenId}, ${JSON.stringify(tags)}, ${JSON.stringify(fields)}, 'new'
-                  )`;
+                  ) ON CONFLICT (leadgen_id) DO UPDATE SET
+                    phone_number = ${savePhone}, patient_name = ${name}, stage = 'new'`;
 
                   // Conversations tablosuna da ekle
                   const existing = await sql`SELECT id FROM conversations WHERE phone_number = ${savePhone}`;
