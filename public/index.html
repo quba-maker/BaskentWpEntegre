@@ -185,6 +185,11 @@
         </select>
       </div>
       <div class="card">
+        <h2>Google Sheets Gösterim Linki</h2>
+        <input type="text" id="sheet-view-url" placeholder="https://docs.google.com/spreadsheets/d/..." onchange="saveSheetUrl()" style="width:100%; padding:10px; border-radius:6px; border:1px solid var(--border); background:rgba(0,0,0,0.2); color:#fff; margin-bottom:8px;">
+        <p style="font-size:0.85em;color:var(--text-muted);margin:0;">Leads sekmesinde birebir Excel görünümü için Google Sheets "Paylaş" (Okuma izni) linkinizi yapıştırın.</p>
+      </div>
+      <div class="card">
         <h2>Etiket Yönetimi</h2>
         <div class="tag-add"><input type="text" id="new-tag" placeholder="Yeni etiket adı"><input type="color" id="new-tag-color" value="#3b82f6" style="width:50px;height:38px;padding:2px"><button class="btn btn-primary" onclick="addTag()">Ekle</button></div>
         <div id="tag-list"></div>
@@ -220,9 +225,28 @@ const stageLabels={new:'📥 Yeni',contacted:'📱 İletişim',responded:'💬 C
 const stageColors={new:'#3b82f6',contacted:'#8b5cf6',responded:'#06b6d4',interested:'#f59e0b',appointed:'#22c55e',arrived:'#10b981',treated:'#059669',cold:'#6b7280'};
 
 async function loadLeads(){
+  const s = await api('settings');
+  if(s && s.sheet_view_url){
+    document.getElementById('lead-list').innerHTML = `<iframe src="${s.sheet_view_url}" width="100%" height="800px" style="border:none; border-radius:8px; background:white;"></iframe>`;
+    document.getElementById('lead-filter-stage').style.display = 'none';
+    document.getElementById('lead-filter-tag').style.display = 'none';
+    
+    // Stats güncelle
+    const stats=await api('lead-stats');
+    if(stats){
+      document.getElementById('lead-today').textContent=stats.todayLeads;document.getElementById('lead-total').textContent=stats.totalLeads;
+      const stageMap={};(stats.byStage||[]).forEach(st=>stageMap[st.stage]=+st.count);
+      document.getElementById('lead-contacted').textContent=stageMap.contacted||0;document.getElementById('lead-appointed').textContent=stageMap.appointed||0
+    }
+    return;
+  } else {
+    document.getElementById('lead-filter-stage').style.display = 'inline-block';
+    document.getElementById('lead-filter-tag').style.display = 'inline-block';
+  }
+
   const stats=await api('lead-stats');
   if(stats){document.getElementById('lead-today').textContent=stats.todayLeads;document.getElementById('lead-total').textContent=stats.totalLeads;
-  const stageMap={};(stats.byStage||[]).forEach(s=>stageMap[s.stage]=+s.count);
+  const stageMap={};(stats.byStage||[]).forEach(st=>stageMap[st.stage]=+st.count);
   document.getElementById('lead-contacted').textContent=stageMap.contacted||0;document.getElementById('lead-appointed').textContent=stageMap.appointed||0}
   
   // Etiket filtresini doldur
@@ -341,8 +365,11 @@ async function deleteTemplate(id){if(!confirm('Silinsin mi?'))return;await api('
 async function loadAnalytics(){const d=await api('analytics');if(!d)return;const mx=Math.max(...(d.daily||[]).map(x=>+x.count),1);document.getElementById('chart-daily').innerHTML=(d.daily||[]).map(x=>`<div class="bar-group"><div class="bar" style="height:${+x.count/mx*100}%"><span class="bar-val">${x.count}</span></div><div class="bar-label">${new Date(x.date).toLocaleDateString('tr-TR',{weekday:'short',day:'numeric'})}</div></div>`).join('')||'<p class="empty">Veri yok</p>';const mh=Math.max(...(d.hourly||[]).map(x=>+x.count),1);document.getElementById('chart-hourly').innerHTML=(d.hourly||[]).map(x=>`<div class="bar-group"><div class="bar bar-green" style="height:${+x.count/mh*100}%"><span class="bar-val">${x.count}</span></div><div class="bar-label">${x.hour}:00</div></div>`).join('')||'<p class="empty">Veri yok</p>';document.getElementById('top-phones').innerHTML=(d.topPhones||[]).map((p,i)=>`<div class="rank-item"><span class="rank">#${i+1}</span><span>📱 ${p.phone_number}</span><span class="rank-count">${p.count} mesaj</span></div>`).join('')||'<p class="empty">Veri yok</p>';document.getElementById('model-usage').innerHTML=(d.modelUsage||[]).map(m=>`<div class="rank-item"><span>🤖 ${m.model_used}</span><span class="rank-count">${m.count}</span></div>`).join('')||'<p class="empty">Veri yok</p>'}
 
 // AYARLAR
-async function loadSettings(){const s=await api('settings');if(!s)return;document.getElementById('model-select').value=s.ai_model||'gemini-2.5-flash-lite';if(s.working_hours){try{const h=JSON.parse(s.working_hours);document.getElementById('hours-enabled').checked=h.enabled;document.getElementById('hours-start').value=h.start;document.getElementById('hours-end').value=h.end;document.getElementById('hours-message').value=h.offMessage||''}catch(e){}}loadTagList()}
+async function loadSettings(){const s=await api('settings');if(!s)return;document.getElementById('model-select').value=s.ai_model||'gemini-2.5-flash-lite';
+if(s.sheet_view_url) document.getElementById('sheet-view-url').value=s.sheet_view_url;
+if(s.working_hours){try{const h=JSON.parse(s.working_hours);document.getElementById('hours-enabled').checked=h.enabled;document.getElementById('hours-start').value=h.start;document.getElementById('hours-end').value=h.end;document.getElementById('hours-message').value=h.offMessage||''}catch(e){}}loadTagList()}
 async function saveModel(){await api('settings','POST',{key:'ai_model',value:document.getElementById('model-select').value});toast('✅ Model güncellendi')}
+async function saveSheetUrl(){await api('settings','POST',{key:'sheet_view_url',value:document.getElementById('sheet-view-url').value});toast('✅ Sheets Linki Kaydedildi');loadLeads();}
 async function saveHours(){await api('settings','POST',{key:'working_hours',value:JSON.stringify({enabled:document.getElementById('hours-enabled').checked,start:document.getElementById('hours-start').value,end:document.getElementById('hours-end').value,offMessage:document.getElementById('hours-message').value})});toast('✅ Güncellendi')}
 
 // ETİKETLER
