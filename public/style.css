@@ -149,6 +149,35 @@ textarea:focus, input:focus, select:focus { outline: none; border-color: #3b82f6
 /* Lead Pipeline */
 .lead-filters { display: flex; gap: 10px; margin-bottom: 16px; }
 .lead-filters select { width: auto; flex: 1; margin-bottom: 0; }
+.grid-layout { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 15px; }
+
+/* Table Styles */
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #161920;
+  border-radius: 14px;
+  overflow: hidden;
+  margin-top: 10px;
+}
+.data-table th, .data-table td {
+  padding: 12px 15px;
+  text-align: left;
+  border-bottom: 1px solid #252830;
+  font-size: 0.9rem;
+}
+.data-table th {
+  background: rgba(255, 255, 255, 0.05);
+  font-weight: 500;
+  color: #8b8fa3;
+}
+.data-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+.data-table td {
+  vertical-align: middle;
+}
+
 .lead-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 12px; }
 .lead-card { background: #161920; border: 1px solid #252830; border-radius: 12px; padding: 16px; transition: border-color 0.2s; }
 .lead-card:hover { border-color: #3b82f6; }
