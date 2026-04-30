@@ -89,7 +89,7 @@ export default async function handler(req, res) {
               console.log(`👤 Lead: ${name} | 📱 ${phone} | 🏷 ${tags.join(', ')} | 📋 Form: ${formName}`);
 
               // Veritabanına kaydet (telefon boş olsa bile)
-              const savePhone = phone || `lead_${leadgenId}`;
+              const savePhone = phone || `test_${String(Date.now()).slice(-10)}`;
               if (sql) {
                 try {
                   // Leads tablosuna ekle (aynı leadgen_id varsa güncelle)
