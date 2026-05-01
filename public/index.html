@@ -53,30 +53,24 @@
 
     <!-- LEADS PIPELINE -->
     <div id="page-leads" class="page">
-      <h1>🎯 Lead Pipeline</h1>
+      <h1>📊 Lead Tablosu</h1>
       <div class="stats-grid">
         <div class="stat-card"><div class="stat-value" id="lead-today">0</div><div class="stat-label">Bugün Lead</div></div>
         <div class="stat-card"><div class="stat-value" id="lead-total">0</div><div class="stat-label">Toplam Lead</div></div>
         <div class="stat-card"><div class="stat-value" id="lead-contacted">0</div><div class="stat-label">İletişime Geçildi</div></div>
         <div class="stat-card" style="border-color:#22c55e"><div class="stat-value" id="lead-appointed" style="color:#22c55e">0</div><div class="stat-label">Randevu Aldı</div></div>
       </div>
-      <div class="lead-filters">
-        <select id="lead-filter-stage" onchange="loadLeads()">
-          <option value="all">Tüm Aşamalar</option>
-          <option value="new">📥 Yeni</option>
-          <option value="contacted">📱 İletişime Geçildi</option>
-          <option value="responded">💬 Cevap Verdi</option>
-          <option value="interested">🔥 İlgili</option>
-          <option value="appointed">📅 Randevu Aldı</option>
-          <option value="arrived">✈️ Geldi</option>
-          <option value="treated">✅ Tedavi Oldu</option>
-          <option value="cold">❄️ Soğuk</option>
-        </select>
-        <select id="lead-filter-tag" onchange="loadLeads()">
-          <option value="">Tüm Etiketler</option>
-        </select>
+      <!-- Sheet Sekmeleri -->
+      <div id="sheet-tabs" class="sheet-tabs"></div>
+      <!-- Tablo Alanı -->
+      <div id="sheet-info" style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;color:#8b8fa3;font-size:0.85em;">
+        <span id="sheet-row-count"></span>
+        <button class="btn btn-secondary" onclick="loadSheetData(window._activeSheet)" style="padding:4px 12px;font-size:0.8em;">🔄 Yenile</button>
       </div>
       <div id="lead-list" class="lead-list"></div>
+      <!-- Eski filtreler gizli kalacak (uyumluluk) -->
+      <select id="lead-filter-stage" style="display:none"><option value="all"></option></select>
+      <select id="lead-filter-tag" style="display:none"><option value=""></option></select>
     </div>
 
     <!-- KONUŞMALAR -->
@@ -220,109 +214,122 @@ async function api(a,m='GET',b=null){const o={method:m,headers:{'Content-Type':'
 // DASHBOARD
 async function loadDashboard(){const d=await api('dashboard');if(!d)return;document.getElementById('stat-today').textContent=d.todayMessages;document.getElementById('stat-total').textContent=d.totalMessages;document.getElementById('stat-conversations').textContent=d.activeConversations;document.getElementById('stat-human').textContent=d.humanConversations||0;document.getElementById('recent-messages').innerHTML=(d.recentMessages||[]).map(m=>`<div class="msg-item ${m.direction}"><span class="msg-phone">${m.direction==='in'?'📩':'📤'} ${m.patient_name||m.phone_number}</span><span class="msg-text">${m.content.substring(0,80)}</span><span class="msg-time">${new Date(m.created_at).toLocaleString('tr-TR')}</span></div>`).join('')||'<p class="empty">Henüz mesaj yok</p>'}
 
-// LEADS
+// LEADS - Google Sheets Entegrasyonu
 const stageLabels={new:'📥 Yeni',contacted:'📱 İletişim',responded:'💬 Cevap',interested:'🔥 İlgili',appointed:'📅 Randevu',arrived:'✈️ Geldi',treated:'✅ Tedavi',cold:'❄️ Soğuk'};
 const stageColors={new:'#3b82f6',contacted:'#8b5cf6',responded:'#06b6d4',interested:'#f59e0b',appointed:'#22c55e',arrived:'#10b981',treated:'#059669',cold:'#6b7280'};
+window._activeSheet = null;
+window._sheetRefreshTimer = null;
 
 async function loadLeads(){
-  const s = await api('settings');
-  if(s && s.sheet_view_url){
-    document.getElementById('lead-list').innerHTML = `<iframe src="${s.sheet_view_url}" width="100%" height="800px" style="border:none; border-radius:8px; background:white;"></iframe>`;
-    document.getElementById('lead-filter-stage').style.display = 'none';
-    document.getElementById('lead-filter-tag').style.display = 'none';
-    
-    // Stats güncelle
-    const stats=await api('lead-stats');
-    if(stats){
-      document.getElementById('lead-today').textContent=stats.todayLeads;document.getElementById('lead-total').textContent=stats.totalLeads;
-      const stageMap={};(stats.byStage||[]).forEach(st=>stageMap[st.stage]=+st.count);
-      document.getElementById('lead-contacted').textContent=stageMap.contacted||0;document.getElementById('lead-appointed').textContent=stageMap.appointed||0
-    }
-    return;
-  } else {
-    document.getElementById('lead-filter-stage').style.display = 'inline-block';
-    document.getElementById('lead-filter-tag').style.display = 'inline-block';
+  // Stats güncelle
+  const stats=await api('lead-stats');
+  if(stats){
+    document.getElementById('lead-today').textContent=stats.todayLeads;
+    document.getElementById('lead-total').textContent=stats.totalLeads;
+    const stageMap={};(stats.byStage||[]).forEach(st=>stageMap[st.stage]=+st.count);
+    document.getElementById('lead-contacted').textContent=stageMap.contacted||0;
+    document.getElementById('lead-appointed').textContent=stageMap.appointed||0;
   }
 
-  const stats=await api('lead-stats');
-  if(stats){document.getElementById('lead-today').textContent=stats.todayLeads;document.getElementById('lead-total').textContent=stats.totalLeads;
-  const stageMap={};(stats.byStage||[]).forEach(st=>stageMap[st.stage]=+st.count);
-  document.getElementById('lead-contacted').textContent=stageMap.contacted||0;document.getElementById('lead-appointed').textContent=stageMap.appointed||0}
+  // Google Sheets verilerini çek
+  document.getElementById('lead-list').innerHTML = '<p style="text-align:center;padding:40px;color:#8b8fa3;">⏳ Google Sheets verileri yükleniyor...</p>';
   
-  // Etiket filtresini doldur
-  allTags=await api('tags')||[];
-  const tagSel=document.getElementById('lead-filter-tag');
-  const curVal=tagSel.value;tagSel.innerHTML='<option value="">Tüm Etiketler</option>'+allTags.map(t=>`<option value="${t.name}">${t.name}</option>`).join('');tagSel.value=curVal;
-
-  const stage=document.getElementById('lead-filter-stage').value;
-  const tag=document.getElementById('lead-filter-tag').value;
-  let url='leads';if(stage&&stage!=='all')url+=`&stage=${stage}`;if(tag)url+=`&tag=${tag}`;
-  const leads=await api(url);if(!leads)return;
-  let tableHTML = `<div style="overflow-x:auto;">
-    <table class="data-table" style="min-width: max-content;">
-      <thead>
-        <tr>
-          <th>Tarih</th>
-          <th>İsim</th>
-          <th>Telefon</th>
-          <th>Kampanya</th>
-          <th>Etiketler</th>
-          <th>Aşama</th>`;
-          
-  // raw_data içindeki tüm dinamik soru başlıklarını bulalım (isim, telefon vb. standart olanları hariç tutalım)
-  const excludedKeys = ['full_name', 'phone_number', 'email', 'city', 'isim', 'telefon', 'ad', 'name', 'phone'];
-  const dynamicCols = new Set();
-  leads.forEach(l => {
-    try {
-      const raw = JSON.parse(l.raw_data || '{}');
-      Object.keys(raw).forEach(k => {
-        if (!excludedKeys.includes(k.toLowerCase())) dynamicCols.add(k);
-      });
-    } catch(e){}
-  });
-  const customCols = Array.from(dynamicCols);
-  
-  // Dinamik sütun başlıklarını ekle
-  customCols.forEach(col => {
-    // Sütun adını güzelleştir (alt tireleri boşluk yap, baş harfleri büyüt)
-    const niceColName = col.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-    tableHTML += `<th>${niceColName}</th>`;
-  });
-
-  tableHTML += `<th>İşlem</th></tr></thead><tbody>`;
-  
-  tableHTML += leads.map(l => {
-    let tags = [];
-    let raw = {};
-    try { tags = JSON.parse(l.tags || '[]'); } catch(e){}
-    try { raw = JSON.parse(l.raw_data || '{}'); } catch(e){}
+  try {
+    const resp = await fetch('/api/sheets');
+    const data = await resp.json();
     
-    let rowHTML = `<tr>
-      <td style="white-space:nowrap;color:#888;font-size:0.85em;">${l.created_at ? new Date(l.created_at).toLocaleString('tr-TR') : '-'}</td>
-      <td><strong>${l.patient_name || 'İsimsiz'}</strong></td>
-      <td>${l.phone_number || '-'}</td>
-      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${l.form_name || '-'}">${l.form_name || '-'}</td>
-      <td>${tags.map(t => `<span class="tag-badge" style="font-size:0.75em;padding:2px 6px;">${t}</span>`).join(' ')}</td>
-      <td>
-        <select onchange="updateLeadStage(${l.id},this.value)" style="margin:0;padding:4px 8px;font-size:0.85em;background:${stageColors[l.stage] || '#333'};color:#fff;border:none;border-radius:4px;">
-          ${Object.entries(stageLabels).map(([k,v]) => `<option value="${k}" ${l.stage === k ? 'selected' : ''}>${v}</option>`).join('')}
-        </select>
-      </td>`;
-      
-    // Dinamik sütun verilerini ekle
-    customCols.forEach(col => {
-      rowHTML += `<td style="max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:0.85em;" title="${raw[col] || '-'}">${raw[col] || '-'}</td>`;
-    });
-      
-    rowHTML += `<td>
-        <button class="btn btn-primary" style="padding:4px 10px;font-size:0.85em;" onclick="window.open('https://wa.me/${String(l.phone_number).replace(/\\D/g, '')}','_blank')">WhatsApp</button>
-      </td>
-    </tr>`;
-    return rowHTML;
-  }).join('');
+    if(!data.success){
+      document.getElementById('lead-list').innerHTML = `<p class="empty">❌ Sheets hatası: ${data.error}</p>`;
+      return;
+    }
+    
+    // Sekmeleri oluştur
+    renderSheetTabs(data.tabs, data.activeSheet);
+    
+    // Tabloyu oluştur
+    renderSheetTable(data.headers, data.rows, data.total);
+    
+    // Otomatik yenileme (30 saniye)
+    if(window._sheetRefreshTimer) clearInterval(window._sheetRefreshTimer);
+    window._sheetRefreshTimer = setInterval(() => {
+      if(document.getElementById('page-leads').classList.contains('active')){
+        loadSheetData(window._activeSheet, true);
+      }
+    }, 30000);
+    
+  } catch(e) {
+    document.getElementById('lead-list').innerHTML = `<p class="empty">❌ Bağlantı hatası: ${e.message}</p>`;
+  }
+}
+
+function renderSheetTabs(tabs, activeSheet) {
+  window._activeSheet = activeSheet;
+  const tabsEl = document.getElementById('sheet-tabs');
+  tabsEl.innerHTML = tabs.map(t => 
+    `<button class="sheet-tab ${t.title === activeSheet ? 'active' : ''}" onclick="loadSheetData('${t.title.replace(/'/g, "\\'")}')">${t.title}</button>`
+  ).join('');
+}
+
+async function loadSheetData(sheetName, silent) {
+  window._activeSheet = sheetName;
   
-  tableHTML += `</tbody></table></div>`;
-  document.getElementById('lead-list').innerHTML = leads.length ? tableHTML : '<p class="empty">Lead bulunamadı</p>';
+  // Aktif sekmeyi güncelle
+  document.querySelectorAll('.sheet-tab').forEach(t => {
+    t.classList.toggle('active', t.textContent === sheetName);
+  });
+  
+  if(!silent) {
+    document.getElementById('lead-list').innerHTML = '<p style="text-align:center;padding:40px;color:#8b8fa3;">⏳ Yükleniyor...</p>';
+  }
+  
+  try {
+    const resp = await fetch(`/api/sheets?action=data&sheet=${encodeURIComponent(sheetName)}`);
+    const data = await resp.json();
+    
+    if(!data.success){
+      document.getElementById('lead-list').innerHTML = `<p class="empty">❌ ${data.error}</p>`;
+      return;
+    }
+    
+    renderSheetTable(data.headers, data.rows, data.total);
+  } catch(e) {
+    if(!silent) document.getElementById('lead-list').innerHTML = `<p class="empty">❌ ${e.message}</p>`;
+  }
+}
+
+function renderSheetTable(headers, rows, total) {
+  document.getElementById('sheet-row-count').textContent = `📋 ${total} kayıt`;
+  
+  if(!headers || headers.length === 0) {
+    document.getElementById('lead-list').innerHTML = '<p class="empty">Bu sekmede veri yok</p>';
+    return;
+  }
+  
+  let html = `<div style="overflow-x:auto;max-height:70vh;overflow-y:auto;">
+    <table class="data-table" style="min-width:max-content;">
+      <thead>
+        <tr><th class="row-num">#</th>${headers.map(h => `<th>${h}</th>`).join('')}</tr>
+      </thead>
+      <tbody>`;
+  
+  rows.forEach((row, i) => {
+    html += `<tr><td class="row-num">${i + 1}</td>`;
+    headers.forEach((h, j) => {
+      const val = row[j] || '';
+      const isPhone = h.toLowerCase().includes('phone') || h.toLowerCase().includes('telefon') || h.toLowerCase().includes('whatsapp');
+      const isDate = h.toLowerCase().includes('tarih') || h.toLowerCase().includes('date') || h.toLowerCase().includes('created');
+      
+      let cellClass = '';
+      if(isDate) cellClass = 'cell-date';
+      else if(isPhone) cellClass = 'cell-phone';
+      
+      html += `<td class="${cellClass}" title="${String(val).replace(/"/g, '&quot;')}">${val}</td>`;
+    });
+    html += '</tr>';
+  });
+  
+  html += '</tbody></table></div>';
+  document.getElementById('lead-list').innerHTML = html;
 }
 
 async function updateLeadStage(id,stage){await api('update-lead','POST',{id,stage});toast('✅ Aşama güncellendi');loadLeads()}
