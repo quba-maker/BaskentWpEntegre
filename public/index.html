@@ -23,7 +23,8 @@
 
 <!-- APP -->
 <div class="app" id="main-app" style="display:none">
-  <nav class="sidebar">
+  <button class="mobile-menu-btn" onclick="document.querySelector('.sidebar').classList.toggle('open')">☰</button>
+  <nav class="sidebar" id="sidebar">
     <div class="logo"><div class="logo-icon">🏥</div><span>Başkent Paneli</span><div id="notif-bell" class="notif-bell" onclick="showNotifications()" style="display:none">🔔<span id="notif-count" class="notif-count">0</span></div></div>
     <div class="nav-items">
       <button class="nav-btn active" data-page="dashboard">📊 Gösterge Paneli</button>
@@ -395,6 +396,8 @@ document.querySelectorAll('.nav-btn').forEach(b => {
     
     // Yükleme fonksiyonları
     ({dashboard:loadDashboard, leads:loadLeads, conversations:loadConversations, training:loadPrompt, templates:loadTemplates, analytics:loadAnalytics, settings:loadSettings, appointments:loadAppointments})[b.dataset.page]?.();
+    // Mobilde sidebar'ı kapat
+    document.getElementById('sidebar')?.classList.remove('open');
   });
 });
 
