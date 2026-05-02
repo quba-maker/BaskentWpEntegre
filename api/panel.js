@@ -175,14 +175,45 @@ export default async function handler(req, res) {
     // META ŞABLONLARINI LİSTELE
     if (action === 'whatsapp-templates') {
       try {
-        const wabaId = process.env.WABA_ID;
-        if (!wabaId) return res.json({ templates: [], note: 'WABA_ID env değişkeni gerekli' });
+        // WABA_ID otomatik tespiti
+        let wabaId = process.env.WABA_ID;
+        if (!wabaId) {
+          // PHONE_NUMBER_ID üzerinden WABA_ID bul
+          try {
+            const phoneInfo = await axios.get(`https://graph.facebook.com/v25.0/${PHONE_ID}?fields=id`, {
+              headers: { Authorization: `Bearer ${META}` }
+            });
+            // Business Account ID'yi phone number'ın parent'ından al
+            const bizAccounts = await axios.get(`https://graph.facebook.com/v25.0/${PHONE_ID}/whatsapp_business_account`, {
+              headers: { Authorization: `Bearer ${META}` }
+            });
+            wabaId = bizAccounts.data?.id;
+          } catch(autoErr) {
+            // Son çare: doğrudan business accounts endpoint'ini dene
+            try {
+              const biz = await axios.get(`https://graph.facebook.com/v25.0/me/businesses`, {
+                headers: { Authorization: `Bearer ${META}` }
+              });
+              if (biz.data?.data?.[0]?.id) {
+                const wabaRes = await axios.get(`https://graph.facebook.com/v25.0/${biz.data.data[0].id}/owned_whatsapp_business_accounts`, {
+                  headers: { Authorization: `Bearer ${META}` }
+                });
+                wabaId = wabaRes.data?.data?.[0]?.id;
+              }
+            } catch(e2) {}
+          }
+        }
+        
+        if (!wabaId) {
+          return res.json({ templates: [], note: 'WABA_ID bulunamadı. Vercel env olarak WABA_ID ekleyin veya Meta Business ayarlarından bulun.' });
+        }
+
         const r = await axios.get(`https://graph.facebook.com/v25.0/${wabaId}/message_templates`, {
           headers: { Authorization: `Bearer ${META}` },
           params: { limit: 50 }
         });
         const approved = (r.data.data || []).filter(t => t.status === 'APPROVED');
-        return res.json({ templates: approved });
+        return res.json({ templates: approved, wabaId });
       } catch(e) {
         return res.json({ templates: [], error: e.response?.data?.error?.message || e.message });
       }
