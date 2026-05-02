@@ -134,8 +134,33 @@
               <div class="lead-info-row"><span class="lead-label">Lead Skoru:</span><span id="crm-lead-score" class="lead-value">—</span></div>
             </div>
 
+            <div class="form-group" style="margin-bottom: 12px;">
+              <label>Süreç Durumu</label>
+              <select id="crm-stage" class="form-control" style="width:100%; padding: 8px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-hover); color: var(--text-main); font-size: 13px;">
+                <option value="new">🆕 Yeni Form</option>
+                <option value="responded">💬 İletişimde (Bot)</option>
+                <option value="appointment_request">📅 Randevu İstiyor</option>
+                <option value="appointed">✅ Randevu Alındı</option>
+                <option value="lost">❌ Kaybedildi</option>
+              </select>
+            </div>
+            
+            <div class="form-group" style="margin-bottom: 12px;">
+              <label>Hasta Tipi / Demografi</label>
+              <select id="crm-patient-type" class="form-control" style="width:100%; padding: 8px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-hover); color: var(--text-main); font-size: 13px;">
+                <option value="Yerli">🇹🇷 Yerli</option>
+                <option value="Gurbetçi">🌍 Gurbetçi</option>
+                <option value="Yabancı Turist">✈️ Yabancı Turist</option>
+              </select>
+            </div>
+
+            <div class="form-group" style="margin-bottom: 12px;">
+              <label>İlgilendiği Tedavi / Bölüm</label>
+              <input type="text" id="crm-department" placeholder="Örn: Estetik, Diş" class="form-control" style="width:100%; padding: 8px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-hover); color: var(--text-main); font-size: 13px;">
+            </div>
+
             <div class="form-group">
-              <label>Etiketler</label>
+              <label>Özel Etiketler</label>
               <div id="crm-tags" class="tags-container"></div>
             </div>
             <div class="form-group">
@@ -567,6 +592,18 @@ async function loadChat(phone, channel) {
   document.getElementById('crm-panel').style.display = 'flex';
   document.getElementById('crm-name').value = pData.patient_name || '';
   document.getElementById('crm-notes').value = pData.notes || '';
+  document.getElementById('crm-department').value = pData.department || '';
+  
+  const stageSelect = document.getElementById('crm-stage');
+  if (pData.has_lead && pData.lead_stage) {
+    stageSelect.value = pData.lead_stage;
+  } else {
+    stageSelect.value = 'new';
+  }
+
+  const pTypeSelect = document.getElementById('crm-patient-type');
+  pTypeSelect.value = pData.patient_type || 'Yerli';
+
   let pt = []; try { pt = JSON.parse(pData.tags||'[]'); } catch(e){}
   renderCRMTags(pt);
 
@@ -682,7 +719,16 @@ async function sendFileMessage() {
 
 async function saveCRM() {
   const tags = Array.from(document.querySelectorAll('.tag.selected')).map(el => el.dataset.val);
-  await api('update-patient','POST',{phone:currentPhone, patient_name:document.getElementById('crm-name').value, tags:JSON.stringify(tags), notes:document.getElementById('crm-notes').value});
+  const payload = {
+    phone: currentPhone, 
+    patient_name: document.getElementById('crm-name').value, 
+    tags: JSON.stringify(tags), 
+    notes: document.getElementById('crm-notes').value,
+    department: document.getElementById('crm-department').value,
+    patient_type: document.getElementById('crm-patient-type').value,
+    lead_stage: document.getElementById('crm-stage').value
+  };
+  await api('update-patient', 'POST', payload);
   toast('Hasta kartı güncellendi');
   loadConversations();
 }
@@ -855,8 +901,8 @@ async function loadAppointments() {
     const nm = e.patient_name || e.phone_number;
     const dt = new Date(e.created_at).toLocaleString('tr-TR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
     return `<div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;background:var(--bg-hover);border-radius:var(--radius-sm);margin-bottom:8px;border-left:3px solid ${sC[e.status]||'#6b7280'}">
-      <div style="flex:1"><div style="font-weight:600;margin-bottom:4px">${nm}</div>
-        <div style="display:flex;gap:12px;flex-wrap:wrap">${e.form_name?'<span style="font-size:11px;color:var(--text-muted)">📋 '+e.form_name+'</span>':''}${e.city?'<span style="font-size:11px;color:var(--text-muted)">📍 '+e.city+'</span>':''}<span style="font-size:11px;color:var(--text-muted)">🕐 ${dt}</span></div>
+      <div style="flex:1"><div style="font-weight:600;margin-bottom:4px;display:flex;align-items:center;gap:8px;">${nm} ${e.patient_type==='Gurbetçi'?'🌍':(e.patient_type==='Yabancı Turist'?'✈️':'🇹🇷')}</div>
+        <div style="display:flex;gap:12px;flex-wrap:wrap">${e.department?`<span style="font-size:11px;background:var(--accent-primary);color:white;padding:2px 6px;border-radius:6px;font-weight:500;">🩺 ${e.department}</span>`:''}${e.form_name?'<span style="font-size:11px;color:var(--text-muted)">📋 '+e.form_name+'</span>':''}${e.city?'<span style="font-size:11px;color:var(--text-muted)">📍 '+e.city+'</span>':''}<span style="font-size:11px;color:var(--text-muted)">🕐 ${dt}</span></div>
         <div style="font-size:12px;color:var(--text-muted);margin-top:4px;max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e.details||''}</div>
       </div>
       <div style="display:flex;gap:6px;align-items:center">

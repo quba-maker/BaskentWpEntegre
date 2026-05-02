@@ -95,8 +95,19 @@ export default async function handler(req, res) {
 
     // HASTA BİLGİSİ GÜNCELLE (CRM)
     if (action === 'update-patient' && req.method === 'POST') {
-      const { phone, patient_name, tags, notes } = req.body;
-      await sql`UPDATE conversations SET patient_name = ${patient_name || null}, tags = ${tags || '[]'}, notes = ${notes || ''} WHERE phone_number = ${phone}`;
+      const { phone, patient_name, tags, notes, department, patient_type, lead_stage } = req.body;
+      await sql`
+        UPDATE conversations 
+        SET patient_name = ${patient_name || null}, 
+            tags = ${tags || '[]'}, 
+            notes = ${notes || ''},
+            department = ${department || null},
+            patient_type = ${patient_type || 'Yerli'}
+        WHERE phone_number = ${phone}
+      `;
+      if (lead_stage) {
+        await sql`UPDATE leads SET stage = ${lead_stage} WHERE phone_number = ${phone}`;
+      }
       return res.json({ success: true });
     }
 
@@ -398,7 +409,7 @@ export default async function handler(req, res) {
         
         // Sadece en son lead'i almak için DISTINCT ON (e.id) PostgreSQL özelliğini kullanabiliriz
         const events = await sql`
-          SELECT DISTINCT ON (e.id) e.*, c.patient_name, l.form_name, l.city 
+          SELECT DISTINCT ON (e.id) e.*, c.patient_name, c.department, c.patient_type, l.form_name, l.city 
           FROM events e 
           LEFT JOIN conversations c ON c.phone_number = e.phone_number
           LEFT JOIN leads l ON l.phone_number = e.phone_number
