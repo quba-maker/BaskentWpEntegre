@@ -110,17 +110,25 @@ export default async function handler(req, res) {
       const campaign = req.query.campaign || '';
       const stage = req.query.stage || '';
       
-      const search = q ? `%${q}%` : null;
-      const cmp = campaign ? campaign : null;
-      const stg = stage ? stage : null;
-
-      const leads = await sql`
-        SELECT * FROM leads 
-        WHERE (${search}::text IS NULL OR patient_name ILIKE ${search} OR phone_number ILIKE ${search} OR city ILIKE ${search})
-          AND (${cmp}::text IS NULL OR form_name = ${cmp})
-          AND (${stg}::text IS NULL OR stage = ${stg})
-        ORDER BY created_at DESC LIMIT 300
-      `;
+      // Neon driver için en güvenli dinamik sorgu yapısı
+      let leads;
+      if (q && campaign && stage) {
+        leads = await sql`SELECT * FROM leads WHERE (patient_name ILIKE ${'%'+q+'%'} OR phone_number ILIKE ${'%'+q+'%'} OR city ILIKE ${'%'+q+'%'}) AND form_name = ${campaign} AND stage = ${stage} ORDER BY created_at DESC LIMIT 300`;
+      } else if (q && campaign) {
+        leads = await sql`SELECT * FROM leads WHERE (patient_name ILIKE ${'%'+q+'%'} OR phone_number ILIKE ${'%'+q+'%'} OR city ILIKE ${'%'+q+'%'}) AND form_name = ${campaign} ORDER BY created_at DESC LIMIT 300`;
+      } else if (q && stage) {
+        leads = await sql`SELECT * FROM leads WHERE (patient_name ILIKE ${'%'+q+'%'} OR phone_number ILIKE ${'%'+q+'%'} OR city ILIKE ${'%'+q+'%'}) AND stage = ${stage} ORDER BY created_at DESC LIMIT 300`;
+      } else if (campaign && stage) {
+        leads = await sql`SELECT * FROM leads WHERE form_name = ${campaign} AND stage = ${stage} ORDER BY created_at DESC LIMIT 300`;
+      } else if (q) {
+        leads = await sql`SELECT * FROM leads WHERE (patient_name ILIKE ${'%'+q+'%'} OR phone_number ILIKE ${'%'+q+'%'} OR city ILIKE ${'%'+q+'%'}) ORDER BY created_at DESC LIMIT 300`;
+      } else if (campaign) {
+        leads = await sql`SELECT * FROM leads WHERE form_name = ${campaign} ORDER BY created_at DESC LIMIT 300`;
+      } else if (stage) {
+        leads = await sql`SELECT * FROM leads WHERE stage = ${stage} ORDER BY created_at DESC LIMIT 300`;
+      } else {
+        leads = await sql`SELECT * FROM leads ORDER BY created_at DESC LIMIT 300`;
+      }
       
       // Benzersiz kampanya isimleri
       const campaigns = await sql`SELECT DISTINCT form_name FROM leads WHERE form_name IS NOT NULL AND form_name != '' ORDER BY form_name`;
