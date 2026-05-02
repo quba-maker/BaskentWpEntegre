@@ -545,25 +545,37 @@ function cancelUpload() {
 
 async function sendFileMessage() {
   if (!pendingFile || !currentPhone) return;
-  const formData = new FormData();
-  formData.append('file', pendingFile);
-  formData.append('phone', currentPhone);
-  formData.append('channel', currentChannel);
-  formData.append('caption', document.getElementById('chat-input').value || '');
   
-  toast('Dosya gönderiliyor...');
-  try {
-    const r = await fetch('/api/panel?action=upload-media', {
-      method: 'POST',
-      headers: { Authorization: 'Bearer ' + AUTH_TOKEN },
-      body: formData
-    });
-    const data = await r.json();
-    if (data.success) { toast('Dosya gönderildi ✅'); loadChat(currentPhone, currentChannel); }
-    else toast('Dosya gönderilemedi: ' + (data.error||''), 'error');
-  } catch(e) { toast('Dosya hatası', 'error'); }
-  cancelUpload();
-  document.getElementById('chat-input').value = '';
+  toast('Dosya hazırlanıyor...');
+  
+  // Dosyayı base64'e çevir
+  const reader = new FileReader();
+  reader.onload = async function() {
+    try {
+      toast('Dosya gönderiliyor...');
+      const r = await fetch('/api/upload-media', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer ' + AUTH_TOKEN 
+        },
+        body: JSON.stringify({
+          phone: currentPhone,
+          channel: currentChannel,
+          caption: document.getElementById('chat-input').value || '',
+          fileName: pendingFile.name,
+          fileType: pendingFile.type,
+          fileBase64: reader.result
+        })
+      });
+      const data = await r.json();
+      if (data.success) { toast('Dosya gönderildi ✅'); loadChat(currentPhone, currentChannel); }
+      else toast('Dosya gönderilemedi: ' + (data.error||''), 'error');
+    } catch(e) { toast('Dosya hatası: ' + e.message, 'error'); }
+    cancelUpload();
+    document.getElementById('chat-input').value = '';
+  };
+  reader.readAsDataURL(pendingFile);
 }
 
 async function saveCRM() {
