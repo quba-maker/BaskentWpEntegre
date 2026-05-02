@@ -22,6 +22,12 @@ export default async function handler(req, res) {
   try {
     // DASHBOARD
     if (action === 'dashboard') {
+      // Auto-migrate db for channel column
+      try {
+        await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS channel VARCHAR(50) DEFAULT 'whatsapp'`;
+        await sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS channel VARCHAR(50) DEFAULT 'whatsapp'`;
+      } catch(e) {}
+
       const total = await sql`SELECT COUNT(*) as c FROM messages`;
       const today = await sql`SELECT COUNT(*) as c FROM messages WHERE created_at >= CURRENT_DATE`;
       const active = await sql`SELECT COUNT(*) as c FROM conversations WHERE status = 'active'`;
@@ -38,7 +44,9 @@ export default async function handler(req, res) {
     // KONUŞMALAR
     if (action === 'conversations') {
       const list = await sql`
-        SELECT c.*, (SELECT content FROM messages WHERE phone_number = c.phone_number ORDER BY created_at DESC LIMIT 1) as last_message
+        SELECT c.*, 
+               (SELECT content FROM messages WHERE phone_number = c.phone_number ORDER BY created_at DESC LIMIT 1) as last_message,
+               (SELECT channel FROM messages WHERE phone_number = c.phone_number AND channel IS NOT NULL ORDER BY created_at DESC LIMIT 1) as last_channel
         FROM conversations c ORDER BY last_message_at DESC
       `;
       return res.json(list);
@@ -94,12 +102,23 @@ export default async function handler(req, res) {
 
     // MESAJ GÖNDER
     if (action === 'send-message' && req.method === 'POST') {
-      const { phone, message } = req.body;
-      await axios({ method: 'POST', url: `https://graph.facebook.com/v25.0/${PHONE_ID}/messages`, headers: { Authorization: `Bearer ${META}` },
-        data: { messaging_product: 'whatsapp', to: phone, type: 'text', text: { body: message } }
-      });
-      await sql`INSERT INTO messages (phone_number, direction, content, model_used) VALUES (${phone}, 'out', ${message}, 'panel')`;
-      await sql`UPDATE conversations SET last_message_at = NOW(), message_count = message_count + 1 WHERE phone_number = ${phone}`;
+      const { phone, message, channel } = req.body;
+      const targetChannel = channel || 'whatsapp';
+      
+      if (targetChannel === 'whatsapp') {
+        await axios({ method: 'POST', url: `https://graph.facebook.com/v25.0/${PHONE_ID}/messages`, headers: { Authorization: `Bearer ${META}` },
+          data: { messaging_product: 'whatsapp', to: phone, type: 'text', text: { body: message } }
+        });
+      } else if (targetChannel === 'messenger') {
+        const { sendMessengerMessage } = await import('../lib/channels/messenger.js');
+        await sendMessengerMessage(phone, message);
+      } else if (targetChannel === 'instagram') {
+        const { sendInstagramMessage } = await import('../lib/channels/instagram.js');
+        await sendInstagramMessage(phone, message);
+      }
+      
+      await sql`INSERT INTO messages (phone_number, direction, content, model_used, channel) VALUES (${phone}, 'out', ${message}, 'panel', ${targetChannel})`;
+      await sql`UPDATE conversations SET last_message_at = NOW(), message_count = message_count + 1, channel = ${targetChannel} WHERE phone_number = ${phone}`;
       return res.json({ success: true });
     }
 

@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Başkent WP Bot - Yönetim Paneli</title>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<title>Omnichannel Business Manager - Başkent WP</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
@@ -13,8 +13,8 @@
 <div id="login-screen" class="login-screen">
   <div class="login-card">
     <div class="login-logo">🏥</div>
-    <h2>Başkent WP Bot</h2>
-    <p>Yönetim Paneli</p>
+    <h2>Başkent Omnichannel</h2>
+    <p>Tüm kanallar tek panelde</p>
     <input type="password" id="login-pass" placeholder="Şifre giriniz..." onkeydown="if(event.key==='Enter')doLogin()">
     <button class="btn btn-primary" onclick="doLogin()" style="width:100%">Giriş Yap</button>
     <div id="login-error" class="login-error"></div>
@@ -24,175 +24,211 @@
 <!-- APP -->
 <div class="app" id="main-app" style="display:none">
   <nav class="sidebar">
-    <div class="logo"><div class="logo-icon">🏥</div><span>Başkent WP Bot</span></div>
+    <div class="logo"><div class="logo-icon">🏥</div><span>Başkent Paneli</span></div>
     <div class="nav-items">
-      <button class="nav-btn active" data-page="dashboard">📊 Dashboard</button>
-      <button class="nav-btn" data-page="leads">🎯 Leads</button>
-      <button class="nav-btn" data-page="conversations">💬 Konuşmalar</button>
-      <button class="nav-btn" data-page="training">🤖 Bot Eğitimi</button>
-      <button class="nav-btn" data-page="bulk">📢 Toplu Mesaj</button>
-      <button class="nav-btn" data-page="templates">📋 Şablonlar</button>
-      <button class="nav-btn" data-page="analytics">📈 Analitik</button>
+      <button class="nav-btn active" data-page="dashboard">📊 Gösterge Paneli</button>
+      <button class="nav-btn" data-page="conversations">💬 Tüm Mesajlar</button>
+      <button class="nav-btn" data-page="leads">🎯 Hasta Formları</button>
+      <button class="nav-btn" data-page="training">🧠 Bot Eğitimi</button>
+      <button class="nav-btn" data-page="templates">📋 Hızlı Yanıtlar</button>
+      <button class="nav-btn" data-page="analytics">📈 Performans</button>
       <button class="nav-btn" data-page="settings">⚙️ Ayarlar</button>
     </div>
-    <div class="nav-footer"><div class="status-dot"></div><span>Bot Aktif</span></div>
+    <div class="nav-footer" style="margin-top:auto;"><div class="status-dot"></div><span>Sistem Çevrimiçi</span></div>
   </nav>
 
   <main class="content">
     <!-- DASHBOARD -->
     <div id="page-dashboard" class="page active">
-      <h1>Dashboard</h1>
+      <h1>Gösterge Paneli</h1>
       <div class="stats-grid">
-        <div class="stat-card"><div class="stat-value" id="stat-today">0</div><div class="stat-label">Bugün Mesaj</div></div>
-        <div class="stat-card"><div class="stat-value" id="stat-total">0</div><div class="stat-label">Toplam Mesaj</div></div>
-        <div class="stat-card"><div class="stat-value" id="stat-conversations">0</div><div class="stat-label">Aktif Konuşma</div></div>
-        <div class="stat-card stat-human"><div class="stat-value" id="stat-human">0</div><div class="stat-label">İnsan Müdahalesi</div></div>
+        <div class="stat-card"><div class="stat-value" id="stat-today">0</div><div class="stat-label">Bugünkü Mesajlar</div></div>
+        <div class="stat-card"><div class="stat-value" id="stat-total">0</div><div class="stat-label">Toplam Hacim</div></div>
+        <div class="stat-card"><div class="stat-value" id="stat-conversations">0</div><div class="stat-label">Aktif Görüşmeler</div></div>
+        <div class="stat-card stat-human"><div class="stat-value" id="stat-human">0</div><div class="stat-label">Personel Müdahalesi</div></div>
       </div>
-      <div class="card"><h2>Son Mesajlar</h2><div id="recent-messages" class="message-list"></div></div>
+      <div class="card" style="flex:1;">
+        <h2>Son Etkileşimler</h2>
+        <div id="recent-messages" style="display:flex; flex-direction:column; gap:10px;"></div>
+      </div>
     </div>
 
-    <!-- LEADS PIPELINE -->
+    <!-- OMNICHANNEL INBOX -->
+    <div id="page-conversations" class="page">
+      <h1>Omnichannel Inbox</h1>
+      <div class="inbox-layout">
+        
+        <!-- Contact List -->
+        <div class="inbox-sidebar">
+          <div class="inbox-header">
+            <h3>💬 Gelen Kutusu</h3>
+            <button class="btn btn-sm btn-secondary" onclick="loadConversations()">🔄</button>
+          </div>
+          <div id="conversation-list" class="contact-list"></div>
+        </div>
+
+        <!-- Main Chat -->
+        <div class="inbox-main">
+          <div class="chat-window-header">
+            <div class="chat-user-info">
+              <span class="chat-user-name" id="chat-title">Bir sohbet seçin</span>
+              <span class="chat-channel-badge" id="chat-channel-badge" style="display:none">📱 Kanal</span>
+            </div>
+            <div id="chat-actions" class="handover-control" style="display:none">
+              <button id="btn-status-bot" class="handover-btn active-bot" onclick="setConvStatus('active')">🤖 Bot Yanıtlasın</button>
+              <button id="btn-status-human" class="handover-btn" onclick="setConvStatus('human')">👤 Manuel Devral</button>
+            </div>
+          </div>
+          <div id="chat-messages" class="chat-history">
+            <div class="empty"><div class="empty-icon">👈</div>Listeden bir hasta seçerek mesajları görebilirsiniz.</div>
+          </div>
+          <div id="chat-input-area" class="chat-composer" style="display:none">
+            <input type="text" id="chat-input" placeholder="Mesajınızı buraya yazın..." onkeydown="if(event.key==='Enter')sendPanelMessage()">
+            <button class="btn btn-primary" onclick="sendPanelMessage()">Gönder</button>
+          </div>
+        </div>
+
+        <!-- CRM Info -->
+        <div class="inbox-details" id="crm-panel" style="display:none">
+          <div class="crm-header">Hasta Kartı</div>
+          <div class="crm-body">
+            <div class="form-group">
+              <label>Hasta Adı / Soyadı</label>
+              <input type="text" id="crm-name" placeholder="İsim giriniz">
+            </div>
+            <div class="form-group">
+              <label>Etiketler</label>
+              <div id="crm-tags" class="tags-container"></div>
+            </div>
+            <div class="form-group">
+              <label>Özel Notlar</label>
+              <textarea id="crm-notes" rows="4" placeholder="Hasta hakkında notlar..."></textarea>
+            </div>
+            <button class="btn btn-primary" style="width:100%" onclick="saveCRM()">💾 Değişiklikleri Kaydet</button>
+            <div style="margin-top:auto;">
+              <button class="btn btn-danger" style="width:100%;" onclick="deleteMessages()">🗑 Görüşmeyi Temizle</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- BOT TRAINING -->
+    <div id="page-training" class="page">
+      <h1>Bot Eğitimi</h1>
+      <div class="training-layout">
+        <div class="card prompt-editor-card" style="margin:0">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+            <h2 style="margin:0">🧠 Sistem Promptu (Ana Beyin)</h2>
+            <div style="display:flex; gap:8px;">
+              <button class="btn btn-secondary btn-sm" onclick="resetPrompt()">Varsayılana Dön</button>
+              <button class="btn btn-primary btn-sm" onclick="savePrompt()">💾 Kaydet & Yayınla</button>
+            </div>
+          </div>
+          <p class="hint">Bu alan yapay zekanın "karakteridir". Kuralları ve sınırları belirleyin.</p>
+          <textarea id="prompt-editor" placeholder="Sistem promptu yükleniyor..."></textarea>
+        </div>
+        
+        <div class="card" style="margin:0; display:flex; flex-direction:column;">
+          <h2>Nasıl Eğitmelisiniz?</h2>
+          <div style="flex:1; overflow-y:auto; font-size:13px; color:var(--text-muted); line-height:1.6;">
+            <p style="margin-bottom:12px;"><strong>Kanal Farkındalığı:</strong></p>
+            <p style="margin-bottom:16px; color:#fff">Bot, kullanıcının hangi kanaldan geldiğini bilir. Prompt içinde kanala özel kurallar verebilirsiniz:</p>
+            <code style="display:block; margin-bottom:20px;">"Eğer kullanıcı Instagram'dan geliyorsa daha kısa ve emojili cevaplar ver, WhatsApp'tan geliyorsa resmi ol."</code>
+            
+            <p style="margin-bottom:12px;"><strong>Örnek Soru-Cevap (Few-Shot):</strong></p>
+            <p style="margin-bottom:16px; color:#fff">Bota vereceği örnek yanıtları öğretmek için aşağıdaki formatı kullanın:</p>
+            <code style="display:block; white-space:pre-wrap;">Soru: Muayene ücretiniz ne kadar?
+Cevap: Muayene ücretimiz branşa göre değişiklik göstermektedir. Hangi bölümden randevu almak istiyorsunuz?</code>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- LEADS (Sheets) -->
     <div id="page-leads" class="page">
-      <h1>📊 Lead Tablosu</h1>
+      <h1>🎯 Lead (Müşteri) Panosu</h1>
       <div class="stats-grid">
         <div class="stat-card"><div class="stat-value" id="lead-today">0</div><div class="stat-label">Bugün Lead</div></div>
         <div class="stat-card"><div class="stat-value" id="lead-total">0</div><div class="stat-label">Toplam Lead</div></div>
         <div class="stat-card"><div class="stat-value" id="lead-contacted">0</div><div class="stat-label">İletişime Geçildi</div></div>
         <div class="stat-card" style="border-color:#22c55e"><div class="stat-value" id="lead-appointed" style="color:#22c55e">0</div><div class="stat-label">Randevu Aldı</div></div>
       </div>
-      <!-- Sheet Sekmeleri -->
       <div id="sheet-tabs" class="sheet-tabs"></div>
-      <!-- Tablo Alanı -->
-      <div id="sheet-info" style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;color:#8b8fa3;font-size:0.85em;">
+      <div id="sheet-info" style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;color:var(--text-muted);font-size:13px;">
         <span id="sheet-row-count"></span>
-        <button class="btn btn-secondary" onclick="loadSheetData(window._activeSheet)" style="padding:4px 12px;font-size:0.8em;">🔄 Yenile</button>
+        <button class="btn btn-secondary btn-sm" onclick="loadSheetData(window._activeSheet)">🔄 Yenile</button>
       </div>
-      <div id="lead-list" class="lead-list"></div>
-      <!-- Eski filtreler gizli kalacak (uyumluluk) -->
-      <select id="lead-filter-stage" style="display:none"><option value="all"></option></select>
-      <select id="lead-filter-tag" style="display:none"><option value=""></option></select>
+      <div id="lead-list" style="margin-top:10px;"></div>
     </div>
 
-    <!-- KONUŞMALAR -->
-    <div id="page-conversations" class="page">
-      <h1>Konuşmalar</h1>
-      <div class="conversations-layout">
-        <div class="card conversation-list-card"><h2>Hasta Listesi</h2><div id="conversation-list" class="conversation-list"></div></div>
-        <div class="card conversation-detail-card">
-          <div class="chat-header">
-            <h2 id="chat-title">Bir konuşma seçin</h2>
-            <div id="chat-actions" class="chat-actions" style="display:none">
-              <button class="btn btn-warning" onclick="setConvStatus('human')">👤 İnsan</button>
-              <button class="btn btn-success" onclick="setConvStatus('active')">🤖 Bot</button>
-              <button class="btn btn-secondary" onclick="toggleCRM()">📝 CRM</button>
-              <button class="btn btn-danger" onclick="deleteMessages()">🗑 Sil</button>
-            </div>
-          </div>
-          <!-- CRM Panel -->
-          <div id="crm-panel" class="crm-panel" style="display:none">
-            <div class="crm-grid">
-              <div><label>Hasta Adı</label><input type="text" id="crm-name" placeholder="İsim giriniz"></div>
-              <div><label>Etiketler</label><div id="crm-tags" class="crm-tags"></div></div>
-              <div><label>Notlar</label><textarea id="crm-notes" rows="2" placeholder="Not ekleyin..."></textarea></div>
-            </div>
-            <button class="btn btn-primary" onclick="saveCRM()">💾 Kaydet</button>
-          </div>
-          <div id="chat-messages" class="chat-messages"></div>
-          <div id="chat-input-area" class="chat-input-area" style="display:none">
-            <input type="text" id="chat-input" placeholder="Mesaj yazın..." onkeydown="if(event.key==='Enter')sendPanelMessage()">
-            <button class="btn btn-primary" onclick="sendPanelMessage()">📤</button>
-            <button class="btn btn-secondary" onclick="toggleMedia()">📎</button>
-          </div>
-          <div id="media-panel" class="media-panel" style="display:none">
-            <select id="media-type"><option value="image">🖼 Resim</option><option value="document">📄 Belge</option><option value="video">🎥 Video</option></select>
-            <input type="text" id="media-url" placeholder="Medya URL'si (https://...)">
-            <input type="text" id="media-caption" placeholder="Açıklama (opsiyonel)">
-            <button class="btn btn-primary" onclick="sendMedia()">📤 Gönder</button>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- BOT EĞİTİMİ -->
-    <div id="page-training" class="page">
-      <h1>Bot Eğitimi</h1>
-      <div class="card">
-        <h2>Sistem Promptu</h2>
-        <p class="hint">Bot'un davranışını değiştirin. Kaydedin, bot anında güncellenir.</p>
-        <textarea id="prompt-editor" rows="18" placeholder="Yükleniyor..."></textarea>
-        <div class="card-actions">
-          <button class="btn btn-primary" onclick="savePrompt()">💾 Kaydet</button>
-          <button class="btn btn-secondary" onclick="resetPrompt()">🔄 Sıfırla</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- TOPLU MESAJ -->
-    <div id="page-bulk" class="page">
-      <h1>📢 Toplu Mesaj Gönder</h1>
-      <div class="card">
-        <h2>Hedef Kitle</h2>
-        <select id="bulk-tag"><option value="__all__">🌍 Tüm Hastalar</option></select>
-        <h2 style="margin-top:16px">Mesaj</h2>
-        <textarea id="bulk-message" rows="4" placeholder="Toplu gönderilecek mesaj..."></textarea>
-        <div id="bulk-preview" class="hint"></div>
-        <button class="btn btn-primary" onclick="sendBulk()">📢 Gönder</button>
-        <div id="bulk-result"></div>
-      </div>
-    </div>
-
-    <!-- ŞABLONLAR -->
+    <!-- TEMPLATES -->
     <div id="page-templates" class="page">
-      <h1>Şablonlar</h1>
+      <h1>Hızlı Yanıt Şablonları</h1>
       <div class="card">
-        <h2>Yeni Şablon</h2>
-        <input type="text" id="tpl-title" placeholder="Şablon adı">
-        <select id="tpl-category"><option value="genel">Genel</option><option value="randevu">Randevu</option><option value="fiyat">Fiyat</option></select>
-        <textarea id="tpl-content" rows="3" placeholder="İçerik..."></textarea>
+        <h2>Yeni Şablon Ekle</h2>
+        <div style="display:flex; gap:12px; margin-bottom:12px;">
+          <input type="text" id="tpl-title" placeholder="Şablon Adı (Örn: Fiyat Bilgisi)">
+          <select id="tpl-category" style="width:200px;">
+            <option value="genel">Genel</option>
+            <option value="randevu">Randevu</option>
+          </select>
+        </div>
+        <textarea id="tpl-content" rows="3" placeholder="Mesaj içeriği..."></textarea>
         <button class="btn btn-primary" onclick="addTemplate()">➕ Ekle</button>
       </div>
-      <div class="card"><h2>Mevcut</h2><div id="template-list"></div></div>
+      <div class="card">
+        <h2>Mevcut Şablonlar</h2>
+        <div id="template-list"></div>
+      </div>
     </div>
 
-    <!-- ANALİTİK -->
+    <!-- ANALYTICS -->
     <div id="page-analytics" class="page">
-      <h1>Analitik</h1>
-      <div class="stats-grid cols-2">
-        <div class="card"><h2>Son 7 Gün</h2><div id="chart-daily" class="chart-container"></div></div>
+      <h1>Performans Analitiği</h1>
+      <div class="stats-grid" style="grid-template-columns:1fr 1fr;">
+        <div class="card"><h2>Son 7 Günlük Mesaj Trafiği</h2><div id="chart-daily" class="chart-container"></div></div>
         <div class="card"><h2>Saatlik Yoğunluk</h2><div id="chart-hourly" class="chart-container"></div></div>
       </div>
-      <div class="stats-grid cols-2">
+      <div class="stats-grid" style="grid-template-columns:1fr 1fr;">
         <div class="card"><h2>En Aktif Hastalar</h2><div id="top-phones"></div></div>
         <div class="card"><h2>Model Kullanımı</h2><div id="model-usage"></div></div>
       </div>
     </div>
 
-    <!-- AYARLAR -->
+    <!-- SETTINGS -->
     <div id="page-settings" class="page">
-      <h1>Ayarlar</h1>
+      <h1>Sistem Ayarları</h1>
       <div class="card">
         <h2>Yapay Zeka Modeli</h2>
         <select id="model-select" onchange="saveModel()">
-          <option value="gemini-2.5-flash-lite">Flash Lite (En ucuz)</option>
+          <option value="gemini-2.5-flash-lite">Flash Lite (Hızlı & Ekonomik)</option>
           <option value="gemini-2.5-flash">Flash (Dengeli)</option>
-          <option value="gemini-2.5-pro">Pro (Akıllı - Pahalı)</option>
+          <option value="gemini-2.5-pro">Pro (Derinlemesine Düşünen - Pahalı)</option>
         </select>
       </div>
       <div class="card">
-        <h2>Google Sheets Gösterim Linki</h2>
-        <input type="text" id="sheet-view-url" placeholder="https://docs.google.com/spreadsheets/d/..." onchange="saveSheetUrl()" style="width:100%; padding:10px; border-radius:6px; border:1px solid var(--border); background:rgba(0,0,0,0.2); color:#fff; margin-bottom:8px;">
-        <p style="font-size:0.85em;color:var(--text-muted);margin:0;">Leads sekmesinde birebir Excel görünümü için Google Sheets "Paylaş" (Okuma izni) linkinizi yapıştırın.</p>
+        <h2>Hasta Etiketleri</h2>
+        <div style="display:flex; gap:12px; margin-bottom:16px;">
+          <input type="text" id="new-tag" placeholder="Yeni etiket adı (Örn: Acil)">
+          <input type="color" id="new-tag-color" value="#3b82f6" style="width:60px; padding:0; height:42px; border:none; cursor:pointer;">
+          <button class="btn btn-primary" onclick="addTag()">Oluştur</button>
+        </div>
+        <div id="tag-list" style="display:flex; flex-direction:column; gap:8px;"></div>
       </div>
       <div class="card">
-        <h2>Etiket Yönetimi</h2>
-        <div class="tag-add"><input type="text" id="new-tag" placeholder="Yeni etiket adı"><input type="color" id="new-tag-color" value="#3b82f6" style="width:50px;height:38px;padding:2px"><button class="btn btn-primary" onclick="addTag()">Ekle</button></div>
-        <div id="tag-list"></div>
-      </div>
-      <div class="card">
-        <h2>Çalışma Saatleri</h2>
-        <label class="toggle"><input type="checkbox" id="hours-enabled" onchange="saveHours()"><span>Mesai dışı mesaj aktif</span></label>
-        <div class="hours-inputs"><input type="time" id="hours-start" value="09:00" onchange="saveHours()"><span>—</span><input type="time" id="hours-end" value="18:00" onchange="saveHours()"></div>
-        <textarea id="hours-message" rows="2" placeholder="Mesai dışı mesajı..." onchange="saveHours()"></textarea>
+        <h2>Çalışma Saatleri & Mesai Dışı Modu</h2>
+        <label style="display:flex; align-items:center; gap:10px; cursor:pointer; margin-bottom:16px;">
+          <input type="checkbox" id="hours-enabled" onchange="saveHours()" style="width:20px; height:20px;">
+          <span>Mesai Dışı Modunu Aktifleştir</span>
+        </label>
+        <div style="display:flex; gap:12px; margin-bottom:16px;">
+          <input type="time" id="hours-start" value="09:00" onchange="saveHours()" style="width:150px;">
+          <span style="align-self:center;">ile</span>
+          <input type="time" id="hours-end" value="18:00" onchange="saveHours()" style="width:150px;">
+          <span style="align-self:center;">arası</span>
+        </div>
+        <textarea id="hours-message" rows="2" placeholder="Mesai dışı kalınca gidecek otomatik mesaj..." onchange="saveHours()"></textarea>
       </div>
     </div>
   </main>
@@ -201,27 +237,206 @@
 <div id="toast" class="toast"></div>
 
 <script>
-const API='/api/panel'; let AUTH_TOKEN=localStorage.getItem('panel_auth')||''; let currentPhone=''; let allTags=[];
+const API = '/api/panel'; 
+let AUTH_TOKEN = localStorage.getItem('panel_auth') || ''; 
+let currentPhone = ''; 
+let currentChannel = 'whatsapp';
+let allTags = [];
 
-function doLogin(){AUTH_TOKEN=document.getElementById('login-pass').value;localStorage.setItem('panel_auth',AUTH_TOKEN);checkAuth()}
-async function checkAuth(){try{const r=await fetch(API+'?action=dashboard',{headers:{Authorization:'Bearer '+AUTH_TOKEN}});if(r.ok){document.getElementById('login-screen').style.display='none';document.getElementById('main-app').style.display='flex';loadDashboard()}else{document.getElementById('login-screen').style.display='flex';document.getElementById('main-app').style.display='none';document.getElementById('login-error').textContent=AUTH_TOKEN?'Şifre yanlış!':''}}catch(e){document.getElementById('login-error').textContent='Bağlantı hatası'}}
+function getChannelIcon(channel) {
+  if (channel === 'messenger') return '<div class="channel-icon channel-messenger">M</div>';
+  if (channel === 'instagram') return '<div class="channel-icon channel-instagram">IG</div>';
+  return '<div class="channel-icon channel-whatsapp">W</div>';
+}
+function getChannelBadge(channel) {
+  if (channel === 'messenger') return '<span style="color:#0084FF">Ⓜ️ Messenger</span>';
+  if (channel === 'instagram') return '<span style="color:#e1306c">📸 Instagram</span>';
+  return '<span style="color:#25D366">📱 WhatsApp</span>';
+}
 
-document.querySelectorAll('.nav-btn').forEach(b=>{b.addEventListener('click',()=>{document.querySelectorAll('.nav-btn').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));b.classList.add('active');document.getElementById('page-'+b.dataset.page).classList.add('active');({dashboard:loadDashboard,leads:loadLeads,conversations:loadConversations,training:loadPrompt,templates:loadTemplates,analytics:loadAnalytics,settings:loadSettings,bulk:loadBulk})[b.dataset.page]?.()})});
+function doLogin() { AUTH_TOKEN = document.getElementById('login-pass').value; localStorage.setItem('panel_auth', AUTH_TOKEN); checkAuth(); }
+async function checkAuth() {
+  try {
+    const r = await fetch(API+'?action=dashboard', {headers:{Authorization:'Bearer '+AUTH_TOKEN}});
+    if(r.ok) { document.getElementById('login-screen').style.display='none'; document.getElementById('main-app').style.display='flex'; loadDashboard(); }
+    else { document.getElementById('login-screen').style.display='flex'; document.getElementById('main-app').style.display='none'; document.getElementById('login-error').textContent=AUTH_TOKEN?'Hatalı Şifre':''; }
+  } catch(e) { document.getElementById('login-error').textContent='Bağlantı koptu.'; }
+}
 
-function toast(m,t='success'){const el=document.getElementById('toast');el.textContent=m;el.className='toast show '+t;setTimeout(()=>el.className='toast',3000)}
-async function api(a,m='GET',b=null){const o={method:m,headers:{'Content-Type':'application/json',Authorization:'Bearer '+AUTH_TOKEN}};if(b)o.body=JSON.stringify(b);const r=await fetch(API+'?action='+a,o);if(r.status===401){document.getElementById('login-screen').style.display='flex';document.getElementById('main-app').style.display='none';return null}return r.json()}
+document.querySelectorAll('.nav-btn').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('.nav-btn').forEach(x => x.classList.remove('active'));
+    document.querySelectorAll('.page').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    document.getElementById('page-' + b.dataset.page).classList.add('active');
+    
+    // Yükleme fonksiyonları
+    ({dashboard:loadDashboard, leads:loadLeads, conversations:loadConversations, training:loadPrompt, templates:loadTemplates, analytics:loadAnalytics, settings:loadSettings})[b.dataset.page]?.();
+  });
+});
 
-// DASHBOARD
-async function loadDashboard(){const d=await api('dashboard');if(!d)return;document.getElementById('stat-today').textContent=d.todayMessages;document.getElementById('stat-total').textContent=d.totalMessages;document.getElementById('stat-conversations').textContent=d.activeConversations;document.getElementById('stat-human').textContent=d.humanConversations||0;document.getElementById('recent-messages').innerHTML=(d.recentMessages||[]).map(m=>`<div class="msg-item ${m.direction}"><span class="msg-phone">${m.direction==='in'?'📩':'📤'} ${m.patient_name||m.phone_number}</span><span class="msg-text">${m.content.substring(0,80)}</span><span class="msg-time">${new Date(m.created_at).toLocaleString('tr-TR')}</span></div>`).join('')||'<p class="empty">Henüz mesaj yok</p>'}
+function toast(m, t='success') { const el=document.getElementById('toast'); el.textContent=m; el.className='toast show '+t; setTimeout(()=>el.className='toast', 3000); }
 
-// LEADS - Google Sheets Entegrasyonu
-const stageLabels={new:'📥 Yeni',contacted:'📱 İletişim',responded:'💬 Cevap',interested:'🔥 İlgili',appointed:'📅 Randevu',arrived:'✈️ Geldi',treated:'✅ Tedavi',cold:'❄️ Soğuk'};
-const stageColors={new:'#3b82f6',contacted:'#8b5cf6',responded:'#06b6d4',interested:'#f59e0b',appointed:'#22c55e',arrived:'#10b981',treated:'#059669',cold:'#6b7280'};
-window._activeSheet = null;
-window._sheetRefreshTimer = null;
+async function api(a, m='GET', b=null) {
+  const o = {method:m, headers:{'Content-Type':'application/json', Authorization:'Bearer '+AUTH_TOKEN}};
+  if(b) o.body = JSON.stringify(b);
+  const r = await fetch(API+'?action='+a, o);
+  if(r.status===401) { checkAuth(); return null; }
+  return r.json();
+}
 
-async function loadLeads(){
-  // Stats güncelle
+/* DASHBOARD */
+async function loadDashboard() {
+  const d = await api('dashboard'); if(!d) return;
+  document.getElementById('stat-today').textContent = d.todayMessages;
+  document.getElementById('stat-total').textContent = d.totalMessages;
+  document.getElementById('stat-conversations').textContent = d.activeConversations;
+  document.getElementById('stat-human').textContent = d.humanConversations || 0;
+  
+  document.getElementById('recent-messages').innerHTML = (d.recentMessages||[]).map(m => {
+    const icon = m.direction === 'in' ? '👤' : '🤖';
+    const isBot = m.direction === 'out' ? 'background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.2);' : 'background: var(--bg-hover);';
+    return `<div style="${isBot} padding: 12px 16px; border-radius: var(--radius-sm); display:flex; gap:12px; align-items:center;">
+      <div style="font-size:20px;">${icon}</div>
+      <div style="flex:1; overflow:hidden;">
+        <div style="font-size:13px; font-weight:600; color:var(--text-main); margin-bottom:4px;">${m.patient_name || m.phone_number}</div>
+        <div style="font-size:13px; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${m.content}</div>
+      </div>
+      <div style="font-size:11px; color:#52525b; align-self:flex-start;">${new Date(m.created_at).toLocaleTimeString('tr-TR')}</div>
+    </div>`;
+  }).join('') || '<div class="empty">Etkileşim yok</div>';
+}
+
+/* OMNICHANNEL INBOX */
+async function loadConversations() {
+  const list = await api('conversations'); if(!list) return;
+  allTags = await api('tags') || [];
+  document.getElementById('conversation-list').innerHTML = list.map(c => {
+    let t = ''; try { t = JSON.parse(c.tags||'[]').map(x=>`<span class="tag-badge-display" style="background:#3b82f6;">${x}</span>`).join(''); } catch(e){}
+    const isActive = c.phone_number === currentPhone ? 'active' : '';
+    const stBadge = c.status === 'human' ? '<span class="status-badge status-human">MANUAL</span>' : '<span class="status-badge status-bot">BOT</span>';
+    const ch = c.last_channel || c.channel || 'whatsapp';
+    
+    return `<div class="contact-item ${isActive}" onclick="loadChat('${c.phone_number}', '${ch}')">
+      <div class="contact-avatar">👤${getChannelIcon(ch)}</div>
+      <div class="contact-info">
+        <div class="contact-top">
+          <span class="contact-name">${c.patient_name || c.phone_number}</span>
+          <span class="contact-time">${new Date(c.last_message_at).toLocaleTimeString('tr-TR', {hour:'2-digit',minute:'2-digit'})}</span>
+        </div>
+        <div class="contact-preview">${c.last_message ? c.last_message : ''}</div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px;">
+          <div style="display:flex; gap:4px;">${t}</div>
+          ${stBadge}
+        </div>
+      </div>
+    </div>`;
+  }).join('') || '<div class="empty">Konuşma bulunamadı</div>';
+}
+
+async function loadChat(phone, channel) {
+  currentPhone = phone; currentChannel = channel;
+  
+  // Highlight active
+  document.querySelectorAll('.contact-item').forEach(el => el.classList.remove('active'));
+  const activeEl = Array.from(document.querySelectorAll('.contact-item')).find(el => el.innerHTML.includes(phone));
+  if(activeEl) activeEl.classList.add('active');
+
+  // Load patient data for CRM and Status
+  const pData = await api('get-patient&phone='+phone);
+  document.getElementById('chat-title').textContent = pData.patient_name || phone;
+  document.getElementById('chat-channel-badge').innerHTML = getChannelBadge(currentChannel);
+  document.getElementById('chat-channel-badge').style.display = 'inline-flex';
+  
+  // Handover controls
+  document.getElementById('chat-actions').style.display = 'flex';
+  const isHuman = pData.status === 'human';
+  document.getElementById('btn-status-bot').className = `handover-btn ${!isHuman ? 'active-bot' : ''}`;
+  document.getElementById('btn-status-human').className = `handover-btn ${isHuman ? 'active-human' : ''}`;
+  
+  document.getElementById('chat-input-area').style.display = 'flex';
+  
+  // CRM setup
+  document.getElementById('crm-panel').style.display = 'flex';
+  document.getElementById('crm-name').value = pData.patient_name || '';
+  document.getElementById('crm-notes').value = pData.notes || '';
+  let pt = []; try { pt = JSON.parse(pData.tags||'[]'); } catch(e){}
+  renderCRMTags(pt);
+
+  // Load Messages
+  const msgs = await api('conversation-detail&phone='+phone);
+  if(!msgs) return;
+  const chatEl = document.getElementById('chat-messages');
+  chatEl.innerHTML = msgs.map(m => {
+    const isOut = m.direction === 'out';
+    const isBot = m.model_used && m.model_used !== 'panel' && m.model_used !== 'toplu';
+    const cls = `message-bubble ${isOut ? 'out' : 'in'} ${isOut && isBot ? 'bot-reply' : ''}`;
+    const info = `<div class="msg-info">${new Date(m.created_at).toLocaleTimeString('tr-TR', {hour:'2-digit',minute:'2-digit'})} ${isBot ? '<span class="bot-indicator">🤖 '+m.model_used+'</span>' : ''}</div>`;
+    return `<div class="${cls}">${m.content}${info}</div>`;
+  }).join('');
+  chatEl.scrollTop = chatEl.scrollHeight;
+}
+
+function renderCRMTags(selected=[]) {
+  document.getElementById('crm-tags').innerHTML = allTags.map(t => 
+    `<div class="tag ${selected.includes(t.name)?'selected':''}" onclick="this.classList.toggle('selected')" data-val="${t.name}">${t.name}</div>`
+  ).join('');
+}
+
+async function saveCRM() {
+  const tags = Array.from(document.querySelectorAll('.tag.selected')).map(el => el.dataset.val);
+  await api('update-patient','POST',{phone:currentPhone, patient_name:document.getElementById('crm-name').value, tags:JSON.stringify(tags), notes:document.getElementById('crm-notes').value});
+  toast('Hasta kartı güncellendi');
+  loadConversations();
+}
+
+async function setConvStatus(s) {
+  if(!currentPhone) return;
+  await api('conversation-status','POST',{phone:currentPhone, status:s});
+  document.getElementById('btn-status-bot').className = `handover-btn ${s==='active' ? 'active-bot' : ''}`;
+  document.getElementById('btn-status-human').className = `handover-btn ${s==='human' ? 'active-human' : ''}`;
+  toast(s==='human'?'Manuel kontrole geçildi':'Yapay Zeka devrede');
+  loadConversations();
+}
+
+async function deleteMessages() {
+  if(!currentPhone || !confirm('Tüm geçmiş silinecek. Onaylıyor musunuz?')) return;
+  await api('delete-messages','POST',{phone:currentPhone});
+  toast('Sohbet temizlendi');
+  document.getElementById('chat-messages').innerHTML = '<div class="empty">Sohbet temizlendi.</div>';
+}
+
+async function sendPanelMessage() {
+  const i = document.getElementById('chat-input');
+  const m = i.value.trim();
+  if(!m || !currentPhone) return;
+  i.value = '';
+  try {
+    // API, kanal bağımsız çalışmalı, Vercel üzerinden halledilecek.
+    await api('send-message','POST',{phone:currentPhone, message:m, channel:currentChannel});
+    toast('Mesaj gönderildi');
+    loadChat(currentPhone, currentChannel);
+  } catch(e) { toast('Hata oluştu', 'error'); }
+}
+
+/* BOT EĞİTİMİ */
+async function loadPrompt() {
+  const s = await api('settings'); 
+  if(s) document.getElementById('prompt-editor').value = s.system_prompt || '';
+}
+async function savePrompt() {
+  await api('settings','POST',{key:'system_prompt', value:document.getElementById('prompt-editor').value});
+  toast('Sistem Promptu güncellendi!');
+}
+async function resetPrompt() {
+  if(!confirm('Orijinal ayarlara dönülecek, emin misiniz?')) return;
+  const d = await api('default-prompt');
+  if(d && d.prompt) { document.getElementById('prompt-editor').value = d.prompt; savePrompt(); }
+}
+
+/* LEADS - AYNI KALACAK SADECE STİL DEĞİŞTİ */
+window._activeSheet = null; window._sheetRefreshTimer = null;
+async function loadLeads() {
   const stats=await api('lead-stats');
   if(stats){
     document.getElementById('lead-today').textContent=stats.todayLeads;
@@ -230,276 +445,95 @@ async function loadLeads(){
     document.getElementById('lead-contacted').textContent=stageMap.contacted||0;
     document.getElementById('lead-appointed').textContent=stageMap.appointed||0;
   }
-
-  // Google Sheets verilerini çek
-  document.getElementById('lead-list').innerHTML = '<p style="text-align:center;padding:40px;color:#8b8fa3;">⏳ Google Sheets verileri yükleniyor...</p>';
-  
+  document.getElementById('lead-list').innerHTML = '<p style="text-align:center;padding:40px;color:var(--text-muted);">⏳ Yükleniyor...</p>';
   try {
-    const resp = await fetch('/api/sheets');
-    const data = await resp.json();
-    
-    if(!data.success){
-      document.getElementById('lead-list').innerHTML = `<p class="empty">❌ Sheets hatası: ${data.error}</p>`;
-      return;
-    }
-    
-    // Sekmeleri oluştur
-    renderSheetTabs(data.tabs, data.activeSheet);
-    
-    // Tabloyu oluştur
+    const resp = await fetch('/api/sheets'); const data = await resp.json();
+    if(!data.success) return document.getElementById('lead-list').innerHTML = `<p class="empty">❌ Hata: ${data.error}</p>`;
+    window._activeSheet = data.activeSheet;
+    document.getElementById('sheet-tabs').innerHTML = data.tabs.map(t => `<button class="sheet-tab ${t.title === data.activeSheet ? 'active' : ''}" onclick="loadSheetData('${t.title.replace(/'/g, "\\'")}')">${t.title}</button>`).join('');
     renderSheetTable(data.headers, data.rows, data.total);
-    
-    // Otomatik yenileme (30 saniye)
-    if(window._sheetRefreshTimer) clearInterval(window._sheetRefreshTimer);
-    window._sheetRefreshTimer = setInterval(() => {
-      if(document.getElementById('page-leads').classList.contains('active')){
-        loadSheetData(window._activeSheet, true);
-      }
-    }, 60000);
-    
-  } catch(e) {
-    document.getElementById('lead-list').innerHTML = `<p class="empty">❌ Bağlantı hatası: ${e.message}</p>`;
-  }
+  } catch(e) { document.getElementById('lead-list').innerHTML = `<p class="empty">❌ Bağlantı hatası</p>`; }
 }
 
-function renderSheetTabs(tabs, activeSheet) {
-  window._activeSheet = activeSheet;
-  const tabsEl = document.getElementById('sheet-tabs');
-  tabsEl.innerHTML = tabs.map(t => 
-    `<button class="sheet-tab ${t.title === activeSheet ? 'active' : ''}" onclick="loadSheetData('${t.title.replace(/'/g, "\\'")}')">${t.title}</button>`
-  ).join('');
-}
-
-async function loadSheetData(sheetName, silent) {
-  // Sekmeleri her zaman taze çek (isim değişikliklerini yakala)
-  try {
-    const tabResp = await fetch('/api/sheets?action=tabs');
-    const tabData = await tabResp.json();
-    if(tabData.success) {
-      const tabNames = tabData.tabs.map(t => t.title);
-      // Aktif sekme artık yoksa (ismi değişmiş), ilk sekmeye geç
-      if(!tabNames.includes(sheetName)) {
-        sheetName = tabNames[0] || sheetName;
-      }
-      renderSheetTabs(tabData.tabs, sheetName);
-    }
-  } catch(e){}
-  
+async function loadSheetData(sheetName) {
   window._activeSheet = sheetName;
-  
-  if(!silent) {
-    document.getElementById('lead-list').innerHTML = '<p style="text-align:center;padding:40px;color:#8b8fa3;">⏳ Yükleniyor...</p>';
-  }
-  
+  document.getElementById('lead-list').innerHTML = '<p style="text-align:center;padding:40px;color:var(--text-muted);">⏳ Yükleniyor...</p>';
   try {
-    const resp = await fetch(`/api/sheets?action=data&sheet=${encodeURIComponent(sheetName)}`);
-    const data = await resp.json();
-    
-    if(!data.success){
-      if(!silent) document.getElementById('lead-list').innerHTML = `<p class="empty">❌ ${data.error}</p>`;
-      return;
-    }
-    
-    // Silent modda: satır sayısı değişmediyse hiç dokunma
-    if(silent && window._lastRowCount === data.total) return;
-    window._lastRowCount = data.total;
-    
-    // Scroll pozisyonunu kaydet
-    const scrollContainer = document.querySelector('#lead-list > div');
-    const scrollX = scrollContainer ? scrollContainer.scrollLeft : 0;
-    const scrollY = scrollContainer ? scrollContainer.scrollTop : 0;
-    
-    renderSheetTable(data.headers, data.rows, data.total);
-    
-    // Scroll pozisyonunu geri yükle
-    if(silent) {
-      const newContainer = document.querySelector('#lead-list > div');
-      if(newContainer) {
-        newContainer.scrollLeft = scrollX;
-        newContainer.scrollTop = scrollY;
-      }
-    }
-  } catch(e) {
-    if(!silent) document.getElementById('lead-list').innerHTML = `<p class="empty">❌ ${e.message}</p>`;
-  }
+    const tabResp = await fetch('/api/sheets?action=tabs'); const tabData = await tabResp.json();
+    if(tabData.success) document.getElementById('sheet-tabs').innerHTML = tabData.tabs.map(t => `<button class="sheet-tab ${t.title === sheetName ? 'active' : ''}" onclick="loadSheetData('${t.title.replace(/'/g, "\\'")}')">${t.title}</button>`).join('');
+    const resp = await fetch(`/api/sheets?action=data&sheet=${encodeURIComponent(sheetName)}`); const data = await resp.json();
+    if(data.success) renderSheetTable(data.headers, data.rows, data.total);
+  } catch(e) {}
 }
 
 function renderSheetTable(headers, rows, total) {
   document.getElementById('sheet-row-count').textContent = `📋 ${total} kayıt`;
-  
-  if(!headers || headers.length === 0) {
-    document.getElementById('lead-list').innerHTML = '<p class="empty">Bu sekmede veri yok</p>';
-    return;
-  }
-  
-  // Düzenlenebilir sütunları belirle
+  if(!headers || headers.length === 0) return document.getElementById('lead-list').innerHTML = '<p class="empty">Veri yok</p>';
   const editableCols = {};
-  headers.forEach((h, idx) => {
-    const lower = h.toLowerCase().replace(/\s+/g, '_');
-    if(lower.includes('lead_status') || lower === 'status') editableCols[idx] = 'status';
-    if(lower.includes('geri_dönüş') || lower.includes('geri_donus') || lower.includes('geri dönüş')) editableCols[idx] = 'text';
-  });
-  
+  headers.forEach((h, idx) => { const lower = h.toLowerCase().replace(/\s+/g, '_'); if(lower.includes('lead_status') || lower === 'status') editableCols[idx] = 'status'; if(lower.includes('geri_dönüş') || lower.includes('geri_donus') || lower.includes('geri dönüş')) editableCols[idx] = 'text'; });
   const statusOptions = ['', 'CREATED', 'İletişime Geçildi', 'Cevap Verdi', 'İlgili', 'Randevu Aldı', 'Geldi', 'Tedavi Oldu', 'Soğuk'];
-  
-  let html = `<div style="overflow-x:auto;max-height:70vh;overflow-y:auto;">
-    <table class="data-table" style="min-width:max-content;">
-      <thead>
-        <tr><th class="row-num">#</th>${headers.map(h => {
-          const lower = h.toLowerCase().replace(/\s+/g, '_');
-          const isEditable = lower.includes('lead_status') || lower === 'status' || lower.includes('geri_dönüş') || lower.includes('geri_donus') || lower.includes('geri dönüş');
-          return `<th${isEditable ? ' style="color:#4ade80;"' : ''}>${h}${isEditable ? ' ✏️' : ''}</th>`;
-        }).join('')}</tr>
-      </thead>
-      <tbody>`;
-  
+  let html = `<div style="overflow-x:auto;"><table class="data-table"><thead><tr><th class="row-num">#</th>${headers.map((h, j) => `<th${editableCols[j] ? ' style="color:#4ade80;"' : ''}>${h}</th>`).join('')}</tr></thead><tbody>`;
   rows.forEach((row, i) => {
     html += `<tr><td class="row-num">${i + 1}</td>`;
     headers.forEach((h, j) => {
-      const val = row[j] || '';
-      const editType = editableCols[j];
-      
-      if(editType === 'status') {
-        html += `<td class="cell-editable">
-          <select class="cell-select" onchange="updateSheetCell(${i}, ${j}, this.value)">
-            ${statusOptions.map(s => `<option value="${s}" ${val === s ? 'selected' : ''}>${s || '—'}</option>`).join('')}
-          </select>
-        </td>`;
-      } else if(editType === 'text') {
-        html += `<td class="cell-editable">
-          <input type="text" class="cell-input" value="${String(val).replace(/"/g, '&quot;')}" 
-            onblur="updateSheetCell(${i}, ${j}, this.value)" 
-            onkeydown="if(event.key==='Enter'){this.blur()}" />
-        </td>`;
-      } else {
-        const isPhone = h.toLowerCase().includes('phone') || h.toLowerCase().includes('telefon') || h.toLowerCase().includes('whatsapp');
-        const isDate = h.toLowerCase().includes('tarih') || h.toLowerCase().includes('date') || h.toLowerCase().includes('created');
-        let cellClass = '';
-        if(isDate) cellClass = 'cell-date';
-        else if(isPhone) cellClass = 'cell-phone';
-        html += `<td class="${cellClass}" title="${String(val).replace(/"/g, '&quot;')}">${val}</td>`;
-      }
+      const val = row[j] || ''; const editType = editableCols[j];
+      if(editType === 'status') html += `<td style="padding:4px"><select style="background:var(--bg-hover);border:none;color:white;padding:4px;" onchange="updateSheetCell(${i}, ${j}, this.value)">${statusOptions.map(s => `<option value="${s}" ${val === s ? 'selected' : ''}>${s || '—'}</option>`).join('')}</select></td>`;
+      else if(editType === 'text') html += `<td style="padding:4px"><input type="text" style="background:var(--bg-hover);border:none;color:white;padding:4px;margin:0;" value="${String(val).replace(/"/g, '&quot;')}" onblur="updateSheetCell(${i}, ${j}, this.value)" /></td>`;
+      else html += `<td>${val}</td>`;
     });
     html += '</tr>';
   });
-  
-  html += '</tbody></table></div>';
-  document.getElementById('lead-list').innerHTML = html;
+  document.getElementById('lead-list').innerHTML = html + '</tbody></table></div>';
 }
 
 async function updateSheetCell(row, col, value) {
-  try {
-    const resp = await fetch('/api/sheets?action=update', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ sheetName: window._activeSheet, row, col, value })
-    });
-    const data = await resp.json();
-    if(data.success) {
-      toast('✅ Güncellendi');
-    } else {
-      toast('❌ Hata: ' + data.error, 'error');
-    }
-  } catch(e) {
-    toast('❌ Bağlantı hatası', 'error');
-  }
+  const resp = await fetch('/api/sheets?action=update', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ sheetName: window._activeSheet, row, col, value }) });
+  const data = await resp.json(); if(data.success) toast('Güncellendi'); else toast('Hata', 'error');
 }
 
-async function updateLeadStage(id,stage){await api('update-lead','POST',{id,stage});toast('✅ Aşama güncellendi');loadLeads()}
+/* ŞABLONLAR */
+async function loadTemplates(){const list=await api('templates');if(!list)return;document.getElementById('template-list').innerHTML=list.map(t=>`<div style="padding:16px; background:var(--bg-hover); border-radius:var(--radius-sm); margin-bottom:8px;"><div style="display:flex; justify-content:space-between; margin-bottom:8px;"><strong>${t.title}</strong><button class="btn-sm btn-danger" onclick="deleteTemplate(${t.id})">Sil</button></div><div style="font-size:13px; color:var(--text-muted);">${t.content}</div></div>`).join('')||'<p class="empty">Şablon yok</p>'}
+async function addTemplate(){const t=document.getElementById('tpl-title').value,c=document.getElementById('tpl-content').value,cat=document.getElementById('tpl-category').value;if(!t||!c)return toast('Zorunlu alanlar','error');await api('templates','POST',{title:t,content:c,category:cat});document.getElementById('tpl-title').value='';document.getElementById('tpl-content').value='';loadTemplates();toast('Eklendi')}
+async function deleteTemplate(id){if(!confirm('Silinsin mi?'))return;await api('templates&id='+id,'DELETE');loadTemplates();toast('Silindi')}
 
-// KONUŞMALAR
-async function loadConversations(){const list=await api('conversations');if(!list)return;allTags=await api('tags')||[];document.getElementById('conversation-list').innerHTML=list.map(c=>{let tags='';try{tags=JSON.parse(c.tags||'[]').map(t=>`<span class="tag-badge">${t}</span>`).join('')}catch(e){}return`<div class="conv-item ${c.status==='human'?'conv-human':''}" onclick="loadChat('${c.phone_number}')"><div class="conv-phone">${c.status==='human'?'👤':'📱'} ${c.patient_name||c.phone_number}</div><div class="conv-meta">${c.message_count} mesaj · ${new Date(c.last_message_at).toLocaleString('tr-TR')}</div><div class="conv-tags">${tags}</div><div class="conv-preview">${c.last_message?c.last_message.substring(0,50):''}</div></div>`}).join('')||'<p class="empty">Henüz konuşma yok</p>'}
+/* ANALİTİK */
+async function loadAnalytics(){const d=await api('analytics');if(!d)return;const mx=Math.max(...(d.daily||[]).map(x=>+x.count),1);document.getElementById('chart-daily').innerHTML=(d.daily||[]).map(x=>`<div style="display:flex; flex-direction:column; align-items:center; flex:1; height:100%; justify-content:flex-end;"><div style="background:var(--accent-primary); width:100%; max-width:30px; height:${+x.count/mx*100}%; border-radius:4px 4px 0 0; position:relative;"><span style="position:absolute; top:-20px; font-size:10px; width:100%; text-align:center;">${x.count}</span></div><div style="font-size:10px; margin-top:8px; color:var(--text-muted);">${new Date(x.date).toLocaleDateString('tr-TR',{weekday:'short'})}</div></div>`).join('')||'<p class="empty">Veri yok</p>';const mh=Math.max(...(d.hourly||[]).map(x=>+x.count),1);document.getElementById('chart-hourly').innerHTML=(d.hourly||[]).map(x=>`<div style="display:flex; flex-direction:column; align-items:center; flex:1; height:100%; justify-content:flex-end;"><div style="background:#10b981; width:100%; max-width:30px; height:${+x.count/mh*100}%; border-radius:4px 4px 0 0; position:relative;"><span style="position:absolute; top:-20px; font-size:10px; width:100%; text-align:center;">${x.count}</span></div><div style="font-size:10px; margin-top:8px; color:var(--text-muted);">${x.hour}:00</div></div>`).join('')||'<p class="empty">Veri yok</p>';document.getElementById('top-phones').innerHTML=(d.topPhones||[]).map((p,i)=>`<div style="display:flex; justify-content:space-between; padding:12px; background:var(--bg-hover); margin-bottom:4px; border-radius:6px;"><span>#${i+1} 📱 ${p.phone_number}</span><span style="color:var(--text-muted);">${p.count} mesaj</span></div>`).join('');document.getElementById('model-usage').innerHTML=(d.modelUsage||[]).map(m=>`<div style="display:flex; justify-content:space-between; padding:12px; background:var(--bg-hover); margin-bottom:4px; border-radius:6px;"><span>🤖 ${m.model_used}</span><span style="color:var(--text-muted);">${m.count}</span></div>`).join('');}
 
-async function loadChat(phone){currentPhone=phone;document.getElementById('chat-title').textContent='📱 '+phone;document.getElementById('chat-actions').style.display='flex';document.getElementById('chat-input-area').style.display='flex';document.getElementById('crm-panel').style.display='none';const msgs=await api('conversation-detail&phone='+phone);if(!msgs)return;document.getElementById('chat-messages').innerHTML=msgs.map(m=>`<div class="chat-bubble ${m.direction}"><div class="bubble-content">${m.media_url?`<a href="${m.media_url}" target="_blank">📎 ${m.media_type}</a><br>`:''}${m.content}</div><div class="bubble-meta">${m.model_used?'🤖 '+m.model_used:''} ${new Date(m.created_at).toLocaleTimeString('tr-TR')}</div></div>`).join('');const el=document.getElementById('chat-messages');el.scrollTop=el.scrollHeight}
 
-async function toggleCRM(){const p=document.getElementById('crm-panel');if(p.style.display==='none'){p.style.display='block';const data=await api('get-patient&phone='+currentPhone);if(data){document.getElementById('crm-name').value=data.patient_name||'';document.getElementById('crm-notes').value=data.notes||'';let patientTags=[];try{patientTags=JSON.parse(data.tags||'[]')}catch(e){}renderCRMTags(patientTags)}}else p.style.display='none'}
-
-function renderCRMTags(selected=[]){document.getElementById('crm-tags').innerHTML=allTags.map(t=>`<label class="tag-check" style="border-color:${t.color}"><input type="checkbox" value="${t.name}" ${selected.includes(t.name)?'checked':''}><span style="color:${t.color}">${t.name}</span></label>`).join('')}
-
-async function saveCRM(){const tags=Array.from(document.querySelectorAll('#crm-tags input:checked')).map(i=>i.value);await api('update-patient','POST',{phone:currentPhone,patient_name:document.getElementById('crm-name').value,tags:JSON.stringify(tags),notes:document.getElementById('crm-notes').value});toast('✅ Hasta bilgisi kaydedildi');loadConversations()}
-
-async function setConvStatus(s){if(!currentPhone)return;await api('conversation-status','POST',{phone:currentPhone,status:s});toast(s==='human'?'👤 İnsan müdahalesi aktif':'🤖 Bot aktif');loadConversations()}
-
-async function deleteMessages(){if(!currentPhone)return;if(!confirm('Bu konuşmanın tüm mesajları silinecek. Emin misiniz?'))return;await api('delete-messages','POST',{phone:currentPhone});toast('🗑 Mesajlar silindi');loadChat(currentPhone)}
-
-async function sendPanelMessage(){const i=document.getElementById('chat-input');const m=i.value.trim();if(!m||!currentPhone)return;i.value='';try{await api('send-message','POST',{phone:currentPhone,message:m});toast('📤 Gönderildi');loadChat(currentPhone)}catch(e){toast('❌ Hata','error')}}
-
-function toggleMedia(){const p=document.getElementById('media-panel');p.style.display=p.style.display==='none'?'flex':'none'}
-async function sendMedia(){const url=document.getElementById('media-url').value;const type=document.getElementById('media-type').value;const cap=document.getElementById('media-caption').value;if(!url||!currentPhone)return toast('URL gerekli','error');await api('send-media','POST',{phone:currentPhone,media_url:url,media_type:type,caption:cap});document.getElementById('media-url').value='';document.getElementById('media-caption').value='';document.getElementById('media-panel').style.display='none';toast('📤 Medya gönderildi');loadChat(currentPhone)}
-
-// BOT EĞİTİMİ
-async function loadPrompt(){const s=await api('settings');if(s)document.getElementById('prompt-editor').value=s.system_prompt||''}
-async function savePrompt(){await api('settings','POST',{key:'system_prompt',value:document.getElementById('prompt-editor').value});toast('✅ Prompt kaydedildi')}
-async function resetPrompt(){if(!confirm('Sıfırlansın mı?'))return;const d=await api('default-prompt');if(d&&d.prompt){document.getElementById('prompt-editor').value=d.prompt;savePrompt();toast('✅ Varsayılan prompt yüklendi')}}
-
-// TOPLU MESAJ
-async function loadBulk(){allTags=await api('tags')||[];const sel=document.getElementById('bulk-tag');sel.innerHTML='<option value="__all__">🌍 Tüm Hastalar</option>'+allTags.map(t=>`<option value="${t.name}">${t.name}</option>`).join('')}
-async function sendBulk(){const tag=document.getElementById('bulk-tag').value;const msg=document.getElementById('bulk-message').value;if(!msg)return toast('Mesaj yazın','error');if(!confirm(`"${tag==='__all__'?'Tüm hastalar':tag}" grubuna toplu mesaj gönderilecek. Onaylıyor musunuz?`))return;const r=await api('bulk-message','POST',{tag,message:msg});if(r)document.getElementById('bulk-result').innerHTML=`<div class="card" style="margin-top:12px;border-color:#4ade80">✅ ${r.sent} kişiye gönderildi${r.failed?' · ❌ '+r.failed+' başarısız':''}</div>`}
-
-// ŞABLONLAR
-async function loadTemplates(){const list=await api('templates');if(!list)return;document.getElementById('template-list').innerHTML=list.map(t=>`<div class="template-item"><div class="tpl-header"><strong>${t.title}</strong><span class="tpl-cat">${t.category}</span><button class="btn-sm btn-danger" onclick="deleteTemplate(${t.id})">🗑</button></div><div class="tpl-content">${t.content}</div></div>`).join('')||'<p class="empty">Şablon yok</p>'}
-async function addTemplate(){const t=document.getElementById('tpl-title').value,c=document.getElementById('tpl-content').value,cat=document.getElementById('tpl-category').value;if(!t||!c)return toast('Zorunlu alanlar','error');await api('templates','POST',{title:t,content:c,category:cat});document.getElementById('tpl-title').value='';document.getElementById('tpl-content').value='';loadTemplates();toast('✅ Eklendi')}
-async function deleteTemplate(id){if(!confirm('Silinsin mi?'))return;await api('templates&id='+id,'DELETE');loadTemplates();toast('🗑 Silindi')}
-
-// ANALİTİK
-async function loadAnalytics(){const d=await api('analytics');if(!d)return;const mx=Math.max(...(d.daily||[]).map(x=>+x.count),1);document.getElementById('chart-daily').innerHTML=(d.daily||[]).map(x=>`<div class="bar-group"><div class="bar" style="height:${+x.count/mx*100}%"><span class="bar-val">${x.count}</span></div><div class="bar-label">${new Date(x.date).toLocaleDateString('tr-TR',{weekday:'short',day:'numeric'})}</div></div>`).join('')||'<p class="empty">Veri yok</p>';const mh=Math.max(...(d.hourly||[]).map(x=>+x.count),1);document.getElementById('chart-hourly').innerHTML=(d.hourly||[]).map(x=>`<div class="bar-group"><div class="bar bar-green" style="height:${+x.count/mh*100}%"><span class="bar-val">${x.count}</span></div><div class="bar-label">${x.hour}:00</div></div>`).join('')||'<p class="empty">Veri yok</p>';document.getElementById('top-phones').innerHTML=(d.topPhones||[]).map((p,i)=>`<div class="rank-item"><span class="rank">#${i+1}</span><span>📱 ${p.phone_number}</span><span class="rank-count">${p.count} mesaj</span></div>`).join('')||'<p class="empty">Veri yok</p>';document.getElementById('model-usage').innerHTML=(d.modelUsage||[]).map(m=>`<div class="rank-item"><span>🤖 ${m.model_used}</span><span class="rank-count">${m.count}</span></div>`).join('')||'<p class="empty">Veri yok</p>'}
-
-// AYARLAR
-async function loadSettings(){const s=await api('settings');if(!s)return;document.getElementById('model-select').value=s.ai_model||'gemini-2.5-flash-lite';
-if(s.sheet_view_url) document.getElementById('sheet-view-url').value=s.sheet_view_url;
-if(s.working_hours){try{const h=JSON.parse(s.working_hours);document.getElementById('hours-enabled').checked=h.enabled;document.getElementById('hours-start').value=h.start;document.getElementById('hours-end').value=h.end;document.getElementById('hours-message').value=h.offMessage||''}catch(e){}}loadTagList()}
-async function saveModel(){await api('settings','POST',{key:'ai_model',value:document.getElementById('model-select').value});toast('✅ Model güncellendi')}
-async function saveSheetUrl(){await api('settings','POST',{key:'sheet_view_url',value:document.getElementById('sheet-view-url').value});toast('✅ Sheets Linki Kaydedildi');loadLeads();}
-async function saveHours(){await api('settings','POST',{key:'working_hours',value:JSON.stringify({enabled:document.getElementById('hours-enabled').checked,start:document.getElementById('hours-start').value,end:document.getElementById('hours-end').value,offMessage:document.getElementById('hours-message').value})});toast('✅ Güncellendi')}
-
-// ETİKETLER
-async function loadTagList(){allTags=await api('tags')||[];document.getElementById('tag-list').innerHTML=allTags.map(t=>`<div class="rank-item"><span class="tag-badge" style="background:${t.color}">${t.name}</span><button class="btn-sm btn-danger" onclick="deleteTag(${t.id})">🗑</button></div>`).join('')||'<p class="empty">Etiket yok</p>'}
-async function addTag(){const n=document.getElementById('new-tag').value;const c=document.getElementById('new-tag-color').value;if(!n)return toast('İsim girin','error');await api('tags','POST',{name:n,color:c});document.getElementById('new-tag').value='';loadTagList();toast('✅ Etiket eklendi')}
-async function deleteTag(id){if(!confirm('Silinsin mi?'))return;await api('tags&id='+id,'DELETE');loadTagList();toast('🗑 Silindi')}
-
-// AKILLI OTOMATİK YENİLEME - Ekranı bozmadan arka planda güncelle
-let autoRefresh;
-function startAutoRefresh() {
-  if (autoRefresh) clearInterval(autoRefresh);
-  autoRefresh = setInterval(async () => {
-    const activePage = document.querySelector('.page.active')?.id;
-    
-    // Dashboard: sadece stat sayılarını güncelle (DOM yeniden oluşturma yok)
-    if (activePage === 'page-dashboard') {
-      try {
-        const d = await api('dashboard');
-        if(d) {
-          document.getElementById('stat-today').textContent = d.todayMessages;
-          document.getElementById('stat-total').textContent = d.totalMessages;
-          document.getElementById('stat-conversations').textContent = d.activeConversations;
-          document.getElementById('stat-human').textContent = d.humanConversations || 0;
-        }
-      } catch(e){}
-    }
-    
-    // Konuşmalar: Açık chat varsa sadece yeni mesajları kontrol et (scroll pozisyonunu bozmaz)
-    else if (activePage === 'page-conversations' && currentPhone) {
-      try {
-        const msgs = await api('conversation-detail&phone=' + currentPhone);
-        if (!msgs) return;
-        const chatEl = document.getElementById('chat-messages');
-        const currentCount = chatEl.querySelectorAll('.chat-bubble').length;
-        if (msgs.length > currentCount) {
-          // Sadece yeni mesajlar varsa güncelle
-          const wasAtBottom = chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight < 50;
-          chatEl.innerHTML = msgs.map(m => `<div class="chat-bubble ${m.direction}"><div class="bubble-content">${m.media_url ? `<a href="${m.media_url}" target="_blank">📎 ${m.media_type}</a><br>` : ''}${m.content}</div><div class="bubble-meta">${m.model_used ? '🤖 ' + m.model_used : ''} ${new Date(m.created_at).toLocaleTimeString('tr-TR')}</div></div>`).join('');
-          if (wasAtBottom) chatEl.scrollTop = chatEl.scrollHeight;
-        }
-      } catch(e){}
-    }
-    
-    // Leads: Sheet zaten kendi 30sn timer'ıyla sessizce güncelleniyor, burada tekrar çağırmıyoruz
-    
-  }, 10000); // 10 saniye (eskisi 5'ti, gereksiz yük)
+/* AYARLAR & ETİKETLER */
+async function loadSettings() {
+  const s = await api('settings'); if(!s) return;
+  document.getElementById('model-select').value = s.ai_model || 'gemini-2.5-flash-lite';
+  allTags = await api('tags') || [];
+  document.getElementById('tag-list').innerHTML = allTags.map(t => 
+    `<div style="display:flex; justify-content:space-between; padding:12px; background:var(--bg-hover); border-radius:var(--radius-sm);">
+      <span style="color:${t.color}; font-weight:600;">${t.name}</span>
+      <button class="btn-sm btn-danger" onclick="deleteTag(${t.id})">Sil</button>
+    </div>`
+  ).join('');
 }
+async function addTag() {
+  await api('tags','POST',{name:document.getElementById('new-tag').value, color:document.getElementById('new-tag-color').value});
+  document.getElementById('new-tag').value=''; loadSettings();
+}
+async function deleteTag(id) { await api('tags&id='+id,'DELETE'); loadSettings(); }
 
+// Başlatıcı
 checkAuth();
-startAutoRefresh();
+
+// Otomatik yenileme
+setInterval(async () => {
+  const page = document.querySelector('.page.active')?.id;
+  if (page === 'page-dashboard') loadDashboard();
+  if (page === 'page-conversations' && currentPhone) {
+    const msgs = await api('conversation-detail&phone=' + currentPhone);
+    if (!msgs) return;
+    const chatEl = document.getElementById('chat-messages');
+    const currentCount = chatEl.querySelectorAll('.message-bubble').length;
+    if (msgs.length > currentCount) loadChat(currentPhone, currentChannel);
+  }
+}, 8000);
+
 </script>
 </body>
 </html>
