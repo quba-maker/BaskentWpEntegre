@@ -325,24 +325,43 @@ Cevap: Muayene ücretimiz branşa göre değişiklik göstermektedir. Hangi böl
 
     <!-- FORM YÖNETİMİ -->
     <div id="page-form-management" class="page">
-      <h1>📋 Form Yönetimi</h1>
-      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;">
-        <input type="text" id="fm-search" placeholder="🔍 İsim, telefon veya şehir ara..." style="flex:1;min-width:200px;" oninput="loadFormList()">
-        <select id="fm-campaign" onchange="loadFormList()" style="min-width:180px;">
-          <option value="">Tüm Kampanyalar</option>
-        </select>
-        <select id="fm-stage" onchange="loadFormList()" style="min-width:140px;">
-          <option value="">Tüm Durumlar</option>
-          <option value="new">🆕 Yeni</option>
-          <option value="contacted">📞 İletişime Geçildi</option>
-          <option value="responded">💬 Cevap Verdi</option>
-          <option value="appointed">✅ Randevu Aldı</option>
-          <option value="lost">❌ Kaybedildi</option>
-        </select>
-        <button class="btn btn-secondary btn-sm" onclick="loadFormList()">🔄</button>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 20px;">
+        <h1 style="margin:0">📋 Form Yönetimi</h1>
+        <div class="sheet-tabs" style="margin:0; border:none; background:var(--bg-card); border-radius:12px; padding:4px;">
+          <button class="sheet-tab active" id="tab-fm-new" onclick="switchFmTab('new')" style="border-radius:8px;">🚀 Otomatik Formlar (Webhook)</button>
+          <button class="sheet-tab" id="tab-fm-sheets" onclick="switchFmTab('sheets')" style="border-radius:8px;">🗂️ Manuel Tablolar (Google Sheets)</button>
+        </div>
       </div>
-      <div id="fm-count" style="color:var(--text-muted);font-size:13px;margin-bottom:12px;"></div>
-      <div id="fm-list"></div>
+
+      <!-- YENİ SİSTEM (WEBHOOKS) -->
+      <div id="fm-view-new">
+        <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;">
+          <input type="text" id="fm-search" placeholder="🔍 İsim, telefon veya şehir ara..." style="flex:1;min-width:200px;" oninput="loadFormList()">
+          <select id="fm-campaign" onchange="loadFormList()" style="min-width:180px;">
+            <option value="">Tüm Kampanyalar</option>
+          </select>
+          <select id="fm-stage" onchange="loadFormList()" style="min-width:140px;">
+            <option value="">Tüm Durumlar</option>
+            <option value="new">🆕 Yeni</option>
+            <option value="contacted">📞 İletişime Geçildi</option>
+            <option value="responded">💬 Cevap Verdi</option>
+            <option value="appointed">✅ Randevu Aldı</option>
+            <option value="lost">❌ Kaybedildi</option>
+          </select>
+          <button class="btn btn-secondary btn-sm" onclick="loadFormList()">🔄</button>
+        </div>
+        <div id="fm-count" style="color:var(--text-muted);font-size:13px;margin-bottom:12px;"></div>
+        <div id="fm-list"></div>
+      </div>
+
+      <!-- ESKİ SİSTEM (GOOGLE SHEETS) -->
+      <div id="fm-view-sheets" style="display:none;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px">
+          <div id="sheet-tabs" class="sheet-tabs" style="margin:0; flex-wrap:wrap; gap:8px;"></div>
+          <div id="sheet-row-count" style="color:var(--text-muted); font-size:13px;"></div>
+        </div>
+        <div id="lead-list"></div>
+      </div>
     </div>
 
     <!-- FORM YÖNETİMİ DETAY SAYFASI -->
@@ -525,7 +544,7 @@ document.querySelectorAll('.nav-btn').forEach(b => {
     document.getElementById('page-' + b.dataset.page).classList.add('active');
     
     // Yükleme fonksiyonları
-    ({dashboard:loadDashboard, leads:loadLeads, conversations:loadConversations, training:loadPrompt, templates:loadTemplates, analytics:loadAnalytics, settings:loadSettings, appointments:loadAppointments, 'form-management':loadFormList})[b.dataset.page]?.();
+    ({dashboard:loadDashboard, leads:loadSheets, conversations:loadConversations, training:loadPrompt, templates:loadTemplates, analytics:loadAnalytics, settings:loadSettings, appointments:loadAppointments, 'form-management':loadFormManagement})[b.dataset.page]?.();
     // Mobilde sidebar'ı kapat
     document.getElementById('sidebar')?.classList.remove('open');
   });
@@ -679,10 +698,73 @@ async function loadFormList() {
   }).join('');
 }
 
+function loadFormManagement() {
+  loadFormList();
+  loadSheets();
+}
+
+function switchFmTab(tab) {
+  document.getElementById('tab-fm-new').classList.remove('active');
+  document.getElementById('tab-fm-sheets').classList.remove('active');
+  document.getElementById('tab-fm-' + tab).classList.add('active');
+  
+  document.getElementById('fm-view-new').style.display = tab === 'new' ? 'block' : 'none';
+  document.getElementById('fm-view-sheets').style.display = tab === 'sheets' ? 'block' : 'none';
+}
+
 async function updateLeadStage(id, stage) {
   await api('update-lead-stage','POST',{id, stage});
   loadFormList();
   toast('Lead durumu güncellendi ✅');
+}
+
+/* GOOGLE SHEETS ENTEGRASYONU (ESKİ SİSTEM) */
+window._activeSheet = null; window._sheetRefreshTimer = null;
+async function loadSheets() {
+  document.getElementById('lead-list').innerHTML = '<p style="text-align:center;padding:40px;color:var(--text-muted);">⏳ Google Sheets verileri yükleniyor...</p>';
+  try {
+    const resp = await fetch('/api/sheets'); const data = await resp.json();
+    if(!data.success) return document.getElementById('lead-list').innerHTML = `<p class="empty">❌ Hata: ${data.error}</p>`;
+    window._activeSheet = data.activeSheet;
+    document.getElementById('sheet-tabs').innerHTML = data.tabs.map(t => `<button class="sheet-tab ${t.title === data.activeSheet ? 'active' : ''}" onclick="loadSheetData('${t.title.replace(/'/g, "\\'")}')">${t.title}</button>`).join('');
+    renderSheetTable(data.headers, data.rows, data.total);
+  } catch(e) { document.getElementById('lead-list').innerHTML = `<p class="empty">❌ Google Sheets bağlantı hatası</p>`; }
+}
+
+async function loadSheetData(sheetName) {
+  window._activeSheet = sheetName;
+  document.getElementById('lead-list').innerHTML = '<p style="text-align:center;padding:40px;color:var(--text-muted);">⏳ Sekme yükleniyor...</p>';
+  try {
+    const tabResp = await fetch('/api/sheets?action=tabs'); const tabData = await tabResp.json();
+    if(tabData.success) document.getElementById('sheet-tabs').innerHTML = tabData.tabs.map(t => `<button class="sheet-tab ${t.title === sheetName ? 'active' : ''}" onclick="loadSheetData('${t.title.replace(/'/g, "\\'")}')">${t.title}</button>`).join('');
+    const resp = await fetch(`/api/sheets?action=data&sheet=${encodeURIComponent(sheetName)}`); const data = await resp.json();
+    if(data.success) renderSheetTable(data.headers, data.rows, data.total);
+  } catch(e) {}
+}
+
+function renderSheetTable(headers, rows, total) {
+  document.getElementById('sheet-row-count').textContent = `📋 ${total} kayıt`;
+  if(!headers || headers.length === 0) return document.getElementById('lead-list').innerHTML = '<p class="empty">Veri yok</p>';
+  const editableCols = {};
+  headers.forEach((h, idx) => { const lower = h.toLowerCase().replace(/\s+/g, '_'); if(lower.includes('lead_status') || lower === 'status') editableCols[idx] = 'status'; if(lower.includes('geri_dönüş') || lower.includes('geri_donus') || lower.includes('geri dönüş')) editableCols[idx] = 'text'; });
+  const statusOptions = ['', 'CREATED', 'İletişime Geçildi', 'Cevap Verdi', 'İlgili', 'Randevu Aldı', 'Geldi', 'Tedavi Oldu', 'Soğuk'];
+  let html = `<div style="overflow-x:auto;"><table class="data-table"><thead><tr><th class="row-num">#</th>${headers.map((h, j) => `<th${editableCols[j] ? ' style="color:#4ade80;"' : ''}>${h}</th>`).join('')}</tr></thead><tbody>`;
+  rows.forEach((row, i) => {
+    html += `<tr><td class="row-num">${i + 1}</td>`;
+    headers.forEach((h, j) => {
+      const val = row[j] || ''; const editType = editableCols[j];
+      if(editType === 'status') html += `<td style="padding:4px"><select style="background:var(--bg-hover);border:none;color:white;padding:4px;" onchange="updateSheetCell(${i}, ${j}, this.value)">${statusOptions.map(s => `<option value="${s}" ${val === s ? 'selected' : ''}>${s || '—'}</option>`).join('')}</select></td>`;
+      else if(editType === 'text') html += `<td style="padding:4px"><input type="text" style="background:var(--bg-hover);border:none;color:white;padding:4px;margin:0;" value="${String(val).replace(/"/g, '&quot;')}" onblur="updateSheetCell(${i}, ${j}, this.value)" /></td>`;
+      else html += `<td>${val}</td>`;
+    });
+    html += '</tr>';
+  });
+  document.getElementById('lead-list').innerHTML = html + '</tbody></table></div>';
+}
+
+async function updateSheetCell(row, col, value) {
+  const resp = await fetch('/api/sheets?action=update', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ sheetName: window._activeSheet, row, col, value }) });
+  const data = await resp.json(); if(data.success) toast('Güncellendi'); else toast('Hata', 'error');
 }
 
 let currentInboxFilter = 'all';
