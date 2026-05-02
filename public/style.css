@@ -238,3 +238,16 @@ textarea:focus, input:focus, select:focus { outline: none; border-color: var(--a
 
 /* LEAD BADGE in inbox */
 .lead-badge { font-size: 9px; background: linear-gradient(135deg, #3b82f6, #8b5cf6); color: white; padding: 1px 6px; border-radius: 8px; font-weight: 600; letter-spacing: 0.3px; }
+
+/* NOTIFICATION BELL */
+.notif-bell { position: relative; cursor: pointer; font-size: 16px; display: flex; align-items: center; margin-left: auto; padding: 4px; transition: transform 0.2s; }
+.notif-bell:hover { transform: scale(1.15); }
+.notif-count { position: absolute; top: -4px; right: -6px; background: #ef4444; color: white; font-size: 9px; font-weight: 700; min-width: 16px; height: 16px; border-radius: 8px; display: flex; align-items: center; justify-content: center; padding: 0 3px; animation: pulse-notif 2s infinite; }
+@keyframes pulse-notif { 0%,100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.4); } 50% { box-shadow: 0 0 0 6px rgba(239,68,68,0); } }
+
+/* APPOINTMENT BADGE */
+.apt-badge { background: #ef4444; color: white; font-size: 10px; font-weight: 700; min-width: 18px; height: 18px; border-radius: 9px; display: inline-flex; align-items: center; justify-content: center; padding: 0 4px; margin-left: 6px; animation: pulse-notif 2s infinite; }
+
+/* TOAST */
+.toast { position: fixed; bottom: 24px; right: 24px; background: #22c55e; color: white; padding: 12px 20px; border-radius: 10px; font-weight: 600; font-size: 14px; z-index: 9999; box-shadow: 0 8px 24px rgba(34,197,94,0.3); animation: slideUp 0.3s ease; }
+@keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }

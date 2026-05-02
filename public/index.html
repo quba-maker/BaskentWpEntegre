@@ -24,10 +24,11 @@
 <!-- APP -->
 <div class="app" id="main-app" style="display:none">
   <nav class="sidebar">
-    <div class="logo"><div class="logo-icon">🏥</div><span>Başkent Paneli</span></div>
+    <div class="logo"><div class="logo-icon">🏥</div><span>Başkent Paneli</span><div id="notif-bell" class="notif-bell" onclick="showNotifications()" style="display:none">🔔<span id="notif-count" class="notif-count">0</span></div></div>
     <div class="nav-items">
       <button class="nav-btn active" data-page="dashboard">📊 Gösterge Paneli</button>
       <button class="nav-btn" data-page="conversations">💬 Tüm Mesajlar</button>
+      <button class="nav-btn" data-page="appointments">📅 Randevu Talepleri <span id="apt-badge" class="apt-badge" style="display:none">0</span></button>
       <button class="nav-btn" data-page="leads">🎯 Hasta Formları</button>
       <button class="nav-btn" data-page="training">🧠 Bot Eğitimi</button>
       <button class="nav-btn" data-page="templates">📋 Hızlı Yanıtlar</button>
@@ -203,6 +204,24 @@ Cevap: Muayene ücretimiz branşa göre değişiklik göstermektedir. Hangi böl
       </div>
     </div>
 
+    <!-- RANDEVU TALEPLERİ -->
+    <div id="page-appointments" class="page">
+      <h1>📅 Randevu Talepleri</h1>
+      <div class="stats-grid">
+        <div class="stat-card" style="border-color:#f59e0b"><div class="stat-value" id="apt-pending" style="color:#f59e0b">0</div><div class="stat-label">Bekleyen</div></div>
+        <div class="stat-card" style="border-color:#3b82f6"><div class="stat-value" id="apt-called" style="color:#3b82f6">0</div><div class="stat-label">Arandı</div></div>
+        <div class="stat-card" style="border-color:#22c55e"><div class="stat-value" id="apt-confirmed" style="color:#22c55e">0</div><div class="stat-label">Randevu Alındı</div></div>
+        <div class="stat-card" style="border-color:#ef4444"><div class="stat-value" id="apt-noshow" style="color:#ef4444">0</div><div class="stat-label">Gelmedi</div></div>
+      </div>
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px">
+          <h2>Talep Listesi</h2>
+          <button class="btn btn-secondary btn-sm" onclick="loadAppointments()">🔄 Yenile</button>
+        </div>
+        <div id="appointment-list"></div>
+      </div>
+    </div>
+
     <!-- LEADS (Sheets) -->
     <div id="page-leads" class="page">
       <h1>🎯 Lead (Müşteri) Panosu</h1>
@@ -252,6 +271,7 @@ Cevap: Muayene ücretimiz branşa göre değişiklik göstermektedir. Hangi böl
         <div class="card"><h2>En Aktif Hastalar</h2><div id="top-phones"></div></div>
         <div class="card"><h2>Model Kullanımı</h2><div id="model-usage"></div></div>
       </div>
+      <div id="advanced-analytics-content" style="margin-top:20px"></div>
     </div>
 
     <!-- SETTINGS -->
@@ -374,7 +394,7 @@ document.querySelectorAll('.nav-btn').forEach(b => {
     document.getElementById('page-' + b.dataset.page).classList.add('active');
     
     // Yükleme fonksiyonları
-    ({dashboard:loadDashboard, leads:loadLeads, conversations:loadConversations, training:loadPrompt, templates:loadTemplates, analytics:loadAnalytics, settings:loadSettings})[b.dataset.page]?.();
+    ({dashboard:loadDashboard, leads:loadLeads, conversations:loadConversations, training:loadPrompt, templates:loadTemplates, analytics:loadAnalytics, settings:loadSettings, appointments:loadAppointments})[b.dataset.page]?.();
   });
 });
 
@@ -790,7 +810,7 @@ async function addTemplate(){const t=document.getElementById('tpl-title').value,
 async function deleteTemplate(id){if(!confirm('Silinsin mi?'))return;await api('templates&id='+id,'DELETE');loadTemplates();toast('Silindi')}
 
 /* ANALİTİK */
-async function loadAnalytics(){const d=await api('analytics');if(!d)return;const mx=Math.max(...(d.daily||[]).map(x=>+x.count),1);document.getElementById('chart-daily').innerHTML=(d.daily||[]).map(x=>`<div style="display:flex; flex-direction:column; align-items:center; flex:1; height:100%; justify-content:flex-end;"><div style="background:var(--accent-primary); width:100%; max-width:30px; height:${+x.count/mx*100}%; border-radius:4px 4px 0 0; position:relative;"><span style="position:absolute; top:-20px; font-size:10px; width:100%; text-align:center;">${x.count}</span></div><div style="font-size:10px; margin-top:8px; color:var(--text-muted);">${new Date(x.date).toLocaleDateString('tr-TR',{weekday:'short'})}</div></div>`).join('')||'<p class="empty">Veri yok</p>';const mh=Math.max(...(d.hourly||[]).map(x=>+x.count),1);document.getElementById('chart-hourly').innerHTML=(d.hourly||[]).map(x=>`<div style="display:flex; flex-direction:column; align-items:center; flex:1; height:100%; justify-content:flex-end;"><div style="background:#10b981; width:100%; max-width:30px; height:${+x.count/mh*100}%; border-radius:4px 4px 0 0; position:relative;"><span style="position:absolute; top:-20px; font-size:10px; width:100%; text-align:center;">${x.count}</span></div><div style="font-size:10px; margin-top:8px; color:var(--text-muted);">${x.hour}:00</div></div>`).join('')||'<p class="empty">Veri yok</p>';document.getElementById('top-phones').innerHTML=(d.topPhones||[]).map((p,i)=>`<div style="display:flex; justify-content:space-between; padding:12px; background:var(--bg-hover); margin-bottom:4px; border-radius:6px;"><span>#${i+1} 📱 ${p.phone_number}</span><span style="color:var(--text-muted);">${p.count} mesaj</span></div>`).join('');document.getElementById('model-usage').innerHTML=(d.modelUsage||[]).map(m=>`<div style="display:flex; justify-content:space-between; padding:12px; background:var(--bg-hover); margin-bottom:4px; border-radius:6px;"><span>🤖 ${m.model_used}</span><span style="color:var(--text-muted);">${m.count}</span></div>`).join('');}
+async function loadAnalytics(){const d=await api('analytics');if(!d)return;const mx=Math.max(...(d.daily||[]).map(x=>+x.count),1);document.getElementById('chart-daily').innerHTML=(d.daily||[]).map(x=>`<div style="display:flex; flex-direction:column; align-items:center; flex:1; height:100%; justify-content:flex-end;"><div style="background:var(--accent-primary); width:100%; max-width:30px; height:${+x.count/mx*100}%; border-radius:4px 4px 0 0; position:relative;"><span style="position:absolute; top:-20px; font-size:10px; width:100%; text-align:center;">${x.count}</span></div><div style="font-size:10px; margin-top:8px; color:var(--text-muted);">${new Date(x.date).toLocaleDateString('tr-TR',{weekday:'short'})}</div></div>`).join('')||'<p class="empty">Veri yok</p>';const mh=Math.max(...(d.hourly||[]).map(x=>+x.count),1);document.getElementById('chart-hourly').innerHTML=(d.hourly||[]).map(x=>`<div style="display:flex; flex-direction:column; align-items:center; flex:1; height:100%; justify-content:flex-end;"><div style="background:#10b981; width:100%; max-width:30px; height:${+x.count/mh*100}%; border-radius:4px 4px 0 0; position:relative;"><span style="position:absolute; top:-20px; font-size:10px; width:100%; text-align:center;">${x.count}</span></div><div style="font-size:10px; margin-top:8px; color:var(--text-muted);">${x.hour}:00</div></div>`).join('')||'<p class="empty">Veri yok</p>';document.getElementById('top-phones').innerHTML=(d.topPhones||[]).map((p,i)=>`<div style="display:flex; justify-content:space-between; padding:12px; background:var(--bg-hover); margin-bottom:4px; border-radius:6px;"><span>#${i+1} 📱 ${p.phone_number}</span><span style="color:var(--text-muted);">${p.count} mesaj</span></div>`).join('');document.getElementById('model-usage').innerHTML=(d.modelUsage||[]).map(m=>`<div style="display:flex; justify-content:space-between; padding:12px; background:var(--bg-hover); margin-bottom:4px; border-radius:6px;"><span>🤖 ${m.model_used}</span><span style="color:var(--text-muted);">${m.count}</span></div>`).join('');loadAdvancedAnalytics();}
 
 
 /* AYARLAR & ETİKETLER */
@@ -811,13 +831,96 @@ async function addTag() {
 }
 async function deleteTag(id) { await api('tags&id='+id,'DELETE'); loadSettings(); }
 
+// ========== RANDEVU TALEPLERİ ==========
+async function loadAppointments() {
+  const data = await api('appointments');
+  if (!data) return;
+  document.getElementById('apt-pending').textContent = data.counts.pending;
+  document.getElementById('apt-called').textContent = data.counts.called;
+  document.getElementById('apt-confirmed').textContent = data.counts.confirmed;
+  document.getElementById('apt-noshow').textContent = data.counts.noshow;
+  const badge = document.getElementById('apt-badge');
+  if (data.counts.pending > 0) { badge.textContent = data.counts.pending; badge.style.display = 'inline'; }
+  else { badge.style.display = 'none'; }
+  const list = document.getElementById('appointment-list');
+  if (data.events.length === 0) { list.innerHTML = '<div class="empty" style="padding:30px"><div class="empty-icon">📅</div>Henüz randevu talebi yok</div>'; return; }
+  const sC = { pending:'#f59e0b', called:'#3b82f6', confirmed:'#22c55e', noshow:'#ef4444', cancelled:'#6b7280' };
+  const sL = { pending:'⏳ Bekliyor', called:'📞 Arandı', confirmed:'✅ Alındı', noshow:'❌ Gelmedi', cancelled:'🚫 İptal' };
+  list.innerHTML = data.events.map(e => {
+    const nm = e.patient_name || e.phone_number;
+    const dt = new Date(e.created_at).toLocaleString('tr-TR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;background:var(--bg-hover);border-radius:var(--radius-sm);margin-bottom:8px;border-left:3px solid ${sC[e.status]||'#6b7280'}">
+      <div style="flex:1"><div style="font-weight:600;margin-bottom:4px">${nm}</div>
+        <div style="display:flex;gap:12px;flex-wrap:wrap">${e.form_name?'<span style="font-size:11px;color:var(--text-muted)">📋 '+e.form_name+'</span>':''}${e.city?'<span style="font-size:11px;color:var(--text-muted)">📍 '+e.city+'</span>':''}<span style="font-size:11px;color:var(--text-muted)">🕐 ${dt}</span></div>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:4px;max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e.details||''}</div>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center">
+        <span style="background:${sC[e.status]||'#6b7280'}20;color:${sC[e.status]||'#6b7280'};padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600">${sL[e.status]||e.status}</span>
+        <select onchange="updateAppointment(${e.id},this.value)" style="background:var(--bg-card);color:var(--text-main);border:1px solid var(--border-color);border-radius:6px;padding:4px 8px;font-size:12px">
+          <option value="">Güncelle</option><option value="called">📞 Arandı</option><option value="confirmed">✅ Alındı</option><option value="noshow">❌ Gelmedi</option><option value="cancelled">🚫 İptal</option>
+        </select>
+        <button class="btn btn-sm btn-primary" onclick="document.querySelector('[data-page=conversations]').click();setTimeout(()=>loadChat('${e.phone_number}','whatsapp'),300)" style="font-size:11px;padding:4px 8px">💬</button>
+      </div></div>`;
+  }).join('');
+}
+async function updateAppointment(id,status) { if(!status)return; await api('update-appointment','POST',{id,status}); loadAppointments(); toast('Randevu durumu güncellendi ✅'); }
+
+// ========== BİLDİRİM SİSTEMİ ==========
+async function checkNotifications() {
+  try {
+    const data = await api('notifications');
+    if (!data) return;
+    const bell = document.getElementById('notif-bell');
+    const count = document.getElementById('notif-count');
+    if (data.total > 0) { bell.style.display = 'flex'; count.textContent = data.total; }
+    else { bell.style.display = 'none'; }
+    const badge = document.getElementById('apt-badge');
+    if (data.pendingAppointments > 0) { badge.textContent = data.pendingAppointments; badge.style.display = 'inline'; }
+  } catch(e) {}
+}
+function showNotifications() {
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  document.querySelector('[data-page="appointments"]').classList.add('active');
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-appointments').classList.add('active');
+  loadAppointments();
+}
+
+// ========== GELİŞMİŞ ANALİTİK ==========
+async function loadAdvancedAnalytics() {
+  const data = await api('advanced-analytics');
+  if (!data) return;
+  let cHtml = '<table style="width:100%;font-size:13px;border-collapse:collapse"><tr style="border-bottom:1px solid var(--border-color)"><th style="text-align:left;padding:8px">Kampanya</th><th>Lead</th><th>Cevap</th><th>Randevu</th><th>Dönüşüm</th></tr>';
+  (data.campaignConversion||[]).forEach(c => {
+    const rate = c.total > 0 ? Math.round((Number(c.appointed)/Number(c.total))*100) : 0;
+    const cl = rate>20?'#22c55e':rate>10?'#f59e0b':'#ef4444';
+    cHtml += `<tr style="border-bottom:1px solid rgba(255,255,255,0.05)"><td style="padding:6px 8px;max-width:200px;overflow:hidden;text-overflow:ellipsis">${c.form_name}</td><td style="text-align:center">${c.total}</td><td style="text-align:center">${c.responded}</td><td style="text-align:center">${c.appointed}</td><td style="text-align:center;color:${cl};font-weight:600">${rate}%</td></tr>`;
+  });
+  cHtml += '</table>';
+  const el = document.getElementById('advanced-analytics-content');
+  if (el) el.innerHTML = `
+    <div class="stats-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px">
+      <div class="stat-card"><div class="stat-value" style="color:#3b82f6">${data.botMessages}</div><div class="stat-label">🤖 Bot Mesajı</div></div>
+      <div class="stat-card"><div class="stat-value" style="color:#8b5cf6">${data.humanMessages}</div><div class="stat-label">👤 Personel Mesajı</div></div>
+      <div class="stat-card"><div class="stat-value" style="color:#22c55e">${data.intlPatients}/${data.totalPatients}</div><div class="stat-label">🌍 Uluslararası</div></div>
+      <div class="stat-card"><div class="stat-value" style="color:#f59e0b">${data.avgResponseSeconds>0?Math.round(data.avgResponseSeconds)+'s':'—'}</div><div class="stat-label">⚡ Ort. Yanıt</div></div>
+    </div>
+    <div class="stats-grid" style="grid-template-columns:1fr 1fr">
+      <div class="card"><h2>📊 Kampanya Dönüşüm</h2>${cHtml}</div>
+      <div class="card"><h2>🏥 Bölüm Talep Dağılımı</h2>${(data.departmentDemand||[]).map(d=>
+        `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.05)"><span style="font-size:13px">${d.name}</span><div style="display:flex;align-items:center;gap:8px"><div style="width:${Math.min(d.count*15,200)}px;height:8px;background:linear-gradient(90deg,#3b82f6,#8b5cf6);border-radius:4px"></div><span style="font-size:12px;font-weight:600;min-width:24px;text-align:right">${d.count}</span></div></div>`
+      ).join('')}</div>
+    </div>`;
+}
+
 // Başlatıcı
 checkAuth();
 
-// Otomatik yenileme
+// Otomatik yenileme + bildirim (8 saniyede bir)
 setInterval(async () => {
   const page = document.querySelector('.page.active')?.id;
   if (page === 'page-dashboard') loadDashboard();
+  if (page === 'page-appointments') loadAppointments();
   if (page === 'page-conversations' && currentPhone) {
     const msgs = await api('conversation-detail&phone=' + currentPhone);
     if (!msgs) return;
@@ -825,6 +928,7 @@ setInterval(async () => {
     const currentCount = chatEl.querySelectorAll('.message-bubble').length;
     if (msgs.length > currentCount) loadChat(currentPhone, currentChannel);
   }
+  checkNotifications();
 }, 8000);
 
 </script>

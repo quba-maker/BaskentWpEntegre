@@ -384,6 +384,123 @@ export default async function handler(req, res) {
       return res.json({ byStage, byCampaign, byTag, todayLeads: today[0].count, totalLeads: total[0].count });
     }
 
+    // RANDEVU TALEPLERİ
+    if (action === 'appointments') {
+      try {
+        await sql`CREATE TABLE IF NOT EXISTS events (
+          id SERIAL PRIMARY KEY, phone_number VARCHAR(20), event_type VARCHAR(50),
+          details TEXT, status VARCHAR(20) DEFAULT 'pending', created_at TIMESTAMP DEFAULT NOW()
+        )`;
+      } catch(e) {}
+      
+      const events = await sql`
+        SELECT e.*, c.patient_name, l.form_name, l.city 
+        FROM events e 
+        LEFT JOIN conversations c ON c.phone_number = e.phone_number
+        LEFT JOIN leads l ON l.phone_number = e.phone_number
+        WHERE e.event_type = 'appointment_request'
+        ORDER BY e.created_at DESC LIMIT 100
+      `;
+      const counts = {
+        pending: events.filter(e => e.status === 'pending').length,
+        called: events.filter(e => e.status === 'called').length,
+        confirmed: events.filter(e => e.status === 'confirmed').length,
+        noshow: events.filter(e => e.status === 'noshow').length
+      };
+      return res.json({ events, counts });
+    }
+
+    // RANDEVU DURUM GÜNCELLE
+    if (action === 'update-appointment' && req.method === 'POST') {
+      const { id, status } = req.body;
+      await sql`UPDATE events SET status = ${status} WHERE id = ${id}`;
+      // Lead durumunu da güncelle
+      if (status === 'confirmed') {
+        const ev = await sql`SELECT phone_number FROM events WHERE id = ${id}`;
+        if (ev.length > 0) {
+          await sql`UPDATE leads SET stage = 'appointed' WHERE phone_number = ${ev[0].phone_number}`;
+          // Etiket güncelle
+          const conv = await sql`SELECT tags FROM conversations WHERE phone_number = ${ev[0].phone_number}`;
+          let tags = []; try { tags = JSON.parse(conv[0]?.tags || '[]'); } catch(e) {}
+          if (!tags.includes('Randevu Alındı')) { tags.push('Randevu Alındı'); }
+          tags = tags.filter(t => t !== 'Randevu İstiyor');
+          await sql`UPDATE conversations SET tags = ${JSON.stringify(tags)} WHERE phone_number = ${ev[0].phone_number}`;
+        }
+      }
+      return res.json({ success: true });
+    }
+
+    // BİLDİRİM SAYACI
+    if (action === 'notifications') {
+      try {
+        await sql`CREATE TABLE IF NOT EXISTS events (
+          id SERIAL PRIMARY KEY, phone_number VARCHAR(20), event_type VARCHAR(50),
+          details TEXT, status VARCHAR(20) DEFAULT 'pending', created_at TIMESTAMP DEFAULT NOW()
+        )`;
+      } catch(e) {}
+      const pendingApts = await sql`SELECT COUNT(*) as c FROM events WHERE event_type = 'appointment_request' AND status = 'pending'`;
+      const newMessages = await sql`SELECT COUNT(*) as c FROM messages WHERE direction = 'in' AND created_at > NOW() - INTERVAL '1 hour'`;
+      return res.json({ 
+        pendingAppointments: Number(pendingApts[0].c),
+        recentMessages: Number(newMessages[0].c),
+        total: Number(pendingApts[0].c) + (Number(newMessages[0].c) > 0 ? 1 : 0)
+      });
+    }
+
+    // GELİŞMİŞ ANALİTİK
+    if (action === 'advanced-analytics') {
+      // Kampanya dönüşüm oranları
+      const campaignConversion = await sql`
+        SELECT l.form_name, 
+               COUNT(*) as total,
+               COUNT(CASE WHEN l.stage = 'responded' THEN 1 END) as responded,
+               COUNT(CASE WHEN l.stage = 'appointed' THEN 1 END) as appointed
+        FROM leads l 
+        WHERE l.form_name IS NOT NULL AND l.form_name != ''
+        GROUP BY l.form_name ORDER BY total DESC
+      `;
+      
+      // Bölüm talep analizi (etiketlerden)
+      const allTags = await sql`SELECT tags FROM conversations WHERE tags IS NOT NULL AND tags != '[]'`;
+      const deptCounts = {};
+      allTags.forEach(row => {
+        try {
+          const tags = JSON.parse(row.tags);
+          tags.forEach(t => { if (!['Genel','Gurbetçi','Fiyat Sordu','Randevu İstiyor','Randevu Alındı','Görüşme Devam'].includes(t)) deptCounts[t] = (deptCounts[t]||0)+1; });
+        } catch(e) {}
+      });
+      
+      // Bot vs Personel performans
+      const botMsgs = await sql`SELECT COUNT(*) as c FROM messages WHERE direction = 'out' AND model_used NOT IN ('panel', 'toplu', 'follow-up', 'lead-auto', 'mesai-disi', 'fallback') AND model_used IS NOT NULL`;
+      const humanMsgs = await sql`SELECT COUNT(*) as c FROM messages WHERE direction = 'out' AND model_used = 'panel'`;
+      
+      // Uluslararası hastalar
+      const intlPatients = await sql`SELECT COUNT(*) as c FROM conversations WHERE phone_number NOT LIKE '90%' AND phone_number NOT LIKE 'test%'`;
+      const totalPatients = await sql`SELECT COUNT(*) as c FROM conversations WHERE phone_number NOT LIKE 'test%'`;
+      
+      // Ortalama yanıt süresi (yaklaşık)
+      const avgResponse = await sql`
+        SELECT AVG(EXTRACT(EPOCH FROM (out_msg.created_at - in_msg.created_at))) as avg_seconds
+        FROM messages in_msg
+        JOIN LATERAL (
+          SELECT created_at FROM messages 
+          WHERE phone_number = in_msg.phone_number AND direction = 'out' AND created_at > in_msg.created_at
+          ORDER BY created_at ASC LIMIT 1
+        ) out_msg ON true
+        WHERE in_msg.direction = 'in' AND in_msg.created_at > NOW() - INTERVAL '7 days'
+      `;
+
+      return res.json({
+        campaignConversion,
+        departmentDemand: Object.entries(deptCounts).map(([name, count]) => ({name, count})).sort((a,b) => b.count - a.count),
+        botMessages: Number(botMsgs[0].c),
+        humanMessages: Number(humanMsgs[0].c),
+        intlPatients: Number(intlPatients[0].c),
+        totalPatients: Number(totalPatients[0].c),
+        avgResponseSeconds: Math.round(Number(avgResponse[0]?.avg_seconds || 0))
+      });
+    }
+
     return res.status(400).json({ error: 'Geçersiz action' });
   } catch (error) {
     console.error('Panel API hatası:', error);
