@@ -8,7 +8,7 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   const SHEETS_API_KEY = process.env.GOOGLE_SHEETS_API_KEY || 'AIzaSyAxNUHQCrXzmATX4YuMgcFP3u4EW_jsJYc';
-  const SPREADSHEET_ID = process.env.GOOGLE_SPREADSHEET_ID || 'h1oSKJ-iYiZPltYUQ73_O-FaFdelhwAwtf09wVKKVs1GQ';
+  const SPREADSHEET_ID = process.env.GOOGLE_SPREADSHEET_ID || '1oSKJ-iYiZPltYUQ73_O-FaFdelhwAwtf09wVKKVs1GQ';
   const BASE_URL = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}`;
 
   try {
