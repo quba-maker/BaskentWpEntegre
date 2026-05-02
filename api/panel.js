@@ -52,7 +52,23 @@ export default async function handler(req, res) {
       const active = await sql`SELECT COUNT(*) as c FROM conversations WHERE status = 'active'`;
       const human = await sql`SELECT COUNT(*) as c FROM conversations WHERE status = 'human'`;
       const recent = await sql`SELECT m.*, c.patient_name FROM messages m LEFT JOIN conversations c ON m.phone_number = c.phone_number ORDER BY m.created_at DESC LIMIT 15`;
-      return res.json({ totalMessages: total[0].c, todayMessages: today[0].c, activeConversations: active[0].c, humanConversations: human[0].c, recentMessages: recent });
+
+      // Lead istatistikleri
+      let leadStats = { todayLeads: 0, totalLeads: 0, contacted: 0, appointed: 0, lost: 0, campaigns: [] };
+      try {
+        const lt = await sql`SELECT COUNT(*) as c FROM leads WHERE created_at >= CURRENT_DATE`;
+        const la = await sql`SELECT COUNT(*) as c FROM leads`;
+        const lc = await sql`SELECT COUNT(*) as c FROM leads WHERE stage IN ('contacted','responded')`;
+        const lp = await sql`SELECT COUNT(*) as c FROM leads WHERE stage = 'appointed'`;
+        const ll = await sql`SELECT COUNT(*) as c FROM leads WHERE stage = 'lost'`;
+        const camps = await sql`SELECT form_name, COUNT(*) as count, 
+          SUM(CASE WHEN stage = 'appointed' THEN 1 ELSE 0 END) as appointed
+          FROM leads WHERE form_name IS NOT NULL AND form_name != '' 
+          GROUP BY form_name ORDER BY count DESC LIMIT 8`;
+        leadStats = { todayLeads: lt[0].c, totalLeads: la[0].c, contacted: lc[0].c, appointed: lp[0].c, lost: ll[0].c, campaigns: camps };
+      } catch(e) {}
+
+      return res.json({ totalMessages: total[0].c, todayMessages: today[0].c, activeConversations: active[0].c, humanConversations: human[0].c, recentMessages: recent, leadStats });
     }
 
     // VARSAYILAN PROMPT
@@ -82,7 +98,38 @@ export default async function handler(req, res) {
     // KONUŞMA DETAY
     if (action === 'conversation-detail') {
       const msgs = await sql`SELECT * FROM messages WHERE phone_number = ${req.query.phone} ORDER BY created_at ASC`;
-      return res.json(msgs);
+      // Hasta'nın form geçmişini de ekle
+      let forms = [];
+      try { forms = await sql`SELECT form_name, city, email, tags, stage, created_at, contacted_at FROM leads WHERE phone_number = ${req.query.phone} ORDER BY created_at DESC`; } catch(e){}
+      return res.json({ messages: msgs, forms });
+    }
+
+    // FORM LİSTESİ (Tüm gelen formlar)
+    if (action === 'form-list') {
+      const q = req.query.q || '';
+      const campaign = req.query.campaign || '';
+      const stage = req.query.stage || '';
+      let leads;
+      if (q) {
+        const search = `%${q}%`;
+        leads = await sql`SELECT * FROM leads WHERE (patient_name ILIKE ${search} OR phone_number ILIKE ${search} OR city ILIKE ${search}) ORDER BY created_at DESC LIMIT 200`;
+      } else if (campaign) {
+        leads = await sql`SELECT * FROM leads WHERE form_name = ${campaign} ORDER BY created_at DESC LIMIT 200`;
+      } else if (stage) {
+        leads = await sql`SELECT * FROM leads WHERE stage = ${stage} ORDER BY created_at DESC LIMIT 200`;
+      } else {
+        leads = await sql`SELECT * FROM leads ORDER BY created_at DESC LIMIT 200`;
+      }
+      // Benzersiz kampanya isimleri
+      const campaigns = await sql`SELECT DISTINCT form_name FROM leads WHERE form_name IS NOT NULL AND form_name != '' ORDER BY form_name`;
+      return res.json({ leads, campaigns: campaigns.map(c => c.form_name) });
+    }
+
+    // LEAD DURUMU GÜNCELLE
+    if (action === 'update-lead-stage' && req.method === 'POST') {
+      const { id, stage } = req.body;
+      await sql`UPDATE leads SET stage = ${stage} WHERE id = ${id}`;
+      return res.json({ success: true });
     }
 
     // MESAJLARI SİL

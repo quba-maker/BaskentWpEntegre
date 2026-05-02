@@ -31,6 +31,7 @@
       <button class="nav-btn" data-page="conversations">💬 Tüm Mesajlar</button>
       <button class="nav-btn" data-page="appointments">📅 Randevu Talepleri <span id="apt-badge" class="apt-badge" style="display:none">0</span></button>
       <button class="nav-btn" data-page="leads">🎯 Hasta Formları</button>
+      <button class="nav-btn" data-page="form-management">📋 Form Yönetimi</button>
       <button class="nav-btn" data-page="training">🧠 Bot Eğitimi</button>
       <button class="nav-btn" data-page="templates">📋 Hızlı Yanıtlar</button>
       <button class="nav-btn" data-page="analytics">📈 Performans</button>
@@ -49,9 +50,21 @@
         <div class="stat-card"><div class="stat-value" id="stat-conversations">0</div><div class="stat-label">Aktif Görüşmeler</div></div>
         <div class="stat-card stat-human"><div class="stat-value" id="stat-human">0</div><div class="stat-label">Personel Müdahalesi</div></div>
       </div>
-      <div class="card" style="flex:1;">
-        <h2>Son Etkileşimler</h2>
-        <div id="recent-messages" style="display:flex; flex-direction:column; gap:10px;"></div>
+      <div class="stats-grid" style="margin-top:12px;">
+        <div class="stat-card" style="border-color:#8b5cf6"><div class="stat-value" id="stat-today-leads" style="color:#8b5cf6">0</div><div class="stat-label">Bugün Gelen Form</div></div>
+        <div class="stat-card" style="border-color:#3b82f6"><div class="stat-value" id="stat-total-leads" style="color:#3b82f6">0</div><div class="stat-label">Toplam Lead</div></div>
+        <div class="stat-card" style="border-color:#22c55e"><div class="stat-value" id="stat-appointed-leads" style="color:#22c55e">0</div><div class="stat-label">Randevu Aldı</div></div>
+        <div class="stat-card" style="border-color:#ef4444"><div class="stat-value" id="stat-lost-leads" style="color:#ef4444">0</div><div class="stat-label">Kaybedildi</div></div>
+      </div>
+      <div class="stats-grid" style="grid-template-columns:1fr 1fr; margin-top:12px;">
+        <div class="card" style="flex:1;">
+          <h2>Son Etkileşimler</h2>
+          <div id="recent-messages" style="display:flex; flex-direction:column; gap:10px;"></div>
+        </div>
+        <div class="card" style="flex:1;">
+          <h2>📊 Kampanya Performansı</h2>
+          <div id="campaign-stats"></div>
+        </div>
       </div>
     </div>
 
@@ -165,6 +178,10 @@
               <select id="crm-add-tag" class="form-control" onchange="addCRMTag(this.value)" style="width:100%; padding: 8px; border-radius: 8px; border: 1px dashed var(--border-color); background: transparent; color: var(--text-main); font-size: 13px;">
                 <option value="">+ Yeni Etiket Ekle</option>
               </select>
+            </div>
+            <div class="form-group" style="display:none" id="crm-form-history-wrapper">
+              <label>📋 Form Geçmişi</label>
+              <div id="crm-form-history" style="max-height:120px;overflow-y:auto;"></div>
             </div>
             <div class="form-group">
               <label>Özel Notlar</label>
@@ -322,6 +339,28 @@ Cevap: Muayene ücretimiz branşa göre değişiklik göstermektedir. Hangi böl
         <button class="btn btn-secondary btn-sm" onclick="loadSheetData(window._activeSheet)">🔄 Yenile</button>
       </div>
       <div id="lead-list" style="margin-top:10px;"></div>
+    </div>
+
+    <!-- FORM YÖNETİMİ -->
+    <div id="page-form-management" class="page">
+      <h1>📋 Form Yönetimi</h1>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;">
+        <input type="text" id="fm-search" placeholder="🔍 İsim, telefon veya şehir ara..." style="flex:1;min-width:200px;" oninput="loadFormList()">
+        <select id="fm-campaign" onchange="loadFormList()" style="min-width:180px;">
+          <option value="">Tüm Kampanyalar</option>
+        </select>
+        <select id="fm-stage" onchange="loadFormList()" style="min-width:140px;">
+          <option value="">Tüm Durumlar</option>
+          <option value="new">🆕 Yeni</option>
+          <option value="contacted">📞 İletişime Geçildi</option>
+          <option value="responded">💬 Cevap Verdi</option>
+          <option value="appointed">✅ Randevu Aldı</option>
+          <option value="lost">❌ Kaybedildi</option>
+        </select>
+        <button class="btn btn-secondary btn-sm" onclick="loadFormList()">🔄</button>
+      </div>
+      <div id="fm-count" style="color:var(--text-muted);font-size:13px;margin-bottom:12px;"></div>
+      <div id="fm-list"></div>
     </div>
 
     <!-- TEMPLATES -->
@@ -493,7 +532,7 @@ document.querySelectorAll('.nav-btn').forEach(b => {
     document.getElementById('page-' + b.dataset.page).classList.add('active');
     
     // Yükleme fonksiyonları
-    ({dashboard:loadDashboard, leads:loadLeads, conversations:loadConversations, training:loadPrompt, templates:loadTemplates, analytics:loadAnalytics, settings:loadSettings, appointments:loadAppointments})[b.dataset.page]?.();
+    ({dashboard:loadDashboard, leads:loadLeads, conversations:loadConversations, training:loadPrompt, templates:loadTemplates, analytics:loadAnalytics, settings:loadSettings, appointments:loadAppointments, 'form-management':loadFormList})[b.dataset.page]?.();
     // Mobilde sidebar'ı kapat
     document.getElementById('sidebar')?.classList.remove('open');
   });
@@ -517,6 +556,31 @@ async function loadDashboard() {
   document.getElementById('stat-conversations').textContent = d.activeConversations;
   document.getElementById('stat-human').textContent = d.humanConversations || 0;
   
+  // Lead istatistikleri
+  if (d.leadStats) {
+    document.getElementById('stat-today-leads').textContent = d.leadStats.todayLeads || 0;
+    document.getElementById('stat-total-leads').textContent = d.leadStats.totalLeads || 0;
+    document.getElementById('stat-appointed-leads').textContent = d.leadStats.appointed || 0;
+    document.getElementById('stat-lost-leads').textContent = d.leadStats.lost || 0;
+    
+    // Kampanya performansı
+    const campEl = document.getElementById('campaign-stats');
+    const camps = d.leadStats.campaigns || [];
+    if (camps.length > 0) {
+      campEl.innerHTML = camps.map(c => {
+        const pct = c.count > 0 ? Math.round((c.appointed / c.count) * 100) : 0;
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:var(--bg-hover);border-radius:var(--radius-sm);margin-bottom:6px;">
+          <div style="flex:1;"><div style="font-weight:600;font-size:13px;margin-bottom:2px;">${c.form_name}</div>
+            <div style="font-size:11px;color:var(--text-muted)">${c.count} lead · ${c.appointed || 0} randevu</div></div>
+          <div style="text-align:right;"><span style="font-weight:700;font-size:15px;color:${pct>=30?'#22c55e':(pct>=10?'#f59e0b':'#ef4444')}">${pct}%</span>
+            <div style="font-size:10px;color:var(--text-muted)">dönüşüm</div></div>
+        </div>`;
+      }).join('');
+    } else {
+      campEl.innerHTML = '<div class="empty" style="padding:20px"><div class="empty-icon">📊</div>Henüz kampanya verisi yok</div>';
+    }
+  }
+  
   document.getElementById('recent-messages').innerHTML = (d.recentMessages||[]).map(m => {
     const icon = m.direction === 'in' ? '👤' : '🤖';
     const isBot = m.direction === 'out' ? 'background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.2);' : 'background: var(--bg-hover);';
@@ -529,6 +593,73 @@ async function loadDashboard() {
       <div style="font-size:11px; color:#52525b; align-self:flex-start;">${new Date(m.created_at).toLocaleTimeString('tr-TR')}</div>
     </div>`;
   }).join('') || '<div class="empty">Etkileşim yok</div>';
+}
+
+// ========== FORM YÖNETİMİ ==========
+async function loadFormList() {
+  const q = document.getElementById('fm-search').value;
+  const campaign = document.getElementById('fm-campaign').value;
+  const stage = document.getElementById('fm-stage').value;
+  
+  let url = 'form-list';
+  if (q) url += '&q=' + encodeURIComponent(q);
+  else if (campaign) url += '&campaign=' + encodeURIComponent(campaign);
+  else if (stage) url += '&stage=' + encodeURIComponent(stage);
+  
+  const data = await api(url);
+  if (!data) return;
+  
+  // Kampanya dropdown'ını doldur (ilk yüklemede)
+  const sel = document.getElementById('fm-campaign');
+  if (sel.options.length <= 1 && data.campaigns) {
+    data.campaigns.forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c; opt.textContent = c;
+      sel.appendChild(opt);
+    });
+  }
+  
+  const leads = data.leads || [];
+  document.getElementById('fm-count').textContent = `${leads.length} form gösteriliyor`;
+  
+  const stageColors = { new:'#8b5cf6', contacted:'#3b82f6', responded:'#f59e0b', appointed:'#22c55e', lost:'#6b7280' };
+  const stageLabels = { new:'🆕 Yeni', contacted:'📞 İletişim', responded:'💬 Cevap', appointed:'✅ Randevu', lost:'❌ Kayıp' };
+  
+  const list = document.getElementById('fm-list');
+  if (leads.length === 0) { list.innerHTML = '<div class="empty" style="padding:30px"><div class="empty-icon">📋</div>Henüz form verisi yok</div>'; return; }
+  
+  list.innerHTML = leads.map(l => {
+    const dt = new Date(l.created_at).toLocaleString('tr-TR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+    let tags = []; try { tags = JSON.parse(l.tags || '[]'); } catch(e) {}
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:14px 16px;background:var(--bg-hover);border-radius:var(--radius-sm);margin-bottom:8px;border-left:4px solid ${stageColors[l.stage]||'#6b7280'}">
+      <div style="flex:1;">
+        <div style="font-weight:600;margin-bottom:4px;display:flex;align-items:center;gap:8px;">
+          ${l.patient_name || 'İsimsiz'} 
+          <span style="font-size:11px;background:${stageColors[l.stage]||'#6b7280'}20;color:${stageColors[l.stage]||'#6b7280'};padding:2px 8px;border-radius:10px;font-weight:500;">${stageLabels[l.stage]||l.stage}</span>
+        </div>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:4px;">
+          <span style="font-size:12px;color:var(--text-muted)">📱 ${l.phone_number}</span>
+          ${l.city ? `<span style="font-size:12px;color:var(--text-muted)">📍 ${l.city}</span>` : ''}
+          ${l.email ? `<span style="font-size:12px;color:var(--text-muted)">✉️ ${l.email}</span>` : ''}
+          <span style="font-size:11px;color:var(--text-muted)">🕐 ${dt}</span>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          ${l.form_name ? `<span style="font-size:11px;background:var(--accent-primary);color:white;padding:2px 8px;border-radius:6px;font-weight:500;">📋 ${l.form_name}</span>` : ''}
+          ${tags.map(t => `<span style="font-size:11px;background:#374151;color:#d1d5db;padding:2px 6px;border-radius:4px;">${t}</span>`).join('')}
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;flex-direction:column;">
+        <button class="btn btn-sm btn-primary" onclick="document.querySelector('[data-page=conversations]').click();setTimeout(()=>loadChat('${l.phone_number}','whatsapp'),300)" style="font-size:11px;padding:4px 10px;width:100%">💬 Sohbet</button>
+        ${l.stage !== 'appointed' ? `<button class="btn btn-sm btn-secondary" onclick="updateLeadStage(${l.id},'appointed')" style="font-size:11px;padding:4px 10px;width:100%">✅ Randevu</button>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function updateLeadStage(id, stage) {
+  await api('update-lead-stage','POST',{id, stage});
+  loadFormList();
+  toast('Lead durumu güncellendi ✅');
 }
 
 let currentInboxFilter = 'all';
@@ -699,8 +830,9 @@ async function loadChat(phone, channel) {
   }
 
   // Load Messages
-  const msgs = await api('conversation-detail&phone='+phone);
-  if(!msgs) return;
+  const data = await api('conversation-detail&phone='+phone);
+  if(!data) return;
+  const msgs = data.messages || data; // Geriye uyumluluk (eğer eski format gelirse)
   const chatEl = document.getElementById('chat-messages');
   chatEl.innerHTML = msgs.map(m => {
     const isOut = m.direction === 'out';
@@ -718,6 +850,30 @@ async function loadChat(phone, channel) {
     return `<div class="${cls}">${content}${info}</div>`;
   }).join('');
   chatEl.scrollTop = chatEl.scrollHeight;
+  
+  // Form Geçmişi — CRM panelinde göster
+  const formHistory = data.forms || [];
+  const formBox = document.getElementById('crm-form-history');
+  if (formBox) {
+    if (formHistory.length > 0) {
+      formBox.innerHTML = formHistory.map(f => {
+        const dt = new Date(f.created_at).toLocaleDateString('tr-TR',{day:'2-digit',month:'2-digit',year:'numeric'});
+        let tags = []; try { tags = JSON.parse(f.tags || '[]'); } catch(e) {}
+        return `<div style="padding:8px 10px;background:var(--bg-hover);border-radius:6px;margin-bottom:6px;font-size:12px;border-left:3px solid var(--accent-primary);">
+          <div style="font-weight:600;margin-bottom:3px;">📋 ${f.form_name || 'Genel Form'}</div>
+          <div style="color:var(--text-muted);display:flex;gap:8px;flex-wrap:wrap;">
+            <span>📅 ${dt}</span>
+            ${f.city ? `<span>📍 ${f.city}</span>` : ''}
+            ${tags.map(t => `<span style="background:var(--accent-primary);color:white;padding:1px 5px;border-radius:4px;font-size:10px;">${t}</span>`).join('')}
+          </div>
+        </div>`;
+      }).join('');
+      formBox.style.display = 'block';
+    } else {
+      formBox.innerHTML = '';
+      formBox.style.display = 'none';
+    }
+  }
 }
 
 function renderCRMTags(selected=[]) {
