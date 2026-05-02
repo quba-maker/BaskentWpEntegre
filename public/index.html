@@ -345,6 +345,17 @@ Cevap: Muayene ücretimiz branşa göre değişiklik göstermektedir. Hangi böl
       <div id="fm-list"></div>
     </div>
 
+    <!-- FORM YÖNETİMİ DETAY SAYFASI -->
+    <div id="page-form-detail" class="page" style="display:none;">
+      <div style="display:flex; align-items:center; gap:16px; margin-bottom:24px;">
+        <button class="btn btn-secondary" onclick="goBackToForms()">⬅️ Geri Dön</button>
+        <h1 style="margin:0">📄 Form Detayı</h1>
+      </div>
+      <div class="card" id="fd-content" style="max-width:800px;">
+        <!-- Form içeriği buraya yüklenecek -->
+      </div>
+    </div>
+
     <!-- TEMPLATES -->
     <div id="page-templates" class="page">
       <h1>Hızlı Yanıt Şablonları</h1>
@@ -609,6 +620,7 @@ async function loadFormList() {
   }
   
   const leads = data.leads || [];
+  currentLeads = leads;
   document.getElementById('fm-count').textContent = `${leads.length} form gösteriliyor`;
   
   const stageColors = { new:'#8b5cf6', contacted:'#3b82f6', responded:'#f59e0b', appointed:'#22c55e', lost:'#6b7280' };
@@ -660,24 +672,11 @@ async function loadFormList() {
         <div style="display:flex;gap:6px;align-items:center;flex-direction:column;min-width:110px;">
           <button class="btn btn-sm btn-primary" onclick="document.querySelector('[data-page=conversations]').click();setTimeout(()=>loadChat('${l.phone_number}','whatsapp'),300)" style="font-size:11px;padding:4px 10px;width:100%">💬 Sohbet</button>
           ${l.stage !== 'appointed' ? `<button class="btn btn-sm btn-secondary" onclick="updateLeadStage(${l.id},'appointed')" style="font-size:11px;padding:4px 10px;width:100%">✅ Randevu</button>` : ''}
-          ${hasRawData ? `<button class="btn btn-sm" onclick="toggleFormDetails(${l.id})" style="font-size:11px;padding:4px 10px;width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1)">📄 Form Detayı</button>` : ''}
+          ${hasRawData ? `<button class="btn btn-sm" onclick="showFormDetailPage(${l.id})" style="font-size:11px;padding:4px 10px;width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1)">📄 Form Detayı</button>` : ''}
         </div>
       </div>
-      ${hasRawData ? `
-      <div id="form-detail-${l.id}" style="display:none;padding:12px 16px;background:rgba(0,0,0,0.2);border-top:1px solid rgba(255,255,255,0.05);">
-        ${rawDataHtml}
-      </div>` : ''}
     </div>`;
   }).join('');
-}
-
-function toggleFormDetails(id) {
-  const el = document.getElementById(`form-detail-${id}`);
-  if (el.style.display === 'none') {
-    el.style.display = 'block';
-  } else {
-    el.style.display = 'none';
-  }
 }
 
 async function updateLeadStage(id, stage) {
