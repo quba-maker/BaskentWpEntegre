@@ -31,8 +31,8 @@ export default async function handler(req, res) {
         body.object === 'whatsapp_business_account' && 
         body.entry?.[0]?.changes?.[0]?.value?.messages?.[0]
       ) {
-        // Asenkron olarak WhatsApp modülüne gönder, yanıt bekleme
-        handleWhatsAppMessage(body);
+        // Vercel serverless ortamında fonksiyonun ölmemesi için await eklenmeli
+        await handleWhatsAppMessage(body);
         return res.status(200).send('EVENT_RECEIVED');
       }
 
@@ -41,8 +41,8 @@ export default async function handler(req, res) {
         body.object === 'page' && 
         body.entry?.[0]?.messaging?.[0]
       ) {
-        // Asenkron olarak Messenger modülüne gönder, yanıt bekleme
-        handleMessengerMessage(body);
+        // Vercel serverless ortamında fonksiyonun ölmemesi için await eklenmeli
+        await handleMessengerMessage(body);
         return res.status(200).send('EVENT_RECEIVED');
       }
 
