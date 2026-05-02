@@ -11,15 +11,12 @@ async function sendTemplateMessage(phoneId, token, phone, templateName, language
       messaging_product: 'whatsapp',
       to: phone,
       type: 'template',
-      template: {
-        name: templateName,
-        language: { code: languageCode }
-      }
+      template: { name: templateName, language: { code: languageCode } }
     }
   });
 }
 
-// Normal metin mesajı gönderme (24 saat penceresi açıkken)
+// Normal metin mesajı gönderme
 async function sendTextMessage(phoneId, token, phone, text) {
   return axios({
     method: 'POST',
@@ -28,6 +25,46 @@ async function sendTextMessage(phoneId, token, phone, text) {
     data: { messaging_product: 'whatsapp', to: phone, type: 'text', text: { body: text } }
   });
 }
+
+// Dil tespit fonksiyonu
+function detectLang(text) {
+  if (!text) return 'tr';
+  if (/[\u0600-\u06FF]/.test(text)) return 'ar';
+  if (/[\u0400-\u04FF]/.test(text)) return 'ru';
+  const l = text.toLowerCase();
+  if (/^(hello|hi|hey|i need|i want|please|thank|good)/.test(l)) return 'en';
+  if (/^(hallo|guten|ich|danke|bitte)/.test(l)) return 'de';
+  if (/^(bonjour|salut|je|merci)/.test(l)) return 'fr';
+  return 'tr';
+}
+
+// Dile göre follow-up metin mesajları
+const followUpTexts = {
+  tr: [
+    (n) => `${n ? n+', r' : 'R'}andevunuzla ilgili size ulaşmaya çalışmıştık. Size uygun bir zaman belirleyebilir miyiz? Sağlığınız bizim için önemli.`,
+    (n) => `${n ? n+', s' : 'S'}on olarak hatırlatmak istedik. Randevu veya sağlık konusunda yardımcı olabiliriz. İstediğiniz zaman bize yazabilirsiniz.`
+  ],
+  en: [
+    (n) => `${n ? n+', w' : 'W'}e tried to reach you regarding your appointment. Could we schedule a convenient time? Your health is important to us.`,
+    (n) => `${n ? n+', j' : 'J'}ust a final reminder. We are here to help with your health consultation. Feel free to message us anytime.`
+  ],
+  ar: [
+    (n) => `${n ? n+'، ' : ''}حاولنا التواصل معكم بخصوص موعدكم. هل يمكننا تحديد وقت مناسب لكم؟ صحتكم تهمنا.`,
+    (n) => `${n ? n+'، ' : ''}تذكير أخير. نحن هنا لمساعدتكم في استشارتكم الصحية. لا تترددوا في مراسلتنا في أي وقت.`
+  ],
+  de: [
+    (n) => `${n ? n+', w' : 'W'}ir haben versucht, Sie bezüglich Ihres Termins zu erreichen. Können wir eine passende Zeit vereinbaren? Ihre Gesundheit ist uns wichtig.`,
+    (n) => `${n ? n+', e' : 'E'}ine letzte Erinnerung. Wir sind hier, um Ihnen bei Ihrer Gesundheitsberatung zu helfen. Schreiben Sie uns jederzeit.`
+  ],
+  fr: [
+    (n) => `${n ? n+', n' : 'N'}ous avons essayé de vous joindre concernant votre rendez-vous. Pouvons-nous convenir d'un moment? Votre santé est importante pour nous.`,
+    (n) => `${n ? n+', u' : 'U'}n dernier rappel. Nous sommes là pour vous aider. N'hésitez pas à nous écrire à tout moment.`
+  ],
+  ru: [
+    (n) => `${n ? n+', м' : 'М'}ы пытались связаться с вами по поводу вашей записи. Можем ли мы назначить удобное время? Ваше здоровье важно для нас.`,
+    (n) => `${n ? n+', п' : 'П'}оследнее напоминание. Мы готовы помочь вам с медицинской консультацией. Пишите нам в любое время.`
+  ]
+};
 
 export default async function handler(req, res) {
   const authHeader = req.headers.authorization;
@@ -45,8 +82,8 @@ export default async function handler(req, res) {
   try { await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS follow_up_count INT DEFAULT 0`; } catch(e) {}
   try { await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_follow_up_at TIMESTAMP`; } catch(e) {}
 
-  // Kullanılacak şablon adını ayarlardan oku
-  let templateName = 'hello_world'; // Meta varsayılan onaylı şablon
+  // Şablon adını ayarlardan oku
+  let templateName = 'hello_world';
   try {
     const s = await sql`SELECT value FROM settings WHERE key = 'followup_template_name'`;
     if (s.length > 0 && s[0].value) templateName = s[0].value;
@@ -56,7 +93,8 @@ export default async function handler(req, res) {
     const staleConversations = await sql`
       SELECT c.phone_number, c.patient_name, c.follow_up_count, c.status,
         (SELECT direction FROM messages WHERE phone_number = c.phone_number ORDER BY created_at DESC LIMIT 1) as last_direction,
-        (SELECT created_at FROM messages WHERE phone_number = c.phone_number AND direction = 'in' ORDER BY created_at DESC LIMIT 1) as last_patient_msg_time
+        (SELECT created_at FROM messages WHERE phone_number = c.phone_number AND direction = 'in' ORDER BY created_at DESC LIMIT 1) as last_patient_msg_time,
+        (SELECT content FROM messages WHERE phone_number = c.phone_number AND direction = 'in' ORDER BY created_at DESC LIMIT 1) as last_patient_text
       FROM conversations c
       WHERE c.status != 'human'
         AND c.follow_up_count < 2
@@ -69,6 +107,7 @@ export default async function handler(req, res) {
       if (conv.last_direction !== 'out') { skipped++; continue; }
 
       const name = conv.patient_name || '';
+      const lang = detectLang(conv.last_patient_text);
       
       // 24 saat penceresi kontrolü
       const lastPatientMsg = conv.last_patient_msg_time ? new Date(conv.last_patient_msg_time) : null;
@@ -79,25 +118,19 @@ export default async function handler(req, res) {
 
       try {
         if (windowOpen) {
-          // ✅ Pencere açık — normal metin
-          if (conv.follow_up_count === 0) {
-            msgContent = name
-              ? `${name}, randevunuzla ilgili size ulaşmaya çalışmıştık. Size uygun bir zaman belirleyebilir miyiz? Sağlığınız bizim için önemli.`
-              : `Randevunuzla ilgili size ulaşmaya çalışmıştık. Size uygun bir zaman belirleyebilir miyiz? Sağlığınız bizim için önemli.`;
-          } else {
-            msgContent = name
-              ? `${name}, son olarak hatırlatmak istedik. Randevu veya sağlık konusunda yardımcı olabiliriz. İstediğiniz zaman bize yazabilirsiniz.`
-              : `Son olarak hatırlatmak istedik. Randevu veya sağlık konusunda yardımcı olabiliriz. İstediğiniz zaman bize yazabilirsiniz.`;
-          }
+          // ✅ Pencere açık — hastanın dilinde metin gönder
+          const texts = followUpTexts[lang] || followUpTexts.tr;
+          const idx = Math.min(conv.follow_up_count, texts.length - 1);
+          msgContent = texts[idx](name);
           await sendTextMessage(PHONE_ID, META, conv.phone_number, msgContent);
           textUsed++;
-          console.log(`📤 [Metin] Takip #${conv.follow_up_count + 1}: ${conv.phone_number}`);
+          console.log(`📤 [Metin/${lang}] Takip #${conv.follow_up_count + 1}: ${conv.phone_number}`);
         } else {
-          // ⏰ Pencere KAPALI — şablon mesaj
-          await sendTemplateMessage(PHONE_ID, META, conv.phone_number, templateName);
-          msgContent = `[Şablon: ${templateName}]`;
+          // ⏰ Pencere KAPALI — hastanın dilinde şablon gönder
+          await sendTemplateMessage(PHONE_ID, META, conv.phone_number, templateName, lang);
+          msgContent = `[Şablon: ${templateName} (${lang})]`;
           templateUsed++;
-          console.log(`📋 [Şablon] Takip #${conv.follow_up_count + 1}: ${conv.phone_number} (${Math.round(hoursSince)}s)`);
+          console.log(`📋 [Şablon/${lang}] Takip #${conv.follow_up_count + 1}: ${conv.phone_number} (${Math.round(hoursSince)}s)`);
         }
 
         await sql`INSERT INTO messages (phone_number, direction, content, model_used, channel) VALUES (${conv.phone_number}, 'out', ${msgContent}, 'follow-up', 'whatsapp')`;
