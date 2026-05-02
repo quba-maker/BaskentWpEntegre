@@ -227,3 +227,14 @@ textarea:focus, input:focus, select:focus { outline: none; border-color: var(--a
 
 /* MESSAGE IMAGES */
 .message-bubble img { display: block; max-width: 100%; border-radius: 8px; margin-bottom: 4px; }
+
+/* LEAD INFO CARD */
+.lead-info-card { background: linear-gradient(135deg, rgba(59,130,246,0.08), rgba(139,92,246,0.08)); border: 1px solid rgba(59,130,246,0.2); border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 12px; }
+.lead-info-header { font-size: 12px; font-weight: 700; color: var(--accent-primary); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+.lead-info-row { display: flex; justify-content: space-between; padding: 3px 0; font-size: 12px; border-bottom: 1px solid rgba(255,255,255,0.04); }
+.lead-info-row:last-child { border-bottom: none; }
+.lead-label { color: var(--text-muted); }
+.lead-value { color: var(--text-main); font-weight: 500; text-align: right; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* LEAD BADGE in inbox */
+.lead-badge { font-size: 9px; background: linear-gradient(135deg, #3b82f6, #8b5cf6); color: white; padding: 1px 6px; border-radius: 8px; font-weight: 600; letter-spacing: 0.3px; }

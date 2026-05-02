@@ -67,8 +67,11 @@ export default async function handler(req, res) {
       const list = await sql`
         SELECT c.*, 
                (SELECT content FROM messages WHERE phone_number = c.phone_number ORDER BY created_at DESC LIMIT 1) as last_message,
-               (SELECT channel FROM messages WHERE phone_number = c.phone_number AND channel IS NOT NULL ORDER BY created_at DESC LIMIT 1) as last_channel
-        FROM conversations c ORDER BY last_message_at DESC
+               (SELECT channel FROM messages WHERE phone_number = c.phone_number AND channel IS NOT NULL ORDER BY created_at DESC LIMIT 1) as last_channel,
+               l.id as lead_id, l.form_name as lead_form_name, l.stage as lead_stage
+        FROM conversations c 
+        LEFT JOIN leads l ON l.phone_number = c.phone_number
+        ORDER BY c.last_message_at DESC
       `;
       return res.json(list);
     }
@@ -96,8 +99,35 @@ export default async function handler(req, res) {
 
     // HASTA BİLGİSİ OKU
     if (action === 'get-patient') {
-      const p = await sql`SELECT * FROM conversations WHERE phone_number = ${req.query.phone}`;
-      return res.json(p[0] || {});
+      const phone = req.query.phone;
+      const p = await sql`SELECT * FROM conversations WHERE phone_number = ${phone}`;
+      const conv = p[0] || {};
+      
+      // Lead tablosundan form bilgilerini çek (numara eşleştirme)
+      try {
+        const leads = await sql`SELECT * FROM leads WHERE phone_number = ${phone} ORDER BY created_at DESC LIMIT 1`;
+        if (leads.length > 0) {
+          const lead = leads[0];
+          conv.lead_id = lead.id;
+          conv.lead_form_name = lead.form_name;
+          conv.lead_city = lead.city;
+          conv.lead_email = lead.email;
+          conv.lead_tags = lead.tags;
+          conv.lead_stage = lead.stage;
+          conv.lead_date = lead.created_at;
+          conv.lead_ad_id = lead.ad_id;
+          conv.lead_notes = lead.notes;
+          conv.has_lead = true;
+          
+          // Hasta adı lead'den gelip conversation'da yoksa otomatik eşleştirelim
+          if (lead.patient_name && !conv.patient_name) {
+            conv.patient_name = lead.patient_name;
+            await sql`UPDATE conversations SET patient_name = ${lead.patient_name} WHERE phone_number = ${phone}`;
+          }
+        }
+      } catch(e) { console.error('Lead eşleştirme hatası:', e.message); }
+      
+      return res.json(conv);
     }
 
     // KONUŞMA DURUMU
@@ -219,26 +249,42 @@ export default async function handler(req, res) {
       }
     }
 
-    // TOPLU MESAJ
+    // TOPLU MESAJ (24h kuralı ile)
     if (action === 'bulk-message' && req.method === 'POST') {
-      const { tag, message } = req.body;
+      const { tag, message, templateName } = req.body;
       let conversations;
       if (tag === '__all__') {
-        conversations = await sql`SELECT phone_number FROM conversations`;
+        conversations = await sql`SELECT c.phone_number, 
+          (SELECT created_at FROM messages WHERE phone_number = c.phone_number AND direction = 'in' ORDER BY created_at DESC LIMIT 1) as last_in
+          FROM conversations c`;
       } else {
-        conversations = await sql`SELECT phone_number FROM conversations WHERE tags LIKE ${'%' + tag + '%'}`;
+        conversations = await sql`SELECT c.phone_number, 
+          (SELECT created_at FROM messages WHERE phone_number = c.phone_number AND direction = 'in' ORDER BY created_at DESC LIMIT 1) as last_in
+          FROM conversations c WHERE c.tags LIKE ${'%' + tag + '%'}`;
       }
-      let sent = 0, failed = 0;
+      let sent = 0, failed = 0, templateUsed = 0;
       for (const c of conversations) {
         try {
-          await axios({ method: 'POST', url: `https://graph.facebook.com/v25.0/${PHONE_ID}/messages`, headers: { Authorization: `Bearer ${META}` },
-            data: { messaging_product: 'whatsapp', to: c.phone_number, type: 'text', text: { body: message } }
-          });
-          await sql`INSERT INTO messages (phone_number, direction, content, model_used) VALUES (${c.phone_number}, 'out', ${message}, 'toplu')`;
+          const hoursSince = c.last_in ? (Date.now() - new Date(c.last_in).getTime()) / 3600000 : 999;
+          if (hoursSince < 24) {
+            // Pencere açık → normal metin
+            await axios({ method: 'POST', url: `https://graph.facebook.com/v25.0/${PHONE_ID}/messages`, headers: { Authorization: `Bearer ${META}` },
+              data: { messaging_product: 'whatsapp', to: c.phone_number, type: 'text', text: { body: message } }
+            });
+            await sql`INSERT INTO messages (phone_number, direction, content, model_used) VALUES (${c.phone_number}, 'out', ${message}, 'toplu')`;
+          } else {
+            // Pencere kapalı → şablon kullan
+            const tpl = templateName || 'randevu_hatirlatma';
+            await axios({ method: 'POST', url: `https://graph.facebook.com/v25.0/${PHONE_ID}/messages`, headers: { Authorization: `Bearer ${META}` },
+              data: { messaging_product: 'whatsapp', to: c.phone_number, type: 'template', template: { name: tpl, language: { code: 'tr' } } }
+            });
+            await sql`INSERT INTO messages (phone_number, direction, content, model_used) VALUES (${c.phone_number}, 'out', ${'[Şablon: ' + tpl + ']'}, 'toplu')`;
+            templateUsed++;
+          }
           sent++;
         } catch (e) { failed++; }
       }
-      return res.json({ success: true, sent, failed, total: conversations.length });
+      return res.json({ success: true, sent, failed, templateUsed, total: conversations.length });
     }
 
     // MEDYA GÖNDER (URL ile)

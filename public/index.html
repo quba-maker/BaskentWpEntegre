@@ -120,6 +120,17 @@
               <label>Hasta Adı / Soyadı</label>
               <input type="text" id="crm-name" placeholder="İsim giriniz">
             </div>
+
+            <!-- LEAD FORM BİLGİLERİ -->
+            <div id="crm-lead-info" class="lead-info-card" style="display:none">
+              <div class="lead-info-header">📋 Form Bilgisi</div>
+              <div class="lead-info-row"><span class="lead-label">Kampanya:</span><span id="crm-lead-form" class="lead-value">—</span></div>
+              <div class="lead-info-row"><span class="lead-label">Şehir:</span><span id="crm-lead-city" class="lead-value">—</span></div>
+              <div class="lead-info-row"><span class="lead-label">E-posta:</span><span id="crm-lead-email" class="lead-value">—</span></div>
+              <div class="lead-info-row"><span class="lead-label">Tarih:</span><span id="crm-lead-date" class="lead-value">—</span></div>
+              <div class="lead-info-row"><span class="lead-label">Durum:</span><span id="crm-lead-stage" class="lead-value">—</span></div>
+            </div>
+
             <div class="form-group">
               <label>Etiketler</label>
               <div id="crm-tags" class="tags-container"></div>
@@ -485,7 +496,7 @@ function renderConversationList() {
         ${phoneDisplay}
         <div class="contact-preview">${c.last_message || ''}</div>
         <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px;">
-          <div style="display:flex; gap:4px; flex-wrap:wrap;">${tagHtml}</div>
+          <div style="display:flex; gap:4px; flex-wrap:wrap;">${tagHtml}${c.lead_id ? '<span class="lead-badge">📋 FORM</span>' : ''}</div>
           ${stBadge}
         </div>
       </div>
@@ -534,6 +545,24 @@ async function loadChat(phone, channel) {
   document.getElementById('crm-notes').value = pData.notes || '';
   let pt = []; try { pt = JSON.parse(pData.tags||'[]'); } catch(e){}
   renderCRMTags(pt);
+
+  // Lead Form bilgilerini doldur
+  const leadInfo = document.getElementById('crm-lead-info');
+  if (pData.has_lead) {
+    leadInfo.style.display = 'block';
+    document.getElementById('crm-lead-form').textContent = pData.lead_form_name || '—';
+    document.getElementById('crm-lead-city').textContent = pData.lead_city || '—';
+    document.getElementById('crm-lead-email').textContent = pData.lead_email || '—';
+    document.getElementById('crm-lead-date').textContent = pData.lead_date ? new Date(pData.lead_date).toLocaleDateString('tr-TR') : '—';
+    const stageMap = { new:'🆕 Yeni', contacted:'📞 İletişime Geçildi', responded:'💬 Cevap Verdi', appointed:'✅ Randevu Alındı', lost:'❌ Kaybedildi' };
+    document.getElementById('crm-lead-stage').textContent = stageMap[pData.lead_stage] || pData.lead_stage || '—';
+    // Adı lead'den geliyorsa otomatik doldur
+    if (pData.patient_name && !document.getElementById('crm-name').value) {
+      document.getElementById('crm-name').value = pData.patient_name;
+    }
+  } else {
+    leadInfo.style.display = 'none';
+  }
 
   // Load Messages
   const msgs = await api('conversation-detail&phone='+phone);
