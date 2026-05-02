@@ -155,7 +155,7 @@ textarea:focus, input:focus, select:focus { outline: none; border-color: var(--a
 /* Bot Training Panel */
 .training-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; height: calc(100vh - 120px); }
 .prompt-editor-card { display: flex; flex-direction: column; height: 100%; }
-.prompt-editor-card textarea { flex: 1; font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; font-size: 13px; line-height: 1.6; padding: 20px; resize: none; background: #000; border-color: #27272a; }
+.prompt-editor-card textarea { flex: 1; min-height: 500px; width: 100%; box-sizing: border-box; font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; font-size: 14px; line-height: 1.6; padding: 20px; resize: vertical; background: #000; border-color: #27272a; border-radius: 8px; }
 
 /* Lead Pipeline (Sheets) */
 .sheet-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border-color); padding: 0 16px; overflow-x: auto; scrollbar-width: none; margin-bottom: 16px; }
