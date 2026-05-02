@@ -234,21 +234,76 @@ Cevap: Muayene ücretimiz branşa göre değişiklik göstermektedir. Hangi böl
       </div>
     </div>
 
-    <!-- RANDEVU TALEPLERİ -->
-    <div id="page-appointments" class="page">
-      <h1>📅 Randevu Talepleri</h1>
-      <div class="stats-grid">
-        <div class="stat-card" style="border-color:#f59e0b"><div class="stat-value" id="apt-pending" style="color:#f59e0b">0</div><div class="stat-label">Bekleyen</div></div>
-        <div class="stat-card" style="border-color:#3b82f6"><div class="stat-value" id="apt-called" style="color:#3b82f6">0</div><div class="stat-label">Arandı</div></div>
-        <div class="stat-card" style="border-color:#22c55e"><div class="stat-value" id="apt-confirmed" style="color:#22c55e">0</div><div class="stat-label">Randevu Alındı</div></div>
-        <div class="stat-card" style="border-color:#ef4444"><div class="stat-value" id="apt-noshow" style="color:#ef4444">0</div><div class="stat-label">Gelmedi</div></div>
-      </div>
-      <div class="card">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px">
-          <h2>Talep Listesi</h2>
-          <button class="btn btn-secondary btn-sm" onclick="loadAppointments()">🔄 Yenile</button>
+    <!-- RANDEVU TALEPLERİ VE TAKVİM -->
+    <div id="page-appointments" class="page" style="height: 100vh; overflow-y: auto; padding-bottom: 50px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 20px;">
+        <h1 style="margin:0">📅 Randevu Yönetimi</h1>
+        <div class="sheet-tabs" style="margin:0; border:none; background:var(--bg-card); border-radius:12px; padding:4px;">
+          <button class="sheet-tab active" id="tab-apt-inbox" onclick="switchAptTab('inbox')" style="border-radius:8px;">📥 Talepler / Ön Görüşme</button>
+          <button class="sheet-tab" id="tab-apt-calendar" onclick="switchAptTab('calendar')" style="border-radius:8px;">🗓️ Randevu Takvimi</button>
         </div>
-        <div id="appointment-list"></div>
+      </div>
+
+      <!-- SEKME: Gelen Kutusu (Talepler) -->
+      <div id="apt-view-inbox">
+        <div class="stats-grid">
+          <div class="stat-card" style="border-color:#f59e0b"><div class="stat-value" id="apt-pending" style="color:#f59e0b">0</div><div class="stat-label">Bekleyen</div></div>
+          <div class="stat-card" style="border-color:#3b82f6"><div class="stat-value" id="apt-called" style="color:#3b82f6">0</div><div class="stat-label">Arandı (Ön Görüşme)</div></div>
+          <div class="stat-card" style="border-color:#6b7280"><div class="stat-value" id="apt-lost" style="color:#6b7280">0</div><div class="stat-label">Olumsuz</div></div>
+        </div>
+        <div class="card">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px">
+            <h2>Gelen Talepler</h2>
+            <button class="btn btn-secondary btn-sm" onclick="loadAppointments()">🔄 Yenile</button>
+          </div>
+          <div id="appointment-list"></div>
+        </div>
+      </div>
+
+      <!-- SEKME: Randevu Takvimi -->
+      <div id="apt-view-calendar" style="display:none; height: calc(100vh - 150px);">
+        <div class="training-layout">
+          <!-- Sol Kısım: Tarih Seçimi -->
+          <div class="card" style="margin:0; flex:0 0 300px;">
+            <h2>Takvim</h2>
+            <input type="date" id="calendar-date-picker" class="form-control" style="width:100%; margin-bottom: 16px; background:var(--bg-hover); color:white; border:none; padding:12px; border-radius:8px;" onchange="filterCalendar()">
+            <div style="margin-bottom:16px;">
+              <input type="text" id="calendar-search" placeholder="İsim, Bölüm veya Numara Ara..." class="form-control" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border-color); background:var(--bg-hover); color:white;" oninput="filterCalendar()">
+            </div>
+            <div class="stats-grid" style="grid-template-columns: 1fr;">
+               <div class="stat-card" style="border-color:#22c55e; padding:12px;"><div class="stat-value" id="apt-scheduled" style="color:#22c55e; font-size:24px;">0</div><div class="stat-label">Takvimdeki Randevular</div></div>
+            </div>
+          </div>
+          
+          <!-- Sağ Kısım: Randevular -->
+          <div class="card" style="margin:0; overflow-y:auto;">
+            <h2 id="calendar-day-title">Tüm Takvim</h2>
+            <div id="calendar-list"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RANDEVU PLANLAMA MODAL -->
+    <div id="modal-schedule" class="modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:9999; align-items:center; justify-content:center;">
+      <div class="card" style="width:400px; margin:auto; box-shadow:0 10px 30px rgba(0,0,0,0.5);">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; border-bottom:1px solid var(--border-color); padding-bottom:10px;">
+          <h2 style="margin:0;">🗓️ Randevu Atama</h2>
+          <button onclick="document.getElementById('modal-schedule').style.display='none'" style="background:transparent; border:none; color:white; font-size:18px; cursor:pointer;">✕</button>
+        </div>
+        <input type="hidden" id="sch-apt-id">
+        <div class="form-group">
+          <label>Tarih ve Saat Seçimi</label>
+          <input type="datetime-local" id="sch-date" class="form-control" style="width:100%; padding:10px; background:var(--bg-hover); border:1px solid var(--border-color); color:white; border-radius:8px;">
+        </div>
+        <div class="form-group">
+          <label>Doktor / Uzman Seçimi (İsteğe Bağlı)</label>
+          <input type="text" id="sch-doctor" placeholder="Örn: Dr. Ahmet Yılmaz" class="form-control" style="width:100%; padding:10px; background:var(--bg-hover); border:1px solid var(--border-color); color:white; border-radius:8px;">
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:12px; margin-top:20px;">
+          <button class="btn btn-secondary" onclick="document.getElementById('modal-schedule').style.display='none'">İptal</button>
+          <button class="btn btn-primary" onclick="submitSchedule()">Kaydet ve Takvime Ekle</button>
+        </div>
       </div>
     </div>
 
@@ -902,38 +957,130 @@ async function addTag() {
 }
 async function deleteTag(id) { await api('tags&id='+id,'DELETE'); loadSettings(); }
 
-// ========== RANDEVU TALEPLERİ ==========
+let calendarEventsData = [];
+
+function switchAptTab(tab) {
+  document.querySelectorAll('.sheet-tab').forEach(el => el.classList.remove('active'));
+  document.getElementById('tab-apt-' + tab).classList.add('active');
+  document.getElementById('apt-view-inbox').style.display = tab === 'inbox' ? 'block' : 'none';
+  document.getElementById('apt-view-calendar').style.display = tab === 'calendar' ? 'block' : 'none';
+  if (tab === 'calendar') filterCalendar();
+}
+
 async function loadAppointments() {
   const data = await api('appointments');
   if (!data) return;
-  document.getElementById('apt-pending').textContent = data.counts.pending;
-  document.getElementById('apt-called').textContent = data.counts.called;
-  document.getElementById('apt-confirmed').textContent = data.counts.confirmed;
-  document.getElementById('apt-noshow').textContent = data.counts.noshow;
+  calendarEventsData = data.events || [];
+  
+  // INBOX VERİLERİ (Takvime eklenmemiş veya iptal olmuş hastalar)
+  const inboxEvents = calendarEventsData.filter(e => e.status !== 'scheduled' && e.status !== 'confirmed');
+  
+  document.getElementById('apt-pending').textContent = inboxEvents.filter(e => e.status === 'pending').length;
+  document.getElementById('apt-called').textContent = inboxEvents.filter(e => e.status === 'called').length;
+  document.getElementById('apt-lost').textContent = inboxEvents.filter(e => e.status === 'lost' || e.status === 'cancelled').length;
+  
   const badge = document.getElementById('apt-badge');
-  if (data.counts.pending > 0) { badge.textContent = data.counts.pending; badge.style.display = 'inline'; }
+  const pendingCount = inboxEvents.filter(e => e.status === 'pending').length;
+  if (pendingCount > 0) { badge.textContent = pendingCount; badge.style.display = 'inline'; }
   else { badge.style.display = 'none'; }
+  
   const list = document.getElementById('appointment-list');
-  if (data.events.length === 0) { list.innerHTML = '<div class="empty" style="padding:30px"><div class="empty-icon">📅</div>Henüz randevu talebi yok</div>'; return; }
-  const sC = { pending:'#f59e0b', called:'#3b82f6', confirmed:'#22c55e', noshow:'#ef4444', cancelled:'#6b7280' };
-  const sL = { pending:'⏳ Bekliyor', called:'📞 Arandı', confirmed:'✅ Alındı', noshow:'❌ Gelmedi', cancelled:'🚫 İptal' };
-  list.innerHTML = data.events.map(e => {
+  if (inboxEvents.length === 0) { list.innerHTML = '<div class="empty" style="padding:30px"><div class="empty-icon">📥</div>Henüz gelen kutusunda talep yok</div>'; }
+  else {
+    const sC = { pending:'#f59e0b', called:'#3b82f6', lost:'#6b7280', cancelled:'#6b7280' };
+    const sL = { pending:'⏳ Bekliyor', called:'📞 Ön Görüşme Yapıldı', lost:'❌ Olumsuz', cancelled:'🚫 İptal' };
+    list.innerHTML = inboxEvents.map(e => {
+      const nm = e.patient_name || e.phone_number;
+      const dt = new Date(e.created_at).toLocaleString('tr-TR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+      return `<div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;background:var(--bg-hover);border-radius:var(--radius-sm);margin-bottom:8px;border-left:3px solid ${sC[e.status]||'#6b7280'}">
+        <div style="flex:1"><div style="font-weight:600;margin-bottom:4px;display:flex;align-items:center;gap:8px;">${nm} ${e.patient_type==='Gurbetçi'?'🌍':(e.patient_type==='Yabancı Turist'?'✈️':'🇹🇷')}</div>
+          <div style="display:flex;gap:12px;flex-wrap:wrap">${e.department?`<span style="font-size:11px;background:var(--accent-primary);color:white;padding:2px 6px;border-radius:6px;font-weight:500;">🩺 ${e.department}</span>`:''}${e.form_name?'<span style="font-size:11px;color:var(--text-muted)">📋 '+e.form_name+'</span>':''}${e.city?'<span style="font-size:11px;color:var(--text-muted)">📍 '+e.city+'</span>':''}<span style="font-size:11px;color:var(--text-muted)">🕐 ${dt}</span></div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:4px;max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e.details||''}</div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <span style="background:${sC[e.status]||'#6b7280'}20;color:${sC[e.status]||'#6b7280'};padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600">${sL[e.status]||e.status}</span>
+          <select onchange="updateAppointment(${e.id},this.value)" style="background:var(--bg-card);color:var(--text-main);border:1px solid var(--border-color);border-radius:6px;padding:4px 8px;font-size:12px">
+            <option value="">Durum Güncelle</option><option value="called">📞 Ön Görüşme</option><option value="lost">❌ Olumsuz</option>
+          </select>
+          <button class="btn btn-sm btn-primary" onclick="openScheduleModal(${e.id})" style="font-size:11px;padding:4px 8px;background:#22c55e;border-color:#22c55e;">🗓️ Takvime Ekle</button>
+          <button class="btn btn-sm btn-secondary" onclick="document.querySelector('[data-page=conversations]').click();setTimeout(()=>loadChat('${e.phone_number}','whatsapp'),300)" style="font-size:11px;padding:4px 8px">💬</button>
+        </div></div>`;
+    }).join('');
+  }
+  
+  filterCalendar(); // Takvimi de yenile
+}
+
+function openScheduleModal(id) {
+  document.getElementById('sch-apt-id').value = id;
+  document.getElementById('sch-date').value = '';
+  document.getElementById('sch-doctor').value = '';
+  document.getElementById('modal-schedule').style.display = 'flex';
+}
+
+async function submitSchedule() {
+  const id = document.getElementById('sch-apt-id').value;
+  const date = document.getElementById('sch-date').value;
+  const doctor = document.getElementById('sch-doctor').value;
+  if (!date) return toast('Lütfen tarih seçin!', 'error');
+  
+  await api('update-appointment','POST',{id, status: 'scheduled', scheduled_date: date, assigned_doctor: doctor});
+  document.getElementById('modal-schedule').style.display = 'none';
+  toast('Takvime eklendi ✅');
+  loadAppointments();
+  switchAptTab('calendar');
+}
+
+function filterCalendar() {
+  const q = (document.getElementById('calendar-search').value || '').toLowerCase();
+  const dateStr = document.getElementById('calendar-date-picker').value; // YYYY-MM-DD
+  
+  // Sadece takvimlenmiş randevular
+  let cal = calendarEventsData.filter(e => e.status === 'scheduled' || e.status === 'confirmed');
+  
+  if (dateStr) {
+    cal = cal.filter(e => e.scheduled_date && e.scheduled_date.startsWith(dateStr));
+    document.getElementById('calendar-day-title').textContent = new Date(dateStr).toLocaleDateString('tr-TR', {weekday:'long', day:'numeric', month:'long'}) + ' Randevuları';
+  } else {
+    document.getElementById('calendar-day-title').textContent = 'Tüm Gelecek Randevular';
+  }
+  
+  if (q) {
+    cal = cal.filter(e => (e.patient_name||'').toLowerCase().includes(q) || (e.phone_number||'').includes(q) || (e.department||'').toLowerCase().includes(q));
+  }
+  
+  // Tarihe göre sırala
+  cal.sort((a,b) => new Date(a.scheduled_date) - new Date(b.scheduled_date));
+  
+  document.getElementById('apt-scheduled').textContent = cal.length;
+  
+  const list = document.getElementById('calendar-list');
+  if (cal.length === 0) { list.innerHTML = '<div class="empty"><div class="empty-icon">🗓️</div>Bu kriterlere uygun takvimli randevu yok</div>'; return; }
+  
+  list.innerHTML = cal.map(e => {
     const nm = e.patient_name || e.phone_number;
-    const dt = new Date(e.created_at).toLocaleString('tr-TR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
-    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;background:var(--bg-hover);border-radius:var(--radius-sm);margin-bottom:8px;border-left:3px solid ${sC[e.status]||'#6b7280'}">
-      <div style="flex:1"><div style="font-weight:600;margin-bottom:4px;display:flex;align-items:center;gap:8px;">${nm} ${e.patient_type==='Gurbetçi'?'🌍':(e.patient_type==='Yabancı Turist'?'✈️':'🇹🇷')}</div>
-        <div style="display:flex;gap:12px;flex-wrap:wrap">${e.department?`<span style="font-size:11px;background:var(--accent-primary);color:white;padding:2px 6px;border-radius:6px;font-weight:500;">🩺 ${e.department}</span>`:''}${e.form_name?'<span style="font-size:11px;color:var(--text-muted)">📋 '+e.form_name+'</span>':''}${e.city?'<span style="font-size:11px;color:var(--text-muted)">📍 '+e.city+'</span>':''}<span style="font-size:11px;color:var(--text-muted)">🕐 ${dt}</span></div>
-        <div style="font-size:12px;color:var(--text-muted);margin-top:4px;max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e.details||''}</div>
+    const timeStr = e.scheduled_date ? new Date(e.scheduled_date).toLocaleString('tr-TR', {day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) : 'Belirsiz';
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:16px;background:var(--bg-hover);border-radius:var(--radius-sm);margin-bottom:8px;border-left:4px solid #22c55e">
+      <div style="flex:1"><div style="font-weight:600;margin-bottom:6px;font-size:15px;display:flex;align-items:center;gap:8px;">${nm} ${e.patient_type==='Gurbetçi'?'🌍':(e.patient_type==='Yabancı Turist'?'✈️':'🇹🇷')}</div>
+        <div style="display:flex;gap:16px;flex-wrap:wrap">
+          <span style="color:#22c55e;font-weight:600;font-size:13px;">🕒 ${timeStr}</span>
+          ${e.assigned_doctor ? `<span style="font-size:13px;color:var(--text-main);">👨‍⚕️ ${e.assigned_doctor}</span>` : ''}
+          ${e.department ? `<span style="font-size:12px;background:var(--accent-primary);color:white;padding:2px 8px;border-radius:6px;font-weight:500;">🩺 ${e.department}</span>`:''}
+        </div>
+        ${e.details ? `<div style="font-size:12px;color:var(--text-muted);margin-top:8px;">${e.details}</div>` : ''}
       </div>
-      <div style="display:flex;gap:6px;align-items:center">
-        <span style="background:${sC[e.status]||'#6b7280'}20;color:${sC[e.status]||'#6b7280'};padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600">${sL[e.status]||e.status}</span>
+      <div style="display:flex;gap:6px;align-items:center;flex-direction:column;">
         <select onchange="updateAppointment(${e.id},this.value)" style="background:var(--bg-card);color:var(--text-main);border:1px solid var(--border-color);border-radius:6px;padding:4px 8px;font-size:12px">
-          <option value="">Güncelle</option><option value="called">📞 Arandı</option><option value="confirmed">✅ Alındı</option><option value="noshow">❌ Gelmedi</option><option value="cancelled">🚫 İptal</option>
+           <option value="">Durum Güncelle</option>
+           <option value="confirmed">✅ Tedavi Onaylandı</option>
+           <option value="noshow">❌ Randevuya Gelmedi</option>
+           <option value="cancelled">🚫 İptal Etti</option>
         </select>
-        <button class="btn btn-sm btn-primary" onclick="document.querySelector('[data-page=conversations]').click();setTimeout(()=>loadChat('${e.phone_number}','whatsapp'),300)" style="font-size:11px;padding:4px 8px">💬</button>
+        <button class="btn btn-sm btn-secondary" onclick="document.querySelector('[data-page=conversations]').click();setTimeout(()=>loadChat('${e.phone_number}','whatsapp'),300)" style="font-size:11px;padding:4px 8px;width:100%">💬 Sohbet</button>
       </div></div>`;
   }).join('');
 }
+
 async function updateAppointment(id,status) { if(!status)return; await api('update-appointment','POST',{id,status}); loadAppointments(); toast('Randevu durumu güncellendi ✅'); }
 
 // ========== BİLDİRİM SİSTEMİ ==========

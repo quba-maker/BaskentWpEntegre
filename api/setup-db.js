@@ -11,6 +11,7 @@ export default async function handler(req, res) {
     await sql`CREATE TABLE IF NOT EXISTS conversations (
       id SERIAL PRIMARY KEY, phone_number VARCHAR(20) NOT NULL,
       patient_name VARCHAR(100), tags TEXT DEFAULT '[]', notes TEXT DEFAULT '',
+      department VARCHAR(100), patient_type VARCHAR(50),
       created_at TIMESTAMP DEFAULT NOW(), last_message_at TIMESTAMP DEFAULT NOW(),
       message_count INT DEFAULT 0, status VARCHAR(20) DEFAULT 'active'
     )`;
@@ -21,6 +22,28 @@ export default async function handler(req, res) {
       model_used VARCHAR(50), media_url TEXT, media_type VARCHAR(20),
       created_at TIMESTAMP DEFAULT NOW()
     )`;
+
+    await sql`CREATE TABLE IF NOT EXISTS leads (
+      id SERIAL PRIMARY KEY, phone_number VARCHAR(20) NOT NULL,
+      patient_name VARCHAR(100), form_name VARCHAR(100),
+      city VARCHAR(50), email VARCHAR(100),
+      tags TEXT DEFAULT '[]', stage VARCHAR(20) DEFAULT 'new',
+      notes TEXT DEFAULT '', ad_id VARCHAR(50),
+      score INT DEFAULT 0,
+      created_at TIMESTAMP DEFAULT NOW()
+    )`;
+
+    await sql`CREATE TABLE IF NOT EXISTS events (
+      id SERIAL PRIMARY KEY, phone_number VARCHAR(20),
+      event_type VARCHAR(50), details TEXT,
+      status VARCHAR(20) DEFAULT 'pending',
+      scheduled_date TIMESTAMP,
+      assigned_doctor VARCHAR(100),
+      created_at TIMESTAMP DEFAULT NOW()
+    )`;
+    // Geriye dönük kolonları ekleme garantisi (mevcut tablo varsa diye)
+    try { await sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS scheduled_date TIMESTAMP`; } catch(e){}
+    try { await sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS assigned_doctor VARCHAR(100)`; } catch(e){}
 
     await sql`CREATE TABLE IF NOT EXISTS settings (
       id SERIAL PRIMARY KEY, key VARCHAR(100) UNIQUE NOT NULL,

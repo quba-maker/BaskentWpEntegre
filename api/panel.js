@@ -429,12 +429,19 @@ export default async function handler(req, res) {
       }
     }
 
-    // RANDEVU DURUM GÜNCELLE
+    // RANDEVU DURUM GÜNCELLE & TAKVİMLE
     if (action === 'update-appointment' && req.method === 'POST') {
-      const { id, status } = req.body;
-      await sql`UPDATE events SET status = ${status} WHERE id = ${id}`;
+      const { id, status, scheduled_date, assigned_doctor } = req.body;
+      
+      if (scheduled_date) {
+        // Eğer bir tarih atandıysa durumu otomatik "scheduled" (Takvimde) yapıyoruz
+        await sql`UPDATE events SET status = 'scheduled', scheduled_date = ${scheduled_date}, assigned_doctor = ${assigned_doctor || null} WHERE id = ${id}`;
+      } else {
+        await sql`UPDATE events SET status = ${status} WHERE id = ${id}`;
+      }
+      
       // Lead durumunu da güncelle
-      if (status === 'confirmed') {
+      if (status === 'confirmed' || status === 'scheduled' || scheduled_date) {
         const ev = await sql`SELECT phone_number FROM events WHERE id = ${id}`;
         if (ev.length > 0) {
           await sql`UPDATE leads SET stage = 'appointed' WHERE phone_number = ${ev[0].phone_number}`;
