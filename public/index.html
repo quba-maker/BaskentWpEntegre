@@ -62,13 +62,27 @@
         <div class="inbox-sidebar">
           <div class="inbox-header">
             <h3>💬 Gelen Kutusu</h3>
-            <button class="btn btn-sm btn-secondary" onclick="loadConversations()">🔄</button>
+            <button class="btn btn-sm btn-secondary" onclick="loadConversations()" title="Yenile">🔄</button>
+          </div>
+          <div class="inbox-search">
+            <div class="search-input-wrapper">
+              <span class="search-icon">🔍</span>
+              <input type="text" id="inbox-search" placeholder="İsim veya numara ara..." oninput="filterConversations()">
+            </div>
           </div>
           <div class="inbox-filter-tabs">
-            <button class="filter-tab active" onclick="setInboxFilter('all')">Tümü</button>
-            <button class="filter-tab" onclick="setInboxFilter('whatsapp')">WhatsApp</button>
-            <button class="filter-tab" onclick="setInboxFilter('messenger')">Face</button>
-            <button class="filter-tab" onclick="setInboxFilter('instagram')">İnsta</button>
+            <button class="filter-tab active" data-filter="all" onclick="setInboxFilter('all')">
+              <span>Tümü</span><span class="filter-count" id="count-all">0</span>
+            </button>
+            <button class="filter-tab" data-filter="whatsapp" onclick="setInboxFilter('whatsapp')">
+              <span style="color:#25D366">●</span> WA<span class="filter-count" id="count-whatsapp">0</span>
+            </button>
+            <button class="filter-tab" data-filter="messenger" onclick="setInboxFilter('messenger')">
+              <span style="color:#0084FF">●</span> FB<span class="filter-count" id="count-messenger">0</span>
+            </button>
+            <button class="filter-tab" data-filter="instagram" onclick="setInboxFilter('instagram')">
+              <span style="color:#e1306c">●</span> IG<span class="filter-count" id="count-instagram">0</span>
+            </button>
           </div>
           <div id="conversation-list" class="contact-list"></div>
         </div>
@@ -78,6 +92,7 @@
           <div class="chat-window-header">
             <div class="chat-user-info">
               <span class="chat-user-name" id="chat-title">Bir sohbet seçin</span>
+              <span class="chat-user-phone" id="chat-phone" style="display:none"></span>
               <span class="chat-channel-badge" id="chat-channel-badge" style="display:none">📱 Kanal</span>
             </div>
             <div id="chat-actions" class="handover-control" style="display:none">
@@ -86,12 +101,15 @@
             </div>
           </div>
           <div id="chat-messages" class="chat-history">
-            <div class="empty"><div class="empty-icon">👈</div>Listeden bir hasta seçerek mesajları görebilirsiniz.</div>
+            <div class="empty"><div class="empty-icon">💬</div><div style="font-size:18px;font-weight:600;margin-bottom:4px">Sohbet Seçin</div>Listeden bir hasta seçerek mesajları görebilirsiniz.</div>
           </div>
           <div id="chat-input-area" class="chat-composer" style="display:none">
+            <button class="btn-attach" onclick="document.getElementById('file-upload').click()" title="Dosya Ekle">📎</button>
+            <input type="file" id="file-upload" style="display:none" accept="image/*,.pdf,.doc,.docx" onchange="handleFileUpload(event)">
             <input type="text" id="chat-input" placeholder="Mesajınızı buraya yazın..." onkeydown="if(event.key==='Enter')sendPanelMessage()">
             <button class="btn btn-primary" onclick="sendPanelMessage()">Gönder</button>
           </div>
+          <div id="upload-preview" class="upload-preview" style="display:none"></div>
         </div>
 
         <!-- CRM Info -->
@@ -337,12 +355,37 @@ async function loadDashboard() {
 }
 
 let currentInboxFilter = 'all';
+let cachedConversations = [];
+
+function smartDate(dateStr) {
+  const d = new Date(dateStr);
+  const now = new Date();
+  const diff = now - d;
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'Şimdi';
+  if (mins < 60) return mins + ' dk';
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const msgDay = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  if (msgDay.getTime() === today.getTime()) return d.toLocaleTimeString('tr-TR', {hour:'2-digit',minute:'2-digit'});
+  const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
+  if (msgDay.getTime() === yesterday.getTime()) return 'Dün';
+  return d.toLocaleDateString('tr-TR', {day:'numeric', month:'short'});
+}
+
+function getTagColor(tagName) {
+  const t = allTags.find(x => x.name === tagName);
+  return t ? t.color : '#3b82f6';
+}
 
 function setInboxFilter(filter) {
   currentInboxFilter = filter;
   document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
-  event.target.classList.add('active');
-  loadConversations();
+  document.querySelector(`.filter-tab[data-filter="${filter}"]`).classList.add('active');
+  renderConversationList();
+}
+
+function filterConversations() {
+  renderConversationList();
 }
 
 function switchPromptTab(tab) {
@@ -353,37 +396,64 @@ function switchPromptTab(tab) {
   document.getElementById('prompt-section-en').style.display = tab === 'en' ? 'block' : 'none';
 }
 
-/* OMNICHANNEL INBOX */
-async function loadConversations() {
-  const list = await api('conversations'); if(!list) return;
-  allTags = await api('tags') || [];
+function renderConversationList() {
+  const list = cachedConversations;
+  const search = (document.getElementById('inbox-search')?.value || '').toLowerCase();
   
-  const filteredList = currentInboxFilter === 'all' ? list : list.filter(c => {
-    const ch = c.last_channel || c.channel || 'whatsapp';
-    return ch === currentInboxFilter;
-  });
+  // Kanal sayaçları
+  const counts = {all: list.length, whatsapp: 0, messenger: 0, instagram: 0};
+  list.forEach(c => { const ch = c.last_channel || c.channel || 'whatsapp'; counts[ch] = (counts[ch]||0) + 1; });
+  document.getElementById('count-all').textContent = counts.all;
+  document.getElementById('count-whatsapp').textContent = counts.whatsapp;
+  document.getElementById('count-messenger').textContent = counts.messenger;
+  document.getElementById('count-instagram').textContent = counts.instagram;
 
-  document.getElementById('conversation-list').innerHTML = filteredList.map(c => {
-    let t = ''; try { t = JSON.parse(c.tags||'[]').map(x=>`<span class="tag-badge-display" style="background:#3b82f6;">${x}</span>`).join(''); } catch(e){}
+  let filtered = currentInboxFilter === 'all' ? list : list.filter(c => (c.last_channel || c.channel || 'whatsapp') === currentInboxFilter);
+  
+  if (search) {
+    filtered = filtered.filter(c => {
+      const name = (c.patient_name || '').toLowerCase();
+      const phone = (c.phone_number || '').toLowerCase();
+      return name.includes(search) || phone.includes(search);
+    });
+  }
+
+  document.getElementById('conversation-list').innerHTML = filtered.map(c => {
+    let tags = []; try { tags = JSON.parse(c.tags||'[]'); } catch(e){}
+    const tagHtml = tags.map(x => `<span class="tag-badge-display" style="background:${getTagColor(x)};">${x}</span>`).join('');
     const isActive = c.phone_number === currentPhone ? 'active' : '';
-    const stBadge = c.status === 'human' ? '<span class="status-badge status-human">MANUAL</span>' : '<span class="status-badge status-bot">BOT</span>';
+    const stBadge = c.status === 'human' ? '<span class="status-badge status-human">👤 MANUEL</span>' : '<span class="status-badge status-bot">🤖 BOT</span>';
     const ch = c.last_channel || c.channel || 'whatsapp';
+    const hasName = c.patient_name && c.patient_name !== c.phone_number;
+    const phoneDisplay = hasName ? `<div class="contact-phone">${c.phone_number}</div>` : '';
+    const nameDisplay = c.patient_name || c.phone_number;
+    const timeDisplay = smartDate(c.last_message_at);
+    const isRecent = (Date.now() - new Date(c.last_message_at).getTime()) < 300000;
     
     return `<div class="contact-item ${isActive}" onclick="loadChat('${c.phone_number}', '${ch}')">
-      <div class="contact-avatar">👤${getChannelIcon(ch)}</div>
+      <div class="contact-avatar">${isRecent ? '<div class="online-dot"></div>' : ''}👤${getChannelIcon(ch)}</div>
       <div class="contact-info">
         <div class="contact-top">
-          <span class="contact-name">${c.patient_name || c.phone_number}</span>
-          <span class="contact-time">${new Date(c.last_message_at).toLocaleTimeString('tr-TR', {hour:'2-digit',minute:'2-digit'})}</span>
+          <span class="contact-name">${nameDisplay}</span>
+          <span class="contact-time">${timeDisplay}</span>
         </div>
-        <div class="contact-preview">${c.last_message ? c.last_message : ''}</div>
+        ${phoneDisplay}
+        <div class="contact-preview">${c.last_message || ''}</div>
         <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px;">
-          <div style="display:flex; gap:4px;">${t}</div>
+          <div style="display:flex; gap:4px; flex-wrap:wrap;">${tagHtml}</div>
           ${stBadge}
         </div>
       </div>
     </div>`;
-  }).join('') || '<div class="empty">Konuşma bulunamadı</div>';
+  }).join('') || '<div class="empty" style="padding:30px">Konuşma bulunamadı</div>';
+}
+
+/* OMNICHANNEL INBOX */
+async function loadConversations() {
+  const list = await api('conversations'); if(!list) return;
+  allTags = await api('tags') || [];
+  cachedConversations = list;
+  renderConversationList();
 }
 
 async function loadChat(phone, channel) {
@@ -397,6 +467,8 @@ async function loadChat(phone, channel) {
   // Load patient data for CRM and Status
   const pData = await api('get-patient&phone='+phone);
   document.getElementById('chat-title').textContent = pData.patient_name || phone;
+  document.getElementById('chat-phone').textContent = phone;
+  document.getElementById('chat-phone').style.display = 'inline';
   document.getElementById('chat-channel-badge').innerHTML = getChannelBadge(currentChannel);
   document.getElementById('chat-channel-badge').style.display = 'inline-flex';
   
@@ -423,16 +495,75 @@ async function loadChat(phone, channel) {
     const isOut = m.direction === 'out';
     const isBot = m.model_used && m.model_used !== 'panel' && m.model_used !== 'toplu';
     const cls = `message-bubble ${isOut ? 'out' : 'in'} ${isOut && isBot ? 'bot-reply' : ''}`;
-    const info = `<div class="msg-info">${new Date(m.created_at).toLocaleTimeString('tr-TR', {hour:'2-digit',minute:'2-digit'})} ${isBot ? '<span class="bot-indicator">🤖 '+m.model_used+'</span>' : ''}</div>`;
-    return `<div class="${cls}">${m.content}${info}</div>`;
+    const senderLabel = isOut ? (isBot ? '🤖 Bot' : '👤 Sen') : '📩 Hasta';
+    const info = `<div class="msg-info">${senderLabel} · ${new Date(m.created_at).toLocaleTimeString('tr-TR', {hour:'2-digit',minute:'2-digit'})} ${isBot ? '<span class="bot-indicator">' + m.model_used + '</span>' : ''}</div>`;
+    
+    // Medya içerik kontrolü
+    let content = m.content;
+    if (m.media_url) {
+      if (m.media_type === 'image') content = `<img src="${m.media_url}" style="max-width:240px;border-radius:8px;margin-bottom:4px;"><br>${m.content||''}`;
+      else content = `📎 <a href="${m.media_url}" target="_blank" style="color:inherit;text-decoration:underline">${m.content||'Dosya'}</a>`;
+    }
+    return `<div class="${cls}">${content}${info}</div>`;
   }).join('');
   chatEl.scrollTop = chatEl.scrollHeight;
 }
 
 function renderCRMTags(selected=[]) {
   document.getElementById('crm-tags').innerHTML = allTags.map(t => 
-    `<div class="tag ${selected.includes(t.name)?'selected':''}" onclick="this.classList.toggle('selected')" data-val="${t.name}">${t.name}</div>`
+    `<div class="tag ${selected.includes(t.name)?'selected':''}" onclick="this.classList.toggle('selected')" data-val="${t.name}" style="--tag-color:${t.color}">${t.name}</div>`
   ).join('');
+}
+
+/* DOSYA YÜKLEME */
+let pendingFile = null;
+async function handleFileUpload(e) {
+  const file = e.target.files[0];
+  if (!file || !currentPhone) return;
+  
+  const maxSize = 16 * 1024 * 1024; // 16MB
+  if (file.size > maxSize) { toast('Dosya 16MB\'dan büyük olamaz', 'error'); return; }
+  
+  const preview = document.getElementById('upload-preview');
+  const isImage = file.type.startsWith('image/');
+  
+  if (isImage) {
+    const url = URL.createObjectURL(file);
+    preview.innerHTML = `<div class="preview-card"><img src="${url}" style="max-height:80px;border-radius:6px;"><div><strong>${file.name}</strong><div style="font-size:11px;color:var(--text-muted)">${(file.size/1024).toFixed(0)} KB</div></div><button class="btn btn-sm btn-danger" onclick="cancelUpload()">✕</button></div>`;
+  } else {
+    preview.innerHTML = `<div class="preview-card"><span style="font-size:24px">📄</span><div><strong>${file.name}</strong><div style="font-size:11px;color:var(--text-muted)">${(file.size/1024).toFixed(0)} KB</div></div><button class="btn btn-sm btn-danger" onclick="cancelUpload()">✕</button></div>`;
+  }
+  preview.style.display = 'block';
+  pendingFile = file;
+}
+
+function cancelUpload() {
+  pendingFile = null;
+  document.getElementById('upload-preview').style.display = 'none';
+  document.getElementById('file-upload').value = '';
+}
+
+async function sendFileMessage() {
+  if (!pendingFile || !currentPhone) return;
+  const formData = new FormData();
+  formData.append('file', pendingFile);
+  formData.append('phone', currentPhone);
+  formData.append('channel', currentChannel);
+  formData.append('caption', document.getElementById('chat-input').value || '');
+  
+  toast('Dosya gönderiliyor...');
+  try {
+    const r = await fetch('/api/panel?action=upload-media', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + AUTH_TOKEN },
+      body: formData
+    });
+    const data = await r.json();
+    if (data.success) { toast('Dosya gönderildi ✅'); loadChat(currentPhone, currentChannel); }
+    else toast('Dosya gönderilemedi: ' + (data.error||''), 'error');
+  } catch(e) { toast('Dosya hatası', 'error'); }
+  cancelUpload();
+  document.getElementById('chat-input').value = '';
 }
 
 async function saveCRM() {
@@ -459,12 +590,14 @@ async function deleteMessages() {
 }
 
 async function sendPanelMessage() {
+  // Dosya varsa dosya gönder
+  if (pendingFile) { await sendFileMessage(); return; }
+  
   const i = document.getElementById('chat-input');
   const m = i.value.trim();
   if(!m || !currentPhone) return;
   i.value = '';
   try {
-    // API, kanal bağımsız çalışmalı, Vercel üzerinden halledilecek.
     await api('send-message','POST',{phone:currentPhone, message:m, channel:currentChannel});
     toast('Mesaj gönderildi');
     loadChat(currentPhone, currentChannel);
