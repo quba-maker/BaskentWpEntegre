@@ -143,6 +143,9 @@ export default async function handler(req, res) {
     // HASTA BİLGİSİ GÜNCELLE (CRM)
     if (action === 'update-patient' && req.method === 'POST') {
       const { phone, patient_name, tags, notes, department, patient_type, lead_stage } = req.body;
+      let parsedTags = [];
+      try { parsedTags = JSON.parse(tags || '[]'); } catch(e){}
+
       await sql`
         UPDATE conversations 
         SET patient_name = ${patient_name || null}, 
@@ -155,6 +158,19 @@ export default async function handler(req, res) {
       if (lead_stage) {
         await sql`UPDATE leads SET stage = ${lead_stage} WHERE phone_number = ${phone}`;
       }
+
+      // OTOMATİK RANDEVU OLUŞTURMA
+      if (lead_stage === 'appointment_request' || lead_stage === 'appointed' || 
+          parsedTags.includes('Randevu İstiyor') || parsedTags.includes('Randevu Alındı')) {
+        try {
+          const recent = await sql`SELECT id FROM events WHERE phone_number = ${phone} AND event_type = 'appointment_request'`;
+          if (recent.length === 0) {
+            await sql`INSERT INTO events (phone_number, event_type, details, status) 
+                      VALUES (${phone}, 'appointment_request', 'Panel üzerinden manuel randevu etiketi/durumu eklendi', 'pending')`;
+          }
+        } catch(e) { console.error('Manuel randevu ekleme hatasi:', e); }
+      }
+
       return res.json({ success: true });
     }
 
