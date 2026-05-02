@@ -2,7 +2,7 @@ import axios from 'axios';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.setHeader('Cache-Control', 'no-store, max-age=0');
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -25,6 +25,28 @@ export default async function handler(req, res) {
         index: s.properties.index
       }));
       return res.json({ success: true, tabs });
+    }
+
+    // Hücre güncelle (POST)
+    if (action === 'update' && req.method === 'POST') {
+      const { sheetName, row, col, value } = req.body;
+      // Google Apps Script üzerinden güncelle
+      const APPS_SCRIPT_URL = process.env.GOOGLE_SHEET_UPDATE_URL || process.env.GOOGLE_SHEET_URL || 'https://script.google.com/macros/s/AKfycbw_iaJ0zqgOFYAGlkCnGnKQOzYQtPJWtbLMIEMIPuVbVkXOnDyq_1jMmII554s85sxu/exec';
+      
+      try {
+        await axios.post(APPS_SCRIPT_URL, {
+          action: 'updateCell',
+          sheet: sheetName,
+          row: row + 2, // +2 çünkü: 1-indexed + header satırı
+          col: col + 1, // 1-indexed
+          value: value
+        }, { timeout: 10000 });
+        
+        return res.json({ success: true, message: 'Hücre güncellendi' });
+      } catch (e) {
+        console.error('Sheets güncelleme hatası:', e.message);
+        return res.json({ success: false, error: e.message });
+      }
     }
 
     // Belirli bir sekmenin verilerini getir

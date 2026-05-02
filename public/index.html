@@ -323,10 +323,24 @@ function renderSheetTable(headers, rows, total) {
     return;
   }
   
+  // Düzenlenebilir sütunları belirle
+  const editableCols = {};
+  headers.forEach((h, idx) => {
+    const lower = h.toLowerCase().replace(/\s+/g, '_');
+    if(lower.includes('lead_status') || lower === 'status') editableCols[idx] = 'status';
+    if(lower.includes('geri_dönüş') || lower.includes('geri_donus') || lower.includes('geri dönüş')) editableCols[idx] = 'text';
+  });
+  
+  const statusOptions = ['', 'CREATED', 'İletişime Geçildi', 'Cevap Verdi', 'İlgili', 'Randevu Aldı', 'Geldi', 'Tedavi Oldu', 'Soğuk'];
+  
   let html = `<div style="overflow-x:auto;max-height:70vh;overflow-y:auto;">
     <table class="data-table" style="min-width:max-content;">
       <thead>
-        <tr><th class="row-num">#</th>${headers.map(h => `<th>${h}</th>`).join('')}</tr>
+        <tr><th class="row-num">#</th>${headers.map(h => {
+          const lower = h.toLowerCase().replace(/\s+/g, '_');
+          const isEditable = lower.includes('lead_status') || lower === 'status' || lower.includes('geri_dönüş') || lower.includes('geri_donus') || lower.includes('geri dönüş');
+          return `<th${isEditable ? ' style="color:#4ade80;"' : ''}>${h}${isEditable ? ' ✏️' : ''}</th>`;
+        }).join('')}</tr>
       </thead>
       <tbody>`;
   
@@ -334,20 +348,52 @@ function renderSheetTable(headers, rows, total) {
     html += `<tr><td class="row-num">${i + 1}</td>`;
     headers.forEach((h, j) => {
       const val = row[j] || '';
-      const isPhone = h.toLowerCase().includes('phone') || h.toLowerCase().includes('telefon') || h.toLowerCase().includes('whatsapp');
-      const isDate = h.toLowerCase().includes('tarih') || h.toLowerCase().includes('date') || h.toLowerCase().includes('created');
+      const editType = editableCols[j];
       
-      let cellClass = '';
-      if(isDate) cellClass = 'cell-date';
-      else if(isPhone) cellClass = 'cell-phone';
-      
-      html += `<td class="${cellClass}" title="${String(val).replace(/"/g, '&quot;')}">${val}</td>`;
+      if(editType === 'status') {
+        html += `<td class="cell-editable">
+          <select class="cell-select" onchange="updateSheetCell(${i}, ${j}, this.value)">
+            ${statusOptions.map(s => `<option value="${s}" ${val === s ? 'selected' : ''}>${s || '—'}</option>`).join('')}
+          </select>
+        </td>`;
+      } else if(editType === 'text') {
+        html += `<td class="cell-editable">
+          <input type="text" class="cell-input" value="${String(val).replace(/"/g, '&quot;')}" 
+            onblur="updateSheetCell(${i}, ${j}, this.value)" 
+            onkeydown="if(event.key==='Enter'){this.blur()}" />
+        </td>`;
+      } else {
+        const isPhone = h.toLowerCase().includes('phone') || h.toLowerCase().includes('telefon') || h.toLowerCase().includes('whatsapp');
+        const isDate = h.toLowerCase().includes('tarih') || h.toLowerCase().includes('date') || h.toLowerCase().includes('created');
+        let cellClass = '';
+        if(isDate) cellClass = 'cell-date';
+        else if(isPhone) cellClass = 'cell-phone';
+        html += `<td class="${cellClass}" title="${String(val).replace(/"/g, '&quot;')}">${val}</td>`;
+      }
     });
     html += '</tr>';
   });
   
   html += '</tbody></table></div>';
   document.getElementById('lead-list').innerHTML = html;
+}
+
+async function updateSheetCell(row, col, value) {
+  try {
+    const resp = await fetch('/api/sheets?action=update', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ sheetName: window._activeSheet, row, col, value })
+    });
+    const data = await resp.json();
+    if(data.success) {
+      toast('✅ Güncellendi');
+    } else {
+      toast('❌ Hata: ' + data.error, 'error');
+    }
+  } catch(e) {
+    toast('❌ Bağlantı hatası', 'error');
+  }
 }
 
 async function updateLeadStage(id,stage){await api('update-lead','POST',{id,stage});toast('✅ Aşama güncellendi');loadLeads()}
