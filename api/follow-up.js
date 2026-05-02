@@ -83,7 +83,7 @@ export default async function handler(req, res) {
   try { await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_follow_up_at TIMESTAMP`; } catch(e) {}
 
   // Şablon adını ayarlardan oku
-  let templateName = 'hello_world';
+  let templateName = 'randevu_hatirlatma';
   try {
     const s = await sql`SELECT value FROM settings WHERE key = 'followup_template_name'`;
     if (s.length > 0 && s[0].value) templateName = s[0].value;
