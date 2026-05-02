@@ -1,5 +1,6 @@
 import { handleWhatsAppMessage } from '../lib/channels/whatsapp.js';
 import { handleMessengerMessage } from '../lib/channels/messenger.js';
+import { handleInstagramMessage } from '../lib/channels/instagram.js';
 import leadWebhookHandler from './lead-webhook.js';
 
 export default async function handler(req, res) {
@@ -45,7 +46,16 @@ export default async function handler(req, res) {
         return res.status(200).send('EVENT_RECEIVED');
       }
 
-      // 3. FACEBOOK LEAD ADS (FORM) KONTROLÜ
+      // 3. INSTAGRAM KONTROLÜ
+      if (
+        body.object === 'instagram' && 
+        body.entry?.[0]?.messaging?.[0]
+      ) {
+        await handleInstagramMessage(body);
+        return res.status(200).send('EVENT_RECEIVED');
+      }
+
+      // 4. FACEBOOK LEAD ADS (FORM) KONTROLÜ
       if (
         body.object === 'page' && 
         body.entry?.[0]?.changes?.[0]?.field === 'leadgen'
