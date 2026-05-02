@@ -600,7 +600,7 @@ async function loadFormList() {
     if (q) params.append('q', q);
     if (campaign) params.append('campaign', campaign);
     if (stage) params.append('stage', stage);
-    url += '?' + params.toString();
+    url += '&' + params.toString();
   }
   
   const data = await api(url);
