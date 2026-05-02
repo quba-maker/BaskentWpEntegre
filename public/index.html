@@ -301,6 +301,51 @@ function getChannelBadge(channel) {
   return '<span style="color:#25D366">📱 WhatsApp</span>';
 }
 
+// Ülke kodu tespiti
+const COUNTRY_MAP = [
+  ['90','🇹🇷','Türkiye'],['49','🇩🇪','Almanya'],['44','🇬🇧','İngiltere'],['33','🇫🇷','Fransa'],
+  ['31','🇳🇱','Hollanda'],['32','🇧🇪','Belçika'],['43','🇦🇹','Avusturya'],['41','🇨🇭','İsviçre'],
+  ['46','🇸🇪','İsveç'],['45','🇩🇰','Danimarka'],['47','🇳🇴','Norveç'],['358','🇫🇮','Finlandiya'],
+  ['39','🇮🇹','İtalya'],['34','🇪🇸','İspanya'],['351','🇵🇹','Portekiz'],['30','🇬🇷','Yunanistan'],
+  ['48','🇵🇱','Polonya'],['420','🇨🇿','Çekya'],['36','🇭🇺','Macaristan'],['40','🇷🇴','Romanya'],
+  ['359','🇧🇬','Bulgaristan'],['381','🇷🇸','Sırbistan'],['385','🇭🇷','Hırvatistan'],
+  ['387','🇧🇦','Bosna Hersek'],['355','🇦🇱','Arnavutluk'],['383','🇽🇰','Kosova'],
+  ['389','🇲🇰','K.Makedonya'],['382','🇲🇪','Karadağ'],
+  ['1','🇺🇸','ABD/Kanada'],['7','🇷🇺','Rusya'],['380','🇺🇦','Ukrayna'],
+  ['375','🇧🇾','Belarus'],['370','🇱🇹','Litvanya'],['371','🇱🇻','Letonya'],['372','🇪🇪','Estonya'],
+  ['966','🇸🇦','S.Arabistan'],['971','🇦🇪','BAE'],['974','🇶🇦','Katar'],
+  ['973','🇧🇭','Bahreyn'],['965','🇰🇼','Kuveyt'],['968','🇴🇲','Umman'],
+  ['964','🇮🇶','Irak'],['963','🇸🇾','Suriye'],['962','🇯🇴','Ürdün'],
+  ['961','🇱🇧','Lübnan'],['970','🇵🇸','Filistin'],['972','🇮🇱','İsrail'],
+  ['20','🇪🇬','Mısır'],['212','🇲🇦','Fas'],['213','🇩🇿','Cezayir'],['216','🇹🇳','Tunus'],
+  ['218','🇱🇾','Libya'],['249','🇸🇩','Sudan'],['98','🇮🇷','İran'],
+  ['92','🇵🇰','Pakistan'],['91','🇮🇳','Hindistan'],['93','🇦🇫','Afganistan'],
+  ['994','🇦🇿','Azerbaycan'],['995','🇬🇪','Gürcistan'],['996','🇰🇬','Kırgızistan'],
+  ['998','🇺🇿','Özbekistan'],['993','🇹🇲','Türkmenistan'],['992','🇹🇯','Tacikistan'],
+  ['77','🇰🇿','Kazakistan'],['86','🇨🇳','Çin'],['82','🇰🇷','G.Kore'],['81','🇯🇵','Japonya'],
+  ['60','🇲🇾','Malezya'],['62','🇮🇩','Endonezya'],['66','🇹🇭','Tayland'],
+  ['55','🇧🇷','Brezilya'],['52','🇲🇽','Meksika'],['54','🇦🇷','Arjantin'],
+  ['234','🇳🇬','Nijerya'],['27','🇿🇦','G.Afrika'],['254','🇰🇪','Kenya'],
+  ['233','🇬🇭','Gana'],['251','🇪🇹','Etiyopya'],['256','🇺🇬','Uganda'],
+  ['61','🇦🇺','Avustralya'],['64','🇳🇿','Yeni Zelanda']
+];
+// Uzun kodlar önce denensin
+COUNTRY_MAP.sort((a,b) => b[0].length - a[0].length);
+
+function getCountry(phone) {
+  if (!phone) return null;
+  const p = String(phone).replace(/[^0-9]/g, '');
+  for (const [code, flag, name] of COUNTRY_MAP) {
+    if (p.startsWith(code)) return { code, flag, name };
+  }
+  return null;
+}
+function countryBadge(phone) {
+  const c = getCountry(phone);
+  if (!c) return '';
+  return `<span class="country-badge">${c.flag} ${c.name}</span>`;
+}
+
 function doLogin() { AUTH_TOKEN = document.getElementById('login-pass').value; localStorage.setItem('panel_auth', AUTH_TOKEN); checkAuth(); }
 async function checkAuth() {
   try {
@@ -425,8 +470,8 @@ function renderConversationList() {
     const stBadge = c.status === 'human' ? '<span class="status-badge status-human">👤 MANUEL</span>' : '<span class="status-badge status-bot">🤖 BOT</span>';
     const ch = c.last_channel || c.channel || 'whatsapp';
     const hasName = c.patient_name && c.patient_name !== c.phone_number;
-    const phoneDisplay = hasName ? `<div class="contact-phone">${c.phone_number}</div>` : '';
-    const nameDisplay = c.patient_name || c.phone_number;
+    const phoneDisplay = hasName ? `<div class="contact-phone">${countryBadge(c.phone_number)} ${c.phone_number}</div>` : '';
+    const nameDisplay = hasName ? c.patient_name : `${countryBadge(c.phone_number)} ${c.phone_number}`;
     const timeDisplay = smartDate(c.last_message_at);
     const isRecent = (Date.now() - new Date(c.last_message_at).getTime()) < 300000;
     
@@ -466,9 +511,12 @@ async function loadChat(phone, channel) {
 
   // Load patient data for CRM and Status
   const pData = await api('get-patient&phone='+phone);
+  const hasName = pData.patient_name && pData.patient_name !== phone;
   document.getElementById('chat-title').textContent = pData.patient_name || phone;
-  document.getElementById('chat-phone').textContent = phone;
-  document.getElementById('chat-phone').style.display = 'inline';
+  const country = getCountry(phone);
+  const countryInfo = country ? `${country.flag} ${country.name} · ` : '';
+  document.getElementById('chat-phone').innerHTML = hasName ? `${countryInfo}${phone}` : (country ? `${country.flag} ${country.name}` : '');
+  document.getElementById('chat-phone').style.display = (hasName || country) ? 'inline' : 'none';
   document.getElementById('chat-channel-badge').innerHTML = getChannelBadge(currentChannel);
   document.getElementById('chat-channel-badge').style.display = 'inline-flex';
   
