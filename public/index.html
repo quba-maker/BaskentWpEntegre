@@ -384,16 +384,45 @@ async function loadTagList(){allTags=await api('tags')||[];document.getElementBy
 async function addTag(){const n=document.getElementById('new-tag').value;const c=document.getElementById('new-tag-color').value;if(!n)return toast('İsim girin','error');await api('tags','POST',{name:n,color:c});document.getElementById('new-tag').value='';loadTagList();toast('✅ Etiket eklendi')}
 async function deleteTag(id){if(!confirm('Silinsin mi?'))return;await api('tags&id='+id,'DELETE');loadTagList();toast('🗑 Silindi')}
 
-// OTOMATİK YENİLEME (5 saniyede bir)
+// AKILLI OTOMATİK YENİLEME - Ekranı bozmadan arka planda güncelle
 let autoRefresh;
 function startAutoRefresh() {
   if (autoRefresh) clearInterval(autoRefresh);
-  autoRefresh = setInterval(() => {
+  autoRefresh = setInterval(async () => {
     const activePage = document.querySelector('.page.active')?.id;
-    if (activePage === 'page-dashboard') loadDashboard();
-    else if (activePage === 'page-conversations' && currentPhone) loadChat(currentPhone);
-    else if (activePage === 'page-leads') loadLeads();
-  }, 5000);
+    
+    // Dashboard: sadece stat sayılarını güncelle (DOM yeniden oluşturma yok)
+    if (activePage === 'page-dashboard') {
+      try {
+        const d = await api('dashboard');
+        if(d) {
+          document.getElementById('stat-today').textContent = d.todayMessages;
+          document.getElementById('stat-total').textContent = d.totalMessages;
+          document.getElementById('stat-conversations').textContent = d.activeConversations;
+          document.getElementById('stat-human').textContent = d.humanConversations || 0;
+        }
+      } catch(e){}
+    }
+    
+    // Konuşmalar: Açık chat varsa sadece yeni mesajları kontrol et (scroll pozisyonunu bozmaz)
+    else if (activePage === 'page-conversations' && currentPhone) {
+      try {
+        const msgs = await api('conversation-detail&phone=' + currentPhone);
+        if (!msgs) return;
+        const chatEl = document.getElementById('chat-messages');
+        const currentCount = chatEl.querySelectorAll('.chat-bubble').length;
+        if (msgs.length > currentCount) {
+          // Sadece yeni mesajlar varsa güncelle
+          const wasAtBottom = chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight < 50;
+          chatEl.innerHTML = msgs.map(m => `<div class="chat-bubble ${m.direction}"><div class="bubble-content">${m.media_url ? `<a href="${m.media_url}" target="_blank">📎 ${m.media_type}</a><br>` : ''}${m.content}</div><div class="bubble-meta">${m.model_used ? '🤖 ' + m.model_used : ''} ${new Date(m.created_at).toLocaleTimeString('tr-TR')}</div></div>`).join('');
+          if (wasAtBottom) chatEl.scrollTop = chatEl.scrollHeight;
+        }
+      } catch(e){}
+    }
+    
+    // Leads: Sheet zaten kendi 30sn timer'ıyla sessizce güncelleniyor, burada tekrar çağırmıyoruz
+    
+  }, 10000); // 10 saniye (eskisi 5'ti, gereksiz yük)
 }
 
 checkAuth();
