@@ -1,5 +1,6 @@
 import { handleWhatsAppMessage } from '../lib/channels/whatsapp.js';
 import { handleMessengerMessage } from '../lib/channels/messenger.js';
+import leadWebhookHandler from './lead-webhook.js';
 
 export default async function handler(req, res) {
   // GET - Webhook doğrulama (Hem WP hem Messenger aynı webhook url'ini kullanabilir)
@@ -31,7 +32,6 @@ export default async function handler(req, res) {
         body.object === 'whatsapp_business_account' && 
         body.entry?.[0]?.changes?.[0]?.value?.messages?.[0]
       ) {
-        // Vercel serverless ortamında fonksiyonun ölmemesi için await eklenmeli
         await handleWhatsAppMessage(body);
         return res.status(200).send('EVENT_RECEIVED');
       }
@@ -41,9 +41,17 @@ export default async function handler(req, res) {
         body.object === 'page' && 
         body.entry?.[0]?.messaging?.[0]
       ) {
-        // Vercel serverless ortamında fonksiyonun ölmemesi için await eklenmeli
         await handleMessengerMessage(body);
         return res.status(200).send('EVENT_RECEIVED');
+      }
+
+      // 3. FACEBOOK LEAD ADS (FORM) KONTROLÜ
+      if (
+        body.object === 'page' && 
+        body.entry?.[0]?.changes?.[0]?.field === 'leadgen'
+      ) {
+        // Eski lead-webhook.js mantığına yönlendir
+        return leadWebhookHandler(req, res);
       }
 
       // Diğer durumlarda (Okundu bilgisi, vs) sadece 200 dönelim ki Meta hata vermesin
