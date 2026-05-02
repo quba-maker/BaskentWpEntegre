@@ -1183,7 +1183,9 @@ async function loadAppointments() {
         <div style="display:flex;gap:6px;align-items:center">
           <span style="background:${sC[e.status]||'#6b7280'}20;color:${sC[e.status]||'#6b7280'};padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600">${sL[e.status]||e.status}</span>
           <select onchange="updateAppointment(${e.id},this.value)" style="background:var(--bg-card);color:var(--text-main);border:1px solid var(--border-color);border-radius:6px;padding:4px 8px;font-size:12px">
-            <option value="">Durum Güncelle</option><option value="called">📞 Ön Görüşme</option><option value="lost">❌ Olumsuz</option>
+            <option value="" disabled ${e.status === 'pending' ? 'selected' : ''}>Durum Güncelle</option>
+            <option value="called" ${e.status === 'called' ? 'selected' : ''}>📞 Ön Görüşme</option>
+            <option value="lost" ${e.status === 'lost' ? 'selected' : ''}>❌ Olumsuz</option>
           </select>
           <button class="btn btn-sm btn-primary" onclick="openScheduleModal(${e.id})" style="font-size:11px;padding:4px 8px;background:#22c55e;border-color:#22c55e;">🗓️ Takvime Ekle</button>
           <button class="btn btn-sm btn-secondary" onclick="document.querySelector('[data-page=conversations]').click();setTimeout(()=>loadChat('${e.phone_number}','whatsapp'),300)" style="font-size:11px;padding:4px 8px">💬</button>

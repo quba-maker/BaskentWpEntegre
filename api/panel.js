@@ -129,6 +129,32 @@ export default async function handler(req, res) {
     if (action === 'update-lead-stage' && req.method === 'POST') {
       const { id, stage } = req.body;
       await sql`UPDATE leads SET stage = ${stage} WHERE id = ${id}`;
+      
+      // Randevu durumu seçildiyse otomatik takvime at (events)
+      if (stage === 'appointed' || stage === 'appointment_request') {
+        const lead = await sql`SELECT phone_number FROM leads WHERE id = ${id}`;
+        if (lead.length > 0) {
+          const phone = lead[0].phone_number;
+          try {
+            const recent = await sql`SELECT id FROM events WHERE phone_number = ${phone} AND event_type = 'appointment_request'`;
+            if (recent.length === 0) {
+              await sql`INSERT INTO events (phone_number, event_type, details, status) 
+                        VALUES (${phone}, 'appointment_request', 'Form Yönetimi panelinden randevu eklendi', 'pending')`;
+            }
+            // Tag ekle (Eğer Randevu alındıysa)
+            if (stage === 'appointed') {
+              const conv = await sql`SELECT tags FROM conversations WHERE phone_number = ${phone}`;
+              if (conv.length > 0) {
+                let tags = []; try { tags = JSON.parse(conv[0].tags || '[]'); } catch(e) {}
+                if (!tags.includes('Randevu Alındı')) { tags.push('Randevu Alındı'); }
+                tags = tags.filter(t => t !== 'Randevu İstiyor');
+                await sql`UPDATE conversations SET tags = ${JSON.stringify(tags)} WHERE phone_number = ${phone}`;
+              }
+            }
+          } catch(e) {}
+        }
+      }
+      
       return res.json({ success: true });
     }
 
@@ -504,16 +530,19 @@ export default async function handler(req, res) {
       }
       
       // Lead durumunu da güncelle
-      if (status === 'confirmed' || status === 'scheduled' || scheduled_date) {
-        const ev = await sql`SELECT phone_number FROM events WHERE id = ${id}`;
-        if (ev.length > 0) {
-          await sql`UPDATE leads SET stage = 'appointed' WHERE phone_number = ${ev[0].phone_number}`;
+      const ev = await sql`SELECT phone_number FROM events WHERE id = ${id}`;
+      if (ev.length > 0) {
+        const phone = ev[0].phone_number;
+        if (status === 'confirmed' || status === 'scheduled' || scheduled_date) {
+          await sql`UPDATE leads SET stage = 'appointed' WHERE phone_number = ${phone}`;
           // Etiket güncelle
-          const conv = await sql`SELECT tags FROM conversations WHERE phone_number = ${ev[0].phone_number}`;
+          const conv = await sql`SELECT tags FROM conversations WHERE phone_number = ${phone}`;
           let tags = []; try { tags = JSON.parse(conv[0]?.tags || '[]'); } catch(e) {}
           if (!tags.includes('Randevu Alındı')) { tags.push('Randevu Alındı'); }
           tags = tags.filter(t => t !== 'Randevu İstiyor');
-          await sql`UPDATE conversations SET tags = ${JSON.stringify(tags)} WHERE phone_number = ${ev[0].phone_number}`;
+          await sql`UPDATE conversations SET tags = ${JSON.stringify(tags)} WHERE phone_number = ${phone}`;
+        } else if (status === 'lost' || status === 'cancelled') {
+          await sql`UPDATE leads SET stage = 'lost' WHERE phone_number = ${phone}`;
         }
       }
       return res.json({ success: true });
