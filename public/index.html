@@ -658,10 +658,16 @@ async function sendPanelMessage() {
   if(!m || !currentPhone) return;
   i.value = '';
   try {
-    await api('send-message','POST',{phone:currentPhone, message:m, channel:currentChannel});
-    toast('Mesaj gönderildi');
+    const r = await fetch(`/api/panel?action=send-message`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + AUTH_TOKEN },
+      body: JSON.stringify({phone:currentPhone, message:m, channel:currentChannel})
+    });
+    const data = await r.json();
+    if (data.error) { toast('❌ ' + data.error, 'error'); return; }
+    toast('Mesaj gönderildi ✅');
     loadChat(currentPhone, currentChannel);
-  } catch(e) { toast('Hata oluştu', 'error'); }
+  } catch(e) { toast('Bağlantı hatası', 'error'); }
 }
 
 /* BOT EĞİTİMİ */

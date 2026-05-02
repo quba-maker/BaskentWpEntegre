@@ -56,17 +56,19 @@ export default async function handler(req, res) {
       const boundary = '----FormBoundary' + Date.now();
       const name = fileName || ('upload.' + (mimeType.split('/')[1] || 'bin'));
       
-      const parts = [];
-      // messaging_product
-      parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="messaging_product"\r\n\r\nwhatsapp`);
-      // type
-      parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="type"\r\n\r\n${mimeType}`);
-      // file
-      parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${name}"\r\nContent-Type: ${mimeType}\r\n\r\n`);
+      // Multipart form-data doğru formatta oluştur
+      const CRLF = '\r\n';
+      const headerParts = [
+        `--${boundary}${CRLF}Content-Disposition: form-data; name="messaging_product"${CRLF}${CRLF}whatsapp${CRLF}`,
+        `--${boundary}${CRLF}Content-Disposition: form-data; name="type"${CRLF}${CRLF}${mimeType}${CRLF}`,
+        `--${boundary}${CRLF}Content-Disposition: form-data; name="file"; filename="${name}"${CRLF}Content-Type: ${mimeType}${CRLF}${CRLF}`
+      ].join('');
       
-      const header = Buffer.from(parts.join('\r\n') + '\r\n', 'utf-8');
-      const footer = Buffer.from(`\r\n--${boundary}--\r\n`, 'utf-8');
-      const body = Buffer.concat([header, fileBuffer, footer]);
+      const headerBuffer = Buffer.from(headerParts, 'utf-8');
+      const footerBuffer = Buffer.from(`${CRLF}--${boundary}--${CRLF}`, 'utf-8');
+      const requestBody = Buffer.concat([headerBuffer, fileBuffer, footerBuffer]);
+
+      console.log(`📤 Upload başlıyor: ${name} (${mimeType}, ${fileBuffer.length} bytes)`);
 
       const uploadRes = await axios({
         method: 'POST',
@@ -75,8 +77,9 @@ export default async function handler(req, res) {
           Authorization: `Bearer ${META}`,
           'Content-Type': `multipart/form-data; boundary=${boundary}`
         },
-        data: body,
-        maxBodyLength: Infinity
+        data: requestBody,
+        maxBodyLength: Infinity,
+        maxContentLength: Infinity
       });
 
       const mediaId = uploadRes.data.id;

@@ -126,16 +126,21 @@ export default async function handler(req, res) {
       const { phone, message, channel } = req.body;
       const targetChannel = channel || 'whatsapp';
       
-      if (targetChannel === 'whatsapp') {
-        await axios({ method: 'POST', url: `https://graph.facebook.com/v25.0/${PHONE_ID}/messages`, headers: { Authorization: `Bearer ${META}` },
-          data: { messaging_product: 'whatsapp', to: phone, type: 'text', text: { body: message } }
-        });
-      } else if (targetChannel === 'messenger') {
-        const { sendMessengerMessage } = await import('../lib/channels/messenger.js');
-        await sendMessengerMessage(phone, message);
-      } else if (targetChannel === 'instagram') {
-        const { sendInstagramMessage } = await import('../lib/channels/instagram.js');
-        await sendInstagramMessage(phone, message);
+      try {
+        if (targetChannel === 'whatsapp') {
+          await axios({ method: 'POST', url: `https://graph.facebook.com/v25.0/${PHONE_ID}/messages`, headers: { Authorization: `Bearer ${META}` },
+            data: { messaging_product: 'whatsapp', to: phone, type: 'text', text: { body: message } }
+          });
+        } else if (targetChannel === 'messenger') {
+          const { sendMessengerMessage } = await import('../lib/channels/messenger.js');
+          await sendMessengerMessage(phone, message);
+        } else if (targetChannel === 'instagram') {
+          const { sendInstagramMessage } = await import('../lib/channels/instagram.js');
+          await sendInstagramMessage(phone, message);
+        }
+      } catch (sendErr) {
+        console.error('❌ Mesaj gönderme hatası:', sendErr.response?.data || sendErr.message);
+        return res.status(500).json({ error: sendErr.response?.data?.error?.message || sendErr.message });
       }
       
       await sql`INSERT INTO messages (phone_number, direction, content, model_used, channel) VALUES (${phone}, 'out', ${message}, 'panel', ${targetChannel})`;
