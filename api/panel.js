@@ -136,8 +136,9 @@ export default async function handler(req, res) {
         if (lead.length > 0) {
           const phone = lead[0].phone_number;
           try {
-            const recent = await sql`SELECT id FROM events WHERE phone_number = ${phone} AND event_type = 'appointment_request'`;
-            if (recent.length === 0) {
+            // Sadece aktif randevusu varsa yenisini açma
+            const activeEvent = await sql`SELECT id FROM events WHERE phone_number = ${phone} AND event_type = 'appointment_request' AND status IN ('pending', 'scheduled', 'confirmed')`;
+            if (activeEvent.length === 0) {
               await sql`INSERT INTO events (phone_number, event_type, details, status) 
                         VALUES (${phone}, 'appointment_request', 'Form Yönetimi panelinden randevu eklendi', 'pending')`;
             }
@@ -189,8 +190,9 @@ export default async function handler(req, res) {
       if (lead_stage === 'appointment_request' || lead_stage === 'appointed' || 
           parsedTags.includes('Randevu İstiyor') || parsedTags.includes('Randevu Alındı')) {
         try {
-          const recent = await sql`SELECT id FROM events WHERE phone_number = ${phone} AND event_type = 'appointment_request'`;
-          if (recent.length === 0) {
+          // Sadece aktif (bekleyen, planlanmış, onaylanmış) bir randevusu var mı diye bak. İptal olanlar için yenisi açılabilir.
+          const activeEvent = await sql`SELECT id FROM events WHERE phone_number = ${phone} AND event_type = 'appointment_request' AND status IN ('pending', 'scheduled', 'confirmed')`;
+          if (activeEvent.length === 0) {
             await sql`INSERT INTO events (phone_number, event_type, details, status) 
                       VALUES (${phone}, 'appointment_request', 'Panel üzerinden manuel randevu etiketi/durumu eklendi', 'pending')`;
           }
