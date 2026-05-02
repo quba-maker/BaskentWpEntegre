@@ -489,13 +489,13 @@ async function savePrompt() {
   toast('Sistem Promptları güncellendi!');
 }
 async function resetPrompt() {
-  if(!confirm('Orijinal ayarlara dönülecek, emin misiniz?')) return;
+  if(!confirm('Orijinal (Başkent Hastanesi) ayarlara dönülecek. Emin misiniz?')) return;
   const d = await api('default-prompt');
-  if(d && d.prompt) { 
-    document.getElementById('prompt-editor-wp').value = d.prompt; 
-    document.getElementById('prompt-editor-tr').value = d.prompt; 
-    document.getElementById('prompt-editor-en').value = d.prompt; 
-    savePrompt(); 
+  if(d) { 
+    document.getElementById('prompt-editor-wp').value = d.wp || ''; 
+    document.getElementById('prompt-editor-tr').value = d.tr || ''; 
+    document.getElementById('prompt-editor-en').value = d.en || ''; 
+    toast('Varsayılan metinler yüklendi! Kalıcı olması için KAYDET butonuna basın.');
   }
 }
 
