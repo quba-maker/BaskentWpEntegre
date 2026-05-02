@@ -395,23 +395,27 @@ export default async function handler(req, res) {
           id SERIAL PRIMARY KEY, phone_number VARCHAR(20), event_type VARCHAR(50),
           details TEXT, status VARCHAR(20) DEFAULT 'pending', created_at TIMESTAMP DEFAULT NOW()
         )`;
-      } catch(e) {}
-      
-      const events = await sql`
-        SELECT e.*, c.patient_name, l.form_name, l.city 
-        FROM events e 
-        LEFT JOIN conversations c ON c.phone_number = e.phone_number
-        LEFT JOIN leads l ON l.phone_number = e.phone_number
-        WHERE e.event_type = 'appointment_request'
-        ORDER BY e.created_at DESC LIMIT 100
-      `;
-      const counts = {
-        pending: events.filter(e => e.status === 'pending').length,
-        called: events.filter(e => e.status === 'called').length,
-        confirmed: events.filter(e => e.status === 'confirmed').length,
-        noshow: events.filter(e => e.status === 'noshow').length
-      };
-      return res.json({ events, counts });
+        
+        // Sadece en son lead'i almak için DISTINCT ON (e.id) PostgreSQL özelliğini kullanabiliriz
+        const events = await sql`
+          SELECT DISTINCT ON (e.id) e.*, c.patient_name, l.form_name, l.city 
+          FROM events e 
+          LEFT JOIN conversations c ON c.phone_number = e.phone_number
+          LEFT JOIN leads l ON l.phone_number = e.phone_number
+          WHERE e.event_type = 'appointment_request'
+          ORDER BY e.id DESC, l.created_at DESC LIMIT 100
+        `;
+        const counts = {
+          pending: events.filter(e => e.status === 'pending').length,
+          called: events.filter(e => e.status === 'called').length,
+          confirmed: events.filter(e => e.status === 'confirmed').length,
+          noshow: events.filter(e => e.status === 'noshow').length
+        };
+        return res.json({ events, counts });
+      } catch(e) {
+        console.error('Randevu çekme hatası:', e.message);
+        return res.json({ events: [], counts: { pending: 0, called: 0, confirmed: 0, noshow: 0 } });
+      }
     }
 
     // RANDEVU DURUM GÜNCELLE
