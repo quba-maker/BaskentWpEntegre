@@ -255,7 +255,7 @@ async function loadLeads(){
       if(document.getElementById('page-leads').classList.contains('active')){
         loadSheetData(window._activeSheet, true);
       }
-    }, 30000);
+    }, 60000);
     
   } catch(e) {
     document.getElementById('lead-list').innerHTML = `<p class="empty">❌ Bağlantı hatası: ${e.message}</p>`;
@@ -287,11 +287,29 @@ async function loadSheetData(sheetName, silent) {
     const data = await resp.json();
     
     if(!data.success){
-      document.getElementById('lead-list').innerHTML = `<p class="empty">❌ ${data.error}</p>`;
+      if(!silent) document.getElementById('lead-list').innerHTML = `<p class="empty">❌ ${data.error}</p>`;
       return;
     }
     
+    // Silent modda: satır sayısı değişmediyse hiç dokunma
+    if(silent && window._lastRowCount === data.total) return;
+    window._lastRowCount = data.total;
+    
+    // Scroll pozisyonunu kaydet
+    const scrollContainer = document.querySelector('#lead-list > div');
+    const scrollX = scrollContainer ? scrollContainer.scrollLeft : 0;
+    const scrollY = scrollContainer ? scrollContainer.scrollTop : 0;
+    
     renderSheetTable(data.headers, data.rows, data.total);
+    
+    // Scroll pozisyonunu geri yükle
+    if(silent) {
+      const newContainer = document.querySelector('#lead-list > div');
+      if(newContainer) {
+        newContainer.scrollLeft = scrollX;
+        newContainer.scrollTop = scrollY;
+      }
+    }
   } catch(e) {
     if(!silent) document.getElementById('lead-list').innerHTML = `<p class="empty">❌ ${e.message}</p>`;
   }
