@@ -271,12 +271,21 @@ function renderSheetTabs(tabs, activeSheet) {
 }
 
 async function loadSheetData(sheetName, silent) {
-  window._activeSheet = sheetName;
+  // Sekmeleri her zaman taze çek (isim değişikliklerini yakala)
+  try {
+    const tabResp = await fetch('/api/sheets?action=tabs');
+    const tabData = await tabResp.json();
+    if(tabData.success) {
+      const tabNames = tabData.tabs.map(t => t.title);
+      // Aktif sekme artık yoksa (ismi değişmiş), ilk sekmeye geç
+      if(!tabNames.includes(sheetName)) {
+        sheetName = tabNames[0] || sheetName;
+      }
+      renderSheetTabs(tabData.tabs, sheetName);
+    }
+  } catch(e){}
   
-  // Aktif sekmeyi güncelle
-  document.querySelectorAll('.sheet-tab').forEach(t => {
-    t.classList.toggle('active', t.textContent === sheetName);
-  });
+  window._activeSheet = sheetName;
   
   if(!silent) {
     document.getElementById('lead-list').innerHTML = '<p style="text-align:center;padding:40px;color:#8b8fa3;">⏳ Yükleniyor...</p>';

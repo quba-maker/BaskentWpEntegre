@@ -14,16 +14,18 @@ export default async function handler(req, res) {
   try {
     const { action, sheet } = req.query;
 
-    // Sekmeleri (sheet tab isimlerini) getir
+    // Sekmeleri (sheet tab isimlerini) getir - gizli sekmeleri filtrele
     if (action === 'tabs') {
       const resp = await axios.get(BASE_URL, {
         params: { key: SHEETS_API_KEY, fields: 'sheets.properties' }
       });
-      const tabs = resp.data.sheets.map(s => ({
-        id: s.properties.sheetId,
-        title: s.properties.title,
-        index: s.properties.index
-      }));
+      const tabs = resp.data.sheets
+        .filter(s => !s.properties.hidden)
+        .map(s => ({
+          id: s.properties.sheetId,
+          title: s.properties.title,
+          index: s.properties.index
+        }));
       return res.json({ success: true, tabs });
     }
 
@@ -73,15 +75,17 @@ export default async function handler(req, res) {
       });
     }
 
-    // Default: tüm sekmeleri ve ilk sekmenin verilerini getir
+    // Default: tüm sekmeleri ve ilk sekmenin verilerini getir (gizliler hariç)
     const metaResp = await axios.get(BASE_URL, {
       params: { key: SHEETS_API_KEY, fields: 'sheets.properties' }
     });
-    const tabs = metaResp.data.sheets.map(s => ({
-      id: s.properties.sheetId,
-      title: s.properties.title,
-      index: s.properties.index
-    }));
+    const tabs = metaResp.data.sheets
+      .filter(s => !s.properties.hidden)
+      .map(s => ({
+        id: s.properties.sheetId,
+        title: s.properties.title,
+        index: s.properties.index
+      }));
 
     const firstSheet = tabs[0]?.title || 'Sheet1';
     const dataResp = await axios.get(`${BASE_URL}/values/${encodeURIComponent(firstSheet)}`, {
