@@ -148,6 +148,46 @@ export default async function handler(req, res) {
       return res.json({ success: true });
     }
 
+    // ŞABLON MESAJ GÖNDER (24 saat penceresi kapalıysa)
+    if (action === 'send-template' && req.method === 'POST') {
+      const { phone, template_name, language_code } = req.body;
+      const lang = language_code || 'tr';
+      try {
+        await axios({
+          method: 'POST',
+          url: `https://graph.facebook.com/v25.0/${PHONE_ID}/messages`,
+          headers: { Authorization: `Bearer ${META}` },
+          data: {
+            messaging_product: 'whatsapp',
+            to: phone,
+            type: 'template',
+            template: { name: template_name, language: { code: lang } }
+          }
+        });
+        await sql`INSERT INTO messages (phone_number, direction, content, model_used, channel) VALUES (${phone}, 'out', ${'[Şablon: ' + template_name + ']'}, 'panel-template', 'whatsapp')`;
+        await sql`UPDATE conversations SET last_message_at = NOW(), message_count = message_count + 1 WHERE phone_number = ${phone}`;
+        return res.json({ success: true });
+      } catch(e) {
+        return res.status(500).json({ error: e.response?.data?.error?.message || e.message });
+      }
+    }
+
+    // META ŞABLONLARINI LİSTELE
+    if (action === 'whatsapp-templates') {
+      try {
+        const wabaId = process.env.WABA_ID;
+        if (!wabaId) return res.json({ templates: [], note: 'WABA_ID env değişkeni gerekli' });
+        const r = await axios.get(`https://graph.facebook.com/v25.0/${wabaId}/message_templates`, {
+          headers: { Authorization: `Bearer ${META}` },
+          params: { limit: 50 }
+        });
+        const approved = (r.data.data || []).filter(t => t.status === 'APPROVED');
+        return res.json({ templates: approved });
+      } catch(e) {
+        return res.json({ templates: [], error: e.response?.data?.error?.message || e.message });
+      }
+    }
+
     // TOPLU MESAJ
     if (action === 'bulk-message' && req.method === 'POST') {
       const { tag, message } = req.body;

@@ -129,7 +129,7 @@ export default async function handler(req, res) {
     }
 
     // DB'ye kaydet
-    const contentText = caption || `📎 ${mediaType} gönderildi`;
+    const contentText = caption || `📎 ${fileName || mediaType} gönderildi`;
     
     // media_url ve media_type kolonları yoksa ekle
     try {
@@ -137,8 +137,18 @@ export default async function handler(req, res) {
       await sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_type VARCHAR(50)`;
     } catch(e) {}
     
-    await sql`INSERT INTO messages (phone_number, direction, content, model_used, channel, media_type) 
-              VALUES (${phone}, 'out', ${contentText}, 'panel', ${targetChannel}, ${mediaType})`;
+    // Görseller için base64 data URL'ini kaydet (panelde görünsün)
+    let savedMediaUrl = null;
+    if (mediaType === 'image' && fileBase64) {
+      // Data URL formatında kaydet (max ~2MB makul)
+      const dataUrl = fileBase64.startsWith('data:') ? fileBase64 : `data:${mimeType};base64,${base64Data}`;
+      if (dataUrl.length < 2 * 1024 * 1024) { // 2MB altındaysa DB'ye kaydet
+        savedMediaUrl = dataUrl;
+      }
+    }
+    
+    await sql`INSERT INTO messages (phone_number, direction, content, model_used, channel, media_type, media_url) 
+              VALUES (${phone}, 'out', ${contentText}, 'panel', ${targetChannel}, ${mediaType}, ${savedMediaUrl})`;
     await sql`UPDATE conversations SET last_message_at = NOW(), message_count = message_count + 1 WHERE phone_number = ${phone}`;
 
     return res.json({ success: true, mediaType });
