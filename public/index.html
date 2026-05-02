@@ -160,8 +160,11 @@
             </div>
 
             <div class="form-group">
-              <label>Özel Etiketler</label>
-              <div id="crm-tags" class="tags-container"></div>
+              <label>Özel Etiketler (Manuel Seçim)</label>
+              <div id="crm-tags" class="tags-container" style="margin-bottom: 8px; min-height: 24px;"></div>
+              <select id="crm-add-tag" class="form-control" onchange="addCRMTag(this.value)" style="width:100%; padding: 8px; border-radius: 8px; border: 1px dashed var(--border-color); background: transparent; color: var(--text-main); font-size: 13px;">
+                <option value="">+ Yeni Etiket Ekle</option>
+              </select>
             </div>
             <div class="form-group">
               <label>Özel Notlar</label>
@@ -649,9 +652,26 @@ async function loadChat(phone, channel) {
 }
 
 function renderCRMTags(selected=[]) {
-  document.getElementById('crm-tags').innerHTML = allTags.map(t => 
-    `<div class="tag ${selected.includes(t.name)?'selected':''}" onclick="this.classList.toggle('selected')" data-val="${t.name}" style="--tag-color:${t.color}">${t.name}</div>`
+  const container = document.getElementById('crm-tags');
+  container.innerHTML = selected.map(t => 
+    `<div class="tag selected" onclick="this.remove()" data-val="${t}" style="--tag-color:#3b82f6">${t} ✕</div>`
   ).join('');
+
+  // Dropdown options (filter out already selected tags and system tags)
+  const select = document.getElementById('crm-add-tag');
+  const available = allTags.filter(t => !selected.includes(t.name) && !['Gurbetçi', 'Yabancı Turist', 'Yerli', 'Kaybedildi', 'Randevu İstiyor'].includes(t.name));
+  
+  select.innerHTML = '<option value="">+ Etiket Ekle</option>' + available.map(t => `<option value="${t.name}">${t.name}</option>`).join('');
+}
+
+function addCRMTag(val) {
+  if (!val) return;
+  const container = document.getElementById('crm-tags');
+  // Zaten ekli mi kontrol et
+  if (Array.from(container.children).some(el => el.dataset.val === val)) return;
+  
+  container.insertAdjacentHTML('beforeend', `<div class="tag selected" onclick="this.remove()" data-val="${val}" style="--tag-color:#3b82f6">${val} ✕</div>`);
+  document.getElementById('crm-add-tag').value = '';
 }
 
 /* DOSYA YÜKLEME */
