@@ -120,6 +120,7 @@ export default async function handler(req, res) {
           conv.lead_date = lead.created_at;
           conv.lead_ad_id = lead.ad_id;
           conv.lead_notes = lead.notes;
+          conv.lead_score = lead.score;
           conv.has_lead = true;
           
           // Hasta adı lead'den gelip conversation'da yoksa otomatik eşleştirelim
