@@ -2,7 +2,10 @@ import { neon } from '@neondatabase/serverless';
 import axios from 'axios';
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  const allowedOrigins = [process.env.PANEL_ORIGIN || 'https://baskent-wp-entegre.vercel.app', 'http://localhost:3000'];
+  const origin = req.headers.origin;
+  if (allowedOrigins.includes(origin)) res.setHeader('Access-Control-Allow-Origin', origin);
+  else res.setHeader('Access-Control-Allow-Origin', allowedOrigins[0]);
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.setHeader('Cache-Control', 'no-store, max-age=0');
@@ -10,7 +13,7 @@ export default async function handler(req, res) {
 
   const authHeader = req.headers.authorization;
   const PANEL_PASSWORD = process.env.PANEL_PASSWORD || 'baskent2024';
-  if (authHeader !== `Bearer ${PANEL_PASSWORD}` && req.query.action !== 'debug_db') {
+  if (authHeader !== `Bearer ${PANEL_PASSWORD}`) {
     return res.status(401).json({ error: 'Yetkisiz', needsAuth: true });
   }
 
@@ -31,7 +34,7 @@ export default async function handler(req, res) {
         const check = await sql`SELECT value FROM settings WHERE key = 'foreign_page_id'`;
         if (check.length === 0 || !check[0].value) {
           try {
-            const token = 'IGAAc7T3ixmxxBZAFo1V0dzUlNXaTd0SFB4Yk9pU1Rad0FsZAlJLREVPd01neXg2YW5kZA2pOSjZAnM0tidi16ZAjZA5eGZAET0ZAHTnpnYjZAvakJhU0JHTTZAUUzVIajdISFplQUhidGltRVByc3ktUHd6UDFobl96WXZAtb3RhbVQ5bDZAnOAZDZD';
+            const token = process.env.IG_TOKEN_1;
             const igRes = await axios.get(`https://graph.instagram.com/v25.0/me?access_token=${token}`);
             if (igRes.data && igRes.data.id) {
               if (check.length > 0) {

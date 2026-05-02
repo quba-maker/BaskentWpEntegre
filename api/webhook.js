@@ -11,7 +11,7 @@ export default async function handler(req, res) {
     const challenge = req.query['hub.challenge'];
     
     // Güvenlik token'ınız
-    if (mode === 'subscribe' && token === 'baskent_wp_secret_token_123') {
+    if (mode === 'subscribe' && token === (process.env.WEBHOOK_VERIFY_TOKEN || 'baskent_wp_secret_token_123')) {
       console.log('✅ Trafik Polisi: Webhook doğrulandı!');
       return res.status(200).send(challenge);
     }
