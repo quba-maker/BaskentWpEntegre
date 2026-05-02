@@ -54,7 +54,12 @@ export default async function handler(req, res) {
 
     // VARSAYILAN PROMPT
     if (action === 'default-prompt') {
-      return res.json({ prompt: getDefaultPrompt() });
+      const { defaultPrompts } = await import('../lib/ai/prompts.js');
+      return res.json({ 
+        wp: defaultPrompts.whatsapp, 
+        tr: defaultPrompts.instagram, 
+        en: defaultPrompts.foreign 
+      });
     }
 
     // KONUŞMALAR
