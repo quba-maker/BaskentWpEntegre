@@ -75,28 +75,57 @@ export default async function handler(req, res) {
                 formName = formResponse.data.name || '';
               } catch (e) { console.error('Form adı alınamadı:', e.message); }
 
-              // Kampanya etiketlerini belirle
+              // Kampanya etiketlerini belirle (Genişletilmiş — brain.js ile senkron)
               const tags = [];
               const formLower = formName.toLowerCase();
-              if (formLower.includes('ortopedi') || formLower.includes('orthop')) tags.push('Ortopedi');
-              if (formLower.includes('kardiyoloji') || formLower.includes('cardio')) tags.push('Kardiyoloji');
-              if (formLower.includes('estetik') || formLower.includes('aesthetic')) tags.push('Estetik');
-              if (formLower.includes('diş') || formLower.includes('dental')) tags.push('Diş');
-              if (formLower.includes('ortaasya') || formLower.includes('kazak') || formLower.includes('kirgiz') || formLower.includes('ozbek')) tags.push('Ortaasya');
-              if (formLower.includes('avrupa') || formLower.includes('europe') || formLower.includes('gurbetci')) tags.push('Avrupa');
+              const deptMap = [
+                { re: /ortopedi|orthop|bel fıtığı|omurga|diz|kalça|kırık|eklem/i, tag: 'Ortopedi' },
+                { re: /kardiyoloji|cardio|kalp|tansiyon|stent|anjio|bypass/i, tag: 'Kardiyoloji' },
+                { re: /estetik|aesthetic|burun|yüz germe|liposuction|botox|dolgu|meme|rhino/i, tag: 'Estetik' },
+                { re: /diş|dental|implant|ortodonti|kanal tedavi|çekim|zirkonyum/i, tag: 'Diş' },
+                { re: /göz|eye|katarakt|lazer|retina|lens/i, tag: 'Göz' },
+                { re: /tüp bebek|ivf|kısırlık|gebelik|doğum|kadın|fertility/i, tag: 'Tüp Bebek' },
+                { re: /nakil|organ|böbrek|karaciğer|haberal|transplant|kidney|liver/i, tag: 'Organ Nakli' },
+                { re: /onkoloji|kanser|tümör|kemoterapi|oncology|cancer/i, tag: 'Onkoloji' },
+                { re: /obezite|mide küçültme|sleeve|bariatrik|obesity|gastric/i, tag: 'Obezite' },
+                { re: /nöroloji|beyin|baş ağrısı|epilepsi|neurology/i, tag: 'Nöroloji' },
+                { re: /üroloji|prostat|böbrek taşı|mesane|urology/i, tag: 'Üroloji' },
+                { re: /check.?up|genel kontrol|tarama|screening/i, tag: 'Check-Up' }
+              ];
+              
+              // Form adı VE form alanlarından bölüm tespiti
+              const combinedText = `${formLower} ${Object.values(fields).join(' ').toLowerCase()}`;
+              deptMap.forEach(d => {
+                if (d.re.test(combinedText) && !tags.includes(d.tag)) tags.push(d.tag);
+              });
+
+              // Coğrafi etiketler
+              if (/ortaasya|kazak|kirgiz|ozbek|central.?asia/i.test(combinedText)) tags.push('Ortaasya');
+              if (/avrupa|europe|gurbetci|germany|france|netherlands/i.test(combinedText)) tags.push('Avrupa');
               if (tags.length === 0) tags.push('Genel');
 
-              console.log(`👤 Lead: ${name} | 📱 ${phone} | 🏷 ${tags.join(', ')} | 📋 Form: ${formName}`);
-
-              // Veritabanına kaydet (telefon boş olsa bile veya dummy data ise)
-              let savePhone = phone || `test_${String(Date.now()).slice(-10)}`;
-              if (savePhone.length > 20) {
-                 savePhone = `test_${String(Date.now()).slice(-10)}`;
+              // Hasta tipi: Telefon numarasından tespit
+              let patientType = 'Yerli';
+              let cleanPhone = (phone || '').replace(/[\s\-\(\)\+]/g, '');
+              if (cleanPhone.startsWith('0')) cleanPhone = '90' + cleanPhone.substring(1);
+              
+              if (cleanPhone && !cleanPhone.startsWith('90')) {
+                // Avrupa ülke kodları (Gurbetçi tespiti)
+                const gurbetciCodes = ['49','44','33','31','32','43','41','46','45','47','39','34','48','420','36','40'];
+                const isGurbetci = gurbetciCodes.some(c => cleanPhone.startsWith(c));
+                patientType = isGurbetci ? 'Gurbetçi' : 'Yabancı Turist';
               }
+
+              const department = tags.filter(t => !['Genel','Ortaasya','Avrupa'].includes(t)).join(', ') || '';
+
+              console.log(`👤 Lead: ${name} | 📱 ${phone} | 🏷 ${tags.join(', ')} | 📋 Form: ${formName} | 🩺 Dep: ${department} | 👤 Tip: ${patientType}`);
+
+              // Veritabanına kaydet
+              let savePhone = cleanPhone || `test_${String(Date.now()).slice(-10)}`;
+              if (savePhone.length > 20) savePhone = `test_${String(Date.now()).slice(-10)}`;
 
               if (sql) {
                 try {
-                  // Leads tablosuna ekle (aynı leadgen_id varsa güncelle)
                   await sql`INSERT INTO leads (
                     phone_number, patient_name, email, city, form_id, form_name, ad_id,
                     leadgen_id, tags, raw_data, stage
@@ -106,12 +135,12 @@ export default async function handler(req, res) {
                   ) ON CONFLICT (leadgen_id) DO UPDATE SET
                     phone_number = ${savePhone}, patient_name = ${name}, stage = 'new'`;
 
-                  // Conversations tablosuna da ekle
+                  // Conversations tablosuna da ekle (department ve patient_type ile!)
                   const existing = await sql`SELECT id FROM conversations WHERE phone_number = ${savePhone}`;
                   if (existing.length === 0) {
-                    await sql`INSERT INTO conversations (phone_number, patient_name, tags, status) VALUES (${savePhone}, ${name}, ${JSON.stringify(tags)}, 'active')`;
+                    await sql`INSERT INTO conversations (phone_number, patient_name, tags, status, department, patient_type) VALUES (${savePhone}, ${name}, ${JSON.stringify(tags)}, 'active', ${department}, ${patientType})`;
                   } else {
-                    await sql`UPDATE conversations SET patient_name = ${name}, tags = ${JSON.stringify(tags)} WHERE phone_number = ${savePhone}`;
+                    await sql`UPDATE conversations SET patient_name = ${name}, tags = ${JSON.stringify(tags)}, department = ${department}, patient_type = ${patientType} WHERE phone_number = ${savePhone}`;
                   }
                 } catch (e) { console.error('DB kayıt hatası:', e.message); }
               }
@@ -126,22 +155,36 @@ export default async function handler(req, res) {
                 console.error('❌ Google Sheets hatası:', e.message);
               }
 
-              // Otomatik WhatsApp mesajı gönder
-              if (phone) {
-                // Telefon numarasını temizle
-                let cleanPhone = phone.replace(/[\s\-\(\)\+]/g, '');
-                if (cleanPhone.startsWith('0')) cleanPhone = '90' + cleanPhone.substring(1);
-                if (!cleanPhone.match(/^\d{10,15}$/)) {
-                  console.error('❌ Geçersiz telefon:', phone);
-                  continue;
+              // Otomatik WhatsApp karşılama mesajı gönder
+              if (phone && cleanPhone.match(/^\d{10,15}$/)) {
+                // Dil tespiti: +90 ise Türkçe, değilse İngilizce
+                const isTurkish = cleanPhone.startsWith('90');
+                
+                // Panelden düzenlenebilir karşılama mesajları (DB'den oku)
+                let greetingTr = '';
+                let greetingEn = '';
+                if (sql) {
+                  try {
+                    const trSet = await sql`SELECT value FROM settings WHERE key = 'form_greeting_tr'`;
+                    const enSet = await sql`SELECT value FROM settings WHERE key = 'form_greeting_en'`;
+                    greetingTr = trSet.length > 0 ? trSet[0].value : '';
+                    greetingEn = enSet.length > 0 ? enSet[0].value : '';
+                  } catch(e) {}
                 }
+                
+                const deptLabel = department || 'sağlık';
+                const greeting = name ? (isTurkish ? `Merhaba ${name}!` : `Hello ${name}!`) : (isTurkish ? 'Merhaba!' : 'Hello!');
 
-                const department = tags.includes('Ortopedi') ? 'Ortopedi' :
-                                   tags.includes('Kardiyoloji') ? 'Kardiyoloji' :
-                                   tags.includes('Estetik') ? 'Estetik' : 'sağlık';
-
-                const greeting = name ? `Merhaba ${name}!` : 'Merhaba!';
-                const welcomeMsg = `${greeting} Başkent Üniversitesi Konya Hastanesi'nden yazıyoruz. ${department} konusundaki ilginiz için teşekkür ederiz. Uzman doktorlarımız sizi değerlendirmek için hazır. Size uygun bir randevu ayarlayalım mı? 😊`;
+                let welcomeMsg;
+                if (isTurkish) {
+                  welcomeMsg = greetingTr
+                    ? greetingTr.replace('{isim}', name || '').replace('{bolum}', deptLabel).trim()
+                    : `${greeting} Başkent Üniversitesi Konya Hastanesi'nden yazıyoruz. ${deptLabel} konusundaki ilginiz için teşekkür ederiz. Uzman doktorlarımız sizi değerlendirmek için hazır. Size uygun bir randevu ayarlayalım mı? 😊`;
+                } else {
+                  welcomeMsg = greetingEn
+                    ? greetingEn.replace('{name}', name || '').replace('{department}', deptLabel).trim()
+                    : `${greeting} We are writing from Başkent University Konya Hospital. Thank you for your interest in ${deptLabel}. Our expert doctors are ready to evaluate your case. If you'd like, we can call you at a convenient time to discuss the details. 🙏`;
+                }
 
                 try {
                   await axios({
@@ -151,13 +194,12 @@ export default async function handler(req, res) {
                     data: { messaging_product: 'whatsapp', to: cleanPhone, type: 'text', text: { body: welcomeMsg } }
                   });
 
-                  // Mesajı kaydet
                   if (sql) {
                     await sql`INSERT INTO messages (phone_number, direction, content, model_used) VALUES (${cleanPhone}, 'out', ${welcomeMsg}, 'lead-auto')`;
                     await sql`UPDATE leads SET stage = 'contacted', contacted_at = NOW() WHERE leadgen_id = ${leadgenId}`;
                   }
 
-                  console.log(`📤 Lead'e otomatik mesaj gönderildi: ${cleanPhone}`);
+                  console.log(`📤 Lead'e ${isTurkish ? 'TR' : 'EN'} otomatik mesaj gönderildi: ${cleanPhone}`);
                 } catch (e) {
                   console.error('❌ WhatsApp gönderim hatası:', e.response?.data || e.message);
                 }

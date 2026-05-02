@@ -24,14 +24,22 @@ export default async function handler(req, res) {
     )`;
 
     await sql`CREATE TABLE IF NOT EXISTS leads (
-      id SERIAL PRIMARY KEY, phone_number VARCHAR(20) NOT NULL,
-      patient_name VARCHAR(100), form_name VARCHAR(100),
-      city VARCHAR(50), email VARCHAR(100),
-      tags TEXT DEFAULT '[]', stage VARCHAR(20) DEFAULT 'new',
-      notes TEXT DEFAULT '', ad_id VARCHAR(50),
-      score INT DEFAULT 0,
+      id SERIAL PRIMARY KEY, phone_number VARCHAR(20),
+      patient_name VARCHAR(100), email VARCHAR(200), city VARCHAR(100),
+      form_id VARCHAR(50), form_name VARCHAR(200), ad_id VARCHAR(50),
+      leadgen_id VARCHAR(50) UNIQUE, tags TEXT DEFAULT '[]',
+      raw_data TEXT DEFAULT '{}', stage VARCHAR(20) DEFAULT 'new',
+      score INT DEFAULT 0, notes TEXT DEFAULT '',
+      contacted_at TIMESTAMP, responded_at TIMESTAMP,
       created_at TIMESTAMP DEFAULT NOW()
     )`;
+    // Geriye dönük kolon garantisi
+    try { await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS score INT DEFAULT 0`; } catch(e){}
+    try { await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS form_id VARCHAR(50)`; } catch(e){}
+    try { await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS leadgen_id VARCHAR(50)`; } catch(e){}
+    try { await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS raw_data TEXT DEFAULT '{}'`; } catch(e){}
+    try { await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS contacted_at TIMESTAMP`; } catch(e){}
+    try { await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS responded_at TIMESTAMP`; } catch(e){}
 
     await sql`CREATE TABLE IF NOT EXISTS events (
       id SERIAL PRIMARY KEY, phone_number VARCHAR(20),
@@ -41,7 +49,6 @@ export default async function handler(req, res) {
       assigned_doctor VARCHAR(100),
       created_at TIMESTAMP DEFAULT NOW()
     )`;
-    // Geriye dönük kolonları ekleme garantisi (mevcut tablo varsa diye)
     try { await sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS scheduled_date TIMESTAMP`; } catch(e){}
     try { await sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS assigned_doctor VARCHAR(100)`; } catch(e){}
 
@@ -59,16 +66,6 @@ export default async function handler(req, res) {
     await sql`CREATE TABLE IF NOT EXISTS tags (
       id SERIAL PRIMARY KEY, name VARCHAR(100) UNIQUE NOT NULL,
       color VARCHAR(7) DEFAULT '#3b82f6', created_at TIMESTAMP DEFAULT NOW()
-    )`;
-
-    await sql`CREATE TABLE IF NOT EXISTS leads (
-      id SERIAL PRIMARY KEY, phone_number VARCHAR(20),
-      patient_name VARCHAR(100), email VARCHAR(200), city VARCHAR(100),
-      form_id VARCHAR(50), form_name VARCHAR(200), ad_id VARCHAR(50),
-      leadgen_id VARCHAR(50) UNIQUE, tags TEXT DEFAULT '[]',
-      raw_data TEXT DEFAULT '{}', stage VARCHAR(20) DEFAULT 'new',
-      contacted_at TIMESTAMP, responded_at TIMESTAMP, notes TEXT DEFAULT '',
-      created_at TIMESTAMP DEFAULT NOW()
     )`;
 
     // Yeni sütunları ekle (varsa hata vermez)

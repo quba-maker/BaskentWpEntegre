@@ -393,6 +393,20 @@ Cevap: Muayene ücretimiz branşa göre değişiklik göstermektedir. Hangi böl
         </div>
         <textarea id="hours-message" rows="2" placeholder="Mesai dışı kalınca gidecek otomatik mesaj..." onchange="saveHours()"></textarea>
       </div>
+      <div class="card">
+        <h2>📋 Form Karşılama Mesajları</h2>
+        <p style="color:var(--text-muted); font-size:13px; margin-bottom:16px;">Meta reklamlarından form dolduran hastalara otomatik gönderilen ilk mesaj. <code>{isim}</code> ve <code>{bolum}</code> değişkenlerini kullanabilirsiniz.</p>
+        <div class="form-group" style="margin-bottom:16px;">
+          <label>🇹🇷 Türkçe Karşılama (Yerli / Gurbetçi)</label>
+          <textarea id="form-greeting-tr" rows="3" placeholder="Merhaba {isim}! Başkent Üniversitesi Konya Hastanesi'nden yazıyoruz. {bolum} konusundaki ilginiz için teşekkür ederiz..."></textarea>
+        </div>
+        <div class="form-group" style="margin-bottom:16px;">
+          <label>🇬🇧 English Greeting (International Patients)</label>
+          <textarea id="form-greeting-en" rows="3" placeholder="Hello {name}! We are writing from Başkent University Konya Hospital. Thank you for your interest in {department}..."></textarea>
+        </div>
+        <p style="color:var(--text-muted); font-size:12px; margin-bottom:12px;">💡 Boş bırakırsanız sistem varsayılan mesajı kullanır.</p>
+        <button class="btn btn-primary" onclick="saveFormGreetings()" style="width:100%">💾 Karşılama Mesajlarını Kaydet</button>
+      </div>
     </div>
   </main>
 </div>
@@ -950,12 +964,24 @@ async function loadSettings() {
       <button class="btn-sm btn-danger" onclick="deleteTag(${t.id})">Sil</button>
     </div>`
   ).join('');
+  
+  // Form karşılama mesajlarını yükle
+  document.getElementById('form-greeting-tr').value = s.form_greeting_tr || '';
+  document.getElementById('form-greeting-en').value = s.form_greeting_en || '';
 }
 async function addTag() {
   await api('tags','POST',{name:document.getElementById('new-tag').value, color:document.getElementById('new-tag-color').value});
   document.getElementById('new-tag').value=''; loadSettings();
 }
 async function deleteTag(id) { await api('tags&id='+id,'DELETE'); loadSettings(); }
+
+async function saveFormGreetings() {
+  const tr = document.getElementById('form-greeting-tr').value;
+  const en = document.getElementById('form-greeting-en').value;
+  await api('settings','POST',{key:'form_greeting_tr', value: tr});
+  await api('settings','POST',{key:'form_greeting_en', value: en});
+  toast('Form karşılama mesajları kaydedildi ✅');
+}
 
 let calendarEventsData = [];
 
