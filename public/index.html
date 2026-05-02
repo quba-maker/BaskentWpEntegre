@@ -30,7 +30,6 @@
       <button class="nav-btn active" data-page="dashboard">📊 Gösterge Paneli</button>
       <button class="nav-btn" data-page="conversations">💬 Tüm Mesajlar</button>
       <button class="nav-btn" data-page="appointments">📅 Randevu Talepleri <span id="apt-badge" class="apt-badge" style="display:none">0</span></button>
-      <button class="nav-btn" data-page="leads">🎯 Hasta Formları</button>
       <button class="nav-btn" data-page="form-management">📋 Form Yönetimi</button>
       <button class="nav-btn" data-page="training">🧠 Bot Eğitimi</button>
       <button class="nav-btn" data-page="templates">📋 Hızlı Yanıtlar</button>
@@ -324,23 +323,6 @@ Cevap: Muayene ücretimiz branşa göre değişiklik göstermektedir. Hangi böl
       </div>
     </div>
 
-    <!-- LEADS (Sheets) -->
-    <div id="page-leads" class="page">
-      <h1>🎯 Lead (Müşteri) Panosu</h1>
-      <div class="stats-grid">
-        <div class="stat-card"><div class="stat-value" id="lead-today">0</div><div class="stat-label">Bugün Lead</div></div>
-        <div class="stat-card"><div class="stat-value" id="lead-total">0</div><div class="stat-label">Toplam Lead</div></div>
-        <div class="stat-card"><div class="stat-value" id="lead-contacted">0</div><div class="stat-label">İletişime Geçildi</div></div>
-        <div class="stat-card" style="border-color:#22c55e"><div class="stat-value" id="lead-appointed" style="color:#22c55e">0</div><div class="stat-label">Randevu Aldı</div></div>
-      </div>
-      <div id="sheet-tabs" class="sheet-tabs"></div>
-      <div id="sheet-info" style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;color:var(--text-muted);font-size:13px;">
-        <span id="sheet-row-count"></span>
-        <button class="btn btn-secondary btn-sm" onclick="loadSheetData(window._activeSheet)">🔄 Yenile</button>
-      </div>
-      <div id="lead-list" style="margin-top:10px;"></div>
-    </div>
-
     <!-- FORM YÖNETİMİ -->
     <div id="page-form-management" class="page">
       <h1>📋 Form Yönetimi</h1>
@@ -602,19 +584,26 @@ async function loadFormList() {
   const stage = document.getElementById('fm-stage').value;
   
   let url = 'form-list';
-  if (q) url += '&q=' + encodeURIComponent(q);
-  else if (campaign) url += '&campaign=' + encodeURIComponent(campaign);
-  else if (stage) url += '&stage=' + encodeURIComponent(stage);
+  if (q || campaign || stage) {
+    const params = new URLSearchParams();
+    if (q) params.append('q', q);
+    if (campaign) params.append('campaign', campaign);
+    if (stage) params.append('stage', stage);
+    url += '?' + params.toString();
+  }
   
   const data = await api(url);
   if (!data) return;
   
-  // Kampanya dropdown'ını doldur (ilk yüklemede)
+  // Kampanya dropdown'ını doldur (seçimi koruyarak)
   const sel = document.getElementById('fm-campaign');
-  if (sel.options.length <= 1 && data.campaigns) {
+  if (data.campaigns) {
+    const currentVal = sel.value;
+    sel.innerHTML = '<option value="">Tüm Kampanyalar</option>';
     data.campaigns.forEach(c => {
       const opt = document.createElement('option');
       opt.value = c; opt.textContent = c;
+      if (c === currentVal) opt.selected = true;
       sel.appendChild(opt);
     });
   }
@@ -631,29 +620,64 @@ async function loadFormList() {
   list.innerHTML = leads.map(l => {
     const dt = new Date(l.created_at).toLocaleString('tr-TR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
     let tags = []; try { tags = JSON.parse(l.tags || '[]'); } catch(e) {}
-    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:14px 16px;background:var(--bg-hover);border-radius:var(--radius-sm);margin-bottom:8px;border-left:4px solid ${stageColors[l.stage]||'#6b7280'}">
-      <div style="flex:1;">
-        <div style="font-weight:600;margin-bottom:4px;display:flex;align-items:center;gap:8px;">
-          ${l.patient_name || 'İsimsiz'} 
-          <span style="font-size:11px;background:${stageColors[l.stage]||'#6b7280'}20;color:${stageColors[l.stage]||'#6b7280'};padding:2px 8px;border-radius:10px;font-weight:500;">${stageLabels[l.stage]||l.stage}</span>
+    
+    // Parse raw_data to display in accordion
+    let rawDataHtml = '';
+    try {
+      if (l.raw_data) {
+        const raw = JSON.parse(l.raw_data);
+        if (Object.keys(raw).length > 0) {
+          rawDataHtml = Object.entries(raw).map(([k,v]) => `
+            <div style="margin-bottom:8px;">
+              <div style="font-size:11px;color:var(--text-muted);margin-bottom:2px;">${k}</div>
+              <div style="font-size:13px;color:#fff;">${v}</div>
+            </div>
+          `).join('');
+        }
+      }
+    } catch(e) {}
+    
+    const hasRawData = rawDataHtml !== '';
+
+    return `<div style="background:var(--bg-hover);border-radius:var(--radius-sm);margin-bottom:8px;border-left:4px solid ${stageColors[l.stage]||'#6b7280'}; overflow:hidden;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;padding:14px 16px;">
+        <div style="flex:1;">
+          <div style="font-weight:600;margin-bottom:6px;display:flex;align-items:center;gap:8px;">
+            ${l.patient_name || 'İsimsiz'} 
+            <span style="font-size:11px;background:${stageColors[l.stage]||'#6b7280'}20;color:${stageColors[l.stage]||'#6b7280'};padding:2px 8px;border-radius:10px;font-weight:500;">${stageLabels[l.stage]||l.stage}</span>
+          </div>
+          <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:6px;">
+            <span style="font-size:12px;color:var(--text-muted)">📱 ${l.phone_number}</span>
+            ${l.city ? `<span style="font-size:12px;color:var(--text-muted)">📍 ${l.city}</span>` : ''}
+            ${l.email ? `<span style="font-size:12px;color:var(--text-muted)">✉️ ${l.email}</span>` : ''}
+            <span style="font-size:11px;color:var(--text-muted)">🕐 ${dt}</span>
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            ${l.form_name ? `<span style="font-size:11px;background:var(--accent-primary);color:white;padding:2px 8px;border-radius:6px;font-weight:500;">📋 ${l.form_name}</span>` : ''}
+            ${tags.map(t => `<span style="font-size:11px;background:#374151;color:#d1d5db;padding:2px 6px;border-radius:4px;">${t}</span>`).join('')}
+          </div>
         </div>
-        <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:4px;">
-          <span style="font-size:12px;color:var(--text-muted)">📱 ${l.phone_number}</span>
-          ${l.city ? `<span style="font-size:12px;color:var(--text-muted)">📍 ${l.city}</span>` : ''}
-          ${l.email ? `<span style="font-size:12px;color:var(--text-muted)">✉️ ${l.email}</span>` : ''}
-          <span style="font-size:11px;color:var(--text-muted)">🕐 ${dt}</span>
-        </div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap;">
-          ${l.form_name ? `<span style="font-size:11px;background:var(--accent-primary);color:white;padding:2px 8px;border-radius:6px;font-weight:500;">📋 ${l.form_name}</span>` : ''}
-          ${tags.map(t => `<span style="font-size:11px;background:#374151;color:#d1d5db;padding:2px 6px;border-radius:4px;">${t}</span>`).join('')}
+        <div style="display:flex;gap:6px;align-items:center;flex-direction:column;min-width:110px;">
+          <button class="btn btn-sm btn-primary" onclick="document.querySelector('[data-page=conversations]').click();setTimeout(()=>loadChat('${l.phone_number}','whatsapp'),300)" style="font-size:11px;padding:4px 10px;width:100%">💬 Sohbet</button>
+          ${l.stage !== 'appointed' ? `<button class="btn btn-sm btn-secondary" onclick="updateLeadStage(${l.id},'appointed')" style="font-size:11px;padding:4px 10px;width:100%">✅ Randevu</button>` : ''}
+          ${hasRawData ? `<button class="btn btn-sm" onclick="toggleFormDetails(${l.id})" style="font-size:11px;padding:4px 10px;width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1)">📄 Form Detayı</button>` : ''}
         </div>
       </div>
-      <div style="display:flex;gap:6px;align-items:center;flex-direction:column;">
-        <button class="btn btn-sm btn-primary" onclick="document.querySelector('[data-page=conversations]').click();setTimeout(()=>loadChat('${l.phone_number}','whatsapp'),300)" style="font-size:11px;padding:4px 10px;width:100%">💬 Sohbet</button>
-        ${l.stage !== 'appointed' ? `<button class="btn btn-sm btn-secondary" onclick="updateLeadStage(${l.id},'appointed')" style="font-size:11px;padding:4px 10px;width:100%">✅ Randevu</button>` : ''}
-      </div>
+      ${hasRawData ? `
+      <div id="form-detail-${l.id}" style="display:none;padding:12px 16px;background:rgba(0,0,0,0.2);border-top:1px solid rgba(255,255,255,0.05);">
+        ${rawDataHtml}
+      </div>` : ''}
     </div>`;
   }).join('');
+}
+
+function toggleFormDetails(id) {
+  const el = document.getElementById(`form-detail-${id}`);
+  if (el.style.display === 'none') {
+    el.style.display = 'block';
+  } else {
+    el.style.display = 'none';
+  }
 }
 
 async function updateLeadStage(id, stage) {

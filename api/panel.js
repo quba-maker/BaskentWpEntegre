@@ -109,17 +109,19 @@ export default async function handler(req, res) {
       const q = req.query.q || '';
       const campaign = req.query.campaign || '';
       const stage = req.query.stage || '';
-      let leads;
-      if (q) {
-        const search = `%${q}%`;
-        leads = await sql`SELECT * FROM leads WHERE (patient_name ILIKE ${search} OR phone_number ILIKE ${search} OR city ILIKE ${search}) ORDER BY created_at DESC LIMIT 200`;
-      } else if (campaign) {
-        leads = await sql`SELECT * FROM leads WHERE form_name = ${campaign} ORDER BY created_at DESC LIMIT 200`;
-      } else if (stage) {
-        leads = await sql`SELECT * FROM leads WHERE stage = ${stage} ORDER BY created_at DESC LIMIT 200`;
-      } else {
-        leads = await sql`SELECT * FROM leads ORDER BY created_at DESC LIMIT 200`;
-      }
+      
+      const search = q ? `%${q}%` : null;
+      const cmp = campaign ? campaign : null;
+      const stg = stage ? stage : null;
+
+      const leads = await sql`
+        SELECT * FROM leads 
+        WHERE (${search}::text IS NULL OR patient_name ILIKE ${search} OR phone_number ILIKE ${search} OR city ILIKE ${search})
+          AND (${cmp}::text IS NULL OR form_name = ${cmp})
+          AND (${stg}::text IS NULL OR stage = ${stg})
+        ORDER BY created_at DESC LIMIT 300
+      `;
+      
       // Benzersiz kampanya isimleri
       const campaigns = await sql`SELECT DISTINCT form_name FROM leads WHERE form_name IS NOT NULL AND form_name != '' ORDER BY form_name`;
       return res.json({ leads, campaigns: campaigns.map(c => c.form_name) });
