@@ -26,6 +26,22 @@ export default async function handler(req, res) {
       try {
         await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS channel VARCHAR(50) DEFAULT 'whatsapp'`;
         await sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS channel VARCHAR(50) DEFAULT 'whatsapp'`;
+        
+        // Otomatik Yabancı Sayfa ID tespiti (Kullanıcıyı yormamak için)
+        const check = await sql`SELECT value FROM settings WHERE key = 'foreign_page_id'`;
+        if (check.length === 0 || !check[0].value) {
+          try {
+            const token = 'IGAAc7T3ixmxxBZAFo1V0dzUlNXaTd0SFB4Yk9pU1Rad0FsZAlJLREVPd01neXg2YW5kZA2pOSjZAnM0tidi16ZAjZA5eGZAET0ZAHTnpnYjZAvakJhU0JHTTZAUUzVIajdISFplQUhidGltRVByc3ktUHd6UDFobl96WXZAtb3RhbVQ5bDZAnOAZDZD';
+            const igRes = await axios.get(`https://graph.instagram.com/v25.0/me?access_token=${token}`);
+            if (igRes.data && igRes.data.id) {
+              if (check.length > 0) {
+                await sql`UPDATE settings SET value = ${igRes.data.id} WHERE key = 'foreign_page_id'`;
+              } else {
+                await sql`INSERT INTO settings (key, value) VALUES ('foreign_page_id', ${igRes.data.id})`;
+              }
+            }
+          } catch(e) { console.error('Otomatik ID tespiti hatasi:', e.message); }
+        }
       } catch(e) {}
 
       const total = await sql`SELECT COUNT(*) as c FROM messages`;

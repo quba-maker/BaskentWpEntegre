@@ -64,6 +64,12 @@
             <h3>💬 Gelen Kutusu</h3>
             <button class="btn btn-sm btn-secondary" onclick="loadConversations()">🔄</button>
           </div>
+          <div class="inbox-filter-tabs">
+            <button class="filter-tab active" onclick="setInboxFilter('all')">Tümü</button>
+            <button class="filter-tab" onclick="setInboxFilter('whatsapp')">WhatsApp</button>
+            <button class="filter-tab" onclick="setInboxFilter('messenger')">Face</button>
+            <button class="filter-tab" onclick="setInboxFilter('instagram')">İnsta</button>
+          </div>
           <div id="conversation-list" class="contact-list"></div>
         </div>
 
@@ -119,14 +125,37 @@
       <div class="training-layout">
         <div class="card prompt-editor-card" style="margin:0">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-            <h2 style="margin:0">🧠 Sistem Promptu (Ana Beyin)</h2>
+            <h2 style="margin:0">🧠 Bot Eğitimi & Karakter</h2>
             <div style="display:flex; gap:8px;">
               <button class="btn btn-secondary btn-sm" onclick="resetPrompt()">Varsayılana Dön</button>
-              <button class="btn btn-primary btn-sm" onclick="savePrompt()">💾 Kaydet & Yayınla</button>
+              <button class="btn btn-primary btn-sm" onclick="savePrompt()">💾 Ayarları Kaydet</button>
             </div>
           </div>
-          <p class="hint">Bu alan yapay zekanın "karakteridir". Kuralları ve sınırları belirleyin.</p>
-          <textarea id="prompt-editor" placeholder="Sistem promptu yükleniyor..."></textarea>
+          
+          <div class="sheet-tabs" style="margin-bottom:16px; border-bottom:1px solid rgba(255,255,255,0.1)">
+            <button class="sheet-tab active" id="tab-prompt-wp" onclick="switchPromptTab('wp')">🟢 WhatsApp</button>
+            <button class="sheet-tab" id="tab-prompt-tr" onclick="switchPromptTab('tr')">🇹🇷 Türkçe Sayfalar (FB/IG)</button>
+            <button class="sheet-tab" id="tab-prompt-en" onclick="switchPromptTab('en')">🇬🇧 Yabancı Sayfa (Health)</button>
+          </div>
+
+          <div id="prompt-section-wp">
+            <p class="hint">Bu karakter sadece <strong>WhatsApp</strong> üzerinden gelen hastalara cevap verirken kullanılır.</p>
+            <textarea id="prompt-editor-wp" placeholder="WhatsApp sistem promptu yükleniyor..."></textarea>
+          </div>
+
+          <div id="prompt-section-tr" style="display:none;">
+            <p class="hint">Bu karakter WhatsApp dışındaki <strong>Türkçe Instagram ve Messenger</strong> sayfalarınızda kullanılır.</p>
+            <textarea id="prompt-editor-tr" placeholder="Türkçe sayfalar için sistem promptu yükleniyor..."></textarea>
+          </div>
+
+          <div id="prompt-section-en" style="display:none;">
+            <div style="display:flex; gap:10px; align-items:center; margin-bottom:10px;">
+              <label style="font-size:13px; font-weight:600;">Yabancı Sayfa ID (Instagram/Messenger):</label>
+              <input type="text" id="foreign-page-id" placeholder="Örn: 17841407525670452" style="background:var(--bg-hover); border:1px solid rgba(255,255,255,0.1); color:white; padding:6px 10px; border-radius:6px; flex:1;">
+            </div>
+            <p class="hint">Bu prompt SADECE yukarıda ID'sini girdiğiniz Yabancı Sayfaya gelen mesajlarda kullanılır.</p>
+            <textarea id="prompt-editor-en" placeholder="Yabancı sayfa sistem promptu yükleniyor..."></textarea>
+          </div>
         </div>
         
         <div class="card" style="margin:0; display:flex; flex-direction:column;">
@@ -307,11 +336,34 @@ async function loadDashboard() {
   }).join('') || '<div class="empty">Etkileşim yok</div>';
 }
 
+let currentInboxFilter = 'all';
+
+function setInboxFilter(filter) {
+  currentInboxFilter = filter;
+  document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+  event.target.classList.add('active');
+  loadConversations();
+}
+
+function switchPromptTab(tab) {
+  document.querySelectorAll('.prompt-editor-card .sheet-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById(`tab-prompt-${tab}`).classList.add('active');
+  document.getElementById('prompt-section-wp').style.display = tab === 'wp' ? 'block' : 'none';
+  document.getElementById('prompt-section-tr').style.display = tab === 'tr' ? 'block' : 'none';
+  document.getElementById('prompt-section-en').style.display = tab === 'en' ? 'block' : 'none';
+}
+
 /* OMNICHANNEL INBOX */
 async function loadConversations() {
   const list = await api('conversations'); if(!list) return;
   allTags = await api('tags') || [];
-  document.getElementById('conversation-list').innerHTML = list.map(c => {
+  
+  const filteredList = currentInboxFilter === 'all' ? list : list.filter(c => {
+    const ch = c.last_channel || c.channel || 'whatsapp';
+    return ch === currentInboxFilter;
+  });
+
+  document.getElementById('conversation-list').innerHTML = filteredList.map(c => {
     let t = ''; try { t = JSON.parse(c.tags||'[]').map(x=>`<span class="tag-badge-display" style="background:#3b82f6;">${x}</span>`).join(''); } catch(e){}
     const isActive = c.phone_number === currentPhone ? 'active' : '';
     const stBadge = c.status === 'human' ? '<span class="status-badge status-human">MANUAL</span>' : '<span class="status-badge status-bot">BOT</span>';
@@ -422,16 +474,29 @@ async function sendPanelMessage() {
 /* BOT EĞİTİMİ */
 async function loadPrompt() {
   const s = await api('settings'); 
-  if(s) document.getElementById('prompt-editor').value = s.system_prompt || '';
+  if(s) {
+    document.getElementById('prompt-editor-wp').value = s.system_prompt_whatsapp || s.system_prompt || '';
+    document.getElementById('prompt-editor-tr').value = s.system_prompt_tr || s.system_prompt || '';
+    document.getElementById('prompt-editor-en').value = s.system_prompt_foreign || '';
+    document.getElementById('foreign-page-id').value = s.foreign_page_id || '';
+  }
 }
 async function savePrompt() {
-  await api('settings','POST',{key:'system_prompt', value:document.getElementById('prompt-editor').value});
-  toast('Sistem Promptu güncellendi!');
+  await api('settings','POST',{key:'system_prompt_whatsapp', value:document.getElementById('prompt-editor-wp').value});
+  await api('settings','POST',{key:'system_prompt_tr', value:document.getElementById('prompt-editor-tr').value});
+  await api('settings','POST',{key:'system_prompt_foreign', value:document.getElementById('prompt-editor-en').value});
+  await api('settings','POST',{key:'foreign_page_id', value:document.getElementById('foreign-page-id').value});
+  toast('Sistem Promptları güncellendi!');
 }
 async function resetPrompt() {
   if(!confirm('Orijinal ayarlara dönülecek, emin misiniz?')) return;
   const d = await api('default-prompt');
-  if(d && d.prompt) { document.getElementById('prompt-editor').value = d.prompt; savePrompt(); }
+  if(d && d.prompt) { 
+    document.getElementById('prompt-editor-wp').value = d.prompt; 
+    document.getElementById('prompt-editor-tr').value = d.prompt; 
+    document.getElementById('prompt-editor-en').value = d.prompt; 
+    savePrompt(); 
+  }
 }
 
 /* LEADS - AYNI KALACAK SADECE STİL DEĞİŞTİ */
