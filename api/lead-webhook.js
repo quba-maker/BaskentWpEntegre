@@ -179,11 +179,11 @@ export default async function handler(req, res) {
                 if (isTurkish) {
                   welcomeMsg = greetingTr
                     ? greetingTr.replace('{isim}', name || '').replace('{bolum}', deptLabel).trim()
-                    : `${greeting} Başkent Üniversitesi Konya Hastanesi'nden yazıyoruz. ${deptLabel} konusundaki ilginiz için teşekkür ederiz. Uzman doktorlarımız sizi değerlendirmek için hazır. Size uygun bir randevu ayarlayalım mı? 😊`;
+                    : `${greeting} Başkent Üniversitesi Konya Hastanesi'nden yazıyoruz 🙏\n\n${deptLabel} konusunda bize ulaştığınızı gördük. Şikayetiniz ne zamandır devam ediyor?\n\nDurumunuzu daha iyi anlamamız için birkaç soru sormak istiyoruz, sonrasında size en uygun değerlendirmeyi sunalım.`;
                 } else {
                   welcomeMsg = greetingEn
                     ? greetingEn.replace('{name}', name || '').replace('{department}', deptLabel).trim()
-                    : `${greeting} We are writing from Başkent University Konya Hospital. Thank you for your interest in ${deptLabel}. Our expert doctors are ready to evaluate your case. If you'd like, we can call you at a convenient time to discuss the details. 🙏`;
+                    : `${greeting} We're reaching out from Başkent University Konya Hospital 🙏\n\nWe noticed your interest in ${deptLabel}. How long have you been experiencing this issue?\n\nWe'd like to understand your situation better so we can recommend the best course of action for you.`;
                 }
 
                 try {
