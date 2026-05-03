@@ -84,6 +84,26 @@ export default async function handler(req, res) {
     // ALERTS (Zorbay Bildirim Sistemi)
     if (action === 'alerts') {
       try {
+        // 1. Operatör Gecikme Kontrolü (5 Dakika Kuralı - SLA)
+        // İnsan modunda olup, son mesajı hastadan gelen ve üzerinden 5 dakika geçen görüşmeleri bul
+        const delayed = await sql`
+          SELECT c.phone_number, c.patient_name 
+          FROM conversations c
+          WHERE c.status = 'human'
+            AND (SELECT direction FROM messages WHERE phone_number = c.phone_number ORDER BY created_at DESC LIMIT 1) = 'in'
+            AND (SELECT created_at FROM messages WHERE phone_number = c.phone_number ORDER BY created_at DESC LIMIT 1) < NOW() - INTERVAL '5 minutes'
+        `;
+        
+        for (const chat of delayed) {
+          // Son 1 saat içinde bu hasta için SLA alarmı üretilmiş mi bak (spami önlemek için)
+          const existing = await sql`SELECT id FROM alerts WHERE phone_number = ${chat.phone_number} AND alert_type = 'sla_violation' AND created_at > NOW() - INTERVAL '1 hour'`;
+          if (existing.length === 0) {
+            const msg = `⚠️ SLA İHLALİ: ${chat.patient_name || chat.phone_number} 5 dakikadan uzun süredir cevap bekliyor!`;
+            await sql`INSERT INTO alerts (phone_number, alert_type, message) VALUES (${chat.phone_number}, 'sla_violation', ${msg})`;
+          }
+        }
+
+        // 2. Aktif alarmları getir
         const activeAlerts = await sql`SELECT * FROM alerts WHERE is_read = false ORDER BY created_at DESC`;
         return res.json(activeAlerts);
       } catch (e) {

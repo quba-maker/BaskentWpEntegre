@@ -96,9 +96,8 @@ export default async function handler(req, res) {
         (SELECT created_at FROM messages WHERE phone_number = c.phone_number AND direction = 'in' ORDER BY created_at DESC LIMIT 1) as last_patient_msg_time,
         (SELECT content FROM messages WHERE phone_number = c.phone_number AND direction = 'in' ORDER BY created_at DESC LIMIT 1) as last_patient_text
       FROM conversations c
-      WHERE c.status != 'human'
-        AND c.follow_up_count < 2
-        AND c.last_message_at < NOW() - INTERVAL '6 hours'
+      WHERE c.follow_up_count < 2
+        AND c.last_message_at < NOW() - INTERVAL '24 hours'
     `;
 
     let sent = 0, skipped = 0, templateUsed = 0, textUsed = 0;
@@ -134,7 +133,7 @@ export default async function handler(req, res) {
         }
 
         await sql`INSERT INTO messages (phone_number, direction, content, model_used, channel) VALUES (${conv.phone_number}, 'out', ${msgContent}, 'follow-up', 'whatsapp')`;
-        await sql`UPDATE conversations SET follow_up_count = follow_up_count + 1, last_follow_up_at = NOW(), last_message_at = NOW() WHERE phone_number = ${conv.phone_number}`;
+        await sql`UPDATE conversations SET follow_up_count = follow_up_count + 1, last_follow_up_at = NOW(), last_message_at = NOW(), phase = 'recovery' WHERE phone_number = ${conv.phone_number}`;
         sent++;
       } catch (e) {
         console.error(`❌ Takip hatası (${conv.phone_number}):`, e.response?.data?.error?.message || e.message);
