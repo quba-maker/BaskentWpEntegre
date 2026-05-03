@@ -724,14 +724,14 @@ function renderSheetTable(headers, rows, total) {
   
   // Status Colors (Apple Style Badges)
   const getStatusColor = (s) => {
-    if (s === 'Randevu Aldı' || s === 'Geldi' || s === 'Tedavi Oldu') return 'color:#22c55e; background:rgba(34,197,94,0.1); font-weight:600;';
-    if (s === 'Soğuk') return 'color:#ef4444; background:rgba(239,68,68,0.1);';
-    if (s === 'İlgili' || s === 'Cevap Verdi' || s === 'İletişime Geçildi') return 'color:#f59e0b; background:rgba(245,158,11,0.1);';
-    if (s === 'CREATED') return 'color:#8b5cf6; background:rgba(139,92,246,0.1);';
+    if (s === 'Randevu Aldı' || s === 'Geldi' || s === 'Tedavi Oldu') return 'color:var(--system-green); background:rgba(50, 215, 75, 0.1); font-weight:600;';
+    if (s === 'Soğuk') return 'color:var(--system-red); background:rgba(255, 69, 58, 0.1);';
+    if (s === 'İlgili' || s === 'Cevap Verdi' || s === 'İletişime Geçildi') return 'color:var(--system-orange); background:rgba(255, 159, 10, 0.1);';
+    if (s === 'CREATED') return 'color:#BF5AF2; background:rgba(191, 90, 242, 0.1);';
     return 'color:var(--text-main); background:transparent;';
   };
 
-  let html = `<div style="overflow-x:auto;"><table class="data-table" style="margin:0; box-shadow:none; border-radius:0;"><thead><tr><th style="width:40px; text-align:center; color:var(--text-muted);">#</th>${headers.map((h, j) => `<th${editableCols[j] ? ' style="color:#60a5fa;" title="Düzenlenebilir Alan"' : ''}>${editableCols[j] ? '✍️ ' : ''}${h}</th>`).join('')}</tr></thead><tbody>`;
+  let html = `<div style="overflow-x:auto;"><table class="data-table" style="margin:0; box-shadow:none; border-radius:0;"><thead><tr><th style="width:40px; text-align:center; color:var(--text-muted);">#</th>${headers.map((h, j) => `<th${editableCols[j] ? ' style="color:var(--accent-primary);" title="Düzenlenebilir Alan"' : ''}>${editableCols[j] ? '✍️ ' : ''}${h}</th>`).join('')}</tr></thead><tbody>`;
   
   rows.forEach((row, i) => {
     html += `<tr><td style="text-align:center; color:var(--text-muted); font-size:12px;">${i + 1}</td>`;
@@ -741,10 +741,10 @@ function renderSheetTable(headers, rows, total) {
       
       if(editType === 'status') {
         const bgStyle = getStatusColor(val);
-        html += `<td style="padding:6px 12px;"><select id="cell-${i}-${j}" style="appearance:none; padding:6px 12px; border-radius:8px; border:1px solid transparent; width:100%; min-width:140px; font-size:13px; cursor:pointer; transition:all 0.2s; outline:none; ${bgStyle}" onchange="updateSheetCell(${i}, ${j}, this.value, this)" onfocus="this.style.border='1px solid #3b82f6'"><option value="" style="background:var(--bg-card);color:white">Durum Seçin</option>${statusOptions.map(s => `<option value="${s}" style="background:var(--bg-card);color:white" ${val === s ? 'selected' : ''}>${s}</option>`).join('')}</select></td>`;
+        html += `<td style="padding:6px 12px;"><select id="cell-${i}-${j}" style="appearance:none; padding:8px 12px; border-radius:8px; border:1px solid transparent; width:100%; min-width:140px; font-size:13px; font-weight:500; cursor:pointer; transition:all 0.2s; outline:none; ${bgStyle}" onchange="updateSheetCell(${i}, ${j}, this.value, this)" onfocus="this.style.border='1px solid var(--accent-primary)'"><option value="" style="background:var(--bg-card);color:white">Durum Seçin</option>${statusOptions.map(s => `<option value="${s}" style="background:var(--bg-card);color:white" ${val === s ? 'selected' : ''}>${s}</option>`).join('')}</select></td>`;
       }
       else if(editType === 'text') {
-        html += `<td style="padding:6px 12px;"><input type="text" id="cell-${i}-${j}" style="width:100%; min-width:160px; background:var(--bg-hover); border:1px solid transparent; color:white; padding:8px 12px; border-radius:8px; font-size:13px; transition:all 0.2s; outline:none;" value="${String(val).replace(/"/g, '&quot;')}" placeholder="Not yazın..." onblur="updateSheetCell(${i}, ${j}, this.value, this)" onfocus="this.style.border='1px solid #3b82f6'" onkeydown="if(event.key==='Enter') this.blur();" /></td>`;
+        html += `<td style="padding:6px 12px;"><input type="text" id="cell-${i}-${j}" style="width:100%; min-width:160px; background:var(--bg-input); border:1px solid transparent; color:var(--text-main); padding:8px 12px; border-radius:8px; font-size:13px; font-weight:500; transition:all 0.2s; outline:none;" value="${String(val).replace(/"/g, '&quot;')}" placeholder="Not yazın..." onblur="updateSheetCell(${i}, ${j}, this.value, this)" onfocus="this.style.background='var(--bg-card)'; this.style.boxShadow='0 0 0 2px rgba(10, 132, 255, 0.2)';" onkeydown="if(event.key==='Enter') this.blur();" /></td>`;
       }
       else {
         html += `<td style="max-width:200px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${String(val).replace(/"/g, '&quot;')}">${val}</td>`;
@@ -771,23 +771,26 @@ async function updateSheetCell(row, col, value, element) {
     
     if(data.success) {
       toast('✅ Değişiklik kaydedildi');
-      element.style.border = '1px solid #10b981';
+      element.style.border = '1px solid var(--system-green)';
+      element.style.boxShadow = 'none';
       setTimeout(() => element.style.border = '1px solid transparent', 2000);
       
       if (element.tagName === 'SELECT') {
-        if (value === 'Randevu Aldı' || value === 'Geldi' || value === 'Tedavi Oldu') { element.style.color = '#22c55e'; element.style.background = 'rgba(34,197,94,0.1)'; element.style.fontWeight = '600'; }
-        else if (value === 'Soğuk') { element.style.color = '#ef4444'; element.style.background = 'rgba(239,68,68,0.1)'; element.style.fontWeight = 'normal'; }
-        else if (value === 'İlgili' || value === 'Cevap Verdi' || value === 'İletişime Geçildi') { element.style.color = '#f59e0b'; element.style.background = 'rgba(245,158,11,0.1)'; element.style.fontWeight = 'normal'; }
-        else if (value === 'CREATED') { element.style.color = '#8b5cf6'; element.style.background = 'rgba(139,92,246,0.1)'; element.style.fontWeight = 'normal'; }
-        else { element.style.color = 'var(--text-main)'; element.style.background = 'transparent'; element.style.fontWeight = 'normal'; }
+        if (value === 'Randevu Aldı' || value === 'Geldi' || value === 'Tedavi Oldu') { element.style.color = 'var(--system-green)'; element.style.background = 'rgba(50, 215, 75, 0.1)'; element.style.fontWeight = '600'; }
+        else if (value === 'Soğuk') { element.style.color = 'var(--system-red)'; element.style.background = 'rgba(255, 69, 58, 0.1)'; element.style.fontWeight = '500'; }
+        else if (value === 'İlgili' || value === 'Cevap Verdi' || value === 'İletişime Geçildi') { element.style.color = 'var(--system-orange)'; element.style.background = 'rgba(255, 159, 10, 0.1)'; element.style.fontWeight = '500'; }
+        else if (value === 'CREATED') { element.style.color = '#BF5AF2'; element.style.background = 'rgba(191, 90, 242, 0.1)'; element.style.fontWeight = '500'; }
+        else { element.style.color = 'var(--text-main)'; element.style.background = 'transparent'; element.style.fontWeight = '500'; }
+      } else {
+         element.style.background = 'var(--bg-input)';
       }
     } else {
       toast('❌ Hata: ' + data.error, 'error');
-      element.style.border = '1px solid #ef4444';
+      element.style.border = '1px solid var(--system-red)';
     }
   } catch(e) {
     toast('❌ Bağlantı hatası', 'error');
-    element.style.border = '1px solid #ef4444';
+    element.style.border = '1px solid var(--system-red)';
   } finally {
     element.style.opacity = originalOpacity;
     element.style.pointerEvents = 'auto';
