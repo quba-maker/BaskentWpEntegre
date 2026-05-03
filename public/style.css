@@ -36,7 +36,7 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { 
   font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; 
-  background: #0A0A0B;
+  background: #0C0C0E;
   color: var(--text-main); 
   min-height: 100vh; 
   overflow: hidden; 
@@ -55,18 +55,19 @@ body {
 
 /* APP LAYOUT */
 .app { display: flex; height: 100vh; width: 100vw; overflow: hidden; position: relative; }
-.app::before { content: ''; position: fixed; top: -50%; left: -30%; width: 80%; height: 80%; background: radial-gradient(circle, rgba(10, 132, 255, 0.06) 0%, transparent 70%); pointer-events: none; z-index: 0; }
-.app::after { content: ''; position: fixed; bottom: -40%; right: -20%; width: 60%; height: 60%; background: radial-gradient(circle, rgba(191, 90, 242, 0.04) 0%, transparent 70%); pointer-events: none; z-index: 0; }
+.app::before { content: ''; position: fixed; top: -40%; left: -20%; width: 70%; height: 70%; background: radial-gradient(circle, rgba(10, 132, 255, 0.12) 0%, transparent 65%); pointer-events: none; z-index: 0; animation: ambientShift 20s ease-in-out infinite alternate; }
+.app::after { content: ''; position: fixed; bottom: -30%; right: -15%; width: 55%; height: 55%; background: radial-gradient(circle, rgba(191, 90, 242, 0.08) 0%, transparent 65%); pointer-events: none; z-index: 0; animation: ambientShift 25s ease-in-out infinite alternate-reverse; }
+@keyframes ambientShift { 0% { transform: translate(0,0); } 100% { transform: translate(5%, 3%); } }
 
 /* Sidebar */
-.sidebar { width: 260px; background: rgba(20, 20, 22, 0.75); backdrop-filter: saturate(180%) blur(40px); -webkit-backdrop-filter: saturate(180%) blur(40px); border-right: 1px solid rgba(255,255,255,0.08); display: flex; flex-direction: column; padding: 24px 16px; z-index: 10; position: relative; }
+.sidebar { width: 260px; background: rgba(18, 18, 20, 0.85); backdrop-filter: saturate(180%) blur(50px); -webkit-backdrop-filter: saturate(180%) blur(50px); border-right: 1px solid rgba(255,255,255,0.06); display: flex; flex-direction: column; padding: 24px 16px; z-index: 10; position: relative; }
 .logo { display: flex; align-items: center; gap: 12px; padding: 0 8px 24px; margin-bottom: 16px; }
 .logo-icon { font-size: 28px; } 
 .logo span { font-weight: 600; font-size: 16px; color: var(--text-main); letter-spacing: -0.3px; }
 .nav-items { flex: 1; display: flex; flex-direction: column; gap: 4px; overflow-y: auto; padding-right: 4px; }
 .nav-btn { background: transparent; border: none; color: var(--text-muted); padding: 10px 14px; border-radius: var(--radius-sm); cursor: pointer; text-align: left; font-size: 14px; font-weight: 500; font-family: inherit; transition: all 0.2s ease; display: flex; align-items: center; gap: 10px; }
 .nav-btn:hover { background: var(--bg-hover); color: var(--text-main); }
-.nav-btn.active { background: rgba(255, 255, 255, 0.1); color: #fff; font-weight: 600; }
+.nav-btn.active { background: rgba(255, 255, 255, 0.12); color: #fff; font-weight: 600; border-radius: 10px; }
 .nav-footer { padding: 16px 8px 0; display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text-muted); font-weight: 500; }
 .status-dot { width: 8px; height: 8px; background: var(--system-green); border-radius: 50%; box-shadow: 0 0 10px rgba(50, 215, 75, 0.5); }
 
@@ -80,14 +81,14 @@ h1 { font-size: 32px; font-weight: 700; margin-bottom: 24px; color: var(--text-m
 h2 { font-size: 18px; font-weight: 600; margin-bottom: 16px; color: var(--text-main); letter-spacing: -0.4px; }
 
 /* Common Components */
-.card { background: rgba(30, 30, 34, 0.6); backdrop-filter: saturate(180%) blur(20px); -webkit-backdrop-filter: saturate(180%) blur(20px); border: 1px solid rgba(255,255,255,0.08); border-radius: 20px; padding: 24px; margin-bottom: 24px; }
+.card { background: rgba(28, 28, 32, 0.55); backdrop-filter: saturate(180%) blur(30px); -webkit-backdrop-filter: saturate(180%) blur(30px); border: 1px solid rgba(255,255,255,0.1); border-radius: 20px; padding: 24px; margin-bottom: 24px; }
 .hint { font-size: 13px; color: var(--text-muted); margin-bottom: 16px; line-height: 1.5; }
 code { background: var(--bg-hover); padding: 2px 6px; border-radius: 6px; font-size: 13px; color: var(--accent-primary); }
 
 /* Stats Grid */
 .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 32px; flex-shrink: 0; }
-.stat-card { background: rgba(30, 30, 34, 0.6); backdrop-filter: saturate(180%) blur(20px); -webkit-backdrop-filter: saturate(180%) blur(20px); border: 1px solid rgba(255,255,255,0.08); border-radius: 20px; padding: 24px; transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s; position: relative; overflow: hidden; }
-.stat-card:hover { transform: translateY(-3px); box-shadow: 0 8px 32px rgba(0,0,0,0.3); }
+.stat-card { background: rgba(28, 28, 32, 0.55); backdrop-filter: saturate(180%) blur(30px); -webkit-backdrop-filter: saturate(180%) blur(30px); border: 1px solid rgba(255,255,255,0.1); border-radius: 20px; padding: 24px; transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s, border-color 0.25s; position: relative; overflow: hidden; }
+.stat-card:hover { transform: translateY(-3px); box-shadow: 0 12px 40px rgba(0,0,0,0.3); border-color: rgba(255,255,255,0.15); }
 .stat-value { font-size: 36px; font-weight: 700; color: var(--text-main); margin-bottom: 4px; letter-spacing: -1.5px; }
 .stat-label { font-size: 13px; color: var(--text-muted); font-weight: 500; }
 
@@ -114,7 +115,7 @@ textarea:focus, input:focus, select:focus { outline: none; border-color: var(--a
 
 /* Omnichannel Inbox Layout */
 .inbox-layout { display: grid; grid-template-columns: 320px 1fr 320px; gap: 16px; height: calc(100vh - 120px); min-height: 600px; }
-.inbox-sidebar, .inbox-main, .inbox-details { background: rgba(30, 30, 34, 0.6); backdrop-filter: saturate(180%) blur(20px); -webkit-backdrop-filter: saturate(180%) blur(20px); border: 1px solid rgba(255,255,255,0.08); border-radius: 20px; display: flex; flex-direction: column; overflow: hidden; }
+.inbox-sidebar, .inbox-main, .inbox-details { background: rgba(28, 28, 32, 0.55); backdrop-filter: saturate(180%) blur(30px); -webkit-backdrop-filter: saturate(180%) blur(30px); border: 1px solid rgba(255,255,255,0.1); border-radius: 20px; display: flex; flex-direction: column; overflow: hidden; }
 
 /* Inbox: Contact List */
 .inbox-header { padding: 16px 20px; border-bottom: 1px solid var(--border-light); display: flex; justify-content: space-between; align-items: center; background: rgba(28, 28, 30, 0.8); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
