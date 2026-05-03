@@ -81,6 +81,25 @@ export default async function handler(req, res) {
       });
     }
 
+    // ALERTS (Zorbay Bildirim Sistemi)
+    if (action === 'alerts') {
+      try {
+        const activeAlerts = await sql`SELECT * FROM alerts WHERE is_read = false ORDER BY created_at DESC`;
+        return res.json(activeAlerts);
+      } catch (e) {
+        return res.json([]);
+      }
+    }
+
+    if (action === 'mark-alert-read') {
+      try {
+        await sql`UPDATE alerts SET is_read = true WHERE id = ${req.body.id}`;
+        return res.json({ success: true });
+      } catch (e) {
+        return res.status(500).json({ error: e.message });
+      }
+    }
+
     // KONUŞMALAR
     if (action === 'conversations') {
       const list = await sql`
