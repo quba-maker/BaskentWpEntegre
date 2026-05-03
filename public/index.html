@@ -69,7 +69,7 @@
 
     <!-- OMNICHANNEL INBOX -->
     <div id="page-conversations" class="page">
-      <h1>Omnichannel Inbox</h1>
+      <h1>Mesajlar</h1>
       <div class="inbox-layout">
         
         <!-- Contact List -->
@@ -146,9 +146,9 @@
               <div class="lead-info-row"><span class="lead-label">Lead Skoru:</span><span id="crm-lead-score" class="lead-value">—</span></div>
             </div>
 
-            <div class="form-group" style="margin-bottom: 12px;">
+            <div class="form-group">
               <label>Süreç Durumu</label>
-              <select id="crm-stage" class="form-control" style="width:100%; padding: 8px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-hover); color: var(--text-main); font-size: 13px;">
+              <select id="crm-stage">
                 <option value="new">🆕 Yeni Form</option>
                 <option value="responded">💬 İletişimde (Bot)</option>
                 <option value="appointment_request">📅 Randevu İstiyor</option>
@@ -157,25 +157,25 @@
               </select>
             </div>
             
-            <div class="form-group" style="margin-bottom: 12px;">
+            <div class="form-group">
               <label>Hasta Tipi / Demografi</label>
-              <select id="crm-patient-type" class="form-control" style="width:100%; padding: 8px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-hover); color: var(--text-main); font-size: 13px;">
+              <select id="crm-patient-type">
                 <option value="Yerli">🇹🇷 Yerli</option>
                 <option value="Gurbetçi">🌍 Gurbetçi</option>
                 <option value="Yabancı Turist">✈️ Yabancı Turist</option>
               </select>
             </div>
 
-            <div class="form-group" style="margin-bottom: 12px;">
+            <div class="form-group">
               <label>İlgilendiği Tedavi / Bölüm</label>
-              <input type="text" id="crm-department" placeholder="Örn: Estetik, Diş" class="form-control" style="width:100%; padding: 8px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-hover); color: var(--text-main); font-size: 13px;">
+              <input type="text" id="crm-department" placeholder="Örn: Estetik, Diş">
             </div>
 
             <div class="form-group">
               <label>Özel Etiketler (Manuel Seçim)</label>
               <div id="crm-tags" class="tags-container" style="margin-bottom: 8px; min-height: 24px;"></div>
-              <select id="crm-add-tag" class="form-control" onchange="addCRMTag(this.value)" style="width:100%; padding: 8px; border-radius: 8px; border: 1px dashed var(--border-color); background: transparent; color: var(--text-main); font-size: 13px;">
-                <option value="">+ Yeni Etiket Ekle</option>
+              <select id="crm-add-tag" onchange="addCRMTag(this.value)" style="border-style: dashed; background: transparent;">
+                <option value="">+ Etiket Ekle</option>
               </select>
             </div>
             <div class="form-group" style="display:none" id="crm-form-history-wrapper">
