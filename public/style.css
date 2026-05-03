@@ -135,10 +135,20 @@ textarea:focus, input:focus, select:focus { outline: none; border-color: var(--a
 .contact-time { font-size: 11px; color: var(--text-muted); flex-shrink: 0; margin-left: 6px; }
 .contact-preview { font-size: 12px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* Status Badges */
-.status-badge { display: inline-flex; align-items: center; padding: 2px 7px; border-radius: 10px; font-size: 10px; font-weight: 600; margin-top: 4px; }
+/* Contact Badges Row */
+.contact-badges { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; margin-top: 4px; }
+.contact-phone { font-size: 11px; color: var(--text-muted); margin-top: 1px; }
+
+/* Tag & Status Badges (Translucent Pills) */
+.tag-badge-display { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 20px; font-size: 10px; font-weight: 600; letter-spacing: 0.2px; }
+.status-badge { display: inline-flex; align-items: center; padding: 2px 7px; border-radius: 20px; font-size: 10px; font-weight: 500; letter-spacing: 0.2px; }
 .status-bot { background: rgba(50, 215, 75, 0.1); color: var(--system-green); }
 .status-human { background: rgba(255, 159, 10, 0.1); color: var(--system-orange); }
+.country-badge { font-size: 11px; color: var(--text-muted); }
+
+/* Online Indicator */
+.online-dot { position: absolute; top: 0; right: 0; width: 10px; height: 10px; background: var(--system-green); border-radius: 50%; border: 2px solid rgba(28,28,32,0.9); z-index: 1; animation: pulse-dot 2s ease-in-out infinite; }
+@keyframes pulse-dot { 0%,100% { box-shadow: 0 0 0 0 rgba(50,215,75,0.4); } 50% { box-shadow: 0 0 0 4px rgba(50,215,75,0); } }
 
 /* Inbox: Main Chat */
 .chat-window-header { padding: 14px 20px; border-bottom: 1px solid rgba(255,255,255,0.04); display: flex; justify-content: space-between; align-items: center; }
