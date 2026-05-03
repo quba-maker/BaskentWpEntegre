@@ -392,3 +392,147 @@ textarea:focus, input:focus, select:focus { outline: none; border-color: var(--a
   background: rgba(255, 255, 255, 0.1);
 }
 
+
+/* ========== HIZLI TEKLİF (QUOTE) MODAL ========== */
+.quote-modal {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.5);
+  backdrop-filter: blur(5px);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 10000;
+  opacity: 0;
+  pointer-events: none;
+  transition: all 0.3s ease;
+}
+
+.quote-modal.active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.quote-content {
+  background: var(--bg-card);
+  width: 400px;
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+  transform: translateY(20px);
+  transition: all 0.3s ease;
+}
+
+.quote-modal.active .quote-content {
+  transform: translateY(0);
+}
+
+.quote-header {
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.quote-header .close-btn {
+  background: none; border: none; font-size: 20px; color: var(--text-muted); cursor: pointer;
+}
+
+.quote-form-group {
+  margin-bottom: 16px;
+}
+
+.quote-form-group label {
+  display: block; font-size: 13px; color: var(--text-muted); margin-bottom: 6px;
+}
+
+.quote-form-group input[type="text"], .quote-form-group input[type="number"] {
+  width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-hover); color: var(--text-main); font-size: 14px;
+}
+
+.quote-checkbox-group {
+  display: flex; gap: 12px; margin-bottom: 20px;
+}
+
+.quote-checkbox {
+  display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-muted); cursor: pointer;
+}
+
+.quote-actions {
+  display: flex; justify-content: flex-end; gap: 12px;
+}
+
+/* ========== PDF TEMPLATE (GİZLİ) ========== */
+#pdf-template-wrapper {
+  position: absolute;
+  top: -9999px; left: -9999px;
+}
+
+.pdf-document {
+  width: 800px; /* A4 width roughly */
+  min-height: 1120px; /* A4 height */
+  background: #ffffff;
+  color: #000000;
+  padding: 60px;
+  box-sizing: border-box;
+  font-family: Arial, sans-serif;
+  position: relative;
+}
+
+.pdf-header {
+  display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 40px; border-bottom: 2px solid #002e5b; padding-bottom: 20px;
+}
+
+.pdf-header img {
+  height: 60px;
+}
+
+.pdf-header-info {
+  text-align: right; font-size: 12px; color: #555;
+}
+
+.pdf-title {
+  font-size: 24px; font-weight: bold; color: #002e5b; margin-bottom: 30px; text-transform: uppercase; letter-spacing: 1px;
+}
+
+.pdf-patient-info {
+  background: #f8f9fa; padding: 15px; border-left: 4px solid #002e5b; margin-bottom: 30px; font-size: 14px;
+}
+
+.pdf-table {
+  width: 100%; border-collapse: collapse; margin-bottom: 30px;
+}
+
+.pdf-table th {
+  background: #002e5b; color: white; padding: 12px; text-align: left; font-size: 14px;
+}
+
+.pdf-table td {
+  padding: 12px; border-bottom: 1px solid #ddd; font-size: 14px;
+}
+
+.pdf-total {
+  text-align: right; font-size: 20px; font-weight: bold; color: #002e5b; margin-bottom: 40px;
+}
+
+.pdf-includes {
+  font-size: 14px; margin-bottom: 40px;
+}
+
+.pdf-includes ul {
+  list-style-type: none; padding-left: 0;
+}
+
+.pdf-includes li {
+  margin-bottom: 8px; padding-left: 20px; position: relative;
+}
+
+.pdf-includes li::before {
+  content: '✓'; color: #2ecc71; font-weight: bold; position: absolute; left: 0;
+}
+
+.pdf-footer {
+  position: absolute; bottom: 60px; left: 60px; right: 60px; border-top: 1px solid #ddd; padding-top: 20px; font-size: 10px; color: #777; text-align: center;
+}
