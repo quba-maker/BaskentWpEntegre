@@ -159,7 +159,7 @@
 
             <div class="form-group">
               <label>Süreç Durumu</label>
-              <select id="crm-stage">
+              <select id="crm-stage" onchange="instantStageUpdate(this.value)">
                 <option value="new">🆕 Yeni Form</option>
                 <option value="responded">💬 İletişimde (Bot)</option>
                 <option value="appointment_request">📅 Randevu İstiyor</option>
@@ -182,13 +182,7 @@
               <input type="text" id="crm-department" placeholder="Örn: Estetik, Diş">
             </div>
 
-            <div class="form-group">
-              <label>Özel Etiketler (Manuel Seçim)</label>
-              <div id="crm-tags" class="tags-container" style="margin-bottom: 8px; min-height: 24px;"></div>
-              <select id="crm-add-tag" onchange="addCRMTag(this.value)" style="border-style: dashed; background: transparent;">
-                <option value="">+ Etiket Ekle</option>
-              </select>
-            </div>
+
             <div class="form-group" style="display:none" id="crm-form-history-wrapper">
               <label>📋 Form Geçmişi</label>
               <div id="crm-form-history" style="max-height:120px;overflow-y:auto;"></div>
@@ -876,10 +870,20 @@ function renderConversationList() {
   }
 
   document.getElementById('conversation-list').innerHTML = filtered.map(c => {
-    let tags = []; try { tags = JSON.parse(c.tags||'[]'); } catch(e){}
-    const tagHtml = tags.map(x => { const c = getTagColor(x); return `<span class="tag-badge-display" style="background:${c.bg};color:${c.text};">${x}</span>`; }).join('');
     const isActive = c.phone_number === currentPhone ? 'active' : '';
-    const stBadge = c.status === 'human' ? '<span class="status-badge status-human">Manuel</span>' : '<span class="status-badge status-bot">Bot</span>';
+    
+    // Status Badge (Bot vs Sen)
+    const isHuman = c.status === 'human';
+    const stBadge = isHuman ? '<span class="status-badge status-human">👤 Sen</span>' : '<span class="status-badge status-bot">🤖 Bot</span>';
+    
+    // Pipeline Stage Badge
+    let stageBadge = '<span class="badge-stage badge-stage-new">🟢 Yeni</span>';
+    if (c.lead_stage === 'appointed') stageBadge = '<span class="badge-stage badge-stage-appointed">✅ Randevulu</span>';
+    else if (c.lead_stage === 'lost') stageBadge = '<span class="badge-stage badge-stage-lost">❌ Kaybedildi</span>';
+    else if (c.temperature === 'hot' || isHuman) stageBadge = '<span class="badge-stage badge-stage-hot">🔥 Sıcak Satış</span>';
+    else if (c.phase === 'discovery') stageBadge = '<span class="badge-stage badge-stage-contacted">🩺 Anlama</span>';
+    else if (c.phase === 'trust') stageBadge = '<span class="badge-stage badge-stage-responded">🔵 İkna Ediliyor</span>';
+
     const ch = c.last_channel || c.channel || 'whatsapp';
     const hasName = c.patient_name && c.patient_name !== c.phone_number;
     const phoneDisplay = hasName ? `<div class="contact-phone">${countryBadge(c.phone_number)} ${c.phone_number}</div>` : '';
@@ -896,7 +900,7 @@ function renderConversationList() {
         </div>
         ${phoneDisplay}
         <div class="contact-preview">${c.last_message || ''}</div>
-        <div class="contact-badges">${tagHtml}${c.lead_id ? '<span class="tag-badge-display" style="background:rgba(191,90,242,0.12);color:#BF5AF2;">Form</span>' : ''}${stBadge}</div>
+        <div class="contact-badges">${stageBadge}${stBadge}</div>
       </div>
     </div>`;
   }).join('') || '<div class="empty" style="padding:30px">Konuşma bulunamadı</div>';
@@ -1030,8 +1034,7 @@ async function loadChat(phone, channel) {
   const pTypeSelect = document.getElementById('crm-patient-type');
   pTypeSelect.value = pData.patient_type || 'Yerli';
 
-  let pt = []; try { pt = JSON.parse(pData.tags||'[]'); } catch(e){}
-  renderCRMTags(pt);
+  // Tags are now handled system-wide
 
   // Lead Form bilgilerini doldur
   const leadInfo = document.getElementById('crm-lead-info');
@@ -1186,12 +1189,30 @@ async function sendFileMessage() {
   reader.readAsDataURL(pendingFile);
 }
 
+async function instantStageUpdate(newStage) {
+  if(!currentPhone) return;
+  // Anında lokal cache'i güncelle (Hızlı UI tepkisi)
+  const idx = cachedConversations.findIndex(c => c.phone_number === currentPhone);
+  if (idx > -1) cachedConversations[idx].lead_stage = newStage;
+  
+  renderConversationList(); // Sol listeyi anında güncelle
+  
+  if (currentPage === 'page-kanban') {
+    loadKanban(); // Kanban açıksa anında yer değiştirsin
+  }
+
+  // Arkada sessizce kaydet
+  await api('update-patient', 'POST', {
+    phone: currentPhone,
+    lead_stage: newStage
+  });
+}
+
 async function saveCRM() {
-  const tags = Array.from(document.querySelectorAll('.tag.selected')).map(el => el.dataset.val);
   const payload = {
     phone: currentPhone, 
     patient_name: document.getElementById('crm-name').value, 
-    tags: JSON.stringify(tags), 
+    tags: "[]", // Etiketler artık tamamen otomatik
     notes: document.getElementById('crm-notes').value,
     department: document.getElementById('crm-department').value,
     patient_type: document.getElementById('crm-patient-type').value,

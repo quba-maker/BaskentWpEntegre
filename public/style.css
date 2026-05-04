@@ -536,3 +536,24 @@ textarea:focus, input:focus, select:focus { outline: none; border-color: var(--a
 .pdf-footer {
   position: absolute; bottom: 60px; left: 60px; right: 60px; border-top: 1px solid #ddd; padding-top: 20px; font-size: 10px; color: #777; text-align: center;
 }
+
+/* ========== NEW PIPELINE BADGES ========== */
+.badge-stage {
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.badge-stage-new { background: rgba(52,199,89,0.1); color: #34c759; }
+.badge-stage-contacted { background: rgba(0,122,255,0.1); color: #007aff; }
+.badge-stage-responded { background: rgba(255,149,0,0.1); color: #ff9500; }
+.badge-stage-hot { background: rgba(255,59,48,0.1); color: #ff3b30; }
+.badge-stage-appointed { background: rgba(46,204,113,0.1); color: #2ecc71; }
+.badge-stage-lost { background: rgba(142,142,147,0.1); color: #8e8e93; }
+
+.contact-badges {
+  display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px;
+}
