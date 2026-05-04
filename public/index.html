@@ -710,13 +710,22 @@ function renderSheetTable(headers, rows, total) {
   document.getElementById('sheet-row-count').textContent = `📋 ${total} kayıt`;
   if(!headers || headers.length === 0) return document.getElementById('lead-list').innerHTML = '<div class="empty"><div class="empty-icon">📭</div><div style="font-weight:500; font-size: 15px;">Bu kampanyada henüz kayıt yok</div></div>';
 
-  // Sütun tespiti
-  let dateCol = headers.findIndex(h => h.toLowerCase().includes('time') || h.toLowerCase().includes('tarih'));
-  let nameCol = headers.findIndex(h => h.toLowerCase().includes('ad') || h.toLowerCase().includes('isim') || h.toLowerCase().includes('name'));
-  let phoneCol = headers.findIndex(h => h.toLowerCase().includes('telefon') || h.toLowerCase().includes('phone') || h.toLowerCase() === 'tel');
-  let deptCol = headers.findIndex(h => h.toLowerCase().includes('ad_name') || h.toLowerCase().includes('campaign') || h.toLowerCase().includes('form'));
-  let statusCol = headers.findIndex(h => h.toLowerCase().includes('durum') || h.toLowerCase().includes('status'));
+  // Sütun tespiti (tüm sekmelerde çalışması için geniş keyword listesi)
+  const findCol = (keywords) => headers.findIndex(h => {
+    const l = h.toLowerCase().replace(/[_\s]+/g, '');
+    return keywords.some(k => l.includes(k));
+  });
+
+  let dateCol = findCol(['time', 'tarih', 'created', 'date', 'zaman']);
+  let nameCol = findCol(['adname', 'ad_name', 'isim', 'fullname', 'full_name', 'hastadi', 'hastaadi']);
+  let phoneCol = findCol(['telefon', 'phone', 'tel', 'gsm', 'cep', 'numara', 'phonenumber']);
+  let deptCol = findCol(['adname', 'campaign', 'kampanya', 'bolum', 'bölüm', 'form']);
+  let statusCol = findCol(['durum', 'status', 'leadstatus', 'lead_status', 'aşama']);
+  let notesCol = findCol(['geridönüş', 'geridönus', 'geridönüs', 'notlar', 'notes', 'geridonus', 'açıklama', 'yorum']);
+
   if (dateCol === -1) dateCol = 0;
+  // İsim bulunamazsa tüm sütunlarda "ad" kelimesini tek başına ara
+  if (nameCol === -1) nameCol = headers.findIndex(h => /^ad$/i.test(h.trim()) || h.toLowerCase().includes('isim') || h.toLowerCase().includes('name'));
   if (nameCol === -1) nameCol = headers.length > 2 ? 2 : -1;
 
   // Kaydet (openLeadDetail kullanır)
@@ -748,9 +757,11 @@ function renderSheetTable(headers, rows, total) {
     const phoneVal = phoneCol > -1 ? (row[phoneCol] || '') : '';
     const deptVal = deptCol > -1 ? (row[deptCol] || '') : '';
     const statusVal = statusCol > -1 ? (row[statusCol] || '') : '';
+    const notesVal = notesCol > -1 ? (row[notesCol] || '') : '';
 
+    // Rozet belirleme (öncelik sırası: durum sütunu > notlar > yeni)
     let badgeHtml = '<span class="lead-badge badge-new" style="min-width:140px; text-align:center;">🟡 Yeni</span>';
-    let isUnread = !readLeads.includes(phoneVal) && (!statusVal || statusVal.toLowerCase() === 'created');
+    let isUnread = true;
 
     if (statusVal.includes('SİSTEME ALINDI') || statusVal.includes('İletişime Geçildi')) {
       badgeHtml = '<span class="lead-badge badge-contacted" style="min-width:140px; text-align:center;">🟢 Dönüş Yapıldı</span>';
@@ -758,10 +769,17 @@ function renderSheetTable(headers, rows, total) {
     } else if (statusVal.includes('Cevap Verdi') || statusVal.includes('İlgili')) {
       badgeHtml = '<span class="lead-badge badge-active" style="min-width:140px; text-align:center;">💬 İletişimde</span>';
       isUnread = false;
-    } else if (statusVal && statusVal.toLowerCase() !== 'created') {
+    } else if (statusVal && statusVal.toLowerCase() !== 'created' && statusVal.toLowerCase() !== '') {
       badgeHtml = `<span class="lead-badge badge-custom" style="min-width:140px; text-align:center;">${statusVal}</span>`;
       isUnread = false;
+    } else if (notesVal.trim()) {
+      // Durum boş ama not/geri dönüş alanı doluysa → Cevap Verildi
+      badgeHtml = '<span class="lead-badge badge-contacted" style="min-width:140px; text-align:center;">✅ Cevap Verildi</span>';
+      isUnread = false;
     }
+
+    // Ek kontrol: Daha önce tıklanmışsa okunmadı değil
+    if (readLeads.includes(phoneVal || `row-${si}`)) isUnread = false;
 
     const unreadStyle = isUnread
       ? 'border-left: 4px solid #4ade80; background: rgba(74, 222, 128, 0.05);'
@@ -1618,8 +1636,8 @@ function openLeadDetail(sortedIndex) {
   document.getElementById('fd-content').innerHTML = detailsHtml + editHtml;
   
   // Görünümleri değiştir
-  document.getElementById('fm-view-sheets').style.display = 'none';
-  document.getElementById('page-form-detail').style.display = 'block';
+  document.getElementById('page-form-management').style.display = 'none';
+  document.getElementById('page-form-detail').style.display = 'flex';
 }
 
 function editLeadStatusOptions() {
@@ -1664,7 +1682,7 @@ async function triggerSingleOutbound(phone, name) {
 }
 function goBackToForms() {
   document.getElementById('page-form-detail').style.display = 'none';
-  document.getElementById('fm-view-sheets').style.display = 'block';
+  document.getElementById('page-form-management').style.display = 'flex';
   // Listeyi sessizce yenile ki yapılan editler karta yansısın
   if (window._activeSheet) loadSheetData(window._activeSheet);
 }
