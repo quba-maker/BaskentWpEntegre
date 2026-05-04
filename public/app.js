@@ -72,9 +72,17 @@ async function checkAuth() {
 document.querySelectorAll('.nav-btn').forEach(b => {
   b.addEventListener('click', () => {
     document.querySelectorAll('.nav-btn').forEach(x => x.classList.remove('active'));
-    document.querySelectorAll('.page').forEach(x => x.classList.remove('active'));
+    document.querySelectorAll('.page').forEach(x => {
+      x.classList.remove('active');
+      x.style.display = ''; // Manuel display stillerini sıfırla (form-detail vb.)
+    });
     b.classList.add('active');
     document.getElementById('page-' + b.dataset.page).classList.add('active');
+    
+    // Form management'a dönüşte fm-view-sheets'i göster
+    if (b.dataset.page === 'form-management') {
+      document.getElementById('fm-view-sheets').style.display = '';
+    }
     
     // Yükleme fonksiyonları
     ({dashboard:loadDashboard, kanban:loadKanban, leads:loadSheets, conversations:loadConversations, training:loadPrompt, templates:loadTemplates, analytics:loadAnalytics, settings:loadSettings, appointments:loadAppointments, 'form-management':loadFormManagement})[b.dataset.page]?.();
@@ -254,7 +262,7 @@ function renderSheetTable(headers, rows, total) {
           <div style="width:140px; font-size:12px; color:var(--text-muted);">🗓 ${dateVal}</div>
           <div style="width:200px;">
             <div style="font-weight:600; color:white; margin-bottom:4px;">👤 ${nameVal}</div>
-            <div style="font-size:12px; color:var(--text-muted);">📱 ${phoneVal}</div>
+            <div style="font-size:12px; color:var(--text-muted); display:flex; align-items:center; gap:6px;">📱 ${phoneVal} ${countryBadge(phoneVal)}</div>
           </div>
           <div style="flex:1; font-size:13px; color:var(--text-muted); display:flex; align-items:center; gap:8px;">
             <span style="background:var(--bg-hover); padding:4px 8px; border-radius:4px;">🩺 ${deptVal.substring(0, 50)}${deptVal.length > 50 ? '...' : ''}</span>
@@ -967,10 +975,14 @@ function openLeadDetail(sortedIndex) {
         <!-- İletişim Kartı -->
         <div style="background:var(--card-bg); border:1px solid var(--border-color); border-radius:12px; padding:20px;">
           <h2 style="margin:0 0 16px 0; color:white; font-size:20px;">👤 ${nameVal}</h2>
-          <div style="display:flex; gap:24px; margin-bottom: 24px;">
+          <div style="display:flex; gap:24px; margin-bottom: 24px; flex-wrap:wrap;">
             <div>
               <div style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">Telefon</div>
               <div style="font-size:15px; color:var(--accent-primary); font-weight:500;">📱 ${phoneVal || 'Belirtilmedi'}</div>
+            </div>
+            <div>
+              <div style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">Ülke</div>
+              <div style="font-size:15px; color:white;">${countryBadge(phoneVal) || '🌍 Bilinmiyor'}</div>
             </div>
             <div>
               <div style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">E-Posta</div>
