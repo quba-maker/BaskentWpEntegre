@@ -709,50 +709,122 @@ async function loadSheetData(sheetName) {
 function renderSheetTable(headers, rows, total) {
   document.getElementById('sheet-row-count').textContent = `📋 ${total} kayıt`;
   if(!headers || headers.length === 0) return document.getElementById('lead-list').innerHTML = '<div class="empty"><div class="empty-icon">📭</div><div style="font-weight:500; font-size: 15px;">Bu kampanyada henüz kayıt yok</div></div>';
-  
-  const editableCols = {};
-  headers.forEach((h, idx) => { 
-    const lower = h.toLowerCase().replace(/\s+/g, '_'); 
-    if(lower.includes('lead_status') || lower === 'status') editableCols[idx] = 'status'; 
-    if(lower.includes('geri_dönüş') || lower.includes('geri_donus') || lower.includes('geri dönüş')) editableCols[idx] = 'text'; 
-  });
-  
-  const statusOptions = ['', 'CREATED', 'İletişime Geçildi', 'Cevap Verdi', 'İlgili', 'Randevu Aldı', 'Geldi', 'Tedavi Oldu', 'Soğuk'];
-  
-  // Status Colors (Apple Style Badges)
-  const getStatusColor = (s) => {
-    if (s === 'Randevu Aldı' || s === 'Geldi' || s === 'Tedavi Oldu') return 'color:var(--system-green); background:rgba(50, 215, 75, 0.1); font-weight:600;';
-    if (s === 'Soğuk') return 'color:var(--system-red); background:rgba(255, 69, 58, 0.1);';
-    if (s === 'İlgili' || s === 'Cevap Verdi' || s === 'İletişime Geçildi') return 'color:var(--system-orange); background:rgba(255, 159, 10, 0.1);';
-    if (s === 'CREATED') return 'color:#BF5AF2; background:rgba(191, 90, 242, 0.1);';
-    return 'color:var(--text-main); background:transparent;';
-  };
 
-  let html = `<div style="overflow-x:auto;"><table class="data-table" style="margin:0; box-shadow:none; border-radius:0;"><thead><tr><th style="width:40px; text-align:center; color:var(--text-muted);">#</th>${headers.map((h, j) => `<th${editableCols[j] ? ' style="color:var(--accent-primary);" title="Düzenlenebilir Alan"' : ''}>${editableCols[j] ? '✍️ ' : ''}${h}</th>`).join('')}</tr></thead><tbody>`;
-  
-  rows.forEach((row, i) => {
-    html += `<tr><td style="text-align:center; color:var(--text-muted); font-size:12px;">${i + 1}</td>`;
-    headers.forEach((h, j) => {
-      const val = row[j] || ''; 
-      const editType = editableCols[j];
-      
-      if(editType === 'status') {
-        const bgStyle = getStatusColor(val);
-        html += `<td style="padding:6px 12px;"><select id="cell-${i}-${j}" style="appearance:none; padding:8px 12px; border-radius:8px; border:1px solid transparent; width:100%; min-width:140px; font-size:13px; font-weight:500; cursor:pointer; transition:all 0.2s; outline:none; ${bgStyle}" onchange="updateSheetCell(${i}, ${j}, this.value, this)" onfocus="this.style.border='1px solid var(--accent-primary)'"><option value="" style="background:var(--bg-card);color:white">Durum Seçin</option>${statusOptions.map(s => `<option value="${s}" style="background:var(--bg-card);color:white" ${val === s ? 'selected' : ''}>${s}</option>`).join('')}</select></td>`;
-      }
-      else if(editType === 'text') {
-        html += `<td style="padding:6px 12px;"><input type="text" id="cell-${i}-${j}" style="width:100%; min-width:160px; background:var(--bg-input); border:1px solid transparent; color:var(--text-main); padding:8px 12px; border-radius:8px; font-size:13px; font-weight:500; transition:all 0.2s; outline:none;" value="${String(val).replace(/"/g, '&quot;')}" placeholder="Not yazın..." onblur="updateSheetCell(${i}, ${j}, this.value, this)" onfocus="this.style.background='var(--bg-card)'; this.style.boxShadow='0 0 0 2px rgba(10, 132, 255, 0.2)';" onkeydown="if(event.key==='Enter') this.blur();" /></td>`;
-      }
-      else {
-        html += `<td style="max-width:200px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${String(val).replace(/"/g, '&quot;')}">${val}</td>`;
-      }
-    });
-    html += '</tr>';
+  // Sütun tespiti
+  let dateCol = headers.findIndex(h => h.toLowerCase().includes('time') || h.toLowerCase().includes('tarih'));
+  let nameCol = headers.findIndex(h => h.toLowerCase().includes('ad') || h.toLowerCase().includes('isim') || h.toLowerCase().includes('name'));
+  let phoneCol = headers.findIndex(h => h.toLowerCase().includes('telefon') || h.toLowerCase().includes('phone') || h.toLowerCase() === 'tel');
+  let deptCol = headers.findIndex(h => h.toLowerCase().includes('ad_name') || h.toLowerCase().includes('campaign') || h.toLowerCase().includes('form'));
+  let statusCol = headers.findIndex(h => h.toLowerCase().includes('durum') || h.toLowerCase().includes('status'));
+  if (dateCol === -1) dateCol = 0;
+  if (nameCol === -1) nameCol = headers.length > 2 ? 2 : -1;
+
+  // Kaydet (openLeadDetail kullanır)
+  window._sheetHeaders = headers;
+  window._sheetRows = rows;
+
+  // EN YENİ FORMA GÖRE SIRALA
+  const sortedRows = [...rows].sort((a, b) => {
+    const da = dateCol > -1 ? new Date(a[dateCol] || 0) : 0;
+    const db = dateCol > -1 ? new Date(b[dateCol] || 0) : 0;
+    return db - da;
   });
-  document.getElementById('lead-list').innerHTML = html + '</tbody></table></div>';
+  window._sortedRowMap = sortedRows.map(r => rows.indexOf(r));
+
+  let html = `<div class="lead-list-view" style="display:flex; flex-direction:column; gap:8px; padding:0 16px 16px 16px;">`;
+  const readLeads = JSON.parse(localStorage.getItem('readLeads') || '[]');
+
+  sortedRows.forEach((row, si) => {
+    let dateVal = '';
+    if (dateCol > -1 && row[dateCol]) {
+      const d = new Date(row[dateCol]);
+      if (!isNaN(d.getTime())) {
+        dateVal = d.toLocaleDateString('tr-TR', { day: '2-digit', month: 'short' }) + ' - ' + d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+      } else {
+        dateVal = row[dateCol].split('T')[0];
+      }
+    }
+    const nameVal = nameCol > -1 ? (row[nameCol] || 'Bilinmiyor') : 'Bilinmiyor';
+    const phoneVal = phoneCol > -1 ? (row[phoneCol] || '') : '';
+    const deptVal = deptCol > -1 ? (row[deptCol] || '') : '';
+    const statusVal = statusCol > -1 ? (row[statusCol] || '') : '';
+
+    let badgeHtml = '<span class="lead-badge badge-new" style="min-width:140px; text-align:center;">🟡 Yeni</span>';
+    let isUnread = !readLeads.includes(phoneVal) && (!statusVal || statusVal.toLowerCase() === 'created');
+
+    if (statusVal.includes('SİSTEME ALINDI') || statusVal.includes('İletişime Geçildi')) {
+      badgeHtml = '<span class="lead-badge badge-contacted" style="min-width:140px; text-align:center;">🟢 Dönüş Yapıldı</span>';
+      isUnread = false;
+    } else if (statusVal.includes('Cevap Verdi') || statusVal.includes('İlgili')) {
+      badgeHtml = '<span class="lead-badge badge-active" style="min-width:140px; text-align:center;">💬 İletişimde</span>';
+      isUnread = false;
+    } else if (statusVal && statusVal.toLowerCase() !== 'created') {
+      badgeHtml = `<span class="lead-badge badge-custom" style="min-width:140px; text-align:center;">${statusVal}</span>`;
+      isUnread = false;
+    }
+
+    const unreadStyle = isUnread
+      ? 'border-left: 4px solid #4ade80; background: rgba(74, 222, 128, 0.05);'
+      : 'border-left: 4px solid transparent; background: var(--card-bg);';
+
+    html += `
+      <div class="lead-card list-row" id="lead-row-${si}" onclick="openLeadDetail(${si})" style="display:flex; align-items:center; justify-content:space-between; border-radius:8px; padding:12px 16px; cursor:pointer; border:1px solid var(--border-color); transition:all 0.2s; ${unreadStyle}">
+        <div style="display:flex; align-items:center; gap:24px; flex:1;">
+          <div style="width:140px; font-size:12px; color:var(--text-muted);">🗓 ${dateVal}</div>
+          <div style="width:200px;">
+            <div style="font-weight:600; color:white; margin-bottom:4px;">👤 ${nameVal}</div>
+            <div style="font-size:12px; color:var(--text-muted);">📱 ${phoneVal}</div>
+          </div>
+          <div style="flex:1; font-size:13px; color:var(--text-muted); display:flex; align-items:center; gap:8px;">
+            <span style="background:var(--bg-hover); padding:4px 8px; border-radius:4px;">🩺 ${deptVal.substring(0, 50)}${deptVal.length > 50 ? '...' : ''}</span>
+          </div>
+          <div id="lead-enrich-${si}" style="display:flex; align-items:center; gap:6px; font-size:12px;"></div>
+        </div>
+        <div>${badgeHtml}</div>
+      </div>
+    `;
+  });
+
+  html += '</div>';
+  document.getElementById('lead-list').innerHTML = html;
+  enrichLeadCards(sortedRows, phoneCol);
 }
 
+async function enrichLeadCards(rows, phoneCol) {
+  const token = localStorage.getItem('panel_token') || '';
+  const batchSize = 5;
+  for (let si = 0; si < rows.length; si += batchSize) {
+    const batch = rows.slice(si, si + batchSize);
+    await Promise.all(batch.map(async (row, bIdx) => {
+      const idx = si + bIdx;
+      const phone = phoneCol > -1 ? (row[phoneCol] || '') : '';
+      if (!phone) return;
+      try {
+        const resp = await fetch(`/api/panel?action=lead-context&phone=${encodeURIComponent(phone)}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const ctx = await resp.json();
+        const el = document.getElementById(`lead-enrich-${idx}`);
+        if (!el) return;
+        let h = '';
+        const icons = { whatsapp: '📱', instagram: '📸', messenger: '💬', web: '🌐' };
+        (ctx.channels || []).forEach(ch => { h += `<span title="${ch}" style="font-size:14px;">${icons[ch] || '📞'}</span>`; });
+        if (ctx.lastMessage) {
+          h += `<span style="color:#60a5fa; font-size:11px; max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${ctx.lastMessage.content}">&ldquo;${ctx.lastMessage.content.substring(0, 30)}...&rdquo;</span>`;
+        }
+        if (ctx.score > 0) {
+          const sc = ctx.score >= 50 ? '#f97316' : ctx.score >= 30 ? '#facc15' : '#6b7280';
+          h += `<span style="background:${sc}22; color:${sc}; border:1px solid ${sc}44; border-radius:4px; padding:2px 6px; font-weight:600; font-size:11px;">⚡ ${ctx.score}</span>`;
+        }
+        el.innerHTML = h;
+      } catch(e) {}
+    }));
+  }
+}
+
+
 async function updateSheetCell(row, col, value, element) {
+  if (element) {
   const originalBorder = element.style.border;
   const originalOpacity = element.style.opacity;
   element.style.opacity = '0.5';
@@ -789,8 +861,17 @@ async function updateSheetCell(row, col, value, element) {
     toast('❌ Bağlantı hatası', 'error');
     element.style.border = '1px solid var(--system-red)';
   } finally {
+    if (element) {
     element.style.opacity = originalOpacity;
     element.style.pointerEvents = 'auto';
+    }
+  }
+  } else {
+    // element yoksa basit call (detay ekranından)
+    try {
+      const resp = await fetch('/api/sheets?action=update', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ sheetName: window._activeSheet, row, col, value }) });
+      const data = await resp.json(); if(data.success) toast('Güncellendi'); else toast('Hata', 'error');
+    } catch(e) { toast('Bağlantı hatası', 'error'); }
   }
 }
 
@@ -1392,119 +1473,23 @@ async function resetPrompt() {
   }
 }
 
-/* LEADS - AYNI KALACAK SADECE STİL DEĞİŞTİ */
-window._activeSheet = null; window._sheetRefreshTimer = null;
+/* LEADS */
 async function loadLeads() {
-  const stats=await api('lead-stats');
+  const stats = await api('lead-stats');
   if(stats){
-    document.getElementById('lead-today').textContent=stats.todayLeads;
-    document.getElementById('lead-total').textContent=stats.totalLeads;
-    const stageMap={};(stats.byStage||[]).forEach(st=>stageMap[st.stage]=+st.count);
-    document.getElementById('lead-contacted').textContent=stageMap.contacted||0;
-    document.getElementById('lead-appointed').textContent=stageMap.appointed||0;
+    document.getElementById('lead-today').textContent = stats.todayLeads;
+    document.getElementById('lead-total').textContent = stats.totalLeads;
+    const stageMap = {};
+    (stats.byStage || []).forEach(st => stageMap[st.stage] = +st.count);
+    document.getElementById('lead-contacted').textContent = stageMap.contacted || 0;
+    document.getElementById('lead-appointed').textContent = stageMap.appointed || 0;
   }
-  document.getElementById('lead-list').innerHTML = '<p style="text-align:center;padding:40px;color:var(--text-muted);">⏳ Yükleniyor...</p>';
-  try {
-    const resp = await fetch('/api/sheets'); const data = await resp.json();
-    if(!data.success) return document.getElementById('lead-list').innerHTML = `<p class="empty">❌ Hata: ${data.error}</p>`;
-    window._activeSheet = data.activeSheet;
-    document.getElementById('sheet-tabs').innerHTML = data.tabs.map(t => `<button class="sheet-tab ${t.title === data.activeSheet ? 'active' : ''}" onclick="loadSheetData('${t.title.replace(/'/g, "\\'")}')">${t.title}</button>`).join('');
-    renderSheetTable(data.headers, data.rows, data.total);
-  } catch(e) { document.getElementById('lead-list').innerHTML = `<p class="empty">❌ Bağlantı hatası</p>`; }
+  loadSheets();
 }
 
-async function loadSheetData(sheetName) {
-  window._activeSheet = sheetName;
-  document.getElementById('lead-list').innerHTML = '<p style="text-align:center;padding:40px;color:var(--text-muted);">⏳ Yükleniyor...</p>';
-  try {
-    const tabResp = await fetch('/api/sheets?action=tabs'); const tabData = await tabResp.json();
-    if(tabData.success) document.getElementById('sheet-tabs').innerHTML = tabData.tabs.map(t => `<button class="sheet-tab ${t.title === sheetName ? 'active' : ''}" onclick="loadSheetData('${t.title.replace(/'/g, "\\'")}')">${t.title}</button>`).join('');
-    const resp = await fetch(`/api/sheets?action=data&sheet=${encodeURIComponent(sheetName)}`); const data = await resp.json();
-    if(data.success) {
-      window._sheetHeaders = data.headers;
-      window._sheetRows = data.rows;
-      renderSheetTable(data.headers, data.rows, data.total);
-    }
-  } catch(e) {}
-}
-
-function renderSheetTable(headers, rows, total) {
-  document.getElementById('sheet-row-count').textContent = `📋 ${total} kayıt`;
-  if(!headers || headers.length === 0) return document.getElementById('lead-list').innerHTML = '<p class="empty">Veri yok</p>';
-  
-  const lowerHeaders = headers.map(h => h.toLowerCase().replace(/\s+/g, '_'));
-  
-  // Find important columns
-  let dateCol = headers.findIndex(h => h.toLowerCase().includes('time') || h.toLowerCase().includes('tarih'));
-  let nameCol = headers.findIndex(h => h.toLowerCase().includes('ad') || h.toLowerCase().includes('isim') || h.toLowerCase().includes('name'));
-  let phoneCol = headers.findIndex(h => h.toLowerCase().includes('telefon') || h.toLowerCase().includes('phone') || h.toLowerCase() === 'tel');
-  let deptCol = headers.findIndex(h => h.toLowerCase().includes('ad_name') || h.toLowerCase().includes('campaign') || h.toLowerCase().includes('form'));
-  let statusCol = headers.findIndex(h => h.toLowerCase().includes('durum') || h.toLowerCase().includes('status'));
-
-  // Fallbacks if columns are not obvious
-  if (dateCol === -1) dateCol = 0; // Usually first column
-  if (nameCol === -1) nameCol = headers.length > 2 ? 2 : -1;
-  
-  let html = `<div class="lead-list-view" style="display:flex; flex-direction:column; gap:8px; padding:0 16px 16px 16px; background: var(--bg-color);">`;
-  
-  const readLeads = JSON.parse(localStorage.getItem('readLeads') || '[]');
-
-  rows.forEach((row, i) => {
-    let dateVal = '';
-    if (dateCol > -1 && row[dateCol]) {
-      const d = new Date(row[dateCol]);
-      if (!isNaN(d.getTime())) {
-        dateVal = d.toLocaleDateString('tr-TR', { day: '2-digit', month: 'short' }) + ' - ' + d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
-      } else {
-        dateVal = row[dateCol].split('T')[0];
-      }
-    }
-    
-    const nameVal = nameCol > -1 ? (row[nameCol] || 'Bilinmiyor') : 'Bilinmiyor';
-    const phoneVal = phoneCol > -1 ? (row[phoneCol] || '') : '';
-    const deptVal = deptCol > -1 ? (row[deptCol] || 'Bilinmiyor') : '';
-    const statusVal = statusCol > -1 ? (row[statusCol] || '') : '';
-    
-    let badgeHtml = '<span class="lead-badge badge-new" style="min-width:140px; text-align:center;">🟡 Yeni / İşlenmedi</span>';
-    let isUnread = !readLeads.includes(phoneVal) && (!statusVal || statusVal.toLowerCase() === 'created');
-    
-    if (statusVal.includes('SİSTEME ALINDI') || statusVal.includes('İletişime Geçildi')) {
-      badgeHtml = '<span class="lead-badge badge-contacted" style="min-width:140px; text-align:center;">🟢 Dönüş Yapıldı</span>';
-      isUnread = false;
-    } else if (statusVal.includes('Cevap Verdi') || statusVal.includes('İlgili')) {
-      badgeHtml = '<span class="lead-badge badge-active" style="min-width:140px; text-align:center;">💬 İletişimde</span>';
-      isUnread = false;
-    } else if (statusVal && statusVal.toLowerCase() !== 'created') {
-      badgeHtml = `<span class="lead-badge badge-custom" style="min-width:140px; text-align:center;">${statusVal}</span>`;
-      isUnread = false;
-    }
-
-    const unreadStyle = isUnread ? 'border-left: 4px solid #4ade80; background: rgba(74, 222, 128, 0.05);' : 'border-left: 4px solid transparent; background: var(--card-bg);';
-
-    html += `
-      <div class="lead-card list-row" onclick="openLeadDetail(${i})" style="display:flex; align-items:center; justify-content:space-between; border-radius:8px; padding:12px 16px; cursor:pointer; border:1px solid var(--border-color); transition:all 0.2s; ${unreadStyle}">
-        <div style="display:flex; align-items:center; gap:24px; flex:1;">
-          <div style="width:140px; font-size:12px; color:var(--text-muted);">🗓 ${dateVal}</div>
-          <div style="width:200px;">
-            <div style="font-weight:600; color:white; margin-bottom:4px;">👤 ${nameVal}</div>
-            <div style="font-size:12px; color:var(--text-muted);">📱 ${phoneVal}</div>
-          </div>
-          <div style="flex:1; font-size:13px; color:var(--text-muted); display:flex; align-items:center; gap:8px;">
-            <span style="background:var(--bg-hover); padding:4px 8px; border-radius:4px;">🩺 ${deptVal.substring(0, 50)}${deptVal.length > 50 ? '...' : ''}</span>
-          </div>
-        </div>
-        <div>
-          ${badgeHtml}
-        </div>
-      </div>
-    `;
-  });
-  
-  html += '</div>';
-  document.getElementById('lead-list').innerHTML = html;
-}
-
-function openLeadDetail(rowIndex) {
+function openLeadDetail(sortedIndex) {
+  // Sıralanmış index'ten orijinal satıra dönüş
+  const rowIndex = window._sortedRowMap ? window._sortedRowMap[sortedIndex] : sortedIndex;
   const headers = window._sheetHeaders;
   const row = window._sheetRows[rowIndex];
   if (!headers || !row) return;
@@ -1684,10 +1669,7 @@ function goBackToForms() {
   if (window._activeSheet) loadSheetData(window._activeSheet);
 }
 
-async function updateSheetCell(row, col, value) {
-  const resp = await fetch('/api/sheets?action=update', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ sheetName: window._activeSheet, row, col, value }) });
-  const data = await resp.json(); if(data.success) toast('Güncellendi'); else toast('Hata', 'error');
-}
+
 
 async function triggerBulkOutbound() {
   if (!window._activeSheet || !window._sheetHeaders || !window._sheetRows) return toast('Önce bir liste yükleyin', 'error');

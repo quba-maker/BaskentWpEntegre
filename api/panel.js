@@ -120,6 +120,59 @@ export default async function handler(req, res) {
       }
     }
 
+    // ÇAPRAZ KANAL + LEAD SCORING (form listesindeki her kart için)
+    if (action === 'lead-context' && req.method === 'GET') {
+      const phone = (req.query.phone || '').replace(/[\s\-\(\)\+]/g, '');
+      if (!phone) return res.json({ score: 0, channels: [], lastMessage: null, conversationStatus: null });
+
+      try {
+        // Normalise: trünkçe 0 ile başlarsa 90 ile değiştir
+        let cleanPhone = phone;
+        if (cleanPhone.startsWith('0')) cleanPhone = '90' + cleanPhone.substring(1);
+
+        const [conv, msgs, lead] = await Promise.all([
+          sql`SELECT status, created_at FROM conversations WHERE phone_number = ${cleanPhone} LIMIT 1`,
+          sql`SELECT direction, channel, content, created_at FROM messages WHERE phone_number = ${cleanPhone} ORDER BY created_at DESC LIMIT 10`,
+          sql`SELECT stage, score, contacted_at, responded_at FROM leads WHERE phone_number = ${cleanPhone} OR phone_number = ${phone} ORDER BY created_at DESC LIMIT 1`
+        ]);
+
+        // Kanal tespiti
+        const channelSet = new Set();
+        msgs.forEach(m => { if (m.channel) channelSet.add(m.channel); else channelSet.add('whatsapp'); });
+        const channels = [...channelSet];
+
+        // Lead Skorlama
+        let score = 0;
+        if (lead.length > 0) {
+          score += 10; // Form doldurdu
+          if (lead[0].contacted_at) score += 10; // Bot ulaştı
+          if (lead[0].responded_at) score += 15; // Cevap verdi
+        }
+        if (conv.length > 0) score += 20; // WhatsApp/IG'dan yazdı
+        const inMsgs = msgs.filter(m => m.direction === 'in');
+        score += Math.min(inMsgs.length * 5, 30); // Her gelen mesaj +5 (max 30)
+
+        // Son mesaj önizlemesi
+        const lastMsgIn = msgs.find(m => m.direction === 'in');
+        const lastMessage = lastMsgIn ? {
+          content: (lastMsgIn.content || '').substring(0, 80),
+          channel: lastMsgIn.channel || 'whatsapp',
+          created_at: lastMsgIn.created_at
+        } : null;
+
+        return res.json({
+          score,
+          channels,
+          lastMessage,
+          conversationStatus: conv.length > 0 ? conv[0].status : null,
+          messageCount: msgs.length
+        });
+      } catch (e) {
+        console.error('lead-context error:', e.message);
+        return res.json({ score: 0, channels: [], lastMessage: null, conversationStatus: null });
+      }
+    }
+
     // KONUŞMALAR
     if (action === 'conversations') {
       const list = await sql`
