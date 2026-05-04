@@ -801,9 +801,30 @@ async function generateAndSendQuote() {
   btn.disabled = true;
 
   try {
-    // Şablonu doldur
+    // Kaydedilmiş şablon ayarlarını yükle
+    let qtSettings = {};
+    try { qtSettings = await api('settings') || {}; } catch(e) {}
+    
+    const hospitalName = qtSettings.qt_hospital_name || 'BAŞKENT ÜNİVERSİTESİ';
+    const hospitalSub = qtSettings.qt_hospital_subtitle || 'KONYA HASTANESİ';
+    const patientName = document.getElementById('chat-title').textContent || 'Sayın Hastamız';
+    const introText = (qtSettings.qt_intro_text || 'Sayın {hasta_adi}, hastanemize göstermiş olduğunuz ilgi için teşekkür ederiz. Uzman hekimlerimiz tarafından yapılan ön değerlendirme sonucunda sizin için hazırlanan tedavi planı ve teklifi aşağıda sunulmuştur.').replace(/{hasta_adi}/g, patientName);
+    const footerNote = qtSettings.qt_footer_note || 'Bu teklif bir ön bilgilendirme niteliğindedir. Hastanın hastanemize gelişinde yapılacak detaylı tetkikler sonucunda tedavi planında ve fiyatlarda değişiklik olabilir. Kesin fiyat, yüz yüze muayene sonrası belirlenecektir.';
+    const footerAddress = qtSettings.qt_footer_address || 'Başkent Üniversitesi Konya Uygulama ve Araştırma Merkezi | Hocacihan Mah. Saray Cad. No:1 Selçuklu / KONYA | +90 332 257 06 06';
+    const validityDays = qtSettings.qt_validity_days || '30';
+    const waMessage = qtSettings.qt_wa_message || 'Merhaba, uzman hekimlerimizin değerlendirmesi sonucunda size özel hazırlanan tedavi teklifini ekte bulabilirsiniz. Detaylı bilgi için bize her zaman yazabilirsiniz.';
+
+    // PDF Şablonunu dinamik olarak doldur
+    const pdfEl = document.getElementById('pdf-document');
+    const headerEl = pdfEl.querySelector('.pdf-header > div:first-child');
+    headerEl.innerHTML = `<span style="font-size:28px; font-weight:bold; color:#002e5b">${hospitalName}</span><br><span style="font-size:14px; font-weight:normal; color:#555">${hospitalSub}</span>`;
+    
     document.getElementById('pdf-date').textContent = new Date().toLocaleDateString('tr-TR');
-    document.getElementById('pdf-patient-name').textContent = document.getElementById('chat-title').textContent || 'Sayın Hastamız';
+    pdfEl.querySelector('.pdf-header-info').innerHTML = `Tarih: ${new Date().toLocaleDateString('tr-TR')}<br>Geçerlilik: ${validityDays} Gün`;
+    
+    document.getElementById('pdf-patient-name').textContent = patientName;
+    pdfEl.querySelector('.pdf-patient-info').innerHTML = `Sayın <b>${patientName}</b>,<br><br>${introText}`;
+    
     document.getElementById('pdf-treatment-name').textContent = treatment;
     document.getElementById('pdf-treatment-price').textContent = currency + price;
     document.getElementById('pdf-total-price').textContent = currency + price;
@@ -818,11 +839,17 @@ async function generateAndSendQuote() {
       ${incTranslator ? '<li>🗣️ 7/24 Kişisel Tercüman ve Asistanlık</li>' : ''}
     `;
 
+    // Footer note ve adres güncelle
+    const footerNoteEl = pdfEl.querySelector('.pdf-includes + div');
+    if (footerNoteEl) footerNoteEl.innerHTML = `<b>Not:</b> ${footerNote}`;
+    const footerEl = pdfEl.querySelector('.pdf-footer');
+    if (footerEl) footerEl.textContent = footerAddress;
+
     // PDF Oluştur
     const element = document.getElementById('pdf-document');
     const opt = {
       margin: 0,
-      filename: `Başkent_Teklif_${treatment.replace(/\s+/g, '_')}.pdf`,
+      filename: `${hospitalName.replace(/\s+/g, '_')}_Teklif_${treatment.replace(/\s+/g, '_')}.pdf`,
       image: { type: 'jpeg', quality: 0.98 },
       html2canvas: { scale: 2, useCORS: true },
       jsPDF: { unit: 'px', format: [800, 1120], orientation: 'portrait' }
@@ -851,7 +878,7 @@ async function generateAndSendQuote() {
           channel: currentChannel,
           fileName: opt.filename,
           pdfBase64: base64data,
-          message: `Merhaba, uzman hekimlerimizin değerlendirmesi sonucunda size özel hazırlanan tedavi teklifini ekte bulabilirsiniz. Detaylı bilgi için bize her zaman yazabilirsiniz.`
+          message: waMessage
         })
       });
 
@@ -1203,6 +1230,15 @@ async function loadSettings() {
   // Form karşılama mesajlarını yükle
   document.getElementById('form-greeting-tr').value = s.form_greeting_tr || '';
   document.getElementById('form-greeting-en').value = s.form_greeting_en || '';
+  
+  // Teklif şablonu ayarlarını yükle
+  document.getElementById('qt-hospital-name').value = s.qt_hospital_name || '';
+  document.getElementById('qt-hospital-subtitle').value = s.qt_hospital_subtitle || '';
+  document.getElementById('qt-intro-text').value = s.qt_intro_text || '';
+  document.getElementById('qt-footer-note').value = s.qt_footer_note || '';
+  document.getElementById('qt-footer-address').value = s.qt_footer_address || '';
+  document.getElementById('qt-validity-days').value = s.qt_validity_days || '30';
+  document.getElementById('qt-wa-message').value = s.qt_wa_message || '';
 }
 async function addTag() {
   await api('tags','POST',{name:document.getElementById('new-tag').value, color:document.getElementById('new-tag-color').value});
@@ -1216,6 +1252,22 @@ async function saveFormGreetings() {
   await api('settings','POST',{key:'form_greeting_tr', value: tr});
   await api('settings','POST',{key:'form_greeting_en', value: en});
   toast('Form karşılama mesajları kaydedildi ✅');
+}
+
+async function saveQuoteTemplate() {
+  const fields = [
+    ['qt_hospital_name', 'qt-hospital-name'],
+    ['qt_hospital_subtitle', 'qt-hospital-subtitle'],
+    ['qt_intro_text', 'qt-intro-text'],
+    ['qt_footer_note', 'qt-footer-note'],
+    ['qt_footer_address', 'qt-footer-address'],
+    ['qt_validity_days', 'qt-validity-days'],
+    ['qt_wa_message', 'qt-wa-message']
+  ];
+  for (const [key, id] of fields) {
+    await api('settings', 'POST', { key, value: document.getElementById(id).value });
+  }
+  toast('Teklif şablonu kaydedildi ✅');
 }
 
 let calendarEventsData = [];

@@ -432,6 +432,46 @@ Cevap: Muayene ücretimiz branşa göre değişiklik göstermektedir. Hangi böl
         <p style="color:var(--text-muted); font-size:12px; margin-bottom:12px;">💡 Boş bırakırsanız sistem varsayılan mesajı kullanır.</p>
         <button class="btn btn-primary" onclick="saveFormGreetings()" style="width:100%">💾 Karşılama Mesajlarını Kaydet</button>
       </div>
+
+      <!-- PDF TEKLİF ŞABLONU -->
+      <div class="card">
+        <h2>📄 Teklif PDF Şablonu</h2>
+        <p style="color:var(--text-muted); font-size:13px; margin-bottom:16px;">Hastaya gönderilen tedavi teklifi PDF'inin içeriğini buradan düzenleyebilirsiniz.</p>
+        
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:16px;">
+          <div class="form-group">
+            <label>🏥 Kurum Adı</label>
+            <input type="text" id="qt-hospital-name" placeholder="BAŞKENT ÜNİVERSİTESİ">
+          </div>
+          <div class="form-group">
+            <label>📌 Alt Başlık</label>
+            <input type="text" id="qt-hospital-subtitle" placeholder="KONYA HASTANESİ">
+          </div>
+        </div>
+        <div class="form-group" style="margin-bottom:16px;">
+          <label>📝 Giriş Metni <code style="font-size:11px; color:var(--text-muted);">{hasta_adi}</code> değişkenini kullanabilirsiniz</label>
+          <textarea id="qt-intro-text" rows="3" placeholder="Sayın {hasta_adi}, hastanemize göstermiş olduğunuz ilgi için teşekkür ederiz..."></textarea>
+        </div>
+        <div class="form-group" style="margin-bottom:16px;">
+          <label>⚠️ Alt Not (Uyarı)</label>
+          <textarea id="qt-footer-note" rows="2" placeholder="Bu teklif bir ön bilgilendirme niteliğindedir. Kesin fiyat yüz yüze muayene sonrası belirlenecektir."></textarea>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:16px;">
+          <div class="form-group">
+            <label>📍 Adres / İletişim</label>
+            <input type="text" id="qt-footer-address" placeholder="Hocacihan Mah. Saray Cad. No:1 Selçuklu / KONYA | +90 332 257 06 06">
+          </div>
+          <div class="form-group">
+            <label>📅 Geçerlilik Süresi (Gün)</label>
+            <input type="number" id="qt-validity-days" value="30" min="1" max="365" style="width:120px;">
+          </div>
+        </div>
+        <div class="form-group" style="margin-bottom:16px;">
+          <label>💬 WhatsApp Gönderim Mesajı <code style="font-size:11px; color:var(--text-muted);">PDF ile birlikte hastaya gönderilir</code></label>
+          <textarea id="qt-wa-message" rows="2" placeholder="Merhaba, uzman hekimlerimizin değerlendirmesi sonucunda size özel hazırlanan tedavi teklifini ekte bulabilirsiniz."></textarea>
+        </div>
+        <button class="btn btn-primary" onclick="saveQuoteTemplate()" style="width:100%">💾 Teklif Şablonunu Kaydet</button>
+      </div>
     </div>
   </main>
 </div>
