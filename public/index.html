@@ -582,105 +582,7 @@ async function loadDashboard() {
 }
 
 // ========== FORM YÖNETİMİ ==========
-async function loadFormList() {
-  const q = document.getElementById('fm-search').value;
-  const campaign = document.getElementById('fm-campaign').value;
-  const stage = document.getElementById('fm-stage').value;
-  
-  let url = 'form-list';
-  if (q || campaign || stage) {
-    const params = new URLSearchParams();
-    if (q) params.append('q', q);
-    if (campaign) params.append('campaign', campaign);
-    if (stage) params.append('stage', stage);
-    url += '&' + params.toString();
-  }
-  
-  const data = await api(url);
-  if (!data) return;
-  
-  // Kampanya dropdown'ını doldur (seçimi koruyarak)
-  const sel = document.getElementById('fm-campaign');
-  if (data.campaigns) {
-    const currentVal = sel.value;
-    sel.innerHTML = '<option value="">Tüm Kampanyalar</option>';
-    data.campaigns.forEach(c => {
-      const opt = document.createElement('option');
-      opt.value = c; opt.textContent = c;
-      if (c === currentVal) opt.selected = true;
-      sel.appendChild(opt);
-    });
-  }
-  
-  const leads = data.leads || [];
-  currentLeads = leads;
-  document.getElementById('fm-count').textContent = `${leads.length} form gösteriliyor`;
-  
-  const stageColors = { new:'#8b5cf6', contacted:'#3b82f6', responded:'#f59e0b', appointed:'#22c55e', lost:'#6b7280' };
-  const stageLabels = { new:'🆕 Yeni', contacted:'📞 İletişim', responded:'💬 Cevap', appointed:'✅ Randevu', lost:'❌ Kayıp' };
-  
-  const list = document.getElementById('fm-list');
-  if (leads.length === 0) { list.innerHTML = '<div class="empty" style="padding:30px"><div class="empty-icon">📋</div>Henüz form verisi yok</div>'; return; }
-  
-  list.innerHTML = leads.map(l => {
-    const dt = new Date(l.created_at).toLocaleString('tr-TR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
-    let tags = []; try { tags = JSON.parse(l.tags || '[]'); } catch(e) {}
-    
-    // Parse raw_data to display in accordion
-    let rawDataHtml = '';
-    try {
-      if (l.raw_data) {
-        const raw = JSON.parse(l.raw_data);
-        if (Object.keys(raw).length > 0) {
-          rawDataHtml = Object.entries(raw).map(([k,v]) => `
-            <div style="margin-bottom:8px;">
-              <div style="font-size:11px;color:var(--text-muted);margin-bottom:2px;">${k}</div>
-              <div style="font-size:13px;color:#fff;">${v}</div>
-            </div>
-          `).join('');
-        }
-      }
-    } catch(e) {}
-    
-    const hasRawData = rawDataHtml !== '';
 
-    return `<div style="background:var(--bg-hover);border-radius:var(--radius-sm);margin-bottom:8px;border-left:4px solid ${stageColors[l.stage]||'#6b7280'}; overflow:hidden;">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;padding:14px 16px;">
-        <div style="flex:1;">
-          <div style="font-weight:600;margin-bottom:6px;display:flex;align-items:center;gap:8px;">
-            ${l.patient_name || 'İsimsiz'} 
-            <span style="font-size:11px;background:${stageColors[l.stage]||'#6b7280'}20;color:${stageColors[l.stage]||'#6b7280'};padding:2px 8px;border-radius:10px;font-weight:500;">${stageLabels[l.stage]||l.stage}</span>
-          </div>
-          <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:6px;">
-            <span style="font-size:12px;color:var(--text-muted)">📱 ${l.phone_number}</span>
-            ${l.city ? `<span style="font-size:12px;color:var(--text-muted)">📍 ${l.city}</span>` : ''}
-            ${l.email ? `<span style="font-size:12px;color:var(--text-muted)">✉️ ${l.email}</span>` : ''}
-            <span style="font-size:11px;color:var(--text-muted)">🕐 ${dt}</span>
-          </div>
-          <div style="display:flex;gap:6px;flex-wrap:wrap;">
-            ${l.form_name ? `<span style="font-size:11px;background:var(--accent-primary);color:white;padding:2px 8px;border-radius:6px;font-weight:500;">📋 ${l.form_name}</span>` : ''}
-            ${tags.map(t => `<span style="font-size:11px;background:#374151;color:#d1d5db;padding:2px 6px;border-radius:4px;">${t}</span>`).join('')}
-          </div>
-        </div>
-        <div style="display:flex;gap:6px;align-items:center;flex-direction:column;min-width:110px;">
-          <button class="btn btn-sm btn-primary" onclick="document.querySelector('[data-page=conversations]').click();setTimeout(()=>loadChat('${l.phone_number}','whatsapp'),300)" style="font-size:11px;padding:4px 10px;width:100%">💬 Sohbet</button>
-          ${l.stage !== 'appointed' ? `<button class="btn btn-sm btn-secondary" onclick="updateLeadStage(${l.id},'appointed')" style="font-size:11px;padding:4px 10px;width:100%">✅ Randevu</button>` : ''}
-          ${hasRawData ? `<button class="btn btn-sm" onclick="showFormDetailPage(${l.id})" style="font-size:11px;padding:4px 10px;width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1)">📄 Form Detayı</button>` : ''}
-        </div>
-      </div>
-    </div>`;
-  }).join('');
-}
-
-function loadFormManagement() {
-  loadSheets();
-}
-
-async function updateLeadStage(id, stage) {
-  await api('update-lead-stage','POST',{id, stage});
-  loadFormList();
-  toast('Lead durumu güncellendi ✅');
-}
 
 /* GOOGLE SHEETS ENTEGRASYONU (ESKİ SİSTEM) */
 window._activeSheet = null; window._sheetRefreshTimer = null;
@@ -841,55 +743,18 @@ async function enrichLeadCards(rows, phoneCol) {
 }
 
 
-async function updateSheetCell(row, col, value, element) {
-  if (element) {
-  const originalBorder = element.style.border;
-  const originalOpacity = element.style.opacity;
-  element.style.opacity = '0.5';
-  element.style.pointerEvents = 'none';
-  
+async function updateSheetCell(row, col, value) {
   try {
-    const resp = await fetch('/api/sheets?action=update', { 
-      method: 'POST', 
-      headers: {'Content-Type': 'application/json'}, 
-      body: JSON.stringify({ sheetName: window._activeSheet, row, col, value }) 
+    const resp = await fetch('/api/sheets?action=update', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ sheetName: window._activeSheet, row, col, value })
     });
-    const data = await resp.json(); 
-    
-    if(data.success) {
-      toast('✅ Değişiklik kaydedildi');
-      element.style.border = '1px solid var(--system-green)';
-      element.style.boxShadow = 'none';
-      setTimeout(() => element.style.border = '1px solid transparent', 2000);
-      
-      if (element.tagName === 'SELECT') {
-        if (value === 'Randevu Aldı' || value === 'Geldi' || value === 'Tedavi Oldu') { element.style.color = 'var(--system-green)'; element.style.background = 'rgba(50, 215, 75, 0.1)'; element.style.fontWeight = '600'; }
-        else if (value === 'Soğuk') { element.style.color = 'var(--system-red)'; element.style.background = 'rgba(255, 69, 58, 0.1)'; element.style.fontWeight = '500'; }
-        else if (value === 'İlgili' || value === 'Cevap Verdi' || value === 'İletişime Geçildi') { element.style.color = 'var(--system-orange)'; element.style.background = 'rgba(255, 159, 10, 0.1)'; element.style.fontWeight = '500'; }
-        else if (value === 'CREATED') { element.style.color = '#BF5AF2'; element.style.background = 'rgba(191, 90, 242, 0.1)'; element.style.fontWeight = '500'; }
-        else { element.style.color = 'var(--text-main)'; element.style.background = 'transparent'; element.style.fontWeight = '500'; }
-      } else {
-         element.style.background = 'var(--bg-input)';
-      }
-    } else {
-      toast('❌ Hata: ' + data.error, 'error');
-      element.style.border = '1px solid var(--system-red)';
-    }
+    const data = await resp.json();
+    if (data.success) toast('✅ Güncellendi');
+    else toast('❌ Hata: ' + data.error, 'error');
   } catch(e) {
     toast('❌ Bağlantı hatası', 'error');
-    element.style.border = '1px solid var(--system-red)';
-  } finally {
-    if (element) {
-    element.style.opacity = originalOpacity;
-    element.style.pointerEvents = 'auto';
-    }
-  }
-  } else {
-    // element yoksa basit call (detay ekranından)
-    try {
-      const resp = await fetch('/api/sheets?action=update', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ sheetName: window._activeSheet, row, col, value }) });
-      const data = await resp.json(); if(data.success) toast('Güncellendi'); else toast('Hata', 'error');
-    } catch(e) { toast('Bağlantı hatası', 'error'); }
   }
 }
 
