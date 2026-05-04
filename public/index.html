@@ -1431,21 +1431,127 @@ async function loadSheetData(sheetName) {
 function renderSheetTable(headers, rows, total) {
   document.getElementById('sheet-row-count').textContent = `📋 ${total} kayıt`;
   if(!headers || headers.length === 0) return document.getElementById('lead-list').innerHTML = '<p class="empty">Veri yok</p>';
-  const editableCols = {};
-  headers.forEach((h, idx) => { const lower = h.toLowerCase().replace(/\s+/g, '_'); if(lower.includes('lead_status') || lower === 'status') editableCols[idx] = 'status'; if(lower.includes('geri_dönüş') || lower.includes('geri_donus') || lower.includes('geri dönüş')) editableCols[idx] = 'text'; });
-  const statusOptions = ['', 'CREATED', 'İletişime Geçildi', 'Cevap Verdi', 'İlgili', 'Randevu Aldı', 'Geldi', 'Tedavi Oldu', 'Soğuk'];
-  let html = `<div style="overflow-x:auto;"><table class="data-table"><thead><tr><th class="row-num">#</th>${headers.map((h, j) => `<th${editableCols[j] ? ' style="color:#4ade80;"' : ''}>${h}</th>`).join('')}</tr></thead><tbody>`;
+  
+  const lowerHeaders = headers.map(h => h.toLowerCase().replace(/\s+/g, '_'));
+  
+  // Find important columns
+  let dateCol = headers.findIndex(h => h.toLowerCase().includes('time') || h.toLowerCase().includes('tarih'));
+  let nameCol = headers.findIndex(h => h.toLowerCase().includes('ad') || h.toLowerCase().includes('isim') || h.toLowerCase().includes('name'));
+  let phoneCol = headers.findIndex(h => h.toLowerCase().includes('telefon') || h.toLowerCase().includes('phone') || h.toLowerCase() === 'tel');
+  let deptCol = headers.findIndex(h => h.toLowerCase().includes('ad_name') || h.toLowerCase().includes('campaign') || h.toLowerCase().includes('form'));
+  let statusCol = headers.findIndex(h => h.toLowerCase().includes('durum') || h.toLowerCase().includes('status'));
+
+  // Fallbacks if columns are not obvious
+  if (dateCol === -1) dateCol = 0; // Usually first column
+  if (nameCol === -1) nameCol = headers.length > 2 ? 2 : -1;
+  
+  let html = `<div class="lead-cards-grid" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; padding: 16px; background: var(--bg-color);">`;
+  
   rows.forEach((row, i) => {
-    html += `<tr><td class="row-num">${i + 1}</td>`;
-    headers.forEach((h, j) => {
-      const val = row[j] || ''; const editType = editableCols[j];
-      if(editType === 'status') html += `<td style="padding:4px"><select style="background:var(--bg-hover);border:none;color:white;padding:4px;" onchange="updateSheetCell(${i}, ${j}, this.value)">${statusOptions.map(s => `<option value="${s}" ${val === s ? 'selected' : ''}>${s || '—'}</option>`).join('')}</select></td>`;
-      else if(editType === 'text') html += `<td style="padding:4px"><input type="text" style="background:var(--bg-hover);border:none;color:white;padding:4px;margin:0;" value="${String(val).replace(/"/g, '&quot;')}" onblur="updateSheetCell(${i}, ${j}, this.value)" /></td>`;
-      else html += `<td>${val}</td>`;
-    });
-    html += '</tr>';
+    const dateVal = dateCol > -1 ? (row[dateCol] || '').split('T')[0] : '';
+    const nameVal = nameCol > -1 ? (row[nameCol] || 'Bilinmiyor') : 'Bilinmiyor';
+    const phoneVal = phoneCol > -1 ? (row[phoneCol] || '') : '';
+    const deptVal = deptCol > -1 ? (row[deptCol] || 'Bilinmiyor') : '';
+    const statusVal = statusCol > -1 ? (row[statusCol] || '') : '';
+    
+    let badgeHtml = '<span class="lead-badge badge-new">🟡 Yeni / İşlenmedi</span>';
+    if (statusVal.includes('SİSTEME ALINDI') || statusVal.includes('İletişime Geçildi')) {
+      badgeHtml = '<span class="lead-badge badge-contacted">🟢 Dönüş Yapıldı</span>';
+    } else if (statusVal.includes('Cevap Verdi') || statusVal.includes('İlgili')) {
+      badgeHtml = '<span class="lead-badge badge-active">💬 İletişimde</span>';
+    } else if (statusVal) {
+      badgeHtml = `<span class="lead-badge badge-custom">${statusVal}</span>`;
+    }
+
+    html += `
+      <div class="lead-card" onclick="openLeadDetail(${i})" style="background:var(--card-bg); border-radius:12px; padding:16px; cursor:pointer; border:1px solid var(--border-color); box-shadow:0 2px 8px rgba(0,0,0,0.2); transition:transform 0.2s, border-color 0.2s;">
+        <div style="display:flex; justify-content:space-between; margin-bottom:12px; font-size:12px; color:var(--text-muted);">
+          <span>🗓 ${dateVal}</span>
+          ${badgeHtml}
+        </div>
+        <h3 style="margin:0 0 8px 0; font-size:16px; color:white;">👤 ${nameVal}</h3>
+        <div style="font-size:13px; color:var(--text-muted); margin-bottom:8px;">📱 ${phoneVal}</div>
+        <div style="font-size:12px; padding:6px 10px; background:var(--bg-hover); border-radius:6px; display:inline-block; max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+          🩺 ${deptVal.substring(0, 35)}${deptVal.length > 35 ? '...' : ''}
+        </div>
+      </div>
+    `;
   });
-  document.getElementById('lead-list').innerHTML = html + '</tbody></table></div>';
+  
+  html += '</div>';
+  document.getElementById('lead-list').innerHTML = html;
+}
+
+function openLeadDetail(rowIndex) {
+  const headers = window._sheetHeaders;
+  const row = window._sheetRows[rowIndex];
+  if (!headers || !row) return;
+
+  const technicalCols = ['id', 'ad_id', 'adset_id', 'campaign_id', 'leadgen_id', 'is_organic', 'platform'];
+  let statusColIndex = -1;
+  let notesColIndex = -1;
+
+  let detailsHtml = '<div style="display:flex; flex-direction:column; gap:16px;">';
+  
+  // Soru-Cevapları Listele
+  headers.forEach((h, j) => {
+    const lower = h.toLowerCase().replace(/\s+/g, '_');
+    if (lower.includes('lead_status') || lower === 'status' || lower === 'durum') { statusColIndex = j; return; }
+    if (lower.includes('geri_dönüş') || lower.includes('geri_donus') || lower.includes('geri dönüş') || lower === 'notlar') { notesColIndex = j; return; }
+    if (technicalCols.some(tc => lower.includes(tc))) return; // Teknik kolonları atla
+
+    const val = row[j] || '—';
+    detailsHtml += `
+      <div style="background:var(--bg-hover); padding:12px 16px; border-radius:8px;">
+        <div style="font-size:11px; color:var(--text-muted); margin-bottom:4px; text-transform:uppercase; letter-spacing:0.5px;">${h}</div>
+        <div style="font-size:15px; color:white;">${val}</div>
+      </div>
+    `;
+  });
+  detailsHtml += '</div>';
+
+  // En Alta Düzenlenebilir Alanları Ekle
+  const statusOptions = ['', 'SİSTEME ALINDI ✅', 'CREATED', 'İletişime Geçildi', 'Cevap Verdi', 'İlgili', 'Randevu Aldı', 'Geldi', 'Tedavi Oldu', 'Soğuk'];
+  const currentStatus = statusColIndex > -1 ? (row[statusColIndex] || '') : '';
+  const currentNotes = notesColIndex > -1 ? (row[notesColIndex] || '') : '';
+
+  let editHtml = '<div style="margin-top:32px; padding-top:24px; border-top:1px solid var(--border-color); display:flex; flex-direction:column; gap:16px;">';
+  editHtml += '<h3 style="margin:0; font-size:16px; color:var(--accent-primary);">📝 Yönetim (Otomatik Kaydedilir)</h3>';
+  
+  if (statusColIndex > -1) {
+    editHtml += `
+      <div>
+        <label style="display:block; font-size:12px; color:var(--text-muted); margin-bottom:6px;">Lead Durumu</label>
+        <select style="width:100%; padding:12px; background:var(--bg-hover); border:1px solid var(--border-color); border-radius:8px; color:white; font-size:14px;" onchange="updateSheetCell(${rowIndex}, ${statusColIndex}, this.value)">
+          ${statusOptions.map(s => `<option value="${s}" ${currentStatus === s ? 'selected' : ''}>${s || '— Seçiniz —'}</option>`).join('')}
+        </select>
+      </div>
+    `;
+  }
+  
+  if (notesColIndex > -1) {
+    editHtml += `
+      <div>
+        <label style="display:block; font-size:12px; color:var(--text-muted); margin-bottom:6px;">Geri Dönüş / Notlar</label>
+        <textarea style="width:100%; padding:12px; background:var(--bg-hover); border:1px solid var(--border-color); border-radius:8px; color:white; font-size:14px; resize:vertical; min-height:80px;" onblur="updateSheetCell(${rowIndex}, ${notesColIndex}, this.value)">${String(currentNotes).replace(/"/g, '&quot;')}</textarea>
+      </div>
+    `;
+  }
+  
+  editHtml += '</div>';
+
+  document.getElementById('fd-content').innerHTML = detailsHtml + editHtml;
+  
+  // Görünümleri değiştir
+  document.getElementById('fm-view-sheets').style.display = 'none';
+  document.getElementById('page-form-detail').style.display = 'block';
+}
+
+function goBackToForms() {
+  document.getElementById('page-form-detail').style.display = 'none';
+  document.getElementById('fm-view-sheets').style.display = 'block';
+  // Listeyi sessizce yenile ki yapılan editler karta yansısın
+  if (window._activeSheet) loadSheetData(window._activeSheet);
 }
 
 async function updateSheetCell(row, col, value) {

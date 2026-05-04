@@ -557,3 +557,27 @@ textarea:focus, input:focus, select:focus { outline: none; border-color: var(--a
 .contact-badges {
   display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px;
 }
+
+/* LEAD CARDS */
+.lead-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 16px;
+  padding: 16px;
+  background: var(--bg-color);
+}
+.lead-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent-primary) !important;
+}
+.lead-badge {
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-weight: 600;
+  font-size: 11px;
+}
+.badge-new { background: rgba(255, 204, 0, 0.2); color: #FFCC00; border: 1px solid rgba(255, 204, 0, 0.4); }
+.badge-contacted { background: rgba(74, 222, 128, 0.2); color: #4ade80; border: 1px solid rgba(74, 222, 128, 0.4); }
+.badge-active { background: rgba(0, 132, 255, 0.2); color: #0084FF; border: 1px solid rgba(0, 132, 255, 0.4); }
+.badge-custom { background: rgba(255, 255, 255, 0.1); color: #ccc; border: 1px solid rgba(255, 255, 255, 0.2); }
+
