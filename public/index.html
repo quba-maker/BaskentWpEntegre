@@ -1447,26 +1447,44 @@ function renderSheetTable(headers, rows, total) {
   
   let html = `<div class="lead-list-view" style="display:flex; flex-direction:column; gap:8px; padding:0 16px 16px 16px; background: var(--bg-color);">`;
   
+  const readLeads = JSON.parse(localStorage.getItem('readLeads') || '[]');
+
   rows.forEach((row, i) => {
-    const dateVal = dateCol > -1 ? (row[dateCol] || '').split('T')[0] : '';
+    let dateVal = '';
+    if (dateCol > -1 && row[dateCol]) {
+      const d = new Date(row[dateCol]);
+      if (!isNaN(d.getTime())) {
+        dateVal = d.toLocaleDateString('tr-TR', { day: '2-digit', month: 'short' }) + ' - ' + d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+      } else {
+        dateVal = row[dateCol].split('T')[0];
+      }
+    }
+    
     const nameVal = nameCol > -1 ? (row[nameCol] || 'Bilinmiyor') : 'Bilinmiyor';
     const phoneVal = phoneCol > -1 ? (row[phoneCol] || '') : '';
     const deptVal = deptCol > -1 ? (row[deptCol] || 'Bilinmiyor') : '';
     const statusVal = statusCol > -1 ? (row[statusCol] || '') : '';
     
     let badgeHtml = '<span class="lead-badge badge-new" style="min-width:140px; text-align:center;">🟡 Yeni / İşlenmedi</span>';
+    let isUnread = !readLeads.includes(phoneVal) && (!statusVal || statusVal.toLowerCase() === 'created');
+    
     if (statusVal.includes('SİSTEME ALINDI') || statusVal.includes('İletişime Geçildi')) {
       badgeHtml = '<span class="lead-badge badge-contacted" style="min-width:140px; text-align:center;">🟢 Dönüş Yapıldı</span>';
+      isUnread = false;
     } else if (statusVal.includes('Cevap Verdi') || statusVal.includes('İlgili')) {
       badgeHtml = '<span class="lead-badge badge-active" style="min-width:140px; text-align:center;">💬 İletişimde</span>';
-    } else if (statusVal) {
+      isUnread = false;
+    } else if (statusVal && statusVal.toLowerCase() !== 'created') {
       badgeHtml = `<span class="lead-badge badge-custom" style="min-width:140px; text-align:center;">${statusVal}</span>`;
+      isUnread = false;
     }
 
+    const unreadStyle = isUnread ? 'border-left: 4px solid #4ade80; background: rgba(74, 222, 128, 0.05);' : 'border-left: 4px solid transparent; background: var(--card-bg);';
+
     html += `
-      <div class="lead-card list-row" onclick="openLeadDetail(${i})" style="display:flex; align-items:center; justify-content:space-between; background:var(--card-bg); border-radius:8px; padding:12px 16px; cursor:pointer; border:1px solid var(--border-color); transition:all 0.2s;">
+      <div class="lead-card list-row" onclick="openLeadDetail(${i})" style="display:flex; align-items:center; justify-content:space-between; border-radius:8px; padding:12px 16px; cursor:pointer; border:1px solid var(--border-color); transition:all 0.2s; ${unreadStyle}">
         <div style="display:flex; align-items:center; gap:24px; flex:1;">
-          <div style="width:100px; font-size:12px; color:var(--text-muted);">🗓 ${dateVal}</div>
+          <div style="width:140px; font-size:12px; color:var(--text-muted);">🗓 ${dateVal}</div>
           <div style="width:200px;">
             <div style="font-weight:600; color:white; margin-bottom:4px;">👤 ${nameVal}</div>
             <div style="font-size:12px; color:var(--text-muted);">📱 ${phoneVal}</div>
@@ -1503,6 +1521,15 @@ function openLeadDetail(rowIndex) {
   const phoneVal = phoneCol > -1 ? (row[phoneCol] || '') : '';
   const emailVal = emailCol > -1 ? (row[emailCol] || '') : '';
 
+  // Okundu olarak işaretle
+  if (phoneVal) {
+    let readLeads = JSON.parse(localStorage.getItem('readLeads') || '[]');
+    if (!readLeads.includes(phoneVal)) {
+      readLeads.push(phoneVal);
+      localStorage.setItem('readLeads', JSON.stringify(readLeads));
+    }
+  }
+
   let detailsHtml = `
     <div style="display:grid; grid-template-columns: 2fr 1fr; gap:32px;">
       
@@ -1511,7 +1538,7 @@ function openLeadDetail(rowIndex) {
         <!-- İletişim Kartı -->
         <div style="background:var(--card-bg); border:1px solid var(--border-color); border-radius:12px; padding:20px;">
           <h2 style="margin:0 0 16px 0; color:white; font-size:20px;">👤 ${nameVal}</h2>
-          <div style="display:flex; gap:24px;">
+          <div style="display:flex; gap:24px; margin-bottom: 24px;">
             <div>
               <div style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">Telefon</div>
               <div style="font-size:15px; color:var(--accent-primary); font-weight:500;">📱 ${phoneVal || 'Belirtilmedi'}</div>
@@ -1520,6 +1547,15 @@ function openLeadDetail(rowIndex) {
               <div style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">E-Posta</div>
               <div style="font-size:15px; color:white;">✉️ ${emailVal || 'Belirtilmedi'}</div>
             </div>
+          </div>
+          <!-- HIZLI AKSİYONLAR -->
+          <div style="display:flex; gap:12px;">
+            <a href="https://wa.me/${(phoneVal || '').replace(/\\D/g, '')}" target="_blank" class="btn" style="background:#25D366; color:white; border:none; padding:8px 16px; border-radius:8px; font-size:13px; font-weight:600; text-decoration:none;">
+              🟢 WhatsApp'tan Yaz
+            </a>
+            <button onclick="triggerSingleOutbound('${(phoneVal || '').replace(/\\D/g, '')}', '${nameVal.replace(/'/g, "\\'")}')" class="btn" style="background:#bf5af2; color:white; border:none; padding:8px 16px; border-radius:8px; font-size:13px; font-weight:600;">
+              🤖 Bota Devret (Açılış Mesajı)
+            </button>
           </div>
         </div>
 
@@ -1546,7 +1582,8 @@ function openLeadDetail(rowIndex) {
   detailsHtml += '</div></div>'; // Sol panel sonu
 
   // SAĞ PANEL: Düzenlenebilir Alanlar (Sticky)
-  const statusOptions = ['', 'SİSTEME ALINDI ✅', 'CREATED', 'İletişime Geçildi', 'Cevap Verdi', 'İlgili', 'Randevu Aldı', 'Geldi', 'Tedavi Oldu', 'Soğuk'];
+  let storedOptions = localStorage.getItem('leadStatusOptions');
+  let statusOptions = storedOptions ? JSON.parse(storedOptions) : ['', 'SİSTEME ALINDI ✅', 'CREATED', 'İletişime Geçildi', 'Cevap Verdi', 'İlgili', 'Randevu Aldı', 'Geldi', 'Tedavi Oldu', 'Soğuk'];
   const currentStatus = statusColIndex > -1 ? (row[statusColIndex] || '') : '';
   const currentNotes = notesColIndex > -1 ? (row[notesColIndex] || '') : '';
 
@@ -1562,7 +1599,10 @@ function openLeadDetail(rowIndex) {
   if (statusColIndex > -1) {
     editHtml += `
       <div style="margin-bottom:16px;">
-        <label style="display:block; font-size:12px; color:var(--text-muted); margin-bottom:6px;">Lead Durumu</label>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+          <label style="font-size:12px; color:var(--text-muted);">Lead Durumu</label>
+          <button onclick="editLeadStatusOptions()" style="background:none; border:none; color:var(--accent-primary); cursor:pointer; font-size:12px; padding:0;">⚙️ Düzenle</button>
+        </div>
         <select style="width:100%; padding:12px; background:var(--bg-hover); border:1px solid var(--border-color); border-radius:8px; color:white; font-size:14px; cursor:pointer;" onchange="updateSheetCell(${rowIndex}, ${statusColIndex}, this.value)">
           ${statusOptions.map(s => `<option value="${s}" ${currentStatus === s ? 'selected' : ''}>${s || '— Seçiniz —'}</option>`).join('')}
         </select>
@@ -1597,6 +1637,46 @@ function openLeadDetail(rowIndex) {
   document.getElementById('page-form-detail').style.display = 'block';
 }
 
+function editLeadStatusOptions() {
+  let storedOptions = localStorage.getItem('leadStatusOptions');
+  let currentOptions = storedOptions ? JSON.parse(storedOptions) : ['', 'SİSTEME ALINDI ✅', 'CREATED', 'İletişime Geçildi', 'Cevap Verdi', 'İlgili', 'Randevu Aldı', 'Geldi', 'Tedavi Oldu', 'Soğuk'];
+  
+  const userInput = prompt("Lead süreçlerini virgülle ayırarak giriniz:\n(Örn: Yeni, Arandı, Ulaşılamadı, İlgilenmiyor, Randevu Alındı)", currentOptions.filter(x => x).join(', '));
+  
+  if (userInput !== null) {
+    const newOptions = ['', ...userInput.split(',').map(s => s.trim()).filter(s => s)];
+    localStorage.setItem('leadStatusOptions', JSON.stringify(newOptions));
+    toast('Süreç seçenekleri güncellendi.');
+    // Yeniden render etmek için sayfayı yalandan refresh edebiliriz
+    goBackToForms();
+  }
+}
+
+async function triggerSingleOutbound(phone, name) {
+  if (!phone) return toast('Geçerli bir telefon numarası yok', 'error');
+  if (!confirm(`${name || phone} adlı hastaya otomatik açılış şablonu mesajı gönderilecek. Emin misiniz?`)) return;
+
+  try {
+    toast('Mesaj gönderiliyor...', 'info');
+    const resp = await fetch('/api/bulk-outbound', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        leads: [{ phone, name }],
+        sheetContext: { sheetName: window._activeSheet }
+      })
+    });
+    const data = await resp.json();
+    
+    if (data.success && data.results.successes.length > 0) {
+      toast('✅ Mesaj başarıyla gönderildi ve bot başlatıldı!');
+    } else {
+      toast('❌ Mesaj gönderilemedi: ' + (data.results?.failures[0]?.error || 'Bilinmeyen hata'), 'error');
+    }
+  } catch (error) {
+    toast('Sunucu hatası', 'error');
+  }
+}
 function goBackToForms() {
   document.getElementById('page-form-detail').style.display = 'none';
   document.getElementById('fm-view-sheets').style.display = 'block';
