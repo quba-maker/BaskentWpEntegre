@@ -141,7 +141,9 @@ async function loadDashboard() {
 }
 
 // ========== FORM YÖNETİMİ ==========
-
+function loadFormManagement() {
+  loadSheets();
+}
 
 /* GOOGLE SHEETS ENTEGRASYONU (ESKİ SİSTEM) */
 window._activeSheet = null; window._sheetRefreshTimer = null;
