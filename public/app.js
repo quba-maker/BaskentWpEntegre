@@ -1213,8 +1213,7 @@ async function setLeadPipelineStage(phone, name, stage, btnEl) {
     await api('update-patient', 'POST', {
       phone: phone,
       patient_name: name || null,
-      lead_stage: stage,
-      tags: '[]'
+      lead_stage: stage
     });
     
     toast(`Pipeline: ${stageLabels[stage]}`);

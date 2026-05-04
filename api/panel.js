@@ -211,16 +211,22 @@ export default async function handler(req, res) {
       let parsedTags = [];
       try { parsedTags = JSON.parse(tags || '[]'); } catch(e){}
 
+      // lead_stage sütunu yoksa oluştur (migration)
+      try { await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS lead_stage VARCHAR(50) DEFAULT 'new'`; } catch(e) {}
+
+      // UPSERT: Kayıt yoksa oluştur (Form lead'leri Sheets'te olup DB'de olmayabilir)
       await sql`
-        UPDATE conversations 
-        SET patient_name = ${patient_name || null}, 
-            tags = ${tags || '[]'}, 
-            notes = ${notes || ''},
-            department = ${department || null},
-            patient_type = ${patient_type || 'Yerli'}
-        WHERE phone_number = ${phone}
+        INSERT INTO conversations (phone_number, patient_name, tags, notes, department, patient_type, status, lead_stage)
+        VALUES (${phone}, ${patient_name || null}, ${tags || '[]'}, ${notes || ''}, ${department || null}, ${patient_type || 'Yerli'}, 'active', ${lead_stage || 'new'})
+        ON CONFLICT (phone_number) DO UPDATE SET
+          patient_name = COALESCE(NULLIF(${patient_name || null}, ''), conversations.patient_name),
+          tags = CASE WHEN ${tags || '[]'} != '[]' THEN ${tags || '[]'} ELSE conversations.tags END,
+          notes = CASE WHEN ${notes || ''} != '' THEN ${notes || ''} ELSE conversations.notes END,
+          department = COALESCE(NULLIF(${department || null}, ''), conversations.department),
+          lead_stage = COALESCE(NULLIF(${lead_stage || null}, ''), conversations.lead_stage)
       `;
       if (lead_stage) {
+        // leads tablosunda da güncelle (varsa)
         await sql`UPDATE leads SET stage = ${lead_stage} WHERE phone_number = ${phone}`;
       }
 
@@ -256,7 +262,11 @@ export default async function handler(req, res) {
           conv.lead_city = lead.city;
           conv.lead_email = lead.email;
           conv.lead_tags = lead.tags;
-          conv.lead_stage = lead.stage;
+          // lead_stage: conversations tablosundaki değer öncelikli (form detayından set edilen)
+          // Eğer conversations'ta lead_stage yoksa leads tablosundan al
+          if (!conv.lead_stage || conv.lead_stage === 'new') {
+            conv.lead_stage = conv.lead_stage || lead.stage || 'new';
+          }
           conv.lead_date = lead.created_at;
           conv.lead_ad_id = lead.ad_id;
           conv.lead_notes = lead.notes;
@@ -270,6 +280,9 @@ export default async function handler(req, res) {
           }
         }
       } catch(e) { console.error('Lead eşleştirme hatası:', e.message); }
+      
+      // lead_stage fallback
+      if (!conv.lead_stage) conv.lead_stage = 'new';
       
       return res.json(conv);
     }
