@@ -321,7 +321,10 @@ Cevap: Muayene ücretimiz branşa göre değişiklik göstermektedir. Hangi böl
     <div id="page-form-management" class="page">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 24px;">
         <h1 style="margin:0">📋 Form Yönetimi</h1>
-        <div id="sheet-row-count" style="background:var(--accent-primary); color:white; font-size:12px; font-weight:600; padding:6px 14px; border-radius:20px; box-shadow:0 4px 10px rgba(0,0,0,0.1);"></div>
+        <div style="display:flex; gap: 12px; align-items:center;">
+          <div id="sheet-row-count" style="background:var(--accent-primary); color:white; font-size:12px; font-weight:600; padding:6px 14px; border-radius:20px; box-shadow:0 4px 10px rgba(0,0,0,0.1);"></div>
+          <button class="btn btn-primary" onclick="triggerBulkOutbound()" style="background:#bf5af2; border:none; box-shadow:0 4px 12px rgba(191,90,242,0.3);">🚀 Tüm Yeni Lead'lere Ulaş</button>
+        </div>
       </div>
 
       <!-- TEKİL SİSTEM (GOOGLE SHEETS CRM) -->
@@ -1417,7 +1420,11 @@ async function loadSheetData(sheetName) {
     const tabResp = await fetch('/api/sheets?action=tabs'); const tabData = await tabResp.json();
     if(tabData.success) document.getElementById('sheet-tabs').innerHTML = tabData.tabs.map(t => `<button class="sheet-tab ${t.title === sheetName ? 'active' : ''}" onclick="loadSheetData('${t.title.replace(/'/g, "\\'")}')">${t.title}</button>`).join('');
     const resp = await fetch(`/api/sheets?action=data&sheet=${encodeURIComponent(sheetName)}`); const data = await resp.json();
-    if(data.success) renderSheetTable(data.headers, data.rows, data.total);
+    if(data.success) {
+      window._sheetHeaders = data.headers;
+      window._sheetRows = data.rows;
+      renderSheetTable(data.headers, data.rows, data.total);
+    }
   } catch(e) {}
 }
 
@@ -1444,6 +1451,58 @@ function renderSheetTable(headers, rows, total) {
 async function updateSheetCell(row, col, value) {
   const resp = await fetch('/api/sheets?action=update', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ sheetName: window._activeSheet, row, col, value }) });
   const data = await resp.json(); if(data.success) toast('Güncellendi'); else toast('Hata', 'error');
+}
+
+async function triggerBulkOutbound() {
+  if (!window._activeSheet || !window._sheetHeaders || !window._sheetRows) return toast('Önce bir liste yükleyin', 'error');
+  
+  const headers = window._sheetHeaders.map(h => h.toLowerCase());
+  let phoneCol = headers.findIndex(h => h.includes('telefon') || h.includes('phone') || h === 'tel');
+  let nameCol = headers.findIndex(h => h.includes('ad') || h.includes('isim') || h.includes('name'));
+  let statusCol = headers.findIndex(h => h.includes('durum') || h.includes('status'));
+  
+  if (phoneCol === -1) return toast('Telefon sütunu bulunamadı', 'error');
+  
+  const leadsToProcess = [];
+  window._sheetRows.forEach((row, i) => {
+    const phone = row[phoneCol];
+    const name = nameCol > -1 ? row[nameCol] : '';
+    const status = statusCol > -1 ? (row[statusCol] || '') : '';
+    
+    // Eğer telefon var ve durum boşsa (Sisteme alınmadıysa)
+    if (phone && (!status || (!status.includes('SİSTEME ALINDI') && !status.includes('ALINDI')))) {
+      leadsToProcess.push({ rowIndex: i, phone, name, statusColIndex: statusCol > -1 ? statusCol + 1 : headers.length + 1 });
+    }
+  });
+
+  if (leadsToProcess.length === 0) return toast('İşlenecek yeni lead bulunamadı!', 'info');
+  
+  if (!confirm(`${leadsToProcess.length} adet yeni lead tespit edildi. Hepsine otomatik WhatsApp açılış mesajı gönderilecek. Onaylıyor musunuz?`)) return;
+
+  toast(`🚀 ${leadsToProcess.length} lead işleniyor... Lütfen bekleyin.`, 'info');
+  
+  try {
+    const res = await fetch('/api/bulk-outbound', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sheetName: window._activeSheet,
+        leads: leadsToProcess,
+        templateName: 'lead_greeting' // Default meta template
+      })
+    });
+    
+    const data = await res.json();
+    if (data.success) {
+      toast(`✅ İşlem tamam! Başarılı: ${data.results.success}, Hatalı: ${data.results.failed}`);
+      // Tabloyu güncelle
+      loadSheetData(window._activeSheet);
+    } else {
+      toast('Hata oluştu: ' + data.error, 'error');
+    }
+  } catch (err) {
+    toast('Bağlantı hatası', 'error');
+  }
 }
 
 /* ŞABLONLAR */
