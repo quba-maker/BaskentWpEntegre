@@ -985,43 +985,75 @@ function openLeadDetail(sortedIndex) {
   const phoneVal = phoneCol > -1 ? (row[phoneCol] || '') : '';
   const emailVal = emailCol > -1 ? (row[emailCol] || '') : '';
 
-  // Okundu olarak işaretle
+  // 📞 TÜM FORM ALANLARINDAN TELEFON NUMARASI TESPİT ET
+  const phoneNumbers = [];
+  const phoneRegex = /(\+?\d[\d\s\-().]{7,}\d)/g;
+  const normalizePhone = (p) => p.replace(/[\s\-().]/g, '');
+  const seenPhones = new Set();
+
+  if (phoneVal) {
+    const clean = normalizePhone(phoneVal);
+    seenPhones.add(clean);
+    phoneNumbers.push({ number: clean, label: 'Telefon', isWhatsApp: false, raw: phoneVal });
+  }
+
+  headers.forEach((h, j) => {
+    if (j === phoneCol || j === nameCol || j === emailCol) return;
+    const val = row[j] || '';
+    const lower = h.toLowerCase().replace(/[\s_]+/g, '');
+    const isWA = lower.includes('whatsapp') || lower.includes('wp') || lower.includes('wapp');
+    const isPhoneField = isWA || lower.includes('telefon') || lower.includes('phone') || lower.includes('numara') || lower.includes('gsm') || lower.includes('cep') || lower.includes('iletişim') || lower.includes('iletisim');
+    const matches = val.match(phoneRegex);
+    if (matches && (isPhoneField || matches[0].length > 9)) {
+      matches.forEach(m => {
+        const clean = normalizePhone(m);
+        if (clean.length >= 10 && !seenPhones.has(clean)) {
+          seenPhones.add(clean);
+          phoneNumbers.push({ number: clean, label: isWA ? '🟢 WhatsApp' : h.substring(0, 40), isWhatsApp: isWA, raw: m.trim() });
+        }
+      });
+    }
+  });
+
   if (phoneVal) {
     let readLeads = JSON.parse(localStorage.getItem('readLeads') || '[]');
-    if (!readLeads.includes(phoneVal)) {
-      readLeads.push(phoneVal);
-      localStorage.setItem('readLeads', JSON.stringify(readLeads));
-    }
+    if (!readLeads.includes(phoneVal)) { readLeads.push(phoneVal); localStorage.setItem('readLeads', JSON.stringify(readLeads)); }
   }
+
+  const phonesHtml = phoneNumbers.length > 0 ? phoneNumbers.map(p => `
+    <div style="display:flex; align-items:center; gap:8px; padding:6px 0;">
+      <div style="flex:1;">
+        <div style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">${p.label}</div>
+        <div style="font-size:15px; color:${p.isWhatsApp ? '#25D366' : 'var(--accent-primary)'}; font-weight:500; display:flex; align-items:center; gap:6px;">
+          ${p.isWhatsApp ? '🟢' : '📱'} ${p.raw} ${countryBadge(p.number)}
+        </div>
+      </div>
+      <a href="https://wa.me/${p.number}" target="_blank" style="background:#25D366; color:white; border:none; padding:4px 10px; border-radius:6px; font-size:11px; font-weight:600; text-decoration:none; white-space:nowrap;">WA Yaz</a>
+    </div>
+  `).join('') : `<div style="font-size:13px; color:var(--text-muted);">📱 Telefon bulunamadı</div>`;
+
+  const primaryPhone = phoneNumbers.length > 0 ? phoneNumbers[0].number : '';
 
   let detailsHtml = `
     <div style="display:grid; grid-template-columns: 2fr 1fr; gap:32px;">
-      
-      <!-- SOL PANEL: İletişim ve Sorular -->
+      <!-- SOL PANEL -->
       <div style="display:flex; flex-direction:column; gap:16px;">
-        <!-- İletişim Kartı -->
         <div style="background:var(--card-bg); border:1px solid var(--border-color); border-radius:12px; padding:20px;">
           <h2 style="margin:0 0 16px 0; color:white; font-size:20px;">👤 ${nameVal}</h2>
-          <div style="display:flex; gap:24px; margin-bottom: 24px; flex-wrap:wrap;">
-            <div>
-              <div style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">Telefon</div>
-              <div style="font-size:15px; color:var(--accent-primary); font-weight:500;">📱 ${phoneVal || 'Belirtilmedi'}</div>
-            </div>
-            <div>
-              <div style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">Ülke</div>
-              <div style="font-size:15px; color:white;">${countryBadge(phoneVal) || '🌍 Bilinmiyor'}</div>
-            </div>
+          <div style="margin-bottom:16px; border-bottom:1px solid var(--border-color); padding-bottom:16px;">
+            ${phonesHtml}
+          </div>
+          <div style="display:flex; gap:24px; margin-bottom:16px; flex-wrap:wrap;">
             <div>
               <div style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">E-Posta</div>
               <div style="font-size:15px; color:white;">✉️ ${emailVal || 'Belirtilmedi'}</div>
             </div>
           </div>
-          <!-- HIZLI AKSİYONLAR -->
-          <div style="display:flex; gap:12px;">
-            <a href="https://wa.me/${(phoneVal || '').replace(/\\D/g, '')}" target="_blank" class="btn" style="background:#25D366; color:white; border:none; padding:8px 16px; border-radius:8px; font-size:13px; font-weight:600; text-decoration:none;">
+          <div style="display:flex; gap:12px; flex-wrap:wrap;">
+            <a href="https://wa.me/${primaryPhone}" target="_blank" class="btn" style="background:#25D366; color:white; border:none; padding:8px 16px; border-radius:8px; font-size:13px; font-weight:600; text-decoration:none;">
               🟢 WhatsApp'tan Yaz
             </a>
-            <button onclick="triggerSingleOutbound('${(phoneVal || '').replace(/\\D/g, '')}', '${nameVal.replace(/'/g, "\\'")}')" class="btn" style="background:#bf5af2; color:white; border:none; padding:8px 16px; border-radius:8px; font-size:13px; font-weight:600;">
+            <button onclick="triggerSingleOutbound('${primaryPhone}', '${nameVal.replace(/'/g, "\\'")}')" class="btn" style="background:#bf5af2; color:white; border:none; padding:8px 16px; border-radius:8px; font-size:13px; font-weight:600;">
               🤖 Bota Devret (Açılış Mesajı)
             </button>
           </div>
@@ -1049,32 +1081,42 @@ function openLeadDetail(sortedIndex) {
   });
   detailsHtml += '</div></div>'; // Sol panel sonu
 
-  // SAĞ PANEL: CRM Kontrol Paneli (DB bağlantılı, Sheets'ten bağımsız)
-  const cleanPhone = (phoneVal || '').replace(/\D/g, '');
+  // SAĞ PANEL: Pipeline + Etiketler + Notlar (DB + Sheets entegre)
+  const cleanPhone = primaryPhone || (phoneVal || '').replace(/\D/g, '');
   
+  // Pipeline → Sheets eşleştirme
+  const stageToSheets = { new:'CREATED', contacted:'İletişime Geçildi', responded:'Cevap Verdi', appointed:'Randevu Aldı', lost:'Soğuk' };
+  const sheetsToStage = { '':'new', 'CREATED':'new', 'İletişime Geçildi':'contacted', 'Cevap Verdi':'responded', 'İlgili':'responded', 'SİSTEME ALINDI ✅':'contacted', 'Randevu Aldı':'appointed', 'Geldi':'appointed', 'Tedavi Oldu':'appointed', 'Soğuk':'lost' };
+  
+  // Mevcut Sheets durumundan aktif pipeline'ı belirle
+  const currentSheetStatus = statusColIndex > -1 ? (row[statusColIndex] || '') : '';
+  const initialStage = sheetsToStage[currentSheetStatus] || 'new';
+
   let editHtml = `
     <!-- SAĞ PANEL -->
     <div>
       <div style="position:sticky; top:24px; display:flex; flex-direction:column; gap:16px;">
         
-        <!-- 🔹 CRM Pipeline (DB Bağlantılı) -->
+        <!-- 🎯 Pipeline Durumu (DB + Sheets Entegre) -->
         <div style="background:var(--card-bg); border:1px solid var(--accent-primary); border-radius:12px; padding:20px; box-shadow:0 8px 24px rgba(10,132,255,0.1);">
-          <h3 style="margin:0 0 16px 0; font-size:16px; color:var(--accent-primary); display:flex; align-items:center; gap:8px;">
-            🎯 Pipeline Durumu
-            <span style="font-size:11px; color:var(--text-muted); font-weight:400;">Sheets'ten bağımsız</span>
+          <h3 style="margin:0 0 4px 0; font-size:16px; color:var(--accent-primary); display:flex; align-items:center; gap:8px;">
+            🎯 Lead Durumu
           </h3>
+          <p style="margin:0 0 14px 0; font-size:11px; color:var(--text-muted);">DB + Google Sheets'e anlık yansır</p>
           <div id="fd-pipeline-stages" style="display:flex; flex-direction:column; gap:6px;">
             ${['new', 'contacted', 'responded', 'appointed', 'lost'].map(stage => {
               const labels = { new:'🆕 Yeni Lead', contacted:'📞 İletişime Geçildi', responded:'💬 Cevap Verdi', appointed:'✅ Randevu Alındı', lost:'❌ Kaybedildi' };
               const colors = { new:'#8b5cf6', contacted:'#3b82f6', responded:'#f59e0b', appointed:'#22c55e', lost:'#6b7280' };
-              return `<button class="fd-stage-btn" data-stage="${stage}" onclick="setLeadPipelineStage('${cleanPhone}', '${nameVal.replace(/'/g, "\\'")}', '${stage}', this)" style="display:flex; align-items:center; gap:8px; width:100%; padding:10px 14px; border-radius:8px; border:1px solid var(--border-color); background:var(--bg-hover); color:white; cursor:pointer; font-size:13px; font-weight:500; transition:all 0.2s;">
+              const isActive = stage === initialStage;
+              const activeStyle = isActive ? `background:${colors[stage]}22; border-color:${colors[stage]}; font-weight:700;` : '';
+              return `<button class="fd-stage-btn" data-stage="${stage}" onclick="setLeadPipelineStage('${cleanPhone}', '${nameVal.replace(/'/g, "\\'")}', '${stage}', this, ${statusColIndex}, ${rowIndex})" style="display:flex; align-items:center; gap:8px; width:100%; padding:10px 14px; border-radius:8px; border:1px solid var(--border-color); background:var(--bg-hover); color:white; cursor:pointer; font-size:13px; font-weight:500; transition:all 0.2s; ${activeStyle}">
                 <span style="width:10px; height:10px; border-radius:50%; background:${colors[stage]}; flex-shrink:0;"></span>
                 ${labels[stage]}
               </button>`;
             }).join('')}
           </div>
           <div id="fd-pipeline-info" style="margin-top:12px; font-size:11px; color:var(--text-muted); text-align:center;">
-            ⏳ Yükleniyor...
+            ${statusColIndex > -1 ? `Sheets durumu: <strong>${currentSheetStatus || 'Boş'}</strong>` : 'Sheets sütunu bulunamadı'}
           </div>
         </div>
 
@@ -1089,45 +1131,22 @@ function openLeadDetail(sortedIndex) {
           </select>
         </div>
 
-        <!-- 📋 Google Sheets Senkron (Mevcut Sistem) -->
+        <!-- 📝 Geri Dönüş / Notlar -->
         <div style="background:var(--card-bg); border:1px solid var(--border-color); border-radius:12px; padding:20px;">
-          <h3 style="margin:0 0 12px 0; font-size:14px; color:white; display:flex; align-items:center; gap:8px;">
-            📋 Google Sheets
-            <span style="font-size:11px; color:var(--text-muted); font-weight:400;">Anlık senkron</span>
-          </h3>
+          <h3 style="margin:0 0 12px 0; font-size:14px; color:white;">📝 Geri Dönüş / Notlar</h3>
   `;
-  
-  if (statusColIndex > -1) {
-    let storedOptions = localStorage.getItem('leadStatusOptions');
-    let statusOptions = storedOptions ? JSON.parse(storedOptions) : ['', 'SİSTEME ALINDI ✅', 'CREATED', 'İletişime Geçildi', 'Cevap Verdi', 'İlgili', 'Randevu Aldı', 'Geldi', 'Tedavi Oldu', 'Soğuk'];
-    const currentStatus = row[statusColIndex] || '';
-    editHtml += `
-      <div style="margin-bottom:12px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-          <label style="font-size:11px; color:var(--text-muted);">Sheets Durumu</label>
-          <button onclick="editLeadStatusOptions()" style="background:none; border:none; color:var(--accent-primary); cursor:pointer; font-size:11px; padding:0;">⚙️</button>
-        </div>
-        <select style="width:100%; padding:10px; background:var(--bg-hover); border:1px solid var(--border-color); border-radius:8px; color:white; font-size:13px; cursor:pointer;" onchange="updateSheetCell(${rowIndex}, ${statusColIndex}, this.value)">
-          ${statusOptions.map(s => `<option value="${s}" ${currentStatus === s ? 'selected' : ''}>${s || '— Seçiniz —'}</option>`).join('')}
-        </select>
-      </div>
-    `;
-  }
   
   if (notesColIndex > -1) {
     const currentNotes = row[notesColIndex] || '';
     editHtml += `
-      <div>
-        <label style="display:block; font-size:11px; color:var(--text-muted); margin-bottom:4px;">Geri Dönüş / Notlar</label>
-        <textarea style="width:100%; padding:10px; background:var(--bg-hover); border:1px solid var(--border-color); border-radius:8px; color:white; font-size:13px; resize:vertical; min-height:80px;" onblur="updateSheetCell(${rowIndex}, ${notesColIndex}, this.value)">${String(currentNotes).replace(/"/g, '&quot;')}</textarea>
-      </div>
+          <textarea style="width:100%; padding:10px; background:var(--bg-hover); border:1px solid var(--border-color); border-radius:8px; color:white; font-size:13px; resize:vertical; min-height:100px;" onblur="updateSheetCell(${rowIndex}, ${notesColIndex}, this.value)" placeholder="Hastaya yapılan geri dönüş notunu buraya yazın...">${String(currentNotes).replace(/"/g, '&quot;')}</textarea>
+          <div style="margin-top:6px; font-size:10px; color:var(--text-muted); text-align:center;">✓ Google Sheets'e anlık kaydedilir</div>
     `;
+  } else {
+    editHtml += `<div style="font-size:12px; color:var(--text-muted);">Sheets'te "Geri Dönüş" veya "Notlar" sütunu bulunamadı.</div>`;
   }
 
   editHtml += `
-          <div style="margin-top:8px; font-size:10px; color:var(--text-muted); text-align:center;">
-            ✓ Değişiklikler otomatik kaydedilir
-          </div>
         </div>
 
       </div>
@@ -1141,7 +1160,7 @@ function openLeadDetail(sortedIndex) {
   document.getElementById('page-form-management').style.display = 'none';
   document.getElementById('page-form-detail').style.display = 'flex';
 
-  // Async: DB'den CRM verisini yükle
+  // Async: DB'den CRM verisini yükle (etiketler vb.)
   loadFormDetailCRM(cleanPhone);
 }
 
@@ -1151,27 +1170,25 @@ async function loadFormDetailCRM(phone) {
   try {
     const pData = await api('get-patient&phone=' + phone);
     
-    // Pipeline durumunu işaretle
-    const currentStage = pData.lead_stage || 'new';
-    document.querySelectorAll('.fd-stage-btn').forEach(btn => {
-      const stage = btn.dataset.stage;
+    // Pipeline durumunu DB'den kontrol et — ama Sheets'ten okunan initialStage zaten UI'da set
+    // DB'de farklı bir stage varsa onu öncelikle göster
+    if (pData.lead_stage && pData.lead_stage !== 'new') {
       const colors = { new:'#8b5cf6', contacted:'#3b82f6', responded:'#f59e0b', appointed:'#22c55e', lost:'#6b7280' };
-      if (stage === currentStage) {
-        btn.style.background = colors[stage] + '22';
-        btn.style.borderColor = colors[stage];
-        btn.style.fontWeight = '700';
-      } else {
-        btn.style.background = 'var(--bg-hover)';
-        btn.style.borderColor = 'var(--border-color)';
-        btn.style.fontWeight = '500';
-      }
-    });
-    
-    const stageLabels = { new:'🆕 Yeni Lead', contacted:'📞 İletişime Geçildi', responded:'💬 Cevap Verdi', appointed:'✅ Randevu Alındı', lost:'❌ Kaybedildi' };
-    const infoEl = document.getElementById('fd-pipeline-info');
-    if (infoEl) {
-      infoEl.innerHTML = `Aktif durum: <strong>${stageLabels[currentStage] || currentStage}</strong>`;
-      if (currentStage === 'appointed') infoEl.innerHTML += '<br>🗓️ Randevu Talepleri paneline otomatik eklendi';
+      const stageLabels = { new:'🆕 Yeni Lead', contacted:'📞 İletişime Geçildi', responded:'💬 Cevap Verdi', appointed:'✅ Randevu Alındı', lost:'❌ Kaybedildi' };
+      document.querySelectorAll('.fd-stage-btn').forEach(btn => {
+        const stage = btn.dataset.stage;
+        if (stage === pData.lead_stage) {
+          btn.style.background = colors[stage] + '22';
+          btn.style.borderColor = colors[stage];
+          btn.style.fontWeight = '700';
+        } else {
+          btn.style.background = 'var(--bg-hover)';
+          btn.style.borderColor = 'var(--border-color)';
+          btn.style.fontWeight = '500';
+        }
+      });
+      const infoEl = document.getElementById('fd-pipeline-info');
+      if (infoEl) infoEl.innerHTML = `DB durumu: <strong>${stageLabels[pData.lead_stage] || pData.lead_stage}</strong>`;
     }
     
     // CRM etiketleri yükle
@@ -1181,17 +1198,18 @@ async function loadFormDetailCRM(phone) {
     
   } catch(e) {
     console.error('CRM yükleme hatası:', e);
-    const infoEl = document.getElementById('fd-pipeline-info');
-    if (infoEl) infoEl.textContent = 'DB bağlantısı kurulamadı';
   }
 }
 
-// Pipeline durumu değiştir
-async function setLeadPipelineStage(phone, name, stage, btnEl) {
+// Pipeline durumu değiştir — DB + Sheets'e birlikte yaz
+async function setLeadPipelineStage(phone, name, stage, btnEl, sheetsStatusCol, sheetsRowIndex) {
   if (!phone) return toast('Telefon numarası bulunamadı', 'error');
   
   // UI anında güncelle
   const colors = { new:'#8b5cf6', contacted:'#3b82f6', responded:'#f59e0b', appointed:'#22c55e', lost:'#6b7280' };
+  const stageLabels = { new:'🆕 Yeni Lead', contacted:'📞 İletişime Geçildi', responded:'💬 Cevap Verdi', appointed:'✅ Randevu Alındı', lost:'❌ Kaybedildi' };
+  const stageToSheets = { new:'CREATED', contacted:'İletişime Geçildi', responded:'Cevap Verdi', appointed:'Randevu Aldı', lost:'Soğuk' };
+  
   document.querySelectorAll('.fd-stage-btn').forEach(btn => {
     btn.style.background = 'var(--bg-hover)';
     btn.style.borderColor = 'var(--border-color)';
@@ -1201,31 +1219,36 @@ async function setLeadPipelineStage(phone, name, stage, btnEl) {
   btnEl.style.borderColor = colors[stage];
   btnEl.style.fontWeight = '700';
 
-  const stageLabels = { new:'🆕 Yeni Lead', contacted:'📞 İletişime Geçildi', responded:'💬 Cevap Verdi', appointed:'✅ Randevu Alındı', lost:'❌ Kaybedildi' };
   const infoEl = document.getElementById('fd-pipeline-info');
   if (infoEl) {
-    infoEl.innerHTML = `Aktif durum: <strong>${stageLabels[stage]}</strong>`;
-    if (stage === 'appointed') infoEl.innerHTML += '<br>🗓️ Randevu oluşturuluyor...';
+    infoEl.innerHTML = `⏳ Kaydediliyor...`;
   }
   
-  // DB'ye kaydet (conversations + leads + events otomatik)
   try {
+    // 1. DB'ye kaydet (conversations + leads + events otomatik)
     await api('update-patient', 'POST', {
       phone: phone,
       patient_name: name || null,
       lead_stage: stage
     });
     
-    toast(`Pipeline: ${stageLabels[stage]}`);
-    if (stage === 'appointed' && infoEl) {
-      infoEl.innerHTML = `Aktif durum: <strong>${stageLabels[stage]}</strong><br>✅ Randevu Talepleri paneline eklendi`;
+    // 2. Google Sheets'e kaydet (status sütunu varsa)
+    if (sheetsStatusCol > -1 && sheetsRowIndex >= 0) {
+      const sheetsValue = stageToSheets[stage] || stage;
+      await updateSheetCell(sheetsRowIndex, sheetsStatusCol, sheetsValue);
     }
+    
+    if (infoEl) {
+      infoEl.innerHTML = `✅ <strong>${stageLabels[stage]}</strong> — DB + Sheets kaydedildi`;
+      if (stage === 'appointed') infoEl.innerHTML += '<br>🗓️ Randevu Talepleri paneline eklendi';
+    }
+    toast(`${stageLabels[stage]}`);
   } catch(e) {
-    toast('Pipeline güncellenemedi', 'error');
+    toast('Kayıt hatası', 'error');
+    if (infoEl) infoEl.innerHTML = '❌ Kayıt hatası';
   }
 }
 
-// Form detayı CRM etiketlerini render et
 function renderFormDetailTags(phone, name, selectedTags) {
   const container = document.getElementById('fd-crm-tags');
   const select = document.getElementById('fd-add-tag');
