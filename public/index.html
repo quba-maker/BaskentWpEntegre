@@ -404,6 +404,60 @@ Cevap: Muayene ücretimiz branşa göre değişiklik göstermektedir. Hangi böl
         </div>
         <div id="tag-list" style="display:flex; flex-direction:column; gap:8px;"></div>
       </div>
+
+      <!-- KANAL BOT AÇ/KAPAT -->
+      <div class="card">
+        <h2>🤖 Bot Kanal Kontrolü</h2>
+        <p style="color:var(--text-muted); font-size:13px; margin-bottom:20px;">Her kanal için botu ayrı ayrı açıp kapatabilirsiniz. Pasif olan kanallarda gelen mesajlar işlenmez, bot cevap vermez.</p>
+        
+        <div style="display:flex; flex-direction:column; gap:12px;">
+          <!-- WhatsApp -->
+          <div style="display:flex; justify-content:space-between; align-items:center; padding:14px 16px; background:var(--bg-hover); border-radius:10px; border:1px solid rgba(37,211,102,0.2);">
+            <div style="display:flex; align-items:center; gap:12px;">
+              <span style="font-size:24px;">🟢</span>
+              <div>
+                <div style="font-weight:600; color:white;">WhatsApp</div>
+                <div style="font-size:11px; color:var(--text-muted);">WhatsApp Business API üzerinden gelen mesajlar</div>
+              </div>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="toggle-whatsapp" onchange="saveChannelToggle('whatsapp', this.checked)">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+
+          <!-- Instagram -->
+          <div style="display:flex; justify-content:space-between; align-items:center; padding:14px 16px; background:var(--bg-hover); border-radius:10px; border:1px solid rgba(225,48,108,0.2);">
+            <div style="display:flex; align-items:center; gap:12px;">
+              <span style="font-size:24px;">📸</span>
+              <div>
+                <div style="font-weight:600; color:white;">Instagram</div>
+                <div style="font-size:11px; color:var(--text-muted);">Instagram DM üzerinden gelen mesajlar</div>
+              </div>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="toggle-instagram" onchange="saveChannelToggle('instagram', this.checked)">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+
+          <!-- Messenger -->
+          <div style="display:flex; justify-content:space-between; align-items:center; padding:14px 16px; background:var(--bg-hover); border-radius:10px; border:1px solid rgba(0,132,255,0.2);">
+            <div style="display:flex; align-items:center; gap:12px;">
+              <span style="font-size:24px;">💬</span>
+              <div>
+                <div style="font-weight:600; color:white;">Facebook Messenger</div>
+                <div style="font-size:11px; color:var(--text-muted);">Facebook sayfa mesajları</div>
+              </div>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="toggle-messenger" onchange="saveChannelToggle('messenger', this.checked)">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+      </div>
+
       <div class="card">
         <h2>Çalışma Saatleri & Mesai Dışı Modu</h2>
         <label style="display:flex; align-items:center; gap:10px; cursor:pointer; margin-bottom:16px;">

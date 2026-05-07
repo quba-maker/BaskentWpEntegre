@@ -1419,6 +1419,11 @@ async function loadSettings() {
     </div>`
   ).join('');
   
+  // Kanal toggle durumlarını yükle (varsayılan: WA açık, IG ve Messenger kapalı)
+  document.getElementById('toggle-whatsapp').checked = (s.channel_whatsapp_enabled || 'true') === 'true';
+  document.getElementById('toggle-instagram').checked = (s.channel_instagram_enabled || 'false') === 'true';
+  document.getElementById('toggle-messenger').checked = (s.channel_messenger_enabled || 'false') === 'true';
+  
   // Form karşılama mesajlarını yükle
   document.getElementById('form-greeting-tr').value = s.form_greeting_tr || '';
   document.getElementById('form-greeting-en').value = s.form_greeting_en || '';
@@ -1431,6 +1436,15 @@ async function loadSettings() {
   document.getElementById('qt-footer-address').value = s.qt_footer_address || '';
   document.getElementById('qt-validity-days').value = s.qt_validity_days || '30';
   document.getElementById('qt-wa-message').value = s.qt_wa_message || '';
+}
+
+async function saveChannelToggle(channel, enabled) {
+  const key = `channel_${channel}_enabled`;
+  const value = enabled ? 'true' : 'false';
+  await api('settings', 'POST', { key, value });
+  const labels = { whatsapp: 'WhatsApp', instagram: 'Instagram', messenger: 'Messenger' };
+  const emoji = enabled ? '✅' : '⛔';
+  toast(`${emoji} ${labels[channel]} botu ${enabled ? 'AKTİF' : 'PASİF'} yapıldı`);
 }
 async function addTag() {
   await api('tags','POST',{name:document.getElementById('new-tag').value, color:document.getElementById('new-tag-color').value});
