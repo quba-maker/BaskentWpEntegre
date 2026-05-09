@@ -188,20 +188,35 @@ function renderSheetTable(headers, rows, total) {
   });
 
   let dateCol = findCol(['time', 'tarih', 'created', 'date', 'zaman']);
-  let nameCol = findCol(['adname', 'ad_name', 'isim', 'fullname', 'full_name', 'hastadi', 'hastaadi']);
+  // İsim sütunu: full_name / isim öncelikli (ad_name Meta reklam adıdır, karıştırma!)
+  let nameCol = findCol(['fullname', 'full_name', 'isim', 'hastadi', 'hastaadi']);
+  if (nameCol === -1) nameCol = headers.findIndex(h => /^ad$/i.test(h.trim()) || h.toLowerCase().includes('isim'));
   let phoneCol = findCol(['telefon', 'phone', 'tel', 'gsm', 'cep', 'numara', 'phonenumber']);
-  let deptCol = findCol(['adname', 'campaign', 'kampanya', 'bolum', 'bölüm', 'form']);
+  let campaignCol = findCol(['campaignname', 'campaign_name', 'kampanya']);
+  let deptCol = findCol(['adname', 'ad_name', 'campaign', 'bolum', 'bölüm', 'form']);
   let statusCol = findCol(['durum', 'status', 'leadstatus', 'lead_status', 'aşama']);
   let notesCol = findCol(['geridönüş', 'geridönus', 'geridönüs', 'notlar', 'notes', 'geridonus', 'açıklama', 'yorum']);
 
   if (dateCol === -1) dateCol = 0;
-  // İsim bulunamazsa tüm sütunlarda "ad" kelimesini tek başına ara
-  if (nameCol === -1) nameCol = headers.findIndex(h => /^ad$/i.test(h.trim()) || h.toLowerCase().includes('isim') || h.toLowerCase().includes('name'));
   if (nameCol === -1) nameCol = headers.length > 2 ? 2 : -1;
 
   // Kaydet (openLeadDetail kullanır)
   window._sheetHeaders = headers;
   window._sheetRows = rows;
+
+  // Tarih formatlama yardımcı fonksiyonu: 🗓 09 May 2026 - 15:31
+  const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  function formatLeadDate(rawDate) {
+    if (!rawDate) return '';
+    const d = new Date(rawDate);
+    if (isNaN(d.getTime())) return rawDate.split('T')[0];
+    const day = String(d.getDate()).padStart(2, '0');
+    const mon = monthNames[d.getMonth()];
+    const year = d.getFullYear();
+    const hour = String(d.getHours()).padStart(2, '0');
+    const min = String(d.getMinutes()).padStart(2, '0');
+    return `${day} ${mon} ${year} - ${hour}:${min}`;
+  }
 
   // EN YENİ FORMA GÖRE SIRALA
   const sortedRows = [...rows].sort((a, b) => {
@@ -215,17 +230,10 @@ function renderSheetTable(headers, rows, total) {
   const readLeads = JSON.parse(localStorage.getItem('readLeads') || '[]');
 
   sortedRows.forEach((row, si) => {
-    let dateVal = '';
-    if (dateCol > -1 && row[dateCol]) {
-      const d = new Date(row[dateCol]);
-      if (!isNaN(d.getTime())) {
-        dateVal = d.toLocaleDateString('tr-TR', { day: '2-digit', month: 'short' }) + ' - ' + d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
-      } else {
-        dateVal = row[dateCol].split('T')[0];
-      }
-    }
+    const dateVal = dateCol > -1 ? formatLeadDate(row[dateCol]) : '';
     const nameVal = nameCol > -1 ? (row[nameCol] || 'Bilinmiyor') : 'Bilinmiyor';
     const phoneVal = phoneCol > -1 ? (row[phoneCol] || '') : '';
+    const campaignVal = campaignCol > -1 ? (row[campaignCol] || '') : '';
     const deptVal = deptCol > -1 ? (row[deptCol] || '') : '';
     const statusVal = statusCol > -1 ? (row[statusCol] || '') : '';
     const notesVal = notesCol > -1 ? (row[notesCol] || '') : '';
@@ -244,28 +252,29 @@ function renderSheetTable(headers, rows, total) {
       badgeHtml = `<span class="lead-badge badge-custom" style="min-width:140px; text-align:center;">${statusVal}</span>`;
       isUnread = false;
     } else if (notesVal.trim()) {
-      // Durum boş ama not/geri dönüş alanı doluysa → Cevap Verildi
       badgeHtml = '<span class="lead-badge badge-contacted" style="min-width:140px; text-align:center;">✅ Cevap Verildi</span>';
       isUnread = false;
     }
 
-    // Ek kontrol: Daha önce tıklanmışsa okunmadı değil
     if (readLeads.includes(phoneVal || `row-${si}`)) isUnread = false;
 
     const unreadStyle = isUnread
       ? 'border-left: 4px solid #4ade80; background: rgba(74, 222, 128, 0.05);'
       : 'border-left: 4px solid transparent; background: var(--card-bg);';
 
+    const campaignBadge = campaignVal ? `<span style="background:rgba(191,90,242,0.15); color:#bf5af2; padding:2px 8px; border-radius:6px; font-size:11px; font-weight:500; white-space:nowrap;">📣 ${campaignVal.substring(0, 40)}${campaignVal.length > 40 ? '…' : ''}</span>` : '';
+
     html += `
       <div class="lead-card list-row" id="lead-row-${si}" onclick="openLeadDetail(${si})" style="display:flex; align-items:center; justify-content:space-between; border-radius:8px; padding:12px 16px; cursor:pointer; border:1px solid var(--border-color); transition:all 0.2s; ${unreadStyle}">
         <div style="display:flex; align-items:center; gap:24px; flex:1;">
-          <div style="width:140px; font-size:12px; color:var(--text-muted);">🗓 ${dateVal}</div>
+          <div style="width:170px; font-size:12px; color:var(--text-muted);">🗓 ${dateVal}</div>
           <div style="width:200px;">
             <div style="font-weight:600; color:white; margin-bottom:4px;">👤 ${nameVal}</div>
-            <div style="font-size:12px; color:var(--text-muted); display:flex; align-items:center; gap:6px;">📱 ${phoneVal} ${countryBadge(phoneVal)}</div>
+            <div style="font-size:12px; color:#25D366; display:flex; align-items:center; gap:6px;">🟢 ${phoneVal} ${countryBadge(phoneVal)}</div>
           </div>
-          <div style="flex:1; font-size:13px; color:var(--text-muted); display:flex; align-items:center; gap:8px;">
-            <span style="background:var(--bg-hover); padding:4px 8px; border-radius:4px;">🩺 ${deptVal.substring(0, 50)}${deptVal.length > 50 ? '...' : ''}</span>
+          <div style="flex:1; font-size:13px; color:var(--text-muted); display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+            ${campaignBadge}
+            ${deptVal ? `<span style="background:var(--bg-hover); padding:4px 8px; border-radius:4px;">🩺 ${deptVal.substring(0, 50)}${deptVal.length > 50 ? '...' : ''}</span>` : ''}
           </div>
           <div id="lead-enrich-${si}" style="display:flex; align-items:center; gap:6px; font-size:12px;"></div>
         </div>
@@ -973,17 +982,42 @@ function openLeadDetail(sortedIndex) {
   const row = window._sheetRows[rowIndex];
   if (!headers || !row) return;
 
-  const technicalCols = ['id', 'ad_id', 'adset_id', 'campaign_id', 'leadgen_id', 'is_organic', 'platform'];
+  // Meta reklam teknik alanları (açılır menüye taşınacak)
+  const metaCols = ['ad_name', 'adset_name', 'adset_id', 'campaign_name', 'campaign_id', 'form_name', 'form_id', 'ad_id', 'leadgen_id', 'is_organic', 'platform', 'id'];
   let statusColIndex = -1;
   let notesColIndex = -1;
   
-  let nameCol = headers.findIndex(h => h.toLowerCase().includes('ad') || h.toLowerCase().includes('isim') || h.toLowerCase().includes('name'));
+  // İsim sütunu: full_name / isim öncelikli (ad_name Meta reklam adıdır!)
+  const findColDetail = (keywords) => headers.findIndex(h => {
+    const l = h.toLowerCase().replace(/[_\s]+/g, '');
+    return keywords.some(k => l.includes(k));
+  });
+  let nameCol = findColDetail(['fullname', 'full_name', 'isim', 'hastadi', 'hastaadi']);
+  if (nameCol === -1) nameCol = headers.findIndex(h => /^ad$/i.test(h.trim()) || h.toLowerCase().includes('isim'));
   let phoneCol = headers.findIndex(h => h.toLowerCase().includes('telefon') || h.toLowerCase().includes('phone') || h.toLowerCase() === 'tel');
   let emailCol = headers.findIndex(h => h.toLowerCase().includes('email') || h.toLowerCase().includes('e-posta') || h.toLowerCase().includes('eposta'));
+  let dateCol = findColDetail(['time', 'tarih', 'created', 'date', 'zaman']);
+  let campaignNameCol = findColDetail(['campaignname', 'campaign_name']);
   
   const nameVal = nameCol > -1 ? (row[nameCol] || 'Bilinmiyor') : 'Bilinmiyor';
   const phoneVal = phoneCol > -1 ? (row[phoneCol] || '') : '';
   const emailVal = emailCol > -1 ? (row[emailCol] || '') : '';
+  const campaignNameVal = campaignNameCol > -1 ? (row[campaignNameCol] || '') : '';
+
+  // Tarih formatlama: 🗓 09 May 2026 - 15:31
+  const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  let dateDisplay = '';
+  if (dateCol > -1 && row[dateCol]) {
+    const d = new Date(row[dateCol]);
+    if (!isNaN(d.getTime())) {
+      const day = String(d.getDate()).padStart(2, '0');
+      const mon = monthNames[d.getMonth()];
+      const year = d.getFullYear();
+      const hour = String(d.getHours()).padStart(2, '0');
+      const min = String(d.getMinutes()).padStart(2, '0');
+      dateDisplay = `${day} ${mon} ${year} - ${hour}:${min}`;
+    }
+  }
 
   // 📞 TÜM FORM ALANLARINDAN TELEFON NUMARASI TESPİT ET
   const phoneNumbers = [];
@@ -994,7 +1028,7 @@ function openLeadDetail(sortedIndex) {
   if (phoneVal) {
     const clean = normalizePhone(phoneVal);
     seenPhones.add(clean);
-    phoneNumbers.push({ number: clean, label: 'Telefon', isWhatsApp: false, raw: phoneVal });
+    phoneNumbers.push({ number: clean, label: 'WhatsApp', isWhatsApp: true, raw: phoneVal });
   }
 
   headers.forEach((h, j) => {
@@ -1009,7 +1043,7 @@ function openLeadDetail(sortedIndex) {
         const clean = normalizePhone(m);
         if (clean.length >= 10 && !seenPhones.has(clean)) {
           seenPhones.add(clean);
-          phoneNumbers.push({ number: clean, label: isWA ? '🟢 WhatsApp' : h.substring(0, 40), isWhatsApp: isWA, raw: m.trim() });
+          phoneNumbers.push({ number: clean, label: 'WhatsApp', isWhatsApp: true, raw: m.trim() });
         }
       });
     }
@@ -1023,9 +1057,9 @@ function openLeadDetail(sortedIndex) {
   const phonesHtml = phoneNumbers.length > 0 ? phoneNumbers.map(p => `
     <div style="display:flex; align-items:center; gap:8px; padding:6px 0;">
       <div style="flex:1;">
-        <div style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">${p.label}</div>
-        <div style="font-size:15px; color:${p.isWhatsApp ? '#25D366' : 'var(--accent-primary)'}; font-weight:500; display:flex; align-items:center; gap:6px;">
-          ${p.isWhatsApp ? '🟢' : '📱'} ${p.raw} ${countryBadge(p.number)}
+        <div style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">WHATSAPP</div>
+        <div style="font-size:15px; color:#25D366; font-weight:500; display:flex; align-items:center; gap:6px;">
+          🟢 ${p.raw} ${countryBadge(p.number)}
         </div>
       </div>
       <a href="https://wa.me/${p.number}" target="_blank" style="background:#25D366; color:white; border:none; padding:4px 10px; border-radius:6px; font-size:11px; font-weight:600; text-decoration:none; white-space:nowrap;">WA Yaz</a>
@@ -1034,12 +1068,22 @@ function openLeadDetail(sortedIndex) {
 
   const primaryPhone = phoneNumbers.length > 0 ? phoneNumbers[0].number : '';
 
+  // Kampanya ve tarih başlık bilgisi
+  const campaignBadgeHtml = campaignNameVal ? `<span style="background:rgba(191,90,242,0.2); color:#bf5af2; padding:4px 12px; border-radius:8px; font-size:12px; font-weight:600;">📣 ${campaignNameVal}</span>` : '';
+  const dateHtml = dateDisplay ? `<span style="font-size:13px; color:var(--text-muted);">🗓 ${dateDisplay}</span>` : '';
+
   let detailsHtml = `
     <div style="display:grid; grid-template-columns: 2fr 1fr; gap:32px;">
       <!-- SOL PANEL -->
       <div style="display:flex; flex-direction:column; gap:16px;">
         <div style="background:var(--card-bg); border:1px solid var(--border-color); border-radius:12px; padding:20px;">
-          <h2 style="margin:0 0 16px 0; color:white; font-size:20px;">👤 ${nameVal}</h2>
+          <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px; flex-wrap:wrap;">
+            <h2 style="margin:0; color:white; font-size:20px;">👤 ${nameVal}</h2>
+            ${campaignBadgeHtml}
+          </div>
+          <div style="margin-bottom:16px;">
+            ${dateHtml}
+          </div>
           <div style="margin-bottom:16px; border-bottom:1px solid var(--border-color); padding-bottom:16px;">
             ${phonesHtml}
           </div>
@@ -1058,28 +1102,100 @@ function openLeadDetail(sortedIndex) {
             </button>
           </div>
         </div>
-
-        <h3 style="margin:16px 0 0 0; font-size:16px; color:var(--text-muted);">Form Yanıtları</h3>
-        <div style="display:flex; flex-direction:column; gap:12px;">
   `;
+
+  // === FORM YANITLARI BÖLÜMÜ ===
+  // Alanları kategorize et: önemli form soruları vs meta reklam bilgileri vs diğer
+  const importantQuestionKeys = ['ülke', 'ulke', 'yaşıyor', 'yasiyor', 'tetkik', 'tedavi', 'şikayet', 'sikayet', 'hastalık', 'hastalik', 'bölüm', 'bolum', 'departman'];
+  const metaFieldKeys = ['ad_name', 'adset_name', 'adset_id', 'campaign_name', 'campaign_id', 'form_name', 'form_id'];
   
-  // Soru-Cevapları Listele
+  const importantFields = [];
+  const metaFields = [];
+  const otherFields = [];
+
   headers.forEach((h, j) => {
     const lower = h.toLowerCase().replace(/\s+/g, '_');
+    // Status ve notlar ayrı yönetiliyor
     if (lower.includes('lead_status') || lower === 'status' || lower === 'durum') { statusColIndex = j; return; }
     if (lower.includes('geri_dönüş') || lower.includes('geri_donus') || lower.includes('geri dönüş') || lower === 'notlar') { notesColIndex = j; return; }
-    if (technicalCols.some(tc => lower.includes(tc))) return; // Teknik kolonları atla
-    if (j === nameCol || j === phoneCol || j === emailCol) return; // İletişim kartında gösterildi
+    // İletişim kartında zaten gösterilen alanları atla
+    if (j === nameCol || j === phoneCol || j === emailCol || j === dateCol) return;
+    // Teknik ID alanlarını atla (metaCols'ta olmayanlar)
+    const lowerClean = lower.replace(/_/g, '');
+    if (['id', 'leadgenid', 'isorganic', 'platform'].some(tc => lowerClean === tc || lower === tc)) return;
 
     const val = row[j] || '—';
-    detailsHtml += `
-      <div style="background:var(--bg-hover); padding:12px 16px; border-radius:8px;">
-        <div style="font-size:11px; color:var(--text-muted); margin-bottom:4px; text-transform:uppercase; letter-spacing:0.5px;">${h}</div>
-        <div style="font-size:15px; color:white;">${val}</div>
-      </div>
-    `;
+    const fieldObj = { header: h, value: val };
+
+    // Meta reklam bilgisi mi?
+    if (metaFieldKeys.some(mk => lower.includes(mk.replace(/_/g, '')) || lower === mk.replace(/_/g, ''))) {
+      metaFields.push(fieldObj);
+      return;
+    }
+    // Önemli form sorusu mu?
+    if (importantQuestionKeys.some(ik => lower.includes(ik))) {
+      importantFields.push(fieldObj);
+      return;
+    }
+    otherFields.push(fieldObj);
   });
-  detailsHtml += '</div></div>'; // Sol panel sonu
+
+  // Önemli Form Soruları (üstte, belirgin)
+  if (importantFields.length > 0) {
+    detailsHtml += `
+        <div style="background:linear-gradient(135deg, rgba(10,132,255,0.08), rgba(191,90,242,0.08)); border:1px solid rgba(10,132,255,0.3); border-radius:12px; padding:16px;">
+          <h3 style="margin:0 0 12px 0; font-size:15px; color:var(--accent-primary); display:flex; align-items:center; gap:8px;">⭐ Önemli Form Bilgileri</h3>
+          <div style="display:flex; flex-direction:column; gap:10px;">
+    `;
+    importantFields.forEach(f => {
+      detailsHtml += `
+            <div style="background:rgba(255,255,255,0.05); padding:12px 16px; border-radius:8px; border-left:3px solid var(--accent-primary);">
+              <div style="font-size:11px; color:var(--text-muted); margin-bottom:4px; text-transform:uppercase; letter-spacing:0.5px;">${f.header}</div>
+              <div style="font-size:15px; color:white; font-weight:500;">${f.value}</div>
+            </div>
+      `;
+    });
+    detailsHtml += `</div></div>`;
+  }
+
+  // Diğer Form Yanıtları
+  if (otherFields.length > 0) {
+    detailsHtml += `
+        <h3 style="margin:16px 0 0 0; font-size:16px; color:var(--text-muted);">Form Yanıtları</h3>
+        <div style="display:flex; flex-direction:column; gap:12px;">
+    `;
+    otherFields.forEach(f => {
+      detailsHtml += `
+          <div style="background:var(--bg-hover); padding:12px 16px; border-radius:8px;">
+            <div style="font-size:11px; color:var(--text-muted); margin-bottom:4px; text-transform:uppercase; letter-spacing:0.5px;">${f.header}</div>
+            <div style="font-size:15px; color:white;">${f.value}</div>
+          </div>
+      `;
+    });
+    detailsHtml += `</div>`;
+  }
+
+  // Meta Reklam Bilgileri (açılır menü)
+  if (metaFields.length > 0) {
+    detailsHtml += `
+        <details style="margin-top:8px; background:var(--card-bg); border:1px solid var(--border-color); border-radius:10px; overflow:hidden;">
+          <summary style="padding:12px 16px; cursor:pointer; font-size:14px; font-weight:600; color:var(--text-muted); display:flex; align-items:center; gap:8px; user-select:none;">
+            📊 Meta Reklam Bilgileri <span style="font-size:11px; font-weight:400; opacity:0.6;">(${metaFields.length} alan)</span>
+          </summary>
+          <div style="padding:4px 16px 16px 16px; display:flex; flex-direction:column; gap:8px;">
+    `;
+    metaFields.forEach(f => {
+      detailsHtml += `
+            <div style="background:var(--bg-hover); padding:10px 14px; border-radius:8px;">
+              <div style="font-size:10px; color:var(--text-muted); margin-bottom:2px; text-transform:uppercase; letter-spacing:0.5px;">${f.header}</div>
+              <div style="font-size:13px; color:white; word-break:break-all;">${f.value}</div>
+            </div>
+      `;
+    });
+    detailsHtml += `</div></details>`;
+  }
+
+  detailsHtml += '</div>'; // Sol panel sonu
 
   // SAĞ PANEL: Pipeline + Etiketler + Notlar (DB + Sheets entegre)
   const cleanPhone = primaryPhone || (phoneVal || '').replace(/\D/g, '');

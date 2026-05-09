@@ -625,3 +625,36 @@ textarea:focus, input:focus, select:focus { outline: none; border-color: var(--a
 .toggle-switch input:checked + .toggle-slider::before {
   transform: translateX(20px);
 }
+
+/* ========== FORM DETAIL: Meta Data Collapsible ========== */
+details summary {
+  list-style: none;
+}
+details summary::-webkit-details-marker {
+  display: none;
+}
+details summary::after {
+  content: '▶';
+  font-size: 10px;
+  transition: transform 0.2s ease;
+  opacity: 0.5;
+}
+details[open] summary::after {
+  transform: rotate(90deg);
+}
+details[open] summary {
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 4px;
+}
+
+/* Appointment Badge */
+.apt-badge {
+  background: var(--system-orange);
+  color: white;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 10px;
+  margin-left: 6px;
+}
+
