@@ -425,8 +425,8 @@ async function enrichLeadCards(rows, phoneCol) {
             extraBadges += `<span style="background:rgba(255,159,10,0.12); color:#FF9F0A; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600; white-space:nowrap;">👤 Manuel</span>`;
           }
           
-          // Lead stage (yeni değilse göster)
-          if (leadStage && leadStage !== 'new') {
+          // Lead stage (her zaman göster)
+          if (leadStage) {
             const sc = stageColors[leadStage] || '#6b7280';
             extraBadges += `<span style="background:${sc}18; color:${sc}; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600; white-space:nowrap; border:1px solid ${sc}33;">🎯 ${stages[leadStage] || leadStage}</span>`;
           }

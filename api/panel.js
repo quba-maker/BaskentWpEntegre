@@ -193,15 +193,15 @@ export default async function handler(req, res) {
       if (!phone) return res.json({ score: 0, channels: [], lastMessage: null, conversationStatus: null });
 
       try {
-        // Normalise: türkçe 0 ile başlarsa 90 ile değiştir
-        let cleanPhone = phone;
-        if (cleanPhone.startsWith('0')) cleanPhone = '90' + cleanPhone.substring(1);
-        const phoneAlt = cleanPhone.startsWith('90') ? cleanPhone.substring(2) : '90' + cleanPhone;
+        // Normalise: sadece son 10 haneye göre esnek (LIKE) arama yap
+        let cleanPhone = (phone || '').replace(/\D/g, '');
+        const searchPhone = cleanPhone.length > 10 ? cleanPhone.substring(cleanPhone.length - 10) : cleanPhone;
+        const likePattern = `%${searchPhone}%`;
 
         const [conv, msgs, lead] = await Promise.all([
-          sql`SELECT status, phase, lead_stage, created_at FROM conversations WHERE phone_number IN (${cleanPhone}, ${phoneAlt}, ${phone}) LIMIT 1`,
-          sql`SELECT direction, channel, content, created_at FROM messages WHERE phone_number IN (${cleanPhone}, ${phoneAlt}, ${phone}) ORDER BY created_at DESC LIMIT 10`,
-          sql`SELECT stage, score, contacted_at, responded_at FROM leads WHERE phone_number IN (${cleanPhone}, ${phoneAlt}, ${phone}) ORDER BY created_at DESC LIMIT 1`
+          sql`SELECT status, phase, lead_stage, created_at FROM conversations WHERE phone_number LIKE ${likePattern} LIMIT 1`,
+          sql`SELECT direction, channel, content, created_at FROM messages WHERE phone_number LIKE ${likePattern} ORDER BY created_at DESC LIMIT 10`,
+          sql`SELECT stage, score, contacted_at, responded_at FROM leads WHERE phone_number LIKE ${likePattern} ORDER BY created_at DESC LIMIT 1`
         ]);
 
         // Kanal tespiti
@@ -261,12 +261,13 @@ export default async function handler(req, res) {
 
     // KONUŞMA DETAY
     if (action === 'conversation-detail') {
-      const phone = (req.query.phone || '').replace(/\D/g, '');
-      const phoneAlt = phone.startsWith('90') ? phone.substring(2) : '90' + phone;
-      const msgs = await sql`SELECT * FROM messages WHERE phone_number IN (${phone}, ${phoneAlt}) ORDER BY created_at ASC`;
+      const cleanPhone = (req.query.phone || '').replace(/\D/g, '');
+      const searchPhone = cleanPhone.length > 10 ? cleanPhone.substring(cleanPhone.length - 10) : cleanPhone;
+      const likePattern = `%${searchPhone}%`;
+      const msgs = await sql`SELECT * FROM messages WHERE phone_number LIKE ${likePattern} ORDER BY created_at ASC`;
       // Hasta'nın form geçmişini de ekle (raw_data dahil — form cevapları)
       let forms = [];
-      try { forms = await sql`SELECT form_name, city, email, tags, stage, raw_data, created_at, contacted_at FROM leads WHERE phone_number IN (${phone}, ${phoneAlt}) ORDER BY created_at DESC`; } catch(e){}
+      try { forms = await sql`SELECT form_name, city, email, tags, stage, raw_data, created_at, contacted_at FROM leads WHERE phone_number LIKE ${likePattern} ORDER BY created_at DESC`; } catch(e){}
       return res.json({ messages: msgs, forms });
     }
 
@@ -306,12 +307,13 @@ export default async function handler(req, res) {
       // lead_stage sütunu yoksa oluştur (migration)
       try { await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS lead_stage VARCHAR(50) DEFAULT 'new'`; } catch(e) {}
 
-      // Çoklu format arama
-      const cleanPhone = (phone || '').replace(/[\s\-\(\)\+]/g, '');
-      const phoneAlt = cleanPhone.startsWith('90') ? cleanPhone.substring(2) : '90' + cleanPhone;
+      // Çoklu format arama (LIKE ile sağlam)
+      const cleanPhone = (phone || '').replace(/\D/g, '');
+      const searchPhone = cleanPhone.length > 10 ? cleanPhone.substring(cleanPhone.length - 10) : cleanPhone;
+      const likePattern = `%${searchPhone}%`;
       
       // SELECT + INSERT/UPDATE (ON CONFLICT UNIQUE constraint yok)
-      const existing = await sql`SELECT id FROM conversations WHERE phone_number IN (${cleanPhone}, ${phoneAlt}) LIMIT 1`;
+      const existing = await sql`SELECT id, phone_number FROM conversations WHERE phone_number LIKE ${likePattern} LIMIT 1`;
       if (existing.length > 0) {
         await sql`
           UPDATE conversations SET 
@@ -321,7 +323,7 @@ export default async function handler(req, res) {
             department = COALESCE(NULLIF(${department || null}, ''), department),
             lead_stage = COALESCE(NULLIF(${lead_stage || null}, ''), lead_stage),
             status = COALESCE(NULLIF(${status || null}, ''), status)
-          WHERE phone_number IN (${cleanPhone}, ${phoneAlt})
+          WHERE phone_number LIKE ${likePattern}
         `;
       } else {
         await sql`
@@ -331,7 +333,7 @@ export default async function handler(req, res) {
       }
       if (lead_stage) {
         // leads tablosunda da güncelle (varsa)
-        await sql`UPDATE leads SET stage = ${lead_stage} WHERE phone_number IN (${cleanPhone}, ${phoneAlt})`;
+        await sql`UPDATE leads SET stage = ${lead_stage} WHERE phone_number LIKE ${likePattern}`;
       }
 
       // OTOMATİK RANDEVU OLUŞTURMA
