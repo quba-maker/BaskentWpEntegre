@@ -64,7 +64,12 @@ function doLogin() { AUTH_TOKEN = document.getElementById('login-pass').value; l
 async function checkAuth() {
   try {
     const r = await fetch(API+'?action=dashboard', {headers:{Authorization:'Bearer '+AUTH_TOKEN}});
-    if(r.ok) { document.getElementById('login-screen').style.display='none'; document.getElementById('main-app').style.display='flex'; loadDashboard(); }
+    if(r.ok) { 
+      document.getElementById('login-screen').style.display='none'; 
+      document.getElementById('main-app').style.display='flex'; 
+      loadDashboard(); 
+      startPolling(); // SWR Polling başlat
+    }
     else { document.getElementById('login-screen').style.display='flex'; document.getElementById('main-app').style.display='none'; document.getElementById('login-error').textContent=AUTH_TOKEN?'Hatalı Şifre':''; }
   } catch(e) { document.getElementById('login-error').textContent='Bağlantı koptu.'; }
 }
@@ -668,6 +673,8 @@ async function loadConversations() {
   renderConversationList();
 }
 
+let lastChatLength = 0; // SWR polling için uzunluk takibi
+
 async function loadChat(phone, channel) {
   currentPhone = phone; currentChannel = channel;
   
@@ -777,6 +784,7 @@ async function loadChat(phone, channel) {
     return `<div class="${cls}">${content}${info}</div>`;
   }).join('');
   chatEl.scrollTop = chatEl.scrollHeight;
+  lastChatLength = msgs.length; // Başlangıç mesaj sayısını kaydet
   
   // Form Geçmişi — CRM panelinde göster (form cevapları dahil)
   const formHistory = data.forms || [];
@@ -2220,6 +2228,70 @@ async function fetchZorbayAlerts() {
       try { new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3').play(); } catch(e){}
     });
   } catch (e) { console.error('Alert fetch error', e); }
+}
+
+// =========================================================================
+// REAL-TIME SWR POLLING (Vercel Serverless Optimizasyonu)
+// =========================================================================
+let pollInterval = null;
+function startPolling() {
+  if (pollInterval) clearInterval(pollInterval);
+  
+  pollInterval = setInterval(async () => {
+    // Sadece sekme açıkken ve kullanıcı uygulamaya bakıyorken istek at (Vercel tasarrufu)
+    if (document.visibilityState !== 'visible') return;
+    
+    const activePage = document.querySelector('.nav-btn.active')?.dataset?.page;
+    
+    if (activePage === 'conversations') {
+      // 1. Sol paneli güncelle (Contact List)
+      const list = await api('conversations', 'GET', null, true); // true = sessiz (hata gösterme)
+      if (list && JSON.stringify(list) !== JSON.stringify(cachedConversations)) {
+        cachedConversations = list;
+        renderConversationList();
+      }
+      
+      // 2. Açık olan mesajlaşmayı güncelle
+      if (currentPhone) {
+        const data = await api('conversation-detail&phone='+currentPhone, 'GET', null, true);
+        if (data) {
+          const msgs = data.messages || data;
+          const chatEl = document.getElementById('chat-messages');
+          
+          if (chatEl && msgs.length !== lastChatLength) {
+            // Scroll en altta mı kontrol et
+            const isScrolledToBottom = chatEl.scrollHeight - chatEl.clientHeight <= chatEl.scrollTop + 50;
+            
+            chatEl.innerHTML = msgs.map(m => {
+              const isOut = m.direction === 'out';
+              const isBot = m.model_used && m.model_used !== 'panel' && m.model_used !== 'toplu';
+              const cls = `message-bubble ${isOut ? 'out' : 'in'} ${isOut && isBot ? 'bot-reply' : ''}`;
+              const senderLabel = isOut ? (isBot ? '🤖 Bot' : '👤 Sen') : '📩 Hasta';
+              const info = `<div class="msg-info">${senderLabel} · ${new Date(m.created_at).toLocaleTimeString('tr-TR', {hour:'2-digit',minute:'2-digit'})} ${isBot ? '<span class="bot-indicator">' + m.model_used + '</span>' : ''}</div>`;
+              
+              let content = m.content;
+              if (m.media_url) {
+                if (m.media_type === 'image') content = `<img src="${m.media_url}" style="max-width:240px;border-radius:8px;margin-bottom:4px;"><br>${m.content||''}`;
+                else content = `📎 <a href="${m.media_url}" target="_blank" style="color:inherit;text-decoration:underline">${m.content||'Dosya'}</a>`;
+              }
+              return `<div class="${cls}">${content}${info}</div>`;
+            }).join('');
+            
+            // Eğer yeni mesaj geldiyse veya önceden alttaysa scrollu en alta çek
+            if (isScrolledToBottom || msgs.length > lastChatLength) {
+              chatEl.scrollTop = chatEl.scrollHeight;
+              
+              // Sesli bildirim (Opsiyonel ama premium bir his verir)
+              if (msgs.length > lastChatLength && msgs[msgs.length - 1].direction === 'in') {
+                try { new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3').play(); } catch(e) {}
+              }
+            }
+            lastChatLength = msgs.length;
+          }
+        }
+      }
+    }
+  }, 3000); // 3 saniyede bir kontrol et
 }
 
 async function dismissZorbayAlert(id, phone) {
