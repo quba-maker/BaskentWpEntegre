@@ -423,8 +423,49 @@ function renderConversationList() {
 
     const ch = c.last_channel || c.channel || 'whatsapp';
     const hasName = c.patient_name && c.patient_name !== c.phone_number;
-    const phoneDisplay = hasName ? `<div class="contact-phone">${countryBadge(c.phone_number)} ${c.phone_number}</div>` : '';
-    const nameDisplay = hasName ? c.patient_name : `${countryBadge(c.phone_number)} ${c.phone_number}`;
+    const isWhatsApp = ch === 'whatsapp';
+    const isIG = ch === 'instagram';
+    const isFB = ch === 'messenger';
+
+    // İsim & telefon gösterimi kanalına göre farklılaşır
+    let nameDisplay, phoneDisplay, profileLink = '';
+
+    if (isWhatsApp) {
+      // WhatsApp: gerçek telefon numarası + ülke bayrağı
+      nameDisplay = hasName ? c.patient_name : c.phone_number;
+      phoneDisplay = `<div class="contact-phone">🟢 ${countryBadge(c.phone_number)} ${c.phone_number}</div>`;
+    } else if (isIG) {
+      // Instagram: kullanıcı adı veya PSID'yi kısalt
+      nameDisplay = hasName ? c.patient_name : `IG Kullanıcı`;
+      const shortId = c.phone_number.length > 10 ? '...' + c.phone_number.slice(-6) : c.phone_number;
+      phoneDisplay = hasName 
+        ? `<div class="contact-phone">📸 @${c.patient_name.replace(/\s/g, '').toLowerCase()}</div>` 
+        : `<div class="contact-phone">📸 ID: ${shortId}</div>`;
+      // Profil linki (eğer isim varsa Instagram profil URL'si)
+      if (hasName) profileLink = `https://instagram.com/${c.patient_name.replace(/\s/g, '').toLowerCase()}`;
+    } else if (isFB) {
+      // Messenger: FB ismi veya PSID kısaltması
+      nameDisplay = hasName ? c.patient_name : `FB Kullanıcı`;
+      const shortId = c.phone_number.length > 10 ? '...' + c.phone_number.slice(-6) : c.phone_number;
+      phoneDisplay = hasName
+        ? `<div class="contact-phone">💬 Facebook</div>`
+        : `<div class="contact-phone">💬 ID: ${shortId}</div>`;
+      profileLink = `https://facebook.com/${c.phone_number}`;
+    } else {
+      nameDisplay = hasName ? c.patient_name : c.phone_number;
+      phoneDisplay = `<div class="contact-phone">${c.phone_number}</div>`;
+    }
+
+    // Profil dış bağlantısı ikonu
+    const profileLinkHtml = profileLink 
+      ? `<a href="${profileLink}" target="_blank" onclick="event.stopPropagation()" style="font-size:11px; color:var(--accent-primary); text-decoration:none; opacity:0.7;" title="Profili Aç">🔗</a>` 
+      : '';
+
+    // Form badge (varsa)
+    const formBadge = c.lead_form_name 
+      ? `<span style="font-size:10px; background:rgba(191,90,242,0.12); color:#bf5af2; padding:1px 6px; border-radius:6px; white-space:nowrap;">${c.lead_form_name.substring(0, 25)}${c.lead_form_name.length > 25 ? '…' : ''}</span>` 
+      : '';
+
     const timeDisplay = smartDate(c.last_message_at);
     const isRecent = (Date.now() - new Date(c.last_message_at).getTime()) < 300000;
     
@@ -432,12 +473,12 @@ function renderConversationList() {
       <div class="contact-avatar">${isRecent ? '<div class="online-dot"></div>' : ''}👤${getChannelIcon(ch)}</div>
       <div class="contact-info">
         <div class="contact-top">
-          <span class="contact-name">${nameDisplay}</span>
+          <span class="contact-name">${nameDisplay} ${profileLinkHtml}</span>
           <span class="contact-time">${timeDisplay}</span>
         </div>
         ${phoneDisplay}
         <div class="contact-preview">${c.last_message || ''}</div>
-        <div class="contact-badges">${stageBadge}${stBadge}</div>
+        <div class="contact-badges">${stageBadge}${stBadge}${formBadge ? ' ' + formBadge : ''}</div>
       </div>
     </div>`;
   }).join('') || '<div class="empty" style="padding:30px">Konuşma bulunamadı</div>';
@@ -491,14 +532,29 @@ async function loadKanban() {
         <div class="kanban-body">
           ${col.cards.map(c => {
             const hasName = c.patient_name && c.patient_name !== c.phone_number;
-            const displayName = hasName ? c.patient_name : c.phone_number;
-            const channelIcon = c.channel === 'whatsapp' ? '🟢' : (c.channel === 'instagram' ? '🟣' : '🔵');
+            const ch = c.last_channel || c.channel || 'whatsapp';
+            const channelIcon = ch === 'whatsapp' ? '🟢' : (ch === 'instagram' ? '🟣' : '🔵');
+            
+            let displayName;
+            let subInfo = '';
+            if (ch === 'whatsapp') {
+              displayName = hasName ? c.patient_name : c.phone_number;
+              subInfo = countryBadge(c.phone_number) + ' ' + c.phone_number;
+            } else if (ch === 'instagram') {
+              displayName = hasName ? c.patient_name : 'IG Kullanıcı';
+              subInfo = hasName ? `📸 @${c.patient_name.replace(/\\s/g, '').toLowerCase()}` : `📸 ID: ...${c.phone_number.slice(-6)}`;
+            } else {
+              displayName = hasName ? c.patient_name : 'FB Kullanıcı';
+              subInfo = hasName ? '💬 Facebook' : `💬 ID: ...${c.phone_number.slice(-6)}`;
+            }
+            
             const preview = c.last_message || '...';
             const isHotCard = (c.temperature === 'hot' || isHotCol);
             
             return `
-              <div class="kanban-card ${isHotCard ? 'hot' : ''}" onclick="openChatFromKanban('${c.phone_number}', '${c.channel}')">
+              <div class="kanban-card ${isHotCard ? 'hot' : ''}" onclick="openChatFromKanban('${c.phone_number}', '${ch}')">
                 <div class="name">${channelIcon} ${displayName}</div>
+                <div style="font-size:11px; color:var(--text-muted); margin-bottom:4px;">${subInfo}</div>
                 <div class="preview">${preview}</div>
                 <div class="tags">
                   ${c.lead_form_name ? `<span class="tag">${c.lead_form_name}</span>` : ''}
