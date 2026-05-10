@@ -47,7 +47,7 @@ export default async function handler(req, res) {
           const conv = await sql`SELECT notes FROM conversations WHERE phone_number LIKE ${likePattern} LIMIT 1`;
           const oldNotes = conv[0]?.notes || '';
           const newNoteEntry = `[SİSTEM - ${userFirstName} - ${new Date().toLocaleTimeString('tr-TR')}]: 📞 Arandı ve ulaşıldı. Sonuç bekleniyor.`;
-          await sql`UPDATE conversations SET notes = ${oldNotes ? oldNotes + '\n' + newNoteEntry : newNoteEntry} WHERE phone_number LIKE ${likePattern}`;
+          await sql`UPDATE conversations SET notes = ${oldNotes ? oldNotes + '\n' + newNoteEntry : newNoteEntry}, updated_at = NOW() WHERE phone_number LIKE ${likePattern}`;
 
           // Popup göster
           try {
@@ -183,7 +183,7 @@ export default async function handler(req, res) {
             
             const newNoteEntry = `[SİSTEM - ${userFirstName} - ${new Date().toLocaleTimeString('tr-TR')}]: ${systemNote}`;
             const updatedNotes = oldNotes ? `${oldNotes}\n${newNoteEntry}` : newNoteEntry;
-            await sql`UPDATE conversations SET notes = ${updatedNotes} WHERE phone_number LIKE ${likePattern}`;
+            await sql`UPDATE conversations SET notes = ${updatedNotes}, updated_at = NOW() WHERE phone_number LIKE ${likePattern}`;
           }
 
           // Popup göster
@@ -228,7 +228,7 @@ export default async function handler(req, res) {
           const newNoteEntry = `[${userFirstName} - ${new Date().toLocaleTimeString('tr-TR')}]: ${replyText}`;
           const updatedNotes = oldNotes ? `${oldNotes}\n${newNoteEntry}` : newNoteEntry;
 
-          await sql`UPDATE conversations SET notes = ${updatedNotes} WHERE phone_number LIKE ${likePattern}`;
+          await sql`UPDATE conversations SET notes = ${updatedNotes}, updated_at = NOW() WHERE phone_number LIKE ${likePattern}`;
 
           // Geri bildirim mesajı (Mesajı beğenme veya onay mesajı atma)
           try {
