@@ -304,7 +304,10 @@ function renderSheetTable(headers, rows, total) {
   sortedRows.forEach((row, si) => {
     const dateVal = dateCol > -1 ? formatLeadDate(row[dateCol]) : '';
     const nameVal = nameCol > -1 ? (row[nameCol] || 'Bilinmiyor') : 'Bilinmiyor';
-    const phoneVal = phoneCol > -1 ? (row[phoneCol] || '') : '';
+    const phoneVal = phoneCol > -1 ? (row[phoneCol] || '').replace(/\D/g, '') : '';
+    const phoneDisplay = phoneVal.startsWith('90') && phoneVal.length >= 12 
+      ? '+' + phoneVal.substring(0,2) + ' ' + phoneVal.substring(2,5) + ' ' + phoneVal.substring(5,8) + ' ' + phoneVal.substring(8,10) + ' ' + phoneVal.substring(10)
+      : (phoneVal ? '+' + phoneVal : '');
     const campaignVal = campaignCol > -1 ? (row[campaignCol] || '') : '';
     const deptVal = deptCol > -1 ? (row[deptCol] || '') : '';
     const statusVal = statusCol > -1 ? (row[statusCol] || '') : '';
@@ -342,7 +345,7 @@ function renderSheetTable(headers, rows, total) {
           <div style="width:170px; font-size:12px; color:var(--text-muted);">🗓 ${dateVal}</div>
           <div style="width:200px;">
             <div style="font-weight:600; color:white; margin-bottom:4px;">👤 ${nameVal}</div>
-            <div style="font-size:12px; color:#25D366; display:flex; align-items:center; gap:6px;">🟢 ${phoneVal} ${countryBadge(phoneVal)}</div>
+            <div style="font-size:12px; color:#25D366; display:flex; align-items:center; gap:6px;">🟢 ${phoneDisplay} ${countryBadge(phoneVal)}</div>
           </div>
           <div style="flex:1; font-size:13px; color:var(--text-muted); display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
             ${campaignBadge}
@@ -367,8 +370,10 @@ async function enrichLeadCards(rows, phoneCol) {
     const batch = rows.slice(si, si + batchSize);
     await Promise.all(batch.map(async (row, bIdx) => {
       const idx = si + bIdx;
-      const phone = phoneCol > -1 ? (row[phoneCol] || '') : '';
-      if (!phone) return;
+      const rawPhone = phoneCol > -1 ? (row[phoneCol] || '') : '';
+      if (!rawPhone) return;
+      const phone = rawPhone.replace(/\D/g, ''); // p:+905... → 905...
+      if (!phone || phone.length < 10) return;
       try {
         const resp = await fetch(`/api/panel?action=lead-context&phone=${encodeURIComponent(phone)}`, {
           headers: { Authorization: `Bearer ${token}` }
@@ -1156,12 +1161,20 @@ function openLeadDetail(sortedIndex) {
   const phoneNumbers = [];
   const phoneRegex = /(\+?\d[\d\s\-().]{7,}\d)/g;
   const normalizePhone = (p) => p.replace(/\D/g, '');
+  const formatPhoneDisplay = (num) => {
+    // 905546833306 → +90 554 683 33 06
+    if (num.length >= 10) {
+      if (num.startsWith('90') && num.length >= 12) return '+' + num.substring(0,2) + ' ' + num.substring(2,5) + ' ' + num.substring(5,8) + ' ' + num.substring(8,10) + ' ' + num.substring(10);
+      return '+' + num;
+    }
+    return num;
+  };
   const seenPhones = new Set();
 
   if (phoneVal) {
     const clean = normalizePhone(phoneVal);
     seenPhones.add(clean);
-    phoneNumbers.push({ number: clean, label: 'WhatsApp', isWhatsApp: true, raw: phoneVal });
+    phoneNumbers.push({ number: clean, label: 'WhatsApp', isWhatsApp: true, raw: formatPhoneDisplay(clean) });
   }
 
   // SADECE açıkça telefon/whatsapp olarak adlandırılmış alanlardan numara al
@@ -1171,7 +1184,8 @@ function openLeadDetail(sortedIndex) {
     const val = row[j] || '';
     const lower = h.toLowerCase().replace(/[\s_]+/g, '');
     const isWA = lower.includes('whatsapp') || lower.includes('wp') || lower.includes('wapp');
-    const isPhoneField = isWA || lower.includes('telefon') || lower === 'phone' || lower === 'phonenumber' || lower.includes('numara') || lower.includes('gsm') || lower.includes('cep') || lower.includes('iletişim') || lower.includes('iletisim');
+    const isTelField = lower === 'phonenumber';
+    const isPhoneField = isWA || isTelField || lower.includes('telefon') || lower === 'phone' || lower.includes('numara') || lower.includes('gsm') || lower.includes('cep') || lower.includes('iletişim') || lower.includes('iletisim');
     // SADECE telefon/whatsapp alanlarından numara çıkar
     if (!isPhoneField) return;
     const matches = val.match(phoneRegex);
@@ -1180,7 +1194,7 @@ function openLeadDetail(sortedIndex) {
         const clean = normalizePhone(m);
         if (clean.length >= 10 && !seenPhones.has(clean)) {
           seenPhones.add(clean);
-          phoneNumbers.push({ number: clean, label: isWA ? 'WhatsApp' : 'Telefon', isWhatsApp: isWA, raw: m.trim() });
+          phoneNumbers.push({ number: clean, label: isTelField ? 'Telefon' : (isWA ? 'WhatsApp' : 'Telefon'), isWhatsApp: !isTelField && isWA, raw: formatPhoneDisplay(clean) });
         }
       });
     }
