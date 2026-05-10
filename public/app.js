@@ -238,6 +238,13 @@ function renderSheetTable(headers, rows, total) {
     const l = h.toLowerCase().replace(/[_\s]+/g, '');
     return keywords.some(k => l.includes(k));
   });
+  
+  // Sıkı eşleşme: Sadece kısa sütun başlıklarında ara (uzun form sorularını dışla)
+  const findColStrict = (keywords, maxLen = 30) => headers.findIndex(h => {
+    if (h.length > maxLen) return false; // Uzun form soruları (ör: "mevcut_kalp_sağlığı_durumunuzu...") dışla
+    const l = h.toLowerCase().replace(/[_\s]+/g, '');
+    return keywords.some(k => l.includes(k));
+  });
 
   let dateCol = findCol(['time', 'tarih', 'created', 'date', 'zaman']);
   // İsim sütunu: full_name / isim öncelikli (ad_name Meta reklam adıdır, karıştırma!)
@@ -248,9 +255,9 @@ function renderSheetTable(headers, rows, total) {
     return l === 'phonenumber' || l === 'phone' || l === 'telefon' || l === 'tel' || l === 'gsm' || l === 'cep';
   });
   let campaignCol = findCol(['campaignname', 'campaign_name', 'kampanya']);
-  let deptCol = findCol(['adname', 'ad_name', 'campaign', 'bolum', 'bölüm', 'form']);
-  let statusCol = findCol(['durum', 'status', 'leadstatus', 'lead_status', 'aşama']);
-  let notesCol = findCol(['geridönüş', 'geridönus', 'geridönüs', 'notlar', 'notes', 'geridonus', 'açıklama', 'yorum']);
+  let deptCol = findColStrict(['adname', 'ad_name', 'campaign', 'bolum', 'bölüm', 'form'], 40);
+  let statusCol = findColStrict(['durum', 'status', 'leadstatus', 'lead_status', 'aşama']);
+  let notesCol = findColStrict(['geridönüş', 'geridönus', 'geridönüs', 'notlar', 'notes', 'geridonus', 'açıklama', 'yorum']);
 
   if (dateCol === -1) dateCol = 0;
   if (nameCol === -1) nameCol = headers.length > 2 ? 2 : -1;
@@ -1406,36 +1413,43 @@ async function loadFormDetailCRM(phone) {
   try {
     const pData = await api('get-patient&phone=' + phone);
     
-    // Pipeline durumunu DB'den kontrol et
-    if (pData.lead_stage && pData.lead_stage !== 'new') {
-      document.querySelectorAll('.fd-stage-btn').forEach(btn => {
-        const stage = btn.dataset.stage;
-        const sCfg = PIPELINE_STAGES[stage] || PIPELINE_STAGES.new;
-        if (stage === pData.lead_stage) {
-          btn.style.background = sCfg.color + '22';
-          btn.style.borderColor = sCfg.color;
-          btn.style.fontWeight = '700';
-        } else {
-          btn.style.background = 'var(--bg-hover)';
-          btn.style.borderColor = 'var(--border-color)';
-          btn.style.fontWeight = '500';
-        }
-      });
-      const infoEl = document.getElementById('fd-pipeline-info');
-      const dbCfg = PIPELINE_STAGES[pData.lead_stage] || { emoji: '❓', label: pData.lead_stage };
-      if (infoEl) infoEl.innerHTML = `DB durumu: <strong>${dbCfg.emoji} ${dbCfg.label}</strong>`;
-    }
+    // Pipeline durumunu DB'den kontrol et (her zaman güncelle, sadece 'new' değilse değil)
+    const effectiveStage = pData.lead_stage || 'new';
+    document.querySelectorAll('.fd-stage-btn').forEach(btn => {
+      const stage = btn.dataset.stage;
+      const sCfg = PIPELINE_STAGES[stage] || PIPELINE_STAGES.new;
+      if (stage === effectiveStage) {
+        btn.style.background = sCfg.color + '22';
+        btn.style.borderColor = sCfg.color;
+        btn.style.fontWeight = '700';
+      } else {
+        btn.style.background = 'var(--bg-hover)';
+        btn.style.borderColor = 'var(--border-color)';
+        btn.style.fontWeight = '500';
+      }
+    });
+    const infoEl = document.getElementById('fd-pipeline-info');
+    const dbCfg = PIPELINE_STAGES[effectiveStage] || { emoji: '❓', label: effectiveStage };
+    if (infoEl) infoEl.innerHTML = `DB durumu: <strong>${dbCfg.emoji} ${dbCfg.label}</strong>`;
     
-    // 🤖 Bot Durumu güncelle (sadece bilgi)
+    // 🤖 Bot Durumu güncelle
     const isHuman = pData.status === 'human';
+    const isActive = pData.status === 'active';
     const botIndicator = document.getElementById('fd-bot-indicator');
     const botLabel = document.getElementById('fd-bot-label');
     const botPhase = document.getElementById('fd-bot-phase');
     
     if (botIndicator) {
-      botIndicator.style.background = isHuman ? '#FF9F0A' : '#30D158';
-      botLabel.textContent = isHuman ? '👤 Manuel Kontrol' : '🤖 Bot Aktif';
-      botLabel.style.color = isHuman ? '#FF9F0A' : '#30D158';
+      if (isHuman) {
+        botIndicator.style.background = '#FF9F0A';
+        botLabel.textContent = '👤 Manuel Kontrol';
+        botLabel.style.color = '#FF9F0A';
+      } else if (isActive) {
+        botIndicator.style.background = '#30D158';
+        botIndicator.style.boxShadow = '0 0 12px rgba(48,209,88,0.6)';
+        botLabel.textContent = '🤖 Bot Aktif';
+        botLabel.style.color = '#30D158';
+      }
     }
     
     if (botPhase) {
@@ -1448,6 +1462,19 @@ async function loadFormDetailCRM(phone) {
       botPhase.textContent = phaseLabels[pData.phase] || '📍 Başlangıç';
       botPhase.style.color = pData.phase === 'handover' ? '#FF453A' : 'var(--text-muted)';
       botPhase.style.fontWeight = pData.phase === 'handover' ? '600' : '400';
+    }
+    
+    // 🔄 "Bota Devret" butonunu DB durumuna göre güncelle (sayfa yenilendiğinde de hatırla)
+    if (isActive || isHuman) {
+      const outboundBtns = document.querySelectorAll('[onclick*="triggerSingleOutbound"]');
+      outboundBtns.forEach(btn => {
+        btn.textContent = '✅ Bot Başlatıldı';
+        btn.style.background = 'rgba(48,209,88,0.15)';
+        btn.style.color = '#30D158';
+        btn.style.border = '1px solid rgba(48,209,88,0.3)';
+        btn.style.cursor = 'default';
+        btn.onclick = null;
+      });
     }
     
     // CRM etiketleri yükle
