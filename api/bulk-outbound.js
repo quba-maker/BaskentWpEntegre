@@ -61,7 +61,7 @@ export default async function handler(req, res) {
       // Make sure the conversation is active, phase is greeting, and mark it as a lead
       try {
         await sql`
-          INSERT INTO conversations (phone_number, channel, status, patient_name, phase, has_lead, updated_at)
+          INSERT INTO conversations (phone_number, channel, status, patient_name, phase, has_lead, last_message_at)
           VALUES (${formattedPhone}, 'whatsapp', 'active', ${name || null}, 'greeting', true, NOW())
           ON CONFLICT (phone_number) 
           DO UPDATE SET 
@@ -69,19 +69,19 @@ export default async function handler(req, res) {
             phase = 'greeting',
             has_lead = true,
             patient_name = COALESCE(conversations.patient_name, ${name || null}),
-            updated_at = NOW()
+            last_message_at = NOW()
         `;
       } catch (dbErr) {
         // Fallback: has_lead/phase columns may not exist yet — use simpler query
         console.warn('has_lead/phase columns missing, using fallback:', dbErr.message);
         await sql`
-          INSERT INTO conversations (phone_number, channel, status, patient_name, updated_at)
+          INSERT INTO conversations (phone_number, channel, status, patient_name, last_message_at)
           VALUES (${formattedPhone}, 'whatsapp', 'active', ${name || null}, NOW())
           ON CONFLICT (phone_number) 
           DO UPDATE SET 
             status = 'active',
             patient_name = COALESCE(conversations.patient_name, ${name || null}),
-            updated_at = NOW()
+            last_message_at = NOW()
         `;
       }
 
