@@ -130,25 +130,39 @@ export default async function handler(req, res) {
             feedbackMsg = `📞 3. kez ulaşılamadı! Hastaya bilgi mesajı gönderildi. Sistem aktif beklemeye alındı.`;
             statusBadge = `📞 3x Ulaşılamadı — Hasta Bilgilendirildi (${userFirstName})`;
             
-            // Hastaya WhatsApp mesajı gönder
+            // Hastaya Kanala Göre Mesaj Gönder
             try {
-              const META = process.env.META_ACCESS_TOKEN;
-              const PHONE_ID = process.env.PHONE_NUMBER_ID;
-              if (META && PHONE_ID) {
-                const isTurkish = phone.startsWith('90');
-                const missMsg = isTurkish 
-                  ? 'Merhaba, sizi birkaç kez aramaya çalıştık ancak ulaşamadık 📱 Müsait olduğunuzda bize WhatsApp üzerinden yazabilir veya 0332 257 06 06 numarasından arayabilirsiniz 🙏'
-                  : 'Hello, we tried to reach you several times but could not connect 📱 When you are available, please message us on WhatsApp or call +90 501 015 42 42 🙏';
-                
-                await axios({
-                  method: 'POST',
-                  url: `https://graph.facebook.com/v25.0/${PHONE_ID}/messages`,
-                  headers: { Authorization: `Bearer ${META}` },
-                  data: { messaging_product: 'whatsapp', to: phone, type: 'text', text: { body: missMsg } }
-                });
-                await sql`INSERT INTO messages (phone_number, direction, content, model_used, channel) VALUES (${phone}, 'out', ${missMsg}, 'callmiss-auto', 'whatsapp')`;
+              const chInfo = await sql`SELECT COALESCE(last_channel, channel, 'whatsapp') as ch FROM conversations WHERE phone_number LIKE ${likePattern} LIMIT 1`;
+              const targetChannel = chInfo[0]?.ch || 'whatsapp';
+              
+              const isTurkish = phone.startsWith('90');
+              const missMsg = isTurkish 
+                ? 'Merhaba, sizi randevunuz/talebiniz için birkaç kez aramaya çalıştık ancak ulaşamadık 📱 Müsait olduğunuzda bize bu mesaj üzerinden yazabilir veya 0332 257 06 06 numarasından arayabilirsiniz 🙏'
+                : 'Hello, we tried to reach you several times regarding your request but could not connect 📱 When you are available, please reply to this message or call +90 501 015 42 42 🙏';
+
+              if (targetChannel === 'whatsapp' || phone.match(/^9\d{10,}/)) {
+                const META = process.env.META_ACCESS_TOKEN;
+                const PHONE_ID = process.env.PHONE_NUMBER_ID;
+                if (META && PHONE_ID) {
+                  await axios({
+                    method: 'POST',
+                    url: `https://graph.facebook.com/v25.0/${PHONE_ID}/messages`,
+                    headers: { Authorization: `Bearer ${META}` },
+                    data: { messaging_product: 'whatsapp', to: phone, type: 'text', text: { body: missMsg } }
+                  });
+                  await sql`INSERT INTO messages (phone_number, direction, content, model_used, channel) VALUES (${phone}, 'out', ${missMsg}, 'callmiss-auto', 'whatsapp')`;
+                }
+              } else if (targetChannel === 'instagram') {
+                const { sendInstagramMessage } = await import('../lib/channels/instagram.js');
+                // recipient id for ig is stored in phone field in our DB schema for non-wa channels
+                await sendInstagramMessage(phone, missMsg, null); 
+                await sql`INSERT INTO messages (phone_number, direction, content, model_used, channel) VALUES (${phone}, 'out', ${missMsg}, 'callmiss-auto', 'instagram')`;
+              } else if (targetChannel === 'messenger') {
+                const { sendMessengerMessage } = await import('../lib/channels/messenger.js');
+                await sendMessengerMessage(phone, missMsg, null); // Page ID is dynamically fetched inside the function if null, but we need to pass a valid pageId normally. However, for a broadcast fallback, it relies on PAGE_ACCESS_TOKEN.
+                await sql`INSERT INTO messages (phone_number, direction, content, model_used, channel) VALUES (${phone}, 'out', ${missMsg}, 'callmiss-auto', 'messenger')`;
               }
-            } catch(e) { console.error('Callmiss WA hatası:', e.message); }
+            } catch(e) { console.error(`Callmiss oto-mesaj hatası (${phone}):`, e.response?.data?.error?.message || e.message); }
           } else {
             feedbackMsg = `📞 ${missCount}. arama — Ulaşılamadı. ${3 - missCount} deneme kaldı.`;
             statusBadge = `📞 ${missCount}/3 Ulaşılamadı (${userFirstName})`;
@@ -229,10 +243,12 @@ export default async function handler(req, res) {
           const updatedNotes = oldNotes ? `${oldNotes}\n${newNoteEntry}` : newNoteEntry;
           await sql`UPDATE conversations SET notes = ${updatedNotes}, updated_at = NOW() WHERE phone_number LIKE ${likePattern}`;
 
-          // 🚀 HASTAYA WHATSAPP MESAJı GÖNDER (Sadece WhatsApp kanalındaysa)
+          // 🚀 HASTAYA KANALA GÖRE MESAJ GÖNDER (WA / IG / MSG)
           let sentToPatient = false;
-          if (lastChannel === 'whatsapp' || phone.match(/^9\d{10,}/)) {
-            try {
+          let targetChannel = lastChannel || 'whatsapp';
+          
+          try {
+            if (targetChannel === 'whatsapp' || phone.match(/^9\d{10,}/)) {
               const META = process.env.META_ACCESS_TOKEN;
               const PHONE_ID = process.env.PHONE_NUMBER_ID;
               if (META && PHONE_ID) {
@@ -244,15 +260,26 @@ export default async function handler(req, res) {
                 });
                 await sql`INSERT INTO messages (phone_number, direction, content, model_used, channel) VALUES (${phone}, 'out', ${replyText}, 'human-telegram', 'whatsapp')`;
                 sentToPatient = true;
+                targetChannel = 'whatsapp';
               }
-            } catch(e) { console.error('Telegram→WA hata:', e.response?.data?.error?.message || e.message); }
-          }
+            } else if (targetChannel === 'instagram') {
+              const { sendInstagramMessage } = await import('../lib/channels/instagram.js');
+              await sendInstagramMessage(phone, replyText, null);
+              await sql`INSERT INTO messages (phone_number, direction, content, model_used, channel) VALUES (${phone}, 'out', ${replyText}, 'human-telegram', 'instagram')`;
+              sentToPatient = true;
+            } else if (targetChannel === 'messenger') {
+              const { sendMessengerMessage } = await import('../lib/channels/messenger.js');
+              await sendMessengerMessage(phone, replyText, null);
+              await sql`INSERT INTO messages (phone_number, direction, content, model_used, channel) VALUES (${phone}, 'out', ${replyText}, 'human-telegram', 'messenger')`;
+              sentToPatient = true;
+            }
+          } catch(e) { console.error('Telegram→Hasta hata:', e.response?.data?.error?.message || e.message); }
 
           // Danışmana onay mesajı
           try {
             const confirmMsg = sentToPatient 
-              ? `✅ Mesaj hastaya WhatsApp'tan iletildi + CRM'e not eklendi`
-              : `📝 CRM'e Not Eklendi (WhatsApp gönderilemedi)`;
+              ? `✅ Mesaj hastaya ${targetChannel.toUpperCase()} üzerinden iletildi + CRM'e not eklendi`
+              : `📝 CRM'e Not Eklendi (Mesaj hastaya iletilemedi, kanal: ${targetChannel})`;
             await axios.post(`https://api.telegram.org/bot${botToken}/sendMessage`, {
               chat_id: message.chat.id,
               reply_to_message_id: message.message_id,
