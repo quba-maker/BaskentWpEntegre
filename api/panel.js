@@ -656,6 +656,34 @@ export default async function handler(req, res) {
       return res.json({ success: true });
     }
 
+    // SHOW-UP TAKİBİ — Hasta geldi mi?
+    if (action === 'update-showup' && req.method === 'POST') {
+      const { id, showed_up, no_show_reason, treatment_completed, satisfaction_score } = req.body;
+      
+      if (showed_up === true) {
+        await sql`UPDATE events SET showed_up = true, showed_up_at = NOW(), status = 'completed' WHERE id = ${id}`;
+        // Tedavi tamamlandı mı?
+        if (treatment_completed) {
+          await sql`UPDATE events SET treatment_completed = true WHERE id = ${id}`;
+        }
+        if (satisfaction_score) {
+          await sql`UPDATE events SET satisfaction_score = ${satisfaction_score} WHERE id = ${id}`;
+        }
+        // Lead stage güncelle
+        const ev = await sql`SELECT phone_number FROM events WHERE id = ${id}`;
+        if (ev.length > 0) {
+          await sql`UPDATE leads SET stage = 'appointed' WHERE phone_number = ${ev[0].phone_number}`;
+        }
+      } else {
+        await sql`UPDATE events SET showed_up = false, no_show_reason = ${no_show_reason || 'Bilinmiyor'}, status = 'noshow' WHERE id = ${id}`;
+        const ev = await sql`SELECT phone_number FROM events WHERE id = ${id}`;
+        if (ev.length > 0) {
+          await sql`UPDATE leads SET stage = 'lost' WHERE phone_number = ${ev[0].phone_number}`;
+        }
+      }
+      return res.json({ success: true });
+    }
+
     // BİLDİRİM SAYACI
     if (action === 'notifications') {
       try {

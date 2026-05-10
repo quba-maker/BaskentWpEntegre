@@ -51,6 +51,12 @@ export default async function handler(req, res) {
     )`;
     try { await sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS scheduled_date TIMESTAMP`; } catch(e){}
     try { await sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS assigned_doctor VARCHAR(100)`; } catch(e){}
+    // Show-up tracking
+    try { await sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS showed_up BOOLEAN`; } catch(e){}
+    try { await sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS showed_up_at TIMESTAMP`; } catch(e){}
+    try { await sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS no_show_reason TEXT`; } catch(e){}
+    try { await sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS treatment_completed BOOLEAN`; } catch(e){}
+    try { await sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS satisfaction_score INT`; } catch(e){}
 
     await sql`CREATE TABLE IF NOT EXISTS settings (
       id SERIAL PRIMARY KEY, key VARCHAR(100) UNIQUE NOT NULL,
@@ -90,7 +96,7 @@ export default async function handler(req, res) {
       await sql`INSERT INTO settings (key, value) VALUES ('system_prompt', 'Sen Başkent Üniversitesi Konya Hastanesi danışmanısın. Samimi, kısa, doğal yaz. Fiyat verme, randevuya yönlendir.')`;
     }
     const em = await sql`SELECT * FROM settings WHERE key = 'ai_model'`;
-    if (em.length === 0) await sql`INSERT INTO settings (key, value) VALUES ('ai_model', 'gemini-2.5-flash-lite')`;
+    if (em.length === 0) await sql`INSERT INTO settings (key, value) VALUES ('ai_model', 'gemini-2.5-flash')`;
     const eh = await sql`SELECT * FROM settings WHERE key = 'working_hours'`;
     if (eh.length === 0) await sql`INSERT INTO settings (key, value) VALUES ('working_hours', '{"enabled":false,"start":"09:00","end":"18:00","offMessage":"Mesai dışıyız."}')`;
 

@@ -1797,18 +1797,49 @@ function filterCalendar() {
         ${e.details ? `<div style="font-size:12px;color:var(--text-muted);margin-top:8px;">${e.details}</div>` : ''}
       </div>
       <div style="display:flex;gap:6px;align-items:center;flex-direction:column;">
+        ${e.showed_up === true ? '<span style="background:#22c55e;color:white;padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600;">✅ GELDİ</span>' : 
+          e.showed_up === false ? '<span style="background:#ef4444;color:white;padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600;">❌ GELMEDİ</span>' : ''}
+        ${e.treatment_completed ? '<span style="background:#8b5cf6;color:white;padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600;margin-top:4px;">🏥 Tedavi Tamam</span>' : ''}
+        ${e.satisfaction_score ? '<span style="font-size:11px;color:var(--text-muted);">⭐ ' + e.satisfaction_score + '/5</span>' : ''}
         <select onchange="updateAppointment(${e.id},this.value)" style="background:var(--bg-card);color:var(--text-main);border:1px solid var(--border-color);border-radius:6px;padding:4px 8px;font-size:12px">
            <option value="">Durum Güncelle</option>
            <option value="confirmed">✅ Tedavi Onaylandı</option>
            <option value="noshow">❌ Randevuya Gelmedi</option>
            <option value="cancelled">🚫 İptal Etti</option>
         </select>
+        ${(e.status === 'scheduled' || e.status === 'confirmed') && e.showed_up == null ? `
+          <div style="display:flex;gap:4px;width:100%">
+            <button class="btn btn-sm" onclick="markShowUp(${e.id},true)" style="font-size:10px;padding:3px 6px;flex:1;background:#22c55e;color:white;border:none;border-radius:4px">Geldi ✅</button>
+            <button class="btn btn-sm" onclick="markShowUp(${e.id},false)" style="font-size:10px;padding:3px 6px;flex:1;background:#ef4444;color:white;border:none;border-radius:4px">Gelmedi ❌</button>
+          </div>` : ''}
+        ${e.showed_up === true && !e.treatment_completed ? `<button class="btn btn-sm" onclick="markTreatmentDone(${e.id})" style="font-size:10px;padding:3px 6px;width:100%;background:#8b5cf6;color:white;border:none;border-radius:4px">🏥 Tedavi Tamam</button>` : ''}
         <button class="btn btn-sm btn-secondary" onclick="document.querySelector('[data-page=conversations]').click();setTimeout(()=>loadChat('${e.phone_number}','whatsapp'),300)" style="font-size:11px;padding:4px 8px;width:100%">💬 Sohbet</button>
       </div></div>`;
   }).join('');
 }
 
 async function updateAppointment(id,status) { if(!status)return; await api('update-appointment','POST',{id,status}); loadAppointments(); toast('Randevu durumu güncellendi ✅'); }
+
+// Show-up Takibi
+async function markShowUp(id, showedUp) {
+  if (showedUp) {
+    await api('update-showup', 'POST', { id, showed_up: true });
+    toast('✅ Hasta geldi olarak işaretlendi');
+  } else {
+    const reason = prompt('Gelmeme nedeni (opsiyonel):') || 'Bilinmiyor';
+    await api('update-showup', 'POST', { id, showed_up: false, no_show_reason: reason });
+    toast('❌ No-show olarak işaretlendi');
+  }
+  loadAppointments();
+}
+
+async function markTreatmentDone(id) {
+  const score = prompt('Hasta memnuniyet puanı (1-5):');
+  const s = parseInt(score);
+  await api('update-showup', 'POST', { id, showed_up: true, treatment_completed: true, satisfaction_score: (s >= 1 && s <= 5) ? s : null });
+  toast('🏥 Tedavi tamamlandı olarak işaretlendi');
+  loadAppointments();
+}
 
 // ========== BİLDİRİM SİSTEMİ ==========
 async function checkNotifications() {
