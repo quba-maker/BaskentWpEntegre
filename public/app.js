@@ -1047,11 +1047,12 @@ async function deleteMessages() {
     cachedConversations[idx].temperature = 'cold';
     cachedConversations[idx].message_count = 0;
     cachedConversations[idx].last_message = '';
+    cachedConversations[idx].last_message_at = null;
     cachedConversations[idx]._effectiveStage = 'new';
   }
   
-  // Listeyi yenile
-  renderConversationList();
+  // Listeyi ve tüm verileri sunucudan temiz şekilde çek ki UI senkronizasyonu şaşmasın
+  loadConversations();
 }
 
 /* ========== QUOTE ENGINE (HIZLI TEKLİF) ========== */

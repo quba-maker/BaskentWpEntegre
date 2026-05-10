@@ -301,9 +301,7 @@ export default async function handler(req, res) {
       WHERE phone_number LIKE ${likePattern}`;
       // 3. Conversation states sıfırla (brain.js phase tracker)
       try { await sql`DELETE FROM conversation_states WHERE phone_number LIKE ${likePattern}`; } catch(e) {}
-      // 4. Form verilerini (Leads) sıfırla ki botun 'Anayasası' tamamen temizlensin
-      try { await sql`DELETE FROM leads WHERE phone_number LIKE ${likePattern}`; } catch(e) {}
-      // 4. Lead stage'i de sıfırla
+      // 4. Lead stage'i de sıfırla ama LEADS tablosunu silme! Form verileri anayasa için kalsın.
       try { await sql`UPDATE leads SET stage = 'new' WHERE phone_number LIKE ${likePattern}`; } catch(e) {}
       
       return res.json({ success: true });
