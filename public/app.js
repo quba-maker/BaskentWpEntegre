@@ -566,14 +566,106 @@ async function loadKanban() {
         </div>
       </div>
     `;
-  }).join('');
+   }).join('');
 }
 
+let kanbanChatPhone = '';
+let kanbanChatChannel = '';
+
 function openChatFromKanban(phone, channel) {
+  openKanbanChat(phone, channel);
+}
+
+async function openKanbanChat(phone, channel) {
+  kanbanChatPhone = phone;
+  kanbanChatChannel = channel || 'whatsapp';
+  
+  // Panel ve overlay göster
+  document.getElementById('kanban-chat-overlay').style.display = 'block';
+  document.getElementById('kanban-chat-panel').style.display = 'flex';
+  
+  // Hasta bilgilerini yükle
+  const pData = await api('get-patient&phone=' + phone);
+  const hasName = pData.patient_name && pData.patient_name !== phone;
+  const ch = channel || 'whatsapp';
+  
+  // Header bilgileri
+  document.getElementById('kanban-chat-name').textContent = hasName ? pData.patient_name : (ch === 'instagram' ? 'IG Kullanıcı' : ch === 'messenger' ? 'FB Kullanıcı' : phone);
+  
+  let subText = '';
+  if (ch === 'whatsapp') {
+    const country = getCountry(phone);
+    subText = country ? `${country.flag} ${country.name} · ${phone}` : phone;
+  } else if (ch === 'instagram') {
+    subText = hasName ? `📸 @${pData.patient_name.replace(/\s/g, '').toLowerCase()}` : `📸 ID: ...${phone.slice(-6)}`;
+  } else {
+    subText = hasName ? '💬 Facebook Messenger' : `💬 ID: ...${phone.slice(-6)}`;
+  }
+  document.getElementById('kanban-chat-sub').textContent = subText;
+  document.getElementById('kanban-chat-channel-badge').innerHTML = getChannelBadge(ch);
+  
+  // Mesajları yükle
+  document.getElementById('kanban-chat-messages').innerHTML = '<div style="text-align:center; padding:40px; color:var(--text-muted);">⏳ Yükleniyor...</div>';
+  
+  const data = await api('conversation-detail&phone=' + phone);
+  if (!data) return;
+  const msgs = data.messages || data;
+  const chatEl = document.getElementById('kanban-chat-messages');
+  
+  if (msgs.length === 0) {
+    chatEl.innerHTML = '<div style="text-align:center; padding:40px; color:var(--text-muted);">📭 Henüz mesaj yok</div>';
+    return;
+  }
+  
+  chatEl.innerHTML = msgs.map(m => {
+    const isOut = m.direction === 'out';
+    const isBot = m.model_used && m.model_used !== 'panel' && m.model_used !== 'toplu';
+    const cls = `message-bubble ${isOut ? 'out' : 'in'} ${isOut && isBot ? 'bot-reply' : ''}`;
+    const senderLabel = isOut ? (isBot ? '🤖 Bot' : '👤 Sen') : '📩 Hasta';
+    const info = `<div class="msg-info">${senderLabel} · ${new Date(m.created_at).toLocaleTimeString('tr-TR', {hour:'2-digit',minute:'2-digit'})} ${isBot ? '<span style="opacity:0.5">' + m.model_used + '</span>' : ''}</div>`;
+    return `<div class="${cls}">${m.content}${info}</div>`;
+  }).join('');
+  chatEl.scrollTop = chatEl.scrollHeight;
+  
+  // Input'a focus
+  setTimeout(() => document.getElementById('kanban-chat-input-field')?.focus(), 300);
+}
+
+function closeKanbanChat() {
+  document.getElementById('kanban-chat-overlay').style.display = 'none';
+  document.getElementById('kanban-chat-panel').style.display = 'none';
+  kanbanChatPhone = '';
+  kanbanChatChannel = '';
+}
+
+async function sendKanbanMessage() {
+  const input = document.getElementById('kanban-chat-input-field');
+  const msg = input.value.trim();
+  if (!msg || !kanbanChatPhone) return;
+  
+  input.value = '';
+  
+  // Mesajı hemen UI'da göster
+  const chatEl = document.getElementById('kanban-chat-messages');
+  chatEl.innerHTML += `<div class="message-bubble out">${msg}<div class="msg-info">👤 Sen · şimdi</div></div>`;
+  chatEl.scrollTop = chatEl.scrollHeight;
+  
+  // API ile gönder
+  const result = await api('send-message', { phone: kanbanChatPhone, message: msg, channel: kanbanChatChannel });
+  if (result?.success) {
+    // Refresh messages
+    setTimeout(() => openKanbanChat(kanbanChatPhone, kanbanChatChannel), 500);
+  }
+}
+
+function openFullChat() {
+  const phone = kanbanChatPhone;
+  const channel = kanbanChatChannel;
+  closeKanbanChat();
   document.querySelector('[data-page="conversations"]').click();
   setTimeout(() => {
     loadChat(phone, channel || 'whatsapp');
-  }, 100);
+  }, 150);
 }
 
 /* OMNICHANNEL INBOX */
