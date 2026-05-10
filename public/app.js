@@ -796,35 +796,54 @@ async function loadChat(phone, channel) {
         const dt = new Date(f.created_at).toLocaleDateString('tr-TR',{day:'2-digit',month:'2-digit',year:'numeric'});
         let tags = []; try { tags = JSON.parse(f.tags || '[]'); } catch(e) {}
         
-        // Form cevaplarını parse et
+        // Form cevaplarını parse et ve temizle
         let formAnswersHtml = '';
         try {
           const rawData = typeof f.raw_data === 'string' ? JSON.parse(f.raw_data || '{}') : (f.raw_data || {});
-          const skipKeys = ['id', 'leadgen_id', 'form_id', 'ad_id', 'adset_id', 'campaign_id', 'platform', 'is_organic', 'created_time', 'phone_number_id'];
+          // İsim ve telefon gibi gereksiz veya halihazırda görünen bilgileri gizle
+          const skipKeys = ['id', 'leadgen_id', 'form_id', 'ad_id', 'adset_id', 'campaign_id', 'platform', 'is_organic', 'created_time', 'phone_number_id', 'full_name', 'phone_number'];
           const entries = Object.entries(rawData).filter(([key]) => !skipKeys.includes(key.toLowerCase()));
           if (entries.length > 0) {
-            formAnswersHtml = `<div id="form-answers-${fi}" style="display:none; margin-top:8px; padding-top:8px; border-top:1px solid var(--border-color);">
+            formAnswersHtml = `<div id="form-answers-${fi}" style="display:none; margin-top:12px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.08);">
+              <div style="display:flex; flex-direction:column; gap:8px;">
               ${entries.map(([key, val]) => {
                 const label = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-                return `<div style="display:flex; gap:8px; padding:3px 0; font-size:11px;">
-                  <span style="color:var(--text-muted); min-width:100px; flex-shrink:0;">${label}:</span>
-                  <span style="color:white; font-weight:500;">${val}</span>
+                return `<div style="background:rgba(0,0,0,0.15); padding:8px 10px; border-radius:6px; border-left:2px solid var(--accent-primary);">
+                  <div style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:3px;">${label}</div>
+                  <div style="font-size:13px; color:white; font-weight:400; line-height:1.4;">${val}</div>
                 </div>`;
               }).join('')}
+              </div>
             </div>`;
           }
         } catch(e) {}
         
         const hasAnswers = formAnswersHtml !== '';
-        return `<div style="padding:8px 10px;background:var(--bg-hover);border-radius:6px;margin-bottom:6px;font-size:12px;border-left:3px solid var(--accent-primary);${hasAnswers ? 'cursor:pointer;' : ''}" ${hasAnswers ? `onclick="const el=document.getElementById('form-answers-${fi}'); el.style.display=el.style.display==='none'?'block':'none';"` : ''}>
-          <div style="font-weight:600;margin-bottom:3px;display:flex;align-items:center;gap:6px;">
-            📋 ${f.form_name || 'Genel Form'}
-            ${hasAnswers ? '<span style="font-size:10px;color:var(--text-muted);">▶ Cevapları Göster</span>' : ''}
-          </div>
-          <div style="color:var(--text-muted);display:flex;gap:8px;flex-wrap:wrap;">
-            <span>📅 ${dt}</span>
-            ${f.city ? `<span>📍 ${f.city}</span>` : ''}
-            ${tags.map(t => `<span style="background:var(--accent-primary);color:white;padding:1px 5px;border-radius:4px;font-size:10px;">${t}</span>`).join('')}
+        
+        // Form adını kısalt (Eğer çok uzunsa çirkin görünmemesi için)
+        let displayName = f.form_name || 'Genel Kampanya Formu';
+        if (displayName.length > 35) displayName = displayName.substring(0, 32) + '...';
+
+        return `<div style="background:var(--bg-card); border:1px solid rgba(255,255,255,0.1); border-radius:8px; margin-bottom:8px; padding:12px; transition:border-color 0.2s;">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; cursor:${hasAnswers ? 'pointer' : 'default'};" ${hasAnswers ? `onclick="const el=document.getElementById('form-answers-${fi}'); const icon=document.getElementById('form-icon-${fi}'); if(el.style.display==='none'){el.style.display='block';icon.style.transform='rotate(90deg)';}else{el.style.display='none';icon.style.transform='rotate(0deg)';}"` : ''}>
+            
+            <div style="flex:1;">
+              <div style="font-weight:600; font-size:13px; color:#fff; margin-bottom:6px; display:flex; align-items:center; gap:6px;">
+                <i class="fas fa-clipboard-list" style="color:var(--accent-primary)"></i> 
+                <span title="${f.form_name || ''}">${displayName}</span>
+              </div>
+              
+              <div style="display:flex; flex-wrap:wrap; gap:6px; align-items:center;">
+                <span style="font-size:11px; color:var(--text-muted); background:rgba(255,255,255,0.05); padding:2px 6px; border-radius:4px;"><i class="fas fa-calendar-alt" style="margin-right:4px;"></i>${dt}</span>
+                ${f.city ? `<span style="font-size:11px; color:var(--text-muted); background:rgba(255,255,255,0.05); padding:2px 6px; border-radius:4px;"><i class="fas fa-map-marker-alt" style="margin-right:4px;"></i>${f.city}</span>` : ''}
+                ${tags.map(t => `<span style="font-size:11px; color:var(--accent-primary); background:rgba(10,132,255,0.1); padding:2px 6px; border-radius:4px;">${t}</span>`).join('')}
+              </div>
+            </div>
+
+            ${hasAnswers ? `<div style="color:var(--text-muted); font-size:11px; display:flex; align-items:center; gap:4px; padding-top:2px;">
+              Yanıtlar <i id="form-icon-${fi}" class="fas fa-chevron-right" style="transition:transform 0.2s; font-size:10px;"></i>
+            </div>` : ''}
+
           </div>
           ${formAnswersHtml}
         </div>`;
