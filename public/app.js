@@ -1558,14 +1558,58 @@ async function triggerSingleOutbound(phone, name) {
     
     if (data.success && data.results.success > 0) {
       toast('✅ Mesaj başarıyla gönderildi ve bot başlatıldı!');
-      // UI güncelle (Eğer Form Detay ekranındaysa)
+      
+      // 1. Bot Durumu → Yeşil / Aktif
       const botIndicator = document.getElementById('fd-bot-indicator');
       const botLabel = document.getElementById('fd-bot-label');
+      const botPhase = document.getElementById('fd-bot-phase');
       if (botIndicator && botLabel) {
         botIndicator.style.background = '#30D158';
+        botIndicator.style.boxShadow = '0 0 12px rgba(48,209,88,0.6)';
         botLabel.textContent = '🤖 Bot Aktif';
         botLabel.style.color = '#30D158';
       }
+      if (botPhase) {
+        botPhase.textContent = '📍 Karşılama — Şikayeti dinliyor';
+        botPhase.style.color = 'var(--text-muted)';
+      }
+      
+      // 2. "Bota Devret" butonunu gizle, yerine durum göster
+      const outboundBtns = document.querySelectorAll('[onclick*="triggerSingleOutbound"]');
+      outboundBtns.forEach(btn => {
+        btn.textContent = '✅ Bot Başlatıldı';
+        btn.style.background = 'rgba(48,209,88,0.15)';
+        btn.style.color = '#30D158';
+        btn.style.border = '1px solid rgba(48,209,88,0.3)';
+        btn.style.cursor = 'default';
+        btn.onclick = null;
+      });
+      
+      // 3. Lead Durumunu "İlk Temas"a çek (UI güncelle)
+      const contactedBtn = document.querySelector('.fd-stage-btn[data-stage="contacted"]');
+      if (contactedBtn) {
+        document.querySelectorAll('.fd-stage-btn').forEach(btn => {
+          btn.style.background = 'var(--bg-hover)';
+          btn.style.borderColor = 'var(--border-color)';
+          btn.style.fontWeight = '500';
+        });
+        contactedBtn.style.background = '#0A84FF22';
+        contactedBtn.style.borderColor = '#0A84FF';
+        contactedBtn.style.fontWeight = '700';
+      }
+      const infoEl = document.getElementById('fd-pipeline-info');
+      if (infoEl) infoEl.innerHTML = `✅ <strong>📞 İlk Temas</strong> — Bot mesaj gönderdi`;
+      
+      // 4. DB'ye de "contacted" olarak kaydet
+      try {
+        const cleanPhone = phone.replace(/\D/g, '');
+        await api('update-patient', 'POST', {
+          phone: cleanPhone,
+          patient_name: name || null,
+          lead_stage: 'contacted'
+        });
+      } catch(e) { console.warn('Lead stage update failed:', e); }
+      
     } else {
       const errMsg = data.results?.details?.[0]?.error || 'Bilinmeyen hata';
       toast('❌ Mesaj gönderilemedi: ' + errMsg, 'error');
