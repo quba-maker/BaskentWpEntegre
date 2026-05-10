@@ -340,7 +340,22 @@ async function updateSheetCell(row, col, value) {
 }
 
 let currentInboxFilter = 'all';
+let currentPipelineFilter = 'all';
 let cachedConversations = [];
+
+// Merkezi effectiveStage hesaplama (tüm UI'larda tutarlı)
+function getEffectiveStage(c) {
+  let effectiveStage = c.lead_stage || 'new';
+  if (effectiveStage === 'new' || effectiveStage === 'responded') {
+    const phaseStage = BOT_PHASE_TO_STAGE[c.phase];
+    if (phaseStage) effectiveStage = phaseStage;
+  }
+  if (c.temperature === 'hot' && effectiveStage !== 'appointed') effectiveStage = 'hot_lead';
+  if (c.status === 'human' && !['appointed', 'lost', 'hot_lead'].includes(effectiveStage)) effectiveStage = 'hot_lead';
+  if (effectiveStage === 'responded') effectiveStage = 'discovery';
+  if (effectiveStage === 'appointment_request') effectiveStage = 'hot_lead';
+  return effectiveStage;
+}
 
 function smartDate(dateStr) {
   const d = new Date(dateStr);
@@ -372,6 +387,11 @@ function setInboxFilter(filter) {
   renderConversationList();
 }
 
+function setPipelineFilter(stage) {
+  currentPipelineFilter = stage;
+  renderConversationList();
+}
+
 function filterConversations() {
   renderConversationList();
 }
@@ -388,6 +408,33 @@ function renderConversationList() {
   const list = cachedConversations;
   const search = (document.getElementById('inbox-search')?.value || '').toLowerCase();
   
+  // Her konuşmanın effectiveStage'ini hesapla
+  list.forEach(c => { c._effectiveStage = getEffectiveStage(c); });
+  
+  // 🎯 Pipeline hapları render et
+  const stageCounts = { all: list.length };
+  Object.keys(PIPELINE_STAGES).forEach(s => { stageCounts[s] = 0; });
+  list.forEach(c => { stageCounts[c._effectiveStage] = (stageCounts[c._effectiveStage] || 0) + 1; });
+  
+  const pillsEl = document.getElementById('pipeline-pills');
+  if (pillsEl) {
+    pillsEl.innerHTML = `
+      <button class="pipeline-pill ${currentPipelineFilter === 'all' ? 'active' : ''}" onclick="setPipelineFilter('all')" style="${currentPipelineFilter === 'all' ? 'border-color:var(--accent-primary); color:white; background:rgba(10,132,255,0.12);' : ''}">
+        <span class="pill-count">${stageCounts.all}</span> Tümü
+      </button>
+      ${Object.entries(PIPELINE_STAGES).map(([stage, cfg]) => {
+        const count = stageCounts[stage] || 0;
+        const isActive = currentPipelineFilter === stage;
+        const activeStyle = isActive ? `border-color:${cfg.color}; color:${cfg.color}; background:${cfg.color}15;` : '';
+        return `<button class="pipeline-pill ${isActive ? 'active' : ''}" onclick="setPipelineFilter('${stage}')" style="${activeStyle}">
+          <span class="pill-dot" style="background:${cfg.color};"></span>
+          <span class="pill-count" style="${isActive ? `background:${cfg.color}33;` : ''}">${count}</span>
+          ${cfg.label}
+        </button>`;
+      }).join('')}
+    `;
+  }
+  
   // Kanal sayaçları
   const counts = {all: list.length, whatsapp: 0, messenger: 0, instagram: 0};
   list.forEach(c => { const ch = c.last_channel || c.channel || 'whatsapp'; counts[ch] = (counts[ch]||0) + 1; });
@@ -396,8 +443,14 @@ function renderConversationList() {
   document.getElementById('count-messenger').textContent = counts.messenger;
   document.getElementById('count-instagram').textContent = counts.instagram;
 
-  let filtered = currentInboxFilter === 'all' ? list : list.filter(c => (c.last_channel || c.channel || 'whatsapp') === currentInboxFilter);
-  
+  // Filtre uygula: Pipeline + Kanal + Arama
+  let filtered = list;
+  if (currentPipelineFilter !== 'all') {
+    filtered = filtered.filter(c => c._effectiveStage === currentPipelineFilter);
+  }
+  if (currentInboxFilter !== 'all') {
+    filtered = filtered.filter(c => (c.last_channel || c.channel || 'whatsapp') === currentInboxFilter);
+  }
   if (search) {
     filtered = filtered.filter(c => {
       const name = (c.patient_name || '').toLowerCase();
@@ -494,191 +547,10 @@ function renderConversationList() {
   }).join('') || '<div class="empty" style="padding:30px">Konuşma bulunamadı</div>';
 }
 
-/* KANBAN BOARD */
-async function loadKanban() {
-  const list = await api('conversations'); if(!list) return;
-  
-  // 🎯 Birleşik Pipeline Sütunları (pipeline-config.js'den)
-  const cols = {};
-  KANBAN_COLUMNS.forEach(col => { cols[col.key] = { ...col, cards: [] }; });
+/* KANBAN BOARD — Kaldırıldı, pipeline filtreleri inbox'a taşındı */
+function loadKanban() { /* noop — artık pipeline filtreleri inbox'ta */ }
 
-  list.forEach(c => {
-    // Etkin stage'i belirle (inbox ile aynı mantık)
-    let effectiveStage = c.lead_stage || 'new';
-    if (effectiveStage === 'new' || effectiveStage === 'responded') {
-      const phaseStage = BOT_PHASE_TO_STAGE[c.phase];
-      if (phaseStage) effectiveStage = phaseStage;
-    }
-    if (c.temperature === 'hot' && effectiveStage !== 'appointed') effectiveStage = 'hot_lead';
-    if (c.status === 'human' && !['appointed', 'lost', 'hot_lead'].includes(effectiveStage)) effectiveStage = 'hot_lead';
-    if (effectiveStage === 'responded') effectiveStage = 'discovery';
-    if (effectiveStage === 'appointment_request') effectiveStage = 'hot_lead';
 
-    // Kaybedilenleri gösterme (kanban'da gizli)
-    if (effectiveStage === 'lost') return;
-
-    // Doğru sütuna yerleştir
-    c._effectiveStage = effectiveStage;
-    const targetCol = KANBAN_COLUMNS.find(col => col.stages.includes(effectiveStage));
-    if (targetCol) {
-      cols[targetCol.key].cards.push(c);
-    } else {
-      cols[KANBAN_COLUMNS[0].key].cards.push(c);
-    }
-  });
-
-  const container = document.getElementById('kanban-container');
-  container.innerHTML = Object.keys(cols).map(key => {
-    const col = cols[key];
-    
-    return `
-      <div class="kanban-col">
-        <div class="kanban-header" style="border-bottom:2px solid ${col.color};">
-          <span>${col.title}</span>
-          <span class="count" style="background:${col.color}22; color:${col.color};">${col.cards.length}</span>
-        </div>
-        <div class="kanban-body">
-          ${col.cards.map(c => {
-            const hasName = c.patient_name && c.patient_name !== c.phone_number;
-            const ch = c.last_channel || c.channel || 'whatsapp';
-            const channelIcon = ch === 'whatsapp' ? '🟢' : (ch === 'instagram' ? '🟣' : '🔵');
-            
-            let displayName;
-            let subInfo = '';
-            if (ch === 'whatsapp') {
-              displayName = hasName ? c.patient_name : c.phone_number;
-              subInfo = countryBadge(c.phone_number) + ' ' + c.phone_number;
-            } else if (ch === 'instagram') {
-              displayName = hasName ? c.patient_name : 'IG Kullanıcı';
-              subInfo = hasName ? `📸 @${c.patient_name.replace(/\\s/g, '').toLowerCase()}` : `📸 ID: ...${c.phone_number.slice(-6)}`;
-            } else {
-              displayName = hasName ? c.patient_name : 'FB Kullanıcı';
-              subInfo = hasName ? '💬 Facebook' : `💬 ID: ...${c.phone_number.slice(-6)}`;
-            }
-            
-            const preview = c.last_message || '...';
-            const isHotCard = (c._effectiveStage === 'hot_lead');
-            const cardStageBadge = getStageBadge(c._effectiveStage || 'new');
-            
-            return `
-              <div class="kanban-card ${isHotCard ? 'hot' : ''}" onclick="openChatFromKanban('${c.phone_number}', '${ch}')">
-                <div class="name">${channelIcon} ${displayName}</div>
-                <div style="font-size:11px; color:var(--text-muted); margin-bottom:4px;">${subInfo}</div>
-                <div class="preview">${preview}</div>
-                <div class="tags">
-                  ${cardStageBadge}
-                  ${c.lead_form_name ? `<span class="tag">${c.lead_form_name}</span>` : ''}
-                  ${c.department ? `<span class="tag" style="background:rgba(10,132,255,0.2)">${c.department}</span>` : ''}
-                </div>
-              </div>
-            `;
-          }).join('')}
-        </div>
-      </div>
-    `;
-  }).join('');
-}
-
-let kanbanChatPhone = '';
-let kanbanChatChannel = '';
-
-function openChatFromKanban(phone, channel) {
-  openKanbanChat(phone, channel);
-}
-
-async function openKanbanChat(phone, channel) {
-  kanbanChatPhone = phone;
-  kanbanChatChannel = channel || 'whatsapp';
-  
-  // Panel ve overlay göster
-  document.getElementById('kanban-chat-overlay').style.display = 'block';
-  document.getElementById('kanban-chat-panel').style.display = 'flex';
-  
-  // Hasta bilgilerini yükle
-  const pData = await api('get-patient&phone=' + phone);
-  const hasName = pData.patient_name && pData.patient_name !== phone;
-  const ch = channel || 'whatsapp';
-  
-  // Header bilgileri
-  document.getElementById('kanban-chat-name').textContent = hasName ? pData.patient_name : (ch === 'instagram' ? 'IG Kullanıcı' : ch === 'messenger' ? 'FB Kullanıcı' : phone);
-  
-  let subText = '';
-  if (ch === 'whatsapp') {
-    const country = getCountry(phone);
-    subText = country ? `${country.flag} ${country.name} · ${phone}` : phone;
-  } else if (ch === 'instagram') {
-    subText = hasName ? `📸 @${pData.patient_name.replace(/\s/g, '').toLowerCase()}` : `📸 ID: ...${phone.slice(-6)}`;
-  } else {
-    subText = hasName ? '💬 Facebook Messenger' : `💬 ID: ...${phone.slice(-6)}`;
-  }
-  document.getElementById('kanban-chat-sub').textContent = subText;
-  document.getElementById('kanban-chat-channel-badge').innerHTML = getChannelBadge(ch);
-  
-  // Mesajları yükle
-  document.getElementById('kanban-chat-messages').innerHTML = '<div style="text-align:center; padding:40px; color:var(--text-muted);">⏳ Yükleniyor...</div>';
-  
-  const data = await api('conversation-detail&phone=' + phone);
-  if (!data) return;
-  const msgs = data.messages || data;
-  const chatEl = document.getElementById('kanban-chat-messages');
-  
-  if (msgs.length === 0) {
-    chatEl.innerHTML = '<div style="text-align:center; padding:40px; color:var(--text-muted);">📭 Henüz mesaj yok</div>';
-    return;
-  }
-  
-  chatEl.innerHTML = msgs.map(m => {
-    const isOut = m.direction === 'out';
-    const isBot = m.model_used && m.model_used !== 'panel' && m.model_used !== 'toplu';
-    const cls = `message-bubble ${isOut ? 'out' : 'in'} ${isOut && isBot ? 'bot-reply' : ''}`;
-    const senderLabel = isOut ? (isBot ? '🤖 Bot' : '👤 Sen') : '📩 Hasta';
-    const info = `<div class="msg-info">${senderLabel} · ${new Date(m.created_at).toLocaleTimeString('tr-TR', {hour:'2-digit',minute:'2-digit'})} ${isBot ? '<span style="opacity:0.5">' + m.model_used + '</span>' : ''}</div>`;
-    return `<div class="${cls}">${m.content}${info}</div>`;
-  }).join('');
-  chatEl.scrollTop = chatEl.scrollHeight;
-  
-  // Input'a focus
-  setTimeout(() => document.getElementById('kanban-chat-input-field')?.focus(), 300);
-}
-
-function closeKanbanChat() {
-  document.getElementById('kanban-chat-overlay').style.display = 'none';
-  document.getElementById('kanban-chat-panel').style.display = 'none';
-  kanbanChatPhone = '';
-  kanbanChatChannel = '';
-}
-
-async function sendKanbanMessage() {
-  const input = document.getElementById('kanban-chat-input-field');
-  const msg = input.value.trim();
-  if (!msg || !kanbanChatPhone) return;
-  
-  input.value = '';
-  
-  // Mesajı hemen UI'da göster
-  const chatEl = document.getElementById('kanban-chat-messages');
-  chatEl.innerHTML += `<div class="message-bubble out">${msg}<div class="msg-info">👤 Sen · şimdi</div></div>`;
-  chatEl.scrollTop = chatEl.scrollHeight;
-  
-  // API ile gönder
-  const result = await api('send-message', { phone: kanbanChatPhone, message: msg, channel: kanbanChatChannel });
-  if (result?.success) {
-    // Refresh messages
-    setTimeout(() => openKanbanChat(kanbanChatPhone, kanbanChatChannel), 500);
-  }
-}
-
-function openFullChat() {
-  const phone = kanbanChatPhone;
-  const channel = kanbanChatChannel;
-  closeKanbanChat();
-  document.querySelector('[data-page="conversations"]').click();
-  setTimeout(() => {
-    loadChat(phone, channel || 'whatsapp');
-  }, 150);
-}
-
-/* OMNICHANNEL INBOX */
 async function loadConversations() {
   const list = await api('conversations'); if(!list) return;
   allTags = await api('tags') || [];
@@ -901,10 +773,6 @@ async function instantStageUpdate(newStage) {
   if (idx > -1) cachedConversations[idx].lead_stage = newStage;
   
   renderConversationList(); // Sol listeyi anında güncelle
-  
-  if (currentPage === 'page-kanban') {
-    loadKanban(); // Kanban açıksa anında yer değiştirsin
-  }
 
   // Arkada sessizce kaydet
   await api('update-patient', 'POST', {
@@ -1410,29 +1278,14 @@ function openLeadDetail(sortedIndex) {
           </div>
         </div>
 
-        <!-- 🤖 Bot Durumu & Kontrol -->
-        <div id="fd-bot-status-card" style="background:var(--card-bg); border:1px solid var(--border-color); border-radius:12px; padding:20px;">
-          <h3 style="margin:0 0 12px 0; font-size:14px; color:white; display:flex; align-items:center; gap:8px;">
-            🤖 Bot Durumu
-          </h3>
-          <div id="fd-bot-status-content" style="display:flex; flex-direction:column; gap:10px;">
-            <div style="display:flex; align-items:center; gap:8px; padding:10px 14px; border-radius:8px; background:rgba(255,255,255,0.05);">
-              <span id="fd-bot-indicator" style="width:10px; height:10px; border-radius:50%; background:#6b7280;"></span>
-              <span id="fd-bot-label" style="font-size:13px; color:var(--text-muted);">Yükleniyor...</span>
-            </div>
-            <div id="fd-bot-phase" style="font-size:11px; color:var(--text-muted); padding:0 4px;"></div>
-            <div style="display:flex; gap:6px;">
-              <button id="fd-btn-bot" onclick="fdToggleBotStatus('${cleanPhone}', 'active')" style="flex:1; padding:8px; border-radius:8px; border:1px solid var(--border-color); background:var(--bg-hover); color:white; cursor:pointer; font-size:12px; font-weight:500; transition:all 0.2s;">
-                🤖 Bot Aktif
-              </button>
-              <button id="fd-btn-human" onclick="fdToggleBotStatus('${cleanPhone}', 'human')" style="flex:1; padding:8px; border-radius:8px; border:1px solid var(--border-color); background:var(--bg-hover); color:white; cursor:pointer; font-size:12px; font-weight:500; transition:all 0.2s;">
-                👤 Manuel Devral
-              </button>
-            </div>
-            <button onclick="fdSendWelcome('${cleanPhone}')" style="width:100%; padding:8px; border-radius:8px; border:1px solid rgba(48,209,88,0.3); background:rgba(48,209,88,0.08); color:#30D158; cursor:pointer; font-size:12px; font-weight:500; transition:all 0.2s;">
-              📩 Açılış Mesajı Gönder
-            </button>
+
+        <!-- 🤖 Bot Durumu (Sadece bilgi — kontrol inbox'ta) -->
+        <div id="fd-bot-status-card" style="background:var(--card-bg); border:1px solid var(--border-color); border-radius:12px; padding:16px;">
+          <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+            <span id="fd-bot-indicator" style="width:10px; height:10px; border-radius:50%; background:#6b7280;"></span>
+            <span id="fd-bot-label" style="font-size:13px; font-weight:600; color:var(--text-muted);">Yükleniyor...</span>
           </div>
+          <div id="fd-bot-phase" style="font-size:11px; color:var(--text-muted);"></div>
         </div>
         <!-- 🏷️ CRM Etiketler (DB Bağlantılı) -->
         <div style="background:var(--card-bg); border:1px solid var(--border-color); border-radius:12px; padding:20px;">
@@ -1504,45 +1357,28 @@ async function loadFormDetailCRM(phone) {
       if (infoEl) infoEl.innerHTML = `DB durumu: <strong>${dbCfg.emoji} ${dbCfg.label}</strong>`;
     }
     
-    // 🤖 Bot Durumu güncelle
+    // 🤖 Bot Durumu güncelle (sadece bilgi)
     const isHuman = pData.status === 'human';
     const botIndicator = document.getElementById('fd-bot-indicator');
     const botLabel = document.getElementById('fd-bot-label');
     const botPhase = document.getElementById('fd-bot-phase');
-    const btnBot = document.getElementById('fd-btn-bot');
-    const btnHuman = document.getElementById('fd-btn-human');
     
     if (botIndicator) {
-      if (isHuman) {
-        botIndicator.style.background = '#FF9F0A';
-        botLabel.textContent = '👤 Manuel Kontrol — Bot durdu';
-        botLabel.style.color = '#FF9F0A';
-      } else {
-        botIndicator.style.background = '#30D158';
-        botLabel.textContent = '🤖 Bot Aktif — Otomatik yanıt veriyor';
-        botLabel.style.color = '#30D158';
-      }
+      botIndicator.style.background = isHuman ? '#FF9F0A' : '#30D158';
+      botLabel.textContent = isHuman ? '👤 Manuel Kontrol' : '🤖 Bot Aktif';
+      botLabel.style.color = isHuman ? '#FF9F0A' : '#30D158';
     }
     
     if (botPhase) {
       const phaseLabels = {
-        greeting: '📍 Faz: Karşılama — Şikayeti dinliyor',
-        discovery: '📍 Faz: Analiz — Tetkik/MR istiyor',
-        trust: '📍 Faz: İkna — Güven oluşturuyor',
-        handover: '📍 Faz: Devir — Randevu bekliyor!'
+        greeting: '📍 Karşılama — Şikayeti dinliyor',
+        discovery: '📍 Analiz — Tetkik/MR istiyor',
+        trust: '📍 İkna — Güven oluşturuyor',
+        handover: '⚠️ Devir — Randevu bekliyor!'
       };
-      botPhase.textContent = phaseLabels[pData.phase] || '📍 Faz: Başlangıç';
-      if (pData.phase === 'handover') {
-        botPhase.style.color = '#FF453A';
-        botPhase.style.fontWeight = '600';
-      }
-    }
-    
-    if (btnBot) {
-      btnBot.style.background = !isHuman ? 'rgba(48,209,88,0.15)' : 'var(--bg-hover)';
-      btnBot.style.borderColor = !isHuman ? '#30D158' : 'var(--border-color)';
-      btnHuman.style.background = isHuman ? 'rgba(255,159,10,0.15)' : 'var(--bg-hover)';
-      btnHuman.style.borderColor = isHuman ? '#FF9F0A' : 'var(--border-color)';
+      botPhase.textContent = phaseLabels[pData.phase] || '📍 Başlangıç';
+      botPhase.style.color = pData.phase === 'handover' ? '#FF453A' : 'var(--text-muted)';
+      botPhase.style.fontWeight = pData.phase === 'handover' ? '600' : '400';
     }
     
     // CRM etiketleri yükle
@@ -1555,32 +1391,7 @@ async function loadFormDetailCRM(phone) {
   }
 }
 
-// Bot durumunu form detayından toggle et
-async function fdToggleBotStatus(phone, newStatus) {
-  try {
-    await api('update-patient', 'POST', { phone, status: newStatus });
-    toast(newStatus === 'human' ? '👤 Manuel kontrole geçildi' : '🤖 Bot tekrar aktif');
-    // UI güncelle
-    loadFormDetailCRM(phone);
-  } catch(e) {
-    toast('Hata oluştu', 'error');
-  }
-}
-
-// Form detayından açılış mesajı gönder
-async function fdSendWelcome(phone) {
-  if (!phone) return toast('Telefon numarası yok', 'error');
-  try {
-    const result = await api('send-message', 'POST', { phone, message: '__welcome__', channel: 'whatsapp' });
-    if (result?.success) {
-      toast('📩 Açılış mesajı gönderildi');
-    } else {
-      toast('Gönderilemedi', 'error');
-    }
-  } catch(e) {
-    toast('Gönderim hatası', 'error');
-  }
-}
+/* Bot kontrol fonksiyonları kaldırıldı — kontrol inbox sohbet başlığında */
 
 // Pipeline durumu değiştir — DB + Sheets'e birlikte yaz
 async function setLeadPipelineStage(phone, name, stage, btnEl, sheetsStatusCol, sheetsRowIndex) {
@@ -2038,7 +1849,7 @@ checkAuth();
 setInterval(async () => {
   const page = document.querySelector('.page.active')?.id;
   if (page === 'page-dashboard') loadDashboard();
-  if (page === 'page-kanban') loadKanban();
+  // loadKanban kaldırıldı — pipeline filtreleri inbox'ta
   if (page === 'page-appointments') loadAppointments();
   if (page === 'page-conversations' && currentPhone) {
     const msgs = await api('conversation-detail&phone=' + currentPhone);
