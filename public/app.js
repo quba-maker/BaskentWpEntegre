@@ -1556,10 +1556,19 @@ async function triggerSingleOutbound(phone, name) {
     });
     const data = await resp.json();
     
-    if (data.success && data.results.successes.length > 0) {
+    if (data.success && data.results.success > 0) {
       toast('✅ Mesaj başarıyla gönderildi ve bot başlatıldı!');
+      // UI güncelle (Eğer Form Detay ekranındaysa)
+      const botIndicator = document.getElementById('fd-bot-indicator');
+      const botLabel = document.getElementById('fd-bot-label');
+      if (botIndicator && botLabel) {
+        botIndicator.style.background = '#30D158';
+        botLabel.textContent = '🤖 Bot Aktif';
+        botLabel.style.color = '#30D158';
+      }
     } else {
-      toast('❌ Mesaj gönderilemedi: ' + (data.results?.failures[0]?.error || 'Bilinmeyen hata'), 'error');
+      const errMsg = data.results?.details?.[0]?.error || 'Bilinmeyen hata';
+      toast('❌ Mesaj gönderilemedi: ' + errMsg, 'error');
     }
   } catch (error) {
     toast('Sunucu hatası', 'error');
