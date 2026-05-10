@@ -44,6 +44,22 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Custom Webkit Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
 /* LOGIN */
 .login-screen { display: flex; align-items: center; justify-content: center; min-height: 100vh; background: var(--bg-main); }
 .login-card { background: rgba(28, 28, 30, 0.8); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 48px; text-align: center; width: 380px; box-shadow: var(--shadow-lg); }
@@ -161,11 +177,11 @@ textarea:focus, input:focus, select:focus { outline: none; border-color: var(--a
 .handover-btn.active-bot { background: rgba(50, 215, 75, 0.12); color: var(--system-green); }
 .handover-btn.active-human { background: rgba(255, 159, 10, 0.12); color: var(--system-orange); }
 
-.chat-history { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; background: rgba(0,0,0,0.15); }
-.message-bubble { max-width: 75%; padding: 10px 14px; border-radius: 18px; font-size: 14px; line-height: 1.5; position: relative; }
-.message-bubble.in { background: rgba(255,255,255,0.07); border: none; align-self: flex-start; border-bottom-left-radius: 4px; color: var(--text-main); }
-.message-bubble.out { background: var(--accent-primary); color: white; align-self: flex-end; border-bottom-right-radius: 4px; }
-.message-bubble.out.bot-reply { background: rgba(255,255,255,0.05); color: rgba(245,245,247,0.85); border: none; }
+.chat-history { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; background: rgba(0,0,0,0.15); scroll-behavior: smooth; }
+.message-bubble { max-width: 75%; padding: 10px 14px; border-radius: 18px; font-size: 14px; line-height: 1.5; position: relative; box-shadow: 0 1px 2px rgba(0,0,0,0.1); }
+.message-bubble.in { background: rgba(44, 44, 46, 0.85); border: 1px solid rgba(255,255,255,0.05); align-self: flex-start; border-bottom-left-radius: 4px; color: var(--text-main); }
+.message-bubble.out { background: var(--accent-primary); color: white; align-self: flex-end; border-bottom-right-radius: 4px; border: 1px solid rgba(255,255,255,0.1); }
+.message-bubble.out.bot-reply { background: rgba(58, 58, 60, 0.85); color: rgba(245,245,247,0.95); border: 1px solid rgba(255,255,255,0.08); }
 .msg-info { font-size: 10px; margin-top: 4px; opacity: 0.45; display: flex; justify-content: flex-end; align-items: center; gap: 4px; }
 .bot-indicator { font-size: 9px; background: rgba(255,255,255,0.08); padding: 1px 5px; border-radius: 4px; }
 
@@ -174,10 +190,15 @@ textarea:focus, input:focus, select:focus { outline: none; border-color: var(--a
 .chat-composer input:focus { background: rgba(255,255,255,0.1); box-shadow: none; border: none; }
 
 /* Inbox: Details (CRM) */
-.crm-header { padding: 14px 16px; border-bottom: 1px solid rgba(255,255,255,0.04); font-weight: 600; font-size: 15px; letter-spacing: -0.2px; }
-.crm-body { padding: 16px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 14px; }
-.form-group { display: flex; flex-direction: column; gap: 5px; }
-.form-group label { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+.crm-header { padding: 14px 16px; border-bottom: 1px solid rgba(255,255,255,0.04); font-weight: 600; font-size: 15px; letter-spacing: -0.2px; background: rgba(255,255,255,0.02); }
+.crm-body { padding: 20px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 20px; }
+.form-group { display: flex; flex-direction: column; gap: 8px; background: rgba(255,255,255,0.02); padding: 16px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.03); }
+.form-group label { font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; display: flex; align-items: center; gap: 6px; }
+.lead-info-card { background: rgba(10, 132, 255, 0.05); border: 1px solid rgba(10, 132, 255, 0.15); border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+.lead-info-header { font-size: 12px; font-weight: 600; color: var(--accent-primary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; display: flex; align-items: center; gap: 6px; }
+.lead-info-row { display: flex; justify-content: space-between; font-size: 13px; align-items: center; }
+.lead-label { color: var(--text-muted); font-weight: 500; }
+.lead-value { color: var(--text-main); font-weight: 600; }
 
 /* Lead Pipeline (Sheets) */
 .sheet-tabs { display: flex; gap: 8px; margin-bottom: 16px; overflow-x: auto; scrollbar-width: none; padding-bottom: 4px; }
