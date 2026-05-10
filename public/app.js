@@ -250,10 +250,18 @@ function renderSheetTable(headers, rows, total) {
   // İsim sütunu: full_name / isim öncelikli (ad_name Meta reklam adıdır, karıştırma!)
   let nameCol = findCol(['fullname', 'full_name', 'isim', 'hastadi', 'hastaadi']);
   if (nameCol === -1) nameCol = headers.findIndex(h => /^ad$/i.test(h.trim()) || h.toLowerCase().includes('isim'));
-  let phoneCol = headers.findIndex(h => {
+  // WhatsApp numarası sütunu (birincil — bot buraya mesaj atar)
+  let whatsappCol = headers.findIndex(h => {
     const l = h.toLowerCase().replace(/[_\s]+/g, '');
-    return l.includes('whatsappnumarası') || l === 'phonenumber' || l.includes('whatsappnumarasıyazınız');
+    return l.includes('whatsappnumarası') || l.includes('whatsappnumarasıyazınız');
   });
+  // Telefon numarası sütunu (ikincil — fallback)
+  let telCol = headers.findIndex(h => {
+    const l = h.toLowerCase().replace(/[_\s]+/g, '');
+    return l === 'phonenumber';
+  });
+  // Liste görünümü için: WhatsApp öncelikli
+  let phoneCol = whatsappCol > -1 ? whatsappCol : telCol;
   let campaignCol = findCol(['campaignname', 'campaign_name', 'kampanya']);
   let deptCol = findColStrict(['adname', 'ad_name', 'campaign', 'bolum', 'bölüm', 'form'], 40);
   let statusCol = findColStrict(['durum', 'status', 'leadstatus', 'lead_status', 'aşama']);
@@ -265,6 +273,8 @@ function renderSheetTable(headers, rows, total) {
   // Kaydet (openLeadDetail kullanır)
   window._sheetHeaders = headers;
   window._sheetRows = rows;
+  window._whatsappCol = whatsappCol;
+  window._telCol = telCol;
 
   // Tarih formatlama yardımcı fonksiyonu: 🗓 09 May 2026 - 15:31
   const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -1145,7 +1155,7 @@ function openLeadDetail(sortedIndex) {
   // 📞 TÜM FORM ALANLARINDAN TELEFON NUMARASI TESPİT ET
   const phoneNumbers = [];
   const phoneRegex = /(\+?\d[\d\s\-().]{7,}\d)/g;
-  const normalizePhone = (p) => p.replace(/[\s\-().]/g, '');
+  const normalizePhone = (p) => p.replace(/\D/g, '');
   const seenPhones = new Set();
 
   if (phoneVal) {
@@ -1176,20 +1186,34 @@ function openLeadDetail(sortedIndex) {
     }
   });
 
+  // Aynı numaralar varsa sadece WhatsApp olarak göster
+  const uniquePhones = [];
+  const phoneMap = {};
+  phoneNumbers.forEach(p => {
+    if (!phoneMap[p.number]) {
+      phoneMap[p.number] = p;
+      uniquePhones.push(p);
+    } else if (p.isWhatsApp && !phoneMap[p.number].isWhatsApp) {
+      // WhatsApp olanı tercih et
+      phoneMap[p.number].label = 'WhatsApp';
+      phoneMap[p.number].isWhatsApp = true;
+    }
+  });
+
   if (phoneVal) {
     let readLeads = JSON.parse(localStorage.getItem('readLeads') || '[]');
     if (!readLeads.includes(phoneVal)) { readLeads.push(phoneVal); localStorage.setItem('readLeads', JSON.stringify(readLeads)); }
   }
 
-  const phonesHtml = phoneNumbers.length > 0 ? phoneNumbers.map(p => `
+  const phonesHtml = uniquePhones.length > 0 ? uniquePhones.map(p => `
     <div style="display:flex; align-items:center; gap:8px; padding:6px 0;">
       <div style="flex:1;">
-        <div style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">WHATSAPP</div>
-        <div style="font-size:15px; color:#25D366; font-weight:500; display:flex; align-items:center; gap:6px;">
-          🟢 ${p.raw} ${countryBadge(p.number)}
+        <div style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">${p.isWhatsApp ? 'WHATSAPP' : 'TELEFON'}</div>
+        <div style="font-size:15px; color:${p.isWhatsApp ? '#25D366' : '#60a5fa'}; font-weight:500; display:flex; align-items:center; gap:6px;">
+          ${p.isWhatsApp ? '🟢' : '📞'} ${p.raw} ${countryBadge(p.number)}
         </div>
       </div>
-      <a href="https://wa.me/${p.number}" target="_blank" style="background:#25D366; color:white; border:none; padding:4px 10px; border-radius:6px; font-size:11px; font-weight:600; text-decoration:none; white-space:nowrap;">WA Yaz</a>
+      ${p.isWhatsApp ? `<a href="https://wa.me/${p.number}" target="_blank" style="background:#25D366; color:white; border:none; padding:4px 10px; border-radius:6px; font-size:11px; font-weight:600; text-decoration:none; white-space:nowrap;">WA Yaz</a>` : ''}
     </div>
   `).join('') : `<div style="font-size:13px; color:var(--text-muted);">📱 Telefon bulunamadı</div>`;
 
