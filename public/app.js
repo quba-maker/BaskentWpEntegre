@@ -496,22 +496,8 @@ function renderConversationList() {
     const isHuman = c.status === 'human';
     const stBadge = isHuman ? '<span class="status-badge status-human">👤 Sen</span>' : '<span class="status-badge status-bot">🤖 Bot</span>';
     
-    // 🎯 Birleşik Pipeline Badge (tek kaynak: lead_stage)
-    // Bot fazından stage'i çıkar (eğer lead_stage yoksa)
-    let effectiveStage = c.lead_stage || 'new';
-    if (effectiveStage === 'new' || effectiveStage === 'responded') {
-      // Bot fazından daha doğru stage belirle
-      const phaseStage = BOT_PHASE_TO_STAGE[c.phase];
-      if (phaseStage) effectiveStage = phaseStage;
-    }
-    // Sıcak lead override
-    if (c.temperature === 'hot' && effectiveStage !== 'appointed') effectiveStage = 'hot_lead';
-    if (isHuman && !['appointed', 'lost', 'hot_lead'].includes(effectiveStage)) effectiveStage = 'hot_lead';
-    // Legacy uyumluluk
-    if (effectiveStage === 'responded') effectiveStage = 'discovery';
-    if (effectiveStage === 'appointment_request') effectiveStage = 'hot_lead';
-    
-    const stageBadge = getStageBadge(effectiveStage);
+    // 🎯 Pipeline Badge (merkezi hesaplama kullan)
+    const stageBadge = getStageBadge(c._effectiveStage || 'new');
 
     const ch = c.last_channel || c.channel || 'whatsapp';
     const hasName = c.patient_name && c.patient_name !== c.phone_number;
