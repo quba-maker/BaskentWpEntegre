@@ -228,11 +228,15 @@ export default async function handler(req, res) {
           created_at: lastMsgIn.created_at
         } : null;
 
+        // Lead stage: conversations tablosundan veya leads tablosundan
+        const leadStage = (conv.length > 0 && conv[0].lead_stage) ? conv[0].lead_stage : (lead.length > 0 ? lead[0].stage : null);
+
         return res.json({
           score,
           channels,
           lastMessage,
           conversationStatus: conv.length > 0 ? conv[0].status : null,
+          leadStage: leadStage || null,
           messageCount: msgs.length
         });
       } catch (e) {
@@ -257,10 +261,12 @@ export default async function handler(req, res) {
 
     // KONUŞMA DETAY
     if (action === 'conversation-detail') {
-      const msgs = await sql`SELECT * FROM messages WHERE phone_number = ${req.query.phone} ORDER BY created_at ASC`;
-      // Hasta'nın form geçmişini de ekle
+      const phone = (req.query.phone || '').replace(/\D/g, '');
+      const phoneAlt = phone.startsWith('90') ? phone.substring(2) : '90' + phone;
+      const msgs = await sql`SELECT * FROM messages WHERE phone_number IN (${phone}, ${phoneAlt}) ORDER BY created_at ASC`;
+      // Hasta'nın form geçmişini de ekle (raw_data dahil — form cevapları)
       let forms = [];
-      try { forms = await sql`SELECT form_name, city, email, tags, stage, created_at, contacted_at FROM leads WHERE phone_number = ${req.query.phone} ORDER BY created_at DESC`; } catch(e){}
+      try { forms = await sql`SELECT form_name, city, email, tags, stage, raw_data, created_at, contacted_at FROM leads WHERE phone_number IN (${phone}, ${phoneAlt}) ORDER BY created_at DESC`; } catch(e){}
       return res.json({ messages: msgs, forms });
     }
 
@@ -268,8 +274,25 @@ export default async function handler(req, res) {
     // MESAJLARI SİL
     if (action === 'delete-messages' && req.method === 'POST') {
       const { phone } = req.body;
-      await sql`DELETE FROM messages WHERE phone_number = ${phone}`;
-      await sql`UPDATE conversations SET message_count = 0 WHERE phone_number = ${phone}`;
+      const cleanPhone = (phone || '').replace(/\D/g, '');
+      const phoneAlt = cleanPhone.startsWith('90') ? cleanPhone.substring(2) : '90' + cleanPhone;
+      
+      // 1. Mesajları sil
+      await sql`DELETE FROM messages WHERE phone_number IN (${cleanPhone}, ${phoneAlt})`;
+      // 2. Conversation'ı tamamen sıfırla
+      await sql`UPDATE conversations SET 
+        message_count = 0, 
+        status = 'active', 
+        lead_stage = 'new',
+        last_message_at = NULL
+      WHERE phone_number IN (${cleanPhone}, ${phoneAlt})`;
+      // 3. Phase/temperature sıfırla
+      try { await sql`UPDATE conversations SET phase = 'greeting' WHERE phone_number IN (${cleanPhone}, ${phoneAlt})`; } catch(e) {}
+      // 4. Conversation states sıfırla (brain.js phase tracker)
+      try { await sql`DELETE FROM conversation_states WHERE phone_number IN (${cleanPhone}, ${phoneAlt})`; } catch(e) {}
+      // 5. Lead stage'i de sıfırla
+      try { await sql`UPDATE leads SET stage = 'new' WHERE phone_number IN (${cleanPhone}, ${phoneAlt})`; } catch(e) {}
+      
       return res.json({ success: true });
     }
 

@@ -405,19 +405,35 @@ async function enrichLeadCards(rows, phoneCol) {
         
         el.innerHTML = h;
         
-        // Badge'i DB'ye göre güncelle (Sheets status'u "CREATED" veya boşsa DB'den al)
+        // Badge'i DB'ye göre güncelle — lead durumu + bot aktif her zaman göster
         const badgeEl = document.getElementById(`lead-row-${idx}`);
-        if (badgeEl && ctx.conversationStatus) {
-          const existingBadge = badgeEl.querySelector('.lead-badge');
-          if (existingBadge && (existingBadge.classList.contains('badge-new') || existingBadge.textContent.includes('Yeni'))) {
-            // DB'de conversation varsa Yeni badge'ini güncelle
-            if (ctx.conversationStatus === 'active') {
-              existingBadge.className = 'lead-badge badge-contacted';
-              existingBadge.innerHTML = '🤖 Bot Süreçte';
-              existingBadge.style.background = 'rgba(48,209,88,0.12)';
-              existingBadge.style.color = '#30D158';
-              existingBadge.style.border = '1px solid rgba(48,209,88,0.2)';
-            }
+        if (badgeEl) {
+          const badgeContainer = badgeEl.querySelector(':scope > div:last-child');
+          if (!badgeContainer) return;
+          
+          // Lead durumu badge'i
+          const stages = { new: '🆕 Yeni', contacted: '📞 İlk Temas', discovery: '🩺 Analiz', negotiation: '🏛️ İkna', hot_lead: '🔥 Sıcak', appointed: '✅ Randevu', lost: '❌ Kayıp' };
+          const stageColors = { new: '#f59e0b', contacted: '#3b82f6', discovery: '#8b5cf6', negotiation: '#f97316', hot_lead: '#ef4444', appointed: '#22c55e', lost: '#6b7280' };
+          const leadStage = ctx.leadStage || (ctx.conversationStatus ? 'contacted' : null);
+          
+          let extraBadges = '';
+          
+          // Bot durumu
+          if (ctx.conversationStatus === 'active') {
+            extraBadges += `<span style="background:rgba(48,209,88,0.12); color:#30D158; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600; white-space:nowrap; border:1px solid rgba(48,209,88,0.2);">🤖 Bot</span>`;
+          } else if (ctx.conversationStatus === 'human') {
+            extraBadges += `<span style="background:rgba(255,159,10,0.12); color:#FF9F0A; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600; white-space:nowrap;">👤 Manuel</span>`;
+          }
+          
+          // Lead stage (yeni değilse göster)
+          if (leadStage && leadStage !== 'new') {
+            const sc = stageColors[leadStage] || '#6b7280';
+            extraBadges += `<span style="background:${sc}18; color:${sc}; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600; white-space:nowrap; border:1px solid ${sc}33;">🎯 ${stages[leadStage] || leadStage}</span>`;
+          }
+          
+          if (extraBadges) {
+            // Mevcut badge'in yanına ekle
+            badgeContainer.innerHTML = `<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">${extraBadges}${badgeContainer.innerHTML}</div>`;
           }
         }
       } catch(e) {}
@@ -742,22 +758,47 @@ async function loadChat(phone, channel) {
   }).join('');
   chatEl.scrollTop = chatEl.scrollHeight;
   
-  // Form Geçmişi — CRM panelinde göster
+  // Form Geçmişi — CRM panelinde göster (form cevapları dahil)
   const formHistory = data.forms || [];
   const formBox = document.getElementById('crm-form-history');
   const formWrapper = document.getElementById('crm-form-history-wrapper');
   if (formBox && formWrapper) {
     if (formHistory.length > 0) {
-      formBox.innerHTML = formHistory.map(f => {
+      formBox.innerHTML = formHistory.map((f, fi) => {
         const dt = new Date(f.created_at).toLocaleDateString('tr-TR',{day:'2-digit',month:'2-digit',year:'numeric'});
         let tags = []; try { tags = JSON.parse(f.tags || '[]'); } catch(e) {}
-        return `<div style="padding:8px 10px;background:var(--bg-hover);border-radius:6px;margin-bottom:6px;font-size:12px;border-left:3px solid var(--accent-primary);">
-          <div style="font-weight:600;margin-bottom:3px;">📋 ${f.form_name || 'Genel Form'}</div>
+        
+        // Form cevaplarını parse et
+        let formAnswersHtml = '';
+        try {
+          const rawData = typeof f.raw_data === 'string' ? JSON.parse(f.raw_data || '{}') : (f.raw_data || {});
+          const skipKeys = ['id', 'leadgen_id', 'form_id', 'ad_id', 'adset_id', 'campaign_id', 'platform', 'is_organic', 'created_time', 'phone_number_id'];
+          const entries = Object.entries(rawData).filter(([key]) => !skipKeys.includes(key.toLowerCase()));
+          if (entries.length > 0) {
+            formAnswersHtml = `<div id="form-answers-${fi}" style="display:none; margin-top:8px; padding-top:8px; border-top:1px solid var(--border-color);">
+              ${entries.map(([key, val]) => {
+                const label = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                return `<div style="display:flex; gap:8px; padding:3px 0; font-size:11px;">
+                  <span style="color:var(--text-muted); min-width:100px; flex-shrink:0;">${label}:</span>
+                  <span style="color:white; font-weight:500;">${val}</span>
+                </div>`;
+              }).join('')}
+            </div>`;
+          }
+        } catch(e) {}
+        
+        const hasAnswers = formAnswersHtml !== '';
+        return `<div style="padding:8px 10px;background:var(--bg-hover);border-radius:6px;margin-bottom:6px;font-size:12px;border-left:3px solid var(--accent-primary);${hasAnswers ? 'cursor:pointer;' : ''}" ${hasAnswers ? `onclick="const el=document.getElementById('form-answers-${fi}'); el.style.display=el.style.display==='none'?'block':'none';"` : ''}>
+          <div style="font-weight:600;margin-bottom:3px;display:flex;align-items:center;gap:6px;">
+            📋 ${f.form_name || 'Genel Form'}
+            ${hasAnswers ? '<span style="font-size:10px;color:var(--text-muted);">▶ Cevapları Göster</span>' : ''}
+          </div>
           <div style="color:var(--text-muted);display:flex;gap:8px;flex-wrap:wrap;">
             <span>📅 ${dt}</span>
             ${f.city ? `<span>📍 ${f.city}</span>` : ''}
             ${tags.map(t => `<span style="background:var(--accent-primary);color:white;padding:1px 5px;border-radius:4px;font-size:10px;">${t}</span>`).join('')}
           </div>
+          ${formAnswersHtml}
         </div>`;
       }).join('');
       formWrapper.style.display = 'block';
@@ -917,10 +958,19 @@ async function setConvStatus(s) {
 }
 
 async function deleteMessages() {
-  if(!currentPhone || !confirm('Tüm geçmiş silinecek. Onaylıyor musunuz?')) return;
+  if(!currentPhone || !confirm('Tüm geçmiş silinecek ve lead durumu sıfırlanacak. Onaylıyor musunuz?')) return;
   await api('delete-messages','POST',{phone:currentPhone});
-  toast('Sohbet temizlendi');
+  toast('Sohbet ve lead durumu tamamen sıfırlandı');
   document.getElementById('chat-messages').innerHTML = '<div class="empty">Sohbet temizlendi.</div>';
+  
+  // UI'yı da sıfırla
+  document.getElementById('btn-status-bot').className = 'handover-btn active-bot';
+  document.getElementById('btn-status-human').className = 'handover-btn';
+  const stageSelect = document.getElementById('crm-stage');
+  if (stageSelect) stageSelect.value = 'new';
+  
+  // Listeyi yenile
+  loadConversations();
 }
 
 /* ========== QUOTE ENGINE (HIZLI TEKLİF) ========== */
