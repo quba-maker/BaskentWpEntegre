@@ -717,14 +717,27 @@ async function loadChat(phone, channel) {
   document.getElementById('crm-panel').style.display = 'flex';
   document.getElementById('crm-name').value = pData.patient_name || '';
   document.getElementById('crm-notes').value = pData.notes || '';
-  document.getElementById('crm-department').value = pData.department || '';
   
-  const stageSelect = document.getElementById('crm-stage');
-  if (pData.has_lead && pData.lead_stage) {
-    stageSelect.value = pData.lead_stage;
+  // 🏥 Bölüm: Formdan gelen department'i otomatik yerleştir
+  const deptSelect = document.getElementById('crm-department');
+  const deptAutoEl = document.getElementById('crm-dept-auto');
+  const deptAutoVal = document.getElementById('crm-dept-auto-val');
+  const dept = pData.department || '';
+  deptSelect.value = dept;
+  // Eğer formdan gelen bir department varsa, otomatik etiketi göster
+  if (dept && pData.has_lead) {
+    deptAutoEl.style.display = 'block';
+    deptAutoVal.textContent = dept;
   } else {
-    stageSelect.value = 'new';
+    deptAutoEl.style.display = 'none';
   }
+  
+  // 🎯 Süreç Durumu: Birleşik pipeline
+  const stageSelect = document.getElementById('crm-stage');
+  const effectiveStage = pData.lead_stage || (pData.has_lead ? 'new' : 'new');
+  // Fallback: eski 'waiting' → 'new', 'responded' → 'discovery'
+  const stageMap = { waiting: 'new', responded: 'discovery', appointment_request: 'hot_lead' };
+  stageSelect.value = stageMap[effectiveStage] || effectiveStage;
 
   // Tags are now handled system-wide
 
@@ -736,8 +749,8 @@ async function loadChat(phone, channel) {
     document.getElementById('crm-lead-city').textContent = pData.lead_city || '—';
     document.getElementById('crm-lead-email').textContent = pData.lead_email || '—';
     document.getElementById('crm-lead-date').textContent = pData.lead_date ? new Date(pData.lead_date).toLocaleDateString('tr-TR') : '—';
-    const stageMap = { new:'🆕 Yeni', contacted:'📞 İletişime Geçildi', responded:'💬 Cevap Verdi', appointed:'✅ Randevu Alındı', lost:'❌ Kaybedildi' };
-    document.getElementById('crm-lead-stage').textContent = stageMap[pData.lead_stage] || pData.lead_stage || '—';
+    const stageCfg = PIPELINE_STAGES[pData.lead_stage] || { emoji: '❓', label: pData.lead_stage || '—' };
+    document.getElementById('crm-lead-stage').textContent = `${stageCfg.emoji} ${stageCfg.label}`;
     document.getElementById('crm-lead-score').innerHTML = pData.lead_score ? `<b>${pData.lead_score}</b> / 100` : '—';
     // Adı lead'den geliyorsa otomatik doldur
     if (pData.patient_name && !document.getElementById('crm-name').value) {
@@ -1397,6 +1410,30 @@ function openLeadDetail(sortedIndex) {
           </div>
         </div>
 
+        <!-- 🤖 Bot Durumu & Kontrol -->
+        <div id="fd-bot-status-card" style="background:var(--card-bg); border:1px solid var(--border-color); border-radius:12px; padding:20px;">
+          <h3 style="margin:0 0 12px 0; font-size:14px; color:white; display:flex; align-items:center; gap:8px;">
+            🤖 Bot Durumu
+          </h3>
+          <div id="fd-bot-status-content" style="display:flex; flex-direction:column; gap:10px;">
+            <div style="display:flex; align-items:center; gap:8px; padding:10px 14px; border-radius:8px; background:rgba(255,255,255,0.05);">
+              <span id="fd-bot-indicator" style="width:10px; height:10px; border-radius:50%; background:#6b7280;"></span>
+              <span id="fd-bot-label" style="font-size:13px; color:var(--text-muted);">Yükleniyor...</span>
+            </div>
+            <div id="fd-bot-phase" style="font-size:11px; color:var(--text-muted); padding:0 4px;"></div>
+            <div style="display:flex; gap:6px;">
+              <button id="fd-btn-bot" onclick="fdToggleBotStatus('${cleanPhone}', 'active')" style="flex:1; padding:8px; border-radius:8px; border:1px solid var(--border-color); background:var(--bg-hover); color:white; cursor:pointer; font-size:12px; font-weight:500; transition:all 0.2s;">
+                🤖 Bot Aktif
+              </button>
+              <button id="fd-btn-human" onclick="fdToggleBotStatus('${cleanPhone}', 'human')" style="flex:1; padding:8px; border-radius:8px; border:1px solid var(--border-color); background:var(--bg-hover); color:white; cursor:pointer; font-size:12px; font-weight:500; transition:all 0.2s;">
+                👤 Manuel Devral
+              </button>
+            </div>
+            <button onclick="fdSendWelcome('${cleanPhone}')" style="width:100%; padding:8px; border-radius:8px; border:1px solid rgba(48,209,88,0.3); background:rgba(48,209,88,0.08); color:#30D158; cursor:pointer; font-size:12px; font-weight:500; transition:all 0.2s;">
+              📩 Açılış Mesajı Gönder
+            </button>
+          </div>
+        </div>
         <!-- 🏷️ CRM Etiketler (DB Bağlantılı) -->
         <div style="background:var(--card-bg); border:1px solid var(--border-color); border-radius:12px; padding:20px;">
           <h3 style="margin:0 0 12px 0; font-size:14px; color:white; display:flex; align-items:center; gap:8px;">
@@ -1447,8 +1484,7 @@ async function loadFormDetailCRM(phone) {
   try {
     const pData = await api('get-patient&phone=' + phone);
     
-    // Pipeline durumunu DB'den kontrol et — ama Sheets'ten okunan initialStage zaten UI'da set
-    // DB'de farklı bir stage varsa onu öncelikle göster
+    // Pipeline durumunu DB'den kontrol et
     if (pData.lead_stage && pData.lead_stage !== 'new') {
       document.querySelectorAll('.fd-stage-btn').forEach(btn => {
         const stage = btn.dataset.stage;
@@ -1468,6 +1504,47 @@ async function loadFormDetailCRM(phone) {
       if (infoEl) infoEl.innerHTML = `DB durumu: <strong>${dbCfg.emoji} ${dbCfg.label}</strong>`;
     }
     
+    // 🤖 Bot Durumu güncelle
+    const isHuman = pData.status === 'human';
+    const botIndicator = document.getElementById('fd-bot-indicator');
+    const botLabel = document.getElementById('fd-bot-label');
+    const botPhase = document.getElementById('fd-bot-phase');
+    const btnBot = document.getElementById('fd-btn-bot');
+    const btnHuman = document.getElementById('fd-btn-human');
+    
+    if (botIndicator) {
+      if (isHuman) {
+        botIndicator.style.background = '#FF9F0A';
+        botLabel.textContent = '👤 Manuel Kontrol — Bot durdu';
+        botLabel.style.color = '#FF9F0A';
+      } else {
+        botIndicator.style.background = '#30D158';
+        botLabel.textContent = '🤖 Bot Aktif — Otomatik yanıt veriyor';
+        botLabel.style.color = '#30D158';
+      }
+    }
+    
+    if (botPhase) {
+      const phaseLabels = {
+        greeting: '📍 Faz: Karşılama — Şikayeti dinliyor',
+        discovery: '📍 Faz: Analiz — Tetkik/MR istiyor',
+        trust: '📍 Faz: İkna — Güven oluşturuyor',
+        handover: '📍 Faz: Devir — Randevu bekliyor!'
+      };
+      botPhase.textContent = phaseLabels[pData.phase] || '📍 Faz: Başlangıç';
+      if (pData.phase === 'handover') {
+        botPhase.style.color = '#FF453A';
+        botPhase.style.fontWeight = '600';
+      }
+    }
+    
+    if (btnBot) {
+      btnBot.style.background = !isHuman ? 'rgba(48,209,88,0.15)' : 'var(--bg-hover)';
+      btnBot.style.borderColor = !isHuman ? '#30D158' : 'var(--border-color)';
+      btnHuman.style.background = isHuman ? 'rgba(255,159,10,0.15)' : 'var(--bg-hover)';
+      btnHuman.style.borderColor = isHuman ? '#FF9F0A' : 'var(--border-color)';
+    }
+    
     // CRM etiketleri yükle
     let currentTags = [];
     try { currentTags = JSON.parse(pData.tags || '[]'); } catch(e) {}
@@ -1475,6 +1552,33 @@ async function loadFormDetailCRM(phone) {
     
   } catch(e) {
     console.error('CRM yükleme hatası:', e);
+  }
+}
+
+// Bot durumunu form detayından toggle et
+async function fdToggleBotStatus(phone, newStatus) {
+  try {
+    await api('update-patient', 'POST', { phone, status: newStatus });
+    toast(newStatus === 'human' ? '👤 Manuel kontrole geçildi' : '🤖 Bot tekrar aktif');
+    // UI güncelle
+    loadFormDetailCRM(phone);
+  } catch(e) {
+    toast('Hata oluştu', 'error');
+  }
+}
+
+// Form detayından açılış mesajı gönder
+async function fdSendWelcome(phone) {
+  if (!phone) return toast('Telefon numarası yok', 'error');
+  try {
+    const result = await api('send-message', 'POST', { phone, message: '__welcome__', channel: 'whatsapp' });
+    if (result?.success) {
+      toast('📩 Açılış mesajı gönderildi');
+    } else {
+      toast('Gönderilemedi', 'error');
+    }
+  } catch(e) {
+    toast('Gönderim hatası', 'error');
   }
 }
 

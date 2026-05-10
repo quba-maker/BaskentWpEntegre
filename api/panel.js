@@ -207,7 +207,7 @@ export default async function handler(req, res) {
 
     // HASTA BİLGİSİ GÜNCELLE (CRM)
     if (action === 'update-patient' && req.method === 'POST') {
-      const { phone, patient_name, tags, notes, department, patient_type, lead_stage } = req.body;
+      const { phone, patient_name, tags, notes, department, patient_type, lead_stage, status } = req.body;
       let parsedTags = [];
       try { parsedTags = JSON.parse(tags || '[]'); } catch(e){}
 
@@ -217,13 +217,14 @@ export default async function handler(req, res) {
       // UPSERT: Kayıt yoksa oluştur (Form lead'leri Sheets'te olup DB'de olmayabilir)
       await sql`
         INSERT INTO conversations (phone_number, patient_name, tags, notes, department, patient_type, status, lead_stage)
-        VALUES (${phone}, ${patient_name || null}, ${tags || '[]'}, ${notes || ''}, ${department || null}, ${patient_type || 'Yerli'}, 'active', ${lead_stage || 'new'})
+        VALUES (${phone}, ${patient_name || null}, ${tags || '[]'}, ${notes || ''}, ${department || null}, ${patient_type || 'Yerli'}, ${status || 'active'}, ${lead_stage || 'new'})
         ON CONFLICT (phone_number) DO UPDATE SET
           patient_name = COALESCE(NULLIF(${patient_name || null}, ''), conversations.patient_name),
           tags = CASE WHEN ${tags || '[]'} != '[]' THEN ${tags || '[]'} ELSE conversations.tags END,
           notes = CASE WHEN ${notes || ''} != '' THEN ${notes || ''} ELSE conversations.notes END,
           department = COALESCE(NULLIF(${department || null}, ''), conversations.department),
-          lead_stage = COALESCE(NULLIF(${lead_stage || null}, ''), conversations.lead_stage)
+          lead_stage = COALESCE(NULLIF(${lead_stage || null}, ''), conversations.lead_stage),
+          status = COALESCE(NULLIF(${status || null}, ''), conversations.status)
       `;
       if (lead_stage) {
         // leads tablosunda da güncelle (varsa)

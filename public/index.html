@@ -179,17 +179,39 @@
             </div>
 
             <div class="form-group">
-              <label>Süreç Durumu</label>
+              <label>🎯 Süreç Durumu</label>
               <select id="crm-stage" onchange="instantStageUpdate(this.value)">
-                <option value="waiting">⏳ Satış Bekliyor</option>
+                <option value="new">🆕 Yeni Lead</option>
+                <option value="contacted">📞 İlk Temas</option>
+                <option value="discovery">🩺 Analiz</option>
+                <option value="negotiation">🏛️ İkna</option>
+                <option value="hot_lead">🔥 Sıcak Lead</option>
                 <option value="appointed">✅ Randevu Alındı</option>
-                <option value="lost">❌ Kaybedildi / İptal</option>
+                <option value="lost">❌ Kaybedildi</option>
               </select>
             </div>
 
             <div class="form-group">
-              <label>İlgilendiği Tedavi / Bölüm</label>
-              <input type="text" id="crm-department" placeholder="Örn: Estetik, Diş" onblur="autoSaveCRM()">
+              <label>🏥 İlgilendiği Tedavi / Bölüm</label>
+              <div id="crm-dept-auto" style="display:none; padding:6px 10px; margin-bottom:6px; border-radius:6px; background:rgba(10,132,255,0.08); border:1px solid rgba(10,132,255,0.2); font-size:12px; color:#0A84FF;">
+                📋 Formdan: <strong id="crm-dept-auto-val"></strong>
+              </div>
+              <select id="crm-department" onchange="autoSaveCRM()">
+                <option value="">Seçiniz...</option>
+                <option value="Kardiyoloji">❤️ Kardiyoloji</option>
+                <option value="Ortopedi">🦴 Ortopedi</option>
+                <option value="Estetik">💎 Estetik</option>
+                <option value="Diş">🦷 Diş</option>
+                <option value="Göz">👁️ Göz</option>
+                <option value="Tüp Bebek">👶 Tüp Bebek</option>
+                <option value="Organ Nakli">🫀 Organ Nakli</option>
+                <option value="Onkoloji">🔬 Onkoloji</option>
+                <option value="Obezite">⚖️ Obezite</option>
+                <option value="Nöroloji">🧠 Nöroloji</option>
+                <option value="Üroloji">🩺 Üroloji</option>
+                <option value="Check-Up">📋 Check-Up</option>
+                <option value="Genel">📌 Genel</option>
+              </select>
             </div>
 
 
