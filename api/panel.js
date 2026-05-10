@@ -231,7 +231,7 @@ export default async function handler(req, res) {
       }
 
       // OTOMATİK RANDEVU OLUŞTURMA
-      if (lead_stage === 'appointment_request' || lead_stage === 'appointed' || 
+      if (lead_stage === 'appointment_request' || lead_stage === 'appointed' || lead_stage === 'hot_lead' ||
           parsedTags.includes('Randevu İstiyor') || parsedTags.includes('Randevu Alındı')) {
         try {
           // Sadece aktif (bekleyen, planlanmış, onaylanmış) bir randevusu var mı diye bak. İptal olanlar için yenisi açılabilir.
@@ -624,7 +624,7 @@ export default async function handler(req, res) {
       const campaignConversion = await sql`
         SELECT l.form_name, 
                COUNT(*) as total,
-               COUNT(CASE WHEN l.stage = 'responded' THEN 1 END) as responded,
+               COUNT(CASE WHEN l.stage IN ('responded', 'discovery', 'negotiation', 'hot_lead') THEN 1 END) as responded,
                COUNT(CASE WHEN l.stage = 'appointed' THEN 1 END) as appointed
         FROM leads l 
         WHERE l.form_name IS NOT NULL AND l.form_name != ''

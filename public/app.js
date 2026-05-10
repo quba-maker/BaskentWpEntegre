@@ -1450,13 +1450,12 @@ async function loadFormDetailCRM(phone) {
     // Pipeline durumunu DB'den kontrol et — ama Sheets'ten okunan initialStage zaten UI'da set
     // DB'de farklı bir stage varsa onu öncelikle göster
     if (pData.lead_stage && pData.lead_stage !== 'new') {
-      const colors = { new:'#8b5cf6', contacted:'#3b82f6', responded:'#f59e0b', appointed:'#22c55e', lost:'#6b7280' };
-      const stageLabels = { new:'🆕 Yeni Lead', contacted:'📞 İletişime Geçildi', responded:'💬 Cevap Verdi', appointed:'✅ Randevu Alındı', lost:'❌ Kaybedildi' };
       document.querySelectorAll('.fd-stage-btn').forEach(btn => {
         const stage = btn.dataset.stage;
+        const sCfg = PIPELINE_STAGES[stage] || PIPELINE_STAGES.new;
         if (stage === pData.lead_stage) {
-          btn.style.background = colors[stage] + '22';
-          btn.style.borderColor = colors[stage];
+          btn.style.background = sCfg.color + '22';
+          btn.style.borderColor = sCfg.color;
           btn.style.fontWeight = '700';
         } else {
           btn.style.background = 'var(--bg-hover)';
@@ -1465,7 +1464,8 @@ async function loadFormDetailCRM(phone) {
         }
       });
       const infoEl = document.getElementById('fd-pipeline-info');
-      if (infoEl) infoEl.innerHTML = `DB durumu: <strong>${stageLabels[pData.lead_stage] || pData.lead_stage}</strong>`;
+      const dbCfg = PIPELINE_STAGES[pData.lead_stage] || { emoji: '❓', label: pData.lead_stage };
+      if (infoEl) infoEl.innerHTML = `DB durumu: <strong>${dbCfg.emoji} ${dbCfg.label}</strong>`;
     }
     
     // CRM etiketleri yükle
