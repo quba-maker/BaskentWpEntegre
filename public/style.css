@@ -276,7 +276,9 @@ textarea:focus, input:focus, select:focus { outline: none; border-color: var(--a
   .content { padding: 16px; padding-top: 72px; }
   .stats-grid { grid-template-columns: 1fr; gap: 12px; }
   .inbox-layout { flex-direction: column; height: auto; }
-  .inbox-sidebar { max-height: 50vh; border-bottom: 1px solid var(--border-light); }
+  .inbox-sidebar { max-height: 50vh; width: 100% !important; max-width: 100%; border-bottom: 1px solid var(--border-light); }
+  .inbox-details { width: 100% !important; max-width: 100%; }
+  .resize-handle { display: none !important; }
   .chat-area { min-height: 60vh; }
   .crm-panel { display: none; }
 }
