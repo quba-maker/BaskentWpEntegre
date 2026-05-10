@@ -119,7 +119,20 @@ export default async function handler(req, res) {
           phases.forEach(r => { funnelPhases[r.p] = parseInt(r.c); });
         } catch(e) {}
         
-        leadStats = { todayLeads: lt[0].c, totalLeads: la[0].c, contacted: lc[0].c, appointed: lp[0].c, lost: ll[0].c, campaigns: camps, conversionRate, avgResponseMin, hotLeads, responseRate, channelBreakdown, funnelPhases };
+        // 🏥 Show-up Rate
+        let showUpRate = 0;
+        let avgSatisfaction = 0;
+        try {
+          const showedTotal = await sql`SELECT COUNT(*) as c FROM events WHERE showed_up IS NOT NULL`;
+          const showedYes = await sql`SELECT COUNT(*) as c FROM events WHERE showed_up = true`;
+          const totalShowEvents = parseInt(showedTotal[0].c) || 1;
+          showUpRate = Math.round((parseInt(showedYes[0].c) / totalShowEvents) * 100);
+          
+          const sat = await sql`SELECT AVG(satisfaction_score) as avg FROM events WHERE satisfaction_score IS NOT NULL`;
+          avgSatisfaction = parseFloat(sat[0]?.avg || 0).toFixed(1);
+        } catch(e) {}
+        
+        leadStats = { todayLeads: lt[0].c, totalLeads: la[0].c, contacted: lc[0].c, appointed: lp[0].c, lost: ll[0].c, campaigns: camps, conversionRate, avgResponseMin, hotLeads, responseRate, channelBreakdown, funnelPhases, showUpRate, avgSatisfaction };
       } catch(e) {}
 
       return res.json({ totalMessages: total[0].c, todayMessages: today[0].c, activeConversations: active[0].c, humanConversations: human[0].c, recentMessages: recent, leadStats });

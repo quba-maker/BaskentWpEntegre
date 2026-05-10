@@ -83,6 +83,7 @@ export default async function handler(req, res) {
     try { await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_follow_up_at TIMESTAMP`; } catch(e) {}
     try { await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS department VARCHAR(100)`; } catch(e) {}
     try { await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS patient_type VARCHAR(50)`; } catch(e) {}
+    try { await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_channel VARCHAR(20)`; } catch(e) {}
 
     // Varsayılan etiketler
     const existingTags = await sql`SELECT COUNT(*) as c FROM tags`;

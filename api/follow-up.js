@@ -1,6 +1,8 @@
 import axios from 'axios';
 import { neon } from '@neondatabase/serverless';
 import { checkEscalations } from '../lib/ai/handoverManager.js';
+import { sendInstagramMessage } from '../lib/channels/instagram.js';
+import { sendMessengerMessage } from '../lib/channels/messenger.js';
 
 // WhatsApp Template mesajı gönderme (24 saat penceresi kapandıktan sonra)
 async function sendTemplateMessage(phoneId, token, phone, templateName, languageCode = 'tr') {
@@ -180,6 +182,7 @@ export default async function handler(req, res) {
   try {
     const candidates = await sql`
       SELECT c.phone_number, c.patient_name, c.follow_up_count, c.status, c.department, c.last_message_at,
+        COALESCE(c.last_channel, c.channel, 'whatsapp') as conv_channel,
         (SELECT direction FROM messages WHERE phone_number = c.phone_number ORDER BY created_at DESC LIMIT 1) as last_direction,
         (SELECT created_at FROM messages WHERE phone_number = c.phone_number AND direction = 'in' ORDER BY created_at DESC LIMIT 1) as last_patient_msg_time,
         (SELECT content FROM messages WHERE phone_number = c.phone_number AND direction = 'in' ORDER BY created_at DESC LIMIT 1) as last_patient_text
@@ -216,24 +219,41 @@ export default async function handler(req, res) {
       let msgContent = '';
 
       try {
+        const ch = conv.conv_channel || 'whatsapp';
+        
         if (currentCount < 3 && windowOpen) {
           // ✅ Pencere açık — kademeli metin mesajı gönder
           const texts = followUpMessages[lang] || followUpMessages.tr;
           const idx = Math.min(currentCount, texts.length - 1);
           msgContent = texts[idx](name, dept);
-          await sendTextMessage(PHONE_ID, META, conv.phone_number, msgContent);
+          
+          // 📱 Kanal bazlı gönderim
+          if (ch === 'instagram') {
+            await sendInstagramMessage(conv.phone_number, msgContent);
+          } else if (ch === 'messenger') {
+            await sendMessengerMessage(conv.phone_number, msgContent);
+          } else {
+            await sendTextMessage(PHONE_ID, META, conv.phone_number, msgContent);
+          }
           textUsed++;
-          console.log(`📤 [Kademe ${currentCount}/${lang}] Takip: ${conv.phone_number} (${Math.round(hoursSince)}s sonra)`);
+          console.log(`📤 [Kademe ${currentCount}/${lang}/${ch}] Takip: ${conv.phone_number} (${Math.round(hoursSince)}s sonra)`);
         } else {
-          // ⏰ Pencere KAPALI veya kademe 3 — template gönder
-          const templateLang = lang === 'tr' ? 'tr' : lang === 'ar' ? 'ar' : lang === 'ru' ? 'ru' : lang === 'de' ? 'de' : lang === 'fr' ? 'fr' : 'en';
-          await sendTemplateMessage(PHONE_ID, META, conv.phone_number, templateName, templateLang);
-          msgContent = `[Şablon: ${templateName} (${templateLang})]`;
-          templateUsed++;
-          console.log(`📋 [Şablon/Kademe ${currentCount}] Takip: ${conv.phone_number} (${Math.round(hoursSince)}s, pencere kapalı)`);
+          // ⏰ Pencere KAPALI veya kademe 3
+          if (ch === 'whatsapp') {
+            // WhatsApp — template gönder
+            const templateLang = lang === 'tr' ? 'tr' : lang === 'ar' ? 'ar' : lang === 'ru' ? 'ru' : lang === 'de' ? 'de' : lang === 'fr' ? 'fr' : 'en';
+            await sendTemplateMessage(PHONE_ID, META, conv.phone_number, templateName, templateLang);
+            msgContent = `[Şablon: ${templateName} (${templateLang})]`;
+            templateUsed++;
+          } else {
+            // IG/Messenger — pencere kapalıysa skip (template gönderemeyiz)
+            console.log(`⏰ [${ch}] 24s pencere kapalı, takip atlanamıyor: ${conv.phone_number}`);
+            skipped++; continue;
+          }
+          console.log(`📋 [Şablon/Kademe ${currentCount}] Takip: ${conv.phone_number} (${Math.round(hoursSince)}s)`);
         }
 
-        await sql`INSERT INTO messages (phone_number, direction, content, model_used, channel) VALUES (${conv.phone_number}, 'out', ${msgContent}, 'follow-up', 'whatsapp')`;
+        await sql`INSERT INTO messages (phone_number, direction, content, model_used, channel) VALUES (${conv.phone_number}, 'out', ${msgContent}, 'follow-up', ${ch})`;
         await sql`UPDATE conversations SET follow_up_count = follow_up_count + 1, last_follow_up_at = NOW(), last_message_at = NOW() WHERE phone_number = ${conv.phone_number}`;
         
         // 🔄 Follow-up sonrası bot'u tekrar aktif et (hasta cevaplarsa bot yanıt verebilsin)
@@ -256,6 +276,136 @@ export default async function handler(req, res) {
     escalated = await checkEscalations(sql);
   } catch(e) { console.error('Escalation check hatası:', e.message); }
 
-  console.log(`✅ Takip: ${sent} gönderildi (${textUsed} metin, ${templateUsed} şablon), ${skipped} atlandı, ${welcomeSent} ertelenmiş karşılama, ${escalated} escalation`);
-  return res.json({ success: true, sent, skipped, textUsed, templateUsed, welcomeSent, escalated, total: sent + skipped });
+  // ============================================================
+  // BÖLÜM 4: Randevu Hatırlatma (D-3, D-1, D-0)
+  // ============================================================
+  let reminders = 0;
+  try {
+    const upcoming = await sql`
+      SELECT e.id, e.phone_number, e.scheduled_date, e.status, c.patient_name,
+        COALESCE(c.last_channel, c.channel, 'whatsapp') as ch
+      FROM events e
+      JOIN conversations c ON c.phone_number = e.phone_number
+      WHERE e.event_type = 'appointment_request'
+        AND e.status IN ('scheduled', 'confirmed')
+        AND e.scheduled_date IS NOT NULL
+        AND e.showed_up IS NULL
+    `;
+    
+    for (const apt of upcoming) {
+      const aptDate = new Date(apt.scheduled_date);
+      const now = new Date();
+      const daysUntil = Math.ceil((aptDate - now) / 86400000);
+      const name = apt.patient_name || '';
+      const dateStr = aptDate.toLocaleDateString('tr-TR', {day:'numeric', month:'long', year:'numeric', hour:'2-digit', minute:'2-digit'});
+      
+      let reminderMsg = null;
+      if (daysUntil === 3) {
+        reminderMsg = `${name ? name + ', r' : 'R'}andevunuza 3 gün kaldı 📅\n\n📍 Başkent Üniversitesi Konya Hastanesi\n🕒 ${dateStr}\n\nHerhangi bir sorunuz varsa bize yazabilirsiniz 🙏`;
+      } else if (daysUntil === 1) {
+        reminderMsg = `${name ? name + ', y' : 'Y'}arın randevunuz var! 📅\n\n📍 Başkent Üniversitesi Konya Hastanesi\n🕒 ${dateStr}\n\nSizi bekliyoruz 🙏`;
+      } else if (daysUntil === 0) {
+        reminderMsg = `${name ? name + ', b' : 'B'}ugün randevunuz var! 🏥\n\n📍 Başkent Üniversitesi Konya Hastanesi\n🕒 ${dateStr}\n\nGörüşmek üzere, geçmiş olsun 🙏`;
+      }
+      
+      if (reminderMsg) {
+        try {
+          if (apt.ch === 'whatsapp') {
+            await sendTextMessage(PHONE_ID, META, apt.phone_number, reminderMsg);
+          } else if (apt.ch === 'instagram') {
+            await sendInstagramMessage(apt.phone_number, reminderMsg);
+          } else if (apt.ch === 'messenger') {
+            await sendMessengerMessage(apt.phone_number, reminderMsg);
+          }
+          await sql`INSERT INTO messages (phone_number, direction, content, model_used, channel) VALUES (${apt.phone_number}, 'out', ${reminderMsg}, 'reminder', ${apt.ch})`;
+          reminders++;
+          console.log(`📅 [D-${daysUntil}] Randevu hatırlatma: ${apt.phone_number}`);
+        } catch(e) { console.error(`Hatırlatma hatası (${apt.phone_number}):`, e.message); }
+      }
+    }
+  } catch(e) { console.error('Randevu hatırlatma hatası:', e.message); }
+
+  // ============================================================
+  // BÖLÜM 5: Kaybedilen Hasta Recovery (30/60/90 gün)
+  // ============================================================
+  let recovered = 0;
+  try {
+    const lostLeads = await sql`
+      SELECT l.phone_number, l.patient_name, l.form_name, l.stage,
+        COALESCE(c.last_channel, c.channel, 'whatsapp') as ch,
+        EXTRACT(DAY FROM NOW() - l.created_at) as days_since
+      FROM leads l
+      LEFT JOIN conversations c ON c.phone_number = l.phone_number
+      WHERE l.stage = 'lost'
+        AND l.created_at > NOW() - INTERVAL '95 days'
+        AND NOT EXISTS (
+          SELECT 1 FROM messages m 
+          WHERE m.phone_number = l.phone_number 
+          AND m.model_used = 'recovery' 
+          AND m.created_at > NOW() - INTERVAL '25 days'
+        )
+    `;
+    
+    for (const lead of lostLeads) {
+      const days = Math.round(lead.days_since);
+      if (days < 28 || days > 95) continue;
+      
+      const name = lead.patient_name || '';
+      const dept = lead.form_name || 'sağlık';
+      let recoveryMsg = null;
+      
+      if (days >= 28 && days <= 35) {
+        recoveryMsg = `${name ? name + ', g' : 'G'}eçen ay ${dept} konusunda bize ulaşmıştınız. Durumunuzda bir değişiklik oldu mu? Ücretsiz ön değerlendirme hakkınız hala geçerli 🙏`;
+      } else if (days >= 55 && days <= 65) {
+        recoveryMsg = `${name ? name + ', s' : 'S'}ağlığınız bizim için hala önemli 🙏 ${dept} konusunda uzman ekibimiz sizi değerlendirmeye hazır. İsterseniz size uygun bir zamanda sizi arayalım.`;
+      } else if (days >= 85 && days <= 95) {
+        recoveryMsg = `${name ? name + ', B' : 'B'}aşkent Üniversitesi Konya Hastanesi'nden yazıyoruz. ${dept} konusundaki durumunuzu merak ettik. Sağlığınızla ilgili herhangi bir konuda yardımcı olabiliriz — bize yazmaktan çekinmeyin 🙏`;
+      }
+      
+      if (recoveryMsg && lead.ch === 'whatsapp') {
+        try {
+          await sendTextMessage(PHONE_ID, META, lead.phone_number, recoveryMsg);
+          await sql`INSERT INTO messages (phone_number, direction, content, model_used, channel) VALUES (${lead.phone_number}, 'out', ${recoveryMsg}, 'recovery', 'whatsapp')`;
+          await sql`UPDATE leads SET stage = 'contacted' WHERE phone_number = ${lead.phone_number} AND stage = 'lost'`;
+          await sql`UPDATE conversations SET follow_up_count = 0, status = 'active' WHERE phone_number = ${lead.phone_number}`;
+          recovered++;
+          console.log(`🔄 [D${days}] Recovery: ${lead.phone_number}`);
+        } catch(e) {}
+      }
+    }
+  } catch(e) { console.error('Recovery hatası:', e.message); }
+
+  // ============================================================
+  // BÖLÜM 6: Post-Tedavi Memnuniyet Anketi
+  // ============================================================
+  let surveys = 0;
+  try {
+    const completed = await sql`
+      SELECT e.id, e.phone_number, c.patient_name,
+        COALESCE(c.last_channel, c.channel, 'whatsapp') as ch
+      FROM events e
+      JOIN conversations c ON c.phone_number = e.phone_number
+      WHERE e.treatment_completed = true
+        AND e.satisfaction_score IS NULL
+        AND e.showed_up_at < NOW() - INTERVAL '1 day'
+        AND e.showed_up_at > NOW() - INTERVAL '3 days'
+    `;
+    
+    for (const ev of completed) {
+      const name = ev.patient_name || '';
+      const surveyMsg = `${name ? name + ', t' : 'T'}edavinizin tamamlandığını öğrendik! Sizin için her şey yolunda mı? 🙏\n\nDeneyiminizi 1-5 arası puanlasanız kaç verirdiniz?\n⭐ 1 — Memnun değilim\n⭐⭐ 2 — Az memnun\n⭐⭐⭐ 3 — Orta\n⭐⭐⭐⭐ 4 — Memnun\n⭐⭐⭐⭐⭐ 5 — Çok memnun\n\nGörüşleriniz bizim için çok değerli!`;
+      
+      try {
+        if (ev.ch === 'whatsapp') {
+          await sendTextMessage(PHONE_ID, META, ev.phone_number, surveyMsg);
+        }
+        await sql`INSERT INTO messages (phone_number, direction, content, model_used, channel) VALUES (${ev.phone_number}, 'out', ${surveyMsg}, 'survey', ${ev.ch})`;
+        surveys++;
+        console.log(`⭐ Memnuniyet anketi gönderildi: ${ev.phone_number}`);
+      } catch(e) {}
+    }
+  } catch(e) { console.error('Anket hatası:', e.message); }
+
+  console.log(`✅ Takip: ${sent} gönderildi (${textUsed} metin, ${templateUsed} şablon), ${skipped} atlandı, ${welcomeSent} karşılama, ${escalated} escalation, ${reminders} hatırlatma, ${recovered} recovery, ${surveys} anket`);
+  return res.json({ success: true, sent, skipped, textUsed, templateUsed, welcomeSent, escalated, reminders, recovered, surveys, total: sent + skipped });
 }

@@ -142,8 +142,8 @@ async function loadDashboard() {
       const rrColor = ls.responseRate >= 60 ? 'var(--system-green)' : (ls.responseRate >= 30 ? 'var(--system-orange)' : 'var(--system-red)');
       
       kpiEl.innerHTML = `
-        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px,1fr)); gap:10px;">
-          <div style="background:var(--bg-card); border-radius:12px; padding:14px; text-align:center;">
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(120px,1fr)); gap:10px;">
+          <div style="background:var(--bg-card); border-radius:12px; padding:14px; text-align:center; cursor:pointer;" onclick="document.querySelector('[data-page=conversations]').click()">
             <div style="font-size:24px; font-weight:800; color:${crColor};">${ls.conversionRate}%</div>
             <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">🎯 Dönüşüm</div>
           </div>
@@ -151,7 +151,7 @@ async function loadDashboard() {
             <div style="font-size:24px; font-weight:800; color:${rtColor};">${ls.avgResponseMin}<span style="font-size:12px">dk</span></div>
             <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">⏱ İlk Yanıt</div>
           </div>
-          <div style="background:var(--bg-card); border-radius:12px; padding:14px; text-align:center;">
+          <div style="background:var(--bg-card); border-radius:12px; padding:14px; text-align:center; cursor:pointer;" onclick="document.querySelector('[data-page=conversations]').click();setTimeout(()=>{currentPipelineFilter='hot_lead';renderConversationList(window._lastConvData||[])},300)">
             <div style="font-size:24px; font-weight:800; color:${ls.hotLeads > 0 ? 'var(--system-red)' : 'var(--system-green)'};">${ls.hotLeads}</div>
             <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">🔥 Sıcak Lead</div>
           </div>
@@ -159,7 +159,29 @@ async function loadDashboard() {
             <div style="font-size:24px; font-weight:800; color:${rrColor};">${ls.responseRate}%</div>
             <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">📊 Yanıt Oranı</div>
           </div>
+          <div style="background:var(--bg-card); border-radius:12px; padding:14px; text-align:center; cursor:pointer;" onclick="document.querySelector('[data-page=appointments]').click()">
+            <div style="font-size:24px; font-weight:800; color:${ls.showUpRate >= 70 ? 'var(--system-green)' : (ls.showUpRate >= 40 ? 'var(--system-orange)' : 'var(--system-red)')}">${ls.showUpRate}%</div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">🏥 Show-up</div>
+          </div>
+          <div style="background:var(--bg-card); border-radius:12px; padding:14px; text-align:center;">
+            <div style="font-size:24px; font-weight:800; color:${parseFloat(ls.avgSatisfaction) >= 4 ? 'var(--system-green)' : (parseFloat(ls.avgSatisfaction) >= 3 ? 'var(--system-orange)' : 'var(--system-red)')}">${ls.avgSatisfaction}<span style="font-size:12px">/5</span></div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">⭐ Memnuniyet</div>
+          </div>
         </div>
+        ${Object.keys(ls.funnelPhases || {}).length > 0 ? `
+        <div style="margin-top:14px;">
+          <div style="font-size:12px; font-weight:600; color:var(--text-muted); margin-bottom:8px;">📊 Funnel Dağılımı</div>
+          ${(() => {
+            const fp = ls.funnelPhases;
+            const total = Object.values(fp).reduce((a,b) => a+b, 0) || 1;
+            const labels = {greeting:'Karşılama',discovery:'Keşif',trust:'Güven',handover:'Devir',pending_welcome:'Bekleyen'};
+            const colors = {greeting:'#3b82f6',discovery:'#8b5cf6',trust:'#f59e0b',handover:'#22c55e',pending_welcome:'#6b7280'};
+            return Object.entries(fp).map(([k,v]) => {
+              const pct = Math.round(v/total*100);
+              return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;"><span style="font-size:11px;width:70px;color:var(--text-muted);">' + (labels[k]||k) + '</span><div style="flex:1;background:var(--bg-hover);border-radius:4px;height:14px;overflow:hidden;"><div style="width:'+pct+'%;height:100%;background:'+(colors[k]||'#3b82f6')+';border-radius:4px;transition:width 0.3s;"></div></div><span style="font-size:11px;font-weight:600;width:40px;text-align:right;">'+v+'</span></div>';
+            }).join('');
+          })()}
+        </div>` : ''}
       `;
     }
   }
