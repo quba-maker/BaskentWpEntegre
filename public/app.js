@@ -997,12 +997,34 @@ async function deleteMessages() {
   const stageSelect = document.getElementById('crm-stage');
   if (stageSelect) stageSelect.value = 'new';
   
+  // Hasta Kartı arayüzünü (Sağ panel) temizle
+  const deptArea = document.getElementById('dept-area');
+  if (deptArea) deptArea.style.display = 'none';
+  const notesDiv = document.getElementById('special-notes');
+  if (notesDiv) {
+    notesDiv.innerHTML = '';
+    notesDiv.style.display = 'none';
+  }
+  const formAnswersBox = document.getElementById('form-answers-box');
+  if (formAnswersBox) {
+    formAnswersBox.innerHTML = '';
+    document.getElementById('form-answers-wrapper').style.display = 'none';
+  }
+  document.getElementById('lead-score').textContent = '0 / 100';
+  document.getElementById('lead-score-fill').style.width = '0%';
+  document.getElementById('patient-score-badge').style.display = 'none';
+  document.getElementById('patient-score-badge').className = 'score-badge bg-gray-500';
+  document.getElementById('patient-score-badge').innerHTML = '<i class="fas fa-star" style="font-size:10px;"></i> 0p';
+  
   // Local cache'i de temizle ki liste anında güncellensin
   const idx = cachedConversations.findIndex(c => c.phone_number === currentPhone);
   if (idx > -1) {
     cachedConversations[idx].status = 'active';
     cachedConversations[idx].lead_stage = 'new';
     cachedConversations[idx].phase = 'greeting';
+    cachedConversations[idx].notes = null;
+    cachedConversations[idx].tags = '[]';
+    cachedConversations[idx].lead_score = 0;
     cachedConversations[idx].temperature = 'cold';
     cachedConversations[idx].message_count = 0;
     cachedConversations[idx].last_message = '';
