@@ -286,6 +286,7 @@ export default async function handler(req, res) {
         status = 'active', 
         lead_stage = 'new',
         phase = 'greeting',
+        temperature = 'cold',
         last_message_at = NULL
       WHERE phone_number LIKE ${likePattern}`;
       // 3. Conversation states sıfırla (brain.js phase tracker)

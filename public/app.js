@@ -975,6 +975,7 @@ async function deleteMessages() {
     cachedConversations[idx].status = 'active';
     cachedConversations[idx].lead_stage = 'new';
     cachedConversations[idx].phase = 'greeting';
+    cachedConversations[idx].temperature = 'cold';
     cachedConversations[idx].message_count = 0;
     cachedConversations[idx].last_message = '';
     cachedConversations[idx]._effectiveStage = 'new';
