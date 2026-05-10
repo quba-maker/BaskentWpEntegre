@@ -362,14 +362,42 @@ async function enrichLeadCards(rows, phoneCol) {
         let h = '';
         const icons = { whatsapp: '📱', instagram: '📸', messenger: '💬', web: '🌐' };
         (ctx.channels || []).forEach(ch => { h += `<span title="${ch}" style="font-size:14px;">${icons[ch] || '📞'}</span>`; });
-        if (ctx.lastMessage) {
-          h += `<span style="color:#60a5fa; font-size:11px; max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${ctx.lastMessage.content}">&ldquo;${ctx.lastMessage.content.substring(0, 30)}...&rdquo;</span>`;
+        
+        // Bot durumu badge'i
+        if (ctx.conversationStatus === 'active') {
+          h += `<span style="background:rgba(48,209,88,0.12); color:#30D158; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600; white-space:nowrap;">🤖 Bot Aktif</span>`;
+        } else if (ctx.conversationStatus === 'human') {
+          h += `<span style="background:rgba(255,159,10,0.12); color:#FF9F0A; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600; white-space:nowrap;">👤 Manuel</span>`;
         }
+        
+        // Lead skoru
         if (ctx.score > 0) {
           const sc = ctx.score >= 50 ? '#f97316' : ctx.score >= 30 ? '#facc15' : '#6b7280';
           h += `<span style="background:${sc}22; color:${sc}; border:1px solid ${sc}44; border-radius:4px; padding:2px 6px; font-weight:600; font-size:11px;">⚡ ${ctx.score}</span>`;
         }
+        
+        // Son mesaj kısa önizleme
+        if (ctx.lastMessage) {
+          h += `<span style="color:#60a5fa; font-size:11px; max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${ctx.lastMessage.content}">&ldquo;${ctx.lastMessage.content.substring(0, 25)}...&rdquo;</span>`;
+        }
+        
         el.innerHTML = h;
+        
+        // Badge'i DB'ye göre güncelle (Sheets status'u "CREATED" veya boşsa DB'den al)
+        const badgeEl = document.getElementById(`lead-row-${idx}`);
+        if (badgeEl && ctx.conversationStatus) {
+          const existingBadge = badgeEl.querySelector('.lead-badge');
+          if (existingBadge && (existingBadge.classList.contains('badge-new') || existingBadge.textContent.includes('Yeni'))) {
+            // DB'de conversation varsa Yeni badge'ini güncelle
+            if (ctx.conversationStatus === 'active') {
+              existingBadge.className = 'lead-badge badge-contacted';
+              existingBadge.innerHTML = '🤖 Bot Süreçte';
+              existingBadge.style.background = 'rgba(48,209,88,0.12)';
+              existingBadge.style.color = '#30D158';
+              existingBadge.style.border = '1px solid rgba(48,209,88,0.2)';
+            }
+          }
+        }
       } catch(e) {}
     }));
   }
