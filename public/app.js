@@ -633,6 +633,12 @@ function renderConversationList() {
       ? `<span style="font-size:10px; background:rgba(191,90,242,0.12); color:#bf5af2; padding:1px 6px; border-radius:6px; white-space:nowrap;">${c.lead_form_name.substring(0, 25)}${c.lead_form_name.length > 25 ? '…' : ''}</span>` 
       : '';
 
+    // Score badge (varsa)
+    const score = c.lead_score || 0;
+    const scoreBadge = score > 0 
+      ? `<span style="font-size:10px; background:${score >= 80 ? 'rgba(48,209,88,0.15)' : score >= 60 ? 'rgba(48,209,88,0.1)' : score >= 30 ? 'rgba(255,214,10,0.12)' : 'rgba(255,69,58,0.1)'}; color:${score >= 60 ? '#30d158' : score >= 30 ? '#ffd60a' : '#ff453a'}; padding:1px 6px; border-radius:6px; font-weight:600;">${score}p</span>` 
+      : '';
+
     const timeDisplay = smartDate(c.last_message_at);
     const isRecent = (Date.now() - new Date(c.last_message_at).getTime()) < 300000;
     
@@ -645,7 +651,7 @@ function renderConversationList() {
         </div>
         ${phoneDisplay}
         <div class="contact-preview">${c.last_message || ''}</div>
-        <div class="contact-badges">${stageBadge}${stBadge}${formBadge ? ' ' + formBadge : ''}</div>
+        <div class="contact-badges">${stageBadge}${stBadge}${scoreBadge ? ' ' + scoreBadge : ''}${formBadge ? ' ' + formBadge : ''}</div>
       </div>
     </div>`;
   }).join('') || '<div class="empty" style="padding:30px">Konuşma bulunamadı</div>';
@@ -693,6 +699,20 @@ async function loadChat(phone, channel) {
   document.getElementById('crm-panel').style.display = 'flex';
   document.getElementById('crm-name').value = pData.patient_name || '';
   document.getElementById('crm-notes').value = pData.notes || '';
+  
+  // 📊 Lead Score Gösterimi
+  const scoreEl = document.getElementById('crm-score');
+  if (scoreEl) {
+    const s = pData.lead_score || 0;
+    const clr = s >= 80 ? '#30d158' : s >= 60 ? '#34c759' : s >= 30 ? '#ffd60a' : '#ff453a';
+    scoreEl.innerHTML = `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+      <span style="font-size:11px;color:var(--text-muted)">Skor</span>
+      <div style="flex:1;height:6px;background:var(--bg-tertiary);border-radius:3px;overflow:hidden;">
+        <div style="height:100%;width:${Math.min(s,100)}%;background:${clr};border-radius:3px;transition:width 0.5s;"></div>
+      </div>
+      <span style="font-size:12px;font-weight:700;color:${clr}">${s}</span>
+    </div>`;
+  }
   
   // 🏥 Bölüm: Formdan gelen department'i otomatik yerleştir
   const deptSelect = document.getElementById('crm-department');

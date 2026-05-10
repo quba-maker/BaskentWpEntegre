@@ -206,9 +206,8 @@ export default async function handler(req, res) {
       }
     }
 
-    // 2. MESAJ YANITLAMA (CRM'e Not Düşme)
+    // 2. MESAJ YANITLAMA (CRM'e Not + Hastaya WhatsApp Mesajı)
     if (message && message.reply_to_message) {
-      // Bir mesaja yanıt verildi
       const replyText = message.text;
       const originalText = message.reply_to_message.text;
       const userFirstName = message.from.first_name || 'Danışman';
@@ -221,21 +220,43 @@ export default async function handler(req, res) {
         const searchP = cleanP.length > 10 ? cleanP.substring(cleanP.length - 10) : cleanP;
         const likePattern = `%${searchP}%`;
 
-        // Mevcut notu çek ve yeni notu ekle
-        const conv = await sql`SELECT notes FROM conversations WHERE phone_number LIKE ${likePattern} LIMIT 1`;
+        // CRM'e not ekle
+        const conv = await sql`SELECT notes, last_channel FROM conversations WHERE phone_number LIKE ${likePattern} LIMIT 1`;
         if (conv.length > 0) {
           const oldNotes = conv[0].notes || '';
+          const lastChannel = conv[0].last_channel || 'whatsapp';
           const newNoteEntry = `[${userFirstName} - ${new Date().toLocaleTimeString('tr-TR')}]: ${replyText}`;
           const updatedNotes = oldNotes ? `${oldNotes}\n${newNoteEntry}` : newNoteEntry;
-
           await sql`UPDATE conversations SET notes = ${updatedNotes}, updated_at = NOW() WHERE phone_number LIKE ${likePattern}`;
 
-          // Geri bildirim mesajı (Mesajı beğenme veya onay mesajı atma)
+          // 🚀 HASTAYA WHATSAPP MESAJı GÖNDER (Sadece WhatsApp kanalındaysa)
+          let sentToPatient = false;
+          if (lastChannel === 'whatsapp' || phone.match(/^9\d{10,}/)) {
+            try {
+              const META = process.env.META_ACCESS_TOKEN;
+              const PHONE_ID = process.env.PHONE_NUMBER_ID;
+              if (META && PHONE_ID) {
+                await axios({
+                  method: 'POST',
+                  url: `https://graph.facebook.com/v25.0/${PHONE_ID}/messages`,
+                  headers: { Authorization: `Bearer ${META}` },
+                  data: { messaging_product: 'whatsapp', to: phone, type: 'text', text: { body: replyText } }
+                });
+                await sql`INSERT INTO messages (phone_number, direction, content, model_used, channel) VALUES (${phone}, 'out', ${replyText}, 'human-telegram', 'whatsapp')`;
+                sentToPatient = true;
+              }
+            } catch(e) { console.error('Telegram→WA hata:', e.response?.data?.error?.message || e.message); }
+          }
+
+          // Danışmana onay mesajı
           try {
+            const confirmMsg = sentToPatient 
+              ? `✅ Mesaj hastaya WhatsApp'tan iletildi + CRM'e not eklendi`
+              : `📝 CRM'e Not Eklendi (WhatsApp gönderilemedi)`;
             await axios.post(`https://api.telegram.org/bot${botToken}/sendMessage`, {
               chat_id: message.chat.id,
               reply_to_message_id: message.message_id,
-              text: `📝 CRM'e Not Eklendi: "${replyText}"`
+              text: confirmMsg
             });
           } catch(e) {}
         }
