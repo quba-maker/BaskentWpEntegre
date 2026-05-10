@@ -191,7 +191,10 @@ function renderSheetTable(headers, rows, total) {
   // İsim sütunu: full_name / isim öncelikli (ad_name Meta reklam adıdır, karıştırma!)
   let nameCol = findCol(['fullname', 'full_name', 'isim', 'hastadi', 'hastaadi']);
   if (nameCol === -1) nameCol = headers.findIndex(h => /^ad$/i.test(h.trim()) || h.toLowerCase().includes('isim'));
-  let phoneCol = findCol(['telefon', 'phone', 'tel', 'gsm', 'cep', 'numara', 'phonenumber']);
+  let phoneCol = headers.findIndex(h => {
+    const l = h.toLowerCase().replace(/[_\s]+/g, '');
+    return l === 'phonenumber' || l === 'phone' || l === 'telefon' || l === 'tel' || l === 'gsm' || l === 'cep';
+  });
   let campaignCol = findCol(['campaignname', 'campaign_name', 'kampanya']);
   let deptCol = findCol(['adname', 'ad_name', 'campaign', 'bolum', 'bölüm', 'form']);
   let statusCol = findCol(['durum', 'status', 'leadstatus', 'lead_status', 'aşama']);
@@ -994,7 +997,12 @@ function openLeadDetail(sortedIndex) {
   });
   let nameCol = findColDetail(['fullname', 'full_name', 'isim', 'hastadi', 'hastaadi']);
   if (nameCol === -1) nameCol = headers.findIndex(h => /^ad$/i.test(h.trim()) || h.toLowerCase().includes('isim'));
-  let phoneCol = headers.findIndex(h => h.toLowerCase().includes('telefon') || h.toLowerCase().includes('phone') || h.toLowerCase() === 'tel');
+  // phone_number veya phone sütunu (phone_number_id gibi Meta ID alanlarını dışla)
+  let phoneCol = headers.findIndex(h => {
+    const l = h.toLowerCase().replace(/[_\s]+/g, '');
+    return l === 'phonenumber' || l === 'phone' || l === 'telefon' || l === 'tel' || l === 'gsm' || l === 'cep';
+  });
+  // E-posta sütunu (kullanılmıyor ama skip etmek için tespit ediyoruz)
   let emailCol = headers.findIndex(h => h.toLowerCase().includes('email') || h.toLowerCase().includes('e-posta') || h.toLowerCase().includes('eposta'));
   let dateCol = findColDetail(['time', 'tarih', 'created', 'date', 'zaman']);
   let campaignNameCol = findColDetail(['campaignname', 'campaign_name']);
@@ -1031,19 +1039,23 @@ function openLeadDetail(sortedIndex) {
     phoneNumbers.push({ number: clean, label: 'WhatsApp', isWhatsApp: true, raw: phoneVal });
   }
 
+  // SADECE açıkça telefon/whatsapp olarak adlandırılmış alanlardan numara al
+  // (Meta reklam ID'lerini yakalamayı engeller)
   headers.forEach((h, j) => {
     if (j === phoneCol || j === nameCol || j === emailCol) return;
     const val = row[j] || '';
     const lower = h.toLowerCase().replace(/[\s_]+/g, '');
     const isWA = lower.includes('whatsapp') || lower.includes('wp') || lower.includes('wapp');
-    const isPhoneField = isWA || lower.includes('telefon') || lower.includes('phone') || lower.includes('numara') || lower.includes('gsm') || lower.includes('cep') || lower.includes('iletişim') || lower.includes('iletisim');
+    const isPhoneField = isWA || lower.includes('telefon') || lower === 'phone' || lower === 'phonenumber' || lower.includes('numara') || lower.includes('gsm') || lower.includes('cep') || lower.includes('iletişim') || lower.includes('iletisim');
+    // SADECE telefon/whatsapp alanlarından numara çıkar
+    if (!isPhoneField) return;
     const matches = val.match(phoneRegex);
-    if (matches && (isPhoneField || matches[0].length > 9)) {
+    if (matches) {
       matches.forEach(m => {
         const clean = normalizePhone(m);
         if (clean.length >= 10 && !seenPhones.has(clean)) {
           seenPhones.add(clean);
-          phoneNumbers.push({ number: clean, label: 'WhatsApp', isWhatsApp: true, raw: m.trim() });
+          phoneNumbers.push({ number: clean, label: isWA ? 'WhatsApp' : 'Telefon', isWhatsApp: isWA, raw: m.trim() });
         }
       });
     }
@@ -1087,12 +1099,6 @@ function openLeadDetail(sortedIndex) {
           <div style="margin-bottom:16px; border-bottom:1px solid var(--border-color); padding-bottom:16px;">
             ${phonesHtml}
           </div>
-          <div style="display:flex; gap:24px; margin-bottom:16px; flex-wrap:wrap;">
-            <div>
-              <div style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">E-Posta</div>
-              <div style="font-size:15px; color:white;">✉️ ${emailVal || 'Belirtilmedi'}</div>
-            </div>
-          </div>
           <div style="display:flex; gap:12px; flex-wrap:wrap;">
             <a href="https://wa.me/${primaryPhone}" target="_blank" class="btn" style="background:#25D366; color:white; border:none; padding:8px 16px; border-radius:8px; font-size:13px; font-weight:600; text-decoration:none;">
               🟢 WhatsApp'tan Yaz
@@ -1106,7 +1112,7 @@ function openLeadDetail(sortedIndex) {
 
   // === FORM YANITLARI BÖLÜMÜ ===
   // Alanları kategorize et: önemli form soruları vs meta reklam bilgileri vs diğer
-  const importantQuestionKeys = ['ülke', 'ulke', 'yaşıyor', 'yasiyor', 'tetkik', 'tedavi', 'şikayet', 'sikayet', 'hastalık', 'hastalik', 'bölüm', 'bolum', 'departman'];
+  const importantQuestionKeys = ['ülke', 'ulke', 'yaşıyor', 'yasiyor', 'tetkik', 'tedavi', 'şikayet', 'sikayet', 'hastalık', 'hastalik', 'bölüm', 'bolum', 'departman', 'kalp', 'heart', 'geliş', 'gelis', 'randevu', 'appointment', 'planlama', 'arayalım', 'arayalim', 'birth', 'doğum', 'dogum', 'konya'];
   const metaFieldKeys = ['ad_name', 'adset_name', 'adset_id', 'campaign_name', 'campaign_id', 'form_name', 'form_id'];
   
   const importantFields = [];
@@ -1119,7 +1125,7 @@ function openLeadDetail(sortedIndex) {
     if (lower.includes('lead_status') || lower === 'status' || lower === 'durum') { statusColIndex = j; return; }
     if (lower.includes('geri_dönüş') || lower.includes('geri_donus') || lower.includes('geri dönüş') || lower === 'notlar') { notesColIndex = j; return; }
     // İletişim kartında zaten gösterilen alanları atla
-    if (j === nameCol || j === phoneCol || j === emailCol || j === dateCol) return;
+    if (j === nameCol || j === phoneCol || j === emailCol || j === dateCol || j === campaignNameCol) return;
     // Teknik ID alanlarını atla (metaCols'ta olmayanlar)
     const lowerClean = lower.replace(/_/g, '');
     if (['id', 'leadgenid', 'isorganic', 'platform'].some(tc => lowerClean === tc || lower === tc)) return;
