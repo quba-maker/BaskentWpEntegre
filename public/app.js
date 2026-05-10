@@ -1089,6 +1089,9 @@ function openLeadDetail(sortedIndex) {
   const headers = window._sheetHeaders;
   const row = window._sheetRows[rowIndex];
   if (!headers || !row) return;
+  
+  // Form satır verisini sakla (triggerSingleOutbound'da kullanılır)
+  window._currentLeadRowData = row;
 
   // Meta reklam teknik alanları (açılır menüye taşınacak)
   const metaCols = ['ad_name', 'adset_name', 'adset_id', 'campaign_name', 'campaign_id', 'form_name', 'form_id', 'ad_id', 'leadgen_id', 'is_organic', 'platform', 'id'];
@@ -1574,11 +1577,29 @@ async function triggerSingleOutbound(phone, name) {
 
   try {
     toast('Mesaj gönderiliyor...', 'info');
+    
+    // Form satır verisini topla (brain.js'e aktarmak için)
+    let formData = {};
+    let campaignName = '';
+    let cityVal = '';
+    let emailVal = '';
+    if (window._sheetHeaders && window._currentLeadRowData) {
+      window._sheetHeaders.forEach((header, idx) => {
+        if (window._currentLeadRowData[idx]) {
+          formData[header] = window._currentLeadRowData[idx];
+        }
+        const h = header.toLowerCase();
+        if (h.includes('campaign') || h.includes('kampanya')) campaignName = window._currentLeadRowData[idx] || '';
+        if (h.includes('city') || h.includes('şehir') || h.includes('sehir') || h.includes('ülke') || h.includes('country')) cityVal = window._currentLeadRowData[idx] || '';
+        if (h.includes('email') || h.includes('eposta')) emailVal = window._currentLeadRowData[idx] || '';
+      });
+    }
+    
     const resp = await fetch('/api/bulk-outbound', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
-        leads: [{ phone, name }],
+        leads: [{ phone, name, formData, campaignName, city: cityVal, email: emailVal }],
         sheetContext: { sheetName: window._activeSheet }
       })
     });

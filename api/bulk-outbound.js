@@ -86,6 +86,32 @@ export default async function handler(req, res) {
         }
       }
 
+      // 2b. Leads tablosuna da kayıt yap (brain.js form bilgilerini buradan okur)
+      // Frontend'den gelen form satır verisini raw_data olarak sakla
+      const rawData = lead.formData || lead.rawData || {};
+      const formName = lead.formName || lead.campaignName || '';
+      const city = lead.city || '';
+      const email = lead.email || '';
+      const tags = lead.tags ? JSON.stringify(lead.tags) : '["Genel"]';
+      
+      try {
+        const existingLead = await sql`SELECT id FROM leads WHERE phone_number = ${formattedPhone} LIMIT 1`;
+        if (existingLead.length === 0) {
+          await sql`
+            INSERT INTO leads (phone_number, patient_name, email, city, form_name, tags, raw_data, stage, contacted_at)
+            VALUES (${formattedPhone}, ${name || null}, ${email}, ${city}, ${formName}, ${tags}, ${JSON.stringify(rawData)}, 'contacted', NOW())
+          `;
+        } else {
+          await sql`
+            UPDATE leads SET 
+              stage = CASE WHEN stage = 'new' THEN 'contacted' ELSE stage END,
+              contacted_at = COALESCE(contacted_at, NOW()),
+              patient_name = COALESCE(patient_name, ${name || null})
+            WHERE phone_number = ${formattedPhone}
+          `;
+        }
+      } catch(e) { console.warn('Leads table update:', e.message); }
+
       // 3. Update Google Sheets (Mark as Processed)
       // We assume the Google Sheet API has action: 'updateCell' built-in.
       // We need to know which column "Durum" is. For now, we will assume it's column 10 (J), 
