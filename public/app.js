@@ -969,8 +969,19 @@ async function deleteMessages() {
   const stageSelect = document.getElementById('crm-stage');
   if (stageSelect) stageSelect.value = 'new';
   
+  // Local cache'i de temizle ki liste anında güncellensin
+  const idx = cachedConversations.findIndex(c => c.phone_number === currentPhone);
+  if (idx > -1) {
+    cachedConversations[idx].status = 'active';
+    cachedConversations[idx].lead_stage = 'new';
+    cachedConversations[idx].phase = 'greeting';
+    cachedConversations[idx].message_count = 0;
+    cachedConversations[idx].last_message = '';
+    cachedConversations[idx]._effectiveStage = 'new';
+  }
+  
   // Listeyi yenile
-  loadConversations();
+  renderConversationList();
 }
 
 /* ========== QUOTE ENGINE (HIZLI TEKLİF) ========== */

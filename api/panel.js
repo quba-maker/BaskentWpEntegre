@@ -275,23 +275,23 @@ export default async function handler(req, res) {
     if (action === 'delete-messages' && req.method === 'POST') {
       const { phone } = req.body;
       const cleanPhone = (phone || '').replace(/\D/g, '');
-      const phoneAlt = cleanPhone.startsWith('90') ? cleanPhone.substring(2) : '90' + cleanPhone;
+      const searchPhone = cleanPhone.length > 10 ? cleanPhone.substring(cleanPhone.length - 10) : cleanPhone; // son 10 haneyi al (5546833306)
+      const likePattern = `%${searchPhone}%`;
       
       // 1. Mesajları sil
-      await sql`DELETE FROM messages WHERE phone_number IN (${cleanPhone}, ${phoneAlt})`;
+      await sql`DELETE FROM messages WHERE phone_number LIKE ${likePattern}`;
       // 2. Conversation'ı tamamen sıfırla
       await sql`UPDATE conversations SET 
         message_count = 0, 
         status = 'active', 
         lead_stage = 'new',
+        phase = 'greeting',
         last_message_at = NULL
-      WHERE phone_number IN (${cleanPhone}, ${phoneAlt})`;
-      // 3. Phase/temperature sıfırla
-      try { await sql`UPDATE conversations SET phase = 'greeting' WHERE phone_number IN (${cleanPhone}, ${phoneAlt})`; } catch(e) {}
-      // 4. Conversation states sıfırla (brain.js phase tracker)
-      try { await sql`DELETE FROM conversation_states WHERE phone_number IN (${cleanPhone}, ${phoneAlt})`; } catch(e) {}
-      // 5. Lead stage'i de sıfırla
-      try { await sql`UPDATE leads SET stage = 'new' WHERE phone_number IN (${cleanPhone}, ${phoneAlt})`; } catch(e) {}
+      WHERE phone_number LIKE ${likePattern}`;
+      // 3. Conversation states sıfırla (brain.js phase tracker)
+      try { await sql`DELETE FROM conversation_states WHERE phone_number LIKE ${likePattern}`; } catch(e) {}
+      // 4. Lead stage'i de sıfırla
+      try { await sql`UPDATE leads SET stage = 'new' WHERE phone_number LIKE ${likePattern}`; } catch(e) {}
       
       return res.json({ success: true });
     }
