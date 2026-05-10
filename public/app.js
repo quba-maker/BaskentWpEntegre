@@ -4,6 +4,61 @@ let currentPhone = '';
 let currentChannel = 'whatsapp';
 let allTags = [];
 
+// 🔀 Resizable Panels — Sürükle/Bırak ile panel genişliği ayarlama
+document.addEventListener('DOMContentLoaded', () => {
+  // Kayıtlı genişlikleri yükle
+  const savedLeft = localStorage.getItem('inbox_left_w');
+  const savedRight = localStorage.getItem('inbox_right_w');
+  if (savedLeft) document.documentElement.style.setProperty('--inbox-left-w', savedLeft + 'px');
+  if (savedRight) document.documentElement.style.setProperty('--inbox-right-w', savedRight + 'px');
+
+  initResizeHandle('resize-left', '.inbox-sidebar', 'left');
+  initResizeHandle('resize-right', '.inbox-details', 'right');
+});
+
+function initResizeHandle(handleId, panelSelector, side) {
+  const handle = document.getElementById(handleId);
+  if (!handle) return;
+  
+  let isDragging = false;
+  let startX = 0;
+  let startWidth = 0;
+  
+  handle.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    isDragging = true;
+    startX = e.clientX;
+    const panel = document.querySelector(panelSelector);
+    if (!panel) return;
+    startWidth = panel.offsetWidth;
+    handle.classList.add('dragging');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  });
+  
+  document.addEventListener('mousemove', (e) => {
+    if (!isDragging) return;
+    const delta = side === 'left' ? (e.clientX - startX) : (startX - e.clientX);
+    const newWidth = Math.max(220, Math.min(500, startWidth + delta));
+    const cssVar = side === 'left' ? '--inbox-left-w' : '--inbox-right-w';
+    document.documentElement.style.setProperty(cssVar, newWidth + 'px');
+  });
+  
+  document.addEventListener('mouseup', () => {
+    if (!isDragging) return;
+    isDragging = false;
+    handle.classList.remove('dragging');
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    // Persist
+    const panel = document.querySelector(panelSelector);
+    if (panel) {
+      const key = side === 'left' ? 'inbox_left_w' : 'inbox_right_w';
+      localStorage.setItem(key, panel.offsetWidth);
+    }
+  });
+}
+
 function getChannelIcon(channel) {
   if (channel === 'messenger') return '<div class="channel-icon channel-messenger">M</div>';
   if (channel === 'instagram') return '<div class="channel-icon channel-instagram">IG</div>';
@@ -437,8 +492,8 @@ async function enrichLeadCards(rows, phoneCol) {
           }
           
           if (extraBadges) {
-            // Mevcut badge'in yanına ekle
-            badgeContainer.innerHTML = `<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">${extraBadges}${badgeContainer.innerHTML}</div>`;
+            // DB'den stage varsa eski Sheets badge'ini TAMAMEN DEĞİŞTİR
+            badgeContainer.innerHTML = `<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">${extraBadges}</div>`;
           }
         }
       } catch(e) {}
@@ -971,7 +1026,7 @@ async function autoSaveCRM() {
     tags: "[]",
     notes: newNotes,
     department: newDepartment,
-    patient_type: 'Yerli', // Hardcoded as obsolete, API still expects it maybe
+    patient_type: 'Yerli',
     lead_stage: newStage
   };
 
@@ -981,9 +1036,11 @@ async function autoSaveCRM() {
     cachedConversations[idx].patient_name = newName;
     cachedConversations[idx].notes = newNotes;
     cachedConversations[idx].department = newDepartment;
+    cachedConversations[idx].lead_stage = newStage;
+    cachedConversations[idx]._effectiveStage = newStage;
   }
   
-  // Listeyi sessizce render et (Arama/Filtre bozulmadan isim değişikliğini yansıtmak için)
+  // Listeyi sessizce render et
   renderConversationList();
 
   // API'ye kaydet
@@ -992,6 +1049,52 @@ async function autoSaveCRM() {
     toast('✓ Kaydedildi', 'success');
   } catch(e) {
     console.error('AutoSave Error', e);
+  }
+
+  // 📊 Google Sheets'e süreç durumu senkronizasyonu
+  if (newStage && window._sheetRows && window._sheetHeaders) {
+    try {
+      const stageLabels = { new: 'Yeni', contacted: 'İlk Temas', discovery: 'Analiz', negotiation: 'İkna', hot_lead: 'Sıcak Lead', appointed: 'Randevu Alındı', lost: 'Kayıp' };
+      const cleanCurrent = currentPhone.replace(/\D/g, '');
+      const last10 = cleanCurrent.substring(cleanCurrent.length - 10);
+      
+      // Telefon sütununu bul
+      const phoneColIdx = window._sheetHeaders.findIndex(h => 
+        /phone|telefon|tel|whatsapp|cep/i.test(h.toLowerCase())
+      );
+      if (phoneColIdx === -1) return;
+      
+      // Durum sütununu bul
+      const statusColIdx = window._sheetHeaders.findIndex(h => 
+        /durum|status|lead_status|aşama/i.test(h.toLowerCase())
+      );
+      if (statusColIdx === -1) return;
+      
+      // Telefon eşleşmesi ile satırı bul
+      const rowIdx = window._sheetRows.findIndex(row => {
+        const cellPhone = (row[phoneColIdx] || '').replace(/\D/g, '');
+        return cellPhone.length >= 10 && cellPhone.includes(last10);
+      });
+      
+      if (rowIdx > -1) {
+        const label = stageLabels[newStage] || newStage;
+        await fetch('/api/sheets?action=update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sheetName: window._activeSheet,
+            row: rowIdx,
+            col: statusColIdx,
+            value: label
+          })
+        });
+        // Lokal sheet data'yı da güncelle
+        window._sheetRows[rowIdx][statusColIdx] = label;
+        console.log(`📊 Sheets sync: satır ${rowIdx}, sütun ${statusColIdx} → ${label}`);
+      }
+    } catch(e) {
+      console.error('Sheets sync hatası:', e);
+    }
   }
 }
 
