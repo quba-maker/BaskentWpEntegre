@@ -1923,6 +1923,12 @@ async function loadSettings() {
   document.getElementById('qt-wa-message').value = s.qt_wa_message || '';
 }
 
+async function saveModel() {
+  const model = document.getElementById('model-select').value;
+  await api('settings', 'POST', { key: 'ai_model', value: model });
+  toast('Yapay Zeka Modeli güncellendi ✅');
+}
+
 async function saveChannelToggle(channel, enabled) {
   const key = `channel_${channel}_enabled`;
   const value = enabled ? 'true' : 'false';
