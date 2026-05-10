@@ -669,7 +669,8 @@ export default async function handler(req, res) {
       try { const r = await sql`DELETE FROM messages WHERE phone_number LIKE ${likePattern}`; console.log('  ✓ messages silindi'); } catch(e) { console.error('  ✗ messages:', e.message); }
       try { const r = await sql`DELETE FROM conversation_states WHERE phone_number LIKE ${likePattern}`; console.log('  ✓ conversation_states silindi'); } catch(e) { console.error('  ✗ conversation_states:', e.message); }
       try { const r = await sql`DELETE FROM events WHERE phone_number LIKE ${likePattern}`; console.log('  ✓ events silindi'); } catch(e) { console.error('  ✗ events:', e.message); }
-      try { const r = await sql`DELETE FROM leads WHERE phone_number LIKE ${likePattern}`; console.log('  ✓ leads silindi'); } catch(e) { console.error('  ✗ leads:', e.message); }
+      // ⚠️ leads tablosunu SİLME — form verileri kaynak veridir, sohbet sıfırlansa bile korunmalı
+      // try { const r = await sql`DELETE FROM leads WHERE phone_number LIKE ${likePattern}`; console.log('  ✓ leads silindi'); } catch(e) { console.error('  ✗ leads:', e.message); }
       try { const r = await sql`DELETE FROM conversations WHERE phone_number LIKE ${likePattern}`; console.log('  ✓ conversations silindi'); } catch(e) { console.error('  ✗ conversations:', e.message); }
       
       console.log(`🗑️ HARD DELETE tamamlandı: ${phone}`);
