@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { neon } from '@neondatabase/serverless';
-import { checkEscalations } from '../lib/ai/handoverManager.js';
+import { checkEscalations, sendTelegramAlert } from '../lib/ai/handoverManager.js';
 import { sendInstagramMessage } from '../lib/channels/instagram.js';
 import { sendMessengerMessage } from '../lib/channels/messenger.js';
 
@@ -260,6 +260,20 @@ export default async function handler(req, res) {
         if (conv.status !== 'active') {
           await sql`UPDATE conversations SET status = 'active' WHERE phone_number = ${conv.phone_number} AND status != 'human'`;
         }
+
+        // 📱 Telegram'a bildir (Kademe 1+ için — danışman haberdar olsun)
+        if (currentCount >= 1) {
+          try {
+            await sendTelegramAlert(`📋 <b>TAKİP MESAJI GÖNDERİLDİ</b>
+
+👤 ${conv.patient_name || conv.phone_number}
+📱 <code>${conv.phone_number}</code>
+📊 Kademe: ${currentCount + 1}/4
+⏰ Son mesajdan ${Math.round(hoursSince)} saat sonra
+
+<i>${msgContent.substring(0, 100)}...</i>`);
+          } catch(e) {}
+        }
         
         sent++;
       } catch (e) {
@@ -275,6 +289,60 @@ export default async function handler(req, res) {
   try {
     escalated = await checkEscalations(sql);
   } catch(e) { console.error('Escalation check hatası:', e.message); }
+
+  // ============================================================
+  // BÖLÜM 3.5: Otomatik Geri Arama Hatırlatması
+  // Danışman "Arandı - Ulaşılamadı" butonuna bastıysa,
+  // 30 dakika sonra Telegram'a tekrar hatırlatma düş
+  // ============================================================
+  let recallReminders = 0;
+  try {
+    // Notlarında "Arandı ama ulaşılamadı" olan ve 30+ dk geçmiş hastaları bul
+    const callmissPatients = await sql`
+      SELECT c.phone_number, c.patient_name, c.department, c.notes, c.updated_at
+      FROM conversations c
+      WHERE c.status = 'human'
+        AND c.temperature = 'hot'
+        AND c.notes LIKE '%ulaşılamadı%'
+        AND c.updated_at < NOW() - INTERVAL '30 minutes'
+        AND c.updated_at > NOW() - INTERVAL '2 hours'
+        AND NOT EXISTS (
+          SELECT 1 FROM messages m 
+          WHERE m.phone_number = c.phone_number 
+          AND m.model_used = 'recall-reminder'
+          AND m.created_at > NOW() - INTERVAL '30 minutes'
+        )
+    `;
+
+    for (const patient of callmissPatients) {
+      try {
+        const inlineKeyboard = {
+          inline_keyboard: [
+            [
+              { text: "📞 Arandı - Ulaşılamadı", callback_data: `crm_callmiss_${patient.phone_number}` },
+              { text: "✅ Randevu Verildi", callback_data: `crm_appoint_${patient.phone_number}` }
+            ],
+            [
+              { text: "❌ İptal / İlgilenmiyor", callback_data: `crm_lost_${patient.phone_number}` }
+            ]
+          ]
+        };
+
+        await sendTelegramAlert(`⏰ <b>GERİ ARAMA HATIRLATMASI</b>
+
+👤 <b>${patient.patient_name || patient.phone_number}</b>
+📱 <code>${patient.phone_number}</code>
+🏥 ${patient.department || 'Genel'}
+
+📞 <i>30 dakika önce arandı ama ulaşılamadı. Lütfen tekrar arayın!</i>`, inlineKeyboard);
+
+        // Tekrar tetiklenmemesi için marker ekle
+        await sql`INSERT INTO messages (phone_number, direction, content, model_used, channel) 
+          VALUES (${patient.phone_number}, 'out', '[SİSTEM] Geri arama hatırlatması gönderildi', 'recall-reminder', 'system')`;
+        recallReminders++;
+      } catch(e) {}
+    }
+  } catch(e) { console.error('Geri arama hatırlatma hatası:', e.message); }
 
   // ============================================================
   // BÖLÜM 4: Randevu Hatırlatma (D-3, D-1, D-0)
@@ -406,6 +474,6 @@ export default async function handler(req, res) {
     }
   } catch(e) { console.error('Anket hatası:', e.message); }
 
-  console.log(`✅ Takip: ${sent} gönderildi (${textUsed} metin, ${templateUsed} şablon), ${skipped} atlandı, ${welcomeSent} karşılama, ${escalated} escalation, ${reminders} hatırlatma, ${recovered} recovery, ${surveys} anket`);
-  return res.json({ success: true, sent, skipped, textUsed, templateUsed, welcomeSent, escalated, reminders, recovered, surveys, total: sent + skipped });
+  console.log(`✅ Takip: ${sent} gönderildi (${textUsed} metin, ${templateUsed} şablon), ${skipped} atlandı, ${welcomeSent} karşılama, ${escalated} escalation, ${recallReminders} geri arama, ${reminders} hatırlatma, ${recovered} recovery, ${surveys} anket`);
+  return res.json({ success: true, sent, skipped, textUsed, templateUsed, welcomeSent, escalated, recallReminders, reminders, recovered, surveys, total: sent + skipped });
 }
