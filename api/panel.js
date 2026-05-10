@@ -371,9 +371,13 @@ export default async function handler(req, res) {
       const p = await sql`SELECT * FROM conversations WHERE phone_number IN (${phone}, ${phoneAlt}, ${phoneWithPlus}) LIMIT 1`;
       const conv = p[0] || {};
       
-      // Lead tablosundan form bilgilerini çek (numara eşleştirme)
+      // Lead tablosundan form bilgilerini çek (LIKE ile son 10 hane arama — format farklılıklarını yakala)
       try {
-        const leads = await sql`SELECT * FROM leads WHERE phone_number IN (${phone}, ${phoneAlt}, ${phoneWithPlus}) ORDER BY created_at DESC LIMIT 1`;
+        const cleanP = phone.replace(/\D/g, '');
+        const last10 = cleanP.substring(cleanP.length - 10);
+        const leadLike = `%${last10}%`;
+        
+        const leads = await sql`SELECT * FROM leads WHERE phone_number LIKE ${leadLike} ORDER BY created_at DESC LIMIT 1`;
         if (leads.length > 0) {
           const lead = leads[0];
           conv.lead_id = lead.id;
@@ -392,10 +396,23 @@ export default async function handler(req, res) {
           conv.lead_score = lead.score;
           conv.has_lead = true;
           
+          // 🏥 Bölüm otomatik doldurma: Lead tags'ten department'i çıkar
+          if (!conv.department && lead.tags) {
+            try {
+              const leadTags = typeof lead.tags === 'string' ? JSON.parse(lead.tags) : lead.tags;
+              const medicalTags = (leadTags || []).filter(t => !['Genel', 'Ortaasya', 'Avrupa'].includes(t));
+              if (medicalTags.length > 0) {
+                conv.department = medicalTags.join(', ');
+                await sql`UPDATE conversations SET department = ${conv.department} WHERE phone_number LIKE ${leadLike}`;
+                console.log(`🏥 Bölüm otomatik dolduruldu: ${conv.department}`);
+              }
+            } catch(e) {}
+          }
+          
           // Hasta adı lead'den gelip conversation'da yoksa otomatik eşleştirelim
           if (lead.patient_name && !conv.patient_name) {
             conv.patient_name = lead.patient_name;
-            await sql`UPDATE conversations SET patient_name = ${lead.patient_name} WHERE phone_number IN (${phone}, ${phoneAlt}, ${phoneWithPlus})`;
+            await sql`UPDATE conversations SET patient_name = ${lead.patient_name} WHERE phone_number LIKE ${leadLike}`;
           }
         }
       } catch(e) { console.error('Lead eşleştirme hatası:', e.message); }
