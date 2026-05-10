@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { neon } from '@neondatabase/serverless';
+import { checkEscalations } from '../lib/ai/handoverManager.js';
 
 // WhatsApp Template mesajı gönderme (24 saat penceresi kapandıktan sonra)
 async function sendTemplateMessage(phoneId, token, phone, templateName, languageCode = 'tr') {
@@ -38,33 +39,57 @@ function detectLang(text) {
   return 'tr';
 }
 
-// Dile göre follow-up metin mesajları
-const followUpTexts = {
+// ============================================================
+// 4 KADEMELİ TAKİP SİSTEMİ
+// Kademe 0: 2 saat   → Nazik hatırlatma
+// Kademe 1: 6 saat   → Değer teklifi + sosyal kanıt
+// Kademe 2: 24 saat  → Son çağrı + ücretsiz değerlendirme
+// Kademe 3: 72 saat  → Template mesaj (24h window kapalı)
+// ============================================================
+
+const followUpMessages = {
   tr: [
-    (n) => `${n ? n+', r' : 'R'}andevunuzla ilgili size ulaşmaya çalışmıştık. Size uygun bir zaman belirleyebilir miyiz? Sağlığınız bizim için önemli.`,
-    (n) => `${n ? n+', s' : 'S'}on olarak hatırlatmak istedik. Randevu veya sağlık konusunda yardımcı olabiliriz. İstediğiniz zaman bize yazabilirsiniz.`
+    // Kademe 0 (2 saat) — Nazik hatırlatma
+    (n, dept) => `${n ? n + ', m' : 'M'}esajımızı gördünüz mü? ${dept ? dept + ' konusunda' : 'Sağlığınızla ilgili'} sizinle konuşmak istiyoruz 🙏`,
+    // Kademe 1 (6 saat) — Sosyal kanıt + değer
+    (n, dept) => `${n ? n + ', g' : 'G'}eçen ay ${dept || 'benzer şikayetle'} gelen hastalarımız tedavilerinden çok memnun kaldı. Sizin durumunuzu da değerlendirebiliriz — ücretsiz ön görüşme hakkınız var.`,
+    // Kademe 2 (24 saat) — Son çağrı
+    (n, dept) => `${n ? n + ', s' : 'S'}on hatırlatma 🙏 ${dept || 'Sağlık'} konusundaki ücretsiz ön değerlendirme hakkınız hala geçerli. Erken teşhis tedavi başarısını önemli ölçüde artırıyor. Bize yazmak ister misiniz?`,
   ],
   en: [
-    (n) => `${n ? n+', w' : 'W'}e tried to reach you regarding your appointment. Could we schedule a convenient time? Your health is important to us.`,
-    (n) => `${n ? n+', j' : 'J'}ust a final reminder. We are here to help with your health consultation. Feel free to message us anytime.`
+    (n, dept) => `${n ? n + ', d' : 'D'}id you see our message? We'd love to discuss your ${dept || 'health'} concern 🙏`,
+    (n, dept) => `${n ? n + ', l' : 'L'}ast month, patients with similar ${dept || 'conditions'} were very satisfied with their treatment. You have a free preliminary consultation available.`,
+    (n, dept) => `${n ? n + ', f' : 'F'}inal reminder 🙏 Your free ${dept || 'health'} evaluation is still available. Early diagnosis significantly improves treatment success.`,
   ],
   ar: [
-    (n) => `${n ? n+'، ' : ''}حاولنا التواصل معكم بخصوص موعدكم. هل يمكننا تحديد وقت مناسب لكم؟ صحتكم تهمنا.`,
-    (n) => `${n ? n+'، ' : ''}تذكير أخير. نحن هنا لمساعدتكم في استشارتكم الصحية. لا تترددوا في مراسلتنا في أي وقت.`
+    (n, dept) => `${n ? n + '، ' : ''}هل رأيت رسالتنا؟ نود مناقشة حالتك ${dept ? 'في ' + dept : 'الصحية'} 🙏`,
+    (n, dept) => `${n ? n + '، ' : ''}المرضى الذين زارونا الشهر الماضي كانوا راضين جداً. لديك استشارة أولية مجانية.`,
+    (n, dept) => `${n ? n + '، ' : ''}تذكير أخير 🙏 التشخيص المبكر يحسن نتائج العلاج بشكل كبير. هل تود التواصل معنا؟`,
   ],
   de: [
-    (n) => `${n ? n+', w' : 'W'}ir haben versucht, Sie bezüglich Ihres Termins zu erreichen. Können wir eine passende Zeit vereinbaren? Ihre Gesundheit ist uns wichtig.`,
-    (n) => `${n ? n+', e' : 'E'}ine letzte Erinnerung. Wir sind hier, um Ihnen bei Ihrer Gesundheitsberatung zu helfen. Schreiben Sie uns jederzeit.`
+    (n, dept) => `${n ? n + ', h' : 'H'}aben Sie unsere Nachricht gesehen? Wir möchten gerne über Ihr ${dept || 'Gesundheits'}anliegen sprechen 🙏`,
+    (n, dept) => `${n ? n + ', l' : 'L'}etzten Monat waren Patienten mit ähnlichen Beschwerden sehr zufrieden. Sie haben eine kostenlose Erstberatung.`,
+    (n, dept) => `${n ? n + ', l' : 'L'}etzte Erinnerung 🙏 Ihre kostenlose Bewertung ist noch verfügbar. Früherkennung verbessert den Behandlungserfolg erheblich.`,
   ],
   fr: [
-    (n) => `${n ? n+', n' : 'N'}ous avons essayé de vous joindre concernant votre rendez-vous. Pouvons-nous convenir d'un moment? Votre santé est importante pour nous.`,
-    (n) => `${n ? n+', u' : 'U'}n dernier rappel. Nous sommes là pour vous aider. N'hésitez pas à nous écrire à tout moment.`
+    (n, dept) => `${n ? n + ', a' : 'A'}vez-vous vu notre message ? Nous aimerions discuter de votre ${dept || 'santé'} 🙏`,
+    (n, dept) => `${n ? n + ', l' : 'L'}e mois dernier, des patients similaires étaient très satisfaits. Vous avez une consultation préliminaire gratuite.`,
+    (n, dept) => `${n ? n + ', d' : 'D'}ernier rappel 🙏 Votre évaluation gratuite est toujours disponible. Un diagnostic précoce améliore considérablement les résultats.`,
   ],
   ru: [
-    (n) => `${n ? n+', м' : 'М'}ы пытались связаться с вами по поводу вашей записи. Можем ли мы назначить удобное время? Ваше здоровье важно для нас.`,
-    (n) => `${n ? n+', п' : 'П'}оследнее напоминание. Мы готовы помочь вам с медицинской консультацией. Пишите нам в любое время.`
+    (n, dept) => `${n ? n + ', в' : 'В'}ы видели наше сообщение? Мы хотели бы обсудить ваш ${dept || 'вопрос здоровья'} 🙏`,
+    (n, dept) => `${n ? n + ', в' : 'В'} прошлом месяце пациенты с похожими проблемами были очень довольны лечением. У вас есть бесплатная первичная консультация.`,
+    (n, dept) => `${n ? n + ', п' : 'П'}оследнее напоминание 🙏 Ваша бесплатная оценка всё ещё доступна. Ранняя диагностика значительно улучшает результаты лечения.`,
   ]
 };
+
+// Kademe → minimum bekleme süresi (saat)
+const FOLLOW_UP_THRESHOLDS = [
+  { minHours: 2,  maxFollowUpCount: 0 },  // Kademe 0: 2 saat sonra
+  { minHours: 6,  maxFollowUpCount: 1 },  // Kademe 1: 6 saat sonra
+  { minHours: 24, maxFollowUpCount: 2 },  // Kademe 2: 24 saat sonra
+  { minHours: 72, maxFollowUpCount: 3 },  // Kademe 3: 72 saat sonra (template)
+];
 
 export default async function handler(req, res) {
   const authHeader = req.headers.authorization;
@@ -79,6 +104,14 @@ export default async function handler(req, res) {
 
   const sql = neon(DATABASE_URL);
 
+  // 🕐 Saat kontrolü — sadece 08:00-21:00 TR saatinde çalış
+  const trHour = new Date().toLocaleString('en-US', { timeZone: 'Europe/Istanbul', hour: 'numeric', hour12: false });
+  const hourNow = parseInt(trHour);
+  if (hourNow < 8 || hourNow >= 21) {
+    return res.json({ success: true, skipped: 'night_hours', hour: hourNow });
+  }
+
+  // DB migration
   try { await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS follow_up_count INT DEFAULT 0`; } catch(e) {}
   try { await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_follow_up_at TIMESTAMP`; } catch(e) {}
 
@@ -89,62 +122,140 @@ export default async function handler(req, res) {
     if (s.length > 0 && s[0].value) templateName = s[0].value;
   } catch(e) {}
 
+  let sent = 0, skipped = 0, templateUsed = 0, textUsed = 0, welcomeSent = 0;
+
+  // ============================================================
+  // BÖLÜM 1: Geciken karşılama mesajları (gece gelen leadler)
+  // ============================================================
   try {
-    const staleConversations = await sql`
-      SELECT c.phone_number, c.patient_name, c.follow_up_count, c.status,
+    const pendingWelcomes = await sql`
+      SELECT c.phone_number, c.patient_name, c.department
+      FROM conversations c
+      WHERE c.phase = 'pending_welcome'
+    `;
+
+    for (const pw of pendingWelcomes) {
+      const phone = pw.phone_number;
+      const name = pw.patient_name || '';
+      const dept = pw.department || 'sağlık';
+      const isTurkish = phone.startsWith('90');
+
+      // Karşılama mesajı oluştur
+      let greetingTr = '', greetingEn = '';
+      try {
+        const trSet = await sql`SELECT value FROM settings WHERE key = 'form_greeting_tr'`;
+        const enSet = await sql`SELECT value FROM settings WHERE key = 'form_greeting_en'`;
+        greetingTr = trSet.length > 0 ? trSet[0].value : '';
+        greetingEn = enSet.length > 0 ? enSet[0].value : '';
+      } catch(e) {}
+
+      const greeting = name ? (isTurkish ? `Merhaba ${name}!` : `Hello ${name}!`) : (isTurkish ? 'Merhaba!' : 'Hello!');
+      let welcomeMsg;
+      if (isTurkish) {
+        welcomeMsg = greetingTr
+          ? greetingTr.replace('{isim}', name).replace('{bolum}', dept).trim()
+          : `${greeting} Başkent Üniversitesi Konya Hastanesi'nden yazıyoruz 🙏\n\n${dept} konusunda bize ulaştığınızı gördük. Şikayetiniz ne zamandır devam ediyor?\n\nDurumunuzu daha iyi anlamamız için birkaç soru sormak istiyoruz, sonrasında size en uygun değerlendirmeyi sunalım.`;
+      } else {
+        welcomeMsg = greetingEn
+          ? greetingEn.replace('{name}', name).replace('{department}', dept).trim()
+          : `${greeting} We're reaching out from Başkent University Konya Hospital 🙏\n\nWe noticed your interest in ${dept}. How long have you been experiencing this issue?\n\nWe'd like to understand your situation better so we can recommend the best course of action for you.`;
+      }
+
+      try {
+        await sendTextMessage(PHONE_ID, META, phone, welcomeMsg);
+        await sql`INSERT INTO messages (phone_number, direction, content, model_used) VALUES (${phone}, 'out', ${welcomeMsg}, 'lead-auto')`;
+        await sql`UPDATE conversations SET phase = 'greeting', last_message_at = NOW() WHERE phone_number = ${phone}`;
+        await sql`UPDATE leads SET stage = 'contacted', contacted_at = NOW() WHERE phone_number = ${phone} AND stage = 'new'`;
+        welcomeSent++;
+        console.log(`🌅 Ertelenmiş karşılama gönderildi: ${phone}`);
+      } catch(e) {
+        console.error(`❌ Ertelenmiş karşılama hatası (${phone}):`, e.response?.data?.error?.message || e.message);
+      }
+    }
+  } catch(e) { console.error('Pending welcome hatası:', e.message); }
+
+  // ============================================================
+  // BÖLÜM 2: 4 Kademeli Takip Sistemi
+  // ============================================================
+  try {
+    const candidates = await sql`
+      SELECT c.phone_number, c.patient_name, c.follow_up_count, c.status, c.department, c.last_message_at,
         (SELECT direction FROM messages WHERE phone_number = c.phone_number ORDER BY created_at DESC LIMIT 1) as last_direction,
         (SELECT created_at FROM messages WHERE phone_number = c.phone_number AND direction = 'in' ORDER BY created_at DESC LIMIT 1) as last_patient_msg_time,
         (SELECT content FROM messages WHERE phone_number = c.phone_number AND direction = 'in' ORDER BY created_at DESC LIMIT 1) as last_patient_text
       FROM conversations c
-      WHERE c.follow_up_count < 2
-        AND c.last_message_at < NOW() - INTERVAL '24 hours'
+      WHERE c.follow_up_count < 4
+        AND c.phase NOT IN ('pending_welcome', 'handover')
+        AND c.status != 'human'
     `;
 
-    let sent = 0, skipped = 0, templateUsed = 0, textUsed = 0;
-
-    for (const conv of staleConversations) {
+    for (const conv of candidates) {
+      // Son mesaj hasta tarafından geldiyse follow-up atma
       if (conv.last_direction !== 'out') { skipped++; continue; }
 
+      // Kaç saat oldu?
+      const lastMsgTime = conv.last_message_at ? new Date(conv.last_message_at) : null;
+      if (!lastMsgTime) { skipped++; continue; }
+      const hoursSince = (Date.now() - lastMsgTime.getTime()) / 3600000;
+
+      // Doğru kademeyi bul
+      const currentCount = conv.follow_up_count || 0;
+      const threshold = FOLLOW_UP_THRESHOLDS[currentCount];
+      if (!threshold) { skipped++; continue; }
+      if (hoursSince < threshold.minHours) { skipped++; continue; }
+
       const name = conv.patient_name || '';
+      const dept = conv.department || '';
       const lang = detectLang(conv.last_patient_text);
-      
+
       // 24 saat penceresi kontrolü
       const lastPatientMsg = conv.last_patient_msg_time ? new Date(conv.last_patient_msg_time) : null;
-      const hoursSince = lastPatientMsg ? (Date.now() - lastPatientMsg.getTime()) / 3600000 : 999;
-      const windowOpen = hoursSince < 24;
+      const patientHoursSince = lastPatientMsg ? (Date.now() - lastPatientMsg.getTime()) / 3600000 : 999;
+      const windowOpen = patientHoursSince < 24;
 
       let msgContent = '';
 
       try {
-        if (windowOpen) {
-          // ✅ Pencere açık — hastanın dilinde metin gönder
-          const texts = followUpTexts[lang] || followUpTexts.tr;
-          const idx = Math.min(conv.follow_up_count, texts.length - 1);
-          msgContent = texts[idx](name);
+        if (currentCount < 3 && windowOpen) {
+          // ✅ Pencere açık — kademeli metin mesajı gönder
+          const texts = followUpMessages[lang] || followUpMessages.tr;
+          const idx = Math.min(currentCount, texts.length - 1);
+          msgContent = texts[idx](name, dept);
           await sendTextMessage(PHONE_ID, META, conv.phone_number, msgContent);
           textUsed++;
-          console.log(`📤 [Metin/${lang}] Takip #${conv.follow_up_count + 1}: ${conv.phone_number}`);
+          console.log(`📤 [Kademe ${currentCount}/${lang}] Takip: ${conv.phone_number} (${Math.round(hoursSince)}s sonra)`);
         } else {
-          // ⏰ Pencere KAPALI — hastanın dilinde şablon gönder
-          await sendTemplateMessage(PHONE_ID, META, conv.phone_number, templateName, lang);
-          msgContent = `[Şablon: ${templateName} (${lang})]`;
+          // ⏰ Pencere KAPALI veya kademe 3 — template gönder
+          const templateLang = lang === 'tr' ? 'tr' : lang === 'ar' ? 'ar' : lang === 'ru' ? 'ru' : lang === 'de' ? 'de' : lang === 'fr' ? 'fr' : 'en';
+          await sendTemplateMessage(PHONE_ID, META, conv.phone_number, templateName, templateLang);
+          msgContent = `[Şablon: ${templateName} (${templateLang})]`;
           templateUsed++;
-          console.log(`📋 [Şablon/${lang}] Takip #${conv.follow_up_count + 1}: ${conv.phone_number} (${Math.round(hoursSince)}s)`);
+          console.log(`📋 [Şablon/Kademe ${currentCount}] Takip: ${conv.phone_number} (${Math.round(hoursSince)}s, pencere kapalı)`);
         }
 
         await sql`INSERT INTO messages (phone_number, direction, content, model_used, channel) VALUES (${conv.phone_number}, 'out', ${msgContent}, 'follow-up', 'whatsapp')`;
-        await sql`UPDATE conversations SET follow_up_count = follow_up_count + 1, last_follow_up_at = NOW(), last_message_at = NOW(), phase = 'recovery' WHERE phone_number = ${conv.phone_number}`;
+        await sql`UPDATE conversations SET follow_up_count = follow_up_count + 1, last_follow_up_at = NOW(), last_message_at = NOW() WHERE phone_number = ${conv.phone_number}`;
+        
+        // 🔄 Follow-up sonrası bot'u tekrar aktif et (hasta cevaplarsa bot yanıt verebilsin)
+        if (conv.status !== 'active') {
+          await sql`UPDATE conversations SET status = 'active' WHERE phone_number = ${conv.phone_number} AND status != 'human'`;
+        }
+        
         sent++;
       } catch (e) {
         console.error(`❌ Takip hatası (${conv.phone_number}):`, e.response?.data?.error?.message || e.message);
       }
     }
+  } catch(e) { console.error('Follow-up genel hatası:', e.message); }
 
-    console.log(`✅ Takip: ${sent} gönderildi (${textUsed} metin, ${templateUsed} şablon), ${skipped} atlandı`);
-    return res.json({ success: true, sent, skipped, textUsed, templateUsed, total: staleConversations.length });
+  // ============================================================
+  // BÖLÜM 3: Escalation Kontrolü (Handover SLA)
+  // ============================================================
+  let escalated = 0;
+  try {
+    escalated = await checkEscalations(sql);
+  } catch(e) { console.error('Escalation check hatası:', e.message); }
 
-  } catch (error) {
-    console.error('❌ Follow-up hatası:', error.message);
-    return res.status(500).json({ error: error.message });
-  }
+  console.log(`✅ Takip: ${sent} gönderildi (${textUsed} metin, ${templateUsed} şablon), ${skipped} atlandı, ${welcomeSent} ertelenmiş karşılama, ${escalated} escalation`);
+  return res.json({ success: true, sent, skipped, textUsed, templateUsed, welcomeSent, escalated, total: sent + skipped });
 }

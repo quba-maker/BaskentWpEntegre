@@ -157,6 +157,21 @@ export default async function handler(req, res) {
 
               // Otomatik WhatsApp karşılama mesajı gönder
               if (phone && cleanPhone.match(/^\d{10,15}$/)) {
+                // 🕐 Saat kontrolü: Türkiye saatine göre 08:00-21:00 arası mı?
+                const trHour = new Date().toLocaleString('en-US', { timeZone: 'Europe/Istanbul', hour: 'numeric', hour12: false });
+                const hourNow = parseInt(trHour);
+                const isBusinessHours = hourNow >= 8 && hourNow < 21;
+
+                if (!isBusinessHours) {
+                  // Gece saati — mesajı GÖNDERME, sabah gönderilmek üzere işaretle
+                  console.log(`🌙 Gece saati (${hourNow}:00 TR) — ${cleanPhone} için mesaj sabah 08:00'e ertelendi`);
+                  if (sql) {
+                    try {
+                      await sql`UPDATE conversations SET phase = 'pending_welcome' WHERE phone_number = ${savePhone}`;
+                      await sql`UPDATE leads SET stage = 'new' WHERE leadgen_id = ${leadgenId}`;
+                    } catch(e) {}
+                  }
+                } else {
                 // Dil tespiti: +90 ise Türkçe, değilse İngilizce
                 const isTurkish = cleanPhone.startsWith('90');
                 
@@ -203,6 +218,7 @@ export default async function handler(req, res) {
                 } catch (e) {
                   console.error('❌ WhatsApp gönderim hatası:', e.response?.data || e.message);
                 }
+                } // end business hours
               }
             }
           }

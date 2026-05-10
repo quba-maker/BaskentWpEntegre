@@ -54,18 +54,72 @@ export default async function handler(req, res) {
       const recent = await sql`SELECT m.*, c.patient_name FROM messages m LEFT JOIN conversations c ON m.phone_number = c.phone_number ORDER BY m.created_at DESC LIMIT 15`;
 
       // Lead istatistikleri
-      let leadStats = { todayLeads: 0, totalLeads: 0, contacted: 0, appointed: 0, lost: 0, campaigns: [] };
+      let leadStats = { todayLeads: 0, totalLeads: 0, contacted: 0, appointed: 0, lost: 0, campaigns: [], conversionRate: 0, avgResponseMin: 0, hotLeads: 0, responseRate: 0, channelBreakdown: {}, funnelPhases: {} };
       try {
         const lt = await sql`SELECT COUNT(*) as c FROM leads WHERE created_at >= CURRENT_DATE`;
         const la = await sql`SELECT COUNT(*) as c FROM leads`;
-        const lc = await sql`SELECT COUNT(*) as c FROM leads WHERE stage IN ('contacted','responded')`;
+        const lc = await sql`SELECT COUNT(*) as c FROM leads WHERE stage IN ('contacted','responded','discovery')`;
         const lp = await sql`SELECT COUNT(*) as c FROM leads WHERE stage = 'appointed'`;
         const ll = await sql`SELECT COUNT(*) as c FROM leads WHERE stage = 'lost'`;
         const camps = await sql`SELECT form_name, COUNT(*) as count, 
           SUM(CASE WHEN stage = 'appointed' THEN 1 ELSE 0 END) as appointed
           FROM leads WHERE form_name IS NOT NULL AND form_name != '' 
           GROUP BY form_name ORDER BY count DESC LIMIT 8`;
-        leadStats = { todayLeads: lt[0].c, totalLeads: la[0].c, contacted: lc[0].c, appointed: lp[0].c, lost: ll[0].c, campaigns: camps };
+        
+        // 🎯 Dönüşüm Oranı
+        const totalLeadCount = parseInt(la[0].c) || 1;
+        const appointedCount = parseInt(lp[0].c) || 0;
+        const conversionRate = Math.round((appointedCount / totalLeadCount) * 100);
+        
+        // ⏱ Ortalama İlk Yanıt Süresi (dakika)
+        let avgResponseMin = 0;
+        try {
+          const respTime = await sql`
+            SELECT AVG(EXTRACT(EPOCH FROM (m.created_at - l.created_at)) / 60) as avg_min
+            FROM leads l
+            JOIN messages m ON m.phone_number = l.phone_number AND m.direction = 'out'
+            WHERE l.created_at > NOW() - INTERVAL '30 days'
+            AND m.created_at = (SELECT MIN(created_at) FROM messages WHERE phone_number = l.phone_number AND direction = 'out')
+          `;
+          avgResponseMin = Math.round(respTime[0]?.avg_min || 0);
+        } catch(e) {}
+        
+        // 🔥 Sıcak leadler (şu an insana devredilmiş, bekleyen)
+        let hotLeads = 0;
+        try {
+          const hl = await sql`SELECT COUNT(*) as c FROM conversations WHERE temperature = 'hot' AND status = 'human'`;
+          hotLeads = parseInt(hl[0].c);
+        } catch(e) {}
+        
+        // 📊 Yanıt oranı (kaç lead cevap verdi)
+        let responseRate = 0;
+        try {
+          const responded = await sql`
+            SELECT COUNT(DISTINCT l.phone_number) as c 
+            FROM leads l 
+            JOIN messages m ON m.phone_number = l.phone_number AND m.direction = 'in'
+            WHERE l.created_at > NOW() - INTERVAL '30 days'
+          `;
+          const totalRecent = await sql`SELECT COUNT(*) as c FROM leads WHERE created_at > NOW() - INTERVAL '30 days'`;
+          const recentTotal = parseInt(totalRecent[0].c) || 1;
+          responseRate = Math.round((parseInt(responded[0].c) / recentTotal) * 100);
+        } catch(e) {}
+        
+        // 📱 Kanal dağılımı
+        let channelBreakdown = {};
+        try {
+          const channels = await sql`SELECT COALESCE(last_channel, channel, 'whatsapp') as ch, COUNT(*) as c FROM conversations GROUP BY ch`;
+          channels.forEach(r => { channelBreakdown[r.ch] = parseInt(r.c); });
+        } catch(e) {}
+        
+        // 🔄 Funnel faz dağılımı
+        let funnelPhases = {};
+        try {
+          const phases = await sql`SELECT COALESCE(phase, 'greeting') as p, COUNT(*) as c FROM conversations WHERE status != 'human' GROUP BY p`;
+          phases.forEach(r => { funnelPhases[r.p] = parseInt(r.c); });
+        } catch(e) {}
+        
+        leadStats = { todayLeads: lt[0].c, totalLeads: la[0].c, contacted: lc[0].c, appointed: lp[0].c, lost: ll[0].c, campaigns: camps, conversionRate, avgResponseMin, hotLeads, responseRate, channelBreakdown, funnelPhases };
       } catch(e) {}
 
       return res.json({ totalMessages: total[0].c, todayMessages: today[0].c, activeConversations: active[0].c, humanConversations: human[0].c, recentMessages: recent, leadStats });

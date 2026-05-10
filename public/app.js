@@ -132,6 +132,36 @@ async function loadDashboard() {
     } else {
       campEl.innerHTML = '<div class="empty" style="padding:20px"><div class="empty-icon">📊</div>Henüz kampanya verisi yok</div>';
     }
+    
+    // 🎯 KPI Kartları
+    const kpiEl = document.getElementById('kpi-cards');
+    if (kpiEl) {
+      const ls = d.leadStats;
+      const crColor = ls.conversionRate >= 25 ? 'var(--system-green)' : (ls.conversionRate >= 10 ? 'var(--system-orange)' : 'var(--system-red)');
+      const rtColor = ls.avgResponseMin <= 5 ? 'var(--system-green)' : (ls.avgResponseMin <= 30 ? 'var(--system-orange)' : 'var(--system-red)');
+      const rrColor = ls.responseRate >= 60 ? 'var(--system-green)' : (ls.responseRate >= 30 ? 'var(--system-orange)' : 'var(--system-red)');
+      
+      kpiEl.innerHTML = `
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px,1fr)); gap:10px;">
+          <div style="background:var(--bg-card); border-radius:12px; padding:14px; text-align:center;">
+            <div style="font-size:24px; font-weight:800; color:${crColor};">${ls.conversionRate}%</div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">🎯 Dönüşüm</div>
+          </div>
+          <div style="background:var(--bg-card); border-radius:12px; padding:14px; text-align:center;">
+            <div style="font-size:24px; font-weight:800; color:${rtColor};">${ls.avgResponseMin}<span style="font-size:12px">dk</span></div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">⏱ İlk Yanıt</div>
+          </div>
+          <div style="background:var(--bg-card); border-radius:12px; padding:14px; text-align:center;">
+            <div style="font-size:24px; font-weight:800; color:${ls.hotLeads > 0 ? 'var(--system-red)' : 'var(--system-green)'};">${ls.hotLeads}</div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">🔥 Sıcak Lead</div>
+          </div>
+          <div style="background:var(--bg-card); border-radius:12px; padding:14px; text-align:center;">
+            <div style="font-size:24px; font-weight:800; color:${rrColor};">${ls.responseRate}%</div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">📊 Yanıt Oranı</div>
+          </div>
+        </div>
+      `;
+    }
   }
   
   document.getElementById('recent-messages').innerHTML = (d.recentMessages||[]).map(m => {
