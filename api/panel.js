@@ -645,8 +645,31 @@ export default async function handler(req, res) {
     if (action === 'update-lead' && req.method === 'POST') {
       const { id, stage, notes } = req.body;
       if (stage) await sql`UPDATE leads SET stage = ${stage} WHERE id = ${id}`;
+      await sql`UPDATE leads SET stage = ${stage} WHERE id = ${id}`;
       if (notes !== undefined) await sql`UPDATE leads SET notes = ${notes} WHERE id = ${id}`;
       if (stage === 'responded') await sql`UPDATE leads SET responded_at = NOW() WHERE id = ${id}`;
+      return res.json({ success: true });
+    }
+
+    // RANDEVU TALEPLERİNİ (GELEN TALEPLER) SIFIRLA
+    if (action === 'clear-appointments') {
+      try { await sql`DELETE FROM events`; } catch(e) {}
+      return res.json({ success: true });
+    }
+
+    // BELİRLİ BİR NUMARAYI TÜM VERİTABANINDAN SİL (HARD DELETE)
+    if (action === 'hard-delete-lead') {
+      const { phone } = req.body;
+      if (!phone) return res.status(400).json({error: 'Telefon numarası gerekli'});
+      let cleanPhone = phone.replace(/\D/g, '');
+      const likePattern = `%${cleanPhone.substring(cleanPhone.length - 10)}%`;
+      try {
+        await sql`DELETE FROM messages WHERE phone_number LIKE ${likePattern}`;
+        await sql`DELETE FROM conversation_states WHERE phone_number LIKE ${likePattern}`;
+        await sql`DELETE FROM events WHERE phone_number LIKE ${likePattern}`;
+        await sql`DELETE FROM leads WHERE phone_number LIKE ${likePattern}`;
+        await sql`DELETE FROM conversations WHERE phone_number LIKE ${likePattern}`;
+      } catch(e) { console.error('Hard delete error:', e); }
       return res.json({ success: true });
     }
 

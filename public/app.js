@@ -1055,6 +1055,40 @@ async function deleteMessages() {
   loadConversations();
 }
 
+async function hardDeleteLead() {
+  if(!currentPhone || !confirm('⚠️ DİKKAT! Bu hastanın TÜM form, log, mesaj ve randevu kayıtları veritabanından kalıcı olarak silinecek. SADECE test için kullanın. Onaylıyor musunuz?')) return;
+  await api('hard-delete-lead', 'POST', { phone: currentPhone });
+  toast('Kayıt tamamen yok edildi (Hard Reset)');
+  
+  document.getElementById('chat-messages').innerHTML = '<div class="empty">Kayıt silindi.</div>';
+  document.getElementById('btn-status-bot').className = 'handover-btn active-bot';
+  document.getElementById('btn-status-human').className = 'handover-btn';
+  
+  // Hasta Kartını temizle
+  const deptArea = document.getElementById('dept-area'); if (deptArea) deptArea.style.display = 'none';
+  const notesDiv = document.getElementById('special-notes'); if (notesDiv) notesDiv.style.display = 'none';
+  const formAnswersBox = document.getElementById('form-answers-box'); if (formAnswersBox) formAnswersBox.innerHTML = '';
+  document.getElementById('form-answers-wrapper').style.display = 'none';
+  document.getElementById('lead-score').textContent = '0 / 100';
+  document.getElementById('lead-score-fill').style.width = '0%';
+  document.getElementById('patient-score-badge').style.display = 'none';
+
+  // Listeden çıkar ve UI'ı güncelle
+  cachedConversations = cachedConversations.filter(c => c.phone_number !== currentPhone);
+  currentPhone = null;
+  renderConversationList();
+  
+  // Ana listeyi yeniden yükle ki her şey eşitlensin
+  setTimeout(loadConversations, 500);
+}
+
+async function clearAllAppointments() {
+  if(!confirm('Gelen randevu/ön görüşme taleplerinin tümü silinecektir. Test aşamasındaysanız onaylayın.')) return;
+  await api('clear-appointments', 'POST');
+  toast('Tüm talepler sıfırlandı.');
+  loadAppointments();
+}
+
 /* ========== QUOTE ENGINE (HIZLI TEKLİF) ========== */
 async function generateAndSendQuote() {
   if (!currentPhone) return toast('Lütfen bir sohbet seçin', 'error');

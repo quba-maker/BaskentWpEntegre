@@ -208,7 +208,8 @@
             </div>
             <!-- Auto-saved, no button needed -->
             <div style="margin-top:auto;">
-              <button class="btn btn-danger" style="width:100%;" onclick="deleteMessages()">🗑 Görüşmeyi Temizle</button>
+              <button class="btn btn-danger" style="width:100%; margin-bottom:8px;" onclick="deleteMessages()">🗑 Görüşmeyi Temizle</button>
+              <button class="btn btn-secondary" style="width:100%; font-size:11px; background:rgba(239, 68, 68, 0.1); color:#ef4444;" onclick="hardDeleteLead()">⚠️ Kaydı Tamamen Sil (Hard Reset)</button>
             </div>
           </div>
         </div>
@@ -290,7 +291,10 @@ Cevap: Muayene ücretimiz branşa göre değişiklik göstermektedir. Hangi böl
         <div class="card">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px">
             <h2>Gelen Talepler</h2>
-            <button class="btn btn-secondary btn-sm" onclick="loadAppointments()">🔄 Yenile</button>
+            <div>
+              <button class="btn btn-secondary btn-sm" onclick="clearAllAppointments()" style="margin-right:8px; background:rgba(239, 68, 68, 0.1); color:#ef4444; border-color:rgba(239,68,68,0.2);">🧹 Tümünü Sıfırla</button>
+              <button class="btn btn-secondary btn-sm" onclick="loadAppointments()">🔄 Yenile</button>
+            </div>
           </div>
           <div id="appointment-list"></div>
         </div>
