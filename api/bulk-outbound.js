@@ -7,7 +7,7 @@ const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { sheetName, leads, templateName = 'randevu_hatirlatma' } = req.body;
+  const { sheetName, leads, templateName = 'hello_world' } = req.body;
   if (!leads || !Array.isArray(leads)) return res.status(400).json({ error: 'Invalid leads array' });
 
   const APPS_SCRIPT_URL = process.env.GOOGLE_SHEET_UPDATE_URL || process.env.GOOGLE_SHEET_URL || 'https://script.google.com/macros/s/AKfycbw_iaJ0zqgOFYAGlkCnGnKQOzYQtPJWtbLMIEMIPuVbVkXOnDyq_1jMmII554s85sxu/exec';
@@ -44,7 +44,7 @@ export default async function handler(req, res) {
           type: 'template',
           template: {
             name: templateName,
-            language: { code: 'tr' }
+            language: { code: templateName === 'hello_world' ? 'en_US' : 'tr' }
             // If the template has variables (like name), we would add 'components' here.
           }
         }
