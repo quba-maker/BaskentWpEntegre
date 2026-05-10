@@ -193,14 +193,15 @@ export default async function handler(req, res) {
       if (!phone) return res.json({ score: 0, channels: [], lastMessage: null, conversationStatus: null });
 
       try {
-        // Normalise: trünkçe 0 ile başlarsa 90 ile değiştir
+        // Normalise: türkçe 0 ile başlarsa 90 ile değiştir
         let cleanPhone = phone;
         if (cleanPhone.startsWith('0')) cleanPhone = '90' + cleanPhone.substring(1);
+        const phoneAlt = cleanPhone.startsWith('90') ? cleanPhone.substring(2) : '90' + cleanPhone;
 
         const [conv, msgs, lead] = await Promise.all([
-          sql`SELECT status, created_at FROM conversations WHERE phone_number = ${cleanPhone} LIMIT 1`,
-          sql`SELECT direction, channel, content, created_at FROM messages WHERE phone_number = ${cleanPhone} ORDER BY created_at DESC LIMIT 10`,
-          sql`SELECT stage, score, contacted_at, responded_at FROM leads WHERE phone_number = ${cleanPhone} OR phone_number = ${phone} ORDER BY created_at DESC LIMIT 1`
+          sql`SELECT status, phase, lead_stage, created_at FROM conversations WHERE phone_number IN (${cleanPhone}, ${phoneAlt}, ${phone}) LIMIT 1`,
+          sql`SELECT direction, channel, content, created_at FROM messages WHERE phone_number IN (${cleanPhone}, ${phoneAlt}, ${phone}) ORDER BY created_at DESC LIMIT 10`,
+          sql`SELECT stage, score, contacted_at, responded_at FROM leads WHERE phone_number IN (${cleanPhone}, ${phoneAlt}, ${phone}) ORDER BY created_at DESC LIMIT 1`
         ]);
 
         // Kanal tespiti
@@ -281,21 +282,32 @@ export default async function handler(req, res) {
       // lead_stage sütunu yoksa oluştur (migration)
       try { await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS lead_stage VARCHAR(50) DEFAULT 'new'`; } catch(e) {}
 
-      // UPSERT: Kayıt yoksa oluştur (Form lead'leri Sheets'te olup DB'de olmayabilir)
-      await sql`
-        INSERT INTO conversations (phone_number, patient_name, tags, notes, department, patient_type, status, lead_stage)
-        VALUES (${phone}, ${patient_name || null}, ${tags || '[]'}, ${notes || ''}, ${department || null}, ${patient_type || 'Yerli'}, ${status || 'active'}, ${lead_stage || 'new'})
-        ON CONFLICT (phone_number) DO UPDATE SET
-          patient_name = COALESCE(NULLIF(${patient_name || null}, ''), conversations.patient_name),
-          tags = CASE WHEN ${tags || '[]'} != '[]' THEN ${tags || '[]'} ELSE conversations.tags END,
-          notes = CASE WHEN ${notes || ''} != '' THEN ${notes || ''} ELSE conversations.notes END,
-          department = COALESCE(NULLIF(${department || null}, ''), conversations.department),
-          lead_stage = COALESCE(NULLIF(${lead_stage || null}, ''), conversations.lead_stage),
-          status = COALESCE(NULLIF(${status || null}, ''), conversations.status)
-      `;
+      // Çoklu format arama
+      const cleanPhone = (phone || '').replace(/[\s\-\(\)\+]/g, '');
+      const phoneAlt = cleanPhone.startsWith('90') ? cleanPhone.substring(2) : '90' + cleanPhone;
+      
+      // SELECT + INSERT/UPDATE (ON CONFLICT UNIQUE constraint yok)
+      const existing = await sql`SELECT id FROM conversations WHERE phone_number IN (${cleanPhone}, ${phoneAlt}) LIMIT 1`;
+      if (existing.length > 0) {
+        await sql`
+          UPDATE conversations SET 
+            patient_name = COALESCE(NULLIF(${patient_name || null}, ''), patient_name),
+            tags = CASE WHEN ${tags || '[]'} != '[]' THEN ${tags || '[]'} ELSE tags END,
+            notes = CASE WHEN ${notes || ''} != '' THEN ${notes || ''} ELSE notes END,
+            department = COALESCE(NULLIF(${department || null}, ''), department),
+            lead_stage = COALESCE(NULLIF(${lead_stage || null}, ''), lead_stage),
+            status = COALESCE(NULLIF(${status || null}, ''), status)
+          WHERE phone_number IN (${cleanPhone}, ${phoneAlt})
+        `;
+      } else {
+        await sql`
+          INSERT INTO conversations (phone_number, patient_name, tags, notes, department, patient_type, status, lead_stage)
+          VALUES (${cleanPhone}, ${patient_name || null}, ${tags || '[]'}, ${notes || ''}, ${department || null}, ${patient_type || 'Yerli'}, ${status || 'active'}, ${lead_stage || 'new'})
+        `;
+      }
       if (lead_stage) {
         // leads tablosunda da güncelle (varsa)
-        await sql`UPDATE leads SET stage = ${lead_stage} WHERE phone_number = ${phone}`;
+        await sql`UPDATE leads SET stage = ${lead_stage} WHERE phone_number IN (${cleanPhone}, ${phoneAlt})`;
       }
 
       // OTOMATİK RANDEVU OLUŞTURMA
@@ -316,13 +328,17 @@ export default async function handler(req, res) {
 
     // HASTA BİLGİSİ OKU
     if (action === 'get-patient') {
-      const phone = req.query.phone;
-      const p = await sql`SELECT * FROM conversations WHERE phone_number = ${phone}`;
+      const phone = (req.query.phone || '').replace(/[\s\-\(\)\+]/g, '');
+      // Çoklu format arama
+      const phoneAlt = phone.startsWith('90') ? phone.substring(2) : '90' + phone;
+      const phoneWithPlus = '+' + phone;
+      
+      const p = await sql`SELECT * FROM conversations WHERE phone_number IN (${phone}, ${phoneAlt}, ${phoneWithPlus}) LIMIT 1`;
       const conv = p[0] || {};
       
       // Lead tablosundan form bilgilerini çek (numara eşleştirme)
       try {
-        const leads = await sql`SELECT * FROM leads WHERE phone_number = ${phone} ORDER BY created_at DESC LIMIT 1`;
+        const leads = await sql`SELECT * FROM leads WHERE phone_number IN (${phone}, ${phoneAlt}, ${phoneWithPlus}) ORDER BY created_at DESC LIMIT 1`;
         if (leads.length > 0) {
           const lead = leads[0];
           conv.lead_id = lead.id;
@@ -344,7 +360,7 @@ export default async function handler(req, res) {
           // Hasta adı lead'den gelip conversation'da yoksa otomatik eşleştirelim
           if (lead.patient_name && !conv.patient_name) {
             conv.patient_name = lead.patient_name;
-            await sql`UPDATE conversations SET patient_name = ${lead.patient_name} WHERE phone_number = ${phone}`;
+            await sql`UPDATE conversations SET patient_name = ${lead.patient_name} WHERE phone_number IN (${phone}, ${phoneAlt}, ${phoneWithPlus})`;
           }
         }
       } catch(e) { console.error('Lead eşleştirme hatası:', e.message); }

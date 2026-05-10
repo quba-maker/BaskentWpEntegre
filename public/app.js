@@ -252,7 +252,7 @@ function renderSheetTable(headers, rows, total) {
   if (nameCol === -1) nameCol = headers.findIndex(h => /^ad$/i.test(h.trim()) || h.toLowerCase().includes('isim'));
   let phoneCol = headers.findIndex(h => {
     const l = h.toLowerCase().replace(/[_\s]+/g, '');
-    return l === 'phonenumber' || l === 'phone' || l === 'telefon' || l === 'tel' || l === 'gsm' || l === 'cep';
+    return l.includes('whatsappnumarası') || l === 'phonenumber' || l.includes('whatsappnumarasıyazınız');
   });
   let campaignCol = findCol(['campaignname', 'campaign_name', 'kampanya']);
   let deptCol = findColStrict(['adname', 'ad_name', 'campaign', 'bolum', 'bölüm', 'form'], 40);
