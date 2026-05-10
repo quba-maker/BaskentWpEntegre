@@ -663,13 +663,16 @@ export default async function handler(req, res) {
       if (!phone) return res.status(400).json({error: 'Telefon numarası gerekli'});
       let cleanPhone = phone.replace(/\D/g, '');
       const likePattern = `%${cleanPhone.substring(cleanPhone.length - 10)}%`;
-      try {
-        await sql`DELETE FROM messages WHERE phone_number LIKE ${likePattern}`;
-        await sql`DELETE FROM conversation_states WHERE phone_number LIKE ${likePattern}`;
-        await sql`DELETE FROM events WHERE phone_number LIKE ${likePattern}`;
-        await sql`DELETE FROM leads WHERE phone_number LIKE ${likePattern}`;
-        await sql`DELETE FROM conversations WHERE phone_number LIKE ${likePattern}`;
-      } catch(e) { console.error('Hard delete error:', e); }
+      console.log(`🗑️ HARD DELETE başlatıldı: ${phone} → pattern: ${likePattern}`);
+      
+      // Her tabloyu bağımsız try/catch ile sil — biri patlarsa diğerleri etkilenmesin
+      try { const r = await sql`DELETE FROM messages WHERE phone_number LIKE ${likePattern}`; console.log('  ✓ messages silindi'); } catch(e) { console.error('  ✗ messages:', e.message); }
+      try { const r = await sql`DELETE FROM conversation_states WHERE phone_number LIKE ${likePattern}`; console.log('  ✓ conversation_states silindi'); } catch(e) { console.error('  ✗ conversation_states:', e.message); }
+      try { const r = await sql`DELETE FROM events WHERE phone_number LIKE ${likePattern}`; console.log('  ✓ events silindi'); } catch(e) { console.error('  ✗ events:', e.message); }
+      try { const r = await sql`DELETE FROM leads WHERE phone_number LIKE ${likePattern}`; console.log('  ✓ leads silindi'); } catch(e) { console.error('  ✗ leads:', e.message); }
+      try { const r = await sql`DELETE FROM conversations WHERE phone_number LIKE ${likePattern}`; console.log('  ✓ conversations silindi'); } catch(e) { console.error('  ✗ conversations:', e.message); }
+      
+      console.log(`🗑️ HARD DELETE tamamlandı: ${phone}`);
       return res.json({ success: true });
     }
 

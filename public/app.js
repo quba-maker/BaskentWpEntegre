@@ -1057,29 +1057,50 @@ async function deleteMessages() {
 
 async function hardDeleteLead() {
   if(!currentPhone || !confirm('⚠️ DİKKAT! Bu hastanın TÜM form, log, mesaj ve randevu kayıtları veritabanından kalıcı olarak silinecek. SADECE test için kullanın. Onaylıyor musunuz?')) return;
-  await api('hard-delete-lead', 'POST', { phone: currentPhone });
+  
+  const deletingPhone = currentPhone;
+  
+  try {
+    const result = await api('hard-delete-lead', 'POST', { phone: deletingPhone });
+    console.log('Hard delete result:', result);
+  } catch(e) {
+    console.error('Hard delete API error:', e);
+    toast('Silme işlemi başarısız oldu!', 'error');
+    return;
+  }
+  
   toast('Kayıt tamamen yok edildi (Hard Reset)');
   
+  // Sohbet alanını temizle
   document.getElementById('chat-messages').innerHTML = '<div class="empty">Kayıt silindi.</div>';
   document.getElementById('btn-status-bot').className = 'handover-btn active-bot';
   document.getElementById('btn-status-human').className = 'handover-btn';
   
+  // Üst bar (chat header) temizle
+  const chatTitle = document.getElementById('chat-title');
+  if (chatTitle) chatTitle.textContent = '';
+  const chatSubtitle = document.getElementById('chat-subtitle');
+  if (chatSubtitle) chatSubtitle.textContent = '';
+  
   // Hasta Kartını temizle
   const deptArea = document.getElementById('dept-area'); if (deptArea) deptArea.style.display = 'none';
-  const notesDiv = document.getElementById('special-notes'); if (notesDiv) notesDiv.style.display = 'none';
+  const notesDiv = document.getElementById('special-notes'); if (notesDiv) { notesDiv.innerHTML = ''; notesDiv.style.display = 'none'; }
   const formAnswersBox = document.getElementById('form-answers-box'); if (formAnswersBox) formAnswersBox.innerHTML = '';
-  document.getElementById('form-answers-wrapper').style.display = 'none';
+  const faw = document.getElementById('form-answers-wrapper'); if (faw) faw.style.display = 'none';
   document.getElementById('lead-score').textContent = '0 / 100';
   document.getElementById('lead-score-fill').style.width = '0%';
-  document.getElementById('patient-score-badge').style.display = 'none';
+  const scoreBadge = document.getElementById('patient-score-badge'); 
+  if (scoreBadge) { scoreBadge.style.display = 'none'; }
+  const stageSelect = document.getElementById('crm-stage'); if (stageSelect) stageSelect.value = 'new';
+  const patientNameInput = document.getElementById('patient-name'); if (patientNameInput) patientNameInput.value = '';
 
-  // Listeden çıkar ve UI'ı güncelle
-  cachedConversations = cachedConversations.filter(c => c.phone_number !== currentPhone);
+  // Listeden çıkar ve currentPhone'u sıfırla
+  cachedConversations = cachedConversations.filter(c => c.phone_number !== deletingPhone);
   currentPhone = null;
   renderConversationList();
   
-  // Ana listeyi yeniden yükle ki her şey eşitlensin
-  setTimeout(loadConversations, 500);
+  // Sunucudan listeyi tümüyle yeniden çek
+  setTimeout(loadConversations, 300);
 }
 
 async function clearAllAppointments() {
