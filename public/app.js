@@ -413,13 +413,22 @@ function renderConversationList() {
     const isHuman = c.status === 'human';
     const stBadge = isHuman ? '<span class="status-badge status-human">👤 Sen</span>' : '<span class="status-badge status-bot">🤖 Bot</span>';
     
-    // Pipeline Stage Badge
-    let stageBadge = '<span class="badge-stage badge-stage-new">🟢 Yeni</span>';
-    if (c.lead_stage === 'appointed') stageBadge = '<span class="badge-stage badge-stage-appointed">✅ Randevulu</span>';
-    else if (c.lead_stage === 'lost') stageBadge = '<span class="badge-stage badge-stage-lost">❌ Kaybedildi</span>';
-    else if (c.temperature === 'hot' || isHuman) stageBadge = '<span class="badge-stage badge-stage-hot">🔥 Sıcak Satış</span>';
-    else if (c.phase === 'discovery') stageBadge = '<span class="badge-stage badge-stage-contacted">🩺 Anlama</span>';
-    else if (c.phase === 'trust') stageBadge = '<span class="badge-stage badge-stage-responded">🔵 İkna Ediliyor</span>';
+    // 🎯 Birleşik Pipeline Badge (tek kaynak: lead_stage)
+    // Bot fazından stage'i çıkar (eğer lead_stage yoksa)
+    let effectiveStage = c.lead_stage || 'new';
+    if (effectiveStage === 'new' || effectiveStage === 'responded') {
+      // Bot fazından daha doğru stage belirle
+      const phaseStage = BOT_PHASE_TO_STAGE[c.phase];
+      if (phaseStage) effectiveStage = phaseStage;
+    }
+    // Sıcak lead override
+    if (c.temperature === 'hot' && effectiveStage !== 'appointed') effectiveStage = 'hot_lead';
+    if (isHuman && !['appointed', 'lost', 'hot_lead'].includes(effectiveStage)) effectiveStage = 'hot_lead';
+    // Legacy uyumluluk
+    if (effectiveStage === 'responded') effectiveStage = 'discovery';
+    if (effectiveStage === 'appointment_request') effectiveStage = 'hot_lead';
+    
+    const stageBadge = getStageBadge(effectiveStage);
 
     const ch = c.last_channel || c.channel || 'whatsapp';
     const hasName = c.patient_name && c.patient_name !== c.phone_number;
@@ -439,10 +448,10 @@ function renderConversationList() {
       nameDisplay = hasName ? c.patient_name : `IG Kullanıcı`;
       const shortId = c.phone_number.length > 10 ? '...' + c.phone_number.slice(-6) : c.phone_number;
       phoneDisplay = hasName 
-        ? `<div class="contact-phone">📸 @${c.patient_name.replace(/\s/g, '').toLowerCase()}</div>` 
+        ? `<div class="contact-phone">📸 Instagram</div>` 
         : `<div class="contact-phone">📸 ID: ${shortId}</div>`;
-      // Profil linki (eğer isim varsa Instagram profil URL'si)
-      if (hasName) profileLink = `https://instagram.com/${c.patient_name.replace(/\s/g, '').toLowerCase()}`;
+      // Instagram'da isim ile arama linki
+      if (hasName) profileLink = `https://www.instagram.com/explore/search/keyword/?q=${encodeURIComponent(c.patient_name)}`;
     } else if (isFB) {
       // Messenger: FB ismi veya PSID kısaltması
       nameDisplay = hasName ? c.patient_name : `FB Kullanıcı`;
@@ -450,7 +459,8 @@ function renderConversationList() {
       phoneDisplay = hasName
         ? `<div class="contact-phone">💬 Facebook</div>`
         : `<div class="contact-phone">💬 ID: ${shortId}</div>`;
-      profileLink = `https://facebook.com/${c.phone_number}`;
+      // Facebook'ta isim ile arama linki
+      if (hasName) profileLink = `https://www.facebook.com/search/people/?q=${encodeURIComponent(c.patient_name)}`;
     } else {
       nameDisplay = hasName ? c.patient_name : c.phone_number;
       phoneDisplay = `<div class="contact-phone">${c.phone_number}</div>`;
@@ -458,7 +468,7 @@ function renderConversationList() {
 
     // Profil dış bağlantısı ikonu
     const profileLinkHtml = profileLink 
-      ? `<a href="${profileLink}" target="_blank" onclick="event.stopPropagation()" style="font-size:11px; color:var(--accent-primary); text-decoration:none; opacity:0.7;" title="Profili Aç">🔗</a>` 
+      ? `<a href="${profileLink}" target="_blank" onclick="event.stopPropagation()" style="font-size:11px; color:var(--accent-primary); text-decoration:none; opacity:0.8;" title="Profili Ara">🔍</a>` 
       : '';
 
     // Form badge (varsa)
@@ -488,46 +498,44 @@ function renderConversationList() {
 async function loadKanban() {
   const list = await api('conversations'); if(!list) return;
   
-  // Sütunları tanımla
-  const cols = {
-    'bot_greeting': { title: '🤖 Karşılama', cards: [] },
-    'bot_discovery': { title: '🩺 Anlama / Tetkik', cards: [] },
-    'bot_trust': { title: '🏛️ İkna', cards: [] },
-    'human_hot': { title: '🔥 Sicak Lead (Randevu Bekliyor)', cards: [] },
-    'human_appointed': { title: '✅ Randevu Alındı', cards: [] }
-  };
+  // 🎯 Birleşik Pipeline Sütunları (pipeline-config.js'den)
+  const cols = {};
+  KANBAN_COLUMNS.forEach(col => { cols[col.key] = { ...col, cards: [] }; });
 
   list.forEach(c => {
-    const isHuman = c.status === 'human';
-    const phase = c.phase || 'greeting';
-    const temp = c.temperature || 'cold';
-    const isAppointed = c.lead_stage === 'appointed';
-
-    let targetCol = '';
-    
-    if (isAppointed) {
-      targetCol = 'human_appointed';
-    } else if (isHuman || temp === 'hot') {
-      targetCol = 'human_hot';
-    } else {
-      if (phase === 'greeting') targetCol = 'bot_greeting';
-      else if (phase === 'discovery') targetCol = 'bot_discovery';
-      else targetCol = 'bot_trust';
+    // Etkin stage'i belirle (inbox ile aynı mantık)
+    let effectiveStage = c.lead_stage || 'new';
+    if (effectiveStage === 'new' || effectiveStage === 'responded') {
+      const phaseStage = BOT_PHASE_TO_STAGE[c.phase];
+      if (phaseStage) effectiveStage = phaseStage;
     }
+    if (c.temperature === 'hot' && effectiveStage !== 'appointed') effectiveStage = 'hot_lead';
+    if (c.status === 'human' && !['appointed', 'lost', 'hot_lead'].includes(effectiveStage)) effectiveStage = 'hot_lead';
+    if (effectiveStage === 'responded') effectiveStage = 'discovery';
+    if (effectiveStage === 'appointment_request') effectiveStage = 'hot_lead';
 
-    cols[targetCol].cards.push(c);
+    // Kaybedilenleri gösterme (kanban'da gizli)
+    if (effectiveStage === 'lost') return;
+
+    // Doğru sütuna yerleştir
+    c._effectiveStage = effectiveStage;
+    const targetCol = KANBAN_COLUMNS.find(col => col.stages.includes(effectiveStage));
+    if (targetCol) {
+      cols[targetCol.key].cards.push(c);
+    } else {
+      cols[KANBAN_COLUMNS[0].key].cards.push(c);
+    }
   });
 
   const container = document.getElementById('kanban-container');
   container.innerHTML = Object.keys(cols).map(key => {
     const col = cols[key];
-    const isHotCol = key === 'human_hot';
     
     return `
       <div class="kanban-col">
-        <div class="kanban-header">
+        <div class="kanban-header" style="border-bottom:2px solid ${col.color};">
           <span>${col.title}</span>
-          <span class="count">${col.cards.length}</span>
+          <span class="count" style="background:${col.color}22; color:${col.color};">${col.cards.length}</span>
         </div>
         <div class="kanban-body">
           ${col.cards.map(c => {
@@ -549,7 +557,8 @@ async function loadKanban() {
             }
             
             const preview = c.last_message || '...';
-            const isHotCard = (c.temperature === 'hot' || isHotCol);
+            const isHotCard = (c._effectiveStage === 'hot_lead');
+            const cardStageBadge = getStageBadge(c._effectiveStage || 'new');
             
             return `
               <div class="kanban-card ${isHotCard ? 'hot' : ''}" onclick="openChatFromKanban('${c.phone_number}', '${ch}')">
@@ -557,6 +566,7 @@ async function loadKanban() {
                 <div style="font-size:11px; color:var(--text-muted); margin-bottom:4px;">${subInfo}</div>
                 <div class="preview">${preview}</div>
                 <div class="tags">
+                  ${cardStageBadge}
                   ${c.lead_form_name ? `<span class="tag">${c.lead_form_name}</span>` : ''}
                   ${c.department ? `<span class="tag" style="background:rgba(10,132,255,0.2)">${c.department}</span>` : ''}
                 </div>
@@ -566,7 +576,7 @@ async function loadKanban() {
         </div>
       </div>
     `;
-   }).join('');
+  }).join('');
 }
 
 let kanbanChatPhone = '';
@@ -1355,12 +1365,11 @@ function openLeadDetail(sortedIndex) {
   const cleanPhone = primaryPhone || (phoneVal || '').replace(/\D/g, '');
   
   // Pipeline → Sheets eşleştirme
-  const stageToSheets = { new:'CREATED', contacted:'İletişime Geçildi', responded:'Cevap Verdi', appointed:'Randevu Aldı', lost:'Soğuk' };
-  const sheetsToStage = { '':'new', 'CREATED':'new', 'İletişime Geçildi':'contacted', 'Cevap Verdi':'responded', 'İlgili':'responded', 'SİSTEME ALINDI ✅':'contacted', 'Randevu Aldı':'appointed', 'Geldi':'appointed', 'Tedavi Oldu':'appointed', 'Soğuk':'lost' };
+  // 🎯 Birleşik Pipeline (pipeline-config.js'den)
   
   // Mevcut Sheets durumundan aktif pipeline'ı belirle
   const currentSheetStatus = statusColIndex > -1 ? (row[statusColIndex] || '') : '';
-  const initialStage = sheetsToStage[currentSheetStatus] || 'new';
+  const initialStage = SHEETS_TO_STAGE[currentSheetStatus] || 'new';
 
   let editHtml = `
     <!-- SAĞ PANEL -->
@@ -1374,14 +1383,12 @@ function openLeadDetail(sortedIndex) {
           </h3>
           <p style="margin:0 0 14px 0; font-size:11px; color:var(--text-muted);">DB + Google Sheets'e anlık yansır</p>
           <div id="fd-pipeline-stages" style="display:flex; flex-direction:column; gap:6px;">
-            ${['new', 'contacted', 'responded', 'appointed', 'lost'].map(stage => {
-              const labels = { new:'🆕 Yeni Lead', contacted:'📞 İletişime Geçildi', responded:'💬 Cevap Verdi', appointed:'✅ Randevu Alındı', lost:'❌ Kaybedildi' };
-              const colors = { new:'#8b5cf6', contacted:'#3b82f6', responded:'#f59e0b', appointed:'#22c55e', lost:'#6b7280' };
+            ${Object.entries(PIPELINE_STAGES).map(([stage, cfg]) => {
               const isActive = stage === initialStage;
-              const activeStyle = isActive ? `background:${colors[stage]}22; border-color:${colors[stage]}; font-weight:700;` : '';
+              const activeStyle = isActive ? `background:${cfg.color}22; border-color:${cfg.color}; font-weight:700;` : '';
               return `<button class="fd-stage-btn" data-stage="${stage}" onclick="setLeadPipelineStage('${cleanPhone}', '${nameVal.replace(/'/g, "\\'")}', '${stage}', this, ${statusColIndex}, ${rowIndex})" style="display:flex; align-items:center; gap:8px; width:100%; padding:10px 14px; border-radius:8px; border:1px solid var(--border-color); background:var(--bg-hover); color:white; cursor:pointer; font-size:13px; font-weight:500; transition:all 0.2s; ${activeStyle}">
-                <span style="width:10px; height:10px; border-radius:50%; background:${colors[stage]}; flex-shrink:0;"></span>
-                ${labels[stage]}
+                <span style="width:10px; height:10px; border-radius:50%; background:${cfg.color}; flex-shrink:0;"></span>
+                ${cfg.emoji} ${cfg.label}
               </button>`;
             }).join('')}
           </div>
@@ -1475,18 +1482,16 @@ async function loadFormDetailCRM(phone) {
 async function setLeadPipelineStage(phone, name, stage, btnEl, sheetsStatusCol, sheetsRowIndex) {
   if (!phone) return toast('Telefon numarası bulunamadı', 'error');
   
-  // UI anında güncelle
-  const colors = { new:'#8b5cf6', contacted:'#3b82f6', responded:'#f59e0b', appointed:'#22c55e', lost:'#6b7280' };
-  const stageLabels = { new:'🆕 Yeni Lead', contacted:'📞 İletişime Geçildi', responded:'💬 Cevap Verdi', appointed:'✅ Randevu Alındı', lost:'❌ Kaybedildi' };
-  const stageToSheets = { new:'CREATED', contacted:'İletişime Geçildi', responded:'Cevap Verdi', appointed:'Randevu Aldı', lost:'Soğuk' };
+  // 🎯 Birleşik config'den oku
+  const cfg = PIPELINE_STAGES[stage] || PIPELINE_STAGES.new;
   
   document.querySelectorAll('.fd-stage-btn').forEach(btn => {
     btn.style.background = 'var(--bg-hover)';
     btn.style.borderColor = 'var(--border-color)';
     btn.style.fontWeight = '500';
   });
-  btnEl.style.background = colors[stage] + '22';
-  btnEl.style.borderColor = colors[stage];
+  btnEl.style.background = cfg.color + '22';
+  btnEl.style.borderColor = cfg.color;
   btnEl.style.fontWeight = '700';
 
   const infoEl = document.getElementById('fd-pipeline-info');
@@ -1504,15 +1509,15 @@ async function setLeadPipelineStage(phone, name, stage, btnEl, sheetsStatusCol, 
     
     // 2. Google Sheets'e kaydet (status sütunu varsa)
     if (sheetsStatusCol > -1 && sheetsRowIndex >= 0) {
-      const sheetsValue = stageToSheets[stage] || stage;
+      const sheetsValue = cfg.sheetsVal || stage;
       await updateSheetCell(sheetsRowIndex, sheetsStatusCol, sheetsValue);
     }
     
     if (infoEl) {
-      infoEl.innerHTML = `✅ <strong>${stageLabels[stage]}</strong> — DB + Sheets kaydedildi`;
+      infoEl.innerHTML = `✅ <strong>${cfg.emoji} ${cfg.label}</strong> — DB + Sheets kaydedildi`;
       if (stage === 'appointed') infoEl.innerHTML += '<br>🗓️ Randevu Talepleri paneline eklendi';
     }
-    toast(`${stageLabels[stage]}`);
+    toast(`${cfg.emoji} ${cfg.label}`);
   } catch(e) {
     toast('Kayıt hatası', 'error');
     if (infoEl) infoEl.innerHTML = '❌ Kayıt hatası';
