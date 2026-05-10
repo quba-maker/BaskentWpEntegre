@@ -5,3 +5,6 @@ node_modules
 .env*.local
 *.log
 test_*.js
+
+get-templates.js
+test-templates.js

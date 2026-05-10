@@ -59,30 +59,31 @@ export default async function handler(req, res) {
       `;
 
       // Make sure the conversation is active, phase is greeting, and mark it as a lead
-      try {
+      const existing = await sql`SELECT id FROM conversations WHERE phone_number = ${formattedPhone} LIMIT 1`;
+      if (existing.length > 0) {
         await sql`
-          INSERT INTO conversations (phone_number, channel, status, patient_name, phase, has_lead, last_message_at)
-          VALUES (${formattedPhone}, 'whatsapp', 'active', ${name || null}, 'greeting', true, NOW())
-          ON CONFLICT (phone_number) 
-          DO UPDATE SET 
-            status = 'active',
-            phase = 'greeting',
-            has_lead = true,
-            patient_name = COALESCE(conversations.patient_name, ${name || null}),
+          UPDATE conversations SET 
+            status = 'active', 
+            channel = 'whatsapp',
+            patient_name = COALESCE(patient_name, ${name || null}),
             last_message_at = NOW()
+          WHERE phone_number = ${formattedPhone}
         `;
-      } catch (dbErr) {
-        // Fallback: has_lead/phase columns may not exist yet — use simpler query
-        console.warn('has_lead/phase columns missing, using fallback:', dbErr.message);
-        await sql`
-          INSERT INTO conversations (phone_number, channel, status, patient_name, last_message_at)
-          VALUES (${formattedPhone}, 'whatsapp', 'active', ${name || null}, NOW())
-          ON CONFLICT (phone_number) 
-          DO UPDATE SET 
-            status = 'active',
-            patient_name = COALESCE(conversations.patient_name, ${name || null}),
-            last_message_at = NOW()
-        `;
+        // Try updating new columns separately (may not exist)
+        try { await sql`UPDATE conversations SET phase = 'greeting', has_lead = true WHERE phone_number = ${formattedPhone}`; } catch(e) {}
+      } else {
+        try {
+          await sql`
+            INSERT INTO conversations (phone_number, channel, status, patient_name, phase, has_lead, last_message_at)
+            VALUES (${formattedPhone}, 'whatsapp', 'active', ${name || null}, 'greeting', true, NOW())
+          `;
+        } catch(e) {
+          // Fallback without new columns
+          await sql`
+            INSERT INTO conversations (phone_number, channel, status, patient_name, last_message_at)
+            VALUES (${formattedPhone}, 'whatsapp', 'active', ${name || null}, NOW())
+          `;
+        }
       }
 
       // 3. Update Google Sheets (Mark as Processed)
