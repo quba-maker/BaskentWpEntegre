@@ -246,6 +246,12 @@ export default async function handler(req, res) {
     }
 
     // KONUŞMALAR
+    // TODO: Temporary endpoint to clear cached prompts
+    if (action === 'clear-prompts') {
+      await sql`DELETE FROM settings WHERE key LIKE 'system_prompt%'`;
+      return new Response(JSON.stringify({ ok: true, message: 'Prompts cleared' }), { headers });
+    }
+
     if (action === 'conversations') {
       const list = await sql`
         SELECT c.*, 
