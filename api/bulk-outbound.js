@@ -89,8 +89,21 @@ export default async function handler(req, res) {
       
     } catch (err) {
       console.error(`Bulk Outbound Error for ${formattedPhone}:`, err.response?.data || err.message);
+      
+      // Şablon hatası varsa mevcut şablonları çekip hataya ekle
+      let availableTemplates = '';
+      try {
+        const bizAccounts = await axios.get(`https://graph.facebook.com/v25.0/${PHONE_NUMBER_ID}/whatsapp_business_account`, { headers: { Authorization: `Bearer ${META_ACCESS_TOKEN}` } });
+        const wabaId = bizAccounts.data?.id;
+        if (wabaId) {
+          const r = await axios.get(`https://graph.facebook.com/v25.0/${wabaId}/message_templates?limit=50`, { headers: { Authorization: `Bearer ${META_ACCESS_TOKEN}` } });
+          const approved = (r.data.data || []).filter(t => t.status === 'APPROVED').map(t => t.name);
+          availableTemplates = approved.length > 0 ? `\n(Mevcut Onaylı Şablonlar: ${approved.join(', ')})` : '\n(Hiç onaylı şablon bulunamadı)';
+        }
+      } catch(e) { console.error('Template fetch failed', e.message); }
+
       results.failed++;
-      results.details.push({ phone: formattedPhone, status: 'failed', error: err.response?.data?.error?.message || err.message });
+      results.details.push({ phone: formattedPhone, status: 'failed', error: (err.response?.data?.error?.message || err.message) + availableTemplates });
     }
   }
 
