@@ -86,6 +86,26 @@ export default async function handler(req, res) {
     try { await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_channel VARCHAR(20)`; } catch(e) {}
     try { await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS has_lead BOOLEAN DEFAULT false`; } catch(e) {}
     try { await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS phase VARCHAR(50) DEFAULT 'greeting'`; } catch(e) {}
+    try { await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS temperature VARCHAR(20) DEFAULT 'cold'`; } catch(e) {}
+    try { await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS lead_stage VARCHAR(50) DEFAULT 'new'`; } catch(e) {}
+    try { await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS channel VARCHAR(50) DEFAULT 'whatsapp'`; } catch(e) {}
+
+    // Alerts tablosu (Sıcak lead alarmları)
+    await sql`CREATE TABLE IF NOT EXISTS alerts (
+      id SERIAL PRIMARY KEY, phone_number VARCHAR(20),
+      alert_type VARCHAR(50), message TEXT,
+      is_read BOOLEAN DEFAULT false,
+      created_at TIMESTAMP DEFAULT NOW()
+    )`;
+
+    // Escalations tablosu (SLA hatırlatma sistemi)
+    await sql`CREATE TABLE IF NOT EXISTS escalations (
+      id SERIAL PRIMARY KEY, phone_number VARCHAR(20),
+      alert_id INT REFERENCES alerts(id),
+      escalation_level INT DEFAULT 0,
+      next_escalation_at TIMESTAMP,
+      created_at TIMESTAMP DEFAULT NOW()
+    )`;
 
     // Varsayılan etiketler
     const existingTags = await sql`SELECT COUNT(*) as c FROM tags`;
