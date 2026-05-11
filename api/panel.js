@@ -487,6 +487,59 @@ export default async function handler(req, res) {
       if (lead_stage) {
         // leads tablosunda da güncelle (varsa)
         await sql`UPDATE leads SET stage = ${lead_stage} WHERE phone_number LIKE ${likePattern}`;
+        
+        // 📊 BACKEND SHEETS SYNC — Sheets'e lead durumunu yaz (her yerden çalışır)
+        try {
+          const SHEETS_API_KEY = process.env.GOOGLE_SHEETS_API_KEY || 'AIzaSyAxNUHQCrXzmATX4YuMgcFP3u4EW_jsJYc';
+          const SPREADSHEET_ID = process.env.GOOGLE_SPREADSHEET_ID || '1oSKJ-iYiZPltYUQ73_O-FaFdelhwAwtf09wVKKVs1GQ';
+          const APPS_SCRIPT_URL = process.env.GOOGLE_SHEET_UPDATE_URL || process.env.GOOGLE_SHEET_URL || 'https://script.google.com/macros/s/AKfycbw_iaJ0zqgOFYAGlkCnGnKQOzYQtPJWtbLMIEMIPuVbVkXOnDyq_1jMmII554s85sxu/exec';
+          const stageLabels = { new: 'Yeni', contacted: 'İlk Temas', discovery: 'Analiz', negotiation: 'İkna', hot_lead: 'Sıcak Lead', appointed: 'Randevu Alındı', lost: 'Kayıp' };
+          const stageLabel = stageLabels[lead_stage] || lead_stage;
+          
+          // 1) Spreadsheet meta → tüm sekme isimlerini çek
+          const metaResp = await axios.get(`https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}`, {
+            params: { key: SHEETS_API_KEY, fields: 'sheets.properties' }
+          });
+          const tabs = metaResp.data.sheets
+            .filter(s => !s.properties.hidden)
+            .map(s => s.properties.title);
+          
+          // 2) Her sekmede telefon + durum sütununu bul
+          const last10 = cleanPhone.length > 10 ? cleanPhone.slice(-10) : cleanPhone;
+          
+          for (const tabName of tabs) {
+            try {
+              const dataResp = await axios.get(
+                `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${encodeURIComponent(tabName)}`,
+                { params: { key: SHEETS_API_KEY, valueRenderOption: 'FORMATTED_VALUE' } }
+              );
+              const values = dataResp.data.values || [];
+              if (values.length < 2) continue;
+              
+              const headers = values[0];
+              const phoneColIdx = headers.findIndex(h => /phone|telefon|tel|whatsapp|cep/i.test((h || '').toLowerCase()));
+              const statusColIdx = headers.findIndex(h => /durum|status|lead_status|aşama/i.test((h || '').toLowerCase()));
+              if (phoneColIdx === -1 || statusColIdx === -1) continue;
+              
+              // 3) Satırı bul
+              for (let r = 1; r < values.length; r++) {
+                const cellPhone = (values[r][phoneColIdx] || '').replace(/\D/g, '');
+                if (cellPhone.length >= 10 && (cellPhone.endsWith(last10) || last10.endsWith(cellPhone.slice(-10)))) {
+                  // 4) Apps Script ile güncelle
+                  await axios.post(APPS_SCRIPT_URL, {
+                    action: 'updateCell',
+                    sheet: tabName,
+                    row: r + 1, // 1-indexed (header = 1, data = 2+)
+                    col: statusColIdx + 1,
+                    value: stageLabel
+                  }, { timeout: 8000 });
+                  console.log(`📊 Backend Sheets sync: ${tabName} satır ${r+1} → ${stageLabel}`);
+                  break; // Bulundu, durdur
+                }
+              }
+            } catch(tabErr) { /* sessizce devam */ }
+          }
+        } catch(sheetsErr) { console.error('Backend Sheets sync hatası:', sheetsErr.message); }
       }
 
       // OTOMATİK RANDEVU OLUŞTURMA
