@@ -741,6 +741,24 @@ Cevap: Muayene ücretimiz branşa göre değişiklik göstermektedir. Hangi böl
   </div>
 </div>
 
+<!-- WhatsApp Style Media Lightbox -->
+<div id="media-lightbox" class="media-lightbox" style="display:none">
+  <div class="lightbox-header">
+    <div class="lightbox-sender" id="lightbox-sender">Gönderen Bilgisi</div>
+    <div class="lightbox-actions">
+      <button onclick="downloadLightboxMedia()" title="İndir"><i class="fas fa-download"></i></button>
+      <button onclick="closeLightbox()" title="Kapat">✕</button>
+    </div>
+  </div>
+  <div class="lightbox-content">
+    <img id="lightbox-main-img" src="" />
+  </div>
+  <div class="lightbox-footer">
+    <div class="lightbox-caption" id="lightbox-caption"></div>
+    <div class="lightbox-thumbnails" id="lightbox-thumbnails"></div>
+  </div>
+</div>
+
 <script src="pipeline-config.js?v=2"></script>
 <!-- Modular App Architecture -->
 <script src="js/core.js?v=2"></script>

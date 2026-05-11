@@ -163,14 +163,17 @@ async function loadChat(phone, channel) {
       const textWithoutMediaBracket = cleanContent.replace(/\[[^\]]*\]\s*/, '').trim();
       
       if (isImage) {
-        content = `<img src="/api/panel?action=media&id=${mediaId}&token=${AUTH_TOKEN}" style="max-width:min(280px,100%);border-radius:12px;margin-bottom:6px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.3);" onclick="window.open('/api/panel?action=media&id=${mediaId}&token=${AUTH_TOKEN}','_blank')" loading="lazy"><br><span style="font-size:12px;opacity:0.8;">${textWithoutMediaBracket}</span>`;
+        const safeCaption = textWithoutMediaBracket.replace(/'/g, "&apos;").replace(/"/g, "&quot;");
+        content = `<img src="/api/panel?action=media&id=${mediaId}&token=${AUTH_TOKEN}" class="chat-media-img" data-sender="${senderLabel.replace(/"/g, "&quot;")}" data-caption="${safeCaption}" data-time="${msgDate.toLocaleTimeString('tr-TR', {hour:'2-digit',minute:'2-digit'})}" style="max-width:min(280px,100%);border-radius:12px;margin-bottom:6px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.3);" onclick="openMediaLightbox(this)" loading="lazy"><br><span style="font-size:12px;opacity:0.8;">${textWithoutMediaBracket}</span>`;
       } else if (isDoc) {
         content = `📎 <a href="/api/panel?action=media&id=${mediaId}&token=${AUTH_TOKEN}" target="_blank" style="color:#60a5fa;text-decoration:underline;font-weight:500;">${textWithoutMediaBracket || 'Belgeyi İndir'}</a>`;
       }
     } else if (m.media_url) {
       // Eski format desteği (media_url alanı varsa)
-      if (m.media_type === 'image') content = `<img src="${m.media_url}" style="max-width:min(240px,100%);border-radius:8px;margin-bottom:4px;"><br>${escapeHtml(m.content||'')}`;
-      else content = `📎 <a href="${m.media_url}" target="_blank" style="color:inherit;text-decoration:underline">${escapeHtml(m.content||'Dosya')}</a>`;
+      if (m.media_type === 'image') {
+        const safeCaption = (m.content||'').replace(/'/g, "&apos;").replace(/"/g, "&quot;");
+        content = `<img src="${m.media_url}" class="chat-media-img" data-sender="${senderLabel.replace(/"/g, "&quot;")}" data-caption="${safeCaption}" data-time="${msgDate.toLocaleTimeString('tr-TR', {hour:'2-digit',minute:'2-digit'})}" style="max-width:min(240px,100%);border-radius:8px;margin-bottom:4px;cursor:pointer;" onclick="openMediaLightbox(this)"><br>${escapeHtml(m.content||'')}`;
+      } else content = `📎 <a href="${m.media_url}" target="_blank" style="color:inherit;text-decoration:underline">${escapeHtml(m.content||'Dosya')}</a>`;
     }
     return separatorHtml + `<div class="${cls}">${content}${info}</div>`;
   }).join('');
@@ -271,3 +274,91 @@ function addCRMTag(val) {
   document.getElementById('crm-add-tag').value = '';
 }
 
+/* ══════════════════════════════════════════════
+   WHATSAPP STYLE MEDIA LIGHTBOX
+   ══════════════════════════════════════════════ */
+let lightboxImages = [];
+let currentLightboxIndex = 0;
+
+function openMediaLightbox(imgElement) {
+  // Find all images in the chat
+  const chatMessages = document.getElementById('chat-messages');
+  if (!chatMessages) return;
+  
+  const allImgs = Array.from(chatMessages.querySelectorAll('img.chat-media-img'));
+  if (allImgs.length === 0) return;
+  
+  lightboxImages = allImgs;
+  currentLightboxIndex = allImgs.indexOf(imgElement);
+  if (currentLightboxIndex === -1) currentLightboxIndex = 0;
+  
+  const lightbox = document.getElementById('media-lightbox');
+  lightbox.style.display = 'flex';
+  
+  // Create thumbnails
+  const thumbnailsContainer = document.getElementById('lightbox-thumbnails');
+  thumbnailsContainer.innerHTML = '';
+  
+  allImgs.forEach((img, idx) => {
+    const thumb = document.createElement('img');
+    thumb.src = img.src;
+    if (idx === currentLightboxIndex) thumb.classList.add('active');
+    thumb.onclick = () => updateLightboxView(idx);
+    thumbnailsContainer.appendChild(thumb);
+  });
+  
+  updateLightboxView(currentLightboxIndex);
+  
+  // Add swipe listener
+  let startX = 0;
+  lightbox.ontouchstart = (e) => { startX = e.touches[0].clientX; };
+  lightbox.ontouchend = (e) => {
+    const endX = e.changedTouches[0].clientX;
+    const diff = startX - endX;
+    if (diff > 50) updateLightboxView(currentLightboxIndex + 1); // Swipe left -> next
+    else if (diff < -50) updateLightboxView(currentLightboxIndex - 1); // Swipe right -> prev
+  };
+}
+
+function updateLightboxView(index) {
+  if (index < 0) index = 0;
+  if (index >= lightboxImages.length) index = lightboxImages.length - 1;
+  currentLightboxIndex = index;
+  
+  const imgData = lightboxImages[index];
+  document.getElementById('lightbox-main-img').src = imgData.src;
+  document.getElementById('lightbox-caption').textContent = imgData.dataset.caption || '';
+  
+  const senderText = imgData.dataset.sender || '';
+  const timeText = imgData.dataset.time || '';
+  document.getElementById('lightbox-sender').textContent = senderText ? `${senderText} • ${timeText}` : 'Medya';
+  
+  // Update thumbnails
+  const thumbnailsContainer = document.getElementById('lightbox-thumbnails');
+  Array.from(thumbnailsContainer.children).forEach((thumb, idx) => {
+    if (idx === currentLightboxIndex) {
+      thumb.classList.add('active');
+      thumb.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+    } else {
+      thumb.classList.remove('active');
+    }
+  });
+}
+
+function closeLightbox() {
+  document.getElementById('media-lightbox').style.display = 'none';
+  document.getElementById('media-lightbox').ontouchstart = null;
+  document.getElementById('media-lightbox').ontouchend = null;
+}
+
+function downloadLightboxMedia() {
+  const imgData = lightboxImages[currentLightboxIndex];
+  if (!imgData) return;
+  const a = document.createElement('a');
+  a.href = imgData.src;
+  a.download = 'media_' + Date.now();
+  a.target = '_blank';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
