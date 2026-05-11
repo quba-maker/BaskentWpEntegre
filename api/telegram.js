@@ -29,7 +29,7 @@ export default async function handler(req, res) {
         const likePattern = `%${searchP}%`;
 
         let newStage = '';
-        let newStatus = 'human';
+        let newStatus = 'active'; // Default: bot aktif kalır. Sadece panelden Manuel Devral tıklanırsa 'human' olur.
         let feedbackMsg = '';
         let telegramAlertText = callback_query.message.text;
         let statusBadge = '';
