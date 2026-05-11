@@ -1258,9 +1258,21 @@ async function instantStageUpdate(newStage) {
   if(!currentPhone) return;
   // Anında lokal cache'i güncelle (Hızlı UI tepkisi)
   const idx = cachedConversations.findIndex(c => c.phone_number === currentPhone);
-  if (idx > -1) cachedConversations[idx].lead_stage = newStage;
+  if (idx > -1) {
+    cachedConversations[idx].lead_stage = newStage;
+    cachedConversations[idx]._effectiveStage = newStage;
+  }
   
   renderConversationList(); // Sol listeyi anında güncelle
+  
+  // Sağ paneldeki Lead Durumu label'ını da güncelle
+  const stageCfg = PIPELINE_STAGES[newStage] || { emoji: '❓', label: newStage || '—' };
+  const stageLabel = document.getElementById('crm-lead-stage');
+  if (stageLabel) stageLabel.textContent = `${stageCfg.emoji} ${stageCfg.label}`;
+  
+  // Form Yönetimi enrich cache'ini temizle (oraya geçince güncel görsün)
+  const cleanPhone = currentPhone.replace(/\D/g, '');
+  if (window._enrichCache) delete window._enrichCache[cleanPhone];
 
   // Arkada sessizce kaydet
   await api('update-patient', 'POST', {
@@ -1299,6 +1311,15 @@ async function autoSaveCRM() {
   
   // Listeyi sessizce render et
   renderConversationList();
+  
+  // Sağ paneldeki Lead Durumu label'ını güncelle
+  const stageCfg = PIPELINE_STAGES[newStage] || { emoji: '❓', label: newStage || '—' };
+  const stageLabel = document.getElementById('crm-lead-stage');
+  if (stageLabel) stageLabel.textContent = `${stageCfg.emoji} ${stageCfg.label}`;
+  
+  // Form Yönetimi enrich cache'ini temizle
+  const cleanPhone = currentPhone.replace(/\D/g, '');
+  if (window._enrichCache) delete window._enrichCache[cleanPhone];
 
   // API'ye kaydet
   try {
@@ -2115,8 +2136,21 @@ async function setLeadPipelineStage(phone, name, stage, btnEl, sheetsStatusCol, 
     }
     toast(`${cfg.emoji} ${cfg.label}`, 'success', { phone: phone });
     
-    // UI Anlık Güncelleme
+    // UI Anlık Güncelleme — Form Yönetimi satırları
     if (typeof refreshLeadRowUI === 'function') refreshLeadRowUI(phone);
+    
+    // Inbox cache'ini de güncelle (sekme değişince hemen yansısın)
+    if (typeof cachedConversations !== 'undefined') {
+      const cleanP = phone.replace(/\D/g, '');
+      const cIdx = cachedConversations.findIndex(c => {
+        const cp = (c.phone_number || '').replace(/\D/g, '');
+        return cp === cleanP || cp.endsWith(cleanP.slice(-10)) || cleanP.endsWith(cp.slice(-10));
+      });
+      if (cIdx > -1) {
+        cachedConversations[cIdx].lead_stage = stage;
+        cachedConversations[cIdx]._effectiveStage = stage;
+      }
+    }
   } catch(e) {
     toast('Kayıt hatası', 'error', { phone: phone });
     if (infoEl) infoEl.innerHTML = '❌ Kayıt hatası';
@@ -2176,6 +2210,7 @@ async function addLeadCRMTag(phone, name, tagName) {
   toast(`🏷️ "${tagName}" eklendi`, 'success', { phone: phone });
   
   if (typeof refreshLeadRowUI === 'function') refreshLeadRowUI(phone);
+  syncTagsToInboxCache(phone, tags);
 }
 
 // Etiket kaldır
@@ -2193,6 +2228,20 @@ async function removeLeadCRMTag(phone, name, tagName) {
   toast(`🗑️ "${tagName}" kaldırıldı`, 'info', { phone: phone });
   
   if (typeof refreshLeadRowUI === 'function') refreshLeadRowUI(phone);
+  syncTagsToInboxCache(phone, tags);
+}
+
+// Inbox cache'inde tag bilgisini güncelle
+function syncTagsToInboxCache(phone, tags) {
+  if (typeof cachedConversations === 'undefined') return;
+  const cleanP = phone.replace(/\D/g, '');
+  const idx = cachedConversations.findIndex(c => {
+    const cp = (c.phone_number || '').replace(/\D/g, '');
+    return cp === cleanP || cp.endsWith(cleanP.slice(-10)) || cleanP.endsWith(cp.slice(-10));
+  });
+  if (idx > -1) {
+    cachedConversations[idx].tags = JSON.stringify(tags);
+  }
 }
 
 function editLeadStatusOptions() {
