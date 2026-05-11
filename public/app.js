@@ -263,8 +263,8 @@ function onNotifClick(id) {
   if (n) {
     if (n.phone) {
       toggleNotifPanel();
-      document.querySelector('[data-page="form-management"]')?.click();
-      if (typeof openFormDetail === 'function') openFormDetail(n.phone);
+      // Telefon numarasından ilgili satırı bul ve detayını aç
+      navigateToLeadByPhone(n.phone);
     }
     if (n.dbId) {
       // Veritabanında da okundu işaretle
@@ -275,6 +275,37 @@ function onNotifClick(id) {
   _notifStore.markRead(id);
   renderNotifList();
   updateNotifBadge();
+}
+
+// Telefon numarasına göre lead detayına git
+function navigateToLeadByPhone(phone) {
+  if (!phone) return;
+  const cleanPhone = phone.replace(/\D/g, '');
+  
+  // Eğer sheet verileri yüklüyse, form yönetimi sayfasında aç
+  if (window._sheetRows && window._sheetHeaders) {
+    const phoneCol = window._sheetHeaders.findIndex(h => {
+      const l = h.toLowerCase().replace(/[_\s]+/g, '');
+      return l === 'phonenumber' || l === 'phone' || l === 'telefon' || l === 'tel' || l === 'gsm' || l === 'cep';
+    });
+    
+    if (phoneCol > -1) {
+      const rowIndex = window._sheetRows.findIndex(row => {
+        const rp = (row[phoneCol] || '').replace(/\D/g, '');
+        return rp === cleanPhone || rp.endsWith(cleanPhone.slice(-10)) || cleanPhone.endsWith(rp.slice(-10));
+      });
+      
+      if (rowIndex > -1) {
+        document.querySelector('[data-page="form-management"]')?.click();
+        setTimeout(() => openLeadDetail(rowIndex), 300);
+        return;
+      }
+    }
+  }
+  
+  // Fallback: Sohbet ekranında aç
+  document.querySelector('[data-page="conversations"]')?.click();
+  setTimeout(() => loadChat(cleanPhone, 'whatsapp'), 300);
 }
 
 // Tümünü okundu işaretle
@@ -291,6 +322,10 @@ function markAllNotifRead() {
 
 // Temizle
 function clearAllNotifs() {
+  const all = _notifStore.getAll();
+  all.forEach(n => {
+    if (n.dbId) api('mark-alert-read', 'POST', { id: n.dbId }).catch(() => {});
+  });
   _notifStore.clear();
   renderNotifList();
   updateNotifBadge();
