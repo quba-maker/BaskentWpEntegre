@@ -280,7 +280,7 @@ navButtons.forEach(b => {
         navigateMobileFormView('list');
       } else {
         document.getElementById('page-form-detail').style.display = 'none';
-        document.getElementById('page-form-management').style.display = 'block';
+        document.getElementById('page-form-management').style.display = '';
       }
     }
     

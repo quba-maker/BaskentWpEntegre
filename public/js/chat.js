@@ -696,7 +696,7 @@ function goBackToForms() {
     navigateMobileFormView('list');
   } else {
     document.getElementById('page-form-detail').style.display = 'none';
-    document.getElementById('page-form-management').style.display = 'flex';
+    document.getElementById('page-form-management').style.display = '';
   }
   // Listeyi sessizce yenile ki yapılan editler karta yansısın
   if (window._activeSheet) loadSheetData(window._activeSheet);
