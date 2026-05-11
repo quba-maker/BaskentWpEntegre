@@ -2156,17 +2156,29 @@ async function setLeadPipelineStage(phone, name, stage, btnEl, sheetsStatusCol, 
 
 // Arka plandaki satır arayüzünü anlık güncellemek için yardımcı fonksiyon
 function refreshLeadRowUI(phone) {
-  if (window._enrichCache && window._enrichCache[phone]) {
-    delete window._enrichCache[phone];
+  const cleanP = (phone || '').replace(/\D/g, '');
+  const last10 = cleanP.length > 10 ? cleanP.slice(-10) : cleanP;
+  
+  // Tüm eşleşen cache girişlerini temizle (format ne olursa olsun)
+  if (window._enrichCache) {
+    Object.keys(window._enrichCache).forEach(key => {
+      const keyClean = key.replace(/\D/g, '');
+      if (keyClean.endsWith(last10) || last10.endsWith(keyClean.slice(-10))) {
+        delete window._enrichCache[key];
+      }
+    });
   }
   if (!window._sheetRows || !window._sheetHeaders) return;
   
-  const phoneCol = window._sheetHeaders.findIndex(h => h.toLowerCase().includes('telefon') || h.toLowerCase().includes('phone'));
+  const phoneCol = window._sheetHeaders.findIndex(h => {
+    const l = h.toLowerCase().replace(/[_\s]+/g, '');
+    return l === 'phonenumber' || l === 'phone' || l === 'telefon' || l === 'tel' || l === 'gsm' || l === 'cep';
+  });
   if (phoneCol === -1) return;
   
   const targetRows = window._sheetRows.filter(row => {
-    const rawP = row[phoneCol] || '';
-    return rawP.replace(/\D/g, '') === phone;
+    const rawP = (row[phoneCol] || '').replace(/\D/g, '');
+    return rawP.endsWith(last10) || last10.endsWith(rawP.slice(-10));
   });
   
   if (targetRows.length > 0 && typeof enrichLeadCards === 'function') {

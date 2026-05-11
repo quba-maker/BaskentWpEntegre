@@ -360,10 +360,10 @@ export default async function handler(req, res) {
           parsedTags.includes('Randevu İstiyor') || parsedTags.includes('Randevu Alındı')) {
         try {
           // Sadece aktif (bekleyen, planlanmış, onaylanmış) bir randevusu var mı diye bak. İptal olanlar için yenisi açılabilir.
-          const activeEvent = await sql`SELECT id FROM events WHERE phone_number = ${phone} AND event_type = 'appointment_request' AND status IN ('pending', 'scheduled', 'confirmed')`;
+          const activeEvent = await sql`SELECT id FROM events WHERE phone_number LIKE ${likePattern} AND event_type = 'appointment_request' AND status IN ('pending', 'scheduled', 'confirmed')`;
           if (activeEvent.length === 0) {
             await sql`INSERT INTO events (phone_number, event_type, details, status) 
-                      VALUES (${phone}, 'appointment_request', 'Panel üzerinden manuel randevu etiketi/durumu eklendi', 'pending')`;
+                      VALUES (${cleanPhone}, 'appointment_request', 'Panel üzerinden manuel randevu etiketi/durumu eklendi', 'pending')`;
           }
         } catch(e) { console.error('Manuel randevu ekleme hatasi:', e); }
       }
@@ -374,11 +374,12 @@ export default async function handler(req, res) {
     // HASTA BİLGİSİ OKU
     if (action === 'get-patient') {
       const phone = (req.query.phone || '').replace(/[\s\-\(\)\+]/g, '');
-      // Çoklu format arama
-      const phoneAlt = phone.startsWith('90') ? phone.substring(2) : '90' + phone;
-      const phoneWithPlus = '+' + phone;
+      // Son 10 hane ile esnek arama (tüm format farklılıklarını yakala)
+      const cleanP = phone.replace(/\D/g, '');
+      const searchPhone = cleanP.length > 10 ? cleanP.substring(cleanP.length - 10) : cleanP;
+      const likePattern = `%${searchPhone}%`;
       
-      const p = await sql`SELECT * FROM conversations WHERE phone_number IN (${phone}, ${phoneAlt}, ${phoneWithPlus}) LIMIT 1`;
+      const p = await sql`SELECT * FROM conversations WHERE phone_number LIKE ${likePattern} LIMIT 1`;
       const conv = p[0] || {};
       
       // Lead tablosundan form bilgilerini çek (LIKE ile son 10 hane arama — format farklılıklarını yakala)
