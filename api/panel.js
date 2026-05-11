@@ -202,7 +202,7 @@ export default async function handler(req, res) {
         const likePattern = `%${searchPhone}%`;
 
         const [conv, msgs, lead] = await Promise.all([
-          sql`SELECT status, phase, lead_stage, created_at FROM conversations WHERE phone_number LIKE ${likePattern} LIMIT 1`,
+          sql`SELECT status, phase, lead_stage, tags, created_at FROM conversations WHERE phone_number LIKE ${likePattern} LIMIT 1`,
           sql`SELECT direction, channel, content, created_at FROM messages WHERE phone_number LIKE ${likePattern} ORDER BY created_at DESC LIMIT 10`,
           sql`SELECT stage, score, contacted_at, responded_at FROM leads WHERE phone_number LIKE ${likePattern} ORDER BY created_at DESC LIMIT 1`
         ]);
@@ -234,13 +234,20 @@ export default async function handler(req, res) {
         // Lead stage: conversations tablosundan veya leads tablosundan
         const leadStage = (conv.length > 0 && conv[0].lead_stage) ? conv[0].lead_stage : (lead.length > 0 ? lead[0].stage : null);
 
+        // Conversation tag'leri (evrensel etiketler)
+        let convTags = [];
+        if (conv.length > 0 && conv[0].tags) {
+          try { convTags = JSON.parse(conv[0].tags); } catch(e) {}
+        }
+
         return res.json({
           score,
           channels,
           lastMessage,
           conversationStatus: conv.length > 0 ? conv[0].status : null,
           leadStage: leadStage || null,
-          messageCount: msgs.length
+          messageCount: msgs.length,
+          tags: convTags
         });
       } catch (e) {
         console.error('lead-context error:', e.message);

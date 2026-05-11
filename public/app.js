@@ -491,6 +491,15 @@ async function enrichLeadCards(rows, phoneCol) {
             extraBadges += `<span style="background:${sc}18; color:${sc}; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600; white-space:nowrap; border:1px solid ${sc}33;">🎯 ${stages[leadStage] || leadStage}</span>`;
           }
           
+          // Evrensel etiketler (tags) — Olumsuz, Randevu, Takvimde vb.
+          const tagColors = { 'Olumsuz':'#ef4444', 'Randevu Alındı':'#22c55e', 'Takvimde':'#3b82f6', 'Randevu İstiyor':'#f59e0b', 'Düşünüyor':'#a855f7', 'Tedavi Oldu':'#10b981' };
+          if (ctx.tags && ctx.tags.length > 0) {
+            ctx.tags.forEach(tag => {
+              const tc = tagColors[tag] || '#6b7280';
+              extraBadges += `<span style="background:${tc}15; color:${tc}; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600; white-space:nowrap; border:1px solid ${tc}33;">${tag}</span>`;
+            });
+          }
+          
           if (extraBadges) {
             // DB'den stage varsa eski Sheets badge'ini TAMAMEN DEĞİŞTİR
             badgeContainer.innerHTML = `<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">${extraBadges}</div>`;
