@@ -915,8 +915,8 @@ function renderSheetTable(headers, rows, total) {
 
     html += `<div class="lead-card list-row" id="lead-row-${origIdx}" onclick="openLeadDetail(${origIdx})" style="display:flex; align-items:center; justify-content:space-between; border-radius:8px; padding:12px 16px; cursor:pointer; border:1px solid var(--border-color); transition:all 0.2s; ${unreadStyle}">
       <div style="display:flex; align-items:center; gap:24px; flex:1;">
-        <div style="width:170px; font-size:12px; color:var(--text-muted);">🗓 ${dateVal}</div>
-        <div style="width:200px;"><div style="font-weight:600; color:white; margin-bottom:4px;">👤 ${nameVal}</div><div style="font-size:12px; color:#25D366;">🟢 ${phoneDisplay} ${countryBadge(phoneVal)}</div></div>
+        <div style="min-width:100px; max-width:170px; font-size:12px; color:var(--text-muted);">🗓 ${dateVal}</div>
+        <div style="min-width:120px; max-width:200px; flex-shrink:0;"><div style="font-weight:600; color:white; margin-bottom:4px;">👤 ${nameVal}</div><div style="font-size:12px; color:#25D366;">🟢 ${phoneDisplay} ${countryBadge(phoneVal)}</div></div>
         <div style="flex:1; font-size:13px; color:var(--text-muted); display:flex; align-items:center; gap:8px; flex-wrap:wrap;">${campaignBadge}${deptVal ? `<span style="background:var(--bg-hover); padding:4px 8px; border-radius:4px;">🩺 ${deptVal.substring(0,50)}${deptVal.length > 50 ? '...' : ''}</span>` : ''}</div>
         <div id="lead-enrich-${origIdx}" style="display:flex; align-items:center; gap:6px; font-size:12px;"></div>
       </div>
@@ -1331,13 +1331,13 @@ async function loadChat(phone, channel) {
       const textWithoutMediaBracket = cleanContent.replace(/\[[^\]]*\]\s*/, '').trim();
       
       if (isImage) {
-        content = `<img src="/api/panel?action=media&id=${mediaId}&token=${AUTH_TOKEN}" style="max-width:280px;border-radius:12px;margin-bottom:6px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.3);" onclick="window.open('/api/panel?action=media&id=${mediaId}&token=${AUTH_TOKEN}','_blank')" loading="lazy"><br><span style="font-size:12px;opacity:0.8;">${textWithoutMediaBracket}</span>`;
+        content = `<img src="/api/panel?action=media&id=${mediaId}&token=${AUTH_TOKEN}" style="max-width:min(280px,100%);border-radius:12px;margin-bottom:6px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.3);" onclick="window.open('/api/panel?action=media&id=${mediaId}&token=${AUTH_TOKEN}','_blank')" loading="lazy"><br><span style="font-size:12px;opacity:0.8;">${textWithoutMediaBracket}</span>`;
       } else if (isDoc) {
         content = `📎 <a href="/api/panel?action=media&id=${mediaId}&token=${AUTH_TOKEN}" target="_blank" style="color:#60a5fa;text-decoration:underline;font-weight:500;">${textWithoutMediaBracket || 'Belgeyi İndir'}</a>`;
       }
     } else if (m.media_url) {
       // Eski format desteği (media_url alanı varsa)
-      if (m.media_type === 'image') content = `<img src="${m.media_url}" style="max-width:240px;border-radius:8px;margin-bottom:4px;"><br>${escapeHtml(m.content||'')}`;
+      if (m.media_type === 'image') content = `<img src="${m.media_url}" style="max-width:min(240px,100%);border-radius:8px;margin-bottom:4px;"><br>${escapeHtml(m.content||'')}`;
       else content = `📎 <a href="${m.media_url}" target="_blank" style="color:inherit;text-decoration:underline">${escapeHtml(m.content||'Dosya')}</a>`;
     }
     return `<div class="${cls}">${content}${info}</div>`;
