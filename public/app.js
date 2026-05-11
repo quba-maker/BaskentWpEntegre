@@ -2781,6 +2781,19 @@ async function fetchZorbayAlerts() {
     alerts.forEach(alert => {
       if (document.getElementById('zorbay-alert-' + alert.id)) return;
       
+      // Bildirim zili paneline (soldaki menüye) de ekle
+      const titleText = alert.alert_type === 'hot_lead' ? '🔥 Sıcak Lead (Manuel)' : alert.alert_type === 'new_image' ? '📸 Görüntü/Rapor' : '🚨 CRM Uyarısı';
+      const sev = alert.alert_type === 'hot_lead' ? 'critical' : 'warning';
+      
+      _notifStore.add({
+        title: titleText,
+        desc: alert.message,
+        severity: sev,
+        icon: '🔔',
+        phone: alert.phone_number
+      });
+      updateNotifBadge();
+      
       const el = document.createElement('div');
       el.id = 'zorbay-alert-' + alert.id;
       el.className = 'zorbay-alert';
