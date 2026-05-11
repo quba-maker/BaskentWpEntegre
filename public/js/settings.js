@@ -347,10 +347,36 @@ function downloadIcal(id) {
   window.open(`/api/panel?action=appointment-ical&id=${id}`, '_blank');
 }
 
+function setCalendarFilter(filter, btnEl) {
+  document.querySelectorAll('.cal-filter-btn').forEach(btn => {
+    btn.classList.remove('active');
+    btn.style.background = 'transparent';
+    btn.style.color = 'var(--text-muted)';
+  });
+  if (btnEl) {
+    btnEl.classList.add('active');
+    btnEl.style.background = 'rgba(255,255,255,0.1)';
+    btnEl.style.color = 'white';
+  }
+  
+  const datePicker = document.getElementById('calendar-date-picker');
+  const tzOffset = (new Date()).getTimezoneOffset() * 60000; 
+  if (filter === 'today') {
+    datePicker.value = (new Date(Date.now() - tzOffset)).toISOString().split('T')[0];
+  } else if (filter === 'tomorrow') {
+    const tmr = new Date(Date.now() + 86400000 - tzOffset);
+    datePicker.value = tmr.toISOString().split('T')[0];
+  } else {
+    datePicker.value = '';
+  }
+  filterCalendar();
+}
+
 function filterCalendar() {
   const q = (document.getElementById('calendar-search')?.value || '').toLowerCase();
   const dateStr = document.getElementById('calendar-date-picker')?.value;
   let cal = calendarEventsData.filter(e => ['scheduled','confirmed','completed'].includes(e.status));
+  
   if (dateStr) {
     cal = cal.filter(e => e.scheduled_date && e.scheduled_date.startsWith(dateStr));
     document.getElementById('calendar-day-title').textContent = new Date(dateStr).toLocaleDateString('tr-TR',{weekday:'long',day:'numeric',month:'long'});
@@ -366,20 +392,30 @@ function filterCalendar() {
   
   list.innerHTML = cal.map(e => {
     const nm = e.patient_name || e.phone_number;
-    const ts = e.scheduled_date ? new Date(e.scheduled_date).toLocaleString('tr-TR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '—';
-    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:14px;background:var(--bg-hover);border-radius:10px;margin-bottom:6px;border-left:3px solid #22c55e;">
-      <div style="flex:1"><div style="font-weight:600;font-size:14px;">${nm}</div>
-        <div style="display:flex;gap:12px;margin-top:4px;flex-wrap:wrap;">
-          <span style="color:#22c55e;font-weight:600;font-size:12px;">🕒 ${ts}</span>
-          ${e.assigned_doctor?`<span style="font-size:12px;">👨‍⚕️ ${e.assigned_doctor}</span>`:''}
-          ${e.department?`<span style="font-size:11px;background:var(--accent-primary);color:white;padding:1px 6px;border-radius:4px;">🩺 ${e.department}</span>`:''}
+    
+    // Yerele dönüştürülmüş saat (inline edit için)
+    const tzOffset = (new Date()).getTimezoneOffset() * 60000;
+    const localISOTime = e.scheduled_date ? (new Date(new Date(e.scheduled_date) - tzOffset)).toISOString().slice(0, 16) : '';
+    
+    return `<div style="display:flex; flex-direction:column; gap:12px; padding:16px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); border-radius:16px; margin-bottom:12px; border-left:4px solid #30D158; box-shadow:0 4px 12px rgba(0,0,0,0.1);">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+        <div style="flex:1;">
+          <div style="font-weight:600; font-size:15px; margin-bottom:6px;">${nm}</div>
+          <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+            <input type="datetime-local" value="${localISOTime}" onchange="updateAppointmentDateInline(${e.id}, this.value)" style="background:rgba(48,209,88,0.1); color:#30D158; border:1px solid rgba(48,209,88,0.3); border-radius:8px; padding:4px 8px; font-size:12px; font-weight:600; color-scheme:dark; outline:none; cursor:pointer;" title="Tarihi düzenle">
+            ${e.assigned_doctor ? `<span style="font-size:12px; color:var(--text-muted);"><i class="fas fa-user-md"></i> ${e.assigned_doctor}</span>` : ''}
+            ${e.department ? `<span style="font-size:11px; background:rgba(10,132,255,0.1); color:#0A84FF; padding:3px 8px; border-radius:6px; font-weight:600;">${e.department}</span>` : ''}
+          </div>
+        </div>
+        <div>
+          <button class="btn btn-sm" onclick="downloadIcal(${e.id})" style="font-size:12px; padding:6px; background:rgba(255,255,255,0.05); border:none; border-radius:8px; color:var(--text-muted); cursor:pointer;" title="Takvime Ekle">📅</button>
         </div>
       </div>
-      <div style="display:flex;gap:4px;align-items:center;">
-        ${e.showed_up==null?`<button class="btn btn-sm" onclick="markShowUp(${e.id},true)" style="font-size:10px;padding:3px 8px;background:#22c55e;color:white;border:none;border-radius:6px;">Geldi ✅</button><button class="btn btn-sm" onclick="markShowUp(${e.id},false)" style="font-size:10px;padding:3px 8px;background:#ef4444;color:white;border:none;border-radius:6px;">Gelmedi ❌</button>`:''}
-        ${e.showed_up===true?'<span style="background:#22c55e;color:white;padding:3px 8px;border-radius:6px;font-size:10px;font-weight:600;">✅ GELDİ</span>':''}
-        ${e.showed_up===false?'<span style="background:#ef4444;color:white;padding:3px 8px;border-radius:6px;font-size:10px;font-weight:600;">❌ GELMEDİ</span>':''}
-        <button class="btn btn-sm" onclick="downloadIcal(${e.id})" style="font-size:10px;padding:3px 8px;background:transparent;border:1px solid var(--border-color);border-radius:6px;color:var(--text-muted);">📅</button>
+      
+      <div style="display:flex; background:rgba(0,0,0,0.3); border-radius:10px; padding:3px; align-items:center; align-self:flex-start;">
+        <button onclick="markShowUp(${e.id}, true)" style="padding:6px 16px; border-radius:8px; border:none; font-size:12px; font-weight:600; cursor:pointer; transition:0.2s; ${e.showed_up===true ? 'background:#30D158; color:white; box-shadow:0 2px 8px rgba(48,209,88,0.4);' : 'background:transparent; color:var(--text-muted);'}">✅ Geldi</button>
+        <button onclick="markShowUp(${e.id}, false)" style="padding:6px 16px; border-radius:8px; border:none; font-size:12px; font-weight:600; cursor:pointer; transition:0.2s; ${e.showed_up===false ? 'background:#FF453A; color:white; box-shadow:0 2px 8px rgba(255,69,58,0.4);' : 'background:transparent; color:var(--text-muted);'}">❌ Gelmedi</button>
+        ${e.showed_up !== null ? `<button onclick="markShowUp(${e.id}, null)" style="padding:6px 10px; border-radius:8px; border:none; font-size:12px; font-weight:600; cursor:pointer; background:transparent; color:var(--text-muted);" title="Sıfırla">↺</button>` : ''}
       </div>
     </div>`;
   }).join('');
@@ -388,8 +424,9 @@ function filterCalendar() {
 async function updateAppointment(id,status) { if(!status)return; await api('update-appointment','POST',{id,status}); loadAppointments(); if(selectedAptId===id) loadAptDetail(id); toast('Durum güncellendi ✅'); }
 
 async function markShowUp(id, showedUp) {
-  if (showedUp) { await api('update-showup','POST',{id,showed_up:true}); toast('✅ Hasta geldi'); }
-  else { const r = prompt('Gelmeme nedeni (opsiyonel):') || 'Bilinmiyor'; await api('update-showup','POST',{id,showed_up:false,no_show_reason:r}); toast('❌ No-show'); }
+  if (showedUp === true) { await api('update-showup','POST',{id,showed_up:true}); toast('✅ Hasta geldi'); }
+  else if (showedUp === false) { const r = prompt('Gelmeme nedeni (opsiyonel):') || 'Bilinmiyor'; await api('update-showup','POST',{id,showed_up:false,no_show_reason:r}); toast('❌ No-show'); }
+  else { await api('update-showup','POST',{id,showed_up:null}); toast('🔄 Durum sıfırlandı'); }
   loadAppointments();
 }
 
@@ -397,6 +434,14 @@ async function markTreatmentDone(id) {
   const s = parseInt(prompt('Memnuniyet puanı (1-5):')||'0');
   await api('update-showup','POST',{id,showed_up:true,treatment_completed:true,satisfaction_score:(s>=1&&s<=5)?s:null});
   toast('🏥 Tedavi tamamlandı'); loadAppointments();
+}
+
+async function updateAppointmentDateInline(id, localTimeStr) {
+  if (!localTimeStr) return;
+  const d = new Date(localTimeStr);
+  await api('update-appointment', 'POST', { id, scheduled_date: d.toISOString(), status: 'scheduled' });
+  toast('📅 Randevu tarihi güncellendi');
+  loadAppointments();
 }
 
 // ========== BİLDİRİM SİSTEMİ ==========
