@@ -77,30 +77,18 @@ let calendarEventsData = [];
 let selectedAptId = null;
 let aptFilterMode = 'all';
 
-function switchAptTab(tab) {
-  document.querySelectorAll('#page-appointments .sheet-tab').forEach(el => el.classList.remove('active'));
-  document.getElementById('tab-apt-' + tab).classList.add('active');
-  document.getElementById('apt-view-inbox').style.display = tab === 'inbox' ? 'flex' : 'none';
-  document.getElementById('apt-view-calendar').style.display = tab === 'calendar' ? 'block' : 'none';
-  if (tab === 'calendar') filterCalendar();
-}
+// switchAptTab removed — Calendar tab was removed from HTML, single-view CRM now
 
 function filterAptList(mode) {
   aptFilterMode = mode;
-  // Highlight active stat pill
-  document.querySelectorAll('.apt-stat-pill').forEach(p => {
-    p.style.borderColor = p.dataset.filter === mode ? 'var(--accent-primary)' : 'transparent';
-  });
-  const titles = {all:'Tüm Talepler',pending:'⏳ Bekleyenler',called:'📞 Görüşülenler',scheduled:'📅 Takvimdekiler',completed:'🏥 Tamamlananlar',lost:'❌ Olumsuzlar'};
-  const el = document.getElementById('apt-list-title');
-  if (el) el.textContent = titles[mode] || 'Tüm Talepler';
   renderAptList();
 }
 
 function renderAptList() {
   let filtered = calendarEventsData;
   if (aptFilterMode !== 'all') {
-    if (aptFilterMode === 'scheduled') filtered = calendarEventsData.filter(e => ['scheduled','confirmed'].includes(e.status));
+    if (aptFilterMode === 'contacted') filtered = calendarEventsData.filter(e => ['called','contacted'].includes(e.status));
+    else if (aptFilterMode === 'scheduled') filtered = calendarEventsData.filter(e => ['scheduled','confirmed'].includes(e.status));
     else if (aptFilterMode === 'completed') filtered = calendarEventsData.filter(e => ['completed'].includes(e.status));
     else if (aptFilterMode === 'lost') filtered = calendarEventsData.filter(e => ['lost','cancelled','noshow'].includes(e.status));
     else filtered = calendarEventsData.filter(e => e.status === aptFilterMode);
@@ -395,81 +383,19 @@ function downloadIcal(id) {
   window.open(`/api/panel?action=appointment-ical&id=${id}`, '_blank');
 }
 
-function setCalendarFilter(filter, btnEl) {
-  document.querySelectorAll('.cal-filter-btn').forEach(btn => {
-    btn.classList.remove('active');
-    btn.style.background = 'transparent';
-    btn.style.color = 'var(--text-muted)';
-  });
-  if (btnEl) {
-    btnEl.classList.add('active');
-    btnEl.style.background = 'rgba(255,255,255,0.1)';
-    btnEl.style.color = 'white';
-  }
-  
-  const datePicker = document.getElementById('calendar-date-picker');
-  const tzOffset = (new Date()).getTimezoneOffset() * 60000; 
-  if (filter === 'today') {
-    datePicker.value = (new Date(Date.now() - tzOffset)).toISOString().split('T')[0];
-  } else if (filter === 'tomorrow') {
-    const tmr = new Date(Date.now() + 86400000 - tzOffset);
-    datePicker.value = tmr.toISOString().split('T')[0];
-  } else {
-    datePicker.value = '';
-  }
-  filterCalendar();
-}
+// setCalendarFilter and filterCalendar removed — Calendar tab was removed from HTML
+// Calendar functionality is now handled within the CRM pipeline detail view
 
-function filterCalendar() {
-  const q = (document.getElementById('calendar-search')?.value || '').toLowerCase();
-  const dateStr = document.getElementById('calendar-date-picker')?.value;
-  let cal = calendarEventsData.filter(e => ['scheduled','confirmed','completed'].includes(e.status));
-  
-  if (dateStr) {
-    cal = cal.filter(e => e.scheduled_date && e.scheduled_date.startsWith(dateStr));
-    document.getElementById('calendar-day-title').textContent = new Date(dateStr).toLocaleDateString('tr-TR',{weekday:'long',day:'numeric',month:'long'});
-  } else {
-    document.getElementById('calendar-day-title').textContent = 'Tüm Gelecek Randevular';
-  }
-  if (q) cal = cal.filter(e => (e.patient_name||'').toLowerCase().includes(q) || (e.phone_number||'').includes(q) || (e.department||'').toLowerCase().includes(q));
-  cal.sort((a,b) => new Date(a.scheduled_date) - new Date(b.scheduled_date));
-  document.getElementById('apt-scheduled').textContent = cal.length;
-  
-  const list = document.getElementById('calendar-list');
-  if (cal.length === 0) { list.innerHTML = '<div class="empty"><div class="empty-icon">🗓️</div>Takvimli randevu yok</div>'; return; }
-  
-  list.innerHTML = cal.map(e => {
-    const nm = e.patient_name || e.phone_number;
-    
-    // Yerele dönüştürülmüş saat (inline edit için)
-    const tzOffset = (new Date()).getTimezoneOffset() * 60000;
-    const localISOTime = e.scheduled_date ? (new Date(new Date(e.scheduled_date) - tzOffset)).toISOString().slice(0, 16) : '';
-    
-    return `<div style="display:flex; flex-direction:column; gap:12px; padding:16px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); border-radius:16px; margin-bottom:12px; border-left:4px solid #30D158; box-shadow:0 4px 12px rgba(0,0,0,0.1);">
-      <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-        <div style="flex:1;">
-          <div style="font-weight:600; font-size:15px; margin-bottom:6px;">${nm}</div>
-          <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-            <input type="datetime-local" value="${localISOTime}" onchange="updateAppointmentDateInline(${e.id}, this.value)" style="background:rgba(48,209,88,0.1); color:#30D158; border:1px solid rgba(48,209,88,0.3); border-radius:8px; padding:4px 8px; font-size:12px; font-weight:600; color-scheme:dark; outline:none; cursor:pointer;" title="Tarihi düzenle">
-            ${e.assigned_doctor ? `<span style="font-size:12px; color:var(--text-muted);"><i class="fas fa-user-md"></i> ${e.assigned_doctor}</span>` : ''}
-            ${e.department ? `<span style="font-size:11px; background:rgba(10,132,255,0.1); color:#0A84FF; padding:3px 8px; border-radius:6px; font-weight:600;">${e.department}</span>` : ''}
-          </div>
-        </div>
-        <div>
-          <button class="btn btn-sm" onclick="downloadIcal(${e.id})" style="font-size:12px; padding:6px; background:rgba(255,255,255,0.05); border:none; border-radius:8px; color:var(--text-muted); cursor:pointer;" title="Takvime Ekle">📅</button>
-        </div>
-      </div>
-      
-      <div style="display:flex; background:rgba(0,0,0,0.3); border-radius:10px; padding:3px; align-items:center; align-self:flex-start;">
-        <button onclick="markShowUp(${e.id}, true)" style="padding:6px 16px; border-radius:8px; border:none; font-size:12px; font-weight:600; cursor:pointer; transition:0.2s; ${e.showed_up===true ? 'background:#30D158; color:white; box-shadow:0 2px 8px rgba(48,209,88,0.4);' : 'background:transparent; color:var(--text-muted);'}">✅ Geldi</button>
-        <button onclick="markShowUp(${e.id}, false)" style="padding:6px 16px; border-radius:8px; border:none; font-size:12px; font-weight:600; cursor:pointer; transition:0.2s; ${e.showed_up===false ? 'background:#FF453A; color:white; box-shadow:0 2px 8px rgba(255,69,58,0.4);' : 'background:transparent; color:var(--text-muted);'}">❌ Gelmedi</button>
-        ${e.showed_up !== null ? `<button onclick="markShowUp(${e.id}, null)" style="padding:6px 10px; border-radius:8px; border:none; font-size:12px; font-weight:600; cursor:pointer; background:transparent; color:var(--text-muted);" title="Sıfırla">↺</button>` : ''}
-      </div>
-    </div>`;
-  }).join('');
+async function updateAppointment(id, stage) {
+  if (!stage) return;
+  // Map UI pipeline stages to DB-compatible status values
+  const stageToStatus = { pending: 'pending', contacted: 'called', scheduled: 'scheduled', closed: 'completed' };
+  const dbStatus = stageToStatus[stage] || stage;
+  await api('update-appointment', 'POST', { id, status: dbStatus });
+  loadAppointments();
+  if (selectedAptId === id) loadAptDetail(id);
+  toast('Durum güncellendi ✅');
 }
-
-async function updateAppointment(id,status) { if(!status)return; await api('update-appointment','POST',{id,status}); loadAppointments(); if(selectedAptId===id) loadAptDetail(id); toast('Durum güncellendi ✅'); }
 
 async function markShowUp(id, showedUp) {
   if (showedUp === true) { await api('update-showup','POST',{id,showed_up:true}); toast('✅ Hasta geldi'); }
