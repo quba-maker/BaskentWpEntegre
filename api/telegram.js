@@ -198,6 +198,14 @@ export default async function handler(req, res) {
             const newNoteEntry = `[SİSTEM - ${userFirstName} - ${new Date().toLocaleTimeString('tr-TR', {timeZone:'Europe/Istanbul',hour:'2-digit',minute:'2-digit'})}]: ${systemNote}`;
             const updatedNotes = oldNotes ? `${oldNotes}\n${newNoteEntry}` : newNoteEntry;
             await sql`UPDATE conversations SET notes = ${updatedNotes}, updated_at = NOW() WHERE phone_number LIKE ${likePattern}`;
+            
+            // CRM Bildirim (Alert) Paneline Düşür
+            try {
+              if (systemNote) {
+                const cleanPhone = phone.replace(/\D/g, '');
+                await sql`INSERT INTO alerts (phone_number, alert_type, message) VALUES (${cleanPhone}, 'system_update', ${`🔄 Sistem Güncellemesi: ${systemNote} (${userFirstName})`})`;
+              }
+            } catch(dbErr) {}
           }
 
           // Popup göster
