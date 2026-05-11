@@ -1795,7 +1795,7 @@ function openLeadDetail(rowIndex) {
           ${p.isWhatsApp ? '🟢' : '📞'} ${p.raw} ${countryBadge(p.number)}
         </div>
       </div>
-      ${p.isWhatsApp ? `<a href="https://wa.me/${p.number}" target="_blank" style="background:#25D366; color:white; border:none; padding:4px 10px; border-radius:6px; font-size:11px; font-weight:600; text-decoration:none; white-space:nowrap;">WA Yaz</a>` : ''}
+
     </div>
   `).join('') : `<div style="font-size:13px; color:var(--text-muted);">📱 Telefon bulunamadı</div>`;
 
@@ -1821,11 +1821,8 @@ function openLeadDetail(rowIndex) {
             ${phonesHtml}
           </div>
           <div style="display:flex; gap:12px; flex-wrap:wrap;">
-            <a href="https://wa.me/${primaryPhone}" target="_blank" class="btn" style="background:#25D366; color:white; border:none; padding:8px 16px; border-radius:8px; font-size:13px; font-weight:600; text-decoration:none;">
-              🟢 WhatsApp'tan Yaz
-            </a>
-            <button onclick="triggerSingleOutbound('${primaryPhone}', '${nameVal.replace(/'/g, "\\'")}')" class="btn" style="background:#bf5af2; color:white; border:none; padding:8px 16px; border-radius:8px; font-size:13px; font-weight:600;">
-              🤖 Bota Devret (Açılış Mesajı)
+            <button onclick="document.querySelector('[data-page=\'conversations\']')?.click(); setTimeout(function(){ loadChat('${primaryPhone}', 'whatsapp'); }, 300);" class="btn" style="background:#25D366; color:white; border:none; padding:8px 16px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer;">
+              💬 Mesaj Bölümüne Git
             </button>
           </div>
         </div>
