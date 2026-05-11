@@ -830,9 +830,22 @@ async function loadChat(phone, channel) {
     const senderLabel = isOut ? (isBot ? '🤖 Bot' : '👤 Sen') : '📩 Hasta';
     const info = `<div class="msg-info">${senderLabel} · ${new Date(m.created_at).toLocaleTimeString('tr-TR', {hour:'2-digit',minute:'2-digit'})} ${isBot ? '<span class="bot-indicator">' + m.model_used + '</span>' : ''}</div>`;
     
-    // Medya içerik kontrolü
-    let content = m.content;
-    if (m.media_url) {
+    // Medya içerik kontrolü — content'ten media_id parse et
+    let content = m.content || '';
+    const mediaMatch = content.match(/\|media_id:([a-zA-Z0-9_]+)\]/);
+    if (mediaMatch) {
+      const mediaId = mediaMatch[1];
+      const isImage = content.includes('[📷');
+      const isDoc = content.includes('[📄');
+      // media_id kısmını içerikten temizle
+      const cleanContent = content.replace(/\|media_id:[a-zA-Z0-9_]+\]/, ']');
+      if (isImage) {
+        content = `<img src="/api/panel?action=media&id=${mediaId}&token=${AUTH_TOKEN}" style="max-width:280px;border-radius:12px;margin-bottom:6px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.3);" onclick="window.open('/api/panel?action=media&id=${mediaId}&token=${AUTH_TOKEN}','_blank')" loading="lazy"><br><span style="font-size:12px;opacity:0.8;">${cleanContent.replace(/\[📷[^\]]*\]\s*/, '')}</span>`;
+      } else if (isDoc) {
+        content = `📎 <a href="/api/panel?action=media&id=${mediaId}&token=${AUTH_TOKEN}" target="_blank" style="color:#60a5fa;text-decoration:underline;font-weight:500;">${cleanContent.replace(/\[📄[^\]]*\]\s*/, '') || 'Belgeyi İndir'}</a>`;
+      }
+    } else if (m.media_url) {
+      // Eski format desteği (media_url alanı varsa)
       if (m.media_type === 'image') content = `<img src="${m.media_url}" style="max-width:240px;border-radius:8px;margin-bottom:4px;"><br>${m.content||''}`;
       else content = `📎 <a href="${m.media_url}" target="_blank" style="color:inherit;text-decoration:underline">${m.content||'Dosya'}</a>`;
     }

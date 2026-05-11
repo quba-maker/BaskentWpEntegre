@@ -13,7 +13,10 @@ export default async function handler(req, res) {
 
   const authHeader = req.headers.authorization;
   const PANEL_PASSWORD = process.env.PANEL_PASSWORD || 'baskent2024';
-  if (authHeader !== `Bearer ${PANEL_PASSWORD}`) {
+  // Media endpoint için query param token desteği (img tag Authorization header gönderemez)
+  const queryToken = req.query.token;
+  const isMediaReq = req.query.action === 'media';
+  if (authHeader !== `Bearer ${PANEL_PASSWORD}` && !(isMediaReq && queryToken === PANEL_PASSWORD)) {
     return res.status(401).json({ error: 'Yetkisiz', needsAuth: true });
   }
 
@@ -825,6 +828,35 @@ export default async function handler(req, res) {
         recentMessages: Number(newMessages[0].c),
         total: Number(pendingApts[0].c) + (Number(newMessages[0].c) > 0 ? 1 : 0)
       });
+    }
+
+    // 📎 MEDYA PROXY — WhatsApp medya dosyalarını panelde göster
+    if (action === 'media') {
+      const mediaId = req.query.id;
+      if (!mediaId) return res.status(400).json({ error: 'media id gerekli' });
+      
+      try {
+        const META = process.env.META_ACCESS_TOKEN;
+        // 1. Media URL al
+        const mediaInfo = await axios.get(`https://graph.facebook.com/v25.0/${mediaId}`, {
+          headers: { Authorization: `Bearer ${META}` }
+        });
+        const mediaUrl = mediaInfo.data.url;
+        const mimeType = mediaInfo.data.mime_type || 'image/jpeg';
+        
+        // 2. Dosyayı indir ve proxy olarak ilet
+        const mediaRes = await axios.get(mediaUrl, {
+          headers: { Authorization: `Bearer ${META}` },
+          responseType: 'arraybuffer'
+        });
+        
+        res.setHeader('Content-Type', mimeType);
+        res.setHeader('Cache-Control', 'public, max-age=86400'); // 24 saat cache
+        return res.send(Buffer.from(mediaRes.data));
+      } catch(e) {
+        console.error('Media proxy hatası:', e.response?.data || e.message);
+        return res.status(404).json({ error: 'Medya bulunamadı veya süresi dolmuş' });
+      }
     }
 
     // GELİŞMİŞ ANALİTİK
