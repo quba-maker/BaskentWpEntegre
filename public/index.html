@@ -26,7 +26,7 @@
 <div class="app" id="main-app" style="display:none">
   <button class="mobile-menu-btn" onclick="document.querySelector('.sidebar').classList.toggle('open')">☰</button>
   <nav class="sidebar" id="sidebar">
-    <div class="logo"><div class="logo-icon">🏥</div><span>Başkent Paneli</span><div id="notif-bell" class="notif-bell" onclick="showNotifications()" style="display:none">🔔<span id="notif-count" class="notif-count">0</span></div></div>
+    <div class="logo"><div class="logo-icon">🏥</div><span>Başkent Paneli</span><div id="notif-bell" class="notif-bell" onclick="toggleNotifPanel()">🔔<span id="notif-count" class="notif-count" style="display:none">0</span></div></div>
     <div class="nav-items">
       <button class="nav-btn active" data-page="dashboard">📊 Gösterge Paneli</button>
       <button class="nav-btn" data-page="conversations">💬 Hasta Takibi</button>
@@ -595,8 +595,23 @@ Cevap: Muayene ücretimiz branşa göre değişiklik göstermektedir. Hangi böl
   </main>
 </div>
 
+<!-- TOAST (mini bildirim) -->
 <div id="toast" class="toast"></div>
 
+<!-- BİLDİRİM PANELİ -->
+<div id="notif-overlay" class="notif-overlay" onclick="toggleNotifPanel()" style="display:none"></div>
+<div id="notif-panel" class="notif-panel" style="display:none">
+  <div class="notif-panel-header">
+    <h3 style="margin:0; font-size:15px; font-weight:600;">🔔 Bildirimler</h3>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <button onclick="markAllNotifRead()" style="background:none; border:none; color:var(--text-muted); font-size:12px; cursor:pointer;">✓ Tümünü oku</button>
+      <button onclick="clearAllNotifs()" style="background:none; border:none; color:var(--text-muted); font-size:12px; cursor:pointer;">🧹 Temizle</button>
+    </div>
+  </div>
+  <div id="notif-list" class="notif-list">
+    <div class="notif-empty">Bildirim yok</div>
+  </div>
+</div>
 
 
 <!-- QUOTE (HIZLI TEKLİF) MODAL -->

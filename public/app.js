@@ -151,7 +151,134 @@ document.querySelectorAll('.nav-btn').forEach(b => {
   });
 });
 
-function toast(m, t='success') { const el=document.getElementById('toast'); el.textContent=m; el.className='toast show '+t; setTimeout(()=>el.className='toast', 3000); }
+// ========== BİLDİRİM SİSTEMİ ==========
+const _notifStore = {
+  _key: 'crm_notifications',
+  _dedup: new Set(),
+  _max: 50,
+  getAll() { try { return JSON.parse(localStorage.getItem(this._key) || '[]'); } catch { return []; } },
+  save(list) { localStorage.setItem(this._key, JSON.stringify(list.slice(0, this._max))); },
+  add(notif) {
+    // Deduplikasyon: aynı mesaj son 60 saniye içinde tekrar gelmesin
+    const dedupKey = notif.title + notif.desc;
+    if (this._dedup.has(dedupKey)) return false;
+    this._dedup.add(dedupKey);
+    setTimeout(() => this._dedup.delete(dedupKey), 60000);
+    const all = this.getAll();
+    all.unshift({ ...notif, id: Date.now(), read: false, time: new Date().toISOString() });
+    this.save(all);
+    return true;
+  },
+  markRead(id) { const all = this.getAll(); const n = all.find(x => x.id === id); if (n) n.read = true; this.save(all); },
+  markAllRead() { const all = this.getAll(); all.forEach(n => n.read = true); this.save(all); },
+  clear() { this.save([]); },
+  unreadCount() { return this.getAll().filter(n => !n.read).length; }
+};
+
+// Toast: zarif mini bildirim + panele kaydet
+function toast(message, severity = 'success', options = {}) {
+  const { save = true, title, icon } = options;
+  const el = document.getElementById('toast');
+  el.textContent = message;
+  el.className = 'toast show ' + severity;
+  const duration = severity === 'critical' ? 6000 : severity === 'warning' ? 4500 : 3000;
+  clearTimeout(window._toastTimer);
+  window._toastTimer = setTimeout(() => el.className = 'toast', duration);
+
+  // Panele kaydet
+  if (save) {
+    const icons = { success: '✅', error: '❌', warning: '⚠️', info: 'ℹ️', critical: '🚨' };
+    const added = _notifStore.add({
+      title: title || (severity === 'success' ? 'İşlem Başarılı' : severity === 'error' ? 'Hata' : severity === 'warning' ? 'Uyarı' : severity === 'critical' ? 'Kritik' : 'Bilgi'),
+      desc: message,
+      severity: severity,
+      icon: icon || icons[severity] || '📌'
+    });
+    if (added) updateNotifBadge();
+  }
+}
+
+// Bildirim paneli aç/kapat
+function toggleNotifPanel() {
+  const panel = document.getElementById('notif-panel');
+  const overlay = document.getElementById('notif-overlay');
+  const isOpen = panel.style.display !== 'none';
+  if (isOpen) {
+    panel.style.display = 'none';
+    overlay.style.display = 'none';
+  } else {
+    renderNotifList();
+    panel.style.display = 'flex';
+    overlay.style.display = 'block';
+  }
+}
+
+// Bildirim listesi render
+function renderNotifList() {
+  const list = _notifStore.getAll();
+  const container = document.getElementById('notif-list');
+  if (list.length === 0) {
+    container.innerHTML = '<div class="notif-empty">🔕 Bildirim yok</div>';
+    return;
+  }
+  container.innerHTML = list.map(n => {
+    const timeAgo = getTimeAgo(n.time);
+    return `<div class="notif-item ${n.read ? '' : 'unread'} severity-${n.severity || 'info'}" onclick="onNotifClick(${n.id})">
+      <div class="notif-icon">${n.icon || '📌'}</div>
+      <div class="notif-body">
+        <div class="notif-title">${n.title}</div>
+        <div class="notif-desc" title="${n.desc}">${n.desc}</div>
+      </div>
+      <div class="notif-time">${timeAgo}</div>
+    </div>`;
+  }).join('');
+}
+
+// Zaman farkı
+function getTimeAgo(isoTime) {
+  const diff = Date.now() - new Date(isoTime).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'Az önce';
+  if (mins < 60) return mins + 'dk';
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return hours + 'sa';
+  return Math.floor(hours / 24) + 'g';
+}
+
+// Bildirime tıklama
+function onNotifClick(id) {
+  _notifStore.markRead(id);
+  renderNotifList();
+  updateNotifBadge();
+}
+
+// Tümünü okundu işaretle
+function markAllNotifRead() {
+  _notifStore.markAllRead();
+  renderNotifList();
+  updateNotifBadge();
+}
+
+// Temizle
+function clearAllNotifs() {
+  _notifStore.clear();
+  renderNotifList();
+  updateNotifBadge();
+}
+
+// Badge sayacı güncelle
+function updateNotifBadge() {
+  const count = _notifStore.unreadCount();
+  const badge = document.getElementById('notif-count');
+  if (badge) {
+    badge.textContent = count;
+    badge.style.display = count > 0 ? 'block' : 'none';
+  }
+}
+
+// Sayfa yüklendiğinde badge güncelle
+document.addEventListener('DOMContentLoaded', () => updateNotifBadge());
+
 
 async function api(a, m='GET', b=null) {
   const o = {method:m, headers:{'Content-Type':'application/json', Authorization:'Bearer '+AUTH_TOKEN}};
