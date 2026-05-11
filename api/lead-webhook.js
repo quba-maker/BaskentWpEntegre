@@ -23,7 +23,7 @@ export default async function handler(req, res) {
   // POST - Meta Lead Form geldi
   if (req.method === 'POST') {
     const body = req.body;
-    console.log('📋 Lead webhook çağrıldı:', JSON.stringify(body).substring(0, 500));
+    console.log('📋 Lead webhook çağrıldı');
 
     try {
       if (body.entry) {
@@ -47,7 +47,7 @@ export default async function handler(req, res) {
                   { params: { access_token: META_ACCESS_TOKEN } }
                 );
                 leadData = leadResponse.data;
-                console.log('📋 Lead verileri:', JSON.stringify(leadData).substring(0, 500));
+                console.log('📋 Lead verileri alındı');
               } catch (e) {
                 console.error('❌ Lead detay çekme hatası:', e.response?.data || e.message);
               }
@@ -118,7 +118,7 @@ export default async function handler(req, res) {
 
               const department = tags.filter(t => !['Genel','Ortaasya','Avrupa'].includes(t)).join(', ') || '';
 
-              console.log(`👤 Lead: ${name} | 📱 ${phone} | 🏷 ${tags.join(', ')} | 📋 Form: ${formName} | 🩺 Dep: ${department} | 👤 Tip: ${patientType}`);
+              console.log(`👤 Lead: ${(name||'').charAt(0)}*** | 📱 ***${(phone||'').slice(-4)} | 🏷 ${tags.join(', ')} | 📋 Form: ${formName} | 🩺 ${department} | 👤 ${patientType}`);
 
               // Veritabanına kaydet
               let savePhone = cleanPhone || `test_${String(Date.now()).slice(-10)}`;
@@ -214,7 +214,7 @@ export default async function handler(req, res) {
                     await sql`UPDATE leads SET stage = 'contacted', contacted_at = NOW() WHERE leadgen_id = ${leadgenId}`;
                   }
 
-                  console.log(`📤 Lead'e ${isTurkish ? 'TR' : 'EN'} otomatik mesaj gönderildi: ${cleanPhone}`);
+                  console.log(`📤 Lead'e ${isTurkish ? 'TR' : 'EN'} otomatik mesaj gönderildi: ***${cleanPhone.slice(-4)}`);
                 } catch (e) {
                   console.error('❌ WhatsApp gönderim hatası:', e.response?.data || e.message);
                 }

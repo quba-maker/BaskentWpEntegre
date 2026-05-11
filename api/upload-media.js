@@ -21,7 +21,8 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   // Auth kontrolü
-  const PANEL_PASSWORD = process.env.PANEL_PASSWORD || 'baskent2024';
+  const PANEL_PASSWORD = process.env.PANEL_PASSWORD;
+  if (!PANEL_PASSWORD) return res.status(500).json({ error: 'Server config error' });
   if (req.headers.authorization !== `Bearer ${PANEL_PASSWORD}`) {
     return res.status(401).json({ error: 'Yetkisiz' });
   }
@@ -35,6 +36,12 @@ export default async function handler(req, res) {
 
     if (!phone || !fileBase64) {
       return res.status(400).json({ error: 'phone ve fileBase64 gerekli' });
+    }
+
+    // 🔒 Güvenlik: Dosya tipi ve boyut kontrolü
+    const allowedMimes = ['image/jpeg','image/png','image/webp','image/gif','video/mp4','video/quicktime','audio/mpeg','audio/ogg','application/pdf','application/msword','application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+    if (fileType && !allowedMimes.includes(fileType) && !fileType.startsWith('image/') && !fileType.startsWith('video/') && !fileType.startsWith('audio/')) {
+      return res.status(400).json({ error: 'Desteklenmeyen dosya formatı' });
     }
 
     // Base64'ten Buffer'a çevir
@@ -70,6 +77,11 @@ export default async function handler(req, res) {
       const headerBuffer = Buffer.from(headerParts, 'utf-8');
       const footerBuffer = Buffer.from(`${CRLF}--${boundary}--${CRLF}`, 'utf-8');
       const requestBody = Buffer.concat([headerBuffer, fileBuffer, footerBuffer]);
+
+      // Boyut kontrolü (5MB max)
+      if (fileBuffer.length > 5 * 1024 * 1024) {
+        return res.status(400).json({ error: 'Dosya boyutu 5MB\'den büyük' });
+      }
 
       console.log(`📤 Upload başlıyor: ${name} (${mimeType}, ${fileBuffer.length} bytes)`);
 
@@ -112,7 +124,7 @@ export default async function handler(req, res) {
         data: msgData
       });
 
-      console.log(`✅ Medya mesajı gönderildi: ${phone} (${mediaType})`);
+      console.log(`✅ Medya mesajı gönderildi: ***${phone.slice(-4)} (${mediaType})`);
 
     } else {
       // ═══════════════════════════════════════

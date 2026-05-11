@@ -308,6 +308,13 @@ textarea:focus, input:focus, select:focus { outline: none; border-color: var(--a
   
   /* 🏷️ Sheet tabs scroll */
   .sheet-tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; flex-wrap: nowrap !important; }
+  
+  /* 🌫️ Mobil blur azalt (performans) */
+  .sidebar, .card, .login-card { backdrop-filter: blur(10px) !important; -webkit-backdrop-filter: blur(10px) !important; }
+  .app::before, .app::after { filter: blur(30px) !important; opacity: 0.5; }
+  
+  /* ⌨️ Chat input keyboard fix */
+  .chat-input-area { position: sticky; bottom: 0; background: var(--bg-card); padding-bottom: env(safe-area-inset-bottom, 8px); }
 }
 
 /* ♿ Reduced motion preference */
@@ -315,6 +322,19 @@ textarea:focus, input:focus, select:focus { outline: none; border-color: var(--a
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
   .app::before, .app::after { animation: none !important; }
 }
+
+/* ✨ Skeleton Loading */
+.skeleton {
+  background: linear-gradient(90deg, rgba(255,255,255,0.04) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.04) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  border-radius: 8px;
+}
+.skeleton-text { height: 14px; margin-bottom: 8px; width: 80%; }
+.skeleton-text.short { width: 50%; }
+.skeleton-circle { width: 40px; height: 40px; border-radius: 50%; }
+.skeleton-card { height: 60px; margin-bottom: 8px; }
+@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 
 /* ========== ZORBAY ALERT SİSTEMİ ========== */
 .zorbay-alert-container {

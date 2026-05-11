@@ -670,8 +670,8 @@ async function loadDashboard() {
     return `<div style="${isBot} padding: 12px 16px; border-radius: 14px; display:flex; gap:12px; align-items:center; margin-bottom: 8px;">
       <div style="font-size:20px; opacity:0.8;">${icon}</div>
       <div style="flex:1; overflow:hidden;">
-        <div style="font-size:13px; font-weight:600; color:var(--text-main); margin-bottom:4px; letter-spacing: -0.2px;">${m.patient_name || m.phone_number}</div>
-        <div style="font-size:13px; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${m.content}</div>
+        <div style="font-size:13px; font-weight:600; color:var(--text-main); margin-bottom:4px; letter-spacing: -0.2px;">${escapeHtml(m.patient_name || m.phone_number)}</div>
+        <div style="font-size:13px; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(m.content)}</div>
       </div>
       <div style="font-size:11px; color:var(--text-muted); align-self:flex-start;">${new Date(m.created_at).toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'})}</div>
     </div>`;
@@ -961,7 +961,7 @@ async function enrichLeadCards(rows, phoneCol) {
         const icons = { whatsapp: '📱', instagram: '📸', messenger: '💬', web: '🌐' };
         (ctx.channels || []).forEach(ch => { h += `<span title="${ch}" style="font-size:14px;">${icons[ch] || '📞'}</span>`; });
         if (ctx.score > 0) { const sc = ctx.score >= 50 ? '#f97316' : ctx.score >= 30 ? '#facc15' : '#6b7280'; h += `<span style="background:${sc}22; color:${sc}; border:1px solid ${sc}44; border-radius:4px; padding:2px 6px; font-weight:600; font-size:11px;">⚡ ${ctx.score}</span>`; }
-        if (ctx.lastMessage) { h += `<span style="color:#60a5fa; font-size:11px; max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${ctx.lastMessage.content}">&ldquo;${ctx.lastMessage.content.substring(0,25)}...&rdquo;</span>`; }
+        if (ctx.lastMessage) { h += `<span style="color:#60a5fa; font-size:11px; max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(ctx.lastMessage.content)}">&ldquo;${escapeHtml(ctx.lastMessage.content.substring(0,25))}...&rdquo;</span>`; }
         el.innerHTML = h;
       }
 
@@ -1319,7 +1319,7 @@ async function loadChat(phone, channel) {
     const info = `<div class="msg-info">${senderLabel} · ${new Date(m.created_at).toLocaleTimeString('tr-TR', {hour:'2-digit',minute:'2-digit'})} ${isBot ? '<span class="bot-indicator">' + m.model_used + '</span>' : ''}</div>`;
     
     // Medya içerik kontrolü — content'ten media_id parse et
-    let content = m.content || '';
+    let content = escapeHtml(m.content || '');
     const mediaMatch = content.match(/\|media_id:([a-zA-Z0-9_]+)\]/);
     if (mediaMatch) {
       const mediaId = mediaMatch[1];
@@ -1337,8 +1337,8 @@ async function loadChat(phone, channel) {
       }
     } else if (m.media_url) {
       // Eski format desteği (media_url alanı varsa)
-      if (m.media_type === 'image') content = `<img src="${m.media_url}" style="max-width:240px;border-radius:8px;margin-bottom:4px;"><br>${m.content||''}`;
-      else content = `📎 <a href="${m.media_url}" target="_blank" style="color:inherit;text-decoration:underline">${m.content||'Dosya'}</a>`;
+      if (m.media_type === 'image') content = `<img src="${m.media_url}" style="max-width:240px;border-radius:8px;margin-bottom:4px;"><br>${escapeHtml(m.content||'')}`;
+      else content = `📎 <a href="${m.media_url}" target="_blank" style="color:inherit;text-decoration:underline">${escapeHtml(m.content||'Dosya')}</a>`;
     }
     return `<div class="${cls}">${content}${info}</div>`;
   }).join('');
@@ -2797,12 +2797,12 @@ function renderAptList() {
     const schedDate = e.scheduled_date ? new Date(e.scheduled_date).toLocaleString('tr-TR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
     return `<div onclick="loadAptDetail(${e.id})" style="padding:10px 12px;background:var(--bg-hover);border-radius:10px;margin-bottom:6px;cursor:pointer;border-left:3px solid ${sC[e.status]||'#6b7280'};transition:all 0.15s;${active}" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
       <div style="display:flex;justify-content:space-between;align-items:center;">
-        <span style="font-weight:600;font-size:13px;">${nm}</span>
+        <span style="font-weight:600;font-size:13px;">${escapeHtml(nm)}</span>
         <span style="font-size:10px;color:${sC[e.status]};font-weight:600;">${sL[e.status]||e.status}</span>
       </div>
       <div style="display:flex;gap:8px;margin-top:4px;flex-wrap:wrap;">
         ${e.department?`<span style="font-size:10px;background:var(--accent-primary);color:white;padding:1px 6px;border-radius:4px;">🩺 ${e.department}</span>`:''}
-        ${e.city?`<span style="font-size:10px;color:var(--text-muted);">📍 ${e.city}</span>`:''}
+        ${e.city?`<span style="font-size:10px;color:var(--text-muted);">📍 ${escapeHtml(e.city)}</span>`:''}
         ${schedDate?`<span style="font-size:10px;color:#22c55e;">📅 ${schedDate}</span>`:`<span style="font-size:10px;color:var(--text-muted);">🕐 ${dt}</span>`}
       </div>
     </div>`;
@@ -2836,7 +2836,7 @@ async function loadAptDetail(eventId) {
   renderAptList();
   
   const panel = document.getElementById('apt-detail-content');
-  panel.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-muted);">Yükleniyor...</div>';
+  panel.innerHTML = '<div style="padding:20px;"><div class="skeleton skeleton-text" style="width:60%;height:20px;margin-bottom:12px;"></div><div class="skeleton skeleton-text short"></div><div class="skeleton skeleton-card" style="margin-top:16px;"></div><div class="skeleton skeleton-card"></div><div class="skeleton skeleton-card"></div></div>';
   
   const data = await api('appointment-detail&id=' + eventId);
   if (!data || !data.event) { panel.innerHTML = '<div class="empty">Detay yüklenemedi</div>'; return; }
@@ -2875,8 +2875,8 @@ async function loadAptDetail(eventId) {
     const entries = Object.entries(raw).filter(([k]) => !skip.includes(k.toLowerCase()));
     if (entries.length > 0) {
       formHtml = entries.map(([k,v]) => `<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.04);gap:8px;">
-        <span style="font-size:11px;color:var(--text-muted);min-width:90px;">${k.replace(/_/g,' ')}</span>
-        <span style="font-size:11px;font-weight:500;text-align:right;word-wrap:break-word;">${String(v||'').replace(/_/g,' ')}</span>
+        <span style="font-size:11px;color:var(--text-muted);min-width:90px;">${escapeHtml(k.replace(/_/g,' '))}</span>
+        <span style="font-size:11px;font-weight:500;text-align:right;word-wrap:break-word;">${escapeHtml(String(v||'').replace(/_/g,' '))}</span>
       </div>`).join('');
     }
   } catch(err) {}
@@ -2885,7 +2885,7 @@ async function loadAptDetail(eventId) {
   const msgHtml = msgs.length > 0 ? msgs.slice(-5).map(m => {
     const isOut = m.direction === 'out';
     const t = new Date(m.created_at).toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit'});
-    const content = (m.content||'').substring(0,120) + ((m.content||'').length > 120 ? '...' : '');
+    const content = escapeHtml((m.content||'').substring(0,120)) + ((m.content||'').length > 120 ? '...' : '');
     return `<div style="padding:5px 8px;background:${isOut?'rgba(99,102,241,0.08)':'rgba(255,255,255,0.03)'};border-radius:8px;margin-bottom:3px;border-left:2px solid ${isOut?'var(--accent-primary)':'#f59e0b'};">
       <div style="font-size:10px;color:var(--text-muted);margin-bottom:1px;">${isOut?(m.model_used==='panel'?'👤 Sen':'🤖 Bot'):'📩 Hasta'} · ${t}</div>
       <div style="font-size:12px;line-height:1.4;">${content}</div>
@@ -2900,7 +2900,7 @@ async function loadAptDetail(eventId) {
     if (c.includes('3 gün')) rType = 'D-3';
     else if (c.includes('Yarın')) rType = 'D-1';
     else if (c.includes('Bugün')) rType = 'D-0';
-    return `<span style="font-size:10px;background:rgba(34,197,94,0.15);color:#22c55e;padding:3px 6px;border-radius:6px;" title="${c.replace(/"/g, '&quot;')}">✅ ${rType} — ${d}</span>`;
+    return `<span style="font-size:10px;background:rgba(34,197,94,0.15);color:#22c55e;padding:3px 6px;border-radius:6px;" title="${escapeHtml(c)}">✅ ${rType} — ${d}</span>`;
   }).join(' ') : '<span style="font-size:10px;color:var(--text-muted);font-style:italic;">Henüz hatırlatma yok</span>';
 
   // Show-up section
@@ -2921,11 +2921,11 @@ async function loadAptDetail(eventId) {
       <!-- Header -->
       <div style="display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:12px;border-bottom:1px solid rgba(255,255,255,0.06);">
         <div>
-          <div style="font-size:18px;font-weight:700;">${nm}</div>
+          <div style="font-size:18px;font-weight:700;">${escapeHtml(nm)}</div>
           <div style="display:flex;gap:10px;margin-top:4px;flex-wrap:wrap;align-items:center;">
-            <span style="font-size:12px;color:var(--text-muted);">📱 ${e.phone_number}</span>
-            ${e.city?`<span style="font-size:12px;color:var(--text-muted);">📍 ${e.city}</span>`:''}
-            ${e.email?`<span style="font-size:12px;color:var(--text-muted);">✉️ ${e.email}</span>`:''}
+            <span style="font-size:12px;color:var(--text-muted);">📱 ${escapeHtml(e.phone_number)}</span>
+            ${e.city?`<span style="font-size:12px;color:var(--text-muted);">📍 ${escapeHtml(e.city)}</span>`:''}
+            ${e.email?`<span style="font-size:12px;color:var(--text-muted);">✉️ ${escapeHtml(e.email)}</span>`:''}
           </div>
         </div>
         <div style="display:flex;gap:6px;">

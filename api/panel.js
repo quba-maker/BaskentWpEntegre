@@ -1,6 +1,18 @@
 import { neon } from '@neondatabase/serverless';
 import axios from 'axios';
 
+// 🔒 Simple in-memory rate limiter (IP başına dakikada max 120 istek)
+const rateLimitMap = new Map();
+const RATE_LIMIT = 120;
+const RATE_WINDOW = 60000; // 1 dakika
+setInterval(() => rateLimitMap.clear(), RATE_WINDOW);
+
+function checkRateLimit(ip) {
+  const count = rateLimitMap.get(ip) || 0;
+  rateLimitMap.set(ip, count + 1);
+  return count < RATE_LIMIT;
+}
+
 export default async function handler(req, res) {
   const allowedOrigins = [process.env.PANEL_ORIGIN || 'https://baskent-wp-entegre.vercel.app', 'http://localhost:3000'];
   const origin = req.headers.origin;
@@ -10,6 +22,12 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.setHeader('Cache-Control', 'no-store, max-age=0');
   if (req.method === 'OPTIONS') return res.status(200).end();
+
+  // 🔒 Rate Limiting
+  const clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket?.remoteAddress || 'unknown';
+  if (!checkRateLimit(clientIp)) {
+    return res.status(429).json({ error: 'Çok fazla istek. Lütfen biraz bekleyin.' });
+  }
 
   const authHeader = req.headers.authorization;
   const PANEL_PASSWORD = process.env.PANEL_PASSWORD;

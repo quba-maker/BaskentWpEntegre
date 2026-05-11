@@ -2,6 +2,18 @@ import { handleWhatsAppMessage } from '../lib/channels/whatsapp.js';
 import { handleMessengerMessage } from '../lib/channels/messenger.js';
 import { handleInstagramMessage } from '../lib/channels/instagram.js';
 import leadWebhookHandler from './lead-webhook.js';
+import crypto from 'crypto';
+
+// 🔒 Meta Webhook Signature Doğrulaması
+function verifyWebhookSignature(req) {
+  const appSecret = process.env.META_APP_SECRET;
+  if (!appSecret) return true; // APP_SECRET yoksa skip (backward compatible)
+  const sig = req.headers['x-hub-signature-256'];
+  if (!sig) return false;
+  const body = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+  const hash = crypto.createHmac('sha256', appSecret).update(body).digest('hex');
+  return sig === `sha256=${hash}`;
+}
 
 // 🔄 Arka planda escalation/recall kontrolü (cron yerine webhook-triggered)
 async function runBackgroundChecks() {
@@ -62,6 +74,12 @@ export default async function handler(req, res) {
 
   // POST - Mesaj işle (Trafik Yönlendirme)
   if (req.method === 'POST') {
+    // 🔒 Signature doğrulaması
+    if (!verifyWebhookSignature(req)) {
+      console.warn('⚠️ Webhook signature doğrulaması başarısız — istek reddedildi');
+      return res.status(403).send('INVALID_SIGNATURE');
+    }
+    
     const body = req.body;
     
     if (!body || !body.object) {
