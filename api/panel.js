@@ -733,9 +733,13 @@ export default async function handler(req, res) {
           details TEXT, status VARCHAR(20) DEFAULT 'pending', created_at TIMESTAMP DEFAULT NOW()
         )`;
         
-        // Sadece en son lead'i almak için DISTINCT ON (e.id) PostgreSQL özelliğini kullanabiliriz
+       // Ek kolonları ekle (migration)
+        try { await sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS coordinator_notes TEXT`; } catch(e) {}
+        try { await sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS confirmed_by_patient BOOLEAN DEFAULT false`; } catch(e) {}
+        try { await sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMP`; } catch(e) {}
+        
         const events = await sql`
-          SELECT DISTINCT ON (e.id) e.*, c.patient_name, c.department, c.patient_type, l.form_name, l.city 
+          SELECT DISTINCT ON (e.id) e.*, c.patient_name, c.department, c.patient_type, c.lead_stage, l.form_name, l.city, l.raw_data as lead_raw_data
           FROM events e 
           LEFT JOIN conversations c ON c.phone_number = e.phone_number
           LEFT JOIN leads l ON l.phone_number = e.phone_number
@@ -745,42 +749,133 @@ export default async function handler(req, res) {
         const counts = {
           pending: events.filter(e => e.status === 'pending').length,
           called: events.filter(e => e.status === 'called').length,
-          confirmed: events.filter(e => e.status === 'confirmed').length,
-          noshow: events.filter(e => e.status === 'noshow').length
+          scheduled: events.filter(e => ['scheduled', 'confirmed'].includes(e.status)).length,
+          lost: events.filter(e => ['lost', 'cancelled', 'noshow'].includes(e.status)).length
         };
         return res.json({ events, counts });
       } catch(e) {
         console.error('Randevu çekme hatası:', e.message);
-        return res.json({ events: [], counts: { pending: 0, called: 0, confirmed: 0, noshow: 0 } });
+        return res.json({ events: [], counts: { pending: 0, called: 0, scheduled: 0, lost: 0 } });
+      }
+    }
+
+    // 📋 RANDEVU DETAY — Tekil hasta detayı (sağ panel için)
+    if (action === 'appointment-detail') {
+      const eventId = req.query.id;
+      if (!eventId) return res.status(400).json({ error: 'id gerekli' });
+      
+      try {
+        const ev = await sql`
+          SELECT e.*, c.patient_name, c.department, c.patient_type, c.tags as conv_tags, c.lead_stage, c.notes as conv_notes,
+            l.form_name, l.city, l.email, l.raw_data, l.tags as lead_tags
+          FROM events e
+          LEFT JOIN conversations c ON c.phone_number = e.phone_number
+          LEFT JOIN leads l ON l.phone_number = e.phone_number
+          WHERE e.id = ${eventId}
+          ORDER BY l.created_at DESC LIMIT 1
+        `;
+        if (ev.length === 0) return res.status(404).json({ error: 'Event bulunamadı' });
+        
+        // Son 10 mesaj
+        const msgs = await sql`
+          SELECT direction, content, created_at, model_used FROM messages 
+          WHERE phone_number = ${ev[0].phone_number} 
+          ORDER BY created_at DESC LIMIT 10
+        `;
+        
+        // Hatırlatma durumu
+        const reminders = await sql`
+          SELECT content, created_at FROM messages 
+          WHERE phone_number = ${ev[0].phone_number} AND model_used = 'reminder'
+          ORDER BY created_at DESC LIMIT 5
+        `;
+        
+        return res.json({ event: ev[0], messages: msgs.reverse(), reminders });
+      } catch(e) {
+        console.error('Randevu detay hatası:', e.message);
+        return res.status(500).json({ error: e.message });
+      }
+    }
+
+    // 📅 iCal EXPORT — Tek randevuyu .ics olarak indir
+    if (action === 'appointment-ical') {
+      const eventId = req.query.id;
+      if (!eventId) return res.status(400).json({ error: 'id gerekli' });
+      
+      try {
+        const ev = await sql`
+          SELECT e.*, c.patient_name, c.department 
+          FROM events e 
+          LEFT JOIN conversations c ON c.phone_number = e.phone_number 
+          WHERE e.id = ${eventId}
+        `;
+        if (ev.length === 0) return res.status(404).json({ error: 'Event bulunamadı' });
+        
+        const apt = ev[0];
+        const startDate = new Date(apt.scheduled_date);
+        const endDate = new Date(startDate.getTime() + 60 * 60 * 1000); // 1 saat
+        const fmt = d => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+        
+        const ical = `BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Baskent CRM//Randevu//TR
+BEGIN:VEVENT
+UID:apt-${apt.id}@baskent-crm
+DTSTART:${fmt(startDate)}
+DTEND:${fmt(endDate)}
+SUMMARY:🏥 ${apt.patient_name || 'Hasta'} - ${apt.department || 'Genel'}
+DESCRIPTION:Hasta: ${apt.patient_name || 'Bilinmiyor'}\\nTel: ${apt.phone_number}\\nBölüm: ${apt.department || 'Genel'}${apt.assigned_doctor ? '\\nDoktor: ' + apt.assigned_doctor : ''}${apt.coordinator_notes ? '\\nNot: ' + apt.coordinator_notes : ''}
+LOCATION:Başkent Üniversitesi Konya Hastanesi
+STATUS:CONFIRMED
+END:VEVENT
+END:VCALENDAR`;
+        
+        res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename=randevu-${apt.id}.ics`);
+        return res.send(ical);
+      } catch(e) {
+        return res.status(500).json({ error: e.message });
       }
     }
 
     // RANDEVU DURUM GÜNCELLE & TAKVİMLE
     if (action === 'update-appointment' && req.method === 'POST') {
-      const { id, status, scheduled_date, assigned_doctor } = req.body;
+      const { id, status, scheduled_date, assigned_doctor, coordinator_notes } = req.body;
       
       if (scheduled_date) {
-        // Eğer bir tarih atandıysa durumu otomatik "scheduled" (Takvimde) yapıyoruz
         await sql`UPDATE events SET status = 'scheduled', scheduled_date = ${scheduled_date}, assigned_doctor = ${assigned_doctor || null} WHERE id = ${id}`;
+      } else if (coordinator_notes !== undefined) {
+        // Sadece koordinatör notu güncelle
+        await sql`UPDATE events SET coordinator_notes = ${coordinator_notes} WHERE id = ${id}`;
       } else {
         await sql`UPDATE events SET status = ${status} WHERE id = ${id}`;
       }
       
-      // Lead durumunu da güncelle
+      // 🏷️ Evrensel Etiket Senkronizasyonu — Hasta Takibi & Form'da görünsün
       const ev = await sql`SELECT phone_number FROM events WHERE id = ${id}`;
       if (ev.length > 0) {
         const phone = ev[0].phone_number;
-        if (status === 'confirmed' || status === 'scheduled' || scheduled_date) {
+        const conv = await sql`SELECT tags FROM conversations WHERE phone_number = ${phone}`;
+        let tags = []; try { tags = JSON.parse(conv[0]?.tags || '[]'); } catch(e) {}
+        
+        // Randevu etiketlerini temizle
+        tags = tags.filter(t => !['Randevu İstiyor', 'Randevu Alındı', 'Takvimde', 'Olumsuz', 'İptal'].includes(t));
+        
+        const effectiveStatus = scheduled_date ? 'scheduled' : (status || 'pending');
+        
+        if (effectiveStatus === 'confirmed' || effectiveStatus === 'scheduled' || scheduled_date) {
+          tags.push(scheduled_date ? 'Takvimde' : 'Randevu Alındı');
           await sql`UPDATE leads SET stage = 'appointed' WHERE phone_number = ${phone}`;
-          // Etiket güncelle
-          const conv = await sql`SELECT tags FROM conversations WHERE phone_number = ${phone}`;
-          let tags = []; try { tags = JSON.parse(conv[0]?.tags || '[]'); } catch(e) {}
-          if (!tags.includes('Randevu Alındı')) { tags.push('Randevu Alındı'); }
-          tags = tags.filter(t => t !== 'Randevu İstiyor');
-          await sql`UPDATE conversations SET tags = ${JSON.stringify(tags)} WHERE phone_number = ${phone}`;
-        } else if (status === 'lost' || status === 'cancelled') {
+          await sql`UPDATE conversations SET lead_stage = 'appointed' WHERE phone_number = ${phone}`;
+        } else if (effectiveStatus === 'lost' || effectiveStatus === 'cancelled') {
+          tags.push('Olumsuz');
           await sql`UPDATE leads SET stage = 'lost' WHERE phone_number = ${phone}`;
+          await sql`UPDATE conversations SET lead_stage = 'lost' WHERE phone_number = ${phone}`;
+        } else if (effectiveStatus === 'called') {
+          tags.push('Randevu İstiyor');
         }
+        
+        await sql`UPDATE conversations SET tags = ${JSON.stringify(tags)} WHERE phone_number = ${phone}`;
       }
       return res.json({ success: true });
     }
