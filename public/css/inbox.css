@@ -1,0 +1,78 @@
+/* Omnichannel Inbox Layout */
+.inbox-layout { display: flex; height: calc(100vh - 110px); min-height: 600px; gap: 0; }
+.inbox-sidebar { width: var(--inbox-left-w, 300px); min-width: 220px; max-width: 500px; flex-shrink: 0; }
+.inbox-main { flex: 1; min-width: 300px; }
+.inbox-details { width: var(--inbox-right-w, 300px); min-width: 220px; max-width: 500px; flex-shrink: 0; }
+.resize-handle { width: 6px; cursor: col-resize; background: transparent; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: background 0.2s; position: relative; z-index: 5; }
+.resize-handle:hover, .resize-handle.dragging { background: var(--accent-primary); border-radius: 4px; }
+.resize-handle::after { content: ''; width: 2px; height: 40px; background: rgba(255,255,255,0.15); border-radius: 2px; transition: background 0.2s; }
+.resize-handle:hover::after, .resize-handle.dragging::after { background: rgba(255,255,255,0.6); }
+.inbox-sidebar, .inbox-main, .inbox-details { background: rgba(28, 28, 32, 0.55); backdrop-filter: saturate(180%) blur(30px); -webkit-backdrop-filter: saturate(180%) blur(30px); border: 1px solid rgba(255,255,255,0.08); border-radius: 20px; display: flex; flex-direction: column; overflow: hidden; }
+
+/* Inbox: Contact List */
+.inbox-header { padding: 14px 16px; border-bottom: 1px solid rgba(255,255,255,0.04); display: flex; justify-content: space-between; align-items: center; }
+.inbox-header h3 { font-size: 15px; font-weight: 600; letter-spacing: -0.2px; }
+.contact-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; padding: 8px; gap: 2px; }
+.contact-item { padding: 10px 12px; border-radius: 12px; cursor: pointer; transition: all 0.15s; border: none; display: flex; gap: 10px; align-items: flex-start; }
+.contact-item:hover { background: rgba(255,255,255,0.05); }
+.contact-item.active { background: rgba(10, 132, 255, 0.12); }
+.contact-avatar { width: 38px; height: 38px; border-radius: 50%; background: rgba(255,255,255,0.06); display: flex; align-items: center; justify-content: center; font-size: 16px; position: relative; flex-shrink: 0; }
+.channel-icon { position: absolute; bottom: -2px; right: -2px; width: 15px; height: 15px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 8px; border: 2px solid rgba(28,28,32,0.9); color: white; }
+.channel-whatsapp { background: var(--whatsapp); }
+.channel-messenger { background: var(--messenger); }
+.channel-instagram { background: var(--instagram); }
+.contact-info { flex: 1; min-width: 0; }
+.contact-top { display: flex; justify-content: space-between; margin-bottom: 2px; align-items: baseline; }
+.contact-name { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-main); }
+.contact-time { font-size: 11px; color: var(--text-muted); flex-shrink: 0; margin-left: 6px; }
+.contact-preview { font-size: 12px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Contact Badges Row */
+.contact-badges { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; margin-top: 4px; }
+.contact-phone { font-size: 11px; color: var(--text-muted); margin-top: 1px; }
+
+/* Tag & Status Badges (Translucent Pills) */
+.tag-badge-display { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 20px; font-size: 10px; font-weight: 600; letter-spacing: 0.2px; }
+.status-badge { display: inline-flex; align-items: center; padding: 2px 7px; border-radius: 20px; font-size: 10px; font-weight: 500; letter-spacing: 0.2px; }
+.status-bot { background: rgba(50, 215, 75, 0.1); color: var(--system-green); }
+.status-human { background: rgba(255, 159, 10, 0.1); color: var(--system-orange); }
+.country-badge { font-size: 11px; color: var(--text-muted); }
+
+/* Online Indicator */
+.online-dot { position: absolute; top: 0; right: 0; width: 10px; height: 10px; background: var(--system-green); border-radius: 50%; border: 2px solid rgba(28,28,32,0.9); z-index: 1; animation: pulse-dot 2s ease-in-out infinite; }
+@keyframes pulse-dot { 0%,100% { box-shadow: 0 0 0 0 rgba(50,215,75,0.4); } 50% { box-shadow: 0 0 0 4px rgba(50,215,75,0); } }
+
+/* Inbox: Main Chat */
+.chat-window-header { padding: 14px 20px; border-bottom: 1px solid rgba(255,255,255,0.04); display: flex; justify-content: space-between; align-items: center; }
+.chat-user-info { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.chat-user-name { font-size: 15px; font-weight: 600; color: var(--text-main); letter-spacing: -0.3px; }
+.chat-user-phone { font-size: 11px; color: var(--text-muted); font-family: 'SFMono-Regular', Consolas, monospace; }
+.chat-channel-badge { font-size: 11px; padding: 3px 8px; border-radius: 20px; background: rgba(255,255,255,0.06); color: var(--text-muted); display: inline-flex; align-items: center; gap: 4px; font-weight: 500; }
+.handover-control { display: flex; background: rgba(255,255,255,0.05); border-radius: 10px; padding: 3px; gap: 2px; }
+.handover-btn { padding: 5px 10px; border-radius: 8px; font-size: 12px; font-weight: 500; cursor: pointer; border: none; background: transparent; color: var(--text-muted); transition: all 0.2s; font-family: inherit; }
+.handover-btn.active-bot { background: rgba(50, 215, 75, 0.12); color: var(--system-green); }
+.handover-btn.active-human { background: rgba(255, 159, 10, 0.12); color: var(--system-orange); }
+
+.chat-history { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; background: rgba(0,0,0,0.15); scroll-behavior: smooth; }
+.message-bubble { max-width: 75%; padding: 10px 14px; border-radius: 18px; font-size: 14px; line-height: 1.5; position: relative; box-shadow: 0 1px 2px rgba(0,0,0,0.1); }
+.message-bubble.in { background: rgba(44, 44, 46, 0.85); border: 1px solid rgba(255,255,255,0.05); align-self: flex-start; border-bottom-left-radius: 4px; color: var(--text-main); }
+.message-bubble.out { background: var(--accent-primary); color: white; align-self: flex-end; border-bottom-right-radius: 4px; border: 1px solid rgba(255,255,255,0.1); }
+.message-bubble.out.bot-reply { background: rgba(58, 58, 60, 0.85); color: rgba(245,245,247,0.95); border: 1px solid rgba(255,255,255,0.08); }
+.msg-info { font-size: 10px; margin-top: 4px; opacity: 0.45; display: flex; justify-content: flex-end; align-items: center; gap: 4px; }
+.bot-indicator { font-size: 9px; background: rgba(255,255,255,0.08); padding: 1px 5px; border-radius: 4px; }
+
+.chat-composer { padding: 12px 16px; border-top: 1px solid rgba(255,255,255,0.04); background: transparent; display: flex; gap: 8px; align-items: center; }
+.chat-composer input { flex: 1; margin: 0; background: rgba(255,255,255,0.06); border-radius: 22px; padding: 10px 18px; border: none; font-size: 14px; }
+.chat-composer input:focus { background: rgba(255,255,255,0.1); box-shadow: none; border: none; }
+
+/* Inbox: Details (CRM) */
+.crm-header { padding: 14px 16px; border-bottom: 1px solid rgba(255,255,255,0.04); font-weight: 600; font-size: 15px; letter-spacing: -0.2px; background: rgba(255,255,255,0.02); }
+.crm-body { padding: 20px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 20px; }
+.form-group { display: flex; flex-direction: column; gap: 8px; background: rgba(255,255,255,0.02); padding: 16px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.03); }
+.form-group label { font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; display: flex; align-items: center; gap: 6px; }
+.lead-info-card { background: rgba(10, 132, 255, 0.05); border: 1px solid rgba(10, 132, 255, 0.15); border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+.lead-info-header { font-size: 12px; font-weight: 600; color: var(--accent-primary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; display: flex; align-items: center; gap: 6px; }
+.lead-info-row { display: flex; justify-content: space-between; font-size: 13px; align-items: center; }
+.lead-label { color: var(--text-muted); font-weight: 500; }
+.lead-value { color: var(--text-main); font-weight: 600; }
+

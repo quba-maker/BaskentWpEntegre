@@ -1,0 +1,9 @@
+/* LOGIN */
+.login-screen { display: flex; align-items: center; justify-content: center; min-height: 100vh; background: var(--bg-main); }
+.login-card { background: rgba(28, 28, 30, 0.8); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 48px; text-align: center; width: 380px; box-shadow: var(--shadow-lg); }
+.login-logo { font-size: 56px; margin-bottom: 16px; }
+.login-card h2 { font-size: 24px; color: var(--text-main); margin-bottom: 8px; font-weight: 600; letter-spacing: -0.5px; }
+.login-card p { color: var(--text-muted); margin-bottom: 32px; font-size: 14px; }
+.login-card input { text-align: center; font-size: 16px; margin-bottom: 16px; }
+.login-error { color: var(--system-red); font-size: 13px; margin-top: 12px; font-weight: 500; }
+

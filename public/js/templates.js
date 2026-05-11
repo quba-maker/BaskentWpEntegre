@@ -1,0 +1,5 @@
+/* ŞABLONLAR */
+async function loadTemplates(){const list=await api('templates');if(!list)return;document.getElementById('template-list').innerHTML=list.map(t=>`<div style="padding:16px; background:var(--bg-hover); border-radius:var(--radius-sm); margin-bottom:8px;"><div style="display:flex; justify-content:space-between; margin-bottom:8px;"><strong>${t.title}</strong><button class="btn-sm btn-danger" onclick="deleteTemplate(${t.id})">Sil</button></div><div style="font-size:13px; color:var(--text-muted);">${t.content}</div></div>`).join('')||'<p class="empty">Şablon yok</p>'}
+async function addTemplate(){const t=document.getElementById('tpl-title').value,c=document.getElementById('tpl-content').value,cat=document.getElementById('tpl-category').value;if(!t||!c)return toast('Zorunlu alanlar','error');await api('templates','POST',{title:t,content:c,category:cat});document.getElementById('tpl-title').value='';document.getElementById('tpl-content').value='';loadTemplates();toast('Eklendi')}
+async function deleteTemplate(id){if(!confirm('Silinsin mi?'))return;await api('templates&id='+id,'DELETE');loadTemplates();toast('Silindi')}
+

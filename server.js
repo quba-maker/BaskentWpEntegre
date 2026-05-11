@@ -7,6 +7,9 @@ dotenv.config();
 const app = express();
 app.use(express.json());
 
+// Serve frontend locally
+app.use(express.static('public'));
+
 const {
   META_ACCESS_TOKEN,
   META_VERIFY_TOKEN,

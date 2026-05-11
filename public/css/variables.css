@@ -1,0 +1,51 @@
+:root {
+  /* Apple Premium Dark Theme (HIG Standard) */
+  --bg-main: #000000;
+  --bg-card: rgba(28, 28, 30, 0.6); /* Translucent for true glass effect */
+  --bg-hover: rgba(255, 255, 255, 0.1);
+  --bg-input: rgba(255, 255, 255, 0.05);
+  
+  --border-color: rgba(84, 84, 88, 0.35); /* Apple separator */
+  --border-light: rgba(84, 84, 88, 0.15);
+  
+  --text-main: #FFFFFF; /* Apple Pure White for primary text */
+  --text-muted: rgba(235, 235, 245, 0.6); /* Apple Secondary Label */
+  
+  --accent-primary: #0A84FF; /* Apple Blue */
+  --accent-hover: #007AFF;
+  
+  /* System Colors */
+  --system-green: #30D158; /* Apple HIG Green */
+  --system-red: #FF453A;   /* Apple HIG Red */
+  --system-orange: #FF9F0A; /* Apple HIG Orange */
+  
+  --whatsapp: #30D158;
+  --messenger: #0A84FF;
+  --instagram: linear-gradient(45deg, #f09433, #e6683c, #dc2743, #cc2366, #bc1888);
+  
+  /* Apple Border Radii */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+  
+  /* Mobile UI Standard Dimensions */
+  --mob-nav-height: 54px;
+  --mob-padding: 16px;
+  --btn-height: 44px; /* Apple HIG standard tap target */
+  
+  /* Soft Shadows */
+  --shadow-sm: 0 4px 12px rgba(0,0,0,0.2);
+  --shadow-lg: 0 8px 32px rgba(0,0,0,0.4);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { 
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  background: var(--bg-main);
+  color: var(--text-main); 
+  min-height: 100vh; 
+  overflow: hidden; 
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
