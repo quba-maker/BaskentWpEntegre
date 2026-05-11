@@ -270,6 +270,7 @@ function openLeadDetail(rowIndex) {
   const currentSheetStatus = statusColIndex > -1 ? (row[statusColIndex] || '') : '';
   const initialStage = SHEETS_TO_STAGE[currentSheetStatus] || 'new';
 
+  let editHtml = `
     <!-- SAĞ PANEL -->
     <div>
       <div style="position:sticky; top:24px; display:flex; flex-direction:column; gap:16px;">
