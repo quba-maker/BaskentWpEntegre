@@ -388,7 +388,7 @@ export default async function handler(req, res) {
           // lead_stage: conversations tablosundaki değer öncelikli (form detayından set edilen)
           // Eğer conversations'ta lead_stage yoksa leads tablosundan al
           if (!conv.lead_stage || conv.lead_stage === 'new') {
-            conv.lead_stage = conv.lead_stage || lead.stage || 'new';
+            conv.lead_stage = lead.stage || 'new';
           }
           conv.lead_date = lead.created_at;
           conv.lead_ad_id = lead.ad_id;
@@ -396,17 +396,35 @@ export default async function handler(req, res) {
           conv.lead_score = lead.score;
           conv.has_lead = true;
           
-          // 🏥 Bölüm otomatik doldurma: Lead tags'ten department'i çıkar
-          if (!conv.department && lead.tags) {
-            try {
-              const leadTags = typeof lead.tags === 'string' ? JSON.parse(lead.tags) : lead.tags;
-              const medicalTags = (leadTags || []).filter(t => !['Genel', 'Ortaasya', 'Avrupa'].includes(t));
-              if (medicalTags.length > 0) {
-                conv.department = medicalTags.join(', ');
-                await sql`UPDATE conversations SET department = ${conv.department} WHERE phone_number LIKE ${leadLike}`;
-                console.log(`🏥 Bölüm otomatik dolduruldu: ${conv.department}`);
+          // 🏥 Bölüm otomatik doldurma: Lead tags'ten VEYA form name'den department'i çıkar
+          if (!conv.department) {
+            let detectedDept = '';
+            // Önce tags'ten dene
+            if (lead.tags) {
+              try {
+                const leadTags = typeof lead.tags === 'string' ? JSON.parse(lead.tags) : lead.tags;
+                const medicalTags = (leadTags || []).filter(t => !['Genel', 'Ortaasya', 'Avrupa', 'Yerli', 'Gurbetçi', 'Yabancı Turist'].includes(t));
+                if (medicalTags.length > 0) detectedDept = medicalTags.join(', ');
+              } catch(e) {}
+            }
+            // Tags'te yoksa form name'den tespit et
+            if (!detectedDept && lead.form_name) {
+              const fn = lead.form_name.toLowerCase();
+              const deptMap = [
+                [/ortoped/i, 'Ortopedi'], [/kardiyoloji|kalp/i, 'Kardiyoloji'], [/estetik/i, 'Estetik'],
+                [/di[sş]|implant/i, 'Diş'], [/g[oö]z|katarakt/i, 'Göz'], [/t[uü]p.?bebek|ivf/i, 'Tüp Bebek'],
+                [/nakil|organ/i, 'Organ Nakli'], [/onkoloji|kanser/i, 'Onkoloji'], [/obezite|bariatrik/i, 'Obezite'],
+                [/n[oö]roloji|beyin/i, 'Nöroloji'], [/[uü]roloji|prostat/i, 'Üroloji'], [/check.?up/i, 'Check-Up']
+              ];
+              for (const [re, tag] of deptMap) {
+                if (re.test(fn)) { detectedDept = tag; break; }
               }
-            } catch(e) {}
+            }
+            if (detectedDept) {
+              conv.department = detectedDept;
+              await sql`UPDATE conversations SET department = ${conv.department} WHERE phone_number LIKE ${leadLike}`;
+              console.log(`🏥 Bölüm otomatik dolduruldu: ${conv.department} (kaynak: ${lead.tags ? 'tags' : 'form_name'})`);  
+            }
           }
           
           // Hasta adı lead'den gelip conversation'da yoksa otomatik eşleştirelim
