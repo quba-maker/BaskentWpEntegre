@@ -43,7 +43,7 @@
   /* Mobile Navigation Tab Bar (iOS Style) */
   
   .mobile-tab-bar {
-    display: flex;
+    display: flex !important;
     position: fixed;
     bottom: 0; left: 0; width: 100vw;
     background: rgba(28, 28, 30, 0.85);

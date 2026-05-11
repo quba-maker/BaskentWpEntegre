@@ -1,5 +1,5 @@
 /* MOBILE NAVIGATION HELPERS (Hidden on Desktop) */
-.mobile-only-btn { display: none !important; }
+.mobile-only-btn, .mobile-tab-bar { display: none !important; }
 
 /* INBOX SEARCH */
 .inbox-search { padding: 12px; border-bottom: 1px solid var(--border-light); }
