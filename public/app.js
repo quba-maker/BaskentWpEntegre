@@ -4,6 +4,22 @@ let currentPhone = '';
 let currentChannel = 'whatsapp';
 let allTags = [];
 
+// 🔒 XSS Koruması — tüm user-input'ları escape et
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// 🔒 Session Expiry — 24 saat sonra otomatik logout
+(function checkSessionExpiry() {
+  const loginTime = localStorage.getItem('panel_login_time');
+  if (loginTime && Date.now() - parseInt(loginTime) > 24 * 60 * 60 * 1000) {
+    localStorage.removeItem('panel_auth');
+    localStorage.removeItem('panel_login_time');
+    AUTH_TOKEN = '';
+  }
+})();
+
 // 🔀 Resizable Panels — Sürükle/Bırak ile panel genişliği ayarlama
 document.addEventListener('DOMContentLoaded', () => {
   // Kayıtlı genişlikleri yükle
@@ -115,7 +131,7 @@ function countryBadge(phone) {
   return `<span class="country-badge">${c.flag} ${c.name}</span>`;
 }
 
-function doLogin() { AUTH_TOKEN = document.getElementById('login-pass').value; localStorage.setItem('panel_auth', AUTH_TOKEN); checkAuth(); }
+function doLogin() { AUTH_TOKEN = document.getElementById('login-pass').value; localStorage.setItem('panel_auth', AUTH_TOKEN); localStorage.setItem('panel_login_time', String(Date.now())); checkAuth(); }
 async function checkAuth() {
   try {
     const r = await fetch(API+'?action=dashboard', {headers:{Authorization:'Bearer '+AUTH_TOKEN}});

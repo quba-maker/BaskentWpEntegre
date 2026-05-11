@@ -5,7 +5,7 @@ export default async function handler(req, res) {
   const META_ACCESS_TOKEN = process.env.META_ACCESS_TOKEN;
   const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
   const DATABASE_URL = process.env.DATABASE_URL;
-  const GOOGLE_SHEET_URL = 'https://script.google.com/macros/s/AKfycbw_iaJ0zqgOFYAGlkCnGnKQOzYQtPJWtbLMIEMIPuVbVkXOnDyq_1jMmII554s85sxu/exec';
+  const GOOGLE_SHEET_URL = process.env.GOOGLE_SHEET_UPDATE_URL || process.env.GOOGLE_SHEET_URL;
   const sql = DATABASE_URL ? neon(DATABASE_URL) : null;
 
   // GET - Meta webhook doğrulama
@@ -13,7 +13,7 @@ export default async function handler(req, res) {
     const mode = req.query['hub.mode'];
     const token = req.query['hub.verify_token'];
     const challenge = req.query['hub.challenge'];
-    if (mode === 'subscribe' && token === 'baskent_wp_secret_token_123') {
+    if (mode === 'subscribe' && token === process.env.WEBHOOK_VERIFY_TOKEN) {
       console.log('✅ Lead webhook doğrulandı!');
       return res.status(200).send(challenge);
     }

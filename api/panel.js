@@ -12,7 +12,8 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   const authHeader = req.headers.authorization;
-  const PANEL_PASSWORD = process.env.PANEL_PASSWORD || 'baskent2024';
+  const PANEL_PASSWORD = process.env.PANEL_PASSWORD;
+  if (!PANEL_PASSWORD) return res.status(500).json({ error: 'Server config error: PANEL_PASSWORD not set' });
   // Media endpoint için query param token desteği (img tag Authorization header gönderemez)
   const queryToken = req.query.token;
   const isMediaReq = req.query.action === 'media';
@@ -490,9 +491,10 @@ export default async function handler(req, res) {
         
         // 📊 BACKEND SHEETS SYNC — Sheets'e lead durumunu yaz (her yerden çalışır)
         try {
-          const SHEETS_API_KEY = process.env.GOOGLE_SHEETS_API_KEY || 'AIzaSyAxNUHQCrXzmATX4YuMgcFP3u4EW_jsJYc';
-          const SPREADSHEET_ID = process.env.GOOGLE_SPREADSHEET_ID || '1oSKJ-iYiZPltYUQ73_O-FaFdelhwAwtf09wVKKVs1GQ';
-          const APPS_SCRIPT_URL = process.env.GOOGLE_SHEET_UPDATE_URL || process.env.GOOGLE_SHEET_URL || 'https://script.google.com/macros/s/AKfycbw_iaJ0zqgOFYAGlkCnGnKQOzYQtPJWtbLMIEMIPuVbVkXOnDyq_1jMmII554s85sxu/exec';
+          const SHEETS_API_KEY = process.env.GOOGLE_SHEETS_API_KEY;
+          const SPREADSHEET_ID = process.env.GOOGLE_SPREADSHEET_ID;
+          const APPS_SCRIPT_URL = process.env.GOOGLE_SHEET_UPDATE_URL || process.env.GOOGLE_SHEET_URL;
+          if (!SHEETS_API_KEY || !SPREADSHEET_ID) return res.json({ sheets: [], error: 'Sheets config missing' });
           const stageLabels = { new: 'Yeni', contacted: 'İlk Temas', discovery: 'Analiz', negotiation: 'İkna', hot_lead: 'Sıcak Lead', appointed: 'Randevu Alındı', lost: 'Kayıp' };
           const stageLabel = stageLabels[lead_stage] || lead_stage;
           

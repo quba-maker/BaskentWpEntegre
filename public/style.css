@@ -277,7 +277,7 @@ textarea:focus, input:focus, select:focus { outline: none; border-color: var(--a
   .sidebar { position: fixed; top: 0; left: -280px; width: 280px; height: 100vh; z-index: 999; transition: left 0.3s cubic-bezier(0.16, 1, 0.3, 1); box-shadow: 4px 0 24px rgba(0,0,0,0.5); }
   .sidebar.open { left: 0; }
   .mobile-menu-btn { display: flex; align-items: center; justify-content: center; z-index: 1000; position: fixed; top: 16px; left: 16px; background: rgba(28, 28, 30, 0.8); backdrop-filter: blur(20px); border-radius: 8px; border: 1px solid var(--border-light); color: white; border: none; padding: 10px; cursor: pointer;}
-  .content { padding: 16px; padding-top: 72px; }
+  .content { padding: 16px; padding-top: 72px; padding-bottom: env(safe-area-inset-bottom, 16px); }
   .stats-grid { grid-template-columns: 1fr; gap: 12px; }
   .inbox-layout { flex-direction: column; height: auto; }
   .inbox-sidebar { max-height: 50vh; width: 100% !important; max-width: 100%; border-bottom: 1px solid var(--border-light); }
@@ -285,6 +285,35 @@ textarea:focus, input:focus, select:focus { outline: none; border-color: var(--a
   .resize-handle { display: none !important; }
   .chat-area { min-height: 60vh; }
   .crm-panel { display: none; }
+  
+  /* 📅 Randevu sayfası — mobil stack */
+  #apt-view-inbox { flex-direction: column !important; height: auto !important; min-height: unset !important; }
+  #apt-view-inbox > .card:first-child { flex: unset !important; width: 100% !important; max-height: 40vh; border-radius: 16px 16px 0 0 !important; }
+  #apt-view-inbox > .card:last-child { border-radius: 0 0 16px 16px !important; min-height: 50vh; }
+  
+  /* 📊 Stats pills — mobil 3 sütun grid */
+  .apt-stat-pill { min-width: unset !important; flex: unset !important; }
+  #page-appointments > div:nth-child(2) { display: grid !important; grid-template-columns: repeat(3, 1fr) !important; gap: 8px !important; }
+  
+  /* 🔘 Minimum touch target 44px */
+  button, .btn, select, .sheet-tab, .apt-filter-btn { min-height: 44px; min-width: 44px; }
+  
+  /* 📝 Minimum font-size */
+  body { font-size: 14px; }
+  input, textarea, select { font-size: 16px !important; } /* iOS zoom prevention */
+  
+  /* 📋 Training layout (takvim filtre) stack */
+  .training-layout { flex-direction: column !important; }
+  .training-layout > .card { flex: unset !important; width: 100% !important; }
+  
+  /* 🏷️ Sheet tabs scroll */
+  .sheet-tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; flex-wrap: nowrap !important; }
+}
+
+/* ♿ Reduced motion preference */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  .app::before, .app::after { animation: none !important; }
 }
 
 /* ========== ZORBAY ALERT SİSTEMİ ========== */
