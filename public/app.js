@@ -260,10 +260,16 @@ function getTimeAgo(isoTime) {
 function onNotifClick(id) {
   const all = _notifStore.getAll();
   const n = all.find(x => x.id === id);
-  if (n && n.phone) {
-    toggleNotifPanel();
-    document.querySelector('[data-page="form-management"]')?.click();
-    if (typeof openFormDetail === 'function') openFormDetail(n.phone);
+  if (n) {
+    if (n.phone) {
+      toggleNotifPanel();
+      document.querySelector('[data-page="form-management"]')?.click();
+      if (typeof openFormDetail === 'function') openFormDetail(n.phone);
+    }
+    if (n.dbId) {
+      // Veritabanında da okundu işaretle
+      api('mark-alert-read', 'POST', { id: n.dbId }).catch(() => {});
+    }
   }
   
   _notifStore.markRead(id);
@@ -273,7 +279,12 @@ function onNotifClick(id) {
 
 // Tümünü okundu işaretle
 function markAllNotifRead() {
-  _notifStore.markAllRead();
+  const all = _notifStore.getAll();
+  all.forEach(n => {
+    n.read = true;
+    if (n.dbId) api('mark-alert-read', 'POST', { id: n.dbId }).catch(() => {});
+  });
+  _notifStore.save(all);
   renderNotifList();
   updateNotifBadge();
 }
@@ -2769,51 +2780,29 @@ async function fetchZorbayAlerts() {
     const alerts = await api('alerts');
     if (!alerts || !alerts.length) return;
     
-    let container = document.getElementById('zorbay-alerts-container');
-    if (!container) {
-      container = document.createElement('div');
-      container.id = 'zorbay-alerts-container';
-      container.className = 'zorbay-alert-container';
-      document.body.appendChild(container);
-    }
-    
     // Yalnızca ekranda olmayanları ekle
     alerts.forEach(alert => {
-      if (document.getElementById('zorbay-alert-' + alert.id)) return;
-      
-      // Bildirim zili paneline (soldaki menüye) de ekle
+      // Bildirim zili paneline (soldaki menüye) ekle
       const titleText = alert.alert_type === 'hot_lead' ? '🔥 Sıcak Lead (Manuel)' : alert.alert_type === 'new_image' ? '📸 Görüntü/Rapor' : '🚨 CRM Uyarısı';
       const sev = alert.alert_type === 'hot_lead' ? 'critical' : 'warning';
       
-      _notifStore.add({
-        title: titleText,
-        desc: alert.message,
-        severity: sev,
-        icon: '🔔',
-        phone: alert.phone_number
-      });
-      updateNotifBadge();
+      const allNotifs = _notifStore.getAll();
+      const exists = allNotifs.find(n => n.dbId === alert.id);
       
-      const el = document.createElement('div');
-      el.id = 'zorbay-alert-' + alert.id;
-      el.className = 'zorbay-alert';
-      el.innerHTML = `
-        <div class="icon">🚨</div>
-        <div class="text">${alert.message}</div>
-        <button class="close-btn" onclick="dismissZorbayAlert(${alert.id}, '${alert.phone_number}')">✕</button>
-      `;
-      // Tıklanınca o sohbete git
-      el.onclick = (e) => {
-        if (e.target.className === 'close-btn') return;
-        document.querySelector('[data-page="conversations"]').click();
-        loadChat(alert.phone_number, 'whatsapp');
-        dismissZorbayAlert(alert.id, alert.phone_number);
-      };
-      
-      container.appendChild(el);
-      
-      // Sesi çal (Kullanıcı etkileşimi olduysa çalar)
-      try { new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3').play(); } catch(e){}
+      if (!exists) {
+        _notifStore.add({
+          title: titleText,
+          desc: alert.message,
+          severity: sev,
+          icon: '🚨',
+          phone: alert.phone_number,
+          dbId: alert.id
+        });
+        updateNotifBadge();
+        
+        // Sesi çal (Kullanıcı etkileşimi olduysa çalar)
+        try { new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3').play(); } catch(e){}
+      }
     });
   } catch (e) { console.error('Alert fetch error', e); }
 }
