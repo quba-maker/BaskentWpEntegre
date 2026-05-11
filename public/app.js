@@ -2466,9 +2466,15 @@ async function loadAptDetail(eventId) {
   
   // Hatırlatma badge'leri
   const reminderBadges = reminders.length > 0 ? reminders.map(r => {
-    const d = new Date(r.created_at).toLocaleDateString('tr-TR',{day:'2-digit',month:'2-digit'});
-    return `<span style="font-size:10px;background:rgba(34,197,94,0.15);color:#22c55e;padding:2px 6px;border-radius:4px;">✅ ${d}</span>`;
-  }).join(' ') : '<span style="font-size:11px;color:var(--text-muted);">Henüz hatırlatma gönderilmedi</span>';
+    const d = new Date(r.created_at).toLocaleDateString('tr-TR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+    let rType = 'Hatırlatma';
+    const c = r.content || '';
+    if (c.includes('3 gün')) rType = 'D-3 (3 Gün)';
+    else if (c.includes('Yarın')) rType = 'D-1 (Yarın)';
+    else if (c.includes('Bugün')) rType = 'D-0 (Bugün)';
+    
+    return `<span style="font-size:10px;background:rgba(34,197,94,0.15);color:#22c55e;padding:4px 8px;border-radius:6px;cursor:help;border:1px solid rgba(34,197,94,0.2);" title="${c.replace(/"/g, '&quot;')}">✅ ${rType} — ${d}</span>`;
+  }).join(' ') : '<span style="font-size:11px;color:var(--text-muted);font-style:italic;">Henüz otomatik hatırlatma gönderilmedi</span>';
 
   panel.innerHTML = `
     <div style="padding:20px;">

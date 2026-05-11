@@ -361,11 +361,36 @@ export default async function handler(req, res) {
     `;
     
     for (const apt of upcoming) {
-      const aptDate = new Date(apt.scheduled_date);
+      // TR timezone bazlı gün hesaplaması
+      const aptDateObj = new Date(apt.scheduled_date);
       const now = new Date();
-      const daysUntil = Math.ceil((aptDate - now) / 86400000);
+      const trNow = new Date(now.getTime() + (3 * 3600000));
+      const trApt = new Date(aptDateObj.getTime() + (3 * 3600000));
+      
+      // Saatleri sıfırlayıp sadece gün bazlı fark bulma
+      const dateNow = new Date(trNow.getFullYear(), trNow.getMonth(), trNow.getDate());
+      const dateApt = new Date(trApt.getFullYear(), trApt.getMonth(), trApt.getDate());
+      const daysUntil = Math.round((dateApt - dateNow) / 86400000);
+
+      let reminderType = '';
+      if (daysUntil === 3) reminderType = '3 gün';
+      else if (daysUntil === 1) reminderType = 'Yarın';
+      else if (daysUntil === 0) reminderType = 'Bugün';
+      
+      if (!reminderType) continue; // Sadece D-3, D-1, D-0
+
+      // Duplicate Kontrolü: Bu kişiye bu 'tip' hatırlatma zaten gitmiş mi?
+      const existing = await sql`
+        SELECT id FROM messages 
+        WHERE phone_number = ${apt.phone_number} 
+          AND model_used = 'reminder' 
+          AND content ILIKE ${'%' + reminderType + '%'}
+        LIMIT 1
+      `;
+      if (existing.length > 0) continue; // Zaten gitmiş, atla
+
       const name = apt.patient_name || '';
-      const dateStr = aptDate.toLocaleDateString('tr-TR', {day:'numeric', month:'long', year:'numeric', hour:'2-digit', minute:'2-digit'});
+      const dateStr = aptDateObj.toLocaleDateString('tr-TR', {day:'numeric', month:'long', year:'numeric', hour:'2-digit', minute:'2-digit'});
       
       let reminderMsg = null;
       if (daysUntil === 3) {
