@@ -2749,28 +2749,36 @@ function switchAptTab(tab) {
 
 function filterAptList(mode) {
   aptFilterMode = mode;
-  document.querySelectorAll('.apt-filter-btn').forEach(b => {
-    b.style.background = b.dataset.filter === mode ? 'var(--accent-primary)' : 'transparent';
-    b.style.color = b.dataset.filter === mode ? 'white' : 'var(--text-muted)';
+  // Highlight active stat pill
+  document.querySelectorAll('.apt-stat-pill').forEach(p => {
+    p.style.borderColor = p.dataset.filter === mode ? 'var(--accent-primary)' : 'transparent';
   });
+  const titles = {all:'Tüm Talepler',pending:'⏳ Bekleyenler',called:'📞 Görüşülenler',scheduled:'📅 Takvimdekiler',completed:'🏥 Tamamlananlar',lost:'❌ Olumsuzlar'};
+  const el = document.getElementById('apt-list-title');
+  if (el) el.textContent = titles[mode] || 'Tüm Talepler';
   renderAptList();
 }
 
 function renderAptList() {
-  const inboxEvents = calendarEventsData.filter(e => !['scheduled','confirmed','completed'].includes(e.status));
-  let filtered = inboxEvents;
-  if (aptFilterMode !== 'all') filtered = inboxEvents.filter(e => e.status === aptFilterMode);
+  let filtered = calendarEventsData;
+  if (aptFilterMode !== 'all') {
+    if (aptFilterMode === 'scheduled') filtered = calendarEventsData.filter(e => ['scheduled','confirmed'].includes(e.status));
+    else if (aptFilterMode === 'completed') filtered = calendarEventsData.filter(e => ['completed'].includes(e.status));
+    else if (aptFilterMode === 'lost') filtered = calendarEventsData.filter(e => ['lost','cancelled','noshow'].includes(e.status));
+    else filtered = calendarEventsData.filter(e => e.status === aptFilterMode);
+  }
   
   const list = document.getElementById('appointment-list');
   if (filtered.length === 0) { list.innerHTML = '<div class="empty" style="padding:30px"><div class="empty-icon">📥</div>Talep yok</div>'; return; }
   
-  const sC = {pending:'#f59e0b',called:'#3b82f6',lost:'#6b7280',cancelled:'#6b7280'};
-  const sL = {pending:'⏳ Bekliyor',called:'📞 Arandı',lost:'❌ Olumsuz',cancelled:'🚫 İptal'};
+  const sC = {pending:'#f59e0b',called:'#3b82f6',scheduled:'#22c55e',confirmed:'#22c55e',lost:'#6b7280',cancelled:'#6b7280',completed:'#8b5cf6',noshow:'#ef4444'};
+  const sL = {pending:'⏳ Bekliyor',called:'📞 Arandı',scheduled:'📅 Takvimde',confirmed:'✅ Onaylı',lost:'❌ Olumsuz',cancelled:'🚫 İptal',completed:'🏥 Tamamlandı',noshow:'❌ Gelmedi'};
   
   list.innerHTML = filtered.map(e => {
     const nm = e.patient_name || e.phone_number;
     const dt = new Date(e.created_at).toLocaleString('tr-TR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
     const active = selectedAptId === e.id ? 'border-right:3px solid var(--accent-primary);background:rgba(99,102,241,0.08);' : '';
+    const schedDate = e.scheduled_date ? new Date(e.scheduled_date).toLocaleString('tr-TR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
     return `<div onclick="loadAptDetail(${e.id})" style="padding:10px 12px;background:var(--bg-hover);border-radius:10px;margin-bottom:6px;cursor:pointer;border-left:3px solid ${sC[e.status]||'#6b7280'};transition:all 0.15s;${active}" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <span style="font-weight:600;font-size:13px;">${nm}</span>
@@ -2779,7 +2787,7 @@ function renderAptList() {
       <div style="display:flex;gap:8px;margin-top:4px;flex-wrap:wrap;">
         ${e.department?`<span style="font-size:10px;background:var(--accent-primary);color:white;padding:1px 6px;border-radius:4px;">🩺 ${e.department}</span>`:''}
         ${e.city?`<span style="font-size:10px;color:var(--text-muted);">📍 ${e.city}</span>`:''}
-        <span style="font-size:10px;color:var(--text-muted);">🕐 ${dt}</span>
+        ${schedDate?`<span style="font-size:10px;color:#22c55e;">📅 ${schedDate}</span>`:`<span style="font-size:10px;color:var(--text-muted);">🕐 ${dt}</span>`}
       </div>
     </div>`;
   }).join('');
@@ -2791,9 +2799,12 @@ async function loadAppointments() {
   calendarEventsData = data.events || [];
   
   const c = data.counts || {};
+  const completed = calendarEventsData.filter(e => e.status === 'completed').length;
+  document.getElementById('apt-total').textContent = calendarEventsData.length;
   document.getElementById('apt-pending').textContent = c.pending || 0;
   document.getElementById('apt-called').textContent = c.called || 0;
   document.getElementById('apt-scheduled-count').textContent = c.scheduled || 0;
+  document.getElementById('apt-completed').textContent = completed;
   document.getElementById('apt-lost').textContent = c.lost || 0;
   
   const badge = document.getElementById('apt-badge');
@@ -2806,7 +2817,7 @@ async function loadAppointments() {
 
 async function loadAptDetail(eventId) {
   selectedAptId = eventId;
-  renderAptList(); // Highlight seçili
+  renderAptList();
   
   const panel = document.getElementById('apt-detail-content');
   panel.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-muted);">Yükleniyor...</div>';
@@ -2818,8 +2829,27 @@ async function loadAptDetail(eventId) {
   const msgs = data.messages || [];
   const reminders = data.reminders || [];
   const nm = e.patient_name || e.phone_number;
-  const sC = {pending:'#f59e0b',called:'#3b82f6',scheduled:'#22c55e',confirmed:'#22c55e',lost:'#6b7280',cancelled:'#6b7280',completed:'#8b5cf6',noshow:'#ef4444'};
-  const sL = {pending:'⏳ Bekliyor',called:'📞 Arandı',scheduled:'📅 Takvimde',confirmed:'✅ Onaylandı',lost:'❌ Olumsuz',cancelled:'🚫 İptal',completed:'🏥 Tamamlandı',noshow:'❌ Gelmedi'};
+  
+  const allStatuses = [
+    {key:'pending',emoji:'⏳',label:'Bekliyor',color:'#f59e0b'},
+    {key:'called',emoji:'📞',label:'Arandı',color:'#3b82f6'},
+    {key:'scheduled',emoji:'📅',label:'Takvimde',color:'#22c55e'},
+    {key:'confirmed',emoji:'✅',label:'Onaylandı',color:'#10b981'},
+    {key:'completed',emoji:'🏥',label:'Tamamlandı',color:'#8b5cf6'},
+    {key:'noshow',emoji:'❌',label:'Gelmedi',color:'#ef4444'},
+    {key:'lost',emoji:'🚫',label:'Olumsuz',color:'#6b7280'}
+  ];
+  const currentIdx = allStatuses.findIndex(s => s.key === e.status);
+  
+  const pipelineHtml = allStatuses.map((s, i) => {
+    const isActive = s.key === e.status;
+    const isPast = i < currentIdx;
+    const bg = isActive ? s.color+'22' : isPast ? s.color+'0a' : 'transparent';
+    const border = isActive ? s.color : isPast ? s.color+'44' : 'var(--border-color)';
+    const fw = isActive ? '700' : '500';
+    const opacity = isActive ? '1' : isPast ? '0.7' : '0.5';
+    return `<button onclick="updateAppointment(${e.id},'${s.key}')" style="display:flex;align-items:center;gap:4px;padding:5px 10px;border-radius:8px;border:1px solid ${border};background:${bg};color:${isActive?s.color:'var(--text-muted)'};cursor:pointer;font-size:11px;font-weight:${fw};opacity:${opacity};transition:all 0.2s;white-space:nowrap;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='${opacity}'">${s.emoji} ${s.label}</button>`;
+  }).join('');
   
   // Form yanıtları
   let formHtml = '';
@@ -2828,13 +2858,10 @@ async function loadAptDetail(eventId) {
     const skip = ['id','leadgen_id','form_id','ad_id','adset_id','campaign_id','platform','is_organic','created_time','phone_number_id','full_name','phone_number'];
     const entries = Object.entries(raw).filter(([k]) => !skip.includes(k.toLowerCase()));
     if (entries.length > 0) {
-      formHtml = entries.map(([k,v]) => {
-        const cleanV = String(v || '').replace(/_/g, ' ');
-        return `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.04);gap:12px;">
-          <span style="font-size:11px;color:var(--text-muted);min-width:100px;">${k.replace(/_/g,' ')}</span>
-          <span style="font-size:11px;font-weight:500;max-width:220px;text-align:right;word-wrap:break-word;overflow-wrap:break-word;">${cleanV}</span>
-        </div>`;
-      }).join('');
+      formHtml = entries.map(([k,v]) => `<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.04);gap:8px;">
+        <span style="font-size:11px;color:var(--text-muted);min-width:90px;">${k.replace(/_/g,' ')}</span>
+        <span style="font-size:11px;font-weight:500;text-align:right;word-wrap:break-word;">${String(v||'').replace(/_/g,' ')}</span>
+      </div>`).join('');
     }
   } catch(err) {}
   
@@ -2843,92 +2870,117 @@ async function loadAptDetail(eventId) {
     const isOut = m.direction === 'out';
     const t = new Date(m.created_at).toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit'});
     const content = (m.content||'').substring(0,120) + ((m.content||'').length > 120 ? '...' : '');
-    return `<div style="padding:6px 8px;background:${isOut?'rgba(99,102,241,0.08)':'rgba(255,255,255,0.03)'};border-radius:8px;margin-bottom:4px;border-left:2px solid ${isOut?'var(--accent-primary)':'#f59e0b'};">
-      <div style="font-size:10px;color:var(--text-muted);margin-bottom:2px;">${isOut?(m.model_used==='panel'?'👤 Sen':'🤖 Bot'):'📩 Hasta'} · ${t}</div>
+    return `<div style="padding:5px 8px;background:${isOut?'rgba(99,102,241,0.08)':'rgba(255,255,255,0.03)'};border-radius:8px;margin-bottom:3px;border-left:2px solid ${isOut?'var(--accent-primary)':'#f59e0b'};">
+      <div style="font-size:10px;color:var(--text-muted);margin-bottom:1px;">${isOut?(m.model_used==='panel'?'👤 Sen':'🤖 Bot'):'📩 Hasta'} · ${t}</div>
       <div style="font-size:12px;line-height:1.4;">${content}</div>
     </div>`;
   }).join('') : '<div style="color:var(--text-muted);font-size:12px;">Henüz mesaj yok</div>';
   
-  // Hatırlatma badge'leri
+  // Hatırlatma badges
   const reminderBadges = reminders.length > 0 ? reminders.map(r => {
     const d = new Date(r.created_at).toLocaleDateString('tr-TR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
     let rType = 'Hatırlatma';
     const c = r.content || '';
-    if (c.includes('3 gün')) rType = 'D-3 (3 Gün)';
-    else if (c.includes('Yarın')) rType = 'D-1 (Yarın)';
-    else if (c.includes('Bugün')) rType = 'D-0 (Bugün)';
-    
-    return `<span style="font-size:10px;background:rgba(34,197,94,0.15);color:#22c55e;padding:4px 8px;border-radius:6px;cursor:help;border:1px solid rgba(34,197,94,0.2);" title="${c.replace(/"/g, '&quot;')}">✅ ${rType} — ${d}</span>`;
-  }).join(' ') : '<span style="font-size:11px;color:var(--text-muted);font-style:italic;">Henüz otomatik hatırlatma gönderilmedi</span>';
+    if (c.includes('3 gün')) rType = 'D-3';
+    else if (c.includes('Yarın')) rType = 'D-1';
+    else if (c.includes('Bugün')) rType = 'D-0';
+    return `<span style="font-size:10px;background:rgba(34,197,94,0.15);color:#22c55e;padding:3px 6px;border-radius:6px;" title="${c.replace(/"/g, '&quot;')}">✅ ${rType} — ${d}</span>`;
+  }).join(' ') : '<span style="font-size:10px;color:var(--text-muted);font-style:italic;">Henüz hatırlatma yok</span>';
+
+  // Show-up section
+  let showUpHtml = '';
+  if (['scheduled','confirmed'].includes(e.status)) {
+    showUpHtml = `<div style="display:flex;gap:6px;margin-top:8px;">
+      <button onclick="markShowUp(${e.id},true)" style="flex:1;padding:8px;border-radius:8px;border:1px solid #22c55e;background:rgba(34,197,94,0.1);color:#22c55e;cursor:pointer;font-size:12px;font-weight:600;">✅ Hasta Geldi</button>
+      <button onclick="markShowUp(${e.id},false)" style="flex:1;padding:8px;border-radius:8px;border:1px solid #ef4444;background:rgba(239,68,68,0.1);color:#ef4444;cursor:pointer;font-size:12px;font-weight:600;">❌ Gelmedi</button>
+    </div>`;
+  } else if (e.showed_up === true) {
+    showUpHtml = `<div style="padding:8px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);border-radius:8px;text-align:center;font-size:12px;color:#22c55e;font-weight:600;">✅ Hasta geldi${e.treatment_completed?' — Tedavi tamamlandı':''}</div>`;
+  } else if (e.showed_up === false) {
+    showUpHtml = `<div style="padding:8px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:8px;text-align:center;font-size:12px;color:#ef4444;font-weight:600;">❌ Hasta gelmedi${e.no_show_reason?' — '+e.no_show_reason:''}</div>`;
+  }
 
   panel.innerHTML = `
-    <div style="padding:20px;">
-      <!-- Başlık -->
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid rgba(255,255,255,0.06);">
+    <div style="padding:20px;display:flex;flex-direction:column;gap:14px;">
+      <!-- Header -->
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:12px;border-bottom:1px solid rgba(255,255,255,0.06);">
         <div>
           <div style="font-size:18px;font-weight:700;">${nm}</div>
-          <div style="display:flex;gap:8px;margin-top:4px;flex-wrap:wrap;">
+          <div style="display:flex;gap:10px;margin-top:4px;flex-wrap:wrap;align-items:center;">
             <span style="font-size:12px;color:var(--text-muted);">📱 ${e.phone_number}</span>
             ${e.city?`<span style="font-size:12px;color:var(--text-muted);">📍 ${e.city}</span>`:''}
             ${e.email?`<span style="font-size:12px;color:var(--text-muted);">✉️ ${e.email}</span>`:''}
           </div>
         </div>
-        <span style="background:${sC[e.status]}18;color:${sC[e.status]};padding:6px 14px;border-radius:10px;font-size:13px;font-weight:700;">${sL[e.status]||e.status}</span>
+        <div style="display:flex;gap:6px;">
+          <button onclick="window.open('https://wa.me/${e.phone_number.replace(/[^0-9]/g,'')}','_blank')" style="padding:6px 10px;border-radius:8px;border:1px solid #25D366;background:rgba(37,211,102,0.1);color:#25D366;cursor:pointer;font-size:11px;font-weight:600;">💬 WhatsApp</button>
+          <button onclick="document.querySelector('[data-page=conversations]').click();setTimeout(()=>loadChat('${e.phone_number}','whatsapp'),300)" style="padding:6px 10px;border-radius:8px;border:1px solid var(--border-color);background:transparent;color:var(--text-muted);cursor:pointer;font-size:11px;">💬 Sohbet</button>
+        </div>
       </div>
       
       <!-- Info Grid -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
-        <div style="background:rgba(255,255,255,0.03);padding:10px;border-radius:10px;">
-          <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px;">Bölüm</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <div style="background:rgba(255,255,255,0.03);padding:8px 10px;border-radius:8px;">
+          <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;margin-bottom:2px;">Bölüm</div>
           <div style="font-size:13px;font-weight:600;">${e.department||'Genel'}</div>
         </div>
-        <div style="background:rgba(255,255,255,0.03);padding:10px;border-radius:10px;">
-          <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px;">Kampanya</div>
+        <div style="background:rgba(255,255,255,0.03);padding:8px 10px;border-radius:8px;">
+          <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;margin-bottom:2px;">Kaynak</div>
           <div style="font-size:11px;">${e.form_name||'—'}</div>
         </div>
-        <div style="background:rgba(34,197,94,0.08);padding:10px;border-radius:10px;border:1px solid rgba(34,197,94,0.2);grid-column:1/-1;">
-          <div style="font-size:10px;color:#22c55e;text-transform:uppercase;margin-bottom:4px;">Randevu Planlama</div>
-          <div style="display:flex;align-items:center;gap:8px;">
-            <input type="datetime-local" id="apt-date-input" value="${e.scheduled_date ? new Date(new Date(e.scheduled_date).getTime() + 3*3600000).toISOString().slice(0,16) : ''}" style="background:var(--bg-main);border:1px solid var(--border-color);color:white;padding:6px 10px;border-radius:8px;font-size:13px;flex:1;outline:none;">
-            <button onclick="saveAptDate(${e.id})" class="btn btn-sm" style="background:#22c55e;color:white;border:none;padding:6px 14px;border-radius:8px;font-size:12px;font-weight:600;">Kaydet</button>
-          </div>
+      </div>
+      
+      <!-- Pipeline Status -->
+      <div>
+        <div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;margin-bottom:6px;">🔄 Süreç Durumu</div>
+        <div style="display:flex;gap:4px;flex-wrap:wrap;">${pipelineHtml}</div>
+      </div>
+      
+      <!-- Schedule Section -->
+      <div style="background:rgba(34,197,94,0.06);padding:10px 12px;border-radius:10px;border:1px solid rgba(34,197,94,0.15);">
+        <div style="font-size:11px;font-weight:600;color:#22c55e;text-transform:uppercase;margin-bottom:6px;">📅 Randevu Planlama</div>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+          <input type="datetime-local" id="apt-date-input" value="${e.scheduled_date ? new Date(new Date(e.scheduled_date).getTime() + 3*3600000).toISOString().slice(0,16) : ''}" style="background:var(--bg-main);border:1px solid var(--border-color);color:white;padding:6px 8px;border-radius:8px;font-size:12px;flex:1;min-width:160px;outline:none;">
+          <input type="text" id="apt-doctor-input" placeholder="Doktor adı" value="${e.assigned_doctor||''}" style="background:var(--bg-main);border:1px solid var(--border-color);color:white;padding:6px 8px;border-radius:8px;font-size:12px;flex:1;min-width:120px;outline:none;">
+          <button onclick="saveAptDate(${e.id})" style="background:#22c55e;color:white;border:none;padding:6px 14px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">💾 Kaydet</button>
+        </div>
+        ${showUpHtml}
+      </div>
+      
+      <!-- Reminders -->
+      <div>
+        <div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px;">📩 Hatırlatmalar</div>
+        <div style="display:flex;gap:4px;flex-wrap:wrap;">${reminderBadges} ${e.confirmed_by_patient?'<span style="font-size:10px;background:rgba(34,197,94,0.15);color:#22c55e;padding:3px 6px;border-radius:4px;font-weight:700;">✅ Hasta Teyit Etti</span>':''}</div>
+      </div>
+      
+      <!-- Coordinator Note -->
+      <div>
+        <div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px;">📝 Koordinatör Notu</div>
+        <div style="display:flex;gap:6px;">
+          <textarea id="apt-coord-note" placeholder="Not ekle..." style="flex:1;min-height:40px;background:var(--bg-hover);border:1px solid var(--border-color);border-radius:8px;padding:6px 8px;color:white;font-size:12px;resize:vertical;">${e.coordinator_notes||''}</textarea>
+          <button onclick="saveCoordNote(${e.id})" style="align-self:flex-end;padding:6px 10px;background:var(--accent-primary);color:white;border:none;border-radius:6px;font-size:11px;cursor:pointer;">💾</button>
         </div>
       </div>
       
-      <!-- Hatırlatma Durumu -->
-      <div style="margin-bottom:16px;">
-        <div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;margin-bottom:6px;">📩 Hatırlatma Durumu</div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap;">${reminderBadges} ${e.confirmed_by_patient?'<span style="font-size:10px;background:rgba(34,197,94,0.15);color:#22c55e;padding:2px 6px;border-radius:4px;font-weight:700;">✅ Hasta Teyit Etti</span>':''}</div>
-      </div>
-
-      ${formHtml?`<!-- Form Yanıtları --><div style="margin-bottom:16px;"><div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;margin-bottom:6px;">📝 Form Yanıtları</div><div style="background:rgba(255,255,255,0.02);padding:8px 10px;border-radius:8px;max-height:120px;overflow-y:auto;">${formHtml}</div></div>`:''}
+      ${formHtml?`<!-- Form Data (Collapsible) -->
+      <details style="background:rgba(255,255,255,0.02);border-radius:8px;border:1px solid rgba(255,255,255,0.04);">
+        <summary style="padding:8px 10px;cursor:pointer;font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;">📋 Form Yanıtları</summary>
+        <div style="padding:4px 10px 8px;">${formHtml}</div>
+      </details>`:''}
       
-      <!-- Son Mesajlar -->
-      <div style="margin-bottom:16px;">
-        <div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;margin-bottom:6px;">💬 Son Mesajlar</div>
-        <div style="max-height:180px;overflow-y:auto;">${msgHtml}</div>
-      </div>
+      <!-- Messages (Collapsible) -->
+      <details open style="background:rgba(255,255,255,0.02);border-radius:8px;border:1px solid rgba(255,255,255,0.04);">
+        <summary style="padding:8px 10px;cursor:pointer;font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;">💬 Son Mesajlar (${msgs.length})</summary>
+        <div style="padding:4px 10px 8px;max-height:200px;overflow-y:auto;">${msgHtml}</div>
+      </details>
       
-      <!-- Koordinatör Notu -->
-      <div style="margin-bottom:16px;">
-        <div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;margin-bottom:6px;">📝 Koordinatör Notu</div>
-        <textarea id="apt-coord-note" placeholder="Ön görüşme notları..." style="width:100%;min-height:60px;background:var(--bg-hover);border:1px solid var(--border-color);border-radius:8px;padding:8px;color:white;font-size:12px;resize:vertical;">${e.coordinator_notes||''}</textarea>
-        <button onclick="saveCoordNote(${e.id})" class="btn btn-sm" style="margin-top:4px;font-size:11px;padding:4px 12px;background:var(--accent-primary);color:white;border:none;border-radius:6px;">💾 Notu Kaydet</button>
-      </div>
-      
-      <!-- Aksiyonlar -->
-      <div style="display:flex;gap:8px;flex-wrap:wrap;padding-top:12px;border-top:1px solid rgba(255,255,255,0.06);">
-        <select onchange="updateAppointment(${e.id},this.value)" style="background:var(--bg-card);color:var(--text-main);border:1px solid var(--border-color);border-radius:8px;padding:6px 10px;font-size:12px;">
-          <option value="">Durum Güncelle</option>
-          <option value="called">📞 Ön Görüşme</option>
-          <option value="lost">❌ Olumsuz</option>
-        </select>
-        <button class="btn btn-sm" onclick="openScheduleModal(${e.id})" style="background:#22c55e;color:white;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600;">🗓️ Takvime Ekle</button>
-        ${e.scheduled_date?`<button class="btn btn-sm" onclick="downloadIcal(${e.id})" style="background:rgba(99,102,241,0.15);color:var(--accent-primary);border:1px solid rgba(99,102,241,0.3);border-radius:8px;padding:6px 12px;font-size:12px;">📅 iCal İndir</button>`:''}
-        <button class="btn btn-sm" onclick="document.querySelector('[data-page=conversations]').click();setTimeout(()=>loadChat('${e.phone_number}','whatsapp'),300)" style="background:transparent;border:1px solid var(--border-color);border-radius:8px;padding:6px 12px;font-size:12px;color:var(--text-muted);">💬 Sohbete Git</button>
+      <!-- Quick Actions -->
+      <div style="display:flex;gap:6px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.06);">
+        ${e.scheduled_date?`<button onclick="downloadIcal(${e.id})" style="padding:6px 12px;border-radius:8px;border:1px solid rgba(99,102,241,0.3);background:rgba(99,102,241,0.1);color:var(--accent-primary);cursor:pointer;font-size:11px;">📅 iCal İndir</button>`:''}
       </div>
     </div>`;
 }
+  
 
 async function saveCoordNote(id) {
   const note = document.getElementById('apt-coord-note').value;
@@ -2938,39 +2990,18 @@ async function saveCoordNote(id) {
 
 async function saveAptDate(id) {
   const dt = document.getElementById('apt-date-input').value;
-  if (!dt) return showNotification('Lütfen bir tarih seçin', 'warning');
+  const doctor = document.getElementById('apt-doctor-input')?.value || '';
+  if (!dt) return toast('Lütfen bir tarih seçin', 'error');
   
   const d = new Date(dt);
-  // TR saatine göre seçilen datetime'ı kaydet (ISO formatı UTC olarak gider, backend +3 telafisini hesaba katmalıdır veya düz kaydedilir)
-  await api('update-appointment', 'POST', { id, scheduled_date: d.toISOString(), status: 'scheduled' });
-  showNotification('Randevu tarihi kaydedildi ✅', 'success');
-  
-  if (typeof window._currentLeadRowData_rowIndex !== 'undefined') {
-    openLeadDetail(window._currentLeadRowData_rowIndex);
-  }
+  await api('update-appointment', 'POST', { id, scheduled_date: d.toISOString(), status: 'scheduled', assigned_doctor: doctor || null });
+  toast('📅 Randevu kaydedildi ✅');
+  loadAppointments();
+  loadAptDetail(id);
 }
 
 function downloadIcal(id) {
   window.open(`/api/panel?action=appointment-ical&id=${id}`, '_blank');
-}
-
-function openScheduleModal(id) {
-  document.getElementById('sch-apt-id').value = id;
-  document.getElementById('sch-date').value = '';
-  document.getElementById('sch-doctor').value = '';
-  document.getElementById('modal-schedule').style.display = 'flex';
-}
-
-async function submitSchedule() {
-  const id = document.getElementById('sch-apt-id').value;
-  const date = document.getElementById('sch-date').value;
-  const doctor = document.getElementById('sch-doctor').value;
-  if (!date) return toast('Lütfen tarih seçin!', 'error');
-  await api('update-appointment','POST',{id, status:'scheduled', scheduled_date:date, assigned_doctor:doctor});
-  document.getElementById('modal-schedule').style.display = 'none';
-  toast('Takvime eklendi ✅');
-  loadAppointments();
-  switchAptTab('calendar');
 }
 
 function filterCalendar() {
