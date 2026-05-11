@@ -94,11 +94,7 @@ function navigateMobileAptView(view, isPopState = false) {
 // 📱 Native Mobile Stack Navigation Logic (Forms)
 window.formView = 'list';
 function navigateMobileFormView(view, isPopState = false) {
-  if (window.innerWidth > 768) {
-    // Desktop behavior fallback
-    if (view === 'list') goBackToForms();
-    return;
-  }
+  if (window.innerWidth > 768) return; // Strictly mobile only
   
   document.body.setAttribute('data-form-view', view);
   window.formView = view;
@@ -114,6 +110,31 @@ function navigateMobileFormView(view, isPopState = false) {
     else if (view === 'detail') history.pushState({ formView: 'detail' }, '', '#form-detail');
   }
 }
+
+// 🖥️ Resize guard: clean up mobile form state when switching to desktop
+window.addEventListener('resize', () => {
+  if (window.innerWidth > 768) {
+    // Remove mobile form state from body
+    document.body.removeAttribute('data-form-view');
+    
+    // Reset form pages to desktop normal state
+    const formList = document.getElementById('page-form-management');
+    const formDetail = document.getElementById('page-form-detail');
+    if (formList && formDetail) {
+      // If form-detail was made active by mobile nav, hide it
+      if (formDetail.classList.contains('active') && formList.classList.contains('active')) {
+        formDetail.classList.remove('active');
+        formDetail.style.display = 'none';
+      }
+    }
+    
+    // Clean up URL hash if it's a mobile navigation hash
+    const mobileHashes = ['#form-list', '#form-detail', '#chat-list', '#chat-view', '#chat-crm', '#apt-list', '#apt-detail'];
+    if (mobileHashes.includes(window.location.hash)) {
+      history.replaceState(null, '', window.location.pathname);
+    }
+  }
+});
 
 function initResizeHandle(handleId, panelSelector, side) {
   const handle = document.getElementById(handleId);
