@@ -10,7 +10,7 @@ export default async function handler(req, res) {
   const { sheetName, leads, templateName = 'hello_world' } = req.body;
   if (!leads || !Array.isArray(leads)) return res.status(400).json({ error: 'Invalid leads array' });
 
-  const APPS_SCRIPT_URL = process.env.GOOGLE_SHEET_UPDATE_URL || process.env.GOOGLE_SHEET_URL || 'https://script.google.com/macros/s/AKfycbw_iaJ0zqgOFYAGlkCnGnKQOzYQtPJWtbLMIEMIPuVbVkXOnDyq_1jMmII554s85sxu/exec';
+  const APPS_SCRIPT_URL = process.env.GOOGLE_SHEET_UPDATE_URL || process.env.GOOGLE_SHEET_URL;
   const results = { success: 0, failed: 0, details: [] };
 
   // Helper for formatting phone number (Meta WhatsApp requires numbers without + or leading 00, just country code and number)

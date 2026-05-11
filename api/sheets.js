@@ -7,8 +7,9 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store, max-age=0');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  const SHEETS_API_KEY = process.env.GOOGLE_SHEETS_API_KEY || 'AIzaSyAxNUHQCrXzmATX4YuMgcFP3u4EW_jsJYc';
-  const SPREADSHEET_ID = process.env.GOOGLE_SPREADSHEET_ID || '1oSKJ-iYiZPltYUQ73_O-FaFdelhwAwtf09wVKKVs1GQ';
+  const SHEETS_API_KEY = process.env.GOOGLE_SHEETS_API_KEY;
+  const SPREADSHEET_ID = process.env.GOOGLE_SPREADSHEET_ID;
+  if (!SHEETS_API_KEY || !SPREADSHEET_ID) return res.status(500).json({ error: 'Sheets config missing' });
   const BASE_URL = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}`;
 
   try {
@@ -33,7 +34,7 @@ export default async function handler(req, res) {
     if (action === 'update' && req.method === 'POST') {
       const { sheetName, row, col, value } = req.body;
       // Google Apps Script üzerinden güncelle
-      const APPS_SCRIPT_URL = process.env.GOOGLE_SHEET_UPDATE_URL || process.env.GOOGLE_SHEET_URL || 'https://script.google.com/macros/s/AKfycbw_iaJ0zqgOFYAGlkCnGnKQOzYQtPJWtbLMIEMIPuVbVkXOnDyq_1jMmII554s85sxu/exec';
+      const APPS_SCRIPT_URL = process.env.GOOGLE_SHEET_UPDATE_URL || process.env.GOOGLE_SHEET_URL;
       
       try {
         await axios.post(APPS_SCRIPT_URL, {

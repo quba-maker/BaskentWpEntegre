@@ -1,7 +1,7 @@
 import { neon } from '@neondatabase/serverless';
 
 export default async function handler(req, res) {
-  if (req.query.key !== 'baskent2024setup') {
+  if (req.query.key !== process.env.CRON_SECRET && req.headers.authorization !== `Bearer ${process.env.CRON_SECRET}`) {
     return res.status(403).json({ error: 'Yetkisiz erişim' });
   }
 
