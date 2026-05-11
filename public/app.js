@@ -1245,8 +1245,9 @@ async function loadChat(phone, channel) {
   
   document.getElementById('chat-input-area').style.display = 'flex';
   
-  // CRM setup
-  document.getElementById('crm-panel').style.display = 'flex';
+  // CRM setup — hide on mobile
+  const isMobile = window.innerWidth <= 768;
+  document.getElementById('crm-panel').style.display = isMobile ? 'none' : 'flex';
   document.getElementById('crm-name').value = pData.patient_name || '';
   document.getElementById('crm-notes').value = pData.notes || '';
   

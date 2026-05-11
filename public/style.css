@@ -282,7 +282,15 @@ textarea:focus, input:focus, select:focus { outline: none; border-color: var(--a
 .apt-calendar-sidebar { flex: 0 0 280px; }
 
 @media (max-width: 768px) {
-  /* ─── Global Layout ─── */
+  /* ════════════════════════════════════════════
+     🌐 GLOBAL — Overflow Kill + Base Layout
+     ════════════════════════════════════════════ */
+  *, *::before, *::after { box-sizing: border-box !important; }
+  html, body, .app { overflow-x: hidden !important; max-width: 100vw !important; }
+  body { font-size: 14px; -webkit-text-size-adjust: 100%; }
+  h1 { font-size: 20px !important; margin-bottom: 8px !important; }
+  
+  /* Sidebar — off-canvas drawer */
   .sidebar { 
     position: fixed; top: 0; left: -280px; width: 280px; height: 100vh; 
     z-index: 999; transition: left 0.3s cubic-bezier(0.16, 1, 0.3, 1); 
@@ -290,6 +298,8 @@ textarea:focus, input:focus, select:focus { outline: none; border-color: var(--a
     backdrop-filter: blur(10px) !important; -webkit-backdrop-filter: blur(10px) !important;
   }
   .sidebar.open { left: 0; }
+  
+  /* Hamburger */
   .mobile-menu-btn { 
     display: flex; align-items: center; justify-content: center; 
     z-index: 1000; position: fixed; top: 12px; left: 12px; 
@@ -298,76 +308,165 @@ textarea:focus, input:focus, select:focus { outline: none; border-color: var(--a
     color: white; padding: 10px; cursor: pointer;
     width: 44px; height: 44px;
   }
+  
+  /* Content area */
   .content { 
-    padding: 12px !important; padding-top: 64px !important; 
+    padding: 12px !important; padding-top: 60px !important; 
     padding-bottom: env(safe-area-inset-bottom, 16px) !important; 
     width: 100vw !important; max-width: 100vw !important;
     overflow-x: hidden !important;
   }
-  h1 { font-size: 20px !important; }
   
-  /* ─── Performance ─── */
-  .card, .login-card { backdrop-filter: blur(10px) !important; -webkit-backdrop-filter: blur(10px) !important; }
-  .app::before, .app::after { filter: blur(30px) !important; opacity: 0.4; }
+  /* Performance — reduce blur */
+  .card, .login-card, .sidebar { backdrop-filter: blur(10px) !important; -webkit-backdrop-filter: blur(10px) !important; }
+  .app::before, .app::after { filter: blur(30px) !important; opacity: 0.35; }
   
-  /* ─── Touch & Accessibility ─── */
-  button, .btn, select, .sheet-tab, .apt-filter-btn, .apt-stat-pill, .nav-btn, .filter-tab { 
+  /* Touch targets 44px */
+  button, .btn, select, .sheet-tab, .apt-filter-btn, .nav-btn, .filter-tab { 
     min-height: 44px !important; 
   }
-  input, textarea, select { font-size: 16px !important; } /* iOS zoom prevention */
-  body { font-size: 14px; -webkit-text-size-adjust: 100%; }
-
-  /* ═══════════════════════════════════════════
-     💬 HASTA TAKİBİ (Chat) — Mobil Stack
-     ═══════════════════════════════════════════ */
+  /* iOS zoom prevention */
+  input, textarea, select { font-size: 16px !important; }
+  
+  /* ════════════════════════════════════════════
+     💬 HASTA TAKİBİ (Chat Page) 
+     ════════════════════════════════════════════ */
+  
+  /* Stack inbox vertically */
   .inbox-layout { 
     flex-direction: column !important; 
     height: auto !important; 
+    min-height: unset !important;
     gap: 0 !important;
   }
+  
+  /* Contact list — top half */
   .inbox-sidebar { 
     width: 100% !important; max-width: 100% !important; 
-    max-height: 45vh !important; 
+    max-height: 40vh !important; min-width: unset !important;
     border-right: none !important;
     border-bottom: 1px solid rgba(255,255,255,0.08) !important; 
     border-radius: 16px 16px 0 0 !important;
   }
-  .inbox-details { 
+  
+  /* Chat area — full width */
+  .inbox-main { 
     width: 100% !important; max-width: 100% !important;
-    border-radius: 0 0 16px 16px !important;
+    min-width: unset !important;
+    border-radius: 0 !important;
+    min-height: 50vh !important;
   }
+  
+  /* ❌ CRM PANEL — HIDE ON MOBILE (ID selector beats JS inline) */
+  #crm-panel { display: none !important; }
+  .inbox-details { 
+    width: 100% !important; max-width: 100% !important; 
+    min-width: unset !important;
+  }
+  
+  /* Resize handles — hide */
   .resize-handle { display: none !important; }
-  .chat-area { min-height: 50vh !important; }
-  .crm-panel { display: none !important; }
-  .chat-input-area { 
-    position: sticky !important; bottom: 0; 
-    background: var(--bg-card) !important; 
-    padding-bottom: env(safe-area-inset-bottom, 8px) !important; 
+  
+  /* Chat header — stack on mobile */
+  .chat-window-header {
+    flex-direction: column !important;
+    gap: 8px !important;
+    padding: 10px 12px !important;
+    align-items: stretch !important;
   }
-  /* Pipeline pills horizontal scroll */
+  .chat-user-info {
+    gap: 6px !important;
+  }
+  .chat-user-name { font-size: 14px !important; }
+  .handover-control {
+    width: 100% !important;
+    justify-content: center !important;
+  }
+  .handover-btn { 
+    flex: 1 !important; 
+    text-align: center !important;
+    font-size: 11px !important;
+    padding: 8px 6px !important;
+    min-height: 36px !important;
+  }
+  
+  /* Chat input — compact */
+  .chat-composer {
+    padding: 8px 10px !important;
+    gap: 6px !important;
+    padding-bottom: env(safe-area-inset-bottom, 8px) !important;
+    position: sticky !important;
+    bottom: 0 !important;
+    background: rgba(28, 28, 32, 0.95) !important;
+    backdrop-filter: blur(20px) !important;
+  }
+  .chat-composer .btn-attach {
+    min-height: 36px !important;
+    min-width: 36px !important;
+    padding: 0 8px !important;
+    font-size: 12px !important;
+  }
+  .chat-composer input { 
+    padding: 8px 14px !important; 
+    font-size: 14px !important;
+  }
+  .chat-composer .btn-primary {
+    padding: 8px 14px !important;
+    font-size: 13px !important;
+    min-height: 36px !important;
+    white-space: nowrap !important;
+  }
+  
+  /* Messages — limit width */
+  .message-bubble { max-width: 85% !important; font-size: 13px !important; }
+  
+  /* Pipeline pills — horizontal scroll */
   .pipeline-pills {
     overflow-x: auto !important; -webkit-overflow-scrolling: touch;
-    flex-wrap: nowrap !important; gap: 6px !important;
-    padding-bottom: 4px !important;
+    flex-wrap: nowrap !important; gap: 4px !important;
+    padding: 6px 10px !important;
+    margin: 0 !important;
   }
   .pipeline-pills > * { flex-shrink: 0 !important; white-space: nowrap !important; }
-  /* Filter tabs scroll */
+  .pipeline-pills::-webkit-scrollbar { display: none; }
+  
+  /* Filter tabs — horizontal scroll */
   .inbox-filter-tabs {
     overflow-x: auto !important; -webkit-overflow-scrolling: touch;
     flex-wrap: nowrap !important;
+    padding: 6px 8px !important;
   }
-
-  /* ═══════════════════════════════════════════
-     📅 RANDEVU MERKEZİ — Mobil Stack  
-     ═══════════════════════════════════════════ */
-  /* Page header — stack vertically */
-  #page-appointments > div:first-child {
-    flex-direction: column !important;
-    gap: 8px !important;
-    align-items: stretch !important;
+  .inbox-filter-tabs .filter-tab { 
+    flex-shrink: 0 !important; white-space: nowrap !important; 
+    font-size: 12px !important;
+    padding: 6px 10px !important;
   }
   
-  /* Stats pills — 3-column grid */
+  /* Contact card badges — truncate overflow */
+  .contact-badges { 
+    max-width: 100% !important;
+    overflow: hidden !important;
+  }
+  .contact-badges .tag-badge-display,
+  .contact-badges .status-badge,
+  .contact-badges > span {
+    max-width: 120px !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+  }
+  .contact-item { padding: 8px 10px !important; }
+  
+  /* ════════════════════════════════════════════
+     📅 RANDEVU MERKEZİ
+     ════════════════════════════════════════════ */
+  /* Header — stack */
+  #page-appointments > div:first-child {
+    flex-direction: column !important;
+    gap: 8px !important; align-items: stretch !important;
+  }
+  
+  /* Stats — 3-column grid */
   .apt-stats-row {
     display: grid !important;
     grid-template-columns: repeat(3, 1fr) !important;
@@ -375,81 +474,86 @@ textarea:focus, input:focus, select:focus { outline: none; border-color: var(--a
   }
   .apt-stat-pill { 
     min-width: unset !important; flex: unset !important; 
-    padding: 8px 6px !important;
+    padding: 8px 4px !important; min-height: unset !important;
   }
-  .apt-stat-pill > div:first-child { font-size: 18px !important; }
+  .apt-stat-pill > div:first-child { font-size: 16px !important; }
   .apt-stat-pill > div:last-child { font-size: 9px !important; }
   
-  /* Inbox layout — stack panels vertically */
-  .apt-inbox-layout,
-  #apt-view-inbox { 
+  /* Inbox — stack */
+  .apt-inbox-layout, #apt-view-inbox { 
     flex-direction: column !important; 
-    height: auto !important; 
-    min-height: unset !important; 
+    height: auto !important; min-height: unset !important; 
     gap: 0 !important;
   }
-  .apt-list-panel,
-  #apt-view-inbox > .card:first-child { 
+  .apt-list-panel, #apt-view-inbox > .card:first-child { 
     flex: unset !important; width: 100% !important; 
-    max-height: 40vh !important;
+    max-height: 35vh !important;
     border-radius: 16px 16px 0 0 !important; 
   }
-  .apt-detail-panel,
-  #apt-view-inbox > .card:last-child { 
+  .apt-detail-panel, #apt-view-inbox > .card:last-child { 
     border-radius: 0 0 16px 16px !important; 
     border-left: none !important;
     border-top: 1px solid rgba(255,255,255,0.06) !important;
-    min-height: 50vh !important; 
+    min-height: 45vh !important; 
   }
   
-  /* Calendar view — stack filter sidebar */
+  /* Calendar — stack */
   .training-layout { flex-direction: column !important; }
-  .apt-calendar-sidebar,
-  .training-layout > .card { 
+  .apt-calendar-sidebar, .training-layout > .card { 
     flex: unset !important; width: 100% !important; 
   }
   
-  /* Sheet tabs — horizontal scroll */
+  /* Sheet tabs */
   .sheet-tabs { 
     overflow-x: auto !important; -webkit-overflow-scrolling: touch; 
-    flex-wrap: nowrap !important; 
-    width: 100% !important;
+    flex-wrap: nowrap !important; width: 100% !important;
   }
   .sheet-tabs .sheet-tab { white-space: nowrap !important; flex-shrink: 0 !important; }
 
-  /* ═══════════════════════════════════════════
-     📊 DASHBOARD / STATS — Mobil Grid
-     ═══════════════════════════════════════════ */
+  /* ════════════════════════════════════════════
+     📊 DASHBOARD
+     ════════════════════════════════════════════ */
   .stats-grid { 
     grid-template-columns: repeat(2, 1fr) !important; 
     gap: 8px !important; 
   }
   .stat-card { padding: 12px !important; }
 
-  /* ═══════════════════════════════════════════
-     📋 FORM YÖNETİMİ — Mobil Stack
-     ═══════════════════════════════════════════ */
+  /* ════════════════════════════════════════════
+     📋 FORM YÖNETİMİ
+     ════════════════════════════════════════════ */
   #page-forms .inbox-layout,
   #page-forms > div[style*="display:flex"] {
-    flex-direction: column !important;
-    height: auto !important;
+    flex-direction: column !important; height: auto !important;
   }
   #page-forms .inbox-sidebar,
   #page-forms > div > div:first-child {
     width: 100% !important; max-width: 100% !important;
-    max-height: 40vh !important;
+    max-height: 40vh !important; min-width: unset !important;
     border-right: none !important;
   }
 
-  /* ═══════════════════════════════════════════
-     ⚙️ AYARLAR / ŞABLONLAR — Responsive
-     ═══════════════════════════════════════════ */
-  #page-settings select { width: 100% !important; }
-  #page-templates .card { padding: 12px !important; }
+  /* ════════════════════════════════════════════
+     📋 FORM DETAY KART — lead-card responsive
+     ════════════════════════════════════════════ */
+  .lead-card, .list-row {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 8px !important;
+    padding: 10px 12px !important;
+  }
+  .lead-card > div { 
+    flex-direction: column !important; 
+    gap: 6px !important; 
+  }
+  .lead-card > div > div {
+    width: 100% !important; max-width: 100% !important;
+    min-width: unset !important;
+  }
 
-  /* ═══════════════════════════════════════════
-     📊 GOOGLE SHEETS — Responsive Table
-     ═══════════════════════════════════════════ */
+  /* ════════════════════════════════════════════
+     📊 GOOGLE SHEETS TABLE
+     ════════════════════════════════════════════ */
   .sheet-table-wrapper { 
     overflow-x: auto !important; 
     -webkit-overflow-scrolling: touch !important; 
@@ -457,20 +561,30 @@ textarea:focus, input:focus, select:focus { outline: none; border-color: var(--a
   }
   .sheet-table-wrapper table { min-width: 600px !important; }
 
-  /* ═══════════════════════════════════════════
-     🔔 MODAL & OVERLAY — Full Screen Mobile
-     ═══════════════════════════════════════════ */
-  .zorbay-alert-container { 
-    left: 12px !important; right: 12px !important; 
-    bottom: env(safe-area-inset-bottom, 12px) !important; 
-  }
+  /* ════════════════════════════════════════════
+     ⚙️ AYARLAR
+     ════════════════════════════════════════════ */
+  #page-settings select { width: 100% !important; }
+  #page-templates .card { padding: 12px !important; }
 
-  /* ═══════════════════════════════════════════
-     🎨 LOGIN — Mobil Tam Ekran
-     ═══════════════════════════════════════════ */
+  /* ════════════════════════════════════════════
+     🎨 LOGIN
+     ════════════════════════════════════════════ */
   .login-card { 
     width: calc(100vw - 32px) !important; max-width: 380px !important;
     padding: 32px 24px !important; 
+  }
+
+  /* ════════════════════════════════════════════
+     🔔 TOAST / ALERT
+     ════════════════════════════════════════════ */
+  .toast { 
+    left: 12px !important; right: 12px !important; 
+    max-width: calc(100vw - 24px) !important;
+  }
+  .zorbay-alert-container { 
+    left: 12px !important; right: 12px !important; 
+    bottom: env(safe-area-inset-bottom, 12px) !important; 
   }
 }
 
