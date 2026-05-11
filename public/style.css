@@ -236,6 +236,16 @@ textarea:focus, input:focus, select:focus { outline: none; border-color: var(--a
 .toast.critical { background:rgba(255,69,58,0.95); color:white; border:1px solid rgba(255,255,255,0.2); }
 
 /* Scrollbar Customization */
+/* Truncate Inbox Messages */
+.contact-item .last-msg {
+  display: -webkit-box !important;
+  -webkit-line-clamp: 1 !important;
+  -webkit-box-orient: vertical !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  max-width: 100% !important;
+}
+
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(84, 84, 88, 0.65); border-radius: 10px; }
@@ -280,6 +290,20 @@ textarea:focus, input:focus, select:focus { outline: none; border-color: var(--a
    📱 MOBILE RESPONSIVE — Apple-Quality Native App Feel
    ════════════════════════════════════════════════════════════════════ */
 
+/* Chat Header Mobile Fix */
+@media (max-width: 768px) {
+  .chat-window-header {
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+    padding: 10px 12px !important;
+    min-height: auto !important;
+  }
+  #chat-actions.handover-control {
+    width: 100% !important;
+  }
+  .handover-btn { flex: 1 !important; justify-content: center !important; }
+}
+
 /* Desktop layout defaults */
 .apt-list-panel { flex: 0 0 360px; }
 .apt-calendar-sidebar { flex: 0 0 280px; }
@@ -299,7 +323,8 @@ textarea:focus, input:focus, select:focus { outline: none; border-color: var(--a
     position: fixed; top: 0; left: -280px; width: 280px; height: 100vh; 
     z-index: 999; transition: left 0.3s cubic-bezier(0.16, 1, 0.3, 1); 
     box-shadow: 4px 0 24px rgba(0,0,0,0.5); 
-    backdrop-filter: blur(10px) !important; -webkit-backdrop-filter: blur(10px) !important;
+    background: rgba(15, 15, 15, 0.8) !important;
+    backdrop-filter: blur(24px) !important; -webkit-backdrop-filter: blur(24px) !important;
   }
   .sidebar.open { left: 0; }
   
@@ -317,8 +342,24 @@ textarea:focus, input:focus, select:focus { outline: none; border-color: var(--a
   .content { 
     padding: 12px !important; padding-top: 60px !important; 
     padding-bottom: env(safe-area-inset-bottom, 16px) !important; 
-    width: 100vw !important; max-width: 100vw !important;
+    width: 100% !important; max-width: 100% !important;
     overflow-x: hidden !important;
+  }
+  
+  /* Native App Back Button */
+  .btn-back {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    background: transparent !important;
+    border: none !important;
+    color: #0A84FF !important; /* iOS Blue */
+    font-size: 32px !important;
+    font-weight: 300 !important;
+    padding: 0 12px 0 0 !important;
+    margin-left: -6px !important;
+    line-height: 1 !important;
+    cursor: pointer;
   }
   
   /* Performance — reduce blur */
@@ -1009,27 +1050,32 @@ details[open] summary {
 @media (max-width: 768px) {
   
   /* 1. Dashboard (Gösterge Paneli) */
-  /* Tarih seçiciler ve filtreler */
-  #page-dashboard .card > div[style*="display:flex"]:first-child,
-  #page-dashboard .card > div[style*="display: flex"]:first-child {
+  #page-command-center > div:first-child {
     flex-direction: column !important;
-    gap: 12px !important;
     align-items: stretch !important;
+    gap: 12px !important;
   }
-  #cc-from, #cc-to {
+  #page-command-center > div:first-child > div:last-child {
+    flex-direction: column !important;
     width: 100% !important;
   }
-  /* Tab butonları yatayda kaydırılabilir yap */
-  #page-dashboard .card > div > button,
-  #page-dashboard .card > div > div > button {
-    flex-shrink: 0 !important;
-    white-space: nowrap !important;
+  #cc-period-pills { width: 100% !important; justify-content: space-between !important; }
+  #cc-period-pills button { flex: 1 !important; text-align: center !important; }
+  #cc-from, #cc-to { width: 100% !important; }
+  
+  /* Grids */
+  #cc-kpi-bar {
+    grid-template-columns: repeat(2, 1fr) !important;
   }
-  #page-dashboard .card > div[style*="border-bottom"] {
+  #page-command-center > div:nth-child(3),
+  #page-command-center > div:nth-child(4) {
+    grid-template-columns: 1fr !important;
+  }
+  
+  /* Charts */
+  .chart-container, #cc-funnel, #cc-countries, #cc-departments, #cc-campaigns, #cc-models {
     overflow-x: auto !important;
     -webkit-overflow-scrolling: touch !important;
-    flex-wrap: nowrap !important;
-    padding-bottom: 8px !important;
   }
 
   /* 2. Chat / Hasta Takibi */
@@ -1094,6 +1140,11 @@ details[open] summary {
   #page-training .card > div:last-child button {
     width: 100% !important;
   }
+  #page-training textarea, #page-training input {
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+  }
+  .prompt-editor-card { padding: 12px !important; }
 
   /* 6. Ayarlar */
   /* Etiket oluşturma input ve renk seçici yan yana duruyordu */
@@ -1116,9 +1167,19 @@ details[open] summary {
   /* GENEL KURTARICI */
   /* Ekrandan taşan herhangi bir div için */
   .page {
-    max-width: 100vw !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
     overflow-x: hidden !important;
+    padding-bottom: max(env(safe-area-inset-bottom), 20px) !important;
   }
+  body, html {
+    overflow-x: hidden !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+  }
+  * { box-sizing: border-box !important; }
 
   /* ════════════════════════════════════════════
      📅 RANDEVU MERKEZİ (Stack Navigation)
@@ -1137,6 +1198,7 @@ details[open] summary {
     border-radius: 0 !important; border: none !important;
     transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1) !important;
     background: #050505 !important;
+    box-shadow: -4px 0 24px rgba(0,0,0,0.5) !important;
     z-index: 1;
   }
   /* States for Appointments */
@@ -1166,6 +1228,7 @@ details[open] summary {
     overflow-y: auto !important;
     transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1) !important;
     background: #000 !important;
+    box-shadow: -4px 0 24px rgba(0,0,0,0.5) !important;
     z-index: 1;
   }
   /* States for Forms */
