@@ -1591,6 +1591,7 @@ function openLeadDetail(rowIndex) {
   
   // Form satır verisini sakla (triggerSingleOutbound'da kullanılır)
   window._currentLeadRowData = row;
+  window._currentLeadRowData_rowIndex = rowIndex;
 
   // Meta reklam teknik alanları (açılır menüye taşınacak)
   const metaCols = ['ad_name', 'adset_name', 'adset_id', 'campaign_name', 'campaign_id', 'form_name', 'form_id', 'ad_id', 'leadgen_id', 'is_organic', 'platform', 'id'];
@@ -2505,8 +2506,13 @@ async function loadAptDetail(eventId) {
           <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px;">Kampanya</div>
           <div style="font-size:11px;">${e.form_name||'—'}</div>
         </div>
-        ${e.assigned_doctor?`<div style="background:rgba(255,255,255,0.03);padding:10px;border-radius:10px;"><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px;">Doktor</div><div style="font-size:13px;font-weight:600;">👨‍⚕️ ${e.assigned_doctor}</div></div>`:''}
-        ${e.scheduled_date?`<div style="background:rgba(34,197,94,0.08);padding:10px;border-radius:10px;border:1px solid rgba(34,197,94,0.2);"><div style="font-size:10px;color:#22c55e;text-transform:uppercase;margin-bottom:4px;">Randevu Tarihi</div><div style="font-size:13px;font-weight:600;color:#22c55e;">${new Date(e.scheduled_date).toLocaleString('tr-TR',{day:'2-digit',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit'})}</div></div>`:''}
+        <div style="background:rgba(34,197,94,0.08);padding:10px;border-radius:10px;border:1px solid rgba(34,197,94,0.2);grid-column:1/-1;">
+          <div style="font-size:10px;color:#22c55e;text-transform:uppercase;margin-bottom:4px;">Randevu Planlama</div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <input type="datetime-local" id="apt-date-input" value="${e.scheduled_date ? new Date(new Date(e.scheduled_date).getTime() + 3*3600000).toISOString().slice(0,16) : ''}" style="background:var(--bg-main);border:1px solid var(--border-color);color:white;padding:6px 10px;border-radius:8px;font-size:13px;flex:1;outline:none;">
+            <button onclick="saveAptDate(${e.id})" class="btn btn-sm" style="background:#22c55e;color:white;border:none;padding:6px 14px;border-radius:8px;font-size:12px;font-weight:600;">Kaydet</button>
+          </div>
+        </div>
       </div>
       
       <!-- Hatırlatma Durumu -->
@@ -2547,7 +2553,21 @@ async function loadAptDetail(eventId) {
 async function saveCoordNote(id) {
   const note = document.getElementById('apt-coord-note').value;
   await api('update-appointment','POST',{id, coordinator_notes: note});
-  toast('Koordinatör notu kaydedildi ✅');
+  showNotification('Koordinatör notu kaydedildi ✅', 'success');
+}
+
+async function saveAptDate(id) {
+  const dt = document.getElementById('apt-date-input').value;
+  if (!dt) return showNotification('Lütfen bir tarih seçin', 'warning');
+  
+  const d = new Date(dt);
+  // TR saatine göre seçilen datetime'ı kaydet (ISO formatı UTC olarak gider, backend +3 telafisini hesaba katmalıdır veya düz kaydedilir)
+  await api('update-appointment', 'POST', { id, scheduled_date: d.toISOString(), status: 'scheduled' });
+  showNotification('Randevu tarihi kaydedildi ✅', 'success');
+  
+  if (typeof window._currentLeadRowData_rowIndex !== 'undefined') {
+    openLeadDetail(window._currentLeadRowData_rowIndex);
+  }
 }
 
 function downloadIcal(id) {
