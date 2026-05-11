@@ -1579,9 +1579,8 @@ async function loadLeads() {
   loadSheets();
 }
 
-function openLeadDetail(sortedIndex) {
-  // Sıralanmış index'ten orijinal satıra dönüş
-  const rowIndex = window._sortedRowMap ? window._sortedRowMap[sortedIndex] : sortedIndex;
+function openLeadDetail(rowIndex) {
+  // rowIndex artık doğrudan orijinal satır index'i (origIdx)
   const headers = window._sheetHeaders;
   const row = window._sheetRows[rowIndex];
   if (!headers || !row) return;
