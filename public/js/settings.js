@@ -138,19 +138,28 @@ async function loadAppointments() {
   
   const c = data.counts || {};
   const completed = calendarEventsData.filter(e => e.status === 'completed').length;
-  document.getElementById('apt-total').textContent = calendarEventsData.length;
-  document.getElementById('apt-pending').textContent = c.pending || 0;
-  document.getElementById('apt-called').textContent = c.called || 0;
-  document.getElementById('apt-scheduled-count').textContent = c.scheduled || 0;
-  document.getElementById('apt-completed').textContent = completed;
-  document.getElementById('apt-lost').textContent = c.lost || 0;
+  
+  // Safely update legacy stat pills if they exist
+  ['apt-total','apt-pending','apt-called','apt-scheduled-count','apt-completed','apt-lost'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      if (id === 'apt-total') el.textContent = calendarEventsData.length;
+      if (id === 'apt-pending') el.textContent = c.pending || 0;
+      if (id === 'apt-called') el.textContent = c.called || 0;
+      if (id === 'apt-scheduled-count') el.textContent = c.scheduled || 0;
+      if (id === 'apt-completed') el.textContent = completed;
+      if (id === 'apt-lost') el.textContent = c.lost || 0;
+    }
+  });
   
   const badge = document.getElementById('apt-badge');
-  if ((c.pending||0) > 0) { badge.textContent = c.pending; badge.style.display = 'inline'; }
-  else { badge.style.display = 'none'; }
+  if (badge) {
+    if ((c.pending||0) > 0) { badge.textContent = c.pending; badge.style.display = 'inline'; }
+    else { badge.style.display = 'none'; }
+  }
   
   renderAptList();
-  filterCalendar();
+  if (typeof filterCalendar === 'function') filterCalendar();
 }
 
 async function loadAptDetail(eventId) {
@@ -160,7 +169,7 @@ async function loadAptDetail(eventId) {
   if (window.innerWidth <= 768) navigateMobileAptView('detail');
   
   const panel = document.getElementById('apt-detail-content');
-  panel.innerHTML = '<div style="padding:20px;"><div class="skeleton skeleton-text" style="width:60%;height:20px;margin-bottom:12px;"></div><div class="skeleton skeleton-text short"></div><div class="skeleton skeleton-card" style="margin-top:16px;"></div><div class="skeleton skeleton-card"></div><div class="skeleton skeleton-card"></div></div>';
+  panel.innerHTML = '<div style="padding:20px;display:flex;flex-direction:column;gap:16px;"><div class="skeleton skeleton-text" style="width:60%;height:24px;"></div><div class="skeleton skeleton-text short"></div><div class="skeleton skeleton-card" style="height:100px;"></div><div class="skeleton skeleton-card" style="height:200px;"></div></div>';
   
   const data = await api('appointment-detail&id=' + eventId);
   if (!data || !data.event) { panel.innerHTML = '<div class="empty">Detay yüklenemedi</div>'; return; }
@@ -170,158 +179,197 @@ async function loadAptDetail(eventId) {
   const reminders = data.reminders || [];
   const nm = e.patient_name || e.phone_number;
   
-  const allStatuses = [
-    {key:'pending',emoji:'⏳',label:'Bekliyor',color:'#f59e0b'},
-    {key:'called',emoji:'📞',label:'Arandı',color:'#3b82f6'},
-    {key:'scheduled',emoji:'📅',label:'Takvimde',color:'#22c55e'},
-    {key:'confirmed',emoji:'✅',label:'Onaylandı',color:'#10b981'},
-    {key:'completed',emoji:'🏥',label:'Tamamlandı',color:'#8b5cf6'},
-    {key:'noshow',emoji:'❌',label:'Gelmedi',color:'#ef4444'},
-    {key:'lost',emoji:'🚫',label:'Olumsuz',color:'#6b7280'}
+  // 1. Pipeline Mantığı (4 Aşama)
+  const statusMap = {
+    'pending': 'pending',
+    'called': 'contacted', 'contacted': 'contacted',
+    'scheduled': 'scheduled', 'confirmed': 'scheduled',
+    'completed': 'closed', 'noshow': 'closed', 'lost': 'closed', 'cancelled': 'closed', 'closed': 'closed'
+  };
+  const currentStage = statusMap[e.status] || 'pending';
+  
+  const stages = [
+    {key:'pending', icon:'⏳', label:'Bekliyor', color:'#FF9F0A'},
+    {key:'contacted', icon:'📞', label:'İletişimde', color:'#0A84FF'},
+    {key:'scheduled', icon:'📅', label:'Takvimde', color:'#30D158'},
+    {key:'closed', icon:'🏁', label:'Sonuçlandı', color:'#BF5AF2'}
   ];
-  const currentIdx = allStatuses.findIndex(s => s.key === e.status);
   
-  const pipelineHtml = allStatuses.map((s, i) => {
-    const isActive = s.key === e.status;
-    const isPast = i < currentIdx;
-    const bg = isActive ? s.color+'22' : isPast ? s.color+'0a' : 'transparent';
-    const border = isActive ? s.color : isPast ? s.color+'44' : 'var(--border-color)';
-    const fw = isActive ? '700' : '500';
-    const opacity = isActive ? '1' : isPast ? '0.7' : '0.5';
-    return `<button onclick="updateAppointment(${e.id},'${s.key}')" style="display:flex;align-items:center;gap:4px;padding:5px 10px;border-radius:8px;border:1px solid ${border};background:${bg};color:${isActive?s.color:'var(--text-muted)'};cursor:pointer;font-size:11px;font-weight:${fw};opacity:${opacity};transition:all 0.2s;white-space:nowrap;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='${opacity}'">${s.emoji} ${s.label}</button>`;
-  }).join('');
+  const pipelineHtml = `
+    <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); border-radius:16px; padding:16px; margin-bottom:16px;">
+      <div style="font-size:11px; font-weight:600; color:var(--text-muted); text-transform:uppercase; margin-bottom:12px; letter-spacing:0.5px;">🎯 İşlem Aşaması</div>
+      <div style="display:flex; gap:8px; overflow-x:auto; padding-bottom:4px;">
+        ${stages.map(s => {
+          const isActive = s.key === currentStage;
+          const bg = isActive ? \`rgba(\${hexToRgb(s.color)}, 0.15)\` : 'rgba(0,0,0,0.2)';
+          const border = isActive ? s.color : 'rgba(255,255,255,0.05)';
+          const color = isActive ? s.color : 'var(--text-muted)';
+          return \`<button onclick="updateAppointment(\${e.id},'\${s.key}')" style="flex:1; min-width:100px; display:flex; flex-direction:column; align-items:center; gap:6px; padding:10px; border-radius:12px; border:1px solid \${border}; background:\${bg}; color:\${color}; cursor:pointer; transition:all 0.2s;">
+            <span style="font-size:18px;">\${s.icon}</span>
+            <span style="font-size:12px; font-weight:600;">\${s.label}</span>
+          </button>\`;
+        }).join('')}
+      </div>
+    </div>
+  `;
+
+  // 2. Apple Takvim Kartı (Sadece Takvimde veya Sonuçlandı ise)
+  let scheduleHtml = '';
+  if (['scheduled', 'closed'].includes(currentStage)) {
+    const tzOffset = (new Date()).getTimezoneOffset() * 60000;
+    const localISOTime = e.scheduled_date ? (new Date(new Date(e.scheduled_date) - tzOffset)).toISOString().slice(0, 16) : '';
+    
+    let showUpHtml = '';
+    if (e.showed_up === true) {
+      showUpHtml = \`<div style="margin-top:12px; padding:10px; background:rgba(48,209,88,0.1); border:1px solid rgba(48,209,88,0.2); border-radius:10px; text-align:center; font-size:13px; color:#30D158; font-weight:600;">✅ Hasta Geldi \${e.treatment_completed ? '(Tedavi Tamamlandı)' : ''}</div>\`;
+    } else if (e.showed_up === false) {
+      showUpHtml = \`<div style="margin-top:12px; padding:10px; background:rgba(255,69,58,0.1); border:1px solid rgba(255,69,58,0.2); border-radius:10px; text-align:center; font-size:13px; color:#FF453A; font-weight:600;">❌ Hasta Gelmedi \${e.no_show_reason ? ' — ' + e.no_show_reason : ''}</div>\`;
+    } else {
+      showUpHtml = \`<div style="display:flex; gap:8px; margin-top:12px;">
+        <button onclick="markShowUp(\${e.id},true)" style="flex:1; padding:10px; border-radius:10px; border:none; background:rgba(48,209,88,0.15); color:#30D158; font-size:13px; font-weight:600; cursor:pointer;">✅ Geldi</button>
+        <button onclick="markShowUp(\${e.id},false)" style="flex:1; padding:10px; border-radius:10px; border:none; background:rgba(255,69,58,0.15); color:#FF453A; font-size:13px; font-weight:600; cursor:pointer;">❌ Gelmedi</button>
+      </div>\`;
+    }
+
+    scheduleHtml = \`
+      <div style="background:linear-gradient(145deg, rgba(48,209,88,0.05), rgba(0,0,0,0.2)); border:1px solid rgba(48,209,88,0.2); border-radius:16px; padding:20px; margin-bottom:16px; box-shadow:0 8px 24px rgba(0,0,0,0.2);">
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px;">
+          <div style="width:36px; height:36px; background:rgba(48,209,88,0.2); border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:18px;">📅</div>
+          <div>
+            <div style="font-size:15px; font-weight:600; color:white;">Randevu Planı</div>
+            <div style="font-size:11px; color:var(--text-muted);">Tarih ve doktor bilgisi</div>
+          </div>
+        </div>
+        
+        <div style="display:flex; flex-direction:column; gap:12px;">
+          <div>
+            <label style="font-size:11px; color:var(--text-muted); display:block; margin-bottom:4px;">Tarih & Saat</label>
+            <input type="datetime-local" id="apt-date-input" value="\${localISOTime}" onchange="updateAppointmentDateInline(\${e.id}, this.value)" style="width:100%; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.1); color:#30D158; padding:12px; border-radius:10px; font-size:14px; font-weight:600; color-scheme:dark; outline:none;">
+          </div>
+          <div>
+            <label style="font-size:11px; color:var(--text-muted); display:block; margin-bottom:4px;">Doktor / Uzman</label>
+            <div style="display:flex; gap:8px;">
+              <input type="text" id="apt-doctor-input" placeholder="Örn: Dr. Ahmet Yılmaz" value="\${e.assigned_doctor||''}" style="flex:1; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.1); color:white; padding:12px; border-radius:10px; font-size:13px; outline:none;">
+              <button onclick="api('update-appointment','POST',{id:\${e.id}, assigned_doctor:document.getElementById('apt-doctor-input').value});toast('Doktor güncellendi')" style="background:rgba(255,255,255,0.1); border:none; border-radius:10px; padding:0 16px; color:white; font-weight:600; cursor:pointer;">Kaydet</button>
+            </div>
+          </div>
+        </div>
+        \${showUpHtml}
+      </div>
+    \`;
+  }
+
+  // 3. Birleşik Timeline (Form + Not + Mesajlar + Hatırlatmalar)
+  let timelineItems = [];
   
-  // Form yanıtları
-  let formHtml = '';
+  // Form Verisi
   try {
     const raw = typeof e.raw_data === 'string' ? JSON.parse(e.raw_data || '{}') : (e.raw_data || {});
     const skip = ['id','leadgen_id','form_id','ad_id','adset_id','campaign_id','platform','is_organic','created_time','phone_number_id','full_name','phone_number'];
     const entries = Object.entries(raw).filter(([k]) => !skip.includes(k.toLowerCase()));
     if (entries.length > 0) {
-      formHtml = entries.map(([k,v]) => `<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.04);gap:8px;">
-        <span style="font-size:11px;color:var(--text-muted);min-width:90px;">${escapeHtml(k.replace(/_/g,' '))}</span>
-        <span style="font-size:11px;font-weight:500;text-align:right;word-wrap:break-word;">${escapeHtml(String(v||'').replace(/_/g,' '))}</span>
-      </div>`).join('');
+      let fHtml = entries.map(([k,v]) => \`<div style="display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px solid rgba(255,255,255,0.05); gap:12px;">
+        <span style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">\${escapeHtml(k.replace(/_/g,' '))}</span>
+        <span style="font-size:12px; font-weight:500; color:white; text-align:right; word-break:break-word;">\${escapeHtml(String(v||'').replace(/_/g,' '))}</span>
+      </div>\`).join('');
+      timelineItems.push({
+        type: 'form', date: new Date(e.created_at || Date.now()),
+        html: \`<div style="background:rgba(10,132,255,0.05); border:1px solid rgba(10,132,255,0.2); border-radius:12px; padding:12px;">
+          <div style="font-size:12px; font-weight:600; color:#0A84FF; margin-bottom:8px; display:flex; align-items:center; gap:6px;">📋 Form Dolduruldu</div>
+          \${fHtml}
+        </div>\`
+      });
     }
   } catch(err) {}
-  
-  // Mesaj timeline
-  const msgHtml = msgs.length > 0 ? msgs.slice(-5).map(m => {
+
+  // Mesajlar
+  msgs.forEach(m => {
     const isOut = m.direction === 'out';
-    const t = new Date(m.created_at).toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit'});
-    const content = escapeHtml((m.content||'').substring(0,120)) + ((m.content||'').length > 120 ? '...' : '');
-    return `<div style="padding:5px 8px;background:${isOut?'rgba(99,102,241,0.08)':'rgba(255,255,255,0.03)'};border-radius:8px;margin-bottom:3px;border-left:2px solid ${isOut?'var(--accent-primary)':'#f59e0b'};">
-      <div style="font-size:10px;color:var(--text-muted);margin-bottom:1px;">${isOut?(m.model_used==='panel'?'👤 Sen':'🤖 Bot'):'📩 Hasta'} · ${t}</div>
-      <div style="font-size:12px;line-height:1.4;">${content}</div>
-    </div>`;
-  }).join('') : '<div style="color:var(--text-muted);font-size:12px;">Henüz mesaj yok</div>';
+    const content = escapeHtml(m.content || '');
+    timelineItems.push({
+      type: 'message', date: new Date(m.created_at),
+      html: \`<div style="background:\${isOut ? 'rgba(99,102,241,0.08)' : 'rgba(255,255,255,0.03)'}; border-left:3px solid \${isOut ? 'var(--accent-primary)' : '#FF9F0A'}; border-radius:0 12px 12px 0; padding:10px 12px;">
+        <div style="font-size:10px; color:var(--text-muted); margin-bottom:4px; font-weight:600;">\${isOut ? (m.model_used==='panel' ? '👤 Operatör' : '🤖 Yapay Zeka') : '📩 Hasta'}</div>
+        <div style="font-size:13px; line-height:1.4; color:white; word-break:break-word;">\${content}</div>
+      </div>\`
+    });
+  });
+
+  // Hatırlatmalar
+  reminders.forEach(r => {
+    timelineItems.push({
+      type: 'reminder', date: new Date(r.created_at),
+      html: \`<div style="background:rgba(48,209,88,0.05); border:1px dashed rgba(48,209,88,0.3); border-radius:12px; padding:10px 12px; display:flex; align-items:center; gap:8px;">
+        <span style="font-size:16px;">🔔</span>
+        <div>
+          <div style="font-size:12px; font-weight:600; color:#30D158;">Otomatik Hatırlatma Gönderildi</div>
+          <div style="font-size:11px; color:var(--text-muted);">\${escapeHtml(r.content || 'Sistem mesajı')}</div>
+        </div>
+      </div>\`
+    });
+  });
+
+  // Sort timeline chronological (newest first)
+  timelineItems.sort((a,b) => b.date - a.date);
   
-  // Hatırlatma badges
-  const reminderBadges = reminders.length > 0 ? reminders.map(r => {
-    const d = new Date(r.created_at).toLocaleDateString('tr-TR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
-    let rType = 'Hatırlatma';
-    const c = r.content || '';
-    if (c.includes('3 gün')) rType = 'D-3';
-    else if (c.includes('Yarın')) rType = 'D-1';
-    else if (c.includes('Bugün')) rType = 'D-0';
-    return `<span style="font-size:10px;background:rgba(34,197,94,0.15);color:#22c55e;padding:3px 6px;border-radius:6px;" title="${escapeHtml(c)}">✅ ${rType} — ${d}</span>`;
-  }).join(' ') : '<span style="font-size:10px;color:var(--text-muted);font-style:italic;">Henüz hatırlatma yok</span>';
+  const timelineHtml = \`
+    <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); border-radius:16px; padding:20px;">
+      <h3 style="margin:0 0 16px 0; font-size:15px; color:white; font-weight:600; display:flex; align-items:center; gap:8px;">
+        <span style="background:rgba(255,159,10,0.15); color:#FF9F0A; width:28px; height:28px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:14px;">🕰️</span>
+        Hasta Geçmişi
+      </h3>
+      
+      <!-- Koordinatör Notu Hızlı Ekleme -->
+      <div style="display:flex; gap:8px; margin-bottom:20px;">
+        <input type="text" id="apt-coord-note" placeholder="Not ekle..." value="\${escapeHtml(e.coordinator_notes||'')}" style="flex:1; background:rgba(0,0,0,0.2); border:1px solid rgba(255,255,255,0.1); padding:10px 14px; border-radius:10px; color:white; font-size:13px; outline:none;">
+        <button onclick="saveCoordNote(\${e.id})" style="background:var(--accent-primary); color:white; border:none; border-radius:10px; padding:0 16px; font-weight:600; cursor:pointer;">Kaydet</button>
+      </div>
 
-  // Show-up section
-  let showUpHtml = '';
-  if (['scheduled','confirmed'].includes(e.status)) {
-    showUpHtml = `<div style="display:flex;gap:6px;margin-top:8px;">
-      <button onclick="markShowUp(${e.id},true)" style="flex:1;padding:8px;border-radius:8px;border:1px solid #22c55e;background:rgba(34,197,94,0.1);color:#22c55e;cursor:pointer;font-size:12px;font-weight:600;">✅ Hasta Geldi</button>
-      <button onclick="markShowUp(${e.id},false)" style="flex:1;padding:8px;border-radius:8px;border:1px solid #ef4444;background:rgba(239,68,68,0.1);color:#ef4444;cursor:pointer;font-size:12px;font-weight:600;">❌ Gelmedi</button>
-    </div>`;
-  } else if (e.showed_up === true) {
-    showUpHtml = `<div style="padding:8px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);border-radius:8px;text-align:center;font-size:12px;color:#22c55e;font-weight:600;">✅ Hasta geldi${e.treatment_completed?' — Tedavi tamamlandı':''}</div>`;
-  } else if (e.showed_up === false) {
-    showUpHtml = `<div style="padding:8px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:8px;text-align:center;font-size:12px;color:#ef4444;font-weight:600;">❌ Hasta gelmedi${e.no_show_reason?' — '+e.no_show_reason:''}</div>`;
-  }
+      <div class="unified-timeline" style="display:flex; flex-direction:column; gap:16px; position:relative; padding-left:12px; border-left:2px solid rgba(255,255,255,0.05);">
+        \${timelineItems.length > 0 ? timelineItems.map(item => \`
+          <div style="position:relative;">
+            <div style="position:absolute; left:-17px; top:12px; width:10px; height:10px; border-radius:50%; background:var(--bg-main); border:2px solid rgba(255,255,255,0.2);"></div>
+            <div style="font-size:10px; color:var(--text-muted); margin-bottom:4px; padding-left:4px;">\${item.date.toLocaleString('tr-TR',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}</div>
+            \${item.html}
+          </div>
+        \`).join('') : '<div style="font-size:13px; color:var(--text-muted); text-align:center; padding:20px;">Geçmiş kaydı bulunamadı.</div>'}
+      </div>
+    </div>
+  \`;
 
-  panel.innerHTML = `
-    <div style="padding:20px;display:flex;flex-direction:column;gap:14px;">
+  panel.innerHTML = \`
+    <div style="padding:24px; display:flex; flex-direction:column; max-width:800px; margin:0 auto; width:100%;">
+      
       <!-- Header -->
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:12px;border-bottom:1px solid rgba(255,255,255,0.06);">
-        <div style="display:flex; align-items:center; gap:8px;">
-          <button class="mobile-only-btn btn-back" onclick="navigateMobileAptView('list')" title="Geri">‹</button>
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:24px;">
+        <div style="display:flex; align-items:center; gap:12px;">
+          <button class="mobile-only-btn btn-back" onclick="navigateMobileAptView('list')" style="width:36px; height:36px; background:rgba(255,255,255,0.05); border:none; border-radius:10px; color:white; font-size:20px; display:flex; align-items:center; justify-content:center; cursor:pointer;">‹</button>
           <div>
-            <div style="font-size:18px;font-weight:700;">${escapeHtml(nm)}</div>
-            <div style="display:flex;gap:10px;margin-top:4px;flex-wrap:wrap;align-items:center;">
-              <span style="font-size:12px;color:var(--text-muted);">📱 ${escapeHtml(e.phone_number)}</span>
-              ${e.city?`<span style="font-size:12px;color:var(--text-muted);">📍 ${escapeHtml(e.city)}</span>`:''}
-              ${e.email?`<span style="font-size:12px;color:var(--text-muted);">✉️ ${escapeHtml(e.email)}</span>`:''}
+            <div style="font-size:24px; font-weight:700; color:white; letter-spacing:-0.5px;">\${escapeHtml(nm)}</div>
+            <div style="display:flex; gap:12px; margin-top:6px; flex-wrap:wrap; align-items:center;">
+              <span style="font-size:13px; color:var(--text-muted); display:flex; align-items:center; gap:4px;">📱 \${escapeHtml(e.phone_number)}</span>
+              \${e.department ? \`<span style="font-size:11px; background:rgba(10,132,255,0.1); color:#0A84FF; padding:3px 8px; border-radius:6px; font-weight:600;">\${e.department}</span>\` : ''}
+              \${e.city ? \`<span style="font-size:12px; color:var(--text-muted);">📍 \${escapeHtml(e.city)}</span>\` : ''}
             </div>
           </div>
         </div>
-        <div style="display:flex;gap:6px;">
-          <button onclick="window.open('https://wa.me/${e.phone_number.replace(/[^0-9]/g,'')}','_blank')" style="padding:6px 10px;border-radius:8px;border:1px solid #25D366;background:rgba(37,211,102,0.1);color:#25D366;cursor:pointer;font-size:11px;font-weight:600;">💬 WhatsApp</button>
-          <button onclick="document.querySelector('[data-page=conversations]').click();setTimeout(()=>loadChat('${e.phone_number}','whatsapp'),300)" style="padding:6px 10px;border-radius:8px;border:1px solid var(--border-color);background:transparent;color:var(--text-muted);cursor:pointer;font-size:11px;">💬 Sohbet</button>
+        <div style="display:flex; gap:8px;">
+          <button onclick="window.open('https://wa.me/\${e.phone_number.replace(/[^0-9]/g,'')}','_blank')" style="padding:8px 14px; border-radius:10px; border:none; background:rgba(37,211,102,0.15); color:#25D366; cursor:pointer; font-size:13px; font-weight:600; display:flex; align-items:center; gap:6px;">WhatsApp</button>
+          <button onclick="document.querySelector('[data-page=conversations]').click();setTimeout(()=>loadChat('\${e.phone_number}','whatsapp'),300)" style="padding:8px 14px; border-radius:10px; border:1px solid rgba(255,255,255,0.1); background:rgba(255,255,255,0.05); color:white; cursor:pointer; font-size:13px; font-weight:500; display:flex; align-items:center; gap:6px;">💬 Sohbet</button>
         </div>
       </div>
       
-      <!-- Info Grid -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-        <div style="background:rgba(255,255,255,0.03);padding:8px 10px;border-radius:8px;">
-          <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;margin-bottom:2px;">Bölüm</div>
-          <div style="font-size:13px;font-weight:600;">${e.department||'Genel'}</div>
-        </div>
-        <div style="background:rgba(255,255,255,0.03);padding:8px 10px;border-radius:8px;">
-          <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;margin-bottom:2px;">Kaynak</div>
-          <div style="font-size:11px;">${e.form_name||'—'}</div>
-        </div>
-      </div>
+      \${pipelineHtml}
+      \${scheduleHtml}
+      \${timelineHtml}
       
-      <!-- Pipeline Status -->
-      <div>
-        <div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;margin-bottom:6px;">🔄 Süreç Durumu</div>
-        <div style="display:flex;gap:4px;flex-wrap:wrap;">${pipelineHtml}</div>
-      </div>
-      
-      <!-- Schedule Section -->
-      <div style="background:rgba(34,197,94,0.06);padding:10px 12px;border-radius:10px;border:1px solid rgba(34,197,94,0.15);">
-        <div style="font-size:11px;font-weight:600;color:#22c55e;text-transform:uppercase;margin-bottom:6px;">📅 Randevu Planlama</div>
-        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-          <input type="datetime-local" id="apt-date-input" value="${e.scheduled_date ? new Date(new Date(e.scheduled_date).getTime() + 3*3600000).toISOString().slice(0,16) : ''}" style="background:var(--bg-main);border:1px solid var(--border-color);color:white;padding:6px 8px;border-radius:8px;font-size:12px;flex:1;min-width:160px;outline:none;">
-          <input type="text" id="apt-doctor-input" placeholder="Doktor adı" value="${e.assigned_doctor||''}" style="background:var(--bg-main);border:1px solid var(--border-color);color:white;padding:6px 8px;border-radius:8px;font-size:12px;flex:1;min-width:120px;outline:none;">
-          <button onclick="saveAptDate(${e.id})" style="background:#22c55e;color:white;border:none;padding:6px 14px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">💾 Kaydet</button>
-        </div>
-        ${showUpHtml}
-      </div>
-      
-      <!-- Reminders -->
-      <div>
-        <div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px;">📩 Hatırlatmalar</div>
-        <div style="display:flex;gap:4px;flex-wrap:wrap;">${reminderBadges} ${e.confirmed_by_patient?'<span style="font-size:10px;background:rgba(34,197,94,0.15);color:#22c55e;padding:3px 6px;border-radius:4px;font-weight:700;">✅ Hasta Teyit Etti</span>':''}</div>
-      </div>
-      
-      <!-- Coordinator Note -->
-      <div>
-        <div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px;">📝 Koordinatör Notu</div>
-        <div style="display:flex;gap:6px;">
-          <textarea id="apt-coord-note" placeholder="Not ekle..." style="flex:1;min-height:40px;background:var(--bg-hover);border:1px solid var(--border-color);border-radius:8px;padding:6px 8px;color:white;font-size:12px;resize:vertical;">${e.coordinator_notes||''}</textarea>
-          <button onclick="saveCoordNote(${e.id})" style="align-self:flex-end;padding:6px 10px;background:var(--accent-primary);color:white;border:none;border-radius:6px;font-size:11px;cursor:pointer;">💾</button>
-        </div>
-      </div>
-      
-      ${formHtml?`<!-- Form Data (Collapsible) -->
-      <details style="background:rgba(255,255,255,0.02);border-radius:8px;border:1px solid rgba(255,255,255,0.04);">
-        <summary style="padding:8px 10px;cursor:pointer;font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;">📋 Form Yanıtları</summary>
-        <div style="padding:4px 10px 8px;">${formHtml}</div>
-      </details>`:''}
-      
-      <!-- Messages (Collapsible) -->
-      <details open style="background:rgba(255,255,255,0.02);border-radius:8px;border:1px solid rgba(255,255,255,0.04);">
-        <summary style="padding:8px 10px;cursor:pointer;font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;">💬 Son Mesajlar (${msgs.length})</summary>
-        <div style="padding:4px 10px 8px;max-height:200px;overflow-y:auto;">${msgHtml}</div>
-      </details>
-      
-      <!-- Quick Actions -->
-      <div style="display:flex;gap:6px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.06);">
-        ${e.scheduled_date?`<button onclick="downloadIcal(${e.id})" style="padding:6px 12px;border-radius:8px;border:1px solid rgba(99,102,241,0.3);background:rgba(99,102,241,0.1);color:var(--accent-primary);cursor:pointer;font-size:11px;">📅 iCal İndir</button>`:''}
-      </div>
-    </div>`;
+    </div>
+  \`;
+}
+
+function hexToRgb(hex) {
+  var result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  return result ? parseInt(result[1], 16) + ',' + parseInt(result[2], 16) + ',' + parseInt(result[3], 16) : '255,255,255';
 }
   
 

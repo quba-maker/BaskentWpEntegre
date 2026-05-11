@@ -643,3 +643,4 @@ details[open] summary {
   grid-template-columns: 2fr 1fr;
   gap: 32px;
 }
+\n.apt-pill.active { background: rgba(255,255,255,0.1) !important; color: white !important; }
