@@ -778,11 +778,18 @@ export default async function handler(req, res) {
     if (action === 'conversations') {
       const list = await sql`
         SELECT c.*, 
-               (SELECT content FROM messages WHERE phone_number = c.phone_number ORDER BY created_at DESC LIMIT 1) as last_message,
-               (SELECT channel FROM messages WHERE phone_number = c.phone_number AND channel IS NOT NULL ORDER BY created_at DESC LIMIT 1) as last_channel,
+               m.content as last_message,
+               m.channel as last_channel,
                l.id as lead_id, l.form_name as lead_form_name, l.stage as lead_stage
         FROM conversations c 
         LEFT JOIN leads l ON l.phone_number = c.phone_number
+        LEFT JOIN LATERAL (
+          SELECT content, channel 
+          FROM messages 
+          WHERE phone_number = c.phone_number 
+          ORDER BY created_at DESC 
+          LIMIT 1
+        ) m ON true
         ORDER BY c.last_message_at DESC
       `;
       return res.json(list);

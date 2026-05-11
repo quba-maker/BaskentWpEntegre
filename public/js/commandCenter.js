@@ -440,14 +440,14 @@ function renderSheetTable(headers, rows, total) {
     document.getElementById('sheet-row-count').textContent = '📋 0 kayıt';
     return document.getElementById('lead-list').innerHTML = '<div class="empty"><div class="empty-icon">📭</div><div style="font-weight:500;">Kayıt yok</div></div>';
   }
-  const findCol = (kw) => headers.findIndex(h => { const l = h.toLowerCase().replace(/[_\s]+/g, ''); return kw.some(k => l.includes(k)); });
-  const findColStrict = (kw, mx = 30) => headers.findIndex(h => { if (h.length > mx) return false; const l = h.toLowerCase().replace(/[_\s]+/g, ''); return kw.some(k => l.includes(k)); });
+  const findCol = (kw) => headers.findIndex(h => { const l = String(h).toLowerCase().replace(/[_\s]+/g, ''); return kw.some(k => l.includes(k)); });
+  const findColStrict = (kw, mx = 30) => headers.findIndex(h => { if (String(h).length > mx) return false; const l = String(h).toLowerCase().replace(/[_\s]+/g, ''); return kw.some(k => l.includes(k)); });
 
   let dateCol = findCol(['time','tarih','created','date','zaman']);
   let nameCol = findCol(['fullname','full_name','isim','hastadi','hastaadi']);
-  if (nameCol === -1) nameCol = headers.findIndex(h => /^ad$/i.test(h.trim()) || h.toLowerCase().includes('isim'));
-  let whatsappCol = headers.findIndex(h => { const l = h.toLowerCase().replace(/[_\s]+/g, ''); return l.includes('whatsappnumarası') || l.includes('whatsappnumarasıyazınız'); });
-  let telCol = headers.findIndex(h => h.toLowerCase().replace(/[_\s]+/g, '') === 'phonenumber');
+  if (nameCol === -1) nameCol = headers.findIndex(h => /^ad$/i.test(String(h).trim()) || String(h).toLowerCase().includes('isim'));
+  let whatsappCol = headers.findIndex(h => { const l = String(h).toLowerCase().replace(/[_\s]+/g, ''); return l.includes('whatsappnumarası') || l.includes('whatsappnumarasıyazınız'); });
+  let telCol = headers.findIndex(h => String(h).toLowerCase().replace(/[_\s]+/g, '') === 'phonenumber');
   let phoneCol = whatsappCol > -1 ? whatsappCol : telCol;
   let campaignCol = findCol(['campaignname','campaign_name','kampanya']);
   let deptCol = findColStrict(['adname','ad_name','campaign','bolum','bölüm','form'], 40);
