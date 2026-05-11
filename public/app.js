@@ -263,6 +263,17 @@ async function loadDashboard() {
 // ========== FORM YÖNETİMİ ==========
 function loadFormManagement() {
   loadSheets();
+  // Sessiz auto-refresh: 30 saniyede bir yeni lead kontrolü
+  if (window._sheetRefreshTimer) clearInterval(window._sheetRefreshTimer);
+  window._sheetRefreshTimer = setInterval(() => {
+    const currentPage = document.querySelector('.nav-btn.active')?.dataset?.page;
+    if (currentPage === 'form-management') {
+      silentRefreshSheets();
+    } else {
+      clearInterval(window._sheetRefreshTimer);
+      window._sheetRefreshTimer = null;
+    }
+  }, 30000);
 }
 
 /* GOOGLE SHEETS ENTEGRASYONU (ESKİ SİSTEM) */
@@ -289,7 +300,23 @@ async function loadSheetData(sheetName) {
   } catch(e) {}
 }
 
+// Sessiz yenileme — loading göstermeden yeni lead kontrolü
+async function silentRefreshSheets() {
+  if (!window._activeSheet) return;
+  try {
+    const resp = await fetch(`/api/sheets?action=data&sheet=${encodeURIComponent(window._activeSheet)}`);
+    const data = await resp.json();
+    if (!data.success) return;
+    const prevCount = window._lastSheetRowCount || 0;
+    const newCount = data.total || 0;
+    if (newCount !== prevCount) {
+      renderSheetTable(data.headers, data.rows, data.total);
+    }
+  } catch(e) {}
+}
+
 function renderSheetTable(headers, rows, total) {
+  window._lastSheetRowCount = total;
   document.getElementById('sheet-row-count').textContent = `📋 ${total} kayıt`;
   if(!headers || headers.length === 0) return document.getElementById('lead-list').innerHTML = '<div class="empty"><div class="empty-icon">📭</div><div style="font-weight:500; font-size: 15px;">Bu kampanyada henüz kayıt yok</div></div>';
 
@@ -476,19 +503,19 @@ async function enrichLeadCards(rows, phoneCol) {
           const stageColors = { new: '#f59e0b', contacted: '#3b82f6', discovery: '#8b5cf6', negotiation: '#f97316', hot_lead: '#ef4444', appointed: '#22c55e', lost: '#6b7280' };
           const leadStage = ctx.leadStage || (ctx.conversationStatus ? 'contacted' : null);
           
-          let extraBadges = '';
+          let statusBadges = '';
           
           // Bot durumu
           if (ctx.conversationStatus === 'active') {
-            extraBadges += `<span style="background:rgba(48,209,88,0.12); color:#30D158; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600; white-space:nowrap; border:1px solid rgba(48,209,88,0.2);">🤖 Bot</span>`;
+            statusBadges += `<span style="background:rgba(48,209,88,0.12); color:#30D158; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600; white-space:nowrap; border:1px solid rgba(48,209,88,0.2);">🤖 Bot</span>`;
           } else if (ctx.conversationStatus === 'human') {
-            extraBadges += `<span style="background:rgba(255,159,10,0.12); color:#FF9F0A; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600; white-space:nowrap;">👤 Manuel</span>`;
+            statusBadges += `<span style="background:rgba(255,159,10,0.12); color:#FF9F0A; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600; white-space:nowrap;">👤 Manuel</span>`;
           }
           
           // Lead stage (her zaman göster)
           if (leadStage) {
             const sc = stageColors[leadStage] || '#6b7280';
-            extraBadges += `<span style="background:${sc}18; color:${sc}; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600; white-space:nowrap; border:1px solid ${sc}33;">🎯 ${stages[leadStage] || leadStage}</span>`;
+            statusBadges += `<span style="background:${sc}18; color:${sc}; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600; white-space:nowrap; border:1px solid ${sc}33;">🎯 ${stages[leadStage] || leadStage}</span>`;
           }
           
           // Evrensel etiketler (tags) — Olumsuz, Randevu, Takvimde vb.
@@ -496,13 +523,27 @@ async function enrichLeadCards(rows, phoneCol) {
           if (ctx.tags && ctx.tags.length > 0) {
             ctx.tags.forEach(tag => {
               const tc = tagColors[tag] || '#6b7280';
-              extraBadges += `<span style="background:${tc}15; color:${tc}; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600; white-space:nowrap; border:1px solid ${tc}33;">${tag}</span>`;
+              statusBadges += `<span style="background:${tc}15; color:${tc}; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600; white-space:nowrap; border:1px solid ${tc}33;">${tag}</span>`;
             });
           }
           
-          if (extraBadges) {
-            // DB'den stage varsa eski Sheets badge'ini TAMAMEN DEĞİŞTİR
-            badgeContainer.innerHTML = `<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">${extraBadges}</div>`;
+          // "Yeni" badge: sadece readLeads'te YOKSA ve DB'de stage'i de new/null ise
+          const readLeads = JSON.parse(localStorage.getItem('readLeads') || '[]');
+          const phone = rawPhone.replace(/\D/g, '');
+          const isStillNew = !readLeads.includes(phone) && (!leadStage || leadStage === 'new');
+          const newBadge = isStillNew ? `<span class="lead-badge badge-new" style="padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600;">🟡 Yeni</span>` : '';
+          
+          // Sıralama: [Durum Etiketleri] [Yeni] — Yeni en sağda
+          const finalBadges = statusBadges + newBadge;
+          
+          if (finalBadges) {
+            badgeContainer.innerHTML = `<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">${finalBadges}</div>`;
+          }
+          
+          // Yeşil sol kenarlık da güncelle
+          if (!isStillNew) {
+            badgeEl.style.borderLeftColor = 'transparent';
+            badgeEl.style.background = 'var(--card-bg)';
           }
         }
       } catch(e) {}
