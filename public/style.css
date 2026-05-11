@@ -25,8 +25,13 @@
   
   /* Apple Border Radii */
   --radius-sm: 8px;
-  --radius-md: 14px;
+  --radius-md: 12px;
   --radius-lg: 20px;
+  
+  /* Mobile UI Standard Dimensions */
+  --mob-nav-height: 54px;
+  --mob-padding: 16px;
+  --btn-height: 44px; /* Apple HIG standard tap target */
   
   /* Soft Shadows */
   --shadow-sm: 0 4px 12px rgba(0,0,0,0.2);
@@ -115,23 +120,26 @@ code { background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 6px; 
 .stat-label { font-size: 14px; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
 
 /* Buttons */
-.btn { padding: 10px 18px; border-radius: var(--radius-sm); border: none; cursor: pointer; font-family: inherit; font-size: 14px; font-weight: 500; transition: all 0.2s; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
-.btn-primary { background: var(--accent-primary); color: #fff; box-shadow: 0 2px 8px rgba(10, 132, 255, 0.2); }
-.btn-primary:hover { background: var(--accent-hover); box-shadow: 0 4px 12px rgba(10, 132, 255, 0.3); }
+.btn { padding: 0 18px; min-height: var(--btn-height, 44px); border-radius: var(--radius-md); border: none; cursor: pointer; font-family: inherit; font-size: 15px; font-weight: 600; transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1); display: inline-flex; align-items: center; justify-content: center; gap: 8px; letter-spacing: -0.2px; }
+.btn-primary { background: var(--accent-primary); color: #fff; box-shadow: 0 2px 10px rgba(10, 132, 255, 0.25); }
+.btn-primary:hover { background: var(--accent-hover); box-shadow: 0 4px 16px rgba(10, 132, 255, 0.35); transform: translateY(-1px); }
+.btn-primary:active { transform: scale(0.98); opacity: 0.9; }
 .btn-secondary { background: var(--bg-hover); color: var(--text-main); }
 .btn-secondary:hover { background: rgba(255, 255, 255, 0.15); }
+.btn-secondary:active { transform: scale(0.98); }
 .btn-warning { background: var(--system-orange); color: #fff; }
 .btn-success { background: var(--system-green); color: #fff; }
 .btn-danger { background: rgba(255, 69, 58, 0.15); color: var(--system-red); }
 .btn-danger:hover { background: rgba(255, 69, 58, 0.25); }
-.btn-sm { padding: 6px 12px; font-size: 13px; border-radius: 6px; }
+.btn-sm { min-height: 32px; padding: 0 12px; font-size: 13px; border-radius: var(--radius-sm); font-weight: 500; }
 
 /* Form Elements */
 input[type="text"], input[type="password"], input[type="time"], input[type="date"], input[type="datetime-local"], select, textarea {
-  width: 100%; background: var(--bg-input); border: 1px solid transparent; border-radius: 12px;
-  padding: 12px 16px; color: var(--text-main); font-family: inherit; font-size: 14px;
-  transition: all 0.2s ease;
+  width: 100%; background: var(--bg-input); border: 1px solid transparent; border-radius: var(--radius-md);
+  padding: 0 16px; min-height: 44px; color: var(--text-main); font-family: inherit; font-size: 15px;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
+textarea { padding: 12px 16px; min-height: 80px; resize: vertical; }
 input::placeholder, textarea::placeholder { color: var(--text-muted); }
 textarea:focus, input:focus, select:focus { outline: none; border-color: var(--accent-primary); box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.2); background: rgba(255,255,255,0.05); }
 
@@ -328,14 +336,24 @@ textarea:focus, input:focus, select:focus { outline: none; border-color: var(--a
   }
   .sidebar.open { left: 0; }
   
-  /* Hamburger */
+  /* Hamburger & Global Nav Overlay */
   .mobile-menu-btn { 
     display: flex; align-items: center; justify-content: center; 
-    z-index: 1000; position: fixed; top: 12px; left: 12px; 
-    background: rgba(28, 28, 30, 0.85); backdrop-filter: blur(20px); 
-    border-radius: 10px; border: 1px solid rgba(255,255,255,0.1); 
-    color: white; padding: 10px; cursor: pointer;
-    width: 44px; height: 44px;
+    z-index: 90; position: fixed; top: max(env(safe-area-inset-top), 12px); left: 12px; 
+    background: rgba(28, 28, 30, 0.7); backdrop-filter: saturate(180%) blur(20px); -webkit-backdrop-filter: saturate(180%) blur(20px);
+    border-radius: 12px; border: 1px solid rgba(255,255,255,0.08); 
+    color: var(--text-main); padding: 0; cursor: pointer;
+    width: 44px; height: 44px; box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .mobile-menu-btn:active { transform: scale(0.92); opacity: 0.8; }
+  
+  /* Hide Hamburger when in any Detail Stack View (so Back button can take its place) */
+  body[data-form-view="detail"] .mobile-menu-btn,
+  body[data-apt-view="detail"] .mobile-menu-btn,
+  body[data-mobile-view="chat"] .mobile-menu-btn,
+  body[data-mobile-view="crm"] .mobile-menu-btn {
+    opacity: 0; pointer-events: none; transform: scale(0.8);
   }
   
   /* Content area */
@@ -348,19 +366,28 @@ textarea:focus, input:focus, select:focus { outline: none; border-color: var(--a
   
   /* Native App Back Button */
   .btn-back {
-    display: inline-flex !important;
+    display: flex !important;
     align-items: center;
     justify-content: center;
     background: transparent !important;
     border: none !important;
-    color: #0A84FF !important; /* iOS Blue */
-    font-size: 32px !important;
-    font-weight: 300 !important;
-    padding: 0 12px 0 0 !important;
-    margin-left: -6px !important;
+    color: var(--accent-primary) !important; /* iOS Blue */
+    font-size: 38px !important; /* Larger chevron */
+    font-weight: 200 !important; /* Thinner chevron */
+    padding: 0 8px 4px 0 !important;
+    margin-left: 0 !important;
     line-height: 1 !important;
     cursor: pointer;
+    transition: opacity 0.2s;
+    
+    /* Exact same positioning as mobile-menu-btn */
+    position: fixed !important;
+    top: max(env(safe-area-inset-top), 12px) !important;
+    left: 12px !important;
+    z-index: 110 !important; /* Above panels */
+    width: 44px; height: 44px;
   }
+  .btn-back:active { opacity: 0.5; }
   
   /* Performance — reduce blur */
   .card, .login-card, .sidebar { backdrop-filter: blur(10px) !important; -webkit-backdrop-filter: blur(10px) !important; }
@@ -1049,18 +1076,39 @@ details[open] summary {
    ════════════════════════════════════════════ */
 @media (max-width: 768px) {
   
+  /* Content area */
+  .content { 
+    padding: var(--mob-padding) !important; 
+    padding-top: calc(max(env(safe-area-inset-top), 20px) + var(--mob-nav-height)) !important; 
+    padding-bottom: max(env(safe-area-inset-bottom), 24px) !important; 
+    width: 100% !important; max-width: 100% !important;
+    overflow-x: hidden !important;
+  }
+  
+  /* Typography */
+  h1 { font-size: 32px !important; letter-spacing: -1px !important; font-weight: 700 !important; margin-bottom: 24px !important; line-height: 1.1 !important; }
+  h2 { font-size: 20px !important; letter-spacing: -0.5px !important; margin-bottom: 16px !important; }
+  
+  /* Cards edge-to-edge feel */
+  .card { 
+    padding: 20px !important; 
+    border-radius: var(--radius-lg) !important; 
+    margin-bottom: 20px !important;
+    border: 1px solid rgba(255,255,255,0.08) !important;
+  }
+  
   /* 1. Dashboard (Gösterge Paneli) */
   #page-command-center > div:first-child {
     flex-direction: column !important;
     align-items: stretch !important;
-    gap: 12px !important;
+    gap: 16px !important;
   }
   #page-command-center > div:first-child > div:last-child {
     flex-direction: column !important;
     width: 100% !important;
   }
-  #cc-period-pills { width: 100% !important; justify-content: space-between !important; }
-  #cc-period-pills button { flex: 1 !important; text-align: center !important; }
+  #cc-period-pills { width: 100% !important; justify-content: space-between !important; background: var(--bg-input) !important; padding: 4px !important; border-radius: var(--radius-sm) !important; }
+  #cc-period-pills button { flex: 1 !important; text-align: center !important; padding: 8px !important; font-size: 13px !important; }
   #cc-from, #cc-to { width: 100% !important; }
   
   /* Grids */
@@ -1219,22 +1267,24 @@ details[open] summary {
     width: 100vw !important;
     margin-left: -12px !important; /* Offset content padding */
   }
-  .form-mobile-list, .form-mobile-detail {
-    position: absolute !important;
+  .form-mobile-list.active, .form-mobile-detail.active {
+    position: fixed !important;
     top: 0 !important; left: 0 !important;
     width: 100vw !important; height: 100% !important;
-    padding: 12px !important;
-    padding-top: 60px !important; /* Mobile header height */
+    padding: var(--mob-padding) !important;
+    padding-top: calc(max(env(safe-area-inset-top), 20px) + var(--mob-nav-height)) !important;
+    padding-bottom: max(env(safe-area-inset-bottom), 24px) !important;
     overflow-y: auto !important;
-    transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1) !important;
-    background: #000 !important;
-    box-shadow: -4px 0 24px rgba(0,0,0,0.5) !important;
-    z-index: 1;
+    transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.35s !important;
+    background: var(--bg-main) !important;
+    z-index: 99; /* Float above other content */
+    display: block !important;
   }
-  /* States for Forms */
-  .form-mobile-wrapper[data-mobile-view="list"] .form-mobile-list { transform: translateX(0) !important; z-index: 2 !important; opacity: 1 !important; }
-  .form-mobile-wrapper[data-mobile-view="list"] .form-mobile-detail { transform: translateX(100%) !important; opacity: 0 !important; pointer-events: none !important; display: none !important; }
   
-  .form-mobile-wrapper[data-mobile-view="detail"] .form-mobile-list { transform: translateX(-30%) !important; opacity: 0 !important; pointer-events: none !important; display: none !important; }
-  .form-mobile-wrapper[data-mobile-view="detail"] .form-mobile-detail { transform: translateX(0) !important; z-index: 3 !important; opacity: 1 !important; display: block !important; }
+  /* States for Forms */
+  body[data-form-view="list"] .form-mobile-list.active { transform: translateX(0) !important; z-index: 100 !important; opacity: 1 !important; visibility: visible !important; }
+  body[data-form-view="list"] .form-mobile-detail.active { transform: translateX(100%) !important; opacity: 0 !important; pointer-events: none !important; visibility: hidden !important; }
+  
+  body[data-form-view="detail"] .form-mobile-list.active { transform: translateX(-30%) !important; opacity: 0 !important; pointer-events: none !important; visibility: hidden !important; }
+  body[data-form-view="detail"] .form-mobile-detail.active { transform: translateX(0) !important; z-index: 101 !important; opacity: 1 !important; visibility: visible !important; }
 }
