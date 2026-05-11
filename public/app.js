@@ -139,9 +139,10 @@ document.querySelectorAll('.nav-btn').forEach(b => {
     b.classList.add('active');
     document.getElementById('page-' + b.dataset.page).classList.add('active');
     
-    // Form management'a dönüşte fm-view-sheets'i göster
+    // Form management'a dönüşte detay sayfasını kapatıp listeyi göster
     if (b.dataset.page === 'form-management') {
-      document.getElementById('fm-view-sheets').style.display = '';
+      document.getElementById('page-form-detail').style.display = 'none';
+      document.getElementById('page-form-management').style.display = 'block';
     }
     
     // Yükleme fonksiyonları
@@ -1005,14 +1006,17 @@ async function loadChat(phone, channel) {
     const mediaMatch = content.match(/\|media_id:([a-zA-Z0-9_]+)\]/);
     if (mediaMatch) {
       const mediaId = mediaMatch[1];
-      const isImage = content.includes('[📷');
-      const isDoc = content.includes('[📄');
-      // media_id kısmını içerikten temizle
+      const isImage = content.includes('📷') || content.includes('📸') || content.includes('Görüntü gönderildi');
+      const isDoc = content.includes('📄') || content.includes('Belge gönderildi');
+      
+      // media_id kısmını içerikten temizle ve bracket text'i ([...]) kaldır
       const cleanContent = content.replace(/\|media_id:[a-zA-Z0-9_]+\]/, ']');
+      const textWithoutMediaBracket = cleanContent.replace(/\[[^\]]*\]\s*/, '').trim();
+      
       if (isImage) {
-        content = `<img src="/api/panel?action=media&id=${mediaId}&token=${AUTH_TOKEN}" style="max-width:280px;border-radius:12px;margin-bottom:6px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.3);" onclick="window.open('/api/panel?action=media&id=${mediaId}&token=${AUTH_TOKEN}','_blank')" loading="lazy"><br><span style="font-size:12px;opacity:0.8;">${cleanContent.replace(/\[📷[^\]]*\]\s*/, '')}</span>`;
+        content = `<img src="/api/panel?action=media&id=${mediaId}&token=${AUTH_TOKEN}" style="max-width:280px;border-radius:12px;margin-bottom:6px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.3);" onclick="window.open('/api/panel?action=media&id=${mediaId}&token=${AUTH_TOKEN}','_blank')" loading="lazy"><br><span style="font-size:12px;opacity:0.8;">${textWithoutMediaBracket}</span>`;
       } else if (isDoc) {
-        content = `📎 <a href="/api/panel?action=media&id=${mediaId}&token=${AUTH_TOKEN}" target="_blank" style="color:#60a5fa;text-decoration:underline;font-weight:500;">${cleanContent.replace(/\[📄[^\]]*\]\s*/, '') || 'Belgeyi İndir'}</a>`;
+        content = `📎 <a href="/api/panel?action=media&id=${mediaId}&token=${AUTH_TOKEN}" target="_blank" style="color:#60a5fa;text-decoration:underline;font-weight:500;">${textWithoutMediaBracket || 'Belgeyi İndir'}</a>`;
       }
     } else if (m.media_url) {
       // Eski format desteği (media_url alanı varsa)
