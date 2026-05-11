@@ -806,7 +806,9 @@ function renderSheetTable(headers, rows, total) {
   let phoneCol = whatsappCol > -1 ? whatsappCol : telCol;
   let campaignCol = findCol(['campaignname','campaign_name','kampanya']);
   let deptCol = findColStrict(['adname','ad_name','campaign','bolum','bölüm','form'], 40);
-  let statusCol = findColStrict(['durum','status','leadstatus','lead_status','aşama']);
+  // lead_status sütununu öncelikli ara, yoksa genel durum/aşama'ya fallback
+  let statusCol = findColStrict(['leadstatus','lead_status']);
+  if (statusCol === -1) statusCol = findColStrict(['durum','aşama']);
   let notesCol = findColStrict(['geridönüş','geridönus','geridönüs','notlar','notes','geridonus','açıklama','yorum']);
   if (dateCol === -1) dateCol = 0;
   if (nameCol === -1) nameCol = headers.length > 2 ? 2 : -1;
@@ -1496,7 +1498,10 @@ async function syncStageToSheets(phone, newStage) {
     const last10 = cleanP.length > 10 ? cleanP.slice(-10) : cleanP;
     
     const phoneColIdx = window._sheetHeaders.findIndex(h => /phone|telefon|tel|whatsapp|cep/i.test(h.toLowerCase()));
-    const statusColIdx = window._sheetHeaders.findIndex(h => /durum|status|lead_status|aşama/i.test(h.toLowerCase()));
+    // lead_status sütununu öncelikli ara
+    let statusColIdx = window._sheetHeaders.findIndex(h => /^lead[_\s]?status$/i.test((h||'').trim()));
+    if (statusColIdx === -1) statusColIdx = window._sheetHeaders.findIndex(h => /^(durum|aşama|lead[_\s]?stage)$/i.test((h||'').trim()));
+    if (statusColIdx === -1) statusColIdx = window._sheetHeaders.findIndex(h => /lead_status|lead_stage/i.test((h||'').toLowerCase()));
     if (phoneColIdx === -1 || statusColIdx === -1) return;
     
     const rowIdx = window._sheetRows.findIndex(row => {
@@ -2086,7 +2091,7 @@ function openLeadDetail(rowIndex) {
   headers.forEach((h, j) => {
     const lower = h.toLowerCase().replace(/\s+/g, '_');
     // Status ve notlar ayrı yönetiliyor
-    if (lower.includes('lead_status') || lower === 'status' || lower === 'durum') { statusColIndex = j; return; }
+    if (lower.includes('lead_status') || lower.includes('leadstatus') || lower === 'durum' || lower === 'aşama') { statusColIndex = j; return; }
     if (lower.includes('geri_dönüş') || lower.includes('geri_donus') || lower.includes('geri dönüş') || lower === 'notlar') { notesColIndex = j; return; }
     // İletişim kartında zaten gösterilen alanları atla
     if (j === nameCol || j === phoneCol || j === emailCol || j === dateCol || j === campaignNameCol) return;

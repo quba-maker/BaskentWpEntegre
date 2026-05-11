@@ -518,7 +518,10 @@ export default async function handler(req, res) {
               
               const headers = values[0];
               const phoneColIdx = headers.findIndex(h => /phone|telefon|tel|whatsapp|cep/i.test((h || '').toLowerCase()));
-              const statusColIdx = headers.findIndex(h => /durum|status|lead_status|aşama/i.test((h || '').toLowerCase()));
+              // lead_status sütununu öncelikli ara, yoksa genel durum/status/aşama sütununa fallback
+              let statusColIdx = headers.findIndex(h => /^lead[_\s]?status$/i.test((h || '').trim()));
+              if (statusColIdx === -1) statusColIdx = headers.findIndex(h => /^(durum|aşama|lead[_\s]?stage)$/i.test((h || '').trim()));
+              if (statusColIdx === -1) statusColIdx = headers.findIndex(h => /lead_status|lead_stage/i.test((h || '').toLowerCase()));
               if (phoneColIdx === -1 || statusColIdx === -1) continue;
               
               // 3) Satırı bul
