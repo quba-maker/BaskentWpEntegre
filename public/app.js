@@ -178,7 +178,16 @@ const _notifStore = {
 
 // Toast: zarif mini bildirim + panele kaydet
 function toast(message, severity = 'success', options = {}) {
-  const { save = true, title, icon } = options;
+  // Sistemsel/Teknik hataları kullanıcı dostu hale getir
+  if (message && message.includes && message.includes('timeout')) {
+    message = 'Sunucu aşırı yoğunluk sebebiyle yanıt veremedi (Zaman aşımı). Lütfen tekrar deneyin.';
+    severity = 'warning';
+  } else if (message && message.includes && message.includes('Failed to fetch')) {
+    message = 'İnternet bağlantınız koptu veya sunucuya ulaşılamıyor.';
+    severity = 'error';
+  }
+
+  const { save = true, title, icon, phone } = options;
   const el = document.getElementById('toast');
   el.textContent = message;
   el.className = 'toast show ' + severity;
@@ -190,10 +199,11 @@ function toast(message, severity = 'success', options = {}) {
   if (save) {
     const icons = { success: '✅', error: '❌', warning: '⚠️', info: 'ℹ️', critical: '🚨' };
     const added = _notifStore.add({
-      title: title || (severity === 'success' ? 'İşlem Başarılı' : severity === 'error' ? 'Hata' : severity === 'warning' ? 'Uyarı' : severity === 'critical' ? 'Kritik' : 'Bilgi'),
+      title: title || (severity === 'success' ? 'İşlem Başarılı' : severity === 'error' ? 'Sistem Hatası' : severity === 'warning' ? 'Uyarı' : severity === 'critical' ? 'Kritik Hata' : 'Bilgi'),
       desc: message,
       severity: severity,
-      icon: icon || icons[severity] || '📌'
+      icon: icon || icons[severity] || '📌',
+      phone: phone || null
     });
     if (added) updateNotifBadge();
   }
@@ -248,6 +258,14 @@ function getTimeAgo(isoTime) {
 
 // Bildirime tıklama
 function onNotifClick(id) {
+  const all = _notifStore.getAll();
+  const n = all.find(x => x.id === id);
+  if (n && n.phone) {
+    toggleNotifPanel();
+    document.querySelector('[data-page="form-management"]')?.click();
+    if (typeof openFormDetail === 'function') openFormDetail(n.phone);
+  }
+  
   _notifStore.markRead(id);
   renderNotifList();
   updateNotifBadge();
@@ -2049,10 +2067,33 @@ async function setLeadPipelineStage(phone, name, stage, btnEl, sheetsStatusCol, 
       infoEl.innerHTML = `✅ <strong>${cfg.emoji} ${cfg.label}</strong> — DB + Sheets kaydedildi`;
       if (stage === 'appointed') infoEl.innerHTML += '<br>🗓️ Randevu Talepleri paneline eklendi';
     }
-    toast(`${cfg.emoji} ${cfg.label}`);
+    toast(`${cfg.emoji} ${cfg.label}`, 'success', { phone: phone });
+    
+    // UI Anlık Güncelleme
+    if (typeof refreshLeadRowUI === 'function') refreshLeadRowUI(phone);
   } catch(e) {
-    toast('Kayıt hatası', 'error');
+    toast('Kayıt hatası', 'error', { phone: phone });
     if (infoEl) infoEl.innerHTML = '❌ Kayıt hatası';
+  }
+}
+
+// Arka plandaki satır arayüzünü anlık güncellemek için yardımcı fonksiyon
+function refreshLeadRowUI(phone) {
+  if (window._enrichCache && window._enrichCache[phone]) {
+    delete window._enrichCache[phone];
+  }
+  if (!window._sheetRows || !window._sheetHeaders) return;
+  
+  const phoneCol = window._sheetHeaders.findIndex(h => h.toLowerCase().includes('telefon') || h.toLowerCase().includes('phone'));
+  if (phoneCol === -1) return;
+  
+  const targetRows = window._sheetRows.filter(row => {
+    const rawP = row[phoneCol] || '';
+    return rawP.replace(/\D/g, '') === phone;
+  });
+  
+  if (targetRows.length > 0 && typeof enrichLeadCards === 'function') {
+    enrichLeadCards(targetRows, phoneCol);
   }
 }
 
@@ -2086,7 +2127,9 @@ async function addLeadCRMTag(phone, name, tagName) {
     tags: JSON.stringify(tags), lead_stage: pData.lead_stage || 'new'
   });
   renderFormDetailTags(phone, name || pData.patient_name || '', tags);
-  toast(`🏷️ "${tagName}" eklendi`);
+  toast(`🏷️ "${tagName}" eklendi`, 'success', { phone: phone });
+  
+  if (typeof refreshLeadRowUI === 'function') refreshLeadRowUI(phone);
 }
 
 // Etiket kaldır
@@ -2101,7 +2144,9 @@ async function removeLeadCRMTag(phone, name, tagName) {
     tags: JSON.stringify(tags), lead_stage: pData.lead_stage || 'new'
   });
   renderFormDetailTags(phone, name || pData.patient_name || '', tags);
-  toast(`🏷️ "${tagName}" kaldırıldı`);
+  toast(`🗑️ "${tagName}" kaldırıldı`, 'info', { phone: phone });
+  
+  if (typeof refreshLeadRowUI === 'function') refreshLeadRowUI(phone);
 }
 
 function editLeadStatusOptions() {
