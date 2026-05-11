@@ -367,7 +367,7 @@ Cevap: Muayene ücretimiz branşa göre değişiklik göstermektedir. Hangi böl
 
     <!-- FORM YÖNETİMİ -->
     <div id="page-form-management" class="page">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 24px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 20px;">
         <h1 style="margin:0">📋 Form Yönetimi</h1>
         <div style="display:flex; gap: 12px; align-items:center;">
           <div id="sheet-row-count" style="background:var(--accent-primary); color:white; font-size:12px; font-weight:600; padding:6px 14px; border-radius:20px; box-shadow:0 4px 10px rgba(0,0,0,0.1);"></div>
@@ -375,14 +375,31 @@ Cevap: Muayene ücretimiz branşa göre değişiklik göstermektedir. Hangi böl
         </div>
       </div>
 
-      <!-- TEKİL SİSTEM (GOOGLE SHEETS CRM) -->
-      <div id="fm-view-sheets">
-        <div style="margin-bottom:16px;">
-          <div id="sheet-tabs" class="sheet-tabs" style="margin:0; flex-wrap:wrap; gap:8px;"></div>
+      <!-- SEKMELER -->
+      <div style="margin-bottom:12px;">
+        <div id="sheet-tabs" class="sheet-tabs" style="margin:0; flex-wrap:wrap; gap:8px;"></div>
+      </div>
+
+      <!-- ARAMA + FİLTRELER -->
+      <div style="display:flex; gap:10px; margin-bottom:14px; align-items:center; flex-wrap:wrap;">
+        <div style="flex:1; min-width:200px; position:relative;">
+          <input type="text" id="form-search-input" placeholder="İsim, numara veya bölüm ara..." oninput="filterFormLeads()" 
+            style="width:100%; padding:10px 12px 10px 36px; background:var(--bg-hover); border:1px solid var(--border-color); color:white; border-radius:10px; font-size:13px; outline:none;">
+          <span style="position:absolute; left:12px; top:50%; transform:translateY(-50%); color:var(--text-muted); pointer-events:none;">🔍</span>
         </div>
-        <div class="card" style="padding:0; overflow:hidden; border:1px solid var(--border-color);">
-          <div id="lead-list"></div>
+        <div id="form-filter-chips" style="display:flex; gap:6px; flex-wrap:wrap;">
+          <button class="sheet-tab active" onclick="setFormFilter('all')" data-filter="all" style="border-radius:20px; padding:5px 14px; font-size:12px;">Tümü</button>
+          <button class="sheet-tab" onclick="setFormFilter('new')" data-filter="new" style="border-radius:20px; padding:5px 14px; font-size:12px;">🟡 Yeni</button>
+          <button class="sheet-tab" onclick="setFormFilter('active')" data-filter="active" style="border-radius:20px; padding:5px 14px; font-size:12px;">🤖 Bot Aktif</button>
+          <button class="sheet-tab" onclick="setFormFilter('human')" data-filter="human" style="border-radius:20px; padding:5px 14px; font-size:12px;">👤 Manuel</button>
+          <button class="sheet-tab" onclick="setFormFilter('appointed')" data-filter="appointed" style="border-radius:20px; padding:5px 14px; font-size:12px;">✅ Randevu</button>
+          <button class="sheet-tab" onclick="setFormFilter('lost')" data-filter="lost" style="border-radius:20px; padding:5px 14px; font-size:12px;">❌ Olumsuz</button>
         </div>
+      </div>
+
+      <!-- LEAD LİSTESİ -->
+      <div class="card" style="padding:0; overflow:hidden; border:1px solid var(--border-color);">
+        <div id="lead-list"></div>
       </div>
     </div>
 

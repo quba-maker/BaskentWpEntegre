@@ -260,300 +260,259 @@ async function loadDashboard() {
   }).join('') || '<div class="empty">Etkileşim yok</div>';
 }
 
-// ========== FORM YÖNETİMİ ==========
+// ========== FORM YÖNETİMİ — Load Once, Filter Locally ==========
+window._allSheetData = null;
+window._activeSheet = null;
+window._enrichCache = {};
+window._formFilter = 'all';
+window._sheetRefreshTimer = null;
+window._lastSheetRowCount = 0;
+
 function loadFormManagement() {
-  loadSheets();
-  // Sessiz auto-refresh: 30 saniyede bir yeni lead kontrolü
+  loadAllSheets();
   if (window._sheetRefreshTimer) clearInterval(window._sheetRefreshTimer);
   window._sheetRefreshTimer = setInterval(() => {
     const currentPage = document.querySelector('.nav-btn.active')?.dataset?.page;
-    if (currentPage === 'form-management') {
-      silentRefreshSheets();
-    } else {
-      clearInterval(window._sheetRefreshTimer);
-      window._sheetRefreshTimer = null;
-    }
-  }, 30000);
+    if (currentPage === 'form-management') { silentRefreshSheets(); }
+    else { clearInterval(window._sheetRefreshTimer); window._sheetRefreshTimer = null; }
+  }, 45000);
 }
 
-/* GOOGLE SHEETS ENTEGRASYONU (ESKİ SİSTEM) */
-window._activeSheet = null; window._sheetRefreshTimer = null;
-async function loadSheets() {
-  document.getElementById('lead-list').innerHTML = '<p style="text-align:center;padding:40px;color:var(--text-muted);">⏳ Google Sheets verileri yükleniyor...</p>';
+async function loadAllSheets() {
+  document.getElementById('lead-list').innerHTML = renderSkeleton(8);
   try {
-    const resp = await fetch('/api/sheets'); const data = await resp.json();
-    if(!data.success) return document.getElementById('lead-list').innerHTML = `<p class="empty">❌ Hata: ${data.error}</p>`;
-    window._activeSheet = data.activeSheet;
-    document.getElementById('sheet-tabs').innerHTML = data.tabs.map(t => `<button class="sheet-tab ${t.title === data.activeSheet ? 'active' : ''}" onclick="loadSheetData('${t.title.replace(/'/g, "\\'")}')">${t.title}</button>`).join('');
-    renderSheetTable(data.headers, data.rows, data.total);
-  } catch(e) { document.getElementById('lead-list').innerHTML = `<p class="empty">❌ Google Sheets bağlantı hatası</p>`; }
+    const resp = await fetch('/api/sheets?action=all');
+    const data = await resp.json();
+    if (!data.success) { document.getElementById('lead-list').innerHTML = `<p class="empty">❌ ${data.error}</p>`; return; }
+    window._allSheetData = data.allData;
+    const tabs = data.tabs || [];
+    if (!window._activeSheet && tabs.length > 0) window._activeSheet = tabs[0].title;
+    renderSheetTabs(tabs);
+    switchToTab(window._activeSheet);
+  } catch(e) { document.getElementById('lead-list').innerHTML = '<p class="empty">❌ Sheets bağlantı hatası</p>'; }
 }
 
-async function loadSheetData(sheetName) {
-  window._activeSheet = sheetName;
-  document.getElementById('lead-list').innerHTML = '<p style="text-align:center;padding:40px;color:var(--text-muted);">⏳ Sekme yükleniyor...</p>';
-  try {
-    const tabResp = await fetch('/api/sheets?action=tabs'); const tabData = await tabResp.json();
-    if(tabData.success) document.getElementById('sheet-tabs').innerHTML = tabData.tabs.map(t => `<button class="sheet-tab ${t.title === sheetName ? 'active' : ''}" onclick="loadSheetData('${t.title.replace(/'/g, "\\'")}')">${t.title}</button>`).join('');
-    const resp = await fetch(`/api/sheets?action=data&sheet=${encodeURIComponent(sheetName)}`); const data = await resp.json();
-    if(data.success) renderSheetTable(data.headers, data.rows, data.total);
-  } catch(e) {}
+function renderSheetTabs(tabs) {
+  document.getElementById('sheet-tabs').innerHTML = tabs.map(t => {
+    const count = window._allSheetData?.[t.title]?.total || 0;
+    return `<button class="sheet-tab ${t.title === window._activeSheet ? 'active' : ''}" onclick="switchToTab('${t.title.replace(/'/g, "\\'")}')" style="border-radius:8px;">${t.title} <span style="opacity:0.6; font-size:11px;">(${count})</span></button>`;
+  }).join('');
 }
 
-// Sessiz yenileme — loading göstermeden yeni lead kontrolü
+function switchToTab(tabName) {
+  window._activeSheet = tabName;
+  document.querySelectorAll('#sheet-tabs .sheet-tab').forEach(btn => {
+    btn.classList.toggle('active', btn.textContent.includes(tabName));
+  });
+  const si = document.getElementById('form-search-input');
+  if (si) si.value = '';
+  window._formFilter = 'all';
+  document.querySelectorAll('#form-filter-chips .sheet-tab').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.filter === 'all');
+  });
+  const tabData = window._allSheetData?.[tabName];
+  if (tabData) { renderSheetTable(tabData.headers, tabData.rows, tabData.total); }
+  else { document.getElementById('lead-list').innerHTML = '<div class="empty"><div class="empty-icon">📭</div><div>Bu kampanyada veri yok</div></div>'; document.getElementById('sheet-row-count').textContent = '📋 0 kayıt'; }
+}
+
 async function silentRefreshSheets() {
-  if (!window._activeSheet) return;
   try {
-    const resp = await fetch(`/api/sheets?action=data&sheet=${encodeURIComponent(window._activeSheet)}`);
+    const resp = await fetch('/api/sheets?action=all');
     const data = await resp.json();
     if (!data.success) return;
-    const prevCount = window._lastSheetRowCount || 0;
-    const newCount = data.total || 0;
-    if (newCount !== prevCount) {
-      renderSheetTable(data.headers, data.rows, data.total);
+    const oldTotal = window._allSheetData?.[window._activeSheet]?.total || 0;
+    window._allSheetData = data.allData;
+    const newTotal = data.allData?.[window._activeSheet]?.total || 0;
+    if (newTotal !== oldTotal) {
+      renderSheetTabs(data.tabs || []);
+      const tabData = data.allData[window._activeSheet];
+      if (tabData) renderSheetTable(tabData.headers, tabData.rows, tabData.total);
     }
   } catch(e) {}
 }
+
+function renderSkeleton(count) {
+  let s = '<div style="padding:16px; display:flex; flex-direction:column; gap:10px;">';
+  for (let i = 0; i < count; i++) {
+    s += `<div style="display:flex; align-items:center; gap:20px; padding:14px 16px; border-radius:8px; background:var(--bg-hover); animation:pulse 1.5s ease-in-out infinite;"><div style="width:140px; height:14px; background:rgba(255,255,255,0.06); border-radius:4px;"></div><div style="width:160px; height:16px; background:rgba(255,255,255,0.08); border-radius:4px;"></div><div style="flex:1; height:14px; background:rgba(255,255,255,0.05); border-radius:4px;"></div><div style="width:80px; height:24px; background:rgba(255,255,255,0.06); border-radius:12px;"></div></div>`;
+  }
+  return s + '</div>';
+}
+
+function filterFormLeads() {
+  const tabData = window._allSheetData?.[window._activeSheet];
+  if (tabData) renderSheetTable(tabData.headers, tabData.rows, tabData.total);
+}
+
+function setFormFilter(filter) {
+  window._formFilter = filter;
+  document.querySelectorAll('#form-filter-chips .sheet-tab').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.filter === filter);
+  });
+  filterFormLeads();
+}
+
+async function loadSheetData(sheetName) { switchToTab(sheetName); }
+async function loadSheets() { loadAllSheets(); }
 
 function renderSheetTable(headers, rows, total) {
   window._lastSheetRowCount = total;
-  document.getElementById('sheet-row-count').textContent = `📋 ${total} kayıt`;
-  if(!headers || headers.length === 0) return document.getElementById('lead-list').innerHTML = '<div class="empty"><div class="empty-icon">📭</div><div style="font-weight:500; font-size: 15px;">Bu kampanyada henüz kayıt yok</div></div>';
+  if (!headers || headers.length === 0) {
+    document.getElementById('sheet-row-count').textContent = '📋 0 kayıt';
+    return document.getElementById('lead-list').innerHTML = '<div class="empty"><div class="empty-icon">📭</div><div style="font-weight:500;">Kayıt yok</div></div>';
+  }
+  const findCol = (kw) => headers.findIndex(h => { const l = h.toLowerCase().replace(/[_\s]+/g, ''); return kw.some(k => l.includes(k)); });
+  const findColStrict = (kw, mx = 30) => headers.findIndex(h => { if (h.length > mx) return false; const l = h.toLowerCase().replace(/[_\s]+/g, ''); return kw.some(k => l.includes(k)); });
 
-  // Sütun tespiti (tüm sekmelerde çalışması için geniş keyword listesi)
-  const findCol = (keywords) => headers.findIndex(h => {
-    const l = h.toLowerCase().replace(/[_\s]+/g, '');
-    return keywords.some(k => l.includes(k));
-  });
-  
-  // Sıkı eşleşme: Sadece kısa sütun başlıklarında ara (uzun form sorularını dışla)
-  const findColStrict = (keywords, maxLen = 30) => headers.findIndex(h => {
-    if (h.length > maxLen) return false; // Uzun form soruları (ör: "mevcut_kalp_sağlığı_durumunuzu...") dışla
-    const l = h.toLowerCase().replace(/[_\s]+/g, '');
-    return keywords.some(k => l.includes(k));
-  });
-
-  let dateCol = findCol(['time', 'tarih', 'created', 'date', 'zaman']);
-  // İsim sütunu: full_name / isim öncelikli (ad_name Meta reklam adıdır, karıştırma!)
-  let nameCol = findCol(['fullname', 'full_name', 'isim', 'hastadi', 'hastaadi']);
+  let dateCol = findCol(['time','tarih','created','date','zaman']);
+  let nameCol = findCol(['fullname','full_name','isim','hastadi','hastaadi']);
   if (nameCol === -1) nameCol = headers.findIndex(h => /^ad$/i.test(h.trim()) || h.toLowerCase().includes('isim'));
-  // WhatsApp numarası sütunu (birincil — bot buraya mesaj atar)
-  let whatsappCol = headers.findIndex(h => {
-    const l = h.toLowerCase().replace(/[_\s]+/g, '');
-    return l.includes('whatsappnumarası') || l.includes('whatsappnumarasıyazınız');
-  });
-  // Telefon numarası sütunu (ikincil — fallback)
-  let telCol = headers.findIndex(h => {
-    const l = h.toLowerCase().replace(/[_\s]+/g, '');
-    return l === 'phonenumber';
-  });
-  // Liste görünümü için: WhatsApp öncelikli
+  let whatsappCol = headers.findIndex(h => { const l = h.toLowerCase().replace(/[_\s]+/g, ''); return l.includes('whatsappnumarası') || l.includes('whatsappnumarasıyazınız'); });
+  let telCol = headers.findIndex(h => h.toLowerCase().replace(/[_\s]+/g, '') === 'phonenumber');
   let phoneCol = whatsappCol > -1 ? whatsappCol : telCol;
-  let campaignCol = findCol(['campaignname', 'campaign_name', 'kampanya']);
-  let deptCol = findColStrict(['adname', 'ad_name', 'campaign', 'bolum', 'bölüm', 'form'], 40);
-  let statusCol = findColStrict(['durum', 'status', 'leadstatus', 'lead_status', 'aşama']);
-  let notesCol = findColStrict(['geridönüş', 'geridönus', 'geridönüs', 'notlar', 'notes', 'geridonus', 'açıklama', 'yorum']);
-
+  let campaignCol = findCol(['campaignname','campaign_name','kampanya']);
+  let deptCol = findColStrict(['adname','ad_name','campaign','bolum','bölüm','form'], 40);
+  let statusCol = findColStrict(['durum','status','leadstatus','lead_status','aşama']);
+  let notesCol = findColStrict(['geridönüş','geridönus','geridönüs','notlar','notes','geridonus','açıklama','yorum']);
   if (dateCol === -1) dateCol = 0;
   if (nameCol === -1) nameCol = headers.length > 2 ? 2 : -1;
+  window._sheetHeaders = headers; window._sheetRows = rows; window._whatsappCol = whatsappCol; window._telCol = telCol;
 
-  // Kaydet (openLeadDetail kullanır)
-  window._sheetHeaders = headers;
-  window._sheetRows = rows;
-  window._whatsappCol = whatsappCol;
-  window._telCol = telCol;
+  const mn = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  function fmtDate(r) { if (!r) return ''; const d = new Date(r); if (isNaN(d.getTime())) return r.split('T')[0]; return `${String(d.getDate()).padStart(2,'0')} ${mn[d.getMonth()]} ${d.getFullYear()} - ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; }
 
-  // Tarih formatlama yardımcı fonksiyonu: 🗓 09 May 2026 - 15:31
-  const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  function formatLeadDate(rawDate) {
-    if (!rawDate) return '';
-    const d = new Date(rawDate);
-    if (isNaN(d.getTime())) return rawDate.split('T')[0];
-    const day = String(d.getDate()).padStart(2, '0');
-    const mon = monthNames[d.getMonth()];
-    const year = d.getFullYear();
-    const hour = String(d.getHours()).padStart(2, '0');
-    const min = String(d.getMinutes()).padStart(2, '0');
-    return `${day} ${mon} ${year} - ${hour}:${min}`;
+  const sorted = [...rows].sort((a, b) => { const da = dateCol > -1 ? new Date(a[dateCol] || 0) : 0; const db = dateCol > -1 ? new Date(b[dateCol] || 0) : 0; return db - da; });
+  window._sortedRowMap = sorted.map(r => rows.indexOf(r));
+
+  const searchTerm = (document.getElementById('form-search-input')?.value || '').toLowerCase().trim();
+  let filtered = sorted;
+  if (searchTerm) {
+    filtered = sorted.filter(row => {
+      const n = (nameCol > -1 ? row[nameCol] : '') || '';
+      const p = (phoneCol > -1 ? row[phoneCol] : '') || '';
+      const dept = (deptCol > -1 ? row[deptCol] : '') || '';
+      const c = (campaignCol > -1 ? row[campaignCol] : '') || '';
+      return (n + ' ' + p + ' ' + dept + ' ' + c).toLowerCase().includes(searchTerm);
+    });
   }
 
-  // EN YENİ FORMA GÖRE SIRALA
-  const sortedRows = [...rows].sort((a, b) => {
-    const da = dateCol > -1 ? new Date(a[dateCol] || 0) : 0;
-    const db = dateCol > -1 ? new Date(b[dateCol] || 0) : 0;
-    return db - da;
-  });
-  window._sortedRowMap = sortedRows.map(r => rows.indexOf(r));
-
-  let html = `<div class="lead-list-view" style="display:flex; flex-direction:column; gap:8px; padding:0 16px 16px 16px;">`;
   const readLeads = JSON.parse(localStorage.getItem('readLeads') || '[]');
+  let html = '<div class="lead-list-view" style="display:flex; flex-direction:column; gap:8px; padding:12px 16px 16px 16px;">';
+  let rendered = 0;
 
-  sortedRows.forEach((row, si) => {
-    const dateVal = dateCol > -1 ? formatLeadDate(row[dateCol]) : '';
+  filtered.forEach((row) => {
+    const origIdx = rows.indexOf(row);
+    const dateVal = dateCol > -1 ? fmtDate(row[dateCol]) : '';
     const nameVal = nameCol > -1 ? (row[nameCol] || 'Bilinmiyor') : 'Bilinmiyor';
     const phoneVal = phoneCol > -1 ? (row[phoneCol] || '').replace(/\D/g, '') : '';
-    const phoneDisplay = phoneVal.startsWith('90') && phoneVal.length >= 12 
-      ? '+' + phoneVal.substring(0,2) + ' ' + phoneVal.substring(2,5) + ' ' + phoneVal.substring(5,8) + ' ' + phoneVal.substring(8,10) + ' ' + phoneVal.substring(10)
-      : (phoneVal ? '+' + phoneVal : '');
+    const phoneDisplay = phoneVal.startsWith('90') && phoneVal.length >= 12 ? '+' + phoneVal.substring(0,2) + ' ' + phoneVal.substring(2,5) + ' ' + phoneVal.substring(5,8) + ' ' + phoneVal.substring(8,10) + ' ' + phoneVal.substring(10) : (phoneVal ? '+' + phoneVal : '');
     const campaignVal = campaignCol > -1 ? (row[campaignCol] || '') : '';
     const deptVal = deptCol > -1 ? (row[deptCol] || '') : '';
     const statusVal = statusCol > -1 ? (row[statusCol] || '') : '';
     const notesVal = notesCol > -1 ? (row[notesCol] || '') : '';
 
-    // Rozet belirleme (öncelik sırası: durum sütunu > notlar > yeni)
-    let badgeHtml = '<span class="lead-badge badge-new" style="min-width:140px; text-align:center;">🟡 Yeni</span>';
+    let badgeHtml = '<span style="background:#f59e0b18; color:#f59e0b; padding:3px 10px; border-radius:12px; font-size:11px; font-weight:600;">🟡 Yeni</span>';
     let isUnread = true;
+    let leadStatus = 'new';
 
-    if (statusVal.includes('SİSTEME ALINDI') || statusVal.includes('İletişime Geçildi')) {
-      badgeHtml = '<span class="lead-badge badge-contacted" style="min-width:140px; text-align:center;">🟢 Dönüş Yapıldı</span>';
-      isUnread = false;
-    } else if (statusVal.includes('Cevap Verdi') || statusVal.includes('İlgili')) {
-      badgeHtml = '<span class="lead-badge badge-active" style="min-width:140px; text-align:center;">💬 İletişimde</span>';
-      isUnread = false;
-    } else if (statusVal && statusVal.toLowerCase() !== 'created' && statusVal.toLowerCase() !== '') {
-      badgeHtml = `<span class="lead-badge badge-custom" style="min-width:140px; text-align:center;">${statusVal}</span>`;
-      isUnread = false;
-    } else if (notesVal.trim()) {
-      badgeHtml = '<span class="lead-badge badge-contacted" style="min-width:140px; text-align:center;">✅ Cevap Verildi</span>';
-      isUnread = false;
+    if (statusVal.includes('SİSTEME ALINDI') || statusVal.includes('İletişime Geçildi')) { badgeHtml = '<span style="background:#22c55e18; color:#22c55e; padding:3px 10px; border-radius:12px; font-size:11px; font-weight:600;">🟢 Dönüş Yapıldı</span>'; isUnread = false; leadStatus = 'active'; }
+    else if (statusVal.includes('Cevap Verdi') || statusVal.includes('İlgili')) { badgeHtml = '<span style="background:#3b82f618; color:#3b82f6; padding:3px 10px; border-radius:12px; font-size:11px; font-weight:600;">💬 İletişimde</span>'; isUnread = false; leadStatus = 'active'; }
+    else if (statusVal && statusVal.toLowerCase() !== 'created') { badgeHtml = `<span style="background:var(--bg-hover); color:white; padding:3px 10px; border-radius:12px; font-size:11px; font-weight:600;">${statusVal}</span>`; isUnread = false; leadStatus = 'active'; }
+    else if (notesVal.trim()) { badgeHtml = '<span style="background:#22c55e18; color:#22c55e; padding:3px 10px; border-radius:12px; font-size:11px; font-weight:600;">✅ Cevap Verildi</span>'; isUnread = false; leadStatus = 'active'; }
+    if (readLeads.includes(phoneVal || `row-${origIdx}`)) isUnread = false;
+
+    const cached = window._enrichCache[phoneVal];
+    if (cached) {
+      if (cached.leadStage === 'appointed') leadStatus = 'appointed';
+      else if (cached.leadStage === 'lost') leadStatus = 'lost';
+      else if (cached.conversationStatus === 'human') leadStatus = 'human';
+      else if (cached.conversationStatus === 'active' || (cached.leadStage && cached.leadStage !== 'new')) leadStatus = 'active';
     }
 
-    if (readLeads.includes(phoneVal || `row-${si}`)) isUnread = false;
+    if (window._formFilter !== 'all') {
+      if (window._formFilter === 'new' && leadStatus !== 'new') return;
+      if (window._formFilter === 'active' && leadStatus !== 'active') return;
+      if (window._formFilter === 'human' && leadStatus !== 'human') return;
+      if (window._formFilter === 'appointed' && leadStatus !== 'appointed') return;
+      if (window._formFilter === 'lost' && leadStatus !== 'lost') return;
+    }
+    rendered++;
 
-    const unreadStyle = isUnread
-      ? 'border-left: 4px solid #4ade80; background: rgba(74, 222, 128, 0.05);'
-      : 'border-left: 4px solid transparent; background: var(--card-bg);';
+    const unreadStyle = isUnread ? 'border-left:4px solid #4ade80; background:rgba(74,222,128,0.05);' : 'border-left:4px solid transparent;';
+    const campaignBadge = campaignVal ? `<span style="background:rgba(191,90,242,0.15); color:#bf5af2; padding:2px 8px; border-radius:6px; font-size:11px; font-weight:500;">📣 ${campaignVal.substring(0,40)}${campaignVal.length > 40 ? '…' : ''}</span>` : '';
 
-    const campaignBadge = campaignVal ? `<span style="background:rgba(191,90,242,0.15); color:#bf5af2; padding:2px 8px; border-radius:6px; font-size:11px; font-weight:500; white-space:nowrap;">📣 ${campaignVal.substring(0, 40)}${campaignVal.length > 40 ? '…' : ''}</span>` : '';
-
-    html += `
-      <div class="lead-card list-row" id="lead-row-${si}" onclick="openLeadDetail(${si})" style="display:flex; align-items:center; justify-content:space-between; border-radius:8px; padding:12px 16px; cursor:pointer; border:1px solid var(--border-color); transition:all 0.2s; ${unreadStyle}">
-        <div style="display:flex; align-items:center; gap:24px; flex:1;">
-          <div style="width:170px; font-size:12px; color:var(--text-muted);">🗓 ${dateVal}</div>
-          <div style="width:200px;">
-            <div style="font-weight:600; color:white; margin-bottom:4px;">👤 ${nameVal}</div>
-            <div style="font-size:12px; color:#25D366; display:flex; align-items:center; gap:6px;">🟢 ${phoneDisplay} ${countryBadge(phoneVal)}</div>
-          </div>
-          <div style="flex:1; font-size:13px; color:var(--text-muted); display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-            ${campaignBadge}
-            ${deptVal ? `<span style="background:var(--bg-hover); padding:4px 8px; border-radius:4px;">🩺 ${deptVal.substring(0, 50)}${deptVal.length > 50 ? '...' : ''}</span>` : ''}
-          </div>
-          <div id="lead-enrich-${si}" style="display:flex; align-items:center; gap:6px; font-size:12px;"></div>
-        </div>
-        <div>${badgeHtml}</div>
+    html += `<div class="lead-card list-row" id="lead-row-${origIdx}" onclick="openLeadDetail(${origIdx})" style="display:flex; align-items:center; justify-content:space-between; border-radius:8px; padding:12px 16px; cursor:pointer; border:1px solid var(--border-color); transition:all 0.2s; ${unreadStyle}">
+      <div style="display:flex; align-items:center; gap:24px; flex:1;">
+        <div style="width:170px; font-size:12px; color:var(--text-muted);">🗓 ${dateVal}</div>
+        <div style="width:200px;"><div style="font-weight:600; color:white; margin-bottom:4px;">👤 ${nameVal}</div><div style="font-size:12px; color:#25D366;">🟢 ${phoneDisplay} ${countryBadge(phoneVal)}</div></div>
+        <div style="flex:1; font-size:13px; color:var(--text-muted); display:flex; align-items:center; gap:8px; flex-wrap:wrap;">${campaignBadge}${deptVal ? `<span style="background:var(--bg-hover); padding:4px 8px; border-radius:4px;">🩺 ${deptVal.substring(0,50)}${deptVal.length > 50 ? '...' : ''}</span>` : ''}</div>
+        <div id="lead-enrich-${origIdx}" style="display:flex; align-items:center; gap:6px; font-size:12px;"></div>
       </div>
-    `;
+      <div id="lead-badge-${origIdx}">${badgeHtml}</div>
+    </div>`;
   });
 
+  if (rendered === 0 && (searchTerm || window._formFilter !== 'all')) html += '<div class="empty" style="padding:40px;"><div class="empty-icon">🔍</div><div>Filtreye uygun lead bulunamadı</div></div>';
   html += '</div>';
   document.getElementById('lead-list').innerHTML = html;
-  enrichLeadCards(sortedRows, phoneCol);
+  document.getElementById('sheet-row-count').textContent = `📋 ${rendered}${rendered !== total ? ' / ' + total : ''} kayıt`;
+  enrichLeadCards(filtered, phoneCol);
 }
 
 async function enrichLeadCards(rows, phoneCol) {
   const token = localStorage.getItem('panel_token') || '';
-  const batchSize = 5;
+  const batchSize = 8;
   for (let si = 0; si < rows.length; si += batchSize) {
     const batch = rows.slice(si, si + batchSize);
-    await Promise.all(batch.map(async (row, bIdx) => {
-      const idx = si + bIdx;
+    await Promise.all(batch.map(async (row) => {
       const rawPhone = phoneCol > -1 ? (row[phoneCol] || '') : '';
       if (!rawPhone) return;
-      const phone = rawPhone.replace(/\D/g, ''); // p:+905... → 905...
+      const phone = rawPhone.replace(/\D/g, '');
       if (!phone || phone.length < 10) return;
-      try {
-        const resp = await fetch(`/api/panel?action=lead-context&phone=${encodeURIComponent(phone)}`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        if (!resp.ok) { console.warn(`⚠️ Enrich ${phone}: HTTP ${resp.status}`); return; }
-        const ctx = await resp.json();
-        if (ctx.error) { console.warn(`⚠️ Enrich ${phone}: ${ctx.error}`); return; }
-        const el = document.getElementById(`lead-enrich-${idx}`);
-        if (!el) return;
+      const origIdx = window._sheetRows?.indexOf(row) ?? -1;
+      if (origIdx === -1) return;
+
+      let ctx = window._enrichCache[phone];
+      if (!ctx) {
+        try {
+          const resp = await fetch(`/api/panel?action=lead-context&phone=${encodeURIComponent(phone)}`, { headers: { Authorization: `Bearer ${token}` } });
+          if (!resp.ok) return;
+          ctx = await resp.json();
+          if (ctx.error) return;
+          window._enrichCache[phone] = ctx;
+        } catch(e) { return; }
+      }
+
+      const el = document.getElementById(`lead-enrich-${origIdx}`);
+      if (el) {
         let h = '';
         const icons = { whatsapp: '📱', instagram: '📸', messenger: '💬', web: '🌐' };
         (ctx.channels || []).forEach(ch => { h += `<span title="${ch}" style="font-size:14px;">${icons[ch] || '📞'}</span>`; });
-        
-        // Bot durumu badge'i
-        if (ctx.conversationStatus === 'active') {
-          h += `<span style="background:rgba(48,209,88,0.12); color:#30D158; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600; white-space:nowrap;">🤖 Bot Aktif</span>`;
-        } else if (ctx.conversationStatus === 'human') {
-          h += `<span style="background:rgba(255,159,10,0.12); color:#FF9F0A; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600; white-space:nowrap;">👤 Manuel</span>`;
-        }
-        
-        // Lead skoru
-        if (ctx.score > 0) {
-          const sc = ctx.score >= 50 ? '#f97316' : ctx.score >= 30 ? '#facc15' : '#6b7280';
-          h += `<span style="background:${sc}22; color:${sc}; border:1px solid ${sc}44; border-radius:4px; padding:2px 6px; font-weight:600; font-size:11px;">⚡ ${ctx.score}</span>`;
-        }
-        
-        // Son mesaj kısa önizleme
-        if (ctx.lastMessage) {
-          h += `<span style="color:#60a5fa; font-size:11px; max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${ctx.lastMessage.content}">&ldquo;${ctx.lastMessage.content.substring(0, 25)}...&rdquo;</span>`;
-        }
-        
+        if (ctx.score > 0) { const sc = ctx.score >= 50 ? '#f97316' : ctx.score >= 30 ? '#facc15' : '#6b7280'; h += `<span style="background:${sc}22; color:${sc}; border:1px solid ${sc}44; border-radius:4px; padding:2px 6px; font-weight:600; font-size:11px;">⚡ ${ctx.score}</span>`; }
+        if (ctx.lastMessage) { h += `<span style="color:#60a5fa; font-size:11px; max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${ctx.lastMessage.content}">&ldquo;${ctx.lastMessage.content.substring(0,25)}...&rdquo;</span>`; }
         el.innerHTML = h;
-        
-        // Badge'i DB'ye göre güncelle — lead durumu + bot aktif her zaman göster
-        const badgeEl = document.getElementById(`lead-row-${idx}`);
-        if (badgeEl) {
-          const badgeContainer = badgeEl.querySelector(':scope > div:last-child');
-          if (!badgeContainer) return;
-          
-          // Lead durumu badge'i
-          const stages = { new: '🆕 Yeni', contacted: '📞 İlk Temas', discovery: '🩺 Analiz', negotiation: '🏛️ İkna', hot_lead: '🔥 Sıcak', appointed: '✅ Randevu', lost: '❌ Kayıp' };
-          const stageColors = { new: '#f59e0b', contacted: '#3b82f6', discovery: '#8b5cf6', negotiation: '#f97316', hot_lead: '#ef4444', appointed: '#22c55e', lost: '#6b7280' };
-          const leadStage = ctx.leadStage || (ctx.conversationStatus ? 'contacted' : null);
-          
-          let statusBadges = '';
-          
-          // Bot durumu
-          if (ctx.conversationStatus === 'active') {
-            statusBadges += `<span style="background:rgba(48,209,88,0.12); color:#30D158; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600; white-space:nowrap; border:1px solid rgba(48,209,88,0.2);">🤖 Bot</span>`;
-          } else if (ctx.conversationStatus === 'human') {
-            statusBadges += `<span style="background:rgba(255,159,10,0.12); color:#FF9F0A; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600; white-space:nowrap;">👤 Manuel</span>`;
-          }
-          
-          // Lead stage (her zaman göster)
-          if (leadStage) {
-            const sc = stageColors[leadStage] || '#6b7280';
-            statusBadges += `<span style="background:${sc}18; color:${sc}; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600; white-space:nowrap; border:1px solid ${sc}33;">🎯 ${stages[leadStage] || leadStage}</span>`;
-          }
-          
-          // Evrensel etiketler (tags) — Olumsuz, Randevu, Takvimde vb.
-          const tagColors = { 'Olumsuz':'#ef4444', 'Randevu Alındı':'#22c55e', 'Takvimde':'#3b82f6', 'Randevu İstiyor':'#f59e0b', 'Düşünüyor':'#a855f7', 'Tedavi Oldu':'#10b981' };
-          if (ctx.tags && ctx.tags.length > 0) {
-            ctx.tags.forEach(tag => {
-              const tc = tagColors[tag] || '#6b7280';
-              statusBadges += `<span style="background:${tc}15; color:${tc}; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600; white-space:nowrap; border:1px solid ${tc}33;">${tag}</span>`;
-            });
-          }
-          
-          // "Yeni" badge: sadece readLeads'te YOKSA ve DB'de stage'i de new/null ise
-          const readLeads = JSON.parse(localStorage.getItem('readLeads') || '[]');
-          const phone = rawPhone.replace(/\D/g, '');
-          const isStillNew = !readLeads.includes(phone) && (!leadStage || leadStage === 'new');
-          const newBadge = isStillNew ? `<span class="lead-badge badge-new" style="padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600;">🟡 Yeni</span>` : '';
-          
-          // Sıralama: [Durum Etiketleri] [Yeni] — Yeni en sağda
-          const finalBadges = statusBadges + newBadge;
-          
-          if (finalBadges) {
-            badgeContainer.innerHTML = `<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">${finalBadges}</div>`;
-          }
-          
-          // Yeşil sol kenarlık da güncelle
-          if (!isStillNew) {
-            badgeEl.style.borderLeftColor = 'transparent';
-            badgeEl.style.background = 'var(--card-bg)';
-          }
-        }
-      } catch(e) { console.warn(`⚠️ Enrich hata (${rawPhone}):`, e.message); }
+      }
+
+      const badgeEl = document.getElementById(`lead-badge-${origIdx}`);
+      if (!badgeEl) return;
+      const stages = { new:'🆕 Yeni', contacted:'📞 İlk Temas', discovery:'🩺 Analiz', negotiation:'🏛️ İkna', hot_lead:'🔥 Sıcak', appointed:'✅ Randevu', lost:'❌ Kayıp' };
+      const stageColors = { new:'#f59e0b', contacted:'#3b82f6', discovery:'#8b5cf6', negotiation:'#f97316', hot_lead:'#ef4444', appointed:'#22c55e', lost:'#6b7280' };
+      const leadStage = ctx.leadStage || (ctx.conversationStatus ? 'contacted' : null);
+      let sb = '';
+      if (ctx.conversationStatus === 'active') sb += `<span style="background:rgba(48,209,88,0.12); color:#30D158; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600;">🤖 Bot</span>`;
+      else if (ctx.conversationStatus === 'human') sb += `<span style="background:rgba(255,159,10,0.12); color:#FF9F0A; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600;">👤 Manuel</span>`;
+      if (leadStage && leadStage !== 'new') { const sc = stageColors[leadStage] || '#6b7280'; sb += `<span style="background:${sc}18; color:${sc}; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600;">${stages[leadStage] || leadStage}</span>`; }
+      const tagColors = { 'Olumsuz':'#ef4444','Randevu Alındı':'#22c55e','Takvimde':'#3b82f6','Randevu İstiyor':'#f59e0b','Düşünüyor':'#a855f7','Tedavi Oldu':'#10b981' };
+      if (ctx.tags?.length > 0) ctx.tags.forEach(tag => { const tc = tagColors[tag] || '#6b7280'; sb += `<span style="background:${tc}15; color:${tc}; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600;">${tag}</span>`; });
+      const readLeads = JSON.parse(localStorage.getItem('readLeads') || '[]');
+      const isNew = !readLeads.includes(phone) && (!leadStage || leadStage === 'new');
+      if (isNew) sb += `<span style="background:#f59e0b18; color:#f59e0b; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600;">🟡 Yeni</span>`;
+      if (sb) badgeEl.innerHTML = `<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">${sb}</div>`;
+      const rowEl = document.getElementById(`lead-row-${origIdx}`);
+      if (rowEl && !isNew) { rowEl.style.borderLeftColor = 'transparent'; rowEl.style.background = 'var(--card-bg)'; }
     }));
   }
 }
-
-
 async function updateSheetCell(row, col, value) {
   try {
     const resp = await fetch('/api/sheets?action=update', {

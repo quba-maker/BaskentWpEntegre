@@ -75,6 +75,35 @@ export default async function handler(req, res) {
       });
     }
 
+    // TÜM sekmeleri tek seferde çek (Load Once, Filter Locally)
+    if (action === 'all') {
+      const metaResp = await axios.get(BASE_URL, {
+        params: { key: SHEETS_API_KEY, fields: 'sheets.properties' }
+      });
+      const tabs = metaResp.data.sheets
+        .filter(s => !s.properties.hidden)
+        .map(s => ({ id: s.properties.sheetId, title: s.properties.title, index: s.properties.index }));
+
+      // Google Sheets batchGet — tüm sekmeleri tek HTTP çağrısında çek
+      const ranges = tabs.map(t => encodeURIComponent(t.title)).join('&ranges=');
+      const batchResp = await axios.get(`${BASE_URL}/values:batchGet`, {
+        params: { key: SHEETS_API_KEY, ranges: tabs.map(t => t.title), valueRenderOption: 'FORMATTED_VALUE' }
+      });
+
+      const allData = {};
+      (batchResp.data.valueRanges || []).forEach((vr, i) => {
+        const tabName = tabs[i]?.title;
+        const values = vr.values || [];
+        allData[tabName] = {
+          headers: values[0] || [],
+          rows: values.slice(1),
+          total: Math.max(values.length - 1, 0)
+        };
+      });
+
+      return res.json({ success: true, tabs, allData });
+    }
+
     // Default: tüm sekmeleri ve ilk sekmenin verilerini getir (gizliler hariç)
     const metaResp = await axios.get(BASE_URL, {
       params: { key: SHEETS_API_KEY, fields: 'sheets.properties' }

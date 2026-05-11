@@ -89,6 +89,7 @@ body {
 .nav-footer { padding: 16px 8px 0; display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text-muted); font-weight: 500; border-top: 1px solid rgba(255,255,255,0.05); margin-top: 20px; }
 .status-dot { width: 8px; height: 8px; background: var(--system-green); border-radius: 50%; box-shadow: 0 0 12px rgba(50, 215, 75, 0.8); animation: pulse-green 2s infinite; }
 @keyframes pulse-green { 0% { box-shadow: 0 0 0 0 rgba(50,215,75,0.4); } 70% { box-shadow: 0 0 0 6px rgba(50,215,75,0); } 100% { box-shadow: 0 0 0 0 rgba(50,215,75,0); } }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
 
 /* Content Area */
 .content { flex: 1; padding: 40px 48px; overflow-y: auto; background: transparent; position: relative; z-index: 1; }
