@@ -63,6 +63,7 @@ function navigateMobileView(view, isPopState = false) {
   if (!layout) return;
   
   layout.setAttribute('data-mobile-view', view);
+  document.body.setAttribute('data-mobile-view', view);
   window.mobileView = view;
   
   // History API Integration for Hardware Back Button

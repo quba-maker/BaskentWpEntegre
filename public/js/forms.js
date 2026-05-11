@@ -111,12 +111,44 @@ async function loadChat(phone, channel) {
   if(!data) return;
   const msgs = data.messages || data; // Geriye uyumluluk (eğer eski format gelirse)
   const chatEl = document.getElementById('chat-messages');
+  
+  let lastDateLabel = '';
+  
   chatEl.innerHTML = msgs.map(m => {
+    const msgDate = new Date(m.created_at);
+    const now = new Date();
+    
+    // Tarih etiketi hesaplama
+    let dateLabel = '';
+    const isToday = msgDate.toDateString() === now.toDateString();
+    
+    const yesterday = new Date(now);
+    yesterday.setDate(now.getDate() - 1);
+    const isYesterday = msgDate.toDateString() === yesterday.toDateString();
+    
+    if (isToday) {
+      dateLabel = 'Bugün';
+    } else if (isYesterday) {
+      dateLabel = 'Dün';
+    } else if (now.getTime() - msgDate.getTime() < 7 * 24 * 60 * 60 * 1000) {
+      const days = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'];
+      dateLabel = days[msgDate.getDay()];
+    } else {
+      const isCurrentYear = msgDate.getFullYear() === now.getFullYear();
+      dateLabel = msgDate.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: isCurrentYear ? undefined : 'numeric' });
+    }
+    
+    let separatorHtml = '';
+    if (dateLabel !== lastDateLabel) {
+      separatorHtml = `<div style="display:flex; justify-content:center; margin: 16px 0 8px 0; width:100%;"><span style="background:rgba(255,255,255,0.06); padding:4px 12px; border-radius:12px; font-size:11px; font-weight:600; color:var(--text-muted); backdrop-filter:blur(10px); box-shadow:0 2px 4px rgba(0,0,0,0.1); border:1px solid rgba(255,255,255,0.05);">${dateLabel}</span></div>`;
+      lastDateLabel = dateLabel;
+    }
+
     const isOut = m.direction === 'out';
     const isBot = m.model_used && m.model_used !== 'panel' && m.model_used !== 'toplu';
     const cls = `message-bubble ${isOut ? 'out' : 'in'} ${isOut && isBot ? 'bot-reply' : ''}`;
     const senderLabel = isOut ? (isBot ? '🤖 Bot' : '👤 Sen') : '📩 Hasta';
-    const info = `<div class="msg-info">${senderLabel} · ${new Date(m.created_at).toLocaleTimeString('tr-TR', {hour:'2-digit',minute:'2-digit'})} ${isBot ? '<span class="bot-indicator">' + m.model_used + '</span>' : ''}</div>`;
+    const info = `<div class="msg-info">${senderLabel} · ${msgDate.toLocaleTimeString('tr-TR', {hour:'2-digit',minute:'2-digit'})} ${isBot ? '<span class="bot-indicator">' + m.model_used + '</span>' : ''}</div>`;
     
     // Medya içerik kontrolü — content'ten media_id parse et
     let content = escapeHtml(m.content || '');
@@ -140,7 +172,7 @@ async function loadChat(phone, channel) {
       if (m.media_type === 'image') content = `<img src="${m.media_url}" style="max-width:min(240px,100%);border-radius:8px;margin-bottom:4px;"><br>${escapeHtml(m.content||'')}`;
       else content = `📎 <a href="${m.media_url}" target="_blank" style="color:inherit;text-decoration:underline">${escapeHtml(m.content||'Dosya')}</a>`;
     }
-    return `<div class="${cls}">${content}${info}</div>`;
+    return separatorHtml + `<div class="${cls}">${content}${info}</div>`;
   }).join('');
   chatEl.scrollTop = chatEl.scrollHeight;
   lastChatLength = msgs.length; // Başlangıç mesaj sayısını kaydet
