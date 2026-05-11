@@ -85,10 +85,9 @@ export default async function handler(req, res) {
         .map(s => ({ id: s.properties.sheetId, title: s.properties.title, index: s.properties.index }));
 
       // Google Sheets batchGet — tüm sekmeleri tek HTTP çağrısında çek
-      const ranges = tabs.map(t => encodeURIComponent(t.title)).join('&ranges=');
-      const batchResp = await axios.get(`${BASE_URL}/values:batchGet`, {
-        params: { key: SHEETS_API_KEY, ranges: tabs.map(t => t.title), valueRenderOption: 'FORMATTED_VALUE' }
-      });
+      const rangeParams = tabs.map(t => `ranges=${encodeURIComponent(t.title)}`).join('&');
+      const batchUrl = `${BASE_URL}/values:batchGet?key=${SHEETS_API_KEY}&${rangeParams}&valueRenderOption=FORMATTED_VALUE`;
+      const batchResp = await axios.get(batchUrl);
 
       const allData = {};
       (batchResp.data.valueRanges || []).forEach((vr, i) => {

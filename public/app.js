@@ -283,12 +283,44 @@ async function loadAllSheets() {
   try {
     const resp = await fetch('/api/sheets?action=all');
     const data = await resp.json();
-    if (!data.success) { document.getElementById('lead-list').innerHTML = `<p class="empty">❌ ${data.error}</p>`; return; }
+    if (!data.success || !data.allData) {
+      // Fallback: eski yöntem ile yükle
+      console.warn('batchGet failed, falling back to legacy mode');
+      return loadAllSheetsFallback();
+    }
     window._allSheetData = data.allData;
     const tabs = data.tabs || [];
     if (!window._activeSheet && tabs.length > 0) window._activeSheet = tabs[0].title;
     renderSheetTabs(tabs);
     switchToTab(window._activeSheet);
+  } catch(e) {
+    console.warn('loadAllSheets error:', e);
+    return loadAllSheetsFallback();
+  }
+}
+
+// Fallback: Eski yöntem — tabs + ilk tab'ı ayrı ayrı çek
+async function loadAllSheetsFallback() {
+  try {
+    const resp = await fetch('/api/sheets');
+    const data = await resp.json();
+    if (!data.success) { document.getElementById('lead-list').innerHTML = `<p class="empty">❌ ${data.error}</p>`; return; }
+    window._allSheetData = {};
+    window._allSheetData[data.activeSheet] = { headers: data.headers, rows: data.rows, total: data.total };
+    window._activeSheet = data.activeSheet;
+    const tabs = data.tabs || [];
+    renderSheetTabs(tabs);
+    switchToTab(window._activeSheet);
+    // Arka planda diğer tab'ları da yükle
+    for (const tab of tabs) {
+      if (tab.title === data.activeSheet) continue;
+      try {
+        const r = await fetch(`/api/sheets?action=data&sheet=${encodeURIComponent(tab.title)}`);
+        const d = await r.json();
+        if (d.success) window._allSheetData[tab.title] = { headers: d.headers, rows: d.rows, total: d.total };
+        renderSheetTabs(tabs);
+      } catch(e2) {}
+    }
   } catch(e) { document.getElementById('lead-list').innerHTML = '<p class="empty">❌ Sheets bağlantı hatası</p>'; }
 }
 
