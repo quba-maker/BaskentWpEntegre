@@ -1,5 +1,6 @@
 import { neon } from '@neondatabase/serverless';
 import axios from 'axios';
+import { defaultPrompts } from '../lib/ai/prompts.js';
 
 // 🔒 Simple in-memory rate limiter (IP başına dakikada max 120 istek)
 const rateLimitMap = new Map();
@@ -162,7 +163,6 @@ export default async function handler(req, res) {
 
     // VARSAYILAN PROMPT
     if (action === 'default-prompt') {
-      const { defaultPrompts } = await import('../lib/ai/prompts.js');
       return res.json({ 
         wp: defaultPrompts.whatsapp, 
         tr: defaultPrompts.instagram, 

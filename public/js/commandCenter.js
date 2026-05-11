@@ -561,7 +561,7 @@ function renderSheetTable(headers, rows, total) {
 }
 
 async function enrichLeadCards(rows, phoneCol) {
-  const token = localStorage.getItem('panel_token') || '';
+  const token = localStorage.getItem('panel_auth') || '';
   const batchSize = 8;
   for (let si = 0; si < rows.length; si += batchSize) {
     const batch = rows.slice(si, si + batchSize);

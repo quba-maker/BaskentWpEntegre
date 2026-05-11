@@ -473,6 +473,11 @@ async function api(a, m='GET', b=null) {
   if(b) o.body = JSON.stringify(b);
   const r = await fetch(API+'?action='+a, o);
   if(r.status===401) { checkAuth(); return null; }
-  return r.json();
+  try {
+    return await r.json();
+  } catch(e) {
+    console.error('API Parse Error:', e);
+    return null;
+  }
 }
 
