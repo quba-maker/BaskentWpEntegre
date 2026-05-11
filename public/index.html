@@ -392,7 +392,7 @@ Cevap: Muayene ücretimiz branşa göre değişiklik göstermektedir. Hangi böl
     </div>
 
     <!-- FORM YÖNETİMİ -->
-    <div id="page-form-management" class="page">
+    <div id="page-form-management" class="page form-mobile-list">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 20px;">
         <h1 style="margin:0">📋 Form Yönetimi</h1>
         <div style="display:flex; gap: 12px; align-items:center;">
@@ -430,9 +430,10 @@ Cevap: Muayene ücretimiz branşa göre değişiklik göstermektedir. Hangi böl
     </div>
 
     <!-- FORM YÖNETİMİ DETAY SAYFASI -->
-    <div id="page-form-detail" class="page" style="display:none;">
+    <div id="page-form-detail" class="page form-mobile-detail" style="display:none;">
       <div style="display:flex; align-items:center; gap:16px; margin-bottom:24px;">
-        <button class="btn btn-secondary" onclick="goBackToForms()">⬅️ Geri Dön</button>
+        <button class="mobile-only-btn btn-back" onclick="goBackToForms()" title="Geri">‹</button>
+        <button class="btn btn-secondary desktop-only-btn" onclick="goBackToForms()">⬅️ Geri Dön</button>
         <h1 style="margin:0">📄 Form Detayı</h1>
       </div>
       <div class="card" id="fd-content" style="max-width:100%;">

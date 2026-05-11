@@ -285,6 +285,7 @@ textarea:focus, input:focus, select:focus { outline: none; border-color: var(--a
 .apt-calendar-sidebar { flex: 0 0 280px; }
 
 @media (max-width: 768px) {
+  .desktop-only-btn { display: none !important; }
   /* ════════════════════════════════════════════
      🌐 GLOBAL — Overflow Kill + Base Layout
      ════════════════════════════════════════════ */
@@ -1118,4 +1119,59 @@ details[open] summary {
     max-width: 100vw !important;
     overflow-x: hidden !important;
   }
+
+  /* ════════════════════════════════════════════
+     📅 RANDEVU MERKEZİ (Stack Navigation)
+     ════════════════════════════════════════════ */
+  .apt-inbox-layout {
+    position: relative !important;
+    display: block !important;
+    overflow: hidden !important;
+    height: calc(100vh - 200px) !important;
+  }
+  .apt-list-panel, .apt-detail-panel {
+    position: absolute !important;
+    top: 0 !important; left: 0 !important;
+    width: 100% !important; height: 100% !important;
+    max-width: 100% !important; max-height: 100% !important;
+    border-radius: 0 !important; border: none !important;
+    transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1) !important;
+    background: #050505 !important;
+    z-index: 1;
+  }
+  /* States for Appointments */
+  .apt-inbox-layout[data-mobile-view="list"] .apt-list-panel { transform: translateX(0) !important; z-index: 2 !important; opacity: 1 !important; }
+  .apt-inbox-layout[data-mobile-view="list"] .apt-detail-panel { transform: translateX(100%) !important; opacity: 0 !important; pointer-events: none !important; }
+  
+  .apt-inbox-layout[data-mobile-view="detail"] .apt-list-panel { transform: translateX(-30%) !important; opacity: 0 !important; pointer-events: none !important; }
+  .apt-inbox-layout[data-mobile-view="detail"] .apt-detail-panel { transform: translateX(0) !important; z-index: 3 !important; opacity: 1 !important; }
+
+  /* ════════════════════════════════════════════
+     📋 FORM YÖNETİMİ (Stack Navigation wrapper)
+     ════════════════════════════════════════════ */
+  .form-mobile-wrapper {
+    position: relative !important;
+    display: block !important;
+    overflow: hidden !important;
+    height: 100vh !important;
+    width: 100vw !important;
+    margin-left: -12px !important; /* Offset content padding */
+  }
+  .form-mobile-list, .form-mobile-detail {
+    position: absolute !important;
+    top: 0 !important; left: 0 !important;
+    width: 100vw !important; height: 100% !important;
+    padding: 12px !important;
+    padding-top: 60px !important; /* Mobile header height */
+    overflow-y: auto !important;
+    transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1) !important;
+    background: #000 !important;
+    z-index: 1;
+  }
+  /* States for Forms */
+  .form-mobile-wrapper[data-mobile-view="list"] .form-mobile-list { transform: translateX(0) !important; z-index: 2 !important; opacity: 1 !important; }
+  .form-mobile-wrapper[data-mobile-view="list"] .form-mobile-detail { transform: translateX(100%) !important; opacity: 0 !important; pointer-events: none !important; display: none !important; }
+  
+  .form-mobile-wrapper[data-mobile-view="detail"] .form-mobile-list { transform: translateX(-30%) !important; opacity: 0 !important; pointer-events: none !important; display: none !important; }
+  .form-mobile-wrapper[data-mobile-view="detail"] .form-mobile-detail { transform: translateX(0) !important; z-index: 3 !important; opacity: 1 !important; display: block !important; }
 }

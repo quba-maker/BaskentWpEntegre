@@ -40,16 +40,21 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     // Handle hardware back button
     window.addEventListener('popstate', (e) => {
-      if (e.state && e.state.mobileView) {
-        navigateMobileView(e.state.mobileView, true);
+      if (e.state) {
+        if (e.state.mobileView) navigateMobileView(e.state.mobileView, true);
+        if (e.state.aptView) navigateMobileAptView(e.state.aptView, true);
+        if (e.state.formView) navigateMobileFormView(e.state.formView, true);
       } else {
+        // Fallbacks
         navigateMobileView('list', true);
+        navigateMobileAptView('list', true);
+        navigateMobileFormView('list', true);
       }
     });
   }
 });
 
-// 📱 Native Mobile Stack Navigation Logic
+// 📱 Native Mobile Stack Navigation Logic (Chat)
 window.mobileView = 'list';
 function navigateMobileView(view, isPopState = false) {
   if (window.innerWidth > 768) return; // Only apply on mobile
@@ -62,13 +67,50 @@ function navigateMobileView(view, isPopState = false) {
   
   // History API Integration for Hardware Back Button
   if (!isPopState) {
-    if (view === 'list') {
-      history.pushState({ mobileView: 'list' }, '', '#list');
-    } else if (view === 'chat') {
-      history.pushState({ mobileView: 'chat' }, '', '#chat');
-    } else if (view === 'crm') {
-      history.pushState({ mobileView: 'crm' }, '', '#crm');
-    }
+    if (view === 'list') history.pushState({ mobileView: 'list' }, '', '#chat-list');
+    else if (view === 'chat') history.pushState({ mobileView: 'chat' }, '', '#chat-view');
+    else if (view === 'crm') history.pushState({ mobileView: 'crm' }, '', '#chat-crm');
+  }
+}
+
+// 📱 Native Mobile Stack Navigation Logic (Appointments)
+window.aptView = 'list';
+function navigateMobileAptView(view, isPopState = false) {
+  if (window.innerWidth > 768) return; // Only apply on mobile
+  
+  const layout = document.querySelector('.apt-inbox-layout');
+  if (!layout) return;
+  
+  layout.setAttribute('data-mobile-view', view);
+  window.aptView = view;
+  
+  if (!isPopState) {
+    if (view === 'list') history.pushState({ aptView: 'list' }, '', '#apt-list');
+    else if (view === 'detail') history.pushState({ aptView: 'detail' }, '', '#apt-detail');
+  }
+}
+
+// 📱 Native Mobile Stack Navigation Logic (Forms)
+window.formView = 'list';
+function navigateMobileFormView(view, isPopState = false) {
+  if (window.innerWidth > 768) {
+    // Desktop behavior fallback
+    if (view === 'list') goBackToForms();
+    return;
+  }
+  
+  document.body.setAttribute('data-form-view', view);
+  window.formView = view;
+  
+  // Make sure both pages are active in DOM so CSS can animate them
+  document.getElementById('page-form-management').classList.add('active');
+  document.getElementById('page-form-detail').classList.add('active');
+  document.getElementById('page-form-management').style.display = '';
+  document.getElementById('page-form-detail').style.display = '';
+  
+  if (!isPopState) {
+    if (view === 'list') history.pushState({ formView: 'list' }, '', '#form-list');
+    else if (view === 'detail') history.pushState({ formView: 'detail' }, '', '#form-detail');
   }
 }
 
@@ -195,10 +237,19 @@ document.querySelectorAll('.nav-btn').forEach(b => {
     b.classList.add('active');
     document.getElementById('page-' + b.dataset.page).classList.add('active');
     
-    // Form management'a dönüşte detay sayfasını kapatıp listeyi göster
+    // Form management'a dönüşte listeyi göster
     if (b.dataset.page === 'form-management') {
-      document.getElementById('page-form-detail').style.display = 'none';
-      document.getElementById('page-form-management').style.display = 'block';
+      if (window.innerWidth <= 768) {
+        navigateMobileFormView('list');
+      } else {
+        document.getElementById('page-form-detail').style.display = 'none';
+        document.getElementById('page-form-management').style.display = 'block';
+      }
+    }
+    
+    // Appointments'a geçişte listeyi göster
+    if (b.dataset.page === 'appointments' && window.innerWidth <= 768) {
+      navigateMobileAptView('list');
     }
     
     // Yükleme fonksiyonları
@@ -2317,8 +2368,12 @@ function openLeadDetail(rowIndex) {
   document.getElementById('fd-content').innerHTML = detailsHtml + editHtml;
   
   // Görünümleri değiştir
-  document.getElementById('page-form-management').style.display = 'none';
-  document.getElementById('page-form-detail').style.display = 'flex';
+  if (window.innerWidth <= 768) {
+    navigateMobileFormView('detail');
+  } else {
+    document.getElementById('page-form-management').style.display = 'none';
+    document.getElementById('page-form-detail').style.display = 'flex';
+  }
 
   // Async: DB'den CRM verisini yükle (etiketler vb.)
   loadFormDetailCRM(cleanPhone);
@@ -2654,8 +2709,12 @@ async function triggerSingleOutbound(phone, name) {
   }
 }
 function goBackToForms() {
-  document.getElementById('page-form-detail').style.display = 'none';
-  document.getElementById('page-form-management').style.display = 'flex';
+  if (window.innerWidth <= 768) {
+    navigateMobileFormView('list');
+  } else {
+    document.getElementById('page-form-detail').style.display = 'none';
+    document.getElementById('page-form-management').style.display = 'flex';
+  }
   // Listeyi sessizce yenile ki yapılan editler karta yansısın
   if (window._activeSheet) loadSheetData(window._activeSheet);
 }
@@ -2882,6 +2941,8 @@ async function loadAptDetail(eventId) {
   selectedAptId = eventId;
   renderAptList();
   
+  if (window.innerWidth <= 768) navigateMobileAptView('detail');
+  
   const panel = document.getElementById('apt-detail-content');
   panel.innerHTML = '<div style="padding:20px;"><div class="skeleton skeleton-text" style="width:60%;height:20px;margin-bottom:12px;"></div><div class="skeleton skeleton-text short"></div><div class="skeleton skeleton-card" style="margin-top:16px;"></div><div class="skeleton skeleton-card"></div><div class="skeleton skeleton-card"></div></div>';
   
@@ -2967,12 +3028,15 @@ async function loadAptDetail(eventId) {
     <div style="padding:20px;display:flex;flex-direction:column;gap:14px;">
       <!-- Header -->
       <div style="display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:12px;border-bottom:1px solid rgba(255,255,255,0.06);">
-        <div>
-          <div style="font-size:18px;font-weight:700;">${escapeHtml(nm)}</div>
-          <div style="display:flex;gap:10px;margin-top:4px;flex-wrap:wrap;align-items:center;">
-            <span style="font-size:12px;color:var(--text-muted);">📱 ${escapeHtml(e.phone_number)}</span>
-            ${e.city?`<span style="font-size:12px;color:var(--text-muted);">📍 ${escapeHtml(e.city)}</span>`:''}
-            ${e.email?`<span style="font-size:12px;color:var(--text-muted);">✉️ ${escapeHtml(e.email)}</span>`:''}
+        <div style="display:flex; align-items:center; gap:8px;">
+          <button class="mobile-only-btn btn-back" onclick="navigateMobileAptView('list')" title="Geri">‹</button>
+          <div>
+            <div style="font-size:18px;font-weight:700;">${escapeHtml(nm)}</div>
+            <div style="display:flex;gap:10px;margin-top:4px;flex-wrap:wrap;align-items:center;">
+              <span style="font-size:12px;color:var(--text-muted);">📱 ${escapeHtml(e.phone_number)}</span>
+              ${e.city?`<span style="font-size:12px;color:var(--text-muted);">📍 ${escapeHtml(e.city)}</span>`:''}
+              ${e.email?`<span style="font-size:12px;color:var(--text-muted);">✉️ ${escapeHtml(e.email)}</span>`:''}
+            </div>
           </div>
         </div>
         <div style="display:flex;gap:6px;">
