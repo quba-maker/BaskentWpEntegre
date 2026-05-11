@@ -46,7 +46,7 @@ export default async function handler(req, res) {
           // Görüşme notunu ekle
           const conv = await sql`SELECT notes FROM conversations WHERE phone_number LIKE ${likePattern} LIMIT 1`;
           const oldNotes = conv[0]?.notes || '';
-          const newNoteEntry = `[SİSTEM - ${userFirstName} - ${new Date().toLocaleTimeString('tr-TR')}]: 📞 Arandı ve ulaşıldı. Sonuç bekleniyor.`;
+          const newNoteEntry = `[SİSTEM - ${userFirstName} - ${new Date().toLocaleTimeString('tr-TR', {timeZone:'Europe/Istanbul',hour:'2-digit',minute:'2-digit'})}]: 📞 Arandı ve ulaşıldı. Sonuç bekleniyor.`;
           await sql`UPDATE conversations SET notes = ${oldNotes ? oldNotes + '\n' + newNoteEntry : newNoteEntry}, updated_at = NOW() WHERE phone_number LIKE ${likePattern}`;
 
           // Popup göster
@@ -195,7 +195,7 @@ export default async function handler(req, res) {
             else if (action === 'thinking') systemNote = '💬 Hasta düşünecek. 24 saat sonra otomatik takip.';
             else if (action === 'lost') systemNote = '❌ Hasta iptal etti / ilgilenmiyor.';
             
-            const newNoteEntry = `[SİSTEM - ${userFirstName} - ${new Date().toLocaleTimeString('tr-TR')}]: ${systemNote}`;
+            const newNoteEntry = `[SİSTEM - ${userFirstName} - ${new Date().toLocaleTimeString('tr-TR', {timeZone:'Europe/Istanbul',hour:'2-digit',minute:'2-digit'})}]: ${systemNote}`;
             const updatedNotes = oldNotes ? `${oldNotes}\n${newNoteEntry}` : newNoteEntry;
             await sql`UPDATE conversations SET notes = ${updatedNotes}, updated_at = NOW() WHERE phone_number LIKE ${likePattern}`;
           }
@@ -239,7 +239,7 @@ export default async function handler(req, res) {
         if (conv.length > 0) {
           const oldNotes = conv[0].notes || '';
           const lastChannel = conv[0].last_channel || 'whatsapp';
-          const newNoteEntry = `[${userFirstName} - ${new Date().toLocaleTimeString('tr-TR')}]: ${replyText}`;
+          const newNoteEntry = `[${userFirstName} - ${new Date().toLocaleTimeString('tr-TR', {timeZone:'Europe/Istanbul',hour:'2-digit',minute:'2-digit'})}]: ${replyText}`;
           const updatedNotes = oldNotes ? `${oldNotes}\n${newNoteEntry}` : newNoteEntry;
           await sql`UPDATE conversations SET notes = ${updatedNotes}, updated_at = NOW() WHERE phone_number LIKE ${likePattern}`;
 

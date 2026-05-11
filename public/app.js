@@ -872,13 +872,14 @@ async function loadChat(phone, channel) {
           const skipKeys = ['id', 'leadgen_id', 'form_id', 'ad_id', 'adset_id', 'campaign_id', 'platform', 'is_organic', 'created_time', 'phone_number_id', 'full_name', 'phone_number'];
           const entries = Object.entries(rawData).filter(([key]) => !skipKeys.includes(key.toLowerCase()));
           if (entries.length > 0) {
-            formAnswersHtml = `<div id="form-answers-${fi}" style="display:none; margin-top:12px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.08);">
-              <div style="display:flex; flex-direction:column; gap:8px;">
+            formAnswersHtml = `<div id="form-answers-${fi}" style="display:none; margin-top:12px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.06);">
+              <div style="display:flex; flex-direction:column; gap:6px;">
               ${entries.map(([key, val]) => {
                 const label = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-                return `<div style="background:rgba(0,0,0,0.15); padding:8px 10px; border-radius:6px; border-left:2px solid var(--accent-primary);">
-                  <div style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:3px;">${label}</div>
-                  <div style="font-size:13px; color:white; font-weight:400; line-height:1.4;">${val}</div>
+                const cleanVal = String(val || '').replace(/_/g, ' ');
+                return `<div style="background:rgba(255,255,255,0.03); padding:10px 12px; border-radius:10px; border:1px solid rgba(255,255,255,0.04);">
+                  <div style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px; font-weight:500;">${label}</div>
+                  <div style="font-size:13px; color:white; font-weight:400; line-height:1.5; word-wrap:break-word; overflow-wrap:break-word; white-space:pre-wrap;">${cleanVal}</div>
                 </div>`;
               }).join('')}
               </div>
@@ -2273,7 +2274,13 @@ async function loadAptDetail(eventId) {
     const skip = ['id','leadgen_id','form_id','ad_id','adset_id','campaign_id','platform','is_organic','created_time','phone_number_id','full_name','phone_number'];
     const entries = Object.entries(raw).filter(([k]) => !skip.includes(k.toLowerCase()));
     if (entries.length > 0) {
-      formHtml = entries.map(([k,v]) => `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.04);"><span style="font-size:11px;color:var(--text-muted);">${k.replace(/_/g,' ')}</span><span style="font-size:11px;font-weight:500;max-width:200px;text-align:right;">${v}</span></div>`).join('');
+      formHtml = entries.map(([k,v]) => {
+        const cleanV = String(v || '').replace(/_/g, ' ');
+        return `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.04);gap:12px;">
+          <span style="font-size:11px;color:var(--text-muted);min-width:100px;">${k.replace(/_/g,' ')}</span>
+          <span style="font-size:11px;font-weight:500;max-width:220px;text-align:right;word-wrap:break-word;overflow-wrap:break-word;">${cleanV}</span>
+        </div>`;
+      }).join('');
     }
   } catch(err) {}
   
