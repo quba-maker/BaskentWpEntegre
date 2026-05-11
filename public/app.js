@@ -455,14 +455,14 @@ async function loadAllSheetsFallback() {
 function renderSheetTabs(tabs) {
   document.getElementById('sheet-tabs').innerHTML = tabs.map(t => {
     const count = window._allSheetData?.[t.title]?.total || 0;
-    return `<button class="sheet-tab ${t.title === window._activeSheet ? 'active' : ''}" onclick="switchToTab('${t.title.replace(/'/g, "\\'")}')" style="border-radius:8px;">${t.title} <span style="opacity:0.6; font-size:11px;">(${count})</span></button>`;
+    return `<button class="sheet-tab ${t.title === window._activeSheet ? 'active' : ''}" data-title="${t.title.replace(/"/g, '&quot;')}" onclick="switchToTab('${t.title.replace(/'/g, "\\'")}')" style="border-radius:8px;">${t.title} <span style="opacity:0.6; font-size:11px;">(${count})</span></button>`;
   }).join('');
 }
 
 function switchToTab(tabName) {
   window._activeSheet = tabName;
   document.querySelectorAll('#sheet-tabs .sheet-tab').forEach(btn => {
-    btn.classList.toggle('active', btn.textContent.includes(tabName));
+    btn.classList.toggle('active', btn.dataset.title === tabName);
   });
   const si = document.getElementById('form-search-input');
   if (si) si.value = '';
@@ -662,12 +662,17 @@ async function enrichLeadCards(rows, phoneCol) {
       if (ctx.conversationStatus === 'active') sb += `<span style="background:rgba(48,209,88,0.12); color:#30D158; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600;">🤖 Bot</span>`;
       else if (ctx.conversationStatus === 'human') sb += `<span style="background:rgba(255,159,10,0.12); color:#FF9F0A; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600;">👤 Manuel</span>`;
       if (leadStage && leadStage !== 'new') { const sc = stageColors[leadStage] || '#6b7280'; sb += `<span style="background:${sc}18; color:${sc}; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600;">${stages[leadStage] || leadStage}</span>`; }
-      const tagColors = { 'Olumsuz':'#ef4444','Randevu Alındı':'#22c55e','Takvimde':'#3b82f6','Randevu İstiyor':'#f59e0b','Düşünüyor':'#a855f7','Tedavi Oldu':'#10b981' };
+      const tagColors = { 'Olumsuz':'#ef4444','Randevu Alındı':'#22c55e','Takvimde':'#3b82f6','Randevu İstiyor':'#f59e0b','Düşünüyor':'#a855f7','Tedavi Oldu':'#10b981', 'Sıcak Lead':'#ef4444' };
       if (ctx.tags?.length > 0) ctx.tags.forEach(tag => { const tc = tagColors[tag] || '#6b7280'; sb += `<span style="background:${tc}15; color:${tc}; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600;">${tag}</span>`; });
       const readLeads = JSON.parse(localStorage.getItem('readLeads') || '[]');
       const isNew = !readLeads.includes(phone) && (!leadStage || leadStage === 'new');
       if (isNew) sb += `<span style="background:#f59e0b18; color:#f59e0b; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600;">🟡 Yeni</span>`;
-      if (sb) badgeEl.innerHTML = `<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">${sb}</div>`;
+      
+      if (ctx.score >= 50 && (!ctx.tags || !ctx.tags.includes('Sıcak Lead'))) {
+        sb += `<span style="background:rgba(239,68,68,0.15); color:#ef4444; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:700;">🔥 Sıcak Lead</span>`;
+      }
+
+      if (sb) badgeEl.innerHTML = `<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">${sb}</div>`;
       const rowEl = document.getElementById(`lead-row-${origIdx}`);
       if (rowEl && !isNew) { rowEl.style.borderLeftColor = 'transparent'; rowEl.style.background = 'var(--card-bg)'; }
     }));
