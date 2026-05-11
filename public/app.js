@@ -122,7 +122,7 @@ async function checkAuth() {
     if(r.ok) { 
       document.getElementById('login-screen').style.display='none'; 
       document.getElementById('main-app').style.display='flex'; 
-      loadDashboard(); 
+      loadCommandCenter(); 
       startPolling(); // SWR Polling başlat
     }
     else { document.getElementById('login-screen').style.display='flex'; document.getElementById('main-app').style.display='none'; document.getElementById('login-error').textContent=AUTH_TOKEN?'Hatalı Şifre':''; }
@@ -146,7 +146,7 @@ document.querySelectorAll('.nav-btn').forEach(b => {
     }
     
     // Yükleme fonksiyonları
-    ({dashboard:loadDashboard, kanban:loadKanban, leads:loadSheets, conversations:loadConversations, training:loadPrompt, templates:loadTemplates, analytics:loadAnalytics, settings:loadSettings, appointments:loadAppointments, 'form-management':loadFormManagement})[b.dataset.page]?.();
+    ({'command-center':loadCommandCenter, kanban:loadKanban, leads:loadSheets, conversations:loadConversations, training:loadPrompt, templates:loadTemplates, settings:loadSettings, appointments:loadAppointments, 'form-management':loadFormManagement})[b.dataset.page]?.();
     // Mobilde sidebar'ı kapat
     document.getElementById('sidebar')?.classList.remove('open');
   });
@@ -353,7 +353,217 @@ async function api(a, m='GET', b=null) {
   return r.json();
 }
 
-/* DASHBOARD */
+/* ═══════════════════════════════════════════════════════════ */
+/* KOMUTA MERKEZİ — Birleşik Dashboard + Analitik             */
+/* ═══════════════════════════════════════════════════════════ */
+let _ccChart = null;
+let _ccData = null;
+let _ccCurrentChart = 'leads';
+
+function setCCPeriod(days) {
+  const to = new Date();
+  const from = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  document.getElementById('cc-from').value = from.toISOString().slice(0, 10);
+  document.getElementById('cc-to').value = to.toISOString().slice(0, 10);
+  document.querySelectorAll('#cc-period-pills .sheet-tab').forEach(b => b.classList.remove('active'));
+  document.querySelector(`#cc-period-pills [data-days="${days}"]`)?.classList.add('active');
+  loadCommandCenter();
+}
+
+function switchCCChart(type) {
+  _ccCurrentChart = type;
+  document.querySelectorAll('#cc-chart-tabs .sheet-tab').forEach(b => b.classList.remove('active'));
+  document.querySelector(`#cc-chart-tabs [data-chart="${type}"]`)?.classList.add('active');
+  if (_ccData) renderCCChart(_ccData);
+}
+
+async function loadCommandCenter() {
+  // Tarih aralığını input'lardan oku
+  let from = document.getElementById('cc-from')?.value;
+  let to = document.getElementById('cc-to')?.value;
+  if (!from) {
+    const d = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    from = d.toISOString().slice(0, 10);
+    document.getElementById('cc-from').value = from;
+  }
+  if (!to) {
+    to = new Date().toISOString().slice(0, 10);
+    document.getElementById('cc-to').value = to;
+  }
+
+  const d = await api(`analytics-summary&from=${from}&to=${to}`);
+  if (!d || d.error) return;
+  _ccData = d;
+
+  // ── KPI Hero Bar ──
+  const k = d.kpi;
+  const kpiEl = document.getElementById('cc-kpi-bar');
+  const kpiCards = [
+    { val: k.totalLeads, label: 'Toplam Lead', color: '#BF5AF2', icon: '📋' },
+    { val: `${k.conversionRate}%`, label: 'Dönüşüm', color: k.conversionRate >= 20 ? '#30D158' : k.conversionRate >= 10 ? '#FF9F0A' : '#FF453A', icon: '🎯' },
+    { val: k.appointedCount, label: 'Randevu', color: '#30D158', icon: '✅' },
+    { val: `${k.avgResponseMin || '<1'}dk`, label: 'Ort. Yanıt', color: k.avgResponseMin <= 5 ? '#30D158' : '#FF9F0A', icon: '⏱' },
+    { val: `$${k.totalAICost}`, label: 'AI Maliyet', color: '#0A84FF', icon: '🤖' },
+    { val: k.lostCount, label: 'Kayıp', color: '#FF453A', icon: '❌' }
+  ];
+  kpiEl.innerHTML = kpiCards.map(c => `
+    <div class="stat-card" style="text-align:center; padding:18px 12px;">
+      <div style="font-size:28px; font-weight:800; color:${c.color}; letter-spacing:-1px;">${c.val}</div>
+      <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">${c.icon} ${c.label}</div>
+    </div>
+  `).join('');
+
+  // ── Grafik ──
+  renderCCChart(d);
+
+  // ── Funnel ──
+  const funnelEl = document.getElementById('cc-funnel');
+  const maxFunnel = Math.max(...d.funnel.map(f => f.count), 1);
+  const funnelColors = { new: '#F59E0B', contacted: '#3B82F6', discovery: '#8B5CF6', negotiation: '#F97316', hot_lead: '#EF4444', appointed: '#22C55E', lost: '#6B7280' };
+  funnelEl.innerHTML = d.funnel.map(f => {
+    const pct = Math.round((f.count / maxFunnel) * 100);
+    const c = funnelColors[f.stage] || '#6B7280';
+    return `<div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+      <span style="font-size:11px; width:90px; color:var(--text-muted); text-align:right;">${f.label}</span>
+      <div style="flex:1; background:var(--bg-hover); border-radius:4px; height:20px; overflow:hidden; position:relative;">
+        <div style="width:${pct}%; height:100%; background:${c}; border-radius:4px; transition:width 0.5s;"></div>
+        <span style="position:absolute; right:6px; top:2px; font-size:10px; font-weight:700; color:white;">${f.count}</span>
+      </div>
+    </div>`;
+  }).join('');
+
+  // ── Ülkeler ──
+  const countriesEl = document.getElementById('cc-countries');
+  countriesEl.innerHTML = d.countries.length > 0 ? d.countries.map(c => {
+    const cvr = c.count > 0 ? Math.round((c.converted / c.count) * 100) : 0;
+    return `<div style="display:flex; justify-content:space-between; align-items:center; padding:8px 12px; background:var(--bg-hover); border-radius:8px; margin-bottom:4px;">
+      <span style="font-size:13px; font-weight:500;">🌍 ${c.city}</span>
+      <div style="display:flex; gap:12px; align-items:center;">
+        <span style="font-size:12px; color:var(--text-muted);">${c.count} lead</span>
+        <span style="font-size:12px; font-weight:700; color:${cvr >= 20 ? '#30D158' : cvr >= 10 ? '#FF9F0A' : '#FF453A'};">${cvr}%</span>
+      </div>
+    </div>`;
+  }).join('') : '<div class="empty" style="padding:20px;">📍 Henüz şehir/ülke verisi yok</div>';
+
+  // ── Bölümler ──
+  const deptEl = document.getElementById('cc-departments');
+  deptEl.innerHTML = d.departments.length > 0 ? d.departments.map(dep => {
+    const cvr = dep.count > 0 ? Math.round((dep.converted / dep.count) * 100) : 0;
+    return `<div style="display:flex; justify-content:space-between; align-items:center; padding:8px 12px; background:var(--bg-hover); border-radius:8px; margin-bottom:4px;">
+      <span style="font-size:13px; font-weight:500;">🏥 ${dep.name}</span>
+      <div style="display:flex; gap:12px; align-items:center;">
+        <span style="font-size:12px; color:var(--text-muted);">${dep.count} hasta</span>
+        <span style="font-size:12px; font-weight:700; color:${cvr >= 20 ? '#30D158' : cvr >= 10 ? '#FF9F0A' : '#FF453A'};">${cvr}% dönüşüm</span>
+      </div>
+    </div>`;
+  }).join('') : '<div class="empty" style="padding:20px;">🏥 Henüz bölüm verisi yok</div>';
+
+  // ── Kampanyalar ──
+  const campEl = document.getElementById('cc-campaigns');
+  campEl.innerHTML = d.campaigns.length > 0 ? `
+    <div style="display:grid; grid-template-columns:2fr 1fr 1fr 1fr; gap:4px; font-size:11px; color:var(--text-muted); padding:4px 12px; font-weight:600;">
+      <span>Kampanya</span><span style="text-align:center">Lead</span><span style="text-align:center">Dönüşüm</span><span style="text-align:center">Kayıp</span>
+    </div>
+    ${d.campaigns.map(c => {
+      const cvr = c.leads > 0 ? Math.round((c.converted / c.leads) * 100) : 0;
+      return `<div style="display:grid; grid-template-columns:2fr 1fr 1fr 1fr; gap:4px; padding:8px 12px; background:var(--bg-hover); border-radius:8px; margin-bottom:4px; font-size:12px; align-items:center;">
+        <span style="font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${c.name}">📣 ${c.name.substring(0, 35)}${c.name.length > 35 ? '…' : ''}</span>
+        <span style="text-align:center; font-weight:600;">${c.leads}</span>
+        <span style="text-align:center; font-weight:700; color:${cvr >= 20 ? '#30D158' : '#FF9F0A'};">${c.converted} (${cvr}%)</span>
+        <span style="text-align:center; color:#FF453A;">${c.lost}</span>
+      </div>`;
+    }).join('')}
+  ` : '<div class="empty" style="padding:20px;">📣 Henüz kampanya verisi yok</div>';
+
+  // ── AI Model & Maliyet ──
+  const modelsEl = document.getElementById('cc-models');
+  const totalCost = d.models.reduce((s, m) => s + m.estimatedCost, 0);
+  modelsEl.innerHTML = d.models.length > 0 ? `
+    ${d.models.map(m => `
+      <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 12px; background:var(--bg-hover); border-radius:8px; margin-bottom:4px;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span style="font-size:14px;">🤖</span>
+          <span style="font-size:13px; font-weight:500;">${m.model}</span>
+        </div>
+        <div style="display:flex; gap:16px; align-items:center;">
+          <span style="font-size:12px; color:var(--text-muted);">${m.count} çağrı</span>
+          <span style="font-size:12px; font-weight:700; color:#0A84FF;">$${m.estimatedCost.toFixed(3)}</span>
+        </div>
+      </div>
+    `).join('')}
+    <div style="display:flex; justify-content:space-between; padding:10px 12px; margin-top:8px; background:rgba(10,132,255,0.1); border-radius:8px; border:1px solid rgba(10,132,255,0.2);">
+      <span style="font-size:13px; font-weight:600;">💰 Toplam AI Maliyeti</span>
+      <span style="font-size:15px; font-weight:800; color:#0A84FF;">$${totalCost.toFixed(2)}</span>
+    </div>
+    <div style="font-size:11px; color:var(--text-muted); margin-top:6px; text-align:center;">
+      📊 Koordinatör maliyetine göre <strong style="color:#30D158;">${k.humanSavings}x</strong> tasarruf
+    </div>
+  ` : '<div class="empty" style="padding:20px;">🤖 Model kullanım verisi yok</div>';
+
+  // ── Kayıp Lead Analizi ──
+  const lostEl = document.getElementById('cc-lost-leads');
+  lostEl.innerHTML = d.lostLeads.length > 0 ? `
+    <div style="display:grid; grid-template-columns:1fr 1fr 1fr 2fr auto; gap:4px; font-size:11px; color:var(--text-muted); padding:4px 12px; font-weight:600;">
+      <span>Hasta</span><span>Bölüm</span><span>Tarih</span><span>Son Mesaj</span><span></span>
+    </div>
+    ${d.lostLeads.map(l => `
+      <div style="display:grid; grid-template-columns:1fr 1fr 1fr 2fr auto; gap:4px; padding:8px 12px; background:var(--bg-hover); border-radius:8px; margin-bottom:4px; font-size:12px; align-items:center;">
+        <span style="font-weight:500;">${l.name || '—'}</span>
+        <span style="color:var(--text-muted);">${l.dept || '—'}</span>
+        <span style="color:var(--text-muted);">${l.date ? new Date(l.date).toLocaleDateString('tr-TR') : '—'}</span>
+        <span style="color:var(--text-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${(l.lastMessage || '').substring(0, 100)}">${(l.lastMessage || '—').substring(0, 50)}${(l.lastMessage || '').length > 50 ? '…' : ''}</span>
+        <button onclick="document.querySelector('[data-page=\\'conversations\\']')?.click(); setTimeout(function(){ loadChat('${l.phone}', 'whatsapp'); }, 300);" style="background:rgba(10,132,255,0.15); color:#0A84FF; border:1px solid rgba(10,132,255,0.3); padding:4px 10px; border-radius:6px; font-size:11px; cursor:pointer; white-space:nowrap;">🔄 Recovery</button>
+      </div>
+    `).join('')}
+    <div style="font-size:11px; color:var(--text-muted); margin-top:8px; text-align:center;">
+      💡 Recovery butonuna tıklayarak kayıp lead'lerle yeniden iletişime geçebilirsiniz
+    </div>
+  ` : '<div class="empty" style="padding:20px;">✅ Kayıp lead yok — harika!</div>';
+}
+
+function renderCCChart(d) {
+  const ctx = document.getElementById('cc-main-chart');
+  if (!ctx) return;
+  if (_ccChart) { _ccChart.destroy(); _ccChart = null; }
+  
+  const chartCfg = { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#888', font: { size: 10 } } }, y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#888', font: { size: 10 } }, beginAtZero: true } } };
+
+  if (_ccCurrentChart === 'leads') {
+    _ccChart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: d.dailyLeads.map(x => new Date(x.date).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' })),
+        datasets: [{ label: 'Yeni Lead', data: d.dailyLeads.map(x => x.count), backgroundColor: 'rgba(191,90,242,0.6)', borderRadius: 6, borderSkipped: false }]
+      },
+      options: chartCfg
+    });
+  } else if (_ccCurrentChart === 'messages') {
+    _ccChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: d.dailyMessages.map(x => new Date(x.date).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' })),
+        datasets: [
+          { label: 'Gelen', data: d.dailyMessages.map(x => x.incoming), borderColor: '#30D158', backgroundColor: 'rgba(48,209,88,0.1)', fill: true, tension: 0.4, pointRadius: 2 },
+          { label: 'Giden', data: d.dailyMessages.map(x => x.outgoing), borderColor: '#0A84FF', backgroundColor: 'rgba(10,132,255,0.1)', fill: true, tension: 0.4, pointRadius: 2 }
+        ]
+      },
+      options: { ...chartCfg, plugins: { legend: { display: true, labels: { color: '#888', font: { size: 11 } } } } }
+    });
+  } else if (_ccCurrentChart === 'hourly') {
+    const hours = Array.from({ length: 24 }, (_, i) => i);
+    const hourData = hours.map(h => { const found = d.hourly.find(x => x.hour === h); return found ? found.count : 0; });
+    _ccChart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: hours.map(h => `${h}:00`),
+        datasets: [{ label: 'Mesaj', data: hourData, backgroundColor: 'rgba(16,185,129,0.5)', borderRadius: 4, borderSkipped: false }]
+      },
+      options: chartCfg
+    });
+  }
+}
+
+/* DASHBOARD (eski — artık kullanılmıyor ama geriye uyumluluk) */
 async function loadDashboard() {
   const d = await api('dashboard'); if(!d) return;
   document.getElementById('stat-today').textContent = d.todayMessages;
@@ -2853,7 +3063,7 @@ checkAuth();
 // Otomatik yenileme + bildirim (8 saniyede bir)
 setInterval(async () => {
   const page = document.querySelector('.page.active')?.id;
-  if (page === 'page-dashboard') loadDashboard();
+  // Komuta Merkezi polling'den çıkarıldı — analitik sorguları ağır, manuel yenileme yeterli
   // loadKanban kaldırıldı — pipeline filtreleri inbox'ta
   if (page === 'page-appointments') loadAppointments();
   if (page === 'page-conversations' && currentPhone) {

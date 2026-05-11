@@ -190,6 +190,140 @@ export default async function handler(req, res) {
       }
     }
 
+    // ═══════════════════════════════════════════════════════
+    // KOMUTA MERKEZİ — Birleşik Analitik Özeti
+    // ═══════════════════════════════════════════════════════
+    if (action === 'analytics-summary' && req.method === 'GET') {
+      const from = req.query.from || new Date(Date.now() - 30*24*60*60*1000).toISOString().slice(0,10);
+      const to = req.query.to || new Date().toISOString().slice(0,10);
+      const fromDate = from + ' 00:00:00';
+      const toDate = to + ' 23:59:59';
+      
+      try {
+        const [
+          totalLeads, pipelineCounts, dailyLeads, dailyMessages,
+          modelUsage, channelBreakdown, campaignPerf, deptPerf,
+          responseMetrics, countryBreakdown, lostLeads, allTimeStats,
+          hourlyDist
+        ] = await Promise.all([
+          // 1. Toplam lead (tarih aralığında)
+          sql`SELECT COUNT(*) as count FROM leads WHERE created_at BETWEEN ${fromDate} AND ${toDate}`,
+          
+          // 2. Pipeline aşama dağılımı
+          sql`SELECT lead_stage, COUNT(*) as count FROM conversations WHERE lead_stage IS NOT NULL AND lead_stage != '' GROUP BY lead_stage`,
+          
+          // 3. Günlük lead akışı (grafik için)
+          sql`SELECT DATE(created_at) as date, COUNT(*) as count FROM leads WHERE created_at BETWEEN ${fromDate} AND ${toDate} GROUP BY DATE(created_at) ORDER BY date`,
+          
+          // 4. Günlük mesaj trafiği
+          sql`SELECT DATE(created_at) as date, COUNT(*) as total, 
+                SUM(CASE WHEN direction = 'in' THEN 1 ELSE 0 END) as incoming,
+                SUM(CASE WHEN direction = 'out' THEN 1 ELSE 0 END) as outgoing
+              FROM messages WHERE created_at BETWEEN ${fromDate} AND ${toDate} GROUP BY DATE(created_at) ORDER BY date`,
+          
+          // 5. Model kullanımı (maliyet hesabı için)
+          sql`SELECT model_used, COUNT(*) as count FROM messages WHERE direction = 'out' AND model_used IS NOT NULL AND model_used != 'panel' AND created_at BETWEEN ${fromDate} AND ${toDate} GROUP BY model_used ORDER BY count DESC`,
+          
+          // 6. Kanal dağılımı
+          sql`SELECT COALESCE(channel, 'whatsapp') as channel, COUNT(DISTINCT phone_number) as users, COUNT(*) as messages FROM messages WHERE created_at BETWEEN ${fromDate} AND ${toDate} GROUP BY COALESCE(channel, 'whatsapp')`,
+          
+          // 7. Kampanya performansı
+          sql`SELECT form_name, COUNT(*) as lead_count,
+                SUM(CASE WHEN stage IN ('appointed','hot_lead') THEN 1 ELSE 0 END) as converted,
+                SUM(CASE WHEN stage = 'lost' THEN 1 ELSE 0 END) as lost
+              FROM leads WHERE form_name IS NOT NULL AND created_at BETWEEN ${fromDate} AND ${toDate} GROUP BY form_name ORDER BY lead_count DESC`,
+          
+          // 8. Bölüm performansı
+          sql`SELECT department, COUNT(*) as count,
+                SUM(CASE WHEN lead_stage IN ('appointed','hot_lead') THEN 1 ELSE 0 END) as converted
+              FROM conversations WHERE department IS NOT NULL AND department != '' GROUP BY department ORDER BY count DESC`,
+          
+          // 9. Yanıt süreleri
+          sql`SELECT 
+                AVG(EXTRACT(EPOCH FROM (first_out.t - first_in.t))/60)::int as avg_response_min,
+                COUNT(DISTINCT first_in.phone_number) as total_conversations
+              FROM (SELECT phone_number, MIN(created_at) as t FROM messages WHERE direction='in' AND created_at BETWEEN ${fromDate} AND ${toDate} GROUP BY phone_number) first_in
+              JOIN (SELECT phone_number, MIN(created_at) as t FROM messages WHERE direction='out' AND created_at BETWEEN ${fromDate} AND ${toDate} GROUP BY phone_number) first_out
+              ON first_in.phone_number = first_out.phone_number
+              WHERE first_out.t > first_in.t`,
+          
+          // 10. Ülke/Şehir dağılımı
+          sql`SELECT city, COUNT(*) as count,
+                SUM(CASE WHEN stage IN ('appointed','hot_lead') THEN 1 ELSE 0 END) as converted
+              FROM leads WHERE city IS NOT NULL AND city != '' AND created_at BETWEEN ${fromDate} AND ${toDate} GROUP BY city ORDER BY count DESC LIMIT 15`,
+          
+          // 11. Kayıp lead detayları
+          sql`SELECT c.phone_number, c.patient_name, c.department, c.lead_stage, c.updated_at,
+                (SELECT content FROM messages WHERE phone_number = c.phone_number AND direction='in' ORDER BY created_at DESC LIMIT 1) as last_message
+              FROM conversations c WHERE c.lead_stage = 'lost' ORDER BY c.updated_at DESC LIMIT 20`,
+          
+          // 12. Tüm zamanlara ait genel sayılar
+          sql`SELECT 
+                (SELECT COUNT(*) FROM conversations) as total_conversations,
+                (SELECT COUNT(*) FROM messages) as total_messages,
+                (SELECT COUNT(*) FROM leads) as total_leads,
+                (SELECT COUNT(*) FROM conversations WHERE lead_stage = 'appointed') as total_appointed,
+                (SELECT COUNT(*) FROM conversations WHERE lead_stage = 'lost') as total_lost,
+                (SELECT COUNT(*) FROM conversations WHERE status = 'human') as human_conversations`,
+          
+          // 13. Saatlik dağılım
+          sql`SELECT EXTRACT(HOUR FROM created_at)::int as hour, COUNT(*) as count FROM messages WHERE created_at BETWEEN ${fromDate} AND ${toDate} GROUP BY EXTRACT(HOUR FROM created_at) ORDER BY hour`
+        ]);
+
+        // Model maliyet hesabı (tahmini)
+        const modelCosts = { 'gemini-2.5-flash-lite': 0.001, 'gemini-2.5-flash': 0.003, 'gemini-2.5-pro': 0.02, 'handover manager': 0.003, 'follow-up': 0.001 };
+        const modelData = modelUsage.map(m => ({
+          model: m.model_used,
+          count: +m.count,
+          estimatedCost: +(+m.count * (modelCosts[m.model_used] || 0.001)).toFixed(3)
+        }));
+        const totalAICost = modelData.reduce((s, m) => s + m.estimatedCost, 0);
+
+        // Pipeline funnel hesabı
+        const stageOrder = ['new', 'contacted', 'discovery', 'negotiation', 'hot_lead', 'appointed', 'lost'];
+        const stageLabels = { new: 'Yeni Lead', contacted: 'İlk Temas', discovery: 'Analiz', negotiation: 'İkna', hot_lead: 'Sıcak Lead', appointed: 'Randevu Alındı', lost: 'Kaybedildi' };
+        const funnel = stageOrder.map(s => {
+          const found = pipelineCounts.find(p => p.lead_stage === s);
+          return { stage: s, label: stageLabels[s] || s, count: found ? +found.count : 0 };
+        });
+        const totalInPipeline = funnel.reduce((s, f) => s + f.count, 0) || 1;
+
+        // Dönüşüm oranı
+        const appointedCount = funnel.find(f => f.stage === 'appointed')?.count || 0;
+        const lostCount = funnel.find(f => f.stage === 'lost')?.count || 0;
+        const conversionRate = totalInPipeline > 0 ? Math.round((appointedCount / totalInPipeline) * 100) : 0;
+
+        return res.json({
+          period: { from, to },
+          kpi: {
+            totalLeads: +totalLeads[0]?.count || 0,
+            conversionRate,
+            appointedCount,
+            lostCount,
+            avgResponseMin: +responseMetrics[0]?.avg_response_min || 0,
+            totalAICost: +totalAICost.toFixed(2),
+            humanSavings: Math.round(totalAICost > 0 ? (500 / totalAICost) : 0), // AI vs koordinatör
+            activeConversations: +allTimeStats[0]?.total_conversations || 0,
+            totalMessages: +allTimeStats[0]?.total_messages || 0,
+            humanConversations: +allTimeStats[0]?.human_conversations || 0
+          },
+          funnel,
+          dailyLeads: dailyLeads.map(d => ({ date: d.date, count: +d.count })),
+          dailyMessages: dailyMessages.map(d => ({ date: d.date, total: +d.total, incoming: +d.incoming, outgoing: +d.outgoing })),
+          hourly: hourlyDist.map(h => ({ hour: +h.hour, count: +h.count })),
+          models: modelData,
+          channels: channelBreakdown.map(c => ({ channel: c.channel, users: +c.users, messages: +c.messages })),
+          campaigns: campaignPerf.map(c => ({ name: c.form_name, leads: +c.lead_count, converted: +c.converted, lost: +c.lost })),
+          departments: deptPerf.map(d => ({ name: d.department, count: +d.count, converted: +d.converted })),
+          countries: countryBreakdown.map(c => ({ city: c.city, count: +c.count, converted: +c.converted })),
+          lostLeads: lostLeads.map(l => ({ phone: l.phone_number, name: l.patient_name, dept: l.department, lastMessage: l.last_message, date: l.updated_at }))
+        });
+      } catch (e) {
+        console.error('analytics-summary error:', e.message);
+        return res.status(500).json({ error: e.message });
+      }
+    }
+
     // ÇAPRAZ KANAL + LEAD SCORING (form listesindeki her kart için)
     if (action === 'lead-context' && req.method === 'GET') {
       const phone = (req.query.phone || '').replace(/[\s\-\(\)\+]/g, '');
