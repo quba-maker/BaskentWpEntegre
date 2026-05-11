@@ -849,13 +849,33 @@ function renderSheetTable(headers, rows, total) {
     let isUnread = true;
     let leadStatus = 'new';
 
-    if (statusVal.includes('SİSTEME ALINDI') || statusVal.includes('İletişime Geçildi')) { badgeHtml = '<span style="background:#22c55e18; color:#22c55e; padding:3px 10px; border-radius:12px; font-size:11px; font-weight:600;">🟢 Dönüş Yapıldı</span>'; isUnread = false; leadStatus = 'active'; }
-    else if (statusVal.includes('Cevap Verdi') || statusVal.includes('İlgili')) { badgeHtml = '<span style="background:#3b82f618; color:#3b82f6; padding:3px 10px; border-radius:12px; font-size:11px; font-weight:600;">💬 İletişimde</span>'; isUnread = false; leadStatus = 'active'; }
-    else if (statusVal && statusVal.toLowerCase() !== 'created') { badgeHtml = `<span style="background:var(--bg-hover); color:white; padding:3px 10px; border-radius:12px; font-size:11px; font-weight:600;">${statusVal}</span>`; isUnread = false; leadStatus = 'active'; }
-    else if (notesVal.trim()) { badgeHtml = '<span style="background:#22c55e18; color:#22c55e; padding:3px 10px; border-radius:12px; font-size:11px; font-weight:600;">✅ Cevap Verildi</span>'; isUnread = false; leadStatus = 'active'; }
+    // Önce enrichCache'den DB stage'i kontrol et (varsa öncelikli)
+    const cached = window._enrichCache?.[phoneVal];
+    const dbStage = cached?.leadStage;
+    
+    if (dbStage && dbStage !== 'new') {
+      // DB stage varsa, onu göster (pipeline stage'leri)
+      const stageMap = { contacted:'📞 İlk Temas', discovery:'🩺 Analiz', negotiation:'🏛️ İkna', hot_lead:'🔥 Sıcak Lead', appointed:'✅ Randevu Alındı', lost:'❌ Kaybedildi' };
+      const stageColors = { contacted:'#3b82f6', discovery:'#8b5cf6', negotiation:'#f97316', hot_lead:'#ef4444', appointed:'#22c55e', lost:'#6b7280' };
+      const sc = stageColors[dbStage] || '#6b7280';
+      badgeHtml = `<span style="background:${sc}18; color:${sc}; padding:3px 10px; border-radius:12px; font-size:11px; font-weight:600;">${stageMap[dbStage] || dbStage}</span>`;
+      isUnread = false;
+      leadStatus = dbStage === 'appointed' ? 'appointed' : dbStage === 'lost' ? 'lost' : 'active';
+    } else if (statusVal.includes('SİSTEME ALINDI') || statusVal.includes('İletişime Geçildi')) { 
+      badgeHtml = '<span style="background:#22c55e18; color:#22c55e; padding:3px 10px; border-radius:12px; font-size:11px; font-weight:600;">🟢 Dönüş Yapıldı</span>'; isUnread = false; leadStatus = 'active'; 
+    }
+    else if (statusVal.includes('Cevap Verdi') || statusVal.includes('İlgili')) { 
+      badgeHtml = '<span style="background:#3b82f618; color:#3b82f6; padding:3px 10px; border-radius:12px; font-size:11px; font-weight:600;">💬 İletişimde</span>'; isUnread = false; leadStatus = 'active'; 
+    }
+    else if (statusVal && statusVal.toLowerCase() !== 'created') { 
+      badgeHtml = `<span style="background:var(--bg-hover); color:white; padding:3px 10px; border-radius:12px; font-size:11px; font-weight:600;">${statusVal}</span>`; isUnread = false; leadStatus = 'active'; 
+    }
+    else if (notesVal.trim()) { 
+      badgeHtml = '<span style="background:#22c55e18; color:#22c55e; padding:3px 10px; border-radius:12px; font-size:11px; font-weight:600;">✅ Cevap Verildi</span>'; isUnread = false; leadStatus = 'active'; 
+    }
     if (readLeads.includes(phoneVal || `row-${origIdx}`)) isUnread = false;
 
-    const cached = window._enrichCache[phoneVal];
+    // cached varsa filtreleme için leadStatus güncelle
     if (cached) {
       if (cached.leadStage === 'appointed') leadStatus = 'appointed';
       else if (cached.leadStage === 'lost') leadStatus = 'lost';
