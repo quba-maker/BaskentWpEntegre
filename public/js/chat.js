@@ -145,7 +145,7 @@ function openLeadDetail(rowIndex) {
   const dateHtml = dateDisplay ? `<span style="font-size:13px; color:var(--text-muted);">🗓 ${dateDisplay}</span>` : '';
 
   let detailsHtml = `
-    <div style="display:grid; grid-template-columns: 2fr 1fr; gap:32px;">
+    <div class="form-detail-grid">
       <!-- SOL PANEL -->
       <div style="display:flex; flex-direction:column; gap:16px;">
         <div style="background:var(--card-bg); border:1px solid var(--border-color); border-radius:12px; padding:20px;">
@@ -212,9 +212,9 @@ function openLeadDetail(rowIndex) {
     `;
     importantFields.forEach(f => {
       detailsHtml += `
-            <div style="background:rgba(255,255,255,0.05); padding:12px 16px; border-radius:8px; border-left:3px solid var(--accent-primary);">
-              <div style="font-size:11px; color:var(--text-muted); margin-bottom:4px; text-transform:uppercase; letter-spacing:0.5px;">${f.header}</div>
-              <div style="font-size:15px; color:white; font-weight:500;">${f.value}</div>
+            <div style="background:rgba(255,255,255,0.05); padding:12px 16px; border-radius:8px; border-left:3px solid var(--accent-primary); overflow-wrap:anywhere;">
+              <div style="font-size:11px; color:var(--text-muted); margin-bottom:4px; text-transform:uppercase; letter-spacing:0.5px;">${f.header.replace(/_/g, ' ')}</div>
+              <div style="font-size:15px; color:white; font-weight:500; word-break:break-word;">${f.value.replace(/_/g, ' ')}</div>
             </div>
       `;
     });
@@ -229,9 +229,9 @@ function openLeadDetail(rowIndex) {
     `;
     otherFields.forEach(f => {
       detailsHtml += `
-          <div style="background:var(--bg-hover); padding:12px 16px; border-radius:8px;">
-            <div style="font-size:11px; color:var(--text-muted); margin-bottom:4px; text-transform:uppercase; letter-spacing:0.5px;">${f.header}</div>
-            <div style="font-size:15px; color:white;">${f.value}</div>
+          <div style="background:var(--bg-hover); padding:12px 16px; border-radius:8px; overflow-wrap:anywhere;">
+            <div style="font-size:11px; color:var(--text-muted); margin-bottom:4px; text-transform:uppercase; letter-spacing:0.5px;">${f.header.replace(/_/g, ' ')}</div>
+            <div style="font-size:15px; color:white; word-break:break-word;">${f.value.replace(/_/g, ' ')}</div>
           </div>
       `;
     });
@@ -270,65 +270,73 @@ function openLeadDetail(rowIndex) {
   const currentSheetStatus = statusColIndex > -1 ? (row[statusColIndex] || '') : '';
   const initialStage = SHEETS_TO_STAGE[currentSheetStatus] || 'new';
 
-  let editHtml = `
     <!-- SAĞ PANEL -->
     <div>
       <div style="position:sticky; top:24px; display:flex; flex-direction:column; gap:16px;">
         
-        <!-- 🎯 Pipeline Durumu (DB + Sheets Entegre) -->
-        <div style="background:var(--card-bg); border:1px solid var(--accent-primary); border-radius:12px; padding:20px; box-shadow:0 8px 24px rgba(10,132,255,0.1);">
-          <h3 style="margin:0 0 4px 0; font-size:16px; color:var(--accent-primary); display:flex; align-items:center; gap:8px;">
-            🎯 Lead Durumu
+        <!-- 🎯 Pipeline Durumu -->
+        <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); border-radius:16px; padding:20px; box-shadow:0 8px 32px rgba(0,0,0,0.2);">
+          <h3 style="margin:0 0 16px 0; font-size:16px; color:white; font-weight:600; display:flex; align-items:center; gap:8px;">
+            <span style="background:rgba(10,132,255,0.15); color:#0A84FF; width:28px; height:28px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:14px;">🎯</span> 
+            Lead Durumu
           </h3>
-          <p style="margin:0 0 14px 0; font-size:11px; color:var(--text-muted);">DB + Google Sheets'e anlık yansır</p>
-          <div id="fd-pipeline-stages" style="display:flex; flex-direction:column; gap:6px;">
+          <div id="fd-pipeline-stages" style="display:flex; flex-direction:column; gap:8px;">
             ${Object.entries(PIPELINE_STAGES).map(([stage, cfg]) => {
               const isActive = stage === initialStage;
-              const activeStyle = isActive ? `background:${cfg.color}22; border-color:${cfg.color}; font-weight:700;` : '';
-              return `<button class="fd-stage-btn" data-stage="${stage}" onclick="setLeadPipelineStage('${cleanPhone}', '${nameVal.replace(/'/g, "\\'")}', '${stage}', this, ${statusColIndex}, ${rowIndex})" style="display:flex; align-items:center; gap:8px; width:100%; padding:10px 14px; border-radius:8px; border:1px solid var(--border-color); background:var(--bg-hover); color:white; cursor:pointer; font-size:13px; font-weight:500; transition:all 0.2s; ${activeStyle}">
-                <span style="width:10px; height:10px; border-radius:50%; background:${cfg.color}; flex-shrink:0;"></span>
+              const activeStyle = isActive ? `background:rgba(255,255,255,0.1); border-color:${cfg.color}; box-shadow:0 0 0 1px ${cfg.color};` : 'background:rgba(0,0,0,0.2); border-color:transparent; opacity:0.7;';
+              return `<button class="fd-stage-btn" data-stage="${stage}" onclick="setLeadPipelineStage('${cleanPhone}', '${nameVal.replace(/'/g, "\\'")}', '${stage}', this, ${statusColIndex}, ${rowIndex})" style="display:flex; align-items:center; gap:10px; width:100%; padding:12px 16px; border-radius:12px; border:1px solid; color:white; cursor:pointer; font-size:14px; font-weight:500; transition:all 0.2s; ${activeStyle}">
+                <span style="width:12px; height:12px; border-radius:50%; background:${cfg.color}; box-shadow:0 0 8px ${cfg.color}80; flex-shrink:0;"></span>
                 ${cfg.emoji} ${cfg.label}
               </button>`;
             }).join('')}
           </div>
-          <div id="fd-pipeline-info" style="margin-top:12px; font-size:11px; color:var(--text-muted); text-align:center;">
-            ${statusColIndex > -1 ? `Sheets durumu: <strong>${currentSheetStatus || 'Boş'}</strong>` : 'Sheets sütunu bulunamadı'}
+          <div id="fd-pipeline-info" style="margin-top:16px; font-size:11px; color:var(--text-muted); text-align:center; padding-top:12px; border-top:1px solid rgba(255,255,255,0.05);">
+            ${statusColIndex > -1 ? `Mevcut Sheets Durumu: <span style="color:white; font-weight:500;">${currentSheetStatus || 'Yok'}</span>` : 'Sheets sütunu bulunamadı'}
           </div>
         </div>
 
-
-        <!-- 🤖 Bot Durumu (Sadece bilgi — kontrol inbox'ta) -->
-        <div id="fd-bot-status-card" style="background:var(--card-bg); border:1px solid var(--border-color); border-radius:12px; padding:16px;">
-          <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
-            <span id="fd-bot-indicator" style="width:10px; height:10px; border-radius:50%; background:#6b7280;"></span>
-            <span id="fd-bot-label" style="font-size:13px; font-weight:600; color:var(--text-muted);">Yükleniyor...</span>
+        <!-- 🤖 Bot Durumu -->
+        <div id="fd-bot-status-card" style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); border-radius:16px; padding:16px; display:flex; flex-direction:column; justify-content:center;">
+          <div style="display:flex; align-items:center; justify-content:space-between;">
+            <div style="display:flex; align-items:center; gap:10px;">
+              <span id="fd-bot-indicator" style="width:12px; height:12px; border-radius:50%; background:#6b7280; display:inline-block;"></span>
+              <span id="fd-bot-label" style="font-size:15px; font-weight:600; color:white;">Yükleniyor...</span>
+            </div>
           </div>
-          <div id="fd-bot-phase" style="font-size:11px; color:var(--text-muted);"></div>
+          <div id="fd-bot-phase" style="font-size:13px; color:var(--text-muted); margin-top:8px; padding-left:22px;"></div>
         </div>
-        <!-- 🏷️ CRM Etiketler (DB Bağlantılı) -->
-        <div style="background:var(--card-bg); border:1px solid var(--border-color); border-radius:12px; padding:20px;">
-          <h3 style="margin:0 0 12px 0; font-size:14px; color:white; display:flex; align-items:center; gap:8px;">
-            🏷️ CRM Etiketler
+
+        <!-- 🏷️ CRM Etiketler -->
+        <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); border-radius:16px; padding:20px;">
+          <h3 style="margin:0 0 16px 0; font-size:15px; color:white; font-weight:600; display:flex; align-items:center; gap:8px;">
+            <span style="background:rgba(191,90,242,0.15); color:#BF5AF2; width:28px; height:28px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:14px;">🏷️</span>
+            CRM Etiketler
           </h3>
-          <div id="fd-crm-tags" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px; min-height:28px;"></div>
-          <select id="fd-add-tag" onchange="addLeadCRMTag('${cleanPhone}', '${nameVal.replace(/'/g, "\\'")}', this.value)" style="width:100%; padding:8px 12px; background:var(--bg-hover); border:1px solid var(--border-color); border-radius:8px; color:var(--text-muted); font-size:12px; cursor:pointer;">
-            <option value="">+ Etiket Ekle</option>
+          <div id="fd-crm-tags" style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:16px; min-height:28px;"></div>
+          <select id="fd-add-tag" onchange="addLeadCRMTag('${cleanPhone}', '${nameVal.replace(/'/g, "\\'")}', this.value)" style="width:100%; padding:12px 14px; background:rgba(0,0,0,0.2); border:1px solid rgba(255,255,255,0.1); border-radius:10px; color:white; font-size:13px; font-weight:500; cursor:pointer; outline:none; -webkit-appearance:none;">
+            <option value="" style="color:var(--text-muted);">+ Yeni Etiket Ekle...</option>
           </select>
         </div>
 
         <!-- 📝 Geri Dönüş / Notlar -->
-        <div style="background:var(--card-bg); border:1px solid var(--border-color); border-radius:12px; padding:20px;">
-          <h3 style="margin:0 0 12px 0; font-size:14px; color:white;">📝 Geri Dönüş / Notlar</h3>
+        <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); border-radius:16px; padding:20px;">
+          <h3 style="margin:0 0 16px 0; font-size:15px; color:white; font-weight:600; display:flex; align-items:center; gap:8px;">
+            <span style="background:rgba(255,159,10,0.15); color:#FF9F0A; width:28px; height:28px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:14px;">📝</span>
+            Geri Dönüş / Notlar
+          </h3>
   `;
   
   if (notesColIndex > -1) {
     const currentNotes = row[notesColIndex] || '';
     editHtml += `
-          <textarea style="width:100%; padding:10px; background:var(--bg-hover); border:1px solid var(--border-color); border-radius:8px; color:white; font-size:13px; resize:vertical; min-height:100px;" onblur="updateSheetCell(${rowIndex}, ${notesColIndex}, this.value)" placeholder="Hastaya yapılan geri dönüş notunu buraya yazın...">${String(currentNotes).replace(/"/g, '&quot;')}</textarea>
-          <div style="margin-top:6px; font-size:10px; color:var(--text-muted); text-align:center;">✓ Google Sheets'e anlık kaydedilir</div>
+          <textarea style="width:100%; padding:14px; background:rgba(0,0,0,0.2); border:1px solid rgba(255,255,255,0.1); border-radius:12px; color:white; font-size:14px; line-height:1.5; resize:vertical; min-height:120px; outline:none; transition:border-color 0.2s;" onfocus="this.style.borderColor='rgba(10,132,255,0.5)'" onblur="this.style.borderColor='rgba(255,255,255,0.1)'; updateSheetCell(${rowIndex}, ${notesColIndex}, this.value)" placeholder="Hastaya yapılan geri dönüş notunu buraya yazın...">${String(currentNotes).replace(/"/g, '&quot;')}</textarea>
+          <div style="margin-top:10px; font-size:11px; color:var(--text-muted); display:flex; align-items:center; gap:4px;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+            Google Sheets'e anında kaydedilir
+          </div>
     `;
   } else {
-    editHtml += `<div style="font-size:12px; color:var(--text-muted);">Sheets'te "Geri Dönüş" veya "Notlar" sütunu bulunamadı.</div>`;
+    editHtml += `<div style="font-size:13px; color:var(--text-muted); padding:16px; background:rgba(0,0,0,0.2); border-radius:10px; text-align:center;">Sheets'te "Geri Dönüş" veya "Notlar" sütunu bulunamadı.</div>`;
   }
 
   editHtml += `

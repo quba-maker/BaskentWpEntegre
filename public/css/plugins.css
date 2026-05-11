@@ -629,4 +629,17 @@ details[open] summary {
   
   body[data-form-view="detail"] .form-mobile-list.active { transform: translateX(-30%) !important; opacity: 0 !important; pointer-events: none !important; visibility: hidden !important; }
   body[data-form-view="detail"] .form-mobile-detail.active { transform: translateX(0) !important; z-index: 101 !important; opacity: 1 !important; visibility: visible !important; }
+
+  .form-detail-grid {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 16px !important;
+  }
+}
+
+/* Form Detail Layout Default */
+.form-detail-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 32px;
 }
