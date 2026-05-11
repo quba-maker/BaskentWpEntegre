@@ -1464,31 +1464,106 @@ async function sendFileMessage() {
   reader.readAsDataURL(pendingFile);
 }
 
-async function instantStageUpdate(newStage) {
-  if(!currentPhone) return;
-  // Anında lokal cache'i güncelle (Hızlı UI tepkisi)
-  const idx = cachedConversations.findIndex(c => c.phone_number === currentPhone);
-  if (idx > -1) {
-    cachedConversations[idx].lead_stage = newStage;
-    cachedConversations[idx]._effectiveStage = newStage;
+
+// ═══ EVRENSEL: Stage değişikliğini Google Sheets'e senkronize et ═══
+async function syncStageToSheets(phone, newStage) {
+  if (!newStage || !window._sheetRows || !window._sheetHeaders) return;
+  try {
+    const stageLabels = { new: 'Yeni', contacted: 'İlk Temas', discovery: 'Analiz', negotiation: 'İkna', hot_lead: 'Sıcak Lead', appointed: 'Randevu Alındı', lost: 'Kayıp' };
+    const cleanP = (phone || '').replace(/\D/g, '');
+    const last10 = cleanP.length > 10 ? cleanP.slice(-10) : cleanP;
+    
+    const phoneColIdx = window._sheetHeaders.findIndex(h => /phone|telefon|tel|whatsapp|cep/i.test(h.toLowerCase()));
+    if (phoneColIdx === -1) return;
+    
+    const statusColIdx = window._sheetHeaders.findIndex(h => /durum|status|lead_status|aşama/i.test(h.toLowerCase()));
+    if (statusColIdx === -1) return;
+    
+    const rowIdx = window._sheetRows.findIndex(row => {
+      const cellPhone = (row[phoneColIdx] || '').replace(/\D/g, '');
+      return cellPhone.length >= 10 && (cellPhone.endsWith(last10) || last10.endsWith(cellPhone.slice(-10)));
+    });
+    
+    if (rowIdx > -1) {
+      const label = stageLabels[newStage] || newStage;
+      await fetch('/api/sheets?action=update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sheetName: window._activeSheet, row: rowIdx, col: statusColIdx, value: label })
+      });
+      window._sheetRows[rowIdx][statusColIdx] = label;
+      console.log('📊 Sheets sync:', last10, '→', label);
+    }
+  } catch(e) { console.error('Sheets sync hatası:', e); }
+}
+
+// ═══ EVRENSEL: Tüm view'lardaki cache/UI senkronizasyonu ═══
+function syncStageToAllViews(phone, newStage) {
+  const cleanP = (phone || '').replace(/\D/g, '');
+  const last10 = cleanP.length > 10 ? cleanP.slice(-10) : cleanP;
+  
+  // 1. Inbox cache güncelle
+  if (typeof cachedConversations !== 'undefined') {
+    const cIdx = cachedConversations.findIndex(c => {
+      const cp = (c.phone_number || '').replace(/\D/g, '');
+      return cp.endsWith(last10) || last10.endsWith(cp.slice(-10));
+    });
+    if (cIdx > -1) {
+      cachedConversations[cIdx].lead_stage = newStage;
+      cachedConversations[cIdx]._effectiveStage = newStage;
+    }
   }
   
-  renderConversationList(); // Sol listeyi anında güncelle
+  // 2. Enrich cache temizle (form yönetimi listesi)
+  if (window._enrichCache) {
+    Object.keys(window._enrichCache).forEach(key => {
+      const keyClean = key.replace(/\D/g, '');
+      if (keyClean.endsWith(last10) || last10.endsWith(keyClean.slice(-10))) {
+        delete window._enrichCache[key];
+      }
+    });
+  }
   
-  // Sağ paneldeki Lead Durumu label'ını da güncelle
+  // 3. İnbox sağ paneldeki label güncelle
   const stageCfg = PIPELINE_STAGES[newStage] || { emoji: '❓', label: newStage || '—' };
   const stageLabel = document.getElementById('crm-lead-stage');
-  if (stageLabel) stageLabel.textContent = `${stageCfg.emoji} ${stageCfg.label}`;
+  if (stageLabel) stageLabel.textContent = stageCfg.emoji + ' ' + stageCfg.label;
   
-  // Form Yönetimi enrich cache'ini temizle (oraya geçince güncel görsün)
-  const cleanPhone = currentPhone.replace(/\D/g, '');
-  if (window._enrichCache) delete window._enrichCache[cleanPhone];
+  // 4. Inbox conversation list güncelle
+  if (typeof renderConversationList === 'function') renderConversationList();
+  
+  // 5. Form yönetimi satırlarını güncelle
+  if (typeof refreshLeadRowUI === 'function') refreshLeadRowUI(phone);
+}
 
-  // Arkada sessizce kaydet
-  await api('update-patient', 'POST', {
-    phone: currentPhone,
-    lead_stage: newStage
-  });
+
+function navigateToChat(phone) {
+  if (!phone) return toast('Telefon numarası yok', 'error');
+  // Form detay sayfasından çık
+  const fdPage = document.getElementById('page-form-detail');
+  if (fdPage) fdPage.style.display = 'none';
+  // Conversations sayfasına geç
+  document.querySelectorAll('.nav-btn').forEach(x => x.classList.remove('active'));
+  document.querySelectorAll('.page').forEach(x => { x.classList.remove('active'); x.style.display = ''; });
+  const convBtn = document.querySelector('[data-page="conversations"]');
+  if (convBtn) convBtn.classList.add('active');
+  const convPage = document.getElementById('page-conversations');
+  if (convPage) convPage.classList.add('active');
+  loadConversations();
+  setTimeout(function(){ loadChat(phone, 'whatsapp'); }, 500);
+}
+
+async function instantStageUpdate(newStage) {
+  if(!currentPhone) return;
+  
+  // Evrensel senkronizasyon: tüm view'lar + cache
+  syncStageToAllViews(currentPhone, newStage);
+  
+  // DB'ye kaydet
+  await api('update-patient', 'POST', { phone: currentPhone, lead_stage: newStage });
+  
+  // Google Sheets'e yaz
+  await syncStageToSheets(currentPhone, newStage);
 }
 
 async function autoSaveCRM() {
@@ -1509,27 +1584,16 @@ async function autoSaveCRM() {
     lead_stage: newStage
   };
 
-  // Lokal listeyi anında güncelle
+  // Lokal listeyi anında güncelle (isim/not/bölüm de dahil)
   const idx = cachedConversations.findIndex(c => c.phone_number === currentPhone);
   if (idx > -1) {
     cachedConversations[idx].patient_name = newName;
     cachedConversations[idx].notes = newNotes;
     cachedConversations[idx].department = newDepartment;
-    cachedConversations[idx].lead_stage = newStage;
-    cachedConversations[idx]._effectiveStage = newStage;
   }
   
-  // Listeyi sessizce render et
-  renderConversationList();
-  
-  // Sağ paneldeki Lead Durumu label'ını güncelle
-  const stageCfg = PIPELINE_STAGES[newStage] || { emoji: '❓', label: newStage || '—' };
-  const stageLabel = document.getElementById('crm-lead-stage');
-  if (stageLabel) stageLabel.textContent = `${stageCfg.emoji} ${stageCfg.label}`;
-  
-  // Form Yönetimi enrich cache'ini temizle
-  const cleanPhone = currentPhone.replace(/\D/g, '');
-  if (window._enrichCache) delete window._enrichCache[cleanPhone];
+  // Evrensel stage senkronizasyonu (tüm view'lar + cache)
+  syncStageToAllViews(currentPhone, newStage);
 
   // API'ye kaydet
   try {
@@ -1539,51 +1603,8 @@ async function autoSaveCRM() {
     console.error('AutoSave Error', e);
   }
 
-  // 📊 Google Sheets'e süreç durumu senkronizasyonu
-  if (newStage && window._sheetRows && window._sheetHeaders) {
-    try {
-      const stageLabels = { new: 'Yeni', contacted: 'İlk Temas', discovery: 'Analiz', negotiation: 'İkna', hot_lead: 'Sıcak Lead', appointed: 'Randevu Alındı', lost: 'Kayıp' };
-      const cleanCurrent = currentPhone.replace(/\D/g, '');
-      const last10 = cleanCurrent.substring(cleanCurrent.length - 10);
-      
-      // Telefon sütununu bul
-      const phoneColIdx = window._sheetHeaders.findIndex(h => 
-        /phone|telefon|tel|whatsapp|cep/i.test(h.toLowerCase())
-      );
-      if (phoneColIdx === -1) return;
-      
-      // Durum sütununu bul
-      const statusColIdx = window._sheetHeaders.findIndex(h => 
-        /durum|status|lead_status|aşama/i.test(h.toLowerCase())
-      );
-      if (statusColIdx === -1) return;
-      
-      // Telefon eşleşmesi ile satırı bul
-      const rowIdx = window._sheetRows.findIndex(row => {
-        const cellPhone = (row[phoneColIdx] || '').replace(/\D/g, '');
-        return cellPhone.length >= 10 && cellPhone.includes(last10);
-      });
-      
-      if (rowIdx > -1) {
-        const label = stageLabels[newStage] || newStage;
-        await fetch('/api/sheets?action=update', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            sheetName: window._activeSheet,
-            row: rowIdx,
-            col: statusColIdx,
-            value: label
-          })
-        });
-        // Lokal sheet data'yı da güncelle
-        window._sheetRows[rowIdx][statusColIdx] = label;
-        console.log(`📊 Sheets sync: satır ${rowIdx}, sütun ${statusColIdx} → ${label}`);
-      }
-    } catch(e) {
-      console.error('Sheets sync hatası:', e);
-    }
-  }
+  // 📊 Google Sheets'e evrensel senkronizasyon
+  await syncStageToSheets(currentPhone, newStage);
 }
 
 async function setConvStatus(s) {
@@ -2031,7 +2052,7 @@ function openLeadDetail(rowIndex) {
             ${phonesHtml}
           </div>
           <div style="display:flex; gap:12px; flex-wrap:wrap;">
-            <button onclick="document.querySelector('[data-page=\'conversations\']')?.click(); setTimeout(function(){ loadChat('${primaryPhone}', 'whatsapp'); }, 300);" class="btn" style="background:#25D366; color:white; border:none; padding:8px 16px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer;">
+            <button onclick="navigateToChat('${primaryPhone}')" class="btn" style="background:#25D366; color:white; border:none; padding:8px 16px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer;">
               💬 Mesaj Bölümüne Git
             </button>
           </div>
@@ -2306,9 +2327,9 @@ async function loadFormDetailCRM(phone) {
 async function setLeadPipelineStage(phone, name, stage, btnEl, sheetsStatusCol, sheetsRowIndex) {
   if (!phone) return toast('Telefon numarası bulunamadı', 'error');
   
-  // 🎯 Birleşik config'den oku
   const cfg = PIPELINE_STAGES[stage] || PIPELINE_STAGES.new;
   
+  // UI: buton vurgulama
   document.querySelectorAll('.fd-stage-btn').forEach(btn => {
     btn.style.background = 'var(--bg-hover)';
     btn.style.borderColor = 'var(--border-color)';
@@ -2319,47 +2340,29 @@ async function setLeadPipelineStage(phone, name, stage, btnEl, sheetsStatusCol, 
   btnEl.style.fontWeight = '700';
 
   const infoEl = document.getElementById('fd-pipeline-info');
-  if (infoEl) {
-    infoEl.innerHTML = `⏳ Kaydediliyor...`;
-  }
+  if (infoEl) infoEl.innerHTML = '⏳ Kaydediliyor...';
   
   try {
     // 1. DB'ye kaydet (conversations + leads + events otomatik)
-    await api('update-patient', 'POST', {
-      phone: phone,
-      patient_name: name || null,
-      lead_stage: stage
-    });
+    await api('update-patient', 'POST', { phone, patient_name: name || null, lead_stage: stage });
     
-    // 2. Google Sheets'e kaydet (status sütunu varsa)
+    // 2. Google Sheets'e kaydet (evrensel fonksiyon — parametre geçse de geçmese de çalışır)
     if (sheetsStatusCol > -1 && sheetsRowIndex >= 0) {
-      const sheetsValue = cfg.sheetsVal || stage;
-      await updateSheetCell(sheetsRowIndex, sheetsStatusCol, sheetsValue);
+      await updateSheetCell(sheetsRowIndex, sheetsStatusCol, cfg.sheetsVal || stage);
     }
+    // Her durumda evrensel Sheets sync'i de çalıştır (status col/row bulunamazsa auto-detect eder)
+    await syncStageToSheets(phone, stage);
+    
+    // 3. Tüm view'ları senkronize et (inbox, form listesi, label'lar, cache)
+    syncStageToAllViews(phone, stage);
     
     if (infoEl) {
       infoEl.innerHTML = `✅ <strong>${cfg.emoji} ${cfg.label}</strong> — DB + Sheets kaydedildi`;
       if (stage === 'appointed') infoEl.innerHTML += '<br>🗓️ Randevu Talepleri paneline eklendi';
     }
-    toast(`${cfg.emoji} ${cfg.label}`, 'success', { phone: phone });
-    
-    // UI Anlık Güncelleme — Form Yönetimi satırları
-    if (typeof refreshLeadRowUI === 'function') refreshLeadRowUI(phone);
-    
-    // Inbox cache'ini de güncelle (sekme değişince hemen yansısın)
-    if (typeof cachedConversations !== 'undefined') {
-      const cleanP = phone.replace(/\D/g, '');
-      const cIdx = cachedConversations.findIndex(c => {
-        const cp = (c.phone_number || '').replace(/\D/g, '');
-        return cp === cleanP || cp.endsWith(cleanP.slice(-10)) || cleanP.endsWith(cp.slice(-10));
-      });
-      if (cIdx > -1) {
-        cachedConversations[cIdx].lead_stage = stage;
-        cachedConversations[cIdx]._effectiveStage = stage;
-      }
-    }
+    toast(`${cfg.emoji} ${cfg.label}`, 'success', { phone });
   } catch(e) {
-    toast('Kayıt hatası', 'error', { phone: phone });
+    toast('Kayıt hatası', 'error', { phone });
     if (infoEl) infoEl.innerHTML = '❌ Kayıt hatası';
   }
 }
