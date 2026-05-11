@@ -332,6 +332,12 @@ textarea:focus, input:focus, select:focus { outline: none; border-color: var(--a
      💬 HASTA TAKİBİ (Chat Page) 
      ════════════════════════════════════════════ */
   
+  /* Reset desktop CSS variables */
+  :root {
+    --inbox-left-w: 100% !important;
+    --inbox-right-w: 100% !important;
+  }
+  
   /* Stack inbox vertically */
   .inbox-layout { 
     flex-direction: column !important; 
@@ -344,6 +350,8 @@ textarea:focus, input:focus, select:focus { outline: none; border-color: var(--a
   .inbox-sidebar { 
     width: 100% !important; max-width: 100% !important; 
     max-height: 40vh !important; min-width: unset !important;
+    flex-shrink: 0 !important; flex-grow: 0 !important;
+    flex-basis: auto !important;
     border-right: none !important;
     border-bottom: 1px solid rgba(255,255,255,0.08) !important; 
     border-radius: 16px 16px 0 0 !important;
@@ -353,11 +361,12 @@ textarea:focus, input:focus, select:focus { outline: none; border-color: var(--a
   .inbox-main { 
     width: 100% !important; max-width: 100% !important;
     min-width: unset !important;
+    flex: 1 1 auto !important;
     border-radius: 0 !important;
     min-height: 50vh !important;
   }
   
-  /* ❌ CRM PANEL — HIDE ON MOBILE (ID selector beats JS inline) */
+  /* ❌ CRM PANEL — HIDE ON MOBILE */
   #crm-panel { display: none !important; }
   .inbox-details { 
     width: 100% !important; max-width: 100% !important; 

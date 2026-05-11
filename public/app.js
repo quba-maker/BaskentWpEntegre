@@ -22,14 +22,15 @@ function escapeHtml(str) {
 
 // 🔀 Resizable Panels — Sürükle/Bırak ile panel genişliği ayarlama
 document.addEventListener('DOMContentLoaded', () => {
-  // Kayıtlı genişlikleri yükle
-  const savedLeft = localStorage.getItem('inbox_left_w');
-  const savedRight = localStorage.getItem('inbox_right_w');
-  if (savedLeft) document.documentElement.style.setProperty('--inbox-left-w', savedLeft + 'px');
-  if (savedRight) document.documentElement.style.setProperty('--inbox-right-w', savedRight + 'px');
-
-  initResizeHandle('resize-left', '.inbox-sidebar', 'left');
-  initResizeHandle('resize-right', '.inbox-details', 'right');
+  // Mobilde resize panel mantığını atla
+  if (window.innerWidth > 768) {
+    const savedLeft = localStorage.getItem('inbox_left_w');
+    const savedRight = localStorage.getItem('inbox_right_w');
+    if (savedLeft) document.documentElement.style.setProperty('--inbox-left-w', savedLeft + 'px');
+    if (savedRight) document.documentElement.style.setProperty('--inbox-right-w', savedRight + 'px');
+    initResizeHandle('resize-left', '.inbox-sidebar', 'left');
+    initResizeHandle('resize-right', '.inbox-details', 'right');
+  }
 });
 
 function initResizeHandle(handleId, panelSelector, side) {
