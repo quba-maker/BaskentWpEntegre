@@ -146,10 +146,16 @@
         <!-- Main Chat -->
         <div class="inbox-main">
           <div class="chat-window-header">
-            <div class="chat-user-info">
-              <span class="chat-user-name" id="chat-title">Bir sohbet seçin</span>
-              <span class="chat-user-phone" id="chat-phone" style="display:none"></span>
-              <span class="chat-channel-badge" id="chat-channel-badge" style="display:none">📱 Kanal</span>
+            <div class="chat-user-info" style="width:100%; display:flex; align-items:center;">
+              <button class="mobile-only-btn btn-back" onclick="navigateMobileView('list')" title="Geri">‹</button>
+              <div style="flex:1; display:flex; flex-direction:column; min-width:0;">
+                <span class="chat-user-name" id="chat-title" style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">Bir sohbet seçin</span>
+                <div style="display:flex; gap:6px; align-items:center;">
+                  <span class="chat-user-phone" id="chat-phone" style="display:none"></span>
+                  <span class="chat-channel-badge" id="chat-channel-badge" style="display:none">📱 Kanal</span>
+                </div>
+              </div>
+              <button class="mobile-only-btn btn-crm-toggle" onclick="navigateMobileView('crm')" title="Hasta Kartı" id="btn-mobile-crm" style="display:none;">📋</button>
             </div>
             <div id="chat-actions" class="handover-control" style="display:none">
               <button id="btn-status-bot" class="handover-btn active-bot" onclick="setConvStatus('active')">🤖 Bot Yanıtlasın</button>
@@ -173,7 +179,10 @@
 
         <!-- CRM Info -->
         <div class="inbox-details" id="crm-panel" style="display:none">
-          <div class="crm-header">Hasta Kartı</div>
+          <div class="crm-header" style="display:flex; align-items:center; gap:8px;">
+            <button class="mobile-only-btn btn-back" onclick="navigateMobileView('chat')" title="Sohbete Dön">‹</button>
+            <span style="flex:1">Hasta Kartı</span>
+          </div>
           <div class="crm-body">
             <div class="form-group">
               <label>Hasta Adı / Soyadı</label>

@@ -31,7 +31,46 @@ document.addEventListener('DOMContentLoaded', () => {
     initResizeHandle('resize-left', '.inbox-sidebar', 'left');
     initResizeHandle('resize-right', '.inbox-details', 'right');
   }
+
+  // Initialize mobile view based on URL hash or default
+  if (window.innerWidth <= 768) {
+    const layout = document.querySelector('.inbox-layout');
+    if (layout) {
+      layout.setAttribute('data-mobile-view', 'list');
+    }
+    // Handle hardware back button
+    window.addEventListener('popstate', (e) => {
+      if (e.state && e.state.mobileView) {
+        navigateMobileView(e.state.mobileView, true);
+      } else {
+        navigateMobileView('list', true);
+      }
+    });
+  }
 });
+
+// 📱 Native Mobile Stack Navigation Logic
+window.mobileView = 'list';
+function navigateMobileView(view, isPopState = false) {
+  if (window.innerWidth > 768) return; // Only apply on mobile
+  
+  const layout = document.querySelector('.inbox-layout');
+  if (!layout) return;
+  
+  layout.setAttribute('data-mobile-view', view);
+  window.mobileView = view;
+  
+  // History API Integration for Hardware Back Button
+  if (!isPopState) {
+    if (view === 'list') {
+      history.pushState({ mobileView: 'list' }, '', '#list');
+    } else if (view === 'chat') {
+      history.pushState({ mobileView: 'chat' }, '', '#chat');
+    } else if (view === 'crm') {
+      history.pushState({ mobileView: 'crm' }, '', '#crm');
+    }
+  }
+}
 
 function initResizeHandle(handleId, panelSelector, side) {
   const handle = document.getElementById(handleId);
@@ -1226,6 +1265,12 @@ async function loadChat(phone, channel) {
   document.querySelectorAll('.contact-item').forEach(el => el.classList.remove('active'));
   const activeEl = Array.from(document.querySelectorAll('.contact-item')).find(el => el.innerHTML.includes(phone));
   if(activeEl) activeEl.classList.add('active');
+
+  // Trigger mobile navigation to chat view
+  if (window.innerWidth <= 768) {
+    navigateMobileView('chat');
+    document.getElementById('btn-mobile-crm').style.display = 'inline-flex';
+  }
 
   // Load patient data for CRM and Status
   const pData = await api('get-patient&phone='+phone);
