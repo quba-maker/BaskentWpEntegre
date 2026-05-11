@@ -1465,8 +1465,10 @@ async function sendFileMessage() {
 }
 
 
-// ═══ EVRENSEL: Stage değişikliğini Google Sheets'e senkronize et ═══
+// ═══ EVRENSEL: Stage → Sheets senkronizasyonu (SADECE lokal cache güncelle, gerçek sync backend'de) ═══
 async function syncStageToSheets(phone, newStage) {
+  // Backend update-patient API zaten Google Sheets'e yazıyor.
+  // Burada sadece frontend _sheetRows cache'ini güncelliyoruz (form yönetimi badge'leri için)
   if (!newStage || !window._sheetRows || !window._sheetHeaders) return;
   try {
     const stageLabels = { new: 'Yeni', contacted: 'İlk Temas', discovery: 'Analiz', negotiation: 'İkna', hot_lead: 'Sıcak Lead', appointed: 'Randevu Alındı', lost: 'Kayıp' };
@@ -1474,10 +1476,8 @@ async function syncStageToSheets(phone, newStage) {
     const last10 = cleanP.length > 10 ? cleanP.slice(-10) : cleanP;
     
     const phoneColIdx = window._sheetHeaders.findIndex(h => /phone|telefon|tel|whatsapp|cep/i.test(h.toLowerCase()));
-    if (phoneColIdx === -1) return;
-    
     const statusColIdx = window._sheetHeaders.findIndex(h => /durum|status|lead_status|aşama/i.test(h.toLowerCase()));
-    if (statusColIdx === -1) return;
+    if (phoneColIdx === -1 || statusColIdx === -1) return;
     
     const rowIdx = window._sheetRows.findIndex(row => {
       const cellPhone = (row[phoneColIdx] || '').replace(/\D/g, '');
@@ -1485,16 +1485,9 @@ async function syncStageToSheets(phone, newStage) {
     });
     
     if (rowIdx > -1) {
-      const label = stageLabels[newStage] || newStage;
-      await fetch('/api/sheets?action=update', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sheetName: window._activeSheet, row: rowIdx, col: statusColIdx, value: label })
-      });
-      window._sheetRows[rowIdx][statusColIdx] = label;
-      console.log('📊 Sheets sync:', last10, '→', label);
+      window._sheetRows[rowIdx][statusColIdx] = stageLabels[newStage] || newStage;
     }
-  } catch(e) { console.error('Sheets sync hatası:', e); }
+  } catch(e) { /* sessiz */ }
 }
 
 // ═══ EVRENSEL: Tüm view'lardaki cache/UI senkronizasyonu ═══
@@ -1514,7 +1507,7 @@ function syncStageToAllViews(phone, newStage) {
     }
   }
   
-  // 2. Enrich cache temizle (form yönetimi listesi)
+  // 2. Enrich cache temizle (form yönetimi listesi — geri dönüldüğünde taze data çekilir)
   if (window._enrichCache) {
     Object.keys(window._enrichCache).forEach(key => {
       const keyClean = key.replace(/\D/g, '');
@@ -1529,11 +1522,18 @@ function syncStageToAllViews(phone, newStage) {
   const stageLabel = document.getElementById('crm-lead-stage');
   if (stageLabel) stageLabel.textContent = stageCfg.emoji + ' ' + stageCfg.label;
   
-  // 4. Inbox conversation list güncelle
+  // 4. İnbox dropdown'ı da güncelle (varsa)
+  const stageSelect = document.getElementById('crm-stage');
+  if (stageSelect) stageSelect.value = newStage;
+  
+  // 5. Inbox conversation list güncelle
   if (typeof renderConversationList === 'function') renderConversationList();
   
-  // 5. Form yönetimi satırlarını güncelle
+  // 6. Form yönetimi satırlarını güncelle (sayfa aktifse)
   if (typeof refreshLeadRowUI === 'function') refreshLeadRowUI(phone);
+  
+  // 7. Lokal sheet cache'ini de güncelle
+  syncStageToSheets(phone, newStage);
 }
 
 
@@ -1556,14 +1556,12 @@ function navigateToChat(phone) {
 async function instantStageUpdate(newStage) {
   if(!currentPhone) return;
   
-  // Evrensel senkronizasyon: tüm view'lar + cache
+  // Evrensel senkronizasyon: tüm view'lar + cache + lokal sheets
   syncStageToAllViews(currentPhone, newStage);
   
-  // DB'ye kaydet
+  // DB'ye kaydet → backend otomatik Google Sheets'e yazar
   await api('update-patient', 'POST', { phone: currentPhone, lead_stage: newStage });
-  
-  // Google Sheets'e yaz
-  await syncStageToSheets(currentPhone, newStage);
+  toast(`${(PIPELINE_STAGES[newStage] || {}).emoji || '✓'} ${(PIPELINE_STAGES[newStage] || {}).label || newStage}`, 'success');
 }
 
 async function autoSaveCRM() {
@@ -1592,19 +1590,16 @@ async function autoSaveCRM() {
     cachedConversations[idx].department = newDepartment;
   }
   
-  // Evrensel stage senkronizasyonu (tüm view'lar + cache)
+  // Evrensel stage senkronizasyonu (tüm view'lar + cache + lokal sheets)
   syncStageToAllViews(currentPhone, newStage);
 
-  // API'ye kaydet
+  // API'ye kaydet → backend otomatik Google Sheets'e yazar
   try {
     await api('update-patient', 'POST', payload);
     toast('✓ Kaydedildi', 'success');
   } catch(e) {
     console.error('AutoSave Error', e);
   }
-
-  // 📊 Google Sheets'e evrensel senkronizasyon
-  await syncStageToSheets(currentPhone, newStage);
 }
 
 async function setConvStatus(s) {
@@ -2343,17 +2338,10 @@ async function setLeadPipelineStage(phone, name, stage, btnEl, sheetsStatusCol, 
   if (infoEl) infoEl.innerHTML = '⏳ Kaydediliyor...';
   
   try {
-    // 1. DB'ye kaydet (conversations + leads + events otomatik)
+    // 1. DB'ye kaydet → backend otomatik Google Sheets'e yazar
     await api('update-patient', 'POST', { phone, patient_name: name || null, lead_stage: stage });
     
-    // 2. Google Sheets'e kaydet (evrensel fonksiyon — parametre geçse de geçmese de çalışır)
-    if (sheetsStatusCol > -1 && sheetsRowIndex >= 0) {
-      await updateSheetCell(sheetsRowIndex, sheetsStatusCol, cfg.sheetsVal || stage);
-    }
-    // Her durumda evrensel Sheets sync'i de çalıştır (status col/row bulunamazsa auto-detect eder)
-    await syncStageToSheets(phone, stage);
-    
-    // 3. Tüm view'ları senkronize et (inbox, form listesi, label'lar, cache)
+    // 2. Tüm view'ları senkronize et (inbox, form listesi, label'lar, cache, lokal sheets)
     syncStageToAllViews(phone, stage);
     
     if (infoEl) {
