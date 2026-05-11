@@ -74,17 +74,19 @@
       <!-- Başlık + Tarih Filtresi -->
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
         <h1 style="margin:0">🎯 Komuta Merkezi</h1>
-        <div style="display:flex; gap:8px; align-items:center;">
+        <div class="cc-filter-row" style="display:flex; gap:8px; align-items:center;">
           <div id="cc-period-pills" style="display:flex; gap:4px;">
             <button class="sheet-tab" onclick="setCCPeriod(7)" data-days="7" style="border-radius:20px; padding:5px 12px; font-size:11px;">7 Gün</button>
             <button class="sheet-tab active" onclick="setCCPeriod(30)" data-days="30" style="border-radius:20px; padding:5px 12px; font-size:11px;">30 Gün</button>
             <button class="sheet-tab" onclick="setCCPeriod(90)" data-days="90" style="border-radius:20px; padding:5px 12px; font-size:11px;">90 Gün</button>
             <button class="sheet-tab" onclick="setCCPeriod(365)" data-days="365" style="border-radius:20px; padding:5px 12px; font-size:11px;">1 Yıl</button>
           </div>
-          <input type="date" id="cc-from" style="background:var(--bg-hover); border:1px solid var(--border-color); color:white; padding:5px 10px; border-radius:8px; font-size:12px;">
-          <span style="color:var(--text-muted)">→</span>
-          <input type="date" id="cc-to" style="background:var(--bg-hover); border:1px solid var(--border-color); color:white; padding:5px 10px; border-radius:8px; font-size:12px;">
-          <button class="btn btn-primary" onclick="loadCommandCenter()" style="padding:5px 14px; font-size:12px;">Uygula</button>
+          <div class="apple-date-picker">
+            <input type="date" id="cc-from" aria-label="Başlangıç">
+            <span class="apple-date-divider">→</span>
+            <input type="date" id="cc-to" aria-label="Bitiş">
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="loadCommandCenter()" style="border-radius:12px; font-size:12px; padding:0 14px; min-height:36px;">Uygula</button>
         </div>
       </div>
 

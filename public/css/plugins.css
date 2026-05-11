@@ -393,13 +393,27 @@ details[open] summary {
     align-items: stretch !important;
     gap: 16px !important;
   }
-  #page-command-center > div:first-child > div:last-child {
-    flex-direction: column !important;
+  #page-command-center > div:first-child > .cc-filter-row {
+    flex-direction: row !important;
+    flex-wrap: wrap !important;
     width: 100% !important;
   }
   #cc-period-pills { width: 100% !important; justify-content: space-between !important; background: var(--bg-input) !important; padding: 4px !important; border-radius: var(--radius-sm) !important; }
   #cc-period-pills button { flex: 1 !important; text-align: center !important; padding: 8px !important; font-size: 13px !important; }
-  #cc-from, #cc-to { width: 100% !important; }
+  
+  .apple-date-picker {
+    flex: 1 !important;
+    justify-content: space-between !important;
+    padding: 2px 8px !important;
+  }
+  .apple-date-picker input[type="date"] {
+    width: 100% !important;
+    font-size: 12px !important;
+    padding: 4px !important;
+  }
+  .cc-filter-row > button.btn-primary {
+    flex-shrink: 0 !important;
+  }
   
   /* Grids */
   #cc-kpi-bar {
