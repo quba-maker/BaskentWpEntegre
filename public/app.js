@@ -465,7 +465,9 @@ async function enrichLeadCards(rows, phoneCol) {
         const resp = await fetch(`/api/panel?action=lead-context&phone=${encodeURIComponent(phone)}`, {
           headers: { Authorization: `Bearer ${token}` }
         });
+        if (!resp.ok) { console.warn(`⚠️ Enrich ${phone}: HTTP ${resp.status}`); return; }
         const ctx = await resp.json();
+        if (ctx.error) { console.warn(`⚠️ Enrich ${phone}: ${ctx.error}`); return; }
         const el = document.getElementById(`lead-enrich-${idx}`);
         if (!el) return;
         let h = '';
@@ -546,7 +548,7 @@ async function enrichLeadCards(rows, phoneCol) {
             badgeEl.style.background = 'var(--card-bg)';
           }
         }
-      } catch(e) {}
+      } catch(e) { console.warn(`⚠️ Enrich hata (${rawPhone}):`, e.message); }
     }));
   }
 }
