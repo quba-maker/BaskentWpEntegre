@@ -431,21 +431,47 @@ details[open] summary {
   }
 
   /* 2. Chat / Hasta Takibi */
-  /* WA FB IG sekmeleri için taşmayı engelle */
+  #page-conversations > h1 { display: none !important; }
+  .inbox-header { border-bottom: none !important; padding-bottom: 4px !important; padding-top: 0 !important; }
+  .inbox-header h3 { font-size: 26px !important; font-weight: 700 !important; letter-spacing: -1px !important; }
+
+  /* WA FB IG sekmeleri - Minimal Tek Satır */
   .inbox-filter-tabs {
-    flex-wrap: wrap !important;
-    gap: 8px !important;
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    gap: 4px !important;
     height: auto !important;
+    background: transparent !important;
+    padding: 0 12px 8px 12px !important;
+    margin: 0 !important;
   }
+  .inbox-filter-tabs::-webkit-scrollbar { display: none; }
   .inbox-filter-tabs .filter-tab {
-    flex: 1 1 calc(50% - 8px) !important; /* İki sütun */
-    min-width: 80px !important;
+    flex: 0 0 auto !important;
+    min-width: unset !important;
+    padding: 6px 12px !important;
+    border-radius: 20px !important;
+    background: rgba(255,255,255,0.05) !important;
   }
-  /* Arama çubuğu genişliği */
-  .inbox-search, .search-input-wrapper, #inbox-search {
+  .inbox-filter-tabs .filter-tab.active {
+    background: var(--text-main) !important;
+    color: var(--bg-main) !important;
+  }
+  .inbox-filter-tabs .filter-tab.active .filter-count {
+    background: var(--bg-main);
+    color: var(--text-main);
+  }
+  
+  /* Arama çubuğu genişliği ve padding */
+  .inbox-search {
     width: 100% !important;
-    max-width: 100% !important;
-    box-sizing: border-box !important;
+    padding: 0 12px 12px 12px !important;
+    border-bottom: none !important;
+  }
+  .inbox-search input {
+    background: rgba(255,255,255,0.06) !important;
+    border-radius: 12px !important;
   }
 
   /* 3. Randevu Talepleri (Appointments) */
