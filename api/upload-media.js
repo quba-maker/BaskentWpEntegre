@@ -70,7 +70,7 @@ export default async function handler(req, res) {
       const CRLF = '\r\n';
       const headerParts = [
         `--${boundary}${CRLF}Content-Disposition: form-data; name="messaging_product"${CRLF}${CRLF}whatsapp${CRLF}`,
-        `--${boundary}${CRLF}Content-Disposition: form-data; name="type"${CRLF}${CRLF}${mimeType}${CRLF}`,
+        `--${boundary}${CRLF}Content-Disposition: form-data; name="type"${CRLF}${CRLF}${mediaType}${CRLF}`,
         `--${boundary}${CRLF}Content-Disposition: form-data; name="file"; filename="${name}"${CRLF}Content-Type: ${mimeType}${CRLF}${CRLF}`
       ].join('');
       
@@ -108,13 +108,16 @@ export default async function handler(req, res) {
       };
 
       if (mediaType === 'image') {
-        msgData.image = { id: mediaId, caption: caption || '' };
+        msgData.image = { id: mediaId };
+        if (caption) msgData.image.caption = caption;
       } else if (mediaType === 'video') {
-        msgData.video = { id: mediaId, caption: caption || '' };
+        msgData.video = { id: mediaId };
+        if (caption) msgData.video.caption = caption;
       } else if (mediaType === 'audio') {
         msgData.audio = { id: mediaId };
       } else {
-        msgData.document = { id: mediaId, caption: caption || '', filename: name };
+        msgData.document = { id: mediaId, filename: name };
+        if (caption) msgData.document.caption = caption;
       }
 
       await axios({
