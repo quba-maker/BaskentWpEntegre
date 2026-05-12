@@ -13,6 +13,9 @@ const nextConfig: NextConfig = {
     config.resolve.alias = {
       ...config.resolve.alias,
       '@lib': path.resolve(__dirname, '../lib'),
+      // Eski dosyalar dış kütüphaneleri (root) aradığında v2/node_modules'a yönlendir
+      '@neondatabase/serverless': path.resolve(__dirname, 'node_modules/@neondatabase/serverless'),
+      'axios': path.resolve(__dirname, 'node_modules/axios'),
     };
     return config;
   },
