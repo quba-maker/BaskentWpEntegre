@@ -72,9 +72,9 @@ export async function POST(req: NextRequest) {
     runBackgroundChecks().catch(() => {});
 
     // Dynamic import — lib/ klasörü parent directory'de
-    const { handleWhatsAppMessage } = await import("../../../../lib/channels/whatsapp.js");
-    const { handleMessengerMessage } = await import("../../../../lib/channels/messenger.js");
-    const { handleInstagramMessage } = await import("../../../../lib/channels/instagram.js");
+    const { handleWhatsAppMessage } = await import("../../../../../lib/channels/whatsapp.js");
+    const { handleMessengerMessage } = await import("../../../../../lib/channels/messenger.js");
+    const { handleInstagramMessage } = await import("../../../../../lib/channels/instagram.js");
 
     // 1. WHATSAPP
     if (
