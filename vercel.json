@@ -1,7 +1,6 @@
 {
   "buildCommand": "cd v2 && npm install && npm run build",
   "installCommand": "cd v2 && npm install",
-  "framework": "nextjs",
   "outputDirectory": "v2/.next",
   "crons": [
     {
