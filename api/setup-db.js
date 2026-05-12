@@ -92,6 +92,8 @@ export default async function handler(req, res) {
     try { await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS lead_score INT DEFAULT 0`; } catch(e) {}
     try { await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS notes TEXT`; } catch(e) {}
     try { await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()`; } catch(e) {}
+    try { await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS country VARCHAR(100)`; } catch(e) {}
+    try { await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS real_phone VARCHAR(20)`; } catch(e) {}
 
     // Alerts tablosu (Sıcak lead alarmları)
     await sql`CREATE TABLE IF NOT EXISTS alerts (
