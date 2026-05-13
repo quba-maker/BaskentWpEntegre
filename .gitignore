@@ -9,3 +9,19 @@ test_*.js
 get-templates.js
 test-templates.js
 setup-vercel-env.sh
+
+# v2 subdirectory ignores
+v2/node_modules/
+v2/.next/
+v2/tsconfig.tsbuildinfo
+
+# env & system files
+.env
+.env.local
+.env*.local
+.DS_Store
+*.DS_Store
+.vercel
+node_modules/
+setup-vercel-env.sh
+next-env.d.ts
