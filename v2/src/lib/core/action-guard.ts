@@ -101,6 +101,6 @@ export async function withActionGuard<T>(
       ? "Sistemsel bir hata oluştu. Lütfen daha sonra tekrar deneyin."
       : error.message;
 
-    return { success: false, error: errorMsg, statusCode: 500, rawError: error.stack || error.message } as any;
+    return { success: false, error: errorMsg, statusCode: 500 };
   }
 }

@@ -56,21 +56,14 @@ export async function getBotSettings() {
       });
       
       return { 
-        settings: result,
-        __forensic: {
-          resolvedTenantId: ctx.tenantId,
-          sqlRawResultCount: rows.length,
-          sqlRawResult: rows.slice(0, 2),
-          isArray: Array.isArray(settings),
-          settingsKeysDetected: Object.keys(settings || {}),
-        }
+        settings: result
       };
     }
   ).then(res => {
-    if (!res.success) return { success: false, settings: {} as Record<string, any>, error: res.error, __forensic: { error: res.error, rawError: (res as any).rawError, stage: 'ActionGuard_Failure' } };
-    return { success: true, settings: res.data?.settings as Record<string, any>, __forensic: res.data?.__forensic };
+    if (!res.success) return { success: false, settings: {} as Record<string, any>, error: res.error };
+    return { success: true, settings: res.data?.settings as Record<string, any> };
   }).catch(err => {
-    return { success: false, settings: {} as Record<string, any>, error: err.message, __forensic: { errorStack: err.stack, stage: 'Fatal_Catch' } };
+    return { success: false, settings: {} as Record<string, any>, error: err.message };
   });
 }
 

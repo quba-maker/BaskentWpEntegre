@@ -58,7 +58,6 @@ const channels: BotChannel[] = [
 // ==========================================
 export default function BotManagementPage() {
   const [settings, setSettings] = useState<Record<string, any>>({});
-  const [forensicData, setForensicData] = useState<any>(null);
   const [defaults, setDefaults] = useState<any>(null);
   const [stats, setStats] = useState<any>(null);
   const [activeTab, setActiveTab] = useState("whatsapp");
@@ -99,10 +98,6 @@ export default function BotManagementPage() {
         getModelUsage('30d'),
         getRecentBotConversations(8)
       ]);
-
-      if (settingsRes) {
-        setForensicData(settingsRes);
-      }
 
       if (settingsRes.success) {
         setSettings(settingsRes.settings);
@@ -249,16 +244,6 @@ export default function BotManagementPage() {
       {/* Background */}
       <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-[#5856D6]/5 rounded-full blur-[100px] pointer-events-none -z-10" />
       <div className="absolute bottom-0 left-0 w-[400px] h-[400px] bg-[#007AFF]/5 rounded-full blur-[100px] pointer-events-none -z-10" />
-
-      {/* FORENSIC DEBUG PANEL */}
-      {forensicData && (
-        <div className="mb-8 p-4 bg-red-50 border-2 border-red-500 rounded-xl">
-          <h2 className="text-red-700 font-bold mb-2">🔥 FORENSIC RUNTIME DUMP</h2>
-          <pre className="text-[11px] font-mono text-red-900 whitespace-pre-wrap break-all">
-            {JSON.stringify(forensicData, null, 2)}
-          </pre>
-        </div>
-      )}
 
       {/* Header */}
       <div className="mb-8">
