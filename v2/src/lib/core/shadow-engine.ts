@@ -62,7 +62,7 @@ export class ShadowEngine {
       }
 
       if (legacyResult.status === 'fulfilled' && v2Result.status === 'rejected') {
-        this.log.error(`🔥 FATAL Drift: Legacy succeeded, V2 failed in [${name}]`, { error: v2Result.reason });
+        this.log.error(`🔥 FATAL Drift: Legacy succeeded, V2 failed in [${name}]`, new Error(String(v2Result.reason)));
         return { result: legacyResult.value, match: false };
       }
 
@@ -77,8 +77,8 @@ export class ShadowEngine {
 
       return { result: val1, match: diff.match };
 
-    } catch (e) {
-      this.log.error(`Shadow Engine crashed inside [${name}]`, e);
+    } catch (e: unknown) {
+      this.log.error(`Shadow Engine crashed inside [${name}]`, e instanceof Error ? e : new Error(String(e)));
       // Fallback to legacy
       return { result: await legacyFn(), match: false };
     }
