@@ -67,7 +67,7 @@ export async function getBotSettings() {
       };
     }
   ).then(res => {
-    if (!res.success) return { success: false, settings: {} as Record<string, any>, error: res.error, __forensic: { error: res.error, stage: 'ActionGuard_Failure' } };
+    if (!res.success) return { success: false, settings: {} as Record<string, any>, error: res.error, __forensic: { error: res.error, rawError: (res as any).rawError, stage: 'ActionGuard_Failure' } };
     return { success: true, settings: res.data?.settings as Record<string, any>, __forensic: res.data?.__forensic };
   }).catch(err => {
     return { success: false, settings: {} as Record<string, any>, error: err.message, __forensic: { errorStack: err.stack, stage: 'Fatal_Catch' } };
