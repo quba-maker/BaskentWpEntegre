@@ -58,6 +58,9 @@ export async function saveBotSetting(key: string, value: string) {
   try {
     const session = await getSession();
     if (!session?.tenantId) return { success: false, error: "Oturum yok" };
+    if (session.role !== "owner" && session.role !== "admin" && session.role !== "platform_admin") {
+      return { success: false, error: "Bot ayarlarını değiştirme yetkiniz yok." };
+    }
     const tenantId = session.tenantId;
     
     // UPSERT — tenant bazlı
