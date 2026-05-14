@@ -1,0 +1,67 @@
+name: CI — Build & Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  # Build için minimum gerekli env vars
+  DATABASE_URL: ${{ secrets.DATABASE_URL }}
+  AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: v2
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: v2/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint check
+        run: npx next lint --no-cache 2>/dev/null || echo "Lint warnings found (non-blocking)"
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: npm run build
+
+      - name: Security audit
+        run: |
+          echo "🔒 Security Pattern Check"
+          
+          # Null tenant bypass kontrolü
+          if grep -r "tenantId === null" src/app/actions/ 2>/dev/null; then
+            echo "❌ FAIL: Null tenant bypass found!"
+            exit 1
+          fi
+          echo "✅ No null tenant bypass"
+          
+          # fakeReq/fakeRes kontrolü
+          if grep -r "fakeReq\|fakeRes" src/app/api/ 2>/dev/null; then
+            echo "❌ FAIL: Legacy fakeReq/fakeRes found!"
+            exit 1
+          fi
+          echo "✅ No legacy adapters"
+          
+          # Hardcoded secret kontrolü
+          if grep -r "quba-ai-secret" src/ 2>/dev/null; then
+            echo "❌ FAIL: Hardcoded secret found!"
+            exit 1
+          fi
+          echo "✅ No hardcoded secrets"
+          
+          echo "🎉 All security checks passed"

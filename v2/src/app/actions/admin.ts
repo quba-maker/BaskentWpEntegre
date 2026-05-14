@@ -102,3 +102,137 @@ export async function toggleTenantStatus(tenantId: string) {
     return { success: false, error: error.message };
   }
 }
+
+// ==========================================
+// ONBOARDING WIZARD ACTIONS
+// Adım adım yeni firma kurulumu
+// ==========================================
+
+/**
+ * Adım 2: Meta/WhatsApp kimlik bilgilerini güncelle
+ */
+export async function updateTenantConfig(tenantId: string, config: {
+  meta_page_token?: string;
+  whatsapp_phone_id?: string;
+  whatsapp_business_id?: string;
+  meta_page_id?: string;
+  instagram_id?: string;
+  ai_model?: string;
+  daily_ai_limit?: number;
+  timezone?: string;
+  primary_color?: string;
+}) {
+  const session = await getSession();
+  if (session?.role !== "owner" && session?.role !== "platform_admin") return { success: false, error: "Yetki yok" };
+
+  try {
+    await sql`
+      UPDATE tenants SET
+        meta_page_token = COALESCE(${config.meta_page_token || null}, meta_page_token),
+        whatsapp_phone_id = COALESCE(${config.whatsapp_phone_id || null}, whatsapp_phone_id),
+        whatsapp_business_id = COALESCE(${config.whatsapp_business_id || null}, whatsapp_business_id),
+        meta_page_id = COALESCE(${config.meta_page_id || null}, meta_page_id),
+        instagram_id = COALESCE(${config.instagram_id || null}, instagram_id),
+        ai_model = COALESCE(${config.ai_model || null}, ai_model),
+        daily_ai_limit = COALESCE(${config.daily_ai_limit || null}, daily_ai_limit),
+        timezone = COALESCE(${config.timezone || null}, timezone),
+        primary_color = COALESCE(${config.primary_color || null}, primary_color),
+        updated_at = NOW()
+      WHERE id = ${tenantId}
+    `;
+
+    logAudit({
+      tenantId: session.tenantId,
+      userId: session.userId,
+      userEmail: session.email,
+      action: "tenant_config_updated",
+      entityType: "tenant",
+      entityId: tenantId,
+      details: { updatedFields: Object.keys(config).filter(k => (config as any)[k]) },
+    });
+
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Adım 3: Tenant'a admin kullanıcı oluştur
+ */
+export async function createTenantUser(tenantId: string, user: {
+  email: string;
+  password: string;
+  name: string;
+  role?: string;
+}) {
+  const session = await getSession();
+  if (session?.role !== "owner" && session?.role !== "platform_admin") return { success: false, error: "Yetki yok" };
+
+  try {
+    // Email kontrolü
+    const existing = await sql`SELECT id FROM users WHERE email = ${user.email}`;
+    if (existing.length > 0) return { success: false, error: "Bu e-posta zaten kayıtlı." };
+
+    // Bcrypt hash — dynamic import
+    const bcrypt = await import("bcryptjs");
+    const hash = await bcrypt.hash(user.password, 12);
+
+    await sql`
+      INSERT INTO users (tenant_id, email, password_hash, name, role)
+      VALUES (${tenantId}, ${user.email}, ${hash}, ${user.name}, ${user.role || 'admin'})
+    `;
+
+    logAudit({
+      tenantId: session.tenantId,
+      userId: session.userId,
+      userEmail: session.email,
+      action: "tenant_user_created",
+      entityType: "user",
+      details: { email: user.email, role: user.role || 'admin', forTenant: tenantId },
+    });
+
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Adım 4: Tenant kurulumunu doğrula
+ */
+export async function verifyTenantSetup(tenantId: string) {
+  const session = await getSession();
+  if (session?.role !== "owner" && session?.role !== "platform_admin") return { success: false, error: "Yetki yok" };
+
+  try {
+    const tenant = await sql`SELECT * FROM tenants WHERE id = ${tenantId}`;
+    if (tenant.length === 0) return { success: false, error: "Tenant bulunamadı." };
+    const t = tenant[0];
+
+    const users = await sql`SELECT COUNT(*) as c FROM users WHERE tenant_id = ${tenantId}`;
+    const settings = await sql`SELECT COUNT(*) as c FROM settings WHERE tenant_id = ${tenantId}`;
+
+    const checks = [
+      { name: "Firma bilgileri", ok: !!t.name && !!t.slug, detail: t.name },
+      { name: "WhatsApp token", ok: !!t.meta_page_token, detail: t.meta_page_token ? "✓ Tanımlı" : "✗ Eksik" },
+      { name: "WhatsApp Phone ID", ok: !!t.whatsapp_phone_id, detail: t.whatsapp_phone_id || "✗ Eksik" },
+      { name: "Admin kullanıcı", ok: Number(users[0]?.c) > 0, detail: `${users[0]?.c} kullanıcı` },
+      { name: "Prompt ayarları", ok: Number(settings[0]?.c) > 0, detail: `${settings[0]?.c} ayar` },
+      { name: "AI model", ok: !!t.ai_model, detail: t.ai_model || "varsayılan" },
+    ];
+
+    const allPassed = checks.every(c => c.ok);
+
+    return {
+      success: true,
+      ready: allPassed,
+      checks,
+      summary: allPassed 
+        ? `✅ ${t.name} kurulumu tamamlandı ve hazır!` 
+        : `⚠️ ${checks.filter(c => !c.ok).length} eksik adım var.`,
+    };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}

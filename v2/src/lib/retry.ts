@@ -81,8 +81,55 @@ export async function processRetryQueue(): Promise<{ processed: number; failed: 
             await handleRetryFailure(sql, msg, err);
             stats.failed++;
           }
+        } else if (msg.channel === "instagram") {
+          // Instagram retry
+          const igToken = process.env.IG_TOKEN_1;
+          if (!igToken) {
+            await markFailed(sql, msg.id, "IG_TOKEN_1 eksik");
+            stats.failed++;
+            continue;
+          }
+
+          const response = await fetch(`https://graph.instagram.com/v25.0/me/messages`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${igToken}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ recipient: { id: msg.phone_number }, message: { text: msg.content } }),
+          });
+
+          if (response.ok) {
+            await sql`UPDATE message_retry_queue SET status = 'sent' WHERE id = ${msg.id}`;
+            await sql`INSERT INTO messages (tenant_id, phone_number, direction, content, channel, model_used) VALUES (${msg.tenant_id}, ${msg.phone_number}, 'out', ${msg.content}, 'instagram', 'retry')`;
+            stats.processed++;
+          } else {
+            const err = await response.text();
+            await handleRetryFailure(sql, msg, err);
+            stats.failed++;
+          }
+        } else if (msg.channel === "messenger") {
+          // Messenger retry
+          const pageToken = process.env.PAGE_ACCESS_TOKEN;
+          if (!pageToken) {
+            await markFailed(sql, msg.id, "PAGE_ACCESS_TOKEN eksik");
+            stats.failed++;
+            continue;
+          }
+
+          const response = await fetch(`https://graph.facebook.com/v25.0/me/messages?access_token=${pageToken}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ recipient: { id: msg.phone_number }, message: { text: msg.content } }),
+          });
+
+          if (response.ok) {
+            await sql`UPDATE message_retry_queue SET status = 'sent' WHERE id = ${msg.id}`;
+            await sql`INSERT INTO messages (tenant_id, phone_number, direction, content, channel, model_used) VALUES (${msg.tenant_id}, ${msg.phone_number}, 'out', ${msg.content}, 'messenger', 'retry')`;
+            stats.processed++;
+          } else {
+            const err = await response.text();
+            await handleRetryFailure(sql, msg, err);
+            stats.failed++;
+          }
         } else {
-          // Instagram/Messenger retry — gelecekte eklenecek
           stats.skipped++;
         }
       } catch (e: any) {

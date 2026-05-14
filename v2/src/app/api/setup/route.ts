@@ -207,6 +207,41 @@ export async function GET(req: NextRequest) {
     await sql`CREATE INDEX IF NOT EXISTS idx_conversations_tenant_last ON conversations(tenant_id, last_message_at DESC NULLS LAST)`;
     results.push("✅ performans indexleri oluşturuldu");
 
+    // 16. Denormalized last_message kolonu (N+1 query fix)
+    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_message_content TEXT`;
+    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_message_channel VARCHAR(50)`;
+    // Mevcut verileri backfill
+    await sql`
+      UPDATE conversations c SET 
+        last_message_content = m.content,
+        last_message_channel = m.channel
+      FROM (
+        SELECT DISTINCT ON (phone_number) phone_number, content, channel 
+        FROM messages ORDER BY phone_number, created_at DESC
+      ) m
+      WHERE c.phone_number = m.phone_number AND c.last_message_content IS NULL
+    `;
+    results.push("✅ last_message denormalizasyonu hazır");
+
+    // 17. Billing — monthly_usage tablosu
+    await sql`
+      CREATE TABLE IF NOT EXISTS monthly_usage (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID NOT NULL REFERENCES tenants(id),
+        month TEXT NOT NULL,
+        total_messages INT DEFAULT 0,
+        ai_messages INT DEFAULT 0,
+        human_messages INT DEFAULT 0,
+        whatsapp_messages INT DEFAULT 0,
+        instagram_messages INT DEFAULT 0,
+        messenger_messages INT DEFAULT 0,
+        estimated_cost_usd DECIMAL(10,4) DEFAULT 0,
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(tenant_id, month)
+      )
+    `;
+    results.push("✅ monthly_usage tablosu hazır");
+
     return NextResponse.json({ success: true, results });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });

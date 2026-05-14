@@ -28,20 +28,20 @@ export async function getConversations(page: number = 1, search: string = "", st
         c.tags,
         c.channel,
         c.last_message_at,
-        m.content as last_message,
-        m.created_at as last_message_time,
+        COALESCE(c.last_message_content, m.content) as last_message,
+        c.last_message_at as last_message_time,
         l.form_name,
         l.raw_data as form_raw_data,
         l.created_at as form_date,
         0 as unread
       FROM conversations c
       LEFT JOIN LATERAL (
-        SELECT content, created_at 
+        SELECT content
         FROM messages 
         WHERE phone_number = c.phone_number AND tenant_id = ${tenantId}
         ORDER BY created_at DESC 
         LIMIT 1
-      ) m ON true
+      ) m ON c.last_message_content IS NULL
       LEFT JOIN LATERAL (
         SELECT form_name, raw_data, created_at 
         FROM leads 
@@ -167,12 +167,14 @@ export async function sendMessage(phone: string, text: string) {
       VALUES (${session.tenantId}, ${phone}, 'out', ${text}, 'whatsapp')
     `;
 
-    // 3. Update Conversation Last Message
+    // 3. Update Conversation Last Message (denormalized)
     await sql`
       UPDATE conversations 
       SET last_message_at = NOW(), 
+          last_message_content = ${text},
+          last_message_channel = 'whatsapp',
           message_count = message_count + 1,
-          status = 'human' -- Auto takeover when agent sends message
+          status = 'human'
       WHERE phone_number = ${phone} AND tenant_id = ${session.tenantId}
     `;
 
