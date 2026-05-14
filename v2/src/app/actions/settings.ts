@@ -22,7 +22,16 @@ export async function getTenantSettings() {
 
     if (tenants.length === 0) return { success: false, error: "Tenant bulunamadı" };
 
-    return { success: true, tenant: tenants[0], user: { name: session.name, email: session.email, role: session.role } };
+    const tenant = { ...tenants[0] };
+    
+    // Token maskeleme — sadece admin/owner tam token görebilir
+    if (session.role !== 'owner' && session.role !== 'admin' && session.role !== 'platform_admin') {
+      if (tenant.meta_page_token) {
+        tenant.meta_page_token = '••••••••' + tenant.meta_page_token.slice(-8);
+      }
+    }
+
+    return { success: true, tenant, user: { name: session.name, email: session.email, role: session.role } };
   } catch (error: any) {
     return { success: false, error: error.message };
   }
@@ -32,7 +41,7 @@ export async function updateTenantSettings(updates: Record<string, any>) {
   try {
     const session = await getSession();
     if (!session?.tenantId) return { success: false, error: "Oturum yok" };
-    if (session.role !== "owner" && session.role !== "admin") return { success: false, error: "Yetki yok" };
+    if (session.role !== "owner" && session.role !== "admin" && session.role !== "platform_admin") return { success: false, error: "Yetki yok" };
 
     const { name, industry, primaryColor, aiModel, maxBotMessages, timezone } = updates;
 

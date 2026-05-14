@@ -16,10 +16,13 @@ export async function getAllTenants() {
   try {
     const tenants = await sql`
       SELECT t.*,
-        (SELECT COUNT(*) FROM conversations WHERE tenant_id = t.id) as conversation_count,
-        (SELECT COUNT(*) FROM messages WHERE tenant_id = t.id) as message_count,
-        (SELECT COUNT(*) FROM users WHERE tenant_id = t.id) as user_count
+        COALESCE(cv.cnt, 0) as conversation_count,
+        COALESCE(mv.cnt, 0) as message_count,
+        COALESCE(uv.cnt, 0) as user_count
       FROM tenants t
+      LEFT JOIN (SELECT tenant_id, COUNT(*) as cnt FROM conversations GROUP BY tenant_id) cv ON cv.tenant_id = t.id
+      LEFT JOIN (SELECT tenant_id, COUNT(*) as cnt FROM messages GROUP BY tenant_id) mv ON mv.tenant_id = t.id
+      LEFT JOIN (SELECT tenant_id, COUNT(*) as cnt FROM users GROUP BY tenant_id) uv ON uv.tenant_id = t.id
       ORDER BY t.created_at DESC
     `;
 
@@ -39,8 +42,20 @@ export async function createTenant(data: {
   if (session?.role !== "owner" && session?.role !== "platform_admin") return { success: false, error: "Yetki yok" };
 
   try {
-    const existing = await sql`SELECT id FROM tenants WHERE slug = ${data.slug}`;
+    // Slug validation
+    const slug = data.slug.toLowerCase().trim();
+    const RESERVED_SLUGS = ['admin', 'api', 'login', 'setup', 'privacy', 'terms', 'app', 'dashboard', 'settings', 'webhook', 'sse', 'health', 'status', 'billing', 'support', 'docs', 'help'];
+    
+    if (!/^[a-z0-9][a-z0-9-]{0,28}[a-z0-9]$/.test(slug) || slug.length < 2) {
+      return { success: false, error: "Slug sadece küçük harf, rakam ve tire içerebilir (2-30 karakter)." };
+    }
+    if (RESERVED_SLUGS.includes(slug)) {
+      return { success: false, error: `"${slug}" sistem tarafından ayrılmış bir isimdir.` };
+    }
+
+    const existing = await sql`SELECT id FROM tenants WHERE slug = ${slug}`;
     if (existing.length > 0) return { success: false, error: "Bu slug zaten kullanılıyor." };
+    data.slug = slug;
 
     // 1. Tenant oluştur
     const created = await sql`
@@ -170,9 +185,9 @@ export async function createTenantUser(tenantId: string, user: {
   if (session?.role !== "owner" && session?.role !== "platform_admin") return { success: false, error: "Yetki yok" };
 
   try {
-    // Email kontrolü
-    const existing = await sql`SELECT id FROM users WHERE email = ${user.email}`;
-    if (existing.length > 0) return { success: false, error: "Bu e-posta zaten kayıtlı." };
+    // Email kontrolü — hedef tenant içinde benzersiz
+    const existing = await sql`SELECT id FROM users WHERE email = ${user.email} AND tenant_id = ${tenantId}`;
+    if (existing.length > 0) return { success: false, error: "Bu e-posta bu firmada zaten kayıtlı." };
 
     // Bcrypt hash — dynamic import
     const bcrypt = await import("bcryptjs");

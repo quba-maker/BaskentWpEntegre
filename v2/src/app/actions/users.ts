@@ -44,9 +44,9 @@ export async function createUser(data: {
   }
 
   try {
-    // E-posta kontrolü
-    const existing = await sql`SELECT id FROM users WHERE email = ${data.email}`;
-    if (existing.length > 0) return { success: false, error: "Bu e-posta zaten kullanılıyor." };
+    // E-posta kontrolü — aynı tenant içinde benzersiz olmalı (farklı tenant'larda kullanılabilir)
+    const existing = await sql`SELECT id FROM users WHERE email = ${data.email} AND tenant_id = ${session.tenantId}`;
+    if (existing.length > 0) return { success: false, error: "Bu e-posta bu firmada zaten kullanılıyor." };
 
     // Şifre hash
     const bcrypt = await import("bcryptjs");

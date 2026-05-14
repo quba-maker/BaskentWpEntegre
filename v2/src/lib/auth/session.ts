@@ -34,7 +34,7 @@ export interface Session {
 async function createToken(session: Session): Promise<string> {
   return new SignJWT({ ...session })
     .setProtectedHeader({ alg: "HS256" })
-    .setExpirationTime("7d")
+    .setExpirationTime("2h")
     .setIssuedAt()
     .sign(SECRET);
 }
@@ -49,12 +49,46 @@ async function verifyToken(token: string): Promise<Session | null> {
   }
 }
 
-// Aktif session'ı getir
+// Aktif session'ı getir — DB doğrulamalı
 export async function getSession(): Promise<Session | null> {
   const cookieStore = await cookies();
   const token = cookieStore.get(COOKIE_NAME)?.value;
   if (!token) return null;
-  return verifyToken(token);
+  
+  const session = await verifyToken(token);
+  if (!session) return null;
+
+  // DB'den kullanıcı durumunu doğrula (silinen/deaktif/rol değişen kullanıcılar)
+  try {
+    const user = await sql`
+      SELECT u.is_active, u.role, t.status as tenant_status, t.name as tenant_name
+      FROM users u
+      JOIN tenants t ON u.tenant_id = t.id
+      WHERE u.id = ${session.userId} AND u.tenant_id = ${session.tenantId}
+    `;
+    
+    // Kullanıcı silinmiş veya deaktif
+    if (user.length === 0 || !user[0].is_active) {
+      cookieStore.delete(COOKIE_NAME);
+      return null;
+    }
+    
+    // Tenant askıya alınmış
+    if (user[0].tenant_status === 'suspended') {
+      cookieStore.delete(COOKIE_NAME);
+      return null;
+    }
+    
+    // Rol değişmişse session'ı güncelle
+    if (user[0].role !== session.role) {
+      session.role = user[0].role;
+    }
+    
+    return session;
+  } catch {
+    // DB hatası durumunda JWT'ye güven (graceful degradation)
+    return session;
+  }
 }
 
 // Giriş yap
@@ -110,7 +144,7 @@ export async function login(
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
-      maxAge: 60 * 60 * 24 * 7, // 7 gün
+      maxAge: 60 * 60 * 2, // 2 saat (JWT ile eşleşmeli)
       path: "/",
     });
 
