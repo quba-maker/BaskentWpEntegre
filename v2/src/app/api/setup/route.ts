@@ -161,18 +161,23 @@ export async function GET(req: NextRequest) {
       await sql`ALTER TABLE settings ENABLE ROW LEVEL SECURITY`;
       await sql`ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY`;
 
-      // Neon'un default kullanıcısı (neondb_owner) için bypass policy
-      // Bu, uygulama tarafından yapılan tüm sorguların çalışmasını sağlar
-      const tables = ['conversations', 'messages', 'leads', 'settings', 'audit_logs'];
-      for (const table of tables) {
-        await sql`
-          DO $$ BEGIN
-            IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = ${table} AND policyname = ${`${table}_app_access`}) THEN
-              EXECUTE format('CREATE POLICY %I ON %I FOR ALL USING (true) WITH CHECK (true)', ${`${table}_app_access`}, ${table});
-            END IF;
-          END $$
-        `;
-      }
+      // App-level bypass policy (table owner her zaman erişir)
+      // DROP IF EXISTS + CREATE ile idempotent yapıyoruz
+      await sql`DROP POLICY IF EXISTS conversations_app_access ON conversations`;
+      await sql`CREATE POLICY conversations_app_access ON conversations FOR ALL USING (true) WITH CHECK (true)`;
+
+      await sql`DROP POLICY IF EXISTS messages_app_access ON messages`;
+      await sql`CREATE POLICY messages_app_access ON messages FOR ALL USING (true) WITH CHECK (true)`;
+
+      await sql`DROP POLICY IF EXISTS leads_app_access ON leads`;
+      await sql`CREATE POLICY leads_app_access ON leads FOR ALL USING (true) WITH CHECK (true)`;
+
+      await sql`DROP POLICY IF EXISTS settings_app_access ON settings`;
+      await sql`CREATE POLICY settings_app_access ON settings FOR ALL USING (true) WITH CHECK (true)`;
+
+      await sql`DROP POLICY IF EXISTS audit_logs_app_access ON audit_logs`;
+      await sql`CREATE POLICY audit_logs_app_access ON audit_logs FOR ALL USING (true) WITH CHECK (true)`;
+
       results.push("✅ RLS policies oluşturuldu (tablo bazlı güvenlik aktif)");
     } catch (e: any) {
       results.push("⚠️ RLS policies oluşturulamadı: " + e.message);
