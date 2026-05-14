@@ -12,8 +12,33 @@ const SECRET = new TextEncoder().encode(
 // Giriş gerektirmeyen public route'lar
 const PUBLIC_ROUTES = ["/login", "/privacy", "/terms", "/api/webhook", "/api/telegram"];
 
+// Hangi yollar hangi rollere açık?
+const ROLE_PERMISSIONS: Record<string, string[]> = {
+  '/admin': ['platform_admin'], // Sadece Quba Medya Süper Admin'i
+  '/users': ['platform_admin', 'admin'],
+  '/settings': ['platform_admin', 'admin'],
+  '/integrations': ['platform_admin', 'admin'],
+  '/bot': ['platform_admin', 'admin', 'agent'],
+  '/inbox': ['platform_admin', 'admin', 'agent', 'viewer'],
+  '/forms': ['platform_admin', 'admin', 'agent', 'viewer'],
+  '/calendar': ['platform_admin', 'admin', 'agent', 'viewer'],
+  '/': ['platform_admin', 'admin', 'agent', 'viewer'],
+};
+
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
+
+  // Login rotasına auth'lu gidilirse Dashboard'a yönlendir
+  if (pathname === '/login') {
+    const token = req.cookies.get("quba_session")?.value;
+    if (token) {
+      try {
+        await jwtVerify(token, SECRET);
+        return NextResponse.redirect(new URL("/", req.url));
+      } catch (err) {}
+    }
+    return NextResponse.next();
+  }
 
   // Public route'lar → geç
   if (PUBLIC_ROUTES.some((r) => pathname.startsWith(r))) {
@@ -32,7 +57,28 @@ export async function middleware(req: NextRequest) {
   }
 
   try {
-    await jwtVerify(token, SECRET);
+    const { payload } = await jwtVerify(token, SECRET);
+    const userRole = payload.role as string;
+    
+    // RBAC: Korumalı rota kontrolü
+    const baseRoute = `/${pathname.split('/')[1]}`; // Örn: /admin/users -> /admin
+    
+    // 1. platform_admin dışındaki herkesi /admin'den engelle
+    if (baseRoute === '/admin' && userRole !== 'platform_admin') {
+      return NextResponse.redirect(new URL("/", req.url));
+    }
+
+    // 3. Platform Admin anasayfaya girmek isterse /admin'e yönlendir
+    if (pathname === '/' && userRole === 'platform_admin') {
+      return NextResponse.redirect(new URL("/admin", req.url));
+    }
+
+    // 4. Diğer sayfalar için yetki matrisi kontrolü
+    const allowedRoles = ROLE_PERMISSIONS[baseRoute] || ROLE_PERMISSIONS[pathname];
+    if (allowedRoles && !allowedRoles.includes(userRole)) {
+      return NextResponse.redirect(new URL("/", req.url)); // Yetkisi yoksa anasayfaya at
+    }
+
     return NextResponse.next();
   } catch {
     // Token geçersiz veya süresi dolmuş
@@ -44,7 +90,6 @@ export async function middleware(req: NextRequest) {
 
 export const config = {
   matcher: [
-    // Root + tüm dashboard sayfaları
     "/",
     "/inbox/:path*",
     "/bot/:path*",
@@ -53,6 +98,8 @@ export const config = {
     "/integrations/:path*",
     "/settings/:path*",
     "/admin/:path*",
+    "/users/:path*",
     "/analytics/:path*",
+    "/login"
   ],
 };

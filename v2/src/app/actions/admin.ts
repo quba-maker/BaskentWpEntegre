@@ -10,7 +10,7 @@ import { getSession } from "@/lib/auth/session";
 
 export async function getAllTenants() {
   const session = await getSession();
-  if (session?.role !== "owner") return { success: false, error: "Yetki yok" };
+  if (session?.role !== "owner" && session?.role !== "platform_admin") return { success: false, error: "Yetki yok" };
 
   try {
     const tenants = await sql`
@@ -35,7 +35,7 @@ export async function createTenant(data: {
   plan?: string;
 }) {
   const session = await getSession();
-  if (session?.role !== "owner") return { success: false, error: "Yetki yok" };
+  if (session?.role !== "owner" && session?.role !== "platform_admin") return { success: false, error: "Yetki yok" };
 
   try {
     const existing = await sql`SELECT id FROM tenants WHERE slug = ${data.slug}`;
@@ -54,7 +54,7 @@ export async function createTenant(data: {
 
 export async function toggleTenantStatus(tenantId: string) {
   const session = await getSession();
-  if (session?.role !== "owner") return { success: false, error: "Yetki yok" };
+  if (session?.role !== "owner" && session?.role !== "platform_admin") return { success: false, error: "Yetki yok" };
 
   try {
     const tenant = await sql`SELECT status FROM tenants WHERE id = ${tenantId}`;

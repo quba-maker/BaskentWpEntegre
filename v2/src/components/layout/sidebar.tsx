@@ -44,22 +44,34 @@ export async function Sidebar() {
       
       {/* Navigation */}
       <nav className="flex-1 p-3 space-y-0.5">
-        <NavLink href="/inbox" icon={<MessageSquare className="w-[18px] h-[18px]" />} label="Mesajlar" />
-        <NavLink href="/forms" icon={<ClipboardList className="w-[18px] h-[18px]" />} label="Formlar" />
-        <NavLink href="/calendar" icon={<Calendar className="w-[18px] h-[18px]" />} label="Randevular" />
-        <NavLink href="/bot" icon={<Bot className="w-[18px] h-[18px]" />} label="Bot Yönetimi" />
-        <NavLink href="/integrations" icon={<Link2 className="w-[18px] h-[18px]" />} label="Entegrasyonlar" />
-        {(session?.role === "owner" || session?.role === "admin") && (
+        {session?.role === "platform_admin" ? (
+          <>
+            <NavLink href="/admin" icon={<Shield className="w-[18px] h-[18px]" />} label="Süper Admin" />
+          </>
+        ) : (
+          <>
+            <NavLink href="/inbox" icon={<MessageSquare className="w-[18px] h-[18px]" />} label="Mesajlar" />
+            <NavLink href="/forms" icon={<ClipboardList className="w-[18px] h-[18px]" />} label="Formlar" />
+            <NavLink href="/calendar" icon={<Calendar className="w-[18px] h-[18px]" />} label="Randevular" />
+            {session?.role !== "viewer" && (
+              <NavLink href="/bot" icon={<Bot className="w-[18px] h-[18px]" />} label="Bot Yönetimi" />
+            )}
+            {(session?.role === "admin" || session?.role === "owner") && (
+              <NavLink href="/integrations" icon={<Link2 className="w-[18px] h-[18px]" />} label="Entegrasyonlar" />
+            )}
+          </>
+        )}
+        
+        {(session?.role === "platform_admin" || session?.role === "admin" || session?.role === "owner") && (
           <NavLink href="/users" icon={<Users className="w-[18px] h-[18px]" />} label="Kullanıcılar" />
         )}
       </nav>
 
       {/* User & Logout */}
       <div className="p-3 border-t border-black/5 space-y-1">
-        {session?.role === "owner" && (
-          <NavLink href="/admin" icon={<Shield className="w-[18px] h-[18px]" />} label="Süper Admin" />
+        {(session?.role === "platform_admin" || session?.role === "admin" || session?.role === "owner") && (
+          <NavLink href="/settings" icon={<Settings className="w-[18px] h-[18px]" />} label="Ayarlar" />
         )}
-        <NavLink href="/settings" icon={<Settings className="w-[18px] h-[18px]" />} label="Ayarlar" />
         
         {session && (
           <div className="mt-2 pt-2 border-t border-black/5">

@@ -13,7 +13,7 @@ import { getSession } from "@/lib/auth/session";
 export async function getUsers() {
   const session = await getSession();
   if (!session?.tenantId) return { success: false, error: "Oturum yok" };
-  if (session.role !== "owner" && session.role !== "admin") {
+  if (session.role !== "owner" && session.role !== "admin" && session.role !== "platform_admin") {
     return { success: false, error: "Yetki yok" };
   }
 
@@ -39,7 +39,7 @@ export async function createUser(data: {
 }) {
   const session = await getSession();
   if (!session?.tenantId) return { success: false, error: "Oturum yok" };
-  if (session.role !== "owner" && session.role !== "admin") {
+  if (session.role !== "owner" && session.role !== "admin" && session.role !== "platform_admin") {
     return { success: false, error: "Yetki yok" };
   }
 
@@ -66,7 +66,7 @@ export async function createUser(data: {
 export async function updateUserRole(userId: string, newRole: string) {
   const session = await getSession();
   if (!session?.tenantId) return { success: false, error: "Oturum yok" };
-  if (session.role !== "owner" && session.role !== "admin") {
+  if (session.role !== "owner" && session.role !== "admin" && session.role !== "platform_admin") {
     return { success: false, error: "Yetki yok" };
   }
 
@@ -87,7 +87,7 @@ export async function updateUserRole(userId: string, newRole: string) {
 export async function toggleUserActive(userId: string) {
   const session = await getSession();
   if (!session?.tenantId) return { success: false, error: "Oturum yok" };
-  if (session.role !== "owner" && session.role !== "admin") {
+  if (session.role !== "owner" && session.role !== "admin" && session.role !== "platform_admin") {
     return { success: false, error: "Yetki yok" };
   }
   if (userId === session.userId) return { success: false, error: "Kendinizi deaktif edemezsiniz." };
@@ -109,7 +109,7 @@ export async function toggleUserActive(userId: string) {
 export async function deleteUser(userId: string) {
   const session = await getSession();
   if (!session?.tenantId) return { success: false, error: "Oturum yok" };
-  if (session.role !== "owner" && session.role !== "admin") {
+  if (session.role !== "owner" && session.role !== "admin" && session.role !== "platform_admin") {
     return { success: false, error: "Yetki yok" };
   }
   if (userId === session.userId) return { success: false, error: "Kendinizi silemezsiniz." };
