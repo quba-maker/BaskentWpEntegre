@@ -10,11 +10,29 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Yetkisiz. x-setup-key header veya ?key= parametresi gerekli." }, { status: 401 });
     }
 
+    const isDryRun = req.nextUrl.searchParams.get("dryRun") === "true";
+    const dryRunLogs: string[] = [];
+
     const sql = neon(process.env.DATABASE_URL!);
+    
+    // Custom wrapper for dryRun mode
+    const execute = async (strings: TemplateStringsArray, ...values: any[]) => {
+      if (isDryRun) {
+        let q = "";
+        strings.forEach((s, i) => { q += s + (values[i] !== undefined ? String(values[i]) : ""); });
+        dryRunLogs.push(q.trim().replace(/\s+/g, ' '));
+        // Return dummy data for specific SELECTs if needed, or empty array
+        if (q.includes("SELECT id FROM tenants WHERE slug = 'baskent'")) return [{ id: 'dry-run-uuid' }];
+        return [];
+      }
+      return sql(strings, ...values);
+    };
+
     const results: string[] = [];
+    if (isDryRun) results.push("⚠️ DRY RUN MODU AKTİF — Hiçbir SQL çalıştırılmayacak.");
 
     // 1. TENANTS tablosu
-    await sql`
+    await execute`
       CREATE TABLE IF NOT EXISTS tenants (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         name TEXT NOT NULL,
@@ -40,7 +58,7 @@ export async function GET(req: NextRequest) {
     results.push("✅ tenants tablosu hazır");
 
     // 2. USERS tablosu
-    await sql`
+    await execute`
       CREATE TABLE IF NOT EXISTS users (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE,
@@ -57,7 +75,7 @@ export async function GET(req: NextRequest) {
     results.push("✅ users tablosu hazır");
 
     // 3. BOT_PROMPTS tablosu
-    await sql`
+    await execute`
       CREATE TABLE IF NOT EXISTS bot_prompts (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -72,7 +90,7 @@ export async function GET(req: NextRequest) {
     results.push("✅ bot_prompts tablosu hazır");
 
     // 4. USAGE_LOG tablosu
-    await sql`
+    await execute`
       CREATE TABLE IF NOT EXISTS usage_log (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         tenant_id UUID NOT NULL REFERENCES tenants(id),
@@ -88,32 +106,46 @@ export async function GET(req: NextRequest) {
     results.push("✅ usage_log tablosu hazır");
 
     // 5. Mevcut tablolara tenant_id ekle
-    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS tenant_id UUID`;
-    await sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS tenant_id UUID`;
-    await sql`ALTER TABLE settings ADD COLUMN IF NOT EXISTS tenant_id UUID`;
-    await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS tenant_id UUID`;
+    await execute`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS tenant_id UUID`;
+    await execute`ALTER TABLE messages ADD COLUMN IF NOT EXISTS tenant_id UUID`;
+    await execute`ALTER TABLE settings ADD COLUMN IF NOT EXISTS tenant_id UUID`;
+    await execute`ALTER TABLE leads ADD COLUMN IF NOT EXISTS tenant_id UUID`;
+    
+    // 5.1 Deduplicate settings and add unique constraint
+    await execute`
+      DELETE FROM settings WHERE id IN (
+        SELECT id FROM (
+          SELECT id, ROW_NUMBER() OVER(PARTITION BY tenant_id, key ORDER BY updated_at DESC) as row_num
+          FROM settings
+        ) t WHERE t.row_num > 1
+      )
+    `;
+    
+    // Production-safe concurrent index creation for unique constraint
+    await execute`CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_settings_tenant_key_unique ON settings(tenant_id, key)`;
+    results.push("✅ settings tablosu tekilleştirildi ve CONCURRENT UNIQUE INDEX eklendi");
     
     // Idempotency kolonları
-    await sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS provider_message_id TEXT`;
-    await sql`CREATE INDEX IF NOT EXISTS idx_messages_provider_id ON messages(provider_message_id)`;
-    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_channel TEXT`;
+    await execute`ALTER TABLE messages ADD COLUMN IF NOT EXISTS provider_message_id TEXT`;
+    await execute`CREATE INDEX IF NOT EXISTS idx_messages_provider_id ON messages(provider_message_id)`;
+    await execute`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_channel TEXT`;
     
     results.push("✅ tenant_id ve idempotency kolonları eklendi");
 
     // 6. Mevcut migration'lar (eski setup)
-    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS country VARCHAR(100)`;
-    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS real_phone VARCHAR(20)`;
+    await execute`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS country VARCHAR(100)`;
+    await execute`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS real_phone VARCHAR(20)`;
     results.push("✅ eski migration'lar uygulandı");
 
     // 7. Indexler
-    await sql`CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)`;
-    await sql`CREATE INDEX IF NOT EXISTS idx_users_tenant ON users(tenant_id)`;
-    await sql`CREATE INDEX IF NOT EXISTS idx_conversations_tenant ON conversations(tenant_id)`;
-    await sql`CREATE INDEX IF NOT EXISTS idx_messages_tenant ON messages(tenant_id)`;
+    await execute`CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)`;
+    await execute`CREATE INDEX IF NOT EXISTS idx_users_tenant ON users(tenant_id)`;
+    await execute`CREATE INDEX IF NOT EXISTS idx_conversations_tenant ON conversations(tenant_id)`;
+    await execute`CREATE INDEX IF NOT EXISTS idx_messages_tenant ON messages(tenant_id)`;
     results.push("✅ indexler oluşturuldu");
 
     // 8. Başkent'i ilk tenant olarak ekle
-    await sql`
+    await execute`
       INSERT INTO tenants (name, slug, industry, primary_color, ai_model, plan, status)
       VALUES ('Başkent Hastanesi', 'baskent', 'health', '#005A9C', 'gemini-2.5-flash', 'pro', 'active')
       ON CONFLICT (slug) DO NOTHING
@@ -121,14 +153,15 @@ export async function GET(req: NextRequest) {
     results.push("✅ Başkent tenant eklendi");
 
     // 9. Mevcut Verileri Başkent Tenant'ına Ata
-    await sql`UPDATE conversations SET tenant_id = (SELECT id FROM tenants WHERE slug = 'baskent') WHERE tenant_id IS NULL`;
-    await sql`UPDATE messages SET tenant_id = (SELECT id FROM tenants WHERE slug = 'baskent') WHERE tenant_id IS NULL`;
-    await sql`UPDATE settings SET tenant_id = (SELECT id FROM tenants WHERE slug = 'baskent') WHERE tenant_id IS NULL`;
-    await sql`UPDATE leads SET tenant_id = (SELECT id FROM tenants WHERE slug = 'baskent') WHERE tenant_id IS NULL`;
+    // Eğer tenant zaten atanmışsa UPDATE boşuna row kilitler, o yüzden WHERE tenant_id IS NULL kontrolü var.
+    await execute`UPDATE conversations SET tenant_id = (SELECT id FROM tenants WHERE slug = 'baskent') WHERE tenant_id IS NULL`;
+    await execute`UPDATE messages SET tenant_id = (SELECT id FROM tenants WHERE slug = 'baskent') WHERE tenant_id IS NULL`;
+    await execute`UPDATE settings SET tenant_id = (SELECT id FROM tenants WHERE slug = 'baskent') WHERE tenant_id IS NULL`;
+    await execute`UPDATE leads SET tenant_id = (SELECT id FROM tenants WHERE slug = 'baskent') WHERE tenant_id IS NULL`;
     results.push("✅ Mevcut veriler 'baskent' tenantına atandı");
 
     // 10. AUDIT_LOGS tablosu (Enterprise Compliance)
-    await sql`
+    await execute`
       CREATE TABLE IF NOT EXISTS audit_logs (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         tenant_id UUID REFERENCES tenants(id),
@@ -142,71 +175,54 @@ export async function GET(req: NextRequest) {
         created_at TIMESTAMPTZ DEFAULT NOW()
       )
     `;
-    await sql`CREATE INDEX IF NOT EXISTS idx_audit_tenant ON audit_logs(tenant_id, created_at DESC)`;
+    await execute`CREATE INDEX IF NOT EXISTS idx_audit_tenant ON audit_logs(tenant_id, created_at DESC)`;
     results.push("✅ audit_logs tablosu hazır");
 
     // 11. Leads tenant index
-    await sql`CREATE INDEX IF NOT EXISTS idx_leads_tenant ON leads(tenant_id)`;
-    await sql`CREATE INDEX IF NOT EXISTS idx_leads_phone ON leads(phone_number)`;
+    await execute`CREATE INDEX IF NOT EXISTS idx_leads_tenant ON leads(tenant_id)`;
+    await execute`CREATE INDEX IF NOT EXISTS idx_leads_phone ON leads(phone_number)`;
     results.push("✅ leads indexleri oluşturuldu");
 
     // 12. Tenant daily_ai_limit
-    await sql`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS daily_ai_limit INT DEFAULT 200`;
-    await sql`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS webhook_secret TEXT`;
+    await execute`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS daily_ai_limit INT DEFAULT 200`;
+    await execute`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS webhook_secret TEXT`;
     results.push("✅ tenant genişletmeleri uygulandı");
 
     // 13. ROW-LEVEL SECURITY (RLS) Policies
-    // Neon HTTP driver her SQL'i ayrı connection olarak çalıştırdığı için
-    // app.current_tenant_id SET edilemez. Bu yüzden RLS'i "direct DB access"
-    // koruması olarak ekliyoruz — psql/migration scriptlerini kısıtlar.
     try {
-      // Enable RLS on tenant-scoped tables
-      // ---------------------------------------------------------
-      // RLS CANARY ROLLOUT (Phase A)
-      // Sadece "settings" tablosunda FORCE RLS uygulanır.
-      // Diğerleri şimdilik Shadow Mode (USING true) olarak kalır.
-      // ---------------------------------------------------------
-
       // Canary Table: SETTINGS
-      await sql`ALTER TABLE settings ENABLE ROW LEVEL SECURITY`;
-      // await sql`ALTER TABLE settings FORCE ROW LEVEL SECURITY`; // SHADOW MODE: İptal edildi, migration bitene kadar force edilmeyecek.
+      await execute`ALTER TABLE settings ENABLE ROW LEVEL SECURITY`;
 
-      // Shadow Tables (Henüz Enforce Edilmeyenler)
-      await sql`ALTER TABLE conversations ENABLE ROW LEVEL SECURITY`;
-      await sql`ALTER TABLE messages ENABLE ROW LEVEL SECURITY`;
-      await sql`ALTER TABLE leads ENABLE ROW LEVEL SECURITY`;
-      await sql`ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY`;
+      // Shadow Tables
+      await execute`ALTER TABLE conversations ENABLE ROW LEVEL SECURITY`;
+      await execute`ALTER TABLE messages ENABLE ROW LEVEL SECURITY`;
+      await execute`ALTER TABLE leads ENABLE ROW LEVEL SECURITY`;
+      await execute`ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY`;
 
-      // Strict RLS Condition (Tenant ID Check OR Admin Bypass)
-      const rlsCondition = `
-        (current_setting('quba.is_admin', true) = 'true') OR 
-        (tenant_id::text = current_setting('quba.current_tenant', true))
-      `;
-
-      // Canary Policy Application (SHADOW MODE: Sadece audit için aktif edilecek, şimdilik bypass)
-      await sql`DROP POLICY IF EXISTS settings_app_access ON settings`;
-      await sql`CREATE POLICY settings_app_access ON settings FOR ALL USING (true) WITH CHECK (true)`;
+      // Canary Policy Application
+      await execute`DROP POLICY IF EXISTS settings_app_access ON settings`;
+      await execute`CREATE POLICY settings_app_access ON settings FOR ALL USING (true) WITH CHECK (true)`;
 
       // Shadow Mode Policies (Bypass)
-      await sql`DROP POLICY IF EXISTS conversations_app_access ON conversations`;
-      await sql`CREATE POLICY conversations_app_access ON conversations FOR ALL USING (true) WITH CHECK (true)`;
+      await execute`DROP POLICY IF EXISTS conversations_app_access ON conversations`;
+      await execute`CREATE POLICY conversations_app_access ON conversations FOR ALL USING (true) WITH CHECK (true)`;
 
-      await sql`DROP POLICY IF EXISTS messages_app_access ON messages`;
-      await sql`CREATE POLICY messages_app_access ON messages FOR ALL USING (true) WITH CHECK (true)`;
+      await execute`DROP POLICY IF EXISTS messages_app_access ON messages`;
+      await execute`CREATE POLICY messages_app_access ON messages FOR ALL USING (true) WITH CHECK (true)`;
 
-      await sql`DROP POLICY IF EXISTS leads_app_access ON leads`;
-      await sql`CREATE POLICY leads_app_access ON leads FOR ALL USING (true) WITH CHECK (true)`;
+      await execute`DROP POLICY IF EXISTS leads_app_access ON leads`;
+      await execute`CREATE POLICY leads_app_access ON leads FOR ALL USING (true) WITH CHECK (true)`;
 
-      await sql`DROP POLICY IF EXISTS audit_logs_app_access ON audit_logs`;
-      await sql`CREATE POLICY audit_logs_app_access ON audit_logs FOR ALL USING (true) WITH CHECK (true)`;
+      await execute`DROP POLICY IF EXISTS audit_logs_app_access ON audit_logs`;
+      await execute`CREATE POLICY audit_logs_app_access ON audit_logs FOR ALL USING (true) WITH CHECK (true)`;
 
       results.push("✅ RLS policies oluşturuldu (tablo bazlı güvenlik aktif)");
     } catch (e: any) {
       results.push("⚠️ RLS policies oluşturulamadı: " + e.message);
     }
 
-    // 14. MESSAGE_RETRY_QUEUE tablosu (Webhook retry mekanizması)
-    await sql`
+    // 14. MESSAGE_RETRY_QUEUE tablosu
+    await execute`
       CREATE TABLE IF NOT EXISTS message_retry_queue (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         tenant_id UUID REFERENCES tenants(id),
@@ -221,19 +237,19 @@ export async function GET(req: NextRequest) {
         created_at TIMESTAMPTZ DEFAULT NOW()
       )
     `;
-    await sql`CREATE INDEX IF NOT EXISTS idx_retry_queue_status ON message_retry_queue(status, next_retry_at)`;
+    await execute`CREATE INDEX IF NOT EXISTS idx_retry_queue_status ON message_retry_queue(status, next_retry_at)`;
     results.push("✅ message_retry_queue tablosu hazır");
 
     // 15. Messages tablosuna performans indexleri
-    await sql`CREATE INDEX IF NOT EXISTS idx_messages_phone_created ON messages(phone_number, created_at DESC)`;
-    await sql`CREATE INDEX IF NOT EXISTS idx_conversations_tenant_last ON conversations(tenant_id, last_message_at DESC NULLS LAST)`;
+    await execute`CREATE INDEX IF NOT EXISTS idx_messages_phone_created ON messages(phone_number, created_at DESC)`;
+    await execute`CREATE INDEX IF NOT EXISTS idx_conversations_tenant_last ON conversations(tenant_id, last_message_at DESC NULLS LAST)`;
     results.push("✅ performans indexleri oluşturuldu");
 
-    // 16. Denormalized last_message kolonu (N+1 query fix)
-    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_message_content TEXT`;
-    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_message_channel VARCHAR(50)`;
-    // Mevcut verileri backfill
-    await sql`
+    // 16. Denormalized last_message kolonu
+    await execute`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_message_content TEXT`;
+    await execute`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_message_channel VARCHAR(50)`;
+    
+    await execute`
       UPDATE conversations c SET 
         last_message_content = m.content,
         last_message_channel = m.channel
@@ -246,7 +262,7 @@ export async function GET(req: NextRequest) {
     results.push("✅ last_message denormalizasyonu hazır");
 
     // 17. Billing — monthly_usage tablosu
-    await sql`
+    await execute`
       CREATE TABLE IF NOT EXISTS monthly_usage (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         tenant_id UUID NOT NULL REFERENCES tenants(id),
@@ -264,16 +280,19 @@ export async function GET(req: NextRequest) {
     `;
     results.push("✅ monthly_usage tablosu hazır");
 
-    // 15. Yeni kullanıcı kolonları (şifre sıfırlama, davet sistemi)
+    // 18. Yeni kullanıcı kolonları
     try {
-      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT false`;
-      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS invite_token TEXT`;
-      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS invite_expires_at TIMESTAMPTZ`;
-      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`;
-      await sql`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS daily_ai_limit INT DEFAULT 200`;
+      await execute`ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT false`;
+      await execute`ALTER TABLE users ADD COLUMN IF NOT EXISTS invite_token TEXT`;
+      await execute`ALTER TABLE users ADD COLUMN IF NOT EXISTS invite_expires_at TIMESTAMPTZ`;
+      await execute`ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`;
+      await execute`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS daily_ai_limit INT DEFAULT 200`;
       results.push("✅ kullanıcı davet/şifre kolonları eklendi");
     } catch { results.push("ℹ️ kullanıcı kolonları zaten mevcut"); }
 
+    if (isDryRun) {
+      return NextResponse.json({ success: true, mode: "dryRun", results, executedQueries: dryRunLogs });
+    }
     return NextResponse.json({ success: true, results });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });

@@ -53,22 +53,14 @@ export async function saveBotSetting(key: string, value: string) {
       roles: ['owner', 'admin'] // Sadece yetkililer bot değiştirebilir
     },
     async (ctx) => {
-      // UPSERT — RLS enforced
-      const existing = await ctx.db.executeSafe(sql`
-        SELECT id FROM settings WHERE key = ${key} AND tenant_id = ${ctx.tenantId}
+      // UPSERT — RLS enforced & Idempotent
+      await ctx.db.executeSafe(sql`
+        INSERT INTO settings (key, value, tenant_id, updated_at) 
+        VALUES (${key}, ${value}, ${ctx.tenantId}, NOW())
+        ON CONFLICT (tenant_id, key) 
+        DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at
       `);
-      
-      if (existing.length > 0) {
-        await ctx.db.executeSafe(sql`
-          UPDATE settings SET value = ${value}, updated_at = NOW() 
-          WHERE key = ${key} AND tenant_id = ${ctx.tenantId}
-        `);
-      } else {
-        await ctx.db.executeSafe(sql`
-          INSERT INTO settings (key, value, tenant_id) 
-          VALUES (${key}, ${value}, ${ctx.tenantId})
-        `);
-      }
+
       
       // Audit log
       logAudit({

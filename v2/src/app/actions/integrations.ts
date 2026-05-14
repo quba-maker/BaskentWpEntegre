@@ -37,22 +37,12 @@ export async function saveGoogleSheetsConfig(config: any) {
     async (ctx) => {
       const value = JSON.stringify(config);
       
-      const existing = await ctx.db.executeSafe(sql`
-        SELECT id FROM settings 
-        WHERE key = 'google_sheets_config' AND tenant_id = ${ctx.tenantId}
+      await ctx.db.executeSafe(sql`
+        INSERT INTO settings (key, value, tenant_id, updated_at) 
+        VALUES ('google_sheets_config', ${value}, ${ctx.tenantId}, NOW())
+        ON CONFLICT (tenant_id, key) 
+        DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at
       `);
-      
-      if (existing.length > 0) {
-        await ctx.db.executeSafe(sql`
-          UPDATE settings SET value = ${value}, updated_at = NOW() 
-          WHERE key = 'google_sheets_config' AND tenant_id = ${ctx.tenantId}
-        `);
-      } else {
-        await ctx.db.executeSafe(sql`
-          INSERT INTO settings (key, value, tenant_id) 
-          VALUES ('google_sheets_config', ${value}, ${ctx.tenantId})
-        `);
-      }
       return { success: true };
     }
   ).then(res => {

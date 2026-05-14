@@ -27,7 +27,10 @@ export class TenantDB {
     const startTime = Date.now();
     
     try {
-      const q = params ? [query, params] : query;
+      const q = typeof query === 'string' 
+        ? this.sql.query(query, params || []) 
+        : query;
+
       // Neon HTTP Driver stateless'tır.
       // RLS context'inin kaybolmaması için, SET LOCAL sorgusunu 
       // asıl sorguyla beraber tek bir transaction batch'i olarak gönderiyoruz.
@@ -58,11 +61,13 @@ export class TenantDB {
   async executeTransaction(queries: any[]) {
     const startTime = Date.now();
     try {
+      const formattedQueries = queries.map(q => typeof q === 'string' ? this.sql.query(q) : q);
+      
       const result = await this.sql.transaction([
         this.isAdmin 
           ? this.sql`SET LOCAL quba.is_admin = 'true'`
           : this.sql`SET LOCAL quba.current_tenant = ${this.tenantId}`,
-        ...queries
+        ...formattedQueries
       ]);
       const duration = Date.now() - startTime;
       if (duration > 2000) {

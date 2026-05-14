@@ -74,12 +74,12 @@ export async function toggleAIModule(moduleId: string, enabled: boolean) {
 
     // Kaydet
     const value = JSON.stringify(modules);
-    const existing = await sql`SELECT id FROM settings WHERE key = 'ai_modules_config' AND tenant_id = ${session.tenantId}`;
-    if (existing.length > 0) {
-      await sql`UPDATE settings SET value = ${value}, updated_at = NOW() WHERE key = 'ai_modules_config' AND tenant_id = ${session.tenantId}`;
-    } else {
-      await sql`INSERT INTO settings (key, value, tenant_id) VALUES ('ai_modules_config', ${value}, ${session.tenantId})`;
-    }
+    await sql`
+      INSERT INTO settings (key, value, tenant_id, updated_at) 
+      VALUES ('ai_modules_config', ${value}, ${session.tenantId}, NOW())
+      ON CONFLICT (tenant_id, key) 
+      DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at
+    `;
 
     logAudit({
       tenantId: session.tenantId,
@@ -125,12 +125,12 @@ export async function updateAIModuleConfig(moduleId: string, config: Record<stri
     modules[idx].config = { ...modules[idx].config, ...config };
 
     const value = JSON.stringify(modules);
-    const existing = await sql`SELECT id FROM settings WHERE key = 'ai_modules_config' AND tenant_id = ${session.tenantId}`;
-    if (existing.length > 0) {
-      await sql`UPDATE settings SET value = ${value}, updated_at = NOW() WHERE key = 'ai_modules_config' AND tenant_id = ${session.tenantId}`;
-    } else {
-      await sql`INSERT INTO settings (key, value, tenant_id) VALUES ('ai_modules_config', ${value}, ${session.tenantId})`;
-    }
+    await sql`
+      INSERT INTO settings (key, value, tenant_id, updated_at) 
+      VALUES ('ai_modules_config', ${value}, ${session.tenantId}, NOW())
+      ON CONFLICT (tenant_id, key) 
+      DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at
+    `;
 
     return { success: true };
   } catch (error: any) {
