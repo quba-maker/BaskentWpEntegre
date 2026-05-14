@@ -68,8 +68,9 @@ export async function middleware(req: NextRequest) {
     }
 
     // TENANT ISOLATION KONTROLÜ (GÜMRÜK KAPISI)
-    // Sadece platform_admin farklı tenant'a erişebilir — owner bile kendi tenant'ında kalır
-    if (urlTenantSlug !== sessionTenantSlug && userRole !== 'platform_admin') {
+    // Hiç kimse kendi tenant slug'ı dışında bir yere giremez! Platform Admin bile `/baskent` yazamaz.
+    // Platform admin'in yeri `/admin` rotasıdır.
+    if (urlTenantSlug !== sessionTenantSlug && urlTenantSlug !== 'admin') {
       return NextResponse.redirect(new URL(`/${sessionTenantSlug}`, req.url));
     }
 
