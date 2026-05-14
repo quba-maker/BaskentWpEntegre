@@ -2,6 +2,7 @@
 
 import { sql } from "@/lib/db";
 import { getSession } from "@/lib/auth/session";
+import { logAudit } from "@/lib/audit";
 
 // ==========================================
 // QUBA AI — Super Admin Actions
@@ -41,12 +42,46 @@ export async function createTenant(data: {
     const existing = await sql`SELECT id FROM tenants WHERE slug = ${data.slug}`;
     if (existing.length > 0) return { success: false, error: "Bu slug zaten kullanılıyor." };
 
-    await sql`
+    // 1. Tenant oluştur
+    const created = await sql`
       INSERT INTO tenants (name, slug, industry, plan, status)
       VALUES (${data.name}, ${data.slug}, ${data.industry || 'general'}, ${data.plan || 'starter'}, 'active')
+      RETURNING id
     `;
+    const tenantId = created[0]?.id;
+    if (!tenantId) return { success: false, error: "Tenant oluşturulamadı." };
 
-    return { success: true };
+    // 2. Generic varsayılan ayarları seed et
+    const genericPrompt = `Sen ${data.name} firmasının dijital asistanısın.\nGörevin müşterilerle profesyonel, sıcak ve yardımcı bir şekilde iletişim kurmak.\nHer zaman nazik ol, soruları yanıtla ve müşteriyi randevuya/satışa yönlendir.\nBilmediğin konularda "Bu konuda ekibimiz size yardımcı olacaktır" de.`;
+
+    const defaultSettings = [
+      ['system_prompt_whatsapp', genericPrompt],
+      ['system_prompt_tr', genericPrompt],
+      ['ai_model', 'gemini-2.5-flash'],
+      ['bot_aggression_level', 'medium'],
+      ['bot_max_messages', '8'],
+      ['bot_auto_greeting', 'true'],
+      ['channel_whatsapp_enabled', 'true'],
+      ['channel_instagram_enabled', 'false'],
+      ['channel_messenger_enabled', 'false'],
+    ];
+
+    for (const [key, value] of defaultSettings) {
+      await sql`INSERT INTO settings (key, value, tenant_id) VALUES (${key}, ${value}, ${tenantId}) ON CONFLICT DO NOTHING`;
+    }
+
+    // 3. Audit log
+    logAudit({
+      tenantId: session.tenantId,
+      userId: session.userId,
+      userEmail: session.email,
+      action: "tenant_created",
+      entityType: "tenant",
+      entityId: tenantId,
+      details: { name: data.name, slug: data.slug, plan: data.plan },
+    });
+
+    return { success: true, tenantId };
   } catch (error: any) {
     return { success: false, error: error.message };
   }

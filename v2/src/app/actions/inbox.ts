@@ -245,18 +245,14 @@ export async function sendMessage(phone: string, text: string) {
     const session = await getSession();
     if (!session?.tenantId) return { success: false, error: "Yetkisiz işlem." };
     
-    // Tenant'ın kendi Meta token'ını kullan, yoksa env'den al
-    let META_ACCESS_TOKEN = process.env.META_ACCESS_TOKEN;
-    let PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
+    // Tenant'ın kendi Meta token'ını kullan — env fallback KALDIRILDI (cross-tenant risk)
+    let META_ACCESS_TOKEN: string | null = null;
+    let PHONE_NUMBER_ID: string | null = null;
     
-    if (session?.tenantId) {
-      const tenantRows = await sql`SELECT meta_page_token, whatsapp_phone_id FROM tenants WHERE id = ${session.tenantId}`;
-      if (tenantRows.length > 0 && tenantRows[0].meta_page_token) {
-        META_ACCESS_TOKEN = tenantRows[0].meta_page_token;
-      }
-      if (tenantRows.length > 0 && tenantRows[0].whatsapp_phone_id) {
-        PHONE_NUMBER_ID = tenantRows[0].whatsapp_phone_id;
-      }
+    const tenantRows = await sql`SELECT meta_page_token, whatsapp_phone_id FROM tenants WHERE id = ${session.tenantId}`;
+    if (tenantRows.length > 0) {
+      META_ACCESS_TOKEN = tenantRows[0].meta_page_token || process.env.META_ACCESS_TOKEN || null;
+      PHONE_NUMBER_ID = tenantRows[0].whatsapp_phone_id || process.env.PHONE_NUMBER_ID || null;
     }
 
     if (!META_ACCESS_TOKEN || !PHONE_NUMBER_ID) {
