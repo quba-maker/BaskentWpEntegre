@@ -3,6 +3,7 @@
 import { sql } from "@/lib/db";
 import { getSession } from "@/lib/auth/session";
 import { logAudit } from "@/lib/audit";
+import { enqueueRetry } from "@/lib/retry";
 
 export async function getConversations(page: number = 1, search: string = "", stage: string = "all") {
   try {
@@ -149,6 +150,14 @@ export async function sendMessage(phone: string, text: string) {
       if (!response.ok) {
         const errData = await response.json();
         console.error("Meta API error:", errData);
+        // Retry kuyruğuna ekle
+        await enqueueRetry({
+          tenantId: session.tenantId,
+          phoneNumber: phone,
+          channel: "whatsapp",
+          content: text,
+          error: JSON.stringify(errData).substring(0, 500),
+        });
       }
     }
 
