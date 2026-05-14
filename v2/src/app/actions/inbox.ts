@@ -49,7 +49,8 @@ export async function getConversations(page: number = 1, search: string = "", st
             ORDER BY created_at DESC 
             LIMIT 1
           ) l ON true
-          WHERE (c.patient_name ILIKE ${searchFilter} OR c.phone_number ILIKE ${searchFilter})
+          WHERE (${tenantId === null} OR c.tenant_id = ${tenantId})
+            AND (c.patient_name ILIKE ${searchFilter} OR c.phone_number ILIKE ${searchFilter})
             AND (${stageFilter === null} OR c.lead_stage = ${stageFilter})
           ORDER BY c.last_message_at DESC NULLS LAST
           LIMIT ${limit} OFFSET ${offset}
@@ -88,7 +89,8 @@ export async function getConversations(page: number = 1, search: string = "", st
             ORDER BY created_at DESC 
             LIMIT 1
           ) l ON true
-          WHERE (${stageFilter === null} OR c.lead_stage = ${stageFilter})
+          WHERE (${tenantId === null} OR c.tenant_id = ${tenantId})
+            AND (${stageFilter === null} OR c.lead_stage = ${stageFilter})
           ORDER BY c.last_message_at DESC NULLS LAST
           LIMIT ${limit} OFFSET ${offset}
         `;
@@ -130,7 +132,8 @@ export async function getConversations(page: number = 1, search: string = "", st
             ORDER BY created_at DESC 
             LIMIT 1
           ) l ON true
-          WHERE (c.patient_name ILIKE ${searchFilter} OR c.phone_number ILIKE ${searchFilter})
+          WHERE (${tenantId === null} OR c.tenant_id = ${tenantId})
+            AND (c.patient_name ILIKE ${searchFilter} OR c.phone_number ILIKE ${searchFilter})
             AND (${stageFilter === null} OR c.lead_stage = ${stageFilter})
           ORDER BY c.last_message_at DESC NULLS LAST
           LIMIT ${limit} OFFSET ${offset}
@@ -169,7 +172,8 @@ export async function getConversations(page: number = 1, search: string = "", st
             ORDER BY created_at DESC 
             LIMIT 1
           ) l ON true
-          WHERE (${stageFilter === null} OR c.lead_stage = ${stageFilter})
+          WHERE (${tenantId === null} OR c.tenant_id = ${tenantId})
+            AND (${stageFilter === null} OR c.lead_stage = ${stageFilter})
           ORDER BY c.last_message_at DESC NULLS LAST
           LIMIT ${limit} OFFSET ${offset}
         `;
