@@ -313,7 +313,9 @@ export async function testBotPrompt(prompt: string, testMessage: string, channel
       return { success: false, reply: '⚠️ Test mesajı boş olamaz.', model: '' };
     }
 
-    // Prompt boşsa DB'den çek
+    // Prompt boşsa DB'den çek (tenant-scoped)
+    const session = await getSession();
+    const tenantId = session?.tenantId;
     let finalPrompt = prompt;
     if (!finalPrompt || finalPrompt.trim().length < 10) {
       const promptKeyMap: Record<string, string> = {
@@ -321,11 +323,16 @@ export async function testBotPrompt(prompt: string, testMessage: string, channel
         instagram: 'system_prompt_tr',
         foreign: 'system_prompt_foreign'
       };
-      const dbPrompt = await sql`SELECT value FROM settings WHERE key = ${promptKeyMap[channel] || 'system_prompt_whatsapp'}`;
-      finalPrompt = dbPrompt[0]?.value || 'Sen Başkent Hastanesi hasta danışmanısın. Kısa, sıcak ve profesyonel cevaplar ver.';
+      const key = promptKeyMap[channel] || 'system_prompt_whatsapp';
+      const dbPrompt = tenantId 
+        ? await sql`SELECT value FROM settings WHERE key = ${key} AND tenant_id = ${tenantId}`
+        : await sql`SELECT value FROM settings WHERE key = ${key} LIMIT 1`;
+      finalPrompt = dbPrompt[0]?.value || 'Sen bir dijital asistansın. Kısa, sıcak ve profesyonel cevaplar ver.';
     }
 
-    const aiModel = await sql`SELECT value FROM settings WHERE key = 'ai_model'`;
+    const aiModel = tenantId
+      ? await sql`SELECT value FROM settings WHERE key = 'ai_model' AND tenant_id = ${tenantId}`
+      : await sql`SELECT value FROM settings WHERE key = 'ai_model' LIMIT 1`;
     const model = aiModel[0]?.value || 'gemini-2.5-flash';
 
     const response = await fetch(

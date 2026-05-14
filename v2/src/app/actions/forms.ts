@@ -80,12 +80,17 @@ export async function getForms(page: number = 1, search: string = "", source: st
 
 export async function updateLeadNotes(id: number, notes: string) {
   try {
-    // 1. Update DB
-    const lead = await sql`SELECT phone_number FROM leads WHERE id = ${id}`;
+    const session = await getSession();
+    if (!session?.tenantId) return { success: false, error: "Oturum yok" };
+    const tenantId = session.tenantId;
+
+    // 1. Update DB — tenant izolasyonlu
+    const lead = await sql`SELECT phone_number FROM leads WHERE id = ${id} AND tenant_id = ${tenantId}`;
+    if (lead.length === 0) return { success: false, error: "Kayıt bulunamadı." };
     await sql`
       UPDATE leads 
       SET notes = ${notes} 
-      WHERE id = ${id}
+      WHERE id = ${id} AND tenant_id = ${tenantId}
     `;
 
     // 2. Push to Google Sheets (fire-and-forget)
@@ -115,8 +120,16 @@ export async function updateLeadNotes(id: number, notes: string) {
 
 export async function deleteAllLeads() {
   try {
-    await sql`TRUNCATE TABLE leads RESTART IDENTITY CASCADE`;
-    return { success: true, message: "Tüm form ve hasta kayıtları başarıyla silindi." };
+    const session = await getSession();
+    if (!session?.tenantId) return { success: false, error: "Oturum yok" };
+    if (session.role !== "owner" && session.role !== "admin" && session.role !== "platform_admin") {
+      return { success: false, error: "Bu işlem için admin yetkisi gerekli." };
+    }
+    const tenantId = session.tenantId;
+
+    // Sadece kendi tenant'ının leadlerini sil — ASLA TRUNCATE kullanma
+    await sql`DELETE FROM leads WHERE tenant_id = ${tenantId}`;
+    return { success: true, message: "Firma lead kayıtları başarıyla silindi." };
   } catch (error: any) {
     console.error("deleteAllLeads Error:", error);
     return { success: false, error: error.message };
@@ -125,10 +138,15 @@ export async function deleteAllLeads() {
 
 export async function getCampaignNames() {
   try {
+    const session = await getSession();
+    if (!session?.tenantId) return [];
+    const tenantId = session.tenantId;
+
     const campaigns = await sql`
       SELECT DISTINCT form_name 
       FROM leads 
-      WHERE form_name IS NOT NULL AND form_name != ''
+      WHERE tenant_id = ${tenantId}
+        AND form_name IS NOT NULL AND form_name != ''
       ORDER BY form_name ASC
     `;
     return campaigns.map((c: any) => c.form_name);
@@ -150,7 +168,11 @@ export async function syncGoogleSheets() {
     const BASE_URL = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}`;
 
     // Get config to filter active sheets
-    const configRes = await sql`SELECT value FROM settings WHERE key = 'google_sheets_config' LIMIT 1`;
+    const session = await getSession();
+    if (!session?.tenantId) return { success: false, error: "Oturum yok" };
+    const tenantId = session.tenantId;
+
+    const configRes = await sql`SELECT value FROM settings WHERE key = 'google_sheets_config' AND tenant_id = ${tenantId} LIMIT 1`;
     let activeSheets: string[] = [];
     if (configRes.length > 0) {
       const config = JSON.parse(configRes[0].value);
@@ -250,7 +272,7 @@ export async function syncGoogleSheets() {
         });
 
         // Upsert into leads table safely using phone_number
-        const existing = await sql`SELECT id FROM leads WHERE phone_number LIKE '%' || RIGHT(${phone}, 10) || '%' LIMIT 1`;
+        const existing = await sql`SELECT id FROM leads WHERE phone_number LIKE '%' || RIGHT(${phone}, 10) || '%' AND tenant_id = ${tenantId} LIMIT 1`;
         
         if (existing.length === 0) {
           let createdAt = new Date();
@@ -278,8 +300,8 @@ export async function syncGoogleSheets() {
           }
 
           await sql`
-            INSERT INTO leads (phone_number, patient_name, email, form_name, raw_data, stage, created_at, notes)
-            VALUES (${phone}, ${name}, ${email}, ${formName}, ${JSON.stringify(raw_data)}, 'new', ${createdAt.toISOString()}, ${noteStr})
+            INSERT INTO leads (tenant_id, phone_number, patient_name, email, form_name, raw_data, stage, created_at, notes)
+            VALUES (${tenantId}, ${phone}, ${name}, ${email}, ${formName}, ${JSON.stringify(raw_data)}, 'new', ${createdAt.toISOString()}, ${noteStr})
           `;
           newLeadsCount++;
         }

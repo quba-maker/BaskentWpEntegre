@@ -68,7 +68,8 @@ export async function middleware(req: NextRequest) {
     }
 
     // TENANT ISOLATION KONTROLÜ (GÜMRÜK KAPISI)
-    if (urlTenantSlug !== sessionTenantSlug && userRole !== 'platform_admin' && userRole !== 'owner') {
+    // Sadece platform_admin farklı tenant'a erişebilir — owner bile kendi tenant'ında kalır
+    if (urlTenantSlug !== sessionTenantSlug && userRole !== 'platform_admin') {
       return NextResponse.redirect(new URL(`/${sessionTenantSlug}`, req.url));
     }
 
