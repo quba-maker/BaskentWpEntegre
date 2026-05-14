@@ -16,7 +16,7 @@ export function ChatArea() {
   const { data: messages, isLoading } = useSWR(
     activePhone ? ["messages", activePhone] : null, 
     () => getMessages(activePhone!), 
-    { refreshInterval: 5000 }
+    { refreshInterval: 2000 } // Gerçek zamanlı hissi için süreyi kısalttık (Sekme aktif değilken SWR otomatik durur)
   );
 
   const handleSend = async () => {

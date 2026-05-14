@@ -74,6 +74,9 @@ export default function BotManagementPage() {
   const [testMsg, setTestMsg] = useState("");
   const [testReply, setTestReply] = useState("");
   const [testing, setTesting] = useState(false);
+  const [knowledgePrices, setKnowledgePrices] = useState("");
+  const [knowledgeRules, setKnowledgeRules] = useState("");
+  const [savingKnowledge, setSavingKnowledge] = useState(false);
 
   // Bot behavior settings
   const [botConfig, setBotConfig] = useState({
@@ -114,6 +117,10 @@ export default function BotManagementPage() {
           working_hours: settingsRes.settings['bot_working_hours']?.value || "24/7",
           aggression_level: settingsRes.settings['bot_aggression_level']?.value || "medium"
         });
+
+        // Set knowledge base from DB
+        setKnowledgePrices(settingsRes.settings['bot_knowledge_prices']?.value || "");
+        setKnowledgeRules(settingsRes.settings['bot_knowledge_rules']?.value || "");
       }
 
       setDefaults(defaultsRes);
@@ -189,6 +196,15 @@ export default function BotManagementPage() {
     
     setPrompts(prev => ({ ...prev, [channelId]: defaultMap[channelId] }));
     setShowResetConfirm(null);
+  };
+
+  // Save Knowledge Base
+  const saveKnowledgeBase = async () => {
+    setSavingKnowledge(true);
+    await saveBotSetting('bot_knowledge_prices', knowledgePrices);
+    await saveBotSetting('bot_knowledge_rules', knowledgeRules);
+    setSavingKnowledge(false);
+    alert("Bilgi bankası kaydedildi.");
   };
 
   // Save bot config
@@ -425,6 +441,54 @@ export default function BotManagementPage() {
               className="w-full h-full min-h-[400px] p-6 text-[13px] leading-relaxed font-mono text-[#1D1D1F] bg-[#FAFAFA] border-0 outline-none resize-none placeholder:text-[#C7C7CC]"
               placeholder={`${activeChannel.label} için sistem prompt'unu buraya yazın...`}
               spellCheck={false}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Knowledge Base Section */}
+      <div className="mt-8">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-bold text-[#1D1D1F] flex items-center gap-2">
+            <Globe className="w-5 h-5 text-[#86868B]" />
+            Bot Bilgi Bankası (Kolay Yönetim)
+          </h2>
+          <button
+            onClick={saveKnowledgeBase}
+            disabled={savingKnowledge}
+            className="px-4 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 bg-[#34C759] text-white shadow-sm hover:opacity-90"
+          >
+            {savingKnowledge ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+            Bilgileri Kaydet
+          </button>
+        </div>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Fiyat Listesi */}
+          <div className="bg-white rounded-2xl border border-black/5 shadow-sm p-0 flex flex-col overflow-hidden">
+            <div className="px-5 py-3 border-b border-black/5 bg-black/[0.02]">
+              <h3 className="text-sm font-bold text-[#1D1D1F]">Fiyat Listesi ve Hizmetler</h3>
+              <p className="text-[11px] text-[#86868B]">Kurumun fiyat listesini buraya yapıştırın.</p>
+            </div>
+            <textarea
+              value={knowledgePrices}
+              onChange={(e) => setKnowledgePrices(e.target.value)}
+              className="flex-1 p-5 min-h-[200px] text-[13px] font-medium text-[#1D1D1F] bg-transparent outline-none resize-none placeholder:text-[#C7C7CC]"
+              placeholder="Örn:&#10;- Lazer Epilasyon (Tüm Vücut): 2500 TL&#10;- Cilt Bakımı: 1000 TL"
+            />
+          </div>
+
+          {/* SSS ve Kurallar */}
+          <div className="bg-white rounded-2xl border border-black/5 shadow-sm p-0 flex flex-col overflow-hidden">
+            <div className="px-5 py-3 border-b border-black/5 bg-black/[0.02]">
+              <h3 className="text-sm font-bold text-[#1D1D1F]">Sıkça Sorulan Sorular / Kurallar</h3>
+              <p className="text-[11px] text-[#86868B]">Hastaların sık sorduğu soruları ve cevapları yazın.</p>
+            </div>
+            <textarea
+              value={knowledgeRules}
+              onChange={(e) => setKnowledgeRules(e.target.value)}
+              className="flex-1 p-5 min-h-[200px] text-[13px] font-medium text-[#1D1D1F] bg-transparent outline-none resize-none placeholder:text-[#C7C7CC]"
+              placeholder="Örn:&#10;S: Taksit yapıyor musunuz?&#10;C: Kredi kartlarına vade farksız 3 taksit imkanımız var.&#10;&#10;KURAL: Muayene ücretsizdir ancak randevu alınması zorunludur."
             />
           </div>
         </div>

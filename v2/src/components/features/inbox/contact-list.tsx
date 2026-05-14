@@ -27,7 +27,7 @@ export function ContactList() {
   const { data, size, setSize, isLoading, isValidating } = useSWRInfinite(
     getKey, 
     ([_, page, search, stage]: any) => getConversations(page, search, stage), 
-    { refreshInterval: 10000 }
+    { refreshInterval: 3000 } // Daha hızlı listeleme yenilemesi
   );
 
   const contacts = data ? data.flat() : [];
