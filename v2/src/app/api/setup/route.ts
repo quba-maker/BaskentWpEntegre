@@ -242,6 +242,16 @@ export async function GET(req: NextRequest) {
     `;
     results.push("✅ monthly_usage tablosu hazır");
 
+    // 15. Yeni kullanıcı kolonları (şifre sıfırlama, davet sistemi)
+    try {
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT false`;
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS invite_token TEXT`;
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS invite_expires_at TIMESTAMPTZ`;
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`;
+      await sql`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS daily_ai_limit INT DEFAULT 200`;
+      results.push("✅ kullanıcı davet/şifre kolonları eklendi");
+    } catch { results.push("ℹ️ kullanıcı kolonları zaten mevcut"); }
+
     return NextResponse.json({ success: true, results });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
