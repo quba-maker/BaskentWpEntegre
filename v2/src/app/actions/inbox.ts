@@ -205,6 +205,9 @@ export async function getMessages(phone: string) {
   if (!phone) return [];
   
   try {
+    const session = await getSession();
+    if (!session?.tenantId) return [];
+
     const rows = await sql`
       SELECT 
         id,
@@ -212,7 +215,7 @@ export async function getMessages(phone: string) {
         direction,
         created_at
       FROM messages
-      WHERE phone_number = ${phone}
+      WHERE phone_number = ${phone} AND tenant_id = ${session.tenantId}
       ORDER BY created_at ASC
       LIMIT 100
     `;
@@ -278,8 +281,8 @@ export async function sendMessage(phone: string, text: string) {
 
     // 2. Save to Neon Database
     await sql`
-      INSERT INTO messages (phone_number, direction, content, channel)
-      VALUES (${phone}, 'out', ${text}, 'whatsapp')
+      INSERT INTO messages (tenant_id, phone_number, direction, content, channel)
+      VALUES (${session.tenantId}, ${phone}, 'out', ${text}, 'whatsapp')
     `;
 
     // 3. Update Conversation Last Message
@@ -288,7 +291,7 @@ export async function sendMessage(phone: string, text: string) {
       SET last_message_at = NOW(), 
           message_count = message_count + 1,
           status = 'human' -- Auto takeover when agent sends message
-      WHERE phone_number = ${phone}
+      WHERE phone_number = ${phone} AND tenant_id = ${session.tenantId}
     `;
 
     return { success: true };
@@ -302,6 +305,9 @@ export async function updateCrmData(phone: string, stage: string, department: st
   if (!phone) return { success: false };
 
   try {
+    const session = await getSession();
+    if (!session?.tenantId) return { success: false };
+
     // Graceful column updates depending on schema state
     if (country !== undefined) {
       try {
@@ -310,7 +316,7 @@ export async function updateCrmData(phone: string, stage: string, department: st
           SET lead_stage = ${stage},
               department = ${department},
               country = ${country}
-          WHERE phone_number = ${phone}
+          WHERE phone_number = ${phone} AND tenant_id = ${session.tenantId}
         `;
       } catch (e) {
         // Fallback if country column doesn't exist yet
@@ -318,7 +324,7 @@ export async function updateCrmData(phone: string, stage: string, department: st
           UPDATE conversations
           SET lead_stage = ${stage},
               department = ${department}
-          WHERE phone_number = ${phone}
+          WHERE phone_number = ${phone} AND tenant_id = ${session.tenantId}
         `;
       }
     } else {
@@ -326,7 +332,7 @@ export async function updateCrmData(phone: string, stage: string, department: st
         UPDATE conversations
         SET lead_stage = ${stage},
             department = ${department}
-        WHERE phone_number = ${phone}
+        WHERE phone_number = ${phone} AND tenant_id = ${session.tenantId}
       `;
     }
     
@@ -335,7 +341,8 @@ export async function updateCrmData(phone: string, stage: string, department: st
       await sql`
         UPDATE leads
         SET stage = ${stage}
-        WHERE phone_number = ${phone} OR phone_number LIKE ${'%' + phone.substring(phone.length - 10) + '%'}
+        WHERE (phone_number = ${phone} OR phone_number LIKE ${'%' + phone.substring(phone.length - 10) + '%'})
+          AND tenant_id = ${session.tenantId}
       `;
     } catch (e) {
       // Ignore if leads table structure differs
@@ -352,8 +359,11 @@ export async function addTag(phone: string, tag: string) {
   if (!phone || !tag) return { success: false };
   
   try {
+    const session = await getSession();
+    if (!session?.tenantId) return { success: false };
+
     // Get existing tags
-    const rows = await sql`SELECT tags FROM conversations WHERE phone_number = ${phone}`;
+    const rows = await sql`SELECT tags FROM conversations WHERE phone_number = ${phone} AND tenant_id = ${session.tenantId}`;
     let tags: string[] = [];
     if (rows.length > 0 && rows[0].tags) {
       try {
@@ -370,7 +380,7 @@ export async function addTag(phone: string, tag: string) {
       await sql`
         UPDATE conversations 
         SET tags = ${JSON.stringify(tags)}
-        WHERE phone_number = ${phone}
+        WHERE phone_number = ${phone} AND tenant_id = ${session.tenantId}
       `;
     }
     return { success: true, tags };
@@ -384,8 +394,11 @@ export async function removeTag(phone: string, tagToRemove: string) {
   if (!phone || !tagToRemove) return { success: false };
   
   try {
+    const session = await getSession();
+    if (!session?.tenantId) return { success: false };
+
     // Get existing tags
-    const rows = await sql`SELECT tags FROM conversations WHERE phone_number = ${phone}`;
+    const rows = await sql`SELECT tags FROM conversations WHERE phone_number = ${phone} AND tenant_id = ${session.tenantId}`;
     let tags: string[] = [];
     if (rows.length > 0 && rows[0].tags) {
       try {
@@ -401,7 +414,7 @@ export async function removeTag(phone: string, tagToRemove: string) {
     await sql`
       UPDATE conversations 
       SET tags = ${JSON.stringify(newTags)}
-      WHERE phone_number = ${phone}
+      WHERE phone_number = ${phone} AND tenant_id = ${session.tenantId}
     `;
     
     return { success: true, tags: newTags };
@@ -415,11 +428,14 @@ export async function toggleBotStatus(phone: string, isBotActive: boolean) {
   if (!phone) return { success: false };
   
   try {
+    const session = await getSession();
+    if (!session?.tenantId) return { success: false };
+
     const newStatus = isBotActive ? 'bot' : 'human';
     await sql`
       UPDATE conversations
       SET status = ${newStatus}
-      WHERE phone_number = ${phone}
+      WHERE phone_number = ${phone} AND tenant_id = ${session.tenantId}
     `;
     return { success: true };
   } catch (error) {

@@ -69,6 +69,8 @@ export async function POST(req: NextRequest) {
       
       if (tenant) {
         console.log(`📱 [WA] Tenant: ${tenant.name} (${tenant.slug})`);
+        body.tenant_id = tenant.id;
+        body.tenant_meta = tenant;
       }
 
       // İşlemi arka plana at, Vercel'i bekletme
@@ -87,6 +89,8 @@ export async function POST(req: NextRequest) {
       
       if (tenant) {
         console.log(`💬 [MSG] Tenant: ${tenant.name} (${tenant.slug})`);
+        body.tenant_id = tenant.id;
+        body.tenant_meta = tenant;
       }
 
       waitUntil(handleMessengerMessage(body));
@@ -103,6 +107,8 @@ export async function POST(req: NextRequest) {
       
       if (tenant) {
         console.log(`📸 [IG] Tenant: ${tenant.name} (${tenant.slug})`);
+        body.tenant_id = tenant.id;
+        body.tenant_meta = tenant;
       }
 
       waitUntil(handleInstagramMessage(body));
