@@ -7,7 +7,7 @@ import { logger } from "./logger";
 // ==========================================
 
 export class TenantDB {
-  private tenantId: string;
+  public readonly tenantId: string;
   private isAdmin: boolean;
   private log = logger.withContext({ module: 'TenantDB' });
   private sql = neon(process.env.DATABASE_URL!);
