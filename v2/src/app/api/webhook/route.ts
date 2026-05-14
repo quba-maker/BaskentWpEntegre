@@ -2,45 +2,27 @@ import { NextRequest, NextResponse } from "next/server";
 import { neon } from "@neondatabase/serverless";
 
 // ==========================================
-// META WEBHOOK — WhatsApp / Instagram / Messenger
+// QUBA AI — Multi-Tenant Webhook Router
 // Meta bu endpoint'i çağırır: /api/webhook
+// Gelen mesajı tenant'a göre yönlendirir
 // ==========================================
 
 const DATABASE_URL = process.env.DATABASE_URL!;
 
-// 🔒 Webhook Signature Doğrulaması
-function verifySignature(body: string, signature: string | null): boolean {
-  // Runtime'da crypto kullanacağız
-  if (!process.env.META_APP_SECRET || !signature) return true;
-  // Edge runtime'da crypto.subtle kullanılabilir ama basit tutalım
-  return true; // Vercel'da body raw erişim sınırlı, şimdilik skip
-}
-
-// 🔄 Arka plan kontrolleri
-async function runBackgroundChecks() {
-  try {
-    const sql = neon(DATABASE_URL);
-    // Escalation check - basit versiyon
-    const escalations = await sql`
-      SELECT c.phone_number, c.patient_name, c.department, c.temperature
-      FROM conversations c
-      WHERE c.status = 'human' AND c.temperature IN ('hot', 'warm')
-        AND c.last_message_at < NOW() - INTERVAL '5 minutes'
-        AND c.last_message_at > NOW() - INTERVAL '30 minutes'
-        AND NOT EXISTS (
-          SELECT 1 FROM messages m 
-          WHERE m.phone_number = c.phone_number 
-          AND m.direction = 'out' AND m.model_used = 'panel'
-          AND m.created_at > c.last_message_at
-        )
-    `;
-    // Log escalations (Telegram bildirimi handoverManager'dan)
-    if (escalations.length > 0) {
-      console.log(`⏰ ${escalations.length} hasta SLA bekleme süresini aştı`);
-    }
-  } catch(e) {
-    // Background check hataları webhook'u bloke etmesin
+// Tenant bilgisini page_id veya phone_id ile bul
+async function findTenant(identifier: string, type: "page" | "phone" | "instagram") {
+  const sql = neon(DATABASE_URL);
+  
+  let tenants;
+  if (type === "page") {
+    tenants = await sql`SELECT * FROM tenants WHERE meta_page_id = ${identifier} AND status = 'active'`;
+  } else if (type === "instagram") {
+    tenants = await sql`SELECT * FROM tenants WHERE instagram_id = ${identifier} AND status = 'active'`;
+  } else {
+    tenants = await sql`SELECT * FROM tenants WHERE whatsapp_phone_id = ${identifier} AND status = 'active'`;
   }
+  
+  return tenants.length > 0 ? tenants[0] : null;
 }
 
 // GET — Meta Webhook doğrulama
@@ -59,7 +41,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ error: "Doğrulama başarısız" }, { status: 403 });
 }
 
-// POST — Mesaj işle
+// POST — Mesaj işle (Tenant Router)
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -67,9 +49,6 @@ export async function POST(req: NextRequest) {
     if (!body || !body.object) {
       return new NextResponse("NOT_FOUND", { status: 404 });
     }
-
-    // Arka plan kontrolleri
-    runBackgroundChecks().catch(() => {});
 
     // Dynamic import — lib/ klasörü parent directory'de
     const { handleWhatsAppMessage } = await import("../../../../../lib/channels/whatsapp.js");
@@ -81,6 +60,14 @@ export async function POST(req: NextRequest) {
       body.object === "whatsapp_business_account" &&
       body.entry?.[0]?.changes?.[0]?.value?.messages?.[0]
     ) {
+      const phoneNumberId = body.entry[0].changes[0].value?.metadata?.phone_number_id;
+      const tenant = phoneNumberId ? await findTenant(phoneNumberId, "phone") : null;
+      
+      if (tenant) {
+        console.log(`📱 [WA] Tenant: ${tenant.name} (${tenant.slug})`);
+      }
+
+      // Mevcut handler'ı çağır (tenant bilgisi ileride handler'a geçirilecek)
       await handleWhatsAppMessage(body);
       return new NextResponse("EVENT_RECEIVED", { status: 200 });
     }
@@ -91,6 +78,13 @@ export async function POST(req: NextRequest) {
       body.entry?.[0]?.messaging?.[0] &&
       !body.entry?.[0]?.changes?.[0]?.field
     ) {
+      const pageId = body.entry[0]?.id;
+      const tenant = pageId ? await findTenant(pageId, "page") : null;
+      
+      if (tenant) {
+        console.log(`💬 [MSG] Tenant: ${tenant.name} (${tenant.slug})`);
+      }
+
       await handleMessengerMessage(body);
       return new NextResponse("EVENT_RECEIVED", { status: 200 });
     }
@@ -100,6 +94,13 @@ export async function POST(req: NextRequest) {
       body.object === "instagram" &&
       body.entry?.[0]?.messaging?.[0]
     ) {
+      const igId = body.entry[0]?.id;
+      const tenant = igId ? await findTenant(igId, "instagram") : null;
+      
+      if (tenant) {
+        console.log(`📸 [IG] Tenant: ${tenant.name} (${tenant.slug})`);
+      }
+
       await handleInstagramMessage(body);
       return new NextResponse("EVENT_RECEIVED", { status: 200 });
     }
@@ -109,32 +110,34 @@ export async function POST(req: NextRequest) {
       body.object === "page" &&
       body.entry?.[0]?.changes?.[0]?.field === "leadgen"
     ) {
-      // Lead webhook işleme
       try {
         const leadgenData = body.entry[0].changes[0].value;
         const leadgenId = leadgenData?.leadgen_id;
         const pageId = body.entry[0]?.id;
-        
+        const tenant = pageId ? await findTenant(pageId, "page") : null;
+
         if (leadgenId) {
-          console.log(`📋 [Lead Ad] Yeni lead: ${leadgenId} (Sayfa: ${pageId})`);
-          // Lead verilerini Meta API'den çekip DB'ye kaydet
-          const META_TOKEN = process.env.META_ACCESS_TOKEN || process.env.PAGE_ACCESS_TOKEN;
+          console.log(`📋 [Lead] ${tenant?.name || "Bilinmeyen"} — Lead: ${leadgenId}`);
+          
+          // Tenant'ın token'ını kullan, yoksa env'den al
+          const META_TOKEN = tenant?.meta_page_token || process.env.META_ACCESS_TOKEN;
           if (META_TOKEN) {
             const leadRes = await fetch(
               `https://graph.facebook.com/v25.0/${leadgenId}?access_token=${META_TOKEN}`
             );
             const leadData = await leadRes.json();
-            
+
             if (leadData?.field_data) {
               const fields: Record<string, string> = {};
               leadData.field_data.forEach((f: any) => {
                 fields[f.name] = f.values?.[0] || "";
               });
-              
+
               const sql = neon(DATABASE_URL);
               await sql`INSERT INTO leads (
-                source, patient_name, phone_number, email, department, notes, stage
+                tenant_id, source, patient_name, phone_number, email, department, notes, stage
               ) VALUES (
+                ${tenant?.id || null},
                 'meta_lead_ad',
                 ${fields.full_name || fields.name || ""},
                 ${fields.phone_number || fields.phone || ""},
@@ -143,8 +146,6 @@ export async function POST(req: NextRequest) {
                 ${"Lead Ad - Sayfa: " + pageId},
                 'new'
               ) ON CONFLICT DO NOTHING`;
-              
-              console.log(`✅ [Lead Ad] Lead kaydedildi: ${fields.full_name || fields.phone_number}`);
             }
           }
         }
@@ -154,7 +155,7 @@ export async function POST(req: NextRequest) {
       return new NextResponse("EVENT_RECEIVED", { status: 200 });
     }
 
-    // Diğer durumlar (okundu bildirimi vb.)
+    // Diğer durumlar
     return new NextResponse("EVENT_RECEIVED", { status: 200 });
   } catch (e: any) {
     console.error("❌ Webhook Hatası:", e);
