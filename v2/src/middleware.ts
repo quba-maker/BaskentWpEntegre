@@ -28,25 +28,19 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // Login rotasına auth'lu gidilirse Dashboard'a yönlendir
-  if (pathname === '/login') {
-    const token = req.cookies.get("quba_session")?.value;
-    if (token) {
-      try {
-        await jwtVerify(token, SECRET);
-        return NextResponse.redirect(new URL("/", req.url));
-      } catch (err) {}
+  // Public ve API route'larını pas geç
+  if (PUBLIC_ROUTES.some((r) => pathname.startsWith(r)) || pathname.startsWith("/api/")) {
+    // Sadece /login ise auth kontrolü yapıp içeri at
+    if (pathname === '/login') {
+      const token = req.cookies.get("quba_session")?.value;
+      if (token) {
+        try {
+          const { payload } = await jwtVerify(token, SECRET);
+          const tSlug = payload.tenantSlug as string;
+          return NextResponse.redirect(new URL(`/${tSlug}`, req.url));
+        } catch (err) {}
+      }
     }
-    return NextResponse.next();
-  }
-
-  // Public route'lar → geç
-  if (PUBLIC_ROUTES.some((r) => pathname.startsWith(r))) {
-    return NextResponse.next();
-  }
-
-  // API route'ları → geç (kendi auth'ları var)
-  if (pathname.startsWith("/api/")) {
     return NextResponse.next();
   }
 
@@ -59,39 +53,42 @@ export async function middleware(req: NextRequest) {
   try {
     const { payload } = await jwtVerify(token, SECRET);
     const userRole = payload.role as string;
+    const sessionTenantSlug = payload.tenantSlug as string;
     
-    // RBAC: Korumalı rota kontrolü
-    const baseRoute = `/${pathname.split('/')[1]}`; // Örn: /admin/users -> /admin
-    
-    // 1. platform_admin dışındaki herkesi /admin'den engelle
-    if (baseRoute === '/admin' && userRole !== 'platform_admin' && userRole !== 'owner') {
-      return NextResponse.redirect(new URL("/", req.url));
+    // URL Analizi (Path-based routing)
+    // Örn: /baskent/forms -> parts = ['baskent', 'forms']
+    const parts = pathname.split('/').filter(Boolean);
+    const urlTenantSlug = parts[0];
+    const baseRoute = parts.length > 1 ? `/${parts[1]}` : '/';
+
+    // Kök dizin erişimi (Örn: Sadece ai.qubamedya.com girildiyse)
+    if (!urlTenantSlug) {
+       if (userRole === 'platform_admin') return NextResponse.redirect(new URL("/admin", req.url));
+       return NextResponse.redirect(new URL(`/${sessionTenantSlug}`, req.url));
     }
 
-    // 2. Platform Admin anasayfaya girmek isterse /admin'e yönlendir
-    if (pathname === '/' && userRole === 'platform_admin') {
-      return NextResponse.redirect(new URL("/admin", req.url));
+    // TENANT ISOLATION KONTROLÜ (GÜMRÜK KAPISI)
+    if (urlTenantSlug !== sessionTenantSlug && userRole !== 'platform_admin' && userRole !== 'owner') {
+      return NextResponse.redirect(new URL(`/${sessionTenantSlug}`, req.url));
     }
 
-    // 3. Diğer sayfalar için yetki matrisi kontrolü
-    const allowedRoles = ROLE_PERMISSIONS[baseRoute] || ROLE_PERMISSIONS[pathname];
-    
-    // Geçici 'owner' rolü desteği (veritabanı güncellenene kadar)
+    // Admin Rota Kontrolü
+    if (urlTenantSlug === 'admin' || baseRoute === '/admin') {
+      if (userRole !== 'platform_admin' && userRole !== 'owner') {
+        return NextResponse.redirect(new URL(`/${sessionTenantSlug}`, req.url));
+      }
+    }
+
+    // Diğer sayfalar için yetki matrisi kontrolü
+    const allowedRoles = ROLE_PERMISSIONS[baseRoute];
     const isTempOwner = userRole === 'owner';
     
     if (allowedRoles && !allowedRoles.includes(userRole) && !isTempOwner) {
-      // Eğer zaten / sayfasındaysa ve yetkisi yoksa sonsuz döngüyü engelle
-      if (pathname === '/') {
-        const response = NextResponse.redirect(new URL("/login", req.url));
-        response.cookies.delete("quba_session");
-        return response;
-      }
-      return NextResponse.redirect(new URL("/", req.url));
+      return NextResponse.redirect(new URL(`/${sessionTenantSlug}`, req.url));
     }
 
     return NextResponse.next();
   } catch {
-    // Token geçersiz veya süresi dolmuş
     const response = NextResponse.redirect(new URL("/login", req.url));
     response.cookies.delete("quba_session");
     return response;
@@ -100,16 +97,6 @@ export async function middleware(req: NextRequest) {
 
 export const config = {
   matcher: [
-    "/",
-    "/inbox/:path*",
-    "/bot/:path*",
-    "/forms/:path*",
-    "/calendar/:path*",
-    "/integrations/:path*",
-    "/settings/:path*",
-    "/admin/:path*",
-    "/users/:path*",
-    "/analytics/:path*",
-    "/login"
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 };

@@ -57,6 +57,10 @@ ALTER TABLE conversations
 ALTER TABLE messages 
   ADD COLUMN IF NOT EXISTS tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE;
 
+-- 4.1 LEADS (tenant izoleli - FORMLAR)
+ALTER TABLE leads 
+  ADD COLUMN IF NOT EXISTS tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE;
+
 -- 5. SETTINGS (tenant izoleli)
 -- Mevcut settings tablosuna tenant_id ekle
 ALTER TABLE settings 
@@ -104,6 +108,7 @@ VALUES ('Başkent Hastanesi', 'baskent', 'health', '#005A9C', 'gemini-2.5-flash'
 ON CONFLICT (slug) DO NOTHING;
 
 -- Mevcut verilere tenant_id ata (Başkent)
--- UPDATE conversations SET tenant_id = (SELECT id FROM tenants WHERE slug = 'baskent') WHERE tenant_id IS NULL;
--- UPDATE messages SET tenant_id = (SELECT id FROM tenants WHERE slug = 'baskent') WHERE tenant_id IS NULL;
--- UPDATE settings SET tenant_id = (SELECT id FROM tenants WHERE slug = 'baskent') WHERE tenant_id IS NULL;
+UPDATE conversations SET tenant_id = (SELECT id FROM tenants WHERE slug = 'baskent') WHERE tenant_id IS NULL;
+UPDATE messages SET tenant_id = (SELECT id FROM tenants WHERE slug = 'baskent') WHERE tenant_id IS NULL;
+UPDATE settings SET tenant_id = (SELECT id FROM tenants WHERE slug = 'baskent') WHERE tenant_id IS NULL;
+UPDATE leads SET tenant_id = (SELECT id FROM tenants WHERE slug = 'baskent') WHERE tenant_id IS NULL;

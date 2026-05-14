@@ -84,6 +84,7 @@ export async function GET(req: NextRequest) {
     await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS tenant_id UUID`;
     await sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS tenant_id UUID`;
     await sql`ALTER TABLE settings ADD COLUMN IF NOT EXISTS tenant_id UUID`;
+    await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS tenant_id UUID`;
     results.push("✅ tenant_id kolonları eklendi");
 
     // 6. Mevcut migration'lar (eski setup)
@@ -105,6 +106,13 @@ export async function GET(req: NextRequest) {
       ON CONFLICT (slug) DO NOTHING
     `;
     results.push("✅ Başkent tenant eklendi");
+
+    // 9. Mevcut Verileri Başkent Tenant'ına Ata
+    await sql`UPDATE conversations SET tenant_id = (SELECT id FROM tenants WHERE slug = 'baskent') WHERE tenant_id IS NULL`;
+    await sql`UPDATE messages SET tenant_id = (SELECT id FROM tenants WHERE slug = 'baskent') WHERE tenant_id IS NULL`;
+    await sql`UPDATE settings SET tenant_id = (SELECT id FROM tenants WHERE slug = 'baskent') WHERE tenant_id IS NULL`;
+    await sql`UPDATE leads SET tenant_id = (SELECT id FROM tenants WHERE slug = 'baskent') WHERE tenant_id IS NULL`;
+    results.push("✅ Mevcut veriler 'baskent' tenantına atandı");
 
     return NextResponse.json({ success: true, results });
   } catch (error: any) {

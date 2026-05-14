@@ -5,6 +5,10 @@ import { getSession } from "@/lib/auth/session";
 
 export async function getForms(page: number = 1, search: string = "", source: string = "all") {
   try {
+    const session = await getSession();
+    if (!session?.tenantId) return [];
+    const tenantId = session.tenantId;
+
     const limit = 50;
     const offset = (page - 1) * limit;
     const searchFilter = search.trim() ? `%${search.trim()}%` : null;
@@ -16,8 +20,9 @@ export async function getForms(page: number = 1, search: string = "", source: st
       rows = await sql`
         SELECT l.*, c.status as conversation_status
         FROM leads l
-        LEFT JOIN conversations c ON c.phone_number = l.phone_number
-        WHERE (l.patient_name ILIKE ${searchFilter} OR l.phone_number ILIKE ${searchFilter} OR l.email ILIKE ${searchFilter})
+        LEFT JOIN conversations c ON c.phone_number = l.phone_number AND c.tenant_id = l.tenant_id
+        WHERE l.tenant_id = ${tenantId}
+          AND (l.patient_name ILIKE ${searchFilter} OR l.phone_number ILIKE ${searchFilter} OR l.email ILIKE ${searchFilter})
           AND l.form_name ILIKE ${sourceFilter}
         ORDER BY l.created_at DESC
         LIMIT ${limit} OFFSET ${offset}
@@ -26,8 +31,9 @@ export async function getForms(page: number = 1, search: string = "", source: st
       rows = await sql`
         SELECT l.*, c.status as conversation_status
         FROM leads l
-        LEFT JOIN conversations c ON c.phone_number = l.phone_number
-        WHERE (l.patient_name ILIKE ${searchFilter} OR l.phone_number ILIKE ${searchFilter} OR l.email ILIKE ${searchFilter})
+        LEFT JOIN conversations c ON c.phone_number = l.phone_number AND c.tenant_id = l.tenant_id
+        WHERE l.tenant_id = ${tenantId}
+          AND (l.patient_name ILIKE ${searchFilter} OR l.phone_number ILIKE ${searchFilter} OR l.email ILIKE ${searchFilter})
         ORDER BY l.created_at DESC
         LIMIT ${limit} OFFSET ${offset}
       `;
@@ -35,8 +41,9 @@ export async function getForms(page: number = 1, search: string = "", source: st
       rows = await sql`
         SELECT l.*, c.status as conversation_status
         FROM leads l
-        LEFT JOIN conversations c ON c.phone_number = l.phone_number
-        WHERE l.form_name ILIKE ${sourceFilter}
+        LEFT JOIN conversations c ON c.phone_number = l.phone_number AND c.tenant_id = l.tenant_id
+        WHERE l.tenant_id = ${tenantId}
+          AND l.form_name ILIKE ${sourceFilter}
         ORDER BY l.created_at DESC
         LIMIT ${limit} OFFSET ${offset}
       `;
@@ -44,7 +51,8 @@ export async function getForms(page: number = 1, search: string = "", source: st
       rows = await sql`
         SELECT l.*, c.status as conversation_status
         FROM leads l
-        LEFT JOIN conversations c ON c.phone_number = l.phone_number
+        LEFT JOIN conversations c ON c.phone_number = l.phone_number AND c.tenant_id = l.tenant_id
+        WHERE l.tenant_id = ${tenantId}
         ORDER BY l.created_at DESC
         LIMIT ${limit} OFFSET ${offset}
       `;

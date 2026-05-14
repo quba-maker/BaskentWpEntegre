@@ -50,27 +50,27 @@ export async function Sidebar() {
           </>
         ) : (
           <>
-            <NavLink href="/inbox" icon={<MessageSquare className="w-[18px] h-[18px]" />} label="Mesajlar" />
-            <NavLink href="/forms" icon={<ClipboardList className="w-[18px] h-[18px]" />} label="Formlar" />
-            <NavLink href="/calendar" icon={<Calendar className="w-[18px] h-[18px]" />} label="Randevular" />
+            <NavLink href={`/${session?.tenantSlug || ''}/inbox`} icon={<MessageSquare className="w-[18px] h-[18px]" />} label="Mesajlar" />
+            <NavLink href={`/${session?.tenantSlug || ''}/forms`} icon={<ClipboardList className="w-[18px] h-[18px]" />} label="Formlar" />
+            <NavLink href={`/${session?.tenantSlug || ''}/calendar`} icon={<Calendar className="w-[18px] h-[18px]" />} label="Randevular" />
             {session?.role !== "viewer" && (
-              <NavLink href="/bot" icon={<Bot className="w-[18px] h-[18px]" />} label="Bot Yönetimi" />
+              <NavLink href={`/${session?.tenantSlug || ''}/bot`} icon={<Bot className="w-[18px] h-[18px]" />} label="Bot Yönetimi" />
             )}
             {(session?.role === "admin" || session?.role === "owner") && (
-              <NavLink href="/integrations" icon={<Link2 className="w-[18px] h-[18px]" />} label="Entegrasyonlar" />
+              <NavLink href={`/${session?.tenantSlug || ''}/integrations`} icon={<Link2 className="w-[18px] h-[18px]" />} label="Entegrasyonlar" />
             )}
           </>
         )}
         
         {(session?.role === "platform_admin" || session?.role === "admin" || session?.role === "owner") && (
-          <NavLink href="/users" icon={<Users className="w-[18px] h-[18px]" />} label="Kullanıcılar" />
+          <NavLink href={`/${session?.tenantSlug || ''}/users`} icon={<Users className="w-[18px] h-[18px]" />} label="Kullanıcılar" />
         )}
       </nav>
 
       {/* User & Logout */}
       <div className="p-3 border-t border-black/5 space-y-1">
         {(session?.role === "platform_admin" || session?.role === "admin" || session?.role === "owner") && (
-          <NavLink href="/settings" icon={<Settings className="w-[18px] h-[18px]" />} label="Ayarlar" />
+          <NavLink href={`/${session?.tenantSlug || ''}/settings`} icon={<Settings className="w-[18px] h-[18px]" />} label="Ayarlar" />
         )}
         
         {session && (
