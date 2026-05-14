@@ -37,21 +37,13 @@ export async function getBotSettings() {
           )
       `);
 
-      // Legacy to V2 mapping
-      const keyMapper: Record<string, string> = {
-        'bot_whatsapp_active': 'channel_whatsapp_enabled',
-        'bot_instagram_active': 'channel_instagram_enabled',
-        'bot_foreign_active': 'channel_foreign_enabled',
-        'working_hours': 'bot_working_hours',
-      };
-      
+      // Read path %100 saf tutuldu (No mutation, no side-effects)
       const rows = Array.isArray(settings) ? settings : ((settings as any)?.rows || []);
 
       const result: Record<string, any> = {};
       rows.forEach((s: any) => {
-        const mappedKey = keyMapper[s.key] || s.key;
-        if (!result[mappedKey] || new Date(s.updated_at) > new Date(result[mappedKey].updated_at)) {
-          result[mappedKey] = { value: s.value, updated_at: s.updated_at };
+        if (!result[s.key] || new Date(s.updated_at) > new Date(result[s.key].updated_at)) {
+          result[s.key] = { value: s.value, updated_at: s.updated_at };
         }
       });
       
