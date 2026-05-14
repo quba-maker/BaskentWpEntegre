@@ -34,6 +34,21 @@ export class MigrationService {
     log.info(`Starting schema migration check for tenant`, { tenantId });
 
     try {
+      // Auto-bootstrap schema modifications (Idempotent)
+      await db.executeSafe(sql`
+        ALTER TABLE tenants ADD COLUMN IF NOT EXISTS schema_version VARCHAR(10) DEFAULT 'v1'
+      `);
+      await db.executeSafe(sql`
+        CREATE TABLE IF NOT EXISTS migration_audit_logs (
+          id SERIAL PRIMARY KEY,
+          tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE,
+          from_version VARCHAR(10),
+          to_version VARCHAR(10),
+          changes JSONB,
+          created_at TIMESTAMP DEFAULT NOW()
+        )
+      `);
+
       // Phase A: Detect (Read current schema state)
       // Check if we already migrated recently to avoid heavy queries
       const tenantCheck = await db.executeSafe(sql`
