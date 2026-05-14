@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { neon } from "@neondatabase/serverless";
+import { waitUntil } from "@vercel/functions";
 
 // ==========================================
 // QUBA AI — Multi-Tenant Webhook Router
@@ -8,6 +9,9 @@ import { neon } from "@neondatabase/serverless";
 // ==========================================
 
 const DATABASE_URL = process.env.DATABASE_URL!;
+
+// Vercel'in arka plan işlemlerini (waitUntil) hemen kesmemesi için maksimum süre
+export const maxDuration = 60;
 
 // Tenant bilgisini page_id veya phone_id ile bul
 async function findTenant(identifier: string, type: "page" | "phone" | "instagram") {
@@ -67,8 +71,8 @@ export async function POST(req: NextRequest) {
         console.log(`📱 [WA] Tenant: ${tenant.name} (${tenant.slug})`);
       }
 
-      // Mevcut handler'ı çağır (tenant bilgisi ileride handler'a geçirilecek)
-      await handleWhatsAppMessage(body);
+      // İşlemi arka plana at, Vercel'i bekletme
+      waitUntil(handleWhatsAppMessage(body));
       return new NextResponse("EVENT_RECEIVED", { status: 200 });
     }
 
@@ -85,7 +89,7 @@ export async function POST(req: NextRequest) {
         console.log(`💬 [MSG] Tenant: ${tenant.name} (${tenant.slug})`);
       }
 
-      await handleMessengerMessage(body);
+      waitUntil(handleMessengerMessage(body));
       return new NextResponse("EVENT_RECEIVED", { status: 200 });
     }
 
@@ -101,7 +105,7 @@ export async function POST(req: NextRequest) {
         console.log(`📸 [IG] Tenant: ${tenant.name} (${tenant.slug})`);
       }
 
-      await handleInstagramMessage(body);
+      waitUntil(handleInstagramMessage(body));
       return new NextResponse("EVENT_RECEIVED", { status: 200 });
     }
 
@@ -134,18 +138,20 @@ export async function POST(req: NextRequest) {
               });
 
               const sql = neon(DATABASE_URL);
-              await sql`INSERT INTO leads (
-                tenant_id, source, patient_name, phone_number, email, department, notes, stage
-              ) VALUES (
-                ${tenant?.id || null},
-                'meta_lead_ad',
-                ${fields.full_name || fields.name || ""},
-                ${fields.phone_number || fields.phone || ""},
-                ${fields.email || ""},
-                ${fields.department || fields.interest || ""},
-                ${"Lead Ad - Sayfa: " + pageId},
-                'new'
-              ) ON CONFLICT DO NOTHING`;
+              waitUntil(
+                sql`INSERT INTO leads (
+                  tenant_id, source, patient_name, phone_number, email, department, notes, stage
+                ) VALUES (
+                  ${tenant?.id || null},
+                  'meta_lead_ad',
+                  ${fields.full_name || fields.name || ""},
+                  ${fields.phone_number || fields.phone || ""},
+                  ${fields.email || ""},
+                  ${fields.department || fields.interest || ""},
+                  ${"Lead Ad - Sayfa: " + pageId},
+                  'new'
+                ) ON CONFLICT DO NOTHING`
+              );
             }
           }
         }
