@@ -95,7 +95,7 @@ export async function getSession(): Promise<Session | null> {
 export async function login(
   email: string,
   password: string
-): Promise<{ success: boolean; error?: string; tenantSlug?: string }> {
+): Promise<{ success: boolean; error?: string; tenantSlug?: string; mustChangePassword?: boolean }> {
   try {
     // Rate Limiting — IP yerine email bazlı (serverless'ta IP güvenilmez)
     const rl = checkRateLimit(`login:${email}`, 5, 60_000);
@@ -160,7 +160,7 @@ export async function login(
       details: { role: user.role, tenantSlug: user.tenant_slug },
     });
 
-    return { success: true, tenantSlug: user.tenant_slug };
+    return { success: true, tenantSlug: user.tenant_slug, mustChangePassword: user.must_change_password === true };
   } catch (error: any) {
     console.error("Login error:", error);
     return { success: false, error: "Bir hata oluştu. Tekrar deneyin." };

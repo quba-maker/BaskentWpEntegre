@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { getTenantSettings, updateTenantSettings, getUsageStats } from "@/app/actions/settings";
-import { Building2, Bot, Gauge, Shield, Save, Loader2, CheckCircle } from "lucide-react";
+import { changeMyPassword } from "@/app/actions/users";
+import { getIntegrationHealth } from "@/app/actions/integrations";
+import { Building2, Bot, Gauge, Shield, Save, Loader2, CheckCircle, KeyRound, Wifi, WifiOff, AlertTriangle } from "lucide-react";
 
 // ==========================================
 // QUBA AI — Settings Page (Apple Style)
@@ -14,6 +16,13 @@ export default function SettingsPage() {
   const [usage, setUsage] = useState<any>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [health, setHealth] = useState<any>(null);
+  // Password change
+  const [pwCurrent, setPwCurrent] = useState("");
+  const [pwNew, setPwNew] = useState("");
+  const [pwConfirm, setPwConfirm] = useState("");
+  const [pwLoading, setPwLoading] = useState(false);
+  const [pwMsg, setPwMsg] = useState("");
   const [form, setForm] = useState({
     name: "",
     industry: "",
@@ -27,9 +36,10 @@ export default function SettingsPage() {
   }, []);
 
   async function loadData() {
-    const [tenantRes, usageRes] = await Promise.all([
+    const [tenantRes, usageRes, healthRes] = await Promise.all([
       getTenantSettings(),
-      getUsageStats()
+      getUsageStats(),
+      getIntegrationHealth(),
     ]);
 
     if (tenantRes.success && tenantRes.tenant) {
@@ -47,6 +57,23 @@ export default function SettingsPage() {
     if (usageRes.success && usageRes.stats) {
       setUsage(usageRes.stats);
     }
+    if (healthRes.success) {
+      setHealth(healthRes);
+    }
+  }
+
+  async function handlePasswordChange() {
+    if (pwNew.length < 6) { setPwMsg("❌ Yeni şifre en az 6 karakter."); return; }
+    if (pwNew !== pwConfirm) { setPwMsg("❌ Şifreler eşleşmiyor."); return; }
+    setPwLoading(true); setPwMsg("");
+    const res = await changeMyPassword(pwCurrent, pwNew);
+    if (res.success) {
+      setPwMsg("✅ Şifre başarıyla güncellendi!");
+      setPwCurrent(""); setPwNew(""); setPwConfirm("");
+    } else {
+      setPwMsg(`❌ ${res.error}`);
+    }
+    setPwLoading(false);
   }
 
   async function handleSave() {
@@ -142,6 +169,39 @@ export default function SettingsPage() {
           <InfoRow label="Rol" value={user?.role === "owner" ? "Sahip" : user?.role || "—"} />
           <InfoRow label="Tenant Slug" value={tenant.slug} />
         </Card>
+
+        {/* Şifre Değiştir */}
+        <Card icon={<KeyRound className="w-5 h-5" />} title="Şifre Değiştir">
+          <Field label="Mevcut Şifre" value={pwCurrent} onChange={setPwCurrent} type="password" />
+          <Field label="Yeni Şifre" value={pwNew} onChange={setPwNew} type="password" />
+          <Field label="Yeni Şifre (Tekrar)" value={pwConfirm} onChange={setPwConfirm} type="password" />
+          {pwMsg && <p className={`text-[13px] ${pwMsg.startsWith('✅') ? 'text-[#34C759]' : 'text-[#FF3B30]'}`}>{pwMsg}</p>}
+          <button
+            onClick={handlePasswordChange}
+            disabled={pwLoading || !pwCurrent || pwNew.length < 6}
+            className="px-5 py-2.5 bg-[#FF9500] hover:bg-[#E68A00] text-white text-[13px] font-semibold rounded-xl transition-all disabled:opacity-50"
+          >
+            {pwLoading ? "Değiştiriliyor..." : "Şifre Güncelle"}
+          </button>
+        </Card>
+
+        {/* Entegrasyon Sağlığı */}
+        {health && health.channels && (
+          <Card icon={<Wifi className="w-5 h-5" />} title={`Entegrasyonlar — ${health.summary}`}>
+            {health.channels.map((ch: any, i: number) => (
+              <div key={i} className="flex items-center justify-between py-2 border-b border-black/5 last:border-0">
+                <div className="flex items-center gap-2">
+                  {ch.status === 'connected' ? <Wifi className="w-4 h-4 text-[#34C759]" /> :
+                   ch.status === 'error' ? <AlertTriangle className="w-4 h-4 text-[#FF3B30]" /> :
+                   ch.status === 'warning' ? <AlertTriangle className="w-4 h-4 text-[#FF9500]" /> :
+                   <WifiOff className="w-4 h-4 text-[#86868B]" />}
+                  <span className="text-[14px] font-medium text-[#1D1D1F]">{ch.name}</span>
+                </div>
+                <span className="text-[12px] text-[#86868B]">{ch.detail}</span>
+              </div>
+            ))}
+          </Card>
+        )}
 
         {/* Save Button */}
         <button

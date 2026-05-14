@@ -246,14 +246,22 @@ export default function BotManagementPage() {
 
       {/* Header */}
       <div className="mb-8">
-        <div className="flex items-center gap-3 mb-2">
-          <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-[#5856D6] to-[#007AFF] flex items-center justify-center shadow-lg">
-            <Bot className="w-5 h-5 text-white" />
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-[#5856D6] to-[#007AFF] flex items-center justify-center shadow-lg">
+              <Bot className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-[#1D1D1F]">Bot Yönetimi</h1>
+              <p className="text-[#86868B] text-sm font-medium">AI asistanlarınızı yapılandırın ve yönetin</p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-[#1D1D1F]">Bot Yönetimi</h1>
-            <p className="text-[#86868B] text-sm font-medium">AI asistanlarınızı yapılandırın ve yönetin</p>
-          </div>
+          <a
+            href="bot/modules"
+            className="flex items-center gap-2 px-4 py-2.5 bg-[#AF52DE] hover:bg-[#9A44C8] text-white text-[13px] font-semibold rounded-xl transition-all"
+          >
+            <Cpu className="w-4 h-4" /> AI Modülleri
+          </a>
         </div>
       </div>
 

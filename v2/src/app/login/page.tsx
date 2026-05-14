@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 import { login } from "@/lib/auth/session";
+import { changeMyPassword } from "@/app/actions/users";
 import { useRouter } from "next/navigation";
-import { Loader2, Bot, Eye, EyeOff } from "lucide-react";
+import { Loader2, Bot, Eye, EyeOff, KeyRound } from "lucide-react";
 
 // ==========================================
 // QUBA AI — Login Page (Apple ID Style)
@@ -16,6 +17,10 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [mustChangePassword, setMustChangePassword] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [changingPassword, setChangingPassword] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,11 +32,36 @@ export default function LoginPage() {
     const result = await login(email, password);
 
     if (result.success) {
-      router.push(`/${result.tenantSlug || ""}`);
-      router.refresh();
+      if (result.mustChangePassword) {
+        setMustChangePassword(true);
+        setError("");
+        setLoading(false);
+      } else {
+        router.push(`/${result.tenantSlug || ""}`);
+        router.refresh();
+      }
     } else {
       setError(result.error || "Giriş başarısız.");
       setLoading(false);
+    }
+  };
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newPassword.length < 6) { setError("Yeni şifre en az 6 karakter olmalı."); return; }
+    if (newPassword !== confirmPassword) { setError("Şifreler eşleşmiyor."); return; }
+    setChangingPassword(true); setError("");
+
+    const res = await changeMyPassword(password, newPassword);
+    if (res.success) {
+      const reLogin = await login(email, newPassword);
+      if (reLogin.success) {
+        router.push(`/${reLogin.tenantSlug || ""}`);
+        router.refresh();
+      }
+    } else {
+      setError(res.error || "Şifre değiştirilemedi.");
+      setChangingPassword(false);
     }
   };
 
@@ -54,7 +84,56 @@ export default function LoginPage() {
 
         {/* Login Card */}
         <div className="bg-white rounded-2xl shadow-sm border border-black/5 p-8">
-          <form onSubmit={handleSubmit} className="space-y-5">
+          {mustChangePassword ? (
+            /* Password Change Form */
+            <form onSubmit={handleChangePassword} className="space-y-5">
+              <div className="flex items-center gap-2 text-[#FF9500] mb-2">
+                <KeyRound className="w-5 h-5" />
+                <span className="text-[15px] font-semibold">Şifre Değiştirme Zorunlu</span>
+              </div>
+              <p className="text-[13px] text-[#86868B]">Geçici şifrenizi değiştirin.</p>
+
+              <div>
+                <label className="block text-[13px] font-medium text-[#1D1D1F] mb-1.5">Yeni Şifre</label>
+                <input
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="En az 6 karakter"
+                  className="w-full px-4 py-3 text-[15px] bg-[#F5F5F7] rounded-xl outline-none focus:ring-2 focus:ring-[#007AFF]/30"
+                  required minLength={6} autoFocus
+                />
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium text-[#1D1D1F] mb-1.5">Yeni Şifre (Tekrar)</label>
+                <input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="Şifreyi tekrar girin"
+                  className="w-full px-4 py-3 text-[15px] bg-[#F5F5F7] rounded-xl outline-none focus:ring-2 focus:ring-[#007AFF]/30"
+                  required minLength={6}
+                />
+              </div>
+
+              {error && (
+                <div className="px-4 py-3 bg-red-50 border border-red-100 rounded-xl">
+                  <p className="text-[13px] text-red-600 font-medium">{error}</p>
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={changingPassword || newPassword.length < 6 || newPassword !== confirmPassword}
+                className="w-full py-3 bg-[#FF9500] hover:bg-[#E68A00] text-white text-[15px] font-semibold rounded-xl transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {changingPassword ? <><Loader2 className="w-4 h-4 animate-spin" /> Değiştiriliyor...</> : "Şifreyi Değiştir & Giriş Yap"}
+              </button>
+            </form>
+          ) : (
+            /* Normal Login Form */
+            <form onSubmit={handleSubmit} className="space-y-5">
+
             {/* Email */}
             <div>
               <label className="block text-[13px] font-medium text-[#1D1D1F] mb-1.5">
@@ -121,7 +200,8 @@ export default function LoginPage() {
                 "Giriş Yap"
               )}
             </button>
-          </form>
+            </form>
+          )}
         </div>
 
         {/* Footer */}
