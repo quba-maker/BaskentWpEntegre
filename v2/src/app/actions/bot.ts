@@ -1,6 +1,7 @@
 "use server";
 
 import { sql } from "@/lib/db";
+import { getSession } from "@/lib/auth/session";
 
 // ==========================================
 // VARSAYILAN PROMPTLAR (Başkent Hastanesi)
