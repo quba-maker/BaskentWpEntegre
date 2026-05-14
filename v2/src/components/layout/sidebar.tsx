@@ -31,9 +31,7 @@ export async function Sidebar() {
       {/* Quba AI Branding */}
       <div className="p-5 border-b border-black/5">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#007AFF] to-[#5856D6] flex items-center justify-center shadow-sm">
-            <Bot className="w-5 h-5 text-white" />
-          </div>
+          <img src="/quba-logo.svg" alt="Quba AI" className="w-9 h-9 rounded-xl" />
           <div>
             <h1 className="text-[15px] font-bold tracking-tight text-[#1D1D1F]">Quba AI</h1>
             <p className="text-[10px] text-[#86868B] font-medium">

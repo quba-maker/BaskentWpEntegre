@@ -43,9 +43,7 @@ export default function LoginPage() {
       <div className="relative z-10 w-full max-w-[400px]">
         {/* Logo */}
         <div className="text-center mb-10">
-          <div className="w-16 h-16 mx-auto mb-5 rounded-2xl bg-gradient-to-br from-[#007AFF] to-[#5856D6] flex items-center justify-center shadow-lg shadow-blue-500/20">
-            <Bot className="w-8 h-8 text-white" />
-          </div>
+          <img src="/quba-logo.svg" alt="Quba AI" className="w-16 h-16 mx-auto mb-5 rounded-2xl shadow-lg shadow-blue-500/20" />
           <h1 className="text-[28px] font-bold text-[#1D1D1F] tracking-tight">
             Quba AI
           </h1>
