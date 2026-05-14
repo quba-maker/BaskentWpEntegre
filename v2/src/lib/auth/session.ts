@@ -56,7 +56,7 @@ export async function getSession(): Promise<Session | null> {
 export async function login(
   email: string,
   password: string
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; tenantSlug?: string }> {
   try {
     // Kullanıcıyı bul
     const users = await sql`
@@ -103,7 +103,7 @@ export async function login(
     // Son giriş zamanını güncelle
     await sql`UPDATE users SET last_login_at = NOW() WHERE id = ${user.id}`;
 
-    return { success: true };
+    return { success: true, tenantSlug: user.tenant_slug };
   } catch (error: any) {
     console.error("Login error:", error);
     return { success: false, error: "Bir hata oluştu. Tekrar deneyin." };

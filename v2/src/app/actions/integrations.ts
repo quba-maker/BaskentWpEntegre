@@ -5,7 +5,10 @@ import { getSession } from "@/lib/auth/session";
 
 export async function getGoogleSheetsConfig() {
   try {
-    const res = await sql`SELECT value FROM settings WHERE key = 'google_sheets_config' LIMIT 1`;
+    const session = await getSession();
+    if (!session?.tenantId) return { success: false, error: "Oturum yok" };
+
+    const res = await sql`SELECT value FROM settings WHERE key = 'google_sheets_config' AND tenant_id = ${session.tenantId} LIMIT 1`;
     if (res.length > 0) {
       return { success: true, config: JSON.parse(res[0].value) };
     }
@@ -18,12 +21,17 @@ export async function getGoogleSheetsConfig() {
 
 export async function saveGoogleSheetsConfig(config: any) {
   try {
+    const session = await getSession();
+    if (!session?.tenantId) return { success: false, error: "Oturum yok" };
+
     const value = JSON.stringify(config);
-    await sql`
-      INSERT INTO settings (key, value, updated_at) 
-      VALUES ('google_sheets_config', ${value}, NOW())
-      ON CONFLICT (key) DO UPDATE SET value = ${value}, updated_at = NOW()
-    `;
+    const existing = await sql`SELECT id FROM settings WHERE key = 'google_sheets_config' AND tenant_id = ${session.tenantId}`;
+    
+    if (existing.length > 0) {
+      await sql`UPDATE settings SET value = ${value}, updated_at = NOW() WHERE key = 'google_sheets_config' AND tenant_id = ${session.tenantId}`;
+    } else {
+      await sql`INSERT INTO settings (key, value, tenant_id) VALUES ('google_sheets_config', ${value}, ${session.tenantId})`;
+    }
     return { success: true };
   } catch (error: any) {
     console.error("saveGoogleSheetsConfig error:", error);
@@ -58,3 +66,4 @@ export async function fetchGoogleSheetsTabs(spreadsheetId: string) {
     return { success: false, error: error.message };
   }
 }
+

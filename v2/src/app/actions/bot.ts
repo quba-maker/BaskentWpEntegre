@@ -100,11 +100,12 @@ CORE RULES:
 export async function getBotSettings() {
   try {
     const session = await getSession();
-    const tenantId = session?.tenantId || null;
+    if (!session?.tenantId) return { success: false, settings: {} as Record<string, any>, error: "Oturum yok" };
+    const tenantId = session.tenantId;
     
     const settings = await sql`
       SELECT key, value, updated_at FROM settings 
-      WHERE (${tenantId === null} OR tenant_id = ${tenantId})
+      WHERE tenant_id = ${tenantId}
         AND key IN (
           'system_prompt_whatsapp', 
           'system_prompt_tr', 
@@ -138,12 +139,13 @@ export async function getBotSettings() {
 export async function saveBotSetting(key: string, value: string) {
   try {
     const session = await getSession();
-    const tenantId = session?.tenantId || null;
+    if (!session?.tenantId) return { success: false, error: "Oturum yok" };
+    const tenantId = session.tenantId;
     
     // UPSERT — tenant bazlı
-    const existing = await sql`SELECT id FROM settings WHERE key = ${key} AND (${tenantId === null} OR tenant_id = ${tenantId})`;
+    const existing = await sql`SELECT id FROM settings WHERE key = ${key} AND tenant_id = ${tenantId}`;
     if (existing.length > 0) {
-      await sql`UPDATE settings SET value = ${value}, updated_at = NOW() WHERE key = ${key} AND (${tenantId === null} OR tenant_id = ${tenantId})`;
+      await sql`UPDATE settings SET value = ${value}, updated_at = NOW() WHERE key = ${key} AND tenant_id = ${tenantId}`;
     } else {
       await sql`INSERT INTO settings (key, value, tenant_id) VALUES (${key}, ${value}, ${tenantId})`;
     }
@@ -165,7 +167,8 @@ export async function getDefaultPrompts() {
 export async function getBotStats(period: string = '7d') {
   try {
     const session = await getSession();
-    const tenantId = session?.tenantId || null;
+    if (!session?.tenantId) return { weeklyMessages: 0, handoverRate: 0, botSuccessRate: 0, avgResponseMin: 0 };
+    const tenantId = session.tenantId;
     
     const intervalMap: Record<string, string> = {
       '7d': '7 days',
@@ -176,13 +179,13 @@ export async function getBotStats(period: string = '7d') {
     const interval = intervalMap[period] || '7 days';
 
     const [botMessages, handovers, totalConvs, avgResponse] = await Promise.all([
-      sql`SELECT COUNT(*) as c FROM messages WHERE (${tenantId === null} OR tenant_id = ${tenantId}) AND direction = 'out' AND model_used IS NOT NULL AND model_used != 'panel' AND created_at >= NOW() - CAST(${interval} AS INTERVAL)`,
-      sql`SELECT COUNT(*) as c FROM conversations WHERE (${tenantId === null} OR tenant_id = ${tenantId}) AND status = 'human' AND last_message_at >= NOW() - CAST(${interval} AS INTERVAL)`,
-      sql`SELECT COUNT(*) as c FROM conversations WHERE (${tenantId === null} OR tenant_id = ${tenantId}) AND created_at >= NOW() - CAST(${interval} AS INTERVAL)`,
+      sql`SELECT COUNT(*) as c FROM messages WHERE tenant_id = ${tenantId} AND direction = 'out' AND model_used IS NOT NULL AND model_used != 'panel' AND created_at >= NOW() - CAST(${interval} AS INTERVAL)`,
+      sql`SELECT COUNT(*) as c FROM conversations WHERE tenant_id = ${tenantId} AND status = 'human' AND last_message_at >= NOW() - CAST(${interval} AS INTERVAL)`,
+      sql`SELECT COUNT(*) as c FROM conversations WHERE tenant_id = ${tenantId} AND created_at >= NOW() - CAST(${interval} AS INTERVAL)`,
       sql`SELECT AVG(EXTRACT(EPOCH FROM (m.created_at - c.created_at)) / 60) as avg_min
           FROM conversations c
           JOIN messages m ON m.phone_number = c.phone_number AND m.direction = 'out'
-          WHERE (${tenantId === null} OR c.tenant_id = ${tenantId})
+          WHERE c.tenant_id = ${tenantId}
             AND c.created_at >= NOW() - CAST(${interval} AS INTERVAL)
             AND m.created_at = (SELECT MIN(created_at) FROM messages WHERE phone_number = c.phone_number AND direction = 'out')`
     ]);
@@ -217,7 +220,8 @@ const MODEL_COSTS: Record<string, { input: number; output: number; label: string
 export async function getModelUsage(period: string = '30d') {
   try {
     const session = await getSession();
-    const tenantId = session?.tenantId || null;
+    if (!session?.tenantId) return { models: {}, channels: {}, totalMessages: 0, totalCost: 0 };
+    const tenantId = session.tenantId;
     
     const intervalMap: Record<string, string> = {
       '7d': '7 days', '30d': '30 days', '90d': '90 days', 'all': '10 years'
@@ -227,7 +231,7 @@ export async function getModelUsage(period: string = '30d') {
     const usage = await sql`
       SELECT model_used, COUNT(*) as message_count
       FROM messages 
-      WHERE (${tenantId === null} OR tenant_id = ${tenantId})
+      WHERE tenant_id = ${tenantId}
         AND direction = 'out' 
         AND model_used IS NOT NULL 
         AND model_used NOT IN ('panel', 'mesai-disi', 'fallback', 'none')
@@ -238,7 +242,7 @@ export async function getModelUsage(period: string = '30d') {
     const channelBreakdown = await sql`
       SELECT channel, COUNT(*) as c
       FROM messages 
-      WHERE (${tenantId === null} OR tenant_id = ${tenantId})
+      WHERE tenant_id = ${tenantId}
         AND direction = 'out' 
         AND model_used IS NOT NULL 
         AND model_used NOT IN ('panel', 'mesai-disi', 'fallback', 'none')
@@ -284,7 +288,8 @@ export async function getModelUsage(period: string = '30d') {
 export async function getRecentBotConversations(limit: number = 8) {
   try {
     const session = await getSession();
-    const tenantId = session?.tenantId || null;
+    if (!session?.tenantId) return [];
+    const tenantId = session.tenantId;
     
     const convs = await sql`
       SELECT 
@@ -293,7 +298,7 @@ export async function getRecentBotConversations(limit: number = 8) {
         (SELECT content FROM messages WHERE phone_number = c.phone_number AND direction = 'in' ORDER BY created_at DESC LIMIT 1) as last_patient_msg,
         (SELECT COUNT(*) FROM messages WHERE phone_number = c.phone_number AND direction = 'out' AND model_used IS NOT NULL AND model_used NOT IN ('panel', 'mesai-disi')) as bot_msg_count
       FROM conversations c
-      WHERE (${tenantId === null} OR c.tenant_id = ${tenantId})
+      WHERE c.tenant_id = ${tenantId}
         AND c.message_count > 0
       ORDER BY c.last_message_at DESC LIMIT ${limit}
     `;

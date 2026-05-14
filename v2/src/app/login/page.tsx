@@ -27,7 +27,7 @@ export default function LoginPage() {
     const result = await login(email, password);
 
     if (result.success) {
-      router.push("/");
+      router.push(`/${result.tenantSlug || ""}`);
       router.refresh();
     } else {
       setError(result.error || "Giriş başarısız.");

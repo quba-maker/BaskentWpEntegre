@@ -3,6 +3,12 @@ import { neon } from "@neondatabase/serverless";
 
 export async function GET(req: NextRequest) {
   try {
+    // 🔒 Auth kontrolü — yetkisiz erişimi engelle
+    const setupKey = req.headers.get("x-setup-key") || req.nextUrl.searchParams.get("key");
+    if (setupKey !== "quba-setup-2026") {
+      return NextResponse.json({ error: "Yetkisiz. x-setup-key header veya ?key= parametresi gerekli." }, { status: 401 });
+    }
+
     const sql = neon(process.env.DATABASE_URL!);
     const results: string[] = [];
 
