@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getUsers, createUser, updateUserRole, toggleUserActive, deleteUser } from "@/app/actions/users";
-import { Users, Plus, Loader2, Shield, UserCheck, Eye, Trash2, Power } from "lucide-react";
+import { getUsers, createUser, updateUserRole, toggleUserActive, deleteUser, resetUserPassword, generateInviteLink } from "@/app/actions/users";
+import { Users, Plus, Loader2, Shield, UserCheck, Eye, Trash2, Power, KeyRound, Link2, Copy, Check } from "lucide-react";
 
 // ==========================================
 // QUBA AI — Kullanıcı Yönetimi Sayfası
@@ -20,6 +20,9 @@ export default function UsersPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ name: "", email: "", password: "", role: "agent" });
+  const [tempPass, setTempPass] = useState<{userId: string, pass: string, name: string} | null>(null);
+  const [inviteInfo, setInviteInfo] = useState<{userId: string, url: string, name: string} | null>(null);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => { load(); }, []);
 
@@ -58,6 +61,31 @@ export default function UsersPage() {
     if (!confirm("Bu kullanıcıyı silmek istediğinize emin misiniz?")) return;
     await deleteUser(userId);
     load();
+  }
+
+  async function handleResetPassword(userId: string, userName: string) {
+    if (!confirm(`${userName} kullanıcısının şifresi sıfırlanacak. Devam?`)) return;
+    const res = await resetUserPassword(userId);
+    if (res.success && res.tempPassword) {
+      setTempPass({ userId, pass: res.tempPassword, name: userName });
+    } else {
+      alert(res.error || "Şifre sıfırlanamadı.");
+    }
+  }
+
+  async function handleInviteLink(userId: string, userName: string) {
+    const res = await generateInviteLink(userId);
+    if (res.success && res.inviteUrl) {
+      setInviteInfo({ userId, url: res.inviteUrl, name: userName });
+    } else {
+      alert(res.error || "Davet linki oluşturulamadı.");
+    }
+  }
+
+  function copyToClipboard(text: string) {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   }
 
   if (loading) {
@@ -162,6 +190,12 @@ export default function UsersPage() {
                     <button onClick={() => handleToggle(u.id)} className="p-2 hover:bg-black/5 rounded-lg transition-colors" title={u.is_active ? 'Deaktif Et' : 'Aktifleştir'}>
                       <Power className={`w-4 h-4 ${u.is_active ? 'text-[#34C759]' : 'text-[#FF3B30]'}`} />
                     </button>
+                    <button onClick={() => handleResetPassword(u.id, u.name)} className="p-2 hover:bg-orange-50 rounded-lg transition-colors" title="Şifre Sıfırla">
+                      <KeyRound className="w-4 h-4 text-[#FF9500]" />
+                    </button>
+                    <button onClick={() => handleInviteLink(u.id, u.name)} className="p-2 hover:bg-blue-50 rounded-lg transition-colors" title="Davet Linki">
+                      <Link2 className="w-4 h-4 text-[#5856D6]" />
+                    </button>
                     <button onClick={() => handleDelete(u.id)} className="p-2 hover:bg-red-50 rounded-lg transition-colors" title="Sil">
                       <Trash2 className="w-4 h-4 text-[#FF3B30]" />
                     </button>
@@ -176,6 +210,36 @@ export default function UsersPage() {
             );
           })}
         </div>
+
+        {/* Temp Password Modal */}
+        {tempPass && (
+          <div className="bg-[#FF9500]/5 border border-[#FF9500]/20 rounded-2xl p-5 space-y-3">
+            <h3 className="text-[15px] font-semibold text-[#1D1D1F]">🔑 {tempPass.name} — Geçici Şifre</h3>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 text-[18px] font-mono font-bold tracking-wider text-[#FF9500] bg-white px-4 py-2 rounded-lg">{tempPass.pass}</code>
+              <button onClick={() => copyToClipboard(tempPass.pass)} className="p-2 bg-white rounded-lg">
+                {copied ? <Check className="w-4 h-4 text-[#34C759]" /> : <Copy className="w-4 h-4 text-[#86868B]" />}
+              </button>
+            </div>
+            <p className="text-[12px] text-[#86868B]">Bu şifreyi kullanıcıya güvenli şekilde iletin. İlk girişte değiştirilecektir.</p>
+            <button onClick={() => setTempPass(null)} className="text-[13px] text-[#007AFF] font-medium">Kapat</button>
+          </div>
+        )}
+
+        {/* Invite Link Modal */}
+        {inviteInfo && (
+          <div className="bg-[#5856D6]/5 border border-[#5856D6]/20 rounded-2xl p-5 space-y-3">
+            <h3 className="text-[15px] font-semibold text-[#1D1D1F]">🔗 {inviteInfo.name} — Davet Linki</h3>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 text-[12px] font-mono text-[#5856D6] bg-white px-3 py-2 rounded-lg truncate">{inviteInfo.url}</code>
+              <button onClick={() => copyToClipboard(inviteInfo.url)} className="p-2 bg-white rounded-lg flex-shrink-0">
+                {copied ? <Check className="w-4 h-4 text-[#34C759]" /> : <Copy className="w-4 h-4 text-[#86868B]" />}
+              </button>
+            </div>
+            <p className="text-[12px] text-[#86868B]">72 saat geçerli. Kullanıcı bu linke tıklayarak şifresini belirleyebilir.</p>
+            <button onClick={() => setInviteInfo(null)} className="text-[13px] text-[#007AFF] font-medium">Kapat</button>
+          </div>
+        )}
       </div>
     </div>
   );

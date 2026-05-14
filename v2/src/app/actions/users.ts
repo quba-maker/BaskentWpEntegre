@@ -121,3 +121,121 @@ export async function deleteUser(userId: string) {
     return { success: false, error: error.message };
   }
 }
+
+// ==========================================
+// ŞİFRE YÖNETİMİ
+// ==========================================
+
+/**
+ * Admin şifre sıfırlama — yeni geçici şifre oluştur
+ */
+export async function resetUserPassword(userId: string) {
+  const session = await getSession();
+  if (!session?.tenantId) return { success: false, error: "Oturum yok" };
+  if (session.role !== "owner" && session.role !== "admin" && session.role !== "platform_admin") {
+    return { success: false, error: "Yetki yok" };
+  }
+
+  try {
+    const user = await sql`SELECT id, name, email FROM users WHERE id = ${userId} AND tenant_id = ${session.tenantId}`;
+    if (user.length === 0) return { success: false, error: "Kullanıcı bulunamadı." };
+
+    // 8 karakterlik random geçici şifre
+    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+    let tempPassword = "";
+    for (let i = 0; i < 8; i++) {
+      tempPassword += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+
+    const bcrypt = await import("bcryptjs");
+    const hash = await bcrypt.hash(tempPassword, 10);
+
+    // Şifreyi güncelle + must_change_password flag
+    await sql`
+      UPDATE users SET password_hash = ${hash}, must_change_password = true, updated_at = NOW()
+      WHERE id = ${userId} AND tenant_id = ${session.tenantId}
+    `;
+
+    return {
+      success: true,
+      tempPassword,
+      userName: user[0].name,
+      userEmail: user[0].email,
+      message: `Geçici şifre: ${tempPassword} — Kullanıcı ilk girişte şifresini değiştirmek zorundadır.`,
+    };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Kullanıcı kendi şifresini değiştirir
+ */
+export async function changeMyPassword(currentPassword: string, newPassword: string) {
+  const session = await getSession();
+  if (!session?.userId) return { success: false, error: "Oturum yok" };
+  if (newPassword.length < 6) return { success: false, error: "Yeni şifre en az 6 karakter olmalı." };
+
+  try {
+    const user = await sql`SELECT password_hash FROM users WHERE id = ${session.userId}`;
+    if (user.length === 0) return { success: false, error: "Kullanıcı bulunamadı." };
+
+    const bcrypt = await import("bcryptjs");
+    const valid = await bcrypt.compare(currentPassword, user[0].password_hash);
+    if (!valid) return { success: false, error: "Mevcut şifre yanlış." };
+
+    const hash = await bcrypt.hash(newPassword, 10);
+    await sql`
+      UPDATE users SET password_hash = ${hash}, must_change_password = false, updated_at = NOW()
+      WHERE id = ${session.userId}
+    `;
+
+    return { success: true, message: "Şifre başarıyla güncellendi." };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Davet linki oluştur (token-based)
+ */
+export async function generateInviteLink(userId: string) {
+  const session = await getSession();
+  if (!session?.tenantId) return { success: false, error: "Oturum yok" };
+  if (session.role !== "owner" && session.role !== "admin" && session.role !== "platform_admin") {
+    return { success: false, error: "Yetki yok" };
+  }
+
+  try {
+    const user = await sql`SELECT id, email, name FROM users WHERE id = ${userId} AND tenant_id = ${session.tenantId}`;
+    if (user.length === 0) return { success: false, error: "Kullanıcı bulunamadı." };
+
+    // 32 char random token
+    const token = Array.from({ length: 32 }, () => 
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789".charAt(Math.floor(Math.random() * 62))
+    ).join("");
+
+    const expiresAt = new Date(Date.now() + 72 * 60 * 60 * 1000); // 72 saat
+
+    // Token'ı DB'ye kaydet
+    await sql`
+      UPDATE users SET 
+        invite_token = ${token}, 
+        invite_expires_at = ${expiresAt.toISOString()},
+        updated_at = NOW()
+      WHERE id = ${userId} AND tenant_id = ${session.tenantId}
+    `;
+
+    const inviteUrl = `https://ai.qubamedya.com/login?invite=${token}`;
+
+    return {
+      success: true,
+      inviteUrl,
+      expiresAt: expiresAt.toISOString(),
+      userName: user[0].name,
+      userEmail: user[0].email,
+    };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}

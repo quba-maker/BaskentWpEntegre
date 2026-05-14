@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { getAllTenants, createTenant, toggleTenantStatus } from "@/app/actions/admin";
-import { Building2, Plus, Users, MessageSquare, Loader2, Shield, Power } from "lucide-react";
+import { Building2, Plus, Users, MessageSquare, Loader2, Shield, Power, Sparkles } from "lucide-react";
 
 // ==========================================
 // QUBA AI — Super Admin Panel
@@ -62,12 +62,20 @@ export default function AdminPage() {
             </h1>
             <p className="text-[13px] text-[#86868B] mt-1">{tenants.length} firma kayıtlı</p>
           </div>
-          <button
-            onClick={() => setShowCreate(!showCreate)}
-            className="flex items-center gap-2 px-4 py-2.5 bg-[#007AFF] hover:bg-[#0066D6] text-white text-[13px] font-semibold rounded-xl transition-all"
-          >
-            <Plus className="w-4 h-4" /> Yeni Firma
-          </button>
+        <div className="flex items-center gap-2">
+            <a
+              href="admin/onboarding"
+              className="flex items-center gap-2 px-4 py-2.5 bg-[#AF52DE] hover:bg-[#9A44C8] text-white text-[13px] font-semibold rounded-xl transition-all"
+            >
+              <Sparkles className="w-4 h-4" /> Kurulum Sihirbazı
+            </a>
+            <button
+              onClick={() => setShowCreate(!showCreate)}
+              className="flex items-center gap-2 px-4 py-2.5 bg-[#007AFF] hover:bg-[#0066D6] text-white text-[13px] font-semibold rounded-xl transition-all"
+            >
+              <Plus className="w-4 h-4" /> Hızlı Ekle
+            </button>
+          </div>
         </div>
 
         {/* Create Form */}
