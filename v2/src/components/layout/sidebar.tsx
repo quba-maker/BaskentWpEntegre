@@ -8,7 +8,8 @@ import {
   Bot,
   LogOut,
   BarChart3,
-  Shield
+  Shield,
+  Users
 } from "lucide-react";
 import { getSession, logout } from "@/lib/auth/session";
 import { redirect } from "next/navigation";
@@ -48,6 +49,9 @@ export async function Sidebar() {
         <NavLink href="/calendar" icon={<Calendar className="w-[18px] h-[18px]" />} label="Randevular" />
         <NavLink href="/bot" icon={<Bot className="w-[18px] h-[18px]" />} label="Bot Yönetimi" />
         <NavLink href="/integrations" icon={<Link2 className="w-[18px] h-[18px]" />} label="Entegrasyonlar" />
+        {(session?.role === "owner" || session?.role === "admin") && (
+          <NavLink href="/users" icon={<Users className="w-[18px] h-[18px]" />} label="Kullanıcılar" />
+        )}
       </nav>
 
       {/* User & Logout */}
