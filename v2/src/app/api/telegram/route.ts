@@ -153,10 +153,11 @@ export async function POST(req: NextRequest) {
         const searchP = cleanP.length > 10 ? cleanP.substring(cleanP.length - 10) : cleanP;
         const likePattern = `%${searchP}%`;
 
-        const conv = await sql`SELECT notes, last_channel FROM conversations WHERE phone_number LIKE ${likePattern} LIMIT 1`;
+        const conv = await sql`SELECT notes, last_channel, tenant_id FROM conversations WHERE phone_number LIKE ${likePattern} LIMIT 1`;
         if (conv.length > 0) {
           const oldNotes = conv[0].notes || "";
           const targetChannel = conv[0].last_channel || "whatsapp";
+          const convTenantId = conv[0].tenant_id;
           const ts = new Date().toLocaleTimeString("tr-TR", { timeZone: "Europe/Istanbul", hour: "2-digit", minute: "2-digit" });
           const newNote = `[${userFirstName} - ${ts}]: ${replyText}`;
           await sql`UPDATE conversations SET notes = ${oldNotes ? oldNotes + "\n" + newNote : newNote}, updated_at = NOW() WHERE phone_number LIKE ${likePattern}`;
@@ -164,15 +165,26 @@ export async function POST(req: NextRequest) {
           let sentToPatient = false;
           try {
             if (targetChannel === "whatsapp" || phone.match(/^9\d{10,}/)) {
-              const META = process.env.META_ACCESS_TOKEN;
-              const PHONE_ID = process.env.PHONE_NUMBER_ID;
+              // Tenant'ın kendi token'ını DB'den çek
+              let META: string | null = null;
+              let PHONE_ID: string | null = null;
+              if (convTenantId) {
+                const tenantRows = await sql`SELECT meta_page_token, whatsapp_phone_id FROM tenants WHERE id = ${convTenantId}`;
+                if (tenantRows.length > 0) {
+                  META = tenantRows[0].meta_page_token || process.env.META_ACCESS_TOKEN;
+                  PHONE_ID = tenantRows[0].whatsapp_phone_id || process.env.PHONE_NUMBER_ID;
+                }
+              }
+              if (!META) META = process.env.META_ACCESS_TOKEN || null;
+              if (!PHONE_ID) PHONE_ID = process.env.PHONE_NUMBER_ID || null;
+
               if (META && PHONE_ID) {
                 await fetch(`https://graph.facebook.com/v25.0/${PHONE_ID}/messages`, {
                   method: "POST",
                   headers: { Authorization: `Bearer ${META}`, "Content-Type": "application/json" },
                   body: JSON.stringify({ messaging_product: "whatsapp", to: phone, type: "text", text: { body: replyText } }),
                 });
-                await sql`INSERT INTO messages (phone_number, direction, content, model_used, channel) VALUES (${phone}, 'out', ${replyText}, 'human-telegram', 'whatsapp')`;
+                await sql`INSERT INTO messages (tenant_id, phone_number, direction, content, model_used, channel) VALUES (${convTenantId}, ${phone}, 'out', ${replyText}, 'human-telegram', 'whatsapp')`;
                 sentToPatient = true;
               }
             }
