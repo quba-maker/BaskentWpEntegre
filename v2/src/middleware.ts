@@ -64,19 +64,29 @@ export async function middleware(req: NextRequest) {
     const baseRoute = `/${pathname.split('/')[1]}`; // Örn: /admin/users -> /admin
     
     // 1. platform_admin dışındaki herkesi /admin'den engelle
-    if (baseRoute === '/admin' && userRole !== 'platform_admin') {
+    if (baseRoute === '/admin' && userRole !== 'platform_admin' && userRole !== 'owner') {
       return NextResponse.redirect(new URL("/", req.url));
     }
 
-    // 3. Platform Admin anasayfaya girmek isterse /admin'e yönlendir
+    // 2. Platform Admin anasayfaya girmek isterse /admin'e yönlendir
     if (pathname === '/' && userRole === 'platform_admin') {
       return NextResponse.redirect(new URL("/admin", req.url));
     }
 
-    // 4. Diğer sayfalar için yetki matrisi kontrolü
+    // 3. Diğer sayfalar için yetki matrisi kontrolü
     const allowedRoles = ROLE_PERMISSIONS[baseRoute] || ROLE_PERMISSIONS[pathname];
-    if (allowedRoles && !allowedRoles.includes(userRole)) {
-      return NextResponse.redirect(new URL("/", req.url)); // Yetkisi yoksa anasayfaya at
+    
+    // Geçici 'owner' rolü desteği (veritabanı güncellenene kadar)
+    const isTempOwner = userRole === 'owner';
+    
+    if (allowedRoles && !allowedRoles.includes(userRole) && !isTempOwner) {
+      // Eğer zaten / sayfasındaysa ve yetkisi yoksa sonsuz döngüyü engelle
+      if (pathname === '/') {
+        const response = NextResponse.redirect(new URL("/login", req.url));
+        response.cookies.delete("quba_session");
+        return response;
+      }
+      return NextResponse.redirect(new URL("/", req.url));
     }
 
     return NextResponse.next();
