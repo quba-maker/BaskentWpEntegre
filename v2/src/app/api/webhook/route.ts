@@ -49,7 +49,7 @@ export const POST = withApiGuard(
     const { handleInstagramMessage } = await import("../../../../../lib/channels/instagram.js");
     const { WebhookDedupeService } = await import("@/lib/services/webhook-dedupe.service");
 
-    const dedupeService = new WebhookDedupeService(ctx.db);
+    const dedupeService = new WebhookDedupeService(ctx.db!);
 
     // 1. WHATSAPP
     if (
