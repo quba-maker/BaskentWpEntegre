@@ -17,7 +17,7 @@ export interface LogContext {
 }
 
 class SystemLogger {
-  private baseContext: LogContext = {};
+  public baseContext: LogContext = {};
 
   // Request/Action bazlı sub-logger oluştur
   withContext(context: LogContext): SystemLogger {
