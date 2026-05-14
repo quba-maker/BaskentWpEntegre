@@ -252,5 +252,5 @@ export async function stopImpersonation() {
     path: "/",
   });
 
-  return { success: true, redirectUrl: "/admin" };
+  return { success: true, redirectUrl: `/${session.tenantSlug}/admin` };
 }

@@ -75,7 +75,15 @@ export async function middleware(req: NextRequest) {
     }
 
     // Admin Rota Kontrolü
-    if (urlTenantSlug === 'admin' || baseRoute === '/admin') {
+    if (urlTenantSlug === 'admin') {
+      if (userRole === 'platform_admin' || userRole === 'owner') {
+        return NextResponse.redirect(new URL(`/${sessionTenantSlug}/admin`, req.url));
+      } else {
+        return NextResponse.redirect(new URL(`/${sessionTenantSlug}`, req.url));
+      }
+    }
+    
+    if (baseRoute === '/admin') {
       if (userRole !== 'platform_admin' && userRole !== 'owner') {
         return NextResponse.redirect(new URL(`/${sessionTenantSlug}`, req.url));
       }

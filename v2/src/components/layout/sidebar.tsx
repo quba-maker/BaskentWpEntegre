@@ -25,10 +25,10 @@ async function handleLogout() {
   redirect("/login");
 }
 
-async function handleStopImpersonation() {
+async function handleStopImpersonation(tenantSlug: string) {
   "use server";
   await stopImpersonation();
-  redirect("/admin");
+  redirect(`/${tenantSlug}/admin`);
 }
 
 export async function Sidebar() {
@@ -59,7 +59,7 @@ export async function Sidebar() {
       <nav className="flex-1 p-3 space-y-0.5">
         {session?.role === "platform_admin" && !session?.impersonatedTenantId ? (
           <>
-            <NavLink href="/admin" icon={<Shield className="w-[18px] h-[18px]" />} label="Süper Admin" />
+            <NavLink href={`/${session?.tenantSlug || 'quba'}/admin`} icon={<Shield className="w-[18px] h-[18px]" />} label="Süper Admin" />
           </>
         ) : (
           <>
@@ -99,7 +99,10 @@ export async function Sidebar() {
             </div>
             
             {session.impersonatedTenantId ? (
-              <form action={handleStopImpersonation}>
+              <form action={async () => {
+                "use server";
+                await handleStopImpersonation(session.tenantSlug);
+              }}>
                 <button
                   type="submit"
                   className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] font-medium text-[#AF52DE] hover:bg-[#AF52DE]/10 transition-colors"
