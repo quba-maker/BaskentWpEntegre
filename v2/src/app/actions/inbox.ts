@@ -241,6 +241,7 @@ export async function sendMessage(phone: string, text: string) {
 
   try {
     const session = await getSession();
+    if (!session?.tenantId) return { success: false, error: "Yetkisiz işlem." };
     
     // Tenant'ın kendi Meta token'ını kullan, yoksa env'den al
     let META_ACCESS_TOKEN = process.env.META_ACCESS_TOKEN;
