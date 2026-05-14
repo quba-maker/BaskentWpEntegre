@@ -1,4 +1,3 @@
-import { getSetting } from "@/lib/db"; // V2 version of getSetting or direct DB access
 import { TenantDB } from "./tenant-db";
 
 export interface SystemFeatureFlags {
