@@ -1,9 +1,13 @@
 "use server";
 
 import { sql } from "@/lib/db";
+import { getSession } from "@/lib/auth/session";
 
 export async function getConversations(page: number = 1, search: string = "", stage: string = "all") {
   try {
+    const session = await getSession();
+    const tenantId = session?.tenantId || null;
+    
     const limit = 50;
     const offset = (page - 1) * limit;
     const searchFilter = search.trim() ? `%${search.trim()}%` : null;
@@ -229,9 +233,21 @@ export async function sendMessage(phone: string, text: string) {
   if (!phone || !text) return { success: false, error: "Missing data" };
 
   try {
-    // 1. Send via Meta API
-    const META_ACCESS_TOKEN = process.env.META_ACCESS_TOKEN;
-    const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
+    const session = await getSession();
+    
+    // Tenant'ın kendi Meta token'ını kullan, yoksa env'den al
+    let META_ACCESS_TOKEN = process.env.META_ACCESS_TOKEN;
+    let PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
+    
+    if (session?.tenantId) {
+      const tenantRows = await sql`SELECT meta_page_token, whatsapp_phone_id FROM tenants WHERE id = ${session.tenantId}`;
+      if (tenantRows.length > 0 && tenantRows[0].meta_page_token) {
+        META_ACCESS_TOKEN = tenantRows[0].meta_page_token;
+      }
+      if (tenantRows.length > 0 && tenantRows[0].whatsapp_phone_id) {
+        PHONE_NUMBER_ID = tenantRows[0].whatsapp_phone_id;
+      }
+    }
 
     if (!META_ACCESS_TOKEN || !PHONE_NUMBER_ID) {
       console.warn("Meta credentials missing, only saving to DB");
