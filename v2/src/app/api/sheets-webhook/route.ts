@@ -1,15 +1,43 @@
-import { NextResponse } from 'next/server';
-import { sql } from '@/lib/db';
-import { getGoogleSheetsConfig } from '@/app/actions/integrations';
+import { NextRequest, NextResponse } from 'next/server';
+import { neon } from '@neondatabase/serverless';
 
-export async function POST(request: Request) {
+const DATABASE_URL = process.env.DATABASE_URL!;
+
+export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { sheetName, data } = body;
 
-    // 1. Check if this sheet is active in config
-    const configRes = await getGoogleSheetsConfig();
-    const activeSheets = configRes.config?.activeSheets || [];
+    // Tenant belirleme (query param veya body'den)
+    const tenantSlug = request.nextUrl.searchParams.get('tenant') || body.tenant_slug;
+    const sqlDb = neon(DATABASE_URL);
+    
+    let tenantId: string | null = null;
+    let tenantMeta: any = null;
+    if (tenantSlug) {
+      const tenants = await sqlDb`SELECT * FROM tenants WHERE slug = ${tenantSlug} AND status = 'active'`;
+      if (tenants.length > 0) {
+        tenantId = tenants[0].id;
+        tenantMeta = tenants[0];
+      }
+    }
+    // Fallback: tenant yoksa baskent'i kullan (geriye uyumluluk)
+    if (!tenantId) {
+      const fallback = await sqlDb`SELECT * FROM tenants WHERE slug = 'baskent' LIMIT 1`;
+      if (fallback.length > 0) {
+        tenantId = fallback[0].id;
+        tenantMeta = fallback[0];
+      }
+    }
+
+    // Sheet config — tenant bazlı kontrol
+    let activeSheets: string[] = [];
+    try {
+      const configRes = await sqlDb`SELECT value FROM settings WHERE key = 'google_sheets_config' AND tenant_id = ${tenantId} LIMIT 1`;
+      if (configRes.length > 0) {
+        activeSheets = JSON.parse(configRes[0].value)?.activeSheets || [];
+      }
+    } catch (e) {}
     
     // Allow if activeSheets is empty (not configured yet) OR if sheetName is in activeSheets
     if (activeSheets.length > 0 && !activeSheets.includes(sheetName)) {
@@ -93,7 +121,7 @@ export async function POST(request: Request) {
     }
 
     // 3. Upsert into DB using phone1
-    const existing = await sql`SELECT id FROM leads WHERE phone_number LIKE '%' || RIGHT(${phone1}, 10) || '%' LIMIT 1`;
+    const existing = await sqlDb`SELECT id FROM leads WHERE phone_number LIKE '%' || RIGHT(${phone1}, 10) || '%' AND (tenant_id = ${tenantId} OR tenant_id IS NULL) LIMIT 1`;
         
     if (existing.length === 0) {
       // Parse Date
@@ -117,23 +145,23 @@ export async function POST(request: Request) {
         }
       }
 
-      // Create lead
-      await sql`
-        INSERT INTO leads (phone_number, patient_name, email, form_name, raw_data, stage, created_at, notes)
-        VALUES (${phone1}, ${name}, ${email}, ${formName}, ${JSON.stringify(raw_data)}, 'new', ${createdAt.toISOString()}, ${noteStr})
+      // Create lead — tenant_id ile
+      await sqlDb`
+        INSERT INTO leads (tenant_id, phone_number, patient_name, email, form_name, raw_data, stage, created_at, notes)
+        VALUES (${tenantId}, ${phone1}, ${name}, ${email}, ${formName}, ${JSON.stringify(raw_data)}, 'new', ${createdAt.toISOString()}, ${noteStr})
       `;
       
-      // Auto-Outbound Bot Logic
-      const META_ACCESS_TOKEN = process.env.META_ACCESS_TOKEN;
-      const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
+      // Auto-Outbound Bot Logic — Tenant'ın Meta token'ını kullan
+      const META_ACCESS_TOKEN = tenantMeta?.meta_page_token || process.env.META_ACCESS_TOKEN;
+      const PHONE_NUMBER_ID = tenantMeta?.whatsapp_phone_id || process.env.PHONE_NUMBER_ID;
 
-      // 🔒 Otonom Karşılama kontrolü (Bot Yönetimi'nden açılıp kapatılabilir)
-      const autoGreetingSetting = await sql`SELECT value FROM settings WHERE key = 'bot_auto_greeting'`;
+      // 🔒 Otonom Karşılama kontrolü — tenant bazlı
+      const autoGreetingSetting = await sqlDb`SELECT value FROM settings WHERE key = 'bot_auto_greeting' AND tenant_id = ${tenantId}`;
       const autoGreetingEnabled = autoGreetingSetting.length === 0 || autoGreetingSetting[0].value !== 'false';
 
       if (META_ACCESS_TOKEN && PHONE_NUMBER_ID && autoGreetingEnabled) {
-        // 🌐 Karşılama Dili kontrolü
-        const greetingLangSetting = await sql`SELECT value FROM settings WHERE key = 'bot_greeting_language'`;
+        // 🌐 Karşılama Dili kontrolü — tenant bazlı
+        const greetingLangSetting = await sqlDb`SELECT value FROM settings WHERE key = 'bot_greeting_language' AND tenant_id = ${tenantId}`;
         const greetingLang = greetingLangSetting.length > 0 ? greetingLangSetting[0].value : 'auto';
         
         const isTurkish = greetingLang === 'tr' ? true : greetingLang === 'en' ? false : phone1.startsWith('90');
@@ -175,12 +203,12 @@ export async function POST(request: Request) {
         // Create Conversation and Message
         if (botSuccess) {
           const tags = ["Google Sheets", formName];
-          const existingConv = await sql`SELECT id FROM conversations WHERE phone_number = ${activePhone}`;
+          const existingConv = await sqlDb`SELECT id FROM conversations WHERE phone_number = ${activePhone}`;
           if (existingConv.length === 0) {
-            await sql`INSERT INTO conversations (phone_number, patient_name, tags, status, department) VALUES (${activePhone}, ${name}, ${JSON.stringify(tags)}, 'bot', 'Genel')`;
+            await sqlDb`INSERT INTO conversations (tenant_id, phone_number, patient_name, tags, status, department) VALUES (${tenantId}, ${activePhone}, ${name}, ${JSON.stringify(tags)}, 'bot', 'Genel')`;
           }
-          await sql`INSERT INTO messages (phone_number, direction, content, model_used) VALUES (${activePhone}, 'out', ${welcomeMsg}, 'sheets-auto')`;
-          await sql`UPDATE leads SET stage = 'contacted', contacted_at = NOW(), phone_number = ${activePhone} WHERE phone_number = ${phone1}`;
+          await sqlDb`INSERT INTO messages (tenant_id, phone_number, direction, content, model_used) VALUES (${tenantId}, ${activePhone}, 'out', ${welcomeMsg}, 'sheets-auto')`;
+          await sqlDb`UPDATE leads SET stage = 'contacted', contacted_at = NOW(), phone_number = ${activePhone} WHERE phone_number = ${phone1} AND tenant_id = ${tenantId}`;
         }
       }
       
@@ -188,7 +216,7 @@ export async function POST(request: Request) {
     } else {
       // Update existing lead's note if it has changed
       if (noteStr && noteStr.trim() !== '') {
-        await sql`
+        await sqlDb`
           UPDATE leads 
           SET notes = ${noteStr} 
           WHERE id = ${existing[0].id} AND (notes IS NULL OR notes = '')

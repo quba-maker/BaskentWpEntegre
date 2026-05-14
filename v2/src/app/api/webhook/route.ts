@@ -48,7 +48,25 @@ export async function GET(req: NextRequest) {
 // POST — Mesaj işle (Tenant Router)
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    // 🔒 Meta Webhook İmza Doğrulaması (X-Hub-Signature-256)
+    const APP_SECRET = process.env.META_APP_SECRET;
+    if (APP_SECRET) {
+      const signature = req.headers.get("x-hub-signature-256");
+      if (signature) {
+        const rawBody = await req.clone().text();
+        const crypto = await import("crypto");
+        const expectedSig = "sha256=" + crypto
+          .createHmac("sha256", APP_SECRET)
+          .update(rawBody)
+          .digest("hex");
+        if (signature !== expectedSig) {
+          console.error("❌ Webhook signature mismatch — sahte istek engellendi.");
+          return new NextResponse("FORBIDDEN", { status: 403 });
+        }
+      }
+    }
+
+    const body = await req.json().catch(() => null);
 
     if (!body || !body.object) {
       return new NextResponse("NOT_FOUND", { status: 404 });

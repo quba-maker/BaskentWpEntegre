@@ -3,14 +3,19 @@
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 import { neon } from "@neondatabase/serverless";
+import { checkRateLimit } from "@/lib/rate-limit";
+import { logAudit } from "@/lib/audit";
 
 // ==========================================
 // QUBA AI — Session Yönetimi (JWT + Cookie)
 // ==========================================
 
-const SECRET = new TextEncoder().encode(
-  process.env.AUTH_SECRET || "quba-ai-secret-key-change-in-production"
-);
+const AUTH_SECRET = process.env.AUTH_SECRET;
+if (!AUTH_SECRET) {
+  throw new Error("AUTH_SECRET environment variable is REQUIRED. System cannot start without it.");
+}
+
+const SECRET = new TextEncoder().encode(AUTH_SECRET);
 const COOKIE_NAME = "quba_session";
 const sql = neon(process.env.DATABASE_URL!);
 
@@ -58,6 +63,13 @@ export async function login(
   password: string
 ): Promise<{ success: boolean; error?: string; tenantSlug?: string }> {
   try {
+    // Rate Limiting — IP yerine email bazlı (serverless'ta IP güvenilmez)
+    const rl = checkRateLimit(`login:${email}`, 5, 60_000);
+    if (!rl.allowed) {
+      await logAudit({ action: "login_rate_limited", userEmail: email, details: { retryAfterMs: rl.retryAfterMs } });
+      return { success: false, error: `Çok fazla deneme. ${Math.ceil(rl.retryAfterMs / 1000)} saniye sonra tekrar deneyin.` };
+    }
+
     // Kullanıcıyı bul
     const users = await sql`
       SELECT u.*, t.slug as tenant_slug, t.name as tenant_name 
@@ -67,6 +79,7 @@ export async function login(
     `;
 
     if (users.length === 0) {
+      await logAudit({ action: "login_failed", userEmail: email, details: { reason: "user_not_found" } });
       return { success: false, error: "E-posta veya şifre hatalı." };
     }
 
@@ -76,6 +89,7 @@ export async function login(
     const bcrypt = await import("bcryptjs");
     const isValid = await bcrypt.compare(password, user.password_hash);
     if (!isValid) {
+      await logAudit({ action: "login_failed", userEmail: email, tenantId: user.tenant_id, details: { reason: "wrong_password" } });
       return { success: false, error: "E-posta veya şifre hatalı." };
     }
 
@@ -102,6 +116,15 @@ export async function login(
 
     // Son giriş zamanını güncelle
     await sql`UPDATE users SET last_login_at = NOW() WHERE id = ${user.id}`;
+
+    // Audit log
+    await logAudit({
+      tenantId: user.tenant_id,
+      userId: user.id,
+      userEmail: user.email,
+      action: "login_success",
+      details: { role: user.role, tenantSlug: user.tenant_slug },
+    });
 
     return { success: true, tenantSlug: user.tenant_slug };
   } catch (error: any) {

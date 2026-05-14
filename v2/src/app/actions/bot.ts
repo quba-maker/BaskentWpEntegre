@@ -2,6 +2,7 @@
 
 import { sql } from "@/lib/db";
 import { getSession } from "@/lib/auth/session";
+import { logAudit } from "@/lib/audit";
 
 // ==========================================
 // VARSAYILAN PROMPTLAR (Başkent Hastanesi)
@@ -149,6 +150,17 @@ export async function saveBotSetting(key: string, value: string) {
     } else {
       await sql`INSERT INTO settings (key, value, tenant_id) VALUES (${key}, ${value}, ${tenantId})`;
     }
+    // Audit log — ayar değişikliğini logla
+    logAudit({
+      tenantId,
+      userId: session.userId,
+      userEmail: session.email,
+      action: "bot_setting_changed",
+      entityType: "setting",
+      entityId: key,
+      details: { newValue: value.substring(0, 200) },
+    });
+
     return { success: true };
   } catch (error: any) {
     console.error("saveBotSetting Error:", error);

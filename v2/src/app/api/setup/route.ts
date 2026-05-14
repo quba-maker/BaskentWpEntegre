@@ -120,6 +120,34 @@ export async function GET(req: NextRequest) {
     await sql`UPDATE leads SET tenant_id = (SELECT id FROM tenants WHERE slug = 'baskent') WHERE tenant_id IS NULL`;
     results.push("✅ Mevcut veriler 'baskent' tenantına atandı");
 
+    // 10. AUDIT_LOGS tablosu (Enterprise Compliance)
+    await sql`
+      CREATE TABLE IF NOT EXISTS audit_logs (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID REFERENCES tenants(id),
+        user_id UUID,
+        user_email TEXT,
+        action TEXT NOT NULL,
+        entity_type TEXT,
+        entity_id TEXT,
+        details JSONB,
+        ip_address TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `;
+    await sql`CREATE INDEX IF NOT EXISTS idx_audit_tenant ON audit_logs(tenant_id, created_at DESC)`;
+    results.push("✅ audit_logs tablosu hazır");
+
+    // 11. Leads tenant index
+    await sql`CREATE INDEX IF NOT EXISTS idx_leads_tenant ON leads(tenant_id)`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_leads_phone ON leads(phone_number)`;
+    results.push("✅ leads indexleri oluşturuldu");
+
+    // 12. Tenant daily_ai_limit
+    await sql`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS daily_ai_limit INT DEFAULT 200`;
+    await sql`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS webhook_secret TEXT`;
+    results.push("✅ tenant genişletmeleri uygulandı");
+
     return NextResponse.json({ success: true, results });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });

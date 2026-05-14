@@ -6,7 +6,7 @@ import { jwtVerify } from "jose";
 // ==========================================
 
 const SECRET = new TextEncoder().encode(
-  process.env.AUTH_SECRET || "quba-ai-secret-key-change-in-production"
+  process.env.AUTH_SECRET || ""
 );
 
 // Giriş gerektirmeyen public route'lar

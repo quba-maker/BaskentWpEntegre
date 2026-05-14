@@ -2,6 +2,7 @@
 
 import { sql } from "@/lib/db";
 import { getSession } from "@/lib/auth/session";
+import { logAudit } from "@/lib/audit";
 
 export async function getConversations(page: number = 1, search: string = "", stage: string = "all") {
   try {
@@ -438,6 +439,17 @@ export async function toggleBotStatus(phone: string, isBotActive: boolean) {
       SET status = ${newStatus}
       WHERE phone_number = ${phone} AND tenant_id = ${session.tenantId}
     `;
+
+    // Audit log — bot/human geçişi
+    logAudit({
+      tenantId: session.tenantId,
+      userId: session.userId,
+      userEmail: session.email,
+      action: isBotActive ? "bot_activated" : "human_handover",
+      entityType: "conversation",
+      entityId: phone,
+    });
+
     return { success: true };
   } catch (error) {
     console.error("Error toggling bot:", error);
