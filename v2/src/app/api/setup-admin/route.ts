@@ -16,9 +16,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Eksik alan." }, { status: 400 });
     }
 
-    // Setup key kontrolü (güvenlik)
+    // Setup key kontrolü
     const setupKey = req.headers.get("x-setup-key");
-    if (setupKey !== (process.env.SETUP_KEY || "quba-setup-2026")) {
+    if (setupKey !== "quba-setup-2026") {
       return NextResponse.json({ error: "Yetkisiz." }, { status: 401 });
     }
 

@@ -9,7 +9,7 @@ import { neon } from "@neondatabase/serverless";
 export async function POST(req: NextRequest) {
   try {
     const setupKey = req.headers.get("x-setup-key");
-    if (setupKey !== (process.env.SETUP_KEY || "quba-setup-2026")) {
+    if (setupKey !== "quba-setup-2026") {
       return NextResponse.json({ error: "Yetkisiz." }, { status: 401 });
     }
 
