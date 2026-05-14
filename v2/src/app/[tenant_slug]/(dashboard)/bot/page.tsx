@@ -110,7 +110,8 @@ export default function BotManagementPage() {
         // Set prompts from DB or defaults
         const p: Record<string, string> = {};
         channels.forEach(ch => {
-          p[ch.id] = settingsRes.settings[ch.promptKey]?.value || "";
+          const s = settingsRes.settings as Record<string, any>;
+          p[ch.id] = s[ch.promptKey]?.value || "";
         });
         setPrompts(p);
 
