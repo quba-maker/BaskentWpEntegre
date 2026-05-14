@@ -21,12 +21,13 @@ export class TenantDB {
 
   /**
    * Güvenli raw query executor — RLS Context'i transaction içerisinde basar.
-   * Connection pool sızıntısını önler.
+   * String interpolation yerine Parameterized Query'leri [query, params] formatında destekler.
    */
-  async executeSafe(query: any) {
+  async executeSafe(query: any, params?: any[]) {
     const startTime = Date.now();
     
     try {
+      const q = params ? [query, params] : query;
       // Neon HTTP Driver stateless'tır.
       // RLS context'inin kaybolmaması için, SET LOCAL sorgusunu 
       // asıl sorguyla beraber tek bir transaction batch'i olarak gönderiyoruz.
@@ -34,7 +35,7 @@ export class TenantDB {
         this.isAdmin 
           ? this.sql`SET LOCAL quba.is_admin = 'true'`
           : this.sql`SET LOCAL quba.current_tenant = ${this.tenantId}`,
-        query
+        q
       ]);
       
       const duration = Date.now() - startTime;

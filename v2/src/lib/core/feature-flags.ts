@@ -25,7 +25,7 @@ export class FeatureFlagService {
     try {
       const res = await this.db.executeSafe(`
         SELECT key, value FROM settings 
-        WHERE tenant_id = '${this.db.tenantId}' 
+        WHERE tenant_id = $1 
           AND key IN (
             'USE_V2_STORAGE', 
             'USE_V2_CLASSIFIER', 
@@ -34,7 +34,7 @@ export class FeatureFlagService {
             'SHADOW_MODE_ENABLED', 
             'CANARY_TRAFFIC_PERCENTAGE'
           )
-      `);
+      `, [this.db.tenantId]);
       
       const map: Record<string, any> = {};
       res.forEach((r: any) => map[r.key] = r.value);
