@@ -12,32 +12,29 @@ export async function getBotSettings() {
   return withActionGuard(
     { actionName: 'getBotSettings' },
     async (ctx) => {
-      const requestedKeys = [
-        'system_prompt_whatsapp', 
-        'system_prompt_tr', 
-        'system_prompt_foreign',
-        'foreign_page_id',
-        'channel_whatsapp_enabled',
-        'channel_instagram_enabled',
-        'channel_foreign_enabled',
-        'bot_auto_greeting',
-        'bot_greeting_language',
-        'bot_max_messages',
-        'bot_working_hours',
-        'bot_aggression_level',
-        'ai_model',
-        'bot_banned_words',
-        // Legacy keys to fetch for hydration
-        'bot_whatsapp_active',
-        'bot_instagram_active',
-        'bot_foreign_active',
-        'working_hours'
-      ];
-
       const settings = await ctx.db.executeSafe(sql`
         SELECT key, value, updated_at FROM settings 
         WHERE tenant_id = ${ctx.tenantId}
-          AND key = ANY(${requestedKeys})
+          AND key IN (
+            'system_prompt_whatsapp', 
+            'system_prompt_tr', 
+            'system_prompt_foreign',
+            'foreign_page_id',
+            'channel_whatsapp_enabled',
+            'channel_instagram_enabled',
+            'channel_foreign_enabled',
+            'bot_auto_greeting',
+            'bot_greeting_language',
+            'bot_max_messages',
+            'bot_working_hours',
+            'bot_aggression_level',
+            'ai_model',
+            'bot_banned_words',
+            'bot_whatsapp_active',
+            'bot_instagram_active',
+            'bot_foreign_active',
+            'working_hours'
+          )
       `);
 
       // Legacy to V2 mapping
@@ -62,7 +59,6 @@ export async function getBotSettings() {
         settings: result,
         __forensic: {
           resolvedTenantId: ctx.tenantId,
-          sqlInputKeys: requestedKeys.length,
           sqlRawResultCount: rows.length,
           sqlRawResult: rows.slice(0, 2),
           isArray: Array.isArray(settings),
