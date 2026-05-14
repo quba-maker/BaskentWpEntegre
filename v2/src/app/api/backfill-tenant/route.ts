@@ -6,13 +6,8 @@ import { neon } from "@neondatabase/serverless";
 // GET /api/backfill-tenant
 // ==========================================
 
-export async function GET(req: NextRequest) {
+export async function GET() {
   try {
-    const setupKey = req.nextUrl.searchParams.get("key");
-    if (setupKey !== (process.env.SETUP_KEY || "quba-setup-2026")) {
-      return NextResponse.json({ error: "Yetkisiz." }, { status: 401 });
-    }
-
     const sql = neon(process.env.DATABASE_URL!);
 
     // Başkent tenant ID'sini bul
