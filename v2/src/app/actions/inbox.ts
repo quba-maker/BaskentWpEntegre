@@ -15,172 +15,46 @@ export async function getConversations(page: number = 1, search: string = "", st
     const searchFilter = search.trim() ? `%${search.trim()}%` : null;
     const stageFilter = stage !== "all" ? stage : null;
 
-    let rows;
-    try {
-      if (searchFilter) {
-        rows = await sql`
-          SELECT 
-            c.phone_number as id,
-            c.patient_name as name,
-            c.department,
-            c.country,
-            c.status,
-            c.phase,
-            c.lead_stage as stage,
-            c.tags,
-            c.channel,
-            c.last_message_at,
-            m.content as last_message,
-            m.created_at as last_message_time,
-            l.form_name,
-            l.raw_data as form_raw_data,
-            l.created_at as form_date,
-            0 as unread
-          FROM conversations c
-          LEFT JOIN LATERAL (
-            SELECT content, created_at 
-            FROM messages 
-            WHERE phone_number = c.phone_number 
-            ORDER BY created_at DESC 
-            LIMIT 1
-          ) m ON true
-          LEFT JOIN LATERAL (
-            SELECT form_name, raw_data, created_at 
-            FROM leads 
-            WHERE phone_number LIKE '%' || RIGHT(COALESCE(c.real_phone, c.phone_number), 10) || '%' 
-            ORDER BY created_at DESC 
-            LIMIT 1
-          ) l ON true
-          WHERE c.tenant_id = ${tenantId}
-            AND (c.patient_name ILIKE ${searchFilter} OR c.phone_number ILIKE ${searchFilter})
-            AND (${stageFilter === null} OR c.lead_stage = ${stageFilter})
-          ORDER BY c.last_message_at DESC NULLS LAST
-          LIMIT ${limit} OFFSET ${offset}
-        `;
-      } else {
-        rows = await sql`
-          SELECT 
-            c.phone_number as id,
-            c.patient_name as name,
-            c.department,
-            c.country,
-            c.status,
-            c.phase,
-            c.lead_stage as stage,
-            c.tags,
-            c.channel,
-            c.last_message_at,
-            m.content as last_message,
-            m.created_at as last_message_time,
-            l.form_name,
-            l.raw_data as form_raw_data,
-            l.created_at as form_date,
-            0 as unread
-          FROM conversations c
-          LEFT JOIN LATERAL (
-            SELECT content, created_at 
-            FROM messages 
-            WHERE phone_number = c.phone_number 
-            ORDER BY created_at DESC 
-            LIMIT 1
-          ) m ON true
-          LEFT JOIN LATERAL (
-            SELECT form_name, raw_data, created_at 
-            FROM leads 
-            WHERE phone_number LIKE '%' || RIGHT(COALESCE(c.real_phone, c.phone_number), 10) || '%' 
-            ORDER BY created_at DESC 
-            LIMIT 1
-          ) l ON true
-          WHERE c.tenant_id = ${tenantId}
-            AND (${stageFilter === null} OR c.lead_stage = ${stageFilter})
-          ORDER BY c.last_message_at DESC NULLS LAST
-          LIMIT ${limit} OFFSET ${offset}
-        `;
-      }
-    } catch (columnError) {
-      // Fallback if country or real_phone columns do not exist yet
-      console.log("Missing columns, falling back to safe optimized query...");
-      if (searchFilter) {
-        rows = await sql`
-          SELECT 
-            c.phone_number as id,
-            c.patient_name as name,
-            c.department,
-            NULL as country,
-            c.status,
-            c.phase,
-            c.lead_stage as stage,
-            c.tags,
-            c.channel,
-            c.last_message_at,
-            m.content as last_message,
-            m.created_at as last_message_time,
-            l.form_name,
-            l.raw_data as form_raw_data,
-            l.created_at as form_date,
-            0 as unread
-          FROM conversations c
-          LEFT JOIN LATERAL (
-            SELECT content, created_at 
-            FROM messages 
-            WHERE phone_number = c.phone_number 
-            ORDER BY created_at DESC 
-            LIMIT 1
-          ) m ON true
-          LEFT JOIN LATERAL (
-            SELECT form_name, raw_data, created_at 
-            FROM leads 
-            WHERE phone_number LIKE '%' || RIGHT(c.phone_number, 10) || '%' 
-            ORDER BY created_at DESC 
-            LIMIT 1
-          ) l ON true
-          WHERE c.tenant_id = ${tenantId}
-            AND (c.patient_name ILIKE ${searchFilter} OR c.phone_number ILIKE ${searchFilter})
-            AND (${stageFilter === null} OR c.lead_stage = ${stageFilter})
-          ORDER BY c.last_message_at DESC NULLS LAST
-          LIMIT ${limit} OFFSET ${offset}
-        `;
-      } else {
-        rows = await sql`
-          SELECT 
-            c.phone_number as id,
-            c.patient_name as name,
-            c.department,
-            NULL as country,
-            c.status,
-            c.phase,
-            c.lead_stage as stage,
-            c.tags,
-            c.channel,
-            c.last_message_at,
-            m.content as last_message,
-            m.created_at as last_message_time,
-            l.form_name,
-            l.raw_data as form_raw_data,
-            l.created_at as form_date,
-            0 as unread
-          FROM conversations c
-          LEFT JOIN LATERAL (
-            SELECT content, created_at 
-            FROM messages 
-            WHERE phone_number = c.phone_number 
-            ORDER BY created_at DESC 
-            LIMIT 1
-          ) m ON true
-          LEFT JOIN LATERAL (
-            SELECT form_name, raw_data, created_at 
-            FROM leads 
-            WHERE phone_number LIKE '%' || RIGHT(c.phone_number, 10) || '%' 
-            ORDER BY created_at DESC 
-            LIMIT 1
-          ) l ON true
-          WHERE c.tenant_id = ${tenantId}
-            AND (${stageFilter === null} OR c.lead_stage = ${stageFilter})
-          ORDER BY c.last_message_at DESC NULLS LAST
-          LIMIT ${limit} OFFSET ${offset}
-        `;
-      }
-    }
+    const rows = await sql`
+      SELECT 
+        c.phone_number as id,
+        c.patient_name as name,
+        c.department,
+        c.country,
+        c.status,
+        c.phase,
+        c.lead_stage as stage,
+        c.tags,
+        c.channel,
+        c.last_message_at,
+        m.content as last_message,
+        m.created_at as last_message_time,
+        l.form_name,
+        l.raw_data as form_raw_data,
+        l.created_at as form_date,
+        0 as unread
+      FROM conversations c
+      LEFT JOIN LATERAL (
+        SELECT content, created_at 
+        FROM messages 
+        WHERE phone_number = c.phone_number AND tenant_id = ${tenantId}
+        ORDER BY created_at DESC 
+        LIMIT 1
+      ) m ON true
+      LEFT JOIN LATERAL (
+        SELECT form_name, raw_data, created_at 
+        FROM leads 
+        WHERE tenant_id = ${tenantId}
+          AND phone_number LIKE '%' || RIGHT(COALESCE(c.real_phone, c.phone_number), 10) || '%'
+        ORDER BY created_at DESC 
+        LIMIT 1
+      ) l ON true
+      WHERE c.tenant_id = ${tenantId}
+        AND (${searchFilter === null} OR c.patient_name ILIKE ${searchFilter} OR c.phone_number ILIKE ${searchFilter})
+        AND (${stageFilter === null} OR c.lead_stage = ${stageFilter})
+      ORDER BY c.last_message_at DESC NULLS LAST
+      LIMIT ${limit} OFFSET ${offset}
+    `;
 
     return rows.map((r: any) => ({
       ...r,
