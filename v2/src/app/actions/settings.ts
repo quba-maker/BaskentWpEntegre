@@ -1,96 +1,105 @@
 "use server";
 
 import { sql } from "@/lib/db";
-import { getSession } from "@/lib/auth/session";
+import { withActionGuard } from "@/lib/core/action-guard";
 
 // ==========================================
-// QUBA AI — Settings Actions
+// QUBA AI — Settings Actions (Zero-Trust Migrated)
 // ==========================================
 
 export async function getTenantSettings() {
-  try {
-    const session = await getSession();
-    if (!session?.tenantId) return { success: false, error: "Oturum yok" };
+  return withActionGuard(
+    { actionName: 'getTenantSettings' },
+    async (ctx) => {
+      // 1. Unsafe execute ile güvenli query gönderilir
+      const tenants = await ctx.db.executeSafe(sql`
+        SELECT id, name, slug, industry, logo_url, primary_color,
+               meta_page_id, instagram_id, whatsapp_phone_id, whatsapp_business_id,
+               ai_model, max_bot_messages, timezone, plan, monthly_message_limit, status,
+               created_at
+        FROM tenants WHERE id = ${ctx.tenantId}
+      `);
 
-    const tenants = await sql`
-      SELECT id, name, slug, industry, logo_url, primary_color,
-             meta_page_id, instagram_id, whatsapp_phone_id, whatsapp_business_id,
-             ai_model, max_bot_messages, timezone, plan, monthly_message_limit, status,
-             created_at
-      FROM tenants WHERE id = ${session.tenantId}
-    `;
+      if (tenants.length === 0) throw new Error("Tenant bulunamadı");
 
-    if (tenants.length === 0) return { success: false, error: "Tenant bulunamadı" };
-
-    const tenant = { ...tenants[0] };
-    
-    // Token maskeleme — sadece admin/owner tam token görebilir
-    if (session.role !== 'owner' && session.role !== 'admin' && session.role !== 'platform_admin') {
-      if (tenant.meta_page_token) {
-        tenant.meta_page_token = '••••••••' + tenant.meta_page_token.slice(-8);
+      const tenant = { ...tenants[0] };
+      
+      // Token maskeleme — sadece platform_admin/owner/admin
+      if (ctx.role !== 'owner' && ctx.role !== 'admin' && ctx.role !== 'platform_admin') {
+        if (tenant.meta_page_token) {
+          tenant.meta_page_token = '••••••••' + tenant.meta_page_token.slice(-8);
+        }
       }
-    }
 
-    return { success: true, tenant, user: { name: session.name, email: session.email, role: session.role } };
-  } catch (error: any) {
-    return { success: false, error: error.message };
-  }
+      return { 
+        tenant, 
+        user: { name: ctx.email, email: ctx.email, role: ctx.role } // Not: session.name olmadığı için geçici olarak emaile bağlandı veya eklenebilir.
+      };
+    }
+  ).then(res => {
+    // Legacy API uyumluluğu için response mapping (UI kırılmasın diye)
+    if (!res.success) return { success: false, error: res.error };
+    return { success: true, tenant: res.data?.tenant, user: res.data?.user };
+  });
 }
 
 export async function updateTenantSettings(updates: Record<string, any>) {
-  try {
-    const session = await getSession();
-    if (!session?.tenantId) return { success: false, error: "Oturum yok" };
-    if (session.role !== "owner" && session.role !== "admin" && session.role !== "platform_admin") return { success: false, error: "Yetki yok" };
+  return withActionGuard(
+    { 
+      actionName: 'updateTenantSettings',
+      roles: ['owner', 'admin'] // Sadece yetkili roller değiştirebilir
+    },
+    async (ctx) => {
+      const { name, industry, primaryColor, aiModel, maxBotMessages, timezone } = updates;
 
-    const { name, industry, primaryColor, aiModel, maxBotMessages, timezone } = updates;
+      await ctx.db.executeSafe(sql`
+        UPDATE tenants SET
+          name = COALESCE(${name || null}, name),
+          industry = COALESCE(${industry || null}, industry),
+          primary_color = COALESCE(${primaryColor || null}, primary_color),
+          ai_model = COALESCE(${aiModel || null}, ai_model),
+          max_bot_messages = COALESCE(${maxBotMessages ? parseInt(maxBotMessages) : null}, max_bot_messages),
+          timezone = COALESCE(${timezone || null}, timezone),
+          updated_at = NOW()
+        WHERE id = ${ctx.tenantId}
+      `);
 
-    await sql`
-      UPDATE tenants SET
-        name = COALESCE(${name || null}, name),
-        industry = COALESCE(${industry || null}, industry),
-        primary_color = COALESCE(${primaryColor || null}, primary_color),
-        ai_model = COALESCE(${aiModel || null}, ai_model),
-        max_bot_messages = COALESCE(${maxBotMessages ? parseInt(maxBotMessages) : null}, max_bot_messages),
-        timezone = COALESCE(${timezone || null}, timezone),
-        updated_at = NOW()
-      WHERE id = ${session.tenantId}
-    `;
-
+      return { success: true };
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error };
     return { success: true };
-  } catch (error: any) {
-    return { success: false, error: error.message };
-  }
+  });
 }
 
 export async function getUsageStats() {
-  try {
-    const session = await getSession();
-    if (!session?.tenantId) return { success: false, stats: null };
+  return withActionGuard(
+    { actionName: 'getUsageStats' },
+    async (ctx) => {
+      const now = new Date();
+      const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
-    const now = new Date();
-    const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      // Burada 'tenant_id' kelimesi geçiyor, executeSafe onaylar
+      const usage = await ctx.db.executeSafe(sql`
+        SELECT * FROM usage_log WHERE tenant_id = ${ctx.tenantId} AND month = ${month}
+      `);
 
-    const usage = await sql`
-      SELECT * FROM usage_log WHERE tenant_id = ${session.tenantId} AND month = ${month}
-    `;
+      // tenants tablosu
+      const tenant = await ctx.db.executeSafe(sql`
+        SELECT monthly_message_limit, plan FROM tenants WHERE id = ${ctx.tenantId}
+      `);
 
-    const tenant = await sql`
-      SELECT monthly_message_limit, plan FROM tenants WHERE id = ${session.tenantId}
-    `;
-
-    return {
-      success: true,
-      stats: {
+      return {
         currentMonth: month,
         totalMessages: usage[0]?.total_messages || 0,
         totalAiMessages: usage[0]?.total_ai_messages || 0,
         estimatedCost: parseFloat(usage[0]?.estimated_cost_usd || "0"),
         limit: tenant[0]?.monthly_message_limit || 500,
         plan: tenant[0]?.plan || "starter"
-      }
-    };
-  } catch (error: any) {
-    return { success: false, stats: null };
-  }
+      };
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, stats: null };
+    return { success: true, stats: res.data };
+  });
 }
