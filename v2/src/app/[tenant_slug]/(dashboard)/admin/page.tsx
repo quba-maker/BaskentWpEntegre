@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { getAllTenants, createTenant, toggleTenantStatus } from "@/app/actions/admin";
-import { Building2, Plus, Users, MessageSquare, Loader2, Shield, Power, Sparkles } from "lucide-react";
+import { startImpersonation } from "@/lib/auth/session";
+import { Building2, Plus, Users, MessageSquare, Loader2, Shield, Power, Sparkles, Eye } from "lucide-react";
 
 // ==========================================
 // QUBA AI — Super Admin Panel
@@ -41,6 +42,21 @@ export default function AdminPage() {
   async function handleToggle(id: string) {
     await toggleTenantStatus(id);
     load();
+  }
+
+  async function handleImpersonate(tenantId: string, slug: string) {
+    if (!confirm(`Tüm admin yetkilerinizle "${slug}" firmasının arayüzüne geçiş yapmak üzeresiniz. Onaylıyor musunuz?`)) return;
+    
+    setLoading(true);
+    try {
+      const res = await startImpersonation(tenantId, slug);
+      if (res.success && res.redirectUrl) {
+        window.location.href = res.redirectUrl;
+      }
+    } catch (err: any) {
+      alert("Hata: " + err.message);
+      setLoading(false);
+    }
   }
 
   if (loading) {
@@ -144,6 +160,15 @@ export default function AdminPage() {
                   <span className={`text-[11px] px-2 py-1 rounded-full font-medium ${t.status === 'active' ? 'bg-[#34C759]/10 text-[#34C759]' : 'bg-[#FF3B30]/10 text-[#FF3B30]'}`}>
                     {t.status === 'active' ? 'Aktif' : 'Askıda'}
                   </span>
+                  
+                  <button
+                    onClick={() => handleImpersonate(t.id, t.slug)}
+                    className="p-2 hover:bg-[#007AFF]/10 text-[#007AFF] rounded-lg transition-colors"
+                    title="Müşteri Gözünden Bak"
+                  >
+                    <Eye className="w-4 h-4" />
+                  </button>
+
                   <button
                     onClick={() => handleToggle(t.id)}
                     className="p-2 hover:bg-black/5 rounded-lg transition-colors"

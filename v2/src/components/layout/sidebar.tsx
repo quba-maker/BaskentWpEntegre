@@ -9,9 +9,10 @@ import {
   LogOut,
   BarChart3,
   Shield,
-  Users
+  Users,
+  Eye
 } from "lucide-react";
-import { getSession, logout } from "@/lib/auth/session";
+import { getSession, logout, stopImpersonation } from "@/lib/auth/session";
 import { redirect } from "next/navigation";
 
 // ==========================================
@@ -22,6 +23,12 @@ async function handleLogout() {
   "use server";
   await logout();
   redirect("/login");
+}
+
+async function handleStopImpersonation() {
+  "use server";
+  await stopImpersonation();
+  redirect("/admin");
 }
 
 export async function Sidebar() {
@@ -36,7 +43,13 @@ export async function Sidebar() {
           <div>
             <h1 className="text-[15px] font-bold tracking-tight text-[#1D1D1F]">Quba AI</h1>
             <p className="text-[10px] text-[#86868B] font-medium">
-              {session?.tenantName || "Platform"}
+              {session?.impersonatedTenantId ? (
+                <span className="text-[#AF52DE] font-semibold flex items-center gap-1">
+                  <Eye className="w-3 h-3" /> Gözlem Modu
+                </span>
+              ) : (
+                session?.tenantName || "Platform"
+              )}
             </p>
           </div>
         </div>
@@ -44,7 +57,7 @@ export async function Sidebar() {
       
       {/* Navigation */}
       <nav className="flex-1 p-3 space-y-0.5">
-        {session?.role === "platform_admin" ? (
+        {session?.role === "platform_admin" && !session?.impersonatedTenantId ? (
           <>
             <NavLink href="/admin" icon={<Shield className="w-[18px] h-[18px]" />} label="Süper Admin" />
           </>
@@ -84,15 +97,28 @@ export async function Sidebar() {
                 <p className="text-[10px] text-[#86868B] truncate">{session.email}</p>
               </div>
             </div>
-            <form action={handleLogout}>
-              <button
-                type="submit"
-                className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] font-medium text-[#FF3B30] hover:bg-red-50 transition-colors"
-              >
-                <LogOut className="w-[18px] h-[18px]" />
-                Çıkış Yap
-              </button>
-            </form>
+            
+            {session.impersonatedTenantId ? (
+              <form action={handleStopImpersonation}>
+                <button
+                  type="submit"
+                  className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] font-medium text-[#AF52DE] hover:bg-[#AF52DE]/10 transition-colors"
+                >
+                  <LogOut className="w-[18px] h-[18px]" />
+                  Gözlem Modundan Çık
+                </button>
+              </form>
+            ) : (
+              <form action={handleLogout}>
+                <button
+                  type="submit"
+                  className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] font-medium text-[#FF3B30] hover:bg-red-50 transition-colors"
+                >
+                  <LogOut className="w-[18px] h-[18px]" />
+                  Çıkış Yap
+                </button>
+              </form>
+            )}
           </div>
         )}
       </div>

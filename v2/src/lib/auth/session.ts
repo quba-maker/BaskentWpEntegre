@@ -24,10 +24,14 @@ export interface Session {
   userId: string;
   email: string;
   name: string;
-  role: string; // "owner" | "admin" | "agent" | "superadmin"
+  role: string; // "owner" | "admin" | "agent" | "superadmin" | "platform_admin"
   tenantId: string;
   tenantSlug: string;
   tenantName: string;
+  
+  // Impersonation Fields (Sadece platform_admin kullanabilir)
+  impersonatedTenantId?: string;
+  impersonatedTenantSlug?: string;
 }
 
 // JWT oluştur
@@ -84,9 +88,21 @@ export async function getSession(): Promise<Session | null> {
       session.role = user[0].role;
     }
     
+    // Eğer platform_admin başka bir tenant'ı impersonate ediyorsa, context'i değiştir (Fakat DB doğrulamasını orijinal kullanıcıyla geçtikten sonra)
+    if (session.role === 'platform_admin' && session.impersonatedTenantId) {
+      session.tenantId = session.impersonatedTenantId;
+      session.tenantSlug = session.impersonatedTenantSlug!;
+      // İsteğe bağlı olarak tenantName de güncellenebilir
+    }
+
     return session;
   } catch {
     // DB hatası durumunda JWT'ye güven (graceful degradation)
+    // Impersonation varsa yine context değiştir
+    if (session.role === 'platform_admin' && session.impersonatedTenantId) {
+      session.tenantId = session.impersonatedTenantId;
+      session.tenantSlug = session.impersonatedTenantSlug!;
+    }
     return session;
   }
 }
@@ -171,4 +187,70 @@ export async function login(
 export async function logout() {
   const cookieStore = await cookies();
   cookieStore.delete(COOKIE_NAME);
+}
+
+// ==========================================
+// IMPERSONATION (MÜŞTERİ GÖZÜNDEN BAK)
+// ==========================================
+
+export async function startImpersonation(targetTenantId: string, targetTenantSlug: string) {
+  const session = await getSession();
+  // Güvenlik: Sadece gerçek platform_admin bu eylemi gerçekleştirebilir!
+  if (!session || session.role !== 'platform_admin') {
+    throw new Error("Unauthorized: Only Platform Admins can impersonate tenants.");
+  }
+
+  // Token'ı yeniden oluştur
+  const newSession: Session = {
+    ...session,
+    impersonatedTenantId: targetTenantId,
+    impersonatedTenantSlug: targetTenantSlug,
+    // Dikkat: Gerçek tenantId'sini ezmiyoruz! getSession anında çalışma zamanında(runtime) swap yapılacak.
+  };
+
+  const token = await createToken(newSession);
+  const cookieStore = await cookies();
+  cookieStore.set(COOKIE_NAME, token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: 60 * 60 * 2,
+    path: "/",
+  });
+
+  await logAudit({
+    tenantId: targetTenantId,
+    userId: session.userId,
+    userEmail: session.email,
+    action: "impersonation_started",
+    details: { targetTenantSlug }
+  });
+
+  return { success: true, redirectUrl: `/${targetTenantSlug}` };
+}
+
+export async function stopImpersonation() {
+  const cookieStore = await cookies();
+  const token = cookieStore.get(COOKIE_NAME)?.value;
+  if (!token) return { success: false };
+
+  const { payload } = await jwtVerify(token, SECRET);
+  const session = payload as unknown as Session;
+
+  if (!session.impersonatedTenantId) return { success: true }; // Zaten impersonate edilmemiş
+
+  // Impersonation verilerini temizle
+  delete session.impersonatedTenantId;
+  delete session.impersonatedTenantSlug;
+
+  const newToken = await createToken(session);
+  cookieStore.set(COOKIE_NAME, newToken, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: 60 * 60 * 2,
+    path: "/",
+  });
+
+  return { success: true, redirectUrl: "/admin" };
 }

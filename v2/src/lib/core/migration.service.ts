@@ -113,7 +113,7 @@ export class MigrationService {
 
       return { migrated: true, count: keysToDelete.length, queue: migrationQueue };
 
-    } catch (error) {
+    } catch (error: any) {
       log.error(`Migration Engine failed for tenant`, error, { tenantId });
       throw error;
     }
