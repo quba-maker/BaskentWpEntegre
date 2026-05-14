@@ -7,7 +7,8 @@ import { logAudit } from "@/lib/audit";
 export async function getConversations(page: number = 1, search: string = "", stage: string = "all") {
   try {
     const session = await getSession();
-    const tenantId = session?.tenantId || null;
+    if (!session?.tenantId) return [];
+    const tenantId = session.tenantId;
     
     const limit = 50;
     const offset = (page - 1) * limit;
@@ -50,7 +51,7 @@ export async function getConversations(page: number = 1, search: string = "", st
             ORDER BY created_at DESC 
             LIMIT 1
           ) l ON true
-          WHERE (${tenantId === null} OR c.tenant_id = ${tenantId})
+          WHERE c.tenant_id = ${tenantId}
             AND (c.patient_name ILIKE ${searchFilter} OR c.phone_number ILIKE ${searchFilter})
             AND (${stageFilter === null} OR c.lead_stage = ${stageFilter})
           ORDER BY c.last_message_at DESC NULLS LAST
@@ -90,7 +91,7 @@ export async function getConversations(page: number = 1, search: string = "", st
             ORDER BY created_at DESC 
             LIMIT 1
           ) l ON true
-          WHERE (${tenantId === null} OR c.tenant_id = ${tenantId})
+          WHERE c.tenant_id = ${tenantId}
             AND (${stageFilter === null} OR c.lead_stage = ${stageFilter})
           ORDER BY c.last_message_at DESC NULLS LAST
           LIMIT ${limit} OFFSET ${offset}
@@ -133,7 +134,7 @@ export async function getConversations(page: number = 1, search: string = "", st
             ORDER BY created_at DESC 
             LIMIT 1
           ) l ON true
-          WHERE (${tenantId === null} OR c.tenant_id = ${tenantId})
+          WHERE c.tenant_id = ${tenantId}
             AND (c.patient_name ILIKE ${searchFilter} OR c.phone_number ILIKE ${searchFilter})
             AND (${stageFilter === null} OR c.lead_stage = ${stageFilter})
           ORDER BY c.last_message_at DESC NULLS LAST
@@ -173,7 +174,7 @@ export async function getConversations(page: number = 1, search: string = "", st
             ORDER BY created_at DESC 
             LIMIT 1
           ) l ON true
-          WHERE (${tenantId === null} OR c.tenant_id = ${tenantId})
+          WHERE c.tenant_id = ${tenantId}
             AND (${stageFilter === null} OR c.lead_stage = ${stageFilter})
           ORDER BY c.last_message_at DESC NULLS LAST
           LIMIT ${limit} OFFSET ${offset}
