@@ -48,7 +48,7 @@ export async function getBotSettings() {
         'working_hours': 'bot_working_hours',
       };
       
-      const rows = Array.isArray(settings) ? settings : (settings?.rows || []);
+      const rows = Array.isArray(settings) ? settings : ((settings as any)?.rows || []);
 
       const result: Record<string, any> = {};
       rows.forEach((s: any) => {

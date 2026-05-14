@@ -59,7 +59,7 @@ export async function getConversations(page: number = 1, search: string = "", st
         LIMIT ${limit} OFFSET ${offset}
       `);
 
-      const validRows = Array.isArray(rows) ? rows : (rows?.rows || []);
+      const validRows = Array.isArray(rows) ? rows : ((rows as any)?.rows || []);
 
       return validRows.map((r: any) => ({
         ...r,
@@ -92,7 +92,7 @@ export async function getMessages(phone: string) {
         LIMIT 100
       `);
 
-      const validRows = Array.isArray(rows) ? rows : (rows?.rows || []);
+      const validRows = Array.isArray(rows) ? rows : ((rows as any)?.rows || []);
 
       return validRows.map((r: any) => {
         const date = new Date(r.created_at);
