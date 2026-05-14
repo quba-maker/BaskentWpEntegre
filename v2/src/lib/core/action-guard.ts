@@ -73,7 +73,7 @@ export async function withActionGuard<T>(
       tenantId: session.tenantId!, // Zaten yukarıda guard ettik
       role: session.role,
       email: session.email,
-      db: options.requireTenant !== false ? withTenantDB(session.tenantId!) : null as any,
+      db: options.requireTenant !== false ? withTenantDB(session.tenantId!, session.role === 'platform_admin') : null as any,
     };
 
     log.debug(`Action started`, { userId: ctx.userId, tenantId: ctx.tenantId });

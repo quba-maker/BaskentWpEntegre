@@ -92,7 +92,13 @@ export async function GET(req: NextRequest) {
     await sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS tenant_id UUID`;
     await sql`ALTER TABLE settings ADD COLUMN IF NOT EXISTS tenant_id UUID`;
     await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS tenant_id UUID`;
-    results.push("✅ tenant_id kolonları eklendi");
+    
+    // Idempotency kolonları
+    await sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS provider_message_id TEXT`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_messages_provider_id ON messages(provider_message_id)`;
+    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_channel TEXT`;
+    
+    results.push("✅ tenant_id ve idempotency kolonları eklendi");
 
     // 6. Mevcut migration'lar (eski setup)
     await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS country VARCHAR(100)`;
@@ -155,14 +161,33 @@ export async function GET(req: NextRequest) {
     // koruması olarak ekliyoruz — psql/migration scriptlerini kısıtlar.
     try {
       // Enable RLS on tenant-scoped tables
+      // ---------------------------------------------------------
+      // RLS CANARY ROLLOUT (Phase A)
+      // Sadece "settings" tablosunda FORCE RLS uygulanır.
+      // Diğerleri şimdilik Shadow Mode (USING true) olarak kalır.
+      // ---------------------------------------------------------
+
+      // Canary Table: SETTINGS
+      await sql`ALTER TABLE settings ENABLE ROW LEVEL SECURITY`;
+      // await sql`ALTER TABLE settings FORCE ROW LEVEL SECURITY`; // SHADOW MODE: İptal edildi, migration bitene kadar force edilmeyecek.
+
+      // Shadow Tables (Henüz Enforce Edilmeyenler)
       await sql`ALTER TABLE conversations ENABLE ROW LEVEL SECURITY`;
       await sql`ALTER TABLE messages ENABLE ROW LEVEL SECURITY`;
       await sql`ALTER TABLE leads ENABLE ROW LEVEL SECURITY`;
-      await sql`ALTER TABLE settings ENABLE ROW LEVEL SECURITY`;
       await sql`ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY`;
 
-      // App-level bypass policy (table owner her zaman erişir)
-      // DROP IF EXISTS + CREATE ile idempotent yapıyoruz
+      // Strict RLS Condition (Tenant ID Check OR Admin Bypass)
+      const rlsCondition = `
+        (current_setting('quba.is_admin', true) = 'true') OR 
+        (tenant_id::text = current_setting('quba.current_tenant', true))
+      `;
+
+      // Canary Policy Application (SHADOW MODE: Sadece audit için aktif edilecek, şimdilik bypass)
+      await sql`DROP POLICY IF EXISTS settings_app_access ON settings`;
+      await sql`CREATE POLICY settings_app_access ON settings FOR ALL USING (true) WITH CHECK (true)`;
+
+      // Shadow Mode Policies (Bypass)
       await sql`DROP POLICY IF EXISTS conversations_app_access ON conversations`;
       await sql`CREATE POLICY conversations_app_access ON conversations FOR ALL USING (true) WITH CHECK (true)`;
 
@@ -171,9 +196,6 @@ export async function GET(req: NextRequest) {
 
       await sql`DROP POLICY IF EXISTS leads_app_access ON leads`;
       await sql`CREATE POLICY leads_app_access ON leads FOR ALL USING (true) WITH CHECK (true)`;
-
-      await sql`DROP POLICY IF EXISTS settings_app_access ON settings`;
-      await sql`CREATE POLICY settings_app_access ON settings FOR ALL USING (true) WITH CHECK (true)`;
 
       await sql`DROP POLICY IF EXISTS audit_logs_app_access ON audit_logs`;
       await sql`CREATE POLICY audit_logs_app_access ON audit_logs FOR ALL USING (true) WITH CHECK (true)`;

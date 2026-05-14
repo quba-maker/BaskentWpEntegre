@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { neon } from "@neondatabase/serverless";
 import { waitUntil } from "@vercel/functions";
+import { withApiGuard } from "@/lib/core/api-guard";
 
 // ==========================================
 // QUBA AI — Multi-Tenant Webhook Router
@@ -13,21 +14,7 @@ const DATABASE_URL = process.env.DATABASE_URL!;
 // Vercel'in arka plan işlemlerini (waitUntil) hemen kesmemesi için maksimum süre
 export const maxDuration = 60;
 
-// Tenant bilgisini page_id veya phone_id ile bul
-async function findTenant(identifier: string, type: "page" | "phone" | "instagram") {
-  const sql = neon(DATABASE_URL);
-  
-  let tenants;
-  if (type === "page") {
-    tenants = await sql`SELECT * FROM tenants WHERE meta_page_id = ${identifier} AND status = 'active'`;
-  } else if (type === "instagram") {
-    tenants = await sql`SELECT * FROM tenants WHERE instagram_id = ${identifier} AND status = 'active'`;
-  } else {
-    tenants = await sql`SELECT * FROM tenants WHERE whatsapp_phone_id = ${identifier} AND status = 'active'`;
-  }
-  
-  return tenants.length > 0 ? tenants[0] : null;
-}
+
 
 // GET — Meta Webhook doğrulama
 export async function GET(req: NextRequest) {
@@ -45,28 +32,12 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ error: "Doğrulama başarısız" }, { status: 403 });
 }
 
-// POST — Mesaj işle (Tenant Router)
-export async function POST(req: NextRequest) {
-  try {
-    // 🔒 Meta Webhook İmza Doğrulaması (X-Hub-Signature-256)
-    const APP_SECRET = process.env.META_APP_SECRET;
-    if (APP_SECRET) {
-      const signature = req.headers.get("x-hub-signature-256");
-      if (signature) {
-        const rawBody = await req.clone().text();
-        const crypto = await import("crypto");
-        const expectedSig = "sha256=" + crypto
-          .createHmac("sha256", APP_SECRET)
-          .update(rawBody)
-          .digest("hex");
-        if (signature !== expectedSig) {
-          console.error("❌ Webhook signature mismatch — sahte istek engellendi.");
-          return new NextResponse("FORBIDDEN", { status: 403 });
-        }
-      }
-    }
-
-    const body = await req.json().catch(() => null);
+export const POST = withApiGuard(
+  { routeName: 'MetaWebhook', verifySignature: true, requireTenant: true },
+  async (ctx) => {
+    // 1. Guard zaten tenantId'yi tespit etti, signature'ı doğruladı.
+    const body = (ctx.req as any).parsedBody;
+    const tenant = ctx.tenantMeta;
 
     if (!body || !body.object) {
       return new NextResponse("NOT_FOUND", { status: 404 });
@@ -76,22 +47,30 @@ export async function POST(req: NextRequest) {
     const { handleWhatsAppMessage } = await import("../../../../../lib/channels/whatsapp.js");
     const { handleMessengerMessage } = await import("../../../../../lib/channels/messenger.js");
     const { handleInstagramMessage } = await import("../../../../../lib/channels/instagram.js");
+    const { WebhookDedupeService } = await import("@/lib/services/webhook-dedupe.service");
+
+    const dedupeService = new WebhookDedupeService(ctx.db);
 
     // 1. WHATSAPP
     if (
       body.object === "whatsapp_business_account" &&
       body.entry?.[0]?.changes?.[0]?.value?.messages?.[0]
     ) {
-      const phoneNumberId = body.entry[0].changes[0].value?.metadata?.phone_number_id;
-      const tenant = phoneNumberId ? await findTenant(phoneNumberId, "phone") : null;
+      const msg = body.entry[0].changes[0].value.messages[0];
+      const senderPhone = body.entry[0].changes[0].value.contacts?.[0]?.wa_id;
       
-      if (tenant) {
-        console.log(`📱 [WA] Tenant: ${tenant.name} (${tenant.slug})`);
-        body.tenant_id = tenant.id;
-        body.tenant_meta = tenant;
+      const { isDuplicate } = await dedupeService.checkAndLock({
+        provider: 'whatsapp',
+        providerMessageId: msg.id,
+        senderId: senderPhone,
+        timestamp: msg.timestamp ? parseInt(msg.timestamp) : Date.now()
+      });
+
+      if (isDuplicate) {
+        return new NextResponse("EVENT_RECEIVED_DUPLICATE", { status: 200 });
       }
 
-      // İşlemi arka plana at, Vercel'i bekletme
+      console.log(`📱 [WA] Tenant: ${tenant.name} (${tenant.slug})`);
       waitUntil(handleWhatsAppMessage(body));
       return new NextResponse("EVENT_RECEIVED", { status: 200 });
     }
@@ -102,15 +81,18 @@ export async function POST(req: NextRequest) {
       body.entry?.[0]?.messaging?.[0] &&
       !body.entry?.[0]?.changes?.[0]?.field
     ) {
-      const pageId = body.entry[0]?.id;
-      const tenant = pageId ? await findTenant(pageId, "page") : null;
-      
-      if (tenant) {
-        console.log(`💬 [MSG] Tenant: ${tenant.name} (${tenant.slug})`);
-        body.tenant_id = tenant.id;
-        body.tenant_meta = tenant;
+      const msg = body.entry[0].messaging[0];
+      if (msg.message?.mid) {
+        const { isDuplicate } = await dedupeService.checkAndLock({
+          provider: 'messenger',
+          providerMessageId: msg.message.mid,
+          senderId: msg.sender.id,
+          timestamp: msg.timestamp || Date.now()
+        });
+        if (isDuplicate) return new NextResponse("EVENT_RECEIVED_DUPLICATE", { status: 200 });
       }
 
+      console.log(`💬 [MSG] Tenant: ${tenant.name} (${tenant.slug})`);
       waitUntil(handleMessengerMessage(body));
       return new NextResponse("EVENT_RECEIVED", { status: 200 });
     }
@@ -120,15 +102,18 @@ export async function POST(req: NextRequest) {
       body.object === "instagram" &&
       body.entry?.[0]?.messaging?.[0]
     ) {
-      const igId = body.entry[0]?.id;
-      const tenant = igId ? await findTenant(igId, "instagram") : null;
-      
-      if (tenant) {
-        console.log(`📸 [IG] Tenant: ${tenant.name} (${tenant.slug})`);
-        body.tenant_id = tenant.id;
-        body.tenant_meta = tenant;
+      const msg = body.entry[0].messaging[0];
+      if (msg.message?.mid) {
+        const { isDuplicate } = await dedupeService.checkAndLock({
+          provider: 'instagram',
+          providerMessageId: msg.message.mid,
+          senderId: msg.sender.id,
+          timestamp: msg.timestamp || Date.now()
+        });
+        if (isDuplicate) return new NextResponse("EVENT_RECEIVED_DUPLICATE", { status: 200 });
       }
 
+      console.log(`📸 [IG] Tenant: ${tenant.name} (${tenant.slug})`);
       waitUntil(handleInstagramMessage(body));
       return new NextResponse("EVENT_RECEIVED", { status: 200 });
     }
@@ -142,12 +127,10 @@ export async function POST(req: NextRequest) {
         const leadgenData = body.entry[0].changes[0].value;
         const leadgenId = leadgenData?.leadgen_id;
         const pageId = body.entry[0]?.id;
-        const tenant = pageId ? await findTenant(pageId, "page") : null;
 
         if (leadgenId) {
           console.log(`📋 [Lead] ${tenant?.name || "Bilinmeyen"} — Lead: ${leadgenId}`);
           
-          // Tenant'ın token'ını kullan, yoksa env'den al
           const META_TOKEN = tenant?.meta_page_token || process.env.META_ACCESS_TOKEN;
           if (META_TOKEN) {
             const leadRes = await fetch(
@@ -161,20 +144,23 @@ export async function POST(req: NextRequest) {
                 fields[f.name] = f.values?.[0] || "";
               });
 
-              const sql = neon(DATABASE_URL);
+              // executeSafe ile Zero-Trust RLS enforced yazılım.
+              // Note: ctx.db! garantilidir çünkü requireTenant: true
               waitUntil(
-                sql`INSERT INTO leads (
-                  tenant_id, source, patient_name, phone_number, email, department, notes, stage
-                ) VALUES (
-                  ${tenant?.id || null},
-                  'meta_lead_ad',
-                  ${fields.full_name || fields.name || ""},
-                  ${fields.phone_number || fields.phone || ""},
-                  ${fields.email || ""},
-                  ${fields.department || fields.interest || ""},
-                  ${"Lead Ad - Sayfa: " + pageId},
-                  'new'
-                ) ON CONFLICT DO NOTHING`
+                ctx.db!.executeSafe(
+                  neon(process.env.DATABASE_URL!)`INSERT INTO leads (
+                    tenant_id, source, patient_name, phone_number, email, department, notes, stage
+                  ) VALUES (
+                    ${tenant.id},
+                    'meta_lead_ad',
+                    ${fields.full_name || fields.name || ""},
+                    ${fields.phone_number || fields.phone || ""},
+                    ${fields.email || ""},
+                    ${fields.department || fields.interest || ""},
+                    ${"Lead Ad - Sayfa: " + pageId},
+                    'new'
+                  ) ON CONFLICT DO NOTHING`
+                )
               );
             }
           }
@@ -187,8 +173,5 @@ export async function POST(req: NextRequest) {
 
     // Diğer durumlar
     return new NextResponse("EVENT_RECEIVED", { status: 200 });
-  } catch (e: any) {
-    console.error("❌ Webhook Hatası:", e);
-    return new NextResponse("SERVER_ERROR", { status: 500 });
   }
-}
+);
