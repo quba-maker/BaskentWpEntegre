@@ -7,7 +7,8 @@ import {
   Link2,
   Bot,
   LogOut,
-  BarChart3
+  BarChart3,
+  Shield
 } from "lucide-react";
 import { getSession, logout } from "@/lib/auth/session";
 import { redirect } from "next/navigation";
@@ -53,6 +54,9 @@ export async function Sidebar() {
 
       {/* User & Logout */}
       <div className="p-3 border-t border-black/5 space-y-1">
+        {session?.role === "owner" && (
+          <NavLink href="/admin" icon={<Shield className="w-[18px] h-[18px]" />} label="Süper Admin" />
+        )}
         <NavLink href="/settings" icon={<Settings className="w-[18px] h-[18px]" />} label="Ayarlar" />
         
         {session && (
