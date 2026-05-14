@@ -34,10 +34,11 @@ export class TenantDB {
       // Neon HTTP Driver stateless'tır.
       // RLS context'inin kaybolmaması için, SET LOCAL sorgusunu 
       // asıl sorguyla beraber tek bir transaction batch'i olarak gönderiyoruz.
+      // Postgres SET komutu parametre kabul etmediği için SELECT set_config() kullanıyoruz!
       const result = await this.sql.transaction([
         this.isAdmin 
-          ? this.sql`SET LOCAL quba.is_admin = 'true'`
-          : this.sql`SET LOCAL quba.current_tenant = ${this.tenantId}`,
+          ? this.sql`SELECT set_config('quba.is_admin', 'true', true)`
+          : this.sql`SELECT set_config('quba.current_tenant', ${this.tenantId}, true)`,
         q
       ]);
       
@@ -65,8 +66,8 @@ export class TenantDB {
       
       const result = await this.sql.transaction([
         this.isAdmin 
-          ? this.sql`SET LOCAL quba.is_admin = 'true'`
-          : this.sql`SET LOCAL quba.current_tenant = ${this.tenantId}`,
+          ? this.sql`SELECT set_config('quba.is_admin', 'true', true)`
+          : this.sql`SELECT set_config('quba.current_tenant', ${this.tenantId}, true)`,
         ...formattedQueries
       ]);
       const duration = Date.now() - startTime;
