@@ -1,5 +1,5 @@
-import { neon } from "@neondatabase/serverless";
 import { logger } from "./logger";
+import { sql } from "@/lib/db";
 
 // ==========================================
 // QUBA AI — Tenant-Aware DB Wrapper (RLS Enforced)
@@ -10,7 +10,7 @@ export class TenantDB {
   public readonly tenantId: string;
   private isAdmin: boolean;
   private log = logger.withContext({ module: 'TenantDB' });
-  private sql = neon(process.env.DATABASE_URL!);
+  private sql = sql;
 
   constructor(tenantId: string, isAdmin: boolean = false) {
     if (!tenantId) throw new Error("TenantDB instance requires a valid tenantId");

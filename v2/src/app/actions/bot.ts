@@ -12,30 +12,50 @@ export async function getBotSettings() {
   return withActionGuard(
     { actionName: 'getBotSettings' },
     async (ctx) => {
+      const requestedKeys = [
+        'system_prompt_whatsapp', 
+        'system_prompt_tr', 
+        'system_prompt_foreign',
+        'foreign_page_id',
+        'channel_whatsapp_enabled',
+        'channel_instagram_enabled',
+        'channel_foreign_enabled',
+        'bot_auto_greeting',
+        'bot_greeting_language',
+        'bot_max_messages',
+        'bot_working_hours',
+        'bot_aggression_level',
+        'ai_model',
+        'bot_banned_words',
+        // Legacy keys to fetch for hydration
+        'bot_whatsapp_active',
+        'bot_instagram_active',
+        'bot_foreign_active',
+        'working_hours'
+      ];
+
       const settings = await ctx.db.executeSafe(sql`
         SELECT key, value, updated_at FROM settings 
         WHERE tenant_id = ${ctx.tenantId}
-          AND key IN (
-            'system_prompt_whatsapp', 
-            'system_prompt_tr', 
-            'system_prompt_foreign',
-            'foreign_page_id',
-            'channel_whatsapp_enabled',
-            'channel_instagram_enabled',
-            'channel_foreign_enabled',
-            'bot_auto_greeting',
-            'bot_greeting_language',
-            'bot_max_messages',
-            'bot_working_hours',
-            'bot_aggression_level',
-            'ai_model',
-            'bot_banned_words'
-          )
+          AND key = ANY(${requestedKeys})
       `);
+
+      // Legacy to V2 mapping
+      const keyMapper: Record<string, string> = {
+        'bot_whatsapp_active': 'channel_whatsapp_enabled',
+        'bot_instagram_active': 'channel_instagram_enabled',
+        'bot_foreign_active': 'channel_foreign_enabled',
+        'working_hours': 'bot_working_hours',
+      };
       
+      const rows = Array.isArray(settings) ? settings : (settings?.rows || []);
+
       const result: Record<string, any> = {};
-      settings.forEach((s: any) => {
-        result[s.key] = { value: s.value, updated_at: s.updated_at };
+      rows.forEach((s: any) => {
+        const mappedKey = keyMapper[s.key] || s.key;
+        if (!result[mappedKey] || new Date(s.updated_at) > new Date(result[mappedKey].updated_at)) {
+          result[mappedKey] = { value: s.value, updated_at: s.updated_at };
+        }
       });
       
       return { settings: result };

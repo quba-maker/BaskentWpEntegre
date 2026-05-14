@@ -59,7 +59,9 @@ export async function getConversations(page: number = 1, search: string = "", st
         LIMIT ${limit} OFFSET ${offset}
       `);
 
-      return rows.map((r: any) => ({
+      const validRows = Array.isArray(rows) ? rows : (rows?.rows || []);
+
+      return validRows.map((r: any) => ({
         ...r,
         score: r.stage === 'appointed' ? 100 : r.stage === 'contacted' ? 60 : 30,
         isBotActive: r.status !== 'human',
@@ -90,7 +92,9 @@ export async function getMessages(phone: string) {
         LIMIT 100
       `);
 
-      return rows.map((r: any) => {
+      const validRows = Array.isArray(rows) ? rows : (rows?.rows || []);
+
+      return validRows.map((r: any) => {
         const date = new Date(r.created_at);
         return {
           id: r.id,
