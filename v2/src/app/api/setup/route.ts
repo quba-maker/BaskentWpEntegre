@@ -123,9 +123,12 @@ export async function GET(req: NextRequest) {
       )
     `;
     
-    // Production-safe concurrent index creation for unique constraint
-    await execute`CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_settings_tenant_key_unique ON settings(tenant_id, key)`;
-    results.push("✅ settings tablosu tekilleştirildi ve CONCURRENT UNIQUE INDEX eklendi");
+    // Explicit UNIQUE constraint required for ON CONFLICT (tenant_id, key) to work
+    try { await execute`ALTER TABLE settings DROP CONSTRAINT IF EXISTS settings_key_key`; } catch(e) {}
+    try { await execute`ALTER TABLE settings DROP CONSTRAINT IF EXISTS settings_tenant_id_key_key`; } catch(e) {}
+    try { await execute`ALTER TABLE settings ADD CONSTRAINT settings_tenant_id_key_key UNIQUE (tenant_id, key)`; } catch(e) {}
+    
+    results.push("✅ settings tablosu tekilleştirildi ve UNIQUE constraint eklendi");
     
     // Idempotency kolonları
     await execute`ALTER TABLE messages ADD COLUMN IF NOT EXISTS provider_message_id TEXT`;
