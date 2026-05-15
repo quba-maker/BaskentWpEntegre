@@ -102,10 +102,19 @@ CREATE INDEX IF NOT EXISTS idx_users_tenant ON users(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 CREATE INDEX IF NOT EXISTS idx_settings_tenant_key ON settings(tenant_id, key);
 
--- BAŞKENT'İ İLK TENANT OLARAK EKLE
-INSERT INTO tenants (name, slug, industry, primary_color, ai_model, plan, status)
-VALUES ('Başkent Hastanesi', 'baskent', 'health', '#005A9C', 'gemini-2.5-flash', 'pro', 'active')
-ON CONFLICT (slug) DO NOTHING;
+-- BAŞKENT'İ İLK TENANT OLARAK EKLE — Meta bilgileriyle
+INSERT INTO tenants (
+  name, slug, industry, primary_color, ai_model, plan, status,
+  whatsapp_phone_id, whatsapp_business_id
+)
+VALUES (
+  'Başkent Hastanesi', 'baskent', 'health', '#005A9C', 'gemini-2.5-flash', 'pro', 'active',
+  '1072536945944841', '2733513257027362'
+)
+ON CONFLICT (slug) DO UPDATE SET
+  whatsapp_phone_id = EXCLUDED.whatsapp_phone_id,
+  whatsapp_business_id = EXCLUDED.whatsapp_business_id,
+  updated_at = NOW();
 
 -- Mevcut verilere tenant_id ata (Başkent)
 UPDATE conversations SET tenant_id = (SELECT id FROM tenants WHERE slug = 'baskent') WHERE tenant_id IS NULL;

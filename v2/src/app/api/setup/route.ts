@@ -144,13 +144,23 @@ export async function GET(req: NextRequest) {
     await execute`CREATE INDEX IF NOT EXISTS idx_messages_tenant ON messages(tenant_id)`;
     results.push("✅ indexler oluşturuldu");
 
-    // 8. Başkent'i ilk tenant olarak ekle
+    // 8. Başkent'i ilk tenant olarak ekle — Meta bilgileriyle birlikte
     await execute`
-      INSERT INTO tenants (name, slug, industry, primary_color, ai_model, plan, status)
-      VALUES ('Başkent Hastanesi', 'baskent', 'health', '#005A9C', 'gemini-2.5-flash', 'pro', 'active')
-      ON CONFLICT (slug) DO NOTHING
+      INSERT INTO tenants (
+        name, slug, industry, primary_color, ai_model, plan, status,
+        whatsapp_phone_id, whatsapp_business_id, meta_page_token
+      )
+      VALUES (
+        'Başkent Hastanesi', 'baskent', 'health', '#005A9C', 'gemini-2.5-flash', 'pro', 'active',
+        '1072536945944841', '2733513257027362', ${process.env.META_ACCESS_TOKEN || ''}
+      )
+      ON CONFLICT (slug) DO UPDATE SET
+        whatsapp_phone_id = EXCLUDED.whatsapp_phone_id,
+        whatsapp_business_id = EXCLUDED.whatsapp_business_id,
+        meta_page_token = EXCLUDED.meta_page_token,
+        updated_at = NOW()
     `;
-    results.push("✅ Başkent tenant eklendi");
+    results.push("✅ Başkent tenant eklendi (Meta bilgileriyle)");
 
     // 9. Mevcut Verileri Başkent Tenant'ına Ata
     // Eğer tenant zaten atanmışsa UPDATE boşuna row kilitler, o yüzden WHERE tenant_id IS NULL kontrolü var.
