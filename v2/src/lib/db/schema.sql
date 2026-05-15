@@ -12,7 +12,9 @@ CREATE TABLE IF NOT EXISTS tenants (
   logo_url TEXT,
   primary_color TEXT DEFAULT '#007AFF',
   
-  -- Meta Entegrasyon
+  -- Meta Entegrasyon (Tenant-Isolated)
+  meta_app_id TEXT,
+  meta_app_secret TEXT,
   meta_page_id TEXT,
   meta_page_token TEXT,
   instagram_id TEXT,

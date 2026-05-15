@@ -40,6 +40,8 @@ export async function GET(req: NextRequest) {
         industry TEXT NOT NULL DEFAULT 'general',
         logo_url TEXT,
         primary_color TEXT DEFAULT '#007AFF',
+        meta_app_id TEXT,
+        meta_app_secret TEXT,
         meta_page_id TEXT,
         meta_page_token TEXT,
         instagram_id TEXT,
@@ -193,10 +195,12 @@ export async function GET(req: NextRequest) {
     await execute`CREATE INDEX IF NOT EXISTS idx_leads_phone ON leads(phone_number)`;
     results.push("✅ leads indexleri oluşturuldu");
 
-    // 12. Tenant daily_ai_limit
+    // 12. Tenant extensions (SaaS multi-tenant runtime)
     await execute`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS daily_ai_limit INT DEFAULT 200`;
     await execute`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS webhook_secret TEXT`;
-    results.push("✅ tenant genişletmeleri uygulandı");
+    await execute`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS meta_app_id TEXT`;
+    await execute`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS meta_app_secret TEXT`;
+    results.push("✅ tenant SaaS kolonları uygulandı (meta_app_id, meta_app_secret)");
 
     // 13. ROW-LEVEL SECURITY (RLS) Policies
     try {
