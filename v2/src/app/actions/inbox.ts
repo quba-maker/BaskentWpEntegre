@@ -154,6 +154,7 @@ export async function sendMessage(phone: string, text: string) {
               text: { body: text },
             }),
           });
+        }
         else if (channel === 'instagram' || channel === 'messenger') {
           const customToken = tenantRows[0].meta_page_token;
           // Legacy sistem gibi tüm tokenları sırayla dene (IGSID sadece kendi sayfasında geçerli olduğu için)
