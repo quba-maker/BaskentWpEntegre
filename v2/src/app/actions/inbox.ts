@@ -156,7 +156,8 @@ export async function sendMessage(phone: string, text: string) {
           });
         } 
         else if (channel === 'instagram') {
-          response = await fetch(`https://graph.instagram.com/v25.0/me/messages?access_token=${META_ACCESS_TOKEN}`, {
+          const igToken = tenantRows[0].meta_page_token || process.env.IG_TOKEN_1 || process.env.IG_TOKEN_2 || META_ACCESS_TOKEN;
+          response = await fetch(`https://graph.instagram.com/v25.0/me/messages?access_token=${igToken}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -166,7 +167,8 @@ export async function sendMessage(phone: string, text: string) {
           });
         }
         else if (channel === 'messenger') {
-          response = await fetch(`https://graph.facebook.com/v25.0/me/messages?access_token=${META_ACCESS_TOKEN}`, {
+          const fbToken = tenantRows[0].meta_page_token || process.env.FB_PAGE_TOKEN || process.env.IG_TOKEN_1 || META_ACCESS_TOKEN;
+          response = await fetch(`https://graph.facebook.com/v25.0/me/messages?access_token=${fbToken}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
