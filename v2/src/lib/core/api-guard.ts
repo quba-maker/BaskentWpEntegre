@@ -46,13 +46,21 @@ export function withApiGuard(
           
           rawBody = await req.clone().text();
           const crypto = await import("crypto");
+          const trimmedSecret = APP_SECRET.trim();
           const expectedSig = "sha256=" + crypto
-            .createHmac("sha256", APP_SECRET)
+            .createHmac("sha256", trimmedSecret)
             .update(rawBody)
             .digest("hex");
             
           if (signature !== expectedSig) {
-            log.warn("Signature mismatch in webhook");
+            log.warn("Signature mismatch in webhook", {
+              receivedPrefix: signature.substring(0, 20),
+              expectedPrefix: expectedSig.substring(0, 20),
+              secretLength: trimmedSecret.length,
+              secretPrefix: trimmedSecret.substring(0, 4) + "...",
+              bodyLength: rawBody.length,
+              hasWhitespace: APP_SECRET !== trimmedSecret
+            });
             return new NextResponse("FORBIDDEN", { status: 403 });
           }
         }
