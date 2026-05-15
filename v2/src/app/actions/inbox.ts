@@ -154,28 +154,36 @@ export async function sendMessage(phone: string, text: string) {
               text: { body: text },
             }),
           });
-        } 
-        else if (channel === 'instagram') {
-          const igToken = tenantRows[0].meta_page_token || process.env.IG_TOKEN_1 || process.env.IG_TOKEN_2 || META_ACCESS_TOKEN;
-          response = await fetch(`https://graph.instagram.com/v25.0/me/messages?access_token=${igToken}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              recipient: { id: phone },
-              message: { text: text }
-            }),
-          });
-        }
-        else if (channel === 'messenger') {
-          const fbToken = tenantRows[0].meta_page_token || process.env.FB_PAGE_TOKEN || process.env.IG_TOKEN_1 || META_ACCESS_TOKEN;
-          response = await fetch(`https://graph.facebook.com/v25.0/me/messages?access_token=${fbToken}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              recipient: { id: phone },
-              message: { text: text }
-            }),
-          });
+        else if (channel === 'instagram' || channel === 'messenger') {
+          const customToken = tenantRows[0].meta_page_token;
+          // Legacy sistem gibi tüm tokenları sırayla dene (IGSID sadece kendi sayfasında geçerli olduğu için)
+          const fallbackTokens = [process.env.IG_TOKEN_1, process.env.IG_TOKEN_2, process.env.FB_PAGE_TOKEN, META_ACCESS_TOKEN].filter(Boolean);
+          const tokensToTry = customToken ? [customToken] : fallbackTokens;
+          
+          let success = false;
+          const baseUrl = channel === 'instagram' 
+            ? 'https://graph.instagram.com/v25.0/me/messages'
+            : 'https://graph.facebook.com/v25.0/me/messages';
+
+          for (const token of tokensToTry) {
+            if (!token) continue;
+            response = await fetch(`${baseUrl}?access_token=${token}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                recipient: { id: phone },
+                message: { text: text }
+              }),
+            });
+
+            if (response.ok) {
+              success = true;
+              break; // Doğru token'ı bulduk ve gönderdik
+            } else {
+              const errData = await response.clone().json();
+              console.log(`Token failed for ${channel}, trying next...`, errData.error?.message);
+            }
+          }
         }
 
         if (response && !response.ok) {
