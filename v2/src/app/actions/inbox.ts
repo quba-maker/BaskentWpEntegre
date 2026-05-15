@@ -127,30 +127,62 @@ export async function sendMessage(phone: string, text: string) {
         PHONE_NUMBER_ID = tenantRows[0].whatsapp_phone_id || process.env.PHONE_NUMBER_ID || null;
       }
 
-      if (!META_ACCESS_TOKEN || !PHONE_NUMBER_ID) {
+      // Hangi kanaldan geldiğini bul
+      const convRows = await ctx.db.executeSafe(sql`
+        SELECT channel FROM conversations 
+        WHERE phone_number = ${phone} AND tenant_id = ${ctx.tenantId}
+        LIMIT 1
+      `);
+      const channel = convRows[0]?.channel || 'whatsapp';
+
+      if (!META_ACCESS_TOKEN) {
         console.warn("Meta credentials missing, only saving to DB");
       } else {
-        const response = await fetch(`https://graph.facebook.com/v25.0/${PHONE_NUMBER_ID}/messages`, {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${META_ACCESS_TOKEN}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            messaging_product: "whatsapp",
-            to: phone,
-            type: "text",
-            text: { body: text },
-          }),
-        });
+        let response: Response | null = null;
 
-        if (!response.ok) {
+        if (channel === 'whatsapp' && PHONE_NUMBER_ID) {
+          response = await fetch(`https://graph.facebook.com/v25.0/${PHONE_NUMBER_ID}/messages`, {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${META_ACCESS_TOKEN}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              messaging_product: "whatsapp",
+              to: phone,
+              type: "text",
+              text: { body: text },
+            }),
+          });
+        } 
+        else if (channel === 'instagram') {
+          response = await fetch(`https://graph.instagram.com/v25.0/me/messages?access_token=${META_ACCESS_TOKEN}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              recipient: { id: phone },
+              message: { text: text }
+            }),
+          });
+        }
+        else if (channel === 'messenger') {
+          response = await fetch(`https://graph.facebook.com/v25.0/me/messages?access_token=${META_ACCESS_TOKEN}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              recipient: { id: phone },
+              message: { text: text }
+            }),
+          });
+        }
+
+        if (response && !response.ok) {
           const errData = await response.json();
-          console.error("Meta API error:", errData);
+          console.error(`Meta API error (${channel}):`, errData);
           await enqueueRetry({
             tenantId: ctx.tenantId,
             phoneNumber: phone,
-            channel: "whatsapp",
+            channel: channel,
             content: text,
             error: JSON.stringify(errData).substring(0, 500),
           });
