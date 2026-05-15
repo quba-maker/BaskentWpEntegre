@@ -173,7 +173,9 @@ export async function sendMessage(phone: string, text: string) {
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 recipient: { id: phone },
-                message: { text: text }
+                message: { text: text },
+                messaging_type: "MESSAGE_TAG",
+                tag: "HUMAN_AGENT"
               }),
             });
 
