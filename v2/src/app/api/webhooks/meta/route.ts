@@ -2,19 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { neon } from "@neondatabase/serverless";
 import { waitUntil } from "@vercel/functions";
 import { withApiGuard } from "@/lib/core/api-guard";
+import { QueueService } from "@/lib/queue/queue.service";
 
 // ==========================================
-// QUBA AI — Multi-Tenant Webhook Router
-// Meta bu endpoint'i çağırır: /api/webhook
-// Gelen mesajı tenant'a göre yönlendirir
+// QUBA AI — Multi-Tenant Webhook Router (Queue-Driven)
+// Meta bu endpoint'i çağırır: /api/webhooks/meta
+// Gelen mesajı tenant'a göre yönlendirir ve QueueService'e aktarır
 // ==========================================
 
 const DATABASE_URL = process.env.DATABASE_URL!;
-
-// Vercel'in arka plan işlemlerini (waitUntil) hemen kesmemesi için maksimum süre
-export const maxDuration = 60;
-
-
+export const maxDuration = 60; // Max duration for background ops
 
 // GET — Meta Webhook doğrulama
 export async function GET(req: NextRequest) {
@@ -33,9 +30,8 @@ export async function GET(req: NextRequest) {
 }
 
 export const POST = withApiGuard(
-  { routeName: 'MetaWebhook', verifySignature: true, requireTenant: true },
+  { routeName: 'MetaWebhookQueue', verifySignature: true, requireTenant: true },
   async (ctx) => {
-    // 1. Guard zaten tenantId'yi tespit etti, signature'ı doğruladı.
     const body = (ctx.req as any).parsedBody;
     const tenant = ctx.tenantMeta;
 
@@ -43,13 +39,9 @@ export const POST = withApiGuard(
       return new NextResponse("NOT_FOUND", { status: 404 });
     }
 
-    // Dynamic import — lib/ klasörü parent directory'de
-    const { handleWhatsAppMessage } = await import("../../../../../lib/channels/whatsapp.js");
-    const { handleMessengerMessage } = await import("../../../../../lib/channels/messenger.js");
-    const { handleInstagramMessage } = await import("../../../../../lib/channels/instagram.js");
     const { WebhookDedupeService } = await import("@/lib/services/webhook-dedupe.service");
-
     const dedupeService = new WebhookDedupeService(ctx.db!);
+    const queue = new QueueService();
 
     // 1. WHATSAPP
     if (
@@ -70,8 +62,11 @@ export const POST = withApiGuard(
         return new NextResponse("EVENT_RECEIVED_DUPLICATE", { status: 200 });
       }
 
-      console.log(`📱 [WA] Tenant: ${tenant.name} (${tenant.slug})`);
-      waitUntil(handleWhatsAppMessage(body));
+      console.log(`📱 [WA] Tenant: ${tenant.name} (${tenant.slug}) - Enqueueing`);
+      
+      // Send to Queue instead of synchronous wait
+      waitUntil(queue.publish(ctx.tenantId!, 'whatsapp.message.received', body));
+      
       return new NextResponse("EVENT_RECEIVED", { status: 200 });
     }
 
@@ -92,8 +87,8 @@ export const POST = withApiGuard(
         if (isDuplicate) return new NextResponse("EVENT_RECEIVED_DUPLICATE", { status: 200 });
       }
 
-      console.log(`💬 [MSG] Tenant: ${tenant.name} (${tenant.slug})`);
-      waitUntil(handleMessengerMessage(body));
+      console.log(`💬 [MSG] Tenant: ${tenant.name} (${tenant.slug}) - Enqueueing`);
+      waitUntil(queue.publish(ctx.tenantId!, 'messenger.message.received', body));
       return new NextResponse("EVENT_RECEIVED", { status: 200 });
     }
 
@@ -113,8 +108,8 @@ export const POST = withApiGuard(
         if (isDuplicate) return new NextResponse("EVENT_RECEIVED_DUPLICATE", { status: 200 });
       }
 
-      console.log(`📸 [IG] Tenant: ${tenant.name} (${tenant.slug})`);
-      waitUntil(handleInstagramMessage(body));
+      console.log(`📸 [IG] Tenant: ${tenant.name} (${tenant.slug}) - Enqueueing`);
+      waitUntil(queue.publish(ctx.tenantId!, 'instagram.message.received', body));
       return new NextResponse("EVENT_RECEIVED", { status: 200 });
     }
 
@@ -131,39 +126,7 @@ export const POST = withApiGuard(
         if (leadgenId) {
           console.log(`📋 [Lead] ${tenant?.name || "Bilinmeyen"} — Lead: ${leadgenId}`);
           
-          const META_TOKEN = tenant?.meta_page_token || process.env.META_ACCESS_TOKEN;
-          if (META_TOKEN) {
-            const leadRes = await fetch(
-              `https://graph.facebook.com/v25.0/${leadgenId}?access_token=${META_TOKEN}`
-            );
-            const leadData = await leadRes.json();
-
-            if (leadData?.field_data) {
-              const fields: Record<string, string> = {};
-              leadData.field_data.forEach((f: any) => {
-                fields[f.name] = f.values?.[0] || "";
-              });
-
-              // executeSafe ile Zero-Trust RLS enforced yazılım.
-              // Note: ctx.db! garantilidir çünkü requireTenant: true
-              waitUntil(
-                ctx.db!.executeSafe(
-                  neon(process.env.DATABASE_URL!)`INSERT INTO leads (
-                    tenant_id, source, patient_name, phone_number, email, department, notes, stage
-                  ) VALUES (
-                    ${tenant.id},
-                    'meta_lead_ad',
-                    ${fields.full_name || fields.name || ""},
-                    ${fields.phone_number || fields.phone || ""},
-                    ${fields.email || ""},
-                    ${fields.department || fields.interest || ""},
-                    ${"Lead Ad - Sayfa: " + pageId},
-                    'new'
-                  ) ON CONFLICT DO NOTHING`
-                )
-              );
-            }
-          }
+          waitUntil(queue.publish(ctx.tenantId!, 'meta.lead.received', { leadgenId, pageId, tenant }));
         }
       } catch (e: any) {
         console.error("Lead webhook hatası:", e.message);
