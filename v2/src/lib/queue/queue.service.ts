@@ -42,7 +42,7 @@ export class QueueService {
         url: endpoint,
         body: message,
         retries: 3, // Auto retry up to 3 times with exponential backoff
-        delay: delayMs ? `${delayMs}ms` : undefined,
+        delay: delayMs ? `${Math.max(1, Math.round(delayMs / 1000))}s` : undefined,
         headers: {
           "x-tenant-id": tenantId,
           "x-topic": topic
