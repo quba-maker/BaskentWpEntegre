@@ -120,4 +120,35 @@ export class MessageService {
       throw e;
     }
   }
+
+  /**
+   * Send outgoing WhatsApp message via Meta Graph API
+   */
+  async sendWhatsAppMessage(phoneId: string, accessToken: string, to: string, content: string): Promise<boolean> {
+    const url = `https://graph.facebook.com/v25.0/${phoneId}/messages`;
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${accessToken}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          messaging_product: "whatsapp",
+          recipient_type: "individual",
+          to: to,
+          type: "text",
+          text: { body: content }
+        })
+      });
+      if (!response.ok) {
+        const err = await response.text();
+        throw new Error(`WhatsApp API Error: ${err}`);
+      }
+      return true;
+    } catch (e: any) {
+      console.error("[MessageService] WhatsApp API request failed", e);
+      throw e;
+    }
+  }
 }
