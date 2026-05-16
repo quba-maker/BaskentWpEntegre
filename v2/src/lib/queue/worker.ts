@@ -184,15 +184,18 @@ export class QueueWorkerEngine {
     }
 
     // 8. WhatsApp Send
-    if (!tenantConfig.whatsappPhoneNumberId || !tenantConfig.accessToken) {
+    const accessToken = tenantConfig.accessToken || process.env.WHATSAPP_TOKEN || process.env.META_ACCESS_TOKEN || '';
+    const phoneId = tenantConfig.whatsappPhoneNumberId || process.env.PHONE_NUMBER_ID || '';
+
+    if (!phoneId || !accessToken) {
        this.log.error(`[WHATSAPP_FAILED] Missing Meta credentials for tenant`, undefined, { tenantId, traceId });
        throw new Error("Missing Meta credentials");
     }
 
     try {
       await msgService.sendWhatsAppMessage(
-        tenantConfig.whatsappPhoneNumberId,
-        tenantConfig.accessToken,
+        phoneId,
+        accessToken,
         phoneNumber,
         finalResponseText
       );
