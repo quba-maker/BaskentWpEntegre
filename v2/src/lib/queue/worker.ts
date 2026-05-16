@@ -55,7 +55,7 @@ export class QueueWorkerEngine {
     const tenantConfig = await resolver.resolve(payload);
     
     if (!tenantConfig) {
-      this.log.error(`[TENANT_RESOLUTION_FAILED] Could not resolve tenant config`, { tenantId, traceId });
+      this.log.error(`[TENANT_RESOLUTION_FAILED] Could not resolve tenant config`, undefined, { tenantId, traceId });
       throw new Error(`Tenant resolution failed for ${tenantId}`);
     }
     
@@ -185,7 +185,7 @@ export class QueueWorkerEngine {
 
     // 8. WhatsApp Send
     if (!tenantConfig.whatsappPhoneNumberId || !tenantConfig.accessToken) {
-       this.log.error(`[WHATSAPP_FAILED] Missing Meta credentials for tenant`, { tenantId, traceId });
+       this.log.error(`[WHATSAPP_FAILED] Missing Meta credentials for tenant`, undefined, { tenantId, traceId });
        throw new Error("Missing Meta credentials");
     }
 
