@@ -45,10 +45,11 @@ export class QueueWorkerEngine {
    * Ensures no message is ever silently dropped.
    */
   public async moveToDLQ(topic: string, tenantId: string, payload: any, error: any) {
-    this.log.error(`[DLQ] Moving failed event to Dead Letter Queue`, {
+    const errObj = error instanceof Error ? error : new Error(String(error));
+    this.log.error(`[DLQ] Moving failed event to Dead Letter Queue`, errObj, {
       topic,
       tenantId,
-      error: error?.message || error
+      payload
     });
     // TODO: In Phase 2, persist this to a `dead_letter_jobs` table in Postgres for Observability Dashboard
   }
