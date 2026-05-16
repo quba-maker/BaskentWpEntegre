@@ -11,6 +11,7 @@
   "dependencies": {
     "@base-ui/react": "^1.4.1",
     "@neondatabase/serverless": "^1.1.0",
+    "@upstash/qstash": "^2.11.0",
     "@vercel/functions": "^1.6.0",
     "axios": "^1.7.9",
     "bcryptjs": "^2.4.3",
