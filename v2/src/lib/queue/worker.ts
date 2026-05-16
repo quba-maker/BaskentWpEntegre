@@ -3,7 +3,7 @@ import { withTenantDB } from "@/lib/core/tenant-db";
 import { ConversationService } from "@/lib/services/conversation.service";
 import { MessageService } from "@/lib/services/message.service";
 import { WorkflowService, ConversationPhase } from "@/lib/services/workflow.service";
-import { AIOrchestrator } from "@/lib/services/ai/orchestrator";
+import { AIOrchestrator, ChatMessage } from "@/lib/services/ai/orchestrator";
 import { ResponsePolicy } from "@/lib/services/ai/response-policy";
 import { PromptBuilder } from "@/lib/services/ai/prompt-builder";
 import { TenantResolverService } from "@/lib/services/meta/tenant-resolver.service";
@@ -130,10 +130,10 @@ export class QueueWorkerEngine {
     const systemPromptText = PromptBuilder.buildSystemPrompt(tenantPrompt, targetPhase, false);
     
     const history = await convService.getHistory(phoneNumber, 10);
-    const aiMessages = [
-      { role: 'system' as const, content: systemPromptText },
+    const aiMessages: ChatMessage[] = [
+      { role: 'system' as const, content: String(systemPromptText) },
       ...history,
-      { role: 'user' as const, content: content } // Add current message explicitly if not in history
+      { role: 'user' as const, content: String(content) } // Add current message explicitly if not in history
     ];
 
     this.log.info(`[PROMPT_BUILT] Prepared LLM payload`, { historyLength: history.length, traceId });

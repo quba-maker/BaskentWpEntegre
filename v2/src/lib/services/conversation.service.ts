@@ -92,8 +92,8 @@ export class ConversationService {
     `);
     
     return prev.reverse().map((m: any) => ({
-      role: m.direction === 'in' ? 'user' : 'model',
-      parts: [{ text: m.content }]
+      role: (m.direction === 'in' ? 'user' : 'assistant') as 'user' | 'assistant',
+      content: String(m.content)
     }));
   }
 
