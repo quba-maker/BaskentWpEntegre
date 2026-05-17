@@ -27,6 +27,19 @@ export interface TenantBrain {
   // readonly policies: PolicyRegistry;
 }
 
+function deepFreeze<T>(obj: T): T {
+  if (obj === null || typeof obj !== "object") {
+    return obj;
+  }
+  Object.keys(obj).forEach((prop) => {
+    const value = (obj as any)[prop];
+    if (typeof value === "object" && value !== null && !Object.isFrozen(value)) {
+      deepFreeze(value);
+    }
+  });
+  return Object.freeze(obj);
+}
+
 /**
  * PHASE 1 - TENANT BRAIN CONTAINER
  * Creates an immutable, request-scoped TenantBrain.
@@ -59,15 +72,17 @@ export function createTenantBrain(
     }
   };
 
-  return Object.freeze({
+  const brain = {
     id: instanceId,
-    context: Object.freeze({
+    context: {
       tenantId,
       channel,
       webhookPayloadId,
       config
-    }),
-    namespaces: Object.freeze(namespaces),
-    prompts: Object.freeze(prompts)
-  });
+    },
+    namespaces,
+    prompts
+  };
+
+  return deepFreeze(brain) as unknown as TenantBrain;
 }

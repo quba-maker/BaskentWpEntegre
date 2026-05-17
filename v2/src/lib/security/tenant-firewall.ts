@@ -1,57 +1,59 @@
-import { TenantBrain } from '../brain/tenant-brain';
-import { logger } from '../core/logger';
+import { TenantBrain } from "../brain/tenant-brain";
+import { SecurityTelemetry } from "./telemetry";
 
-/**
- * PHASE 6 - TENANT ASSERTION FIREWALL
- * The absolute last line of defense before any cross-boundary operation 
- * (DB Write, AI Call, Vector Search).
- */
-export class TenantFirewall {
-  private static log = logger.withContext({ module: 'TenantFirewall' });
-
-  /**
-   * Asserts that a given entity strictly belongs to the executing Brain.
-   * If any mismatch is found, it throws a fatal security error to prevent contamination.
-   */
-  public static assertTenantIsolation(
-    brain: TenantBrain,
-    entityTenantId: string,
-    operationContext: string
-  ): void {
-    if (brain.context.tenantId !== entityTenantId) {
-      
-      const errorMsg = `[TENANT_FIREWALL_BLOCK] Cross-Tenant Violation Detected in ${operationContext}`;
-      
-      this.log.error(errorMsg, undefined, {
-        brainTenantId: brain.context.tenantId,
-        entityTenantId,
-        operationContext,
-        webhookPayloadId: brain.context.webhookPayloadId
-      });
-
-      // Move to DLQ or take protective action here ideally.
-      // For now, throw and crash the worker safely.
-      throw new Error(errorMsg);
-    }
-
-    this.log.debug(`[TENANT_FIREWALL_PASS] Isolation verified for ${operationContext}`);
-  }
-
-  /**
-   * Ensures that a webhook source truly matches the expected tenant.
-   */
-  public static assertWebhookSource(
-    brain: TenantBrain,
-    expectedPhoneNumberId: string,
-    actualPhoneNumberId: string
-  ): void {
-    if (expectedPhoneNumberId !== actualPhoneNumberId) {
-      const errorMsg = `[TENANT_FIREWALL_BLOCK] Webhook Spoofing / Crossover Detected. Expected: ${expectedPhoneNumberId}, Actual: ${actualPhoneNumberId}`;
-      this.log.error(errorMsg, undefined, {
-        tenantId: brain.context.tenantId,
-        webhookPayloadId: brain.context.webhookPayloadId
-      });
-      throw new Error(errorMsg);
-    }
+export class SecurityIsolationError extends Error {
+  constructor(message: string) {
+    super(`[TENANT_ISOLATION_FAULT] ${message}`);
+    this.name = "SecurityIsolationError";
   }
 }
+
+export interface ResourceContext {
+  resourceType: "prompt" | "cache" | "vector" | "webhook" | "conversation" | "lead" | "memory_namespace" | "fsm";
+  resourceTenantId: string;
+  resourceId?: string;
+}
+
+export const TenantFirewall = {
+  /**
+   * Enforces strict tenant isolation between the execution brain and the accessed resource.
+   * Fails closed: If any mismatch is detected, execution is immediately blocked.
+   */
+  assertTenantIsolation: (
+    brain: TenantBrain,
+    resource: ResourceContext
+  ) => {
+    if (!brain || !brain.context || !brain.context.tenantId) {
+      SecurityTelemetry.log("SECURITY_PANIC", "UNKNOWN", "UNKNOWN", null, {
+        reason: "TenantBrain is missing or invalid in firewall check",
+        resource
+      });
+      throw new SecurityIsolationError("Execution brain is invalid or missing tenant context.");
+    }
+
+    if (!resource || !resource.resourceTenantId) {
+      SecurityTelemetry.log("SECURITY_PANIC", brain.context.tenantId, brain.context.webhookPayloadId, null, {
+        reason: "Target resource is missing tenant association",
+        resourceType: resource?.resourceType
+      });
+      throw new SecurityIsolationError(`Target resource [${resource?.resourceType || 'UNKNOWN'}] lacks tenant association. Access denied.`);
+    }
+
+    if (brain.context.tenantId !== resource.resourceTenantId) {
+      SecurityTelemetry.log("CROSS_TENANT_ATTEMPT", brain.context.tenantId, brain.context.webhookPayloadId, null, {
+        resourceType: resource.resourceType,
+        targetTenantId: resource.resourceTenantId,
+        resourceId: resource.resourceId
+      });
+      
+      // Moving event to DLQ is handled by the upstream error handler catching this SecurityIsolationError.
+      throw new SecurityIsolationError(`Cross-tenant breach attempted. Brain tenant: ${brain.context.tenantId}, Resource tenant: ${resource.resourceTenantId}`);
+    }
+
+    // Success
+    SecurityTelemetry.log("TENANT_FIREWALL_PASS", brain.context.tenantId, brain.context.webhookPayloadId, null, {
+      resourceType: resource.resourceType,
+      resourceId: resource.resourceId
+    });
+  }
+};

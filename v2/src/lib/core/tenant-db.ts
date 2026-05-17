@@ -1,5 +1,6 @@
 import { logger } from "./logger";
 import { sql } from "@/lib/db";
+import { TenantQueryGuard } from "../security/tenant-query-guard";
 
 // ==========================================
 // QUBA AI — Tenant-Aware DB Wrapper (RLS Enforced)
@@ -27,6 +28,11 @@ export class TenantDB {
     const startTime = Date.now();
     
     try {
+      if (typeof query === 'string' && !this.isAdmin) {
+        // Enforce Phase 5 restrictions on raw strings
+        TenantQueryGuard.assertTenantBoundQuery(this.tenantId, query, params || []);
+      }
+
       const q = typeof query === 'string' 
         ? this.sql.query(query, params || []) 
         : query;
@@ -62,7 +68,15 @@ export class TenantDB {
   async executeTransaction(queries: any[]) {
     const startTime = Date.now();
     try {
-      const formattedQueries = queries.map(q => typeof q === 'string' ? this.sql.query(q) : q);
+      const formattedQueries = queries.map(q => {
+        if (typeof q === 'string') {
+          if (!this.isAdmin) {
+            TenantQueryGuard.assertTenantBoundQuery(this.tenantId, q, []);
+          }
+          return this.sql.query(q);
+        }
+        return q;
+      });
       
       const result = await this.sql.transaction([
         this.isAdmin 

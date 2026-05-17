@@ -64,7 +64,10 @@ export class QueueWorkerEngine {
     }
 
     // Security Assertion
-    TenantFirewall.assertTenantIsolation(brain, tenantId, 'QueueExecution');
+    TenantFirewall.assertTenantIsolation(brain, { 
+      resourceType: 'webhook', 
+      resourceTenantId: tenantId 
+    });
     
     this.log.info(`[TENANT_BRAIN_BOUND] Brain ${brain.id} locked to context`, { tenantSlug: brain.context.tenantId, traceId });
 
