@@ -43,10 +43,10 @@ export default function DashboardPage() {
       <div className="max-w-4xl mx-auto p-6 pb-20 space-y-6">
         {/* Header */}
         <div>
-          <h1 className="text-[22px] font-bold text-[#1D1D1F]">
+          <h1 className="text-[22px] font-bold text-[--q-text-primary]">
             Hoş geldiniz 👋
           </h1>
-          <p className="text-[13px] text-[#86868B] mt-1">
+          <p className="text-[13px] text-[--q-text-secondary] mt-1">
             {stats.tenantName} — Genel Bakış
           </p>
         </div>

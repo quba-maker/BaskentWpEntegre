@@ -64,6 +64,7 @@
   --q-orange-bg: rgba(255, 149, 0, 0.1);
   --q-red-bg: rgba(255, 59, 48, 0.1);
   --q-purple-bg: rgba(88, 86, 214, 0.1);
+  --q-purple-alt-bg: rgba(175, 82, 222, 0.05);
 
   /* -------- SPACING SCALE -------- */
   /* Based on 4px grid */

@@ -2,10 +2,10 @@ export default function TermsPage() {
   return (
     <div className="min-h-screen bg-white">
       <div className="max-w-3xl mx-auto px-6 py-16">
-        <h1 className="text-3xl font-bold text-[#1D1D1F] mb-2">Kullanım Koşulları</h1>
-        <p className="text-sm text-[#86868B] mb-10">Son güncelleme: 13 Mayıs 2026</p>
+        <h1 className="text-3xl font-bold text-[--q-text-primary] mb-2">Kullanım Koşulları</h1>
+        <p className="text-sm text-[--q-text-secondary] mb-10">Son güncelleme: 13 Mayıs 2026</p>
 
-        <div className="space-y-8 text-[#1D1D1F] text-[15px] leading-relaxed">
+        <div className="space-y-8 text-[--q-text-primary] text-[15px] leading-relaxed">
           <section>
             <h2 className="text-lg font-semibold mb-3">1. Hizmet Tanımı</h2>
             <p>
@@ -83,7 +83,7 @@ export default function TermsPage() {
         </div>
 
         <div className="mt-16 pt-8 border-t border-black/5">
-          <p className="text-xs text-[#86868B]">© 2026 Quba AI — Quba Medya tarafından geliştirilmiştir.</p>
+          <p className="text-xs text-[--q-text-secondary]">© 2026 Quba AI — Quba Medya tarafından geliştirilmiştir.</p>
         </div>
       </div>
     </div>

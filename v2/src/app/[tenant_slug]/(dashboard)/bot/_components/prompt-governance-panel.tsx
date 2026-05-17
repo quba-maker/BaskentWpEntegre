@@ -58,8 +58,8 @@ export function PromptGovernancePanel({
               onClick={() => onTabChange(ch.id)}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-200 ${
                 activeTab === ch.id
-                  ? "bg-white text-[#1D1D1F] shadow-sm"
-                  : "text-[#86868B] hover:text-[#1D1D1F]"
+                  ? "bg-white text-[--q-text-primary] shadow-sm"
+                  : "text-[--q-text-secondary] hover:text-[--q-text-primary]"
               }`}
             >
               <Icon className="w-4 h-4" />
@@ -70,9 +70,9 @@ export function PromptGovernancePanel({
       </div>
 
       {/* Editor Card */}
-      <div className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden flex-1 flex flex-col">
+      <div className="bg-white rounded-2xl border border-[--q-border-default] shadow-sm overflow-hidden flex-1 flex flex-col">
         {/* Editor Header */}
-        <div className="px-6 py-4 border-b border-black/5 flex items-center justify-between">
+        <div className="px-6 py-4 border-b border-[--q-border-default] flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div 
               className="w-8 h-8 rounded-lg flex items-center justify-center"
@@ -81,8 +81,8 @@ export function PromptGovernancePanel({
               <activeChannel.icon className="w-4 h-4" style={{ color: activeChannel.color }} />
             </div>
             <div>
-              <h3 className="text-base font-bold text-[#1D1D1F]">{activeChannel.label} Prompt</h3>
-              <p className="text-[11px] text-[#86868B] font-medium">
+              <h3 className="text-base font-bold text-[--q-text-primary]">{activeChannel.label} Prompt</h3>
+              <p className="text-[11px] text-[--q-text-secondary] font-medium">
                 {settings[activeChannel.promptKey]?.updated_at 
                   ? `Son güncelleme: ${new Date(settings[activeChannel.promptKey].updated_at).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`
                   : "Varsayılan prompt kullanılıyor"
@@ -95,7 +95,7 @@ export function PromptGovernancePanel({
             {/* Reset Button */}
             <button
               onClick={handleReset}
-              className="px-3 py-1.5 text-xs font-semibold text-[#FF9500] bg-[#FF9500]/10 border border-[#FF9500]/20 rounded-lg hover:bg-[#FF9500]/20 transition-colors flex items-center gap-1.5"
+              className="px-3 py-1.5 text-xs font-semibold text-[--q-orange] bg-[--q-orange-bg] border border-[--q-orange] rounded-lg hover:bg-[--q-orange-bg] transition-colors flex items-center gap-1.5"
             >
               <RotateCcw className="w-3.5 h-3.5" />
               Varsayılana Dön
@@ -107,8 +107,8 @@ export function PromptGovernancePanel({
               disabled={saving === activeTab}
               className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 ${
                 saved === activeTab
-                  ? "bg-[#34C759] text-white"
-                  : "bg-[#007AFF] text-white hover:bg-[#0056CC] shadow-sm"
+                  ? "bg-[--q-green] text-white"
+                  : "bg-[--q-blue] text-white hover:bg-[--q-blue-hover] shadow-sm"
               }`}
             >
               {saving === activeTab ? (
@@ -128,7 +128,7 @@ export function PromptGovernancePanel({
           <textarea
             value={prompts[activeTab] || ""}
             onChange={(e) => onPromptChange(activeTab, e.target.value)}
-            className="w-full h-full min-h-[400px] p-6 text-[13px] leading-relaxed font-mono text-[#1D1D1F] bg-[#FAFAFA] border-0 outline-none resize-none placeholder:text-[#C7C7CC]"
+            className="w-full h-full min-h-[400px] p-6 text-[13px] leading-relaxed font-mono text-[--q-text-primary] bg-[--q-bg-secondary] border-0 outline-none resize-none placeholder:text-[--q-text-placeholder]"
             placeholder={`${activeChannel.label} için sistem prompt'unu buraya yazın...`}
             spellCheck={false}
           />

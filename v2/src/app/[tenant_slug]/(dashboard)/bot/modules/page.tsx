@@ -8,18 +8,19 @@ import {
   Filter, MessageCircle, BarChart3, AlertTriangle, Sparkles
 } from "lucide-react";
 import { PageLoader } from "@/components/ui/shared-states";
+import { SectionCard } from "@/components/governance";
 
 // ==========================================
 // QUBA AI — AI Module Manager Page
-// Tenant bazlı AI pipeline yönetimi
+// Authority: AI pipeline module toggling & config
 // ==========================================
 
 const TYPE_META: Record<string, { label: string; icon: any; color: string }> = {
-  [MODULE_TYPES.PREPROCESSOR]: { label: "Ön İşleme", icon: Filter, color: "#007AFF" },
-  [MODULE_TYPES.PROMPT_BUILDER]: { label: "Prompt Üretici", icon: MessageCircle, color: "#5856D6" },
-  [MODULE_TYPES.RESPONSE_FILTER]: { label: "Yanıt Filtresi", icon: Settings2, color: "#FF9500" },
-  [MODULE_TYPES.ANALYTICS]: { label: "Analitik", icon: BarChart3, color: "#34C759" },
-  [MODULE_TYPES.ESCALATION]: { label: "Yönlendirme", icon: AlertTriangle, color: "#FF3B30" },
+  [MODULE_TYPES.PREPROCESSOR]: { label: "Ön İşleme", icon: Filter, color: "var(--q-blue)" },
+  [MODULE_TYPES.PROMPT_BUILDER]: { label: "Prompt Üretici", icon: MessageCircle, color: "var(--q-purple)" },
+  [MODULE_TYPES.RESPONSE_FILTER]: { label: "Yanıt Filtresi", icon: Settings2, color: "var(--q-orange)" },
+  [MODULE_TYPES.ANALYTICS]: { label: "Analitik", icon: BarChart3, color: "var(--q-green)" },
+  [MODULE_TYPES.ESCALATION]: { label: "Yönlendirme", icon: AlertTriangle, color: "var(--q-red)" },
 };
 
 export default function AIModulesPage() {
@@ -62,16 +63,16 @@ export default function AIModulesPage() {
       <div className="max-w-2xl mx-auto p-6 pb-20 space-y-6">
         {/* Header */}
         <div>
-          <h1 className="text-[22px] font-bold text-[#1D1D1F] flex items-center gap-2">
-            <Cpu className="w-6 h-6 text-[#AF52DE]" /> AI Modülleri
+          <h1 className="text-[22px] font-bold flex items-center gap-2" style={{ color: "var(--q-text-primary)" }}>
+            <Cpu className="w-6 h-6" style={{ color: "var(--q-purple-alt)" }} /> AI Modülleri
           </h1>
-          <p className="text-[13px] text-[#86868B] mt-1">
+          <p className="text-[13px] mt-1" style={{ color: "var(--q-text-secondary)" }}>
             {activeCount}/{modules.length} modül aktif — AI pipeline'ınızı özelleştirin
           </p>
         </div>
 
         {/* Pipeline Visual */}
-        <div className="flex items-center gap-1 px-4 py-3 bg-gradient-to-r from-[#007AFF]/5 via-[#5856D6]/5 to-[#AF52DE]/5 rounded-xl">
+        <div className="flex items-center gap-1 px-4 py-3 rounded-xl" style={{ background: "linear-gradient(to right, var(--q-blue-bg), var(--q-purple-bg), var(--q-purple-alt-bg))" }}>
           {Object.entries(TYPE_META).map(([type, meta], i) => {
             const count = modules.filter((m) => m.enabled && AI_MODULES[m.moduleId]?.type === type).length;
             return (
@@ -82,7 +83,7 @@ export default function AIModulesPage() {
                   <span className="bg-white px-1.5 py-0.5 rounded text-[10px]">{count}</span>
                 </div>
                 {i < Object.keys(TYPE_META).length - 1 && (
-                  <span className="text-[#86868B]/30 mx-1">→</span>
+                  <span className="mx-1" style={{ color: "var(--q-text-placeholder)" }}>→</span>
                 )}
               </div>
             );
@@ -101,37 +102,36 @@ export default function AIModulesPage() {
               if (!info) return null;
 
               return (
-                <div
+                <SectionCard
                   key={mod.moduleId}
-                  className={`bg-white rounded-xl border shadow-sm transition-all ${
-                    mod.enabled ? "border-black/5" : "border-black/3 opacity-60"
-                  }`}
+                  className={!mod.enabled ? "opacity-60" : ""}
                 >
-                  <div className="flex items-center justify-between p-4">
+                  <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3 flex-1 min-w-0">
                       <div
                         className="w-9 h-9 rounded-lg flex items-center justify-center text-white text-[13px] font-bold"
-                        style={{ backgroundColor: mod.enabled ? group.color : "#86868B" }}
+                        style={{ backgroundColor: mod.enabled ? group.color : "var(--q-text-secondary)" }}
                       >
                         {info.name.charAt(0)}
                       </div>
                       <div className="min-w-0">
-                        <h3 className="text-[14px] font-semibold text-[#1D1D1F] truncate">{info.name}</h3>
-                        <p className="text-[11px] text-[#86868B] truncate">{info.description}</p>
+                        <h3 className="text-[14px] font-semibold truncate" style={{ color: "var(--q-text-primary)" }}>{info.name}</h3>
+                        <p className="text-[11px] truncate" style={{ color: "var(--q-text-secondary)" }}>{info.description}</p>
                       </div>
                     </div>
 
                     <div className="flex items-center gap-2 flex-shrink-0">
-                      <span className="text-[10px] text-[#86868B] font-mono">v{info.version}</span>
+                      <span className="text-[10px] font-mono" style={{ color: "var(--q-text-secondary)" }}>v{info.version}</span>
                       
                       {Object.keys(info.configSchema).length > 0 && (
                         <button
                           onClick={() => setExpanded(expanded === mod.moduleId ? null : mod.moduleId)}
-                          className="p-1.5 hover:bg-black/5 rounded-lg transition-colors"
+                          className="p-1.5 rounded-lg transition-colors"
+                          style={{ color: "var(--q-text-secondary)" }}
                         >
                           {expanded === mod.moduleId ? 
-                            <ChevronUp className="w-4 h-4 text-[#86868B]" /> : 
-                            <ChevronDown className="w-4 h-4 text-[#86868B]" />}
+                            <ChevronUp className="w-4 h-4" /> : 
+                            <ChevronDown className="w-4 h-4" />}
                         </button>
                       )}
                       
@@ -141,11 +141,11 @@ export default function AIModulesPage() {
                         className="transition-transform active:scale-95"
                       >
                         {toggling === mod.moduleId ? (
-                          <Loader2 className="w-7 h-7 animate-spin text-[#86868B]" />
+                          <Loader2 className="w-7 h-7 animate-spin" style={{ color: "var(--q-text-secondary)" }} />
                         ) : mod.enabled ? (
                           <ToggleRight className="w-7 h-7" style={{ color: group.color }} />
                         ) : (
-                          <ToggleLeft className="w-7 h-7 text-[#86868B]" />
+                          <ToggleLeft className="w-7 h-7" style={{ color: "var(--q-text-secondary)" }} />
                         )}
                       </button>
                     </div>
@@ -153,11 +153,11 @@ export default function AIModulesPage() {
 
                   {/* Config Panel */}
                   {expanded === mod.moduleId && Object.keys(info.configSchema).length > 0 && (
-                    <div className="px-4 pb-4 pt-0 border-t border-black/5 mt-0">
-                      <div className="space-y-3 pt-3">
+                    <div className="pt-3 mt-3" style={{ borderTop: "1px solid var(--q-border-default)" }}>
+                      <div className="space-y-3">
                         {Object.entries(info.configSchema).map(([key, schema]: [string, any]) => (
                           <div key={key}>
-                            <label className="text-[11px] font-medium text-[#86868B] uppercase tracking-wide">
+                            <label className="text-[11px] font-medium uppercase tracking-wide" style={{ color: "var(--q-text-secondary)" }}>
                               {key.replace(/([A-Z])/g, ' $1').replace(/^./, s => s.toUpperCase())}
                             </label>
                             {schema.type === 'select' ? (
@@ -167,7 +167,8 @@ export default function AIModulesPage() {
                                   await updateAIModuleConfig(mod.moduleId, { [key]: e.target.value });
                                   load();
                                 }}
-                                className="w-full mt-1 px-3 py-2 text-[13px] bg-[#F5F5F7] rounded-lg outline-none"
+                                className="w-full mt-1 px-3 py-2 text-[13px] rounded-lg outline-none"
+                                style={{ backgroundColor: "var(--q-bg-secondary)" }}
                               >
                                 {schema.options.map((o: string) => (
                                   <option key={o} value={o}>{o}</option>
@@ -183,8 +184,8 @@ export default function AIModulesPage() {
                                   className="text-[13px]"
                                 >
                                   {mod.config[key] ? 
-                                    <ToggleRight className="w-6 h-6 text-[#34C759]" /> : 
-                                    <ToggleLeft className="w-6 h-6 text-[#86868B]" />}
+                                    <ToggleRight className="w-6 h-6" style={{ color: "var(--q-green)" }} /> : 
+                                    <ToggleLeft className="w-6 h-6" style={{ color: "var(--q-text-secondary)" }} />}
                                 </button>
                               </div>
                             ) : schema.type === 'textarea' ? (
@@ -193,7 +194,8 @@ export default function AIModulesPage() {
                                 onBlur={async (e) => {
                                   await updateAIModuleConfig(mod.moduleId, { [key]: e.target.value });
                                 }}
-                                className="w-full mt-1 px-3 py-2 text-[13px] bg-[#F5F5F7] rounded-lg outline-none resize-none h-20"
+                                className="w-full mt-1 px-3 py-2 text-[13px] rounded-lg outline-none resize-none h-20"
+                                style={{ backgroundColor: "var(--q-bg-secondary)" }}
                                 placeholder={schema.default}
                               />
                             ) : (
@@ -204,7 +206,8 @@ export default function AIModulesPage() {
                                   const val = schema.type === 'number' ? Number(e.target.value) : e.target.value;
                                   await updateAIModuleConfig(mod.moduleId, { [key]: val });
                                 }}
-                                className="w-full mt-1 px-3 py-2 text-[13px] bg-[#F5F5F7] rounded-lg outline-none"
+                                className="w-full mt-1 px-3 py-2 text-[13px] rounded-lg outline-none"
+                                style={{ backgroundColor: "var(--q-bg-secondary)" }}
                               />
                             )}
                           </div>
@@ -212,19 +215,19 @@ export default function AIModulesPage() {
                       </div>
                     </div>
                   )}
-                </div>
+                </SectionCard>
               );
             })}
           </div>
         ))}
 
         {/* Info */}
-        <div className="bg-[#AF52DE]/5 border border-[#AF52DE]/10 rounded-xl p-4">
+        <div className="rounded-xl p-4" style={{ backgroundColor: "var(--q-purple-alt-bg)", border: "1px solid var(--q-purple-alt)" }}>
           <div className="flex items-start gap-2">
-            <Sparkles className="w-4 h-4 text-[#AF52DE] mt-0.5" />
+            <Sparkles className="w-4 h-4 mt-0.5" style={{ color: "var(--q-purple-alt)" }} />
             <div>
-              <p className="text-[13px] font-medium text-[#1D1D1F]">AI Pipeline Nasıl Çalışır?</p>
-              <p className="text-[12px] text-[#86868B] mt-1">
+              <p className="text-[13px] font-medium" style={{ color: "var(--q-text-primary)" }}>AI Pipeline Nasıl Çalışır?</p>
+              <p className="text-[12px] mt-1" style={{ color: "var(--q-text-secondary)" }}>
                 Mesaj geldiğinde modüller sırayla çalışır: Ön İşleme → Prompt Üretici → AI Yanıt → Yanıt Filtresi → Analitik → Yönlendirme.
                 Her modülü açıp kapatabilir ve yapılandırabilirsiniz.
               </p>

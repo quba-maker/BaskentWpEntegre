@@ -26,8 +26,8 @@ export function BotPerformancePanel({ stats, statsPeriod, onPeriodChange }: BotP
   return (
     <div className="mb-8">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-bold text-[#1D1D1F] flex items-center gap-2">
-          <Activity className="w-5 h-5 text-[#86868B]" />
+        <h2 className="text-lg font-bold text-[--q-text-primary] flex items-center gap-2">
+          <Activity className="w-5 h-5 text-[--q-text-secondary]" />
           Bot Performansı
         </h2>
         {/* Apple-style Segmented Control */}
@@ -38,8 +38,8 @@ export function BotPerformancePanel({ stats, statsPeriod, onPeriodChange }: BotP
               onClick={() => onPeriodChange(opt.value)}
               className={`px-3 py-1 text-[12px] font-semibold rounded-md transition-all duration-200 ${
                 statsPeriod === opt.value
-                  ? "bg-white text-[#1D1D1F] shadow-sm"
-                  : "text-[#86868B] hover:text-[#1D1D1F]"
+                  ? "bg-white text-[--q-text-primary] shadow-sm"
+                  : "text-[--q-text-secondary] hover:text-[--q-text-primary]"
               }`}
             >
               {opt.label}
@@ -48,10 +48,10 @@ export function BotPerformancePanel({ stats, statsPeriod, onPeriodChange }: BotP
         </div>
       </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <StatCard icon={Activity} label="Bot Mesajı" value={stats.weeklyMessages} color="#007AFF" />
-        <StatCard icon={TrendingUp} label="Bot Başarı Oranı" value={`%${stats.botSuccessRate}`} color="#34C759" />
-        <StatCard icon={Users} label="İnsana Devir" value={`%${stats.handoverRate}`} color="#FF9500" />
-        <StatCard icon={Timer} label="Ort. Yanıt Süresi" value={stats.avgResponseMin > 0 ? `${stats.avgResponseMin} dk` : "<1 dk"} color="#5856D6" />
+        <StatCard icon={Activity} label="Bot Mesajı" value={stats.weeklyMessages} color="var(--q-blue)" />
+        <StatCard icon={TrendingUp} label="Bot Başarı Oranı" value={`%${stats.botSuccessRate}`} color="var(--q-green)" />
+        <StatCard icon={Users} label="İnsana Devir" value={`%${stats.handoverRate}`} color="var(--q-orange)" />
+        <StatCard icon={Timer} label="Ort. Yanıt Süresi" value={stats.avgResponseMin > 0 ? `${stats.avgResponseMin} dk` : "<1 dk"} color="var(--q-purple)" />
       </div>
     </div>
   );

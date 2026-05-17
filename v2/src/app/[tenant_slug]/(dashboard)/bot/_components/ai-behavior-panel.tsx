@@ -22,16 +22,16 @@ interface AIBehaviorPanelProps {
 export function AIBehaviorPanel({ botConfig, onConfigChange }: AIBehaviorPanelProps) {
   return (
     <div className="mt-8">
-      <h2 className="text-lg font-bold text-[#1D1D1F] mb-4 flex items-center gap-2">
-        <Settings2 className="w-5 h-5 text-[#86868B]" />
+      <h2 className="text-lg font-bold text-[--q-text-primary] mb-4 flex items-center gap-2">
+        <Settings2 className="w-5 h-5 text-[--q-text-secondary]" />
         Bot Davranış Ayarları
       </h2>
       
-      <div className="bg-white rounded-2xl border border-black/5 shadow-sm divide-y divide-black/5">
+      <div className="bg-white rounded-2xl border border-[--q-border-default] shadow-sm divide-y divide-black/5">
         {/* Auto Greeting */}
         <SettingRow
           icon={Zap}
-          iconColor="#FF9500"
+          iconColor="var(--q-orange)"
           title="Otonom Karşılama"
           description="Yeni lead geldiğinde otomatik WhatsApp mesajı gönder"
         >
@@ -44,14 +44,14 @@ export function AIBehaviorPanel({ botConfig, onConfigChange }: AIBehaviorPanelPr
         {/* Greeting Language */}
         <SettingRow
           icon={Globe}
-          iconColor="#007AFF"
+          iconColor="var(--q-blue)"
           title="Karşılama Dili"
           description="Otomatik karşılama mesajının dili"
         >
           <select
             value={botConfig.greeting_language}
             onChange={(e) => onConfigChange("greeting_language", e.target.value)}
-            className="px-3 py-1.5 text-sm font-semibold text-[#1D1D1F] bg-black/[0.04] border-0 rounded-lg outline-none cursor-pointer"
+            className="px-3 py-1.5 text-sm font-semibold text-[--q-text-primary] bg-black/[0.04] border-0 rounded-lg outline-none cursor-pointer"
           >
             <option value="auto">Otomatik (Numara bazlı)</option>
             <option value="tr">Türkçe</option>
@@ -62,14 +62,14 @@ export function AIBehaviorPanel({ botConfig, onConfigChange }: AIBehaviorPanelPr
         {/* Max Messages */}
         <SettingRow
           icon={MessageSquare}
-          iconColor="#5856D6"
+          iconColor="var(--q-purple)"
           title="Maksimum Bot Mesaj Sayısı"
           description="Bot kaç mesaj sonra otomatik insana devretsin"
         >
           <select
             value={botConfig.max_messages}
             onChange={(e) => onConfigChange("max_messages", e.target.value)}
-            className="px-3 py-1.5 text-sm font-semibold text-[#1D1D1F] bg-black/[0.04] border-0 rounded-lg outline-none cursor-pointer"
+            className="px-3 py-1.5 text-sm font-semibold text-[--q-text-primary] bg-black/[0.04] border-0 rounded-lg outline-none cursor-pointer"
           >
             <option value="5">5 mesaj</option>
             <option value="8">8 mesaj</option>
@@ -82,14 +82,14 @@ export function AIBehaviorPanel({ botConfig, onConfigChange }: AIBehaviorPanelPr
         {/* Working Hours */}
         <SettingRow
           icon={Clock}
-          iconColor="#34C759"
+          iconColor="var(--q-green)"
           title="Çalışma Saatleri"
           description="Botun aktif olacağı zaman dilimi"
         >
           <select
             value={botConfig.working_hours}
             onChange={(e) => onConfigChange("working_hours", e.target.value)}
-            className="px-3 py-1.5 text-sm font-semibold text-[#1D1D1F] bg-black/[0.04] border-0 rounded-lg outline-none cursor-pointer"
+            className="px-3 py-1.5 text-sm font-semibold text-[--q-text-primary] bg-black/[0.04] border-0 rounded-lg outline-none cursor-pointer"
           >
             <option value="24/7">7/24 Aktif</option>
             <option value="business">Mesai Saatleri (09:00-18:00)</option>
@@ -100,7 +100,7 @@ export function AIBehaviorPanel({ botConfig, onConfigChange }: AIBehaviorPanelPr
         {/* Aggression Level */}
         <SettingRow
           icon={Shield}
-          iconColor="#FF3B30"
+          iconColor="var(--q-red)"
           title="İkna Seviyesi"
           description="Botun satış ve ikna agresiflik düzeyi"
         >
@@ -115,8 +115,8 @@ export function AIBehaviorPanel({ botConfig, onConfigChange }: AIBehaviorPanelPr
                 onClick={() => onConfigChange("aggression_level", opt.value)}
                 className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${
                   botConfig.aggression_level === opt.value
-                    ? "bg-white text-[#1D1D1F] shadow-sm"
-                    : "text-[#86868B]"
+                    ? "bg-white text-[--q-text-primary] shadow-sm"
+                    : "text-[--q-text-secondary]"
                 }`}
               >
                 {opt.label}

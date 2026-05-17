@@ -41,10 +41,10 @@ export async function Sidebar() {
         <div className="flex items-center gap-3">
           <img src="/quba-logo.svg" alt="Quba AI" className="w-9 h-9 rounded-xl" />
           <div>
-            <h1 className="text-[15px] font-bold tracking-tight text-[#1D1D1F]">Quba AI</h1>
-            <p className="text-[10px] text-[#86868B] font-medium">
+            <h1 className="text-[15px] font-bold tracking-tight text-[--q-text-primary]">Quba AI</h1>
+            <p className="text-[10px] text-[--q-text-secondary] font-medium">
               {session?.impersonatedTenantId ? (
-                <span className="text-[#AF52DE] font-semibold flex items-center gap-1">
+                <span className="text-[--q-purple-alt] font-semibold flex items-center gap-1">
                   <Eye className="w-3 h-3" /> Gözlem Modu
                 </span>
               ) : (
@@ -89,12 +89,12 @@ export async function Sidebar() {
         {session && (
           <div className="mt-2 pt-2 border-t border-black/5">
             <div className="flex items-center gap-3 px-3 py-2">
-              <div className="w-8 h-8 rounded-full bg-[#007AFF]/10 flex items-center justify-center text-[#007AFF] text-xs font-bold">
+              <div className="w-8 h-8 rounded-full bg-[--q-blue-bg] flex items-center justify-center text-[--q-blue] text-xs font-bold">
                 {session.name?.charAt(0)?.toUpperCase() || "Q"}
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-[13px] font-medium text-[#1D1D1F] truncate">{session.name}</p>
-                <p className="text-[10px] text-[#86868B] truncate">{session.email}</p>
+                <p className="text-[13px] font-medium text-[--q-text-primary] truncate">{session.name}</p>
+                <p className="text-[10px] text-[--q-text-secondary] truncate">{session.email}</p>
               </div>
             </div>
             
@@ -105,7 +105,7 @@ export async function Sidebar() {
               }}>
                 <button
                   type="submit"
-                  className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] font-medium text-[#AF52DE] hover:bg-[#AF52DE]/10 transition-colors"
+                  className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] font-medium text-[--q-purple-alt] hover:bg-[--q-purple-alt-bg] transition-colors"
                 >
                   <LogOut className="w-[18px] h-[18px]" />
                   Gözlem Modundan Çık
@@ -115,7 +115,7 @@ export async function Sidebar() {
               <form action={handleLogout}>
                 <button
                   type="submit"
-                  className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] font-medium text-[#FF3B30] hover:bg-red-50 transition-colors"
+                  className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] font-medium text-[--q-red] hover:bg-red-50 transition-colors"
                 >
                   <LogOut className="w-[18px] h-[18px]" />
                   Çıkış Yap
@@ -134,7 +134,7 @@ function NavLink({ href, icon, label }: { href: string; icon: React.ReactNode; l
   return (
     <Link 
       href={href} 
-      className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium text-[#3C3C43] hover:bg-black/[0.04] hover:text-[#1D1D1F] transition-all duration-150"
+      className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium text-[--q-text-primary] hover:bg-black/[0.04] hover:text-[--q-text-primary] transition-all duration-150"
     >
       <span className="opacity-60">{icon}</span>
       {label}

@@ -55,7 +55,7 @@ function MobileNavLink({ href, icon, label, active }: { href: string; icon: Reac
     <Link
       href={href}
       className={`flex flex-col items-center gap-1 p-2 transition-colors ${
-        active ? "text-[#007AFF]" : "text-[#86868B] hover:text-[#007AFF]"
+        active ? "text-[#007AFF]" : "text-[--q-text-secondary] hover:text-[#007AFF]"
       }`}
     >
       {icon}

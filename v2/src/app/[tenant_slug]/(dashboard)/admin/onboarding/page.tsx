@@ -186,7 +186,7 @@ export default function OnboardingPage() {
                   placeholder="Örn: Başkent Hastanesi"
                   value={firm.name}
                   onChange={(e) => handleNameChange(e.target.value)}
-                  className="w-full mt-1.5 px-4 py-3 text-[15px] bg-[#F5F5F7] rounded-xl outline-none focus:ring-2 focus:ring-[#007AFF]/30 transition-all"
+                  className="w-full mt-1.5 px-4 py-3 text-[15px] bg-[#F5F5F7] rounded-xl outline-none focus:ring-2 focus:ring-[--q-blue]/30 transition-all"
                 />
               </div>
 
@@ -267,7 +267,7 @@ export default function OnboardingPage() {
                   placeholder="EAAxxxxxxx..."
                   value={config.meta_page_token}
                   onChange={(e) => setConfig({ ...config, meta_page_token: e.target.value })}
-                  className="w-full mt-1.5 px-4 py-3 text-[14px] bg-[#F5F5F7] rounded-xl outline-none focus:ring-2 focus:ring-[#007AFF]/30 font-mono"
+                  className="w-full mt-1.5 px-4 py-3 text-[14px] bg-[#F5F5F7] rounded-xl outline-none focus:ring-2 focus:ring-[--q-blue]/30 font-mono"
                 />
               </div>
               
@@ -278,7 +278,7 @@ export default function OnboardingPage() {
                     placeholder="1234567890"
                     value={config.whatsapp_phone_id}
                     onChange={(e) => setConfig({ ...config, whatsapp_phone_id: e.target.value })}
-                    className="w-full mt-1.5 px-4 py-3 text-[14px] bg-[#F5F5F7] rounded-xl outline-none focus:ring-2 focus:ring-[#007AFF]/30 font-mono"
+                    className="w-full mt-1.5 px-4 py-3 text-[14px] bg-[#F5F5F7] rounded-xl outline-none focus:ring-2 focus:ring-[--q-blue]/30 font-mono"
                   />
                 </div>
                 <div>
@@ -287,7 +287,7 @@ export default function OnboardingPage() {
                     placeholder="Opsiyonel"
                     value={config.whatsapp_business_id}
                     onChange={(e) => setConfig({ ...config, whatsapp_business_id: e.target.value })}
-                    className="w-full mt-1.5 px-4 py-3 text-[14px] bg-[#F5F5F7] rounded-xl outline-none focus:ring-2 focus:ring-[#007AFF]/30 font-mono"
+                    className="w-full mt-1.5 px-4 py-3 text-[14px] bg-[#F5F5F7] rounded-xl outline-none focus:ring-2 focus:ring-[--q-blue]/30 font-mono"
                   />
                 </div>
               </div>
@@ -299,7 +299,7 @@ export default function OnboardingPage() {
                     placeholder="Messenger için"
                     value={config.meta_page_id}
                     onChange={(e) => setConfig({ ...config, meta_page_id: e.target.value })}
-                    className="w-full mt-1.5 px-4 py-3 text-[14px] bg-[#F5F5F7] rounded-xl outline-none focus:ring-2 focus:ring-[#007AFF]/30 font-mono"
+                    className="w-full mt-1.5 px-4 py-3 text-[14px] bg-[#F5F5F7] rounded-xl outline-none focus:ring-2 focus:ring-[--q-blue]/30 font-mono"
                   />
                 </div>
                 <div>
@@ -308,7 +308,7 @@ export default function OnboardingPage() {
                     placeholder="Instagram DM için"
                     value={config.instagram_id}
                     onChange={(e) => setConfig({ ...config, instagram_id: e.target.value })}
-                    className="w-full mt-1.5 px-4 py-3 text-[14px] bg-[#F5F5F7] rounded-xl outline-none focus:ring-2 focus:ring-[#007AFF]/30 font-mono"
+                    className="w-full mt-1.5 px-4 py-3 text-[14px] bg-[#F5F5F7] rounded-xl outline-none focus:ring-2 focus:ring-[--q-blue]/30 font-mono"
                   />
                 </div>
               </div>
@@ -361,7 +361,7 @@ export default function OnboardingPage() {
                   placeholder="Firma yöneticisinin adı"
                   value={admin.name}
                   onChange={(e) => setAdmin({ ...admin, name: e.target.value })}
-                  className="w-full mt-1.5 px-4 py-3 text-[15px] bg-[#F5F5F7] rounded-xl outline-none focus:ring-2 focus:ring-[#007AFF]/30"
+                  className="w-full mt-1.5 px-4 py-3 text-[15px] bg-[#F5F5F7] rounded-xl outline-none focus:ring-2 focus:ring-[--q-blue]/30"
                 />
               </div>
               <div>
@@ -371,7 +371,7 @@ export default function OnboardingPage() {
                   placeholder="admin@firma.com"
                   value={admin.email}
                   onChange={(e) => setAdmin({ ...admin, email: e.target.value })}
-                  className="w-full mt-1.5 px-4 py-3 text-[15px] bg-[#F5F5F7] rounded-xl outline-none focus:ring-2 focus:ring-[#007AFF]/30"
+                  className="w-full mt-1.5 px-4 py-3 text-[15px] bg-[#F5F5F7] rounded-xl outline-none focus:ring-2 focus:ring-[--q-blue]/30"
                 />
               </div>
               <div>
@@ -381,7 +381,7 @@ export default function OnboardingPage() {
                   placeholder="Güçlü bir şifre belirleyin"
                   value={admin.password}
                   onChange={(e) => setAdmin({ ...admin, password: e.target.value })}
-                  className="w-full mt-1.5 px-4 py-3 text-[15px] bg-[#F5F5F7] rounded-xl outline-none focus:ring-2 focus:ring-[#007AFF]/30"
+                  className="w-full mt-1.5 px-4 py-3 text-[15px] bg-[#F5F5F7] rounded-xl outline-none focus:ring-2 focus:ring-[--q-blue]/30"
                 />
                 {admin.password && admin.password.length < 6 && (
                   <p className="text-[11px] text-[#FF3B30] mt-1">Şifre en az 6 karakter olmalı</p>

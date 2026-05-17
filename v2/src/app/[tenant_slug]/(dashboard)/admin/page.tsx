@@ -81,21 +81,21 @@ export default function AdminPage() {
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-[22px] font-bold text-[#1D1D1F] flex items-center gap-2">
-              <Shield className="w-6 h-6 text-[#007AFF]" /> Süper Admin
+            <h1 className="text-[22px] font-bold text-[--q-text-primary] flex items-center gap-2">
+              <Shield className="w-6 h-6 text-[--q-blue]" /> Süper Admin
             </h1>
-            <p className="text-[13px] text-[#86868B] mt-1">{tenants.length} firma kayıtlı</p>
+            <p className="text-[13px] text-[--q-text-secondary] mt-1">{tenants.length} firma kayıtlı</p>
           </div>
         <div className="flex items-center gap-2">
             <a
               href="admin/onboarding"
-              className="flex items-center gap-2 px-4 py-2.5 bg-[#AF52DE] hover:bg-[#9A44C8] text-white text-[13px] font-semibold rounded-xl transition-all"
+              className="flex items-center gap-2 px-4 py-2.5 bg-[--q-purple-alt] hover:bg-[--q-purple-hover] text-white text-[13px] font-semibold rounded-xl transition-all"
             >
               <Sparkles className="w-4 h-4" /> Kurulum Sihirbazı
             </a>
             <button
               onClick={() => setShowCreate(!showCreate)}
-              className="flex items-center gap-2 px-4 py-2.5 bg-[#007AFF] hover:bg-[#0066D6] text-white text-[13px] font-semibold rounded-xl transition-all"
+              className="flex items-center gap-2 px-4 py-2.5 bg-[--q-blue] hover:bg-[--q-blue-hover] text-white text-[13px] font-semibold rounded-xl transition-all"
             >
               <Plus className="w-4 h-4" /> Hızlı Ekle
             </button>
@@ -104,25 +104,25 @@ export default function AdminPage() {
 
         {/* Create Form */}
         {showCreate && (
-          <div className="bg-white rounded-2xl border border-black/5 shadow-sm p-5 space-y-4">
-            <h3 className="text-[15px] font-semibold text-[#1D1D1F]">Yeni Firma Oluştur</h3>
+          <div className="bg-white rounded-2xl border border-[--q-border-default] shadow-sm p-5 space-y-4">
+            <h3 className="text-[15px] font-semibold text-[--q-text-primary]">Yeni Firma Oluştur</h3>
             <div className="grid grid-cols-2 gap-3">
               <input
                 placeholder="Firma Adı"
                 value={newTenant.name}
                 onChange={(e) => setNewTenant({ ...newTenant, name: e.target.value })}
-                className="px-3 py-2.5 text-[14px] bg-[#F5F5F7] rounded-xl outline-none focus:ring-2 focus:ring-[#007AFF]/30"
+                className="px-3 py-2.5 text-[14px] bg-[--q-bg-secondary] rounded-xl outline-none focus:ring-2 focus:ring-[--q-blue]/30"
               />
               <input
                 placeholder="Slug (ör: baskent)"
                 value={newTenant.slug}
                 onChange={(e) => setNewTenant({ ...newTenant, slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "") })}
-                className="px-3 py-2.5 text-[14px] bg-[#F5F5F7] rounded-xl outline-none focus:ring-2 focus:ring-[#007AFF]/30 font-mono"
+                className="px-3 py-2.5 text-[14px] bg-[--q-bg-secondary] rounded-xl outline-none focus:ring-2 focus:ring-[--q-blue]/30 font-mono"
               />
               <select
                 value={newTenant.industry}
                 onChange={(e) => setNewTenant({ ...newTenant, industry: e.target.value })}
-                className="px-3 py-2.5 text-[14px] bg-[#F5F5F7] rounded-xl outline-none"
+                className="px-3 py-2.5 text-[14px] bg-[--q-bg-secondary] rounded-xl outline-none"
               >
                 <option value="health">Sağlık</option>
                 <option value="real_estate">Gayrimenkul</option>
@@ -133,7 +133,7 @@ export default function AdminPage() {
               <select
                 value={newTenant.plan}
                 onChange={(e) => setNewTenant({ ...newTenant, plan: e.target.value })}
-                className="px-3 py-2.5 text-[14px] bg-[#F5F5F7] rounded-xl outline-none"
+                className="px-3 py-2.5 text-[14px] bg-[--q-bg-secondary] rounded-xl outline-none"
               >
                 <option value="starter">Starter</option>
                 <option value="professional">Professional</option>
@@ -143,7 +143,7 @@ export default function AdminPage() {
             <button
               onClick={handleCreate}
               disabled={creating}
-              className="px-6 py-2.5 bg-[#34C759] hover:bg-[#30B350] text-white text-[13px] font-semibold rounded-xl transition-all disabled:opacity-50"
+              className="px-6 py-2.5 bg-[--q-green] hover:bg-[--q-green-hover] text-white text-[13px] font-semibold rounded-xl transition-all disabled:opacity-50"
             >
               {creating ? "Oluşturuluyor..." : "Firma Oluştur"}
             </button>
@@ -153,25 +153,25 @@ export default function AdminPage() {
         {/* Tenant List */}
         <div className="space-y-3">
           {tenants.map((t: any) => (
-            <div key={t.id} className="bg-white rounded-2xl border border-black/5 shadow-sm p-5">
+            <div key={t.id} className="bg-white rounded-2xl border border-[--q-border-default] shadow-sm p-5">
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-3">
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-[15px] ${t.status === 'active' ? 'bg-gradient-to-br from-[#007AFF] to-[#5856D6]' : 'bg-[#86868B]'}`}>
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-[15px] ${t.status === 'active' ? 'bg-gradient-to-br from-[--q-blue] to-[--q-purple]' : 'bg-[--q-text-secondary]'}`}>
                     {t.name?.charAt(0)?.toUpperCase()}
                   </div>
                   <div>
-                    <h3 className="text-[15px] font-semibold text-[#1D1D1F]">{t.name}</h3>
-                    <p className="text-[12px] text-[#86868B] font-mono">{t.slug} · {t.plan}</p>
+                    <h3 className="text-[15px] font-semibold text-[--q-text-primary]">{t.name}</h3>
+                    <p className="text-[12px] text-[--q-text-secondary] font-mono">{t.slug} · {t.plan}</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className={`text-[11px] px-2 py-1 rounded-full font-medium ${t.status === 'active' ? 'bg-[#34C759]/10 text-[#34C759]' : 'bg-[#FF3B30]/10 text-[#FF3B30]'}`}>
+                  <span className={`text-[11px] px-2 py-1 rounded-full font-medium ${t.status === 'active' ? 'bg-[--q-green]/10 text-[--q-green]' : 'bg-[--q-red-bg] text-[--q-red]'}`}>
                     {t.status === 'active' ? 'Aktif' : 'Askıda'}
                   </span>
                   
                   <button
                     onClick={() => handleImpersonate(t.id, t.slug)}
-                    className="p-2 hover:bg-[#007AFF]/10 text-[#007AFF] rounded-lg transition-colors"
+                    className="p-2 hover:bg-[--q-blue]/10 text-[--q-blue] rounded-lg transition-colors"
                     title="Müşteri Gözünden Bak"
                   >
                     <Eye className="w-4 h-4" />
@@ -182,22 +182,22 @@ export default function AdminPage() {
                     className="p-2 hover:bg-black/5 rounded-lg transition-colors"
                     title={t.status === 'active' ? 'Askıya Al' : 'Aktifleştir'}
                   >
-                    <Power className={`w-4 h-4 ${t.status === 'active' ? 'text-[#34C759]' : 'text-[#FF3B30]'}`} />
+                    <Power className={`w-4 h-4 ${t.status === 'active' ? 'text-[--q-green]' : 'text-[--q-red]'}`} />
                   </button>
                 </div>
               </div>
 
               {/* Stats */}
               <div className="grid grid-cols-3 gap-3 mt-4">
-                <div className="flex items-center gap-2 text-[12px] text-[#86868B]">
+                <div className="flex items-center gap-2 text-[12px] text-[--q-text-secondary]">
                   <MessageSquare className="w-3.5 h-3.5" />
                   <span>{t.conversation_count || 0} konuşma</span>
                 </div>
-                <div className="flex items-center gap-2 text-[12px] text-[#86868B]">
+                <div className="flex items-center gap-2 text-[12px] text-[--q-text-secondary]">
                   <Building2 className="w-3.5 h-3.5" />
                   <span>{t.message_count || 0} mesaj</span>
                 </div>
-                <div className="flex items-center gap-2 text-[12px] text-[#86868B]">
+                <div className="flex items-center gap-2 text-[12px] text-[--q-text-secondary]">
                   <Users className="w-3.5 h-3.5" />
                   <span>{t.user_count || 0} kullanıcı</span>
                 </div>
@@ -205,7 +205,7 @@ export default function AdminPage() {
 
               {/* Meta Info */}
               {(t.whatsapp_phone_id || t.meta_page_id || t.instagram_id) && (
-                <div className="mt-3 pt-3 border-t border-black/5 flex gap-4 text-[11px] text-[#86868B] font-mono">
+                <div className="mt-3 pt-3 border-t border-[--q-border-default] flex gap-4 text-[11px] text-[--q-text-secondary] font-mono">
                   {t.whatsapp_phone_id && <span>WA: {t.whatsapp_phone_id.substring(0, 8)}...</span>}
                   {t.meta_page_id && <span>FB: {t.meta_page_id.substring(0, 8)}...</span>}
                   {t.instagram_id && <span>IG: {t.instagram_id.substring(0, 8)}...</span>}

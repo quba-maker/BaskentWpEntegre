@@ -105,7 +105,7 @@ export default function SettingsPage() {
                   style={{ width: `${Math.min((usage.totalMessages / usage.limit) * 100, 100)}%` }}
                 />
               </div>
-              <p className="text-[11px] text-[#86868B] mt-1">
+              <p className="text-[11px] text-[--q-text-secondary] mt-1">
                 {Math.round((usage.totalMessages / usage.limit) * 100)}% kullanıldı
               </p>
             </div>
@@ -142,7 +142,7 @@ export default function SettingsPage() {
           <Field label="Mevcut Şifre" value={pwCurrent} onChange={setPwCurrent} type="password" />
           <Field label="Yeni Şifre" value={pwNew} onChange={setPwNew} type="password" />
           <Field label="Yeni Şifre (Tekrar)" value={pwConfirm} onChange={setPwConfirm} type="password" />
-          {pwMsg && <p className={`text-[13px] ${pwMsg.startsWith('✅') ? 'text-[#34C759]' : 'text-[#FF3B30]'}`}>{pwMsg}</p>}
+          {pwMsg && <p className={`text-[13px] ${pwMsg.startsWith('✅') ? 'text-[--q-green]' : 'text-[--q-red]'}`}>{pwMsg}</p>}
           <button
             onClick={handlePasswordChange}
             disabled={pwLoading || !pwCurrent || pwNew.length < 6}
@@ -156,7 +156,7 @@ export default function SettingsPage() {
         <button
           onClick={handleSave}
           disabled={saving}
-          className="w-full py-3 bg-[#007AFF] hover:bg-[#0066D6] text-white text-[15px] font-semibold rounded-xl transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+          className="w-full py-3 bg-[--q-blue] hover:bg-[#0066D6] text-white text-[15px] font-semibold rounded-xl transition-all disabled:opacity-50 flex items-center justify-center gap-2"
         >
           {saving ? (
             <><Loader2 className="w-4 h-4 animate-spin" /> Kaydediliyor...</>
@@ -189,11 +189,11 @@ function Field({ label, value, onChange, type = "text", options }: { label: stri
     <div>
       <label className="block text-[12px] font-medium mb-1" style={{ color: "var(--q-text-secondary)" }}>{label}</label>
       {type === "select" && options ? (
-        <select value={value} onChange={(e) => onChange(e.target.value)} className="w-full px-3 py-2.5 text-[14px] border-0 rounded-xl outline-none focus:ring-2 focus:ring-[#007AFF]/30" style={{ backgroundColor: "var(--q-bg-secondary)" }}>
+        <select value={value} onChange={(e) => onChange(e.target.value)} className="w-full px-3 py-2.5 text-[14px] border-0 rounded-xl outline-none focus:ring-2 focus:ring-[--q-blue]/30" style={{ backgroundColor: "var(--q-bg-secondary)" }}>
           {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
       ) : (
-        <input type={type} value={value} onChange={(e) => onChange(e.target.value)} className="w-full px-3 py-2.5 text-[14px] border-0 rounded-xl outline-none focus:ring-2 focus:ring-[#007AFF]/30" style={{ backgroundColor: "var(--q-bg-secondary)" }} />
+        <input type={type} value={value} onChange={(e) => onChange(e.target.value)} className="w-full px-3 py-2.5 text-[14px] border-0 rounded-xl outline-none focus:ring-2 focus:ring-[--q-blue]/30" style={{ backgroundColor: "var(--q-bg-secondary)" }} />
       )}
     </div>
   );

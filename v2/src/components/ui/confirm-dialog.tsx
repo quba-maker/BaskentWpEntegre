@@ -79,8 +79,8 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
               <div
                 className={`w-12 h-12 rounded-full flex items-center justify-center ${
                   isDanger
-                    ? "bg-[#FF3B30]/10 text-[#FF3B30]"
-                    : "bg-[#FF9500]/10 text-[#FF9500]"
+                    ? "bg-[--q-red-bg] text-[--q-red]"
+                    : "bg-[--q-orange-bg] text-[--q-orange]"
                 }`}
               >
                 <AlertTriangle className="w-6 h-6" />
@@ -89,26 +89,26 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
 
             {/* Content */}
             <div className="px-6 pb-4 text-center">
-              <h3 className="text-[15px] font-bold text-[#1D1D1F]">
+              <h3 className="text-[15px] font-bold text-[--q-text-primary]">
                 {options.title}
               </h3>
-              <p className="text-[13px] text-[#86868B] mt-1.5 leading-relaxed">
+              <p className="text-[13px] text-[--q-text-secondary] mt-1.5 leading-relaxed">
                 {options.message}
               </p>
             </div>
 
             {/* Actions — iOS style stacked buttons */}
-            <div className="border-t border-black/5">
+            <div className="border-t border-[--q-border-default]">
               <button
                 onClick={handleCancel}
-                className="w-full py-3 text-[15px] font-medium text-[#007AFF] hover:bg-black/[0.03] transition-colors border-b border-black/5"
+                className="w-full py-3 text-[15px] font-medium text-[--q-blue] hover:bg-black/[0.03] transition-colors border-b border-[--q-border-default]"
               >
                 {options.cancelLabel || "İptal"}
               </button>
               <button
                 onClick={handleConfirm}
                 className={`w-full py-3 text-[15px] font-semibold transition-colors hover:bg-black/[0.03] ${
-                  isDanger ? "text-[#FF3B30]" : "text-[#FF9500]"
+                  isDanger ? "text-[--q-red]" : "text-[--q-orange]"
                 }`}
               >
                 {options.confirmLabel || "Onayla"}
