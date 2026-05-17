@@ -1,5 +1,6 @@
 import { sql } from "@/lib/db";
 import { TenantDB } from "@/lib/core/tenant-db";
+import { logger } from "@/lib/core/logger";
 
 export interface MessagePayload {
   phoneNumber: string;
@@ -12,6 +13,7 @@ export interface MessagePayload {
 
 export class MessageService {
   private db: TenantDB;
+  private log = logger.withContext({ module: 'MessageService' });
 
   constructor(db: TenantDB) {
     this.db = db;
@@ -115,7 +117,7 @@ export class MessageService {
 
       return { success: true, isDuplicate: false, messageId: insertedMessageId };
     } catch (e: any) {
-      console.error("SaveMessageIdempotent Error:", e.message);
+      this.log.error("SaveMessageIdempotent Error", e instanceof Error ? e : new Error(String(e)));
       // Eğer column yok hatası alırsak, provider_message_id migrationı henüz yapılmamış demektir
       throw e;
     }
@@ -147,7 +149,7 @@ export class MessageService {
       }
       return true;
     } catch (e: any) {
-      console.error("[MessageService] WhatsApp API request failed", e);
+      this.log.error("WhatsApp API request failed", e instanceof Error ? e : new Error(String(e)));
       throw e;
     }
   }

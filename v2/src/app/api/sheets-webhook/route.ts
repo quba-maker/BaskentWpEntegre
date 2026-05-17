@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
+import { logger } from '@/lib/core/logger';
+
+const log = logger.withContext({ module: 'SheetsWebhook' });
 
 const DATABASE_URL = process.env.DATABASE_URL!;
 
@@ -195,7 +198,7 @@ export async function POST(request: NextRequest) {
 
         // Fallback to Phone 2 if Phone 1 fails
         if (!botSuccess && phone2 && phone2 !== phone1) {
-          console.log(`Fallback: 1. Numara (${phone1}) başarısız, 2. Numara (${phone2}) deneniyor...`);
+          log.info(`Fallback: 1. Numara başarısız, 2. Numara deneniyor`, { phone1, phone2 });
           botSuccess = await sendWhatsApp(phone2);
           if (botSuccess) activePhone = phone2; // Update active phone
         }
@@ -226,7 +229,7 @@ export async function POST(request: NextRequest) {
     }
 
   } catch (error: any) {
-    console.error('Sheets Webhook Error:', error);
+    log.error('Sheets Webhook Error', error instanceof Error ? error : new Error(String(error)));
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }

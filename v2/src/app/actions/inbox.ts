@@ -136,7 +136,8 @@ export async function sendMessage(phone: string, text: string) {
       const channel = convRows[0]?.channel || 'whatsapp';
 
       if (!META_ACCESS_TOKEN) {
-        console.warn("Meta credentials missing, only saving to DB");
+        const { logger: inboxLogger } = await import("@/lib/core/logger");
+        inboxLogger.withContext({ module: 'Inbox' }).warn("Meta credentials missing, only saving to DB");
       } else {
         let response: Response | null = null;
 
@@ -184,14 +185,16 @@ export async function sendMessage(phone: string, text: string) {
               break; // Doğru token'ı bulduk ve gönderdik
             } else {
               const errData = await response.clone().json();
-              console.log(`Token failed for ${channel}, trying next...`, errData.error?.message);
+              const { logger: inboxLog2 } = await import("@/lib/core/logger");
+              inboxLog2.withContext({ module: 'Inbox' }).info(`Token failed for ${channel}, trying next`, { error: errData.error?.message });
             }
           }
         }
 
         if (response && !response.ok) {
           const errData = await response.json();
-          console.error(`Meta API error (${channel}):`, errData);
+          const { logger: inboxLog3 } = await import("@/lib/core/logger");
+          inboxLog3.withContext({ module: 'Inbox' }).error(`Meta API error (${channel})`, undefined, { errData });
           await enqueueRetry({
             tenantId: ctx.tenantId,
             phoneNumber: phone,

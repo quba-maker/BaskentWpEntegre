@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { neon } from "@neondatabase/serverless";
+import { logger } from "@/lib/core/logger";
+
+const log = logger.withContext({ module: 'TelegramWebhook' });
 
 // ==========================================
 // QUBA AI — Telegram Webhook (Native Next.js)
@@ -189,7 +192,7 @@ export async function POST(req: NextRequest) {
               }
             }
           } catch (e: any) {
-            console.error("Telegram→Hasta hata:", e.message);
+            log.error("Telegram→Hasta hata", e instanceof Error ? e : new Error(String(e)));
           }
 
           // Danışmana onay mesajı
@@ -203,7 +206,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true });
   } catch (e: any) {
-    console.error("Telegram Webhook Error:", e);
+    log.error("Telegram Webhook Error", e instanceof Error ? e : new Error(String(e)));
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }

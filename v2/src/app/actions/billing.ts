@@ -87,7 +87,8 @@ export async function getUsageStats() {
       },
     };
   } catch (error: any) {
-    console.error("Usage stats error:", error);
+    const { logger: billingLogger } = await import("@/lib/core/logger");
+    billingLogger.withContext({ module: 'Billing' }).error("Usage stats error", error instanceof Error ? error : new Error(String(error)));
     return { success: false, error: error.message };
   }
 }

@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
 import { neon } from "@neondatabase/serverless";
+import { logger } from "@/lib/core/logger";
+
+const log = logger.withContext({ module: 'FollowUpCron' });
 
 // ==========================================
 // QUBA AI — Follow-Up Cron (Tenant-Aware)
@@ -77,7 +80,7 @@ export async function GET() {
             await sql`INSERT INTO messages (tenant_id, phone_number, direction, content, model_used, channel) VALUES (${tenant.id}, ${conv.phone_number}, 'out', ${msg}, 'follow-up-cron', ${conv.channel || 'whatsapp'})`;
             
           } catch (e: any) {
-            console.error(`Follow-up hatası (${conv.phone_number}):`, e.message);
+            log.error(`Follow-up hatası`, e instanceof Error ? e : new Error(String(e)), { phone: conv.phone_number });
           }
         }
         
@@ -89,7 +92,7 @@ export async function GET() {
 
     return NextResponse.json({ success: true, results });
   } catch (e: any) {
-    console.error("Follow-up cron hatası:", e);
+    log.error("Follow-up cron hatası", e instanceof Error ? e : new Error(String(e)));
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }

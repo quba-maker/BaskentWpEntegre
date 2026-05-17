@@ -29,6 +29,8 @@ export async function logAudit(params: {
     `;
   } catch (e: any) {
     // Audit log asla ana işlemi bloklamaz
-    console.error("[AUDIT] Log yazılamadı:", e.message);
+    // Audit yazma hatası — sessizce yutmuyoruz ama logger kullanıyoruz
+    const { logger } = await import("@/lib/core/logger");
+    logger.withContext({ module: 'AuditLog' }).error("Audit log yazılamadı", e instanceof Error ? e : new Error(String(e)));
   }
 }

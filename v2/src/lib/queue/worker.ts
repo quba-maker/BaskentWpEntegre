@@ -39,12 +39,32 @@ export class QueueWorkerEngine {
         await this.handleWhatsAppMessage(tenantId, payload, metadata);
         break;
       
+      case "messenger.message.received":
+        // EXPLICIT HANDLER: Messenger events are ingested but AI pipeline not yet wired.
+        // Route to DLQ for visibility instead of silent drop.
+        this.log.warn(`[CHANNEL_NOT_IMPLEMENTED] Messenger event received but handler not wired`, { tenantId, traceId: metadata.messageId });
+        await this.moveToDLQ(topic, tenantId, payload, new Error('CHANNEL_NOT_IMPLEMENTED: Messenger handler pending'));
+        break;
+
+      case "instagram.message.received":
+        // EXPLICIT HANDLER: Instagram events are ingested but AI pipeline not yet wired.
+        // Route to DLQ for visibility instead of silent drop.
+        this.log.warn(`[CHANNEL_NOT_IMPLEMENTED] Instagram event received but handler not wired`, { tenantId, traceId: metadata.messageId });
+        await this.moveToDLQ(topic, tenantId, payload, new Error('CHANNEL_NOT_IMPLEMENTED: Instagram handler pending'));
+        break;
+
+      case "meta.lead.received":
+        this.log.info(`[LEAD_RECEIVED] Lead event processed`, { tenantId, traceId: metadata.messageId });
+        break;
+
       case "meta.webhook.fallback":
         this.log.info("Handling meta.webhook.fallback", { tenantId, payload });
         break;
 
       default:
-        this.log.warn(`[WORKER] Unknown topic received, skipping execution. Topic: ${topic}`);
+        // FAIL-VISIBLE: Unknown topics are routed to DLQ, never silently dropped
+        this.log.error(`[UNKNOWN_TOPIC] Unhandled topic routed to DLQ`, undefined, { topic, tenantId });
+        await this.moveToDLQ(topic, tenantId, payload, new Error(`UNKNOWN_TOPIC: ${topic}`));
     }
   }
 

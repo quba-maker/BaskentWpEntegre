@@ -86,7 +86,9 @@ export async function GET(req: NextRequest) {
           // Heartbeat — bağlantıyı canlı tut
           controller.enqueue(encoder.encode(`: heartbeat ${Date.now()}\n\n`));
         } catch (e: any) {
-          console.error("[SSE] Poll error:", e.message);
+          // SSE poll error — use dynamic import to avoid top-level module loading in stream
+          const { logger: sseLogger } = await import("@/lib/core/logger");
+          sseLogger.withContext({ module: 'SSE' }).error("Poll error", e instanceof Error ? e : new Error(String(e)));
         }
       }, 3000);
 

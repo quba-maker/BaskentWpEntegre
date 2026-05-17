@@ -3,6 +3,9 @@ import { neon } from "@neondatabase/serverless";
 import { waitUntil } from "@vercel/functions";
 import { withApiGuard } from "@/lib/core/api-guard";
 import { QueueService } from "@/lib/queue/queue.service";
+import { logger } from "@/lib/core/logger";
+
+const log = logger.withContext({ module: 'MetaWebhook' });
 
 // ==========================================
 // QUBA AI — Multi-Tenant Webhook Router (Queue-Driven)
@@ -22,7 +25,7 @@ export async function GET(req: NextRequest) {
   const VERIFY_TOKEN = process.env.WEBHOOK_VERIFY_TOKEN || process.env.META_VERIFY_TOKEN;
 
   if (mode === "subscribe" && token === VERIFY_TOKEN) {
-    console.log("✅ Meta Webhook doğrulandı!");
+    log.info("Meta Webhook doğrulandı");
     return new NextResponse(challenge, { status: 200 });
   }
 
@@ -62,7 +65,7 @@ export const POST = withApiGuard(
         return new NextResponse("EVENT_RECEIVED_DUPLICATE", { status: 200 });
       }
 
-      console.log(`📱 [WA] Tenant: ${tenant.name} (${tenant.slug}) - Enqueueing`);
+      log.info(`[WA] Enqueueing`, { tenantName: tenant.name, tenantSlug: tenant.slug });
       
       // Send to Queue instead of synchronous wait
       waitUntil(queue.publish(ctx.tenantId!, 'whatsapp.message.received', body));
@@ -87,7 +90,7 @@ export const POST = withApiGuard(
         if (isDuplicate) return new NextResponse("EVENT_RECEIVED_DUPLICATE", { status: 200 });
       }
 
-      console.log(`💬 [MSG] Tenant: ${tenant.name} (${tenant.slug}) - Enqueueing`);
+      log.info(`[MSG] Enqueueing`, { tenantName: tenant.name, tenantSlug: tenant.slug });
       waitUntil(queue.publish(ctx.tenantId!, 'messenger.message.received', body));
       return new NextResponse("EVENT_RECEIVED", { status: 200 });
     }
@@ -108,7 +111,7 @@ export const POST = withApiGuard(
         if (isDuplicate) return new NextResponse("EVENT_RECEIVED_DUPLICATE", { status: 200 });
       }
 
-      console.log(`📸 [IG] Tenant: ${tenant.name} (${tenant.slug}) - Enqueueing`);
+      log.info(`[IG] Enqueueing`, { tenantName: tenant.name, tenantSlug: tenant.slug });
       waitUntil(queue.publish(ctx.tenantId!, 'instagram.message.received', body));
       return new NextResponse("EVENT_RECEIVED", { status: 200 });
     }
@@ -124,12 +127,12 @@ export const POST = withApiGuard(
         const pageId = body.entry[0]?.id;
 
         if (leadgenId) {
-          console.log(`📋 [Lead] ${tenant?.name || "Bilinmeyen"} — Lead: ${leadgenId}`);
+          log.info(`[Lead] Lead received`, { tenantName: tenant?.name, leadgenId });
           
           waitUntil(queue.publish(ctx.tenantId!, 'meta.lead.received', { leadgenId, pageId, tenant }));
         }
       } catch (e: any) {
-        console.error("Lead webhook hatası:", e.message);
+        log.error("Lead webhook hatası", e instanceof Error ? e : new Error(String(e)));
       }
       return new NextResponse("EVENT_RECEIVED", { status: 200 });
     }

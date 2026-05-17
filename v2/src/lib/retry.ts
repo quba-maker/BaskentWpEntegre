@@ -1,4 +1,7 @@
 import { neon } from "@neondatabase/serverless";
+import { logger } from "@/lib/core/logger";
+
+const log = logger.withContext({ module: 'RetryQueue' });
 
 // ==========================================
 // QUBA AI — Message Retry Utility
@@ -25,7 +28,7 @@ export async function enqueueRetry(params: {
       VALUES (${params.tenantId}, ${params.phoneNumber}, ${params.channel}, ${params.content}, ${params.error}, NOW() + INTERVAL '2 minutes')
     `;
   } catch (e: any) {
-    console.error("[RETRY] Kuyruğa eklenemedi:", e.message);
+    log.error("Retry kuyruğa eklenemedi", e instanceof Error ? e : new Error(String(e)));
   }
 }
 
@@ -138,7 +141,7 @@ export async function processRetryQueue(): Promise<{ processed: number; failed: 
       }
     }
   } catch (e: any) {
-    console.error("[RETRY] Queue processing hatası:", e.message);
+    log.error("Retry queue processing hatası", e instanceof Error ? e : new Error(String(e)));
   }
 
   return stats;

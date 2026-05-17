@@ -48,7 +48,8 @@ export async function getDashboardStats() {
       role: session.role,
     };
   } catch (error: any) {
-    console.error("Dashboard stats error:", error);
+    const { logger: dashLogger } = await import("@/lib/core/logger");
+    dashLogger.withContext({ module: 'Dashboard' }).error("Dashboard stats error", error instanceof Error ? error : new Error(String(error)));
     return null;
   }
 }

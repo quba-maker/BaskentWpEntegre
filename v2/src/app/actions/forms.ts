@@ -107,7 +107,8 @@ export async function updateLeadNotes(id: number, notes: string) {
             })
           });
         } catch (sheetErr) {
-          console.warn("Google Sheets note sync failed:", sheetErr);
+          const { logger: formsLogger } = await import("@/lib/core/logger");
+          formsLogger.withContext({ module: 'Forms' }).warn("Google Sheets note sync failed", { error: String(sheetErr) });
         }
       }
 

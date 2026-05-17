@@ -176,7 +176,8 @@ export async function login(
 
     return { success: true, tenantSlug: user.tenant_slug, mustChangePassword: user.must_change_password === true };
   } catch (error: any) {
-    console.error("Login error:", error);
+    const { logger: authLogger } = await import("@/lib/core/logger");
+    authLogger.withContext({ module: 'Auth' }).error("Login error", error instanceof Error ? error : new Error(String(error)));
     return { success: false, error: "Bir hata oluştu. Tekrar deneyin." };
   }
 }

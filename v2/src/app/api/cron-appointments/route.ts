@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
 import { neon } from "@neondatabase/serverless";
+import { logger } from "@/lib/core/logger";
+
+const log = logger.withContext({ module: 'CronAppointments' });
 
 // ==========================================
 // QUBA AI — Cron Appointments (Tenant-Aware)
@@ -73,7 +76,7 @@ export async function GET() {
               await sql`INSERT INTO messages (tenant_id, phone_number, direction, content, model_used) VALUES (${tenant.id}, ${apt.phone_number}, 'out', ${msg}, 'cron-reminder')`;
             }
           } catch (e: any) {
-            console.error(`Appointment reminder hatası (${apt.phone_number}):`, e.message);
+            log.error(`Appointment reminder hatası`, e instanceof Error ? e : new Error(String(e)), { phone: apt.phone_number });
           }
         }
         
@@ -85,7 +88,7 @@ export async function GET() {
 
     return NextResponse.json({ success: true, results });
   } catch (e: any) {
-    console.error("Cron appointments hatası:", e);
+    log.error("Cron appointments hatası", e instanceof Error ? e : new Error(String(e)));
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }
