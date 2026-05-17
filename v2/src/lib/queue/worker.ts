@@ -180,12 +180,12 @@ export class QueueWorkerEngine {
       throw e;
     }
 
-    // 7. Response Policy Check
-    const validation = this.responsePolicy.validate(aiResponse.text);
+    // 7. Response Policy Check (Egress DLP)
+    const validation = this.responsePolicy.validate(aiResponse.text, brain);
     let finalResponseText = aiResponse.text;
 
     if (!validation.valid) {
-      this.log.warn(`[POLICY_FAILED] ${validation.reason}`, { traceId });
+      this.log.error(`[POLICY_FAILED] ${validation.reason}`, undefined, { traceId, tenantId: brain.context.tenantId });
       finalResponseText = validation.fallbackMessage || "Üzgünüm, şu an size yanıt veremiyorum.";
       // TODO: Escalate status
     }
