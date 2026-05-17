@@ -1,8 +1,10 @@
 import { sql } from "@/lib/db";
 import { TenantDB } from "@/lib/core/tenant-db";
+import { logger } from "@/lib/core/logger";
 
 export class AlertService {
   private db: TenantDB;
+  private log = logger.withContext({ module: 'AlertService' });
 
   constructor(db: TenantDB) {
     this.db = db;
@@ -14,25 +16,14 @@ export class AlertService {
    */
   async createAlert(phoneNumber: string, alertType: string, message: string): Promise<void> {
     try {
-      // Tablo yoksa oluştur (Legacy fallback, idealde setup'ta olmalı)
-      await this.db.executeSafe(sql`
-        CREATE TABLE IF NOT EXISTS alerts (
-          id SERIAL PRIMARY KEY, 
-          tenant_id UUID,
-          phone_number VARCHAR(20), 
-          alert_type VARCHAR(50), 
-          message TEXT, 
-          is_read BOOLEAN DEFAULT false, 
-          created_at TIMESTAMP DEFAULT NOW()
-        )
-      `);
-
+      // NOTE: alerts table must exist via setup migrations.
+      // Runtime DDL has been removed for production safety.
       await this.db.executeSafe(sql`
         INSERT INTO alerts (tenant_id, phone_number, alert_type, message) 
         VALUES (${this.db.tenantId}, ${phoneNumber}, ${alertType}, ${message})
       `);
     } catch (e: any) {
-      console.error("AlertService Error:", e.message);
+      this.log.error("AlertService Error", e instanceof Error ? e : new Error(String(e)));
     }
   }
 }

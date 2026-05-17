@@ -36,20 +36,9 @@ export class WebhookDedupeService {
       // 2. Transaction bazlı Advisory Lock al
       queries.push(sql`SELECT pg_advisory_xact_lock(${hash})`);
 
-      // 3. Tablo kontrolü (Eğer webhook_events tablosu yoksa)
-      queries.push(sql`
-        CREATE TABLE IF NOT EXISTS webhook_events (
-          tenant_id UUID,
-          provider VARCHAR(50),
-          provider_message_id VARCHAR(255),
-          sender_id VARCHAR(100),
-          event_timestamp BIGINT,
-          created_at TIMESTAMP DEFAULT NOW(),
-          PRIMARY KEY(tenant_id, provider, provider_message_id)
-        )
-      `);
-
-      // 4. Duplicate Check Query
+      // 3. Duplicate Check Query
+      // NOTE: webhook_events table must exist via setup migrations.
+      // Runtime DDL has been removed for production safety.
       queries.push(sql`
         SELECT 1 FROM webhook_events 
         WHERE tenant_id = ${this.db.tenantId} 
@@ -58,7 +47,7 @@ export class WebhookDedupeService {
       `);
 
       const result = await this.db.executeTransaction(queries);
-      const isDuplicate = result[2].length > 0;
+      const isDuplicate = result[1].length > 0;
 
       if (isDuplicate) {
         this.log.warn(`🛑 Duplicate Webhook Suppressed!`, { payload });

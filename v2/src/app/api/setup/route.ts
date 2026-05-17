@@ -203,7 +203,9 @@ export async function GET(req: NextRequest) {
     await execute`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS webhook_secret TEXT`;
     await execute`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS meta_app_id TEXT`;
     await execute`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS meta_app_secret TEXT`;
-    results.push("✅ tenant SaaS kolonları uygulandı (meta_app_id, meta_app_secret)");
+    await execute`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS reminder_template TEXT`;
+    await execute`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS reminder_hours_before INT DEFAULT 24`;
+    results.push("✅ tenant SaaS kolonları uygulandı");
 
     // 13. ROW-LEVEL SECURITY (RLS) Policies
     try {
@@ -306,6 +308,98 @@ export async function GET(req: NextRequest) {
       await execute`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS daily_ai_limit INT DEFAULT 200`;
       results.push("✅ kullanıcı davet/şifre kolonları eklendi");
     } catch { results.push("ℹ️ kullanıcı kolonları zaten mevcut"); }
+
+    // =====================================================
+    // 19. RUNTIME DDL CONSOLIDATION
+    // Tables below were previously created inline inside services.
+    // Moved here as single DDL source of truth for production safety.
+    // =====================================================
+
+    // 19a. WEBHOOK_EVENTS — deduplication tablosu
+    await execute`
+      CREATE TABLE IF NOT EXISTS webhook_events (
+        tenant_id UUID,
+        provider VARCHAR(50),
+        provider_message_id VARCHAR(255),
+        sender_id VARCHAR(100),
+        event_timestamp BIGINT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        PRIMARY KEY(tenant_id, provider, provider_message_id)
+      )
+    `;
+    results.push("✅ webhook_events tablosu hazır");
+
+    // 19b. ALERTS — dashboard alert sistemi
+    await execute`
+      CREATE TABLE IF NOT EXISTS alerts (
+        id SERIAL PRIMARY KEY, 
+        tenant_id UUID,
+        phone_number VARCHAR(20), 
+        alert_type VARCHAR(50), 
+        message TEXT, 
+        is_read BOOLEAN DEFAULT false, 
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `;
+    await execute`CREATE INDEX IF NOT EXISTS idx_alerts_tenant ON alerts(tenant_id)`;
+    results.push("✅ alerts tablosu hazır");
+
+    // 19c. EVENTS — randevu/olay tablosu
+    await execute`
+      CREATE TABLE IF NOT EXISTS events (
+        id SERIAL PRIMARY KEY, 
+        tenant_id UUID,
+        phone_number VARCHAR(20), 
+        event_type VARCHAR(50), 
+        details TEXT, 
+        status VARCHAR(20) DEFAULT 'pending', 
+        scheduled_date TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `;
+    await execute`CREATE INDEX IF NOT EXISTS idx_events_tenant ON events(tenant_id)`;
+    results.push("✅ events tablosu hazır");
+
+    // 19d. DEAD_LETTER_JOBS — gerçek DLQ persistence
+    await execute`
+      CREATE TABLE IF NOT EXISTS dead_letter_jobs (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID REFERENCES tenants(id),
+        topic VARCHAR(100) NOT NULL,
+        payload JSONB NOT NULL,
+        error_message TEXT,
+        error_stack TEXT,
+        failed_at TIMESTAMP DEFAULT NOW(),
+        status VARCHAR(50) DEFAULT 'unresolved',
+        resolved_at TIMESTAMP,
+        resolved_by UUID
+      )
+    `;
+    await execute`CREATE INDEX IF NOT EXISTS idx_dlq_tenant ON dead_letter_jobs(tenant_id)`;
+    await execute`CREATE INDEX IF NOT EXISTS idx_dlq_status ON dead_letter_jobs(status)`;
+    results.push("✅ dead_letter_jobs tablosu hazır");
+
+    // 19e. MIGRATION_AUDIT_LOGS — şema migration kayıtları
+    await execute`
+      CREATE TABLE IF NOT EXISTS migration_audit_logs (
+        id SERIAL PRIMARY KEY,
+        tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE,
+        from_version VARCHAR(10),
+        to_version VARCHAR(10),
+        changes JSONB,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `;
+    await execute`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS schema_version VARCHAR(10) DEFAULT 'v1'`;
+    results.push("✅ migration_audit_logs ve schema_version hazır");
+
+    // 19f. DLQ RLS
+    try {
+      await execute`ALTER TABLE dead_letter_jobs ENABLE ROW LEVEL SECURITY`;
+      await execute`DROP POLICY IF EXISTS dlq_app_access ON dead_letter_jobs`;
+      await execute`CREATE POLICY dlq_app_access ON dead_letter_jobs FOR ALL USING (true) WITH CHECK (true)`;
+      results.push("✅ DLQ RLS policies oluşturuldu");
+    } catch (e: any) { results.push("⚠️ DLQ RLS: " + e.message); }
 
     if (isDryRun) {
       return NextResponse.json({ success: true, mode: "dryRun", results, executedQueries: dryRunLogs });

@@ -241,17 +241,40 @@ export class QueueWorkerEngine {
   }
 
   /**
-   * Manual DLQ Logging mechanism for when Upstash auto-retries are exhausted.
+   * Persists failed events to the dead_letter_jobs table.
    * Ensures no message is ever silently dropped.
+   * Events can be replayed/resolved via admin dashboard.
+   *
+   * NOTE: dead_letter_jobs table must exist via setup migrations.
    */
   public async moveToDLQ(topic: string, tenantId: string, payload: any, error: any) {
     const errObj = error instanceof Error ? error : new Error(String(error));
     this.log.error(`[DLQ] Moving failed event to Dead Letter Queue`, errObj, {
       topic,
       tenantId,
-      payload
     });
-    // TODO: In Phase 2, persist this to a `dead_letter_jobs` table in Postgres for Observability Dashboard
+
+    try {
+      const db = withTenantDB(tenantId, false);
+      await db.executeSafe(sql`
+        INSERT INTO dead_letter_jobs (tenant_id, topic, payload, error_message, error_stack, status)
+        VALUES (
+          ${tenantId}, 
+          ${topic}, 
+          ${JSON.stringify(payload)}::jsonb, 
+          ${errObj.message.substring(0, 1000)}, 
+          ${errObj.stack?.substring(0, 2000) || null}, 
+          'unresolved'
+        )
+      `);
+      this.log.info(`[DLQ] Event persisted to dead_letter_jobs`, { topic, tenantId });
+    } catch (dlqError: any) {
+      // DLQ yazamıyorsak bile asla sessizce yutmuyoruz — log ile kalıyor
+      this.log.error(`[DLQ_CRITICAL] Failed to persist to DLQ table`, 
+        dlqError instanceof Error ? dlqError : new Error(String(dlqError)), 
+        { topic, tenantId }
+      );
+    }
   }
 }
 

@@ -1,8 +1,10 @@
 import { sql } from "@/lib/db";
 import { TenantDB } from "@/lib/core/tenant-db";
+import { logger } from "@/lib/core/logger";
 
 export class EventService {
   private db: TenantDB;
+  private log = logger.withContext({ module: 'EventService' });
 
   constructor(db: TenantDB) {
     this.db = db;
@@ -11,22 +13,10 @@ export class EventService {
   /**
    * Yeni randevu talebi oluşturur (Idempotent).
    * Zaten pending/scheduled randevu varsa yenisini açmaz.
+   * NOTE: events table must exist via setup migrations.
    */
   async requestAppointment(phoneNumber: string, details: string): Promise<void> {
     try {
-      await this.db.executeSafe(sql`
-        CREATE TABLE IF NOT EXISTS events (
-          id SERIAL PRIMARY KEY, 
-          tenant_id UUID,
-          phone_number VARCHAR(20), 
-          event_type VARCHAR(50), 
-          details TEXT, 
-          status VARCHAR(20) DEFAULT 'pending', 
-          scheduled_date TIMESTAMP,
-          created_at TIMESTAMP DEFAULT NOW()
-        )
-      `);
-
       const activeEvent = await this.db.executeSafe(sql`
         SELECT id FROM events 
         WHERE phone_number = ${phoneNumber} 
@@ -42,7 +32,7 @@ export class EventService {
         `);
       }
     } catch (e: any) {
-      console.error("EventService Error:", e.message);
+      this.log.error("EventService Error", e instanceof Error ? e : new Error(String(e)));
     }
   }
 }
