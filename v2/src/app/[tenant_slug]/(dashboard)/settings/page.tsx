@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { getTenantSettings, updateTenantSettings, getUsageStats } from "@/app/actions/settings";
 import { changeMyPassword } from "@/app/actions/users";
 import { Building2, Gauge, Shield, Save, Loader2, CheckCircle, KeyRound } from "lucide-react";
+import { PageLoader } from "@/components/ui/shared-states";
 
 // ==========================================
 // QUBA AI — Settings Page (Apple Style)
@@ -77,13 +78,7 @@ export default function SettingsPage() {
     setTimeout(() => setSaved(false), 2000);
   }
 
-  if (!tenant) {
-    return (
-      <div className="h-full flex items-center justify-center">
-        <Loader2 className="w-6 h-6 animate-spin text-[#86868B]" />
-      </div>
-    );
-  }
+  if (!tenant) return <PageLoader />;
 
   return (
     <div className="h-full overflow-auto">

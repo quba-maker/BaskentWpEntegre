@@ -7,6 +7,7 @@ import {
   Cpu, Loader2, ToggleLeft, ToggleRight, Settings2, ChevronDown, ChevronUp,
   Filter, MessageCircle, BarChart3, AlertTriangle, Sparkles
 } from "lucide-react";
+import { PageLoader } from "@/components/ui/shared-states";
 
 // ==========================================
 // QUBA AI — AI Module Manager Page
@@ -54,13 +55,7 @@ export default function AIModulesPage() {
     modules: modules.filter((m) => AI_MODULES[m.moduleId]?.type === type),
   }));
 
-  if (loading) {
-    return (
-      <div className="h-full flex items-center justify-center">
-        <Loader2 className="w-6 h-6 animate-spin text-[#86868B]" />
-      </div>
-    );
-  }
+  if (loading) return <PageLoader />;
 
   return (
     <div className="h-full overflow-auto">

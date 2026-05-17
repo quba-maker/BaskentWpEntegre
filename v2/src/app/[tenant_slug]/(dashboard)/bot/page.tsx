@@ -9,6 +9,7 @@ import {
   Send, Loader2, Tag, Plus, Trash2, CheckCircle
 } from "lucide-react";
 import { getBotSettings, saveBotSetting, getDefaultPrompts, getBotStats, getModelUsage, getRecentBotConversations, testBotPrompt } from "@/app/actions/bot";
+import { PageLoader } from "@/components/ui/shared-states";
 
 // ==========================================
 // TYPES
@@ -229,16 +230,7 @@ export default function BotManagementPage() {
 
   const activeChannel = channels.find(c => c.id === activeTab)!;
 
-  if (isLoading) {
-    return (
-      <div className="h-full flex items-center justify-center">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-10 h-10 border-2 border-[#007AFF] border-t-transparent rounded-full animate-spin" />
-          <p className="text-sm text-[#86868B] font-medium">Bot ayarları yükleniyor...</p>
-        </div>
-      </div>
-    );
-  }
+  if (isLoading) return <PageLoader />;
 
   return (
     <div className="p-4 md:p-8 h-full flex flex-col relative overflow-y-auto">

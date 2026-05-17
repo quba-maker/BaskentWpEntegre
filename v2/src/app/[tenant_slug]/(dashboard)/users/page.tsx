@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { getUsers, createUser, updateUserRole, toggleUserActive, deleteUser, resetUserPassword, generateInviteLink } from "@/app/actions/users";
 import { Users, Plus, Loader2, Shield, UserCheck, Eye, Trash2, Power, KeyRound, Link2, Copy, Check } from "lucide-react";
 import { useConfirm } from "@/components/ui/confirm-dialog";
+import { PageLoader, ErrorBanner } from "@/components/ui/shared-states";
 
 // ==========================================
 // QUBA AI — Kullanıcı Yönetimi Sayfası
@@ -104,24 +105,13 @@ export default function UsersPage() {
     setTimeout(() => setCopied(false), 2000);
   }
 
-  if (loading) {
-    return (
-      <div className="h-full flex items-center justify-center">
-        <Loader2 className="w-6 h-6 animate-spin text-[#86868B]" />
-      </div>
-    );
-  }
+  if (loading) return <PageLoader />;
 
   return (
     <div className="h-full overflow-auto">
       <div className="max-w-2xl mx-auto p-6 pb-20 space-y-6">
-        {/* Inline Error Banner */}
-        {error && (
-          <div className="flex items-center gap-2 px-4 py-3 bg-[#FF3B30]/10 border border-[#FF3B30]/20 rounded-xl text-[13px] text-[#FF3B30] font-medium">
-            {error}
-            <button onClick={() => setError(null)} className="ml-auto text-[#FF3B30]/60 hover:text-[#FF3B30]">✕</button>
-          </div>
-        )}
+        {/* Error Banner */}
+        {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
 
         {/* Header */}
         <div className="flex items-center justify-between">

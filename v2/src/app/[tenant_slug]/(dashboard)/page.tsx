@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { getDashboardStats } from "@/app/actions/dashboard";
-import { MessageSquare, Users, Bot, TrendingUp, Activity, ClipboardList, Loader2 } from "lucide-react";
+import { MessageSquare, Bot, TrendingUp, Activity, ClipboardList } from "lucide-react";
+import { PageLoader, EmptyState } from "@/components/ui/shared-states";
 
 // ==========================================
 // QUBA AI — Dashboard Ana Sayfa
@@ -19,20 +20,10 @@ export default function DashboardPage() {
     });
   }, []);
 
-  if (loading) {
-    return (
-      <div className="h-full flex items-center justify-center">
-        <Loader2 className="w-6 h-6 animate-spin text-[#86868B]" />
-      </div>
-    );
-  }
+  if (loading) return <PageLoader />;
 
   if (!stats) {
-    return (
-      <div className="h-full flex items-center justify-center text-[#86868B]">
-        Veri yüklenemedi.
-      </div>
-    );
+    return <EmptyState title="Veri yüklenemedi" description="Lütfen sayfayı yenileyin." />;
   }
 
   const cards = [
