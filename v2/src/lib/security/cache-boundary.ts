@@ -1,5 +1,5 @@
 import { SecurityIsolationError } from "./tenant-firewall";
-import { SecurityTelemetry } from "./telemetry";
+import { telemetry } from "../observability/telemetry";
 
 export const CacheBoundary = {
   /**
@@ -18,7 +18,7 @@ export const CacheBoundary = {
     if (resourceType === "kb") {
       // Must be tenant:{tenantId}:kb:{collection}
       if (!key.startsWith(`tenant:${tenantId}:kb:`)) {
-         SecurityTelemetry.log("SECURITY_PANIC", tenantId, "UNKNOWN", null, {
+         telemetry.track("SECURITY_PANIC", "failure", {
           reason: "Invalid KB namespace format",
           key
         });
@@ -27,7 +27,7 @@ export const CacheBoundary = {
     }
 
     if (!key.startsWith(expectedPrefix)) {
-      SecurityTelemetry.log("SECURITY_PANIC", tenantId, "UNKNOWN", null, {
+      telemetry.track("SECURITY_PANIC", "failure", {
         reason: "Invalid cache namespace format",
         key,
         expectedPrefix
@@ -35,7 +35,7 @@ export const CacheBoundary = {
       throw new SecurityIsolationError(`Cache key [${key}] violates namespace isolation. Expected prefix: ${expectedPrefix}`);
     }
 
-    SecurityTelemetry.log("CACHE_NAMESPACE_APPLIED", tenantId, "UNKNOWN", null, {
+    telemetry.track("SECURITY_NAMESPACE_APPLIED", "info", {
       key
     });
 

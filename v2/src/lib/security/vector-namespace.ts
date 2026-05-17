@@ -1,5 +1,5 @@
 import { SecurityIsolationError } from "./tenant-firewall";
-import { SecurityTelemetry } from "./telemetry";
+import { telemetry } from "../observability/telemetry";
 
 export interface VectorDocumentMetadata {
   tenant_id: string;
@@ -19,7 +19,7 @@ export const VectorNamespace = {
    */
   assertTenantSafeEmbedding: (metadata: any): VectorDocumentMetadata => {
     if (!metadata || !metadata.tenant_id || !metadata.namespace || !metadata.source || !metadata.visibility) {
-      SecurityTelemetry.log("SECURITY_PANIC", metadata?.tenant_id || "UNKNOWN", "UNKNOWN", null, {
+      telemetry.track("SECURITY_PANIC", "failure", {
         reason: "Missing mandatory vector metadata fields",
         metadata
       });
@@ -38,7 +38,7 @@ export const VectorNamespace = {
     }
 
     if (filter.tenant_id && filter.tenant_id !== tenantId) {
-      SecurityTelemetry.log("CROSS_TENANT_ATTEMPT", tenantId, "UNKNOWN", null, {
+      telemetry.track("SECURITY_CROSS_TENANT_BLOCKED", "failure", {
         reason: "Vector retrieval filter mismatch",
         targetTenantId: filter.tenant_id
       });
@@ -51,7 +51,7 @@ export const VectorNamespace = {
       tenant_id: tenantId
     };
 
-    SecurityTelemetry.log("VECTOR_NAMESPACE_APPLIED", tenantId, "UNKNOWN", null, {
+    telemetry.track("SECURITY_NAMESPACE_APPLIED", "info", {
       filter: safeFilter
     });
 

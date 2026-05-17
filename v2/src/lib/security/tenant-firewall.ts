@@ -1,5 +1,5 @@
 import { TenantBrain } from "../brain/tenant-brain";
-import { SecurityTelemetry } from "./telemetry";
+import { telemetry } from "../observability/telemetry";
 
 export class SecurityIsolationError extends Error {
   constructor(message: string) {
@@ -24,7 +24,7 @@ export const TenantFirewall = {
     resource: ResourceContext
   ) => {
     if (!brain || !brain.context || !brain.context.tenantId) {
-      SecurityTelemetry.log("SECURITY_PANIC", "UNKNOWN", "UNKNOWN", null, {
+      telemetry.track("SECURITY_PANIC", "failure", {
         reason: "TenantBrain is missing or invalid in firewall check",
         resource
       });
@@ -32,7 +32,7 @@ export const TenantFirewall = {
     }
 
     if (!resource || !resource.resourceTenantId) {
-      SecurityTelemetry.log("SECURITY_PANIC", brain.context.tenantId, brain.context.webhookPayloadId, null, {
+      telemetry.track("SECURITY_PANIC", "failure", {
         reason: "Target resource is missing tenant association",
         resourceType: resource?.resourceType
       });
@@ -40,7 +40,7 @@ export const TenantFirewall = {
     }
 
     if (brain.context.tenantId !== resource.resourceTenantId) {
-      SecurityTelemetry.log("CROSS_TENANT_ATTEMPT", brain.context.tenantId, brain.context.webhookPayloadId, null, {
+      telemetry.track("SECURITY_CROSS_TENANT_BLOCKED", "failure", {
         resourceType: resource.resourceType,
         targetTenantId: resource.resourceTenantId,
         resourceId: resource.resourceId
@@ -51,7 +51,7 @@ export const TenantFirewall = {
     }
 
     // Success
-    SecurityTelemetry.log("TENANT_FIREWALL_PASS", brain.context.tenantId, brain.context.webhookPayloadId, null, {
+    telemetry.track("TENANT_FIREWALL_PASS", "info", {
       resourceType: resource.resourceType,
       resourceId: resource.resourceId
     });

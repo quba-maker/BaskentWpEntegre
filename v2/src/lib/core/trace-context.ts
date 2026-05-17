@@ -4,6 +4,7 @@ export interface TraceContext {
   traceId: string;
   tenantId?: string;
   spanId?: string;
+  conversationId?: string;
 }
 
 /**

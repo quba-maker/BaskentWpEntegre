@@ -1,5 +1,5 @@
 import { SecurityIsolationError } from "./tenant-firewall";
-import { SecurityTelemetry } from "./telemetry";
+import { telemetry } from "../observability/telemetry";
 
 export const TenantQueryGuard = {
   /**
@@ -19,7 +19,7 @@ export const TenantQueryGuard = {
     // A simplistic check to ensure the query string mentions tenant_id
     // Real enforcement happens via the ORM/QueryBuilder, but this blocks raw strings
     if (!normalizedQuery.includes("tenant_id")) {
-      SecurityTelemetry.log("QUERY_REJECTED", tenantId, "UNKNOWN", null, {
+      telemetry.track("SECURITY_QUERY_REJECTED", "failure", {
         reason: "Raw query lacks tenant_id bound",
         query
       });
@@ -31,7 +31,7 @@ export const TenantQueryGuard = {
     // We enforce that the executing tenantId is present in the parameters array.
     if (params && params.length > 0) {
       if (!params.includes(tenantId)) {
-        SecurityTelemetry.log("QUERY_REJECTED", tenantId, "UNKNOWN", null, {
+        telemetry.track("SECURITY_QUERY_REJECTED", "failure", {
           reason: "Query parameters lack execution tenantId",
           query,
           params
@@ -39,7 +39,7 @@ export const TenantQueryGuard = {
         throw new SecurityIsolationError("Query execution rejected. Parameters must contain the current executing tenant_id to prevent cross-tenant queries.");
       }
     } else {
-        SecurityTelemetry.log("QUERY_REJECTED", tenantId, "UNKNOWN", null, {
+        telemetry.track("SECURITY_QUERY_REJECTED", "failure", {
           reason: "Query lacks parameters (raw execution attempt)",
           query
         });

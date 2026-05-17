@@ -1,7 +1,7 @@
 import { TenantBrain } from '../../brain/tenant-brain';
 import { defaultPrompts } from '../../domain/conversation/prompts';
 import { SecurityIsolationError } from '../../security/tenant-firewall';
-import { SecurityTelemetry } from '../../security/telemetry';
+import { telemetry } from '../../observability/telemetry';
 
 export class PromptBuilder {
   /**
@@ -9,14 +9,14 @@ export class PromptBuilder {
    */
   private static validatePromptOwnership(brain: TenantBrain, promptString: string | null) {
     if (!brain || !brain.context || !brain.context.tenantId) {
-      SecurityTelemetry.log("SECURITY_PANIC", "UNKNOWN", "UNKNOWN", null, {
-        reason: "Missing TenantBrain during prompt generation"
+      telemetry.track("SECURITY_PANIC", "failure", { 
+        reason: "Missing TenantBrain during prompt generation" 
       });
       throw new SecurityIsolationError("Cannot validate prompt ownership without a valid TenantBrain.");
     }
 
     if (promptString && promptString !== brain.prompts.systemPrompt) {
-      SecurityTelemetry.log("CROSS_TENANT_ATTEMPT", brain.context.tenantId, brain.context.webhookPayloadId, null, {
+      telemetry.track("SECURITY_CROSS_TENANT_BLOCKED", "failure", {
         reason: "Prompt injection or ownership mismatch detected",
       });
       throw new SecurityIsolationError(`Prompt ownership validation failed for tenant: ${brain.context.tenantId}. Prompt injection rejected.`);
@@ -28,7 +28,7 @@ export class PromptBuilder {
       const crypto = require('crypto');
       const currentHash = crypto.createHash('sha256').update(promptString).digest('hex');
       if (currentHash !== brain.prompts.promptHash) {
-        SecurityTelemetry.log("SECURITY_PANIC", brain.context.tenantId, brain.context.webhookPayloadId, null, {
+        telemetry.track("SECURITY_PANIC", "failure", {
           reason: "Prompt hash validation failed. Possible memory corruption or injection.",
         });
         throw new SecurityIsolationError(`Prompt execution blocked. Cryptographic hash mismatch for tenant: ${brain.context.tenantId}.`);
