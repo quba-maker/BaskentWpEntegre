@@ -8,6 +8,7 @@ import { AIOrchestrator, ChatMessage } from "@/lib/services/ai/orchestrator";
 import { ResponsePolicy } from "@/lib/services/ai/response-policy";
 import { PromptBuilder } from "@/lib/services/ai/prompt-builder";
 import { TenantResolverService } from "@/lib/services/meta/tenant-resolver.service";
+import { assertTenant } from "@/lib/security/assertions";
 
 /**
  * Enterprise Queue Worker Engine
@@ -28,6 +29,9 @@ export class QueueWorkerEngine {
     payload: any, 
     metadata: { messageId: string, isRetry: boolean, retriedCount: number }
   ) {
+    // SECURITY: Fail-closed tenant assertion at pipeline boundary
+    assertTenant(tenantId, `worker:${topic}`);
+    
     this.log.info(`[WORKER] Initiating execution for topic: ${topic}`, metadata);
 
     switch (topic) {
