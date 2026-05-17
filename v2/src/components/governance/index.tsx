@@ -1,4 +1,5 @@
 import React from "react";
+import { Check, Save, Loader2 } from "lucide-react";
 
 // ==========================================
 // QUBA AI — GOVERNANCE COMPONENTS
@@ -154,15 +155,249 @@ export function ActionButton({
 
   if (href) {
     return (
-      <a href={href} className={`${baseClasses} ${variantClasses[variant]}`} style={style}>
+      <a href={href} className={`${baseClasses} ${variantClasses[variant]} q-press`} style={style}>
         {children}
       </a>
     );
   }
 
   return (
-    <button onClick={onClick} disabled={disabled} className={`${baseClasses} ${variantClasses[variant]}`} style={style}>
+    <button onClick={onClick} disabled={disabled} className={`${baseClasses} ${variantClasses[variant]} q-press`} style={style}>
       {children}
+    </button>
+  );
+}
+
+// ==========================================
+// INTERACTION PRIMITIVES
+// Platform-wide interaction building blocks
+// Every interactive element MUST use these.
+// ==========================================
+
+/**
+ * CardInteractive — Clickable card with hover lift physics.
+ * Use for tenant cards, integration cards, any selectable surface.
+ */
+export function CardInteractive({
+  children,
+  onClick,
+  className = "",
+  selected = false,
+}: {
+  children: React.ReactNode;
+  onClick?: () => void;
+  className?: string;
+  selected?: boolean;
+}) {
+  return (
+    <div
+      onClick={onClick}
+      className={`bg-white rounded-2xl border shadow-sm overflow-hidden p-5 q-card-interactive ${
+        onClick ? "cursor-pointer" : ""
+      } ${selected ? "ring-2" : ""} ${className}`}
+      style={{
+        borderColor: selected ? "var(--q-blue)" : "var(--q-border-default)",
+        ...(selected ? { ringColor: "var(--q-blue)" } : {}),
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+/**
+ * IconButton — Standardized icon action button.
+ * Use for toolbar actions, row actions, settings toggles.
+ * 
+ * Physics: hover bg + active press scale
+ */
+export function IconButton({
+  icon: Icon,
+  onClick,
+  color = "var(--q-text-secondary)",
+  hoverColor,
+  title,
+  size = "default",
+  disabled = false,
+}: {
+  icon: React.ElementType;
+  onClick?: () => void;
+  color?: string;
+  hoverColor?: string;
+  title?: string;
+  size?: "small" | "default";
+  disabled?: boolean;
+}) {
+  const sizeClasses = size === "small" ? "p-1 rounded-md" : "p-2 rounded-lg";
+  const iconSize = size === "small" ? "w-3.5 h-3.5" : "w-4 h-4";
+
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className={`${sizeClasses} q-list-item q-press disabled:opacity-40`}
+      style={{ color }}
+    >
+      <Icon className={iconSize} />
+    </button>
+  );
+}
+
+/**
+ * Skeleton — Loading state placeholder.
+ * 
+ * RULE: Use Skeleton instead of Spinner for content loading.
+ * Spinners only for action feedback (save, submit).
+ */
+export function Skeleton({
+  width,
+  height = "16px",
+  rounded = false,
+  className = "",
+}: {
+  width?: string;
+  height?: string;
+  rounded?: boolean;
+  className?: string;
+}) {
+  return (
+    <div
+      className={`q-skeleton ${className}`}
+      style={{
+        width: width || "100%",
+        height,
+        borderRadius: rounded ? "var(--q-radius-pill)" : "var(--q-radius-default)",
+      }}
+    />
+  );
+}
+
+/**
+ * SkeletonCard — Full card skeleton for page loading states.
+ * Use instead of PageLoader when you know the layout structure.
+ */
+export function SkeletonCard({ lines = 3 }: { lines?: number }) {
+  return (
+    <div
+      className="bg-white rounded-2xl border shadow-sm p-5 space-y-3"
+      style={{ borderColor: "var(--q-border-default)" }}
+    >
+      <Skeleton width="40%" height="20px" />
+      {Array.from({ length: lines }).map((_, i) => (
+        <Skeleton key={i} width={`${80 - i * 15}%`} height="14px" />
+      ))}
+    </div>
+  );
+}
+
+/**
+ * StatusBadge — Consistent status/label display.
+ * Use for active/inactive, plan tiers, role labels.
+ */
+export function StatusBadge({
+  label,
+  color = "var(--q-blue)",
+  variant = "subtle",
+}: {
+  label: string;
+  color?: string;
+  variant?: "subtle" | "solid";
+}) {
+  return (
+    <span
+      className="text-[11px] font-semibold px-2 py-0.5 rounded-full"
+      style={
+        variant === "solid"
+          ? { backgroundColor: color, color: "white" }
+          : { backgroundColor: `color-mix(in srgb, ${color} 10%, transparent)`, color }
+      }
+    >
+      {label}
+    </span>
+  );
+}
+
+/**
+ * ToggleSwitch — Platform-standard toggle.
+ * SSOT: All on/off toggles must use this.
+ */
+export function ToggleSwitch({
+  active,
+  onToggle,
+  disabled = false,
+}: {
+  active: boolean;
+  onToggle: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      onClick={onToggle}
+      disabled={disabled}
+      className="relative w-[51px] h-[31px] rounded-full shrink-0 disabled:opacity-40"
+      style={{
+        backgroundColor: active ? "var(--q-green)" : "var(--q-bg-tertiary)",
+        transition: "background-color var(--q-transition-fast)",
+      }}
+    >
+      <div
+        className="absolute top-[2px] w-[27px] h-[27px] bg-white rounded-full shadow-md"
+        style={{
+          transform: active ? "translateX(22px)" : "translateX(2px)",
+          transition: "transform var(--q-transition-fast)",
+        }}
+      />
+    </button>
+  );
+}
+
+/**
+ * SaveButton — Platform-standard save/persist button.
+ * SSOT: All data persistence actions MUST use this.
+ * 
+ * Lifecycle: idle → saving → success (1.5s) → idle
+ * Physics: press scale + color transition
+ */
+export function SaveButton({
+  saving,
+  saved,
+  onClick,
+  label = "Kaydet",
+  savedLabel = "Kaydedildi!",
+  color = "var(--q-blue)",
+  size = "default",
+}: {
+  saving: boolean;
+  saved: boolean;
+  onClick: () => void;
+  label?: string;
+  savedLabel?: string;
+  color?: string;
+  size?: "small" | "default";
+}) {
+  const sizeClasses = size === "small"
+    ? "px-3 py-1 text-[11px] rounded-lg"
+    : "px-4 py-1.5 text-xs rounded-lg";
+
+  return (
+    <button
+      onClick={onClick}
+      disabled={saving}
+      className={`${sizeClasses} font-bold flex items-center gap-1.5 text-white q-press disabled:opacity-60`}
+      style={{
+        backgroundColor: saved ? "var(--q-green)" : color,
+        transition: "background-color var(--q-transition-fast)",
+      }}
+    >
+      {saving ? (
+        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+      ) : saved ? (
+        <Check className="w-3.5 h-3.5" />
+      ) : (
+        <Save className="w-3.5 h-3.5" />
+      )}
+      {saved ? savedLabel : label}
     </button>
   );
 }

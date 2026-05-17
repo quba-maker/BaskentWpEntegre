@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { getAllTenants, createTenant, toggleTenantStatus } from "@/app/actions/admin";
 import { startImpersonation } from "@/lib/auth/session";
-import { Building2, Plus, Users, MessageSquare, Loader2, Shield, Power, Sparkles, Eye } from "lucide-react";
+import { Building2, Plus, Users, MessageSquare, Loader2, Shield, Power, Eye } from "lucide-react";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { PageLoader, ErrorBanner } from "@/components/ui/shared-states";
 
@@ -87,17 +87,11 @@ export default function AdminPage() {
             <p className="text-[13px] text-[--q-text-secondary] mt-1">{tenants.length} firma kayıtlı</p>
           </div>
         <div className="flex items-center gap-2">
-            <a
-              href="admin/onboarding"
-              className="flex items-center gap-2 px-4 py-2.5 bg-[--q-purple-alt] hover:bg-[--q-purple-hover] text-white text-[13px] font-semibold rounded-xl transition-all"
-            >
-              <Sparkles className="w-4 h-4" /> Kurulum Sihirbazı
-            </a>
             <button
               onClick={() => setShowCreate(!showCreate)}
               className="flex items-center gap-2 px-4 py-2.5 bg-[--q-blue] hover:bg-[--q-blue-hover] text-white text-[13px] font-semibold rounded-xl transition-all"
             >
-              <Plus className="w-4 h-4" /> Hızlı Ekle
+              <Plus className="w-4 h-4" /> Yeni Firma Ekle
             </button>
           </div>
         </div>

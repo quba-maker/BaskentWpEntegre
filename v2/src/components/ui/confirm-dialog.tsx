@@ -68,12 +68,12 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
         <div className="fixed inset-0 z-[9999] flex items-center justify-center">
           {/* Backdrop */}
           <div
-            className="absolute inset-0 bg-black/40 backdrop-blur-sm animate-[fadeIn_150ms_ease-out]"
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm q-backdrop-enter"
             onClick={handleCancel}
           />
 
           {/* Dialog */}
-          <div className="relative bg-white rounded-2xl shadow-2xl w-[90%] max-w-[340px] overflow-hidden animate-[scaleIn_200ms_ease-out]">
+          <div className="relative bg-white rounded-2xl shadow-2xl w-[90%] max-w-[340px] overflow-hidden q-modal-enter">
             {/* Icon */}
             <div className="flex justify-center pt-6 pb-2">
               <div
@@ -118,16 +118,7 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
         </div>
       )}
 
-      <style jsx>{`
-        @keyframes fadeIn {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
-        @keyframes scaleIn {
-          from { opacity: 0; transform: scale(0.95); }
-          to { opacity: 1; transform: scale(1); }
-        }
-      `}</style>
+      {/* Modal animations provided by tokens.css: q-modal-enter, q-backdrop-enter */}
     </ConfirmContext.Provider>
   );
 }
