@@ -65,7 +65,7 @@ export async function getConversations(page: number = 1, search: string = "", st
         ...r,
         score: r.stage === 'appointed' ? 100 : r.stage === 'contacted' ? 60 : 30,
         isBotActive: r.status !== 'human',
-        formattedTime: r.last_message_time ? new Date(r.last_message_time).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }) : '',
+        formattedTime: r.last_message_time ? new Date(r.last_message_time).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul' }) : '',
         channel: r.channel || 'whatsapp',
         country: r.country || (r.form_raw_data && r.form_raw_data.includes('country') ? JSON.parse(r.form_raw_data).country : null) || (r.id.startsWith('90') || r.id.startsWith('+90') ? 'Türkiye' : r.id.startsWith('49') || r.id.startsWith('+49') ? 'Almanya' : null),
         formData: r.form_name ? {
@@ -102,12 +102,31 @@ export async function getMessages(phone: string) {
 
       return validRows.map((r: any) => {
         const date = new Date(r.created_at);
+        
+        const opt = { timeZone: 'Europe/Istanbul', year: 'numeric', month: '2-digit', day: '2-digit' } as const;
+        const now = new Date();
+        const msgStr = date.toLocaleDateString('en-CA', opt);
+        const nowStr = now.toLocaleDateString('en-CA', opt);
+        
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        const yesterdayStr = yesterday.toLocaleDateString('en-CA', opt);
+
+        let dateLabel = '';
+        if (msgStr === nowStr) {
+          dateLabel = 'Bugün';
+        } else if (msgStr === yesterdayStr) {
+          dateLabel = 'Dün';
+        } else {
+          dateLabel = date.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', timeZone: 'Europe/Istanbul' });
+        }
+
         return {
           id: r.id,
           sender: r.direction === 'in' ? 'user' : (r.direction === 'system' ? 'system' : (r.model_used === 'agent' ? 'agent' : 'bot')),
           text: r.text,
-          time: date.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }),
-          dateLabel: date.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long' })
+          time: date.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul' }),
+          dateLabel
         };
       });
     }

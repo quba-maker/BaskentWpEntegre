@@ -73,8 +73,8 @@ export function ConversationViewport() {
       id: Date.now(),
       sender: "agent",
       text: textToSend,
-      time: new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }),
-      dateLabel: new Date().toLocaleDateString("tr-TR", { day: "numeric", month: "long" }),
+      time: new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Istanbul" }),
+      dateLabel: "Bugün",
     };
 
     const currentMessages = messages || [];
