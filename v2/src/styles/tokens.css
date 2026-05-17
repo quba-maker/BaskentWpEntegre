@@ -66,6 +66,11 @@
   --q-purple-bg: rgba(88, 86, 214, 0.1);
   --q-purple-alt-bg: rgba(175, 82, 222, 0.05);
 
+  /* -------- CHAT BUBBLES (WhatsApp Native Feel) -------- */
+  --q-chat-in: #FFFFFF;
+  --q-chat-out: #E7FFDB;
+  --q-chat-system: #FFF8E5;
+
   /* -------- SPACING SCALE -------- */
   /* Based on 4px grid */
   --q-space-1: 4px;

@@ -71,7 +71,7 @@ export function ConversationViewport() {
     // Optimistic update
     const optimisticMsg = {
       id: Date.now(),
-      sender: "user",
+      sender: "bot",
       text: textToSend,
       time: new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }),
       dateLabel: new Date().toLocaleDateString("tr-TR", { day: "numeric", month: "long" }),
@@ -211,7 +211,10 @@ export function ConversationViewport() {
       </div>
 
       {/* ── Messages Area ── */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-6 flex flex-col-reverse">
+      <div 
+        className="flex-1 overflow-y-auto p-6 space-y-6 flex flex-col-reverse"
+        style={{ background: "var(--q-bg-secondary)" }}
+      >
         {isLoading ? (
           <ChatSkeleton />
         ) : (
@@ -242,32 +245,43 @@ export function ConversationViewport() {
                     </div>
                   </div>
                 ) : (
-                  <div className={`flex w-full ${msg.sender === "user" ? "justify-start" : "justify-end"} mb-6 group`}>
-                    <div className={`max-w-[85%] md:max-w-[65%] flex flex-col gap-1.5 ${msg.sender === "user" ? "items-start" : "items-end"}`}>
+                    <div className={`flex w-full ${msg.sender === "user" ? "justify-start" : "justify-end"} mb-6 group`}>
                       {/* Bubble */}
                       <div
-                        className={`px-4 py-3 md:px-5 md:py-3.5 rounded-2xl shadow-sm transition-all duration-200 hover:shadow-md ${msg.sender === "user" ? "rounded-bl-sm" : "rounded-br-sm"}`}
+                        className={`relative max-w-[85%] md:max-w-[65%] px-3 py-2 md:px-4 md:py-2.5 shadow-sm transition-all duration-200 hover:shadow-md ${
+                          msg.sender === "user" 
+                            ? "rounded-2xl rounded-tl-sm" 
+                            : "rounded-2xl rounded-tr-sm"
+                        }`}
                         style={
                           msg.sender === "user"
-                            ? { background: "var(--q-bg-primary)", border: "1px solid var(--q-border-default)", color: "var(--q-text-primary)" }
-                            : { background: `linear-gradient(135deg, var(--q-blue), var(--q-blue-hover))`, color: "white", border: "1px solid rgba(0,122,255,0.2)" }
+                            ? { background: "var(--q-chat-in)", color: "var(--q-text-primary)" }
+                            : { background: "var(--q-chat-out)", color: "var(--q-text-primary)" }
                         }
                       >
-                        <p className="text-[15px] leading-relaxed font-medium whitespace-pre-wrap">{msg.text}</p>
-                      </div>
-                      {/* Info */}
-                      <div className="flex items-center gap-1.5 px-2 opacity-50 group-hover:opacity-100 transition-opacity duration-300">
-                        {msg.sender === "bot" ? (
-                          <Sparkles className="w-3 h-3" style={{ color: "var(--q-blue)" }} />
-                        ) : (
-                          <User className="w-3 h-3" />
+                        {/* Sender Info (Only for bot/system on outgoing, or user on incoming if needed) */}
+                        {msg.sender !== "user" && (
+                          <div className="flex items-center gap-1 mb-1 opacity-70">
+                            {msg.sender === "bot" ? (
+                              <Sparkles className="w-3 h-3" style={{ color: "var(--q-purple)" }} />
+                            ) : (
+                              <User className="w-3 h-3" style={{ color: "var(--q-text-secondary)" }} />
+                            )}
+                            <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: msg.sender === "bot" ? "var(--q-purple)" : "var(--q-text-secondary)" }}>
+                              {msg.sender === "bot" ? "AI" : "Temsilci"}
+                            </span>
+                          </div>
                         )}
-                        <span className="text-[11px] font-semibold tracking-wide" style={{ color: "var(--q-text-secondary)" }}>
+                        
+                        <p className="text-[15px] leading-[1.4] font-medium whitespace-pre-wrap pb-4">
+                          {msg.text}
+                        </p>
+                        
+                        <span className="absolute bottom-1 right-2 text-[10px] font-semibold tracking-wide opacity-50" style={{ color: "var(--q-text-secondary)" }}>
                           {msg.time}
                         </span>
                       </div>
                     </div>
-                  </div>
                 )}
               </div>
             );

@@ -78,18 +78,24 @@ export async function getConversations(page: number = 1, search: string = "", st
   ).then(res => res.data || []);
 }
 
+import { unstable_noStore as noStore } from "next/cache";
+
 export async function getMessages(phone: string) {
+  noStore();
   if (!phone) return [];
   
   return withActionGuard(
     { actionName: 'getMessages' },
     async (ctx) => {
       const rows = await ctx.db.executeSafe(sql`
-        SELECT id, content as text, direction, created_at
-        FROM messages
-        WHERE phone_number = ${phone} AND tenant_id = ${ctx.tenantId}
+        SELECT * FROM (
+          SELECT id, content as text, direction, created_at
+          FROM messages
+          WHERE phone_number = ${phone} AND tenant_id = ${ctx.tenantId}
+          ORDER BY created_at DESC
+          LIMIT 100
+        ) sub
         ORDER BY created_at ASC
-        LIMIT 100
       `);
 
       const validRows = Array.isArray(rows) ? rows : ((rows as any)?.rows || []);
