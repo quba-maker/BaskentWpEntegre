@@ -127,7 +127,8 @@ export class QueueWorkerEngine {
 
     // 5. Build System Prompt & History
     const tenantPrompt = tenantConfig.raw?.prompt || tenantConfig.raw?.system_prompt || null;
-    const systemPromptText = PromptBuilder.buildSystemPrompt(tenantPrompt, targetPhase, false);
+    const { defaultPrompts } = await import('../domain/conversation/prompts');
+    const systemPromptText = PromptBuilder.buildSystemPrompt(tenantPrompt, targetPhase, false, defaultPrompts.whatsapp);
     
     const history = await convService.getHistory(phoneNumber, 10);
     const aiMessages: ChatMessage[] = [

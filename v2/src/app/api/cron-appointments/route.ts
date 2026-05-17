@@ -11,7 +11,7 @@ export async function GET() {
     const sql = neon(process.env.DATABASE_URL!);
     
     // Tüm aktif tenantların yarınki randevularını bul
-    const tenants = await sql`SELECT id, slug, meta_page_token, whatsapp_phone_id FROM tenants WHERE status = 'active'`;
+    const tenants = await sql`SELECT id, slug, meta_page_token, whatsapp_phone_id, reminder_template, reminder_hours_before FROM tenants WHERE status = 'active'`;
     
     const results: any[] = [];
     
@@ -28,7 +28,9 @@ export async function GET() {
           continue;
         }
 
-        // Yarınki randevuları bul
+        const hoursBefore = tenant.reminder_hours_before || 24;
+
+        // Randevuları bul (Interval dinamik)
         const appointments = await sql`
           SELECT e.phone_number, e.scheduled_date, c.patient_name
           FROM events e
@@ -36,7 +38,7 @@ export async function GET() {
           WHERE c.tenant_id = ${tenant.id}
             AND e.event_type = 'appointment_request'
             AND e.status IN ('scheduled', 'confirmed')
-            AND e.scheduled_date::date = (CURRENT_DATE + INTERVAL '1 day')::date
+            AND e.scheduled_date::date = (CURRENT_DATE + INTERVAL '1 hour' * ${hoursBefore})::date
           LIMIT 20
         `;
 
@@ -45,7 +47,13 @@ export async function GET() {
             const dateStr = new Date(apt.scheduled_date).toLocaleString('tr-TR', {
               day: '2-digit', month: 'long', hour: '2-digit', minute: '2-digit'
             });
-            const msg = `Merhaba ${apt.patient_name || ''} 🙏 Yarınki randevunuzu hatırlatmak istiyoruz: ${dateStr}. Görüşmek üzere!`;
+            
+            // SaaS Logic: Use tenant's custom reminder template or fallback
+            const template = tenant.reminder_template || "Merhaba {{patient_name}} 🙏 Yarın {{time}} için planlanan randevunuzu hatırlatmak istiyoruz. Görüşmek üzere!";
+            const msg = template
+              .replace("{{patient_name}}", apt.patient_name || '')
+              .replace("{{time}}", dateStr)
+              .replace("{{date}}", dateStr);
             
             const token = tenant.meta_page_token || process.env.META_ACCESS_TOKEN;
             const phoneId = tenant.whatsapp_phone_id || process.env.PHONE_NUMBER_ID;
