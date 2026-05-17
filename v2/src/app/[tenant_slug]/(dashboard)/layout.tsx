@@ -1,5 +1,6 @@
 import { Sidebar } from "@/components/layout/sidebar";
-import { LayoutDashboard, MessageSquare, ClipboardList, Calendar, Settings, Link2, Bot, Users, MoreHorizontal } from "lucide-react";
+import { DashboardProviders } from "@/components/layout/dashboard-providers";
+import { LayoutDashboard, MessageSquare, ClipboardList, Settings, Bot } from "lucide-react";
 import Link from "next/link";
 import { getSession } from "@/lib/auth/session";
 
@@ -28,7 +29,9 @@ export default async function DashboardLayout({
 
       {/* Main Content */}
       <main className="flex-1 overflow-auto h-full flex flex-col relative pb-[env(safe-area-inset-bottom)] md:pb-0">
-        {children}
+        <DashboardProviders>
+          {children}
+        </DashboardProviders>
       </main>
 
       {/* Mobile Bottom Navigation (iOS Style, Role-Aware) */}
@@ -36,7 +39,6 @@ export default async function DashboardLayout({
         <MobileNavLink href={`/${slug}`} icon={<LayoutDashboard className="w-6 h-6" />} label="Panel" />
         <MobileNavLink href={`/${slug}/inbox`} icon={<MessageSquare className="w-6 h-6" />} label="Mesajlar" active />
         <MobileNavLink href={`/${slug}/forms`} icon={<ClipboardList className="w-6 h-6" />} label="Formlar" />
-        <MobileNavLink href={`/${slug}/calendar`} icon={<Calendar className="w-6 h-6" />} label="Takvim" />
         {canManageBot && (
           <MobileNavLink href={`/${slug}/bot`} icon={<Bot className="w-6 h-6" />} label="Bot" />
         )}

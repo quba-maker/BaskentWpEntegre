@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { Link2, Save, FileSpreadsheet, CheckCircle2, ChevronRight, Activity, Copy, DownloadCloud, Trash2 } from "lucide-react";
 import { getGoogleSheetsConfig, saveGoogleSheetsConfig, fetchGoogleSheetsTabs } from "@/app/actions/integrations";
 import { syncGoogleSheets, deleteAllLeads } from "@/app/actions/forms";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 
 export default function IntegrationsPage() {
   const [activeTab, setActiveTab] = useState("all");
@@ -15,6 +16,7 @@ export default function IntegrationsPage() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [availableTabs, setAvailableTabs] = useState<any[]>([]);
   const [saveMsg, setSaveMsg] = useState("");
+  const confirm = useConfirm();
 
   useEffect(() => {
     loadConfig();
@@ -69,24 +71,32 @@ export default function IntegrationsPage() {
     const res = await syncGoogleSheets();
     setIsSyncingOld(false);
     if (res.success) {
-      alert("Eski kayıtlar başarıyla içeri aktarıldı: " + res.message);
+      setSaveMsg("✅ Eski kayıtlar başarıyla içeri aktırıldı: " + res.message);
     } else {
-      alert("Hata: " + res.error);
+      setSaveMsg("❌ Hata: " + res.error);
     }
+    setTimeout(() => setSaveMsg(""), 4000);
   };
 
   const handleReset = async () => {
-    if (!confirm("DİKKAT! Veritabanındaki tüm mevcut form/hasta kayıtları kalıcı olarak silinecek. Onaylıyor musunuz?")) return;
+    const ok = await confirm({
+      title: "Tüm Kayıtları Sil",
+      message: "DİKKAT! Veritabanındaki tüm form/hasta kayıtları kalıcı olarak silinecek. Bu işlem geri alınamaz.",
+      confirmLabel: "Tümünü Sil",
+      variant: "danger",
+    });
+    if (!ok) return;
     
     setIsDeleting(true);
     const res = await deleteAllLeads();
     setIsDeleting(false);
     
     if (res.success) {
-      alert("✅ " + res.message);
+      setSaveMsg("✅ " + res.message);
     } else {
-      alert("Hata: " + res.error);
+      setSaveMsg("❌ Hata: " + res.error);
     }
+    setTimeout(() => setSaveMsg(""), 4000);
   };
 
   const webhookScript = `

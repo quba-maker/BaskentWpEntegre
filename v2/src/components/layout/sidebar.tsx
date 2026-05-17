@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { 
+  LayoutDashboard,
   MessageSquare, 
   ClipboardList, 
-  Calendar, 
   Settings, 
   Link2,
   Bot,
@@ -63,9 +63,9 @@ export async function Sidebar() {
           </>
         ) : (
           <>
+            <NavLink href={`/${session?.tenantSlug || ''}`} icon={<LayoutDashboard className="w-[18px] h-[18px]" />} label="Panel" />
             <NavLink href={`/${session?.tenantSlug || ''}/inbox`} icon={<MessageSquare className="w-[18px] h-[18px]" />} label="Mesajlar" />
             <NavLink href={`/${session?.tenantSlug || ''}/forms`} icon={<ClipboardList className="w-[18px] h-[18px]" />} label="Formlar" />
-            <NavLink href={`/${session?.tenantSlug || ''}/calendar`} icon={<Calendar className="w-[18px] h-[18px]" />} label="Randevular" />
             {session?.role !== "viewer" && (
               <NavLink href={`/${session?.tenantSlug || ''}/bot`} icon={<Bot className="w-[18px] h-[18px]" />} label="Bot Yönetimi" />
             )}

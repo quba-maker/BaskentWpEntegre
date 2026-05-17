@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { getUsers, createUser, updateUserRole, toggleUserActive, deleteUser, resetUserPassword, generateInviteLink } from "@/app/actions/users";
 import { Users, Plus, Loader2, Shield, UserCheck, Eye, Trash2, Power, KeyRound, Link2, Copy, Check } from "lucide-react";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 
 // ==========================================
 // QUBA AI — Kullanıcı Yönetimi Sayfası
@@ -23,6 +24,8 @@ export default function UsersPage() {
   const [tempPass, setTempPass] = useState<{userId: string, pass: string, name: string} | null>(null);
   const [inviteInfo, setInviteInfo] = useState<{userId: string, url: string, name: string} | null>(null);
   const [copied, setCopied] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const confirm = useConfirm();
 
   useEffect(() => { load(); }, []);
 
@@ -36,13 +39,14 @@ export default function UsersPage() {
   async function handleCreate() {
     if (!form.name || !form.email || !form.password) return;
     setCreating(true);
+    setError(null);
     const res = await createUser(form);
     if (res.success) {
       setShowCreate(false);
       setForm({ name: "", email: "", password: "", role: "agent" });
       load();
     } else {
-      alert(res.error);
+      setError(res.error || "Kullanıcı oluşturulamadı.");
     }
     setCreating(false);
   }
@@ -58,18 +62,30 @@ export default function UsersPage() {
   }
 
   async function handleDelete(userId: string) {
-    if (!confirm("Bu kullanıcıyı silmek istediğinize emin misiniz?")) return;
+    const ok = await confirm({
+      title: "Kullanıcıyı Sil",
+      message: "Bu kullanıcıyı kalıcı olarak silmek istediğinize emin misiniz?",
+      confirmLabel: "Sil",
+      variant: "danger",
+    });
+    if (!ok) return;
     await deleteUser(userId);
     load();
   }
 
   async function handleResetPassword(userId: string, userName: string) {
-    if (!confirm(`${userName} kullanıcısının şifresi sıfırlanacak. Devam?`)) return;
+    const ok = await confirm({
+      title: "Şifre Sıfırla",
+      message: `${userName} kullanıcısının şifresi sıfırlanacak ve geçici yeni bir şifre oluşturulacak.`,
+      confirmLabel: "Sıfırla",
+      variant: "warning",
+    });
+    if (!ok) return;
     const res = await resetUserPassword(userId);
     if (res.success && res.tempPassword) {
       setTempPass({ userId, pass: res.tempPassword, name: userName });
     } else {
-      alert(res.error || "Şifre sıfırlanamadı.");
+      setError(res.error || "Şifre sıfırlanamadı.");
     }
   }
 
@@ -78,7 +94,7 @@ export default function UsersPage() {
     if (res.success && res.inviteUrl) {
       setInviteInfo({ userId, url: res.inviteUrl, name: userName });
     } else {
-      alert(res.error || "Davet linki oluşturulamadı.");
+      setError(res.error || "Davet linki oluşturulamadı.");
     }
   }
 
@@ -99,6 +115,14 @@ export default function UsersPage() {
   return (
     <div className="h-full overflow-auto">
       <div className="max-w-2xl mx-auto p-6 pb-20 space-y-6">
+        {/* Inline Error Banner */}
+        {error && (
+          <div className="flex items-center gap-2 px-4 py-3 bg-[#FF3B30]/10 border border-[#FF3B30]/20 rounded-xl text-[13px] text-[#FF3B30] font-medium">
+            {error}
+            <button onClick={() => setError(null)} className="ml-auto text-[#FF3B30]/60 hover:text-[#FF3B30]">✕</button>
+          </div>
+        )}
+
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>

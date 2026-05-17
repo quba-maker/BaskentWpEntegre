@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { getAllTenants, createTenant, toggleTenantStatus } from "@/app/actions/admin";
 import { startImpersonation } from "@/lib/auth/session";
 import { Building2, Plus, Users, MessageSquare, Loader2, Shield, Power, Sparkles, Eye } from "lucide-react";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 
 // ==========================================
 // QUBA AI — Super Admin Panel
@@ -15,6 +16,8 @@ export default function AdminPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [newTenant, setNewTenant] = useState({ name: "", slug: "", industry: "general", plan: "starter" });
   const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const confirm = useConfirm();
 
   useEffect(() => { load(); }, []);
 
@@ -28,13 +31,14 @@ export default function AdminPage() {
   async function handleCreate() {
     if (!newTenant.name || !newTenant.slug) return;
     setCreating(true);
+    setError(null);
     const res = await createTenant(newTenant);
     if (res.success) {
       setShowCreate(false);
       setNewTenant({ name: "", slug: "", industry: "general", plan: "starter" });
       load();
     } else {
-      alert(res.error);
+      setError(res.error || "Firma oluşturulamadı.");
     }
     setCreating(false);
   }
@@ -45,7 +49,13 @@ export default function AdminPage() {
   }
 
   async function handleImpersonate(tenantId: string, slug: string) {
-    if (!confirm(`Tüm admin yetkilerinizle "${slug}" firmasının arayüzüne geçiş yapmak üzeresiniz. Onaylıyor musunuz?`)) return;
+    const ok = await confirm({
+      title: "Gözlem Moduna Geç",
+      message: `Tüm admin yetkilerinizle "${slug}" firmasının arayüzüne geçiş yapmak üzeresiniz.`,
+      confirmLabel: "Geçiş Yap",
+      variant: "warning",
+    });
+    if (!ok) return;
     
     setLoading(true);
     try {
@@ -54,7 +64,7 @@ export default function AdminPage() {
         window.location.href = res.redirectUrl;
       }
     } catch (err: any) {
-      alert("Hata: " + err.message);
+      setError("Geçiş hatası: " + err.message);
       setLoading(false);
     }
   }
@@ -70,6 +80,14 @@ export default function AdminPage() {
   return (
     <div className="h-full overflow-auto">
       <div className="max-w-3xl mx-auto p-6 pb-20 space-y-6">
+        {/* Inline Error Banner */}
+        {error && (
+          <div className="flex items-center gap-2 px-4 py-3 bg-[#FF3B30]/10 border border-[#FF3B30]/20 rounded-xl text-[13px] text-[#FF3B30] font-medium">
+            {error}
+            <button onClick={() => setError(null)} className="ml-auto text-[#FF3B30]/60 hover:text-[#FF3B30]">✕</button>
+          </div>
+        )}
+
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
