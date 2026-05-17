@@ -1,0 +1,100 @@
+/* ==========================================
+ * QUBA AI — DESIGN TOKEN SYSTEM
+ * Single Source of Truth for all visual properties
+ * 
+ * RULES:
+ * 🚫 No hardcoded HEX colors in components
+ * 🚫 No inline font-size pixel values
+ * 🚫 No arbitrary border-radius
+ * ✅ Use ONLY these tokens
+ * ==========================================
+ */
+
+:root {
+  /* -------- TYPOGRAPHY SCALE -------- */
+  /* 5 sizes only — no exceptions */
+  --font-caption: 11px;    /* Labels, badges, metadata */
+  --font-small: 12px;      /* Secondary info, table cells */
+  --font-body: 13px;       /* Primary body text, inputs */
+  --font-title: 15px;      /* Section titles, nav items */
+  --font-page-title: 22px; /* Page headings (h1) */
+
+  /* -------- SEMANTIC COLORS -------- */
+  /* Text */
+  --q-text-primary: #1D1D1F;
+  --q-text-secondary: #86868B;
+  --q-text-placeholder: #C7C7CC;
+  --q-text-disabled: #C7C7CC;
+
+  /* Backgrounds */
+  --q-bg-primary: #FFFFFF;
+  --q-bg-secondary: #F5F5F7;
+  --q-bg-tertiary: #F2F2F7;
+  --q-bg-elevated: rgba(255, 255, 255, 0.65);
+  --q-bg-hover: rgba(0, 0, 0, 0.04);
+  --q-bg-active: rgba(0, 0, 0, 0.06);
+
+  /* Borders */
+  --q-border-default: rgba(0, 0, 0, 0.05);
+  --q-border-strong: rgba(0, 0, 0, 0.08);
+  --q-border-input: rgba(0, 0, 0, 0.08);
+
+  /* Brand / Action Colors — Apple HIG */
+  --q-blue: #007AFF;         /* Primary action */
+  --q-blue-hover: #0056CC;   /* Primary action hover */
+  --q-green: #34C759;        /* Success, active */
+  --q-green-hover: #30B350;
+  --q-orange: #FF9500;       /* Warning */
+  --q-orange-hover: #E68A00;
+  --q-red: #FF3B30;          /* Danger, destructive */
+  --q-red-hover: #D62D24;
+  --q-purple: #5856D6;       /* AI/Accent */
+  --q-purple-hover: #4A48C4;
+  --q-purple-alt: #AF52DE;   /* AI Modules accent */
+
+  /* Channel-specific (context only) */
+  --q-whatsapp: #25D366;
+  --q-instagram: #E1306C;
+  --q-messenger: #007AFF;
+  --q-google: #0F9D58;
+
+  /* State backgrounds (10% opacity variants) */
+  --q-blue-bg: rgba(0, 122, 255, 0.1);
+  --q-green-bg: rgba(52, 199, 89, 0.1);
+  --q-orange-bg: rgba(255, 149, 0, 0.1);
+  --q-red-bg: rgba(255, 59, 48, 0.1);
+  --q-purple-bg: rgba(88, 86, 214, 0.1);
+
+  /* -------- SPACING SCALE -------- */
+  /* Based on 4px grid */
+  --q-space-1: 4px;
+  --q-space-2: 8px;
+  --q-space-3: 12px;
+  --q-space-4: 16px;
+  --q-space-5: 20px;
+  --q-space-6: 24px;
+  --q-space-8: 32px;
+
+  /* -------- BORDER RADIUS -------- */
+  /* 3 tiers only */
+  --q-radius-default: 12px;   /* Buttons, inputs, tags */
+  --q-radius-card: 16px;      /* Cards, panels */
+  --q-radius-pill: 999px;     /* Circular, badge pills */
+
+  /* -------- SHADOWS -------- */
+  --q-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --q-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --q-shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+
+  /* -------- TRANSITIONS -------- */
+  --q-transition-fast: 150ms ease;
+  --q-transition-normal: 200ms ease;
+  --q-transition-slow: 300ms ease;
+
+  /* -------- Z-INDEX SCALE -------- */
+  --q-z-dropdown: 10;
+  --q-z-sticky: 20;
+  --q-z-overlay: 40;
+  --q-z-modal: 50;
+  --q-z-toast: 60;
+}

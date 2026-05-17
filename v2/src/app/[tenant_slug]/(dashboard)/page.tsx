@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { getDashboardStats } from "@/app/actions/dashboard";
 import { MessageSquare, Bot, TrendingUp, Activity, ClipboardList } from "lucide-react";
 import { PageLoader, EmptyState } from "@/components/ui/shared-states";
+import { SectionCard } from "@/components/governance";
 
 // ==========================================
 // QUBA AI — Dashboard Ana Sayfa
@@ -27,11 +28,11 @@ export default function DashboardPage() {
   }
 
   const cards = [
-    { label: "Toplam Konuşma", value: stats.totalConversations, icon: <MessageSquare className="w-5 h-5" />, color: "#007AFF" },
-    { label: "Toplam Mesaj", value: stats.totalMessages, icon: <TrendingUp className="w-5 h-5" />, color: "#5856D6" },
-    { label: "Form Başvurusu", value: stats.totalLeads, icon: <ClipboardList className="w-5 h-5" />, color: "#FF9500" },
-    { label: "Bot Mesajları", value: stats.botMessages, icon: <Bot className="w-5 h-5" />, color: "#34C759" },
-    { label: "Bugün Aktif", value: stats.activeToday, icon: <Activity className="w-5 h-5" />, color: "#FF3B30" },
+    { label: "Toplam Konuşma", value: stats.totalConversations, icon: <MessageSquare className="w-5 h-5" />, color: "var(--q-blue)" },
+    { label: "Toplam Mesaj", value: stats.totalMessages, icon: <TrendingUp className="w-5 h-5" />, color: "var(--q-purple)" },
+    { label: "Form Başvurusu", value: stats.totalLeads, icon: <ClipboardList className="w-5 h-5" />, color: "var(--q-orange)" },
+    { label: "Bot Mesajları", value: stats.botMessages, icon: <Bot className="w-5 h-5" />, color: "var(--q-green)" },
+    { label: "Bugün Aktif", value: stats.activeToday, icon: <Activity className="w-5 h-5" />, color: "var(--q-red)" },
   ];
 
   // 7 günlük mesaj grafiği
@@ -53,68 +54,69 @@ export default function DashboardPage() {
         {/* Stats Cards */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           {cards.map((card, i) => (
-            <div key={i} className="bg-white rounded-2xl border border-black/5 shadow-sm p-4">
+            <SectionCard key={i}>
               <div className="flex items-center gap-2 mb-2">
                 <span style={{ color: card.color }}>{card.icon}</span>
               </div>
-              <p className="text-[24px] font-bold text-[#1D1D1F]">{card.value.toLocaleString('tr-TR')}</p>
-              <p className="text-[11px] text-[#86868B] mt-0.5">{card.label}</p>
-            </div>
+              <p className="text-[24px] font-bold tracking-tight" style={{ color: "var(--q-text-primary)" }}>{card.value.toLocaleString('tr-TR')}</p>
+              <p className="text-[11px] mt-0.5" style={{ color: "var(--q-text-secondary)" }}>{card.label}</p>
+            </SectionCard>
           ))}
         </div>
 
         {/* 7 Gün Mesaj Grafiği */}
         {stats.dailyMessages.length > 0 && (
-          <div className="bg-white rounded-2xl border border-black/5 shadow-sm p-5">
-            <h2 className="text-[15px] font-semibold text-[#1D1D1F] mb-4">Son 7 Gün</h2>
+          <SectionCard>
+            <h2 className="text-[15px] font-semibold mb-4" style={{ color: "var(--q-text-primary)" }}>Son 7 Gün</h2>
             <div className="flex items-end gap-2 h-32">
               {stats.dailyMessages.map((d: any, i: number) => {
                 const height = (d.count / maxMsg) * 100;
                 const dayLabel = new Date(d.day).toLocaleDateString('tr-TR', { weekday: 'short' });
                 return (
                   <div key={i} className="flex-1 flex flex-col items-center gap-1">
-                    <span className="text-[10px] text-[#86868B] font-medium">{d.count}</span>
+                    <span className="text-[10px] font-medium" style={{ color: "var(--q-text-secondary)" }}>{d.count}</span>
                     <div
-                      className="w-full bg-gradient-to-t from-[#007AFF] to-[#5856D6] rounded-t-lg transition-all"
-                      style={{ height: `${Math.max(height, 4)}%` }}
+                      className="w-full rounded-t-lg transition-all"
+                      style={{ height: `${Math.max(height, 4)}%`, background: "linear-gradient(to top, var(--q-blue), var(--q-purple))" }}
                     />
-                    <span className="text-[10px] text-[#86868B]">{dayLabel}</span>
+                    <span className="text-[10px]" style={{ color: "var(--q-text-secondary)" }}>{dayLabel}</span>
                   </div>
                 );
               })}
             </div>
-          </div>
+          </SectionCard>
         )}
 
         {/* Son Başvurular */}
         {stats.recentLeads.length > 0 && (
-          <div className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
-            <div className="px-5 py-4 border-b border-black/5">
-              <h2 className="text-[15px] font-semibold text-[#1D1D1F]">Son Başvurular</h2>
+          <SectionCard noPadding>
+            <div className="px-5 py-4" style={{ borderBottom: "1px solid var(--q-border-default)" }}>
+              <h2 className="text-[15px] font-semibold" style={{ color: "var(--q-text-primary)" }}>Son Başvurular</h2>
             </div>
             <div className="divide-y divide-black/5">
               {stats.recentLeads.map((lead: any, i: number) => (
                 <div key={i} className="px-5 py-3 flex items-center justify-between">
                   <div>
-                    <p className="text-[14px] font-medium text-[#1D1D1F]">{lead.patient_name || 'İsimsiz'}</p>
-                    <p className="text-[12px] text-[#86868B]">{lead.form_name || 'Form'}</p>
+                    <p className="text-[14px] font-medium" style={{ color: "var(--q-text-primary)" }}>{lead.patient_name || 'İsimsiz'}</p>
+                    <p className="text-[12px]" style={{ color: "var(--q-text-secondary)" }}>{lead.form_name || 'Form'}</p>
                   </div>
                   <div className="text-right">
-                    <span className={`text-[11px] px-2 py-1 rounded-full font-medium ${
-                      lead.stage === 'appointed' ? 'bg-[#34C759]/10 text-[#34C759]' :
-                      lead.stage === 'contacted' ? 'bg-[#007AFF]/10 text-[#007AFF]' :
-                      'bg-[#FF9500]/10 text-[#FF9500]'
-                    }`}>
+                    <span className={`text-[11px] px-2 py-1 rounded-full font-medium`}
+                      style={{
+                        backgroundColor: lead.stage === 'appointed' ? 'var(--q-green-bg)' : lead.stage === 'contacted' ? 'var(--q-blue-bg)' : 'var(--q-orange-bg)',
+                        color: lead.stage === 'appointed' ? 'var(--q-green)' : lead.stage === 'contacted' ? 'var(--q-blue)' : 'var(--q-orange)'
+                      }}
+                    >
                       {lead.stage === 'appointed' ? 'Randevu' : lead.stage === 'contacted' ? 'İletişimde' : 'Yeni'}
                     </span>
-                    <p className="text-[11px] text-[#86868B] mt-1">
+                    <p className="text-[11px] mt-1" style={{ color: "var(--q-text-secondary)" }}>
                       {new Date(lead.created_at).toLocaleDateString('tr-TR')}
                     </p>
                   </div>
                 </div>
               ))}
             </div>
-          </div>
+          </SectionCard>
         )}
       </div>
     </div>

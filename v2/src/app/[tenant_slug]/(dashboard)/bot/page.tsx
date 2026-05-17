@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Bot, Cpu, MessageSquare, Globe, Hash } from "lucide-react";
 import { getBotSettings, saveBotSetting, getDefaultPrompts, getBotStats, getModelUsage, getRecentBotConversations, testBotPrompt } from "@/app/actions/bot";
 import { PageLoader } from "@/components/ui/shared-states";
+import { PageShell, PageHeader, ActionButton } from "@/components/governance";
 import {
   BotPerformancePanel,
   ChannelStatusPanel,
@@ -233,31 +234,16 @@ export default function BotManagementPage() {
 
   // ---- Render: Pure delegation to authority panels ----
   return (
-    <div className="p-4 md:p-8 h-full flex flex-col relative overflow-y-auto">
-      {/* Background */}
-      <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-[#5856D6]/5 rounded-full blur-[100px] pointer-events-none -z-10" />
-      <div className="absolute bottom-0 left-0 w-[400px] h-[400px] bg-[#007AFF]/5 rounded-full blur-[100px] pointer-events-none -z-10" />
-
-      {/* Header */}
-      <div className="mb-8">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-[#5856D6] to-[#007AFF] flex items-center justify-center shadow-lg">
-              <Bot className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-[#1D1D1F]">Bot Yönetimi</h1>
-              <p className="text-[#86868B] text-sm font-medium">AI asistanlarınızı yapılandırın ve yönetin</p>
-            </div>
-          </div>
-          <a
-            href="bot/modules"
-            className="flex items-center gap-2 px-4 py-2.5 bg-[#AF52DE] hover:bg-[#9A44C8] text-white text-[13px] font-semibold rounded-xl transition-all"
-          >
-            <Cpu className="w-4 h-4" /> AI Modülleri
-          </a>
-        </div>
-      </div>
+    <PageShell>
+      <PageHeader
+        icon={Bot}
+        title="Bot Yönetimi"
+        subtitle="AI asistanlarınızı yapılandırın ve yönetin"
+      >
+        <ActionButton href="bot/modules" color="var(--q-purple-alt)">
+          <Cpu className="w-4 h-4" /> AI Modülleri
+        </ActionButton>
+      </PageHeader>
 
       {/* === AUTHORITY PANELS === */}
 
@@ -323,6 +309,6 @@ export default function BotManagementPage() {
         activeTab={activeTab}
         onTestPrompt={testBotPrompt}
       />
-    </div>
+    </PageShell>
   );
 }

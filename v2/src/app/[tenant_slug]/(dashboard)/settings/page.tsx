@@ -85,8 +85,8 @@ export default function SettingsPage() {
       <div className="max-w-2xl mx-auto p-6 pb-20 space-y-6">
         {/* Header */}
         <div>
-          <h1 className="text-[22px] font-bold text-[#1D1D1F]">Ayarlar</h1>
-          <p className="text-[13px] text-[#86868B] mt-1">Firma bilgileri ve hesap ayarlarınızı yönetin.</p>
+          <h1 className="text-[22px] font-bold" style={{ color: "var(--q-text-primary)" }}>Ayarlar</h1>
+          <p className="text-[13px] mt-1" style={{ color: "var(--q-text-secondary)" }}>Firma bilgileri ve hesap ayarlarınızı yönetin.</p>
         </div>
 
         {/* Plan & Usage */}
@@ -174,10 +174,10 @@ export default function SettingsPage() {
 // Sub-components
 function Card({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) {
   return (
-    <div className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
-      <div className="px-5 py-4 border-b border-black/5 flex items-center gap-3">
-        <span className="text-[#007AFF]">{icon}</span>
-        <h2 className="text-[15px] font-semibold text-[#1D1D1F]">{title}</h2>
+    <div className="bg-white rounded-2xl border shadow-sm overflow-hidden" style={{ borderColor: "var(--q-border-default)" }}>
+      <div className="px-5 py-4 flex items-center gap-3" style={{ borderBottom: "1px solid var(--q-border-default)" }}>
+        <span style={{ color: "var(--q-blue)" }}>{icon}</span>
+        <h2 className="text-[15px] font-semibold" style={{ color: "var(--q-text-primary)" }}>{title}</h2>
       </div>
       <div className="p-5 space-y-4">{children}</div>
     </div>
@@ -187,13 +187,13 @@ function Card({ icon, title, children }: { icon: React.ReactNode; title: string;
 function Field({ label, value, onChange, type = "text", options }: { label: string; value: string; onChange: (v: string) => void; type?: string; options?: { value: string; label: string }[] }) {
   return (
     <div>
-      <label className="block text-[12px] font-medium text-[#86868B] mb-1">{label}</label>
+      <label className="block text-[12px] font-medium mb-1" style={{ color: "var(--q-text-secondary)" }}>{label}</label>
       {type === "select" && options ? (
-        <select value={value} onChange={(e) => onChange(e.target.value)} className="w-full px-3 py-2.5 text-[14px] bg-[#F5F5F7] border-0 rounded-xl outline-none focus:ring-2 focus:ring-[#007AFF]/30">
+        <select value={value} onChange={(e) => onChange(e.target.value)} className="w-full px-3 py-2.5 text-[14px] border-0 rounded-xl outline-none focus:ring-2 focus:ring-[#007AFF]/30" style={{ backgroundColor: "var(--q-bg-secondary)" }}>
           {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
       ) : (
-        <input type={type} value={value} onChange={(e) => onChange(e.target.value)} className="w-full px-3 py-2.5 text-[14px] bg-[#F5F5F7] border-0 rounded-xl outline-none focus:ring-2 focus:ring-[#007AFF]/30" />
+        <input type={type} value={value} onChange={(e) => onChange(e.target.value)} className="w-full px-3 py-2.5 text-[14px] border-0 rounded-xl outline-none focus:ring-2 focus:ring-[#007AFF]/30" style={{ backgroundColor: "var(--q-bg-secondary)" }} />
       )}
     </div>
   );
@@ -201,18 +201,18 @@ function Field({ label, value, onChange, type = "text", options }: { label: stri
 
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between py-2 border-b border-black/5 last:border-0">
-      <span className="text-[13px] text-[#86868B]">{label}</span>
-      <span className="text-[13px] font-medium text-[#1D1D1F] font-mono">{value}</span>
+    <div className="flex items-center justify-between py-2 last:border-0" style={{ borderBottom: "1px solid var(--q-border-default)" }}>
+      <span className="text-[13px]" style={{ color: "var(--q-text-secondary)" }}>{label}</span>
+      <span className="text-[13px] font-medium font-mono" style={{ color: "var(--q-text-primary)" }}>{value}</span>
     </div>
   );
 }
 
 function StatBox({ label, value }: { label: string; value: string }) {
   return (
-    <div className="bg-[#F5F5F7] rounded-xl p-3">
-      <p className="text-[11px] text-[#86868B] font-medium">{label}</p>
-      <p className="text-[16px] font-bold text-[#1D1D1F] mt-0.5">{value}</p>
+    <div className="rounded-xl p-3" style={{ backgroundColor: "var(--q-bg-secondary)" }}>
+      <p className="text-[11px] font-medium" style={{ color: "var(--q-text-secondary)" }}>{label}</p>
+      <p className="text-[16px] font-bold mt-0.5" style={{ color: "var(--q-text-primary)" }}>{value}</p>
     </div>
   );
 }
