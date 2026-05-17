@@ -15,7 +15,6 @@
     "@neondatabase/serverless": "^1.1.0",
     "@upstash/qstash": "^2.11.0",
     "@vercel/functions": "^1.6.0",
-    "axios": "^1.7.9",
     "bcryptjs": "^2.4.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
