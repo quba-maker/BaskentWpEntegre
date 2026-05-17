@@ -277,6 +277,35 @@ export async function testBotPrompt(prompt: string, testMessage: string, channel
         finalPrompt = dbPrompt[0]?.value || 'Sen bir dijital asistansın. Kısa, sıcak ve profesyonel cevaplar ver.';
       }
 
+      // 🧠 KNOWLEDGE BASE INJECTION (for accurate playground testing)
+      const kbSettings = await ctx.db.executeSafe(sql`
+        SELECT key, value FROM settings WHERE key IN ('bot_knowledge_prices', 'bot_knowledge_rules', 'bot_banned_words') AND tenant_id = ${ctx.tenantId}
+      `);
+      let prices = '', rules = '', bannedWordsRaw = '';
+      kbSettings.forEach((row: any) => {
+        if (row.key === 'bot_knowledge_prices') prices = row.value;
+        if (row.key === 'bot_knowledge_rules') rules = row.value;
+        if (row.key === 'bot_banned_words') bannedWordsRaw = row.value;
+      });
+
+      let knowledgeInjection = '';
+      if (prices) {
+        knowledgeInjection += `\n\n[FİYAT LİSTESİ VE HİZMETLER]\nAşağıdaki fiyat ve hizmet bilgilerini baz al:\n${prices}`;
+      }
+      if (rules) {
+        knowledgeInjection += `\n\n[ÖZEL KURALLAR VE TALİMATLAR]\nLütfen şu kurallara kesinlikle uy:\n${rules}`;
+      }
+      if (bannedWordsRaw) {
+        try {
+          const bannedWords = JSON.parse(bannedWordsRaw);
+          if (Array.isArray(bannedWords) && bannedWords.length > 0) {
+            knowledgeInjection += `\n\n[YASAKLI KELİMELER]\nŞu kelimeleri ASLA kullanma: ${bannedWords.join(', ')}`;
+          }
+        } catch(e) {}
+      }
+
+      finalPrompt += knowledgeInjection;
+
       const aiModel = await ctx.db.executeSafe(sql`
         SELECT value FROM settings WHERE key = 'ai_model' AND tenant_id = ${ctx.tenantId}
       `);

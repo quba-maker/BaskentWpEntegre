@@ -60,8 +60,22 @@ export class PromptBuilder {
       }
     }
 
+    // Knowledge Base Injection
+    let knowledgeInjection = '';
+    if (brain.context.knowledge) {
+      if (brain.context.knowledge.prices) {
+        knowledgeInjection += `\n\n[FİYAT LİSTESİ VE HİZMETLER]\nAşağıdaki fiyat ve hizmet bilgilerini baz al:\n${brain.context.knowledge.prices}`;
+      }
+      if (brain.context.knowledge.rules) {
+        knowledgeInjection += `\n\n[ÖZEL KURALLAR VE TALİMATLAR]\nLütfen şu kurallara kesinlikle uy:\n${brain.context.knowledge.rules}`;
+      }
+      if (brain.context.knowledge.bannedWords && brain.context.knowledge.bannedWords.length > 0) {
+        knowledgeInjection += `\n\n[YASAKLI KELİMELER]\nŞu kelimeleri ASLA kullanma: ${brain.context.knowledge.bannedWords.join(', ')}`;
+      }
+    }
+
     const phaseContext = `\n\n[Sistem Direktifi] Şu anki konuşma evresi (Phase): ${phase.toUpperCase()}.\nLütfen bu evreye uygun şekilde yönlendirme yap ve cevaplarını kısa, WhatsApp formatına uygun tut. Uzun paragraflardan kaçın.`;
     
-    return base + phaseContext;
+    return base + knowledgeInjection + phaseContext;
   }
 }
