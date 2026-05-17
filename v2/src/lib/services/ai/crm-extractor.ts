@@ -61,7 +61,7 @@ Format:
   "country_confidence": number (0.0 ile 1.0 arası),
   "department": "string (Örn: Ortopedi, Kardiyoloji, Estetik, Diş, Göz, Tüp Bebek, Organ Nakli, Onkoloji, Obezite, Nöroloji, Üroloji, Check-Up. Hastanın niyetine göre seç. Emin değilsen boş bırak)",
   "pipeline_stage": "string (new, contacted, responded, discovery, appointed, lost)",
-  "tags": ["string"] (Örn: international_patient, urgent, price_sensitive vb. normalized/lowercase formatta),
+  "tags": ["string"] (Örn: yurtdışı_hasta, acil, fiyat_odaklı, ilgili vb. tamamen TÜRKÇE, küçük harflerle ve boşluk yerine alt çizgi kullanarak),
   "needs_country_question": boolean (Eğer hastanın ülkesi belirsizse ve randevu için lazımsa true),
   "needs_name_question": boolean (Eğer isim bilinmiyorsa true)
 }

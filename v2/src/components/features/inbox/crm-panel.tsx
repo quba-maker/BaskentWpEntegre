@@ -6,6 +6,19 @@ import { User, MapPin, Building, Activity, Tag, ChevronDown, ChevronRight, Save,
 import { useInboxStore } from "@/store/inbox-store";
 import { updateCrmData, addTag, removeTag } from "@/app/actions/inbox";
 
+const tagTranslationMap: Record<string, string> = {
+  "price_sensitive": "fiyat_odaklı",
+  "international_patient": "yurtdışı_hasta",
+  "urgent": "acil",
+  "new_lead": "yeni_lead",
+  "high_potential": "yüksek_potansiyel"
+};
+
+function formatTag(tag: string) {
+  const t = tag.trim().toLowerCase();
+  return tagTranslationMap[t] || tag;
+}
+
 // ==========================================
 // CONTEXT PANEL — Right-side CRM engine
 // Architecture: Contextual CRM engine (not display component)
@@ -294,7 +307,7 @@ export function ContextPanel() {
                   className="px-3 py-1 text-xs font-bold rounded-lg flex items-center gap-1 shadow-sm group"
                   style={{ background: "var(--q-blue-bg)", color: "var(--q-blue)", border: "1px solid rgba(0,122,255,0.2)" }}
                 >
-                  <Tag className="w-3 h-3" /> {tag}
+                  <Tag className="w-3 h-3" /> {formatTag(tag)}
                   <button
                     onClick={() => handleRemoveTag(tag)}
                     className="ml-1 w-3.5 h-3.5 rounded-full flex items-center justify-center opacity-50 hover:opacity-100 transition-all"
