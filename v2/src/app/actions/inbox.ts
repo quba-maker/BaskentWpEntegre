@@ -30,11 +30,11 @@ export async function getConversations(page: number = 1, search: string = "", st
           c.tags,
           c.channel,
           c.last_message_at,
+          EXTRACT(EPOCH FROM c.last_message_at) * 1000 as last_message_time_ms,
           COALESCE(c.last_message_content, m.content) as last_message,
-          c.last_message_at as last_message_time,
           l.form_name,
           l.raw_data as form_raw_data,
-          l.created_at as form_date,
+          EXTRACT(EPOCH FROM l.created_at) * 1000 as form_date_ms,
           0 as unread
         FROM conversations c
         LEFT JOIN LATERAL (
@@ -61,19 +61,43 @@ export async function getConversations(page: number = 1, search: string = "", st
 
       const validRows = Array.isArray(rows) ? rows : ((rows as any)?.rows || []);
 
-      return validRows.map((r: any) => ({
-        ...r,
-        score: r.stage === 'appointed' ? 100 : r.stage === 'contacted' ? 60 : 30,
-        isBotActive: r.status !== 'human',
-        formattedTime: r.last_message_time ? new Date(r.last_message_time).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul' }) : '',
-        channel: r.channel || 'whatsapp',
-        country: r.country || (r.form_raw_data && r.form_raw_data.includes('country') ? JSON.parse(r.form_raw_data).country : null) || (r.id.startsWith('90') || r.id.startsWith('+90') ? 'Türkiye' : r.id.startsWith('49') || r.id.startsWith('+49') ? 'Almanya' : null),
-        formData: r.form_name ? {
-          name: r.form_name,
-          date: new Date(r.form_date).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' }),
-          raw: r.form_raw_data
-        } : null
-      }));
+      return validRows.map((r: any) => {
+        let formattedTime = '';
+        if (r.last_message_time_ms) {
+          const date = new Date(parseFloat(r.last_message_time_ms));
+          const fmtDate = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: 'Europe/Istanbul', year: 'numeric', month: '2-digit', day: '2-digit' });
+          const now = new Date();
+          const msgDateStr = fmtDate(date);
+          const nowDateStr = fmtDate(now);
+          const diffMs = new Date(nowDateStr + "T00:00:00Z").getTime() - new Date(msgDateStr + "T00:00:00Z").getTime();
+          const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+          
+          if (diffDays === 0) {
+            formattedTime = date.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul' });
+          } else if (diffDays === 1) {
+            formattedTime = 'Dün';
+          } else if (diffDays > 1 && diffDays < 7) {
+            formattedTime = date.toLocaleDateString('tr-TR', { weekday: 'long', timeZone: 'Europe/Istanbul' });
+            formattedTime = formattedTime.charAt(0).toUpperCase() + formattedTime.slice(1);
+          } else {
+            formattedTime = date.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Europe/Istanbul' });
+          }
+        }
+
+        return {
+          ...r,
+          score: r.stage === 'appointed' ? 100 : r.stage === 'contacted' ? 60 : 30,
+          isBotActive: r.status !== 'human',
+          formattedTime,
+          channel: r.channel || 'whatsapp',
+          country: r.country || (r.form_raw_data && r.form_raw_data.includes('country') ? JSON.parse(r.form_raw_data).country : null) || (r.id.startsWith('90') || r.id.startsWith('+90') ? 'Türkiye' : r.id.startsWith('49') || r.id.startsWith('+49') ? 'Almanya' : null),
+          formData: r.form_name ? {
+            name: r.form_name,
+            date: r.form_date_ms ? new Date(parseFloat(r.form_date_ms)).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' }) : '',
+            raw: r.form_raw_data
+          } : null
+        };
+      });
     }
   ).then(res => res.data || []);
 }
@@ -89,19 +113,19 @@ export async function getMessages(phone: string) {
     async (ctx) => {
       const rows = await ctx.db.executeSafe(sql`
         SELECT * FROM (
-          SELECT id, content as text, direction, created_at, model_used
+          SELECT id, content as text, direction, EXTRACT(EPOCH FROM created_at) * 1000 as created_at_ms, model_used
           FROM messages
           WHERE phone_number = ${phone} AND tenant_id = ${ctx.tenantId}
           ORDER BY created_at DESC
           LIMIT 100
         ) sub
-        ORDER BY created_at ASC
+        ORDER BY created_at_ms ASC
       `);
 
       const validRows = Array.isArray(rows) ? rows : ((rows as any)?.rows || []);
 
       return validRows.map((r: any) => {
-        const date = new Date(r.created_at);
+        const date = new Date(parseFloat(r.created_at_ms));
         
         const fmtDate = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: 'Europe/Istanbul', year: 'numeric', month: '2-digit', day: '2-digit' });
         
@@ -128,7 +152,7 @@ export async function getMessages(phone: string) {
 
         return {
           id: r.id,
-          sender: r.direction === 'in' ? 'user' : (r.direction === 'system' ? 'system' : (r.model_used === 'agent' ? 'agent' : 'bot')),
+          sender: r.direction === 'in' ? 'user' : (r.direction === 'system' ? 'system' : (r.model_used && r.model_used !== 'agent' && r.model_used !== 'human' ? 'bot' : 'agent')),
           text: r.text,
           time: date.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul' }),
           dateLabel

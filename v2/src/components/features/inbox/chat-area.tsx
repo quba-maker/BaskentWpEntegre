@@ -253,82 +253,85 @@ export function ConversationViewport() {
         {isLoading ? (
           <ChatSkeleton />
         ) : (
-          [...(messages || [])].reverse().map((msg: any, idx: number, arr: any[]) => {
-            const showDateLabel = msg.dateLabel && (idx === arr.length - 1 || arr[idx + 1].dateLabel !== msg.dateLabel);
-            return (
-              <React.Fragment key={msg.id}>
-                {showDateLabel && (
-                  <div className="sticky top-2 z-10 flex justify-center w-full my-4 pointer-events-none">
-                    <span
-                      className="text-xs font-semibold px-3 py-1 rounded-full shadow-sm pointer-events-auto"
-                      style={{ 
-                        background: "rgba(255, 255, 255, 0.85)", 
-                        backdropFilter: "blur(8px)", 
-                        WebkitBackdropFilter: "blur(8px)",
-                        color: "var(--q-text-secondary)", 
-                        border: "1px solid var(--q-border-default)" 
-                      }}
-                    >
-                      {msg.dateLabel}
-                    </span>
-                  </div>
-                )}
-                <div className="flex flex-col q-bubble-in w-full">
-
-                {msg.sender === "system" ? (
-                  <div className="flex w-full justify-center mb-6">
-                    <div
-                      className="rounded-full px-4 py-1.5 flex items-center gap-2 shadow-sm max-w-[90%] md:max-w-[70%] text-center q-glass-strong"
-                      style={{ border: "1px solid var(--q-orange-bg)", color: "var(--q-orange)" }}
-                    >
-                      <ShieldAlert className="w-4 h-4 flex-shrink-0" style={{ color: "var(--q-orange)" }} />
-                      <p className="text-[13px] font-semibold tracking-tight leading-tight">{msg.text}</p>
-                      <span className="text-[10px] font-bold opacity-60 ml-2 whitespace-nowrap">{msg.time}</span>
-                    </div>
-                  </div>
-                ) : (
-                    <div className={`flex w-full ${msg.sender === "user" ? "justify-start" : "justify-end"} mb-6 group`}>
-                      {/* Bubble */}
-                      <div
-                        className={`relative max-w-[85%] md:max-w-[65%] px-3 py-2 md:px-4 md:py-2.5 shadow-sm transition-all duration-200 hover:shadow-md ${
-                          msg.sender === "user" 
-                            ? "rounded-2xl rounded-tl-sm" 
-                            : "rounded-2xl rounded-tr-sm"
-                        }`}
-                        style={
-                          msg.sender === "user"
-                            ? { background: "var(--q-chat-in)", color: "var(--q-text-primary)" }
-                            : { background: "var(--q-chat-out)", color: "var(--q-text-primary)" }
-                        }
-                      >
-                        {/* Sender Info (Only for bot/system on outgoing, or user on incoming if needed) */}
-                        {msg.sender !== "user" && (
-                          <div className="flex items-center gap-1 mb-1 opacity-70">
-                            {msg.sender === "bot" ? (
-                              <Sparkles className="w-3 h-3" style={{ color: "var(--q-purple)" }} />
-                            ) : (
-                              <User className="w-3 h-3" style={{ color: "var(--q-text-secondary)" }} />
-                            )}
-                            <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: msg.sender === "bot" ? "var(--q-purple)" : "var(--q-text-secondary)" }}>
-                              {msg.sender === "bot" ? "AI" : "SEN"}
-                            </span>
-                          </div>
-                        )}
-                        
-                        <p className="text-[15px] leading-[1.4] font-medium whitespace-pre-wrap pb-4">
-                          {msg.text}
-                        </p>
-                        
-                        <span className="absolute bottom-1 right-2 text-[10px] font-semibold tracking-wide opacity-50" style={{ color: "var(--q-text-secondary)" }}>
-                          {msg.time}
-                        </span>
+          Object.entries(
+            (messages || []).reduce((acc: any, msg: any) => {
+              if (!acc[msg.dateLabel]) acc[msg.dateLabel] = [];
+              acc[msg.dateLabel].push(msg);
+              return acc;
+            }, {})
+          ).reverse().map(([dateLabel, groupMsgs]: [string, any]) => (
+            <div key={dateLabel} className="flex flex-col pb-2">
+              <div className="sticky top-2 z-10 flex justify-center w-full my-4 pointer-events-none">
+                <span
+                  className="text-xs font-semibold px-3 py-1 rounded-full shadow-sm pointer-events-auto"
+                  style={{ 
+                    background: "rgba(255, 255, 255, 0.85)", 
+                    backdropFilter: "blur(8px)", 
+                    WebkitBackdropFilter: "blur(8px)",
+                    color: "var(--q-text-secondary)", 
+                    border: "1px solid var(--q-border-default)" 
+                  }}
+                >
+                  {dateLabel}
+                </span>
+              </div>
+              
+              <div className="space-y-6 flex flex-col">
+                {groupMsgs.map((msg: any) => (
+                  <div key={msg.id} className="flex flex-col q-bubble-in w-full">
+                    {msg.sender === "system" ? (
+                      <div className="flex w-full justify-center">
+                        <div
+                          className="rounded-full px-4 py-1.5 flex items-center gap-2 shadow-sm max-w-[90%] md:max-w-[70%] text-center q-glass-strong"
+                          style={{ border: "1px solid var(--q-orange-bg)", color: "var(--q-orange)" }}
+                        >
+                          <ShieldAlert className="w-4 h-4 flex-shrink-0" style={{ color: "var(--q-orange)" }} />
+                          <p className="text-[13px] font-semibold tracking-tight leading-tight">{msg.text}</p>
+                          <span className="text-[10px] font-bold opacity-60 ml-2 whitespace-nowrap">{msg.time}</span>
+                        </div>
                       </div>
-                    </div>
-                )}
-                </div>
-              </React.Fragment>
-            );
-          })
+                    ) : (
+                      <div className={`flex w-full ${msg.sender === "user" ? "justify-start" : "justify-end"} group`}>
+                        <div
+                          className={`relative max-w-[85%] md:max-w-[65%] px-3 py-2 md:px-4 md:py-2.5 shadow-sm transition-all duration-200 hover:shadow-md ${
+                            msg.sender === "user" 
+                              ? "rounded-2xl rounded-tl-sm" 
+                              : "rounded-2xl rounded-tr-sm"
+                          }`}
+                          style={
+                            msg.sender === "user"
+                              ? { background: "var(--q-chat-in)", color: "var(--q-text-primary)" }
+                              : { background: "var(--q-chat-out)", color: "var(--q-text-primary)" }
+                          }
+                        >
+                          {msg.sender !== "user" && (
+                            <div className="flex items-center gap-1 mb-1 opacity-70">
+                              {msg.sender === "bot" ? (
+                                <Sparkles className="w-3 h-3" style={{ color: "var(--q-purple)" }} />
+                              ) : (
+                                <User className="w-3 h-3" style={{ color: "var(--q-text-secondary)" }} />
+                              )}
+                              <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: msg.sender === "bot" ? "var(--q-purple)" : "var(--q-text-secondary)" }}>
+                                {msg.sender === "bot" ? "AI" : "SEN"}
+                              </span>
+                            </div>
+                          )}
+                          
+                          <p className="text-[15px] leading-[1.4] font-medium whitespace-pre-wrap pb-4">
+                            {msg.text}
+                          </p>
+                          
+                          <span className="absolute bottom-1 right-2 text-[10px] font-semibold tracking-wide opacity-50" style={{ color: "var(--q-text-secondary)" }}>
+                            {msg.time}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))
         )}
         </div>
 
