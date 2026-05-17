@@ -103,22 +103,27 @@ export async function getMessages(phone: string) {
       return validRows.map((r: any) => {
         const date = new Date(r.created_at);
         
-        const opt = { timeZone: 'Europe/Istanbul', year: 'numeric', month: '2-digit', day: '2-digit' } as const;
-        const now = new Date();
-        const msgStr = date.toLocaleDateString('en-CA', opt);
-        const nowStr = now.toLocaleDateString('en-CA', opt);
+        const fmtDate = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: 'Europe/Istanbul', year: 'numeric', month: '2-digit', day: '2-digit' });
         
-        const yesterday = new Date();
-        yesterday.setDate(yesterday.getDate() - 1);
-        const yesterdayStr = yesterday.toLocaleDateString('en-CA', opt);
-
+        const now = new Date();
+        const msgDateStr = fmtDate(date);
+        const nowDateStr = fmtDate(now);
+        
+        const parseDateString = (ds: string) => new Date(ds + "T00:00:00Z");
+        
+        const diffMs = parseDateString(nowDateStr).getTime() - parseDateString(msgDateStr).getTime();
+        const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+        
         let dateLabel = '';
-        if (msgStr === nowStr) {
+        if (diffDays === 0) {
           dateLabel = 'Bugün';
-        } else if (msgStr === yesterdayStr) {
+        } else if (diffDays === 1) {
           dateLabel = 'Dün';
+        } else if (diffDays > 1 && diffDays < 7) {
+          dateLabel = date.toLocaleDateString('tr-TR', { weekday: 'long', timeZone: 'Europe/Istanbul' });
+          dateLabel = dateLabel.charAt(0).toUpperCase() + dateLabel.slice(1);
         } else {
-          dateLabel = date.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', timeZone: 'Europe/Istanbul' });
+          dateLabel = date.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/Istanbul' });
         }
 
         return {

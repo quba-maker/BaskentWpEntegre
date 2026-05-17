@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import React, { useState, useRef } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import { Send, Paperclip, User, MessageCircle, ChevronLeft, ChevronDown, Info, ShieldAlert, Sparkles } from "lucide-react";
 import { getMessages, sendMessage, toggleBotStatus } from "@/app/actions/inbox";
@@ -256,17 +256,24 @@ export function ConversationViewport() {
           [...(messages || [])].reverse().map((msg: any, idx: number, arr: any[]) => {
             const showDateLabel = msg.dateLabel && (idx === arr.length - 1 || arr[idx + 1].dateLabel !== msg.dateLabel);
             return (
-              <div key={msg.id} className="flex flex-col q-bubble-in">
+              <React.Fragment key={msg.id}>
                 {showDateLabel && (
-                  <div className="flex justify-center my-4">
+                  <div className="sticky top-2 z-10 flex justify-center w-full my-4 pointer-events-none">
                     <span
-                      className="text-xs font-medium px-3 py-1 rounded-full"
-                      style={{ background: "var(--q-bg-secondary)", color: "var(--q-text-secondary)", border: "1px solid var(--q-border-default)" }}
+                      className="text-xs font-semibold px-3 py-1 rounded-full shadow-sm pointer-events-auto"
+                      style={{ 
+                        background: "rgba(255, 255, 255, 0.85)", 
+                        backdropFilter: "blur(8px)", 
+                        WebkitBackdropFilter: "blur(8px)",
+                        color: "var(--q-text-secondary)", 
+                        border: "1px solid var(--q-border-default)" 
+                      }}
                     >
                       {msg.dateLabel}
                     </span>
                   </div>
                 )}
+                <div className="flex flex-col q-bubble-in w-full">
 
                 {msg.sender === "system" ? (
                   <div className="flex w-full justify-center mb-6">
@@ -318,7 +325,8 @@ export function ConversationViewport() {
                       </div>
                     </div>
                 )}
-              </div>
+                </div>
+              </React.Fragment>
             );
           })
         )}
