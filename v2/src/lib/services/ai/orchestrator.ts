@@ -1,4 +1,7 @@
 import { logger } from "@/lib/core/logger";
+import { getTraceContext } from "@/lib/core/trace-context";
+import { CircuitBreaker } from "./circuit-breaker";
+import { CostLimiter } from "./cost-limiter";
 
 export interface AIProviderConfig {
   provider: 'gemini' | 'openai' | 'anthropic';
@@ -26,22 +29,33 @@ export interface AIResponse {
  * 🎼 AI Orchestrator
  * Model sağlayıcılarını (Gemini, OpenAI) soyutlar.
  * Tenant'ın seçimine göre isteği doğru API'ye yönlendirir.
+ * CircuitBreaker ve CostLimiter ile güvenliği sağlar.
  */
 export class AIOrchestrator {
   private log = logger.withContext({ module: 'AIOrchestrator' });
+  private geminiCircuit = new CircuitBreaker('gemini', { failureThreshold: 5, resetTimeoutMs: 180000 });
+  private costLimiter = new CostLimiter({ maxRequests: 50, windowSeconds: 3600 }); // Saatte 50 İstek
 
   public async generateResponse(
     messages: ChatMessage[],
     config: AIProviderConfig
   ): Promise<AIResponse> {
     const startTime = Date.now();
+    const traceCtx = getTraceContext();
+    const tenantId = traceCtx?.tenantId;
     
     try {
+      // 1. Maliyet Koruma (Cost Limiter)
+      if (tenantId) {
+        await this.costLimiter.consume(tenantId);
+      }
+
       let responseText = '';
       let usageInfo = {};
 
+      // 2. Devre Kesici ile LLM Çağrısı (Circuit Breaker)
       if (config.provider === 'gemini') {
-        responseText = await this.callGemini(messages, config);
+        responseText = await this.geminiCircuit.execute(() => this.callGemini(messages, config));
       } else if (config.provider === 'openai') {
         // responseText = await this.callOpenAI(messages, config);
         throw new Error("OpenAI not implemented yet");
@@ -64,9 +78,18 @@ export class AIOrchestrator {
       };
     } catch (e: any) {
       this.log.error(`LLM Execution Failed [${config.provider}]`, e);
+      
+      // Anomaly durumlarında kullanıcıya özel fallback
+      let fallbackText = "Şu an yoğunluk nedeniyle yanıt veremiyorum. Lütfen daha sonra tekrar deneyiniz.";
+      if (e.message?.startsWith('COST_LIMIT_EXCEEDED')) {
+        fallbackText = "Sistem aşırı kullanım nedeniyle geçici olarak durduruldu. Lütfen biraz bekleyin.";
+      } else if (e.message?.startsWith('CIRCUIT_OPEN')) {
+         fallbackText = "AI servis sağlayıcımızda şu an bir kesinti yaşıyoruz. Mühendislerimiz konuyla ilgileniyor.";
+      }
+
       // Fallback response
       return {
-        text: "Şu an yoğunluk nedeniyle yanıt veremiyorum. Lütfen daha sonra tekrar deneyiniz.",
+        text: fallbackText,
         providerUsed: 'fallback',
         modelUsed: 'fallback',
         latencyMs: Date.now() - startTime
