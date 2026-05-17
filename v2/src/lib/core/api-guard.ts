@@ -41,11 +41,18 @@ export function withApiGuard(
   handler: ApiHandler
 ) {
   return async (req: NextRequest): Promise<NextResponse> => {
-    const log = logger.withContext({ module: 'ApiGuard', route: options.routeName });
-    const startTime = Date.now();
+    // Check if traceId is passed from upstream (e.g. queue worker or external service)
+    const traceId = req.headers.get("x-trace-id") || crypto.randomUUID();
+    
+    // We import dynamically or top-level. Since this is an edge/nextjs env, let's just require it.
+    const { runWithTrace } = await import("@/lib/core/trace-context");
+    
+    return runWithTrace({ traceId }, async () => {
+      const log = logger.withContext({ module: 'ApiGuard', route: options.routeName });
+      const startTime = Date.now();
 
-    try {
-      // ─────────────────────────────────────────
+      try {
+        // ─────────────────────────────────────────
       // STEP 1: Parse raw body (needed for both
       //         tenant resolution AND signature)
       // ─────────────────────────────────────────
@@ -184,11 +191,12 @@ export function withApiGuard(
 
       return response;
 
-    } catch (error: any) {
-      log.error("API Guard crash", error, {
-        durationMs: Date.now() - startTime
-      });
-      return new NextResponse("SERVER_ERROR", { status: 500 });
-    }
+      } catch (error: any) {
+        log.error("API Guard crash", error, {
+          durationMs: Date.now() - startTime
+        });
+        return new NextResponse("SERVER_ERROR", { status: 500 });
+      }
+    });
   };
 }

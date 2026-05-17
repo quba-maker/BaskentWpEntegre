@@ -1,86 +1,21 @@
 import { getTraceContext } from "../core/trace-context";
-
-// ==========================================
-// EVENT TAXONOMY STANDARD (ADR-0002)
-// Arbitrary string events are forbidden.
-// ==========================================
-export type TelemetryEvent =
-  // Queue Lifecycle
-  | "QUEUE_RECEIVED"
-  | "QUEUE_RETRY"
-  | "QUEUE_DLQ"
-  
-  // Tenant Resolution
-  | "TENANT_RESOLVED"
-  | "TENANT_REJECTED"
-  
-  // Security & Isolation
-  | "SECURITY_ASSERTION_FAILED"
-  | "SECURITY_CROSS_TENANT_BLOCKED"
-  | "SECURITY_PANIC"
-  | "SECURITY_NAMESPACE_APPLIED"
-  | "SECURITY_QUERY_REJECTED"
-  | "TENANT_FIREWALL_PASS"
-  
-  // LLM Lifecycle
-  | "LLM_STARTED"
-  | "LLM_COMPLETED"
-  | "LLM_TIMEOUT"
-  | "LLM_POLICY_REJECTED"
-  
-  // External Communication
-  | "WHATSAPP_SENT"
-  | "WHATSAPP_FAILED"
-  
-  // Anomaly & Performance
-  | "LATENCY_ANOMALY"
-  | "CIRCUIT_BREAKER_OPEN"
-  | "CIRCUIT_BREAKER_CLOSED";
-
-// ==========================================
-// HIGH CARDINALITY PROTECTION
-// Separate indexed structured fields from arbitrary metadata
-// ==========================================
-export interface TelemetryPayload {
-  // 1. Indexed Fields (Low Cardinality, highly queryable)
-  eventId: string;           // UUID for the event
-  timestamp: string;         // ISO String
-  event: TelemetryEvent;     // Strict Taxonomy
-  tenantId: string;          // Extracted from context
-  traceId: string;           // Execution trace
-  conversationId: string;    // Session trace
-  workerId: string;          // Vercel Region / AWS Region
-  status: "success" | "failure" | "info" | "warn";
-  
-  // 2. Metadata (High Cardinality, stored as a JSON blob, NOT indexed by default)
-  metadata?: Record<string, any>;
-  
-  // 3. Error specifics (if status === 'failure')
-  error?: {
-    name: string;
-    message: string;
-    stack?: string;
-  };
-}
+import { TelemetryEvent, TelemetryPayload } from "./taxonomy";
+import { PiiSanitizer } from "./processors/pii-sanitizer";
+import { TelemetryTransport } from "./transport/types";
+import { ConsoleTransport } from "./transport/console.transport";
+import { AxiomTransport } from "./transport/axiom.transport";
 
 class TelemetryGateway {
-  private generateEventId(): string {
-    return crypto.randomUUID();
+  private transports: TelemetryTransport[] = [];
+
+  constructor() {
+    // Configure default transports
+    this.transports.push(new ConsoleTransport());
+    this.transports.push(new AxiomTransport());
   }
 
-  private sanitizeMetadata(metadata?: Record<string, any>): Record<string, any> | undefined {
-    if (!metadata) return undefined;
-    
-    const sanitized = { ...metadata };
-    
-    // PII Masking & Truncation logic goes here
-    // Example: mask phone numbers
-    for (const key of Object.keys(sanitized)) {
-      if (typeof sanitized[key] === 'string' && sanitized[key].match(/(?:\+|00|0)?[1-9][0-9 \-\(\)\.]{9,15}/)) {
-        sanitized[key] = "[MASKED_PHONE]";
-      }
-    }
-    return sanitized;
+  private generateEventId(): string {
+    return crypto.randomUUID();
   }
 
   public track(
@@ -101,7 +36,7 @@ class TelemetryGateway {
         traceId: traceCtx?.traceId || "MISSING_TRACE_ID",
         conversationId: traceCtx?.conversationId || "MISSING_CONVERSATION_ID",
         workerId: process.env.VERCEL_REGION || "local_worker",
-        metadata: this.sanitizeMetadata(metadata),
+        metadata: PiiSanitizer.sanitize(metadata),
         ...(error && {
           error: {
             name: error.name,
@@ -111,17 +46,15 @@ class TelemetryGateway {
         })
       };
 
-      // TRANSPORT LAYER
-      // Later, we will inject Axiom / OpenTelemetry transport here.
-      // For now, structured JSON to stdout/stderr.
-      
-      if (status === "failure") {
-        console.error(JSON.stringify(payload));
-      } else if (status === "warn") {
-        console.warn(JSON.stringify(payload));
-      } else {
-        console.log(JSON.stringify(payload));
-      }
+      // Non-blocking dispatch to all registered transports
+      this.transports.forEach(transport => {
+        try {
+          transport.dispatch(payload);
+        } catch (transportErr) {
+          // A failing transport must never bring down the application
+          console.error(`[TelemetryGateway] Transport failed to dispatch:`, transportErr);
+        }
+      });
       
     } catch (e) {
       // Gateway crash should not kill the runtime

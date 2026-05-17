@@ -36,22 +36,28 @@ export async function POST(req: Request) {
 
     // 2. Parse Body & Headers
     body = await req.json();
-    const { id, tenantId, topic, payload } = body;
+    const { id, traceId: bodyTraceId, tenantId, topic, payload } = body;
     
-    // Upstash injects these headers if it's a retry
-    const retriedCount = parseInt(req.headers.get("Upstash-Retried") || "0", 10);
-    const isRetry = retriedCount > 0;
+    const traceId = req.headers.get("x-trace-id") || bodyTraceId || crypto.randomUUID();
 
-    // 3. Hand over execution to the Engine
-    await queueWorkerEngine.processEvent(
-      topic,
-      tenantId,
-      payload,
-      { messageId: id, isRetry, retriedCount }
-    );
+    const { runWithTrace } = await import("@/lib/core/trace-context");
 
-    // 4. Fast-Ack Success
-    return NextResponse.json({ success: true, messageId: id });
+    return runWithTrace({ traceId, tenantId }, async () => {
+      // Upstash injects these headers if it's a retry
+      const retriedCount = parseInt(req.headers.get("Upstash-Retried") || "0", 10);
+      const isRetry = retriedCount > 0;
+
+      // 3. Hand over execution to the Engine
+      await queueWorkerEngine.processEvent(
+        topic,
+        tenantId,
+        payload,
+        { messageId: id, isRetry, retriedCount }
+      );
+
+      // 4. Fast-Ack Success
+      return NextResponse.json({ success: true, messageId: id });
+    });
 
   } catch (error: any) {
     log.error("[QUEUE WORKER ERROR] Pipeline failed", error);
