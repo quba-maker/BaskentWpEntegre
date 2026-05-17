@@ -50,15 +50,14 @@ export async function updateTenantSettings(updates: Record<string, any>) {
       roles: ['owner', 'admin'] // Sadece yetkili roller değiştirebilir
     },
     async (ctx) => {
-      const { name, industry, primaryColor, aiModel, maxBotMessages, timezone } = updates;
+      const { name, industry, primaryColor, timezone } = updates;
+      // NOTE: aiModel & maxBotMessages are now managed exclusively via Bot page (saveBotSetting action)
 
       await ctx.db.executeSafe(sql`
         UPDATE tenants SET
           name = COALESCE(${name || null}, name),
           industry = COALESCE(${industry || null}, industry),
           primary_color = COALESCE(${primaryColor || null}, primary_color),
-          ai_model = COALESCE(${aiModel || null}, ai_model),
-          max_bot_messages = COALESCE(${maxBotMessages ? parseInt(maxBotMessages) : null}, max_bot_messages),
           timezone = COALESCE(${timezone || null}, timezone),
           updated_at = NOW()
         WHERE id = ${ctx.tenantId}

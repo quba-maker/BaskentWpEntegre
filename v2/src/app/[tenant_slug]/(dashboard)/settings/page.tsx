@@ -3,11 +3,13 @@
 import { useEffect, useState } from "react";
 import { getTenantSettings, updateTenantSettings, getUsageStats } from "@/app/actions/settings";
 import { changeMyPassword } from "@/app/actions/users";
-import { getIntegrationHealth } from "@/app/actions/integrations";
-import { Building2, Bot, Gauge, Shield, Save, Loader2, CheckCircle, KeyRound, Wifi, WifiOff, AlertTriangle } from "lucide-react";
+import { Building2, Gauge, Shield, Save, Loader2, CheckCircle, KeyRound } from "lucide-react";
 
 // ==========================================
 // QUBA AI — Settings Page (Apple Style)
+// Single Responsibility: Company + Account + Usage
+// Bot/AI config → Bot Yönetimi page
+// Meta/Integration config → Entegrasyonlar page
 // ==========================================
 
 export default function SettingsPage() {
@@ -16,7 +18,6 @@ export default function SettingsPage() {
   const [usage, setUsage] = useState<any>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [health, setHealth] = useState<any>(null);
   // Password change
   const [pwCurrent, setPwCurrent] = useState("");
   const [pwNew, setPwNew] = useState("");
@@ -26,8 +27,6 @@ export default function SettingsPage() {
   const [form, setForm] = useState({
     name: "",
     industry: "",
-    aiModel: "gemini-2.5-flash",
-    maxBotMessages: "8",
     timezone: "Europe/Istanbul",
   });
 
@@ -36,10 +35,9 @@ export default function SettingsPage() {
   }, []);
 
   async function loadData() {
-    const [tenantRes, usageRes, healthRes] = await Promise.all([
+    const [tenantRes, usageRes] = await Promise.all([
       getTenantSettings(),
       getUsageStats(),
-      getIntegrationHealth(),
     ]);
 
     if (tenantRes.success && tenantRes.tenant) {
@@ -48,17 +46,12 @@ export default function SettingsPage() {
       setForm({
         name: tenantRes.tenant.name || "",
         industry: tenantRes.tenant.industry || "",
-        aiModel: tenantRes.tenant.ai_model || "gemini-2.5-flash",
-        maxBotMessages: String(tenantRes.tenant.max_bot_messages || 8),
         timezone: tenantRes.tenant.timezone || "Europe/Istanbul",
       });
     }
 
     if (usageRes.success && usageRes.stats) {
       setUsage(usageRes.stats);
-    }
-    if (healthRes.success) {
-      setHealth(healthRes);
     }
   }
 
@@ -98,7 +91,7 @@ export default function SettingsPage() {
         {/* Header */}
         <div>
           <h1 className="text-[22px] font-bold text-[#1D1D1F]">Ayarlar</h1>
-          <p className="text-[13px] text-[#86868B] mt-1">Firma ve bot ayarlarınızı yönetin.</p>
+          <p className="text-[13px] text-[#86868B] mt-1">Firma bilgileri ve hesap ayarlarınızı yönetin.</p>
         </div>
 
         {/* Plan & Usage */}
@@ -141,27 +134,6 @@ export default function SettingsPage() {
           ]} />
         </Card>
 
-        {/* Bot Ayarları */}
-        <Card icon={<Bot className="w-5 h-5" />} title="Bot Ayarları">
-          <Field label="AI Modeli" value={form.aiModel} onChange={(v) => setForm({ ...form, aiModel: v })} type="select" options={[
-            { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash (Hızlı)" },
-            { value: "gemini-2.5-flash-lite", label: "Flash Lite (Ekonomik)" },
-            { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro (Güçlü)" },
-          ]} />
-          <Field label="Maks Bot Mesajı" value={form.maxBotMessages} onChange={(v) => setForm({ ...form, maxBotMessages: v })} type="number" />
-        </Card>
-
-        {/* Meta Entegrasyonları */}
-        <Card icon={<Shield className="w-5 h-5" />} title="Meta Entegrasyonları">
-          <InfoRow label="WhatsApp Phone ID" value={tenant.whatsapp_phone_id || "—"} />
-          <InfoRow label="Business ID" value={tenant.whatsapp_business_id || "—"} />
-          <InfoRow label="Meta Page ID" value={tenant.meta_page_id || "—"} />
-          <InfoRow label="Instagram ID" value={tenant.instagram_id || "—"} />
-          <p className="text-[11px] text-[#86868B] mt-2">
-            Meta bilgileri API üzerinden güncellenir. Destek için iletişime geçin.
-          </p>
-        </Card>
-
         {/* Hesap */}
         <Card icon={<Shield className="w-5 h-5" />} title="Hesap">
           <InfoRow label="Ad" value={user?.name || "—"} />
@@ -184,24 +156,6 @@ export default function SettingsPage() {
             {pwLoading ? "Değiştiriliyor..." : "Şifre Güncelle"}
           </button>
         </Card>
-
-        {/* Entegrasyon Sağlığı */}
-        {health && health.channels && (
-          <Card icon={<Wifi className="w-5 h-5" />} title={`Entegrasyonlar — ${health.summary}`}>
-            {health.channels.map((ch: any, i: number) => (
-              <div key={i} className="flex items-center justify-between py-2 border-b border-black/5 last:border-0">
-                <div className="flex items-center gap-2">
-                  {ch.status === 'connected' ? <Wifi className="w-4 h-4 text-[#34C759]" /> :
-                   ch.status === 'error' ? <AlertTriangle className="w-4 h-4 text-[#FF3B30]" /> :
-                   ch.status === 'warning' ? <AlertTriangle className="w-4 h-4 text-[#FF9500]" /> :
-                   <WifiOff className="w-4 h-4 text-[#86868B]" />}
-                  <span className="text-[14px] font-medium text-[#1D1D1F]">{ch.name}</span>
-                </div>
-                <span className="text-[12px] text-[#86868B]">{ch.detail}</span>
-              </div>
-            ))}
-          </Card>
-        )}
 
         {/* Save Button */}
         <button

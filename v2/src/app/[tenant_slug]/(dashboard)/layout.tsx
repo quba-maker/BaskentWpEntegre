@@ -1,11 +1,11 @@
 import { Sidebar } from "@/components/layout/sidebar";
-import { LayoutDashboard, MessageSquare, ClipboardList, Calendar, Settings, Link2 } from "lucide-react";
+import { LayoutDashboard, MessageSquare, ClipboardList, Calendar, Settings, Link2, Bot, Users, MoreHorizontal } from "lucide-react";
 import Link from "next/link";
 import { getSession } from "@/lib/auth/session";
 
 // ==========================================
 // Dashboard Layout — Sidebar + Mobile Nav
-// Sadece giriş yapmış kullanıcılara gösterilir
+// Mobile nav is now role-aware (mirrors sidebar logic)
 // ==========================================
 
 export default async function DashboardLayout({
@@ -15,6 +15,9 @@ export default async function DashboardLayout({
 }) {
   const session = await getSession();
   const slug = session?.tenantSlug || "";
+  const role = session?.role;
+  const isAdmin = role === "platform_admin" || role === "admin" || role === "owner";
+  const canManageBot = role !== "viewer";
 
   return (
     <div className="h-full flex flex-col md:flex-row overflow-hidden">
@@ -28,33 +31,33 @@ export default async function DashboardLayout({
         {children}
       </main>
 
-      {/* Mobile Bottom Navigation (iOS Style) */}
+      {/* Mobile Bottom Navigation (iOS Style, Role-Aware) */}
       <nav className="md:hidden flex-none w-full h-[72px] bg-white/80 backdrop-blur-[30px] border-t border-black/5 flex items-center justify-around px-2 z-50 pb-[env(safe-area-inset-bottom)]">
-        <Link href={`/${slug}`} className="flex flex-col items-center gap-1 p-2 text-[#86868B] hover:text-[#007AFF] transition-colors">
-          <LayoutDashboard className="w-6 h-6" />
-          <span className="text-[10px] font-medium">Panel</span>
-        </Link>
-        <Link href={`/${slug}/inbox`} className="flex flex-col items-center gap-1 p-2 text-[#007AFF] transition-colors">
-          <MessageSquare className="w-6 h-6" />
-          <span className="text-[10px] font-medium">Mesajlar</span>
-        </Link>
-        <Link href={`/${slug}/forms`} className="flex flex-col items-center gap-1 p-2 text-[#86868B] hover:text-[#007AFF] transition-colors">
-          <ClipboardList className="w-6 h-6" />
-          <span className="text-[10px] font-medium">Formlar</span>
-        </Link>
-        <Link href={`/${slug}/calendar`} className="flex flex-col items-center gap-1 p-2 text-[#86868B] hover:text-[#007AFF] transition-colors">
-          <Calendar className="w-6 h-6" />
-          <span className="text-[10px] font-medium">Takvim</span>
-        </Link>
-        <Link href={`/${slug}/integrations`} className="flex flex-col items-center gap-1 p-2 text-[#86868B] hover:text-[#007AFF] transition-colors">
-          <Link2 className="w-6 h-6" />
-          <span className="text-[10px] font-medium">Entegre</span>
-        </Link>
-        <Link href={`/${slug}/settings`} className="flex flex-col items-center gap-1 p-2 text-[#86868B] hover:text-[#007AFF] transition-colors">
-          <Settings className="w-6 h-6" />
-          <span className="text-[10px] font-medium">Ayarlar</span>
-        </Link>
+        <MobileNavLink href={`/${slug}`} icon={<LayoutDashboard className="w-6 h-6" />} label="Panel" />
+        <MobileNavLink href={`/${slug}/inbox`} icon={<MessageSquare className="w-6 h-6" />} label="Mesajlar" active />
+        <MobileNavLink href={`/${slug}/forms`} icon={<ClipboardList className="w-6 h-6" />} label="Formlar" />
+        <MobileNavLink href={`/${slug}/calendar`} icon={<Calendar className="w-6 h-6" />} label="Takvim" />
+        {canManageBot && (
+          <MobileNavLink href={`/${slug}/bot`} icon={<Bot className="w-6 h-6" />} label="Bot" />
+        )}
+        {isAdmin && (
+          <MobileNavLink href={`/${slug}/settings`} icon={<Settings className="w-6 h-6" />} label="Ayarlar" />
+        )}
       </nav>
     </div>
+  );
+}
+
+function MobileNavLink({ href, icon, label, active }: { href: string; icon: React.ReactNode; label: string; active?: boolean }) {
+  return (
+    <Link
+      href={href}
+      className={`flex flex-col items-center gap-1 p-2 transition-colors ${
+        active ? "text-[#007AFF]" : "text-[#86868B] hover:text-[#007AFF]"
+      }`}
+    >
+      {icon}
+      <span className="text-[10px] font-medium">{label}</span>
+    </Link>
   );
 }

@@ -14,6 +14,7 @@ export default function IntegrationsPage() {
   const [isSyncingOld, setIsSyncingOld] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [availableTabs, setAvailableTabs] = useState<any[]>([]);
+  const [saveMsg, setSaveMsg] = useState("");
 
   useEffect(() => {
     loadConfig();
@@ -43,13 +44,15 @@ export default function IntegrationsPage() {
 
   const handleSave = async () => {
     setIsSaving(true);
+    setSaveMsg("");
     const res = await saveGoogleSheetsConfig(config);
     if (res.success) {
-      alert("Entegrasyon ayarları kaydedildi!");
+      setSaveMsg("✅ Entegrasyon ayarları kaydedildi!");
     } else {
-      alert("Hata: " + res.error);
+      setSaveMsg(`❌ Hata: ${res.error}`);
     }
     setIsSaving(false);
+    setTimeout(() => setSaveMsg(""), 3000);
   };
 
   const toggleSheet = (title: string) => {
@@ -89,7 +92,7 @@ export default function IntegrationsPage() {
   const webhookScript = `
 function onEdit(e) {
   var sheetName = e.source.getActiveSheet().getName();
-  var url = "https://BAŞKENT_CRM_DOMAIN.com/api/sheets-webhook"; // Gerçek domain ile değiştirin
+  var url = "${typeof window !== 'undefined' ? window.location.origin : 'https://YOUR_DOMAIN'}/api/sheets-webhook";
   var range = e.range;
   var row = range.getRow();
   
@@ -227,6 +230,11 @@ function onEdit(e) {
                   <Save className="w-4 h-4" />
                   {isSaving ? "Kaydediliyor..." : "Ayarları Kaydet"}
                 </button>
+                {saveMsg && (
+                  <p className={`text-[13px] font-medium ${saveMsg.startsWith('✅') ? 'text-[#34C759]' : 'text-[#FF3B30]'}`}>
+                    {saveMsg}
+                  </p>
+                )}
               </div>
             </div>
           </div>

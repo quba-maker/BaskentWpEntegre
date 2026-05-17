@@ -6,7 +6,7 @@ import {
   Zap, Clock, Shield, ChevronRight, Check, X, AlertTriangle,
   Activity, Users, Timer, TrendingUp, Settings2, Power,
   Cpu, DollarSign, MessagesSquare, ShieldAlert, FlaskConical,
-  Send, Loader2, Tag, Plus, Trash2
+  Send, Loader2, Tag, Plus, Trash2, CheckCircle
 } from "lucide-react";
 import { getBotSettings, saveBotSetting, getDefaultPrompts, getBotStats, getModelUsage, getRecentBotConversations, testBotPrompt } from "@/app/actions/bot";
 
@@ -205,7 +205,8 @@ export default function BotManagementPage() {
     await saveBotSetting('bot_knowledge_prices', knowledgePrices);
     await saveBotSetting('bot_knowledge_rules', knowledgeRules);
     setSavingKnowledge(false);
-    alert("Bilgi bankası kaydedildi.");
+    setSaved('knowledge');
+    setTimeout(() => setSaved(null), 2000);
   };
 
   // Save bot config
@@ -467,8 +468,8 @@ export default function BotManagementPage() {
             disabled={savingKnowledge}
             className="px-4 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 bg-[#34C759] text-white shadow-sm hover:opacity-90"
           >
-            {savingKnowledge ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-            Bilgileri Kaydet
+            {savingKnowledge ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : saved === 'knowledge' ? <CheckCircle className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />}
+            {saved === 'knowledge' ? 'Kaydedildi!' : 'Bilgileri Kaydet'}
           </button>
         </div>
         
