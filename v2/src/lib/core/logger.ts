@@ -63,12 +63,20 @@ class SystemLogger {
     try {
       const traceCtx = getTraceContext();
       
+      const resolvedTenantId = traceCtx?.tenantId || this.baseContext.tenantId || context?.tenantId;
+      const resolvedTraceId = traceCtx?.traceId || this.baseContext.traceId || context?.traceId;
+      const resolvedConversationId = this.baseContext.conversationId || context?.conversationId;
+
+      // LAYER 2: TENANT CONTEXT TRACE ZORUNLU OLMALI
+      // Enforce presence of critical traceability fields
       const rawPayload = {
         timestamp: new Date().toISOString(),
         level,
         message,
-        traceId: traceCtx?.traceId || this.baseContext.traceId || context?.traceId,
-        tenantId: traceCtx?.tenantId || this.baseContext.tenantId || context?.tenantId,
+        tenantId: resolvedTenantId || "MISSING_TENANT_ID",
+        traceId: resolvedTraceId || "MISSING_TRACE_ID",
+        conversationId: resolvedConversationId || "MISSING_CONVERSATION_ID",
+        workerId: process.env.VERCEL_REGION || process.env.AWS_REGION || "local_worker",
         ...this.baseContext,
         ...context,
         ...(error && { 

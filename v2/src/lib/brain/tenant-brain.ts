@@ -13,6 +13,7 @@ export interface TenantBrainNamespaces {
 
 export interface TenantBrainPrompts {
   systemPrompt: string | null;
+  promptHash: string | null;
   getFormattedPrompt: (phase: string, context?: Record<string, any>) => string;
 }
 
@@ -51,7 +52,8 @@ export function createTenantBrain(
   channel: string, 
   webhookPayloadId: string,
   rawSystemPrompt: string | null,
-  config?: any
+  config?: any,
+  promptHash?: string | null
 ): TenantBrain {
   
   const instanceId = `brain_${tenantId}_${Date.now()}_${Math.random().toString(36).substring(7)}`;
@@ -65,6 +67,7 @@ export function createTenantBrain(
 
   const prompts: TenantBrainPrompts = {
     systemPrompt: rawSystemPrompt,
+    promptHash: promptHash || null,
     getFormattedPrompt: (phase: string, context?: Record<string, any>) => {
       // Basic formatting, to be expanded in PromptBuilder refactor
       const base = rawSystemPrompt || "Sen kibar ve yardımcı bir asistansın.";

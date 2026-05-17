@@ -1,6 +1,8 @@
 import { TenantResolverService } from '../services/meta/tenant-resolver.service';
 import { createTenantBrain, TenantBrain } from './tenant-brain';
 import { neon } from "@neondatabase/serverless";
+import { SecurityIsolationError } from '../security/tenant-firewall';
+import crypto from 'crypto';
 
 /**
  * PHASE 2 - TENANT BRAIN RESOLVER
@@ -21,10 +23,17 @@ export class BrainResolver {
     
     // 1. Resolve Tenant Config safely
     const resolver = new TenantResolverService();
-    const tenantConfig = await resolver.resolve(payload);
+    let tenantConfig;
+    try {
+      tenantConfig = await resolver.resolve(payload);
+    } catch (e) {
+      // Intentionally suppressing to throw the structured error below
+    }
 
+    // LAYER 4: HARD FAIL-CLOSED MODE
+    // If tenant context cannot be resolved, NO default tenant/brain is loaded. DROP.
     if (!tenantConfig || !tenantConfig.tenantId) {
-      throw new Error(`[SECURITY] Could not resolve tenant for payload`);
+      throw new SecurityIsolationError(`TENANT_RESOLUTION_FAILED`);
     }
 
     const tenantId = tenantConfig.tenantId;
@@ -32,11 +41,14 @@ export class BrainResolver {
     // 2. Fetch Prompts strictly isolated by tenantId
     const dbUrl = process.env.DATABASE_URL || "postgres://dummy:dummy@dummy.com/dummy";
     let rawSystemPrompt: string | null = null;
+    let promptHash: string | null = null;
 
     try {
       // Use fallback db check to prevent build crashes
       if (!dbUrl.includes("dummy.com")) {
         const sql = neon(dbUrl);
+        // Using TenantQueryGuard is implicitly applied inside TenantDB, but here we use raw neon client.
+        // For security, parameterization via neon tagged template is used.
         const promptsResult = await sql`
           SELECT prompt_text 
           FROM bot_prompts 
@@ -45,20 +57,27 @@ export class BrainResolver {
         `;
         if (promptsResult.length > 0) {
           rawSystemPrompt = promptsResult[0].prompt_text;
+          
+          // LAYER 3: PROMPT HASH VALIDATION
+          // Calculate SHA256 of the prompt at retrieval time
+          if (rawSystemPrompt) {
+            promptHash = crypto.createHash('sha256').update(rawSystemPrompt).digest('hex');
+          }
         }
       }
     } catch (dbError) {
-      console.warn(`[BRAIN_RESOLVER] DB prompt fetch failed, relying on registry fallback.`, dbError);
+      console.warn(`[BRAIN_RESOLVER] DB prompt fetch failed.`, dbError);
     }
 
-    // 2.5 SaaS Code-First Fallback
-    // If DB has no prompt configured, we use the hardcoded/file-based registry
+    // 2.5 SaaS Code-First Fallback (Strictly scoped by tenantSlug, not generic fallback)
     if (!rawSystemPrompt || rawSystemPrompt.trim() === '') {
       const { PromptRegistry } = await import('./prompts/registry');
-      // Using the slug (e.g. 'baskent') to resolve the file-based prompt
       const tenantSlug = tenantConfig.raw?.slug;
       if (tenantSlug) {
         rawSystemPrompt = PromptRegistry.getFallbackPrompt(tenantSlug, channel);
+        if (rawSystemPrompt) {
+          promptHash = crypto.createHash('sha256').update(rawSystemPrompt).digest('hex');
+        }
       }
     }
 
@@ -68,11 +87,10 @@ export class BrainResolver {
       channel,
       webhookPayloadId,
       rawSystemPrompt,
-      tenantConfig // <-- PASS THE CONFIG HERE
+      tenantConfig,
+      promptHash // Pass prompt hash for validation
     );
 
-    console.log(`[TENANT_BRAIN_CREATED] Brain ${brain.id} initialized for Tenant ${tenantId} on ${channel}`);
-    
     return brain;
   }
 }

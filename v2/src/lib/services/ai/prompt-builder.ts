@@ -15,14 +15,24 @@ export class PromptBuilder {
       throw new SecurityIsolationError("Cannot validate prompt ownership without a valid TenantBrain.");
     }
 
-    // In a real DB scenario, we would verify the prompt's `tenant_id` DB column.
-    // Here we enforce that the string actually came from the Brain's pre-loaded prompts
-    // and was NOT passed as a raw external string bypassing the brain.
     if (promptString && promptString !== brain.prompts.systemPrompt) {
       SecurityTelemetry.log("CROSS_TENANT_ATTEMPT", brain.context.tenantId, brain.context.webhookPayloadId, null, {
         reason: "Prompt injection or ownership mismatch detected",
       });
       throw new SecurityIsolationError(`Prompt ownership validation failed for tenant: ${brain.context.tenantId}. Prompt injection rejected.`);
+    }
+
+    // LAYER 3: PROMPT HASH VALIDATION
+    // Ensure that the prompt hasn't been maliciously altered in memory between retrieval and execution
+    if (promptString && brain.prompts.promptHash) {
+      const crypto = require('crypto');
+      const currentHash = crypto.createHash('sha256').update(promptString).digest('hex');
+      if (currentHash !== brain.prompts.promptHash) {
+        SecurityTelemetry.log("SECURITY_PANIC", brain.context.tenantId, brain.context.webhookPayloadId, null, {
+          reason: "Prompt hash validation failed. Possible memory corruption or injection.",
+        });
+        throw new SecurityIsolationError(`Prompt execution blocked. Cryptographic hash mismatch for tenant: ${brain.context.tenantId}.`);
+      }
     }
   }
 
