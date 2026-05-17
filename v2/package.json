@@ -7,7 +7,8 @@
     "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",
-    "test:security": "eslint src/lib --rule 'quba/no-raw-sql: error' --rule 'quba/forced-trace-context: error' --rule 'quba/no-default-export: error' --rule '@typescript-eslint/no-explicit-any: error' || echo 'SECURITY GATE FAILED: ESLint Rules broken'"
+    "typecheck": "tsc --noEmit",
+    "test:security": "node scripts/security-check.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",
