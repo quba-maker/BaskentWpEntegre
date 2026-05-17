@@ -36,6 +36,9 @@ export async function getConversations(page: number = 1, search: string = "", st
           l.form_name,
           l.raw_data as form_raw_data,
           EXTRACT(EPOCH FROM l.created_at) * 1000 as form_date_ms,
+          mem.summary_text as ai_summary,
+          mem.buying_intent as ai_buying_intent,
+          mem.sentiment as ai_sentiment,
           0 as unread
         FROM conversations c
         LEFT JOIN LATERAL (
@@ -53,6 +56,7 @@ export async function getConversations(page: number = 1, search: string = "", st
           ORDER BY created_at DESC 
           LIMIT 1
         ) l ON true
+        LEFT JOIN conversation_memory mem ON c.id = mem.conversation_id
         WHERE c.tenant_id = ${ctx.tenantId}
           AND (${searchFilter === null} OR c.patient_name ILIKE ${searchFilter} OR c.phone_number ILIKE ${searchFilter})
           AND (${stageFilter === null} OR c.lead_stage = ${stageFilter})
@@ -96,6 +100,11 @@ export async function getConversations(page: number = 1, search: string = "", st
             name: r.form_name,
             date: r.form_date_ms ? new Date(parseFloat(r.form_date_ms)).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' }) : '',
             raw: r.form_raw_data
+          } : null,
+          aiSummary: r.ai_summary ? {
+            text: r.ai_summary,
+            buying_intent: r.ai_buying_intent,
+            sentiment: r.ai_sentiment
           } : null
         };
       });

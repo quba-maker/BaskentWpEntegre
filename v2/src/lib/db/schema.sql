@@ -123,3 +123,59 @@ UPDATE conversations SET tenant_id = (SELECT id FROM tenants WHERE slug = 'baske
 UPDATE messages SET tenant_id = (SELECT id FROM tenants WHERE slug = 'baskent') WHERE tenant_id IS NULL;
 UPDATE settings SET tenant_id = (SELECT id FROM tenants WHERE slug = 'baskent') WHERE tenant_id IS NULL;
 UPDATE leads SET tenant_id = (SELECT id FROM tenants WHERE slug = 'baskent') WHERE tenant_id IS NULL;
+
+-- =============================================
+-- PHASE 1: ENTERPRISE AI CRM OS EXTENSIONS
+-- =============================================
+
+-- 8. CUSTOMER PROFILES (Unified Identity)
+CREATE TABLE IF NOT EXISTS customer_profiles (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  primary_phone TEXT NOT NULL,
+  primary_email TEXT,
+  first_name TEXT,
+  last_name TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(tenant_id, primary_phone)
+);
+
+-- Conversations ile Customer bağlantısı
+ALTER TABLE conversations
+  ADD COLUMN IF NOT EXISTS customer_id UUID REFERENCES customer_profiles(id) ON DELETE SET NULL;
+
+-- Leads ile Customer bağlantısı
+ALTER TABLE leads
+  ADD COLUMN IF NOT EXISTS customer_id UUID REFERENCES customer_profiles(id) ON DELETE SET NULL;
+
+-- 9. CONVERSATION MEMORY (Rolling Summaries)
+CREATE TABLE IF NOT EXISTS conversation_memory (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  summary_text TEXT NOT NULL,
+  buying_intent TEXT, -- e.g., HOT, WARM, COLD
+  sentiment TEXT,
+  objections TEXT[],
+  last_message_count INT DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(conversation_id)
+);
+
+-- 10. AI MODULE SETTINGS (Feature Flags & Orchestration)
+CREATE TABLE IF NOT EXISTS ai_module_settings (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  module_name TEXT NOT NULL,
+  is_active BOOLEAN DEFAULT true,
+  config_json JSONB DEFAULT '{}'::jsonb,
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(tenant_id, module_name)
+);
+
+-- Yeni Indexler
+CREATE INDEX IF NOT EXISTS idx_customer_profiles_tenant ON customer_profiles(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_customer_profiles_phone ON customer_profiles(tenant_id, primary_phone);
+CREATE INDEX IF NOT EXISTS idx_conversation_memory_conv ON conversation_memory(conversation_id);

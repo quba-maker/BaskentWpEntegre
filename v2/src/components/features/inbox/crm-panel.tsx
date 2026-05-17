@@ -49,6 +49,7 @@ function CrmSkeleton() {
 export function ContextPanel() {
   const { activeContact, mobileView, setMobileView } = useInboxStore();
   const [formOpen, setFormOpen] = useState(false);
+  const [aiSummaryOpen, setAiSummaryOpen] = useState(true);
   const [stage, setStage] = useState(activeContact?.stage || "new");
   const [department, setDepartment] = useState(activeContact?.department || "");
   const [country, setCountry] = useState(activeContact?.country || "");
@@ -382,6 +383,48 @@ export function ContextPanel() {
               {formOpen && formDataEntries.length === 0 && (
                 <div className="px-4 pb-4 pt-1" style={{ background: "rgba(255,255,255,0.4)", borderTop: "1px solid var(--q-border-default)" }}>
                   <p className="text-xs text-center italic py-2" style={{ color: "var(--q-text-secondary)" }}>Detaylı yanıt bulunamadı.</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        
+        {/* AI Memory / Summary */}
+        {activeContact.aiSummary && (
+          <div className="pt-6" style={{ borderTop: "1px solid var(--q-border-default)" }}>
+            <label className="text-[10px] font-bold uppercase tracking-widest mb-3 block ml-1 flex items-center gap-1.5" style={{ color: "var(--q-text-secondary)" }}>
+              Görüşme Notları & AI Özeti
+              <span className="text-[8px] px-1.5 py-0.5 rounded" style={{ color: "var(--q-blue)", background: "var(--q-blue-bg)" }}>Otomatik</span>
+            </label>
+
+            <div className="rounded-2xl overflow-hidden transition-all duration-300" style={{ background: "rgba(255,255,255,0.6)", border: "1px solid var(--q-border-default)", boxShadow: "var(--q-shadow-sm)" }}>
+              <button
+                onClick={() => setAiSummaryOpen(!aiSummaryOpen)}
+                className="w-full px-4 py-3.5 flex items-center justify-between transition-colors cursor-pointer q-list-item"
+              >
+                <div className="flex flex-col items-start text-left">
+                  <span className="text-[14px] font-bold line-clamp-1 pr-2" style={{ color: "var(--q-text-primary)" }}>
+                    {activeContact.aiSummary.buying_intent === "HOT" ? "🔥 Yüksek Niyet" : activeContact.aiSummary.buying_intent === "WARM" ? "⚡ Orta Niyet" : "🧊 Düşük Niyet"}
+                  </span>
+                  <span className="text-[11px] mt-0.5 font-medium tracking-wide" style={{ color: "var(--q-text-secondary)" }}>
+                    Duygu Durumu: {activeContact.aiSummary.sentiment || "Nötr"}
+                  </span>
+                </div>
+                {aiSummaryOpen ? (
+                  <ChevronDown className="w-4 h-4 shrink-0" style={{ color: "var(--q-text-secondary)" }} />
+                ) : (
+                  <ChevronRight className="w-4 h-4 shrink-0" style={{ color: "var(--q-text-secondary)" }} />
+                )}
+              </button>
+
+              {aiSummaryOpen && (
+                <div className="px-4 pb-4 pt-1 space-y-3" style={{ background: "rgba(255,255,255,0.4)", borderTop: "1px solid var(--q-border-default)" }}>
+                  <div className="p-3 rounded-xl" style={{ background: "var(--q-bg-primary)", border: "1px solid var(--q-border-default)", boxShadow: "var(--q-shadow-sm)" }}>
+                    <span className="block text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: "var(--q-text-secondary)" }}>ÖZET</span>
+                    <span className="text-[13px] font-semibold leading-relaxed whitespace-pre-wrap" style={{ color: "var(--q-text-primary)" }}>
+                      {activeContact.aiSummary.text}
+                    </span>
+                  </div>
                 </div>
               )}
             </div>

@@ -117,10 +117,19 @@ export class QueueWorkerEngine {
     const msgService = new MessageService(db);
     const convService = new ConversationService(db);
 
-    // 2. Lock Conversation & Save Incoming Message (Idempotency)
+    // 2. Resolve Unified Identity
+    const { IdentityEngine } = await import('@/lib/services/ai/engines/identity');
+    const customerId = await IdentityEngine.resolveIdentity({
+      tenantId: tenantId,
+      phoneNumber: phoneNumber,
+      firstName: payload.entry?.[0]?.changes?.[0]?.value?.contacts?.[0]?.profile?.name // Try to extract WhatsApp Profile Name if available
+    });
+    this.log.info(`[IDENTITY_RESOLVED] Master Customer ID mapped`, { customerId, traceId });
+
+    // 3. Lock Conversation & Save Incoming Message (Idempotency)
     await convService.acquireLock(phoneNumber);
     
-    const { isDuplicate } = await msgService.saveMessageIdempotent({
+    const { isDuplicate, conversationId } = await msgService.saveMessageIdempotent({
       phoneNumber,
       direction: 'in',
       content,
@@ -133,7 +142,12 @@ export class QueueWorkerEngine {
       return;
     }
 
-    this.log.info(`[CONVERSATION_READY] Incoming message saved`, { traceId });
+    // Link Conversation to Customer Profile
+    if (conversationId) {
+       await IdentityEngine.linkConversation(conversationId, customerId);
+    }
+
+    this.log.info(`[CONVERSATION_READY] Incoming message saved & identity linked`, { traceId });
 
     // 3. Conversation Load / State Check
     const status = await convService.getStatus(phoneNumber);
@@ -160,7 +174,30 @@ export class QueueWorkerEngine {
     }
 
     // 5. Build System Prompt & History strictly via TenantBrain
-    const systemPromptText = PromptBuilder.buildSystemPrompt(brain, targetPhase, false);
+    let systemPromptText = PromptBuilder.buildSystemPrompt(brain, targetPhase, false);
+    
+    // Inject Context from Unified Identity Engine
+    try {
+      if (customerId && conversationId) {
+        const unifiedContext = await IdentityEngine.getContext(customerId, conversationId);
+        if (unifiedContext) {
+          systemPromptText += `\n\n--- MÜŞTERİ BAĞLAMI ---\n`;
+          if (unifiedContext.profile) {
+            systemPromptText += `- İsim: ${unifiedContext.profile.first_name || 'Bilinmiyor'} ${unifiedContext.profile.last_name || ''}\n`;
+          }
+          if (unifiedContext.latestForm) {
+            systemPromptText += `- Doldurduğu Form: ${unifiedContext.latestForm.name}\n- Form Detayı: ${unifiedContext.latestForm.data}\n`;
+          }
+          if (unifiedContext.memory) {
+            systemPromptText += `- Önceki Görüşme Özeti: ${unifiedContext.memory.summary}\n`;
+            systemPromptText += `- İlgi Düzeyi (Intent): ${unifiedContext.memory.intent}\n`;
+            systemPromptText += `- İtirazlar: ${(unifiedContext.memory.objections || []).join(', ')}\n`;
+          }
+        }
+      }
+    } catch (e) {
+      this.log.error('[WORKER_CONTEXT_INJECT] Error injecting context', e instanceof Error ? e : new Error(String(e)), { traceId });
+    }
     
     // In future phases, history and AI Orchestrator will use brain.namespaces.memory()
     const history = await convService.getHistory(phoneNumber, 10);
@@ -293,6 +330,20 @@ export class QueueWorkerEngine {
       this.log.info(`[WORKER_CRM_OK] CRM successfully enriched`, { traceId });
     } catch (crmErr) {
       this.log.error(`[WORKER_CRM_FAILED] Non-fatal CRM extraction error`, crmErr instanceof Error ? crmErr : new Error(String(crmErr)), { traceId });
+    }
+
+    // 11. Async Memory & Summarization Sync
+    if (conversationId) {
+      try {
+        const { MemoryEngine } = await import('@/lib/services/ai/engines/memory');
+        // Run in background without blocking
+        MemoryEngine.summarizeConversation(tenantId, conversationId).catch(err => {
+          this.log.error(`[WORKER_MEMORY_FAILED] Non-fatal summary error`, err instanceof Error ? err : new Error(String(err)), { traceId });
+        });
+        this.log.info(`[WORKER_MEMORY] Dispatched background memory summarization`, { traceId, conversationId });
+      } catch (memErr) {
+        this.log.error(`[WORKER_MEMORY_ERROR] Failed to load MemoryEngine`, memErr instanceof Error ? memErr : new Error(String(memErr)), { traceId });
+      }
     }
 
     this.log.info(`[WORKER_COMPLETED] End-to-end pipeline finished successfully`, { traceId });

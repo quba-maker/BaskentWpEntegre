@@ -53,15 +53,19 @@ export class BrainResolver {
     let promptHash: string | null = null;
 
     try {
+      let promptKey = 'system_prompt_whatsapp';
+      if (channel === 'instagram') promptKey = 'system_prompt_tr';
+      if (channel === 'foreign') promptKey = 'system_prompt_foreign';
+
       const db = withTenantDB(tenantId, false);
       const promptsResult = await db.executeSafe(sql`
-        SELECT prompt_text 
-        FROM bot_prompts 
-        WHERE tenant_id = ${tenantId} AND channel = ${channel} 
+        SELECT value 
+        FROM settings 
+        WHERE tenant_id = ${tenantId} AND key = ${promptKey}
         LIMIT 1
       `);
       if (promptsResult.length > 0) {
-        rawSystemPrompt = promptsResult[0].prompt_text;
+        rawSystemPrompt = promptsResult[0].value;
         
         // LAYER 3: PROMPT HASH VALIDATION
         // Calculate SHA256 of the prompt at retrieval time

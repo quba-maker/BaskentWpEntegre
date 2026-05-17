@@ -23,7 +23,7 @@ export class MessageService {
    * Idempotent (Tekrar Engellemeli) Mesaj Kaydetme ve Conversation State Güncelleme.
    * Aynı anda hem lock alır, hem duplicate kontrolü yapar, hem message yazar hem de conversation'ı günceller.
    */
-  async saveMessageIdempotent(payload: MessagePayload): Promise<{ success: boolean; isDuplicate: boolean; messageId?: string }> {
+  async saveMessageIdempotent(payload: MessagePayload): Promise<{ success: boolean; isDuplicate: boolean; messageId?: string; conversationId?: string }> {
     // Lock ID için hash
     const lockKeyStr = `${this.db.tenantId}-${payload.phoneNumber}`;
     let hash = 0;
@@ -91,6 +91,7 @@ export class MessageService {
                 channel = ${payload.channel},
                 last_channel = ${payload.channel}
             WHERE phone_number = ${payload.phoneNumber} AND tenant_id = ${this.db.tenantId}
+            RETURNING id
           `);
         } else {
           writeQueries.push(sql`
@@ -99,6 +100,7 @@ export class MessageService {
                 message_count = message_count + 1, 
                 channel = ${payload.channel}
             WHERE phone_number = ${payload.phoneNumber} AND tenant_id = ${this.db.tenantId}
+            RETURNING id
           `);
         }
       } else {
@@ -109,13 +111,15 @@ export class MessageService {
             ${this.db.tenantId}, ${payload.phoneNumber}, 1, ${payload.channel}, 
             ${payload.direction === 'in' ? payload.channel : null}
           )
+          RETURNING id
         `);
       }
 
       const writeResult = await this.db.executeTransaction(writeQueries);
       const insertedMessageId = writeResult[0][0].id;
+      const conversationId = writeResult[1][0].id;
 
-      return { success: true, isDuplicate: false, messageId: insertedMessageId };
+      return { success: true, isDuplicate: false, messageId: insertedMessageId, conversationId };
     } catch (e: any) {
       this.log.error("SaveMessageIdempotent Error", e instanceof Error ? e : new Error(String(e)));
       // Eğer column yok hatası alırsak, provider_message_id migrationı henüz yapılmamış demektir
