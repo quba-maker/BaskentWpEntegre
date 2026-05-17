@@ -89,7 +89,7 @@ export async function getMessages(phone: string) {
     async (ctx) => {
       const rows = await ctx.db.executeSafe(sql`
         SELECT * FROM (
-          SELECT id, content as text, direction, created_at
+          SELECT id, content as text, direction, created_at, model_used
           FROM messages
           WHERE phone_number = ${phone} AND tenant_id = ${ctx.tenantId}
           ORDER BY created_at DESC
@@ -104,7 +104,7 @@ export async function getMessages(phone: string) {
         const date = new Date(r.created_at);
         return {
           id: r.id,
-          sender: r.direction === 'in' ? 'user' : (r.direction === 'system' ? 'system' : 'bot'),
+          sender: r.direction === 'in' ? 'user' : (r.direction === 'system' ? 'system' : (r.model_used === 'agent' ? 'agent' : 'bot')),
           text: r.text,
           time: date.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }),
           dateLabel: date.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long' })
@@ -212,8 +212,8 @@ export async function sendMessage(phone: string, text: string) {
       }
 
       await ctx.db.executeSafe(sql`
-        INSERT INTO messages (tenant_id, phone_number, direction, content, channel)
-        VALUES (${ctx.tenantId}, ${phone}, 'out', ${text}, 'whatsapp')
+        INSERT INTO messages (tenant_id, phone_number, direction, content, channel, model_used)
+        VALUES (${ctx.tenantId}, ${phone}, 'out', ${text}, ${channel}, 'agent')
       `);
 
       await ctx.db.executeSafe(sql`

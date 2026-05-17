@@ -71,7 +71,7 @@ export function ConversationViewport() {
     // Optimistic update
     const optimisticMsg = {
       id: Date.now(),
-      sender: "bot",
+      sender: "agent",
       text: textToSend,
       time: new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }),
       dateLabel: new Date().toLocaleDateString("tr-TR", { day: "numeric", month: "long" }),
@@ -79,6 +79,20 @@ export function ConversationViewport() {
 
     const currentMessages = messages || [];
     mutate(["messages", activePhone], [...currentMessages, optimisticMsg], false);
+
+    // Eğer bot aktifse, manuel mesaj atıldığı için botu otomatik kapat (Optimistic UI Update)
+    if (activeContact.isBotActive) {
+      useInboxStore.getState().setActiveContact(activePhone, {
+        ...activeContact,
+        isBotActive: false,
+      });
+      // Arka planda veritabanını güncelle
+      toggleBotStatus(activePhone, false).then(res => {
+        if (res.success) {
+          mutate((key) => Array.isArray(key) && key[0] === "conversations");
+        }
+      });
+    }
 
     const res = await sendMessage(activePhone, textToSend);
     if (!res.success) {
@@ -268,7 +282,7 @@ export function ConversationViewport() {
                               <User className="w-3 h-3" style={{ color: "var(--q-text-secondary)" }} />
                             )}
                             <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: msg.sender === "bot" ? "var(--q-purple)" : "var(--q-text-secondary)" }}>
-                              {msg.sender === "bot" ? "AI" : "Temsilci"}
+                              {msg.sender === "bot" ? "AI" : "SEN"}
                             </span>
                           </div>
                         )}
