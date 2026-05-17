@@ -38,6 +38,11 @@ export const noNativeDialog = {
       CallExpression(node) {
         // Direct call: alert(), confirm(), prompt()
         if (node.callee.type === "Identifier" && BANNED[node.callee.name]) {
+          // Allow custom confirm hook which takes an object: confirm({ title: ... })
+          if (node.callee.name === "confirm" && node.arguments.length > 0 && node.arguments[0].type === "ObjectExpression") {
+            return;
+          }
+
           context.report({
             node,
             messageId: BANNED[node.callee.name],
