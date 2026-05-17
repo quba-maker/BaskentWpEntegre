@@ -30,7 +30,8 @@ export class BrainResolver {
     const tenantId = tenantConfig.tenantId;
 
     // 2. Fetch Prompts strictly isolated by tenantId
-    const sql = neon(process.env.DATABASE_URL!);
+    const dbUrl = process.env.DATABASE_URL || "postgres://dummy:dummy@dummy.com/dummy";
+    const sql = neon(dbUrl);
     
     const promptsResult = await sql`
       SELECT prompt_text 
@@ -46,7 +47,8 @@ export class BrainResolver {
       tenantId,
       channel,
       webhookPayloadId,
-      rawSystemPrompt
+      rawSystemPrompt,
+      tenantConfig // <-- PASS THE CONFIG HERE
     );
 
     console.log(`[TENANT_BRAIN_CREATED] Brain ${brain.id} initialized for Tenant ${tenantId} on ${channel}`);

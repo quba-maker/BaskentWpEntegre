@@ -50,16 +50,22 @@ export class QueueWorkerEngine {
     const traceId = metadata.messageId;
     this.log.info(`[QUEUE_RECEIVED] Processing WhatsApp message`, { tenantId, traceId });
 
-    // 1. Resolve Tenant Config
-    const resolver = new TenantResolverService();
-    const tenantConfig = await resolver.resolve(payload);
+    // 1. Resolve Hybrid Isolated Tenant Brain
+    const { BrainResolver } = await import('../brain/brain-resolver');
+    const { TenantFirewall } = await import('../security/tenant-firewall');
     
-    if (!tenantConfig) {
-      this.log.error(`[TENANT_RESOLUTION_FAILED] Could not resolve tenant config`, undefined, { tenantId, traceId });
-      throw new Error(`Tenant resolution failed for ${tenantId}`);
+    let brain;
+    try {
+      brain = await BrainResolver.resolveTenantBrain(payload, 'whatsapp', traceId);
+    } catch (e) {
+      this.log.error(`[TENANT_RESOLUTION_FAILED] Could not resolve brain`, undefined, { tenantId, traceId });
+      throw e;
     }
+
+    // Security Assertion
+    TenantFirewall.assertTenantIsolation(brain, tenantId, 'QueueExecution');
     
-    this.log.info(`[TENANT_RESOLVED] Config loaded`, { tenantSlug: tenantConfig.tenantSlug, traceId });
+    this.log.info(`[TENANT_BRAIN_BOUND] Brain ${brain.id} locked to context`, { tenantSlug: brain.context.tenantId, traceId });
 
     // Extract Message Data
     const value = payload.entry?.[0]?.changes?.[0]?.value;
@@ -125,11 +131,10 @@ export class QueueWorkerEngine {
       }
     }
 
-    // 5. Build System Prompt & History
-    const tenantPrompt = tenantConfig.raw?.prompt || tenantConfig.raw?.system_prompt || null;
-    const { defaultPrompts } = await import('../domain/conversation/prompts');
-    const systemPromptText = PromptBuilder.buildSystemPrompt(tenantPrompt, targetPhase, false, defaultPrompts.whatsapp);
+    // 5. Build System Prompt & History strictly via TenantBrain
+    const systemPromptText = PromptBuilder.buildSystemPrompt(brain, targetPhase, false);
     
+    // In future phases, history and AI Orchestrator will use brain.namespaces.memory()
     const history = await convService.getHistory(phoneNumber, 10);
     const aiMessages: ChatMessage[] = [
       { role: 'system' as const, content: String(systemPromptText) },
@@ -140,10 +145,11 @@ export class QueueWorkerEngine {
     this.log.info(`[PROMPT_BUILT] Prepared LLM payload`, { historyLength: history.length, traceId });
 
     // 6. AI Orchestrator Call (with Timeout Safety)
-    const llmProvider = tenantConfig.raw?.llm_provider || 'gemini';
-    const llmModel = tenantConfig.raw?.llm_model || 'gemini-2.5-flash';
+    const tenantConfig = brain.context.config;
+    const llmProvider = tenantConfig?.raw?.llm_provider || 'gemini';
+    const llmModel = tenantConfig?.raw?.llm_model || 'gemini-2.5-flash';
     // Fallback to global env keys if tenant doesn't have custom keys configured
-    const apiKey = tenantConfig.raw?.gemini_api_key || process.env.GEMINI_API_KEY || '';
+    const apiKey = tenantConfig?.raw?.gemini_api_key || process.env.GEMINI_API_KEY || '';
 
     const aiConfig = {
       provider: llmProvider as 'gemini' | 'openai',
@@ -185,8 +191,8 @@ export class QueueWorkerEngine {
     }
 
     // 8. WhatsApp Send
-    const accessToken = tenantConfig.accessToken || process.env.WHATSAPP_TOKEN || process.env.META_ACCESS_TOKEN || '';
-    const phoneId = tenantConfig.whatsappPhoneNumberId || process.env.PHONE_NUMBER_ID || '';
+    const accessToken = tenantConfig?.accessToken || process.env.WHATSAPP_TOKEN || process.env.META_ACCESS_TOKEN || '';
+    const phoneId = tenantConfig?.whatsappPhoneNumberId || process.env.PHONE_NUMBER_ID || '';
 
     if (!phoneId || !accessToken) {
        this.log.error(`[WHATSAPP_FAILED] Missing Meta credentials for tenant`, undefined, { tenantId, traceId });

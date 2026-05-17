@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 import { NextResponse } from "next/server";
 import { neon } from "@neondatabase/serverless";
 import { getBotSettings } from "@/app/actions/bot";
@@ -13,7 +15,8 @@ export async function GET(req: Request) {
     const tenantId = new URL(req.url).searchParams.get("tenantId") || "43c08749-ecc3-452f-a48d-60cd631986f8";
 
     // 1. Direct neon query
-    const s = neon(process.env.DATABASE_URL!);
+    const dbUrl = process.env.DATABASE_URL || "postgres://dummy:dummy@dummy.com/dummy";
+    const s = neon(dbUrl);
     const rawData = await s`SELECT key, substring(value from 1 for 100) as value FROM settings WHERE tenant_id = ${tenantId}`;
 
     // 2. TenantDB query

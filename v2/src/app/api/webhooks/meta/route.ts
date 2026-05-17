@@ -10,7 +10,7 @@ import { QueueService } from "@/lib/queue/queue.service";
 // Gelen mesajı tenant'a göre yönlendirir ve QueueService'e aktarır
 // ==========================================
 
-const DATABASE_URL = process.env.DATABASE_URL!;
+const DATABASE_URL = process.env.DATABASE_URL || "postgres://dummy:dummy@dummy.com/dummy";
 export const maxDuration = 60; // Max duration for background ops
 
 // GET — Meta Webhook doğrulama
