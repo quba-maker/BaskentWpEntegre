@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import useSWR, { useSWRConfig } from "swr";
-import { Send, Paperclip, User, MessageCircle, ChevronLeft, Info, ShieldAlert, Sparkles } from "lucide-react";
+import { Send, Paperclip, User, MessageCircle, ChevronLeft, ChevronDown, Info, ShieldAlert, Sparkles } from "lucide-react";
 import { getMessages, sendMessage, toggleBotStatus } from "@/app/actions/inbox";
 import { useInboxStore } from "@/store/inbox-store";
 
@@ -54,6 +54,24 @@ export function ConversationViewport() {
   const [isTogglingBot, setIsTogglingBot] = useState(false);
   const [sendError, setSendError] = useState("");
   const { mutate } = useSWRConfig();
+
+  const chatContainerRef = useRef<HTMLDivElement>(null);
+  const [showScrollDown, setShowScrollDown] = useState(false);
+
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const target = e.currentTarget;
+    if (Math.abs(target.scrollTop) > 100) {
+      setShowScrollDown(true);
+    } else {
+      setShowScrollDown(false);
+    }
+  };
+
+  const scrollToBottom = () => {
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
 
   const { data: messages, isLoading } = useSWR(
     activePhone ? ["messages", activePhone] : null,
@@ -225,10 +243,13 @@ export function ConversationViewport() {
       </div>
 
       {/* ── Messages Area ── */}
-      <div 
-        className="flex-1 overflow-y-auto p-6 space-y-6 flex flex-col-reverse"
-        style={{ background: "var(--q-bg-secondary)" }}
-      >
+      <div className="flex-1 relative flex flex-col min-h-0">
+        <div 
+          ref={chatContainerRef}
+          onScroll={handleScroll}
+          className="flex-1 overflow-y-auto p-6 space-y-6 flex flex-col-reverse"
+          style={{ background: "var(--q-bg-secondary)" }}
+        >
         {isLoading ? (
           <ChatSkeleton />
         ) : (
@@ -300,6 +321,19 @@ export function ConversationViewport() {
               </div>
             );
           })
+        )}
+        </div>
+
+        {/* Scroll to Bottom Button */}
+        {showScrollDown && (
+          <button
+            onClick={scrollToBottom}
+            className="absolute bottom-4 right-4 w-10 h-10 rounded-full flex items-center justify-center shadow-md transition-all duration-300 z-20 q-press hover:scale-105"
+            style={{ background: "var(--q-bg-primary)", border: "1px solid var(--q-border-default)", color: "var(--q-text-secondary)" }}
+            aria-label="En alta kaydır"
+          >
+            <ChevronDown className="w-6 h-6" />
+          </button>
         )}
       </div>
 
