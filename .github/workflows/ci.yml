@@ -1,4 +1,4 @@
-name: CI — Build & Test
+name: Production Gate — CI & Security
 
 on:
   push:
@@ -7,12 +7,11 @@ on:
     branches: [main]
 
 env:
-  # Build için minimum gerekli env vars
   DATABASE_URL: ${{ secrets.DATABASE_URL }}
   AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
 
 jobs:
-  build:
+  production-gate:
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -30,38 +29,28 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Lint check
-        run: npx next lint --no-cache 2>/dev/null || echo "Lint warnings found (non-blocking)"
+      - name: Type Check (Strict)
+        run: npm run typecheck
 
-      - name: Type check
-        run: npx tsc --noEmit
+      - name: Security Check (Policy-as-Code)
+        run: npm run test:security
 
-      - name: Build
-        run: npm run build
-
-      - name: Security audit
+      - name: Legacy Bypass Check
         run: |
-          echo "🔒 Security Pattern Check"
-          
-          # Null tenant bypass kontrolü
+          echo "🔒 Legacy Pattern Check"
           if grep -r "tenantId === null" src/app/actions/ 2>/dev/null; then
             echo "❌ FAIL: Null tenant bypass found!"
             exit 1
           fi
-          echo "✅ No null tenant bypass"
-          
-          # fakeReq/fakeRes kontrolü
           if grep -r "fakeReq\|fakeRes" src/app/api/ 2>/dev/null; then
             echo "❌ FAIL: Legacy fakeReq/fakeRes found!"
             exit 1
           fi
-          echo "✅ No legacy adapters"
-          
-          # Hardcoded secret kontrolü
           if grep -r "quba-ai-secret" src/ 2>/dev/null; then
             echo "❌ FAIL: Hardcoded secret found!"
             exit 1
           fi
-          echo "✅ No hardcoded secrets"
-          
-          echo "🎉 All security checks passed"
+          echo "✅ All legacy security checks passed"
+
+      - name: Build (Vercel Simulation)
+        run: npm run build
