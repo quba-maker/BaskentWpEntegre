@@ -1,4 +1,5 @@
 import { logger } from "@/lib/core/logger";
+import { sql } from "@/lib/db";
 import { withTenantDB } from "@/lib/core/tenant-db";
 import { ConversationService } from "@/lib/services/conversation.service";
 import { MessageService } from "@/lib/services/message.service";
@@ -187,7 +188,19 @@ export class QueueWorkerEngine {
     if (!validation.valid) {
       this.log.error(`[POLICY_FAILED] ${validation.reason}`, undefined, { traceId, tenantId: brain.context.tenantId });
       finalResponseText = validation.fallbackMessage || "Üzgünüm, şu an size yanıt veremiyorum.";
-      // TODO: Escalate status
+      
+      // Save a system alert message to alert the agent
+      await db.executeSafe(sql`
+        INSERT INTO messages (tenant_id, phone_number, direction, content, channel, provider_message_id)
+        VALUES (${tenantId}, ${phoneNumber}, 'system', ${'Güvenlik Politikası Devrede: ' + validation.reason}, 'whatsapp', 'system_alert')
+      `);
+
+      // Escalate to human automatically
+      await db.executeSafe(sql`
+        UPDATE conversations 
+        SET status = 'human'
+        WHERE phone_number = ${phoneNumber} AND tenant_id = ${tenantId}
+      `);
     }
 
     // 8. WhatsApp Send

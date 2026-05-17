@@ -98,7 +98,7 @@ export async function getMessages(phone: string) {
         const date = new Date(r.created_at);
         return {
           id: r.id,
-          sender: r.direction === 'in' ? 'user' : 'bot',
+          sender: r.direction === 'in' ? 'user' : (r.direction === 'system' ? 'system' : 'bot'),
           text: r.text,
           time: date.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }),
           dateLabel: date.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long' })

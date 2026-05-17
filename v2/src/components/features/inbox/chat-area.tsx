@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
-import { Send, Paperclip, Bot, User, MessageCircle, ChevronLeft, Info } from "lucide-react";
+import { Send, Paperclip, Bot, User, MessageCircle, ChevronLeft, Info, ShieldAlert, Sparkles } from "lucide-react";
 import { getMessages, sendMessage, toggleBotStatus } from "@/app/actions/inbox";
 import { useInboxStore } from "@/store/inbox-store";
 
@@ -131,15 +131,25 @@ export function ChatArea() {
         
         {/* Actions */}
         <div className="flex items-center gap-2 md:gap-3">
-          <div className="flex items-center gap-2 bg-white/60 px-2 md:px-3 py-1.5 rounded-full border border-white/80 shadow-[0_2px_8px_rgba(0,0,0,0.04)]">
-            <span className="hidden md:inline text-xs font-bold uppercase tracking-wider text-[#86868B]">AI Otopilot</span>
-            <span className="md:hidden text-[10px] font-bold uppercase tracking-wider text-[#86868B] px-1">AI</span>
+          <div className="flex items-center gap-2 bg-white/80 backdrop-blur-md px-2.5 md:px-3.5 py-1.5 rounded-full border border-black/5 shadow-[0_2px_8px_rgba(0,0,0,0.04)]">
+            {activeContact.isBotActive ? (
+              <Sparkles className="w-3.5 h-3.5 text-[#007AFF] animate-pulse" />
+            ) : (
+              <User className="w-3.5 h-3.5 text-[#86868B]" />
+            )}
+            <span className={`hidden md:inline text-[11px] font-bold uppercase tracking-wider ${activeContact.isBotActive ? "text-[#007AFF]" : "text-[#86868B]"}`}>
+              AI Otopilot
+            </span>
+            <span className={`md:hidden text-[10px] font-bold uppercase tracking-wider ${activeContact.isBotActive ? "text-[#007AFF]" : "text-[#86868B]"} px-0.5`}>
+              AI
+            </span>
+            <div className="h-3 w-[1px] bg-black/10 mx-1"></div>
             <button 
               onClick={handleToggleBot}
               disabled={isTogglingBot}
-              className={`w-10 h-5 rounded-full relative transition-all duration-300 flex items-center shadow-inner hover:opacity-90 cursor-pointer ${activeContact.isBotActive ? "bg-[#34C759]" : "bg-[#E5E5EA]"} ${isTogglingBot ? "opacity-50" : ""}`}
+              className={`w-9 h-5 rounded-full relative transition-all duration-300 flex items-center shadow-inner hover:opacity-90 cursor-pointer ${activeContact.isBotActive ? "bg-[#007AFF]" : "bg-[#E5E5EA]"} ${isTogglingBot ? "opacity-50 cursor-not-allowed" : ""}`}
             >
-              <span className={`absolute w-4 h-4 bg-white rounded-full shadow-[0_2px_4px_rgba(0,0,0,0.2)] transition-transform ${activeContact.isBotActive ? "left-[2px] translate-x-5" : "left-[2px]"}`}></span>
+              <span className={`absolute w-4 h-4 bg-white rounded-full shadow-[0_2px_4px_rgba(0,0,0,0.2)] transition-transform duration-300 ease-spring ${activeContact.isBotActive ? "left-[2px] translate-x-4" : "left-[2px]"}`}></span>
             </button>
           </div>
           <button 
@@ -171,26 +181,36 @@ export function ChatArea() {
                 </div>
               )}
               
-              <div className={`flex w-full ${msg.sender === "user" ? "justify-start" : "justify-end"} mb-6`}>
-                <div className={`max-w-[65%] flex flex-col gap-1.5 ${msg.sender === "user" ? "items-start" : "items-end"}`}>
-                  
-                  {/* Bubble */}
-                  <div className={`px-5 py-3 rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.05)] ${msg.sender === "user" ? "bg-[#E9E9EB] border border-white/20 text-[#1D1D1F] rounded-bl-sm" : "bg-[#007AFF] text-white rounded-br-sm"}`}>
-                    <p className="text-[15px] leading-relaxed font-medium whitespace-pre-wrap">{msg.text}</p>
+              {msg.sender === "system" ? (
+                <div className="flex w-full justify-center mb-6">
+                  <div className="bg-[#FFF4E5]/80 backdrop-blur-md border border-[#FFE2B7] text-[#B86B00] rounded-full px-4 py-1.5 flex items-center gap-2 shadow-sm max-w-[90%] md:max-w-[70%] text-center">
+                    <ShieldAlert className="w-4 h-4 flex-shrink-0 text-[#FF9500]" />
+                    <p className="text-[13px] font-semibold tracking-tight leading-tight">{msg.text}</p>
+                    <span className="text-[10px] font-bold opacity-60 ml-2 whitespace-nowrap">{msg.time}</span>
                   </div>
-                  
-                  {/* Info */}
-                  <div className="flex items-center gap-1.5 px-2 opacity-60">
-                    {msg.sender === "bot" ? (
-                      <Bot className="w-3.5 h-3.5" />
-                    ) : (
-                      <User className="w-3.5 h-3.5" />
-                    )}
-                    <span className="text-[10px] font-semibold tracking-wide text-[#86868B]">{msg.time}</span>
-                  </div>
-                  
                 </div>
-              </div>
+              ) : (
+                <div className={`flex w-full ${msg.sender === "user" ? "justify-start" : "justify-end"} mb-6 group`}>
+                  <div className={`max-w-[85%] md:max-w-[65%] flex flex-col gap-1.5 ${msg.sender === "user" ? "items-start" : "items-end"}`}>
+                    
+                    {/* Bubble */}
+                    <div className={`px-4 py-3 md:px-5 md:py-3.5 rounded-2xl shadow-sm transition-all duration-200 ${msg.sender === "user" ? "bg-white border border-black/5 text-[#1D1D1F] rounded-bl-sm hover:shadow-md" : "bg-gradient-to-br from-[#007AFF] to-[#0056b3] text-white rounded-br-sm border border-[#007AFF]/20 hover:shadow-md"}`}>
+                      <p className="text-[15px] leading-relaxed font-medium whitespace-pre-wrap">{msg.text}</p>
+                    </div>
+                    
+                    {/* Info */}
+                    <div className="flex items-center gap-1.5 px-2 opacity-50 group-hover:opacity-100 transition-opacity duration-300">
+                      {msg.sender === "bot" ? (
+                        <Sparkles className="w-3 h-3 text-[#007AFF]" />
+                      ) : (
+                        <User className="w-3 h-3" />
+                      )}
+                      <span className="text-[11px] font-semibold tracking-wide text-[#86868B]">{msg.time}</span>
+                    </div>
+                    
+                  </div>
+                </div>
+              )}
             </div>
             );
           })
