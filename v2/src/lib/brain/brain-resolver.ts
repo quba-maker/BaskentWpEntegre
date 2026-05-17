@@ -51,30 +51,41 @@ export class BrainResolver {
     // preventing cross-tenant prompt leakage.
     let rawSystemPrompt: string | null = null;
     let promptHash: string | null = null;
+    let knowledgePrices = '';
+    let knowledgeRules = '';
+    let bannedWords: string[] = [];
 
     try {
       let promptKey = 'system_prompt_whatsapp';
       if (channel === 'instagram') promptKey = 'system_prompt_tr';
       if (channel === 'foreign') promptKey = 'system_prompt_foreign';
 
+      const keysToFetch = [promptKey, 'bot_knowledge_prices', 'bot_knowledge_rules', 'bot_banned_words'];
       const db = withTenantDB(tenantId, false);
-      const promptsResult = await db.executeSafe(sql`
-        SELECT value 
+      const settingsResult = await db.executeSafe(sql`
+        SELECT key, value 
         FROM settings 
-        WHERE tenant_id = ${tenantId} AND key = ${promptKey}
-        LIMIT 1
+        WHERE tenant_id = ${tenantId} AND key = ANY(${keysToFetch})
       `);
-      if (promptsResult.length > 0) {
-        rawSystemPrompt = promptsResult[0].value;
-        
-        // LAYER 3: PROMPT HASH VALIDATION
-        // Calculate SHA256 of the prompt at retrieval time
-        if (rawSystemPrompt) {
-          promptHash = crypto.createHash('sha256').update(rawSystemPrompt).digest('hex');
+
+      const rows = Array.isArray(settingsResult) ? settingsResult : (settingsResult as any)?.rows || [];
+      
+      for (const row of rows) {
+        if (row.key === promptKey) rawSystemPrompt = row.value;
+        if (row.key === 'bot_knowledge_prices') knowledgePrices = row.value;
+        if (row.key === 'bot_knowledge_rules') knowledgeRules = row.value;
+        if (row.key === 'bot_banned_words') {
+          try { bannedWords = JSON.parse(row.value); } catch(e) {}
         }
       }
+      
+      // LAYER 3: PROMPT HASH VALIDATION
+      // Calculate SHA256 of the prompt at retrieval time
+      if (rawSystemPrompt) {
+        promptHash = crypto.createHash('sha256').update(rawSystemPrompt).digest('hex');
+      }
     } catch (dbError) {
-      log.warn(`DB prompt fetch failed for tenant ${tenantId}. Falling back to registry.`, { tenantId });
+      log.warn(`DB settings fetch failed for tenant ${tenantId}. Falling back to registry.`, { tenantId });
     }
 
     // 2.5 SaaS Code-First Fallback (Strictly scoped by tenantSlug, not generic fallback)
@@ -96,7 +107,8 @@ export class BrainResolver {
       webhookPayloadId,
       rawSystemPrompt,
       tenantConfig,
-      promptHash // Pass prompt hash for validation
+      promptHash, // Pass prompt hash for validation
+      { prices: knowledgePrices, rules: knowledgeRules, bannedWords }
     );
 
     return brain;

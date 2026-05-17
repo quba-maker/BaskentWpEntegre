@@ -3,6 +3,11 @@ export interface TenantBrainContext {
   channel: string;
   webhookPayloadId: string; // for tracing and strict isolation
   config?: any; // The full tenant config resolved
+  knowledge?: {
+    prices?: string;
+    rules?: string;
+    bannedWords?: string[];
+  };
 }
 
 export interface TenantBrainNamespaces {
@@ -53,7 +58,8 @@ export function createTenantBrain(
   webhookPayloadId: string,
   rawSystemPrompt: string | null,
   config?: any,
-  promptHash?: string | null
+  promptHash?: string | null,
+  knowledge?: TenantBrainContext['knowledge']
 ): TenantBrain {
   
   const instanceId = `brain_${tenantId}_${Date.now()}_${Math.random().toString(36).substring(7)}`;
@@ -81,7 +87,8 @@ export function createTenantBrain(
       tenantId,
       channel,
       webhookPayloadId,
-      config
+      config,
+      knowledge
     },
     namespaces,
     prompts
