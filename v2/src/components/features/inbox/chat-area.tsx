@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import { Send, Paperclip, User, MessageCircle, ChevronLeft, ChevronDown, Info, ShieldAlert, Sparkles } from "lucide-react";
 import { getMessages, sendMessage, toggleBotStatus } from "@/app/actions/inbox";
@@ -60,16 +60,17 @@ export function ConversationViewport() {
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const target = e.currentTarget;
-    if (Math.abs(target.scrollTop) > 100) {
-      setShowScrollDown(true);
-    } else {
-      setShowScrollDown(false);
-    }
+    // Show scroll down button if we are not at the bottom
+    const isAtBottom = target.scrollHeight - target.scrollTop - target.clientHeight < 50;
+    setShowScrollDown(!isAtBottom);
   };
 
-  const scrollToBottom = () => {
+  const scrollToBottom = (behavior: "auto" | "smooth" = "smooth") => {
     if (chatContainerRef.current) {
-      chatContainerRef.current.scrollTo({ top: 0, behavior: "smooth" });
+      chatContainerRef.current.scrollTo({
+        top: chatContainerRef.current.scrollHeight,
+        behavior,
+      });
     }
   };
 
@@ -78,6 +79,14 @@ export function ConversationViewport() {
     () => getMessages(activePhone!),
     { refreshInterval: 2000 }
   );
+
+  // Auto-scroll on messages load or change
+  useEffect(() => {
+    if (messages && messages.length > 0) {
+      // Small delay to ensure DOM is updated
+      setTimeout(() => scrollToBottom("auto"), 50);
+    }
+  }, [messages, activePhone]);
 
   const handleSend = async () => {
     if (!inputText.trim() || !activePhone || isSending) return;
@@ -91,7 +100,7 @@ export function ConversationViewport() {
       id: Date.now(),
       sender: "agent",
       text: textToSend,
-      time: new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Istanbul" }),
+      timeMs: Date.now(),
       dateLabel: "Bugün",
     };
 
@@ -247,7 +256,7 @@ export function ConversationViewport() {
         <div 
           ref={chatContainerRef}
           onScroll={handleScroll}
-          className="flex-1 overflow-y-auto p-6 space-y-6 flex flex-col-reverse"
+          className="flex-1 overflow-y-auto p-4 md:p-6 block"
           style={{ background: "var(--q-bg-secondary)" }}
         >
         {isLoading ? (
@@ -255,19 +264,18 @@ export function ConversationViewport() {
         ) : (
           Object.entries(
             (messages || []).reduce((acc: any, msg: any) => {
-              if (!acc[msg.dateLabel]) acc[msg.dateLabel] = [];
-              acc[msg.dateLabel].push(msg);
+              const dateKey = msg.dateLabel || new Date(msg.timeMs).toLocaleDateString("tr-TR");
+              if (!acc[dateKey]) acc[dateKey] = [];
+              acc[dateKey].push(msg);
               return acc;
             }, {})
-          ).reverse().map(([dateLabel, groupMsgs]: [string, any]) => (
-            <div key={dateLabel} className="flex flex-col pb-2">
+          ).map(([dateLabel, groupMsgs]: [string, any]) => (
+            <div key={dateLabel} className="block mb-6 relative">
               <div className="sticky top-2 z-10 flex justify-center w-full my-4 pointer-events-none">
                 <span
-                  className="text-xs font-semibold px-3 py-1 rounded-full shadow-sm pointer-events-auto"
+                  className="text-[11px] font-bold px-3 py-1 rounded-md shadow-sm pointer-events-auto"
                   style={{ 
-                    background: "rgba(255, 255, 255, 0.85)", 
-                    backdropFilter: "blur(8px)", 
-                    WebkitBackdropFilter: "blur(8px)",
+                    background: "var(--q-bg-primary)", 
                     color: "var(--q-text-secondary)", 
                     border: "1px solid var(--q-border-default)" 
                   }}
@@ -275,8 +283,7 @@ export function ConversationViewport() {
                   {dateLabel}
                 </span>
               </div>
-              
-              <div className="space-y-6 flex flex-col">
+              <div className="flex flex-col gap-6">
                 {groupMsgs.map((msg: any) => (
                   <div key={msg.id} className="flex flex-col q-bubble-in w-full">
                     {msg.sender === "system" ? (
@@ -287,7 +294,9 @@ export function ConversationViewport() {
                         >
                           <ShieldAlert className="w-4 h-4 flex-shrink-0" style={{ color: "var(--q-orange)" }} />
                           <p className="text-[13px] font-semibold tracking-tight leading-tight">{msg.text}</p>
-                          <span className="text-[10px] font-bold opacity-60 ml-2 whitespace-nowrap">{msg.time}</span>
+                          <span className="text-[10px] font-bold opacity-60 ml-2 whitespace-nowrap">
+                            {msg.timeMs ? new Date(msg.timeMs).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) : msg.time}
+                          </span>
                         </div>
                       </div>
                     ) : (
@@ -322,7 +331,7 @@ export function ConversationViewport() {
                           </p>
                           
                           <span className="absolute bottom-1 right-2 text-[10px] font-semibold tracking-wide opacity-50" style={{ color: "var(--q-text-secondary)" }}>
-                            {msg.time}
+                            {msg.timeMs ? new Date(msg.timeMs).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) : msg.time}
                           </span>
                         </div>
                       </div>
@@ -338,9 +347,9 @@ export function ConversationViewport() {
         {/* Scroll to Bottom Button */}
         {showScrollDown && (
           <button
-            onClick={scrollToBottom}
-            className="absolute bottom-4 right-4 w-10 h-10 rounded-full flex items-center justify-center shadow-md transition-all duration-300 z-20 q-press hover:scale-105"
-            style={{ background: "var(--q-bg-primary)", border: "1px solid var(--q-border-default)", color: "var(--q-text-secondary)" }}
+            onClick={() => scrollToBottom("smooth")}
+            className="absolute bottom-4 right-4 w-11 h-11 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 z-20 q-press hover:scale-105"
+            style={{ background: "var(--q-bg-primary)", border: "1px solid var(--q-border-default)", color: "var(--q-text-primary)" }}
             aria-label="En alta kaydır"
           >
             <ChevronDown className="w-6 h-6" />

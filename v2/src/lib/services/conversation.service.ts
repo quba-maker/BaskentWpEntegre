@@ -107,4 +107,55 @@ export class ConversationService {
       WHERE phone_number = ${phoneNumber} AND tenant_id = ${this.db.tenantId}
     `);
   }
+
+  /**
+   * CRM Intelligence Updates
+   * Sadece var olan değerleri veya AI çıkarımlarını birleştirir.
+   */
+  async updateCrmIntelligence(
+    phoneNumber: string,
+    data: {
+      country?: string;
+      department?: string;
+      pipelineStage?: string;
+      tags?: string[];
+    }
+  ): Promise<void> {
+    if (!data.country && !data.department && !data.pipelineStage && !data.tags) {
+      return;
+    }
+
+    try {
+      const current = await this.db.executeSafe(sql`
+        SELECT tags FROM conversations 
+        WHERE phone_number = ${phoneNumber} AND tenant_id = ${this.db.tenantId}
+      `);
+      
+      let mergedTags: string[] = [];
+      if (current.length > 0 && current[0].tags) {
+        try {
+          mergedTags = typeof current[0].tags === 'string' ? JSON.parse(current[0].tags) : current[0].tags;
+        } catch {
+           mergedTags = [];
+        }
+      }
+      
+      if (data.tags && Array.isArray(data.tags)) {
+        mergedTags = Array.from(new Set([...mergedTags, ...data.tags]));
+      }
+
+      await this.db.executeSafe(sql`
+        UPDATE conversations 
+        SET 
+          country = COALESCE(${data.country || null}, country),
+          department = COALESCE(${data.department || null}, department),
+          lead_stage = COALESCE(${data.pipelineStage || null}, lead_stage),
+          tags = ${JSON.stringify(mergedTags)}::jsonb
+        WHERE phone_number = ${phoneNumber} AND tenant_id = ${this.db.tenantId}
+      `);
+    } catch (e) {
+      // Non-blocking log, fail safely
+      console.error("[CRM_INTELLIGENCE_UPDATE_ERROR]", e);
+    }
+  }
 }

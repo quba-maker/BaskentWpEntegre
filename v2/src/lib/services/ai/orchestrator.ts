@@ -9,6 +9,7 @@ export interface AIProviderConfig {
   apiKey: string;
   temperature: number;
   maxTokens: number;
+  responseFormat?: 'json' | 'text';
 }
 
 export interface ChatMessage {
@@ -115,7 +116,8 @@ export class AIOrchestrator {
           contents: conversation,
           generationConfig: {
             temperature: config.temperature,
-            maxOutputTokens: config.maxTokens
+            maxOutputTokens: config.maxTokens,
+            responseMimeType: config.responseFormat === 'json' ? 'application/json' : undefined
           }
         })
       }

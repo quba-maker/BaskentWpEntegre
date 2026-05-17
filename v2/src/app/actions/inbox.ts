@@ -10,6 +10,7 @@ import { enqueueRetry } from "@/lib/retry";
 // ==========================================
 
 export async function getConversations(page: number = 1, search: string = "", stage: string = "all") {
+  noStore();
   return withActionGuard(
     { actionName: 'getConversations' },
     async (ctx) => {
@@ -154,7 +155,7 @@ export async function getMessages(phone: string) {
           id: r.id,
           sender: r.direction === 'in' ? 'user' : (r.direction === 'system' ? 'system' : (r.model_used && r.model_used !== 'agent' && r.model_used !== 'human' ? 'bot' : 'agent')),
           text: r.text,
-          time: date.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul' }),
+          timeMs: parseFloat(r.created_at_ms),
           dateLabel
         };
       });

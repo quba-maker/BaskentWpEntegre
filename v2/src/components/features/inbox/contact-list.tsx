@@ -90,7 +90,7 @@ function stageLabel(stage: string | undefined): string {
 }
 
 export function ContactRail() {
-  const { activePhone, setActiveContact, mobileView } = useInboxStore();
+  const { activePhone, activeContact, setActiveContact, mobileView } = useInboxStore();
   const [filter, setFilter] = useState("all");
   const [stageFilter, setStageFilter] = useState("all");
   const [searchInput, setSearchInput] = useState("");
@@ -116,6 +116,40 @@ export function ContactRail() {
   const contacts = data ? data.flat() : [];
   const isLoadingMore = isLoading || (size > 0 && data && typeof data[size - 1] === "undefined");
   const isReachingEnd = data && data[data.length - 1]?.length < 50;
+
+  // Reactively sync updated CRM data/messages to the active contact
+  useEffect(() => {
+    if (activePhone && contacts.length > 0) {
+      const updatedContact = contacts.find((c: any) => c.id === activePhone);
+      if (updatedContact) {
+        // Compare important fields or just deep compare to avoid infinite loops
+        // Easiest is to stringify, though we only care if tags, stage, department, country or messages changed.
+        const currentDataStr = JSON.stringify({
+          stage: activeContact?.stage,
+          department: activeContact?.department,
+          country: activeContact?.country,
+          tags: activeContact?.tags,
+          score: activeContact?.score,
+          last_message: activeContact?.last_message,
+          unread: activeContact?.unread
+        });
+        
+        const updatedDataStr = JSON.stringify({
+          stage: updatedContact.stage,
+          department: updatedContact.department,
+          country: updatedContact.country,
+          tags: updatedContact.tags,
+          score: updatedContact.score,
+          last_message: updatedContact.last_message,
+          unread: updatedContact.unread
+        });
+
+        if (currentDataStr !== updatedDataStr) {
+          useInboxStore.getState().updateActiveContact(updatedContact);
+        }
+      }
+    }
+  }, [contacts, activePhone, activeContact]);
 
   return (
     <div className={`w-full md:w-80 border-r flex-col h-full z-10 q-glass shadow-sm ${mobileView === "list" ? "flex" : "hidden md:flex"}`}

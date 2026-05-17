@@ -261,6 +261,40 @@ export class QueueWorkerEngine {
       modelUsed: aiResponse.modelUsed
     });
 
+    // 10. CRM Intelligence Extraction (Async & Non-blocking)
+    try {
+      this.log.info(`[WORKER_CRM] Initiating CRM extraction`, { traceId });
+      const { crmExtractorService } = await import('../services/ai/crm-extractor');
+      
+      // Deterministik Ülke (Layer 1)
+      let deterministicCountry = undefined;
+      if (phoneNumber.startsWith("90")) deterministicCountry = "Türkiye";
+      else if (phoneNumber.startsWith("49")) deterministicCountry = "Almanya";
+      else if (phoneNumber.startsWith("44")) deterministicCountry = "İngiltere";
+      else if (phoneNumber.startsWith("33")) deterministicCountry = "Fransa";
+      else if (phoneNumber.startsWith("31")) deterministicCountry = "Hollanda";
+      else if (phoneNumber.startsWith("32")) deterministicCountry = "Belçika";
+      else if (phoneNumber.startsWith("998")) deterministicCountry = "Özbekistan";
+      else if (phoneNumber.startsWith("994")) deterministicCountry = "Azerbaycan";
+      else if (phoneNumber.startsWith("7")) deterministicCountry = "Rusya";
+      else if (phoneNumber.startsWith("1")) deterministicCountry = "ABD";
+
+      // AI Inference (Layer 2-4)
+      const crmData = await crmExtractorService.extract(aiMessages, tenantConfig, traceId);
+      
+      // Update DB safely
+      await convService.updateCrmIntelligence(phoneNumber, {
+        country: deterministicCountry || crmData?.country,
+        department: crmData?.department,
+        pipelineStage: crmData?.pipeline_stage,
+        tags: crmData?.tags
+      });
+
+      this.log.info(`[WORKER_CRM_OK] CRM successfully enriched`, { traceId });
+    } catch (crmErr) {
+      this.log.error(`[WORKER_CRM_FAILED] Non-fatal CRM extraction error`, crmErr instanceof Error ? crmErr : new Error(String(crmErr)), { traceId });
+    }
+
     this.log.info(`[WORKER_COMPLETED] End-to-end pipeline finished successfully`, { traceId });
   }
 
