@@ -1,9 +1,12 @@
-import { Check, Save, Loader2 } from "lucide-react";
-
 // ==========================================
-// BOT PAGE — SHARED SUB-COMPONENTS
-// Reusable primitives used across all bot panels
-// Governed by tokens.css — no hardcoded HEX
+// BOT PAGE — SHARED DOMAIN COMPONENTS
+// Bot-specific display components.
+// 
+// GOVERNANCE RULE:
+// SaveButton → @/components/governance
+// ToggleSwitch → @/components/governance
+// These domain components stay here because they're
+// specific to bot panel layout patterns.
 // ==========================================
 
 // ---- Types ----
@@ -18,7 +21,7 @@ export interface BotChannel {
   description: string;
 }
 
-// ---- Components ----
+// ---- Domain-Specific Display Components ----
 
 export function StatCard({ icon: Icon, label, value, color }: { icon: any; label: string; value: any; color: string }) {
   return (
@@ -48,61 +51,5 @@ export function SettingRow({ icon: Icon, iconColor, title, description, children
       </div>
       {children}
     </div>
-  );
-}
-
-export function ToggleSwitch({ active, onToggle }: { active: boolean; onToggle: () => void }) {
-  return (
-    <button
-      onClick={onToggle}
-      className="relative w-[51px] h-[31px] rounded-full transition-colors duration-300 shrink-0"
-      style={{ backgroundColor: active ? "var(--q-green)" : "var(--q-bg-tertiary)" }}
-    >
-      <div className={`absolute top-[2px] w-[27px] h-[27px] bg-white rounded-full shadow-md transition-transform duration-300 ${
-        active ? "translate-x-[22px]" : "translate-x-[2px]"
-      }`} />
-    </button>
-  );
-}
-
-/**
- * Standardized save button — used across all panels that persist data.
- * Single source of truth for save UX behavior.
- */
-export function SaveButton({ 
-  saving, 
-  saved, 
-  onClick, 
-  label = "Kaydet",
-  savedLabel = "Kaydedildi!",
-  color = "var(--q-blue)"
-}: { 
-  saving: boolean; 
-  saved: boolean; 
-  onClick: () => void; 
-  label?: string;
-  savedLabel?: string;
-  color?: string;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={saving}
-      className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 ${
-        saved
-          ? "text-white"
-          : `text-white hover:opacity-90 shadow-sm`
-      }`}
-      style={{ backgroundColor: saved ? "var(--q-green)" : color }}
-    >
-      {saving ? (
-        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-      ) : saved ? (
-        <Check className="w-3.5 h-3.5" />
-      ) : (
-        <Save className="w-3.5 h-3.5" />
-      )}
-      {saved ? savedLabel : label}
-    </button>
   );
 }

@@ -29,7 +29,7 @@ const channels: BotChannel[] = [
     icon: MessageSquare,
     promptKey: "system_prompt_whatsapp",
     activeKey: "channel_whatsapp_enabled",
-    color: "#25D366",
+    color: "var(--q-whatsapp)",
     description: "Ana satış hunisi — Lead karşılama, ikna, randevu dönüşümü"
   },
   {
@@ -38,7 +38,7 @@ const channels: BotChannel[] = [
     icon: Hash,
     promptKey: "system_prompt_tr",
     activeKey: "channel_instagram_enabled",
-    color: "#E1306C",
+    color: "var(--q-instagram)",
     description: "Instagram ve Facebook TR sayfaları için hasta danışmanı"
   },
   {
@@ -47,7 +47,7 @@ const channels: BotChannel[] = [
     icon: Globe,
     promptKey: "system_prompt_foreign",
     activeKey: "channel_foreign_enabled",
-    color: "#007AFF",
+    color: "var(--q-blue)",
     description: "Yabancı dilde gelen hastalar — Çok dilli otomatik yanıt"
   }
 ];

@@ -1,5 +1,5 @@
-import { Globe, Save, CheckCircle, Loader2 } from "lucide-react";
-import { SaveButton } from "./shared";
+import { Globe } from "lucide-react";
+import { SaveButton } from "@/components/governance";
 
 // ==========================================
 // KNOWLEDGE BASE PANEL

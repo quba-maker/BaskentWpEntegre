@@ -1,5 +1,6 @@
 import { Settings2, Zap, Globe, MessageSquare, Clock, Shield } from "lucide-react";
-import { SettingRow, ToggleSwitch } from "./shared";
+import { SettingRow } from "./shared";
+import { ToggleSwitch } from "@/components/governance";
 
 // ==========================================
 // AI BEHAVIOR PANEL

@@ -68,7 +68,7 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-[--q-bg-secondary] px-4">
       {/* Background gradient */}
-      <div className="fixed inset-0 bg-gradient-to-br from-[#F5F5F7] via-white to-[#E8E8ED]" />
+      <div className="fixed inset-0 bg-gradient-to-br from-[--q-bg-secondary] via-white to-[--q-bg-tertiary]" />
 
       <div className="relative z-10 w-full max-w-[400px]">
         {/* Logo */}
@@ -125,7 +125,8 @@ export default function LoginPage() {
               <button
                 type="submit"
                 disabled={changingPassword || newPassword.length < 6 || newPassword !== confirmPassword}
-                className="w-full py-3 bg-[#FF9500] hover:bg-[#E68A00] text-white text-[15px] font-semibold rounded-xl transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                className="w-full py-3 text-white text-[15px] font-semibold rounded-xl transition-all disabled:opacity-50 flex items-center justify-center gap-2 q-press"
+                style={{ backgroundColor: 'var(--q-orange)' }}
               >
                 {changingPassword ? <><Loader2 className="w-4 h-4 animate-spin" /> Değiştiriliyor...</> : "Şifreyi Değiştir & Giriş Yap"}
               </button>
@@ -189,7 +190,7 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading || !email.trim() || !password.trim()}
-              className="w-full py-3 bg-[--q-blue] hover:bg-[#0066D6] text-white text-[15px] font-semibold rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              className="w-full py-3 bg-[--q-blue] hover:bg-[--q-blue-hover] text-white text-[15px] font-semibold rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 q-press"
             >
               {loading ? (
                 <>
@@ -215,7 +216,7 @@ export default function LoginPage() {
               Kullanım Koşulları
             </a>
           </div>
-          <p className="text-[11px] text-[#C7C7CC]">
+          <p className="text-[11px] text-[--q-text-placeholder]">
             © 2026 Quba AI — Quba Medya
           </p>
         </div>

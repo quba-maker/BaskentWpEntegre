@@ -3,14 +3,14 @@
 import { useEffect, useState } from "react";
 import { getTenantSettings, updateTenantSettings, getUsageStats } from "@/app/actions/settings";
 import { changeMyPassword } from "@/app/actions/users";
-import { Building2, Gauge, Shield, Save, Loader2, CheckCircle, KeyRound } from "lucide-react";
+import { Building2, Gauge, Shield, KeyRound } from "lucide-react";
 import { PageLoader } from "@/components/ui/shared-states";
+import { SectionCard, SectionHeader, SaveButton, ActionButton } from "@/components/governance";
 
 // ==========================================
-// QUBA AI — Settings Page (Apple Style)
-// Single Responsibility: Company + Account + Usage
-// Bot/AI config → Bot Yönetimi page
-// Meta/Integration config → Entegrasyonlar page
+// QUBA AI — Settings Page
+// Authority: Company profile + Account + Usage
+// Governance: SectionCard + SaveButton + ActionButton
 // ==========================================
 
 export default function SettingsPage() {
@@ -19,7 +19,6 @@ export default function SettingsPage() {
   const [usage, setUsage] = useState<any>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  // Password change
   const [pwCurrent, setPwCurrent] = useState("");
   const [pwNew, setPwNew] = useState("");
   const [pwConfirm, setPwConfirm] = useState("");
@@ -31,16 +30,13 @@ export default function SettingsPage() {
     timezone: "Europe/Istanbul",
   });
 
-  useEffect(() => {
-    loadData();
-  }, []);
+  useEffect(() => { loadData(); }, []);
 
   async function loadData() {
     const [tenantRes, usageRes] = await Promise.all([
       getTenantSettings(),
       getUsageStats(),
     ]);
-
     if (tenantRes.success && tenantRes.tenant) {
       setTenant(tenantRes.tenant);
       setUser(tenantRes.user);
@@ -50,10 +46,7 @@ export default function SettingsPage() {
         timezone: tenantRes.tenant.timezone || "Europe/Istanbul",
       });
     }
-
-    if (usageRes.success && usageRes.stats) {
-      setUsage(usageRes.stats);
-    }
+    if (usageRes.success && usageRes.stats) setUsage(usageRes.stats);
   }
 
   async function handlePasswordChange() {
@@ -91,7 +84,8 @@ export default function SettingsPage() {
 
         {/* Plan & Usage */}
         {usage && (
-          <Card icon={<Gauge className="w-5 h-5" />} title="Kullanım">
+          <SectionCard>
+            <SectionHeader icon={Gauge} title="Kullanım" />
             <div className="grid grid-cols-2 gap-4">
               <StatBox label="Plan" value={usage.plan.toUpperCase()} />
               <StatBox label="Bu Ay Mesaj" value={`${usage.totalMessages} / ${usage.limit}`} />
@@ -99,101 +93,91 @@ export default function SettingsPage() {
               <StatBox label="Tahmini Maliyet" value={`$${usage.estimatedCost.toFixed(2)}`} />
             </div>
             <div className="mt-3">
-              <div className="h-2 bg-[#F5F5F7] rounded-full overflow-hidden">
+              <div className="h-2 rounded-full overflow-hidden" style={{ backgroundColor: "var(--q-bg-secondary)" }}>
                 <div
-                  className="h-full bg-gradient-to-r from-[#007AFF] to-[#5856D6] rounded-full transition-all"
-                  style={{ width: `${Math.min((usage.totalMessages / usage.limit) * 100, 100)}%` }}
+                  className="h-full rounded-full"
+                  style={{
+                    width: `${Math.min((usage.totalMessages / usage.limit) * 100, 100)}%`,
+                    background: "linear-gradient(to right, var(--q-blue), var(--q-purple))",
+                    transition: "width var(--q-transition-slow)",
+                  }}
                 />
               </div>
-              <p className="text-[11px] text-[--q-text-secondary] mt-1">
+              <p className="text-[11px] mt-1" style={{ color: "var(--q-text-secondary)" }}>
                 {Math.round((usage.totalMessages / usage.limit) * 100)}% kullanıldı
               </p>
             </div>
-          </Card>
+          </SectionCard>
         )}
 
         {/* Firma Bilgileri */}
-        <Card icon={<Building2 className="w-5 h-5" />} title="Firma Bilgileri">
-          <Field label="Firma Adı" value={form.name} onChange={(v) => setForm({ ...form, name: v })} />
-          <Field label="Sektör" value={form.industry} onChange={(v) => setForm({ ...form, industry: v })} type="select" options={[
-            { value: "health", label: "Sağlık" },
-            { value: "real_estate", label: "Gayrimenkul" },
-            { value: "education", label: "Eğitim" },
-            { value: "ecommerce", label: "E-Ticaret" },
-            { value: "general", label: "Genel" },
-          ]} />
-          <Field label="Zaman Dilimi" value={form.timezone} onChange={(v) => setForm({ ...form, timezone: v })} type="select" options={[
-            { value: "Europe/Istanbul", label: "Türkiye (GMT+3)" },
-            { value: "Europe/Berlin", label: "Almanya (GMT+2)" },
-            { value: "Asia/Dubai", label: "Dubai (GMT+4)" },
-          ]} />
-        </Card>
+        <SectionCard>
+          <SectionHeader icon={Building2} title="Firma Bilgileri" />
+          <div className="space-y-4">
+            <Field label="Firma Adı" value={form.name} onChange={(v) => setForm({ ...form, name: v })} />
+            <Field label="Sektör" value={form.industry} onChange={(v) => setForm({ ...form, industry: v })} type="select" options={[
+              { value: "health", label: "Sağlık" },
+              { value: "real_estate", label: "Gayrimenkul" },
+              { value: "education", label: "Eğitim" },
+              { value: "ecommerce", label: "E-Ticaret" },
+              { value: "general", label: "Genel" },
+            ]} />
+            <Field label="Zaman Dilimi" value={form.timezone} onChange={(v) => setForm({ ...form, timezone: v })} type="select" options={[
+              { value: "Europe/Istanbul", label: "Türkiye (GMT+3)" },
+              { value: "Europe/Berlin", label: "Almanya (GMT+2)" },
+              { value: "Asia/Dubai", label: "Dubai (GMT+4)" },
+            ]} />
+          </div>
+        </SectionCard>
 
         {/* Hesap */}
-        <Card icon={<Shield className="w-5 h-5" />} title="Hesap">
-          <InfoRow label="Ad" value={user?.name || "—"} />
-          <InfoRow label="E-posta" value={user?.email || "—"} />
-          <InfoRow label="Rol" value={user?.role === "owner" ? "Sahip" : user?.role || "—"} />
-          <InfoRow label="Tenant Slug" value={tenant.slug} />
-        </Card>
+        <SectionCard>
+          <SectionHeader icon={Shield} title="Hesap" />
+          <div className="space-y-0">
+            <InfoRow label="Ad" value={user?.name || "—"} />
+            <InfoRow label="E-posta" value={user?.email || "—"} />
+            <InfoRow label="Rol" value={user?.role === "owner" ? "Sahip" : user?.role || "—"} />
+            <InfoRow label="Tenant Slug" value={tenant.slug} />
+          </div>
+        </SectionCard>
 
         {/* Şifre Değiştir */}
-        <Card icon={<KeyRound className="w-5 h-5" />} title="Şifre Değiştir">
-          <Field label="Mevcut Şifre" value={pwCurrent} onChange={setPwCurrent} type="password" />
-          <Field label="Yeni Şifre" value={pwNew} onChange={setPwNew} type="password" />
-          <Field label="Yeni Şifre (Tekrar)" value={pwConfirm} onChange={setPwConfirm} type="password" />
-          {pwMsg && <p className={`text-[13px] ${pwMsg.startsWith('✅') ? 'text-[--q-green]' : 'text-[--q-red]'}`}>{pwMsg}</p>}
-          <button
-            onClick={handlePasswordChange}
-            disabled={pwLoading || !pwCurrent || pwNew.length < 6}
-            className="px-5 py-2.5 bg-[#FF9500] hover:bg-[#E68A00] text-white text-[13px] font-semibold rounded-xl transition-all disabled:opacity-50"
-          >
-            {pwLoading ? "Değiştiriliyor..." : "Şifre Güncelle"}
-          </button>
-        </Card>
+        <SectionCard>
+          <SectionHeader icon={KeyRound} title="Şifre Değiştir" />
+          <div className="space-y-4">
+            <Field label="Mevcut Şifre" value={pwCurrent} onChange={setPwCurrent} type="password" />
+            <Field label="Yeni Şifre" value={pwNew} onChange={setPwNew} type="password" />
+            <Field label="Yeni Şifre (Tekrar)" value={pwConfirm} onChange={setPwConfirm} type="password" />
+            {pwMsg && <p className={`text-[13px] ${pwMsg.startsWith('✅') ? 'text-[--q-green]' : 'text-[--q-red]'}`}>{pwMsg}</p>}
+            <ActionButton
+              onClick={handlePasswordChange}
+              color="var(--q-orange)"
+              disabled={pwLoading || !pwCurrent || pwNew.length < 6}
+            >
+              {pwLoading ? "Değiştiriliyor..." : "Şifre Güncelle"}
+            </ActionButton>
+          </div>
+        </SectionCard>
 
-        {/* Save Button */}
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="w-full py-3 bg-[--q-blue] hover:bg-[#0066D6] text-white text-[15px] font-semibold rounded-xl transition-all disabled:opacity-50 flex items-center justify-center gap-2"
-        >
-          {saving ? (
-            <><Loader2 className="w-4 h-4 animate-spin" /> Kaydediliyor...</>
-          ) : saved ? (
-            <><CheckCircle className="w-4 h-4" /> Kaydedildi!</>
-          ) : (
-            <><Save className="w-4 h-4" /> Kaydet</>
-          )}
-        </button>
+        {/* Save */}
+        <SaveButton saving={saving} saved={saved} onClick={handleSave} />
       </div>
     </div>
   );
 }
 
-// Sub-components
-function Card({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) {
-  return (
-    <div className="bg-white rounded-2xl border shadow-sm overflow-hidden" style={{ borderColor: "var(--q-border-default)" }}>
-      <div className="px-5 py-4 flex items-center gap-3" style={{ borderBottom: "1px solid var(--q-border-default)" }}>
-        <span style={{ color: "var(--q-blue)" }}>{icon}</span>
-        <h2 className="text-[15px] font-semibold" style={{ color: "var(--q-text-primary)" }}>{title}</h2>
-      </div>
-      <div className="p-5 space-y-4">{children}</div>
-    </div>
-  );
-}
+// ---- Local sub-components (display-only, no governance equivalent needed) ----
 
 function Field({ label, value, onChange, type = "text", options }: { label: string; value: string; onChange: (v: string) => void; type?: string; options?: { value: string; label: string }[] }) {
   return (
     <div>
       <label className="block text-[12px] font-medium mb-1" style={{ color: "var(--q-text-secondary)" }}>{label}</label>
       {type === "select" && options ? (
-        <select value={value} onChange={(e) => onChange(e.target.value)} className="w-full px-3 py-2.5 text-[14px] border-0 rounded-xl outline-none focus:ring-2 focus:ring-[--q-blue]/30" style={{ backgroundColor: "var(--q-bg-secondary)" }}>
+        <select value={value} onChange={(e) => onChange(e.target.value)} className="w-full px-3 py-2.5 text-[14px] border-0 rounded-xl outline-none" style={{ backgroundColor: "var(--q-bg-secondary)" }}>
           {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
       ) : (
-        <input type={type} value={value} onChange={(e) => onChange(e.target.value)} className="w-full px-3 py-2.5 text-[14px] border-0 rounded-xl outline-none focus:ring-2 focus:ring-[--q-blue]/30" style={{ backgroundColor: "var(--q-bg-secondary)" }} />
+        <input type={type} value={value} onChange={(e) => onChange(e.target.value)} className="w-full px-3 py-2.5 text-[14px] border-0 rounded-xl outline-none" style={{ backgroundColor: "var(--q-bg-secondary)" }} />
       )}
     </div>
   );
