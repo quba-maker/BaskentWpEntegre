@@ -139,7 +139,7 @@ export function PromptGovernancePanel({
       {/* Editor Card */}
       <div className="bg-white rounded-2xl border border-[--q-border-default] shadow-sm flex-1 flex flex-col">
         {/* Editor Header */}
-        <div className="px-6 py-5 border-b border-[--q-border-default] flex items-center justify-between bg-[--q-bg-secondary] rounded-t-2xl">
+        <div className="px-6 py-5 border-b flex items-center justify-between rounded-t-2xl" style={{ borderColor: "var(--q-border-default)", backgroundColor: "var(--q-bg-secondary)" }}>
           <div className="flex items-center gap-4">
             <div 
               className="w-10 h-10 rounded-xl flex items-center justify-center shadow-sm"
@@ -150,7 +150,7 @@ export function PromptGovernancePanel({
             <div>
               <h3 className="text-[15px] font-bold text-[--q-text-primary] flex items-center gap-2">
                 {activeChannel.label} Yapılandırması
-                <span className="px-2 py-0.5 rounded text-[10px] uppercase tracking-wider font-bold bg-[--q-bg-primary] border border-[--q-border-strong] text-[--q-text-secondary]">
+                <span className="px-2 py-0.5 rounded text-[10px] uppercase tracking-wider font-bold border" style={{ backgroundColor: "var(--q-bg-primary)", borderColor: "var(--q-border-strong)", color: "var(--q-text-secondary)" }}>
                   MODÜLER PROMPT
                 </span>
               </h3>
@@ -166,7 +166,8 @@ export function PromptGovernancePanel({
           <div className="flex items-center gap-3">
             <button
               onClick={handleReset}
-              className="px-4 py-2 text-[13px] font-bold text-[--q-orange] bg-white border border-[--q-border-strong] rounded-xl hover:bg-[--q-orange-bg] hover:border-[--q-orange] transition-colors flex items-center gap-2 shadow-sm"
+              className="px-4 py-2 text-[13px] font-bold bg-white border rounded-xl transition-colors flex items-center gap-2 shadow-sm hover:opacity-80"
+              style={{ color: "var(--q-orange)", borderColor: "var(--q-border-strong)" }}
             >
               <RotateCcw className="w-4 h-4" />
               Varsayılana Dön
@@ -175,11 +176,10 @@ export function PromptGovernancePanel({
             <button
               onClick={() => onSave(activeTab)}
               disabled={saving === activeTab}
-              className={`px-5 py-2 text-[13px] font-bold rounded-xl transition-all flex items-center gap-2 shadow-sm ${
-                saved === activeTab
-                  ? "bg-[--q-green] text-white"
-                  : "bg-[--q-blue] text-white hover:bg-[--q-blue-hover]"
-              }`}
+              className="px-5 py-2 text-[13px] font-bold rounded-xl transition-all flex items-center gap-2 shadow-sm text-white disabled:opacity-60"
+              style={{ 
+                backgroundColor: saved === activeTab ? "var(--q-green)" : "var(--q-blue)" 
+              }}
             >
               {saving === activeTab ? (
                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
@@ -197,7 +197,7 @@ export function PromptGovernancePanel({
         <div className="flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-[--q-border-default] flex-1">
           
           {/* Identity & Role */}
-          <div className="flex-1 p-6 flex flex-col gap-3 hover:bg-[--q-bg-secondary] transition-colors duration-300">
+          <div className="flex-1 p-6 flex flex-col gap-3 transition-colors duration-300">
             <div className="flex items-center gap-2 text-[--q-blue] mb-2">
               <UserCircle className="w-5 h-5" />
               <h4 className="font-bold text-[14px]">Kimlik & Rol</h4>

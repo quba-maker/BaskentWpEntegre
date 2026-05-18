@@ -179,8 +179,8 @@ export function AIPipelinePanel() {
                                   await updateAIModuleConfig(mod.moduleId, { [key]: e.target.value });
                                   load();
                                 }}
-                                className="w-full mt-1 px-3 py-2 text-[13px] rounded-lg outline-none border border-[--q-border-default]"
-                                style={{ backgroundColor: "var(--q-bg-secondary)" }}
+                                className="w-full mt-1 px-3 py-2 text-[13px] rounded-lg outline-none border"
+                                style={{ backgroundColor: "var(--q-bg-secondary)", borderColor: "var(--q-border-default)" }}
                               >
                                 {schema.options.map((o: string) => (
                                   <option key={o} value={o}>{o}</option>
@@ -202,8 +202,8 @@ export function AIPipelinePanel() {
                                 onBlur={async e => {
                                   await updateAIModuleConfig(mod.moduleId, { [key]: e.target.value });
                                 }}
-                                className="w-full mt-1 px-3 py-2 text-[13px] rounded-lg outline-none resize-none h-20 border border-[--q-border-default]"
-                                style={{ backgroundColor: "var(--q-bg-secondary)" }}
+                                className="w-full mt-1 px-3 py-2 text-[13px] rounded-lg outline-none resize-none h-20 border"
+                                style={{ backgroundColor: "var(--q-bg-secondary)", borderColor: "var(--q-border-default)" }}
                                 placeholder={schema.default}
                               />
                             ) : (
@@ -214,8 +214,8 @@ export function AIPipelinePanel() {
                                   const val = schema.type === 'number' ? Number(e.target.value) : e.target.value;
                                   await updateAIModuleConfig(mod.moduleId, { [key]: val });
                                 }}
-                                className="w-full mt-1 px-3 py-2 text-[13px] rounded-lg outline-none border border-[--q-border-default]"
-                                style={{ backgroundColor: "var(--q-bg-secondary)" }}
+                                className="w-full mt-1 px-3 py-2 text-[13px] rounded-lg outline-none border"
+                                style={{ backgroundColor: "var(--q-bg-secondary)", borderColor: "var(--q-border-default)" }}
                               />
                             )}
                           </div>

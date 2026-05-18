@@ -31,18 +31,18 @@ export function BotTestPlayground({ activeChannel, currentPrompt, activeTab, onT
 
   return (
     <div className="mt-8 mb-8">
-      <h2 className="text-lg font-bold text-[--q-text-primary] mb-4 flex items-center gap-2">
-        <FlaskConical className="w-5 h-5 text-[--q-text-secondary]" />
+      <h2 className="text-lg font-bold mb-4 flex items-center gap-2" style={{ color: "var(--q-text-primary)" }}>
+        <FlaskConical className="w-5 h-5" style={{ color: "var(--q-text-secondary)" }} />
         Bot Test
       </h2>
-      <div className="bg-white rounded-2xl border border-[--q-border-default] shadow-sm p-5">
+      <div className="bg-white rounded-2xl border shadow-sm p-5" style={{ borderColor: "var(--q-border-default)" }}>
         {/* Active channel indicator */}
         <div className="flex items-center gap-2 mb-4">
           <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{backgroundColor: `${activeChannel.color}15`}}>
             <activeChannel.icon className="w-3 h-3" style={{color: activeChannel.color}} />
           </div>
-          <p className="text-xs text-[--q-text-secondary]">
-            <span className="font-bold text-[--q-text-primary]">{activeChannel.label}</span> prompt&apos;unu test ediyorsunuz. Yukarıdaki sekmelerden kanal değiştirin.
+          <p className="text-xs" style={{ color: "var(--q-text-secondary)" }}>
+            <span className="font-bold" style={{ color: "var(--q-text-primary)" }}>{activeChannel.label}</span> prompt&apos;unu test ediyorsunuz. Yukarıdaki sekmelerden kanal değiştirin.
           </p>
         </div>
         
@@ -52,7 +52,8 @@ export function BotTestPlayground({ activeChannel, currentPrompt, activeTab, onT
             onChange={e => setTestMsg(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') runTest(); }}
             placeholder="Test mesajı yazın... (örn: Bel fıtığım var)"
-            className="flex-1 px-4 py-2.5 text-sm bg-black/[0.03] border-0 rounded-xl outline-none placeholder:text-[--q-text-placeholder]"
+            className="flex-1 px-4 py-2.5 text-sm border-0 rounded-xl outline-none"
+            style={{ backgroundColor: "rgba(0,0,0,0.03)", color: "var(--q-text-primary)" }}
           />
           <button
             onClick={runTest}
@@ -65,14 +66,14 @@ export function BotTestPlayground({ activeChannel, currentPrompt, activeTab, onT
           </button>
         </div>
         {testReply && (
-          <div className="p-4 bg-[--q-bg-secondary] rounded-xl border border-[--q-border-default]">
+          <div className="p-4 rounded-xl border" style={{ backgroundColor: "var(--q-bg-secondary)", borderColor: "var(--q-border-default)" }}>
             <div className="flex items-center gap-2 mb-2">
-              <div className="w-5 h-5 rounded-full bg-gradient-to-br from-[--q-purple] to-[--q-blue] flex items-center justify-center">
+              <div className="w-5 h-5 rounded-full flex items-center justify-center" style={{ background: "linear-gradient(135deg, var(--q-purple), var(--q-blue))" }}>
                 <Bot className="w-3 h-3 text-white" />
               </div>
-              <p className="text-[11px] font-bold text-[--q-text-secondary]">Bot Yanıtı ({activeChannel.label})</p>
+              <p className="text-[11px] font-bold" style={{ color: "var(--q-text-secondary)" }}>Bot Yanıtı ({activeChannel.label})</p>
             </div>
-            <p className="text-sm text-[--q-text-primary] leading-relaxed whitespace-pre-wrap">{testReply}</p>
+            <p className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: "var(--q-text-primary)" }}>{testReply}</p>
           </div>
         )}
       </div>

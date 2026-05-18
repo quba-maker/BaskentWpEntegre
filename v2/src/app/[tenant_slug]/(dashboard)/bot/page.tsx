@@ -284,11 +284,11 @@ export default function BotManagementPage() {
 
       {/* 4. BOT AYARLARI (Konsolide — tek panel) */}
       <div className="mt-8">
-        <h2 className="text-lg font-bold text-[--q-text-primary] mb-4 flex items-center gap-2">
-          <Settings2 className="w-5 h-5 text-[--q-text-secondary]" />
+        <h2 className="text-lg font-bold mb-4 flex items-center gap-2" style={{ color: "var(--q-text-primary)" }}>
+          <Settings2 className="w-5 h-5" style={{ color: "var(--q-text-secondary)" }} />
           Bot Yapılandırması
         </h2>
-        <div className="bg-white rounded-2xl border border-[--q-border-default] shadow-sm divide-y divide-black/5">
+        <div className="bg-white rounded-2xl border shadow-sm divide-y divide-black/5" style={{ borderColor: "var(--q-border-default)" }}>
           {/* Auto Greeting */}
           <SettingRow icon={Zap} iconColor="var(--q-orange)" title="Otonom Karşılama" description="Yeni lead geldiğinde otomatik WhatsApp mesajı gönder">
             <ToggleSwitch active={botConfig.auto_greeting === "true"} onToggle={() => handleBotConfigChange("auto_greeting", botConfig.auto_greeting === "true" ? "false" : "true")} />
@@ -296,7 +296,7 @@ export default function BotManagementPage() {
 
           {/* Greeting Language */}
           <SettingRow icon={Globe} iconColor="var(--q-blue)" title="Karşılama Dili" description="Otomatik karşılama mesajının dili">
-            <select value={botConfig.greeting_language} onChange={e => handleBotConfigChange("greeting_language", e.target.value)} className="px-3 py-1.5 text-sm font-semibold text-[--q-text-primary] bg-black/[0.04] border-0 rounded-lg outline-none cursor-pointer">
+            <select value={botConfig.greeting_language} onChange={e => handleBotConfigChange("greeting_language", e.target.value)} className="px-3 py-1.5 text-sm font-semibold border-0 rounded-lg outline-none cursor-pointer" style={{ color: "var(--q-text-primary)", backgroundColor: "rgba(0,0,0,0.04)" }}>
               <option value="auto">Otomatik</option>
               <option value="tr">Türkçe</option>
               <option value="en">İngilizce</option>
@@ -305,7 +305,7 @@ export default function BotManagementPage() {
 
           {/* Max Messages */}
           <SettingRow icon={MessageSquare} iconColor="var(--q-purple)" title="Maksimum Bot Mesajı" description="Bot kaç mesaj sonra insana devretsin">
-            <select value={botConfig.max_messages} onChange={e => handleBotConfigChange("max_messages", e.target.value)} className="px-3 py-1.5 text-sm font-semibold text-[--q-text-primary] bg-black/[0.04] border-0 rounded-lg outline-none cursor-pointer">
+            <select value={botConfig.max_messages} onChange={e => handleBotConfigChange("max_messages", e.target.value)} className="px-3 py-1.5 text-sm font-semibold border-0 rounded-lg outline-none cursor-pointer" style={{ color: "var(--q-text-primary)", backgroundColor: "rgba(0,0,0,0.04)" }}>
               <option value="5">5</option>
               <option value="8">8</option>
               <option value="12">12</option>
@@ -316,7 +316,7 @@ export default function BotManagementPage() {
 
           {/* Working Hours */}
           <SettingRow icon={Clock} iconColor="var(--q-green)" title="Çalışma Saatleri" description="Botun aktif olacağı zaman dilimi">
-            <select value={botConfig.working_hours} onChange={e => handleBotConfigChange("working_hours", e.target.value)} className="px-3 py-1.5 text-sm font-semibold text-[--q-text-primary] bg-black/[0.04] border-0 rounded-lg outline-none cursor-pointer">
+            <select value={botConfig.working_hours} onChange={e => handleBotConfigChange("working_hours", e.target.value)} className="px-3 py-1.5 text-sm font-semibold border-0 rounded-lg outline-none cursor-pointer" style={{ color: "var(--q-text-primary)", backgroundColor: "rgba(0,0,0,0.04)" }}>
               <option value="24/7">7/24 Aktif</option>
               <option value="business">Mesai (09-18)</option>
               <option value="after_hours">Mesai Dışı (18-09)</option>
@@ -334,11 +334,12 @@ export default function BotManagementPage() {
                 <button
                   key={opt.value}
                   onClick={() => handleBotConfigChange("aggression_level", opt.value)}
-                  className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${
-                    botConfig.aggression_level === opt.value
-                      ? "bg-white text-[--q-text-primary] shadow-sm"
-                      : "text-[--q-text-secondary] hover:text-[--q-text-primary]"
-                  }`}
+                  className="px-3 py-1.5 text-xs font-bold rounded-md transition-all"
+                  style={{
+                    backgroundColor: botConfig.aggression_level === opt.value ? "white" : "transparent",
+                    color: botConfig.aggression_level === opt.value ? "var(--q-text-primary)" : "var(--q-text-secondary)",
+                    boxShadow: botConfig.aggression_level === opt.value ? "0 1px 3px rgba(0,0,0,0.1)" : "none"
+                  }}
                 >
                   {opt.label}
                 </button>
@@ -355,12 +356,11 @@ export default function BotManagementPage() {
                   <button
                     key={m.id}
                     onClick={() => handleBotConfigChange("ai_model", m.id)}
-                    className={`px-3 py-1.5 text-xs font-bold rounded-lg border transition-all ${
-                      isActive
-                        ? "text-white shadow-sm"
-                        : "border-[--q-border-default] text-[--q-text-secondary] hover:border-black/20 bg-white"
-                    }`}
-                    style={isActive ? { backgroundColor: m.color, borderColor: m.color } : undefined}
+                    className="px-3 py-1.5 text-xs font-bold rounded-lg border transition-all"
+                    style={isActive 
+                      ? { backgroundColor: m.color, borderColor: m.color, color: "white", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" } 
+                      : { borderColor: "var(--q-border-default)", color: "var(--q-text-secondary)", backgroundColor: "white" }
+                    }
                   >
                     {isActive && <Check className="w-3 h-3 inline mr-1 -mt-0.5" />}
                     {m.name}
