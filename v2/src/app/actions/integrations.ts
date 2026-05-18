@@ -83,6 +83,69 @@ export async function fetchGoogleSheetsTabs(spreadsheetId: string) {
   });
 }
 
+
+export async function getMetaIntegrationConfig() {
+  return withActionGuard(
+    { actionName: 'getMetaIntegrationConfig' },
+    async (ctx) => {
+      const tenants = await ctx.db.executeSafe(sql`
+        SELECT meta_app_id, meta_app_secret, whatsapp_phone_id, whatsapp_business_id, 
+               meta_page_token, meta_page_id, instagram_id
+        FROM tenants WHERE id = ${ctx.tenantId}
+      `);
+      
+      if (tenants.length === 0) throw new Error("Tenant bulunamadı");
+      
+      const config = { ...tenants[0] };
+      // Mask tokens for security
+      if (config.meta_app_secret) config.meta_app_secret = '••••••••' + config.meta_app_secret.slice(-4);
+      if (config.meta_page_token) config.meta_page_token = '••••••••' + config.meta_page_token.slice(-4);
+      
+      return { config };
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error };
+    return { success: true, config: res.data?.config };
+  });
+}
+
+export async function saveMetaIntegrationConfig(updates: any) {
+  return withActionGuard(
+    { 
+      actionName: 'saveMetaIntegrationConfig',
+      roles: ['owner', 'admin']
+    },
+    async (ctx) => {
+      // Don't overwrite with masked string
+      const appId = typeof updates.meta_app_id === 'string' && updates.meta_app_id.includes('••••') ? undefined : updates.meta_app_id;
+      const appSecret = typeof updates.meta_app_secret === 'string' && updates.meta_app_secret.includes('••••') ? undefined : updates.meta_app_secret;
+      const wpPhoneId = typeof updates.whatsapp_phone_id === 'string' && updates.whatsapp_phone_id.includes('••••') ? undefined : updates.whatsapp_phone_id;
+      const wpBizId = typeof updates.whatsapp_business_id === 'string' && updates.whatsapp_business_id.includes('••••') ? undefined : updates.whatsapp_business_id;
+      const token = typeof updates.meta_page_token === 'string' && updates.meta_page_token.includes('••••') ? undefined : updates.meta_page_token;
+      const pageId = typeof updates.meta_page_id === 'string' && updates.meta_page_id.includes('••••') ? undefined : updates.meta_page_id;
+      const igId = typeof updates.instagram_id === 'string' && updates.instagram_id.includes('••••') ? undefined : updates.instagram_id;
+
+      await ctx.db.executeSafe(sql`
+        UPDATE tenants SET 
+          meta_app_id = COALESCE(${appId !== undefined ? appId : null}, meta_app_id),
+          meta_app_secret = COALESCE(${appSecret !== undefined ? appSecret : null}, meta_app_secret),
+          whatsapp_phone_id = COALESCE(${wpPhoneId !== undefined ? wpPhoneId : null}, whatsapp_phone_id),
+          whatsapp_business_id = COALESCE(${wpBizId !== undefined ? wpBizId : null}, whatsapp_business_id),
+          meta_page_token = COALESCE(${token !== undefined ? token : null}, meta_page_token),
+          meta_page_id = COALESCE(${pageId !== undefined ? pageId : null}, meta_page_id),
+          instagram_id = COALESCE(${igId !== undefined ? igId : null}, instagram_id),
+          updated_at = NOW() 
+        WHERE id = ${ctx.tenantId}
+      `);
+      
+      return { success: true };
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error };
+    return { success: true };
+  });
+}
+
 // ==========================================
 // ENTEGRASYON HEALTH-CHECK
 // ==========================================
