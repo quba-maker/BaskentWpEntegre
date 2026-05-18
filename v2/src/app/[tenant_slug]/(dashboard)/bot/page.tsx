@@ -1,10 +1,10 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Bot, Cpu, MessageSquare, Globe, Hash } from "lucide-react";
+import { Bot, MessageSquare, Globe, Hash } from "lucide-react";
 import { getBotSettings, saveBotSetting, getDefaultPrompts, getBotStats, getModelUsage, getRecentBotConversations, testBotPrompt } from "@/app/actions/bot";
 import { PageLoader } from "@/components/ui/shared-states";
-import { PageShell, PageHeader, ActionButton } from "@/components/governance";
+import { PageShell, PageHeader } from "@/components/governance";
 import {
   BotPerformancePanel,
   ChannelStatusPanel,
@@ -16,6 +16,7 @@ import {
   ModerationPanel,
   RecentConversationsPanel,
   BotTestPlayground,
+  AIPipelinePanel,
   type BotChannel,
 } from "./_components";
 
@@ -53,9 +54,8 @@ const channels: BotChannel[] = [
 ];
 
 // ==========================================
-// PAGE ORCHESTRATOR
-// Role: State ownership + data loading + action delegation
-// All UI rendering is delegated to authority panels.
+// PAGE ORCHESTRATOR — UNIFIED BOT MANAGEMENT
+// Single source of truth for all bot + AI pipeline configuration
 // ==========================================
 export default function BotManagementPage() {
   // ---- Core State ----
@@ -232,27 +232,23 @@ export default function BotManagementPage() {
   // ---- Loading Gate ----
   if (isLoading) return <PageLoader />;
 
-  // ---- Render: Pure delegation to authority panels ----
+  // ---- Render: Unified single-page bot management ----
   return (
     <PageShell>
       <PageHeader
         icon={Bot}
         title="Bot Yönetimi"
-        subtitle="AI asistanlarınızı yapılandırın ve yönetin"
-      >
-        <ActionButton href="bot/modules" color="var(--q-purple-alt)">
-          <Cpu className="w-4 h-4" /> AI Modülleri
-        </ActionButton>
-      </PageHeader>
+        subtitle="AI asistanlarınızı tek noktadan yapılandırın ve yönetin"
+      />
 
-      {/* === AUTHORITY PANELS === */}
-
+      {/* === 1. PERFORMANS === */}
       <BotPerformancePanel
         stats={stats}
         statsPeriod={statsPeriod}
         onPeriodChange={setStatsPeriod}
       />
 
+      {/* === 2. KANAL YÖNETİMİ === */}
       <ChannelStatusPanel
         channels={channels}
         isChannelActive={isChannelActive}
@@ -260,6 +256,7 @@ export default function BotManagementPage() {
         onSelectChannel={setActiveTab}
       />
 
+      {/* === 3. PROMPT YÖNETİMİ === */}
       <PromptGovernancePanel
         channels={channels}
         activeTab={activeTab}
@@ -273,10 +270,46 @@ export default function BotManagementPage() {
         onResetToDefault={resetToDefault}
       />
 
+      {/* === 4. AI PIPELINE MODÜLLERI (eskiden ayrı sayfa) === */}
+      <AIPipelinePanel />
 
+      {/* === 5. BOT DAVRANIŞ AYARLARI === */}
+      <AIBehaviorPanel
+        botConfig={botConfig}
+        onConfigChange={handleBotConfigChange}
+      />
 
+      {/* === 6. AI MODEL SEÇİMİ === */}
+      <AIModelControlPanel
+        currentModel={settings['ai_model']?.value || 'gemini-2.5-flash'}
+        onModelChange={handleModelChange}
+      />
+
+      {/* === 7. BİLGİ BANKASI === */}
+      <KnowledgeBasePanel
+        knowledgePrices={knowledgePrices}
+        knowledgeRules={knowledgeRules}
+        onPricesChange={setKnowledgePrices}
+        onRulesChange={setKnowledgeRules}
+        saving={savingKnowledge}
+        saved={saved === 'knowledge'}
+        onSave={saveKnowledgeBase}
+      />
+
+      {/* === 8. YASAKLI KELİMELER === */}
+      <ModerationPanel
+        bannedWords={bannedWords}
+        onAddWord={handleAddBannedWord}
+        onRemoveWord={handleRemoveBannedWord}
+      />
+
+      {/* === 9. AI KULLANIM & MALİYET === */}
+      <AIUsageCostPanel modelUsage={modelUsage} />
+
+      {/* === 10. SON KONUŞMALAR === */}
       <RecentConversationsPanel conversations={recentConvs} />
 
+      {/* === 11. TEST PLAYGROUND === */}
       <BotTestPlayground
         activeChannel={activeChannel}
         currentPrompt={prompts[activeTab] || ""}

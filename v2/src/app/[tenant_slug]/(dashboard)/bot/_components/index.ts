@@ -13,4 +13,5 @@ export { AIUsageCostPanel } from "./ai-usage-cost-panel";
 export { ModerationPanel } from "./moderation-panel";
 export { RecentConversationsPanel } from "./recent-conversations-panel";
 export { BotTestPlayground } from "./bot-test-playground";
+export { AIPipelinePanel } from "./ai-pipeline-panel";
 export { type BotChannel } from "./shared";
