@@ -1,16 +1,13 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import {
-  Bot, MessageSquare, Globe, Hash, Settings2, Zap, Clock,
-  Shield, Cpu, Check
-} from "lucide-react";
+import { Bot, MessageSquare, Globe, Hash } from "lucide-react";
 import {
   getBotSettings, saveBotSetting, getDefaultPrompts,
   getBotStats, getModelUsage, getRecentBotConversations, testBotPrompt
 } from "@/app/actions/bot";
 import { PageLoader } from "@/components/ui/shared-states";
-import { PageShell, PageHeader, ToggleSwitch } from "@/components/governance";
+import { PageShell, PageHeader } from "@/components/governance";
 import {
   BotPerformancePanel,
   ChannelStatusPanel,
