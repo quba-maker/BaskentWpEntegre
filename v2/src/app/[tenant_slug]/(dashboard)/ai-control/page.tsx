@@ -8,7 +8,13 @@ import { AiControlTower } from "@/components/features/ai-control/AiControlTower"
  * Admin/Owner only.
  */
 export default async function AiControlPage() {
-  const session = await getSession();
+  let session;
+  
+  try {
+    session = await getSession();
+  } catch {
+    redirect('/');
+  }
   
   if (!session || !['admin', 'owner', 'platform_admin'].includes(session.role)) {
     redirect(`/${session?.tenantSlug || ''}`);
