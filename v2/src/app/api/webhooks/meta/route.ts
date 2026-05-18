@@ -16,6 +16,7 @@ const log = logger.withContext({ module: 'MetaWebhook' });
 const DATABASE_URL = process.env.DATABASE_URL || "postgres://dummy:dummy@dummy.com/dummy";
 export const maxDuration = 60; // Max duration for background ops
 
+
 // GET — Meta Webhook doğrulama
 export async function GET(req: NextRequest) {
   const mode = req.nextUrl.searchParams.get("hub.mode");

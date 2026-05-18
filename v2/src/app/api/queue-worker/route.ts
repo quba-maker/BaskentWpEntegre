@@ -8,6 +8,8 @@ const receiver = new Receiver({
   nextSigningKey: process.env.QSTASH_NEXT_SIGNING_KEY || "",
 });
 
+export const maxDuration = 60; // Allow 60s for AI completion to prevent Vercel 504 timeouts
+
 export async function POST(req: Request) {
   const log = logger.withContext({ module: 'QueueWorker' });
   let body: any;
