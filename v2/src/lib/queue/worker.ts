@@ -220,7 +220,7 @@ export class QueueWorkerEngine {
             const fullName = [unifiedContext.profile.first_name, unifiedContext.profile.last_name].filter(Boolean).join(' ').trim();
             if (fullName) {
               systemPromptText += `- İsim: ${fullName}\n`;
-              systemPromptText += `>> DİKKAT: Hastaya mesajlarında adı ile hitap et (Örn: Merhaba ${unifiedContext.profile.first_name} Bey/Hanım).\n`;
+              systemPromptText += `>> DİKKAT: Müşteriye/Kullanıcıya mesajlarında adı ile hitap et (Örn: Merhaba ${unifiedContext.profile.first_name} Bey/Hanım).\n`;
             } else {
               systemPromptText += `- İsim: Bilinmiyor\n`;
             }
@@ -230,7 +230,7 @@ export class QueueWorkerEngine {
               ? JSON.stringify(unifiedContext.latestForm.data, null, 2) 
               : unifiedContext.latestForm.data;
             systemPromptText += `- Doldurduğu Form: ${unifiedContext.latestForm.name}\n- Form Detayı: ${formDataStr}\n`;
-            systemPromptText += `>> DİKKAT: Hasta formu doldurmuş. Formda ilgilendiği tedavi/bölüm yazıyorsa ASLA "hangi konuda destek almak istersiniz" diye sorma, doğrudan konuya gir. Yalnızca formda şikayeti belli değilse sor.\n`;
+            systemPromptText += `>> DİKKAT: Müşteri bir form doldurmuş. Formda ilgilendiği ürün/hizmet/konu yazıyorsa ASLA "hangi konuda destek almak istersiniz" diye sorma, doğrudan konuya gir. Yalnızca formda tam olarak ne istediği belli değilse sor.\n`;
           }
           if (unifiedContext.memory) {
             systemPromptText += `- Önceki Görüşme Özeti: ${unifiedContext.memory.summary}\n`;
