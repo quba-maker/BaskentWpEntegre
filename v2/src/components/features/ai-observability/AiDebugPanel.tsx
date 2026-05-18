@@ -119,16 +119,25 @@ export function AiDebugPanel() {
   const [togglingTool, setTogglingTool] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([
-      getAiDebugData(),
-      getBrainVersions(),
-      getToolPermissions(),
-    ]).then(([d, v, t]) => {
-      setData(d);
-      setVersions(v);
-      setTools(t);
+    async function loadDebugData() {
+      try {
+        const d = await getAiDebugData();
+        setData(d);
+      } catch { setData(null); }
+
+      try {
+        const v = await getBrainVersions();
+        setVersions(Array.isArray(v) ? v : []);
+      } catch { setVersions([]); }
+
+      try {
+        const t = await getToolPermissions();
+        setTools(Array.isArray(t) ? t : []);
+      } catch { setTools([]); }
+
       setLoading(false);
-    }).catch(() => setLoading(false));
+    }
+    loadDebugData();
   }, []);
 
   const handleRollback = async (versionNumber: number) => {
@@ -181,11 +190,11 @@ export function AiDebugPanel() {
 
       {/* Health Cards Row */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <HealthCard label="Başarı Oranı" value={`${data.health.totalEvents > 0 ? Math.round(((data.health.totalEvents - data.health.errorCount) / data.health.totalEvents) * 100) : 100}`} suffix="%" icon={Activity} color="var(--q-green)" />
-        <HealthCard label="Ort. Yanıt" value={formatMs(data.performance.avgResponseMs)} icon={Timer} color="var(--q-blue)" />
-        <HealthCard label="Toplam Çağrı" value={data.performance.totalCalls} icon={Zap} color="var(--q-orange)" />
-        <HealthCard label="Yavaş Çağrı" value={data.performance.slowCalls} icon={AlertTriangle} color="var(--q-red)" alert={data.performance.slowCalls > 3} />
-        <HealthCard label="Hata" value={data.health.errorCount} icon={X} color="var(--q-red)" alert={data.health.errorCount > 0} />
+        <HealthCard label="Başarı Oranı" value={`${data.health?.totalEvents > 0 ? Math.round(((data.health.totalEvents - (data.health.errorCount || 0)) / data.health.totalEvents) * 100) : 100}`} suffix="%" icon={Activity} color="var(--q-green)" />
+        <HealthCard label="Ort. Yanıt" value={formatMs(data.performance?.avgResponseMs || 0)} icon={Timer} color="var(--q-blue)" />
+        <HealthCard label="Toplam Çağrı" value={data.performance?.totalCalls || 0} icon={Zap} color="var(--q-orange)" />
+        <HealthCard label="Yavaş Çağrı" value={data.performance?.slowCalls || 0} icon={AlertTriangle} color="var(--q-red)" alert={(data.performance?.slowCalls || 0) > 3} />
+        <HealthCard label="Hata" value={data.health?.errorCount || 0} icon={X} color="var(--q-red)" alert={(data.health?.errorCount || 0) > 0} />
       </div>
 
       {/* System Prompt Viewer */}
@@ -343,7 +352,7 @@ export function AiDebugPanel() {
                   {v.change_summary || `Versiyon ${v.version_number}`}
                 </span>
                 <span className="text-[9px]" style={{ color: 'var(--q-text-secondary)' }}>
-                  {v.changed_by} · {formatDate(v.created_at)} · {v.prompt_hash?.substring(0, 8)}
+                  {v.changed_by} · {formatDate(v.created_at)} · {String(v.prompt_hash || '').substring(0, 8)}
                 </span>
               </div>
               {v.is_active ? (
