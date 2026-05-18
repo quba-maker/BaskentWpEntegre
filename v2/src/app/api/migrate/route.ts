@@ -126,6 +126,7 @@ export async function GET() {
         tenant_id UUID NOT NULL,
         version_number INTEGER NOT NULL,
         system_prompt TEXT,
+        prompt_key TEXT DEFAULT 'system_prompt_whatsapp',
         knowledge_snapshot JSONB,
         changed_by TEXT DEFAULT 'system',
         change_summary TEXT,
@@ -134,6 +135,19 @@ export async function GET() {
         created_at TIMESTAMPTZ DEFAULT NOW(),
         UNIQUE(tenant_id, version_number)
       )
+    `;
+    // Add prompt_key column if table already exists without it
+    await sql`ALTER TABLE brain_versions ADD COLUMN IF NOT EXISTS prompt_key TEXT DEFAULT 'system_prompt_whatsapp'`;
+    // Backfill: extract prompt_key from change_summary for existing rows
+    await sql`
+      UPDATE brain_versions 
+      SET prompt_key = 
+        CASE 
+          WHEN change_summary ILIKE '%system_prompt_tr%' THEN 'system_prompt_tr'
+          WHEN change_summary ILIKE '%system_prompt_foreign%' THEN 'system_prompt_foreign'
+          ELSE 'system_prompt_whatsapp'
+        END
+      WHERE prompt_key IS NULL OR prompt_key = 'system_prompt_whatsapp'
     `;
     await sql`CREATE INDEX IF NOT EXISTS idx_brain_versions_tenant ON brain_versions(tenant_id, version_number DESC)`;
     results.push('brain_versions: OK');

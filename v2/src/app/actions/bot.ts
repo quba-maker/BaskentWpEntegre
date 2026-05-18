@@ -93,6 +93,7 @@ export async function saveBotSetting(key: string, value: string) {
           await BrainVersionService.saveVersion({
             tenantId: ctx.tenantId,
             systemPrompt: value,
+            promptKey: key,
             changedBy: ctx.email || 'admin',
             changeSummary: `${key} güncellendi`,
           });
