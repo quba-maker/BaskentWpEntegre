@@ -10,6 +10,9 @@ export interface AuditLogData {
   validationPassed: boolean;
   executionMode: 'sandbox' | 'production';
   executionDurationMs?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  costUsd?: number;
   aiConfidence?: number;
   reasoningSummary?: string;
   resultSummary?: any;
@@ -47,11 +50,13 @@ export class AIAuditEngine {
             INSERT INTO ai_audit_logs (
               tenant_id, customer_id, conversation_id, tool_name, tool_arguments, 
               validation_passed, execution_mode, execution_duration_ms, 
+              input_tokens, output_tokens, cost_usd,
               ai_confidence, reasoning_summary, result_summary, error_message
             ) VALUES (
               ${data.tenantId}, ${data.customerId || null}, ${data.conversationId || null}, 
               ${data.toolName}, ${JSON.stringify(data.toolArguments)}::jsonb, 
               ${data.validationPassed}, ${data.executionMode}, ${data.executionDurationMs || null}, 
+              ${data.inputTokens || null}, ${data.outputTokens || null}, ${data.costUsd || null},
               ${data.aiConfidence || null}, ${data.reasoningSummary || null}, 
               ${data.resultSummary ? JSON.stringify(data.resultSummary) : null}::jsonb, ${data.errorMessage || null}
             )

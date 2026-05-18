@@ -191,6 +191,9 @@ CREATE TABLE IF NOT EXISTS ai_audit_logs (
   validation_passed BOOLEAN DEFAULT true,
   execution_mode TEXT DEFAULT 'production', -- 'sandbox' or 'production'
   execution_duration_ms INT,
+  input_tokens INT,
+  output_tokens INT,
+  cost_usd NUMERIC(10,6),
   ai_confidence NUMERIC(3,2),
   reasoning_summary TEXT,
   result_summary JSONB,
