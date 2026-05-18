@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import useSWR from "swr";
-import { Brain, RotateCcw, Eye, ChevronDown, ChevronUp, CheckCircle2, Hash, User, Clock } from "lucide-react";
+import { Brain, RotateCcw, Eye, ChevronUp, CheckCircle2, Hash, User, Clock } from "lucide-react";
 import { getBrainVersionHistory, getBrainVersionFull, rollbackBrain } from "@/app/actions/ai-control";
 
 export function PromptVersionManager() {
@@ -10,7 +10,6 @@ export function PromptVersionManager() {
   const [expandedVersion, setExpandedVersion] = useState<number | null>(null);
   const [fullPrompt, setFullPrompt] = useState<string | null>(null);
   const [loadingRollback, setLoadingRollback] = useState(false);
-  const [diffView, setDiffView] = useState(false);
 
   const handleViewFull = async (versionNumber: number) => {
     if (expandedVersion === versionNumber) {
@@ -24,14 +23,14 @@ export function PromptVersionManager() {
   };
 
   const handleRollback = async (versionNumber: number) => {
-    if (!confirm(`Version ${versionNumber}'ye geri dönülecek. Emin misiniz?`)) return;
+    if (!confirm(`v${versionNumber} sürümüne geri dönülecek. Emin misiniz?`)) return;
     setLoadingRollback(true);
     const result = await rollbackBrain(versionNumber);
     setLoadingRollback(false);
     if (result.success) {
       mutate();
     } else {
-      alert(result.error || 'Rollback failed');
+      alert(result.error || 'Geri alma başarısız');
     }
   };
 
@@ -41,12 +40,17 @@ export function PromptVersionManager() {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Brain className="w-5 h-5" style={{ color: 'var(--q-purple-alt)' }} />
-          <h3 className="text-base font-bold" style={{ color: 'var(--q-text-primary)' }}>Prompt Version History</h3>
+          <h3 className="text-base font-bold" style={{ color: 'var(--q-text-primary)' }}>Prompt Geçmişi</h3>
         </div>
         <span className="text-xs px-2.5 py-1 rounded-full font-medium" 
               style={{ background: 'var(--q-bg-secondary)', color: 'var(--q-text-secondary)' }}>
-          {versions?.length || 0} versions
+          {versions?.length || 0} versiyon
         </span>
+      </div>
+
+      {/* Info Box */}
+      <div className="p-3 rounded-xl text-[12px]" style={{ background: 'color-mix(in srgb, var(--q-blue) 5%, transparent)', border: '1px solid color-mix(in srgb, var(--q-blue) 15%, var(--q-border-default))', color: 'var(--q-text-secondary)' }}>
+        💡 Bot Yönetimi sayfasından sistem promptunu her kaydettiğinizde otomatik olarak bir versiyon oluşturulur. Buradan eski sürümlere geri dönebilirsiniz.
       </div>
 
       {/* Version List */}
@@ -54,8 +58,11 @@ export function PromptVersionManager() {
         {(!versions || versions.length === 0) && (
           <div className="p-8 text-center rounded-xl" style={{ background: 'var(--q-bg-primary)', border: '1px solid var(--q-border-default)' }}>
             <Brain className="w-8 h-8 mx-auto mb-2 opacity-20" />
-            <p className="text-sm" style={{ color: 'var(--q-text-secondary)' }}>
-              No prompt versions yet. Versions are created when the system prompt is saved.
+            <p className="text-sm font-medium" style={{ color: 'var(--q-text-primary)' }}>
+              Henüz prompt versiyonu yok
+            </p>
+            <p className="text-xs mt-1" style={{ color: 'var(--q-text-secondary)' }}>
+              Bot Yönetimi sayfasından sistem promptunu kaydettiğinizde burada versiyonlar görünecek.
             </p>
           </div>
         )}
@@ -89,7 +96,7 @@ export function PromptVersionManager() {
                         <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full"
                               style={{ background: 'color-mix(in srgb, var(--q-green) 12%, transparent)', color: 'var(--q-green)' }}>
                           <CheckCircle2 className="w-2.5 h-2.5 inline mr-0.5" />
-                          Active
+                          AKTİF
                         </span>
                       )}
                     </div>
@@ -104,7 +111,7 @@ export function PromptVersionManager() {
                   <button 
                     onClick={() => handleViewFull(v.version_number)}
                     className="p-2 rounded-lg hover:bg-black/[0.04] transition-colors cursor-pointer"
-                    title="View full prompt"
+                    title="Promptu görüntüle"
                   >
                     {isExpanded ? <ChevronUp className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
@@ -114,10 +121,10 @@ export function PromptVersionManager() {
                       disabled={loadingRollback}
                       className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors cursor-pointer disabled:opacity-50"
                       style={{ background: 'color-mix(in srgb, var(--q-orange) 8%, transparent)', color: 'var(--q-orange)' }}
-                      title={`Rollback to v${v.version_number}`}
+                      title={`v${v.version_number} sürümüne geri dön`}
                     >
                       <RotateCcw className="w-3 h-3" />
-                      Rollback
+                      Geri Al
                     </button>
                   )}
                 </div>
@@ -127,7 +134,7 @@ export function PromptVersionManager() {
               {v.change_summary && (
                 <div className="px-4 pb-2">
                   <p className="text-[12px] italic" style={{ color: 'var(--q-text-secondary)' }}>
-                    "{v.change_summary}"
+                    &quot;{v.change_summary}&quot;
                   </p>
                 </div>
               )}
@@ -148,7 +155,7 @@ export function PromptVersionManager() {
                      style={{ background: 'var(--q-bg-secondary)', border: '1px solid var(--q-border-default)' }}>
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--q-text-secondary)' }}>
-                      Full System Prompt — v{v.version_number}
+                      Tam Sistem Promptu — v{v.version_number}
                     </span>
                     <span className="text-[10px] font-mono" style={{ color: 'var(--q-text-secondary)' }}>
                       hash: {v.prompt_hash?.substring(0, 12)}

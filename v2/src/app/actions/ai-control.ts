@@ -270,7 +270,7 @@ export async function runSandboxTest(params: {
     `;
     
     if (!botSettings[0]?.system_prompt) {
-      return { success: false, error: 'No system prompt configured' };
+      return { success: false, error: 'Sistem promptu yapılandırılmamış. Önce Bot Yönetimi sayfasından prompt kaydedin.' };
     }
 
     // Build sandbox context

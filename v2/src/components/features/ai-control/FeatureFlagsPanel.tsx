@@ -6,12 +6,12 @@ import { Flag, ToggleLeft, ToggleRight, Clock, User } from "lucide-react";
 import { getFeatureFlags, toggleFeatureFlag } from "@/app/actions/ai-control";
 
 const FLAG_DESCRIPTIONS: Record<string, string> = {
-  'ai_memory_enabled': 'AI conversation summarization and memory persistence across sessions.',
-  'tool_calling_enabled': 'Allow AI to execute tools (CRM lookups, calendar scheduling, etc.)',
-  'live_debug_enabled': 'Show live debugging panel for real-time AI pipeline monitoring.',
-  'auto_crm_sync': 'Automatically extract and sync CRM data from conversations.',
-  'autonomous_mode': 'Full autonomous AI mode — no human fallback required.',
-  'ai_sandbox_enabled': 'Enable AI Sandbox Lab for prompt testing without live impact.',
+  'ai_memory_enabled': 'AI konuşma özetleme ve oturumlar arası hafıza tutma özelliği.',
+  'tool_calling_enabled': 'AI\'ın araçları kullanmasına izin ver (CRM arama, takvim planlama vb.)',
+  'live_debug_enabled': 'Gerçek zamanlı AI pipeline izleme için debug panelini göster.',
+  'auto_crm_sync': 'Konuşmalardan CRM verilerini otomatik çıkar ve senkronize et.',
+  'autonomous_mode': 'Tam otonom AI modu — insan müdahalesi gerekmez.',
+  'ai_sandbox_enabled': 'Canlı sistemi etkilemeden prompt test edebilme özelliği.',
 };
 
 export function FeatureFlagsPanel() {
@@ -33,11 +33,11 @@ export function FeatureFlagsPanel() {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Flag className="w-5 h-5" style={{ color: 'var(--q-blue)' }} />
-          <h3 className="text-base font-bold" style={{ color: 'var(--q-text-primary)' }}>Feature Flags</h3>
+          <h3 className="text-base font-bold" style={{ color: 'var(--q-text-primary)' }}>Özellik Anahtarları</h3>
         </div>
         <span className="text-[10px] font-medium px-2.5 py-1 rounded-full"
               style={{ background: 'var(--q-bg-secondary)', color: 'var(--q-text-secondary)' }}>
-          Tenant-Level Control
+          Kiracı Bazlı Kontrol
         </span>
       </div>
 
@@ -46,7 +46,7 @@ export function FeatureFlagsPanel() {
         {(!flags || flags.length === 0) && (
           <div className="p-8 text-center rounded-xl" style={{ background: 'var(--q-bg-primary)', border: '1px solid var(--q-border-default)' }}>
             <Flag className="w-8 h-8 mx-auto mb-2 opacity-20" />
-            <p className="text-sm" style={{ color: 'var(--q-text-secondary)' }}>Loading feature flags...</p>
+            <p className="text-sm" style={{ color: 'var(--q-text-secondary)' }}>Özellik anahtarları yükleniyor...</p>
           </div>
         )}
 
@@ -103,7 +103,7 @@ export function FeatureFlagsPanel() {
                         color: flag.enabled ? 'var(--q-green)' : 'var(--q-text-secondary)',
                         background: flag.enabled ? 'color-mix(in srgb, var(--q-green) 8%, transparent)' : 'var(--q-bg-secondary)',
                       }}>
-                  {flag.enabled ? 'Enabled' : 'Disabled'}
+                  {flag.enabled ? 'Açık' : 'Kapalı'}
                 </span>
               </div>
             </div>

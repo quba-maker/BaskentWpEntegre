@@ -174,8 +174,8 @@ export function AiDebugPanel() {
       <div className="flex items-center gap-3 mb-2">
         <Terminal className="w-6 h-6" style={{ color: 'var(--q-blue)' }} />
         <div>
-          <h2 className="text-xl font-black tracking-tight" style={{ color: 'var(--q-text-primary)' }}>AI Debug Panel</h2>
-          <p className="text-xs" style={{ color: 'var(--q-text-secondary)' }}>Neden bu yanıt verildi? — Enterprise AI Observability</p>
+          <h2 className="text-xl font-black tracking-tight" style={{ color: 'var(--q-text-primary)' }}>AI Debug Paneli</h2>
+          <p className="text-xs" style={{ color: 'var(--q-text-secondary)' }}>Neden bu yanıt verildi? — AI Gözlemlenebilirlik Merkezi</p>
         </div>
       </div>
 
@@ -192,7 +192,7 @@ export function AiDebugPanel() {
       <DebugSection title="Aktif Sistem Promptu" icon={Brain} defaultOpen={false}>
         <div className="mt-4">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--q-text-secondary)' }}>Final Prompt</span>
+            <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--q-text-secondary)' }}>Aktif Prompt</span>
             <button 
               onClick={() => setPromptVisible(!promptVisible)} 
               className="flex items-center gap-1 text-[11px] font-bold cursor-pointer q-press"
@@ -205,7 +205,7 @@ export function AiDebugPanel() {
             <>
               <div className="flex items-center gap-2 mb-2 px-1">
                 <span className="text-[9px] px-2 py-0.5 rounded-full font-bold" style={{ color: 'var(--q-orange)', background: 'rgba(255,149,0,0.08)' }}>
-                  🔒 Secrets Masked
+                  🔒 Gizli Bilgiler Maskelendi
                 </span>
                 <span className="text-[9px]" style={{ color: 'var(--q-text-secondary)' }}>
                   {data.currentPrompt.length.toLocaleString()} karakter
@@ -290,7 +290,7 @@ export function AiDebugPanel() {
               <tr style={{ borderBottom: '1px solid var(--q-border-default)' }}>
                 <th className="text-left py-2 font-bold uppercase tracking-widest text-[9px]" style={{ color: 'var(--q-text-secondary)' }}>Model</th>
                 <th className="text-right py-2 font-bold uppercase tracking-widest text-[9px]" style={{ color: 'var(--q-text-secondary)' }}>Yanıt</th>
-                <th className="text-right py-2 font-bold uppercase tracking-widest text-[9px]" style={{ color: 'var(--q-text-secondary)' }}>Tools</th>
+                <th className="text-right py-2 font-bold uppercase tracking-widest text-[9px]" style={{ color: 'var(--q-text-secondary)' }}>Araçlar</th>
                 <th className="text-right py-2 font-bold uppercase tracking-widest text-[9px]" style={{ color: 'var(--q-text-secondary)' }}>Token</th>
                 <th className="text-right py-2 font-bold uppercase tracking-widest text-[9px]" style={{ color: 'var(--q-text-secondary)' }}>Maliyet</th>
                 <th className="text-right py-2 font-bold uppercase tracking-widest text-[9px]" style={{ color: 'var(--q-text-secondary)' }}>Tarih</th>
@@ -340,7 +340,7 @@ export function AiDebugPanel() {
               </div>
               <div className="flex-1 min-w-0">
                 <span className="text-[12px] font-bold block" style={{ color: 'var(--q-text-primary)' }}>
-                  {v.change_summary || `Version ${v.version_number}`}
+                  {v.change_summary || `Versiyon ${v.version_number}`}
                 </span>
                 <span className="text-[9px]" style={{ color: 'var(--q-text-secondary)' }}>
                   {v.changed_by} · {formatDate(v.created_at)} · {v.prompt_hash?.substring(0, 8)}
@@ -406,7 +406,7 @@ export function AiDebugPanel() {
       </DebugSection>
 
       {/* Recent Events Feed */}
-      <DebugSection title="Son AI Event Akışı (50)" icon={Activity} defaultOpen={false}>
+      <DebugSection title="Son AI Olay Akışı (50)" icon={Activity} defaultOpen={false}>
         <div className="mt-4 space-y-1 max-h-[400px] overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
           {data.recentEvents?.map((ev: any, i: number) => (
             <div 
@@ -428,7 +428,7 @@ export function AiDebugPanel() {
             </div>
           ))}
           {(!data.recentEvents || data.recentEvents.length === 0) && (
-            <p className="text-xs text-center py-4 italic" style={{ color: 'var(--q-text-secondary)' }}>Event yok</p>
+            <p className="text-xs text-center py-4 italic" style={{ color: 'var(--q-text-secondary)' }}>Henüz olay kaydı yok</p>
           )}
         </div>
       </DebugSection>

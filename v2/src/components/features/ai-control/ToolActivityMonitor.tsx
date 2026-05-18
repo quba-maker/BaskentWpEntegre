@@ -2,7 +2,7 @@
 
 import React from "react";
 import useSWR from "swr";
-import { Wrench, AlertTriangle, Clock, CheckCircle2, XCircle, Gauge, Ghost } from "lucide-react";
+import { Wrench, Clock, CheckCircle2, XCircle, Gauge, Ghost } from "lucide-react";
 import { getToolActivityStats } from "@/app/actions/ai-control";
 
 export function ToolActivityMonitor() {
@@ -13,9 +13,9 @@ export function ToolActivityMonitor() {
       {/* Header */}
       <div className="flex items-center gap-2">
         <Wrench className="w-5 h-5" style={{ color: 'var(--q-blue)' }} />
-        <h3 className="text-base font-bold" style={{ color: 'var(--q-text-primary)' }}>Tool Activity Monitor</h3>
+        <h3 className="text-base font-bold" style={{ color: 'var(--q-text-primary)' }}>Araç Aktivite İzleme</h3>
         <span className="text-[10px] px-2 py-0.5 rounded-full" style={{ background: 'var(--q-bg-secondary)', color: 'var(--q-text-secondary)' }}>
-          Last 7 days
+          Son 7 gün
         </span>
       </div>
 
@@ -23,7 +23,8 @@ export function ToolActivityMonitor() {
       {(!tools || tools.length === 0) ? (
         <div className="p-8 text-center rounded-xl" style={{ background: 'var(--q-bg-primary)', border: '1px solid var(--q-border-default)' }}>
           <Wrench className="w-8 h-8 mx-auto mb-2 opacity-20" />
-          <p className="text-sm" style={{ color: 'var(--q-text-secondary)' }}>No tool activity in the last 7 days.</p>
+          <p className="text-sm font-medium" style={{ color: 'var(--q-text-primary)' }}>Araç aktivitesi bulunamadı</p>
+          <p className="text-xs mt-1" style={{ color: 'var(--q-text-secondary)' }}>AI araçları çalıştığında burada istatistikler görünecek.</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -33,7 +34,6 @@ export function ToolActivityMonitor() {
               : 0;
             const avgLatency = Math.round(parseFloat(tool.avg_latency_ms) || 0);
             const isHealthy = successRate >= 95 && parseInt(tool.timeout_count || 0) === 0;
-            const hasHallucinations = parseInt(tool.hallucination_count || 0) > 0;
 
             return (
               <div 
@@ -52,7 +52,7 @@ export function ToolActivityMonitor() {
                       <Wrench className="w-4 h-4" style={{ color: isHealthy ? 'var(--q-green)' : 'var(--q-orange)' }} />
                     </div>
                     <span className="text-[13px] font-bold" style={{ color: 'var(--q-text-primary)' }}>
-                      {tool.tool_name || 'Unknown'}
+                      {tool.tool_name || 'Bilinmeyen'}
                     </span>
                   </div>
                   <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full"
@@ -60,22 +60,22 @@ export function ToolActivityMonitor() {
                           color: isHealthy ? 'var(--q-green)' : 'var(--q-orange)',
                           background: isHealthy ? 'color-mix(in srgb, var(--q-green) 8%, transparent)' : 'color-mix(in srgb, var(--q-orange) 8%, transparent)',
                         }}>
-                    {isHealthy ? 'Healthy' : 'Warning'}
+                    {isHealthy ? 'Sağlıklı' : 'Uyarı'}
                   </span>
                 </div>
 
                 {/* Metrics Grid */}
                 <div className="grid grid-cols-4 gap-2">
-                  <MetricItem icon={CheckCircle2} label="Success" value={tool.success_count} color="var(--q-green)" />
-                  <MetricItem icon={XCircle} label="Failed" value={tool.failure_count || 0} color="var(--q-red)" />
-                  <MetricItem icon={Clock} label="Timeout" value={tool.timeout_count || 0} color="var(--q-orange)" />
-                  <MetricItem icon={Ghost} label="Hallucinated" value={tool.hallucination_count || 0} color="var(--q-purple-alt)" />
+                  <MetricItem icon={CheckCircle2} label="Başarılı" value={tool.success_count} color="var(--q-green)" />
+                  <MetricItem icon={XCircle} label="Başarısız" value={tool.failure_count || 0} color="var(--q-red)" />
+                  <MetricItem icon={Clock} label="Zaman Aşımı" value={tool.timeout_count || 0} color="var(--q-orange)" />
+                  <MetricItem icon={Ghost} label="Halüsinasyon" value={tool.hallucination_count || 0} color="var(--q-purple-alt)" />
                 </div>
 
                 {/* Performance Bar */}
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-medium" style={{ color: 'var(--q-text-secondary)' }}>Success Rate</span>
+                    <span className="text-[10px] font-medium" style={{ color: 'var(--q-text-secondary)' }}>Başarı Oranı</span>
                     <span className="text-[11px] font-bold tabular-nums" style={{ color: successRate >= 95 ? 'var(--q-green)' : successRate >= 80 ? 'var(--q-orange)' : 'var(--q-red)' }}>
                       {successRate}%
                     </span>
@@ -95,10 +95,10 @@ export function ToolActivityMonitor() {
                 <div className="flex items-center justify-between text-[10px]" style={{ color: 'var(--q-text-secondary)' }}>
                   <div className="flex items-center gap-1">
                     <Gauge className="w-3 h-3" />
-                    <span className="font-mono">{avgLatency}ms avg</span>
+                    <span className="font-mono">{avgLatency}ms ort.</span>
                   </div>
                   <div className="flex items-center gap-1">
-                    <span>{tool.total_calls} total calls</span>
+                    <span>{tool.total_calls} toplam çağrı</span>
                   </div>
                   {tool.last_execution && (
                     <div className="flex items-center gap-1">

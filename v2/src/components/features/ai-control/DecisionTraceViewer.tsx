@@ -2,25 +2,25 @@
 
 import React, { useState } from "react";
 import useSWR from "swr";
-import { Route, Search, ChevronRight, CheckCircle2, XCircle, AlertTriangle, MessageSquare, Brain, User, Wrench, Shield, Database, Clock } from "lucide-react";
+import { Route, Search, CheckCircle2, XCircle, AlertTriangle, MessageSquare, Brain, User, Wrench, Shield, Database, Clock } from "lucide-react";
 import { getDecisionTrace } from "@/app/actions/ai-control";
 
 const STAGE_CONFIG: Record<string, { icon: any; color: string; label: string }> = {
-  'brain_resolved':           { icon: Brain, color: 'var(--q-blue)', label: 'Brain Resolved' },
-  'identity_resolved':        { icon: User, color: 'var(--q-green)', label: 'Identity Resolved' },
-  'duplicate_message_dropped': { icon: XCircle, color: 'var(--q-text-secondary)', label: 'Duplicate Dropped' },
-  'working_hours_blocked':    { icon: Clock, color: 'var(--q-orange)', label: 'Working Hours Block' },
-  'max_messages_reached':     { icon: AlertTriangle, color: 'var(--q-orange)', label: 'Max Messages' },
-  'ai_response_generated':    { icon: MessageSquare, color: 'var(--q-green)', label: 'AI Response' },
-  'ai_timeout':               { icon: Clock, color: 'var(--q-red)', label: 'AI Timeout' },
-  'tool_executed':             { icon: Wrench, color: 'var(--q-blue)', label: 'Tool Executed' },
-  'tool_failed':               { icon: Wrench, color: 'var(--q-red)', label: 'Tool Failed' },
-  'policy_blocked':            { icon: Shield, color: 'var(--q-red)', label: 'Policy Blocked' },
-  'human_escalation':          { icon: AlertTriangle, color: 'var(--q-orange)', label: 'Human Escalation' },
-  'crm_extraction_completed':  { icon: Database, color: 'var(--q-green)', label: 'CRM Updated' },
-  'crm_extraction_failed':     { icon: Database, color: 'var(--q-red)', label: 'CRM Failed' },
-  'memory_updated':            { icon: Brain, color: 'var(--q-purple-alt)', label: 'Memory Updated' },
-  'memory_failed':             { icon: Brain, color: 'var(--q-red)', label: 'Memory Failed' },
+  'brain_resolved':           { icon: Brain, color: 'var(--q-blue)', label: 'Brain Çözümlendi' },
+  'identity_resolved':        { icon: User, color: 'var(--q-green)', label: 'Kimlik Eşleşti' },
+  'duplicate_message_dropped': { icon: XCircle, color: 'var(--q-text-secondary)', label: 'Tekrar Mesaj Atıldı' },
+  'working_hours_blocked':    { icon: Clock, color: 'var(--q-orange)', label: 'Mesai Dışı Engeli' },
+  'max_messages_reached':     { icon: AlertTriangle, color: 'var(--q-orange)', label: 'Mesaj Limiti' },
+  'ai_response_generated':    { icon: MessageSquare, color: 'var(--q-green)', label: 'AI Yanıt Oluşturuldu' },
+  'ai_timeout':               { icon: Clock, color: 'var(--q-red)', label: 'AI Zaman Aşımı' },
+  'tool_executed':             { icon: Wrench, color: 'var(--q-blue)', label: 'Araç Çalıştırıldı' },
+  'tool_failed':               { icon: Wrench, color: 'var(--q-red)', label: 'Araç Başarısız' },
+  'policy_blocked':            { icon: Shield, color: 'var(--q-red)', label: 'Politika Engeli' },
+  'human_escalation':          { icon: AlertTriangle, color: 'var(--q-orange)', label: 'İnsan Devralma' },
+  'crm_extraction_completed':  { icon: Database, color: 'var(--q-green)', label: 'CRM Güncellendi' },
+  'crm_extraction_failed':     { icon: Database, color: 'var(--q-red)', label: 'CRM Başarısız' },
+  'memory_updated':            { icon: Brain, color: 'var(--q-purple-alt)', label: 'Hafıza Güncellendi' },
+  'memory_failed':             { icon: Brain, color: 'var(--q-red)', label: 'Hafıza Başarısız' },
 };
 
 export function DecisionTraceViewer() {
@@ -43,7 +43,7 @@ export function DecisionTraceViewer() {
       {/* Header */}
       <div className="flex items-center gap-2">
         <Route className="w-5 h-5" style={{ color: 'var(--q-blue)' }} />
-        <h3 className="text-base font-bold" style={{ color: 'var(--q-text-primary)' }}>AI Decision Trace</h3>
+        <h3 className="text-base font-bold" style={{ color: 'var(--q-text-primary)' }}>AI Karar İzleme</h3>
       </div>
 
       {/* Search */}
@@ -57,7 +57,7 @@ export function DecisionTraceViewer() {
           value={searchInput}
           onChange={e => setSearchInput(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && handleSearch()}
-          placeholder="Enter Conversation ID..."
+          placeholder="Konuşma ID'si girin..."
           className="flex-1 bg-transparent text-sm outline-none"
           style={{ color: 'var(--q-text-primary)' }}
         />
@@ -66,7 +66,7 @@ export function DecisionTraceViewer() {
           className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer"
           style={{ background: 'var(--q-blue)', color: '#fff' }}
         >
-          Trace
+          İzle
         </button>
       </div>
 
@@ -74,7 +74,7 @@ export function DecisionTraceViewer() {
       {isLoading && (
         <div className="p-8 text-center">
           <div className="w-6 h-6 border-2 border-t-transparent rounded-full animate-spin mx-auto mb-2" style={{ borderColor: 'var(--q-blue)', borderTopColor: 'transparent' }} />
-          <p className="text-sm" style={{ color: 'var(--q-text-secondary)' }}>Analyzing pipeline...</p>
+          <p className="text-sm" style={{ color: 'var(--q-text-secondary)' }}>Pipeline analiz ediliyor...</p>
         </div>
       )}
 
@@ -82,9 +82,9 @@ export function DecisionTraceViewer() {
       {!conversationId && !isLoading && (
         <div className="p-12 text-center rounded-xl" style={{ background: 'var(--q-bg-primary)', border: '1px solid var(--q-border-default)' }}>
           <Route className="w-10 h-10 mx-auto mb-3 opacity-20" />
-          <p className="text-sm font-medium" style={{ color: 'var(--q-text-primary)' }}>AI Decision Pipeline Tracer</p>
+          <p className="text-sm font-medium" style={{ color: 'var(--q-text-primary)' }}>AI Karar Pipeline İzleyici</p>
           <p className="text-xs mt-1" style={{ color: 'var(--q-text-secondary)' }}>
-            Enter a Conversation ID to see exactly why the AI made each decision.
+            AI'ın neden her kararı aldığını görmek için bir Konuşma ID&apos;si girin.
           </p>
         </div>
       )}
@@ -93,13 +93,13 @@ export function DecisionTraceViewer() {
       {trace?.conversation && (
         <div className="rounded-xl p-4" style={{ background: 'var(--q-bg-primary)', border: '1px solid var(--q-border-default)' }}>
           <h4 className="text-[11px] font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--q-text-secondary)' }}>
-            Conversation Context
+            Konuşma Bilgileri
           </h4>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <ContextItem label="Phone" value={trace.conversation.phone_number} />
-            <ContextItem label="Customer" value={[trace.conversation.first_name, trace.conversation.last_name].filter(Boolean).join(' ') || '—'} />
-            <ContextItem label="Stage" value={trace.conversation.lead_stage || '—'} />
-            <ContextItem label="Sentiment" value={trace.conversation.sentiment || '—'} />
+            <ContextItem label="Telefon" value={trace.conversation.phone_number} />
+            <ContextItem label="Müşteri" value={[trace.conversation.first_name, trace.conversation.last_name].filter(Boolean).join(' ') || '—'} />
+            <ContextItem label="Aşama" value={trace.conversation.lead_stage || '—'} />
+            <ContextItem label="Duygu" value={trace.conversation.sentiment || '—'} />
           </div>
         </div>
       )}
@@ -108,9 +108,9 @@ export function DecisionTraceViewer() {
       {trace?.pipelineStages && trace.pipelineStages.length > 0 && (
         <div className="rounded-xl overflow-hidden" style={{ background: 'var(--q-bg-primary)', border: '1px solid var(--q-border-default)' }}>
           <div className="px-4 py-3" style={{ borderBottom: '1px solid var(--q-border-default)' }}>
-            <h4 className="text-sm font-bold" style={{ color: 'var(--q-text-primary)' }}>Pipeline Execution</h4>
+            <h4 className="text-sm font-bold" style={{ color: 'var(--q-text-primary)' }}>Pipeline Yürütme</h4>
             <p className="text-[10px] mt-0.5" style={{ color: 'var(--q-text-secondary)' }}>
-              {trace.pipelineStages.length} stages executed · {trace.events?.length || 0} total events
+              {trace.pipelineStages.length} aşama tamamlandı · {trace.events?.length || 0} toplam olay
             </p>
           </div>
 
@@ -166,7 +166,7 @@ export function DecisionTraceViewer() {
         <div className="p-8 text-center rounded-xl" style={{ background: 'var(--q-bg-primary)', border: '1px solid var(--q-border-default)' }}>
           <XCircle className="w-8 h-8 mx-auto mb-2 opacity-20" />
           <p className="text-sm" style={{ color: 'var(--q-text-secondary)' }}>
-            No AI events found for this conversation.
+            Bu konuşma için AI olayı bulunamadı.
           </p>
         </div>
       )}

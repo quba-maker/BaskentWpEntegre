@@ -10,19 +10,17 @@ import { DecisionTraceViewer } from "./DecisionTraceViewer";
 import { AiSandboxLab } from "./AiSandboxLab";
 
 /**
- * 🏗️ AI Control Tower — Phase 7
- * Enterprise AI Orchestration Dashboard
- * 
- * Apple UX + Stripe stability + OpenAI orchestration standard.
+ * 🏗️ AI Kontrol Merkezi — Phase 7
+ * Kurumsal AI Orkestrasyon Paneli
  */
 
 const TABS = [
-  { id: 'activity', label: 'Live Activity', icon: Activity },
-  { id: 'prompt', label: 'Prompt Manager', icon: Brain },
-  { id: 'flags', label: 'Feature Flags', icon: Flag },
-  { id: 'tools', label: 'Tool Monitor', icon: Wrench },
-  { id: 'trace', label: 'Decision Trace', icon: Route },
-  { id: 'sandbox', label: 'AI Sandbox', icon: FlaskConical },
+  { id: 'activity', label: 'Canlı Aktivite', icon: Activity },
+  { id: 'prompt', label: 'Prompt Yönetimi', icon: Brain },
+  { id: 'flags', label: 'Özellik Anahtarları', icon: Flag },
+  { id: 'tools', label: 'Araç İzleme', icon: Wrench },
+  { id: 'trace', label: 'Karar İzleme', icon: Route },
+  { id: 'sandbox', label: 'AI Test Lab', icon: FlaskConical },
 ] as const;
 
 type TabId = typeof TABS[number]['id'];
@@ -36,15 +34,15 @@ export function AiControlTower() {
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight" style={{ color: 'var(--q-text-primary)' }}>
-            AI Control Tower
+            AI Kontrol Merkezi
           </h1>
           <p className="text-sm mt-1" style={{ color: 'var(--q-text-secondary)' }}>
-            Enterprise AI Orchestration & Governance
+            AI Orkestrasyon & Yönetim Paneli
           </p>
         </div>
         <div className="flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          <span className="text-xs font-medium" style={{ color: 'var(--q-text-secondary)' }}>System Online</span>
+          <span className="text-xs font-medium" style={{ color: 'var(--q-text-secondary)' }}>Sistem Aktif</span>
         </div>
       </div>
 
