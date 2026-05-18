@@ -179,3 +179,38 @@ CREATE TABLE IF NOT EXISTS ai_module_settings (
 CREATE INDEX IF NOT EXISTS idx_customer_profiles_tenant ON customer_profiles(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_customer_profiles_phone ON customer_profiles(tenant_id, primary_phone);
 CREATE INDEX IF NOT EXISTS idx_conversation_memory_conv ON conversation_memory(conversation_id);
+
+-- 11. AI AUDIT LOGS (Phase 5C - Observability Layer)
+CREATE TABLE IF NOT EXISTS ai_audit_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  customer_id UUID REFERENCES customer_profiles(id) ON DELETE SET NULL,
+  conversation_id UUID REFERENCES conversations(id) ON DELETE SET NULL,
+  tool_name TEXT NOT NULL,
+  tool_arguments JSONB,
+  validation_passed BOOLEAN DEFAULT true,
+  execution_mode TEXT DEFAULT 'production', -- 'sandbox' or 'production'
+  execution_duration_ms INT,
+  ai_confidence NUMERIC(3,2),
+  reasoning_summary TEXT,
+  result_summary JSONB,
+  error_message TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 12. AI RUNTIME METRICS (Cost & Analytics)
+CREATE TABLE IF NOT EXISTS ai_runtime_metrics (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  total_tokens INT,
+  prompt_tokens INT,
+  completion_tokens INT,
+  estimated_cost_usd NUMERIC(10,6),
+  model_name TEXT,
+  response_time_ms INT,
+  tool_calls_count INT DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_audit_logs_tenant ON ai_audit_logs(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_ai_runtime_metrics_tenant ON ai_runtime_metrics(tenant_id);

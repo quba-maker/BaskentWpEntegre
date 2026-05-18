@@ -4,6 +4,7 @@ import { CircuitBreaker } from "./circuit-breaker";
 import { CostLimiter } from "./cost-limiter";
 import { toolRegistry } from "./core/tool-registry";
 import { toolExecutor } from "./core/tool-executor";
+import { auditEngine } from "./core/audit-engine";
 
 export interface AIProviderConfig {
   provider: 'gemini' | 'openai' | 'anthropic';
@@ -41,8 +42,8 @@ export interface AIResponse {
 }
 
 /**
- * 🎼 AI Orchestrator (Phase 5B - Decision Engine & Runtime)
- * Abstract provider wrapper + Tool Execution loop.
+ * 🎼 AI Orchestrator (Phase 5B/5C - Decision Engine, Runtime & Audit)
+ * Abstract provider wrapper + Tool Execution loop + Observability.
  */
 export class AIOrchestrator {
   private log = logger.withContext({ module: 'AIOrchestrator' });
@@ -86,6 +87,16 @@ export class AIOrchestrator {
         if (rawResponse.text) {
           const latencyMs = Date.now() - startTime;
           this.log.info(`LLM Execution Completed [${config.provider}/${config.modelId}]`, { latencyMs, loopCount });
+          
+          if (tenantId !== 'unknown') {
+            await auditEngine.logRuntimeMetrics({
+              tenantId,
+              modelName: config.modelId,
+              responseTimeMs: latencyMs,
+              toolCallsCount: loopCount - 1
+            });
+          }
+
           return {
             text: rawResponse.text,
             providerUsed: config.provider,
@@ -106,6 +117,9 @@ export class AIOrchestrator {
           });
 
           let toolResult: any;
+          const toolStartTime = Date.now();
+          let validationPassed = true;
+          let errorMessage: string | undefined;
 
           if (isSandbox) {
             this.log.info(`[SANDBOX] Simulating execution of ${name}`);
@@ -121,7 +135,25 @@ export class AIOrchestrator {
             } catch (err: any) {
               this.log.error(`Tool execution failed: ${name}`, err);
               toolResult = { error: err.message };
+              validationPassed = !err.message?.includes("Validation failed");
+              errorMessage = err.message;
             }
+          }
+
+          const executionDurationMs = Date.now() - toolStartTime;
+
+          if (tenantId !== 'unknown') {
+            await auditEngine.logToolExecution({
+              tenantId,
+              conversationId: conversationId !== 'unknown' ? conversationId : undefined,
+              toolName: name,
+              toolArguments: args,
+              validationPassed,
+              executionMode: isSandbox ? 'sandbox' : 'production',
+              executionDurationMs,
+              errorMessage,
+              resultSummary: toolResult
+            });
           }
 
           // Push the tool result back to the LLM to get the final answer
