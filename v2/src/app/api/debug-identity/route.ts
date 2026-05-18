@@ -22,7 +22,7 @@ export async function GET() {
     const profile = profiles[0];
 
     let context = null;
-    let leadsWithMatchingPhone = [];
+    let leadsWithMatchingPhone: any[] = [];
     
     if (profile) {
       context = await IdentityEngine.getContext(profile.id);
