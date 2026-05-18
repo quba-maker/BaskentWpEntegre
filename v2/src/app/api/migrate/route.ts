@@ -96,9 +96,85 @@ export async function GET() {
     await sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS model_used TEXT`;
     results.push('messages.model_used: OK');
 
+    // =============================================
+    // PHASE 6 — AI OS Visibility & Control Layer
+    // =============================================
+
+    // 9. AI Events Timeline (Observability)
+    await sql`
+      CREATE TABLE IF NOT EXISTS ai_events (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID NOT NULL,
+        conversation_id TEXT,
+        customer_id UUID,
+        event_type TEXT NOT NULL,
+        event_category TEXT DEFAULT 'system',
+        payload JSONB DEFAULT '{}'::jsonb,
+        severity TEXT DEFAULT 'info',
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `;
+    await sql`CREATE INDEX IF NOT EXISTS idx_ai_events_tenant ON ai_events(tenant_id, created_at DESC)`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_ai_events_conversation ON ai_events(conversation_id, created_at DESC)`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_ai_events_customer ON ai_events(customer_id, created_at DESC)`;
+    results.push('ai_events: OK');
+
+    // 10. Brain / Prompt Versioning
+    await sql`
+      CREATE TABLE IF NOT EXISTS brain_versions (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID NOT NULL,
+        version_number INTEGER NOT NULL,
+        system_prompt TEXT,
+        knowledge_snapshot JSONB,
+        changed_by TEXT DEFAULT 'system',
+        change_summary TEXT,
+        prompt_hash TEXT,
+        is_active BOOLEAN DEFAULT false,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(tenant_id, version_number)
+      )
+    `;
+    await sql`CREATE INDEX IF NOT EXISTS idx_brain_versions_tenant ON brain_versions(tenant_id, version_number DESC)`;
+    results.push('brain_versions: OK');
+
+    // 11. AI Runtime Logs (Health Monitoring)
+    await sql`
+      CREATE TABLE IF NOT EXISTS ai_runtime_logs (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID NOT NULL,
+        log_type TEXT NOT NULL,
+        context JSONB DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `;
+    await sql`CREATE INDEX IF NOT EXISTS idx_ai_runtime_logs_tenant ON ai_runtime_logs(tenant_id, created_at DESC)`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_ai_runtime_logs_type ON ai_runtime_logs(log_type, created_at DESC)`;
+    results.push('ai_runtime_logs: OK');
+
+    // 12. Tool Permissions (Tenant-Level Toggle)
+    await sql`
+      CREATE TABLE IF NOT EXISTS tool_permissions (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID NOT NULL,
+        tool_name TEXT NOT NULL,
+        is_enabled BOOLEAN DEFAULT true,
+        config JSONB DEFAULT '{}'::jsonb,
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(tenant_id, tool_name)
+      )
+    `;
+    results.push('tool_permissions: OK');
+
+    // 13. Ensure conversation_memory has tenant_id and updated columns
+    await sql`ALTER TABLE conversation_memory ADD COLUMN IF NOT EXISTS tenant_id UUID`;
+    await sql`ALTER TABLE conversation_memory ADD COLUMN IF NOT EXISTS last_message_count INTEGER DEFAULT 0`;
+    await sql`ALTER TABLE conversation_memory ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`;
+    results.push('conversation_memory columns: OK');
+
     return NextResponse.json({ 
       success: true, 
-      message: 'Migration completed successfully!',
+      message: 'Migration completed successfully (Phase 6 included)!',
       details: results 
     });
   } catch (error: any) {

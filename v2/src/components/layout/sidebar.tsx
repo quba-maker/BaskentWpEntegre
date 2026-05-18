@@ -10,7 +10,8 @@ import {
   BarChart3,
   Shield,
   Users,
-  Eye
+  Eye,
+  Terminal
 } from "lucide-react";
 import { getSession, logout, stopImpersonation } from "@/lib/auth/session";
 import { redirect } from "next/navigation";
@@ -68,6 +69,9 @@ export async function Sidebar() {
             <NavLink href={`/${session?.tenantSlug || ''}/forms`} icon={<ClipboardList className="w-[18px] h-[18px]" />} label="Formlar" />
             {session?.role !== "viewer" && (
               <NavLink href={`/${session?.tenantSlug || ''}/bot`} icon={<Bot className="w-[18px] h-[18px]" />} label="Bot Yönetimi" />
+            )}
+            {(session?.role === "admin" || session?.role === "owner") && (
+              <NavLink href={`/${session?.tenantSlug || ''}/bot/debug`} icon={<Terminal className="w-[18px] h-[18px]" />} label="AI Debug" />
             )}
             {(session?.role === "admin" || session?.role === "owner") && (
               <NavLink href={`/${session?.tenantSlug || ''}/integrations`} icon={<Link2 className="w-[18px] h-[18px]" />} label="Entegrasyonlar" />

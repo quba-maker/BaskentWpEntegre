@@ -86,6 +86,22 @@ export async function saveBotSetting(key: string, value: string) {
         details: { newValue: value.substring(0, 200) },
       });
 
+      // Phase 6: Auto-version brain prompts on save
+      if (key.startsWith('system_prompt')) {
+        try {
+          const { BrainVersionService } = await import('@/lib/services/brain-version.service');
+          await BrainVersionService.saveVersion({
+            tenantId: ctx.tenantId,
+            systemPrompt: value,
+            changedBy: ctx.email || 'admin',
+            changeSummary: `${key} güncellendi`,
+          });
+        } catch (e) {
+          console.error('[BRAIN_VERSION_SAVE_FAILED]', e);
+          // Non-fatal — don't block the save
+        }
+      }
+
       return { success: true };
     }
   ).then(res => {

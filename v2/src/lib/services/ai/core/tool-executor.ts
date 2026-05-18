@@ -1,10 +1,12 @@
 import { toolRegistry, ToolContext } from "./tool-registry";
 import { logger } from "@/lib/core/logger";
+import { sql } from "@/lib/db";
+import { AIEventEmitter } from "./event-emitter";
 
 /**
- * ⚡️ Tool Executor
- * Enforces strict validation, timeouts, and auditing before any tool is run.
- * AI Intention -> Validation Layer -> Execution
+ * ⚡️ Tool Executor — Phase 6 Enhanced
+ * Enforces strict validation, timeouts, permission checks, and auditing.
+ * AI Intention -> Permission Gate -> Validation Layer -> Execution -> Event Emit
  */
 export class ToolExecutor {
   private log = logger.withContext({ module: 'ToolExecutor' });
@@ -21,10 +23,18 @@ export class ToolExecutor {
       throw new Error(`Tool [${toolName}] not found.`);
     }
 
-    // 1. Permission Check
-    // Implement robust permission validation against the Tenant settings here
-    if (!this.checkPermissions(tool.permissions, context)) {
+    // 1. Permission Check — DB-backed tenant-level toggle
+    const isAllowed = await this.checkPermissions(toolName, tool.permissions, context);
+    if (!isAllowed) {
       this.log.warn(`Permission denied for tool: ${toolName}`, { tenantId: context.tenantId });
+      AIEventEmitter.emit({
+        tenantId: context.tenantId,
+        conversationId: context.conversationId,
+        type: 'tool_failed',
+        category: 'tool',
+        severity: 'warning',
+        payload: { toolName, reason: 'permission_denied' }
+      });
       throw new Error(`Permission denied for tool: ${toolName}`);
     }
 
@@ -41,6 +51,7 @@ export class ToolExecutor {
     this.log.info(`Executing tool: ${toolName}`, { tenantId: context.tenantId, args: validatedArgs });
     
     const timeoutMs = tool.timeoutMs || 10000; // Default 10s
+    const startTime = Date.now();
     
     try {
       const result = await this.withTimeout(
@@ -48,18 +59,56 @@ export class ToolExecutor {
         timeoutMs
       );
       
-      this.log.info(`Tool executed successfully: ${toolName}`);
+      const durationMs = Date.now() - startTime;
+      this.log.info(`Tool executed successfully: ${toolName}`, { durationMs });
+      
+      // Phase 6: Emit tool success event
+      AIEventEmitter.emit({
+        tenantId: context.tenantId,
+        conversationId: context.conversationId,
+        type: 'tool_executed',
+        category: 'tool',
+        payload: { toolName, durationMs, success: true }
+      });
+      
       return result;
     } catch (error: any) {
+      const durationMs = Date.now() - startTime;
       this.log.error(`Tool execution failed: ${toolName}`, error);
+      
+      // Phase 6: Emit tool failure event
+      AIEventEmitter.emit({
+        tenantId: context.tenantId,
+        conversationId: context.conversationId,
+        type: 'tool_failed',
+        category: 'tool',
+        severity: 'error',
+        payload: { toolName, durationMs, error: error.message }
+      });
+      AIEventEmitter.logHealth(context.tenantId, 'tool_failure', { toolName, error: error.message });
+      
       throw error;
     }
   }
 
-  private checkPermissions(requiredPermissions: string[], context: ToolContext): boolean {
-    // TODO: Connect this to the actual Feature Flag / Settings system
-    // Example: if tool needs 'appointments_write', check if tenant has it enabled.
-    return true; 
+  /**
+   * DB-backed permission check.
+   * If no record exists in tool_permissions, default to ALLOWED (opt-out model).
+   */
+  private async checkPermissions(toolName: string, requiredPermissions: string[], context: ToolContext): Promise<boolean> {
+    try {
+      const rows = await sql`
+        SELECT is_enabled FROM tool_permissions
+        WHERE tenant_id = ${context.tenantId} AND tool_name = ${toolName}
+        LIMIT 1
+      `;
+      // If no record exists, tool is allowed by default (opt-out model)
+      if (rows.length === 0) return true;
+      return rows[0].is_enabled === true;
+    } catch {
+      // If DB check fails, allow the tool to prevent blocking the pipeline
+      return true;
+    }
   }
 
   private withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {

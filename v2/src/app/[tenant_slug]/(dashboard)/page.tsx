@@ -5,6 +5,7 @@ import { getDashboardStats } from "@/app/actions/dashboard";
 import { MessageSquare, Bot, TrendingUp, Activity, ClipboardList } from "lucide-react";
 import { PageLoader, EmptyState } from "@/components/ui/shared-states";
 import { SectionCard } from "@/components/governance";
+import { AiHealthDashboard } from "@/components/features/ai-observability/AiHealthDashboard";
 
 // ==========================================
 // QUBA AI — Dashboard Ana Sayfa
@@ -63,6 +64,9 @@ export default function DashboardPage() {
             </SectionCard>
           ))}
         </div>
+
+        {/* Phase 6: AI Engine Health Monitoring */}
+        <AiHealthDashboard />
 
         {/* 7 Gün Mesaj Grafiği */}
         {stats.dailyMessages.length > 0 && (

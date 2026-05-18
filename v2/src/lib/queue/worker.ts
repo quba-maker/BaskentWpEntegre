@@ -9,6 +9,7 @@ import { ResponsePolicy } from "@/lib/services/ai/response-policy";
 import { PromptBuilder } from "@/lib/services/ai/prompt-builder";
 import { TenantResolverService } from "@/lib/services/meta/tenant-resolver.service";
 import { assertTenant } from "@/lib/security/assertions";
+import { AIEventEmitter } from "@/lib/services/ai/core/event-emitter";
 
 /**
  * Enterprise Queue Worker Engine
@@ -95,6 +96,9 @@ export class QueueWorkerEngine {
     
     this.log.info(`[TENANT_BRAIN_BOUND] Brain ${brain.id} locked to context`, { tenantSlug: brain.context.tenantId, traceId });
 
+    // Phase 6: Emit brain resolution event
+    AIEventEmitter.emit({ tenantId, type: 'brain_resolved', category: 'pipeline', payload: { brainId: brain.id, channel: 'whatsapp' } });
+
     // Extract Message Data
     const value = payload.entry?.[0]?.changes?.[0]?.value;
     const messages = value?.messages;
@@ -126,6 +130,9 @@ export class QueueWorkerEngine {
     });
     this.log.info(`[IDENTITY_RESOLVED] Master Customer ID mapped`, { customerId, traceId });
 
+    // Phase 6: Emit identity resolution event
+    AIEventEmitter.emit({ tenantId, customerId, type: 'identity_resolved', category: 'identity', payload: { phoneNumber, source: 'whatsapp' } });
+
     // 3. Lock Conversation & Save Incoming Message (Idempotency)
     await convService.acquireLock(phoneNumber);
     
@@ -139,6 +146,7 @@ export class QueueWorkerEngine {
 
     if (isDuplicate) {
       this.log.warn(`[DUPLICATE_DROPPED] Message already processed`, { providerMessageId, traceId });
+      AIEventEmitter.emit({ tenantId, customerId, type: 'duplicate_message_dropped', category: 'pipeline', severity: 'warning', payload: { providerMessageId } });
       return;
     }
 
@@ -173,6 +181,7 @@ export class QueueWorkerEngine {
           await msgService.saveMessageIdempotent({ phoneNumber, direction: 'out', content: offMsg, channel: 'whatsapp' });
         }
         this.log.info(`[WORKING_HOURS] Outside hours, sent off-message`, { traceId });
+        AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'working_hours_blocked', category: 'pipeline', payload: { currentTime } });
         return;
       }
     }
@@ -190,6 +199,7 @@ export class QueueWorkerEngine {
           UPDATE conversations SET status = 'human' WHERE phone_number = ${phoneNumber} AND tenant_id = ${tenantId}
         `);
         this.log.info(`[MAX_MESSAGES] Limit reached (${count}/${maxMsg}), auto-handover to human`, { traceId });
+        AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'max_messages_reached', category: 'escalation', payload: { count, maxMsg } });
         return;
       }
     }
@@ -254,10 +264,15 @@ export class QueueWorkerEngine {
     try {
       aiResponse = await Promise.race([aiPromise, timeoutPromise]);
       this.log.info(`[LLM_RESPONSE_OK] AI execution completed`, { latencyMs: aiResponse.latencyMs, traceId });
+
+      // Phase 6: Emit AI response event
+      AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'ai_response_generated', category: 'pipeline', payload: { latencyMs: aiResponse.latencyMs, model: aiResponse.modelUsed } });
     } catch (e: any) {
       if (e.message === "AI_TIMEOUT") {
         this.log.error(`[LLM_TIMEOUT] Execution exceeded 25s limit`, e, { traceId });
-        throw e; // Yönlendir ve DLQ/Retry tetikle
+        AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'ai_timeout', category: 'pipeline', severity: 'error', payload: { timeoutMs } });
+        AIEventEmitter.logHealth(tenantId, 'timeout', { traceId });
+        throw e;
       }
       this.log.error(`[LLM_FAILED] Orchestrator exception`, e, { traceId });
       throw e;
@@ -271,6 +286,11 @@ export class QueueWorkerEngine {
       this.log.error(`[POLICY_FAILED] ${validation.reason}`, undefined, { traceId, tenantId: brain.context.tenantId });
       finalResponseText = validation.fallbackMessage || "Üzgünüm, şu an size yanıt veremiyorum.";
       
+      // Phase 6: Emit policy block + escalation events
+      AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'policy_blocked', category: 'policy', severity: 'error', payload: { reason: validation.reason } });
+      AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'human_escalation', category: 'escalation', severity: 'warning', payload: { trigger: 'policy_violation', reason: validation.reason } });
+      AIEventEmitter.logHealth(tenantId, 'policy_blocked', { reason: validation.reason, traceId });
+
       // Save a system alert message to alert the agent
       await db.executeSafe(sql`
         INSERT INTO messages (tenant_id, phone_number, direction, content, channel, provider_message_id)
@@ -346,8 +366,11 @@ export class QueueWorkerEngine {
       });
 
       this.log.info(`[WORKER_CRM_OK] CRM successfully enriched`, { traceId });
+      AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'crm_extraction_completed', category: 'crm', payload: { country: deterministicCountry || crmData?.country, department: crmData?.department } });
     } catch (crmErr) {
       this.log.error(`[WORKER_CRM_FAILED] Non-fatal CRM extraction error`, crmErr instanceof Error ? crmErr : new Error(String(crmErr)), { traceId });
+      AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'crm_extraction_failed', category: 'crm', severity: 'warning' });
+      AIEventEmitter.logHealth(tenantId, 'crm_failure', { traceId });
     }
 
     // 11. Async Memory & Summarization Sync
@@ -355,8 +378,12 @@ export class QueueWorkerEngine {
       try {
         const { MemoryEngine } = await import('@/lib/services/ai/engines/memory');
         // Run in background without blocking
-        MemoryEngine.summarizeConversation(tenantId, conversationId).catch(err => {
+        MemoryEngine.summarizeConversation(tenantId, conversationId).then(() => {
+          AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'memory_updated', category: 'memory', payload: { conversationId } });
+        }).catch(err => {
           this.log.error(`[WORKER_MEMORY_FAILED] Non-fatal summary error`, err instanceof Error ? err : new Error(String(err)), { traceId });
+          AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'memory_failed', category: 'memory', severity: 'warning' });
+          AIEventEmitter.logHealth(tenantId, 'memory_failure', { traceId });
         });
         this.log.info(`[WORKER_MEMORY] Dispatched background memory summarization`, { traceId, conversationId });
       } catch (memErr) {

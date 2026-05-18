@@ -6,6 +6,7 @@ import { User, MapPin, Building, Activity, Tag, ChevronDown, ChevronRight, Save,
 import { useInboxStore } from "@/store/inbox-store";
 import { updateCrmData, addTag, removeTag } from "@/app/actions/inbox";
 import { CustomerAiBrainPanel } from "@/components/features/ai-observability/CustomerAiBrain";
+import { AiTimelinePanel, AiSummaryBadge } from "@/components/features/ai-observability/AiTimeline";
 
 const tagTranslationMap: Record<string, string> = {
   "price_sensitive": "fiyat_odaklı",
@@ -392,6 +393,14 @@ export function ContextPanel() {
         
         {/* AI Observability: Customer Brain */}
         <CustomerAiBrainPanel phoneNumber={activeContact.id} />
+
+        {/* Phase 6: AI Auto Summary */}
+        <div className="pt-5" style={{ borderTop: '1px solid var(--q-border-default)' }}>
+          <AiSummaryBadge phoneNumber={activeContact.id} />
+        </div>
+
+        {/* Phase 6: AI Activity Timeline */}
+        <AiTimelinePanel phoneNumber={activeContact.id} />
       </div>
 
       {/* Save Button — Governance-compliant lifecycle */}
