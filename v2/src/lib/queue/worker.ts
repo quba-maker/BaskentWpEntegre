@@ -215,20 +215,28 @@ export class QueueWorkerEngine {
         const unifiedContext = await IdentityEngine.getContext(customerId, conversationId);
         if (unifiedContext) {
           systemPromptText += `\n\n=== MÜŞTERİ BAĞLAMI (DİNAMİK CRM VERİSİ) ===\n`;
-          systemPromptText += `Aşağıdaki bilgiler müşterinin sisteme kayıtlı güncel verileridir ve senaryo sırasında bu bilgileri kullanmalısın.\n`;
+          systemPromptText += `Aşağıdaki bilgiler müşterinin sisteme kayıtlı güncel verileridir ve senaryo sırasında bu bilgileri AKTİF OLARAK KULLANMALISIN.\n`;
           if (unifiedContext.profile) {
-            systemPromptText += `- İsim: ${unifiedContext.profile.first_name || 'Bilinmiyor'} ${unifiedContext.profile.last_name || ''}\n`;
+            const fullName = [unifiedContext.profile.first_name, unifiedContext.profile.last_name].filter(Boolean).join(' ').trim();
+            if (fullName) {
+              systemPromptText += `- İsim: ${fullName}\n`;
+              systemPromptText += `>> DİKKAT: Hastaya mesajlarında adı ile hitap et (Örn: Merhaba ${unifiedContext.profile.first_name} Bey/Hanım).\n`;
+            } else {
+              systemPromptText += `- İsim: Bilinmiyor\n`;
+            }
           }
           if (unifiedContext.latestForm) {
             const formDataStr = typeof unifiedContext.latestForm.data === 'object' 
               ? JSON.stringify(unifiedContext.latestForm.data, null, 2) 
               : unifiedContext.latestForm.data;
             systemPromptText += `- Doldurduğu Form: ${unifiedContext.latestForm.name}\n- Form Detayı: ${formDataStr}\n`;
+            systemPromptText += `>> DİKKAT: Hasta formu doldurmuş. Formda ilgilendiği tedavi/bölüm yazıyorsa ASLA "hangi konuda destek almak istersiniz" diye sorma, doğrudan konuya gir. Yalnızca formda şikayeti belli değilse sor.\n`;
           }
           if (unifiedContext.memory) {
             systemPromptText += `- Önceki Görüşme Özeti: ${unifiedContext.memory.summary}\n`;
             systemPromptText += `- İlgi Düzeyi (Intent): ${unifiedContext.memory.intent}\n`;
             systemPromptText += `- İtirazlar: ${(unifiedContext.memory.objections || []).join(', ')}\n`;
+            systemPromptText += `>> DİKKAT: Bu kişiyle geçmiş bir konuşmanız var. Konuşmayı bu özet doğrultusunda, kaldığı yerden sürdür. Kendini ilk defa tanışıyormuş gibi tanıtma.\n`;
           }
           systemPromptText += `============================================\n`;
         }
