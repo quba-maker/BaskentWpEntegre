@@ -11,7 +11,8 @@ import {
   Shield,
   Users,
   Eye,
-  Terminal
+  Terminal,
+  Radar
 } from "lucide-react";
 import { getSession, logout, stopImpersonation } from "@/lib/auth/session";
 import { redirect } from "next/navigation";
@@ -72,6 +73,9 @@ export async function Sidebar() {
             )}
             {(session?.role === "admin" || session?.role === "owner") && (
               <NavLink href={`/${session?.tenantSlug || ''}/bot/debug`} icon={<Terminal className="w-[18px] h-[18px]" />} label="AI Debug" />
+            )}
+            {(session?.role === "admin" || session?.role === "owner") && (
+              <NavLink href={`/${session?.tenantSlug || ''}/ai-control`} icon={<Radar className="w-[18px] h-[18px]" />} label="AI Control Tower" />
             )}
             {(session?.role === "admin" || session?.role === "owner") && (
               <NavLink href={`/${session?.tenantSlug || ''}/integrations`} icon={<Link2 className="w-[18px] h-[18px]" />} label="Entegrasyonlar" />

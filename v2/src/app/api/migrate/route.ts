@@ -172,6 +172,26 @@ export async function GET() {
     await sql`ALTER TABLE conversation_memory ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`;
     results.push('conversation_memory columns: OK');
 
+    // =============================================
+    // PHASE 7 — AI Control Tower
+    // =============================================
+
+    // 14. Feature Flags (Tenant-Level Canary Rollout)
+    await sql`
+      CREATE TABLE IF NOT EXISTS feature_flags (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID NOT NULL,
+        flag_key TEXT NOT NULL,
+        is_enabled BOOLEAN DEFAULT false,
+        config JSONB DEFAULT '{}'::jsonb,
+        updated_by TEXT DEFAULT 'system',
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(tenant_id, flag_key)
+      )
+    `;
+    await sql`CREATE INDEX IF NOT EXISTS idx_feature_flags_tenant ON feature_flags(tenant_id)`;
+    results.push('feature_flags: OK');
+
     return NextResponse.json({ 
       success: true, 
       message: 'Migration completed successfully (Phase 6 included)!',
