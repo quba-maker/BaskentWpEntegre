@@ -1,10 +1,10 @@
 import { sql } from '@/lib/db';
+import { normalizePhone } from '@/lib/utils/normalize-phone';
 
 export class IdentityEngine {
+
   /**
-   * Resolves a customer identity by phone number.
-   * Creates a new profile if it doesn't exist, otherwise returns the existing one.
-   * Merges incoming data (e.g. from forms or WhatsApp) to enrich the profile.
+   * Flow: Webhook -> normalizePhone() -> find/create customer_profiles -> return customerId
    */
   static async resolveIdentity(params: {
     tenantId: string;
@@ -19,11 +19,9 @@ export class IdentityEngine {
       throw new Error('[IdentityEngine] Phone number is required for identity resolution.');
     }
 
-    // Normalize phone number (strip non-digits to ensure uniqueness across platforms)
-    const normalizedPhone = this.normalizePhone(phoneNumber);
+    const normalizedPhone = normalizePhone(phoneNumber);
 
     try {
-      // Upsert logic: If the phone exists in the tenant, update missing fields.
       const result = await sql`
         INSERT INTO customer_profiles (tenant_id, primary_phone, primary_email, first_name, last_name)
         VALUES (${tenantId}, ${normalizedPhone}, ${email || null}, ${firstName || null}, ${lastName || null})
@@ -34,17 +32,36 @@ export class IdentityEngine {
           updated_at = NOW()
         RETURNING id;
       `;
+      const cid = result[0].id;
 
-      return result[0].id;
+      // Retroactive SaaS identity merge for orphaned records
+      try {
+        await sql`
+          UPDATE leads
+          SET customer_id = ${cid}
+          WHERE tenant_id = ${tenantId} 
+            AND customer_id IS NULL
+            AND phone_number LIKE '%' || RIGHT(${normalizedPhone}, 10) || '%'
+        `;
+        
+        await sql`
+          UPDATE conversations
+          SET customer_id = ${cid}
+          WHERE tenant_id = ${tenantId}
+            AND customer_id IS NULL
+            AND phone_number LIKE '%' || RIGHT(${normalizedPhone}, 10) || '%'
+        `;
+      } catch (mergeError) {
+        console.warn('[IdentityEngine] Non-fatal: Orphaned records merge failed', mergeError);
+      }
+
+      return cid;
     } catch (error) {
       console.error('[IdentityEngine] Failed to resolve identity:', error);
       throw error;
     }
   }
 
-  /**
-   * Links an existing conversation to a customer_profile.
-   */
   static async linkConversation(conversationId: string, customerId: string): Promise<void> {
     await sql`
       UPDATE conversations 
@@ -53,9 +70,6 @@ export class IdentityEngine {
     `;
   }
 
-  /**
-   * Links an existing lead (form submission) to a customer_profile.
-   */
   static async linkLead(leadId: string, customerId: string): Promise<void> {
     await sql`
       UPDATE leads 
@@ -65,37 +79,23 @@ export class IdentityEngine {
   }
 
   /**
-   * Helper to normalize phone numbers (e.g., removing +, spaces, brackets)
-   * Converts +90 555 123 45 67 to 905551234567
-   */
-  static normalizePhone(phone: string): string {
-    return phone.replace(/\D/g, ''); 
-  }
-
-  /**
-   * Fetches unified customer context (Profile + CRM + Form Data + Memory) for AI Orchestration.
+   * Unified context based ONLY on customer_id, no fuzzy matching here.
    */
   static async getContext(customerId: string, conversationId?: string): Promise<any> {
     try {
-      // Get profile
       const profiles = await sql`SELECT * FROM customer_profiles WHERE id = ${customerId}`;
       const profile = profiles[0];
       if (!profile) return null;
 
-      // Get latest form data
       const leads = await sql`
         SELECT form_name, raw_data 
         FROM leads 
-        WHERE tenant_id = ${profile.tenant_id} AND (
-          customer_id = ${customerId} OR 
-          REGEXP_REPLACE(phone_number, '\\D', '', 'g') LIKE '%' || RIGHT(${profile.primary_phone}, 10) || '%'
-        )
+        WHERE tenant_id = ${profile.tenant_id} AND customer_id = ${customerId}
         ORDER BY created_at DESC 
         LIMIT 1
       `;
       const lead = leads[0];
 
-      // Get memory if conversationId exists
       let memory = null;
       if (conversationId) {
          const memories = await sql`SELECT * FROM conversation_memory WHERE conversation_id = ${conversationId}`;

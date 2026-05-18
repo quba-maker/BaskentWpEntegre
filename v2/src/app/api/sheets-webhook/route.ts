@@ -246,6 +246,23 @@ export async function POST(request: NextRequest) {
       
       return NextResponse.json({ success: true, message: 'New lead inserted successfully. Auto-bot triggered.' });
     } else {
+      // 🔗 Unified Identity: Form -> customer_profiles bağlantısı (Hatta lead önceden varsa bile)
+      try {
+        const { IdentityEngine } = await import('@/lib/services/ai/engines/identity');
+        const customerId = await IdentityEngine.resolveIdentity({
+          tenantId: tenantId!,
+          phoneNumber: phone1,
+          email: email || undefined,
+          firstName: name || undefined
+        });
+        if (existing[0]?.id) {
+          await IdentityEngine.linkLead(existing[0].id, customerId);
+        }
+        log.info('[IDENTITY] Existing form linked to customer profile', { customerId, phone: phone1 });
+      } catch (idErr) {
+        log.error('[IDENTITY] Non-fatal: Could not link existing form to identity', idErr instanceof Error ? idErr : new Error(String(idErr)));
+      }
+
       // Update existing lead's note if it has changed
       if (noteStr && noteStr.trim() !== '') {
         await sqlDb`

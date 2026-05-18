@@ -1,4 +1,5 @@
 import { IdentityEngine } from '@/lib/services/ai/engines/identity';
+import { normalizePhone } from '@/lib/utils/normalize-phone';
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 
@@ -16,7 +17,7 @@ export async function GET() {
     }
     
     const lead = latestLeads[0];
-    const normalizedPhone = IdentityEngine.normalizePhone(lead.phone_number);
+    const normalizedPhone = normalizePhone(lead.phone_number);
     
     const profiles = await sql`SELECT * FROM customer_profiles WHERE primary_phone = ${normalizedPhone} ORDER BY created_at DESC LIMIT 1`;
     const profile = profiles[0];
