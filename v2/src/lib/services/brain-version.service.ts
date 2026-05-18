@@ -98,11 +98,11 @@ export class BrainVersionService {
     await sql`UPDATE brain_versions SET is_active = false WHERE tenant_id = ${tenantId}`;
     await sql`UPDATE brain_versions SET is_active = true WHERE tenant_id = ${tenantId} AND version_number = ${versionNumber}`;
 
-    // Update the actual tenant brain prompt in bot_settings
+    // Update the actual tenant brain prompt in settings (key-value table)
     await sql`
-      UPDATE bot_settings 
-      SET system_prompt = ${version.system_prompt}, updated_at = NOW()
-      WHERE tenant_id = ${tenantId}
+      UPDATE settings 
+      SET value = ${version.system_prompt}, updated_at = NOW()
+      WHERE tenant_id = ${tenantId} AND key = 'system_prompt_whatsapp'
     `;
 
     log.info(`[BRAIN_ROLLBACK] Rolled back to v${versionNumber}`, { tenantId });

@@ -133,11 +133,11 @@ export async function getAiDebugData() {
       WHERE tenant_id = ${tenantId} AND created_at > NOW() - INTERVAL '24 hours'
     `;
 
-    // Active brain info
+    // Active brain info (settings key-value table)
     const brainInfo = await sql`
-      SELECT system_prompt, welcome_message
-      FROM bot_settings
-      WHERE tenant_id = ${tenantId}
+      SELECT value as system_prompt
+      FROM settings
+      WHERE tenant_id = ${tenantId} AND key = 'system_prompt_whatsapp'
       LIMIT 1
     `;
 

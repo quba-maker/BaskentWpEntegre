@@ -186,6 +186,26 @@ export async function getToolActivityStats() {
 
 // ─── E. Decision Trace Viewer ───────────────────────
 
+export async function getRecentConversationsForTrace(limit = 10) {
+  const session = await requireAdminSession();
+  const tenantId = session.tenantId;
+
+  try {
+    const rows = await sql`
+      SELECT c.id, c.phone_number, c.status, c.lead_stage, c.updated_at,
+             cp.first_name, cp.last_name
+      FROM conversations c
+      LEFT JOIN customer_profiles cp ON cp.id = c.customer_id
+      WHERE c.tenant_id = ${tenantId}
+      ORDER BY c.updated_at DESC
+      LIMIT ${limit}
+    `;
+    return rows;
+  } catch {
+    return [];
+  }
+}
+
 export async function getDecisionTrace(conversationId: string) {
   const session = await requireAdminSession();
   const tenantId = session.tenantId;
@@ -261,20 +281,21 @@ export async function runSandboxTest(params: {
   const tenantId = session.tenantId;
 
   try {
-    // Get current brain/prompt
-    const botSettings = await sql`
-      SELECT system_prompt, welcome_message
-      FROM bot_settings
-      WHERE tenant_id = ${tenantId}
+    // Get current brain/prompt from settings (key-value table)
+    const promptRows = await sql`
+      SELECT value
+      FROM settings
+      WHERE tenant_id = ${tenantId} AND key = 'system_prompt_whatsapp'
       LIMIT 1
     `;
     
-    if (!botSettings[0]?.system_prompt) {
+    const systemPromptValue = promptRows[0]?.value;
+    if (!systemPromptValue) {
       return { success: false, error: 'Sistem promptu yapılandırılmamış. Önce Bot Yönetimi sayfasından prompt kaydedin.' };
     }
 
     // Build sandbox context
-    const systemPrompt = botSettings[0].system_prompt;
+    const systemPrompt = systemPromptValue;
     
     const mockContext = {
       customerName: params.customerName || 'Test User',

@@ -2,8 +2,8 @@
 
 import React, { useState } from "react";
 import useSWR from "swr";
-import { Route, Search, CheckCircle2, XCircle, AlertTriangle, MessageSquare, Brain, User, Wrench, Shield, Database, Clock } from "lucide-react";
-import { getDecisionTrace } from "@/app/actions/ai-control";
+import { Route, Search, CheckCircle2, XCircle, AlertTriangle, MessageSquare, Brain, User, Wrench, Shield, Database, Clock, Phone } from "lucide-react";
+import { getDecisionTrace, getRecentConversationsForTrace } from "@/app/actions/ai-control";
 
 const STAGE_CONFIG: Record<string, { icon: any; color: string; label: string }> = {
   'brain_resolved':           { icon: Brain, color: 'var(--q-blue)', label: 'Brain Çözümlendi' },
@@ -27,6 +27,8 @@ export function DecisionTraceViewer() {
   const [conversationId, setConversationId] = useState('');
   const [searchInput, setSearchInput] = useState('');
   
+  const { data: recentConvs } = useSWR('recent-convs-trace', () => getRecentConversationsForTrace(10));
+
   const { data: trace, isLoading } = useSWR(
     conversationId ? ['decision-trace', conversationId] : null,
     () => getDecisionTrace(conversationId)
@@ -36,6 +38,21 @@ export function DecisionTraceViewer() {
     if (searchInput.trim()) {
       setConversationId(searchInput.trim());
     }
+  };
+
+  const selectConversation = (id: string) => {
+    setSearchInput(id);
+    setConversationId(id);
+  };
+
+  const formatTime = (d: string) => {
+    if (!d) return '';
+    const diff = Date.now() - new Date(d).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 60) return `${mins} dk önce`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs} sa önce`;
+    return `${Math.floor(hrs / 24)} gün önce`;
   };
 
   return (
@@ -57,7 +74,7 @@ export function DecisionTraceViewer() {
           value={searchInput}
           onChange={e => setSearchInput(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && handleSearch()}
-          placeholder="Konuşma ID'si girin..."
+          placeholder="Konuşma ID'si girin veya aşağıdan seçin..."
           className="flex-1 bg-transparent text-sm outline-none"
           style={{ color: 'var(--q-text-primary)' }}
         />
@@ -70,6 +87,50 @@ export function DecisionTraceViewer() {
         </button>
       </div>
 
+      {/* Recent Conversations Picker */}
+      {!conversationId && !isLoading && (
+        <div className="rounded-xl overflow-hidden" style={{ background: 'var(--q-bg-primary)', border: '1px solid var(--q-border-default)' }}>
+          <div className="px-4 py-3" style={{ borderBottom: '1px solid var(--q-border-default)' }}>
+            <p className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--q-text-secondary)' }}>
+              Son Konuşmalar — Hızlı Seçim
+            </p>
+          </div>
+          {recentConvs && recentConvs.length > 0 ? (
+            <div>
+              {recentConvs.map((c: any) => (
+                <button
+                  key={c.id}
+                  onClick={() => selectConversation(c.id)}
+                  className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-[var(--q-bg-hover)] transition-colors cursor-pointer"
+                  style={{ borderBottom: '1px solid var(--q-border-default)' }}
+                >
+                  <Phone className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--q-blue)' }} />
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm font-semibold block truncate" style={{ color: 'var(--q-text-primary)' }}>
+                      {[c.first_name, c.last_name].filter(Boolean).join(' ') || c.phone_number || 'İsimsiz'}
+                    </span>
+                    <span className="text-[10px] block" style={{ color: 'var(--q-text-secondary)' }}>
+                      {c.phone_number} · {c.lead_stage || 'Bilinmiyor'} · {formatTime(c.updated_at)}
+                    </span>
+                  </div>
+                  <span className="text-[9px] font-mono px-2 py-0.5 rounded" style={{ color: 'var(--q-text-secondary)', background: 'var(--q-bg-hover)' }}>
+                    {c.id?.substring(0, 8)}...
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="p-8 text-center">
+              <Route className="w-10 h-10 mx-auto mb-3 opacity-20" />
+              <p className="text-sm font-medium" style={{ color: 'var(--q-text-primary)' }}>Henüz konuşma kaydı yok</p>
+              <p className="text-xs mt-1" style={{ color: 'var(--q-text-secondary)' }}>
+                Bot aktif olduktan sonra burada konuşmalar listelenecek.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Loading */}
       {isLoading && (
         <div className="p-8 text-center">
@@ -78,23 +139,21 @@ export function DecisionTraceViewer() {
         </div>
       )}
 
-      {/* Empty State */}
-      {!conversationId && !isLoading && (
-        <div className="p-12 text-center rounded-xl" style={{ background: 'var(--q-bg-primary)', border: '1px solid var(--q-border-default)' }}>
-          <Route className="w-10 h-10 mx-auto mb-3 opacity-20" />
-          <p className="text-sm font-medium" style={{ color: 'var(--q-text-primary)' }}>AI Karar Pipeline İzleyici</p>
-          <p className="text-xs mt-1" style={{ color: 'var(--q-text-secondary)' }}>
-            AI'ın neden her kararı aldığını görmek için bir Konuşma ID&apos;si girin.
-          </p>
-        </div>
-      )}
-
       {/* Conversation Context */}
       {trace?.conversation && (
         <div className="rounded-xl p-4" style={{ background: 'var(--q-bg-primary)', border: '1px solid var(--q-border-default)' }}>
-          <h4 className="text-[11px] font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--q-text-secondary)' }}>
-            Konuşma Bilgileri
-          </h4>
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--q-text-secondary)' }}>
+              Konuşma Bilgileri
+            </h4>
+            <button 
+              onClick={() => { setConversationId(''); setSearchInput(''); }}
+              className="text-[10px] font-medium px-2 py-1 rounded cursor-pointer"
+              style={{ color: 'var(--q-blue)', background: 'rgba(0,122,255,0.06)' }}
+            >
+              ← Listeye Dön
+            </button>
+          </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <ContextItem label="Telefon" value={trace.conversation.phone_number} />
             <ContextItem label="Müşteri" value={[trace.conversation.first_name, trace.conversation.last_name].filter(Boolean).join(' ') || '—'} />
