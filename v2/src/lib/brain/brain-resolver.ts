@@ -1,5 +1,5 @@
 import { TenantResolverService } from '../services/meta/tenant-resolver.service';
-import { createTenantBrain, TenantBrain } from './tenant-brain';
+import { createTenantBrain, TenantBrain, TenantBrainSettings } from './tenant-brain';
 import { withTenantDB } from '../core/tenant-db';
 import { sql } from '../db';
 import { SecurityIsolationError } from '../security/tenant-firewall';
@@ -20,7 +20,7 @@ export class BrainResolver {
   
   /**
    * Builds an isolated brain for a specific webhook payload.
-   * Ensures that the Brain gets the correct DB-driven prompts.
+   * Ensures that the Brain gets the correct DB-driven prompts AND runtime settings.
    */
   public static async resolveTenantBrain(
     payload: any,
@@ -38,29 +38,35 @@ export class BrainResolver {
     }
 
     // LAYER 4: HARD FAIL-CLOSED MODE
-    // If tenant context cannot be resolved, NO default tenant/brain is loaded. DROP.
     if (!tenantConfig || !tenantConfig.tenantId) {
       throw new SecurityIsolationError(`TENANT_RESOLUTION_FAILED`);
     }
 
     const tenantId = tenantConfig.tenantId;
 
-    // 2. Fetch Prompts strictly isolated by tenantId
-    // SECURITY FIX: Uses TenantDB with RLS enforcement instead of raw neon() client.
-    // This ensures set_config('quba.current_tenant', tenantId) is called before every query,
-    // preventing cross-tenant prompt leakage.
+    // 2. Fetch Prompts + Runtime Settings strictly isolated by tenantId
     let rawSystemPrompt: string | null = null;
     let promptHash: string | null = null;
     let knowledgePrices = '';
     let knowledgeRules = '';
     let bannedWords: string[] = [];
+    let runtimeSettings: TenantBrainSettings = {
+      aiModel: 'gemini-2.5-flash',
+      maxMessages: 8,
+      workingHours: { enabled: false },
+      aggressionLevel: 'medium'
+    };
 
     try {
       let promptKey = 'system_prompt_whatsapp';
       if (channel === 'instagram') promptKey = 'system_prompt_tr';
       if (channel === 'foreign') promptKey = 'system_prompt_foreign';
 
-      const keysToFetch = [promptKey, 'bot_knowledge_prices', 'bot_knowledge_rules', 'bot_banned_words'];
+      const keysToFetch = [
+        promptKey, 
+        'bot_knowledge_prices', 'bot_knowledge_rules', 'bot_banned_words',
+        'ai_model', 'bot_max_messages', 'working_hours', 'bot_aggression_level'
+      ];
       const db = withTenantDB(tenantId, false);
       const settingsResult = await db.executeSafe(sql`
         SELECT key, value 
@@ -77,10 +83,19 @@ export class BrainResolver {
         if (row.key === 'bot_banned_words') {
           try { bannedWords = JSON.parse(row.value); } catch(e) {}
         }
+        // Runtime pipeline settings
+        if (row.key === 'ai_model') runtimeSettings.aiModel = row.value || 'gemini-2.5-flash';
+        if (row.key === 'bot_max_messages') {
+          const parsed = parseInt(row.value);
+          runtimeSettings.maxMessages = isNaN(parsed) ? 8 : parsed;
+        }
+        if (row.key === 'working_hours') {
+          try { runtimeSettings.workingHours = JSON.parse(row.value); } catch(e) {}
+        }
+        if (row.key === 'bot_aggression_level') runtimeSettings.aggressionLevel = row.value || 'medium';
       }
       
       // LAYER 3: PROMPT HASH VALIDATION
-      // Calculate SHA256 of the prompt at retrieval time
       if (rawSystemPrompt) {
         promptHash = crypto.createHash('sha256').update(rawSystemPrompt).digest('hex');
       }
@@ -107,8 +122,9 @@ export class BrainResolver {
       webhookPayloadId,
       rawSystemPrompt,
       tenantConfig,
-      promptHash, // Pass prompt hash for validation
-      { prices: knowledgePrices, rules: knowledgeRules, bannedWords }
+      promptHash,
+      { prices: knowledgePrices, rules: knowledgeRules, bannedWords },
+      runtimeSettings
     );
 
     return brain;

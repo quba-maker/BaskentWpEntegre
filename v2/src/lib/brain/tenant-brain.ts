@@ -1,3 +1,10 @@
+export interface TenantBrainSettings {
+  aiModel: string;
+  maxMessages: number;
+  workingHours: { enabled: boolean; start?: string; end?: string; offMessage?: string };
+  aggressionLevel: string;
+}
+
 export interface TenantBrainContext {
   tenantId: string;
   channel: string;
@@ -8,6 +15,7 @@ export interface TenantBrainContext {
     rules?: string;
     bannedWords?: string[];
   };
+  settings: TenantBrainSettings;
 }
 
 export interface TenantBrainNamespaces {
@@ -59,12 +67,12 @@ export function createTenantBrain(
   rawSystemPrompt: string | null,
   config?: any,
   promptHash?: string | null,
-  knowledge?: TenantBrainContext['knowledge']
+  knowledge?: TenantBrainContext['knowledge'],
+  settings?: TenantBrainSettings
 ): TenantBrain {
   
   const instanceId = `brain_${tenantId}_${Date.now()}_${Math.random().toString(36).substring(7)}`;
 
-  // Namespace generators mathematically bind the tenantId to the keys
   const namespaces: TenantBrainNamespaces = {
     memory: (key: string) => `tenant:${tenantId}:memory:${key}`,
     vector: () => `tenant:${tenantId}:vectors`,
@@ -75,10 +83,17 @@ export function createTenantBrain(
     systemPrompt: rawSystemPrompt,
     promptHash: promptHash || null,
     getFormattedPrompt: (phase: string, context?: Record<string, any>) => {
-      // Basic formatting, to be expanded in PromptBuilder refactor
       const base = rawSystemPrompt || "Sen kibar ve yardımcı bir asistansın.";
       return `${base}\n\n[Sistem Direktifi] Şu anki evre: ${phase.toUpperCase()}`;
     }
+  };
+
+  // Default settings fallback
+  const resolvedSettings: TenantBrainSettings = settings || {
+    aiModel: 'gemini-2.5-flash',
+    maxMessages: 8,
+    workingHours: { enabled: false },
+    aggressionLevel: 'medium'
   };
 
   const brain = {
@@ -88,7 +103,8 @@ export function createTenantBrain(
       channel,
       webhookPayloadId,
       config,
-      knowledge
+      knowledge,
+      settings: resolvedSettings
     },
     namespaces,
     prompts

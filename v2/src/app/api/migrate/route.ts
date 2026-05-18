@@ -92,6 +92,10 @@ export async function GET() {
     await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS customer_id UUID`;
     results.push('leads.customer_id: OK');
 
+    // 8. Add model_used to messages for AI model tracking
+    await sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS model_used TEXT`;
+    results.push('messages.model_used: OK');
+
     return NextResponse.json({ 
       success: true, 
       message: 'Migration completed successfully!',

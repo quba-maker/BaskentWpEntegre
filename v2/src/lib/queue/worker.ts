@@ -156,20 +156,53 @@ export class QueueWorkerEngine {
       return;
     }
 
+    // 3.5 WORKING HOURS GATE — Tenant settings'den okunan mesai kontrolü
+    const wh = brain.context.settings.workingHours;
+    if (wh && wh.enabled && wh.start && wh.end) {
+      const now = new Date();
+      const currentTime = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+      const isInRange = wh.start <= wh.end 
+        ? (currentTime >= wh.start && currentTime <= wh.end)
+        : (currentTime >= wh.start || currentTime <= wh.end);
+      if (!isInRange) {
+        const offMsg = wh.offMessage || 'Mesai saatlerimiz dışındasınız. En kısa sürede dönüş yapılacaktır.';
+        const accessToken = brain.context.config?.accessToken || process.env.META_ACCESS_TOKEN || '';
+        const phoneId = brain.context.config?.whatsappPhoneNumberId || process.env.PHONE_NUMBER_ID || '';
+        if (phoneId && accessToken) {
+          await msgService.sendWhatsAppMessage(phoneId, accessToken, phoneNumber, offMsg);
+          await msgService.saveMessageIdempotent({ phoneNumber, direction: 'out', content: offMsg, channel: 'whatsapp' });
+        }
+        this.log.info(`[WORKING_HOURS] Outside hours, sent off-message`, { traceId });
+        return;
+      }
+    }
+
+    // 3.6 MAX MESSAGES GATE — Auto handover after limit
+    const maxMsg = brain.context.settings.maxMessages;
+    if (maxMsg > 0) {
+      const botMsgCount = await db.executeSafe(sql`
+        SELECT COUNT(*) as c FROM messages 
+        WHERE phone_number = ${phoneNumber} AND tenant_id = ${tenantId} AND direction = 'out'
+      `);
+      const count = parseInt(botMsgCount[0]?.c) || 0;
+      if (count >= maxMsg) {
+        await db.executeSafe(sql`
+          UPDATE conversations SET status = 'human' WHERE phone_number = ${phoneNumber} AND tenant_id = ${tenantId}
+        `);
+        this.log.info(`[MAX_MESSAGES] Limit reached (${count}/${maxMsg}), auto-handover to human`, { traceId });
+        return;
+      }
+    }
+
     // 4. State & FSM Transition
     const state = await convService.getState(phoneNumber);
     const currentPhase = state.phase as ConversationPhase;
-    
-    // Basit FSM geçişi (Şimdilik intent analizi olmadan mevcut fazda kalıyoruz, 
-    // gerçek sistemde classification servisinden gelen intent'e göre targetPhase hesaplanır)
-    const targetPhase = currentPhase; 
+    const targetPhase = currentPhase;
     
     if (this.workflowService.canTransition(currentPhase, targetPhase)) {
       if (currentPhase !== targetPhase) {
          await convService.updateState(phoneNumber, targetPhase);
          this.log.info(`[FSM_TRANSITION] Phase changed: ${currentPhase} -> ${targetPhase}`, { traceId });
-      } else {
-         this.log.info(`[CLASSIFICATION_DONE] Phase remains: ${currentPhase}`, { traceId });
       }
     }
 
@@ -211,13 +244,11 @@ export class QueueWorkerEngine {
 
     // 6. AI Orchestrator Call (with Timeout Safety)
     const tenantConfig = brain.context.config;
-    const llmProvider = tenantConfig?.raw?.llm_provider || 'gemini';
-    const llmModel = tenantConfig?.raw?.llm_model || 'gemini-2.5-flash';
-    // Fallback to global env keys if tenant doesn't have custom keys configured
+    const llmModel = brain.context.settings.aiModel || 'gemini-2.5-flash';
     const apiKey = tenantConfig?.raw?.gemini_api_key || process.env.GEMINI_API_KEY || '';
 
     const aiConfig = {
-      provider: llmProvider as 'gemini' | 'openai',
+      provider: 'gemini' as 'gemini' | 'openai',
       modelId: llmModel,
       apiKey: apiKey,
       temperature: 0.7,
@@ -289,13 +320,13 @@ export class QueueWorkerEngine {
        throw e; // Retry tetikle
     }
 
-    // 9. Save Outgoing Message
+    // 9. Save Outgoing Message (with model tracking)
     await msgService.saveMessageIdempotent({
       phoneNumber,
       direction: 'out',
       content: finalResponseText,
       channel: 'whatsapp',
-      modelUsed: aiResponse.modelUsed
+      modelUsed: aiResponse.modelUsed || llmModel
     });
 
     // 10. CRM Intelligence Extraction (Async & Non-blocking)

@@ -10,7 +10,7 @@ export interface ValidationResult {
 /**
  * AI Response Policy Validator (Egress DLP)
  * Enforces Outbound Data Loss Prevention.
- * Prevents cross-tenant brand leakage, competitor mentions, and AI hallucinations.
+ * Uses tenant-scoped bannedWords from TenantBrain (DB-driven, no hardcoded lists).
  */
 export class ResponsePolicy {
   private log = logger.withContext({ module: 'ResponsePolicy' });
@@ -44,28 +44,13 @@ export class ResponsePolicy {
       }
     }
 
-    // 2. Tenant-Specific Egress DLP (Cross-Tenant Leakage Prevention)
-    const tenantConfig = brain.context.config?.raw || {};
+    // 2. Tenant-Scoped Egress DLP — Uses bannedWords from brain (DB-driven)
+    const bannedWords = brain.context.knowledge?.bannedWords || [];
     
-    // Tenants can define a list of banned/competitor keywords in their config
-    // We strictly enforce that these strings NEVER exit the AI boundary
-    let bannedKeywords: string[] = [];
-    if (tenantConfig.banned_keywords && Array.isArray(tenantConfig.banned_keywords)) {
-      bannedKeywords = tenantConfig.banned_keywords.map((k: string) => k.toLowerCase());
-    }
-
-    // Hardcoded global safety list for Healthcare (Başkent Hospital etc) 
-    // to prevent mixing names with other hospitals (e.g. Acıbadem, Memorial, vs)
-    // In a real system, this should be purely driven by DB configuration, 
-    // but for demo/safety we add common competitor checks.
-    if (tenantConfig.slug === "baskent") {
-      const competitors = ["acıbadem", "acibadem", "memorial", "medical park", "medipol", "florence nightingale", "liv hospital"];
-      bannedKeywords = [...new Set([...bannedKeywords, ...competitors])];
-    }
-
-    for (const keyword of bannedKeywords) {
-      if (keyword.trim().length > 2 && lowerResponse.includes(keyword.trim())) {
-         this.log.error(`[POLICY_VIOLATION] Egress Leakage Prevented. Blocked Keyword: ${keyword}`, undefined, { tenantId: brain.context.tenantId });
+    for (const keyword of bannedWords) {
+      const kw = keyword.trim().toLowerCase();
+      if (kw.length > 2 && lowerResponse.includes(kw)) {
+         this.log.error(`[POLICY_VIOLATION] Egress Leakage Prevented. Blocked: ${kw}`, undefined, { tenantId: brain.context.tenantId });
          return { 
            valid: false, 
            reason: "egress_dlp_violation",

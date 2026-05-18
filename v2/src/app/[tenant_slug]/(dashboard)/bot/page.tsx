@@ -1,17 +1,21 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Bot, MessageSquare, Globe, Hash } from "lucide-react";
-import { getBotSettings, saveBotSetting, getDefaultPrompts, getBotStats, getModelUsage, getRecentBotConversations, testBotPrompt } from "@/app/actions/bot";
+import {
+  Bot, MessageSquare, Globe, Hash, Settings2, Zap, Clock,
+  Shield, Cpu, Check
+} from "lucide-react";
+import {
+  getBotSettings, saveBotSetting, getDefaultPrompts,
+  getBotStats, getModelUsage, getRecentBotConversations, testBotPrompt
+} from "@/app/actions/bot";
 import { PageLoader } from "@/components/ui/shared-states";
-import { PageShell, PageHeader } from "@/components/governance";
+import { PageShell, PageHeader, ToggleSwitch } from "@/components/governance";
 import {
   BotPerformancePanel,
   ChannelStatusPanel,
   PromptGovernancePanel,
   KnowledgeBasePanel,
-  AIBehaviorPanel,
-  AIModelControlPanel,
   AIUsageCostPanel,
   ModerationPanel,
   RecentConversationsPanel,
@@ -19,6 +23,7 @@ import {
   AIPipelinePanel,
   type BotChannel,
 } from "./_components";
+import { SettingRow } from "./_components/shared";
 
 // ==========================================
 // CHANNEL DEFINITIONS
@@ -53,12 +58,17 @@ const channels: BotChannel[] = [
   }
 ];
 
+// AI MODELS
+const AI_MODELS = [
+  { id: 'gemini-2.5-flash-lite', name: 'Flash Lite', desc: 'Hızlı & Ekonomik', speed: 95, cost: 20, iq: 60, color: 'var(--q-green)' },
+  { id: 'gemini-2.5-flash', name: 'Flash', desc: 'Dengeli (Önerilen)', speed: 85, cost: 40, iq: 85, color: 'var(--q-blue)' },
+  { id: 'gemini-2.5-pro', name: 'Pro', desc: 'Güçlü & Pahalı', speed: 50, cost: 90, iq: 98, color: 'var(--q-purple)' },
+];
+
 // ==========================================
 // PAGE ORCHESTRATOR — UNIFIED BOT MANAGEMENT
-// Single source of truth for all bot + AI pipeline configuration
 // ==========================================
 export default function BotManagementPage() {
-  // ---- Core State ----
   const [settings, setSettings] = useState<Record<string, any>>({});
   const [defaults, setDefaults] = useState<any>(null);
   const [stats, setStats] = useState<any>(null);
@@ -72,18 +82,19 @@ export default function BotManagementPage() {
   const [recentConvs, setRecentConvs] = useState<any[]>([]);
   const [bannedWords, setBannedWords] = useState<string[]>([]);
 
-  // ---- Knowledge Base State ----
+  // Knowledge Base
   const [knowledgePrices, setKnowledgePrices] = useState("");
   const [knowledgeRules, setKnowledgeRules] = useState("");
   const [savingKnowledge, setSavingKnowledge] = useState(false);
 
-  // ---- Bot Config State ----
+  // Consolidated Bot Config (single source of truth)
   const [botConfig, setBotConfig] = useState({
     auto_greeting: "true",
     greeting_language: "auto",
     max_messages: "8",
     working_hours: "24/7",
-    aggression_level: "medium"
+    aggression_level: "medium",
+    ai_model: "gemini-2.5-flash"
   });
 
   // ---- Data Loading ----
@@ -100,8 +111,7 @@ export default function BotManagementPage() {
 
       if (settingsRes.success) {
         setSettings(settingsRes.settings);
-        
-        // Set prompts from DB or defaults
+
         const p: Record<string, string> = {};
         channels.forEach(ch => {
           const s = settingsRes.settings as Record<string, any>;
@@ -109,16 +119,24 @@ export default function BotManagementPage() {
         });
         setPrompts(p);
 
-        // Set bot config from DB
+        // Detect working hours mode from JSON
+        let whMode = "24/7";
+        try {
+          const whJson = JSON.parse(settingsRes.settings['working_hours']?.value || '{}');
+          if (whJson.enabled) {
+            whMode = whJson.start === "09:00" ? "business" : "after_hours";
+          }
+        } catch(e) {}
+
         setBotConfig({
           auto_greeting: settingsRes.settings['bot_auto_greeting']?.value || "true",
           greeting_language: settingsRes.settings['bot_greeting_language']?.value || "auto",
           max_messages: settingsRes.settings['bot_max_messages']?.value || "8",
-          working_hours: settingsRes.settings['bot_working_hours']?.value || "24/7",
-          aggression_level: settingsRes.settings['bot_aggression_level']?.value || "medium"
+          working_hours: whMode,
+          aggression_level: settingsRes.settings['bot_aggression_level']?.value || "medium",
+          ai_model: settingsRes.settings['ai_model']?.value || "gemini-2.5-flash"
         });
 
-        // Set knowledge base from DB
         setKnowledgePrices(settingsRes.settings['bot_knowledge_prices']?.value || "");
         setKnowledgeRules(settingsRes.settings['bot_knowledge_rules']?.value || "");
       }
@@ -128,7 +146,6 @@ export default function BotManagementPage() {
       setModelUsage(usageRes);
       setRecentConvs(convsRes);
 
-      // Banned words
       if (settingsRes.success && settingsRes.settings['bot_banned_words']?.value) {
         try { setBannedWords(JSON.parse(settingsRes.settings['bot_banned_words'].value)); } catch(e) {}
       }
@@ -138,7 +155,6 @@ export default function BotManagementPage() {
     load();
   }, []);
 
-  // Reload stats when period changes
   useEffect(() => {
     async function reloadStats() {
       const statsRes = await getBotStats(statsPeriod);
@@ -206,12 +222,11 @@ export default function BotManagementPage() {
       await saveBotSetting('working_hours', hoursMap[value] || '{"enabled":false}');
       return;
     }
+    if (key === 'ai_model') {
+      await saveBotSetting('ai_model', value);
+      return;
+    }
     await saveBotSetting(`bot_${key}`, value);
-  };
-
-  const handleModelChange = (modelId: string) => {
-    setSettings((prev: any) => ({...prev, ai_model: {value: modelId}}));
-    saveBotSetting('ai_model', modelId);
   };
 
   const handleAddBannedWord = (word: string) => {
@@ -226,13 +241,10 @@ export default function BotManagementPage() {
     saveBotSetting('bot_banned_words', JSON.stringify(updated));
   };
 
-  // ---- Derived Values ----
   const activeChannel = channels.find(c => c.id === activeTab)!;
 
-  // ---- Loading Gate ----
   if (isLoading) return <PageLoader />;
 
-  // ---- Render: Unified single-page bot management ----
   return (
     <PageShell>
       <PageHeader
@@ -241,14 +253,14 @@ export default function BotManagementPage() {
         subtitle="AI asistanlarınızı tek noktadan yapılandırın ve yönetin"
       />
 
-      {/* === 1. PERFORMANS === */}
+      {/* 1. PERFORMANS */}
       <BotPerformancePanel
         stats={stats}
         statsPeriod={statsPeriod}
         onPeriodChange={setStatsPeriod}
       />
 
-      {/* === 2. KANAL YÖNETİMİ === */}
+      {/* 2. KANAL YÖNETİMİ */}
       <ChannelStatusPanel
         channels={channels}
         isChannelActive={isChannelActive}
@@ -256,7 +268,7 @@ export default function BotManagementPage() {
         onSelectChannel={setActiveTab}
       />
 
-      {/* === 3. PROMPT YÖNETİMİ === */}
+      {/* 3. PROMPT YÖNETİMİ */}
       <PromptGovernancePanel
         channels={channels}
         activeTab={activeTab}
@@ -270,22 +282,97 @@ export default function BotManagementPage() {
         onResetToDefault={resetToDefault}
       />
 
-      {/* === 4. AI PIPELINE MODÜLLERI (eskiden ayrı sayfa) === */}
-      <AIPipelinePanel />
+      {/* 4. BOT AYARLARI (Konsolide — tek panel) */}
+      <div className="mt-8">
+        <h2 className="text-lg font-bold text-[--q-text-primary] mb-4 flex items-center gap-2">
+          <Settings2 className="w-5 h-5 text-[--q-text-secondary]" />
+          Bot Yapılandırması
+        </h2>
+        <div className="bg-white rounded-2xl border border-[--q-border-default] shadow-sm divide-y divide-black/5">
+          {/* Auto Greeting */}
+          <SettingRow icon={Zap} iconColor="var(--q-orange)" title="Otonom Karşılama" description="Yeni lead geldiğinde otomatik WhatsApp mesajı gönder">
+            <ToggleSwitch active={botConfig.auto_greeting === "true"} onToggle={() => handleBotConfigChange("auto_greeting", botConfig.auto_greeting === "true" ? "false" : "true")} />
+          </SettingRow>
 
-      {/* === 5. BOT DAVRANIŞ AYARLARI === */}
-      <AIBehaviorPanel
-        botConfig={botConfig}
-        onConfigChange={handleBotConfigChange}
-      />
+          {/* Greeting Language */}
+          <SettingRow icon={Globe} iconColor="var(--q-blue)" title="Karşılama Dili" description="Otomatik karşılama mesajının dili">
+            <select value={botConfig.greeting_language} onChange={e => handleBotConfigChange("greeting_language", e.target.value)} className="px-3 py-1.5 text-sm font-semibold text-[--q-text-primary] bg-black/[0.04] border-0 rounded-lg outline-none cursor-pointer">
+              <option value="auto">Otomatik</option>
+              <option value="tr">Türkçe</option>
+              <option value="en">İngilizce</option>
+            </select>
+          </SettingRow>
 
-      {/* === 6. AI MODEL SEÇİMİ === */}
-      <AIModelControlPanel
-        currentModel={settings['ai_model']?.value || 'gemini-2.5-flash'}
-        onModelChange={handleModelChange}
-      />
+          {/* Max Messages */}
+          <SettingRow icon={MessageSquare} iconColor="var(--q-purple)" title="Maksimum Bot Mesajı" description="Bot kaç mesaj sonra insana devretsin">
+            <select value={botConfig.max_messages} onChange={e => handleBotConfigChange("max_messages", e.target.value)} className="px-3 py-1.5 text-sm font-semibold text-[--q-text-primary] bg-black/[0.04] border-0 rounded-lg outline-none cursor-pointer">
+              <option value="5">5</option>
+              <option value="8">8</option>
+              <option value="12">12</option>
+              <option value="20">20</option>
+              <option value="0">Sınırsız</option>
+            </select>
+          </SettingRow>
 
-      {/* === 7. BİLGİ BANKASI === */}
+          {/* Working Hours */}
+          <SettingRow icon={Clock} iconColor="var(--q-green)" title="Çalışma Saatleri" description="Botun aktif olacağı zaman dilimi">
+            <select value={botConfig.working_hours} onChange={e => handleBotConfigChange("working_hours", e.target.value)} className="px-3 py-1.5 text-sm font-semibold text-[--q-text-primary] bg-black/[0.04] border-0 rounded-lg outline-none cursor-pointer">
+              <option value="24/7">7/24 Aktif</option>
+              <option value="business">Mesai (09-18)</option>
+              <option value="after_hours">Mesai Dışı (18-09)</option>
+            </select>
+          </SettingRow>
+
+          {/* Aggression Level */}
+          <SettingRow icon={Shield} iconColor="var(--q-red)" title="İkna Seviyesi" description="Botun satış agresiflik düzeyi">
+            <div className="flex items-center gap-1 p-0.5 bg-black/[0.04] rounded-lg">
+              {[
+                { value: "low", label: "Düşük" },
+                { value: "medium", label: "Orta" },
+                { value: "high", label: "Yüksek" }
+              ].map(opt => (
+                <button
+                  key={opt.value}
+                  onClick={() => handleBotConfigChange("aggression_level", opt.value)}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${
+                    botConfig.aggression_level === opt.value
+                      ? "bg-white text-[--q-text-primary] shadow-sm"
+                      : "text-[--q-text-secondary] hover:text-[--q-text-primary]"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </SettingRow>
+
+          {/* AI Model — Inline */}
+          <SettingRow icon={Cpu} iconColor="var(--q-purple-alt)" title="Yapay Zeka Modeli" description="AI yanıtları için kullanılacak model">
+            <div className="flex items-center gap-1.5">
+              {AI_MODELS.map(m => {
+                const isActive = botConfig.ai_model === m.id;
+                return (
+                  <button
+                    key={m.id}
+                    onClick={() => handleBotConfigChange("ai_model", m.id)}
+                    className={`px-3 py-1.5 text-xs font-bold rounded-lg border transition-all ${
+                      isActive
+                        ? "text-white shadow-sm"
+                        : "border-[--q-border-default] text-[--q-text-secondary] hover:border-black/20 bg-white"
+                    }`}
+                    style={isActive ? { backgroundColor: m.color, borderColor: m.color } : undefined}
+                  >
+                    {isActive && <Check className="w-3 h-3 inline mr-1 -mt-0.5" />}
+                    {m.name}
+                  </button>
+                );
+              })}
+            </div>
+          </SettingRow>
+        </div>
+      </div>
+
+      {/* 5. BİLGİ BANKASI */}
       <KnowledgeBasePanel
         knowledgePrices={knowledgePrices}
         knowledgeRules={knowledgeRules}
@@ -296,20 +383,23 @@ export default function BotManagementPage() {
         onSave={saveKnowledgeBase}
       />
 
-      {/* === 8. YASAKLI KELİMELER === */}
+      {/* 6. YASAKLI KELİMELER */}
       <ModerationPanel
         bannedWords={bannedWords}
         onAddWord={handleAddBannedWord}
         onRemoveWord={handleRemoveBannedWord}
       />
 
-      {/* === 9. AI KULLANIM & MALİYET === */}
+      {/* 7. AI PIPELINE MODÜLLERI */}
+      <AIPipelinePanel />
+
+      {/* 8. AI KULLANIM & MALİYET */}
       <AIUsageCostPanel modelUsage={modelUsage} />
 
-      {/* === 10. SON KONUŞMALAR === */}
+      {/* 9. SON KONUŞMALAR */}
       <RecentConversationsPanel conversations={recentConvs} />
 
-      {/* === 11. TEST PLAYGROUND === */}
+      {/* 10. TEST PLAYGROUND */}
       <BotTestPlayground
         activeChannel={activeChannel}
         currentPrompt={prompts[activeTab] || ""}

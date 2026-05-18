@@ -164,12 +164,12 @@ export async function getModelUsage(period: string = '30d') {
       const interval = intervalMap[period] || '30 days';
 
       const usage = await ctx.db.executeSafe(sql`
-        SELECT 'gemini-2.5-flash' as model_used, COUNT(*) as message_count
+        SELECT COALESCE(model_used, 'gemini-2.5-flash') as model_used, COUNT(*) as message_count
         FROM messages 
         WHERE tenant_id = ${ctx.tenantId}
           AND direction = 'out' 
           AND created_at >= NOW() - CAST(${interval} AS INTERVAL)
-        GROUP BY model_used ORDER BY message_count DESC
+        GROUP BY COALESCE(model_used, 'gemini-2.5-flash') ORDER BY message_count DESC
       `);
 
       const channelBreakdown = await ctx.db.executeSafe(sql`
