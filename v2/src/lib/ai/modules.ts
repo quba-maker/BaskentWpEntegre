@@ -62,8 +62,8 @@ export const AI_MODULES = {
   // ==========================================
   'industry-prompt': {
     id: 'industry-prompt',
-    name: 'Sektör Prompt Üretici',
-    description: 'Sektöre göre özelleştirilmiş AI system prompt üretir',
+    name: 'Sektörel Bağlam Modülü',
+    description: 'Sektöre göre özelleştirilmiş ek bağlam (context) üretir',
     type: MODULE_TYPES.PROMPT_BUILDER,
     version: '1.0',
     defaultEnabled: true,

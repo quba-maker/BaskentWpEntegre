@@ -122,11 +122,16 @@ export async function getMessages(phone: string) {
     { actionName: 'getMessages' },
     async (ctx) => {
       try {
+        const cleanPhone = phone.replace(/\D/g, '').slice(-10);
+        // Create the string pattern with % wildcards
+        const phoneLike = `%${cleanPhone}%`;
+
         const rows = await ctx.db.executeSafe(sql`
           SELECT * FROM (
-            SELECT id, content as text, direction, EXTRACT(EPOCH FROM created_at) * 1000 as created_at_ms, model_used
+            SELECT id, content as text, direction, EXTRACT(EPOCH FROM created_at) * 1000 as created_at_ms
             FROM messages
-            WHERE phone_number = ${phone} AND (tenant_id = ${ctx.tenantId} OR tenant_id IS NULL)
+            WHERE phone_number LIKE ${phoneLike} 
+              AND (tenant_id = ${ctx.tenantId} OR tenant_id IS NULL)
             ORDER BY created_at DESC
             LIMIT 100
           ) sub

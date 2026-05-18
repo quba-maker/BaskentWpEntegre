@@ -14,7 +14,7 @@ export async function getDashboardStats() {
       sql`SELECT COUNT(*) as c FROM conversations WHERE tenant_id = ${tenantId}`,
       sql`SELECT COUNT(*) as c FROM messages WHERE tenant_id = ${tenantId}`,
       sql`SELECT COUNT(*) as c FROM leads WHERE tenant_id = ${tenantId}`,
-      sql`SELECT COUNT(*) as c FROM messages WHERE tenant_id = ${tenantId} AND direction = 'out' AND model_used IS NOT NULL AND model_used NOT IN ('panel', 'mesai-disi', 'fallback', 'none')`,
+      sql`SELECT COUNT(*) as c FROM messages WHERE tenant_id = ${tenantId} AND direction = 'out'`,
       sql`SELECT COUNT(*) as c FROM conversations WHERE tenant_id = ${tenantId} AND last_message_at >= NOW() - INTERVAL '24 hours'`,
     ]);
 

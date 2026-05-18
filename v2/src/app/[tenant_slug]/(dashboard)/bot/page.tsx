@@ -273,33 +273,7 @@ export default function BotManagementPage() {
         onResetToDefault={resetToDefault}
       />
 
-      <KnowledgeBasePanel
-        knowledgePrices={knowledgePrices}
-        knowledgeRules={knowledgeRules}
-        onPricesChange={setKnowledgePrices}
-        onRulesChange={setKnowledgeRules}
-        saving={savingKnowledge}
-        saved={saved === 'knowledge'}
-        onSave={saveKnowledgeBase}
-      />
 
-      <AIBehaviorPanel
-        botConfig={botConfig}
-        onConfigChange={handleBotConfigChange}
-      />
-
-      <AIModelControlPanel
-        currentModel={settings['ai_model']?.value || 'gemini-2.5-flash'}
-        onModelChange={handleModelChange}
-      />
-
-      <AIUsageCostPanel modelUsage={modelUsage} />
-
-      <ModerationPanel
-        bannedWords={bannedWords}
-        onAddWord={handleAddBannedWord}
-        onRemoveWord={handleRemoveBannedWord}
-      />
 
       <RecentConversationsPanel conversations={recentConvs} />
 

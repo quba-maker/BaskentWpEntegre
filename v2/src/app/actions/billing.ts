@@ -21,10 +21,10 @@ export async function getUsageStats() {
     // Güncel ay istatistikleri
     const [totalMsgs, aiMsgs, humanMsgs, channels, dailyStats] = await Promise.all([
       sql`SELECT COUNT(*) as c FROM messages WHERE tenant_id = ${tenantId} AND created_at >= DATE_TRUNC('month', NOW())`,
-      sql`SELECT COUNT(*) as c FROM messages WHERE tenant_id = ${tenantId} AND created_at >= DATE_TRUNC('month', NOW()) AND model_used IS NOT NULL AND model_used NOT IN ('panel', 'mesai-disi', 'fallback', 'none', 'human-telegram', 'retry')`,
-      sql`SELECT COUNT(*) as c FROM messages WHERE tenant_id = ${tenantId} AND created_at >= DATE_TRUNC('month', NOW()) AND direction = 'out' AND (model_used IS NULL OR model_used IN ('panel', 'human-telegram'))`,
+      sql`SELECT COUNT(*) as c FROM messages WHERE tenant_id = ${tenantId} AND created_at >= DATE_TRUNC('month', NOW()) AND direction = 'out'`,
+      sql`SELECT COUNT(*) as c FROM messages WHERE tenant_id = ${tenantId} AND created_at >= DATE_TRUNC('month', NOW()) AND direction = 'in'`,
       sql`SELECT channel, COUNT(*) as c FROM messages WHERE tenant_id = ${tenantId} AND created_at >= DATE_TRUNC('month', NOW()) GROUP BY channel`,
-      sql`SELECT DATE(created_at) as day, COUNT(*) as total, COUNT(*) FILTER (WHERE model_used IS NOT NULL AND model_used NOT IN ('panel','mesai-disi','fallback','none','human-telegram','retry')) as ai FROM messages WHERE tenant_id = ${tenantId} AND created_at >= DATE_TRUNC('month', NOW()) GROUP BY DATE(created_at) ORDER BY day`,
+      sql`SELECT DATE(created_at) as day, COUNT(*) as total, COUNT(*) FILTER (WHERE direction = 'out') as ai FROM messages WHERE tenant_id = ${tenantId} AND created_at >= DATE_TRUNC('month', NOW()) GROUP BY DATE(created_at) ORDER BY day`,
     ]);
 
     // Geçen ay karşılaştırma
@@ -107,7 +107,7 @@ export async function getAllTenantsUsage() {
       SELECT 
         t.name, t.slug, t.plan, t.status,
         COUNT(m.id) as total_messages,
-        COUNT(m.id) FILTER (WHERE m.model_used IS NOT NULL AND m.model_used NOT IN ('panel','mesai-disi','fallback','none','human-telegram','retry')) as ai_messages,
+        COUNT(m.id) FILTER (WHERE m.direction = 'out') as ai_messages,
         COUNT(DISTINCT m.phone_number) as unique_contacts,
         MAX(m.created_at) as last_activity
       FROM tenants t

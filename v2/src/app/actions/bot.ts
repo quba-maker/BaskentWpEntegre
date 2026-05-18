@@ -118,7 +118,7 @@ export async function getBotStats(period: string = '7d') {
       const interval = intervalMap[period] || '7 days';
 
       const [botMessages, handovers, totalConvs, avgResponse] = await Promise.all([
-        ctx.db.executeSafe(sql`SELECT COUNT(*) as c FROM messages WHERE tenant_id = ${ctx.tenantId} AND direction = 'out' AND model_used IS NOT NULL AND model_used != 'panel' AND created_at >= NOW() - CAST(${interval} AS INTERVAL)`),
+        ctx.db.executeSafe(sql`SELECT COUNT(*) as c FROM messages WHERE tenant_id = ${ctx.tenantId} AND direction = 'out' AND created_at >= NOW() - CAST(${interval} AS INTERVAL)`),
         ctx.db.executeSafe(sql`SELECT COUNT(*) as c FROM conversations WHERE tenant_id = ${ctx.tenantId} AND status = 'human' AND last_message_at >= NOW() - CAST(${interval} AS INTERVAL)`),
         ctx.db.executeSafe(sql`SELECT COUNT(*) as c FROM conversations WHERE tenant_id = ${ctx.tenantId} AND created_at >= NOW() - CAST(${interval} AS INTERVAL)`),
         ctx.db.executeSafe(sql`SELECT AVG(EXTRACT(EPOCH FROM (m.created_at - c.created_at)) / 60) as avg_min
@@ -164,12 +164,10 @@ export async function getModelUsage(period: string = '30d') {
       const interval = intervalMap[period] || '30 days';
 
       const usage = await ctx.db.executeSafe(sql`
-        SELECT model_used, COUNT(*) as message_count
+        SELECT 'gemini-2.5-flash' as model_used, COUNT(*) as message_count
         FROM messages 
         WHERE tenant_id = ${ctx.tenantId}
           AND direction = 'out' 
-          AND model_used IS NOT NULL 
-          AND model_used NOT IN ('panel', 'mesai-disi', 'fallback', 'none')
           AND created_at >= NOW() - CAST(${interval} AS INTERVAL)
         GROUP BY model_used ORDER BY message_count DESC
       `);
@@ -179,8 +177,6 @@ export async function getModelUsage(period: string = '30d') {
         FROM messages 
         WHERE tenant_id = ${ctx.tenantId}
           AND direction = 'out' 
-          AND model_used IS NOT NULL 
-          AND model_used NOT IN ('panel', 'mesai-disi', 'fallback', 'none')
           AND created_at >= NOW() - CAST(${interval} AS INTERVAL)
         GROUP BY channel
       `);
@@ -223,7 +219,7 @@ export async function getRecentBotConversations(limit: number = 8) {
           c.phone_number, c.patient_name, c.channel, c.status, c.temperature,
           c.phase, c.department, c.message_count, c.last_message_at, c.lead_score,
           (SELECT content FROM messages WHERE phone_number = c.phone_number AND direction = 'in' ORDER BY created_at DESC LIMIT 1) as last_patient_msg,
-          (SELECT COUNT(*) FROM messages WHERE phone_number = c.phone_number AND direction = 'out' AND model_used IS NOT NULL AND model_used NOT IN ('panel', 'mesai-disi')) as bot_msg_count
+          (SELECT COUNT(*) FROM messages WHERE phone_number = c.phone_number AND direction = 'out') as bot_msg_count
         FROM conversations c
         WHERE c.tenant_id = ${ctx.tenantId}
           AND c.message_count > 0
