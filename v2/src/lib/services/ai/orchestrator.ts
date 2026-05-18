@@ -2,6 +2,8 @@ import { logger } from "@/lib/core/logger";
 import { getTraceContext } from "@/lib/core/trace-context";
 import { CircuitBreaker } from "./circuit-breaker";
 import { CostLimiter } from "./cost-limiter";
+import { toolRegistry } from "./core/tool-registry";
+import { toolExecutor } from "./core/tool-executor";
 
 export interface AIProviderConfig {
   provider: 'gemini' | 'openai' | 'anthropic';
@@ -13,8 +15,20 @@ export interface AIProviderConfig {
 }
 
 export interface ChatMessage {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
+  role: 'system' | 'user' | 'assistant' | 'function';
+  content?: string;
+  
+  // When assistant wants to call a function
+  functionCall?: {
+    name: string;
+    args: any;
+  };
+
+  // When we return the result of a function to the assistant
+  functionResponse?: {
+    name: string;
+    response: any;
+  };
 }
 
 export interface AIResponse {
@@ -27,10 +41,8 @@ export interface AIResponse {
 }
 
 /**
- * 🎼 AI Orchestrator
- * Model sağlayıcılarını (Gemini, OpenAI) soyutlar.
- * Tenant'ın seçimine göre isteği doğru API'ye yönlendirir.
- * CircuitBreaker ve CostLimiter ile güvenliği sağlar.
+ * 🎼 AI Orchestrator (Phase 5B - Decision Engine & Runtime)
+ * Abstract provider wrapper + Tool Execution loop.
  */
 export class AIOrchestrator {
   private log = logger.withContext({ module: 'AIOrchestrator' });
@@ -38,57 +50,106 @@ export class AIOrchestrator {
   private costLimiter = new CostLimiter({ maxRequests: 50, windowSeconds: 3600 }); // Saatte 50 İstek
 
   public async generateResponse(
-    messages: ChatMessage[],
+    initialMessages: ChatMessage[],
     config: AIProviderConfig
   ): Promise<AIResponse> {
     const startTime = Date.now();
     const traceCtx = getTraceContext();
-    const tenantId = traceCtx?.tenantId;
+    const tenantId = traceCtx?.tenantId || 'unknown';
+    const conversationId = traceCtx?.conversationId || 'unknown';
+    const phoneNumber = traceCtx?.metadata?.phone || 'unknown';
     
+    // Sandbox mode layer (Prevents real execution if true)
+    const isSandbox = process.env.AI_TOOL_EXECUTION_MODE === 'sandbox';
+
     try {
-      // 1. Maliyet Koruma (Cost Limiter)
-      if (tenantId) {
+      if (tenantId !== 'unknown') {
         await this.costLimiter.consume(tenantId);
       }
 
-      let responseText = '';
-      let usageInfo = {};
+      let currentMessages = [...initialMessages];
+      let loopCount = 0;
+      const MAX_LOOPS = 5; // Guard against infinite tool loops
 
-      // 2. Devre Kesici ile LLM Çağrısı (Circuit Breaker)
-      if (config.provider === 'gemini') {
-        responseText = await this.geminiCircuit.execute(() => this.callGemini(messages, config));
-      } else if (config.provider === 'openai') {
-        // responseText = await this.callOpenAI(messages, config);
-        throw new Error("OpenAI not implemented yet");
-      } else {
-        throw new Error(`Unsupported provider: ${config.provider}`);
+      while (loopCount < MAX_LOOPS) {
+        loopCount++;
+
+        // Call LLM
+        let rawResponse: any;
+        if (config.provider === 'gemini') {
+          rawResponse = await this.geminiCircuit.execute(() => this.callGemini(currentMessages, config));
+        } else {
+          throw new Error(`Unsupported provider: ${config.provider}`);
+        }
+
+        // 1. Did LLM return standard text? (Respond Intent)
+        if (rawResponse.text) {
+          const latencyMs = Date.now() - startTime;
+          this.log.info(`LLM Execution Completed [${config.provider}/${config.modelId}]`, { latencyMs, loopCount });
+          return {
+            text: rawResponse.text,
+            providerUsed: config.provider,
+            modelUsed: config.modelId,
+            latencyMs
+          };
+        }
+
+        // 2. Did LLM return a function call? (Tool Intent)
+        if (rawResponse.functionCall) {
+          const { name, args } = rawResponse.functionCall;
+          this.log.info(`LLM Decision: Tool Call Requested`, { tool: name, args, tenantId, isSandbox });
+
+          // Add the assistant's function call intent to the history
+          currentMessages.push({
+            role: 'assistant',
+            functionCall: { name, args }
+          });
+
+          let toolResult: any;
+
+          if (isSandbox) {
+            this.log.info(`[SANDBOX] Simulating execution of ${name}`);
+            toolResult = { status: 'sandbox_simulation_ok', note: 'Execution skipped in sandbox mode.' };
+          } else {
+            // EXECUTE TOOL via ToolExecutor (Phase 5B Validation Layer)
+            try {
+              toolResult = await toolExecutor.executeTool(
+                name, 
+                args, 
+                { tenantId, conversationId, phoneNumber }
+              );
+            } catch (err: any) {
+              this.log.error(`Tool execution failed: ${name}`, err);
+              toolResult = { error: err.message };
+            }
+          }
+
+          // Push the tool result back to the LLM to get the final answer
+          currentMessages.push({
+            role: 'function',
+            functionResponse: { name, response: toolResult }
+          });
+
+          // Loop will continue and call Gemini again with the new history
+          continue;
+        }
+
+        // Edge case: Empty response
+        throw new Error("Empty response from LLM");
       }
 
-      const latencyMs = Date.now() - startTime;
-      
-      this.log.info(`LLM Execution Success [${config.provider}/${config.modelId}]`, {
-        latencyMs,
-        ...usageInfo
-      });
+      throw new Error("Max tool execution loops reached without a final text response.");
 
-      return {
-        text: responseText,
-        providerUsed: config.provider,
-        modelUsed: config.modelId,
-        latencyMs
-      };
     } catch (e: any) {
       this.log.error(`LLM Execution Failed [${config.provider}]`, e);
       
-      // Anomaly durumlarında kullanıcıya özel fallback
       let fallbackText = "Şu an yoğunluk nedeniyle yanıt veremiyorum. Lütfen daha sonra tekrar deneyiniz.";
       if (e.message?.startsWith('COST_LIMIT_EXCEEDED')) {
         fallbackText = "Sistem aşırı kullanım nedeniyle geçici olarak durduruldu. Lütfen biraz bekleyin.";
       } else if (e.message?.startsWith('CIRCUIT_OPEN')) {
-         fallbackText = "AI servis sağlayıcımızda şu an bir kesinti yaşıyoruz. Mühendislerimiz konuyla ilgileniyor.";
+        fallbackText = "AI servis sağlayıcımızda şu an bir kesinti yaşıyoruz. Mühendislerimiz konuyla ilgileniyor.";
       }
 
-      // Fallback response
       return {
         text: fallbackText,
         providerUsed: 'fallback',
@@ -98,28 +159,66 @@ export class AIOrchestrator {
     }
   }
 
-  private async callGemini(messages: ChatMessage[], config: AIProviderConfig): Promise<string> {
-    // Sadece system instruction'ı ayıkla
+  private async callGemini(messages: ChatMessage[], config: AIProviderConfig): Promise<{text?: string, functionCall?: {name: string, args: any}}> {
     const systemMsg = messages.find(m => m.role === 'system');
-    const conversation = messages.filter(m => m.role !== 'system').map(m => ({
-      role: m.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: m.content }]
-    }));
+    
+    // Map standard messages to Gemini format
+    const contents: any[] = [];
+    
+    for (const m of messages) {
+      if (m.role === 'system') continue;
+      
+      if (m.role === 'user') {
+        contents.push({ role: 'user', parts: [{ text: m.content || '' }] });
+      } else if (m.role === 'assistant') {
+        if (m.content) {
+          contents.push({ role: 'model', parts: [{ text: m.content }] });
+        } else if (m.functionCall) {
+          contents.push({
+            role: 'model',
+            parts: [{ functionCall: { name: m.functionCall.name, args: m.functionCall.args } }]
+          });
+        }
+      } else if (m.role === 'function') {
+        contents.push({
+          role: 'user', // Gemini expects tool responses to come from user/tool role
+          parts: [{
+            functionResponse: {
+              name: m.functionResponse?.name,
+              response: { name: m.functionResponse?.name, content: m.functionResponse?.response }
+            }
+          }]
+        });
+      }
+    }
+
+    // Attach registered tools to the LLM (Tool Registry Phase 5A)
+    const registeredTools = toolRegistry.getDefinitionsForLLM();
+    let toolsParam: any = undefined;
+    
+    if (registeredTools && registeredTools.length > 0) {
+      toolsParam = [{
+        functionDeclarations: registeredTools
+      }];
+    }
+
+    const payload = {
+      systemInstruction: systemMsg ? { parts: [{ text: systemMsg.content }] } : undefined,
+      contents,
+      tools: toolsParam,
+      generationConfig: {
+        temperature: config.temperature,
+        maxOutputTokens: config.maxTokens,
+        responseMimeType: config.responseFormat === 'json' ? 'application/json' : undefined
+      }
+    };
 
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${config.modelId}:generateContent?key=${config.apiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          systemInstruction: systemMsg ? { parts: [{ text: systemMsg.content }] } : undefined,
-          contents: conversation,
-          generationConfig: {
-            temperature: config.temperature,
-            maxOutputTokens: config.maxTokens,
-            responseMimeType: config.responseFormat === 'json' ? 'application/json' : undefined
-          }
-        })
+        body: JSON.stringify(payload)
       }
     );
 
@@ -129,6 +228,23 @@ export class AIOrchestrator {
     }
 
     const data = await response.json();
-    return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    const candidate = data.candidates?.[0];
+    const part = candidate?.content?.parts?.[0];
+
+    if (!part) {
+      throw new Error("No response parts received from Gemini");
+    }
+
+    if (part.functionCall) {
+      return {
+        functionCall: {
+          name: part.functionCall.name,
+          args: part.functionCall.args
+        }
+      };
+    }
+
+    return { text: part.text || '' };
   }
 }
+

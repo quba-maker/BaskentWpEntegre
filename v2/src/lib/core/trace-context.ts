@@ -5,6 +5,10 @@ export interface TraceContext {
   tenantId?: string;
   spanId?: string;
   conversationId?: string;
+  metadata?: {
+    phone?: string;
+    [key: string]: any;
+  };
 }
 
 /**
