@@ -1,11 +1,13 @@
-import { RotateCcw, Save, Check } from "lucide-react";
+import { RotateCcw, Save, Check, Shield, UserCircle, ListChecks, Layers } from "lucide-react";
 import { type BotChannel } from "./shared";
 import { useConfirm } from "@/components/ui/confirm-dialog";
+import { useState, useEffect } from "react";
 
 // ==========================================
-// PROMPT GOVERNANCE PANEL
+// PROMPT GOVERNANCE PANEL (Modular / Parçalı Yapı)
 // Authority: System prompt editing, saving, resetting
 // Data owner: system_prompt_* bot settings
+// Design: Apple/Linear level premium UX for structured prompting
 // ==========================================
 
 interface PromptGovernancePanelProps {
@@ -20,6 +22,41 @@ interface PromptGovernancePanelProps {
   onSave: (channelId: string) => void;
   onResetToDefault: (channelId: string) => void;
 }
+
+// Prompt'u parçalara ayırma ve birleştirme mantığı
+const parsePrompt = (fullPrompt: string) => {
+  const parts = {
+    identity: "",
+    instructions: "",
+    constraints: ""
+  };
+  
+  if (!fullPrompt) return parts;
+
+  // Basit bir regex parser veya string matching
+  // Eğer daha önceden parçalı kaydedilmişse başlıklarla ayır
+  if (fullPrompt.includes("--- IDENTITY ---")) {
+    const idMatch = fullPrompt.match(/--- IDENTITY ---\n([\s\S]*?)(?=\n--- INSTRUCTIONS ---|\n--- CONSTRAINTS ---|$)/);
+    const inMatch = fullPrompt.match(/--- INSTRUCTIONS ---\n([\s\S]*?)(?=\n--- CONSTRAINTS ---|$)/);
+    const coMatch = fullPrompt.match(/--- CONSTRAINTS ---\n([\s\S]*?)$/);
+    
+    parts.identity = idMatch ? idMatch[1].trim() : "";
+    parts.instructions = inMatch ? inMatch[1].trim() : "";
+    parts.constraints = coMatch ? coMatch[1].trim() : "";
+  } else {
+    // Legacy prompt ise tamamını instructions'a at
+    parts.instructions = fullPrompt;
+  }
+  return parts;
+};
+
+const compilePrompt = (identity: string, instructions: string, constraints: string) => {
+  let result = "";
+  if (identity.trim()) result += `--- IDENTITY ---\n${identity.trim()}\n\n`;
+  if (instructions.trim()) result += `--- INSTRUCTIONS ---\n${instructions.trim()}\n\n`;
+  if (constraints.trim()) result += `--- CONSTRAINTS ---\n${constraints.trim()}`;
+  return result.trim();
+};
 
 export function PromptGovernancePanel({
   channels,
@@ -36,6 +73,36 @@ export function PromptGovernancePanel({
   const confirm = useConfirm();
   const activeChannel = channels.find(c => c.id === activeTab)!;
 
+  // Local state for modular inputs
+  const [identity, setIdentity] = useState("");
+  const [instructions, setInstructions] = useState("");
+  const [constraints, setConstraints] = useState("");
+
+  // Sync from props
+  useEffect(() => {
+    const raw = prompts[activeTab] || "";
+    const parsed = parsePrompt(raw);
+    setIdentity(parsed.identity);
+    setInstructions(parsed.instructions);
+    setConstraints(parsed.constraints);
+  }, [prompts, activeTab]);
+
+  const handleModularChange = (key: 'identity' | 'instructions' | 'constraints', val: string) => {
+    let newId = identity;
+    let newIn = instructions;
+    let newCo = constraints;
+
+    if (key === 'identity') newId = val;
+    if (key === 'instructions') newIn = val;
+    if (key === 'constraints') newCo = val;
+
+    setIdentity(newId);
+    setInstructions(newIn);
+    setConstraints(newCo);
+
+    onPromptChange(activeTab, compilePrompt(newId, newIn, newCo));
+  };
+
   const handleReset = async () => {
     const ok = await confirm({
       title: "Varsayılana Dön",
@@ -47,7 +114,7 @@ export function PromptGovernancePanel({
   };
 
   return (
-    <div className="flex-1 flex flex-col">
+    <div className="flex-1 flex flex-col mb-8 mt-4">
       {/* Tab Bar */}
       <div className="flex items-center gap-1 p-1 bg-black/[0.04] rounded-xl mb-6 w-fit">
         {channels.map(ch => {
@@ -56,7 +123,7 @@ export function PromptGovernancePanel({
             <button
               key={ch.id}
               onClick={() => onTabChange(ch.id)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-200 ${
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all duration-200 ${
                 activeTab === ch.id
                   ? "bg-white text-[--q-text-primary] shadow-sm"
                   : "text-[--q-text-secondary] hover:text-[--q-text-primary]"
@@ -70,70 +137,122 @@ export function PromptGovernancePanel({
       </div>
 
       {/* Editor Card */}
-      <div className="bg-white rounded-2xl border border-[--q-border-default] shadow-sm overflow-hidden flex-1 flex flex-col">
+      <div className="bg-white rounded-2xl border border-[--q-border-default] shadow-sm flex-1 flex flex-col">
         {/* Editor Header */}
-        <div className="px-6 py-4 border-b border-[--q-border-default] flex items-center justify-between">
-          <div className="flex items-center gap-3">
+        <div className="px-6 py-5 border-b border-[--q-border-default] flex items-center justify-between bg-[--q-bg-secondary] rounded-t-2xl">
+          <div className="flex items-center gap-4">
             <div 
-              className="w-8 h-8 rounded-lg flex items-center justify-center"
-              style={{ backgroundColor: `${activeChannel.color}15` }}
+              className="w-10 h-10 rounded-xl flex items-center justify-center shadow-sm"
+              style={{ backgroundColor: `${activeChannel.color}15`, border: `1px solid ${activeChannel.color}30` }}
             >
-              <activeChannel.icon className="w-4 h-4" style={{ color: activeChannel.color }} />
+              <activeChannel.icon className="w-5 h-5" style={{ color: activeChannel.color }} />
             </div>
             <div>
-              <h3 className="text-base font-bold text-[--q-text-primary]">{activeChannel.label} Prompt</h3>
-              <p className="text-[11px] text-[--q-text-secondary] font-medium">
+              <h3 className="text-[15px] font-bold text-[--q-text-primary] flex items-center gap-2">
+                {activeChannel.label} Yapılandırması
+                <span className="px-2 py-0.5 rounded text-[10px] uppercase tracking-wider font-bold bg-[--q-bg-primary] border border-[--q-border-strong] text-[--q-text-secondary]">
+                  MODÜLER PROMPT
+                </span>
+              </h3>
+              <p className="text-[12px] text-[--q-text-secondary] font-medium mt-0.5">
                 {settings[activeChannel.promptKey]?.updated_at 
-                  ? `Son güncelleme: ${new Date(settings[activeChannel.promptKey].updated_at).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`
+                  ? `Son güncelleme: ${new Date(settings[activeChannel.promptKey].updated_at).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`
                   : "Varsayılan prompt kullanılıyor"
                 }
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            {/* Reset Button */}
+          <div className="flex items-center gap-3">
             <button
               onClick={handleReset}
-              className="px-3 py-1.5 text-xs font-semibold text-[--q-orange] bg-[--q-orange-bg] border border-[--q-orange] rounded-lg hover:bg-[--q-orange-bg] transition-colors flex items-center gap-1.5"
+              className="px-4 py-2 text-[13px] font-bold text-[--q-orange] bg-white border border-[--q-border-strong] rounded-xl hover:bg-[--q-orange-bg] hover:border-[--q-orange] transition-colors flex items-center gap-2 shadow-sm"
             >
-              <RotateCcw className="w-3.5 h-3.5" />
+              <RotateCcw className="w-4 h-4" />
               Varsayılana Dön
             </button>
 
-            {/* Save Button */}
             <button
               onClick={() => onSave(activeTab)}
               disabled={saving === activeTab}
-              className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 ${
+              className={`px-5 py-2 text-[13px] font-bold rounded-xl transition-all flex items-center gap-2 shadow-sm ${
                 saved === activeTab
                   ? "bg-[--q-green] text-white"
-                  : "bg-[--q-blue] text-white hover:bg-[--q-blue-hover] shadow-sm"
+                  : "bg-[--q-blue] text-white hover:bg-[--q-blue-hover]"
               }`}
             >
               {saving === activeTab ? (
-                <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
               ) : saved === activeTab ? (
-                <Check className="w-3.5 h-3.5" />
+                <Check className="w-4 h-4" />
               ) : (
-                <Save className="w-3.5 h-3.5" />
+                <Save className="w-4 h-4" />
               )}
-              {saved === activeTab ? "Kaydedildi!" : "Kaydet"}
+              {saved === activeTab ? "Kaydedildi" : "Değişiklikleri Kaydet"}
             </button>
           </div>
         </div>
 
-        {/* Textarea */}
-        <div className="flex-1 p-0">
-          <textarea
-            value={prompts[activeTab] || ""}
-            onChange={(e) => onPromptChange(activeTab, e.target.value)}
-            className="w-full h-full min-h-[400px] p-6 text-[13px] leading-relaxed font-mono text-[--q-text-primary] bg-[--q-bg-secondary] border-0 outline-none resize-none placeholder:text-[--q-text-placeholder]"
-            placeholder={`${activeChannel.label} için sistem prompt'unu buraya yazın...`}
-            spellCheck={false}
-          />
+        {/* Modular Editor Areas */}
+        <div className="flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-[--q-border-default] flex-1">
+          
+          {/* Identity & Role */}
+          <div className="flex-1 p-6 flex flex-col gap-3 hover:bg-[--q-bg-secondary] transition-colors duration-300">
+            <div className="flex items-center gap-2 text-[--q-blue] mb-2">
+              <UserCircle className="w-5 h-5" />
+              <h4 className="font-bold text-[14px]">Kimlik & Rol</h4>
+            </div>
+            <p className="text-[12px] text-[--q-text-secondary] font-medium leading-relaxed">
+              Botun kim olduğunu, hangi kurumu temsil ettiğini ve genel misyonunu buraya yazın.
+            </p>
+            <textarea
+              value={identity}
+              onChange={(e) => handleModularChange('identity', e.target.value)}
+              className="w-full flex-1 min-h-[200px] p-4 text-[13px] leading-relaxed font-mono text-[--q-text-primary] bg-white border border-[--q-border-default] rounded-xl outline-none resize-none focus:ring-2 ring-[--q-blue] transition-shadow shadow-sm"
+              placeholder="Sen Başkent Üniversitesi adına çalışan profesyonel bir asistansın..."
+              spellCheck={false}
+            />
+          </div>
+
+          {/* Instructions */}
+          <div className="flex-1 p-6 flex flex-col gap-3 hover:bg-[--q-bg-secondary] transition-colors duration-300">
+            <div className="flex items-center gap-2 text-[--q-purple] mb-2">
+              <ListChecks className="w-5 h-5" />
+              <h4 className="font-bold text-[14px]">Davranış & Talimatlar</h4>
+            </div>
+            <p className="text-[12px] text-[--q-text-secondary] font-medium leading-relaxed">
+              Hastayla nasıl konuşması gerektiğini, yönlendirme akışını ve ikna adımlarını belirleyin.
+            </p>
+            <textarea
+              value={instructions}
+              onChange={(e) => handleModularChange('instructions', e.target.value)}
+              className="w-full flex-1 min-h-[200px] p-4 text-[13px] leading-relaxed font-mono text-[--q-text-primary] bg-white border border-[--q-border-default] rounded-xl outline-none resize-none focus:ring-2 ring-[--q-purple] transition-shadow shadow-sm"
+              placeholder="Hastayı dinle, anla ve doğal akışta WhatsApp'a veya Randevuya yönlendir..."
+              spellCheck={false}
+            />
+          </div>
+
+          {/* Constraints */}
+          <div className="flex-1 p-6 flex flex-col gap-3 hover:bg-[--q-bg-secondary] transition-colors duration-300">
+            <div className="flex items-center gap-2 text-[--q-red] mb-2">
+              <Shield className="w-5 h-5" />
+              <h4 className="font-bold text-[14px]">Kesin Yasaklar</h4>
+            </div>
+            <p className="text-[12px] text-[--q-text-secondary] font-medium leading-relaxed">
+              Botun ASLA yapmaması gerekenleri, vermemesi gereken sözleri ve yasaklı davranışları yazın.
+            </p>
+            <textarea
+              value={constraints}
+              onChange={(e) => handleModularChange('constraints', e.target.value)}
+              className="w-full flex-1 min-h-[200px] p-4 text-[13px] leading-relaxed font-mono text-[--q-text-primary] bg-white border border-[--q-border-default] rounded-xl outline-none resize-none focus:ring-2 ring-[--q-red] transition-shadow shadow-sm"
+              placeholder="ASLA kesin fiyat verme. ASLA doktor ismi verme..."
+              spellCheck={false}
+            />
+          </div>
+
         </div>
       </div>
     </div>
   );
 }
+

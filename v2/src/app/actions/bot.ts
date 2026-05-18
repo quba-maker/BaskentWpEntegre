@@ -98,14 +98,11 @@ export async function getDefaultPrompts() {
   return withActionGuard(
     { actionName: 'getDefaultPrompts' },
     async (ctx) => {
-      let tenantName = "Firma";
-      const t = await ctx.db.executeSafe(sql`SELECT name FROM tenants WHERE id = ${ctx.tenantId}`);
-      if (t[0]?.name) tenantName = t[0].name;
-
+      const { defaultPrompts } = await import('@/lib/domain/conversation/prompts');
       return {
-        whatsapp: `Sen ${tenantName} adına çalışan profesyonel bir müşteri danışmanısın.\n\nGÖREVİN:\nGelen mesajları analiz ederek müşteriye kısa, güven veren, profesyonel cevaplar vermek. Müşteriyi önce anla, sonra doğal akışta randevuya/satışa yönlendir.\n\nTEMEL KURALLAR:\n1) Kullanıcının yazdığı dilde cevap ver.\n2) Kısa, net ve WhatsApp formatında mesajlar yaz.\n3) Samimi, sıcak ama profesyonel ol.\n4) ASLA "Sizi şimdi arıyorum" gibi yalan söyleme.\n\nİKNA TEKNİKLERİ:\n1. EMPATİ: Müşterinin ihtiyacını anla.\n2. SOSYAL KANIT: "Benzer durumda müşterilerimiz çok memnun kaldı."\n3. KOLAYLIK: "Tüm süreci biz organize ediyoruz."\n\nHEDEF: Her konuşmayı doğal, ikna edici ve empatik şekilde randevuya/satışa dönüştür.`,
-        turkish: `Sen ${tenantName} firmasının Türkçe sosyal medya (Instagram/Facebook) müşteri danışmanısın.\n\nGÖREVİN:\nSosyal medyadan gelen mesajları akıllıca analiz et. Kimin ne amaçla yazdığını tespit et ve ona göre davran.\n\nKURALLAR:\n- Kısa ve samimi mesajlar (2-4 cümle)\n- Emoji: 1-2 max (🙏, 😊)\n- Gerçek müşteriyi 2-3 mesaj sonra doğal şekilde WhatsApp'a yönlendir.`,
-        foreign: `You are a professional consultant representing ${tenantName}.\n\nCRITICAL LANGUAGE RULE:\nDetect the language of the user's LAST message. Respond ENTIRELY in that language. NEVER default to Turkish.\n\nCONSULTATION FLOW:\n1. LISTEN & UNDERSTAND\n2. SOLUTION MAPPING\n3. THE CLOSE\n\nCORE RULES:\n- Professional, warm tone\n- 2-4 sentences per message\n- Guide to WhatsApp for detailed conversation`
+        whatsapp: defaultPrompts.whatsapp,
+        turkish: defaultPrompts.instagram,
+        foreign: defaultPrompts.foreign
       };
     }
   ).then(res => res.data || { whatsapp: '', turkish: '', foreign: '' });
