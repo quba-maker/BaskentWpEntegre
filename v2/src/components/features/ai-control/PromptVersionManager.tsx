@@ -99,23 +99,26 @@ export function PromptVersionManager() {
                           AKTİF
                         </span>
                       )}
-                      <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full"
-                            style={{ 
-                              background: v.prompt_key === 'system_prompt_tr' 
-                                ? 'color-mix(in srgb, var(--q-purple, #8b5cf6) 10%, transparent)' 
-                                : v.prompt_key === 'system_prompt_foreign' 
-                                  ? 'color-mix(in srgb, var(--q-blue) 10%, transparent)' 
-                                  : 'color-mix(in srgb, var(--q-whatsapp, #25d366) 10%, transparent)',
-                              color: v.prompt_key === 'system_prompt_tr' 
-                                ? 'var(--q-purple, #8b5cf6)' 
-                                : v.prompt_key === 'system_prompt_foreign' 
-                                  ? 'var(--q-blue)' 
-                                  : 'var(--q-whatsapp, #25d366)'
-                            }}>
-                        {v.prompt_key === 'system_prompt_tr' ? 'Sosyal Medya TR' 
-                         : v.prompt_key === 'system_prompt_foreign' ? 'Uluslararası' 
-                         : 'WhatsApp'}
-                      </span>
+                      {(() => {
+                        const pk = v.prompt_key || (v.change_summary?.includes('system_prompt_tr') ? 'system_prompt_tr' : v.change_summary?.includes('system_prompt_foreign') ? 'system_prompt_foreign' : 'system_prompt_whatsapp');
+                        const label = pk === 'system_prompt_tr' ? 'Sosyal Medya TR' : pk === 'system_prompt_foreign' ? 'Uluslararası' : 'WhatsApp';
+                        const bgColor = pk === 'system_prompt_tr' 
+                          ? 'color-mix(in srgb, var(--q-purple, #8b5cf6) 10%, transparent)' 
+                          : pk === 'system_prompt_foreign' 
+                            ? 'color-mix(in srgb, var(--q-blue) 10%, transparent)' 
+                            : 'color-mix(in srgb, var(--q-whatsapp, #25d366) 10%, transparent)';
+                        const fgColor = pk === 'system_prompt_tr' 
+                          ? 'var(--q-purple, #8b5cf6)' 
+                          : pk === 'system_prompt_foreign' 
+                            ? 'var(--q-blue)' 
+                            : 'var(--q-whatsapp, #25d366)';
+                        return (
+                          <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full"
+                                style={{ background: bgColor, color: fgColor }}>
+                            {label}
+                          </span>
+                        );
+                      })()}
                     </div>
                     <div className="flex items-center gap-3 text-[11px]" style={{ color: 'var(--q-text-secondary)' }}>
                       <span className="flex items-center gap-1"><User className="w-3 h-3" />{v.changed_by}</span>

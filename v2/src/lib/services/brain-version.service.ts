@@ -16,6 +16,23 @@ import crypto from 'crypto';
 
 const log = logger.withContext({ module: 'BrainVersionService' });
 
+// Check if prompt_key column exists (cached after first check)
+let _hasPromptKeyColumn: boolean | null = null;
+
+async function hasPromptKeyColumn(): Promise<boolean> {
+  if (_hasPromptKeyColumn !== null) return _hasPromptKeyColumn;
+  try {
+    const result = await sql`
+      SELECT column_name FROM information_schema.columns 
+      WHERE table_name = 'brain_versions' AND column_name = 'prompt_key'
+    `;
+    _hasPromptKeyColumn = result.length > 0;
+  } catch {
+    _hasPromptKeyColumn = false;
+  }
+  return _hasPromptKeyColumn;
+}
+
 export class BrainVersionService {
 
   /**
@@ -44,24 +61,46 @@ export class BrainVersionService {
     `;
     const nextVersion = (parseInt(latestVersion[0]?.max_version) || 0) + 1;
 
-    // Deactivate previous versions for the SAME prompt_key only
-    await sql`
-      UPDATE brain_versions SET is_active = false 
-      WHERE tenant_id = ${tenantId} AND prompt_key = ${promptKey}
-    `;
+    const hasColumn = await hasPromptKeyColumn();
 
-    // Insert new version
-    await sql`
-      INSERT INTO brain_versions (
-        tenant_id, version_number, system_prompt, prompt_key, knowledge_snapshot,
-        changed_by, change_summary, prompt_hash, is_active
-      ) VALUES (
-        ${tenantId}, ${nextVersion}, ${systemPrompt}, ${promptKey},
-        ${knowledge ? JSON.stringify(knowledge) : null}::jsonb,
-        ${changedBy || 'admin'}, ${changeSummary || `Version ${nextVersion}`},
-        ${promptHash}, true
-      )
-    `;
+    if (hasColumn) {
+      // Deactivate previous versions for the SAME prompt_key only
+      await sql`
+        UPDATE brain_versions SET is_active = false 
+        WHERE tenant_id = ${tenantId} AND prompt_key = ${promptKey}
+      `;
+
+      // Insert new version with prompt_key
+      await sql`
+        INSERT INTO brain_versions (
+          tenant_id, version_number, system_prompt, prompt_key, knowledge_snapshot,
+          changed_by, change_summary, prompt_hash, is_active
+        ) VALUES (
+          ${tenantId}, ${nextVersion}, ${systemPrompt}, ${promptKey},
+          ${knowledge ? JSON.stringify(knowledge) : null}::jsonb,
+          ${changedBy || 'admin'}, ${changeSummary || `Version ${nextVersion}`},
+          ${promptHash}, true
+        )
+      `;
+    } else {
+      // Fallback: table exists but without prompt_key column
+      await sql`
+        UPDATE brain_versions SET is_active = false 
+        WHERE tenant_id = ${tenantId}
+      `;
+
+      await sql`
+        INSERT INTO brain_versions (
+          tenant_id, version_number, system_prompt, knowledge_snapshot,
+          changed_by, change_summary, prompt_hash, is_active
+        ) VALUES (
+          ${tenantId}, ${nextVersion}, ${systemPrompt},
+          ${knowledge ? JSON.stringify(knowledge) : null}::jsonb,
+          ${changedBy || 'admin'}, ${changeSummary || `Version ${nextVersion}`},
+          ${promptHash}, true
+        )
+      `;
+    }
 
     log.info(`[BRAIN_VERSIONED] v${nextVersion} saved for ${promptKey}`, { tenantId, promptHash: promptHash.substring(0, 12) });
 
@@ -73,9 +112,24 @@ export class BrainVersionService {
    * Returns all prompt versions across all channels.
    */
   static async getHistory(tenantId: string, limit = 20): Promise<any[]> {
+    const hasColumn = await hasPromptKeyColumn();
+    
+    if (hasColumn) {
+      return await sql`
+        SELECT id, version_number, changed_by, change_summary, prompt_hash, 
+               prompt_key, is_active, created_at,
+               LEFT(system_prompt, 200) as prompt_preview
+        FROM brain_versions
+        WHERE tenant_id = ${tenantId}
+        ORDER BY version_number DESC
+        LIMIT ${limit}
+      `;
+    }
+
+    // Fallback without prompt_key
     return await sql`
       SELECT id, version_number, changed_by, change_summary, prompt_hash, 
-             prompt_key, is_active, created_at,
+             is_active, created_at,
              LEFT(system_prompt, 200) as prompt_preview
       FROM brain_versions
       WHERE tenant_id = ${tenantId}
@@ -106,9 +160,15 @@ export class BrainVersionService {
 
     // Determine which settings key to update
     const promptKey = version.prompt_key || 'system_prompt_whatsapp';
+    const hasColumn = await hasPromptKeyColumn();
 
-    // Deactivate all versions for the SAME prompt_key, activate target
-    await sql`UPDATE brain_versions SET is_active = false WHERE tenant_id = ${tenantId} AND prompt_key = ${promptKey}`;
+    if (hasColumn) {
+      // Deactivate all versions for the SAME prompt_key, activate target
+      await sql`UPDATE brain_versions SET is_active = false WHERE tenant_id = ${tenantId} AND prompt_key = ${promptKey}`;
+    } else {
+      await sql`UPDATE brain_versions SET is_active = false WHERE tenant_id = ${tenantId}`;
+    }
+    
     await sql`UPDATE brain_versions SET is_active = true WHERE tenant_id = ${tenantId} AND version_number = ${versionNumber}`;
 
     // Update the actual tenant brain prompt in settings (key-value table)
@@ -128,9 +188,21 @@ export class BrainVersionService {
    */
   static async getActiveVersion(tenantId: string, promptKey?: string): Promise<any | null> {
     const key = promptKey || 'system_prompt_whatsapp';
+    const hasColumn = await hasPromptKeyColumn();
+
+    if (hasColumn) {
+      const rows = await sql`
+        SELECT * FROM brain_versions
+        WHERE tenant_id = ${tenantId} AND is_active = true AND prompt_key = ${key}
+        ORDER BY version_number DESC
+        LIMIT 1
+      `;
+      return rows[0] || null;
+    }
+
     const rows = await sql`
       SELECT * FROM brain_versions
-      WHERE tenant_id = ${tenantId} AND is_active = true AND prompt_key = ${key}
+      WHERE tenant_id = ${tenantId} AND is_active = true
       ORDER BY version_number DESC
       LIMIT 1
     `;
