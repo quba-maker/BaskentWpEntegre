@@ -18,7 +18,7 @@ import { SectionCard, ToggleSwitch } from "@/components/governance";
 // ==========================================
 
 // Modules managed elsewhere — don't show in pipeline
-const MANAGED_ELSEWHERE = ['working-hours', 'banned-words', 'auto-handover'];
+const MANAGED_ELSEWHERE = ['working-hours', 'banned-words', 'auto-handover', 'industry-prompt', 'phase-manager', 'message-formatter', 'sentiment-analyzer'];
 
 const TYPE_META: Record<string, { label: string; icon: any; color: string }> = {
   [MODULE_TYPES.PREPROCESSOR]: { label: "Ön İşleme", icon: Filter, color: "var(--q-blue)" },
@@ -141,7 +141,6 @@ export function AIPipelinePanel() {
                     </div>
 
                     <div className="flex items-center gap-2 flex-shrink-0">
-                      <span className="text-[10px] font-mono" style={{ color: "var(--q-text-secondary)" }}>v{info.version}</span>
 
                       {Object.keys(info.configSchema).length > 0 && (
                         <button

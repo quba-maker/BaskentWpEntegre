@@ -15,15 +15,13 @@ import {
   BotPerformancePanel,
   ChannelStatusPanel,
   PromptGovernancePanel,
-  KnowledgeBasePanel,
   AIUsageCostPanel,
-  ModerationPanel,
   RecentConversationsPanel,
   BotTestPlayground,
   AIPipelinePanel,
+  UnifiedSettingsPanel,
   type BotChannel,
 } from "./_components";
-import { SettingRow } from "./_components/shared";
 
 // ==========================================
 // CHANNEL DEFINITIONS
@@ -56,13 +54,6 @@ const channels: BotChannel[] = [
     color: "var(--q-blue)",
     description: "Yabancı dilde gelen hastalar — Çok dilli otomatik yanıt"
   }
-];
-
-// AI MODELS
-const AI_MODELS = [
-  { id: 'gemini-2.5-flash-lite', name: 'Flash Lite', desc: 'Hızlı & Ekonomik', speed: 95, cost: 20, iq: 60, color: 'var(--q-green)' },
-  { id: 'gemini-2.5-flash', name: 'Flash', desc: 'Dengeli (Önerilen)', speed: 85, cost: 40, iq: 85, color: 'var(--q-blue)' },
-  { id: 'gemini-2.5-pro', name: 'Pro', desc: 'Güçlü & Pahalı', speed: 50, cost: 90, iq: 98, color: 'var(--q-purple)' },
 ];
 
 // ==========================================
@@ -282,130 +273,38 @@ export default function BotManagementPage() {
         onResetToDefault={resetToDefault}
       />
 
-      {/* 4. BOT AYARLARI (Konsolide — tek panel) */}
-      <div className="mt-8">
-        <h2 className="text-lg font-bold mb-4 flex items-center gap-2" style={{ color: "var(--q-text-primary)" }}>
-          <Settings2 className="w-5 h-5" style={{ color: "var(--q-text-secondary)" }} />
-          Bot Yapılandırması
-        </h2>
-        <div className="bg-white rounded-2xl border shadow-sm divide-y divide-black/5" style={{ borderColor: "var(--q-border-default)" }}>
-          {/* Auto Greeting */}
-          <SettingRow icon={Zap} iconColor="var(--q-orange)" title="Otonom Karşılama" description="Yeni lead geldiğinde otomatik WhatsApp mesajı gönder">
-            <ToggleSwitch active={botConfig.auto_greeting === "true"} onToggle={() => handleBotConfigChange("auto_greeting", botConfig.auto_greeting === "true" ? "false" : "true")} />
-          </SettingRow>
-
-          {/* Greeting Language */}
-          <SettingRow icon={Globe} iconColor="var(--q-blue)" title="Karşılama Dili" description="Otomatik karşılama mesajının dili">
-            <select value={botConfig.greeting_language} onChange={e => handleBotConfigChange("greeting_language", e.target.value)} className="px-3 py-1.5 text-sm font-semibold border-0 rounded-lg outline-none cursor-pointer" style={{ color: "var(--q-text-primary)", backgroundColor: "rgba(0,0,0,0.04)" }}>
-              <option value="auto">Otomatik</option>
-              <option value="tr">Türkçe</option>
-              <option value="en">İngilizce</option>
-            </select>
-          </SettingRow>
-
-          {/* Max Messages */}
-          <SettingRow icon={MessageSquare} iconColor="var(--q-purple)" title="Maksimum Bot Mesajı" description="Bot kaç mesaj sonra insana devretsin">
-            <select value={botConfig.max_messages} onChange={e => handleBotConfigChange("max_messages", e.target.value)} className="px-3 py-1.5 text-sm font-semibold border-0 rounded-lg outline-none cursor-pointer" style={{ color: "var(--q-text-primary)", backgroundColor: "rgba(0,0,0,0.04)" }}>
-              <option value="5">5</option>
-              <option value="8">8</option>
-              <option value="12">12</option>
-              <option value="20">20</option>
-              <option value="0">Sınırsız</option>
-            </select>
-          </SettingRow>
-
-          {/* Working Hours */}
-          <SettingRow icon={Clock} iconColor="var(--q-green)" title="Çalışma Saatleri" description="Botun aktif olacağı zaman dilimi">
-            <select value={botConfig.working_hours} onChange={e => handleBotConfigChange("working_hours", e.target.value)} className="px-3 py-1.5 text-sm font-semibold border-0 rounded-lg outline-none cursor-pointer" style={{ color: "var(--q-text-primary)", backgroundColor: "rgba(0,0,0,0.04)" }}>
-              <option value="24/7">7/24 Aktif</option>
-              <option value="business">Mesai (09-18)</option>
-              <option value="after_hours">Mesai Dışı (18-09)</option>
-            </select>
-          </SettingRow>
-
-          {/* Aggression Level */}
-          <SettingRow icon={Shield} iconColor="var(--q-red)" title="İkna Seviyesi" description="Botun satış agresiflik düzeyi">
-            <div className="flex items-center gap-1 p-0.5 bg-black/[0.04] rounded-lg">
-              {[
-                { value: "low", label: "Düşük" },
-                { value: "medium", label: "Orta" },
-                { value: "high", label: "Yüksek" }
-              ].map(opt => (
-                <button
-                  key={opt.value}
-                  onClick={() => handleBotConfigChange("aggression_level", opt.value)}
-                  className="px-3 py-1.5 text-xs font-bold rounded-md transition-all"
-                  style={{
-                    backgroundColor: botConfig.aggression_level === opt.value ? "white" : "transparent",
-                    color: botConfig.aggression_level === opt.value ? "var(--q-text-primary)" : "var(--q-text-secondary)",
-                    boxShadow: botConfig.aggression_level === opt.value ? "0 1px 3px rgba(0,0,0,0.1)" : "none"
-                  }}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-          </SettingRow>
-
-          {/* AI Model — Inline */}
-          <SettingRow icon={Cpu} iconColor="var(--q-purple-alt)" title="Yapay Zeka Modeli" description="AI yanıtları için kullanılacak model">
-            <div className="flex items-center gap-1.5">
-              {AI_MODELS.map(m => {
-                const isActive = botConfig.ai_model === m.id;
-                return (
-                  <button
-                    key={m.id}
-                    onClick={() => handleBotConfigChange("ai_model", m.id)}
-                    className="px-3 py-1.5 text-xs font-bold rounded-lg border transition-all"
-                    style={isActive 
-                      ? { backgroundColor: m.color, borderColor: m.color, color: "white", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" } 
-                      : { borderColor: "var(--q-border-default)", color: "var(--q-text-secondary)", backgroundColor: "white" }
-                    }
-                  >
-                    {isActive && <Check className="w-3 h-3 inline mr-1 -mt-0.5" />}
-                    {m.name}
-                  </button>
-                );
-              })}
-            </div>
-          </SettingRow>
-        </div>
-      </div>
-
-      {/* 5. BİLGİ BANKASI */}
-      <KnowledgeBasePanel
-        knowledgePrices={knowledgePrices}
-        knowledgeRules={knowledgeRules}
-        onPricesChange={setKnowledgePrices}
-        onRulesChange={setKnowledgeRules}
-        saving={savingKnowledge}
-        saved={saved === 'knowledge'}
-        onSave={saveKnowledgeBase}
-      />
-
-      {/* 6. YASAKLI KELİMELER */}
-      <ModerationPanel
-        bannedWords={bannedWords}
-        onAddWord={handleAddBannedWord}
-        onRemoveWord={handleRemoveBannedWord}
-      />
-
-      {/* 7. AI PIPELINE MODÜLLERI */}
-      <AIPipelinePanel />
-
-      {/* 8. AI KULLANIM & MALİYET */}
-      <AIUsageCostPanel modelUsage={modelUsage} />
-
-      {/* 9. SON KONUŞMALAR */}
-      <RecentConversationsPanel conversations={recentConvs} />
-
-      {/* 10. TEST PLAYGROUND */}
+      {/* 4. BOT TEST — Prompt'un hemen altında */}
       <BotTestPlayground
         activeChannel={activeChannel}
         currentPrompt={prompts[activeTab] || ""}
         activeTab={activeTab}
         onTestPrompt={testBotPrompt}
       />
+
+      {/* 5. BOT AYARLARI (Tabbed: Genel + Bilgi Bankası + Yasaklar) */}
+      <UnifiedSettingsPanel
+        botConfig={botConfig}
+        onBotConfigChange={handleBotConfigChange}
+        knowledgePrices={knowledgePrices}
+        knowledgeRules={knowledgeRules}
+        onPricesChange={setKnowledgePrices}
+        onRulesChange={setKnowledgeRules}
+        savingKnowledge={savingKnowledge}
+        savedKnowledge={saved === 'knowledge'}
+        onSaveKnowledge={saveKnowledgeBase}
+        bannedWords={bannedWords}
+        onAddWord={handleAddBannedWord}
+        onRemoveWord={handleRemoveBannedWord}
+      />
+
+      {/* 6. AI PIPELINE (Sadeleştirilmiş — sadece aktif modüller) */}
+      <AIPipelinePanel />
+
+      {/* 7. ALT BÖLÜM: Kullanım + Son Konuşmalar yan yana */}
+      <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <AIUsageCostPanel modelUsage={modelUsage} />
+        <RecentConversationsPanel conversations={recentConvs} />
+      </div>
     </PageShell>
   );
 }

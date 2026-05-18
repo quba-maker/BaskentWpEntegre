@@ -14,7 +14,7 @@ export function AIUsageCostPanel({ modelUsage }: AIUsageCostPanelProps) {
   if (!modelUsage) return null;
 
   return (
-    <div className="mt-8">
+    <div>
       <h2 className="text-lg font-bold mb-4 flex items-center gap-2" style={{ color: "var(--q-text-primary)" }}>
         <DollarSign className="w-5 h-5" style={{ color: "var(--q-text-secondary)" }} />
         AI Kullanım & Maliyet

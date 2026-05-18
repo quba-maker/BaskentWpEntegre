@@ -34,7 +34,7 @@ export function RecentConversationsPanel({ conversations }: RecentConversationsP
   if (conversations.length === 0) return null;
 
   return (
-    <div className="mt-8">
+    <div>
       <h2 className="text-lg font-bold mb-4 flex items-center gap-2" style={{ color: "var(--q-text-primary)" }}>
         <MessagesSquare className="w-5 h-5" style={{ color: "var(--q-text-secondary)" }} />
         Son Bot Konuşmaları
@@ -58,7 +58,7 @@ export function RecentConversationsPanel({ conversations }: RecentConversationsP
               <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{backgroundColor: 'var(--q-bg-secondary)', color: TEMP_COLORS[c.temperature] || 'var(--q-text-secondary)'}}>
                 {PHASE_LABELS[c.phase] || c.phase || '—'}
               </span>
-              <span className="text-[11px] font-medium" style={{ color: "var(--q-text-secondary)" }}>{c.botMsgCount} bot</span>
+              <span className="text-[11px] font-medium" style={{ color: "var(--q-text-secondary)" }}>{c.botMsgCount} mesaj</span>
             </div>
           </div>
         ))}

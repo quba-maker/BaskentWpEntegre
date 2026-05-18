@@ -12,4 +12,5 @@ export { ModerationPanel } from "./moderation-panel";
 export { RecentConversationsPanel } from "./recent-conversations-panel";
 export { BotTestPlayground } from "./bot-test-playground";
 export { AIPipelinePanel } from "./ai-pipeline-panel";
+export { UnifiedSettingsPanel } from "./unified-settings-panel";
 export { type BotChannel } from "./shared";
