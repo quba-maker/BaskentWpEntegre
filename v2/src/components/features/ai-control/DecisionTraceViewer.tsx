@@ -114,7 +114,7 @@ export function DecisionTraceViewer() {
                     </span>
                   </div>
                   <span className="text-[9px] font-mono px-2 py-0.5 rounded" style={{ color: 'var(--q-text-secondary)', background: 'var(--q-bg-hover)' }}>
-                    {c.id?.substring(0, 8)}...
+                    {String(c.id || '').substring(0, 8)}...
                   </span>
                 </button>
               ))}

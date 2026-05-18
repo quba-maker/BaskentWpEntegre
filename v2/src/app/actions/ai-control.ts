@@ -25,16 +25,16 @@ export async function getLiveActivityFeed(limit = 50, cursor?: string) {
   try {
     const rows = cursor
       ? await sql`
-          SELECT id, event_type, event_category, severity, payload,
-                 conversation_id, customer_id, created_at
+          SELECT id::text as id, event_type, event_category, severity, payload,
+                 conversation_id::text as conversation_id, customer_id::text as customer_id, created_at
           FROM ai_events
           WHERE tenant_id = ${tenantId} AND created_at < ${cursor}::timestamptz
           ORDER BY created_at DESC
           LIMIT ${limit}
         `
       : await sql`
-          SELECT id, event_type, event_category, severity, payload,
-                 conversation_id, customer_id, created_at
+          SELECT id::text as id, event_type, event_category, severity, payload,
+                 conversation_id::text as conversation_id, customer_id::text as customer_id, created_at
           FROM ai_events
           WHERE tenant_id = ${tenantId}
           ORDER BY created_at DESC
@@ -197,7 +197,7 @@ export async function getRecentConversationsForTrace(limit = 10) {
 
   try {
     const rows = await sql`
-      SELECT c.id, c.phone_number, c.status, c.lead_stage, c.updated_at,
+      SELECT c.id::text as id, c.phone_number, c.status, c.lead_stage, c.updated_at,
              cp.first_name, cp.last_name
       FROM conversations c
       LEFT JOIN customer_profiles cp ON cp.id = c.customer_id
@@ -218,7 +218,7 @@ export async function getDecisionTrace(conversationId: string) {
   try {
     // Get all events for this conversation in chronological order
     const events = await sql`
-      SELECT id, event_type, event_category, severity, payload, created_at
+      SELECT id::text as id, event_type, event_category, severity, payload, created_at
       FROM ai_events
       WHERE tenant_id = ${tenantId} 
         AND conversation_id = ${conversationId}

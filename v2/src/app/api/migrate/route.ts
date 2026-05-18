@@ -192,6 +192,42 @@ export async function GET() {
     await sql`CREATE INDEX IF NOT EXISTS idx_feature_flags_tenant ON feature_flags(tenant_id)`;
     results.push('feature_flags: OK');
 
+    // 15. AI Audit Logs (Tool call tracking for debug panel)
+    await sql`
+      CREATE TABLE IF NOT EXISTS ai_audit_logs (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID NOT NULL,
+        conversation_id UUID,
+        tool_name TEXT NOT NULL,
+        tool_arguments JSONB DEFAULT '{}'::jsonb,
+        validation_passed BOOLEAN DEFAULT true,
+        execution_mode TEXT DEFAULT 'auto',
+        execution_duration_ms INTEGER DEFAULT 0,
+        error_message TEXT,
+        result_summary TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `;
+    await sql`CREATE INDEX IF NOT EXISTS idx_ai_audit_logs_tenant ON ai_audit_logs(tenant_id, created_at DESC)`;
+    results.push('ai_audit_logs: OK');
+
+    // 16. AI Runtime Metrics (Performance tracking for debug panel)
+    await sql`
+      CREATE TABLE IF NOT EXISTS ai_runtime_metrics (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID NOT NULL,
+        conversation_id UUID,
+        model_name TEXT DEFAULT 'gemini-2.5-flash',
+        response_time_ms INTEGER DEFAULT 0,
+        tool_calls_count INTEGER DEFAULT 0,
+        total_tokens INTEGER DEFAULT 0,
+        estimated_cost_usd NUMERIC(10,6) DEFAULT 0,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `;
+    await sql`CREATE INDEX IF NOT EXISTS idx_ai_runtime_metrics_tenant ON ai_runtime_metrics(tenant_id, created_at DESC)`;
+    results.push('ai_runtime_metrics: OK');
+
     return NextResponse.json({ 
       success: true, 
       message: 'Migration completed successfully (Phase 6 included)!',
@@ -221,7 +257,8 @@ export async function POST() {
       'tenants', 'users', 'conversations', 'messages', 'leads',
       'settings', 'customer_profiles', 'conversation_memory',
       'ai_module_settings', 'ai_events', 'brain_versions',
-      'ai_runtime_logs', 'tool_permissions'
+      'ai_runtime_logs', 'tool_permissions', 'feature_flags',
+      'ai_audit_logs', 'ai_runtime_metrics'
     ];
 
     const existingTables = await sql`

@@ -90,9 +90,18 @@ export async function getAiDebugData() {
   const tenantId = await getCurrentTenantId();
   if (!tenantId) return null;
 
+  // Each query is independently fault-tolerant
+  let toolLogs: any[] = [];
+  let metrics: any[] = [];
+  let recentEvents: any[] = [];
+  let health: any = null;
+  let avgResponseMs = 0;
+  let totalCalls = 0;
+  let slowCalls = 0;
+  let currentPrompt: string | null = null;
+
   try {
-    // Recent tool executions
-    const toolLogs = await sql`
+    toolLogs = await sql`
       SELECT tool_name, tool_arguments, validation_passed, execution_mode,
              execution_duration_ms, error_message, result_summary, created_at
       FROM ai_audit_logs
@@ -100,9 +109,10 @@ export async function getAiDebugData() {
       ORDER BY created_at DESC
       LIMIT 20
     `;
+  } catch { /* table may not exist yet */ }
 
-    // Runtime metrics (last 24h)
-    const metrics = await sql`
+  try {
+    metrics = await sql`
       SELECT model_name, response_time_ms, tool_calls_count, 
              total_tokens, estimated_cost_usd, created_at
       FROM ai_runtime_metrics
@@ -110,20 +120,23 @@ export async function getAiDebugData() {
       ORDER BY created_at DESC
       LIMIT 30
     `;
+  } catch { /* table may not exist yet */ }
 
-    // Recent events summary
-    const recentEvents = await sql`
+  try {
+    recentEvents = await sql`
       SELECT event_type, event_category, severity, payload, created_at
       FROM ai_events
       WHERE tenant_id = ${tenantId}
       ORDER BY created_at DESC
       LIMIT 50
     `;
+  } catch { /* table may not exist yet */ }
 
-    // Health metrics
-    const health = await AIEventEmitter.getHealthMetrics(tenantId);
+  try {
+    health = await AIEventEmitter.getHealthMetrics(tenantId);
+  } catch { /* graceful */ }
 
-    // Average response time
+  try {
     const avgResponse = await sql`
       SELECT 
         AVG(response_time_ms) as avg_response_ms,
@@ -132,31 +145,33 @@ export async function getAiDebugData() {
       FROM ai_runtime_metrics
       WHERE tenant_id = ${tenantId} AND created_at > NOW() - INTERVAL '24 hours'
     `;
+    avgResponseMs = Math.round(parseFloat(avgResponse[0]?.avg_response_ms) || 0);
+    totalCalls = parseInt(avgResponse[0]?.total_calls) || 0;
+    slowCalls = parseInt(avgResponse[0]?.slow_calls) || 0;
+  } catch { /* table may not exist yet */ }
 
-    // Active brain info (settings key-value table)
+  try {
     const brainInfo = await sql`
       SELECT value as system_prompt
       FROM settings
       WHERE tenant_id = ${tenantId} AND key = 'system_prompt_whatsapp'
       LIMIT 1
     `;
+    currentPrompt = brainInfo[0]?.system_prompt || null;
+  } catch { /* graceful */ }
 
-    return {
-      toolLogs,
-      metrics,
-      recentEvents,
-      health,
-      performance: {
-        avgResponseMs: Math.round(parseFloat(avgResponse[0]?.avg_response_ms) || 0),
-        totalCalls: parseInt(avgResponse[0]?.total_calls) || 0,
-        slowCalls: parseInt(avgResponse[0]?.slow_calls) || 0,
-      },
-      currentPrompt: brainInfo[0]?.system_prompt || null,
-    };
-  } catch (e) {
-    console.error('[getAiDebugData]', e);
-    return null;
-  }
+  return {
+    toolLogs,
+    metrics,
+    recentEvents,
+    health,
+    performance: {
+      avgResponseMs,
+      totalCalls,
+      slowCalls,
+    },
+    currentPrompt,
+  };
 }
 
 /**

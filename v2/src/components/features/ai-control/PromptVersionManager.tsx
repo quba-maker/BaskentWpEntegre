@@ -158,7 +158,7 @@ export function PromptVersionManager() {
                       Tam Sistem Promptu — v{v.version_number}
                     </span>
                     <span className="text-[10px] font-mono" style={{ color: 'var(--q-text-secondary)' }}>
-                      hash: {v.prompt_hash?.substring(0, 12)}
+                      hash: {String(v.prompt_hash || '').substring(0, 12)}
                     </span>
                   </div>
                   <pre className="text-[12px] font-mono whitespace-pre-wrap leading-relaxed" style={{ color: 'var(--q-text-primary)' }}>
