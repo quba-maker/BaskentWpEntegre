@@ -86,7 +86,10 @@ export class IdentityEngine {
       const leads = await sql`
         SELECT form_name, raw_data 
         FROM leads 
-        WHERE customer_id = ${customerId} 
+        WHERE tenant_id = ${profile.tenant_id} AND (
+          customer_id = ${customerId} OR 
+          phone_number LIKE '%' || RIGHT(${profile.primary_phone}, 10) || '%'
+        )
         ORDER BY created_at DESC 
         LIMIT 1
       `;

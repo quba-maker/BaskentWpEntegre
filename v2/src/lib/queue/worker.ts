@@ -219,7 +219,10 @@ export class QueueWorkerEngine {
             systemPromptText += `- İsim: ${unifiedContext.profile.first_name || 'Bilinmiyor'} ${unifiedContext.profile.last_name || ''}\n`;
           }
           if (unifiedContext.latestForm) {
-            systemPromptText += `- Doldurduğu Form: ${unifiedContext.latestForm.name}\n- Form Detayı: ${unifiedContext.latestForm.data}\n`;
+            const formDataStr = typeof unifiedContext.latestForm.data === 'object' 
+              ? JSON.stringify(unifiedContext.latestForm.data, null, 2) 
+              : unifiedContext.latestForm.data;
+            systemPromptText += `- Doldurduğu Form: ${unifiedContext.latestForm.name}\n- Form Detayı: ${formDataStr}\n`;
           }
           if (unifiedContext.memory) {
             systemPromptText += `- Önceki Görüşme Özeti: ${unifiedContext.memory.summary}\n`;
