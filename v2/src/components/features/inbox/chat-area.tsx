@@ -5,6 +5,7 @@ import useSWR, { useSWRConfig } from "swr";
 import { Send, Paperclip, User, MessageCircle, ChevronLeft, ChevronDown, Info, ShieldAlert, Sparkles } from "lucide-react";
 import { getMessages, sendMessage, toggleBotStatus } from "@/app/actions/inbox";
 import { useInboxStore } from "@/store/inbox-store";
+import { AiRuntimeTimeline } from "@/components/features/ai-observability/AiRuntimeTimeline";
 
 // ==========================================
 // CONVERSATION VIEWPORT — Central chat surface
@@ -342,6 +343,10 @@ export function ConversationViewport() {
             </div>
           ))
         )}
+          
+          {/* AI Observability Timeline */}
+          {activeContact.isBotActive && <AiRuntimeTimeline conversationId={activePhone!} />}
+          
         </div>
 
         {/* Scroll to Bottom Button */}

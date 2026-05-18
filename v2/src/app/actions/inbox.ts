@@ -121,16 +121,17 @@ export async function getMessages(phone: string) {
   return withActionGuard(
     { actionName: 'getMessages' },
     async (ctx) => {
-      const rows = await ctx.db.executeSafe(sql`
-        SELECT * FROM (
-          SELECT id, content as text, direction, EXTRACT(EPOCH FROM created_at) * 1000 as created_at_ms, model_used
-          FROM messages
-          WHERE phone_number = ${phone} AND tenant_id = ${ctx.tenantId}
-          ORDER BY created_at DESC
-          LIMIT 100
-        ) sub
-        ORDER BY created_at_ms ASC
-      `);
+      try {
+        const rows = await ctx.db.executeSafe(sql`
+          SELECT * FROM (
+            SELECT id, content as text, direction, EXTRACT(EPOCH FROM created_at) * 1000 as created_at_ms, model_used
+            FROM messages
+            WHERE phone_number = ${phone} AND (tenant_id = ${ctx.tenantId} OR tenant_id IS NULL)
+            ORDER BY created_at DESC
+            LIMIT 100
+          ) sub
+          ORDER BY created_at_ms ASC
+        `);
 
       const validRows = Array.isArray(rows) ? rows : ((rows as any)?.rows || []);
 
@@ -168,6 +169,10 @@ export async function getMessages(phone: string) {
           dateLabel
         };
       });
+      } catch(err: any) {
+        console.error("getMessages Error:", err);
+        return [];
+      }
     }
   ).then(res => res.data || []);
 }
