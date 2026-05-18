@@ -64,18 +64,20 @@ export class PromptBuilder {
     let knowledgeInjection = '';
     if (brain.context.knowledge) {
       if (brain.context.knowledge.prices) {
-        knowledgeInjection += `\n\n[FİYAT LİSTESİ VE HİZMETLER]\nAşağıdaki fiyat ve hizmet bilgilerini baz al:\n${brain.context.knowledge.prices}`;
+        knowledgeInjection += `\n\n=== FİYAT LİSTESİ VE HİZMETLER ===\n${brain.context.knowledge.prices}\n==================================`;
       }
       if (brain.context.knowledge.rules) {
-        knowledgeInjection += `\n\n[ÖZEL KURALLAR VE TALİMATLAR]\nLütfen şu kurallara kesinlikle uy:\n${brain.context.knowledge.rules}`;
+        knowledgeInjection += `\n\n=== ÖZEL KURALLAR VE TALİMATLAR ===\n${brain.context.knowledge.rules}\n===================================`;
       }
       if (brain.context.knowledge.bannedWords && brain.context.knowledge.bannedWords.length > 0) {
-        knowledgeInjection += `\n\n[YASAKLI KELİMELER]\nŞu kelimeleri ASLA kullanma: ${brain.context.knowledge.bannedWords.join(', ')}`;
+        knowledgeInjection += `\n\n=== YASAKLI KELİMELER ===\nŞu kelimeleri ASLA kullanma: ${brain.context.knowledge.bannedWords.join(', ')}\n=========================`;
       }
     }
 
-    const phaseContext = `\n\n[Sistem Direktifi] Şu anki konuşma evresi (Phase): ${phase.toUpperCase()}.\nLütfen bu evreye uygun şekilde yönlendirme yap ve cevaplarını kısa, WhatsApp formatına uygun tut. Uzun paragraflardan kaçın.`;
+    const phaseContext = `\n\n=== SİSTEM DİREKTİFİ ===\nŞu anki konuşma evresi (Phase): ${phase.toUpperCase()}.\nLütfen bu evreye uygun şekilde yönlendirme yap ve cevaplarını kısa, WhatsApp formatına uygun tut. Uzun paragraflardan kaçın.\n========================`;
     
-    return base + knowledgeInjection + phaseContext;
+    // Güvenli birleştirme: Eğer base prompt içinde "--- CONSTRAINTS ---" varsa,
+    // ekleyeceğimiz bağlamların "CONSTRAINT" (yasak) zannedilmemesi için ayırıcı kullanıyoruz.
+    return `${base}\n\n${knowledgeInjection}\n\n${phaseContext}`;
   }
 }

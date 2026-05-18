@@ -214,7 +214,8 @@ export class QueueWorkerEngine {
       if (customerId && conversationId) {
         const unifiedContext = await IdentityEngine.getContext(customerId, conversationId);
         if (unifiedContext) {
-          systemPromptText += `\n\n--- MÜŞTERİ BAĞLAMI ---\n`;
+          systemPromptText += `\n\n=== MÜŞTERİ BAĞLAMI (DİNAMİK CRM VERİSİ) ===\n`;
+          systemPromptText += `Aşağıdaki bilgiler müşterinin sisteme kayıtlı güncel verileridir ve senaryo sırasında bu bilgileri kullanmalısın.\n`;
           if (unifiedContext.profile) {
             systemPromptText += `- İsim: ${unifiedContext.profile.first_name || 'Bilinmiyor'} ${unifiedContext.profile.last_name || ''}\n`;
           }
@@ -229,6 +230,7 @@ export class QueueWorkerEngine {
             systemPromptText += `- İlgi Düzeyi (Intent): ${unifiedContext.memory.intent}\n`;
             systemPromptText += `- İtirazlar: ${(unifiedContext.memory.objections || []).join(', ')}\n`;
           }
+          systemPromptText += `============================================\n`;
         }
       }
     } catch (e) {

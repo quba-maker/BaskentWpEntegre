@@ -187,14 +187,15 @@ export async function getModelUsage(period: string = '30d') {
       usage.forEach((row: any) => {
         const model = row.model_used;
         const count = parseInt(row.message_count);
-        const costInfo = MODEL_COSTS[model] || MODEL_COSTS['gemini-2.5-flash'];
+        const costInfo = MODEL_COSTS[model] || { input: 0.15, output: 0.60, label: model };
         const estimatedCost = count * ((150 * costInfo.input + 200 * costInfo.output) / 1_000_000);
         
-        if (!modelBreakdown[model]) {
-          modelBreakdown[model] = { count: 0, cost: 0, label: costInfo.label };
+        const groupKey = costInfo.label;
+        if (!modelBreakdown[groupKey]) {
+          modelBreakdown[groupKey] = { count: 0, cost: 0, label: groupKey };
         }
-        modelBreakdown[model].count += count;
-        modelBreakdown[model].cost += estimatedCost;
+        modelBreakdown[groupKey].count += count;
+        modelBreakdown[groupKey].cost += estimatedCost;
         totalCost += estimatedCost;
       });
 

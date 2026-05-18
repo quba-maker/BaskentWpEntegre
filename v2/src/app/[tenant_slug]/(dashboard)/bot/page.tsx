@@ -266,27 +266,31 @@ export default function BotManagementPage() {
         onSelectChannel={setActiveTab}
       />
 
-      {/* 3. PROMPT YÖNETİMİ */}
-      <PromptGovernancePanel
-        channels={channels}
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-        prompts={prompts}
-        onPromptChange={(channelId, value) => setPrompts(prev => ({ ...prev, [channelId]: value }))}
-        settings={settings}
-        saving={saving}
-        saved={saved}
-        onSave={savePrompt}
-        onResetToDefault={resetToDefault}
-      />
-
-      {/* 4. BOT TEST — Prompt'un hemen altında */}
-      <BotTestPlayground
-        activeChannel={activeChannel}
-        currentPrompt={prompts[activeTab] || ""}
-        activeTab={activeTab}
-        onTestPrompt={testBotPrompt}
-      />
+      {/* 3 & 4. PROMPT YÖNETİMİ VE TEST (Yan Yana) */}
+      <div className="mt-8 grid grid-cols-1 xl:grid-cols-3 gap-6 items-start">
+        <div className="xl:col-span-2">
+          <PromptGovernancePanel
+            channels={channels}
+            activeTab={activeTab}
+            onTabChange={setActiveTab}
+            prompts={prompts}
+            onPromptChange={(channelId, value) => setPrompts(prev => ({ ...prev, [channelId]: value }))}
+            settings={settings}
+            saving={saving}
+            saved={saved}
+            onSave={savePrompt}
+            onResetToDefault={resetToDefault}
+          />
+        </div>
+        <div className="xl:col-span-1 sticky top-6">
+          <BotTestPlayground
+            activeChannel={activeChannel}
+            currentPrompt={prompts[activeTab] || ""}
+            activeTab={activeTab}
+            onTestPrompt={testBotPrompt}
+          />
+        </div>
+      </div>
 
       {/* 5. BOT AYARLARI (Tabbed: Genel + Bilgi Bankası + Yasaklar) */}
       <UnifiedSettingsPanel
