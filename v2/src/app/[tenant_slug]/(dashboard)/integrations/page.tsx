@@ -355,8 +355,8 @@ export default function IntegrationsPage() {
               <div className="p-5 rounded-xl border mb-6" style={{ backgroundColor: "var(--q-bg-secondary)", borderColor: "var(--q-border-default)" }}>
                 <label className="block text-xs font-bold uppercase tracking-wider mb-2" style={{ color: "var(--q-text-secondary)" }}>Callback URL</label>
                 <div className="flex gap-2">
-                  <input type="text" readOnly value={`${domain}/api/webhook`} className="flex-1 px-4 py-3 bg-white rounded-lg text-sm font-mono border outline-none" style={{ borderColor: "var(--q-border-strong)", color: "var(--q-text-primary)" }} />
-                  <button onClick={() => navigator.clipboard.writeText(`${domain}/api/webhook`)} className="px-4 py-3 text-white text-sm font-bold rounded-lg hover:opacity-90 transition-opacity" style={{ backgroundColor: "var(--q-text-primary)" }}>Kopyala</button>
+                  <input type="text" readOnly value={`${domain}/api/webhooks/meta`} className="flex-1 px-4 py-3 bg-white rounded-lg text-sm font-mono border outline-none" style={{ borderColor: "var(--q-border-strong)", color: "var(--q-text-primary)" }} />
+                  <button onClick={() => navigator.clipboard.writeText(`${domain}/api/webhooks/meta`)} className="px-4 py-3 text-white text-sm font-bold rounded-lg hover:opacity-90 transition-opacity" style={{ backgroundColor: "var(--q-text-primary)" }}>Kopyala</button>
                 </div>
                 
                 <div className="mt-4">
