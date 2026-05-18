@@ -40,7 +40,12 @@ export class PromptBuilder {
    * Builds the System Prompt strictly tied to the isolated TenantBrain.
    * NEVER accepts raw strings to prevent prompt contamination.
    */
-  public static buildSystemPrompt(brain: TenantBrain, phase: string, isHumanHandover: boolean): string {
+  public static buildSystemPrompt(
+    brain: TenantBrain, 
+    phase: string, 
+    isHumanHandover: boolean,
+    unifiedContext?: any
+  ): string {
     this.validatePromptOwnership(brain, brain.prompts.systemPrompt);
 
     if (isHumanHandover) {
@@ -60,6 +65,39 @@ export class PromptBuilder {
       }
     }
 
+    // IDENTITY & BEHAVIORAL CONTEXT (Dynamic CRM Injection)
+    let crmContext = '';
+    if (unifiedContext) {
+      crmContext += `\n\n=== MÜŞTERİ BAĞLAMI (DİNAMİK CRM VERİSİ) ===\n`;
+      crmContext += `Aşağıdaki bilgiler müşterinin sisteme kayıtlı güncel verileridir ve senaryo sırasında bu bilgileri AKTİF OLARAK KULLANMALISIN.\n`;
+      
+      if (unifiedContext.profile) {
+        const fullName = [unifiedContext.profile.first_name, unifiedContext.profile.last_name].filter(Boolean).join(' ').trim();
+        if (fullName) {
+          crmContext += `- İsim: ${fullName}\n`;
+          crmContext += `>> DİKKAT: Müşteriye/Kullanıcıya mesajlarında adı ile hitap et (Örn: Merhaba ${unifiedContext.profile.first_name} Bey/Hanım).\n`;
+        } else {
+          crmContext += `- İsim: Bilinmiyor\n`;
+        }
+      }
+      
+      if (unifiedContext.latestForm) {
+        const formDataStr = typeof unifiedContext.latestForm.data === 'object' 
+          ? JSON.stringify(unifiedContext.latestForm.data, null, 2) 
+          : unifiedContext.latestForm.data;
+        crmContext += `- Doldurduğu Form: ${unifiedContext.latestForm.name}\n- Form Detayı: ${formDataStr}\n`;
+        crmContext += `>> DİKKAT: Müşteri bir form doldurmuş. Formda ilgilendiği ürün/hizmet/konu yazıyorsa ASLA "hangi konuda destek almak istersiniz" diye sorma, doğrudan konuya gir. Yalnızca formda tam olarak ne istediği belli değilse sor.\n`;
+      }
+      
+      if (unifiedContext.memory) {
+        crmContext += `- Önceki Görüşme Özeti: ${unifiedContext.memory.summary}\n`;
+        crmContext += `- İlgi Düzeyi (Intent): ${unifiedContext.memory.intent}\n`;
+        crmContext += `- İtirazlar: ${(unifiedContext.memory.objections || []).join(', ')}\n`;
+        crmContext += `>> DİKKAT: Bu kişiyle geçmiş bir konuşmanız var. Konuşmayı bu özet doğrultusunda, kaldığı yerden sürdür. Kendini ilk defa tanışıyormuş gibi tanıtma.\n`;
+      }
+      crmContext += `============================================\n`;
+    }
+
     // Knowledge Base Injection
     let knowledgeInjection = '';
     if (brain.context.knowledge) {
@@ -77,7 +115,8 @@ export class PromptBuilder {
     const phaseContext = `\n\n=== SİSTEM DİREKTİFİ ===\nŞu anki konuşma evresi (Phase): ${phase.toUpperCase()}.\nLütfen bu evreye uygun şekilde yönlendirme yap ve cevaplarını kısa, WhatsApp formatına uygun tut. Uzun paragraflardan kaçın.\n========================`;
     
     // Güvenli birleştirme: Eğer base prompt içinde "--- CONSTRAINTS ---" varsa,
-    // ekleyeceğimiz bağlamların "CONSTRAINT" (yasak) zannedilmemesi için ayırıcı kullanıyoruz.
-    return `${base}\n\n${knowledgeInjection}\n\n${phaseContext}`;
+    // CRM bağlamının CONSTRAINTS'in hemen üzerine yerleştirilmesi SaaS standartlarında en sağlıklısıdır.
+    // Ancak base string'i parçalamak riskli olduğundan, hiyerarşik olarak önce base, sonra dinamik CRM, en son kurallar ve evre eklenir.
+    return `${base}\n${crmContext}\n${knowledgeInjection}\n${phaseContext}`;
   }
 }

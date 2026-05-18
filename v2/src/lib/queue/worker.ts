@@ -206,44 +206,18 @@ export class QueueWorkerEngine {
       }
     }
 
-    // 5. Build System Prompt & History strictly via TenantBrain
-    let systemPromptText = PromptBuilder.buildSystemPrompt(brain, targetPhase, false);
-    
-    // Inject Context from Unified Identity Engine
+    // 5. Fetch Unified CRM Context
+    let unifiedContext: any = null;
     try {
       if (customerId && conversationId) {
-        const unifiedContext = await IdentityEngine.getContext(customerId, conversationId);
-        if (unifiedContext) {
-          systemPromptText += `\n\n=== MÜŞTERİ BAĞLAMI (DİNAMİK CRM VERİSİ) ===\n`;
-          systemPromptText += `Aşağıdaki bilgiler müşterinin sisteme kayıtlı güncel verileridir ve senaryo sırasında bu bilgileri AKTİF OLARAK KULLANMALISIN.\n`;
-          if (unifiedContext.profile) {
-            const fullName = [unifiedContext.profile.first_name, unifiedContext.profile.last_name].filter(Boolean).join(' ').trim();
-            if (fullName) {
-              systemPromptText += `- İsim: ${fullName}\n`;
-              systemPromptText += `>> DİKKAT: Müşteriye/Kullanıcıya mesajlarında adı ile hitap et (Örn: Merhaba ${unifiedContext.profile.first_name} Bey/Hanım).\n`;
-            } else {
-              systemPromptText += `- İsim: Bilinmiyor\n`;
-            }
-          }
-          if (unifiedContext.latestForm) {
-            const formDataStr = typeof unifiedContext.latestForm.data === 'object' 
-              ? JSON.stringify(unifiedContext.latestForm.data, null, 2) 
-              : unifiedContext.latestForm.data;
-            systemPromptText += `- Doldurduğu Form: ${unifiedContext.latestForm.name}\n- Form Detayı: ${formDataStr}\n`;
-            systemPromptText += `>> DİKKAT: Müşteri bir form doldurmuş. Formda ilgilendiği ürün/hizmet/konu yazıyorsa ASLA "hangi konuda destek almak istersiniz" diye sorma, doğrudan konuya gir. Yalnızca formda tam olarak ne istediği belli değilse sor.\n`;
-          }
-          if (unifiedContext.memory) {
-            systemPromptText += `- Önceki Görüşme Özeti: ${unifiedContext.memory.summary}\n`;
-            systemPromptText += `- İlgi Düzeyi (Intent): ${unifiedContext.memory.intent}\n`;
-            systemPromptText += `- İtirazlar: ${(unifiedContext.memory.objections || []).join(', ')}\n`;
-            systemPromptText += `>> DİKKAT: Bu kişiyle geçmiş bir konuşmanız var. Konuşmayı bu özet doğrultusunda, kaldığı yerden sürdür. Kendini ilk defa tanışıyormuş gibi tanıtma.\n`;
-          }
-          systemPromptText += `============================================\n`;
-        }
+        unifiedContext = await IdentityEngine.getContext(customerId, conversationId);
       }
     } catch (e) {
-      this.log.error('[WORKER_CONTEXT_INJECT] Error injecting context', e instanceof Error ? e : new Error(String(e)), { traceId });
+      this.log.error('[WORKER_CONTEXT_FETCH] Error fetching identity context', e instanceof Error ? e : new Error(String(e)), { traceId });
     }
+
+    // 6. Build System Prompt & History strictly via TenantBrain
+    let systemPromptText = PromptBuilder.buildSystemPrompt(brain, targetPhase, false, unifiedContext);
     
     // In future phases, history and AI Orchestrator will use brain.namespaces.memory()
     const history = await convService.getHistory(phoneNumber, 10);

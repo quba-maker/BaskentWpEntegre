@@ -88,7 +88,7 @@ export class IdentityEngine {
         FROM leads 
         WHERE tenant_id = ${profile.tenant_id} AND (
           customer_id = ${customerId} OR 
-          phone_number LIKE '%' || RIGHT(${profile.primary_phone}, 10) || '%'
+          REGEXP_REPLACE(phone_number, '\\D', '', 'g') LIKE '%' || RIGHT(${profile.primary_phone}, 10) || '%'
         )
         ORDER BY created_at DESC 
         LIMIT 1
