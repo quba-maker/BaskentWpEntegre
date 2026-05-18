@@ -10,6 +10,7 @@ import { PromptBuilder } from "@/lib/services/ai/prompt-builder";
 import { TenantResolverService } from "@/lib/services/meta/tenant-resolver.service";
 import { assertTenant } from "@/lib/security/assertions";
 import { AIEventEmitter } from "@/lib/services/ai/core/event-emitter";
+import { FeatureFlagService } from "@/lib/services/feature-flag.service";
 
 /**
  * Enterprise Queue Worker Engine
@@ -249,7 +250,7 @@ export class QueueWorkerEngine {
       modelId: llmModel,
       apiKey: apiKey,
       temperature: 0.7,
-      maxTokens: 500
+      maxTokens: brain.context.settings.maxResponseTokens || 1000
     };
 
     this.log.info(`[LLM_STARTED] Requesting AI response`, { provider: aiConfig.provider, traceId });
@@ -336,7 +337,9 @@ export class QueueWorkerEngine {
       modelUsed: aiResponse.modelUsed || llmModel
     });
 
-    // 10. CRM Intelligence Extraction (Async & Non-blocking)
+    // 10. CRM Intelligence Extraction (Async & Non-blocking — Feature Flag gated)
+    const isCrmEnabled = await FeatureFlagService.isEnabled(tenantId, 'crm_extraction', true);
+    if (isCrmEnabled) {
     try {
       this.log.info(`[WORKER_CRM] Initiating CRM extraction`, { traceId });
       const { crmExtractorService } = await import('../services/ai/crm-extractor');
@@ -372,9 +375,13 @@ export class QueueWorkerEngine {
       AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'crm_extraction_failed', category: 'crm', severity: 'warning' });
       AIEventEmitter.logHealth(tenantId, 'crm_failure', { traceId });
     }
+    } else {
+      this.log.info(`[WORKER_CRM_SKIPPED] CRM extraction disabled via feature flag`, { traceId });
+    }
 
-    // 11. Async Memory & Summarization Sync
-    if (conversationId) {
+    // 11. Async Memory & Summarization Sync (Feature Flag gated)
+    const isMemoryEnabled = await FeatureFlagService.isEnabled(tenantId, 'memory_engine', true);
+    if (conversationId && isMemoryEnabled) {
       try {
         const { MemoryEngine } = await import('@/lib/services/ai/engines/memory');
         // Run in background without blocking

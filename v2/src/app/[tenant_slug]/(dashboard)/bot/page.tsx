@@ -80,6 +80,7 @@ export default function BotManagementPage() {
     auto_greeting: "true",
     greeting_language: "auto",
     max_messages: "8",
+    max_response_tokens: "1000",
     working_hours: "24/7",
     aggression_level: "medium",
     ai_model: "gemini-2.5-flash"
@@ -120,6 +121,7 @@ export default function BotManagementPage() {
           auto_greeting: settingsRes.settings['bot_auto_greeting']?.value || "true",
           greeting_language: settingsRes.settings['bot_greeting_language']?.value || "auto",
           max_messages: settingsRes.settings['bot_max_messages']?.value || "8",
+          max_response_tokens: settingsRes.settings['bot_max_response_tokens']?.value || "1000",
           working_hours: whMode,
           aggression_level: settingsRes.settings['bot_aggression_level']?.value || "medium",
           ai_model: settingsRes.settings['ai_model']?.value || "gemini-2.5-flash"

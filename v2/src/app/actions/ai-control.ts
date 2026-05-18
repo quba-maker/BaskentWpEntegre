@@ -148,6 +148,11 @@ export async function toggleFeatureFlag(flagKey: string, enabled: boolean) {
         updated_by = ${session.name || 'admin'},
         updated_at = NOW()
     `;
+    
+    // Invalidate in-memory flag cache so worker picks up changes immediately
+    const { FeatureFlagService } = await import('@/lib/services/feature-flag.service');
+    FeatureFlagService.invalidateCache(tenantId);
+    
     return { success: true };
   } catch (e: any) {
     return { success: false, error: e.message };
@@ -336,7 +341,7 @@ export async function runSandboxTest(params: {
       modelId: llmModel,
       apiKey,
       temperature: 0.7,
-      maxTokens: 500,
+      maxTokens: 1000,
     });
 
     return {

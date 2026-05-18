@@ -1,4 +1,4 @@
-import { Settings2, Zap, Globe, MessageSquare, Clock, Shield } from "lucide-react";
+import { Settings2, Zap, Globe, MessageSquare, Clock, Shield, Type } from "lucide-react";
 import { SettingRow } from "./shared";
 import { ToggleSwitch } from "@/components/governance";
 
@@ -14,6 +14,7 @@ interface AIBehaviorPanelProps {
     auto_greeting: string;
     greeting_language: string;
     max_messages: string;
+    max_response_tokens: string;
     working_hours: string;
     aggression_level: string;
   };
@@ -77,6 +78,25 @@ export function AIBehaviorPanel({ botConfig, onConfigChange }: AIBehaviorPanelPr
             <option value="12">12 mesaj</option>
             <option value="20">20 mesaj</option>
             <option value="unlimited">Sınırsız</option>
+          </select>
+        </SettingRow>
+
+        {/* Max Response Tokens */}
+        <SettingRow
+          icon={Type}
+          iconColor="var(--q-orange)"
+          title="Yanıt Uzunluğu"
+          description="Bot yanıtlarının maksimum karakter/kelime limiti"
+        >
+          <select
+            value={botConfig.max_response_tokens}
+            onChange={(e) => onConfigChange("max_response_tokens", e.target.value)}
+            className="px-3 py-1.5 text-sm font-semibold text-[--q-text-primary] bg-black/[0.04] border-0 rounded-lg outline-none cursor-pointer"
+          >
+            <option value="500">Kısa (~350 kelime)</option>
+            <option value="1000">Normal (~700 kelime)</option>
+            <option value="2000">Uzun (~1400 kelime)</option>
+            <option value="4000">Detaylı (~2800 kelime)</option>
           </select>
         </SettingRow>
 

@@ -53,6 +53,7 @@ export class BrainResolver {
     let runtimeSettings: TenantBrainSettings = {
       aiModel: 'gemini-2.5-flash',
       maxMessages: 8,
+      maxResponseTokens: 1000,
       workingHours: { enabled: false },
       aggressionLevel: 'medium'
     };
@@ -65,7 +66,7 @@ export class BrainResolver {
       const keysToFetch = [
         promptKey, 
         'bot_knowledge_prices', 'bot_knowledge_rules', 'bot_banned_words',
-        'ai_model', 'bot_max_messages', 'working_hours', 'bot_aggression_level'
+        'ai_model', 'bot_max_messages', 'bot_max_response_tokens', 'working_hours', 'bot_aggression_level'
       ];
       const db = withTenantDB(tenantId, false);
       const settingsResult = await db.executeSafe(sql`
@@ -93,6 +94,10 @@ export class BrainResolver {
           try { runtimeSettings.workingHours = JSON.parse(row.value); } catch(e) {}
         }
         if (row.key === 'bot_aggression_level') runtimeSettings.aggressionLevel = row.value || 'medium';
+        if (row.key === 'bot_max_response_tokens') {
+          const parsed = parseInt(row.value);
+          runtimeSettings.maxResponseTokens = isNaN(parsed) ? 1000 : Math.min(parsed, 8000);
+        }
       }
       
       // LAYER 3: PROMPT HASH VALIDATION

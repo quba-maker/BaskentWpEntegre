@@ -1,6 +1,7 @@
 export interface TenantBrainSettings {
   aiModel: string;
   maxMessages: number;
+  maxResponseTokens: number;
   workingHours: { enabled: boolean; start?: string; end?: string; offMessage?: string };
   aggressionLevel: string;
 }
@@ -92,6 +93,7 @@ export function createTenantBrain(
   const resolvedSettings: TenantBrainSettings = settings || {
     aiModel: 'gemini-2.5-flash',
     maxMessages: 8,
+    maxResponseTokens: 1000,
     workingHours: { enabled: false },
     aggressionLevel: 'medium'
   };
