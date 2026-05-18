@@ -168,7 +168,7 @@ export async function getMessages(phone: string) {
 
         return {
           id: r.id,
-          sender: r.direction === 'in' ? 'user' : (r.direction === 'system' ? 'system' : (r.model_used && r.model_used !== 'agent' && r.model_used !== 'human' ? 'bot' : 'agent')),
+          sender: r.direction === 'in' ? 'user' : (r.direction === 'system' ? 'system' : 'agent'),
           text: r.text,
           timeMs: parseFloat(r.created_at_ms),
           dateLabel

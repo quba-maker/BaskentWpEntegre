@@ -210,7 +210,7 @@ export async function POST(request: NextRequest) {
           if (existingConv.length === 0) {
             await sqlDb`INSERT INTO conversations (tenant_id, phone_number, patient_name, tags, status, department) VALUES (${tenantId}, ${activePhone}, ${name}, ${JSON.stringify(tags)}, 'bot', 'Genel')`;
           }
-          await sqlDb`INSERT INTO messages (tenant_id, phone_number, direction, content, model_used) VALUES (${tenantId}, ${activePhone}, 'out', ${welcomeMsg}, 'sheets-auto')`;
+          await sqlDb`INSERT INTO messages (tenant_id, phone_number, direction, content) VALUES (${tenantId}, ${activePhone}, 'out', ${welcomeMsg})`;
           await sqlDb`UPDATE leads SET stage = 'contacted', contacted_at = NOW(), phone_number = ${activePhone} WHERE phone_number = ${phone1} AND tenant_id = ${tenantId}`;
         }
       }

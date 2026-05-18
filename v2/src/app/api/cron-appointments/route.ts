@@ -73,7 +73,7 @@ export async function GET() {
                 })
               });
               
-              await sql`INSERT INTO messages (tenant_id, phone_number, direction, content, model_used) VALUES (${tenant.id}, ${apt.phone_number}, 'out', ${msg}, 'cron-reminder')`;
+              await sql`INSERT INTO messages (tenant_id, phone_number, direction, content) VALUES (${tenant.id}, ${apt.phone_number}, 'out', ${msg})`;
             }
           } catch (e: any) {
             log.error(`Appointment reminder hatası`, e instanceof Error ? e : new Error(String(e)), { phone: apt.phone_number });
