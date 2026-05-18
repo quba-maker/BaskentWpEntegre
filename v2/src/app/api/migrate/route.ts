@@ -88,6 +88,10 @@ export async function GET() {
     await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_channel TEXT`;
     results.push('conversations columns: OK');
 
+    // 7. Ensure leads has customer_id for Unified Identity linking
+    await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS customer_id UUID`;
+    results.push('leads.customer_id: OK');
+
     return NextResponse.json({ 
       success: true, 
       message: 'Migration completed successfully!',

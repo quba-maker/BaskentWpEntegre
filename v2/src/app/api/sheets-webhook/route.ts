@@ -149,10 +149,28 @@ export async function POST(request: NextRequest) {
       }
 
       // Create lead — tenant_id ile
-      await sqlDb`
+      const leadResult = await sqlDb`
         INSERT INTO leads (tenant_id, phone_number, patient_name, email, form_name, raw_data, stage, created_at, notes)
         VALUES (${tenantId}, ${phone1}, ${name}, ${email}, ${formName}, ${JSON.stringify(raw_data)}, 'new', ${createdAt.toISOString()}, ${noteStr})
+        RETURNING id
       `;
+
+      // 🔗 Unified Identity: Form → customer_profiles bağlantısı
+      try {
+        const { IdentityEngine } = await import('@/lib/services/ai/engines/identity');
+        const customerId = await IdentityEngine.resolveIdentity({
+          tenantId: tenantId!,
+          phoneNumber: phone1,
+          email: email || undefined,
+          firstName: name || undefined
+        });
+        if (leadResult[0]?.id) {
+          await IdentityEngine.linkLead(leadResult[0].id, customerId);
+        }
+        log.info('[IDENTITY] Form linked to customer profile', { customerId, phone: phone1 });
+      } catch (idErr) {
+        log.error('[IDENTITY] Non-fatal: Could not link form to identity', idErr instanceof Error ? idErr : new Error(String(idErr)));
+      }
       
       // Auto-Outbound Bot Logic — Tenant'ın Meta token'ını kullan
       const META_ACCESS_TOKEN = tenantMeta?.meta_page_token || process.env.META_ACCESS_TOKEN;
@@ -207,8 +225,18 @@ export async function POST(request: NextRequest) {
         if (botSuccess) {
           const tags = ["Google Sheets", formName];
           const existingConv = await sqlDb`SELECT id FROM conversations WHERE phone_number = ${activePhone}`;
+          let convId: any = existingConv[0]?.id;
           if (existingConv.length === 0) {
-            await sqlDb`INSERT INTO conversations (tenant_id, phone_number, patient_name, tags, status, department) VALUES (${tenantId}, ${activePhone}, ${name}, ${JSON.stringify(tags)}, 'bot', 'Genel')`;
+            const newConv = await sqlDb`INSERT INTO conversations (tenant_id, phone_number, patient_name, tags, status, department) VALUES (${tenantId}, ${activePhone}, ${name}, ${JSON.stringify(tags)}, 'bot', 'Genel') RETURNING id`;
+            convId = newConv[0]?.id;
+          }
+          // 🔗 Link conversation to same customer profile
+          if (convId) {
+            try {
+              const { IdentityEngine } = await import('@/lib/services/ai/engines/identity');
+              const cid = await IdentityEngine.resolveIdentity({ tenantId: tenantId!, phoneNumber: activePhone });
+              await IdentityEngine.linkConversation(String(convId), cid);
+            } catch (_) {}
           }
           await sqlDb`INSERT INTO messages (tenant_id, phone_number, direction, content) VALUES (${tenantId}, ${activePhone}, 'out', ${welcomeMsg})`;
           await sqlDb`UPDATE leads SET stage = 'contacted', contacted_at = NOW(), phone_number = ${activePhone} WHERE phone_number = ${phone1} AND tenant_id = ${tenantId}`;
