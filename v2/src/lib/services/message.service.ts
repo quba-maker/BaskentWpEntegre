@@ -75,10 +75,10 @@ export class MessageService {
       
       writeQueries.push(sql`
         INSERT INTO messages (
-          tenant_id, phone_number, direction, content, channel, provider_message_id
+          tenant_id, phone_number, direction, content, channel, provider_message_id, model_used
         ) VALUES (
           ${this.db.tenantId}, ${payload.phoneNumber}, ${payload.direction}, ${payload.content}, 
-          ${payload.channel}, ${payload.providerMessageId || null}
+          ${payload.channel}, ${payload.providerMessageId || null}, ${payload.modelUsed || null}
         ) RETURNING id
       `);
 
