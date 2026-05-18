@@ -186,10 +186,11 @@ export async function POST(request: NextRequest) {
         const greetingLang = greetingLangSetting.length > 0 ? greetingLangSetting[0].value : 'auto';
         
         const isTurkish = greetingLang === 'tr' ? true : greetingLang === 'en' ? false : phone1.startsWith('90');
+        const tenantName = tenantMeta?.name || 'Ekibimiz';
         const greeting = name ? (isTurkish ? `Merhaba ${name}!` : `Hello ${name}!`) : (isTurkish ? 'Merhaba!' : 'Hello!');
         const welcomeMsg = isTurkish
-          ? `${greeting} Başkent Üniversitesi Konya Hastanesi'nden yazıyoruz 🙏\n\nDoldurduğunuz form bize ulaştı. Şikayetiniz veya talebiniz hakkında detaylı bilgi alabilir miyiz?`
-          : `${greeting} We are reaching out from Başkent University Konya Hospital 🙏\n\nWe received your form. Could you provide more details about your request?`;
+          ? `${greeting} ${tenantName} olarak size yazıyoruz 🙏\n\nDoldurduğunuz form bize ulaştı. Talebiniz hakkında detaylı bilgi alabilir miyiz?`
+          : `${greeting} We are reaching out from ${tenantName} 🙏\n\nWe received your form. Could you provide more details about your request?`;
 
         let activePhone = phone1;
         let botSuccess = false;
