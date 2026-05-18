@@ -77,7 +77,7 @@ export async function GET() {
 
             // DB güncelle
             await sql`UPDATE conversations SET follow_up_count = ${count}, last_message_at = NOW() WHERE phone_number = ${conv.phone_number}`;
-            await sql`INSERT INTO messages (tenant_id, phone_number, direction, content, model_used, channel) VALUES (${tenant.id}, ${conv.phone_number}, 'out', ${msg}, 'follow-up-cron', ${conv.channel || 'whatsapp'})`;
+            await sql`INSERT INTO messages (tenant_id, phone_number, direction, content, channel) VALUES (${tenant.id}, ${conv.phone_number}, 'out', ${msg}, ${conv.channel || 'whatsapp'})`;
             
           } catch (e: any) {
             log.error(`Follow-up hatası`, e instanceof Error ? e : new Error(String(e)), { phone: conv.phone_number });

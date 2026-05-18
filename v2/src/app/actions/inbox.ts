@@ -283,8 +283,8 @@ export async function sendMessage(phone: string, text: string) {
       }
 
       await ctx.db.executeSafe(sql`
-        INSERT INTO messages (tenant_id, phone_number, direction, content, channel, model_used)
-        VALUES (${ctx.tenantId}, ${phone}, 'out', ${text}, ${channel}, 'agent')
+        INSERT INTO messages (tenant_id, phone_number, direction, content, channel)
+        VALUES (${ctx.tenantId}, ${phone}, 'out', ${text}, ${channel})
       `);
 
       await ctx.db.executeSafe(sql`

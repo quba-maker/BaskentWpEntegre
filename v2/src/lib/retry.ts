@@ -77,7 +77,7 @@ export async function processRetryQueue(): Promise<{ processed: number; failed: 
           if (response.ok) {
             // Başarılı — kuyruğu temizle ve messages tablosuna kaydet
             await sql`UPDATE message_retry_queue SET status = 'sent' WHERE id = ${msg.id}`;
-            await sql`INSERT INTO messages (tenant_id, phone_number, direction, content, channel, model_used) VALUES (${msg.tenant_id}, ${msg.phone_number}, 'out', ${msg.content}, 'whatsapp', 'retry')`;
+            await sql`INSERT INTO messages (tenant_id, phone_number, direction, content, channel) VALUES (${msg.tenant_id}, ${msg.phone_number}, 'out', ${msg.content}, 'whatsapp')`;
             stats.processed++;
           } else {
             const err = await response.text();
@@ -101,7 +101,7 @@ export async function processRetryQueue(): Promise<{ processed: number; failed: 
 
           if (response.ok) {
             await sql`UPDATE message_retry_queue SET status = 'sent' WHERE id = ${msg.id}`;
-            await sql`INSERT INTO messages (tenant_id, phone_number, direction, content, channel, model_used) VALUES (${msg.tenant_id}, ${msg.phone_number}, 'out', ${msg.content}, 'instagram', 'retry')`;
+            await sql`INSERT INTO messages (tenant_id, phone_number, direction, content, channel) VALUES (${msg.tenant_id}, ${msg.phone_number}, 'out', ${msg.content}, 'instagram')`;
             stats.processed++;
           } else {
             const err = await response.text();
@@ -125,7 +125,7 @@ export async function processRetryQueue(): Promise<{ processed: number; failed: 
 
           if (response.ok) {
             await sql`UPDATE message_retry_queue SET status = 'sent' WHERE id = ${msg.id}`;
-            await sql`INSERT INTO messages (tenant_id, phone_number, direction, content, channel, model_used) VALUES (${msg.tenant_id}, ${msg.phone_number}, 'out', ${msg.content}, 'messenger', 'retry')`;
+            await sql`INSERT INTO messages (tenant_id, phone_number, direction, content, channel) VALUES (${msg.tenant_id}, ${msg.phone_number}, 'out', ${msg.content}, 'messenger')`;
             stats.processed++;
           } else {
             const err = await response.text();

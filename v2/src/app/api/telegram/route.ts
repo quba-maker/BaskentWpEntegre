@@ -187,7 +187,7 @@ export async function POST(req: NextRequest) {
                   headers: { Authorization: `Bearer ${META}`, "Content-Type": "application/json" },
                   body: JSON.stringify({ messaging_product: "whatsapp", to: phone, type: "text", text: { body: replyText } }),
                 });
-                await sql`INSERT INTO messages (tenant_id, phone_number, direction, content, model_used, channel) VALUES (${convTenantId}, ${phone}, 'out', ${replyText}, 'human-telegram', 'whatsapp')`;
+                await sql`INSERT INTO messages (tenant_id, phone_number, direction, content, channel) VALUES (${convTenantId}, ${phone}, 'out', ${replyText}, 'whatsapp')`;
                 sentToPatient = true;
               }
             }

@@ -42,7 +42,7 @@ export class QueueService {
 
     try {
       // Base URL resolution: prioritize environment variable, fallback to known prod url
-      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : "https://baskent-wp-entegre.vercel.app";
+      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : "https://baskent-wp-entegre.vercel.app");
       const endpoint = `${baseUrl}/api/queue-worker`;
 
       const headers: Record<string, string> = {
