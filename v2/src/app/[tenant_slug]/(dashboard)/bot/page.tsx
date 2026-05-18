@@ -175,6 +175,16 @@ export default function BotManagementPage() {
     const ch = channels.find(c => c.id === channelId)!;
     setSaving(channelId);
     await saveBotSetting(ch.promptKey, prompts[channelId] || "");
+    
+    setSettings(prev => ({
+      ...prev,
+      [ch.promptKey]: { 
+        ...(prev[ch.promptKey] || {}), 
+        value: prompts[channelId] || "", 
+        updated_at: new Date().toISOString() 
+      }
+    }));
+
     setSaving(null);
     setSaved(channelId);
     setTimeout(() => setSaved(null), 2000);

@@ -77,6 +77,7 @@ export function PromptGovernancePanel({
   const [identity, setIdentity] = useState("");
   const [instructions, setInstructions] = useState("");
   const [constraints, setConstraints] = useState("");
+  const [activeSubTab, setActiveSubTab] = useState<'identity' | 'instructions' | 'constraints'>('instructions');
 
   // Sync from props
   useEffect(() => {
@@ -106,7 +107,7 @@ export function PromptGovernancePanel({
   const handleReset = async () => {
     const ok = await confirm({
       title: "Varsayılana Dön",
-      message: "Başkent Hastanesi varsayılan prompt'u yüklenecek. Mevcut düzenlemeleriniz kaybolacak. Kalıcı olması için ayrıca \"Kaydet\" butonuna basmanız gerekiyor.",
+      message: "Varsayılan prompt yüklenecek. Mevcut düzenlemeleriniz kaybolacak. Kalıcı olması için ayrıca \"Kaydet\" butonuna basmanız gerekiyor.",
       confirmLabel: "Varsayılanı Yükle",
       variant: "warning",
     });
@@ -114,9 +115,9 @@ export function PromptGovernancePanel({
   };
 
   return (
-    <div className="flex-1 flex flex-col mb-8 mt-4">
+    <div className="flex-1 flex flex-col mb-0 mt-0">
       {/* Tab Bar */}
-      <div className="flex items-center gap-1 p-1 bg-black/[0.04] rounded-xl mb-6 w-fit">
+      <div className="flex items-center gap-1 p-1 bg-black/[0.04] rounded-xl mb-4 w-fit">
         {channels.map(ch => {
           const Icon = ch.icon;
           return (
@@ -139,7 +140,7 @@ export function PromptGovernancePanel({
       {/* Editor Card */}
       <div className="bg-white rounded-2xl border border-[--q-border-default] shadow-sm flex-1 flex flex-col">
         {/* Editor Header */}
-        <div className="px-6 py-5 border-b flex items-center justify-between rounded-t-2xl" style={{ borderColor: "var(--q-border-default)", backgroundColor: "var(--q-bg-secondary)" }}>
+        <div className="px-5 py-4 border-b flex items-center justify-between rounded-t-2xl" style={{ borderColor: "var(--q-border-default)", backgroundColor: "var(--q-bg-secondary)" }}>
           <div className="flex items-center gap-4">
             <div 
               className="w-10 h-10 rounded-xl flex items-center justify-center shadow-sm"
@@ -150,11 +151,8 @@ export function PromptGovernancePanel({
             <div>
               <h3 className="text-[15px] font-bold text-[--q-text-primary] flex items-center gap-2">
                 {activeChannel.label} Yapılandırması
-                <span className="px-2 py-0.5 rounded text-[10px] uppercase tracking-wider font-bold border" style={{ backgroundColor: "var(--q-bg-primary)", borderColor: "var(--q-border-strong)", color: "var(--q-text-secondary)" }}>
-                  MODÜLER PROMPT
-                </span>
               </h3>
-              <p className="text-[12px] text-[--q-text-secondary] font-medium mt-0.5">
+              <p className="text-[11px] text-[--q-text-secondary] font-medium mt-0.5">
                 {settings[activeChannel.promptKey]?.updated_at 
                   ? `Son güncelleme: ${new Date(settings[activeChannel.promptKey].updated_at).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`
                   : "Varsayılan prompt kullanılıyor"
@@ -166,90 +164,104 @@ export function PromptGovernancePanel({
           <div className="flex items-center gap-3">
             <button
               onClick={handleReset}
-              className="px-4 py-2 text-[13px] font-bold bg-white border rounded-xl transition-colors flex items-center gap-2 shadow-sm hover:opacity-80"
+              className="px-3 py-2 text-[12px] font-bold bg-white border rounded-lg transition-colors flex items-center gap-2 shadow-sm hover:opacity-80"
               style={{ color: "var(--q-orange)", borderColor: "var(--q-border-strong)" }}
             >
-              <RotateCcw className="w-4 h-4" />
-              Varsayılana Dön
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Varsayılana Dön</span>
             </button>
 
             <button
               onClick={() => onSave(activeTab)}
               disabled={saving === activeTab}
-              className="px-5 py-2 text-[13px] font-bold rounded-xl transition-all flex items-center gap-2 shadow-sm text-white disabled:opacity-60"
+              className="px-4 py-2 text-[12px] font-bold rounded-lg transition-all flex items-center gap-2 shadow-sm text-white disabled:opacity-60"
               style={{ 
                 backgroundColor: saved === activeTab ? "var(--q-green)" : "var(--q-blue)" 
               }}
             >
               {saving === activeTab ? (
-                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
               ) : saved === activeTab ? (
-                <Check className="w-4 h-4" />
+                <Check className="w-3.5 h-3.5" />
               ) : (
-                <Save className="w-4 h-4" />
+                <Save className="w-3.5 h-3.5" />
               )}
-              {saved === activeTab ? "Kaydedildi" : "Değişiklikleri Kaydet"}
+              {saved === activeTab ? "Kaydedildi" : "Kaydet"}
             </button>
           </div>
         </div>
 
+        {/* Sub Tabs */}
+        <div className="flex border-b" style={{ borderColor: "var(--q-border-default)", backgroundColor: "var(--q-bg-secondary)" }}>
+          <button
+            onClick={() => setActiveSubTab('identity')}
+            className="flex items-center gap-2 px-5 py-3 text-xs font-semibold transition-all relative"
+            style={{
+              color: activeSubTab === 'identity' ? "var(--q-blue)" : "var(--q-text-secondary)",
+              backgroundColor: activeSubTab === 'identity' ? "white" : "transparent",
+              borderBottom: activeSubTab === 'identity' ? "2px solid var(--q-blue)" : "2px solid transparent",
+            }}
+          >
+            <UserCircle className="w-4 h-4" />
+            Kimlik & Rol
+          </button>
+          <button
+            onClick={() => setActiveSubTab('instructions')}
+            className="flex items-center gap-2 px-5 py-3 text-xs font-semibold transition-all relative"
+            style={{
+              color: activeSubTab === 'instructions' ? "var(--q-purple)" : "var(--q-text-secondary)",
+              backgroundColor: activeSubTab === 'instructions' ? "white" : "transparent",
+              borderBottom: activeSubTab === 'instructions' ? "2px solid var(--q-purple)" : "2px solid transparent",
+            }}
+          >
+            <ListChecks className="w-4 h-4" />
+            Davranış & Talimatlar
+          </button>
+          <button
+            onClick={() => setActiveSubTab('constraints')}
+            className="flex items-center gap-2 px-5 py-3 text-xs font-semibold transition-all relative"
+            style={{
+              color: activeSubTab === 'constraints' ? "var(--q-red)" : "var(--q-text-secondary)",
+              backgroundColor: activeSubTab === 'constraints' ? "white" : "transparent",
+              borderBottom: activeSubTab === 'constraints' ? "2px solid var(--q-red)" : "2px solid transparent",
+            }}
+          >
+            <Shield className="w-4 h-4" />
+            Kesin Yasaklar
+          </button>
+        </div>
+
         {/* Modular Editor Areas */}
-        <div className="flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-[--q-border-default] flex-1">
-          
-          {/* Identity & Role */}
-          <div className="flex-1 p-6 flex flex-col gap-3 transition-colors duration-300">
-            <div className="flex items-center gap-2 text-[--q-blue] mb-2">
-              <UserCircle className="w-5 h-5" />
-              <h4 className="font-bold text-[14px]">Kimlik & Rol</h4>
-            </div>
-            <p className="text-[12px] text-[--q-text-secondary] font-medium leading-relaxed">
-              Botun kim olduğunu, hangi kurumu temsil ettiğini ve genel misyonunu buraya yazın.
-            </p>
+        <div className="flex-1 flex flex-col p-5 bg-white rounded-b-2xl">
+          {activeSubTab === 'identity' && (
             <textarea
               value={identity}
               onChange={(e) => handleModularChange('identity', e.target.value)}
-              className="w-full flex-1 min-h-[200px] p-4 text-[13px] leading-relaxed font-mono text-[--q-text-primary] bg-white border border-[--q-border-default] rounded-xl outline-none resize-none focus:ring-2 ring-[--q-blue] transition-shadow shadow-sm"
+              className="w-full flex-1 min-h-[300px] p-4 text-[13px] leading-relaxed font-mono text-[--q-text-primary] bg-white border border-[--q-border-default] rounded-xl outline-none resize-none focus:ring-2 ring-[--q-blue] transition-shadow shadow-sm"
               placeholder="Sen Başkent Üniversitesi adına çalışan profesyonel bir asistansın..."
               spellCheck={false}
             />
-          </div>
+          )}
 
-          {/* Instructions */}
-          <div className="flex-1 p-6 flex flex-col gap-3 hover:bg-[--q-bg-secondary] transition-colors duration-300">
-            <div className="flex items-center gap-2 text-[--q-purple] mb-2">
-              <ListChecks className="w-5 h-5" />
-              <h4 className="font-bold text-[14px]">Davranış & Talimatlar</h4>
-            </div>
-            <p className="text-[12px] text-[--q-text-secondary] font-medium leading-relaxed">
-              Hastayla nasıl konuşması gerektiğini, yönlendirme akışını ve ikna adımlarını belirleyin.
-            </p>
+          {activeSubTab === 'instructions' && (
             <textarea
               value={instructions}
               onChange={(e) => handleModularChange('instructions', e.target.value)}
-              className="w-full flex-1 min-h-[200px] p-4 text-[13px] leading-relaxed font-mono text-[--q-text-primary] bg-white border border-[--q-border-default] rounded-xl outline-none resize-none focus:ring-2 ring-[--q-purple] transition-shadow shadow-sm"
+              className="w-full flex-1 min-h-[300px] p-4 text-[13px] leading-relaxed font-mono text-[--q-text-primary] bg-white border border-[--q-border-default] rounded-xl outline-none resize-none focus:ring-2 ring-[--q-purple] transition-shadow shadow-sm"
               placeholder="Hastayı dinle, anla ve doğal akışta WhatsApp'a veya Randevuya yönlendir..."
               spellCheck={false}
             />
-          </div>
+          )}
 
-          {/* Constraints */}
-          <div className="flex-1 p-6 flex flex-col gap-3 hover:bg-[--q-bg-secondary] transition-colors duration-300">
-            <div className="flex items-center gap-2 text-[--q-red] mb-2">
-              <Shield className="w-5 h-5" />
-              <h4 className="font-bold text-[14px]">Kesin Yasaklar</h4>
-            </div>
-            <p className="text-[12px] text-[--q-text-secondary] font-medium leading-relaxed">
-              Botun ASLA yapmaması gerekenleri, vermemesi gereken sözleri ve yasaklı davranışları yazın.
-            </p>
+          {activeSubTab === 'constraints' && (
             <textarea
               value={constraints}
               onChange={(e) => handleModularChange('constraints', e.target.value)}
-              className="w-full flex-1 min-h-[200px] p-4 text-[13px] leading-relaxed font-mono text-[--q-text-primary] bg-white border border-[--q-border-default] rounded-xl outline-none resize-none focus:ring-2 ring-[--q-red] transition-shadow shadow-sm"
+              className="w-full flex-1 min-h-[300px] p-4 text-[13px] leading-relaxed font-mono text-[--q-text-primary] bg-white border border-[--q-border-default] rounded-xl outline-none resize-none focus:ring-2 ring-[--q-red] transition-shadow shadow-sm"
               placeholder="ASLA kesin fiyat verme. ASLA doktor ismi verme..."
               spellCheck={false}
             />
-          </div>
-
+          )}
         </div>
       </div>
     </div>
