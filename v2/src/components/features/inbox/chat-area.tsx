@@ -2,10 +2,11 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import useSWR, { useSWRConfig } from "swr";
-import { Send, Paperclip, User, MessageCircle, ChevronLeft, ChevronDown, Info, ShieldAlert, Sparkles } from "lucide-react";
+import { Send, Paperclip, User, MessageCircle, ChevronLeft, ChevronDown, Info, ShieldAlert, Sparkles, Zap } from "lucide-react";
 import { getMessages, sendMessage, toggleBotStatus } from "@/app/actions/inbox";
 import { useInboxStore } from "@/store/inbox-store";
 import { AiRuntimeTimeline } from "@/components/features/ai-observability/AiRuntimeTimeline";
+import { getAiStatusForConversation } from "@/app/actions/ai-observability";
 
 // ==========================================
 // CONVERSATION VIEWPORT — Central chat surface
@@ -46,6 +47,73 @@ function countryFlag(country: string | undefined): string {
     "Rusya": "🇷🇺", "ABD": "🇺🇸",
   };
   return map[country] || "🌍";
+}
+
+// -- AI Status Badge --
+const AI_EVENT_LABELS: Record<string, string> = {
+  'ai_response_generated': 'Response ✓',
+  'identity_resolved': 'Identity ✓',
+  'crm_extraction_completed': 'CRM Updated',
+  'memory_updated': 'Memory Synced',
+  'tool_executed': 'Tool OK',
+  'policy_blocked': 'Policy Block',
+  'human_escalation': 'Escalated',
+  'ai_timeout': 'Timeout',
+  'working_hours_blocked': 'Off-hours',
+  'brain_resolved': 'Brain Ready',
+};
+
+function AiStatusBadge({ phoneNumber }: { phoneNumber: string }) {
+  const { data: status } = useSWR(
+    phoneNumber ? ['ai-status', phoneNumber] : null,
+    () => getAiStatusForConversation(phoneNumber),
+    { refreshInterval: 8000, revalidateOnFocus: false }
+  );
+
+  if (!status) return null;
+
+  const label = AI_EVENT_LABELS[status.lastEvent] || status.lastEvent;
+  const severityColor = status.severity === 'error' 
+    ? 'var(--q-red)' 
+    : status.severity === 'warning' 
+      ? 'var(--q-orange)' 
+      : 'var(--q-green)';
+
+  const timeAgo = status.timestamp 
+    ? (() => {
+        const diff = Math.round((Date.now() - new Date(status.timestamp).getTime()) / 1000);
+        if (diff < 60) return `${diff}s`;
+        if (diff < 3600) return `${Math.floor(diff / 60)}m`;
+        return `${Math.floor(diff / 3600)}h`;
+      })()
+    : '';
+
+  return (
+    <div 
+      className="hidden md:flex items-center gap-1.5 px-2 py-1 rounded-full transition-all"
+      style={{ 
+        background: status.isRecent ? `color-mix(in srgb, ${severityColor} 8%, transparent)` : 'var(--q-bg-secondary)',
+        border: `1px solid ${status.isRecent ? `color-mix(in srgb, ${severityColor} 15%, transparent)` : 'var(--q-border-default)'}`,
+      }}
+      title={`Son AI işlem: ${status.lastEvent} — ${status.timestamp}`}
+    >
+      {status.isRecent && (
+        <span 
+          className="w-1.5 h-1.5 rounded-full animate-pulse flex-shrink-0" 
+          style={{ background: severityColor }} 
+        />
+      )}
+      <Zap className="w-3 h-3 flex-shrink-0" style={{ color: severityColor }} />
+      <span className="text-[9px] font-bold uppercase tracking-wider" style={{ color: severityColor }}>
+        {label}
+      </span>
+      {timeAgo && (
+        <span className="text-[8px] font-mono" style={{ color: 'var(--q-text-secondary)' }}>
+          {timeAgo}
+        </span>
+      )}
+    </div>
+  );
 }
 
 export function ConversationViewport() {
@@ -212,6 +280,8 @@ export function ConversationViewport() {
 
         {/* Actions */}
         <div className="flex items-center gap-2 md:gap-3">
+          {/* AI Status Badge */}
+          <AiStatusBadge phoneNumber={activePhone} />
           {/* Bot toggle chip */}
           <div className="flex items-center gap-2 px-2.5 md:px-3.5 py-1.5 rounded-full q-glass-strong" style={{ border: "1px solid var(--q-border-default)", boxShadow: "var(--q-shadow-sm)" }}>
             {activeContact.isBotActive ? (

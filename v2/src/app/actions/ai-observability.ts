@@ -52,6 +52,39 @@ export async function getConversationTraces(conversationId: string) {
   ).then(res => res.data || []);
 }
 
+/**
+ * Get the latest AI status for a conversation (used by chat header badge).
+ * Returns the most recent event type, timestamp, and severity.
+ */
+export async function getAiStatusForConversation(phoneNumber: string) {
+  if (!phoneNumber) return null;
+
+  return withActionGuard(
+    { actionName: 'getAiStatusForConversation' },
+    async (ctx) => {
+      const rows = await ctx.db.executeSafe(sql`
+        SELECT ae.event_type, ae.event_category, ae.severity, ae.created_at
+        FROM ai_events ae
+        JOIN conversations c ON ae.conversation_id = c.id::text AND c.tenant_id = ${ctx.tenantId}
+        WHERE c.phone_number = ${phoneNumber} AND ae.tenant_id = ${ctx.tenantId}
+        ORDER BY ae.created_at DESC
+        LIMIT 1
+      `);
+
+      if (rows.length === 0) return null;
+      
+      const row = rows[0];
+      return {
+        lastEvent: row.event_type,
+        category: row.event_category,
+        severity: row.severity,
+        timestamp: row.created_at,
+        isRecent: new Date(row.created_at).getTime() > Date.now() - 5 * 60 * 1000 // Within last 5 min
+      };
+    }
+  ).then(res => res.data || null);
+}
+
 export async function getCustomerAiBrain(phone: string) {
   if (!phone) return null;
   

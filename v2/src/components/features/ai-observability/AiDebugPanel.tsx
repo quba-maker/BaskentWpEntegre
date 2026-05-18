@@ -30,6 +30,21 @@ function formatCost(cost: number) {
   return `$${cost.toFixed(4)}`;
 }
 
+/**
+ * Production Security: Mask secrets, API keys, tokens in prompt text.
+ * Detects patterns like API_KEY=..., Bearer ..., sk-..., key-...
+ */
+function maskSecrets(text: string): string {
+  if (!text) return text;
+  return text
+    .replace(/(api[_-]?key|token|secret|password|bearer)\s*[:=]\s*['"]?([a-zA-Z0-9_\-\.]{8,})['"]?/gi, 
+      (_, key) => `${key}: ***MASKED***`)
+    .replace(/sk-[a-zA-Z0-9]{20,}/g, 'sk-***MASKED***')
+    .replace(/key-[a-zA-Z0-9]{20,}/g, 'key-***MASKED***')
+    .replace(/AIza[a-zA-Z0-9_\-]{30,}/g, 'AIza***MASKED***')
+    .replace(/Bearer\s+[a-zA-Z0-9_\-\.]{20,}/g, 'Bearer ***MASKED***');
+}
+
 // -- Health Card --
 function HealthCard({ label, value, suffix, icon: Icon, color, alert }: {
   label: string; value: number | string; suffix?: string;
@@ -187,17 +202,27 @@ export function AiDebugPanel() {
             </button>
           </div>
           {promptVisible && data.currentPrompt && (
-            <pre 
-              className="text-[11px] leading-relaxed p-4 rounded-xl overflow-auto max-h-[400px] whitespace-pre-wrap"
-              style={{ 
-                background: 'var(--q-bg-primary)', 
-                border: '1px solid var(--q-border-default)',
-                color: 'var(--q-text-primary)',
-                fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace'
-              }}
-            >
-              {data.currentPrompt}
-            </pre>
+            <>
+              <div className="flex items-center gap-2 mb-2 px-1">
+                <span className="text-[9px] px-2 py-0.5 rounded-full font-bold" style={{ color: 'var(--q-orange)', background: 'rgba(255,149,0,0.08)' }}>
+                  🔒 Secrets Masked
+                </span>
+                <span className="text-[9px]" style={{ color: 'var(--q-text-secondary)' }}>
+                  {data.currentPrompt.length.toLocaleString()} karakter
+                </span>
+              </div>
+              <pre 
+                className="text-[11px] leading-relaxed p-4 rounded-xl overflow-auto max-h-[400px] whitespace-pre-wrap"
+                style={{ 
+                  background: 'var(--q-bg-primary)', 
+                  border: '1px solid var(--q-border-default)',
+                  color: 'var(--q-text-primary)',
+                  fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace'
+                }}
+              >
+                {maskSecrets(data.currentPrompt)}
+              </pre>
+            </>
           )}
           {promptVisible && !data.currentPrompt && (
             <p className="text-xs italic py-4" style={{ color: 'var(--q-text-secondary)' }}>Prompt bulunamadı</p>
@@ -232,8 +257,13 @@ export function AiDebugPanel() {
                     {log.execution_mode}
                   </span>
                   {log.execution_duration_ms && (
-                    <span className="text-[9px] font-semibold ml-auto" style={{ color: 'var(--q-text-secondary)' }}>
-                      {formatMs(log.execution_duration_ms)}
+                    <span className="text-[9px] font-semibold ml-auto" style={{ color: log.execution_duration_ms > 5000 ? 'var(--q-red)' : 'var(--q-text-secondary)' }}>
+                      ⏱ {formatMs(log.execution_duration_ms)}
+                    </span>
+                  )}
+                  {(log.input_tokens || log.output_tokens) && (
+                    <span className="text-[8px] font-mono px-1.5 py-0.5 rounded" style={{ background: 'var(--q-bg-hover)', color: 'var(--q-text-secondary)' }}>
+                      {log.input_tokens || 0}→{log.output_tokens || 0} tok
                     </span>
                   )}
                 </div>

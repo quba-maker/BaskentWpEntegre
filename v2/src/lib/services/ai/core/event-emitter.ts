@@ -83,11 +83,89 @@ export class AIEventEmitter {
           )
         `;
       } catch (err) {
-        // Never throw from event emitter — log and move on
+        // HARDENING: Never lose audit events — fallback to structured console log
         log.error('[EVENT_EMIT_FAILED] Non-fatal event write failure', 
           err instanceof Error ? err : new Error(String(err)),
           { eventType: event.type, tenantId: event.tenantId }
         );
+        // Structured fallback audit — ensures events are recoverable from log aggregator
+        console.error(JSON.stringify({
+          _audit_fallback: true,
+          timestamp: new Date().toISOString(),
+          tenant_id: event.tenantId,
+          event_type: event.type,
+          event_category: event.category,
+          severity: event.severity || 'info',
+          conversation_id: event.conversationId || null,
+          customer_id: event.customerId || null,
+          payload: event.payload || {},
+        }));
+      }
+    });
+  }
+
+  /**
+   * Emit a critical event synchronously — waits for DB write.
+   * Use only for events that MUST NOT be lost (policy blocks, escalations).
+   */
+  static async emitSync(event: AIEventPayload): Promise<void> {
+    try {
+      await sql`
+        INSERT INTO ai_events (
+          tenant_id, conversation_id, customer_id,
+          event_type, event_category, payload, severity
+        ) VALUES (
+          ${event.tenantId},
+          ${event.conversationId || null},
+          ${event.customerId || null},
+          ${event.type},
+          ${event.category},
+          ${JSON.stringify(event.payload || {})}::jsonb,
+          ${event.severity || 'info'}
+        )
+      `;
+    } catch (err) {
+      log.error('[SYNC_EVENT_FAILED] Critical event write failure',
+        err instanceof Error ? err : new Error(String(err)),
+        { eventType: event.type, tenantId: event.tenantId }
+      );
+      // Structured fallback for critical events
+      console.error(JSON.stringify({
+        _audit_critical_fallback: true,
+        timestamp: new Date().toISOString(),
+        ...event,
+        payload: event.payload || {},
+      }));
+    }
+  }
+
+  /**
+   * Batch emit multiple events in a single tick (pipeline optimization).
+   */
+  static batchEmit(events: AIEventPayload[]): void {
+    if (events.length === 0) return;
+    setImmediate(async () => {
+      for (const event of events) {
+        try {
+          await sql`
+            INSERT INTO ai_events (
+              tenant_id, conversation_id, customer_id,
+              event_type, event_category, payload, severity
+            ) VALUES (
+              ${event.tenantId},
+              ${event.conversationId || null},
+              ${event.customerId || null},
+              ${event.type},
+              ${event.category},
+              ${JSON.stringify(event.payload || {})}::jsonb,
+              ${event.severity || 'info'}
+            )
+          `;
+        } catch (err) {
+          log.error('[BATCH_EMIT_FAILED]', err instanceof Error ? err : new Error(String(err)),
+            { eventType: event.type }
+          );
+        }
       }
     });
   }

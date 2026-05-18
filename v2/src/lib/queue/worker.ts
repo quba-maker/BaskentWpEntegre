@@ -286,9 +286,9 @@ export class QueueWorkerEngine {
       this.log.error(`[POLICY_FAILED] ${validation.reason}`, undefined, { traceId, tenantId: brain.context.tenantId });
       finalResponseText = validation.fallbackMessage || "Üzgünüm, şu an size yanıt veremiyorum.";
       
-      // Phase 6: Emit policy block + escalation events
-      AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'policy_blocked', category: 'policy', severity: 'error', payload: { reason: validation.reason } });
-      AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'human_escalation', category: 'escalation', severity: 'warning', payload: { trigger: 'policy_violation', reason: validation.reason } });
+      // Phase 6: Emit policy block + escalation events (SYNC — compliance-critical, must not be lost)
+      await AIEventEmitter.emitSync({ tenantId, conversationId, customerId, type: 'policy_blocked', category: 'policy', severity: 'error', payload: { reason: validation.reason } });
+      await AIEventEmitter.emitSync({ tenantId, conversationId, customerId, type: 'human_escalation', category: 'escalation', severity: 'warning', payload: { trigger: 'policy_violation', reason: validation.reason } });
       AIEventEmitter.logHealth(tenantId, 'policy_blocked', { reason: validation.reason, traceId });
 
       // Save a system alert message to alert the agent

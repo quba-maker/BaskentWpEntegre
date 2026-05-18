@@ -58,6 +58,13 @@ export class ToolRegistry {
     });
   }
 
+  /**
+   * List all registered tool names (used for error messages / debug).
+   */
+  public getToolNames(): string[] {
+    return Array.from(this.tools.keys());
+  }
+
   // Simple Zod to JSON Schema converter for standard LLM Tool definitions
   private zodToJsonSchema(schema: z.ZodTypeAny): any {
     // A simplified conversion for demonstration. 
