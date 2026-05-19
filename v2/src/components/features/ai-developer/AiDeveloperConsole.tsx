@@ -20,23 +20,23 @@ export function AiDeveloperConsole() {
   const [activeTab, setActiveTab] = useState<TabId>('logs');
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 w-full max-w-full">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-[--q-blue-bg] flex items-center justify-center">
+          <div className="w-10 h-10 flex-shrink-0 rounded-xl bg-[--q-blue-bg] flex items-center justify-center">
             <Terminal className="w-5 h-5 text-[--q-blue]" />
           </div>
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight" style={{ color: 'var(--q-text-primary)' }}>
+          <div className="flex-1 min-w-0">
+            <h1 className="text-2xl font-bold tracking-tight truncate" style={{ color: 'var(--q-text-primary)' }}>
               AI Geliştirici Konsolu
             </h1>
-            <p className="text-sm mt-1" style={{ color: 'var(--q-text-secondary)' }}>
+            <p className="text-sm mt-1 truncate" style={{ color: 'var(--q-text-secondary)' }}>
               Unified Logs, Runtime Traces ve Sistem Sağlığı
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20">
+        <div className="flex-shrink-0 flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 w-fit">
           <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
           <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">Sistem Stabil</span>
         </div>
@@ -44,7 +44,7 @@ export function AiDeveloperConsole() {
 
       {/* Tab Navigation */}
       <div 
-        className="flex items-center gap-1 p-1 rounded-xl overflow-x-auto"
+        className="flex md:grid md:grid-cols-4 items-center gap-1 p-1 rounded-xl overflow-x-auto w-full no-scrollbar"
         style={{ background: 'var(--q-bg-secondary)', border: '1px solid var(--q-border-default)' }}
       >
         {TABS.map(tab => {
@@ -54,15 +54,15 @@ export function AiDeveloperConsole() {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-[13px] font-medium transition-all whitespace-nowrap cursor-pointer"
+              className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-[13px] font-medium transition-all whitespace-nowrap cursor-pointer"
               style={{
                 background: isActive ? 'var(--q-bg-primary)' : 'transparent',
                 color: isActive ? 'var(--q-blue)' : 'var(--q-text-secondary)',
                 boxShadow: isActive ? 'var(--q-shadow-sm)' : 'none',
               }}
             >
-              <Icon className="w-4 h-4" />
-              {tab.label}
+              <Icon className="w-4 h-4 flex-shrink-0" />
+              <span>{tab.label}</span>
             </button>
           );
         })}
