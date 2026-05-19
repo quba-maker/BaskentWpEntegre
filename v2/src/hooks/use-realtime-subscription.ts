@@ -1,6 +1,8 @@
 import { useEffect } from "react";
 import * as Ably from "ably";
 import { BaseRealtimeEventSchema, ProjectionEvent } from "@/lib/realtime/contracts";
+import { useDiagnosticsStore } from "@/lib/realtime/diagnostics-store";
+import { ChaosEngine } from "@/lib/realtime/chaos-engine";
 
 let sharedAblyClient: Ably.Realtime | null = null;
 
@@ -11,6 +13,12 @@ export const getSharedAblyClient = (tenantId: string) => {
   sharedAblyClient = new Ably.Realtime({
     authUrl: `/api/ably/auth?tenantId=${tenantId}`,
   });
+
+  // Track global socket reconnects
+  sharedAblyClient.connection.on("connected", () => {
+    useDiagnosticsStore.getState().incrementMetric("realtime.socket.reconnects");
+  });
+
   return sharedAblyClient;
 };
 
@@ -27,33 +35,46 @@ export function useRealtimeSubscription(
   useEffect(() => {
     if (!tenantId) return;
 
-    // 1. Initialize Ably Client with Auth Callback
-    // This calls our Edge Route which securely returns a bounded token
     const client = getSharedAblyClient(tenantId);
     if (!client) return;
 
     const channelName = `private:tenant:${tenantId}`;
     const channel = client.channels.get(channelName);
 
-    // 2. Subscribe to all events on this channel
-    channel.subscribe((message) => {
+    // Track Memory Leak Safety (registering subscription)
+    useDiagnosticsStore.getState().registerSubscription(channelName);
+
+    channel.subscribe(async (message) => {
       try {
-        // 3. Strict Runtime Validation (Idempotency and Contract enforcement)
-        // Ensure malicious or malformed events do not crash the UI
         const validatedEvent = BaseRealtimeEventSchema.parse(message.data);
         
-        // 4. Pass the strictly typed event to the consumer (Zustand/React Query)
-        onEvent(validatedEvent as ProjectionEvent);
+        // Metric: Event Latency (Ably publish to client receive)
+        const latency = Date.now() - validatedEvent.timestamp;
+        useDiagnosticsStore.getState().setMetric("realtime.event.latency", latency);
+
+        // Chaos Interception Layer
+        const eventsToProcess = await ChaosEngine.processIncomingEvents(validatedEvent);
+        
+        // Pass to Reconciliation Engine
+        for (const evt of eventsToProcess) {
+          const startTime = performance.now();
+          onEvent(evt as ProjectionEvent);
+          const reconcileMs = performance.now() - startTime;
+          
+          useDiagnosticsStore.getState().setMetric("realtime.projection.reconcile_ms", Math.round(reconcileMs));
+        }
 
       } catch (error) {
         console.error(`[Realtime Sync Error] Invalid event payload received on ${channelName}:`, error);
-        // Sentry/Observability integration for corrupted payloads
       }
     });
 
     return () => {
+      // Memory Safety: Clean up subscriptions and listeners
+      useDiagnosticsStore.getState().unregisterSubscription(channelName);
       channel.unsubscribe();
-      client.close();
+      // We don't close the shared client here to allow other channels to persist,
+      // but if active subscriptions hit 0, we could potentially disconnect.
     };
   }, [tenantId, onEvent]);
 }

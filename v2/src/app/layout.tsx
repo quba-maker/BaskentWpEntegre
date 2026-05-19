@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { QueryProvider } from "@/components/providers/query-provider";
+import { DiagnosticsOverlay } from "@/components/features/realtime/diagnostics-overlay";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -17,6 +18,7 @@ export default function RootLayout({
       <body className="h-full bg-[--q-bg-tertiary] text-[--q-text-primary]">
         <QueryProvider>
           {children}
+          <DiagnosticsOverlay />
         </QueryProvider>
       </body>
     </html>
