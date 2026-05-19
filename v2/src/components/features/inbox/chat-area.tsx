@@ -162,7 +162,7 @@ const VirtualItemWrapper = React.memo(function VirtualItemWrapper({
         style={{ 
           height: `${cachedHeight}px`, 
           width: "100%",
-          contentVisibility: "skip-import" as any,
+          contentVisibility: "auto",
         }} 
       />
     );

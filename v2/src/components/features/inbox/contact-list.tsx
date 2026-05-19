@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { Search, MessageCircle, Check, CheckCheck, Clock } from "lucide-react";
+import { Search, MessageCircle, Check, CheckCheck, Clock, WifiOff } from "lucide-react";
 import { getConversations } from "@/app/actions/inbox";
 import { useInboxStore } from "@/store/inbox-store";
 import { useDiagnosticsStore } from "@/lib/realtime/diagnostics-store";
@@ -163,7 +163,24 @@ export function ContactRail() {
       {/* ── Header ── */}
       <div className="p-5 pb-3">
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-bold tracking-tight" style={{ color: "var(--q-text-primary)" }}>Mesajlar</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-xl font-bold tracking-tight" style={{ color: "var(--q-text-primary)" }}>Mesajlar</h2>
+            {isRealtimeDown && (
+              <div
+                id="offline-sync-status"
+                className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wider uppercase transition-all duration-300 animate-pulse cursor-help"
+                style={{
+                  background: "rgba(239, 68, 68, 0.12)",
+                  border: "1px solid rgba(239, 68, 68, 0.25)",
+                  color: "#ef4444",
+                }}
+                title="Canlı bağlantı kesildi. Polling moduna geçildi (veriler 10 saniyede bir güncelleniyor)."
+              >
+                <WifiOff className="w-2.5 h-2.5" />
+                <span>Çevrimdışı</span>
+              </div>
+            )}
+          </div>
           <select
             value={stageFilter}
             onChange={(e) => setStageFilter(e.target.value)}
