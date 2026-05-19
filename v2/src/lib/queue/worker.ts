@@ -12,6 +12,59 @@ import { assertTenant } from "@/lib/security/assertions";
 import { AIEventEmitter } from "@/lib/services/ai/core/event-emitter";
 import { FeatureFlagService } from "@/lib/services/feature-flag.service";
 
+// --- Worker Payload Types ---
+
+/** Meta webhook payload envelope (WhatsApp/Messenger/Instagram) */
+export interface MetaWebhookPayload {
+  object?: string;
+  entry?: Array<{
+    id?: string;
+    changes?: Array<{
+      value?: {
+        messaging_product?: string;
+        metadata?: { display_phone_number?: string; phone_number_id?: string };
+        contacts?: Array<{ profile?: { name?: string }; wa_id?: string }>;
+        messages?: Array<{
+          from?: string;
+          id?: string;
+          timestamp?: string;
+          type?: string;
+          text?: { body?: string };
+          image?: { id?: string; mime_type?: string; caption?: string };
+          document?: { id?: string; filename?: string; mime_type?: string };
+          audio?: { id?: string; mime_type?: string };
+          video?: { id?: string; mime_type?: string; caption?: string };
+          location?: { latitude?: number; longitude?: number; name?: string };
+          reaction?: { message_id?: string; emoji?: string };
+          button?: { text?: string; payload?: string };
+          interactive?: { type?: string; button_reply?: { id?: string; title?: string }; list_reply?: { id?: string; title?: string } };
+        }>;
+        statuses?: Array<{
+          id?: string;
+          status?: string;
+          recipient_id?: string;
+          timestamp?: string;
+          errors?: Array<{ code?: number; title?: string }>;
+        }>;
+      };
+      field?: string;
+    }>;
+    messaging?: Array<{
+      sender?: { id?: string };
+      recipient?: { id?: string };
+      timestamp?: number;
+      message?: { mid?: string; text?: string; attachments?: Array<{ type?: string; payload?: { url?: string } }> };
+    }>;
+  }>;
+}
+
+/** Metadata attached to each queue job */
+export interface WorkerMetadata {
+  messageId: string;
+  isRetry: boolean;
+  retriedCount: number;
+}
+
 /**
  * Enterprise Queue Worker Engine
  * Abstracted worker logic to keep API routes clean and testable.
@@ -28,8 +81,8 @@ export class QueueWorkerEngine {
   public async processEvent(
     topic: string, 
     tenantId: string, 
-    payload: any, 
-    metadata: { messageId: string, isRetry: boolean, retriedCount: number }
+    payload: MetaWebhookPayload, 
+    metadata: WorkerMetadata
   ) {
     // SECURITY: Fail-closed tenant assertion at pipeline boundary
     assertTenant(tenantId, `worker:${topic}`);
@@ -71,7 +124,7 @@ export class QueueWorkerEngine {
   /**
    * Domain-specific handler for WhatsApp Status (Delivery Receipts)
    */
-  private async handleWhatsAppStatus(tenantId: string, payload: any, metadata: any) {
+  private async handleWhatsAppStatus(tenantId: string, payload: MetaWebhookPayload, metadata: WorkerMetadata) {
     const traceId = metadata.messageId;
     this.log.info(`[WORKER_PROCESSING] [WA STATUS] Processing WhatsApp status receipt`, { tenantId, traceId });
 
@@ -83,7 +136,7 @@ export class QueueWorkerEngine {
 
     const providerMessageId = statusObj.id;
     const deliveryStatus = statusObj.status; // 'sent', 'delivered', 'read'
-    const phoneNumber = statusObj.recipient_id;
+    const phoneNumber = statusObj.recipient_id || '';
 
     const db = withTenantDB(tenantId);
     
@@ -124,11 +177,14 @@ export class QueueWorkerEngine {
       if (internalMessageId && conversationId) {
         try {
           const { RealtimePublisher } = await import('@/lib/realtime/publisher');
+          const validStatus = ['sent', 'delivered', 'read', 'failed'].includes(deliveryStatus) 
+            ? deliveryStatus as 'sent' | 'delivered' | 'read' | 'failed'
+            : 'sent';
           await RealtimePublisher.publishMessageStatusUpdated(
             tenantId,
-            internalMessageId,
+            String(internalMessageId),
             phoneNumber,
-            deliveryStatus as any,
+            validStatus,
             1, // entityVersion placeholder
             { traceId, spanId: providerMessageId }
           );
@@ -146,7 +202,7 @@ export class QueueWorkerEngine {
   /**
    * Domain-specific handler for Incoming Messages across Meta Channels (WhatsApp, Messenger, Instagram)
    */
-  private async handleIncomingMessage(tenantId: string, payload: any, metadata: any, channel: 'whatsapp' | 'messenger' | 'instagram') {
+  private async handleIncomingMessage(tenantId: string, payload: MetaWebhookPayload, metadata: WorkerMetadata, channel: 'whatsapp' | 'messenger' | 'instagram') {
     const traceId = metadata.messageId;
     this.log.info(`[WORKER_PROCESSING] [${channel.toUpperCase()}] Processing incoming message`, { tenantId, traceId });
 
@@ -187,19 +243,19 @@ export class QueueWorkerEngine {
         return;
       }
       const incomingMsg = messages[0];
-      phoneNumber = incomingMsg.from;
-      content = incomingMsg.text?.body;
-      providerMessageId = incomingMsg.id;
-      profileName = payload.entry?.[0]?.changes?.[0]?.value?.contacts?.[0]?.profile?.name;
+      phoneNumber = incomingMsg.from || '';
+      content = incomingMsg.text?.body || '';
+      providerMessageId = incomingMsg.id || '';
+      profileName = value?.contacts?.[0]?.profile?.name;
     } else {
       const incomingMsg = payload.entry?.[0]?.messaging?.[0];
       if (!incomingMsg || !incomingMsg.message) {
         this.log.info(`[SKIP] No messages found in payload`, { traceId });
         return;
       }
-      phoneNumber = incomingMsg.sender.id;
-      content = incomingMsg.message.text;
-      providerMessageId = incomingMsg.message.mid;
+      phoneNumber = incomingMsg.sender?.id || '';
+      content = incomingMsg.message.text || '';
+      providerMessageId = incomingMsg.message.mid || '';
     }
 
     if (!content) {
@@ -617,7 +673,7 @@ export class QueueWorkerEngine {
    *
    * NOTE: dead_letter_jobs table must exist via setup migrations.
    */
-  public async moveToDLQ(topic: string, tenantId: string, payload: any, error: any) {
+  public async moveToDLQ(topic: string, tenantId: string, payload: MetaWebhookPayload | Record<string, unknown>, error: Error | unknown) {
     const errObj = error instanceof Error ? error : new Error(String(error));
     this.log.error(`[DLQ] Moving failed event to Dead Letter Queue`, errObj, {
       topic,

@@ -1,11 +1,22 @@
-import { useDiagnosticsStore } from "./diagnostics-store";
+/**
+ * Chaos Engine — Dev-Only Network Fault Simulator
+ * 
+ * In production builds, this is a complete no-op.
+ * Next.js dead-code elimination removes the entire dev block.
+ */
 
-export const ChaosEngine = {
-  /**
-   * Simulates network unpredictability and hostile production environments.
-   * Intercepts events BEFORE they reach the reconciliation layer.
-   */
+const IS_DEV = process.env.NODE_ENV === "development";
+
+// Production no-op (zero overhead, tree-shaken)
+const NoOpChaosEngine = {
+  processIncomingEvents: async <T>(event: T): Promise<T[]> => [event],
+};
+
+// Dev-only implementation (lazy-loaded to avoid bundle impact)
+const DevChaosEngine = {
   processIncomingEvents: async <T>(event: T): Promise<T[]> => {
+    // Dynamic import prevents diagnostics-store from being bundled in production
+    const { useDiagnosticsStore } = await import("./diagnostics-store");
     const state = useDiagnosticsStore.getState();
     if (!state.chaosModeEnabled) return [event];
 
@@ -33,3 +44,5 @@ export const ChaosEngine = {
     return [event];
   }
 };
+
+export const ChaosEngine = IS_DEV ? DevChaosEngine : NoOpChaosEngine;
