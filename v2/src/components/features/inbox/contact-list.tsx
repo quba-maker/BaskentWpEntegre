@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import useSWRInfinite from "swr/infinite";
-import { Search, MessageCircle } from "lucide-react";
+import { Search, MessageCircle, Check, CheckCheck, Clock } from "lucide-react";
 import { getConversations } from "@/app/actions/inbox";
 import { useInboxStore } from "@/store/inbox-store";
 
@@ -263,10 +263,18 @@ export function ContactRail() {
                       </span>
                     </div>
                     <p
-                      className={`text-[13px] truncate ${c.unread > 0 ? "font-bold" : "font-medium"}`}
+                      className={`text-[13px] truncate flex items-center gap-1.5 ${c.unread > 0 ? "font-bold" : "font-medium"}`}
                       style={{ color: c.unread > 0 ? "var(--q-text-primary)" : "var(--q-text-secondary)" }}
                     >
-                      {c.last_message || "Görsel veya medya"}
+                      {(c.lastMessageDirection === 'out' || c.lastMessageDirection === 'system') && (
+                        <span className="flex-shrink-0 opacity-70">
+                          {(!c.lastMessageStatus || c.lastMessageStatus === 'pending') && <Clock className="w-3.5 h-3.5" />}
+                          {c.lastMessageStatus === 'sent' && <Check className="w-4 h-4" />}
+                          {c.lastMessageStatus === 'delivered' && <CheckCheck className="w-4 h-4" />}
+                          {c.lastMessageStatus === 'read' && <CheckCheck className="w-4 h-4" style={{ color: "var(--q-blue)" }} />}
+                        </span>
+                      )}
+                      <span className="truncate">{c.last_message || "Görsel veya medya"}</span>
                     </p>
                     <div className="flex gap-2 mt-2">
                       <span

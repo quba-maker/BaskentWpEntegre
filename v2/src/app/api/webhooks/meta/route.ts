@@ -74,6 +74,32 @@ export const POST = withApiGuard(
       return new NextResponse("EVENT_RECEIVED", { status: 200 });
     }
 
+    // 1.5 WHATSAPP STATUSES (Delivery Receipts)
+    if (
+      body.object === "whatsapp_business_account" &&
+      body.entry?.[0]?.changes?.[0]?.value?.statuses?.[0]
+    ) {
+      const statusObj = body.entry[0].changes[0].value.statuses[0];
+      const statusId = statusObj.id; // Original message ID
+      
+      const { isDuplicate } = await dedupeService.checkAndLock({
+        provider: 'whatsapp',
+        providerMessageId: `${statusId}_${statusObj.status}`, // e.g. wamid.xxxx_delivered
+        senderId: statusObj.recipient_id,
+        timestamp: statusObj.timestamp ? parseInt(statusObj.timestamp) : Date.now()
+      });
+
+      if (isDuplicate) {
+        return new NextResponse("EVENT_RECEIVED_DUPLICATE", { status: 200 });
+      }
+
+      log.info(`[WA Status] Enqueueing receipt: ${statusObj.status}`, { tenantName: tenant.name, tenantSlug: tenant.slug });
+      
+      waitUntil(queue.publish(ctx.tenantId!, 'whatsapp.status.received', body));
+      
+      return new NextResponse("EVENT_RECEIVED", { status: 200 });
+    }
+
     // 2. MESSENGER
     if (
       body.object === "page" &&

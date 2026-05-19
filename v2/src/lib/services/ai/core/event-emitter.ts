@@ -33,7 +33,8 @@ export type AIEventType =
   | 'max_messages_reached'
   | 'duplicate_message_dropped'
   | 'prompt_version_created'
-  | 'brain_resolved';
+  | 'brain_resolved'
+  | 'message_status_updated';
 
 export type AIEventCategory = 
   | 'identity'

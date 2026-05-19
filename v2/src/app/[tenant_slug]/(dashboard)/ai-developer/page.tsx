@@ -16,7 +16,7 @@ export default async function AiDeveloperPage() {
   }
 
   return (
-    <div className="p-4 md:p-6 lg:p-8 max-w-7xl mx-auto w-full overflow-x-hidden">
+    <div className="p-4 md:p-6 lg:p-8 max-w-7xl mx-auto w-full flex flex-col min-w-0">
       <AiDeveloperConsole />
     </div>
   );

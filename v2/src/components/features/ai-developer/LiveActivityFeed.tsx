@@ -51,7 +51,7 @@ export function LiveActivityFeed() {
     <div className="space-y-6">
       {/* Stats Row */}
       {stats && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <StatCard label="Son 1 Saat" value={parseInt(stats.last_hour) || 0} />
           <StatCard label="Son 24 Saat" value={parseInt(stats.last_24h) || 0} />
           <StatCard label="Hatalar (24s)" value={parseInt(stats.errors_24h) || 0} color={parseInt(stats.errors_24h) > 0 ? 'var(--q-red)' : undefined} />

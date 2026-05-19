@@ -33,6 +33,8 @@ export async function getConversations(page: number = 1, search: string = "", st
           c.last_message_at,
           EXTRACT(EPOCH FROM c.last_message_at) * 1000 as last_message_time_ms,
           COALESCE(c.last_message_content, m.content) as last_message,
+          COALESCE(c.last_message_status, m.status) as last_message_status,
+          COALESCE(c.last_message_direction, m.direction) as last_message_direction,
           l.form_name,
           l.raw_data as form_raw_data,
           EXTRACT(EPOCH FROM l.created_at) * 1000 as form_date_ms,
@@ -42,7 +44,7 @@ export async function getConversations(page: number = 1, search: string = "", st
           0 as unread
         FROM conversations c
         LEFT JOIN LATERAL (
-          SELECT content
+          SELECT content, status, direction
           FROM messages 
           WHERE phone_number = c.phone_number AND (messages.tenant_id = ${ctx.tenantId} OR messages.tenant_id IS NULL)
           ORDER BY created_at DESC 
@@ -95,6 +97,8 @@ export async function getConversations(page: number = 1, search: string = "", st
           isBotActive: r.status !== 'human',
           formattedTime,
           channel: r.channel || 'whatsapp',
+          lastMessageStatus: r.last_message_status || 'sent',
+          lastMessageDirection: r.last_message_direction || 'in',
           country: r.country || (r.form_raw_data && r.form_raw_data.includes('country') ? JSON.parse(r.form_raw_data).country : null) || (r.id.startsWith('90') || r.id.startsWith('+90') ? 'Türkiye' : r.id.startsWith('49') || r.id.startsWith('+49') ? 'Almanya' : null),
           formData: r.form_name ? {
             name: r.form_name,
@@ -128,7 +132,7 @@ export async function getMessages(phone: string) {
 
         const rows = await ctx.db.executeSafe(sql`
           SELECT * FROM (
-            SELECT id, content as text, direction, EXTRACT(EPOCH FROM created_at) * 1000 as created_at_ms
+            SELECT id, content as text, direction, status, EXTRACT(EPOCH FROM created_at) * 1000 as created_at_ms
             FROM messages
             WHERE phone_number LIKE ${phoneLike} 
               AND (tenant_id = ${ctx.tenantId} OR tenant_id IS NULL)
@@ -171,7 +175,8 @@ export async function getMessages(phone: string) {
           sender: r.direction === 'in' ? 'user' : (r.direction === 'system' ? 'system' : 'agent'),
           text: r.text,
           timeMs: parseFloat(r.created_at_ms),
-          dateLabel
+          dateLabel,
+          status: r.status || 'sent'
         };
       });
       } catch(err: any) {
@@ -292,6 +297,8 @@ export async function sendMessage(phone: string, text: string) {
         SET last_message_at = NOW(), 
             last_message_content = ${text},
             last_message_channel = 'whatsapp',
+            last_message_status = 'pending',
+            last_message_direction = 'out',
             message_count = message_count + 1,
             status = 'human'
         WHERE phone_number = ${phone} AND (tenant_id = ${ctx.tenantId} OR tenant_id IS NULL)

@@ -96,10 +96,19 @@ export async function GET() {
     await sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS model_used TEXT`;
     await sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS prompt_tokens INTEGER DEFAULT 0`;
     await sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS completion_tokens INTEGER DEFAULT 0`;
+    
+    // Add status & direction to messages
+    await sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pending'`;
+    await sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS direction TEXT DEFAULT 'in'`;
+    
+    // Add status & direction to conversations
+    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_message_status TEXT DEFAULT 'pending'`;
+    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_message_direction TEXT DEFAULT 'in'`;
+    
     // Composite Indexes for scalability
     await sql`CREATE INDEX IF NOT EXISTS idx_messages_tenant_created ON messages(tenant_id, created_at DESC)`;
     await sql`CREATE INDEX IF NOT EXISTS idx_conversations_tenant_created ON conversations(tenant_id, created_at DESC)`;
-    results.push('messages columns and composite indexes: OK');
+    results.push('messages & conversations status columns and composite indexes: OK');
 
     // =============================================
     // PHASE 6 — AI OS Visibility & Control Layer

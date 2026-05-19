@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import useSWR, { useSWRConfig } from "swr";
-import { Send, Paperclip, User, MessageCircle, ChevronLeft, ChevronDown, Info, ShieldAlert, Sparkles, Zap } from "lucide-react";
+import { Send, Paperclip, User, MessageCircle, ChevronLeft, ChevronDown, Info, ShieldAlert, Sparkles, Zap, Check, CheckCheck, Clock } from "lucide-react";
 import { getMessages, sendMessage, toggleBotStatus } from "@/app/actions/inbox";
 import { useInboxStore } from "@/store/inbox-store";
 import { AiRuntimeTimeline } from "@/components/features/ai-observability/AiRuntimeTimeline";
@@ -164,13 +164,13 @@ export function ConversationViewport() {
     setIsSending(true);
     setSendError("");
 
-    // Optimistic update
     const optimisticMsg = {
       id: Date.now(),
       sender: "agent",
       text: textToSend,
       timeMs: Date.now(),
       dateLabel: "Bugün",
+      status: "pending"
     };
 
     const currentMessages = messages || [];
@@ -365,8 +365,14 @@ export function ConversationViewport() {
                         >
                           <ShieldAlert className="w-4 h-4 flex-shrink-0" style={{ color: "var(--q-orange)" }} />
                           <p className="text-[13px] font-semibold tracking-tight leading-tight">{msg.text}</p>
-                          <span className="text-[10px] font-bold opacity-60 ml-2 whitespace-nowrap">
-                            {msg.timeMs ? new Date(msg.timeMs).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) : msg.time}
+                          <span className="text-[10px] font-bold opacity-60 ml-2 whitespace-nowrap flex items-center gap-1">
+                            <span>{msg.timeMs ? new Date(msg.timeMs).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) : msg.time}</span>
+                            <span className="ml-0.5">
+                              {msg.status === 'pending' && <Clock className="w-3 h-3" />}
+                              {(msg.status === 'sent' || !msg.status) && <Check className="w-3.5 h-3.5" />}
+                              {msg.status === 'delivered' && <CheckCheck className="w-3.5 h-3.5" />}
+                              {msg.status === 'read' && <CheckCheck className="w-3.5 h-3.5" style={{ color: "#53bdeb", opacity: 1 }} />}
+                            </span>
                           </span>
                         </div>
                       </div>
@@ -401,9 +407,17 @@ export function ConversationViewport() {
                             {msg.text}
                           </p>
                           
-                          <span className="absolute bottom-1 right-2 text-[10px] font-semibold tracking-wide opacity-50" style={{ color: "var(--q-text-secondary)" }}>
-                            {msg.timeMs ? new Date(msg.timeMs).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) : msg.time}
-                          </span>
+                          <div className="absolute bottom-1 right-2 flex items-center gap-1 text-[10px] font-semibold tracking-wide" style={{ color: "var(--q-text-secondary)" }}>
+                            <span className="opacity-50">{msg.timeMs ? new Date(msg.timeMs).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) : msg.time}</span>
+                            {msg.sender !== "user" && (
+                              <span className="ml-0.5 opacity-80">
+                                {msg.status === 'pending' && <Clock className="w-3 h-3 opacity-50" />}
+                                {(msg.status === 'sent' || (!msg.status && msg.sender === 'agent')) && <Check className="w-3.5 h-3.5 opacity-70" />}
+                                {msg.status === 'delivered' && <CheckCheck className="w-3.5 h-3.5 opacity-70" />}
+                                {msg.status === 'read' && <CheckCheck className="w-3.5 h-3.5" style={{ color: "#53bdeb", opacity: 1 }} />}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     )}

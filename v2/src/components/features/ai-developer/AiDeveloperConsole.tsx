@@ -20,7 +20,7 @@ export function AiDeveloperConsole() {
   const [activeTab, setActiveTab] = useState<TabId>('logs');
 
   return (
-    <div className="space-y-6 w-full max-w-full">
+    <div className="space-y-6 w-full min-w-0">
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
@@ -44,7 +44,7 @@ export function AiDeveloperConsole() {
 
       {/* Tab Navigation */}
       <div 
-        className="flex md:grid md:grid-cols-4 items-center gap-1 p-1 rounded-xl overflow-x-auto w-full no-scrollbar"
+        className="flex lg:grid lg:grid-cols-4 items-center gap-2 p-1.5 rounded-xl overflow-x-auto w-full no-scrollbar snap-x"
         style={{ background: 'var(--q-bg-secondary)', border: '1px solid var(--q-border-default)' }}
       >
         {TABS.map(tab => {
@@ -54,7 +54,7 @@ export function AiDeveloperConsole() {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-[13px] font-medium transition-all whitespace-nowrap cursor-pointer"
+              className="flex-shrink-0 lg:flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-[13px] font-medium transition-all whitespace-nowrap cursor-pointer snap-center"
               style={{
                 background: isActive ? 'var(--q-bg-primary)' : 'transparent',
                 color: isActive ? 'var(--q-blue)' : 'var(--q-text-secondary)',

@@ -40,6 +40,10 @@ export class QueueWorkerEngine {
       case "whatsapp.message.received":
         await this.handleWhatsAppMessage(tenantId, payload, metadata);
         break;
+        
+      case "whatsapp.status.received":
+        await this.handleWhatsAppStatus(tenantId, payload, metadata);
+        break;
       
       case "messenger.message.received":
         // EXPLICIT HANDLER: Messenger events are ingested but AI pipeline not yet wired.
@@ -67,6 +71,57 @@ export class QueueWorkerEngine {
         // FAIL-VISIBLE: Unknown topics are routed to DLQ, never silently dropped
         this.log.error(`[UNKNOWN_TOPIC] Unhandled topic routed to DLQ`, undefined, { topic, tenantId });
         await this.moveToDLQ(topic, tenantId, payload, new Error(`UNKNOWN_TOPIC: ${topic}`));
+    }
+  }
+
+  /**
+   * Domain-specific handler for WhatsApp Status (Delivery Receipts)
+   */
+  private async handleWhatsAppStatus(tenantId: string, payload: any, metadata: any) {
+    const traceId = metadata.messageId;
+    this.log.info(`[QUEUE_RECEIVED] Processing WhatsApp status receipt`, { tenantId, traceId });
+
+    const statusObj = payload.entry?.[0]?.changes?.[0]?.value?.statuses?.[0];
+    if (!statusObj || !statusObj.id || !statusObj.status) {
+      this.log.info(`[SKIP] No valid status object in payload`, { traceId });
+      return;
+    }
+
+    const providerMessageId = statusObj.id;
+    const deliveryStatus = statusObj.status; // 'sent', 'delivered', 'read'
+    const phoneNumber = statusObj.recipient_id;
+
+    const db = withTenantDB(tenantId);
+    
+    try {
+      // Update message status
+      await db.executeSafe(sql`
+        UPDATE messages 
+        SET status = ${deliveryStatus}
+        WHERE provider_message_id = ${providerMessageId} AND tenant_id = ${tenantId}
+      `);
+
+      // Update conversation last_message_status to reflect real-time UI
+      if (phoneNumber) {
+        await db.executeSafe(sql`
+          UPDATE conversations 
+          SET last_message_status = ${deliveryStatus}
+          WHERE phone_number = ${phoneNumber} AND tenant_id = ${tenantId}
+        `);
+      }
+      
+      this.log.info(`[STATUS_UPDATED] Message ${providerMessageId} marked as ${deliveryStatus}`, { traceId });
+      
+      // Emit event for real-time socket/UI updates
+      AIEventEmitter.emit({ 
+        tenantId, 
+        type: 'message_status_updated', 
+        category: 'pipeline', 
+        payload: { providerMessageId, status: deliveryStatus, phoneNumber } 
+      });
+      
+    } catch (e: any) {
+      this.log.error(`[STATUS_UPDATE_FAILED] Failed to update delivery receipt`, e, { traceId });
     }
   }
 
