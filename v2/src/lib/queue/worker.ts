@@ -334,7 +334,9 @@ export class QueueWorkerEngine {
       direction: 'out',
       content: finalResponseText,
       channel: 'whatsapp',
-      modelUsed: aiResponse.modelUsed || llmModel
+      modelUsed: aiResponse.modelUsed || llmModel,
+      promptTokens: aiResponse.inputTokens || 0,
+      completionTokens: aiResponse.outputTokens || 0
     });
 
     // 10. CRM Intelligence Extraction (Async & Non-blocking — Feature Flag gated)

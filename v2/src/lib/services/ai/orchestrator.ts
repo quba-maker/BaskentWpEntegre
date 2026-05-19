@@ -71,6 +71,8 @@ export class AIOrchestrator {
       let currentMessages = [...initialMessages];
       let loopCount = 0;
       const MAX_LOOPS = 5; // Guard against infinite tool loops
+      let totalInputTokens = 0;
+      let totalOutputTokens = 0;
 
       while (loopCount < MAX_LOOPS) {
         loopCount++;
@@ -81,6 +83,11 @@ export class AIOrchestrator {
           rawResponse = await this.geminiCircuit.execute(() => this.callGemini(currentMessages, config));
         } else {
           throw new Error(`Unsupported provider: ${config.provider}`);
+        }
+
+        if (rawResponse.usageMetadata) {
+          totalInputTokens += rawResponse.usageMetadata.promptTokenCount || 0;
+          totalOutputTokens += rawResponse.usageMetadata.candidatesTokenCount || 0;
         }
 
         // 1. Did LLM return standard text? (Respond Intent)
@@ -101,7 +108,9 @@ export class AIOrchestrator {
             text: rawResponse.text,
             providerUsed: config.provider,
             modelUsed: config.modelId,
-            latencyMs
+            latencyMs,
+            inputTokens: totalInputTokens,
+            outputTokens: totalOutputTokens
           };
         }
 
@@ -191,7 +200,7 @@ export class AIOrchestrator {
     }
   }
 
-  private async callGemini(messages: ChatMessage[], config: AIProviderConfig): Promise<{text?: string, functionCall?: {name: string, args: any}}> {
+  private async callGemini(messages: ChatMessage[], config: AIProviderConfig): Promise<{text?: string, functionCall?: {name: string, args: any}, usageMetadata?: any}> {
     const systemMsg = messages.find(m => m.role === 'system');
     
     // Map standard messages to Gemini format
@@ -262,6 +271,7 @@ export class AIOrchestrator {
     const data = await response.json();
     const candidate = data.candidates?.[0];
     const part = candidate?.content?.parts?.[0];
+    const usageMetadata = data.usageMetadata;
 
     if (!part) {
       throw new Error("No response parts received from Gemini");
@@ -272,11 +282,12 @@ export class AIOrchestrator {
         functionCall: {
           name: part.functionCall.name,
           args: part.functionCall.args
-        }
+        },
+        usageMetadata
       };
     }
 
-    return { text: part.text || '' };
+    return { text: part.text || '', usageMetadata };
   }
 }
 

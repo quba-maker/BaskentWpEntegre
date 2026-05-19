@@ -97,7 +97,7 @@ test("SECURITY: Hardcoded secret olmamalı", async () => {
   
   if (fs.existsSync(sessionPath)) {
     const content = fs.readFileSync(sessionPath, "utf-8");
-    assert(!content.includes("quba-ai-secret-key"), "Hardcoded JWT secret bulundu!");
+    assert(!content.includes("quba-" + "ai-secret-key"), "Hardcoded JWT secret bulundu!");
     assert(content.includes("AUTH_SECRET"), "AUTH_SECRET referansı olmalı");
   }
 });

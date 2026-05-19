@@ -9,7 +9,6 @@ import {
 import { PageLoader } from "@/components/ui/shared-states";
 import { PageShell, PageHeader } from "@/components/governance";
 import {
-  BotPerformancePanel,
   ChannelStatusPanel,
   PromptGovernancePanel,
   RecentConversationsPanel,
@@ -57,7 +56,6 @@ const channels: BotChannel[] = [
 export default function BotManagementPage() {
   const [settings, setSettings] = useState<Record<string, any>>({});
   const [defaults, setDefaults] = useState<any>(null);
-  const [stats, setStats] = useState<any>(null);
   const [activeTab, setActiveTab] = useState("whatsapp");
   const [prompts, setPrompts] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState<string | null>(null);
@@ -65,8 +63,6 @@ export default function BotManagementPage() {
   const [knowledgeSaving, setKnowledgeSaving] = useState(false);
   const [knowledgeSaved, setKnowledgeSaved] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [statsPeriod, setStatsPeriod] = useState("7d");
-  const [modelUsage, setModelUsage] = useState<any>(null);
   const [recentConvs, setRecentConvs] = useState<any[]>([]);
   // Knowledge Base (Global)
   const [knowledgePrices, setKnowledgePrices] = useState("");
@@ -87,11 +83,9 @@ export default function BotManagementPage() {
   useEffect(() => {
     async function load() {
       setIsLoading(true);
-      const [settingsRes, defaultsRes, statsRes, usageRes, convsRes] = await Promise.all([
+      const [settingsRes, defaultsRes, convsRes] = await Promise.all([
         getBotSettings(),
         getDefaultPrompts(),
-        getBotStats(),
-        getModelUsage('30d'),
         getRecentBotConversations(8)
       ]);
 
@@ -129,26 +123,12 @@ export default function BotManagementPage() {
       }
 
       setDefaults(defaultsRes);
-      setStats(statsRes);
-      setModelUsage(usageRes);
       setRecentConvs(convsRes);
 
       setIsLoading(false);
     }
     load();
   }, []);
-
-  useEffect(() => {
-    async function reloadStats() {
-      const [statsRes, usageRes] = await Promise.all([
-        getBotStats(statsPeriod),
-        getModelUsage(statsPeriod)
-      ]);
-      setStats(statsRes);
-      setModelUsage(usageRes);
-    }
-    if (!isLoading) reloadStats();
-  }, [statsPeriod]);
 
   // ---- Action Handlers ----
 
@@ -238,15 +218,7 @@ export default function BotManagementPage() {
         subtitle="AI asistanlarınızı tek noktadan yapılandırın ve yönetin"
       />
 
-      {/* 1. PERFORMANS */}
-      <BotPerformancePanel
-        stats={stats}
-        statsPeriod={statsPeriod}
-        onPeriodChange={setStatsPeriod}
-        modelUsage={modelUsage}
-      />
-
-      {/* 2. KANAL YÖNETİMİ */}
+      {/* 1. KANAL YÖNETİMİ */}
       <ChannelStatusPanel
         channels={channels}
         isChannelActive={isChannelActive}

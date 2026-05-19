@@ -71,6 +71,9 @@ export async function Sidebar() {
             {session?.role !== "viewer" && (
               <NavLink href={`/${session?.tenantSlug || ''}/bot`} icon={<Bot className="w-[18px] h-[18px]" />} label="Bot Yönetimi" />
             )}
+            {session?.role !== "viewer" && (
+              <NavLink href={`/${session?.tenantSlug || ''}/analytics`} icon={<BarChart3 className="w-[18px] h-[18px]" />} label="AI Performans & Maliyet" />
+            )}
             {(session?.role === "admin" || session?.role === "owner") && (
               <NavLink href={`/${session?.tenantSlug || ''}/bot/debug`} icon={<Terminal className="w-[18px] h-[18px]" />} label="AI Debug Paneli" />
             )}

@@ -92,9 +92,14 @@ export async function GET() {
     await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS customer_id UUID`;
     results.push('leads.customer_id: OK');
 
-    // 8. Add model_used to messages for AI model tracking
+    // 8. Add model_used and token tracking to messages for AI model tracking
     await sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS model_used TEXT`;
-    results.push('messages.model_used: OK');
+    await sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS prompt_tokens INTEGER DEFAULT 0`;
+    await sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS completion_tokens INTEGER DEFAULT 0`;
+    // Composite Indexes for scalability
+    await sql`CREATE INDEX IF NOT EXISTS idx_messages_tenant_created ON messages(tenant_id, created_at DESC)`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_conversations_tenant_created ON conversations(tenant_id, created_at DESC)`;
+    results.push('messages columns and composite indexes: OK');
 
     // =============================================
     // PHASE 6 — AI OS Visibility & Control Layer

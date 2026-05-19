@@ -9,6 +9,8 @@ export interface MessagePayload {
   channel: string;
   modelUsed?: string | null;
   providerMessageId?: string | null; // Idempotency için Meta'dan gelen message ID
+  promptTokens?: number;
+  completionTokens?: number;
 }
 
 export class MessageService {
@@ -60,8 +62,8 @@ export class MessageService {
 
       const txResult = await this.db.executeTransaction(queries);
       
-      let dupCheckIdx = payload.providerMessageId ? 1 : -1;
-      let convCheckIdx = payload.providerMessageId ? 2 : 1;
+      const dupCheckIdx = payload.providerMessageId ? 1 : -1;
+      const convCheckIdx = payload.providerMessageId ? 2 : 1;
 
       if (dupCheckIdx > -1 && txResult[dupCheckIdx].length > 0) {
         // Duplicate webhook!
@@ -75,10 +77,11 @@ export class MessageService {
       
       writeQueries.push(sql`
         INSERT INTO messages (
-          tenant_id, phone_number, direction, content, channel, provider_message_id, model_used
+          tenant_id, phone_number, direction, content, channel, provider_message_id, model_used, prompt_tokens, completion_tokens
         ) VALUES (
           ${this.db.tenantId}, ${payload.phoneNumber}, ${payload.direction}, ${payload.content}, 
-          ${payload.channel}, ${payload.providerMessageId || null}, ${payload.modelUsed || null}
+          ${payload.channel}, ${payload.providerMessageId || null}, ${payload.modelUsed || null},
+          ${payload.promptTokens || 0}, ${payload.completionTokens || 0}
         ) RETURNING id
       `);
 

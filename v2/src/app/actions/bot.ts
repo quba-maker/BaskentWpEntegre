@@ -183,7 +183,11 @@ export async function getModelUsage(period: string = '30d') {
       const interval = intervalMap[period] || '30 days';
 
       const usage = await ctx.db.executeSafe(sql`
-        SELECT COALESCE(model_used, 'gemini-2.5-flash') as model_used, COUNT(*) as message_count
+        SELECT 
+          COALESCE(model_used, 'gemini-2.5-flash') as model_used, 
+          COUNT(*) as message_count,
+          SUM(COALESCE(prompt_tokens, 150)) as total_prompt_tokens,
+          SUM(COALESCE(completion_tokens, 200)) as total_completion_tokens
         FROM messages 
         WHERE tenant_id = ${ctx.tenantId}
           AND direction = 'out' 
@@ -200,22 +204,35 @@ export async function getModelUsage(period: string = '30d') {
         GROUP BY channel
       `);
 
-      let totalCost = 0;
-      const modelBreakdown: Record<string, { count: number; cost: number; label: string }> = {};
+      const USD_TRY_RATE = 36.50; // In a production app this could be fetched from an API daily and cached.
+      let totalCostUsd = 0;
+      let totalPromptTokens = 0;
+      let totalCompletionTokens = 0;
+      const modelBreakdown: Record<string, { count: number; costUsd: number; costTry: number; label: string }> = {};
       
       usage.forEach((row: any) => {
         const model = row.model_used;
         const count = parseInt(row.message_count);
+        const pTokens = parseInt(row.total_prompt_tokens || '0');
+        const cTokens = parseInt(row.total_completion_tokens || '0');
+        
+        totalPromptTokens += pTokens;
+        totalCompletionTokens += cTokens;
+
         const costInfo = MODEL_COSTS[model] || { input: 0.15, output: 0.60, label: model };
-        const estimatedCost = count * ((150 * costInfo.input + 200 * costInfo.output) / 1_000_000);
+        
+        // Exact cost calculation based on recorded tokens
+        const costUsd = (pTokens / 1_000_000) * costInfo.input + (cTokens / 1_000_000) * costInfo.output;
+        const costTry = costUsd * USD_TRY_RATE;
         
         const groupKey = costInfo.label;
         if (!modelBreakdown[groupKey]) {
-          modelBreakdown[groupKey] = { count: 0, cost: 0, label: groupKey };
+          modelBreakdown[groupKey] = { count: 0, costUsd: 0, costTry: 0, label: groupKey };
         }
         modelBreakdown[groupKey].count += count;
-        modelBreakdown[groupKey].cost += estimatedCost;
-        totalCost += estimatedCost;
+        modelBreakdown[groupKey].costUsd += costUsd;
+        modelBreakdown[groupKey].costTry += costTry;
+        totalCostUsd += costUsd;
       });
 
       const channels: Record<string, number> = {};
@@ -225,9 +242,27 @@ export async function getModelUsage(period: string = '30d') {
         totalChannelMsgs += parseInt(row.c);
       });
 
-      return { models: modelBreakdown, channels, totalMessages: totalChannelMsgs, totalCost: Math.round(totalCost * 100) / 100 };
+      const totalCostTry = totalCostUsd * USD_TRY_RATE;
+      const avgCostPerMessageUsd = totalChannelMsgs > 0 ? totalCostUsd / totalChannelMsgs : 0;
+      const avgCostPerMessageTry = totalChannelMsgs > 0 ? totalCostTry / totalChannelMsgs : 0;
+
+      return { 
+        models: modelBreakdown, 
+        channels, 
+        totalMessages: totalChannelMsgs, 
+        totalPromptTokens,
+        totalCompletionTokens,
+        totalCostUsd: Math.round(totalCostUsd * 10000) / 10000, 
+        totalCostTry: Math.round(totalCostTry * 100) / 100,
+        avgCostPerMessageUsd: Math.round(avgCostPerMessageUsd * 10000) / 10000,
+        avgCostPerMessageTry: Math.round(avgCostPerMessageTry * 100) / 100,
+        exchangeRate: USD_TRY_RATE
+      };
     }
-  ).then(res => res.data || { models: {}, channels: {}, totalMessages: 0, totalCost: 0 });
+  ).then(res => res.data || { 
+    models: {}, channels: {}, totalMessages: 0, totalPromptTokens: 0, totalCompletionTokens: 0,
+    totalCostUsd: 0, totalCostTry: 0, avgCostPerMessageUsd: 0, avgCostPerMessageTry: 0, exchangeRate: 36.50
+  });
 }
 
 export async function getRecentBotConversations(limit: number = 8) {
