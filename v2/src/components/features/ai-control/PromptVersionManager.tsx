@@ -6,10 +6,21 @@ import { Brain, RotateCcw, Eye, ChevronUp, CheckCircle2, Hash, User, Clock } fro
 import { getBrainVersionHistory, getBrainVersionFull, rollbackBrain } from "@/app/actions/ai-control";
 
 export function PromptVersionManager() {
-  const { data: versions, mutate } = useSWR('brain-versions', getBrainVersionHistory);
+  const [activeTab, setActiveTab] = useState('system_prompt_whatsapp');
+  const { data: versions, mutate, isLoading } = useSWR(
+    ['brain-versions', activeTab], 
+    ([_, key]) => getBrainVersionHistory(key as string)
+  );
+  
   const [expandedVersion, setExpandedVersion] = useState<number | null>(null);
   const [fullPrompt, setFullPrompt] = useState<string | null>(null);
   const [loadingRollback, setLoadingRollback] = useState(false);
+
+  const tabs = [
+    { id: 'system_prompt_whatsapp', label: 'WhatsApp', color: 'var(--q-whatsapp, #25d366)' },
+    { id: 'system_prompt_tr', label: 'Sosyal Medya TR', color: 'var(--q-purple, #8b5cf6)' },
+    { id: 'system_prompt_foreign', label: 'Uluslararası', color: 'var(--q-blue)' }
+  ];
 
   const handleViewFull = async (versionNumber: number) => {
     if (expandedVersion === versionNumber) {
@@ -36,154 +47,142 @@ export function PromptVersionManager() {
 
   return (
     <div className="space-y-4">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+      {/* Header & Tabs */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-black/[0.04] pb-4">
         <div className="flex items-center gap-2">
           <Brain className="w-5 h-5" style={{ color: 'var(--q-purple-alt)' }} />
           <h3 className="text-base font-bold" style={{ color: 'var(--q-text-primary)' }}>Prompt Geçmişi</h3>
         </div>
-        <span className="text-xs px-2.5 py-1 rounded-full font-medium" 
-              style={{ background: 'var(--q-bg-secondary)', color: 'var(--q-text-secondary)' }}>
-          {versions?.length || 0} versiyon
-        </span>
+        
+        {/* Apple/Stripe Style Minimal Tabs */}
+        <div className="flex p-1 rounded-xl" style={{ background: 'var(--q-bg-secondary)' }}>
+          {tabs.map(tab => {
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => { setActiveTab(tab.id); setExpandedVersion(null); }}
+                className={`px-3 py-1.5 text-[11px] font-semibold rounded-lg transition-all ${
+                  isActive ? 'shadow-sm bg-white' : 'hover:bg-black/[0.02]'
+                }`}
+                style={{ 
+                  color: isActive ? tab.color : 'var(--q-text-secondary)',
+                }}
+              >
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Info Box */}
-      <div className="p-3 rounded-xl text-[12px]" style={{ background: 'color-mix(in srgb, var(--q-blue) 5%, transparent)', border: '1px solid color-mix(in srgb, var(--q-blue) 15%, var(--q-border-default))', color: 'var(--q-text-secondary)' }}>
-        💡 Bot Yönetimi sayfasından sistem promptunu her kaydettiğinizde otomatik olarak bir versiyon oluşturulur. Buradan eski sürümlere geri dönebilirsiniz.
+      <div className="p-3 rounded-xl text-[12px] flex items-start gap-2" 
+           style={{ background: 'color-mix(in srgb, var(--q-blue) 5%, transparent)', color: 'var(--q-text-secondary)' }}>
+        <span>💡</span>
+        <p className="leading-relaxed">
+          Sistem promptunu kaydettiğinizde otomatik olarak bir versiyon oluşturulur. Bu sekmede <strong>{tabs.find(t => t.id === activeTab)?.label}</strong> kanalına ait geçmişi görüyorsunuz.
+        </p>
       </div>
 
       {/* Version List */}
-      <div className="space-y-2">
-        {(!versions || versions.length === 0) && (
-          <div className="p-8 text-center rounded-xl" style={{ background: 'var(--q-bg-primary)', border: '1px solid var(--q-border-default)' }}>
-            <Brain className="w-8 h-8 mx-auto mb-2 opacity-20" />
-            <p className="text-sm font-medium" style={{ color: 'var(--q-text-primary)' }}>
-              Henüz prompt versiyonu yok
-            </p>
-            <p className="text-xs mt-1" style={{ color: 'var(--q-text-secondary)' }}>
-              Bot Yönetimi sayfasından sistem promptunu kaydettiğinizde burada versiyonlar görünecek.
+      <div className="space-y-3 relative">
+        {isLoading && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/50 backdrop-blur-sm rounded-xl">
+            <div className="w-5 h-5 border-2 border-black/10 border-t-black/40 rounded-full animate-spin" />
+          </div>
+        )}
+
+        {(!versions || versions.length === 0) && !isLoading && (
+          <div className="p-8 text-center rounded-xl" style={{ border: '1px dashed var(--q-border-default)' }}>
+            <RotateCcw className="w-6 h-6 mx-auto mb-2 opacity-20" />
+            <p className="text-[13px] font-medium" style={{ color: 'var(--q-text-primary)' }}>
+              Bu kanal için geçmiş yok
             </p>
           </div>
         )}
 
-        {versions?.map((v: any) => {
+        {versions?.map((v: any, index: number) => {
           const isExpanded = expandedVersion === v.version_number;
-          const isActive = v.is_active;
+          // By default, the first item in the list is the most recent active if the query is ordered properly,
+          // but let's rely on v.is_active to be absolutely sure.
+          const isCurrent = v.is_active;
 
           return (
             <div 
               key={v.version_number}
-              className="rounded-xl overflow-hidden transition-all"
+              className="rounded-xl overflow-hidden transition-all duration-200"
               style={{ 
-                background: 'var(--q-bg-primary)', 
-                border: isActive ? '2px solid var(--q-blue)' : '1px solid var(--q-border-default)',
+                background: isCurrent ? 'color-mix(in srgb, var(--q-blue) 3%, transparent)' : 'var(--q-bg-primary)', 
+                border: isCurrent ? '1px solid color-mix(in srgb, var(--q-blue) 15%, transparent)' : '1px solid var(--q-border-default)',
+                opacity: isCurrent ? 1 : 0.8
               }}
             >
-              {/* Version Header */}
-              <div className="flex items-center gap-3 px-4 py-3">
-                <div className="flex items-center gap-2 flex-1 min-w-0">
-                  <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
-                       style={{ background: isActive ? 'color-mix(in srgb, var(--q-blue) 10%, transparent)' : 'var(--q-bg-secondary)' }}>
-                    <Hash className="w-4 h-4" style={{ color: isActive ? 'var(--q-blue)' : 'var(--q-text-secondary)' }} />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-bold" style={{ color: 'var(--q-text-primary)' }}>
-                        v{v.version_number}
+              {/* Version Row */}
+              <div className="flex items-center justify-between px-4 py-3">
+                
+                {/* Left: Meta */}
+                <div className="flex items-center gap-3">
+                  <div className="flex flex-col items-center justify-center">
+                    <span className="text-[13px] font-bold" style={{ color: isCurrent ? 'var(--q-blue)' : 'var(--q-text-primary)' }}>
+                      v{v.version_number}
+                    </span>
+                    {isCurrent && (
+                      <span className="text-[8px] font-bold uppercase mt-0.5 tracking-wide" style={{ color: 'var(--q-blue)' }}>
+                        Mevcut
                       </span>
-                      {isActive && (
-                        <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full"
-                              style={{ background: 'color-mix(in srgb, var(--q-green) 12%, transparent)', color: 'var(--q-green)' }}>
-                          <CheckCircle2 className="w-2.5 h-2.5 inline mr-0.5" />
-                          AKTİF
-                        </span>
-                      )}
-                      {(() => {
-                        const pk = v.prompt_key || (v.change_summary?.includes('system_prompt_tr') ? 'system_prompt_tr' : v.change_summary?.includes('system_prompt_foreign') ? 'system_prompt_foreign' : 'system_prompt_whatsapp');
-                        const label = pk === 'system_prompt_tr' ? 'Sosyal Medya TR' : pk === 'system_prompt_foreign' ? 'Uluslararası' : 'WhatsApp';
-                        const bgColor = pk === 'system_prompt_tr' 
-                          ? 'color-mix(in srgb, var(--q-purple, #8b5cf6) 10%, transparent)' 
-                          : pk === 'system_prompt_foreign' 
-                            ? 'color-mix(in srgb, var(--q-blue) 10%, transparent)' 
-                            : 'color-mix(in srgb, var(--q-whatsapp, #25d366) 10%, transparent)';
-                        const fgColor = pk === 'system_prompt_tr' 
-                          ? 'var(--q-purple, #8b5cf6)' 
-                          : pk === 'system_prompt_foreign' 
-                            ? 'var(--q-blue)' 
-                            : 'var(--q-whatsapp, #25d366)';
-                        return (
-                          <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full"
-                                style={{ background: bgColor, color: fgColor }}>
-                            {label}
-                          </span>
-                        );
-                      })()}
-                    </div>
-                    <div className="flex items-center gap-3 text-[11px]" style={{ color: 'var(--q-text-secondary)' }}>
-                      <span className="flex items-center gap-1"><User className="w-3 h-3" />{v.changed_by}</span>
-                      <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{new Date(v.created_at).toLocaleString('tr-TR')}</span>
+                    )}
+                  </div>
+                  
+                  <div className="w-[1px] h-6 bg-black/[0.05]" />
+                  
+                  <div className="flex flex-col">
+                    <span className="text-[12px] font-medium" style={{ color: 'var(--q-text-primary)' }}>
+                      {v.change_summary || 'Güncelleme'}
+                    </span>
+                    <div className="flex items-center gap-2 mt-0.5 text-[10px]" style={{ color: 'var(--q-text-secondary)' }}>
+                      <span className="flex items-center gap-1"><User className="w-2.5 h-2.5" />{v.changed_by}</span>
+                      <span>•</span>
+                      <span className="flex items-center gap-1"><Clock className="w-2.5 h-2.5" />{new Date(v.created_at).toLocaleString('tr-TR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+                      <span>•</span>
+                      <span className="font-mono opacity-60">{String(v.prompt_hash || '').substring(0, 8)}</span>
                     </div>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-1.5 flex-shrink-0">
-                  <button 
-                    onClick={() => handleViewFull(v.version_number)}
-                    className="p-2 rounded-lg hover:bg-black/[0.04] transition-colors cursor-pointer"
-                    title="Promptu görüntüle"
-                  >
-                    {isExpanded ? <ChevronUp className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
-                  {!isActive && (
+                {/* Right: Actions */}
+                <div className="flex items-center gap-1">
+                  {!isCurrent && (
                     <button 
                       onClick={() => handleRollback(v.version_number)}
                       disabled={loadingRollback}
-                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors cursor-pointer disabled:opacity-50"
-                      style={{ background: 'color-mix(in srgb, var(--q-orange) 8%, transparent)', color: 'var(--q-orange)' }}
-                      title={`v${v.version_number} sürümüne geri dön`}
+                      className="px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all cursor-pointer opacity-0 hover:opacity-100 focus:opacity-100 group-hover:opacity-100 sm:opacity-100 disabled:opacity-50"
+                      style={{ background: 'color-mix(in srgb, var(--q-text-primary) 5%, transparent)', color: 'var(--q-text-primary)' }}
                     >
-                      <RotateCcw className="w-3 h-3" />
-                      Geri Al
+                      Geri Dön
                     </button>
                   )}
+                  <button 
+                    onClick={() => handleViewFull(v.version_number)}
+                    className={`p-1.5 rounded-lg transition-colors cursor-pointer ${isExpanded ? 'bg-black/5' : 'hover:bg-black/5'}`}
+                  >
+                    <ChevronUp className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} style={{ color: 'var(--q-text-secondary)' }} />
+                  </button>
                 </div>
               </div>
 
-              {/* Change Summary */}
-              {v.change_summary && (
-                <div className="px-4 pb-2">
-                  <p className="text-[12px] italic" style={{ color: 'var(--q-text-secondary)' }}>
-                    &quot;{v.change_summary}&quot;
-                  </p>
-                </div>
-              )}
-
-              {/* Prompt Preview */}
-              {v.prompt_preview && !isExpanded && (
-                <div className="px-4 pb-3">
-                  <p className="text-[11px] font-mono p-2 rounded-lg truncate" 
-                     style={{ background: 'var(--q-bg-secondary)', color: 'var(--q-text-secondary)' }}>
-                    {v.prompt_preview}
-                  </p>
-                </div>
-              )}
-
-              {/* Full Prompt View */}
-              {isExpanded && fullPrompt && (
-                <div className="mx-4 mb-3 p-4 rounded-lg max-h-[400px] overflow-y-auto"
-                     style={{ background: 'var(--q-bg-secondary)', border: '1px solid var(--q-border-default)' }}>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--q-text-secondary)' }}>
-                      Tam Sistem Promptu — v{v.version_number}
-                    </span>
-                    <span className="text-[10px] font-mono" style={{ color: 'var(--q-text-secondary)' }}>
-                      hash: {String(v.prompt_hash || '').substring(0, 12)}
-                    </span>
-                  </div>
-                  <pre className="text-[12px] font-mono whitespace-pre-wrap leading-relaxed" style={{ color: 'var(--q-text-primary)' }}>
-                    {fullPrompt}
-                  </pre>
+              {/* Collapsed Details View (Lazy Loaded Prompt) */}
+              {isExpanded && (
+                <div className="px-4 pb-4 pt-1 animate-in slide-in-from-top-2 duration-200">
+                  <div className="w-full h-[1px] mb-3" style={{ background: 'var(--q-border-default)' }} />
+                  {fullPrompt === null ? (
+                    <div className="text-[11px] py-4 text-center" style={{ color: 'var(--q-text-secondary)' }}>Yükleniyor...</div>
+                  ) : (
+                    <pre className="text-[11px] font-mono whitespace-pre-wrap leading-relaxed p-3 rounded-lg" 
+                         style={{ background: 'var(--q-bg-secondary)', color: 'var(--q-text-primary)' }}>
+                      {fullPrompt}
+                    </pre>
+                  )}
                 </div>
               )}
             </div>

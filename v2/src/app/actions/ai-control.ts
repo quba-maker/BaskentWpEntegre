@@ -77,9 +77,9 @@ export async function getActivityStats() {
 
 // ─── B. Prompt Version Manager (Enhanced) ───────────
 
-export async function getBrainVersionHistory() {
+export async function getBrainVersionHistory(promptKey?: string) {
   const session = await requireAdminSession();
-  return await BrainVersionService.getHistory(session.tenantId, 30);
+  return await BrainVersionService.getHistory(session.tenantId, promptKey, 30);
 }
 
 export async function getBrainVersionFull(versionNumber: number) {

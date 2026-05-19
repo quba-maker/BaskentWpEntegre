@@ -111,10 +111,21 @@ export class BrainVersionService {
    * Get version history for a tenant.
    * Returns all prompt versions across all channels.
    */
-  static async getHistory(tenantId: string, limit = 20): Promise<any[]> {
+  static async getHistory(tenantId: string, promptKey?: string, limit = 20): Promise<any[]> {
     const hasColumn = await hasPromptKeyColumn();
     
     if (hasColumn) {
+      if (promptKey) {
+        return await sql`
+          SELECT id, version_number, changed_by, change_summary, prompt_hash, 
+                 prompt_key, is_active, created_at,
+                 LEFT(system_prompt, 200) as prompt_preview
+          FROM brain_versions
+          WHERE tenant_id = ${tenantId} AND prompt_key = ${promptKey}
+          ORDER BY version_number DESC
+          LIMIT ${limit}
+        `;
+      }
       return await sql`
         SELECT id, version_number, changed_by, change_summary, prompt_hash, 
                prompt_key, is_active, created_at,
@@ -127,6 +138,19 @@ export class BrainVersionService {
     }
 
     // Fallback without prompt_key
+    if (promptKey) {
+      const searchStr = `%${promptKey}%`;
+      return await sql`
+        SELECT id, version_number, changed_by, change_summary, prompt_hash, 
+               is_active, created_at,
+               LEFT(system_prompt, 200) as prompt_preview
+        FROM brain_versions
+        WHERE tenant_id = ${tenantId} AND change_summary LIKE ${searchStr}
+        ORDER BY version_number DESC
+        LIMIT ${limit}
+      `;
+    }
+
     return await sql`
       SELECT id, version_number, changed_by, change_summary, prompt_hash, 
              is_active, created_at,
