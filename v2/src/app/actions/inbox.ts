@@ -307,22 +307,52 @@ export async function sendMessage(phone: string, text: string) {
         }
       }
 
-      await ctx.db.executeSafe(sql`
+      const msgInsert = await ctx.db.executeSafe(sql`
         INSERT INTO messages (tenant_id, phone_number, direction, content, channel, status, provider_message_id)
         VALUES (${ctx.tenantId}, ${phone}, 'out', ${text}, ${channel}, ${messageStatus}, ${providerMessageId})
+        RETURNING id
       `);
+
+      const messageId = Array.isArray(msgInsert) ? msgInsert[0]?.id : (msgInsert as any)?.rows?.[0]?.id;
 
       await ctx.db.executeSafe(sql`
         UPDATE conversations 
         SET last_message_at = NOW(), 
             last_message_content = ${text},
-            last_message_channel = 'whatsapp',
+            last_message_channel = ${channel},
             last_message_status = ${messageStatus},
             last_message_direction = 'out',
             message_count = message_count + 1,
             status = 'human'
         WHERE phone_number = ${phone} AND (tenant_id = ${ctx.tenantId} OR tenant_id IS NULL)
       `);
+
+      // Publish Realtime Event
+      if (messageId) {
+        try {
+          const { RealtimePublisher } = await import("@/lib/realtime/publisher");
+          const conversationRows = await ctx.db.executeSafe(sql`
+            SELECT id FROM conversations WHERE phone_number = ${phone} AND (tenant_id = ${ctx.tenantId} OR tenant_id IS NULL) LIMIT 1
+          `);
+          const conversationId = Array.isArray(conversationRows) ? conversationRows[0]?.id : (conversationRows as any)?.rows?.[0]?.id;
+          
+          if (conversationId) {
+            await RealtimePublisher.publishMessageCreated(
+              ctx.tenantId,
+              {
+                id: messageId,
+                conversation_id: conversationId,
+                content: text,
+                direction: 'out',
+                status: messageStatus,
+                created_at: new Date().toISOString()
+              }
+            );
+          }
+        } catch (err) {
+          console.error("Failed to publish realtime event for panel message:", err);
+        }
+      }
 
       return { success: true };
     }

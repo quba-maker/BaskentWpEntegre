@@ -87,33 +87,27 @@ export class MessageService {
       `);
 
       if (convExists) {
-        if (payload.direction === 'in') {
-          writeQueries.push(sql`
-            UPDATE conversations 
-            SET last_message_at = NOW(), 
-                message_count = message_count + 1, 
-                channel = ${payload.channel},
-                last_channel = ${payload.channel}
-            WHERE phone_number = ${payload.phoneNumber} AND tenant_id = ${this.db.tenantId}
-            RETURNING id
-          `);
-        } else {
-          writeQueries.push(sql`
-            UPDATE conversations 
-            SET last_message_at = NOW(), 
-                message_count = message_count + 1, 
-                channel = ${payload.channel}
-            WHERE phone_number = ${payload.phoneNumber} AND tenant_id = ${this.db.tenantId}
-            RETURNING id
-          `);
-        }
+        writeQueries.push(sql`
+          UPDATE conversations 
+          SET last_message_at = NOW(), 
+              message_count = message_count + 1, 
+              channel = ${payload.channel},
+              last_channel = ${payload.direction === 'in' ? payload.channel : sql`last_channel`},
+              last_message_content = ${payload.content},
+              last_message_direction = ${payload.direction},
+              last_message_status = ${payload.status || 'pending'}
+          WHERE phone_number = ${payload.phoneNumber} AND tenant_id = ${this.db.tenantId}
+          RETURNING id
+        `);
       } else {
         writeQueries.push(sql`
           INSERT INTO conversations (
-            tenant_id, phone_number, message_count, channel, last_channel
+            tenant_id, phone_number, message_count, channel, last_channel,
+            last_message_content, last_message_direction, last_message_status, last_message_at
           ) VALUES (
             ${this.db.tenantId}, ${payload.phoneNumber}, 1, ${payload.channel}, 
-            ${payload.direction === 'in' ? payload.channel : null}
+            ${payload.direction === 'in' ? payload.channel : null},
+            ${payload.content}, ${payload.direction}, ${payload.status || 'pending'}, NOW()
           )
           RETURNING id
         `);
@@ -160,6 +154,37 @@ export class MessageService {
       return { success: true, providerMessageId };
     } catch (e: any) {
       this.log.error("WhatsApp API request failed", e instanceof Error ? e : new Error(String(e)));
+      throw e;
+    }
+  }
+
+  /**
+   * Send outgoing Messenger/Instagram message via Meta Graph API
+   */
+  async sendSocialMessage(accessToken: string, to: string, content: string, channel: 'messenger' | 'instagram'): Promise<{ success: boolean; providerMessageId?: string }> {
+    const url = `https://graph.facebook.com/v25.0/me/messages`;
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${accessToken}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          recipient: { id: to },
+          message: { text: content },
+          messaging_type: "RESPONSE"
+        })
+      });
+      if (!response.ok) {
+        const err = await response.text();
+        throw new Error(`Meta API Error (${channel}): ${err}`);
+      }
+      const data = await response.json();
+      const providerMessageId = data.message_id || null;
+      return { success: true, providerMessageId };
+    } catch (e: any) {
+      this.log.error(`${channel} API request failed`, e instanceof Error ? e : new Error(String(e)));
       throw e;
     }
   }

@@ -38,7 +38,7 @@ export class QueueWorkerEngine {
 
     switch (topic) {
       case "whatsapp.message.received":
-        await this.handleWhatsAppMessage(tenantId, payload, metadata);
+        await this.handleIncomingMessage(tenantId, payload, metadata, 'whatsapp');
         break;
         
       case "whatsapp.status.received":
@@ -46,17 +46,11 @@ export class QueueWorkerEngine {
         break;
       
       case "messenger.message.received":
-        // EXPLICIT HANDLER: Messenger events are ingested but AI pipeline not yet wired.
-        // Route to DLQ for visibility instead of silent drop.
-        this.log.warn(`[CHANNEL_NOT_IMPLEMENTED] Messenger event received but handler not wired`, { tenantId, traceId: metadata.messageId });
-        await this.moveToDLQ(topic, tenantId, payload, new Error('CHANNEL_NOT_IMPLEMENTED: Messenger handler pending'));
+        await this.handleIncomingMessage(tenantId, payload, metadata, 'messenger');
         break;
 
       case "instagram.message.received":
-        // EXPLICIT HANDLER: Instagram events are ingested but AI pipeline not yet wired.
-        // Route to DLQ for visibility instead of silent drop.
-        this.log.warn(`[CHANNEL_NOT_IMPLEMENTED] Instagram event received but handler not wired`, { tenantId, traceId: metadata.messageId });
-        await this.moveToDLQ(topic, tenantId, payload, new Error('CHANNEL_NOT_IMPLEMENTED: Instagram handler pending'));
+        await this.handleIncomingMessage(tenantId, payload, metadata, 'instagram');
         break;
 
       case "meta.lead.received":
@@ -150,11 +144,11 @@ export class QueueWorkerEngine {
   }
 
   /**
-   * Domain-specific handler for WhatsApp Messages
+   * Domain-specific handler for Incoming Messages across Meta Channels (WhatsApp, Messenger, Instagram)
    */
-  private async handleWhatsAppMessage(tenantId: string, payload: any, metadata: any) {
+  private async handleIncomingMessage(tenantId: string, payload: any, metadata: any, channel: 'whatsapp' | 'messenger' | 'instagram') {
     const traceId = metadata.messageId;
-    this.log.info(`[QUEUE_RECEIVED] Processing WhatsApp message`, { tenantId, traceId });
+    this.log.info(`[QUEUE_RECEIVED] Processing ${channel} message`, { tenantId, traceId });
 
     // 1. Resolve Hybrid Isolated Tenant Brain
     const { BrainResolver } = await import('../brain/brain-resolver');
@@ -162,7 +156,7 @@ export class QueueWorkerEngine {
     
     let brain;
     try {
-      brain = await BrainResolver.resolveTenantBrain(payload, 'whatsapp', traceId);
+      brain = await BrainResolver.resolveTenantBrain(payload, channel, traceId);
     } catch (e) {
       this.log.error(`[TENANT_RESOLUTION_FAILED] Could not resolve brain`, undefined, { tenantId, traceId });
       throw e;
@@ -177,20 +171,36 @@ export class QueueWorkerEngine {
     this.log.info(`[TENANT_BRAIN_BOUND] Brain ${brain.id} locked to context`, { tenantSlug: brain.context.tenantId, traceId });
 
     // Phase 6: Emit brain resolution event
-    AIEventEmitter.emit({ tenantId, type: 'brain_resolved', category: 'pipeline', payload: { brainId: brain.id, channel: 'whatsapp' } });
+    AIEventEmitter.emit({ tenantId, type: 'brain_resolved', category: 'pipeline', payload: { brainId: brain.id, channel } });
 
-    // Extract Message Data
-    const value = payload.entry?.[0]?.changes?.[0]?.value;
-    const messages = value?.messages;
-    if (!messages || messages.length === 0) {
-      this.log.info(`[SKIP] No messages found in payload`, { traceId });
-      return;
+    // Extract Message Data based on channel
+    let phoneNumber: string;
+    let content: string;
+    let providerMessageId: string;
+    let profileName: string | undefined;
+
+    if (channel === 'whatsapp') {
+      const value = payload.entry?.[0]?.changes?.[0]?.value;
+      const messages = value?.messages;
+      if (!messages || messages.length === 0) {
+        this.log.info(`[SKIP] No messages found in payload`, { traceId });
+        return;
+      }
+      const incomingMsg = messages[0];
+      phoneNumber = incomingMsg.from;
+      content = incomingMsg.text?.body;
+      providerMessageId = incomingMsg.id;
+      profileName = payload.entry?.[0]?.changes?.[0]?.value?.contacts?.[0]?.profile?.name;
+    } else {
+      const incomingMsg = payload.entry?.[0]?.messaging?.[0];
+      if (!incomingMsg || !incomingMsg.message) {
+        this.log.info(`[SKIP] No messages found in payload`, { traceId });
+        return;
+      }
+      phoneNumber = incomingMsg.sender.id;
+      content = incomingMsg.message.text;
+      providerMessageId = incomingMsg.message.mid;
     }
-
-    const incomingMsg = messages[0];
-    const phoneNumber = incomingMsg.from;
-    const content = incomingMsg.text?.body;
-    const providerMessageId = incomingMsg.id;
 
     if (!content) {
       this.log.info(`[SKIP] Message has no text content`, { traceId });
@@ -206,12 +216,12 @@ export class QueueWorkerEngine {
     const customerId = await IdentityEngine.resolveIdentity({
       tenantId: tenantId,
       phoneNumber: phoneNumber,
-      firstName: payload.entry?.[0]?.changes?.[0]?.value?.contacts?.[0]?.profile?.name // Try to extract WhatsApp Profile Name if available
+      firstName: profileName
     });
     this.log.info(`[IDENTITY_RESOLVED] Master Customer ID mapped`, { customerId, traceId });
 
     // Phase 6: Emit identity resolution event
-    AIEventEmitter.emit({ tenantId, customerId, type: 'identity_resolved', category: 'identity', payload: { phoneNumber, source: 'whatsapp' } });
+    AIEventEmitter.emit({ tenantId, customerId, type: 'identity_resolved', category: 'identity', payload: { phoneNumber, source: channel } });
 
     // 3. Lock Conversation & Save Incoming Message (Idempotency)
     await convService.acquireLock(phoneNumber);
@@ -220,7 +230,7 @@ export class QueueWorkerEngine {
       phoneNumber,
       direction: 'in',
       content,
-      channel: 'whatsapp',
+      channel: channel,
       providerMessageId
     });
 
@@ -423,7 +433,7 @@ export class QueueWorkerEngine {
       // Save a system alert message to alert the agent
       const sysMsgRes = await db.executeSafe(sql`
         INSERT INTO messages (tenant_id, phone_number, direction, content, channel, provider_message_id)
-        VALUES (${tenantId}, ${phoneNumber}, 'system', ${'Güvenlik Politikası Devrede: ' + validation.reason}, 'whatsapp', 'system_alert')
+        VALUES (${tenantId}, ${phoneNumber}, 'system', ${'Güvenlik Politikası Devrede: ' + validation.reason}, ${channel}, 'system_alert')
         RETURNING id
       `);
       
@@ -456,29 +466,39 @@ export class QueueWorkerEngine {
       `);
     }
 
-    // 8. WhatsApp Send
+    // 8. Meta Channel Send
     const accessToken = tenantConfig?.accessToken || process.env.WHATSAPP_TOKEN || process.env.META_ACCESS_TOKEN || '';
     const phoneId = tenantConfig?.whatsappPhoneNumberId || process.env.PHONE_NUMBER_ID || '';
 
-    if (!phoneId || !accessToken) {
-       this.log.error(`[WHATSAPP_FAILED] Missing Meta credentials for tenant`, undefined, { tenantId, traceId });
+    if (!accessToken || (channel === 'whatsapp' && !phoneId)) {
+       this.log.error(`[SEND_FAILED] Missing Meta credentials for tenant`, undefined, { tenantId, traceId, channel });
        throw new Error("Missing Meta credentials");
     }
 
     let outProviderMessageId: string | null = null;
     let messageStatus = 'pending';
     try {
-      const outRes = await msgService.sendWhatsAppMessage(
-        phoneId,
-        accessToken,
-        phoneNumber,
-        finalResponseText
-      );
-      outProviderMessageId = outRes.providerMessageId || null;
+      if (channel === 'whatsapp') {
+        const outRes = await msgService.sendWhatsAppMessage(
+          phoneId,
+          accessToken,
+          phoneNumber,
+          finalResponseText
+        );
+        outProviderMessageId = outRes.providerMessageId || null;
+      } else {
+        const outRes = await msgService.sendSocialMessage(
+          accessToken,
+          phoneNumber,
+          finalResponseText,
+          channel
+        );
+        outProviderMessageId = outRes.providerMessageId || null;
+      }
       messageStatus = 'sent';
-      this.log.info(`[WHATSAPP_SENT] Message delivered to Meta`, { traceId, providerMessageId: outProviderMessageId });
+      this.log.info(`[SEND_OK] Message delivered to Meta via ${channel}`, { traceId, providerMessageId: outProviderMessageId });
     } catch (e: any) {
-       this.log.error(`[WHATSAPP_FAILED] Meta API rejection`, e, { traceId });
+       this.log.error(`[SEND_FAILED] Meta API rejection for ${channel}`, e, { traceId });
        throw e; // Retry tetikle
     }
 
@@ -487,7 +507,7 @@ export class QueueWorkerEngine {
       phoneNumber,
       direction: 'out',
       content: finalResponseText,
-      channel: 'whatsapp',
+      channel: channel,
       modelUsed: aiResponse.modelUsed || llmModel,
       promptTokens: aiResponse.inputTokens || 0,
       completionTokens: aiResponse.outputTokens || 0,
