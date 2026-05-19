@@ -159,21 +159,29 @@ export function ConversationViewport() {
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const target = e.currentTarget;
-    // Show scroll down button if we are not at the bottom
-    const isAtBottom = target.scrollHeight - target.scrollTop - target.clientHeight < 50;
-    isScrolledUp.current = !isAtBottom;
-    setShowScrollDown(!isAtBottom);
+    // Expanded threshold (150px) for a more forgiving bottom detection
+    const isAtBottom = target.scrollHeight - target.scrollTop - target.clientHeight < 150;
     
-    if (isAtBottom && unreadBadgeCount > 0) {
-      setUnreadBadgeCount(0);
+    if (isAtBottom) {
+      isScrolledUp.current = false;
+      setShowScrollDown(false);
+      if (unreadBadgeCount > 0) setUnreadBadgeCount(0);
+    } else {
+      isScrolledUp.current = true;
+      setShowScrollDown(true);
     }
   };
 
   const scrollToBottom = (behavior: "auto" | "smooth" = "smooth") => {
     if (chatContainerRef.current) {
-      chatContainerRef.current.scrollTo({
-        top: chatContainerRef.current.scrollHeight,
-        behavior,
+      // requestAnimationFrame ensures the layout is painted before calculating scrollHeight
+      requestAnimationFrame(() => {
+        if (chatContainerRef.current) {
+          chatContainerRef.current.scrollTo({
+            top: chatContainerRef.current.scrollHeight,
+            behavior,
+          });
+        }
       });
     }
     setUnreadBadgeCount(0);
@@ -193,11 +201,11 @@ export function ConversationViewport() {
   useEffect(() => {
     if (messages && messages.length > 0) {
       const isFirstLoad = prevMessagesLength.current === 0;
+      const newMessagesCount = messages.length - prevMessagesLength.current;
       
       if (!isScrolledUp.current || isFirstLoad) {
-        setTimeout(() => scrollToBottom(isFirstLoad ? "auto" : "smooth"), 50);
-      } else if (messages.length > prevMessagesLength.current) {
-        const newMessagesCount = messages.length - prevMessagesLength.current;
+        scrollToBottom(isFirstLoad ? "auto" : "smooth");
+      } else if (newMessagesCount > 0 && !isFirstLoad) {
         setUnreadBadgeCount(prev => prev + newMessagesCount);
       }
       prevMessagesLength.current = messages.length;
@@ -211,13 +219,14 @@ export function ConversationViewport() {
     setUnreadBadgeCount(0);
   }, [activePhone]);
 
-  // Keep scroll at bottom when AI is streaming
+  // Handle stream initialization smoothly without per-token jitter
+  const prevStreamState = useRef(aiStream.state);
   useEffect(() => {
-    if (aiStream.isStreaming && !isScrolledUp.current) {
-      // Use auto to prevent scroll jitter while streaming
-      scrollToBottom("auto"); 
+    if (aiStream.state === 'generating' && prevStreamState.current !== 'generating') {
+      if (!isScrolledUp.current) scrollToBottom("smooth");
     }
-  }, [aiStream.content, aiStream.isStreaming]);
+    prevStreamState.current = aiStream.state;
+  }, [aiStream.state]);
 
   const handleSend = async () => {
     if (!inputText.trim() || !activePhone || isSending) return;
@@ -568,6 +577,9 @@ export function ConversationViewport() {
               c.agentType === 'human' || (c.agentType === 'ai' && aiStream.state === 'idle')
             )} 
           />
+          
+          {/* Invisible anchor for native CSS overflow pinning */}
+          <div style={{ height: "1px", width: "100%", overflowAnchor: "auto" }} />
         </div>
 
         {/* Scroll to Bottom Button & New Message Badge */}
@@ -582,7 +594,13 @@ export function ConversationViewport() {
               {unreadBadgeCount > 0 ? (
                 <button
                   onClick={() => scrollToBottom("smooth")}
-                  className="px-4 py-2.5 rounded-full text-[13px] font-bold shadow-[0_4px_12px_rgba(0,122,255,0.3)] bg-blue-500 text-white hover:bg-blue-600 transition-all cursor-pointer flex items-center gap-1.5 q-press"
+                  className="px-4 py-2.5 rounded-full text-[13px] font-bold shadow-[0_8px_16px_rgba(0,122,255,0.25)] transition-all cursor-pointer flex items-center gap-1.5 q-press hover:scale-105"
+                  style={{ 
+                    background: "rgba(0, 122, 255, 0.9)", 
+                    color: "white", 
+                    backdropFilter: "blur(12px)", 
+                    border: "1px solid rgba(255,255,255,0.1)" 
+                  }}
                 >
                   <ArrowDown className="w-4 h-4" />
                   {unreadBadgeCount} Yeni Mesaj
@@ -590,8 +608,13 @@ export function ConversationViewport() {
               ) : (
                 <button
                   onClick={() => scrollToBottom("smooth")}
-                  className="w-11 h-11 rounded-full flex items-center justify-center shadow-[0_4px_12px_rgba(0,0,0,0.08)] transition-all duration-300 q-press hover:scale-105"
-                  style={{ background: "var(--q-bg-primary)", border: "1px solid var(--q-border-default)", color: "var(--q-text-primary)" }}
+                  className="w-11 h-11 rounded-full flex items-center justify-center shadow-[0_8px_16px_rgba(0,0,0,0.1)] transition-all duration-300 q-press hover:scale-105"
+                  style={{ 
+                    background: "rgba(255,255,255,0.8)", 
+                    backdropFilter: "blur(16px)", 
+                    border: "1px solid rgba(0,0,0,0.05)", 
+                    color: "var(--q-text-primary)" 
+                  }}
                   aria-label="En alta kaydır"
                 >
                   <ChevronDown className="w-6 h-6" />

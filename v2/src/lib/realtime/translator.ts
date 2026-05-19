@@ -37,7 +37,7 @@ export class RealtimeTranslator {
       type: "chat.message.created",
       payload: {
         id: internalMessage.id,
-        conversationId: internalMessage.conversation_id,
+        conversationId: internalMessage.phone_number || internalMessage.conversation_id,
         content: internalMessage.content,
         sender: senderType,
         status: internalMessage.status,

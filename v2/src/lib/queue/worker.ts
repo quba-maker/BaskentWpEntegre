@@ -127,7 +127,7 @@ export class QueueWorkerEngine {
           await RealtimePublisher.publishMessageStatusUpdated(
             tenantId,
             internalMessageId,
-            conversationId,
+            phoneNumber,
             deliveryStatus as any,
             1, // entityVersion placeholder
             { traceId, spanId: providerMessageId }
@@ -249,6 +249,7 @@ export class QueueWorkerEngine {
           {
             id: messageId,
             conversation_id: conversationId,
+            phone_number: phoneNumber,
             content,
             direction: 'in',
             status: 'delivered', // Incoming messages don't have sent status, they are just there
@@ -307,6 +308,7 @@ export class QueueWorkerEngine {
                 {
                   id: offMsgResult.messageId,
                   conversation_id: offMsgResult.conversationId || conversationId,
+                  phone_number: phoneNumber,
                   content: offMsg,
                   direction: 'out',
                   status: 'sent', 
@@ -446,6 +448,7 @@ export class QueueWorkerEngine {
             {
               id: sysMsgId,
               conversation_id: conversationId,
+              phone_number: phoneNumber,
               content: 'Güvenlik Politikası Devrede: ' + validation.reason,
               direction: 'system', // Handled as bot/system in translator
               status: 'delivered', 
@@ -525,6 +528,7 @@ export class QueueWorkerEngine {
           {
             id: outMsgResult.messageId,
             conversation_id: outConvId,
+            phone_number: phoneNumber,
             content: finalResponseText,
             direction: 'out',
             model_used: aiResponse.modelUsed || llmModel,

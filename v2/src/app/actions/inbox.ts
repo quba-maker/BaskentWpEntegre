@@ -342,6 +342,7 @@ export async function sendMessage(phone: string, text: string) {
               {
                 id: messageId,
                 conversation_id: conversationId,
+                phone_number: phone,
                 content: text,
                 direction: 'out',
                 status: messageStatus,
