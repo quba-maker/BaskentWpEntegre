@@ -15,6 +15,8 @@ import { useBufferedStream } from "@/hooks/use-buffered-stream";
 import { AblyStreamTransport } from "@/lib/ai/streaming/stream-transport";
 import { StreamBubble } from "@/components/features/realtime/stream-bubble";
 
+import { useRealtimeTenant } from "@/components/providers/realtime-provider";
+
 // ==========================================
 // CONVERSATION VIEWPORT — Central chat surface
 // Architecture: Communication surface (not display component)
@@ -58,11 +60,6 @@ function countryFlag(country: string | undefined): string {
 
 // -- AI Status Badge --
 const AI_EVENT_LABELS: Record<string, string> = {
-  'ai_response_generated': 'Response ✓',
-  'identity_resolved': 'Identity ✓',
-  'crm_extraction_completed': 'CRM Updated',
-  'memory_updated': 'Memory Synced',
-  'tool_executed': 'Tool OK',
   'policy_blocked': 'Policy Block',
   'human_escalation': 'Escalated',
   'ai_timeout': 'Timeout',
@@ -133,20 +130,22 @@ export function ConversationViewport() {
   const queryClient = useQueryClient();
   const params = useParams();
   const tenantSlug = params?.tenant_slug as string;
+  const tenantId = useRealtimeTenant();
 
-  const channelName = tenantSlug ? `presence:tenant:${tenantSlug}` : "";
-  const { typingClients, setTypingStatus } = usePresence(tenantSlug, channelName);
+  // CRITICAL: We must use the REAL tenantId (UUID) for Ably, not the slug!
+  const channelName = tenantId ? `presence:tenant:${tenantId}` : "";
+  const { typingClients, setTypingStatus } = usePresence(tenantId || "", channelName);
 
   const [streamTransport, setStreamTransport] = useState<AblyStreamTransport | null>(null);
 
   useEffect(() => {
-    if (tenantSlug) {
-      setStreamTransport(new AblyStreamTransport(tenantSlug));
+    if (tenantId) {
+      setStreamTransport(new AblyStreamTransport(tenantId));
     }
-  }, [tenantSlug]);
+  }, [tenantId]);
 
   const aiStream = useBufferedStream(
-    tenantSlug,
+    tenantId || "",
     channelName,
     streamTransport
   );

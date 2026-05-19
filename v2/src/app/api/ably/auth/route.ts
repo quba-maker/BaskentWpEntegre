@@ -37,7 +37,9 @@ export async function GET(request: Request) {
       [`presence:tenant:${tenantId}`]: ["subscribe", "publish", "presence", "history"]
     };
 
-    console.log("[ABLY_TOKEN_CAPABILITY]", capabilities);
+    console.log("[ABLY_AUTH_REQUEST_TENANT]", tenantId);
+    console.log("[ABLY_AUTH_CAPABILITY_CHANNEL]", `private:tenant:${tenantId}`);
+    console.log("[ABLY_FINAL_CAPABILITY_JSON]", JSON.stringify(capabilities));
 
     // ClientId could be the actual User ID for presence tracking
     const clientId = `user-${Math.random().toString(36).substring(2, 9)}`;
