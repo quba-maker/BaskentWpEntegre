@@ -217,14 +217,14 @@ export async function sendMessage(phone: string, text: string) {
       `);
       const channel = convRows[0]?.channel || 'whatsapp';
 
+      let response: Response | null = null;
+      let providerMessageId: string | null = null;
+      let messageStatus = 'pending';
+
       if (!META_ACCESS_TOKEN) {
         const { logger: inboxLogger } = await import("@/lib/core/logger");
         inboxLogger.withContext({ module: 'Inbox' }).warn("Meta credentials missing, only saving to DB");
       } else {
-        let response: Response | null = null;
-        let providerMessageId: string | null = null;
-        let messageStatus = 'pending';
-
         if (channel === 'whatsapp' && PHONE_NUMBER_ID) {
           response = await fetch(`https://graph.facebook.com/v25.0/${PHONE_NUMBER_ID}/messages`, {
             method: "POST",
@@ -242,10 +242,13 @@ export async function sendMessage(phone: string, text: string) {
 
           if (response.ok) {
             try {
-              const resData = await response.clone().json();
+              const resData = await response.json();
               providerMessageId = resData.messages?.[0]?.id || resData.message_id || null;
               messageStatus = 'sent';
-            } catch (e) {}
+            } catch (e) {
+              console.error("Error parsing Meta API response:", e);
+              messageStatus = 'sent';
+            }
           }
         }
         else if (channel === 'instagram' || channel === 'messenger') {
