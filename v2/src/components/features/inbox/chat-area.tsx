@@ -10,6 +10,9 @@ import { getAiStatusForConversation } from "@/app/actions/ai-observability";
 import { useParams } from "next/navigation";
 import { usePresence } from "@/hooks/use-presence";
 import { TypingIndicator } from "@/components/features/realtime/typing-indicator";
+import { useBufferedStream } from "@/hooks/use-buffered-stream";
+import { AblyStreamTransport } from "@/lib/ai/streaming/stream-transport";
+import { StreamBubble } from "@/components/features/realtime/stream-bubble";
 
 // ==========================================
 // CONVERSATION VIEWPORT — Central chat surface
@@ -132,6 +135,20 @@ export function ConversationViewport() {
 
   const channelName = tenantSlug ? `presence:tenant:${tenantSlug}` : "";
   const { typingClients, setTypingStatus } = usePresence(tenantSlug, channelName);
+
+  const [streamTransport, setStreamTransport] = useState<AblyStreamTransport | null>(null);
+
+  useEffect(() => {
+    if (tenantSlug) {
+      setStreamTransport(new AblyStreamTransport(tenantSlug));
+    }
+  }, [tenantSlug]);
+
+  const aiStream = useBufferedStream(
+    tenantSlug,
+    channelName,
+    streamTransport
+  );
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const [showScrollDown, setShowScrollDown] = useState(false);
@@ -476,11 +493,24 @@ export function ConversationViewport() {
           ))
         )}
           
+          {/* AI Stream Bubble */}
+          <StreamBubble 
+            isStreaming={aiStream.isStreaming}
+            state={aiStream.state}
+            content={aiStream.content}
+            metrics={aiStream.metrics}
+            showMetrics={true} 
+          />
+          
           {/* AI Observability Timeline */}
           {activeContact.isBotActive && <AiRuntimeTimeline conversationId={activePhone!} />}
           
           {/* Zero-Layout-Shift Typing Indicator at the bottom */}
-          <TypingIndicator typingClients={typingClients} />
+          <TypingIndicator 
+            typingClients={typingClients.filter(c => 
+              c.agentType === 'human' || (c.agentType === 'ai' && aiStream.state === 'idle')
+            )} 
+          />
         </div>
 
         {/* Scroll to Bottom Button */}
