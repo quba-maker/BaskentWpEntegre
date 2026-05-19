@@ -44,9 +44,15 @@ export function useRealtimeSubscription(
     // Track Memory Leak Safety (registering subscription)
     useDiagnosticsStore.getState().registerSubscription(channelName);
     
+    console.log("[ABLY_SUBSCRIBE_ATTACHED]", {
+      channel: channelName,
+      tenantId
+    });
+    console.log(`[ABLY_SUBSCRIBE_CHANNEL] Frontend subscribing to channel: "${channelName}"`);
     console.log(`[CLIENT_SUBSCRIBED] Successfully attached to Ably channel: ${channelName}`);
 
     channel.subscribe(async (message) => {
+      console.log("[ABLY_EVENT_RECEIVED]", message);
       try {
         const validatedEvent = BaseRealtimeEventSchema.parse(message.data);
         

@@ -37,7 +37,8 @@ export class RealtimeTranslator {
       type: "chat.message.created",
       payload: {
         id: String(internalMessage.id),
-        conversationId: String(internalMessage.conversation_id || internalMessage.phone_number),
+        // Frontend uses phone_number as activePhone for ["messages", activePhone] query key!
+        conversationId: String(internalMessage.phone_number || internalMessage.conversation_id),
         content: internalMessage.content,
         sender: senderType,
         status: internalMessage.status,
