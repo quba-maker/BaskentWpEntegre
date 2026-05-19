@@ -27,7 +27,7 @@ jobs:
           cache-dependency-path: v2/package-lock.json
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install
 
       - name: Type Check (Strict)
         run: npm run typecheck
