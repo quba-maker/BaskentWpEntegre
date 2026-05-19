@@ -236,6 +236,16 @@ export async function GET() {
         created_at TIMESTAMPTZ DEFAULT NOW()
       )
     `;
+    
+    // Patch missing columns
+    await sql`
+      ALTER TABLE ai_audit_logs 
+      ADD COLUMN IF NOT EXISTS input_tokens INTEGER DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS output_tokens INTEGER DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS cost_usd NUMERIC(10,6) DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS reasoning_summary TEXT
+    `.catch(e => console.error("ai_audit_logs alter table warning:", e));
+
     await sql`CREATE INDEX IF NOT EXISTS idx_ai_audit_logs_tenant ON ai_audit_logs(tenant_id, created_at DESC)`;
     results.push('ai_audit_logs: OK');
 
@@ -249,10 +259,20 @@ export async function GET() {
         response_time_ms INTEGER DEFAULT 0,
         tool_calls_count INTEGER DEFAULT 0,
         total_tokens INTEGER DEFAULT 0,
+        prompt_tokens INTEGER DEFAULT 0,
+        completion_tokens INTEGER DEFAULT 0,
         estimated_cost_usd NUMERIC(10,6) DEFAULT 0,
         created_at TIMESTAMPTZ DEFAULT NOW()
       )
     `;
+
+    // Patch missing columns
+    await sql`
+      ALTER TABLE ai_runtime_metrics 
+      ADD COLUMN IF NOT EXISTS prompt_tokens INTEGER DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS completion_tokens INTEGER DEFAULT 0
+    `.catch(e => console.error("ai_runtime_metrics alter table warning:", e));
+
     await sql`CREATE INDEX IF NOT EXISTS idx_ai_runtime_metrics_tenant ON ai_runtime_metrics(tenant_id, created_at DESC)`;
     results.push('ai_runtime_metrics: OK');
 
