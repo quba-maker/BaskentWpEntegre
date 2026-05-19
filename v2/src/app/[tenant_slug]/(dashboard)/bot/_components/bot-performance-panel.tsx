@@ -11,6 +11,7 @@ interface BotPerformancePanelProps {
   stats: any;
   statsPeriod: string;
   onPeriodChange: (period: string) => void;
+  modelUsage?: any;
 }
 
 const PERIOD_OPTIONS = [
@@ -20,7 +21,7 @@ const PERIOD_OPTIONS = [
   { value: "all", label: "Tümü" },
 ];
 
-export function BotPerformancePanel({ stats, statsPeriod, onPeriodChange }: BotPerformancePanelProps) {
+export function BotPerformancePanel({ stats, statsPeriod, onPeriodChange, modelUsage }: BotPerformancePanelProps) {
   if (!stats) return null;
 
   return (
@@ -47,11 +48,14 @@ export function BotPerformancePanel({ stats, statsPeriod, onPeriodChange }: BotP
           ))}
         </div>
       </div>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <StatCard icon={Activity} label="Bot Mesajı" value={stats.weeklyMessages} color="var(--q-blue)" />
         <StatCard icon={TrendingUp} label="Bot Başarı Oranı" value={`%${stats.botSuccessRate}`} color="var(--q-green)" />
         <StatCard icon={Users} label="İnsana Devir" value={`%${stats.handoverRate}`} color="var(--q-orange)" />
         <StatCard icon={Timer} label="Ort. Yanıt Süresi" value={stats.avgResponseMin > 0 ? `${stats.avgResponseMin} dk` : "<1 dk"} color="var(--q-purple)" />
+        {modelUsage && (
+          <StatCard icon={Activity} label="Toplam Maliyet" value={`$${modelUsage.totalCost || 0}`} color="var(--q-pink)" />
+        )}
       </div>
     </div>
   );

@@ -12,10 +12,8 @@ import {
   BotPerformancePanel,
   ChannelStatusPanel,
   PromptGovernancePanel,
-  AIUsageCostPanel,
   RecentConversationsPanel,
   BotTestPlayground,
-  AIPipelinePanel,
   UnifiedSettingsPanel,
   type BotChannel,
 } from "./_components";
@@ -68,12 +66,9 @@ export default function BotManagementPage() {
   const [statsPeriod, setStatsPeriod] = useState("7d");
   const [modelUsage, setModelUsage] = useState<any>(null);
   const [recentConvs, setRecentConvs] = useState<any[]>([]);
-  const [bannedWords, setBannedWords] = useState<string[]>([]);
-
-  // Knowledge Base
+  // Knowledge Base (Global)
   const [knowledgePrices, setKnowledgePrices] = useState("");
   const [knowledgeRules, setKnowledgeRules] = useState("");
-  const [savingKnowledge, setSavingKnowledge] = useState(false);
 
   // Consolidated Bot Config (single source of truth)
   const [botConfig, setBotConfig] = useState({
@@ -136,10 +131,6 @@ export default function BotManagementPage() {
       setModelUsage(usageRes);
       setRecentConvs(convsRes);
 
-      if (settingsRes.success && settingsRes.settings['bot_banned_words']?.value) {
-        try { setBannedWords(JSON.parse(settingsRes.settings['bot_banned_words'].value)); } catch(e) {}
-      }
-
       setIsLoading(false);
     }
     load();
@@ -147,8 +138,12 @@ export default function BotManagementPage() {
 
   useEffect(() => {
     async function reloadStats() {
-      const statsRes = await getBotStats(statsPeriod);
+      const [statsRes, usageRes] = await Promise.all([
+        getBotStats(statsPeriod),
+        getModelUsage(statsPeriod)
+      ]);
       setStats(statsRes);
+      setModelUsage(usageRes);
     }
     if (!isLoading) reloadStats();
   }, [statsPeriod]);
@@ -203,12 +198,8 @@ export default function BotManagementPage() {
   };
 
   const saveKnowledgeBase = async () => {
-    setSavingKnowledge(true);
     await saveBotSetting('bot_knowledge_prices', knowledgePrices);
     await saveBotSetting('bot_knowledge_rules', knowledgeRules);
-    setSavingKnowledge(false);
-    setSaved('knowledge');
-    setTimeout(() => setSaved(null), 2000);
   };
 
   const handleBotConfigChange = async (key: string, value: string) => {
@@ -229,18 +220,6 @@ export default function BotManagementPage() {
     await saveBotSetting(`bot_${key}`, value);
   };
 
-  const handleAddBannedWord = (word: string) => {
-    const updated = [...bannedWords, word];
-    setBannedWords(updated);
-    saveBotSetting('bot_banned_words', JSON.stringify(updated));
-  };
-
-  const handleRemoveBannedWord = (index: number) => {
-    const updated = bannedWords.filter((_, idx) => idx !== index);
-    setBannedWords(updated);
-    saveBotSetting('bot_banned_words', JSON.stringify(updated));
-  };
-
   const activeChannel = channels.find(c => c.id === activeTab)!;
 
   if (isLoading) return <PageLoader />;
@@ -258,6 +237,7 @@ export default function BotManagementPage() {
         stats={stats}
         statsPeriod={statsPeriod}
         onPeriodChange={setStatsPeriod}
+        modelUsage={modelUsage}
       />
 
       {/* 2. KANAL YÖNETİMİ */}
@@ -282,6 +262,11 @@ export default function BotManagementPage() {
             saved={saved}
             onSave={savePrompt}
             onResetToDefault={resetToDefault}
+            knowledgePrices={knowledgePrices}
+            knowledgeRules={knowledgeRules}
+            onPricesChange={setKnowledgePrices}
+            onRulesChange={setKnowledgeRules}
+            onSaveKnowledge={saveKnowledgeBase}
           />
         </div>
         <div className="xl:col-span-1 sticky top-6">
@@ -294,28 +279,12 @@ export default function BotManagementPage() {
         </div>
       </div>
 
-      {/* 5. BOT AYARLARI (Tabbed: Genel + Bilgi Bankası + Yasaklar) */}
-      <UnifiedSettingsPanel
-        botConfig={botConfig}
-        onBotConfigChange={handleBotConfigChange}
-        knowledgePrices={knowledgePrices}
-        knowledgeRules={knowledgeRules}
-        onPricesChange={setKnowledgePrices}
-        onRulesChange={setKnowledgeRules}
-        savingKnowledge={savingKnowledge}
-        savedKnowledge={saved === 'knowledge'}
-        onSaveKnowledge={saveKnowledgeBase}
-        bannedWords={bannedWords}
-        onAddWord={handleAddBannedWord}
-        onRemoveWord={handleRemoveBannedWord}
-      />
-
-      {/* 6. AI PIPELINE (Sadeleştirilmiş — sadece aktif modüller) */}
-      <AIPipelinePanel />
-
-      {/* 7. ALT BÖLÜM: Kullanım + Son Konuşmalar yan yana */}
+      {/* 5. BOT AYARLARI */}
       <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <AIUsageCostPanel modelUsage={modelUsage} />
+        <UnifiedSettingsPanel
+          botConfig={botConfig}
+          onBotConfigChange={handleBotConfigChange}
+        />
         <RecentConversationsPanel conversations={recentConvs} />
       </div>
     </PageShell>

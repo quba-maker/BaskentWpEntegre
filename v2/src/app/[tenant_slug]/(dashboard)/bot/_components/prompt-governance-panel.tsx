@@ -21,6 +21,11 @@ interface PromptGovernancePanelProps {
   saved: string | null;
   onSave: (channelId: string) => void;
   onResetToDefault: (channelId: string) => void;
+  knowledgePrices: string;
+  knowledgeRules: string;
+  onPricesChange: (val: string) => void;
+  onRulesChange: (val: string) => void;
+  onSaveKnowledge: () => void;
 }
 
 // Prompt'u parçalara ayırma ve birleştirme mantığı
@@ -69,6 +74,11 @@ export function PromptGovernancePanel({
   saved,
   onSave,
   onResetToDefault,
+  knowledgePrices,
+  knowledgeRules,
+  onPricesChange,
+  onRulesChange,
+  onSaveKnowledge,
 }: PromptGovernancePanelProps) {
   const confirm = useConfirm();
   const activeChannel = channels.find(c => c.id === activeTab)!;
@@ -262,6 +272,50 @@ export function PromptGovernancePanel({
               spellCheck={false}
             />
           )}
+        </div>
+      </div>
+
+      {/* Dikey Akış: Bilgi Bankası (Hizmetler & Kurallar) */}
+      <div className="mt-6 bg-white rounded-2xl border border-[--q-border-default] shadow-sm flex flex-col">
+        <div className="px-5 py-4 border-b flex items-center justify-between rounded-t-2xl" style={{ borderColor: "var(--q-border-default)", backgroundColor: "var(--q-bg-secondary)" }}>
+          <div className="flex items-center gap-3">
+            <Layers className="w-5 h-5 text-[--q-blue]" />
+            <h3 className="text-[15px] font-bold text-[--q-text-primary]">Genel Bilgi Bankası</h3>
+          </div>
+          <button
+            onClick={onSaveKnowledge}
+            className="px-4 py-2 text-[12px] font-bold rounded-lg transition-all flex items-center gap-2 shadow-sm text-white hover:opacity-80"
+            style={{ backgroundColor: "var(--q-blue)" }}
+          >
+            <Save className="w-3.5 h-3.5" />
+            Bilgileri Kaydet
+          </button>
+        </div>
+        <div className="p-5 flex flex-col gap-5">
+          <div>
+            <label className="block text-sm font-semibold mb-2 text-[--q-text-primary]">
+              Hizmetler ve Fiyatlar (Tüm kanallarda geçerli)
+            </label>
+            <textarea
+              value={knowledgePrices}
+              onChange={(e) => onPricesChange(e.target.value)}
+              className="w-full min-h-[150px] p-4 text-[13px] leading-relaxed font-mono text-[--q-text-primary] bg-white border border-[--q-border-default] rounded-xl outline-none resize-none focus:ring-2 ring-[--q-blue] transition-shadow shadow-sm"
+              placeholder="Saç Ekimi: 2000$\nDiş İmplantı: 500$..."
+              spellCheck={false}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-semibold mb-2 text-[--q-text-primary]">
+              İşletme Kuralları (Tüm kanallarda geçerli)
+            </label>
+            <textarea
+              value={knowledgeRules}
+              onChange={(e) => onRulesChange(e.target.value)}
+              className="w-full min-h-[150px] p-4 text-[13px] leading-relaxed font-mono text-[--q-text-primary] bg-white border border-[--q-border-default] rounded-xl outline-none resize-none focus:ring-2 ring-[--q-blue] transition-shadow shadow-sm"
+              placeholder="Pazar günleri kapalıyız. Randevusuz hasta kabul edilmez..."
+              spellCheck={false}
+            />
+          </div>
         </div>
       </div>
     </div>

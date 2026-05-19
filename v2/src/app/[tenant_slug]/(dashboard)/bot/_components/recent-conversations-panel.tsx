@@ -55,8 +55,11 @@ export function RecentConversationsPanel({ conversations }: RecentConversationsP
               </div>
             </div>
             <div className="flex items-center gap-2 shrink-0">
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{backgroundColor: 'var(--q-bg-secondary)', color: TEMP_COLORS[c.temperature] || 'var(--q-text-secondary)'}}>
-                {PHASE_LABELS[c.phase] || c.phase || '—'}
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{
+                backgroundColor: c.status === 'human' ? 'var(--q-orange-bg)' : 'var(--q-bg-secondary)', 
+                color: c.status === 'human' ? 'var(--q-orange)' : (TEMP_COLORS[c.temperature] || 'var(--q-text-secondary)')
+              }}>
+                {c.status === 'human' ? 'İnsana Devredildi' : (PHASE_LABELS[c.phase] || c.phase || '—')}
               </span>
               <span className="text-[11px] font-medium" style={{ color: "var(--q-text-secondary)" }}>{c.botMsgCount} Mesaj</span>
             </div>
