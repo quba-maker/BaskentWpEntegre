@@ -29,11 +29,13 @@ export async function getBotSettings() {
             'bot_working_hours',
             'bot_aggression_level',
             'ai_model',
-            'bot_banned_words',
             'bot_whatsapp_active',
             'bot_instagram_active',
             'bot_foreign_active',
-            'working_hours'
+            'working_hours',
+            'bot_knowledge_prices',
+            'bot_knowledge_rules',
+            'bot_max_response_tokens'
           )
       `);
 
@@ -290,13 +292,12 @@ export async function testBotPrompt(prompt: string, testMessage: string, channel
 
       // 🧠 KNOWLEDGE BASE INJECTION (for accurate playground testing)
       const kbSettings = await ctx.db.executeSafe(sql`
-        SELECT key, value FROM settings WHERE key IN ('bot_knowledge_prices', 'bot_knowledge_rules', 'bot_banned_words') AND tenant_id = ${ctx.tenantId}
+        SELECT key, value FROM settings WHERE key IN ('bot_knowledge_prices', 'bot_knowledge_rules') AND tenant_id = ${ctx.tenantId}
       `);
-      let prices = '', rules = '', bannedWordsRaw = '';
+      let prices = '', rules = '';
       kbSettings.forEach((row: any) => {
         if (row.key === 'bot_knowledge_prices') prices = row.value;
         if (row.key === 'bot_knowledge_rules') rules = row.value;
-        if (row.key === 'bot_banned_words') bannedWordsRaw = row.value;
       });
 
       let knowledgeInjection = '';
@@ -305,14 +306,6 @@ export async function testBotPrompt(prompt: string, testMessage: string, channel
       }
       if (rules) {
         knowledgeInjection += `\n\n[ÖZEL KURALLAR VE TALİMATLAR]\nLütfen şu kurallara kesinlikle uy:\n${rules}`;
-      }
-      if (bannedWordsRaw) {
-        try {
-          const bannedWords = JSON.parse(bannedWordsRaw);
-          if (Array.isArray(bannedWords) && bannedWords.length > 0) {
-            knowledgeInjection += `\n\n[YASAKLI KELİMELER]\nŞu kelimeleri ASLA kullanma: ${bannedWords.join(', ')}`;
-          }
-        } catch(e) {}
       }
 
       finalPrompt += knowledgeInjection;

@@ -49,7 +49,7 @@ export class BrainResolver {
     let promptHash: string | null = null;
     let knowledgePrices = '';
     let knowledgeRules = '';
-    let bannedWords: string[] = [];
+
     let runtimeSettings: TenantBrainSettings = {
       aiModel: 'gemini-2.5-flash',
       maxMessages: 8,
@@ -65,7 +65,7 @@ export class BrainResolver {
 
       const keysToFetch = [
         promptKey, 
-        'bot_knowledge_prices', 'bot_knowledge_rules', 'bot_banned_words',
+        'bot_knowledge_prices', 'bot_knowledge_rules',
         'ai_model', 'bot_max_messages', 'bot_max_response_tokens', 'working_hours', 'bot_aggression_level'
       ];
       const db = withTenantDB(tenantId, false);
@@ -81,9 +81,6 @@ export class BrainResolver {
         if (row.key === promptKey) rawSystemPrompt = row.value;
         if (row.key === 'bot_knowledge_prices') knowledgePrices = row.value;
         if (row.key === 'bot_knowledge_rules') knowledgeRules = row.value;
-        if (row.key === 'bot_banned_words') {
-          try { bannedWords = JSON.parse(row.value); } catch(e) {}
-        }
         // Runtime pipeline settings
         if (row.key === 'ai_model') runtimeSettings.aiModel = row.value || 'gemini-2.5-flash';
         if (row.key === 'bot_max_messages') {
@@ -128,7 +125,7 @@ export class BrainResolver {
       rawSystemPrompt,
       tenantConfig,
       promptHash,
-      { prices: knowledgePrices, rules: knowledgeRules, bannedWords },
+      { prices: knowledgePrices, rules: knowledgeRules },
       runtimeSettings
     );
 

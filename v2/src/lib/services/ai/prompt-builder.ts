@@ -107,9 +107,6 @@ export class PromptBuilder {
       if (brain.context.knowledge.rules) {
         knowledgeInjection += `\n\n=== ÖZEL KURALLAR VE TALİMATLAR ===\n${brain.context.knowledge.rules}\n===================================`;
       }
-      if (brain.context.knowledge.bannedWords && brain.context.knowledge.bannedWords.length > 0) {
-        knowledgeInjection += `\n\n=== YASAKLI KELİMELER ===\nŞu kelimeleri ASLA kullanma: ${brain.context.knowledge.bannedWords.join(', ')}\n=========================`;
-      }
     }
 
     const phaseContext = `\n\n=== SİSTEM DİREKTİFİ ===\nŞu anki konuşma evresi (Phase): ${phase.toUpperCase()}.\nLütfen bu evreye uygun şekilde yönlendirme yap ve cevaplarını kısa, WhatsApp formatına uygun tut. Uzun paragraflardan kaçın.\n========================`;

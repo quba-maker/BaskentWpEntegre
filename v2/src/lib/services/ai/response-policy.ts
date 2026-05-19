@@ -44,20 +44,7 @@ export class ResponsePolicy {
       }
     }
 
-    // 2. Tenant-Scoped Egress DLP — Uses bannedWords from brain (DB-driven)
-    const bannedWords = brain.context.knowledge?.bannedWords || [];
-    
-    for (const keyword of bannedWords) {
-      const kw = keyword.trim().toLowerCase();
-      if (kw.length > 2 && lowerResponse.includes(kw)) {
-         this.log.error(`[POLICY_VIOLATION] Egress Leakage Prevented. Blocked: ${kw}`, undefined, { tenantId: brain.context.tenantId });
-         return { 
-           valid: false, 
-           reason: "egress_dlp_violation",
-           fallbackMessage: "Mesajınız alındı, ilgili uzmanımız en kısa sürede size dönüş yapacaktır. Teşekkürler."
-         };
-      }
-    }
+    // 2. Tenant-Scoped Egress DLP is now handled at the prompt level.
 
     return { valid: true };
   }

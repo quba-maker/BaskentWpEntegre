@@ -14,7 +14,6 @@ export interface TenantBrainContext {
   knowledge?: {
     prices?: string;
     rules?: string;
-    bannedWords?: string[];
   };
   settings: TenantBrainSettings;
 }

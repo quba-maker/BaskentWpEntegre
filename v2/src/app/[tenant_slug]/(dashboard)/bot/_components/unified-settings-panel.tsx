@@ -24,6 +24,7 @@ interface UnifiedSettingsPanelProps {
     auto_greeting: string;
     greeting_language: string;
     max_messages: string;
+    max_response_tokens: string;
     working_hours: string;
     aggression_level: string;
     ai_model: string;
@@ -63,6 +64,15 @@ export function UnifiedSettingsPanel({
               <option value="12">12</option>
               <option value="20">20</option>
               <option value="0">Sınırsız</option>
+            </select>
+          </SettingRow>
+
+          <SettingRow icon={MessageSquare} iconColor="var(--q-blue)" title="Maksimum Yanıt Uzunluğu" description="Botun tek seferde verebileceği en uzun cevap (Token)">
+            <select value={botConfig.max_response_tokens} onChange={e => onBotConfigChange("max_response_tokens", e.target.value)} className="px-3 py-1.5 text-sm font-semibold border-0 rounded-lg outline-none cursor-pointer" style={{ color: "var(--q-text-primary)", backgroundColor: "rgba(0,0,0,0.04)" }}>
+              <option value="200">200 (Çok Kısa)</option>
+              <option value="500">500 (Kısa)</option>
+              <option value="1000">1000 (Orta)</option>
+              <option value="2000">2000 (Uzun)</option>
             </select>
           </SettingRow>
 
