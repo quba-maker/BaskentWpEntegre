@@ -7,7 +7,7 @@ const logReconciliation = (
   action: "ignored_duplicate" | "optimistic_reconciled" | "stale_event_dropped" | "cache_updated" | "cache_miss" | "status_ignored",
   details: any
 ) => {
-  console.log(`[Reconciliation:${action}]`, details);
+  console.log(`[CACHE_MUTATED] [Reconciliation:${action}]`, details);
 };
 
 // Status ranking to prevent downgrades
@@ -185,6 +185,8 @@ export function useRealtimeReconciliation(tenantId: string) {
 
   // Subscribe to Ably events
   useRealtimeSubscription(tenantId, (event: ProjectionEvent) => {
+    console.log(`[CLIENT_EVENT_RECEIVED] Received ${event.type} event. [Trace: ${event.traceId}]`, event);
+    
     switch (event.type) {
       case "chat.message.created":
         handleMessageCreated(event as ChatMessageCreatedEvent);

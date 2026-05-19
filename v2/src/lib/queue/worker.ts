@@ -73,7 +73,7 @@ export class QueueWorkerEngine {
    */
   private async handleWhatsAppStatus(tenantId: string, payload: any, metadata: any) {
     const traceId = metadata.messageId;
-    this.log.info(`[QUEUE_RECEIVED] Processing WhatsApp status receipt`, { tenantId, traceId });
+    this.log.info(`[WORKER_PROCESSING] [WA STATUS] Processing WhatsApp status receipt`, { tenantId, traceId });
 
     const statusObj = payload.entry?.[0]?.changes?.[0]?.value?.statuses?.[0];
     if (!statusObj || !statusObj.id || !statusObj.status) {
@@ -110,7 +110,7 @@ export class QueueWorkerEngine {
         conversationId = convResult[0]?.id;
       }
       
-      this.log.info(`[STATUS_UPDATED] Message ${providerMessageId} marked as ${deliveryStatus}`, { traceId });
+      this.log.info(`[DB_COMMITTED] [WA STATUS] Message ${providerMessageId} marked as ${deliveryStatus} in DB`, { traceId, internalMessageId });
       
       // Emit event for real-time socket/UI updates
       AIEventEmitter.emit({ 
@@ -148,7 +148,7 @@ export class QueueWorkerEngine {
    */
   private async handleIncomingMessage(tenantId: string, payload: any, metadata: any, channel: 'whatsapp' | 'messenger' | 'instagram') {
     const traceId = metadata.messageId;
-    this.log.info(`[QUEUE_RECEIVED] Processing ${channel} message`, { tenantId, traceId });
+    this.log.info(`[WORKER_PROCESSING] [${channel.toUpperCase()}] Processing incoming message`, { tenantId, traceId });
 
     // 1. Resolve Hybrid Isolated Tenant Brain
     const { BrainResolver } = await import('../brain/brain-resolver');
@@ -240,6 +240,8 @@ export class QueueWorkerEngine {
       return;
     }
 
+    this.log.info(`[DB_COMMITTED] [INCOMING MESSAGE] Saved to DB. MsgId: ${messageId}`, { traceId, providerMessageId });
+
     // [NEW] Realtime Event: Message Created (Incoming)
     if (messageId && conversationId) {
       try {
@@ -268,7 +270,7 @@ export class QueueWorkerEngine {
        await IdentityEngine.linkConversation(conversationId, customerId);
     }
 
-    this.log.info(`[CONVERSATION_READY] Incoming message saved & identity linked`, { traceId });
+    this.log.info(`[CONVERSATION_READY] Incoming message processed & identity linked`, { traceId });
 
     // 3. Conversation Load / State Check
     const status = await convService.getStatus(phoneNumber);
@@ -505,7 +507,6 @@ export class QueueWorkerEngine {
        throw e; // Retry tetikle
     }
 
-    // 9. Save Outgoing Message (with model tracking)
     const outMsgResult = await msgService.saveMessageIdempotent({
       phoneNumber,
       direction: 'out',
@@ -517,6 +518,8 @@ export class QueueWorkerEngine {
       providerMessageId: outProviderMessageId,
       status: messageStatus
     });
+
+    this.log.info(`[DB_COMMITTED] [OUTGOING MESSAGE] Saved to DB. MsgId: ${outMsgResult.messageId}`, { traceId, outProviderMessageId });
 
     // [NEW] Realtime Event: Message Created (Outgoing)
     if (outMsgResult.messageId) {

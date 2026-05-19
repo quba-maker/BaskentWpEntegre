@@ -55,6 +55,8 @@ export const POST = withApiGuard(
       const msg = body.entry[0].changes[0].value.messages[0];
       const senderPhone = body.entry[0].changes[0].value.contacts?.[0]?.wa_id;
       
+      log.info(`[WEBHOOK_RECEIVED] [WA MESSAGE] Received msg_id: ${msg.id} from ${senderPhone}`);
+
       const { isDuplicate } = await dedupeService.checkAndLock({
         provider: 'whatsapp',
         providerMessageId: msg.id,
@@ -63,6 +65,7 @@ export const POST = withApiGuard(
       });
 
       if (isDuplicate) {
+        log.warn(`[WEBHOOK_DUPLICATE] Dropping duplicate msg_id: ${msg.id}`);
         return new NextResponse("EVENT_RECEIVED_DUPLICATE", { status: 200 });
       }
 
@@ -82,6 +85,8 @@ export const POST = withApiGuard(
       const statusObj = body.entry[0].changes[0].value.statuses[0];
       const statusId = statusObj.id; // Original message ID
       
+      log.info(`[WEBHOOK_RECEIVED] [WA STATUS] Received status: ${statusObj.status} for msg_id: ${statusId}`);
+
       const { isDuplicate } = await dedupeService.checkAndLock({
         provider: 'whatsapp',
         providerMessageId: `${statusId}_${statusObj.status}`, // e.g. wamid.xxxx_delivered
@@ -90,6 +95,7 @@ export const POST = withApiGuard(
       });
 
       if (isDuplicate) {
+        log.warn(`[WEBHOOK_DUPLICATE] Dropping duplicate status: ${statusObj.status} for msg_id: ${statusId}`);
         return new NextResponse("EVENT_RECEIVED_DUPLICATE", { status: 200 });
       }
 

@@ -34,10 +34,11 @@ export class RealtimeBus {
       const channelName = `private:tenant:${tenantId}`;
       const channel = this.getClient().channels.get(channelName);
       
+      console.log(`[PUBLISH_TRIGGERED] Preparing to publish ${event.type} to ${channelName} [Trace: ${event.traceId}]`);
+      
       await channel.publish(validatedEvent.type, event);
       
-      // OpenTelemetry hook placeholder
-      // console.log(`[RealtimeBus] Published ${event.type} to ${channelName} [Trace: ${event.traceId}]`);
+      console.log(`[ABLY_PUBLISHED] Successfully published ${event.type} to ${channelName} [Trace: ${event.traceId}]`);
       
     } catch (error) {
       console.error("[RealtimeBus] Publish Error:", error);

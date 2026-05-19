@@ -43,6 +43,8 @@ export function useRealtimeSubscription(
 
     // Track Memory Leak Safety (registering subscription)
     useDiagnosticsStore.getState().registerSubscription(channelName);
+    
+    console.log(`[CLIENT_SUBSCRIBED] Successfully attached to Ably channel: ${channelName}`);
 
     channel.subscribe(async (message) => {
       try {
