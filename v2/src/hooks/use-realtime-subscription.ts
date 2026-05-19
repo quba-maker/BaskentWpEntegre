@@ -1,10 +1,12 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef } from "react";
 import * as Ably from "ably";
 import { BaseRealtimeEventSchema, ProjectionEvent } from "@/lib/realtime/contracts";
 import { useDiagnosticsStore } from "@/lib/realtime/diagnostics-store";
 import { ChaosEngine } from "@/lib/realtime/chaos-engine";
 import { CrossTabSync } from "@/lib/realtime/cross-tab-sync";
 import { isTabVisible, onVisibilityChange } from "@/lib/realtime/visibility";
+
+const IS_DEV = process.env.NODE_ENV === "development";
 
 // ─── Singleton Management ───
 let sharedAblyClient: Ably.Realtime | null = null;
@@ -46,15 +48,17 @@ export const getSharedAblyClient = (tenantId: string) => {
 
   currentTenantId = tenantId;
 
-  console.log("[ABLY_CLIENT_CREATED]", {
-    authMode: "authUrl (Token based)",
-    authUrl: `/api/ably/auth?tenantId=${tenantId}`,
-    tabId: CrossTabSync.tabId,
-    isLeader: CrossTabSync.isLeaderTab(),
-  });
+  if (IS_DEV) {
+    console.log("[ABLY_CLIENT_CREATED]", {
+      authMode: "authUrl (Session-based, zero-trust)",
+      authUrl: `/api/ably/auth`,
+      tabId: CrossTabSync.tabId,
+      isLeader: CrossTabSync.isLeaderTab(),
+    });
+  }
 
   sharedAblyClient = new Ably.Realtime({
-    authUrl: `/api/ably/auth?tenantId=${tenantId}`,
+    authUrl: `/api/ably/auth`,
     // Ably SDK handles exponential backoff internally for reconnects
     // disconnectedRetryTimeout: starts at 1s, doubles up to 30s
     // suspendedRetryTimeout: starts at 30s
@@ -62,16 +66,18 @@ export const getSharedAblyClient = (tenantId: string) => {
 
   // Track detailed connection state
   sharedAblyClient.connection.on((stateChange) => {
-    console.log(`[ABLY_CONNECTION_STATE] ${stateChange.current}`, stateChange.reason || "");
+    if (IS_DEV) {
+      console.log(`[ABLY_CONNECTION_STATE] ${stateChange.current}`, stateChange.reason || "");
+    }
     
     if (["disconnected", "suspended", "failed", "closed"].includes(stateChange.current)) {
       useDiagnosticsStore.getState().setRealtimeDown(true);
     } else if (stateChange.current === "connected") {
       useDiagnosticsStore.getState().setRealtimeDown(false);
-      if (stateChange.previous === "connecting" || stateChange.previous === "initialized") {
-        console.log("[ABLY_CONNECTED]");
-      } else {
-        console.log("[ABLY_REATTACHED]");
+      if (IS_DEV) {
+        const label = (stateChange.previous === "connecting" || stateChange.previous === "initialized")
+          ? "[ABLY_CONNECTED]" : "[ABLY_REATTACHED]";
+        console.log(label);
       }
       useDiagnosticsStore.getState().incrementMetric("realtime.socket.reconnects");
     }
@@ -129,13 +135,13 @@ export function useRealtimeSubscription(
     useDiagnosticsStore.getState().registerSubscription(channelName);
     
     // Debug injection (dev only)
-    if (typeof window !== "undefined") {
+    if (IS_DEV && typeof window !== "undefined") {
       (window as any).testAbly = channel;
     }
 
-    console.log(`[ABLY_CHANNEL_ATTACHING] Channel: "${channelName}"`);
+    if (IS_DEV) console.log(`[ABLY_CHANNEL_ATTACHING] Channel: "${channelName}"`);
     channel.attach().then(() => {
-      console.log("[ABLY_CHANNEL_ATTACHED]", { channelName });
+      if (IS_DEV) console.log("[ABLY_CHANNEL_ATTACHED]", { channelName });
     }).catch((err: any) => {
       console.error("[ABLY_CHANNEL_ATTACH_ERROR]", { channelName, err: err?.message });
     });
@@ -143,12 +149,28 @@ export function useRealtimeSubscription(
     // Event processing pipeline
     const processEvent = async (eventData: any, source: "ably" | "cross-tab") => {
       try {
+        // ─── SECURITY: Payload size guard (anti-abuse) ───
+        const serialized = JSON.stringify(eventData);
+        if (serialized.length > 32_768) { // 32KB client-side limit
+          console.error("[ABLY_SECURITY] Oversized payload rejected:", serialized.length);
+          return;
+        }
+
+        // ─── SECURITY: Tenant isolation verification ───
+        if (eventData.tenantId && eventData.tenantId !== tenantId) {
+          console.error("[ABLY_SECURITY] Cross-tenant event rejected:", {
+            expected: tenantId,
+            received: eventData.tenantId
+          });
+          return;
+        }
+
         const validatedEvent = BaseRealtimeEventSchema.parse(eventData);
         
         // ─── Global Dedup Gate ───
         const isDuplicate = trackEventId(validatedEvent.eventId);
         if (isDuplicate) {
-          console.log("[ABLY_EVENT_DEDUPED]", { eventId: validatedEvent.eventId, source });
+          if (IS_DEV) console.log("[ABLY_EVENT_DEDUPED]", { eventId: validatedEvent.eventId, source });
           return;
         }
 
@@ -189,7 +211,7 @@ export function useRealtimeSubscription(
 
     // Ably subscription
     const ablyHandler = async (message: Ably.Message) => {
-      console.log("[ABLY_EVENT_RECEIVED]", { id: message.id, name: message.name });
+      if (IS_DEV) console.log("[ABLY_EVENT_RECEIVED]", { id: message.id, name: message.name });
       await processEvent(message.data, "ably");
     };
     channel.subscribe(ablyHandler);
@@ -204,11 +226,16 @@ export function useRealtimeSubscription(
       // Memory Safety: deterministic cleanup
       useDiagnosticsStore.getState().unregisterSubscription(channelName);
       
-      console.log(`[ABLY_CHANNEL_DISPOSED] Unsubscribing and detaching channel: ${channelName}`);
+      if (IS_DEV) console.log(`[ABLY_CHANNEL_DISPOSED] Unsubscribing and detaching channel: ${channelName}`);
       channel.unsubscribe(ablyHandler);
       channel.detach();
       crossTabCleanup();
       pendingEventsRef.current = [];
+      
+      // Clean up debug references
+      if (IS_DEV && typeof window !== "undefined") {
+        delete (window as any).testAbly;
+      }
     };
   }, [tenantId]); // Removed onEvent from deps — using ref instead
 }

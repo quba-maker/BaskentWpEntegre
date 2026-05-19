@@ -2,12 +2,16 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useRealtimeSubscription } from "./use-realtime-subscription";
 import { ProjectionEvent, ChatMessageCreatedEvent, ChatMessageStatusUpdatedEvent } from "@/lib/realtime/contracts";
 
-// Structured logging helper
+// Production-safe logging (stripped in prod via dead-code elimination)
+const IS_DEV = process.env.NODE_ENV === "development";
+
 const logReconciliation = (
   action: "ignored_duplicate" | "optimistic_reconciled" | "stale_event_dropped" | "cache_updated" | "cache_miss" | "status_ignored",
   details: any
 ) => {
-  console.log(`[CACHE_MUTATED] [Reconciliation:${action}]`, details);
+  if (IS_DEV) {
+    console.log(`[CACHE_MUTATED] [Reconciliation:${action}]`, details);
+  }
 };
 
 // Status ranking to prevent downgrades
@@ -106,7 +110,7 @@ export function useRealtimeReconciliation(tenantId: string) {
     const projection = mapRealtimeMessageToUIProjection(payload);
 
     queryClient.setQueryData(queryKey, (oldData: any[]) => {
-      if (!oldData) return [projection.messageData]; // Cache miss, could optionally trigger a refetch instead.
+      if (!oldData) return [projection.messageData]; // Cache miss
 
       // 1. Deduplication (Optimistic ID or ProviderMessageID)
       const existingMsgIndex = oldData.findIndex((m) => m.id === payload.id);
@@ -123,18 +127,22 @@ export function useRealtimeReconciliation(tenantId: string) {
           return oldData; // Ignore
         }
 
-        console.log("[ABLY_EVENT_DEDUPED]", { eventId, id: payload.id, type: "dedupe_update" });
         logReconciliation("optimistic_reconciled", { eventId, id: payload.id });
         
-        // Merge the canonical data over the optimistic data
+        // Deterministic merge: canonical (server) data wins over optimistic
+        // but preserve any fields the optimistic has that canonical doesn't
         const newData = [...oldData];
         newData[existingMsgIndex] = { ...existing, ...projection.messageData };
-        return newData;
+        
+        // Stable sort: guarantee monotonic ordering by timeMs
+        return stableSortMessages(newData);
       }
 
       // 2. Append new message (from another client or external source)
       logReconciliation("cache_updated", { eventId, id: payload.id, type: "append" });
-      return [...oldData, projection.messageData];
+      
+      // Insert with stable sort to handle out-of-order delivery
+      return stableSortMessages([...oldData, projection.messageData]);
     });
 
     // Update conversation list preview AND REORDER TO TOP
@@ -186,7 +194,9 @@ export function useRealtimeReconciliation(tenantId: string) {
 
   // Subscribe to Ably events
   useRealtimeSubscription(tenantId, (event: ProjectionEvent) => {
-    console.log(`[CLIENT_EVENT_RECEIVED] Received ${event.type} event. [Trace: ${event.traceId}]`, event);
+    if (IS_DEV) {
+      console.log(`[CLIENT_EVENT_RECEIVED] Received ${event.type} event. [Trace: ${event.traceId}]`, event);
+    }
     
     switch (event.type) {
       case "chat.message.created":
@@ -199,5 +209,17 @@ export function useRealtimeReconciliation(tenantId: string) {
         // Future extensions (ai.stream.delta, etc.)
         break;
     }
+  });
+}
+
+// ─── Stable Sort ───
+// Guarantees deterministic message ordering regardless of event arrival order.
+// Uses timeMs as primary sort, id as tiebreaker to prevent position jitter.
+function stableSortMessages(messages: any[]): any[] {
+  return messages.sort((a, b) => {
+    const timeDiff = (a.timeMs || 0) - (b.timeMs || 0);
+    if (timeDiff !== 0) return timeDiff;
+    // Tiebreaker: lexicographic ID comparison for absolute determinism
+    return (a.id || "").localeCompare(b.id || "");
   });
 }

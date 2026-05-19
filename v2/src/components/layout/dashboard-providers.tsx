@@ -10,12 +10,14 @@ import { RealtimeDiagnosticsOverlay } from "@/components/features/realtime/diagn
 // Houses all context providers that require "use client"
 // ==========================================
 
+const IS_DEV = process.env.NODE_ENV === "development";
+
 export function DashboardProviders({ children, tenantId }: { children: React.ReactNode, tenantId?: string }) {
   return (
     <ConfirmProvider>
       <RealtimeProvider tenantId={tenantId}>
         {children}
-        <RealtimeDiagnosticsOverlay />
+        {IS_DEV && <RealtimeDiagnosticsOverlay />}
       </RealtimeProvider>
     </ConfirmProvider>
   );

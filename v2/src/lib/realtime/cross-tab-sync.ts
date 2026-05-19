@@ -10,6 +10,8 @@
  * - Tab 2+: Listen on BroadcastChannel → apply to local React Query cache
  */
 
+const IS_DEV = process.env.NODE_ENV === "development";
+
 type CrossTabMessage =
   | { type: "REALTIME_EVENT"; event: any }
   | { type: "LEADER_HEARTBEAT"; tabId: string; timestamp: number }
@@ -23,6 +25,7 @@ const TAB_ID = typeof crypto !== "undefined"
 let channel: BroadcastChannel | null = null;
 let isLeader = false;
 let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
+let monitorInterval: ReturnType<typeof setInterval> | null = null;
 let lastLeaderHeartbeat = 0;
 const HEARTBEAT_INTERVAL = 2000;
 const LEADER_TIMEOUT = 5000;
@@ -57,7 +60,7 @@ export const CrossTabSync = {
             lastLeaderHeartbeat = msg.timestamp;
             // Another tab is leader, we are follower
             if (isLeader) {
-              console.log("[CROSS_TAB] Yielding leadership to", msg.tabId);
+              if (IS_DEV) console.log("[CROSS_TAB] Yielding leadership to", msg.tabId);
               isLeader = false;
             }
           }
@@ -67,7 +70,7 @@ export const CrossTabSync = {
           if (msg.tabId !== TAB_ID && isLeader) {
             // Race: compare tab IDs lexicographically
             if (msg.tabId < TAB_ID) {
-              console.log("[CROSS_TAB] Lost leader election to", msg.tabId);
+              if (IS_DEV) console.log("[CROSS_TAB] Lost leader election to", msg.tabId);
               isLeader = false;
             }
           }
@@ -94,23 +97,28 @@ export const CrossTabSync = {
     // Try to claim leadership
     this.claimLeadership();
 
-    // Monitor leader liveness
-    setInterval(() => {
+    // Monitor leader liveness (tracked for cleanup)
+    if (monitorInterval) clearInterval(monitorInterval);
+    monitorInterval = setInterval(() => {
       if (!isLeader && Date.now() - lastLeaderHeartbeat > LEADER_TIMEOUT) {
-        console.log("[CROSS_TAB] Leader timeout. Claiming leadership.");
+        if (IS_DEV) console.log("[CROSS_TAB] Leader timeout. Claiming leadership.");
         this.claimLeadership();
       }
     }, LEADER_TIMEOUT / 2);
 
     // Handle tab close: relinquish leadership
-    window.addEventListener("beforeunload", () => {
+    const onUnload = () => {
       if (heartbeatInterval) clearInterval(heartbeatInterval);
-    });
+      if (monitorInterval) clearInterval(monitorInterval);
+    };
+    window.addEventListener("pagehide", onUnload);
+    // Legacy fallback
+    window.addEventListener("beforeunload", onUnload);
   },
 
   claimLeadership() {
     isLeader = true;
-    console.log("[CROSS_TAB] Claimed leadership:", TAB_ID);
+    if (IS_DEV) console.log("[CROSS_TAB] Claimed leadership:", TAB_ID);
     channel?.postMessage({ type: "LEADER_CLAIM", tabId: TAB_ID } as CrossTabMessage);
 
     // Start heartbeat
@@ -152,9 +160,11 @@ export const CrossTabSync = {
   },
 
   destroy() {
-    if (heartbeatInterval) clearInterval(heartbeatInterval);
+    if (heartbeatInterval) { clearInterval(heartbeatInterval); heartbeatInterval = null; }
+    if (monitorInterval) { clearInterval(monitorInterval); monitorInterval = null; }
     channel?.close();
     channel = null;
+    isLeader = false;
     listeners.length = 0;
   }
 };

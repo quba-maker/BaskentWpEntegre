@@ -156,7 +156,6 @@ export function ConversationViewport() {
   const [showScrollDown, setShowScrollDown] = useState(false);
   const [unreadBadgeCount, setUnreadBadgeCount] = useState(0);
   const isScrolledUp = useRef(false);
-  const prevMessagesLength = useRef(0);
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const target = e.currentTarget;
@@ -201,23 +200,37 @@ export function ConversationViewport() {
     gcTime: 5 * 60 * 1000,
   });
 
-  // Auto-scroll on messages load or change
+  // Auto-scroll on new messages ONLY — status updates must NOT trigger scroll
+  const prevMessageCount = useRef(0);
+  const prevLastMsgId = useRef<string | null>(null);
+  
   useEffect(() => {
     if (messages && messages.length > 0) {
-      const isFirstLoad = prevMessagesLength.current === 0;
-      const newMessagesCount = messages.length - prevMessagesLength.current;
+      const currentCount = messages.length;
+      const currentLastId = messages[messages.length - 1]?.id;
+      const isFirstLoad = prevMessageCount.current === 0;
+      const hasNewMessages = currentCount > prevMessageCount.current || currentLastId !== prevLastMsgId.current;
       
-      if (!isScrolledUp.current || isFirstLoad) {
-        scrollToBottom(isFirstLoad ? "auto" : "smooth");
-      } else if (newMessagesCount > 0 && !isFirstLoad) {
-        setUnreadBadgeCount(prev => prev + newMessagesCount);
+      // Only scroll/badge when actual NEW messages appear, not status mutations
+      if (hasNewMessages) {
+        if (!isScrolledUp.current || isFirstLoad) {
+          scrollToBottom(isFirstLoad ? "auto" : "smooth");
+        } else {
+          const newCount = currentCount - prevMessageCount.current;
+          if (newCount > 0 && !isFirstLoad) {
+            setUnreadBadgeCount(prev => prev + newCount);
+          }
+        }
       }
-      prevMessagesLength.current = messages.length;
+      
+      prevMessageCount.current = currentCount;
+      prevLastMsgId.current = currentLastId;
     }
   }, [messages]);
 
   useEffect(() => {
-    prevMessagesLength.current = 0;
+    prevMessageCount.current = 0;
+    prevLastMsgId.current = null;
     isScrolledUp.current = false;
     setShowScrollDown(false);
     setUnreadBadgeCount(0);

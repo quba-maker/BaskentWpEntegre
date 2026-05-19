@@ -25,7 +25,7 @@ export const BaseRealtimeEventSchema = z.object({
     "ai.stream.delta",
     "ai.stream.completed"
   ]),
-}).passthrough();
+}); // No .passthrough() — unknown fields are dropped during parse (event poisoning prevention)
 
 // --- Specific Projection Payloads ---
 // Frontend ONLY sees these, never internal DB structures.

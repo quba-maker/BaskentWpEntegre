@@ -11,6 +11,8 @@ import { useEffect, useRef } from "react";
 
 type VisibilityState = "visible" | "hidden";
 
+const IS_DEV = process.env.NODE_ENV === "development";
+
 let currentVisibility: VisibilityState = 
   typeof document !== "undefined" ? (document.visibilityState as VisibilityState) : "visible";
 
@@ -20,7 +22,7 @@ const visibilityListeners: Array<(state: VisibilityState) => void> = [];
 if (typeof document !== "undefined") {
   document.addEventListener("visibilitychange", () => {
     currentVisibility = document.visibilityState as VisibilityState;
-    console.log(`[VISIBILITY_STATE] Tab is now: ${currentVisibility}`);
+    if (IS_DEV) console.log(`[VISIBILITY_STATE] Tab is now: ${currentVisibility}`);
     for (const fn of visibilityListeners) {
       fn(currentVisibility);
     }

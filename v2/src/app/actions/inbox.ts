@@ -191,6 +191,17 @@ export async function getMessages(phone: string) {
 
 export async function sendMessage(phone: string, text: string) {
   if (!phone || !text) return { success: false, error: "Missing data" };
+  
+  // ─── SECURITY: Input validation ───
+  const sanitizedPhone = phone.replace(/[^\d+]/g, ""); // Strip non-numeric except +
+  const sanitizedText = text.trim().slice(0, 4096); // WhatsApp max message length
+  
+  if (sanitizedPhone.length < 6 || sanitizedPhone.length > 20) {
+    return { success: false, error: "Invalid phone number" };
+  }
+  if (sanitizedText.length === 0) {
+    return { success: false, error: "Empty message" };
+  }
 
   return withActionGuard(
     { actionName: 'sendMessage' },

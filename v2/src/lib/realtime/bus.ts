@@ -4,9 +4,15 @@ import { ProjectionEvent, BaseRealtimeEventSchema } from "./contracts";
 /**
  * Realtime Bus Infrastructure Adapter
  * 
- * Abstraction layer over Ably (or any future Pub/Sub like NATS/Kafka).
- * Ensures business logic never interacts directly with transport SDKs.
+ * SECURITY HARDENING (Phase 7):
+ * 1. Strict schema validation at publish edge
+ * 2. Payload size enforcement (anti-abuse)
+ * 3. Channel namespace normalization (anti-injection)
+ * 4. Production-safe logging (no verbose output)
  */
+
+const MAX_PAYLOAD_SIZE = 16_384; // 16KB — Ably limit is 64KB, we enforce tighter
+
 export class RealtimeBus {
   private static instance: Ably.Rest;
 
@@ -14,7 +20,7 @@ export class RealtimeBus {
     if (!this.instance) {
       const apiKey = process.env.ABLY_API_KEY;
       if (!apiKey) {
-        console.warn("ABLY_API_KEY is not set. RealtimeBus will fail silently or throw in prod.");
+        throw new Error("[RealtimeBus] ABLY_API_KEY is not configured");
       }
       this.instance = new Ably.Rest({ key: apiKey });
     }
@@ -27,23 +33,30 @@ export class RealtimeBus {
    */
   static async publish(tenantId: string, event: ProjectionEvent): Promise<void> {
     try {
-      // 1. Strict Validation at the Edge
-      // Prevent any malformed events from entering the realtime system
+      // ─── 1. Strict Schema Validation at the Edge ───
       const validatedEvent = BaseRealtimeEventSchema.parse(event);
-      
+
+      // ─── 2. Payload Size Enforcement ───
+      const serialized = JSON.stringify(event);
+      if (serialized.length > MAX_PAYLOAD_SIZE) {
+        throw new Error(
+          `[RealtimeBus] Payload too large: ${serialized.length} bytes (max: ${MAX_PAYLOAD_SIZE})`
+        );
+      }
+
+      // ─── 3. Channel Namespace Normalization ───
+      // Prevent injection via tenantId — only UUID format allowed
+      if (!/^[a-f0-9-]{36}$/i.test(tenantId)) {
+        throw new Error(`[RealtimeBus] Invalid tenantId format: ${tenantId}`);
+      }
+
       const channelName = `private:tenant:${tenantId}`;
       const channel = this.getClient().channels.get(channelName);
       
-      console.log(`[ABLY_PUBLISH_CHANNEL] Backend publishing to channel: "${channelName}"`);
-      console.log(`[PUBLISH_TRIGGERED] Preparing to publish ${event.type} to ${channelName} [Trace: ${event.traceId}]`);
-      
       await channel.publish(validatedEvent.type, event);
-      
-      console.log(`[ABLY_PUBLISHED] Successfully published ${event.type} to ${channelName} [Trace: ${event.traceId}]`);
       
     } catch (error) {
       console.error("[RealtimeBus] Publish Error:", error);
-      // Sentry capture placeholder
       // In a robust DLQ architecture, failed publishes should be routed to a retry queue
       throw error;
     }
