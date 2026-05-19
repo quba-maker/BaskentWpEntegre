@@ -11,6 +11,7 @@ export interface MessagePayload {
   providerMessageId?: string | null; // Idempotency için Meta'dan gelen message ID
   promptTokens?: number;
   completionTokens?: number;
+  status?: string;
 }
 
 export class MessageService {
@@ -77,11 +78,11 @@ export class MessageService {
       
       writeQueries.push(sql`
         INSERT INTO messages (
-          tenant_id, phone_number, direction, content, channel, provider_message_id, model_used, prompt_tokens, completion_tokens
+          tenant_id, phone_number, direction, content, channel, provider_message_id, model_used, prompt_tokens, completion_tokens, status
         ) VALUES (
           ${this.db.tenantId}, ${payload.phoneNumber}, ${payload.direction}, ${payload.content}, 
           ${payload.channel}, ${payload.providerMessageId || null}, ${payload.modelUsed || null},
-          ${payload.promptTokens || 0}, ${payload.completionTokens || 0}
+          ${payload.promptTokens || 0}, ${payload.completionTokens || 0}, ${payload.status || 'pending'}
         ) RETURNING id
       `);
 
@@ -133,7 +134,7 @@ export class MessageService {
   /**
    * Send outgoing WhatsApp message via Meta Graph API
    */
-  async sendWhatsAppMessage(phoneId: string, accessToken: string, to: string, content: string): Promise<boolean> {
+  async sendWhatsAppMessage(phoneId: string, accessToken: string, to: string, content: string): Promise<{ success: boolean; providerMessageId?: string }> {
     const url = `https://graph.facebook.com/v25.0/${phoneId}/messages`;
     try {
       const response = await fetch(url, {
@@ -154,7 +155,9 @@ export class MessageService {
         const err = await response.text();
         throw new Error(`WhatsApp API Error: ${err}`);
       }
-      return true;
+      const data = await response.json();
+      const providerMessageId = data.messages?.[0]?.id || data.message_id || null;
+      return { success: true, providerMessageId };
     } catch (e: any) {
       this.log.error("WhatsApp API request failed", e instanceof Error ? e : new Error(String(e)));
       throw e;

@@ -233,8 +233,15 @@ export class QueueWorkerEngine {
         const accessToken = brain.context.config?.accessToken || process.env.META_ACCESS_TOKEN || '';
         const phoneId = brain.context.config?.whatsappPhoneNumberId || process.env.PHONE_NUMBER_ID || '';
         if (phoneId && accessToken) {
-          await msgService.sendWhatsAppMessage(phoneId, accessToken, phoneNumber, offMsg);
-          await msgService.saveMessageIdempotent({ phoneNumber, direction: 'out', content: offMsg, channel: 'whatsapp' });
+          const outRes = await msgService.sendWhatsAppMessage(phoneId, accessToken, phoneNumber, offMsg);
+          await msgService.saveMessageIdempotent({ 
+            phoneNumber, 
+            direction: 'out', 
+            content: offMsg, 
+            channel: 'whatsapp',
+            providerMessageId: outRes.providerMessageId,
+            status: 'sent'
+          });
         }
         this.log.info(`[WORKING_HOURS] Outside hours, sent off-message`, { traceId });
         AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'working_hours_blocked', category: 'pipeline', payload: { currentTime } });
@@ -370,14 +377,18 @@ export class QueueWorkerEngine {
        throw new Error("Missing Meta credentials");
     }
 
+    let outProviderMessageId: string | null = null;
+    let messageStatus = 'pending';
     try {
-      await msgService.sendWhatsAppMessage(
+      const outRes = await msgService.sendWhatsAppMessage(
         phoneId,
         accessToken,
         phoneNumber,
         finalResponseText
       );
-      this.log.info(`[WHATSAPP_SENT] Message delivered to Meta`, { traceId });
+      outProviderMessageId = outRes.providerMessageId || null;
+      messageStatus = 'sent';
+      this.log.info(`[WHATSAPP_SENT] Message delivered to Meta`, { traceId, providerMessageId: outProviderMessageId });
     } catch (e: any) {
        this.log.error(`[WHATSAPP_FAILED] Meta API rejection`, e, { traceId });
        throw e; // Retry tetikle
@@ -391,7 +402,9 @@ export class QueueWorkerEngine {
       channel: 'whatsapp',
       modelUsed: aiResponse.modelUsed || llmModel,
       promptTokens: aiResponse.inputTokens || 0,
-      completionTokens: aiResponse.outputTokens || 0
+      completionTokens: aiResponse.outputTokens || 0,
+      providerMessageId: outProviderMessageId,
+      status: messageStatus
     });
 
     // 10. CRM Intelligence Extraction (Async & Non-blocking — Feature Flag gated)

@@ -132,7 +132,7 @@ export async function getMessages(phone: string) {
 
         const rows = await ctx.db.executeSafe(sql`
           SELECT * FROM (
-            SELECT id, content as text, direction, status, EXTRACT(EPOCH FROM created_at) * 1000 as created_at_ms
+            SELECT id, content as text, direction, status, model_used, EXTRACT(EPOCH FROM created_at) * 1000 as created_at_ms
             FROM messages
             WHERE phone_number LIKE ${phoneLike} 
               AND (tenant_id = ${ctx.tenantId} OR tenant_id IS NULL)
@@ -172,7 +172,7 @@ export async function getMessages(phone: string) {
 
         return {
           id: r.id,
-          sender: r.direction === 'in' ? 'user' : (r.direction === 'system' ? 'system' : 'agent'),
+          sender: r.direction === 'in' ? 'user' : (r.direction === 'system' ? 'system' : (r.model_used ? 'bot' : 'agent')),
           text: r.text,
           timeMs: parseFloat(r.created_at_ms),
           dateLabel,
