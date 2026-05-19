@@ -9,6 +9,7 @@ import { AiRuntimeTimeline } from "@/components/features/ai-observability/AiRunt
 import { getAiStatusForConversation } from "@/app/actions/ai-observability";
 import { useParams } from "next/navigation";
 import { usePresence } from "@/hooks/use-presence";
+import { TypingIndicator } from "@/components/features/realtime/typing-indicator";
 
 // ==========================================
 // CONVERSATION VIEWPORT — Central chat surface
@@ -130,7 +131,7 @@ export function ConversationViewport() {
   const tenantSlug = params?.tenant_slug as string;
 
   const channelName = tenantSlug ? `presence:tenant:${tenantSlug}` : "";
-  const { members, updatePresence } = usePresence(tenantSlug, channelName);
+  const { typingClients, setTypingStatus } = usePresence(tenantSlug, channelName);
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const [showScrollDown, setShowScrollDown] = useState(false);
@@ -229,25 +230,16 @@ export function ConversationViewport() {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
-      updatePresence({ typing: false, phone: activePhone });
+      if (activePhone) setTypingStatus(false, "human");
     }
   };
-
-  // Setup typing indicator timeout
-  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInputText(e.target.value);
     
-    // Broadcast typing status
+    // Broadcast typing status (throttled and debounced automatically by the hook)
     if (activePhone) {
-      updatePresence({ typing: true, phone: activePhone });
-      
-      // Clear typing status after 3 seconds of inactivity
-      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-      typingTimeoutRef.current = setTimeout(() => {
-        updatePresence({ typing: false, phone: activePhone });
-      }, 3000);
+      setTypingStatus(true, "human");
     }
   };
 
@@ -320,10 +312,10 @@ export function ConversationViewport() {
               <p className="text-xs font-medium" style={{ color: "var(--q-text-secondary)" }}>
                 {activeContact.id}
               </p>
-              {members.some(m => m.data?.typing && m.data?.phone === activePhone) && (
+              {typingClients.length > 0 && (
                 <span className="text-[11px] font-semibold text-emerald-500 animate-pulse flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                  Birisi yazıyor...
+                  {typingClients.some(c => c.agentType === 'ai') ? 'AI üretiyor...' : 'Birisi yazıyor...'}
                 </span>
               )}
             </div>
@@ -487,6 +479,8 @@ export function ConversationViewport() {
           {/* AI Observability Timeline */}
           {activeContact.isBotActive && <AiRuntimeTimeline conversationId={activePhone!} />}
           
+          {/* Zero-Layout-Shift Typing Indicator at the bottom */}
+          <TypingIndicator typingClients={typingClients} />
         </div>
 
         {/* Scroll to Bottom Button */}
