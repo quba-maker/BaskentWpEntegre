@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import * as Ably from "ably";
 import { getSharedAblyClient } from "./use-realtime-subscription";
 import { usePresenceStore, AgentType } from "@/lib/realtime/presence-store";
@@ -15,14 +15,16 @@ export function usePresence(tenantId: string, channelName: string) {
   const setTyping = usePresenceStore((state) => state.setTyping);
   const getTypingClients = usePresenceStore((state) => state.getTypingClients);
   
-  // Re-render when typing state changes for this specific channel
-  const typingClients = usePresenceStore((state) => {
-    const channelState = state.typingStates[channelName] || {};
+  // Avoid infinite loops by selecting the raw state and using useMemo
+  const channelState = usePresenceStore((state) => state.typingStates[channelName]);
+  
+  const typingClients = useMemo(() => {
+    if (!channelState) return [];
     return Object.entries(channelState).map(([clientId, data]) => ({
       clientId,
       agentType: data.agentType,
     }));
-  });
+  }, [channelState]);
 
   const localTypingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastPublishRef = useRef<number>(0);
