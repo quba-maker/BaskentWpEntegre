@@ -14,6 +14,9 @@ interface DiagnosticsState {
   logs: { id: string; timestamp: number; message: string; data?: any }[];
   activeSubscriptions: Set<string>;
   
+  // High Availability
+  isRealtimeDown: boolean;
+  
   // Chaos Flags
   chaosModeEnabled: boolean;
   chaosSettings: {
@@ -27,6 +30,7 @@ interface DiagnosticsState {
   addLog: (message: string, data?: any) => void;
   registerSubscription: (channel: string) => void;
   unregisterSubscription: (channel: string) => void;
+  setRealtimeDown: (isDown: boolean) => void;
   setChaosMode: (enabled: boolean) => void;
   updateChaosSettings: (settings: Partial<DiagnosticsState['chaosSettings']>) => void;
 }
@@ -43,6 +47,7 @@ export const useDiagnosticsStore = create<DiagnosticsState>((set) => ({
   },
   logs: [],
   activeSubscriptions: new Set(),
+  isRealtimeDown: false,
   chaosModeEnabled: false,
   chaosSettings: {
     delayMs: 0,
@@ -73,6 +78,7 @@ export const useDiagnosticsStore = create<DiagnosticsState>((set) => ({
     newSet.delete(channel);
     return { activeSubscriptions: newSet };
   }),
+  setRealtimeDown: (isDown) => set({ isRealtimeDown: isDown }),
   setChaosMode: (enabled) => set({ chaosModeEnabled: enabled }),
   updateChaosSettings: (settings) => set((state) => ({
     chaosSettings: { ...state.chaosSettings, ...settings }

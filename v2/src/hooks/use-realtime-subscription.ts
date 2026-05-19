@@ -5,10 +5,22 @@ import { useDiagnosticsStore } from "@/lib/realtime/diagnostics-store";
 import { ChaosEngine } from "@/lib/realtime/chaos-engine";
 
 let sharedAblyClient: Ably.Realtime | null = null;
+let currentTenantId: string | null = null;
 
 export const getSharedAblyClient = (tenantId: string) => {
-  if (sharedAblyClient) return sharedAblyClient;
+  if (sharedAblyClient && currentTenantId === tenantId) {
+    return sharedAblyClient;
+  }
+
   if (typeof window === "undefined") return null;
+
+  if (sharedAblyClient && currentTenantId !== tenantId) {
+    console.log("[ABLY_CLIENT_DISPOSED] Tenant changed. Disposing old client.");
+    sharedAblyClient.close();
+    sharedAblyClient = null;
+  }
+
+  currentTenantId = tenantId;
 
   console.log("[ABLY_ENV_CHECK]", {
     ABLY_PUBLIC: process.env.NEXT_PUBLIC_ABLY_KEY ? process.env.NEXT_PUBLIC_ABLY_KEY.slice(0, 10) + "..." : "undefined",
@@ -26,8 +38,16 @@ export const getSharedAblyClient = (tenantId: string) => {
 
   // Track detailed connection state
   sharedAblyClient.connection.on((stateChange) => {
-    console.log("[ABLY_CONNECTION_STATE]", stateChange.current, stateChange.reason || "");
-    if (stateChange.current === "connected") {
+    console.log(`[ABLY_CONNECTION_STATE] ${stateChange.current}`, stateChange.reason || "");
+    if (["disconnected", "suspended", "failed", "closed"].includes(stateChange.current)) {
+      useDiagnosticsStore.getState().setRealtimeDown(true);
+    } else if (stateChange.current === "connected") {
+      useDiagnosticsStore.getState().setRealtimeDown(false);
+      if (stateChange.previous === "connecting" || stateChange.previous === "initialized") {
+        console.log("[ABLY_CONNECTED]");
+      } else {
+        console.log("[ABLY_REATTACHED]");
+      }
       useDiagnosticsStore.getState().incrementMetric("realtime.socket.reconnects");
     }
   });
@@ -104,7 +124,10 @@ export function useRealtimeSubscription(
     return () => {
       // Memory Safety: Clean up subscriptions and listeners
       useDiagnosticsStore.getState().unregisterSubscription(channelName);
+      
+      console.log(`[ABLY_CHANNEL_DISPOSED] Unsubscribing and detaching channel: ${channelName}`);
       channel.unsubscribe();
+      channel.detach();
       // We don't close the shared client here to allow other channels to persist,
       // but if active subscriptions hit 0, we could potentially disconnect.
     };

@@ -131,6 +131,7 @@ export function ConversationViewport() {
   const params = useParams();
   const tenantSlug = params?.tenant_slug as string;
   const tenantId = useRealtimeTenant();
+  const isRealtimeDown = useDiagnosticsStore((state) => state.isRealtimeDown);
 
   // CRITICAL: We must use the REAL tenantId (UUID) for Ably, not the slug!
   const channelName = tenantId ? `presence:tenant:${tenantId}` : "";
@@ -192,7 +193,8 @@ export function ConversationViewport() {
     queryKey: ["messages", activePhone],
     queryFn: () => getMessages(activePhone!),
     enabled: !!activePhone,
-    // Realtime operates now, no polling needed
+    // Realtime operates now, fallback polling if disconnected
+    refetchInterval: isRealtimeDown ? 5000 : false,
     staleTime: Infinity,
   });
 

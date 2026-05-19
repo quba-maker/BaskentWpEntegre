@@ -123,6 +123,7 @@ export function useRealtimeReconciliation(tenantId: string) {
           return oldData; // Ignore
         }
 
+        console.log("[ABLY_EVENT_DEDUPED]", { eventId, id: payload.id, type: "dedupe_update" });
         logReconciliation("optimistic_reconciled", { eventId, id: payload.id });
         
         // Merge the canonical data over the optimistic data

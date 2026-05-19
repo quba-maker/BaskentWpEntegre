@@ -5,6 +5,7 @@ import { useInfiniteQuery } from "@tanstack/react-query";
 import { Search, MessageCircle, Check, CheckCheck, Clock } from "lucide-react";
 import { getConversations } from "@/app/actions/inbox";
 import { useInboxStore } from "@/store/inbox-store";
+import { useDiagnosticsStore } from "@/lib/realtime/diagnostics-store";
 
 // ==========================================
 // CONTACT RAIL — Left navigation panel
@@ -95,6 +96,7 @@ export function ContactRail() {
   const [stageFilter, setStageFilter] = useState("all");
   const [searchInput, setSearchInput] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  const isRealtimeDown = useDiagnosticsStore((state) => state.isRealtimeDown);
 
   // Debounce
   useEffect(() => {
@@ -109,6 +111,8 @@ export function ContactRail() {
     getNextPageParam: (lastPage, allPages) => {
       return lastPage.length === 50 ? allPages.length + 1 : undefined;
     },
+    // Realtime operates now, fallback polling if disconnected
+    refetchInterval: isRealtimeDown ? 10000 : false,
     staleTime: Infinity,
   });
 

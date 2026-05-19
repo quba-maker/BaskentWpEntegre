@@ -69,6 +69,11 @@ export const usePresenceStore = create<PresenceStore>((set, get) => ({
             delete newChannelState[clientId]; // Stale state evicted (Ghost typing prevented)
             channelChanged = true;
             hasChanges = true;
+            
+            // Metric: Record expired presence
+            import("@/lib/realtime/diagnostics-store").then(({ useDiagnosticsStore }) => {
+              useDiagnosticsStore.getState().incrementMetric("realtime.presence.ttl_expired");
+            });
           }
         }
 
