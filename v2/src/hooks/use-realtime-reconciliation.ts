@@ -1,6 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useRealtimeSubscription } from "./use-realtime-subscription";
 import { ProjectionEvent, ChatMessageCreatedEvent, ChatMessageStatusUpdatedEvent } from "@/lib/realtime/contracts";
+import { useInboxStore } from "@/store/inbox-store";
 
 // Production-safe logging (stripped in prod via dead-code elimination)
 const IS_DEV = process.env.NODE_ENV === "development";
@@ -145,11 +146,23 @@ export function useRealtimeReconciliation(tenantId: string) {
       return stableSortMessages([...oldData, projection.messageData]);
     });
 
+    // Read the active phone directly from the store to prevent unread count bumps on focused conversation
+    const activePhone = useInboxStore.getState().activePhone;
+    const isFocused = activePhone === payload.conversationId;
+
     // Update conversation list preview AND REORDER TO TOP
-    updateConversationPreview(payload.conversationId, (conv: any) => ({
-      ...projection.conversationData,
-      unread: payload.sender === "user" ? (conv.unread || 0) + 1 : conv.unread
-    }), true);
+    updateConversationPreview(payload.conversationId, (conv: any) => {
+      let nextUnread = conv.unread || 0;
+      if (isFocused) {
+        nextUnread = 0;
+      } else if (payload.sender === "user") {
+        nextUnread = nextUnread + 1;
+      }
+      return {
+        ...projection.conversationData,
+        unread: nextUnread
+      };
+    }, true);
   };
 
   // Internal handler for status updates

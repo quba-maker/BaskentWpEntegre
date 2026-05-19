@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { Search, MessageCircle, Check, CheckCheck, Clock, WifiOff } from "lucide-react";
 import { getConversations } from "@/app/actions/inbox";
 import { useInboxStore } from "@/store/inbox-store";
@@ -92,6 +92,7 @@ function stageLabel(stage: string | undefined): string {
 
 export function ContactRail() {
   const { activePhone, activeContact, setActiveContact, mobileView } = useInboxStore();
+  const queryClient = useQueryClient();
   const [filter, setFilter] = useState("all");
   const [stageFilter, setStageFilter] = useState("all");
   const [searchInput, setSearchInput] = useState("");
@@ -155,6 +156,27 @@ export function ContactRail() {
       }
     }
   }, [contacts, activePhone, activeContact]);
+
+  // Reset unread count for the active conversation in the cache
+  useEffect(() => {
+    if (activePhone && contacts.length > 0) {
+      const activeConv = contacts.find((c: any) => c.id === activePhone);
+      if (activeConv && activeConv.unread > 0) {
+        queryClient.setQueriesData({ queryKey: ["conversations"] }, (oldData: any) => {
+          if (!oldData || !oldData.pages) return oldData;
+          const newPages = oldData.pages.map((page: any[]) =>
+            page.map(conv => {
+              if (conv.id === activePhone) {
+                return { ...conv, unread: 0 };
+              }
+              return conv;
+            })
+          );
+          return { ...oldData, pages: newPages };
+        });
+      }
+    }
+  }, [activePhone, contacts, queryClient]);
 
   return (
     <div className={`w-full md:w-80 border-r flex-col h-full z-10 q-glass shadow-sm ${mobileView === "list" ? "flex" : "hidden md:flex"}`}
@@ -246,7 +268,7 @@ export function ContactRail() {
               .map((c: any) => (
                 <button
                   key={c.id}
-                  onClick={() => setActiveContact(c.id, c)}
+                  onClick={() => setActiveContact(c.id, { ...c, unread: 0 })}
                   className="w-full text-left p-3.5 rounded-2xl transition-all duration-200 flex items-start gap-3.5 border q-list-item"
                   style={{
                     backgroundColor: activePhone === c.id ? "var(--q-bg-primary)" : "transparent",

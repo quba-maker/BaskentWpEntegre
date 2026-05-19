@@ -62,7 +62,8 @@ export default function FormsPage() {
       id: form.phone_number,
       name: form.patient_name,
       channel: "whatsapp",
-      stage: form.stage
+      stage: form.stage,
+      unread: 0
     });
     router.push("/inbox");
   };
