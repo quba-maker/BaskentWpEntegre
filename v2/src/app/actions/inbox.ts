@@ -222,6 +222,8 @@ export async function sendMessage(phone: string, text: string) {
         inboxLogger.withContext({ module: 'Inbox' }).warn("Meta credentials missing, only saving to DB");
       } else {
         let response: Response | null = null;
+        let providerMessageId: string | null = null;
+        let messageStatus = 'pending';
 
         if (channel === 'whatsapp' && PHONE_NUMBER_ID) {
           response = await fetch(`https://graph.facebook.com/v25.0/${PHONE_NUMBER_ID}/messages`, {
@@ -237,6 +239,14 @@ export async function sendMessage(phone: string, text: string) {
               text: { body: text },
             }),
           });
+
+          if (response.ok) {
+            try {
+              const resData = await response.clone().json();
+              providerMessageId = resData.messages?.[0]?.id || resData.message_id || null;
+              messageStatus = 'sent';
+            } catch (e) {}
+          }
         }
         else if (channel === 'instagram' || channel === 'messenger') {
           const customToken = tenantRows[0].meta_page_token;
@@ -264,6 +274,14 @@ export async function sendMessage(phone: string, text: string) {
 
             if (response.ok) {
               success = true;
+              try {
+                const resData = await response.json();
+                providerMessageId = resData.messages?.[0]?.id || resData.message_id || null;
+                messageStatus = 'sent';
+              } catch (e) {
+                console.error("Error parsing Meta API response:", e);
+                messageStatus = 'sent'; // Even if parse fails, it was successful
+              }
               break; // Doğru token'ı bulduk ve gönderdik
             } else {
               const errData = await response.clone().json();
@@ -288,8 +306,8 @@ export async function sendMessage(phone: string, text: string) {
       }
 
       await ctx.db.executeSafe(sql`
-        INSERT INTO messages (tenant_id, phone_number, direction, content, channel)
-        VALUES (${ctx.tenantId}, ${phone}, 'out', ${text}, ${channel})
+        INSERT INTO messages (tenant_id, phone_number, direction, content, channel, status, provider_message_id)
+        VALUES (${ctx.tenantId}, ${phone}, 'out', ${text}, ${channel}, ${messageStatus}, ${providerMessageId})
       `);
 
       await ctx.db.executeSafe(sql`
@@ -297,7 +315,7 @@ export async function sendMessage(phone: string, text: string) {
         SET last_message_at = NOW(), 
             last_message_content = ${text},
             last_message_channel = 'whatsapp',
-            last_message_status = 'pending',
+            last_message_status = ${messageStatus},
             last_message_direction = 'out',
             message_count = message_count + 1,
             status = 'human'
