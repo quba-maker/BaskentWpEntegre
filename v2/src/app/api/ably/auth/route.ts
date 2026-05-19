@@ -30,20 +30,22 @@ export async function GET(request: Request) {
 
     const client = new Ably.Rest({ key: apiKey });
 
-    // Capability Definition:
-    // This client can ONLY subscribe and presence-subscribe to their specific tenant channel.
-    // They cannot publish (Publishing is server-side only) and cannot access other tenants.
+    // Capability Definition: STRICT EXACT MATCH
+    // The frontend listens to: private:tenant:<uuid>
     const capabilities = {
-      [`private:tenant:${tenantId}`]: ["subscribe", "presence"],
-      [`presence:tenant:${tenantId}`]: ["subscribe", "presence", "publish"]
+      [`private:tenant:${tenantId}`]: ["subscribe", "publish", "presence", "history"],
+      [`presence:tenant:${tenantId}`]: ["subscribe", "publish", "presence", "history"]
     };
+
+    console.log("[ABLY_TOKEN_CAPABILITY]", capabilities);
 
     // ClientId could be the actual User ID for presence tracking
     const clientId = `user-${Math.random().toString(36).substring(2, 9)}`;
 
     const tokenRequestData = await client.auth.createTokenRequest({
       clientId: clientId,
-      capability: capabilities as any
+      // CRITICAL: Ably requires capability to be a JSON string!
+      capability: JSON.stringify(capabilities)
     });
 
     return NextResponse.json(tokenRequestData);
