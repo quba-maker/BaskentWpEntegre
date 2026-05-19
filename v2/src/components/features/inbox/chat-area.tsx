@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Send, Paperclip, User, MessageCircle, ChevronLeft, ChevronDown, ArrowDown, Info, ShieldAlert, Sparkles, Zap, Check, CheckCheck, Clock } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -13,16 +13,16 @@ import { usePresence } from "@/hooks/use-presence";
 import { TypingIndicator } from "@/components/features/realtime/typing-indicator";
 import { useBufferedStream } from "@/hooks/use-buffered-stream";
 import { AblyStreamTransport } from "@/lib/ai/streaming/stream-transport";
-import { StreamBubble } from "@/components/features/realtime/stream-bubble";
+import { StreamBubble } from "@/components/components/../features/realtime/stream-bubble";
 
 import { useRealtimeTenant } from "@/components/providers/realtime-provider";
 import { useDiagnosticsStore } from "@/lib/realtime/diagnostics-store";
 
 // ==========================================
 // CONVERSATION VIEWPORT — Central chat surface
-// Architecture: Communication surface (not display component)
-// Authority: Messages, sending, bot toggle
-// Governance: Token-native, skeleton-first, q-glass
+// Architecture: Communication surface with High-Fidelity Custom Virtualization
+// Authority: Messages, viewport sliding windowing, dynamic heights resize observer
+// Governance: Token-native, skeleton-first, display-performance optimization
 // ==========================================
 
 // -- Skeleton --
@@ -122,6 +122,66 @@ function AiStatusBadge({ phoneNumber }: { phoneNumber: string }) {
   );
 }
 
+// -- Virtualization Helper Component --
+interface VirtualItemWrapperProps {
+  id: string;
+  children: React.ReactNode;
+  onMeasure: (id: string, height: number) => void;
+  cachedHeight: number;
+  shouldRender: boolean;
+}
+
+const VirtualItemWrapper = React.memo(function VirtualItemWrapper({
+  id,
+  children,
+  onMeasure,
+  cachedHeight,
+  shouldRender,
+}: VirtualItemWrapperProps) {
+  const elementRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!shouldRender || !elementRef.current) return;
+
+    const observer = new ResizeObserver((entries) => {
+      if (entries[0]) {
+        const height = entries[0].borderBoxSize?.[0]?.blockSize || entries[0].contentRect.height;
+        if (height > 0 && height !== cachedHeight) {
+          onMeasure(id, height);
+        }
+      }
+    });
+
+    observer.observe(elementRef.current);
+    return () => observer.disconnect();
+  }, [id, shouldRender, cachedHeight, onMeasure]);
+
+  if (!shouldRender) {
+    return (
+      <div 
+        style={{ 
+          height: `${cachedHeight}px`, 
+          width: "100%",
+          contentVisibility: "skip-import" as any,
+        }} 
+      />
+    );
+  }
+
+  return (
+    <div ref={elementRef} className="w-full">
+      {children}
+    </div>
+  );
+});
+
+interface FlatItem {
+  id: string;
+  type: "header" | "message";
+  dateLabel?: string;
+  message?: any;
+}
+
 export function ConversationViewport() {
   const { activePhone, activeContact, mobileView, setMobileView } = useInboxStore();
   const [inputText, setInputText] = useState("");
@@ -157,6 +217,32 @@ export function ConversationViewport() {
   const [unreadBadgeCount, setUnreadBadgeCount] = useState(0);
   const isScrolledUp = useRef(false);
 
+  // Virtualization Scroll & Viewport State
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(600);
+  const [measureTrigger, setMeasureTrigger] = useState(0);
+  const itemHeights = useRef<Record<string, number>>({});
+
+  useEffect(() => {
+    itemHeights.current = {};
+    setScrollTop(0);
+  }, [activePhone]);
+
+  useEffect(() => {
+    if (chatContainerRef.current) {
+      setViewportHeight(chatContainerRef.current.clientHeight);
+    }
+    
+    const handleResize = () => {
+      if (chatContainerRef.current) {
+        setViewportHeight(chatContainerRef.current.clientHeight);
+      }
+    };
+    
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const target = e.currentTarget;
     // Expanded threshold (150px) for a more forgiving bottom detection
@@ -170,11 +256,18 @@ export function ConversationViewport() {
       isScrolledUp.current = true;
       setShowScrollDown(true);
     }
+
+    const currentScrollTop = target.scrollTop;
+    const currentViewportHeight = target.clientHeight;
+
+    window.requestAnimationFrame(() => {
+      setScrollTop(currentScrollTop);
+      setViewportHeight(currentViewportHeight);
+    });
   };
 
   const scrollToBottom = (behavior: "auto" | "smooth" = "smooth") => {
     if (chatContainerRef.current) {
-      // requestAnimationFrame ensures the layout is painted before calculating scrollHeight
       requestAnimationFrame(() => {
         if (chatContainerRef.current) {
           chatContainerRef.current.scrollTo({
@@ -292,10 +385,6 @@ export function ConversationViewport() {
       if (!res.success) {
         throw new Error(res.error || "Bilinmeyen hata");
       }
-      // Note: Do not immediately invalidate here if relying on Realtime Event (Ably)
-      // to resolve the optimistic message. If the event arrives, it handles reconciliation.
-      // But we can silently invalidate in background just to be safe.
-      // queryClient.invalidateQueries({ queryKey: ["messages", activePhone] });
     } catch (err: any) {
       // Rollback on failure
       queryClient.setQueryData(["messages", activePhone], previousMessages);
@@ -346,6 +435,119 @@ export function ConversationViewport() {
     }
     setIsTogglingBot(false);
   };
+
+  // Flatten date-grouped messages into a dynamic virtualization feed
+  const flatItems = useMemo<FlatItem[]>(() => {
+    if (!messages || messages.length === 0) return [];
+    
+    const items: FlatItem[] = [];
+    const groups = messages.reduce((acc: Record<string, any[]>, msg: any) => {
+      let dateKey = msg.dateLabel;
+      if (msg.timeMs) {
+        const date = new Date(msg.timeMs);
+        const fmtDate = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: 'Europe/Istanbul', year: 'numeric', month: '2-digit', day: '2-digit' });
+        const now = new Date();
+        const msgDateStr = fmtDate(date);
+        const nowDateStr = fmtDate(now);
+        const diffMs = new Date(nowDateStr + "T00:00:00Z").getTime() - new Date(msgDateStr + "T00:00:00Z").getTime();
+        const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+        
+        if (diffDays === 0) {
+          dateKey = 'Bugün';
+        } else if (diffDays === 1) {
+          dateKey = 'Dün';
+        } else if (diffDays > 1 && diffDays < 7) {
+          let lbl = date.toLocaleDateString('tr-TR', { weekday: 'long', timeZone: 'Europe/Istanbul' });
+          dateKey = lbl.charAt(0).toUpperCase() + lbl.slice(1);
+        } else {
+          dateKey = date.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/Istanbul' });
+        }
+      }
+      if (!acc[dateKey]) acc[dateKey] = [];
+      acc[dateKey].push(msg);
+      return acc;
+    }, {} as Record<string, any[]>);
+
+    Object.entries(groups as Record<string, any[]>).forEach(([dateLabel, groupMsgs]) => {
+      items.push({
+        id: `header-${dateLabel}`,
+        type: "header",
+        dateLabel,
+      });
+      groupMsgs.forEach((msg: any) => {
+        items.push({
+          id: String(msg.id),
+          type: "message",
+          message: msg,
+        });
+      });
+    });
+    
+    return items;
+  }, [messages]);
+
+  // Calculate top offsets for zero-layout-shift spacer sizing
+  const { itemOffsets, totalHeight } = useMemo(() => {
+    const offsets: number[] = [];
+    let currentOffset = 0;
+    
+    flatItems.forEach((item) => {
+      offsets.push(currentOffset);
+      const height = itemHeights.current[item.id] || (item.type === 'header' ? 48 : 85);
+      currentOffset += height;
+    });
+    
+    return { itemOffsets: offsets, totalHeight: currentOffset };
+  }, [flatItems, measureTrigger]);
+
+  // Perform highly efficient O(N) slicing of the visible viewport window
+  const { startIndex, endIndex } = useMemo(() => {
+    let start = 0;
+    let end = flatItems.length - 1;
+    
+    for (let i = 0; i < flatItems.length; i++) {
+      const offset = itemOffsets[i];
+      const height = itemHeights.current[flatItems[i].id] || (flatItems[i].type === 'header' ? 48 : 85);
+      if (offset + height >= scrollTop) {
+        start = i;
+        break;
+      }
+    }
+    
+    for (let i = start; i < flatItems.length; i++) {
+      const offset = itemOffsets[i];
+      if (offset > scrollTop + viewportHeight) {
+        end = i;
+        break;
+      }
+    }
+    
+    // Proactive rendering buffer (25 items) to prevent any white-screen flashes when scrolling fast
+    const buffer = 25;
+    const startWithBuffer = Math.max(0, start - buffer);
+    const endWithBuffer = Math.min(flatItems.length - 1, end + buffer);
+    
+    return { startIndex: startWithBuffer, endIndex: endWithBuffer };
+  }, [itemOffsets, flatItems, scrollTop, viewportHeight]);
+
+  // Spacers for windowed virtualization
+  const { topSpacerHeight, bottomSpacerHeight } = useMemo(() => {
+    if (flatItems.length === 0) return { topSpacerHeight: 0, bottomSpacerHeight: 0 };
+    
+    const topSpacer = itemOffsets[startIndex] || 0;
+    const lastVisibleItemOffset = itemOffsets[endIndex] || 0;
+    const lastVisibleItemHeight = itemHeights.current[flatItems[endIndex]?.id] || (flatItems[endIndex]?.type === 'header' ? 48 : 85);
+    const bottomSpacer = Math.max(0, totalHeight - (lastVisibleItemOffset + lastVisibleItemHeight));
+    
+    return { topSpacerHeight: topSpacer, bottomSpacerHeight: bottomSpacer };
+  }, [startIndex, endIndex, itemOffsets, flatItems, totalHeight]);
+
+  const handleItemMeasure = useCallback((id: string, height: number) => {
+    if (itemHeights.current[id] !== height) {
+      itemHeights.current[id] = height;
+      setMeasureTrigger(prev => prev + 1);
+    }
+  }, []);
 
   // -- Empty state --
   if (!activePhone || !activeContact) {
@@ -457,123 +659,126 @@ export function ConversationViewport() {
         {isLoading ? (
           <ChatSkeleton />
         ) : (
-          Object.entries(
-            (messages || []).reduce((acc: any, msg: any) => {
-              let dateKey = msg.dateLabel;
-              if (msg.timeMs) {
-                const date = new Date(msg.timeMs);
-                const fmtDate = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: 'Europe/Istanbul', year: 'numeric', month: '2-digit', day: '2-digit' });
-                const now = new Date();
-                const msgDateStr = fmtDate(date);
-                const nowDateStr = fmtDate(now);
-                const diffMs = new Date(nowDateStr + "T00:00:00Z").getTime() - new Date(msgDateStr + "T00:00:00Z").getTime();
-                const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-                
-                if (diffDays === 0) {
-                  dateKey = 'Bugün';
-                } else if (diffDays === 1) {
-                  dateKey = 'Dün';
-                } else if (diffDays > 1 && diffDays < 7) {
-                  let lbl = date.toLocaleDateString('tr-TR', { weekday: 'long', timeZone: 'Europe/Istanbul' });
-                  dateKey = lbl.charAt(0).toUpperCase() + lbl.slice(1);
-                } else {
-                  dateKey = date.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/Istanbul' });
-                }
-              }
-              if (!acc[dateKey]) acc[dateKey] = [];
-              acc[dateKey].push(msg);
-              return acc;
-            }, {})
-          ).map(([dateLabel, groupMsgs]: [string, any]) => (
-            <div 
-              key={dateLabel} 
-              className="block mb-6 relative"
-              style={{ contentVisibility: "auto", containIntrinsicSize: "auto 500px" }}
-            >
-              <div className="sticky top-2 z-10 flex justify-center w-full my-4 pointer-events-none">
-                <span
-                  className="text-[11px] font-bold px-3 py-1 rounded-md shadow-sm pointer-events-auto"
-                  style={{ 
-                    background: "var(--q-bg-primary)", 
-                    color: "var(--q-text-secondary)", 
-                    border: "1px solid var(--q-border-default)" 
-                  }}
+          <>
+            {/* Top Virtual Spacer */}
+            {topSpacerHeight > 0 && (
+              <div 
+                style={{ 
+                  height: `${topSpacerHeight}px`, 
+                  width: "100%",
+                  pointerEvents: "none"
+                }} 
+              />
+            )}
+
+            {/* Sliced Visible Items */}
+            {flatItems.slice(startIndex, endIndex + 1).map((item) => {
+              const cachedHeight = itemHeights.current[item.id] || (item.type === 'header' ? 48 : 85);
+              
+              return (
+                <VirtualItemWrapper
+                  key={item.id}
+                  id={item.id}
+                  cachedHeight={cachedHeight}
+                  shouldRender={true}
+                  onMeasure={handleItemMeasure}
                 >
-                  {dateLabel}
-                </span>
-              </div>
-              <div className="flex flex-col gap-6">
-                {groupMsgs.map((msg: any) => (
-                  <div key={msg.id} className="flex flex-col q-bubble-in w-full">
-                    {msg.sender === "system" ? (
-                      <div className="flex w-full justify-center">
-                        <div
-                          className="rounded-full px-4 py-1.5 flex items-center gap-2 shadow-sm max-w-[90%] md:max-w-[70%] text-center q-glass-strong"
-                          style={{ border: "1px solid var(--q-orange-bg)", color: "var(--q-orange)" }}
-                        >
-                          <ShieldAlert className="w-4 h-4 flex-shrink-0" style={{ color: "var(--q-orange)" }} />
-                          <p className="text-[13px] font-semibold tracking-tight leading-tight">{msg.text}</p>
-                          <span className="text-[10px] font-bold opacity-60 ml-2 whitespace-nowrap flex items-center gap-1">
-                            <span>{msg.timeMs ? new Date(msg.timeMs).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) : msg.time}</span>
-                            <span className="ml-0.5">
-                              {msg.status === 'pending' && <Clock className="w-3 h-3" />}
-                              {(msg.status === 'sent' || !msg.status) && <Check className="w-3.5 h-3.5" />}
-                              {msg.status === 'delivered' && <CheckCheck className="w-3.5 h-3.5" />}
-                              {msg.status === 'read' && <CheckCheck className="w-3.5 h-3.5" style={{ color: "#53bdeb", opacity: 1 }} />}
+                  {item.type === "header" ? (
+                    <div className="sticky top-2 z-10 flex justify-center w-full my-4 pointer-events-none">
+                      <span
+                        className="text-[11px] font-bold px-3 py-1 rounded-md shadow-sm pointer-events-auto"
+                        style={{ 
+                          background: "var(--q-bg-primary)", 
+                          color: "var(--q-text-secondary)", 
+                          border: "1px solid var(--q-border-default)" 
+                        }}
+                      >
+                        {item.dateLabel}
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col q-bubble-in w-full pb-4">
+                      {item.message.sender === "system" ? (
+                        <div className="flex w-full justify-center">
+                          <div
+                            className="rounded-full px-4 py-1.5 flex items-center gap-2 shadow-sm max-w-[90%] md:max-w-[70%] text-center q-glass-strong"
+                            style={{ border: "1px solid var(--q-orange-bg)", color: "var(--q-orange)" }}
+                          >
+                            <ShieldAlert className="w-4 h-4 flex-shrink-0" style={{ color: "var(--q-orange)" }} />
+                            <p className="text-[13px] font-semibold tracking-tight leading-tight">{item.message.text}</p>
+                            <span className="text-[10px] font-bold opacity-60 ml-2 whitespace-nowrap flex items-center gap-1">
+                              <span>{item.message.timeMs ? new Date(item.message.timeMs).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) : item.message.time}</span>
+                              <span className="ml-0.5">
+                                {item.message.status === 'pending' && <Clock className="w-3 h-3" />}
+                                {(item.message.status === 'sent' || !item.message.status) && <Check className="w-3.5 h-3.5" />}
+                                {item.message.status === 'delivered' && <CheckCheck className="w-3.5 h-3.5" />}
+                                {item.message.status === 'read' && <CheckCheck className="w-3.5 h-3.5" style={{ color: "#53bdeb", opacity: 1 }} />}
+                              </span>
                             </span>
-                          </span>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className={`flex w-full ${msg.sender === "user" ? "justify-start" : "justify-end"} group`}>
-                        <div
-                          className={`relative max-w-[85%] md:max-w-[65%] px-3 py-2 md:px-4 md:py-2.5 shadow-sm transition-all duration-200 hover:shadow-md ${
-                            msg.sender === "user" 
-                              ? "rounded-2xl rounded-tl-sm" 
-                              : "rounded-2xl rounded-tr-sm"
-                          }`}
-                          style={
-                            msg.sender === "user"
-                              ? { background: "var(--q-chat-in)", color: "var(--q-text-primary)" }
-                              : { background: "var(--q-chat-out)", color: "var(--q-text-primary)" }
-                          }
-                        >
-                          {msg.sender !== "user" && (
-                            <div className="flex items-center gap-1 mb-1 opacity-70">
-                              {msg.sender === "bot" ? (
-                                <Sparkles className="w-3 h-3" style={{ color: "var(--q-purple)" }} />
-                              ) : (
-                                <User className="w-3 h-3" style={{ color: "var(--q-text-secondary)" }} />
-                              )}
-                              <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: msg.sender === "bot" ? "var(--q-purple)" : "var(--q-text-secondary)" }}>
-                                {msg.sender === "bot" ? "AI" : "SEN"}
-                              </span>
-                            </div>
-                          )}
-                          
-                          <p className="text-[15px] leading-[1.4] font-medium whitespace-pre-wrap pb-4">
-                            {msg.text}
-                          </p>
-                          
-                          <div className="absolute bottom-1 right-2 flex items-center gap-1 text-[10px] font-semibold tracking-wide" style={{ color: "var(--q-text-secondary)" }}>
-                            <span className="opacity-50">{msg.timeMs ? new Date(msg.timeMs).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) : msg.time}</span>
-                            {msg.sender !== "user" && (
-                              <span className="ml-0.5 opacity-80">
-                                {msg.status === 'pending' && <Clock className="w-3 h-3 opacity-50" />}
-                                {(msg.status === 'sent' || (!msg.status && msg.sender === 'agent')) && <Check className="w-3.5 h-3.5 opacity-70" />}
-                                {msg.status === 'delivered' && <CheckCheck className="w-3.5 h-3.5 opacity-70" />}
-                                {msg.status === 'read' && <CheckCheck className="w-3.5 h-3.5" style={{ color: "#53bdeb", opacity: 1 }} />}
-                              </span>
-                            )}
                           </div>
                         </div>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))
+                      ) : (
+                        <div className={`flex w-full ${item.message.sender === "user" ? "justify-start" : "justify-end"} group`}>
+                          <div
+                            className={`relative max-w-[85%] md:max-w-[65%] px-3 py-2 md:px-4 md:py-2.5 shadow-sm transition-all duration-200 hover:shadow-md ${
+                              item.message.sender === "user" 
+                                ? "rounded-2xl rounded-tl-sm" 
+                                : "rounded-2xl rounded-tr-sm"
+                            }`}
+                            style={
+                              item.message.sender === "user"
+                                ? { background: "var(--q-chat-in)", color: "var(--q-text-primary)" }
+                                : { background: "var(--q-chat-out)", color: "var(--q-text-primary)" }
+                            }
+                          >
+                            {item.message.sender !== "user" && (
+                              <div className="flex items-center gap-1 mb-1 opacity-70">
+                                {item.message.sender === "bot" ? (
+                                  <Sparkles className="w-3 h-3" style={{ color: "var(--q-purple)" }} />
+                                ) : (
+                                  <User className="w-3 h-3" style={{ color: "var(--q-text-secondary)" }} />
+                                )}
+                                <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: item.message.sender === "bot" ? "var(--q-purple)" : "var(--q-text-secondary)" }}>
+                                  {item.message.sender === "bot" ? "AI" : "SEN"}
+                                </span>
+                              </div>
+                            )}
+                            
+                            <p className="text-[15px] leading-[1.4] font-medium whitespace-pre-wrap pb-4">
+                              {item.message.text}
+                            </p>
+                            
+                            <div className="absolute bottom-1 right-2 flex items-center gap-1 text-[10px] font-semibold tracking-wide" style={{ color: "var(--q-text-secondary)" }}>
+                              <span className="opacity-50">{item.message.timeMs ? new Date(item.message.timeMs).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) : item.message.time}</span>
+                              {item.message.sender !== "user" && (
+                                <span className="ml-0.5 opacity-80">
+                                  {item.message.status === 'pending' && <Clock className="w-3 h-3 opacity-50" />}
+                                  {(item.message.status === 'sent' || (!item.message.status && item.message.sender === 'agent')) && <Check className="w-3.5 h-3.5 opacity-70" />}
+                                  {item.message.status === 'delivered' && <CheckCheck className="w-3.5 h-3.5 opacity-70" />}
+                                  {item.message.status === 'read' && <CheckCheck className="w-3.5 h-3.5" style={{ color: "#53bdeb", opacity: 1 }} />}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </VirtualItemWrapper>
+              );
+            })}
+
+            {/* Bottom Virtual Spacer */}
+            {bottomSpacerHeight > 0 && (
+              <div 
+                style={{ 
+                  height: `${bottomSpacerHeight}px`, 
+                  width: "100%",
+                  pointerEvents: "none"
+                }} 
+              />
+            )}
+          </>
         )}
           
           {/* AI Stream Bubble */}

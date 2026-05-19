@@ -60,9 +60,20 @@ export function withApiGuard(
       let body: any = null;
 
       rawBody = await req.clone().text().catch(() => "");
+      
+      if (!rawBody) {
+        log.warn("Empty webhook payload received");
+        return new NextResponse("BAD_REQUEST", { status: 400 });
+      }
+
       try {
-        if (rawBody) body = JSON.parse(rawBody);
-      } catch (e) {}
+        body = JSON.parse(rawBody);
+      } catch (e: any) {
+        log.error("Malformed JSON webhook payload", e instanceof Error ? e : new Error(String(e)), {
+          rawBodySnippet: rawBody.substring(0, 200)
+        });
+        return new NextResponse("BAD_REQUEST", { status: 400 });
+      }
 
       // ─────────────────────────────────────────
       // STEP 2: Resolve tenant from webhook payload
@@ -121,12 +132,20 @@ export function withApiGuard(
             .update(rawBody)
             .digest("hex");
 
-          if (signature !== expectedSig) {
+          // Timing-safe comparison to prevent timing attacks
+          const sigBuffer = Buffer.from(signature);
+          const expectedBuffer = Buffer.from(expectedSig);
+          
+          let isMatch = false;
+          if (sigBuffer.length === expectedBuffer.length) {
+            isMatch = crypto.timingSafeEqual(sigBuffer, expectedBuffer);
+          }
+
+          if (!isMatch) {
             log.warn("Signature mismatch", {
               tenantSlug: tenantRuntime?.tenantSlug || 'unknown',
               secretSource,
               secretLength: APP_SECRET.length,
-              secretPrefix: APP_SECRET.substring(0, 4) + "...",
               receivedPrefix: signature.substring(0, 20),
               expectedPrefix: expectedSig.substring(0, 20),
               bodyLength: rawBody.length
