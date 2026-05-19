@@ -1,48 +1,44 @@
 "use client";
 
 import React, { useState } from "react";
-import { Activity, Brain, Flag, Wrench, Route, FlaskConical } from "lucide-react";
+import { Activity, Wrench, Route, Flag, Terminal } from "lucide-react";
 import { LiveActivityFeed } from "./LiveActivityFeed";
-import { PromptVersionManager } from "./PromptVersionManager";
-import { FeatureFlagsPanel } from "./FeatureFlagsPanel";
 import { ToolActivityMonitor } from "./ToolActivityMonitor";
 import { DecisionTraceViewer } from "./DecisionTraceViewer";
-import { AiSandboxLab } from "./AiSandboxLab";
-
-/**
- * 🏗️ AI Kontrol Merkezi — Phase 7
- * Kurumsal AI Orkestrasyon Paneli
- */
+import { FeatureFlagsPanel } from "./FeatureFlagsPanel";
 
 const TABS = [
-  { id: 'activity', label: 'Canlı Aktivite', icon: Activity },
-  { id: 'prompt', label: 'Prompt Yönetimi', icon: Brain },
-  { id: 'flags', label: 'Özellik Anahtarları', icon: Flag },
-  { id: 'tools', label: 'Araç İzleme', icon: Wrench },
-  { id: 'trace', label: 'Karar İzleme', icon: Route },
-  { id: 'sandbox', label: 'AI Test Lab', icon: FlaskConical },
+  { id: 'logs', label: 'Birleştirilmiş Loglar', icon: Activity },
+  { id: 'trace', label: 'Karar & Aksiyon İzleme', icon: Route },
+  { id: 'tools', label: 'Araç İzleme (Tools)', icon: Wrench },
+  { id: 'flags', label: 'Sistem Durumu (Health)', icon: Flag },
 ] as const;
 
 type TabId = typeof TABS[number]['id'];
 
-export function AiControlTower() {
-  const [activeTab, setActiveTab] = useState<TabId>('activity');
+export function AiDeveloperConsole() {
+  const [activeTab, setActiveTab] = useState<TabId>('logs');
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight" style={{ color: 'var(--q-text-primary)' }}>
-            AI Kontrol Merkezi
-          </h1>
-          <p className="text-sm mt-1" style={{ color: 'var(--q-text-secondary)' }}>
-            AI Orkestrasyon & Yönetim Paneli
-          </p>
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-[--q-blue-bg] flex items-center justify-center">
+            <Terminal className="w-5 h-5 text-[--q-blue]" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight" style={{ color: 'var(--q-text-primary)' }}>
+              AI Geliştirici Konsolu
+            </h1>
+            <p className="text-sm mt-1" style={{ color: 'var(--q-text-secondary)' }}>
+              Unified Logs, Runtime Traces ve Sistem Sağlığı
+            </p>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20">
           <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          <span className="text-xs font-medium" style={{ color: 'var(--q-text-secondary)' }}>Sistem Aktif</span>
+          <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">Sistem Stabil</span>
         </div>
       </div>
 
@@ -74,12 +70,10 @@ export function AiControlTower() {
 
       {/* Active Panel */}
       <div className="min-h-[500px]">
-        {activeTab === 'activity' && <LiveActivityFeed />}
-        {activeTab === 'prompt' && <PromptVersionManager />}
-        {activeTab === 'flags' && <FeatureFlagsPanel />}
-        {activeTab === 'tools' && <ToolActivityMonitor />}
+        {activeTab === 'logs' && <LiveActivityFeed />}
         {activeTab === 'trace' && <DecisionTraceViewer />}
-        {activeTab === 'sandbox' && <AiSandboxLab />}
+        {activeTab === 'tools' && <ToolActivityMonitor />}
+        {activeTab === 'flags' && <FeatureFlagsPanel />}
       </div>
     </div>
   );

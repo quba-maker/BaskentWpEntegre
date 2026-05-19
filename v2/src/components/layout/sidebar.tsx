@@ -75,10 +75,7 @@ export async function Sidebar() {
               <NavLink href={`/${session?.tenantSlug || ''}/analytics`} icon={<BarChart3 className="w-[18px] h-[18px]" />} label="AI Performans & Maliyet" />
             )}
             {(session?.role === "admin" || session?.role === "owner") && (
-              <NavLink href={`/${session?.tenantSlug || ''}/bot/debug`} icon={<Terminal className="w-[18px] h-[18px]" />} label="AI Debug Paneli" />
-            )}
-            {(session?.role === "admin" || session?.role === "owner") && (
-              <NavLink href={`/${session?.tenantSlug || ''}/ai-control`} icon={<Radar className="w-[18px] h-[18px]" />} label="AI Kontrol Merkezi" />
+              <NavLink href={`/${session?.tenantSlug || ''}/ai-developer`} icon={<Terminal className="w-[18px] h-[18px]" />} label="AI Geliştirici Konsolu" />
             )}
             {(session?.role === "admin" || session?.role === "owner") && (
               <NavLink href={`/${session?.tenantSlug || ''}/integrations`} icon={<Link2 className="w-[18px] h-[18px]" />} label="Entegrasyonlar" />
