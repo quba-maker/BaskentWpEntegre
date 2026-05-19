@@ -9,10 +9,10 @@ import { RealtimeProvider } from "@/components/providers/realtime-provider";
 // Houses all context providers that require "use client"
 // ==========================================
 
-export function DashboardProviders({ children }: { children: React.ReactNode }) {
+export function DashboardProviders({ children, tenantId }: { children: React.ReactNode, tenantId?: string }) {
   return (
     <ConfirmProvider>
-      <RealtimeProvider>
+      <RealtimeProvider tenantId={tenantId}>
         {children}
       </RealtimeProvider>
     </ConfirmProvider>

@@ -1,22 +1,17 @@
 "use client";
 
 import { useRealtimeReconciliation } from "@/hooks/use-realtime-reconciliation";
-import { useParams } from "next/navigation";
-
-export function RealtimeProvider({ children }: { children: React.ReactNode }) {
-  const params = useParams();
-  const tenantSlug = params?.tenant_slug as string;
-
+export function RealtimeProvider({ children, tenantId }: { children: React.ReactNode, tenantId?: string }) {
   // Only subscribe if we are within a tenant context
-  if (tenantSlug) {
+  if (tenantId) {
     // We use a separate component to isolate the hook
-    return <RealtimeSubscriber tenantSlug={tenantSlug}>{children}</RealtimeSubscriber>;
+    return <RealtimeSubscriber tenantId={tenantId}>{children}</RealtimeSubscriber>;
   }
 
   return <>{children}</>;
 }
 
-function RealtimeSubscriber({ tenantSlug, children }: { tenantSlug: string, children: React.ReactNode }) {
-  useRealtimeReconciliation(tenantSlug);
+function RealtimeSubscriber({ tenantId, children }: { tenantId: string, children: React.ReactNode }) {
+  useRealtimeReconciliation(tenantId);
   return <>{children}</>;
 }

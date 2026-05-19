@@ -29,7 +29,7 @@ export default async function DashboardLayout({
 
       {/* Main Content */}
       <main className="flex-1 overflow-auto h-full flex flex-col relative pb-[env(safe-area-inset-bottom)] md:pb-0">
-        <DashboardProviders>
+        <DashboardProviders tenantId={session?.tenantId}>
           {children}
         </DashboardProviders>
       </main>
