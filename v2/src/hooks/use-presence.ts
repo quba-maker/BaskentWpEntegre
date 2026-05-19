@@ -45,15 +45,15 @@ export function usePresence(tenantId: string, channelName: string) {
     channel.presence.subscribe(["enter", "present", "leave", "update"], onPresence);
 
     // Initial fetch of present members
-    channel.presence.get((err, presenceSet) => {
-      if (!err && presenceSet) {
+    channel.presence.get().then((presenceSet) => {
+      if (presenceSet) {
         setMembers(presenceSet.map(msg => ({
           clientId: msg.clientId,
           data: msg.data,
           action: msg.action as any
         })));
       }
-    });
+    }).catch((err) => console.error("Ably presence get error:", err));
 
     return () => {
       channel.presence.unsubscribe(["enter", "present", "leave", "update"], onPresence);

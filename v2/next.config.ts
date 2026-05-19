@@ -21,10 +21,6 @@ const nextConfig: NextConfig = {
   },
   // Serverless function timeout (Vercel Pro: 60s, Hobby: 10s)
   serverExternalPackages: ['@neondatabase/serverless'],
-  eslint: {
-    // Vercel and CI should not fail the production build on legacy lint errors.
-    ignoreDuringBuilds: true,
-  },
   typescript: {
     // Vercel and CI should not fail the production build on legacy type errors.
     ignoreBuildErrors: true,

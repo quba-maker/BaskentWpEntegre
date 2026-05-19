@@ -4,7 +4,7 @@ import { ProjectionEvent, ChatMessageCreatedEvent, ChatMessageStatusUpdatedEvent
 
 // Structured logging helper
 const logReconciliation = (
-  action: "ignored_duplicate" | "optimistic_reconciled" | "stale_event_dropped" | "cache_updated",
+  action: "ignored_duplicate" | "optimistic_reconciled" | "stale_event_dropped" | "cache_updated" | "cache_miss" | "status_ignored",
   details: any
 ) => {
   console.log(`[Reconciliation:${action}]`, details);
@@ -61,10 +61,10 @@ export function useRealtimeReconciliation(tenantId: string) {
 
     // Update conversation list preview
     updateConversationPreview(payload.conversationId, (conv: any) => ({
-      last_message_body: payload.body,
+      last_message_body: payload.content,
       last_message_at: payload.createdAt,
-      last_message_direction: payload.direction,
-      unread_count: payload.direction === "in" ? (conv.unread_count || 0) + 1 : conv.unread_count
+      last_message_direction: payload.sender,
+      unread_count: payload.sender === "user" ? (conv.unread_count || 0) + 1 : conv.unread_count
     }));
   };
 
@@ -77,7 +77,7 @@ export function useRealtimeReconciliation(tenantId: string) {
       if (!oldData) return oldData;
 
       const existingMsgIndex = oldData.findIndex(
-        (m) => m.id === payload.id || (m.providerMessageId && m.providerMessageId === payload.providerMessageId)
+        (m) => m.id === payload.id
       );
 
       if (existingMsgIndex === -1) {
