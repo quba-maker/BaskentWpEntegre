@@ -26,6 +26,8 @@ interface PromptGovernancePanelProps {
   onPricesChange: (val: string) => void;
   onRulesChange: (val: string) => void;
   onSaveKnowledge: () => void;
+  knowledgeSaving?: boolean;
+  knowledgeSaved?: boolean;
 }
 
 // Prompt'u parçalara ayırma ve birleştirme mantığı
@@ -79,6 +81,8 @@ export function PromptGovernancePanel({
   onPricesChange,
   onRulesChange,
   onSaveKnowledge,
+  knowledgeSaving,
+  knowledgeSaved,
 }: PromptGovernancePanelProps) {
   const confirm = useConfirm();
   const activeChannel = channels.find(c => c.id === activeTab)!;
@@ -284,11 +288,18 @@ export function PromptGovernancePanel({
           </div>
           <button
             onClick={onSaveKnowledge}
-            className="px-4 py-2 text-[12px] font-bold rounded-lg transition-all flex items-center gap-2 shadow-sm text-white hover:opacity-80"
-            style={{ backgroundColor: "var(--q-blue)" }}
+            disabled={knowledgeSaving}
+            className="px-4 py-2 text-[12px] font-bold rounded-lg transition-all flex items-center gap-2 shadow-sm text-white disabled:opacity-60"
+            style={{ backgroundColor: knowledgeSaved ? "var(--q-green)" : "var(--q-blue)" }}
           >
-            <Save className="w-3.5 h-3.5" />
-            Bilgileri Kaydet
+            {knowledgeSaving ? (
+              <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+            ) : knowledgeSaved ? (
+              <Check className="w-3.5 h-3.5" />
+            ) : (
+              <Save className="w-3.5 h-3.5" />
+            )}
+            {knowledgeSaved ? "Kaydedildi" : "Bilgileri Kaydet"}
           </button>
         </div>
         <div className="p-5 flex flex-col gap-5">

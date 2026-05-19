@@ -62,6 +62,8 @@ export default function BotManagementPage() {
   const [prompts, setPrompts] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
+  const [knowledgeSaving, setKnowledgeSaving] = useState(false);
+  const [knowledgeSaved, setKnowledgeSaved] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [statsPeriod, setStatsPeriod] = useState("7d");
   const [modelUsage, setModelUsage] = useState<any>(null);
@@ -198,8 +200,12 @@ export default function BotManagementPage() {
   };
 
   const saveKnowledgeBase = async () => {
+    setKnowledgeSaving(true);
     await saveBotSetting('bot_knowledge_prices', knowledgePrices);
     await saveBotSetting('bot_knowledge_rules', knowledgeRules);
+    setKnowledgeSaving(false);
+    setKnowledgeSaved(true);
+    setTimeout(() => setKnowledgeSaved(false), 2000);
   };
 
   const handleBotConfigChange = async (key: string, value: string) => {
@@ -267,6 +273,8 @@ export default function BotManagementPage() {
             onPricesChange={setKnowledgePrices}
             onRulesChange={setKnowledgeRules}
             onSaveKnowledge={saveKnowledgeBase}
+            knowledgeSaving={knowledgeSaving}
+            knowledgeSaved={knowledgeSaved}
           />
         </div>
         <div className="xl:col-span-1 sticky top-6">
