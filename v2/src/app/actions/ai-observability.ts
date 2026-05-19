@@ -39,7 +39,7 @@ export async function getConversationTraces(conversationId: string) {
           error_message,
           EXTRACT(EPOCH FROM created_at) * 1000 as created_at_ms
         FROM ai_audit_logs
-        WHERE conversation_id = ${convUuid} AND tenant_id = ${ctx.tenantId}
+        WHERE conversation_id::text = ${convUuid}::text AND tenant_id = ${ctx.tenantId}
         ORDER BY created_at ASC
         LIMIT 100
       `);
@@ -97,10 +97,10 @@ export async function getCustomerAiBrain(phone: string) {
           mem.buying_intent, mem.sentiment, mem.summary_text,
           (
             SELECT count(*) FROM ai_audit_logs aal 
-            WHERE aal.conversation_id = c.id
+            WHERE aal.conversation_id::text = c.id::text
           ) as total_tool_calls
         FROM conversations c
-        LEFT JOIN conversation_memory mem ON c.id = mem.conversation_id
+        LEFT JOIN conversation_memory mem ON c.id::text = mem.conversation_id::text
         WHERE c.phone_number = ${phone} AND c.tenant_id = ${ctx.tenantId}
         LIMIT 1
       `);
