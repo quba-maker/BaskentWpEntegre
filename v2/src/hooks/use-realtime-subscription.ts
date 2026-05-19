@@ -10,13 +10,26 @@ export const getSharedAblyClient = (tenantId: string) => {
   if (sharedAblyClient) return sharedAblyClient;
   if (typeof window === "undefined") return null;
 
+  console.log("[ABLY_ENV_CHECK]", {
+    ABLY_PUBLIC: process.env.NEXT_PUBLIC_ABLY_KEY ? process.env.NEXT_PUBLIC_ABLY_KEY.slice(0, 10) + "..." : "undefined",
+    reason: "Frontend uses authUrl (/api/ably/auth) so PUBLIC_KEY is usually NOT required."
+  });
+
+  console.log("[ABLY_CLIENT_CREATED]", {
+    authMode: "authUrl (Token based)",
+    authUrl: `/api/ably/auth?tenantId=${tenantId}`
+  });
+
   sharedAblyClient = new Ably.Realtime({
     authUrl: `/api/ably/auth?tenantId=${tenantId}`,
   });
 
-  // Track global socket reconnects
-  sharedAblyClient.connection.on("connected", () => {
-    useDiagnosticsStore.getState().incrementMetric("realtime.socket.reconnects");
+  // Track detailed connection state
+  sharedAblyClient.connection.on((stateChange) => {
+    console.log("[ABLY_CONNECTION_STATE]", stateChange.current, stateChange.reason || "");
+    if (stateChange.current === "connected") {
+      useDiagnosticsStore.getState().incrementMetric("realtime.socket.reconnects");
+    }
   });
 
   return sharedAblyClient;
@@ -44,6 +57,17 @@ export function useRealtimeSubscription(
     // Track Memory Leak Safety (registering subscription)
     useDiagnosticsStore.getState().registerSubscription(channelName);
     
+    // Manual Debug Injection
+    if (typeof window !== "undefined") {
+      (window as any).testAbly = channel;
+      console.log(`[ABLY_DEBUG] window.testAbly is now available for channel: ${channelName}`);
+    }
+
+    console.log(`[ABLY_CHANNEL_ATTACHING] Channel: "${channelName}"`);
+    channel.attach((err) => {
+      console.log("[ABLY_CHANNEL_ATTACHED]", { channelName, err: err?.message || null });
+    });
+
     console.log("[ABLY_SUBSCRIBE_ATTACHED]", {
       channel: channelName,
       tenantId
