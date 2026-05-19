@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import useSWRInfinite from "swr/infinite";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { Search, MessageCircle, Check, CheckCheck, Clock } from "lucide-react";
 import { getConversations } from "@/app/actions/inbox";
 import { useInboxStore } from "@/store/inbox-store";
@@ -102,20 +102,19 @@ export function ContactRail() {
     return () => clearTimeout(timer);
   }, [searchInput]);
 
-  const getKey = (pageIndex: number, previousPageData: any) => {
-    if (previousPageData && previousPageData.length < 50) return null;
-    return ["conversations", pageIndex + 1, debouncedSearch, stageFilter];
-  };
+  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading } = useInfiniteQuery({
+    queryKey: ["conversations", debouncedSearch, stageFilter],
+    queryFn: ({ pageParam = 1 }) => getConversations(pageParam, debouncedSearch, stageFilter),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage, allPages) => {
+      return lastPage.length === 50 ? allPages.length + 1 : undefined;
+    },
+    staleTime: Infinity,
+  });
 
-  const { data, size, setSize, isLoading, isValidating } = useSWRInfinite(
-    getKey,
-    ([_, page, search, stage]: any) => getConversations(page, search, stage),
-    { refreshInterval: 3000 }
-  );
-
-  const contacts = data ? data.flat() : [];
-  const isLoadingMore = isLoading || (size > 0 && data && typeof data[size - 1] === "undefined");
-  const isReachingEnd = data && data[data.length - 1]?.length < 50;
+  const contacts = data ? data.pages.flat() : [];
+  const isLoadingMore = isFetchingNextPage || isLoading;
+  const isReachingEnd = !hasNextPage;
 
   // Reactively sync updated CRM data/messages to the active contact
   useEffect(() => {
@@ -301,7 +300,7 @@ export function ContactRail() {
         {/* Load More */}
         {!isLoading && !isReachingEnd && contacts.length > 0 && (
           <button
-            onClick={() => setSize(size + 1)}
+            onClick={() => fetchNextPage()}
             disabled={isLoadingMore}
             className="w-full py-3 mt-2 text-sm font-semibold rounded-xl transition-all disabled:opacity-50 q-press"
             style={{ color: "var(--q-blue)", background: "rgba(255,255,255,0.5)", border: "1px solid var(--q-border-default)" }}
