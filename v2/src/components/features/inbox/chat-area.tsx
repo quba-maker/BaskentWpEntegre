@@ -2,7 +2,8 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Send, Paperclip, User, MessageCircle, ChevronLeft, ChevronDown, Info, ShieldAlert, Sparkles, Zap, Check, CheckCheck, Clock } from "lucide-react";
+import { Send, Paperclip, User, MessageCircle, ChevronLeft, ChevronDown, ArrowDown, Info, ShieldAlert, Sparkles, Zap, Check, CheckCheck, Clock } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 import { getMessages, sendMessage, toggleBotStatus } from "@/app/actions/inbox";
 import { useInboxStore } from "@/store/inbox-store";
 import { AiRuntimeTimeline } from "@/components/features/ai-observability/AiRuntimeTimeline";
@@ -152,12 +153,20 @@ export function ConversationViewport() {
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const [showScrollDown, setShowScrollDown] = useState(false);
+  const [unreadBadgeCount, setUnreadBadgeCount] = useState(0);
+  const isScrolledUp = useRef(false);
+  const prevMessagesLength = useRef(0);
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const target = e.currentTarget;
     // Show scroll down button if we are not at the bottom
     const isAtBottom = target.scrollHeight - target.scrollTop - target.clientHeight < 50;
+    isScrolledUp.current = !isAtBottom;
     setShowScrollDown(!isAtBottom);
+    
+    if (isAtBottom && unreadBadgeCount > 0) {
+      setUnreadBadgeCount(0);
+    }
   };
 
   const scrollToBottom = (behavior: "auto" | "smooth" = "smooth") => {
@@ -167,6 +176,9 @@ export function ConversationViewport() {
         behavior,
       });
     }
+    setUnreadBadgeCount(0);
+    isScrolledUp.current = false;
+    setShowScrollDown(false);
   };
 
   const { data: messages, isLoading } = useQuery({
@@ -180,10 +192,32 @@ export function ConversationViewport() {
   // Auto-scroll on messages load or change
   useEffect(() => {
     if (messages && messages.length > 0) {
-      // Small delay to ensure DOM is updated
-      setTimeout(() => scrollToBottom("auto"), 50);
+      const isFirstLoad = prevMessagesLength.current === 0;
+      
+      if (!isScrolledUp.current || isFirstLoad) {
+        setTimeout(() => scrollToBottom(isFirstLoad ? "auto" : "smooth"), 50);
+      } else if (messages.length > prevMessagesLength.current) {
+        const newMessagesCount = messages.length - prevMessagesLength.current;
+        setUnreadBadgeCount(prev => prev + newMessagesCount);
+      }
+      prevMessagesLength.current = messages.length;
     }
-  }, [messages, activePhone]);
+  }, [messages]);
+
+  useEffect(() => {
+    prevMessagesLength.current = 0;
+    isScrolledUp.current = false;
+    setShowScrollDown(false);
+    setUnreadBadgeCount(0);
+  }, [activePhone]);
+
+  // Keep scroll at bottom when AI is streaming
+  useEffect(() => {
+    if (aiStream.isStreaming && !isScrolledUp.current) {
+      // Use auto to prevent scroll jitter while streaming
+      scrollToBottom("auto"); 
+    }
+  }, [aiStream.content, aiStream.isStreaming]);
 
   const handleSend = async () => {
     if (!inputText.trim() || !activePhone || isSending) return;
@@ -191,6 +225,9 @@ export function ConversationViewport() {
     setInputText("");
     setIsSending(true);
     setSendError("");
+    
+    // Force scroll to bottom upon user action
+    scrollToBottom("smooth");
 
     const optimisticId = `temp-${Date.now()}`;
     const optimisticMsg = {
@@ -533,17 +570,36 @@ export function ConversationViewport() {
           />
         </div>
 
-        {/* Scroll to Bottom Button */}
-        {showScrollDown && (
-          <button
-            onClick={() => scrollToBottom("smooth")}
-            className="absolute bottom-4 right-4 w-11 h-11 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 z-20 q-press hover:scale-105"
-            style={{ background: "var(--q-bg-primary)", border: "1px solid var(--q-border-default)", color: "var(--q-text-primary)" }}
-            aria-label="En alta kaydır"
-          >
-            <ChevronDown className="w-6 h-6" />
-          </button>
-        )}
+        {/* Scroll to Bottom Button & New Message Badge */}
+        <AnimatePresence>
+          {showScrollDown && (
+            <motion.div
+              initial={{ opacity: 0, y: 10, scale: 0.9 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 10, scale: 0.9 }}
+              className="absolute bottom-4 right-4 z-20 flex flex-col items-center gap-2"
+            >
+              {unreadBadgeCount > 0 ? (
+                <button
+                  onClick={() => scrollToBottom("smooth")}
+                  className="px-4 py-2.5 rounded-full text-[13px] font-bold shadow-[0_4px_12px_rgba(0,122,255,0.3)] bg-blue-500 text-white hover:bg-blue-600 transition-all cursor-pointer flex items-center gap-1.5 q-press"
+                >
+                  <ArrowDown className="w-4 h-4" />
+                  {unreadBadgeCount} Yeni Mesaj
+                </button>
+              ) : (
+                <button
+                  onClick={() => scrollToBottom("smooth")}
+                  className="w-11 h-11 rounded-full flex items-center justify-center shadow-[0_4px_12px_rgba(0,0,0,0.08)] transition-all duration-300 q-press hover:scale-105"
+                  style={{ background: "var(--q-bg-primary)", border: "1px solid var(--q-border-default)", color: "var(--q-text-primary)" }}
+                  aria-label="En alta kaydır"
+                >
+                  <ChevronDown className="w-6 h-6" />
+                </button>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* ── Inline error ── */}
