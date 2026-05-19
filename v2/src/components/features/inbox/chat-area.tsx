@@ -396,7 +396,27 @@ export function ConversationViewport() {
         ) : (
           Object.entries(
             (messages || []).reduce((acc: any, msg: any) => {
-              const dateKey = msg.dateLabel || new Date(msg.timeMs).toLocaleDateString("tr-TR");
+              let dateKey = msg.dateLabel;
+              if (msg.timeMs) {
+                const date = new Date(msg.timeMs);
+                const fmtDate = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: 'Europe/Istanbul', year: 'numeric', month: '2-digit', day: '2-digit' });
+                const now = new Date();
+                const msgDateStr = fmtDate(date);
+                const nowDateStr = fmtDate(now);
+                const diffMs = new Date(nowDateStr + "T00:00:00Z").getTime() - new Date(msgDateStr + "T00:00:00Z").getTime();
+                const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+                
+                if (diffDays === 0) {
+                  dateKey = 'Bugün';
+                } else if (diffDays === 1) {
+                  dateKey = 'Dün';
+                } else if (diffDays > 1 && diffDays < 7) {
+                  let lbl = date.toLocaleDateString('tr-TR', { weekday: 'long', timeZone: 'Europe/Istanbul' });
+                  dateKey = lbl.charAt(0).toUpperCase() + lbl.slice(1);
+                } else {
+                  dateKey = date.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/Istanbul' });
+                }
+              }
               if (!acc[dateKey]) acc[dateKey] = [];
               acc[dateKey].push(msg);
               return acc;

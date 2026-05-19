@@ -50,22 +50,57 @@ export function useRealtimeReconciliation(tenantId: string) {
         
         // Merge the canonical data over the optimistic data
         const newData = [...oldData];
-        newData[existingMsgIndex] = { ...existing, ...payload };
+        newData[existingMsgIndex] = { 
+          ...existing, 
+          id: payload.id,
+          sender: payload.sender,
+          text: payload.content,
+          timeMs: new Date(payload.createdAt).getTime(),
+          status: payload.status || 'delivered'
+        };
         return newData;
       }
 
       // 2. Append new message (from another client or external source)
       logReconciliation("cache_updated", { eventId, id: payload.id, type: "append" });
-      return [...oldData, payload];
+      const mappedPayload = {
+        id: payload.id,
+        sender: payload.sender,
+        text: payload.content,
+        timeMs: new Date(payload.createdAt).getTime(),
+        status: payload.status || 'delivered'
+      };
+      return [...oldData, mappedPayload];
     });
 
     // Update conversation list preview
-    updateConversationPreview(payload.conversationId, (conv: any) => ({
-      last_message_body: payload.content,
-      last_message_at: payload.createdAt,
-      last_message_direction: payload.sender,
-      unread_count: payload.sender === "user" ? (conv.unread_count || 0) + 1 : conv.unread_count
-    }));
+    updateConversationPreview(payload.conversationId, (conv: any) => {
+      const date = new Date(payload.createdAt);
+      const fmtDate = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: 'Europe/Istanbul', year: 'numeric', month: '2-digit', day: '2-digit' });
+      const now = new Date();
+      const diffMs = new Date(fmtDate(now) + "T00:00:00Z").getTime() - new Date(fmtDate(date) + "T00:00:00Z").getTime();
+      const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+      
+      let formattedTime = '';
+      if (diffDays === 0) {
+        formattedTime = date.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul' });
+      } else if (diffDays === 1) {
+        formattedTime = 'Dün';
+      } else if (diffDays > 1 && diffDays < 7) {
+        formattedTime = date.toLocaleDateString('tr-TR', { weekday: 'long', timeZone: 'Europe/Istanbul' });
+        formattedTime = formattedTime.charAt(0).toUpperCase() + formattedTime.slice(1);
+      } else {
+        formattedTime = date.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Europe/Istanbul' });
+      }
+
+      return {
+        last_message: payload.content,
+        lastMessageDirection: payload.sender === 'user' ? 'in' : 'out',
+        lastMessageStatus: payload.status || 'delivered',
+        formattedTime,
+        unread: payload.sender === "user" ? (conv.unread || 0) + 1 : conv.unread
+      };
+    });
   };
 
   // Internal handler for status updates
@@ -105,7 +140,7 @@ export function useRealtimeReconciliation(tenantId: string) {
 
     // Update conversation list preview
     updateConversationPreview(payload.conversationId, {
-      last_message_status: payload.status
+      lastMessageStatus: payload.status
     });
   };
 
