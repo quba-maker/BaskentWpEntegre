@@ -2,18 +2,38 @@ import { v4 as uuidv4 } from "uuid";
 import { ChatMessageCreatedEvent, ChatMessageStatusUpdatedEvent } from "./contracts";
 
 /**
+ * Internal message payload from DB/worker.
+ * This replaces all `any` usage in the realtime pipeline.
+ */
+export interface InternalMessagePayload {
+  id: string;
+  conversation_id?: string;
+  phone_number?: string;
+  content: string;
+  direction: "in" | "out" | "system";
+  status?: string;
+  model_used?: string;
+  created_at: string; // ISO date string
+}
+
+interface TraceContext {
+  traceId: string;
+  spanId: string;
+  parentSpanId?: string;
+}
+
+/**
  * Event Translator Layer
  * Converts internal domain entities (e.g. DB Row) into Public Realtime Projections.
  */
-
 export class RealtimeTranslator {
   /**
    * Translates an internal database message into a projection event.
    */
   static toMessageCreated(
     tenantId: string, 
-    internalMessage: any, 
-    traceContext: { traceId: string; spanId: string; parentSpanId?: string }
+    internalMessage: InternalMessagePayload, 
+    traceContext: TraceContext
   ): ChatMessageCreatedEvent {
     
     // Convert logic (e.g. sender identification)
@@ -38,10 +58,10 @@ export class RealtimeTranslator {
       payload: {
         id: String(internalMessage.id),
         // Frontend uses phone_number as activePhone for ["messages", activePhone] query key!
-        conversationId: String(internalMessage.phone_number || internalMessage.conversation_id),
+        conversationId: String(internalMessage.phone_number || internalMessage.conversation_id || ""),
         content: internalMessage.content,
         sender: senderType,
-        status: internalMessage.status,
+        status: (internalMessage.status as "sent" | "delivered" | "read" | "failed") || undefined,
         createdAt: new Date(internalMessage.created_at).toISOString()
       }
     };
@@ -53,7 +73,7 @@ export class RealtimeTranslator {
     conversationId: string, 
     status: "sent" | "delivered" | "read" | "failed",
     entityVersion: number,
-    traceContext: { traceId: string; spanId: string; parentSpanId?: string }
+    traceContext: TraceContext
   ): ChatMessageStatusUpdatedEvent {
     
     return {

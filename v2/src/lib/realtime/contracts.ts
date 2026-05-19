@@ -2,6 +2,8 @@ import { z } from "zod";
 
 // --- Base Realtime Event Schema ---
 // Defines the strict envelope for all messages passing through Ably
+// SECURITY: No .passthrough() — unknown top-level fields are dropped during parse.
+// `payload` is declared here so it survives the parse step.
 export const BaseRealtimeEventSchema = z.object({
   eventId: z.string().uuid(), // Unique ID for idempotency checks
   
@@ -25,7 +27,10 @@ export const BaseRealtimeEventSchema = z.object({
     "ai.stream.delta",
     "ai.stream.completed"
   ]),
-}); // No .passthrough() — unknown fields are dropped during parse (event poisoning prevention)
+  
+  // Payload envelope — base accepts any record, specific schemas refine it
+  payload: z.record(z.string(), z.any()),
+});
 
 // --- Specific Projection Payloads ---
 // Frontend ONLY sees these, never internal DB structures.

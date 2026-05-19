@@ -46,20 +46,20 @@ export async function getConversations(page: number = 1, search: string = "", st
         LEFT JOIN LATERAL (
           SELECT content, status, direction
           FROM messages 
-          WHERE phone_number = c.phone_number AND (messages.tenant_id = ${ctx.tenantId} OR messages.tenant_id IS NULL)
+          WHERE phone_number = c.phone_number AND messages.tenant_id = ${ctx.tenantId}
           ORDER BY created_at DESC 
           LIMIT 1
         ) m ON c.last_message_content IS NULL
         LEFT JOIN LATERAL (
           SELECT form_name, raw_data, created_at 
           FROM leads 
-          WHERE (leads.tenant_id = ${ctx.tenantId} OR leads.tenant_id IS NULL)
+          WHERE leads.tenant_id = ${ctx.tenantId}
             AND leads.phone_number LIKE '%' || RIGHT(COALESCE(c.real_phone, c.phone_number), 10) || '%'
           ORDER BY created_at DESC 
           LIMIT 1
         ) l ON true
         LEFT JOIN conversation_memory mem ON c.id = mem.conversation_id
-        WHERE (c.tenant_id = ${ctx.tenantId} OR c.tenant_id IS NULL)
+        WHERE c.tenant_id = ${ctx.tenantId}
           AND (${searchFilter === null} OR c.patient_name ILIKE ${searchFilter} OR c.phone_number ILIKE ${searchFilter})
           AND (${stageFilter === null} OR c.lead_stage = ${stageFilter})
         ORDER BY c.last_message_at DESC NULLS LAST
@@ -135,7 +135,7 @@ export async function getMessages(phone: string) {
             SELECT id, content as text, direction, status, model_used, EXTRACT(EPOCH FROM created_at) * 1000 as created_at_ms
             FROM messages
             WHERE phone_number LIKE ${phoneLike} 
-              AND (tenant_id = ${ctx.tenantId} OR tenant_id IS NULL)
+              AND (tenant_id = ${ctx.tenantId})
             ORDER BY created_at DESC
             LIMIT 100
           ) sub
@@ -222,7 +222,7 @@ export async function sendMessage(phone: string, text: string) {
       // Hangi kanaldan geldiğini bul
       const convRows = await ctx.db.executeSafe(sql`
         SELECT channel FROM conversations 
-        WHERE phone_number = ${phone} AND (tenant_id = ${ctx.tenantId} OR tenant_id IS NULL)
+        WHERE phone_number = ${phone} AND (tenant_id = ${ctx.tenantId})
         LIMIT 1
       `);
       const channel = convRows[0]?.channel || 'whatsapp';
@@ -335,7 +335,7 @@ export async function sendMessage(phone: string, text: string) {
             last_message_direction = 'out',
             message_count = message_count + 1,
             status = 'human'
-        WHERE phone_number = ${phone} AND (tenant_id = ${ctx.tenantId} OR tenant_id IS NULL)
+        WHERE phone_number = ${phone} AND (tenant_id = ${ctx.tenantId})
       `);
 
       // Publish Realtime Event
@@ -343,7 +343,7 @@ export async function sendMessage(phone: string, text: string) {
         try {
           const { RealtimePublisher } = await import("@/lib/realtime/publisher");
           const conversationRows = await ctx.db.executeSafe(sql`
-            SELECT id FROM conversations WHERE phone_number = ${phone} AND (tenant_id = ${ctx.tenantId} OR tenant_id IS NULL) LIMIT 1
+            SELECT id FROM conversations WHERE phone_number = ${phone} AND (tenant_id = ${ctx.tenantId}) LIMIT 1
           `);
           const conversationId = Array.isArray(conversationRows) ? conversationRows[0]?.id : (conversationRows as any)?.rows?.[0]?.id;
           
@@ -385,20 +385,20 @@ export async function updateCrmData(phone: string, stage: string, department: st
           await ctx.db.executeSafe(sql`
             UPDATE conversations
             SET lead_stage = ${stage}, department = ${department}, country = ${country}
-            WHERE phone_number = ${phone} AND (tenant_id = ${ctx.tenantId} OR tenant_id IS NULL)
+            WHERE phone_number = ${phone} AND (tenant_id = ${ctx.tenantId})
           `);
         } catch (e) {
           await ctx.db.executeSafe(sql`
             UPDATE conversations
             SET lead_stage = ${stage}, department = ${department}
-            WHERE phone_number = ${phone} AND (tenant_id = ${ctx.tenantId} OR tenant_id IS NULL)
+            WHERE phone_number = ${phone} AND (tenant_id = ${ctx.tenantId})
           `);
         }
       } else {
         await ctx.db.executeSafe(sql`
           UPDATE conversations
           SET lead_stage = ${stage}, department = ${department}
-          WHERE phone_number = ${phone} AND (tenant_id = ${ctx.tenantId} OR tenant_id IS NULL)
+          WHERE phone_number = ${phone} AND (tenant_id = ${ctx.tenantId})
         `);
       }
       
@@ -407,7 +407,7 @@ export async function updateCrmData(phone: string, stage: string, department: st
           UPDATE leads
           SET stage = ${stage}
           WHERE (phone_number = ${phone} OR phone_number LIKE ${'%' + phone.substring(phone.length - 10) + '%'})
-            AND (tenant_id = ${ctx.tenantId} OR tenant_id IS NULL)
+            AND (tenant_id = ${ctx.tenantId})
         `);
       } catch (e) {
         // Ignore if leads table structure differs
@@ -435,7 +435,7 @@ export async function addTag(phone: string, tag: string) {
     { actionName: 'addTag' },
     async (ctx) => {
       const rows = await ctx.db.executeSafe(sql`
-        SELECT tags FROM conversations WHERE phone_number = ${phone} AND (tenant_id = ${ctx.tenantId} OR tenant_id IS NULL)
+        SELECT tags FROM conversations WHERE phone_number = ${phone} AND (tenant_id = ${ctx.tenantId})
       `);
       let tags: string[] = [];
       if (rows.length > 0 && rows[0].tags) {
@@ -452,7 +452,7 @@ export async function addTag(phone: string, tag: string) {
         await ctx.db.executeSafe(sql`
           UPDATE conversations 
           SET tags = ${JSON.stringify(tags)}
-          WHERE phone_number = ${phone} AND (tenant_id = ${ctx.tenantId} OR tenant_id IS NULL)
+          WHERE phone_number = ${phone} AND (tenant_id = ${ctx.tenantId})
         `);
       }
       return { success: true, tags };
@@ -467,7 +467,7 @@ export async function removeTag(phone: string, tagToRemove: string) {
     { actionName: 'removeTag' },
     async (ctx) => {
       const rows = await ctx.db.executeSafe(sql`
-        SELECT tags FROM conversations WHERE phone_number = ${phone} AND (tenant_id = ${ctx.tenantId} OR tenant_id IS NULL)
+        SELECT tags FROM conversations WHERE phone_number = ${phone} AND (tenant_id = ${ctx.tenantId})
       `);
       let tags: string[] = [];
       if (rows.length > 0 && rows[0].tags) {
@@ -483,7 +483,7 @@ export async function removeTag(phone: string, tagToRemove: string) {
       await ctx.db.executeSafe(sql`
         UPDATE conversations 
         SET tags = ${JSON.stringify(newTags)}
-        WHERE phone_number = ${phone} AND (tenant_id = ${ctx.tenantId} OR tenant_id IS NULL)
+        WHERE phone_number = ${phone} AND (tenant_id = ${ctx.tenantId})
       `);
       
       return { success: true, tags: newTags };
@@ -501,7 +501,7 @@ export async function toggleBotStatus(phone: string, isBotActive: boolean) {
       await ctx.db.executeSafe(sql`
         UPDATE conversations
         SET status = ${newStatus}
-        WHERE phone_number = ${phone} AND (tenant_id = ${ctx.tenantId} OR tenant_id IS NULL)
+        WHERE phone_number = ${phone} AND (tenant_id = ${ctx.tenantId})
       `);
 
       logAudit({

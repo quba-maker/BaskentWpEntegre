@@ -124,7 +124,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 3. Upsert into DB using phone1
-    const existing = await sqlDb`SELECT id FROM leads WHERE phone_number LIKE '%' || RIGHT(${phone1}, 10) || '%' AND (tenant_id = ${tenantId} OR tenant_id IS NULL) LIMIT 1`;
+    const existing = await sqlDb`SELECT id FROM leads WHERE phone_number LIKE '%' || RIGHT(${phone1}, 10) || '%' AND tenant_id = ${tenantId} LIMIT 1`;
         
     if (existing.length === 0) {
       // Parse Date

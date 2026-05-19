@@ -1,4 +1,4 @@
-import { RealtimeTranslator } from "./translator";
+import { RealtimeTranslator, InternalMessagePayload } from "./translator";
 import { RealtimeBus } from "./bus";
 import { v4 as uuidv4 } from "uuid";
 
@@ -16,7 +16,7 @@ export class RealtimePublisher {
    */
   static async publishMessageCreated(
     tenantId: string,
-    internalMessage: any,
+    internalMessage: InternalMessagePayload,
     traceContext?: { traceId: string; spanId: string; parentSpanId?: string }
   ) {
     // Generate trace context if not provided (fallback)
