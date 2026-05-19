@@ -43,7 +43,7 @@ export async function GET(request: Request) {
 
     const tokenRequestData = await client.auth.createTokenRequest({
       clientId: clientId,
-      capability: capabilities
+      capability: capabilities as any
     });
 
     return NextResponse.json(tokenRequestData);
