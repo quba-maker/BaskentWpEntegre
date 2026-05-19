@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import * as Ably from "ably";
 import { getSharedAblyClient } from "./use-realtime-subscription";
 import { usePresenceStore, AgentType } from "@/lib/realtime/presence-store";
+import { isTabVisible } from "@/lib/realtime/visibility";
 
 export interface PresenceMember {
   clientId: string;
@@ -103,9 +104,10 @@ export function usePresence(tenantId: string, channelName: string) {
 
     const now = Date.now();
 
-    // 2. Throttled Network Publish
+    // 2. Throttled Network Publish (background tabs throttled to 5s)
+    const throttleMs = isTabVisible() ? 1000 : 5000;
     if (isTyping) {
-      if (now - lastPublishRef.current > 1000) {
+      if (now - lastPublishRef.current > throttleMs) {
         lastPublishRef.current = now;
         await channel.presence.update({ typing: true, agentType }).catch(console.error);
       }

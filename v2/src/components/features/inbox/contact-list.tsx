@@ -114,6 +114,8 @@ export function ContactRail() {
     // Realtime operates now, fallback polling if disconnected
     refetchInterval: isRealtimeDown ? 10000 : false,
     staleTime: Infinity,
+    // GC: evict stale conversation pages after 10 minutes
+    gcTime: 10 * 60 * 1000,
   });
 
   const contacts = data ? data.pages.flat() : [];

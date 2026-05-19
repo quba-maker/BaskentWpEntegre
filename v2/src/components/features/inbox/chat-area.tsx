@@ -16,6 +16,7 @@ import { AblyStreamTransport } from "@/lib/ai/streaming/stream-transport";
 import { StreamBubble } from "@/components/features/realtime/stream-bubble";
 
 import { useRealtimeTenant } from "@/components/providers/realtime-provider";
+import { useDiagnosticsStore } from "@/lib/realtime/diagnostics-store";
 
 // ==========================================
 // CONVERSATION VIEWPORT — Central chat surface
@@ -196,6 +197,8 @@ export function ConversationViewport() {
     // Realtime operates now, fallback polling if disconnected
     refetchInterval: isRealtimeDown ? 5000 : false,
     staleTime: Infinity,
+    // GC: evict cache for conversations not visited in 5 minutes
+    gcTime: 5 * 60 * 1000,
   });
 
   // Auto-scroll on messages load or change
@@ -223,7 +226,7 @@ export function ConversationViewport() {
   // Handle stream initialization smoothly without per-token jitter
   const prevStreamState = useRef(aiStream.state);
   useEffect(() => {
-    if (aiStream.state === 'generating' && prevStreamState.current !== 'generating') {
+    if (aiStream.state === 'streaming' && prevStreamState.current !== 'streaming') {
       if (!isScrolledUp.current) scrollToBottom("smooth");
     }
     prevStreamState.current = aiStream.state;

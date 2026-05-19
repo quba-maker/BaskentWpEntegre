@@ -1,11 +1,34 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import * as Ably from "ably";
 import { BaseRealtimeEventSchema, ProjectionEvent } from "@/lib/realtime/contracts";
 import { useDiagnosticsStore } from "@/lib/realtime/diagnostics-store";
 import { ChaosEngine } from "@/lib/realtime/chaos-engine";
+import { CrossTabSync } from "@/lib/realtime/cross-tab-sync";
+import { isTabVisible, onVisibilityChange } from "@/lib/realtime/visibility";
 
+// ─── Singleton Management ───
 let sharedAblyClient: Ably.Realtime | null = null;
 let currentTenantId: string | null = null;
+
+// ─── Global Event ID Dedup Set (LRU-style, max 500 entries) ───
+const processedEventIds = new Set<string>();
+const DEDUP_MAX_SIZE = 500;
+
+function trackEventId(eventId: string): boolean {
+  if (processedEventIds.has(eventId)) return true; // Already processed
+  processedEventIds.add(eventId);
+  // LRU eviction: if set exceeds max, remove oldest
+  if (processedEventIds.size > DEDUP_MAX_SIZE) {
+    const first = processedEventIds.values().next().value;
+    if (first) processedEventIds.delete(first);
+  }
+  return false;
+}
+
+// Initialize cross-tab sync once
+if (typeof window !== "undefined") {
+  CrossTabSync.init();
+}
 
 export const getSharedAblyClient = (tenantId: string) => {
   if (sharedAblyClient && currentTenantId === tenantId) {
@@ -14,6 +37,7 @@ export const getSharedAblyClient = (tenantId: string) => {
 
   if (typeof window === "undefined") return null;
 
+  // Tenant switch: dispose old client completely
   if (sharedAblyClient && currentTenantId !== tenantId) {
     console.log("[ABLY_CLIENT_DISPOSED] Tenant changed. Disposing old client.");
     sharedAblyClient.close();
@@ -22,23 +46,24 @@ export const getSharedAblyClient = (tenantId: string) => {
 
   currentTenantId = tenantId;
 
-  console.log("[ABLY_ENV_CHECK]", {
-    ABLY_PUBLIC: process.env.NEXT_PUBLIC_ABLY_KEY ? process.env.NEXT_PUBLIC_ABLY_KEY.slice(0, 10) + "..." : "undefined",
-    reason: "Frontend uses authUrl (/api/ably/auth) so PUBLIC_KEY is usually NOT required."
-  });
-
   console.log("[ABLY_CLIENT_CREATED]", {
     authMode: "authUrl (Token based)",
-    authUrl: `/api/ably/auth?tenantId=${tenantId}`
+    authUrl: `/api/ably/auth?tenantId=${tenantId}`,
+    tabId: CrossTabSync.tabId,
+    isLeader: CrossTabSync.isLeaderTab(),
   });
 
   sharedAblyClient = new Ably.Realtime({
     authUrl: `/api/ably/auth?tenantId=${tenantId}`,
+    // Ably SDK handles exponential backoff internally for reconnects
+    // disconnectedRetryTimeout: starts at 1s, doubles up to 30s
+    // suspendedRetryTimeout: starts at 30s
   });
 
   // Track detailed connection state
   sharedAblyClient.connection.on((stateChange) => {
     console.log(`[ABLY_CONNECTION_STATE] ${stateChange.current}`, stateChange.reason || "");
+    
     if (["disconnected", "suspended", "failed", "closed"].includes(stateChange.current)) {
       useDiagnosticsStore.getState().setRealtimeDown(true);
     } else if (stateChange.current === "connected") {
@@ -58,13 +83,39 @@ export const getSharedAblyClient = (tenantId: string) => {
 /**
  * Client Subscription Engine
  * 
- * Securely connects to the Ably private channel using the Vercel Auth Endpoint.
- * Validates incoming events via Zod before passing them to the UI/State.
+ * Production-hardened realtime subscription with:
+ * - Cross-tab leader election (only leader subscribes to Ably)
+ * - Global event deduplication via eventId
+ * - Visibility-aware render throttling
+ * - Automatic channel cleanup on unmount/tenant switch
  */
 export function useRealtimeSubscription(
   tenantId: string,
   onEvent: (event: ProjectionEvent) => void
 ) {
+  // Stabilize the callback reference to prevent re-subscriptions
+  const onEventRef = useRef(onEvent);
+  onEventRef.current = onEvent;
+
+  // Visibility-aware: queue events when tab is hidden, flush on visible
+  const pendingEventsRef = useRef<ProjectionEvent[]>([]);
+  const isVisibleRef = useRef(isTabVisible());
+
+  useEffect(() => {
+    const cleanup = onVisibilityChange((state) => {
+      isVisibleRef.current = state === "visible";
+      // Flush pending events when tab becomes visible
+      if (state === "visible" && pendingEventsRef.current.length > 0) {
+        console.log(`[ABLY_VISIBILITY_FLUSH] Flushing ${pendingEventsRef.current.length} queued events`);
+        for (const evt of pendingEventsRef.current) {
+          onEventRef.current(evt);
+        }
+        pendingEventsRef.current = [];
+      }
+    });
+    return cleanup;
+  }, []);
+
   useEffect(() => {
     if (!tenantId) return;
 
@@ -74,62 +125,90 @@ export function useRealtimeSubscription(
     const channelName = `private:tenant:${tenantId}`;
     const channel = client.channels.get(channelName);
 
-    // Track Memory Leak Safety (registering subscription)
+    // Track Memory Leak Safety
     useDiagnosticsStore.getState().registerSubscription(channelName);
     
-    // Manual Debug Injection
+    // Debug injection (dev only)
     if (typeof window !== "undefined") {
       (window as any).testAbly = channel;
-      console.log(`[ABLY_DEBUG] window.testAbly is now available for channel: ${channelName}`);
     }
 
     console.log(`[ABLY_CHANNEL_ATTACHING] Channel: "${channelName}"`);
-    channel.attach((err) => {
-      console.log("[ABLY_CHANNEL_ATTACHED]", { channelName, err: err?.message || null });
+    channel.attach().then(() => {
+      console.log("[ABLY_CHANNEL_ATTACHED]", { channelName });
+    }).catch((err: any) => {
+      console.error("[ABLY_CHANNEL_ATTACH_ERROR]", { channelName, err: err?.message });
     });
 
-    console.log("[ABLY_SUBSCRIBE_ATTACHED]", {
-      channel: channelName,
-      tenantId
-    });
-    console.log(`[ABLY_SUBSCRIBE_CHANNEL] Frontend subscribing to channel: "${channelName}"`);
-    console.log(`[CLIENT_SUBSCRIBED] Successfully attached to Ably channel: ${channelName}`);
-
-    channel.subscribe(async (message) => {
-      console.log("[ABLY_EVENT_RECEIVED]", message);
+    // Event processing pipeline
+    const processEvent = async (eventData: any, source: "ably" | "cross-tab") => {
       try {
-        const validatedEvent = BaseRealtimeEventSchema.parse(message.data);
+        const validatedEvent = BaseRealtimeEventSchema.parse(eventData);
         
-        // Metric: Event Latency (Ably publish to client receive)
+        // ─── Global Dedup Gate ───
+        const isDuplicate = trackEventId(validatedEvent.eventId);
+        if (isDuplicate) {
+          console.log("[ABLY_EVENT_DEDUPED]", { eventId: validatedEvent.eventId, source });
+          return;
+        }
+
+        // Metric: Event Latency
         const latency = Date.now() - validatedEvent.timestamp;
         useDiagnosticsStore.getState().setMetric("realtime.event.latency", latency);
 
-        // Chaos Interception Layer
+        // Chaos Interception (dev only)
         const eventsToProcess = await ChaosEngine.processIncomingEvents(validatedEvent);
         
-        // Pass to Reconciliation Engine
         for (const evt of eventsToProcess) {
           const startTime = performance.now();
-          onEvent(evt as ProjectionEvent);
-          const reconcileMs = performance.now() - startTime;
           
+          // Visibility throttle: queue if tab is hidden
+          if (!isVisibleRef.current) {
+            pendingEventsRef.current.push(evt as ProjectionEvent);
+            // Cap pending queue to prevent memory leak
+            if (pendingEventsRef.current.length > 50) {
+              pendingEventsRef.current = pendingEventsRef.current.slice(-25);
+            }
+          } else {
+            onEventRef.current(evt as ProjectionEvent);
+          }
+          
+          const reconcileMs = performance.now() - startTime;
           useDiagnosticsStore.getState().setMetric("realtime.projection.reconcile_ms", Math.round(reconcileMs));
+        }
+
+        // Leader broadcasts to follower tabs
+        if (source === "ably") {
+          CrossTabSync.broadcastEvent(eventData);
         }
 
       } catch (error) {
         console.error(`[Realtime Sync Error] Invalid event payload received on ${channelName}:`, error);
       }
+    };
+
+    // Ably subscription
+    const ablyHandler = async (message: Ably.Message) => {
+      console.log("[ABLY_EVENT_RECEIVED]", { id: message.id, name: message.name });
+      await processEvent(message.data, "ably");
+    };
+    channel.subscribe(ablyHandler);
+
+    // Cross-tab listener (for follower tabs)
+    const crossTabCleanup = CrossTabSync.onEvent((event) => {
+      if (event._type === "cache_invalidation") return; // Handled elsewhere
+      processEvent(event, "cross-tab");
     });
 
     return () => {
-      // Memory Safety: Clean up subscriptions and listeners
+      // Memory Safety: deterministic cleanup
       useDiagnosticsStore.getState().unregisterSubscription(channelName);
       
       console.log(`[ABLY_CHANNEL_DISPOSED] Unsubscribing and detaching channel: ${channelName}`);
-      channel.unsubscribe();
+      channel.unsubscribe(ablyHandler);
       channel.detach();
-      // We don't close the shared client here to allow other channels to persist,
-      // but if active subscriptions hit 0, we could potentially disconnect.
+      crossTabCleanup();
+      pendingEventsRef.current = [];
     };
-  }, [tenantId, onEvent]);
+  }, [tenantId]); // Removed onEvent from deps — using ref instead
 }
