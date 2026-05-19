@@ -185,7 +185,6 @@ export async function getMessages(phone: string) {
       }
     }
   ).then(res => {
-    console.log("getMessages Action Result for phone:", phone, "Success:", res.success, "Data Length:", res.data?.length);
     return res.data || [];
   });
 }
