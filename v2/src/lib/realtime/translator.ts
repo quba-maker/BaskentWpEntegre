@@ -20,6 +20,8 @@ export class RealtimeTranslator {
     let senderType: "agent" | "bot" | "user" = "user";
     if (internalMessage.direction === "out") {
       senderType = internalMessage.model_used ? "bot" : "agent";
+    } else if (internalMessage.direction === "system") {
+      senderType = "bot";
     }
 
     return {

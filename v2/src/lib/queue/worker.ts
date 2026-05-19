@@ -94,20 +94,26 @@ export class QueueWorkerEngine {
     const db = withTenantDB(tenantId);
     
     try {
-      // Update message status
-      await db.executeSafe(sql`
+      // Update message status and get the internal ID
+      const msgResult = await db.executeSafe(sql`
         UPDATE messages 
         SET status = ${deliveryStatus}
         WHERE provider_message_id = ${providerMessageId} AND tenant_id = ${tenantId}
+        RETURNING id
       `);
+      const internalMessageId = msgResult[0]?.id;
+
+      let conversationId: string | undefined;
 
       // Update conversation last_message_status to reflect real-time UI
       if (phoneNumber) {
-        await db.executeSafe(sql`
+        const convResult = await db.executeSafe(sql`
           UPDATE conversations 
           SET last_message_status = ${deliveryStatus}
           WHERE phone_number = ${phoneNumber} AND tenant_id = ${tenantId}
+          RETURNING id
         `);
+        conversationId = convResult[0]?.id;
       }
       
       this.log.info(`[STATUS_UPDATED] Message ${providerMessageId} marked as ${deliveryStatus}`, { traceId });
@@ -119,6 +125,24 @@ export class QueueWorkerEngine {
         category: 'pipeline', 
         payload: { providerMessageId, status: deliveryStatus, phoneNumber } 
       });
+
+      // [NEW] Realtime Event: Message Status Updated
+      if (internalMessageId && conversationId) {
+        try {
+          const { RealtimePublisher } = await import('@/lib/realtime/publisher');
+          await RealtimePublisher.publishMessageStatusUpdated(
+            tenantId,
+            internalMessageId,
+            conversationId,
+            deliveryStatus as any,
+            1, // entityVersion placeholder
+            { traceId, spanId: providerMessageId }
+          );
+          this.log.info(`[REALTIME_PUBLISH] chat.message.status_updated emitted`, { traceId, messageId: internalMessageId });
+        } catch (realtimeErr) {
+          this.log.error(`[REALTIME_PUBLISH_FAILED]`, realtimeErr instanceof Error ? realtimeErr : new Error(String(realtimeErr)), { traceId });
+        }
+      }
       
     } catch (e: any) {
       this.log.error(`[STATUS_UPDATE_FAILED] Failed to update delivery receipt`, e, { traceId });
@@ -192,7 +216,7 @@ export class QueueWorkerEngine {
     // 3. Lock Conversation & Save Incoming Message (Idempotency)
     await convService.acquireLock(phoneNumber);
     
-    const { isDuplicate, conversationId } = await msgService.saveMessageIdempotent({
+    const { isDuplicate, conversationId, messageId } = await msgService.saveMessageIdempotent({
       phoneNumber,
       direction: 'in',
       content,
@@ -204,6 +228,28 @@ export class QueueWorkerEngine {
       this.log.warn(`[DUPLICATE_DROPPED] Message already processed`, { providerMessageId, traceId });
       AIEventEmitter.emit({ tenantId, customerId, type: 'duplicate_message_dropped', category: 'pipeline', severity: 'warning', payload: { providerMessageId } });
       return;
+    }
+
+    // [NEW] Realtime Event: Message Created (Incoming)
+    if (messageId && conversationId) {
+      try {
+        const { RealtimePublisher } = await import('@/lib/realtime/publisher');
+        await RealtimePublisher.publishMessageCreated(
+          tenantId,
+          {
+            id: messageId,
+            conversation_id: conversationId,
+            content,
+            direction: 'in',
+            status: 'delivered', // Incoming messages don't have sent status, they are just there
+            created_at: new Date().toISOString()
+          },
+          { traceId, spanId: providerMessageId }
+        );
+        this.log.info(`[REALTIME_PUBLISH] chat.message.created emitted for incoming`, { traceId, messageId });
+      } catch (realtimeErr) {
+        this.log.error(`[REALTIME_PUBLISH_FAILED]`, realtimeErr instanceof Error ? realtimeErr : new Error(String(realtimeErr)), { traceId });
+      }
     }
 
     // Link Conversation to Customer Profile
@@ -234,7 +280,7 @@ export class QueueWorkerEngine {
         const phoneId = brain.context.config?.whatsappPhoneNumberId || process.env.PHONE_NUMBER_ID || '';
         if (phoneId && accessToken) {
           const outRes = await msgService.sendWhatsAppMessage(phoneId, accessToken, phoneNumber, offMsg);
-          await msgService.saveMessageIdempotent({ 
+          const offMsgResult = await msgService.saveMessageIdempotent({ 
             phoneNumber, 
             direction: 'out', 
             content: offMsg, 
@@ -242,6 +288,26 @@ export class QueueWorkerEngine {
             providerMessageId: outRes.providerMessageId,
             status: 'sent'
           });
+
+          if (offMsgResult.messageId) {
+            try {
+              const { RealtimePublisher } = await import('@/lib/realtime/publisher');
+              await RealtimePublisher.publishMessageCreated(
+                tenantId,
+                {
+                  id: offMsgResult.messageId,
+                  conversation_id: offMsgResult.conversationId || conversationId,
+                  content: offMsg,
+                  direction: 'out',
+                  status: 'sent', 
+                  created_at: new Date().toISOString()
+                },
+                { traceId, spanId: outRes.providerMessageId || traceId }
+              );
+            } catch (realtimeErr) {
+              this.log.error(`[REALTIME_PUBLISH_FAILED]`, realtimeErr instanceof Error ? realtimeErr : new Error(String(realtimeErr)), { traceId });
+            }
+          }
         }
         this.log.info(`[WORKING_HOURS] Outside hours, sent off-message`, { traceId });
         AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'working_hours_blocked', category: 'pipeline', payload: { currentTime } });
@@ -355,10 +421,32 @@ export class QueueWorkerEngine {
       AIEventEmitter.logHealth(tenantId, 'policy_blocked', { reason: validation.reason, traceId });
 
       // Save a system alert message to alert the agent
-      await db.executeSafe(sql`
+      const sysMsgRes = await db.executeSafe(sql`
         INSERT INTO messages (tenant_id, phone_number, direction, content, channel, provider_message_id)
         VALUES (${tenantId}, ${phoneNumber}, 'system', ${'Güvenlik Politikası Devrede: ' + validation.reason}, 'whatsapp', 'system_alert')
+        RETURNING id
       `);
+      
+      const sysMsgId = sysMsgRes[0]?.id;
+      if (sysMsgId && conversationId) {
+        try {
+          const { RealtimePublisher } = await import('@/lib/realtime/publisher');
+          await RealtimePublisher.publishMessageCreated(
+            tenantId,
+            {
+              id: sysMsgId,
+              conversation_id: conversationId,
+              content: 'Güvenlik Politikası Devrede: ' + validation.reason,
+              direction: 'system', // Handled as bot/system in translator
+              status: 'delivered', 
+              created_at: new Date().toISOString()
+            },
+            { traceId, spanId: 'system_alert' }
+          );
+        } catch (realtimeErr) {
+          this.log.error(`[REALTIME_PUBLISH_FAILED]`, realtimeErr instanceof Error ? realtimeErr : new Error(String(realtimeErr)), { traceId });
+        }
+      }
 
       // Escalate to human automatically
       await db.executeSafe(sql`
@@ -395,7 +483,7 @@ export class QueueWorkerEngine {
     }
 
     // 9. Save Outgoing Message (with model tracking)
-    await msgService.saveMessageIdempotent({
+    const outMsgResult = await msgService.saveMessageIdempotent({
       phoneNumber,
       direction: 'out',
       content: finalResponseText,
@@ -406,6 +494,30 @@ export class QueueWorkerEngine {
       providerMessageId: outProviderMessageId,
       status: messageStatus
     });
+
+    // [NEW] Realtime Event: Message Created (Outgoing)
+    if (outMsgResult.messageId) {
+      try {
+        const outConvId = outMsgResult.conversationId || conversationId;
+        const { RealtimePublisher } = await import('@/lib/realtime/publisher');
+        await RealtimePublisher.publishMessageCreated(
+          tenantId,
+          {
+            id: outMsgResult.messageId,
+            conversation_id: outConvId,
+            content: finalResponseText,
+            direction: 'out',
+            model_used: aiResponse.modelUsed || llmModel,
+            status: messageStatus, 
+            created_at: new Date().toISOString()
+          },
+          { traceId, spanId: outProviderMessageId || traceId }
+        );
+        this.log.info(`[REALTIME_PUBLISH] chat.message.created emitted for outgoing`, { traceId, messageId: outMsgResult.messageId });
+      } catch (realtimeErr) {
+        this.log.error(`[REALTIME_PUBLISH_FAILED]`, realtimeErr instanceof Error ? realtimeErr : new Error(String(realtimeErr)), { traceId });
+      }
+    }
 
     // 10. CRM Intelligence Extraction (Async & Non-blocking — Feature Flag gated)
     const isCrmEnabled = await FeatureFlagService.isEnabled(tenantId, 'crm_extraction', true);

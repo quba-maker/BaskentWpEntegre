@@ -2,6 +2,18 @@ import { useEffect } from "react";
 import * as Ably from "ably";
 import { BaseRealtimeEventSchema, ProjectionEvent } from "@/lib/realtime/contracts";
 
+let sharedAblyClient: Ably.Realtime | null = null;
+
+export const getSharedAblyClient = (tenantId: string) => {
+  if (sharedAblyClient) return sharedAblyClient;
+  if (typeof window === "undefined") return null;
+
+  sharedAblyClient = new Ably.Realtime({
+    authUrl: `/api/ably/auth?tenantId=${tenantId}`,
+  });
+  return sharedAblyClient;
+};
+
 /**
  * Client Subscription Engine
  * 
@@ -17,9 +29,8 @@ export function useRealtimeSubscription(
 
     // 1. Initialize Ably Client with Auth Callback
     // This calls our Edge Route which securely returns a bounded token
-    const client = new Ably.Realtime({
-      authUrl: `/api/ably/auth?tenantId=${tenantId}`,
-    });
+    const client = getSharedAblyClient(tenantId);
+    if (!client) return;
 
     const channelName = `private:tenant:${tenantId}`;
     const channel = client.channels.get(channelName);

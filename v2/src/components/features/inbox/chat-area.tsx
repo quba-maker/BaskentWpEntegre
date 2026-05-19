@@ -1,12 +1,14 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from "react";
-import useSWR, { useSWRConfig } from "swr";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Send, Paperclip, User, MessageCircle, ChevronLeft, ChevronDown, Info, ShieldAlert, Sparkles, Zap, Check, CheckCheck, Clock } from "lucide-react";
 import { getMessages, sendMessage, toggleBotStatus } from "@/app/actions/inbox";
 import { useInboxStore } from "@/store/inbox-store";
 import { AiRuntimeTimeline } from "@/components/features/ai-observability/AiRuntimeTimeline";
 import { getAiStatusForConversation } from "@/app/actions/ai-observability";
+import { useParams } from "next/navigation";
+import { usePresence } from "@/hooks/use-presence";
 
 // ==========================================
 // CONVERSATION VIEWPORT — Central chat surface
@@ -64,11 +66,12 @@ const AI_EVENT_LABELS: Record<string, string> = {
 };
 
 function AiStatusBadge({ phoneNumber }: { phoneNumber: string }) {
-  const { data: status } = useSWR(
-    phoneNumber ? ['ai-status', phoneNumber] : null,
-    () => getAiStatusForConversation(phoneNumber),
-    { refreshInterval: 8000, revalidateOnFocus: false }
-  );
+  const { data: status } = useQuery({
+    queryKey: ['ai-status', phoneNumber],
+    queryFn: () => getAiStatusForConversation(phoneNumber),
+    enabled: !!phoneNumber,
+    refetchInterval: 8000
+  });
 
   if (!status) return null;
 
@@ -122,7 +125,12 @@ export function ConversationViewport() {
   const [isSending, setIsSending] = useState(false);
   const [isTogglingBot, setIsTogglingBot] = useState(false);
   const [sendError, setSendError] = useState("");
-  const { mutate } = useSWRConfig();
+  const queryClient = useQueryClient();
+  const params = useParams();
+  const tenantSlug = params?.tenant_slug as string;
+
+  const channelName = tenantSlug ? `presence:tenant:${tenantSlug}` : "";
+  const { members, updatePresence } = usePresence(tenantSlug, channelName);
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const [showScrollDown, setShowScrollDown] = useState(false);
@@ -143,11 +151,13 @@ export function ConversationViewport() {
     }
   };
 
-  const { data: messages, isLoading } = useSWR(
-    activePhone ? ["messages", activePhone] : null,
-    () => getMessages(activePhone!),
-    { refreshInterval: 2000 }
-  );
+  const { data: messages, isLoading } = useQuery({
+    queryKey: ["messages", activePhone],
+    queryFn: () => getMessages(activePhone!),
+    enabled: !!activePhone,
+    // Realtime operates now, no polling needed
+    staleTime: Infinity,
+  });
 
   // Auto-scroll on messages load or change
   useEffect(() => {
@@ -164,17 +174,23 @@ export function ConversationViewport() {
     setIsSending(true);
     setSendError("");
 
+    const optimisticId = `temp-${Date.now()}`;
     const optimisticMsg = {
-      id: Date.now(),
+      id: optimisticId,
       sender: "agent",
       text: textToSend,
       timeMs: Date.now(),
-      dateLabel: "Bugün",
+      dateLabel: new Date().toLocaleDateString("tr-TR"),
       status: "pending"
     };
 
-    const currentMessages = messages || [];
-    mutate(["messages", activePhone], [...currentMessages, optimisticMsg], false);
+    // Snapshot the previous value
+    const previousMessages = queryClient.getQueryData(["messages", activePhone]);
+
+    // Optimistically update to the new value
+    queryClient.setQueryData(["messages", activePhone], (oldData: any[]) => {
+      return [...(oldData || []), optimisticMsg];
+    });
 
     // Eğer bot aktifse, manuel mesaj atıldığı için botu otomatik kapat (Optimistic UI Update)
     if (activeContact.isBotActive) {
@@ -185,25 +201,53 @@ export function ConversationViewport() {
       // Arka planda veritabanını güncelle
       toggleBotStatus(activePhone, false).then(res => {
         if (res.success) {
-          mutate((key) => Array.isArray(key) && key[0] === "conversations");
+          queryClient.invalidateQueries({ queryKey: ["conversations"] });
         }
       });
     }
 
-    const res = await sendMessage(activePhone, textToSend);
-    if (!res.success) {
-      setSendError("Mesaj gönderilemedi: " + res.error);
+    try {
+      const res = await sendMessage(activePhone, textToSend);
+      if (!res.success) {
+        throw new Error(res.error || "Bilinmeyen hata");
+      }
+      // Note: Do not immediately invalidate here if relying on Realtime Event (Ably)
+      // to resolve the optimistic message. If the event arrives, it handles reconciliation.
+      // But we can silently invalidate in background just to be safe.
+      // queryClient.invalidateQueries({ queryKey: ["messages", activePhone] });
+    } catch (err: any) {
+      // Rollback on failure
+      queryClient.setQueryData(["messages", activePhone], previousMessages);
+      setSendError("Mesaj gönderilemedi: " + err.message);
       setTimeout(() => setSendError(""), 4000);
+    } finally {
+      setIsSending(false);
     }
-
-    mutate(["messages", activePhone]);
-    setIsSending(false);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
+      updatePresence({ typing: false, phone: activePhone });
+    }
+  };
+
+  // Setup typing indicator timeout
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setInputText(e.target.value);
+    
+    // Broadcast typing status
+    if (activePhone) {
+      updatePresence({ typing: true, phone: activePhone });
+      
+      // Clear typing status after 3 seconds of inactivity
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = setTimeout(() => {
+        updatePresence({ typing: false, phone: activePhone });
+      }, 3000);
     }
   };
 
@@ -219,7 +263,7 @@ export function ConversationViewport() {
 
     const res = await toggleBotStatus(activePhone, newBotState);
     if (res.success) {
-      mutate((key) => Array.isArray(key) && key[0] === "conversations");
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
     } else {
       useInboxStore.getState().setActiveContact(activePhone, {
         ...activeContact,
@@ -272,9 +316,17 @@ export function ConversationViewport() {
                 </span>
               )}
             </div>
-            <p className="text-xs font-medium mt-0.5" style={{ color: "var(--q-text-secondary)" }}>
-              {activeContact.id}
-            </p>
+            <div className="flex items-center gap-2 mt-0.5">
+              <p className="text-xs font-medium" style={{ color: "var(--q-text-secondary)" }}>
+                {activeContact.id}
+              </p>
+              {members.some(m => m.data?.typing && m.data?.phone === activePhone) && (
+                <span className="text-[11px] font-semibold text-emerald-500 animate-pulse flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                  Birisi yazıyor...
+                </span>
+              )}
+            </div>
           </div>
         </div>
 
@@ -341,7 +393,11 @@ export function ConversationViewport() {
               return acc;
             }, {})
           ).map(([dateLabel, groupMsgs]: [string, any]) => (
-            <div key={dateLabel} className="block mb-6 relative">
+            <div 
+              key={dateLabel} 
+              className="block mb-6 relative"
+              style={{ contentVisibility: "auto", containIntrinsicSize: "auto 500px" }}
+            >
               <div className="sticky top-2 z-10 flex justify-center w-full my-4 pointer-events-none">
                 <span
                   className="text-[11px] font-bold px-3 py-1 rounded-md shadow-sm pointer-events-auto"
@@ -465,7 +521,7 @@ export function ConversationViewport() {
 
           <textarea
             value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
+            onChange={handleInputChange}
             onKeyDown={handleKeyDown}
             placeholder="Mesajınızı yazın..."
             className="flex-1 max-h-32 min-h-[44px] bg-transparent resize-none outline-none py-2.5 text-[15px] font-medium"
