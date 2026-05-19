@@ -7,10 +7,10 @@ export function DiagnosticsOverlay() {
   const [isOpen, setIsOpen] = useState(false);
   const state = useDiagnosticsStore();
 
-  // Keyboard shortcut (Cmd+K / Ctrl+K + Shift + C for Chaos)
+  // Keyboard shortcut (Cmd+Shift+X / Ctrl+Shift+X for Chaos)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "C") {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toUpperCase() === "X") {
         setIsOpen((prev) => !prev);
       }
     };
