@@ -36,8 +36,8 @@ export class RealtimeTranslator {
       tenantId,
       type: "chat.message.created",
       payload: {
-        id: internalMessage.id,
-        conversationId: internalMessage.phone_number || internalMessage.conversation_id,
+        id: String(internalMessage.id),
+        conversationId: String(internalMessage.conversation_id || internalMessage.phone_number),
         content: internalMessage.content,
         sender: senderType,
         status: internalMessage.status,
@@ -67,8 +67,8 @@ export class RealtimeTranslator {
       tenantId,
       type: "chat.message.status_updated",
       payload: {
-        id: messageId,
-        conversationId,
+        id: String(messageId),
+        conversationId: String(conversationId),
         status,
         updatedAt: new Date().toISOString()
       }

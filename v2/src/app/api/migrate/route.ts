@@ -195,6 +195,11 @@ export async function GET() {
     results.push('tool_permissions: OK');
 
     // 13. Ensure conversation_memory has tenant_id and updated columns
+    if (convIdDataType === 'integer') {
+      await sql`ALTER TABLE conversation_memory ADD COLUMN IF NOT EXISTS conversation_id INTEGER`.catch(e => console.error("conversation_memory alter table warning:", e));
+    } else {
+      await sql`ALTER TABLE conversation_memory ADD COLUMN IF NOT EXISTS conversation_id UUID`.catch(e => console.error("conversation_memory alter table warning:", e));
+    }
     await sql`ALTER TABLE conversation_memory ADD COLUMN IF NOT EXISTS tenant_id UUID`;
     await sql`ALTER TABLE conversation_memory ADD COLUMN IF NOT EXISTS last_message_count INTEGER DEFAULT 0`;
     await sql`ALTER TABLE conversation_memory ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`;
