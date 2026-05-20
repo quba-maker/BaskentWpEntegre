@@ -61,11 +61,15 @@ function countryFlag(country: string | undefined): string {
 
 // -- AI Status Badge --
 const AI_EVENT_LABELS: Record<string, string> = {
-  'policy_blocked': 'Policy Block',
-  'human_escalation': 'Escalated',
-  'ai_timeout': 'Timeout',
-  'working_hours_blocked': 'Off-hours',
-  'brain_resolved': 'Brain Ready',
+  'memory_updated': 'Hafıza Eşlendi',
+  'memory_failed': 'Hafıza Hatası',
+  'policy_blocked': 'Kural Engeli',
+  'human_escalation': 'Ekibe Aktarıldı',
+  'ai_timeout': 'Bağlantı Koptu',
+  'working_hours_blocked': 'Mesai Dışı',
+  'brain_resolved': 'AI Hazır',
+  'brain_started': 'Analiz Ediliyor',
+  'brain_error': 'Analiz Hatası',
 };
 
 function AiStatusBadge({ phoneNumber }: { phoneNumber: string }) {
