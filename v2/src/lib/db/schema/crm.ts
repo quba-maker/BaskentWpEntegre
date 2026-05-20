@@ -1,5 +1,6 @@
 import { pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
+import { channels } from './channels';
 
 export const customerProfiles = pgTable('customer_profiles', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -16,9 +17,22 @@ export const leads = pgTable('leads', {
   id: uuid('id').primaryKey().defaultRandom(),
   tenantId: uuid('tenant_id').references(() => tenants.id, { onDelete: 'cascade' }).notNull(),
   customerId: uuid('customer_id').references(() => customerProfiles.id, { onDelete: 'set null' }),
+  channelId: uuid('channel_id').references(() => channels.id, { onDelete: 'set null' }),
   phoneNumber: text('phone_number').notNull(),
   department: text('department'),
   message: text('message'),
   source: text('source'), // e.g. 'google_sheets'
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
+
+export const conversations = pgTable('conversations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').references(() => tenants.id, { onDelete: 'cascade' }).notNull(),
+  customerId: uuid('customer_id').references(() => customerProfiles.id, { onDelete: 'set null' }),
+  channelId: uuid('channel_id').references(() => channels.id, { onDelete: 'set null' }),
+  channel: text('channel'), // Legacy
+  phoneNumber: text('phone_number'),
+  status: text('status').default('open'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });

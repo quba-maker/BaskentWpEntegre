@@ -74,18 +74,18 @@ export async function Sidebar({ tenantData }: { tenantData?: TenantBootstrapData
         {/* INBOX (Always enabled for now, or check module) */}
         <NavLink href={`/${session?.tenantSlug || ''}/inbox`} icon={<MessageSquare className="w-[18px] h-[18px]" />} label="Mesajlar" />
         
-        {/* FORMS (Check module) */}
-        {(tenantData?.modules?.includes('forms') || true) && (
+        {/* FORMS */}
+        {true && (
           <NavLink href={`/${session?.tenantSlug || ''}/forms`} icon={<ClipboardList className="w-[18px] h-[18px]" />} label="Formlar" />
         )}
         
         {/* AI MODULES */}
-        {session?.role !== "viewer" && (tenantData?.modules?.includes('ai_orchestrator') || true) && (
+        {session?.role !== "viewer" && (
           <NavLink href={`/${session?.tenantSlug || ''}/bot`} icon={<Bot className="w-[18px] h-[18px]" />} label="AI Asistan" />
         )}
         
         {/* ANALYTICS */}
-        {session?.role !== "viewer" && (tenantData?.modules?.includes('analytics') || true) && (
+        {session?.role !== "viewer" && (
           <NavLink href={`/${session?.tenantSlug || ''}/analytics`} icon={<BarChart3 className="w-[18px] h-[18px]" />} label="Performans" />
         )}
         

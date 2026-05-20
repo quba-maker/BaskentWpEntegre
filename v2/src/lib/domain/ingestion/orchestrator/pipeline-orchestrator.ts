@@ -29,7 +29,7 @@ export class PipelineOrchestrator {
     const pipelineRunId = crypto.randomUUID();
     let eventIndex = 0;
 
-    const emit = (eventProps: Omit<PipelineRealtimeEvent, 'version' | 'pipelineRunId' | 'tenantId' | 'timestamp'>) => {
+    const emit = (eventProps: any) => {
       const eventId = `${pipelineRunId}-${eventIndex++}`;
       const fullEvent = {
         eventId,

@@ -76,7 +76,7 @@ export async function GET(request: Request) {
     }
 
     // ─── 3. Rate Limiting (per-user, anti token farming) ───
-    const rl = checkRateLimit(`ably_auth:${userId}`, 30, 60_000); // 30 tokens/min
+    const rl = await checkRateLimit(`ably_auth:${userId}`, 30, 60_000); // 30 tokens/min
     if (!rl.allowed) {
       return NextResponse.json(
         { error: "Rate limited. Try again later.", retryAfterMs: rl.retryAfterMs },

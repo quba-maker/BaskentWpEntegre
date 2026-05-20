@@ -63,7 +63,7 @@ export async function GET(req: NextRequest) {
       ];
 
       try {
-        await orchestrator.runPipeline(tenantId, mockRawData, expectedSchema, signal, (event: any) => {
+        await orchestrator.runPipeline(tenantSlug, mockRawData, expectedSchema, signal, (event: any) => {
           // Skip events we've already processed (Resumability logic)
           if (lastEventId && event.eventId <= lastEventId) {
             return;
