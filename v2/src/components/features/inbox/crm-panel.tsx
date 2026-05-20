@@ -2,11 +2,11 @@
 
 import { useState, useEffect } from "react";
 import { useSWRConfig } from "swr";
-import { User, MapPin, Building, Activity, Tag, ChevronDown, ChevronRight, Save, X, Plus, ChevronLeft, Check, Loader2, Sparkles, FileText } from "lucide-react";
+import { User, MapPin, Building, Activity, Tag, ChevronDown, ChevronRight, Save, X, Plus, ChevronLeft, Check, Loader2, Sparkles, FileText, Brain } from "lucide-react";
 import { useInboxStore } from "@/store/inbox-store";
 import { updateCrmData, addTag, removeTag } from "@/app/actions/inbox";
 import { CustomerAiBrainPanel } from "@/components/features/ai-observability/CustomerAiBrain";
-import { AiTimelinePanel, AiSummaryBadge } from "@/components/features/ai-observability/AiTimeline";
+import { AiTimelinePanel } from "@/components/features/ai-observability/AiTimeline";
 
 const tagTranslationMap: Record<string, string> = {
   "price_sensitive": "fiyat_odaklı",
@@ -278,48 +278,77 @@ export function ContextPanel() {
               style={{ border: "1px solid var(--q-border-default)" }}
             />
 
-            {/* AI Taslak Önerisi (Frosted Cam Efektli Kutu) */}
-            {(!notes || notes.trim() === "") && activeContact.aiSummary?.text && (
-              <div className="mt-3 p-4 rounded-2xl border border-emerald-500/20 bg-emerald-500/[0.04] backdrop-blur-md relative overflow-hidden transition-all duration-300 shadow-sm">
-                <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-transparent via-emerald-500/40 to-transparent" />
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                  <span className="text-[11px] font-bold text-emerald-800 uppercase tracking-wider flex items-center gap-1">
-                    <Sparkles className="w-3.5 h-3.5 text-emerald-600 animate-pulse" /> Yapay Zeka Önerisi
-                  </span>
+            {/* Unified AI Insights Panel (Single Source of Truth) */}
+            {(() => {
+              const aiText = activeContact.aiSummary?.text || activeContact.ai_summary;
+              const aiIntent = activeContact.aiSummary?.buying_intent || activeContact.ai_buying_intent;
+              const aiSentiment = activeContact.aiSummary?.sentiment || activeContact.ai_sentiment;
+              
+              if (!aiText) return null;
+
+              return (
+                <div className="mt-4 p-4 rounded-2xl relative overflow-hidden transition-all duration-300 shadow-sm border"
+                     style={{ background: "rgba(175, 82, 222, 0.05)", borderColor: "rgba(175, 82, 222, 0.2)" }}>
+                  <div className="absolute top-0 left-0 w-full h-[2px] opacity-70" style={{ background: "linear-gradient(to right, transparent, #AF52DE, transparent)" }} />
+                  
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full animate-pulse" style={{ background: "#AF52DE" }} />
+                      <span className="text-[11px] font-bold uppercase tracking-wider flex items-center gap-1" style={{ color: "var(--q-purple)" }}>
+                        <Brain className="w-3.5 h-3.5 animate-pulse" /> AI Özeti (Canlı)
+                      </span>
+                    </div>
+                    
+                    <div className="flex gap-1.5">
+                      {aiIntent && (
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded shadow-sm" style={{ background: "var(--q-bg-primary)", color: "var(--q-text-secondary)", border: "1px solid var(--q-border-default)" }}>
+                          {aiIntent}
+                        </span>
+                      )}
+                      {aiSentiment && (
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded shadow-sm" style={{ background: "var(--q-bg-primary)", color: "var(--q-text-secondary)", border: "1px solid var(--q-border-default)" }}>
+                          {aiSentiment}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  
+                  <p className="text-[12px] font-medium leading-relaxed italic mb-3" style={{ color: "var(--q-text-primary)" }}>
+                    "{aiText}"
+                  </p>
+                  
+                  {(!notes || notes.trim() === "") && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        setNotes(aiText);
+                        setIsSaving(true);
+                        setSaveStatus("saving");
+                        const res = await updateCrmData(activeContact.id, stage, department, country, aiText);
+                        if (res.success) {
+                          useInboxStore.getState().setActiveContact(activeContact.id, {
+                            ...activeContact,
+                            notes: aiText,
+                          });
+                          mutate((key) => Array.isArray(key) && key[0] === "conversations");
+                          setSaveStatus("saved");
+                          setTimeout(() => setSaveStatus("idle"), 2000);
+                        } else {
+                          setSaveStatus("error");
+                          setTimeout(() => setSaveStatus("idle"), 3000);
+                        }
+                        setIsSaving(false);
+                      }}
+                      disabled={isSaving}
+                      className="w-full py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-md cursor-pointer disabled:opacity-50"
+                      style={{ background: "#AF52DE", color: "white" }}
+                    >
+                      <FileText className="w-3.5 h-3.5" /> Nota Aktar ve Kaydet
+                    </button>
+                  )}
                 </div>
-                <p className="text-[12px] text-emerald-950 font-medium leading-relaxed italic mb-3">
-                  "{activeContact.aiSummary.text}"
-                </p>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    const aiText = activeContact.aiSummary.text;
-                    setNotes(aiText);
-                    setIsSaving(true);
-                    setSaveStatus("saving");
-                    const res = await updateCrmData(activeContact.id, stage, department, country, aiText);
-                    if (res.success) {
-                      useInboxStore.getState().setActiveContact(activeContact.id, {
-                        ...activeContact,
-                        notes: aiText,
-                      });
-                      mutate((key) => Array.isArray(key) && key[0] === "conversations");
-                      setSaveStatus("saved");
-                      setTimeout(() => setSaveStatus("idle"), 2000);
-                    } else {
-                      setSaveStatus("error");
-                      setTimeout(() => setSaveStatus("idle"), 3000);
-                    }
-                    setIsSaving(false);
-                  }}
-                  disabled={isSaving}
-                  className="w-full py-2 rounded-xl text-xs font-bold bg-emerald-500 hover:bg-emerald-600 active:scale-[0.98] text-white transition-all flex items-center justify-center gap-1.5 shadow-md cursor-pointer disabled:opacity-50"
-                >
-                  <FileText className="w-3.5 h-3.5" /> Nota Aktar ve Kaydet
-                </button>
-              </div>
-            )}
+              );
+            })()}
           </div>
         </div>
 
@@ -450,14 +479,7 @@ export function ContextPanel() {
             </div>
           </div>
         )}
-        
-        {/* AI Observability: Customer Brain */}
-        <CustomerAiBrainPanel phoneNumber={activeContact.id} />
 
-        {/* Phase 6: AI Auto Summary */}
-        <div className="pt-5" style={{ borderTop: '1px solid var(--q-border-default)' }}>
-          <AiSummaryBadge phoneNumber={activeContact.id} />
-        </div>
 
         {/* Phase 6: AI Activity Timeline */}
         <AiTimelinePanel phoneNumber={activeContact.id} />
