@@ -89,13 +89,18 @@ export class MemoryEngine {
       const cleanedJson = jsonMatch ? jsonMatch[0] : rawText;
       
       const parsed = JSON.parse(cleanedJson);
+      
+      const summaryText = parsed.summary_text || parsed.summary || parsed.text || "Özet oluşturulamadı.";
+      const buyingIntent = parsed.buying_intent || parsed.intent || parsed.buyingIntent || "WARM";
+      const sentiment = parsed.sentiment || "NEUTRAL";
+      const objections = parsed.objections ? JSON.stringify(parsed.objections) : "[]";
 
       // 4. Save to conversation_memory
       await sql`
         INSERT INTO conversation_memory (
           tenant_id, conversation_id, summary_text, buying_intent, sentiment, objections, last_message_count
         ) VALUES (
-          ${tenantId}, ${conversationId}, ${parsed.summary_text}, ${parsed.buying_intent}, ${parsed.sentiment}, ${parsed.objections}, ${messages.length}
+          ${tenantId}, ${conversationId}, ${summaryText}, ${buyingIntent}, ${sentiment}, ${objections}, ${messages.length}
         )
         ON CONFLICT (conversation_id) DO UPDATE SET
           summary_text = EXCLUDED.summary_text,
@@ -112,10 +117,10 @@ export class MemoryEngine {
       try {
         const { RealtimePublisher } = await import('@/lib/realtime/publisher');
         await RealtimePublisher.publishMemoryUpdated(tenantId, phone, {
-          aiSummary: parsed.summary_text,
-          aiBuyingIntent: parsed.buying_intent,
-          aiSentiment: parsed.sentiment,
-          objections: parsed.objections
+          aiSummary: summaryText,
+          aiBuyingIntent: buyingIntent,
+          aiSentiment: sentiment,
+          objections: parsed.objections || []
         });
         log.info(`[MEMORY_REALTIME_PUBLISH] Realtime event published for memory update of conv: ${conversationId}`);
       } catch (realtimeErr) {
