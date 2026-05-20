@@ -45,3 +45,24 @@ export const humanReviewSessions = pgTable('human_review_sessions', {
   status: text('status').notNull().default('pending'), // pending, resolved, dismissed
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
+
+export const webhookEvents = pgTable('webhook_events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').references(() => tenants.id, { onDelete: 'cascade' }).notNull(),
+  provider: text('provider').notNull(),
+  providerMessageId: text('provider_message_id').notNull(),
+  senderId: text('sender_id'),
+  eventTimestamp: numeric('event_timestamp', { precision: 20, scale: 0 }),
+  processedAt: timestamp('processed_at', { withTimezone: true }).defaultNow(),
+});
+
+export const deadLetterJobs = pgTable('dead_letter_jobs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').references(() => tenants.id, { onDelete: 'cascade' }).notNull(),
+  topic: text('topic').notNull(),
+  payload: jsonb('payload'),
+  errorMessage: text('error_message'),
+  errorStack: text('error_stack'),
+  status: text('status').default('unresolved'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});

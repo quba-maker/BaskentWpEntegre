@@ -63,6 +63,8 @@ export interface WorkerMetadata {
   messageId: string;
   isRetry: boolean;
   retriedCount: number;
+  channelId?: string;
+  groupId?: string;
 }
 
 /**
@@ -287,6 +289,8 @@ export class QueueWorkerEngine {
       direction: 'in',
       content,
       channel: channel,
+      channelId: metadata.channelId,
+      groupId: metadata.groupId,
       providerMessageId
     });
 
@@ -368,6 +372,8 @@ export class QueueWorkerEngine {
             direction: 'out', 
             content: offMsg, 
             channel: 'whatsapp',
+            channelId: metadata.channelId,
+            groupId: metadata.groupId,
             providerMessageId: outRes.providerMessageId,
             status: 'sent'
           });
@@ -582,6 +588,8 @@ export class QueueWorkerEngine {
       direction: 'out',
       content: finalResponseText,
       channel: channel,
+      channelId: metadata.channelId,
+      groupId: metadata.groupId,
       modelUsed: aiResponse.modelUsed || llmModel,
       promptTokens: aiResponse.inputTokens || 0,
       completionTokens: aiResponse.outputTokens || 0,

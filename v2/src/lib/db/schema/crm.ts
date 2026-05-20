@@ -62,7 +62,11 @@ export const messages = pgTable('messages', {
   conversationId: uuid('conversation_id').references(() => conversations.id, { onDelete: 'cascade' }).notNull(),
   direction: text('direction').notNull(),
   content: text('content').notNull(),
-  channel: text('channel'),
+  channel: text('channel'), // Legacy string fallback
+  channelId: uuid('channel_id').references(() => channels.id, { onDelete: 'set null' }),
+  groupId: uuid('group_id'), // We can use plain uuid since channelGroups might cause circular deps or just loosely coupled
+  workflowRunId: uuid('workflow_run_id'),
+  promptBindingId: uuid('prompt_binding_id'),
   status: text('status'),
   providerMessageId: text('provider_message_id'),
   modelUsed: text('model_used'),

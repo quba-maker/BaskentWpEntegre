@@ -7,6 +7,10 @@ export interface MessagePayload {
   direction: 'in' | 'out';
   content: string;
   channel: string;
+  channelId?: string | null;
+  groupId?: string | null;
+  workflowRunId?: string | null;
+  promptBindingId?: string | null;
   modelUsed?: string | null;
   providerMessageId?: string | null; // Idempotency için Meta'dan gelen message ID
   promptTokens?: number;
@@ -78,10 +82,14 @@ export class MessageService {
       
       writeQueries.push(sql`
         INSERT INTO messages (
-          tenant_id, phone_number, direction, content, channel, provider_message_id, model_used, prompt_tokens, completion_tokens, status
+          tenant_id, phone_number, direction, content, channel, 
+          channel_id, group_id, workflow_run_id, prompt_binding_id,
+          provider_message_id, model_used, prompt_tokens, completion_tokens, status
         ) VALUES (
           ${this.db.tenantId}, ${payload.phoneNumber}, ${payload.direction}, ${payload.content}, 
-          ${payload.channel}, ${payload.providerMessageId || null}, ${payload.modelUsed || null},
+          ${payload.channel}, ${payload.channelId || null}, ${payload.groupId || null}, 
+          ${payload.workflowRunId || null}, ${payload.promptBindingId || null},
+          ${payload.providerMessageId || null}, ${payload.modelUsed || null},
           ${payload.promptTokens || 0}, ${payload.completionTokens || 0}, ${payload.status || 'pending'}
         ) RETURNING id
       `);

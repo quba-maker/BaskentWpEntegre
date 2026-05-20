@@ -54,7 +54,7 @@ export async function POST(req: Request) {
         topic,
         tenantId,
         payload,
-        { messageId: id, isRetry, retriedCount }
+        { messageId: id, isRetry, retriedCount, channelId: body.channelId, groupId: body.groupId }
       );
 
       // 4. Fast-Ack Success
