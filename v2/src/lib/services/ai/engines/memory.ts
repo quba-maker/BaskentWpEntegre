@@ -84,6 +84,66 @@ export class MemoryEngine {
       `;
 
       log.info(`[MEMORY_UPDATED] Rolling memory compressed for conv: ${conversationId}`);
+
+      // 4. Sync rolling AI summary back to matching lead notes & Google Sheets
+      try {
+        const conv = await sql`
+          SELECT phone_number FROM conversations 
+          WHERE id::text = ${conversationId}::text AND tenant_id = ${tenantId}
+          LIMIT 1;
+        `;
+
+        if (conv.length > 0) {
+          const phone = conv[0].phone_number;
+          const cleanPhone = phone.replace(/[^0-9]/g, '');
+          if (cleanPhone.length >= 10) {
+            const suffix = cleanPhone.substring(cleanPhone.length - 10);
+            
+            const matchingLeads = await sql`
+              SELECT id, notes FROM leads
+              WHERE phone_number LIKE ${'%' + suffix}
+                AND tenant_id = ${tenantId}
+              LIMIT 5;
+            `;
+            
+            for (const lead of matchingLeads) {
+              if (!lead.notes || lead.notes.trim() === '') {
+                await sql`
+                  UPDATE leads
+                  SET notes = ${parsed.summary_text}
+                  WHERE id = ${lead.id} AND tenant_id = ${tenantId};
+                `;
+                
+                log.info(`[MEMORY_SYNC] Lead ${lead.id} notes automatically updated with AI summary.`);
+                
+                const SHEET_URL = process.env.GOOGLE_SHEET_UPDATE_URL || process.env.GOOGLE_SHEET_URL;
+                if (SHEET_URL) {
+                  try {
+                    const sheetResponse = await fetch(SHEET_URL, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        action: 'updateNoteByPhone',
+                        phone: phone,
+                        note: parsed.summary_text
+                      })
+                    });
+                    if (!sheetResponse.ok) {
+                      log.warn(`[MEMORY_SYNC] Google Sheets note sync returned status ${sheetResponse.status}`);
+                    } else {
+                      log.info(`[MEMORY_SYNC] Lead ${lead.id} AI summary successfully synced to Google Sheets.`);
+                    }
+                  } catch (sheetErr) {
+                    log.warn(`[MEMORY_SYNC] Google Sheets note sync failed for phone: ${phone}`, { error: String(sheetErr) });
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch (syncErr) {
+        log.error('[MEMORY_SYNC_ERROR] Failed during CRM/Sheets sync', syncErr instanceof Error ? syncErr : new Error(String(syncErr)));
+      }
     } catch (e) {
       log.error('[MEMORY_ENGINE] Error generating summary', e instanceof Error ? e : new Error(String(e)));
     }

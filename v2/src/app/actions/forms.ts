@@ -21,9 +21,10 @@ export async function getForms(page: number = 1, search: string = "", source: st
       
       if (searchFilter && sourceFilter) {
         rows = await ctx.db.executeSafe(sql`
-          SELECT l.*, c.status as conversation_status
+          SELECT l.*, c.status as conversation_status, mem.summary_text as ai_summary
           FROM leads l
           LEFT JOIN conversations c ON c.phone_number = l.phone_number AND c.tenant_id = l.tenant_id
+          LEFT JOIN conversation_memory mem ON mem.conversation_id::text = c.id::text
           WHERE l.tenant_id = ${ctx.tenantId}
             AND (l.patient_name ILIKE ${searchFilter} OR l.phone_number ILIKE ${searchFilter} OR l.email ILIKE ${searchFilter})
             AND l.form_name ILIKE ${sourceFilter}
@@ -32,9 +33,10 @@ export async function getForms(page: number = 1, search: string = "", source: st
         `);
       } else if (searchFilter) {
         rows = await ctx.db.executeSafe(sql`
-          SELECT l.*, c.status as conversation_status
+          SELECT l.*, c.status as conversation_status, mem.summary_text as ai_summary
           FROM leads l
           LEFT JOIN conversations c ON c.phone_number = l.phone_number AND c.tenant_id = l.tenant_id
+          LEFT JOIN conversation_memory mem ON mem.conversation_id::text = c.id::text
           WHERE l.tenant_id = ${ctx.tenantId}
             AND (l.patient_name ILIKE ${searchFilter} OR l.phone_number ILIKE ${searchFilter} OR l.email ILIKE ${searchFilter})
           ORDER BY l.created_at DESC
@@ -42,9 +44,10 @@ export async function getForms(page: number = 1, search: string = "", source: st
         `);
       } else if (sourceFilter) {
         rows = await ctx.db.executeSafe(sql`
-          SELECT l.*, c.status as conversation_status
+          SELECT l.*, c.status as conversation_status, mem.summary_text as ai_summary
           FROM leads l
           LEFT JOIN conversations c ON c.phone_number = l.phone_number AND c.tenant_id = l.tenant_id
+          LEFT JOIN conversation_memory mem ON mem.conversation_id::text = c.id::text
           WHERE l.tenant_id = ${ctx.tenantId}
             AND l.form_name ILIKE ${sourceFilter}
           ORDER BY l.created_at DESC
@@ -52,9 +55,10 @@ export async function getForms(page: number = 1, search: string = "", source: st
         `);
       } else {
         rows = await ctx.db.executeSafe(sql`
-          SELECT l.*, c.status as conversation_status
+          SELECT l.*, c.status as conversation_status, mem.summary_text as ai_summary
           FROM leads l
           LEFT JOIN conversations c ON c.phone_number = l.phone_number AND c.tenant_id = l.tenant_id
+          LEFT JOIN conversation_memory mem ON mem.conversation_id::text = c.id::text
           WHERE l.tenant_id = ${ctx.tenantId}
           ORDER BY l.created_at DESC
           LIMIT ${limit} OFFSET ${offset}
@@ -72,7 +76,7 @@ export async function getForms(page: number = 1, search: string = "", source: st
         created_at: r.created_at,
         raw_data: r.raw_data ? JSON.parse(r.raw_data) : {},
         country: r.country,
-        notes: r.notes || "",
+        notes: r.notes || r.ai_summary || "",
         isBotActive: r.conversation_status === 'bot'
       }));
     }
