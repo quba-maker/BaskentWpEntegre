@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { X, ArrowRight, ArrowLeft, Check, Sparkles } from 'lucide-react';
+import { X, ArrowRight, ArrowLeft, Check, Sparkles, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { get, set } from 'idb-keyval';
 
 export interface WizardStep {
   id: string;
@@ -31,27 +32,37 @@ export function IntegrationWizard({
   onComplete,
   localStorageKey
 }: IntegrationWizardProps) {
-  const [currentStepIndex, setCurrentStepIndex] = useState(() => {
-    if (typeof window !== 'undefined' && localStorageKey) {
-      const saved = localStorage.getItem(`${localStorageKey}_step`);
-      if (saved) {
-        const parsed = parseInt(saved, 10);
-        return isNaN(parsed) ? 0 : parsed;
-      }
-    }
-    return 0;
-  });
+  const [currentStepIndex, setCurrentStepIndex] = useState(0);
+  const [isRestoring, setIsRestoring] = useState(true);
 
+  // Load from IndexedDB on mount
   useEffect(() => {
-    if (localStorageKey) {
-      localStorage.setItem(`${localStorageKey}_step`, currentStepIndex.toString());
+    if (isOpen && localStorageKey) {
+      get(`${localStorageKey}_step`).then((val) => {
+        if (typeof val === 'number') setCurrentStepIndex(val);
+        setIsRestoring(false);
+      });
+    } else {
+      setIsRestoring(false);
     }
-  }, [currentStepIndex, localStorageKey]);
+  }, [isOpen, localStorageKey]);
 
-  // Reset if modal is closed and re-opened without a draft (in this case, we always want draft, so we only reset if told to)
-  // Actually, we keep draft state.
+  // Save to IndexedDB on change
+  useEffect(() => {
+    if (!isRestoring && localStorageKey) {
+      set(`${localStorageKey}_step`, currentStepIndex);
+    }
+  }, [currentStepIndex, isRestoring, localStorageKey]);
 
   if (!isOpen) return null;
+
+  if (isRestoring) {
+    return (
+      <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-md p-4">
+        <Loader2 className="w-10 h-10 animate-spin text-white" />
+      </div>
+    );
+  }
 
   const currentStep = steps[currentStepIndex];
   const isFirstStep = currentStepIndex === 0;

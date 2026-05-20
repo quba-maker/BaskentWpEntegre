@@ -21,6 +21,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "framer-motion": "^11.11.17",
+    "idb-keyval": "^6.2.2",
     "immer": "^11.1.8",
     "jose": "^6.0.11",
     "lucide-react": "^0.460.0",
