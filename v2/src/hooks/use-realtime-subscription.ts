@@ -81,6 +81,12 @@ export const getSharedAblyClient = (tenantId: string) => {
       }
       useDiagnosticsStore.getState().incrementMetric("realtime.socket.reconnects");
     }
+
+    // Polling fallback activation tracking
+    const transport = (sharedAblyClient as any)?.connection?.transportType;
+    if (transport === "xhr_polling" || transport === "jsonp") {
+      useDiagnosticsStore.getState().incrementMetric("realtime.polling_fallback_activation_count");
+    }
   });
 
   return sharedAblyClient;
@@ -153,6 +159,7 @@ export function useRealtimeSubscription(
         const serialized = JSON.stringify(eventData);
         if (serialized.length > 32_768) { // 32KB client-side limit
           console.error("[ABLY_SECURITY] Oversized payload rejected:", serialized.length);
+          useDiagnosticsStore.getState().incrementMetric("realtime.dropped_event_count");
           return;
         }
 
@@ -162,15 +169,20 @@ export function useRealtimeSubscription(
             expected: tenantId,
             received: eventData.tenantId
           });
+          useDiagnosticsStore.getState().incrementMetric("realtime.dropped_event_count");
           return;
         }
 
         const validatedEvent = BaseRealtimeEventSchema.parse(eventData);
         
+        // Telemetry: processed event count
+        useDiagnosticsStore.getState().incrementMetric("realtime.processed_events_count");
+
         // ─── Global Dedup Gate ───
         const isDuplicate = trackEventId(validatedEvent.eventId);
         if (isDuplicate) {
           if (IS_DEV) console.log("[ABLY_EVENT_DEDUPED]", { eventId: validatedEvent.eventId, source });
+          useDiagnosticsStore.getState().incrementMetric("realtime.duplicate_events_count");
           return;
         }
 
@@ -180,6 +192,9 @@ export function useRealtimeSubscription(
 
         // Chaos Interception (dev only)
         const eventsToProcess = await ChaosEngine.processIncomingEvents(validatedEvent);
+        if (eventsToProcess.length === 0) {
+          useDiagnosticsStore.getState().incrementMetric("realtime.dropped_event_count");
+        }
         
         for (const evt of eventsToProcess) {
           const startTime = performance.now();
@@ -197,6 +212,7 @@ export function useRealtimeSubscription(
           
           const reconcileMs = performance.now() - startTime;
           useDiagnosticsStore.getState().setMetric("realtime.projection.reconcile_ms", Math.round(reconcileMs));
+          useDiagnosticsStore.getState().setMetric("realtime.cache_mutation_duration", Math.round(reconcileMs));
         }
 
         // Leader broadcasts to follower tabs

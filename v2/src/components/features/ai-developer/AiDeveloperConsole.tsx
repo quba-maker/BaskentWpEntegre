@@ -1,17 +1,19 @@
 "use client";
 
 import React, { useState } from "react";
-import { Activity, Wrench, Route, Flag, Terminal } from "lucide-react";
+import { Activity, Wrench, Route, Flag, Terminal, Zap } from "lucide-react";
 import { LiveActivityFeed } from "./LiveActivityFeed";
 import { ToolActivityMonitor } from "./ToolActivityMonitor";
 import { DecisionTraceViewer } from "./DecisionTraceViewer";
 import { FeatureFlagsPanel } from "./FeatureFlagsPanel";
+import { RealtimeTelemetryDashboard } from "./RealtimeTelemetryDashboard";
 
 const TABS = [
   { id: 'logs', label: 'Birleştirilmiş Loglar', icon: Activity },
   { id: 'trace', label: 'Karar & Aksiyon İzleme', icon: Route },
   { id: 'tools', label: 'Araç İzleme (Tools)', icon: Wrench },
   { id: 'flags', label: 'Sistem Durumu (Health)', icon: Flag },
+  { id: 'realtime', label: 'Realtime Telemetry', icon: Zap },
 ] as const;
 
 type TabId = typeof TABS[number]['id'];
@@ -44,7 +46,7 @@ export function AiDeveloperConsole() {
 
       {/* Tab Navigation */}
       <div 
-        className="flex lg:grid lg:grid-cols-4 items-center gap-2 p-1.5 rounded-xl overflow-x-auto w-full no-scrollbar snap-x"
+        className="flex lg:grid lg:grid-cols-5 items-center gap-2 p-1.5 rounded-xl overflow-x-auto w-full no-scrollbar snap-x"
         style={{ background: 'var(--q-bg-secondary)', border: '1px solid var(--q-border-default)' }}
       >
         {TABS.map(tab => {
@@ -74,6 +76,7 @@ export function AiDeveloperConsole() {
         {activeTab === 'trace' && <DecisionTraceViewer />}
         {activeTab === 'tools' && <ToolActivityMonitor />}
         {activeTab === 'flags' && <FeatureFlagsPanel />}
+        {activeTab === 'realtime' && <RealtimeTelemetryDashboard />}
       </div>
     </div>
   );
