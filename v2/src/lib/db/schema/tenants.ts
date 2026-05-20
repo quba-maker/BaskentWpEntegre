@@ -9,6 +9,9 @@ export const tenants = pgTable('tenants', {
   primaryColor: text('primary_color').default('#007AFF'),
   aiModel: text('ai_model').default('gemini-2.5-flash'),
   status: text('status').default('active'),
+  plan: text('plan').default('starter'),
+  monthlyMessageLimit: integer('monthly_message_limit').default(500),
+  timezone: text('timezone').default('Europe/Istanbul'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });

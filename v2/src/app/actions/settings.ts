@@ -14,8 +14,7 @@ export async function getTenantSettings() {
       // 1. Unsafe execute ile güvenli query gönderilir
       const tenants = await ctx.db.executeSafe(sql`
         SELECT id, name, slug, industry, logo_url, primary_color,
-               meta_page_id, instagram_id, whatsapp_phone_id, whatsapp_business_id,
-               ai_model, max_bot_messages, timezone, plan, monthly_message_limit, status,
+               ai_model, timezone, plan, monthly_message_limit, status,
                created_at
         FROM tenants WHERE id = ${ctx.tenantId}
       `);
@@ -24,12 +23,7 @@ export async function getTenantSettings() {
 
       const tenant = { ...tenants[0] };
       
-      // Token maskeleme — sadece platform_admin/owner/admin
-      if (ctx.role !== 'owner' && ctx.role !== 'admin' && ctx.role !== 'platform_admin') {
-        if (tenant.meta_page_token) {
-          tenant.meta_page_token = '••••••••' + tenant.meta_page_token.slice(-8);
-        }
-      }
+      // Token maskeleme vb işlemler yeni mimaride channel_integrations'a taşındığı için gerek kalmadı.
 
       return { 
         tenant, 
@@ -78,9 +72,16 @@ export async function getUsageStats() {
       const now = new Date();
       const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
-      // Burada 'tenant_id' kelimesi geçiyor, executeSafe onaylar
-      const usage = await ctx.db.executeSafe(sql`
-        SELECT * FROM usage_log WHERE tenant_id = ${ctx.tenantId} AND month = ${month}
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+
+      // Get metrics from ai_runtime_metrics instead of missing usage_log table
+      const metrics = await ctx.db.executeSafe(sql`
+        SELECT 
+          COUNT(*) as total_ai_messages,
+          SUM(estimated_cost_usd) as estimated_cost_usd,
+          SUM(total_tokens) as total_tokens
+        FROM ai_runtime_metrics 
+        WHERE tenant_id = ${ctx.tenantId} AND created_at >= ${monthStart}
       `);
 
       // tenants tablosu
@@ -90,9 +91,9 @@ export async function getUsageStats() {
 
       return {
         currentMonth: month,
-        totalMessages: usage[0]?.total_messages || 0,
-        totalAiMessages: usage[0]?.total_ai_messages || 0,
-        estimatedCost: parseFloat(usage[0]?.estimated_cost_usd || "0"),
+        totalMessages: parseInt(metrics[0]?.total_ai_messages || "0"), // Base metrics on AI actions for now
+        totalAiMessages: parseInt(metrics[0]?.total_ai_messages || "0"),
+        estimatedCost: parseFloat(metrics[0]?.estimated_cost_usd || "0"),
         limit: tenant[0]?.monthly_message_limit || 500,
         plan: tenant[0]?.plan || "starter"
       };
