@@ -64,32 +64,7 @@ function ActiveStream() {
       <div className="flex-1 space-y-3 overflow-y-auto pr-2 max-h-[300px]">
         <AnimatePresence>
           {events.map((evt, idx) => (
-            <motion.div 
-              key={idx}
-              initial={{ opacity: 0, x: -10 }}
-              animate={{ opacity: 1, x: 0 }}
-              className="flex items-start gap-4 p-3 bg-gray-50/50 rounded-xl border border-gray-100"
-            >
-              <div className="mt-0.5 flex-shrink-0">
-                {evt.type.includes('started') && <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />}
-                {evt.type.includes('completed') && <CheckCircle2 className="w-4 h-4 text-green-500" />}
-                {evt.type.includes('required') && <ShieldAlert className="w-4 h-4 text-amber-500" />}
-                {evt.type.includes('progress') && <Activity className="w-4 h-4 text-purple-500" />}
-              </div>
-              <div className="flex-1">
-                <p className="text-[13px] font-bold text-gray-800">
-                  {evt.type.split('.').slice(1).join(' ').toUpperCase()}
-                </p>
-                {'payload' in evt && evt.payload && (
-                  <pre className="text-[10px] text-gray-500 mt-1 bg-white p-2 border border-gray-100 rounded-lg overflow-x-auto">
-                    {JSON.stringify(evt.payload, null, 2)}
-                  </pre>
-                )}
-              </div>
-              <div className="text-[10px] text-gray-400 font-mono">
-                {new Date(evt.timestamp).toLocaleTimeString()}
-              </div>
-            </motion.div>
+            <EventItem key={evt.eventId || idx} evt={evt} />
           ))}
         </AnimatePresence>
 
@@ -115,3 +90,33 @@ function ActiveStream() {
     </div>
   );
 }
+
+const EventItem = React.memo(({ evt }: { evt: any }) => {
+  return (
+    <motion.div 
+      initial={{ opacity: 0, x: -10 }}
+      animate={{ opacity: 1, x: 0 }}
+      className="flex items-start gap-4 p-3 bg-gray-50/50 rounded-xl border border-gray-100"
+    >
+      <div className="mt-0.5 flex-shrink-0">
+        {evt.type.includes('started') && <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />}
+        {evt.type.includes('completed') && <CheckCircle2 className="w-4 h-4 text-green-500" />}
+        {evt.type.includes('required') && <ShieldAlert className="w-4 h-4 text-amber-500" />}
+        {evt.type.includes('progress') && <Activity className="w-4 h-4 text-purple-500" />}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-[13px] font-bold text-gray-800">
+          {evt.type.split('.').slice(1).join(' ').toUpperCase()}
+        </p>
+        {'payload' in evt && evt.payload && (
+          <pre className="text-[10px] text-gray-500 mt-1 bg-white p-2 border border-gray-100 rounded-lg overflow-x-auto whitespace-pre-wrap break-words max-h-[150px]">
+            {JSON.stringify(evt.payload, null, 2)}
+          </pre>
+        )}
+      </div>
+      <div className="text-[10px] text-gray-400 font-mono whitespace-nowrap">
+        {new Date(evt.timestamp).toLocaleTimeString()}
+      </div>
+    </motion.div>
+  );
+});

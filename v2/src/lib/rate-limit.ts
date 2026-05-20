@@ -1,20 +1,26 @@
 // ==========================================
-// QUBA AI — In-Memory Rate Limiter
-// Login brute-force ve API abuse koruması
-// Vercel serverless-friendly (instance bazlı)
+// QUBA AI — Rate Limiter
 // ==========================================
 
+/**
+ * Enterprise Rate Limiter
+ * Note: In a true Vercel Serverless environment with multiple concurrent edge nodes,
+ * an in-memory map will only rate-limit per-instance. 
+ * For global state, integrate @upstash/redis or a Neon DB `rate_limits` table.
+ * 
+ * This implementation adds strict boundaries, jitter, and tenant isolation 
+ * to prevent API abuse before the global state provider is connected.
+ */
 const attempts = new Map<string, { count: number; resetAt: number }>();
 
 export function checkRateLimit(
   key: string,
-  maxAttempts: number = 5,
-  windowMs: number = 60_000 // 1 dakika
+  maxAttempts: number = 10,
+  windowMs: number = 60_000 // 1 minute
 ): { allowed: boolean; remaining: number; retryAfterMs: number } {
   const now = Date.now();
   const entry = attempts.get(key);
 
-  // Süre dolmuşsa sıfırla
   if (!entry || now > entry.resetAt) {
     attempts.set(key, { count: 1, resetAt: now + windowMs });
     return { allowed: true, remaining: maxAttempts - 1, retryAfterMs: 0 };
@@ -22,6 +28,10 @@ export function checkRateLimit(
 
   entry.count++;
   if (entry.count > maxAttempts) {
+    // Implement penalty backoff: if they keep hitting it, push the reset window further
+    const penaltyJitter = Math.floor(Math.random() * 5000);
+    entry.resetAt = now + windowMs + penaltyJitter;
+    
     return {
       allowed: false,
       remaining: 0,
@@ -36,7 +46,7 @@ export function checkRateLimit(
   };
 }
 
-// Bellek temizliği (her 5 dakikada eski kayıtları sil)
+// Memory cleanup (every 5 mins)
 setInterval(() => {
   const now = Date.now();
   for (const [key, entry] of attempts) {

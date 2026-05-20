@@ -1,29 +1,38 @@
 import { NextRequest } from 'next/server';
 import { PipelineOrchestrator } from '@/lib/domain/ingestion/orchestrator/pipeline-orchestrator';
 import { GeminiAdapter } from '@/lib/domain/ai/providers/gemini-adapter';
-import { PipelineRealtimeEvent } from '@/lib/core/events/pipeline-events';
 
 export const runtime = 'edge';
+export const dynamic = 'force-dynamic';
 
 /**
  * Enterprise SSE Route for Realtime Pipeline Status
- * Supports Last-Event-ID for resumability and AbortSignal for cancellation.
+ * Supports Last-Event-ID for resumability, AbortSignal for cancellation, and Heartbeat.
  */
 export async function GET(req: NextRequest) {
   const encoder = new TextEncoder();
-  const lastEventId = req.headers.get('Last-Event-ID');
-  const signal = req.signal; // Abort signal when client disconnects
+  const lastEventId = req.headers.get('Last-Event-ID') || req.nextUrl.searchParams.get('lastEventId');
+  const signal = req.signal;
 
   const readable = new ReadableStream({
     async start(controller) {
       // Send an initial connected message
       controller.enqueue(encoder.encode(`id: 0\nevent: connected\ndata: ${JSON.stringify({ status: 'connected', resumable: !!lastEventId })}\n\n`));
 
+      // 10s Heartbeat Ping to prevent proxy timeouts
+      const pingInterval = setInterval(() => {
+        controller.enqueue(encoder.encode(`event: ping\ndata: ${JSON.stringify({ status: 'ping' })}\n\n`));
+      }, 10000);
+
       const aiProvider = new GeminiAdapter();
       const orchestrator = new PipelineOrchestrator(aiProvider);
 
       const url = new URL(req.url);
       const scenario = url.searchParams.get('scenario') || 'normal';
+
+      // Tenant Validation: In a real system, pull this from JWT or SSE Ticket.
+      // For now, using query or default to 'demo_tenant_id'
+      const tenantId = url.searchParams.get('tenantId') || 'demo_tenant_id';
 
       const mockRawData = scenario === 'review_needed' 
         ? JSON.stringify({ FullName: 'Mustafa K.', Contact: 'No phone given, email is musti@test', Note: 'Wants an appointment ASAP but didn\'t say which branch' })
@@ -35,26 +44,27 @@ export async function GET(req: NextRequest) {
         { name: 'phone', type: 'string', required: true }
       ];
 
-      let eventIndex = lastEventId ? parseInt(lastEventId, 10) : 0;
-
       try {
-        await orchestrator.runPipeline('demo_tenant_id', mockRawData, expectedSchema, signal, (event: PipelineRealtimeEvent) => {
-          eventIndex++;
-          // Standard SSE format: id, event, data
-          const ssePayload = `id: ${eventIndex}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
+        await orchestrator.runPipeline(tenantId, mockRawData, expectedSchema, signal, (event: any) => {
+          // Skip events we've already processed (Resumability logic)
+          if (lastEventId && event.eventId <= lastEventId) {
+            return;
+          }
+          const ssePayload = `id: ${event.eventId}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
           controller.enqueue(encoder.encode(ssePayload));
         });
         
         // Final close event
-        controller.enqueue(encoder.encode(`id: ${eventIndex+1}\nevent: done\ndata: ${JSON.stringify({ status: 'done' })}\n\n`));
+        controller.enqueue(encoder.encode(`event: done\ndata: ${JSON.stringify({ status: 'done' })}\n\n`));
       } catch (err: any) {
         if (err.name === 'AbortError' || signal.aborted) {
-          console.log('[SSE] Client disconnected, pipeline aborted');
-          // Graceful termination handled by orchestrator
+          console.log('[SSE] Client disconnected, pipeline aborted gracefully');
         } else {
+          console.error('[SSE] Pipeline error:', err);
           controller.enqueue(encoder.encode(`event: error\ndata: ${JSON.stringify({ status: 'error', message: err.message })}\n\n`));
         }
       } finally {
+        clearInterval(pingInterval);
         controller.close();
       }
     },

@@ -16,7 +16,8 @@ export type PipelineState =
   | 'canceled';
 
 export interface BasePipelineEvent {
-  version: 1; // Strict versioning for future-proofing
+  eventId: string; // Idempotency key
+  version: 1;
   pipelineRunId: string;
   tenantId: string;
   timestamp: string;

@@ -34,6 +34,9 @@ interface PipelineStoreState {
   resetPipeline: () => void;
 }
 
+const STORAGE_KEY = 'pipeline_draft_snapshot_v2';
+const SCHEMA_VERSION = 2;
+
 export const usePipelineStore = create<PipelineStoreState>((set, get) => ({
   isConnected: false,
   isReconnecting: false,
@@ -56,6 +59,11 @@ export const usePipelineStore = create<PipelineStoreState>((set, get) => ({
 
   addEvent: (event) => {
     set((state) => {
+      // Idempotency Guard: prevent duplicate events from SSE replays
+      if (state.events.some(e => e.eventId === event.eventId)) {
+        return state; // No-op
+      }
+
       const newEvents = [...state.events, event];
       
       // Compute aggregated metrics based on the event type
@@ -65,36 +73,42 @@ export const usePipelineStore = create<PipelineStoreState>((set, get) => ({
       let mappedFields = { ...state.mappedFields };
 
       if (event.type === 'pipeline.semantic_analysis.completed') {
-        aiLatencyMs += event.payload.latencyMs;
-        mappedFields = { ...mappedFields, ...event.payload.mappedFields };
+        // Safe access payload properties knowing the event type
+        const payload = (event as any).payload;
+        aiLatencyMs += payload.latencyMs || 0;
+        mappedFields = { ...mappedFields, ...(payload.mappedFields || {}) };
       }
       
       if (event.type === 'pipeline.duplicate_resolution.completed') {
-        totalDuplicates += event.payload.duplicatesFound;
+        const payload = (event as any).payload;
+        totalDuplicates += payload.duplicatesFound || 0;
       }
 
       if (event.type === 'pipeline.human_review.required') {
+        const payload = (event as any).payload;
         reviewSession = {
           required: true,
-          reason: event.payload.reason,
-          sessionId: event.payload.sessionId,
-          suggestedResolution: event.payload.suggestedResolution,
+          reason: payload.reason,
+          sessionId: payload.sessionId,
+          suggestedResolution: payload.suggestedResolution,
         };
       }
 
       const newState = {
         events: newEvents,
-        currentState: event.state,
+        currentState: (event as any).state || state.currentState,
         aiLatencyMs,
         totalDuplicates,
         reviewSession,
-        mappedFields
+        mappedFields,
+        lastEventId: event.eventId,
+        _schemaVersion: SCHEMA_VERSION
       };
 
       // Background persist to IDB
-      idb.set('pipeline_draft_snapshot', newState).catch(console.error);
+      idb.set(STORAGE_KEY, newState).catch(console.error);
 
-      return newState;
+      return newState as Partial<PipelineStoreState>;
     });
   },
 
@@ -112,11 +126,10 @@ export const usePipelineStore = create<PipelineStoreState>((set, get) => ({
       sessionId: null,
       suggestedResolution: null
     }
-    // Also we would typically fire an API call here to submit the decision to backend
   }),
 
   resetPipeline: () => {
-    idb.del('pipeline_draft_snapshot').catch(console.error);
+    idb.del(STORAGE_KEY).catch(console.error);
     set({
       currentState: 'idle',
       events: [],
@@ -132,8 +145,18 @@ export const usePipelineStore = create<PipelineStoreState>((set, get) => ({
 
 // Function to hydrate store on mount
 export async function hydratePipelineStore() {
-  const state = await idb.get('pipeline_draft_snapshot');
-  if (state) {
-    usePipelineStore.setState(state);
+  try {
+    const state: any = await idb.get(STORAGE_KEY);
+    if (state) {
+      if (state._schemaVersion === SCHEMA_VERSION) {
+        usePipelineStore.setState(state);
+      } else {
+        console.warn(`[IDB] Schema version mismatch. Expected ${SCHEMA_VERSION}, found ${state._schemaVersion}. Discarding cache.`);
+        await idb.del(STORAGE_KEY);
+      }
+    }
+  } catch (err) {
+    console.error('[IDB] Failed to hydrate pipeline store, cache may be corrupted.', err);
+    await idb.del(STORAGE_KEY).catch(() => {});
   }
 }
