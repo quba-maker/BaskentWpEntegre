@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, ArrowRight, ArrowLeft, Check, Sparkles } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -18,6 +18,7 @@ export interface IntegrationWizardProps {
   providerIcon: React.ReactNode;
   steps: WizardStep[];
   onComplete: () => void;
+  localStorageKey?: string;
 }
 
 export function IntegrationWizard({
@@ -27,9 +28,28 @@ export function IntegrationWizard({
   providerName,
   providerIcon,
   steps,
-  onComplete
+  onComplete,
+  localStorageKey
 }: IntegrationWizardProps) {
-  const [currentStepIndex, setCurrentStepIndex] = useState(0);
+  const [currentStepIndex, setCurrentStepIndex] = useState(() => {
+    if (typeof window !== 'undefined' && localStorageKey) {
+      const saved = localStorage.getItem(`${localStorageKey}_step`);
+      if (saved) {
+        const parsed = parseInt(saved, 10);
+        return isNaN(parsed) ? 0 : parsed;
+      }
+    }
+    return 0;
+  });
+
+  useEffect(() => {
+    if (localStorageKey) {
+      localStorage.setItem(`${localStorageKey}_step`, currentStepIndex.toString());
+    }
+  }, [currentStepIndex, localStorageKey]);
+
+  // Reset if modal is closed and re-opened without a draft (in this case, we always want draft, so we only reset if told to)
+  // Actually, we keep draft state.
 
   if (!isOpen) return null;
 
