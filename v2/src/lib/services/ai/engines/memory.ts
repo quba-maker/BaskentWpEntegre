@@ -11,12 +11,26 @@ export class MemoryEngine {
    */
   static async summarizeConversation(tenantId: string, conversationId: string): Promise<void> {
     try {
-      // 1. Fetch raw messages to summarize
+      // 1. Fetch conversation to get phone number
+      const conv = await sql`
+        SELECT phone_number FROM conversations 
+        WHERE id::text = ${conversationId}::text AND tenant_id = ${tenantId}
+        LIMIT 1;
+      `;
+
+      if (conv.length === 0) {
+        log.warn(`[MEMORY_SKIPPED] Conversation ${conversationId} not found for tenant ${tenantId}`);
+        return;
+      }
+
+      const phone = conv[0].phone_number;
+
+      // 2. Fetch raw messages to summarize (linked by phone_number)
       const messages = await sql`
         SELECT content, direction, created_at
         FROM messages
         WHERE tenant_id = ${tenantId} 
-          AND conversation_id = ${conversationId}
+          AND phone_number = ${phone}
         ORDER BY created_at ASC
         LIMIT 50; -- Only get latest or chunked
       `;
@@ -27,7 +41,7 @@ export class MemoryEngine {
         `[${m.direction === 'in' ? 'Müşteri' : 'Asistan'}]: ${m.content}`
       ).join('\n');
 
-      // 2. Generate Summary using LLM
+      // 3. Generate Summary using LLM
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey) throw new Error('GEMINI_API_KEY is missing');
 
@@ -67,7 +81,7 @@ export class MemoryEngine {
       
       const parsed = JSON.parse(cleanedJson);
 
-      // 3. Save to conversation_memory
+      // 4. Save to conversation_memory
       await sql`
         INSERT INTO conversation_memory (
           tenant_id, conversation_id, summary_text, buying_intent, sentiment, objections, last_message_count
@@ -85,57 +99,48 @@ export class MemoryEngine {
 
       log.info(`[MEMORY_UPDATED] Rolling memory compressed for conv: ${conversationId}`);
 
-      // 4. Sync rolling AI summary back to matching lead notes & Google Sheets
+      // 5. Sync rolling AI summary back to matching lead notes & Google Sheets
       try {
-        const conv = await sql`
-          SELECT phone_number FROM conversations 
-          WHERE id::text = ${conversationId}::text AND tenant_id = ${tenantId}
-          LIMIT 1;
-        `;
-
-        if (conv.length > 0) {
-          const phone = conv[0].phone_number;
-          const cleanPhone = phone.replace(/[^0-9]/g, '');
-          if (cleanPhone.length >= 10) {
-            const suffix = cleanPhone.substring(cleanPhone.length - 10);
-            
-            const matchingLeads = await sql`
-              SELECT id, notes FROM leads
-              WHERE phone_number LIKE ${'%' + suffix}
-                AND tenant_id = ${tenantId}
-              LIMIT 5;
-            `;
-            
-            for (const lead of matchingLeads) {
-              if (!lead.notes || lead.notes.trim() === '') {
-                await sql`
-                  UPDATE leads
-                  SET notes = ${parsed.summary_text}
-                  WHERE id = ${lead.id} AND tenant_id = ${tenantId};
-                `;
-                
-                log.info(`[MEMORY_SYNC] Lead ${lead.id} notes automatically updated with AI summary.`);
-                
-                const SHEET_URL = process.env.GOOGLE_SHEET_UPDATE_URL || process.env.GOOGLE_SHEET_URL;
-                if (SHEET_URL) {
-                  try {
-                    const sheetResponse = await fetch(SHEET_URL, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({
-                        action: 'updateNoteByPhone',
-                        phone: phone,
-                        note: parsed.summary_text
-                      })
-                    });
-                    if (!sheetResponse.ok) {
-                      log.warn(`[MEMORY_SYNC] Google Sheets note sync returned status ${sheetResponse.status}`);
-                    } else {
-                      log.info(`[MEMORY_SYNC] Lead ${lead.id} AI summary successfully synced to Google Sheets.`);
-                    }
-                  } catch (sheetErr) {
-                    log.warn(`[MEMORY_SYNC] Google Sheets note sync failed for phone: ${phone}`, { error: String(sheetErr) });
+        const cleanPhone = phone.replace(/[^0-9]/g, '');
+        if (cleanPhone.length >= 10) {
+          const suffix = cleanPhone.substring(cleanPhone.length - 10);
+          
+          const matchingLeads = await sql`
+            SELECT id, notes FROM leads
+            WHERE phone_number LIKE ${'%' + suffix}
+              AND tenant_id = ${tenantId}
+            LIMIT 5;
+          `;
+          
+          for (const lead of matchingLeads) {
+            if (!lead.notes || lead.notes.trim() === '') {
+              await sql`
+                UPDATE leads
+                SET notes = ${parsed.summary_text}
+                WHERE id = ${lead.id} AND tenant_id = ${tenantId};
+              `;
+              
+              log.info(`[MEMORY_SYNC] Lead ${lead.id} notes automatically updated with AI summary.`);
+              
+              const SHEET_URL = process.env.GOOGLE_SHEET_UPDATE_URL || process.env.GOOGLE_SHEET_URL;
+              if (SHEET_URL) {
+                try {
+                  const sheetResponse = await fetch(SHEET_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      action: 'updateNoteByPhone',
+                      phone: phone,
+                      note: parsed.summary_text
+                    })
+                  });
+                  if (!sheetResponse.ok) {
+                    log.warn(`[MEMORY_SYNC] Google Sheets note sync returned status ${sheetResponse.status}`);
+                  } else {
+                    log.info(`[MEMORY_SYNC] Lead ${lead.id} AI summary successfully synced to Google Sheets.`);
                   }
+                } catch (sheetErr) {
+                  log.warn(`[MEMORY_SYNC] Google Sheets note sync failed for phone: ${phone}`, { error: String(sheetErr) });
                 }
               }
             }
