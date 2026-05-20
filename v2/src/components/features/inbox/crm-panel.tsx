@@ -317,19 +317,24 @@ export function ContextPanel() {
                     "{aiText}"
                   </p>
                   
-                  {(!notes || notes.trim() === "") && (
+                  {notes !== aiText && (
                     <button
                       type="button"
                       onClick={async () => {
+                        // 1. Instantly update local UI
                         setNotes(aiText);
                         setIsSaving(true);
                         setSaveStatus("saving");
+                        
+                        // 2. Instantly update the store to prevent the `useEffect` from resetting it during the await
+                        useInboxStore.getState().setActiveContact(activeContact.id, {
+                          ...activeContact,
+                          notes: aiText,
+                        });
+
+                        // 3. Send request
                         const res = await updateCrmData(activeContact.id, stage, department, country, aiText);
                         if (res.success) {
-                          useInboxStore.getState().setActiveContact(activeContact.id, {
-                            ...activeContact,
-                            notes: aiText,
-                          });
                           mutate((key) => Array.isArray(key) && key[0] === "conversations");
                           setSaveStatus("saved");
                           setTimeout(() => setSaveStatus("idle"), 2000);
@@ -340,10 +345,10 @@ export function ContextPanel() {
                         setIsSaving(false);
                       }}
                       disabled={isSaving}
-                      className="w-full py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-md cursor-pointer disabled:opacity-50"
+                      className="w-full py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-md cursor-pointer disabled:opacity-50 hover:opacity-90"
                       style={{ background: "#AF52DE", color: "white" }}
                     >
-                      <FileText className="w-3.5 h-3.5" /> Nota Aktar ve Kaydet
+                      <FileText className="w-3.5 h-3.5" /> {(!notes || notes.trim() === "") ? "Nota Aktar ve Kaydet" : "AI ile Güncelle ve Kaydet"}
                     </button>
                   )}
                 </div>
