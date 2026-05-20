@@ -80,6 +80,11 @@ export const messages = pgTable('messages', {
   modelUsed: text('model_used'),
   phoneNumber: text('phone_number'),
   
+  // Delivery & Reliability
+  retryAttempt: integer('retry_attempt').default(0),
+  deliveryStatus: text('delivery_status'),
+  deliveryError: text('delivery_error'),
+  
   // AI Response Safety Ledger & Tracing
   latencyMs: integer('latency_ms'),
   estimatedCost: numeric('estimated_cost', { precision: 10, scale: 6 }),
@@ -113,5 +118,20 @@ export const conversationSnapshots = pgTable('conversation_snapshots', {
   conversationId: uuid('conversation_id').references(() => conversations.id, { onDelete: 'cascade' }).notNull(),
   workflowRunId: uuid('workflow_run_id'), // Optional link to the run that created it
   snapshotData: jsonb('snapshot_data').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
+
+export const aiUsageLedger = pgTable('ai_usage_ledger', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').references(() => tenants.id, { onDelete: 'cascade' }).notNull(),
+  conversationId: uuid('conversation_id').references(() => conversations.id, { onDelete: 'set null' }),
+  workflowRunId: uuid('workflow_run_id'), // optional cross-reference
+  messageId: uuid('message_id').references(() => messages.id, { onDelete: 'set null' }),
+  model: text('model'),
+  promptTokens: integer('prompt_tokens'),
+  completionTokens: integer('completion_tokens'),
+  totalTokens: integer('total_tokens'),
+  estimatedCost: numeric('estimated_cost', { precision: 10, scale: 6 }),
+  latencyMs: integer('latency_ms'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });

@@ -73,6 +73,12 @@ export const workflowRuns = pgTable('workflow_runs', {
   status: text('status').default('queued'),
   triggeredBy: text('triggered_by'),
   promptBindingVersions: jsonb('prompt_binding_versions'),
+  
+  // Multi-Agent & Execution Strategy
+  agentType: text('agent_type'),
+  orchestratorVersion: text('orchestrator_version'),
+  executionStrategy: text('execution_strategy'),
+  
   errorDetails: jsonb('error_details'),
   correlationId: text('correlation_id'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
