@@ -61,9 +61,9 @@ export class MemoryEngine {
         Format:
         {
           "summary_text": "Kısa ve profesyonel görüşme özeti (Son kararları içermeli).",
-          "buying_intent": "HOT" | "WARM" | "COLD",
-          "sentiment": "POSITIVE" | "NEUTRAL" | "NEGATIVE",
-          "objections": ["fiyat yüksek", "doktor tecrübesi", vb.]
+          "buying_intent": "HOT",
+          "sentiment": "POSITIVE",
+          "objections": ["fiyat yüksek", "zaman uymuyor"]
         }
 
         Görüşme:
@@ -171,6 +171,7 @@ export class MemoryEngine {
       }
     } catch (e) {
       log.error('[MEMORY_ENGINE] Error generating summary', e instanceof Error ? e : new Error(String(e)));
+      throw e;
     }
   }
 }
