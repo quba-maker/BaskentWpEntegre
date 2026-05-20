@@ -114,7 +114,18 @@ export function useRealtimeReconciliation(tenantId: string) {
       if (!oldData) return [projection.messageData]; // Cache miss
 
       // 1. Deduplication (Optimistic ID or ProviderMessageID)
-      const existingMsgIndex = oldData.findIndex((m) => m.id === payload.id);
+      let existingMsgIndex = oldData.findIndex((m) => m.id === payload.id);
+
+      // Fallback for optimistic UI matching: match 'temp-' ids by text and sender within 60s window
+      if (existingMsgIndex === -1 && payload.sender === 'agent') {
+        const payloadTimeMs = new Date(payload.createdAt || payload.updatedAt || Date.now()).getTime();
+        existingMsgIndex = oldData.findIndex((m) => 
+          String(m.id).startsWith("temp-") && 
+          m.sender === payload.sender && 
+          m.text === payload.content &&
+          Math.abs((m.timeMs || 0) - payloadTimeMs) < 60000
+        );
+      }
 
       if (existingMsgIndex !== -1) {
         const existing = oldData[existingMsgIndex];
