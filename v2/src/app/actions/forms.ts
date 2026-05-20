@@ -171,133 +171,92 @@ export async function syncGoogleSheets() {
   return withActionGuard(
     { actionName: 'syncGoogleSheets', roles: ['owner', 'admin'] },
     async (ctx) => {
-      const SHEETS_API_KEY = process.env.GOOGLE_SHEETS_API_KEY;
-      const SPREADSHEET_ID = process.env.GOOGLE_SPREADSHEET_ID;
-      
-      if (!SHEETS_API_KEY || !SPREADSHEET_ID) {
-        throw new Error("Google Sheets API key or Spreadsheet ID is missing in ENV.");
+      // Async Orchestration - Send to QStash
+      const QSTASH_URL = process.env.QSTASH_URL || "https://qstash.upstash.io/v2/publish/";
+      const QSTASH_TOKEN = process.env.QSTASH_TOKEN;
+      const NEXT_PUBLIC_BASE_URL = process.env.NEXT_PUBLIC_BASE_URL;
+
+      if (!QSTASH_TOKEN) {
+        throw new Error("QStash token is missing. Background queues are disabled.");
       }
 
-      const BASE_URL = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}`;
+      if (!NEXT_PUBLIC_BASE_URL) {
+        throw new Error("NEXT_PUBLIC_BASE_URL is missing. Cannot determine webhook destination.");
+      }
 
-      const configRes = await ctx.db.executeSafe(sql`
-        SELECT value FROM settings 
-        WHERE key = 'google_sheets_config' AND tenant_id = ${ctx.tenantId} LIMIT 1
+      // Check if integration exists and is healthy
+      const integrations = await ctx.db.executeSafe(sql`
+        SELECT health_status FROM tenant_integrations 
+        WHERE tenant_id = ${ctx.tenantId} AND provider = 'google_sheets' LIMIT 1
       `);
-      
-      let activeSheets: string[] = [];
-      if (configRes.length > 0) {
-        const config = JSON.parse(configRes[0].value);
-        activeSheets = config.activeSheets || [];
+
+      if (integrations.length === 0) {
+        return { success: false, error: "Google Sheets entegrasyonu bulunamadı. Lütfen ayarlardan kurulum yapın." };
       }
 
-      const metaResp = await fetch(`${BASE_URL}?key=${SHEETS_API_KEY}&fields=sheets.properties`);
-      const metaData = await metaResp.json();
-      
-      if (!metaData.sheets) {
-        throw new Error("Failed to fetch sheets metadata.");
+      if (integrations[0].health_status === 'expired_token' || integrations[0].health_status === 'quota_exceeded') {
+        return { success: false, error: "Entegrasyon durumu sorunlu (" + integrations[0].health_status + "). Lütfen bağlantıyı güncelleyin." };
       }
 
-      let tabs = metaData.sheets
-        .filter((s: any) => !s.properties.hidden)
-        .map((s: any) => s.properties.title);
-        
-      if (activeSheets.length > 0) {
-        tabs = tabs.filter((t: string) => activeSheets.includes(t));
+      const destinationUrl = `${NEXT_PUBLIC_BASE_URL}/api/webhooks/qstash/sync`;
+
+      const correlationId = crypto.randomUUID();
+      const pipelineRunId = `sync_${Date.now()}`;
+
+      const qstashRes = await fetch(QSTASH_URL + destinationUrl, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${QSTASH_TOKEN}`,
+          "Content-Type": "application/json",
+          "Upstash-Delay": "0"
+        },
+        body: JSON.stringify({ 
+          tenantId: ctx.tenantId,
+          initiatedBy: ctx.userId,
+          correlationId,
+          pipelineRunId
+        })
+      });
+
+      if (!qstashRes.ok) {
+        const err = await qstashRes.text();
+        throw new Error(`Failed to queue sync job: ${err}`);
       }
 
-      if (tabs.length === 0) {
-        return { success: true, message: "Senkronize edilecek sekme bulunamadı." };
+      // ----------------------------------------------------
+      // Init SSE Status in Redis (using Upstash Redis)
+      // ----------------------------------------------------
+      try {
+        const { Redis } = await import('@upstash/redis');
+        const redis = Redis.fromEnv();
+        await redis.set(`sync_status:${ctx.tenantId}:${correlationId}`, {
+          status: 'queued',
+          progress: 0,
+          message: 'Job queued successfully',
+          updatedAt: new Date().toISOString()
+        }, { ex: 3600 }); // expire in 1 hour
+      } catch(e) {
+        // Silently fail Redis so we don't break the main flow
       }
 
-      const rangeParams = tabs.map((t: string) => `ranges=${encodeURIComponent(t)}`).join('&');
-      const batchUrl = `${BASE_URL}/values:batchGet?key=${SHEETS_API_KEY}&${rangeParams}&valueRenderOption=FORMATTED_VALUE`;
-      
-      const batchResp = await fetch(batchUrl);
-      const batchData = await batchResp.json();
+      logAudit({
+        tenantId: ctx.tenantId,
+        userId: ctx.userId,
+        userEmail: ctx.email,
+        action: "google_sheets_sync_queued",
+        entityType: "integration",
+        entityId: "google_sheets",
+        details: { correlationId, pipelineRunId }
+      });
 
-      let newLeadsCount = 0;
-
-      for (let i = 0; i < batchData.valueRanges.length; i++) {
-        const vr = batchData.valueRanges[i];
-        const tabName = tabs[i];
-        const values = vr.values || [];
-        
-        if (values.length <= 1) continue;
-
-        const headers = values[0].map((h: string) => String(h).toLowerCase().trim());
-        
-        const phoneIdx = headers.findIndex((h: string) => h.includes('telefon') || h.includes('phone') || h === 'numara' || h.includes('cep'));
-        const nameIdx = headers.findIndex((h: string) => !h.endsWith('id') && !h.endsWith('_id') && !h.includes(' id') && (h.includes('isim') || h.includes('soyad') || h === 'ad' || h === 'adı' || h === 'adınız' || h === 'name' || h === 'full name' || h === 'full_name'));
-        const emailIdx = headers.findIndex((h: string) => h.includes('mail') || h.includes('e-posta'));
-        const countryIdx = headers.findIndex((h: string) => h.includes('ülke') || h.includes('country'));
-        const dateIdx = headers.findIndex((h: string) => h.includes('tarih') || h.includes('date') || h.includes('created') || h.includes('zaman') || h.includes('time'));
-        const noteIdx = headers.findIndex((h: string) => h === 'not' || h === 'notlar' || h === 'notes' || h === 'note' || h.includes('geri dönüş') || h.includes('açıklama') || h.includes('feedback') || h === 'açıklamalar');
-        const formNameIdx = headers.findIndex((h: string) => !h.endsWith('id') && !h.endsWith('_id') && !h.includes(' id') && (h.includes('form adı') || h.includes('form name') || h.includes('form_name') || h.includes('kampanya adı') || h.includes('campaign_name') || h.includes('campaign name') || h === 'kampanya' || h === 'campaign' || h === 'form'));
-
-        if (phoneIdx === -1) continue;
-
-        for (let r = 1; r < values.length; r++) {
-          const row = values[r];
-          let phone = row[phoneIdx];
-          if (!phone) continue;
-          
-          phone = String(phone).replace(/[^0-9]/g, '');
-          if (phone.length < 10) continue;
-          phone = phone.substring(0, 20);
-
-          let name = nameIdx !== -1 && row[nameIdx] ? String(row[nameIdx]).substring(0, 100) : null;
-          let email = emailIdx !== -1 && row[emailIdx] ? String(row[emailIdx]).substring(0, 200) : null;
-          let formName = formNameIdx !== -1 && row[formNameIdx] ? String(row[formNameIdx]).substring(0, 200) : tabName;
-          let dateStr = dateIdx !== -1 && row[dateIdx] ? String(row[dateIdx]) : null;
-          let noteStr = noteIdx !== -1 && row[noteIdx] ? String(row[noteIdx]).substring(0, 5000) : null;
-          
-          const raw_data: any = {};
-          headers.forEach((h: string, idx: number) => {
-            raw_data[h] = row[idx] || "";
-          });
-
-          // Idempotency: Mükerrer kayıt engeli (Sağdan 10 hane ile arama)
-          const existing = await ctx.db.executeSafe(sql`
-            SELECT id FROM leads 
-            WHERE phone_number LIKE '%' || RIGHT(${phone}, 10) || '%' 
-              AND tenant_id = ${ctx.tenantId} LIMIT 1
-          `);
-          
-          if (existing.length === 0) {
-            let createdAt = new Date();
-            if (dateStr) {
-              const parts = dateStr.match(/(\d+)/g);
-              if (parts && parts.length >= 3) {
-                const p0 = parseInt(parts[0]);
-                const p1 = parseInt(parts[1]) - 1;
-                const p2 = parseInt(parts[2]);
-                let y = p2, m = p1, d = p0;
-                if (p0 > 31) { y = p0; d = p2; }
-                const hr = parts.length > 3 ? parseInt(parts[3]) : 0;
-                const min = parts.length > 4 ? parseInt(parts[4]) : 0;
-                const sec = parts.length > 5 ? parseInt(parts[5]) : 0;
-                const parsedDate = new Date(y, m, d, hr, min, sec);
-                if (!isNaN(parsedDate.getTime())) createdAt = parsedDate;
-              } else {
-                const standardParsed = new Date(dateStr);
-                if (!isNaN(standardParsed.getTime())) createdAt = standardParsed;
-              }
-            }
-
-            await ctx.db.executeSafe(sql`
-              INSERT INTO leads (tenant_id, phone_number, patient_name, email, form_name, raw_data, stage, created_at, notes)
-              VALUES (${ctx.tenantId}, ${phone}, ${name}, ${email}, ${formName}, ${JSON.stringify(raw_data)}, 'new', ${createdAt.toISOString()}, ${noteStr})
-            `);
-            newLeadsCount++;
-          }
-        }
-      }
-
-      return { success: true, message: `${newLeadsCount} yeni kayıt eklendi.` };
+      return { 
+        success: true, 
+        message: "Senkronizasyon kuyruğa eklendi. İşlem arka planda tamamlanacak.",
+        correlationId 
+      };
     }
   ).then(res => {
     if (!res.success) return { success: false, error: res.error };
-    return { success: true, message: res.data?.message };
+    return { success: true, message: res.data?.message, correlationId: res.data?.correlationId };
   });
 }

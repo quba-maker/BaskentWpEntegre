@@ -5,6 +5,7 @@ import Link from "next/link";
 import { getSession } from "@/lib/auth/session";
 import { getTenantBootstrapData } from "@/lib/domain/tenant/bootstrap";
 import { Metadata } from "next";
+import { ImpersonationBanner } from "@/components/layout/impersonation-banner";
 
 // ==========================================
 // Dashboard Layout — Sidebar + Mobile Nav
@@ -54,6 +55,9 @@ export default async function DashboardLayout({
 
       {/* Main Content */}
       <main className="flex-1 overflow-auto h-full flex flex-col relative pb-[env(safe-area-inset-bottom)] md:pb-0 bg-[--q-light-bg]">
+        {session?.impersonatedTenantId && tenantData && (
+          <ImpersonationBanner tenantName={tenantData.profile.name} />
+        )}
         <DashboardProviders tenantId={session?.tenantId} tenantData={tenantData} role={role}>
           {children}
         </DashboardProviders>

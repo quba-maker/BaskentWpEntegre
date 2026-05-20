@@ -9,6 +9,7 @@ export async function logAudit(params: {
   tenantId?: string | null;
   userId?: string | null;
   userEmail?: string | null;
+  impersonatorId?: string | null; // Added for Platform Admin Impersonation
   action: string;
   entityType?: string;
   entityId?: string;
@@ -16,11 +17,12 @@ export async function logAudit(params: {
 }) {
   try {
     await sql`
-      INSERT INTO audit_logs (tenant_id, user_id, user_email, action, entity_type, entity_id, details)
+      INSERT INTO audit_logs (tenant_id, user_id, user_email, impersonator_id, action, entity_type, entity_id, details)
       VALUES (
         ${params.tenantId || null},
         ${params.userId || null},
         ${params.userEmail || null},
+        ${params.impersonatorId || null},
         ${params.action},
         ${params.entityType || null},
         ${params.entityId || null},

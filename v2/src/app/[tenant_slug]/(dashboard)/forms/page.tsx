@@ -2,10 +2,10 @@
 
 import { useState, useEffect } from "react";
 import useSWRInfinite from "swr/infinite";
-import { Search, MessageCircle, X, FileText, ChevronRight, CheckCircle2, Bot, Save, StickyNote, Sparkles } from "lucide-react";
-import { getForms, getCampaignNames, updateLeadNotes } from "@/app/actions/forms";
+import { Search, MessageCircle, X, FileText, ChevronRight, CheckCircle2, Bot, Save, StickyNote, Sparkles, RefreshCw } from "lucide-react";
+import { getForms, getCampaignNames, updateLeadNotes, syncGoogleSheets } from "@/app/actions/forms";
 import { useInboxStore } from "@/store/inbox-store";
-import { useRouter } from "next/navigation";
+import { useRouter, useParams } from "next/navigation";
 
 const formatDate = (dateString: string) => {
   if (!dateString) return "";
@@ -21,6 +21,8 @@ const formatTime = (dateString: string) => {
 
 export default function FormsPage() {
   const router = useRouter();
+  const params = useParams();
+  const tenantId = typeof params.tenant_slug === 'string' ? params.tenant_slug : 'baskent';
   const { setActiveContact } = useInboxStore();
   
   const [searchInput, setSearchInput] = useState("");
@@ -31,6 +33,9 @@ export default function FormsPage() {
   const [selectedForm, setSelectedForm] = useState<any>(null);
   const [notes, setNotes] = useState("");
   const [isSavingNotes, setIsSavingNotes] = useState(false);
+
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncProgress, setSyncProgress] = useState({ status: '', progress: 0, message: '' });
 
   useEffect(() => {
     getCampaignNames().then(setCampaigns);
@@ -99,6 +104,59 @@ export default function FormsPage() {
         </div>
         
         <div className="flex flex-col md:flex-row items-center gap-3">
+          {/* Sync Button & Progress */}
+          <div className="relative flex items-center">
+            {isSyncing ? (
+              <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 text-blue-600 rounded-xl border border-blue-100 text-sm font-medium">
+                <RefreshCw className="w-4 h-4 animate-spin" />
+                <span className="min-w-[120px]">{syncProgress.message || 'Senkronize ediliyor...'} {syncProgress.progress > 0 && `${syncProgress.progress}%`}</span>
+              </div>
+            ) : (
+              <button
+                onClick={async () => {
+                  try {
+                    setIsSyncing(true);
+                    setSyncProgress({ status: 'starting', progress: 0, message: 'İşlem başlatılıyor...' });
+                    const res = await syncGoogleSheets();
+                    if (res.success && res.correlationId) {
+                      // Start SSE listening
+                      const eventSource = new EventSource(`/api/sse/sync-progress?tenantId=${encodeURIComponent(tenantId)}&correlationId=${encodeURIComponent(res.correlationId)}`);
+                      
+                      eventSource.onmessage = (event) => {
+                        try {
+                          const data = JSON.parse(event.data);
+                          setSyncProgress(data);
+                          if (data.status === 'completed') {
+                            eventSource.close();
+                            setTimeout(() => setIsSyncing(false), 2000);
+                            mutate(); // refresh data
+                          } else if (data.status === 'error') {
+                            eventSource.close();
+                            setTimeout(() => setIsSyncing(false), 4000);
+                          }
+                        } catch (e) {}
+                      };
+                      eventSource.onerror = () => {
+                        eventSource.close();
+                        setIsSyncing(false);
+                      };
+                    } else {
+                      setIsSyncing(false);
+                      alert(res.error || "Beklenmeyen bir hata oluştu.");
+                    }
+                  } catch (e) {
+                    setIsSyncing(false);
+                    alert("Senkronizasyon başlatılamadı.");
+                  }
+                }}
+                className="flex items-center gap-2 px-4 py-2.5 bg-white/60 backdrop-blur-md border border-white/60 hover:bg-white text-sm font-semibold text-[#1D1D1F] rounded-xl shadow-[0_2px_10px_rgba(0,0,0,0.02)] transition-all cursor-pointer"
+              >
+                <RefreshCw className="w-4 h-4" />
+                Senkronize Et
+              </button>
+            )}
+          </div>
+
           <div className="relative w-full md:w-64">
             <Search className="absolute left-3 top-2.5 h-4 w-4 text-[#86868B]" />
             <input 

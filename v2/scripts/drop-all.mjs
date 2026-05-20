@@ -2,6 +2,12 @@ import { neon } from '@neondatabase/serverless';
 import dotenv from 'dotenv';
 dotenv.config({ path: '.env.local' });
 
+if (process.env.VERCEL_ENV === "production" || process.env.NODE_ENV === "production") {
+  console.error("❌ CRITICAL: Destructive migrations (DROP CASCADE) are permanently blocked in production environments.");
+  console.error("Execution aborted to protect live tenant data.");
+  process.exit(1);
+}
+
 const sql = neon(process.env.DATABASE_URL);
 
 async function wipeDatabase() {
