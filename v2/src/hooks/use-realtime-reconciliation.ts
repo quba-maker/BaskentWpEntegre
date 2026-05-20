@@ -118,7 +118,7 @@ export function useRealtimeReconciliation(tenantId: string) {
 
       // Fallback for optimistic UI matching: match 'temp-' ids by text and sender within 60s window
       if (existingMsgIndex === -1 && payload.sender === 'agent') {
-        const payloadTimeMs = new Date(payload.createdAt || payload.updatedAt || Date.now()).getTime();
+        const payloadTimeMs = new Date(payload.createdAt || Date.now()).getTime();
         existingMsgIndex = oldData.findIndex((m) => 
           String(m.id).startsWith("temp-") && 
           m.sender === payload.sender && 
