@@ -63,40 +63,38 @@ export async function Sidebar({ tenantData }: { tenantData?: TenantBootstrapData
       
       {/* Navigation */}
       <nav className="flex-1 p-3 space-y-0.5">
-        {session?.role === "platform_admin" && !session?.impersonatedTenantId ? (
-          <>
+        {session?.role === "platform_admin" && !session?.impersonatedTenantId && (
+          <div className="mb-2 pb-2 border-b border-black/5">
             <NavLink href={`/${session?.tenantSlug || 'quba'}/admin`} icon={<Shield className="w-[18px] h-[18px]" />} label="Süper Admin" />
-          </>
-        ) : (
-          <>
-            <NavLink href={`/${session?.tenantSlug || ''}`} icon={<LayoutDashboard className="w-[18px] h-[18px]" />} label="Workspace" />
-            
-            {/* INBOX (Always enabled for now, or check module) */}
-            <NavLink href={`/${session?.tenantSlug || ''}/inbox`} icon={<MessageSquare className="w-[18px] h-[18px]" />} label="Mesajlar" />
-            
-            {/* FORMS (Check module) */}
-            {(tenantData?.modules.includes('forms') || true) && (
-              <NavLink href={`/${session?.tenantSlug || ''}/forms`} icon={<ClipboardList className="w-[18px] h-[18px]" />} label="Formlar" />
-            )}
-            
-            {/* AI MODULES */}
-            {session?.role !== "viewer" && (tenantData?.modules.includes('ai_orchestrator') || true) && (
-              <NavLink href={`/${session?.tenantSlug || ''}/bot`} icon={<Bot className="w-[18px] h-[18px]" />} label="AI Asistan" />
-            )}
-            
-            {/* ANALYTICS */}
-            {session?.role !== "viewer" && (tenantData?.modules.includes('analytics') || true) && (
-              <NavLink href={`/${session?.tenantSlug || ''}/analytics`} icon={<BarChart3 className="w-[18px] h-[18px]" />} label="Performans" />
-            )}
-            
-            {/* ADMIN ONLY */}
-            {(session?.role === "admin" || session?.role === "owner") && (
-              <NavLink href={`/${session?.tenantSlug || ''}/ai-developer`} icon={<Terminal className="w-[18px] h-[18px]" />} label="AI Developer" />
-            )}
-            {(session?.role === "admin" || session?.role === "owner") && (
-              <NavLink href={`/${session?.tenantSlug || ''}/integrations`} icon={<Link2 className="w-[18px] h-[18px]" />} label="Entegrasyonlar" />
-            )}
-          </>
+          </div>
+        )}
+
+        <NavLink href={`/${session?.tenantSlug || ''}`} icon={<LayoutDashboard className="w-[18px] h-[18px]" />} label="Workspace" />
+        
+        {/* INBOX (Always enabled for now, or check module) */}
+        <NavLink href={`/${session?.tenantSlug || ''}/inbox`} icon={<MessageSquare className="w-[18px] h-[18px]" />} label="Mesajlar" />
+        
+        {/* FORMS (Check module) */}
+        {(tenantData?.modules?.includes('forms') || true) && (
+          <NavLink href={`/${session?.tenantSlug || ''}/forms`} icon={<ClipboardList className="w-[18px] h-[18px]" />} label="Formlar" />
+        )}
+        
+        {/* AI MODULES */}
+        {session?.role !== "viewer" && (tenantData?.modules?.includes('ai_orchestrator') || true) && (
+          <NavLink href={`/${session?.tenantSlug || ''}/bot`} icon={<Bot className="w-[18px] h-[18px]" />} label="AI Asistan" />
+        )}
+        
+        {/* ANALYTICS */}
+        {session?.role !== "viewer" && (tenantData?.modules?.includes('analytics') || true) && (
+          <NavLink href={`/${session?.tenantSlug || ''}/analytics`} icon={<BarChart3 className="w-[18px] h-[18px]" />} label="Performans" />
+        )}
+        
+        {/* ADMIN ONLY */}
+        {(session?.role === "platform_admin" || session?.role === "admin" || session?.role === "owner") && (
+          <NavLink href={`/${session?.tenantSlug || ''}/ai-developer`} icon={<Terminal className="w-[18px] h-[18px]" />} label="AI Developer" />
+        )}
+        {(session?.role === "platform_admin" || session?.role === "admin" || session?.role === "owner") && (
+          <NavLink href={`/${session?.tenantSlug || ''}/integrations`} icon={<Link2 className="w-[18px] h-[18px]" />} label="Entegrasyonlar" />
         )}
         
         {(session?.role === "platform_admin" || session?.role === "admin" || session?.role === "owner") && (
