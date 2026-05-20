@@ -79,11 +79,14 @@ export class MemoryEngine {
         modelId: 'gemini-2.5-flash',
         apiKey: apiKey,
         temperature: 0.2,
-        maxTokens: 500
+        maxTokens: 2000
       });
 
       const rawText = aiResult.text.trim();
-      const cleanedJson = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
+      
+      // Robust JSON extraction to ignore any conversational prefix/suffix
+      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+      const cleanedJson = jsonMatch ? jsonMatch[0] : rawText;
       
       const parsed = JSON.parse(cleanedJson);
 
