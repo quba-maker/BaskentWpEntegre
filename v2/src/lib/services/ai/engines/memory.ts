@@ -27,12 +27,15 @@ export class MemoryEngine {
 
       // 2. Fetch raw messages to summarize (linked by phone_number)
       const messages = await sql`
-        SELECT content, direction, created_at
-        FROM messages
-        WHERE tenant_id = ${tenantId} 
-          AND phone_number = ${phone}
-        ORDER BY created_at ASC
-        LIMIT 50; -- Only get latest or chunked
+        SELECT * FROM (
+          SELECT content, direction, created_at
+          FROM messages
+          WHERE tenant_id = ${tenantId} 
+            AND phone_number = ${phone}
+          ORDER BY created_at DESC
+          LIMIT 50
+        ) sub
+        ORDER BY created_at ASC;
       `;
 
       if (messages.length === 0) return;
