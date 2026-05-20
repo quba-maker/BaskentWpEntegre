@@ -129,6 +129,13 @@ export class MemoryEngine {
 
       // 5. Sync rolling AI summary back to matching lead notes & Google Sheets
       try {
+        // ALWAYS update conversations table notes
+        await sql`
+          UPDATE conversations
+          SET notes = ${summaryText}
+          WHERE id::text = ${conversationId}::text AND tenant_id = ${tenantId};
+        `;
+        
         const cleanPhone = phone.replace(/[^0-9]/g, '');
         if (cleanPhone.length >= 10) {
           const suffix = cleanPhone.substring(cleanPhone.length - 10);
@@ -141,14 +148,14 @@ export class MemoryEngine {
           `;
           
           for (const lead of matchingLeads) {
-            if (!lead.notes || lead.notes.trim() === '') {
-              await sql`
-                UPDATE leads
-                SET notes = ${parsed.summary_text}
-                WHERE id = ${lead.id} AND tenant_id = ${tenantId};
-              `;
-              
-              log.info(`[MEMORY_SYNC] Lead ${lead.id} notes automatically updated with AI summary.`);
+            // Tam otomatik: Mevcut not boş olsun veya olmasın her zaman AI özetini yaz
+            await sql`
+              UPDATE leads
+              SET notes = ${summaryText}
+              WHERE id = ${lead.id} AND tenant_id = ${tenantId};
+            `;
+            
+            log.info(`[MEMORY_SYNC] Lead ${lead.id} notes automatically updated with AI summary.`);
               
               const SHEET_URL = process.env.GOOGLE_SHEET_UPDATE_URL || process.env.GOOGLE_SHEET_URL;
               if (SHEET_URL) {

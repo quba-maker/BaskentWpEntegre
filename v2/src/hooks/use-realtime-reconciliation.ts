@@ -212,6 +212,7 @@ export function useRealtimeReconciliation(tenantId: string) {
 
     // Update conversation list preview with new AI summary fields (both snake_case and camelCase objects for strict UI compatibility)
     updateConversationPreview(payload.conversationId, {
+      notes: payload.aiSummary, // Instantly sync to CRM notes field per user request
       ai_summary: payload.aiSummary,
       ai_buying_intent: payload.aiBuyingIntent,
       ai_sentiment: payload.aiSentiment,
