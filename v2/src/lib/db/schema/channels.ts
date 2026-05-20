@@ -72,6 +72,9 @@ export const workflowRuns = pgTable('workflow_runs', {
   conversationId: uuid('conversation_id'), // Will be linked to conversations table loosely to avoid circular dependency in ORM
   status: text('status').default('queued'),
   triggeredBy: text('triggered_by'),
+  promptBindingVersions: jsonb('prompt_binding_versions'),
+  errorDetails: jsonb('error_details'),
+  correlationId: text('correlation_id'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });
@@ -83,6 +86,9 @@ export const workflowSteps = pgTable('workflow_steps', {
   status: text('status').default('pending'),
   payload: jsonb('payload'),
   errorLog: text('error_log'),
+  retryCount: integer('retry_count').default(0),
+  maxRetries: integer('max_retries').default(3),
+  dependencies: jsonb('dependencies'), // For DAG logic (e.g., ["step1", "step2"])
   startedAt: timestamp('started_at', { withTimezone: true }),
   completedAt: timestamp('completed_at', { withTimezone: true }),
 });
@@ -93,5 +99,6 @@ export const channelEvents = pgTable('channel_events', {
   eventType: text('event_type').notNull(),
   payload: jsonb('payload'),
   status: text('status').default('success'),
+  correlationId: text('correlation_id'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });

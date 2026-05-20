@@ -53,6 +53,7 @@ export const webhookEvents = pgTable('webhook_events', {
   providerMessageId: text('provider_message_id').notNull(),
   senderId: text('sender_id'),
   eventTimestamp: numeric('event_timestamp', { precision: 20, scale: 0 }),
+  correlationId: text('correlation_id'),
   processedAt: timestamp('processed_at', { withTimezone: true }).defaultNow(),
 });
 

@@ -1,5 +1,5 @@
-import { pgTable, text, timestamp, uuid, integer } from 'drizzle-orm/pg-core';
-import { tenants } from './tenants';
+import { pgTable, text, timestamp, uuid, integer, numeric, jsonb } from 'drizzle-orm/pg-core';
+import { tenants, users } from './tenants';
 import { channels } from './channels';
 
 export const customerProfiles = pgTable('customer_profiles', {
@@ -51,6 +51,14 @@ export const conversations = pgTable('conversations', {
   lastMessageChannel: text('last_message_channel'),
   realPhone: text('real_phone'),
 
+  // Stateful Orchestration Fields
+  activeWorkflowRunId: uuid('active_workflow_run_id'),
+  workflowLockExpiresAt: timestamp('workflow_lock_expires_at', { withTimezone: true }),
+  handedOffBy: uuid('handed_off_by').references(() => users.id, { onDelete: 'set null' }),
+  handedOffAt: timestamp('handed_off_at', { withTimezone: true }),
+  handoffReason: text('handoff_reason'),
+  aiDisabledUntil: timestamp('ai_disabled_until', { withTimezone: true }),
+
   lastMessageAt: timestamp('last_message_at', { withTimezone: true }).defaultNow(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
@@ -71,6 +79,14 @@ export const messages = pgTable('messages', {
   providerMessageId: text('provider_message_id'),
   modelUsed: text('model_used'),
   phoneNumber: text('phone_number'),
+  
+  // AI Response Safety Ledger & Tracing
+  latencyMs: integer('latency_ms'),
+  estimatedCost: numeric('estimated_cost', { precision: 10, scale: 6 }),
+  temperature: numeric('temperature', { precision: 3, scale: 2 }),
+  moderationResult: text('moderation_result'),
+  correlationId: text('correlation_id'),
+  
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 
@@ -90,4 +106,12 @@ export const conversationMemory = pgTable('conversation_memory', {
   buyingIntent: text('buying_intent'),
   sentiment: text('sentiment'),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+});
+
+export const conversationSnapshots = pgTable('conversation_snapshots', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  conversationId: uuid('conversation_id').references(() => conversations.id, { onDelete: 'cascade' }).notNull(),
+  workflowRunId: uuid('workflow_run_id'), // Optional link to the run that created it
+  snapshotData: jsonb('snapshot_data').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });

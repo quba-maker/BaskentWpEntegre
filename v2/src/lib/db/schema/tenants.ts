@@ -11,6 +11,8 @@ export const tenants = pgTable('tenants', {
   status: text('status').default('active'),
   plan: text('plan').default('starter'),
   monthlyMessageLimit: integer('monthly_message_limit').default(500),
+  tokenBudget: integer('token_budget').default(1000000),
+  tokensUsed: integer('tokens_used').default(0),
   timezone: text('timezone').default('Europe/Istanbul'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
