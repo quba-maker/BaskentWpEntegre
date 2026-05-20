@@ -210,11 +210,16 @@ export function useRealtimeReconciliation(tenantId: string) {
     const { payload, eventId } = event;
     logReconciliation("cache_updated", { eventId, id: payload.conversationId, type: "memory_update" });
 
-    // Update conversation list preview with new AI summary fields
+    // Update conversation list preview with new AI summary fields (both snake_case and camelCase objects for strict UI compatibility)
     updateConversationPreview(payload.conversationId, {
       ai_summary: payload.aiSummary,
       ai_buying_intent: payload.aiBuyingIntent,
-      ai_sentiment: payload.aiSentiment
+      ai_sentiment: payload.aiSentiment,
+      aiSummary: payload.aiSummary ? {
+        text: payload.aiSummary,
+        buying_intent: payload.aiBuyingIntent,
+        sentiment: payload.aiSentiment
+      } : null
     }, false);
   };
 

@@ -138,7 +138,8 @@ export function ContactRail() {
           score: activeContact?.score,
           last_message: activeContact?.last_message,
           unread: activeContact?.unread,
-          ai_summary: activeContact?.ai_summary
+          ai_summary: activeContact?.ai_summary,
+          aiSummary: activeContact?.aiSummary
         });
         
         const updatedDataStr = JSON.stringify({
@@ -149,7 +150,8 @@ export function ContactRail() {
           score: updatedContact.score,
           last_message: updatedContact.last_message,
           unread: updatedContact.unread,
-          ai_summary: updatedContact.ai_summary
+          ai_summary: updatedContact.ai_summary,
+          aiSummary: updatedContact.aiSummary
         });
 
         if (currentDataStr !== updatedDataStr) {
