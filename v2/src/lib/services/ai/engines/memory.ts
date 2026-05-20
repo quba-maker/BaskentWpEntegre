@@ -99,6 +99,20 @@ export class MemoryEngine {
 
       log.info(`[MEMORY_UPDATED] Rolling memory compressed for conv: ${conversationId}`);
 
+      // [NEW] Publish Realtime Memory Update event
+      try {
+        const { RealtimePublisher } = await import('@/lib/realtime/publisher');
+        await RealtimePublisher.publishMemoryUpdated(tenantId, conversationId, {
+          aiSummary: parsed.summary_text,
+          aiBuyingIntent: parsed.buying_intent,
+          aiSentiment: parsed.sentiment,
+          objections: parsed.objections
+        });
+        log.info(`[MEMORY_REALTIME_PUBLISH] Realtime event published for memory update of conv: ${conversationId}`);
+      } catch (realtimeErr) {
+        log.error(`[MEMORY_REALTIME_FAILED] Failed to publish realtime memory update`, realtimeErr instanceof Error ? realtimeErr : new Error(String(realtimeErr)));
+      }
+
       // 5. Sync rolling AI summary back to matching lead notes & Google Sheets
       try {
         const cleanPhone = phone.replace(/[^0-9]/g, '');

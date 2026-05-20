@@ -331,7 +331,21 @@ export class QueueWorkerEngine {
     // 3. Conversation Load / State Check
     const status = await convService.getStatus(phoneNumber);
     if (status === 'human') {
-      this.log.info(`[SKIP] Conversation is handled by human`, { phoneNumber, traceId });
+      this.log.info(`[SKIP] Conversation is handled by human, triggering memory summarization asynchronously`, { phoneNumber, traceId });
+      if (conversationId) {
+        // Fire-and-forget memory summarization in human mode so it doesn't block the worker execution
+        (async () => {
+          try {
+            const isMemoryEnabled = await FeatureFlagService.isEnabled(tenantId, 'memory_engine', true);
+            if (isMemoryEnabled) {
+              const { MemoryEngine } = await import('@/lib/services/ai/engines/memory');
+              await MemoryEngine.summarizeConversation(tenantId, conversationId);
+            }
+          } catch (memErr) {
+            this.log.error(`[WORKER_HUMAN_MEMORY_FAILED] Human mode memory summarization error`, memErr instanceof Error ? memErr : new Error(String(memErr)), { traceId });
+          }
+        })();
+      }
       return;
     }
 

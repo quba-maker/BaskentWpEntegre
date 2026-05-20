@@ -59,4 +59,33 @@ export class RealtimePublisher {
 
     await RealtimeBus.publish(tenantId, event);
   }
+
+  /**
+   * Translates and publishes a conversation memory / AI summary update.
+   */
+  static async publishMemoryUpdated(
+    tenantId: string,
+    conversationId: string,
+    memoryPayload: {
+      aiSummary: string;
+      aiBuyingIntent?: "HOT" | "WARM" | "COLD";
+      aiSentiment?: "POSITIVE" | "NEUTRAL" | "NEGATIVE";
+      objections?: string[];
+    },
+    traceContext?: { traceId: string; spanId: string; parentSpanId?: string }
+  ) {
+    const context = traceContext || {
+      traceId: uuidv4(),
+      spanId: uuidv4()
+    };
+
+    const event = RealtimeTranslator.toMemoryUpdated(
+      tenantId, 
+      conversationId, 
+      memoryPayload, 
+      context
+    );
+
+    await RealtimeBus.publish(tenantId, event);
+  }
 }

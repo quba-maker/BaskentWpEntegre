@@ -24,6 +24,7 @@ export const BaseRealtimeEventSchema = z.object({
   type: z.enum([
     "chat.message.created",
     "chat.message.status_updated",
+    "conversation.memory_updated",
     "ai.stream.delta",
     "ai.stream.completed"
   ]),
@@ -51,6 +52,14 @@ export const ChatMessageStatusProjectionSchema = z.object({
   updatedAt: z.string()
 });
 
+export const ConversationMemoryProjectionSchema = z.object({
+  conversationId: z.string(),
+  aiSummary: z.string(),
+  aiBuyingIntent: z.enum(["HOT", "WARM", "COLD"]).optional(),
+  aiSentiment: z.enum(["POSITIVE", "NEUTRAL", "NEGATIVE"]).optional(),
+  objections: z.array(z.string()).optional()
+});
+
 // --- Final Event Types ---
 
 export const ChatMessageCreatedEventSchema = BaseRealtimeEventSchema.extend({
@@ -63,9 +72,18 @@ export const ChatMessageStatusUpdatedEventSchema = BaseRealtimeEventSchema.exten
   payload: ChatMessageStatusProjectionSchema
 });
 
+export const ConversationMemoryUpdatedEventSchema = BaseRealtimeEventSchema.extend({
+  type: z.literal("conversation.memory_updated"),
+  payload: ConversationMemoryProjectionSchema
+});
+
 export type RealtimeEventBase = z.infer<typeof BaseRealtimeEventSchema>;
 export type ChatMessageCreatedEvent = z.infer<typeof ChatMessageCreatedEventSchema>;
 export type ChatMessageStatusUpdatedEvent = z.infer<typeof ChatMessageStatusUpdatedEventSchema>;
+export type ConversationMemoryUpdatedEvent = z.infer<typeof ConversationMemoryUpdatedEventSchema>;
 
 // Union of all supported projection events
-export type ProjectionEvent = ChatMessageCreatedEvent | ChatMessageStatusUpdatedEvent;
+export type ProjectionEvent = 
+  | ChatMessageCreatedEvent 
+  | ChatMessageStatusUpdatedEvent
+  | ConversationMemoryUpdatedEvent;

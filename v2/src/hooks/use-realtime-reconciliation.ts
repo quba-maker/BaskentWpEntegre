@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useRealtimeSubscription } from "./use-realtime-subscription";
-import { ProjectionEvent, ChatMessageCreatedEvent, ChatMessageStatusUpdatedEvent } from "@/lib/realtime/contracts";
+import { ProjectionEvent, ChatMessageCreatedEvent, ChatMessageStatusUpdatedEvent, ConversationMemoryUpdatedEvent } from "@/lib/realtime/contracts";
 import { useInboxStore } from "@/store/inbox-store";
 
 // Production-safe logging (stripped in prod via dead-code elimination)
@@ -205,6 +205,19 @@ export function useRealtimeReconciliation(tenantId: string) {
     }, false);
   };
 
+  // Internal handler for memory updates
+  const handleMemoryUpdated = (event: ConversationMemoryUpdatedEvent) => {
+    const { payload, eventId } = event;
+    logReconciliation("cache_updated", { eventId, id: payload.conversationId, type: "memory_update" });
+
+    // Update conversation list preview with new AI summary fields
+    updateConversationPreview(payload.conversationId, {
+      ai_summary: payload.aiSummary,
+      ai_buying_intent: payload.aiBuyingIntent,
+      ai_sentiment: payload.aiSentiment
+    }, false);
+  };
+
   // Subscribe to Ably events
   useRealtimeSubscription(tenantId, (event: ProjectionEvent) => {
     if (IS_DEV) {
@@ -217,6 +230,9 @@ export function useRealtimeReconciliation(tenantId: string) {
         break;
       case "chat.message.status_updated":
         handleStatusUpdated(event as ChatMessageStatusUpdatedEvent);
+        break;
+      case "conversation.memory_updated":
+        handleMemoryUpdated(event as ConversationMemoryUpdatedEvent);
         break;
       default:
         // Future extensions (ai.stream.delta, etc.)

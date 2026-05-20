@@ -362,6 +362,21 @@ export async function sendMessage(phone: string, text: string) {
                 created_at: new Date().toISOString()
               }
             );
+
+            // [NEW] Fire-and-forget memory summarization on agent response
+            const tenantId = ctx.tenantId;
+            (async () => {
+              try {
+                const { FeatureFlagService } = await import('@/lib/services/feature-flag.service');
+                const isMemoryEnabled = await FeatureFlagService.isEnabled(tenantId, 'memory_engine', true);
+                if (isMemoryEnabled) {
+                  const { MemoryEngine } = await import('@/lib/services/ai/engines/memory');
+                  await MemoryEngine.summarizeConversation(tenantId, conversationId);
+                }
+              } catch (memErr) {
+                console.error("Failed to summarize conversation asynchronously after agent response:", memErr);
+              }
+            })();
           }
         } catch (err) {
           console.error("Failed to publish realtime event for panel message:", err);

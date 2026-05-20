@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from "uuid";
-import { ChatMessageCreatedEvent, ChatMessageStatusUpdatedEvent } from "./contracts";
+import { ChatMessageCreatedEvent, ChatMessageStatusUpdatedEvent, ConversationMemoryUpdatedEvent } from "./contracts";
 
 /**
  * Internal message payload from DB/worker.
@@ -92,6 +92,38 @@ export class RealtimeTranslator {
         conversationId: String(conversationId),
         status,
         updatedAt: new Date().toISOString()
+      }
+    };
+  }
+
+  static toMemoryUpdated(
+    tenantId: string,
+    conversationId: string,
+    memoryPayload: {
+      aiSummary: string;
+      aiBuyingIntent?: "HOT" | "WARM" | "COLD";
+      aiSentiment?: "POSITIVE" | "NEUTRAL" | "NEGATIVE";
+      objections?: string[];
+    },
+    traceContext: TraceContext
+  ): ConversationMemoryUpdatedEvent {
+    return {
+      eventId: uuidv4(),
+      traceId: traceContext.traceId,
+      spanId: traceContext.spanId,
+      parentSpanId: traceContext.parentSpanId,
+      timestamp: Date.now() * 1000,
+      entityVersion: 1,
+      eventVersion: "1.0",
+      schemaVersion: "1.0",
+      tenantId,
+      type: "conversation.memory_updated",
+      payload: {
+        conversationId,
+        aiSummary: memoryPayload.aiSummary,
+        aiBuyingIntent: memoryPayload.aiBuyingIntent,
+        aiSentiment: memoryPayload.aiSentiment,
+        objections: memoryPayload.objections
       }
     };
   }
