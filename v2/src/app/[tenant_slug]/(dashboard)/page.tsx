@@ -5,8 +5,8 @@ import { getDashboardStats } from "@/app/actions/dashboard";
 import { MessageSquare, Bot, TrendingUp, Activity, ClipboardList } from "lucide-react";
 import { PageLoader, EmptyState } from "@/components/ui/shared-states";
 import { SectionCard } from "@/components/governance";
-import { AiHealthDashboard } from "@/components/features/ai-observability/AiHealthDashboard";
 import { useTenant } from "@/components/providers/tenant-provider";
+import { useWorkspacePlugins } from "@/lib/plugins/registry";
 
 // ==========================================
 // QUBA AI — Dashboard Ana Sayfa (Hydrated)
@@ -14,6 +14,7 @@ import { useTenant } from "@/components/providers/tenant-provider";
 
 export default function DashboardPage() {
   const { tenant, hasFeature } = useTenant();
+  const { activePlugins } = useWorkspacePlugins();
   const [stats, setStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
@@ -48,7 +49,7 @@ export default function DashboardPage() {
         <div>
           <h1 className="text-[22px] font-bold text-[--q-text-primary] flex items-center gap-2">
             {tenant?.profile.logo_url && (
-              <img src={tenant.profile.logo_url} alt="Logo" className="w-8 h-8 rounded-lg shadow-sm" />
+              <img src={tenant.profile.logo_url} alt="Logo" className="w-8 h-8 rounded-lg shadow-sm object-cover" />
             )}
             Hoş geldiniz, {tenant?.profile.name || stats.tenantName} 👋
           </h1>
@@ -57,21 +58,26 @@ export default function DashboardPage() {
           </p>
         </div>
 
-        {/* Stats Cards */}
+        {/* Phase 1: Metrikler */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-          {cards.map((card, i) => (
-            <SectionCard key={i}>
-              <div className="flex items-center gap-2 mb-2">
-                <span style={{ color: card.color }}>{card.icon}</span>
+          {cards.map((c, i) => (
+            <div key={i} className="bg-white p-4 rounded-2xl border border-black/5 shadow-[0_2px_10px_rgba(0,0,0,0.02)]">
+              <div className="flex items-center gap-2 text-[--q-text-secondary] mb-2">
+                <div style={{ color: c.color }}>{c.icon}</div>
+                <span className="text-[12px] font-medium">{c.label}</span>
               </div>
-              <p className="text-[24px] font-bold tracking-tight" style={{ color: "var(--q-text-primary)" }}>{card.value.toLocaleString('tr-TR')}</p>
-              <p className="text-[11px] mt-0.5" style={{ color: "var(--q-text-secondary)" }}>{card.label}</p>
-            </SectionCard>
+              <div className="text-xl font-bold text-[--q-text-primary]">{c.value.toLocaleString()}</div>
+            </div>
           ))}
         </div>
 
-        {/* Phase 6: AI Engine Health Monitoring (Only if AI is enabled) */}
-        {(hasFeature('ai_orchestrator') || true) && <AiHealthDashboard />}
+        {/* Dynamic Workspace Plugins */}
+        <div className="space-y-6">
+          {activePlugins.map(plugin => {
+            const PluginComponent = plugin.component;
+            return <PluginComponent key={plugin.id} />;
+          })}
+        </div>
 
         {/* 7 Gün Mesaj Grafiği */}
         {stats.dailyMessages.length > 0 && (

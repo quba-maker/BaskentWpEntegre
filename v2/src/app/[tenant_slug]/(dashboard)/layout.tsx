@@ -4,11 +4,26 @@ import { LayoutDashboard, MessageSquare, ClipboardList, Settings, Bot, BarChart3
 import Link from "next/link";
 import { getSession } from "@/lib/auth/session";
 import { getTenantBootstrapData } from "@/lib/domain/tenant/bootstrap";
+import { Metadata } from "next";
 
 // ==========================================
 // Dashboard Layout — Sidebar + Mobile Nav
-// Mobile nav is now role-aware (mirrors sidebar logic)
 // ==========================================
+
+export async function generateMetadata({ params }: { params: { tenant_slug: string } }): Promise<Metadata> {
+  const session = await getSession();
+  const tenantData = session?.tenantId ? await getTenantBootstrapData(session.tenantId) : null;
+  const brandingName = tenantData?.profile.name || "Quba AI";
+  
+  return {
+    title: {
+      template: `%s | ${brandingName}`,
+      default: `${brandingName} Workspace`,
+    },
+    themeColor: tenantData?.profile.primary_color || "#007AFF",
+    icons: tenantData?.profile.logo_url ? [{ rel: "icon", url: tenantData.profile.logo_url }] : undefined,
+  };
+}
 
 export default async function DashboardLayout({
   children,
@@ -27,19 +42,19 @@ export default async function DashboardLayout({
   }
   
   // Use tenant modules for visibility
-  const hasAiFeature = tenantData?.modules.includes("ai_orchestrator") || true; // Provide fallback if testing
+  const hasAiFeature = tenantData?.flags?.['ai_orchestrator'] || true; 
   const canManageBot = role !== "viewer" && hasAiFeature;
 
   return (
-    <div className="h-full flex flex-col md:flex-row overflow-hidden">
+    <div className="h-full flex flex-col md:flex-row overflow-hidden" data-tenant={slug}>
       {/* Desktop Sidebar */}
       <div className="hidden md:flex h-full">
         <Sidebar tenantData={tenantData} />
       </div>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-auto h-full flex flex-col relative pb-[env(safe-area-inset-bottom)] md:pb-0">
-        <DashboardProviders tenantId={session?.tenantId} tenantData={tenantData}>
+      <main className="flex-1 overflow-auto h-full flex flex-col relative pb-[env(safe-area-inset-bottom)] md:pb-0 bg-[--q-light-bg]">
+        <DashboardProviders tenantId={session?.tenantId} tenantData={tenantData} role={role}>
           {children}
         </DashboardProviders>
       </main>

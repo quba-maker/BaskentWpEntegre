@@ -11,6 +11,10 @@ CREATE TABLE IF NOT EXISTS tenants (
   industry TEXT NOT NULL DEFAULT 'general',
   logo_url TEXT,
   primary_color TEXT DEFAULT '#007AFF',
+  sidebar_theme TEXT DEFAULT 'light',
+  dashboard_density TEXT DEFAULT 'comfortable',
+  ui_mode TEXT DEFAULT 'system',
+  workspace_version INT DEFAULT 1,
   
   -- Meta Entegrasyon (Tenant-Isolated)
   meta_app_id TEXT,

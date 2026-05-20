@@ -16,14 +16,16 @@ const IS_DEV = process.env.NODE_ENV === "development";
 export function DashboardProviders({ 
   children, 
   tenantId,
-  tenantData 
+  tenantData,
+  role
 }: { 
   children: React.ReactNode; 
   tenantId?: string;
   tenantData: TenantBootstrapData | null;
+  role?: string;
 }) {
   return (
-    <TenantProvider initialData={tenantData}>
+    <TenantProvider initialData={tenantData} role={role}>
       <ConfirmProvider>
         <RealtimeProvider tenantId={tenantId}>
           {children}
