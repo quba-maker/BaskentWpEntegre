@@ -96,10 +96,6 @@ export async function Sidebar({ tenantData }: { tenantData?: TenantBootstrapData
         {(session?.role === "platform_admin" || session?.role === "admin" || session?.role === "owner") && (
           <NavLink href={`/${session?.tenantSlug || ''}/integrations`} icon={<Link2 className="w-[18px] h-[18px]" />} label="Entegrasyonlar" />
         )}
-        
-        {(session?.role === "platform_admin" || session?.role === "admin" || session?.role === "owner") && (
-          <NavLink href={`/${session?.tenantSlug || ''}/users`} icon={<Users className="w-[18px] h-[18px]" />} label="Kullanıcılar" />
-        )}
       </nav>
 
       {/* User & Logout */}
