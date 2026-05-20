@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useSWRConfig } from "swr";
-import { User, MapPin, Building, Activity, Tag, ChevronDown, ChevronRight, Save, X, Plus, ChevronLeft, Check, Loader2 } from "lucide-react";
+import { User, MapPin, Building, Activity, Tag, ChevronDown, ChevronRight, Save, X, Plus, ChevronLeft, Check, Loader2, Sparkles, FileText } from "lucide-react";
 import { useInboxStore } from "@/store/inbox-store";
 import { updateCrmData, addTag, removeTag } from "@/app/actions/inbox";
 import { CustomerAiBrainPanel } from "@/components/features/ai-observability/CustomerAiBrain";
@@ -55,6 +55,7 @@ export function ContextPanel() {
   const [stage, setStage] = useState(activeContact?.stage || "new");
   const [department, setDepartment] = useState(activeContact?.department || "");
   const [country, setCountry] = useState(activeContact?.country || "");
+  const [notes, setNotes] = useState(activeContact?.notes || "");
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
 
@@ -69,6 +70,7 @@ export function ContextPanel() {
       setStage(activeContact.stage || "new");
       setDepartment(activeContact.department || "");
       setCountry(activeContact.country || "");
+      setNotes(activeContact.notes || "");
       setIsAddingTag(false);
       setNewTagVal("");
       setSaveStatus("idle");
@@ -89,11 +91,11 @@ export function ContextPanel() {
     setIsSaving(true);
     setSaveStatus("saving");
 
-    const res = await updateCrmData(activeContact.id, stage, department, country);
+    const res = await updateCrmData(activeContact.id, stage, department, country, notes);
     if (res.success) {
       useInboxStore.getState().setActiveContact(activeContact.id, {
         ...activeContact,
-        stage, department, country,
+        stage, department, country, notes,
       });
       mutate((key) => Array.isArray(key) && key[0] === "conversations");
       setSaveStatus("saved");
@@ -260,6 +262,64 @@ export function ContextPanel() {
               <option value="appointed">Randevu Aldı</option>
               <option value="lost">Kaybedildi</option>
             </select>
+          </div>
+
+          {/* Görüşme Notları & AI Özeti */}
+          <div className="pt-2">
+            <label className="text-[10px] font-bold uppercase tracking-widest mb-1.5 block ml-1 flex justify-between" style={{ color: "var(--q-text-secondary)" }}>
+              Görüşme Notları & AI Özeti
+              <span className="text-[8px] px-1.5 py-0.5 rounded" style={{ color: "var(--q-blue)", background: "var(--q-blue-bg)" }}>CRM Entegre</span>
+            </label>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Görüşmeyle ilgili notlarınızı yazın..."
+              className="w-full h-24 bg-white/60 border border-black/5 rounded-xl p-3 text-sm text-[#1D1D1F] placeholder:text-[#86868B] focus:ring-2 focus:ring-[#007AFF]/40 resize-none outline-none transition-all shadow-sm"
+              style={{ border: "1px solid var(--q-border-default)" }}
+            />
+
+            {/* AI Taslak Önerisi (Frosted Cam Efektli Kutu) */}
+            {(!notes || notes.trim() === "") && activeContact.aiSummary?.text && (
+              <div className="mt-3 p-4 rounded-2xl border border-emerald-500/20 bg-emerald-500/[0.04] backdrop-blur-md relative overflow-hidden transition-all duration-300 shadow-sm">
+                <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-transparent via-emerald-500/40 to-transparent" />
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <span className="text-[11px] font-bold text-emerald-800 uppercase tracking-wider flex items-center gap-1">
+                    <Sparkles className="w-3.5 h-3.5 text-emerald-600 animate-pulse" /> Yapay Zeka Önerisi
+                  </span>
+                </div>
+                <p className="text-[12px] text-emerald-950 font-medium leading-relaxed italic mb-3">
+                  "{activeContact.aiSummary.text}"
+                </p>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const aiText = activeContact.aiSummary.text;
+                    setNotes(aiText);
+                    setIsSaving(true);
+                    setSaveStatus("saving");
+                    const res = await updateCrmData(activeContact.id, stage, department, country, aiText);
+                    if (res.success) {
+                      useInboxStore.getState().setActiveContact(activeContact.id, {
+                        ...activeContact,
+                        notes: aiText,
+                      });
+                      mutate((key) => Array.isArray(key) && key[0] === "conversations");
+                      setSaveStatus("saved");
+                      setTimeout(() => setSaveStatus("idle"), 2000);
+                    } else {
+                      setSaveStatus("error");
+                      setTimeout(() => setSaveStatus("idle"), 3000);
+                    }
+                    setIsSaving(false);
+                  }}
+                  disabled={isSaving}
+                  className="w-full py-2 rounded-xl text-xs font-bold bg-emerald-500 hover:bg-emerald-600 active:scale-[0.98] text-white transition-all flex items-center justify-center gap-1.5 shadow-md cursor-pointer disabled:opacity-50"
+                >
+                  <FileText className="w-3.5 h-3.5" /> Nota Aktar ve Kaydet
+                </button>
+              </div>
+            )}
           </div>
         </div>
 

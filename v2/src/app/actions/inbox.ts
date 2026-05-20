@@ -30,6 +30,7 @@ export async function getConversations(page: number = 1, search: string = "", st
           c.lead_stage as stage,
           c.tags,
           c.channel,
+          c.notes as notes,
           c.last_message_at,
           EXTRACT(EPOCH FROM c.last_message_at) * 1000 as last_message_time_ms,
           COALESCE(c.last_message_content, m.content) as last_message,
@@ -99,6 +100,7 @@ export async function getConversations(page: number = 1, search: string = "", st
           channel: r.channel || 'whatsapp',
           lastMessageStatus: r.last_message_status || 'sent',
           lastMessageDirection: r.last_message_direction || 'in',
+          notes: r.notes || '',
           country: r.country || (r.form_raw_data && r.form_raw_data.includes('country') ? JSON.parse(r.form_raw_data).country : null) || (r.id.startsWith('90') || r.id.startsWith('+90') ? 'Türkiye' : r.id.startsWith('49') || r.id.startsWith('+49') ? 'Almanya' : null),
           formData: r.form_name ? {
             name: r.form_name,
@@ -374,7 +376,7 @@ export async function sendMessage(phone: string, text: string) {
   });
 }
 
-export async function updateCrmData(phone: string, stage: string, department: string, country?: string) {
+export async function updateCrmData(phone: string, stage: string, department: string, country?: string, notes?: string) {
   if (!phone) return { success: false };
 
   return withActionGuard(
@@ -384,20 +386,20 @@ export async function updateCrmData(phone: string, stage: string, department: st
         try {
           await ctx.db.executeSafe(sql`
             UPDATE conversations
-            SET lead_stage = ${stage}, department = ${department}, country = ${country}
+            SET lead_stage = ${stage}, department = ${department}, country = ${country}, notes = ${notes !== undefined ? notes : null}
             WHERE phone_number = ${phone} AND (tenant_id = ${ctx.tenantId})
           `);
         } catch (e) {
           await ctx.db.executeSafe(sql`
             UPDATE conversations
-            SET lead_stage = ${stage}, department = ${department}
+            SET lead_stage = ${stage}, department = ${department}, notes = ${notes !== undefined ? notes : null}
             WHERE phone_number = ${phone} AND (tenant_id = ${ctx.tenantId})
           `);
         }
       } else {
         await ctx.db.executeSafe(sql`
           UPDATE conversations
-          SET lead_stage = ${stage}, department = ${department}
+          SET lead_stage = ${stage}, department = ${department}, notes = ${notes !== undefined ? notes : null}
           WHERE phone_number = ${phone} AND (tenant_id = ${ctx.tenantId})
         `);
       }
@@ -405,12 +407,33 @@ export async function updateCrmData(phone: string, stage: string, department: st
       try {
         await ctx.db.executeSafe(sql`
           UPDATE leads
-          SET stage = ${stage}
+          SET stage = ${stage}, notes = ${notes !== undefined ? notes : null}
           WHERE (phone_number = ${phone} OR phone_number LIKE ${'%' + phone.substring(phone.length - 10) + '%'})
             AND (tenant_id = ${ctx.tenantId})
         `);
       } catch (e) {
         // Ignore if leads table structure differs
+      }
+
+      // 3 Yönlü Google Sheets Senkronizasyonu
+      if (notes !== undefined) {
+        const SHEET_URL = process.env.GOOGLE_SHEET_UPDATE_URL || process.env.GOOGLE_SHEET_URL;
+        if (SHEET_URL) {
+          try {
+            await fetch(SHEET_URL, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                action: 'updateNoteByPhone',
+                phone: phone,
+                note: notes
+              })
+            });
+          } catch (sheetErr) {
+            const { logger: inboxLogger } = await import("@/lib/core/logger");
+            inboxLogger.withContext({ module: 'Inbox' }).warn("Google Sheets note sync failed from updateCrmData", { error: String(sheetErr) });
+          }
+        }
       }
       
       logAudit({
@@ -420,7 +443,7 @@ export async function updateCrmData(phone: string, stage: string, department: st
         action: "crm_updated",
         entityType: "conversation",
         entityId: phone,
-        details: { stage, department }
+        details: { stage, department, has_notes: notes !== undefined }
       });
 
       return { success: true };

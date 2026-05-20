@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import useSWRInfinite from "swr/infinite";
-import { Search, MessageCircle, X, FileText, ChevronRight, CheckCircle2, Bot, Save, StickyNote } from "lucide-react";
+import { Search, MessageCircle, X, FileText, ChevronRight, CheckCircle2, Bot, Save, StickyNote, Sparkles } from "lucide-react";
 import { getForms, getCampaignNames, updateLeadNotes } from "@/app/actions/forms";
 import { useInboxStore } from "@/store/inbox-store";
 import { useRouter } from "next/navigation";
@@ -353,6 +353,39 @@ export default function FormsPage() {
                   placeholder="Botun görüşme özeti buraya düşer veya manuel olarak kendi satış notlarınızı alabilirsiniz..."
                   className="w-full h-28 bg-[#F5F5F7] border-none rounded-xl p-3 text-sm text-[#1D1D1F] placeholder:text-[#86868B] focus:ring-2 focus:ring-[#007AFF]/40 resize-none outline-none transition-all"
                 />
+
+                {/* AI Taslak Önerisi (Frosted Cam Efektli Kutu) */}
+                {(!notes || notes.trim() === "") && selectedForm.ai_summary && (
+                  <div className="mt-3 p-4 rounded-2xl border border-emerald-500/20 bg-emerald-500/[0.04] backdrop-blur-md relative overflow-hidden transition-all duration-300 shadow-sm text-left">
+                    <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-transparent via-emerald-500/40 to-transparent" />
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                      <span className="text-[11px] font-bold text-emerald-800 uppercase tracking-wider flex items-center gap-1">
+                        <Sparkles className="w-3.5 h-3.5 text-emerald-600 animate-pulse" /> Yapay Zeka Önerisi
+                      </span>
+                    </div>
+                    <p className="text-[12px] text-emerald-950 font-medium leading-relaxed italic mb-3">
+                      "{selectedForm.ai_summary}"
+                    </p>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const aiText = selectedForm.ai_summary;
+                        setNotes(aiText);
+                        setIsSavingNotes(true);
+                        const res = await updateLeadNotes(selectedForm.id, aiText);
+                        if (res.success) {
+                          mutate();
+                        }
+                        setIsSavingNotes(false);
+                      }}
+                      disabled={isSavingNotes}
+                      className="w-full py-2.5 rounded-xl text-xs font-bold bg-emerald-500 hover:bg-emerald-600 active:scale-[0.98] text-white transition-all flex items-center justify-center gap-1.5 shadow-md cursor-pointer disabled:opacity-50"
+                    >
+                      <FileText className="w-3.5 h-3.5" /> Nota Aktar ve Kaydet
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Form Data (raw_data) */}

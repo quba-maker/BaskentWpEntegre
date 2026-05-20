@@ -76,7 +76,8 @@ export async function getForms(page: number = 1, search: string = "", source: st
         created_at: r.created_at,
         raw_data: r.raw_data ? JSON.parse(r.raw_data) : {},
         country: r.country,
-        notes: r.notes || r.ai_summary || "",
+        notes: r.notes || "",
+        ai_summary: r.ai_summary || "",
         isBotActive: r.conversation_status === 'bot'
       }));
     }
