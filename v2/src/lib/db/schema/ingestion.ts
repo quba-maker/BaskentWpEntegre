@@ -1,0 +1,34 @@
+import { pgTable, text, timestamp, uuid, jsonb, numeric } from 'drizzle-orm/pg-core';
+import { tenants } from './tenants';
+import { users } from './tenants';
+
+export const ingestionPipelines = pgTable('ingestion_pipelines', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').references(() => tenants.id, { onDelete: 'cascade' }).notNull(),
+  name: text('name').notNull(),
+  provider: text('provider').notNull(), // e.g., 'google_sheets'
+  config: jsonb('config').notNull().default({}),
+  isActive: text('is_active').default('true'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
+
+export const pipelineEvents = pgTable('pipeline_events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').references(() => tenants.id, { onDelete: 'cascade' }).notNull(),
+  pipelineId: uuid('pipeline_id').references(() => ingestionPipelines.id, { onDelete: 'cascade' }),
+  eventType: text('event_type').notNull(), // 'LeadImported', 'SemanticAnalysisCompleted'
+  sourceId: text('source_id'), // e.g. sheet_row_id
+  entityId: uuid('entity_id'), 
+  payload: jsonb('payload').notNull(),
+  aiConfidence: numeric('ai_confidence', { precision: 3, scale: 2 }),
+  operatorId: uuid('operator_id').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow()
+});
+
+export const rollbackSnapshots = pgTable('rollback_snapshots', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').references(() => tenants.id, { onDelete: 'cascade' }).notNull(),
+  syncEventId: uuid('sync_event_id').references(() => pipelineEvents.id, { onDelete: 'cascade' }),
+  previousState: jsonb('previous_state').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
