@@ -2,17 +2,24 @@
 
 import { useEffect, useState } from "react";
 import { getTenantSettings, updateTenantSettings, getUsageStats } from "@/app/actions/settings";
-import { changeMyPassword } from "@/app/actions/users";
-import { Building2, Gauge, Shield, KeyRound, CreditCard, LayoutDashboard } from "lucide-react";
+import { changeMyPassword, getUsers, createUser, updateUserRole, toggleUserActive, deleteUser, resetUserPassword, generateInviteLink } from "@/app/actions/users";
+import { Building2, Gauge, Shield, KeyRound, CreditCard, Users, Plus, Link2, Copy, Check, Trash2, Power } from "lucide-react";
 import { PageLoader } from "@/components/ui/shared-states";
 import { SectionCard, SectionHeader, SaveButton, ActionButton } from "@/components/governance";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 
 // ==========================================
 // QUBA AI — Modular Settings Page
 // Architecture: Apple/Stripe-inspired vertical tabs
 // ==========================================
 
-type TabType = 'general' | 'account' | 'billing';
+type TabType = 'general' | 'account' | 'users' | 'billing';
+
+const ROLES = [
+  { value: "admin", label: "Yönetici", desc: "Tam yetki", color: "#007AFF" },
+  { value: "agent", label: "Temsilci", desc: "Mesaj gönderebilir", color: "#34C759" },
+  { value: "viewer", label: "İzleyici", desc: "Sadece görüntüleme", color: "#8E8E93" },
+];
 
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<TabType>('general');
@@ -21,23 +28,39 @@ export default function SettingsPage() {
   const [usage, setUsage] = useState<any>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const confirm = useConfirm();
+
+  // Password State
   const [pwCurrent, setPwCurrent] = useState("");
   const [pwNew, setPwNew] = useState("");
   const [pwConfirm, setPwConfirm] = useState("");
   const [pwLoading, setPwLoading] = useState(false);
   const [pwMsg, setPwMsg] = useState("");
+
+  // General Settings State
   const [form, setForm] = useState({
     name: "",
     industry: "",
     timezone: "Europe/Istanbul",
   });
 
+  // Users State
+  const [users, setUsers] = useState<any[]>([]);
+  const [showCreateUser, setShowCreateUser] = useState(false);
+  const [creatingUser, setCreatingUser] = useState(false);
+  const [userForm, setUserForm] = useState({ name: "", email: "", password: "", role: "agent" });
+  const [tempPass, setTempPass] = useState<{userId: string, pass: string, name: string} | null>(null);
+  const [inviteInfo, setInviteInfo] = useState<{userId: string, url: string, name: string} | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [userError, setUserError] = useState<string | null>(null);
+
   useEffect(() => { loadData(); }, []);
 
   async function loadData() {
-    const [tenantRes, usageRes] = await Promise.all([
+    const [tenantRes, usageRes, usersRes] = await Promise.all([
       getTenantSettings(),
       getUsageStats(),
+      getUsers(),
     ]);
     if (tenantRes.success && tenantRes.tenant) {
       setTenant(tenantRes.tenant);
@@ -49,8 +72,15 @@ export default function SettingsPage() {
       });
     }
     if (usageRes.success && usageRes.stats) setUsage(usageRes.stats);
+    if (usersRes.success && usersRes.users) setUsers(usersRes.users);
   }
 
+  async function reloadUsers() {
+    const res = await getUsers();
+    if (res.success && res.users) setUsers(res.users);
+  }
+
+  // --- Handlers: Settings & Account ---
   async function handlePasswordChange() {
     if (pwNew.length < 6) { setPwMsg("❌ Yeni şifre en az 6 karakter."); return; }
     if (pwNew !== pwConfirm) { setPwMsg("❌ Şifreler eşleşmiyor."); return; }
@@ -71,6 +101,75 @@ export default function SettingsPage() {
     setSaving(false);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
+  }
+
+  // --- Handlers: Users ---
+  async function handleCreateUser() {
+    if (!userForm.name || !userForm.email || !userForm.password) return;
+    setCreatingUser(true);
+    setUserError(null);
+    const res = await createUser(userForm);
+    if (res.success) {
+      setShowCreateUser(false);
+      setUserForm({ name: "", email: "", password: "", role: "agent" });
+      reloadUsers();
+    } else {
+      setUserError(res.error || "Kullanıcı oluşturulamadı.");
+    }
+    setCreatingUser(false);
+  }
+
+  async function handleRoleChange(userId: string, newRole: string) {
+    await updateUserRole(userId, newRole);
+    reloadUsers();
+  }
+
+  async function handleToggle(userId: string) {
+    await toggleUserActive(userId);
+    reloadUsers();
+  }
+
+  async function handleDelete(userId: string) {
+    const ok = await confirm({
+      title: "Kullanıcıyı Sil",
+      message: "Bu kullanıcıyı kalıcı olarak silmek istediğinize emin misiniz?",
+      confirmLabel: "Sil",
+      variant: "danger",
+    });
+    if (!ok) return;
+    await deleteUser(userId);
+    reloadUsers();
+  }
+
+  async function handleResetPassword(userId: string, userName: string) {
+    const ok = await confirm({
+      title: "Şifre Sıfırla",
+      message: `${userName} kullanıcısının şifresi sıfırlanacak ve geçici yeni bir şifre oluşturulacak.`,
+      confirmLabel: "Sıfırla",
+      variant: "warning",
+    });
+    if (!ok) return;
+    const res = await resetUserPassword(userId);
+    if (res.success && res.tempPassword) {
+      setTempPass({ userId, pass: res.tempPassword, name: userName });
+    } else {
+      setUserError(res.error || "Şifre sıfırlanamadı.");
+    }
+  }
+
+  async function handleInviteLink(userId: string, userName: string) {
+    const res = await generateInviteLink(userId);
+    if (res.success && res.inviteUrl) {
+      setInviteInfo({ userId, url: res.inviteUrl, name: userName });
+    } else {
+      setUserError(res.error || "Davet linki oluşturulamadı.");
+    }
+  }
+
+  function copyToClipboard(text: string) {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   }
 
   if (!tenant) return <PageLoader />;
@@ -96,6 +195,12 @@ export default function SettingsPage() {
             icon={Shield} 
             label="Hesap ve Güvenlik" 
             onClick={() => setActiveTab('account')} 
+          />
+          <TabButton 
+            active={activeTab === 'users'} 
+            icon={Users} 
+            label="Kullanıcılar" 
+            onClick={() => setActiveTab('users')} 
           />
           <TabButton 
             active={activeTab === 'billing'} 
@@ -168,13 +273,136 @@ export default function SettingsPage() {
                   {pwMsg && <p className={`text-[13px] ${pwMsg.startsWith('✅') ? 'text-[--q-green]' : 'text-[--q-red]'}`}>{pwMsg}</p>}
                   <ActionButton
                     onClick={handlePasswordChange}
-                    color="var(--q-orange)"
+                    color="#FF9500" // Orange
                     disabled={pwLoading || !pwCurrent || pwNew.length < 6}
                   >
                     {pwLoading ? "Değiştiriliyor..." : "Şifre Güncelle"}
                   </ActionButton>
                 </div>
               </SectionCard>
+            </div>
+          )}
+
+          {/* TAB: USERS */}
+          {activeTab === 'users' && (
+            <div className="space-y-6 animate-in fade-in duration-300">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-lg font-medium text-black dark:text-white">Takım Üyeleri</h2>
+                  <p className="text-[13px] text-black/50 dark:text-white/50 mt-1">Sisteme erişebilen {users.length} temsilci ve yönetici.</p>
+                </div>
+                <button 
+                  onClick={() => setShowCreateUser(!showCreateUser)}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-black dark:bg-white text-white dark:text-black text-[13px] font-medium rounded-lg"
+                >
+                  <Plus className="w-4 h-4" /> Yeni Kullanıcı
+                </button>
+              </div>
+
+              {userError && (
+                <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-600 rounded-xl text-[13px]">
+                  {userError}
+                </div>
+              )}
+
+              {/* Create User Form */}
+              {showCreateUser && (
+                <SectionCard>
+                  <SectionHeader icon={Users} title="Yeni Kullanıcı Ekle" />
+                  <div className="grid grid-cols-2 gap-4">
+                    <Field label="Ad Soyad" value={userForm.name} onChange={(v) => setUserForm({...userForm, name: v})} />
+                    <Field label="E-posta" type="email" value={userForm.email} onChange={(v) => setUserForm({...userForm, email: v})} />
+                    <Field label="Şifre" type="password" value={userForm.password} onChange={(v) => setUserForm({...userForm, password: v})} />
+                    <Field label="Rol" type="select" options={ROLES} value={userForm.role} onChange={(v) => setUserForm({...userForm, role: v})} />
+                  </div>
+                  <div className="mt-4 flex justify-end">
+                    <ActionButton color="#34C759" onClick={handleCreateUser} disabled={creatingUser}>
+                      {creatingUser ? "Ekleniyor..." : "Oluştur"}
+                    </ActionButton>
+                  </div>
+                </SectionCard>
+              )}
+
+              {/* Modals for Temp Pass / Invite Link */}
+              {tempPass && (
+                <div className="rounded-xl p-4 bg-[#FF9500]/10 border border-[#FF9500]/20 space-y-2">
+                  <h3 className="text-[14px] font-medium text-black dark:text-white">🔑 {tempPass.name} — Geçici Şifre</h3>
+                  <div className="flex items-center gap-2">
+                    <code className="text-[15px] font-mono bg-white dark:bg-black px-2 py-1 rounded text-[#FF9500]">{tempPass.pass}</code>
+                    <button onClick={() => copyToClipboard(tempPass.pass)} className="p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded">
+                      {copied ? <Check className="w-4 h-4 text-[#34C759]" /> : <Copy className="w-4 h-4 text-black/50 dark:text-white/50" />}
+                    </button>
+                  </div>
+                  <p className="text-[12px] text-black/50 dark:text-white/50">Kullanıcı ilk girişte değiştirmek zorundadır.</p>
+                  <button onClick={() => setTempPass(null)} className="text-[12px] text-[#007AFF]">Kapat</button>
+                </div>
+              )}
+
+              {inviteInfo && (
+                <div className="rounded-xl p-4 bg-[#AF52DE]/10 border border-[#AF52DE]/20 space-y-2">
+                  <h3 className="text-[14px] font-medium text-black dark:text-white">🔗 {inviteInfo.name} — Davet Linki</h3>
+                  <div className="flex items-center gap-2">
+                    <code className="text-[12px] font-mono bg-white dark:bg-black px-2 py-1 rounded text-[#AF52DE] truncate w-full">{inviteInfo.url}</code>
+                    <button onClick={() => copyToClipboard(inviteInfo.url)} className="p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded">
+                      {copied ? <Check className="w-4 h-4 text-[#34C759]" /> : <Copy className="w-4 h-4 text-black/50 dark:text-white/50" />}
+                    </button>
+                  </div>
+                  <p className="text-[12px] text-black/50 dark:text-white/50">72 saat geçerlidir.</p>
+                  <button onClick={() => setInviteInfo(null)} className="text-[12px] text-[#007AFF]">Kapat</button>
+                </div>
+              )}
+
+              {/* User List */}
+              <div className="space-y-3">
+                {users.map((u: any) => {
+                  const roleInfo = ROLES.find((r) => r.value === u.role) || ROLES[2];
+                  return (
+                    <div key={u.id} className={`flex items-center justify-between p-4 rounded-xl border border-black/5 dark:border-white/10 bg-white dark:bg-[#111] transition-opacity ${!u.is_active ? 'opacity-50' : ''}`}>
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-[14px]"
+                          style={{ backgroundColor: roleInfo.color }}>
+                          {u.name?.charAt(0)?.toUpperCase()}
+                        </div>
+                        <div>
+                          <h3 className="text-[14px] font-medium text-black dark:text-white">{u.name}</h3>
+                          <div className="flex items-center gap-2 mt-0.5 text-[12px] text-black/50 dark:text-white/50">
+                            <span>{u.email}</span>
+                            <span>·</span>
+                            <span>{u.last_login_at ? `Giriş: ${new Date(u.last_login_at).toLocaleDateString('tr-TR')}` : 'Henüz giriş yapmadı'}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <select
+                          value={u.role}
+                          onChange={(e) => handleRoleChange(u.id, e.target.value)}
+                          className="text-[12px] rounded-lg px-2 py-1.5 outline-none bg-black/5 dark:bg-white/5 border-0 text-black dark:text-white"
+                        >
+                          {ROLES.map((r) => (
+                            <option key={r.value} value={r.value}>{r.label}</option>
+                          ))}
+                        </select>
+                        <div className="flex items-center gap-1 border-l border-black/10 dark:border-white/10 pl-2">
+                          <button onClick={() => handleToggle(u.id)} className="p-1.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors" style={{ color: u.is_active ? '#34C759' : '#FF3B30' }} title={u.is_active ? 'Deaktif Et' : 'Aktifleştir'}>
+                            <Power className="w-4 h-4" />
+                          </button>
+                          <button onClick={() => handleResetPassword(u.id, u.name)} className="p-1.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors text-[#FF9500]" title="Şifre Sıfırla">
+                            <KeyRound className="w-4 h-4" />
+                          </button>
+                          <button onClick={() => handleInviteLink(u.id, u.name)} className="p-1.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors text-[#AF52DE]" title="Davet Linki">
+                            <Link2 className="w-4 h-4" />
+                          </button>
+                          <button onClick={() => handleDelete(u.id)} className="p-1.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors text-[#FF3B30]" title="Sil">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
             </div>
           )}
 
