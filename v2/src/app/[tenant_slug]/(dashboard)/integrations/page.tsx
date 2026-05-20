@@ -1,11 +1,14 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Link2, MessageCircle, FileSpreadsheet, Instagram, Webhook, Activity } from "lucide-react";
+import { Link2, MessageCircle, FileSpreadsheet, Instagram, Webhook } from "lucide-react";
 import { PageShell, PageHeader } from "@/components/governance";
 import { IntegrationCard } from "@/components/features/integrations/IntegrationCard";
 import { OAuthModal } from "@/components/features/integrations/OAuthModal";
-import { ProviderConfigModal } from "@/components/features/integrations/ProviderConfigModal";
+import { GoogleSheetsWizard } from "@/components/features/integrations/GoogleSheetsWizard";
+
+// A generic placeholder wizard for other providers (Sprint 1.5 scope focuses on Sheets)
+import { IntegrationWizard, WizardStep } from "@/components/features/integrations/IntegrationWizard";
 
 type ConnectionState = 'connected' | 'disconnected' | 'error';
 
@@ -46,7 +49,7 @@ const PROVIDERS: ProviderDef[] = [
 export default function IntegrationsPage() {
   const [isPageLoading, setIsPageLoading] = useState(true);
   
-  // Simulated State Machine for Sprint 1
+  // Simulated State Machine
   const [connections, setConnections] = useState<Record<string, ConnectionState>>({
     google_sheets: "disconnected",
     meta_whatsapp: "disconnected",
@@ -56,12 +59,12 @@ export default function IntegrationsPage() {
 
   // Modal States
   const [authModal, setAuthModal] = useState<{ isOpen: boolean; providerId: string | null }>({ isOpen: false, providerId: null });
-  const [configModal, setConfigModal] = useState<{ isOpen: boolean; providerId: string | null }>({ isOpen: false, providerId: null });
+  const [wizardModal, setWizardModal] = useState<{ isOpen: boolean; providerId: string | null }>({ isOpen: false, providerId: null });
 
   // Simulate network load
   useEffect(() => {
     const timer = setTimeout(() => {
-      // Simulate that Google Sheets is already connected
+      // Simulate that Google Sheets is already connected for demo purposes
       setConnections(prev => ({ ...prev, google_sheets: "connected" }));
       setIsPageLoading(false);
     }, 800);
@@ -70,35 +73,41 @@ export default function IntegrationsPage() {
 
   const handleConnectClick = (id: string) => {
     if (id === 'custom_webhook') {
-      // Webhook doesn't need OAuth, goes straight to config
-      setConfigModal({ isOpen: true, providerId: id });
+      // Webhook doesn't need OAuth, goes straight to config wizard
+      setWizardModal({ isOpen: true, providerId: id });
     } else {
       setAuthModal({ isOpen: true, providerId: id });
     }
   };
 
   const handleConfigureClick = (id: string) => {
-    setConfigModal({ isOpen: true, providerId: id });
+    setWizardModal({ isOpen: true, providerId: id });
   };
 
   const handleOAuthSuccess = (id: string) => {
     setConnections(prev => ({ ...prev, [id]: "connected" }));
-    // Automatically open config after success
+    // Automatically open wizard after success
     setTimeout(() => {
-      setConfigModal({ isOpen: true, providerId: id });
+      setWizardModal({ isOpen: true, providerId: id });
     }, 500);
   };
 
-  const handleDisconnect = (id: string) => {
-    setConnections(prev => ({ ...prev, [id]: "disconnected" }));
-  };
+  const activeProvider = PROVIDERS.find(p => p.id === authModal.providerId) || PROVIDERS.find(p => p.id === wizardModal.providerId);
 
-  const handleSaveConfig = (id: string, config: any) => {
-    console.log(`Saved config for ${id}:`, config);
-    // In Sprint 2, this will save to DB
-  };
-
-  const activeProvider = PROVIDERS.find(p => p.id === authModal.providerId) || PROVIDERS.find(p => p.id === configModal.providerId);
+  // Generic Placeholder Wizard for Meta/Webhook
+  const genericSteps: WizardStep[] = [
+    {
+      id: 'coming_soon',
+      title: 'Yakında...',
+      subtitle: 'Bu entegrasyonun akıllı kurulum sihirbazı geliştirme aşamasındadır.',
+      component: (
+        <div className="py-20 text-center">
+          <p className="text-gray-500 font-medium">Bu özellik yakında aktif olacaktır.</p>
+        </div>
+      ),
+      isValid: true
+    }
+  ];
 
   return (
     <PageShell>
@@ -132,27 +141,40 @@ export default function IntegrationsPage() {
         </div>
       )}
 
-      {/* Modals */}
+      {/* Auth Modal */}
       {activeProvider && (
-        <>
-          <OAuthModal
-            isOpen={authModal.isOpen}
-            onClose={() => setAuthModal({ isOpen: false, providerId: null })}
-            providerId={activeProvider.id}
-            providerName={activeProvider.name}
-            providerIcon={activeProvider.icon}
-            onSuccess={handleOAuthSuccess}
-          />
-          
-          <ProviderConfigModal
-            isOpen={configModal.isOpen}
-            onClose={() => setConfigModal({ isOpen: false, providerId: null })}
-            providerId={activeProvider.id}
-            providerName={activeProvider.name}
-            onDisconnect={handleDisconnect}
-            onSave={handleSaveConfig}
-          />
-        </>
+        <OAuthModal
+          isOpen={authModal.isOpen}
+          onClose={() => setAuthModal({ isOpen: false, providerId: null })}
+          providerId={activeProvider.id}
+          providerName={activeProvider.name}
+          providerIcon={activeProvider.icon}
+          onSuccess={handleOAuthSuccess}
+        />
+      )}
+
+      {/* Integration Wizards */}
+      {wizardModal.providerId === 'google_sheets' && (
+        <GoogleSheetsWizard
+          isOpen={wizardModal.isOpen}
+          onClose={() => setWizardModal({ isOpen: false, providerId: null })}
+          onComplete={() => {
+            console.log("Google Sheets Configured");
+            setWizardModal({ isOpen: false, providerId: null });
+          }}
+        />
+      )}
+
+      {wizardModal.providerId && wizardModal.providerId !== 'google_sheets' && activeProvider && (
+        <IntegrationWizard
+          isOpen={wizardModal.isOpen}
+          onClose={() => setWizardModal({ isOpen: false, providerId: null })}
+          providerId={activeProvider.id}
+          providerName={activeProvider.name}
+          providerIcon={activeProvider.icon}
+          steps={genericSteps}
+          onComplete={() => setWizardModal({ isOpen: false, providerId: null })}
+        />
       )}
 
     </PageShell>
