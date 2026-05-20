@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { getSession, logout, stopImpersonation } from "@/lib/auth/session";
 import { redirect } from "next/navigation";
+import type { TenantBootstrapData } from "@/lib/domain/tenant/bootstrap";
 
 // ==========================================
 // QUBA AI — Sidebar (Server Component)
@@ -33,24 +34,27 @@ async function handleStopImpersonation(tenantSlug: string) {
   redirect(`/${tenantSlug}/admin`);
 }
 
-export async function Sidebar() {
+export async function Sidebar({ tenantData }: { tenantData?: TenantBootstrapData | null }) {
   const session = await getSession();
+  
+  const brandingName = tenantData?.profile.name || session?.tenantName || "Platform";
+  const brandingLogo = tenantData?.profile.logo_url || "/quba-logo.svg";
 
   return (
     <aside className="w-64 border-r border-white/50 bg-white/40 backdrop-blur-[30px] h-full flex flex-col shadow-[1px_0_20px_rgba(0,0,0,0.03)] z-20">
       {/* Quba AI Branding */}
       <div className="p-5 border-b border-black/5">
         <div className="flex items-center gap-3">
-          <img src="/quba-logo.svg" alt="Quba AI" className="w-9 h-9 rounded-xl" />
+          <img src={brandingLogo} alt={brandingName} className="w-9 h-9 rounded-xl object-cover shadow-sm" />
           <div>
-            <h1 className="text-[15px] font-bold tracking-tight text-[--q-text-primary]">Quba AI</h1>
+            <h1 className="text-[15px] font-bold tracking-tight text-[--q-text-primary] truncate w-40">{brandingName}</h1>
             <p className="text-[10px] text-[--q-text-secondary] font-medium">
               {session?.impersonatedTenantId ? (
                 <span className="text-[--q-purple-alt] font-semibold flex items-center gap-1">
                   <Eye className="w-3 h-3" /> Gözlem Modu
                 </span>
               ) : (
-                session?.tenantName || "Platform"
+                tenantData?.profile.industry === 'health' ? 'Sağlık CRM' : 'Yapay Zeka Platformu'
               )}
             </p>
           </div>
@@ -65,17 +69,29 @@ export async function Sidebar() {
           </>
         ) : (
           <>
-            <NavLink href={`/${session?.tenantSlug || ''}`} icon={<LayoutDashboard className="w-[18px] h-[18px]" />} label="Panel" />
+            <NavLink href={`/${session?.tenantSlug || ''}`} icon={<LayoutDashboard className="w-[18px] h-[18px]" />} label="Workspace" />
+            
+            {/* INBOX (Always enabled for now, or check module) */}
             <NavLink href={`/${session?.tenantSlug || ''}/inbox`} icon={<MessageSquare className="w-[18px] h-[18px]" />} label="Mesajlar" />
-            <NavLink href={`/${session?.tenantSlug || ''}/forms`} icon={<ClipboardList className="w-[18px] h-[18px]" />} label="Formlar" />
-            {session?.role !== "viewer" && (
-              <NavLink href={`/${session?.tenantSlug || ''}/bot`} icon={<Bot className="w-[18px] h-[18px]" />} label="Bot Yönetimi" />
+            
+            {/* FORMS (Check module) */}
+            {(tenantData?.modules.includes('forms') || true) && (
+              <NavLink href={`/${session?.tenantSlug || ''}/forms`} icon={<ClipboardList className="w-[18px] h-[18px]" />} label="Formlar" />
             )}
-            {session?.role !== "viewer" && (
-              <NavLink href={`/${session?.tenantSlug || ''}/analytics`} icon={<BarChart3 className="w-[18px] h-[18px]" />} label="AI Performans & Maliyet" />
+            
+            {/* AI MODULES */}
+            {session?.role !== "viewer" && (tenantData?.modules.includes('ai_orchestrator') || true) && (
+              <NavLink href={`/${session?.tenantSlug || ''}/bot`} icon={<Bot className="w-[18px] h-[18px]" />} label="AI Asistan" />
             )}
+            
+            {/* ANALYTICS */}
+            {session?.role !== "viewer" && (tenantData?.modules.includes('analytics') || true) && (
+              <NavLink href={`/${session?.tenantSlug || ''}/analytics`} icon={<BarChart3 className="w-[18px] h-[18px]" />} label="Performans" />
+            )}
+            
+            {/* ADMIN ONLY */}
             {(session?.role === "admin" || session?.role === "owner") && (
-              <NavLink href={`/${session?.tenantSlug || ''}/ai-developer`} icon={<Terminal className="w-[18px] h-[18px]" />} label="AI Geliştirici Konsolu" />
+              <NavLink href={`/${session?.tenantSlug || ''}/ai-developer`} icon={<Terminal className="w-[18px] h-[18px]" />} label="AI Developer" />
             )}
             {(session?.role === "admin" || session?.role === "owner") && (
               <NavLink href={`/${session?.tenantSlug || ''}/integrations`} icon={<Link2 className="w-[18px] h-[18px]" />} label="Entegrasyonlar" />

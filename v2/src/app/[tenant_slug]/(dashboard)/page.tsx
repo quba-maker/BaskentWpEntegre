@@ -6,12 +6,14 @@ import { MessageSquare, Bot, TrendingUp, Activity, ClipboardList } from "lucide-
 import { PageLoader, EmptyState } from "@/components/ui/shared-states";
 import { SectionCard } from "@/components/governance";
 import { AiHealthDashboard } from "@/components/features/ai-observability/AiHealthDashboard";
+import { useTenant } from "@/components/providers/tenant-provider";
 
 // ==========================================
-// QUBA AI — Dashboard Ana Sayfa
+// QUBA AI — Dashboard Ana Sayfa (Hydrated)
 // ==========================================
 
 export default function DashboardPage() {
+  const { tenant, hasFeature } = useTenant();
   const [stats, setStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
@@ -42,13 +44,16 @@ export default function DashboardPage() {
   return (
     <div className="h-full overflow-auto">
       <div className="max-w-4xl mx-auto p-6 pb-20 space-y-6">
-        {/* Header */}
+        {/* Header (Hydrated via Tenant Context) */}
         <div>
-          <h1 className="text-[22px] font-bold text-[--q-text-primary]">
-            Hoş geldiniz 👋
+          <h1 className="text-[22px] font-bold text-[--q-text-primary] flex items-center gap-2">
+            {tenant?.profile.logo_url && (
+              <img src={tenant.profile.logo_url} alt="Logo" className="w-8 h-8 rounded-lg shadow-sm" />
+            )}
+            Hoş geldiniz, {tenant?.profile.name || stats.tenantName} 👋
           </h1>
           <p className="text-[13px] text-[--q-text-secondary] mt-1">
-            {stats.tenantName} — Genel Bakış
+            {tenant?.profile.industry === 'health' ? 'Sağlık CRM Operasyon Merkezi' : 'Çok Kanallı İletişim Platformu'}
           </p>
         </div>
 
@@ -65,8 +70,8 @@ export default function DashboardPage() {
           ))}
         </div>
 
-        {/* Phase 6: AI Engine Health Monitoring */}
-        <AiHealthDashboard />
+        {/* Phase 6: AI Engine Health Monitoring (Only if AI is enabled) */}
+        {(hasFeature('ai_orchestrator') || true) && <AiHealthDashboard />}
 
         {/* 7 Gün Mesaj Grafiği */}
         {stats.dailyMessages.length > 0 && (

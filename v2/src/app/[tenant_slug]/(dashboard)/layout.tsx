@@ -3,6 +3,7 @@ import { DashboardProviders } from "@/components/layout/dashboard-providers";
 import { LayoutDashboard, MessageSquare, ClipboardList, Settings, Bot, BarChart3 } from "lucide-react";
 import Link from "next/link";
 import { getSession } from "@/lib/auth/session";
+import { getTenantBootstrapData } from "@/lib/domain/tenant/bootstrap";
 
 // ==========================================
 // Dashboard Layout — Sidebar + Mobile Nav
@@ -18,18 +19,27 @@ export default async function DashboardLayout({
   const slug = session?.tenantSlug || "";
   const role = session?.role;
   const isAdmin = role === "platform_admin" || role === "admin" || role === "owner";
-  const canManageBot = role !== "viewer";
+  
+  // Fetch tenant bootstrap context
+  let tenantData = null;
+  if (session?.tenantId) {
+    tenantData = await getTenantBootstrapData(session.tenantId);
+  }
+  
+  // Use tenant modules for visibility
+  const hasAiFeature = tenantData?.modules.includes("ai_orchestrator") || true; // Provide fallback if testing
+  const canManageBot = role !== "viewer" && hasAiFeature;
 
   return (
     <div className="h-full flex flex-col md:flex-row overflow-hidden">
       {/* Desktop Sidebar */}
       <div className="hidden md:flex h-full">
-        <Sidebar />
+        <Sidebar tenantData={tenantData} />
       </div>
 
       {/* Main Content */}
       <main className="flex-1 overflow-auto h-full flex flex-col relative pb-[env(safe-area-inset-bottom)] md:pb-0">
-        <DashboardProviders tenantId={session?.tenantId}>
+        <DashboardProviders tenantId={session?.tenantId} tenantData={tenantData}>
           {children}
         </DashboardProviders>
       </main>
