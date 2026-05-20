@@ -21,5 +21,7 @@ export const users = pgTable('users', {
   name: text('name').notNull(),
   role: text('role').default('agent'),
   isActive: boolean('is_active').default(true),
+  mustChangePassword: boolean('must_change_password').default(false),
+  lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
