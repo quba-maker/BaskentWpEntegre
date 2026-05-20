@@ -401,6 +401,56 @@ export async function GET(req: NextRequest) {
       results.push("✅ DLQ RLS policies oluşturuldu");
     } catch (e: any) { results.push("⚠️ DLQ RLS: " + e.message); }
 
+    // =====================================================
+    // 20. SPRINT 4.0: ENTERPRISE DATA INGESTION ENGINE
+    // =====================================================
+
+    await execute`
+      CREATE TABLE IF NOT EXISTS tenant_semantic_rules (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        source_field TEXT NOT NULL,
+        resolved_entity TEXT NOT NULL,
+        confidence_threshold NUMERIC(3,2) DEFAULT 0.85,
+        is_operator_enforced BOOLEAN DEFAULT false,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(tenant_id, source_field)
+      )
+    `;
+    await execute`CREATE INDEX IF NOT EXISTS idx_tenant_semantic_rules ON tenant_semantic_rules(tenant_id)`;
+    results.push("✅ tenant_semantic_rules tablosu hazır");
+
+    await execute`
+      CREATE TABLE IF NOT EXISTS ai_context_memory (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        entity_type TEXT NOT NULL,
+        context_key TEXT NOT NULL,
+        context_value JSONB NOT NULL,
+        last_used_at TIMESTAMPTZ DEFAULT NOW(),
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `;
+    await execute`CREATE INDEX IF NOT EXISTS idx_ai_context_memory ON ai_context_memory(tenant_id, entity_type)`;
+    results.push("✅ ai_context_memory tablosu hazır");
+
+    await execute`
+      CREATE TABLE IF NOT EXISTS pipeline_events (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        event_type TEXT NOT NULL,
+        source_id TEXT,
+        entity_id UUID,
+        payload JSONB NOT NULL,
+        ai_confidence NUMERIC(3,2),
+        operator_id UUID REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `;
+    await execute`CREATE INDEX IF NOT EXISTS idx_pipeline_events ON pipeline_events(tenant_id, event_type)`;
+    results.push("✅ pipeline_events tablosu hazır");
+
     if (isDryRun) {
       return NextResponse.json({ success: true, mode: "dryRun", results, executedQueries: dryRunLogs });
     }
