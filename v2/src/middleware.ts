@@ -37,7 +37,7 @@ export async function middleware(req: NextRequest) {
         try {
           const { payload } = await jwtVerify(token, SECRET);
           const tSlug = payload.tenantSlug as string;
-          console.log(`[AUTH AUDIT] User already logged in, redirecting /login -> /${tSlug}`);
+          if (process.env.NODE_ENV !== 'production') console.log(`[AUTH AUDIT] User already logged in, redirecting /login -> /${tSlug}`);
           return NextResponse.redirect(new URL(`/${tSlug}`, req.url));
         } catch (err) {}
       }
@@ -48,7 +48,7 @@ export async function middleware(req: NextRequest) {
   // Session kontrolü
   const token = req.cookies.get("quba_session")?.value;
   if (!token) {
-    console.log(`[AUTH AUDIT] Request missing session token for ${pathname}, redirecting to /login`);
+    if (process.env.NODE_ENV !== 'production') console.log(`[AUTH AUDIT] Request missing session token for ${pathname}, redirecting to /login`);
     return NextResponse.redirect(new URL("/login", req.url));
   }
 
@@ -73,7 +73,7 @@ export async function middleware(req: NextRequest) {
     // Hiç kimse kendi tenant slug'ı dışında bir yere giremez! Platform Admin bile `/baskent` yazamaz.
     // Platform admin'in yeri `/admin` rotasıdır.
     if (urlTenantSlug !== sessionTenantSlug && urlTenantSlug !== 'admin') {
-      console.log(`[AUTH AUDIT] Tenant isolation failure: Attempted /${urlTenantSlug} but session is /${sessionTenantSlug}`);
+      if (process.env.NODE_ENV !== 'production') console.log(`[AUTH AUDIT] Tenant isolation failure: Attempted /${urlTenantSlug} but session is /${sessionTenantSlug}`);
       return NextResponse.redirect(new URL(`/${sessionTenantSlug}`, req.url));
     }
 
@@ -82,14 +82,14 @@ export async function middleware(req: NextRequest) {
       if (userRole === 'platform_admin' || userRole === 'owner') {
         return NextResponse.redirect(new URL(`/${sessionTenantSlug}/admin`, req.url));
       } else {
-        console.log(`[AUTH AUDIT] Non-admin attempted to access /admin`);
+        if (process.env.NODE_ENV !== 'production') console.log(`[AUTH AUDIT] Non-admin attempted to access /admin`);
         return NextResponse.redirect(new URL(`/${sessionTenantSlug}`, req.url));
       }
     }
     
     if (baseRoute === '/admin') {
       if (userRole !== 'platform_admin' && userRole !== 'owner') {
-        console.log(`[AUTH AUDIT] Non-admin attempted to access baseRoute /admin`);
+        if (process.env.NODE_ENV !== 'production') console.log(`[AUTH AUDIT] Non-admin attempted to access baseRoute /admin`);
         return NextResponse.redirect(new URL(`/${sessionTenantSlug}`, req.url));
       }
     }
@@ -99,13 +99,13 @@ export async function middleware(req: NextRequest) {
     const isTempOwner = userRole === 'owner';
     
     if (allowedRoles && !allowedRoles.includes(userRole) && !isTempOwner) {
-      console.log(`[AUTH AUDIT] Role permission denied for ${baseRoute}. Role: ${userRole}`);
+      if (process.env.NODE_ENV !== 'production') console.log(`[AUTH AUDIT] Role permission denied for ${baseRoute}. Role: ${userRole}`);
       return NextResponse.redirect(new URL(`/${sessionTenantSlug}`, req.url));
     }
 
     return NextResponse.next();
   } catch (error) {
-    console.log(`[AUTH AUDIT] JWT verification failed or other error, clearing cookie`);
+    if (process.env.NODE_ENV !== 'production') console.log(`[AUTH AUDIT] JWT verification failed or other error, clearing cookie`);
     const response = NextResponse.redirect(new URL("/login", req.url));
     response.cookies.delete("quba_session");
     return response;

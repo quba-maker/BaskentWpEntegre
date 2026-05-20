@@ -4,11 +4,15 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build --webpack",
+    "build": "node scripts/health-check.mjs && next build --webpack",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test:security": "node scripts/security-check.mjs"
+    "test:security": "node scripts/security-check.mjs",
+    "seed:dev": "node scripts/seed.mjs dev",
+    "seed:staging": "node scripts/seed.mjs staging",
+    "seed:production": "node scripts/seed.mjs production",
+    "db:push": "node scripts/db-push.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",

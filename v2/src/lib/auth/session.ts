@@ -110,12 +110,12 @@ export async function login(
   email: string,
   password: string
 ): Promise<{ success: boolean; error?: string; tenantSlug?: string; mustChangePassword?: boolean }> {
-  console.log(`[AUTH AUDIT] Attempting login for: ${email}`);
+  if (process.env.NODE_ENV !== 'production') console.log(`[AUTH AUDIT] Attempting login for: ${email}`);
   try {
     // Rate Limiting — IP yerine email bazlı (serverless'ta IP güvenilmez)
     const rl = checkRateLimit(`login:${email}`, 5, 60_000);
     if (!rl.allowed) {
-      console.log(`[AUTH AUDIT] Rate limit exceeded for: ${email}`);
+      if (process.env.NODE_ENV !== 'production') console.log(`[AUTH AUDIT] Rate limit exceeded for: ${email}`);
       await logAudit({ action: "login_rate_limited", userEmail: email, details: { retryAfterMs: rl.retryAfterMs } });
       return { success: false, error: `Çok fazla deneme. ${Math.ceil(rl.retryAfterMs / 1000)} saniye sonra tekrar deneyin.` };
     }
@@ -128,7 +128,7 @@ export async function login(
       WHERE u.email = ${email} AND u.is_active = true
     `;
 
-    console.log(`[AUTH AUDIT] User found in Neon DB? ${users.length > 0 ? "Yes" : "No"}`);
+    if (process.env.NODE_ENV !== 'production') console.log(`[AUTH AUDIT] User found in Neon DB? ${users.length > 0 ? "Yes" : "No"}`);
 
     if (users.length === 0) {
       await logAudit({ action: "login_failed", userEmail: email, details: { reason: "user_not_found" } });
@@ -141,14 +141,14 @@ export async function login(
     const bcrypt = await import("bcryptjs");
     const isValid = await bcrypt.compare(password, user.password_hash);
     
-    console.log(`[AUTH AUDIT] Password compare result: ${isValid}`);
+    if (process.env.NODE_ENV !== 'production') console.log(`[AUTH AUDIT] Password compare result: ${isValid}`);
 
     if (!isValid) {
       await logAudit({ action: "login_failed", userEmail: email, tenantId: user.tenant_id, details: { reason: "wrong_password" } });
       return { success: false, error: "E-posta veya şifre hatalı." };
     }
 
-    console.log(`[AUTH AUDIT] Tenant resolved: ${user.tenant_slug}`);
+    if (process.env.NODE_ENV !== 'production') console.log(`[AUTH AUDIT] Tenant resolved: ${user.tenant_slug}`);
 
     // Session oluştur
     const session: Session = {
@@ -162,7 +162,7 @@ export async function login(
     };
 
     const token = await createToken(session);
-    console.log(`[AUTH AUDIT] Session successfully created & JWT signed for User ID: ${session.userId}`);
+    if (process.env.NODE_ENV !== 'production') console.log(`[AUTH AUDIT] Session successfully created & JWT signed for User ID: ${session.userId}`);
     
     const cookieStore = await cookies();
     cookieStore.set(COOKIE_NAME, token, {
@@ -173,7 +173,7 @@ export async function login(
       path: "/",
     });
     
-    console.log(`[AUTH AUDIT] Cookie successfully written.`);
+    if (process.env.NODE_ENV !== 'production') console.log(`[AUTH AUDIT] Cookie successfully written.`);
 
     // Son giriş zamanını güncelle
     await sql`UPDATE users SET last_login_at = NOW() WHERE id = ${user.id}`;
