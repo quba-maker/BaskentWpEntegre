@@ -124,10 +124,17 @@ export async function getAiDebugData() {
 
   try {
     recentEvents = await sql`
-      SELECT event_type, event_category, severity, payload, created_at
-      FROM ai_events
-      WHERE tenant_id = ${tenantId}
-      ORDER BY created_at DESC
+      SELECT 
+        e.event_type, 
+        'orchestration' as event_category, 
+        CASE WHEN e.status = 'error' THEN 'error' ELSE 'info' END as severity, 
+        e.payload, 
+        e.created_at
+      FROM channel_events e
+      JOIN channels c ON e.channel_id = c.id
+      JOIN channel_groups cg ON c.group_id = cg.id
+      WHERE cg.tenant_id = ${tenantId}
+      ORDER BY e.created_at DESC
       LIMIT 50
     `;
   } catch { /* table may not exist yet */ }
@@ -187,8 +194,10 @@ export async function getAiHealthCards() {
       SELECT 
         COUNT(*) FILTER (WHERE event_type = 'ai_response_generated') as successes,
         COUNT(*) FILTER (WHERE event_type IN ('ai_response_failed', 'ai_timeout')) as failures
-      FROM ai_events
-      WHERE tenant_id = ${tenantId} AND created_at > NOW() - INTERVAL '24 hours'
+      FROM channel_events e
+      JOIN channels c ON e.channel_id = c.id
+      JOIN channel_groups cg ON c.group_id = cg.id
+      WHERE cg.tenant_id = ${tenantId} AND e.created_at > NOW() - INTERVAL '24 hours'
     `;
     const s = parseInt(successRate[0]?.successes) || 0;
     const f = parseInt(successRate[0]?.failures) || 0;
@@ -198,9 +207,11 @@ export async function getAiHealthCards() {
     const identityRate = await sql`
       SELECT 
         COUNT(*) FILTER (WHERE event_type = 'identity_resolved') as matched,
-        COUNT(*) FILTER (WHERE event_type = 'identity_resolved' OR event_category = 'identity') as total
-      FROM ai_events
-      WHERE tenant_id = ${tenantId} AND created_at > NOW() - INTERVAL '24 hours'
+        COUNT(*) FILTER (WHERE event_type IN ('identity_resolved', 'identity_failed')) as total
+      FROM channel_events e
+      JOIN channels c ON e.channel_id = c.id
+      JOIN channel_groups cg ON c.group_id = cg.id
+      WHERE cg.tenant_id = ${tenantId} AND e.created_at > NOW() - INTERVAL '24 hours'
     `;
     const im = parseInt(identityRate[0]?.matched) || 0;
     const it = parseInt(identityRate[0]?.total) || 1;
