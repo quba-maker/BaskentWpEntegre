@@ -72,7 +72,10 @@ export const POST = withApiGuard(
       log.info(`[WA] Enqueueing`, { tenantName: tenant.name, tenantSlug: tenant.slug });
       
       // Send to Queue instead of synchronous wait
-      waitUntil(queue.publish(ctx.tenantId!, 'whatsapp.message.received', body));
+      waitUntil(queue.publish(ctx.tenantId!, 'whatsapp.message.received', body, { 
+        channelId: ctx.tenantRuntime?.channelId, 
+        groupId: ctx.tenantRuntime?.groupId 
+      }));
       
       return new NextResponse("EVENT_RECEIVED", { status: 200 });
     }
@@ -101,7 +104,10 @@ export const POST = withApiGuard(
 
       log.info(`[WA Status] Enqueueing receipt: ${statusObj.status}`, { tenantName: tenant.name, tenantSlug: tenant.slug });
       
-      waitUntil(queue.publish(ctx.tenantId!, 'whatsapp.status.received', body));
+      waitUntil(queue.publish(ctx.tenantId!, 'whatsapp.status.received', body, {
+        channelId: ctx.tenantRuntime?.channelId,
+        groupId: ctx.tenantRuntime?.groupId
+      }));
       
       return new NextResponse("EVENT_RECEIVED", { status: 200 });
     }
@@ -124,7 +130,10 @@ export const POST = withApiGuard(
       }
 
       log.info(`[MSG] Enqueueing`, { tenantName: tenant.name, tenantSlug: tenant.slug });
-      waitUntil(queue.publish(ctx.tenantId!, 'messenger.message.received', body));
+      waitUntil(queue.publish(ctx.tenantId!, 'messenger.message.received', body, {
+        channelId: ctx.tenantRuntime?.channelId,
+        groupId: ctx.tenantRuntime?.groupId
+      }));
       return new NextResponse("EVENT_RECEIVED", { status: 200 });
     }
 
@@ -145,7 +154,10 @@ export const POST = withApiGuard(
       }
 
       log.info(`[IG] Enqueueing`, { tenantName: tenant.name, tenantSlug: tenant.slug });
-      waitUntil(queue.publish(ctx.tenantId!, 'instagram.message.received', body));
+      waitUntil(queue.publish(ctx.tenantId!, 'instagram.message.received', body, {
+        channelId: ctx.tenantRuntime?.channelId,
+        groupId: ctx.tenantRuntime?.groupId
+      }));
       return new NextResponse("EVENT_RECEIVED", { status: 200 });
     }
 
@@ -162,7 +174,10 @@ export const POST = withApiGuard(
         if (leadgenId) {
           log.info(`[Lead] Lead received`, { tenantName: tenant?.name, leadgenId });
           
-          waitUntil(queue.publish(ctx.tenantId!, 'meta.lead.received', { leadgenId, pageId, tenant }));
+          waitUntil(queue.publish(ctx.tenantId!, 'meta.lead.received', { leadgenId, pageId, tenant }, {
+            channelId: ctx.tenantRuntime?.channelId,
+            groupId: ctx.tenantRuntime?.groupId
+          }));
         }
       } catch (e: any) {
         log.error("Lead webhook hatası", e instanceof Error ? e : new Error(String(e)));

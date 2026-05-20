@@ -9,6 +9,8 @@ export interface QueueMessage<T = any> {
   id: string;
   traceId?: string;
   tenantId: string;
+  channelId?: string; // NEW V2 Routing
+  groupId?: string;   // NEW V2 Routing
   topic: string;
   payload: T;
   timestamp: number;
@@ -22,7 +24,12 @@ export interface QueueMessage<T = any> {
 export class QueueService {
   private log = logger.withContext({ module: 'QueueService' });
 
-  public async publish<T>(tenantId: string, topic: string, payload: T, delayMs?: number): Promise<string> {
+  public async publish<T>(
+    tenantId: string, 
+    topic: string, 
+    payload: T, 
+    options?: { delayMs?: number; channelId?: string; groupId?: string }
+  ): Promise<string> {
     const traceCtx = getTraceContext();
     const traceId = traceCtx?.traceId;
 
@@ -30,6 +37,8 @@ export class QueueService {
       id: crypto.randomUUID(), // Internal correlation ID
       traceId,
       tenantId,
+      channelId: options?.channelId,
+      groupId: options?.groupId,
       topic,
       payload,
       timestamp: Date.now()
@@ -58,7 +67,7 @@ export class QueueService {
         url: endpoint,
         body: message,
         retries: 3, // Auto retry up to 3 times with exponential backoff
-        delay: delayMs ? Math.max(1, Math.round(delayMs / 1000)) : undefined,
+        delay: options?.delayMs ? Math.max(1, Math.round(options.delayMs / 1000)) : undefined,
         headers
       });
 

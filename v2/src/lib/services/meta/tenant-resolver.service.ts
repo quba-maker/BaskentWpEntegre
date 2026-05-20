@@ -15,16 +15,22 @@ export interface TenantRuntimeConfig {
   tenantSlug: string;
   name: string;
 
-  // Meta App Credentials (tenant-isolated)
+  // New Channel Architecture
+  channelId: string;
+  groupId: string;
+  provider: string; // 'whatsapp' | 'messenger' | 'instagram'
+
+  // Meta App Credentials (tenant-isolated, for validating webhook signature)
   metaAppId: string | null;
   metaAppSecret: string | null;
 
-  // WhatsApp Runtime
+  // Channel Specific
+  identifier: string; // The phone number id or page id
+  accessToken: string | null; // Extracted from channel_integrations.credentials_encrypted if JSON
+
+  // Legacy mappings for backwards compatibility during migration
   whatsappPhoneNumberId: string | null;
   whatsappBusinessAccountId: string | null;
-  accessToken: string | null;
-
-  // Facebook / Instagram
   metaPageId: string | null;
   instagramId: string | null;
 
@@ -32,14 +38,15 @@ export interface TenantRuntimeConfig {
   plan: string;
   status: string;
 
-  // Raw DB row (legacy compat)
+  // Raw DB row
   raw: Record<string, any>;
 }
 
 export interface TenantIdentifier {
-  type: 'whatsapp_phone_id' | 'whatsapp_business_id' | 'meta_page_id' | 'instagram_id';
+  type: 'whatsapp' | 'messenger' | 'instagram';
   id: string;
   source: string;
+  wabaId?: string; // Optional: WhatsApp Business Account ID fallback
 }
 
 export class TenantResolverService {
@@ -47,38 +54,32 @@ export class TenantResolverService {
 
   /**
    * Webhook payload'ından tenant tanımlayıcıları çıkarır.
-   * Fallback zinciri: phone_number_id → waba_id → page_id → instagram_id
    */
   extractIdentifiers(body: any): TenantIdentifier | null {
     if (!body?.object || !body?.entry?.[0]) return null;
 
-    // 1. WHATSAPP — phone_number_id (en güvenilir tanımlayıcı)
+    // 1. WHATSAPP
     if (body.object === 'whatsapp_business_account') {
       const phoneId = body.entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id;
-      if (phoneId) {
-        return { type: 'whatsapp_phone_id', id: phoneId, source: 'metadata.phone_number_id' };
-      }
-
-      // Fallback: WABA ID (entry-level)
       const wabaId = body.entry?.[0]?.id;
-      if (wabaId) {
-        return { type: 'whatsapp_business_id', id: wabaId, source: 'entry.id (waba)' };
+      if (phoneId) {
+        return { type: 'whatsapp', id: phoneId, source: 'metadata.phone_number_id', wabaId };
       }
     }
 
-    // 2. MESSENGER / PAGE — page_id
+    // 2. MESSENGER / PAGE
     if (body.object === 'page') {
       const pageId = body.entry?.[0]?.id;
       if (pageId) {
-        return { type: 'meta_page_id', id: pageId, source: 'entry.id (page)' };
+        return { type: 'messenger', id: pageId, source: 'entry.id (page)' };
       }
     }
 
-    // 3. INSTAGRAM — instagram_id
+    // 3. INSTAGRAM
     if (body.object === 'instagram') {
       const igId = body.entry?.[0]?.id;
       if (igId) {
-        return { type: 'instagram_id', id: igId, source: 'entry.id (instagram)' };
+        return { type: 'instagram', id: igId, source: 'entry.id (instagram)' };
       }
     }
 
@@ -104,44 +105,83 @@ export class TenantResolverService {
     try {
       const sql = neon(process.env.DATABASE_URL!);
 
-      // Dynamic column-based lookup
-      const columnMap: Record<string, string> = {
-        'whatsapp_phone_id': 'whatsapp_phone_id',
-        'whatsapp_business_id': 'whatsapp_business_id',
-        'meta_page_id': 'meta_page_id',
-        'instagram_id': 'instagram_id',
-      };
+      // NEW V2 ROUTING: Look up via channels -> channel_groups -> tenants
+      let results = await sql`
+        SELECT 
+          c.id as channel_id,
+          c.provider,
+          c.identifier,
+          cg.id as group_id,
+          t.id as tenant_id,
+          t.slug as tenant_slug,
+          t.name as tenant_name,
+          t.meta_app_id,
+          t.meta_app_secret,
+          t.plan,
+          t.status,
+          t.whatsapp_phone_id,
+          t.whatsapp_business_id,
+          t.meta_page_id,
+          t.instagram_id,
+          ci.credentials_encrypted
+        FROM channels c
+        JOIN channel_groups cg ON c.group_id = cg.id
+        JOIN tenants t ON cg.tenant_id = t.id
+        LEFT JOIN channel_integrations ci ON ci.channel_id = c.id
+        WHERE c.identifier = ${identifier.id} 
+          AND t.status = 'active'
+        LIMIT 1
+      `;
 
-      const column = columnMap[identifier.type];
-      if (!column) {
-        this.log.warn('Unknown identifier type', { type: identifier.type });
-        return null;
-      }
+      // FALLBACK TO LEGACY V1 ROUTING (Migration phase)
+      // If the channel doesn't exist yet, we check if the tenant exists via legacy columns
+      if (results.length === 0) {
+        let legacyResults: any[] = [];
+        if (identifier.type === 'whatsapp') {
+          legacyResults = await sql`SELECT * FROM tenants WHERE whatsapp_phone_id = ${identifier.id} AND status = 'active' LIMIT 1`;
+          if (legacyResults.length === 0 && identifier.wabaId) {
+            legacyResults = await sql`SELECT * FROM tenants WHERE whatsapp_business_id = ${identifier.wabaId} AND status = 'active' LIMIT 1`;
+          }
+        } else if (identifier.type === 'messenger') {
+          legacyResults = await sql`SELECT * FROM tenants WHERE meta_page_id = ${identifier.id} AND status = 'active' LIMIT 1`;
+        } else if (identifier.type === 'instagram') {
+          legacyResults = await sql`SELECT * FROM tenants WHERE instagram_id = ${identifier.id} AND status = 'active' LIMIT 1`;
+        }
 
-      // Parameterized query (SQL injection safe)
-      // neon tagged template literals auto-parameterize
-      let tenants: any[];
-      switch (identifier.type) {
-        case 'whatsapp_phone_id':
-          tenants = await sql`SELECT * FROM tenants WHERE whatsapp_phone_id = ${identifier.id} AND status = 'active' LIMIT 1`;
-          break;
-        case 'whatsapp_business_id':
-          tenants = await sql`SELECT * FROM tenants WHERE whatsapp_business_id = ${identifier.id} AND status = 'active' LIMIT 1`;
-          break;
-        case 'meta_page_id':
-          tenants = await sql`SELECT * FROM tenants WHERE meta_page_id = ${identifier.id} AND status = 'active' LIMIT 1`;
-          break;
-        case 'instagram_id':
-          tenants = await sql`SELECT * FROM tenants WHERE instagram_id = ${identifier.id} AND status = 'active' LIMIT 1`;
-          break;
-        default:
-          tenants = [];
+        if (legacyResults.length > 0) {
+          const t = legacyResults[0];
+          this.log.warn('Used legacy V1 routing. Tenant has no channel defined!', {
+            tenantId: t.id,
+            tenantSlug: t.slug,
+            identifierId: identifier.id
+          });
+          
+          return {
+            tenantId: t.id,
+            tenantSlug: t.slug,
+            name: t.name,
+            channelId: 'legacy_unmapped',
+            groupId: 'legacy_unmapped',
+            provider: identifier.type,
+            metaAppId: t.meta_app_id || null,
+            metaAppSecret: t.meta_app_secret || null,
+            identifier: identifier.id,
+            accessToken: t.meta_page_token || null,
+            whatsappPhoneNumberId: t.whatsapp_phone_id || null,
+            whatsappBusinessAccountId: t.whatsapp_business_id || null,
+            metaPageId: t.meta_page_id || null,
+            instagramId: t.instagram_id || null,
+            plan: t.plan || 'starter',
+            status: t.status,
+            raw: t
+          };
+        }
       }
 
       const durationMs = Date.now() - startTime;
 
-      if (tenants.length === 0) {
-        this.log.warn('No matching active tenant found', {
+      if (results.length === 0) {
+        this.log.warn('No matching active tenant/channel found', {
           identifierType: identifier.type,
           identifierId: identifier.id,
           identifierSource: identifier.source,
@@ -150,28 +190,47 @@ export class TenantResolverService {
         return null;
       }
 
-      const t = tenants[0];
+      const row = results[0];
+      
+      // Attempt to extract access token from JSON credentials
+      let accessToken = null;
+      try {
+        if (row.credentials_encrypted) {
+          const creds = JSON.parse(row.credentials_encrypted);
+          accessToken = creds.accessToken || null;
+        }
+      } catch (e) {
+        // Assume plain string or legacy format
+        accessToken = row.credentials_encrypted;
+      }
+
+      // If no token in integration, fallback to legacy tenant token
+      if (!accessToken && identifier.type === 'whatsapp') accessToken = row.whatsapp_business_id ? row.meta_page_token : null; // Typically same token
+
       const runtime: TenantRuntimeConfig = {
-        tenantId: t.id,
-        tenantSlug: t.slug,
-        name: t.name,
-        metaAppId: t.meta_app_id || null,
-        metaAppSecret: t.meta_app_secret || null,
-        whatsappPhoneNumberId: t.whatsapp_phone_id || null,
-        whatsappBusinessAccountId: t.whatsapp_business_id || null,
-        accessToken: t.meta_page_token || null,
-        metaPageId: t.meta_page_id || null,
-        instagramId: t.instagram_id || null,
-        plan: t.plan || 'starter',
-        status: t.status,
-        raw: t
+        tenantId: row.tenant_id,
+        tenantSlug: row.tenant_slug,
+        name: row.tenant_name,
+        channelId: row.channel_id,
+        groupId: row.group_id,
+        provider: row.provider,
+        metaAppId: row.meta_app_id || null,
+        metaAppSecret: row.meta_app_secret || null,
+        identifier: row.identifier,
+        accessToken: accessToken,
+        whatsappPhoneNumberId: row.whatsapp_phone_id || null,
+        whatsappBusinessAccountId: row.whatsapp_business_id || null,
+        metaPageId: row.meta_page_id || null,
+        instagramId: row.instagram_id || null,
+        plan: row.plan || 'starter',
+        status: row.status,
+        raw: row
       };
 
-      this.log.info('Tenant resolved', {
+      this.log.info('Tenant resolved (V2)', {
         tenantSlug: runtime.tenantSlug,
-        identifierType: identifier.type,
-        identifierSource: identifier.source,
-        hasOwnSecret: !!runtime.metaAppSecret,
+        channelId: runtime.channelId,
+        provider: runtime.provider,
         durationMs
       });
 
@@ -186,3 +245,4 @@ export class TenantResolverService {
     }
   }
 }
+
