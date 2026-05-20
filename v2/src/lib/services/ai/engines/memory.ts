@@ -180,7 +180,6 @@ export class MemoryEngine {
               }
             }
           }
-        }
       } catch (syncErr) {
         log.error('[MEMORY_SYNC_ERROR] Failed during CRM/Sheets sync', syncErr instanceof Error ? syncErr : new Error(String(syncErr)));
       }
