@@ -113,7 +113,7 @@ export async function login(
   if (process.env.NODE_ENV !== 'production') console.log(`[AUTH AUDIT] Attempting login for: ${email}`);
   try {
     // Rate Limiting — IP yerine email bazlı (serverless'ta IP güvenilmez)
-    const rl = checkRateLimit(`login:${email}`, 5, 60_000);
+    const rl = await checkRateLimit(`login:${email}`, 5, 60_000);
     if (!rl.allowed) {
       if (process.env.NODE_ENV !== 'production') console.log(`[AUTH AUDIT] Rate limit exceeded for: ${email}`);
       await logAudit({ action: "login_rate_limited", userEmail: email, details: { retryAfterMs: rl.retryAfterMs } });

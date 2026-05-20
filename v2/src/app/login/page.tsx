@@ -190,7 +190,8 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading || !email.trim() || !password.trim()}
-              className="w-full py-3 bg-[--q-blue] hover:bg-[--q-blue-hover] text-white text-[15px] font-semibold rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 q-press"
+              className="w-full py-3 text-white text-[15px] font-semibold rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 q-press"
+              style={{ backgroundColor: 'var(--q-blue)' }}
             >
               {loading ? (
                 <>
