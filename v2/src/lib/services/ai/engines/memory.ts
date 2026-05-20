@@ -53,11 +53,14 @@ export class MemoryEngine {
       const prompt = `
         Aşağıdaki müşteri-asistan WhatsApp görüşmesini analiz et.
         Müşterinin satın alma niyetini, duygusunu, itirazlarını ve genel özetini çıkar.
+        
+        DİKKAT (ÇOK ÖNEMLİ): Konuşmanın SONUNDAKİ en güncel bilgileri (yeni istenen tarihler, saat değişiklikleri, son kararlar vb.) ÖZELLİKLE özete yansıt. Eğer müşteri önceki bir fikrini veya saatini değiştirdiyse, ESKİ planı değil, her zaman EN GÜNCEL durumu özetle. Özetin kısa, net ve sonuca odaklı olmalı.
+
         SADECE AŞAĞIDAKİ JSON FORMATINDA CEVAP VER. BAŞKA METİN YAZMA.
         
         Format:
         {
-          "summary_text": "Kısa ve profesyonel görüşme özeti.",
+          "summary_text": "Kısa ve profesyonel görüşme özeti (Son kararları içermeli).",
           "buying_intent": "HOT" | "WARM" | "COLD",
           "sentiment": "POSITIVE" | "NEUTRAL" | "NEGATIVE",
           "objections": ["fiyat yüksek", "doktor tecrübesi", vb.]
