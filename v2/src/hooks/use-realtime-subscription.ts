@@ -107,7 +107,9 @@ export function useRealtimeSubscription(
 ) {
   // Stabilize the callback reference to prevent re-subscriptions
   const onEventRef = useRef(onEvent);
-  onEventRef.current = onEvent;
+  useEffect(() => {
+    onEventRef.current = onEvent;
+  });
 
   // Visibility-aware: queue events when tab is hidden, flush on visible
   const pendingEventsRef = useRef<ProjectionEvent[]>([]);

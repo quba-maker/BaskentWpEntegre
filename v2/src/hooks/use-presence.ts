@@ -29,6 +29,7 @@ export function usePresence(tenantId: string, channelName: string) {
 
   const localTypingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastPublishRef = useRef<number>(0);
+  const setTypingStatusRef = useRef<any>(null);
 
   useEffect(() => {
     if (!tenantId || !channelName || typeof window === "undefined") return;
@@ -115,7 +116,7 @@ export function usePresence(tenantId: string, channelName: string) {
       // 3. Debounce: Auto-stop after 3s of silence
       if (localTypingTimeoutRef.current) clearTimeout(localTypingTimeoutRef.current);
       localTypingTimeoutRef.current = setTimeout(() => {
-        setTypingStatus(false, agentType);
+        setTypingStatusRef.current?.(false, agentType);
       }, 3000);
       
     } else {
@@ -128,6 +129,10 @@ export function usePresence(tenantId: string, channelName: string) {
       await channel.presence.update({ typing: false, agentType }).catch(console.error);
     }
   }, [tenantId, channelName, setTyping]);
+
+  useEffect(() => {
+    setTypingStatusRef.current = setTypingStatus;
+  });
 
   return { members, typingClients, setTypingStatus, updatePresence };
 }

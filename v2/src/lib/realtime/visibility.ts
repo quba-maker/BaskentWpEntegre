@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 /**
  * Visibility-Aware Hook
@@ -51,14 +51,14 @@ export function onVisibilityChange(fn: (state: VisibilityState) => void): () => 
  * Can be used to gate expensive renders or presence updates.
  */
 export function useVisibilityThrottle(): boolean {
-  const isVisibleRef = useRef(isTabVisible());
+  const [isVisible, setIsVisible] = useState(isTabVisible());
   
   useEffect(() => {
     const cleanup = onVisibilityChange((state) => {
-      isVisibleRef.current = state === "visible";
+      setIsVisible(state === "visible");
     });
     return cleanup;
   }, []);
 
-  return isVisibleRef.current;
+  return isVisible;
 }
