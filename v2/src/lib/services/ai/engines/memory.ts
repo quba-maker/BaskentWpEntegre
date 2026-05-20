@@ -102,7 +102,7 @@ export class MemoryEngine {
       // [NEW] Publish Realtime Memory Update event
       try {
         const { RealtimePublisher } = await import('@/lib/realtime/publisher');
-        await RealtimePublisher.publishMemoryUpdated(tenantId, conversationId, {
+        await RealtimePublisher.publishMemoryUpdated(tenantId, phone, {
           aiSummary: parsed.summary_text,
           aiBuyingIntent: parsed.buying_intent,
           aiSentiment: parsed.sentiment,
