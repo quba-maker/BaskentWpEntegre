@@ -29,10 +29,16 @@ export async function getDashboardStats() {
 
     // Son leadler
     const recentLeads = await sql`
-      SELECT patient_name, phone_number, form_name, stage, created_at
-      FROM leads
-      WHERE tenant_id = ${tenantId}
-      ORDER BY created_at DESC
+      SELECT 
+        COALESCE(cp.first_name || ' ' || cp.last_name, 'İsimsiz') as patient_name, 
+        l.phone_number, 
+        COALESCE(l.source, 'Bilinmeyen Form') as form_name, 
+        'new' as stage, 
+        l.created_at
+      FROM leads l
+      LEFT JOIN customer_profiles cp ON l.customer_id = cp.id
+      WHERE l.tenant_id = ${tenantId}
+      ORDER BY l.created_at DESC
       LIMIT 5
     `;
 
