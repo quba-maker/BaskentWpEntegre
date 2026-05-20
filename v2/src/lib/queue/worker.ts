@@ -644,22 +644,19 @@ export class QueueWorkerEngine {
       this.log.info(`[WORKER_CRM_SKIPPED] CRM extraction disabled via feature flag`, { traceId });
     }
 
-    // 11. Async Memory & Summarization Sync (Feature Flag gated)
+    // 11. Async Memory & Summarization Sync (Feature Flag gated - Awaited for Serverless durability)
     const isMemoryEnabled = await FeatureFlagService.isEnabled(tenantId, 'memory_engine', true);
     if (conversationId && isMemoryEnabled) {
       try {
         const { MemoryEngine } = await import('@/lib/services/ai/engines/memory');
-        // Run in background without blocking
-        MemoryEngine.summarizeConversation(tenantId, conversationId).then(() => {
-          AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'memory_updated', category: 'memory', payload: { conversationId } });
-        }).catch(err => {
-          this.log.error(`[WORKER_MEMORY_FAILED] Non-fatal summary error`, err instanceof Error ? err : new Error(String(err)), { traceId });
-          AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'memory_failed', category: 'memory', severity: 'warning' });
-          AIEventEmitter.logHealth(tenantId, 'memory_failure', { traceId });
-        });
-        this.log.info(`[WORKER_MEMORY] Dispatched background memory summarization`, { traceId, conversationId });
-      } catch (memErr) {
-        this.log.error(`[WORKER_MEMORY_ERROR] Failed to load MemoryEngine`, memErr instanceof Error ? memErr : new Error(String(memErr)), { traceId });
+        this.log.info(`[WORKER_MEMORY] Starting memory summarization`, { traceId, conversationId });
+        await MemoryEngine.summarizeConversation(tenantId, conversationId);
+        AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'memory_updated', category: 'memory', payload: { conversationId } });
+        this.log.info(`[WORKER_MEMORY_OK] Memory summarization completed successfully`, { traceId, conversationId });
+      } catch (err) {
+        this.log.error(`[WORKER_MEMORY_FAILED] Non-fatal summary error`, err instanceof Error ? err : new Error(String(err)), { traceId });
+        AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'memory_failed', category: 'memory', severity: 'warning' });
+        AIEventEmitter.logHealth(tenantId, 'memory_failure', { traceId });
       }
     }
 
