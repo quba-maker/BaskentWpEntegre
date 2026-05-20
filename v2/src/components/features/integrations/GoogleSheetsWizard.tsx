@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { get, set, del } from 'idb-keyval';
+import { LivePipelineView } from './LivePipelineView';
 
 export function GoogleSheetsWizard({ isOpen, onClose, onComplete }: { isOpen: boolean, onClose: () => void, onComplete: () => void }) {
   
@@ -450,21 +451,11 @@ export function GoogleSheetsWizard({ isOpen, onClose, onComplete }: { isOpen: bo
   );
 
   // -------------------------------------------------------------
-  // STEP 9: Test Sync
+  // STEP 9: Test Sync (Replaced with Realtime Pipeline Viewer)
   // -------------------------------------------------------------
-  const [testStatus, setTestStatus] = useState<'idle' | 'running' | 'success'>('idle');
-  const handleRunTest = () => { setTestStatus('running'); setTimeout(() => setTestStatus('success'), 2000); };
   const Step9Test = (
     <div className="space-y-6">
-      <div className="bg-white border border-gray-200 rounded-[24px] p-8 text-center shadow-sm">
-        {testStatus === 'idle' && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-            <button onClick={handleRunTest} className="px-8 py-3 bg-[var(--q-text-primary)] text-white text-[14px] font-bold rounded-xl hover:bg-black transition-all">Orkestrasyonu Test Et</button>
-          </motion.div>
-        )}
-        {testStatus === 'running' && ( <Loader2 className="w-12 h-12 animate-spin text-[var(--q-blue)] mx-auto" /> )}
-        {testStatus === 'success' && ( <CheckCircle2 className="w-16 h-16 text-green-500 mx-auto" /> )}
-      </div>
+      <LivePipelineView />
     </div>
   );
 
@@ -504,7 +495,7 @@ export function GoogleSheetsWizard({ isOpen, onClose, onComplete }: { isOpen: bo
     { id: 'transform', title: 'Dönüşüm', component: Step6Transformation, isValid: true },
     { id: 'validation', title: 'Validation', component: Step7HealthCheck, isValid: !isHealthChecking },
     { id: 'preview', title: 'Entity Preview', component: Step8Preview, isValid: true },
-    { id: 'test', title: 'Canlı Test', component: Step9Test, isValid: testStatus === 'success' },
+    { id: 'test', title: 'Canlı Test', component: Step9Test, isValid: true },
     { id: 'finish', title: 'Aktivasyon', component: Step10Finish, isValid: true }
   ];
 

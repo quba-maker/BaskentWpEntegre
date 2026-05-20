@@ -32,3 +32,16 @@ export const rollbackSnapshots = pgTable('rollback_snapshots', {
   previousState: jsonb('previous_state').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
+
+export const humanReviewSessions = pgTable('human_review_sessions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').references(() => tenants.id, { onDelete: 'cascade' }).notNull(),
+  pipelineRunId: uuid('pipeline_run_id').notNull(),
+  confidenceScore: numeric('confidence_score', { precision: 3, scale: 2 }).notNull(),
+  aiReasoning: text('ai_reasoning').notNull(),
+  suggestedResolution: jsonb('suggested_resolution').default({}),
+  operatorDecision: jsonb('operator_decision'),
+  resolutionTime: timestamp('resolution_time', { withTimezone: true }),
+  status: text('status').notNull().default('pending'), // pending, resolved, dismissed
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
