@@ -8,7 +8,7 @@ import { TenantQueryGuard } from "../security/tenant-query-guard";
 // Unsafe raw SQL'i engeller, tenant izolasyonunu DB seviyesinde garanti eder.
 // ==========================================
 
-const appDatabaseUrl = process.env.APP_DATABASE_URL || process.env.DATABASE_URL || "";
+const appDatabaseUrl = process.env.APP_DATABASE_URL || process.env.DATABASE_URL || "postgres://dummy:dummy@dummy.com/dummy";
 const appSql = neon(appDatabaseUrl);
 
 export class TenantDB {
