@@ -23,7 +23,7 @@ export default async function RecoveryPage({ params }: { params: Promise<{ tenan
   const orphanedConversationsRes = await db.executeSafe(sql`
     SELECT id, phone_number, channel, created_at, status 
     FROM conversations 
-    WHERE tenant_id = ${tenant.id} AND (channel_id IS NULL OR customer_id IS NULL)
+    WHERE tenant_id = ${tenantData.profile.id} AND (channel_id IS NULL OR customer_id IS NULL)
     ORDER BY created_at DESC 
     LIMIT 20
   `);
@@ -33,7 +33,7 @@ export default async function RecoveryPage({ params }: { params: Promise<{ tenan
   const orphanedMessagesRes = await db.executeSafe(sql`
     SELECT id, phone_number, direction, channel, created_at, provider_message_id 
     FROM messages 
-    WHERE tenant_id = ${tenant.id} AND (channel_id IS NULL OR group_id IS NULL)
+    WHERE tenant_id = ${tenantData.profile.id} AND (channel_id IS NULL OR group_id IS NULL)
     ORDER BY created_at DESC 
     LIMIT 20
   `);
@@ -45,7 +45,7 @@ export default async function RecoveryPage({ params }: { params: Promise<{ tenan
     const dlqRes = await db.executeSafe(sql`
       SELECT id, topic, error_message, status, created_at 
       FROM dead_letter_jobs 
-      WHERE tenant_id = ${tenant.id} AND status = 'unresolved'
+      WHERE tenant_id = ${tenantData.profile.id} AND status = 'unresolved'
       ORDER BY created_at DESC 
       LIMIT 20
     `);
