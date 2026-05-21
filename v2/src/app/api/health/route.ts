@@ -25,10 +25,9 @@ export async function GET() {
 
   // 2. Ably configuration check (not connectivity — just env presence)
   const ablyKeyExists = !!process.env.ABLY_API_KEY;
-  const ablyPublicExists = !!process.env.NEXT_PUBLIC_ABLY_KEY;
   checks.ably = {
-    status: ablyKeyExists && ablyPublicExists ? "ok" : "degraded",
-    detail: !ablyKeyExists ? "ABLY_API_KEY missing" : !ablyPublicExists ? "NEXT_PUBLIC_ABLY_KEY missing" : undefined,
+    status: ablyKeyExists ? "ok" : "degraded",
+    detail: !ablyKeyExists ? "ABLY_API_KEY missing" : undefined,
   };
 
   // 3. Meta integration check (env presence)
@@ -47,10 +46,10 @@ export async function GET() {
   };
 
   // 5. Auth config
-  const clerkKey = !!process.env.CLERK_SECRET_KEY;
+  const authSecretExists = !!process.env.AUTH_SECRET;
   checks.auth = {
-    status: clerkKey ? "ok" : "degraded",
-    detail: !clerkKey ? "CLERK_SECRET_KEY missing" : undefined,
+    status: authSecretExists ? "ok" : "degraded",
+    detail: !authSecretExists ? "AUTH_SECRET missing" : undefined,
   };
 
   // Compute overall status
