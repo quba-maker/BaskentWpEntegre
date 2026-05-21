@@ -1,7 +1,7 @@
 import { getSession } from "@/lib/auth/session";
 import { getTenantBootstrapData } from "@/lib/domain/tenant/bootstrap";
 import { TenantDB } from "@/lib/core/tenant-db";
-import { sql } from "drizzle-orm";
+import { sql as drizzleSql } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { AlertCircle, FileWarning, Activity } from "lucide-react";
 
@@ -21,35 +21,38 @@ export default async function RecoveryPage({ params }: { params: Promise<{ tenan
   const db = new TenantDB(tenantData.profile.id);
 
   // 1. Unresolved/Orphaned conversations (missing customer_id or channel_id)
-  const orphanedConversationsRes = await db.executeSafe(sql`
-    SELECT id, phone_number, channel, created_at, status 
+  const orphanedConversationsRes = await db.executeSafe(
+    `SELECT id, phone_number, channel, created_at, status 
     FROM conversations 
-    WHERE tenant_id = ${tenantData.profile.id} AND (channel_id IS NULL OR customer_id IS NULL)
+    WHERE tenant_id = $1 AND (channel_id IS NULL OR customer_id IS NULL)
     ORDER BY created_at DESC 
-    LIMIT 20
-  `);
+    LIMIT 20`,
+    [tenantData.profile.id]
+  );
   const orphanedConversations = orphanedConversationsRes || [];
 
   // 2. Orphaned Messages
-  const orphanedMessagesRes = await db.executeSafe(sql`
-    SELECT id, phone_number, direction, channel, created_at, provider_message_id 
+  const orphanedMessagesRes = await db.executeSafe(
+    `SELECT id, phone_number, direction, channel, created_at, provider_message_id 
     FROM messages 
-    WHERE tenant_id = ${tenantData.profile.id} AND (channel_id IS NULL OR group_id IS NULL)
+    WHERE tenant_id = $1 AND (channel_id IS NULL OR group_id IS NULL)
     ORDER BY created_at DESC 
-    LIMIT 20
-  `);
+    LIMIT 20`,
+    [tenantData.profile.id]
+  );
   const orphanedMessages = orphanedMessagesRes || [];
 
   // 3. Queue Failures / Dead Letter Jobs
   let deadLetters: any[] = [];
   try {
-    const dlqRes = await db.executeSafe(sql`
-      SELECT id, topic, error_message, status, created_at 
+    const dlqRes = await db.executeSafe(
+      `SELECT id, topic, error_message, status, created_at 
       FROM dead_letter_jobs 
-      WHERE tenant_id = ${tenantData.profile.id} AND status = 'unresolved'
+      WHERE tenant_id = $1 AND status = 'unresolved'
       ORDER BY created_at DESC 
-      LIMIT 20
-    `);
+      LIMIT 20`,
+      [tenantData.profile.id]
+    );
     deadLetters = dlqRes || [];
   } catch (err) {
     // If table doesn't exist yet, just ignore gracefully in UI
