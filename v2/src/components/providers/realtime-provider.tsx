@@ -15,8 +15,9 @@ export function RealtimeProvider({ children, tenantId }: { children: React.React
     return (
       <RealtimeContext.Provider value={{ tenantId }}>
         <RealtimeErrorBoundary>
-          <RealtimeSubscriber tenantId={tenantId}>{children}</RealtimeSubscriber>
+          <RealtimeSubscriber tenantId={tenantId} />
         </RealtimeErrorBoundary>
+        {children}
       </RealtimeContext.Provider>
     );
   }
@@ -24,7 +25,7 @@ export function RealtimeProvider({ children, tenantId }: { children: React.React
   return <RealtimeContext.Provider value={{}}>{children}</RealtimeContext.Provider>;
 }
 
-function RealtimeSubscriber({ tenantId, children }: { tenantId: string, children: React.ReactNode }) {
+function RealtimeSubscriber({ tenantId }: { tenantId: string }) {
   useRealtimeReconciliation(tenantId);
-  return <>{children}</>;
+  return null;
 }
