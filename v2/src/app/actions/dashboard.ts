@@ -1,34 +1,30 @@
 "use server";
 
-import { sql } from "@/lib/db";
-import { getSession } from "@/lib/auth/session";
+import { withActionGuard } from "@/lib/core/action-guard";
 
 export async function getDashboardStats() {
-  const session = await getSession();
-  if (!session?.tenantId) return null;
+  return withActionGuard({ actionName: 'getDashboardStats' }, async (ctx) => {
+    const { db, tenantId } = ctx;
 
-  const tenantId = session.tenantId;
-
-  try {
     const [convs, msgs, leads, botMsgs, activeConvs] = await Promise.all([
-      sql`SELECT COUNT(*) as c FROM conversations WHERE tenant_id = ${tenantId}`,
-      sql`SELECT COUNT(*) as c FROM messages WHERE tenant_id = ${tenantId}`,
-      sql`SELECT COUNT(*) as c FROM leads WHERE tenant_id = ${tenantId}`,
-      sql`SELECT COUNT(*) as c FROM messages WHERE tenant_id = ${tenantId} AND direction = 'out'`,
-      sql`SELECT COUNT(*) as c FROM conversations WHERE tenant_id = ${tenantId} AND last_message_at >= NOW() - INTERVAL '24 hours'`,
+      db.executeSafe(`SELECT COUNT(*) as c FROM conversations WHERE tenant_id = $1`, [tenantId]),
+      db.executeSafe(`SELECT COUNT(*) as c FROM messages WHERE tenant_id = $1`, [tenantId]),
+      db.executeSafe(`SELECT COUNT(*) as c FROM leads WHERE tenant_id = $1`, [tenantId]),
+      db.executeSafe(`SELECT COUNT(*) as c FROM messages WHERE tenant_id = $1 AND direction = 'out'`, [tenantId]),
+      db.executeSafe(`SELECT COUNT(*) as c FROM conversations WHERE tenant_id = $1 AND last_message_at >= NOW() - INTERVAL '24 hours'`, [tenantId]),
     ]);
 
     // Son 7 gün mesaj grafiği
-    const daily = await sql`
+    const daily = await db.executeSafe(`
       SELECT DATE(created_at) as day, COUNT(*) as c
       FROM messages
-      WHERE tenant_id = ${tenantId} AND created_at >= NOW() - INTERVAL '7 days'
+      WHERE tenant_id = $1 AND created_at >= NOW() - INTERVAL '7 days'
       GROUP BY DATE(created_at)
       ORDER BY day ASC
-    `;
+    `, [tenantId]);
 
     // Son leadler
-    const recentLeads = await sql`
+    const recentLeads = await db.executeSafe(`
       SELECT 
         COALESCE(cp.first_name || ' ' || cp.last_name, 'İsimsiz') as patient_name, 
         l.phone_number, 
@@ -37,10 +33,10 @@ export async function getDashboardStats() {
         l.created_at
       FROM leads l
       LEFT JOIN customer_profiles cp ON l.customer_id = cp.id
-      WHERE l.tenant_id = ${tenantId}
+      WHERE l.tenant_id = $1
       ORDER BY l.created_at DESC
       LIMIT 5
-    `;
+    `, [tenantId]);
 
     return {
       totalConversations: parseInt(convs[0]?.c) || 0,
@@ -50,12 +46,6 @@ export async function getDashboardStats() {
       activeToday: parseInt(activeConvs[0]?.c) || 0,
       dailyMessages: daily.map((d: any) => ({ day: d.day, count: parseInt(d.c) })),
       recentLeads: recentLeads,
-      tenantName: session.tenantName,
-      role: session.role,
     };
-  } catch (error: any) {
-    const { logger: dashLogger } = await import("@/lib/core/logger");
-    dashLogger.withContext({ module: 'Dashboard' }).error("Dashboard stats error", error instanceof Error ? error : new Error(String(error)));
-    return null;
-  }
+  });
 }

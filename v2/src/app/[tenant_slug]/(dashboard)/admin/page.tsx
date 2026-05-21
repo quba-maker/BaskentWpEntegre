@@ -36,7 +36,7 @@ export default function AdminPage() {
   async function load() {
     setLoading(true);
     const res = await getAllTenants();
-    if (res.success && res.tenants) setTenants(res.tenants);
+    if (res.success && res.data) setTenants(res.data as any[]);
     setLoading(false);
   }
 

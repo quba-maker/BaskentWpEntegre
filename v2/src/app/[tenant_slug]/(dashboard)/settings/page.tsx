@@ -72,12 +72,12 @@ export default function SettingsPage() {
       });
     }
     if (usageRes.success && usageRes.stats) setUsage(usageRes.stats);
-    if (usersRes.success && usersRes.users) setUsers(usersRes.users);
+    if (usersRes.success && usersRes.data) setUsers(usersRes.data as any[]);
   }
 
   async function reloadUsers() {
     const res = await getUsers();
-    if (res.success && res.users) setUsers(res.users);
+    if (res.success && res.data) setUsers(res.data as any[]);
   }
 
   // --- Handlers: Settings & Account ---
@@ -150,8 +150,8 @@ export default function SettingsPage() {
     });
     if (!ok) return;
     const res = await resetUserPassword(userId);
-    if (res.success && res.tempPassword) {
-      setTempPass({ userId, pass: res.tempPassword, name: userName });
+    if (res.success && res.data) {
+      setTempPass({ userId, pass: (res.data as any).tempPassword, name: userName });
     } else {
       setUserError(res.error || "Şifre sıfırlanamadı.");
     }
@@ -159,8 +159,8 @@ export default function SettingsPage() {
 
   async function handleInviteLink(userId: string, userName: string) {
     const res = await generateInviteLink(userId);
-    if (res.success && res.inviteUrl) {
-      setInviteInfo({ userId, url: res.inviteUrl, name: userName });
+    if (res.success && res.data) {
+      setInviteInfo({ userId, url: (res.data as any).inviteUrl, name: userName });
     } else {
       setUserError(res.error || "Davet linki oluşturulamadı.");
     }

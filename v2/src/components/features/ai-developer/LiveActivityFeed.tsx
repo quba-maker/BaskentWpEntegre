@@ -42,9 +42,11 @@ function StatCard({ label, value, color }: { label: string; value: number | stri
 }
 
 export function LiveActivityFeed() {
-  const { data: feedData } = useSWR('ai-activity-feed', () => getLiveActivityFeed(80), { refreshInterval: 5000 });
-  const { data: stats } = useSWR('ai-activity-stats', getActivityStats, { refreshInterval: 10000 });
+  const { data: feedRes } = useSWR('ai-activity-feed', () => getLiveActivityFeed(80), { refreshInterval: 5000 });
+  const { data: statsRes } = useSWR('ai-activity-stats', getActivityStats, { refreshInterval: 10000 });
 
+  const feedData = feedRes?.success ? (feedRes.data as any) : null;
+  const stats = statsRes?.success ? (statsRes.data as any) : null;
   const events = feedData?.events || [];
 
   return (

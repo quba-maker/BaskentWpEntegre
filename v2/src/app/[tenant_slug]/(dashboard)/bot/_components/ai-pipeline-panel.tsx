@@ -38,9 +38,9 @@ export function AIPipelinePanel() {
   async function load() {
     setLoading(true);
     const res = await getAIModules();
-    if (res.success && res.modules) {
+    if (res.success && res.data?.modules) {
       // Filter out modules managed by other panels
-      setModules(res.modules.filter(m => !MANAGED_ELSEWHERE.includes(m.moduleId)));
+      setModules(res.data.modules.filter((m: TenantModuleConfig) => !MANAGED_ELSEWHERE.includes(m.moduleId)));
     }
     setLoading(false);
   }

@@ -27,12 +27,14 @@ export function DecisionTraceViewer() {
   const [conversationId, setConversationId] = useState('');
   const [searchInput, setSearchInput] = useState('');
   
-  const { data: recentConvs } = useSWR('recent-convs-trace', () => getRecentConversationsForTrace(10));
+  const { data: recentConvsRes } = useSWR('recent-convs-trace', () => getRecentConversationsForTrace(10));
+  const recentConvs = recentConvsRes?.success ? (recentConvsRes.data as any[]) : [];
 
-  const { data: trace, isLoading } = useSWR(
+  const { data: traceRes, isLoading } = useSWR(
     conversationId ? ['decision-trace', conversationId] : null,
     () => getDecisionTrace(conversationId)
   );
+  const trace = traceRes?.success ? (traceRes.data as any) : null;
 
   const handleSearch = () => {
     if (searchInput.trim()) {

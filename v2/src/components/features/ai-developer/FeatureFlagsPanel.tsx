@@ -15,7 +15,8 @@ const FLAG_DESCRIPTIONS: Record<string, string> = {
 };
 
 export function FeatureFlagsPanel() {
-  const { data: flags, mutate } = useSWR('feature-flags', getFeatureFlags);
+  const { data: flagsRes, mutate } = useSWR('feature-flags', getFeatureFlags);
+  const flags = flagsRes?.success ? (flagsRes.data as any[]) : null;
   const [loadingKey, setLoadingKey] = useState<string | null>(null);
 
   const handleToggle = async (key: string, currentState: boolean) => {

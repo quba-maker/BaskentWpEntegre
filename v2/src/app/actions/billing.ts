@@ -1,7 +1,7 @@
 "use server";
 
+import { withActionGuard } from "@/lib/core/action-guard";
 import { sql } from "@/lib/db";
-import { getSession } from "@/lib/auth/session";
 
 // ==========================================
 // QUBA AI — Billing & Usage Server Actions
@@ -9,100 +9,74 @@ import { getSession } from "@/lib/auth/session";
 // ==========================================
 
 export async function getUsageStats() {
-  try {
-    const session = await getSession();
-    if (!session?.tenantId) return { success: false, error: "Oturum yok" };
-    const tenantId = session.tenantId;
-
-    // Aylık kullanım
-    const currentMonth = new Date().toISOString().slice(0, 7); // 2026-05
+  return withActionGuard({ actionName: 'getUsageStats' }, async (ctx) => {
+    const { db, tenantId } = ctx;
+    const currentMonth = new Date().toISOString().slice(0, 7);
     const lastMonth = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 7);
 
-    // Güncel ay istatistikleri
     const [totalMsgs, aiMsgs, humanMsgs, channels, dailyStats] = await Promise.all([
-      sql`SELECT COUNT(*) as c FROM messages WHERE tenant_id = ${tenantId} AND created_at >= DATE_TRUNC('month', NOW())`,
-      sql`SELECT COUNT(*) as c FROM messages WHERE tenant_id = ${tenantId} AND created_at >= DATE_TRUNC('month', NOW()) AND direction = 'out'`,
-      sql`SELECT COUNT(*) as c FROM messages WHERE tenant_id = ${tenantId} AND created_at >= DATE_TRUNC('month', NOW()) AND direction = 'in'`,
-      sql`SELECT channel, COUNT(*) as c FROM messages WHERE tenant_id = ${tenantId} AND created_at >= DATE_TRUNC('month', NOW()) GROUP BY channel`,
-      sql`SELECT DATE(created_at) as day, COUNT(*) as total, COUNT(*) FILTER (WHERE direction = 'out') as ai FROM messages WHERE tenant_id = ${tenantId} AND created_at >= DATE_TRUNC('month', NOW()) GROUP BY DATE(created_at) ORDER BY day`,
+      db.executeSafe(`SELECT COUNT(*) as c FROM messages WHERE tenant_id = $1 AND created_at >= DATE_TRUNC('month', NOW())`, [tenantId]),
+      db.executeSafe(`SELECT COUNT(*) as c FROM messages WHERE tenant_id = $1 AND created_at >= DATE_TRUNC('month', NOW()) AND direction = 'out'`, [tenantId]),
+      db.executeSafe(`SELECT COUNT(*) as c FROM messages WHERE tenant_id = $1 AND created_at >= DATE_TRUNC('month', NOW()) AND direction = 'in'`, [tenantId]),
+      db.executeSafe(`SELECT channel, COUNT(*) as c FROM messages WHERE tenant_id = $1 AND created_at >= DATE_TRUNC('month', NOW()) GROUP BY channel`, [tenantId]),
+      db.executeSafe(`SELECT DATE(created_at) as day, COUNT(*) as total, COUNT(*) FILTER (WHERE direction = 'out') as ai FROM messages WHERE tenant_id = $1 AND created_at >= DATE_TRUNC('month', NOW()) GROUP BY DATE(created_at) ORDER BY day`, [tenantId]),
     ]);
 
-    // Geçen ay karşılaştırma
-    const lastMonthTotal = await sql`SELECT COUNT(*) as c FROM messages WHERE tenant_id = ${tenantId} AND DATE_TRUNC('month', created_at) = DATE_TRUNC('month', ${lastMonth + '-01'}::date)`;
+    const lastMonthTotal = await db.executeSafe(
+      `SELECT COUNT(*) as c FROM messages WHERE tenant_id = $1 AND DATE_TRUNC('month', created_at) = DATE_TRUNC('month', $2::date)`,
+      [tenantId, lastMonth + '-01']
+    );
 
-    // Kanal dağılımı
     const channelBreakdown: Record<string, number> = {};
     for (const ch of channels) {
       channelBreakdown[ch.channel || 'unknown'] = Number(ch.c);
     }
 
-    // Tahmini maliyet (Gemini Flash: ~$0.0001/mesaj)
     const aiCount = Number(aiMsgs[0]?.c || 0);
     const estimatedCost = (aiCount * 0.0001).toFixed(4);
 
-    // Tenant limiti
-    const tenantInfo = await sql`SELECT name, daily_ai_limit, plan, monthly_message_limit FROM tenants WHERE id = ${tenantId}`;
+    // Tenant limit — bu sorgu tenant tablosuna gittiği için RLS bypass gerekebilir
+    const tenantInfo = await db.executeSafe(
+      `SELECT name, plan, monthly_message_limit FROM tenants WHERE id = $1`,
+      [tenantId]
+    );
     const tenant = tenantInfo[0] || {};
 
-    // Bu ay kullanım oranı
     const monthlyLimit = tenant.monthly_message_limit || 500;
     const totalCount = Number(totalMsgs[0]?.c || 0);
     const usagePercent = Math.round((totalCount / monthlyLimit) * 100);
 
     return {
-      success: true,
-      data: {
-        currentMonth,
-        tenantName: tenant.name || session.tenantName,
-        plan: tenant.plan || 'starter',
-
-        // Mesaj İstatistikleri
-        totalMessages: totalCount,
-        aiMessages: aiCount,
-        humanMessages: Number(humanMsgs[0]?.c || 0),
-        
-        // Karşılaştırma
-        lastMonthTotal: Number(lastMonthTotal[0]?.c || 0),
-        growthPercent: lastMonthTotal[0]?.c > 0 
-          ? Math.round(((totalCount - Number(lastMonthTotal[0].c)) / Number(lastMonthTotal[0].c)) * 100) 
-          : 100,
-
-        // Kanal Dağılımı
-        channels: channelBreakdown,
-
-        // Günlük Grafik
-        daily: dailyStats.map((d: any) => ({
-          day: d.day,
-          total: Number(d.total),
-          ai: Number(d.ai),
-        })),
-
-        // Limitler
-        monthlyLimit,
-        dailyAiLimit: tenant.daily_ai_limit || 200,
-        usagePercent,
-
-        // Maliyet
-        estimatedCostUsd: estimatedCost,
-      },
+      currentMonth,
+      tenantName: tenant.name,
+      plan: tenant.plan || 'starter',
+      totalMessages: totalCount,
+      aiMessages: aiCount,
+      humanMessages: Number(humanMsgs[0]?.c || 0),
+      lastMonthTotal: Number(lastMonthTotal[0]?.c || 0),
+      growthPercent: lastMonthTotal[0]?.c > 0
+        ? Math.round(((totalCount - Number(lastMonthTotal[0].c)) / Number(lastMonthTotal[0].c)) * 100)
+        : 100,
+      channels: channelBreakdown,
+      daily: dailyStats.map((d: any) => ({
+        day: d.day,
+        total: Number(d.total),
+        ai: Number(d.ai),
+      })),
+      monthlyLimit,
+      usagePercent,
+      estimatedCostUsd: estimatedCost,
     };
-  } catch (error: any) {
-    const { logger: billingLogger } = await import("@/lib/core/logger");
-    billingLogger.withContext({ module: 'Billing' }).error("Usage stats error", error instanceof Error ? error : new Error(String(error)));
-    return { success: false, error: error.message };
-  }
+  });
 }
 
 /**
  * Platform admin — tüm tenantların kullanım özeti
+ * NOT: Bu action cross-tenant data gerektirir, bu nedenle raw sql kullanır
  */
 export async function getAllTenantsUsage() {
-  try {
-    const session = await getSession();
-    if (session?.role !== "owner" && session?.role !== "platform_admin") {
-      return { success: false, error: "Yetki yok" };
-    }
-
+  return withActionGuard({ actionName: 'getAllTenantsUsage', roles: ['owner', 'platform_admin'] }, async (ctx) => {
+    // Cross-tenant sorgu — platform admin bypass ile çalışır
     const stats = await sql`
       SELECT 
         t.name, t.slug, t.plan, t.status,
@@ -117,20 +91,15 @@ export async function getAllTenantsUsage() {
       ORDER BY total_messages DESC
     `;
 
-    return {
-      success: true,
-      tenants: stats.map((t: any) => ({
-        name: t.name,
-        slug: t.slug,
-        plan: t.plan,
-        totalMessages: Number(t.total_messages),
-        aiMessages: Number(t.ai_messages),
-        uniqueContacts: Number(t.unique_contacts),
-        lastActivity: t.last_activity,
-        estimatedCost: (Number(t.ai_messages) * 0.0001).toFixed(4),
-      })),
-    };
-  } catch (error: any) {
-    return { success: false, error: error.message };
-  }
+    return stats.map((t: any) => ({
+      name: t.name,
+      slug: t.slug,
+      plan: t.plan,
+      totalMessages: Number(t.total_messages),
+      aiMessages: Number(t.ai_messages),
+      uniqueContacts: Number(t.unique_contacts),
+      lastActivity: t.last_activity,
+      estimatedCost: (Number(t.ai_messages) * 0.0001).toFixed(4),
+    }));
+  });
 }

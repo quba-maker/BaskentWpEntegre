@@ -72,8 +72,8 @@ export function AiTimelinePanel({ phoneNumber }: { phoneNumber: string }) {
   useEffect(() => {
     if (!phoneNumber) return;
     setLoading(true);
-    getAiTimeline(phoneNumber, 30).then((data) => {
-      setEvents(data as TimelineEvent[]);
+    getAiTimeline(phoneNumber, 30).then((res) => {
+      setEvents((res?.success ? res.data : []) as TimelineEvent[]);
       setLoading(false);
     }).catch(() => setLoading(false));
   }, [phoneNumber]);
@@ -188,8 +188,8 @@ export function AiSummaryBadge({ phoneNumber }: { phoneNumber: string }) {
 
   useEffect(() => {
     if (!phoneNumber) { setLoading(false); return; }
-    getAiSummary(phoneNumber).then(data => {
-      setSummary(data);
+    getAiSummary(phoneNumber).then(res => {
+      setSummary(res?.success ? res.data : null);
       setLoading(false);
     }).catch(() => setLoading(false));
   }, [phoneNumber]);
