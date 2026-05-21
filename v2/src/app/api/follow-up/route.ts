@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { neon } from "@neondatabase/serverless";
 import { logger } from "@/lib/core/logger";
+import { CredentialsService } from "@/lib/services/credentials.service";
 
 const log = logger.withContext({ module: 'FollowUpCron' });
 
@@ -14,7 +15,7 @@ export async function GET() {
     const sql = neon(process.env.DATABASE_URL!);
     
     // Tüm aktif tenantları al
-    const tenants = await sql`SELECT id, slug, meta_page_token, whatsapp_phone_id FROM tenants WHERE status = 'active'`;
+    const tenants = await sql`SELECT id, slug FROM tenants WHERE status = 'active'`;
     
     const results: any[] = [];
     
@@ -57,9 +58,10 @@ export async function GET() {
             const msg = followUpMessages[Math.min(count - 1, 2)];
 
             // Mesaj gönder (WhatsApp kanalı için)
-            if (conv.channel === 'whatsapp' && tenant.whatsapp_phone_id) {
-              const token = tenant.meta_page_token || process.env.META_ACCESS_TOKEN;
-              const phoneId = tenant.whatsapp_phone_id || process.env.PHONE_NUMBER_ID;
+            if (conv.channel === 'whatsapp') {
+              const creds = await CredentialsService.resolveCredentials(tenant.id, "whatsapp");
+              const token = creds.accessToken;
+              const phoneId = creds.whatsappPhoneNumberId;
               
               if (token && phoneId) {
                 await fetch(`https://graph.facebook.com/v25.0/${phoneId}/messages`, {

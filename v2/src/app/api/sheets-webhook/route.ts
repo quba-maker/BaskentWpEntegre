@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
 import { logger } from '@/lib/core/logger';
+import { CredentialsService } from '@/lib/services/credentials.service';
 
 const log = logger.withContext({ module: 'SheetsWebhook' });
 
@@ -18,7 +19,7 @@ export async function POST(request: NextRequest) {
     let tenantId: string | null = null;
     let tenantMeta: any = null;
     if (tenantSlug) {
-      const tenants = await sqlDb`SELECT * FROM tenants WHERE slug = ${tenantSlug} AND status = 'active'`;
+      const tenants = await sqlDb`SELECT id, name FROM tenants WHERE slug = ${tenantSlug} AND status = 'active'`;
       if (tenants.length > 0) {
         tenantId = tenants[0].id;
         tenantMeta = tenants[0];
@@ -26,7 +27,7 @@ export async function POST(request: NextRequest) {
     }
     // Fallback: tenant yoksa baskent'i kullan (geriye uyumluluk)
     if (!tenantId) {
-      const fallback = await sqlDb`SELECT * FROM tenants WHERE slug = 'baskent' LIMIT 1`;
+      const fallback = await sqlDb`SELECT id, name FROM tenants WHERE slug = 'baskent' LIMIT 1`;
       if (fallback.length > 0) {
         tenantId = fallback[0].id;
         tenantMeta = fallback[0];
@@ -173,8 +174,13 @@ export async function POST(request: NextRequest) {
       }
       
       // Auto-Outbound Bot Logic — Tenant'ın Meta token'ını kullan
-      const META_ACCESS_TOKEN = tenantMeta?.meta_page_token || process.env.META_ACCESS_TOKEN;
-      const PHONE_NUMBER_ID = tenantMeta?.whatsapp_phone_id || process.env.PHONE_NUMBER_ID;
+      let META_ACCESS_TOKEN = process.env.META_ACCESS_TOKEN || null;
+      let PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID || null;
+      if (tenantId) {
+        const creds = await CredentialsService.resolveCredentials(tenantId, "whatsapp");
+        if (creds.accessToken) META_ACCESS_TOKEN = creds.accessToken;
+        if (creds.whatsappPhoneNumberId) PHONE_NUMBER_ID = creds.whatsappPhoneNumberId;
+      }
 
       // 🔒 Otonom Karşılama kontrolü — tenant bazlı
       const autoGreetingSetting = await sqlDb`SELECT value FROM settings WHERE key = 'bot_auto_greeting' AND tenant_id = ${tenantId}`;

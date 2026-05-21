@@ -1,5 +1,6 @@
 import { neon } from "@neondatabase/serverless";
 import { logger } from "@/lib/core/logger";
+import { CredentialsService } from "@/lib/services/credentials.service";
 
 const log = logger.withContext({ module: 'RetryQueue' });
 
@@ -41,11 +42,10 @@ export async function processRetryQueue(): Promise<{ processed: number; failed: 
   const stats = { processed: 0, failed: 0, skipped: 0 };
 
   try {
-    // Bekleyen mesajları al (max 10)
+    // Bekleyen mesajları al (max 10) - decoupled from legacy tenant columns
     const pending = await sql`
-      SELECT q.*, t.meta_page_token, t.whatsapp_phone_id
+      SELECT q.*
       FROM message_retry_queue q
-      JOIN tenants t ON t.id = q.tenant_id
       WHERE q.status = 'pending' AND q.next_retry_at <= NOW()
       ORDER BY q.next_retry_at ASC
       LIMIT 10
@@ -54,8 +54,9 @@ export async function processRetryQueue(): Promise<{ processed: number; failed: 
     for (const msg of pending) {
       try {
         if (msg.channel === "whatsapp") {
-          const token = msg.meta_page_token || process.env.META_ACCESS_TOKEN;
-          const phoneId = msg.whatsapp_phone_id || process.env.PHONE_NUMBER_ID;
+          const creds = await CredentialsService.resolveCredentials(msg.tenant_id, "whatsapp");
+          const token = creds.accessToken || process.env.META_ACCESS_TOKEN;
+          const phoneId = creds.whatsappPhoneNumberId || process.env.PHONE_NUMBER_ID;
 
           if (!token || !phoneId) {
             await markFailed(sql, msg.id, "Token/PhoneID eksik");

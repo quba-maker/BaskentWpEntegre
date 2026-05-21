@@ -30,7 +30,9 @@ export const conversations = pgTable('conversations', {
   tenantId: uuid('tenant_id').references(() => tenants.id, { onDelete: 'cascade' }).notNull(),
   customerId: uuid('customer_id').references(() => customerProfiles.id, { onDelete: 'set null' }),
   channelId: uuid('channel_id').references(() => channels.id, { onDelete: 'set null' }),
-  channel: text('channel'), // Legacy
+  /** @deprecated channel is deprecated and replaced by channelId. Do not use for new features. */
+  channel: text('channel'),
+  /** @deprecated phoneNumber is deprecated for legacy direct lookup; routing is handled via customerProfiles and channelId. */
   phoneNumber: text('phone_number'),
   status: text('status').default('open'),
   
@@ -70,6 +72,7 @@ export const messages = pgTable('messages', {
   conversationId: uuid('conversation_id').references(() => conversations.id, { onDelete: 'cascade' }).notNull(),
   direction: text('direction').notNull(),
   content: text('content').notNull(),
+  /** @deprecated channel is deprecated and replaced by channelId. Do not use for new features. */
   channel: text('channel'), // Legacy string fallback
   channelId: uuid('channel_id').references(() => channels.id, { onDelete: 'set null' }),
   groupId: uuid('group_id'), // We can use plain uuid since channelGroups might cause circular deps or just loosely coupled
@@ -78,6 +81,7 @@ export const messages = pgTable('messages', {
   status: text('status'),
   providerMessageId: text('provider_message_id'),
   modelUsed: text('model_used'),
+  /** @deprecated phoneNumber is deprecated for legacy direct lookup; routing is handled via customerProfiles and channelId. */
   phoneNumber: text('phone_number'),
   
   // Delivery & Reliability

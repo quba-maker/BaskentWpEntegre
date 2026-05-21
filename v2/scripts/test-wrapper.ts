@@ -4,7 +4,7 @@ import { sql } from 'drizzle-orm';
 import * as dotenv from 'dotenv';
 dotenv.config({ path: '.env.local' });
 
-const dbUrl = new URL(process.env.DATABASE_URL);
+const dbUrl = new URL(process.env.DATABASE_URL!);
 dbUrl.username = 'app_client';
 dbUrl.password = 'AppClientSuperSecurePassword123!@#_2026';
 const db = drizzle(neon(dbUrl.toString()));

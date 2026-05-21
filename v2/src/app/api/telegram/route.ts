@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { neon } from "@neondatabase/serverless";
 import { logger } from "@/lib/core/logger";
+import { CredentialsService } from "@/lib/services/credentials.service";
 
 const log = logger.withContext({ module: 'TelegramWebhook' });
 
@@ -172,11 +173,9 @@ export async function POST(req: NextRequest) {
               let META: string | null = null;
               let PHONE_ID: string | null = null;
               if (convTenantId) {
-                const tenantRows = await sql`SELECT meta_page_token, whatsapp_phone_id FROM tenants WHERE id = ${convTenantId}`;
-                if (tenantRows.length > 0) {
-                  META = tenantRows[0].meta_page_token || process.env.META_ACCESS_TOKEN;
-                  PHONE_ID = tenantRows[0].whatsapp_phone_id || process.env.PHONE_NUMBER_ID;
-                }
+                const creds = await CredentialsService.resolveCredentials(convTenantId, "whatsapp");
+                META = creds.accessToken;
+                PHONE_ID = creds.whatsappPhoneNumberId;
               }
               if (!META) META = process.env.META_ACCESS_TOKEN || null;
               if (!PHONE_ID) PHONE_ID = process.env.PHONE_NUMBER_ID || null;
