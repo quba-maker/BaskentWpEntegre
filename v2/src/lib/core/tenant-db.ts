@@ -1,5 +1,6 @@
 import { logger } from "./logger";
-import { sql } from "@/lib/db";
+import { sql as bypassSql } from "@/lib/db";
+import { neon } from "@neondatabase/serverless";
 import { TenantQueryGuard } from "../security/tenant-query-guard";
 
 // ==========================================
@@ -7,11 +8,14 @@ import { TenantQueryGuard } from "../security/tenant-query-guard";
 // Unsafe raw SQL'i engeller, tenant izolasyonunu DB seviyesinde garanti eder.
 // ==========================================
 
+const appDatabaseUrl = process.env.APP_DATABASE_URL || process.env.DATABASE_URL || "";
+const appSql = neon(appDatabaseUrl);
+
 export class TenantDB {
   public readonly tenantId: string;
   private isAdmin: boolean;
   private log = logger.withContext({ module: 'TenantDB' });
-  private sql = sql;
+  private sql = appSql;
 
   constructor(tenantId: string, isAdmin: boolean = false) {
     if (!tenantId) throw new Error("TenantDB instance requires a valid tenantId");
@@ -43,8 +47,8 @@ export class TenantDB {
       // Postgres SET komutu parametre kabul etmediği için SELECT set_config() kullanıyoruz!
       const result = await this.sql.transaction([
         this.isAdmin 
-          ? this.sql`SELECT set_config('quba.is_admin', 'true', true)`
-          : this.sql`SELECT set_config('quba.current_tenant', ${this.tenantId}, true)`,
+          ? this.sql`SELECT set_config('app.bypass_rls', 'true', true)`
+          : this.sql`SELECT set_config('app.current_tenant_id', ${this.tenantId}, true)`,
         q
       ]);
       
@@ -80,8 +84,8 @@ export class TenantDB {
       
       const result = await this.sql.transaction([
         this.isAdmin 
-          ? this.sql`SELECT set_config('quba.is_admin', 'true', true)`
-          : this.sql`SELECT set_config('quba.current_tenant', ${this.tenantId}, true)`,
+          ? this.sql`SELECT set_config('app.bypass_rls', 'true', true)`
+          : this.sql`SELECT set_config('app.current_tenant_id', ${this.tenantId}, true)`,
         ...formattedQueries
       ]);
       const duration = Date.now() - startTime;
