@@ -14,6 +14,11 @@ export const tenants = pgTable('tenants', {
   tokenBudget: integer('token_budget').default(1000000),
   tokensUsed: integer('tokens_used').default(0),
   timezone: text('timezone').default('Europe/Istanbul'),
+  // UI Preferences (already in production DB)
+  sidebarTheme: text('sidebar_theme').default('light'),
+  dashboardDensity: text('dashboard_density').default('comfortable'),
+  uiMode: text('ui_mode').default('default'),
+  workspaceVersion: integer('workspace_version').default(1),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });
