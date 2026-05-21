@@ -16,11 +16,12 @@ const MAX_PAYLOAD_SIZE = 16_384; // 16KB — Ably limit is 64KB, we enforce tigh
 export class RealtimeBus {
   private static instance: Ably.Rest;
 
-  private static getClient(): Ably.Rest {
+  private static getClient(): Ably.Rest | null {
     if (!this.instance) {
       const apiKey = process.env.ABLY_API_KEY;
       if (!apiKey) {
-        throw new Error("[RealtimeBus] ABLY_API_KEY is not configured");
+        console.warn("[RealtimeBus] ABLY_API_KEY is not configured. Realtime publisher will skip Ably broadcast.");
+        return null;
       }
       this.instance = new Ably.Rest({ key: apiKey });
     }
@@ -51,7 +52,11 @@ export class RealtimeBus {
       }
 
       const channelName = `private:tenant:${tenantId}`;
-      const channel = this.getClient().channels.get(channelName);
+      const client = this.getClient();
+      if (!client) {
+        return;
+      }
+      const channel = client.channels.get(channelName);
       
       await channel.publish(validatedEvent.type, event);
       

@@ -40,3 +40,13 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 .env*.local
+
+# local scratch, test, and debug scripts
+scratch-*
+test-*
+scratch.*
+test-db.*
+scripts/check-*
+scripts/check-counts.js
+scripts/check-tenants-details.js
+src/app/api/debug/route.ts

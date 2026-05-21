@@ -45,7 +45,31 @@ export class QueueService {
     };
 
     if (!process.env.QSTASH_TOKEN) {
-      this.log.warn("QSTASH_TOKEN is not set. Ensure you configure it for production. Simulating queue publish...", { topic, tenantId });
+      this.log.warn("QSTASH_TOKEN is not set. Simulating queue publish locally via direct API call...", { topic, tenantId });
+      
+      const localUrl = `http://localhost:${process.env.PORT || 3000}/api/queue-worker`;
+      fetch(localUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-tenant-id": tenantId,
+          "x-topic": topic,
+          ...(traceId ? { "x-trace-id": traceId } : {})
+        },
+        body: JSON.stringify(message)
+      })
+      .then(async (res) => {
+        const text = await res.text();
+        if (res.ok) {
+          this.log.info(`[QueueService] Local simulation dispatch success: ${res.status}`, { topic, response: text });
+        } else {
+          this.log.error(`[QueueService] Local simulation dispatch rejected: ${res.status}`, new Error(text), { topic });
+        }
+      })
+      .catch(err => {
+        this.log.error("[QueueService] Local simulation dispatch network failed:", err);
+      });
+
       return "simulated-" + message.id;
     }
 

@@ -5,6 +5,7 @@ import { cookies } from "next/headers";
 import { withTenantDB } from "@/lib/core/tenant-db";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { logAudit } from "@/lib/audit";
+import { logger } from "@/lib/core/logger";
 
 // ==========================================
 // QUBA AI — Session Yönetimi (JWT + Cookie)
@@ -98,16 +99,23 @@ export async function getSession(): Promise<Session | null> {
     
     // Eğer platform_admin başka bir tenant'ı impersonate ediyorsa, context'i değiştir (Fakat DB doğrulamasını orijinal kullanıcıyla geçtikten sonra)
     if (session.role === 'platform_admin' && session.impersonatedTenantId) {
+      const impCheck = await db.executeSafe({
+        text: `SELECT status, name FROM tenants WHERE id = $1`,
+        values: [session.impersonatedTenantId]
+      });
+      if (impCheck.length === 0 || impCheck[0].status === 'suspended') {
+        logger.withContext({ module: 'Auth' }).warn("Impersonation target is suspended or invalid, rejecting session", { targetTenantId: session.impersonatedTenantId });
+        return null;
+      }
       session.tenantId = session.impersonatedTenantId;
       session.tenantSlug = session.impersonatedTenantSlug!;
-      // İsteğe bağlı olarak tenantName de güncellenebilir
+      session.tenantName = impCheck[0].name;
     }
 
     return session;
   } catch (error) {
     // Fail closed: log database/auth failures and deny access
-    const { logger: authLogger } = await import("@/lib/core/logger");
-    authLogger.withContext({ module: 'Auth' }).error("Database verification check failed - failing closed", error instanceof Error ? error : new Error(String(error)));
+    logger.withContext({ module: 'Auth' }).error("Database verification check failed - failing closed", error instanceof Error ? error : new Error(String(error)));
     try {
       cookieStore.delete(COOKIE_NAME);
     } catch {

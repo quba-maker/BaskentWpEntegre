@@ -48,15 +48,6 @@ export class MessageService {
             SELECT id FROM messages 
             WHERE tenant_id = $1 AND provider_message_id = $10 AND $10 IS NOT NULL
             LIMIT 1
-          ), msg_insert AS (
-            INSERT INTO messages (
-              tenant_id, phone_number, direction, content, channel, 
-              channel_id, group_id, workflow_run_id, prompt_binding_id,
-              provider_message_id, model_used, prompt_tokens, completion_tokens, status
-            )
-            SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
-            WHERE NOT EXISTS (SELECT 1 FROM dup_check)
-            RETURNING id
           ), conv_update AS (
             UPDATE conversations 
             SET 
@@ -77,11 +68,27 @@ export class MessageService {
             SELECT $1, $2, 1, $5, CASE WHEN $3 = 'in' THEN $5 ELSE NULL END, $4, $3, $14, NOW()
             WHERE NOT EXISTS (SELECT 1 FROM dup_check) AND NOT EXISTS (SELECT 1 FROM conv_update)
             RETURNING id
+          ), resolved_conv AS (
+            SELECT COALESCE(
+              (SELECT id FROM conv_update),
+              (SELECT id FROM conv_insert),
+              (SELECT id FROM conversations WHERE phone_number = $2 AND tenant_id = $1 LIMIT 1)
+            ) AS conv_id
+          ), msg_insert AS (
+            INSERT INTO messages (
+              tenant_id, conversation_id, phone_number, direction, content, channel, 
+              channel_id, group_id, workflow_run_id, prompt_binding_id,
+              provider_message_id, model_used, prompt_tokens, completion_tokens, status
+            )
+            SELECT $1, rc.conv_id, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+            FROM resolved_conv rc
+            WHERE rc.conv_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM dup_check)
+            RETURNING id
           )
           SELECT 
             (SELECT id FROM dup_check) as dup_id,
             (SELECT id FROM msg_insert) as msg_id,
-            COALESCE((SELECT id FROM conv_update), (SELECT id FROM conv_insert)) as conv_id;
+            (SELECT conv_id FROM resolved_conv) as conv_id;
         `,
         values: [
           this.db.tenantId,                  // $1

@@ -34,6 +34,32 @@ export async function GET() {
     `;
     results.push('customer_profiles: OK');
 
+    // Ensure unique constraint exists on customer_profiles(tenant_id, primary_phone)
+    try {
+      await sql`
+        DELETE FROM customer_profiles cp
+        WHERE cp.id NOT IN (
+          SELECT id FROM (
+            SELECT DISTINCT ON (tenant_id, primary_phone) id
+            FROM customer_profiles
+            ORDER BY tenant_id, primary_phone, created_at DESC
+          ) tmp
+        )
+      `;
+      await sql`
+        ALTER TABLE customer_profiles 
+        ADD CONSTRAINT customer_profiles_tenant_phone_unique 
+        UNIQUE (tenant_id, primary_phone)
+      `;
+      results.push('customer_profiles_tenant_phone_unique constraint: ADDED');
+    } catch (e: any) {
+      if (e.message?.includes('already exists') || e.message?.includes('zaten var')) {
+        results.push('customer_profiles_tenant_phone_unique constraint: ALREADY EXISTS');
+      } else {
+        results.push(`customer_profiles_tenant_phone_unique constraint error: ${e.message}`);
+      }
+    }
+
     // 3. Add customer_id to conversations (UUID, references customer_profiles)
     await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS customer_id UUID`;
     results.push('conversations.customer_id: OK');

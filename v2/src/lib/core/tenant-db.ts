@@ -22,6 +22,9 @@ export class TenantDB {
     this.tenantId = tenantId;
     this.isAdmin = isAdmin;
     this.log = this.log.withContext({ tenantId, isAdmin });
+    if (isAdmin) {
+      this.sql = bypassSql;
+    }
   }
 
   /**
@@ -97,11 +100,28 @@ export class TenantDB {
             }
             return tx.query(q);
           }
-          if (q && typeof q === 'object' && 'text' in q) {
+          if (Array.isArray(q) && q.length === 2 && typeof q[0] === 'string') {
+            const [text, values] = q;
             if (!this.isAdmin) {
-              TenantQueryGuard.assertTenantBoundQuery(this.tenantId, q.text, q.values || []);
+              TenantQueryGuard.assertTenantBoundQuery(this.tenantId, text, values || []);
             }
-            return tx.query(q.text, q.values || []);
+            return tx.query(text, values || []);
+          }
+          if (q && typeof q === 'object') {
+            if ('text' in q) {
+              if (!this.isAdmin) {
+                TenantQueryGuard.assertTenantBoundQuery(this.tenantId, q.text, q.values || []);
+              }
+              return tx.query(q.text, q.values || []);
+            }
+            if ('query' in q) {
+              const text = q.query;
+              const values = q.params || q.values || [];
+              if (!this.isAdmin) {
+                TenantQueryGuard.assertTenantBoundQuery(this.tenantId, text, values);
+              }
+              return tx.query(text, values);
+            }
           }
           return q;
         });
