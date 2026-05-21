@@ -8,13 +8,23 @@ import { AlertCircle, FileWarning, Activity } from "lucide-react";
 export default async function RecoveryPage({ params }: { params: Promise<{ tenant_slug: string }> }) {
   const resolvedParams = await params;
   const session = await getSession();
-  if (!session || !session.tenantId) {
-    notFound();
-  }
   
-  const tenantData = await getTenantBootstrapData(session.tenantId);
-  if (!tenantData || tenantData.profile.slug !== resolvedParams.tenant_slug) {
-    notFound();
+  const tenantData = session?.tenantId ? await getTenantBootstrapData(session.tenantId) : null;
+  
+  if (!session || !session.tenantId || !tenantData || tenantData.profile.slug !== resolvedParams.tenant_slug) {
+    return (
+      <div className="p-8 bg-red-50 text-red-900 border border-red-200 rounded-xl m-8">
+        <h2 className="text-xl font-bold mb-4">Debug Information (404 was here)</h2>
+        <pre className="text-xs bg-white p-4 rounded border">
+          {JSON.stringify({
+            resolvedParams,
+            sessionTenantId: session?.tenantId,
+            tenantDataSlug: tenantData?.profile?.slug,
+            sessionRole: session?.role
+          }, null, 2)}
+        </pre>
+      </div>
+    );
   }
 
   const db = new TenantDB(tenantData.profile.id);
