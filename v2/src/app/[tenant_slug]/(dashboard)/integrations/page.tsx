@@ -76,7 +76,7 @@ export default function IntegrationsPage() {
         res.channels.forEach(ch => {
           if (ch.provider === 'whatsapp') newConnections.meta_whatsapp = ch.status === 'connected' ? 'connected' : 'error';
           if (ch.provider === 'messenger' || ch.provider === 'instagram' || ch.provider === 'meta_instagram') newConnections.meta_instagram = ch.status === 'connected' ? 'connected' : 'error';
-          if (ch.name === 'Google Sheets') newConnections.google_sheets = ch.status === 'connected' ? 'connected' : 'disconnected';
+          if (ch.provider === 'google_sheets') newConnections.google_sheets = ch.status === 'connected' ? 'connected' : 'disconnected';
         });
         setConnections(newConnections);
       } else {

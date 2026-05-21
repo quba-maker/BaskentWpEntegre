@@ -113,8 +113,8 @@ export async function getIntegrationHealth() {
         group: string;
         status: 'connected' | 'disconnected' | 'warning' | 'error';
         detail: string;
-        lastMessage?: string;
-        lastSyncAt?: string;
+        lastMessage?: any;
+        lastSyncAt?: any;
       }[] = [];
 
       for (const row of dbChannels) {

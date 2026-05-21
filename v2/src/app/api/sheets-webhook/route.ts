@@ -271,7 +271,7 @@ export async function POST(request: NextRequest) {
             }) as any[];
             if (chs.length > 0) whatsappChannelId = chs[0].id;
           } catch (err) {
-            log.error('Failed to resolve WhatsApp channel ID for sheets webhook', err);
+            log.error('Failed to resolve WhatsApp channel ID for sheets webhook', err as any);
           }
 
           if (existingConv.length === 0) {
