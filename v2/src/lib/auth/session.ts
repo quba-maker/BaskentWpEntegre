@@ -73,13 +73,21 @@ export async function getSession(): Promise<Session | null> {
     
     // Kullanıcı silinmiş veya deaktif
     if (user.length === 0 || !user[0].is_active) {
-      cookieStore.delete(COOKIE_NAME);
+      try {
+        cookieStore.delete(COOKIE_NAME);
+      } catch {
+        // Ignored: Next.js throws when modifying cookies during Server Component render phase
+      }
       return null;
     }
     
     // Tenant askıya alınmış
     if (user[0].tenant_status === 'suspended') {
-      cookieStore.delete(COOKIE_NAME);
+      try {
+        cookieStore.delete(COOKIE_NAME);
+      } catch {
+        // Ignored
+      }
       return null;
     }
     
@@ -100,7 +108,11 @@ export async function getSession(): Promise<Session | null> {
     // Fail closed: log database/auth failures and deny access
     const { logger: authLogger } = await import("@/lib/core/logger");
     authLogger.withContext({ module: 'Auth' }).error("Database verification check failed - failing closed", error instanceof Error ? error : new Error(String(error)));
-    cookieStore.delete(COOKIE_NAME);
+    try {
+      cookieStore.delete(COOKIE_NAME);
+    } catch {
+      // Ignored
+    }
     return null;
   }
 }

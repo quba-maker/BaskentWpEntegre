@@ -37,19 +37,17 @@ export class TenantDB {
         TenantQueryGuard.assertTenantBoundQuery(this.tenantId, query, params || []);
       }
 
-      const q = typeof query === 'string' 
-        ? this.sql.query(query, params || []) 
-        : query;
-
       // Neon HTTP Driver stateless'tır.
       // RLS context'inin kaybolmaması için, SET LOCAL sorgusunu 
       // asıl sorguyla beraber tek bir transaction batch'i olarak gönderiyoruz.
       // Postgres SET komutu parametre kabul etmediği için SELECT set_config() kullanıyoruz!
-      const result = await this.sql.transaction([
+      const result = await this.sql.transaction(tx => [
         this.isAdmin 
-          ? this.sql`SELECT set_config('app.bypass_rls', 'true', true)`
-          : this.sql`SELECT set_config('app.current_tenant_id', ${this.tenantId}, true)`,
-        q
+          ? tx`SELECT set_config('app.bypass_rls', 'true', true)`
+          : tx`SELECT set_config('app.current_tenant_id', ${this.tenantId}, true)`,
+        typeof query === 'string'
+          ? tx.query(query, params || [])
+          : query
       ]);
       
       const duration = Date.now() - startTime;
@@ -72,28 +70,30 @@ export class TenantDB {
   async executeTransaction(queries: any[]) {
     const startTime = Date.now();
     try {
-      const formattedQueries = queries.map(q => {
-        if (typeof q === 'string') {
-          if (!this.isAdmin) {
-            TenantQueryGuard.assertTenantBoundQuery(this.tenantId, q, []);
+      const result = await this.sql.transaction(tx => {
+        const formattedQueries = queries.map(q => {
+          if (typeof q === 'string') {
+            if (!this.isAdmin) {
+              TenantQueryGuard.assertTenantBoundQuery(this.tenantId, q, []);
+            }
+            return tx.query(q);
           }
-          return this.sql.query(q);
-        }
-        if (q && typeof q === 'object' && 'text' in q) {
-          if (!this.isAdmin) {
-            TenantQueryGuard.assertTenantBoundQuery(this.tenantId, q.text, q.values || []);
+          if (q && typeof q === 'object' && 'text' in q) {
+            if (!this.isAdmin) {
+              TenantQueryGuard.assertTenantBoundQuery(this.tenantId, q.text, q.values || []);
+            }
+            return tx.query(q.text, q.values || []);
           }
-          return this.sql.query(q.text, q.values || []);
-        }
-        return q;
+          return q;
+        });
+
+        return [
+          this.isAdmin 
+            ? tx`SELECT set_config('app.bypass_rls', 'true', true)`
+            : tx`SELECT set_config('app.current_tenant_id', ${this.tenantId}, true)`,
+          ...formattedQueries
+        ];
       });
-      
-      const result = await this.sql.transaction([
-        this.isAdmin 
-          ? this.sql`SELECT set_config('app.bypass_rls', 'true', true)`
-          : this.sql`SELECT set_config('app.current_tenant_id', ${this.tenantId}, true)`,
-        ...formattedQueries
-      ]);
       const duration = Date.now() - startTime;
       if (duration > 2000) {
         this.log.warn(`🐢 Slow Transaction Detected`, { durationMs: duration });
