@@ -1,5 +1,6 @@
 import { withTenantDB } from "@/lib/core/tenant-db";
 import { logger } from "@/lib/core/logger";
+import { decryptPayload, EncryptedPayload } from "@/lib/core/encryption";
 
 // ==========================================
 // QUBA AI OS — Multi-Tenant Runtime Resolver
@@ -207,15 +208,28 @@ export class TenantResolverService {
 
       const row = results[0];
       
-      // Attempt to extract access token from JSON credentials
+      // Attempt to extract access token from credentials (supports encrypted envelope, plain JSON, and raw string)
       let accessToken = null;
       try {
         if (row.credentials_encrypted) {
-          const creds = JSON.parse(row.credentials_encrypted);
-          accessToken = creds.accessToken || null;
+          const parsed = JSON.parse(row.credentials_encrypted);
+          
+          // Encrypted envelope: { version, provider, encrypted_payload }
+          if (parsed.encrypted_payload && parsed.version) {
+            try {
+              const decrypted = decryptPayload(parsed as EncryptedPayload);
+              accessToken = decrypted.access_token || decrypted.accessToken || decrypted.page_token || null;
+            } catch (decryptErr) {
+              this.log.error("[RESOLVER_DECRYPT_FAILED]", decryptErr instanceof Error ? decryptErr : new Error(String(decryptErr)));
+            }
+          }
+          // Plain JSON: { accessToken: "..." }
+          else if (parsed.accessToken) {
+            accessToken = parsed.accessToken;
+          }
         }
       } catch (e) {
-        // Assume plain string or legacy format
+        // Raw string token (not JSON)
         accessToken = row.credentials_encrypted;
       }
 

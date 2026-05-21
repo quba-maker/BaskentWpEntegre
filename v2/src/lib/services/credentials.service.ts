@@ -1,5 +1,6 @@
 import { withTenantDB } from "@/lib/core/tenant-db";
 import { logger } from "@/lib/core/logger";
+import { decryptPayload, EncryptedPayload } from "@/lib/core/encryption";
 
 const log = logger.withContext({ module: "CredentialsService" });
 
@@ -61,9 +62,33 @@ export class CredentialsService {
         
         if (row.credentials_encrypted) {
           try {
-            const creds = JSON.parse(row.credentials_encrypted);
-            accessToken = creds.accessToken || null;
+            const parsed = JSON.parse(row.credentials_encrypted);
+            
+            // ── Encrypted envelope: { version, provider, encrypted_payload } ──
+            if (parsed.encrypted_payload && parsed.version) {
+              try {
+                const decrypted = decryptPayload(parsed as EncryptedPayload);
+                // Decrypted keys use snake_case: access_token, page_token, phone_number_id
+                accessToken = decrypted.access_token || decrypted.accessToken || decrypted.page_token || null;
+                // Override phoneNumberId if present in decrypted payload
+                if (decrypted.phone_number_id) {
+                  row.__decryptedPhoneNumberId = decrypted.phone_number_id;
+                }
+                log.info("[CREDENTIAL_DECRYPTED] Successfully decrypted V2 credentials", {
+                  tenantId, provider, hasToken: !!accessToken
+                });
+              } catch (decryptErr) {
+                log.error("[CREDENTIAL_DECRYPT_FAILED] Could not decrypt encrypted_payload", decryptErr instanceof Error ? decryptErr : new Error(String(decryptErr)), {
+                  tenantId, provider, version: parsed.version
+                });
+              }
+            }
+            // ── Plain JSON: { accessToken: "..." } ──
+            else if (parsed.accessToken) {
+              accessToken = parsed.accessToken;
+            }
           } catch {
+            // ── Raw string token (not JSON) ──
             accessToken = row.credentials_encrypted;
           }
         }
@@ -74,7 +99,7 @@ export class CredentialsService {
           });
           return {
             accessToken,
-            whatsappPhoneNumberId: provider === "whatsapp" ? row.identifier : null,
+            whatsappPhoneNumberId: provider === "whatsapp" ? (row.__decryptedPhoneNumberId || row.identifier) : null,
             whatsappBusinessAccountId: null,
             metaPageId: provider === "messenger" ? row.identifier : null,
             instagramId: provider === "instagram" ? row.identifier : null,
