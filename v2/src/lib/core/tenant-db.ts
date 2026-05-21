@@ -30,6 +30,9 @@ export class TenantDB {
    */
   async executeSafe(query: any, params?: any[]) {
     const startTime = Date.now();
+    const safeTenantId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(this.tenantId)
+      ? this.tenantId
+      : "00000000-0000-0000-0000-000000000000";
     
     try {
       if (!this.isAdmin) {
@@ -56,8 +59,8 @@ export class TenantDB {
 
         return [
           this.isAdmin 
-            ? tx`SELECT set_config('app.bypass_rls', 'true', true)`
-            : tx`SELECT set_config('app.current_tenant_id', ${this.tenantId}, true)`,
+            ? tx`SELECT set_config('app.bypass_rls', 'true', true), set_config('app.current_tenant_id', ${safeTenantId}, true)`
+            : tx`SELECT set_config('app.bypass_rls', 'false', true), set_config('app.current_tenant_id', ${safeTenantId}, true)`,
           actualQuery
         ];
       });
@@ -81,6 +84,10 @@ export class TenantDB {
    */
   async executeTransaction(queries: any[]) {
     const startTime = Date.now();
+    const safeTenantId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(this.tenantId)
+      ? this.tenantId
+      : "00000000-0000-0000-0000-000000000000";
+
     try {
       const result = await this.sql.transaction(tx => {
         const formattedQueries = queries.map(q => {
@@ -101,8 +108,8 @@ export class TenantDB {
 
         return [
           this.isAdmin 
-            ? tx`SELECT set_config('app.bypass_rls', 'true', true)`
-            : tx`SELECT set_config('app.current_tenant_id', ${this.tenantId}, true)`,
+            ? tx`SELECT set_config('app.bypass_rls', 'true', true), set_config('app.current_tenant_id', ${safeTenantId}, true)`
+            : tx`SELECT set_config('app.bypass_rls', 'false', true), set_config('app.current_tenant_id', ${safeTenantId}, true)`,
           ...formattedQueries
         ];
       });
