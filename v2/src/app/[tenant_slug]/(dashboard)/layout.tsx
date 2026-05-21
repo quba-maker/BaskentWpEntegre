@@ -11,7 +11,8 @@ import { ImpersonationBanner } from "@/components/layout/impersonation-banner";
 // Dashboard Layout — Sidebar + Mobile Nav
 // ==========================================
 
-export async function generateMetadata({ params }: { params: { tenant_slug: string } }): Promise<Metadata> {
+export async function generateMetadata({ params }: { params: Promise<{ tenant_slug: string }> }): Promise<Metadata> {
+  const resolvedParams = await params;
   const session = await getSession();
   const tenantData = session?.tenantId ? await getTenantBootstrapData(session.tenantId) : null;
   const brandingName = tenantData?.profile.name || "Quba AI";

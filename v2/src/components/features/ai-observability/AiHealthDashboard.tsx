@@ -64,10 +64,17 @@ export function AiHealthDashboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    getAiHealthCards().then(d => {
-      setData(d);
+    getAiHealthCards().then(res => {
+      if (res.success && res.data) {
+        setData(res.data);
+      } else {
+        setData(null);
+      }
       setLoading(false);
-    }).catch(() => setLoading(false));
+    }).catch(() => {
+      setData(null);
+      setLoading(false);
+    });
   }, []);
 
   if (loading) {

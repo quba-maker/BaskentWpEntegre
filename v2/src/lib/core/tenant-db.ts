@@ -32,23 +32,35 @@ export class TenantDB {
     const startTime = Date.now();
     
     try {
-      if (typeof query === 'string' && !this.isAdmin) {
-        // Enforce Phase 5 restrictions on raw strings
-        TenantQueryGuard.assertTenantBoundQuery(this.tenantId, query, params || []);
+      if (!this.isAdmin) {
+        if (typeof query === 'string') {
+          TenantQueryGuard.assertTenantBoundQuery(this.tenantId, query, params || []);
+        } else if (query && typeof query === 'object' && 'text' in query) {
+          TenantQueryGuard.assertTenantBoundQuery(this.tenantId, query.text, query.values || []);
+        }
       }
 
       // Neon HTTP Driver stateless'tır.
       // RLS context'inin kaybolmaması için, SET LOCAL sorgusunu 
       // asıl sorguyla beraber tek bir transaction batch'i olarak gönderiyoruz.
       // Postgres SET komutu parametre kabul etmediği için SELECT set_config() kullanıyoruz!
-      const result = await this.sql.transaction(tx => [
-        this.isAdmin 
-          ? tx`SELECT set_config('app.bypass_rls', 'true', true)`
-          : tx`SELECT set_config('app.current_tenant_id', ${this.tenantId}, true)`,
-        typeof query === 'string'
-          ? tx.query(query, params || [])
-          : query
-      ]);
+      const result = await this.sql.transaction(tx => {
+        let actualQuery;
+        if (typeof query === 'string') {
+          actualQuery = tx.query(query, params || []);
+        } else if (query && typeof query === 'object' && 'text' in query) {
+          actualQuery = tx.query(query.text, query.values || []);
+        } else {
+          actualQuery = query;
+        }
+
+        return [
+          this.isAdmin 
+            ? tx`SELECT set_config('app.bypass_rls', 'true', true)`
+            : tx`SELECT set_config('app.current_tenant_id', ${this.tenantId}, true)`,
+          actualQuery
+        ];
+      });
       
       const duration = Date.now() - startTime;
       if (duration > 1000) {
