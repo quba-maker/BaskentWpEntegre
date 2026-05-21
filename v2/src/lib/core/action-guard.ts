@@ -48,8 +48,11 @@ export async function withActionGuard<T>(
   try {
     // 1. Auth Check
     const session = await getSession();
+    // ── FORENSIC TRACE ──
+    console.log(`[GUARD_FORENSIC] ${options.actionName} | session=${session ? 'OK' : 'NULL'} | userId=${session?.userId || 'NONE'} | tenantId=${session?.tenantId || 'NONE'} | role=${session?.role || 'NONE'} | impersonated=${session?.impersonatedTenantId || 'NONE'}`);
     if (!session || !session.userId) {
       log.warn("Unauthorized action attempt (No session)");
+      console.log(`[GUARD_FORENSIC] ${options.actionName} BLOCKED: No session`);
       return { success: false, error: "Oturum süresi dolmuş veya yetkisiz.", statusCode: 401 };
     }
 
