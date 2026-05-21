@@ -44,17 +44,20 @@ async function fetchTenantDataFromDB(tenantId: string): Promise<TenantBootstrapD
     if (tenants.length === 0) return null;
     const t = tenants[0];
 
-    // 2. Fetch Feature Flags
-    const modules = await sqlClient`
-      SELECT module_name, is_active 
-      FROM ai_module_settings 
-      WHERE tenant_id = ${tenantId}
-    `;
-    
+    // 2. Fetch Feature Flags (with safe fallback if table missing)
     const flags: Record<string, boolean> = {};
-    modules.forEach((m: any) => {
-      flags[m.module_name] = m.is_active;
-    });
+    try {
+      const modules = await sqlClient`
+        SELECT module_name, is_active 
+        FROM ai_module_settings 
+        WHERE tenant_id = ${tenantId}
+      `;
+      modules.forEach((m: any) => {
+        flags[m.module_name] = m.is_active;
+      });
+    } catch (err) {
+      // Table doesn't exist yet, ignore
+    }
 
     const duration = performance.now() - startTime;
     console.log(`[BOOTSTRAP] Successfully hydrated workspace for ${t.slug} in ${duration.toFixed(2)}ms`);
