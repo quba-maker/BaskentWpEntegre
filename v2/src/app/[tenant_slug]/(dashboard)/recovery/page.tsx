@@ -5,14 +5,15 @@ import { sql } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { AlertCircle, FileWarning, Activity } from "lucide-react";
 
-export default async function RecoveryPage({ params }: { params: { tenant_slug: string } }) {
+export default async function RecoveryPage({ params }: { params: Promise<{ tenant_slug: string }> }) {
+  const resolvedParams = await params;
   const session = await getSession();
   if (!session || !session.tenantId) {
     notFound();
   }
   
   const tenantData = await getTenantBootstrapData(session.tenantId);
-  if (!tenantData || tenantData.profile.slug !== params.tenant_slug) {
+  if (!tenantData || tenantData.profile.slug !== resolvedParams.tenant_slug) {
     notFound();
   }
 
