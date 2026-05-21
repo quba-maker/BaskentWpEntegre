@@ -20,7 +20,11 @@ export async function getConversations(page: number = 1, search: string = "", st
       const searchFilter = search.trim() ? `%${search.trim()}%` : null;
       const stageFilter = stage !== "all" ? stage : null;
 
-      const rows = await ctx.db.executeSafe(sql`
+      // ── FORENSIC TRACE: Log the tenant context being used ──
+      console.log(`[INBOX_FORENSIC] getConversations called | tenantId=${ctx.tenantId} | page=${page} | search="${search}" | stage="${stage}"`);
+
+      const rows = await ctx.db.executeSafe({
+        text: `
         SELECT 
           c.phone_number as id,
           c.patient_name as name,
@@ -48,27 +52,32 @@ export async function getConversations(page: number = 1, search: string = "", st
         LEFT JOIN LATERAL (
           SELECT content, status, direction
           FROM messages 
-          WHERE phone_number = c.phone_number AND messages.tenant_id = ${ctx.tenantId}
+          WHERE phone_number = c.phone_number AND messages.tenant_id = $1
           ORDER BY created_at DESC 
           LIMIT 1
         ) m ON c.last_message_content IS NULL
         LEFT JOIN LATERAL (
           SELECT form_name, raw_data, created_at 
           FROM leads 
-          WHERE leads.tenant_id = ${ctx.tenantId}
+          WHERE leads.tenant_id = $1
             AND leads.phone_number LIKE '%' || RIGHT(COALESCE(c.real_phone, c.phone_number), 10) || '%'
           ORDER BY created_at DESC 
           LIMIT 1
         ) l ON true
         LEFT JOIN conversation_memory mem ON c.id = mem.conversation_id
-        WHERE c.tenant_id = ${ctx.tenantId}
-          AND (${searchFilter === null} OR c.patient_name ILIKE ${searchFilter} OR c.phone_number ILIKE ${searchFilter})
-          AND (${stageFilter === null} OR c.lead_stage = ${stageFilter})
+        WHERE c.tenant_id = $1
+          AND ($2::text IS NULL OR c.patient_name ILIKE $2 OR c.phone_number ILIKE $2)
+          AND ($3::text IS NULL OR c.lead_stage = $3)
         ORDER BY c.last_message_at DESC NULLS LAST
-        LIMIT ${limit} OFFSET ${offset}
-      `);
+        LIMIT $4 OFFSET $5
+        `,
+        values: [ctx.tenantId, searchFilter, stageFilter, limit, offset]
+      });
 
       const validRows = Array.isArray(rows) ? rows : ((rows as any)?.rows || []);
+
+      // ── FORENSIC TRACE: Log row count ──
+      console.log(`[INBOX_FORENSIC] Query returned ${validRows.length} rows for tenant ${ctx.tenantId}`);
 
       return validRows.map((r: any) => {
         let formattedTime = '';
@@ -102,7 +111,7 @@ export async function getConversations(page: number = 1, search: string = "", st
           lastMessageStatus: r.last_message_status || 'sent',
           lastMessageDirection: r.last_message_direction || 'in',
           notes: r.notes || '',
-          country: r.country || (r.form_raw_data && r.form_raw_data.includes('country') ? JSON.parse(r.form_raw_data).country : null) || (r.id.startsWith('90') || r.id.startsWith('+90') ? 'Türkiye' : r.id.startsWith('49') || r.id.startsWith('+49') ? 'Almanya' : null),
+          country: r.country || (r.form_raw_data && typeof r.form_raw_data === 'string' && r.form_raw_data.includes('country') ? JSON.parse(r.form_raw_data).country : null) || (r.id.startsWith('90') || r.id.startsWith('+90') ? 'Türkiye' : r.id.startsWith('49') || r.id.startsWith('+49') ? 'Almanya' : null),
           formData: r.form_name ? {
             name: r.form_name,
             date: r.form_date_ms ? new Date(parseFloat(r.form_date_ms)).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' }) : '',
@@ -118,6 +127,7 @@ export async function getConversations(page: number = 1, search: string = "", st
     }
   ).then(res => res.data || []);
 }
+
 
 import { unstable_noStore as noStore } from "next/cache";
 
