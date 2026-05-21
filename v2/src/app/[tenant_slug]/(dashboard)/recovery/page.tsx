@@ -33,7 +33,7 @@ export default async function RecoveryPage({ params }: { params: Promise<{ tenan
 
   // 2. Orphaned Messages
   const orphanedMessagesRes = await db.executeSafe(
-    `SELECT id, phone_number, direction, channel, created_at, provider_message_id 
+    `SELECT id, direction, created_at, content 
     FROM messages 
     WHERE tenant_id = $1 AND (channel_id IS NULL OR group_id IS NULL)
     ORDER BY created_at DESC 
