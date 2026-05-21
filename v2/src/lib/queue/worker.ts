@@ -200,6 +200,37 @@ export class QueueWorkerEngine {
           this.log.error(`[REALTIME_PUBLISH_FAILED]`, realtimeErr instanceof Error ? realtimeErr : new Error(String(realtimeErr)), { traceId });
         }
       }
+
+      // [NEW] Update integration health telemetry
+      let resolvedChannelId = metadata.channelId;
+      if (!resolvedChannelId) {
+        const phoneId = payload.entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id;
+        if (phoneId) {
+          try {
+            const chRow = await db.executeSafe({
+              text: `SELECT id FROM channels WHERE identifier = $1 LIMIT 1`,
+              values: [phoneId]
+            }) as any[];
+            resolvedChannelId = chRow[0]?.id;
+          } catch (err) {}
+        }
+      }
+
+      if (resolvedChannelId && resolvedChannelId !== 'legacy_unmapped') {
+        try {
+          await db.executeSafe({
+            text: `
+              UPDATE channel_integrations 
+              SET last_sync_at = NOW(), health_status = 'healthy' 
+              WHERE channel_id = $1
+            `,
+            values: [resolvedChannelId]
+          });
+          this.log.info(`[TELEMETRY_UPDATED] Channel ${resolvedChannelId} marked healthy and last_sync_at updated via status receipt`);
+        } catch (telErr) {
+          this.log.error(`[TELEMETRY_UPDATE_FAILED] Non-fatal integration telemetry update failure`, telErr instanceof Error ? telErr : new Error(String(telErr)), { traceId });
+        }
+      }
       
     } catch (e: any) {
       this.log.error(`[STATUS_UPDATE_FAILED] Failed to update delivery receipt`, e, { traceId });
@@ -304,6 +335,31 @@ export class QueueWorkerEngine {
     }
 
     this.log.info(`[DB_COMMITTED] [INCOMING MESSAGE] Saved to DB. MsgId: ${messageId}`, { traceId, providerMessageId });
+
+    // [NEW] Update integration health telemetry immediately upon successful event ingestion
+    const telemetryChannelId = brain.context.config?.channelId && brain.context.config?.channelId !== 'legacy_unmapped'
+      ? brain.context.config.channelId
+      : metadata.channelId;
+    if (telemetryChannelId && telemetryChannelId !== 'legacy_unmapped') {
+      try {
+        await db.executeSafe({
+          text: `
+            UPDATE channel_integrations 
+            SET last_sync_at = NOW(), health_status = 'healthy' 
+            WHERE channel_id = $1
+              AND channel_id IN (
+                SELECT c.id FROM channels c
+                JOIN channel_groups cg ON c.group_id = cg.id
+                WHERE cg.tenant_id = $2
+              )
+          `,
+          values: [telemetryChannelId, tenantId]
+        });
+        this.log.info(`[TELEMETRY_UPDATED] Ingestion telemetry updated for channel ${telemetryChannelId}`);
+      } catch (telErr) {
+        this.log.error(`[TELEMETRY_UPDATE_FAILED] Inbound integration telemetry update failed`, telErr instanceof Error ? telErr : new Error(String(telErr)), { traceId });
+      }
+    }
 
     // [NEW] Realtime Event: Message Created (Incoming)
     if (messageId && conversationId) {
@@ -690,6 +746,8 @@ export class QueueWorkerEngine {
         AIEventEmitter.logHealth(tenantId, 'memory_failure', { traceId });
       }
     }
+
+    // Telemetry updated immediately upon ingestion above
 
     this.log.info(`[WORKER_COMPLETED] End-to-end pipeline finished successfully`, { traceId });
   }

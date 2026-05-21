@@ -261,12 +261,31 @@ export async function POST(request: NextRequest) {
             values: [activePhone]
           }) as any[];
           let convId: any = existingConv[0]?.id;
+          
+          // Get channel_id for active whatsapp channel of this tenant
+          let whatsappChannelId: string | null = null;
+          try {
+            const chs = await db.executeSafe({
+              text: `SELECT c.id FROM channels c JOIN channel_groups cg ON c.group_id = cg.id WHERE cg.tenant_id = $1 AND c.provider = 'whatsapp' LIMIT 1`,
+              values: [tenantId]
+            }) as any[];
+            if (chs.length > 0) whatsappChannelId = chs[0].id;
+          } catch (err) {
+            log.error('Failed to resolve WhatsApp channel ID for sheets webhook', err);
+          }
+
           if (existingConv.length === 0) {
             const newConv = await db.executeSafe({
-              text: `INSERT INTO conversations (tenant_id, phone_number, patient_name, tags, status, department) VALUES ($1, $2, $3, $4, 'bot', 'Genel') RETURNING id`,
-              values: [tenantId, activePhone, name, JSON.stringify(tags)]
+              text: `INSERT INTO conversations (tenant_id, phone_number, patient_name, tags, status, department, channel, channel_id) VALUES ($1, $2, $3, $4, 'bot', 'Genel', 'whatsapp', $5) RETURNING id`,
+              values: [tenantId, activePhone, name, JSON.stringify(tags), whatsappChannelId]
             }) as any[];
             convId = newConv[0]?.id;
+          } else {
+            // If conversation exists but has no channel_id, update it
+            await db.executeSafe({
+              text: `UPDATE conversations SET channel_id = COALESCE(channel_id, $1), channel = COALESCE(channel, 'whatsapp') WHERE id = $2`,
+              values: [whatsappChannelId, convId]
+            });
           }
           // 🔗 Link conversation to same customer profile
           if (convId) {
@@ -277,8 +296,8 @@ export async function POST(request: NextRequest) {
             } catch (_) {}
           }
           await db.executeSafe({
-            text: `INSERT INTO messages (tenant_id, phone_number, direction, content) VALUES ($1, $2, 'out', $3)`,
-            values: [tenantId, activePhone, welcomeMsg]
+            text: `INSERT INTO messages (tenant_id, conversation_id, phone_number, direction, content, channel, channel_id) VALUES ($1, $2, $3, 'out', $4, 'whatsapp', $5)`,
+            values: [tenantId, convId, activePhone, welcomeMsg, whatsappChannelId]
           });
           await db.executeSafe({
             text: `UPDATE leads SET stage = 'contacted', contacted_at = NOW(), phone_number = $1 WHERE phone_number = $2 AND tenant_id = $3`,

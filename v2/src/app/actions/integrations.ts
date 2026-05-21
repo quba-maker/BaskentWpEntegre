@@ -97,6 +97,13 @@ export async function getIntegrationHealth() {
         JOIN channel_groups cg ON c.group_id = cg.id
         LEFT JOIN channel_integrations ci ON ci.channel_id = c.id
         WHERE cg.tenant_id = ${ctx.tenantId}
+          AND c.provider != 'meta_legacy'
+      `);
+
+      const sheetsConfig = await ctx.db.executeSafe(sql`
+        SELECT value, updated_at FROM settings 
+        WHERE key = 'google_sheets_config' AND tenant_id = ${ctx.tenantId} 
+        LIMIT 1
       `);
 
       const channels: {
@@ -107,6 +114,7 @@ export async function getIntegrationHealth() {
         status: 'connected' | 'disconnected' | 'warning' | 'error';
         detail: string;
         lastMessage?: string;
+        lastSyncAt?: string;
       }[] = [];
 
       for (const row of dbChannels) {
@@ -135,7 +143,27 @@ export async function getIntegrationHealth() {
           status,
           detail,
           lastMessage: lastMsg[0]?.created_at || null,
+          lastSyncAt: row.last_sync_at || null,
         });
+      }
+
+      if (sheetsConfig.length > 0) {
+        try {
+          const cfg = JSON.parse(sheetsConfig[0].value);
+          const isConnected = !!cfg?.spreadsheetId;
+          channels.push({
+            id: 'google-sheets-synthetic',
+            name: 'Google Sheets Integration',
+            provider: 'google_sheets',
+            group: 'Automation',
+            status: isConnected ? 'connected' : 'warning',
+            detail: isConnected ? `✓ Aktif (${cfg.spreadsheetId.slice(0, 12)}...)` : 'Kurulum tamamlanmadı',
+            lastMessage: null,
+            lastSyncAt: sheetsConfig[0].updated_at || null,
+          });
+        } catch (e) {
+          // ignore parsing error
+        }
       }
 
       const connectedCount = channels.filter(c => c.status === 'connected').length;

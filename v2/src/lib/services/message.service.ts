@@ -54,6 +54,7 @@ export class MessageService {
               last_message_at = NOW(), 
               message_count = message_count + 1, 
               channel = $5,
+              channel_id = COALESCE($6, channel_id),
               last_channel = CASE WHEN $3 = 'in' THEN $5 ELSE last_channel END,
               last_message_content = $4,
               last_message_direction = $3,
@@ -62,10 +63,10 @@ export class MessageService {
             RETURNING id
           ), conv_insert AS (
             INSERT INTO conversations (
-              tenant_id, phone_number, message_count, channel, last_channel,
+              tenant_id, phone_number, message_count, channel, channel_id, last_channel,
               last_message_content, last_message_direction, last_message_status, last_message_at
             )
-            SELECT $1, $2, 1, $5, CASE WHEN $3 = 'in' THEN $5 ELSE NULL END, $4, $3, $14, NOW()
+            SELECT $1, $2, 1, $5, $6, CASE WHEN $3 = 'in' THEN $5 ELSE NULL END, $4, $3, $14, NOW()
             WHERE NOT EXISTS (SELECT 1 FROM dup_check) AND NOT EXISTS (SELECT 1 FROM conv_update)
             RETURNING id
           ), resolved_conv AS (
