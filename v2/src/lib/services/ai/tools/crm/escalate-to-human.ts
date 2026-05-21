@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ToolDefinition } from "../../core/tool-registry";
-import { sql } from "@/lib/db";
+import { withTenantDB } from "@/lib/core/tenant-db";
 
 export const escalateToHumanTool: ToolDefinition = {
   name: "escalate_to_human",
@@ -12,15 +12,19 @@ export const escalateToHumanTool: ToolDefinition = {
   permissions: ["handoff_write"],
   execute: async (args, context) => {
     // 1. Update the conversation status to 'human' in the database
-    await sql`
-      UPDATE conversations
-      SET 
-        status = 'human',
-        updated_at = NOW()
-      WHERE 
-        phone_number = ${context.phoneNumber} 
-        AND tenant_id = ${context.tenantId}
-    `;
+    const db = withTenantDB(context.tenantId);
+    await db.executeSafe({
+      text: `
+        UPDATE conversations
+        SET 
+          status = 'human',
+          updated_at = NOW()
+        WHERE 
+          phone_number = $1 
+          AND tenant_id = $2
+      `,
+      values: [context.phoneNumber, context.tenantId]
+    });
 
     // 2. Here, you could also trigger an event to Slack/WhatsApp/Email notifications via QStash
     // e.g., await publishEvent('tenant.notification', { type: 'handoff', phone: context.phoneNumber, reason: args.reason })

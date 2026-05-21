@@ -1,4 +1,4 @@
-import { neon } from "@neondatabase/serverless";
+import { withTenantDB } from "@/lib/core/tenant-db";
 import { logger } from "@/lib/core/logger";
 
 const log = logger.withContext({ module: "CredentialsService" });
@@ -20,22 +20,24 @@ export class CredentialsService {
     tenantId: string,
     provider: "whatsapp" | "messenger" | "instagram"
   ): Promise<ResolvedCredentials> {
-    const databaseUrl = process.env.DATABASE_URL!;
-    const sql = neon(databaseUrl);
-    
     try {
+      const db = withTenantDB(tenantId);
+      
       // 1. Try V2 Routing: Look up via channel groups -> channels -> channel integrations
-      const v2Results = await sql`
-        SELECT ci.credentials_encrypted, c.identifier, c.id as channel_id
-        FROM channels c
-        JOIN channel_groups cg ON c.group_id = cg.id
-        LEFT JOIN channel_integrations ci ON ci.channel_id = c.id
-        WHERE cg.tenant_id = ${tenantId} 
-          AND c.provider = ${provider}
-        LIMIT 1
-      `;
+      const v2Results = await db.executeSafe({
+        text: `
+          SELECT ci.credentials_encrypted, c.identifier, c.id as channel_id
+          FROM channels c
+          JOIN channel_groups cg ON c.group_id = cg.id
+          LEFT JOIN channel_integrations ci ON ci.channel_id = c.id
+          WHERE cg.tenant_id = $1 
+            AND c.provider = $2
+          LIMIT 1
+        `,
+        values: [tenantId, provider]
+      }) as any[];
 
-      if (v2Results.length > 0) {
+      if (v2Results && v2Results.length > 0) {
         const row = v2Results[0];
         let accessToken = null;
         
@@ -61,14 +63,17 @@ export class CredentialsService {
       }
 
       // 2. Fallback to Legacy Tenants V1 Columns
-      const legacyResults = await sql`
-        SELECT meta_page_token, whatsapp_phone_id, whatsapp_business_id, meta_page_id, instagram_id
-        FROM tenants
-        WHERE id = ${tenantId}
-        LIMIT 1
-      `;
+      const legacyResults = await db.executeSafe({
+        text: `
+          SELECT meta_page_token, whatsapp_phone_id, whatsapp_business_id, meta_page_id, instagram_id
+          FROM tenants
+          WHERE id = $1
+          LIMIT 1
+        `,
+        values: [tenantId]
+      }) as any[];
 
-      if (legacyResults.length > 0) {
+      if (legacyResults && legacyResults.length > 0) {
         const t = legacyResults[0];
         log.warn("Using V1 fallback credentials for tenant outbound send", { tenantId, provider });
         
@@ -97,3 +102,4 @@ export class CredentialsService {
     };
   }
 }
+

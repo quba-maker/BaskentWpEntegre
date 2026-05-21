@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { sql } from "@/lib/db";
+import { withTenantDB } from "@/lib/core/tenant-db";
 import { logger } from "@/lib/core/logger";
 
 // ==========================================
@@ -25,11 +25,14 @@ export async function GET(req: NextRequest) {
   };
 
   try {
-    const tenants = await sql`
-      SELECT id, name, slug, whatsapp_phone_id, whatsapp_business_id, meta_page_token, meta_page_id, instagram_id 
-      FROM tenants 
-      WHERE status = 'active'
-    `;
+    const systemDb = withTenantDB('admin-system', true);
+    const tenants = await systemDb.executeSafe({
+      text: `
+        SELECT id, name, slug, whatsapp_phone_id, whatsapp_business_id, meta_page_token, meta_page_id, instagram_id 
+        FROM tenants 
+        WHERE status = 'active'
+      `
+    }) as any[];
 
     for (const t of tenants) {
       log.info(`Processing tenant: ${t.name}`);
@@ -41,17 +44,23 @@ export async function GET(req: NextRequest) {
       if (!hasWhatsapp && !hasMessenger && !hasInstagram) continue;
 
       // 1. Create Default Channel Group if not exists
-      const existingGroup = await sql`SELECT id FROM channel_groups WHERE tenant_id = ${t.id} AND name = 'Varsayılan Grup' LIMIT 1`;
+      const existingGroup = await systemDb.executeSafe({
+        text: `SELECT id FROM channel_groups WHERE tenant_id = $1 AND name = 'Varsayılan Grup' LIMIT 1`,
+        values: [t.id]
+      }) as any[];
       let groupId;
 
       if (existingGroup.length > 0) {
         groupId = existingGroup[0].id;
       } else {
-        const newGroup = await sql`
-          INSERT INTO channel_groups (tenant_id, name, description) 
-          VALUES (${t.id}, 'Varsayılan Grup', 'Otomatik taşınan entegrasyonlar') 
-          RETURNING id
-        `;
+        const newGroup = await systemDb.executeSafe({
+          text: `
+            INSERT INTO channel_groups (tenant_id, name, description) 
+            VALUES ($1, 'Varsayılan Grup', 'Otomatik taşınan entegrasyonlar') 
+            RETURNING id
+          `,
+          values: [t.id]
+        }) as any[];
         groupId = newGroup[0].id;
         report.recoveredGroups++;
       }
@@ -61,60 +70,87 @@ export async function GET(req: NextRequest) {
       // 2. Migrate WhatsApp
       if (hasWhatsapp) {
         const identifier = t.whatsapp_phone_id || t.whatsapp_business_id;
-        const existingChannel = await sql`SELECT id FROM channels WHERE group_id = ${groupId} AND provider = 'whatsapp' AND identifier = ${identifier}`;
+        const existingChannel = await systemDb.executeSafe({
+          text: `SELECT id FROM channels WHERE group_id = $1 AND provider = 'whatsapp' AND identifier = $2`,
+          values: [groupId, identifier]
+        }) as any[];
         
         if (existingChannel.length === 0) {
-          const newCh = await sql`
-            INSERT INTO channels (group_id, provider, identifier, name) 
-            VALUES (${groupId}, 'whatsapp', ${identifier}, 'WhatsApp') 
-            RETURNING id
-          `;
+          const newCh = await systemDb.executeSafe({
+            text: `
+              INSERT INTO channels (group_id, provider, identifier, name) 
+              VALUES ($1, 'whatsapp', $2, 'WhatsApp') 
+              RETURNING id
+            `,
+            values: [groupId, identifier]
+          }) as any[];
           report.recoveredChannels++;
           
-          await sql`
-            INSERT INTO channel_integrations (channel_id, provider, credentials_encrypted, health_status) 
-            VALUES (${newCh[0].id}, 'whatsapp', ${tokenJson}, 'healthy')
-          `;
+          await systemDb.executeSafe({
+            text: `
+              INSERT INTO channel_integrations (channel_id, provider, credentials_encrypted, health_status) 
+              VALUES ($1, 'whatsapp', $2, 'healthy')
+            `,
+            values: [newCh[0].id, tokenJson]
+          });
           report.recoveredIntegrations++;
         }
       }
 
       // 3. Migrate Messenger
       if (hasMessenger) {
-        const existingChannel = await sql`SELECT id FROM channels WHERE group_id = ${groupId} AND provider = 'messenger' AND identifier = ${t.meta_page_id}`;
+        const existingChannel = await systemDb.executeSafe({
+          text: `SELECT id FROM channels WHERE group_id = $1 AND provider = 'messenger' AND identifier = $2`,
+          values: [groupId, t.meta_page_id]
+        }) as any[];
         
         if (existingChannel.length === 0) {
-          const newCh = await sql`
-            INSERT INTO channels (group_id, provider, identifier, name) 
-            VALUES (${groupId}, 'messenger', ${t.meta_page_id}, 'Messenger') 
-            RETURNING id
-          `;
+          const newCh = await systemDb.executeSafe({
+            text: `
+              INSERT INTO channels (group_id, provider, identifier, name) 
+              VALUES ($1, 'messenger', $2, 'Messenger') 
+              RETURNING id
+            `,
+            values: [groupId, t.meta_page_id]
+          }) as any[];
           report.recoveredChannels++;
           
-          await sql`
-            INSERT INTO channel_integrations (channel_id, provider, credentials_encrypted, health_status) 
-            VALUES (${newCh[0].id}, 'messenger', ${tokenJson}, 'healthy')
-          `;
+          await systemDb.executeSafe({
+            text: `
+              INSERT INTO channel_integrations (channel_id, provider, credentials_encrypted, health_status) 
+              VALUES ($1, 'messenger', $2, 'healthy')
+            `,
+            values: [newCh[0].id, tokenJson]
+          });
           report.recoveredIntegrations++;
         }
       }
 
       // 4. Migrate Instagram
       if (hasInstagram) {
-        const existingChannel = await sql`SELECT id FROM channels WHERE group_id = ${groupId} AND provider = 'instagram' AND identifier = ${t.instagram_id}`;
+        const existingChannel = await systemDb.executeSafe({
+          text: `SELECT id FROM channels WHERE group_id = $1 AND provider = 'instagram' AND identifier = $2`,
+          values: [groupId, t.instagram_id]
+        }) as any[];
         
         if (existingChannel.length === 0) {
-          const newCh = await sql`
-            INSERT INTO channels (group_id, provider, identifier, name) 
-            VALUES (${groupId}, 'instagram', ${t.instagram_id}, 'Instagram') 
-            RETURNING id
-          `;
+          const newCh = await systemDb.executeSafe({
+            text: `
+              INSERT INTO channels (group_id, provider, identifier, name) 
+              VALUES ($1, 'instagram', $2, 'Instagram') 
+              RETURNING id
+            `,
+            values: [groupId, t.instagram_id]
+          }) as any[];
           report.recoveredChannels++;
           
-          await sql`
-            INSERT INTO channel_integrations (channel_id, provider, credentials_encrypted, health_status) 
-            VALUES (${newCh[0].id}, 'instagram', ${tokenJson}, 'healthy')
-          `;
+          await systemDb.executeSafe({
+            text: `
+              INSERT INTO channel_integrations (channel_id, provider, credentials_encrypted, health_status) 
+              VALUES ($1, 'instagram', $2, 'healthy')
+            `,
+            values: [newCh[0].id, tokenJson]
+          });
           report.recoveredIntegrations++;
         }
       }

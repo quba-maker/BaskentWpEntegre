@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { neon } from "@neondatabase/serverless";
 import { waitUntil } from "@vercel/functions";
 import { withApiGuard } from "@/lib/core/api-guard";
 import { QueueService } from "@/lib/queue/queue.service";
@@ -13,7 +12,6 @@ const log = logger.withContext({ module: 'MetaWebhook' });
 // Gelen mesajı tenant'a göre yönlendirir ve QueueService'e aktarır
 // ==========================================
 
-const DATABASE_URL = process.env.DATABASE_URL || "postgres://dummy:dummy@dummy.com/dummy";
 export const maxDuration = 60; // Max duration for background ops
 
 

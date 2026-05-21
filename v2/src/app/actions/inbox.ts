@@ -4,6 +4,7 @@ import { sql } from "@/lib/db";
 import { withActionGuard } from "@/lib/core/action-guard";
 import { logAudit } from "@/lib/audit";
 import { enqueueRetry } from "@/lib/retry";
+import { CredentialsService } from "@/lib/services/credentials.service";
 
 // ==========================================
 // QUBA AI — Inbox Actions (Zero-Trust Migrated)
@@ -208,19 +209,6 @@ export async function sendMessage(phone: string, text: string) {
   return withActionGuard(
     { actionName: 'sendMessage' },
     async (ctx) => {
-      let META_ACCESS_TOKEN: string | null = null;
-      let PHONE_NUMBER_ID: string | null = null;
-      
-      const tenantRows = await ctx.db.executeSafe(sql`
-        SELECT meta_page_token, whatsapp_phone_id 
-        FROM tenants WHERE id = ${ctx.tenantId}
-      `);
-      
-      if (tenantRows.length > 0) {
-        META_ACCESS_TOKEN = tenantRows[0].meta_page_token || process.env.META_ACCESS_TOKEN || null;
-        PHONE_NUMBER_ID = tenantRows[0].whatsapp_phone_id || process.env.PHONE_NUMBER_ID || null;
-      }
-
       // Hangi kanaldan geldiğini bul
       const convRows = await ctx.db.executeSafe(sql`
         SELECT channel FROM conversations 
@@ -228,6 +216,12 @@ export async function sendMessage(phone: string, text: string) {
         LIMIT 1
       `);
       const channel = convRows[0]?.channel || 'whatsapp';
+
+      // Credentials Service ile kimlik bilgilerini çöz
+      const provider = (channel === 'messenger' || channel === 'instagram' ? channel : 'whatsapp') as 'whatsapp' | 'messenger' | 'instagram';
+      const credentials = await CredentialsService.resolveCredentials(ctx.tenantId, provider);
+      const META_ACCESS_TOKEN = credentials.accessToken;
+      const PHONE_NUMBER_ID = credentials.whatsappPhoneNumberId;
 
       let response: Response | null = null;
       let providerMessageId: string | null = null;
@@ -264,7 +258,7 @@ export async function sendMessage(phone: string, text: string) {
           }
         }
         else if (channel === 'instagram' || channel === 'messenger') {
-          const customToken = tenantRows[0].meta_page_token;
+          const customToken = credentials.accessToken;
           // Legacy sistem gibi tüm tokenları sırayla dene (IGSID sadece kendi sayfasında geçerli olduğu için)
           const fallbackTokens = [process.env.IG_TOKEN_1, process.env.IG_TOKEN_2, process.env.FB_PAGE_TOKEN, META_ACCESS_TOKEN].filter(Boolean);
           const tokensToTry = customToken ? [customToken] : fallbackTokens;

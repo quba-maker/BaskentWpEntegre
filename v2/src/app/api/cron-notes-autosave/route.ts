@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { sql } from "@/lib/db";
+import { withTenantDB } from "@/lib/core/tenant-db";
 
 // ========================================================
 // QUBA AI — 24 Saatlik Otonom CRM Not Otomatik Kaydetme Cron Job
@@ -19,19 +19,23 @@ export async function GET(req: Request) {
   }
 
   try {
+    const systemDb = withTenantDB('admin-system', true);
+
     // 1. 24 saat inaktif, not alanı boş olan ve AI özeti bulunan görüşmeleri tespit et
-    const targetConversations = await sql`
-      SELECT 
-        c.id as conversation_id, 
-        c.phone_number, 
-        c.tenant_id, 
-        mem.summary_text as ai_summary
-      FROM conversations c
-      INNER JOIN conversation_memory mem ON mem.conversation_id::text = c.id::text
-      WHERE (c.notes IS NULL OR TRIM(c.notes) = '')
-        AND mem.summary_text IS NOT NULL AND TRIM(mem.summary_text) != ''
-        AND c.last_message_at < NOW() - INTERVAL '24 hours'
-    `;
+    const targetConversations = await systemDb.executeSafe({
+      text: `
+        SELECT 
+          c.id as conversation_id, 
+          c.phone_number, 
+          c.tenant_id, 
+          mem.summary_text as ai_summary
+        FROM conversations c
+        INNER JOIN conversation_memory mem ON mem.conversation_id::text = c.id::text
+        WHERE (c.notes IS NULL OR TRIM(c.notes) = '')
+          AND mem.summary_text IS NOT NULL AND TRIM(mem.summary_text) != ''
+          AND c.last_message_at < NOW() - INTERVAL '24 hours'
+      `
+    }) as any[];
 
     const records = Array.isArray(targetConversations) ? targetConversations : [];
     
@@ -50,24 +54,32 @@ export async function GET(req: Request) {
     // 2. Her bir kayıt için veritabanlarını güncelle ve Google Sheets'e push gönder
     for (const row of records) {
       const { conversation_id, phone_number, tenant_id, ai_summary } = row;
-      if (!ai_summary || !phone_number) continue;
+      if (!ai_summary || !phone_number || !tenant_id) continue;
+
+      const db = withTenantDB(tenant_id);
 
       // a. conversations tablosundaki notes alanını güncelle
-      await sql`
-        UPDATE conversations 
-        SET notes = ${ai_summary} 
-        WHERE id = ${conversation_id}
-      `;
+      await db.executeSafe({
+        text: `
+          UPDATE conversations 
+          SET notes = $1 
+          WHERE id = $2 AND tenant_id = $3
+        `,
+        values: [ai_summary, conversation_id, tenant_id]
+      });
 
       // b. Son 10 haneli telefon numarası eşleşmesiyle leads tablosunu güncelle (lead'in notu boşsa)
       const phoneSuffix = String(phone_number).slice(-10);
-      await sql`
-        UPDATE leads
-        SET notes = ${ai_summary}
-        WHERE (phone_number = ${phone_number} OR phone_number LIKE ${'%' + phoneSuffix})
-          AND tenant_id = ${tenant_id}
-          AND (notes IS NULL OR TRIM(notes) = '')
-      `;
+      await db.executeSafe({
+        text: `
+          UPDATE leads
+          SET notes = $1
+          WHERE (phone_number = $2 OR phone_number LIKE $3)
+            AND tenant_id = $4
+            AND (notes IS NULL OR TRIM(notes) = '')
+        `,
+        values: [ai_summary, phone_number, '%' + phoneSuffix, tenant_id]
+      });
 
       // c. Google Sheets senkronizasyonunu gerçekleştir
       if (SHEET_URL) {

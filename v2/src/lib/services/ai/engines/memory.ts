@@ -1,4 +1,4 @@
-import { sql } from '@/lib/db';
+import { withTenantDB } from '@/lib/core/tenant-db';
 import { logger } from '@/lib/core/logger';
 import { AIOrchestrator, ChatMessage } from '../orchestrator';
 
@@ -11,14 +11,19 @@ export class MemoryEngine {
    */
   static async summarizeConversation(tenantId: string, conversationId: string): Promise<void> {
     try {
-      // 1. Fetch conversation to get phone number
-      const conv = await sql`
-        SELECT phone_number FROM conversations 
-        WHERE id::text = ${conversationId}::text AND tenant_id = ${tenantId}
-        LIMIT 1;
-      `;
+      const db = withTenantDB(tenantId);
 
-      if (conv.length === 0) {
+      // 1. Fetch conversation to get phone number
+      const conv = await db.executeSafe({
+        text: `
+          SELECT phone_number FROM conversations 
+          WHERE id::text = $1::text AND tenant_id = $2
+          LIMIT 1;
+        `,
+        values: [conversationId, tenantId]
+      }) as any[];
+
+      if (!conv || conv.length === 0) {
         log.warn(`[MEMORY_SKIPPED] Conversation ${conversationId} not found for tenant ${tenantId}`);
         return;
       }
@@ -26,19 +31,22 @@ export class MemoryEngine {
       const phone = conv[0].phone_number;
 
       // 2. Fetch raw messages to summarize (linked by phone_number)
-      const messages = await sql`
-        SELECT * FROM (
-          SELECT content, direction, created_at
-          FROM messages
-          WHERE tenant_id = ${tenantId} 
-            AND phone_number = ${phone}
-          ORDER BY created_at DESC
-          LIMIT 50
-        ) sub
-        ORDER BY created_at ASC;
-      `;
+      const messages = await db.executeSafe({
+        text: `
+          SELECT * FROM (
+            SELECT content, direction, created_at
+            FROM messages
+            WHERE tenant_id = $1 
+              AND phone_number = $2
+            ORDER BY created_at DESC
+            LIMIT 50
+          ) sub
+          ORDER BY created_at ASC;
+        `,
+        values: [tenantId, phone]
+      }) as any[];
 
-      if (messages.length === 0) return;
+      if (!messages || messages.length === 0) return;
 
       const conversationText = messages.map(m => 
         `[${m.direction === 'in' ? 'Müşteri' : 'Asistan'}]: ${m.content}`
@@ -96,20 +104,23 @@ export class MemoryEngine {
       const objections = parsed.objections ? JSON.stringify(parsed.objections) : "[]";
 
       // 4. Save to conversation_memory
-      await sql`
-        INSERT INTO conversation_memory (
-          tenant_id, conversation_id, summary_text, buying_intent, sentiment, objections, last_message_count
-        ) VALUES (
-          ${tenantId}, ${conversationId}, ${summaryText}, ${buyingIntent}, ${sentiment}, ${objections}, ${messages.length}
-        )
-        ON CONFLICT (conversation_id) DO UPDATE SET
-          summary_text = EXCLUDED.summary_text,
-          buying_intent = EXCLUDED.buying_intent,
-          sentiment = EXCLUDED.sentiment,
-          objections = EXCLUDED.objections,
-          last_message_count = EXCLUDED.last_message_count,
-          updated_at = NOW();
-      `;
+      await db.executeSafe({
+        text: `
+          INSERT INTO conversation_memory (
+            tenant_id, conversation_id, summary_text, buying_intent, sentiment, objections, last_message_count
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7
+          )
+          ON CONFLICT (conversation_id) DO UPDATE SET
+            summary_text = EXCLUDED.summary_text,
+            buying_intent = EXCLUDED.buying_intent,
+            sentiment = EXCLUDED.sentiment,
+            objections = EXCLUDED.objections,
+            last_message_count = EXCLUDED.last_message_count,
+            updated_at = NOW();
+        `,
+        values: [tenantId, conversationId, summaryText, buyingIntent, sentiment, objections, messages.length]
+      });
 
       log.info(`[MEMORY_UPDATED] Rolling memory compressed for conv: ${conversationId}`);
 
@@ -130,30 +141,39 @@ export class MemoryEngine {
       // 5. Sync rolling AI summary back to matching lead notes & Google Sheets
       try {
         // ALWAYS update conversations table notes
-        await sql`
-          UPDATE conversations
-          SET notes = ${summaryText}
-          WHERE id::text = ${conversationId}::text AND tenant_id = ${tenantId};
-        `;
+        await db.executeSafe({
+          text: `
+            UPDATE conversations
+            SET notes = $1
+            WHERE id::text = $2::text AND tenant_id = $3;
+          `,
+          values: [summaryText, conversationId, tenantId]
+        });
         
         const cleanPhone = phone.replace(/[^0-9]/g, '');
         if (cleanPhone.length >= 10) {
           const suffix = cleanPhone.substring(cleanPhone.length - 10);
           
-          const matchingLeads = await sql`
-            SELECT id, notes FROM leads
-            WHERE phone_number LIKE ${'%' + suffix}
-              AND tenant_id = ${tenantId}
-            LIMIT 5;
-          `;
+          const matchingLeads = await db.executeSafe({
+            text: `
+              SELECT id, notes FROM leads
+              WHERE phone_number LIKE $1
+                AND tenant_id = $2
+              LIMIT 5;
+            `,
+            values: ['%' + suffix, tenantId]
+          }) as any[];
           
           for (const lead of matchingLeads) {
             // Tam otomatik: Mevcut not boş olsun veya olmasın her zaman AI özetini yaz
-            await sql`
-              UPDATE leads
-              SET notes = ${summaryText}
-              WHERE id = ${lead.id} AND tenant_id = ${tenantId};
-            `;
+            await db.executeSafe({
+              text: `
+                UPDATE leads
+                SET notes = $1
+                WHERE id = $2 AND tenant_id = $3;
+              `,
+              values: [summaryText, lead.id, tenantId]
+            });
             
             log.info(`[MEMORY_SYNC] Lead ${lead.id} notes automatically updated with AI summary.`);
               

@@ -2,7 +2,7 @@
 
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
-import { neon } from "@neondatabase/serverless";
+import { withTenantDB } from "@/lib/core/tenant-db";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { logAudit } from "@/lib/audit";
 
@@ -14,8 +14,6 @@ const AUTH_SECRET = process.env.AUTH_SECRET || "fallback_secret_for_build_only";
 
 const SECRET = new TextEncoder().encode(AUTH_SECRET);
 const COOKIE_NAME = "quba_session";
-const dbUrl = process.env.DATABASE_URL || "postgres://dummy:dummy@dummy.com/dummy";
-const sql = neon(dbUrl);
 
 // Session tipi
 export interface Session {
@@ -62,12 +60,16 @@ export async function getSession(): Promise<Session | null> {
 
   // DB'den kullanıcı durumunu doğrula (silinen/deaktif/rol değişen kullanıcılar)
   try {
-    const user = await sql`
-      SELECT u.is_active, u.role, t.status as tenant_status, t.name as tenant_name
-      FROM users u
-      JOIN tenants t ON u.tenant_id = t.id
-      WHERE u.id = ${session.userId} AND u.tenant_id = ${session.tenantId}
-    `;
+    const db = withTenantDB(session.tenantId);
+    const user = await db.executeSafe({
+      text: `
+        SELECT u.is_active, u.role, t.status as tenant_status, t.name as tenant_name
+        FROM users u
+        JOIN tenants t ON u.tenant_id = t.id
+        WHERE u.id = $1 AND u.tenant_id = $2
+      `,
+      values: [session.userId, session.tenantId]
+    });
     
     // Kullanıcı silinmiş veya deaktif
     if (user.length === 0 || !user[0].is_active) {
@@ -94,14 +96,12 @@ export async function getSession(): Promise<Session | null> {
     }
 
     return session;
-  } catch {
-    // DB hatası durumunda JWT'ye güven (graceful degradation)
-    // Impersonation varsa yine context değiştir
-    if (session.role === 'platform_admin' && session.impersonatedTenantId) {
-      session.tenantId = session.impersonatedTenantId;
-      session.tenantSlug = session.impersonatedTenantSlug!;
-    }
-    return session;
+  } catch (error) {
+    // Fail closed: log database/auth failures and deny access
+    const { logger: authLogger } = await import("@/lib/core/logger");
+    authLogger.withContext({ module: 'Auth' }).error("Database verification check failed - failing closed", error instanceof Error ? error : new Error(String(error)));
+    cookieStore.delete(COOKIE_NAME);
+    return null;
   }
 }
 
@@ -121,12 +121,16 @@ export async function login(
     }
 
     // Kullanıcıyı bul
-    const users = await sql`
-      SELECT u.*, t.slug as tenant_slug, t.name as tenant_name 
-      FROM users u 
-      JOIN tenants t ON u.tenant_id = t.id 
-      WHERE u.email = ${email} AND u.is_active = true
-    `;
+    const systemDb = withTenantDB('admin-system', true);
+    const users = await systemDb.executeSafe({
+      text: `
+        SELECT u.*, t.slug as tenant_slug, t.name as tenant_name 
+        FROM users u 
+        JOIN tenants t ON u.tenant_id = t.id 
+        WHERE u.email = $1 AND u.is_active = true
+      `,
+      values: [email]
+    });
 
     if (process.env.NODE_ENV !== 'production') console.log(`[AUTH AUDIT] User found in Neon DB? ${users.length > 0 ? "Yes" : "No"}`);
 
@@ -176,7 +180,10 @@ export async function login(
     if (process.env.NODE_ENV !== 'production') console.log(`[AUTH AUDIT] Cookie successfully written.`);
 
     // Son giriş zamanını güncelle
-    await sql`UPDATE users SET last_login_at = NOW() WHERE id = ${user.id}`;
+    await systemDb.executeSafe({
+      text: `UPDATE users SET last_login_at = NOW() WHERE id = $1`,
+      values: [user.id]
+    });
 
     // Audit log
     await logAudit({

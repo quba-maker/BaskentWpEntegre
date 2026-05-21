@@ -1,5 +1,5 @@
-import { sql } from '@/lib/db';
 import { logger } from '@/lib/core/logger';
+import { withTenantDB } from '@/lib/core/tenant-db';
 
 /**
  * 📡 AI Event Emitter — Phase 6 Observability Core
@@ -69,20 +69,24 @@ export class AIEventEmitter {
     // Fire-and-forget pattern — never block the caller
     setImmediate(async () => {
       try {
-        await sql`
-          INSERT INTO ai_events (
-            tenant_id, conversation_id, customer_id,
-            event_type, event_category, payload, severity
-          ) VALUES (
-            ${event.tenantId},
-            ${event.conversationId || null},
-            ${event.customerId || null},
-            ${event.type},
-            ${event.category},
-            ${JSON.stringify(event.payload || {})}::jsonb,
-            ${event.severity || 'info'}
-          )
-        `;
+        const db = withTenantDB(event.tenantId);
+        await db.executeSafe({
+          text: `
+            INSERT INTO ai_events (
+              tenant_id, conversation_id, customer_id,
+              event_type, event_category, payload, severity
+            ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
+          `,
+          values: [
+            event.tenantId,
+            event.conversationId || null,
+            event.customerId || null,
+            event.type,
+            event.category,
+            JSON.stringify(event.payload || {}),
+            event.severity || 'info'
+          ]
+        });
       } catch (err) {
         // HARDENING: Never lose audit events — fallback to structured console log
         log.error('[EVENT_EMIT_FAILED] Non-fatal event write failure', 
@@ -111,20 +115,24 @@ export class AIEventEmitter {
    */
   static async emitSync(event: AIEventPayload): Promise<void> {
     try {
-      await sql`
-        INSERT INTO ai_events (
-          tenant_id, conversation_id, customer_id,
-          event_type, event_category, payload, severity
-        ) VALUES (
-          ${event.tenantId},
-          ${event.conversationId || null},
-          ${event.customerId || null},
-          ${event.type},
-          ${event.category},
-          ${JSON.stringify(event.payload || {})}::jsonb,
-          ${event.severity || 'info'}
-        )
-      `;
+      const db = withTenantDB(event.tenantId);
+      await db.executeSafe({
+        text: `
+          INSERT INTO ai_events (
+            tenant_id, conversation_id, customer_id,
+            event_type, event_category, payload, severity
+          ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
+        `,
+        values: [
+          event.tenantId,
+          event.conversationId || null,
+          event.customerId || null,
+          event.type,
+          event.category,
+          JSON.stringify(event.payload || {}),
+          event.severity || 'info'
+        ]
+      });
     } catch (err) {
       log.error('[SYNC_EVENT_FAILED] Critical event write failure',
         err instanceof Error ? err : new Error(String(err)),
@@ -148,20 +156,24 @@ export class AIEventEmitter {
     setImmediate(async () => {
       for (const event of events) {
         try {
-          await sql`
-            INSERT INTO ai_events (
-              tenant_id, conversation_id, customer_id,
-              event_type, event_category, payload, severity
-            ) VALUES (
-              ${event.tenantId},
-              ${event.conversationId || null},
-              ${event.customerId || null},
-              ${event.type},
-              ${event.category},
-              ${JSON.stringify(event.payload || {})}::jsonb,
-              ${event.severity || 'info'}
-            )
-          `;
+          const db = withTenantDB(event.tenantId);
+          await db.executeSafe({
+            text: `
+              INSERT INTO ai_events (
+                tenant_id, conversation_id, customer_id,
+                event_type, event_category, payload, severity
+              ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
+            `,
+            values: [
+              event.tenantId,
+              event.conversationId || null,
+              event.customerId || null,
+              event.type,
+              event.category,
+              JSON.stringify(event.payload || {}),
+              event.severity || 'info'
+            ]
+          });
         } catch (err) {
           log.error('[BATCH_EMIT_FAILED]', err instanceof Error ? err : new Error(String(err)),
             { eventType: event.type }
@@ -177,10 +189,14 @@ export class AIEventEmitter {
   static logHealth(tenantId: string, logType: string, context?: Record<string, any>): void {
     setImmediate(async () => {
       try {
-        await sql`
-          INSERT INTO ai_runtime_logs (tenant_id, log_type, context)
-          VALUES (${tenantId}, ${logType}, ${JSON.stringify(context || {})}::jsonb)
-        `;
+        const db = withTenantDB(tenantId);
+        await db.executeSafe({
+          text: `
+            INSERT INTO ai_runtime_logs (tenant_id, log_type, context)
+            VALUES ($1, $2, $3::jsonb)
+          `,
+          values: [tenantId, logType, JSON.stringify(context || {})]
+        });
       } catch (err) {
         log.error('[HEALTH_LOG_FAILED] Non-fatal health log failure',
           err instanceof Error ? err : new Error(String(err))
@@ -197,13 +213,17 @@ export class AIEventEmitter {
     conversationId: string, 
     limit = 50
   ): Promise<any[]> {
-    return await sql`
-      SELECT id, event_type, event_category, payload, severity, created_at
-      FROM ai_events
-      WHERE tenant_id = ${tenantId} AND conversation_id = ${conversationId}
-      ORDER BY created_at DESC
-      LIMIT ${limit}
-    `;
+    const db = withTenantDB(tenantId);
+    return await db.executeSafe({
+      text: `
+        SELECT id, event_type, event_category, payload, severity, created_at
+        FROM ai_events
+        WHERE tenant_id = $1 AND conversation_id = $2
+        ORDER BY created_at DESC
+        LIMIT $3
+      `,
+      values: [tenantId, conversationId, limit]
+    }) as any[];
   }
 
   /**
@@ -214,13 +234,17 @@ export class AIEventEmitter {
     customerId: string,
     limit = 50
   ): Promise<any[]> {
-    return await sql`
-      SELECT id, event_type, event_category, payload, severity, conversation_id, created_at
-      FROM ai_events
-      WHERE tenant_id = ${tenantId} AND customer_id = ${customerId}
-      ORDER BY created_at DESC
-      LIMIT ${limit}
-    `;
+    const db = withTenantDB(tenantId);
+    return await db.executeSafe({
+      text: `
+        SELECT id, event_type, event_category, payload, severity, conversation_id, created_at
+        FROM ai_events
+        WHERE tenant_id = $1 AND customer_id = $2
+        ORDER BY created_at DESC
+        LIMIT $3
+      `,
+      values: [tenantId, customerId, limit]
+    }) as any[];
   }
 
   /**
@@ -236,19 +260,22 @@ export class AIEventEmitter {
     timeouts: number;
   }> {
     const since = new Date(Date.now() - hoursBack * 60 * 60 * 1000).toISOString();
-    
-    const counts = await sql`
-      SELECT 
-        COUNT(*) FILTER (WHERE TRUE) as total_events,
-        COUNT(*) FILTER (WHERE severity = 'error') as error_count,
-        COUNT(*) FILTER (WHERE log_type = 'tool_failure') as tool_failures,
-        COUNT(*) FILTER (WHERE log_type = 'policy_blocked') as policy_blocks,
-        COUNT(*) FILTER (WHERE log_type = 'identity_miss') as identity_misses,
-        COUNT(*) FILTER (WHERE log_type = 'memory_failure') as memory_failures,
-        COUNT(*) FILTER (WHERE log_type = 'timeout') as timeouts
-      FROM ai_runtime_logs
-      WHERE tenant_id = ${tenantId} AND created_at >= ${since}::timestamptz
-    `;
+    const db = withTenantDB(tenantId);
+    const counts = await db.executeSafe({
+      text: `
+        SELECT 
+          COUNT(*) FILTER (WHERE TRUE) as total_events,
+          COUNT(*) FILTER (WHERE severity = 'error') as error_count,
+          COUNT(*) FILTER (WHERE log_type = 'tool_failure') as tool_failures,
+          COUNT(*) FILTER (WHERE log_type = 'policy_blocked') as policy_blocks,
+          COUNT(*) FILTER (WHERE log_type = 'identity_miss') as identity_misses,
+          COUNT(*) FILTER (WHERE log_type = 'memory_failure') as memory_failures,
+          COUNT(*) FILTER (WHERE log_type = 'timeout') as timeouts
+        FROM ai_runtime_logs
+        WHERE tenant_id = $1 AND created_at >= $2::timestamptz
+      `,
+      values: [tenantId, since]
+    }) as any[];
 
     const row = counts[0] || {};
     return {

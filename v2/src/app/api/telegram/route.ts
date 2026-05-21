@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { neon } from "@neondatabase/serverless";
+import { withTenantDB } from "@/lib/core/tenant-db";
 import { logger } from "@/lib/core/logger";
 import { CredentialsService } from "@/lib/services/credentials.service";
 
@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "TELEGRAM_BOT_TOKEN not configured" }, { status: 500 });
     }
 
-    const sql = neon(process.env.DATABASE_URL!);
+    const systemDb = withTenantDB('admin-system', true);
 
     // 1. BUTON TIKLAMALARI (CRM Callback)
     if (callback_query) {
@@ -38,6 +38,20 @@ export async function POST(req: NextRequest) {
         const searchP = cleanP.length > 10 ? cleanP.substring(cleanP.length - 10) : cleanP;
         const likePattern = `%${searchP}%`;
 
+        // 1. Resolve Tenant Context globally first
+        const convCheck = await systemDb.executeSafe({
+          text: `SELECT tenant_id FROM conversations WHERE phone_number LIKE $1 LIMIT 1`,
+          values: [likePattern]
+        }) as any[];
+
+        if (!convCheck || convCheck.length === 0) {
+          log.warn(`[TELEGRAM] Conversation not found for phone: ${phone}`);
+          return NextResponse.json({ ok: false, error: "Conversation not found" });
+        }
+
+        const tenantId = convCheck[0].tenant_id;
+        const db = withTenantDB(tenantId);
+
         let newStage = "";
         let newStatus = "active";
         let feedbackMsg = "";
@@ -49,11 +63,18 @@ export async function POST(req: NextRequest) {
           feedbackMsg = "✅ Görüşme kaydedildi! Sonucu seçin.";
           statusBadge = `📞 Arandı - Ulaşıldı (${userFirstName})`;
 
-          const conv = await sql`SELECT notes FROM conversations WHERE phone_number LIKE ${likePattern} LIMIT 1`;
+          const conv = await db.executeSafe({
+            text: `SELECT notes FROM conversations WHERE phone_number LIKE $1 LIMIT 1`,
+            values: [likePattern]
+          }) as any[];
           const oldNotes = conv[0]?.notes || "";
           const ts = new Date().toLocaleTimeString("tr-TR", { timeZone: "Europe/Istanbul", hour: "2-digit", minute: "2-digit" });
           const newNote = `[SİSTEM - ${userFirstName} - ${ts}]: 📞 Arandı ve ulaşıldı. Sonuç bekleniyor.`;
-          await sql`UPDATE conversations SET notes = ${oldNotes ? oldNotes + "\n" + newNote : newNote}, updated_at = NOW() WHERE phone_number LIKE ${likePattern}`;
+          
+          await db.executeSafe({
+            text: `UPDATE conversations SET notes = $1, updated_at = NOW() WHERE phone_number LIKE $2`,
+            values: [oldNotes ? oldNotes + "\n" + newNote : newNote, likePattern]
+          });
 
           await answerCallback(botToken, callbackId, feedbackMsg);
           await editMessage(botToken, chatId, messageId,
@@ -83,7 +104,11 @@ export async function POST(req: NextRequest) {
           newStage = "negotiation"; newStatus = "active";
           feedbackMsg = "💬 CRM Güncellendi: Hasta düşünecek. 24 saat sonra otomatik takip.";
           statusBadge = `💬 Düşünecek — 24s Takip Kuruldu (${userFirstName})`;
-          await sql`UPDATE conversations SET follow_up_count = 0, last_follow_up_at = NULL, last_message_at = NOW() WHERE phone_number LIKE ${likePattern}`;
+          
+          await db.executeSafe({
+            text: `UPDATE conversations SET follow_up_count = 0, last_follow_up_at = NULL, last_message_at = NOW() WHERE phone_number LIKE $1`,
+            values: [likePattern]
+          });
         }
         // 🔄 Tekrar Aranacak
         else if (action === "recall") {
@@ -94,7 +119,10 @@ export async function POST(req: NextRequest) {
         // 📞 Ulaşılamadı
         else if (action === "callmiss") {
           newStage = "hot_lead";
-          const conv = await sql`SELECT notes FROM conversations WHERE phone_number LIKE ${likePattern} LIMIT 1`;
+          const conv = await db.executeSafe({
+            text: `SELECT notes FROM conversations WHERE phone_number LIKE $1 LIMIT 1`,
+            values: [likePattern]
+          }) as any[];
           const oldNotes = conv[0]?.notes || "";
           const missCount = (oldNotes.match(/ulaşılamadı/gi) || []).length + 1;
 
@@ -116,11 +144,20 @@ export async function POST(req: NextRequest) {
 
         // DB güncelle
         if (newStage) {
-          await sql`UPDATE leads SET stage = ${newStage} WHERE phone_number LIKE ${likePattern}`;
-          await sql`UPDATE conversations SET lead_stage = ${newStage}, status = ${newStatus} WHERE phone_number LIKE ${likePattern}`;
+          await db.executeSafe({
+            text: `UPDATE leads SET stage = $1 WHERE phone_number LIKE $2`,
+            values: [newStage, likePattern]
+          });
+          await db.executeSafe({
+            text: `UPDATE conversations SET lead_stage = $1, status = $2 WHERE phone_number LIKE $3`,
+            values: [newStage, newStatus, likePattern]
+          });
 
           if (action !== "contacted") {
-            const conv = await sql`SELECT notes FROM conversations WHERE phone_number LIKE ${likePattern} LIMIT 1`;
+            const conv = await db.executeSafe({
+              text: `SELECT notes FROM conversations WHERE phone_number LIKE $1 LIMIT 1`,
+              values: [likePattern]
+            }) as any[];
             const oldNotes = conv[0]?.notes || "";
             const noteMap: Record<string, string> = {
               callmiss: "☎️ Arandı ama ulaşılamadı.",
@@ -132,7 +169,11 @@ export async function POST(req: NextRequest) {
             const systemNote = noteMap[action] || "";
             const ts = new Date().toLocaleTimeString("tr-TR", { timeZone: "Europe/Istanbul", hour: "2-digit", minute: "2-digit" });
             const newNote = `[SİSTEM - ${userFirstName} - ${ts}]: ${systemNote}`;
-            await sql`UPDATE conversations SET notes = ${oldNotes ? oldNotes + "\n" + newNote : newNote}, updated_at = NOW() WHERE phone_number LIKE ${likePattern}`;
+            
+            await db.executeSafe({
+              text: `UPDATE conversations SET notes = $1, updated_at = NOW() WHERE phone_number LIKE $2`,
+              values: [oldNotes ? oldNotes + "\n" + newNote : newNote, likePattern]
+            });
           }
 
           await answerCallback(botToken, callbackId, feedbackMsg);
@@ -157,14 +198,25 @@ export async function POST(req: NextRequest) {
         const searchP = cleanP.length > 10 ? cleanP.substring(cleanP.length - 10) : cleanP;
         const likePattern = `%${searchP}%`;
 
-        const conv = await sql`SELECT notes, last_channel, tenant_id FROM conversations WHERE phone_number LIKE ${likePattern} LIMIT 1`;
-        if (conv.length > 0) {
+        // Resolve Tenant Context globally first
+        const conv = await systemDb.executeSafe({
+          text: `SELECT notes, last_channel, tenant_id FROM conversations WHERE phone_number LIKE $1 LIMIT 1`,
+          values: [likePattern]
+        }) as any[];
+
+        if (conv && conv.length > 0) {
           const oldNotes = conv[0].notes || "";
           const targetChannel = conv[0].last_channel || "whatsapp";
           const convTenantId = conv[0].tenant_id;
+          
+          const db = withTenantDB(convTenantId);
           const ts = new Date().toLocaleTimeString("tr-TR", { timeZone: "Europe/Istanbul", hour: "2-digit", minute: "2-digit" });
           const newNote = `[${userFirstName} - ${ts}]: ${replyText}`;
-          await sql`UPDATE conversations SET notes = ${oldNotes ? oldNotes + "\n" + newNote : newNote}, updated_at = NOW() WHERE phone_number LIKE ${likePattern}`;
+          
+          await db.executeSafe({
+            text: `UPDATE conversations SET notes = $1, updated_at = NOW() WHERE phone_number LIKE $2`,
+            values: [oldNotes ? oldNotes + "\n" + newNote : newNote, likePattern]
+          });
 
           let sentToPatient = false;
           try {
@@ -186,7 +238,11 @@ export async function POST(req: NextRequest) {
                   headers: { Authorization: `Bearer ${META}`, "Content-Type": "application/json" },
                   body: JSON.stringify({ messaging_product: "whatsapp", to: phone, type: "text", text: { body: replyText } }),
                 });
-                await sql`INSERT INTO messages (tenant_id, phone_number, direction, content, channel) VALUES (${convTenantId}, ${phone}, 'out', ${replyText}, 'whatsapp')`;
+                
+                await db.executeSafe({
+                  text: `INSERT INTO messages (tenant_id, phone_number, direction, content, channel) VALUES ($1, $2, 'out', $3, 'whatsapp')`,
+                  values: [convTenantId, phone, replyText]
+                });
                 sentToPatient = true;
               }
             }
@@ -204,9 +260,9 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json({ ok: true });
-  } catch (e: any) {
-    log.error("Telegram Webhook Error", e instanceof Error ? e : new Error(String(e)));
-    return NextResponse.json({ error: e.message }, { status: 500 });
+  } catch (error: any) {
+    log.error("Telegram Webhook Error", error instanceof Error ? error : new Error(String(error)));
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
 

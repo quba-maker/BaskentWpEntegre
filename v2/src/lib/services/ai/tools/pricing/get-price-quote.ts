@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ToolDefinition } from "../../core/tool-registry";
-import { sql } from "@/lib/db";
+import { withTenantDB } from "@/lib/core/tenant-db";
 
 export const getPriceQuoteTool: ToolDefinition = {
   name: "get_price_quote",
@@ -15,11 +15,15 @@ export const getPriceQuoteTool: ToolDefinition = {
     // For now, we simulate fetching from the tenant's knowledge settings.
     
     // Safety check - force query strictly within tenant scope
-    const res = await sql`
-      SELECT value FROM settings 
-      WHERE key = 'bot_knowledge_prices' 
-        AND tenant_id = ${context.tenantId}
-    `;
+    const db = withTenantDB(context.tenantId);
+    const res = await db.executeSafe({
+      text: `
+        SELECT value FROM settings 
+        WHERE key = 'bot_knowledge_prices' 
+          AND tenant_id = $1
+      `,
+      values: [context.tenantId]
+    }) as any[];
 
     if (!res || res.length === 0 || !res[0].value) {
       return { 

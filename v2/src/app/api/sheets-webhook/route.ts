@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { neon } from '@neondatabase/serverless';
+import { withTenantDB } from '@/lib/core/tenant-db';
 import { logger } from '@/lib/core/logger';
 import { CredentialsService } from '@/lib/services/credentials.service';
 
 const log = logger.withContext({ module: 'SheetsWebhook' });
-
-const DATABASE_URL = process.env.DATABASE_URL!;
 
 export async function POST(request: NextRequest) {
   try {
@@ -14,31 +12,46 @@ export async function POST(request: NextRequest) {
 
     // Tenant belirleme (query param veya body'den)
     const tenantSlug = request.nextUrl.searchParams.get('tenant') || body.tenant_slug;
-    const sqlDb = neon(DATABASE_URL);
+    const systemDb = withTenantDB('admin-system', true);
     
     let tenantId: string | null = null;
     let tenantMeta: any = null;
     if (tenantSlug) {
-      const tenants = await sqlDb`SELECT id, name FROM tenants WHERE slug = ${tenantSlug} AND status = 'active'`;
-      if (tenants.length > 0) {
+      const tenants = await systemDb.executeSafe({
+        text: `SELECT id, name FROM tenants WHERE slug = $1 AND status = 'active'`,
+        values: [tenantSlug]
+      }) as any[];
+      if (tenants && tenants.length > 0) {
         tenantId = tenants[0].id;
         tenantMeta = tenants[0];
       }
     }
     // Fallback: tenant yoksa baskent'i kullan (geriye uyumluluk)
     if (!tenantId) {
-      const fallback = await sqlDb`SELECT id, name FROM tenants WHERE slug = 'baskent' LIMIT 1`;
-      if (fallback.length > 0) {
+      const fallback = await systemDb.executeSafe({
+        text: `SELECT id, name FROM tenants WHERE slug = 'baskent' LIMIT 1`,
+        values: []
+      }) as any[];
+      if (fallback && fallback.length > 0) {
         tenantId = fallback[0].id;
         tenantMeta = fallback[0];
       }
     }
 
+    if (!tenantId) {
+      return NextResponse.json({ success: false, error: 'No active tenant found' }, { status: 404 });
+    }
+
+    const db = withTenantDB(tenantId);
+
     // Sheet config — tenant bazlı kontrol
     let activeSheets: string[] = [];
     try {
-      const configRes = await sqlDb`SELECT value FROM settings WHERE key = 'google_sheets_config' AND tenant_id = ${tenantId} LIMIT 1`;
-      if (configRes.length > 0) {
+      const configRes = await db.executeSafe({
+        text: `SELECT value FROM settings WHERE key = 'google_sheets_config' AND tenant_id = $1 LIMIT 1`,
+        values: [tenantId]
+      }) as any[];
+      if (configRes && configRes.length > 0) {
         activeSheets = JSON.parse(configRes[0].value)?.activeSheets || [];
       }
     } catch (e) {}
@@ -125,9 +138,12 @@ export async function POST(request: NextRequest) {
     }
 
     // 3. Upsert into DB using phone1
-    const existing = await sqlDb`SELECT id FROM leads WHERE phone_number LIKE '%' || RIGHT(${phone1}, 10) || '%' AND tenant_id = ${tenantId} LIMIT 1`;
+    const existing = await db.executeSafe({
+      text: `SELECT id FROM leads WHERE phone_number LIKE '%' || RIGHT($1, 10) || '%' AND tenant_id = $2 LIMIT 1`,
+      values: [phone1, tenantId]
+    }) as any[];
         
-    if (existing.length === 0) {
+    if (existing && existing.length === 0) {
       // Parse Date
       let createdAt = new Date();
       if (dateStr) {
@@ -150,11 +166,14 @@ export async function POST(request: NextRequest) {
       }
 
       // Create lead — tenant_id ile
-      const leadResult = await sqlDb`
-        INSERT INTO leads (tenant_id, phone_number, patient_name, email, form_name, raw_data, stage, created_at, notes)
-        VALUES (${tenantId}, ${phone1}, ${name}, ${email}, ${formName}, ${JSON.stringify(raw_data)}, 'new', ${createdAt.toISOString()}, ${noteStr})
-        RETURNING id
-      `;
+      const leadResult = await db.executeSafe({
+        text: `
+          INSERT INTO leads (tenant_id, phone_number, patient_name, email, form_name, raw_data, stage, created_at, notes)
+          VALUES ($1, $2, $3, $4, $5, $6, 'new', $7, $8)
+          RETURNING id
+        `,
+        values: [tenantId, phone1, name, email, formName, JSON.stringify(raw_data), createdAt.toISOString(), noteStr]
+      }) as any[];
 
       // 🔗 Unified Identity: Form → customer_profiles bağlantısı
       try {
@@ -165,8 +184,8 @@ export async function POST(request: NextRequest) {
           email: email || undefined,
           firstName: name || undefined
         });
-        if (leadResult[0]?.id) {
-          await IdentityEngine.linkLead(leadResult[0].id, customerId);
+        if (leadResult && leadResult[0]?.id) {
+          await IdentityEngine.linkLead(tenantId!, leadResult[0].id, customerId);
         }
         log.info('[IDENTITY] Form linked to customer profile', { customerId, phone: phone1 });
       } catch (idErr) {
@@ -183,12 +202,18 @@ export async function POST(request: NextRequest) {
       }
 
       // 🔒 Otonom Karşılama kontrolü — tenant bazlı
-      const autoGreetingSetting = await sqlDb`SELECT value FROM settings WHERE key = 'bot_auto_greeting' AND tenant_id = ${tenantId}`;
+      const autoGreetingSetting = await db.executeSafe({
+        text: `SELECT value FROM settings WHERE key = 'bot_auto_greeting' AND tenant_id = $1`,
+        values: [tenantId]
+      }) as any[];
       const autoGreetingEnabled = autoGreetingSetting.length === 0 || autoGreetingSetting[0].value !== 'false';
 
       if (META_ACCESS_TOKEN && PHONE_NUMBER_ID && autoGreetingEnabled) {
         // 🌐 Karşılama Dili kontrolü — tenant bazlı
-        const greetingLangSetting = await sqlDb`SELECT value FROM settings WHERE key = 'bot_greeting_language' AND tenant_id = ${tenantId}`;
+        const greetingLangSetting = await db.executeSafe({
+          text: `SELECT value FROM settings WHERE key = 'bot_greeting_language' AND tenant_id = $1`,
+          values: [tenantId]
+        }) as any[];
         const greetingLang = greetingLangSetting.length > 0 ? greetingLangSetting[0].value : 'auto';
         
         const isTurkish = greetingLang === 'tr' ? true : greetingLang === 'en' ? false : phone1.startsWith('90');
@@ -231,10 +256,16 @@ export async function POST(request: NextRequest) {
         // Create Conversation and Message
         if (botSuccess) {
           const tags = ["Google Sheets", formName];
-          const existingConv = await sqlDb`SELECT id FROM conversations WHERE phone_number = ${activePhone}`;
+          const existingConv = await db.executeSafe({
+            text: `SELECT id FROM conversations WHERE phone_number = $1`,
+            values: [activePhone]
+          }) as any[];
           let convId: any = existingConv[0]?.id;
           if (existingConv.length === 0) {
-            const newConv = await sqlDb`INSERT INTO conversations (tenant_id, phone_number, patient_name, tags, status, department) VALUES (${tenantId}, ${activePhone}, ${name}, ${JSON.stringify(tags)}, 'bot', 'Genel') RETURNING id`;
+            const newConv = await db.executeSafe({
+              text: `INSERT INTO conversations (tenant_id, phone_number, patient_name, tags, status, department) VALUES ($1, $2, $3, $4, 'bot', 'Genel') RETURNING id`,
+              values: [tenantId, activePhone, name, JSON.stringify(tags)]
+            }) as any[];
             convId = newConv[0]?.id;
           }
           // 🔗 Link conversation to same customer profile
@@ -242,11 +273,17 @@ export async function POST(request: NextRequest) {
             try {
               const { IdentityEngine } = await import('@/lib/services/ai/engines/identity');
               const cid = await IdentityEngine.resolveIdentity({ tenantId: tenantId!, phoneNumber: activePhone });
-              await IdentityEngine.linkConversation(String(convId), cid);
+              await IdentityEngine.linkConversation(tenantId!, String(convId), cid);
             } catch (_) {}
           }
-          await sqlDb`INSERT INTO messages (tenant_id, phone_number, direction, content) VALUES (${tenantId}, ${activePhone}, 'out', ${welcomeMsg})`;
-          await sqlDb`UPDATE leads SET stage = 'contacted', contacted_at = NOW(), phone_number = ${activePhone} WHERE phone_number = ${phone1} AND tenant_id = ${tenantId}`;
+          await db.executeSafe({
+            text: `INSERT INTO messages (tenant_id, phone_number, direction, content) VALUES ($1, $2, 'out', $3)`,
+            values: [tenantId, activePhone, welcomeMsg]
+          });
+          await db.executeSafe({
+            text: `UPDATE leads SET stage = 'contacted', contacted_at = NOW(), phone_number = $1 WHERE phone_number = $2 AND tenant_id = $3`,
+            values: [activePhone, phone1, tenantId]
+          });
         }
       }
       
@@ -261,8 +298,8 @@ export async function POST(request: NextRequest) {
           email: email || undefined,
           firstName: name || undefined
         });
-        if (existing[0]?.id) {
-          await IdentityEngine.linkLead(existing[0].id, customerId);
+        if (existing && existing[0]?.id) {
+          await IdentityEngine.linkLead(tenantId!, existing[0].id, customerId);
         }
         log.info('[IDENTITY] Existing form linked to customer profile', { customerId, phone: phone1 });
       } catch (idErr) {
@@ -271,11 +308,14 @@ export async function POST(request: NextRequest) {
 
       // Update existing lead's note if it has changed
       if (noteStr && noteStr.trim() !== '') {
-        await sqlDb`
-          UPDATE leads 
-          SET notes = ${noteStr} 
-          WHERE id = ${existing[0].id} AND (notes IS NULL OR notes = '')
-        `;
+        await db.executeSafe({
+          text: `
+            UPDATE leads 
+            SET notes = $1 
+            WHERE id = $2 AND (notes IS NULL OR notes = '')
+          `,
+          values: [noteStr, existing[0].id]
+        });
       }
       return NextResponse.json({ success: true, message: 'Lead already exists, note updated if available.' });
     }

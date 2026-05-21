@@ -1,4 +1,3 @@
-import { sql } from "@/lib/db";
 import { TenantDB } from "@/lib/core/tenant-db";
 import { logger } from "@/lib/core/logger";
 
@@ -32,22 +31,35 @@ export class WebhookDedupeService {
     }
 
     try {
-      const queries = [];
-      // 2. Transaction bazlı Advisory Lock al
-      queries.push(sql`SELECT pg_advisory_xact_lock(${hash})`);
+      // Single transaction boundary CTE for locking, deduplication, and insertion
+      const result = await this.db.executeSafe({
+        text: `
+          WITH lock_acquire AS (
+            SELECT pg_advisory_xact_lock($1)
+          ), dup_check AS (
+            SELECT 1 FROM webhook_events 
+            WHERE tenant_id = $2 
+              AND provider = $3 
+              AND provider_message_id = $4
+          ), ins AS (
+            INSERT INTO webhook_events (tenant_id, provider, provider_message_id, sender_id, event_timestamp)
+            SELECT $2, $3, $4, $5, $6
+            WHERE NOT EXISTS (SELECT 1 FROM dup_check)
+            RETURNING 1
+          )
+          SELECT (SELECT 1 FROM dup_check) IS NOT NULL as is_duplicate;
+        `,
+        values: [
+          hash,
+          this.db.tenantId,
+          payload.provider,
+          payload.providerMessageId,
+          payload.senderId,
+          payload.timestamp || 0
+        ]
+      }) as any[];
 
-      // 3. Duplicate Check Query
-      // NOTE: webhook_events table must exist via setup migrations.
-      // Runtime DDL has been removed for production safety.
-      queries.push(sql`
-        SELECT 1 FROM webhook_events 
-        WHERE tenant_id = ${this.db.tenantId} 
-          AND provider = ${payload.provider} 
-          AND provider_message_id = ${payload.providerMessageId}
-      `);
-
-      const result = await this.db.executeTransaction(queries);
-      const isDuplicate = result[1].length > 0;
+      const isDuplicate = result && result.length > 0 ? result[0].is_duplicate : false;
 
       if (isDuplicate) {
         this.log.warn(`🛑 Duplicate Webhook Suppressed!`, { payload });
@@ -56,28 +68,23 @@ export class WebhookDedupeService {
 
       // 5. Ordering Protection (Eski timestamp kontrolü)
       if (payload.timestamp) {
-        const lastEvent = await this.db.executeSafe(sql`
-          SELECT event_timestamp FROM webhook_events 
-          WHERE tenant_id = ${this.db.tenantId} 
-            AND provider = ${payload.provider} 
-            AND sender_id = ${payload.senderId}
-          ORDER BY event_timestamp DESC LIMIT 1
-        `);
+        const lastEvent = await this.db.executeSafe({
+          text: `
+            SELECT event_timestamp FROM webhook_events 
+            WHERE tenant_id = $1 
+              AND provider = $2 
+              AND sender_id = $3
+            ORDER BY event_timestamp DESC LIMIT 1
+          `,
+          values: [this.db.tenantId, payload.provider, payload.senderId]
+        }) as any[];
 
-        if (lastEvent.length > 0 && lastEvent[0].event_timestamp > payload.timestamp) {
+        if (lastEvent && lastEvent.length > 0 && lastEvent[0].event_timestamp > payload.timestamp) {
           this.log.warn(`⚠️ Out-of-order webhook detected!`, { 
             last: lastEvent[0].event_timestamp, incoming: payload.timestamp 
           });
-          // Not: Out-of-order eventleri isDuplicate=false döner ama işlerken dikkat edilmeli.
-          // İleride message ordering buffer'a atılabilir.
         }
       }
-
-      // 6. Webhook'u kaydet (Event Sourcing Hazırlığı)
-      await this.db.executeSafe(sql`
-        INSERT INTO webhook_events (tenant_id, provider, provider_message_id, sender_id, event_timestamp)
-        VALUES (${this.db.tenantId}, ${payload.provider}, ${payload.providerMessageId}, ${payload.senderId}, ${payload.timestamp || 0})
-      `);
 
       return { isDuplicate: false, lockHash: hash };
     } catch (e: any) {
@@ -87,3 +94,4 @@ export class WebhookDedupeService {
     }
   }
 }
+

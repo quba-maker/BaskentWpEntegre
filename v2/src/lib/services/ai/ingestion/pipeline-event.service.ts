@@ -1,4 +1,4 @@
-import { neon } from '@neondatabase/serverless';
+import { withTenantDB } from '@/lib/core/tenant-db';
 
 export type PipelineEventType = 
   | 'LeadImported' 
@@ -22,36 +22,37 @@ export interface PipelineEventPayload {
  * Ensures every change in the customer ingestion pipeline is recorded as an immutable event.
  */
 export class PipelineEventService {
-  private static getSql() {
-    return neon(process.env.DATABASE_URL!);
-  }
-
   /**
    * Append a new event to the pipeline event stream.
    * Instead of `UPDATE leads`, we `recordEvent('LeadImported', payload)`
    */
   static async recordEvent(data: PipelineEventPayload) {
-    const sql = this.getSql();
-    const result = await sql`
-      INSERT INTO pipeline_events (
-        tenant_id, 
-        event_type, 
-        source_id, 
-        entity_id, 
-        payload, 
-        ai_confidence, 
-        operator_id
-      ) VALUES (
-        ${data.tenantId},
-        ${data.eventType},
-        ${data.sourceId || null},
-        ${data.entityId || null},
-        ${JSON.stringify(data.payload)}::jsonb,
-        ${data.aiConfidence || null},
-        ${data.operatorId || null}
-      )
-      RETURNING *
-    `;
+    const db = withTenantDB(data.tenantId);
+    const result = await db.executeSafe({
+      text: `
+        INSERT INTO pipeline_events (
+          tenant_id, 
+          event_type, 
+          source_id, 
+          entity_id, 
+          payload, 
+          ai_confidence, 
+          operator_id
+        ) VALUES (
+          $1, $2, $3, $4, $5::jsonb, $6, $7
+        )
+        RETURNING *
+      `,
+      values: [
+        data.tenantId,
+        data.eventType,
+        data.sourceId || null,
+        data.entityId || null,
+        JSON.stringify(data.payload),
+        data.aiConfidence || null,
+        data.operatorId || null
+      ]
+    }) as any[];
     return result[0];
   }
 
@@ -59,11 +60,14 @@ export class PipelineEventService {
    * Get the event history for a specific source to replay state or show Audit Trail.
    */
   static async getHistory(tenantId: string, sourceId: string) {
-    const sql = this.getSql();
-    return await sql`
-      SELECT * FROM pipeline_events
-      WHERE tenant_id = ${tenantId} AND source_id = ${sourceId}
-      ORDER BY created_at ASC
-    `;
+    const db = withTenantDB(tenantId);
+    return await db.executeSafe({
+      text: `
+        SELECT * FROM pipeline_events
+        WHERE tenant_id = $1 AND source_id = $2
+        ORDER BY created_at ASC
+      `,
+      values: [tenantId, sourceId]
+    }) as any[];
   }
 }

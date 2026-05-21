@@ -1,5 +1,4 @@
 import { logger } from "@/lib/core/logger";
-import { sql } from "@/lib/db";
 import { withTenantDB } from "@/lib/core/tenant-db";
 import { ConversationService } from "@/lib/services/conversation.service";
 import { MessageService } from "@/lib/services/message.service";
@@ -144,24 +143,30 @@ export class QueueWorkerEngine {
     
     try {
       // Update message status and get the internal ID
-      const msgResult = await db.executeSafe(sql`
-        UPDATE messages 
-        SET status = ${deliveryStatus}
-        WHERE provider_message_id = ${providerMessageId} AND tenant_id = ${tenantId}
-        RETURNING id
-      `);
+      const msgResult = await db.executeSafe({
+        text: `
+          UPDATE messages 
+          SET status = $1
+          WHERE provider_message_id = $2 AND tenant_id = $3
+          RETURNING id
+        `,
+        values: [deliveryStatus, providerMessageId, tenantId]
+      }) as any[];
       const internalMessageId = msgResult[0]?.id;
 
       let conversationId: string | undefined;
 
       // Update conversation last_message_status to reflect real-time UI
       if (phoneNumber) {
-        const convResult = await db.executeSafe(sql`
-          UPDATE conversations 
-          SET last_message_status = ${deliveryStatus}
-          WHERE phone_number = ${phoneNumber} AND tenant_id = ${tenantId}
-          RETURNING id
-        `);
+        const convResult = await db.executeSafe({
+          text: `
+            UPDATE conversations 
+            SET last_message_status = $1
+            WHERE phone_number = $2 AND tenant_id = $3
+            RETURNING id
+          `,
+          values: [deliveryStatus, phoneNumber, tenantId]
+        }) as any[];
         conversationId = convResult[0]?.id;
       }
       
@@ -281,9 +286,7 @@ export class QueueWorkerEngine {
     // Phase 6: Emit identity resolution event
     AIEventEmitter.emit({ tenantId, customerId, type: 'identity_resolved', category: 'identity', payload: { phoneNumber, source: channel } });
 
-    // 3. Lock Conversation & Save Incoming Message (Idempotency)
-    await convService.acquireLock(phoneNumber);
-    
+    // 3. Save Incoming Message (Idempotency and locking handled atomically in CTE)
     const { isDuplicate, conversationId, messageId } = await msgService.saveMessageIdempotent({
       phoneNumber,
       direction: 'in',
@@ -327,7 +330,7 @@ export class QueueWorkerEngine {
 
     // Link Conversation to Customer Profile
     if (conversationId) {
-       await IdentityEngine.linkConversation(conversationId, customerId);
+       await IdentityEngine.linkConversation(tenantId, conversationId, customerId);
     }
 
     this.log.info(`[CONVERSATION_READY] Incoming message processed & identity linked`, { traceId });
@@ -408,15 +411,19 @@ export class QueueWorkerEngine {
     // 3.6 MAX MESSAGES GATE — Auto handover after limit
     const maxMsg = brain.context.settings.maxMessages;
     if (maxMsg > 0) {
-      const botMsgCount = await db.executeSafe(sql`
-        SELECT COUNT(*) as c FROM messages 
-        WHERE phone_number = ${phoneNumber} AND tenant_id = ${tenantId} AND direction = 'out'
-      `);
+      const botMsgCount = await db.executeSafe({
+        text: `
+          SELECT COUNT(*) as c FROM messages 
+          WHERE phone_number = $1 AND tenant_id = $2 AND direction = 'out'
+        `,
+        values: [phoneNumber, tenantId]
+      }) as any[];
       const count = parseInt(botMsgCount[0]?.c) || 0;
       if (count >= maxMsg) {
-        await db.executeSafe(sql`
-          UPDATE conversations SET status = 'human' WHERE phone_number = ${phoneNumber} AND tenant_id = ${tenantId}
-        `);
+        await db.executeSafe({
+          text: `UPDATE conversations SET status = 'human' WHERE phone_number = $1 AND tenant_id = $2`,
+          values: [phoneNumber, tenantId]
+        });
         this.log.info(`[MAX_MESSAGES] Limit reached (${count}/${maxMsg}), auto-handover to human`, { traceId });
         AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'max_messages_reached', category: 'escalation', payload: { count, maxMsg } });
         return;
@@ -439,7 +446,7 @@ export class QueueWorkerEngine {
     let unifiedContext: any = null;
     try {
       if (customerId && conversationId) {
-        unifiedContext = await IdentityEngine.getContext(customerId, conversationId);
+        unifiedContext = await IdentityEngine.getContext(tenantId, customerId, conversationId);
       }
     } catch (e) {
       this.log.error('[WORKER_CONTEXT_FETCH] Error fetching identity context', e instanceof Error ? e : new Error(String(e)), { traceId });
@@ -511,11 +518,14 @@ export class QueueWorkerEngine {
       AIEventEmitter.logHealth(tenantId, 'policy_blocked', { reason: validation.reason, traceId });
 
       // Save a system alert message to alert the agent
-      const sysMsgRes = await db.executeSafe(sql`
-        INSERT INTO messages (tenant_id, phone_number, direction, content, channel, provider_message_id)
-        VALUES (${tenantId}, ${phoneNumber}, 'system', ${'Güvenlik Politikası Devrede: ' + validation.reason}, ${channel}, 'system_alert')
-        RETURNING id
-      `);
+      const sysMsgRes = await db.executeSafe({
+        text: `
+          INSERT INTO messages (tenant_id, phone_number, direction, content, channel, provider_message_id)
+          VALUES ($1, $2, 'system', $3, $4, 'system_alert')
+          RETURNING id
+        `,
+        values: [tenantId, phoneNumber, 'Güvenlik Politikası Devrede: ' + validation.reason, channel]
+      }) as any[];
       
       const sysMsgId = sysMsgRes[0]?.id;
       if (sysMsgId && conversationId) {
@@ -540,11 +550,10 @@ export class QueueWorkerEngine {
       }
 
       // Escalate to human automatically
-      await db.executeSafe(sql`
-        UPDATE conversations 
-        SET status = 'human'
-        WHERE phone_number = ${phoneNumber} AND tenant_id = ${tenantId}
-      `);
+      await db.executeSafe({
+        text: `UPDATE conversations SET status = 'human' WHERE phone_number = $1 AND tenant_id = $2`,
+        values: [phoneNumber, tenantId]
+      });
     }
 
     // 8. Meta Channel Send
@@ -701,17 +710,19 @@ export class QueueWorkerEngine {
 
     try {
       const db = withTenantDB(tenantId, false);
-      await db.executeSafe(sql`
-        INSERT INTO dead_letter_jobs (tenant_id, topic, payload, error_message, error_stack, status)
-        VALUES (
-          ${tenantId}, 
-          ${topic}, 
-          ${JSON.stringify(payload)}::jsonb, 
-          ${errObj.message.substring(0, 1000)}, 
-          ${errObj.stack?.substring(0, 2000) || null}, 
-          'unresolved'
-        )
-      `);
+      await db.executeSafe({
+        text: `
+          INSERT INTO dead_letter_jobs (tenant_id, topic, payload, error_message, error_stack, status)
+          VALUES ($1, $2, $3::jsonb, $4, $5, 'unresolved')
+        `,
+        values: [
+          tenantId, 
+          topic, 
+          JSON.stringify(payload), 
+          errObj.message.substring(0, 1000), 
+          errObj.stack?.substring(0, 2000) || null
+        ]
+      });
       this.log.info(`[DLQ] Event persisted to dead_letter_jobs`, { topic, tenantId });
     } catch (dlqError: any) {
       // DLQ yazamıyorsak bile asla sessizce yutmuyoruz — log ile kalıyor

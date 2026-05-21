@@ -1,4 +1,4 @@
-import { neon } from "@neondatabase/serverless";
+import { withTenantDB } from "@/lib/core/tenant-db";
 import { unstable_cache } from "next/cache";
 
 export interface TenantBootstrapData {
@@ -26,32 +26,35 @@ export interface TenantBootstrapData {
 
 async function fetchTenantDataFromDB(tenantId: string): Promise<TenantBootstrapData | null> {
   const startTime = performance.now();
-  const connectionString = process.env.DATABASE_URL;
-  if (!connectionString) return null;
-  
-  const sqlClient = neon(connectionString);
+  const db = withTenantDB(tenantId, true);
 
   try {
     // 1. Fetch Tenant Profile, Theme & Limits
-    const tenants = await sqlClient`
-      SELECT id, name, slug, industry, logo_url, primary_color, 
-             sidebar_theme, dashboard_density, ui_mode, workspace_version,
-             plan, monthly_message_limit, token_budget
-      FROM tenants 
-      WHERE id = ${tenantId} AND status = 'active'
-    `;
+    const tenants = await db.executeSafe({
+      text: `
+        SELECT id, name, slug, industry, logo_url, primary_color, 
+               sidebar_theme, dashboard_density, ui_mode, workspace_version,
+               plan, monthly_message_limit, token_budget
+        FROM tenants 
+        WHERE id = $1 AND status = 'active'
+      `,
+      values: [tenantId]
+    }) as any[];
 
-    if (tenants.length === 0) return null;
+    if (!tenants || tenants.length === 0) return null;
     const t = tenants[0];
 
     // 2. Fetch Feature Flags (with safe fallback if table missing)
     const flags: Record<string, boolean> = {};
     try {
-      const modules = await sqlClient`
-        SELECT module_name, is_active 
-        FROM ai_module_settings 
-        WHERE tenant_id = ${tenantId}
-      `;
+      const modules = await db.executeSafe({
+        text: `
+          SELECT module_name, is_active 
+          FROM ai_module_settings 
+          WHERE tenant_id = $1
+        `,
+        values: [tenantId]
+      }) as any[];
       modules.forEach((m: any) => {
         flags[m.module_name] = m.is_active;
       });

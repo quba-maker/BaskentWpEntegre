@@ -1,5 +1,5 @@
 import { logger } from "@/lib/core/logger";
-import { sql } from "@/lib/db";
+import { withTenantDB } from "@/lib/core/tenant-db";
 
 export interface AuditLogData {
   tenantId: string;
@@ -46,21 +46,39 @@ export class AIAuditEngine {
       // Execute asynchronously, don't block the main flow
       setImmediate(async () => {
         try {
-          await sql`
-            INSERT INTO ai_audit_logs (
-              tenant_id, customer_id, conversation_id, tool_name, tool_arguments, 
-              validation_passed, execution_mode, execution_duration_ms, 
-              input_tokens, output_tokens, cost_usd,
-              ai_confidence, reasoning_summary, result_summary, error_message
-            ) VALUES (
-              ${data.tenantId}, ${data.customerId || null}, ${data.conversationId || null}, 
-              ${data.toolName}, ${JSON.stringify(data.toolArguments)}::jsonb, 
-              ${data.validationPassed}, ${data.executionMode}, ${data.executionDurationMs || null}, 
-              ${data.inputTokens || null}, ${data.outputTokens || null}, ${data.costUsd || null},
-              ${data.aiConfidence || null}, ${data.reasoningSummary || null}, 
-              ${data.resultSummary ? JSON.stringify(data.resultSummary) : null}::jsonb, ${data.errorMessage || null}
-            )
-          `;
+          const db = withTenantDB(data.tenantId);
+          await db.executeSafe({
+            text: `
+              INSERT INTO ai_audit_logs (
+                tenant_id, customer_id, conversation_id, tool_name, tool_arguments, 
+                validation_passed, execution_mode, execution_duration_ms, 
+                input_tokens, output_tokens, cost_usd,
+                ai_confidence, reasoning_summary, result_summary, error_message
+              ) VALUES (
+                $1, $2, $3, $4, $5::jsonb, 
+                $6, $7, $8, 
+                $9, $10, $11,
+                $12, $13, $14::jsonb, $15
+              )
+            `,
+            values: [
+              data.tenantId,
+              data.customerId || null,
+              data.conversationId || null,
+              data.toolName,
+              JSON.stringify(data.toolArguments),
+              data.validationPassed,
+              data.executionMode,
+              data.executionDurationMs || null,
+              data.inputTokens || null,
+              data.outputTokens || null,
+              data.costUsd || null,
+              data.aiConfidence || null,
+              data.reasoningSummary || null,
+              data.resultSummary ? JSON.stringify(data.resultSummary) : null,
+              data.errorMessage || null
+            ]
+          });
         } catch (dbErr: any) {
           this.log.error('Failed to insert tool execution log into database', dbErr);
         }
@@ -77,16 +95,27 @@ export class AIAuditEngine {
     try {
       setImmediate(async () => {
         try {
-          await sql`
-            INSERT INTO ai_runtime_metrics (
-              tenant_id, total_tokens, prompt_tokens, completion_tokens, 
-              estimated_cost_usd, model_name, response_time_ms, tool_calls_count
-            ) VALUES (
-              ${data.tenantId}, ${data.totalTokens || null}, ${data.promptTokens || null}, 
-              ${data.completionTokens || null}, ${data.estimatedCostUsd || null}, 
-              ${data.modelName}, ${data.responseTimeMs}, ${data.toolCallsCount}
-            )
-          `;
+          const db = withTenantDB(data.tenantId);
+          await db.executeSafe({
+            text: `
+              INSERT INTO ai_runtime_metrics (
+                tenant_id, total_tokens, prompt_tokens, completion_tokens, 
+                estimated_cost_usd, model_name, response_time_ms, tool_calls_count
+              ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8
+              )
+            `,
+            values: [
+              data.tenantId,
+              data.totalTokens || null,
+              data.promptTokens || null,
+              data.completionTokens || null,
+              data.estimatedCostUsd || null,
+              data.modelName,
+              data.responseTimeMs,
+              data.toolCallsCount
+            ]
+          });
         } catch (dbErr: any) {
           this.log.error('Failed to insert runtime metrics into database', dbErr);
         }

@@ -1,31 +1,33 @@
 import { NextRequest, NextResponse } from "next/server";
-import { neon } from "@neondatabase/serverless";
+import { withTenantDB } from "@/lib/core/tenant-db";
 import { validateEnv } from "@/lib/env";
+
+const getSetupKey = () => process.env.ADMIN_SETUP_KEY || process.env.SETUP_KEY || "quba-setup-2026";
 
 export async function GET(req: NextRequest) {
   try {
     // 🔒 Auth kontrolü — yetkisiz erişimi engelle
     const setupKey = req.headers.get("x-setup-key") || req.nextUrl.searchParams.get("key");
-    if (setupKey !== "quba-setup-2026") {
+    if (setupKey !== getSetupKey()) {
       return NextResponse.json({ error: "Yetkisiz. x-setup-key header veya ?key= parametresi gerekli." }, { status: 401 });
     }
 
     const isDryRun = req.nextUrl.searchParams.get("dryRun") === "true";
     const dryRunLogs: string[] = [];
 
-    const sql = neon(process.env.DATABASE_URL!);
+    const systemDb = withTenantDB('admin-system', true);
     
     // Custom wrapper for dryRun mode
     const execute = async (strings: TemplateStringsArray, ...values: any[]) => {
+      let q = "";
+      strings.forEach((s, i) => { q += s + (values[i] !== undefined ? String(values[i]) : ""); });
       if (isDryRun) {
-        let q = "";
-        strings.forEach((s, i) => { q += s + (values[i] !== undefined ? String(values[i]) : ""); });
         dryRunLogs.push(q.trim().replace(/\s+/g, ' '));
         // Return dummy data for specific SELECTs if needed, or empty array
         if (q.includes("SELECT id FROM tenants WHERE slug = 'baskent'")) return [{ id: 'dry-run-uuid' }];
         return [];
       }
-      return sql(strings, ...values);
+      return systemDb.executeSafe({ text: q });
     };
 
     const results: string[] = [];
@@ -157,7 +159,7 @@ export async function GET(req: NextRequest) {
       )
       VALUES (
         'Başkent Hastanesi', 'baskent', 'health', '#005A9C', 'gemini-2.5-flash', 'pro', 'active',
-        '1072536945944841', '2733513257027362', ${process.env.META_ACCESS_TOKEN || ''}
+        '1072536945944841', '2733513257027362', '${process.env.META_ACCESS_TOKEN || ''}'
       )
       ON CONFLICT (slug) DO UPDATE SET
         whatsapp_phone_id = EXCLUDED.whatsapp_phone_id,
@@ -463,17 +465,20 @@ export async function GET(req: NextRequest) {
 // POST — Sistem sağlık kontrolü + env doğrulama
 export async function POST(req: NextRequest) {
   const setupKey = req.headers.get("x-setup-key") || req.nextUrl.searchParams.get("key");
-  if (setupKey !== "quba-setup-2026") {
+  if (setupKey !== getSetupKey()) {
     return NextResponse.json({ error: "Yetkisiz." }, { status: 401 });
   }
 
   const envResult = validateEnv();
 
+  const systemDb = withTenantDB('admin-system', true);
+
   // DB bağlantı testi
   let dbStatus = "unknown";
   try {
-    const sql = neon(process.env.DATABASE_URL!);
-    const result = await sql`SELECT COUNT(*) as tenant_count FROM tenants WHERE status = 'active'`;
+    const result = await systemDb.executeSafe({
+      text: "SELECT COUNT(*) as tenant_count FROM tenants WHERE status = 'active'"
+    }) as any[];
     dbStatus = `connected (${result[0]?.tenant_count || 0} aktif tenant)`;
   } catch (e: any) {
     dbStatus = `error: ${e.message}`;
@@ -482,9 +487,12 @@ export async function POST(req: NextRequest) {
   // Retry queue durumu
   let retryQueueStatus = "unknown";
   try {
-    const sql = neon(process.env.DATABASE_URL!);
-    const pending = await sql`SELECT COUNT(*) as c FROM message_retry_queue WHERE status = 'pending'`;
-    const failed = await sql`SELECT COUNT(*) as c FROM message_retry_queue WHERE status = 'failed'`;
+    const pending = await systemDb.executeSafe({
+      text: "SELECT COUNT(*) as c FROM message_retry_queue WHERE status = 'pending'"
+    }) as any[];
+    const failed = await systemDb.executeSafe({
+      text: "SELECT COUNT(*) as c FROM message_retry_queue WHERE status = 'failed'"
+    }) as any[];
     retryQueueStatus = `${pending[0]?.c || 0} bekleyen, ${failed[0]?.c || 0} başarısız`;
   } catch {
     retryQueueStatus = "tablo henüz oluşturulmadı";

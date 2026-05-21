@@ -31,7 +31,8 @@ const ENV_SCHEMA: EnvVar[] = [
   { name: "IG_TOKEN_1", required: false, description: "Instagram Graph API token (Türkçe sayfa)" },
 
   // Setup & Security
-  { name: "SETUP_KEY", required: false, description: "Setup API güvenlik anahtarı" },
+  { name: "SETUP_KEY", required: false, description: "Setup API güvenlik anahtarı (legacy)" },
+  { name: "ADMIN_SETUP_KEY", required: false, description: "Modern platform ve debug API güvenlik anahtarı" },
   { name: "CRON_SECRET", required: false, description: "Vercel Cron güvenlik token'ı" },
 ];
 

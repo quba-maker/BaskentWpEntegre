@@ -1,4 +1,4 @@
-import { neon } from "@neondatabase/serverless";
+import { withTenantDB } from "@/lib/core/tenant-db";
 import { logger } from "@/lib/core/logger";
 
 // ==========================================
@@ -103,49 +103,64 @@ export class TenantResolverService {
     }
 
     try {
-      const sql = neon(process.env.DATABASE_URL!);
+      const db = withTenantDB('admin-system', true);
 
       // NEW V2 ROUTING: Look up via channels -> channel_groups -> tenants
-      let results = await sql`
-        SELECT 
-          c.id as channel_id,
-          c.provider,
-          c.identifier,
-          cg.id as group_id,
-          t.id as tenant_id,
-          t.slug as tenant_slug,
-          t.name as tenant_name,
-          t.meta_app_id,
-          t.meta_app_secret,
-          t.plan,
-          t.status,
-          t.whatsapp_phone_id,
-          t.whatsapp_business_id,
-          t.meta_page_id,
-          t.instagram_id,
-          ci.credentials_encrypted
-        FROM channels c
-        JOIN channel_groups cg ON c.group_id = cg.id
-        JOIN tenants t ON cg.tenant_id = t.id
-        LEFT JOIN channel_integrations ci ON ci.channel_id = c.id
-        WHERE c.identifier = ${identifier.id} 
-          AND t.status = 'active'
-        LIMIT 1
-      `;
+      let results = await db.executeSafe({
+        text: `
+          SELECT 
+            c.id as channel_id,
+            c.provider,
+            c.identifier,
+            cg.id as group_id,
+            t.id as tenant_id,
+            t.slug as tenant_slug,
+            t.name as tenant_name,
+            t.meta_app_id,
+            t.meta_app_secret,
+            t.plan,
+            t.status,
+            t.whatsapp_phone_id,
+            t.whatsapp_business_id,
+            t.meta_page_id,
+            t.instagram_id,
+            ci.credentials_encrypted
+          FROM channels c
+          JOIN channel_groups cg ON c.group_id = cg.id
+          JOIN tenants t ON cg.tenant_id = t.id
+          LEFT JOIN channel_integrations ci ON ci.channel_id = c.id
+          WHERE c.identifier = $1 
+            AND t.status = 'active'
+          LIMIT 1
+        `,
+        values: [identifier.id]
+      }) as any[];
 
       // FALLBACK TO LEGACY V1 ROUTING (Migration phase)
       // If the channel doesn't exist yet, we check if the tenant exists via legacy columns
       if (results.length === 0) {
         let legacyResults: any[] = [];
         if (identifier.type === 'whatsapp') {
-          legacyResults = await sql`SELECT * FROM tenants WHERE whatsapp_phone_id = ${identifier.id} AND status = 'active' LIMIT 1`;
+          legacyResults = await db.executeSafe({
+            text: `SELECT * FROM tenants WHERE whatsapp_phone_id = $1 AND status = 'active' LIMIT 1`,
+            values: [identifier.id]
+          }) as any[];
           if (legacyResults.length === 0 && identifier.wabaId) {
-            legacyResults = await sql`SELECT * FROM tenants WHERE whatsapp_business_id = ${identifier.wabaId} AND status = 'active' LIMIT 1`;
+            legacyResults = await db.executeSafe({
+              text: `SELECT * FROM tenants WHERE whatsapp_business_id = $1 AND status = 'active' LIMIT 1`,
+              values: [identifier.wabaId]
+            }) as any[];
           }
         } else if (identifier.type === 'messenger') {
-          legacyResults = await sql`SELECT * FROM tenants WHERE meta_page_id = ${identifier.id} AND status = 'active' LIMIT 1`;
+          legacyResults = await db.executeSafe({
+            text: `SELECT * FROM tenants WHERE meta_page_id = $1 AND status = 'active' LIMIT 1`,
+            values: [identifier.id]
+          }) as any[];
         } else if (identifier.type === 'instagram') {
-          legacyResults = await sql`SELECT * FROM tenants WHERE instagram_id = ${identifier.id} AND status = 'active' LIMIT 1`;
+          legacyResults = await db.executeSafe({
+            text: `SELECT * FROM tenants WHERE instagram_id = $1 AND status = 'active' LIMIT 1`,
+            values: [identifier.id]
+          }) as any[];
         }
 
         if (legacyResults.length > 0) {
@@ -245,4 +260,5 @@ export class TenantResolverService {
     }
   }
 }
+
 

@@ -1,6 +1,6 @@
 import { toolRegistry, ToolContext } from "./tool-registry";
 import { logger } from "@/lib/core/logger";
-import { sql } from "@/lib/db";
+import { withTenantDB } from "@/lib/core/tenant-db";
 import { AIEventEmitter } from "./event-emitter";
 
 /**
@@ -144,17 +144,17 @@ export class ToolExecutor {
     }
   }
 
-  /**
-   * DB-backed permission check.
-   * If no record exists in tool_permissions, default to ALLOWED (opt-out model).
-   */
   private async checkPermissions(toolName: string, requiredPermissions: string[], context: ToolContext): Promise<boolean> {
     try {
-      const rows = await sql`
-        SELECT is_enabled FROM tool_permissions
-        WHERE tenant_id = ${context.tenantId} AND tool_name = ${toolName}
-        LIMIT 1
-      `;
+      const db = withTenantDB(context.tenantId);
+      const rows = await db.executeSafe({
+        text: `
+          SELECT is_enabled FROM tool_permissions
+          WHERE tenant_id = $1 AND tool_name = $2
+          LIMIT 1
+        `,
+        values: [context.tenantId, toolName]
+      }) as any[];
       // If no record exists, tool is allowed by default (opt-out model)
       if (rows.length === 0) return true;
       return rows[0].is_enabled === true;

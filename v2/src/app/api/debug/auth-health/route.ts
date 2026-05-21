@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { neon } from '@neondatabase/serverless';
+import { withTenantDB } from '@/lib/core/tenant-db';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,14 +24,14 @@ export async function GET() {
   }
 
   try {
-    const sql = neon(dbUrl);
+    const systemDb = withTenantDB('admin-system', true);
     
     // Check DB and count tenants
-    const tenants = await sql`SELECT count(*) as count FROM tenants`;
+    const tenants = await systemDb.executeSafe("SELECT count(*) as count FROM tenants") as any[];
     healthStatus.tenantsCount = parseInt(tenants[0].count);
 
     // Check users
-    const users = await sql`SELECT count(*) as count FROM users`;
+    const users = await systemDb.executeSafe("SELECT count(*) as count FROM users") as any[];
     healthStatus.usersCount = parseInt(users[0].count);
 
     healthStatus.dbReachable = true;

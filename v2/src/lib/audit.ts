@@ -1,4 +1,4 @@
-import { sql } from "@/lib/db";
+import { withTenantDB } from "@/lib/core/tenant-db";
 
 // ==========================================
 // QUBA AI — Audit Logger (Enterprise)
@@ -16,19 +16,26 @@ export async function logAudit(params: {
   details?: Record<string, any>;
 }) {
   try {
-    await sql`
-      INSERT INTO audit_logs (tenant_id, user_id, user_email, impersonator_id, action, entity_type, entity_id, details)
-      VALUES (
-        ${params.tenantId || null},
-        ${params.userId || null},
-        ${params.userEmail || null},
-        ${params.impersonatorId || null},
-        ${params.action},
-        ${params.entityType || null},
-        ${params.entityId || null},
-        ${params.details ? JSON.stringify(params.details) : null}
-      )
-    `;
+    const tenantId = params.tenantId || 'admin-system';
+    const isPlatformContext = !params.tenantId;
+    const db = withTenantDB(tenantId, isPlatformContext);
+
+    await db.executeSafe({
+      text: `
+        INSERT INTO audit_logs (tenant_id, user_id, user_email, impersonator_id, action, entity_type, entity_id, details)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+      `,
+      values: [
+        params.tenantId || null,
+        params.userId || null,
+        params.userEmail || null,
+        params.impersonatorId || null,
+        params.action,
+        params.entityType || null,
+        params.entityId || null,
+        params.details ? JSON.stringify(params.details) : null
+      ]
+    });
   } catch (e: any) {
     // Audit log asla ana işlemi bloklamaz
     // Audit yazma hatası — sessizce yutmuyoruz ama logger kullanıyoruz

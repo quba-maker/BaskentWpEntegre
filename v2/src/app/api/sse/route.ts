@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
-import { neon } from "@neondatabase/serverless";
 import { jwtVerify } from "jose";
+import { withTenantDB } from "@/lib/core/tenant-db";
 
 // ==========================================
 // QUBA AI — Real-Time Server-Sent Events (SSE)
@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
     return new Response("Invalid or expired token", { status: 403 });
   }
 
-  const sql = neon(process.env.DATABASE_URL!);
+  const db = withTenantDB(tenantId);
 
   // SSE stream oluştur
   const encoder = new TextEncoder();
@@ -53,18 +53,21 @@ export async function GET(req: NextRequest) {
         }
 
         try {
-          const newMessages = await sql`
-            SELECT m.id, m.phone_number, m.content, m.direction, m.channel, m.created_at,
-                   c.patient_name
-            FROM messages m
-            LEFT JOIN conversations c ON c.phone_number = m.phone_number AND c.tenant_id = m.tenant_id
-            WHERE m.tenant_id = ${tenantId} 
-              AND m.created_at > ${lastCheckTime}::timestamptz
-            ORDER BY m.created_at ASC
-            LIMIT 20
-          `;
+          const newMessages = await db.executeSafe({
+            text: `
+              SELECT m.id, m.phone_number, m.content, m.direction, m.channel, m.created_at,
+                     c.patient_name
+              FROM messages m
+              LEFT JOIN conversations c ON c.phone_number = m.phone_number AND c.tenant_id = m.tenant_id
+              WHERE m.tenant_id = $1 
+                AND m.created_at > $2::timestamptz
+              ORDER BY m.created_at ASC
+              LIMIT 20
+            `,
+            values: [tenantId, lastCheckTime]
+          }) as any[];
 
-          if (newMessages.length > 0) {
+          if (newMessages && newMessages.length > 0) {
             lastCheckTime = newMessages[newMessages.length - 1].created_at;
             
             for (const msg of newMessages) {

@@ -1,4 +1,4 @@
-import { sql } from '@/lib/db';
+import { withTenantDB } from '@/lib/core/tenant-db';
 import { normalizePhone } from '@/lib/utils/normalize-phone';
 
 export class IdentityEngine {
@@ -22,35 +22,45 @@ export class IdentityEngine {
     const normalizedPhone = normalizePhone(phoneNumber);
 
     try {
-      const result = await sql`
-        INSERT INTO customer_profiles (tenant_id, primary_phone, primary_email, first_name, last_name)
-        VALUES (${tenantId}, ${normalizedPhone}, ${email || null}, ${firstName || null}, ${lastName || null})
-        ON CONFLICT (tenant_id, primary_phone) DO UPDATE SET
-          primary_email = COALESCE(customer_profiles.primary_email, EXCLUDED.primary_email),
-          first_name = COALESCE(customer_profiles.first_name, EXCLUDED.first_name),
-          last_name = COALESCE(customer_profiles.last_name, EXCLUDED.last_name),
-          updated_at = NOW()
-        RETURNING id;
-      `;
+      const db = withTenantDB(tenantId);
+      const result = await db.executeSafe({
+        text: `
+          INSERT INTO customer_profiles (tenant_id, primary_phone, primary_email, first_name, last_name)
+          VALUES ($1, $2, $3, $4, $5)
+          ON CONFLICT (tenant_id, primary_phone) DO UPDATE SET
+            primary_email = COALESCE(customer_profiles.primary_email, EXCLUDED.primary_email),
+            first_name = COALESCE(customer_profiles.first_name, EXCLUDED.first_name),
+            last_name = COALESCE(customer_profiles.last_name, EXCLUDED.last_name),
+            updated_at = NOW()
+          RETURNING id;
+        `,
+        values: [tenantId, normalizedPhone, email || null, firstName || null, lastName || null]
+      }) as any[];
       const cid = result[0].id;
 
       // Retroactive SaaS identity merge for orphaned records
       try {
-        await sql`
-          UPDATE leads
-          SET customer_id = ${cid}
-          WHERE tenant_id = ${tenantId} 
-            AND customer_id IS NULL
-            AND phone_number LIKE '%' || RIGHT(${normalizedPhone}, 10) || '%'
-        `;
+        await db.executeSafe({
+          text: `
+            UPDATE leads
+            SET customer_id = $1
+            WHERE tenant_id = $2 
+              AND customer_id IS NULL
+              AND phone_number LIKE '%' || RIGHT($3, 10) || '%'
+          `,
+          values: [cid, tenantId, normalizedPhone]
+        });
         
-        await sql`
-          UPDATE conversations
-          SET customer_id = ${cid}
-          WHERE tenant_id = ${tenantId}
-            AND customer_id IS NULL
-            AND phone_number LIKE '%' || RIGHT(${normalizedPhone}, 10) || '%'
-        `;
+        await db.executeSafe({
+          text: `
+            UPDATE conversations
+            SET customer_id = $1
+            WHERE tenant_id = $2
+              AND customer_id IS NULL
+              AND phone_number LIKE '%' || RIGHT($3, 10) || '%'
+          `,
+          values: [cid, tenantId, normalizedPhone]
+        });
       } catch (mergeError) {
         console.warn('[IdentityEngine] Non-fatal: Orphaned records merge failed', mergeError);
       }
@@ -62,43 +72,61 @@ export class IdentityEngine {
     }
   }
 
-  static async linkConversation(conversationId: string, customerId: string): Promise<void> {
-    await sql`
-      UPDATE conversations 
-      SET customer_id = ${customerId}, updated_at = NOW()
-      WHERE id = ${conversationId};
-    `;
+  static async linkConversation(tenantId: string, conversationId: string, customerId: string): Promise<void> {
+    const db = withTenantDB(tenantId);
+    await db.executeSafe({
+      text: `
+        UPDATE conversations 
+        SET customer_id = $1, updated_at = NOW()
+        WHERE id = $2 AND tenant_id = $3;
+      `,
+      values: [customerId, conversationId, tenantId]
+    });
   }
 
-  static async linkLead(leadId: string, customerId: string): Promise<void> {
-    await sql`
-      UPDATE leads 
-      SET customer_id = ${customerId}, updated_at = NOW()
-      WHERE id = ${leadId};
-    `;
+  static async linkLead(tenantId: string, leadId: string, customerId: string): Promise<void> {
+    const db = withTenantDB(tenantId);
+    await db.executeSafe({
+      text: `
+        UPDATE leads 
+        SET customer_id = $1, updated_at = NOW()
+        WHERE id = $2 AND tenant_id = $3;
+      `,
+      values: [customerId, leadId, tenantId]
+    });
   }
 
   /**
    * Unified context based ONLY on customer_id, no fuzzy matching here.
    */
-  static async getContext(customerId: string, conversationId?: string): Promise<any> {
+  static async getContext(tenantId: string, customerId: string, conversationId?: string): Promise<any> {
     try {
-      const profiles = await sql`SELECT * FROM customer_profiles WHERE id = ${customerId}`;
+      const db = withTenantDB(tenantId);
+      const profiles = await db.executeSafe({
+        text: `SELECT * FROM customer_profiles WHERE id = $1 AND tenant_id = $2`,
+        values: [customerId, tenantId]
+      }) as any[];
       const profile = profiles[0];
       if (!profile) return null;
 
-      const leads = await sql`
-        SELECT form_name, raw_data 
-        FROM leads 
-        WHERE tenant_id = ${profile.tenant_id} AND customer_id = ${customerId}
-        ORDER BY created_at DESC 
-        LIMIT 1
-      `;
+      const leads = await db.executeSafe({
+        text: `
+          SELECT form_name, raw_data 
+          FROM leads 
+          WHERE tenant_id = $1 AND customer_id = $2
+          ORDER BY created_at DESC 
+          LIMIT 1
+        `,
+        values: [tenantId, customerId]
+      }) as any[];
       const lead = leads[0];
 
       let memory = null;
       if (conversationId) {
-         const memories = await sql`SELECT * FROM conversation_memory WHERE conversation_id = ${conversationId}`;
+         const memories = await db.executeSafe({
+           text: `SELECT * FROM conversation_memory WHERE conversation_id = $1 AND tenant_id = $2`,
+           values: [conversationId, tenantId]
+         }) as any[];
          memory = memories[0];
       }
 

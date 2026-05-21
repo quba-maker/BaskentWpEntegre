@@ -1,4 +1,3 @@
-import { sql } from "@/lib/db";
 import { TenantDB } from "@/lib/core/tenant-db";
 import { logger } from "@/lib/core/logger";
 
@@ -40,98 +39,84 @@ export class MessageService {
     }
 
     try {
-      // 1. Transaction başlat: Lock Al + Duplicate Kontrolü Yap + Insert
-      // Eğer provider_message_id varsa, duplicate mesaj gelip gelmediğine bak.
-      const queries = [];
-      queries.push(sql`SELECT pg_advisory_xact_lock(${hash})`);
-
-      // Idempotency: Duplicate Check
-      if (payload.providerMessageId) {
-        // Eğer varsa provider_message_id = ${payload.providerMessageId} olan bir şey var mı diye okumak daha iyi ama 
-        // Transaction içi olduğu için insert conflict de yapabilirdik.
-        // Biz burada basit select yapalım. PostgreSQL'de messages tablosuna `provider_message_id` eklendiğini varsayıyoruz.
-        // NOT: Schema migration ile eklenecektir.
-        queries.push(sql`
-          SELECT id FROM messages 
-          WHERE tenant_id = ${this.db.tenantId} 
-            AND provider_message_id = ${payload.providerMessageId} 
-          LIMIT 1
-        `);
-      }
-
-      // Check if conversation exists
-      queries.push(sql`
-        SELECT id FROM conversations 
-        WHERE phone_number = ${payload.phoneNumber} AND tenant_id = ${this.db.tenantId}
-      `);
-
-      const txResult = await this.db.executeTransaction(queries);
-      
-      const dupCheckIdx = payload.providerMessageId ? 1 : -1;
-      const convCheckIdx = payload.providerMessageId ? 2 : 1;
-
-      if (dupCheckIdx > -1 && txResult[dupCheckIdx].length > 0) {
-        // Duplicate webhook!
-        return { success: true, isDuplicate: true, messageId: txResult[dupCheckIdx][0].id };
-      }
-
-      const convExists = txResult[convCheckIdx].length > 0;
-
-      // 2. Insert Message & Upsert Conversation
-      const writeQueries = [];
-      
-      writeQueries.push(sql`
-        INSERT INTO messages (
-          tenant_id, phone_number, direction, content, channel, 
-          channel_id, group_id, workflow_run_id, prompt_binding_id,
-          provider_message_id, model_used, prompt_tokens, completion_tokens, status
-        ) VALUES (
-          ${this.db.tenantId}, ${payload.phoneNumber}, ${payload.direction}, ${payload.content}, 
-          ${payload.channel}, ${payload.channelId || null}, ${payload.groupId || null}, 
-          ${payload.workflowRunId || null}, ${payload.promptBindingId || null},
-          ${payload.providerMessageId || null}, ${payload.modelUsed || null},
-          ${payload.promptTokens || 0}, ${payload.completionTokens || 0}, ${payload.status || 'pending'}
-        ) RETURNING id
-      `);
-
-      if (convExists) {
-        writeQueries.push(sql`
-          UPDATE conversations 
-          SET last_message_at = NOW(), 
+      // Single transaction boundary CTE for locking, deduplication, message insert, and conversation upsert
+      const result = await this.db.executeSafe({
+        text: `
+          WITH lock_acquire AS (
+            SELECT pg_advisory_xact_lock($15)
+          ), dup_check AS (
+            SELECT id FROM messages 
+            WHERE tenant_id = $1 AND provider_message_id = $10 AND $10 IS NOT NULL
+            LIMIT 1
+          ), msg_insert AS (
+            INSERT INTO messages (
+              tenant_id, phone_number, direction, content, channel, 
+              channel_id, group_id, workflow_run_id, prompt_binding_id,
+              provider_message_id, model_used, prompt_tokens, completion_tokens, status
+            )
+            SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+            WHERE NOT EXISTS (SELECT 1 FROM dup_check)
+            RETURNING id
+          ), conv_update AS (
+            UPDATE conversations 
+            SET 
+              last_message_at = NOW(), 
               message_count = message_count + 1, 
-              channel = ${payload.channel},
-              last_channel = ${payload.direction === 'in' ? payload.channel : sql`last_channel`},
-              last_message_content = ${payload.content},
-              last_message_direction = ${payload.direction},
-              last_message_status = ${payload.status || 'pending'}
-          WHERE phone_number = ${payload.phoneNumber} AND tenant_id = ${this.db.tenantId}
-          RETURNING id
-        `);
-      } else {
-        writeQueries.push(sql`
-          INSERT INTO conversations (
-            tenant_id, phone_number, message_count, channel, last_channel,
-            last_message_content, last_message_direction, last_message_status, last_message_at
-          ) VALUES (
-            ${this.db.tenantId}, ${payload.phoneNumber}, 1, ${payload.channel}, 
-            ${payload.direction === 'in' ? payload.channel : null},
-            ${payload.content}, ${payload.direction}, ${payload.status || 'pending'}, NOW()
+              channel = $5,
+              last_channel = CASE WHEN $3 = 'in' THEN $5 ELSE last_channel END,
+              last_message_content = $4,
+              last_message_direction = $3,
+              last_message_status = $14
+            WHERE phone_number = $2 AND tenant_id = $1 AND NOT EXISTS (SELECT 1 FROM dup_check)
+            RETURNING id
+          ), conv_insert AS (
+            INSERT INTO conversations (
+              tenant_id, phone_number, message_count, channel, last_channel,
+              last_message_content, last_message_direction, last_message_status, last_message_at
+            )
+            SELECT $1, $2, 1, $5, CASE WHEN $3 = 'in' THEN $5 ELSE NULL END, $4, $3, $14, NOW()
+            WHERE NOT EXISTS (SELECT 1 FROM dup_check) AND NOT EXISTS (SELECT 1 FROM conv_update)
+            RETURNING id
           )
-          RETURNING id
-        `);
+          SELECT 
+            (SELECT id FROM dup_check) as dup_id,
+            (SELECT id FROM msg_insert) as msg_id,
+            COALESCE((SELECT id FROM conv_update), (SELECT id FROM conv_insert)) as conv_id;
+        `,
+        values: [
+          this.db.tenantId,                  // $1
+          payload.phoneNumber,               // $2
+          payload.direction,                 // $3
+          payload.content,                   // $4
+          payload.channel,                   // $5
+          payload.channelId || null,         // $6
+          payload.groupId || null,           // $7
+          payload.workflowRunId || null,     // $8
+          payload.promptBindingId || null,   // $9
+          payload.providerMessageId || null, // $10
+          payload.modelUsed || null,         // $11
+          payload.promptTokens || 0,         // $12
+          payload.completionTokens || 0,     // $13
+          payload.status || 'pending',       // $14
+          hash                               // $15
+        ]
+      }) as any[];
+
+      const row = result && result.length > 0 ? result[0] : null;
+      if (row && row.dup_id) {
+        return { success: true, isDuplicate: true, messageId: row.dup_id };
       }
 
-      const writeResult = await this.db.executeTransaction(writeQueries);
-      const insertedMessageId = writeResult[0][0].id;
-      const conversationId = writeResult[1][0].id;
+      const insertedMessageId = row ? row.msg_id : null;
+      const conversationId = row ? row.conv_id : null;
 
       return { success: true, isDuplicate: false, messageId: insertedMessageId, conversationId };
     } catch (e: any) {
       this.log.error("SaveMessageIdempotent Error", e instanceof Error ? e : new Error(String(e)));
-      // Eğer column yok hatası alırsak, provider_message_id migrationı henüz yapılmamış demektir
       throw e;
     }
   }
+
 
   /**
    * Send outgoing WhatsApp message via Meta Graph API

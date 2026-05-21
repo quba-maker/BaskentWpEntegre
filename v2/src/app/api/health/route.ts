@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { neon } from "@neondatabase/serverless";
+import { withTenantDB } from "@/lib/core/tenant-db";
 
 /**
  * Health Check Endpoint
@@ -16,8 +16,8 @@ export async function GET() {
   // 1. Database connectivity
   try {
     const dbStart = Date.now();
-    const sqlDb = neon(process.env.DATABASE_URL!);
-    await sqlDb`SELECT 1 AS ping`;
+    const systemDb = withTenantDB('admin-system', true);
+    await systemDb.executeSafe("SELECT 1 AS ping");
     checks.database = { status: "ok", latencyMs: Date.now() - dbStart };
   } catch (err: any) {
     checks.database = { status: "down", detail: err?.message?.substring(0, 100) };

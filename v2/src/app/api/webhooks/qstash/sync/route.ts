@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { sql } from "@/lib/db";
+import { withTenantDB } from "@/lib/core/tenant-db";
 import { decryptPayload } from "@/lib/core/encryption";
 import { Receiver } from "@upstash/qstash";
 import { Redis } from "@upstash/redis";
@@ -63,12 +63,16 @@ export async function POST(req: Request) {
     await updateSyncProgress(tenantId, correlationId, 10, 'processing', 'Validating credentials...');
 
     // 2. Fetch Encrypted Credentials
-    const integrations = await sql`
-      SELECT credentials FROM tenant_integrations 
-      WHERE tenant_id = ${tenantId} AND provider = 'google_sheets' LIMIT 1
-    `;
+    const db = withTenantDB(tenantId);
+    const integrations = await db.executeSafe({
+      text: `
+        SELECT credentials FROM tenant_integrations 
+        WHERE tenant_id = $1 AND provider = 'google_sheets' LIMIT 1
+      `,
+      values: [tenantId]
+    }) as any[];
 
-    if (integrations.length === 0) {
+    if (!integrations || integrations.length === 0) {
       await updateSyncProgress(tenantId, correlationId, 0, 'error', 'Integration not found');
       return NextResponse.json({ error: "Integration not found" }, { status: 404 });
     }
@@ -189,30 +193,40 @@ export async function POST(req: Request) {
         headers.forEach((h: string, idx: number) => { raw_data[h] = row[idx] || ""; });
 
         // Idempotency check via phone matching
-        const existing = await sql`
-          SELECT id FROM leads 
-          WHERE phone_number LIKE '%' || RIGHT(${phone}, 10) || '%' 
-            AND tenant_id = ${tenantId} LIMIT 1
-        `;
+        const existing = await db.executeSafe({
+          text: `
+            SELECT id FROM leads 
+            WHERE phone_number LIKE '%' || RIGHT($1, 10) || '%' 
+              AND tenant_id = $2 LIMIT 1
+          `,
+          values: [phone, tenantId]
+        }) as any[];
         
-        if (existing.length === 0) {
-          const inserted = await sql`
-            INSERT INTO leads (tenant_id, phone_number, patient_name, email, form_name, raw_data, stage, created_at)
-            VALUES (${tenantId}, ${phone}, ${name}, ${email}, ${formName}, ${JSON.stringify(raw_data)}, 'new', NOW())
-            RETURNING id
-          `;
+        if (existing && existing.length === 0) {
+          const inserted = await db.executeSafe({
+            text: `
+              INSERT INTO leads (tenant_id, phone_number, patient_name, email, form_name, raw_data, stage, created_at)
+              VALUES ($1, $2, $3, $4, $5, $6, 'new', NOW())
+              RETURNING id
+            `,
+            values: [tenantId, phone, name, email, formName, JSON.stringify(raw_data)]
+          }) as any[];
+          
           newLeadsCount++;
 
           // Create pipeline_events idempotently
-          if (inserted.length > 0) {
-            await sql`
-              INSERT INTO pipeline_events (tenant_id, lead_id, event_type, details, created_at)
-              SELECT ${tenantId}, ${inserted[0].id}, 'lead_ingested', ${JSON.stringify({ source: 'google_sheets', tabName, pipelineRunId })}, NOW()
-              WHERE NOT EXISTS (
-                SELECT 1 FROM pipeline_events 
-                WHERE lead_id = ${inserted[0].id} AND event_type = 'lead_ingested' AND tenant_id = ${tenantId}
-              )
-            `;
+          if (inserted && inserted.length > 0) {
+            await db.executeSafe({
+              text: `
+                INSERT INTO pipeline_events (tenant_id, lead_id, event_type, payload, created_at)
+                SELECT $1, $2, 'lead_ingested', $3, NOW()
+                WHERE NOT EXISTS (
+                  SELECT 1 FROM pipeline_events 
+                  WHERE lead_id = $4 AND event_type = 'lead_ingested' AND tenant_id = $5
+                )
+              `,
+              values: [tenantId, inserted[0].id, JSON.stringify({ source: 'google_sheets', tabName, pipelineRunId }), inserted[0].id, tenantId]
+            });
           }
         }
       }
@@ -252,14 +266,18 @@ export async function POST(req: Request) {
 
 async function updateHealthStatus(tenantId: string, provider: string, status: string, errorLog: string | null) {
   try {
-    await sql`
-      UPDATE tenant_integrations
-      SET health_status = ${status},
-          error_log = ${errorLog ? JSON.stringify({ message: errorLog, time: new Date().toISOString() }) : null},
-          last_sync_at = NOW(),
-          updated_at = NOW()
-      WHERE tenant_id = ${tenantId} AND provider = ${provider}
-    `;
+    const db = withTenantDB(tenantId);
+    await db.executeSafe({
+      text: `
+        UPDATE tenant_integrations
+        SET health_status = $1,
+            error_log = $2,
+            last_sync_at = NOW(),
+            updated_at = NOW()
+        WHERE tenant_id = $3 AND provider = $4
+      `,
+      values: [status, errorLog ? JSON.stringify({ message: errorLog, time: new Date().toISOString() }) : null, tenantId, provider]
+    });
   } catch (e) {
     console.error("Failed to update integration health status", e);
   }

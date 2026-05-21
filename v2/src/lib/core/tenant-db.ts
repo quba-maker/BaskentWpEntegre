@@ -79,6 +79,12 @@ export class TenantDB {
           }
           return this.sql.query(q);
         }
+        if (q && typeof q === 'object' && 'text' in q) {
+          if (!this.isAdmin) {
+            TenantQueryGuard.assertTenantBoundQuery(this.tenantId, q.text, q.values || []);
+          }
+          return this.sql.query(q.text, q.values || []);
+        }
         return q;
       });
       

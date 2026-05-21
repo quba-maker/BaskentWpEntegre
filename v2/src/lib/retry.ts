@@ -1,6 +1,6 @@
-import { neon } from "@neondatabase/serverless";
 import { logger } from "@/lib/core/logger";
 import { CredentialsService } from "@/lib/services/credentials.service";
+import { withTenantDB } from "@/lib/core/tenant-db";
 
 const log = logger.withContext({ module: 'RetryQueue' });
 
@@ -9,8 +9,6 @@ const log = logger.withContext({ module: 'RetryQueue' });
 // Başarısız mesaj gönderimlerini kuyruğa alır
 // ve exponential backoff ile tekrar dener
 // ==========================================
-
-const DATABASE_URL = process.env.DATABASE_URL!;
 
 /**
  * Başarısız mesajı retry kuyruğuna ekle
@@ -23,11 +21,14 @@ export async function enqueueRetry(params: {
   error: string;
 }) {
   try {
-    const sql = neon(DATABASE_URL);
-    await sql`
-      INSERT INTO message_retry_queue (tenant_id, phone_number, channel, content, last_error, next_retry_at)
-      VALUES (${params.tenantId}, ${params.phoneNumber}, ${params.channel}, ${params.content}, ${params.error}, NOW() + INTERVAL '2 minutes')
-    `;
+    const db = withTenantDB(params.tenantId);
+    await db.executeSafe({
+      text: `
+        INSERT INTO message_retry_queue (tenant_id, phone_number, channel, content, last_error, next_retry_at)
+        VALUES ($1, $2, $3, $4, $5, NOW() + INTERVAL '2 minutes')
+      `,
+      values: [params.tenantId, params.phoneNumber, params.channel, params.content, params.error]
+    });
   } catch (e: any) {
     log.error("Retry kuyruğa eklenemedi", e instanceof Error ? e : new Error(String(e)));
   }
@@ -38,28 +39,32 @@ export async function enqueueRetry(params: {
  * Her çağrıda max 10 mesaj işler (Vercel timeout koruması)
  */
 export async function processRetryQueue(): Promise<{ processed: number; failed: number; skipped: number }> {
-  const sql = neon(DATABASE_URL);
   const stats = { processed: 0, failed: 0, skipped: 0 };
 
   try {
-    // Bekleyen mesajları al (max 10) - decoupled from legacy tenant columns
-    const pending = await sql`
-      SELECT q.*
-      FROM message_retry_queue q
-      WHERE q.status = 'pending' AND q.next_retry_at <= NOW()
-      ORDER BY q.next_retry_at ASC
-      LIMIT 10
-    `;
+    // Bekleyen mesajları al (max 10) - platform/admin context
+    const adminDb = withTenantDB('admin-system', true);
+    const pending = await adminDb.executeSafe({
+      text: `
+        SELECT id, tenant_id, phone_number, channel, content, attempt_count, max_attempts, last_error
+        FROM message_retry_queue
+        WHERE status = 'pending' AND next_retry_at <= NOW()
+        ORDER BY next_retry_at ASC
+        LIMIT 10
+      `
+    }) as any[];
 
     for (const msg of pending) {
       try {
+        const tenantDb = withTenantDB(msg.tenant_id);
+
         if (msg.channel === "whatsapp") {
           const creds = await CredentialsService.resolveCredentials(msg.tenant_id, "whatsapp");
           const token = creds.accessToken || process.env.META_ACCESS_TOKEN;
           const phoneId = creds.whatsappPhoneNumberId || process.env.PHONE_NUMBER_ID;
 
           if (!token || !phoneId) {
-            await markFailed(sql, msg.id, "Token/PhoneID eksik");
+            await markFailed(tenantDb, msg.id, "Token/PhoneID eksik");
             stats.failed++;
             continue;
           }
@@ -77,67 +82,88 @@ export async function processRetryQueue(): Promise<{ processed: number; failed: 
 
           if (response.ok) {
             // Başarılı — kuyruğu temizle ve messages tablosuna kaydet
-            await sql`UPDATE message_retry_queue SET status = 'sent' WHERE id = ${msg.id}`;
-            await sql`INSERT INTO messages (tenant_id, phone_number, direction, content, channel) VALUES (${msg.tenant_id}, ${msg.phone_number}, 'out', ${msg.content}, 'whatsapp')`;
+            await tenantDb.executeSafe({
+              text: "UPDATE message_retry_queue SET status = 'sent' WHERE id = $1",
+              values: [msg.id]
+            });
+            await tenantDb.executeSafe({
+              text: "INSERT INTO messages (tenant_id, phone_number, direction, content, channel) VALUES ($1, $2, 'out', $3, 'whatsapp')",
+              values: [msg.tenant_id, msg.phone_number, msg.content]
+            });
             stats.processed++;
           } else {
             const err = await response.text();
-            await handleRetryFailure(sql, msg, err);
+            await handleRetryFailure(tenantDb, msg, err);
             stats.failed++;
           }
         } else if (msg.channel === "instagram") {
-          // Instagram retry
-          const igToken = process.env.IG_TOKEN_1;
-          if (!igToken) {
-            await markFailed(sql, msg.id, "IG_TOKEN_1 eksik");
+          const creds = await CredentialsService.resolveCredentials(msg.tenant_id, "instagram");
+          const token = creds.accessToken || process.env.IG_TOKEN_1;
+
+          if (!token) {
+            await markFailed(tenantDb, msg.id, "IG token eksik");
             stats.failed++;
             continue;
           }
 
           const response = await fetch(`https://graph.instagram.com/v25.0/me/messages`, {
             method: "POST",
-            headers: { Authorization: `Bearer ${igToken}`, "Content-Type": "application/json" },
+            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
             body: JSON.stringify({ recipient: { id: msg.phone_number }, message: { text: msg.content } }),
           });
 
           if (response.ok) {
-            await sql`UPDATE message_retry_queue SET status = 'sent' WHERE id = ${msg.id}`;
-            await sql`INSERT INTO messages (tenant_id, phone_number, direction, content, channel) VALUES (${msg.tenant_id}, ${msg.phone_number}, 'out', ${msg.content}, 'instagram')`;
+            await tenantDb.executeSafe({
+              text: "UPDATE message_retry_queue SET status = 'sent' WHERE id = $1",
+              values: [msg.id]
+            });
+            await tenantDb.executeSafe({
+              text: "INSERT INTO messages (tenant_id, phone_number, direction, content, channel) VALUES ($1, $2, 'out', $3, 'instagram')",
+              values: [msg.tenant_id, msg.phone_number, msg.content]
+            });
             stats.processed++;
           } else {
             const err = await response.text();
-            await handleRetryFailure(sql, msg, err);
+            await handleRetryFailure(tenantDb, msg, err);
             stats.failed++;
           }
         } else if (msg.channel === "messenger") {
-          // Messenger retry
-          const pageToken = process.env.PAGE_ACCESS_TOKEN;
-          if (!pageToken) {
-            await markFailed(sql, msg.id, "PAGE_ACCESS_TOKEN eksik");
+          const creds = await CredentialsService.resolveCredentials(msg.tenant_id, "messenger");
+          const token = creds.accessToken || process.env.PAGE_ACCESS_TOKEN;
+
+          if (!token) {
+            await markFailed(tenantDb, msg.id, "Messenger page token eksik");
             stats.failed++;
             continue;
           }
 
-          const response = await fetch(`https://graph.facebook.com/v25.0/me/messages?access_token=${pageToken}`, {
+          const response = await fetch(`https://graph.facebook.com/v25.0/me/messages?access_token=${token}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ recipient: { id: msg.phone_number }, message: { text: msg.content } }),
           });
 
           if (response.ok) {
-            await sql`UPDATE message_retry_queue SET status = 'sent' WHERE id = ${msg.id}`;
-            await sql`INSERT INTO messages (tenant_id, phone_number, direction, content, channel) VALUES (${msg.tenant_id}, ${msg.phone_number}, 'out', ${msg.content}, 'messenger')`;
+            await tenantDb.executeSafe({
+              text: "UPDATE message_retry_queue SET status = 'sent' WHERE id = $1",
+              values: [msg.id]
+            });
+            await tenantDb.executeSafe({
+              text: "INSERT INTO messages (tenant_id, phone_number, direction, content, channel) VALUES ($1, $2, 'out', $3, 'messenger')",
+              values: [msg.tenant_id, msg.phone_number, msg.content]
+            });
             stats.processed++;
           } else {
             const err = await response.text();
-            await handleRetryFailure(sql, msg, err);
+            await handleRetryFailure(tenantDb, msg, err);
             stats.failed++;
           }
         } else {
           stats.skipped++;
         }
       } catch (e: any) {
-        await handleRetryFailure(sql, msg, e.message);
+        const tenantDb = withTenantDB(msg.tenant_id);
+        await handleRetryFailure(tenantDb, msg, e.message);
         stats.failed++;
       }
     }
@@ -151,28 +177,37 @@ export async function processRetryQueue(): Promise<{ processed: number; failed: 
 /**
  * Retry başarısız — attempt sayısını artır, exponential backoff uygula
  */
-async function handleRetryFailure(sql: any, msg: any, error: string) {
+async function handleRetryFailure(db: any, msg: any, error: string) {
   const newAttempt = (msg.attempt_count || 0) + 1;
 
   if (newAttempt >= msg.max_attempts) {
     // Max deneme aşıldı → kalıcı başarısızlık
-    await sql`
-      UPDATE message_retry_queue 
-      SET status = 'failed', attempt_count = ${newAttempt}, last_error = ${error}
-      WHERE id = ${msg.id}
-    `;
+    await db.executeSafe({
+      text: `
+        UPDATE message_retry_queue 
+        SET status = 'failed', attempt_count = $1, last_error = $2
+        WHERE id = $3
+      `,
+      values: [newAttempt, error, msg.id]
+    });
   } else {
     // Exponential backoff: 2^attempt dakika (2, 4, 8 dk)
     const delayMinutes = Math.pow(2, newAttempt);
-    await sql`
-      UPDATE message_retry_queue 
-      SET attempt_count = ${newAttempt}, last_error = ${error},
-          next_retry_at = NOW() + ${delayMinutes + ' minutes'}::interval
-      WHERE id = ${msg.id}
-    `;
+    await db.executeSafe({
+      text: `
+        UPDATE message_retry_queue 
+        SET attempt_count = $1, last_error = $2,
+            next_retry_at = NOW() + $3::interval
+        WHERE id = $4
+      `,
+      values: [newAttempt, error, `${delayMinutes} minutes`, msg.id]
+    });
   }
 }
 
-async function markFailed(sql: any, id: string, error: string) {
-  await sql`UPDATE message_retry_queue SET status = 'failed', last_error = ${error} WHERE id = ${id}`;
+async function markFailed(db: any, id: string, error: string) {
+  await db.executeSafe({
+    text: "UPDATE message_retry_queue SET status = 'failed', last_error = $1 WHERE id = $2",
+    values: [error, id]
+  });
 }
