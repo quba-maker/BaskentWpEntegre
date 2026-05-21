@@ -19,8 +19,10 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    getDashboardStats().then((data) => {
-      setStats(data);
+    getDashboardStats().then((res) => {
+      if (res.success && res.data) {
+        setStats(res.data);
+      }
       setLoading(false);
     });
   }, []);
