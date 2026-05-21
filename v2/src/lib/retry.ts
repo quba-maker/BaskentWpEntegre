@@ -60,11 +60,14 @@ export async function processRetryQueue(): Promise<{ processed: number; failed: 
 
         if (msg.channel === "whatsapp") {
           const creds = await CredentialsService.resolveCredentials(msg.tenant_id, "whatsapp");
-          const token = creds.accessToken || process.env.META_ACCESS_TOKEN;
-          const phoneId = creds.whatsappPhoneNumberId || process.env.PHONE_NUMBER_ID;
+          const token = creds.accessToken;
+          const phoneId = creds.whatsappPhoneNumberId;
+
+          log.info(`[CREDENTIAL_SOURCE] Retry WhatsApp`, { tenantId: msg.tenant_id, source: creds.source, hasToken: !!token, hasPhoneId: !!phoneId });
 
           if (!token || !phoneId) {
-            await markFailed(tenantDb, msg.id, "Token/PhoneID eksik");
+            log.error(`[CREDENTIAL_MISSING] Retry failed — no WhatsApp credentials`, undefined, { tenantId: msg.tenant_id, source: creds.source });
+            await markFailed(tenantDb, msg.id, "CREDENTIAL_MISSING: WhatsApp token/PhoneID not found");
             stats.failed++;
             continue;
           }
@@ -98,10 +101,13 @@ export async function processRetryQueue(): Promise<{ processed: number; failed: 
           }
         } else if (msg.channel === "instagram") {
           const creds = await CredentialsService.resolveCredentials(msg.tenant_id, "instagram");
-          const token = creds.accessToken || process.env.IG_TOKEN_1;
+          const token = creds.accessToken;
+
+          log.info(`[CREDENTIAL_SOURCE] Retry Instagram`, { tenantId: msg.tenant_id, source: creds.source, hasToken: !!token });
 
           if (!token) {
-            await markFailed(tenantDb, msg.id, "IG token eksik");
+            log.error(`[CREDENTIAL_MISSING] Retry failed — no Instagram credentials`, undefined, { tenantId: msg.tenant_id, source: creds.source });
+            await markFailed(tenantDb, msg.id, "CREDENTIAL_MISSING: Instagram token not found");
             stats.failed++;
             continue;
           }
@@ -129,10 +135,13 @@ export async function processRetryQueue(): Promise<{ processed: number; failed: 
           }
         } else if (msg.channel === "messenger") {
           const creds = await CredentialsService.resolveCredentials(msg.tenant_id, "messenger");
-          const token = creds.accessToken || process.env.PAGE_ACCESS_TOKEN;
+          const token = creds.accessToken;
+
+          log.info(`[CREDENTIAL_SOURCE] Retry Messenger`, { tenantId: msg.tenant_id, source: creds.source, hasToken: !!token });
 
           if (!token) {
-            await markFailed(tenantDb, msg.id, "Messenger page token eksik");
+            log.error(`[CREDENTIAL_MISSING] Retry failed — no Messenger credentials`, undefined, { tenantId: msg.tenant_id, source: creds.source });
+            await markFailed(tenantDb, msg.id, "CREDENTIAL_MISSING: Messenger page token not found");
             stats.failed++;
             continue;
           }

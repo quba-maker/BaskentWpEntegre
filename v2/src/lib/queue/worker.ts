@@ -10,6 +10,7 @@ import { TenantResolverService } from "@/lib/services/meta/tenant-resolver.servi
 import { assertTenant } from "@/lib/security/assertions";
 import { AIEventEmitter } from "@/lib/services/ai/core/event-emitter";
 import { FeatureFlagService } from "@/lib/services/feature-flag.service";
+import { CredentialsService } from "@/lib/services/credentials.service";
 
 // --- Worker Payload Types ---
 
@@ -422,8 +423,11 @@ export class QueueWorkerEngine {
         : (currentTime >= wh.start || currentTime <= wh.end);
       if (!isInRange) {
         const offMsg = wh.offMessage || 'Mesai saatlerimiz dışındasınız. En kısa sürede dönüş yapılacaktır.';
-        const accessToken = brain.context.config?.accessToken || process.env.META_ACCESS_TOKEN || '';
-        const phoneId = brain.context.config?.whatsappPhoneNumberId || process.env.PHONE_NUMBER_ID || '';
+        // V2 Credential Resolution — NO ENV FALLBACK
+        const whCreds = await CredentialsService.resolveCredentials(tenantId, 'whatsapp');
+        this.log.info(`[CREDENTIAL_SOURCE] Working hours off-message`, { tenantId, source: whCreds.source, traceId });
+        const accessToken = whCreds.accessToken || '';
+        const phoneId = whCreds.whatsappPhoneNumberId || '';
         if (phoneId && accessToken) {
           const outRes = await msgService.sendWhatsAppMessage(phoneId, accessToken, phoneNumber, offMsg);
           const offMsgResult = await msgService.saveMessageIdempotent({ 
@@ -457,6 +461,8 @@ export class QueueWorkerEngine {
               this.log.error(`[REALTIME_PUBLISH_FAILED]`, realtimeErr instanceof Error ? realtimeErr : new Error(String(realtimeErr)), { traceId });
             }
           }
+        } else {
+          this.log.error(`[CREDENTIAL_MISSING] Cannot send working hours message — no credentials`, undefined, { tenantId, traceId });
         }
         this.log.info(`[WORKING_HOURS] Outside hours, sent off-message`, { traceId });
         AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'working_hours_blocked', category: 'pipeline', payload: { currentTime } });
@@ -612,13 +618,24 @@ export class QueueWorkerEngine {
       });
     }
 
-    // 8. Meta Channel Send
-    const accessToken = tenantConfig?.accessToken || process.env.WHATSAPP_TOKEN || process.env.META_ACCESS_TOKEN || '';
-    const phoneId = tenantConfig?.whatsappPhoneNumberId || process.env.PHONE_NUMBER_ID || '';
+    // 8. Meta Channel Send — V2 Credential Isolation (NO ENV FALLBACK)
+    const outboundCreds = await CredentialsService.resolveCredentials(tenantId, channel);
+    this.log.info(`[CREDENTIAL_SOURCE] Outbound send`, {
+      tenantId, channel, source: outboundCreds.source, 
+      hasToken: !!outboundCreds.accessToken, 
+      hasPhoneId: !!outboundCreds.whatsappPhoneNumberId,
+      traceId
+    });
+
+    const accessToken = outboundCreds.accessToken || '';
+    const phoneId = outboundCreds.whatsappPhoneNumberId || '';
 
     if (!accessToken || (channel === 'whatsapp' && !phoneId)) {
-       this.log.error(`[SEND_FAILED] Missing Meta credentials for tenant`, undefined, { tenantId, traceId, channel });
-       throw new Error("Missing Meta credentials");
+       this.log.error(`[CREDENTIAL_MISSING] Cannot send — no credentials resolved for tenant`, undefined, {
+         tenantId, traceId, channel, source: outboundCreds.source,
+         hasToken: !!accessToken, hasPhoneId: !!phoneId
+       });
+       throw new Error(`CREDENTIAL_MISSING: No ${channel} credentials for tenant ${tenantId}`);
     }
 
     let outProviderMessageId: string | null = null;
@@ -642,7 +659,7 @@ export class QueueWorkerEngine {
         outProviderMessageId = outRes.providerMessageId || null;
       }
       messageStatus = 'sent';
-      this.log.info(`[SEND_OK] Message delivered to Meta via ${channel}`, { traceId, providerMessageId: outProviderMessageId });
+      this.log.info(`[SEND_OK] Message delivered to Meta via ${channel}`, { traceId, providerMessageId: outProviderMessageId, credentialSource: outboundCreds.source });
     } catch (e: any) {
        this.log.error(`[SEND_FAILED] Meta API rejection for ${channel}`, e, { traceId });
        throw e; // Retry tetikle
