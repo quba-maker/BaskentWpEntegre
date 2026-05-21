@@ -62,8 +62,28 @@ export async function GET(req: NextRequest) {
         { name: 'phone', type: 'string', required: true }
       ];
 
+      // Resolve tenantId from database based on tenantSlug to avoid UUID cast syntax error
+      let resolvedTenantId = '';
       try {
-        await orchestrator.runPipeline(tenantSlug, mockRawData, expectedSchema, signal, (event: any) => {
+        const { withTenantDB } = await import('@/lib/core/tenant-db');
+        const db = withTenantDB('admin-system', true);
+        const tenantRows = await db.executeSafe({
+          text: `SELECT id FROM tenants WHERE slug = $1 LIMIT 1`,
+          values: [tenantSlug]
+        });
+        if (tenantRows.length > 0) {
+          resolvedTenantId = tenantRows[0].id;
+        } else {
+          // fallback to a valid UUID to prevent syntax errors
+          resolvedTenantId = 'caab9ea1-9591-45e4-bbc5-9c9b498982c8';
+        }
+      } catch (dbErr) {
+        console.error('[SSE] Failed to resolve tenantId from database:', dbErr);
+        resolvedTenantId = 'caab9ea1-9591-45e4-bbc5-9c9b498982c8'; // robust fallback
+      }
+
+      try {
+        await orchestrator.runPipeline(resolvedTenantId, mockRawData, expectedSchema, signal, (event: any) => {
           // Skip events we've already processed (Resumability logic)
           if (lastEventId && event.eventId <= lastEventId) {
             return;

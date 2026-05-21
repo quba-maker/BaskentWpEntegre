@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { withTenantDB } from "@/lib/core/tenant-db";
 import { logger } from "@/lib/core/logger";
 import { CredentialsService } from "@/lib/services/credentials.service";
+import { processRetryQueue } from "@/lib/retry";
 
 const log = logger.withContext({ module: 'CronAppointments' });
 
@@ -12,6 +13,14 @@ const log = logger.withContext({ module: 'CronAppointments' });
 
 export async function GET() {
   try {
+    // Process retry queue automatically to comply with Vercel Hobby 2 crons limit
+    try {
+      await processRetryQueue();
+      log.info("Processed retry queue automatically inside cron-appointments");
+    } catch (retryErr: any) {
+      log.error("Failed to automatically process retry queue inside cron-appointments", retryErr);
+    }
+
     const systemDb = withTenantDB('admin-system', true);
     
     // Tüm aktif tenantların yarınki randevularını bul

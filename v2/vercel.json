@@ -7,10 +7,6 @@
     {
       "path": "/api/cron-appointments",
       "schedule": "0 6 * * *"
-    },
-    {
-      "path": "/api/cron-retry",
-      "schedule": "0 7 * * *"
     }
   ]
 }

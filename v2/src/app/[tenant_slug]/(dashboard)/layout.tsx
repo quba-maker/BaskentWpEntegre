@@ -29,10 +29,35 @@ export async function generateMetadata({ params }: { params: Promise<{ tenant_sl
 
 export default async function DashboardLayout({
   children,
+  params,
 }: {
   children: React.ReactNode;
+  params: Promise<{ tenant_slug: string }>;
 }) {
+  const resolvedParams = await params;
+  const tenantSlug = resolvedParams.tenant_slug;
   const session = await getSession();
+
+  // Dynamic Auto-Impersonation for Platform Admins visiting different workspaces
+  if (session && session.role === "platform_admin" && session.tenantSlug !== tenantSlug && tenantSlug !== "admin") {
+    const { withTenantDB } = await import("@/lib/core/tenant-db");
+    const db = withTenantDB('admin-system', true);
+    const targetTenants = await db.executeSafe({
+      text: `SELECT id, slug FROM tenants WHERE slug = $1 AND status = 'active' LIMIT 1`,
+      values: [tenantSlug]
+    });
+    
+    if (targetTenants.length > 0) {
+      const target = targetTenants[0];
+      const { startImpersonation } = await import("@/lib/auth/session");
+      const res = await startImpersonation(target.id, target.slug);
+      if (res.success) {
+        const { redirect } = await import("next/navigation");
+        redirect(res.redirectUrl || `/${target.slug}`);
+      }
+    }
+  }
+
   const slug = session?.tenantSlug || "";
   const role = session?.role;
   const isAdmin = role === "platform_admin" || role === "admin" || role === "owner";

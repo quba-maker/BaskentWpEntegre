@@ -72,7 +72,13 @@ export async function middleware(req: NextRequest) {
     // TENANT ISOLATION KONTROLÜ (GÜMRÜK KAPISI)
     // Hiç kimse kendi tenant slug'ı dışında bir yere giremez! Platform Admin bile `/baskent` yazamaz.
     // Platform admin'in yeri `/admin` rotasıdır.
+    // Ancak platform_admin başka bir tenant slug'ına (örn: /baskent) girdiğinde auto-impersonation
+    // tetiklenebilmesi için bu isolation geçidine izin veriyoruz.
     if (urlTenantSlug !== sessionTenantSlug && urlTenantSlug !== 'admin') {
+      if (userRole === 'platform_admin') {
+        // Platform admin can bypass the isolation gate for auto-impersonation dynamic alignment
+        return NextResponse.next();
+      }
       if (process.env.NODE_ENV !== 'production') console.log(`[AUTH AUDIT] Tenant isolation failure: Attempted /${urlTenantSlug} but session is /${sessionTenantSlug}`);
       return NextResponse.redirect(new URL(`/${sessionTenantSlug}`, req.url));
     }
