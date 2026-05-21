@@ -1,6 +1,6 @@
 "use server";
 
-import { sql } from "@/lib/db";
+// sql import removed — all queries use parameterized {text, values} format for proper RLS enforcement
 import { withActionGuard } from "@/lib/core/action-guard";
 import { logAudit } from "@/lib/audit";
 import { enqueueRetry } from "@/lib/retry";
@@ -143,17 +143,20 @@ export async function getMessages(phone: string) {
         // Create the string pattern with % wildcards
         const phoneLike = `%${cleanPhone}%`;
 
-        const rows = await ctx.db.executeSafe(sql`
-          SELECT * FROM (
-            SELECT id, content as text, direction, status, model_used, EXTRACT(EPOCH FROM created_at) * 1000 as created_at_ms
-            FROM messages
-            WHERE phone_number LIKE ${phoneLike} 
-              AND (tenant_id = ${ctx.tenantId})
-            ORDER BY created_at DESC
-            LIMIT 100
-          ) sub
-          ORDER BY created_at_ms ASC
-        `);
+        const rows = await ctx.db.executeSafe({
+          text: `
+            SELECT * FROM (
+              SELECT id, content as text, direction, status, model_used, EXTRACT(EPOCH FROM created_at) * 1000 as created_at_ms
+              FROM messages
+              WHERE phone_number LIKE $1 
+                AND (tenant_id = $2)
+              ORDER BY created_at DESC
+              LIMIT 100
+            ) sub
+            ORDER BY created_at_ms ASC
+          `,
+          values: [phoneLike, ctx.tenantId]
+        });
 
       const validRows = Array.isArray(rows) ? rows : ((rows as any)?.rows || []);
 
@@ -220,11 +223,10 @@ export async function sendMessage(phone: string, text: string) {
     { actionName: 'sendMessage' },
     async (ctx) => {
       // Hangi kanaldan geldiğini bul
-      const convRows = await ctx.db.executeSafe(sql`
-        SELECT channel FROM conversations 
-        WHERE phone_number = ${phone} AND (tenant_id = ${ctx.tenantId})
-        LIMIT 1
-      `);
+      const convRows = await ctx.db.executeSafe({
+        text: `SELECT channel FROM conversations WHERE phone_number = $1 AND tenant_id = $2 LIMIT 1`,
+        values: [phone, ctx.tenantId]
+      });
       const channel = convRows[0]?.channel || 'whatsapp';
 
       // Credentials Service ile kimlik bilgilerini çöz
@@ -324,33 +326,36 @@ export async function sendMessage(phone: string, text: string) {
         }
       }
 
-      const msgInsert = await ctx.db.executeSafe(sql`
-        INSERT INTO messages (tenant_id, phone_number, direction, content, channel, status, provider_message_id)
-        VALUES (${ctx.tenantId}, ${phone}, 'out', ${text}, ${channel}, ${messageStatus}, ${providerMessageId})
-        RETURNING id
-      `);
+      const msgInsert = await ctx.db.executeSafe({
+        text: `INSERT INTO messages (tenant_id, phone_number, direction, content, channel, status, provider_message_id)
+               VALUES ($1, $2, 'out', $3, $4, $5, $6)
+               RETURNING id`,
+        values: [ctx.tenantId, phone, text, channel, messageStatus, providerMessageId]
+      });
 
       const messageId = Array.isArray(msgInsert) ? msgInsert[0]?.id : (msgInsert as any)?.rows?.[0]?.id;
 
-      await ctx.db.executeSafe(sql`
-        UPDATE conversations 
-        SET last_message_at = NOW(), 
-            last_message_content = ${text},
-            last_message_channel = ${channel},
-            last_message_status = ${messageStatus},
-            last_message_direction = 'out',
-            message_count = message_count + 1,
-            status = 'human'
-        WHERE phone_number = ${phone} AND (tenant_id = ${ctx.tenantId})
-      `);
+      await ctx.db.executeSafe({
+        text: `UPDATE conversations 
+               SET last_message_at = NOW(), 
+                   last_message_content = $1,
+                   last_message_channel = $2,
+                   last_message_status = $3,
+                   last_message_direction = 'out',
+                   message_count = message_count + 1,
+                   status = 'human'
+               WHERE phone_number = $4 AND tenant_id = $5`,
+        values: [text, channel, messageStatus, phone, ctx.tenantId]
+      });
 
       // Publish Realtime Event
       if (messageId) {
         try {
           const { RealtimePublisher } = await import("@/lib/realtime/publisher");
-          const conversationRows = await ctx.db.executeSafe(sql`
-            SELECT id FROM conversations WHERE phone_number = ${phone} AND (tenant_id = ${ctx.tenantId}) LIMIT 1
-          `);
+          const conversationRows = await ctx.db.executeSafe({
+            text: `SELECT id FROM conversations WHERE phone_number = $1 AND tenant_id = $2 LIMIT 1`,
+            values: [phone, ctx.tenantId]
+          });
           const conversationId = Array.isArray(conversationRows) ? conversationRows[0]?.id : (conversationRows as any)?.rows?.[0]?.id;
           
           if (conversationId) {
@@ -403,33 +408,28 @@ export async function updateCrmData(phone: string, stage: string, department: st
     async (ctx) => {
       if (country !== undefined) {
         try {
-          await ctx.db.executeSafe(sql`
-            UPDATE conversations
-            SET lead_stage = ${stage}, department = ${department}, country = ${country}, notes = ${notes !== undefined ? notes : null}
-            WHERE phone_number = ${phone} AND (tenant_id = ${ctx.tenantId})
-          `);
+          await ctx.db.executeSafe({
+            text: `UPDATE conversations SET lead_stage = $1, department = $2, country = $3, notes = $4 WHERE phone_number = $5 AND tenant_id = $6`,
+            values: [stage, department, country, notes !== undefined ? notes : null, phone, ctx.tenantId]
+          });
         } catch (e) {
-          await ctx.db.executeSafe(sql`
-            UPDATE conversations
-            SET lead_stage = ${stage}, department = ${department}, notes = ${notes !== undefined ? notes : null}
-            WHERE phone_number = ${phone} AND (tenant_id = ${ctx.tenantId})
-          `);
+          await ctx.db.executeSafe({
+            text: `UPDATE conversations SET lead_stage = $1, department = $2, notes = $3 WHERE phone_number = $4 AND tenant_id = $5`,
+            values: [stage, department, notes !== undefined ? notes : null, phone, ctx.tenantId]
+          });
         }
       } else {
-        await ctx.db.executeSafe(sql`
-          UPDATE conversations
-          SET lead_stage = ${stage}, department = ${department}, notes = ${notes !== undefined ? notes : null}
-          WHERE phone_number = ${phone} AND (tenant_id = ${ctx.tenantId})
-        `);
+        await ctx.db.executeSafe({
+          text: `UPDATE conversations SET lead_stage = $1, department = $2, notes = $3 WHERE phone_number = $4 AND tenant_id = $5`,
+          values: [stage, department, notes !== undefined ? notes : null, phone, ctx.tenantId]
+        });
       }
       
       try {
-        await ctx.db.executeSafe(sql`
-          UPDATE leads
-          SET stage = ${stage}, notes = ${notes !== undefined ? notes : null}
-          WHERE (phone_number = ${phone} OR phone_number LIKE ${'%' + phone.substring(phone.length - 10) + '%'})
-            AND (tenant_id = ${ctx.tenantId})
-        `);
+        await ctx.db.executeSafe({
+          text: `UPDATE leads SET stage = $1, notes = $2 WHERE (phone_number = $3 OR phone_number LIKE $4) AND tenant_id = $5`,
+          values: [stage, notes !== undefined ? notes : null, phone, '%' + phone.substring(phone.length - 10) + '%', ctx.tenantId]
+        });
       } catch (e) {
         // Ignore if leads table structure differs
       }
@@ -476,9 +476,10 @@ export async function addTag(phone: string, tag: string) {
   return withActionGuard(
     { actionName: 'addTag' },
     async (ctx) => {
-      const rows = await ctx.db.executeSafe(sql`
-        SELECT tags FROM conversations WHERE phone_number = ${phone} AND (tenant_id = ${ctx.tenantId})
-      `);
+      const rows = await ctx.db.executeSafe({
+        text: `SELECT tags FROM conversations WHERE phone_number = $1 AND tenant_id = $2`,
+        values: [phone, ctx.tenantId]
+      });
       let tags: string[] = [];
       if (rows.length > 0 && rows[0].tags) {
         try {
@@ -491,11 +492,10 @@ export async function addTag(phone: string, tag: string) {
       
       if (!tags.includes(tag)) {
         tags.push(tag);
-        await ctx.db.executeSafe(sql`
-          UPDATE conversations 
-          SET tags = ${JSON.stringify(tags)}
-          WHERE phone_number = ${phone} AND (tenant_id = ${ctx.tenantId})
-        `);
+        await ctx.db.executeSafe({
+          text: `UPDATE conversations SET tags = $1 WHERE phone_number = $2 AND tenant_id = $3`,
+          values: [JSON.stringify(tags), phone, ctx.tenantId]
+        });
       }
       return { success: true, tags };
     }
@@ -508,9 +508,10 @@ export async function removeTag(phone: string, tagToRemove: string) {
   return withActionGuard(
     { actionName: 'removeTag' },
     async (ctx) => {
-      const rows = await ctx.db.executeSafe(sql`
-        SELECT tags FROM conversations WHERE phone_number = ${phone} AND (tenant_id = ${ctx.tenantId})
-      `);
+      const rows = await ctx.db.executeSafe({
+        text: `SELECT tags FROM conversations WHERE phone_number = $1 AND tenant_id = $2`,
+        values: [phone, ctx.tenantId]
+      });
       let tags: string[] = [];
       if (rows.length > 0 && rows[0].tags) {
         try {
@@ -522,11 +523,10 @@ export async function removeTag(phone: string, tagToRemove: string) {
       }
       
       const newTags = tags.filter(t => t !== tagToRemove);
-      await ctx.db.executeSafe(sql`
-        UPDATE conversations 
-        SET tags = ${JSON.stringify(newTags)}
-        WHERE phone_number = ${phone} AND (tenant_id = ${ctx.tenantId})
-      `);
+      await ctx.db.executeSafe({
+        text: `UPDATE conversations SET tags = $1 WHERE phone_number = $2 AND tenant_id = $3`,
+        values: [JSON.stringify(newTags), phone, ctx.tenantId]
+      });
       
       return { success: true, tags: newTags };
     }
@@ -540,11 +540,10 @@ export async function toggleBotStatus(phone: string, isBotActive: boolean) {
     { actionName: 'toggleBotStatus' },
     async (ctx) => {
       const newStatus = isBotActive ? 'bot' : 'human';
-      await ctx.db.executeSafe(sql`
-        UPDATE conversations
-        SET status = ${newStatus}
-        WHERE phone_number = ${phone} AND (tenant_id = ${ctx.tenantId})
-      `);
+      await ctx.db.executeSafe({
+        text: `UPDATE conversations SET status = $1 WHERE phone_number = $2 AND tenant_id = $3`,
+        values: [newStatus, phone, ctx.tenantId]
+      });
 
       logAudit({
         tenantId: ctx.tenantId,
