@@ -36,7 +36,7 @@ async function fetchTenantDataFromDB(tenantId: string): Promise<TenantBootstrapD
     const tenants = await sqlClient`
       SELECT id, name, slug, industry, logo_url, primary_color, 
              sidebar_theme, dashboard_density, ui_mode, workspace_version,
-             plan, monthly_message_limit, max_bot_messages 
+             plan, monthly_message_limit, token_budget
       FROM tenants 
       WHERE id = ${tenantId} AND status = 'active'
     `;
@@ -79,7 +79,7 @@ async function fetchTenantDataFromDB(tenantId: string): Promise<TenantBootstrapD
       limits: {
         plan: t.plan || 'starter',
         monthly_message_limit: t.monthly_message_limit || 500,
-        max_bot_messages: t.max_bot_messages || 8
+        max_bot_messages: 8 // default since it was removed
       },
       flags,
       workspace_version: t.workspace_version || 1
