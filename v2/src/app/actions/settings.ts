@@ -1,6 +1,6 @@
 "use server";
 
-import { sql } from "@/lib/db";
+// sql import removed — all queries use parameterized {text, values} format for proper RLS enforcement
 import { withActionGuard } from "@/lib/core/action-guard";
 
 // ==========================================
@@ -12,12 +12,13 @@ export async function getTenantSettings() {
     { actionName: 'getTenantSettings' },
     async (ctx) => {
       // 1. Unsafe execute ile güvenli query gönderilir
-      const tenants = await ctx.db.executeSafe(sql`
-        SELECT id, name, slug, industry, logo_url, primary_color,
+      const tenants = await ctx.db.executeSafe({
+        text: `SELECT id, name, slug, industry, logo_url, primary_color,
                ai_model, timezone, plan, monthly_message_limit, status,
                created_at
-        FROM tenants WHERE id = ${ctx.tenantId}
-      `);
+               FROM tenants WHERE id = $1`,
+        values: [ctx.tenantId]
+      });
 
       if (tenants.length === 0) throw new Error("Tenant bulunamadı");
 
@@ -47,15 +48,16 @@ export async function updateTenantSettings(updates: Record<string, any>) {
       const { name, industry, primaryColor, timezone } = updates;
       // NOTE: aiModel & maxBotMessages are now managed exclusively via Bot page (saveBotSetting action)
 
-      await ctx.db.executeSafe(sql`
-        UPDATE tenants SET
-          name = COALESCE(${name || null}, name),
-          industry = COALESCE(${industry || null}, industry),
-          primary_color = COALESCE(${primaryColor || null}, primary_color),
-          timezone = COALESCE(${timezone || null}, timezone),
-          updated_at = NOW()
-        WHERE id = ${ctx.tenantId}
-      `);
+      await ctx.db.executeSafe({
+        text: `UPDATE tenants SET
+                 name = COALESCE($1, name),
+                 industry = COALESCE($2, industry),
+                 primary_color = COALESCE($3, primary_color),
+                 timezone = COALESCE($4, timezone),
+                 updated_at = NOW()
+               WHERE id = $5`,
+        values: [name || null, industry || null, primaryColor || null, timezone || null, ctx.tenantId]
+      });
 
       return { success: true };
     }
@@ -75,19 +77,21 @@ export async function getUsageStats() {
       const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
 
       // Get metrics from ai_runtime_metrics instead of missing usage_log table
-      const metrics = await ctx.db.executeSafe(sql`
-        SELECT 
-          COUNT(*) as total_ai_messages,
-          SUM(estimated_cost_usd) as estimated_cost_usd,
-          SUM(total_tokens) as total_tokens
-        FROM ai_runtime_metrics 
-        WHERE tenant_id = ${ctx.tenantId} AND created_at >= ${monthStart}
-      `);
+      const metrics = await ctx.db.executeSafe({
+        text: `SELECT 
+                 COUNT(*) as total_ai_messages,
+                 SUM(estimated_cost_usd) as estimated_cost_usd,
+                 SUM(total_tokens) as total_tokens
+               FROM ai_runtime_metrics 
+               WHERE tenant_id = $1 AND created_at >= $2`,
+        values: [ctx.tenantId, monthStart]
+      });
 
       // tenants tablosu
-      const tenant = await ctx.db.executeSafe(sql`
-        SELECT monthly_message_limit, plan FROM tenants WHERE id = ${ctx.tenantId}
-      `);
+      const tenant = await ctx.db.executeSafe({
+        text: `SELECT monthly_message_limit, plan FROM tenants WHERE id = $1`,
+        values: [ctx.tenantId]
+      });
 
       return {
         currentMonth: month,

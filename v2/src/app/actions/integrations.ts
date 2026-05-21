@@ -1,6 +1,6 @@
 "use server";
 
-import { sql } from "@/lib/db";
+// sql import removed — all queries use parameterized {text, values} format for proper RLS enforcement
 import { withActionGuard } from "@/lib/core/action-guard";
 
 // ==========================================
@@ -11,11 +11,10 @@ export async function getGoogleSheetsConfig() {
   return withActionGuard(
     { actionName: 'getGoogleSheetsConfig' },
     async (ctx) => {
-      const res = await ctx.db.executeSafe(sql`
-        SELECT value FROM settings 
-        WHERE key = 'google_sheets_config' AND tenant_id = ${ctx.tenantId} 
-        LIMIT 1
-      `);
+      const res = await ctx.db.executeSafe({
+        text: `SELECT value FROM settings WHERE key = 'google_sheets_config' AND tenant_id = $1 LIMIT 1`,
+        values: [ctx.tenantId]
+      });
       
       if (res.length > 0) {
         return { config: JSON.parse(res[0].value) };
@@ -37,12 +36,13 @@ export async function saveGoogleSheetsConfig(config: any) {
     async (ctx) => {
       const value = JSON.stringify(config);
       
-      await ctx.db.executeSafe(sql`
-        INSERT INTO settings (key, value, tenant_id, updated_at) 
-        VALUES ('google_sheets_config', ${value}, ${ctx.tenantId}, NOW())
-        ON CONFLICT (tenant_id, key) 
-        DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at
-      `);
+      await ctx.db.executeSafe({
+        text: `INSERT INTO settings (key, value, tenant_id, updated_at) 
+               VALUES ('google_sheets_config', $1, $2, NOW())
+               ON CONFLICT (tenant_id, key) 
+               DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at`,
+        values: [value, ctx.tenantId]
+      });
       return { success: true };
     }
   ).then(res => {
@@ -88,23 +88,22 @@ export async function getIntegrationHealth() {
   return withActionGuard(
     { actionName: 'getIntegrationHealth' },
     async (ctx) => {
-      const dbChannels = await ctx.db.executeSafe(sql`
-        SELECT 
-          c.id, c.provider, c.identifier, c.name,
-          ci.health_status, ci.credentials_encrypted, ci.last_sync_at,
-          cg.name as group_name
-        FROM channels c
-        JOIN channel_groups cg ON c.group_id = cg.id
-        LEFT JOIN channel_integrations ci ON ci.channel_id = c.id
-        WHERE cg.tenant_id = ${ctx.tenantId}
-          AND c.provider != 'meta_legacy'
-      `);
+      const dbChannels = await ctx.db.executeSafe({
+        text: `SELECT 
+                 c.id, c.provider, c.identifier, c.name,
+                 ci.health_status, ci.credentials_encrypted, ci.last_sync_at,
+                 cg.name as group_name
+               FROM channels c
+               JOIN channel_groups cg ON c.group_id = cg.id
+               LEFT JOIN channel_integrations ci ON ci.channel_id = c.id
+               WHERE cg.tenant_id = $1 AND c.provider != 'meta_legacy'`,
+        values: [ctx.tenantId]
+      });
 
-      const sheetsConfig = await ctx.db.executeSafe(sql`
-        SELECT value, updated_at FROM settings 
-        WHERE key = 'google_sheets_config' AND tenant_id = ${ctx.tenantId} 
-        LIMIT 1
-      `);
+      const sheetsConfig = await ctx.db.executeSafe({
+        text: `SELECT value, updated_at FROM settings WHERE key = 'google_sheets_config' AND tenant_id = $1 LIMIT 1`,
+        values: [ctx.tenantId]
+      });
 
       const channels: {
         id: string;
@@ -129,11 +128,10 @@ export async function getIntegrationHealth() {
           detail = 'Token veya bağlantı hatası';
         }
 
-        const lastMsg = await ctx.db.executeSafe(sql`
-          SELECT created_at FROM messages 
-          WHERE channel_id = ${row.id}
-          ORDER BY created_at DESC LIMIT 1
-        `);
+        const lastMsg = await ctx.db.executeSafe({
+          text: `SELECT created_at FROM messages WHERE channel_id = $1 ORDER BY created_at DESC LIMIT 1`,
+          values: [row.id]
+        });
 
         channels.push({
           id: row.id,
@@ -187,16 +185,15 @@ export async function setupIntegrationChannel(provider: string, identifier: stri
     { actionName: 'setupIntegrationChannel', roles: ['owner', 'admin'] },
     async (ctx) => {
       let groupId;
-      const groups = await ctx.db.executeSafe(sql`SELECT id FROM channel_groups WHERE tenant_id = ${ctx.tenantId} AND name = 'Varsayılan Grup'`);
+      const groups = await ctx.db.executeSafe({ text: `SELECT id FROM channel_groups WHERE tenant_id = $1 AND name = 'Varsayılan Grup'`, values: [ctx.tenantId] });
       if (groups.length > 0) groupId = groups[0].id;
       else {
-        const newGroup = await ctx.db.executeSafe(sql`INSERT INTO channel_groups (tenant_id, name) VALUES (${ctx.tenantId}, 'Varsayılan Grup') RETURNING id`);
+        const newGroup = await ctx.db.executeSafe({ text: `INSERT INTO channel_groups (tenant_id, name) VALUES ($1, 'Varsayılan Grup') RETURNING id`, values: [ctx.tenantId] });
         groupId = newGroup[0].id;
       }
+      const newCh = await ctx.db.executeSafe({ text: `INSERT INTO channels (group_id, provider, identifier, name) VALUES ($1, $2, $3, $4) RETURNING id`, values: [groupId, provider, identifier, name] });
       
-      const newCh = await ctx.db.executeSafe(sql`INSERT INTO channels (group_id, provider, identifier, name) VALUES (${groupId}, ${provider}, ${identifier}, ${name}) RETURNING id`);
-      
-      await ctx.db.executeSafe(sql`INSERT INTO channel_integrations (channel_id, provider, credentials_encrypted) VALUES (${newCh[0].id}, ${provider}, ${JSON.stringify({ accessToken: token })})`);
+      await ctx.db.executeSafe({ text: `INSERT INTO channel_integrations (channel_id, provider, credentials_encrypted) VALUES ($1, $2, $3)`, values: [newCh[0].id, provider, JSON.stringify({ accessToken: token })] });
 
       return { success: true };
     }

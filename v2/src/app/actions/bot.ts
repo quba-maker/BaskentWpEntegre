@@ -1,6 +1,6 @@
 "use server";
 
-import { sql } from "@/lib/db";
+// sql import removed — all queries use parameterized {text, values} format for proper RLS enforcement
 import { withActionGuard } from "@/lib/core/action-guard";
 import { logAudit } from "@/lib/audit";
 
@@ -12,32 +12,20 @@ export async function getBotSettings() {
   return withActionGuard(
     { actionName: 'getBotSettings' },
     async (ctx) => {
-      const settings = await ctx.db.executeSafe(sql`
-        SELECT key, value, updated_at FROM settings 
-        WHERE tenant_id = ${ctx.tenantId}
-          AND key IN (
-            'system_prompt_whatsapp', 
-            'system_prompt_tr', 
-            'system_prompt_foreign',
-            'foreign_page_id',
-            'channel_whatsapp_enabled',
-            'channel_instagram_enabled',
-            'channel_foreign_enabled',
-            'bot_auto_greeting',
-            'bot_greeting_language',
-            'bot_max_messages',
-            'bot_working_hours',
-            'bot_aggression_level',
-            'ai_model',
-            'bot_whatsapp_active',
-            'bot_instagram_active',
-            'bot_foreign_active',
-            'working_hours',
-            'bot_knowledge_prices',
-            'bot_knowledge_rules',
-            'bot_max_response_tokens'
-          )
-      `);
+      const settings = await ctx.db.executeSafe({
+        text: `SELECT key, value, updated_at FROM settings 
+               WHERE tenant_id = $1
+                 AND key IN (
+                   'system_prompt_whatsapp', 'system_prompt_tr', 'system_prompt_foreign',
+                   'foreign_page_id', 'channel_whatsapp_enabled', 'channel_instagram_enabled',
+                   'channel_foreign_enabled', 'bot_auto_greeting', 'bot_greeting_language',
+                   'bot_max_messages', 'bot_working_hours', 'bot_aggression_level',
+                   'ai_model', 'bot_whatsapp_active', 'bot_instagram_active',
+                   'bot_foreign_active', 'working_hours', 'bot_knowledge_prices',
+                   'bot_knowledge_rules', 'bot_max_response_tokens'
+                 )`,
+        values: [ctx.tenantId]
+      });
 
       // Read path %100 saf tutuldu (No mutation, no side-effects)
       const rows = Array.isArray(settings) ? settings : ((settings as any)?.rows || []);
@@ -69,12 +57,13 @@ export async function saveBotSetting(key: string, value: string) {
     },
     async (ctx) => {
       // UPSERT — RLS enforced & Idempotent
-      await ctx.db.executeSafe(sql`
-        INSERT INTO settings (key, value, tenant_id, updated_at) 
-        VALUES (${key}, ${value}, ${ctx.tenantId}, NOW())
-        ON CONFLICT (tenant_id, key) 
-        DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at
-      `);
+      await ctx.db.executeSafe({
+        text: `INSERT INTO settings (key, value, tenant_id, updated_at) 
+               VALUES ($1, $2, $3, NOW())
+               ON CONFLICT (tenant_id, key) 
+               DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at`,
+        values: [key, value, ctx.tenantId]
+      });
 
       
       // Audit log
@@ -137,15 +126,15 @@ export async function getBotStats(period: string = '7d') {
       const interval = intervalMap[period] || '7 days';
 
       const [botMessages, handovers, totalConvs, avgResponse] = await Promise.all([
-        ctx.db.executeSafe(sql`SELECT COUNT(*) as c FROM messages WHERE tenant_id = ${ctx.tenantId} AND direction = 'out' AND created_at >= NOW() - CAST(${interval} AS INTERVAL)`),
-        ctx.db.executeSafe(sql`SELECT COUNT(*) as c FROM conversations WHERE tenant_id = ${ctx.tenantId} AND status = 'human' AND last_message_at >= NOW() - CAST(${interval} AS INTERVAL)`),
-        ctx.db.executeSafe(sql`SELECT COUNT(*) as c FROM conversations WHERE tenant_id = ${ctx.tenantId} AND created_at >= NOW() - CAST(${interval} AS INTERVAL)`),
-        ctx.db.executeSafe(sql`SELECT AVG(EXTRACT(EPOCH FROM (m.created_at - c.created_at)) / 60) as avg_min
+        ctx.db.executeSafe({ text: `SELECT COUNT(*) as c FROM messages WHERE tenant_id = $1 AND direction = 'out' AND created_at >= NOW() - CAST($2 AS INTERVAL)`, values: [ctx.tenantId, interval] }),
+        ctx.db.executeSafe({ text: `SELECT COUNT(*) as c FROM conversations WHERE tenant_id = $1 AND status = 'human' AND last_message_at >= NOW() - CAST($2 AS INTERVAL)`, values: [ctx.tenantId, interval] }),
+        ctx.db.executeSafe({ text: `SELECT COUNT(*) as c FROM conversations WHERE tenant_id = $1 AND created_at >= NOW() - CAST($2 AS INTERVAL)`, values: [ctx.tenantId, interval] }),
+        ctx.db.executeSafe({ text: `SELECT AVG(EXTRACT(EPOCH FROM (m.created_at - c.created_at)) / 60) as avg_min
             FROM conversations c
             JOIN messages m ON m.phone_number = c.phone_number AND m.direction = 'out'
-            WHERE c.tenant_id = ${ctx.tenantId}
-              AND c.created_at >= NOW() - CAST(${interval} AS INTERVAL)
-              AND m.created_at = (SELECT MIN(created_at) FROM messages WHERE phone_number = c.phone_number AND direction = 'out')`)
+            WHERE c.tenant_id = $1
+              AND c.created_at >= NOW() - CAST($2 AS INTERVAL)
+              AND m.created_at = (SELECT MIN(created_at) FROM messages WHERE phone_number = c.phone_number AND direction = 'out')`, values: [ctx.tenantId, interval] })
       ]);
 
       const totalConvsCount = parseInt(totalConvs[0]?.c) || 1;
@@ -182,27 +171,26 @@ export async function getModelUsage(period: string = '30d') {
       };
       const interval = intervalMap[period] || '30 days';
 
-      const usage = await ctx.db.executeSafe(sql`
-        SELECT 
-          COALESCE(model_used, 'gemini-2.5-flash') as model_used, 
-          COUNT(*) as message_count,
-          SUM(COALESCE(prompt_tokens, 150)) as total_prompt_tokens,
-          SUM(COALESCE(completion_tokens, 200)) as total_completion_tokens
-        FROM messages 
-        WHERE tenant_id = ${ctx.tenantId}
-          AND direction = 'out' 
-          AND created_at >= NOW() - CAST(${interval} AS INTERVAL)
-        GROUP BY COALESCE(model_used, 'gemini-2.5-flash') ORDER BY message_count DESC
-      `);
+      const usage = await ctx.db.executeSafe({
+        text: `SELECT 
+                 COALESCE(model_used, 'gemini-2.5-flash') as model_used, 
+                 COUNT(*) as message_count,
+                 SUM(COALESCE(prompt_tokens, 150)) as total_prompt_tokens,
+                 SUM(COALESCE(completion_tokens, 200)) as total_completion_tokens
+               FROM messages 
+               WHERE tenant_id = $1 AND direction = 'out' 
+                 AND created_at >= NOW() - CAST($2 AS INTERVAL)
+               GROUP BY COALESCE(model_used, 'gemini-2.5-flash') ORDER BY message_count DESC`,
+        values: [ctx.tenantId, interval]
+      });
 
-      const channelBreakdown = await ctx.db.executeSafe(sql`
-        SELECT channel, COUNT(*) as c
-        FROM messages 
-        WHERE tenant_id = ${ctx.tenantId}
-          AND direction = 'out' 
-          AND created_at >= NOW() - CAST(${interval} AS INTERVAL)
-        GROUP BY channel
-      `);
+      const channelBreakdown = await ctx.db.executeSafe({
+        text: `SELECT channel, COUNT(*) as c FROM messages 
+               WHERE tenant_id = $1 AND direction = 'out' 
+                 AND created_at >= NOW() - CAST($2 AS INTERVAL)
+               GROUP BY channel`,
+        values: [ctx.tenantId, interval]
+      });
 
       const USD_TRY_RATE = 36.50; // In a production app this could be fetched from an API daily and cached.
       let totalCostUsd = 0;
@@ -269,17 +257,17 @@ export async function getRecentBotConversations(limit: number = 8) {
   return withActionGuard(
     { actionName: 'getRecentBotConversations' },
     async (ctx) => {
-      const convs = await ctx.db.executeSafe(sql`
-        SELECT 
-          c.phone_number, c.patient_name, c.channel, c.status, c.temperature,
-          c.phase, c.department, c.message_count, c.last_message_at, c.lead_score,
-          (SELECT content FROM messages WHERE phone_number = c.phone_number AND direction = 'in' ORDER BY created_at DESC LIMIT 1) as last_patient_msg,
-          (SELECT COUNT(*) FROM messages WHERE phone_number = c.phone_number AND direction = 'out') as bot_msg_count
-        FROM conversations c
-        WHERE c.tenant_id = ${ctx.tenantId}
-          AND c.message_count > 0
-        ORDER BY c.last_message_at DESC LIMIT ${limit}
-      `);
+      const convs = await ctx.db.executeSafe({
+        text: `SELECT 
+                 c.phone_number, c.patient_name, c.channel, c.status, c.temperature,
+                 c.phase, c.department, c.message_count, c.last_message_at, c.lead_score,
+                 (SELECT content FROM messages WHERE phone_number = c.phone_number AND direction = 'in' ORDER BY created_at DESC LIMIT 1) as last_patient_msg,
+                 (SELECT COUNT(*) FROM messages WHERE phone_number = c.phone_number AND direction = 'out') as bot_msg_count
+               FROM conversations c
+               WHERE c.tenant_id = $1 AND c.message_count > 0
+               ORDER BY c.last_message_at DESC LIMIT $2`,
+        values: [ctx.tenantId, limit]
+      });
 
       return convs.map((c: any) => ({
         phone: c.phone_number,
@@ -319,16 +307,18 @@ export async function testBotPrompt(prompt: string, testMessage: string, channel
           foreign: 'system_prompt_foreign'
         };
         const key = promptKeyMap[channel] || 'system_prompt_whatsapp';
-        const dbPrompt = await ctx.db.executeSafe(sql`
-          SELECT value FROM settings WHERE key = ${key} AND tenant_id = ${ctx.tenantId}
-        `);
+        const dbPrompt = await ctx.db.executeSafe({
+          text: `SELECT value FROM settings WHERE key = $1 AND tenant_id = $2`,
+          values: [key, ctx.tenantId]
+        });
         finalPrompt = dbPrompt[0]?.value || 'Sen bir dijital asistansın. Kısa, sıcak ve profesyonel cevaplar ver.';
       }
 
       // 🧠 KNOWLEDGE BASE INJECTION (for accurate playground testing)
-      const kbSettings = await ctx.db.executeSafe(sql`
-        SELECT key, value FROM settings WHERE key IN ('bot_knowledge_prices', 'bot_knowledge_rules') AND tenant_id = ${ctx.tenantId}
-      `);
+      const kbSettings = await ctx.db.executeSafe({
+        text: `SELECT key, value FROM settings WHERE key IN ('bot_knowledge_prices', 'bot_knowledge_rules') AND tenant_id = $1`,
+        values: [ctx.tenantId]
+      });
       let prices = '', rules = '';
       kbSettings.forEach((row: any) => {
         if (row.key === 'bot_knowledge_prices') prices = row.value;
@@ -345,9 +335,10 @@ export async function testBotPrompt(prompt: string, testMessage: string, channel
 
       finalPrompt += knowledgeInjection;
 
-      const aiModel = await ctx.db.executeSafe(sql`
-        SELECT value FROM settings WHERE key = 'ai_model' AND tenant_id = ${ctx.tenantId}
-      `);
+      const aiModel = await ctx.db.executeSafe({
+        text: `SELECT value FROM settings WHERE key = 'ai_model' AND tenant_id = $1`,
+        values: [ctx.tenantId]
+      });
       const model = aiModel[0]?.value || 'gemini-2.5-flash';
 
       const response = await fetch(

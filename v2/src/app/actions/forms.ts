@@ -1,6 +1,6 @@
 "use server";
 
-import { sql } from "@/lib/db";
+// sql import removed — all queries use parameterized {text, values} format for proper RLS enforcement
 import { withActionGuard } from "@/lib/core/action-guard";
 import { logAudit } from "@/lib/audit";
 
@@ -20,49 +20,49 @@ export async function getForms(page: number = 1, search: string = "", source: st
       let rows;
       
       if (searchFilter && sourceFilter) {
-        rows = await ctx.db.executeSafe(sql`
-          SELECT l.*, c.status as conversation_status, mem.summary_text as ai_summary
-          FROM leads l
-          LEFT JOIN conversations c ON c.phone_number = l.phone_number AND c.tenant_id = l.tenant_id
-          LEFT JOIN conversation_memory mem ON mem.conversation_id::text = c.id::text
-          WHERE l.tenant_id = ${ctx.tenantId}
-            AND (l.patient_name ILIKE ${searchFilter} OR l.phone_number ILIKE ${searchFilter} OR l.email ILIKE ${searchFilter})
-            AND l.form_name ILIKE ${sourceFilter}
-          ORDER BY l.created_at DESC
-          LIMIT ${limit} OFFSET ${offset}
-        `);
+        rows = await ctx.db.executeSafe({
+          text: `SELECT l.*, c.status as conversation_status, mem.summary_text as ai_summary
+                 FROM leads l
+                 LEFT JOIN conversations c ON c.phone_number = l.phone_number AND c.tenant_id = l.tenant_id
+                 LEFT JOIN conversation_memory mem ON mem.conversation_id::text = c.id::text
+                 WHERE l.tenant_id = $1
+                   AND (l.patient_name ILIKE $2 OR l.phone_number ILIKE $2 OR l.email ILIKE $2)
+                   AND l.form_name ILIKE $3
+                 ORDER BY l.created_at DESC LIMIT $4 OFFSET $5`,
+          values: [ctx.tenantId, searchFilter, sourceFilter, limit, offset]
+        });
       } else if (searchFilter) {
-        rows = await ctx.db.executeSafe(sql`
-          SELECT l.*, c.status as conversation_status, mem.summary_text as ai_summary
-          FROM leads l
-          LEFT JOIN conversations c ON c.phone_number = l.phone_number AND c.tenant_id = l.tenant_id
-          LEFT JOIN conversation_memory mem ON mem.conversation_id::text = c.id::text
-          WHERE l.tenant_id = ${ctx.tenantId}
-            AND (l.patient_name ILIKE ${searchFilter} OR l.phone_number ILIKE ${searchFilter} OR l.email ILIKE ${searchFilter})
-          ORDER BY l.created_at DESC
-          LIMIT ${limit} OFFSET ${offset}
-        `);
+        rows = await ctx.db.executeSafe({
+          text: `SELECT l.*, c.status as conversation_status, mem.summary_text as ai_summary
+                 FROM leads l
+                 LEFT JOIN conversations c ON c.phone_number = l.phone_number AND c.tenant_id = l.tenant_id
+                 LEFT JOIN conversation_memory mem ON mem.conversation_id::text = c.id::text
+                 WHERE l.tenant_id = $1
+                   AND (l.patient_name ILIKE $2 OR l.phone_number ILIKE $2 OR l.email ILIKE $2)
+                 ORDER BY l.created_at DESC LIMIT $3 OFFSET $4`,
+          values: [ctx.tenantId, searchFilter, limit, offset]
+        });
       } else if (sourceFilter) {
-        rows = await ctx.db.executeSafe(sql`
-          SELECT l.*, c.status as conversation_status, mem.summary_text as ai_summary
-          FROM leads l
-          LEFT JOIN conversations c ON c.phone_number = l.phone_number AND c.tenant_id = l.tenant_id
-          LEFT JOIN conversation_memory mem ON mem.conversation_id::text = c.id::text
-          WHERE l.tenant_id = ${ctx.tenantId}
-            AND l.form_name ILIKE ${sourceFilter}
-          ORDER BY l.created_at DESC
-          LIMIT ${limit} OFFSET ${offset}
-        `);
+        rows = await ctx.db.executeSafe({
+          text: `SELECT l.*, c.status as conversation_status, mem.summary_text as ai_summary
+                 FROM leads l
+                 LEFT JOIN conversations c ON c.phone_number = l.phone_number AND c.tenant_id = l.tenant_id
+                 LEFT JOIN conversation_memory mem ON mem.conversation_id::text = c.id::text
+                 WHERE l.tenant_id = $1
+                   AND l.form_name ILIKE $2
+                 ORDER BY l.created_at DESC LIMIT $3 OFFSET $4`,
+          values: [ctx.tenantId, sourceFilter, limit, offset]
+        });
       } else {
-        rows = await ctx.db.executeSafe(sql`
-          SELECT l.*, c.status as conversation_status, mem.summary_text as ai_summary
-          FROM leads l
-          LEFT JOIN conversations c ON c.phone_number = l.phone_number AND c.tenant_id = l.tenant_id
-          LEFT JOIN conversation_memory mem ON mem.conversation_id::text = c.id::text
-          WHERE l.tenant_id = ${ctx.tenantId}
-          ORDER BY l.created_at DESC
-          LIMIT ${limit} OFFSET ${offset}
-        `);
+        rows = await ctx.db.executeSafe({
+          text: `SELECT l.*, c.status as conversation_status, mem.summary_text as ai_summary
+                 FROM leads l
+                 LEFT JOIN conversations c ON c.phone_number = l.phone_number AND c.tenant_id = l.tenant_id
+                 LEFT JOIN conversation_memory mem ON mem.conversation_id::text = c.id::text
+                 WHERE l.tenant_id = $1
+                 ORDER BY l.created_at DESC LIMIT $2 OFFSET $3`,
+          values: [ctx.tenantId, limit, offset]
+        });
       }
 
       return rows.map((r: any) => ({
@@ -88,16 +88,16 @@ export async function updateLeadNotes(id: number, notes: string) {
   return withActionGuard(
     { actionName: 'updateLeadNotes' },
     async (ctx) => {
-      const lead = await ctx.db.executeSafe(sql`
-        SELECT phone_number FROM leads WHERE id = ${id} AND tenant_id = ${ctx.tenantId}
-      `);
+      const lead = await ctx.db.executeSafe({
+        text: `SELECT phone_number FROM leads WHERE id = $1 AND tenant_id = $2`,
+        values: [id, ctx.tenantId]
+      });
       if (lead.length === 0) throw new Error("Kayıt bulunamadı.");
 
-      await ctx.db.executeSafe(sql`
-        UPDATE leads 
-        SET notes = ${notes} 
-        WHERE id = ${id} AND tenant_id = ${ctx.tenantId}
-      `);
+      await ctx.db.executeSafe({
+        text: `UPDATE leads SET notes = $1 WHERE id = $2 AND tenant_id = $3`,
+        values: [notes, id, ctx.tenantId]
+      });
 
       const SHEET_URL = process.env.GOOGLE_SHEET_UPDATE_URL || process.env.GOOGLE_SHEET_URL;
       if (SHEET_URL && lead.length > 0) {
@@ -132,7 +132,7 @@ export async function deleteAllLeads() {
       roles: ['owner', 'admin', 'platform_admin']
     },
     async (ctx) => {
-      await ctx.db.executeSafe(sql`DELETE FROM leads WHERE tenant_id = ${ctx.tenantId}`);
+      await ctx.db.executeSafe({ text: `DELETE FROM leads WHERE tenant_id = $1`, values: [ctx.tenantId] });
       
       logAudit({
         tenantId: ctx.tenantId,
@@ -155,13 +155,10 @@ export async function getCampaignNames() {
   return withActionGuard(
     { actionName: 'getCampaignNames' },
     async (ctx) => {
-      const campaigns = await ctx.db.executeSafe(sql`
-        SELECT DISTINCT form_name 
-        FROM leads 
-        WHERE tenant_id = ${ctx.tenantId}
-          AND form_name IS NOT NULL AND form_name != ''
-        ORDER BY form_name ASC
-      `);
+      const campaigns = await ctx.db.executeSafe({
+        text: `SELECT DISTINCT form_name FROM leads WHERE tenant_id = $1 AND form_name IS NOT NULL AND form_name != '' ORDER BY form_name ASC`,
+        values: [ctx.tenantId]
+      });
       return campaigns.map((c: any) => c.form_name);
     }
   ).then(res => res.data || []);
@@ -185,10 +182,10 @@ export async function syncGoogleSheets() {
       }
 
       // Check if integration exists and is healthy
-      const integrations = await ctx.db.executeSafe(sql`
-        SELECT health_status FROM tenant_integrations 
-        WHERE tenant_id = ${ctx.tenantId} AND provider = 'google_sheets' LIMIT 1
-      `);
+      const integrations = await ctx.db.executeSafe({
+        text: `SELECT health_status FROM tenant_integrations WHERE tenant_id = $1 AND provider = 'google_sheets' LIMIT 1`,
+        values: [ctx.tenantId]
+      });
 
       if (integrations.length === 0) {
         return { success: false, error: "Google Sheets entegrasyonu bulunamadı. Lütfen ayarlardan kurulum yapın." };
