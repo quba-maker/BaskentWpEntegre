@@ -1,17 +1,22 @@
-import { assertTenant } from "@/lib/security/assertions";
+import { getSession } from "@/lib/auth/session";
+import { getTenantBootstrapData } from "@/lib/domain/tenant/bootstrap";
 import { TenantDB } from "@/lib/core/tenant-db";
-import { sql } from "@/lib/db";
+import { sql } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { AlertCircle, FileWarning, Activity } from "lucide-react";
 
 export default async function RecoveryPage({ params }: { params: { tenant_slug: string } }) {
-  const { tenant } = await assertTenant();
+  const session = await getSession();
+  if (!session || !session.tenantId) {
+    notFound();
+  }
   
-  if (tenant.slug !== params.tenant_slug) {
+  const tenantData = await getTenantBootstrapData(session.tenantId);
+  if (!tenantData || tenantData.profile.slug !== params.tenant_slug) {
     notFound();
   }
 
-  const db = new TenantDB(tenant.id);
+  const db = new TenantDB(tenantData.profile.id);
 
   // 1. Unresolved/Orphaned conversations (missing customer_id or channel_id)
   const orphanedConversationsRes = await db.executeSafe(sql`
