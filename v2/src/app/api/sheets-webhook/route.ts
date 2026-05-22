@@ -44,16 +44,26 @@ export async function POST(request: NextRequest) {
 
     const db = withTenantDB(tenantId);
 
-    // Sheet config — tenant bazlı kontrol
-    // V1_LEGACY: Reads from settings table. Migrate to channel config in Phase 2D.
+    // Sheet config — V2: ingestion_pipelines, V1 fallback: settings
     let activeSheets: string[] = [];
     try {
-      const configRes = await db.executeSafe({
-        text: `SELECT value FROM settings WHERE key = 'google_sheets_config' AND tenant_id = $1 LIMIT 1`,
-        values: [tenantId]
-      }) as any[];
-      if (configRes && configRes.length > 0) {
-        activeSheets = JSON.parse(configRes[0].value)?.activeSheets || [];
+      if (process.env.USE_V2_INTEGRATIONS !== 'false') {
+        const pipeRes = await db.executeSafe({
+          text: `SELECT config FROM ingestion_pipelines WHERE tenant_id = $1 AND provider = 'google_sheets' LIMIT 1`,
+          values: [tenantId]
+        }) as any[];
+        if (pipeRes && pipeRes.length > 0) {
+          const cfg = typeof pipeRes[0].config === 'string' ? JSON.parse(pipeRes[0].config) : pipeRes[0].config;
+          activeSheets = cfg?.activeSheets || [];
+        }
+      } else {
+        const configRes = await db.executeSafe({
+          text: `SELECT value FROM settings WHERE key = 'google_sheets_config' AND tenant_id = $1 LIMIT 1`,
+          values: [tenantId]
+        }) as any[];
+        if (configRes && configRes.length > 0) {
+          activeSheets = JSON.parse(configRes[0].value)?.activeSheets || [];
+        }
       }
     } catch (e) {}
     
@@ -202,22 +212,37 @@ export async function POST(request: NextRequest) {
         if (creds.whatsappPhoneNumberId) PHONE_NUMBER_ID = creds.whatsappPhoneNumberId;
       }
 
-      // 🔒 Otonom Karşılama kontrolü — tenant bazlı
-      // V1_LEGACY: Reads from settings table. Migrate to channel config in Phase 2D.
-      const autoGreetingSetting = await db.executeSafe({
-        text: `SELECT value FROM settings WHERE key = 'bot_auto_greeting' AND tenant_id = $1`,
-        values: [tenantId]
-      }) as any[];
-      const autoGreetingEnabled = autoGreetingSetting.length === 0 || autoGreetingSetting[0].value !== 'false';
+      // 🔒 Otonom Karşılama kontrolü — V2: channel_ai_profiles, V1 fallback: settings
+      let autoGreetingEnabled = true; // default: true
+      let greetingLang = 'auto'; // default: auto
 
-      if (META_ACCESS_TOKEN && PHONE_NUMBER_ID && autoGreetingEnabled) {
-        // 🌐 Karşılama Dili kontrolü — tenant bazlı
-        // V1_LEGACY: Reads from settings table. Migrate to channel config in Phase 2D.
+      if (process.env.USE_V2_INTEGRATIONS !== 'false') {
+        const profileRes = await db.executeSafe({
+          text: `SELECT cap.auto_greeting, cap.greeting_language
+                 FROM channel_ai_profiles cap
+                 JOIN channel_groups cg ON cap.group_id = cg.id
+                 WHERE cg.tenant_id = $1 LIMIT 1`,
+          values: [tenantId]
+        }) as any[];
+        if (profileRes.length > 0) {
+          autoGreetingEnabled = profileRes[0].auto_greeting !== false;
+          greetingLang = profileRes[0].greeting_language || 'auto';
+        }
+      } else {
+        const autoGreetingSetting = await db.executeSafe({
+          text: `SELECT value FROM settings WHERE key = 'bot_auto_greeting' AND tenant_id = $1`,
+          values: [tenantId]
+        }) as any[];
+        autoGreetingEnabled = autoGreetingSetting.length === 0 || autoGreetingSetting[0].value !== 'false';
+
         const greetingLangSetting = await db.executeSafe({
           text: `SELECT value FROM settings WHERE key = 'bot_greeting_language' AND tenant_id = $1`,
           values: [tenantId]
         }) as any[];
-        const greetingLang = greetingLangSetting.length > 0 ? greetingLangSetting[0].value : 'auto';
+        greetingLang = greetingLangSetting.length > 0 ? greetingLangSetting[0].value : 'auto';
+      }
+
+      if (META_ACCESS_TOKEN && PHONE_NUMBER_ID && autoGreetingEnabled) {
         
         const isTurkish = greetingLang === 'tr' ? true : greetingLang === 'en' ? false : phone1.startsWith('90');
         const tenantName = tenantMeta?.name || 'Ekibimiz';

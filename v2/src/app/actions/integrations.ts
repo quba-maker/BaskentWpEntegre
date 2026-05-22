@@ -1,17 +1,74 @@
 "use server";
 
-// sql import removed — all queries use parameterized {text, values} format for proper RLS enforcement
 import { withActionGuard } from "@/lib/core/action-guard";
+import { decryptPayload, encryptPayload, EncryptedPayload } from "@/lib/core/encryption";
 
 // ==========================================
-// QUBA AI — Integrations Actions (Zero-Trust)
-// V1_LEGACY: google_sheets_config stored in settings table. Migrate to dedicated integrations table in Phase 2D.
+// QUBA AI — Integrations Actions (Zero-Trust, V2-Native)
+// V2: google_sheets config from ingestion_pipelines + tenant_integrations
+// Rollback: USE_V2_INTEGRATIONS=false → settings table
 // ==========================================
 
+function isV2IntegrationsEnabled(): boolean {
+  return process.env.USE_V2_INTEGRATIONS !== 'false'; // default: true
+}
+
+// ── GET CONFIG ──────────────────────────────────────────
 export async function getGoogleSheetsConfig() {
   return withActionGuard(
     { actionName: 'getGoogleSheetsConfig' },
     async (ctx) => {
+      if (isV2IntegrationsEnabled()) {
+        // V2: Read from ingestion_pipelines (config) + tenant_integrations (credentials)
+        const pipeline = await ctx.db.executeSafe({
+          text: `SELECT config FROM ingestion_pipelines 
+                 WHERE tenant_id = $1 AND provider = 'google_sheets' LIMIT 1`,
+          values: [ctx.tenantId]
+        });
+
+        const integration = await ctx.db.executeSafe({
+          text: `SELECT credentials FROM tenant_integrations 
+                 WHERE tenant_id = $1 AND provider = 'google_sheets' LIMIT 1`,
+          values: [ctx.tenantId]
+        });
+
+        if (pipeline.length === 0 && integration.length === 0) {
+          return { config: null };
+        }
+
+        // Build unified config shape (same as V1 for UI compatibility)
+        const pipelineConfig = pipeline.length > 0 
+          ? (typeof pipeline[0].config === 'string' ? JSON.parse(pipeline[0].config) : pipeline[0].config)
+          : {};
+        
+        let apiKey = '';
+        if (integration.length > 0 && integration[0].credentials) {
+          try {
+            const creds = typeof integration[0].credentials === 'string' 
+              ? JSON.parse(integration[0].credentials) 
+              : integration[0].credentials;
+            // If encrypted, decrypt
+            if (creds.iv && creds.encryptedData) {
+              const decrypted = decryptPayload(creds as EncryptedPayload);
+              apiKey = decrypted.apiKey || '';
+            } else {
+              apiKey = creds.apiKey || '';
+            }
+          } catch (e) {
+            console.warn('[V2_INTEGRATIONS] Failed to decrypt credentials, continuing without apiKey');
+          }
+        }
+
+        return {
+          config: {
+            spreadsheetId: pipelineConfig.spreadsheetId || '',
+            activeSheets: pipelineConfig.activeSheets || [],
+            ...(apiKey ? { apiKey } : {})
+          }
+        };
+      }
+
+      // V1 FALLBACK: Read from settings table
       const res = await ctx.db.executeSafe({
         text: `SELECT value FROM settings WHERE key = 'google_sheets_config' AND tenant_id = $1 LIMIT 1`,
         values: [ctx.tenantId]
@@ -28,15 +85,61 @@ export async function getGoogleSheetsConfig() {
   });
 }
 
+// ── SAVE CONFIG ─────────────────────────────────────────
 export async function saveGoogleSheetsConfig(config: any) {
   return withActionGuard(
     { 
       actionName: 'saveGoogleSheetsConfig',
-      roles: ['owner', 'admin'] // Sadece yetkililer config değiştirebilir
+      roles: ['owner', 'admin']
     },
     async (ctx) => {
+      if (isV2IntegrationsEnabled()) {
+        // V2: Write to ingestion_pipelines (config) + tenant_integrations (credentials)
+        const pipelineConfig = {
+          spreadsheetId: config.spreadsheetId || '',
+          activeSheets: config.activeSheets || []
+        };
+
+        // Upsert ingestion_pipelines (no unique constraint, use conditional)
+        const existing = await ctx.db.executeSafe({
+          text: `SELECT id FROM ingestion_pipelines WHERE tenant_id = $1 AND provider = 'google_sheets' LIMIT 1`,
+          values: [ctx.tenantId]
+        });
+
+        if (existing.length > 0) {
+          await ctx.db.executeSafe({
+            text: `UPDATE ingestion_pipelines SET config = $1 WHERE id = $2`,
+            values: [JSON.stringify(pipelineConfig), existing[0].id]
+          });
+        } else {
+          await ctx.db.executeSafe({
+            text: `INSERT INTO ingestion_pipelines (tenant_id, name, provider, config) 
+                   VALUES ($1, 'Google Sheets Lead Ingestion', 'google_sheets', $2)`,
+            values: [ctx.tenantId, JSON.stringify(pipelineConfig)]
+          });
+        }
+
+        // Upsert tenant_integrations (encrypt credentials)
+        if (config.apiKey) {
+          const encryptedCreds = encryptPayload('google_sheets', {
+            apiKey: config.apiKey,
+            spreadsheetId: config.spreadsheetId || '',
+            activeSheets: config.activeSheets || []
+          });
+
+          await ctx.db.executeSafe({
+            text: `UPDATE tenant_integrations 
+                   SET credentials = $1, updated_at = NOW()
+                   WHERE tenant_id = $2 AND provider = 'google_sheets'`,
+            values: [JSON.stringify(encryptedCreds), ctx.tenantId]
+          });
+        }
+
+        return { success: true };
+      }
+
+      // V1 FALLBACK: Write to settings table
       const value = JSON.stringify(config);
-      
       await ctx.db.executeSafe({
         text: `INSERT INTO settings (key, value, tenant_id, updated_at) 
                VALUES ('google_sheets_config', $1, $2, NOW())
@@ -52,6 +155,7 @@ export async function saveGoogleSheetsConfig(config: any) {
   });
 }
 
+// ── FETCH TABS ──────────────────────────────────────────
 export async function fetchGoogleSheetsTabs(spreadsheetId: string) {
   return withActionGuard(
     { actionName: 'fetchGoogleSheetsTabs' },
@@ -84,11 +188,12 @@ export async function fetchGoogleSheetsTabs(spreadsheetId: string) {
   });
 }
 
-
+// ── INTEGRATION HEALTH ──────────────────────────────────
 export async function getIntegrationHealth() {
   return withActionGuard(
     { actionName: 'getIntegrationHealth' },
     async (ctx) => {
+      // V2: Channel health from channels + channel_integrations (always V2)
       const dbChannels = await ctx.db.executeSafe({
         text: `SELECT 
                  c.id, c.provider, c.identifier, c.name,
@@ -98,11 +203,6 @@ export async function getIntegrationHealth() {
                JOIN channel_groups cg ON c.group_id = cg.id
                LEFT JOIN channel_integrations ci ON ci.channel_id = c.id
                WHERE cg.tenant_id = $1 AND c.provider != 'meta_legacy'`,
-        values: [ctx.tenantId]
-      });
-
-      const sheetsConfig = await ctx.db.executeSafe({
-        text: `SELECT value, updated_at FROM settings WHERE key = 'google_sheets_config' AND tenant_id = $1 LIMIT 1`,
         values: [ctx.tenantId]
       });
 
@@ -146,22 +246,64 @@ export async function getIntegrationHealth() {
         });
       }
 
-      if (sheetsConfig.length > 0) {
-        try {
-          const cfg = JSON.parse(sheetsConfig[0].value);
-          const isConnected = !!cfg?.spreadsheetId;
+      // Google Sheets integration card — V2 or V1
+      if (isV2IntegrationsEnabled()) {
+        // V2: Read from tenant_integrations + ingestion_pipelines
+        const sheetsIntegration = await ctx.db.executeSafe({
+          text: `SELECT health_status, last_sync_at, updated_at FROM tenant_integrations 
+                 WHERE tenant_id = $1 AND provider = 'google_sheets' LIMIT 1`,
+          values: [ctx.tenantId]
+        });
+        const sheetsPipeline = await ctx.db.executeSafe({
+          text: `SELECT config FROM ingestion_pipelines 
+                 WHERE tenant_id = $1 AND provider = 'google_sheets' LIMIT 1`,
+          values: [ctx.tenantId]
+        });
+
+        if (sheetsIntegration.length > 0) {
+          const pipeConfig = sheetsPipeline.length > 0 
+            ? (typeof sheetsPipeline[0].config === 'string' ? JSON.parse(sheetsPipeline[0].config) : sheetsPipeline[0].config)
+            : {};
+          const hasSpreadsheet = !!pipeConfig?.spreadsheetId;
+          const isHealthy = sheetsIntegration[0].health_status === 'healthy';
+
           channels.push({
             id: 'google-sheets-synthetic',
             name: 'Google Sheets Integration',
             provider: 'google_sheets',
             group: 'Automation',
-            status: isConnected ? 'connected' : 'warning',
-            detail: isConnected ? `✓ Aktif (${cfg.spreadsheetId.slice(0, 12)}...)` : 'Kurulum tamamlanmadı',
+            status: isHealthy && hasSpreadsheet ? 'connected' : hasSpreadsheet ? 'warning' : 'warning',
+            detail: isHealthy && hasSpreadsheet 
+              ? `✓ Aktif (${pipeConfig.spreadsheetId.slice(0, 12)}...)`
+              : hasSpreadsheet ? `⚠ ${sheetsIntegration[0].health_status}` : 'Kurulum tamamlanmadı',
             lastMessage: null,
-            lastSyncAt: sheetsConfig[0].updated_at || null,
+            lastSyncAt: sheetsIntegration[0].last_sync_at || null,
           });
-        } catch (e) {
-          // ignore parsing error
+        }
+      } else {
+        // V1 FALLBACK: Read from settings
+        const sheetsConfig = await ctx.db.executeSafe({
+          text: `SELECT value, updated_at FROM settings WHERE key = 'google_sheets_config' AND tenant_id = $1 LIMIT 1`,
+          values: [ctx.tenantId]
+        });
+
+        if (sheetsConfig.length > 0) {
+          try {
+            const cfg = JSON.parse(sheetsConfig[0].value);
+            const isConnected = !!cfg?.spreadsheetId;
+            channels.push({
+              id: 'google-sheets-synthetic',
+              name: 'Google Sheets Integration',
+              provider: 'google_sheets',
+              group: 'Automation',
+              status: isConnected ? 'connected' : 'warning',
+              detail: isConnected ? `✓ Aktif (${cfg.spreadsheetId.slice(0, 12)}...)` : 'Kurulum tamamlanmadı',
+              lastMessage: null,
+              lastSyncAt: sheetsConfig[0].updated_at || null,
+            });
+          } catch (e) {
+            // ignore parsing error
+          }
         }
       }
 
@@ -181,6 +323,7 @@ export async function getIntegrationHealth() {
   });
 }
 
+// ── SETUP CHANNEL ───────────────────────────────────────
 export async function setupIntegrationChannel(provider: string, identifier: string, name: string, token: string) {
   return withActionGuard(
     { actionName: 'setupIntegrationChannel', roles: ['owner', 'admin'] },
