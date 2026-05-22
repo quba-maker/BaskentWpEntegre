@@ -3,18 +3,30 @@ import { logger } from '@/lib/core/logger';
 import crypto from 'crypto';
 
 /**
- * 🧠 Brain Version Service — Phase 6 Prompt Safety
+ * 🧠 Brain Version Service — V2 Prompt Safety
  * 
  * Her prompt değişikliğini versiyonlar, hash'ler ve
  * rollback desteği sağlar. Production-grade prompt yönetimi.
  * 
- * prompt_key ile kanal bazlı versiyon takibi:
- * - system_prompt_whatsapp
- * - system_prompt_tr
- * - system_prompt_foreign
+ * V2: Rollback artık channel_prompts tablosuna yazar.
+ * Rollback: USE_V2_BRAIN_VERSIONS=false → settings fallback
  */
 
 const log = logger.withContext({ module: 'BrainVersionService' });
+
+function isV2BrainVersionsEnabled(): boolean {
+  return process.env.USE_V2_BRAIN_VERSIONS !== 'false'; // default: true
+}
+
+// V1 promptKey → V2 channel_prompts.name mapping
+function promptKeyToName(promptKey: string): string | null {
+  const map: Record<string, string> = {
+    'system_prompt_whatsapp': 'WhatsApp System Prompt',
+    'system_prompt_tr': 'Social TR Prompt',
+    'system_prompt_foreign': 'Social Foreign Prompt',
+  };
+  return map[promptKey] || null;
+}
 
 // Check if prompt_key column exists (cached after first check)
 let _hasPromptKeyColumn: boolean | null = null;
@@ -175,19 +187,19 @@ export class BrainVersionService {
 
   /**
    * Rollback to a specific version — restores prompt to that snapshot.
-   * Uses the stored prompt_key to update the correct settings entry.
-   * Returns the restored prompt text.
+   * V2: Updates channel_prompts table (runtime source).
+   * V1 fallback: Updates settings table.
    */
   static async rollback(tenantId: string, versionNumber: number): Promise<string | null> {
     const version = await this.getVersion(tenantId, versionNumber);
     if (!version) return null;
 
-    // Determine which settings key to update
+    // Determine which prompt to update
     const promptKey = version.prompt_key || 'system_prompt_whatsapp';
     const hasColumn = await hasPromptKeyColumn();
 
+    // Mark versions active/inactive in brain_versions
     if (hasColumn) {
-      // Deactivate all versions for the SAME prompt_key, activate target
       await sql`UPDATE brain_versions SET is_active = false WHERE tenant_id = ${tenantId} AND prompt_key = ${promptKey}`;
     } else {
       await sql`UPDATE brain_versions SET is_active = false WHERE tenant_id = ${tenantId}`;
@@ -195,14 +207,33 @@ export class BrainVersionService {
     
     await sql`UPDATE brain_versions SET is_active = true WHERE tenant_id = ${tenantId} AND version_number = ${versionNumber}`;
 
-    // Update the actual tenant brain prompt in settings (key-value table)
-    await sql`
-      UPDATE settings 
-      SET value = ${version.system_prompt}, updated_at = NOW()
-      WHERE tenant_id = ${tenantId} AND key = ${promptKey}
-    `;
-
-    log.info(`[BRAIN_ROLLBACK] Rolled back ${promptKey} to v${versionNumber}`, { tenantId });
+    if (isV2BrainVersionsEnabled()) {
+      // V2: Update channel_prompts (the actual runtime source)
+      const promptName = promptKeyToName(promptKey);
+      
+      if (promptName) {
+        await sql`
+          UPDATE channel_prompts 
+          SET prompt_text = ${version.system_prompt}, 
+              version = version + 1, 
+              updated_at = NOW()
+          WHERE tenant_id = ${tenantId} 
+            AND name = ${promptName} 
+            AND is_active = true
+        `;
+        log.info(`[BRAIN_ROLLBACK_V2] Rolled back ${promptKey} → channel_prompts[${promptName}] to v${versionNumber}`, { tenantId });
+      } else {
+        log.warn(`[BRAIN_ROLLBACK_V2] Unknown promptKey mapping: ${promptKey}`, { tenantId });
+      }
+    } else {
+      // V1 FALLBACK: Update settings table
+      await sql`
+        UPDATE settings 
+        SET value = ${version.system_prompt}, updated_at = NOW()
+        WHERE tenant_id = ${tenantId} AND key = ${promptKey}
+      `;
+      log.info(`[BRAIN_ROLLBACK_V1] Rolled back ${promptKey} to v${versionNumber} (settings)`, { tenantId });
+    }
 
     return version.system_prompt;
   }

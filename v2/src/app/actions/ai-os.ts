@@ -107,7 +107,9 @@ export async function getAiDebugData() {
 
     try {
       const brainInfo = await ctx.db.executeSafe(`
-        SELECT value as system_prompt FROM settings WHERE tenant_id = $1 AND key = 'system_prompt_whatsapp' LIMIT 1
+        SELECT prompt_text as system_prompt FROM channel_prompts 
+        WHERE tenant_id = $1 AND prompt_type = 'system' AND is_active = true
+        ORDER BY updated_at DESC LIMIT 1
       `, [ctx.tenantId]);
       currentPrompt = brainInfo[0]?.system_prompt || null;
     } catch {}
