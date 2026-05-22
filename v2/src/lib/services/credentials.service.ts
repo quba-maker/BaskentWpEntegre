@@ -10,30 +10,29 @@ export interface ResolvedCredentials {
   whatsappBusinessAccountId: string | null;
   metaPageId: string | null;
   instagramId: string | null;
-  source: "v2_channels" | "v1_legacy" | "env_fallback";
+  source: "v2_channels" | "v1_legacy" | "none";
   channelId?: string | null;
 }
 
 /**
- * Returns true if ENV credential fallback is allowed.
- * Default: false (strict tenant isolation mode).
- * Set ALLOW_ENV_CREDENTIAL_FALLBACK=true to enable legacy behavior during emergency recovery.
+ * Returns true if V1 legacy credential fallback is allowed.
+ * Default: false (V2 channel_integrations is the only source).
+ * Set USE_V1_CREDENTIAL_FALLBACK=true to enable legacy tenants.meta_page_token fallback.
  */
-function isEnvFallbackAllowed(): boolean {
-  return process.env.ALLOW_ENV_CREDENTIAL_FALLBACK === 'true';
+function isV1FallbackEnabled(): boolean {
+  return process.env.USE_V1_CREDENTIAL_FALLBACK === 'true';
 }
 
 export class CredentialsService {
   /**
    * Resolves credentials for a given tenant and channel provider.
    * 
-   * Resolution chain (strict priority):
-   *   1. V2: channel_integrations.credentials_encrypted (tenant-isolated)
-   *   2. V1: tenants.meta_page_token (legacy, tenant-scoped)
-   *   3. ENV: process.env (ONLY if ALLOW_ENV_CREDENTIAL_FALLBACK=true)
+   * Resolution chain:
+   *   1. V2: channel_integrations.credentials_encrypted (tenant-isolated) — ALWAYS PRIMARY
+   *   2. V1: tenants.meta_page_token (ONLY if USE_V1_CREDENTIAL_FALLBACK=true)
+   *   3. HARD FAIL: returns nulls (caller must handle)
    * 
-   * If no credentials found and ENV fallback is disabled, returns nulls.
-   * Caller MUST check for null and throw hard error.
+   * ENV fallback has been permanently removed (cross-tenant isolation risk).
    */
   static async resolveCredentials(
     tenantId: string,
@@ -109,32 +108,38 @@ export class CredentialsService {
         }
       }
 
-      // ── LAYER 2: V1 Legacy Tenant Columns ──
-      const legacyResults = await db.executeSafe({
-        text: `
-          SELECT meta_page_token, whatsapp_phone_id, whatsapp_business_id, meta_page_id, instagram_id
-          FROM tenants
-          WHERE id = $1
-          LIMIT 1
-        `,
-        values: [tenantId]
-      }) as any[];
+      // ── LAYER 2: V1 Legacy Tenant Columns (Feature-Flag Gated) ──
+      if (isV1FallbackEnabled()) {
+        const legacyResults = await db.executeSafe({
+          text: `
+            SELECT meta_page_token, whatsapp_phone_id, whatsapp_business_id, meta_page_id, instagram_id
+            FROM tenants
+            WHERE id = $1
+            LIMIT 1
+          `,
+          values: [tenantId]
+        }) as any[];
 
-      if (legacyResults && legacyResults.length > 0) {
-        const t = legacyResults[0];
-        if (t.meta_page_token) {
-          log.warn("[CREDENTIAL_RESOLVED] Using V1 legacy credentials — should migrate to V2", {
-            tenantId, provider, source: "v1_legacy"
-          });
-          return {
-            accessToken: t.meta_page_token || null,
-            whatsappPhoneNumberId: t.whatsapp_phone_id || null,
-            whatsappBusinessAccountId: t.whatsapp_business_id || null,
-            metaPageId: t.meta_page_id || null,
-            instagramId: t.instagram_id || null,
-            source: "v1_legacy"
-          };
+        if (legacyResults && legacyResults.length > 0) {
+          const t = legacyResults[0];
+          if (t.meta_page_token) {
+            log.warn("[CREDENTIAL_RESOLVED] Using V1 legacy credentials — should migrate to V2", {
+              tenantId, provider, source: "v1_legacy"
+            });
+            return {
+              accessToken: t.meta_page_token || null,
+              whatsappPhoneNumberId: t.whatsapp_phone_id || null,
+              whatsappBusinessAccountId: t.whatsapp_business_id || null,
+              metaPageId: t.meta_page_id || null,
+              instagramId: t.instagram_id || null,
+              source: "v1_legacy"
+            };
+          }
         }
+      } else {
+        log.info("[V1_CREDENTIAL_FALLBACK_DISABLED] V1 tenants fallback skipped", {
+          tenantId, provider
+        });
       }
     } catch (err) {
       log.error("[CREDENTIAL_MISSING] DB credential resolution failed", err instanceof Error ? err : new Error(String(err)), {
@@ -142,24 +147,9 @@ export class CredentialsService {
       });
     }
 
-    // ── LAYER 3: ENV Fallback (Feature-Flag Gated) ──
-    if (isEnvFallbackAllowed()) {
-      log.warn("[CREDENTIAL_SOURCE] ENV fallback ACTIVATED — emergency recovery mode", {
-        tenantId, provider, source: "env_fallback", flag: "ALLOW_ENV_CREDENTIAL_FALLBACK=true"
-      });
-      return {
-        accessToken: process.env.META_ACCESS_TOKEN || null,
-        whatsappPhoneNumberId: process.env.PHONE_NUMBER_ID || null,
-        whatsappBusinessAccountId: null,
-        metaPageId: process.env.PAGE_ACCESS_TOKEN || null,
-        instagramId: process.env.IG_TOKEN_1 || null,
-        source: "env_fallback"
-      };
-    }
-
-    // ── HARD FAIL: No credentials and ENV fallback disabled ──
-    log.error("[CREDENTIAL_MISSING] No credentials found and ENV fallback is DISABLED", undefined, {
-      tenantId, provider, envFallbackAllowed: false
+    // ── HARD FAIL: No credentials found ──
+    log.error("[CREDENTIAL_MISSING] No credentials found — V2 empty, V1 fallback disabled", undefined, {
+      tenantId, provider, v1FallbackEnabled: isV1FallbackEnabled()
     });
     return {
       accessToken: null,
@@ -167,8 +157,7 @@ export class CredentialsService {
       whatsappBusinessAccountId: null,
       metaPageId: null,
       instagramId: null,
-      source: "env_fallback"
+      source: "none"
     };
   }
 }
-
