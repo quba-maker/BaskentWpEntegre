@@ -337,19 +337,29 @@ export default function BotManagementPage() {
   const [bots, setBots] = useState<BotData[]>([]);
   const [selectedBotId, setSelectedBotId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
 
   const selectedBot = bots.find(b => b.id === selectedBotId) || bots[0] || null;
 
   // ---- Data Loading ----
   const loadBots = useCallback(async () => {
-    const res = await getBots();
-    if (res.success && res.bots) {
-      setBots(res.bots);
-      // Auto-select first if none selected
-      if (!selectedBotId && res.bots.length > 0) {
-        setSelectedBotId(res.bots[0].id);
+    setLoadError(null);
+    try {
+      const res = await getBots();
+      if (res.success && res.bots) {
+        setBots(res.bots);
+        // Auto-select first if none selected
+        if (!selectedBotId && res.bots.length > 0) {
+          setSelectedBotId(res.bots[0].id);
+        }
+      } else {
+        console.error('[BOT_PAGE] getBots failed:', res.error);
+        setLoadError(res.error || 'Botlar yüklenemedi');
       }
+    } catch (err) {
+      console.error('[BOT_PAGE] getBots exception:', err);
+      setLoadError('Bağlantı hatası — lütfen tekrar deneyin');
     }
   }, [selectedBotId]);
 
@@ -418,16 +428,34 @@ export default function BotManagementPage() {
           ))}
 
           {bots.length === 0 && (
-            <div className="col-span-full text-center py-12 rounded-2xl border" style={{ borderColor: "var(--q-border-default)" }}>
-              <Bot className="w-12 h-12 mx-auto mb-3" style={{ color: "var(--q-text-secondary)" }} />
-              <p className="text-sm font-medium" style={{ color: "var(--q-text-secondary)" }}>Henüz bot oluşturmadınız</p>
-              <button
-                onClick={() => setShowCreateModal(true)}
-                className="mt-3 px-4 py-2 text-sm font-bold rounded-xl text-white"
-                style={{ backgroundColor: "var(--q-primary, #6366f1)" }}
-              >
-                İlk Botu Oluştur
-              </button>
+            <div className="col-span-full text-center py-12 rounded-2xl border" style={{ borderColor: loadError ? "var(--q-red, #ef4444)" : "var(--q-border-default)" }}>
+              {loadError ? (
+                <>
+                  <AlertTriangle className="w-12 h-12 mx-auto mb-3" style={{ color: "var(--q-red, #ef4444)" }} />
+                  <p className="text-sm font-medium" style={{ color: "var(--q-text-primary)" }}>Botlar yüklenemedi</p>
+                  <p className="text-xs mt-1 mb-3" style={{ color: "var(--q-text-secondary)" }}>{loadError}</p>
+                  <button
+                    onClick={async () => { setIsLoading(true); await loadBots(); setIsLoading(false); }}
+                    className="px-4 py-2 text-sm font-bold rounded-xl text-white flex items-center gap-1.5 mx-auto"
+                    style={{ backgroundColor: "var(--q-primary, #6366f1)" }}
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    Tekrar Dene
+                  </button>
+                </>
+              ) : (
+                <>
+                  <Bot className="w-12 h-12 mx-auto mb-3" style={{ color: "var(--q-text-secondary)" }} />
+                  <p className="text-sm font-medium" style={{ color: "var(--q-text-secondary)" }}>Henüz bot oluşturmadınız</p>
+                  <button
+                    onClick={() => setShowCreateModal(true)}
+                    className="mt-3 px-4 py-2 text-sm font-bold rounded-xl text-white"
+                    style={{ backgroundColor: "var(--q-primary, #6366f1)" }}
+                  >
+                    İlk Botu Oluştur
+                  </button>
+                </>
+              )}
             </div>
           )}
         </div>

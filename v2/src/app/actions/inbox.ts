@@ -270,19 +270,19 @@ export async function sendMessage(phone: string, text: string) {
           }
         }
         else if (channel === 'instagram' || channel === 'messenger') {
-          const customToken = credentials.accessToken;
-          // Legacy sistem gibi tüm tokenları sırayla dene (IGSID sadece kendi sayfasında geçerli olduğu için)
-          const fallbackTokens = [process.env.IG_TOKEN_1, process.env.IG_TOKEN_2, process.env.FB_PAGE_TOKEN, META_ACCESS_TOKEN].filter(Boolean);
-          const tokensToTry = customToken ? [customToken] : fallbackTokens;
+          // V2-only: Use tenant-isolated credential from CredentialsService
+          // ENV token fallback permanently removed (cross-tenant isolation risk)
+          const channelToken = credentials.accessToken;
           
-          let success = false;
-          const baseUrl = channel === 'instagram' 
-            ? 'https://graph.instagram.com/v25.0/me/messages'
-            : 'https://graph.facebook.com/v25.0/me/messages';
+          if (!channelToken) {
+            const { logger: inboxLog2 } = await import("@/lib/core/logger");
+            inboxLog2.withContext({ module: 'Inbox' }).warn(`No credential found for ${channel} — message will only be saved to DB`, { tenantId: ctx.tenantId });
+          } else {
+            const baseUrl = channel === 'instagram' 
+              ? 'https://graph.instagram.com/v25.0/me/messages'
+              : 'https://graph.facebook.com/v25.0/me/messages';
 
-          for (const token of tokensToTry) {
-            if (!token) continue;
-            response = await fetch(`${baseUrl}?access_token=${token}`, {
+            response = await fetch(`${baseUrl}?access_token=${channelToken}`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -294,20 +294,18 @@ export async function sendMessage(phone: string, text: string) {
             });
 
             if (response.ok) {
-              success = true;
               try {
                 const resData = await response.json();
                 providerMessageId = resData.messages?.[0]?.id || resData.message_id || null;
                 messageStatus = 'sent';
               } catch (e) {
                 console.error("Error parsing Meta API response:", e);
-                messageStatus = 'sent'; // Even if parse fails, it was successful
+                messageStatus = 'sent';
               }
-              break; // Doğru token'ı bulduk ve gönderdik
             } else {
               const errData = await response.clone().json();
               const { logger: inboxLog2 } = await import("@/lib/core/logger");
-              inboxLog2.withContext({ module: 'Inbox' }).info(`Token failed for ${channel}, trying next`, { error: errData.error?.message });
+              inboxLog2.withContext({ module: 'Inbox' }).error(`${channel} send failed`, undefined, { error: errData.error?.message });
             }
           }
         }

@@ -46,15 +46,19 @@ export async function POST(request: NextRequest) {
 
     // Sheet config — V2: ingestion_pipelines, V1 fallback: settings
     let activeSheets: string[] = [];
+    let pipelineGreetingGroupId: string | null = null;
+    let pipelineOutboundChannelId: string | null = null;
     try {
       if (process.env.USE_V2_INTEGRATIONS !== 'false') {
         const pipeRes = await db.executeSafe({
-          text: `SELECT config FROM ingestion_pipelines WHERE tenant_id = $1 AND provider = 'google_sheets' LIMIT 1`,
+          text: `SELECT config, greeting_group_id, outbound_channel_id FROM ingestion_pipelines WHERE tenant_id = $1 AND provider = 'google_sheets' LIMIT 1`,
           values: [tenantId]
         }) as any[];
         if (pipeRes && pipeRes.length > 0) {
           const cfg = typeof pipeRes[0].config === 'string' ? JSON.parse(pipeRes[0].config) : pipeRes[0].config;
           activeSheets = cfg?.activeSheets || [];
+          pipelineGreetingGroupId = pipeRes[0].greeting_group_id || null;
+          pipelineOutboundChannelId = pipeRes[0].outbound_channel_id || null;
         }
       } else {
         const configRes = await db.executeSafe({
@@ -214,22 +218,38 @@ export async function POST(request: NextRequest) {
         log.info('[SHEETS_CREDENTIAL_SOURCE]', { source: creds.source, hasToken: !!META_ACCESS_TOKEN, hasPhoneId: !!PHONE_NUMBER_ID });
       }
 
-      // 🔒 Otonom Karşılama kontrolü — V2: channel_ai_profiles, V1 fallback: settings
+      // 🔒 Otonom Karşılama kontrolü — V2: pipeline greeting_group_id → channel_ai_profiles
       let autoGreetingEnabled = true; // default: true
       let greetingLang = 'auto'; // default: auto
 
       if (process.env.USE_V2_INTEGRATIONS !== 'false') {
-        const profileRes = await db.executeSafe({
-          text: `SELECT cap.auto_greeting, cap.greeting_language
-                 FROM channel_ai_profiles cap
-                 JOIN channel_groups cg ON cap.group_id = cg.id
-                 WHERE cg.tenant_id = $1 LIMIT 1`,
-          values: [tenantId]
-        }) as any[];
+        // Prefer pipeline's greeting_group_id for bot-specific greeting config
+        const greetingQuery = pipelineGreetingGroupId
+          ? {
+              text: `SELECT cap.auto_greeting, cap.greeting_language
+                     FROM channel_ai_profiles cap
+                     WHERE cap.group_id = $1`,
+              values: [pipelineGreetingGroupId]
+            }
+          : {
+              text: `SELECT cap.auto_greeting, cap.greeting_language
+                     FROM channel_ai_profiles cap
+                     JOIN channel_groups cg ON cap.group_id = cg.id
+                     WHERE cg.tenant_id = $1 AND cg.status = 'active'
+                     ORDER BY cg.sort_order ASC LIMIT 1`,
+              values: [tenantId]
+            };
+        
+        const profileRes = await db.executeSafe(greetingQuery) as any[];
         if (profileRes.length > 0) {
           autoGreetingEnabled = profileRes[0].auto_greeting !== false;
           greetingLang = profileRes[0].greeting_language || 'auto';
         }
+        log.info('[SHEETS_GREETING_CONFIG]', { 
+          greetingGroupId: pipelineGreetingGroupId || 'default_first', 
+          autoGreeting: autoGreetingEnabled, 
+          lang: greetingLang 
+        });
       } else {
         const autoGreetingSetting = await db.executeSafe({
           text: `SELECT value FROM settings WHERE key = 'bot_auto_greeting' AND tenant_id = $1`,
@@ -293,19 +313,12 @@ export async function POST(request: NextRequest) {
           let convId: any = existingConv[0]?.id;
           
           // Get channel_id for outbound whatsapp channel — prefer pipeline routing
-          let whatsappChannelId: string | null = null;
+          let whatsappChannelId: string | null = pipelineOutboundChannelId;
           try {
-            // V2: Use pipeline's explicit outbound_channel_id if configured
-            const pipelineRouting = await db.executeSafe({
-              text: `SELECT outbound_channel_id FROM ingestion_pipelines WHERE tenant_id = $1 AND provider = 'google_sheets' AND outbound_channel_id IS NOT NULL LIMIT 1`,
-              values: [tenantId]
-            }) as any[];
-            if (pipelineRouting.length > 0 && pipelineRouting[0].outbound_channel_id) {
-              whatsappChannelId = pipelineRouting[0].outbound_channel_id;
-            } else {
+            if (!whatsappChannelId) {
               // Fallback: first whatsapp channel
               const chs = await db.executeSafe({
-                text: `SELECT c.id FROM channels c JOIN channel_groups cg ON c.group_id = cg.id WHERE cg.tenant_id = $1 AND c.provider = 'whatsapp' LIMIT 1`,
+                text: `SELECT c.id FROM channels c JOIN channel_groups cg ON c.group_id = cg.id WHERE cg.tenant_id = $1 AND c.provider = 'whatsapp' AND cg.status = 'active' LIMIT 1`,
                 values: [tenantId]
               }) as any[];
               if (chs.length > 0) whatsappChannelId = chs[0].id;
