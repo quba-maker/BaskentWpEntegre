@@ -528,3 +528,546 @@ function v1KeyToPromptName(key: string): string | null {
   };
   return map[key] || null;
 }
+
+// ==========================================
+// READ: getBotChannelBindings (V2-Native)
+// Returns real channel↔prompt mapping for Bot page UI
+// ==========================================
+export async function getBotChannelBindings() {
+  return withActionGuard(
+    { actionName: 'getBotChannelBindings' },
+    async (ctx) => {
+      // Fetch all channel→prompt bindings with channel and prompt details
+      const bindings = await ctx.db.executeSafe({
+        text: `
+          SELECT 
+            c.id as channel_id,
+            c.provider,
+            c.identifier,
+            c.name as channel_name,
+            cg.name as group_name,
+            cp.id as prompt_id,
+            cp.name as prompt_name,
+            ci.health_status,
+            ci.last_sync_at,
+            ci.credentials_encrypted IS NOT NULL as has_credentials
+          FROM channels c
+          JOIN channel_groups cg ON c.group_id = cg.id
+          LEFT JOIN channel_integrations ci ON ci.channel_id = c.id
+          LEFT JOIN channel_prompt_bindings cpb ON cpb.channel_id = c.id
+          LEFT JOIN channel_prompts cp ON cpb.prompt_id = cp.id AND cp.tenant_id = $1
+          WHERE cg.tenant_id = $1 AND c.provider != 'meta_legacy'
+          ORDER BY c.provider, c.name
+        `,
+        values: [ctx.tenantId]
+      });
+
+      // Map bot channel IDs to their bound V2 channels
+      const channelBindings: Record<string, {
+        channels: {
+          id: string;
+          provider: string;
+          identifier: string;
+          name: string;
+          group: string;
+          promptName: string | null;
+          hasCredentials: boolean;
+          healthStatus: string | null;
+          warnings: string[];
+        }[];
+      }> = {
+        whatsapp: { channels: [] },
+        instagram: { channels: [] },
+        foreign: { channels: [] },
+      };
+
+      for (const row of bindings) {
+        const warnings: string[] = [];
+        
+        // Determine which bot tab this channel belongs to
+        let botTab: string | null = null;
+        const provider = row.provider;
+        
+        if (provider === 'whatsapp') {
+          botTab = 'whatsapp';
+        } else if (provider === 'meta_instagram' || provider === 'instagram') {
+          // Check group name to determine TR vs Foreign
+          const groupName = (row.group_name || '').toLowerCase();
+          if (groupName.includes('foreign') || groupName.includes('en')) {
+            botTab = 'foreign';
+          } else {
+            botTab = 'instagram';
+          }
+        } else if (provider === 'messenger') {
+          // Messenger goes to instagram tab (TR) by default
+          botTab = 'instagram';
+        }
+
+        if (!botTab) continue;
+
+        // Warnings
+        if (!row.prompt_name) warnings.push('Prompt bağlı değil');
+        if (!row.has_credentials) warnings.push('Kimlik bilgisi eksik');
+        if (provider === 'messenger' && !/^\d{5,}$/.test(row.identifier || '')) {
+          warnings.push('PAGE_ID gerekli');
+        }
+        if (row.health_status !== 'healthy') {
+          warnings.push('Sağlık kontrolü bekliyor');
+        }
+
+        channelBindings[botTab].channels.push({
+          id: row.channel_id,
+          provider: provider,
+          identifier: row.identifier,
+          name: row.channel_name || provider,
+          group: row.group_name,
+          promptName: row.prompt_name || null,
+          hasCredentials: !!row.has_credentials,
+          healthStatus: row.health_status,
+          warnings,
+        });
+      }
+
+      return channelBindings;
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error };
+    return { success: true, bindings: res.data };
+  });
+}
+
+// ==========================================
+// DYNAMIC BOT MANAGEMENT — V2 SaaS Actions
+// channel_groups = Bot Entity
+// ==========================================
+
+export interface BotData {
+  id: string;
+  name: string;
+  displayName: string;
+  description: string | null;
+  botType: string;
+  icon: string;
+  color: string | null;
+  sortOrder: number;
+  status: string;
+  prompt: {
+    id: string;
+    name: string;
+    text: string;
+    version: number;
+    knowledgePrices: string;
+    knowledgeRules: string;
+  } | null;
+  profile: {
+    aiModel: string;
+    maxMessages: number;
+    maxResponseTokens: number;
+    aggressionLevel: string;
+    autoGreeting: boolean;
+    greetingLanguage: string;
+    followUpEnabled: boolean;
+    workingHours: any;
+  } | null;
+  channels: {
+    id: string;
+    provider: string;
+    identifier: string;
+    name: string;
+    hasCredentials: boolean;
+    healthStatus: string | null;
+    hasPromptBinding: boolean;
+  }[];
+}
+
+/**
+ * Returns all active bots for the current tenant with their prompts, profiles, and channels.
+ */
+export async function getBots(): Promise<{ success: boolean; bots?: BotData[]; error?: string }> {
+  return withActionGuard(
+    { actionName: 'getBots' },
+    async (ctx) => {
+      // 1. Fetch all active bot groups
+      const groups = await ctx.db.executeSafe({
+        text: `SELECT id, name, display_name, description, bot_type, icon, color, sort_order, status
+               FROM channel_groups 
+               WHERE tenant_id = $1 AND status = 'active'
+               ORDER BY sort_order ASC, created_at ASC`,
+        values: [ctx.tenantId]
+      });
+
+      const bots: BotData[] = [];
+
+      for (const g of groups) {
+        // 2. Fetch prompt for this group
+        const prompts = await ctx.db.executeSafe({
+          text: `SELECT id, name, prompt_text, version, knowledge_prices, knowledge_rules
+                 FROM channel_prompts 
+                 WHERE group_id = $1 AND tenant_id = $2 AND is_active = true AND prompt_type = 'system'
+                 ORDER BY version DESC LIMIT 1`,
+          values: [g.id, ctx.tenantId]
+        });
+        const prompt = prompts.length > 0 ? {
+          id: prompts[0].id,
+          name: prompts[0].name,
+          text: prompts[0].prompt_text || '',
+          version: prompts[0].version || 1,
+          knowledgePrices: prompts[0].knowledge_prices || '',
+          knowledgeRules: prompts[0].knowledge_rules || '',
+        } : null;
+
+        // 3. Fetch AI profile for this group
+        const profiles = await ctx.db.executeSafe({
+          text: `SELECT ai_model, max_messages, max_response_tokens, aggression_level,
+                        auto_greeting, greeting_language, follow_up_enabled, business_hours_json
+                 FROM channel_ai_profiles WHERE group_id = $1 LIMIT 1`,
+          values: [g.id]
+        });
+        const profile = profiles.length > 0 ? {
+          aiModel: profiles[0].ai_model || 'gemini-2.5-flash',
+          maxMessages: profiles[0].max_messages || 8,
+          maxResponseTokens: profiles[0].max_response_tokens || 1000,
+          aggressionLevel: profiles[0].aggression_level || 'medium',
+          autoGreeting: profiles[0].auto_greeting !== false,
+          greetingLanguage: profiles[0].greeting_language || 'auto',
+          followUpEnabled: profiles[0].follow_up_enabled !== false,
+          workingHours: profiles[0].business_hours_json || { enabled: false },
+        } : null;
+
+        // 4. Fetch channels in this group
+        const channels = await ctx.db.executeSafe({
+          text: `SELECT c.id, c.provider, c.identifier, c.name,
+                        ci.credentials_encrypted IS NOT NULL as has_credentials,
+                        ci.health_status,
+                        EXISTS(SELECT 1 FROM channel_prompt_bindings cpb WHERE cpb.channel_id = c.id AND cpb.is_active = true) as has_prompt_binding
+                 FROM channels c
+                 LEFT JOIN channel_integrations ci ON ci.channel_id = c.id
+                 WHERE c.group_id = $1 AND c.provider != 'meta_legacy'
+                 ORDER BY c.provider, c.name`,
+          values: [g.id]
+        });
+
+        bots.push({
+          id: g.id,
+          name: g.name,
+          displayName: g.display_name || g.name,
+          description: g.description,
+          botType: g.bot_type || 'custom',
+          icon: g.icon || 'bot',
+          color: g.color || '#6366f1',
+          sortOrder: g.sort_order || 0,
+          status: g.status,
+          prompt,
+          profile,
+          channels: channels.map((c: any) => ({
+            id: c.id,
+            provider: c.provider,
+            identifier: c.identifier,
+            name: c.name || c.provider,
+            hasCredentials: !!c.has_credentials,
+            healthStatus: c.health_status,
+            hasPromptBinding: !!c.has_prompt_binding,
+          })),
+        });
+      }
+
+      return bots;
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error };
+    return { success: true, bots: res.data as BotData[] };
+  });
+}
+
+/**
+ * Creates a new bot (channel_group + channel_prompt + channel_ai_profile).
+ */
+export async function createBot(input: {
+  displayName: string;
+  description?: string;
+  botType?: string;
+  icon?: string;
+  color?: string;
+  promptText?: string;
+  promptName?: string;
+}): Promise<{ success: boolean; botId?: string; error?: string }> {
+  return withActionGuard(
+    { actionName: 'createBot' },
+    async (ctx) => {
+      const { displayName, description, botType, icon, color, promptText, promptName } = input;
+
+      // 1. Create channel_group (bot entity)
+      const groupResult = await ctx.db.executeSafe({
+        text: `INSERT INTO channel_groups (tenant_id, name, display_name, description, bot_type, icon, color, sort_order, status)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, 
+                 COALESCE((SELECT MAX(sort_order) + 1 FROM channel_groups WHERE tenant_id = $1), 1),
+                 'active')
+               RETURNING id`,
+        values: [ctx.tenantId, displayName, displayName, description || null, botType || 'custom', icon || 'bot', color || '#6366f1']
+      });
+
+      const groupId = groupResult[0]?.id;
+      if (!groupId) throw new Error('Failed to create bot group');
+
+      // 2. Create channel_prompt
+      const pName = promptName || `${displayName} Prompt`;
+      await ctx.db.executeSafe({
+        text: `INSERT INTO channel_prompts (group_id, tenant_id, name, prompt_text, prompt_type, is_active, version)
+               VALUES ($1, $2, $3, $4, 'system', true, 1)`,
+        values: [groupId, ctx.tenantId, pName, promptText || '']
+      });
+
+      // 3. Create channel_ai_profile with defaults
+      await ctx.db.executeSafe({
+        text: `INSERT INTO channel_ai_profiles (group_id, ai_model, max_messages, max_response_tokens, aggression_level, auto_greeting, greeting_language, follow_up_enabled)
+               VALUES ($1, 'gemini-2.5-flash', 8, 1000, 'medium', true, 'auto', true)`,
+        values: [groupId]
+      });
+
+      await logAudit(ctx.tenantId, ctx.userId || 'system', 'bot.created', { botId: groupId, displayName });
+
+      return groupId;
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error };
+    return { success: true, botId: res.data as string };
+  });
+}
+
+/**
+ * Updates a bot's display info, prompt, and/or AI profile.
+ */
+export async function updateBot(
+  botId: string,
+  updates: {
+    displayName?: string;
+    description?: string;
+    icon?: string;
+    color?: string;
+    promptText?: string;
+    knowledgePrices?: string;
+    knowledgeRules?: string;
+    aiModel?: string;
+    maxMessages?: number;
+    maxResponseTokens?: number;
+    aggressionLevel?: string;
+    autoGreeting?: boolean;
+    greetingLanguage?: string;
+    followUpEnabled?: boolean;
+    workingHours?: any;
+  }
+): Promise<{ success: boolean; error?: string }> {
+  return withActionGuard(
+    { actionName: 'updateBot' },
+    async (ctx) => {
+      // Verify ownership
+      const ownership = await ctx.db.executeSafe({
+        text: `SELECT id FROM channel_groups WHERE id = $1 AND tenant_id = $2 AND status = 'active'`,
+        values: [botId, ctx.tenantId]
+      });
+      if (ownership.length === 0) throw new Error('Bot not found or not authorized');
+
+      // Update group display
+      if (updates.displayName || updates.description || updates.icon || updates.color) {
+        const setClauses: string[] = [];
+        const vals: any[] = [];
+        let idx = 1;
+        if (updates.displayName) { setClauses.push(`display_name = $${idx}, name = $${idx}`); vals.push(updates.displayName); idx++; }
+        if (updates.description !== undefined) { setClauses.push(`description = $${idx}`); vals.push(updates.description); idx++; }
+        if (updates.icon) { setClauses.push(`icon = $${idx}`); vals.push(updates.icon); idx++; }
+        if (updates.color) { setClauses.push(`color = $${idx}`); vals.push(updates.color); idx++; }
+        setClauses.push(`updated_at = NOW()`);
+        vals.push(botId);
+        await ctx.db.executeSafe({
+          text: `UPDATE channel_groups SET ${setClauses.join(', ')} WHERE id = $${idx}`,
+          values: vals
+        });
+      }
+
+      // Update prompt
+      if (updates.promptText !== undefined || updates.knowledgePrices !== undefined || updates.knowledgeRules !== undefined) {
+        const setClauses: string[] = ['updated_at = NOW()'];
+        const vals: any[] = [];
+        let idx = 1;
+        if (updates.promptText !== undefined) { setClauses.push(`prompt_text = $${idx}`); vals.push(updates.promptText); idx++; }
+        if (updates.knowledgePrices !== undefined) { setClauses.push(`knowledge_prices = $${idx}`); vals.push(updates.knowledgePrices); idx++; }
+        if (updates.knowledgeRules !== undefined) { setClauses.push(`knowledge_rules = $${idx}`); vals.push(updates.knowledgeRules); idx++; }
+        setClauses.push(`version = version + 1`);
+        vals.push(botId, ctx.tenantId);
+        await ctx.db.executeSafe({
+          text: `UPDATE channel_prompts SET ${setClauses.join(', ')} WHERE group_id = $${idx} AND tenant_id = $${idx + 1} AND is_active = true AND prompt_type = 'system'`,
+          values: vals
+        });
+      }
+
+      // Update AI profile
+      const profileFields: string[] = [];
+      const profileVals: any[] = [];
+      let pIdx = 1;
+      if (updates.aiModel) { profileFields.push(`ai_model = $${pIdx}`); profileVals.push(updates.aiModel); pIdx++; }
+      if (updates.maxMessages !== undefined) { profileFields.push(`max_messages = $${pIdx}`); profileVals.push(updates.maxMessages); pIdx++; }
+      if (updates.maxResponseTokens !== undefined) { profileFields.push(`max_response_tokens = $${pIdx}`); profileVals.push(updates.maxResponseTokens); pIdx++; }
+      if (updates.aggressionLevel) { profileFields.push(`aggression_level = $${pIdx}`); profileVals.push(updates.aggressionLevel); pIdx++; }
+      if (updates.autoGreeting !== undefined) { profileFields.push(`auto_greeting = $${pIdx}`); profileVals.push(updates.autoGreeting); pIdx++; }
+      if (updates.greetingLanguage) { profileFields.push(`greeting_language = $${pIdx}`); profileVals.push(updates.greetingLanguage); pIdx++; }
+      if (updates.followUpEnabled !== undefined) { profileFields.push(`follow_up_enabled = $${pIdx}`); profileVals.push(updates.followUpEnabled); pIdx++; }
+      if (updates.workingHours !== undefined) { profileFields.push(`business_hours_json = $${pIdx}`); profileVals.push(JSON.stringify(updates.workingHours)); pIdx++; }
+
+      if (profileFields.length > 0) {
+        profileFields.push(`updated_at = NOW()`);
+        profileVals.push(botId);
+        await ctx.db.executeSafe({
+          text: `UPDATE channel_ai_profiles SET ${profileFields.join(', ')} WHERE group_id = $${pIdx}`,
+          values: profileVals
+        });
+      }
+
+      await logAudit(ctx.tenantId, ctx.userId || 'system', 'bot.updated', { botId, fields: Object.keys(updates) });
+      return true;
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error };
+    return { success: true };
+  });
+}
+
+/**
+ * Archives a bot. Channels are NOT deleted — they become unassigned.
+ */
+export async function archiveBot(botId: string): Promise<{ success: boolean; error?: string }> {
+  return withActionGuard(
+    { actionName: 'archiveBot' },
+    async (ctx) => {
+      // Verify ownership
+      const ownership = await ctx.db.executeSafe({
+        text: `SELECT id, display_name FROM channel_groups WHERE id = $1 AND tenant_id = $2 AND status = 'active'`,
+        values: [botId, ctx.tenantId]
+      });
+      if (ownership.length === 0) throw new Error('Bot not found or not authorized');
+
+      // Check if WhatsApp channels are attached — warn
+      const waChannels = await ctx.db.executeSafe({
+        text: `SELECT id FROM channels WHERE group_id = $1 AND provider = 'whatsapp'`,
+        values: [botId]
+      });
+      if (waChannels.length > 0) {
+        throw new Error('SAFETY: Bu bot aktif WhatsApp kanalları içeriyor. Önce kanalları başka bir bota atayın.');
+      }
+
+      // Archive the group
+      await ctx.db.executeSafe({
+        text: `UPDATE channel_groups SET status = 'archived', updated_at = NOW() WHERE id = $1`,
+        values: [botId]
+      });
+
+      // Deactivate prompt bindings for channels in this group
+      await ctx.db.executeSafe({
+        text: `UPDATE channel_prompt_bindings SET is_active = false 
+               WHERE channel_id IN (SELECT id FROM channels WHERE group_id = $1)`,
+        values: [botId]
+      });
+
+      await logAudit(ctx.tenantId, ctx.userId || 'system', 'bot.archived', { botId, name: ownership[0].display_name });
+      return true;
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error };
+    return { success: true };
+  });
+}
+
+/**
+ * Assigns a channel to a bot. Updates group_id and prompt binding atomically.
+ * A channel can only be managed by ONE active bot at a time.
+ */
+export async function assignChannelToBot(
+  channelId: string, 
+  targetBotId: string
+): Promise<{ success: boolean; error?: string }> {
+  return withActionGuard(
+    { actionName: 'assignChannelToBot' },
+    async (ctx) => {
+      // 1. Verify target bot ownership
+      const targetBot = await ctx.db.executeSafe({
+        text: `SELECT id FROM channel_groups WHERE id = $1 AND tenant_id = $2 AND status = 'active'`,
+        values: [targetBotId, ctx.tenantId]
+      });
+      if (targetBot.length === 0) throw new Error('Target bot not found');
+
+      // 2. Verify channel ownership
+      const channel = await ctx.db.executeSafe({
+        text: `SELECT c.id, c.group_id, c.provider, c.name
+               FROM channels c 
+               JOIN channel_groups cg ON c.group_id = cg.id
+               WHERE c.id = $1 AND cg.tenant_id = $2`,
+        values: [channelId, ctx.tenantId]
+      });
+      if (channel.length === 0) throw new Error('Channel not found or not authorized');
+
+      // 3. Move channel to new group
+      await ctx.db.executeSafe({
+        text: `UPDATE channels SET group_id = $1, updated_at = NOW() WHERE id = $2`,
+        values: [targetBotId, channelId]
+      });
+
+      // 4. Deactivate old prompt bindings
+      await ctx.db.executeSafe({
+        text: `UPDATE channel_prompt_bindings SET is_active = false WHERE channel_id = $1`,
+        values: [channelId]
+      });
+
+      // 5. Create new binding to target bot's active system prompt
+      const targetPrompt = await ctx.db.executeSafe({
+        text: `SELECT id FROM channel_prompts 
+               WHERE group_id = $1 AND tenant_id = $2 AND is_active = true AND prompt_type = 'system'
+               ORDER BY version DESC LIMIT 1`,
+        values: [targetBotId, ctx.tenantId]
+      });
+
+      if (targetPrompt.length > 0) {
+        await ctx.db.executeSafe({
+          text: `INSERT INTO channel_prompt_bindings (channel_id, prompt_id, is_active, priority)
+                 VALUES ($1, $2, true, 100)
+                 ON CONFLICT DO NOTHING`,
+          values: [channelId, targetPrompt[0].id]
+        });
+      }
+
+      await logAudit(ctx.tenantId, ctx.userId || 'system', 'channel.assigned', { 
+        channelId, 
+        channelName: channel[0].name,
+        fromBotId: channel[0].group_id, 
+        toBotId: targetBotId 
+      });
+
+      return true;
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error };
+    return { success: true };
+  });
+}
+
+/**
+ * Returns all unassigned channels (channels in archived groups)
+ */
+export async function getUnassignedChannels(): Promise<{ success: boolean; channels?: any[]; error?: string }> {
+  return withActionGuard(
+    { actionName: 'getUnassignedChannels' },
+    async (ctx) => {
+      const channels = await ctx.db.executeSafe({
+        text: `SELECT c.id, c.provider, c.identifier, c.name, cg.name as group_name, cg.status as group_status
+               FROM channels c
+               JOIN channel_groups cg ON c.group_id = cg.id
+               WHERE cg.tenant_id = $1 AND (cg.status = 'archived' OR cg.status = 'inactive')
+               AND c.provider != 'meta_legacy'
+               ORDER BY c.provider`,
+        values: [ctx.tenantId]
+      });
+      return channels;
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error };
+    return { success: true, channels: res.data as any[] };
+  });
+}

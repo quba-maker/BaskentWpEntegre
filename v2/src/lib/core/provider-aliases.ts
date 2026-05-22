@@ -1,0 +1,42 @@
+// ==========================================
+// QUBA AI — Provider Alias Normalization
+// ==========================================
+// DB'de "meta_instagram" saklanırken runtime "instagram" kullanır.
+// Bu helper merkezi alias çözümü sağlar.
+// Tüm downstream servisler bunu kullanmalıdır.
+// ==========================================
+
+/**
+ * Runtime provider adını DB alias dizisine çevirir.
+ * SQL: WHERE c.provider = ANY($2::text[])
+ */
+export function getProviderAliases(provider: string): string[] {
+  switch (provider) {
+    case 'instagram':
+    case 'meta_instagram':
+      return ['instagram', 'meta_instagram'];
+    case 'whatsapp':
+      return ['whatsapp'];
+    case 'messenger':
+      return ['messenger'];
+    default:
+      return [provider];
+  }
+}
+
+/**
+ * Runtime'dan gelen provider adını canonical forma çevirir.
+ * Canonical form: 'whatsapp' | 'instagram' | 'messenger'
+ */
+export function canonicalProvider(provider: string): string {
+  if (provider === 'meta_instagram') return 'instagram';
+  return provider;
+}
+
+/**
+ * Messenger channel identifier'ının valid olup olmadığını kontrol eder.
+ * Geçerli identifier: numeric Page ID
+ */
+export function isValidMessengerIdentifier(identifier: string): boolean {
+  return /^\d{5,}$/.test(identifier);
+}

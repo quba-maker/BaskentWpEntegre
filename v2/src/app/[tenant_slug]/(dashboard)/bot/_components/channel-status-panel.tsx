@@ -1,21 +1,34 @@
-import { Power } from "lucide-react";
+import { Power, Link2, AlertTriangle } from "lucide-react";
 import { type BotChannel } from "./shared";
 import { ToggleSwitch } from "@/components/governance";
 
 // ==========================================
 // CHANNEL STATUS PANEL
-// Authority: Channel activation/deactivation
-// Data owner: channel_*_enabled bot settings
+// Authority: Channel activation/deactivation + V2 binding visibility
+// Data owner: channel_*_enabled bot settings + channel_prompt_bindings
 // ==========================================
+
+interface ChannelBinding {
+  id: string;
+  provider: string;
+  identifier: string;
+  name: string;
+  group: string;
+  promptName: string | null;
+  hasCredentials: boolean;
+  healthStatus: string | null;
+  warnings: string[];
+}
 
 interface ChannelStatusPanelProps {
   channels: BotChannel[];
   isChannelActive: (id: string) => boolean;
   onToggleChannel: (id: string) => void;
   onSelectChannel: (id: string) => void;
+  channelBindings?: Record<string, { channels: ChannelBinding[] }>;
 }
 
-export function ChannelStatusPanel({ channels, isChannelActive, onToggleChannel, onSelectChannel }: ChannelStatusPanelProps) {
+export function ChannelStatusPanel({ channels, isChannelActive, onToggleChannel, onSelectChannel, channelBindings }: ChannelStatusPanelProps) {
   return (
     <div className="mb-8">
       <h2 className="text-lg font-bold mb-4 flex items-center gap-2" style={{ color: "var(--q-text-primary)" }}>
@@ -26,6 +39,7 @@ export function ChannelStatusPanel({ channels, isChannelActive, onToggleChannel,
         {channels.map(ch => {
           const active = isChannelActive(ch.id);
           const Icon = ch.icon;
+          const bindings = channelBindings?.[ch.id]?.channels || [];
           return (
             <div 
               key={ch.id} 
@@ -74,6 +88,61 @@ export function ChannelStatusPanel({ channels, isChannelActive, onToggleChannel,
                   {active ? "Aktif" : "Devre Dışı"}
                 </span>
               </div>
+
+              {/* V2 Channel Bindings — Read-only visibility */}
+              {bindings.length > 0 && (
+                <div className="mt-3 pt-3 border-t" style={{ borderColor: "var(--q-border-default)" }}>
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <Link2 className="w-3 h-3" style={{ color: "var(--q-text-secondary)" }} />
+                    <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: "var(--q-text-secondary)" }}>
+                      Bağlı Kanallar
+                    </span>
+                  </div>
+                  {bindings.map(b => (
+                    <div key={b.id} className="flex items-center justify-between py-1">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div 
+                          className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                          style={{ 
+                            backgroundColor: b.warnings.length === 0 
+                              ? "var(--q-green)" 
+                              : "var(--q-yellow, #f59e0b)" 
+                          }}
+                        />
+                        <span className="text-[11px] truncate" style={{ color: "var(--q-text-primary)" }}>
+                          {b.name}
+                        </span>
+                        {b.promptName && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-md flex-shrink-0" style={{ backgroundColor: "rgba(0,0,0,0.04)", color: "var(--q-text-secondary)" }}>
+                            {b.promptName}
+                          </span>
+                        )}
+                      </div>
+                      {b.warnings.length > 0 && (
+                        <div className="flex items-center gap-1 flex-shrink-0" title={b.warnings.join(', ')}>
+                          <AlertTriangle className="w-3 h-3" style={{ color: "var(--q-yellow, #f59e0b)" }} />
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  {bindings.some(b => b.warnings.length > 0) && (
+                    <div className="mt-1.5">
+                      {bindings.flatMap(b => b.warnings).filter((v, i, a) => a.indexOf(v) === i).map((w, i) => (
+                        <p key={i} className="text-[10px] leading-tight" style={{ color: "var(--q-yellow, #f59e0b)" }}>
+                          ⚠ {w}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+              {bindings.length === 0 && channelBindings && (
+                <div className="mt-3 pt-3 border-t" style={{ borderColor: "var(--q-border-default)" }}>
+                  <p className="text-[10px]" style={{ color: "var(--q-text-secondary)" }}>
+                    Henüz kanal bağlanmadı
+                  </p>
+                </div>
+              )}
             </div>
           );
         })}

@@ -2,6 +2,7 @@
 
 import { withActionGuard } from "@/lib/core/action-guard";
 import { decryptPayload, encryptPayload, EncryptedPayload } from "@/lib/core/encryption";
+import { canonicalProvider, isValidMessengerIdentifier } from "@/lib/core/provider-aliases";
 
 // ==========================================
 // QUBA AI — Integrations Actions (Zero-Trust, V2-Native)
@@ -219,15 +220,59 @@ export async function getIntegrationHealth() {
       }[] = [];
 
       for (const row of dbChannels) {
-        let status: 'connected' | 'warning' | 'error' = 'warning';
+        let status: 'connected' | 'disconnected' | 'warning' | 'error' = 'warning';
         let detail = 'Bağlantı bekleniyor...';
+        const displayProvider = canonicalProvider(row.provider);
 
-        if (row.health_status === 'healthy') {
-          status = 'connected';
-          detail = `✓ Aktif (${row.identifier})`;
-        } else if (row.health_status === 'error') {
+        // ── Real Health Evaluation ──
+        const hasCreds = !!row.credentials_encrypted;
+        const hasLastSync = !!row.last_sync_at;
+
+        // 1. No credentials → disconnected
+        if (!hasCreds) {
+          status = 'disconnected';
+          detail = 'Kimlik bilgisi eksik';
+        }
+        // 2. Messenger with non-numeric identifier → needs PAGE_ID
+        else if (displayProvider === 'messenger' && !isValidMessengerIdentifier(row.identifier || '')) {
+          status = 'warning';
+          detail = 'PAGE_ID gerekli — Meta Business Suite\'den alın';
+        }
+        // 3. Has error health_status
+        else if (row.health_status === 'error') {
           status = 'error';
           detail = 'Token veya bağlantı hatası';
+        }
+        // 4. Healthy but no last_sync_at
+        else if (row.health_status === 'healthy' && !hasLastSync) {
+          status = 'warning';
+          detail = `Bağlı ama test edilmedi (${row.identifier})`;
+        }
+        // 5. Healthy but last_sync_at > 7 days ago
+        else if (row.health_status === 'healthy' && hasLastSync) {
+          const daysSinceSync = (Date.now() - new Date(row.last_sync_at).getTime()) / (1000 * 60 * 60 * 24);
+          if (daysSinceSync > 7) {
+            status = 'warning';
+            detail = `İnaktif — son webhook ${Math.floor(daysSinceSync)} gün önce`;
+          } else {
+            status = 'connected';
+            detail = `✓ Aktif (${row.identifier})`;
+          }
+        }
+        // 6. Healthy + recent sync → active
+        else if (row.health_status === 'healthy') {
+          status = 'connected';
+          detail = `✓ Aktif (${row.identifier})`;
+        }
+
+        // Check for missing prompt binding
+        const bindingCheck = await ctx.db.executeSafe({
+          text: `SELECT 1 FROM channel_prompt_bindings WHERE channel_id = $1 LIMIT 1`,
+          values: [row.id]
+        });
+        const hasBinding = bindingCheck.length > 0;
+        if (!hasBinding && status !== 'disconnected') {
+          detail += ' • Prompt bağlı değil';
         }
 
         const lastMsg = await ctx.db.executeSafe({
@@ -237,8 +282,8 @@ export async function getIntegrationHealth() {
 
         channels.push({
           id: row.id,
-          name: row.name || row.provider,
-          provider: row.provider,
+          name: row.name || displayProvider,
+          provider: displayProvider,
           group: row.group_name,
           status,
           detail,

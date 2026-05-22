@@ -203,13 +203,15 @@ export async function POST(request: NextRequest) {
         log.error('[IDENTITY] Non-fatal: Could not link form to identity', idErr instanceof Error ? idErr : new Error(String(idErr)));
       }
       
-      // Auto-Outbound Bot Logic — Tenant'ın Meta token'ını kullan
-      let META_ACCESS_TOKEN = process.env.META_ACCESS_TOKEN || null;
-      let PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID || null;
+      // Auto-Outbound Bot Logic — V2 Only: Tenant-isolated credentials
+      // ENV fallback permanently removed (cross-tenant isolation risk)
+      let META_ACCESS_TOKEN: string | null = null;
+      let PHONE_NUMBER_ID: string | null = null;
       if (tenantId) {
         const creds = await CredentialsService.resolveCredentials(tenantId, "whatsapp");
-        if (creds.accessToken) META_ACCESS_TOKEN = creds.accessToken;
-        if (creds.whatsappPhoneNumberId) PHONE_NUMBER_ID = creds.whatsappPhoneNumberId;
+        META_ACCESS_TOKEN = creds.accessToken;
+        PHONE_NUMBER_ID = creds.whatsappPhoneNumberId;
+        log.info('[SHEETS_CREDENTIAL_SOURCE]', { source: creds.source, hasToken: !!META_ACCESS_TOKEN, hasPhoneId: !!PHONE_NUMBER_ID });
       }
 
       // 🔒 Otonom Karşılama kontrolü — V2: channel_ai_profiles, V1 fallback: settings

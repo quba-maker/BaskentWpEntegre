@@ -1,6 +1,7 @@
 import { withTenantDB } from "@/lib/core/tenant-db";
 import { logger } from "@/lib/core/logger";
 import { decryptPayload, EncryptedPayload } from "@/lib/core/encryption";
+import { getProviderAliases, canonicalProvider } from "@/lib/core/provider-aliases";
 
 const log = logger.withContext({ module: "CredentialsService" });
 
@@ -42,6 +43,8 @@ export class CredentialsService {
       const db = withTenantDB(tenantId);
       
       // ── LAYER 1: V2 Channel Integrations (Tenant-Isolated) ──
+      // Uses provider aliases: 'instagram' matches both 'instagram' and 'meta_instagram'
+      const providerAliases = getProviderAliases(provider);
       const v2Results = await db.executeSafe({
         text: `
           SELECT ci.credentials_encrypted, c.identifier, c.id as channel_id
@@ -49,10 +52,10 @@ export class CredentialsService {
           JOIN channel_groups cg ON c.group_id = cg.id
           LEFT JOIN channel_integrations ci ON ci.channel_id = c.id
           WHERE cg.tenant_id = $1 
-            AND c.provider = $2
+            AND c.provider = ANY($2::text[])
           LIMIT 1
         `,
-        values: [tenantId, provider]
+        values: [tenantId, providerAliases]
       }) as any[];
 
       if (v2Results && v2Results.length > 0) {
