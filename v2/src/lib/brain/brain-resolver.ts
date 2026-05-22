@@ -90,8 +90,12 @@ export class BrainResolver {
     // ═══════════════════════════════════════════════════════════
     //  V2 PATH (feature-flag gated)
     // ═══════════════════════════════════════════════════════════
-    if (isV2BrainEnabled() && channelId && channelId !== 'legacy_unmapped') {
+    const v2Enabled = isV2BrainEnabled();
+    log.info('[BRAIN_V2_GATE]', { v2Enabled, channelId: channelId || 'NULL', groupId: groupId || 'NULL', isLegacy: channelId === 'legacy_unmapped' });
+
+    if (v2Enabled && channelId && channelId !== 'legacy_unmapped') {
       try {
+        log.info('[BRAIN_V2_ENTERING] Attempting V2 resolution', { tenantId, channelId, groupId, channel });
         const v2Result = await this.resolveFromV2(tenantId, channelId, groupId, channel);
         
         if (v2Result && v2Result.systemPrompt && v2Result.systemPrompt.trim().length > 50) {
@@ -113,17 +117,23 @@ export class BrainResolver {
           log.warn('[BRAIN_FALLBACK] V2 prompt empty or too short, falling back to V1 settings', {
             tenantId, channelId, channel,
             v2PromptLength: v2Result?.systemPrompt?.length || 0,
+            v2ResultNull: v2Result === null,
             reason: 'prompt_empty_or_short'
           });
         }
       } catch (v2Error) {
         // V2 resolution failed entirely — fallback to V1 silently
-        log.warn('[BRAIN_FALLBACK] V2 resolution failed, falling back to V1 settings', {
+        log.warn('[BRAIN_FALLBACK] V2 resolution EXCEPTION, falling back to V1 settings', {
           tenantId, channelId, channel,
           reason: 'v2_query_error',
-          error: v2Error instanceof Error ? v2Error.message : String(v2Error)
+          error: v2Error instanceof Error ? v2Error.message : String(v2Error),
+          stack: v2Error instanceof Error ? v2Error.stack?.substring(0, 300) : undefined
         });
       }
+    } else if (!v2Enabled) {
+      log.info('[BRAIN_V2_SKIP] V2 disabled by feature flag');
+    } else {
+      log.info('[BRAIN_V2_SKIP] channelId missing or legacy', { channelId });
     }
 
     // ═══════════════════════════════════════════════════════════
