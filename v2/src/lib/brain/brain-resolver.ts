@@ -4,6 +4,7 @@ import { withTenantDB } from '../core/tenant-db';
 import { sql } from '../db';
 import { SecurityIsolationError } from '../security/tenant-firewall';
 import { logger } from '../core/logger';
+import { AIEventEmitter } from '../services/ai/core/event-emitter';
 import crypto from 'crypto';
 
 const log = logger.withContext({ module: 'BrainResolver' });
@@ -91,6 +92,7 @@ export class BrainResolver {
     //  V2 PATH (feature-flag gated)
     // ═══════════════════════════════════════════════════════════
     const v2Enabled = isV2BrainEnabled();
+    let v2DiagnosticReason = 'unknown';
     log.info('[BRAIN_V2_GATE]', { v2Enabled, channelId: channelId || 'NULL', groupId: groupId || 'NULL', isLegacy: channelId === 'legacy_unmapped' });
 
     if (v2Enabled && channelId && channelId !== 'legacy_unmapped') {
@@ -106,6 +108,7 @@ export class BrainResolver {
           runtimeSettings = v2Result.settings;
           brainSource = 'v2_channel_prompts';
 
+          v2DiagnosticReason = 'v2_success';
           log.info('[BRAIN_SOURCE] v2_channel_prompts', {
             tenantId, channelId, channel,
             promptName: v2Result.promptName,
@@ -114,6 +117,7 @@ export class BrainResolver {
           });
         } else {
           // V2 data exists but prompt is empty/too short — fallback to V1
+          v2DiagnosticReason = 'prompt_empty_or_short (len=' + (v2Result?.systemPrompt?.length || 0) + ', null=' + (v2Result === null) + ')';
           log.warn('[BRAIN_FALLBACK] V2 prompt empty or too short, falling back to V1 settings', {
             tenantId, channelId, channel,
             v2PromptLength: v2Result?.systemPrompt?.length || 0,
@@ -123,6 +127,7 @@ export class BrainResolver {
         }
       } catch (v2Error) {
         // V2 resolution failed entirely — fallback to V1 silently
+        v2DiagnosticReason = 'v2_exception: ' + (v2Error instanceof Error ? v2Error.message : String(v2Error));
         log.warn('[BRAIN_FALLBACK] V2 resolution EXCEPTION, falling back to V1 settings', {
           tenantId, channelId, channel,
           reason: 'v2_query_error',
@@ -131,10 +136,18 @@ export class BrainResolver {
         });
       }
     } else if (!v2Enabled) {
+      v2DiagnosticReason = 'feature_flag_disabled';
       log.info('[BRAIN_V2_SKIP] V2 disabled by feature flag');
     } else {
+      v2DiagnosticReason = 'channelId_missing_or_legacy (' + channelId + ')';
       log.info('[BRAIN_V2_SKIP] channelId missing or legacy', { channelId });
     }
+
+    // TEMPORARY: Write diagnostic to ai_events so we can read it from DB (no Vercel log access needed)
+    AIEventEmitter.emit({ tenantId, type: 'v2_brain_diagnostic' as any, category: 'pipeline', severity: 'info', payload: {
+      v2Enabled, channelId: channelId || 'NULL', groupId: groupId || 'NULL',
+      isLegacy: channelId === 'legacy_unmapped', reason: v2DiagnosticReason, brainSource
+    }});
 
     // ═══════════════════════════════════════════════════════════
     //  V1 PATH (default, or fallback from V2)
