@@ -231,8 +231,8 @@ export async function getIntegrationHealth() {
         }
 
         const lastMsg = await ctx.db.executeSafe({
-          text: `SELECT created_at FROM messages WHERE channel_id = $1 ORDER BY created_at DESC LIMIT 1`,
-          values: [row.id]
+          text: `SELECT created_at FROM messages WHERE channel_id = $1 AND tenant_id = $2 ORDER BY created_at DESC LIMIT 1`,
+          values: [row.id, ctx.tenantId]
         });
 
         channels.push({
