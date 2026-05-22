@@ -7,6 +7,7 @@ import { logAudit } from "@/lib/audit";
 // ==========================================
 // QUBA AI — AI Module Management Actions
 // Tenant bazlı AI modül yönetimi
+// V1_LEGACY: All settings R/W via V1 settings table. Migrate to dedicated ai_modules table in Phase 2D.
 // ==========================================
 
 export async function getAIModules(): Promise<{

@@ -26,6 +26,7 @@ export async function GET() {
         const db = withTenantDB(tenant.id);
 
         // Tenant'ın follow-up ayarlarını kontrol et
+        // V1_LEGACY: Reads from settings table. Migrate to channel config in Phase 2D.
         const followUpEnabled = await db.executeSafe({
           text: "SELECT value FROM settings WHERE key = 'bot_follow_up_enabled' AND tenant_id = $1",
           values: [tenant.id]

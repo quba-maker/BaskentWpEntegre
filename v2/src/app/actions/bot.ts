@@ -12,6 +12,7 @@ export async function getBotSettings() {
   return withActionGuard(
     { actionName: 'getBotSettings' },
     async (ctx) => {
+      // V1_LEGACY: Reads all bot settings from V1 settings table. Migrate panel UI to V2 tables in Phase 2D.
       const settings = await ctx.db.executeSafe({
         text: `SELECT key, value, updated_at FROM settings 
                WHERE tenant_id = $1
@@ -56,7 +57,7 @@ export async function saveBotSetting(key: string, value: string) {
       roles: ['owner', 'admin'] // Sadece yetkililer bot değiştirebilir
     },
     async (ctx) => {
-      // UPSERT — RLS enforced & Idempotent
+      // V1_LEGACY: Writes to settings table. Panel admin still uses V1. Migrate in Phase 2D.
       await ctx.db.executeSafe({
         text: `INSERT INTO settings (key, value, tenant_id, updated_at) 
                VALUES ($1, $2, $3, NOW())
@@ -307,6 +308,7 @@ export async function testBotPrompt(prompt: string, testMessage: string, channel
           foreign: 'system_prompt_foreign'
         };
         const key = promptKeyMap[channel] || 'system_prompt_whatsapp';
+        // V1_LEGACY: Reads prompt from settings. Migrate to channel_prompts in Phase 2D.
         const dbPrompt = await ctx.db.executeSafe({
           text: `SELECT value FROM settings WHERE key = $1 AND tenant_id = $2`,
           values: [key, ctx.tenantId]
@@ -314,7 +316,7 @@ export async function testBotPrompt(prompt: string, testMessage: string, channel
         finalPrompt = dbPrompt[0]?.value || 'Sen bir dijital asistansın. Kısa, sıcak ve profesyonel cevaplar ver.';
       }
 
-      // 🧠 KNOWLEDGE BASE INJECTION (for accurate playground testing)
+      // V1_LEGACY: Reads knowledge from settings. Migrate to channel_prompts in Phase 2D.
       const kbSettings = await ctx.db.executeSafe({
         text: `SELECT key, value FROM settings WHERE key IN ('bot_knowledge_prices', 'bot_knowledge_rules') AND tenant_id = $1`,
         values: [ctx.tenantId]
@@ -335,6 +337,7 @@ export async function testBotPrompt(prompt: string, testMessage: string, channel
 
       finalPrompt += knowledgeInjection;
 
+      // V1_LEGACY: Reads AI model from settings. Migrate to channel_ai_profiles in Phase 2D.
       const aiModel = await ctx.db.executeSafe({
         text: `SELECT value FROM settings WHERE key = 'ai_model' AND tenant_id = $1`,
         values: [ctx.tenantId]

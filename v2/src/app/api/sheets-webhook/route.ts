@@ -45,6 +45,7 @@ export async function POST(request: NextRequest) {
     const db = withTenantDB(tenantId);
 
     // Sheet config — tenant bazlı kontrol
+    // V1_LEGACY: Reads from settings table. Migrate to channel config in Phase 2D.
     let activeSheets: string[] = [];
     try {
       const configRes = await db.executeSafe({
@@ -202,6 +203,7 @@ export async function POST(request: NextRequest) {
       }
 
       // 🔒 Otonom Karşılama kontrolü — tenant bazlı
+      // V1_LEGACY: Reads from settings table. Migrate to channel config in Phase 2D.
       const autoGreetingSetting = await db.executeSafe({
         text: `SELECT value FROM settings WHERE key = 'bot_auto_greeting' AND tenant_id = $1`,
         values: [tenantId]
@@ -210,6 +212,7 @@ export async function POST(request: NextRequest) {
 
       if (META_ACCESS_TOKEN && PHONE_NUMBER_ID && autoGreetingEnabled) {
         // 🌐 Karşılama Dili kontrolü — tenant bazlı
+        // V1_LEGACY: Reads from settings table. Migrate to channel config in Phase 2D.
         const greetingLangSetting = await db.executeSafe({
           text: `SELECT value FROM settings WHERE key = 'bot_greeting_language' AND tenant_id = $1`,
           values: [tenantId]

@@ -5,6 +5,7 @@ import { withActionGuard } from "@/lib/core/action-guard";
 
 // ==========================================
 // QUBA AI — Integrations Actions (Zero-Trust)
+// V1_LEGACY: google_sheets_config stored in settings table. Migrate to dedicated integrations table in Phase 2D.
 // ==========================================
 
 export async function getGoogleSheetsConfig() {

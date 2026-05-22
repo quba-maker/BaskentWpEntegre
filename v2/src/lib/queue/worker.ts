@@ -266,7 +266,7 @@ export class QueueWorkerEngine {
     this.log.info(`[TENANT_BRAIN_BOUND] Brain ${brain.id} locked to context`, { tenantSlug: brain.context.tenantId, traceId });
 
     // Phase 6: Emit brain resolution event
-    AIEventEmitter.emit({ tenantId, type: 'brain_resolved', category: 'pipeline', payload: { brainId: brain.id, channel } });
+    AIEventEmitter.emit({ tenantId, type: 'brain_resolved', category: 'pipeline', payload: { brainId: brain.id, channel, brainSource: brain.context.brainSource || 'v1_settings' } });
 
     // Extract Message Data based on channel
     let phoneNumber: string;
@@ -759,7 +759,7 @@ export class QueueWorkerEngine {
         this.log.info(`[WORKER_MEMORY_OK] Memory summarization completed successfully`, { traceId, conversationId });
       } catch (err) {
         this.log.error(`[WORKER_MEMORY_FAILED] Non-fatal summary error`, err instanceof Error ? err : new Error(String(err)), { traceId });
-        AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'memory_failed', category: 'memory', severity: 'warning' });
+        AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'memory_failed', category: 'memory', severity: 'warning', payload: { error: err instanceof Error ? err.message : String(err) } });
         AIEventEmitter.logHealth(tenantId, 'memory_failure', { traceId });
       }
     }

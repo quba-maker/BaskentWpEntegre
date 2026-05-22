@@ -209,7 +209,8 @@ export class BrainResolver {
       tenantConfig,
       promptHash,
       { prices: knowledgePrices, rules: knowledgeRules },
-      runtimeSettings
+      runtimeSettings,
+      brainSource
     );
 
     return brain;

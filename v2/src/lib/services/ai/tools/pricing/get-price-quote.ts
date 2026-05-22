@@ -14,7 +14,7 @@ export const getPriceQuoteTool: ToolDefinition = {
     // In a real scenario, this might call an external CRM or query the database directly.
     // For now, we simulate fetching from the tenant's knowledge settings.
     
-    // Safety check - force query strictly within tenant scope
+    // V1_LEGACY: Reads from settings table. Migrate to channel_prompts (bot_knowledge_prices) in Phase 2D.
     const db = withTenantDB(context.tenantId);
     const res = await db.executeSafe({
       text: `

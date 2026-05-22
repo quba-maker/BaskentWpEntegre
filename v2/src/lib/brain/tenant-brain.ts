@@ -10,6 +10,7 @@ export interface TenantBrainContext {
   tenantId: string;
   channel: string;
   webhookPayloadId: string; // for tracing and strict isolation
+  brainSource?: 'v1_settings' | 'v2_channel_prompts'; // V2 observability — which resolution path was used
   config?: any; // The full tenant config resolved
   knowledge?: {
     prices?: string;
@@ -68,7 +69,8 @@ export function createTenantBrain(
   config?: any,
   promptHash?: string | null,
   knowledge?: TenantBrainContext['knowledge'],
-  settings?: TenantBrainSettings
+  settings?: TenantBrainSettings,
+  brainSource?: 'v1_settings' | 'v2_channel_prompts'
 ): TenantBrain {
   
   const instanceId = `brain_${tenantId}_${Date.now()}_${Math.random().toString(36).substring(7)}`;
@@ -103,6 +105,7 @@ export function createTenantBrain(
       tenantId,
       channel,
       webhookPayloadId,
+      brainSource: brainSource || 'v1_settings',
       config,
       knowledge,
       settings: resolvedSettings
