@@ -7,8 +7,13 @@ const log = logger.withContext({ module: 'FollowUpCron' });
 
 // ==========================================
 // QUBA AI — Follow-Up Cron (Tenant-Aware)
-// Her aktif tenant için ayrı ayrı çalışır
+// V2: Reads follow_up_enabled from channel_ai_profiles
+// Rollback: USE_V2_FOLLOW_UP=false → settings table
 // ==========================================
+
+function isV2FollowUpEnabled(): boolean {
+  return process.env.USE_V2_FOLLOW_UP !== 'false'; // default: true
+}
 
 export async function GET() {
   try {
@@ -25,14 +30,37 @@ export async function GET() {
       try {
         const db = withTenantDB(tenant.id);
 
-        // Tenant'ın follow-up ayarlarını kontrol et
-        // V1_LEGACY: Reads from settings table. Migrate to channel config in Phase 2D.
-        const followUpEnabled = await db.executeSafe({
-          text: "SELECT value FROM settings WHERE key = 'bot_follow_up_enabled' AND tenant_id = $1",
-          values: [tenant.id]
-        }) as any[];
+        // ── Follow-up enabled kontrolü ──
+        let isEnabled = true; // default: enabled
 
-        if (followUpEnabled.length > 0 && followUpEnabled[0].value === 'false') {
+        if (isV2FollowUpEnabled()) {
+          // V2: Read from channel_ai_profiles
+          const followUpConfig = await db.executeSafe({
+            text: `SELECT cap.follow_up_enabled 
+                   FROM channel_ai_profiles cap
+                   JOIN channel_groups cg ON cap.group_id = cg.id
+                   WHERE cg.tenant_id = $1
+                   ORDER BY cap.updated_at DESC LIMIT 1`,
+            values: [tenant.id]
+          }) as any[];
+
+          if (followUpConfig.length > 0 && followUpConfig[0].follow_up_enabled === false) {
+            isEnabled = false;
+          }
+          // No rows = default enabled
+        } else {
+          // V1 FALLBACK: Read from settings table
+          const followUpSettings = await db.executeSafe({
+            text: "SELECT value FROM settings WHERE key = 'bot_follow_up_enabled' AND tenant_id = $1",
+            values: [tenant.id]
+          }) as any[];
+
+          if (followUpSettings.length > 0 && followUpSettings[0].value === 'false') {
+            isEnabled = false;
+          }
+        }
+
+        if (!isEnabled) {
           results.push({ tenant: tenant.slug, status: 'disabled' });
           continue;
         }
@@ -98,7 +126,7 @@ export async function GET() {
 
             await db.executeSafe({
               text: "INSERT INTO messages (tenant_id, phone_number, direction, content, channel) VALUES ($1, $2, 'out', $3, $4)",
-              values: [tenant.id, conv.phone_number, 'out', msg, conv.channel || 'whatsapp']
+              values: [tenant.id, conv.phone_number, msg, conv.channel || 'whatsapp']
             });
             
           } catch (e: any) {
