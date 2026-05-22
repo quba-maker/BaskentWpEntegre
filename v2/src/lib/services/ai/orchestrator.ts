@@ -48,7 +48,7 @@ export interface AIResponse {
 export class AIOrchestrator {
   private log = logger.withContext({ module: 'AIOrchestrator' });
   private geminiCircuit = new CircuitBreaker('gemini', { failureThreshold: 5, resetTimeoutMs: 180000 });
-  private costLimiter = new CostLimiter({ maxRequests: 50, windowSeconds: 3600 }); // Saatte 50 İstek
+  private costLimiter = new CostLimiter({ maxRequests: 200, windowSeconds: 3600 }); // Saatte 200 İstek
 
   public async generateResponse(
     initialMessages: ChatMessage[],
@@ -184,11 +184,11 @@ export class AIOrchestrator {
     } catch (e: any) {
       this.log.error(`LLM Execution Failed [${config.provider}]`, e);
       
-      let fallbackText = "Şu an yoğunluk nedeniyle yanıt veremiyorum. Lütfen daha sonra tekrar deneyiniz.";
+      let fallbackText = "Şu an size en iyi şekilde yardımcı olabilmemiz için kısa bir bekleme süresi oluştu. Lütfen birkaç dakika sonra tekrar yazınız. 🙏";
       if (e.message?.startsWith('COST_LIMIT_EXCEEDED')) {
-        fallbackText = "Sistem aşırı kullanım nedeniyle geçici olarak durduruldu. Lütfen biraz bekleyin.";
+        fallbackText = "Şu an yoğun bir talep yaşıyoruz. Kısa süre içinde size dönüş yapacağız. Lütfen birkaç dakika bekleyiniz. 🙏";
       } else if (e.message?.startsWith('CIRCUIT_OPEN')) {
-        fallbackText = "AI servis sağlayıcımızda şu an bir kesinti yaşıyoruz. Mühendislerimiz konuyla ilgileniyor.";
+        fallbackText = "Sistemimizde kısa süreli bir bakım yapılıyor. En kısa sürede tekrar hizmetinizdeyiz. 🙏";
       }
 
       return {
