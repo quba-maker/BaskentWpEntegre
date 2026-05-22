@@ -1,46 +1,118 @@
 "use server";
 
-// sql import removed — all queries use parameterized {text, values} format for proper RLS enforcement
 import { withActionGuard } from "@/lib/core/action-guard";
 import { logAudit } from "@/lib/audit";
 
 // ==========================================
-// QUBA AI — Bot Actions (Zero-Trust Migrated)
+// QUBA AI — Bot Actions (V2-Native)
+// Phase 2D-2B: All reads/writes use V2 tables
+// V1 dual-write gated behind USE_V1_DUAL_WRITE
 // ==========================================
 
+/** When true, writes also sync to V1 settings table for backward compatibility */
+function isV1DualWriteEnabled(): boolean {
+  return process.env.USE_V1_DUAL_WRITE === 'true';
+}
+
+// ─── V2 CHANNEL MAPPING ───
+// Maps panel channel IDs to V2 prompt names for lookup
+const CHANNEL_PROMPT_MAP: Record<string, string> = {
+  whatsapp: 'WhatsApp System Prompt',
+  instagram: 'Social TR Prompt',
+  foreign: 'Social Foreign Prompt',
+};
+
+// Maps panel channel IDs to V2 channel providers for lookup
+const CHANNEL_PROVIDER_MAP: Record<string, string> = {
+  whatsapp: 'whatsapp',
+  instagram: 'meta_instagram',
+  foreign: 'meta_instagram',  // foreign uses instagram channel with different group
+};
+
+// ==========================================
+// READ: getBotSettings (V2 Primary)
+// Returns data in same shape as V1 for UI compatibility
+// ==========================================
 export async function getBotSettings() {
   return withActionGuard(
     { actionName: 'getBotSettings' },
     async (ctx) => {
-      // V1_LEGACY: Reads all bot settings from V1 settings table. Migrate panel UI to V2 tables in Phase 2D.
-      const settings = await ctx.db.executeSafe({
-        text: `SELECT key, value, updated_at FROM settings 
-               WHERE tenant_id = $1
-                 AND key IN (
-                   'system_prompt_whatsapp', 'system_prompt_tr', 'system_prompt_foreign',
-                   'foreign_page_id', 'channel_whatsapp_enabled', 'channel_instagram_enabled',
-                   'channel_foreign_enabled', 'bot_auto_greeting', 'bot_greeting_language',
-                   'bot_max_messages', 'bot_working_hours', 'bot_aggression_level',
-                   'ai_model', 'bot_whatsapp_active', 'bot_instagram_active',
-                   'bot_foreign_active', 'working_hours', 'bot_knowledge_prices',
-                   'bot_knowledge_rules', 'bot_max_response_tokens'
-                 )`,
+      // ── V2 READ: Fetch all prompts for this tenant ──
+      const prompts = await ctx.db.executeSafe({
+        text: `SELECT cp.name, cp.prompt_text, cp.knowledge_prices, cp.knowledge_rules, 
+                      cp.is_active, cp.version, cp.updated_at
+               FROM channel_prompts cp
+               WHERE cp.tenant_id = $1 AND cp.is_active = true`,
         values: [ctx.tenantId]
       });
 
-      // Read path %100 saf tutuldu (No mutation, no side-effects)
-      const rows = Array.isArray(settings) ? settings : ((settings as any)?.rows || []);
-
-      const result: Record<string, any> = {};
-      rows.forEach((s: any) => {
-        if (!result[s.key] || new Date(s.updated_at) > new Date(result[s.key].updated_at)) {
-          result[s.key] = { value: s.value, updated_at: s.updated_at };
-        }
+      // ── V2 READ: Fetch AI profile (use first active group's profile) ──
+      const profiles = await ctx.db.executeSafe({
+        text: `SELECT cap.ai_model, cap.max_messages, cap.max_response_tokens, 
+                      cap.aggression_level, cap.business_hours_json,
+                      cap.auto_greeting, cap.greeting_language,
+                      cap.updated_at
+               FROM channel_ai_profiles cap
+               JOIN channel_groups cg ON cap.group_id = cg.id
+               WHERE cg.tenant_id = $1 AND cg.status = 'active'
+               ORDER BY cap.updated_at DESC LIMIT 1`,
+        values: [ctx.tenantId]
       });
-      
-      return { 
-        settings: result
-      };
+
+      // ── V2 READ: Fetch channel enable states ──
+      const channels = await ctx.db.executeSafe({
+        text: `SELECT c.provider, c.name, cg.status
+               FROM channels c
+               JOIN channel_groups cg ON c.group_id = cg.id
+               WHERE cg.tenant_id = $1`,
+        values: [ctx.tenantId]
+      });
+
+      // ── BUILD V1-COMPATIBLE SHAPE ──
+      // UI expects: { [key]: { value, updated_at } }
+      const result: Record<string, any> = {};
+
+      // Map prompts to V1 keys
+      const promptRows = Array.isArray(prompts) ? prompts : [];
+      for (const p of promptRows) {
+        const v1Key = promptNameToV1Key(p.name);
+        if (v1Key) {
+          result[v1Key] = { value: p.prompt_text, updated_at: p.updated_at };
+        }
+        // Knowledge is shared across prompts — use first non-empty
+        if (p.knowledge_prices && !result['bot_knowledge_prices']) {
+          result['bot_knowledge_prices'] = { value: p.knowledge_prices, updated_at: p.updated_at };
+        }
+        if (p.knowledge_rules && !result['bot_knowledge_rules']) {
+          result['bot_knowledge_rules'] = { value: p.knowledge_rules, updated_at: p.updated_at };
+        }
+      }
+
+      // Map AI profile to V1 keys
+      const profile = Array.isArray(profiles) && profiles.length > 0 ? profiles[0] : null;
+      if (profile) {
+        result['ai_model'] = { value: profile.ai_model || 'gemini-2.5-flash', updated_at: profile.updated_at };
+        result['bot_max_messages'] = { value: String(profile.max_messages || 8), updated_at: profile.updated_at };
+        result['bot_max_response_tokens'] = { value: String(profile.max_response_tokens || 1000), updated_at: profile.updated_at };
+        result['bot_aggression_level'] = { value: profile.aggression_level || 'medium', updated_at: profile.updated_at };
+        result['working_hours'] = { value: JSON.stringify(profile.business_hours_json || { enabled: false }), updated_at: profile.updated_at };
+        result['bot_auto_greeting'] = { value: profile.auto_greeting ? 'true' : 'false', updated_at: profile.updated_at };
+        result['bot_greeting_language'] = { value: profile.greeting_language || 'auto', updated_at: profile.updated_at };
+      }
+
+      // Map channel states
+      const channelRows = Array.isArray(channels) ? channels : [];
+      const hasWhatsapp = channelRows.some((c: any) => c.provider === 'whatsapp');
+      const hasInstagram = channelRows.some((c: any) => c.provider === 'meta_instagram');
+      result['channel_whatsapp_enabled'] = { value: hasWhatsapp ? 'true' : 'false', updated_at: new Date().toISOString() };
+      result['channel_instagram_enabled'] = { value: hasInstagram ? 'true' : 'false', updated_at: new Date().toISOString() };
+      result['channel_foreign_enabled'] = { value: hasInstagram ? 'true' : 'false', updated_at: new Date().toISOString() };
+
+      // Fill missing knowledge
+      if (!result['bot_knowledge_prices']) result['bot_knowledge_prices'] = { value: '', updated_at: null };
+      if (!result['bot_knowledge_rules']) result['bot_knowledge_rules'] = { value: '', updated_at: null };
+
+      return { settings: result };
     }
   ).then(res => {
     if (!res.success) return { success: false, settings: {} as Record<string, any>, error: res.error };
@@ -50,23 +122,100 @@ export async function getBotSettings() {
   });
 }
 
+// ==========================================
+// WRITE: saveBotSetting (V2 Primary, V1 Dual-Write Optional)
+// ==========================================
 export async function saveBotSetting(key: string, value: string) {
   return withActionGuard(
     { 
       actionName: 'saveBotSetting',
-      roles: ['owner', 'admin'] // Sadece yetkililer bot değiştirebilir
+      roles: ['owner', 'admin']
     },
     async (ctx) => {
-      // V1_LEGACY: Writes to settings table. Panel admin still uses V1. Migrate in Phase 2D.
-      await ctx.db.executeSafe({
-        text: `INSERT INTO settings (key, value, tenant_id, updated_at) 
-               VALUES ($1, $2, $3, NOW())
-               ON CONFLICT (tenant_id, key) 
-               DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at`,
-        values: [key, value, ctx.tenantId]
-      });
+      // ── ROUTE TO V2 TABLE ──
+      if (key.startsWith('system_prompt_')) {
+        // Write to channel_prompts
+        const promptName = v1KeyToPromptName(key);
+        if (promptName) {
+          await ctx.db.executeSafe({
+            text: `UPDATE channel_prompts 
+                   SET prompt_text = $1, version = version + 1, updated_at = NOW()
+                   WHERE tenant_id = $2 AND name = $3 AND is_active = true`,
+            values: [value, ctx.tenantId, promptName]
+          });
+        }
+      } else if (key === 'bot_knowledge_prices' || key === 'bot_knowledge_rules') {
+        // Write knowledge to ALL active prompts for this tenant
+        const col = key === 'bot_knowledge_prices' ? 'knowledge_prices' : 'knowledge_rules';
+        await ctx.db.executeSafe({
+          text: `UPDATE channel_prompts SET ${col} = $1, updated_at = NOW()
+                 WHERE tenant_id = $2 AND is_active = true`,
+          values: [value, ctx.tenantId]
+        });
+      } else if (['ai_model', 'bot_max_messages', 'bot_max_response_tokens', 'bot_aggression_level'].includes(key)) {
+        // Write to channel_ai_profiles
+        const colMap: Record<string, string> = {
+          'ai_model': 'ai_model',
+          'bot_max_messages': 'max_messages',
+          'bot_max_response_tokens': 'max_response_tokens',
+          'bot_aggression_level': 'aggression_level',
+        };
+        const col = colMap[key];
+        const isNumeric = ['max_messages', 'max_response_tokens'].includes(col);
+        const dbVal = isNumeric ? parseInt(value) || (col === 'max_messages' ? 8 : 1000) : value;
+        
+        await ctx.db.executeSafe({
+          text: `UPDATE channel_ai_profiles SET ${col} = $1, updated_at = NOW()
+                 WHERE group_id IN (
+                   SELECT id FROM channel_groups WHERE tenant_id = $2 AND status = 'active'
+                 )`,
+          values: [dbVal, ctx.tenantId]
+        });
+      } else if (key === 'working_hours') {
+        // Write business hours to channel_ai_profiles
+        let parsed: any = { enabled: false };
+        try { parsed = JSON.parse(value); } catch(e) {}
+        
+        await ctx.db.executeSafe({
+          text: `UPDATE channel_ai_profiles SET business_hours_json = $1, updated_at = NOW()
+                 WHERE group_id IN (
+                   SELECT id FROM channel_groups WHERE tenant_id = $2 AND status = 'active'
+                 )`,
+          values: [JSON.stringify(parsed), ctx.tenantId]
+        });
+      } else if (key === 'bot_auto_greeting') {
+        await ctx.db.executeSafe({
+          text: `UPDATE channel_ai_profiles SET auto_greeting = $1, updated_at = NOW()
+                 WHERE group_id IN (
+                   SELECT id FROM channel_groups WHERE tenant_id = $2 AND status = 'active'
+                 )`,
+          values: [value === 'true', ctx.tenantId]
+        });
+      } else if (key === 'bot_greeting_language') {
+        await ctx.db.executeSafe({
+          text: `UPDATE channel_ai_profiles SET greeting_language = $1, updated_at = NOW()
+                 WHERE group_id IN (
+                   SELECT id FROM channel_groups WHERE tenant_id = $2 AND status = 'active'
+                 )`,
+          values: [value, ctx.tenantId]
+        });
+      }
 
-      
+      // ── V1 DUAL WRITE (optional) ──
+      if (isV1DualWriteEnabled()) {
+        try {
+          await ctx.db.executeSafe({
+            text: `INSERT INTO settings (key, value, tenant_id, updated_at) 
+                   VALUES ($1, $2, $3, NOW())
+                   ON CONFLICT (tenant_id, key) 
+                   DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at`,
+            values: [key, value, ctx.tenantId]
+          });
+        } catch (e) {
+          // Non-fatal: V1 dual-write failure doesn't block V2
+        }
+      }
+
       // Audit log
       logAudit({
         tenantId: ctx.tenantId,
@@ -75,10 +224,10 @@ export async function saveBotSetting(key: string, value: string) {
         action: "bot_setting_changed",
         entityType: "setting",
         entityId: key,
-        details: { newValue: value.substring(0, 200) },
+        details: { newValue: value.substring(0, 200), source: 'v2' },
       });
 
-      // Phase 6: Auto-version brain prompts on save
+      // Auto-version brain prompts on save
       if (key.startsWith('system_prompt')) {
         try {
           const { BrainVersionService } = await import('@/lib/services/brain-version.service');
@@ -87,11 +236,10 @@ export async function saveBotSetting(key: string, value: string) {
             systemPrompt: value,
             promptKey: key,
             changedBy: ctx.email || 'admin',
-            changeSummary: `${key} güncellendi`,
+            changeSummary: `${key} güncellendi (V2)`,
           });
         } catch (e) {
-          console.error('[BRAIN_VERSION_SAVE_FAILED]', e);
-          // Non-fatal — don't block the save
+          // Non-fatal
         }
       }
 
@@ -193,58 +341,42 @@ export async function getModelUsage(period: string = '30d') {
         values: [ctx.tenantId, interval]
       });
 
-      const USD_TRY_RATE = 36.50; // In a production app this could be fetched from an API daily and cached.
+      const USD_TRY_RATE = 36.50;
       let totalCostUsd = 0;
       let totalPromptTokens = 0;
       let totalCompletionTokens = 0;
       const modelBreakdown: Record<string, { count: number; costUsd: number; costTry: number; label: string }> = {};
-      
-      usage.forEach((row: any) => {
-        const model = row.model_used;
-        const count = parseInt(row.message_count);
-        const pTokens = parseInt(row.total_prompt_tokens || '0');
-        const cTokens = parseInt(row.total_completion_tokens || '0');
-        
-        totalPromptTokens += pTokens;
-        totalCompletionTokens += cTokens;
 
-        const costInfo = MODEL_COSTS[model] || { input: 0.15, output: 0.60, label: model };
+      for (const row of (usage as any[])) {
+        const m = row.model_used;
+        const costs = MODEL_COSTS[m] || MODEL_COSTS['gemini-2.5-flash'];
+        const promptT = parseInt(row.total_prompt_tokens) || 0;
+        const completionT = parseInt(row.total_completion_tokens) || 0;
+        const costUsd = ((promptT / 1_000_000) * costs.input) + ((completionT / 1_000_000) * costs.output);
         
-        // Exact cost calculation based on recorded tokens
-        const costUsd = (pTokens / 1_000_000) * costInfo.input + (cTokens / 1_000_000) * costInfo.output;
-        const costTry = costUsd * USD_TRY_RATE;
-        
-        const groupKey = costInfo.label;
-        if (!modelBreakdown[groupKey]) {
-          modelBreakdown[groupKey] = { count: 0, costUsd: 0, costTry: 0, label: groupKey };
-        }
-        modelBreakdown[groupKey].count += count;
-        modelBreakdown[groupKey].costUsd += costUsd;
-        modelBreakdown[groupKey].costTry += costTry;
         totalCostUsd += costUsd;
-      });
+        totalPromptTokens += promptT;
+        totalCompletionTokens += completionT;
+        modelBreakdown[m] = { count: parseInt(row.message_count), costUsd, costTry: costUsd * USD_TRY_RATE, label: costs.label };
+      }
 
-      const channels: Record<string, number> = {};
-      let totalChannelMsgs = 0;
-      channelBreakdown.forEach((row: any) => {
-        channels[row.channel] = parseInt(row.c);
-        totalChannelMsgs += parseInt(row.c);
-      });
+      const channelMap: Record<string, number> = {};
+      for (const row of (channelBreakdown as any[])) {
+        channelMap[row.channel || 'whatsapp'] = parseInt(row.c) || 0;
+      }
 
-      const totalCostTry = totalCostUsd * USD_TRY_RATE;
-      const avgCostPerMessageUsd = totalChannelMsgs > 0 ? totalCostUsd / totalChannelMsgs : 0;
-      const avgCostPerMessageTry = totalChannelMsgs > 0 ? totalCostTry / totalChannelMsgs : 0;
+      const totalMessages = Object.values(modelBreakdown).reduce((s, m) => s + m.count, 0);
 
-      return { 
-        models: modelBreakdown, 
-        channels, 
-        totalMessages: totalChannelMsgs, 
+      return {
+        models: modelBreakdown,
+        channels: channelMap,
+        totalMessages,
         totalPromptTokens,
         totalCompletionTokens,
-        totalCostUsd: Math.round(totalCostUsd * 10000) / 10000, 
-        totalCostTry: Math.round(totalCostTry * 100) / 100,
-        avgCostPerMessageUsd: Math.round(avgCostPerMessageUsd * 10000) / 10000,
-        avgCostPerMessageTry: Math.round(avgCostPerMessageTry * 100) / 100,
+        totalCostUsd,
+        totalCostTry: totalCostUsd * USD_TRY_RATE,
+        avgCostPerMessageUsd: totalMessages > 0 ? totalCostUsd / totalMessages : 0,
+        avgCostPerMessageTry: totalMessages > 0 ? (totalCostUsd * USD_TRY_RATE) / totalMessages : 0,
         exchangeRate: USD_TRY_RATE
       };
     }
@@ -288,6 +420,9 @@ export async function getRecentBotConversations(limit: number = 8) {
   ).then(res => res.data || []);
 }
 
+// ==========================================
+// TEST BOT PROMPT (V2 Primary)
+// ==========================================
 export async function testBotPrompt(prompt: string, testMessage: string, channel: string = 'whatsapp') {
   return withActionGuard(
     { actionName: 'testBotPrompt' },
@@ -302,30 +437,24 @@ export async function testBotPrompt(prompt: string, testMessage: string, channel
 
       let finalPrompt = prompt;
       if (!finalPrompt || finalPrompt.trim().length < 10) {
-        const promptKeyMap: Record<string, string> = {
-          whatsapp: 'system_prompt_whatsapp',
-          instagram: 'system_prompt_tr',
-          foreign: 'system_prompt_foreign'
-        };
-        const key = promptKeyMap[channel] || 'system_prompt_whatsapp';
-        // V1_LEGACY: Reads prompt from settings. Migrate to channel_prompts in Phase 2D.
+        // V2: Read from channel_prompts
+        const promptName = CHANNEL_PROMPT_MAP[channel] || CHANNEL_PROMPT_MAP['whatsapp'];
         const dbPrompt = await ctx.db.executeSafe({
-          text: `SELECT value FROM settings WHERE key = $1 AND tenant_id = $2`,
-          values: [key, ctx.tenantId]
+          text: `SELECT prompt_text FROM channel_prompts 
+                 WHERE tenant_id = $1 AND name = $2 AND is_active = true LIMIT 1`,
+          values: [ctx.tenantId, promptName]
         });
-        finalPrompt = dbPrompt[0]?.value || 'Sen bir dijital asistansın. Kısa, sıcak ve profesyonel cevaplar ver.';
+        finalPrompt = dbPrompt[0]?.prompt_text || 'Sen bir dijital asistansın. Kısa, sıcak ve profesyonel cevaplar ver.';
       }
 
-      // V1_LEGACY: Reads knowledge from settings. Migrate to channel_prompts in Phase 2D.
-      const kbSettings = await ctx.db.executeSafe({
-        text: `SELECT key, value FROM settings WHERE key IN ('bot_knowledge_prices', 'bot_knowledge_rules') AND tenant_id = $1`,
+      // V2: Read knowledge from channel_prompts
+      const kbData = await ctx.db.executeSafe({
+        text: `SELECT knowledge_prices, knowledge_rules FROM channel_prompts 
+               WHERE tenant_id = $1 AND is_active = true LIMIT 1`,
         values: [ctx.tenantId]
       });
-      let prices = '', rules = '';
-      kbSettings.forEach((row: any) => {
-        if (row.key === 'bot_knowledge_prices') prices = row.value;
-        if (row.key === 'bot_knowledge_rules') rules = row.value;
-      });
+      const prices = kbData[0]?.knowledge_prices || '';
+      const rules = kbData[0]?.knowledge_rules || '';
 
       let knowledgeInjection = '';
       if (prices) {
@@ -337,12 +466,14 @@ export async function testBotPrompt(prompt: string, testMessage: string, channel
 
       finalPrompt += knowledgeInjection;
 
-      // V1_LEGACY: Reads AI model from settings. Migrate to channel_ai_profiles in Phase 2D.
-      const aiModel = await ctx.db.executeSafe({
-        text: `SELECT value FROM settings WHERE key = 'ai_model' AND tenant_id = $1`,
+      // V2: Read AI model from channel_ai_profiles
+      const profileData = await ctx.db.executeSafe({
+        text: `SELECT cap.ai_model FROM channel_ai_profiles cap
+               JOIN channel_groups cg ON cap.group_id = cg.id
+               WHERE cg.tenant_id = $1 AND cg.status = 'active' LIMIT 1`,
         values: [ctx.tenantId]
       });
-      const model = aiModel[0]?.value || 'gemini-2.5-flash';
+      const model = profileData[0]?.ai_model || 'gemini-2.5-flash';
 
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
@@ -370,4 +501,26 @@ export async function testBotPrompt(prompt: string, testMessage: string, channel
     if (!res.success) return { success: false, reply: '❌ Bağlantı hatası: ' + res.error, model: '' };
     return res.data!;
   });
+}
+
+// ==========================================
+// HELPERS — V1 ↔ V2 Key Mapping
+// ==========================================
+
+function promptNameToV1Key(name: string): string | null {
+  const map: Record<string, string> = {
+    'WhatsApp System Prompt': 'system_prompt_whatsapp',
+    'Social TR Prompt': 'system_prompt_tr',
+    'Social Foreign Prompt': 'system_prompt_foreign',
+  };
+  return map[name] || null;
+}
+
+function v1KeyToPromptName(key: string): string | null {
+  const map: Record<string, string> = {
+    'system_prompt_whatsapp': 'WhatsApp System Prompt',
+    'system_prompt_tr': 'Social TR Prompt',
+    'system_prompt_foreign': 'Social Foreign Prompt',
+  };
+  return map[key] || null;
 }
