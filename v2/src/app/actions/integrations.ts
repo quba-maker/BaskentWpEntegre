@@ -47,8 +47,8 @@ export async function getGoogleSheetsConfig() {
             const creds = typeof integration[0].credentials === 'string' 
               ? JSON.parse(integration[0].credentials) 
               : integration[0].credentials;
-            // If encrypted, decrypt
-            if (creds.iv && creds.encryptedData) {
+            // If encrypted, decrypt (EncryptedPayload format: {version, provider, encrypted_payload})
+            if (creds.encrypted_payload && creds.version) {
               const decrypted = decryptPayload(creds as EncryptedPayload);
               apiKey = decrypted.apiKey || '';
             } else {
@@ -193,6 +193,7 @@ export async function getIntegrationHealth() {
   return withActionGuard(
     { actionName: 'getIntegrationHealth' },
     async (ctx) => {
+      console.log('[V2_INTEGRATIONS_TRACE] getIntegrationHealth START | tenantId:', ctx.tenantId, '| v2Enabled:', isV2IntegrationsEnabled());
       // V2: Channel health from channels + channel_integrations (always V2)
       const dbChannels = await ctx.db.executeSafe({
         text: `SELECT 
@@ -249,6 +250,7 @@ export async function getIntegrationHealth() {
       // Google Sheets integration card — V2 or V1
       if (isV2IntegrationsEnabled()) {
         // V2: Read from tenant_integrations + ingestion_pipelines
+        try {
         const sheetsIntegration = await ctx.db.executeSafe({
           text: `SELECT health_status, last_sync_at, updated_at FROM tenant_integrations 
                  WHERE tenant_id = $1 AND provider = 'google_sheets' LIMIT 1`,
@@ -279,6 +281,10 @@ export async function getIntegrationHealth() {
             lastMessage: null,
             lastSyncAt: sheetsIntegration[0].last_sync_at || null,
           });
+        }
+        } catch (sheetsErr: any) {
+          console.error('[V2_INTEGRATIONS_ERROR] Sheets health check failed:', sheetsErr?.message || sheetsErr);
+          // Non-fatal: continue without Google Sheets card
         }
       } else {
         // V1 FALLBACK: Read from settings
