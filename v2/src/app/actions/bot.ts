@@ -95,7 +95,11 @@ export async function getBotSettings() {
         result['bot_max_messages'] = { value: String(profile.max_messages || 8), updated_at: profile.updated_at };
         result['bot_max_response_tokens'] = { value: String(profile.max_response_tokens || 1000), updated_at: profile.updated_at };
         result['bot_aggression_level'] = { value: profile.aggression_level || 'medium', updated_at: profile.updated_at };
-        result['working_hours'] = { value: JSON.stringify(profile.business_hours_json || { enabled: false }), updated_at: profile.updated_at };
+        const bhJson = profile.business_hours_json;
+        const workingHoursValue = (bhJson && typeof bhJson === 'object' && Object.keys(bhJson).length > 0) 
+          ? bhJson 
+          : { enabled: false };
+        result['working_hours'] = { value: JSON.stringify(workingHoursValue), updated_at: profile.updated_at };
         result['bot_auto_greeting'] = { value: profile.auto_greeting ? 'true' : 'false', updated_at: profile.updated_at };
         result['bot_greeting_language'] = { value: profile.greeting_language || 'auto', updated_at: profile.updated_at };
       }
@@ -134,6 +138,11 @@ export async function saveBotSetting(key: string, value: string) {
     async (ctx) => {
       // ── ROUTE TO V2 TABLE ──
       if (key.startsWith('system_prompt_')) {
+        // Guard: never write empty/short prompts — prevents accidental data loss
+        if (!value || value.trim().length < 20) {
+          console.warn('[PROMPT_SAVE_BLOCKED] Attempted to save empty/short prompt:', key, 'len:', value?.length);
+          return { success: true }; // Silently skip — don't corrupt V2 data
+        }
         // Write to channel_prompts
         const promptName = v1KeyToPromptName(key);
         if (promptName) {
