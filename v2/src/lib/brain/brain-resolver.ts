@@ -264,10 +264,11 @@ export class BrainResolver {
         WHERE cpb.channel_id = $1
           AND cpb.is_active = true
           AND cp.prompt_type = 'system'
+          AND cp.tenant_id = $2
         ORDER BY cpb.priority ASC
         LIMIT 1
       `,
-      values: [channelId]
+      values: [channelId, tenantId]
     }) as any[];
 
     if (!bindingRows || bindingRows.length === 0) {
@@ -335,13 +336,15 @@ export class BrainResolver {
     try {
       const profileRows = await db.executeSafe({
         text: `
-          SELECT id, ai_model, temperature, aggression_level, business_hours_json,
-                 max_messages, max_response_tokens
-          FROM channel_ai_profiles
-          WHERE group_id = $1
+          SELECT cap.id, cap.ai_model, cap.temperature, cap.aggression_level, cap.business_hours_json,
+                 cap.max_messages, cap.max_response_tokens
+          FROM channel_ai_profiles cap
+          JOIN channel_groups cg ON cap.group_id = cg.id
+          WHERE cap.group_id = $1
+            AND cg.tenant_id = $2
           LIMIT 1
         `,
-        values: [groupId]
+        values: [groupId, tenantId]
       }) as any[];
 
       if (profileRows && profileRows.length > 0) {
