@@ -19,7 +19,7 @@ export const TenantQueryGuard = {
     // A simplistic check to ensure the query string mentions tenant_id
     // Real enforcement happens via the ORM/QueryBuilder, but this blocks raw strings
     if (!normalizedQuery.includes("tenant_id")) {
-      telemetry.track("SECURITY_QUERY_REJECTED", "failure", {
+      telemetry.track("SECURITY_QUERY_REJECTED", "warn", {
         reason: "Raw query lacks tenant_id bound",
         query
       });
@@ -31,7 +31,7 @@ export const TenantQueryGuard = {
     // We enforce that the executing tenantId is present in the parameters array.
     if (params && params.length > 0) {
       if (!params.includes(tenantId)) {
-        telemetry.track("SECURITY_QUERY_REJECTED", "failure", {
+        telemetry.track("SECURITY_QUERY_REJECTED", "warn", {
           reason: "Query parameters lack execution tenantId",
           query,
           params
@@ -39,7 +39,7 @@ export const TenantQueryGuard = {
         throw new SecurityIsolationError("Query execution rejected. Parameters must contain the current executing tenant_id to prevent cross-tenant queries.");
       }
     } else {
-        telemetry.track("SECURITY_QUERY_REJECTED", "failure", {
+        telemetry.track("SECURITY_QUERY_REJECTED", "warn", {
           reason: "Query lacks parameters (raw execution attempt)",
           query
         });

@@ -4,18 +4,27 @@ import { withTenantDB } from '../core/tenant-db';
 import { sql } from '../db';
 import { SecurityIsolationError } from '../security/tenant-firewall';
 import { logger } from '../core/logger';
-import { AIEventEmitter } from '../services/ai/core/event-emitter';
 import crypto from 'crypto';
 
 const log = logger.withContext({ module: 'BrainResolver' });
 
-/**
- * Returns true if V2 brain resolution is enabled.
- * Default: false (V1 settings path).
- * Set USE_V2_BRAIN_RESOLUTION=true to activate V2 channel-based resolution.
- */
+// ═══════════════════════════════════════════════════════════
+//  FEATURE FLAGS
+// ═══════════════════════════════════════════════════════════
+
+/** V2 brain resolution via channel_prompts + channel_ai_profiles */
 function isV2BrainEnabled(): boolean {
   return process.env.USE_V2_BRAIN_RESOLUTION === 'true';
+}
+
+/** V1 settings table fallback. Default: false (disabled). Set USE_V1_FALLBACK=true to re-enable. */
+function isV1FallbackEnabled(): boolean {
+  return process.env.USE_V1_FALLBACK === 'true';
+}
+
+/** Strict V2 mode. When true, missing prompts/bindings throw hard errors instead of warnings. */
+function isStrictV2(): boolean {
+  return process.env.USE_STRICT_V2 === 'true';
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -89,70 +98,68 @@ export class BrainResolver {
     };
 
     // ═══════════════════════════════════════════════════════════
-    //  V2 PATH (feature-flag gated)
+    //  V2 PATH — Primary resolution via channel_prompts
     // ═══════════════════════════════════════════════════════════
-    const v2Enabled = isV2BrainEnabled();
-    let v2DiagnosticReason = 'unknown';
-    log.info('[BRAIN_V2_GATE]', { v2Enabled, channelId: channelId || 'NULL', groupId: groupId || 'NULL', isLegacy: channelId === 'legacy_unmapped' });
-
-    if (v2Enabled && channelId && channelId !== 'legacy_unmapped') {
+    if (isV2BrainEnabled() && channelId && channelId !== 'legacy_unmapped') {
       try {
-        log.info('[BRAIN_V2_ENTERING] Attempting V2 resolution', { tenantId, channelId, groupId, channel });
         const v2Result = await this.resolveFromV2(tenantId, channelId, groupId, channel);
-        
-        if (v2Result && v2Result.systemPrompt && v2Result.systemPrompt.trim().length > 50) {
-          // V2 resolution successful — use it
+        const promptLen = v2Result?.systemPrompt?.trim().length || 0;
+
+        if (v2Result && v2Result.systemPrompt && promptLen > 50) {
           rawSystemPrompt = v2Result.systemPrompt;
           knowledgePrices = v2Result.knowledgePrices;
           knowledgeRules = v2Result.knowledgeRules;
           runtimeSettings = v2Result.settings;
           brainSource = 'v2_channel_prompts';
 
-          v2DiagnosticReason = 'v2_success';
           log.info('[BRAIN_SOURCE] v2_channel_prompts', {
             tenantId, channelId, channel,
             promptName: v2Result.promptName,
             promptLength: rawSystemPrompt.length,
             profileId: v2Result.profileId
           });
+        } else if (v2Result === null) {
+          // No binding found
+          const msg = `PROMPT_MISSING: No active prompt binding for channel ${channelId}`;
+          if (isStrictV2()) {
+            throw new Error(msg);
+          }
+          log.warn('[PROMPT_MISSING] ' + msg, { tenantId, channelId, channel });
         } else {
-          // V2 data exists but prompt is empty/too short — fallback to V1
-          v2DiagnosticReason = 'prompt_empty_or_short (len=' + (v2Result?.systemPrompt?.length || 0) + ', null=' + (v2Result === null) + ')';
-          log.warn('[BRAIN_FALLBACK] V2 prompt empty or too short, falling back to V1 settings', {
-            tenantId, channelId, channel,
-            v2PromptLength: v2Result?.systemPrompt?.length || 0,
-            v2ResultNull: v2Result === null,
-            reason: 'prompt_empty_or_short'
-          });
+          // Prompt exists but too short
+          const msg = `PROMPT_INVALID: Prompt too short (${promptLen} chars, min 100)`;
+          if (isStrictV2()) {
+            throw new Error(msg);
+          }
+          log.warn('[PROMPT_INVALID] ' + msg, { tenantId, channelId, channel, promptLen });
         }
       } catch (v2Error) {
-        // V2 resolution failed entirely — fallback to V1 silently
-        v2DiagnosticReason = 'v2_exception: ' + (v2Error instanceof Error ? v2Error.message : String(v2Error));
-        log.warn('[BRAIN_FALLBACK] V2 resolution EXCEPTION, falling back to V1 settings', {
-          tenantId, channelId, channel,
-          reason: 'v2_query_error',
-          error: v2Error instanceof Error ? v2Error.message : String(v2Error),
-          stack: v2Error instanceof Error ? v2Error.stack?.substring(0, 300) : undefined
+        // If strict mode caused the throw, propagate it
+        if (v2Error instanceof Error && (v2Error.message.startsWith('PROMPT_MISSING') || v2Error.message.startsWith('PROMPT_INVALID'))) {
+          throw v2Error;
+        }
+        // V2 query/runtime error — log and fall through
+        log.error('[BRAIN_V2_ERROR] V2 resolution failed', v2Error instanceof Error ? v2Error : new Error(String(v2Error)), {
+          tenantId, channelId, channel
         });
       }
-    } else if (!v2Enabled) {
-      v2DiagnosticReason = 'feature_flag_disabled';
-      log.info('[BRAIN_V2_SKIP] V2 disabled by feature flag');
+    } else if (!isV2BrainEnabled()) {
+      log.info('[BRAIN_V2_DISABLED] V2 brain not enabled, using V1 path', { tenantId });
     } else {
-      v2DiagnosticReason = 'channelId_missing_or_legacy (' + channelId + ')';
-      log.info('[BRAIN_V2_SKIP] channelId missing or legacy', { channelId });
+      // channelId missing or legacy_unmapped
+      const msg = `CHANNEL_UNMAPPED: channelId=${channelId || 'NULL'}`;
+      if (isStrictV2()) {
+        throw new SecurityIsolationError(msg);
+      }
+      log.warn('[CHANNEL_UNMAPPED] ' + msg, { tenantId, channelId });
     }
 
-    // TEMPORARY: Write diagnostic to ai_events so we can read it from DB (no Vercel log access needed)
-    AIEventEmitter.emit({ tenantId, type: 'v2_brain_diagnostic' as any, category: 'pipeline', severity: 'info', payload: {
-      v2Enabled, channelId: channelId || 'NULL', groupId: groupId || 'NULL',
-      isLegacy: channelId === 'legacy_unmapped', reason: v2DiagnosticReason, brainSource
-    }});
-
     // ═══════════════════════════════════════════════════════════
-    //  V1 PATH (default, or fallback from V2)
+    //  V1 PATH — Legacy fallback (disabled by default)
+    //  Gate: USE_V1_FALLBACK=true to re-enable
     // ═══════════════════════════════════════════════════════════
-    if (brainSource === 'v1_settings') {
+    if (brainSource === 'v1_settings' && isV1FallbackEnabled()) {
+      log.warn('[V1_FALLBACK_USED] Falling back to V1 settings table', { tenantId, channel });
       try {
         let promptKey = 'system_prompt_whatsapp';
         if (channel === 'instagram') promptKey = 'system_prompt_tr';
@@ -176,7 +183,6 @@ export class BrainResolver {
           if (row.key === promptKey) rawSystemPrompt = row.value;
           if (row.key === 'bot_knowledge_prices') knowledgePrices = row.value;
           if (row.key === 'bot_knowledge_rules') knowledgeRules = row.value;
-          // Runtime pipeline settings
           if (row.key === 'ai_model') runtimeSettings.aiModel = row.value || 'gemini-2.5-flash';
           if (row.key === 'bot_max_messages') {
             const parsed = parseInt(row.value);
@@ -192,35 +198,20 @@ export class BrainResolver {
           }
         }
 
-        log.info('[BRAIN_SOURCE] v1_settings', {
-          tenantId, channel,
-          promptLength: rawSystemPrompt?.length || 0,
-          v2Enabled: isV2BrainEnabled()
-        });
-
+        log.info('[BRAIN_SOURCE] v1_settings', { tenantId, channel, promptLength: rawSystemPrompt?.length || 0 });
       } catch (dbError) {
-        log.warn(`DB settings fetch failed for tenant ${tenantId}. Falling back to registry.`, { tenantId });
+        log.warn('[V1_FALLBACK_FAILED] DB settings fetch failed', { tenantId });
       }
+    } else if (brainSource === 'v1_settings') {
+      // V1 fallback disabled — no prompt resolved
+      log.warn('[V1_FALLBACK_DISABLED] V1 fallback not enabled, no prompt resolved', { tenantId, channel });
     }
 
-    // LAYER 3: PROMPT HASH VALIDATION
+    // ═══════════════════════════════════════════════════════════
+    //  PROMPT HASH + FINAL VALIDATION
+    // ═══════════════════════════════════════════════════════════
     if (rawSystemPrompt) {
       promptHash = crypto.createHash('sha256').update(rawSystemPrompt).digest('hex');
-    }
-
-    // 2.5 SaaS Code-First Fallback (Strictly scoped by tenantSlug, not generic fallback)
-    if (!rawSystemPrompt || rawSystemPrompt.trim() === '') {
-      const { PromptRegistry } = await import('./prompts/registry');
-      const tenantSlug = tenantConfig.raw?.slug;
-      if (tenantSlug) {
-        rawSystemPrompt = PromptRegistry.getFallbackPrompt(tenantSlug, channel);
-        if (rawSystemPrompt) {
-          promptHash = crypto.createHash('sha256').update(rawSystemPrompt).digest('hex');
-          log.info('[BRAIN_FALLBACK] Using PromptRegistry code-first fallback', {
-            tenantId, channel, tenantSlug, promptLength: rawSystemPrompt.length
-          });
-        }
-      }
     }
 
     // 3. Create the immutable brain
