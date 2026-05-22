@@ -198,13 +198,17 @@ export async function getIntegrationHealth() {
       // V2: Channel health from channels + channel_integrations (always V2)
       const dbChannels = await ctx.db.executeSafe({
         text: `SELECT 
-                 c.id, c.provider, c.identifier, c.name,
+                 c.id, c.provider, c.identifier, c.name, c.status as channel_status,
                  ci.health_status, ci.credentials_encrypted, ci.last_sync_at,
-                 cg.name as group_name
+                 cg.name as group_name,
+                 COALESCE(cg.display_name, cg.name) as bot_name,
+                 cg.id as bot_id, cg.color as bot_color
                FROM channels c
                JOIN channel_groups cg ON c.group_id = cg.id
                LEFT JOIN channel_integrations ci ON ci.channel_id = c.id
-               WHERE cg.tenant_id = $1 AND c.provider != 'meta_legacy'`,
+               WHERE cg.tenant_id = $1 AND c.provider != 'meta_legacy'
+               AND COALESCE(c.status, 'active') != 'archived'
+               AND cg.status = 'active'`,
         values: [ctx.tenantId]
       });
 
@@ -285,8 +289,12 @@ export async function getIntegrationHealth() {
           name: row.name || displayProvider,
           provider: displayProvider,
           group: row.group_name,
+          botName: row.bot_name || row.group_name,
+          botId: row.bot_id,
+          botColor: row.bot_color || '#6366f1',
           status,
           detail,
+          hasBinding,
           lastMessage: lastMsg[0]?.created_at || null,
           lastSyncAt: row.last_sync_at || null,
         });
@@ -374,26 +382,233 @@ export async function getIntegrationHealth() {
   });
 }
 
-// ── SETUP CHANNEL ───────────────────────────────────────
-export async function setupIntegrationChannel(provider: string, identifier: string, name: string, token: string) {
-  return withActionGuard(
-    { actionName: 'setupIntegrationChannel', roles: ['owner', 'admin'] },
-    async (ctx) => {
-      let groupId;
-      const groups = await ctx.db.executeSafe({ text: `SELECT id FROM channel_groups WHERE tenant_id = $1 AND name = 'Varsayılan Grup'`, values: [ctx.tenantId] });
-      if (groups.length > 0) groupId = groups[0].id;
-      else {
-        const newGroup = await ctx.db.executeSafe({ text: `INSERT INTO channel_groups (tenant_id, name) VALUES ($1, 'Varsayılan Grup') RETURNING id`, values: [ctx.tenantId] });
-        groupId = newGroup[0].id;
-      }
-      const newCh = await ctx.db.executeSafe({ text: `INSERT INTO channels (group_id, provider, identifier, name) VALUES ($1, $2, $3, $4) RETURNING id`, values: [groupId, provider, identifier, name] });
-      
-      await ctx.db.executeSafe({ text: `INSERT INTO channel_integrations (channel_id, provider, credentials_encrypted) VALUES ($1, $2, $3)`, values: [newCh[0].id, provider, JSON.stringify({ accessToken: token })] });
+// ── CHANNEL CONNECT ACTIONS ─────────────────────────────
 
-      return { success: true };
+/**
+ * Connect a new WhatsApp channel
+ */
+export async function connectWhatsAppChannel(input: {
+  name: string;
+  phoneNumberId: string;
+  wabaId?: string;
+  accessToken: string;
+  botGroupId: string;
+}): Promise<{ success: boolean; channelId?: string; error?: string }> {
+  return withActionGuard(
+    { actionName: 'connectWhatsAppChannel', roles: ['owner', 'admin'] },
+    async (ctx) => {
+      const { name, phoneNumberId, wabaId, accessToken, botGroupId } = input;
+
+      // Verify bot ownership
+      const bot = await ctx.db.executeSafe({
+        text: `SELECT id FROM channel_groups WHERE id = $1 AND tenant_id = $2 AND status = 'active'`,
+        values: [botGroupId, ctx.tenantId]
+      });
+      if (bot.length === 0) throw new Error('Bot not found');
+
+      // Check duplicate
+      const existing = await ctx.db.executeSafe({
+        text: `SELECT c.id FROM channels c JOIN channel_groups cg ON c.group_id = cg.id 
+               WHERE cg.tenant_id = $1 AND c.provider = 'whatsapp' AND c.identifier = $2`,
+        values: [ctx.tenantId, phoneNumberId]
+      });
+      if (existing.length > 0) throw new Error('Bu WhatsApp numarası zaten ekli');
+
+      // Insert channel
+      const ch = await ctx.db.executeSafe({
+        text: `INSERT INTO channels (group_id, provider, identifier, name, status) 
+               VALUES ($1, 'whatsapp', $2, $3, 'active') RETURNING id`,
+        values: [botGroupId, phoneNumberId, name]
+      });
+      const channelId = ch[0].id;
+
+      // Insert credentials (encrypted)
+      const encrypted = encryptPayload({ accessToken, wabaId: wabaId || '', phoneNumberId }, 'whatsapp');
+      await ctx.db.executeSafe({
+        text: `INSERT INTO channel_integrations (channel_id, provider, credentials_encrypted, health_status)
+               VALUES ($1, 'whatsapp', $2, 'healthy')`,
+        values: [channelId, JSON.stringify(encrypted)]
+      });
+
+      // Create prompt binding to bot's active prompt
+      const prompt = await ctx.db.executeSafe({
+        text: `SELECT id FROM channel_prompts WHERE group_id = $1 AND tenant_id = $2 AND is_active = true AND prompt_type = 'system' LIMIT 1`,
+        values: [botGroupId, ctx.tenantId]
+      });
+      if (prompt.length > 0) {
+        await ctx.db.executeSafe({
+          text: `INSERT INTO channel_prompt_bindings (channel_id, prompt_id, is_active, priority) VALUES ($1, $2, true, 100)`,
+          values: [channelId, prompt[0].id]
+        });
+      }
+
+      return { channelId };
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error };
+    return { success: true, channelId: (res.data as any)?.channelId };
+  });
+}
+
+/**
+ * Connect a new Instagram channel
+ */
+export async function connectInstagramChannel(input: {
+  name: string;
+  instagramBusinessAccountId: string;
+  accessToken: string;
+  botGroupId: string;
+}): Promise<{ success: boolean; channelId?: string; error?: string }> {
+  return withActionGuard(
+    { actionName: 'connectInstagramChannel', roles: ['owner', 'admin'] },
+    async (ctx) => {
+      const { name, instagramBusinessAccountId, accessToken, botGroupId } = input;
+
+      const bot = await ctx.db.executeSafe({
+        text: `SELECT id FROM channel_groups WHERE id = $1 AND tenant_id = $2 AND status = 'active'`,
+        values: [botGroupId, ctx.tenantId]
+      });
+      if (bot.length === 0) throw new Error('Bot not found');
+
+      // Use meta_instagram as DB provider (alias system handles runtime)
+      const ch = await ctx.db.executeSafe({
+        text: `INSERT INTO channels (group_id, provider, identifier, name, status)
+               VALUES ($1, 'meta_instagram', $2, $3, 'active') RETURNING id`,
+        values: [botGroupId, instagramBusinessAccountId, name]
+      });
+      const channelId = ch[0].id;
+
+      const encrypted = encryptPayload({ accessToken, instagramBusinessAccountId }, 'instagram');
+      await ctx.db.executeSafe({
+        text: `INSERT INTO channel_integrations (channel_id, provider, credentials_encrypted, health_status)
+               VALUES ($1, 'meta_instagram', $2, 'healthy')`,
+        values: [channelId, JSON.stringify(encrypted)]
+      });
+
+      const prompt = await ctx.db.executeSafe({
+        text: `SELECT id FROM channel_prompts WHERE group_id = $1 AND tenant_id = $2 AND is_active = true AND prompt_type = 'system' LIMIT 1`,
+        values: [botGroupId, ctx.tenantId]
+      });
+      if (prompt.length > 0) {
+        await ctx.db.executeSafe({
+          text: `INSERT INTO channel_prompt_bindings (channel_id, prompt_id, is_active, priority) VALUES ($1, $2, true, 100)`,
+          values: [channelId, prompt[0].id]
+        });
+      }
+
+      return { channelId };
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error };
+    return { success: true, channelId: (res.data as any)?.channelId };
+  });
+}
+
+/**
+ * Connect a new Facebook/Messenger page
+ */
+export async function connectMessengerPage(input: {
+  name: string;
+  pageId: string;
+  pageAccessToken: string;
+  botGroupId: string;
+}): Promise<{ success: boolean; channelId?: string; error?: string }> {
+  return withActionGuard(
+    { actionName: 'connectMessengerPage', roles: ['owner', 'admin'] },
+    async (ctx) => {
+      const { name, pageId, pageAccessToken, botGroupId } = input;
+
+      if (!isValidMessengerIdentifier(pageId)) {
+        throw new Error('PAGE_ID numerik olmalıdır. Meta Business Suite → Pages → About → Page ID');
+      }
+
+      const bot = await ctx.db.executeSafe({
+        text: `SELECT id FROM channel_groups WHERE id = $1 AND tenant_id = $2 AND status = 'active'`,
+        values: [botGroupId, ctx.tenantId]
+      });
+      if (bot.length === 0) throw new Error('Bot not found');
+
+      const ch = await ctx.db.executeSafe({
+        text: `INSERT INTO channels (group_id, provider, identifier, name, status)
+               VALUES ($1, 'messenger', $2, $3, 'active') RETURNING id`,
+        values: [botGroupId, pageId, name]
+      });
+      const channelId = ch[0].id;
+
+      const encrypted = encryptPayload({ pageAccessToken, pageId }, 'messenger');
+      await ctx.db.executeSafe({
+        text: `INSERT INTO channel_integrations (channel_id, provider, credentials_encrypted, health_status)
+               VALUES ($1, 'messenger', $2, 'healthy')`,
+        values: [channelId, JSON.stringify(encrypted)]
+      });
+
+      const prompt = await ctx.db.executeSafe({
+        text: `SELECT id FROM channel_prompts WHERE group_id = $1 AND tenant_id = $2 AND is_active = true AND prompt_type = 'system' LIMIT 1`,
+        values: [botGroupId, ctx.tenantId]
+      });
+      if (prompt.length > 0) {
+        await ctx.db.executeSafe({
+          text: `INSERT INTO channel_prompt_bindings (channel_id, prompt_id, is_active, priority) VALUES ($1, $2, true, 100)`,
+          values: [channelId, prompt[0].id]
+        });
+      }
+
+      return { channelId };
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error };
+    return { success: true, channelId: (res.data as any)?.channelId };
+  });
+}
+
+/**
+ * Soft-archive a channel (credentials preserved, channel inactive)
+ */
+export async function archiveChannel(channelId: string): Promise<{ success: boolean; error?: string }> {
+  return withActionGuard(
+    { actionName: 'archiveChannel', roles: ['owner', 'admin'] },
+    async (ctx) => {
+      const ch = await ctx.db.executeSafe({
+        text: `SELECT c.id FROM channels c JOIN channel_groups cg ON c.group_id = cg.id
+               WHERE c.id = $1 AND cg.tenant_id = $2`,
+        values: [channelId, ctx.tenantId]
+      });
+      if (ch.length === 0) throw new Error('Channel not found');
+
+      await ctx.db.executeSafe({
+        text: `UPDATE channels SET status = 'archived', updated_at = NOW() WHERE id = $1`,
+        values: [channelId]
+      });
+      await ctx.db.executeSafe({
+        text: `UPDATE channel_prompt_bindings SET is_active = false WHERE channel_id = $1`,
+        values: [channelId]
+      });
+      return true;
     }
   ).then(res => {
     if (!res.success) return { success: false, error: res.error };
     return { success: true };
   });
 }
+
+/**
+ * Returns active bots for bot assignment dropdown
+ */
+export async function getBotListForDropdown(): Promise<{ success: boolean; bots?: { id: string; displayName: string; color: string }[]; error?: string }> {
+  return withActionGuard(
+    { actionName: 'getBotListForDropdown' },
+    async (ctx) => {
+      const bots = await ctx.db.executeSafe({
+        text: `SELECT id, COALESCE(display_name, name) as display_name, color
+               FROM channel_groups WHERE tenant_id = $1 AND status = 'active'
+               ORDER BY sort_order ASC`,
+        values: [ctx.tenantId]
+      });
+      return bots.map((b: any) => ({ id: b.id, displayName: b.display_name, color: b.color || '#6366f1' }));
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error };
+    return { success: true, bots: res.data as any[] };
+  });
+}
+

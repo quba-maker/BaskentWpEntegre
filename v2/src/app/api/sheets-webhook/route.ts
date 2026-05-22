@@ -292,14 +292,24 @@ export async function POST(request: NextRequest) {
           }) as any[];
           let convId: any = existingConv[0]?.id;
           
-          // Get channel_id for active whatsapp channel of this tenant
+          // Get channel_id for outbound whatsapp channel — prefer pipeline routing
           let whatsappChannelId: string | null = null;
           try {
-            const chs = await db.executeSafe({
-              text: `SELECT c.id FROM channels c JOIN channel_groups cg ON c.group_id = cg.id WHERE cg.tenant_id = $1 AND c.provider = 'whatsapp' LIMIT 1`,
+            // V2: Use pipeline's explicit outbound_channel_id if configured
+            const pipelineRouting = await db.executeSafe({
+              text: `SELECT outbound_channel_id FROM ingestion_pipelines WHERE tenant_id = $1 AND provider = 'google_sheets' AND outbound_channel_id IS NOT NULL LIMIT 1`,
               values: [tenantId]
             }) as any[];
-            if (chs.length > 0) whatsappChannelId = chs[0].id;
+            if (pipelineRouting.length > 0 && pipelineRouting[0].outbound_channel_id) {
+              whatsappChannelId = pipelineRouting[0].outbound_channel_id;
+            } else {
+              // Fallback: first whatsapp channel
+              const chs = await db.executeSafe({
+                text: `SELECT c.id FROM channels c JOIN channel_groups cg ON c.group_id = cg.id WHERE cg.tenant_id = $1 AND c.provider = 'whatsapp' LIMIT 1`,
+                values: [tenantId]
+              }) as any[];
+              if (chs.length > 0) whatsappChannelId = chs[0].id;
+            }
           } catch (err) {
             log.error('Failed to resolve WhatsApp channel ID for sheets webhook', err as any);
           }
