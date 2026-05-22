@@ -137,9 +137,9 @@ export class TenantResolverService {
         values: [identifier.id]
       }) as any[];
 
-      // FALLBACK TO LEGACY V1 ROUTING (Migration phase)
-      // If the channel doesn't exist yet, we check if the tenant exists via legacy columns
-      if (results.length === 0) {
+      // FALLBACK TO LEGACY V1 ROUTING (Quarantine — disabled by default)
+      // Gate: USE_V1_TENANT_ROUTING_FALLBACK=true to re-enable
+      if (results.length === 0 && process.env.USE_V1_TENANT_ROUTING_FALLBACK === 'true') {
         let legacyResults: any[] = [];
         if (identifier.type === 'whatsapp') {
           legacyResults = await db.executeSafe({
@@ -166,7 +166,7 @@ export class TenantResolverService {
 
         if (legacyResults.length > 0) {
           const t = legacyResults[0];
-          this.log.warn('Used legacy V1 routing. Tenant has no channel defined!', {
+          this.log.warn('[V1_TENANT_ROUTING_USED] Legacy V1 routing activated via flag', {
             tenantId: t.id,
             tenantSlug: t.slug,
             identifierId: identifier.id
@@ -192,6 +192,12 @@ export class TenantResolverService {
             raw: t
           };
         }
+      } else if (results.length === 0) {
+        this.log.warn('[TENANT_RESOLUTION_V2_ONLY] No V2 channel match, V1 fallback disabled', {
+          identifierType: identifier.type,
+          identifierId: identifier.id,
+          identifierSource: identifier.source
+        });
       }
 
       const durationMs = Date.now() - startTime;
