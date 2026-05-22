@@ -249,6 +249,7 @@ export class BrainResolver {
       text: `
         SELECT cp.id as prompt_id, cp.name as prompt_name, cp.prompt_text, cp.prompt_type,
                cp.tenant_id as prompt_tenant_id, cp.version,
+               cp.knowledge_prices, cp.knowledge_rules,
                cpb.is_active as binding_active
         FROM channel_prompt_bindings cpb
         JOIN channel_prompts cp ON cpb.prompt_id = cp.id
@@ -288,28 +289,17 @@ export class BrainResolver {
       promptVersion: binding.version
     });
 
-    // ── STEP 2: Resolve knowledge prompts (if they exist) ──
-    let knowledgePrices = '';
-    let knowledgeRules = '';
+    // ── STEP 2: Resolve knowledge from prompt columns ──
+    const knowledgePrices = binding.knowledge_prices || '';
+    const knowledgeRules = binding.knowledge_rules || '';
 
-    try {
-      const knowledgeRows = await db.executeSafe({
-        text: `
-          SELECT prompt_type, prompt_text
-          FROM channel_prompts
-          WHERE tenant_id = $1
-            AND prompt_type IN ('knowledge_prices', 'knowledge_rules')
-        `,
-        values: [tenantId]
-      }) as any[];
-
-      for (const kr of (knowledgeRows || [])) {
-        if (kr.prompt_type === 'knowledge_prices') knowledgePrices = kr.prompt_text || '';
-        if (kr.prompt_type === 'knowledge_rules') knowledgeRules = kr.prompt_text || '';
-      }
-    } catch (knErr) {
-      log.warn('[BRAIN_V2_KNOWLEDGE] Knowledge prompt fetch failed, continuing without', {
-        tenantId, error: knErr instanceof Error ? knErr.message : String(knErr)
+    if (knowledgePrices || knowledgeRules) {
+      log.info('[BRAIN_V2_KNOWLEDGE_RESOLVED]', {
+        tenantId, channelId,
+        hasPrices: !!knowledgePrices,
+        hasRules: !!knowledgeRules,
+        pricesLen: knowledgePrices.length,
+        rulesLen: knowledgeRules.length
       });
     }
 

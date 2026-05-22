@@ -138,15 +138,6 @@ export async function saveBotSetting(key: string, value: string) {
     async (ctx) => {
       // ── ROUTE TO V2 TABLE ──
       if (key.startsWith('system_prompt_')) {
-        // Guard: strip section markers and check real content length
-        const strippedContent = (value || '')
-          .replace(/---\s*(IDENTITY|INSTRUCTIONS|CONSTRAINTS)\s*---/g, '')
-          .replace(/\s+/g, ' ')
-          .trim();
-        if (strippedContent.length < 100) {
-          console.warn('[PROMPT_SAVE_BLOCKED] Real content too short:', key, 'stripped_len:', strippedContent.length);
-          return { success: true };
-        }
         // Write to channel_prompts
         const promptName = v1KeyToPromptName(key);
         if (promptName) {
