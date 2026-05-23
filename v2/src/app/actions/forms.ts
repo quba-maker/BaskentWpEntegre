@@ -171,14 +171,11 @@ export async function syncGoogleSheets() {
       // Async Orchestration - Send to QStash
       const QSTASH_URL = process.env.QSTASH_URL || "https://qstash.upstash.io/v2/publish/";
       const QSTASH_TOKEN = process.env.QSTASH_TOKEN;
-      const NEXT_PUBLIC_BASE_URL = process.env.NEXT_PUBLIC_BASE_URL;
+      const baseUrl = (await import('@/lib/core/url')).getPublicBaseUrl();
+      const NEXT_PUBLIC_BASE_URL = baseUrl;
 
       if (!QSTASH_TOKEN) {
-        throw new Error("QStash token is missing. Background queues are disabled.");
-      }
-
-      if (!NEXT_PUBLIC_BASE_URL) {
-        throw new Error("NEXT_PUBLIC_BASE_URL is missing. Cannot determine webhook destination.");
+        throw new Error("QStash token eksik. Arka plan senkronizasyonu devre dışı.");
       }
 
       // Check if integration exists and is healthy

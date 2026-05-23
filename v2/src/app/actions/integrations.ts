@@ -458,7 +458,7 @@ export async function connectWhatsAppChannel(input: {
       const channelId = ch[0].id;
 
       // Insert credentials (tenant_id bound via channel → group)
-      const encrypted = encryptPayload({ accessToken, wabaId: wabaId || '', phoneNumberId }, 'whatsapp');
+      const encrypted = encryptPayload('whatsapp', { accessToken, wabaId: wabaId || '', phoneNumberId });
       await ctx.db.executeSafe({
         text: `INSERT INTO channel_integrations (channel_id, provider, credentials_encrypted, health_status)
                SELECT $1, 'whatsapp', $2, 'pending'
@@ -521,7 +521,7 @@ export async function connectInstagramChannel(input: {
       if (ch.length === 0) throw new Error('Channel insert failed — tenant_id mismatch');
       const channelId = ch[0].id;
 
-      const encrypted = encryptPayload({ accessToken, instagramBusinessAccountId }, 'instagram');
+      const encrypted = encryptPayload('instagram', { accessToken, instagramBusinessAccountId });
       await ctx.db.executeSafe({
         text: `INSERT INTO channel_integrations (channel_id, provider, credentials_encrypted, health_status)
                SELECT $1, 'meta_instagram', $2, 'pending'
@@ -586,7 +586,7 @@ export async function connectMessengerPage(input: {
       if (ch.length === 0) throw new Error('Channel insert failed — tenant_id mismatch');
       const channelId = ch[0].id;
 
-      const encrypted = encryptPayload({ pageAccessToken, pageId }, 'messenger');
+      const encrypted = encryptPayload('messenger', { pageAccessToken, pageId });
       await ctx.db.executeSafe({
         text: `INSERT INTO channel_integrations (channel_id, provider, credentials_encrypted, health_status)
                SELECT $1, 'messenger', $2, 'pending'
