@@ -168,89 +168,91 @@ export async function syncGoogleSheets() {
   return withActionGuard(
     { actionName: 'syncGoogleSheets', roles: ['owner', 'admin'] },
     async (ctx) => {
-      // Async Orchestration - Send to QStash
-      const QSTASH_URL = process.env.QSTASH_URL || "https://qstash.upstash.io/v2/publish/";
-      const QSTASH_TOKEN = process.env.QSTASH_TOKEN;
-      const baseUrl = (await import('@/lib/core/url')).getPublicBaseUrl();
-      const NEXT_PUBLIC_BASE_URL = baseUrl;
-
-      if (!QSTASH_TOKEN) {
-        throw new Error("QStash token eksik. Arka plan senkronizasyonu devre dışı.");
-      }
-
-      // Check if integration exists and is healthy
-      const integrations = await ctx.db.executeSafe({
-        text: `SELECT health_status FROM tenant_integrations WHERE tenant_id = $1 AND provider = 'google_sheets' LIMIT 1`,
-        values: [ctx.tenantId]
-      });
-
-      if (integrations.length === 0) {
-        return { success: false, error: "Google Sheets entegrasyonu bulunamadı. Lütfen ayarlardan kurulum yapın." };
-      }
-
-      if (integrations[0].health_status === 'expired_token' || integrations[0].health_status === 'quota_exceeded') {
-        return { success: false, error: "Entegrasyon durumu sorunlu (" + integrations[0].health_status + "). Lütfen bağlantıyı güncelleyin." };
-      }
-
-      const destinationUrl = `${NEXT_PUBLIC_BASE_URL}/api/webhooks/qstash/sync`;
-
-      const correlationId = crypto.randomUUID();
-      const pipelineRunId = `sync_${Date.now()}`;
-
-      const qstashRes = await fetch(QSTASH_URL + destinationUrl, {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${QSTASH_TOKEN}`,
-          "Content-Type": "application/json",
-          "Upstash-Delay": "0"
-        },
-        body: JSON.stringify({ 
-          tenantId: ctx.tenantId,
-          initiatedBy: ctx.userId,
-          correlationId,
-          pipelineRunId
-        })
-      });
-
-      if (!qstashRes.ok) {
-        const err = await qstashRes.text();
-        throw new Error(`Failed to queue sync job: ${err}`);
-      }
-
-      // ----------------------------------------------------
-      // Init SSE Status in Redis (using Upstash Redis)
-      // ----------------------------------------------------
       try {
-        const { Redis } = await import('@upstash/redis');
-        const redis = Redis.fromEnv();
-        await redis.set(`sync_status:${ctx.tenantId}:${correlationId}`, {
-          status: 'queued',
-          progress: 0,
-          message: 'Job queued successfully',
-          updatedAt: new Date().toISOString()
-        }, { ex: 3600 }); // expire in 1 hour
-      } catch(e) {
-        // Silently fail Redis so we don't break the main flow
+        const QSTASH_TOKEN = process.env.QSTASH_TOKEN;
+        
+        if (!QSTASH_TOKEN) {
+          return { success: false, error: "QStash token tanımlı değil. Vercel → Settings → Environment Variables → QSTASH_TOKEN ekleyin." };
+        }
+
+        // Base URL resolution (inline — same priority as queue.service.ts)
+        const baseUrl = process.env.NEXT_PUBLIC_APP_URL 
+          || (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : null)
+          || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null)
+          || 'https://baskent-wp-entegre.vercel.app';
+
+        // Check if integration exists and is healthy
+        const integrations = await ctx.db.executeSafe({
+          text: `SELECT health_status FROM tenant_integrations WHERE tenant_id = $1 AND provider = 'google_sheets' LIMIT 1`,
+          values: [ctx.tenantId]
+        });
+
+        if (integrations.length === 0) {
+          return { success: false, error: "Google Sheets entegrasyonu bulunamadı. Lütfen ayarlardan kurulum yapın." };
+        }
+
+        if (integrations[0].health_status === 'expired_token' || integrations[0].health_status === 'quota_exceeded') {
+          return { success: false, error: "Entegrasyon durumu sorunlu (" + integrations[0].health_status + "). Lütfen bağlantıyı güncelleyin." };
+        }
+
+        const destinationUrl = `${baseUrl}/api/webhooks/qstash/sync`;
+        const correlationId = crypto.randomUUID();
+        const pipelineRunId = `sync_${Date.now()}`;
+
+        // Use QStash SDK (same as queue.service.ts) — raw fetch was failing due to URL format
+        const { Client } = await import('@upstash/qstash');
+        const qstashClient = new Client({ token: QSTASH_TOKEN });
+
+        const qstashRes = await qstashClient.publishJSON({
+          url: destinationUrl,
+          body: { 
+            tenantId: ctx.tenantId,
+            initiatedBy: ctx.userId,
+            correlationId,
+            pipelineRunId
+          },
+          retries: 3,
+          headers: {
+            "x-tenant-id": ctx.tenantId,
+          }
+        });
+
+        // Init SSE Status in Redis
+        try {
+          const { Redis } = await import('@upstash/redis');
+          const redis = Redis.fromEnv();
+          await redis.set(`sync_status:${ctx.tenantId}:${correlationId}`, {
+            status: 'queued',
+            progress: 0,
+            message: 'Senkronizasyon kuyruğa eklendi',
+            updatedAt: new Date().toISOString()
+          }, { ex: 3600 });
+        } catch(e) {
+          // Redis SSE status is nice-to-have, don't break flow
+        }
+
+        logAudit({
+          tenantId: ctx.tenantId,
+          userId: ctx.userId,
+          userEmail: ctx.email,
+          action: "google_sheets_sync_queued",
+          entityType: "integration",
+          entityId: "google_sheets",
+          details: { correlationId, pipelineRunId, qstashMessageId: qstashRes.messageId }
+        });
+
+        return { 
+          success: true, 
+          message: "Senkronizasyon kuyruğa eklendi. İşlem arka planda tamamlanacak.",
+          correlationId 
+        };
+      } catch (err: any) {
+        console.error('[syncGoogleSheets] Error:', err?.message, err?.cause?.message);
+        return { success: false, error: `Sync hatası: ${err?.cause?.message || err?.message || 'Bilinmeyen hata'}` };
       }
-
-      logAudit({
-        tenantId: ctx.tenantId,
-        userId: ctx.userId,
-        userEmail: ctx.email,
-        action: "google_sheets_sync_queued",
-        entityType: "integration",
-        entityId: "google_sheets",
-        details: { correlationId, pipelineRunId }
-      });
-
-      return { 
-        success: true, 
-        message: "Senkronizasyon kuyruğa eklendi. İşlem arka planda tamamlanacak.",
-        correlationId 
-      };
     }
   ).then(res => {
-    if (!res.success) return { success: false, error: res.error };
+    if (!res.success) return { success: false, error: res.error || res.data?.error };
     return { success: true, message: res.data?.message, correlationId: res.data?.correlationId };
   });
 }
