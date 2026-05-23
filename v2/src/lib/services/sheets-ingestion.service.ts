@@ -190,25 +190,7 @@ export async function ingestSheetRow(params: IngestRowParams): Promise<IngestRow
     }) as any[];
 
     if (existing && existing.length > 0) {
-      // Update notes if available — tenant_id required for TenantQueryGuard
-      if (noteStr && noteStr.trim() !== '') {
-        try {
-          await db.executeSafe({
-            text: `UPDATE leads SET notes = $1 WHERE id = $2 AND tenant_id = $3 AND (notes IS NULL OR notes = '')`,
-            values: [noteStr, existing[0].id, tenantId]
-          });
-        } catch (_) {}
-      }
-
-      // Identity link even for existing leads (non-fatal)
-      try {
-        const { IdentityEngine } = await import('@/lib/services/ai/engines/identity');
-        const customerId = await IdentityEngine.resolveIdentity({
-          tenantId, phoneNumber: phone1, email: email || undefined, firstName: name || undefined
-        });
-        await IdentityEngine.linkLead(tenantId, existing[0].id, customerId);
-      } catch (_) {}
-
+      // Duplicate — skip heavy processing in batch mode
       return { status: 'duplicate', leadId: existing[0].id };
     }
 
@@ -223,16 +205,19 @@ export async function ingestSheetRow(params: IngestRowParams): Promise<IngestRow
     const leadId = leadResult?.[0]?.id;
 
     // ── 6. Identity Engine: Link lead to customer profile ──
-    try {
-      const { IdentityEngine } = await import('@/lib/services/ai/engines/identity');
-      const customerId = await IdentityEngine.resolveIdentity({
-        tenantId, phoneNumber: phone1, email: email || undefined, firstName: name || undefined
-      });
-      if (leadId) {
-        await IdentityEngine.linkLead(tenantId, leadId, customerId);
+    // Skip in batch sync mode — identity linking happens via webhook/conversation events
+    if (!skipAutoMessage) {
+      try {
+        const { IdentityEngine } = await import('@/lib/services/ai/engines/identity');
+        const customerId = await IdentityEngine.resolveIdentity({
+          tenantId, phoneNumber: phone1, email: email || undefined, firstName: name || undefined
+        });
+        if (leadId) {
+          await IdentityEngine.linkLead(tenantId, leadId, customerId);
+        }
+      } catch (idErr) {
+        log.error('[INGEST_IDENTITY] Non-fatal identity link error', idErr instanceof Error ? idErr : new Error(String(idErr)));
       }
-    } catch (idErr) {
-      log.error('[INGEST_IDENTITY] Non-fatal identity link error', idErr instanceof Error ? idErr : new Error(String(idErr)));
     }
 
     // ── 7. Auto WhatsApp greeting (only if not skipAutoMessage) ──

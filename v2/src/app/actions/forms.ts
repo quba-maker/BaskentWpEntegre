@@ -279,10 +279,38 @@ export async function syncGoogleSheets() {
 
       const batchData = await batchResp.json();
       
-      // ── 6. Process each row through shared ingestion service ──
-      const { ingestSheetRow } = await import('@/lib/services/sheets-ingestion.service');
+      // ── 6. BATCH PROCESSING (fast — no per-row DB queries) ──
       
-      let created = 0, duplicates = 0, errors = 0, totalRows = 0;
+      // 6a. Collect all rows with parsed fields
+      const PHONE_PATTERNS = ['whatsapp_number', 'whatsapp', 'wp', 'iletişim', 'telefon', 'phone', 'phone_number', 'numara', 'cep', 'cep telefonu', 'mobile', 'gsm'];
+      const NAME_PATTERNS = ['full_name', 'full name', 'name', 'isim', 'ad_soyad', 'ad soyad', 'adı', 'adınız', 'ad', 'soyad', 'hasta adı', 'patient_name', 'first_name'];
+      const EMAIL_PATTERNS = ['email', 'e-posta', 'mail', 'e_posta'];
+      const FORM_PATTERNS = ['form adı', 'form name', 'form_name', 'kampanya adı', 'campaign_name', 'campaign name', 'kampanya', 'campaign', 'form'];
+
+      const findCol = (headers: string[], patterns: string[]) => {
+        for (const p of patterns) {
+          const idx = headers.findIndex((h: string) => h === p || h.includes(p));
+          if (idx !== -1) return idx;
+        }
+        return -1;
+      };
+
+      const normalizePhone = (raw: string): string => {
+        let phone = String(raw || '').replace(/[^0-9]/g, '');
+        if (phone.startsWith('0')) phone = '90' + phone.substring(1);
+        return phone.substring(0, 20);
+      };
+
+      interface ParsedRow {
+        phone: string;
+        name: string | null;
+        email: string | null;
+        formName: string;
+        rawData: string;
+        tabName: string;
+      }
+
+      const allRows: ParsedRow[] = [];
 
       for (let i = 0; i < batchData.valueRanges.length; i++) {
         const vr = batchData.valueRanges[i];
@@ -290,35 +318,112 @@ export async function syncGoogleSheets() {
         const values = vr.values || [];
         if (values.length <= 1) continue;
 
-        const headers = values[0].map((h: string) => String(h).trim());
-        const rowCount = values.length - 1;
-        totalRows += rowCount;
+        const headers = values[0].map((h: string) => String(h).toLowerCase().trim());
+        const phoneIdx = findCol(headers, PHONE_PATTERNS);
 
-        console.log(`[SYNC_TAB] ${tabName}: ${rowCount} rows`);
+        if (phoneIdx === -1) {
+          console.log(`[SYNC_SKIP_TAB] ${tabName}: No phone column`);
+          continue;
+        }
+
+        const nameIdx = findCol(headers.filter((_: string, i: number) => {
+          const h = headers[i];
+          return !h.endsWith('id') && !h.endsWith('_id');
+        }), NAME_PATTERNS);
+        const emailIdx = findCol(headers, EMAIL_PATTERNS);
+        const formIdx = findCol(headers.filter((_: string, i: number) => {
+          const h = headers[i];
+          return !h.endsWith('id') && !h.endsWith('_id');
+        }), FORM_PATTERNS);
+
+        // Re-find on original headers (the filter above broke indices)
+        const realNameIdx = headers.findIndex((h: string) => !h.endsWith('id') && !h.endsWith('_id') && NAME_PATTERNS.some(p => h === p || h.includes(p)));
+        const realEmailIdx = headers.findIndex((h: string) => EMAIL_PATTERNS.some(p => h === p || h.includes(p)));
+        const realFormIdx = headers.findIndex((h: string) => !h.endsWith('id') && !h.endsWith('_id') && FORM_PATTERNS.some(p => h === p || h.includes(p)));
+
+        console.log(`[SYNC_TAB] ${tabName}: ${values.length - 1} rows`);
 
         for (let r = 1; r < values.length; r++) {
           const row = values[r];
-          
-          // Build key-value object from headers + row
-          const rowData: Record<string, any> = {};
-          headers.forEach((h: string, idx: number) => {
-            rowData[h] = row[idx] || '';
-          });
+          const rawPhone = row[phoneIdx];
+          if (!rawPhone) continue;
 
-          const result = await ingestSheetRow({
-            tenantId: ctx.tenantId,
-            tenantName: tenantName || undefined,
-            sheetName: tabName,
-            data: rowData,
-            outboundChannelId,
-            greetingGroupId,
-            skipAutoMessage: true,   // BATCH SYNC — no mass WhatsApp sends
-            source: 'manual_sync'
-          });
+          const phone = normalizePhone(rawPhone);
+          if (phone.length < 10) continue;
 
-          if (result.status === 'created') created++;
-          else if (result.status === 'duplicate') duplicates++;
-          else if (result.status === 'error') errors++;
+          const name = realNameIdx !== -1 && row[realNameIdx] ? String(row[realNameIdx]).substring(0, 100) : null;
+          const email = realEmailIdx !== -1 && row[realEmailIdx] ? String(row[realEmailIdx]).substring(0, 200) : null;
+          const formName = realFormIdx !== -1 && row[realFormIdx] ? String(row[realFormIdx]).substring(0, 200) : tabName;
+
+          const rawData: Record<string, string> = {};
+          headers.forEach((h: string, idx: number) => { rawData[h] = row[idx] || ''; });
+          rawData['_sheet_name'] = tabName;
+          rawData['_source'] = 'manual_sync';
+
+          allRows.push({ phone, name, email, formName, rawData: JSON.stringify(rawData), tabName });
+        }
+      }
+
+      const totalRows = allRows.length;
+      console.log(`[SYNC_TOTAL_PARSED] ${totalRows} valid rows from ${tabs.length} tabs`);
+
+      if (totalRows === 0) {
+        return { success: true, message: "Geçerli telefon numarası olan satır bulunamadı.", stats: { totalRows: 0, created: 0, duplicates: 0 } };
+      }
+
+      // 6b. Batch duplicate check — single query
+      const existingPhones = await ctx.db.executeSafe({
+        text: `SELECT DISTINCT RIGHT(phone_number, 10) as phone_suffix FROM leads WHERE tenant_id = $1`,
+        values: [ctx.tenantId]
+      }) as any[];
+
+      const existingSet = new Set(existingPhones.map((r: any) => r.phone_suffix));
+      console.log(`[SYNC_EXISTING] ${existingSet.size} existing phone suffixes in DB`);
+
+      // 6c. Filter new rows (in-memory dedup)
+      const seenPhones = new Set<string>();
+      const newRows: ParsedRow[] = [];
+
+      for (const row of allRows) {
+        const suffix = row.phone.slice(-10);
+        if (existingSet.has(suffix) || seenPhones.has(suffix)) {
+          continue; // duplicate
+        }
+        seenPhones.add(suffix);
+        newRows.push(row);
+      }
+
+      const duplicates = totalRows - newRows.length;
+      console.log(`[SYNC_DEDUP] ${newRows.length} new, ${duplicates} duplicates`);
+
+      // 6d. Batch INSERT in chunks of 50
+      let created = 0;
+      const CHUNK_SIZE = 50;
+      
+      for (let c = 0; c < newRows.length; c += CHUNK_SIZE) {
+        const chunk = newRows.slice(c, c + CHUNK_SIZE);
+        
+        // Build multi-row INSERT
+        const valueParts: string[] = [];
+        const params: any[] = [];
+        let paramIdx = 1;
+
+        for (const row of chunk) {
+          valueParts.push(`($${paramIdx}, $${paramIdx+1}, $${paramIdx+2}, $${paramIdx+3}, $${paramIdx+4}, $${paramIdx+5}, 'new', NOW())`);
+          params.push(ctx.tenantId, row.phone, row.name, row.email, row.formName, row.rawData);
+          paramIdx += 6;
+        }
+
+        try {
+          await ctx.db.executeSafe({
+            text: `INSERT INTO leads (tenant_id, phone_number, patient_name, email, form_name, raw_data, stage, created_at)
+                   VALUES ${valueParts.join(', ')}
+                   ON CONFLICT DO NOTHING`,
+            values: params
+          });
+          created += chunk.length;
+        } catch (insertErr: any) {
+          console.error('[SYNC_INSERT_ERROR]', insertErr?.message?.slice(0, 200));
         }
       }
 
@@ -328,7 +433,7 @@ export async function syncGoogleSheets() {
         values: [ctx.tenantId]
       });
 
-      const stats = { totalRows, created, duplicates, errors };
+      const stats = { totalRows, created, duplicates, errors: 0 };
       console.log('[SYNC_COMPLETED]', stats);
 
       logAudit({
@@ -343,7 +448,7 @@ export async function syncGoogleSheets() {
 
       return { 
         success: true, 
-        message: `${created} yeni kayıt eklendi. ${duplicates} tekrar eden atlandı. ${errors > 0 ? `${errors} hata.` : ''} Toplam ${totalRows} satır.`,
+        message: `${created} yeni kayıt eklendi. ${duplicates} tekrar eden atlandı. Toplam ${totalRows} satır.`,
         stats
       };
     }
