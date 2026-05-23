@@ -53,13 +53,12 @@ export function GoogleSheetsWizard({ isOpen, onClose, onComplete }: { isOpen: bo
       const botRes = await getBotListForDropdown();
       if (botRes.success && botRes.bots) {
         setBots(botRes.bots);
-        if (botRes.bots.length > 0 && !selectedBotId) {
-          setSelectedBotId(botRes.bots[0].id);
-        }
       }
       
-      // Load existing config
+      // Load existing config + pipeline routing
       const cfgRes = await getGoogleSheetsConfig();
+      let existingOutboundId = '';
+      let existingGreetingId = '';
       if (cfgRes.success && cfgRes.config) {
         const cfg = cfgRes.config as any;
         if (cfg.spreadsheetId) {
@@ -69,6 +68,9 @@ export function GoogleSheetsWizard({ isOpen, onClose, onComplete }: { isOpen: bo
         if (cfg.activeSheets?.length) {
           setSelectedTabs(cfg.activeSheets);
         }
+        // Pipeline routing from config response
+        if (cfg.outbound_channel_id) existingOutboundId = cfg.outbound_channel_id;
+        if (cfg.greeting_group_id) existingGreetingId = cfg.greeting_group_id;
       }
       
       // Load WhatsApp channels for outbound selection
@@ -76,16 +78,27 @@ export function GoogleSheetsWizard({ isOpen, onClose, onComplete }: { isOpen: bo
         const { getIntegrationHealth } = await import('@/app/actions/integrations');
         const healthRes = await getIntegrationHealth();
         if (healthRes.success && healthRes.channels) {
+          // Include any WhatsApp channel (connected or warning — both can send outbound)
           const waChannels = (healthRes.channels as any[]).filter(
-            (c: any) => c.provider === 'whatsapp' && c.status === 'connected'
+            (c: any) => c.provider === 'whatsapp'
           );
           setChannels(waChannels.map((c: any) => ({ id: c.id, name: c.name, provider: c.provider })));
-          if (waChannels.length > 0 && !selectedChannelId) {
+          // Pre-select existing outbound or first available
+          if (existingOutboundId && waChannels.some((c: any) => c.id === existingOutboundId)) {
+            setSelectedChannelId(existingOutboundId);
+          } else if (waChannels.length > 0 && !selectedChannelId) {
             setSelectedChannelId(waChannels[0].id);
           }
         }
       } catch (e) {
         console.warn('[GSW] Failed to load channels:', e);
+      }
+      
+      // Pre-select bot: existing greeting or first WA bot
+      if (existingGreetingId && botRes.success && botRes.bots?.some((b: any) => b.id === existingGreetingId)) {
+        setSelectedBotId(existingGreetingId);
+      } else if (botRes.success && botRes.bots && botRes.bots.length > 0 && !selectedBotId) {
+        setSelectedBotId(botRes.bots[0].id);
       }
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps

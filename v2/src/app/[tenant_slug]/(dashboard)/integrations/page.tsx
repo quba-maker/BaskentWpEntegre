@@ -306,21 +306,21 @@ function AddChannelModal({
         <div className="space-y-3">
           <div>
             <label className="text-[11px] font-semibold mb-1 block" style={{ color: "var(--q-text-secondary)" }}>Kanal Adı</label>
-            <input value={name} onChange={e => setName(e.target.value)} placeholder="Örn: WhatsApp Primary" className="w-full px-3 py-2 rounded-xl border text-sm" style={{ borderColor: "var(--q-border-default)" }} />
+            <input value={name} onChange={e => setName(e.target.value)} placeholder="Örn: WhatsApp Primary" autoComplete="off" name="quba_channel_name" className="w-full px-3 py-2 rounded-xl border text-sm" style={{ borderColor: "var(--q-border-default)" }} />
           </div>
           <div>
             <label className="text-[11px] font-semibold mb-1 block" style={{ color: "var(--q-text-secondary)" }}>{f.label}</label>
-            <input value={identifier} onChange={e => setIdentifier(e.target.value)} placeholder={f.placeholder} className="w-full px-3 py-2 rounded-xl border text-sm font-mono" style={{ borderColor: "var(--q-border-default)" }} />
+            <input value={identifier} onChange={e => setIdentifier(e.target.value)} placeholder={f.placeholder} autoComplete="off" name="quba_channel_identifier" className="w-full px-3 py-2 rounded-xl border text-sm font-mono" style={{ borderColor: "var(--q-border-default)" }} />
           </div>
           {provider === "whatsapp" && (
             <div>
               <label className="text-[11px] font-semibold mb-1 block" style={{ color: "var(--q-text-secondary)" }}>WABA ID (opsiyonel)</label>
-              <input value={wabaId} onChange={e => setWabaId(e.target.value)} placeholder="WhatsApp Business Account ID" className="w-full px-3 py-2 rounded-xl border text-sm font-mono" style={{ borderColor: "var(--q-border-default)" }} />
+              <input value={wabaId} onChange={e => setWabaId(e.target.value)} placeholder="WhatsApp Business Account ID" autoComplete="off" name="quba_waba_id" className="w-full px-3 py-2 rounded-xl border text-sm font-mono" style={{ borderColor: "var(--q-border-default)" }} />
             </div>
           )}
           <div>
             <label className="text-[11px] font-semibold mb-1 block" style={{ color: "var(--q-text-secondary)" }}>Access Token</label>
-            <input value={token} onChange={e => setToken(e.target.value)} type="password" placeholder="Meta Graph API Token" className="w-full px-3 py-2 rounded-xl border text-sm font-mono" style={{ borderColor: "var(--q-border-default)" }} />
+            <input value={token} onChange={e => setToken(e.target.value)} type="password" placeholder="Meta Graph API Token" autoComplete="new-password" name="quba_access_token" className="w-full px-3 py-2 rounded-xl border text-sm font-mono" style={{ borderColor: "var(--q-border-default)" }} />
           </div>
           <div>
             <label className="text-[11px] font-semibold mb-1 block" style={{ color: "var(--q-text-secondary)" }}>Yöneten Bot</label>

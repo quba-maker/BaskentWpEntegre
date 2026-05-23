@@ -99,9 +99,12 @@ export async function withActionGuard<T>(
       durationMs: Date.now() - startTime
     });
     
+    // Always log full error to Vercel/server console for debugging
+    console.error(`[ACTION_CRASH] ${options.actionName} | Error:`, error.message || error, '| Stack:', error.stack?.slice(0, 500));
+    
     // Güvenlik: Asla raw error mesajını client'a sızdırma (eğer production'daysan)
     const errorMsg = process.env.NODE_ENV === 'production' 
-      ? "Sistemsel bir hata oluştu. Lütfen daha sonra tekrar deneyin."
+      ? `Sistemsel bir hata oluştu (${options.actionName}). Lütfen daha sonra tekrar deneyin.`
       : error.message;
 
     return { success: false, error: errorMsg, statusCode: 500 };

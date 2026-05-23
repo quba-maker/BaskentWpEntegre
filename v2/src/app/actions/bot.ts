@@ -718,10 +718,12 @@ export async function getBots(): Promise<{ success: boolean; bots?: BotData[]; e
 
         // 3. Fetch AI profile for this group
         const profiles = await ctx.db.executeSafe({
-          text: `SELECT ai_model, max_messages, max_response_tokens, aggression_level,
-                        auto_greeting, greeting_language, follow_up_enabled, business_hours_json
-                 FROM channel_ai_profiles WHERE group_id = $1 LIMIT 1`,
-          values: [g.id]
+          text: `SELECT cap.ai_model, cap.max_messages, cap.max_response_tokens, cap.aggression_level,
+                        cap.auto_greeting, cap.greeting_language, cap.follow_up_enabled, cap.business_hours_json
+                 FROM channel_ai_profiles cap
+                 JOIN channel_groups cg ON cap.group_id = cg.id
+                 WHERE cap.group_id = $1 AND cg.tenant_id = $2 LIMIT 1`,
+          values: [g.id, ctx.tenantId]
         });
         const profile = profiles.length > 0 ? {
           aiModel: profiles[0].ai_model || 'gemini-2.5-flash',
@@ -742,9 +744,10 @@ export async function getBots(): Promise<{ success: boolean; bots?: BotData[]; e
                         EXISTS(SELECT 1 FROM channel_prompt_bindings cpb WHERE cpb.channel_id = c.id AND cpb.is_active = true) as has_prompt_binding
                  FROM channels c
                  LEFT JOIN channel_integrations ci ON ci.channel_id = c.id
-                 WHERE c.group_id = $1 AND c.provider != 'meta_legacy'
+                 JOIN channel_groups cg ON c.group_id = cg.id
+                 WHERE c.group_id = $1 AND cg.tenant_id = $2 AND c.provider != 'meta_legacy'
                  ORDER BY c.provider, c.name`,
-          values: [g.id]
+          values: [g.id, ctx.tenantId]
         });
 
         bots.push({
@@ -947,8 +950,9 @@ export async function archiveBot(botId: string): Promise<{ success: boolean; err
 
       // Check if WhatsApp channels are attached — warn
       const waChannels = await ctx.db.executeSafe({
-        text: `SELECT id FROM channels WHERE group_id = $1 AND provider = 'whatsapp'`,
-        values: [botId]
+        text: `SELECT c.id FROM channels c JOIN channel_groups cg ON c.group_id = cg.id
+               WHERE c.group_id = $1 AND cg.tenant_id = $2 AND c.provider = 'whatsapp'`,
+        values: [botId, ctx.tenantId]
       });
       if (waChannels.length > 0) {
         throw new Error('SAFETY: Bu bot aktif WhatsApp kanalları içeriyor. Önce kanalları başka bir bota atayın.');
@@ -956,15 +960,15 @@ export async function archiveBot(botId: string): Promise<{ success: boolean; err
 
       // Archive the group
       await ctx.db.executeSafe({
-        text: `UPDATE channel_groups SET status = 'archived', updated_at = NOW() WHERE id = $1`,
-        values: [botId]
+        text: `UPDATE channel_groups SET status = 'archived', updated_at = NOW() WHERE id = $1 AND tenant_id = $2`,
+        values: [botId, ctx.tenantId]
       });
 
       // Deactivate prompt bindings for channels in this group
       await ctx.db.executeSafe({
         text: `UPDATE channel_prompt_bindings SET is_active = false 
-               WHERE channel_id IN (SELECT id FROM channels WHERE group_id = $1)`,
-        values: [botId]
+               WHERE channel_id IN (SELECT c.id FROM channels c JOIN channel_groups cg ON c.group_id = cg.id WHERE c.group_id = $1 AND cg.tenant_id = $2)`,
+        values: [botId, ctx.tenantId]
       });
 
       await logAudit(ctx.tenantId, ctx.userId || 'system', 'bot.archived', { botId, name: ownership[0].display_name });

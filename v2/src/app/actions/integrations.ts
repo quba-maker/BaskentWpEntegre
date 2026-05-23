@@ -22,7 +22,7 @@ export async function getGoogleSheetsConfig() {
       if (isV2IntegrationsEnabled()) {
         // V2: Read from ingestion_pipelines (config) + tenant_integrations (credentials)
         const pipeline = await ctx.db.executeSafe({
-          text: `SELECT config FROM ingestion_pipelines 
+          text: `SELECT config, outbound_channel_id, greeting_group_id FROM ingestion_pipelines 
                  WHERE tenant_id = $1 AND provider = 'google_sheets' LIMIT 1`,
           values: [ctx.tenantId]
         });
@@ -64,6 +64,8 @@ export async function getGoogleSheetsConfig() {
           config: {
             spreadsheetId: pipelineConfig.spreadsheetId || '',
             activeSheets: pipelineConfig.activeSheets || [],
+            outbound_channel_id: pipeline.length > 0 ? pipeline[0].outbound_channel_id || '' : '',
+            greeting_group_id: pipeline.length > 0 ? pipeline[0].greeting_group_id || '' : '',
             ...(apiKey ? { apiKey } : {})
           }
         };
@@ -109,8 +111,8 @@ export async function saveGoogleSheetsConfig(config: any) {
 
         if (existing.length > 0) {
           await ctx.db.executeSafe({
-            text: `UPDATE ingestion_pipelines SET config = $1, updated_at = NOW() WHERE id = $2`,
-            values: [JSON.stringify(pipelineConfig), existing[0].id]
+            text: `UPDATE ingestion_pipelines SET config = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3`,
+            values: [JSON.stringify(pipelineConfig), existing[0].id, ctx.tenantId]
           });
           // Update routing if provided
           if (config.outbound_channel_id !== undefined || config.greeting_group_id !== undefined) {
@@ -127,9 +129,10 @@ export async function saveGoogleSheetsConfig(config: any) {
               vals.push(config.greeting_group_id || null);
               idx++;
             }
+            vals.push(ctx.tenantId);
             vals.push(existing[0].id);
             await ctx.db.executeSafe({
-              text: `UPDATE ingestion_pipelines SET ${updates.join(', ')} WHERE id = $${idx}`,
+              text: `UPDATE ingestion_pipelines SET ${updates.join(', ')} WHERE id = $${idx + 1} AND tenant_id = $${idx}`,
               values: vals
             });
           }
@@ -297,8 +300,11 @@ export async function getIntegrationHealth() {
 
         // Check for missing prompt binding
         const bindingCheck = await ctx.db.executeSafe({
-          text: `SELECT 1 FROM channel_prompt_bindings WHERE channel_id = $1 LIMIT 1`,
-          values: [row.id]
+          text: `SELECT 1 FROM channel_prompt_bindings cpb
+                 JOIN channels ch ON ch.id = cpb.channel_id
+                 JOIN channel_groups cg ON cg.id = ch.group_id
+                 WHERE cpb.channel_id = $1 AND cg.tenant_id = $2 LIMIT 1`,
+          values: [row.id, ctx.tenantId]
         });
         const hasBinding = bindingCheck.length > 0;
         if (!hasBinding && status !== 'disconnected') {
@@ -602,12 +608,16 @@ export async function archiveChannel(channelId: string): Promise<{ success: bool
       if (ch.length === 0) throw new Error('Channel not found');
 
       await ctx.db.executeSafe({
-        text: `UPDATE channels SET status = 'archived', updated_at = NOW() WHERE id = $1`,
-        values: [channelId]
+        text: `UPDATE channels SET status = 'archived', updated_at = NOW() 
+               WHERE id = $1 AND group_id IN (SELECT id FROM channel_groups WHERE tenant_id = $2)`,
+        values: [channelId, ctx.tenantId]
       });
       await ctx.db.executeSafe({
-        text: `UPDATE channel_prompt_bindings SET is_active = false WHERE channel_id = $1`,
-        values: [channelId]
+        text: `UPDATE channel_prompt_bindings SET is_active = false 
+               WHERE channel_id = $1 AND channel_id IN (
+                 SELECT c.id FROM channels c JOIN channel_groups cg ON c.group_id = cg.id WHERE cg.tenant_id = $2
+               )`,
+        values: [channelId, ctx.tenantId]
       });
       return true;
     }
