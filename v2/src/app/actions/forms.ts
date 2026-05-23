@@ -171,18 +171,16 @@ export async function syncGoogleSheets() {
     { actionName: 'syncGoogleSheets', roles: ['owner', 'admin'] },
     async (ctx) => {
       console.log('[SYNC_START] tenantId:', ctx.tenantId);
-      
+
+      // ── 1. Load Google Sheets credentials ──
       const integrations = await ctx.db.executeSafe({
         text: `SELECT credentials FROM tenant_integrations WHERE tenant_id = $1 AND provider = 'google_sheets' LIMIT 1`,
         values: [ctx.tenantId]
       });
 
       if (integrations.length === 0) {
-        console.log('[SYNC_NO_INTEGRATION]');
-        return { success: false, error: "Google Sheets entegrasyonu bulunamadı. Lütfen ayarlardan kurulum yapın." };
+        return { success: false, error: "Google Sheets entegrasyonu bulunamadı. Lütfen Ayarlar → Entegrasyonlar'dan kurulum yapın." };
       }
-
-      console.log('[SYNC_INTEGRATION_FOUND]');
 
       let payload;
       try {
@@ -195,19 +193,41 @@ export async function syncGoogleSheets() {
 
       const SHEETS_API_KEY = payload.apiKey;
       const SPREADSHEET_ID = payload.spreadsheetId;
-      const activeSheets = payload.activeSheets || [];
+      const configActiveSheets: string[] = payload.activeSheets || [];
 
       if (!SHEETS_API_KEY || !SPREADSHEET_ID) {
-        console.log('[SYNC_MISSING_CONFIG]', { hasApiKey: !!SHEETS_API_KEY, hasSpreadsheetId: !!SPREADSHEET_ID });
         return { success: false, error: "Google Sheets API Key veya Spreadsheet ID eksik." };
       }
 
-      console.log('[SYNC_CONFIG_OK] spreadsheetId:', SPREADSHEET_ID, 'activeSheets:', activeSheets.length);
+      console.log('[SYNC_CONFIG_OK] spreadsheetId:', SPREADSHEET_ID);
 
-      // Fetch spreadsheet metadata
+      // ── 2. Load pipeline routing config ──
+      let outboundChannelId: string | null = null;
+      let greetingGroupId: string | null = null;
+      let tenantName: string | null = null;
+
+      try {
+        const pipeRes = await ctx.db.executeSafe({
+          text: `SELECT greeting_group_id, outbound_channel_id FROM ingestion_pipelines WHERE tenant_id = $1 AND provider = 'google_sheets' LIMIT 1`,
+          values: [ctx.tenantId]
+        });
+        if (pipeRes.length > 0) {
+          greetingGroupId = pipeRes[0].greeting_group_id || null;
+          outboundChannelId = pipeRes[0].outbound_channel_id || null;
+        }
+      } catch (_) {}
+
+      try {
+        const tenantRes = await ctx.db.executeSafe({
+          text: `SELECT name FROM tenants WHERE id = $1 LIMIT 1`,
+          values: [ctx.tenantId]
+        });
+        if (tenantRes.length > 0) tenantName = tenantRes[0].name;
+      } catch (_) {}
+
+      // ── 3. Fetch spreadsheet metadata ──
       const BASE_URL = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}`;
       
-      console.log('[SYNC_FETCHING_META]');
       const metaResp = await fetch(`${BASE_URL}?key=${SHEETS_API_KEY}&fields=sheets.properties`);
       if (!metaResp.ok) {
         const errorText = await metaResp.text();
@@ -216,36 +236,38 @@ export async function syncGoogleSheets() {
       }
 
       const metaData = await metaResp.json();
-      let tabs = metaData.sheets
+      const allTabs = metaData.sheets
         .filter((s: any) => !s.properties.hidden)
         .map((s: any) => s.properties.title);
 
-      console.log('[SYNC_SHEET_TABS]', JSON.stringify(tabs));
-      console.log('[SYNC_ACTIVE_SHEETS_CONFIG]', JSON.stringify(activeSheets));
-        
-      if (activeSheets.length > 0) {
-        const filtered = tabs.filter((t: string) => activeSheets.includes(t));
-        if (filtered.length > 0) {
-          tabs = filtered;
-        } else {
-          // Config mismatch — activeSheets doesn't match any real tab name
-          // Fallback: sync ALL visible tabs instead of syncing nothing
-          console.log('[SYNC_FILTER_MISMATCH] activeSheets config doesnt match real tabs. Syncing ALL visible tabs.');
+      console.log('[SYNC_SHEET_TABS]', JSON.stringify(allTabs));
+      console.log('[SYNC_ACTIVE_SHEETS_CONFIG]', JSON.stringify(configActiveSheets));
+
+      // ── 4. Tab selection (strict mode) ──
+      let tabs: string[];
+      if (configActiveSheets.length > 0) {
+        tabs = allTabs.filter((t: string) => configActiveSheets.includes(t));
+        if (tabs.length === 0) {
+          console.log('[SYNC_TAB_MISMATCH]', { config: configActiveSheets, real: allTabs });
+          // Fallback: sync ALL visible tabs when config doesn't match
+          // This prevents blocking sync due to stale tab names
+          tabs = allTabs;
+          console.log('[SYNC_FALLBACK] Config tabs dont match. Syncing all visible tabs.');
         }
+      } else {
+        tabs = allTabs;
       }
 
       if (tabs.length === 0) {
-        console.log('[SYNC_NO_TABS] Spreadsheet has no visible tabs at all');
-        return { success: true, message: "Spreadsheet'te görünür sekme bulunamadı.", newLeads: 0 };
+        return { success: true, message: "Spreadsheet'te görünür sekme bulunamadı.", stats: { totalRows: 0, created: 0, duplicates: 0 } };
       }
 
       console.log('[SYNC_TABS]', tabs);
 
-      // Fetch all rows
+      // ── 5. Fetch all rows (batch) ──
       const rangeParams = tabs.map((t: string) => `ranges=${encodeURIComponent(t)}`).join('&');
       const batchUrl = `${BASE_URL}/values:batchGet?key=${SHEETS_API_KEY}&${rangeParams}&valueRenderOption=FORMATTED_VALUE`;
       
-      console.log('[SYNC_FETCHING_ROWS]');
       const batchResp = await fetch(batchUrl);
       if (!batchResp.ok) {
         const errorText = await batchResp.text();
@@ -254,95 +276,79 @@ export async function syncGoogleSheets() {
       }
 
       const batchData = await batchResp.json();
-      let newLeadsCount = 0;
-      let duplicatesSkipped = 0;
-      let totalRows = 0;
-
-      console.log('[SYNC_PROCESSING] valueRanges:', batchData.valueRanges?.length);
       
+      // ── 6. Process each row through shared ingestion service ──
+      const { ingestSheetRow } = await import('@/lib/services/sheets-ingestion.service');
+      
+      let created = 0, duplicates = 0, errors = 0, totalRows = 0;
+
       for (let i = 0; i < batchData.valueRanges.length; i++) {
         const vr = batchData.valueRanges[i];
         const tabName = tabs[i];
         const values = vr.values || [];
         if (values.length <= 1) continue;
 
-        totalRows += values.length - 1;
-        const headers = values[0].map((h: string) => String(h).toLowerCase().trim());
-        
-        const phoneIdx = headers.findIndex((h: string) => h.includes('telefon') || h.includes('phone') || h === 'numara' || h.includes('cep'));
-        const nameIdx = headers.findIndex((h: string) => !h.endsWith('id') && !h.endsWith('_id') && !h.includes(' id') && (h.includes('isim') || h.includes('soyad') || h === 'ad' || h === 'adı' || h === 'adınız' || h === 'name' || h === 'full name' || h === 'full_name'));
-        const emailIdx = headers.findIndex((h: string) => h.includes('mail') || h.includes('e-posta'));
-        const formNameIdx = headers.findIndex((h: string) => !h.endsWith('id') && !h.endsWith('_id') && !h.includes(' id') && (h.includes('form adı') || h.includes('form name') || h.includes('form_name') || h.includes('kampanya adı') || h.includes('campaign_name') || h.includes('campaign name') || h === 'kampanya' || h === 'campaign' || h === 'form'));
+        const headers = values[0].map((h: string) => String(h).trim());
+        const rowCount = values.length - 1;
+        totalRows += rowCount;
 
-        if (phoneIdx === -1) {
-          console.log(`[SYNC_SKIP_TAB] ${tabName}: No phone column. headers:`, headers.join(', '));
-          continue;
-        }
-
-        console.log(`[SYNC_TAB] ${tabName}: ${values.length - 1} rows, phoneIdx=${phoneIdx}`);
+        console.log(`[SYNC_TAB] ${tabName}: ${rowCount} rows`);
 
         for (let r = 1; r < values.length; r++) {
           const row = values[r];
-          let phone = row[phoneIdx];
-          if (!phone) continue;
           
-          phone = String(phone).replace(/[^0-9]/g, '');
-          if (phone.length < 10) continue;
-          phone = phone.substring(0, 20);
-
-          const name = nameIdx !== -1 && row[nameIdx] ? String(row[nameIdx]).substring(0, 100) : null;
-          const email = emailIdx !== -1 && row[emailIdx] ? String(row[emailIdx]).substring(0, 200) : null;
-          const formName = formNameIdx !== -1 && row[formNameIdx] ? String(row[formNameIdx]).substring(0, 200) : tabName;
-
-          const raw_data: any = {};
-          headers.forEach((h: string, idx: number) => { raw_data[h] = row[idx] || ""; });
-
-          const existing = await ctx.db.executeSafe({
-            text: `SELECT id FROM leads WHERE phone_number LIKE '%' || RIGHT($1, 10) || '%' AND tenant_id = $2 LIMIT 1`,
-            values: [phone, ctx.tenantId]
+          // Build key-value object from headers + row
+          const rowData: Record<string, any> = {};
+          headers.forEach((h: string, idx: number) => {
+            rowData[h] = row[idx] || '';
           });
-          
-          if (existing.length === 0) {
-            await ctx.db.executeSafe({
-              text: `INSERT INTO leads (tenant_id, phone_number, patient_name, email, form_name, raw_data, stage, created_at) VALUES ($1, $2, $3, $4, $5, $6, 'new', NOW())`,
-              values: [ctx.tenantId, phone, name, email, formName, JSON.stringify(raw_data)]
-            });
-            newLeadsCount++;
-          } else {
-            duplicatesSkipped++;
-          }
+
+          const result = await ingestSheetRow({
+            tenantId: ctx.tenantId,
+            tenantName: tenantName || undefined,
+            sheetName: tabName,
+            data: rowData,
+            outboundChannelId,
+            greetingGroupId,
+            skipAutoMessage: true,   // BATCH SYNC — no mass WhatsApp sends
+            source: 'manual_sync'
+          });
+
+          if (result.status === 'created') created++;
+          else if (result.status === 'duplicate') duplicates++;
+          else if (result.status === 'error') errors++;
         }
       }
 
-      // Update health status
+      // ── 7. Update health status ──
       await ctx.db.executeSafe({
         text: `UPDATE tenant_integrations SET health_status = 'healthy', last_sync_at = NOW(), updated_at = NOW() WHERE tenant_id = $1 AND provider = 'google_sheets'`,
         values: [ctx.tenantId]
       });
 
-      console.log('[SYNC_COMPLETED]', { totalRows, newLeadsCount, duplicatesSkipped });
+      const stats = { totalRows, created, duplicates, errors };
+      console.log('[SYNC_COMPLETED]', stats);
 
       logAudit({
         tenantId: ctx.tenantId,
         userId: ctx.userId,
         userEmail: ctx.email,
-        action: "google_sheets_sync_completed",
-        entityType: "integration",
-        entityId: "google_sheets",
-        details: { totalRows, newLeadsCount, duplicatesSkipped }
+        action: 'google_sheets_sync_completed',
+        entityType: 'integration',
+        entityId: 'google_sheets',
+        details: stats
       });
 
       return { 
         success: true, 
-        message: `${newLeadsCount} yeni kayıt eklendi. ${duplicatesSkipped} tekrar eden atlandı. Toplam ${totalRows} satır.`,
-        newLeads: newLeadsCount,
-        duplicates: duplicatesSkipped,
-        totalRows
+        message: `${created} yeni kayıt eklendi. ${duplicates} tekrar eden atlandı. ${errors > 0 ? `${errors} hata.` : ''} Toplam ${totalRows} satır.`,
+        stats
       };
     }
   ).then(res => {
     console.log('[SYNC_ACTION_RETURN]', JSON.stringify(res).slice(0, 300));
     if (!res.success) return { success: false, error: res.error || res.data?.error };
-    return { success: true, message: res.data?.message, newLeads: res.data?.newLeads };
+    return { success: true, message: res.data?.message, stats: res.data?.stats };
   });
 }
+
