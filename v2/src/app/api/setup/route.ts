@@ -453,6 +453,12 @@ export async function GET(req: NextRequest) {
     await execute`CREATE INDEX IF NOT EXISTS idx_pipeline_events ON pipeline_events(tenant_id, event_type)`;
     results.push("✅ pipeline_events tablosu hazır");
 
+    // 21. BOT ACTIVATION TRACKING — max_messages counter reset support
+    await execute`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS bot_activated_at TIMESTAMPTZ`;
+    await execute`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_message_status VARCHAR(20)`;
+    await execute`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_message_direction VARCHAR(10)`;
+    results.push("✅ bot_activated_at ve last_message denormalizasyon kolonları eklendi");
+
     if (isDryRun) {
       return NextResponse.json({ success: true, mode: "dryRun", results, executedQueries: dryRunLogs });
     }

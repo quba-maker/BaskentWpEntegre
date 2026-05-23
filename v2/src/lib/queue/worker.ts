@@ -471,12 +471,20 @@ export class QueueWorkerEngine {
     }
 
     // 3.6 MAX MESSAGES GATE — Auto handover after limit
+    // Only counts BOT-generated messages (model_used IS NOT NULL) since bot_activated_at
+    // This prevents human agent messages from counting and allows admin to re-enable bot
     const maxMsg = brain.context.settings.maxMessages;
     if (maxMsg > 0) {
       const botMsgCount = await db.executeSafe({
         text: `
           SELECT COUNT(*) as c FROM messages 
-          WHERE phone_number = $1 AND tenant_id = $2 AND direction = 'out'
+          WHERE phone_number = $1 AND tenant_id = $2 
+            AND direction = 'out' 
+            AND model_used IS NOT NULL
+            AND created_at > COALESCE(
+              (SELECT bot_activated_at FROM conversations WHERE phone_number = $1 AND tenant_id = $2),
+              '1970-01-01'::timestamptz
+            )
         `,
         values: [phoneNumber, tenantId]
       }) as any[];
@@ -486,7 +494,7 @@ export class QueueWorkerEngine {
           text: `UPDATE conversations SET status = 'human' WHERE phone_number = $1 AND tenant_id = $2`,
           values: [phoneNumber, tenantId]
         });
-        this.log.info(`[MAX_MESSAGES] Limit reached (${count}/${maxMsg}), auto-handover to human`, { traceId });
+        this.log.info(`[MAX_MESSAGES] Bot limit reached (${count}/${maxMsg}), auto-handover to human`, { traceId });
         AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'max_messages_reached', category: 'escalation', payload: { count, maxMsg } });
         return;
       }

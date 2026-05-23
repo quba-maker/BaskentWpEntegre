@@ -2,8 +2,9 @@
 
 import { useState, useEffect, useRef } from "react";
 import useSWRInfinite from "swr/infinite";
-import { Search, MessageCircle, X, FileText, ChevronRight, CheckCircle2, Bot, Save, StickyNote, Sparkles, RefreshCw, ChevronDown, Filter } from "lucide-react";
+import { Search, MessageCircle, X, FileText, ChevronRight, CheckCircle2, Bot, Save, StickyNote, Sparkles, RefreshCw, ChevronDown, Filter, Zap } from "lucide-react";
 import { getForms, getCampaignNames, updateLeadNotes, updateLeadStage, syncGoogleSheets } from "@/app/actions/forms";
+import { toggleBotStatus } from "@/app/actions/inbox";
 import { useInboxStore } from "@/store/inbox-store";
 import { useRouter, useParams } from "next/navigation";
 import { resolveCountry, deduplicatePhones } from "@/lib/utils/country";
@@ -144,14 +145,41 @@ export default function FormsPage() {
 
   const handleMessageClick = (form: any, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
+    const displayName = getDisplayName(form);
     setActiveContact(form.phone_number, {
       id: form.phone_number,
-      name: form.patient_name,
+      name: displayName,
       channel: "whatsapp",
       stage: form.stage,
       unread: 0
     });
     router.push(`/${tenantId}/inbox`);
+  };
+
+  const [isBotHandoffLoading, setIsBotHandoffLoading] = useState(false);
+
+  const handleBotHandoff = async (form: any, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setIsBotHandoffLoading(true);
+    try {
+      // Enable bot for this contact
+      await toggleBotStatus(form.phone_number, true);
+      // Navigate to inbox with this contact selected
+      const displayName = getDisplayName(form);
+      setActiveContact(form.phone_number, {
+        id: form.phone_number,
+        name: displayName,
+        channel: "whatsapp",
+        stage: form.stage,
+        unread: 0,
+        isBotActive: true
+      });
+      router.push(`/${tenantId}/inbox`);
+    } catch (err) {
+      console.error('Bot handoff failed:', err);
+    } finally {
+      setIsBotHandoffLoading(false);
+    }
   };
 
   const handleStageChange = async (form: any, newStage: string, e?: React.MouseEvent) => {
@@ -545,13 +573,23 @@ export default function FormsPage() {
               <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-6">
               
               {/* Quick Actions */}
-              <button 
-                onClick={(e) => handleMessageClick(selectedForm, e as any)}
-                className="w-full flex items-center justify-center gap-2 py-3.5 bg-[#25D366] text-white rounded-xl font-semibold shadow-[0_4px_14px_rgba(37,211,102,0.39)] hover:bg-[#1DA851] transition-colors"
-              >
-                <MessageCircle className="w-5 h-5" />
-                WhatsApp'tan Mesaj Gönder
-              </button>
+              <div className="flex gap-3">
+                <button 
+                  onClick={(e) => handleMessageClick(selectedForm, e as any)}
+                  className="flex-1 flex items-center justify-center gap-2 py-3 bg-[#25D366] text-white rounded-xl font-semibold shadow-[0_4px_14px_rgba(37,211,102,0.39)] hover:bg-[#1DA851] transition-colors"
+                >
+                  <MessageCircle className="w-5 h-5" />
+                  Mesaj Gönder
+                </button>
+                <button 
+                  onClick={(e) => handleBotHandoff(selectedForm, e as any)}
+                  disabled={isBotHandoffLoading || selectedForm.isBotActive}
+                  className="flex-1 flex items-center justify-center gap-2 py-3 bg-[#007AFF] text-white rounded-xl font-semibold shadow-[0_4px_14px_rgba(0,122,255,0.3)] hover:bg-[#0056b3] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Zap className="w-5 h-5" />
+                  {selectedForm.isBotActive ? 'Bot Aktif' : isBotHandoffLoading ? 'Devrediliyor...' : 'Bota Devret'}
+                </button>
+              </div>
 
               {/* Meta Info */}
               <div className="bg-white rounded-2xl p-5 border border-black/5 shadow-sm space-y-4">

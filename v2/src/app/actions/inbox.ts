@@ -42,6 +42,7 @@ export async function getConversations(page: number = 1, search: string = "", st
           COALESCE(c.last_message_status, m.status) as last_message_status,
           COALESCE(c.last_message_direction, m.direction) as last_message_direction,
           l.form_name,
+          l.patient_name as form_patient_name,
           l.raw_data as form_raw_data,
           EXTRACT(EPOCH FROM l.created_at) * 1000 as form_date_ms,
           mem.summary_text as ai_summary,
@@ -102,8 +103,29 @@ export async function getConversations(page: number = 1, search: string = "", st
           }
         }
 
+        // Priority name resolution: form full_name > form patient_name > conversation name
+        let resolvedName = r.name;
+        if (r.form_raw_data) {
+          try {
+            const rawData = typeof r.form_raw_data === 'string' ? JSON.parse(r.form_raw_data) : r.form_raw_data;
+            const formFullName = rawData.full_name || rawData['full name'] || rawData['Full Name'] || rawData['full_name'];
+            if (formFullName && formFullName.trim()) {
+              resolvedName = formFullName.trim();
+            } else if (r.form_patient_name && r.form_patient_name.trim()) {
+              resolvedName = r.form_patient_name.trim();
+            }
+          } catch {
+            if (r.form_patient_name && r.form_patient_name.trim()) {
+              resolvedName = r.form_patient_name.trim();
+            }
+          }
+        } else if (r.form_patient_name && r.form_patient_name.trim()) {
+          resolvedName = r.form_patient_name.trim();
+        }
+
         return {
           ...r,
+          name: resolvedName,
           score: r.stage === 'appointed' ? 100 : r.stage === 'contacted' ? 60 : 30,
           isBotActive: r.status !== 'human',
           formattedTime,
@@ -340,8 +362,7 @@ export async function sendMessage(phone: string, text: string) {
                    last_message_channel = $2,
                    last_message_status = $3,
                    last_message_direction = 'out',
-                   message_count = message_count + 1,
-                   status = 'human'
+                   message_count = message_count + 1
                WHERE phone_number = $4 AND tenant_id = $5`,
         values: [text, channel, messageStatus, phone, ctx.tenantId]
       });
@@ -538,10 +559,19 @@ export async function toggleBotStatus(phone: string, isBotActive: boolean) {
     { actionName: 'toggleBotStatus' },
     async (ctx) => {
       const newStatus = isBotActive ? 'bot' : 'human';
-      await ctx.db.executeSafe({
-        text: `UPDATE conversations SET status = $1 WHERE phone_number = $2 AND tenant_id = $3`,
-        values: [newStatus, phone, ctx.tenantId]
-      });
+      
+      if (isBotActive) {
+        // Bot enabled: set bot_activated_at to reset the max messages counter
+        await ctx.db.executeSafe({
+          text: `UPDATE conversations SET status = $1, bot_activated_at = NOW() WHERE phone_number = $2 AND tenant_id = $3`,
+          values: [newStatus, phone, ctx.tenantId]
+        });
+      } else {
+        await ctx.db.executeSafe({
+          text: `UPDATE conversations SET status = $1 WHERE phone_number = $2 AND tenant_id = $3`,
+          values: [newStatus, phone, ctx.tenantId]
+        });
+      }
 
       logAudit({
         tenantId: ctx.tenantId,
