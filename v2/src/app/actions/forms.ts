@@ -711,21 +711,26 @@ export async function syncGoogleSheets() {
       const existingSet = new Set(existingPhones.map((r: any) => r.phone_suffix));
       console.log(`[SYNC_EXISTING] ${existingSet.size} existing phone suffixes in DB`);
 
-      // 6c. Filter new rows (in-memory dedup)
+      // 6c. Filter new rows vs existing rows that need updates
       const seenPhones = new Set<string>();
       const newRows: ParsedRow[] = [];
+      const updateRows: ParsedRow[] = []; // existing leads whose notes/raw_data should be updated
 
       for (const row of allRows) {
         const suffix = row.phone.slice(-10);
-        if (existingSet.has(suffix) || seenPhones.has(suffix)) {
-          continue; // duplicate
-        }
+        if (seenPhones.has(suffix)) continue; // in-batch duplicate
         seenPhones.add(suffix);
-        newRows.push(row);
+        
+        if (existingSet.has(suffix)) {
+          // Existing lead — collect for update (notes, raw_data, form_name)
+          updateRows.push(row);
+        } else {
+          newRows.push(row);
+        }
       }
 
-      const duplicates = totalRows - newRows.length;
-      console.log(`[SYNC_DEDUP] ${newRows.length} new, ${duplicates} duplicates`);
+      const duplicates = updateRows.length;
+      console.log(`[SYNC_DEDUP] ${newRows.length} new, ${updateRows.length} to update`);
 
       // 6d. Batch INSERT in chunks of 50
       let created = 0;
@@ -771,13 +776,63 @@ export async function syncGoogleSheets() {
         }
       }
 
+      // 6e. Batch UPDATE existing leads (notes, raw_data, form_name, patient_name)
+      let updated = 0;
+      for (const row of updateRows) {
+        try {
+          const suffix = row.phone.slice(-10);
+          // Only update fields that have actual values from Sheets
+          const setClauses: string[] = [];
+          const updateParams: any[] = [];
+          let pIdx = 1;
+
+          // Always update raw_data (latest sheet snapshot)
+          setClauses.push(`raw_data = $${pIdx}`);
+          updateParams.push(row.rawData);
+          pIdx++;
+
+          // Update notes only if Sheets has a non-empty value
+          if (row.notes && row.notes.trim()) {
+            setClauses.push(`notes = $${pIdx}`);
+            updateParams.push(row.notes);
+            pIdx++;
+          }
+
+          // Update patient_name if Sheets has a value and DB doesn't
+          if (row.name && row.name.trim()) {
+            setClauses.push(`patient_name = COALESCE(NULLIF(patient_name, ''), $${pIdx})`);
+            updateParams.push(row.name);
+            pIdx++;
+          }
+
+          // Update form_name
+          if (row.formName) {
+            setClauses.push(`form_name = $${pIdx}`);
+            updateParams.push(row.formName);
+            pIdx++;
+          }
+
+          updateParams.push(ctx.tenantId, suffix);
+
+          await ctx.db.executeSafe({
+            text: `UPDATE leads SET ${setClauses.join(', ')} 
+                   WHERE tenant_id = $${pIdx} AND RIGHT(phone_number, 10) = $${pIdx + 1}`,
+            values: updateParams
+          });
+          updated++;
+        } catch (updateErr: any) {
+          console.error('[SYNC_UPDATE_ERROR]', updateErr?.message?.slice(0, 200));
+        }
+      }
+      console.log(`[SYNC_UPDATED] ${updated} existing leads updated`);
+
       // ── 7. Update health status ──
       await ctx.db.executeSafe({
         text: `UPDATE tenant_integrations SET health_status = 'healthy', last_sync_at = NOW(), updated_at = NOW() WHERE tenant_id = $1 AND provider = 'google_sheets'`,
         values: [ctx.tenantId]
       });
 
-      const stats = { totalRows, created, duplicates, errors: 0 };
+      const stats = { totalRows, created, updated, duplicates, errors: 0 };
       console.log('[SYNC_COMPLETED]', stats);
 
       logAudit({
@@ -792,7 +847,7 @@ export async function syncGoogleSheets() {
 
       return { 
         success: true, 
-        message: `${created} yeni kayıt eklendi. ${duplicates} tekrar eden atlandı. Toplam ${totalRows} satır.`,
+        message: `${created} yeni kayıt eklendi. ${stats.updated} kayıt güncellendi. ${duplicates} tekrar eden. Toplam ${totalRows} satır.`,
         stats
       };
     }
