@@ -14,6 +14,7 @@ import { TypingIndicator } from "@/components/features/realtime/typing-indicator
 import { useBufferedStream } from "@/hooks/use-buffered-stream";
 import { AblyStreamTransport } from "@/lib/ai/streaming/stream-transport";
 import { StreamBubble } from "@/components/components/../features/realtime/stream-bubble";
+import { getCountryFromPhone } from "@/lib/utils/country";
 
 import { useRealtimeTenant } from "@/components/providers/realtime-provider";
 import { useDiagnosticsStore } from "@/lib/realtime/diagnostics-store";
@@ -48,16 +49,7 @@ function ChatSkeleton() {
   );
 }
 
-// -- Country flag (shared utility) --
-function countryFlag(country: string | undefined): string {
-  if (!country) return "";
-  const map: Record<string, string> = {
-    "Türkiye": "🇹🇷", "Almanya": "🇩🇪", "İngiltere": "🇬🇧", "Fransa": "🇫🇷",
-    "Hollanda": "🇳🇱", "Belçika": "🇧🇪", "Özbekistan": "🇺🇿", "Azerbaycan": "🇦🇿",
-    "Rusya": "🇷🇺", "ABD": "🇺🇸",
-  };
-  return map[country] || "🌍";
-}
+
 
 // -- AI Status Badge --
 const AI_EVENT_LABELS: Record<string, string> = {
@@ -588,11 +580,14 @@ export function ConversationViewport() {
               <h3 className="font-bold text-lg tracking-tight truncate max-w-[130px] md:max-w-[300px]" style={{ color: "var(--q-text-primary)" }}>
                 {activeContact.name || activeContact.id}
               </h3>
-              {activeContact.country && (
-                <span className="ml-1.5 text-[14px] opacity-90 flex-shrink-0" title={activeContact.country}>
-                  {countryFlag(activeContact.country)}
-                </span>
-              )}
+              {(() => {
+                const country = getCountryFromPhone(activeContact.id) || (activeContact.country ? { flag: '🌍', name: activeContact.country, code: '' } : null);
+                return country ? (
+                  <span className="ml-1.5 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] font-semibold flex-shrink-0" style={{ background: 'rgba(0,0,0,0.04)', color: 'var(--q-text-secondary)' }}>
+                    {country.flag} {country.name}
+                  </span>
+                ) : null;
+              })()}
             </div>
             <div className="flex items-center gap-2 mt-0.5">
               <p className="text-xs font-medium" style={{ color: "var(--q-text-secondary)" }}>

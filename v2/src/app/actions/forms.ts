@@ -340,10 +340,103 @@ export async function syncGoogleSheets() {
         return found;
       };
 
-      const normalizePhone = (raw: string): string => {
+      // ── Smart phone normalization with country code inference ──
+      // Detects country from local number patterns (05XX=TR, 06XX=NL, 015X=DE, etc.)
+      // Falls back to reference phone's country code when pattern is ambiguous
+      const inferCountryFromLocal = (digits: string): string | null => {
+        // Turkish mobile: 05XX (10 digits)
+        if (/^05\d{8}$/.test(digits)) return '90';
+        // German mobile: 015X/016X/017X (11-12 digits)
+        if (/^0(15|16|17)\d{8,9}$/.test(digits)) return '49';
+        // Dutch mobile: 06XX (10 digits)
+        if (/^06\d{8}$/.test(digits)) return '31';
+        // Belgian mobile: 04XX (10 digits)
+        if (/^04\d{8}$/.test(digits)) return '32';
+        // UK mobile: 07XXX (11 digits)
+        if (/^07\d{9}$/.test(digits)) return '44';
+        // French mobile: 06/07 (10 digits) — caught above for NL/UK
+        if (/^0[67]\d{8}$/.test(digits)) return '33';
+        // Austrian mobile: 0664/0676/0699/0660/0650 (11-12 digits)
+        if (/^0(664|676|699|660|650)\d{6,8}$/.test(digits)) return '43';
+        // Swiss mobile: 07X (10 digits)
+        if (/^07[5-9]\d{7}$/.test(digits)) return '41';
+        return null;
+      };
+
+      const extractCountryCode = (digits: string): string | null => {
+        const CODES = ['998','996','995','994','993','992','971','966','964','962','961','380','374','359','90','86','82','81','77','55','52','49','48','47','46','45','44','43','41','40','39','36','34','33','32','31','30','91','61','7','1'];
+        for (const code of CODES) {
+          if (digits.startsWith(code)) return code;
+        }
+        return null;
+      };
+
+      const normalizePhone = (raw: string, referenceCountryCode?: string | null): string => {
         let phone = String(raw || '').replace(/[^0-9]/g, '');
-        if (phone.startsWith('0')) phone = '90' + phone.substring(1);
+        if (!phone || phone.length < 7) return '';
+        
+        // Starts with 00 → international format (strip 00)
+        if (phone.startsWith('00') && phone.length >= 11) {
+          return phone.substring(2, 22);
+        }
+        
+        // Starts with 0 → local format, infer country code
+        if (phone.startsWith('0') && phone.length >= 9) {
+          const inferredCode = inferCountryFromLocal(phone);
+          if (inferredCode) {
+            phone = inferredCode + phone.substring(1);
+          } else if (referenceCountryCode) {
+            phone = referenceCountryCode + phone.substring(1);
+          } else {
+            phone = '90' + phone.substring(1);
+          }
+          return phone.substring(0, 20);
+        }
+        
+        // Already has valid country code (10+ digits, doesn't start with 0)
+        if (phone.length >= 10) {
+          return phone.substring(0, 20);
+        }
+        
+        // SHORT NUMBER (7-9 digits, no leading 0) — Meta sometimes strips country code
+        // e.g. p:911069189 → should be 998911069189
+        if (phone.length >= 7 && phone.length <= 9 && referenceCountryCode) {
+          const withCode = referenceCountryCode + phone;
+          if (withCode.length >= 10 && withCode.length <= 15) {
+            return withCode.substring(0, 20);
+          }
+        }
+        
+        // Fallback: try Turkey prefix
+        if (phone.length >= 7 && phone.length <= 9) {
+          return ('90' + phone).substring(0, 20);
+        }
+        
         return phone.substring(0, 20);
+      };
+
+      // Smart dedup: suffix matching + containment check
+      // Keeps the longest (most complete) version of each number
+      const dedupPhones = (phones: string[]): string[] => {
+        // Sort by length descending — longer = more complete = keep first
+        const sorted = [...phones].sort((a, b) => b.length - a.length);
+        const result: string[] = [];
+        
+        for (const phone of sorted) {
+          const isDuplicate = result.some(existing => {
+            // Last 9 digits match (covers most national numbers)
+            const existSuffix = existing.slice(-9);
+            const phoneSuffix = phone.slice(-9);
+            if (existSuffix === phoneSuffix) return true;
+            // One is suffix of the other (e.g. 911069189 vs 998911069189)
+            if (existing.endsWith(phone) || phone.endsWith(existing)) return true;
+            return false;
+          });
+          
+          if (!isDuplicate) result.push(phone);
+        }
+        
+        return result;
       };
 
       interface ParsedRow {
@@ -389,21 +482,56 @@ export async function syncGoogleSheets() {
         for (let r = 1; r < values.length; r++) {
           const row = values[r];
 
-          // Extract ALL phone numbers from all phone columns
-          const allPhones: string[] = [];
-          let primaryPhone = '';
+          // STEP 1: Extract reference country code from Meta's phone_number first
+          let referenceCountryCode: string | null = null;
+          for (const pc of phoneCols) {
+            if (!pc.isWhatsapp) {
+              const raw = row[pc.idx];
+              if (raw) {
+                const clean = String(raw).replace(/[^0-9]/g, '');
+                if (clean.length >= 10 && !clean.startsWith('0')) {
+                  referenceCountryCode = extractCountryCode(clean);
+                  if (referenceCountryCode) break;
+                }
+              }
+            }
+          }
+
+          // STEP 2: Normalize all phones using reference country code
+          // Track WhatsApp vs Meta phone separately for smart primary selection
+          const rawPhones: string[] = [];
+          let whatsappPhone = '';
+          let metaPhone = '';
 
           for (const pc of phoneCols) {
             const raw = row[pc.idx];
             if (!raw) continue;
-            const normalized = normalizePhone(raw);
-            if (normalized.length >= 10 && !allPhones.includes(normalized)) {
-              allPhones.push(normalized);
-              if (!primaryPhone || pc.isWhatsapp) primaryPhone = normalized;
+            const normalized = normalizePhone(raw, referenceCountryCode);
+            if (normalized.length >= 10) {
+              rawPhones.push(normalized);
+              if (pc.isWhatsapp && !whatsappPhone) whatsappPhone = normalized;
+              if (!pc.isWhatsapp && !metaPhone) metaPhone = normalized;
             }
           }
 
-          if (!primaryPhone && allPhones.length > 0) primaryPhone = allPhones[0];
+          // STEP 3: Smart dedup (suffix + containment)
+          const allPhones = dedupPhones(rawPhones);
+
+          // STEP 4: Smart primary selection
+          // Priority: WhatsApp with valid country code > longest number > first available
+          let primaryPhone = '';
+          
+          // If WhatsApp number survived dedup AND has detectable country code → primary
+          if (whatsappPhone && allPhones.some(p => p === whatsappPhone || p.endsWith(whatsappPhone) || whatsappPhone.endsWith(p))) {
+            // Find the longest version of the whatsapp number in deduped list
+            primaryPhone = allPhones.find(p => p.endsWith(whatsappPhone.slice(-9))) || whatsappPhone;
+          }
+          
+          // Fallback: the longest number (most complete)
+          if (!primaryPhone && allPhones.length > 0) {
+            primaryPhone = allPhones[0]; // Already sorted by length desc in dedupPhones
+          }
+
           if (!primaryPhone) continue;
 
           const name = nameIdx !== -1 && row[nameIdx] ? String(row[nameIdx]).substring(0, 100) : null;

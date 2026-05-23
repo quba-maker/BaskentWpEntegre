@@ -6,6 +6,7 @@ import { Search, MessageCircle, X, FileText, ChevronRight, CheckCircle2, Bot, Sa
 import { getForms, getCampaignNames, updateLeadNotes, syncGoogleSheets } from "@/app/actions/forms";
 import { useInboxStore } from "@/store/inbox-store";
 import { useRouter, useParams } from "next/navigation";
+import { resolveCountry, deduplicatePhones } from "@/lib/utils/country";
 
 const formatDate = (dateString: string) => {
   if (!dateString) return "";
@@ -40,16 +41,18 @@ const getBestDate = (form: any): string => {
   return form.created_at || '';
 };
 
-// Get all phone numbers from raw_data
+// Get all phone numbers from raw_data (deduplicated by last 10 digits)
 const getAllPhones = (form: any): string[] => {
   const rd = form.raw_data || {};
+  let phones: string[] = [];
   try {
     if (rd._all_phones) {
       const parsed = typeof rd._all_phones === 'string' ? JSON.parse(rd._all_phones) : rd._all_phones;
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed) && parsed.length > 0) phones = parsed;
     }
   } catch (_) {}
-  return [form.phone_number].filter(Boolean);
+  if (phones.length === 0) phones = [form.phone_number].filter(Boolean);
+  return deduplicatePhones(phones);
 };
 
 // Format phone display
@@ -117,22 +120,7 @@ export default function FormsPage() {
     router.push(`/${tenantId}/inbox`);
   };
 
-  const getFlag = (form: any) => {
-    const country = form.country || form.raw_data?.['ülke'] || form.raw_data?.['country'];
-    if (!country) return "";
-    const c = String(country).toLowerCase();
-    if (c.includes("türkiye") || c.includes("turkey") || c.includes("tr")) return "🇹🇷";
-    if (c.includes("almanya") || c.includes("germany") || c.includes("de")) return "🇩🇪";
-    if (c.includes("ingiltere") || c.includes("england") || c.includes("uk")) return "🇬🇧";
-    if (c.includes("fransa") || c.includes("france")) return "🇫🇷";
-    if (c.includes("hollanda") || c.includes("netherlands")) return "🇳🇱";
-    if (c.includes("belçika") || c.includes("belgium")) return "🇧🇪";
-    if (c.includes("özbekistan") || c.includes("uzbekistan")) return "🇺🇿";
-    if (c.includes("azerbaycan") || c.includes("azerbaijan")) return "🇦🇿";
-    if (c.includes("rusya") || c.includes("russia")) return "🇷🇺";
-    if (c.includes("abd") || c.includes("usa") || c.includes("amerika")) return "🇺🇸";
-    return "🌍";
-  };
+
 
   return (
     <div className="p-4 md:p-8 h-full flex flex-col relative overflow-hidden">
@@ -254,6 +242,7 @@ export default function FormsPage() {
                 const allPhones = getAllPhones(form);
                 const primaryPhone = allPhones[0] || form.phone_number;
                 const extraPhones = allPhones.slice(1);
+                const country = resolveCountry(primaryPhone, form.raw_data);
                 
                 return (
                 <tr 
@@ -272,14 +261,16 @@ export default function FormsPage() {
                       {formatTime(bestDate)}
                     </div>
                   </td>
-                  <td className="py-4 px-4 min-w-[200px] max-w-[240px] whitespace-normal align-middle">
-                    <div className="font-bold text-[14px] text-[#1D1D1F] flex flex-wrap items-center gap-2 leading-snug">
-                      <span className="break-words whitespace-pre-wrap max-w-full">
+                  <td className="py-4 px-4 min-w-[200px] max-w-[280px] whitespace-normal align-middle">
+                    <div className="font-bold text-[14px] text-[#1D1D1F] flex flex-wrap items-center gap-1.5 leading-snug">
+                      <span className="break-words whitespace-pre-wrap">
                         {displayName}
-                        {getFlag(form) && (
-                          <span className="ml-1.5 text-[12px] opacity-90 inline-block align-middle">{getFlag(form)}</span>
-                        )}
                       </span>
+                      {country && (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/[0.04] text-[11px] font-semibold text-[#86868B] shrink-0">
+                          {country.flag} {country.name}
+                        </span>
+                      )}
                       {form.isBotActive && (
                         <span className="px-1.5 py-0.5 shrink-0 bg-[#0F9D58]/10 text-[#0F9D58] border border-[#0F9D58]/20 rounded text-[10px] font-bold uppercase flex items-center gap-1" title="Bot İlgileniyor">
                           <Bot className="w-3 h-3 animate-pulse" /> Bot
@@ -387,7 +378,14 @@ export default function FormsPage() {
                 <div className="pr-4 w-full">
                   <h2 className="text-xl font-bold text-[#1D1D1F] flex flex-wrap items-center gap-2 leading-snug">
                     <span className="break-words whitespace-pre-wrap max-w-full">{getDisplayName(selectedForm)}</span>
-                    {getFlag(selectedForm) && <span className="text-lg shrink-0">{getFlag(selectedForm)}</span>}
+                    {(() => {
+                      const c = resolveCountry(selectedForm.phone_number, selectedForm.raw_data);
+                      return c ? (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/[0.04] text-[12px] font-semibold text-[#86868B] shrink-0">
+                          {c.flag} {c.name}
+                        </span>
+                      ) : null;
+                    })()}
                   </h2>
                   <p className="text-[#86868B] text-sm font-medium mt-1 break-words">{formatPhone(selectedForm.phone_number)}</p>
                 </div>
@@ -421,8 +419,15 @@ export default function FormsPage() {
                     <div className="flex items-center gap-2 flex-wrap leading-snug">
                       <p className="text-sm font-bold text-[#1D1D1F] break-words whitespace-pre-wrap max-w-full">
                         {getDisplayName(selectedForm)}
-                        <span className="ml-2 text-lg inline-block" title={selectedForm.country}>{getFlag(selectedForm)}</span>
                       </p>
+                      {(() => {
+                        const c = resolveCountry(selectedForm.phone_number, selectedForm.raw_data);
+                        return c ? (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/[0.04] text-[11px] font-semibold text-[#86868B] shrink-0">
+                            {c.flag} {c.name}
+                          </span>
+                        ) : null;
+                      })()}
                       {selectedForm.isBotActive && (
                         <span className="px-1.5 py-0.5 shrink-0 bg-[#0F9D58]/10 text-[#0F9D58] border border-[#0F9D58]/20 rounded text-[10px] font-bold uppercase flex items-center gap-1" title="Bot İlgileniyor">
                           <Bot className="w-3 h-3 animate-pulse" /> Bot

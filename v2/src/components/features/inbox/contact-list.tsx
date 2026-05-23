@@ -6,6 +6,7 @@ import { Search, MessageCircle, Check, CheckCheck, Clock, WifiOff } from "lucide
 import { getConversations } from "@/app/actions/inbox";
 import { useInboxStore } from "@/store/inbox-store";
 import { useDiagnosticsStore } from "@/lib/realtime/diagnostics-store";
+import { getCountryFromPhone } from "@/lib/utils/country";
 
 // ==========================================
 // CONTACT RAIL — Left navigation panel
@@ -70,16 +71,7 @@ function ChannelIcon({ channel }: { channel: string }) {
   return <MessageCircle className="w-8 h-8 opacity-80" style={{ color }} />;
 }
 
-// -- Country flag resolver --
-function countryFlag(country: string | undefined): string {
-  if (!country) return "";
-  const map: Record<string, string> = {
-    "Türkiye": "🇹🇷", "Almanya": "🇩🇪", "İngiltere": "🇬🇧", "Fransa": "🇫🇷",
-    "Hollanda": "🇳🇱", "Belçika": "🇧🇪", "Özbekistan": "🇺🇿", "Azerbaycan": "🇦🇿",
-    "Rusya": "🇷🇺", "ABD": "🇺🇸",
-  };
-  return map[country] || "🌍";
-}
+
 
 // -- Stage label map --
 function stageLabel(stage: string | undefined): string {
@@ -300,11 +292,14 @@ export function ContactRail() {
                         <span className="font-bold text-[14px] truncate" style={{ color: "var(--q-text-primary)" }}>
                           {c.name || c.id}
                         </span>
-                        {c.country && (
-                          <span className="ml-1.5 text-[12px] opacity-90 flex-shrink-0" title={c.country}>
-                            {countryFlag(c.country)}
-                          </span>
-                        )}
+                        {(() => {
+                          const country = getCountryFromPhone(c.id) || (c.country ? { flag: '🌍', name: c.country, code: '' } : null);
+                          return country ? (
+                            <span className="ml-1.5 inline-flex items-center gap-0.5 px-1 py-0.5 rounded bg-black/[0.04] text-[10px] font-semibold flex-shrink-0" style={{ color: 'var(--q-text-secondary)' }}>
+                              {country.flag} {country.name}
+                            </span>
+                          ) : null;
+                        })()}
                       </div>
                       <span className="text-[10px] font-semibold tracking-wide whitespace-nowrap ml-2" style={{ color: "var(--q-text-secondary)" }}>
                         {c.formattedTime}
