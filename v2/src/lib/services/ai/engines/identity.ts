@@ -89,7 +89,7 @@ export class IdentityEngine {
     await db.executeSafe({
       text: `
         UPDATE leads 
-        SET customer_id = $1, updated_at = NOW()
+        SET customer_id = $1
         WHERE id = $2 AND tenant_id = $3;
       `,
       values: [customerId, leadId, tenantId]
