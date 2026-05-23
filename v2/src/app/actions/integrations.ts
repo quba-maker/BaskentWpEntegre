@@ -109,14 +109,35 @@ export async function saveGoogleSheetsConfig(config: any) {
 
         if (existing.length > 0) {
           await ctx.db.executeSafe({
-            text: `UPDATE ingestion_pipelines SET config = $1 WHERE id = $2`,
+            text: `UPDATE ingestion_pipelines SET config = $1, updated_at = NOW() WHERE id = $2`,
             values: [JSON.stringify(pipelineConfig), existing[0].id]
           });
+          // Update routing if provided
+          if (config.outbound_channel_id !== undefined || config.greeting_group_id !== undefined) {
+            const updates: string[] = ['updated_at = NOW()'];
+            const vals: any[] = [];
+            let idx = 1;
+            if (config.outbound_channel_id !== undefined) {
+              updates.push(`outbound_channel_id = $${idx}`);
+              vals.push(config.outbound_channel_id || null);
+              idx++;
+            }
+            if (config.greeting_group_id !== undefined) {
+              updates.push(`greeting_group_id = $${idx}`);
+              vals.push(config.greeting_group_id || null);
+              idx++;
+            }
+            vals.push(existing[0].id);
+            await ctx.db.executeSafe({
+              text: `UPDATE ingestion_pipelines SET ${updates.join(', ')} WHERE id = $${idx}`,
+              values: vals
+            });
+          }
         } else {
           await ctx.db.executeSafe({
-            text: `INSERT INTO ingestion_pipelines (tenant_id, name, provider, config) 
-                   VALUES ($1, 'Google Sheets Lead Ingestion', 'google_sheets', $2)`,
-            values: [ctx.tenantId, JSON.stringify(pipelineConfig)]
+            text: `INSERT INTO ingestion_pipelines (tenant_id, name, provider, config, outbound_channel_id, greeting_group_id) 
+                   VALUES ($1, 'Google Sheets Lead Ingestion', 'google_sheets', $2, $3, $4)`,
+            values: [ctx.tenantId, JSON.stringify(pipelineConfig), config.outbound_channel_id || null, config.greeting_group_id || null]
           });
         }
 
@@ -247,12 +268,17 @@ export async function getIntegrationHealth() {
           status = 'error';
           detail = 'Token veya bağlantı hatası';
         }
-        // 4. Healthy but no last_sync_at
+        // 4. Pending (newly connected, no webhook yet)
+        else if (row.health_status === 'pending') {
+          status = 'warning';
+          detail = `Bağlandı — test/webhook bekleniyor (${row.identifier})`;
+        }
+        // 5. Healthy but no last_sync_at
         else if (row.health_status === 'healthy' && !hasLastSync) {
           status = 'warning';
           detail = `Bağlı ama test edilmedi (${row.identifier})`;
         }
-        // 5. Healthy but last_sync_at > 7 days ago
+        // 6. Healthy but last_sync_at > 7 days ago
         else if (row.health_status === 'healthy' && hasLastSync) {
           const daysSinceSync = (Date.now() - new Date(row.last_sync_at).getTime()) / (1000 * 60 * 60 * 24);
           if (daysSinceSync > 7) {
@@ -263,7 +289,7 @@ export async function getIntegrationHealth() {
             detail = `✓ Aktif (${row.identifier})`;
           }
         }
-        // 6. Healthy + recent sync → active
+        // 7. Healthy + recent sync → active
         else if (row.health_status === 'healthy') {
           status = 'connected';
           detail = `✓ Aktif (${row.identifier})`;
@@ -426,7 +452,7 @@ export async function connectWhatsAppChannel(input: {
       const encrypted = encryptPayload({ accessToken, wabaId: wabaId || '', phoneNumberId }, 'whatsapp');
       await ctx.db.executeSafe({
         text: `INSERT INTO channel_integrations (channel_id, provider, credentials_encrypted, health_status)
-               VALUES ($1, 'whatsapp', $2, 'healthy')`,
+               VALUES ($1, 'whatsapp', $2, 'pending')`,
         values: [channelId, JSON.stringify(encrypted)]
       });
 
@@ -481,7 +507,7 @@ export async function connectInstagramChannel(input: {
       const encrypted = encryptPayload({ accessToken, instagramBusinessAccountId }, 'instagram');
       await ctx.db.executeSafe({
         text: `INSERT INTO channel_integrations (channel_id, provider, credentials_encrypted, health_status)
-               VALUES ($1, 'meta_instagram', $2, 'healthy')`,
+               VALUES ($1, 'meta_instagram', $2, 'pending')`,
         values: [channelId, JSON.stringify(encrypted)]
       });
 
@@ -538,7 +564,7 @@ export async function connectMessengerPage(input: {
       const encrypted = encryptPayload({ pageAccessToken, pageId }, 'messenger');
       await ctx.db.executeSafe({
         text: `INSERT INTO channel_integrations (channel_id, provider, credentials_encrypted, health_status)
-               VALUES ($1, 'messenger', $2, 'healthy')`,
+               VALUES ($1, 'messenger', $2, 'pending')`,
         values: [channelId, JSON.stringify(encrypted)]
       });
 

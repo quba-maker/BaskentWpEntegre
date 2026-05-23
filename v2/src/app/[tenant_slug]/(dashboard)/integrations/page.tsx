@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Link2, MessageCircle, FileSpreadsheet, Instagram, Facebook, Webhook, Activity, AlertTriangle, Plus, X, Bot, ChevronRight, RotateCcw } from "lucide-react";
+import { Link2, MessageCircle, FileSpreadsheet, Instagram, Facebook, Webhook, Activity, AlertTriangle, Plus, X, Bot, ChevronRight, RotateCcw, Archive, Trash2 } from "lucide-react";
 import { PageShell, PageHeader } from "@/components/governance";
 import { GoogleSheetsWizard } from "@/components/features/integrations/GoogleSheetsWizard";
 import {
@@ -56,16 +56,20 @@ function ChannelRow({
   channel,
   bots,
   onAssignBot,
+  onArchive,
   onRefresh,
 }: {
   channel: any;
   bots: { id: string; displayName: string; color: string }[];
   onAssignBot: (channelId: string, botId: string) => Promise<void>;
+  onArchive: (channelId: string) => Promise<void>;
   onRefresh: () => void;
 }) {
   const meta = getProviderMeta(channel.provider);
   const Icon = meta.icon;
   const [assigning, setAssigning] = useState(false);
+  const [confirmArchive, setConfirmArchive] = useState(false);
+  const [archiving, setArchiving] = useState(false);
 
   async function handleBotChange(botId: string) {
     setAssigning(true);
@@ -73,6 +77,17 @@ function ChannelRow({
     setAssigning(false);
     onRefresh();
   }
+
+  async function handleArchive() {
+    setArchiving(true);
+    await onArchive(channel.id);
+    setArchiving(false);
+    setConfirmArchive(false);
+    onRefresh();
+  }
+
+  // Don't show archive for synthetic cards (google sheets)
+  const isSynthetic = channel.id?.startsWith('google-sheets');
 
   return (
     <div className="flex items-center justify-between px-4 py-3 hover:bg-gray-50/50 transition-colors border-b last:border-b-0" style={{ borderColor: "var(--q-border-default)" }}>
@@ -121,6 +136,38 @@ function ChannelRow({
           </span>
         )}
       </div>
+
+      {/* Archive button */}
+      {!isSynthetic && (
+        <div className="flex-shrink-0 ml-2">
+          {confirmArchive ? (
+            <div className="flex items-center gap-1">
+              <button
+                onClick={handleArchive}
+                disabled={archiving}
+                className="px-2 py-1 text-[10px] font-bold rounded-lg text-white bg-rose-500 hover:bg-rose-600 disabled:opacity-50"
+              >
+                {archiving ? '...' : 'Evet'}
+              </button>
+              <button
+                onClick={() => setConfirmArchive(false)}
+                className="px-2 py-1 text-[10px] font-bold rounded-lg hover:bg-gray-100"
+                style={{ color: "var(--q-text-secondary)" }}
+              >
+                İptal
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setConfirmArchive(true)}
+              className="p-1.5 rounded-lg hover:bg-rose-50 transition-colors group"
+              title="Arşivle"
+            >
+              <Archive className="w-3.5 h-3.5 text-gray-400 group-hover:text-rose-500" />
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -134,6 +181,7 @@ function ProviderSection({
   bots,
   onAddChannel,
   onAssignBot,
+  onArchive,
   onRefresh,
 }: {
   provider: string;
@@ -141,6 +189,7 @@ function ProviderSection({
   bots: any[];
   onAddChannel: (provider: string) => void;
   onAssignBot: (channelId: string, botId: string) => Promise<void>;
+  onArchive: (channelId: string) => Promise<void>;
   onRefresh: () => void;
 }) {
   const meta = getProviderMeta(provider);
@@ -175,7 +224,7 @@ function ProviderSection({
       {/* Channel Rows */}
       {channels.length > 0 ? (
         channels.map(ch => (
-          <ChannelRow key={ch.id} channel={ch} bots={bots} onAssignBot={onAssignBot} onRefresh={onRefresh} />
+          <ChannelRow key={ch.id} channel={ch} bots={bots} onAssignBot={onAssignBot} onArchive={onArchive} onRefresh={onRefresh} />
         ))
       ) : (
         <div className="px-4 py-6 text-center">
@@ -301,21 +350,31 @@ export default function IntegrationsPage() {
   const [channels, setChannels] = useState<any[]>([]);
   const [bots, setBots] = useState<{ id: string; displayName: string; color: string }[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [addModal, setAddModal] = useState<string | null>(null);
   const [sheetsWizard, setSheetsWizard] = useState(false);
   const [summary, setSummary] = useState("");
 
   const loadData = useCallback(async () => {
-    const [healthRes, botRes] = await Promise.all([
-      getIntegrationHealth(),
-      getBotListForDropdown(),
-    ]);
-    if (healthRes.success && healthRes.channels) {
-      setChannels(healthRes.channels);
-      setSummary(healthRes.summary || "");
-    }
-    if (botRes.success && botRes.bots) {
-      setBots(botRes.bots);
+    setLoadError(null);
+    try {
+      const [healthRes, botRes] = await Promise.all([
+        getIntegrationHealth(),
+        getBotListForDropdown(),
+      ]);
+      if (healthRes.success && healthRes.channels) {
+        setChannels(healthRes.channels);
+        setSummary(healthRes.summary || "");
+      } else {
+        console.error('[INTEGRATIONS_PAGE] getIntegrationHealth failed:', healthRes.error);
+        setLoadError(healthRes.error || 'Entegrasyon verileri yüklenemedi');
+      }
+      if (botRes.success && botRes.bots) {
+        setBots(botRes.bots);
+      }
+    } catch (err) {
+      console.error('[INTEGRATIONS_PAGE] loadData exception:', err);
+      setLoadError('Bağlantı hatası — lütfen tekrar deneyin');
     }
   }, []);
 
@@ -329,6 +388,11 @@ export default function IntegrationsPage() {
 
   async function handleAssignBot(channelId: string, botId: string) {
     await assignChannelToBot(channelId, botId);
+    await loadData();
+  }
+
+  async function handleArchive(channelId: string) {
+    await archiveChannel(channelId);
     await loadData();
   }
 
@@ -362,13 +426,22 @@ export default function IntegrationsPage() {
       />
 
       {/* Summary Bar */}
-      <div className="flex items-center justify-between mb-6 px-4 py-3 rounded-2xl border" style={{ borderColor: "var(--q-border-default)", backgroundColor: "#fff" }}>
+      <div className="flex items-center justify-between mb-6 px-4 py-3 rounded-2xl border" style={{ borderColor: loadError ? "var(--q-red, #ef4444)" : "var(--q-border-default)", backgroundColor: "#fff" }}>
         <div className="flex items-center gap-3">
-          <Activity className="w-4 h-4" style={{ color: "var(--q-primary, #6366f1)" }} />
-          <span className="text-[13px] font-medium" style={{ color: "var(--q-text-primary)" }}>{summary}</span>
+          {loadError ? (
+            <>
+              <AlertTriangle className="w-4 h-4" style={{ color: "var(--q-red, #ef4444)" }} />
+              <span className="text-[13px] font-medium" style={{ color: "var(--q-red, #ef4444)" }}>{loadError}</span>
+            </>
+          ) : (
+            <>
+              <Activity className="w-4 h-4" style={{ color: "var(--q-primary, #6366f1)" }} />
+              <span className="text-[13px] font-medium" style={{ color: "var(--q-text-primary)" }}>{summary}</span>
+            </>
+          )}
         </div>
-        <button onClick={loadData} className="flex items-center gap-1 text-[12px] font-semibold transition-colors" style={{ color: "var(--q-primary, #6366f1)" }}>
-          <RotateCcw className="w-3 h-3" /> Yenile
+        <button onClick={async () => { setIsLoading(true); await loadData(); setIsLoading(false); }} className="flex items-center gap-1 text-[12px] font-semibold transition-colors" style={{ color: "var(--q-primary, #6366f1)" }}>
+          <RotateCcw className="w-3 h-3" /> {loadError ? 'Tekrar Dene' : 'Yenile'}
         </button>
       </div>
 
@@ -382,6 +455,7 @@ export default function IntegrationsPage() {
             bots={bots}
             onAddChannel={handleAddChannel}
             onAssignBot={handleAssignBot}
+            onArchive={handleArchive}
             onRefresh={loadData}
           />
         ))}
