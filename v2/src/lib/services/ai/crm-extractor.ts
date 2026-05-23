@@ -60,14 +60,24 @@ Format:
   "country": "string (Tahmin edilen ülke. Örn: Germany, UK. Emin değilsen boş bırak)",
   "country_confidence": number (0.0 ile 1.0 arası),
   "department": "string (Örn: Ortopedi, Kardiyoloji, Estetik, Diş, Göz, Tüp Bebek, Organ Nakli, Onkoloji, Obezite, Nöroloji, Üroloji, Check-Up. Hastanın niyetine göre seç. Emin değilsen boş bırak)",
-  "pipeline_stage": "string (new, contacted, responded, discovery, appointed, lost)",
+  "pipeline_stage": "string (new | contacted | responded | discovery | qualified | appointed | lost)",
   "tags": ["string"] (Örn: yurtdışı_hasta, acil, fiyat_odaklı, ilgili vb. tamamen TÜRKÇE, küçük harflerle ve boşluk yerine alt çizgi kullanarak),
   "needs_country_question": boolean (Eğer hastanın ülkesi belirsizse ve randevu için lazımsa true),
   "needs_name_question": boolean (Eğer isim bilinmiyorsa true)
 }
 
-Analiz Kuralları:
-- Pipeline: İlk mesajsa 'new', yanıt verdiyse 'responded', soru soruyorsa 'discovery', randevu istediyse 'appointed'.
+Pipeline Aşama Kuralları (sırayla ilerler, geri gitmez):
+- "new": Hasta sadece form doldurmuş, henüz hiçbir iletişim yok.
+- "contacted": Bot veya temsilci ilk mesajı göndermiş ama hasta henüz yanıt vermemiş.
+- "responded": Hasta en az bir mesaj ile yanıt vermiş.
+- "discovery": Hasta soru soruyor, bilgi alıyor, fiyat/tedavi detayı öğreniyor. Aktif görüşme var.
+- "qualified": Hasta ciddi ilgi gösteriyor: tedavi istiyor, fiyat teklifi istedi, MR/rapor paylaştı veya gelmek istediğini belirtti.
+- "appointed": Hasta randevu aldı, tarih belirlendi veya geliş planı kesinleşti.
+- "lost": Hasta ilgilenmediğini belirtti, uzun süre yanıt vermedi veya başka yere gittiğini söyledi.
+
+Önemli Kurallar:
+- Eğer mevcut aşama belirlenemiyorsa "new" döndür.
+- Pipeline sadece İLERİ gider: appointed veya lost olan bir hasta discovery'ye geri dönemez.
 - Departman: Yalnızca kullanıcının sorusuna veya ihtiyacına göre belirle. Kanıt yoksa boş bırak.`
       };
 
