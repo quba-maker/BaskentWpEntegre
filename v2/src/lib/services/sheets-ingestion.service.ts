@@ -190,15 +190,17 @@ export async function ingestSheetRow(params: IngestRowParams): Promise<IngestRow
     }) as any[];
 
     if (existing && existing.length > 0) {
-      // Update notes if available
+      // Update notes if available — tenant_id required for TenantQueryGuard
       if (noteStr && noteStr.trim() !== '') {
-        await db.executeSafe({
-          text: `UPDATE leads SET notes = $1 WHERE id = $2 AND (notes IS NULL OR notes = '')`,
-          values: [noteStr, existing[0].id]
-        });
+        try {
+          await db.executeSafe({
+            text: `UPDATE leads SET notes = $1 WHERE id = $2 AND tenant_id = $3 AND (notes IS NULL OR notes = '')`,
+            values: [noteStr, existing[0].id, tenantId]
+          });
+        } catch (_) {}
       }
 
-      // Identity link even for existing leads
+      // Identity link even for existing leads (non-fatal)
       try {
         const { IdentityEngine } = await import('@/lib/services/ai/engines/identity');
         const customerId = await IdentityEngine.resolveIdentity({
@@ -336,8 +338,8 @@ export async function ingestSheetRow(params: IngestRowParams): Promise<IngestRow
             convId = newConv?.[0]?.id;
           } else {
             await db.executeSafe({
-              text: `UPDATE conversations SET channel_id = COALESCE(channel_id, $1), channel = COALESCE(channel, 'whatsapp') WHERE id = $2`,
-              values: [whatsappChannelId, convId]
+              text: `UPDATE conversations SET channel_id = COALESCE(channel_id, $1), channel = COALESCE(channel, 'whatsapp') WHERE id = $2 AND tenant_id = $3`,
+              values: [whatsappChannelId, convId, tenantId]
             });
           }
 

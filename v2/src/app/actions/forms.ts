@@ -218,7 +218,9 @@ export async function syncGoogleSheets() {
       } catch (_) {}
 
       try {
-        const tenantRes = await ctx.db.executeSafe({
+        const { withTenantDB } = await import('@/lib/core/tenant-db');
+        const sysDb = withTenantDB('admin-system', true);
+        const tenantRes = await sysDb.executeSafe({
           text: `SELECT name FROM tenants WHERE id = $1 LIMIT 1`,
           values: [ctx.tenantId]
         });
