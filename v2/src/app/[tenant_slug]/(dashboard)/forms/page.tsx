@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import useSWRInfinite from "swr/infinite";
-import { Search, MessageCircle, X, FileText, ChevronRight, CheckCircle2, Bot, Save, StickyNote, Sparkles, RefreshCw } from "lucide-react";
-import { getForms, getCampaignNames, updateLeadNotes, syncGoogleSheets } from "@/app/actions/forms";
+import { Search, MessageCircle, X, FileText, ChevronRight, CheckCircle2, Bot, Save, StickyNote, Sparkles, RefreshCw, ChevronDown, Filter } from "lucide-react";
+import { getForms, getCampaignNames, updateLeadNotes, updateLeadStage, syncGoogleSheets } from "@/app/actions/forms";
 import { useInboxStore } from "@/store/inbox-store";
 import { useRouter, useParams } from "next/navigation";
 import { resolveCountry, deduplicatePhones } from "@/lib/utils/country";
@@ -66,6 +66,35 @@ const formatPhone = (phone: string): string => {
   return clean;
 };
 
+// Stage definitions
+const STAGES = [
+  { value: 'new', label: 'Yeni Lead', color: '#007AFF', bg: '#007AFF/10' },
+  { value: 'contacted', label: 'İletişime Geçildi', color: '#FF9500', bg: '#FF9500/10' },
+  { value: 'responded', label: 'Yanıt Alındı', color: '#34C759', bg: '#34C759/10' },
+  { value: 'discovery', label: 'Keşif / Analiz', color: '#5856D6', bg: '#5856D6/10' },
+  { value: 'qualified', label: 'Nitelikli', color: '#30B0C7', bg: '#30B0C7/10' },
+  { value: 'appointed', label: 'Randevu Aldı', color: '#0F9D58', bg: '#0F9D58/10' },
+  { value: 'lost', label: 'Kaybedildi', color: '#FF3B30', bg: '#FF3B30/10' },
+] as const;
+
+const getStageInfo = (stage: string) => STAGES.find(s => s.value === stage) || STAGES[0];
+
+// Dropdown hook for outside click
+function useDropdown() {
+  const [isOpen, setIsOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setIsOpen(false);
+    };
+    if (isOpen) document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [isOpen]);
+  
+  return { isOpen, setIsOpen, ref };
+}
+
 export default function FormsPage() {
   const router = useRouter();
   const params = useParams();
@@ -75,6 +104,7 @@ export default function FormsPage() {
   const [searchInput, setSearchInput] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [sourceFilter, setSourceFilter] = useState("all");
+  const [stageFilter, setStageFilter] = useState("all");
   const [campaigns, setCampaigns] = useState<string[]>([]);
   
   const [selectedForm, setSelectedForm] = useState<any>(null);
@@ -83,6 +113,10 @@ export default function FormsPage() {
 
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncProgress, setSyncProgress] = useState({ status: '', progress: 0, message: '' });
+
+  // Header dropdowns
+  const campDropdown = useDropdown();
+  const stageDropdown = useDropdown();
 
   useEffect(() => {
     getCampaignNames().then(setCampaigns);
@@ -95,12 +129,12 @@ export default function FormsPage() {
 
   const getKey = (pageIndex: number, previousPageData: any) => {
     if (previousPageData && previousPageData.length < 50) return null;
-    return ["forms", pageIndex + 1, debouncedSearch, sourceFilter];
+    return ["forms", pageIndex + 1, debouncedSearch, sourceFilter, stageFilter];
   };
 
   const { data, size, setSize, isLoading, mutate } = useSWRInfinite(
     getKey, 
-    ([_, page, search, source]: any) => getForms(page, search, source), 
+    ([_, page, search, source, stage]: any) => getForms(page, search, source, stage), 
     { refreshInterval: 15000 }
   );
 
@@ -120,7 +154,16 @@ export default function FormsPage() {
     router.push(`/${tenantId}/inbox`);
   };
 
-
+  const handleStageChange = async (form: any, newStage: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    // Optimistic update
+    mutate(
+      data?.map(page => page.map((f: any) => f.id === form.id ? { ...f, stage: newStage } : f)),
+      false
+    );
+    await updateLeadStage(form.id, newStage);
+    mutate();
+  };
 
   return (
     <div className="p-4 md:p-8 h-full flex flex-col relative overflow-hidden">
@@ -162,7 +205,6 @@ export default function FormsPage() {
                     setIsSyncing(true);
                     setSyncProgress({ status: 'starting', progress: 0, message: 'Google Sheets verileri çekiliyor...' });
                     
-                    // Safety timeout — 30s max, then auto-reset
                     const timeout = setTimeout(() => {
                       setSyncProgress({ status: 'error', progress: 0, message: 'İşlem zaman aşımına uğradı. Tekrar deneyin.' });
                       setTimeout(() => setIsSyncing(false), 3000);
@@ -171,20 +213,16 @@ export default function FormsPage() {
                     const res = await syncGoogleSheets();
                     clearTimeout(timeout);
                     
-                    console.log('[SYNC] Response:', JSON.stringify(res));
-                    
                     if (res.success) {
                       setSyncProgress({ status: 'completed', progress: 100, message: res.message || 'Senkronizasyon tamamlandı.' });
-                      mutate(); // refresh form list
+                      mutate();
                       setTimeout(() => setIsSyncing(false), 2500);
                     } else {
                       const errMsg = res.error || "Senkronizasyon başarısız.";
-                      console.error('[SYNC] Error:', errMsg);
                       setSyncProgress({ status: 'error', progress: 0, message: errMsg });
                       setTimeout(() => setIsSyncing(false), 4000);
                     }
                   } catch (e: any) {
-                    console.error('[SYNC] Exception:', e);
                     setSyncProgress({ status: 'error', progress: 0, message: e?.message || 'Senkronizasyon başlatılamadı.' });
                     setTimeout(() => setIsSyncing(false), 4000);
                   }
@@ -207,21 +245,45 @@ export default function FormsPage() {
               className="w-full pl-9 pr-4 py-2 bg-white/60 backdrop-blur-md border border-white/60 rounded-xl text-sm outline-none focus:ring-2 focus:ring-[#007AFF]/40 focus:bg-white transition-all shadow-[0_2px_10px_rgba(0,0,0,0.02)]"
             />
           </div>
-          <select 
-            value={sourceFilter}
-            onChange={(e) => setSourceFilter(e.target.value)}
-            className="px-4 py-2.5 bg-white/60 backdrop-blur-md border border-white/60 rounded-xl text-sm font-semibold text-[#1D1D1F] appearance-none focus:outline-none focus:ring-2 focus:ring-black/5 shadow-[0_2px_10px_rgba(0,0,0,0.02)] cursor-pointer"
-          >
-            <option value="all">Tüm Kampanyalar</option>
-            {campaigns.map((camp, idx) => (
-              <option key={idx} value={camp}>
-                {camp.length > 30 ? camp.substring(0, 30) + '...' : camp}
-              </option>
-            ))}
-          </select>
         </div>
       </div>
       
+      {/* Active Filters Bar */}
+      {(sourceFilter !== 'all' || stageFilter !== 'all') && (
+        <div className="mb-3 flex items-center gap-2 flex-wrap">
+          <span className="text-[11px] font-semibold text-[#86868B] uppercase tracking-wider">Filtreler:</span>
+          {sourceFilter !== 'all' && (
+            <button 
+              onClick={() => setSourceFilter('all')}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#007AFF]/10 text-[#007AFF] text-[11px] font-bold hover:bg-[#007AFF]/20 transition-colors"
+            >
+              <Filter className="w-3 h-3" />
+              {sourceFilter.length > 25 ? sourceFilter.substring(0, 25) + '...' : sourceFilter}
+              <X className="w-3 h-3 ml-1" />
+            </button>
+          )}
+          {stageFilter !== 'all' && (
+            <button 
+              onClick={() => setStageFilter('all')}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold hover:opacity-80 transition-colors"
+              style={{ 
+                backgroundColor: `${getStageInfo(stageFilter).color}15`,
+                color: getStageInfo(stageFilter).color 
+              }}
+            >
+              {getStageInfo(stageFilter).label}
+              <X className="w-3 h-3 ml-1" />
+            </button>
+          )}
+          <button 
+            onClick={() => { setSourceFilter('all'); setStageFilter('all'); }}
+            className="text-[11px] font-semibold text-[#86868B] hover:text-[#1D1D1F] transition-colors ml-1"
+          >
+            Tümünü temizle
+          </button>
+        </div>
+      )}
+
       {/* Table Container */}
       <div className="flex-1 overflow-hidden flex flex-col bg-white/40 backdrop-blur-xl border border-white/50 rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
         <div className="overflow-x-auto flex-1">
@@ -230,8 +292,93 @@ export default function FormsPage() {
               <tr>
                 <th className="py-3 px-4 text-xs font-semibold text-[#86868B] tracking-wider uppercase">Tarih</th>
                 <th className="py-3 px-4 text-xs font-semibold text-[#86868B] tracking-wider uppercase">Hasta Adı & İletişim</th>
-                <th className="py-3 px-4 text-xs font-semibold text-[#86868B] tracking-wider uppercase">Kampanya / Form</th>
-                <th className="py-3 px-4 text-xs font-semibold text-[#86868B] tracking-wider uppercase">Durum</th>
+                
+                {/* Kampanya / Form — Clickable Filter Header */}
+                <th className="py-3 px-4 text-xs font-semibold text-[#86868B] tracking-wider uppercase relative">
+                  <div ref={campDropdown.ref} className="relative inline-block">
+                    <button 
+                      onClick={() => campDropdown.setIsOpen(!campDropdown.isOpen)}
+                      className={`inline-flex items-center gap-1 hover:text-[#1D1D1F] transition-colors cursor-pointer select-none rounded-md px-1.5 py-0.5 -mx-1.5 -my-0.5 ${
+                        sourceFilter !== 'all' ? 'text-[#007AFF] bg-[#007AFF]/10' : 'hover:bg-black/5'
+                      }`}
+                    >
+                      Kampanya / Form
+                      <ChevronDown className={`w-3 h-3 transition-transform ${campDropdown.isOpen ? 'rotate-180' : ''}`} />
+                    </button>
+                    
+                    {campDropdown.isOpen && (
+                      <div className="absolute top-full left-0 mt-1 w-64 bg-white rounded-xl shadow-[0_8px_30px_rgba(0,0,0,0.12)] border border-black/5 py-1 z-50 max-h-[300px] overflow-y-auto">
+                        <button 
+                          onClick={() => { setSourceFilter('all'); campDropdown.setIsOpen(false); }}
+                          className={`w-full text-left px-3 py-2 text-[12px] font-semibold hover:bg-black/5 transition-colors flex items-center gap-2 ${
+                            sourceFilter === 'all' ? 'text-[#007AFF]' : 'text-[#1D1D1F]'
+                          }`}
+                        >
+                          {sourceFilter === 'all' && <CheckCircle2 className="w-3.5 h-3.5" />}
+                          Tüm Kampanyalar
+                        </button>
+                        <div className="h-px bg-black/5 my-1" />
+                        {campaigns.map((camp, idx) => (
+                          <button 
+                            key={idx}
+                            onClick={() => { setSourceFilter(camp); campDropdown.setIsOpen(false); }}
+                            className={`w-full text-left px-3 py-2 text-[12px] font-medium hover:bg-black/5 transition-colors flex items-center gap-2 ${
+                              sourceFilter === camp ? 'text-[#007AFF] font-semibold' : 'text-[#1D1D1F]'
+                            }`}
+                          >
+                            {sourceFilter === camp && <CheckCircle2 className="w-3.5 h-3.5" />}
+                            <span className="truncate">{camp}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </th>
+                
+                {/* Durum — Clickable Filter Header */}
+                <th className="py-3 px-4 text-xs font-semibold text-[#86868B] tracking-wider uppercase relative">
+                  <div ref={stageDropdown.ref} className="relative inline-block">
+                    <button 
+                      onClick={() => stageDropdown.setIsOpen(!stageDropdown.isOpen)}
+                      className={`inline-flex items-center gap-1 hover:text-[#1D1D1F] transition-colors cursor-pointer select-none rounded-md px-1.5 py-0.5 -mx-1.5 -my-0.5 ${
+                        stageFilter !== 'all' ? 'bg-[#007AFF]/10 text-[#007AFF]' : 'hover:bg-black/5'
+                      }`}
+                    >
+                      Durum
+                      <ChevronDown className={`w-3 h-3 transition-transform ${stageDropdown.isOpen ? 'rotate-180' : ''}`} />
+                    </button>
+                    
+                    {stageDropdown.isOpen && (
+                      <div className="absolute top-full left-0 mt-1 w-52 bg-white rounded-xl shadow-[0_8px_30px_rgba(0,0,0,0.12)] border border-black/5 py-1 z-50">
+                        <button 
+                          onClick={() => { setStageFilter('all'); stageDropdown.setIsOpen(false); }}
+                          className={`w-full text-left px-3 py-2 text-[12px] font-semibold hover:bg-black/5 transition-colors flex items-center gap-2 ${
+                            stageFilter === 'all' ? 'text-[#007AFF]' : 'text-[#1D1D1F]'
+                          }`}
+                        >
+                          {stageFilter === 'all' && <CheckCircle2 className="w-3.5 h-3.5" />}
+                          Tüm Durumlar
+                        </button>
+                        <div className="h-px bg-black/5 my-1" />
+                        {STAGES.map(s => (
+                          <button 
+                            key={s.value}
+                            onClick={() => { setStageFilter(s.value); stageDropdown.setIsOpen(false); }}
+                            className={`w-full text-left px-3 py-2 text-[12px] font-medium hover:bg-black/5 transition-colors flex items-center gap-2 ${
+                              stageFilter === s.value ? 'font-semibold' : ''
+                            }`}
+                            style={{ color: stageFilter === s.value ? s.color : '#1D1D1F' }}
+                          >
+                            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: s.color }} />
+                            {s.label}
+                            {stageFilter === s.value && <CheckCircle2 className="w-3.5 h-3.5 ml-auto" />}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </th>
+                
                 <th className="py-3 px-4 text-xs font-semibold text-[#86868B] tracking-wider uppercase text-right">Aksiyon</th>
               </tr>
             </thead>
@@ -243,6 +390,7 @@ export default function FormsPage() {
                 const primaryPhone = allPhones[0] || form.phone_number;
                 const extraPhones = allPhones.slice(1);
                 const country = resolveCountry(primaryPhone, form.raw_data);
+                const stageInfo = getStageInfo(form.stage);
                 
                 return (
                 <tr 
@@ -313,15 +461,11 @@ export default function FormsPage() {
                     </div>
                   </td>
                   <td className="py-4 px-4 whitespace-nowrap">
-                    <span className="text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 bg-black/5 border border-black/5 rounded-md text-[#1D1D1F]">
-                      {form.stage === 'new' ? 'Yeni Lead' : 
-                       form.stage === 'contacted' ? 'İletişime Geçildi' :
-                       form.stage === 'responded' ? 'Yanıt Alındı' :
-                       form.stage === 'discovery' ? 'Keşif / Analiz' :
-                       form.stage === 'qualified' ? 'Nitelikli' :
-                       form.stage === 'appointed' ? 'Randevu Aldı' :
-                       form.stage === 'lost' ? 'Kaybedildi' : form.stage}
-                    </span>
+                    <InlineStageSelector 
+                      currentStage={form.stage} 
+                      stageInfo={stageInfo}
+                      onStageChange={(newStage) => handleStageChange(form, newStage)}
+                    />
                   </td>
                   <td className="py-4 px-4 text-right">
                     <button 
@@ -465,15 +609,16 @@ export default function FormsPage() {
                   </div>
                   <div>
                     <p className="text-xs font-semibold text-[#86868B] uppercase tracking-wider">Aşama</p>
-                    <p className="text-[14px] font-semibold text-[#1D1D1F] mt-1 capitalize">
-                      {selectedForm.stage === 'new' ? 'Yeni Lead' : 
-                       selectedForm.stage === 'contacted' ? 'İletişime Geçildi' :
-                       selectedForm.stage === 'responded' ? 'Yanıt Alındı' :
-                       selectedForm.stage === 'discovery' ? 'Keşif / Analiz' :
-                       selectedForm.stage === 'qualified' ? 'Nitelikli' :
-                       selectedForm.stage === 'appointed' ? 'Randevu Aldı' :
-                       selectedForm.stage === 'lost' ? 'Kaybedildi' : selectedForm.stage}
-                    </p>
+                    <div className="mt-1">
+                      <InlineStageSelector 
+                        currentStage={selectedForm.stage}
+                        stageInfo={getStageInfo(selectedForm.stage)}
+                        onStageChange={(newStage) => {
+                          handleStageChange(selectedForm, newStage);
+                          setSelectedForm({ ...selectedForm, stage: newStage });
+                        }}
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -567,6 +712,55 @@ export default function FormsPage() {
           </div>
           </div>
         </>
+      )}
+    </div>
+  );
+}
+
+// ─── Inline Stage Selector Component ───
+function InlineStageSelector({ currentStage, stageInfo, onStageChange }: { 
+  currentStage: string; 
+  stageInfo: { value: string; label: string; color: string };
+  onStageChange: (stage: string) => void;
+}) {
+  const dropdown = useDropdown();
+  
+  return (
+    <div ref={dropdown.ref} className="relative inline-block">
+      <button
+        onClick={(e) => { e.stopPropagation(); dropdown.setIsOpen(!dropdown.isOpen); }}
+        className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-md border transition-all hover:shadow-sm cursor-pointer"
+        style={{
+          backgroundColor: `${stageInfo.color}12`,
+          borderColor: `${stageInfo.color}25`,
+          color: stageInfo.color
+        }}
+      >
+        <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: stageInfo.color }} />
+        {stageInfo.label}
+        <ChevronDown className="w-3 h-3 opacity-60" />
+      </button>
+      
+      {dropdown.isOpen && (
+        <div 
+          className="absolute top-full left-0 mt-1 w-48 bg-white rounded-xl shadow-[0_8px_30px_rgba(0,0,0,0.12)] border border-black/5 py-1 z-50"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {STAGES.map(s => (
+            <button
+              key={s.value}
+              onClick={() => { onStageChange(s.value); dropdown.setIsOpen(false); }}
+              className={`w-full text-left px-3 py-2 text-[12px] font-medium hover:bg-black/5 transition-colors flex items-center gap-2 ${
+                currentStage === s.value ? 'font-semibold' : ''
+              }`}
+              style={{ color: currentStage === s.value ? s.color : '#1D1D1F' }}
+            >
+              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: s.color }} />
+              {s.label}
+              {currentStage === s.value && <CheckCircle2 className="w-3.5 h-3.5 ml-auto" style={{ color: s.color }} />}
+            </button>
+          ))}
+        </div>
       )}
     </div>
   );

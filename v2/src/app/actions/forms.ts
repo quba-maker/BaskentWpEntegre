@@ -8,7 +8,7 @@ import { logAudit } from "@/lib/audit";
 // QUBA AI — Forms & Leads Actions (Zero-Trust)
 // ==========================================
 
-export async function getForms(page: number = 1, search: string = "", source: string = "all") {
+export async function getForms(page: number = 1, search: string = "", source: string = "all", stageFilter: string = "all") {
   return withActionGuard(
     { actionName: 'getForms' },
     async (ctx) => {
@@ -16,54 +16,42 @@ export async function getForms(page: number = 1, search: string = "", source: st
       const offset = (page - 1) * limit;
       const searchFilter = search.trim() ? `%${search.trim()}%` : null;
       const sourceFilter = source !== "all" ? `%${source}%` : null;
+      const stageParam = stageFilter !== "all" ? stageFilter : null;
 
-      let rows;
-      
-      if (searchFilter && sourceFilter) {
-        rows = await ctx.db.executeSafe({
-          text: `SELECT l.*, c.status as conversation_status, mem.summary_text as ai_summary
-                 FROM leads l
-                 LEFT JOIN conversations c ON c.phone_number = l.phone_number AND c.tenant_id = l.tenant_id
-                 LEFT JOIN conversation_memory mem ON mem.conversation_id::text = c.id::text
-                 WHERE l.tenant_id = $1
-                   AND (l.patient_name ILIKE $2 OR l.phone_number ILIKE $2 OR l.email ILIKE $2)
-                   AND l.form_name ILIKE $3
-                 ORDER BY l.created_at DESC LIMIT $4 OFFSET $5`,
-          values: [ctx.tenantId, searchFilter, sourceFilter, limit, offset]
-        });
-      } else if (searchFilter) {
-        rows = await ctx.db.executeSafe({
-          text: `SELECT l.*, c.status as conversation_status, mem.summary_text as ai_summary
-                 FROM leads l
-                 LEFT JOIN conversations c ON c.phone_number = l.phone_number AND c.tenant_id = l.tenant_id
-                 LEFT JOIN conversation_memory mem ON mem.conversation_id::text = c.id::text
-                 WHERE l.tenant_id = $1
-                   AND (l.patient_name ILIKE $2 OR l.phone_number ILIKE $2 OR l.email ILIKE $2)
-                 ORDER BY l.created_at DESC LIMIT $3 OFFSET $4`,
-          values: [ctx.tenantId, searchFilter, limit, offset]
-        });
-      } else if (sourceFilter) {
-        rows = await ctx.db.executeSafe({
-          text: `SELECT l.*, c.status as conversation_status, mem.summary_text as ai_summary
-                 FROM leads l
-                 LEFT JOIN conversations c ON c.phone_number = l.phone_number AND c.tenant_id = l.tenant_id
-                 LEFT JOIN conversation_memory mem ON mem.conversation_id::text = c.id::text
-                 WHERE l.tenant_id = $1
-                   AND l.form_name ILIKE $2
-                 ORDER BY l.created_at DESC LIMIT $3 OFFSET $4`,
-          values: [ctx.tenantId, sourceFilter, limit, offset]
-        });
-      } else {
-        rows = await ctx.db.executeSafe({
-          text: `SELECT l.*, c.status as conversation_status, mem.summary_text as ai_summary
-                 FROM leads l
-                 LEFT JOIN conversations c ON c.phone_number = l.phone_number AND c.tenant_id = l.tenant_id
-                 LEFT JOIN conversation_memory mem ON mem.conversation_id::text = c.id::text
-                 WHERE l.tenant_id = $1
-                 ORDER BY l.created_at DESC LIMIT $2 OFFSET $3`,
-          values: [ctx.tenantId, limit, offset]
-        });
+      // Dynamic WHERE builder
+      const conditions: string[] = [`l.tenant_id = $1`];
+      const params: any[] = [ctx.tenantId];
+      let paramIdx = 2;
+
+      if (searchFilter) {
+        conditions.push(`(l.patient_name ILIKE $${paramIdx} OR l.phone_number ILIKE $${paramIdx} OR l.email ILIKE $${paramIdx})`);
+        params.push(searchFilter);
+        paramIdx++;
       }
+      if (sourceFilter) {
+        conditions.push(`l.form_name ILIKE $${paramIdx}`);
+        params.push(sourceFilter);
+        paramIdx++;
+      }
+      if (stageParam) {
+        conditions.push(`l.stage = $${paramIdx}`);
+        params.push(stageParam);
+        paramIdx++;
+      }
+
+      params.push(limit, offset);
+      const limitIdx = paramIdx;
+      const offsetIdx = paramIdx + 1;
+
+      const rows = await ctx.db.executeSafe({
+        text: `SELECT l.*, c.status as conversation_status, mem.summary_text as ai_summary
+               FROM leads l
+               LEFT JOIN conversations c ON c.phone_number = l.phone_number AND c.tenant_id = l.tenant_id
+               LEFT JOIN conversation_memory mem ON mem.conversation_id::text = c.id::text
+               WHERE ${conditions.join(' AND ')}
+               ORDER BY l.created_at DESC LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+        values: params
+      });
 
       return rows.map((r: any) => ({
         id: r.id,
@@ -162,6 +150,59 @@ export async function getCampaignNames() {
       return campaigns.map((c: any) => c.form_name);
     }
   ).then(res => res.data || []);
+}
+
+export async function updateLeadStage(id: number, stage: string) {
+  return withActionGuard(
+    { actionName: 'updateLeadStage' },
+    async (ctx) => {
+      const lead = await ctx.db.executeSafe({
+        text: `SELECT phone_number, raw_data FROM leads WHERE id = $1 AND tenant_id = $2`,
+        values: [id, ctx.tenantId]
+      });
+      if (lead.length === 0) throw new Error("Kayıt bulunamadı.");
+
+      await ctx.db.executeSafe({
+        text: `UPDATE leads SET stage = $1 WHERE id = $2 AND tenant_id = $3`,
+        values: [stage, id, ctx.tenantId]
+      });
+
+      // Sync stage to Google Sheets lead_status column
+      const SHEET_URL = process.env.GOOGLE_SHEET_UPDATE_URL || process.env.GOOGLE_SHEET_URL;
+      if (SHEET_URL && lead.length > 0) {
+        try {
+          // Map internal stage to display label for Sheets
+          const stageLabels: Record<string, string> = {
+            'new': 'Yeni Lead',
+            'contacted': 'İletişime Geçildi',
+            'responded': 'Yanıt Alındı',
+            'discovery': 'Keşif / Analiz',
+            'qualified': 'Nitelikli',
+            'appointed': 'Randevu Aldı',
+            'lost': 'Kaybedildi',
+          };
+          
+          await fetch(SHEET_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'updateStatusByPhone',
+              phone: lead[0].phone_number,
+              status: stageLabels[stage] || stage
+            })
+          });
+        } catch (sheetErr) {
+          const { logger: formsLogger } = await import("@/lib/core/logger");
+          formsLogger.withContext({ module: 'Forms' }).warn("Google Sheets status sync failed", { error: String(sheetErr) });
+        }
+      }
+
+      return { success: true };
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error };
+    return { success: true };
+  });
 }
 
 export async function syncGoogleSheets() {
