@@ -281,18 +281,63 @@ export async function syncGoogleSheets() {
       
       // ── 6. BATCH PROCESSING (fast — no per-row DB queries) ──
       
-      // 6a. Collect all rows with parsed fields
-      const PHONE_PATTERNS = ['whatsapp_number', 'whatsapp', 'wp', 'iletişim', 'telefon', 'phone', 'phone_number', 'numara', 'cep', 'cep telefonu', 'mobile', 'gsm'];
-      const NAME_PATTERNS = ['full_name', 'full name', 'name', 'isim', 'ad_soyad', 'ad soyad', 'adı', 'adınız', 'ad', 'soyad', 'hasta adı', 'patient_name', 'first_name'];
+      // 6a. Field detection patterns — ORDER MATTERS (exact first)
+      const WHATSAPP_PATTERNS = ['whatsapp_number', 'whatsapp numarası', 'whatsapp', 'wp numarası', 'wp'];
+      const PHONE_PATTERNS = ['phone_number', 'telefon', 'phone', 'numara', 'cep', 'cep telefonu', 'mobile', 'gsm', 'iletişim'];
+      const NAME_EXACT = ['full_name', 'full name', 'ad_soyad', 'ad soyad', 'hasta adı', 'patient_name'];
+      const NAME_FALLBACK = ['isim', 'adı', 'adınız', 'first_name'];
       const EMAIL_PATTERNS = ['email', 'e-posta', 'mail', 'e_posta'];
-      const FORM_PATTERNS = ['form adı', 'form name', 'form_name', 'kampanya adı', 'campaign_name', 'campaign name', 'kampanya', 'campaign', 'form'];
+      const DATE_PATTERNS = ['created_time', 'timestamp', 'tarih', 'date', 'created_at'];
+      const NOTE_PATTERNS = ['geri dönüş', 'geri_dönüş', 'notlar', 'notes', 'not', 'açıklama', 'feedback'];
+      const CAMPAIGN_PATTERNS = ['campaign_name', 'kampanya adı', 'kampanya'];
 
-      const findCol = (headers: string[], patterns: string[]) => {
+      // Safe column finder — excludes ad_id, ad_name etc for name detection
+      const findCol = (headers: string[], patterns: string[], excludePrefixes: string[] = []) => {
         for (const p of patterns) {
-          const idx = headers.findIndex((h: string) => h === p || h.includes(p));
+          const idx = headers.findIndex((h: string) => {
+            if (excludePrefixes.some(ex => h.startsWith(ex))) return false;
+            if (h.endsWith('_id') || h.endsWith(' id')) return false;
+            return h === p;
+          });
+          if (idx !== -1) return idx;
+        }
+        // Fallback: includes match
+        for (const p of patterns) {
+          const idx = headers.findIndex((h: string) => {
+            if (excludePrefixes.some(ex => h.startsWith(ex))) return false;
+            if (h.endsWith('_id') || h.endsWith(' id')) return false;
+            return h.includes(p);
+          });
           if (idx !== -1) return idx;
         }
         return -1;
+      };
+
+      // Find ALL phone columns (for multi-phone support)
+      const findAllPhoneCols = (headers: string[]) => {
+        const allPatterns = [...WHATSAPP_PATTERNS, ...PHONE_PATTERNS];
+        const found: { idx: number; isWhatsapp: boolean }[] = [];
+        const usedIdx = new Set<number>();
+
+        // WhatsApp columns first (primary)
+        for (const p of WHATSAPP_PATTERNS) {
+          headers.forEach((h, idx) => {
+            if (!usedIdx.has(idx) && (h === p || h.includes(p)) && !h.endsWith('_id')) {
+              found.push({ idx, isWhatsapp: true });
+              usedIdx.add(idx);
+            }
+          });
+        }
+        // Then phone columns
+        for (const p of PHONE_PATTERNS) {
+          headers.forEach((h, idx) => {
+            if (!usedIdx.has(idx) && (h === p || h.includes(p)) && !h.endsWith('_id')) {
+              found.push({ idx, isWhatsapp: false });
+              usedIdx.add(idx);
+            }
+          });
+        }
+        return found;
       };
 
       const normalizePhone = (raw: string): string => {
@@ -303,9 +348,12 @@ export async function syncGoogleSheets() {
 
       interface ParsedRow {
         phone: string;
+        allPhones: string[];
         name: string | null;
         email: string | null;
         formName: string;
+        notes: string | null;
+        createdTime: string | null;
         rawData: string;
         tabName: string;
       }
@@ -319,48 +367,70 @@ export async function syncGoogleSheets() {
         if (values.length <= 1) continue;
 
         const headers = values[0].map((h: string) => String(h).toLowerCase().trim());
-        const phoneIdx = findCol(headers, PHONE_PATTERNS);
 
-        if (phoneIdx === -1) {
+        // Phone detection (all columns)
+        const phoneCols = findAllPhoneCols(headers);
+        if (phoneCols.length === 0) {
           console.log(`[SYNC_SKIP_TAB] ${tabName}: No phone column`);
           continue;
         }
 
-        const nameIdx = findCol(headers.filter((_: string, i: number) => {
-          const h = headers[i];
-          return !h.endsWith('id') && !h.endsWith('_id');
-        }), NAME_PATTERNS);
+        // Name: exact match first (full_name), then fallback — EXCLUDE ad_name, adset_name
+        let nameIdx = findCol(headers, NAME_EXACT, ['ad_', 'adset_']);
+        if (nameIdx === -1) nameIdx = findCol(headers, NAME_FALLBACK, ['ad_', 'adset_']);
+
         const emailIdx = findCol(headers, EMAIL_PATTERNS);
-        const formIdx = findCol(headers.filter((_: string, i: number) => {
-          const h = headers[i];
-          return !h.endsWith('id') && !h.endsWith('_id');
-        }), FORM_PATTERNS);
+        const dateIdx = findCol(headers, DATE_PATTERNS);
+        const noteIdx = findCol(headers, NOTE_PATTERNS);
+        const campaignIdx = findCol(headers, CAMPAIGN_PATTERNS, ['campaign_id']);
 
-        // Re-find on original headers (the filter above broke indices)
-        const realNameIdx = headers.findIndex((h: string) => !h.endsWith('id') && !h.endsWith('_id') && NAME_PATTERNS.some(p => h === p || h.includes(p)));
-        const realEmailIdx = headers.findIndex((h: string) => EMAIL_PATTERNS.some(p => h === p || h.includes(p)));
-        const realFormIdx = headers.findIndex((h: string) => !h.endsWith('id') && !h.endsWith('_id') && FORM_PATTERNS.some(p => h === p || h.includes(p)));
-
-        console.log(`[SYNC_TAB] ${tabName}: ${values.length - 1} rows`);
+        console.log(`[SYNC_TAB] ${tabName}: ${values.length - 1} rows | name=${nameIdx >= 0 ? headers[nameIdx] : 'NONE'} phoneCols=${phoneCols.length}`);
 
         for (let r = 1; r < values.length; r++) {
           const row = values[r];
-          const rawPhone = row[phoneIdx];
-          if (!rawPhone) continue;
 
-          const phone = normalizePhone(rawPhone);
-          if (phone.length < 10) continue;
+          // Extract ALL phone numbers from all phone columns
+          const allPhones: string[] = [];
+          let primaryPhone = '';
 
-          const name = realNameIdx !== -1 && row[realNameIdx] ? String(row[realNameIdx]).substring(0, 100) : null;
-          const email = realEmailIdx !== -1 && row[realEmailIdx] ? String(row[realEmailIdx]).substring(0, 200) : null;
-          const formName = realFormIdx !== -1 && row[realFormIdx] ? String(row[realFormIdx]).substring(0, 200) : tabName;
+          for (const pc of phoneCols) {
+            const raw = row[pc.idx];
+            if (!raw) continue;
+            const normalized = normalizePhone(raw);
+            if (normalized.length >= 10 && !allPhones.includes(normalized)) {
+              allPhones.push(normalized);
+              if (!primaryPhone || pc.isWhatsapp) primaryPhone = normalized;
+            }
+          }
 
+          if (!primaryPhone && allPhones.length > 0) primaryPhone = allPhones[0];
+          if (!primaryPhone) continue;
+
+          const name = nameIdx !== -1 && row[nameIdx] ? String(row[nameIdx]).substring(0, 100) : null;
+          const email = emailIdx !== -1 && row[emailIdx] ? String(row[emailIdx]).substring(0, 200) : null;
+          const createdTime = dateIdx !== -1 && row[dateIdx] ? String(row[dateIdx]) : null;
+          const noteVal = noteIdx !== -1 && row[noteIdx] ? String(row[noteIdx]).substring(0, 5000) : null;
+          const campaignName = campaignIdx !== -1 && row[campaignIdx] ? String(row[campaignIdx]).substring(0, 200) : tabName;
+
+          // Build raw_data preserving original header names
           const rawData: Record<string, string> = {};
-          headers.forEach((h: string, idx: number) => { rawData[h] = row[idx] || ''; });
+          const origHeaders = values[0];
+          origHeaders.forEach((h: string, idx: number) => { rawData[String(h).trim()] = row[idx] || ''; });
           rawData['_sheet_name'] = tabName;
           rawData['_source'] = 'manual_sync';
+          rawData['_all_phones'] = JSON.stringify(allPhones);
 
-          allRows.push({ phone, name, email, formName, rawData: JSON.stringify(rawData), tabName });
+          allRows.push({
+            phone: primaryPhone,
+            allPhones,
+            name,
+            email,
+            formName: campaignName,
+            notes: noteVal,
+            createdTime,
+            rawData: JSON.stringify(rawData),
+            tabName
+          });
         }
       }
 
@@ -399,6 +469,15 @@ export async function syncGoogleSheets() {
       // 6d. Batch INSERT in chunks of 50
       let created = 0;
       const CHUNK_SIZE = 50;
+
+      const parseCreatedTime = (raw: string | null): string => {
+        if (!raw) return new Date().toISOString();
+        try {
+          const d = new Date(raw);
+          if (!isNaN(d.getTime())) return d.toISOString();
+        } catch (_) {}
+        return new Date().toISOString();
+      };
       
       for (let c = 0; c < newRows.length; c += CHUNK_SIZE) {
         const chunk = newRows.slice(c, c + CHUNK_SIZE);
@@ -409,14 +488,18 @@ export async function syncGoogleSheets() {
         let paramIdx = 1;
 
         for (const row of chunk) {
-          valueParts.push(`($${paramIdx}, $${paramIdx+1}, $${paramIdx+2}, $${paramIdx+3}, $${paramIdx+4}, $${paramIdx+5}, 'new', NOW())`);
-          params.push(ctx.tenantId, row.phone, row.name, row.email, row.formName, row.rawData);
-          paramIdx += 6;
+          valueParts.push(`($${paramIdx}, $${paramIdx+1}, $${paramIdx+2}, $${paramIdx+3}, $${paramIdx+4}, $${paramIdx+5}, 'new', $${paramIdx+6}, $${paramIdx+7})`);
+          params.push(
+            ctx.tenantId, row.phone, row.name, row.email, row.formName, row.rawData,
+            parseCreatedTime(row.createdTime),
+            row.notes || null
+          );
+          paramIdx += 8;
         }
 
         try {
           await ctx.db.executeSafe({
-            text: `INSERT INTO leads (tenant_id, phone_number, patient_name, email, form_name, raw_data, stage, created_at)
+            text: `INSERT INTO leads (tenant_id, phone_number, patient_name, email, form_name, raw_data, stage, created_at, notes)
                    VALUES ${valueParts.join(', ')}
                    ON CONFLICT DO NOTHING`,
             values: params

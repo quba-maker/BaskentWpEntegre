@@ -10,13 +10,57 @@ import { useRouter, useParams } from "next/navigation";
 const formatDate = (dateString: string) => {
   if (!dateString) return "";
   const d = new Date(dateString);
-  return d.toLocaleDateString("tr-TR", { day: "numeric", month: "short", year: "numeric" });
+  if (isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("tr-TR", { day: "numeric", month: "short", year: "numeric", timeZone: "Europe/Istanbul" });
 };
 
 const formatTime = (dateString: string) => {
   if (!dateString) return "";
   const d = new Date(dateString);
-  return d.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" });
+  if (isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Istanbul" });
+};
+
+// Get best display name: raw_data.full_name > patient_name
+const getDisplayName = (form: any): string => {
+  const rd = form.raw_data || {};
+  const fullName = rd.full_name || rd['full name'] || rd['Full Name'] || rd['full_name'];
+  if (fullName && fullName.trim()) return fullName.trim();
+  return form.patient_name || 'İsimsiz';
+};
+
+// Get best date: raw_data.created_time > created_at
+const getBestDate = (form: any): string => {
+  const rd = form.raw_data || {};
+  const ct = rd.created_time || rd.Created_Time || rd.timestamp;
+  if (ct) {
+    const d = new Date(ct);
+    if (!isNaN(d.getTime())) return d.toISOString();
+  }
+  return form.created_at || '';
+};
+
+// Get all phone numbers from raw_data
+const getAllPhones = (form: any): string[] => {
+  const rd = form.raw_data || {};
+  try {
+    if (rd._all_phones) {
+      const parsed = typeof rd._all_phones === 'string' ? JSON.parse(rd._all_phones) : rd._all_phones;
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (_) {}
+  return [form.phone_number].filter(Boolean);
+};
+
+// Format phone display
+const formatPhone = (phone: string): string => {
+  if (!phone) return '';
+  const clean = phone.replace(/[^0-9]/g, '');
+  if (clean.startsWith('90') && clean.length >= 12) {
+    return `+${clean.slice(0,2)} ${clean.slice(2,5)} ${clean.slice(5,8)} ${clean.slice(8,10)} ${clean.slice(10)}`;
+  }
+  if (clean.length >= 10) return `+${clean}`;
+  return clean;
 };
 
 export default function FormsPage() {
@@ -204,7 +248,14 @@ export default function FormsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-black/5">
-              {forms.map((form: any) => (
+              {forms.map((form: any) => {
+                const displayName = getDisplayName(form);
+                const bestDate = getBestDate(form);
+                const allPhones = getAllPhones(form);
+                const primaryPhone = allPhones[0] || form.phone_number;
+                const extraPhones = allPhones.slice(1);
+                
+                return (
                 <tr 
                   key={form.id} 
                   onClick={() => {
@@ -215,16 +266,16 @@ export default function FormsPage() {
                 >
                   <td className="py-4 px-4 whitespace-nowrap">
                     <div className="text-[13px] font-semibold text-[#1D1D1F]">
-                      {formatDate(form.created_at)}
+                      {formatDate(bestDate)}
                     </div>
                     <div className="text-[11px] font-medium text-[#86868B] mt-0.5">
-                      {formatTime(form.created_at)}
+                      {formatTime(bestDate)}
                     </div>
                   </td>
                   <td className="py-4 px-4 min-w-[200px] max-w-[240px] whitespace-normal align-middle">
                     <div className="font-bold text-[14px] text-[#1D1D1F] flex flex-wrap items-center gap-2 leading-snug">
                       <span className="break-words whitespace-pre-wrap max-w-full">
-                        {form.patient_name}
+                        {displayName}
                         {getFlag(form) && (
                           <span className="ml-1.5 text-[12px] opacity-90 inline-block align-middle">{getFlag(form)}</span>
                         )}
@@ -240,7 +291,21 @@ export default function FormsPage() {
                         </span>
                       )}
                     </div>
-                    <div className="text-[12px] font-medium text-[#86868B] mt-1">{form.phone_number}</div>
+                    <div className="flex items-center gap-1.5 mt-1">
+                      <span className="text-[12px] font-medium text-[#86868B]">{formatPhone(primaryPhone)}</span>
+                      {extraPhones.length > 0 && (
+                        <span 
+                          className="text-[10px] font-bold text-[#007AFF] bg-[#007AFF]/10 px-1.5 py-0.5 rounded cursor-pointer hover:bg-[#007AFF]/20 transition-colors"
+                          title={extraPhones.map(formatPhone).join(', ')}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            alert(`Diğer numaralar:\n${extraPhones.map(formatPhone).join('\n')}`);
+                          }}
+                        >
+                          +{extraPhones.length} numara
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="py-4 px-4">
                     <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white border border-black/5 shadow-sm">
@@ -277,7 +342,8 @@ export default function FormsPage() {
                     </button>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
               
               {forms.length === 0 && !isLoading && (
                 <tr>
@@ -320,10 +386,10 @@ export default function FormsPage() {
               <div className="px-6 py-5 bg-white border-b border-black/5 flex items-center justify-between shrink-0 rounded-t-[28px]">
                 <div className="pr-4 w-full">
                   <h2 className="text-xl font-bold text-[#1D1D1F] flex flex-wrap items-center gap-2 leading-snug">
-                    <span className="break-words whitespace-pre-wrap max-w-full">{selectedForm.patient_name}</span>
+                    <span className="break-words whitespace-pre-wrap max-w-full">{getDisplayName(selectedForm)}</span>
                     {getFlag(selectedForm) && <span className="text-lg shrink-0">{getFlag(selectedForm)}</span>}
                   </h2>
-                  <p className="text-[#86868B] text-sm font-medium mt-1 break-words">{selectedForm.phone_number}</p>
+                  <p className="text-[#86868B] text-sm font-medium mt-1 break-words">{formatPhone(selectedForm.phone_number)}</p>
                 </div>
                 <button 
                   onClick={() => setSelectedForm(null)}
@@ -349,12 +415,12 @@ export default function FormsPage() {
               <div className="bg-white rounded-2xl p-5 border border-black/5 shadow-sm space-y-4">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-full bg-black/5 flex flex-col items-center justify-center font-bold text-[#1D1D1F] text-xs">
-                    {selectedForm.patient_name ? selectedForm.patient_name.charAt(0).toUpperCase() : '?'}
+                    {getDisplayName(selectedForm).charAt(0).toUpperCase()}
                   </div>
                   <div className="w-full pr-2">
                     <div className="flex items-center gap-2 flex-wrap leading-snug">
                       <p className="text-sm font-bold text-[#1D1D1F] break-words whitespace-pre-wrap max-w-full">
-                        {selectedForm.patient_name || "İsimsiz"}
+                        {getDisplayName(selectedForm)}
                         <span className="ml-2 text-lg inline-block" title={selectedForm.country}>{getFlag(selectedForm)}</span>
                       </p>
                       {selectedForm.isBotActive && (
@@ -368,14 +434,29 @@ export default function FormsPage() {
                         </span>
                       )}
                     </div>
-                    <p className="text-xs text-[#86868B] font-medium mt-1 break-words">{selectedForm.phone_number}</p>
+                    {/* Multi-phone display */}
+                    {(() => {
+                      const phones = getAllPhones(selectedForm);
+                      return (
+                        <div className="mt-1.5 space-y-1">
+                          {phones.map((ph: string, idx: number) => (
+                            <p key={idx} className="text-xs text-[#86868B] font-medium break-words flex items-center gap-1.5">
+                              <span className={`w-1.5 h-1.5 rounded-full ${idx === 0 ? 'bg-[#25D366]' : 'bg-[#86868B]'}`} />
+                              {formatPhone(ph)}
+                              {idx === 0 && <span className="text-[10px] text-[#25D366] font-semibold">(Birincil)</span>}
+                            </p>
+                          ))}
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
                 
                 <div className="grid grid-cols-2 gap-4 pt-4 border-t border-black/5">
                   <div>
                     <p className="text-xs font-semibold text-[#86868B] uppercase tracking-wider">Tarih</p>
-                    <p className="text-[14px] font-semibold text-[#1D1D1F] mt-1">{formatDate(selectedForm.created_at)}</p>
+                    <p className="text-[14px] font-semibold text-[#1D1D1F] mt-1">{formatDate(getBestDate(selectedForm))}</p>
+                    <p className="text-[12px] text-[#86868B] font-medium">{formatTime(getBestDate(selectedForm))}</p>
                   </div>
                   <div>
                     <p className="text-xs font-semibold text-[#86868B] uppercase tracking-wider">Aşama</p>
