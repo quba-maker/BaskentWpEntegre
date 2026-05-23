@@ -407,6 +407,7 @@ export default function FormsPage() {
                   </div>
                 </th>
                 
+                <th className="py-3 px-4 text-xs font-semibold text-[#86868B] tracking-wider uppercase">Geri Dönüş</th>
                 <th className="py-3 px-4 text-xs font-semibold text-[#86868B] tracking-wider uppercase text-right">Aksiyon</th>
               </tr>
             </thead>
@@ -495,6 +496,15 @@ export default function FormsPage() {
                       onStageChange={(newStage) => handleStageChange(form, newStage)}
                     />
                   </td>
+                  <td className="py-4 px-4">
+                    {form.notes && form.notes.trim() !== '' ? (
+                      <span className="text-[12px] text-[#1D1D1F] font-medium line-clamp-2 max-w-[200px]" title={form.notes}>
+                        {form.notes.length > 60 ? form.notes.substring(0, 60) + '…' : form.notes}
+                      </span>
+                    ) : (
+                      <span className="text-[11px] text-[#C7C7CC] italic">—</span>
+                    )}
+                  </td>
                   <td className="py-4 px-4 text-right">
                     <button 
                       onClick={(e) => handleMessageClick(form, e)}
@@ -510,7 +520,7 @@ export default function FormsPage() {
               
               {forms.length === 0 && !isLoading && (
                 <tr>
-                  <td colSpan={5} className="py-12 text-center text-[#86868B] font-medium">
+                  <td colSpan={6} className="py-12 text-center text-[#86868B] font-medium">
                     Henüz kayıt bulunmuyor.
                   </td>
                 </tr>
