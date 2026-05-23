@@ -107,8 +107,20 @@ export default function FormsPage() {
           {/* Sync Button & Progress */}
           <div className="relative flex items-center">
             {isSyncing ? (
-              <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 text-blue-600 rounded-xl border border-blue-100 text-sm font-medium">
-                <RefreshCw className="w-4 h-4 animate-spin" />
+              <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-sm font-medium ${
+                syncProgress.status === 'error' 
+                  ? 'bg-rose-50 text-rose-600 border-rose-200' 
+                  : syncProgress.status === 'completed'
+                  ? 'bg-emerald-50 text-emerald-600 border-emerald-200'
+                  : 'bg-blue-50 text-blue-600 border-blue-100'
+              }`}>
+                {syncProgress.status === 'error' ? (
+                  <X className="w-4 h-4" />
+                ) : syncProgress.status === 'completed' ? (
+                  <CheckCircle2 className="w-4 h-4" />
+                ) : (
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                )}
                 <span className="min-w-[120px]">{syncProgress.message || 'Senkronize ediliyor...'} {syncProgress.progress > 0 && `${syncProgress.progress}%`}</span>
               </div>
             ) : (
@@ -118,6 +130,7 @@ export default function FormsPage() {
                     setIsSyncing(true);
                     setSyncProgress({ status: 'starting', progress: 0, message: 'İşlem başlatılıyor...' });
                     const res = await syncGoogleSheets();
+                    console.log('[SYNC] Response:', JSON.stringify(res));
                     if (res.success && res.correlationId) {
                       // Start SSE listening
                       const eventSource = new EventSource(`/api/sse/sync-progress?tenantId=${encodeURIComponent(tenantId)}&correlationId=${encodeURIComponent(res.correlationId)}`);
@@ -138,15 +151,19 @@ export default function FormsPage() {
                       };
                       eventSource.onerror = () => {
                         eventSource.close();
-                        setIsSyncing(false);
+                        setSyncProgress({ status: 'error', progress: 0, message: 'Bağlantı kesildi. Tekrar deneyin.' });
+                        setTimeout(() => setIsSyncing(false), 3000);
                       };
                     } else {
-                      setIsSyncing(false);
-                      alert(res.error || "Beklenmeyen bir hata oluştu.");
+                      const errMsg = res.error || "Senkronizasyon başlatılamadı.";
+                      console.error('[SYNC] Error:', errMsg);
+                      setSyncProgress({ status: 'error', progress: 0, message: errMsg });
+                      setTimeout(() => setIsSyncing(false), 4000);
                     }
-                  } catch (e) {
-                    setIsSyncing(false);
-                    alert("Senkronizasyon başlatılamadı.");
+                  } catch (e: any) {
+                    console.error('[SYNC] Exception:', e);
+                    setSyncProgress({ status: 'error', progress: 0, message: e?.message || 'Senkronizasyon başlatılamadı.' });
+                    setTimeout(() => setIsSyncing(false), 4000);
                   }
                 }}
                 className="flex items-center gap-2 px-4 py-2.5 bg-white/60 backdrop-blur-md border border-white/60 hover:bg-white text-sm font-semibold text-[#1D1D1F] rounded-xl shadow-[0_2px_10px_rgba(0,0,0,0.02)] transition-all cursor-pointer"

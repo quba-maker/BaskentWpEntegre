@@ -150,16 +150,21 @@ export function GoogleSheetsWizard({ isOpen, onClose, onComplete }: { isOpen: bo
       });
       
       if (!res.success) {
-        setSaveError(res.error || 'Kayıt hatası');
+        setSaveError(res.error || 'Google Sheets yapılandırması kaydedilemedi');
         setSaving(false);
         return;
       }
       
       setSaveSuccess(true);
       setSaving(false);
+      
+      // Auto-close wizard after success feedback (1.5s)
+      setTimeout(() => {
+        onComplete();
+      }, 1500);
     } catch (err) {
       console.error('[GSW] Save error:', err);
-      setSaveError('Kayıt sırasında bir hata oluştu');
+      setSaveError('Google Sheets yapılandırması kaydedilemedi. Lütfen tekrar deneyin.');
       setSaving(false);
     }
   }
