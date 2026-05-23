@@ -446,20 +446,25 @@ export async function connectWhatsAppChannel(input: {
       });
       if (existing.length > 0) throw new Error('Bu WhatsApp numarası zaten ekli');
 
-      // Insert channel
+      // Insert channel (tenant_id validated via group_id ownership)
       const ch = await ctx.db.executeSafe({
         text: `INSERT INTO channels (group_id, provider, identifier, name, status) 
-               VALUES ($1, 'whatsapp', $2, $3, 'active') RETURNING id`,
-        values: [botGroupId, phoneNumberId, name]
+               SELECT $1, 'whatsapp', $2, $3, 'active' 
+               FROM channel_groups WHERE id = $1 AND tenant_id = $4
+               RETURNING id`,
+        values: [botGroupId, phoneNumberId, name, ctx.tenantId]
       });
+      if (ch.length === 0) throw new Error('Channel insert failed — tenant_id mismatch');
       const channelId = ch[0].id;
 
-      // Insert credentials (encrypted)
+      // Insert credentials (tenant_id bound via channel → group)
       const encrypted = encryptPayload({ accessToken, wabaId: wabaId || '', phoneNumberId }, 'whatsapp');
       await ctx.db.executeSafe({
         text: `INSERT INTO channel_integrations (channel_id, provider, credentials_encrypted, health_status)
-               VALUES ($1, 'whatsapp', $2, 'pending')`,
-        values: [channelId, JSON.stringify(encrypted)]
+               SELECT $1, 'whatsapp', $2, 'pending'
+               FROM channels c JOIN channel_groups cg ON c.group_id = cg.id
+               WHERE c.id = $1 AND cg.tenant_id = $3`,
+        values: [channelId, JSON.stringify(encrypted), ctx.tenantId]
       });
 
       // Create prompt binding to bot's active prompt
@@ -469,8 +474,11 @@ export async function connectWhatsAppChannel(input: {
       });
       if (prompt.length > 0) {
         await ctx.db.executeSafe({
-          text: `INSERT INTO channel_prompt_bindings (channel_id, prompt_id, is_active, priority) VALUES ($1, $2, true, 100)`,
-          values: [channelId, prompt[0].id]
+          text: `INSERT INTO channel_prompt_bindings (channel_id, prompt_id, is_active, priority) 
+                 SELECT $1, $2, true, 100
+                 FROM channels c JOIN channel_groups cg ON c.group_id = cg.id
+                 WHERE c.id = $1 AND cg.tenant_id = $3`,
+          values: [channelId, prompt[0].id, ctx.tenantId]
         });
       }
 
@@ -505,16 +513,21 @@ export async function connectInstagramChannel(input: {
       // Use meta_instagram as DB provider (alias system handles runtime)
       const ch = await ctx.db.executeSafe({
         text: `INSERT INTO channels (group_id, provider, identifier, name, status)
-               VALUES ($1, 'meta_instagram', $2, $3, 'active') RETURNING id`,
-        values: [botGroupId, instagramBusinessAccountId, name]
+               SELECT $1, 'meta_instagram', $2, $3, 'active'
+               FROM channel_groups WHERE id = $1 AND tenant_id = $4
+               RETURNING id`,
+        values: [botGroupId, instagramBusinessAccountId, name, ctx.tenantId]
       });
+      if (ch.length === 0) throw new Error('Channel insert failed — tenant_id mismatch');
       const channelId = ch[0].id;
 
       const encrypted = encryptPayload({ accessToken, instagramBusinessAccountId }, 'instagram');
       await ctx.db.executeSafe({
         text: `INSERT INTO channel_integrations (channel_id, provider, credentials_encrypted, health_status)
-               VALUES ($1, 'meta_instagram', $2, 'pending')`,
-        values: [channelId, JSON.stringify(encrypted)]
+               SELECT $1, 'meta_instagram', $2, 'pending'
+               FROM channels c JOIN channel_groups cg ON c.group_id = cg.id
+               WHERE c.id = $1 AND cg.tenant_id = $3`,
+        values: [channelId, JSON.stringify(encrypted), ctx.tenantId]
       });
 
       const prompt = await ctx.db.executeSafe({
@@ -523,8 +536,11 @@ export async function connectInstagramChannel(input: {
       });
       if (prompt.length > 0) {
         await ctx.db.executeSafe({
-          text: `INSERT INTO channel_prompt_bindings (channel_id, prompt_id, is_active, priority) VALUES ($1, $2, true, 100)`,
-          values: [channelId, prompt[0].id]
+          text: `INSERT INTO channel_prompt_bindings (channel_id, prompt_id, is_active, priority)
+                 SELECT $1, $2, true, 100
+                 FROM channels c JOIN channel_groups cg ON c.group_id = cg.id
+                 WHERE c.id = $1 AND cg.tenant_id = $3`,
+          values: [channelId, prompt[0].id, ctx.tenantId]
         });
       }
 
@@ -562,16 +578,21 @@ export async function connectMessengerPage(input: {
 
       const ch = await ctx.db.executeSafe({
         text: `INSERT INTO channels (group_id, provider, identifier, name, status)
-               VALUES ($1, 'messenger', $2, $3, 'active') RETURNING id`,
-        values: [botGroupId, pageId, name]
+               SELECT $1, 'messenger', $2, $3, 'active'
+               FROM channel_groups WHERE id = $1 AND tenant_id = $4
+               RETURNING id`,
+        values: [botGroupId, pageId, name, ctx.tenantId]
       });
+      if (ch.length === 0) throw new Error('Channel insert failed — tenant_id mismatch');
       const channelId = ch[0].id;
 
       const encrypted = encryptPayload({ pageAccessToken, pageId }, 'messenger');
       await ctx.db.executeSafe({
         text: `INSERT INTO channel_integrations (channel_id, provider, credentials_encrypted, health_status)
-               VALUES ($1, 'messenger', $2, 'pending')`,
-        values: [channelId, JSON.stringify(encrypted)]
+               SELECT $1, 'messenger', $2, 'pending'
+               FROM channels c JOIN channel_groups cg ON c.group_id = cg.id
+               WHERE c.id = $1 AND cg.tenant_id = $3`,
+        values: [channelId, JSON.stringify(encrypted), ctx.tenantId]
       });
 
       const prompt = await ctx.db.executeSafe({
@@ -580,8 +601,11 @@ export async function connectMessengerPage(input: {
       });
       if (prompt.length > 0) {
         await ctx.db.executeSafe({
-          text: `INSERT INTO channel_prompt_bindings (channel_id, prompt_id, is_active, priority) VALUES ($1, $2, true, 100)`,
-          values: [channelId, prompt[0].id]
+          text: `INSERT INTO channel_prompt_bindings (channel_id, prompt_id, is_active, priority)
+                 SELECT $1, $2, true, 100
+                 FROM channels c JOIN channel_groups cg ON c.group_id = cg.id
+                 WHERE c.id = $1 AND cg.tenant_id = $3`,
+          values: [channelId, prompt[0].id, ctx.tenantId]
         });
       }
 

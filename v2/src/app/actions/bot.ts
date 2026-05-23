@@ -820,11 +820,12 @@ export async function createBot(input: {
         values: [groupId, ctx.tenantId, pName, promptText || '']
       });
 
-      // 3. Create channel_ai_profile with defaults
+      // 3. Create channel_ai_profile with defaults (tenant_id validated via group)
       await ctx.db.executeSafe({
         text: `INSERT INTO channel_ai_profiles (group_id, ai_model, max_messages, max_response_tokens, aggression_level, auto_greeting, greeting_language, follow_up_enabled)
-               VALUES ($1, 'gemini-2.5-flash', 8, 1000, 'medium', true, 'auto', true)`,
-        values: [groupId]
+               SELECT $1, 'gemini-2.5-flash', 8, 1000, 'medium', true, 'auto', true
+               FROM channel_groups WHERE id = $1 AND tenant_id = $2`,
+        values: [groupId, ctx.tenantId]
       });
 
       await logAudit(ctx.tenantId, ctx.userId || 'system', 'bot.created', { botId: groupId, displayName });
@@ -880,9 +881,10 @@ export async function updateBot(
         if (updates.icon) { setClauses.push(`icon = $${idx}`); vals.push(updates.icon); idx++; }
         if (updates.color) { setClauses.push(`color = $${idx}`); vals.push(updates.color); idx++; }
         setClauses.push(`updated_at = NOW()`);
+        vals.push(ctx.tenantId);
         vals.push(botId);
         await ctx.db.executeSafe({
-          text: `UPDATE channel_groups SET ${setClauses.join(', ')} WHERE id = $${idx}`,
+          text: `UPDATE channel_groups SET ${setClauses.join(', ')} WHERE id = $${idx + 1} AND tenant_id = $${idx}`,
           values: vals
         });
       }
@@ -918,9 +920,10 @@ export async function updateBot(
 
       if (profileFields.length > 0) {
         profileFields.push(`updated_at = NOW()`);
+        profileVals.push(ctx.tenantId);
         profileVals.push(botId);
         await ctx.db.executeSafe({
-          text: `UPDATE channel_ai_profiles SET ${profileFields.join(', ')} WHERE group_id = $${pIdx}`,
+          text: `UPDATE channel_ai_profiles SET ${profileFields.join(', ')} WHERE group_id = $${pIdx + 1} AND group_id IN (SELECT id FROM channel_groups WHERE tenant_id = $${pIdx})`,
           values: profileVals
         });
       }
@@ -1010,14 +1013,18 @@ export async function assignChannelToBot(
 
       // 3. Move channel to new group
       await ctx.db.executeSafe({
-        text: `UPDATE channels SET group_id = $1, updated_at = NOW() WHERE id = $2`,
-        values: [targetBotId, channelId]
+        text: `UPDATE channels SET group_id = $1, updated_at = NOW() 
+               WHERE id = $2 AND group_id IN (SELECT id FROM channel_groups WHERE tenant_id = $3)`,
+        values: [targetBotId, channelId, ctx.tenantId]
       });
 
       // 4. Deactivate old prompt bindings
       await ctx.db.executeSafe({
-        text: `UPDATE channel_prompt_bindings SET is_active = false WHERE channel_id = $1`,
-        values: [channelId]
+        text: `UPDATE channel_prompt_bindings SET is_active = false 
+               WHERE channel_id = $1 AND channel_id IN (
+                 SELECT c.id FROM channels c JOIN channel_groups cg ON c.group_id = cg.id WHERE cg.tenant_id = $2
+               )`,
+        values: [channelId, ctx.tenantId]
       });
 
       // 5. Create new binding to target bot's active system prompt
@@ -1031,9 +1038,11 @@ export async function assignChannelToBot(
       if (targetPrompt.length > 0) {
         await ctx.db.executeSafe({
           text: `INSERT INTO channel_prompt_bindings (channel_id, prompt_id, is_active, priority)
-                 VALUES ($1, $2, true, 100)
+                 SELECT $1, $2, true, 100
+                 FROM channels c JOIN channel_groups cg ON c.group_id = cg.id
+                 WHERE c.id = $1 AND cg.tenant_id = $3
                  ON CONFLICT DO NOTHING`,
-          values: [channelId, targetPrompt[0].id]
+          values: [channelId, targetPrompt[0].id, ctx.tenantId]
         });
       }
 
