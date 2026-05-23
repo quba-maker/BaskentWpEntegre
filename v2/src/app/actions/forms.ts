@@ -165,10 +165,8 @@ export async function getCampaignNames() {
 }
 
 export async function syncGoogleSheets() {
-  console.log('[DEBUG] syncGoogleSheets reached probe');
-  return { success: true, message: "Probe active" };
+  console.log('[SYNC_ACTION_ENTRY] syncGoogleSheets called');
   
-  /*
   return withActionGuard(
     { actionName: 'syncGoogleSheets', roles: ['owner', 'admin'] },
     async (ctx) => {
@@ -180,15 +178,19 @@ export async function syncGoogleSheets() {
       });
 
       if (integrations.length === 0) {
-        return { success: false, error: "Google Sheets entegrasyonu bulunamadı." };
+        console.log('[SYNC_NO_INTEGRATION]');
+        return { success: false, error: "Google Sheets entegrasyonu bulunamadı. Lütfen ayarlardan kurulum yapın." };
       }
+
+      console.log('[SYNC_INTEGRATION_FOUND]');
 
       let payload;
       try {
         const { decryptPayload } = await import('@/lib/core/encryption');
         payload = decryptPayload(integrations[0].credentials);
       } catch (e: any) {
-        return { success: false, error: `Kimlik bilgileri çözülemedi.` };
+        console.error('[SYNC_DECRYPT_ERROR]', e?.message);
+        return { success: false, error: `Kimlik bilgileri çözülemedi: ${e?.message}` };
       }
 
       const SHEETS_API_KEY = payload.apiKey;
@@ -196,13 +198,22 @@ export async function syncGoogleSheets() {
       const activeSheets = payload.activeSheets || [];
 
       if (!SHEETS_API_KEY || !SPREADSHEET_ID) {
+        console.log('[SYNC_MISSING_CONFIG]', { hasApiKey: !!SHEETS_API_KEY, hasSpreadsheetId: !!SPREADSHEET_ID });
         return { success: false, error: "Google Sheets API Key veya Spreadsheet ID eksik." };
       }
 
+      console.log('[SYNC_CONFIG_OK] spreadsheetId:', SPREADSHEET_ID, 'activeSheets:', activeSheets.length);
+
+      // Fetch spreadsheet metadata
       const BASE_URL = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}`;
       
+      console.log('[SYNC_FETCHING_META]');
       const metaResp = await fetch(`${BASE_URL}?key=${SHEETS_API_KEY}&fields=sheets.properties`);
-      if (!metaResp.ok) return { success: false, error: "Metadata alınamadı." };
+      if (!metaResp.ok) {
+        const errorText = await metaResp.text();
+        console.error('[SYNC_META_ERROR]', metaResp.status, errorText.slice(0, 300));
+        return { success: false, error: `Google Sheets API hatası (${metaResp.status}): Metadata alınamadı.` };
+      }
 
       const metaData = await metaResp.json();
       let tabs = metaData.sheets
@@ -214,20 +225,31 @@ export async function syncGoogleSheets() {
       }
 
       if (tabs.length === 0) {
+        console.log('[SYNC_NO_TABS]');
         return { success: true, message: "Senkronize edilecek sekme bulunamadı.", newLeads: 0 };
       }
 
+      console.log('[SYNC_TABS]', tabs);
+
+      // Fetch all rows
       const rangeParams = tabs.map((t: string) => `ranges=${encodeURIComponent(t)}`).join('&');
       const batchUrl = `${BASE_URL}/values:batchGet?key=${SHEETS_API_KEY}&${rangeParams}&valueRenderOption=FORMATTED_VALUE`;
       
+      console.log('[SYNC_FETCHING_ROWS]');
       const batchResp = await fetch(batchUrl);
-      if (!batchResp.ok) return { success: false, error: "Satır verileri alınamadı." };
+      if (!batchResp.ok) {
+        const errorText = await batchResp.text();
+        console.error('[SYNC_BATCH_ERROR]', batchResp.status, errorText.slice(0, 300));
+        return { success: false, error: `Satır verileri alınamadı (${batchResp.status}).` };
+      }
 
       const batchData = await batchResp.json();
       let newLeadsCount = 0;
       let duplicatesSkipped = 0;
       let totalRows = 0;
 
+      console.log('[SYNC_PROCESSING] valueRanges:', batchData.valueRanges?.length);
+      
       for (let i = 0; i < batchData.valueRanges.length; i++) {
         const vr = batchData.valueRanges[i];
         const tabName = tabs[i];
@@ -242,7 +264,12 @@ export async function syncGoogleSheets() {
         const emailIdx = headers.findIndex((h: string) => h.includes('mail') || h.includes('e-posta'));
         const formNameIdx = headers.findIndex((h: string) => !h.endsWith('id') && !h.endsWith('_id') && !h.includes(' id') && (h.includes('form adı') || h.includes('form name') || h.includes('form_name') || h.includes('kampanya adı') || h.includes('campaign_name') || h.includes('campaign name') || h === 'kampanya' || h === 'campaign' || h === 'form'));
 
-        if (phoneIdx === -1) continue;
+        if (phoneIdx === -1) {
+          console.log(`[SYNC_SKIP_TAB] ${tabName}: No phone column. headers:`, headers.join(', '));
+          continue;
+        }
+
+        console.log(`[SYNC_TAB] ${tabName}: ${values.length - 1} rows, phoneIdx=${phoneIdx}`);
 
         for (let r = 1; r < values.length; r++) {
           const row = values[r];
@@ -277,22 +304,35 @@ export async function syncGoogleSheets() {
         }
       }
 
+      // Update health status
       await ctx.db.executeSafe({
         text: `UPDATE tenant_integrations SET health_status = 'healthy', last_sync_at = NOW(), updated_at = NOW() WHERE tenant_id = $1 AND provider = 'google_sheets'`,
         values: [ctx.tenantId]
       });
 
+      console.log('[SYNC_COMPLETED]', { totalRows, newLeadsCount, duplicatesSkipped });
+
+      logAudit({
+        tenantId: ctx.tenantId,
+        userId: ctx.userId,
+        userEmail: ctx.email,
+        action: "google_sheets_sync_completed",
+        entityType: "integration",
+        entityId: "google_sheets",
+        details: { totalRows, newLeadsCount, duplicatesSkipped }
+      });
+
       return { 
         success: true, 
-        message: `${newLeadsCount} yeni kayıt eklendi.`,
+        message: `${newLeadsCount} yeni kayıt eklendi. ${duplicatesSkipped} tekrar eden atlandı. Toplam ${totalRows} satır.`,
         newLeads: newLeadsCount,
         duplicates: duplicatesSkipped,
         totalRows
       };
     }
   ).then(res => {
+    console.log('[SYNC_ACTION_RETURN]', JSON.stringify(res).slice(0, 300));
     if (!res.success) return { success: false, error: res.error || res.data?.error };
     return { success: true, message: res.data?.message, newLeads: res.data?.newLeads };
   });
-  */
 }
