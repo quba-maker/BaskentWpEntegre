@@ -482,11 +482,35 @@ export async function syncGoogleSheets() {
         for (let r = 1; r < values.length; r++) {
           const row = values[r];
 
+          // ── COLUMN SHIFT DETECTION ──
+          // Some Google Sheets have data rows with fewer columns than headers
+          // (e.g. 'id' column missing from end, or extra empty column in header)
+          // This causes ALL field mappings to be off by 1+ columns
+          const colShift = headers.length - row.length;
+          
+          // Helper to get correct cell value accounting for shift
+          const getCell = (headerIdx: number): string | undefined => {
+            if (headerIdx < 0) return undefined;
+            // If row is shorter, check if this column's data is shifted
+            // Try the direct index first
+            let val = row[headerIdx];
+            
+            // If shift detected AND direct index seems wrong, try shifted index
+            if (colShift > 0 && headerIdx >= colShift) {
+              const shiftedVal = row[headerIdx - colShift];
+              // Heuristic: if we expect a name but got a phone number, use shifted
+              // We'll do final validation below
+              if (!val && shiftedVal) val = shiftedVal;
+            }
+            
+            return val;
+          };
+
           // STEP 1: Extract reference country code from Meta's phone_number first
           let referenceCountryCode: string | null = null;
           for (const pc of phoneCols) {
             if (!pc.isWhatsapp) {
-              const raw = row[pc.idx];
+              const raw = getCell(pc.idx);
               if (raw) {
                 const clean = String(raw).replace(/[^0-9]/g, '');
                 if (clean.length >= 10 && !clean.startsWith('0')) {
@@ -504,7 +528,7 @@ export async function syncGoogleSheets() {
           let metaPhone = '';
 
           for (const pc of phoneCols) {
-            const raw = row[pc.idx];
+            const raw = getCell(pc.idx);
             if (!raw) continue;
             const normalized = normalizePhone(raw, referenceCountryCode);
             if (normalized.length >= 10) {
@@ -534,11 +558,72 @@ export async function syncGoogleSheets() {
 
           if (!primaryPhone) continue;
 
-          const name = nameIdx !== -1 && row[nameIdx] ? String(row[nameIdx]).substring(0, 100) : null;
-          const email = emailIdx !== -1 && row[emailIdx] ? String(row[emailIdx]).substring(0, 200) : null;
-          const createdTime = dateIdx !== -1 && row[dateIdx] ? String(row[dateIdx]) : null;
-          const noteVal = noteIdx !== -1 && row[noteIdx] ? String(row[noteIdx]).substring(0, 5000) : null;
-          const campaignName = campaignIdx !== -1 && row[campaignIdx] ? String(row[campaignIdx]).substring(0, 200) : tabName;
+          // ── CONTENT-AWARE FIELD EXTRACTION ──
+          // Instead of blindly using header index, validate the content
+          let name = nameIdx !== -1 && getCell(nameIdx) ? String(getCell(nameIdx)).substring(0, 100) : null;
+          
+          // Validation: if "name" looks like a phone number, scan row for actual name
+          const looksLikePhone = (s: string) => /^[p:+\s]*[\d\s+\-()]{8,}$/.test(s.trim());
+          const looksLikeName = (s: string) => /^[a-zA-ZÀ-ÿçÇğĞıİöÖşŞüÜ\s.''-]{2,}$/u.test(s.trim()) && s.trim().length <= 60;
+          
+          if (name && looksLikePhone(name)) {
+            // Name field contains a phone number → data is shifted
+            // Scan entire row to find the actual name
+            let foundName: string | null = null;
+            for (let ci = 0; ci < row.length; ci++) {
+              const cellVal = String(row[ci] || '');
+              if (cellVal && looksLikeName(cellVal) && !looksLikePhone(cellVal)) {
+                // Check it's not an ad_name or campaign value
+                const header = headers[ci] || '';
+                if (!header.startsWith('ad_') && !header.startsWith('adset_') && header !== 'campaign_name') {
+                  foundName = cellVal;
+                  break;
+                }
+              }
+            }
+            name = foundName;
+          }
+
+          // Campaign/Form name — validate content
+          let campaignName = campaignIdx !== -1 && getCell(campaignIdx) ? String(getCell(campaignIdx)).substring(0, 200) : '';
+          
+          // If campaign looks like an ID (starts with c: or is just numbers), try to find the real name
+          if (!campaignName || /^[cf]:\d+$/.test(campaignName) || /^\d{10,}$/.test(campaignName)) {
+            // Scan raw_data for actual campaign/form name
+            // Priority: form_name (human readable) > campaign_name > tab name
+            const formNameVal = getCell(findCol(headers, ['form_name'], ['form_id']));
+            const campNameVal = getCell(campaignIdx);
+            
+            if (formNameVal && !/^[f]:\d+$/.test(formNameVal)) {
+              campaignName = formNameVal;
+            } else {
+              // Look through all cells for the campaign/form name
+              // Known patterns: campaign names contain descriptive text, not IDs
+              for (let ci = 0; ci < row.length; ci++) {
+                const cellVal = String(row[ci] || '');
+                const hdr = headers[ci] || '';
+                if ((hdr === 'form_name' || hdr === 'campaign_name') && cellVal && !/^[cf]:\d+$/.test(cellVal)) {
+                  campaignName = cellVal;
+                  break;
+                }
+              }
+              // Still no good name? Use is_organic field which sometimes has the form name
+              if (!campaignName || /^[cf]:\d+$/.test(campaignName)) {
+                const isOrganicIdx = headers.indexOf('is_organic');
+                if (isOrganicIdx >= 0) {
+                  const isOrganicVal = String(row[isOrganicIdx] || '');
+                  if (isOrganicVal && isOrganicVal !== 'true' && isOrganicVal !== 'false' && isOrganicVal.length > 3) {
+                    campaignName = isOrganicVal;
+                  }
+                }
+              }
+            }
+            if (!campaignName || /^[cf]:\d+$/.test(campaignName)) campaignName = tabName;
+          }
+
+          const email = emailIdx !== -1 && getCell(emailIdx) ? String(getCell(emailIdx)).substring(0, 200) : null;
+          const createdTime = dateIdx !== -1 && getCell(dateIdx) ? String(getCell(dateIdx)) : null;
+          const noteVal = noteIdx !== -1 && getCell(noteIdx) ? String(getCell(noteIdx)).substring(0, 5000) : null;
 
           // Build raw_data preserving original header names
           const rawData: Record<string, string> = {};
