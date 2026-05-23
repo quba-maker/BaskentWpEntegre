@@ -44,9 +44,10 @@ export async function getForms(page: number = 1, search: string = "", source: st
       const offsetIdx = paramIdx + 1;
 
       const rows = await ctx.db.executeSafe({
-        text: `SELECT l.*, c.status as conversation_status, mem.summary_text as ai_summary
+        text: `SELECT l.*, c.status as conversation_status, c.lead_stage as conv_lead_stage, mem.summary_text as ai_summary
                FROM leads l
-               LEFT JOIN conversations c ON c.phone_number = l.phone_number AND c.tenant_id = l.tenant_id
+               LEFT JOIN conversations c ON c.tenant_id = l.tenant_id 
+                 AND RIGHT(c.phone_number, 10) = RIGHT(l.phone_number, 10)
                LEFT JOIN conversation_memory mem ON mem.conversation_id::text = c.id::text
                WHERE ${conditions.join(' AND ')}
                ORDER BY l.created_at DESC LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
@@ -60,7 +61,7 @@ export async function getForms(page: number = 1, search: string = "", source: st
         email: r.email,
         city: r.city,
         form_name: r.form_name || "Bilinmeyen Form",
-        stage: r.stage || "new",
+        stage: r.conv_lead_stage || r.stage || "new",
         created_at: r.created_at,
         raw_data: r.raw_data ? JSON.parse(r.raw_data) : {},
         country: r.country,
@@ -166,6 +167,17 @@ export async function updateLeadStage(id: number, stage: string) {
         text: `UPDATE leads SET stage = $1 WHERE id = $2 AND tenant_id = $3`,
         values: [stage, id, ctx.tenantId]
       });
+
+      // Sync stage to conversations table (single source of truth)
+      const phoneSuffix = lead[0].phone_number.replace(/\D/g, '').slice(-10);
+      try {
+        await ctx.db.executeSafe({
+          text: `UPDATE conversations SET lead_stage = $1 WHERE RIGHT(phone_number, 10) = $2 AND tenant_id = $3`,
+          values: [stage, phoneSuffix, ctx.tenantId]
+        });
+      } catch (_) {
+        // Non-blocking
+      }
 
       // Sync stage to Google Sheets lead_status column
       const SHEET_URL = process.env.GOOGLE_SHEET_UPDATE_URL || process.env.GOOGLE_SHEET_URL;
@@ -329,7 +341,7 @@ export async function syncGoogleSheets() {
       const NAME_FALLBACK = ['isim', 'adı', 'adınız', 'first_name'];
       const EMAIL_PATTERNS = ['email', 'e-posta', 'mail', 'e_posta'];
       const DATE_PATTERNS = ['created_time', 'timestamp', 'tarih', 'date', 'created_at'];
-      const NOTE_PATTERNS = ['geri dönüş', 'geri_dönüş', 'notlar', 'notes', 'not', 'açıklama', 'feedback'];
+      const NOTE_PATTERNS = ['geri dönüş', 'geri_dönüş', 'geri dönüs', 'geri_donus', 'notlar', 'notes', 'açıklama', 'feedback'];
       const CAMPAIGN_PATTERNS = ['campaign_name', 'kampanya adı', 'kampanya'];
 
       // Safe column finder — excludes ad_id, ad_name etc for name detection
@@ -342,8 +354,9 @@ export async function syncGoogleSheets() {
           });
           if (idx !== -1) return idx;
         }
-        // Fallback: includes match
+        // Fallback: includes match (only for patterns >= 5 chars to avoid false positives)
         for (const p of patterns) {
+          if (p.length < 5) continue; // skip short patterns in fuzzy mode
           const idx = headers.findIndex((h: string) => {
             if (excludePrefixes.some(ex => h.startsWith(ex))) return false;
             if (h.endsWith('_id') || h.endsWith(' id')) return false;
@@ -665,10 +678,20 @@ export async function syncGoogleSheets() {
           const email = emailIdx !== -1 && getCell(emailIdx) ? String(getCell(emailIdx)).substring(0, 200) : null;
           const createdTime = dateIdx !== -1 && getCell(dateIdx) ? String(getCell(dateIdx)) : null;
           let noteVal = noteIdx !== -1 && getCell(noteIdx) ? String(getCell(noteIdx)).substring(0, 5000) : null;
-          // Filter out garbage: if note is a status keyword or system value, discard
+          // Filter out garbage: status keywords, system values, dates (birth dates)
           if (noteVal) {
+            const trimmed = noteVal.trim();
             const JUNK_VALUES = ['CREATED', 'ACTIVE', 'CLOSED', 'PENDING', 'true', 'false', 'fb', 'ig', 'null', 'undefined'];
-            if (JUNK_VALUES.includes(noteVal.trim()) || /^[a-z]:[\d]+$/.test(noteVal.trim()) || /^[lf]:\d+$/.test(noteVal.trim())) {
+            const isJunk = JUNK_VALUES.includes(trimmed)
+              || /^[a-z]:[\d]+$/.test(trimmed)
+              || /^[lf]:\d+$/.test(trimmed)
+              // Date formats: MM/DD/YYYY, DD/MM/YYYY, YYYY-MM-DD, DD.MM.YYYY
+              || /^\d{2}\/\d{2}\/\d{4}$/.test(trimmed)
+              || /^\d{4}-\d{2}-\d{2}$/.test(trimmed)
+              || /^\d{2}\.\d{2}\.\d{4}$/.test(trimmed)
+              // Pure numbers (IDs, phone fragments)
+              || /^\d+$/.test(trimmed);
+            if (isJunk) {
               noteVal = null;
             }
           }
