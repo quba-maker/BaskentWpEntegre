@@ -623,7 +623,14 @@ export async function syncGoogleSheets() {
 
           const email = emailIdx !== -1 && getCell(emailIdx) ? String(getCell(emailIdx)).substring(0, 200) : null;
           const createdTime = dateIdx !== -1 && getCell(dateIdx) ? String(getCell(dateIdx)) : null;
-          const noteVal = noteIdx !== -1 && getCell(noteIdx) ? String(getCell(noteIdx)).substring(0, 5000) : null;
+          let noteVal = noteIdx !== -1 && getCell(noteIdx) ? String(getCell(noteIdx)).substring(0, 5000) : null;
+          // Filter out garbage: if note is a status keyword or system value, discard
+          if (noteVal) {
+            const JUNK_VALUES = ['CREATED', 'ACTIVE', 'CLOSED', 'PENDING', 'true', 'false', 'fb', 'ig', 'null', 'undefined'];
+            if (JUNK_VALUES.includes(noteVal.trim()) || /^[a-z]:[\d]+$/.test(noteVal.trim()) || /^[lf]:\d+$/.test(noteVal.trim())) {
+              noteVal = null;
+            }
+          }
 
           // Build raw_data preserving original header names
           const rawData: Record<string, string> = {};
