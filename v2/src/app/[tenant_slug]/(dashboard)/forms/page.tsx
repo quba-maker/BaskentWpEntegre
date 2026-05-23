@@ -70,7 +70,7 @@ export default function FormsPage() {
       stage: form.stage,
       unread: 0
     });
-    router.push("/inbox");
+    router.push(`/${tenantId}/inbox`);
   };
 
   const getFlag = (form: any) => {
@@ -128,34 +128,25 @@ export default function FormsPage() {
                 onClick={async () => {
                   try {
                     setIsSyncing(true);
-                    setSyncProgress({ status: 'starting', progress: 0, message: 'İşlem başlatılıyor...' });
+                    setSyncProgress({ status: 'starting', progress: 0, message: 'Google Sheets verileri çekiliyor...' });
+                    
+                    // Safety timeout — 30s max, then auto-reset
+                    const timeout = setTimeout(() => {
+                      setSyncProgress({ status: 'error', progress: 0, message: 'İşlem zaman aşımına uğradı. Tekrar deneyin.' });
+                      setTimeout(() => setIsSyncing(false), 3000);
+                    }, 30000);
+
                     const res = await syncGoogleSheets();
+                    clearTimeout(timeout);
+                    
                     console.log('[SYNC] Response:', JSON.stringify(res));
-                    if (res.success && res.correlationId) {
-                      // Start SSE listening
-                      const eventSource = new EventSource(`/api/sse/sync-progress?tenantId=${encodeURIComponent(tenantId)}&correlationId=${encodeURIComponent(res.correlationId)}`);
-                      
-                      eventSource.onmessage = (event) => {
-                        try {
-                          const data = JSON.parse(event.data);
-                          setSyncProgress(data);
-                          if (data.status === 'completed') {
-                            eventSource.close();
-                            setTimeout(() => setIsSyncing(false), 2000);
-                            mutate(); // refresh data
-                          } else if (data.status === 'error') {
-                            eventSource.close();
-                            setTimeout(() => setIsSyncing(false), 4000);
-                          }
-                        } catch (e) {}
-                      };
-                      eventSource.onerror = () => {
-                        eventSource.close();
-                        setSyncProgress({ status: 'error', progress: 0, message: 'Bağlantı kesildi. Tekrar deneyin.' });
-                        setTimeout(() => setIsSyncing(false), 3000);
-                      };
+                    
+                    if (res.success) {
+                      setSyncProgress({ status: 'completed', progress: 100, message: res.message || 'Senkronizasyon tamamlandı.' });
+                      mutate(); // refresh form list
+                      setTimeout(() => setIsSyncing(false), 2500);
                     } else {
-                      const errMsg = res.error || "Senkronizasyon başlatılamadı.";
+                      const errMsg = res.error || "Senkronizasyon başarısız.";
                       console.error('[SYNC] Error:', errMsg);
                       setSyncProgress({ status: 'error', progress: 0, message: errMsg });
                       setTimeout(() => setIsSyncing(false), 4000);
