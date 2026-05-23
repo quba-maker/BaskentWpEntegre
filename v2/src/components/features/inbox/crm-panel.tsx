@@ -247,7 +247,7 @@ export function ContextPanel() {
 
           <div>
             <label className="text-[10px] font-bold uppercase tracking-widest mb-1.5 block ml-1" style={{ color: "var(--q-text-secondary)" }}>
-              Pipeline Aşaması
+              Durum
             </label>
             <select
               value={stage}
@@ -258,7 +258,8 @@ export function ContextPanel() {
               <option value="new">Yeni Lead</option>
               <option value="contacted">İletişime Geçildi</option>
               <option value="responded">Yanıt Alındı</option>
-              <option value="discovery">Keşif / Bilgi</option>
+              <option value="discovery">Keşif / Analiz</option>
+              <option value="qualified">Nitelikli</option>
               <option value="appointed">Randevu Aldı</option>
               <option value="lost">Kaybedildi</option>
             </select>

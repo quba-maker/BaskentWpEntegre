@@ -646,7 +646,7 @@ export default function FormsPage() {
                     <p className="text-[12px] text-[#86868B] font-medium">{formatTime(getBestDate(selectedForm))}</p>
                   </div>
                   <div>
-                    <p className="text-xs font-semibold text-[#86868B] uppercase tracking-wider">Aşama</p>
+                    <p className="text-xs font-semibold text-[#86868B] uppercase tracking-wider">Durum</p>
                     <div className="mt-1">
                       <InlineStageSelector 
                         currentStage={selectedForm.stage}
