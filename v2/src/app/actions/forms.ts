@@ -219,14 +219,24 @@ export async function syncGoogleSheets() {
       let tabs = metaData.sheets
         .filter((s: any) => !s.properties.hidden)
         .map((s: any) => s.properties.title);
+
+      console.log('[SYNC_SHEET_TABS]', JSON.stringify(tabs));
+      console.log('[SYNC_ACTIVE_SHEETS_CONFIG]', JSON.stringify(activeSheets));
         
       if (activeSheets.length > 0) {
-        tabs = tabs.filter((t: string) => activeSheets.includes(t));
+        const filtered = tabs.filter((t: string) => activeSheets.includes(t));
+        if (filtered.length > 0) {
+          tabs = filtered;
+        } else {
+          // Config mismatch — activeSheets doesn't match any real tab name
+          // Fallback: sync ALL visible tabs instead of syncing nothing
+          console.log('[SYNC_FILTER_MISMATCH] activeSheets config doesnt match real tabs. Syncing ALL visible tabs.');
+        }
       }
 
       if (tabs.length === 0) {
-        console.log('[SYNC_NO_TABS]');
-        return { success: true, message: "Senkronize edilecek sekme bulunamadı.", newLeads: 0 };
+        console.log('[SYNC_NO_TABS] Spreadsheet has no visible tabs at all');
+        return { success: true, message: "Spreadsheet'te görünür sekme bulunamadı.", newLeads: 0 };
       }
 
       console.log('[SYNC_TABS]', tabs);
