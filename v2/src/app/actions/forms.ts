@@ -199,9 +199,12 @@ export async function syncGoogleSheets() {
         const correlationId = crypto.randomUUID();
         const pipelineRunId = `sync_${Date.now()}`;
 
-        // Use QStash SDK (same as queue.service.ts) — raw fetch was failing due to URL format
+        // Use QStash SDK — explicitly set baseUrl to prevent QSTASH_URL env var override
         const { Client } = await import('@upstash/qstash');
-        const qstashClient = new Client({ token: QSTASH_TOKEN });
+        const qstashClient = new Client({ 
+          token: QSTASH_TOKEN,
+          baseUrl: 'https://qstash.upstash.io'
+        });
 
         const qstashRes = await qstashClient.publishJSON({
           url: destinationUrl,

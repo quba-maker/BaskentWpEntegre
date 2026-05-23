@@ -1,7 +1,10 @@
 import { logger } from "@/lib/core/logger";
 import { Client } from "@upstash/qstash";
 
-const qstash = new Client({ token: process.env.QSTASH_TOKEN || "" });
+const qstash = new Client({ 
+  token: process.env.QSTASH_TOKEN || "",
+  baseUrl: 'https://qstash.upstash.io'
+});
 
 import { getTraceContext } from "@/lib/core/trace-context";
 
