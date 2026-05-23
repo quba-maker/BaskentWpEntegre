@@ -58,7 +58,7 @@ export async function getConversations(page: number = 1, search: string = "", st
           LIMIT 1
         ) m ON c.last_message_content IS NULL
         LEFT JOIN LATERAL (
-          SELECT form_name, raw_data, created_at 
+          SELECT form_name, patient_name, raw_data, created_at 
           FROM leads 
           WHERE leads.tenant_id = $1
             AND leads.phone_number LIKE '%' || RIGHT(COALESCE(c.real_phone, c.phone_number), 10) || '%'
