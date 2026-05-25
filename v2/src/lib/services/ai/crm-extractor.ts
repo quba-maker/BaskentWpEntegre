@@ -158,7 +158,15 @@ Pipeline Aşama Kuralları (sırayla ilerler, geri gitmez):
       };
 
       // Filter out original system prompts to avoid confusing the extraction model
-      const userHistory = history.filter(m => m.role !== 'system');
+      let userHistory = history.filter(m => m.role !== 'system');
+      
+      // ═══ SAFEGUARD: Trim to last 8 messages to prevent context window overflow ═══
+      if (userHistory.length > 8) {
+        this.log.info(`[CRM_EXTRACTION] Trimming history from ${userHistory.length} to 8 messages`, { traceId });
+        userHistory = userHistory.slice(-8);
+      }
+      
+      this.log.info(`[CRM_EXTRACTION] Sending ${userHistory.length} messages to extraction model`, { traceId });
       
       const aiPromise = this.orchestrator.generateResponse(
         [systemPrompt, ...userHistory],
@@ -172,6 +180,8 @@ Pipeline Aşama Kuralları (sırayla ilerler, geri gitmez):
 
       const aiResponse = await Promise.race([aiPromise, timeoutPromise]);
       let jsonText = aiResponse.text;
+
+      this.log.info(`[CRM_EXTRACTION_RAW] Raw LLM output (first 500 chars)`, { traceId, raw: jsonText.substring(0, 500) });
 
       // Clean markdown block if model ignored strict json instruction
       if (jsonText.startsWith('\`\`\`json')) {
@@ -196,7 +206,7 @@ Pipeline Aşama Kuralları (sırayla ilerler, geri gitmez):
       return validatedData;
 
     } catch (e: any) {
-      this.log.warn(`[CRM_EXTRACTION_FAILED] Could not extract CRM data. Proceeding without updates. Error: ${e.message}`, { traceId });
+      this.log.error(`[CRM_EXTRACTION_FAILED] Error: ${e.message} | Name: ${e.name} | Stack: ${e.stack?.split('\n').slice(0, 3).join(' | ')}`, undefined, { traceId });
       return null;
     }
   }
