@@ -122,7 +122,9 @@ export class OpportunityService {
     const { tenantId, conversationId, phoneNumber, channel, patientName, crmData, lastCustomerMessageAt, traceId, externalCountry } = input;
 
     // Resolve country: externalCountry (deterministic) > crmData.country
-    const resolvedCountry = externalCountry || crmData.country || null;
+    // Resolve country: AI extraction (patient's own words) > phone prefix (deterministic guess)
+    // Medical tourism: patient may have +90 phone but live in Germany
+    const resolvedCountry = crmData.country || externalCountry || null;
 
     // Guard: Do not create opportunity if AI says no
     if (!crmData.should_create_opportunity) {
@@ -288,7 +290,9 @@ export class OpportunityService {
 
       if (existing.length === 0) return false;
 
-      const resolvedCountry = externalCountry || crmData.country || null;
+      // Resolve country: AI extraction (patient's own words) > phone prefix (deterministic guess)
+    // Medical tourism: patient may have +90 phone but live in Germany
+    const resolvedCountry = crmData.country || externalCountry || null;
       const metadata = this.buildMetadata(crmData);
       let travelDate: string | null = null;
       if (crmData.travel_date) {

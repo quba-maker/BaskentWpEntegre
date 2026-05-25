@@ -1035,17 +1035,19 @@ export class QueueWorkerEngine {
       // AI Inference (Layer 2-4)
       const crmData = await crmExtractorService.extract(aiMessages, tenantConfig, traceId);
       
-      // Update DB safely
+      // Update DB safely — AI extraction takes precedence over phone prefix for country
+      // Medical tourism: patient may have +90 phone but live in Germany ("Almanya'dayım")
+      const resolvedCountryForConv = crmData?.country || deterministicCountry;
       await convService.updateCrmIntelligence(phoneNumber, {
         patientName: crmData?.patient_name,
-        country: deterministicCountry || crmData?.country,
+        country: resolvedCountryForConv,
         department: crmData?.department,
         pipelineStage: crmData?.pipeline_stage,
         tags: crmData?.tags
       });
 
-      this.log.info(`[WORKER_CRM_OK] CRM successfully enriched`, { traceId, patientName: crmData?.patient_name, country: deterministicCountry || crmData?.country });
-      AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'crm_extraction_completed', category: 'crm', payload: { patientName: crmData?.patient_name, country: deterministicCountry || crmData?.country, department: crmData?.department } });
+      this.log.info(`[WORKER_CRM_OK] CRM successfully enriched`, { traceId, patientName: crmData?.patient_name, country: resolvedCountryForConv });
+      AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'crm_extraction_completed', category: 'crm', payload: { patientName: crmData?.patient_name, country: resolvedCountryForConv, department: crmData?.department } });
 
       // 10b. Opportunity Upsert / Enrichment (non-fatal, async-safe)
       if (crmData && conversationId) {
