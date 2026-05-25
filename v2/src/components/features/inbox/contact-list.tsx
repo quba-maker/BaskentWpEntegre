@@ -6,7 +6,7 @@ import { Search, MessageCircle, Check, CheckCheck, Clock, WifiOff } from "lucide
 import { getConversations } from "@/app/actions/inbox";
 import { useInboxStore } from "@/store/inbox-store";
 import { useDiagnosticsStore } from "@/lib/realtime/diagnostics-store";
-import { getCountryFromPhone, normalizeCountryName } from "@/lib/utils/country";
+import { getCountryFromPhone, normalizeCountryName, getCountryFlag } from "@/lib/utils/country";
 
 // ==========================================
 // CONTACT RAIL — Left navigation panel
@@ -293,7 +293,8 @@ export function ContactRail() {
                           {c.name || c.id}
                         </span>
                         {(() => {
-                          const country = getCountryFromPhone(c.id) || (c.country ? { flag: '🌍', name: normalizeCountryName(c.country), code: '' } : null);
+                          const cn = c.country ? normalizeCountryName(c.country) : '';
+                          const country = getCountryFromPhone(c.id) || (c.country ? { flag: getCountryFlag(cn), name: cn, code: '' } : null);
                           return country ? (
                             <span className="ml-1.5 inline-flex items-center gap-0.5 px-1 py-0.5 rounded bg-black/[0.04] text-[10px] font-semibold flex-shrink-0" style={{ color: 'var(--q-text-secondary)' }}>
                               {country.flag} {country.name}

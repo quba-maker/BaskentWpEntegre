@@ -4,6 +4,7 @@ import { AIOrchestrator, ChatMessage } from "./orchestrator";
 
 // 1. Output Contract
 export const CrmExtractionSchema = z.object({
+  patient_name: z.string().optional(),
   language: z.string().optional(),
   country: z.string().optional(),
   country_confidence: z.number().min(0).max(1).optional(),
@@ -56,8 +57,9 @@ KESİNLİKLE markdown veya extra metin KULLANMA. SADECE GEÇERLİ JSON DÖNDÜR.
 
 Format:
 {
+  "patient_name": "string (Hastanın GERÇEK adı. Konuşmada 'ismim Mustafa' veya 'ben Ali' gibi ifadelerden çıkar. Instagram/Facebook profil adı DEĞİL, hastanın söylediği gerçek isim. Emin değilsen boş bırak)",
   "language": "string (örn: German, English, Turkish)",
-  "country": "string (Tahmin edilen ülke. Örn: Germany, UK. Emin değilsen boş bırak)",
+  "country": "string (Hastanın yaşadığı ülke — Türkçe olarak yaz. Örn: Almanya, Türkiye, İngiltere. Emin değilsen boş bırak)",
   "country_confidence": number (0.0 ile 1.0 arası),
   "department": "string (Örn: Ortopedi, Kardiyoloji, Estetik, Diş, Göz, Tüp Bebek, Organ Nakli, Onkoloji, Obezite, Nöroloji, Üroloji, Check-Up. Hastanın niyetine göre seç. Emin değilsen boş bırak)",
   "pipeline_stage": "string (new | contacted | responded | discovery | qualified | appointed | lost)",

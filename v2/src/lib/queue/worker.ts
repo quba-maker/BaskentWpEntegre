@@ -895,14 +895,15 @@ export class QueueWorkerEngine {
       
       // Update DB safely
       await convService.updateCrmIntelligence(phoneNumber, {
+        patientName: crmData?.patient_name,
         country: deterministicCountry || crmData?.country,
         department: crmData?.department,
         pipelineStage: crmData?.pipeline_stage,
         tags: crmData?.tags
       });
 
-      this.log.info(`[WORKER_CRM_OK] CRM successfully enriched`, { traceId });
-      AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'crm_extraction_completed', category: 'crm', payload: { country: deterministicCountry || crmData?.country, department: crmData?.department } });
+      this.log.info(`[WORKER_CRM_OK] CRM successfully enriched`, { traceId, patientName: crmData?.patient_name, country: deterministicCountry || crmData?.country });
+      AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'crm_extraction_completed', category: 'crm', payload: { patientName: crmData?.patient_name, country: deterministicCountry || crmData?.country, department: crmData?.department } });
     } catch (crmErr) {
       this.log.error(`[WORKER_CRM_FAILED] Non-fatal CRM extraction error`, crmErr instanceof Error ? crmErr : new Error(String(crmErr)), { traceId });
       AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'crm_extraction_failed', category: 'crm', severity: 'warning' });

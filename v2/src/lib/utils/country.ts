@@ -132,6 +132,21 @@ export function normalizeCountryName(name: string): string {
   return COUNTRY_NAME_TR_MAP[lower] || name;
 }
 
+// Turkish country name → flag emoji map (built from PHONE_PREFIX_MAP for consistency)
+const COUNTRY_FLAG_MAP: Record<string, string> = Object.fromEntries(
+  PHONE_PREFIX_MAP.map(([, info]) => [info.name.toLowerCase(), info.flag])
+);
+
+/**
+ * Resolve flag emoji from a country name (Turkish).
+ * Falls back to 🌍 if no match found.
+ */
+export function getCountryFlag(countryName: string | null | undefined): string {
+  if (!countryName) return '🌍';
+  const lower = countryName.trim().toLowerCase();
+  return COUNTRY_FLAG_MAP[lower] || '🌍';
+}
+
 /**
  * Resolve country: first from phone prefix, then from raw_data country fields.
  */

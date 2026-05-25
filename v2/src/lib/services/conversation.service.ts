@@ -1,5 +1,6 @@
 import { sql } from "@/lib/db";
 import { TenantDB } from "@/lib/core/tenant-db";
+import { normalizeCountryName } from "@/lib/utils/country";
 
 // ==========================================
 // CONVERSATION SERVICE (State Extraction & Locking)
@@ -111,19 +112,25 @@ export class ConversationService {
   /**
    * CRM Intelligence Updates
    * Sadece var olan değerleri veya AI çıkarımlarını birleştirir.
+   * patient_name: AI konuşmadan gerçek isim çıkardığında günceller (sosyal profil adını override eder)
+   * country: Türkçe normalize edilir ve uygun bayrak ikonuyla eşleştirilir
    */
   async updateCrmIntelligence(
     phoneNumber: string,
     data: {
+      patientName?: string;
       country?: string;
       department?: string;
       pipelineStage?: string;
       tags?: string[];
     }
   ): Promise<void> {
-    if (!data.country && !data.department && !data.pipelineStage && !data.tags) {
+    if (!data.patientName && !data.country && !data.department && !data.pipelineStage && !data.tags) {
       return;
     }
+
+    // Normalize country to Turkish
+    const normalizedCountry = data.country ? normalizeCountryName(data.country) : null;
 
     // Forward-only pipeline stage order
     const STAGE_ORDER = ['new', 'contacted', 'responded', 'discovery', 'qualified', 'appointed', 'lost'];
@@ -166,7 +173,8 @@ export class ConversationService {
       await this.db.executeSafe(sql`
         UPDATE conversations 
         SET 
-          country = COALESCE(${data.country || null}, country),
+          patient_name = COALESCE(${data.patientName || null}, patient_name),
+          country = COALESCE(${normalizedCountry}, country),
           department = COALESCE(${data.department || null}, department),
           lead_stage = COALESCE(${finalStage}, lead_stage),
           tags = ${JSON.stringify(mergedTags)}::jsonb
