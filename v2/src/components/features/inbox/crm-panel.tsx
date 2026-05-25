@@ -208,7 +208,7 @@ export function ContextPanel() {
               style={{ background: "var(--q-bg-hover)", color: "var(--q-text-primary)", border: "1px solid transparent" }}
             >
               <option value="" disabled>Ülke Seç...</option>
-              {["Türkiye", "Almanya", "İngiltere", "Fransa", "Hollanda", "Belçika", "Özbekistan", "Azerbaycan", "Rusya", "ABD", "Diğer"].map((c) => (
+              {["Türkiye", "Almanya", "İngiltere", "Fransa", "Hollanda", "Belçika", "Portekiz", "İspanya", "İtalya", "İsviçre", "Avusturya", "İsveç", "Danimarka", "Norveç", "Polonya", "Yunanistan", "Romanya", "Bulgaristan", "Ukrayna", "Rusya", "Azerbaycan", "Özbekistan", "Kazakistan", "Gürcistan", "Irak", "Ürdün", "Lübnan", "Suudi Arabistan", "BAE", "ABD", "Avustralya", "Diğer"].map((c) => (
                 <option key={c} value={c}>{c}</option>
               ))}
             </select>
