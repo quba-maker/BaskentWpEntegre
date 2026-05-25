@@ -178,11 +178,11 @@ export class UnifiedStageService {
                  stage = $1, 
                  closed_at = CASE WHEN $1 IN ('lost', 'not_qualified', 'arrived') THEN NOW() ELSE NULL END,
                  closed_reason = CASE WHEN $1 IN ('lost', 'not_qualified') THEN $4 ELSE NULL END,
-                 next_follow_up_at = CASE WHEN $5 = true THEN NULL ELSE next_follow_up_at END,
-                 automation_status = CASE WHEN $5 = true THEN 'paused' ELSE automation_status END,
+                 next_follow_up_at = CASE WHEN $5::boolean = true THEN NULL ELSE next_follow_up_at END,
+                 automation_status = CASE WHEN $5::boolean = true THEN 'paused' ELSE automation_status END,
                  metadata = CASE 
-                   WHEN $5 = true THEN metadata || jsonb_build_object(
-                     'opt_out_requested', $6,
+                   WHEN $5::boolean = true THEN metadata || jsonb_build_object(
+                     'opt_out_requested', $6::boolean,
                      'opt_out_at', NOW()::text,
                      'opt_out_reason', $4
                    )

@@ -1479,6 +1479,40 @@ export class QueueWorkerEngine {
               });
               if (oppId) {
                 this.log.info(`[WORKER_OPP_OK] Opportunity upserted`, { traceId, oppId });
+                
+                // ═══ P1A-FIX5B: Mirror new opp stage to conversation ═══
+                // When no active opp existed (beforeOpp=null) and we created a new one,
+                // conversation.lead_stage is still 'lost' from previous cancellation.
+                // Must update to match new opportunity stage.
+                if (!beforeOpp) {
+                  try {
+                    const newOppRow = await db.executeSafe({
+                      text: `SELECT stage FROM opportunities WHERE id = $1 AND tenant_id = $2`,
+                      values: [oppId, tenantId]
+                    }) as any[];
+                    const newStage = newOppRow[0]?.stage;
+                    if (newStage) {
+                      const { oppStageToLeadStage } = await import('../config/stage-mapping');
+                      const mirrorStage = oppStageToLeadStage(newStage);
+                      await db.executeSafe({
+                        text: `UPDATE conversations SET lead_stage = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3`,
+                        values: [mirrorStage, conversationId, tenantId]
+                      });
+                      // Also mirror to leads
+                      const cleanPhone2 = phoneNumber.replace(/\D/g, '');
+                      const last10_2 = cleanPhone2.length > 10 ? cleanPhone2.substring(cleanPhone2.length - 10) : cleanPhone2;
+                      await db.executeSafe({
+                        text: `UPDATE leads SET stage = $1 WHERE phone_number LIKE '%' || $2 || '%' AND tenant_id = $3`,
+                        values: [mirrorStage, last10_2, tenantId]
+                      });
+                      this.log.info(`[OPP_NEW_STAGE_MIRROR] Mirrored new opp stage to conversation`, {
+                        traceId, oppId, newStage, mirrorStage
+                      });
+                    }
+                  } catch (mirrorErr) {
+                    this.log.warn(`[OPP_NEW_STAGE_MIRROR_FAIL] Non-fatal`, { traceId, error: (mirrorErr as Error).message });
+                  }
+                }
               }
             } else {
               const enriched = await oppService.enrichExisting(tenantId, conversationId, crmData, resolvedCountryForOpp, traceId);
@@ -1518,13 +1552,13 @@ export class QueueWorkerEngine {
             }
           });
           // ═══ P1A-FIX5 (FIX D): Tag cleanup on reset/new-identity/deletion ═══
-          if (shouldCloseAndCreateNew || dataDeletionRequest) {
+          if (shouldCloseAndCreateNew || dataDeletionRequest || newIdentityDetected || (resetConversationRequested && newTreatmentInterest)) {
             try {
               const STALE_TAGS = [
                 'iptal_edildi', 'vazgeçti', 'randevu_iptali', 'açık_iptal',
                 'takip_durduruldu', 'opt_out_talebi', 'bilgi_silme_talebi',
                 'randevu_onayı', 'telefon_gorusmesi_istiyor', 'karar_değişikliği',
-                'seyahat_planlama', 'randevu_talebi'
+                'seyahat_planlama', 'randevu_talebi', 'explicit_cancellation'
               ];
               // Fetch current tags, filter out stale ones
               const convRow = await db.executeSafe({
