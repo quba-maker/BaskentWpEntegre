@@ -110,10 +110,48 @@ export const POST = withApiGuard(
       return new NextResponse("EVENT_RECEIVED", { status: 200 });
     }
 
-    // 2. MESSENGER
+    // 2. MESSENGER / INSTAGRAM — Delivery & Read Receipts
+    if (
+      (body.object === "page" || body.object === "instagram") &&
+      body.entry?.[0]?.messaging?.[0] &&
+      (body.entry[0].messaging[0].delivery || body.entry[0].messaging[0].read)
+    ) {
+      const msg = body.entry[0].messaging[0];
+      const isDelivery = !!msg.delivery;
+      const isRead = !!msg.read;
+      const provider = body.object === "instagram" ? "instagram" : "messenger";
+      
+      // Extract relevant data
+      const deliveryStatus = isRead ? 'read' : 'delivered';
+      const watermark = isRead ? msg.read.watermark : msg.delivery?.watermark;
+      const mids = isDelivery ? (msg.delivery.mids || []) : [];
+
+      log.info(`[${provider.toUpperCase()} STATUS] ${deliveryStatus}`, { 
+        tenantSlug: tenant.slug, 
+        watermark, 
+        midsCount: mids.length 
+      });
+
+      waitUntil(queue.publish(ctx.tenantId!, 'social.status.received', {
+        provider,
+        deliveryStatus,
+        watermark,
+        mids,
+        senderId: msg.sender?.id,
+        recipientId: msg.recipient?.id,
+        timestamp: msg.timestamp || Date.now()
+      }, {
+        channelId: ctx.tenantRuntime?.channelId,
+        groupId: ctx.tenantRuntime?.groupId
+      }));
+
+      return new NextResponse("EVENT_RECEIVED", { status: 200 });
+    }
+
+    // 2b. MESSENGER — Messages
     if (
       body.object === "page" &&
-      body.entry?.[0]?.messaging?.[0] &&
+      body.entry?.[0]?.messaging?.[0]?.message &&
       !body.entry?.[0]?.changes?.[0]?.field
     ) {
       const msg = body.entry[0].messaging[0];
@@ -135,10 +173,10 @@ export const POST = withApiGuard(
       return new NextResponse("EVENT_RECEIVED", { status: 200 });
     }
 
-    // 3. INSTAGRAM
+    // 3. INSTAGRAM — Messages
     if (
       body.object === "instagram" &&
-      body.entry?.[0]?.messaging?.[0]
+      body.entry?.[0]?.messaging?.[0]?.message
     ) {
       const msg = body.entry[0].messaging[0];
       if (msg.message?.mid) {

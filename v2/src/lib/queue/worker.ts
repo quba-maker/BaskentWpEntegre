@@ -108,6 +108,10 @@ export class QueueWorkerEngine {
         await this.handleIncomingMessage(tenantId, payload, metadata, 'instagram');
         break;
 
+      case "social.status.received":
+        await this.handleSocialStatus(tenantId, payload as any, metadata);
+        break;
+
       case "meta.lead.received":
         this.log.info(`[LEAD_RECEIVED] Lead event processed`, { tenantId, traceId: metadata.messageId });
         break;
@@ -235,6 +239,135 @@ export class QueueWorkerEngine {
       
     } catch (e: any) {
       this.log.error(`[STATUS_UPDATE_FAILED] Failed to update delivery receipt`, e, { traceId });
+    }
+  }
+
+  /**
+   * Domain-specific handler for Messenger/Instagram Delivery & Read Receipts
+   * 
+   * Meta sends:
+   * - delivery: { mids: ['mid.xxx'], watermark: 1527459824 }
+   * - read: { watermark: 1527459824 }
+   * 
+   * Watermark = all messages sent before this timestamp are delivered/read
+   */
+  private async handleSocialStatus(tenantId: string, payload: {
+    provider: string;
+    deliveryStatus: string;
+    watermark: number;
+    mids: string[];
+    senderId: string;
+    recipientId: string;
+    timestamp: number;
+  }, metadata: WorkerMetadata) {
+    const traceId = metadata.messageId;
+    const { provider, deliveryStatus, watermark, mids, recipientId } = payload;
+    
+    this.log.info(`[WORKER_PROCESSING] [SOCIAL STATUS] ${provider} ${deliveryStatus}`, { 
+      tenantId, traceId, watermark, midsCount: mids.length 
+    });
+
+    const db = withTenantDB(tenantId);
+
+    try {
+      let updatedCount = 0;
+
+      if (mids && mids.length > 0) {
+        // Strategy 1: Update specific message IDs (delivery receipts often include mids)
+        for (const mid of mids) {
+          const result = await db.executeSafe({
+            text: `
+              UPDATE messages 
+              SET status = $1
+              WHERE provider_message_id = $2 
+                AND tenant_id = $3 
+                AND direction = 'out'
+                AND (status IS NULL OR status IN ('pending', 'sent', 'delivered'))
+              RETURNING id, phone_number
+            `,
+            values: [deliveryStatus, mid, tenantId]
+          }) as any[];
+          
+          if (result.length > 0) {
+            updatedCount++;
+            
+            // Emit realtime status update for each message
+            try {
+              const { RealtimePublisher } = await import('@/lib/realtime/publisher');
+              const validStatus = ['sent', 'delivered', 'read', 'failed'].includes(deliveryStatus) 
+                ? deliveryStatus as 'sent' | 'delivered' | 'read' | 'failed'
+                : 'sent';
+              await RealtimePublisher.publishMessageStatusUpdated(
+                tenantId,
+                String(result[0].id),
+                result[0].phone_number,
+                validStatus,
+                1,
+                { traceId, spanId: mid }
+              );
+            } catch (rtErr) {
+              // Non-fatal
+            }
+          }
+        }
+      } else if (watermark) {
+        // Strategy 2: Watermark-based bulk update (read receipts)
+        // Update all outbound messages sent before the watermark timestamp
+        const watermarkDate = new Date(watermark * 1000).toISOString();
+        
+        const result = await db.executeSafe({
+          text: `
+            UPDATE messages 
+            SET status = $1
+            WHERE tenant_id = $2 
+              AND direction = 'out'
+              AND created_at <= $3
+              AND (status IS NULL OR status IN ('pending', 'sent', 'delivered'))
+              AND phone_number = $4
+            RETURNING id, phone_number
+          `,
+          values: [deliveryStatus, tenantId, watermarkDate, recipientId]
+        }) as any[];
+
+        updatedCount = result.length;
+
+        // Update conversation last_message_status
+        if (recipientId) {
+          await db.executeSafe({
+            text: `
+              UPDATE conversations 
+              SET last_message_status = $1
+              WHERE phone_number = $2 AND tenant_id = $3
+            `,
+            values: [deliveryStatus, recipientId, tenantId]
+          });
+        }
+
+        // Emit bulk realtime update for the most recent message
+        if (result.length > 0) {
+          try {
+            const { RealtimePublisher } = await import('@/lib/realtime/publisher');
+            const validStatus = ['sent', 'delivered', 'read', 'failed'].includes(deliveryStatus) 
+              ? deliveryStatus as 'sent' | 'delivered' | 'read' | 'failed'
+              : 'sent';
+            await RealtimePublisher.publishMessageStatusUpdated(
+              tenantId,
+              String(result[result.length - 1].id),
+              result[result.length - 1].phone_number,
+              validStatus,
+              1,
+              { traceId }
+            );
+          } catch (rtErr) {
+            // Non-fatal
+          }
+        }
+      }
+
+      this.log.info(`[DB_COMMITTED] [SOCIAL STATUS] ${provider} ${deliveryStatus}: ${updatedCount} messages updated`, { traceId });
+
+    } catch (e: any) {
+      this.log.error(`[SOCIAL_STATUS_FAILED] Failed to process ${provider} delivery receipt`, e, { traceId });
     }
   }
 
