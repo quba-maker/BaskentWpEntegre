@@ -81,6 +81,11 @@ export class UnifiedStageService {
     const { tenantId, source, targetStage, actorId, reason } = input;
     const db = withTenantDB(tenantId);
 
+    // Declare outside try for catch fallback access
+    let queries: any[] = [];
+    let normalizedTarget = targetStage;
+    let resolvedOppId: string | undefined;
+
     try {
       // ── 1. Resolve opportunity ──
       const oppResolution = await this.resolveOpportunity(db, input);
@@ -108,11 +113,12 @@ export class UnifiedStageService {
       }
 
       const opp = oppResolution.opportunity;
+      resolvedOppId = opp.id;
       const previousOppStage = opp.stage;
 
       // ── 3. Normalize targetStage ──
       // If source sends a lead-system stage, map it to opportunity stage
-      let normalizedTarget = targetStage;
+      normalizedTarget = targetStage;
       if (LEAD_TO_OPP_MAP[targetStage]) {
         normalizedTarget = LEAD_TO_OPP_MAP[targetStage];
       }
@@ -163,7 +169,7 @@ export class UnifiedStageService {
       const mirrorLeadStage = oppStageToLeadStage(normalizedTarget);
 
       // ── 7. Atomic transaction: opp + conv + lead + audit ──
-      const queries: any[] = [];
+      queries = [];
 
       // 7a. Update opportunity
       const isCancellation = input.explicitCancellation && normalizedTarget === 'lost';
@@ -248,14 +254,49 @@ export class UnifiedStageService {
       };
 
     } catch (error: any) {
+      const errorMessage = error?.message || String(error);
+      const errorCode = error?.code || 'UNKNOWN';
+      const errorDetail = error?.detail || error?.hint || null;
+      
       log.error(`[UNIFIED_STAGE_FAIL] Atomic transaction failed`, 
         error instanceof Error ? error : new Error(String(error)),
-        { source, targetStage, actorId }
+        { source, targetStage, actorId, errorCode, errorDetail, errorMessage }
       );
+
+      // ═══ P1A-FIX5: Sequential fallback when transaction fails ═══
+      // Neon HTTP driver transaction can fail due to connection/batching issues.
+      // Fall back to sequential execution to ensure stage update happens.
+      if (queries.length > 0) {
+        log.warn(`[UNIFIED_STAGE_FALLBACK] Attempting sequential execution`, {
+          queryCount: queries.length, source, targetStage
+        });
+        try {
+          for (const q of queries) {
+            await db.executeSafe(q);
+          }
+          log.info(`[UNIFIED_STAGE_FALLBACK_OK] Sequential execution succeeded`, {
+            source, targetStage, actorId
+          });
+          // Return success since sequential worked
+          return {
+            success: true,
+            opportunityId: resolvedOppId || input.opportunityId,
+            newOppStage: targetStage,
+            mirrorLeadStage: OPP_TO_LEAD_MAP[targetStage] || targetStage,
+            mirrorConvStage: OPP_TO_LEAD_MAP[targetStage] || targetStage,
+          };
+        } catch (seqErr: any) {
+          log.error(`[UNIFIED_STAGE_FALLBACK_FAIL] Sequential also failed`,
+            seqErr instanceof Error ? seqErr : new Error(String(seqErr)),
+            { source, targetStage }
+          );
+        }
+      }
+
       return {
         success: false,
         blocked: true,
-        blockReason: 'Stage güncelleme sırasında bir hata oluştu. Lütfen tekrar deneyin.',
+        blockReason: `Stage güncelleme hatası: ${errorCode} — ${errorMessage.substring(0, 200)}`,
       };
     }
   }
