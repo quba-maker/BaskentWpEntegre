@@ -147,7 +147,25 @@ export class MemoryEngine {
 
       // 5. Sync rolling AI summary back to matching lead notes & Google Sheets
       try {
-        // ALWAYS update conversations table notes
+        // P1B: Opportunity-aware notes sync
+        // If active_opportunity_id exists, use opportunity summary (prevents stale global summary)
+        const convMeta = await db.executeSafe({
+          text: `SELECT active_opportunity_id FROM conversations WHERE id::text = $1::text AND tenant_id = $2`,
+          values: [conversationId, tenantId]
+        }) as any[];
+        
+        const activeOppId = convMeta?.[0]?.active_opportunity_id;
+        
+        if (activeOppId) {
+          // Update opportunity.summary with the new AI summary
+          await db.executeSafe({
+            text: `UPDATE opportunities SET summary = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3`,
+            values: [summaryText, activeOppId, tenantId]
+          });
+          log.info(`[MEMORY_OPP_SYNC] Active opportunity ${activeOppId} summary updated`);
+        }
+        
+        // ALWAYS update conversations.notes with the latest summary
         await db.executeSafe({
           text: `
             UPDATE conversations
