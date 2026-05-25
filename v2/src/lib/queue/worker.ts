@@ -1059,6 +1059,27 @@ export class QueueWorkerEngine {
         report_status: crmData?.report_status || '(empty)'
       });
 
+      // ═══ DIAGNOSTIC DB WRITE: Persist CRM result for verification ═══
+      try {
+        await db.executeSafe({
+          text: `INSERT INTO messages (tenant_id, phone_number, direction, content, channel, provider_message_id)
+                 VALUES ($1, $2, 'system', $3, 'whatsapp', $4)`,
+          values: [
+            tenantId,
+            phoneNumber,
+            `[CRM_DIAG] ${JSON.stringify({
+              country: crmData?.country || null,
+              department: crmData?.department || null,
+              travel_date: crmData?.travel_date || null,
+              intent: crmData?.intent_type || null,
+              opp: crmData?.should_create_opportunity || false,
+              isNull: crmData === null
+            })}`,
+            `crm_diag_${traceId}`
+          ]
+        });
+      } catch (_diagErr) { /* non-blocking */ }
+
       // Update DB safely — AI extraction takes precedence over phone prefix for country
       // Medical tourism: patient may have +90 phone but live in Germany ("Almanya'dayım")
       const resolvedCountryForConv = crmData?.country || deterministicCountry;
