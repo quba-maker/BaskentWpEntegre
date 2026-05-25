@@ -171,6 +171,19 @@ export class OpportunityService {
         const newPrioIdx = priorityOrder.indexOf(priority);
         const finalPriority = newPrioIdx > currentPrioIdx ? priority : current.priority;
 
+        // ═══ DIAGNOSTIC: Opportunity Update Values ═══
+        log.info(`[OPP_UPDATE_TRACE] SQL params for existing opp update`, {
+          traceId,
+          oppId: current.id,
+          existing_department: current.department || '(null)',
+          new_department_param: crmData.department || '(empty→will keep existing)',
+          existing_country: current.country || '(null)',
+          new_country_param: resolvedCountry || '(empty→will keep existing)',
+          travel_date_param: travelDate || '(null→will keep existing)',
+          stage: `${current.stage} → ${finalStage}`,
+          priority: `${current.priority} → ${finalPriority}`
+        });
+
         await this.db.executeSafe({
           text: `UPDATE opportunities SET
                    stage = $1,
@@ -215,6 +228,7 @@ export class OpportunityService {
 
         log.info(`[OPP_UPDATED] Opportunity updated`, { 
           traceId, oppId: current.id, stage: finalStage, priority: finalPriority,
+          department: crmData.department, country: resolvedCountry,
           travelDate, reportStatus: crmData.report_status, requiresConfirmation: crmData.requires_human_confirmation
         });
         return current.id;
@@ -327,7 +341,13 @@ export class OpportunityService {
         ]
       });
 
-      log.info(`[OPP_ENRICHED] Existing opportunity enriched (no new opp needed)`, { traceId, oppId: existing[0].id });
+      // ═══ DIAGNOSTIC: Enrich Existing Trace ═══
+      log.info(`[OPP_ENRICHED] Existing opportunity enriched (no new opp needed)`, { 
+        traceId, oppId: existing[0].id,
+        department_param: crmData.department || '(empty)',
+        country_param: resolvedCountry || '(empty)',
+        travel_date_param: travelDate || '(null)'
+      });
       return true;
     } catch (e: any) {
       log.error(`[OPP_ENRICH_FAILED] Non-fatal`, e instanceof Error ? e : new Error(String(e)), { traceId });

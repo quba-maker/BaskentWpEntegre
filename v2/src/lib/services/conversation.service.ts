@@ -170,6 +170,9 @@ export class ConversationService {
         }
       }
 
+      // ═══ DIAGNOSTIC: Conversation CRM Update ═══
+      console.log(`[CONV_CRM_UPDATE] Params → patientName=${data.patientName || '(empty)'}, country=${normalizedCountry || '(null)'}, department=${data.department || '(null)'}, stage=${finalStage || '(null/no-change)'}, phone=${phoneNumber}`);
+
       await this.db.executeSafe(sql`
         UPDATE conversations 
         SET 
@@ -180,6 +183,8 @@ export class ConversationService {
           tags = ${JSON.stringify(mergedTags)}::jsonb
         WHERE phone_number = ${phoneNumber} AND tenant_id = ${this.db.tenantId}
       `);
+
+      console.log(`[CONV_CRM_UPDATED] OK → phone=${phoneNumber}, country=${normalizedCountry}, department=${data.department}`);
 
       // Sync stage to leads table (bi-directional consistency)
       if (finalStage) {

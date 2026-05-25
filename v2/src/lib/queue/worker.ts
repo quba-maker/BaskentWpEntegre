@@ -1035,9 +1035,34 @@ export class QueueWorkerEngine {
       // AI Inference (Layer 2-4)
       const crmData = await crmExtractorService.extract(aiMessages, tenantConfig, traceId);
       
+      // ═══ DIAGNOSTIC: CRM Extractor Raw Output ═══
+      this.log.info(`[CRM_EXTRACTED] Raw CRM extractor output`, { 
+        traceId, 
+        country: crmData?.country || '(empty)',
+        department: crmData?.department || '(empty)',
+        travel_date: crmData?.travel_date || '(empty)',
+        should_create_opportunity: crmData?.should_create_opportunity,
+        intent_type: crmData?.intent_type || '(empty)',
+        pipeline_stage: crmData?.pipeline_stage || '(empty)',
+        patient_name: crmData?.patient_name || '(empty)',
+        requires_human_confirmation: crmData?.requires_human_confirmation,
+        requested_callback: crmData?.requested_callback_datetime || '(empty)',
+        report_status: crmData?.report_status || '(empty)'
+      });
+
       // Update DB safely — AI extraction takes precedence over phone prefix for country
       // Medical tourism: patient may have +90 phone but live in Germany ("Almanya'dayım")
       const resolvedCountryForConv = crmData?.country || deterministicCountry;
+      
+      // ═══ DIAGNOSTIC: Worker Resolved Values ═══
+      this.log.info(`[WORKER_RESOLVE] Country resolution trace`, { 
+        traceId, 
+        deterministicCountry: deterministicCountry || '(none)',
+        crmDataCountry: crmData?.country || '(empty)',
+        finalCountryForConversation: resolvedCountryForConv || '(none)',
+        crmDataDepartment: crmData?.department || '(empty)'
+      });
+      
       await convService.updateCrmIntelligence(phoneNumber, {
         patientName: crmData?.patient_name,
         country: resolvedCountryForConv,
@@ -1046,7 +1071,7 @@ export class QueueWorkerEngine {
         tags: crmData?.tags
       });
 
-      this.log.info(`[WORKER_CRM_OK] CRM successfully enriched`, { traceId, patientName: crmData?.patient_name, country: resolvedCountryForConv });
+      this.log.info(`[WORKER_CRM_OK] CRM successfully enriched`, { traceId, patientName: crmData?.patient_name, country: resolvedCountryForConv, department: crmData?.department });
       AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'crm_extraction_completed', category: 'crm', payload: { patientName: crmData?.patient_name, country: resolvedCountryForConv, department: crmData?.department } });
 
       // 10b. Opportunity Upsert / Enrichment (non-fatal, async-safe)
@@ -1054,6 +1079,19 @@ export class QueueWorkerEngine {
         try {
           const { OpportunityService } = await import('../services/opportunity.service');
           const oppService = new OpportunityService(db);
+
+          // ═══ DIAGNOSTIC: Opportunity Pipeline Decision ═══
+          const finalCountryForOpp = crmData.country || deterministicCountry || null;
+          this.log.info(`[WORKER_OPP_DECISION] Opportunity pipeline routing`, { 
+            traceId, 
+            should_create_opportunity: crmData.should_create_opportunity,
+            crmDataCountry: crmData.country || '(empty)',
+            deterministicCountry: deterministicCountry || '(none)',
+            finalCountryForOpportunity: finalCountryForOpp || '(none)',
+            crmDataDepartment: crmData.department || '(empty)',
+            conversationId,
+            intent_type: crmData.intent_type || '(empty)'
+          });
 
           if (crmData.should_create_opportunity) {
             // Full upsert: create or update opportunity
@@ -1069,13 +1107,16 @@ export class QueueWorkerEngine {
               externalCountry: deterministicCountry
             });
             if (oppId) {
-              this.log.info(`[WORKER_OPP_OK] Opportunity upserted`, { traceId, oppId, priority: crmData.opportunity_priority, intent: crmData.intent_type });
+              this.log.info(`[WORKER_OPP_OK] Opportunity upserted`, { traceId, oppId, priority: crmData.opportunity_priority, intent: crmData.intent_type, department: crmData.department, country: crmData.country });
             }
           } else {
             // Always-enrich: even if no new opportunity needed, update existing fields
+            this.log.info(`[WORKER_OPP_ENRICH_START] Enriching existing opportunity (should_create=false)`, { traceId, department: crmData.department, country: crmData.country });
             const enriched = await oppService.enrichExisting(tenantId, conversationId, crmData, deterministicCountry, traceId);
             if (enriched) {
-              this.log.info(`[WORKER_OPP_ENRICHED] Existing opportunity enriched with new CRM data`, { traceId });
+              this.log.info(`[WORKER_OPP_ENRICHED] Existing opportunity enriched with new CRM data`, { traceId, department: crmData.department, country: crmData.country });
+            } else {
+              this.log.warn(`[WORKER_OPP_ENRICH_MISS] enrichExisting returned false — no existing opp found or error`, { traceId });
             }
           }
         } catch (oppErr) {
