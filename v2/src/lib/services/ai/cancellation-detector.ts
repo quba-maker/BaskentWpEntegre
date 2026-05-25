@@ -20,20 +20,22 @@ export interface CancellationDetection {
 // ══════════════════════════════════════════════
 
 const CANCELLATION_PHRASES: RegExp[] = [
-  // Turkish
-  /gelmeyeceğ[iz]m/i,
-  /vazgeçtim/i,
-  /vazgeçtik/i,
-  /gelmekten\s+vazgeçtik/i,
-  /istemiyorum/i,
-  /iptal\s+edin/i,
-  /randevuyu?\s+iptal/i,
-  /ilgilenmiyorum/i,
-  /artık\s+gerek\s+yok/i,
-  /görüşmek\s+istemiyorum/i,
-  /gelme(k|ye)\s+(istemiyorum|niyetim\s+yok)/i,
-  /başka\s+hastane/i,
-  /başka\s+yere?\s+gid/i,
+  // Turkish — core cancellation
+  /gel[e]?meyece[gğ]/i,           // gelmeyeceğim, gelemeyeceğim, gelmeyeceğiz
+  /vazge[cç]ti[mk]/i,             // vazgeçtim, vazgeçtik
+  /vazge[cç]iyorum/i,             // vazgeçiyorum
+  /iptal\s*(et|edin|edelim|ediyorum|istiyorum)/i,  // iptal et, iptal edin, iptal edelim
+  /randevuyu?\s*(iptal|iptale)/i,  // randevuyu iptal, randevu iptale
+  /istemiyorum/i,                  // istemiyorum
+  /ilgilenmiyorum/i,               // ilgilenmiyorum
+  /art[iı]k\s+gerek\s+yok/i,      // artık gerek yok
+  /g[oö]r[uü][sş]mek\s+istemiyorum/i, // görüşmek istemiyorum
+  /gelme[ky]\s*(istemiyorum|niyetim\s+yok)/i, // gelmek istemiyorum
+  /ba[sş]ka\s+hastane/i,           // başka hastaneye gitti
+  /ba[sş]ka\s+yere?\s+gi[dt]/i,    // başka yere gitti/gidiyorum
+  /gelmiyorum/i,                   // gelmiyorum
+  /gelmeyece[gğ]iz/i,             // gelmeyeceğiz  
+  /gele?miyorum/i,                 // gelemiyorum, gelmiyorum
   // English
   /i\s+won'?t\s+come/i,
   /cancel\s+(my\s+)?appointment/i,
@@ -42,6 +44,7 @@ const CANCELLATION_PHRASES: RegExp[] = [
   /no\s+longer\s+interested/i,
   /i('?m|\s+am)\s+not\s+coming/i,
   /changed?\s+my\s+mind/i,
+  /i'?m?\s+cancell?ing/i,
   // Arabic
   /لا أريد/,
   /ألغي/,
@@ -49,7 +52,7 @@ const CANCELLATION_PHRASES: RegExp[] = [
   /لا تتصلوا/,
   // German
   /ich\s+komme\s+nicht/i,
-  /ich\s+möchte\s+nicht/i,
+  /ich\s+m[oö]chte\s+nicht/i,
   /termin\s+absagen/i,
   /stornieren/i,
   /kein\s+interesse/i,

@@ -1110,14 +1110,30 @@ export class QueueWorkerEngine {
           previousLeadStage: beforeConv?.lead_stage || null
         }
       });
-
-      // ═══ P1A-FIX: Deterministic Cancellation Detection ═══
+      // ═══ P1A-FIX2: Multi-Layer Cancellation Detection ═══
+      // Layer 1: LLM explicit boolean (new field — may not be set by older deployments)
       let explicitCancellation = crmData?.explicit_cancellation || false;
       let optOutRequested = crmData?.opt_out_requested || false;
       let cancellationReason = crmData?.cancellation_reason || null;
       let shouldStopFollowUp = crmData?.should_stop_follow_up || false;
 
-      // Run deterministic detector as safety net (overrides LLM if it missed)
+      // Layer 2: LLM intent_type fallback — if LLM said intent is cancellation but missed the boolean
+      if (!explicitCancellation && crmData?.intent_type === 'explicit_cancellation') {
+        explicitCancellation = true;
+        shouldStopFollowUp = true;
+        cancellationReason = cancellationReason || `llm_intent_type: explicit_cancellation`;
+        this.log.info(`[CANCELLATION_LAYER2] LLM intent_type fallback`, { traceId, phoneNumber });
+      }
+
+      // Layer 3: LLM pipeline_stage=lost + priority=cold heuristic
+      if (!explicitCancellation && crmData?.pipeline_stage === 'lost' && crmData?.opportunity_priority === 'cold') {
+        explicitCancellation = true;
+        shouldStopFollowUp = true;
+        cancellationReason = cancellationReason || `llm_stage_priority: lost+cold`;
+        this.log.info(`[CANCELLATION_LAYER3] LLM lost+cold heuristic`, { traceId, phoneNumber });
+      }
+
+      // Layer 4: Deterministic regex safety net (runs even when crmData is null/failed)
       if (content && !explicitCancellation) {
         try {
           const { detectCancellation } = await import('../services/ai/cancellation-detector');
@@ -1127,19 +1143,28 @@ export class QueueWorkerEngine {
             optOutRequested = detection.opt_out_requested || optOutRequested;
             shouldStopFollowUp = true;
             cancellationReason = cancellationReason || `deterministic_match: ${detection.matched_phrases.join(', ')}`;
-            this.log.info(`[CANCELLATION_DETECTED] Deterministic override`, {
+            this.log.info(`[CANCELLATION_LAYER4] Deterministic override`, {
               traceId, phoneNumber,
               matched_phrases: detection.matched_phrases,
-              llm_missed: !crmData?.explicit_cancellation
+              llm_missed: true,
+              crmDataNull: !crmData
             });
           }
         } catch (_) { /* non-blocking */ }
       }
 
-      // Override pipeline_stage to 'lost' if explicit cancellation detected
+      // Override pipeline_stage to 'lost' if any cancellation layer triggered
       const effectivePipelineStage = explicitCancellation 
         ? 'lost' 
         : crmData?.pipeline_stage;
+
+      if (explicitCancellation) {
+        this.log.info(`[CANCELLATION_FINAL] Explicit cancellation confirmed`, {
+          traceId, phoneNumber, optOutRequested, cancellationReason,
+          effectivePipelineStage: 'lost',
+          originalPipelineStage: crmData?.pipeline_stage || '(null)',
+        });
+      }
       
       await convService.updateCrmIntelligence(phoneNumber, {
         patientName: crmData?.patient_name,

@@ -255,13 +255,65 @@ Pipeline Aşama Kuralları (sırayla ilerler, geri gitmez):
         }
       }
       
-      const validatedData = CrmExtractionSchema.parse(parsedObj);
+      
+      // Use safeParse to avoid losing the entire extraction on minor type mismatches
+      // (e.g. LLM returns follow_up_hours as string "24" instead of number 24)
+      const safeResult = CrmExtractionSchema.safeParse(parsedObj);
+      
+      let validatedData: CrmExtractionType;
+      if (safeResult.success) {
+        validatedData = safeResult.data;
+      } else {
+        // Partial recovery: strip invalid fields, keep valid ones
+        this.log.warn(`[CRM_ZOD_PARTIAL] Zod validation partial failure, recovering valid fields`, {
+          traceId,
+          errors: safeResult.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; '),
+        });
+        
+        // Manual recovery: coerce known problematic fields
+        const coerced = { ...parsedObj };
+        if (typeof coerced.follow_up_hours === 'string') {
+          coerced.follow_up_hours = parseInt(coerced.follow_up_hours, 10) || undefined;
+        }
+        if (typeof coerced.country_confidence === 'string') {
+          coerced.country_confidence = parseFloat(coerced.country_confidence) || undefined;
+        }
+        // Nulls → undefined for optional string fields
+        for (const key of ['opportunity_reason', 'requested_callback_datetime', 'travel_date', 'cancellation_reason']) {
+          if (coerced[key] === null) coerced[key] = undefined;
+        }
+        
+        // Retry with coerced values
+        const retryResult = CrmExtractionSchema.safeParse(coerced);
+        if (retryResult.success) {
+          validatedData = retryResult.data;
+          this.log.info(`[CRM_ZOD_RECOVERED] Coerced types recovered extraction`, { traceId });
+        } else {
+          // Last resort: pick only known-valid fields manually
+          validatedData = {
+            patient_name: typeof parsedObj.patient_name === 'string' ? parsedObj.patient_name : undefined,
+            country: typeof parsedObj.country === 'string' ? parsedObj.country : undefined,
+            department: typeof parsedObj.department === 'string' ? parsedObj.department : undefined,
+            pipeline_stage: typeof parsedObj.pipeline_stage === 'string' ? parsedObj.pipeline_stage : undefined,
+            tags: Array.isArray(parsedObj.tags) ? parsedObj.tags : undefined,
+            explicit_cancellation: typeof parsedObj.explicit_cancellation === 'boolean' ? parsedObj.explicit_cancellation : undefined,
+            opt_out_requested: typeof parsedObj.opt_out_requested === 'boolean' ? parsedObj.opt_out_requested : undefined,
+            cancellation_reason: typeof parsedObj.cancellation_reason === 'string' ? parsedObj.cancellation_reason : undefined,
+            should_stop_follow_up: typeof parsedObj.should_stop_follow_up === 'boolean' ? parsedObj.should_stop_follow_up : undefined,
+            opportunity_priority: ['cold', 'warm', 'hot'].includes(parsedObj.opportunity_priority) ? parsedObj.opportunity_priority : undefined,
+            intent_type: typeof parsedObj.intent_type === 'string' ? parsedObj.intent_type : undefined,
+            should_create_opportunity: typeof parsedObj.should_create_opportunity === 'boolean' ? parsedObj.should_create_opportunity : undefined,
+          } as CrmExtractionType;
+          this.log.warn(`[CRM_ZOD_MANUAL_RECOVERY] Manual field extraction as last resort`, { traceId });
+        }
+      }
 
       this.log.info(`[CRM_EXTRACTION_SUCCESS] CRM intelligence applied`, { 
         traceId, 
         country: validatedData.country,
         department: validatedData.department,
         stage: validatedData.pipeline_stage,
+        explicitCancellation: validatedData.explicit_cancellation,
         callbackTime: validatedData.requested_callback_datetime,
         travelDate: validatedData.travel_date,
         requiresConfirmation: validatedData.requires_human_confirmation
