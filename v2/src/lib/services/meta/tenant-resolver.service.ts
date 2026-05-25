@@ -24,6 +24,7 @@ export interface TenantRuntimeConfig {
   // Meta App Credentials (tenant-isolated, for validating webhook signature)
   metaAppId: string | null;
   metaAppSecret: string | null;
+  instagramAppSecret: string | null;
 
   // Channel Specific
   identifier: string; // The phone number id or page id
@@ -127,6 +128,7 @@ export class TenantResolverService {
             t.name as tenant_name,
             t.meta_app_id,
             t.meta_app_secret,
+            t.instagram_app_secret,
             t.plan,
             t.status,
             t.whatsapp_phone_id,
@@ -190,6 +192,7 @@ export class TenantResolverService {
             provider: identifier.type,
             metaAppId: t.meta_app_id || null,
             metaAppSecret: t.meta_app_secret || null,
+            instagramAppSecret: t.instagram_app_secret || null,
             identifier: identifier.id,
             accessToken: t.meta_page_token || null,
             whatsappPhoneNumberId: t.whatsapp_phone_id || null,
@@ -260,6 +263,7 @@ export class TenantResolverService {
         provider: row.provider,
         metaAppId: row.meta_app_id || null,
         metaAppSecret: row.meta_app_secret || null,
+        instagramAppSecret: row.instagram_app_secret || null,
         identifier: row.identifier,
         accessToken: accessToken,
         whatsappPhoneNumberId: row.whatsapp_phone_id || null,

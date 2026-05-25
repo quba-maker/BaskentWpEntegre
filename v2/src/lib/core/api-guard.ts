@@ -112,42 +112,56 @@ export function withApiGuard(
       //   - Tenants connected via Quba AI platform app
       // ─────────────────────────────────────────
       if (options.verifySignature) {
-        const tenantSecret = tenantRuntime?.metaAppSecret;
-        const globalSecret = process.env.META_APP_SECRET;
-        const secretSource = tenantSecret ? 'tenant_db' : 'env_global';
-        const APP_SECRET = (tenantSecret || globalSecret || "").trim();
+        const signature = req.headers.get("x-hub-signature-256");
+        if (!signature) {
+          log.warn("Missing x-hub-signature-256 header", {
+            tenantSlug: tenantRuntime?.tenantSlug || 'unknown'
+          });
+          return new NextResponse("FORBIDDEN", { status: 403 });
+        }
 
-        if (APP_SECRET) {
-          const signature = req.headers.get("x-hub-signature-256");
-          if (!signature) {
-            log.warn("Missing x-hub-signature-256 header", {
-              tenantSlug: tenantRuntime?.tenantSlug || 'unknown'
-            });
-            return new NextResponse("FORBIDDEN", { status: 403 });
-          }
+        // Build candidate secrets list:
+        //   1. Tenant's Facebook App Secret (meta_app_secret)
+        //   2. Tenant's Instagram App Secret (instagram_app_secret)
+        //   3. Global platform secret (META_APP_SECRET env)
+        const candidateSecrets: { source: string; secret: string }[] = [];
+        if (tenantRuntime?.metaAppSecret) {
+          candidateSecrets.push({ source: 'tenant_db_meta', secret: tenantRuntime.metaAppSecret.trim() });
+        }
+        if (tenantRuntime?.instagramAppSecret) {
+          candidateSecrets.push({ source: 'tenant_db_instagram', secret: tenantRuntime.instagramAppSecret.trim() });
+        }
+        if (process.env.META_APP_SECRET) {
+          candidateSecrets.push({ source: 'env_global', secret: process.env.META_APP_SECRET.trim() });
+        }
 
+        if (candidateSecrets.length > 0) {
           const crypto = await import("crypto");
-          const expectedSig = "sha256=" + crypto
-            .createHmac("sha256", APP_SECRET)
-            .update(rawBody)
-            .digest("hex");
-
-          // Timing-safe comparison to prevent timing attacks
           const sigBuffer = Buffer.from(signature);
-          const expectedBuffer = Buffer.from(expectedSig);
-          
           let isMatch = false;
-          if (sigBuffer.length === expectedBuffer.length) {
-            isMatch = crypto.timingSafeEqual(sigBuffer, expectedBuffer);
+          let matchedSource = '';
+
+          for (const candidate of candidateSecrets) {
+            const expectedSig = "sha256=" + crypto
+              .createHmac("sha256", candidate.secret)
+              .update(rawBody)
+              .digest("hex");
+            const expectedBuffer = Buffer.from(expectedSig);
+
+            if (sigBuffer.length === expectedBuffer.length) {
+              if (crypto.timingSafeEqual(sigBuffer, expectedBuffer)) {
+                isMatch = true;
+                matchedSource = candidate.source;
+                break;
+              }
+            }
           }
 
           if (!isMatch) {
-            log.warn("Signature mismatch", {
+            log.warn("Signature mismatch (all secrets tried)", {
               tenantSlug: tenantRuntime?.tenantSlug || 'unknown',
-              secretSource,
-              secretLength: APP_SECRET.length,
+              secretsTried: candidateSecrets.map(c => c.source),
               receivedPrefix: signature.substring(0, 20),
-              expectedPrefix: expectedSig.substring(0, 20),
               bodyLength: rawBody.length
             });
             return new NextResponse("FORBIDDEN", { status: 403 });
@@ -155,9 +169,8 @@ export function withApiGuard(
 
           log.info("Webhook signature verified", {
             tenantSlug: tenantRuntime?.tenantSlug || 'unknown',
-            secretSource
+            secretSource: matchedSource
           });
-
         } else {
           // No secret configured anywhere — allow but warn
           log.warn("No META_APP_SECRET configured (tenant or env), skipping verification", {
