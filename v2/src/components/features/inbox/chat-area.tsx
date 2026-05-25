@@ -14,7 +14,7 @@ import { TypingIndicator } from "@/components/features/realtime/typing-indicator
 import { useBufferedStream } from "@/hooks/use-buffered-stream";
 import { AblyStreamTransport } from "@/lib/ai/streaming/stream-transport";
 import { StreamBubble } from "@/components/components/../features/realtime/stream-bubble";
-import { getCountryFromPhone } from "@/lib/utils/country";
+import { getCountryFromPhone, normalizeCountryName } from "@/lib/utils/country";
 
 import { useRealtimeTenant } from "@/components/providers/realtime-provider";
 import { useDiagnosticsStore } from "@/lib/realtime/diagnostics-store";
@@ -581,7 +581,7 @@ export function ConversationViewport() {
                 {activeContact.name || activeContact.id}
               </h3>
               {(() => {
-                const country = getCountryFromPhone(activeContact.id) || (activeContact.country ? { flag: '🌍', name: activeContact.country, code: '' } : null);
+                const country = getCountryFromPhone(activeContact.id) || (activeContact.country ? { flag: '🌍', name: normalizeCountryName(activeContact.country), code: '' } : null);
                 return country ? (
                   <span className="ml-1.5 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] font-semibold flex-shrink-0" style={{ background: 'rgba(0,0,0,0.04)', color: 'var(--q-text-secondary)' }}>
                     {country.flag} {country.name}

@@ -62,12 +62,74 @@ export function getCountryFromPhone(phone: string | null | undefined): CountryIn
   const clean = phone.replace(/[^0-9]/g, '');
   if (clean.length < 8) return null;
 
+  // Skip social platform IDs (Instagram IGSID, Messenger PSID — typically 15+ digits with no country prefix match)
+  if (clean.length > 14) return null;
+
   // Try longest prefix first (3-digit → 2-digit → 1-digit)
   for (const [prefix, info] of PHONE_PREFIX_MAP) {
     if (clean.startsWith(prefix)) return info;
   }
 
   return null;
+}
+
+// English → Turkish country name normalization (for AI-detected country fields)
+const COUNTRY_NAME_TR_MAP: Record<string, string> = {
+  'turkey': 'Türkiye',
+  'türkei': 'Türkiye',
+  'germany': 'Almanya',
+  'deutschland': 'Almanya',
+  'united kingdom': 'İngiltere',
+  'uk': 'İngiltere',
+  'england': 'İngiltere',
+  'france': 'Fransa',
+  'italy': 'İtalya',
+  'spain': 'İspanya',
+  'netherlands': 'Hollanda',
+  'belgium': 'Belçika',
+  'austria': 'Avusturya',
+  'switzerland': 'İsviçre',
+  'sweden': 'İsveç',
+  'norway': 'Norveç',
+  'denmark': 'Danimarka',
+  'poland': 'Polonya',
+  'greece': 'Yunanistan',
+  'hungary': 'Macaristan',
+  'romania': 'Romanya',
+  'bulgaria': 'Bulgaristan',
+  'ukraine': 'Ukrayna',
+  'russia': 'Rusya',
+  'usa': 'ABD',
+  'united states': 'ABD',
+  'australia': 'Avustralya',
+  'japan': 'Japonya',
+  'china': 'Çin',
+  'south korea': 'Güney Kore',
+  'india': 'Hindistan',
+  'brazil': 'Brezilya',
+  'mexico': 'Meksika',
+  'iraq': 'Irak',
+  'jordan': 'Ürdün',
+  'lebanon': 'Lübnan',
+  'saudi arabia': 'Suudi Arabistan',
+  'uae': 'BAE',
+  'united arab emirates': 'BAE',
+  'azerbaijan': 'Azerbaycan',
+  'uzbekistan': 'Özbekistan',
+  'kyrgyzstan': 'Kırgızistan',
+  'turkmenistan': 'Türkmenistan',
+  'tajikistan': 'Tacikistan',
+  'georgia': 'Gürcistan',
+  'armenia': 'Ermenistan',
+  'kazakhstan': 'Kazakistan',
+};
+
+/**
+ * Normalize country name to Turkish (handles AI-detected English names)
+ */
+export function normalizeCountryName(name: string): string {
+  const lower = name.trim().toLowerCase();
+  return COUNTRY_NAME_TR_MAP[lower] || name;
 }
 
 /**
