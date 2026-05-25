@@ -1046,6 +1046,29 @@ export class QueueWorkerEngine {
 
       this.log.info(`[WORKER_CRM_OK] CRM successfully enriched`, { traceId, patientName: crmData?.patient_name, country: deterministicCountry || crmData?.country });
       AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'crm_extraction_completed', category: 'crm', payload: { patientName: crmData?.patient_name, country: deterministicCountry || crmData?.country, department: crmData?.department } });
+
+      // 10b. Opportunity Upsert (non-fatal, async-safe)
+      if (crmData?.should_create_opportunity && conversationId) {
+        try {
+          const { OpportunityService } = await import('../services/opportunity.service');
+          const oppService = new OpportunityService(db);
+          const oppId = await oppService.upsertFromCrm({
+            tenantId,
+            conversationId,
+            phoneNumber,
+            channel,
+            patientName: crmData.patient_name,
+            crmData,
+            lastCustomerMessageAt: new Date().toISOString(),
+            traceId
+          });
+          if (oppId) {
+            this.log.info(`[WORKER_OPP_OK] Opportunity upserted`, { traceId, oppId, priority: crmData.opportunity_priority, intent: crmData.intent_type });
+          }
+        } catch (oppErr) {
+          this.log.error(`[WORKER_OPP_FAILED] Non-fatal opportunity error`, oppErr instanceof Error ? oppErr : new Error(String(oppErr)), { traceId });
+        }
+      }
     } catch (crmErr) {
       this.log.error(`[WORKER_CRM_FAILED] Non-fatal CRM extraction error`, crmErr instanceof Error ? crmErr : new Error(String(crmErr)), { traceId });
       AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'crm_extraction_failed', category: 'crm', severity: 'warning' });

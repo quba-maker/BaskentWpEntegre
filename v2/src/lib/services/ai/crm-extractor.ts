@@ -13,7 +13,14 @@ export const CrmExtractionSchema = z.object({
   tags: z.array(z.string()).optional(),
   needs_country_question: z.boolean().optional(),
   needs_name_question: z.boolean().optional(),
-  suggested_questions: z.array(z.string()).optional()
+  suggested_questions: z.array(z.string()).optional(),
+  // Opportunity Detection Fields
+  should_create_opportunity: z.boolean().optional(),
+  opportunity_priority: z.enum(['cold', 'warm', 'hot']).optional(),
+  intent_type: z.string().optional(),
+  next_best_action: z.string().optional(),
+  follow_up_hours: z.number().optional(),
+  opportunity_reason: z.string().optional()
 });
 
 export type CrmExtractionType = z.infer<typeof CrmExtractionSchema>;
@@ -65,7 +72,14 @@ Format:
   "pipeline_stage": "string (new | contacted | responded | discovery | qualified | appointed | lost)",
   "tags": ["string"] (Örn: yurtdışı_hasta, acil, fiyat_odaklı, ilgili vb. tamamen TÜRKÇE, küçük harflerle ve boşluk yerine alt çizgi kullanarak),
   "needs_country_question": boolean (Eğer hastanın ülkesi belirsizse ve randevu için lazımsa true),
-  "needs_name_question": boolean (Eğer isim bilinmiyorsa true)
+  "needs_name_question": boolean (Eğer isim bilinmiyorsa true),
+
+  "should_create_opportunity": boolean,
+  "opportunity_priority": "cold" | "warm" | "hot",
+  "intent_type": "string (appointment_request | report_sent | report_waiting | price_inquiry | travel_planning | doctor_review | general_info | follow_up_needed)",
+  "next_best_action": "string (call_patient | send_info | request_report | doctor_review | send_offer | plan_appointment | follow_up)",
+  "follow_up_hours": number (önerilen takip süresi, saat olarak. Örn: 4, 24, 48, 72, 168),
+  "opportunity_reason": "string (neden opportunity açılmalı — kısa açıklama)"
 }
 
 Pipeline Aşama Kuralları (sırayla ilerler, geri gitmez):
@@ -77,10 +91,32 @@ Pipeline Aşama Kuralları (sırayla ilerler, geri gitmez):
 - "appointed": Hasta randevu aldı, tarih belirlendi veya geliş planı kesinleşti.
 - "lost": Hasta ilgilenmediğini belirtti, uzun süre yanıt vermedi veya başka yere gittiğini söyledi.
 
+🔥 FIRSAT TESPİT KURALLARI (should_create_opportunity):
+- should_create_opportunity = TRUE eğer:
+  • Hasta randevu istiyorsa (appointment_request)
+  • Hasta rapor gönderdi veya göndereceğini söylüyorsa (report_sent, report_waiting)
+  • Hasta fiyat soruyorsa (price_inquiry)
+  • Hasta gelmek istediğini belirtiyorsa (travel_planning)
+  • Hasta doktor incelemesi istiyorsa (doctor_review)
+  • Hasta departman/tedavi hakkında detaylı soru soruyorsa (general_info)
+
+- should_create_opportunity = FALSE eğer:
+  • Hasta sadece "merhaba", "selam", "hi" yazdıysa
+  • Sadece emoji, sticker, tepki gönderiyorsa
+  • Fan mesajı ("harika", "güzel sayfa", "👏")
+  • Spam veya alakasız mesaj
+  • Hasta zaten ilgisini kaybettiğini belirttiyse
+
+- priority:
+  • HOT: Randevu istedi, rapor gönderdi, gelmek istiyor, tarih soruyor
+  • WARM: Fiyat soruyor, bilgi alıyor, tedavi seçeneklerini araştırıyor
+  • COLD: Genel soru, henüz net niyet yok ama potansiyel var
+
 Önemli Kurallar:
 - Eğer mevcut aşama belirlenemiyorsa "new" döndür.
 - Pipeline sadece İLERİ gider: appointed veya lost olan bir hasta discovery'ye geri dönemez.
-- Departman: Yalnızca kullanıcının sorusuna veya ihtiyacına göre belirle. Kanıt yoksa boş bırak.`
+- Departman: Yalnızca kullanıcının sorusuna veya ihtiyacına göre belirle. Kanıt yoksa boş bırak.
+- should_create_opportunity: Emin değilsen false döndür. Yanlış pozitif, yanlış negatiften daha kötüdür.`
       };
 
       // Filter out original system prompts to avoid confusing the extraction model

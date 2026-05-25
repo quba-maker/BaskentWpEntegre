@@ -80,6 +80,9 @@ export async function Sidebar({ tenantData }: { tenantData?: TenantBootstrapData
           <NavLink href={`/${session?.tenantSlug || ''}/forms`} icon={<ClipboardList className="w-[18px] h-[18px]" />} label="Formlar" />
         )}
         
+        {/* PIPELINE / TAKİP MERKEZİ */}
+        <NavLink href={`/${session?.tenantSlug || ''}/takip`} icon={<Radar className="w-[18px] h-[18px]" />} label="Takip Merkezi" />
+        
         {/* AI MODULES */}
         {session?.role !== "viewer" && (
           <NavLink href={`/${session?.tenantSlug || ''}/bot`} icon={<Bot className="w-[18px] h-[18px]" />} label="AI Asistan" />
