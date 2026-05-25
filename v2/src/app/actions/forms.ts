@@ -43,12 +43,39 @@ export async function getForms(page: number = 1, search: string = "", source: st
       const limitIdx = paramIdx;
       const offsetIdx = paramIdx + 1;
 
+      // Safe AI summary linking strategy:
+      // Layer 1: customer_id link (identity match)
+      // Layer 2: phone match ONLY if exactly ONE conversation exists (no ambiguity)
+      // Layer 3: no match → null summary (safe empty state)
       const rows = await ctx.db.executeSafe({
-        text: `SELECT l.*, c.status as conversation_status, c.lead_stage as conv_lead_stage, mem.summary_text as ai_summary
+        text: `SELECT l.*, 
+               COALESCE(c_identity.status, c_phone.status) as conversation_status, 
+               COALESCE(c_identity.lead_stage, c_phone.lead_stage) as conv_lead_stage, 
+               COALESCE(mem_identity.summary_text, mem_phone.summary_text) as ai_summary,
+               CASE 
+                 WHEN c_identity.id IS NOT NULL THEN 'customer_id'
+                 WHEN c_phone.id IS NOT NULL THEN 'phone_unique'
+                 ELSE 'none'
+               END as summary_link_method
                FROM leads l
-               LEFT JOIN conversations c ON c.tenant_id = l.tenant_id 
-                 AND RIGHT(c.phone_number, 10) = RIGHT(l.phone_number, 10)
-               LEFT JOIN conversation_memory mem ON mem.conversation_id::text = c.id::text
+               -- Layer 1: Safe link via customer_id (identity-based, no ambiguity)
+               LEFT JOIN conversations c_identity ON c_identity.tenant_id = l.tenant_id 
+                 AND l.customer_id IS NOT NULL 
+                 AND c_identity.customer_id = l.customer_id
+               LEFT JOIN conversation_memory mem_identity ON mem_identity.conversation_id = c_identity.id
+               -- Layer 2: Phone match only if EXACTLY ONE conversation matches (prevents cross-leak)
+               LEFT JOIN LATERAL (
+                 SELECT c2.id, c2.status, c2.lead_stage
+                 FROM conversations c2 
+                 WHERE c2.tenant_id = l.tenant_id 
+                   AND RIGHT(c2.phone_number, 10) = RIGHT(l.phone_number, 10)
+                   AND l.customer_id IS NULL  -- Only use phone fallback when customer_id link unavailable
+                   AND (SELECT COUNT(*) FROM conversations cx 
+                        WHERE cx.tenant_id = l.tenant_id 
+                        AND RIGHT(cx.phone_number, 10) = RIGHT(l.phone_number, 10)) = 1
+                 LIMIT 1
+               ) c_phone ON c_identity.id IS NULL
+               LEFT JOIN conversation_memory mem_phone ON mem_phone.conversation_id = c_phone.id AND c_identity.id IS NULL
                WHERE ${conditions.join(' AND ')}
                ORDER BY l.created_at DESC LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
         values: params
@@ -67,7 +94,8 @@ export async function getForms(page: number = 1, search: string = "", source: st
         country: r.country,
         notes: r.notes || "",
         ai_summary: r.ai_summary || "",
-        isBotActive: r.conversation_status === 'bot'
+        isBotActive: r.conversation_status === 'bot',
+        summaryLinkMethod: r.summary_link_method || 'none'
       }));
     }
   ).then(res => res.data || []);

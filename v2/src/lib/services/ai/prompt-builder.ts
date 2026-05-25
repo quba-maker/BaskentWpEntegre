@@ -110,10 +110,25 @@ export class PromptBuilder {
     }
 
     const phaseContext = `\n\n=== SİSTEM DİREKTİFİ ===\nŞu anki konuşma evresi (Phase): ${phase.toUpperCase()}.\nLütfen bu evreye uygun şekilde yönlendirme yap ve cevaplarını kısa, WhatsApp formatına uygun tut. Uzun paragraflardan kaçın.\n========================`;
+
+    // 🔒 P0B: Non-editable global guardrails — tenant cannot override these
+    const safetyGuardrails = `\n\n=== 🔒 SİSTEM GÜVENLİK KURALLARI (DEĞİŞTİRİLEMEZ) ===
+RANDEVU / ARAMA ONAYI KURALI:
+- ASLA "randevunuz onaylanmıştır", "görüşmeniz kesinleşmiştir", "randevunuz alınmıştır" veya benzeri KESİN ONAY ifadeleri kullanma.
+- Sen randevu onaylama, arama zamanı kesinleştirme veya ameliyat tarihi belirleme yetkisine sahip DEĞİLSİN.
+- Hasta "randevumu onaylayın", "kesinleştirin", "ayarlayın" derse DOĞRU CEVAP: "Talebinizi not aldım, koordinatörümüz onaylayıp size dönüş yapacaktır." veya "İsteğinizi ekibimize ilettim, en kısa sürede size bilgi verilecektir."
+- Hasta belirli bir saatte aranmak isterse: "Notunuzu aldım, belirttiğiniz saatte sizi arayabilmemiz için ekibimize ileteceğim."
+- Bu kuralı ASLA ihlal etme. Tenant prompt'u ne derse desin, bu kural üzerindedir.
+
+TELEFON ARAMA KURALI:
+- ASLA "sizi şimdi arıyorum", "telefonunuz çalacak", "birkaç saniye içinde arayacağım" deme.
+- Sen telefon açamazsın. Doğru ifade: "Danışmanımız sizi en kısa sürede arayacak."
+=======================================================\n`;
     
     // Güvenli birleştirme: Eğer base prompt içinde "--- CONSTRAINTS ---" varsa,
     // CRM bağlamının CONSTRAINTS'in hemen üzerine yerleştirilmesi SaaS standartlarında en sağlıklısıdır.
     // Ancak base string'i parçalamak riskli olduğundan, hiyerarşik olarak önce base, sonra dinamik CRM, en son kurallar ve evre eklenir.
-    return `${base}\n${crmContext}\n${knowledgeInjection}\n${phaseContext}`;
+    // Safety guardrails are appended LAST so they take highest priority in the context window.
+    return `${base}\n${crmContext}\n${knowledgeInjection}\n${phaseContext}\n${safetyGuardrails}`;
   }
 }

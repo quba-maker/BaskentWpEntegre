@@ -1,5 +1,5 @@
 import { logger } from "@/lib/core/logger";
-import type { TenantQueryGuard } from "@/lib/core/tenant-db";
+import type { TenantDB } from "@/lib/core/tenant-db";
 import type { CrmExtractionType } from "./ai/crm-extractor";
 
 const log = logger.withContext({ module: 'OpportunityService' });
@@ -73,18 +73,56 @@ export interface OpportunityUpsertInput {
   crmData: CrmExtractionType;
   lastCustomerMessageAt?: string;
   traceId: string;
+  externalCountry?: string; // Deterministic country from phone prefix
 }
 
 export class OpportunityService {
-  constructor(private db: TenantQueryGuard) {}
+  constructor(private db: TenantDB) {}
 
   /**
    * Upsert opportunity from CRM extraction result.
    * Creates new opportunity if none exists for this conversation.
    * Updates existing opportunity if one exists (stage forward-only).
    */
+  /**
+   * Compute the best next_follow_up_at from CRM extraction.
+   * Priority: requested_callback_datetime > follow_up_hours > 24h default
+   */
+  private computeNextFollowUp(crmData: CrmExtractionType): string {
+    // 1. AI extracted a specific callback datetime (e.g. "yarın 14:00")
+    if (crmData.requested_callback_datetime) {
+      try {
+        const parsed = new Date(crmData.requested_callback_datetime);
+        if (!isNaN(parsed.getTime()) && parsed.getTime() > Date.now()) {
+          return parsed.toISOString();
+        }
+      } catch {
+        // Fall through to follow_up_hours
+      }
+    }
+    // 2. AI suggested follow_up_hours
+    const followUpHours = crmData.follow_up_hours || 24;
+    return new Date(Date.now() + followUpHours * 3600 * 1000).toISOString();
+  }
+
+  /**
+   * Build metadata JSONB from CRM extraction.
+   */
+  private buildMetadata(crmData: CrmExtractionType): Record<string, any> {
+    const meta: Record<string, any> = {};
+    if (crmData.requested_callback_datetime) meta.requested_callback_datetime = crmData.requested_callback_datetime;
+    if (crmData.travel_date) meta.travel_date_raw = crmData.travel_date;
+    if (crmData.report_status && crmData.report_status !== 'none') meta.report_status = crmData.report_status;
+    if (crmData.next_best_action) meta.next_best_action = crmData.next_best_action;
+    if (crmData.requires_human_confirmation) meta.requires_human_confirmation = true;
+    return meta;
+  }
+
   async upsertFromCrm(input: OpportunityUpsertInput): Promise<string | null> {
-    const { tenantId, conversationId, phoneNumber, channel, patientName, crmData, lastCustomerMessageAt, traceId } = input;
+    const { tenantId, conversationId, phoneNumber, channel, patientName, crmData, lastCustomerMessageAt, traceId, externalCountry } = input;
+
+    // Resolve country: externalCountry (deterministic) > crmData.country
+    const resolvedCountry = externalCountry || crmData.country || null;
 
     // Guard: Do not create opportunity if AI says no
     if (!crmData.should_create_opportunity) {
@@ -104,8 +142,17 @@ export class OpportunityService {
 
       const newStage = mapPipelineToOpportunityStage(crmData.pipeline_stage, crmData.intent_type);
       const priority = crmData.opportunity_priority || 'warm';
-      const followUpHours = crmData.follow_up_hours || 24;
-      const nextFollowUp = new Date(Date.now() + followUpHours * 3600 * 1000).toISOString();
+      const nextFollowUp = this.computeNextFollowUp(crmData);
+      const metadata = this.buildMetadata(crmData);
+
+      // Parse travel_date
+      let travelDate: string | null = null;
+      if (crmData.travel_date) {
+        try {
+          const td = new Date(crmData.travel_date);
+          if (!isNaN(td.getTime())) travelDate = td.toISOString().split('T')[0];
+        } catch { /* ignore */ }
+      }
 
       if (existing.length > 0) {
         // UPDATE existing — forward-only stage progression
@@ -126,38 +173,47 @@ export class OpportunityService {
           text: `UPDATE opportunities SET
                    stage = $1,
                    priority = $2,
-                   intent_type = COALESCE($3, intent_type),
-                   department = COALESCE($4, department),
-                   country = COALESCE($5, country),
-                   language = COALESCE($6, language),
-                   patient_name = COALESCE($7, patient_name),
-                   summary = COALESCE($8, summary),
+                   intent_type = COALESCE(NULLIF($3, ''), intent_type),
+                   department = COALESCE(NULLIF($4, ''), department),
+                   country = COALESCE(NULLIF($5, ''), country),
+                   language = COALESCE(NULLIF($6, ''), language),
+                   patient_name = COALESCE(NULLIF($7, ''), patient_name),
+                   summary = COALESCE(NULLIF($8, ''), summary),
                    next_follow_up_at = $9,
                    last_customer_message_at = COALESCE($10, last_customer_message_at),
-                   ai_confidence = $11,
-                   ai_reason = COALESCE($12, ai_reason),
+                   ai_confidence = COALESCE($11, ai_confidence),
+                   ai_reason = COALESCE(NULLIF($12, ''), ai_reason),
+                   travel_date = COALESCE($13::date, travel_date),
+                   report_status = COALESCE(NULLIF($14, ''), NULLIF($14, 'none'), report_status),
+                   requires_human_confirmation = CASE WHEN $15 = true THEN true ELSE requires_human_confirmation END,
+                   metadata = metadata || $16::jsonb,
                    updated_at = NOW()
-                 WHERE id = $13 AND tenant_id = $14`,
+                 WHERE id = $17 AND tenant_id = $18`,
           values: [
             finalStage,
             finalPriority,
-            crmData.intent_type || null,
-            crmData.department || null,
-            crmData.country || null,
-            crmData.language || null,
-            patientName || null,
-            crmData.opportunity_reason || null,
+            crmData.intent_type || '',
+            crmData.department || '',
+            resolvedCountry || '',
+            crmData.language || '',
+            patientName || '',
+            crmData.opportunity_reason || '',
             nextFollowUp,
             lastCustomerMessageAt || null,
             crmData.country_confidence || null,
-            crmData.opportunity_reason || null,
+            crmData.opportunity_reason || '',
+            travelDate,
+            crmData.report_status || '',
+            crmData.requires_human_confirmation || false,
+            JSON.stringify(metadata),
             current.id,
             tenantId
           ]
         });
 
         log.info(`[OPP_UPDATED] Opportunity updated`, { 
-          traceId, oppId: current.id, stage: finalStage, priority: finalPriority 
+          traceId, oppId: current.id, stage: finalStage, priority: finalPriority,
+          travelDate, reportStatus: crmData.report_status, requiresConfirmation: crmData.requires_human_confirmation
         });
         return current.id;
       }
@@ -172,41 +228,106 @@ export class OpportunityService {
                  next_follow_up_at, automation_status,
                  last_customer_message_at,
                  summary, ai_confidence, ai_reason,
-                 tags
-               ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+                 tags, travel_date, report_status,
+                 requires_human_confirmation, metadata
+               ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20::date, $21, $22, $23::jsonb)
                RETURNING id`,
         values: [
           tenantId,
           conversationId,
           phoneNumber,
           patientName || null,
-          crmData.country || null,
+          resolvedCountry,
           crmData.language || null,
-          channel, // whatsapp | instagram | messenger
+          channel,
           channel,
           crmData.department || null,
           newStage,
           priority,
           crmData.intent_type || null,
           nextFollowUp,
-          'manual', // MVP: no auto messaging
+          'manual',
           lastCustomerMessageAt || new Date().toISOString(),
           crmData.opportunity_reason || null,
           crmData.country_confidence || null,
           crmData.opportunity_reason || null,
-          crmData.tags || []
+          crmData.tags || [],
+          travelDate,
+          crmData.report_status || null,
+          crmData.requires_human_confirmation || false,
+          JSON.stringify(metadata)
         ]
       }) as any[];
 
       const newId = result[0]?.id;
       log.info(`[OPP_CREATED] New opportunity created`, { 
-        traceId, oppId: newId, stage: newStage, priority, intentType: crmData.intent_type 
+        traceId, oppId: newId, stage: newStage, priority, intentType: crmData.intent_type,
+        travelDate, reportStatus: crmData.report_status
       });
       return newId;
 
     } catch (e: any) {
       log.error(`[OPP_UPSERT_FAILED] Non-fatal opportunity error`, e instanceof Error ? e : new Error(String(e)), { traceId });
       return null;
+    }
+  }
+
+  /**
+   * Partial update: Enrich existing opportunity with new CRM data without full upsert.
+   * Used when should_create_opportunity=false but active opportunity exists.
+   */
+  async enrichExisting(tenantId: string, conversationId: string, crmData: CrmExtractionType, externalCountry?: string, traceId?: string): Promise<boolean> {
+    try {
+      const existing = await this.db.executeSafe({
+        text: `SELECT id FROM opportunities 
+               WHERE conversation_id = $1 AND tenant_id = $2 
+               AND stage NOT IN ('lost', 'not_qualified', 'arrived')
+               ORDER BY created_at DESC LIMIT 1`,
+        values: [conversationId, tenantId]
+      }) as any[];
+
+      if (existing.length === 0) return false;
+
+      const resolvedCountry = externalCountry || crmData.country || null;
+      const metadata = this.buildMetadata(crmData);
+      let travelDate: string | null = null;
+      if (crmData.travel_date) {
+        try {
+          const td = new Date(crmData.travel_date);
+          if (!isNaN(td.getTime())) travelDate = td.toISOString().split('T')[0];
+        } catch { /* ignore */ }
+      }
+
+      await this.db.executeSafe({
+        text: `UPDATE opportunities SET
+                 department = COALESCE(NULLIF($1, ''), department),
+                 country = COALESCE(NULLIF($2, ''), country),
+                 language = COALESCE(NULLIF($3, ''), language),
+                 travel_date = COALESCE($4::date, travel_date),
+                 report_status = COALESCE(NULLIF($5, ''), NULLIF($5, 'none'), report_status),
+                 requires_human_confirmation = CASE WHEN $6 = true THEN true ELSE requires_human_confirmation END,
+                 metadata = metadata || $7::jsonb,
+                 last_customer_message_at = NOW(),
+                 updated_at = NOW()
+               WHERE id = $8 AND tenant_id = $9`,
+        values: [
+          crmData.department || '',
+          resolvedCountry || '',
+          crmData.language || '',
+          travelDate,
+          crmData.report_status || '',
+          crmData.requires_human_confirmation || false,
+          JSON.stringify(metadata),
+          existing[0].id,
+          tenantId
+        ]
+      });
+
+      log.info(`[OPP_ENRICHED] Existing opportunity enriched (no new opp needed)`, { traceId, oppId: existing[0].id });
+      return true;
+    } catch (e: any) {
+      log.error(`[OPP_ENRICH_FAILED] Non-fatal`, e instanceof Error ? e : new Error(String(e)), { traceId });
+      return false;
     }
   }
 

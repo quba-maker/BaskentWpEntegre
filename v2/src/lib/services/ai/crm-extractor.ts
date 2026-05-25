@@ -20,7 +20,12 @@ export const CrmExtractionSchema = z.object({
   intent_type: z.string().optional(),
   next_best_action: z.string().optional(),
   follow_up_hours: z.number().optional(),
-  opportunity_reason: z.string().optional()
+  opportunity_reason: z.string().optional(),
+  // P0B: Semantic Quality Fields
+  requested_callback_datetime: z.string().optional(),
+  travel_date: z.string().optional(),
+  report_status: z.enum(['none', 'waiting', 'sent', 'received', 'reviewed']).optional(),
+  requires_human_confirmation: z.boolean().optional(),
 });
 
 export type CrmExtractionType = z.infer<typeof CrmExtractionSchema>;
@@ -52,9 +57,17 @@ export class CRMExtractorService {
         modelId: llmModel,
         apiKey: apiKey,
         temperature: 0.1, // Düşük temperature, deterministik çıktı için
-        maxTokens: 500,
+        maxTokens: 600,
         responseFormat: 'json' as const
       };
+
+      // Current datetime for AI date parsing context
+      const nowIstanbul = new Date().toLocaleString('tr-TR', { 
+        timeZone: 'Europe/Istanbul', 
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', weekday: 'long'
+      });
+      const nowISO = new Date().toISOString();
 
       const systemPrompt: ChatMessage = {
         role: 'system',
@@ -62,13 +75,16 @@ export class CRMExtractorService {
 Görevin, aşağıdaki hasta-temsilci (veya bot) görüşmesini analiz ederek yapılandırılmış JSON çıktısı üretmektir.
 KESİNLİKLE markdown veya extra metin KULLANMA. SADECE GEÇERLİ JSON DÖNDÜR.
 
+📅 ŞU ANKİ TARİH VE SAAT: ${nowIstanbul} (${nowISO})
+Bu bilgiyi "yarın", "bugün", "gelecek hafta", "Haziran 20" gibi ifadeleri ISO tarihine çevirirken kullan.
+
 Format:
 {
   "patient_name": "string (Hastanın GERÇEK adı. Konuşmada 'ismim Mustafa' veya 'ben Ali' gibi ifadelerden çıkar. Instagram/Facebook profil adı DEĞİL, hastanın söylediği gerçek isim. Emin değilsen boş bırak)",
   "language": "string (örn: German, English, Turkish)",
   "country": "string (Hastanın yaşadığı ülke — Türkçe olarak yaz. Örn: Almanya, Türkiye, İngiltere. Emin değilsen boş bırak)",
   "country_confidence": number (0.0 ile 1.0 arası),
-  "department": "string (Örn: Ortopedi, Kardiyoloji, Estetik, Diş, Göz, Tüp Bebek, Organ Nakli, Onkoloji, Obezite, Nöroloji, Üroloji, Check-Up. Hastanın niyetine göre seç. Emin değilsen boş bırak)",
+  "department": "string (Örn: Ortopedi, Kardiyoloji, Gastroenteroloji, Estetik, Diş, Göz, Tüp Bebek, Organ Nakli, Onkoloji, Obezite, Nöroloji, Üroloji, Check-Up. Hastanın niyetine göre seç. Emin değilsen boş bırak)",
   "pipeline_stage": "string (new | contacted | responded | discovery | qualified | appointed | lost)",
   "tags": ["string"] (Örn: yurtdışı_hasta, acil, fiyat_odaklı, ilgili vb. tamamen TÜRKÇE, küçük harflerle ve boşluk yerine alt çizgi kullanarak),
   "needs_country_question": boolean (Eğer hastanın ülkesi belirsizse ve randevu için lazımsa true),
@@ -76,10 +92,15 @@ Format:
 
   "should_create_opportunity": boolean,
   "opportunity_priority": "cold" | "warm" | "hot",
-  "intent_type": "string (appointment_request | report_sent | report_waiting | price_inquiry | travel_planning | doctor_review | general_info | follow_up_needed)",
-  "next_best_action": "string (call_patient | send_info | request_report | doctor_review | send_offer | plan_appointment | follow_up)",
+  "intent_type": "string (appointment_request | call_request | report_sent | report_waiting | price_inquiry | travel_planning | doctor_review | general_info | follow_up_needed)",
+  "next_best_action": "string (call_patient | send_info | request_report | doctor_review | send_offer | plan_appointment | follow_up | coordinator_confirm_call | coordinator_confirm_appointment)",
   "follow_up_hours": number (önerilen takip süresi, saat olarak. Örn: 4, 24, 48, 72, 168),
-  "opportunity_reason": "string (neden opportunity açılmalı — kısa açıklama)"
+  "opportunity_reason": "string (neden opportunity açılmalı — kısa açıklama)",
+
+  "requested_callback_datetime": "string ISO 8601 (Hasta 'yarın 14:00'te arayın' derse → '2026-05-26T14:00:00+03:00'. Spesifik zaman belirtilmemişse boş bırak. Timezone Europe/Istanbul (+03:00) varsay)",
+  "travel_date": "string ISO date (Hasta 'Haziran 20'de geleceğim' derse → '2026-06-20'. Kesin tarih yoksa boş bırak)",
+  "report_status": "none | waiting | sent | received | reviewed (Hastanın rapor/tetkik durumu: henüz yok, göndereceğini söylüyor, gönderdi, alındı, doktor inceledi)",
+  "requires_human_confirmation": boolean (Hasta randevu onayı, arama zamanı onayı, doktor randevusu gibi İNSAN ONAYI gerektiren bir talep belirttiyse true)
 }
 
 Pipeline Aşama Kuralları (sırayla ilerler, geri gitmez):
@@ -94,6 +115,7 @@ Pipeline Aşama Kuralları (sırayla ilerler, geri gitmez):
 🔥 FIRSAT TESPİT KURALLARI (should_create_opportunity):
 - should_create_opportunity = TRUE eğer:
   • Hasta randevu istiyorsa (appointment_request)
+  • Hasta aranmasını istiyorsa (call_request)
   • Hasta rapor gönderdi veya göndereceğini söylüyorsa (report_sent, report_waiting)
   • Hasta fiyat soruyorsa (price_inquiry)
   • Hasta gelmek istediğini belirtiyorsa (travel_planning)
@@ -108,9 +130,25 @@ Pipeline Aşama Kuralları (sırayla ilerler, geri gitmez):
   • Hasta zaten ilgisini kaybettiğini belirttiyse
 
 - priority:
-  • HOT: Randevu istedi, rapor gönderdi, gelmek istiyor, tarih soruyor
+  • HOT: Randevu istedi, rapor gönderdi, gelmek istiyor, tarih soruyor, aranmasını istiyor
   • WARM: Fiyat soruyor, bilgi alıyor, tedavi seçeneklerini araştırıyor
   • COLD: Genel soru, henüz net niyet yok ama potansiyel var
+
+📞 CALLBACK / RANDEVU TARİH ÇÖZÜMLEME:
+- "yarın" = bugün + 1 gün
+- "bugün saat 3'te" = bugün 15:00
+- "öğlen 2'de" = 14:00
+- "pazartesi" = gelecek pazartesi
+- "Haziran 20" veya "20 Haziran" = 2026-06-20 (yıl yoksa mevcut yılı kullan, geçmişte kalıyorsa gelecek yılı kullan)
+- Timezone: Europe/Istanbul (+03:00)
+- Emin değilsen requested_callback_datetime boş bırak
+
+🚨 İNSAN ONAYI GEREKTİREN DURUMLAR (requires_human_confirmation = true):
+- Hasta "randevumu onaylayın" / "randevu kesinleştirin" derse
+- Hasta belirli bir saatte aranmak isterse
+- Hasta doktor randevusu talep ederse
+- Hasta ameliyat/işlem tarihi belirlenmesini isterse
+- Bot kendi başına kesinleştiremeyeceği herhangi bir aksiyon talep edilirse
 
 Önemli Kurallar:
 - Eğer mevcut aşama belirlenemiyorsa "new" döndür.
@@ -149,7 +187,10 @@ Pipeline Aşama Kuralları (sırayla ilerler, geri gitmez):
         traceId, 
         country: validatedData.country,
         department: validatedData.department,
-        stage: validatedData.pipeline_stage 
+        stage: validatedData.pipeline_stage,
+        callbackTime: validatedData.requested_callback_datetime,
+        travelDate: validatedData.travel_date,
+        requiresConfirmation: validatedData.requires_human_confirmation
       });
 
       return validatedData;

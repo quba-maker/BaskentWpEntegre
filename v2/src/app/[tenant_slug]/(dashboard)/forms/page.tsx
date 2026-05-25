@@ -731,6 +731,14 @@ export default function FormsPage() {
                     </button>
                   </div>
                 )}
+                {/* Safe empty state: No AI summary available for this form */}
+                {(!notes || notes.trim() === "") && !selectedForm.ai_summary && (
+                  <div className="mt-3 p-3 rounded-xl border border-black/5 bg-[#F5F5F7] text-center">
+                    <p className="text-[11px] font-medium text-[#86868B]">
+                      Bu form için henüz AI özeti yok. WhatsApp üzerinden görüşme başladığında otomatik oluşturulacaktır.
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* Form Data (raw_data) */}

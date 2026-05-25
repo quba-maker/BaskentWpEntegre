@@ -1047,23 +1047,34 @@ export class QueueWorkerEngine {
       this.log.info(`[WORKER_CRM_OK] CRM successfully enriched`, { traceId, patientName: crmData?.patient_name, country: deterministicCountry || crmData?.country });
       AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'crm_extraction_completed', category: 'crm', payload: { patientName: crmData?.patient_name, country: deterministicCountry || crmData?.country, department: crmData?.department } });
 
-      // 10b. Opportunity Upsert (non-fatal, async-safe)
-      if (crmData?.should_create_opportunity && conversationId) {
+      // 10b. Opportunity Upsert / Enrichment (non-fatal, async-safe)
+      if (crmData && conversationId) {
         try {
           const { OpportunityService } = await import('../services/opportunity.service');
           const oppService = new OpportunityService(db);
-          const oppId = await oppService.upsertFromCrm({
-            tenantId,
-            conversationId,
-            phoneNumber,
-            channel,
-            patientName: crmData.patient_name,
-            crmData,
-            lastCustomerMessageAt: new Date().toISOString(),
-            traceId
-          });
-          if (oppId) {
-            this.log.info(`[WORKER_OPP_OK] Opportunity upserted`, { traceId, oppId, priority: crmData.opportunity_priority, intent: crmData.intent_type });
+
+          if (crmData.should_create_opportunity) {
+            // Full upsert: create or update opportunity
+            const oppId = await oppService.upsertFromCrm({
+              tenantId,
+              conversationId,
+              phoneNumber,
+              channel,
+              patientName: crmData.patient_name,
+              crmData,
+              lastCustomerMessageAt: new Date().toISOString(),
+              traceId,
+              externalCountry: deterministicCountry
+            });
+            if (oppId) {
+              this.log.info(`[WORKER_OPP_OK] Opportunity upserted`, { traceId, oppId, priority: crmData.opportunity_priority, intent: crmData.intent_type });
+            }
+          } else {
+            // Always-enrich: even if no new opportunity needed, update existing fields
+            const enriched = await oppService.enrichExisting(tenantId, conversationId, crmData, deterministicCountry, traceId);
+            if (enriched) {
+              this.log.info(`[WORKER_OPP_ENRICHED] Existing opportunity enriched with new CRM data`, { traceId });
+            }
           }
         } catch (oppErr) {
           this.log.error(`[WORKER_OPP_FAILED] Non-fatal opportunity error`, oppErr instanceof Error ? oppErr : new Error(String(oppErr)), { traceId });
