@@ -34,6 +34,14 @@ export class MediaStorageService {
     }
   ): Promise<{ blobUrl: string; fileSize: number } | null> {
     try {
+      // Pre-check: BLOB_READ_WRITE_TOKEN must exist
+      if (!process.env.BLOB_READ_WRITE_TOKEN) {
+        log.error(`[MEDIA_NO_BLOB_TOKEN] BLOB_READ_WRITE_TOKEN env variable is missing. Create a Blob Store in Vercel Dashboard → Storage.`, undefined, {
+          tenantId,
+          mediaId,
+        });
+        return null;
+      }
       // Step 1: Get the download URL from Meta Graph API
       const metaRes = await fetch(
         `https://graph.facebook.com/v25.0/${mediaId}`,

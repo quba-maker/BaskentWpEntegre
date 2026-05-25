@@ -477,7 +477,7 @@ export class QueueWorkerEngine {
           break;
         case 'sticker':
           mediaType = 'sticker';
-          mediaId = incomingMsg.image?.id || null; // stickers use image payload
+          mediaId = incomingMsg.sticker?.id || null;
           mediaMetadata = { mime_type: 'image/webp' };
           content = '';
           break;
