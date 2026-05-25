@@ -302,9 +302,10 @@ export function ContextPanel() {
               style={{ border: "1px solid var(--q-border-default)" }}
             />
 
-            {/* Unified AI Insights Panel (Single Source of Truth) */}
+            {/* P1B: AI CRM Summary Panel (from active opportunity.summary) */}
             {(() => {
-              const aiText = activeContact.aiSummary?.text || activeContact.ai_summary;
+              // P1B: Primary source is ai_crm_summary (opportunity.summary via MemoryEngine)
+              const aiText = activeContact.ai_crm_summary || activeContact.aiSummary?.text || activeContact.ai_summary;
               const aiIntent = activeContact.aiSummary?.buying_intent || activeContact.ai_buying_intent;
               const aiSentiment = activeContact.aiSummary?.sentiment || activeContact.ai_sentiment;
               
@@ -317,9 +318,9 @@ export function ContextPanel() {
                   
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-2">
-                      <div className="w-2 h-2 rounded-full animate-pulse" style={{ background: "#AF52DE" }} />
+                      <div className="w-2 h-2 rounded-full" style={{ background: "#AF52DE" }} />
                       <span className="text-[11px] font-bold uppercase tracking-wider flex items-center gap-1" style={{ color: "var(--q-purple)" }}>
-                        <Brain className="w-3.5 h-3.5 animate-pulse" /> AI Özeti (Canlı)
+                        <Brain className="w-3.5 h-3.5" /> AI CRM Özeti
                       </span>
                     </div>
                     

@@ -164,12 +164,16 @@ export async function getConversations(page: number = 1, search: string = "", st
           channel: r.channel || 'whatsapp',
           lastMessageStatus: r.last_message_status || 'sent',
           lastMessageDirection: r.last_message_direction || 'in',
-          // P1B Summary Unification:
-          // notes = CRM Entegre textarea content
-          // Priority: opp_summary (MemoryEngine CRM quality) > conversations.notes > empty
+          // P1B Summary Unification — separate fields for manual vs AI
+          // ai_crm_summary: long CRM summary from MemoryEngine (opportunity.summary)
+          // notes: textarea content — manual if user edited, else ai_crm_summary
+          ai_crm_summary: r.opp_summary || '',
           notes: (() => {
             const oppSummary = r.opp_summary || '';
             const convNotes = r.notes || '';
+            // If conv.notes has content AND it's different from opp.summary → user edited manually
+            if (convNotes && oppSummary && convNotes !== oppSummary) return convNotes;
+            // Otherwise use opp_summary as primary (AI-managed)
             if (oppSummary) return oppSummary;
             return convNotes;
           })(),
