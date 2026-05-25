@@ -189,17 +189,17 @@ export class OpportunityService {
                    country = COALESCE(NULLIF($4, ''), country),
                    language = COALESCE(NULLIF($5, ''), language),
                    patient_name = COALESCE(NULLIF($6, ''), patient_name),
-                   summary = COALESCE(NULLIF($7, ''), summary),
+                   -- P1B: summary NOT written here — exclusively owned by MemoryEngine
+                   ai_reason = COALESCE(NULLIF($7, ''), ai_reason),
                    next_follow_up_at = COALESCE($8, next_follow_up_at),
                    last_customer_message_at = COALESCE($9, last_customer_message_at),
                    ai_confidence = COALESCE($10, ai_confidence),
-                   ai_reason = COALESCE(NULLIF($11, ''), ai_reason),
-                   travel_date = COALESCE($12::date, travel_date),
-                   report_status = COALESCE(NULLIF($13, ''), NULLIF($13, 'none'), report_status),
-                   requires_human_confirmation = CASE WHEN $14 = true THEN true ELSE requires_human_confirmation END,
-                   metadata = metadata || $15::jsonb,
+                   travel_date = COALESCE($11::date, travel_date),
+                   report_status = COALESCE(NULLIF($12, ''), NULLIF($12, 'none'), report_status),
+                   requires_human_confirmation = CASE WHEN $13 = true THEN true ELSE requires_human_confirmation END,
+                   metadata = metadata || $14::jsonb,
                    updated_at = NOW()
-                 WHERE id = $16 AND tenant_id = $17`,
+                 WHERE id = $15 AND tenant_id = $16`,
           values: [
             finalPriority,
             crmData.intent_type || '',
@@ -211,7 +211,6 @@ export class OpportunityService {
             nextFollowUp,
             lastCustomerMessageAt || null,
             crmData.country_confidence || null,
-            crmData.opportunity_reason || '',
             travelDate,
             crmData.report_status || '',
             crmData.requires_human_confirmation || false,
@@ -232,6 +231,8 @@ export class OpportunityService {
       }
 
       // CREATE new opportunity
+      // P1B: summary = NULL (exclusively owned by MemoryEngine)
+      // ai_reason = opportunity_reason (short "Neden fırsat" text)
       const result = await this.db.executeSafe({
         text: `INSERT INTO opportunities (
                  tenant_id, conversation_id, phone_number,
@@ -261,9 +262,9 @@ export class OpportunityService {
           nextFollowUp,
           'manual',
           lastCustomerMessageAt || new Date().toISOString(),
-          crmData.opportunity_reason || null,
+          null, // summary = NULL — MemoryEngine will fill this
           crmData.country_confidence || null,
-          crmData.opportunity_reason || null,
+          crmData.opportunity_reason || null, // ai_reason = short reason
           crmData.tags || [],
           travelDate,
           crmData.report_status || null,

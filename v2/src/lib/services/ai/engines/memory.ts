@@ -7,17 +7,23 @@ const log = logger.withContext({ module: 'MemoryEngine' });
 export class MemoryEngine {
   /**
    * Generates or updates a rolling summary of the conversation.
-   * Compresses older messages into a structured memory object.
+   * P1B: Produces CRM-quality summary scoped to active opportunity.
+   * This is the SOLE owner of opportunity.summary.
    */
   static async summarizeConversation(tenantId: string, conversationId: string): Promise<void> {
     try {
       const db = withTenantDB(tenantId);
 
-      // 1. Fetch conversation to get phone number
+      // 1. Fetch conversation to get phone number + active opportunity
       const conv = await db.executeSafe({
         text: `
-          SELECT phone_number FROM conversations 
-          WHERE id::text = $1::text AND tenant_id = $2
+          SELECT c.phone_number, c.active_opportunity_id, c.notes as current_notes,
+                 o.summary as current_opp_summary,
+                 o.requester_name, o.patient_name, o.country, o.department,
+                 o.patient_relation
+          FROM conversations c
+          LEFT JOIN opportunities o ON o.id = c.active_opportunity_id AND o.tenant_id = c.tenant_id
+          WHERE c.id::text = $1::text AND c.tenant_id = $2
           LIMIT 1;
         `,
         values: [conversationId, tenantId]
@@ -29,6 +35,15 @@ export class MemoryEngine {
       }
 
       const phone = conv[0].phone_number;
+      const activeOppId = conv[0].active_opportunity_id;
+      const currentNotes = conv[0].current_notes || '';
+      const currentOppSummary = conv[0].current_opp_summary || '';
+      const oppContext = {
+        name: conv[0].requester_name || conv[0].patient_name || '',
+        country: conv[0].country || '',
+        department: conv[0].department || '',
+        relation: conv[0].patient_relation || ''
+      };
 
       // 2. Fetch raw messages to summarize (linked by phone_number)
       const messages = await db.executeSafe({
@@ -52,27 +67,39 @@ export class MemoryEngine {
         `[${m.direction === 'in' ? 'Müşteri' : 'Asistan'}]: ${m.content}`
       ).join('\n');
 
-      // 3. Generate Summary using LLM
+      // 3. Generate CRM-quality Summary using LLM
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey) throw new Error('GEMINI_API_KEY is missing');
 
       const orchestrator = new AIOrchestrator();
 
+      // P1B: CRM-quality prompt — coordinator-oriented, action-focused
+      const contextHint = oppContext.name 
+        ? `\nBilinen hasta/başvuran bilgisi: ${oppContext.name}${oppContext.country ? `, ${oppContext.country}` : ''}${oppContext.department ? `, ${oppContext.department} bölümü` : ''}${oppContext.relation ? `, ${oppContext.relation} için başvuruyor` : ''}`
+        : '';
+
       const prompt = `
-        Aşağıdaki müşteri-asistan WhatsApp görüşmesini analiz et.
-        Müşterinin satın alma niyetini, duygusunu, itirazlarını ve genel özetini çıkar.
-        
-        DİKKAT (ÇOK ÖNEMLİ): Konuşmanın SONUNDAKİ en güncel bilgileri (yeni istenen tarihler, saat değişiklikleri, son kararlar vb.) ÖZELLİKLE özete yansıt. Eğer müşteri önceki bir fikrini veya saatini değiştirdiyse, ESKİ planı değil, her zaman EN GÜNCEL durumu özetle. Özetin kısa, net ve sonuca odaklı olmalı.
+        Sen bir hastane CRM koordinatörüsün. Aşağıdaki WhatsApp görüşmesini analiz et ve koordinatör/satış ekibinin hızlıca okuyacağı profesyonel bir CRM notu oluştur.
+        ${contextHint}
 
         SADECE AŞAĞIDAKİ JSON FORMATINDA CEVAP VER. BAŞKA METİN YAZMA.
         
         Format:
         {
-          "summary_text": "Kısa ve profesyonel görüşme özeti (Son kararları içermeli).",
-          "buying_intent": "HOT",
-          "sentiment": "POSITIVE",
-          "objections": ["fiyat yüksek", "zaman uymuyor"]
+          "crm_summary": "Koordinatör odaklı detaylı CRM özeti (500-900 karakter). Şunları içermeli: Kim başvuruyor? Nereden? Kimin için? Hangi tedavi/bölüm? Şu ana kadar hangi bilgiler alındı/verildi? Eksik bilgi/rapor var mı? Sonraki aksiyon nedir? Arama/randevu beklentisi var mı? Bot mesajlarını birebir kopyalama, durumu özetle.",
+          "summary_text": "Kısa 1-2 cümle anlık durum özeti.",
+          "buying_intent": "HOT | WARM | COLD",
+          "sentiment": "POSITIVE | NEUTRAL | NEGATIVE",
+          "objections": ["varsa itirazlar"]
         }
+
+        KURALLAR:
+        - crm_summary 500-900 karakter arasında olmalı.
+        - Konuşmanın SONUNDAKİ en güncel bilgileri (yeni istenen tarihler, saat değişiklikleri, son kararlar) ÖZELLİKLE yansıt.
+        - Müşteri önceki fikrini değiştirdiyse ESKİ planı değil EN GÜNCEL durumu özetle.
+        - Asistan cevaplarını birebir kopyalama, sadece önemli verileri çıkar.
+        - Profesyonel, net, sonuca odaklı CRM satış notu gibi yaz.
+        - Eksik aksiyonları açıkça belirt ("Sonraki aksiyon: ...", "Beklenen: ...").
 
         Görüşme:
         ${conversationText}
@@ -105,12 +132,14 @@ export class MemoryEngine {
       
       const parsed = JSON.parse(cleanedJson);
       
-      const summaryText = parsed.summary_text || parsed.summary || parsed.text || "Özet oluşturulamadı.";
+      // P1B: Two-tier summary extraction
+      const crmSummary = parsed.crm_summary || parsed.summary_text || parsed.summary || parsed.text || "Özet oluşturulamadı.";
+      const shortSummary = parsed.summary_text || parsed.summary || crmSummary;
       const buyingIntent = parsed.buying_intent || parsed.intent || parsed.buyingIntent || "WARM";
       const sentiment = parsed.sentiment || "NEUTRAL";
       const objections = parsed.objections ? JSON.stringify(parsed.objections) : "[]";
 
-      // 4. Save to conversation_memory
+      // 4. Save to conversation_memory (short summary for quick reference)
       await db.executeSafe({
         text: `
           INSERT INTO conversation_memory (
@@ -126,7 +155,7 @@ export class MemoryEngine {
             last_message_count = EXCLUDED.last_message_count,
             updated_at = NOW();
         `,
-        values: [tenantId, conversationId, summaryText, buyingIntent, sentiment, objections, messages.length]
+        values: [tenantId, conversationId, shortSummary, buyingIntent, sentiment, objections, messages.length]
       });
 
       log.info(`[MEMORY_UPDATED] Rolling memory compressed for conv: ${conversationId}`);
@@ -135,7 +164,7 @@ export class MemoryEngine {
       try {
         const { RealtimePublisher } = await import('@/lib/realtime/publisher');
         await RealtimePublisher.publishMemoryUpdated(tenantId, phone, {
-          aiSummary: summaryText,
+          aiSummary: crmSummary,
           aiBuyingIntent: buyingIntent,
           aiSentiment: sentiment,
           objections: parsed.objections || []
@@ -145,36 +174,33 @@ export class MemoryEngine {
         log.error(`[MEMORY_REALTIME_FAILED] Failed to publish realtime memory update`, realtimeErr instanceof Error ? realtimeErr : new Error(String(realtimeErr)));
       }
 
-      // 5. Sync rolling AI summary back to matching lead notes & Google Sheets
-      try {
-        // P1B: Opportunity-aware notes sync
-        // If active_opportunity_id exists, use opportunity summary (prevents stale global summary)
-        const convMeta = await db.executeSafe({
-          text: `SELECT active_opportunity_id FROM conversations WHERE id::text = $1::text AND tenant_id = $2`,
-          values: [conversationId, tenantId]
-        }) as any[];
-        
-        const activeOppId = convMeta?.[0]?.active_opportunity_id;
-        
-        if (activeOppId) {
-          // Update opportunity.summary with the new AI summary
-          await db.executeSafe({
-            text: `UPDATE opportunities SET summary = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3`,
-            values: [summaryText, activeOppId, tenantId]
-          });
-          log.info(`[MEMORY_OPP_SYNC] Active opportunity ${activeOppId} summary updated`);
-        }
-        
-        // ALWAYS update conversations.notes with the latest summary
+      // 5. P1B: Write CRM summary to active opportunity (SOLE OWNER)
+      if (activeOppId) {
         await db.executeSafe({
-          text: `
-            UPDATE conversations
-            SET notes = $1
-            WHERE id::text = $2::text AND tenant_id = $3;
-          `,
-          values: [summaryText, conversationId, tenantId]
+          text: `UPDATE opportunities SET summary = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3`,
+          values: [crmSummary, activeOppId, tenantId]
         });
-        
+        log.info(`[MEMORY_OPP_SYNC] Active opportunity ${activeOppId} CRM summary updated (${crmSummary.length} chars)`);
+      }
+
+      // 6. P1B: Conditional conversations.notes write
+      // Only update if: notes is empty OR notes matches previous AI summary (not manually edited)
+      const isNotesEmpty = !currentNotes || currentNotes.trim() === '';
+      const isNotesSameAsOldSummary = currentNotes.trim() === currentOppSummary.trim();
+      const shouldUpdateNotes = isNotesEmpty || isNotesSameAsOldSummary;
+      
+      if (shouldUpdateNotes) {
+        await db.executeSafe({
+          text: `UPDATE conversations SET notes = $1 WHERE id::text = $2::text AND tenant_id = $3;`,
+          values: [crmSummary, conversationId, tenantId]
+        });
+        log.info(`[MEMORY_NOTES_SYNC] conversations.notes updated (was ${isNotesEmpty ? 'empty' : 'AI-managed'})`);
+      } else {
+        log.info(`[MEMORY_NOTES_SKIP] conversations.notes preserved (manual notes detected, ${currentNotes.length} chars)`);
+      }
+
+      // 7. Sync to matching leads + Google Sheets
+      try {
         const cleanPhone = phone.replace(/[^0-9]/g, '');
         if (cleanPhone.length >= 10) {
           const suffix = cleanPhone.substring(cleanPhone.length - 10);
@@ -190,17 +216,13 @@ export class MemoryEngine {
           }) as any[];
           
           for (const lead of matchingLeads) {
-            // Tam otomatik: Mevcut not boş olsun veya olmasın her zaman AI özetini yaz
+            // Update lead notes with CRM summary
             await db.executeSafe({
-              text: `
-                UPDATE leads
-                SET notes = $1
-                WHERE id = $2 AND tenant_id = $3;
-              `,
-              values: [summaryText, lead.id, tenantId]
+              text: `UPDATE leads SET notes = $1 WHERE id = $2 AND tenant_id = $3;`,
+              values: [crmSummary, lead.id, tenantId]
             });
             
-            log.info(`[MEMORY_SYNC] Lead ${lead.id} notes automatically updated with AI summary.`);
+            log.info(`[MEMORY_SYNC] Lead ${lead.id} notes updated with CRM summary.`);
               
               const SHEET_URL = process.env.GOOGLE_SHEET_UPDATE_URL || process.env.GOOGLE_SHEET_URL;
               if (SHEET_URL) {
@@ -211,13 +233,13 @@ export class MemoryEngine {
                     body: JSON.stringify({
                       action: 'updateNoteByPhone',
                       phone: phone,
-                      note: parsed.summary_text
+                      note: crmSummary
                     })
                   });
                   if (!sheetResponse.ok) {
                     log.warn(`[MEMORY_SYNC] Google Sheets note sync returned status ${sheetResponse.status}`);
                   } else {
-                    log.info(`[MEMORY_SYNC] Lead ${lead.id} AI summary successfully synced to Google Sheets.`);
+                    log.info(`[MEMORY_SYNC] Lead ${lead.id} CRM summary synced to Google Sheets.`);
                   }
                 } catch (sheetErr) {
                   log.warn(`[MEMORY_SYNC] Google Sheets note sync failed for phone: ${phone}`, { error: String(sheetErr) });

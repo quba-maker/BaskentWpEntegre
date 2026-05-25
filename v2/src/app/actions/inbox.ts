@@ -164,8 +164,15 @@ export async function getConversations(page: number = 1, search: string = "", st
           channel: r.channel || 'whatsapp',
           lastMessageStatus: r.last_message_status || 'sent',
           lastMessageDirection: r.last_message_direction || 'in',
-          // P1B: Notes auto-fill from active_opp.summary if manual notes empty
-          notes: r.notes || r.opp_summary || '',
+          // P1B Summary Unification:
+          // notes = CRM Entegre textarea content
+          // Priority: opp_summary (MemoryEngine CRM quality) > conversations.notes > empty
+          notes: (() => {
+            const oppSummary = r.opp_summary || '';
+            const convNotes = r.notes || '';
+            if (oppSummary) return oppSummary;
+            return convNotes;
+          })(),
           patientRelation: r.opp_patient_relation || null,
           formData: r.form_name ? {
             name: r.form_name,

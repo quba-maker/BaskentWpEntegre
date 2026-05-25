@@ -663,25 +663,25 @@ function OppDetailModal({ opp, onClose, onStageChange, onAddNote, onGoToInbox, n
             </div>
 
             {/* AI Summary */}
-            {(opp.ai_summary || opp.summary) && (
-              <div className="bg-white rounded-2xl p-5 border border-black/5 shadow-sm">
-                <h3 className="text-sm font-bold text-[#1D1D1F] mb-2 flex items-center gap-2">
-                  🤖 AI Özeti
-                </h3>
+            <div className="bg-white rounded-2xl p-5 border border-black/5 shadow-sm">
+              <h3 className="text-sm font-bold text-[#1D1D1F] mb-2 flex items-center gap-2">
+                🤖 AI Özeti
+              </h3>
+              {(opp.ai_summary || opp.summary) ? (
                 <p className="text-[13px] text-[#1D1D1F] leading-relaxed">
                   {opp.ai_summary || opp.summary}
                 </p>
-              </div>
-            )}
+              ) : (
+                <p className="text-[12px] text-[#86868B] italic">Bu fırsat için henüz AI özeti yok.</p>
+              )}
+            </div>
 
             {/* AI Reason */}
-            {opp.ai_reason && (
-              <div className="bg-[#5856D6]/5 rounded-xl p-3 border border-[#5856D6]/10">
-                <p className="text-[11px] font-semibold text-[#5856D6]">
-                  🎯 Neden fırsat: {opp.ai_reason}
-                </p>
-              </div>
-            )}
+            <div className="bg-[#5856D6]/5 rounded-xl p-3 border border-[#5856D6]/10">
+              <p className="text-[11px] font-semibold text-[#5856D6]">
+                🎯 Neden fırsat: {opp.ai_reason || 'Fırsat nedeni henüz çıkarılmadı.'}
+              </p>
+            </div>
 
             {/* Add Note */}
             <div className="bg-white rounded-2xl p-5 border border-black/5 shadow-sm">
