@@ -49,33 +49,104 @@ function ChatSkeleton() {
   );
 }
 
-// -- Media Lightbox (WhatsApp-like fullscreen viewer) --
-function MediaLightbox({ src, type, onClose }: { src: string; type: string; onClose: () => void }) {
+// -- Media Lightbox (WhatsApp-quality fullscreen viewer) --
+function MediaLightbox({ src, type, caption, onClose }: { src: string; type: string; caption?: string; onClose: () => void }) {
+  // ESC key handler
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    
+    // Lock body scroll while lightbox is open
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [onClose]);
+
   return (
-    <div
-      className="fixed inset-0 z-[9999] flex items-center justify-center"
-      style={{ background: "rgba(0,0,0,0.9)" }}
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.2 }}
+      className="fixed inset-0 z-[9999] flex flex-col items-center justify-center"
+      style={{ background: "rgba(0,0,0,0.95)" }}
       onClick={onClose}
     >
-      <button
-        onClick={onClose}
-        className="absolute top-4 right-4 w-10 h-10 rounded-full flex items-center justify-center bg-white/10 hover:bg-white/20 transition-colors z-10"
+      {/* Top bar: close + download */}
+      <div 
+        className="absolute top-0 left-0 right-0 flex items-center justify-between px-4 py-3 z-20"
+        style={{ background: "linear-gradient(to bottom, rgba(0,0,0,0.6), transparent)" }}
+        onClick={(e) => e.stopPropagation()}
       >
-        <X className="w-6 h-6 text-white" />
-      </button>
-      <div className="max-w-[90vw] max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
+        <div />
+        <div className="flex items-center gap-2">
+          <a
+            href={src}
+            download
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-10 h-10 rounded-full flex items-center justify-center bg-white/10 hover:bg-white/20 transition-colors"
+            title="İndir"
+          >
+            <Download className="w-5 h-5 text-white" />
+          </a>
+          <button
+            onClick={onClose}
+            className="w-10 h-10 rounded-full flex items-center justify-center bg-white/10 hover:bg-white/20 transition-colors"
+          >
+            <X className="w-6 h-6 text-white" />
+          </button>
+        </div>
+      </div>
+
+      {/* Media content — centered */}
+      <div
+        className="flex-1 flex items-center justify-center w-full px-4 py-16"
+        onClick={(e) => e.stopPropagation()}
+      >
         {type === 'video' ? (
-          <video src={src} controls autoPlay className="max-w-full max-h-[90vh] rounded-lg" />
+          <video
+            src={src}
+            controls
+            autoPlay
+            className="max-w-full max-h-[85vh] rounded-lg shadow-2xl"
+            style={{ objectFit: 'contain' }}
+          />
         ) : (
-          <img src={src} alt="Media" className="max-w-full max-h-[90vh] object-contain rounded-lg" />
+          <img
+            src={src}
+            alt={caption || 'Media'}
+            className="max-w-full max-h-[85vh] rounded-lg shadow-2xl select-none"
+            style={{ objectFit: 'contain' }}
+            draggable={false}
+          />
         )}
       </div>
-    </div>
+
+      {/* Caption bar — bottom */}
+      {caption && (
+        <div 
+          className="absolute bottom-0 left-0 right-0 px-6 py-4 text-center z-20"
+          style={{ background: "linear-gradient(to top, rgba(0,0,0,0.7), transparent)" }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <p className="text-white/90 text-sm font-medium max-w-lg mx-auto leading-relaxed">
+            {caption}
+          </p>
+        </div>
+      )}
+    </motion.div>
   );
 }
 
 // -- Media Bubble Renderer --
-function MediaBubbleContent({ message, onLightbox }: { message: any; onLightbox: (src: string, type: string) => void }) {
+function MediaBubbleContent({ message, onLightbox }: { message: any; onLightbox: (src: string, type: string, caption?: string) => void }) {
   const mt = message.mediaType;
   const url = message.mediaUrl;
   const meta = message.mediaMetadata;
@@ -91,12 +162,12 @@ function MediaBubbleContent({ message, onLightbox }: { message: any; onLightbox:
           alt={meta?.caption || 'Görsel'}
           className="rounded-lg max-w-full max-h-64 object-cover cursor-pointer hover:opacity-90 transition-opacity mb-1"
           loading="lazy"
-          onClick={() => onLightbox(url, 'image')}
+          onClick={() => onLightbox(url, 'image', meta?.caption)}
         />
       );
     case 'video':
       return (
-        <div className="relative cursor-pointer mb-1" onClick={() => onLightbox(url, 'video')}>
+        <div className="relative cursor-pointer mb-1" onClick={() => onLightbox(url, 'video', meta?.caption)}>
           <video src={url} className="rounded-lg max-w-full max-h-64 object-cover" preload="metadata" />
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="w-12 h-12 rounded-full bg-black/50 flex items-center justify-center">
@@ -283,7 +354,7 @@ export function ConversationViewport() {
   const [isSending, setIsSending] = useState(false);
   const [isTogglingBot, setIsTogglingBot] = useState(false);
   const [sendError, setSendError] = useState("");
-  const [lightbox, setLightbox] = useState<{ src: string; type: string } | null>(null);
+  const [lightbox, setLightbox] = useState<{ src: string; type: string; caption?: string } | null>(null);
   const queryClient = useQueryClient();
   const params = useParams();
   const tenantSlug = params?.tenant_slug as string;
@@ -664,7 +735,7 @@ export function ConversationViewport() {
       
       {/* ── Media Lightbox ── */}
       {lightbox && (
-        <MediaLightbox src={lightbox.src} type={lightbox.type} onClose={() => setLightbox(null)} />
+        <MediaLightbox src={lightbox.src} type={lightbox.type} caption={lightbox.caption} onClose={() => setLightbox(null)} />
       )}
       {/* ── Header ── */}
       <div
@@ -851,7 +922,7 @@ export function ConversationViewport() {
                             {item.message.mediaType && item.message.mediaUrl && (
                               <MediaBubbleContent
                                 message={item.message}
-                                onLightbox={(src, type) => setLightbox({ src, type })}
+                                onLightbox={(src, type, caption) => setLightbox({ src, type, caption })}
                               />
                             )}
 

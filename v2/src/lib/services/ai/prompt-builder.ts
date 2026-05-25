@@ -131,6 +131,8 @@ MEDYA MESAJI KURALI:
 - Belge/rapor geldiğinde: "Raporunuzu/belgenizi aldık, uzman ekibimiz inceleyecektir." gibi güvenli yanıt ver.
 - Ses mesajı geldiğinde: "Ses mesajınızı aldık." de. İçeriğini uydurma veya tahmin etme.
 - Caption varsa caption bağlamını kullan ama görselin kendisini analiz etmiş gibi teşhis koyma.
+- Hasta arka arkaya birden fazla fotoğraf/belge gönderdiyse HER BİRİNE ayrı ayrı uzun cevap verme. Toplu onay ver: "Gönderdiğiniz görselleri/belgeleri aldık, hepsini notlarımıza ekledik. Doktor/ekibimiz inceleyecektir."
+- Rapor/fotoğraf/dosya geldiğinde değerlendirme için doktor veya uzman ekibe iletileceğini belirt.
 =======================================================\n`;
     
     // Güvenli birleştirme: Eğer base prompt içinde "--- CONSTRAINTS ---" varsa,
