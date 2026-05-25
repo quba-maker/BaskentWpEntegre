@@ -686,7 +686,7 @@ export function ConversationViewport() {
               </h3>
               {(() => {
                 const normalizedName = activeContact.country ? normalizeCountryName(activeContact.country) : '';
-                const country = getCountryFromPhone(activeContact.id) || (activeContact.country ? { flag: getCountryFlag(normalizedName), name: normalizedName, code: '' } : null);
+                const country = (activeContact.country ? { flag: getCountryFlag(normalizedName), name: normalizedName, code: '' } : null) || getCountryFromPhone(activeContact.id);
                 return country ? (
                   <span className="ml-1.5 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] font-semibold flex-shrink-0" style={{ background: 'rgba(0,0,0,0.04)', color: 'var(--q-text-secondary)' }}>
                     {country.flag} {country.name}
