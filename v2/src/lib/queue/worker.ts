@@ -1080,11 +1080,10 @@ export class QueueWorkerEngine {
         }
       });
 
-      // ═══ P0-3: Country priority — CRM extraction ALWAYS wins over phone prefix ═══
+      // ═══ P1A-FIX3: Country priority — CRM > existing DB > phone prefix ═══
       // Medical tourism: patient with +90 phone may live in Germany
-      const resolvedCountryForConv = crmData?.country || deterministicCountry;
-      
-      // ═══ Fetch before-snapshot for conversations ═══
+      // When LLM returns null country, we MUST preserve existing validated country
+      // Phone-prefix is LAST RESORT only
       let beforeConv: any = null;
       try {
         const snap = await db.executeSafe({
@@ -1093,6 +1092,9 @@ export class QueueWorkerEngine {
         }) as any[];
         beforeConv = snap[0] || null;
       } catch (_) { /* non-blocking */ }
+
+      const existingConvCountry = beforeConv?.country || null;
+      const resolvedCountryForConv = crmData?.country || existingConvCountry || deterministicCountry;
 
       // ═══ P0-1: CRM_RESOLVED_FOR_CONVERSATION ═══
       await AIEventEmitter.emitSync({
@@ -1232,6 +1234,10 @@ export class QueueWorkerEngine {
             beforeOpp = oppSnap[0] || null;
           } catch (_) { /* non-blocking */ }
 
+          // ═══ P1A-FIX3: Opp country priority — CRM > existingOpp > conv > phone prefix ═══
+          const existingOppCountry = beforeOpp?.country || null;
+          const resolvedCountryForOpp = crmData.country || existingOppCountry || existingConvCountry || deterministicCountry;
+
           // ═══ P0-1: OPP_RESOLVED_FOR_UPDATE ═══
           await AIEventEmitter.emitSync({
             tenantId, conversationId, customerId,
@@ -1243,7 +1249,8 @@ export class QueueWorkerEngine {
               activeOpportunityExists: !!beforeOpp,
               crmCountry: crmData.country || null,
               deterministicCountry: deterministicCountry || null,
-              finalCountryForOpportunity: crmData.country || deterministicCountry || null,
+              existingOppCountry: existingOppCountry || null,
+              finalCountryForOpportunity: resolvedCountryForOpp || null,
               crmDepartment: crmData.department || null,
               previousOpportunityCountry: beforeOpp?.country || null,
               previousOpportunityDepartment: beforeOpp?.department || null,
@@ -1256,13 +1263,13 @@ export class QueueWorkerEngine {
               tenantId, conversationId, phoneNumber, channel,
               patientName: crmData.patient_name,
               crmData, lastCustomerMessageAt: new Date().toISOString(),
-              traceId, externalCountry: deterministicCountry
+              traceId, externalCountry: resolvedCountryForOpp
             });
             if (oppId) {
               this.log.info(`[WORKER_OPP_OK] Opportunity upserted`, { traceId, oppId });
             }
           } else {
-            const enriched = await oppService.enrichExisting(tenantId, conversationId, crmData, deterministicCountry, traceId);
+            const enriched = await oppService.enrichExisting(tenantId, conversationId, crmData, resolvedCountryForOpp, traceId);
             this.log.info(`[WORKER_OPP_ENRICH] result=${enriched}`, { traceId });
           }
 

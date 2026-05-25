@@ -158,14 +158,10 @@ export class OpportunityService {
       }
 
       if (existing.length > 0) {
-        // UPDATE existing — forward-only stage progression
+        // UPDATE existing — metadata/enrichment only, NO stage write
+        // Stage is exclusively managed by UnifiedStageService
         const current = existing[0];
-        const stageOrder = Object.keys(STAGE_LABELS);
-        const currentIdx = stageOrder.indexOf(current.stage);
-        const newIdx = stageOrder.indexOf(newStage);
 
-        // Only advance stage, never go backwards
-        const finalStage = newIdx > currentIdx ? newStage : current.stage;
         // Priority can escalate (cold→warm→hot) but not de-escalate
         const priorityOrder = ['cold', 'warm', 'hot'];
         const currentPrioIdx = priorityOrder.indexOf(current.priority);
@@ -173,7 +169,7 @@ export class OpportunityService {
         const finalPriority = newPrioIdx > currentPrioIdx ? priority : current.priority;
 
         // ═══ DIAGNOSTIC: Opportunity Update Values ═══
-        log.info(`[OPP_UPDATE_TRACE] SQL params for existing opp update`, {
+        log.info(`[OPP_UPDATE_TRACE] Metadata-only update (stage managed by UnifiedStageService)`, {
           traceId,
           oppId: current.id,
           existing_department: current.department || '(null)',
@@ -181,32 +177,30 @@ export class OpportunityService {
           existing_country: current.country || '(null)',
           new_country_param: resolvedCountry || '(empty→will keep existing)',
           travel_date_param: travelDate || '(null→will keep existing)',
-          stage: `${current.stage} → ${finalStage}`,
+          currentStage: current.stage,
           priority: `${current.priority} → ${finalPriority}`
         });
 
         await this.db.executeSafe({
           text: `UPDATE opportunities SET
-                   stage = $1,
-                   priority = $2,
-                   intent_type = COALESCE(NULLIF($3, ''), intent_type),
-                   department = COALESCE(NULLIF($4, ''), department),
-                   country = COALESCE(NULLIF($5, ''), country),
-                   language = COALESCE(NULLIF($6, ''), language),
-                   patient_name = COALESCE(NULLIF($7, ''), patient_name),
-                   summary = COALESCE(NULLIF($8, ''), summary),
-                   next_follow_up_at = $9,
-                   last_customer_message_at = COALESCE($10, last_customer_message_at),
-                   ai_confidence = COALESCE($11, ai_confidence),
-                   ai_reason = COALESCE(NULLIF($12, ''), ai_reason),
-                   travel_date = COALESCE($13::date, travel_date),
-                   report_status = COALESCE(NULLIF($14, ''), NULLIF($14, 'none'), report_status),
-                   requires_human_confirmation = CASE WHEN $15 = true THEN true ELSE requires_human_confirmation END,
-                   metadata = metadata || $16::jsonb,
+                   priority = $1,
+                   intent_type = COALESCE(NULLIF($2, ''), intent_type),
+                   department = COALESCE(NULLIF($3, ''), department),
+                   country = COALESCE(NULLIF($4, ''), country),
+                   language = COALESCE(NULLIF($5, ''), language),
+                   patient_name = COALESCE(NULLIF($6, ''), patient_name),
+                   summary = COALESCE(NULLIF($7, ''), summary),
+                   next_follow_up_at = COALESCE($8, next_follow_up_at),
+                   last_customer_message_at = COALESCE($9, last_customer_message_at),
+                   ai_confidence = COALESCE($10, ai_confidence),
+                   ai_reason = COALESCE(NULLIF($11, ''), ai_reason),
+                   travel_date = COALESCE($12::date, travel_date),
+                   report_status = COALESCE(NULLIF($13, ''), NULLIF($13, 'none'), report_status),
+                   requires_human_confirmation = CASE WHEN $14 = true THEN true ELSE requires_human_confirmation END,
+                   metadata = metadata || $15::jsonb,
                    updated_at = NOW()
-                 WHERE id = $17 AND tenant_id = $18`,
+                 WHERE id = $16 AND tenant_id = $17`,
           values: [
-            finalStage,
             finalPriority,
             crmData.intent_type || '',
             crmData.department || '',
@@ -227,14 +221,13 @@ export class OpportunityService {
           ]
         });
 
-        log.info(`[OPP_UPDATED] Opportunity updated`, { 
-          traceId, oppId: current.id, stage: finalStage, priority: finalPriority,
+        log.info(`[OPP_UPDATED] Opportunity metadata updated (stage unchanged)`, { 
+          traceId, oppId: current.id, currentStage: current.stage, priority: finalPriority,
           department: crmData.department, country: resolvedCountry,
-          travelDate, reportStatus: crmData.report_status, requiresConfirmation: crmData.requires_human_confirmation
+          travelDate, reportStatus: crmData.report_status
         });
 
-        // Mirror stage to conversations + leads (non-blocking best-effort)
-        this.mirrorStageToLinked(tenantId, conversationId, phoneNumber, finalStage).catch(() => {});
+        // NO mirrorStageToLinked — UnifiedStageService is sole stage owner
         return current.id;
       }
 
@@ -285,8 +278,7 @@ export class OpportunityService {
         travelDate, reportStatus: crmData.report_status
       });
 
-      // Mirror stage to conversations + leads (non-blocking best-effort)
-      this.mirrorStageToLinked(tenantId, conversationId, phoneNumber, newStage).catch(() => {});
+      // NO mirrorStageToLinked on INSERT — UnifiedStageService handles stage sync
       return newId;
 
     } catch (e: any) {
