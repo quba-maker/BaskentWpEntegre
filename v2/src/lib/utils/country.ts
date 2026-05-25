@@ -190,6 +190,28 @@ export function resolveCountry(phone: string | null | undefined, rawData?: Recor
 }
 
 /**
+ * Resolve a country name (Turkish display name) to CountryInfo.
+ * Used when we have the country name from DB (e.g. conversations.country = 'İngiltere')
+ * and need the flag + code for display.
+ */
+export function getCountryInfoByName(name: string | null | undefined): CountryInfo | null {
+  if (!name) return null;
+  const lower = name.toLowerCase().trim();
+  for (const [, info] of PHONE_PREFIX_MAP) {
+    if (info.name.toLowerCase() === lower) return info;
+  }
+  // Fallback: check COUNTRY_NAME_TR_MAP for alternate spellings
+  const normalized = COUNTRY_NAME_TR_MAP[lower];
+  if (normalized) {
+    for (const [, info] of PHONE_PREFIX_MAP) {
+      if (info.name === normalized) return info;
+    }
+  }
+  // Last resort: return with globe flag
+  return { name, flag: '🌍', code: '??' };
+}
+
+/**
  * Deduplicate phone numbers with smart matching.
  * - Sorts by length desc (keeps longer = more complete numbers)
  * - Uses last-9-digit matching AND suffix containment check

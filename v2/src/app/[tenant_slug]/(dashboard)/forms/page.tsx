@@ -7,7 +7,8 @@ import { getForms, getCampaignNames, updateLeadNotes, updateLeadStage, syncGoogl
 import { toggleBotStatus } from "@/app/actions/inbox";
 import { useInboxStore } from "@/store/inbox-store";
 import { useRouter, useParams } from "next/navigation";
-import { resolveCountry, deduplicatePhones } from "@/lib/utils/country";
+import { resolveCountry, deduplicatePhones, getCountryInfoByName } from "@/lib/utils/country";
+import { MapPin, Building2, Calendar, Flame, TrendingUp } from "lucide-react";
 
 const formatDate = (dateString: string) => {
   if (!dateString) return "";
@@ -79,6 +80,23 @@ const STAGES = [
 ] as const;
 
 const getStageInfo = (stage: string) => STAGES.find(s => s.value === stage) || STAGES[0];
+
+// P0C: Resolve country with live CRM priority
+const getFormCountry = (form: any): { name: string; flag: string } | null => {
+  // Priority 1: Live CRM data from conversation/opportunity
+  if (form.current_country) {
+    return getCountryInfoByName(form.current_country);
+  }
+  // Priority 2: Phone prefix detection (fallback)
+  const phones = getAllPhones(form);
+  return resolveCountry(phones[0] || form.phone_number, form.raw_data);
+};
+
+const PRIORITY_CONFIG: Record<string, { label: string; color: string; icon: string }> = {
+  'hot': { label: 'SICAK', color: '#FF3B30', icon: '🔥' },
+  'warm': { label: 'ILIK', color: '#FF9500', icon: '🟡' },
+  'cold': { label: 'SOĞUK', color: '#007AFF', icon: '🔵' },
+};
 
 // Dropdown hook for outside click
 function useDropdown() {
@@ -418,7 +436,7 @@ export default function FormsPage() {
                 const allPhones = getAllPhones(form);
                 const primaryPhone = allPhones[0] || form.phone_number;
                 const extraPhones = allPhones.slice(1);
-                const country = resolveCountry(primaryPhone, form.raw_data);
+                const country = getFormCountry(form);
                 const stageInfo = getStageInfo(form.stage);
                 
                 return (
@@ -561,7 +579,7 @@ export default function FormsPage() {
                   <h2 className="text-xl font-bold text-[#1D1D1F] flex flex-wrap items-center gap-2 leading-snug">
                     <span className="break-words whitespace-pre-wrap max-w-full">{getDisplayName(selectedForm)}</span>
                     {(() => {
-                      const c = resolveCountry(selectedForm.phone_number, selectedForm.raw_data);
+                      const c = getFormCountry(selectedForm);
                       return c ? (
                         <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/[0.04] text-[12px] font-semibold text-[#86868B] shrink-0">
                           {c.flag} {c.name}
@@ -613,7 +631,7 @@ export default function FormsPage() {
                         {getDisplayName(selectedForm)}
                       </p>
                       {(() => {
-                        const c = resolveCountry(selectedForm.phone_number, selectedForm.raw_data);
+                        const c = getFormCountry(selectedForm);
                         return c ? (
                           <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/[0.04] text-[11px] font-semibold text-[#86868B] shrink-0">
                             {c.flag} {c.name}
@@ -670,6 +688,68 @@ export default function FormsPage() {
                   </div>
                 </div>
               </div>
+
+              {/* P0C: Güncel Takip Bilgisi (from opportunity/conversation) */}
+              {(selectedForm.current_country || selectedForm.current_department || selectedForm.current_stage || selectedForm.current_travel_date) && (
+                <div className="bg-white rounded-2xl p-5 border border-black/5 shadow-sm">
+                  <div className="flex items-center gap-2 mb-4">
+                    <TrendingUp className="w-4 h-4 text-[#007AFF]" />
+                    <h3 className="text-sm font-bold text-[#1D1D1F]">Güncel Takip Bilgisi</h3>
+                    {selectedForm.link_confidence && selectedForm.link_confidence !== 'none' && (
+                      <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-[#007AFF]/10 text-[#007AFF]">
+                        {selectedForm.link_confidence === 'customer_id' ? 'Kimlik Eşleşmesi' : 'Telefon Eşleşmesi'}
+                      </span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    {selectedForm.current_country && (() => {
+                      const ci = getCountryInfoByName(selectedForm.current_country);
+                      return (
+                        <div>
+                          <p className="text-[10px] font-semibold text-[#86868B] uppercase tracking-wider flex items-center gap-1"><MapPin className="w-3 h-3" /> Ülke</p>
+                          <p className="text-[14px] font-semibold text-[#1D1D1F] mt-1">{ci?.flag} {selectedForm.current_country}</p>
+                        </div>
+                      );
+                    })()}
+                    {selectedForm.current_department && (
+                      <div>
+                        <p className="text-[10px] font-semibold text-[#86868B] uppercase tracking-wider flex items-center gap-1"><Building2 className="w-3 h-3" /> Bölüm</p>
+                        <p className="text-[14px] font-semibold text-[#1D1D1F] mt-1">{selectedForm.current_department}</p>
+                      </div>
+                    )}
+                    {selectedForm.current_travel_date && (
+                      <div>
+                        <p className="text-[10px] font-semibold text-[#86868B] uppercase tracking-wider flex items-center gap-1"><Calendar className="w-3 h-3" /> Geliş Tarihi</p>
+                        <p className="text-[14px] font-semibold text-[#1D1D1F] mt-1">
+                          {new Date(selectedForm.current_travel_date).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' })}
+                        </p>
+                      </div>
+                    )}
+                    {selectedForm.current_priority && (() => {
+                      const p = PRIORITY_CONFIG[selectedForm.current_priority];
+                      return p ? (
+                        <div>
+                          <p className="text-[10px] font-semibold text-[#86868B] uppercase tracking-wider flex items-center gap-1"><Flame className="w-3 h-3" /> Öncelik</p>
+                          <p className="text-[14px] font-bold mt-1" style={{ color: p.color }}>{p.icon} {p.label}</p>
+                        </div>
+                      ) : null;
+                    })()}
+                    {selectedForm.current_stage && (() => {
+                      const si = getStageInfo(selectedForm.current_stage);
+                      return (
+                        <div className="col-span-2">
+                          <p className="text-[10px] font-semibold text-[#86868B] uppercase tracking-wider mb-1">Opportunity Durumu</p>
+                          <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-md border"
+                            style={{ backgroundColor: `${si.color}12`, borderColor: `${si.color}25`, color: si.color }}>
+                            <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: si.color }} />
+                            {si.label}
+                          </span>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+              )}
 
               {/* AI Summary / Notes */}
               <div className="bg-white rounded-2xl p-5 border border-black/5 shadow-sm space-y-3">

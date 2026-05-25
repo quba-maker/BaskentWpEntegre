@@ -43,15 +43,28 @@ export async function getForms(page: number = 1, search: string = "", source: st
       const limitIdx = paramIdx;
       const offsetIdx = paramIdx + 1;
 
-      // Safe AI summary linking strategy:
+      // Safe AI summary + CRM linking strategy:
       // Layer 1: customer_id link (identity match)
       // Layer 2: phone match ONLY if exactly ONE conversation exists (no ambiguity)
       // Layer 3: no match → null summary (safe empty state)
+      // Layer 4: LATERAL opportunity (most recent, no row duplication)
       const rows = await ctx.db.executeSafe({
         text: `SELECT l.*, 
                COALESCE(c_identity.status, c_phone.status) as conversation_status, 
                COALESCE(c_identity.lead_stage, c_phone.lead_stage) as conv_lead_stage, 
                COALESCE(mem_identity.summary_text, mem_phone.summary_text) as ai_summary,
+               COALESCE(c_identity.id, c_phone.id) as linked_conv_id,
+               COALESCE(c_identity.country, c_phone.conv_country) as conv_country,
+               COALESCE(c_identity.department, c_phone.conv_department) as conv_department,
+               opp.opp_id,
+               opp.opp_country,
+               opp.opp_department,
+               opp.opp_stage,
+               opp.opp_priority,
+               opp.opp_intent_type,
+               opp.opp_travel_date,
+               opp.opp_next_follow_up_at,
+               opp.opp_summary,
                CASE 
                  WHEN c_identity.id IS NOT NULL THEN 'customer_id'
                  WHEN c_phone.id IS NOT NULL THEN 'phone_unique'
@@ -65,7 +78,7 @@ export async function getForms(page: number = 1, search: string = "", source: st
                LEFT JOIN conversation_memory mem_identity ON mem_identity.conversation_id = c_identity.id
                -- Layer 2: Phone match only if EXACTLY ONE conversation matches (prevents cross-leak)
                LEFT JOIN LATERAL (
-                 SELECT c2.id, c2.status, c2.lead_stage
+                 SELECT c2.id, c2.status, c2.lead_stage, c2.country as conv_country, c2.department as conv_department
                  FROM conversations c2 
                  WHERE c2.tenant_id = l.tenant_id 
                    AND RIGHT(c2.phone_number, 10) = RIGHT(l.phone_number, 10)
@@ -76,6 +89,20 @@ export async function getForms(page: number = 1, search: string = "", source: st
                  LIMIT 1
                ) c_phone ON c_identity.id IS NULL
                LEFT JOIN conversation_memory mem_phone ON mem_phone.conversation_id = c_phone.id AND c_identity.id IS NULL
+               -- Layer 4: Most recent opportunity for linked conversation (LATERAL prevents duplication)
+               LEFT JOIN LATERAL (
+                 SELECT o.id as opp_id, 
+                        o.country as opp_country, o.department as opp_department,
+                        o.stage as opp_stage, o.priority as opp_priority,
+                        o.intent_type as opp_intent_type, o.travel_date as opp_travel_date,
+                        o.next_follow_up_at as opp_next_follow_up_at,
+                        o.summary as opp_summary
+                 FROM opportunities o
+                 WHERE o.tenant_id = l.tenant_id
+                   AND o.conversation_id = COALESCE(c_identity.id, c_phone.id)
+                 ORDER BY o.updated_at DESC
+                 LIMIT 1
+               ) opp ON COALESCE(c_identity.id, c_phone.id) IS NOT NULL
                WHERE ${conditions.join(' AND ')}
                ORDER BY l.created_at DESC LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
         values: params
@@ -95,7 +122,19 @@ export async function getForms(page: number = 1, search: string = "", source: st
         notes: r.notes || "",
         ai_summary: r.ai_summary || "",
         isBotActive: r.conversation_status === 'bot',
-        summaryLinkMethod: r.summary_link_method || 'none'
+        summaryLinkMethod: r.summary_link_method || 'none',
+        // ═══ P0C: Live CRM data from conversation/opportunity ═══
+        linked_conversation_id: r.linked_conv_id || null,
+        linked_opportunity_id: r.opp_id || null,
+        current_country: r.opp_country || r.conv_country || r.country || null,
+        current_department: r.opp_department || r.conv_department || null,
+        current_stage: r.opp_stage || null,
+        current_priority: r.opp_priority || null,
+        current_intent_type: r.opp_intent_type || null,
+        current_travel_date: r.opp_travel_date || null,
+        current_next_follow_up_at: r.opp_next_follow_up_at || null,
+        current_ai_summary: r.opp_summary || r.ai_summary || "",
+        link_confidence: r.summary_link_method || 'none',
       }));
     }
   ).then(res => res.data || []);
