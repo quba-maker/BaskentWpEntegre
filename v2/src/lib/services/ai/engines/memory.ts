@@ -92,9 +92,16 @@ export class MemoryEngine {
 
       const rawText = aiResult.text.trim();
       
+      // Strip markdown code fences (```json ... ``` or ``` ... ```)
+      let strippedText = rawText;
+      const fenceMatch = rawText.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
+      if (fenceMatch) {
+        strippedText = fenceMatch[1].trim();
+      }
+      
       // Robust JSON extraction to ignore any conversational prefix/suffix
-      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-      const cleanedJson = jsonMatch ? jsonMatch[0] : rawText;
+      const jsonMatch = strippedText.match(/\{[\s\S]*\}/);
+      const cleanedJson = jsonMatch ? jsonMatch[0] : strippedText;
       
       const parsed = JSON.parse(cleanedJson);
       
