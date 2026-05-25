@@ -1,6 +1,7 @@
 import { sql } from "@/lib/db";
 import { TenantDB } from "@/lib/core/tenant-db";
 import { normalizeCountryName } from "@/lib/utils/country";
+import { logger } from "@/lib/core/logger";
 
 // ==========================================
 // CONVERSATION SERVICE (State Extraction & Locking)
@@ -8,6 +9,7 @@ import { normalizeCountryName } from "@/lib/utils/country";
 
 export class ConversationService {
   private db: TenantDB;
+  private log = logger.withContext({ module: 'ConversationService' });
 
   constructor(db: TenantDB) {
     this.db = db;
@@ -170,24 +172,9 @@ export class ConversationService {
         }
       }
 
-      // ═══ DIAGNOSTIC: Conversation CRM Update ═══
-      console.log(`[CONV_CRM_UPDATE] Params → patientName=${data.patientName || '(empty)'}, country=${normalizedCountry || '(null)'}, department=${data.department || '(null)'}, stage=${finalStage || '(null/no-change)'}, phone=${phoneNumber}`);
+      this.log.info(`[CONV_CRM_UPDATE] input`, { phone: phoneNumber, rawCountry: data.country, normalized: normalizedCountry, department: data.department, stage: finalStage });
 
-      // ═══ DIAGNOSTIC DB WRITE — inside updateCrmIntelligence ═══
-      try {
-        await this.db.executeSafe({
-          text: `INSERT INTO messages (tenant_id, phone_number, direction, content, channel, provider_message_id)
-                 VALUES ($1, $2, 'system', $3, 'whatsapp', $4)`,
-          values: [
-            this.db.tenantId,
-            phoneNumber,
-            `[CRM_INTEL_DIAG] raw_country=${data.country || '(undef)'} | normalized=${normalizedCountry || '(null)'} | department=${data.department || '(undef)'} | patientName=${data.patientName || '(undef)'} | stage=${finalStage || '(null)'}`,
-            `crm_intel_${Date.now()}`
-          ]
-        });
-      } catch (_) { /* non-blocking */ }
-
-      await this.db.executeSafe(sql`
+      const updateResult = await this.db.executeSafe(sql`
         UPDATE conversations 
         SET 
           patient_name = COALESCE(${data.patientName || null}, patient_name),
@@ -198,7 +185,7 @@ export class ConversationService {
         WHERE phone_number = ${phoneNumber} AND tenant_id = ${this.db.tenantId}
       `);
 
-      console.log(`[CONV_CRM_UPDATED] OK → phone=${phoneNumber}, country=${normalizedCountry}, department=${data.department}`);
+      this.log.info(`[CONV_CRM_UPDATED] result`, { phone: phoneNumber, country: normalizedCountry, department: data.department, updateResult: JSON.stringify(updateResult).substring(0, 200) });
 
       // Sync stage to leads table (bi-directional consistency)
       if (finalStage) {

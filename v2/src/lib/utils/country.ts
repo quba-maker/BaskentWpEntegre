@@ -125,7 +125,6 @@ const COUNTRY_NAME_TR_MAP: Record<string, string> = {
   'kazakhstan': 'Kazakistan',
   'portugal': 'Portekiz',
   'portekiz': 'Portekiz',
-  'portugal': 'Portekiz',
   'czech republic': 'Çekya',
   'finland': 'Finlandiya',
   'ireland': 'İrlanda',

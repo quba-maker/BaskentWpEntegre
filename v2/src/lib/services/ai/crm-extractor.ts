@@ -16,6 +16,7 @@ export const CrmExtractionSchema = z.object({
   suggested_questions: z.array(z.string()).optional(),
   // Opportunity Detection Fields
   should_create_opportunity: z.boolean().optional(),
+  should_update_existing_opportunity: z.boolean().optional(),
   opportunity_priority: z.enum(['cold', 'warm', 'hot']).optional(),
   intent_type: z.string().optional(),
   next_best_action: z.string().optional(),
@@ -149,6 +150,14 @@ Pipeline Aşama Kuralları (sırayla ilerler, geri gitmez):
 - Hasta doktor randevusu talep ederse
 - Hasta ameliyat/işlem tarihi belirlenmesini isterse
 - Bot kendi başına kesinleştiremeyeceği herhangi bir aksiyon talep edilirse
+
+🎯 AÇIK GÜNCELLEME MESAJLARI (KRİTİK):
+- Eğer kullanıcı açıkça "ülke X", "bölüm Y", "departman Z" diyorsa, country ve department alanlarını MUTLAKA X/Y/Z olarak doldur.
+- Bu bir düzeltme mesajı ise önceki değerleri güncelle.
+- Örnek: "Ülke İngiltere, bölüm Onkoloji" → country: "İngiltere", department: "Onkoloji"
+- Örnek: "Portekiz'den geliyoruz, Kardiyoloji bölümü" → country: "Portekiz", department: "Kardiyoloji"
+- Bu durumda country_confidence = 1.0 olmalı.
+- Bu tür açık bildirimler varsa should_create_opportunity = true, should_update_existing_opportunity = true olmalı.
 
 Önemli Kurallar:
 - Eğer mevcut aşama belirlenemiyorsa "new" döndür.

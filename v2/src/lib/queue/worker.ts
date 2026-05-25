@@ -1044,53 +1044,60 @@ export class QueueWorkerEngine {
       // AI Inference (Layer 2-4)
       const crmData = await crmExtractorService.extract(aiMessages, tenantConfig, traceId);
       
-      // ═══ DIAGNOSTIC: CRM Extractor Raw Output ═══
-      this.log.info(`[CRM_EXTRACTED] Raw CRM extractor output`, { 
-        traceId, 
-        country: crmData?.country || '(empty)',
-        department: crmData?.department || '(empty)',
-        travel_date: crmData?.travel_date || '(empty)',
-        should_create_opportunity: crmData?.should_create_opportunity,
-        intent_type: crmData?.intent_type || '(empty)',
-        pipeline_stage: crmData?.pipeline_stage || '(empty)',
-        patient_name: crmData?.patient_name || '(empty)',
-        requires_human_confirmation: crmData?.requires_human_confirmation,
-        requested_callback: crmData?.requested_callback_datetime || '(empty)',
-        report_status: crmData?.report_status || '(empty)'
+      // ═══ P0-1: CRM_RAW_EXTRACTED — ai_events (reliable, nullable conversation_id) ═══
+      await AIEventEmitter.emitSync({
+        tenantId, conversationId, customerId,
+        type: 'crm_raw_extracted',
+        category: 'crm',
+        payload: {
+          traceId,
+          phoneNumber,
+          isNull: crmData === null,
+          country: crmData?.country || null,
+          department: crmData?.department || null,
+          travelDate: crmData?.travel_date || null,
+          requestedCallbackDatetime: crmData?.requested_callback_datetime || null,
+          shouldCreateOpportunity: crmData?.should_create_opportunity ?? null,
+          shouldUpdateExistingOpportunity: crmData?.should_update_existing_opportunity ?? null,
+          intentType: crmData?.intent_type || null,
+          priority: crmData?.opportunity_priority || null,
+          patientName: crmData?.patient_name || null,
+          pipelineStage: crmData?.pipeline_stage || null,
+          reportStatus: crmData?.report_status || null,
+          requiresHumanConfirmation: crmData?.requires_human_confirmation ?? null,
+          rawUserMessage: String(content).substring(0, 200)
+        }
       });
 
-      // ═══ DIAGNOSTIC DB WRITE: Persist CRM result for verification ═══
-      try {
-        await db.executeSafe({
-          text: `INSERT INTO messages (tenant_id, phone_number, direction, content, channel, provider_message_id)
-                 VALUES ($1, $2, 'system', $3, 'whatsapp', $4)`,
-          values: [
-            tenantId,
-            phoneNumber,
-            `[CRM_DIAG] ${JSON.stringify({
-              country: crmData?.country || null,
-              department: crmData?.department || null,
-              travel_date: crmData?.travel_date || null,
-              intent: crmData?.intent_type || null,
-              opp: crmData?.should_create_opportunity || false,
-              isNull: crmData === null
-            })}`,
-            `crm_diag_${traceId}`
-          ]
-        });
-      } catch (_diagErr) { /* non-blocking */ }
-
-      // Update DB safely — AI extraction takes precedence over phone prefix for country
-      // Medical tourism: patient may have +90 phone but live in Germany ("Almanya'dayım")
+      // ═══ P0-3: Country priority — CRM extraction ALWAYS wins over phone prefix ═══
+      // Medical tourism: patient with +90 phone may live in Germany
       const resolvedCountryForConv = crmData?.country || deterministicCountry;
       
-      // ═══ DIAGNOSTIC: Worker Resolved Values ═══
-      this.log.info(`[WORKER_RESOLVE] Country resolution trace`, { 
-        traceId, 
-        deterministicCountry: deterministicCountry || '(none)',
-        crmDataCountry: crmData?.country || '(empty)',
-        finalCountryForConversation: resolvedCountryForConv || '(none)',
-        crmDataDepartment: crmData?.department || '(empty)'
+      // ═══ Fetch before-snapshot for conversations ═══
+      let beforeConv: any = null;
+      try {
+        const snap = await db.executeSafe({
+          text: `SELECT country, department, lead_stage FROM conversations WHERE phone_number = $1 AND tenant_id = $2`,
+          values: [phoneNumber, tenantId]
+        }) as any[];
+        beforeConv = snap[0] || null;
+      } catch (_) { /* non-blocking */ }
+
+      // ═══ P0-1: CRM_RESOLVED_FOR_CONVERSATION ═══
+      await AIEventEmitter.emitSync({
+        tenantId, conversationId, customerId,
+        type: 'crm_resolved_for_conversation',
+        category: 'crm',
+        payload: {
+          traceId,
+          deterministicCountry: deterministicCountry || null,
+          crmCountry: crmData?.country || null,
+          finalCountryForConversation: resolvedCountryForConv || null,
+          crmDepartment: crmData?.department || null,
+          previousConversationCountry: beforeConv?.country || null,
+          previousConversationDepartment: beforeConv?.department || null,
+          previousLeadStage: beforeConv?.lead_stage || null
+        }
       });
       
       await convService.updateCrmIntelligence(phoneNumber, {
@@ -1101,8 +1108,40 @@ export class QueueWorkerEngine {
         tags: crmData?.tags
       });
 
-      this.log.info(`[WORKER_CRM_OK] CRM successfully enriched`, { traceId, patientName: crmData?.patient_name, country: resolvedCountryForConv, department: crmData?.department });
-      AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'crm_extraction_completed', category: 'crm', payload: { patientName: crmData?.patient_name, country: resolvedCountryForConv, department: crmData?.department } });
+      // ═══ P0-4: CRM_CONVERSATION_UPDATE_RESULT — after-snapshot ═══
+      let afterConv: any = null;
+      try {
+        const snap = await db.executeSafe({
+          text: `SELECT country, department, lead_stage FROM conversations WHERE phone_number = $1 AND tenant_id = $2`,
+          values: [phoneNumber, tenantId]
+        }) as any[];
+        afterConv = snap[0] || null;
+      } catch (_) { /* non-blocking */ }
+
+      await AIEventEmitter.emitSync({
+        tenantId, conversationId, customerId,
+        type: 'crm_conversation_update_result',
+        category: 'crm',
+        payload: {
+          traceId,
+          beforeCountry: beforeConv?.country || null,
+          afterCountry: afterConv?.country || null,
+          beforeDepartment: beforeConv?.department || null,
+          afterDepartment: afterConv?.department || null,
+          beforeLeadStage: beforeConv?.lead_stage || null,
+          afterLeadStage: afterConv?.lead_stage || null,
+          countryChanged: beforeConv?.country !== afterConv?.country,
+          departmentChanged: beforeConv?.department !== afterConv?.department
+        }
+      });
+
+      this.log.info(`[WORKER_CRM_OK] CRM enriched`, { traceId, country: afterConv?.country, department: afterConv?.department });
+      AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'crm_extraction_completed', category: 'crm', payload: { 
+        patientName: crmData?.patient_name, country: resolvedCountryForConv, department: crmData?.department,
+        travelDate: crmData?.travel_date, intentType: crmData?.intent_type, priority: crmData?.opportunity_priority,
+        reportStatus: crmData?.report_status, requiresHumanConfirmation: crmData?.requires_human_confirmation,
+        shouldCreateOpportunity: crmData?.should_create_opportunity, opportunityReason: crmData?.opportunity_reason
+      }});
 
       // 10b. Opportunity Upsert / Enrichment (non-fatal, async-safe)
       if (crmData && conversationId) {
@@ -1110,45 +1149,85 @@ export class QueueWorkerEngine {
           const { OpportunityService } = await import('../services/opportunity.service');
           const oppService = new OpportunityService(db);
 
-          // ═══ DIAGNOSTIC: Opportunity Pipeline Decision ═══
-          const finalCountryForOpp = crmData.country || deterministicCountry || null;
-          this.log.info(`[WORKER_OPP_DECISION] Opportunity pipeline routing`, { 
-            traceId, 
-            should_create_opportunity: crmData.should_create_opportunity,
-            crmDataCountry: crmData.country || '(empty)',
-            deterministicCountry: deterministicCountry || '(none)',
-            finalCountryForOpportunity: finalCountryForOpp || '(none)',
-            crmDataDepartment: crmData.department || '(empty)',
-            conversationId,
-            intent_type: crmData.intent_type || '(empty)'
+          // ═══ P0-5: Fetch opportunity before-snapshot ═══
+          let beforeOpp: any = null;
+          try {
+            const oppSnap = await db.executeSafe({
+              text: `SELECT id, country, department, travel_date, stage, priority FROM opportunities 
+                     WHERE conversation_id = $1 AND tenant_id = $2 
+                     AND stage NOT IN ('lost', 'not_qualified', 'arrived')
+                     ORDER BY created_at DESC LIMIT 1`,
+              values: [conversationId, tenantId]
+            }) as any[];
+            beforeOpp = oppSnap[0] || null;
+          } catch (_) { /* non-blocking */ }
+
+          // ═══ P0-1: OPP_RESOLVED_FOR_UPDATE ═══
+          await AIEventEmitter.emitSync({
+            tenantId, conversationId, customerId,
+            type: 'opp_resolved_for_update',
+            category: 'crm',
+            payload: {
+              traceId,
+              opportunityId: beforeOpp?.id || null,
+              activeOpportunityExists: !!beforeOpp,
+              crmCountry: crmData.country || null,
+              deterministicCountry: deterministicCountry || null,
+              finalCountryForOpportunity: crmData.country || deterministicCountry || null,
+              crmDepartment: crmData.department || null,
+              previousOpportunityCountry: beforeOpp?.country || null,
+              previousOpportunityDepartment: beforeOpp?.department || null,
+              shouldCreateOpportunity: crmData.should_create_opportunity
+            }
           });
 
           if (crmData.should_create_opportunity) {
-            // Full upsert: create or update opportunity
             const oppId = await oppService.upsertFromCrm({
-              tenantId,
-              conversationId,
-              phoneNumber,
-              channel,
+              tenantId, conversationId, phoneNumber, channel,
               patientName: crmData.patient_name,
-              crmData,
-              lastCustomerMessageAt: new Date().toISOString(),
-              traceId,
-              externalCountry: deterministicCountry
+              crmData, lastCustomerMessageAt: new Date().toISOString(),
+              traceId, externalCountry: deterministicCountry
             });
             if (oppId) {
-              this.log.info(`[WORKER_OPP_OK] Opportunity upserted`, { traceId, oppId, priority: crmData.opportunity_priority, intent: crmData.intent_type, department: crmData.department, country: crmData.country });
+              this.log.info(`[WORKER_OPP_OK] Opportunity upserted`, { traceId, oppId });
             }
           } else {
-            // Always-enrich: even if no new opportunity needed, update existing fields
-            this.log.info(`[WORKER_OPP_ENRICH_START] Enriching existing opportunity (should_create=false)`, { traceId, department: crmData.department, country: crmData.country });
             const enriched = await oppService.enrichExisting(tenantId, conversationId, crmData, deterministicCountry, traceId);
-            if (enriched) {
-              this.log.info(`[WORKER_OPP_ENRICHED] Existing opportunity enriched with new CRM data`, { traceId, department: crmData.department, country: crmData.country });
-            } else {
-              this.log.warn(`[WORKER_OPP_ENRICH_MISS] enrichExisting returned false — no existing opp found or error`, { traceId });
-            }
+            this.log.info(`[WORKER_OPP_ENRICH] result=${enriched}`, { traceId });
           }
+
+          // ═══ P0-5: OPP_UPDATE_RESULT — after-snapshot ═══
+          let afterOpp: any = null;
+          try {
+            const oppSnap = await db.executeSafe({
+              text: `SELECT id, country, department, travel_date, stage, priority, updated_at FROM opportunities 
+                     WHERE conversation_id = $1 AND tenant_id = $2 
+                     AND stage NOT IN ('lost', 'not_qualified', 'arrived')
+                     ORDER BY created_at DESC LIMIT 1`,
+              values: [conversationId, tenantId]
+            }) as any[];
+            afterOpp = oppSnap[0] || null;
+          } catch (_) { /* non-blocking */ }
+
+          await AIEventEmitter.emitSync({
+            tenantId, conversationId, customerId,
+            type: 'opp_update_result',
+            category: 'crm',
+            payload: {
+              traceId,
+              opportunityId: afterOpp?.id || null,
+              beforeCountry: beforeOpp?.country || null,
+              afterCountry: afterOpp?.country || null,
+              beforeDepartment: beforeOpp?.department || null,
+              afterDepartment: afterOpp?.department || null,
+              beforeTravelDate: beforeOpp?.travel_date || null,
+              afterTravelDate: afterOpp?.travel_date || null,
+              updatedAt: afterOpp?.updated_at || null,
+              countryChanged: beforeOpp?.country !== afterOpp?.country,
+              departmentChanged: beforeOpp?.department !== afterOpp?.department
+            }
+          });
+
         } catch (oppErr) {
           this.log.error(`[WORKER_OPP_FAILED] Non-fatal opportunity error`, oppErr instanceof Error ? oppErr : new Error(String(oppErr)), { traceId });
         }
