@@ -34,13 +34,20 @@ export async function updateOpportunityStage(oppId: string, newStage: string, re
   return withActionGuard(
     { actionName: 'updateOpportunityStage' },
     async (ctx) => {
-      const service = new OpportunityService(ctx.db);
-      await service.updateStage(ctx.tenantId, oppId, newStage, reason);
-      return { success: true };
+      const { UnifiedStageService } = await import('@/lib/services/unified-stage.service');
+      const result = await UnifiedStageService.update({
+        tenantId: ctx.tenantId,
+        source: 'takip',
+        opportunityId: oppId,
+        targetStage: newStage,
+        actorId: ctx.userId,
+        reason,
+      });
+      return result;
     }
   ).then(res => {
     if (!res.success) return { success: false, error: res.error };
-    return { success: true };
+    return res.data || { success: true };
   });
 }
 

@@ -1,6 +1,7 @@
 import { logger } from "@/lib/core/logger";
 import type { TenantDB } from "@/lib/core/tenant-db";
 import type { CrmExtractionType } from "./ai/crm-extractor";
+import { oppStageToLeadStage } from '@/lib/config/stage-mapping';
 
 const log = logger.withContext({ module: 'OpportunityService' });
 
@@ -231,6 +232,9 @@ export class OpportunityService {
           department: crmData.department, country: resolvedCountry,
           travelDate, reportStatus: crmData.report_status, requiresConfirmation: crmData.requires_human_confirmation
         });
+
+        // Mirror stage to conversations + leads (non-blocking best-effort)
+        this.mirrorStageToLinked(tenantId, conversationId, phoneNumber, finalStage).catch(() => {});
         return current.id;
       }
 
@@ -280,6 +284,9 @@ export class OpportunityService {
         traceId, oppId: newId, stage: newStage, priority, intentType: crmData.intent_type,
         travelDate, reportStatus: crmData.report_status
       });
+
+      // Mirror stage to conversations + leads (non-blocking best-effort)
+      this.mirrorStageToLinked(tenantId, conversationId, phoneNumber, newStage).catch(() => {});
       return newId;
 
     } catch (e: any) {
@@ -431,15 +438,39 @@ export class OpportunityService {
    * Update stage manually
    */
   async updateStage(tenantId: string, oppId: string, newStage: string, reason?: string) {
-    await this.db.executeSafe({
-      text: `UPDATE opportunities SET 
-               stage = $1, 
-               closed_at = CASE WHEN $1 IN ('lost', 'not_qualified', 'arrived') THEN NOW() ELSE NULL END,
-               closed_reason = CASE WHEN $1 IN ('lost', 'not_qualified') THEN $4 ELSE NULL END,
-               updated_at = NOW()
-             WHERE id = $2 AND tenant_id = $3`,
-      values: [newStage, oppId, tenantId, reason || null]
+    // Delegate to UnifiedStageService for atomic 3-way sync
+    const { UnifiedStageService } = await import('./unified-stage.service');
+    await UnifiedStageService.update({
+      tenantId,
+      source: 'system',
+      opportunityId: oppId,
+      targetStage: newStage,
+      reason,
     });
+  }
+
+  /**
+   * Mirror opportunity stage to linked conversations + leads.
+   * Best-effort, non-blocking — used after upsertFromCrm.
+   */
+  private async mirrorStageToLinked(tenantId: string, conversationId: string, phoneNumber: string, oppStage: string) {
+    const mirrorStage = oppStageToLeadStage(oppStage);
+    try {
+      // Mirror to conversation
+      await this.db.executeSafe({
+        text: `UPDATE conversations SET lead_stage = $1 WHERE id = $2 AND tenant_id = $3`,
+        values: [mirrorStage, conversationId, tenantId]
+      });
+      // Mirror to leads
+      const cleanPhone = phoneNumber.replace(/\D/g, '');
+      const last10 = cleanPhone.length > 10 ? cleanPhone.substring(cleanPhone.length - 10) : cleanPhone;
+      await this.db.executeSafe({
+        text: `UPDATE leads SET stage = $1 WHERE phone_number LIKE '%' || $2 || '%' AND tenant_id = $3`,
+        values: [mirrorStage, last10, tenantId]
+      });
+    } catch (err) {
+      log.error(`[OPP_MIRROR_FAILED] Non-fatal mirror sync`, err instanceof Error ? err : new Error(String(err)));
+    }
   }
 
   /**

@@ -230,57 +230,49 @@ export async function updateLeadStage(id: number, stage: string) {
       });
       if (lead.length === 0) throw new Error("Kayıt bulunamadı.");
 
-      await ctx.db.executeSafe({
-        text: `UPDATE leads SET stage = $1 WHERE id = $2 AND tenant_id = $3`,
-        values: [stage, id, ctx.tenantId]
+      // Route through UnifiedStageService (maps lead stage → opp stage internally)
+      const { UnifiedStageService } = await import('@/lib/services/unified-stage.service');
+      const { LEAD_TO_OPP_MAP } = await import('@/lib/config/stage-mapping');
+      
+      // Convert lead-system stage to opportunity-system stage for unified service
+      const oppTargetStage = LEAD_TO_OPP_MAP[stage] || stage;
+      
+      const result = await UnifiedStageService.update({
+        tenantId: ctx.tenantId,
+        source: 'forms',
+        leadId: id,
+        phoneNumber: lead[0].phone_number,
+        targetStage: oppTargetStage,
+        actorId: ctx.userId,
       });
 
-      // Sync stage to conversations table (single source of truth)
-      const phoneSuffix = lead[0].phone_number.replace(/\D/g, '').slice(-10);
-      try {
-        await ctx.db.executeSafe({
-          text: `UPDATE conversations SET lead_stage = $1 WHERE RIGHT(phone_number, 10) = $2 AND tenant_id = $3`,
-          values: [stage, phoneSuffix, ctx.tenantId]
-        });
-      } catch (_) {
-        // Non-blocking
-      }
-
-      // Sync stage to Google Sheets lead_status column
-      const SHEET_URL = process.env.GOOGLE_SHEET_UPDATE_URL || process.env.GOOGLE_SHEET_URL;
-      if (SHEET_URL && lead.length > 0) {
-        try {
-          // Map internal stage to display label for Sheets
-          const stageLabels: Record<string, string> = {
-            'new': 'Yeni Lead',
-            'contacted': 'İletişime Geçildi',
-            'responded': 'Yanıt Alındı',
-            'discovery': 'Keşif / Analiz',
-            'qualified': 'Nitelikli',
-            'appointed': 'Randevu Aldı',
-            'lost': 'Kaybedildi',
-          };
-          
-          await fetch(SHEET_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              action: 'updateStatusByPhone',
-              phone: lead[0].phone_number,
-              status: stageLabels[stage] || stage
-            })
-          });
-        } catch (sheetErr) {
-          const { logger: formsLogger } = await import("@/lib/core/logger");
-          formsLogger.withContext({ module: 'Forms' }).warn("Google Sheets status sync failed", { error: String(sheetErr) });
+      // Google Sheets sync (non-blocking, post-transaction)
+      if (result.success || result.legacyFallback) {
+        const SHEET_URL = process.env.GOOGLE_SHEET_UPDATE_URL || process.env.GOOGLE_SHEET_URL;
+        if (SHEET_URL) {
+          try {
+            const { LEAD_STAGE_LABELS } = await import('@/lib/config/stage-mapping');
+            await fetch(SHEET_URL, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                action: 'updateStatusByPhone',
+                phone: lead[0].phone_number,
+                status: LEAD_STAGE_LABELS[result.mirrorLeadStage || stage] || stage
+              })
+            });
+          } catch (sheetErr) {
+            const { logger: formsLogger } = await import("@/lib/core/logger");
+            formsLogger.withContext({ module: 'Forms' }).warn("Google Sheets status sync failed", { error: String(sheetErr) });
+          }
         }
       }
 
-      return { success: true };
+      return result;
     }
   ).then(res => {
-    if (!res.success) return { success: false, error: res.error };
-    return { success: true };
+    if (!res.success) return { success: false, error: res.error, blocked: res.data?.blocked, blockReason: res.data?.blockReason };
+    return res.data || { success: true };
   });
 }
 

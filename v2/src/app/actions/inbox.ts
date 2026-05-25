@@ -431,35 +431,55 @@ export async function updateCrmData(phone: string, stage: string, department: st
   return withActionGuard(
     { actionName: 'updateCrmData' },
     async (ctx) => {
+      // 1. Update non-stage fields directly (department, country, notes)
       if (country !== undefined) {
         try {
           await ctx.db.executeSafe({
-            text: `UPDATE conversations SET lead_stage = $1, department = $2, country = $3, notes = $4 WHERE phone_number = $5 AND tenant_id = $6`,
-            values: [stage, department, country, notes !== undefined ? notes : null, phone, ctx.tenantId]
+            text: `UPDATE conversations SET department = $1, country = $2, notes = $3 WHERE phone_number = $4 AND tenant_id = $5`,
+            values: [department, country, notes !== undefined ? notes : null, phone, ctx.tenantId]
           });
         } catch (e) {
           await ctx.db.executeSafe({
-            text: `UPDATE conversations SET lead_stage = $1, department = $2, notes = $3 WHERE phone_number = $4 AND tenant_id = $5`,
-            values: [stage, department, notes !== undefined ? notes : null, phone, ctx.tenantId]
+            text: `UPDATE conversations SET department = $1, notes = $2 WHERE phone_number = $3 AND tenant_id = $4`,
+            values: [department, notes !== undefined ? notes : null, phone, ctx.tenantId]
           });
         }
       } else {
         await ctx.db.executeSafe({
-          text: `UPDATE conversations SET lead_stage = $1, department = $2, notes = $3 WHERE phone_number = $4 AND tenant_id = $5`,
-          values: [stage, department, notes !== undefined ? notes : null, phone, ctx.tenantId]
+          text: `UPDATE conversations SET department = $1, notes = $2 WHERE phone_number = $3 AND tenant_id = $4`,
+          values: [department, notes !== undefined ? notes : null, phone, ctx.tenantId]
         });
-      }
-      
-      try {
-        await ctx.db.executeSafe({
-          text: `UPDATE leads SET stage = $1, notes = $2 WHERE (phone_number = $3 OR phone_number LIKE $4) AND tenant_id = $5`,
-          values: [stage, notes !== undefined ? notes : null, phone, '%' + phone.substring(phone.length - 10) + '%', ctx.tenantId]
-        });
-      } catch (e) {
-        // Ignore if leads table structure differs
       }
 
-      // 3 Yönlü Google Sheets Senkronizasyonu
+      // 2. Route stage change through UnifiedStageService
+      if (stage) {
+        const { UnifiedStageService } = await import('@/lib/services/unified-stage.service');
+        const { LEAD_TO_OPP_MAP } = await import('@/lib/config/stage-mapping');
+        
+        // Convert lead-system stage to opportunity-system stage
+        const oppTargetStage = LEAD_TO_OPP_MAP[stage] || stage;
+
+        // Find conversation ID for better opportunity resolution
+        let conversationId: string | undefined;
+        try {
+          const convRows = await ctx.db.executeSafe({
+            text: `SELECT id FROM conversations WHERE phone_number = $1 AND tenant_id = $2 LIMIT 1`,
+            values: [phone, ctx.tenantId]
+          });
+          conversationId = convRows[0]?.id;
+        } catch (_) { /* non-blocking */ }
+        
+        await UnifiedStageService.update({
+          tenantId: ctx.tenantId,
+          source: 'inbox',
+          conversationId,
+          phoneNumber: phone,
+          targetStage: oppTargetStage,
+          actorId: ctx.userId,
+        });
+      }
+
+      // 3. Google Sheets note sync (non-blocking)
       if (notes !== undefined) {
         const SHEET_URL = process.env.GOOGLE_SHEET_UPDATE_URL || process.env.GOOGLE_SHEET_URL;
         if (SHEET_URL) {

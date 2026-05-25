@@ -134,19 +134,14 @@ export class ConversationService {
     // Normalize country to Turkish
     const normalizedCountry = data.country ? normalizeCountryName(data.country) : null;
 
-    // Forward-only pipeline stage order
-    const STAGE_ORDER = ['new', 'contacted', 'responded', 'discovery', 'qualified', 'appointed', 'lost'];
-
     try {
       const current = await this.db.executeSafe(sql`
-        SELECT tags, lead_stage FROM conversations 
+        SELECT tags FROM conversations 
         WHERE phone_number = ${phoneNumber} AND tenant_id = ${this.db.tenantId}
       `);
       
       let mergedTags: string[] = [];
-      let currentStage = 'new';
       if (current.length > 0) {
-        currentStage = current[0].lead_stage || 'new';
         if (current[0].tags) {
           try {
             mergedTags = typeof current[0].tags === 'string' ? JSON.parse(current[0].tags) : current[0].tags;
@@ -160,46 +155,64 @@ export class ConversationService {
         mergedTags = Array.from(new Set([...mergedTags, ...data.tags]));
       }
 
-      // Forward-only stage protection: AI can only advance, never regress
-      let finalStage = data.pipelineStage || null;
-      if (finalStage) {
-        const currentIdx = STAGE_ORDER.indexOf(currentStage);
-        const newIdx = STAGE_ORDER.indexOf(finalStage);
-        // If current stage is more advanced (or same), keep current
-        // Exception: 'lost' can only be set manually or by AI, but can't go back from it
-        if (currentIdx >= 0 && newIdx >= 0 && newIdx <= currentIdx) {
-          finalStage = null; // Don't regress
-        }
-      }
+      this.log.info(`[CONV_CRM_UPDATE] input`, { phone: phoneNumber, rawCountry: data.country, normalized: normalizedCountry, department: data.department, stage: data.pipelineStage });
 
-      this.log.info(`[CONV_CRM_UPDATE] input`, { phone: phoneNumber, rawCountry: data.country, normalized: normalizedCountry, department: data.department, stage: finalStage });
-
-      const updateResult = await this.db.executeSafe(sql`
+      // Update non-stage fields directly (country, department, name, tags)
+      await this.db.executeSafe(sql`
         UPDATE conversations 
         SET 
           patient_name = COALESCE(${data.patientName || null}, patient_name),
           country = COALESCE(${normalizedCountry}, country),
           department = COALESCE(${data.department || null}, department),
-          lead_stage = COALESCE(${finalStage}, lead_stage),
           tags = ${JSON.stringify(mergedTags)}::jsonb
         WHERE phone_number = ${phoneNumber} AND tenant_id = ${this.db.tenantId}
       `);
 
-      this.log.info(`[CONV_CRM_UPDATED] result`, { phone: phoneNumber, country: normalizedCountry, department: data.department, updateResult: JSON.stringify(updateResult).substring(0, 200) });
+      this.log.info(`[CONV_CRM_UPDATED] non-stage fields`, { phone: phoneNumber, country: normalizedCountry, department: data.department });
 
-      // Sync stage to leads table (bi-directional consistency)
-      if (finalStage) {
-        const cleanPhone = phoneNumber.replace(/\D/g, '');
-        const last10 = cleanPhone.length > 10 ? cleanPhone.substring(cleanPhone.length - 10) : cleanPhone;
+      // Route stage change through UnifiedStageService (AI rules enforced centrally)
+      if (data.pipelineStage) {
         try {
-          await this.db.executeSafe(sql`
-            UPDATE leads SET stage = ${finalStage}
-            WHERE phone_number LIKE ${'%' + last10 + '%'} 
-              AND tenant_id = ${this.db.tenantId}
-              AND stage NOT IN ('appointed', 'lost')
+          const { UnifiedStageService } = await import('./unified-stage.service');
+          const { LEAD_TO_OPP_MAP } = await import('@/lib/config/stage-mapping');
+
+          // Find conversation for proper opportunity resolution
+          const convRows = await this.db.executeSafe(sql`
+            SELECT id FROM conversations 
+            WHERE phone_number = ${phoneNumber} AND tenant_id = ${this.db.tenantId}
           `);
-        } catch (_) {
-          // Non-blocking — leads table sync is best-effort
+          const conversationId = convRows[0]?.id;
+
+          // Map lead-system pipeline_stage to opportunity stage
+          const oppTargetStage = LEAD_TO_OPP_MAP[data.pipelineStage] || data.pipelineStage;
+
+          const result = await UnifiedStageService.update({
+            tenantId: this.db.tenantId,
+            source: 'ai',
+            conversationId,
+            phoneNumber,
+            targetStage: oppTargetStage,
+          });
+
+          if (result.blocked) {
+            this.log.info(`[CONV_CRM_STAGE_BLOCKED] AI stage blocked`, {
+              phone: phoneNumber,
+              targetStage: oppTargetStage,
+              blockReason: result.blockReason
+            });
+          } else {
+            this.log.info(`[CONV_CRM_STAGE_SYNCED] AI stage unified`, {
+              phone: phoneNumber,
+              newOppStage: result.newOppStage,
+              mirrorLeadStage: result.mirrorLeadStage
+            });
+          }
+        } catch (stageErr) {
+          // Non-blocking — stage sync failure shouldn't break CRM pipeline
+          this.log.error(`[CONV_CRM_STAGE_ERROR] Non-fatal`,
+            stageErr instanceof Error ? stageErr : new Error(String(stageErr)),
+            { phone: phoneNumber }
+          );
         }
       }
     } catch (e) {
