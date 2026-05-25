@@ -32,6 +32,14 @@ export const CrmExtractionSchema = z.object({
   opt_out_requested: z.boolean().optional(),
   cancellation_reason: z.string().optional(),
   should_stop_follow_up: z.boolean().optional(),
+  // P1B: Identity & Boundary Detection
+  requester_name: z.string().optional(),
+  patient_relation: z.string().optional(),
+  new_identity_detected: z.boolean().optional(),
+  reset_conversation_requested: z.boolean().optional(),
+  data_deletion_request: z.boolean().optional(),
+  different_department_detected: z.boolean().optional(),
+  raw_department: z.string().optional(),
 });
 
 export type CrmExtractionType = z.infer<typeof CrmExtractionSchema>;
@@ -111,7 +119,15 @@ Format:
   "explicit_cancellation": boolean (Hasta AÇIKÇA gelmeyeceğini, vazgeçtiğini, iptal istediğini belirttiyse true. Örn: 'gelmeyeceğim', 'vazgeçtim', 'istemiyorum', 'iptal edin', 'randevuyu iptal edin', 'gelmekten vazgeçtik'. 'Şimdilik düşünmüyorum' gibi belirsiz ifadeler İÇİN FALSE — sadece kesin beyanlar),
   "opt_out_requested": boolean (Hasta aranmamak/mesaj almamak istiyorsa true. Örn: 'aramayın', 'beni bir daha aramayın', 'rahatsız etmeyin', 'mesaj atmayın', 'görüşmek istemiyorum'),
   "cancellation_reason": "string (İptal/vazgeçme sebebi. Hasta söylediyse yazılır. Örn: 'başka hastaneye gitti', 'maddi nedenler', 'gelmekten vazgeçti'. Yoksa boş bırak)",
-  "should_stop_follow_up": boolean (true ise tüm otomatik takip durdurulmalı. explicit_cancellation veya opt_out_requested true ise bu da true olmalı)
+  "should_stop_follow_up": boolean (true ise tüm otomatik takip durdurulmalı. explicit_cancellation veya opt_out_requested true ise bu da true olmalı),
+
+  "requester_name": "string (Başvuran kişinin gerçek adı. 'ismim Mustafa', 'ben Mehmet' gibi ifadelerden çıkar. patient_name aynı kişi ise aynı olabilir. Emin değilsen boş bırak)",
+  "patient_relation": "string (Başvuran kişinin hasta ile ilişkisi. Örn: 'kendisi', 'anne', 'baba', 'eş', 'kardeş', 'çocuk'. 'annem için', 'babam için' gibi ifadelerden çıkar. Yoksa boş bırak)",
+  "new_identity_detected": boolean (Konuşmada daha önce farklı bir kişi konuşuyorken ŞİMDİ yeni/farklı bir kişi konuşmaya başladıysa true. Örn: önceki mesajlarda Mustafa konuşuyordu, şimdi 'ben Mehmet' diyen biri geldi. İLK mesaj veya aynı kişi devam ediyorsa FALSE),
+  "reset_conversation_requested": boolean (Kullanıcı açıkça 'baştan başlayalım', 'sıfırdan başlayalım', 'yeni talep' gibi ifade kullandıysa true),
+  "data_deletion_request": boolean (Kullanıcı açıkça 'bilgilerimi sil', 'beni unut', 'verilerimi sil', 'kaydımı sil' gibi GDPR/KVKK talebi belirttiyse true),
+  "different_department_detected": boolean (Mevcut görüşme bağlamından FARKLI bir departman/tedavi talebi tespit edildiyse true. Örn: görüşme Kardiyoloji iken 'saç ekimi için bilgi almak istiyorum' dendi. AYNI departman devam ediyorsa false. İLK mesajda departman belirtiliyorsa false — çünkü henüz 'farklı' olacak bir önceki yok),
+  "raw_department": "string (Kullanıcının söylediği ham departman/tedavi ifadesi. Normalizasyon YAPMA. Örn: 'saç ekimi', 'kalp ameliyatı', 'diş beyazlatma'. Boş bırakılabilir)"
 }
 
 Pipeline Aşama Kuralları (sırayla ilerler, geri gitmez):
@@ -183,7 +199,26 @@ Pipeline Aşama Kuralları (sırayla ilerler, geri gitmez):
 - Eğer mevcut aşama belirlenemiyorsa "new" döndür.
 - Pipeline sadece İLERİ gider: appointed veya lost olan bir hasta discovery'ye geri dönemez.
 - Departman: Yalnızca kullanıcının sorusuna veya ihtiyacına göre belirle. Kanıt yoksa boş bırak.
-- should_create_opportunity: Emin değilsen false döndür. Yanlış pozitif, yanlış negatiften daha kötüdür.`
+- should_create_opportunity: Emin değilsen false döndür. Yanlış pozitif, yanlış negatiften daha kötüdür.
+
+🆔 KİMLİK TESPİTİ (P1B — KRİTİK):
+- requester_name: Konuşmada 'ismim X', 'ben X', 'adım X' diyorsa → requester_name = X. patient_name ile aynı kişi olabilir.
+- patient_relation: 'annem için', 'babam için', 'eşim için' → patient_relation = anne/baba/eş. Kendisi için geliyorsa 'kendisi'.
+- new_identity_detected: SADECE önceki mesajlarda farklı biri konuşuyorken şimdi yeni biri geldiyse true. İlk mesaj veya aynı kişi devam ediyorsa FALSE.
+- Örnek: Önceki mesajlarda "Mustafa" konuşuyor, şimdi "ben Mehmet, saç ekimi için bilgi almak istiyorum" → new_identity_detected = true
+
+🔄 OPPORTUNITY BOUNDARY DETECTION (ÇOK ÖNEMLİ):
+- different_department_detected: Mevcut görüşme bağlamı Kardiyoloji iken "saç ekimi" talep ediliyorsa true.
+  • İLK mesajda departman belirtilmesi = false (önceki bağlam yok)
+  • Aynı departman devam ediyorsa = false
+  • "ülke Almanya olacak" gibi DÜZELTME mesajları = false (country correction, yeni opportunity DEĞİL)
+- reset_conversation_requested: "baştan başlayalım", "sıfırdan başlayalım" → true. "tekrar bilgi alabilir miyim" = false.
+- data_deletion_request: "bilgilerimi sil", "beni unut", "verilerimi sil", "kaydımı sil" → true. Sadece KVKK/GDPR açık talepleri.
+
+📋 DEPARTMAN NORMALİZASYON:
+- raw_department: Hastanın söylediği HAM ifade. Örn: "saç ekimi", "kalp ameliyatı", "diş beyazlatma"
+- department: Normalize edilmiş departman. Örn: "saç ekimi" → "Saç Ekimi", "kalp ameliyatı" → "Kardiyoloji"
+- Her iki alan da doldurulmalı. raw_department birebir kullanıcının sözü, department sistem standardı.`
       };
 
       // Filter out original system prompts to avoid confusing the extraction model
@@ -279,7 +314,7 @@ Pipeline Aşama Kuralları (sırayla ilerler, geri gitmez):
           coerced.country_confidence = parseFloat(coerced.country_confidence) || undefined;
         }
         // Nulls → undefined for optional string fields
-        for (const key of ['opportunity_reason', 'requested_callback_datetime', 'travel_date', 'cancellation_reason']) {
+        for (const key of ['opportunity_reason', 'requested_callback_datetime', 'travel_date', 'cancellation_reason', 'requester_name', 'patient_relation', 'raw_department']) {
           if (coerced[key] === null) coerced[key] = undefined;
         }
         
@@ -303,6 +338,14 @@ Pipeline Aşama Kuralları (sırayla ilerler, geri gitmez):
             opportunity_priority: ['cold', 'warm', 'hot'].includes(parsedObj.opportunity_priority) ? parsedObj.opportunity_priority : undefined,
             intent_type: typeof parsedObj.intent_type === 'string' ? parsedObj.intent_type : undefined,
             should_create_opportunity: typeof parsedObj.should_create_opportunity === 'boolean' ? parsedObj.should_create_opportunity : undefined,
+            // P1B: Identity & Boundary fields
+            requester_name: typeof parsedObj.requester_name === 'string' ? parsedObj.requester_name : undefined,
+            patient_relation: typeof parsedObj.patient_relation === 'string' ? parsedObj.patient_relation : undefined,
+            new_identity_detected: typeof parsedObj.new_identity_detected === 'boolean' ? parsedObj.new_identity_detected : undefined,
+            reset_conversation_requested: typeof parsedObj.reset_conversation_requested === 'boolean' ? parsedObj.reset_conversation_requested : undefined,
+            data_deletion_request: typeof parsedObj.data_deletion_request === 'boolean' ? parsedObj.data_deletion_request : undefined,
+            different_department_detected: typeof parsedObj.different_department_detected === 'boolean' ? parsedObj.different_department_detected : undefined,
+            raw_department: typeof parsedObj.raw_department === 'string' ? parsedObj.raw_department : undefined,
           } as CrmExtractionType;
           this.log.warn(`[CRM_ZOD_MANUAL_RECOVERY] Manual field extraction as last resort`, { traceId });
         }
@@ -316,7 +359,15 @@ Pipeline Aşama Kuralları (sırayla ilerler, geri gitmez):
         explicitCancellation: validatedData.explicit_cancellation,
         callbackTime: validatedData.requested_callback_datetime,
         travelDate: validatedData.travel_date,
-        requiresConfirmation: validatedData.requires_human_confirmation
+        requiresConfirmation: validatedData.requires_human_confirmation,
+        // P1B
+        requesterName: validatedData.requester_name,
+        patientRelation: validatedData.patient_relation,
+        newIdentity: validatedData.new_identity_detected,
+        resetRequested: validatedData.reset_conversation_requested,
+        deletionRequest: validatedData.data_deletion_request,
+        differentDept: validatedData.different_department_detected,
+        rawDepartment: validatedData.raw_department,
       });
 
       return validatedData;

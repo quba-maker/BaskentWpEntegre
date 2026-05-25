@@ -89,18 +89,23 @@ export async function getForms(page: number = 1, search: string = "", source: st
                  LIMIT 1
                ) c_phone ON c_identity.id IS NULL
                LEFT JOIN conversation_memory mem_phone ON mem_phone.conversation_id = c_phone.id AND c_identity.id IS NULL
-               -- Layer 4: Most recent opportunity for linked conversation (LATERAL prevents duplication)
+               -- Layer 4: P1B — Active opportunity preferred, fallback to most recent
                LEFT JOIN LATERAL (
                  SELECT o.id as opp_id, 
                         o.country as opp_country, o.department as opp_department,
                         o.stage as opp_stage, o.priority as opp_priority,
                         o.intent_type as opp_intent_type, o.travel_date as opp_travel_date,
                         o.next_follow_up_at as opp_next_follow_up_at,
-                        o.summary as opp_summary
+                        o.summary as opp_summary,
+                        o.requester_name as opp_requester_name,
+                        o.patient_name as opp_patient_name,
+                        o.patient_relation as opp_patient_relation
                  FROM opportunities o
                  WHERE o.tenant_id = l.tenant_id
                    AND o.conversation_id = COALESCE(c_identity.id, c_phone.id)
-                 ORDER BY o.updated_at DESC
+                 ORDER BY 
+                   CASE WHEN o.id = COALESCE(c_identity.active_opportunity_id, (SELECT active_opportunity_id FROM conversations WHERE id = c_phone.id AND tenant_id = l.tenant_id)) THEN 0 ELSE 1 END,
+                   o.updated_at DESC
                  LIMIT 1
                ) opp ON COALESCE(c_identity.id, c_phone.id) IS NOT NULL
                WHERE ${conditions.join(' AND ')}
@@ -111,7 +116,8 @@ export async function getForms(page: number = 1, search: string = "", source: st
       return rows.map((r: any) => ({
         id: r.id,
         phone_number: r.phone_number,
-        patient_name: r.patient_name || "İsimsiz Form",
+        // P1B: Name priority: opp_requester_name > opp_patient_name > form patient_name
+        patient_name: r.opp_requester_name || r.opp_patient_name || r.patient_name || "İsimsiz Form",
         email: r.email,
         city: r.city,
         form_name: r.form_name || "Bilinmeyen Form",
@@ -123,7 +129,7 @@ export async function getForms(page: number = 1, search: string = "", source: st
         ai_summary: r.ai_summary || "",
         isBotActive: r.conversation_status === 'bot',
         summaryLinkMethod: r.summary_link_method || 'none',
-        // ═══ P0C: Live CRM data from conversation/opportunity ═══
+        // ═══ P1B: Live CRM data from active opportunity ═══
         linked_conversation_id: r.linked_conv_id || null,
         linked_opportunity_id: r.opp_id || null,
         current_country: r.opp_country || r.conv_country || r.country || null,
@@ -134,6 +140,7 @@ export async function getForms(page: number = 1, search: string = "", source: st
         current_travel_date: r.opp_travel_date || null,
         current_next_follow_up_at: r.opp_next_follow_up_at || null,
         current_ai_summary: r.opp_summary || r.ai_summary || "",
+        patient_relation: r.opp_patient_relation || null,
         link_confidence: r.summary_link_method || 'none',
       }));
     }

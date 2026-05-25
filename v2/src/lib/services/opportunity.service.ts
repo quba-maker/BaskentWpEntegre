@@ -395,7 +395,7 @@ export class OpportunityService {
     const rows = await this.db.executeSafe({
       text: `SELECT 
                o.*,
-               cm.summary_text as ai_summary,
+               COALESCE(o.summary, cm.summary_text) as ai_summary,
                cm.buying_intent,
                cm.sentiment,
                c.last_message_content,

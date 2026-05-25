@@ -822,6 +822,128 @@ export class QueueWorkerEngine {
       this.log.error('[WORKER_CONTEXT_FETCH] Error fetching identity context', e instanceof Error ? e : new Error(String(e)), { traceId });
     }
 
+    // ══════════════════════════════════════════════════════════
+    // P1B: PRIVACY PRE-DETECTOR — Runs BEFORE AI response
+    // Catches "bilgilerimi sil", "beni unut", "verilerimi sil",
+    // "kaydımı sil", "baştan başlayalım" BEFORE they reach
+    // the sales AI prompt. Deterministic safe response.
+    // ══════════════════════════════════════════════════════════
+    if (content) {
+      try {
+        const { detectCancellation } = await import('../services/ai/cancellation-detector');
+        const preDetection = detectCancellation(String(content));
+
+        if (preDetection.data_deletion_request || preDetection.reset_conversation_requested) {
+          this.log.info(`[P1B_PRIVACY_PRE] Privacy/reset detected BEFORE AI — bypassing AI response`, {
+            traceId, phoneNumber,
+            dataDeletion: preDetection.data_deletion_request,
+            resetRequested: preDetection.reset_conversation_requested,
+            matched: preDetection.matched_phrases,
+          });
+
+          // 1. Deterministic safe response
+          const safeResponse = preDetection.data_deletion_request
+            ? 'Talebinizi aldık. Kişisel verilerinizle ilgili silme/güncelleme talebiniz ilgili birime iletilecektir.'
+            : 'Talebinizi aldık. Görüşme sıfırlanma talebiniz alınmıştır, size en kısa sürede dönüş yapılacaktır.';
+
+          // 2. Update active opportunity (if exists)
+          if (conversationId) {
+            try {
+              const { ActiveOpportunityResolver } = await import('../services/active-opportunity-resolver');
+              const resolver = new ActiveOpportunityResolver(db);
+              const resolved = await resolver.resolve({ tenantId, conversationId, phoneNumber });
+              
+              if (resolved.opportunity) {
+                const updateFields: string[] = [];
+                const updateValues: any[] = [];
+                let idx = 1;
+
+                if (preDetection.data_deletion_request) {
+                  updateFields.push(`automation_status = 'stopped'`);
+                  updateFields.push(`next_follow_up_at = NULL`);
+                  updateFields.push(`metadata = metadata || $${idx++}::jsonb`);
+                  updateValues.push(JSON.stringify({
+                    privacy_request_pending: true,
+                    data_deletion_requested_at: new Date().toISOString(),
+                    admin_action_required: true,
+                  }));
+                }
+
+                if (preDetection.reset_conversation_requested) {
+                  // Clear active_opportunity_id — next message will create new opp
+                  await resolver.clearActive(tenantId, conversationId);
+                  this.log.info(`[P1B_PRIVACY_PRE] Cleared active_opportunity_id for reset`, { traceId, conversationId });
+                }
+
+                if (updateFields.length > 0) {
+                  updateFields.push(`updated_at = NOW()`);
+                  await db.executeSafe({
+                    text: `UPDATE opportunities SET ${updateFields.join(', ')} WHERE id = $${idx++} AND tenant_id = $${idx++}`,
+                    values: [...updateValues, resolved.opportunity.id, tenantId]
+                  });
+                }
+              }
+            } catch (privErr) {
+              this.log.error(`[P1B_PRIVACY_PRE] Opportunity update failed (non-fatal)`, privErr instanceof Error ? privErr : new Error(String(privErr)), { traceId });
+            }
+          }
+
+          // 3. Send deterministic response via channel
+          const privCreds = await CredentialsService.resolveCredentials(tenantId, channel);
+          const privAccessToken = privCreds.accessToken || '';
+          const privPhoneId = privCreds.whatsappPhoneNumberId || '';
+
+          if (privAccessToken && (channel !== 'whatsapp' || privPhoneId)) {
+            try {
+              let privOutResult;
+              if (channel === 'whatsapp') {
+                const outRes = await msgService.sendWhatsAppMessage(privPhoneId, privAccessToken, phoneNumber, safeResponse);
+                privOutResult = outRes;
+              } else {
+                const outRes = await msgService.sendSocialMessage(privAccessToken, phoneNumber, safeResponse, channel);
+                privOutResult = outRes;
+              }
+
+              // Save message to DB
+              const saveMsgResult = await msgService.saveMessageIdempotent({
+                phoneNumber, direction: 'out', content: safeResponse, channel,
+                channelId: metadata.channelId, groupId: metadata.groupId,
+                providerMessageId: privOutResult?.providerMessageId,
+                status: 'sent', modelUsed: 'privacy_pre_detector',
+              });
+
+              // Realtime publish
+              if (saveMsgResult.messageId && conversationId) {
+                try {
+                  const { RealtimePublisher } = await import('@/lib/realtime/publisher');
+                  await RealtimePublisher.publishMessageCreated(tenantId, {
+                    id: saveMsgResult.messageId,
+                    conversation_id: conversationId,
+                    phone_number: phoneNumber,
+                    content: safeResponse,
+                    direction: 'out',
+                    status: 'sent',
+                    created_at: new Date().toISOString(),
+                  }, { traceId, spanId: privOutResult?.providerMessageId || traceId });
+                } catch (realtimeErr) {
+                  this.log.error(`[P1B_PRIVACY_REALTIME]`, realtimeErr instanceof Error ? realtimeErr : new Error(String(realtimeErr)), { traceId });
+                }
+              }
+            } catch (sendErr) {
+              this.log.error(`[P1B_PRIVACY_SEND]`, sendErr instanceof Error ? sendErr : new Error(String(sendErr)), { traceId });
+            }
+          }
+
+          // 4. CRM extraction still runs (skip AI only)
+          // Continue to CRM extraction section below but skip bot reply
+          skipBotReply = true;
+          this.log.info(`[P1B_PRIVACY_PRE_DONE] Privacy safe response sent, CRM extraction will still run`, { traceId });
+        }
+      } catch (preDetErr) {
+        this.log.error(`[P1B_PRIVACY_PRE_ERROR] Non-fatal`, preDetErr instanceof Error ? preDetErr : new Error(String(preDetErr)), { traceId });
+      }
+    }
+
     // 6. Build System Prompt & History strictly via TenantBrain
     let systemPromptText = PromptBuilder.buildSystemPrompt(brain, targetPhase, false, unifiedContext);
     
@@ -1331,15 +1453,21 @@ export class QueueWorkerEngine {
           const existingOppCountry = beforeOpp?.country || null;
           const resolvedCountryForOpp = crmData.country || existingOppCountry || existingConvCountry || deterministicCountry;
 
-          // ═══ P1A-FIX5: Detect if this is a fundamentally different request ═══
+          // ═══ P1B: Non-Aggressive Boundary Detection ═══
+          // Country correction = update existing, NOT new opp
+          // Only strong signals trigger new opportunity:
           const isDifferentDepartment = !!(beforeOpp && crmData.department && 
             beforeOpp.department && crmData.department.toLowerCase() !== beforeOpp.department.toLowerCase());
-          const isDifferentCountry = !!(beforeOpp && crmData.country && 
-            beforeOpp.country && crmData.country.toLowerCase() !== beforeOpp.country.toLowerCase());
+          
+          // Merge deterministic + LLM signals
+          const effectiveNewIdentity = newIdentityDetected || crmData?.new_identity_detected || false;
+          const effectiveReset = resetConversationRequested || crmData?.reset_conversation_requested || false;
+          const effectiveDiffDept = isDifferentDepartment || crmData?.different_department_detected || false;
+          
           const shouldCloseAndCreateNew = beforeOpp && (
-            resetConversationRequested ||
-            (newIdentityDetected && (isDifferentDepartment || isDifferentCountry)) ||
-            (newTreatmentInterest && isDifferentDepartment) ||
+            effectiveReset ||
+            (effectiveNewIdentity && effectiveDiffDept) ||
+            (newTreatmentInterest && effectiveDiffDept) ||
             (dataDeletionRequest)
           );
 
@@ -1360,10 +1488,12 @@ export class QueueWorkerEngine {
               previousOpportunityCountry: beforeOpp?.country || null,
               previousOpportunityDepartment: beforeOpp?.department || null,
               shouldCreateOpportunity: crmData.should_create_opportunity,
-              // P1A-FIX5 new fields
+              // P1B boundary signals
               shouldCloseAndCreateNew,
               isDifferentDepartment,
-              isDifferentCountry,
+              effectiveDiffDept,
+              effectiveNewIdentity,
+              effectiveReset,
               resetConversationRequested,
               newIdentityDetected,
               dataDeletionRequest,
@@ -1457,6 +1587,34 @@ export class QueueWorkerEngine {
                 traceId, closedOppId: beforeOpp.id, newOppId, newDept: crmData.department, newCountry: crmData.country
               });
               
+              // P1B: Set active_opportunity_id
+              try {
+                const { ActiveOpportunityResolver } = await import('../services/active-opportunity-resolver');
+                const resolver = new ActiveOpportunityResolver(db);
+                await resolver.setActive(tenantId, conversationId, newOppId);
+              } catch (setErr) {
+                this.log.error(`[P1B_SET_ACTIVE] Non-fatal`, setErr instanceof Error ? setErr : new Error(String(setErr)), { traceId });
+              }
+              
+              // P1B: Update identity fields + raw_department
+              try {
+                await db.executeSafe({
+                  text: `UPDATE opportunities SET
+                           requester_name = COALESCE(NULLIF($1, ''), requester_name),
+                           patient_relation = COALESCE(NULLIF($2, ''), patient_relation),
+                           metadata = metadata || $3::jsonb,
+                           summary = COALESCE(NULLIF($4, ''), summary)
+                         WHERE id = $5 AND tenant_id = $6`,
+                  values: [
+                    crmData.requester_name || detectedNewName || '',
+                    crmData.patient_relation || '',
+                    JSON.stringify({ raw_department: crmData.raw_department || crmData.department || null }),
+                    crmData.opportunity_reason || '',
+                    newOppId, tenantId
+                  ]
+                });
+              } catch (_) { /* non-fatal */ }
+              
               // Mirror new stage to conversation
               const newOppStage = newOppId !== beforeOpp.id ? 'discovery' : null;
               if (newOppStage) {
@@ -1480,10 +1638,35 @@ export class QueueWorkerEngine {
               if (oppId) {
                 this.log.info(`[WORKER_OPP_OK] Opportunity upserted`, { traceId, oppId });
                 
+                // P1B: Set active_opportunity_id (always — ensures consistency)
+                try {
+                  const { ActiveOpportunityResolver } = await import('../services/active-opportunity-resolver');
+                  const resolver = new ActiveOpportunityResolver(db);
+                  await resolver.setActive(tenantId, conversationId, oppId);
+                } catch (setErr) {
+                  this.log.error(`[P1B_SET_ACTIVE] Non-fatal`, setErr instanceof Error ? setErr : new Error(String(setErr)), { traceId });
+                }
+                
+                // P1B: Update identity fields + raw_department + opp-specific summary
+                try {
+                  await db.executeSafe({
+                    text: `UPDATE opportunities SET
+                             requester_name = COALESCE(NULLIF($1, ''), requester_name),
+                             patient_relation = COALESCE(NULLIF($2, ''), patient_relation),
+                             metadata = metadata || $3::jsonb,
+                             summary = COALESCE(NULLIF($4, ''), summary)
+                           WHERE id = $5 AND tenant_id = $6`,
+                    values: [
+                      crmData.requester_name || crmData.patient_name || '',
+                      crmData.patient_relation || '',
+                      JSON.stringify({ raw_department: crmData.raw_department || crmData.department || null }),
+                      crmData.opportunity_reason || '',
+                      oppId, tenantId
+                    ]
+                  });
+                } catch (_) { /* non-fatal */ }
+                
                 // ═══ P1A-FIX5B: Mirror new opp stage to conversation ═══
-                // When no active opp existed (beforeOpp=null) and we created a new one,
-                // conversation.lead_stage is still 'lost' from previous cancellation.
-                // Must update to match new opportunity stage.
                 if (!beforeOpp) {
                   try {
                     const newOppRow = await db.executeSafe({
@@ -1498,7 +1681,6 @@ export class QueueWorkerEngine {
                         text: `UPDATE conversations SET lead_stage = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3`,
                         values: [mirrorStage, conversationId, tenantId]
                       });
-                      // Also mirror to leads
                       const cleanPhone2 = phoneNumber.replace(/\D/g, '');
                       const last10_2 = cleanPhone2.length > 10 ? cleanPhone2.substring(cleanPhone2.length - 10) : cleanPhone2;
                       await db.executeSafe({

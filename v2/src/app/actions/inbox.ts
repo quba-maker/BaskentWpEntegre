@@ -45,7 +45,18 @@ export async function getConversations(page: number = 1, search: string = "", st
           l.patient_name as form_patient_name,
           l.raw_data as form_raw_data,
           EXTRACT(EPOCH FROM l.created_at) * 1000 as form_date_ms,
-          mem.summary_text as ai_summary,
+          -- P1B: Active opportunity fields (source of truth)
+          active_opp.id as active_opp_id,
+          active_opp.requester_name as opp_requester_name,
+          active_opp.patient_name as opp_patient_name,
+          active_opp.country as opp_country,
+          active_opp.department as opp_department,
+          active_opp.summary as opp_summary,
+          active_opp.stage as opp_stage,
+          active_opp.priority as opp_priority,
+          active_opp.patient_relation as opp_patient_relation,
+          -- Summary: opp-specific preferred, global fallback
+          COALESCE(active_opp.summary, mem.summary_text) as ai_summary,
           mem.buying_intent as ai_buying_intent,
           mem.sentiment as ai_sentiment,
           0 as unread
@@ -66,6 +77,11 @@ export async function getConversations(page: number = 1, search: string = "", st
           LIMIT 1
         ) l ON true
         LEFT JOIN conversation_memory mem ON c.id = mem.conversation_id
+        -- P1B: Active opportunity JOIN (tenant safety enforced)
+        LEFT JOIN opportunities active_opp 
+          ON active_opp.id = c.active_opportunity_id 
+          AND active_opp.tenant_id = c.tenant_id
+          AND active_opp.conversation_id = c.id
         WHERE c.tenant_id = $1
           AND ($2::text IS NULL OR c.patient_name ILIKE $2 OR c.phone_number ILIKE $2)
           AND ($3::text IS NULL OR c.lead_stage = $3)
@@ -103,9 +119,15 @@ export async function getConversations(page: number = 1, search: string = "", st
           }
         }
 
-        // Priority name resolution: form full_name > form patient_name > conversation name
+        // P1B Priority name resolution: opp.requester_name > opp.patient_name > form full_name > form patient_name > conversation name
         let resolvedName = r.name;
-        if (r.form_raw_data) {
+        
+        // Highest priority: Active opportunity identity
+        if (r.opp_requester_name && r.opp_requester_name.trim()) {
+          resolvedName = r.opp_requester_name.trim();
+        } else if (r.opp_patient_name && r.opp_patient_name.trim()) {
+          resolvedName = r.opp_patient_name.trim();
+        } else if (r.form_raw_data) {
           try {
             const rawData = typeof r.form_raw_data === 'string' ? JSON.parse(r.form_raw_data) : r.form_raw_data;
             const formFullName = rawData.full_name || rawData['full name'] || rawData['Full Name'] || rawData['full_name'];
@@ -123,9 +145,17 @@ export async function getConversations(page: number = 1, search: string = "", st
           resolvedName = r.form_patient_name.trim();
         }
 
+        // P1B: Country/Department from active opp (source of truth)
+        const resolvedCountry = r.opp_country || r.country || 
+          (r.form_raw_data && typeof r.form_raw_data === 'string' && r.form_raw_data.includes('country') ? JSON.parse(r.form_raw_data).country : null) || 
+          (r.id.startsWith('90') || r.id.startsWith('+90') ? 'Türkiye' : r.id.startsWith('49') || r.id.startsWith('+49') ? 'Almanya' : null);
+        const resolvedDepartment = r.opp_department || r.department;
+
         return {
           ...r,
           name: resolvedName,
+          country: resolvedCountry,
+          department: resolvedDepartment,
           score: r.stage === 'appointed' ? 100 : r.stage === 'contacted' ? 60 : 30,
           isBotActive: r.status !== 'human',
           formattedTime,
@@ -133,7 +163,7 @@ export async function getConversations(page: number = 1, search: string = "", st
           lastMessageStatus: r.last_message_status || 'sent',
           lastMessageDirection: r.last_message_direction || 'in',
           notes: r.notes || '',
-          country: r.country || (r.form_raw_data && typeof r.form_raw_data === 'string' && r.form_raw_data.includes('country') ? JSON.parse(r.form_raw_data).country : null) || (r.id.startsWith('90') || r.id.startsWith('+90') ? 'Türkiye' : r.id.startsWith('49') || r.id.startsWith('+49') ? 'Almanya' : null),
+          patientRelation: r.opp_patient_relation || null,
           formData: r.form_name ? {
             name: r.form_name,
             date: r.form_date_ms ? new Date(parseFloat(r.form_date_ms)).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' }) : '',
@@ -431,7 +461,42 @@ export async function updateCrmData(phone: string, stage: string, department: st
   return withActionGuard(
     { actionName: 'updateCrmData' },
     async (ctx) => {
-      // 1. Update non-stage fields directly (department, country, notes)
+      // P1B: Update active opportunity FIRST (source of truth), then mirror to conversation
+      let conversationId: string | undefined;
+      try {
+        const convRows = await ctx.db.executeSafe({
+          text: `SELECT id, active_opportunity_id FROM conversations WHERE phone_number = $1 AND tenant_id = $2 LIMIT 1`,
+          values: [phone, ctx.tenantId]
+        });
+        conversationId = convRows[0]?.id;
+        const activeOppId = convRows[0]?.active_opportunity_id;
+
+        // Update active opportunity if exists
+        if (activeOppId) {
+          const oppUpdateFields: string[] = [];
+          const oppValues: any[] = [];
+          let oppIdx = 1;
+
+          if (department) {
+            oppUpdateFields.push(`department = $${oppIdx++}`);
+            oppValues.push(department);
+          }
+          if (country !== undefined && country) {
+            oppUpdateFields.push(`country = $${oppIdx++}`);
+            oppValues.push(country);
+          }
+          if (oppUpdateFields.length > 0) {
+            oppUpdateFields.push(`updated_at = NOW()`);
+            oppValues.push(activeOppId, ctx.tenantId);
+            await ctx.db.executeSafe({
+              text: `UPDATE opportunities SET ${oppUpdateFields.join(', ')} WHERE id = $${oppIdx++} AND tenant_id = $${oppIdx++}`,
+              values: oppValues
+            });
+          }
+        }
+      } catch (_) { /* non-blocking */ }
+
+      // 1. Update conversation fields (mirror)
       if (country !== undefined) {
         try {
           await ctx.db.executeSafe({
@@ -459,15 +524,16 @@ export async function updateCrmData(phone: string, stage: string, department: st
         // Convert lead-system stage to opportunity-system stage
         const oppTargetStage = LEAD_TO_OPP_MAP[stage] || stage;
 
-        // Find conversation ID for better opportunity resolution
-        let conversationId: string | undefined;
-        try {
-          const convRows = await ctx.db.executeSafe({
-            text: `SELECT id FROM conversations WHERE phone_number = $1 AND tenant_id = $2 LIMIT 1`,
-            values: [phone, ctx.tenantId]
-          });
-          conversationId = convRows[0]?.id;
-        } catch (_) { /* non-blocking */ }
+        // Reuse conversationId from P1B active opp resolution above; fallback fetch if needed
+        if (!conversationId) {
+          try {
+            const convRows = await ctx.db.executeSafe({
+              text: `SELECT id FROM conversations WHERE phone_number = $1 AND tenant_id = $2 LIMIT 1`,
+              values: [phone, ctx.tenantId]
+            });
+            conversationId = convRows[0]?.id;
+          } catch (_) { /* non-blocking */ }
+        }
         
         await UnifiedStageService.update({
           tenantId: ctx.tenantId,
