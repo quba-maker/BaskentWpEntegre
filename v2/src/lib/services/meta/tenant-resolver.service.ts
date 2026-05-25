@@ -106,6 +106,14 @@ export class TenantResolverService {
     try {
       const db = withTenantDB('admin-system', true);
 
+      // Map webhook identifier type to DB provider names
+      const providerMap: Record<string, string[]> = {
+        'whatsapp': ['whatsapp'],
+        'messenger': ['messenger', 'meta_messenger'],
+        'instagram': ['instagram', 'meta_instagram'],
+      };
+      const providerValues = providerMap[identifier.type] || [identifier.type];
+
       // NEW V2 ROUTING: Look up via channels -> channel_groups -> tenants
       let results = await db.executeSafe({
         text: `
@@ -131,10 +139,11 @@ export class TenantResolverService {
           JOIN tenants t ON cg.tenant_id = t.id
           LEFT JOIN channel_integrations ci ON ci.channel_id = c.id
           WHERE c.identifier = $1 
+            AND c.provider = ANY($2)
             AND t.status = 'active'
           LIMIT 1
         `,
-        values: [identifier.id]
+        values: [identifier.id, providerValues]
       }) as any[];
 
       // FALLBACK TO LEGACY V1 ROUTING (Quarantine — disabled by default)
