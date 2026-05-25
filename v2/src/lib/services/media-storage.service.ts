@@ -1,0 +1,229 @@
+import { put, del, list } from "@vercel/blob";
+import { logger } from "@/lib/core/logger";
+
+const log = logger.withContext({ module: "MediaStorageService" });
+
+/**
+ * SaaS Media Storage Service
+ *
+ * Tenant-isolated blob storage for WhatsApp/Instagram/Messenger media.
+ * Path format: media/{tenant_id}/{year-month}/{message_id}_{original_filename}
+ *
+ * Security: Each blob path is scoped to tenant_id — cross-tenant access impossible.
+ */
+export class MediaStorageService {
+  /**
+   * Downloads media from Meta CDN and uploads to Vercel Blob (tenant-isolated).
+   *
+   * @param tenantId - Tenant UUID for isolation
+   * @param mediaId - Meta media ID (from webhook payload)
+   * @param accessToken - Meta API access token
+   * @param messageId - Internal message ID for naming
+   * @param metadata - { mime_type, filename, media_type }
+   * @returns { blobUrl, fileSize } or null on failure
+   */
+  static async downloadAndStore(
+    tenantId: string,
+    mediaId: string,
+    accessToken: string,
+    messageId: string,
+    metadata: {
+      mimeType?: string;
+      filename?: string;
+      mediaType: string;
+    }
+  ): Promise<{ blobUrl: string; fileSize: number } | null> {
+    try {
+      // Step 1: Get the download URL from Meta Graph API
+      const metaRes = await fetch(
+        `https://graph.facebook.com/v25.0/${mediaId}`,
+        {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        }
+      );
+
+      if (!metaRes.ok) {
+        const errText = await metaRes.text();
+        log.error(`[MEDIA_RESOLVE_FAILED] Meta media URL resolve failed`, new Error(errText), {
+          mediaId,
+          tenantId,
+          status: metaRes.status,
+        });
+        return null;
+      }
+
+      const metaData = await metaRes.json();
+      const downloadUrl = metaData.url;
+
+      if (!downloadUrl) {
+        log.error(`[MEDIA_NO_URL] Meta returned no download URL`, undefined, {
+          mediaId,
+          tenantId,
+        });
+        return null;
+      }
+
+      // Step 2: Download the actual file from Meta CDN
+      const fileRes = await fetch(downloadUrl, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+
+      if (!fileRes.ok) {
+        log.error(`[MEDIA_DOWNLOAD_FAILED] Failed to download media from CDN`, new Error(`HTTP ${fileRes.status}`), {
+          mediaId,
+          tenantId,
+        });
+        return null;
+      }
+
+      const fileBuffer = await fileRes.arrayBuffer();
+      const fileSize = fileBuffer.byteLength;
+
+      // Step 3: Generate tenant-isolated blob path
+      const now = new Date();
+      const yearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+      const ext = this.getExtension(metadata.mimeType || "", metadata.filename || "");
+      const safeName = metadata.filename
+        ? metadata.filename.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 100)
+        : `${metadata.mediaType}_${messageId.slice(0, 8)}${ext}`;
+
+      const blobPath = `media/${tenantId}/${yearMonth}/${messageId}_${safeName}`;
+
+      // Step 4: Upload to Vercel Blob
+      const blob = await put(blobPath, Buffer.from(fileBuffer), {
+        access: "public",
+        contentType: metadata.mimeType || "application/octet-stream",
+        addRandomSuffix: false,
+      });
+
+      log.info(`[MEDIA_STORED] Blob uploaded`, {
+        tenantId,
+        mediaId,
+        blobPath,
+        fileSize,
+        mediaType: metadata.mediaType,
+      });
+
+      return { blobUrl: blob.url, fileSize };
+    } catch (err) {
+      log.error(
+        `[MEDIA_STORE_FAILED] Unexpected error in downloadAndStore`,
+        err instanceof Error ? err : new Error(String(err)),
+        { tenantId, mediaId }
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Delete a blob by URL (for 30-day cleanup cron).
+   */
+  static async deleteBlob(blobUrl: string): Promise<boolean> {
+    try {
+      await del(blobUrl);
+      return true;
+    } catch (err) {
+      log.error(`[MEDIA_DELETE_FAILED]`, err instanceof Error ? err : new Error(String(err)), { blobUrl });
+      return false;
+    }
+  }
+
+  /**
+   * List all blobs for a tenant (for admin/quota views).
+   */
+  static async listTenantBlobs(tenantId: string, cursor?: string) {
+    return list({ prefix: `media/${tenantId}/`, cursor, limit: 100 });
+  }
+
+  /**
+   * Update tenant storage usage tracking (SaaS quota).
+   */
+  static async trackUsage(
+    db: any,
+    tenantId: string,
+    mediaType: string,
+    fileSize: number
+  ): Promise<void> {
+    const now = new Date();
+    const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+
+    const mediaColumn =
+      mediaType === "image" ? "image_count"
+      : mediaType === "document" ? "document_count"
+      : mediaType === "audio" ? "audio_count"
+      : mediaType === "video" ? "video_count"
+      : "image_count"; // fallback
+
+    try {
+      await db.executeSafe({
+        text: `
+          INSERT INTO tenant_storage_usage (tenant_id, month, total_files, total_bytes, ${mediaColumn})
+          VALUES ($1, $2, 1, $3, 1)
+          ON CONFLICT (tenant_id, month) DO UPDATE SET
+            total_files = tenant_storage_usage.total_files + 1,
+            total_bytes = tenant_storage_usage.total_bytes + $3,
+            ${mediaColumn} = tenant_storage_usage.${mediaColumn} + 1,
+            updated_at = NOW()
+        `,
+        values: [tenantId, month, fileSize],
+      });
+    } catch (err) {
+      // Non-fatal — don't block message processing for quota tracking
+      log.warn(`[STORAGE_TRACKING_FAILED] Non-fatal`, { tenantId, error: (err as Error).message });
+    }
+  }
+
+  /**
+   * Derive file extension from MIME type or filename.
+   */
+  private static getExtension(mimeType: string, filename: string): string {
+    // Try from filename first
+    const fnMatch = filename.match(/\.[a-zA-Z0-9]+$/);
+    if (fnMatch) return fnMatch[0];
+
+    // Fallback to MIME type
+    const mimeMap: Record<string, string> = {
+      "image/jpeg": ".jpg",
+      "image/png": ".png",
+      "image/webp": ".webp",
+      "image/gif": ".gif",
+      "video/mp4": ".mp4",
+      "video/3gpp": ".3gp",
+      "audio/ogg": ".ogg",
+      "audio/mpeg": ".mp3",
+      "audio/aac": ".aac",
+      "audio/amr": ".amr",
+      "application/pdf": ".pdf",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+      "application/msword": ".doc",
+      "application/vnd.ms-excel": ".xls",
+    };
+
+    return mimeMap[mimeType] || "";
+  }
+
+  /**
+   * Generate human-readable content text for media messages.
+   * Used in conversations list (last_message preview) and AI context.
+   */
+  static getMediaContentText(
+    mediaType: string,
+    metadata?: { caption?: string; filename?: string }
+  ): string {
+    const prefix: Record<string, string> = {
+      image: "📷 Fotoğraf",
+      document: "📎 Belge",
+      audio: "🎵 Ses kaydı",
+      video: "🎬 Video",
+      location: "📍 Konum",
+      sticker: "🏷️ Sticker",
+    };
+
+    const label = prefix[mediaType] || `📦 ${mediaType}`;
+
+    if (metadata?.caption) return `${label}: ${metadata.caption}`;
+    if (metadata?.filename) return `${label}: ${metadata.filename}`;
+    return label;
+  }
+}

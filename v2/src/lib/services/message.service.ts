@@ -15,6 +15,10 @@ export interface MessagePayload {
   promptTokens?: number;
   completionTokens?: number;
   status?: string;
+  // Media fields
+  mediaType?: string | null;           // 'image' | 'document' | 'audio' | 'video' | 'location' | 'sticker'
+  mediaUrl?: string | null;            // Vercel Blob permanent URL
+  mediaMetadata?: Record<string, any> | null;  // { filename, mime_type, caption, latitude, longitude, ... }
 }
 
 export class MessageService {
@@ -79,9 +83,11 @@ export class MessageService {
             INSERT INTO messages (
               tenant_id, conversation_id, phone_number, direction, content, channel, 
               channel_id, group_id, workflow_run_id, prompt_binding_id,
-              provider_message_id, model_used, prompt_tokens, completion_tokens, status
+              provider_message_id, model_used, prompt_tokens, completion_tokens, status,
+              media_type, media_url, media_metadata
             )
-            SELECT $1, rc.conv_id, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+            SELECT $1, rc.conv_id, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+                   $16, $17, $18::jsonb
             FROM resolved_conv rc
             WHERE rc.conv_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM dup_check)
             RETURNING id
@@ -106,7 +112,10 @@ export class MessageService {
           payload.promptTokens || 0,         // $12
           payload.completionTokens || 0,     // $13
           payload.status || 'pending',       // $14
-          hash                               // $15
+          hash,                              // $15
+          payload.mediaType || null,         // $16
+          payload.mediaUrl || null,          // $17
+          payload.mediaMetadata ? JSON.stringify(payload.mediaMetadata) : null  // $18
         ]
       }) as any[];
 

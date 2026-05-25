@@ -168,7 +168,9 @@ export async function getMessages(phone: string) {
         const rows = await ctx.db.executeSafe({
           text: `
             SELECT * FROM (
-              SELECT id, content as text, direction, status, model_used, EXTRACT(EPOCH FROM created_at) * 1000 as created_at_ms
+              SELECT id, content as text, direction, status, model_used,
+                     media_type, media_url, media_metadata,
+                     EXTRACT(EPOCH FROM created_at) * 1000 as created_at_ms
               FROM messages
               WHERE phone_number LIKE $1 
                 AND (tenant_id = $2)
@@ -214,7 +216,11 @@ export async function getMessages(phone: string) {
           text: r.text,
           timeMs: parseFloat(r.created_at_ms),
           dateLabel,
-          status: r.status || 'sent'
+          status: r.status || 'sent',
+          // Media fields
+          mediaType: r.media_type || null,
+          mediaUrl: r.media_url || null,
+          mediaMetadata: r.media_metadata || null,
         };
       });
       } catch(err: any) {

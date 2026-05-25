@@ -42,7 +42,11 @@ export const ChatMessageProjectionSchema = z.object({
   content: z.string(),
   sender: z.enum(["agent", "bot", "user"]),
   status: z.enum(["sent", "delivered", "read", "failed"]).optional(),
-  createdAt: z.string() // ISO Date string
+  createdAt: z.string(), // ISO Date string
+  // Media fields
+  mediaType: z.string().optional(),
+  mediaUrl: z.string().optional(),
+  mediaMetadata: z.record(z.string(), z.any()).optional(),
 });
 
 export const ChatMessageStatusProjectionSchema = z.object({

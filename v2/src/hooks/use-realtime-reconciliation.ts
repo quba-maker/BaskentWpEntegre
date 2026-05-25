@@ -52,7 +52,11 @@ const mapRealtimeMessageToUIProjection = (payload: any) => {
       sender: payload.sender,
       text: payload.content,
       timeMs: date.getTime(),
-      status: status
+      status: status,
+      // Media fields
+      mediaType: payload.mediaType || null,
+      mediaUrl: payload.mediaUrl || null,
+      mediaMetadata: payload.mediaMetadata || null,
     },
     conversationData: {
       last_message: payload.content,

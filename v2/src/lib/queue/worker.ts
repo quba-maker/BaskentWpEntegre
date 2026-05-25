@@ -406,6 +406,11 @@ export class QueueWorkerEngine {
     let content: string;
     let providerMessageId: string;
     let profileName: string | undefined;
+    // Media extraction
+    let mediaType: string | null = null;
+    let mediaId: string | null = null;
+    let mediaUrl: string | null = null;
+    let mediaMetadata: Record<string, any> | null = null;
 
     if (channel === 'whatsapp') {
       const value = payload.entry?.[0]?.changes?.[0]?.value;
@@ -416,10 +421,81 @@ export class QueueWorkerEngine {
       }
       const incomingMsg = messages[0];
       phoneNumber = incomingMsg.from || '';
-      content = incomingMsg.text?.body || '';
       providerMessageId = incomingMsg.id || '';
       profileName = value?.contacts?.[0]?.profile?.name;
+
+      // ── MEDIA TYPE EXTRACTION ──
+      const msgType = incomingMsg.type || 'text';
+
+      switch (msgType) {
+        case 'text':
+          content = incomingMsg.text?.body || '';
+          break;
+        case 'image':
+          mediaType = 'image';
+          mediaId = incomingMsg.image?.id || null;
+          mediaMetadata = {
+            mime_type: incomingMsg.image?.mime_type,
+            caption: incomingMsg.image?.caption,
+          };
+          content = incomingMsg.image?.caption || '';
+          break;
+        case 'document':
+          mediaType = 'document';
+          mediaId = incomingMsg.document?.id || null;
+          mediaMetadata = {
+            mime_type: incomingMsg.document?.mime_type,
+            filename: incomingMsg.document?.filename,
+          };
+          content = '';
+          break;
+        case 'audio':
+          mediaType = 'audio';
+          mediaId = incomingMsg.audio?.id || null;
+          mediaMetadata = {
+            mime_type: incomingMsg.audio?.mime_type,
+          };
+          content = '';
+          break;
+        case 'video':
+          mediaType = 'video';
+          mediaId = incomingMsg.video?.id || null;
+          mediaMetadata = {
+            mime_type: incomingMsg.video?.mime_type,
+            caption: incomingMsg.video?.caption,
+          };
+          content = incomingMsg.video?.caption || '';
+          break;
+        case 'location':
+          mediaType = 'location';
+          mediaMetadata = {
+            latitude: incomingMsg.location?.latitude,
+            longitude: incomingMsg.location?.longitude,
+            name: incomingMsg.location?.name,
+          };
+          content = incomingMsg.location?.name || '';
+          break;
+        case 'sticker':
+          mediaType = 'sticker';
+          mediaId = incomingMsg.image?.id || null; // stickers use image payload
+          mediaMetadata = { mime_type: 'image/webp' };
+          content = '';
+          break;
+        case 'reaction':
+          content = incomingMsg.reaction?.emoji || '👍';
+          break;
+        case 'button':
+          content = incomingMsg.button?.text || incomingMsg.button?.payload || '';
+          break;
+        case 'interactive':
+          content = incomingMsg.interactive?.button_reply?.title || incomingMsg.interactive?.list_reply?.title || '';
+          break;
+        default:
+          content = '';
+          break;
+      }
     } else {
+      // Messenger / Instagram
       const incomingMsg = payload.entry?.[0]?.messaging?.[0];
       if (!incomingMsg || !incomingMsg.message) {
         this.log.info(`[SKIP] No messages found in payload`, { traceId });
@@ -428,16 +504,67 @@ export class QueueWorkerEngine {
       phoneNumber = incomingMsg.sender?.id || '';
       content = incomingMsg.message.text || '';
       providerMessageId = incomingMsg.message.mid || '';
+
+      // Messenger/IG attachments
+      const attachments = incomingMsg.message.attachments;
+      if (attachments && attachments.length > 0) {
+        const att = attachments[0];
+        const attType = att.type || '';
+        if (['image', 'video', 'audio', 'file'].includes(attType)) {
+          mediaType = attType === 'file' ? 'document' : attType;
+          mediaUrl = att.payload?.url || null; // Messenger/IG gives direct URL (no media_id resolve needed)
+          mediaMetadata = { source_url: att.payload?.url };
+        }
+      }
     }
 
-    if (!content) {
-      this.log.info(`[SKIP] Message has no text content`, { traceId });
+    // Generate fallback content for media messages (conversation list preview + AI context)
+    if (mediaType && !content) {
+      const { MediaStorageService } = await import('@/lib/services/media-storage.service');
+      content = MediaStorageService.getMediaContentText(mediaType, mediaMetadata || undefined);
+    }
+
+    // Skip only if BOTH content AND media are empty
+    if (!content && !mediaType) {
+      this.log.info(`[SKIP] Message has no text content and no media`, { traceId });
       return;
     }
 
     const db = withTenantDB(tenantId);
     const msgService = new MessageService(db);
     const convService = new ConversationService(db);
+
+    // ── MEDIA DOWNLOAD & BLOB UPLOAD (tenant-isolated) ──
+    if (mediaType && mediaId) {
+      try {
+        const mediaCreds = await CredentialsService.resolveCredentials(tenantId, channel === 'whatsapp' ? 'whatsapp' : channel as any);
+        if (mediaCreds.accessToken) {
+          const { MediaStorageService } = await import('@/lib/services/media-storage.service');
+          const blobResult = await MediaStorageService.downloadAndStore(
+            tenantId,
+            mediaId,
+            mediaCreds.accessToken,
+            providerMessageId || `msg_${Date.now()}`,
+            {
+              mimeType: mediaMetadata?.mime_type,
+              filename: mediaMetadata?.filename,
+              mediaType,
+            }
+          );
+          if (blobResult) {
+            mediaUrl = blobResult.blobUrl;
+            // Track storage usage for SaaS billing
+            await MediaStorageService.trackUsage(db, tenantId, mediaType, blobResult.fileSize);
+            this.log.info(`[MEDIA_OK] Media stored in blob`, { tenantId, mediaType, fileSize: blobResult.fileSize, traceId });
+          }
+        } else {
+          this.log.warn(`[MEDIA_NO_CREDS] No access token for media download`, { tenantId, traceId });
+        }
+      } catch (mediaErr) {
+        // Non-fatal: save message even if media download fails
+        this.log.error(`[MEDIA_DOWNLOAD_FAILED] Non-fatal media error`, mediaErr instanceof Error ? mediaErr : new Error(String(mediaErr)), { tenantId, traceId });
+      }
+    }
 
     // 2. Resolve Unified Identity
     const { IdentityEngine } = await import('@/lib/services/ai/engines/identity');
@@ -459,7 +586,10 @@ export class QueueWorkerEngine {
       channel: channel,
       channelId: metadata.channelId,
       groupId: metadata.groupId,
-      providerMessageId
+      providerMessageId,
+      mediaType,
+      mediaUrl,
+      mediaMetadata,
     });
 
     if (isDuplicate) {
@@ -507,8 +637,11 @@ export class QueueWorkerEngine {
             phone_number: phoneNumber,
             content,
             direction: 'in',
-            status: 'delivered', // Incoming messages don't have sent status, they are just there
-            created_at: new Date().toISOString()
+            status: 'delivered',
+            created_at: new Date().toISOString(),
+            media_type: mediaType || undefined,
+            media_url: mediaUrl || undefined,
+            media_metadata: mediaMetadata || undefined,
           },
           { traceId, spanId: providerMessageId }
         );

@@ -14,6 +14,10 @@ export interface InternalMessagePayload {
   status?: string;
   model_used?: string;
   created_at: string; // ISO date string
+  // Media fields
+  media_type?: string;    // 'image' | 'document' | 'audio' | 'video' | 'location' | 'sticker'
+  media_url?: string;     // Vercel Blob permanent URL
+  media_metadata?: Record<string, any>;  // { filename, mime_type, caption, ... }
 }
 
 interface TraceContext {
@@ -62,7 +66,11 @@ export class RealtimeTranslator {
         content: internalMessage.content,
         sender: senderType,
         status: (internalMessage.status as "sent" | "delivered" | "read" | "failed") || undefined,
-        createdAt: new Date(internalMessage.created_at).toISOString()
+        createdAt: new Date(internalMessage.created_at).toISOString(),
+        // Media fields
+        mediaType: internalMessage.media_type,
+        mediaUrl: internalMessage.media_url,
+        mediaMetadata: internalMessage.media_metadata,
       }
     };
   }

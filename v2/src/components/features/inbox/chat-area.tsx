@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Send, Paperclip, User, MessageCircle, ChevronLeft, ChevronDown, ArrowDown, Info, ShieldAlert, Sparkles, Zap, Check, CheckCheck, Clock } from "lucide-react";
+import { Send, Paperclip, User, MessageCircle, ChevronLeft, ChevronDown, ArrowDown, Info, ShieldAlert, Sparkles, Zap, Check, CheckCheck, Clock, FileText, Play, Mic, MapPin, X, Download } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { getMessages, sendMessage, toggleBotStatus } from "@/app/actions/inbox";
 import { useInboxStore } from "@/store/inbox-store";
@@ -47,6 +47,105 @@ function ChatSkeleton() {
       <MessageSkeleton align="left" />
     </div>
   );
+}
+
+// -- Media Lightbox (WhatsApp-like fullscreen viewer) --
+function MediaLightbox({ src, type, onClose }: { src: string; type: string; onClose: () => void }) {
+  return (
+    <div
+      className="fixed inset-0 z-[9999] flex items-center justify-center"
+      style={{ background: "rgba(0,0,0,0.9)" }}
+      onClick={onClose}
+    >
+      <button
+        onClick={onClose}
+        className="absolute top-4 right-4 w-10 h-10 rounded-full flex items-center justify-center bg-white/10 hover:bg-white/20 transition-colors z-10"
+      >
+        <X className="w-6 h-6 text-white" />
+      </button>
+      <div className="max-w-[90vw] max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
+        {type === 'video' ? (
+          <video src={src} controls autoPlay className="max-w-full max-h-[90vh] rounded-lg" />
+        ) : (
+          <img src={src} alt="Media" className="max-w-full max-h-[90vh] object-contain rounded-lg" />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// -- Media Bubble Renderer --
+function MediaBubbleContent({ message, onLightbox }: { message: any; onLightbox: (src: string, type: string) => void }) {
+  const mt = message.mediaType;
+  const url = message.mediaUrl;
+  const meta = message.mediaMetadata;
+
+  if (!mt || !url) return null;
+
+  switch (mt) {
+    case 'image':
+    case 'sticker':
+      return (
+        <img
+          src={url}
+          alt={meta?.caption || 'Görsel'}
+          className="rounded-lg max-w-full max-h-64 object-cover cursor-pointer hover:opacity-90 transition-opacity mb-1"
+          loading="lazy"
+          onClick={() => onLightbox(url, 'image')}
+        />
+      );
+    case 'video':
+      return (
+        <div className="relative cursor-pointer mb-1" onClick={() => onLightbox(url, 'video')}>
+          <video src={url} className="rounded-lg max-w-full max-h-64 object-cover" preload="metadata" />
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="w-12 h-12 rounded-full bg-black/50 flex items-center justify-center">
+              <Play className="w-6 h-6 text-white ml-0.5" />
+            </div>
+          </div>
+        </div>
+      );
+    case 'audio':
+      return (
+        <div className="flex items-center gap-2 mb-1 min-w-[200px]">
+          <Mic className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--q-green)' }} />
+          <audio src={url} controls className="w-full h-8" style={{ maxWidth: '250px' }} />
+        </div>
+      );
+    case 'document':
+      return (
+        <a
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-2 px-3 py-2 rounded-lg mb-1 transition-colors hover:opacity-80"
+          style={{ background: 'rgba(0,0,0,0.05)', border: '1px solid var(--q-border-default)' }}
+        >
+          <FileText className="w-5 h-5 flex-shrink-0" style={{ color: 'var(--q-blue)' }} />
+          <span className="text-[13px] font-semibold truncate max-w-[180px]">
+            {meta?.filename || 'Belge'}
+          </span>
+          <Download className="w-4 h-4 flex-shrink-0 ml-auto" style={{ color: 'var(--q-text-secondary)' }} />
+        </a>
+      );
+    case 'location':
+      return (
+        <a
+          href={`https://www.google.com/maps?q=${meta?.latitude},${meta?.longitude}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-2 px-3 py-2 rounded-lg mb-1 transition-colors hover:opacity-80"
+          style={{ background: 'rgba(0,0,0,0.05)', border: '1px solid var(--q-border-default)' }}
+        >
+          <MapPin className="w-5 h-5 flex-shrink-0" style={{ color: 'var(--q-red)' }} />
+          <span className="text-[13px] font-semibold">
+            {meta?.name || `${meta?.latitude?.toFixed(4)}, ${meta?.longitude?.toFixed(4)}`}
+          </span>
+        </a>
+      );
+    default:
+      return null;
+  }
 }
 
 
@@ -184,6 +283,7 @@ export function ConversationViewport() {
   const [isSending, setIsSending] = useState(false);
   const [isTogglingBot, setIsTogglingBot] = useState(false);
   const [sendError, setSendError] = useState("");
+  const [lightbox, setLightbox] = useState<{ src: string; type: string } | null>(null);
   const queryClient = useQueryClient();
   const params = useParams();
   const tenantSlug = params?.tenant_slug as string;
@@ -562,6 +662,10 @@ export function ConversationViewport() {
   return (
     <div className={`w-full md:flex-1 md:flex flex-col bg-transparent h-full relative z-0 ${mobileView === "chat" ? "flex" : "hidden md:flex"}`}>
       
+      {/* ── Media Lightbox ── */}
+      {lightbox && (
+        <MediaLightbox src={lightbox.src} type={lightbox.type} onClose={() => setLightbox(null)} />
+      )}
       {/* ── Header ── */}
       <div
         className="h-[72px] px-4 md:px-8 flex items-center justify-between q-glass-strong sticky top-0 z-10"
@@ -743,10 +847,24 @@ export function ConversationViewport() {
                                 </span>
                               </div>
                             )}
-                            
-                            <p className="text-[15px] leading-[1.4] font-medium whitespace-pre-wrap pb-4">
-                              {item.message.text}
-                            </p>
+                            {/* ── MEDIA CONTENT ── */}
+                            {item.message.mediaType && item.message.mediaUrl && (
+                              <MediaBubbleContent
+                                message={item.message}
+                                onLightbox={(src, type) => setLightbox({ src, type })}
+                              />
+                            )}
+
+                            {/* ── TEXT CONTENT (or caption) ── */}
+                            {item.message.text && !(['📷', '📎', '🎵', '🎬', '📍', '🏷️', '📦'].some(e => item.message.text === e || (item.message.mediaType && item.message.text.startsWith(e) && !item.message.text.includes(' ')))) && (
+                              <p className="text-[15px] leading-[1.4] font-medium whitespace-pre-wrap pb-4">
+                                {item.message.text}
+                              </p>
+                            )}
+                            {/* Spacer for timestamp when no visible text */}
+                            {(!item.message.text || (item.message.mediaType && ['📷 Fotoğraf', '📎 Belge', '🎵 Ses kaydı', '🎬 Video', '📍 Konum', '🏷️ Sticker'].includes(item.message.text))) && (
+                              <div className="pb-4" />
+                            )}
                             
                             <div className="absolute bottom-1 right-2 flex items-center gap-1 text-[10px] font-semibold tracking-wide" style={{ color: "var(--q-text-secondary)" }}>
                               <span className="opacity-50">{item.message.timeMs ? new Date(item.message.timeMs).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) : item.message.time}</span>
