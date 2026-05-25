@@ -227,9 +227,9 @@ export class QueueWorkerEngine {
             text: `
               UPDATE channel_integrations 
               SET last_sync_at = NOW(), health_status = 'healthy' 
-              WHERE channel_id = $1
+              WHERE channel_id = $1 AND tenant_id = $2
             `,
-            values: [resolvedChannelId]
+            values: [resolvedChannelId, tenantId]
           });
           this.log.info(`[TELEMETRY_UPDATED] Channel ${resolvedChannelId} marked healthy and last_sync_at updated via status receipt`);
         } catch (telErr) {

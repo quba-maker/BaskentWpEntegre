@@ -182,7 +182,7 @@ export class AIOrchestrator {
       throw new Error("Max tool execution loops reached without a final text response.");
 
     } catch (e: any) {
-      this.log.error(`LLM Execution Failed [${config.provider}]`, e);
+      this.log.error(`[LLM_EXECUTION_FAILED] provider=${config.provider} model=${config.modelId} error=${e.message}`, e, { errorName: e.name, errorStack: e.stack?.substring(0, 500) });
       
       let fallbackText = "Şu an size en iyi şekilde yardımcı olabilmemiz için kısa bir bekleme süresi oluştu. Lütfen birkaç dakika sonra tekrar yazınız. 🙏";
       if (e.message?.startsWith('COST_LIMIT_EXCEEDED')) {
