@@ -534,6 +534,15 @@ export class QueueWorkerEngine {
     const msgService = new MessageService(db);
     const convService = new ConversationService(db);
 
+    // ── DEBUG: Trace media extraction results ──
+    if (mediaType) {
+      this.log.info(`[MEDIA_EXTRACT] Media detected`, { 
+        traceId, mediaType, mediaId: mediaId || 'NULL', 
+        hasMediaUrl: !!mediaUrl, content: content?.substring(0, 50),
+        rawImagePayload: channel === 'whatsapp' ? JSON.stringify(payload.entry?.[0]?.changes?.[0]?.value?.messages?.[0]?.image || payload.entry?.[0]?.changes?.[0]?.value?.messages?.[0]?.document || 'no-media-field').substring(0, 300) : 'non-whatsapp'
+      });
+    }
+
     // ── MEDIA DOWNLOAD & BLOB UPLOAD (tenant-isolated) ──
     if (mediaType && mediaId) {
       try {
