@@ -98,6 +98,26 @@ const PRIORITY_CONFIG: Record<string, { label: string; color: string; icon: stri
   'cold': { label: 'SOĞUK', color: '#007AFF', icon: '🔵' },
 };
 
+// Opportunity stage system (matches /takip) — separate from lead STAGES above
+const OPP_STAGES: { value: string; label: string; color: string; icon: string }[] = [
+  { value: 'new_lead', label: 'Yeni', color: '#007AFF', icon: '🆕' },
+  { value: 'first_contact', label: 'İlk İletişim', color: '#FF9500', icon: '📞' },
+  { value: 'engaged', label: 'Cevap Verdi', color: '#34C759', icon: '💬' },
+  { value: 'discovery', label: 'Keşif', color: '#5856D6', icon: '🔍' },
+  { value: 'report_waiting', label: 'Rapor Bekleniyor', color: '#FF9500', icon: '📋' },
+  { value: 'report_received', label: 'Rapor Geldi', color: '#30B0C7', icon: '📄' },
+  { value: 'doctor_review', label: 'Doktor İncelemesi', color: '#AF52DE', icon: '🩺' },
+  { value: 'qualified', label: 'Nitelikli', color: '#30B0C7', icon: '⭐' },
+  { value: 'offer_sent', label: 'Teklif Gönderildi', color: '#FF6482', icon: '💰' },
+  { value: 'appointment_planning', label: 'Randevu Planlanıyor', color: '#FFD60A', icon: '📅' },
+  { value: 'appointment_booked', label: 'Randevu Alındı', color: '#0F9D58', icon: '✅' },
+  { value: 'arrived', label: 'Geldi', color: '#0F9D58', icon: '🏥' },
+  { value: 'lost', label: 'Kayıp', color: '#FF3B30', icon: '❌' },
+  { value: 'not_qualified', label: 'Uygun Değil', color: '#8E8E93', icon: '🚫' },
+];
+
+const getOppStageInfo = (stage: string) => OPP_STAGES.find(s => s.value === stage) || { value: stage, label: stage, color: '#86868B', icon: '❓' };
+
 // Dropdown hook for outside click
 function useDropdown() {
   const [isOpen, setIsOpen] = useState(false);
@@ -735,12 +755,13 @@ export default function FormsPage() {
                       ) : null;
                     })()}
                     {selectedForm.current_stage && (() => {
-                      const si = getStageInfo(selectedForm.current_stage);
+                      const si = getOppStageInfo(selectedForm.current_stage);
                       return (
                         <div className="col-span-2">
                           <p className="text-[10px] font-semibold text-[#86868B] uppercase tracking-wider mb-1">Opportunity Durumu</p>
                           <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-md border"
                             style={{ backgroundColor: `${si.color}12`, borderColor: `${si.color}25`, color: si.color }}>
+                            <span>{si.icon}</span>
                             <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: si.color }} />
                             {si.label}
                           </span>
