@@ -8,7 +8,7 @@ import { toggleBotStatus } from "@/app/actions/inbox";
 import { useInboxStore } from "@/store/inbox-store";
 import { useRouter, useParams } from "next/navigation";
 import { resolveCountry, deduplicatePhones, getCountryInfoByName } from "@/lib/utils/country";
-import { MapPin, Building2, Calendar, Flame, TrendingUp } from "lucide-react";
+import { MapPin, Building2, Calendar, Flame, TrendingUp, User } from "lucide-react";
 
 const formatDate = (dateString: string) => {
   if (!dateString) return "";
@@ -709,8 +709,8 @@ export default function FormsPage() {
                 </div>
               </div>
 
-              {/* P0C: Güncel Takip Bilgisi (from opportunity/conversation) */}
-              {(selectedForm.current_country || selectedForm.current_department || selectedForm.current_stage || selectedForm.current_travel_date) && (
+              {/* P1B: Güncel Takip Bilgisi (from active opportunity) */}
+              {(selectedForm.current_country || selectedForm.current_department || selectedForm.current_stage || selectedForm.current_travel_date || selectedForm.current_display_name) && (
                 <div className="bg-white rounded-2xl p-5 border border-black/5 shadow-sm">
                   <div className="flex items-center gap-2 mb-4">
                     <TrendingUp className="w-4 h-4 text-[#007AFF]" />
@@ -722,6 +722,17 @@ export default function FormsPage() {
                     )}
                   </div>
                   <div className="grid grid-cols-2 gap-4">
+                    {/* P1B: Current identity from active opportunity */}
+                    {selectedForm.current_display_name && (
+                      <div className="col-span-2">
+                        <p className="text-[10px] font-semibold text-[#86868B] uppercase tracking-wider flex items-center gap-1"><User className="w-3 h-3" /> Güncel İsim</p>
+                        <p className="text-[14px] font-semibold text-[#1D1D1F] mt-1">{selectedForm.current_display_name}
+                          {selectedForm.patient_relation && (
+                            <span className="ml-2 text-[11px] font-medium text-[#86868B]">({selectedForm.patient_relation})</span>
+                          )}
+                        </p>
+                      </div>
+                    )}
                     {selectedForm.current_country && (() => {
                       const ci = getCountryInfoByName(selectedForm.current_country);
                       return (
@@ -768,6 +779,17 @@ export default function FormsPage() {
                         </div>
                       );
                     })()}
+                    {/* P1B: Opp-scoped summary */}
+                    {selectedForm.current_ai_summary ? (
+                      <div className="col-span-2 mt-1 pt-3 border-t border-black/5">
+                        <p className="text-[10px] font-semibold text-[#86868B] uppercase tracking-wider mb-1 flex items-center gap-1"><Sparkles className="w-3 h-3" /> AI Özet</p>
+                        <p className="text-[12px] text-[#1D1D1F] font-medium leading-relaxed">{selectedForm.current_ai_summary}</p>
+                      </div>
+                    ) : selectedForm.linked_opportunity_id ? (
+                      <div className="col-span-2 mt-1 pt-3 border-t border-black/5">
+                        <p className="text-[11px] font-medium text-[#86868B] italic">Bu fırsat için henüz AI özeti yok.</p>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               )}

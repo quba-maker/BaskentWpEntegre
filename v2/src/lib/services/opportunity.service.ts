@@ -395,7 +395,8 @@ export class OpportunityService {
     const rows = await this.db.executeSafe({
       text: `SELECT 
                o.*,
-               COALESCE(o.summary, cm.summary_text) as ai_summary,
+               -- P1B FIX: No global fallback — opp-scoped summary only
+               o.summary as ai_summary,
                cm.buying_intent,
                cm.sentiment,
                c.last_message_content,

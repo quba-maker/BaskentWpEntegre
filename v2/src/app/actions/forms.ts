@@ -116,8 +116,10 @@ export async function getForms(page: number = 1, search: string = "", source: st
       return rows.map((r: any) => ({
         id: r.id,
         phone_number: r.phone_number,
-        // P1B: Name priority: opp_requester_name > opp_patient_name > form patient_name
-        patient_name: r.opp_requester_name || r.opp_patient_name || r.patient_name || "İsimsiz Form",
+        // Raw form identity — always preserved as submitted
+        patient_name: r.patient_name || "İsimsiz Form",
+        // P1B: Current opportunity identity — for "Güncel Takip Bilgisi" display
+        current_display_name: r.opp_requester_name || r.opp_patient_name || null,
         email: r.email,
         city: r.city,
         form_name: r.form_name || "Bilinmeyen Form",
@@ -139,7 +141,7 @@ export async function getForms(page: number = 1, search: string = "", source: st
         current_intent_type: r.opp_intent_type || null,
         current_travel_date: r.opp_travel_date || null,
         current_next_follow_up_at: r.opp_next_follow_up_at || null,
-        current_ai_summary: r.opp_summary || r.ai_summary || "",
+        current_ai_summary: r.opp_summary || "",
         patient_relation: r.opp_patient_relation || null,
         link_confidence: r.summary_link_method || 'none',
       }));

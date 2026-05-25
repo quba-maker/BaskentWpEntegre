@@ -55,8 +55,8 @@ export async function getConversations(page: number = 1, search: string = "", st
           active_opp.stage as opp_stage,
           active_opp.priority as opp_priority,
           active_opp.patient_relation as opp_patient_relation,
-          -- Summary: opp-specific preferred, global fallback
-          COALESCE(active_opp.summary, mem.summary_text) as ai_summary,
+          -- P1B FIX: No global fallback — prevents Mehmet/Irak leaking into Almanya/Kardiyoloji
+          active_opp.summary as ai_summary,
           mem.buying_intent as ai_buying_intent,
           mem.sentiment as ai_sentiment,
           0 as unread
