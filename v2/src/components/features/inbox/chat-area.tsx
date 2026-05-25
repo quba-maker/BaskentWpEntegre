@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Send, Paperclip, User, MessageCircle, ChevronLeft, ChevronDown, ArrowDown, Info, ShieldAlert, Sparkles, Zap, Check, CheckCheck, Clock, FileText, Play, Mic, MapPin, X, Download } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -733,9 +734,10 @@ export function ConversationViewport() {
   return (
     <div className={`w-full md:flex-1 md:flex flex-col bg-transparent h-full relative z-0 ${mobileView === "chat" ? "flex" : "hidden md:flex"}`}>
       
-      {/* ── Media Lightbox ── */}
-      {lightbox && (
-        <MediaLightbox src={lightbox.src} type={lightbox.type} caption={lightbox.caption} onClose={() => setLightbox(null)} />
+      {/* ── Media Lightbox (Portal to body — escapes z-0 stacking context) ── */}
+      {lightbox && createPortal(
+        <MediaLightbox src={lightbox.src} type={lightbox.type} caption={lightbox.caption} onClose={() => setLightbox(null)} />,
+        document.body
       )}
       {/* ── Header ── */}
       <div
