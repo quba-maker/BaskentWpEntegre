@@ -1,47 +1,96 @@
 import { NextResponse } from 'next/server';
-import { crmExtractorService } from '@/lib/services/ai/crm-extractor';
 import { ChatMessage } from '@/lib/services/ai/orchestrator';
+import { AIOrchestrator } from '@/lib/services/ai/orchestrator';
+import { CrmExtractionSchema } from '@/lib/services/ai/crm-extractor';
 
 /**
  * DEBUG ONLY — Tests CRM extraction with recent messages
  * DELETE THIS FILE AFTER DEBUGGING
- * 
- * Usage: GET /api/debug/crm-test?phone=905546833306
  */
 export async function GET(req: Request) {
-  const { searchParams } = new URL(req.url);
-  const phone = searchParams.get('phone') || '905546833306';
-  const tenantId = 'caab9ea1-9591-45e4-bbc5-9c9b498982c8';
+  const orchestrator = new AIOrchestrator();
   
-  // Simulate the exact messages the CRM extractor would see
+  const nowIstanbul = new Date().toLocaleString('tr-TR', { 
+    timeZone: 'Europe/Istanbul', 
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', weekday: 'long'
+  });
+  const nowISO = new Date().toISOString();
+
+  const systemPrompt: ChatMessage = {
+    role: 'system',
+    content: `Sen bir Enterprise CRM Intelligence Engine'sin.
+Görevin, aşağıdaki hasta-temsilci (veya bot) görüşmesini analiz ederek yapılandırılmış JSON çıktısı üretmektir.
+KESİNLİKLE markdown veya extra metin KULLANMA. SADECE GEÇERLİ JSON DÖNDÜR.
+
+📅 ŞU ANKİ TARİH VE SAAT: ${nowIstanbul} (${nowISO})
+
+Format:
+{
+  "patient_name": "string",
+  "language": "string",
+  "country": "string (Türkçe)",
+  "department": "string",
+  "pipeline_stage": "string",
+  "should_create_opportunity": boolean,
+  "opportunity_priority": "cold | warm | hot",
+  "intent_type": "string",
+  "travel_date": "string ISO date",
+  "requires_human_confirmation": boolean
+}`
+  };
+
   const testMessages: ChatMessage[] = [
+    systemPrompt,
     { role: 'user', content: 'Annem için kardiyoloji randevusu istiyorum, Portekizdeyim' },
-    { role: 'assistant', content: 'Mustafa Ercan Bey, anneniz için kardiyoloji randevusu talebinizi ve Portekiz\'den geleceğinizi notlarımıza ekledik.' },
-    { role: 'user', content: 'önce telefon görüşmesi istiyorum.' },
-    { role: 'assistant', content: 'Telefon görüşmesi talebiniz notlarımızda. Yarın saat 14:00\'te koordinatörümüz sizi arayacak.' },
+    { role: 'assistant', content: 'Anneniz için kardiyoloji randevusu talebinizi ve Portekiz\'den geleceğinizi notlarımıza ekledik.' },
     { role: 'user', content: 'Bir düzeltme daha yapalım, ülke Portekiz, bölüm Kardiyoloji olacak. 20 Haziran\'da geleceğiz.' },
   ];
 
+  const apiKey = process.env.GEMINI_API_KEY || '';
+  
   try {
-    const result = await crmExtractorService.extract(
-      testMessages,
-      { raw: { gemini_api_key: process.env.GEMINI_API_KEY } },
-      `debug-${Date.now()}`
-    );
+    const aiResponse = await orchestrator.generateResponse(testMessages, {
+      provider: 'gemini',
+      modelId: 'gemini-2.5-flash',
+      apiKey,
+      temperature: 0.1,
+      maxTokens: 600,
+      responseFormat: 'json' as const
+    });
+
+    let jsonText = aiResponse.text;
+    // Clean markdown
+    if (jsonText.startsWith('\`\`\`json')) {
+      jsonText = jsonText.replace(/\`\`\`json/g, '').replace(/\`\`\`/g, '').trim();
+    } else if (jsonText.startsWith('\`\`\`')) {
+      jsonText = jsonText.replace(/\`\`\`/g, '').trim();
+    }
+
+    const parsed = JSON.parse(jsonText);
+    const validated = CrmExtractionSchema.parse(parsed);
 
     return NextResponse.json({
       status: 'ok',
-      extraction: result,
+      raw_text: aiResponse.text,
+      parsed: parsed,
+      validated: validated,
       debug: {
-        country: result?.country || '(EMPTY)',
-        department: result?.department || '(EMPTY)',
-        travel_date: result?.travel_date || '(EMPTY)',
-        should_create_opportunity: result?.should_create_opportunity,
-        intent_type: result?.intent_type || '(EMPTY)',
-        requires_human_confirmation: result?.requires_human_confirmation,
+        country: validated.country || '(EMPTY)',
+        department: validated.department || '(EMPTY)',
+        travel_date: validated.travel_date || '(EMPTY)',
+        should_create_opportunity: validated.should_create_opportunity,
+        intent_type: validated.intent_type || '(EMPTY)',
       }
     });
   } catch (e: any) {
-    return NextResponse.json({ status: 'error', message: e.message }, { status: 500 });
+    return NextResponse.json({ 
+      status: 'error', 
+      message: e.message,
+      stack: e.stack?.split('\n').slice(0, 5),
+      name: e.name,
+      apiKeyExists: !!apiKey,
+      apiKeyLength: apiKey.length
+    }, { status: 500 });
   }
 }
