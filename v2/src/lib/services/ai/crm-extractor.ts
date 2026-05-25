@@ -58,7 +58,7 @@ export class CRMExtractorService {
         modelId: llmModel,
         apiKey: apiKey,
         temperature: 0.1, // Düşük temperature, deterministik çıktı için
-        maxTokens: 600,
+        maxTokens: 1500, // CRM JSON has ~20 fields, 600 was causing truncation
         responseFormat: 'json' as const
       };
 
@@ -190,16 +190,51 @@ Pipeline Aşama Kuralları (sırayla ilerler, geri gitmez):
       const aiResponse = await Promise.race([aiPromise, timeoutPromise]);
       let jsonText = aiResponse.text;
 
-      this.log.info(`[CRM_EXTRACTION_RAW] Raw LLM output (first 500 chars)`, { traceId, raw: jsonText.substring(0, 500) });
+      this.log.info(`[CRM_EXTRACTION_RAW] Raw LLM output (first 800 chars)`, { traceId, raw: jsonText.substring(0, 800) });
 
       // Clean markdown block if model ignored strict json instruction
-      if (jsonText.startsWith('\`\`\`json')) {
-        jsonText = jsonText.replace(/\`\`\`json/g, '').replace(/\`\`\`/g, '').trim();
-      } else if (jsonText.startsWith('\`\`\`')) {
-        jsonText = jsonText.replace(/\`\`\`/g, '').trim();
+      if (jsonText.startsWith('```json')) {
+        jsonText = jsonText.replace(/```json/g, '').replace(/```/g, '').trim();
+      } else if (jsonText.startsWith('```')) {
+        jsonText = jsonText.replace(/```/g, '').trim();
       }
+      
+      // Trim any trailing whitespace or incomplete content
+      jsonText = jsonText.trim();
 
-      const parsedObj = JSON.parse(jsonText);
+      let parsedObj: any;
+      try {
+        parsedObj = JSON.parse(jsonText);
+      } catch (parseErr: any) {
+        // JSON repair attempt: try to close unclosed braces/brackets
+        this.log.warn(`[CRM_JSON_REPAIR] Initial parse failed, attempting repair`, { traceId, error: parseErr.message, rawLength: jsonText.length });
+        
+        // Remove trailing incomplete key-value pairs and close the object
+        let repaired = jsonText;
+        // Remove trailing comma and whitespace
+        repaired = repaired.replace(/,\s*$/, '');
+        // If doesn't end with }, try to close it
+        if (!repaired.endsWith('}')) {
+          // Find the last complete key-value pair
+          const lastCompleteComma = repaired.lastIndexOf(',');
+          const lastCompleteBrace = repaired.lastIndexOf('}');
+          if (lastCompleteComma > lastCompleteBrace) {
+            repaired = repaired.substring(0, lastCompleteComma);
+          }
+          // Remove any trailing partial values (incomplete strings etc)
+          repaired = repaired.replace(/,?\s*"[^"]*"?\s*:?\s*"?[^"]*$/, '');
+          repaired += '}';
+        }
+        
+        try {
+          parsedObj = JSON.parse(repaired);
+          this.log.info(`[CRM_JSON_REPAIRED] Successfully repaired truncated JSON`, { traceId });
+        } catch {
+          // Final fallback: capture raw output in error
+          throw new Error(`JSON_PARSE_FAILED: ${parseErr.message} | raw_start: ${jsonText.substring(0, 200)}`);
+        }
+      }
+      
       const validatedData = CrmExtractionSchema.parse(parsedObj);
 
       this.log.info(`[CRM_EXTRACTION_SUCCESS] CRM intelligence applied`, { 
