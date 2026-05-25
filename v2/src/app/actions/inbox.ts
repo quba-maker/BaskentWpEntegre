@@ -33,7 +33,9 @@ export async function getConversations(page: number = 1, search: string = "", st
           c.status,
           c.phase,
           c.lead_stage as stage,
-          c.tags,
+          -- P1B: Tags from active opportunity (scoped), fallback to conversation tags
+          COALESCE(active_opp.tags::text, c.tags) as tags,
+          c.tags as conv_tags_raw,
           c.channel,
           c.notes as notes,
           c.last_message_at,
@@ -162,7 +164,8 @@ export async function getConversations(page: number = 1, search: string = "", st
           channel: r.channel || 'whatsapp',
           lastMessageStatus: r.last_message_status || 'sent',
           lastMessageDirection: r.last_message_direction || 'in',
-          notes: r.notes || '',
+          // P1B: Notes auto-fill from active_opp.summary if manual notes empty
+          notes: r.notes || r.opp_summary || '',
           patientRelation: r.opp_patient_relation || null,
           formData: r.form_name ? {
             name: r.form_name,

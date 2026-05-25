@@ -64,7 +64,14 @@ export function ContextPanel() {
   const [newTagVal, setNewTagVal] = useState("");
   const { mutate } = useSWRConfig();
 
-  // Reset local state when contact changes
+  // Reset local state when contact changes or active opp fields update
+  // P1B: Granular deps ensure refresh on opp switch (same contact, different opp fields)
+  const contactId = activeContact?.id;
+  const contactDept = activeContact?.department;
+  const contactCountry = activeContact?.country;
+  const contactNotes = activeContact?.notes;
+  const contactStage = activeContact?.stage;
+  
   useEffect(() => {
     if (activeContact) {
       setStage(activeContact.stage || "new");
@@ -75,7 +82,7 @@ export function ContextPanel() {
       setNewTagVal("");
       setSaveStatus("idle");
     }
-  }, [activeContact]);
+  }, [contactId, contactDept, contactCountry, contactNotes, contactStage]);
 
   if (!activeContact) {
     return (

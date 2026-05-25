@@ -187,7 +187,8 @@ export default function TakipPage() {
     ? opportunities.filter((o: any) => {
         const search = debouncedSearch.toLowerCase();
         return (
-          o.patient_name?.toLowerCase().includes(search) ||
+          (o.display_name || o.patient_name || '')?.toLowerCase().includes(search) ||
+          o.requester_name?.toLowerCase().includes(search) ||
           o.phone_number?.includes(search) ||
           o.department?.toLowerCase().includes(search) ||
           o.country?.toLowerCase().includes(search)
@@ -198,7 +199,7 @@ export default function TakipPage() {
   const handleGoToInbox = (opp: any) => {
     setActiveContact(opp.phone_number, {
       id: opp.phone_number,
-      name: opp.patient_name || opp.phone_number,
+      name: opp.display_name || opp.requester_name || opp.patient_name || opp.phone_number,
       channel: opp.source || 'whatsapp',
       unread: 0
     });
@@ -380,7 +381,7 @@ export default function TakipPage() {
                     <td className="py-3.5 px-4 min-w-[180px]">
                       <div className="flex items-center gap-2">
                         <div className="font-bold text-[13px] text-[#1D1D1F]">
-                          {opp.patient_name || 'İsimsiz'}
+                          {opp.display_name || opp.requester_name || opp.patient_name || 'İsimsiz'}
                         </div>
                         {opp.country && (
                           <span className="text-[11px] px-1.5 py-0.5 rounded bg-black/[0.04] font-semibold text-[#86868B]">
@@ -599,7 +600,7 @@ function OppDetailModal({ opp, onClose, onStageChange, onAddNote, onGoToInbox, n
           <div className="px-6 py-5 bg-white border-b border-black/5 flex items-center justify-between shrink-0 rounded-t-[28px]">
             <div>
               <h2 className="text-xl font-bold text-[#1D1D1F] flex items-center gap-2">
-                {opp.patient_name || 'İsimsiz'}
+                {opp.display_name || opp.requester_name || opp.patient_name || 'İsimsiz'}
                 {flag && <span className="text-lg">{flag}</span>}
               </h2>
               <p className="text-[#86868B] text-sm font-medium mt-0.5">

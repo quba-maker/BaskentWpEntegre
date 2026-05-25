@@ -369,6 +369,8 @@ export class OpportunityService {
     const values: any[] = [tenantId];
     let paramIdx = 2;
 
+    const isLostFilter = filters?.stage === 'lost';
+
     if (filters?.stage) {
       conditions.push(`o.stage = $${paramIdx++}`);
       values.push(filters.stage);
@@ -386,8 +388,26 @@ export class OpportunityService {
       values.push(filters.source);
     }
 
-    // Exclude terminal states by default
-    conditions.push(`o.stage NOT IN ('arrived')`);
+    if (!isLostFilter) {
+      // P1B: Default view — exclude terminal states AND deduplicate per conversation
+      // Only show the opportunity that matches conversation.active_opportunity_id
+      // If conversation has no active_opportunity_id, show non-terminal opps (backward compat)
+      conditions.push(`o.stage NOT IN ('lost', 'not_qualified', 'arrived')`);
+      conditions.push(`(
+        EXISTS (
+          SELECT 1 FROM conversations c2
+          WHERE c2.active_opportunity_id = o.id AND c2.tenant_id = o.tenant_id
+        )
+        OR NOT EXISTS (
+          SELECT 1 FROM conversations c2
+          WHERE c2.id = o.conversation_id AND c2.tenant_id = o.tenant_id
+            AND c2.active_opportunity_id IS NOT NULL
+        )
+      )`);
+    } else {
+      // Lost filter: show all lost opps (including superseded historical ones)
+      conditions.push(`o.stage NOT IN ('arrived')`);
+    }
 
     const limit = filters?.limit || 50;
     const offset = filters?.offset || 0;
@@ -395,6 +415,8 @@ export class OpportunityService {
     const rows = await this.db.executeSafe({
       text: `SELECT 
                o.*,
+               -- P1B: Display name resolver (requester_name > patient_name > phone)
+               COALESCE(NULLIF(o.requester_name, ''), NULLIF(o.patient_name, ''), o.phone_number) as display_name,
                -- P1B FIX: No global fallback — opp-scoped summary only
                o.summary as ai_summary,
                cm.buying_intent,
