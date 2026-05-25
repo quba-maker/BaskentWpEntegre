@@ -1110,13 +1110,47 @@ export class QueueWorkerEngine {
           previousLeadStage: beforeConv?.lead_stage || null
         }
       });
+
+      // ═══ P1A-FIX: Deterministic Cancellation Detection ═══
+      let explicitCancellation = crmData?.explicit_cancellation || false;
+      let optOutRequested = crmData?.opt_out_requested || false;
+      let cancellationReason = crmData?.cancellation_reason || null;
+      let shouldStopFollowUp = crmData?.should_stop_follow_up || false;
+
+      // Run deterministic detector as safety net (overrides LLM if it missed)
+      if (content && !explicitCancellation) {
+        try {
+          const { detectCancellation } = await import('../services/ai/cancellation-detector');
+          const detection = detectCancellation(content);
+          if (detection.explicit_cancellation) {
+            explicitCancellation = true;
+            optOutRequested = detection.opt_out_requested || optOutRequested;
+            shouldStopFollowUp = true;
+            cancellationReason = cancellationReason || `deterministic_match: ${detection.matched_phrases.join(', ')}`;
+            this.log.info(`[CANCELLATION_DETECTED] Deterministic override`, {
+              traceId, phoneNumber,
+              matched_phrases: detection.matched_phrases,
+              llm_missed: !crmData?.explicit_cancellation
+            });
+          }
+        } catch (_) { /* non-blocking */ }
+      }
+
+      // Override pipeline_stage to 'lost' if explicit cancellation detected
+      const effectivePipelineStage = explicitCancellation 
+        ? 'lost' 
+        : crmData?.pipeline_stage;
       
       await convService.updateCrmIntelligence(phoneNumber, {
         patientName: crmData?.patient_name,
         country: resolvedCountryForConv,
         department: crmData?.department,
-        pipelineStage: crmData?.pipeline_stage,
-        tags: crmData?.tags
+        pipelineStage: effectivePipelineStage,
+        tags: crmData?.tags,
+        explicitCancellation,
+        optOutRequested,
+        cancellationReason: cancellationReason || undefined,
+        shouldStopFollowUp,
       });
 
       // ═══ P0-4: CRM_CONVERSATION_UPDATE_RESULT — after-snapshot ═══

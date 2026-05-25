@@ -50,6 +50,10 @@ export interface UnifiedStageUpdateInput {
   actorId?: string;
   /** Reason for the change */
   reason?: string;
+  /** P1A-FIX: Customer explicitly cancelled/opted out — bypasses AI 'lost' restriction */
+  explicitCancellation?: boolean;
+  /** P1A-FIX: Customer requested no further contact */
+  optOutRequested?: boolean;
 }
 
 export interface UnifiedStageResult {
@@ -122,7 +126,7 @@ export class UnifiedStageService {
       }
 
       // ── 4. Direction rules ──
-      const directionCheck = this.checkDirectionRules(source, previousOppStage, normalizedTarget);
+      const directionCheck = this.checkDirectionRules(source, previousOppStage, normalizedTarget, input.explicitCancellation);
       if (directionCheck.blocked) {
         const result: UnifiedStageResult = {
           success: false,
@@ -162,14 +166,25 @@ export class UnifiedStageService {
       const queries: any[] = [];
 
       // 7a. Update opportunity
+      const isCancellation = input.explicitCancellation && normalizedTarget === 'lost';
       queries.push({
         text: `UPDATE opportunities SET 
                  stage = $1, 
                  closed_at = CASE WHEN $1 IN ('lost', 'not_qualified', 'arrived') THEN NOW() ELSE NULL END,
                  closed_reason = CASE WHEN $1 IN ('lost', 'not_qualified') THEN $4 ELSE NULL END,
+                 next_follow_up_at = CASE WHEN $5 = true THEN NULL ELSE next_follow_up_at END,
+                 automation_status = CASE WHEN $5 = true THEN 'paused' ELSE automation_status END,
+                 metadata = CASE 
+                   WHEN $5 = true THEN metadata || jsonb_build_object(
+                     'opt_out_requested', $6,
+                     'opt_out_at', NOW()::text,
+                     'opt_out_reason', $4
+                   )
+                   ELSE metadata 
+                 END,
                  updated_at = NOW()
                WHERE id = $2 AND tenant_id = $3`,
-        values: [normalizedTarget, opp.id, tenantId, reason || null]
+        values: [normalizedTarget, opp.id, tenantId, reason || null, isCancellation, input.optOutRequested || false]
       });
 
       // 7b. Mirror to conversations.lead_stage (via conversation_id)
@@ -348,11 +363,18 @@ export class UnifiedStageService {
   private static checkDirectionRules(
     source: StageUpdateSource,
     currentStage: string,
-    targetStage: string
+    targetStage: string,
+    explicitCancellation?: boolean
   ): { blocked: boolean; blockReason?: string } {
 
     // AI restrictions: forbidden stages
     if (source === 'ai' && AI_FORBIDDEN_STAGES.has(targetStage)) {
+      // P1A-FIX: Exception for explicit customer cancellation
+      if (targetStage === 'lost' && explicitCancellation) {
+        // Customer explicitly said "gelmeyeceğim", "aramayın" etc.
+        // This is not AI speculation — it's customer action. Allow it.
+        return { blocked: false };
+      }
       return {
         blocked: true,
         blockReason: `AI bu aşamayı ayarlayamaz: ${targetStage}. İnsan onayı gereklidir.`,

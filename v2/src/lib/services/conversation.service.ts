@@ -125,9 +125,14 @@ export class ConversationService {
       department?: string;
       pipelineStage?: string;
       tags?: string[];
+      // P1A-FIX: Cancellation detection
+      explicitCancellation?: boolean;
+      optOutRequested?: boolean;
+      cancellationReason?: string;
+      shouldStopFollowUp?: boolean;
     }
   ): Promise<void> {
-    if (!data.patientName && !data.country && !data.department && !data.pipelineStage && !data.tags) {
+    if (!data.patientName && !data.country && !data.department && !data.pipelineStage && !data.tags && !data.explicitCancellation) {
       return;
     }
 
@@ -192,6 +197,11 @@ export class ConversationService {
             conversationId,
             phoneNumber,
             targetStage: oppTargetStage,
+            explicitCancellation: data.explicitCancellation,
+            optOutRequested: data.optOutRequested,
+            reason: data.explicitCancellation 
+              ? `explicit_customer_cancellation: ${data.cancellationReason || 'müşteri açıkça vazgeçti'}`
+              : undefined,
           });
 
           if (result.blocked) {

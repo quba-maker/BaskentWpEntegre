@@ -27,6 +27,11 @@ export const CrmExtractionSchema = z.object({
   travel_date: z.string().optional(),
   report_status: z.enum(['none', 'waiting', 'sent', 'received', 'reviewed']).optional(),
   requires_human_confirmation: z.boolean().optional(),
+  // P1A-FIX: Explicit Cancellation / Opt-Out Detection
+  explicit_cancellation: z.boolean().optional(),
+  opt_out_requested: z.boolean().optional(),
+  cancellation_reason: z.string().optional(),
+  should_stop_follow_up: z.boolean().optional(),
 });
 
 export type CrmExtractionType = z.infer<typeof CrmExtractionSchema>;
@@ -101,7 +106,12 @@ Format:
   "requested_callback_datetime": "string ISO 8601 (Hasta 'yarın 14:00'te arayın' derse → '2026-05-26T14:00:00+03:00'. Spesifik zaman belirtilmemişse boş bırak. Timezone Europe/Istanbul (+03:00) varsay)",
   "travel_date": "string ISO date (Hasta 'Haziran 20'de geleceğim' derse → '2026-06-20'. Kesin tarih yoksa boş bırak)",
   "report_status": "none | waiting | sent | received | reviewed (Hastanın rapor/tetkik durumu: henüz yok, göndereceğini söylüyor, gönderdi, alındı, doktor inceledi)",
-  "requires_human_confirmation": boolean (Hasta randevu onayı, arama zamanı onayı, doktor randevusu gibi İNSAN ONAYI gerektiren bir talep belirttiyse true)
+  "requires_human_confirmation": boolean (Hasta randevu onayı, arama zamanı onayı, doktor randevusu gibi İNSAN ONAYI gerektiren bir talep belirttiyse true),
+
+  "explicit_cancellation": boolean (Hasta AÇIKÇA gelmeyeceğini, vazgeçtiğini, iptal istediğini belirttiyse true. Örn: 'gelmeyeceğim', 'vazgeçtim', 'istemiyorum', 'iptal edin', 'randevuyu iptal edin', 'gelmekten vazgeçtik'. 'Şimdilik düşünmüyorum' gibi belirsiz ifadeler İÇİN FALSE — sadece kesin beyanlar),
+  "opt_out_requested": boolean (Hasta aranmamak/mesaj almamak istiyorsa true. Örn: 'aramayın', 'beni bir daha aramayın', 'rahatsız etmeyin', 'mesaj atmayın', 'görüşmek istemiyorum'),
+  "cancellation_reason": "string (İptal/vazgeçme sebebi. Hasta söylediyse yazılır. Örn: 'başka hastaneye gitti', 'maddi nedenler', 'gelmekten vazgeçti'. Yoksa boş bırak)",
+  "should_stop_follow_up": boolean (true ise tüm otomatik takip durdurulmalı. explicit_cancellation veya opt_out_requested true ise bu da true olmalı)
 }
 
 Pipeline Aşama Kuralları (sırayla ilerler, geri gitmez):
@@ -112,6 +122,16 @@ Pipeline Aşama Kuralları (sırayla ilerler, geri gitmez):
 - "qualified": Hasta ciddi ilgi gösteriyor: tedavi istiyor, fiyat teklifi istedi, MR/rapor paylaştı veya gelmek istediğini belirtti.
 - "appointed": Hasta randevu aldı, tarih belirlendi veya geliş planı kesinleşti.
 - "lost": Hasta ilgilenmediğini belirtti, uzun süre yanıt vermedi veya başka yere gittiğini söyledi.
+
+🚫 AÇIK İPTAL / OPT-OUT TESPİTİ (KRİTİK):
+- Eğer hasta AÇIKÇA "gelmeyeceğim", "vazgeçtim", "istemiyorum", "iptal edin", "aramayın", "rahatsız etmeyin" gibi ifadeler kullanıyorsa:
+  → explicit_cancellation = true
+  → pipeline_stage = "lost"
+  → should_stop_follow_up = true
+  → opportunity_priority = "cold"
+- Eğer hasta "aramayın", "beni bir daha aramayın", "mesaj atmayın" diyorsa:
+  → opt_out_requested = true (ek olarak)
+- DİKKAT: "Şimdilik düşünmüyorum", "Bir düşüneyim", "Sonra bakarız" gibi belirsiz ifadeler İPTAL DEĞİLDİR. Bu durumda explicit_cancellation = false.
 
 🔥 FIRSAT TESPİT KURALLARI (should_create_opportunity):
 - should_create_opportunity = TRUE eğer:
