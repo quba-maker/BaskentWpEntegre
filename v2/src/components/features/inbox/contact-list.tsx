@@ -77,7 +77,7 @@ function ChannelIcon({ channel }: { channel: string }) {
 function stageLabel(stage: string | undefined): string {
   const map: Record<string, string> = {
     new: "Yeni Lead", contacted: "İletişime Geçildi", responded: "Yanıt Alındı",
-    discovery: "Keşif / Bilgi", appointed: "Randevu Aldı", lost: "Kaybedildi",
+    discovery: "Keşif / Bilgi", qualified: "Nitelikli", appointed: "Randevu Aldı", lost: "Kaybedildi",
   };
   return map[stage || "new"] || stage || "Yeni Lead";
 }
@@ -293,8 +293,10 @@ export function ContactRail() {
                           {c.name || c.id}
                         </span>
                         {(() => {
+                          // Country priority: DB (AI-extracted) > phone prefix (deterministic guess)
+                          // Medical tourism: patient may have +90 phone but live in Germany
                           const cn = c.country ? normalizeCountryName(c.country) : '';
-                          const country = getCountryFromPhone(c.id) || (c.country ? { flag: getCountryFlag(cn), name: cn, code: '' } : null);
+                          const country = (c.country ? { flag: getCountryFlag(cn), name: cn, code: '' } : null) || getCountryFromPhone(c.id);
                           return country ? (
                             <span className="ml-1.5 inline-flex items-center gap-0.5 px-1 py-0.5 rounded bg-black/[0.04] text-[10px] font-semibold flex-shrink-0" style={{ color: 'var(--q-text-secondary)' }}>
                               {country.flag} {country.name}

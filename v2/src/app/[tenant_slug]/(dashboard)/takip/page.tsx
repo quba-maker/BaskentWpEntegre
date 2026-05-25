@@ -23,7 +23,23 @@ const formatDate = (dateString: string) => {
 
 const timeAgo = (dateString: string) => {
   if (!dateString) return "";
-  const diff = Math.round((Date.now() - new Date(dateString).getTime()) / 1000);
+  const target = new Date(dateString);
+  const diff = Math.round((Date.now() - target.getTime()) / 1000);
+  
+  // Future dates (follow-up scheduled)
+  if (diff < 0) {
+    const absDiff = Math.abs(diff);
+    if (absDiff < 60) return "Birkaç saniye sonra";
+    if (absDiff < 3600) return `${Math.floor(absDiff / 60)} dk sonra`;
+    if (absDiff < 86400) return `${Math.floor(absDiff / 3600)} saat sonra`;
+    if (absDiff < 172800) {
+      const time = target.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Istanbul" });
+      return `Yarın ${time}`;
+    }
+    return target.toLocaleDateString("tr-TR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Istanbul" });
+  }
+  
+  // Past dates
   if (diff < 60) return "Az önce";
   if (diff < 3600) return `${Math.floor(diff / 60)} dk önce`;
   if (diff < 86400) return `${Math.floor(diff / 3600)} saat önce`;
@@ -72,6 +88,7 @@ const CHANNEL_ICONS: Record<string, string> = {
 
 const INTENT_LABELS: Record<string, string> = {
   appointment_request: 'Randevu Talebi',
+  call_request: 'Arama Talebi',
   report_sent: 'Rapor Gönderildi',
   report_waiting: 'Rapor Bekleniyor',
   price_inquiry: 'Fiyat Sorgusu',
@@ -79,6 +96,11 @@ const INTENT_LABELS: Record<string, string> = {
   doctor_review: 'Doktor İncelemesi',
   general_info: 'Genel Bilgi',
   follow_up_needed: 'Takip Gerekli',
+  consultation_request: 'Danışma Talebi',
+  second_opinion: 'İkinci Görüş',
+  insurance_query: 'Sigorta Sorgusu',
+  companion_inquiry: 'Refakatçi Bilgisi',
+  emergency: 'Acil Durum',
 };
 
 // ── Dropdown Hook ──
