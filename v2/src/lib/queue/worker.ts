@@ -1135,12 +1135,21 @@ export class QueueWorkerEngine {
         this.log.info(`[CANCELLATION_LAYER3] LLM lost+cold heuristic`, { traceId, phoneNumber });
       }
 
-      // Layer 4: Deterministic regex safety net (runs even when crmData is null/failed)
-      if (content && !explicitCancellation) {
+      // Layer 4: Deterministic intent safety net (runs even when crmData is null/failed)
+      // Expanded from pure cancellation to full intent detection (P1A-FIX5)
+      let dataDeletionRequest = false;
+      let resetConversationRequested = false;
+      let newIdentityDetected = false;
+      let newTreatmentInterest = false;
+      let detectedNewName: string | null = null;
+      
+      if (content) {
         try {
           const { detectCancellation } = await import('../services/ai/cancellation-detector');
           const detection = detectCancellation(content);
-          if (detection.explicit_cancellation) {
+          
+          // Cancellation override (existing behavior)
+          if (detection.explicit_cancellation && !explicitCancellation) {
             explicitCancellation = true;
             optOutRequested = detection.opt_out_requested || optOutRequested;
             shouldStopFollowUp = true;
@@ -1150,6 +1159,24 @@ export class QueueWorkerEngine {
               matched_phrases: detection.matched_phrases,
               llm_missed: true,
               crmDataNull: !crmData
+            });
+          }
+          
+          // New intent signals (P1A-FIX5)
+          dataDeletionRequest = detection.data_deletion_request;
+          resetConversationRequested = detection.reset_conversation_requested;
+          newIdentityDetected = detection.new_identity_detected;
+          newTreatmentInterest = detection.new_treatment_interest;
+          detectedNewName = detection.detected_name;
+          
+          if (dataDeletionRequest || resetConversationRequested || newIdentityDetected) {
+            shouldStopFollowUp = dataDeletionRequest || shouldStopFollowUp;
+            this.log.info(`[INTENT_LAYER4] New intent signals detected`, {
+              traceId, phoneNumber,
+              dataDeletionRequest, resetConversationRequested,
+              newIdentityDetected, newTreatmentInterest,
+              detectedNewName,
+              matched_phrases: detection.matched_phrases
             });
           }
         } catch (_) { /* non-blocking */ }
@@ -1304,6 +1331,18 @@ export class QueueWorkerEngine {
           const existingOppCountry = beforeOpp?.country || null;
           const resolvedCountryForOpp = crmData.country || existingOppCountry || existingConvCountry || deterministicCountry;
 
+          // ═══ P1A-FIX5: Detect if this is a fundamentally different request ═══
+          const isDifferentDepartment = !!(beforeOpp && crmData.department && 
+            beforeOpp.department && crmData.department.toLowerCase() !== beforeOpp.department.toLowerCase());
+          const isDifferentCountry = !!(beforeOpp && crmData.country && 
+            beforeOpp.country && crmData.country.toLowerCase() !== beforeOpp.country.toLowerCase());
+          const shouldCloseAndCreateNew = beforeOpp && (
+            resetConversationRequested ||
+            (newIdentityDetected && (isDifferentDepartment || isDifferentCountry)) ||
+            (newTreatmentInterest && isDifferentDepartment) ||
+            (dataDeletionRequest)
+          );
+
           // ═══ P0-1: OPP_RESOLVED_FOR_UPDATE ═══
           await AIEventEmitter.emitSync({
             tenantId, conversationId, customerId,
@@ -1320,23 +1359,131 @@ export class QueueWorkerEngine {
               crmDepartment: crmData.department || null,
               previousOpportunityCountry: beforeOpp?.country || null,
               previousOpportunityDepartment: beforeOpp?.department || null,
-              shouldCreateOpportunity: crmData.should_create_opportunity
+              shouldCreateOpportunity: crmData.should_create_opportunity,
+              // P1A-FIX5 new fields
+              shouldCloseAndCreateNew,
+              isDifferentDepartment,
+              isDifferentCountry,
+              resetConversationRequested,
+              newIdentityDetected,
+              dataDeletionRequest,
             }
           });
 
-          if (crmData.should_create_opportunity) {
-            const oppId = await oppService.upsertFromCrm({
-              tenantId, conversationId, phoneNumber, channel,
-              patientName: crmData.patient_name,
-              crmData, lastCustomerMessageAt: new Date().toISOString(),
-              traceId, externalCountry: resolvedCountryForOpp
+          // ═══ P1A-FIX5: Data Deletion / Privacy Request handling ═══
+          if (dataDeletionRequest && beforeOpp) {
+            this.log.info(`[DATA_DELETION_REQUEST] Privacy request detected, closing opp + stopping automation`, {
+              traceId, oppId: beforeOpp.id, phoneNumber
             });
-            if (oppId) {
-              this.log.info(`[WORKER_OPP_OK] Opportunity upserted`, { traceId, oppId });
+            // Close old opportunity with privacy reason
+            await db.executeSafe({
+              text: `UPDATE opportunities SET 
+                       stage = 'lost', 
+                       closed_at = NOW(), 
+                       closed_reason = 'data_deletion_request',
+                       automation_status = 'stopped',
+                       next_follow_up_at = NULL,
+                       metadata = metadata || $1::jsonb,
+                       updated_at = NOW()
+                     WHERE id = $2 AND tenant_id = $3`,
+              values: [
+                JSON.stringify({ 
+                  privacy_request_pending: true,
+                  data_deletion_requested_at: new Date().toISOString(),
+                  closed_by: 'system_privacy_request'
+                }),
+                beforeOpp.id, tenantId
+              ]
+            });
+            // Mirror to conversation + lead
+            await db.executeSafe({
+              text: `UPDATE conversations SET lead_stage = 'lost', updated_at = NOW() WHERE id = $1 AND tenant_id = $2`,
+              values: [conversationId, tenantId]
+            });
+            const cleanPhone = phoneNumber.replace(/\D/g, '');
+            const last10 = cleanPhone.length > 10 ? cleanPhone.substring(cleanPhone.length - 10) : cleanPhone;
+            await db.executeSafe({
+              text: `UPDATE leads SET stage = 'lost' WHERE phone_number LIKE '%' || $1 || '%' AND tenant_id = $2`,
+              values: [last10, tenantId]
+            });
+          }
+
+          // ═══ P1A-FIX5: Close old + Create new opportunity on identity/dept change ═══
+          if (shouldCloseAndCreateNew && !dataDeletionRequest) {
+            this.log.info(`[OPP_CLOSE_AND_CREATE] Closing old opp, creating new for different request`, {
+              traceId, oldOppId: beforeOpp.id,
+              oldDept: beforeOpp.department, newDept: crmData.department,
+              oldCountry: beforeOpp.country, newCountry: crmData.country,
+              resetConversationRequested, newIdentityDetected, isDifferentDepartment
+            });
+            
+            // Close old opportunity (superseded, not lost)
+            const closeReason = resetConversationRequested ? 'user_requested_reset' 
+              : newIdentityDetected ? 'new_identity_new_treatment'
+              : 'new_treatment_interest';
+            
+            await db.executeSafe({
+              text: `UPDATE opportunities SET 
+                       stage = 'lost', 
+                       closed_at = NOW(), 
+                       closed_reason = $1,
+                       metadata = metadata || $2::jsonb,
+                       updated_at = NOW()
+                     WHERE id = $3 AND tenant_id = $4`,
+              values: [
+                closeReason,
+                JSON.stringify({ 
+                  superseded_by: 'new_opportunity',
+                  superseded_at: new Date().toISOString(),
+                  superseded_reason: closeReason
+                }),
+                beforeOpp.id, tenantId
+              ]
+            });
+
+            // Force create new opportunity (bypass existing check)
+            const newOppCrmData = { ...crmData, should_create_opportunity: true };
+            // Use new country for the new opp
+            const newOppCountry = crmData.country || deterministicCountry;
+            const newOppId = await oppService.upsertFromCrm({
+              tenantId, conversationId, phoneNumber, channel,
+              patientName: detectedNewName || crmData.patient_name,
+              crmData: newOppCrmData, lastCustomerMessageAt: new Date().toISOString(),
+              traceId, externalCountry: newOppCountry
+            });
+            
+            if (newOppId) {
+              this.log.info(`[OPP_CLOSE_AND_CREATE_OK] Old closed, new created`, {
+                traceId, closedOppId: beforeOpp.id, newOppId, newDept: crmData.department, newCountry: crmData.country
+              });
+              
+              // Mirror new stage to conversation
+              const newOppStage = newOppId !== beforeOpp.id ? 'discovery' : null;
+              if (newOppStage) {
+                const { oppStageToLeadStage } = await import('../config/stage-mapping');
+                const mirrorStage = oppStageToLeadStage(newOppStage);
+                await db.executeSafe({
+                  text: `UPDATE conversations SET lead_stage = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3`,
+                  values: [mirrorStage, conversationId, tenantId]
+                });
+              }
             }
-          } else {
-            const enriched = await oppService.enrichExisting(tenantId, conversationId, crmData, resolvedCountryForOpp, traceId);
-            this.log.info(`[WORKER_OPP_ENRICH] result=${enriched}`, { traceId });
+          } else if (!shouldCloseAndCreateNew && !dataDeletionRequest) {
+            // Normal upsert (existing behavior)
+            if (crmData.should_create_opportunity) {
+              const oppId = await oppService.upsertFromCrm({
+                tenantId, conversationId, phoneNumber, channel,
+                patientName: crmData.patient_name,
+                crmData, lastCustomerMessageAt: new Date().toISOString(),
+                traceId, externalCountry: resolvedCountryForOpp
+              });
+              if (oppId) {
+                this.log.info(`[WORKER_OPP_OK] Opportunity upserted`, { traceId, oppId });
+              }
+            } else {
+              const enriched = await oppService.enrichExisting(tenantId, conversationId, crmData, resolvedCountryForOpp, traceId);
+              this.log.info(`[WORKER_OPP_ENRICH] result=${enriched}`, { traceId });
+            }
           }
 
           // ═══ P0-5: OPP_UPDATE_RESULT — after-snapshot ═══
@@ -1370,6 +1517,42 @@ export class QueueWorkerEngine {
               departmentChanged: beforeOpp?.department !== afterOpp?.department
             }
           });
+          // ═══ P1A-FIX5 (FIX D): Tag cleanup on reset/new-identity/deletion ═══
+          if (shouldCloseAndCreateNew || dataDeletionRequest) {
+            try {
+              const STALE_TAGS = [
+                'iptal_edildi', 'vazgeçti', 'randevu_iptali', 'açık_iptal',
+                'takip_durduruldu', 'opt_out_talebi', 'bilgi_silme_talebi',
+                'randevu_onayı', 'telefon_gorusmesi_istiyor', 'karar_değişikliği',
+                'seyahat_planlama', 'randevu_talebi'
+              ];
+              // Fetch current tags, filter out stale ones
+              const convRow = await db.executeSafe({
+                text: `SELECT tags FROM conversations WHERE id = $1 AND tenant_id = $2`,
+                values: [conversationId, tenantId]
+              }) as any[];
+              
+              if (convRow[0]?.tags) {
+                let tags: string[] = [];
+                try {
+                  tags = typeof convRow[0].tags === 'string' ? JSON.parse(convRow[0].tags) : convRow[0].tags;
+                } catch { tags = []; }
+                
+                const cleanedTags = tags.filter((t: string) => !STALE_TAGS.includes(t));
+                if (cleanedTags.length !== tags.length) {
+                  await db.executeSafe({
+                    text: `UPDATE conversations SET tags = $1::jsonb, updated_at = NOW() WHERE id = $2 AND tenant_id = $3`,
+                    values: [JSON.stringify(cleanedTags), conversationId, tenantId]
+                  });
+                  this.log.info(`[TAG_CLEANUP] Removed ${tags.length - cleanedTags.length} stale tags`, {
+                    traceId, removed: tags.filter((t: string) => STALE_TAGS.includes(t)), remaining: cleanedTags
+                  });
+                }
+              }
+            } catch (tagErr) {
+              this.log.warn(`[TAG_CLEANUP_FAILED] Non-fatal`, { traceId, error: (tagErr as Error).message });
+            }
+          }
 
         } catch (oppErr) {
           this.log.error(`[WORKER_OPP_FAILED] Non-fatal opportunity error`, oppErr instanceof Error ? oppErr : new Error(String(oppErr)), { traceId });
