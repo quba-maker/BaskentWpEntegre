@@ -771,6 +771,8 @@ export class QueueWorkerEngine {
     // 3.6 MAX MESSAGES GATE — Auto handover after limit
     // Only counts BOT-generated messages (model_used IS NOT NULL) since bot_activated_at
     // This prevents human agent messages from counting and allows admin to re-enable bot
+    // IMPORTANT: skipBotReply flag allows CRM extraction to still run even when bot limit reached
+    let skipBotReply = false;
     const maxMsg = brain.context.settings.maxMessages;
     if (maxMsg > 0) {
       const botMsgCount = await db.executeSafe({
@@ -792,9 +794,9 @@ export class QueueWorkerEngine {
           text: `UPDATE conversations SET status = 'human' WHERE phone_number = $1 AND tenant_id = $2`,
           values: [phoneNumber, tenantId]
         });
-        this.log.info(`[MAX_MESSAGES] Bot limit reached (${count}/${maxMsg}), auto-handover to human`, { traceId });
+        this.log.info(`[MAX_MESSAGES] Bot limit reached (${count}/${maxMsg}), auto-handover to human. CRM extraction will still run.`, { traceId });
         AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'max_messages_reached', category: 'escalation', payload: { count, maxMsg } });
-        return;
+        skipBotReply = true;
       }
     }
 
@@ -845,6 +847,11 @@ export class QueueWorkerEngine {
       temperature: 0.7,
       maxTokens: brain.context.settings.maxResponseTokens || 1000
     };
+
+    // ── Bot Reply Pipeline (skipped when max messages reached) ──
+    if (skipBotReply) {
+      this.log.info(`[SKIP_BOT_REPLY] Max messages reached, skipping AI response generation. CRM extraction will still run.`, { traceId });
+    } else {
 
     this.log.info(`[LLM_STARTED] Requesting AI response`, { provider: aiConfig.provider, traceId });
     
@@ -1011,6 +1018,8 @@ export class QueueWorkerEngine {
         this.log.error(`[REALTIME_PUBLISH_FAILED]`, realtimeErr instanceof Error ? realtimeErr : new Error(String(realtimeErr)), { traceId });
       }
     }
+
+    } // end skipBotReply else
 
     // 10. CRM Intelligence Extraction (Async & Non-blocking — Feature Flag gated)
     const isCrmEnabled = await FeatureFlagService.isEnabled(tenantId, 'crm_extraction', true);
