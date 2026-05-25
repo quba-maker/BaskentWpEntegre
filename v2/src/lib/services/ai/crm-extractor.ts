@@ -215,8 +215,14 @@ Pipeline Aşama Kuralları (sırayla ilerler, geri gitmez):
       return validatedData;
 
     } catch (e: any) {
-      this.log.error(`[CRM_EXTRACTION_FAILED] Error: ${e.message} | Name: ${e.name} | Stack: ${e.stack?.split('\n').slice(0, 3).join(' | ')}`, undefined, { traceId });
-      return null;
+      const errorInfo = {
+        message: e.message?.substring(0, 500) || 'unknown',
+        name: e.name || 'Error',
+        isTimeout: e.message === 'EXTRACTION_TIMEOUT',
+      };
+      this.log.error(`[CRM_EXTRACTION_FAILED] Error: ${errorInfo.message} | Name: ${errorInfo.name}`, undefined, { traceId });
+      // Store error info on the return so caller can log it
+      return { _extractionError: errorInfo } as any;
     }
   }
 }

@@ -1042,7 +1042,14 @@ export class QueueWorkerEngine {
       else if (phoneNumber.startsWith("1")) deterministicCountry = "ABD";
 
       // AI Inference (Layer 2-4)
-      const crmData = await crmExtractorService.extract(aiMessages, tenantConfig, traceId);
+      let crmData = await crmExtractorService.extract(aiMessages, tenantConfig, traceId);
+      
+      // Handle extraction error (extractor returns { _extractionError: {...} } on failure)
+      let extractionError: any = null;
+      if (crmData && (crmData as any)._extractionError) {
+        extractionError = (crmData as any)._extractionError;
+        crmData = null;
+      }
       
       // ═══ P0-1: CRM_RAW_EXTRACTED — ai_events (reliable, nullable conversation_id) ═══
       await AIEventEmitter.emitSync({
@@ -1053,6 +1060,10 @@ export class QueueWorkerEngine {
           traceId,
           phoneNumber,
           isNull: crmData === null,
+          extractionFailed: !!extractionError,
+          extractionErrorMessage: extractionError?.message || null,
+          extractionErrorName: extractionError?.name || null,
+          extractionIsTimeout: extractionError?.isTimeout || false,
           country: crmData?.country || null,
           department: crmData?.department || null,
           travelDate: crmData?.travel_date || null,
