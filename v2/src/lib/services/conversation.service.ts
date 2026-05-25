@@ -173,6 +173,20 @@ export class ConversationService {
       // ═══ DIAGNOSTIC: Conversation CRM Update ═══
       console.log(`[CONV_CRM_UPDATE] Params → patientName=${data.patientName || '(empty)'}, country=${normalizedCountry || '(null)'}, department=${data.department || '(null)'}, stage=${finalStage || '(null/no-change)'}, phone=${phoneNumber}`);
 
+      // ═══ DIAGNOSTIC DB WRITE — inside updateCrmIntelligence ═══
+      try {
+        await this.db.executeSafe({
+          text: `INSERT INTO messages (tenant_id, phone_number, direction, content, channel, provider_message_id)
+                 VALUES ($1, $2, 'system', $3, 'whatsapp', $4)`,
+          values: [
+            this.db.tenantId,
+            phoneNumber,
+            `[CRM_INTEL_DIAG] raw_country=${data.country || '(undef)'} | normalized=${normalizedCountry || '(null)'} | department=${data.department || '(undef)'} | patientName=${data.patientName || '(undef)'} | stage=${finalStage || '(null)'}`,
+            `crm_intel_${Date.now()}`
+          ]
+        });
+      } catch (_) { /* non-blocking */ }
+
       await this.db.executeSafe(sql`
         UPDATE conversations 
         SET 
