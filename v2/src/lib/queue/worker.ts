@@ -392,6 +392,29 @@ export class QueueWorkerEngine {
 
     this.log.info(`[CONVERSATION_READY] Incoming message processed & identity linked`, { traceId });
 
+    // Profile Enrichment: Resolve Instagram IGSID / Messenger PSID to real name (fire-and-forget)
+    if (conversationId && ['instagram', 'meta_instagram', 'messenger'].includes(channel)) {
+      try {
+        const { ProfileEnrichmentService } = await import('@/lib/services/profile-enrichment.service');
+        const enrichCreds = await CredentialsService.resolveCredentials(tenantId, channel);
+        if (enrichCreds.accessToken) {
+          const enrichService = new ProfileEnrichmentService(db);
+          // Non-blocking: don't await, fire and forget
+          enrichService.enrichIfNeeded({
+            tenantId,
+            conversationId,
+            phoneNumber,
+            channel,
+            accessToken: enrichCreds.accessToken,
+            customerId
+          }).catch(err => this.log.warn('[ENRICH_FAILED] Profile enrichment error (non-fatal)', { error: err.message }));
+        }
+      } catch (enrichErr) {
+        // Completely non-fatal
+        this.log.warn('[ENRICH_INIT_FAILED] Could not initialize enrichment (non-fatal)', { error: (enrichErr as Error).message });
+      }
+    }
+
     // 3. Conversation Load / State Check
     const status = await convService.getStatus(phoneNumber);
     if (status === 'human') {
