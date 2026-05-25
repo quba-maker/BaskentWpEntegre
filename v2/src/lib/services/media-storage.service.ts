@@ -231,7 +231,7 @@ export class MediaStorageService {
     const label = prefix[mediaType] || `📦 ${mediaType}`;
 
     if (metadata?.caption) return `${label}: ${metadata.caption}`;
-    if (metadata?.filename) return `${label}: ${metadata.filename}`;
+    if (metadata?.filename) return `${label} — ${metadata.filename}`;
     return label;
   }
 }

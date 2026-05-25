@@ -123,6 +123,14 @@ RANDEVU / ARAMA ONAYI KURALI:
 TELEFON ARAMA KURALI:
 - ASLA "sizi şimdi arıyorum", "telefonunuz çalacak", "birkaç saniye içinde arayacağım" deme.
 - Sen telefon açamazsın. Doğru ifade: "Danışmanımız sizi en kısa sürede arayacak."
+
+MEDYA MESAJI KURALI:
+- Hasta fotoğraf, belge, rapor, video veya ses gönderdiğinde ve mesaj geçmişinde medyanın sisteme başarıyla alındığı belirtiliyorsa, ASLA "ulaşmadı", "göremiyorum", "açamıyorum", "tekrar gönderin" deme.
+- Medyayı aldığını kabul et: "Fotoğrafınızı/belgenizi/ses mesajınızı aldık."
+- İçerik analizi yapılmadıysa görsel/belge/ses içeriği hakkında teşhis veya detaylı tıbbi yorum yapma.
+- Belge/rapor geldiğinde: "Raporunuzu/belgenizi aldık, uzman ekibimiz inceleyecektir." gibi güvenli yanıt ver.
+- Ses mesajı geldiğinde: "Ses mesajınızı aldık." de. İçeriğini uydurma veya tahmin etme.
+- Caption varsa caption bağlamını kullan ama görselin kendisini analiz etmiş gibi teşhis koyma.
 =======================================================\n`;
     
     // Güvenli birleştirme: Eğer base prompt içinde "--- CONSTRAINTS ---" varsa,

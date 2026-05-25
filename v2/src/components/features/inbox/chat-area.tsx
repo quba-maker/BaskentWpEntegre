@@ -855,16 +855,47 @@ export function ConversationViewport() {
                               />
                             )}
 
-                            {/* ── TEXT CONTENT (or caption) ── */}
-                            {item.message.text && !(['📷', '📎', '🎵', '🎬', '📍', '🏷️', '📦'].some(e => item.message.text === e || (item.message.mediaType && item.message.text.startsWith(e) && !item.message.text.includes(' ')))) && (
-                              <p className="text-[15px] leading-[1.4] font-medium whitespace-pre-wrap pb-4">
-                                {item.message.text}
-                              </p>
-                            )}
-                            {/* Spacer for timestamp when no visible text */}
-                            {(!item.message.text || (item.message.mediaType && ['📷 Fotoğraf', '📎 Belge', '🎵 Ses kaydı', '🎬 Video', '📍 Konum', '🏷️ Sticker'].includes(item.message.text))) && (
-                              <div className="pb-4" />
-                            )}
+                            {/* ── TEXT CONTENT (caption only, no emoji prefix) ── */}
+                            {(() => {
+                              const text = item.message.text;
+                              const mt = item.message.mediaType;
+                              if (!text) return <div className="pb-4" />;
+                              
+                              // If media is rendered, extract clean caption (strip "📷 Fotoğraf: " prefix)
+                              if (mt && item.message.mediaUrl) {
+                                const placeholders = ['📷 Fotoğraf', '📎 Belge', '🎵 Ses kaydı', '🎬 Video', '📍 Konum', '🏷️ Sticker'];
+                                const emojiPrefixes = ['📷', '📎', '🎵', '🎬', '📍', '🏷️', '📦'];
+                                
+                                // Pure placeholder — hide text entirely
+                                if (placeholders.includes(text) || emojiPrefixes.includes(text)) {
+                                  return <div className="pb-4" />;
+                                }
+                                
+                                // "📷 Fotoğraf: caption" → show only caption
+                                const colonIdx = text.indexOf(': ');
+                                if (colonIdx !== -1) {
+                                  const before = text.substring(0, colonIdx);
+                                  if (emojiPrefixes.some(p => before.startsWith(p))) {
+                                    const caption = text.substring(colonIdx + 2).trim();
+                                    if (caption) {
+                                      return (
+                                        <p className="text-[15px] leading-[1.4] font-medium whitespace-pre-wrap pb-4">
+                                          {caption}
+                                        </p>
+                                      );
+                                    }
+                                    return <div className="pb-4" />;
+                                  }
+                                }
+                              }
+                              
+                              // Non-media message or no prefix — show full text
+                              return (
+                                <p className="text-[15px] leading-[1.4] font-medium whitespace-pre-wrap pb-4">
+                                  {text}
+                                </p>
+                              );
+                            })()}
                             
                             <div className="absolute bottom-1 right-2 flex items-center gap-1 text-[10px] font-semibold tracking-wide" style={{ color: "var(--q-text-secondary)" }}>
                               <span className="opacity-50">{item.message.timeMs ? new Date(item.message.timeMs).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) : item.message.time}</span>

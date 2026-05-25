@@ -1,6 +1,7 @@
 import { withTenantDB } from '@/lib/core/tenant-db';
 import { logger } from '@/lib/core/logger';
 import { AIOrchestrator, ChatMessage } from '../orchestrator';
+import { buildMediaContext } from '../media-context';
 
 const log = logger.withContext({ module: 'MemoryEngine' });
 
@@ -49,7 +50,7 @@ export class MemoryEngine {
       const messages = await db.executeSafe({
         text: `
           SELECT * FROM (
-            SELECT content, direction, created_at
+            SELECT content, direction, created_at, media_type, media_metadata
             FROM messages
             WHERE tenant_id = $1 
               AND phone_number = $2
@@ -63,9 +64,20 @@ export class MemoryEngine {
 
       if (!messages || messages.length === 0) return;
 
-      const conversationText = messages.map(m => 
-        `[${m.direction === 'in' ? 'Müşteri' : 'Asistan'}]: ${m.content}`
-      ).join('\n');
+      // P2I-P0: Media-aware conversation text using shared helper
+      const conversationText = messages.map(m => {
+        const label = m.direction === 'in' ? 'Müşteri' : 'Asistan';
+        if (m.media_type) {
+          const mediaCtx = buildMediaContext({
+            direction: m.direction,
+            mediaType: m.media_type,
+            content: m.content || '',
+            metadata: m.media_metadata || undefined,
+          });
+          return `[${label}]: ${mediaCtx}`;
+        }
+        return `[${label}]: ${m.content}`;
+      }).join('\n');
 
       // 3. Generate CRM-quality Summary using LLM
       const apiKey = process.env.GEMINI_API_KEY;

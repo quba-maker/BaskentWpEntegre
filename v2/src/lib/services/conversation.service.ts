@@ -89,15 +89,32 @@ export class ConversationService {
    */
   async getHistory(phoneNumber: string, limit: number = 20) {
     const prev = await this.db.executeSafe(sql`
-      SELECT direction, content FROM messages 
+      SELECT direction, content, media_type, media_metadata FROM messages 
       WHERE phone_number = ${phoneNumber} AND tenant_id = ${this.db.tenantId} 
       ORDER BY created_at DESC LIMIT ${limit}
     `);
     
-    return prev.reverse().map((m: any) => ({
-      role: (m.direction === 'in' ? 'user' : 'assistant') as 'user' | 'assistant',
-      content: String(m.content)
-    }));
+    return prev.reverse().map((m: any) => {
+      let messageContent: string;
+      
+      if (m.media_type) {
+        // P2I-P0: Inject AI-safe media context instead of emoji placeholder
+        const { buildMediaContext } = require('./ai/media-context');
+        messageContent = buildMediaContext({
+          direction: m.direction,
+          mediaType: m.media_type,
+          content: m.content || '',
+          metadata: m.media_metadata || undefined,
+        });
+      } else {
+        messageContent = String(m.content);
+      }
+      
+      return {
+        role: (m.direction === 'in' ? 'user' : 'assistant') as 'user' | 'assistant',
+        content: messageContent,
+      };
+    });
   }
 
   /**
