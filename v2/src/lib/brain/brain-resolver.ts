@@ -91,8 +91,8 @@ export class BrainResolver {
 
     let runtimeSettings: TenantBrainSettings = {
       aiModel: 'gemini-2.5-flash',
-      maxMessages: 8,
-      maxResponseTokens: 1000,
+      maxMessages: 20,
+      maxResponseTokens: 2000,
       workingHours: { enabled: false },
       aggressionLevel: 'medium'
     };
@@ -186,7 +186,7 @@ export class BrainResolver {
           if (row.key === 'ai_model') runtimeSettings.aiModel = row.value || 'gemini-2.5-flash';
           if (row.key === 'bot_max_messages') {
             const parsed = parseInt(row.value);
-            runtimeSettings.maxMessages = isNaN(parsed) ? 8 : parsed;
+            runtimeSettings.maxMessages = isNaN(parsed) ? 20 : parsed;
           }
           if (row.key === 'working_hours') {
             try { runtimeSettings.workingHours = JSON.parse(row.value); } catch(e) {}
@@ -194,7 +194,7 @@ export class BrainResolver {
           if (row.key === 'bot_aggression_level') runtimeSettings.aggressionLevel = row.value || 'medium';
           if (row.key === 'bot_max_response_tokens') {
             const parsed = parseInt(row.value);
-            runtimeSettings.maxResponseTokens = isNaN(parsed) ? 1000 : Math.min(parsed, 8000);
+            runtimeSettings.maxResponseTokens = isNaN(parsed) ? 2000 : Math.min(parsed, 8000);
           }
         }
 
@@ -306,8 +306,8 @@ export class BrainResolver {
     // ── STEP 3: Resolve AI profile from channel_ai_profiles ──
     let runtimeSettings: TenantBrainSettings = {
       aiModel: 'gemini-2.5-flash',
-      maxMessages: 8,
-      maxResponseTokens: 1000,
+      maxMessages: 20,
+      maxResponseTokens: 2000,
       workingHours: { enabled: false },
       aggressionLevel: 'medium'
     };
@@ -336,11 +336,11 @@ export class BrainResolver {
 
         if (p.max_messages !== null && p.max_messages !== undefined) {
           const parsed = parseInt(String(p.max_messages));
-          runtimeSettings.maxMessages = isNaN(parsed) ? 8 : parsed;
+          runtimeSettings.maxMessages = isNaN(parsed) ? 20 : parsed;
         }
         if (p.max_response_tokens !== null && p.max_response_tokens !== undefined) {
           const parsed = parseInt(String(p.max_response_tokens));
-          runtimeSettings.maxResponseTokens = isNaN(parsed) ? 1000 : Math.min(parsed, 8000);
+          runtimeSettings.maxResponseTokens = isNaN(parsed) ? 2000 : Math.min(parsed, 8000);
         }
         if (p.business_hours_json && typeof p.business_hours_json === 'object') {
           runtimeSettings.workingHours = p.business_hours_json;

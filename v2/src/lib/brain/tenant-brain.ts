@@ -93,8 +93,8 @@ export function createTenantBrain(
   // Default settings fallback
   const resolvedSettings: TenantBrainSettings = settings || {
     aiModel: 'gemini-2.5-flash',
-    maxMessages: 8,
-    maxResponseTokens: 1000,
+    maxMessages: 20,
+    maxResponseTokens: 2000,
     workingHours: { enabled: false },
     aggressionLevel: 'medium'
   };
