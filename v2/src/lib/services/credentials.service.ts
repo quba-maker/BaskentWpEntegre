@@ -53,6 +53,7 @@ export class CredentialsService {
           LEFT JOIN channel_integrations ci ON ci.channel_id = c.id
           WHERE cg.tenant_id = $1 
             AND c.provider = ANY($2::text[])
+            AND c.status = 'active'
           LIMIT 1
         `,
         values: [tenantId, providerAliases]
