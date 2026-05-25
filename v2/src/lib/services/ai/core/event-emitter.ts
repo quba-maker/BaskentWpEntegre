@@ -39,7 +39,9 @@ export type AIEventType =
   | 'duplicate_message_dropped'
   | 'prompt_version_created'
   | 'brain_resolved'
-  | 'message_status_updated';
+  | 'message_status_updated'
+  | 'stage_changed'
+  | 'cancellation_stage_guard';
 
 export type AIEventCategory = 
   | 'identity'
@@ -49,7 +51,8 @@ export type AIEventCategory =
   | 'escalation'
   | 'policy'
   | 'pipeline'
-  | 'system';
+  | 'system'
+  | 'stage';
 
 export type AIEventSeverity = 'info' | 'warning' | 'error';
 

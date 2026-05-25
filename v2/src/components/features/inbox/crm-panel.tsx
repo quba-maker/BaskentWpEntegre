@@ -262,6 +262,22 @@ export function ContextPanel() {
               <option value="qualified">Nitelikli</option>
               <option value="appointed">Randevu Aldı</option>
               <option value="lost">Kaybedildi</option>
+              {/* Opportunity-system fallback values (shown only if data has opp-stage) */}
+              {stage && !["new","contacted","responded","discovery","qualified","appointed","lost"].includes(stage) && (
+                <>
+                  {stage === "new_lead" && <option value="new_lead">Yeni Lead</option>}
+                  {stage === "first_contact" && <option value="first_contact">İlk İletişim</option>}
+                  {stage === "engaged" && <option value="engaged">Yanıt Alındı</option>}
+                  {stage === "report_waiting" && <option value="report_waiting">Rapor Bekleniyor</option>}
+                  {stage === "report_received" && <option value="report_received">Rapor Geldi</option>}
+                  {stage === "doctor_review" && <option value="doctor_review">Doktor İncelemesi</option>}
+                  {stage === "offer_sent" && <option value="offer_sent">Teklif Gönderildi</option>}
+                  {stage === "appointment_planning" && <option value="appointment_planning">Randevu Planlanıyor</option>}
+                  {stage === "appointment_booked" && <option value="appointment_booked">Randevu Alındı</option>}
+                  {stage === "arrived" && <option value="arrived">Geldi</option>}
+                  {stage === "not_qualified" && <option value="not_qualified">Uygun Değil</option>}
+                </>
+              )}
             </select>
           </div>
 

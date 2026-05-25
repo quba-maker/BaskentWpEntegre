@@ -1207,6 +1207,72 @@ export class QueueWorkerEngine {
         }
       });
 
+      // ═══ P1A-FIX4: Cancellation Stage Guard ═══
+      // Safety net: if explicitCancellation was detected but stage didn't change
+      // (updateCrmIntelligence may have silently failed), force stage via direct call
+      if (explicitCancellation && conversationId) {
+        const currentStage = afterConv?.lead_stage || beforeConv?.lead_stage;
+        const stageIsLost = currentStage === 'lost';
+        
+        if (!stageIsLost) {
+          this.log.warn(`[CANCELLATION_STAGE_GUARD] Stage not lost after updateCrmIntelligence, forcing direct UnifiedStageService call`, {
+            traceId, phoneNumber, currentStage, explicitCancellation, optOutRequested
+          });
+          
+          try {
+            const { UnifiedStageService } = await import('../services/unified-stage.service');
+            const result = await UnifiedStageService.update({
+              tenantId,
+              source: 'ai',
+              conversationId,
+              phoneNumber,
+              targetStage: 'lost',
+              explicitCancellation: true,
+              optOutRequested,
+              reason: `explicit_customer_cancellation: ${cancellationReason || 'müşteri açıkça vazgeçti'}`,
+            });
+            
+            await AIEventEmitter.emitSync({
+              tenantId, conversationId, customerId,
+              type: 'cancellation_stage_guard',
+              category: 'stage',
+              severity: result.blocked ? 'warning' : 'info',
+              payload: {
+                traceId, phoneNumber,
+                guardTriggered: true,
+                result: {
+                  success: result.success,
+                  blocked: result.blocked,
+                  blockReason: result.blockReason,
+                  previousOppStage: result.previousOppStage,
+                  newOppStage: result.newOppStage,
+                  mirrorLeadStage: result.mirrorLeadStage,
+                },
+                cancellationReason,
+                optOutRequested,
+              }
+            });
+            
+            if (result.success && !result.blocked) {
+              this.log.info(`[CANCELLATION_STAGE_GUARD_OK] Stage forced to lost`, {
+                traceId, oppId: result.opportunityId, mirrorLeadStage: result.mirrorLeadStage
+              });
+            } else {
+              this.log.warn(`[CANCELLATION_STAGE_GUARD_BLOCKED] Could not force stage`, {
+                traceId, blocked: result.blocked, blockReason: result.blockReason
+              });
+            }
+          } catch (guardErr) {
+            this.log.error(`[CANCELLATION_STAGE_GUARD_ERROR] Non-fatal`, 
+              guardErr instanceof Error ? guardErr : new Error(String(guardErr)), 
+              { traceId, phoneNumber }
+            );
+          }
+        } else {
+          this.log.info(`[CANCELLATION_STAGE_GUARD_SKIP] Stage already lost`, { traceId, phoneNumber });
+        }
+      }
+
       this.log.info(`[WORKER_CRM_OK] CRM enriched`, { traceId, country: afterConv?.country, department: afterConv?.department });
       AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'crm_extraction_completed', category: 'crm', payload: { 
         patientName: crmData?.patient_name, country: resolvedCountryForConv, department: crmData?.department,

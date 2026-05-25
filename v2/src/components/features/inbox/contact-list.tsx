@@ -73,11 +73,18 @@ function ChannelIcon({ channel }: { channel: string }) {
 
 
 
-// -- Stage label map --
+// -- Stage label map (covers both lead-system and opportunity-system stages) --
 function stageLabel(stage: string | undefined): string {
   const map: Record<string, string> = {
+    // Lead system stages
     new: "Yeni Lead", contacted: "İletişime Geçildi", responded: "Yanıt Alındı",
     discovery: "Keşif / Bilgi", qualified: "Nitelikli", appointed: "Randevu Aldı", lost: "Kaybedildi",
+    // Opportunity system stages (fallback — should not appear if mirror is correct)
+    new_lead: "Yeni Lead", first_contact: "İlk İletişim", engaged: "Yanıt Alındı",
+    report_waiting: "Rapor Bekleniyor", report_received: "Rapor Geldi",
+    doctor_review: "Doktor İncelemesi", offer_sent: "Teklif Gönderildi",
+    appointment_planning: "Randevu Planlanıyor", appointment_booked: "Randevu Alındı",
+    arrived: "Geldi", not_qualified: "Uygun Değil",
   };
   return map[stage || "new"] || stage || "Yeni Lead";
 }
