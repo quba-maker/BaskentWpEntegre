@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { Search, MessageCircle, Check, CheckCheck, Clock, WifiOff } from "lucide-react";
 import { getConversations } from "@/app/actions/inbox";
@@ -92,6 +93,9 @@ function stageLabel(stage: string | undefined): string {
 export function ContactRail() {
   const { activePhone, activeContact, setActiveContact, mobileView } = useInboxStore();
   const queryClient = useQueryClient();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const deepLinkContact = searchParams.get('contact');
   const [filter, setFilter] = useState("all");
   const [stageFilter, setStageFilter] = useState("all");
   const [searchInput, setSearchInput] = useState("");
@@ -121,6 +125,19 @@ export function ContactRail() {
   const contacts = data ? data.pages.flat() : [];
   const isLoadingMore = isFetchingNextPage || isLoading;
   const isReachingEnd = !hasNextPage;
+
+  // Deep link: auto-select contact from notification click
+  useEffect(() => {
+    if (deepLinkContact && contacts.length > 0 && !activePhone) {
+      const target = contacts.find((c: any) => c.id === deepLinkContact);
+      if (target) {
+        setActiveContact(target.id, { ...target, unread: 0 });
+        // Clean up URL
+        const currentPath = window.location.pathname;
+        router.replace(currentPath, { scroll: false });
+      }
+    }
+  }, [deepLinkContact, contacts, activePhone, setActiveContact, router]);
 
   // Reactively sync updated CRM data/messages to the active contact
   useEffect(() => {

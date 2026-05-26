@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { getOpportunities, getOpportunityStats, updateOpportunityStage, addOpportunityNote } from "@/app/actions/pipeline";
 import { useInboxStore } from "@/store/inbox-store";
-import { useRouter, useParams } from "next/navigation";
+import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { getCountryFlag } from "@/lib/utils/country";
 import TasksTab from "@/components/features/takip/tasks-tab";
 
@@ -129,8 +129,10 @@ function useDropdown() {
 export default function TakipPage() {
   const router = useRouter();
   const params = useParams();
+  const searchParams = useSearchParams();
   const tenantSlug = typeof params.tenant_slug === 'string' ? params.tenant_slug : '';
   const { setActiveContact } = useInboxStore();
+  const deepLinkOppId = searchParams.get('opp');
   const [activeTab, setActiveTab] = useState<'firsatlar' | 'gorevler'>('firsatlar');
   
   // Filters
@@ -184,6 +186,18 @@ export default function TakipPage() {
 
   const opportunities = data?.items || [];
   const total = data?.total || 0;
+
+  // Deep link: auto-open opportunity detail from notification click
+  useEffect(() => {
+    if (deepLinkOppId && opportunities.length > 0 && !selectedOpp) {
+      const target = opportunities.find((o: any) => o.id === deepLinkOppId);
+      if (target) {
+        setSelectedOpp(target);
+        // Clean up URL
+        router.replace(`/${tenantSlug}/takip`, { scroll: false });
+      }
+    }
+  }, [deepLinkOppId, opportunities, selectedOpp, router, tenantSlug]);
 
   // Client-side search filter
   const filtered = debouncedSearch

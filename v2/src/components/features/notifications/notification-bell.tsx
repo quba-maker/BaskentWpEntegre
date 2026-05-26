@@ -82,11 +82,11 @@ export default function NotificationBell() {
   const handleClick = useCallback((notif: any) => {
     handleRead(notif.id);
 
-    // Route based on context
+    // Deep link to specific record
     if (notif.opportunity_id) {
-      router.push(`/${tenantSlug}/takip`);
+      router.push(`/${tenantSlug}/takip?opp=${notif.opportunity_id}`);
     } else if (notif.conversation_id || notif.phone_number) {
-      router.push(`/${tenantSlug}/inbox`);
+      router.push(`/${tenantSlug}/inbox?contact=${encodeURIComponent(notif.phone_number || notif.conversation_id)}`);
     }
     
     setIsOpen(false);
