@@ -444,7 +444,21 @@ function TelegramChannelSection() {
     );
   }
 
-  if (isLoading) return null;
+  if (isLoading) {
+    return (
+      <div className="rounded-2xl border overflow-hidden mb-8" style={{ borderColor: "var(--q-border-default)", backgroundColor: "#fff" }}>
+        <div className="flex items-center gap-3 px-4 py-3">
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ backgroundColor: "#0088cc12" }}>
+            <Send className="w-5 h-5" style={{ color: "#0088cc" }} />
+          </div>
+          <div>
+            <h3 className="text-[14px] font-bold" style={{ color: "var(--q-text-primary)" }}>Telegram Bildirimleri</h3>
+            <p className="text-[10px] font-medium" style={{ color: "var(--q-text-secondary)" }}>Yükleniyor...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="rounded-2xl border overflow-hidden mb-8" style={{ borderColor: "var(--q-border-default)", backgroundColor: "#fff" }}>
