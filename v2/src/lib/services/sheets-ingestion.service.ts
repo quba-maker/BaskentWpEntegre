@@ -601,8 +601,20 @@ export function filterJunkNote(note: string | null): string | null {
   const trimmed = note.trim();
   if (!trimmed) return null;
 
-  const JUNK_VALUES = ['CREATED', 'ACTIVE', 'CLOSED', 'PENDING', 'true', 'false', 'fb', 'ig', 'null', 'undefined'];
-  const isJunk = JUNK_VALUES.includes(trimmed)
+  // Status values that should never be stored as notes
+  const JUNK_VALUES = [
+    'CREATED', 'ACTIVE', 'CLOSED', 'PENDING', 'true', 'false', 'fb', 'ig', 'null', 'undefined',
+    // Lead status labels (TR)
+    'Yeni Lead', 'İletişime Geçildi', 'Yanıt Alındı', 'Keşif / Analiz', 'Nitelikli', 'Randevu Aldı', 'Kaybedildi',
+    // Opportunity status labels (TR)
+    'Yeni', 'İlk İletişim', 'Cevap Verdi', 'Keşif', 'Rapor Bekleniyor', 'Rapor Geldi',
+    'Doktor İncelemesi', 'Teklif Gönderildi', 'Randevu Planlanıyor', 'Randevu Alındı', 'Geldi', 'Kayıp', 'Uygun Değil',
+    // System stage values (EN)
+    'new', 'contacted', 'responded', 'discovery', 'qualified', 'appointed', 'lost',
+    'new_lead', 'first_contact', 'engaged', 'report_waiting', 'report_received',
+    'doctor_review', 'offer_sent', 'appointment_planning', 'appointment_booked', 'arrived', 'not_qualified',
+  ];
+  const isJunk = JUNK_VALUES.some(j => j.toLowerCase() === trimmed.toLowerCase())
     || /^[a-z]:[\d]+$/.test(trimmed)
     || /^[lf]:\d+$/.test(trimmed)
     || /^\d{2}\/\d{2}\/\d{4}$/.test(trimmed)
@@ -723,7 +735,7 @@ export async function ingestSheetBatch(params: IngestBatchParams): Promise<Inges
 
       const emailIdx = findCol(headers, BATCH_EMAIL_PATTERNS);
       const dateIdx = findCol(headers, BATCH_DATE_PATTERNS);
-      const noteIdx = findCol(headers, BATCH_NOTE_PATTERNS);
+      const noteIdx = findCol(headers, BATCH_NOTE_PATTERNS, ['lead_status', 'status', 'durum', 'stage', 'aşama']);
       const campaignIdx = findCol(headers, BATCH_CAMPAIGN_PATTERNS, ['campaign_id']);
 
       log.info('[BATCH_TAB]', {
