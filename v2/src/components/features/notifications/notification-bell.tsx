@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { createPortal } from "react-dom";
 import useSWR from "swr";
 import { Bell, Check, CheckCheck, X, ExternalLink } from "lucide-react";
 import { getUnreadNotifications, getNotificationCount, markNotificationRead, markAllNotificationsRead } from "@/app/actions/notifications";
@@ -40,9 +41,20 @@ const timeAgo = (dateString: string) => {
 export default function NotificationBell() {
   const [isOpen, setIsOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const bellBtnRef = useRef<HTMLButtonElement>(null);
   const router = useRouter();
   const params = useParams();
   const tenantSlug = typeof params.tenant_slug === 'string' ? params.tenant_slug : '';
+
+  // Calculate dropdown position from bell button
+  const dropdownStyle = useMemo(() => {
+    if (!isOpen || !bellBtnRef.current) return { top: 60, right: 12 };
+    const rect = bellBtnRef.current.getBoundingClientRect();
+    return {
+      top: rect.bottom + 8,
+      right: Math.max(12, window.innerWidth - rect.right),
+    };
+  }, [isOpen]);
 
   // Close on outside click
   useEffect(() => {
@@ -99,6 +111,7 @@ export default function NotificationBell() {
     <div ref={ref} className="relative">
       {/* Bell Button */}
       <button
+        ref={bellBtnRef}
         onClick={() => setIsOpen(!isOpen)}
         className="relative w-9 h-9 flex items-center justify-center rounded-xl hover:bg-black/5 transition-colors"
         aria-label="Bildirimler"
@@ -111,12 +124,15 @@ export default function NotificationBell() {
         )}
       </button>
 
-      {/* Dropdown Panel */}
-      {isOpen && (
+      {/* Dropdown Panel — rendered via portal to escape sidebar stacking context */}
+      {isOpen && typeof document !== 'undefined' && createPortal(
         <>
-        {/* Mobile backdrop */}
-        <div className="fixed inset-0 bg-black/20 z-40 md:hidden" onClick={() => setIsOpen(false)} />
-        <div className="fixed inset-x-3 top-[60px] max-h-[calc(100vh-80px)] md:absolute md:inset-x-auto md:right-0 md:top-full md:mt-2 md:w-[380px] md:max-h-[480px] bg-white rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.15)] border border-black/5 flex flex-col z-50 overflow-hidden">
+        {/* Backdrop */}
+        <div className="fixed inset-0 z-[9998]" onClick={() => setIsOpen(false)} />
+        <div 
+          className="fixed z-[9999] w-[calc(100vw-24px)] max-w-[380px] max-h-[480px] bg-white rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.15)] border border-black/5 flex flex-col overflow-hidden"
+          style={dropdownStyle}
+        >
           
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-black/5">
@@ -202,7 +218,8 @@ export default function NotificationBell() {
             </div>
           )}
         </div>
-        </>
+        </>,
+        document.body
       )}
     </div>
   );
