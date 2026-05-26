@@ -120,15 +120,21 @@ export function useRealtimeReconciliation(tenantId: string) {
       // 1. Deduplication (Optimistic ID or ProviderMessageID)
       let existingMsgIndex = oldData.findIndex((m) => m.id === payload.id);
 
-      // Fallback for optimistic UI matching: match 'temp-' ids by text and sender within 60s window
+      // Fallback for optimistic UI matching: match 'temp-' / 'temp-media-' ids by mediaUrl or text/sender within 60s window
       if (existingMsgIndex === -1 && payload.sender === 'agent') {
         const payloadTimeMs = new Date(payload.createdAt || Date.now()).getTime();
-        existingMsgIndex = oldData.findIndex((m) => 
-          String(m.id).startsWith("temp-") && 
-          m.sender === payload.sender && 
-          m.text === payload.content &&
-          Math.abs((m.timeMs || 0) - payloadTimeMs) < 60000
-        );
+        existingMsgIndex = oldData.findIndex((m) => {
+          const isTemp = String(m.id).startsWith("temp-") || String(m.id).startsWith("temp-media-");
+          if (!isTemp || m.sender !== payload.sender) return false;
+
+          // If both have mediaUrl, match them directly (unique blob urls never collide)
+          if (payload.mediaUrl && m.mediaUrl && payload.mediaUrl === m.mediaUrl) {
+            return true;
+          }
+
+          // Text-based fallback
+          return m.text === payload.content && Math.abs((m.timeMs || 0) - payloadTimeMs) < 60000;
+        });
       }
 
       if (existingMsgIndex !== -1) {

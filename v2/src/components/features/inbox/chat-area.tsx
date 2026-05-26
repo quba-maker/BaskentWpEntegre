@@ -812,12 +812,20 @@ export function ConversationViewport() {
 
         const { url: blobUrl, filename, mimeType, size } = await uploadRes.json();
 
+        // 3. Send via server action (caption only on first file)
+        const fileCaption = sentCount === 0 ? captionText || undefined : undefined;
+
         // 2. Optimistic UI
         const optimisticId = `temp-media-${Date.now()}-${sentCount}`;
-        const contentText = currentFile.mediaType === 'image' ? '📷 Fotoğraf' 
-          : currentFile.mediaType === 'video' ? '🎬 Video'
-          : currentFile.mediaType === 'audio' ? '🎵 Ses' 
-          : `📎 ${filename}`;
+        let contentText = '';
+        if (fileCaption) {
+          contentText = fileCaption;
+        } else {
+          contentText = currentFile.mediaType === 'image' ? '📷 Fotoğraf' 
+            : currentFile.mediaType === 'video' ? '🎬 Video'
+            : currentFile.mediaType === 'audio' ? '🎵 Ses kaydı' 
+            : `📎 Belge — ${filename}`;
+        }
         
         queryClient.setQueryData(["messages", activePhone], (oldData: any[]) => {
           return [...(oldData || []), {
@@ -835,8 +843,6 @@ export function ConversationViewport() {
 
         scrollToBottom("smooth");
 
-        // 3. Send via server action (caption only on first file)
-        const fileCaption = sentCount === 0 ? captionText || undefined : undefined;
         const res = await sendMediaMessage(
           activePhone,
           blobUrl,
