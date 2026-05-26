@@ -409,7 +409,7 @@ export async function sendMessage(phone: string, text: string) {
         text: `UPDATE conversations 
                SET last_message_at = NOW(), 
                    last_message_content = $1,
-                   last_message_channel = $2,
+                   last_channel = $2,
                    last_message_status = $3,
                    last_message_direction = 'out',
                    message_count = message_count + 1
@@ -566,7 +566,7 @@ export async function sendMediaMessage(phone: string, mediaUrl: string, mediaTyp
         text: `UPDATE conversations 
                SET last_message_at = NOW(), 
                    last_message_content = $1,
-                   last_message_channel = $2,
+                   last_channel = $2,
                    last_message_status = $3,
                    last_message_direction = 'out',
                    message_count = message_count + 1

@@ -466,13 +466,10 @@ export function ConversationViewport() {
     images: Array<{ src: string; caption?: string; timeMs?: number }>;
     currentIndex: number;
   } | null>(null);
-  // File upload state
+  // File upload state (multi-file)
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [uploadFile, setUploadFile] = useState<{
-    file: File;
-    preview?: string;
-    mediaType: 'image' | 'document' | 'audio';
-  } | null>(null);
+  type UploadFileItem = { file: File; preview?: string; mediaType: 'image' | 'document' | 'audio' };
+  const [uploadFiles, setUploadFiles] = useState<UploadFileItem[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const queryClient = useQueryClient();
   const params = useParams();
@@ -713,103 +710,130 @@ export function ConversationViewport() {
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
 
-    // Reset input so same file can be selected again
+    // Reset input so same file(s) can be selected again
     e.target.value = '';
 
-    if (!ALLOWED_MIMES.includes(file.type)) {
-      setSendError(`Desteklenmeyen dosya türü: ${file.type}`);
-      setTimeout(() => setSendError(''), 4000);
-      return;
+    const newItems: UploadFileItem[] = [];
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+
+      if (!ALLOWED_MIMES.includes(file.type)) {
+        setSendError(`Desteklenmeyen dosya türü: ${file.type}`);
+        setTimeout(() => setSendError(''), 4000);
+        continue;
+      }
+
+      if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
+        setSendError(`Dosya çok büyük: ${file.name} (${(file.size / 1024 / 1024).toFixed(1)}MB). Maks: ${MAX_FILE_SIZE_MB}MB`);
+        setTimeout(() => setSendError(''), 4000);
+        continue;
+      }
+
+      const mediaType = getMediaTypeFromMime(file.type);
+      let preview: string | undefined;
+      if (mediaType === 'image') {
+        preview = URL.createObjectURL(file);
+      }
+      newItems.push({ file, preview, mediaType });
     }
 
-    if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
-      setSendError(`Dosya çok büyük (${(file.size / 1024 / 1024).toFixed(1)}MB). Maks: ${MAX_FILE_SIZE_MB}MB`);
-      setTimeout(() => setSendError(''), 4000);
-      return;
+    if (newItems.length > 0) {
+      setUploadFiles(prev => [...prev, ...newItems]);
     }
-
-    const mediaType = getMediaTypeFromMime(file.type);
-    let preview: string | undefined;
-    if (mediaType === 'image') {
-      preview = URL.createObjectURL(file);
-    }
-
-    setUploadFile({ file, preview, mediaType });
   };
 
-  const handleCancelUpload = () => {
-    if (uploadFile?.preview) URL.revokeObjectURL(uploadFile.preview);
-    setUploadFile(null);
+  const handleCancelUpload = (index?: number) => {
+    if (index !== undefined) {
+      // Remove single file by index
+      setUploadFiles(prev => {
+        const removed = prev[index];
+        if (removed?.preview) URL.revokeObjectURL(removed.preview);
+        return prev.filter((_, i) => i !== index);
+      });
+    } else {
+      // Remove all
+      uploadFiles.forEach(f => { if (f.preview) URL.revokeObjectURL(f.preview); });
+      setUploadFiles([]);
+    }
   };
 
   const handleFileUploadAndSend = async () => {
-    if (!uploadFile || !activePhone || isUploading) return;
+    if (uploadFiles.length === 0 || !activePhone || isUploading) return;
     setIsUploading(true);
     setSendError('');
 
+    const filesToSend = [...uploadFiles];
+    const captionText = inputText.trim();
+    
     try {
-      // 1. Upload to Vercel Blob via API route
-      const formData = new FormData();
-      formData.append('file', uploadFile.file);
+      for (let i = 0; i < filesToSend.length; i++) {
+        const currentFile = filesToSend[i];
+        
+        // 1. Upload to Vercel Blob
+        const formData = new FormData();
+        formData.append('file', currentFile.file);
 
-      const uploadRes = await fetch('/api/panel/upload', {
-        method: 'POST',
-        body: formData,
-      });
+        const uploadRes = await fetch('/api/panel/upload', {
+          method: 'POST',
+          body: formData,
+        });
 
-      if (!uploadRes.ok) {
-        const errData = await uploadRes.json().catch(() => ({ error: 'Yükleme başarısız' }));
-        throw new Error(errData.error || 'Yükleme başarısız');
+        if (!uploadRes.ok) {
+          const errData = await uploadRes.json().catch(() => ({ error: 'Yükleme başarısız' }));
+          throw new Error(`${currentFile.file.name}: ${errData.error || 'Yükleme başarısız'}`);
+        }
+
+        const { url: blobUrl, filename, mimeType, size } = await uploadRes.json();
+
+        // 2. Optimistic UI
+        const optimisticId = `temp-media-${Date.now()}-${i}`;
+        const contentText = currentFile.mediaType === 'image' ? '📷 Fotoğraf' 
+          : currentFile.mediaType === 'audio' ? '🎵 Ses' 
+          : `📎 ${filename}`;
+        
+        queryClient.setQueryData(["messages", activePhone], (oldData: any[]) => {
+          return [...(oldData || []), {
+            id: optimisticId,
+            sender: "agent",
+            text: contentText,
+            timeMs: Date.now(),
+            dateLabel: 'Bugün',
+            status: "pending",
+            mediaType: currentFile.mediaType,
+            mediaUrl: blobUrl,
+            mediaMetadata: { filename, mime_type: mimeType },
+          }];
+        });
+
+        scrollToBottom("smooth");
+
+        // 3. Send via server action (caption only on first file)
+        const fileCaption = i === 0 ? captionText || undefined : undefined;
+        const res = await sendMediaMessage(
+          activePhone,
+          blobUrl,
+          currentFile.mediaType,
+          filename,
+          mimeType,
+          size,
+          fileCaption
+        );
+
+        if (!res.success) {
+          throw new Error(res.error || `${currentFile.file.name} gönderilemedi`);
+        }
       }
 
-      const { url: blobUrl, filename, mimeType, size } = await uploadRes.json();
-
-      // 2. Optimistic UI
-      const optimisticId = `temp-media-${Date.now()}`;
-      const contentText = uploadFile.mediaType === 'image' ? '📷 Fotoğraf' 
-        : uploadFile.mediaType === 'audio' ? '🎵 Ses' 
-        : `📎 ${filename}`;
-      
-      queryClient.setQueryData(["messages", activePhone], (oldData: any[]) => {
-        return [...(oldData || []), {
-          id: optimisticId,
-          sender: "agent",
-          text: contentText,
-          timeMs: Date.now(),
-          dateLabel: 'Bugün',
-          status: "pending",
-          mediaType: uploadFile.mediaType,
-          mediaUrl: blobUrl,
-          mediaMetadata: { filename, mime_type: mimeType },
-        }];
-      });
-
-      scrollToBottom("smooth");
-
-      // 3. Send via server action
-      const res = await sendMediaMessage(
-        activePhone,
-        blobUrl,
-        uploadFile.mediaType,
-        filename,
-        mimeType,
-        size,
-        inputText.trim() || undefined
-      );
-
-      if (!res.success) {
-        throw new Error(res.error || 'Gönderim başarısız');
-      }
-
-      // Success — clear upload state and caption
-      setUploadFile(null);
+      // Success — clear all
+      uploadFiles.forEach(f => { if (f.preview) URL.revokeObjectURL(f.preview); });
+      setUploadFiles([]);
       setInputText('');
     } catch (err: any) {
       setSendError('Dosya gönderilemedi: ' + err.message);
-      setTimeout(() => setSendError(''), 4000);
+      setTimeout(() => setSendError(''), 5000);
     } finally {
       setIsUploading(false);
     }
@@ -1505,38 +1529,60 @@ export function ConversationViewport() {
 
       {/* ── Input Area ── */}
       <div className="p-6 q-glass-strong z-10" style={{ borderTop: "1px solid var(--q-border-default)", boxShadow: "0 -1px 10px rgba(0,0,0,0.02)" }}>
-        {/* Upload Preview Bar */}
-        {uploadFile && (
+        {/* Upload Preview Bar (multi-file) */}
+        {uploadFiles.length > 0 && (
           <div 
-            className="mb-3 flex items-center gap-3 px-4 py-3 rounded-xl"
+            className="mb-3 px-3 py-2.5 rounded-xl"
             style={{ background: "var(--q-bg-secondary)", border: "1px solid var(--q-border-default)" }}
           >
-            {uploadFile.preview ? (
-              <img src={uploadFile.preview} alt="" className="w-12 h-12 rounded-lg object-cover flex-shrink-0" />
-            ) : (
-              <div className="w-12 h-12 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "var(--q-bg-hover)" }}>
-                {uploadFile.mediaType === 'audio' ? (
-                  <Mic className="w-5 h-5" style={{ color: "var(--q-text-secondary)" }} />
-                ) : (
-                  <FileText className="w-5 h-5" style={{ color: "var(--q-text-secondary)" }} />
-                )}
-              </div>
-            )}
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold truncate" style={{ color: "var(--q-text-primary)" }}>
-                {uploadFile.file.name}
-              </p>
-              <p className="text-xs" style={{ color: "var(--q-text-secondary)" }}>
-                {(uploadFile.file.size / 1024).toFixed(0)} KB • {uploadFile.mediaType === 'image' ? 'Görsel' : uploadFile.mediaType === 'audio' ? 'Ses' : 'Belge'}
-              </p>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-bold uppercase tracking-wider" style={{ color: "var(--q-text-secondary)" }}>
+                {uploadFiles.length} dosya seçildi
+              </span>
+              <button
+                onClick={() => handleCancelUpload()}
+                className="text-xs font-medium px-2 py-0.5 rounded-md hover:bg-[--q-bg-hover] transition-colors"
+                style={{ color: "var(--q-red)" }}
+              >
+                Tümünü Kaldır
+              </button>
             </div>
-            <button
-              onClick={handleCancelUpload}
-              className="p-1.5 rounded-full hover:bg-[--q-bg-hover] transition-colors"
-              title="İptal"
-            >
-              <X className="w-4 h-4" style={{ color: "var(--q-text-secondary)" }} />
-            </button>
+            <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1">
+              {uploadFiles.map((uf, idx) => (
+                <div key={idx} className="relative flex-shrink-0 group">
+                  {uf.preview ? (
+                    <img src={uf.preview} alt="" className="w-14 h-14 rounded-lg object-cover" />
+                  ) : (
+                    <div className="w-14 h-14 rounded-lg flex flex-col items-center justify-center gap-0.5" style={{ background: "var(--q-bg-hover)" }}>
+                      {uf.mediaType === 'audio' ? (
+                        <Mic className="w-4 h-4" style={{ color: "var(--q-text-secondary)" }} />
+                      ) : (
+                        <FileText className="w-4 h-4" style={{ color: "var(--q-text-secondary)" }} />
+                      )}
+                      <span className="text-[8px] font-medium truncate max-w-[48px]" style={{ color: "var(--q-text-secondary)" }}>
+                        {uf.file.name.split('.').pop()?.toUpperCase()}
+                      </span>
+                    </div>
+                  )}
+                  <button
+                    onClick={() => handleCancelUpload(idx)}
+                    className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full flex items-center justify-center shadow-md opacity-0 group-hover:opacity-100 transition-opacity"
+                    style={{ background: "var(--q-red)", color: "white" }}
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+              {/* Add more button */}
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="w-14 h-14 rounded-lg flex items-center justify-center flex-shrink-0 border-2 border-dashed hover:bg-[--q-bg-hover] transition-colors"
+                style={{ borderColor: "var(--q-border-default)" }}
+                title="Daha fazla dosya ekle"
+              >
+                <span className="text-xl font-light" style={{ color: "var(--q-text-secondary)" }}>+</span>
+              </button>
+            </div>
           </div>
         )}
 
@@ -1546,6 +1592,7 @@ export function ConversationViewport() {
           type="file"
           accept="image/jpeg,image/png,image/webp,application/pdf,audio/mpeg,audio/ogg,audio/aac,audio/amr"
           className="hidden"
+          multiple
           onChange={handleFileSelect}
         />
 
@@ -1568,7 +1615,7 @@ export function ConversationViewport() {
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
-                if (uploadFile) {
+                if (uploadFiles.length > 0) {
                   handleFileUploadAndSend();
                 } else {
                   handleSend();
@@ -1576,7 +1623,7 @@ export function ConversationViewport() {
                 if (activePhone) setTypingStatus(false, "human");
               }
             }}
-            placeholder={uploadFile ? "Açıklama ekleyin (opsiyonel)..." : "Mesajınızı yazın..."}
+            placeholder={uploadFiles.length > 0 ? "Açıklama ekleyin (opsiyonel)..." : "Mesajınızı yazın..."}
             className="flex-1 max-h-32 min-h-[44px] bg-transparent resize-none outline-none py-2.5 text-[15px] font-medium"
             style={{ color: "var(--q-text-primary)" }}
             rows={1}
@@ -1584,12 +1631,12 @@ export function ConversationViewport() {
           />
 
           <button
-            onClick={uploadFile ? handleFileUploadAndSend : handleSend}
-            disabled={(isSending || isUploading) || (!uploadFile && !inputText.trim())}
+            onClick={uploadFiles.length > 0 ? handleFileUploadAndSend : handleSend}
+            disabled={(isSending || isUploading) || (uploadFiles.length === 0 && !inputText.trim())}
             className="p-2.5 text-white rounded-xl transition-all duration-200 flex items-center justify-center cursor-pointer q-press"
             style={{
-              background: (uploadFile || inputText.trim()) && !isSending && !isUploading ? "var(--q-blue)" : "rgba(134,134,139,0.5)",
-              boxShadow: (uploadFile || inputText.trim()) && !isSending && !isUploading ? "0 4px 10px rgba(0,122,255,0.3)" : "none",
+              background: (uploadFiles.length > 0 || inputText.trim()) && !isSending && !isUploading ? "var(--q-blue)" : "rgba(134,134,139,0.5)",
+              boxShadow: (uploadFiles.length > 0 || inputText.trim()) && !isSending && !isUploading ? "0 4px 10px rgba(0,122,255,0.3)" : "none",
             }}
           >
             {isSending || isUploading ? (
