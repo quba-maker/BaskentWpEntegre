@@ -468,7 +468,7 @@ export function ConversationViewport() {
   } | null>(null);
   // File upload state (multi-file)
   const fileInputRef = useRef<HTMLInputElement>(null);
-  type UploadFileItem = { file: File; preview?: string; mediaType: 'image' | 'document' | 'audio' };
+  type UploadFileItem = { file: File; preview?: string; mediaType: 'image' | 'document' | 'audio' | 'video' };
   const [uploadFiles, setUploadFiles] = useState<UploadFileItem[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const queryClient = useQueryClient();
@@ -697,15 +697,33 @@ export function ConversationViewport() {
 
   // ── File Upload Handlers ──
   const ALLOWED_MIMES = [
-    'image/jpeg', 'image/png', 'image/webp',
+    // Images
+    'image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/heic', 'image/heif', 'image/bmp', 'image/tiff',
+    // Documents  
     'application/pdf',
-    'audio/mpeg', 'audio/ogg', 'audio/aac', 'audio/amr',
+    'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // doc, docx
+    'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // xls, xlsx
+    'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation', // ppt, pptx
+    'text/plain', 'text/csv',
+    'application/zip', 'application/x-rar-compressed', 'application/x-7z-compressed',
+    // Audio
+    'audio/mpeg', 'audio/ogg', 'audio/aac', 'audio/amr', 'audio/mp4', 'audio/wav',
+    // Video
+    'video/mp4', 'video/3gpp', 'video/quicktime',
   ];
-  const MAX_FILE_SIZE_MB = 10;
+  const MAX_FILE_SIZE_MB = 16; // WhatsApp limit
 
-  const getMediaTypeFromMime = (mime: string): 'image' | 'document' | 'audio' => {
+  const isAllowedMime = (mime: string): boolean => {
+    if (ALLOWED_MIMES.includes(mime)) return true;
+    // Fallback: allow all image/*, audio/*, video/* prefixes
+    if (mime.startsWith('image/') || mime.startsWith('audio/') || mime.startsWith('video/')) return true;
+    return false;
+  };
+
+  const getMediaTypeFromMime = (mime: string): 'image' | 'document' | 'audio' | 'video' => {
     if (mime.startsWith('image/')) return 'image';
     if (mime.startsWith('audio/')) return 'audio';
+    if (mime.startsWith('video/')) return 'video';
     return 'document';
   };
 
@@ -720,8 +738,8 @@ export function ConversationViewport() {
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
 
-      if (!ALLOWED_MIMES.includes(file.type)) {
-        setSendError(`Desteklenmeyen dosya türü: ${file.type}`);
+      if (!isAllowedMime(file.type)) {
+        setSendError(`Desteklenmeyen dosya türü: ${file.type || file.name}`);
         setTimeout(() => setSendError(''), 4000);
         continue;
       }
@@ -734,7 +752,7 @@ export function ConversationViewport() {
 
       const mediaType = getMediaTypeFromMime(file.type);
       let preview: string | undefined;
-      if (mediaType === 'image') {
+      if (mediaType === 'image' || mediaType === 'video') {
         preview = URL.createObjectURL(file);
       }
       newItems.push({ file, preview, mediaType });
@@ -791,6 +809,7 @@ export function ConversationViewport() {
         // 2. Optimistic UI
         const optimisticId = `temp-media-${Date.now()}-${i}`;
         const contentText = currentFile.mediaType === 'image' ? '📷 Fotoğraf' 
+          : currentFile.mediaType === 'video' ? '🎬 Video'
           : currentFile.mediaType === 'audio' ? '🎵 Ses' 
           : `📎 ${filename}`;
         
@@ -1590,7 +1609,7 @@ export function ConversationViewport() {
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/jpeg,image/png,image/webp,application/pdf,audio/mpeg,audio/ogg,audio/aac,audio/amr"
+          accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip,.rar,.7z"
           className="hidden"
           multiple
           onChange={handleFileSelect}
