@@ -1,16 +1,84 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withTenantDB } from '@/lib/core/tenant-db';
 import { logger } from '@/lib/core/logger';
-import { ingestSheetRow } from '@/lib/services/sheets-ingestion.service';
+import { ingestSheetRow, updateSheetsHealthStatus } from '@/lib/services/sheets-ingestion.service';
+import crypto from 'crypto';
 
 const log = logger.withContext({ module: 'SheetsWebhook' });
 
+// ═══════════════════════════════════════════════════════════
+// HMAC VERIFICATION
+// ═══════════════════════════════════════════════════════════
+
+function verifyHmac(secret: string, timestamp: string, rawBody: string, signature: string): boolean {
+  const expectedSig = 'sha256=' + crypto
+    .createHmac('sha256', secret)
+    .update(timestamp + '.' + rawBody)
+    .digest('hex');
+
+  const sigBuf = Buffer.from(signature);
+  const expBuf = Buffer.from(expectedSig);
+
+  if (sigBuf.length !== expBuf.length) return false;
+  return crypto.timingSafeEqual(sigBuf, expBuf);
+}
+
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { sheetName, data } = body;
+    // ── 0. Read raw body for HMAC verification ──
+    const rawBody = await request.text();
+    let body: any;
+    try {
+      body = JSON.parse(rawBody);
+    } catch {
+      return NextResponse.json({ success: false, error: 'Invalid JSON' }, { status: 400 });
+    }
 
-    // ── 1. Tenant Resolution ──
+    // ── 1. HMAC Authentication ──
+    const secret = process.env.SHEETS_WEBHOOK_SECRET;
+
+    if (secret) {
+      const signature = request.headers.get('x-sheets-signature');
+      const timestamp = request.headers.get('x-sheets-timestamp');
+
+      if (!signature || !timestamp) {
+        log.warn('[WEBHOOK_AUTH_MISSING] Missing auth headers');
+        return NextResponse.json({ error: 'Missing auth headers' }, { status: 401 });
+      }
+
+      // Replay protection: ±5 minutes
+      const now = Math.floor(Date.now() / 1000);
+      const ts = parseInt(timestamp);
+      if (isNaN(ts) || Math.abs(now - ts) > 300) {
+        log.warn('[WEBHOOK_REPLAY] Timestamp expired', { now, ts, diff: Math.abs(now - ts) });
+        return NextResponse.json({ error: 'Timestamp expired' }, { status: 401 });
+      }
+
+      // HMAC verification with timing-safe comparison
+      if (!verifyHmac(secret, timestamp, rawBody, signature)) {
+        log.warn('[WEBHOOK_AUTH_FAIL] Invalid signature');
+        return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
+      }
+    } else {
+      // Auth-less fallback — migration period only
+      log.warn('[WEBHOOK_NO_SECRET] SHEETS_WEBHOOK_SECRET not set — accepting unverified request');
+    }
+
+    // ── 2. Parse payload: support both old {data:{}} and new {headers:[], values:[]} ──
+    const { sheetName, sheet_name } = body;
+    const effectiveSheetName = sheetName || sheet_name || 'Google Sheets';
+
+    let rowData = body.data;
+
+    // New App Script format: headers[] + values[] → key-value map
+    if (!rowData && body.headers && body.values) {
+      rowData = {};
+      (body.headers as string[]).forEach((h: string, i: number) => {
+        rowData[h] = (body.values as string[])[i] || '';
+      });
+    }
+
+    // ── 3. Tenant Resolution ──
     const tenantSlug = request.nextUrl.searchParams.get('tenant') || body.tenant_slug;
     const systemDb = withTenantDB('admin-system', true);
     
@@ -27,7 +95,7 @@ export async function POST(request: NextRequest) {
         tenantName = tenants[0].name;
       }
     }
-    // Fallback: baskent (geriye uyumluluk)
+    // Fallback: baskent (backward compatibility)
     if (!tenantId) {
       const fallback = await systemDb.executeSafe({
         text: `SELECT id, name FROM tenants WHERE slug = 'baskent' LIMIT 1`,
@@ -45,7 +113,7 @@ export async function POST(request: NextRequest) {
 
     const db = withTenantDB(tenantId);
 
-    // ── 2. Pipeline Config Resolution ──
+    // ── 4. Pipeline Config Resolution ──
     let activeSheets: string[] = [];
     let greetingGroupId: string | null = null;
     let outboundChannelId: string | null = null;
@@ -63,23 +131,23 @@ export async function POST(request: NextRequest) {
       }
     } catch (e) {}
 
-    // ── 3. Sheet Filter ──
-    if (activeSheets.length > 0 && sheetName && !activeSheets.includes(sheetName)) {
-      return NextResponse.json({ success: true, message: `Sheet '${sheetName}' is ignored by configuration.` });
+    // ── 5. Sheet Filter ──
+    if (activeSheets.length > 0 && effectiveSheetName && !activeSheets.includes(effectiveSheetName)) {
+      return NextResponse.json({ success: true, message: `Sheet '${effectiveSheetName}' is ignored by configuration.` });
     }
 
-    if (!data) {
+    if (!rowData) {
       return NextResponse.json({ success: false, error: 'No data provided' }, { status: 400 });
     }
 
-    // ── 4. Delegate to Shared Ingestion Service ──
-    log.info('[WEBHOOK_INGEST]', { tenantId, sheetName, source: 'webhook' });
+    // ── 6. Delegate to Shared Ingestion Service ──
+    log.info('[WEBHOOK_INGEST]', { tenantId, sheetName: effectiveSheetName, source: 'webhook' });
 
     const result = await ingestSheetRow({
       tenantId,
       tenantName: tenantName || undefined,
-      sheetName: sheetName || 'Google Sheets',
-      data,
+      sheetName: effectiveSheetName,
+      data: rowData,
       outboundChannelId,
       greetingGroupId,
       skipAutoMessage: false, // Webhook = new row → send auto-message
@@ -87,6 +155,27 @@ export async function POST(request: NextRequest) {
     });
 
     log.info('[WEBHOOK_RESULT]', { status: result.status, leadId: result.leadId, messageSent: result.messageSent });
+
+    // ── 7. Health status update ──
+    await updateSheetsHealthStatus(
+      tenantId,
+      result.status === 'error' ? 'warning' : 'healthy',
+      'webhook',
+      {
+        created: result.status === 'created' ? 1 : 0,
+        duplicates: result.status === 'duplicate' ? 1 : 0,
+        errors: result.status === 'error' ? 1 : 0,
+        errorMessage: result.error
+      }
+    );
+
+    // Auth-less health warning
+    if (!secret) {
+      await updateSheetsHealthStatus(tenantId, 'warning', 'webhook', {
+        created: 0, duplicates: 0, errors: 0,
+        errorMessage: 'SHEETS_WEBHOOK_SECRET not configured — webhook is unprotected'
+      });
+    }
 
     if (result.status === 'error') {
       return NextResponse.json({ success: false, error: result.error }, { status: 400 });

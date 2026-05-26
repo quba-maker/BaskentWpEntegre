@@ -1,13 +1,17 @@
 import { withTenantDB } from '@/lib/core/tenant-db';
 import { logger } from '@/lib/core/logger';
 import { CredentialsService } from '@/lib/services/credentials.service';
+import { logAudit } from '@/lib/audit';
 
 const log = logger.withContext({ module: 'SheetsIngestion' });
 
 // ═══════════════════════════════════════════════════════════
 // FIELD DETECTION PRIORITY TABLES
+// Single source of truth — used by both single-row (webhook)
+// and batch (manual sync / cron) ingestion paths
 // ═══════════════════════════════════════════════════════════
 
+// ── Single-row field detection (webhook ingestSheetRow) ──
 const PHONE_PRIMARY_PATTERNS = [
   'whatsapp_number', 'whatsapp', 'wp', 'iletişim', 'wp numarası', 'whatsapp numarası'
 ];
@@ -26,6 +30,16 @@ const FORM_NAME_PATTERNS = [
   'form adı', 'form name', 'form_name', 'kampanya adı', 'campaign_name',
   'campaign name', 'kampanya', 'campaign', 'form'
 ];
+
+// ── Batch field detection (advanced — ported from forms.ts) ──
+const BATCH_WHATSAPP_PATTERNS = ['whatsapp_number', 'whatsapp numarası', 'whatsapp', 'wp numarası', 'wp'];
+const BATCH_PHONE_PATTERNS = ['phone_number', 'telefon', 'phone', 'numara', 'cep', 'cep telefonu', 'mobile', 'gsm', 'iletişim'];
+const BATCH_NAME_EXACT = ['full_name', 'full name', 'ad_soyad', 'ad soyad', 'hasta adı', 'patient_name'];
+const BATCH_NAME_FALLBACK = ['isim', 'adı', 'adınız', 'first_name'];
+const BATCH_EMAIL_PATTERNS = ['email', 'e-posta', 'mail', 'e_posta'];
+const BATCH_DATE_PATTERNS = ['created_time', 'timestamp', 'tarih', 'date', 'created_at'];
+const BATCH_NOTE_PATTERNS = ['geri dönüş', 'geri_dönüş', 'geri dönüs', 'geri_donus', 'notlar', 'notes', 'açıklama', 'feedback'];
+const BATCH_CAMPAIGN_PATTERNS = ['campaign_name', 'kampanya adı', 'kampanya'];
 
 // ═══════════════════════════════════════════════════════════
 // TYPES
@@ -52,6 +66,68 @@ export interface IngestRowResult {
   messageSent?: boolean;
   activePhone?: string;
   error?: string;
+}
+
+// ── Batch Ingestion Types ──
+
+export interface IngestBatchParams {
+  tenantId: string;
+  tenantName?: string;
+  /** Google Sheets API key (decrypted) */
+  apiKey: string;
+  /** Spreadsheet ID */
+  spreadsheetId: string;
+  /** Tab names to sync (empty = all visible) */
+  activeSheets: string[];
+  /** Pipeline routing */
+  outboundChannelId?: string | null;
+  greetingGroupId?: string | null;
+  /** Always true for batch (cron/manual). Only false for webhook single-row */
+  skipAutoMessage: boolean;
+  /** Origin identifier */
+  source: 'manual_sync' | 'cron_sync' | 'qstash_sync';
+  /** Safety: max rows to process in this run (default: 2000) */
+  maxRowsPerRun?: number;
+  /** Safety: abort processing if elapsed > this ms (default: 45000) */
+  timeBudgetMs?: number;
+}
+
+export interface IngestBatchResult {
+  success: boolean;
+  totalRows: number;
+  created: number;
+  updated: number;
+  duplicates: number;
+  errors: number;
+  /** true if processing stopped early due to time/row limit */
+  partial: boolean;
+  /** Human-readable message */
+  message: string;
+  errorDetails?: string;
+}
+
+export interface PhoneColumn {
+  idx: number;
+  isWhatsapp: boolean;
+}
+
+export interface HealthStats {
+  created: number;
+  duplicates: number;
+  errors: number;
+  errorMessage?: string;
+}
+
+interface ParsedRow {
+  phone: string;
+  allPhones: string[];
+  name: string | null;
+  email: string | null;
+  formName: string;
+  notes: string | null;
+  createdTime: string | null;
+  rawData: string;
+  tabName: string;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -366,5 +442,672 @@ export async function ingestSheetRow(params: IngestRowParams): Promise<IngestRow
   } catch (err: any) {
     log.error('[INGEST_ROW_ERROR]', err instanceof Error ? err : new Error(String(err)));
     return { status: 'error', error: err?.message || 'Unknown error' };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// ADVANCED PHONE NORMALIZATION
+// Ported from forms.ts — supports 8+ country code patterns
+// ═══════════════════════════════════════════════════════════
+
+/** Detect country code from local number pattern: 05XX→TR, 06XX→NL, 015X→DE, etc. */
+export function inferCountryFromLocal(digits: string): string | null {
+  if (/^05\d{8}$/.test(digits)) return '90';          // Turkish mobile
+  if (/^0(15|16|17)\d{8,9}$/.test(digits)) return '49'; // German mobile
+  if (/^06\d{8}$/.test(digits)) return '31';           // Dutch mobile
+  if (/^04\d{8}$/.test(digits)) return '32';           // Belgian mobile
+  if (/^07\d{9}$/.test(digits)) return '44';           // UK mobile
+  if (/^0[67]\d{8}$/.test(digits)) return '33';        // French mobile
+  if (/^0(664|676|699|660|650)\d{6,8}$/.test(digits)) return '43'; // Austrian mobile
+  if (/^07[5-9]\d{7}$/.test(digits)) return '41';     // Swiss mobile
+  return null;
+}
+
+/** Extract leading country code from international number */
+export function extractCountryCode(digits: string): string | null {
+  const CODES = [
+    '998','996','995','994','993','992','971','966','964','962','961',
+    '380','374','359','90','86','82','81','77','55','52','49','48',
+    '47','46','45','44','43','41','40','39','36','34','33','32','31',
+    '30','91','61','7','1'
+  ];
+  for (const code of CODES) {
+    if (digits.startsWith(code)) return code;
+  }
+  return null;
+}
+
+/** Full phone normalization with country inference + reference fallback */
+export function normalizePhoneAdvanced(raw: string, referenceCountryCode?: string | null): string {
+  let phone = String(raw || '').replace(/[^0-9]/g, '');
+  if (!phone || phone.length < 7) return '';
+
+  // Starts with 00 → international format (strip 00)
+  if (phone.startsWith('00') && phone.length >= 11) {
+    return phone.substring(2, 22);
+  }
+
+  // Starts with 0 → local format, infer country code
+  if (phone.startsWith('0') && phone.length >= 9) {
+    const inferredCode = inferCountryFromLocal(phone);
+    if (inferredCode) {
+      phone = inferredCode + phone.substring(1);
+    } else if (referenceCountryCode) {
+      phone = referenceCountryCode + phone.substring(1);
+    } else {
+      phone = '90' + phone.substring(1);
+    }
+    return phone.substring(0, 20);
+  }
+
+  // Already has valid country code (10+ digits, doesn't start with 0)
+  if (phone.length >= 10) {
+    return phone.substring(0, 20);
+  }
+
+  // SHORT NUMBER (7-9 digits, no leading 0) — Meta sometimes strips country code
+  if (phone.length >= 7 && phone.length <= 9 && referenceCountryCode) {
+    const withCode = referenceCountryCode + phone;
+    if (withCode.length >= 10 && withCode.length <= 15) {
+      return withCode.substring(0, 20);
+    }
+  }
+
+  // Fallback: try Turkey prefix
+  if (phone.length >= 7 && phone.length <= 9) {
+    return ('90' + phone).substring(0, 20);
+  }
+
+  return phone.substring(0, 20);
+}
+
+/** Smart dedup: suffix matching + containment check. Keeps longest (most complete) version. */
+export function dedupPhones(phones: string[]): string[] {
+  const sorted = [...phones].sort((a, b) => b.length - a.length);
+  const result: string[] = [];
+
+  for (const phone of sorted) {
+    const isDuplicate = result.some(existing => {
+      const existSuffix = existing.slice(-9);
+      const phoneSuffix = phone.slice(-9);
+      if (existSuffix === phoneSuffix) return true;
+      if (existing.endsWith(phone) || phone.endsWith(existing)) return true;
+      return false;
+    });
+    if (!isDuplicate) result.push(phone);
+  }
+
+  return result;
+}
+
+// ═══════════════════════════════════════════════════════════
+// ADVANCED FIELD DETECTION (Batch mode)
+// Ported from forms.ts — content-aware with exclude prefixes
+// ═══════════════════════════════════════════════════════════
+
+/** Safe column finder — excludes ad_id, ad_name for name detection. Exact match first, then fuzzy (>=5 char). */
+export function findCol(headers: string[], patterns: string[], excludePrefixes: string[] = []): number {
+  // Exact match first
+  for (const p of patterns) {
+    const idx = headers.findIndex((h: string) => {
+      if (excludePrefixes.some(ex => h.startsWith(ex))) return false;
+      if (h.endsWith('_id') || h.endsWith(' id')) return false;
+      return h === p;
+    });
+    if (idx !== -1) return idx;
+  }
+  // Fuzzy fallback (>=5 char patterns only to avoid false positives)
+  for (const p of patterns) {
+    if (p.length < 5) continue;
+    const idx = headers.findIndex((h: string) => {
+      if (excludePrefixes.some(ex => h.startsWith(ex))) return false;
+      if (h.endsWith('_id') || h.endsWith(' id')) return false;
+      return h.includes(p);
+    });
+    if (idx !== -1) return idx;
+  }
+  return -1;
+}
+
+/** Find ALL phone columns (WhatsApp priority first, then general phone) */
+export function findAllPhoneCols(headers: string[]): PhoneColumn[] {
+  const found: PhoneColumn[] = [];
+  const usedIdx = new Set<number>();
+
+  // WhatsApp columns first (primary)
+  for (const p of BATCH_WHATSAPP_PATTERNS) {
+    headers.forEach((h, idx) => {
+      if (!usedIdx.has(idx) && (h === p || h.includes(p)) && !h.endsWith('_id')) {
+        found.push({ idx, isWhatsapp: true });
+        usedIdx.add(idx);
+      }
+    });
+  }
+  // Then phone columns
+  for (const p of BATCH_PHONE_PATTERNS) {
+    headers.forEach((h, idx) => {
+      if (!usedIdx.has(idx) && (h === p || h.includes(p)) && !h.endsWith('_id')) {
+        found.push({ idx, isWhatsapp: false });
+        usedIdx.add(idx);
+      }
+    });
+  }
+  return found;
+}
+
+/** Filter junk notes: status keywords, pure IDs, dates */
+export function filterJunkNote(note: string | null): string | null {
+  if (!note) return null;
+  const trimmed = note.trim();
+  if (!trimmed) return null;
+
+  const JUNK_VALUES = ['CREATED', 'ACTIVE', 'CLOSED', 'PENDING', 'true', 'false', 'fb', 'ig', 'null', 'undefined'];
+  const isJunk = JUNK_VALUES.includes(trimmed)
+    || /^[a-z]:[\d]+$/.test(trimmed)
+    || /^[lf]:\d+$/.test(trimmed)
+    || /^\d{2}\/\d{2}\/\d{4}$/.test(trimmed)
+    || /^\d{4}-\d{2}-\d{2}$/.test(trimmed)
+    || /^\d{2}\.\d{2}\.\d{4}$/.test(trimmed)
+    || /^\d+$/.test(trimmed);
+
+  return isJunk ? null : trimmed;
+}
+
+// ═══════════════════════════════════════════════════════════
+// BATCH INGESTION ENGINE
+// Unified processor for manual sync, cron sync, and qstash.
+// Key features:
+//   - Newest-first row processing (last rows → first processed)
+//   - Time budget guard (default 45s)
+//   - Max rows per run (default 2000)
+//   - Batch duplicate detection (single query + Set)
+//   - Content-aware field extraction with column shift detection
+//   - Smart multi-phone normalization with country code inference
+//   - P1B SAFE: never touches opportunities or conversations
+// ═══════════════════════════════════════════════════════════
+
+export async function ingestSheetBatch(params: IngestBatchParams): Promise<IngestBatchResult> {
+  const {
+    tenantId, tenantName, apiKey, spreadsheetId, activeSheets,
+    outboundChannelId, greetingGroupId,
+    skipAutoMessage, source,
+    maxRowsPerRun = 2000,
+    timeBudgetMs = 45_000,
+  } = params;
+
+  const startTime = Date.now();
+  const db = withTenantDB(tenantId);
+
+  let totalRows = 0;
+  let created = 0;
+  let updated = 0;
+  let duplicates = 0;
+  let errors = 0;
+  let partial = false;
+
+  try {
+    // ── 1. Fetch spreadsheet metadata ──
+    const BASE_URL = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`;
+    const metaResp = await fetch(`${BASE_URL}?key=${apiKey}&fields=sheets.properties`);
+    if (!metaResp.ok) {
+      const errorText = await metaResp.text();
+      log.error('[BATCH_META_ERROR]', new Error(errorText.slice(0, 300)));
+      return {
+        success: false, totalRows: 0, created: 0, updated: 0, duplicates: 0, errors: 1,
+        partial: false, message: `Google Sheets API hatası (${metaResp.status})`, errorDetails: errorText.slice(0, 500)
+      };
+    }
+
+    const metaData = await metaResp.json();
+    const allTabs = metaData.sheets
+      .filter((s: any) => !s.properties.hidden)
+      .map((s: any) => s.properties.title);
+
+    // ── 2. Tab selection ──
+    let tabs: string[];
+    if (activeSheets.length > 0) {
+      tabs = allTabs.filter((t: string) => activeSheets.includes(t));
+      if (tabs.length === 0) {
+        log.warn('[BATCH_TAB_MISMATCH]', { config: activeSheets, real: allTabs });
+        tabs = allTabs; // Fallback: sync all visible tabs
+      }
+    } else {
+      tabs = allTabs;
+    }
+
+    if (tabs.length === 0) {
+      return {
+        success: true, totalRows: 0, created: 0, updated: 0, duplicates: 0, errors: 0,
+        partial: false, message: 'Spreadsheet\'te görünür sekme bulunamadı.'
+      };
+    }
+
+    log.info('[BATCH_TABS]', { tabs, source });
+
+    // ── 3. Fetch all rows (batch API) ──
+    const rangeParams = tabs.map((t: string) => `ranges=${encodeURIComponent(t)}`).join('&');
+    const batchUrl = `${BASE_URL}/values:batchGet?key=${apiKey}&${rangeParams}&valueRenderOption=FORMATTED_VALUE`;
+    const batchResp = await fetch(batchUrl);
+    if (!batchResp.ok) {
+      const errorText = await batchResp.text();
+      log.error('[BATCH_FETCH_ERROR]', new Error(errorText.slice(0, 300)));
+      return {
+        success: false, totalRows: 0, created: 0, updated: 0, duplicates: 0, errors: 1,
+        partial: false, message: `Satır verileri alınamadı (${batchResp.status})`, errorDetails: errorText.slice(0, 500)
+      };
+    }
+
+    const batchData = await batchResp.json();
+
+    // ── 4. Parse all rows from all tabs ──
+    const allRows: ParsedRow[] = [];
+
+    for (let i = 0; i < batchData.valueRanges.length; i++) {
+      const vr = batchData.valueRanges[i];
+      const tabName = tabs[i];
+      const values = vr.values || [];
+      if (values.length <= 1) continue; // header only or empty
+
+      const headers = values[0].map((h: string) => String(h).toLowerCase().trim());
+
+      // Phone detection
+      const phoneCols = findAllPhoneCols(headers);
+      if (phoneCols.length === 0) {
+        log.info('[BATCH_SKIP_TAB] No phone column', { tabName });
+        continue;
+      }
+
+      // Name detection: exact match first, then fallback — EXCLUDE ad_name, adset_name
+      let nameIdx = findCol(headers, BATCH_NAME_EXACT, ['ad_', 'adset_']);
+      if (nameIdx === -1) nameIdx = findCol(headers, BATCH_NAME_FALLBACK, ['ad_', 'adset_']);
+
+      const emailIdx = findCol(headers, BATCH_EMAIL_PATTERNS);
+      const dateIdx = findCol(headers, BATCH_DATE_PATTERNS);
+      const noteIdx = findCol(headers, BATCH_NOTE_PATTERNS);
+      const campaignIdx = findCol(headers, BATCH_CAMPAIGN_PATTERNS, ['campaign_id']);
+
+      log.info('[BATCH_TAB]', {
+        tabName, rows: values.length - 1,
+        nameCol: nameIdx >= 0 ? headers[nameIdx] : 'NONE',
+        phoneCols: phoneCols.length
+      });
+
+      // ── Process rows NEWEST-FIRST (reverse order) ──
+      // New form submissions are appended to the bottom of the sheet.
+      // By iterating from the last row upward, we ensure the most recent
+      // entries are processed first within the maxRowsPerRun budget.
+      for (let r = values.length - 1; r >= 1; r--) {
+        const row = values[r];
+
+        // ── COLUMN SHIFT DETECTION ──
+        const colShift = headers.length - row.length;
+        const getCell = (headerIdx: number): string | undefined => {
+          if (headerIdx < 0) return undefined;
+          let val = row[headerIdx];
+          if (colShift > 0 && headerIdx >= colShift) {
+            const shiftedVal = row[headerIdx - colShift];
+            if (!val && shiftedVal) val = shiftedVal;
+          }
+          return val;
+        };
+
+        // STEP 1: Extract reference country code from Meta's phone_number
+        let referenceCountryCode: string | null = null;
+        for (const pc of phoneCols) {
+          if (!pc.isWhatsapp) {
+            const raw = getCell(pc.idx);
+            if (raw) {
+              const clean = String(raw).replace(/[^0-9]/g, '');
+              if (clean.length >= 10 && !clean.startsWith('0')) {
+                referenceCountryCode = extractCountryCode(clean);
+                if (referenceCountryCode) break;
+              }
+            }
+          }
+        }
+
+        // STEP 2: Normalize all phones with country code inference
+        const rawPhones: string[] = [];
+        let whatsappPhone = '';
+        let metaPhone = '';
+        for (const pc of phoneCols) {
+          const raw = getCell(pc.idx);
+          if (!raw) continue;
+          const normalized = normalizePhoneAdvanced(raw, referenceCountryCode);
+          if (normalized.length >= 10) {
+            rawPhones.push(normalized);
+            if (pc.isWhatsapp && !whatsappPhone) whatsappPhone = normalized;
+            if (!pc.isWhatsapp && !metaPhone) metaPhone = normalized;
+          }
+        }
+
+        // STEP 3: Smart dedup (suffix + containment)
+        const allPhones = dedupPhones(rawPhones);
+
+        // STEP 4: Smart primary selection
+        let primaryPhone = '';
+        if (whatsappPhone && allPhones.some(p => p === whatsappPhone || p.endsWith(whatsappPhone) || whatsappPhone.endsWith(p))) {
+          primaryPhone = allPhones.find(p => p.endsWith(whatsappPhone.slice(-9))) || whatsappPhone;
+        }
+        if (!primaryPhone && allPhones.length > 0) {
+          primaryPhone = allPhones[0]; // Longest (sorted by dedup)
+        }
+        if (!primaryPhone) continue;
+
+        // ── CONTENT-AWARE FIELD EXTRACTION ──
+        let name = nameIdx !== -1 && getCell(nameIdx) ? String(getCell(nameIdx)).substring(0, 100) : null;
+        const looksLikePhone = (s: string) => /^[p:+\s]*[\d\s+\-()]{8,}$/.test(s.trim());
+        const looksLikeName = (s: string) => /^[a-zA-ZÀ-ÿçÇğĞıİöÖşŞüÜ\s.''-]{2,}$/u.test(s.trim()) && s.trim().length <= 60;
+
+        if (name && looksLikePhone(name)) {
+          let foundName: string | null = null;
+          for (let ci = 0; ci < row.length; ci++) {
+            const cellVal = String(row[ci] || '');
+            if (cellVal && looksLikeName(cellVal) && !looksLikePhone(cellVal)) {
+              const header = headers[ci] || '';
+              if (!header.startsWith('ad_') && !header.startsWith('adset_') && header !== 'campaign_name') {
+                foundName = cellVal;
+                break;
+              }
+            }
+          }
+          name = foundName;
+        }
+
+        // Campaign/Form name — validate content
+        let campaignName = campaignIdx !== -1 && getCell(campaignIdx) ? String(getCell(campaignIdx)).substring(0, 200) : '';
+        if (!campaignName || /^[cf]:\d+$/.test(campaignName) || /^\d{10,}$/.test(campaignName)) {
+          const formNameVal = getCell(findCol(headers, ['form_name'], ['form_id']));
+          if (formNameVal && !/^[f]:\d+$/.test(formNameVal)) {
+            campaignName = formNameVal;
+          } else {
+            for (let ci = 0; ci < row.length; ci++) {
+              const cellVal = String(row[ci] || '');
+              const hdr = headers[ci] || '';
+              if ((hdr === 'form_name' || hdr === 'campaign_name') && cellVal && !/^[cf]:\d+$/.test(cellVal)) {
+                campaignName = cellVal;
+                break;
+              }
+            }
+            if (!campaignName || /^[cf]:\d+$/.test(campaignName)) {
+              const isOrganicIdx = headers.indexOf('is_organic');
+              if (isOrganicIdx >= 0) {
+                const isOrganicVal = String(row[isOrganicIdx] || '');
+                if (isOrganicVal && isOrganicVal !== 'true' && isOrganicVal !== 'false' && isOrganicVal.length > 3) {
+                  campaignName = isOrganicVal;
+                }
+              }
+            }
+          }
+          if (!campaignName || /^[cf]:\d+$/.test(campaignName)) campaignName = tabName;
+        }
+
+        const email = emailIdx !== -1 && getCell(emailIdx) ? String(getCell(emailIdx)).substring(0, 200) : null;
+        const createdTime = dateIdx !== -1 && getCell(dateIdx) ? String(getCell(dateIdx)) : null;
+        let noteVal = noteIdx !== -1 && getCell(noteIdx) ? String(getCell(noteIdx)).substring(0, 5000) : null;
+        noteVal = filterJunkNote(noteVal);
+
+        // Build raw_data preserving original header names
+        const rawData: Record<string, string> = {};
+        const origHeaders = values[0];
+        origHeaders.forEach((h: string, idx: number) => { rawData[String(h).trim()] = row[idx] || ''; });
+        rawData['_sheet_name'] = tabName;
+        rawData['_source'] = source;
+        rawData['_all_phones'] = JSON.stringify(allPhones);
+
+        allRows.push({
+          phone: primaryPhone,
+          allPhones,
+          name,
+          email,
+          formName: campaignName,
+          notes: noteVal,
+          createdTime,
+          rawData: JSON.stringify(rawData),
+          tabName
+        });
+      }
+    }
+
+    totalRows = allRows.length;
+    log.info('[BATCH_PARSED]', { totalRows, tabs: tabs.length, source });
+
+    if (totalRows === 0) {
+      return {
+        success: true, totalRows: 0, created: 0, updated: 0, duplicates: 0, errors: 0,
+        partial: false, message: 'Geçerli telefon numarası olan satır bulunamadı.'
+      };
+    }
+
+    // ── 5. Batch duplicate detection (single query + Set) ──
+    const existingPhones = await db.executeSafe({
+      text: `SELECT DISTINCT RIGHT(phone_number, 10) as phone_suffix FROM leads WHERE tenant_id = $1`,
+      values: [tenantId]
+    }) as any[];
+
+    const existingSet = new Set(existingPhones.map((r: any) => r.phone_suffix));
+    log.info('[BATCH_EXISTING]', { existingCount: existingSet.size });
+
+    // ── 6. Separate new vs existing, enforce limits ──
+    const seenPhones = new Set<string>();
+    const newRows: ParsedRow[] = [];
+    const updateRows: ParsedRow[] = [];
+
+    for (const row of allRows) {
+      // ── TIME BUDGET CHECK ──
+      if (Date.now() - startTime > timeBudgetMs) {
+        log.warn('[BATCH_TIME_BUDGET] Stopping early', { elapsed: Date.now() - startTime, processed: newRows.length + updateRows.length });
+        partial = true;
+        break;
+      }
+      // ── ROW LIMIT CHECK ──
+      if (newRows.length + updateRows.length >= maxRowsPerRun) {
+        log.warn('[BATCH_ROW_LIMIT] Max rows reached', { maxRowsPerRun });
+        partial = true;
+        break;
+      }
+
+      const suffix = row.phone.slice(-10);
+      if (seenPhones.has(suffix)) continue; // in-batch duplicate
+      seenPhones.add(suffix);
+
+      if (existingSet.has(suffix)) {
+        updateRows.push(row);
+      } else {
+        newRows.push(row);
+      }
+    }
+
+    duplicates = updateRows.length;
+    log.info('[BATCH_DEDUP]', { new: newRows.length, update: updateRows.length, partial });
+
+    // ── 7. Batch INSERT in chunks of 50 ──
+    const CHUNK_SIZE = 50;
+
+    const parseCreatedTime = (raw: string | null): string => {
+      if (!raw) return new Date().toISOString();
+      try {
+        const d = new Date(raw);
+        if (!isNaN(d.getTime())) return d.toISOString();
+      } catch (_) {}
+      return new Date().toISOString();
+    };
+
+    for (let c = 0; c < newRows.length; c += CHUNK_SIZE) {
+      // Time budget re-check during inserts
+      if (Date.now() - startTime > timeBudgetMs) {
+        log.warn('[BATCH_INSERT_TIME_BUDGET] Stopping inserts early');
+        partial = true;
+        break;
+      }
+
+      const chunk = newRows.slice(c, c + CHUNK_SIZE);
+      const valueParts: string[] = [];
+      const insertParams: any[] = [];
+      let paramIdx = 1;
+
+      for (const row of chunk) {
+        valueParts.push(`($${paramIdx}, $${paramIdx+1}, $${paramIdx+2}, $${paramIdx+3}, $${paramIdx+4}, $${paramIdx+5}, 'new', $${paramIdx+6}, $${paramIdx+7})`);
+        insertParams.push(
+          tenantId, row.phone, row.name, row.email, row.formName, row.rawData,
+          parseCreatedTime(row.createdTime),
+          row.notes || null
+        );
+        paramIdx += 8;
+      }
+
+      try {
+        await db.executeSafe({
+          text: `INSERT INTO leads (tenant_id, phone_number, patient_name, email, form_name, raw_data, stage, created_at, notes)
+                 VALUES ${valueParts.join(', ')}
+                 ON CONFLICT DO NOTHING`,
+          values: insertParams
+        });
+        created += chunk.length;
+      } catch (insertErr: any) {
+        log.error('[BATCH_INSERT_ERROR]', insertErr instanceof Error ? insertErr : new Error(String(insertErr)));
+        errors += chunk.length;
+      }
+    }
+
+    // ── 8. Batch UPDATE existing leads (notes only if empty, raw_data always) ──
+    // P1B GUARD: Only updates leads table. NEVER touches conversations or opportunities.
+    for (const row of updateRows) {
+      // Time budget re-check during updates
+      if (Date.now() - startTime > timeBudgetMs) {
+        log.warn('[BATCH_UPDATE_TIME_BUDGET] Stopping updates early');
+        partial = true;
+        break;
+      }
+
+      try {
+        const suffix = row.phone.slice(-10);
+        const setClauses: string[] = [];
+        const updateParams: any[] = [];
+        let pIdx = 1;
+
+        // Always update raw_data (latest sheet snapshot)
+        setClauses.push(`raw_data = $${pIdx}`);
+        updateParams.push(row.rawData);
+        pIdx++;
+
+        // Update notes ONLY if current DB value is empty (P1B: never overwrite manual notes)
+        if (row.notes && row.notes.trim()) {
+          setClauses.push(`notes = COALESCE(NULLIF(notes, ''), $${pIdx})`);
+          updateParams.push(row.notes);
+          pIdx++;
+        }
+
+        // Update patient_name if DB is empty
+        if (row.name && row.name.trim()) {
+          setClauses.push(`patient_name = COALESCE(NULLIF(patient_name, ''), $${pIdx})`);
+          updateParams.push(row.name);
+          pIdx++;
+        }
+
+        // Update form_name
+        if (row.formName) {
+          setClauses.push(`form_name = $${pIdx}`);
+          updateParams.push(row.formName);
+          pIdx++;
+        }
+
+        updateParams.push(tenantId, suffix);
+
+        await db.executeSafe({
+          text: `UPDATE leads SET ${setClauses.join(', ')}
+                 WHERE tenant_id = $${pIdx} AND RIGHT(phone_number, 10) = $${pIdx + 1}`,
+          values: updateParams
+        });
+        updated++;
+      } catch (updateErr: any) {
+        log.error('[BATCH_UPDATE_ERROR]', updateErr instanceof Error ? updateErr : new Error(String(updateErr)));
+        errors++;
+      }
+    }
+
+    const durationMs = Date.now() - startTime;
+    log.info('[BATCH_COMPLETED]', { created, updated, duplicates, errors, partial, durationMs, source });
+
+    const message = partial
+      ? `Kısmi sync: ${created} yeni, ${updated} güncellendi, ${duplicates} tekrar (zaman/satır limiti)`
+      : `${created} yeni kayıt eklendi. ${updated} güncellendi. ${duplicates} tekrar eden. Toplam ${totalRows} satır.`;
+
+    return { success: true, totalRows, created, updated, duplicates, errors, partial, message };
+
+  } catch (err: any) {
+    log.error('[BATCH_FATAL_ERROR]', err instanceof Error ? err : new Error(String(err)));
+    return {
+      success: false, totalRows, created, updated, duplicates, errors: errors + 1,
+      partial: false, message: 'Sync hatası: ' + (err?.message || 'Unknown'),
+      errorDetails: err?.message
+    };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// HEALTH STATUS TRACKING
+// Updates tenant_integrations with sync results.
+// Called by webhook, manual sync, and cron sync paths.
+// ═══════════════════════════════════════════════════════════
+
+export async function updateSheetsHealthStatus(
+  tenantId: string,
+  status: 'healthy' | 'warning' | 'error',
+  source: 'webhook' | 'cron_sync' | 'manual_sync',
+  stats?: HealthStats
+): Promise<void> {
+  try {
+    const db = withTenantDB(tenantId);
+
+    const setClauses: string[] = [
+      'health_status = $1',
+      'last_sync_at = NOW()',
+      'updated_at = NOW()',
+    ];
+    const values: any[] = [status];
+    let idx = 2;
+
+    if (status !== 'error') {
+      setClauses.push('last_success_at = NOW()');
+    }
+
+    if (stats) {
+      setClauses.push(`last_import_count = $${idx}`); values.push(stats.created); idx++;
+      setClauses.push(`last_duplicate_count = $${idx}`); values.push(stats.duplicates); idx++;
+    }
+
+    if (status === 'error' && stats?.errorMessage) {
+      setClauses.push('last_error_at = NOW()');
+      setClauses.push(`last_error_message = $${idx}`); values.push(stats.errorMessage); idx++;
+    }
+
+    if (source === 'webhook') {
+      setClauses.push('webhook_last_received_at = NOW()');
+    } else if (source === 'cron_sync') {
+      setClauses.push('cron_last_run_at = NOW()');
+    }
+
+    values.push(tenantId);
+
+    await db.executeSafe({
+      text: `UPDATE tenant_integrations SET ${setClauses.join(', ')}
+             WHERE tenant_id = $${idx} AND provider = 'google_sheets'`,
+      values
+    });
+
+    // Pipeline event logging
+    await db.executeSafe({
+      text: `INSERT INTO pipeline_events (tenant_id, event_type, payload, created_at)
+             VALUES ($1, $2, $3, NOW())`,
+      values: [
+        tenantId,
+        status === 'error' ? `${source}_failed` : `${source}_completed`,
+        JSON.stringify({ source, status, ...stats })
+      ]
+    });
+  } catch (e) {
+    // Non-blocking — health tracking should never break the main flow
+    log.error('[HEALTH_UPDATE_ERROR]', e instanceof Error ? e : new Error(String(e)));
   }
 }

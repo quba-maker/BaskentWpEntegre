@@ -459,6 +459,16 @@ export async function GET(req: NextRequest) {
     await execute`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_message_direction VARCHAR(10)`;
     results.push("✅ bot_activated_at ve last_message denormalizasyon kolonları eklendi");
 
+    // 22. PHASE 2M-P0: Health monitoring columns for tenant_integrations
+    await execute`ALTER TABLE tenant_integrations ADD COLUMN IF NOT EXISTS last_success_at TIMESTAMPTZ`;
+    await execute`ALTER TABLE tenant_integrations ADD COLUMN IF NOT EXISTS last_error_at TIMESTAMPTZ`;
+    await execute`ALTER TABLE tenant_integrations ADD COLUMN IF NOT EXISTS last_error_message TEXT`;
+    await execute`ALTER TABLE tenant_integrations ADD COLUMN IF NOT EXISTS last_import_count INTEGER DEFAULT 0`;
+    await execute`ALTER TABLE tenant_integrations ADD COLUMN IF NOT EXISTS last_duplicate_count INTEGER DEFAULT 0`;
+    await execute`ALTER TABLE tenant_integrations ADD COLUMN IF NOT EXISTS webhook_last_received_at TIMESTAMPTZ`;
+    await execute`ALTER TABLE tenant_integrations ADD COLUMN IF NOT EXISTS cron_last_run_at TIMESTAMPTZ`;
+    results.push("✅ PHASE 2M-P0: tenant_integrations health monitoring kolonları eklendi");
+
     if (isDryRun) {
       return NextResponse.json({ success: true, mode: "dryRun", results, executedQueries: dryRunLogs });
     }

@@ -26,6 +26,21 @@ async function updateSyncProgress(tenantId: string, correlationId: string, progr
 }
 
 export async function POST(req: Request) {
+  // ═══════════════════════════════════════════════════════
+  // DEPRECATED GUARD — P1 will migrate to shared ingestSheetBatch()
+  // This route uses an old, basic parser without country code inference,
+  // multi-phone dedup, or content-aware field detection.
+  // To prevent accidental data corruption, it's disabled by default.
+  // Set ENABLE_LEGACY_QSTASH_SHEETS_SYNC=true to re-enable.
+  // ═══════════════════════════════════════════════════════
+  if (process.env.ENABLE_LEGACY_QSTASH_SHEETS_SYNC !== 'true') {
+    console.warn('[QSTASH_DEPRECATED] Legacy QStash sheets sync route is disabled. Set ENABLE_LEGACY_QSTASH_SHEETS_SYNC=true to re-enable.');
+    return NextResponse.json(
+      { error: 'This route is deprecated. Use /api/cron-form-sync or /api/sheets-webhook instead.' },
+      { status: 410 }
+    );
+  }
+
   let bodyPayload: any = {};
   let rawBody = "";
   try {
