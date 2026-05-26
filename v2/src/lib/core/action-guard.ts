@@ -104,7 +104,7 @@ export async function withActionGuard<T>(
     
     // Güvenlik: Asla raw error mesajını client'a sızdırma (eğer production'daysan)
     const errorMsg = process.env.NODE_ENV === 'production' 
-      ? `Sistemsel bir hata oluştu (${options.actionName}). Lütfen daha sonra tekrar deneyin.`
+      ? `Sistemsel bir hata oluştu (${options.actionName}): ${error.message}. Lütfen daha sonra tekrar deneyin.`
       : error.message;
 
     return { success: false, error: errorMsg, statusCode: 500 };
