@@ -40,6 +40,39 @@ const BATCH_EMAIL_PATTERNS = ['email', 'e-posta', 'mail', 'e_posta'];
 const BATCH_DATE_PATTERNS = ['created_time', 'timestamp', 'tarih', 'date', 'created_at'];
 const BATCH_NOTE_PATTERNS = ['geri dönüş', 'geri_dönüş', 'geri dönüs', 'geri_donus', 'notlar', 'notes', 'açıklama', 'feedback'];
 const BATCH_CAMPAIGN_PATTERNS = ['campaign_name', 'kampanya adı', 'kampanya'];
+const BATCH_STATUS_PATTERNS = ['lead_status', 'durum', 'status', 'aşama', 'stage', 'lead_stage'];
+
+// ── Sheet value → DB stage mapping ──
+// Sheet'teki Türkçe/İngilizce değerleri sistem stage'lerine çevirir.
+const STAGE_MAP: Record<string, string> = {
+  // Exact system values (pass-through)
+  'new': 'new', 'contacted': 'contacted', 'responded': 'responded',
+  'discovery': 'discovery', 'qualified': 'qualified', 'appointed': 'appointed', 'lost': 'lost',
+  // Turkish labels → system values
+  'yeni': 'new', 'yeni lead': 'new',
+  'iletişime geçildi': 'contacted', 'iletişim kuruldu': 'contacted', 'arandı': 'contacted',
+  'yanıt alındı': 'responded', 'yanıt aldı': 'responded', 'cevap geldi': 'responded',
+  'keşif': 'discovery', 'bilgi': 'discovery', 'keşif / bilgi': 'discovery',
+  'nitelikli': 'qualified', 'uygun': 'qualified',
+  'randevu aldı': 'appointed', 'randevu': 'appointed', 'randevu alındı': 'appointed',
+  'kaybedildi': 'lost', 'kayıp': 'lost', 'iptal': 'lost', 'vazgeçti': 'lost',
+  // Opportunity system fallbacks
+  'new_lead': 'new', 'first_contact': 'contacted', 'engaged': 'responded',
+  'ilk iletişim': 'contacted', 'rapor bekleniyor': 'discovery', 'report_waiting': 'discovery',
+  'rapor geldi': 'qualified', 'report_received': 'qualified',
+  'doktor incelemesi': 'qualified', 'doctor_review': 'qualified',
+  'teklif gönderildi': 'qualified', 'offer_sent': 'qualified',
+  'randevu planlanıyor': 'appointed', 'appointment_planning': 'appointed',
+  'appointment_booked': 'appointed',
+  'geldi': 'appointed', 'arrived': 'appointed',
+  'uygun değil': 'lost', 'not_qualified': 'lost',
+};
+
+function mapSheetStatusToStage(raw: string | null | undefined): string | null {
+  if (!raw || !raw.trim()) return null;
+  const normalized = raw.toLowerCase().trim();
+  return STAGE_MAP[normalized] || null;
+}
 
 // ═══════════════════════════════════════════════════════════
 // TYPES
@@ -128,6 +161,8 @@ interface ParsedRow {
   createdTime: string | null;
   rawData: string;
   tabName: string;
+  /** Mapped system stage from sheet lead_status/durum column */
+  leadStatus: string | null;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -847,6 +882,11 @@ export async function ingestSheetBatch(params: IngestBatchParams): Promise<Inges
         let noteVal = noteIdx !== -1 && getCell(noteIdx) ? String(getCell(noteIdx)).substring(0, 5000) : null;
         noteVal = filterJunkNote(noteVal);
 
+        // ── Lead status detection ──
+        const statusIdx = findCol(headers, BATCH_STATUS_PATTERNS);
+        const rawStatus = statusIdx !== -1 && getCell(statusIdx) ? String(getCell(statusIdx)) : null;
+        const leadStatus = mapSheetStatusToStage(rawStatus);
+
         // Build raw_data preserving original header names
         const rawData: Record<string, string> = {};
         const origHeaders = values[0];
@@ -864,7 +904,8 @@ export async function ingestSheetBatch(params: IngestBatchParams): Promise<Inges
           notes: noteVal,
           createdTime,
           rawData: JSON.stringify(rawData),
-          tabName
+          tabName,
+          leadStatus
         });
       }
     }
@@ -947,13 +988,14 @@ export async function ingestSheetBatch(params: IngestBatchParams): Promise<Inges
       let paramIdx = 1;
 
       for (const row of chunk) {
-        valueParts.push(`($${paramIdx}, $${paramIdx+1}, $${paramIdx+2}, $${paramIdx+3}, $${paramIdx+4}, $${paramIdx+5}, 'new', $${paramIdx+6}, $${paramIdx+7})`);
+        valueParts.push(`($${paramIdx}, $${paramIdx+1}, $${paramIdx+2}, $${paramIdx+3}, $${paramIdx+4}, $${paramIdx+5}, $${paramIdx+6}, $${paramIdx+7}, $${paramIdx+8})`);
         insertParams.push(
           tenantId, row.phone, row.name, row.email, row.formName, row.rawData,
+          row.leadStatus || 'new',  // Use sheet status if mapped, else 'new'
           parseCreatedTime(row.createdTime),
           row.notes || null
         );
-        paramIdx += 8;
+        paramIdx += 9;
       }
 
       try {
@@ -1009,6 +1051,14 @@ export async function ingestSheetBatch(params: IngestBatchParams): Promise<Inges
         if (row.formName) {
           setClauses.push(`form_name = $${pIdx}`);
           updateParams.push(row.formName);
+          pIdx++;
+        }
+
+        // ── ALWAYS update stage from sheet (lead_status column) ──
+        // Sheet'teki durum/lead_status değeri her zaman DB'yi ezer.
+        if (row.leadStatus) {
+          setClauses.push(`stage = $${pIdx}`);
+          updateParams.push(row.leadStatus);
           pIdx++;
         }
 

@@ -199,11 +199,28 @@ function testWebhook() {
     event_type: 'test',
     sheet_name: 'TEST',
     headers: ['full_name', 'phone_number', 'email'],
-    values: ['Test User', '+90 555 123 4567', 'test@example.com'],
+    values: ['Debug Test ' + Date.now(), '+90 544 999 8877', 'debug@test.com'],
     timestamp: new Date().toISOString(),
     tenant_slug: CONFIG.TENANT_SLUG
   };
   
-  sendWithRetry(payload, CONFIG.WEBHOOK_URL);
-  Logger.log('[TEST] Check Vercel logs for webhook receipt');
+  var bodyStr = JSON.stringify(payload);
+  var timestamp = Math.floor(Date.now() / 1000).toString();
+  var signatureData = timestamp + '.' + bodyStr;
+  var signature = 'sha256=' + computeHmacSha256(CONFIG.WEBHOOK_SECRET, signatureData);
+  var targetUrl = CONFIG.WEBHOOK_URL + '?tenant=' + CONFIG.TENANT_SLUG;
+  
+  var response = UrlFetchApp.fetch(targetUrl, {
+    method: 'POST',
+    contentType: 'application/json',
+    headers: {
+      'X-Sheets-Signature': signature,
+      'X-Sheets-Timestamp': timestamp
+    },
+    payload: bodyStr,
+    muteHttpExceptions: true
+  });
+  
+  Logger.log('[TEST] HTTP ' + response.getResponseCode());
+  Logger.log('[TEST] Body: ' + response.getContentText());
 }
