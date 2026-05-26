@@ -728,16 +728,17 @@ export function ConversationViewport() {
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
+    const fileList = e.target.files;
+    if (!fileList || fileList.length === 0) return;
+
+    // CRITICAL: FileList is a LIVE reference — snapshot into Array BEFORE clearing input
+    const files = Array.from(fileList);
 
     // Reset input so same file(s) can be selected again
     e.target.value = '';
 
     const newItems: UploadFileItem[] = [];
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-
+    for (const file of files) {
       if (!isAllowedMime(file.type)) {
         setSendError(`Desteklenmeyen dosya türü: ${file.type || file.name}`);
         setTimeout(() => setSendError(''), 4000);
