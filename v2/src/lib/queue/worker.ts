@@ -120,6 +120,10 @@ export class QueueWorkerEngine {
         this.log.info("Handling meta.webhook.fallback", { tenantId, payload });
         break;
 
+      case "media_batch.check":
+        await this.handleMediaBatchCheck(tenantId, payload as any, metadata);
+        break;
+
       default:
         // FAIL-VISIBLE: Unknown topics are routed to DLQ, never silently dropped
         this.log.error(`[UNKNOWN_TOPIC] Unhandled topic routed to DLQ`, undefined, { topic, tenantId });
@@ -368,6 +372,237 @@ export class QueueWorkerEngine {
 
     } catch (e: any) {
       this.log.error(`[SOCIAL_STATUS_FAILED] Failed to process ${provider} delivery receipt`, e, { traceId });
+    }
+  }
+
+  /**
+   * Media Batch Check — Delayed processor for consolidated media response
+   * Fires after MEDIA_BATCH_WINDOW_MS. Counts all media, sends single acknowledgment.
+   */
+  private async handleMediaBatchCheck(tenantId: string, payload: {
+    phoneNumber: string;
+    conversationId?: string;
+    channel: string;
+    customerId?: string;
+    firstMediaAt: string;
+  }, metadata: WorkerMetadata) {
+    const traceId = metadata.messageId;
+    const { phoneNumber, channel, customerId } = payload;
+    this.log.info(`[MEDIA_BATCH_CHECK] Delayed batch check triggered`, { traceId, phoneNumber, tenantId });
+
+    const db = withTenantDB(tenantId);
+    const MEDIA_BATCH_WINDOW_MS = parseInt(process.env.MEDIA_BATCH_WINDOW_MS || '30000', 10);
+    const batchWindowSec = Math.ceil(MEDIA_BATCH_WINDOW_MS / 1000) + 15; // window + buffer
+
+    try {
+      // Race condition guard: advisory lock on phone hash
+      const lockKeyStr = `media_batch-${tenantId}-${phoneNumber}`;
+      let hash = 0;
+      for (let i = 0; i < lockKeyStr.length; i++) {
+        hash = ((hash << 5) - hash) + lockKeyStr.charCodeAt(i);
+        hash |= 0;
+      }
+      
+      // Try to acquire lock — if another batch check is running, skip
+      const lockResult = await db.executeSafe({
+        text: `SELECT pg_try_advisory_xact_lock($1) as locked`,
+        values: [hash]
+      }) as any[];
+      
+      if (!lockResult[0]?.locked) {
+        this.log.info(`[MEDIA_BATCH_LOCK_SKIP] Another batch check is processing`, { traceId, phoneNumber });
+        AIEventEmitter.emit({ tenantId, type: 'media_batch_skipped_already_processed', category: 'pipeline', payload: { phoneNumber, reason: 'lock_contention' } });
+        return;
+      }
+
+      // Check: has a bot already responded to media in this window?
+      // Use model_used='media_batch_auto' marker — robust, language-independent
+      const alreadyProcessed = await db.executeSafe({
+        text: `
+          SELECT COUNT(*) as cnt FROM messages 
+          WHERE phone_number = $1 AND tenant_id = $2 
+            AND direction = 'out'
+            AND model_used = 'media_batch_auto'
+            AND created_at > NOW() - INTERVAL '${batchWindowSec + 30} seconds'
+        `,
+        values: [phoneNumber, tenantId]
+      }) as any[];
+      
+      if (parseInt(alreadyProcessed[0]?.cnt) > 0) {
+        this.log.info(`[MEDIA_BATCH_ALREADY_PROCESSED] Batch already responded, skipping`, { traceId, phoneNumber });
+        AIEventEmitter.emit({ tenantId, type: 'media_batch_skipped_already_processed', category: 'pipeline', payload: { phoneNumber, reason: 'already_responded' } });
+        return;
+      }
+
+      // Count all media types in the batch window
+      const batchStats = await db.executeSafe({
+        text: `
+          SELECT 
+            COUNT(*) FILTER (WHERE media_type = 'image' OR media_type = 'sticker') as image_count,
+            COUNT(*) FILTER (WHERE media_type = 'document') as doc_count,
+            COUNT(*) FILTER (WHERE media_type = 'audio') as audio_count,
+            COUNT(*) FILTER (WHERE media_type = 'video') as video_count,
+            COUNT(*) as total_count
+          FROM messages 
+          WHERE phone_number = $1 AND tenant_id = $2 
+            AND direction = 'in'
+            AND media_type IS NOT NULL
+            AND created_at > NOW() - INTERVAL '${batchWindowSec} seconds'
+        `,
+        values: [phoneNumber, tenantId]
+      }) as any[];
+
+      const stats = batchStats[0] || {};
+      const imageCount = parseInt(stats.image_count) || 0;
+      const docCount = parseInt(stats.doc_count) || 0;
+      const audioCount = parseInt(stats.audio_count) || 0;
+      const videoCount = parseInt(stats.video_count) || 0;
+      const totalCount = parseInt(stats.total_count) || 0;
+
+      if (totalCount === 0) {
+        this.log.info(`[MEDIA_BATCH_EMPTY] No media found in window, skipping`, { traceId, phoneNumber });
+        return;
+      }
+
+      // Build consolidated response text
+      const parts: string[] = [];
+      if (imageCount > 0) {
+        parts.push(imageCount === 1 ? 'görseliniz' : `${imageCount} görseliniz`);
+      }
+      if (docCount > 0) {
+        parts.push(docCount === 1 ? 'belgeniz' : `${docCount} belgeniz`);
+      }
+      if (audioCount > 0) {
+        parts.push(audioCount === 1 ? 'ses mesajınız' : `${audioCount} ses mesajınız`);
+      }
+      if (videoCount > 0) {
+        parts.push(videoCount === 1 ? 'videonuz' : `${videoCount} videonuz`);
+      }
+
+      let responseText: string;
+      if (parts.length === 0) {
+        responseText = 'Gönderdiğiniz dosya bize ulaştı. Notlarımıza ekledik.';
+      } else {
+        const joined = parts.length > 1 
+          ? parts.slice(0, -1).join(', ') + ' ve ' + parts[parts.length - 1]
+          : parts[0];
+        responseText = `Gönderdiğiniz ${joined} bize ulaştı. Hepsini notlarımıza ekledik; doktor/ekibimiz değerlendirecek.`;
+      }
+
+      // Add audio disclaimer if applicable
+      if (audioCount > 0) {
+        responseText += ' Ses mesajı içeriği ayrıca değerlendirmeye alınacaktır.';
+      }
+
+      // Check conversation status — don't reply if human-handled
+      const convStatus = await db.executeSafe({
+        text: `SELECT status FROM conversations WHERE phone_number = $1 AND tenant_id = $2 LIMIT 1`,
+        values: [phoneNumber, tenantId]
+      }) as any[];
+
+      if (convStatus[0]?.status === 'human') {
+        this.log.info(`[MEDIA_BATCH_HUMAN] Conversation is human-handled, skipping batch response`, { traceId, phoneNumber });
+        return;
+      }
+
+      // Send consolidated response via WhatsApp/Meta
+      const { CredentialsService } = await import('../services/credentials.service');
+      const provider = (channel === 'messenger' || channel === 'instagram' ? channel : 'whatsapp') as 'whatsapp' | 'messenger' | 'instagram';
+      const credentials = await CredentialsService.resolveCredentials(tenantId, provider);
+      
+      if (!credentials.accessToken) {
+        this.log.error(`[MEDIA_BATCH_NO_CREDS] No credentials for batch response`, undefined, { tenantId, channel });
+        return;
+      }
+
+      const msgService = new MessageService(db);
+      let outProviderMessageId: string | null = null;
+      
+      try {
+        if (provider === 'whatsapp' && credentials.whatsappPhoneNumberId) {
+          const res = await msgService.sendWhatsAppMessage(
+            credentials.whatsappPhoneNumberId,
+            credentials.accessToken,
+            phoneNumber,
+            responseText
+          );
+          outProviderMessageId = res.providerMessageId || null;
+        } else {
+          const res = await msgService.sendSocialMessage(
+            credentials.accessToken,
+            phoneNumber,
+            responseText,
+            provider as 'messenger' | 'instagram'
+          );
+          outProviderMessageId = res.providerMessageId || null;
+        }
+      } catch (sendErr) {
+        this.log.error(`[MEDIA_BATCH_SEND_FAILED] Failed to send batch response`, sendErr instanceof Error ? sendErr : new Error(String(sendErr)), { traceId });
+        return;
+      }
+
+      // Save to DB
+      const conversationId = payload.conversationId || (await db.executeSafe({
+        text: `SELECT id FROM conversations WHERE phone_number = $1 AND tenant_id = $2 LIMIT 1`,
+        values: [phoneNumber, tenantId]
+      }) as any[])[0]?.id;
+
+      const outMsg = await msgService.saveMessageIdempotent({
+        phoneNumber,
+        direction: 'out',
+        content: responseText,
+        channel,
+        modelUsed: 'media_batch_auto',
+        providerMessageId: outProviderMessageId,
+        status: 'sent'
+      });
+
+      // Publish realtime event
+      if (outMsg.messageId && conversationId) {
+        try {
+          const { RealtimePublisher } = await import('@/lib/realtime/publisher');
+          await RealtimePublisher.publishMessageCreated(tenantId, {
+            id: outMsg.messageId,
+            conversation_id: conversationId,
+            phone_number: phoneNumber,
+            content: responseText,
+            direction: 'out',
+            status: 'sent',
+            created_at: new Date().toISOString()
+          }, { traceId, spanId: 'media_batch' });
+        } catch (rtErr) {
+          this.log.error(`[MEDIA_BATCH_REALTIME]`, rtErr instanceof Error ? rtErr : new Error(String(rtErr)), { traceId });
+        }
+      }
+
+      AIEventEmitter.emit({ 
+        tenantId, conversationId, customerId, 
+        type: 'media_batch_processed', category: 'pipeline', 
+        payload: { phoneNumber, imageCount, docCount, audioCount, videoCount, totalCount } 
+      });
+
+      this.log.info(`[MEDIA_BATCH_DONE] Consolidated response sent`, { 
+        traceId, phoneNumber, totalCount, imageCount, docCount, audioCount 
+      });
+
+      // Trigger memory summarization (fire-and-forget)
+      if (conversationId) {
+        (async () => {
+          try {
+            const { FeatureFlagService } = await import('@/lib/services/feature-flag.service');
+            const isMemoryEnabled = await FeatureFlagService.isEnabled(tenantId, 'memory_engine', true);
+            if (isMemoryEnabled) {
+              const { MemoryEngine } = await import('@/lib/services/ai/engines/memory');
+              await MemoryEngine.summarizeConversation(tenantId, conversationId);
+            }
+          } catch (memErr) {
+            this.log.error(`[MEDIA_BATCH_MEMORY]`, memErr instanceof Error ? memErr : new Error(String(memErr)), { traceId });
+          }
+        })();
+      }
+
+    } catch (e: any) {
+      this.log.error(`[MEDIA_BATCH_CHECK_FAILED] Batch check handler failed`, e instanceof Error ? e : new Error(String(e)), { traceId, phoneNumber });
     }
   }
 
@@ -800,45 +1035,42 @@ export class QueueWorkerEngine {
       }
     }
 
-    // 3.7 MEDIA BURST DEBOUNCE — Prevent bot from replying to each photo individually
-    // When user sends multiple photos/docs rapidly, only the first triggers AI response.
-    // Subsequent media within 45s window are saved but bot reply is skipped.
+    // 3.7 MEDIA BATCH WINDOW — Delay bot response for media messages
+    // When media arrives, skip immediate bot reply. Schedule a delayed batch check.
+    // After the window closes (default 30s), a single consolidated response is sent.
+    // This prevents bot from replying to each photo individually.
+    //
+    // ARCHITECTURE: We schedule a delayed QStash event for EVERY media message.
+    // handleMediaBatchCheck has an already-processed guard (model_used='media_batch_auto')
+    // that ensures only the FIRST arriving check actually sends a response.
+    // This eliminates race conditions where multiple webhooks arrive simultaneously.
+    const MEDIA_BATCH_WINDOW_MS = parseInt(process.env.MEDIA_BATCH_WINDOW_MS || '30000', 10);
+    
     if (mediaType && !skipBotReply) {
+      skipBotReply = true; // Media messages NEVER get immediate bot reply
+      
       try {
-        const recentBotMediaResponses = await db.executeSafe({
-          text: `
-            SELECT COUNT(*) as cnt FROM messages 
-            WHERE phone_number = $1 AND tenant_id = $2 
-              AND direction = 'out'
-              AND model_used IS NOT NULL
-              AND created_at > NOW() - INTERVAL '45 seconds'
-          `,
-          values: [phoneNumber, tenantId]
-        }) as any[];
+        const { QueueService } = await import('./queue.service');
+        const queue = new QueueService();
+        await queue.publish(tenantId, 'media_batch.check', {
+          phoneNumber,
+          conversationId,
+          channel,
+          customerId,
+          firstMediaAt: new Date().toISOString(),
+        }, { delayMs: MEDIA_BATCH_WINDOW_MS });
         
-        const recentIncomingMedia = await db.executeSafe({
-          text: `
-            SELECT COUNT(*) as cnt FROM messages 
-            WHERE phone_number = $1 AND tenant_id = $2 
-              AND direction = 'in'
-              AND media_type IS NOT NULL
-              AND created_at > NOW() - INTERVAL '45 seconds'
-          `,
-          values: [phoneNumber, tenantId]
-        }) as any[];
-        
-        const botRepliedRecently = parseInt(recentBotMediaResponses[0]?.cnt) > 0;
-        const mediaCount = parseInt(recentIncomingMedia[0]?.cnt) || 0;
-        
-        if (botRepliedRecently && mediaCount > 1) {
-          skipBotReply = true;
-          this.log.info(`[MEDIA_BURST_SKIP] Skipping AI response — bot already replied to media burst (${mediaCount} media in 45s window)`, { 
-            traceId, phoneNumber, mediaType, mediaCount 
-          });
-        }
-      } catch (debounceErr) {
-        // Non-fatal — if check fails, proceed normally
-        this.log.warn(`[MEDIA_BURST_CHECK_FAILED] Non-fatal`, { traceId, error: String(debounceErr) });
+        AIEventEmitter.emit({ 
+          tenantId, conversationId, customerId, 
+          type: 'media_batch_started', category: 'pipeline', 
+          payload: { phoneNumber, mediaType, batchWindowMs: MEDIA_BATCH_WINDOW_MS } 
+        });
+        this.log.info(`[MEDIA_BATCH] Delayed check scheduled for media message`, {
+          traceId, phoneNumber, mediaType
+        });
+      } catch (batchErr) {
+        // Non-fatal — if batch scheduling fails, media is still saved, just no batch response
+        this.log.warn(`[MEDIA_BATCH_ERROR] Non-fatal batch scheduling error`, { traceId, error: String(batchErr) });
       }
     }
 

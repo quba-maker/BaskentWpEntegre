@@ -3,9 +3,9 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Send, Paperclip, User, MessageCircle, ChevronLeft, ChevronDown, ArrowDown, Info, ShieldAlert, Sparkles, Zap, Check, CheckCheck, Clock, FileText, Play, Mic, MapPin, X, Download } from "lucide-react";
+import { Send, Paperclip, User, MessageCircle, ChevronLeft, ChevronRight, ChevronDown, ArrowDown, Info, ShieldAlert, Sparkles, Zap, Check, CheckCheck, Clock, FileText, Play, Mic, MapPin, X, Download } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { getMessages, sendMessage, toggleBotStatus } from "@/app/actions/inbox";
+import { getMessages, sendMessage, sendMediaMessage, toggleBotStatus } from "@/app/actions/inbox";
 import { useInboxStore } from "@/store/inbox-store";
 import { AiRuntimeTimeline } from "@/components/features/ai-observability/AiRuntimeTimeline";
 import { getAiStatusForConversation } from "@/app/actions/ai-observability";
@@ -50,24 +50,72 @@ function ChatSkeleton() {
   );
 }
 
-// -- Media Lightbox (WhatsApp-quality fullscreen viewer) --
-function MediaLightbox({ src, type, caption, onClose }: { src: string; type: string; caption?: string; onClose: () => void }) {
-  // ESC key handler
+// -- Media Gallery Lightbox (WhatsApp-quality fullscreen gallery viewer) --
+function MediaGalleryLightbox({ 
+  images, 
+  currentIndex, 
+  onClose, 
+  onNavigate 
+}: { 
+  images: Array<{ src: string; caption?: string; timeMs?: number }>;
+  currentIndex: number;
+  onClose: () => void;
+  onNavigate: (index: number) => void;
+}) {
+  const thumbStripRef = useRef<HTMLDivElement>(null);
+  const touchStartX = useRef<number>(0);
+  const touchDeltaX = useRef<number>(0);
+  const current = images[currentIndex];
+
+  const goNext = useCallback(() => {
+    if (currentIndex < images.length - 1) onNavigate(currentIndex + 1);
+  }, [currentIndex, images.length, onNavigate]);
+
+  const goPrev = useCallback(() => {
+    if (currentIndex > 0) onNavigate(currentIndex - 1);
+  }, [currentIndex, onNavigate]);
+
+  // Keyboard + scroll lock
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
+      if (e.key === 'ArrowRight') goNext();
+      if (e.key === 'ArrowLeft') goPrev();
     };
     document.addEventListener('keydown', handleKeyDown);
-    
-    // Lock body scroll while lightbox is open
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
       document.body.style.overflow = prevOverflow;
     };
-  }, [onClose]);
+  }, [onClose, goNext, goPrev]);
+
+  // Auto-scroll thumbnail strip to active
+  useEffect(() => {
+    if (thumbStripRef.current) {
+      const activeThumb = thumbStripRef.current.children[currentIndex] as HTMLElement;
+      if (activeThumb) {
+        activeThumb.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+      }
+    }
+  }, [currentIndex]);
+
+  // Touch handlers for swipe
+  const onTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX;
+    touchDeltaX.current = 0;
+  };
+  const onTouchMove = (e: React.TouchEvent) => {
+    touchDeltaX.current = e.touches[0].clientX - touchStartX.current;
+  };
+  const onTouchEnd = () => {
+    if (touchDeltaX.current > 60) goPrev();
+    else if (touchDeltaX.current < -60) goNext();
+    touchDeltaX.current = 0;
+  };
+
+  if (!current) return null;
 
   return (
     <motion.div
@@ -75,20 +123,23 @@ function MediaLightbox({ src, type, caption, onClose }: { src: string; type: str
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.2 }}
-      className="fixed inset-0 z-[9999] flex flex-col items-center justify-center"
+      className="fixed inset-0 z-[9999] flex flex-col"
       style={{ background: "rgba(0,0,0,0.95)" }}
       onClick={onClose}
     >
-      {/* Top bar: close + download */}
+      {/* Top bar */}
       <div 
-        className="absolute top-0 left-0 right-0 flex items-center justify-between px-4 py-3 z-20"
+        className="flex items-center justify-between px-4 py-3 z-20 flex-shrink-0"
         style={{ background: "linear-gradient(to bottom, rgba(0,0,0,0.6), transparent)" }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div />
+        {/* Counter */}
+        <span className="text-white/80 text-sm font-semibold tabular-nums">
+          {currentIndex + 1} / {images.length}
+        </span>
         <div className="flex items-center gap-2">
           <a
-            href={src}
+            href={current.src}
             download
             target="_blank"
             rel="noopener noreferrer"
@@ -106,40 +157,95 @@ function MediaLightbox({ src, type, caption, onClose }: { src: string; type: str
         </div>
       </div>
 
-      {/* Media content — centered */}
+      {/* Main image area with swipe + arrows */}
       <div
-        className="flex-1 flex items-center justify-center w-full px-4 py-16"
+        className="flex-1 flex items-center justify-center relative px-4 min-h-0"
         onClick={(e) => e.stopPropagation()}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
       >
-        {type === 'video' ? (
-          <video
-            src={src}
-            controls
-            autoPlay
-            className="max-w-full max-h-[85vh] rounded-lg shadow-2xl"
-            style={{ objectFit: 'contain' }}
-          />
-        ) : (
-          <img
-            src={src}
-            alt={caption || 'Media'}
-            className="max-w-full max-h-[85vh] rounded-lg shadow-2xl select-none"
+        {/* Left arrow */}
+        {currentIndex > 0 && (
+          <button
+            onClick={goPrev}
+            className="absolute left-2 md:left-4 top-1/2 -translate-y-1/2 w-10 h-10 md:w-12 md:h-12 rounded-full bg-black/40 hover:bg-black/60 flex items-center justify-center transition-colors z-10"
+          >
+            <ChevronLeft className="w-6 h-6 text-white" />
+          </button>
+        )}
+
+        {/* Image */}
+        <AnimatePresence mode="wait">
+          <motion.img
+            key={current.src}
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            transition={{ duration: 0.15 }}
+            src={current.src}
+            alt={current.caption || 'Media'}
+            className="max-w-full max-h-[70vh] rounded-lg shadow-2xl select-none"
             style={{ objectFit: 'contain' }}
             draggable={false}
           />
+        </AnimatePresence>
+
+        {/* Right arrow */}
+        {currentIndex < images.length - 1 && (
+          <button
+            onClick={goNext}
+            className="absolute right-2 md:right-4 top-1/2 -translate-y-1/2 w-10 h-10 md:w-12 md:h-12 rounded-full bg-black/40 hover:bg-black/60 flex items-center justify-center transition-colors z-10"
+          >
+            <ChevronRight className="w-6 h-6 text-white" />
+          </button>
         )}
       </div>
 
-      {/* Caption bar — bottom */}
-      {caption && (
+      {/* Caption */}
+      {current.caption && (
         <div 
-          className="absolute bottom-0 left-0 right-0 px-6 py-4 text-center z-20"
-          style={{ background: "linear-gradient(to top, rgba(0,0,0,0.7), transparent)" }}
+          className="text-center px-6 py-2 flex-shrink-0"
           onClick={(e) => e.stopPropagation()}
         >
           <p className="text-white/90 text-sm font-medium max-w-lg mx-auto leading-relaxed">
-            {caption}
+            {current.caption}
           </p>
+        </div>
+      )}
+
+      {/* Thumbnail strip */}
+      {images.length > 1 && (
+        <div 
+          className="flex-shrink-0 px-4 py-3 z-20"
+          style={{ background: "linear-gradient(to top, rgba(0,0,0,0.7), transparent)" }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div 
+            ref={thumbStripRef}
+            className="flex gap-2 overflow-x-auto scrollbar-hide justify-center"
+            style={{ scrollBehavior: 'smooth' }}
+          >
+            {images.map((img, idx) => (
+              <button
+                key={idx}
+                onClick={() => onNavigate(idx)}
+                className={`flex-shrink-0 w-14 h-14 rounded-lg overflow-hidden transition-all duration-200 ${
+                  idx === currentIndex 
+                    ? 'ring-2 ring-white ring-offset-1 ring-offset-black/50 opacity-100 scale-105' 
+                    : 'opacity-50 hover:opacity-75'
+                }`}
+              >
+                <img
+                  src={img.src}
+                  alt=""
+                  className="w-full h-full object-cover"
+                  loading="lazy"
+                  draggable={false}
+                />
+              </button>
+            ))}
+          </div>
         </div>
       )}
     </motion.div>
@@ -147,7 +253,7 @@ function MediaLightbox({ src, type, caption, onClose }: { src: string; type: str
 }
 
 // -- Media Bubble Renderer --
-function MediaBubbleContent({ message, onLightbox }: { message: any; onLightbox: (src: string, type: string, caption?: string) => void }) {
+function MediaBubbleContent({ message, onGalleryOpen }: { message: any; onGalleryOpen: (src: string) => void }) {
   const mt = message.mediaType;
   const url = message.mediaUrl;
   const meta = message.mediaMetadata;
@@ -163,12 +269,12 @@ function MediaBubbleContent({ message, onLightbox }: { message: any; onLightbox:
           alt={meta?.caption || 'Görsel'}
           className="rounded-lg max-w-full max-h-64 object-cover cursor-pointer hover:opacity-90 transition-opacity mb-1"
           loading="lazy"
-          onClick={() => onLightbox(url, 'image', meta?.caption)}
+          onClick={() => onGalleryOpen(url)}
         />
       );
     case 'video':
       return (
-        <div className="relative cursor-pointer mb-1" onClick={() => onLightbox(url, 'video', meta?.caption)}>
+        <div className="relative cursor-pointer mb-1" onClick={() => onGalleryOpen(url)}>
           <video src={url} className="rounded-lg max-w-full max-h-64 object-cover" preload="metadata" />
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="w-12 h-12 rounded-full bg-black/50 flex items-center justify-center">
@@ -356,7 +462,18 @@ export function ConversationViewport() {
   const [isSending, setIsSending] = useState(false);
   const [isTogglingBot, setIsTogglingBot] = useState(false);
   const [sendError, setSendError] = useState("");
-  const [lightbox, setLightbox] = useState<{ src: string; type: string; caption?: string } | null>(null);
+  const [gallery, setGallery] = useState<{
+    images: Array<{ src: string; caption?: string; timeMs?: number }>;
+    currentIndex: number;
+  } | null>(null);
+  // File upload state
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadFile, setUploadFile] = useState<{
+    file: File;
+    preview?: string;
+    mediaType: 'image' | 'document' | 'audio';
+  } | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
   const queryClient = useQueryClient();
   const params = useParams();
   const tenantSlug = params?.tenant_slug as string;
@@ -581,6 +698,123 @@ export function ConversationViewport() {
     }
   };
 
+  // ── File Upload Handlers ──
+  const ALLOWED_MIMES = [
+    'image/jpeg', 'image/png', 'image/webp',
+    'application/pdf',
+    'audio/mpeg', 'audio/ogg', 'audio/aac', 'audio/amr',
+  ];
+  const MAX_FILE_SIZE_MB = 10;
+
+  const getMediaTypeFromMime = (mime: string): 'image' | 'document' | 'audio' => {
+    if (mime.startsWith('image/')) return 'image';
+    if (mime.startsWith('audio/')) return 'audio';
+    return 'document';
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Reset input so same file can be selected again
+    e.target.value = '';
+
+    if (!ALLOWED_MIMES.includes(file.type)) {
+      setSendError(`Desteklenmeyen dosya türü: ${file.type}`);
+      setTimeout(() => setSendError(''), 4000);
+      return;
+    }
+
+    if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
+      setSendError(`Dosya çok büyük (${(file.size / 1024 / 1024).toFixed(1)}MB). Maks: ${MAX_FILE_SIZE_MB}MB`);
+      setTimeout(() => setSendError(''), 4000);
+      return;
+    }
+
+    const mediaType = getMediaTypeFromMime(file.type);
+    let preview: string | undefined;
+    if (mediaType === 'image') {
+      preview = URL.createObjectURL(file);
+    }
+
+    setUploadFile({ file, preview, mediaType });
+  };
+
+  const handleCancelUpload = () => {
+    if (uploadFile?.preview) URL.revokeObjectURL(uploadFile.preview);
+    setUploadFile(null);
+  };
+
+  const handleFileUploadAndSend = async () => {
+    if (!uploadFile || !activePhone || isUploading) return;
+    setIsUploading(true);
+    setSendError('');
+
+    try {
+      // 1. Upload to Vercel Blob via API route
+      const formData = new FormData();
+      formData.append('file', uploadFile.file);
+
+      const uploadRes = await fetch('/api/panel/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!uploadRes.ok) {
+        const errData = await uploadRes.json().catch(() => ({ error: 'Yükleme başarısız' }));
+        throw new Error(errData.error || 'Yükleme başarısız');
+      }
+
+      const { url: blobUrl, filename, mimeType, size } = await uploadRes.json();
+
+      // 2. Optimistic UI
+      const optimisticId = `temp-media-${Date.now()}`;
+      const contentText = uploadFile.mediaType === 'image' ? '📷 Fotoğraf' 
+        : uploadFile.mediaType === 'audio' ? '🎵 Ses' 
+        : `📎 ${filename}`;
+      
+      queryClient.setQueryData(["messages", activePhone], (oldData: any[]) => {
+        return [...(oldData || []), {
+          id: optimisticId,
+          sender: "agent",
+          text: contentText,
+          timeMs: Date.now(),
+          dateLabel: 'Bugün',
+          status: "pending",
+          mediaType: uploadFile.mediaType,
+          mediaUrl: blobUrl,
+          mediaMetadata: { filename, mime_type: mimeType },
+        }];
+      });
+
+      scrollToBottom("smooth");
+
+      // 3. Send via server action
+      const res = await sendMediaMessage(
+        activePhone,
+        blobUrl,
+        uploadFile.mediaType,
+        filename,
+        mimeType,
+        size,
+        inputText.trim() || undefined
+      );
+
+      if (!res.success) {
+        throw new Error(res.error || 'Gönderim başarısız');
+      }
+
+      // Success — clear upload state and caption
+      setUploadFile(null);
+      setInputText('');
+    } catch (err: any) {
+      setSendError('Dosya gönderilemedi: ' + err.message);
+      setTimeout(() => setSendError(''), 4000);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   const handleToggleBot = async () => {
     if (!activePhone || isTogglingBot) return;
     setIsTogglingBot(true);
@@ -604,6 +838,18 @@ export function ConversationViewport() {
     }
     setIsTogglingBot(false);
   };
+
+  // Collect all conversation images for gallery navigation (inbound + outbound)
+  const allConversationImages = useMemo(() => {
+    if (!messages || messages.length === 0) return [];
+    return messages
+      .filter((m: any) => (m.mediaType === 'image' || m.mediaType === 'sticker') && m.mediaUrl)
+      .map((m: any) => ({
+        src: m.mediaUrl,
+        caption: m.mediaMetadata?.caption || undefined,
+        timeMs: m.timeMs,
+      }));
+  }, [messages]);
 
   // Flatten date-grouped messages into a dynamic virtualization feed
   const flatItems = useMemo<FlatItem[]>(() => {
@@ -643,44 +889,80 @@ export function ConversationViewport() {
         type: "header",
         dateLabel,
       });
-      // Group consecutive images from same sender into media_group items
+      // Smart image grouping — groups same-sender images within 2min window
+      // Skips interleaved bot messages (which shouldn't happen after batch fix, but handles legacy data)
+      // User text messages break the group
       let i = 0;
       while (i < groupMsgs.length) {
         const msg = groupMsgs[i];
         const isImage = (msg.mediaType === 'image' || msg.mediaType === 'sticker') && msg.mediaUrl;
         
         if (isImage) {
-          // Collect consecutive images from same sender
           const group: any[] = [msg];
           let j = i + 1;
+          
           while (j < groupMsgs.length) {
             const next = groupMsgs[j];
             const nextIsImage = (next.mediaType === 'image' || next.mediaType === 'sticker') && next.mediaUrl;
             const sameSender = next.sender === msg.sender;
-            // Within 2 minutes of previous
-            const timeDiff = next.timeMs && group[group.length - 1].timeMs 
-              ? Math.abs(next.timeMs - group[group.length - 1].timeMs) 
-              : 0;
-            const withinWindow = timeDiff < 120000; // 2 min
             
-            if (nextIsImage && sameSender && withinWindow) {
-              group.push(next);
-              j++;
+            // Skip bot auto-replies between user images (interleaved bot messages)
+            const isBotInterleave = next.sender !== msg.sender && next.sender !== 'user' && !nextIsImage;
+            if (isBotInterleave && msg.sender === 'user') {
+              // Check if there's another user image after this bot message
+              let k = j + 1;
+              let foundNextImage = false;
+              while (k < groupMsgs.length && k - j <= 3) { // Look ahead max 3 messages
+                const peek = groupMsgs[k];
+                if (peek.sender === msg.sender && (peek.mediaType === 'image' || peek.mediaType === 'sticker') && peek.mediaUrl) {
+                  const timeDiff = peek.timeMs && group[group.length - 1].timeMs 
+                    ? Math.abs(peek.timeMs - group[group.length - 1].timeMs) : 0;
+                  if (timeDiff < 120000) { foundNextImage = true; }
+                }
+                k++;
+              }
+              if (foundNextImage) {
+                j++; // Skip bot message, continue looking
+                continue;
+              } else {
+                break; // No more user images after bot message
+              }
+            }
+            
+            // User TEXT message from same sender breaks the group
+            if (sameSender && !nextIsImage && next.content?.trim()) {
+              break;
+            }
+            
+            // Non-image from different sender — break
+            if (!nextIsImage && !isBotInterleave) {
+              break;
+            }
+            
+            // Same sender image within 2min window
+            if (nextIsImage && sameSender) {
+              const timeDiff = next.timeMs && group[group.length - 1].timeMs 
+                ? Math.abs(next.timeMs - group[group.length - 1].timeMs) : 0;
+              const withinWindow = timeDiff < 120000;
+              if (withinWindow) {
+                group.push(next);
+                j++;
+              } else {
+                break;
+              }
             } else {
               break;
             }
           }
           
           if (group.length > 1) {
-            // Multiple images → media_group
             items.push({
               id: `media-group-${group[0].id}`,
               type: "media_group",
               messages: group,
-              message: group[0], // Keep first for sender info
+              message: group[0],
             });
           } else {
-            // Single image → normal message
             items.push({
               id: String(msg.id),
               type: "message",
@@ -782,9 +1064,14 @@ export function ConversationViewport() {
   return (
     <div className={`w-full md:flex-1 md:flex flex-col bg-transparent h-full relative z-0 ${mobileView === "chat" ? "flex" : "hidden md:flex"}`}>
       
-      {/* ── Media Lightbox (Portal to body — escapes z-0 stacking context) ── */}
-      {lightbox && createPortal(
-        <MediaLightbox src={lightbox.src} type={lightbox.type} caption={lightbox.caption} onClose={() => setLightbox(null)} />,
+      {/* ── Media Gallery Lightbox (Portal to body — escapes z-0 stacking context) ── */}
+      {gallery && createPortal(
+        <MediaGalleryLightbox 
+          images={gallery.images} 
+          currentIndex={gallery.currentIndex} 
+          onClose={() => setGallery(null)} 
+          onNavigate={(idx) => setGallery(prev => prev ? { ...prev, currentIndex: idx } : null)}
+        />,
         document.body
       )}
       {/* ── Header ── */}
@@ -921,8 +1208,17 @@ export function ConversationViewport() {
                         {item.dateLabel}
                       </span>
                     </div>
-                  ) : item.type === "media_group" ? (
-                    /* ── WhatsApp-style Image Grid ── */
+                  ) : item.type === "media_group" ? (() => {
+                    /* ── WhatsApp-style Image Grid with +N overlay ── */
+                    const allGroupImages = item.messages || [];
+                    const totalCount = allGroupImages.length;
+                    const displayImages = allGroupImages.slice(0, Math.min(4, totalCount));
+                    const overflow = totalCount - 4;
+                    const cols = displayImages.length === 1 ? 1 : 2;
+                    // For 3 images: first image spans full width
+                    const isThreeLayout = displayImages.length === 3;
+
+                    return (
                     <div className={`flex w-full ${item.message.sender === "user" ? "justify-start" : "justify-end"} pb-4`}>
                       <div 
                         className={`relative max-w-[85%] md:max-w-[65%] overflow-hidden shadow-sm transition-all duration-200 hover:shadow-md ${
@@ -939,36 +1235,56 @@ export function ConversationViewport() {
                         <div 
                           className="grid gap-[2px]"
                           style={{ 
-                            gridTemplateColumns: (item.messages?.length || 0) === 1 
-                              ? '1fr' 
-                              : 'repeat(2, 1fr)' 
+                            gridTemplateColumns: cols === 1 ? '1fr' : 'repeat(2, 1fr)',
                           }}
                         >
-                          {item.messages?.map((imgMsg: any, idx: number) => (
-                            <img
-                              key={imgMsg.id}
-                              src={imgMsg.mediaUrl}
-                              alt={imgMsg.mediaMetadata?.caption || `Görsel ${idx + 1}`}
-                              className="w-full h-full object-cover cursor-pointer hover:opacity-90 transition-opacity"
-                              style={{ 
-                                aspectRatio: (item.messages?.length || 0) <= 2 ? '4/3' : '1/1',
-                                minHeight: '100px',
-                                maxHeight: '220px',
-                              }}
-                              loading="lazy"
-                              onClick={() => setLightbox({ 
-                                src: imgMsg.mediaUrl, 
-                                type: 'image', 
-                                caption: imgMsg.mediaMetadata?.caption 
-                              })}
-                            />
-                          ))}
+                          {displayImages.map((imgMsg: any, idx: number) => {
+                            const isLastWithOverflow = idx === 3 && overflow > 0;
+                            // 3-image layout: first image spans 2 columns
+                            const spanTwo = isThreeLayout && idx === 0;
+                            
+                            return (
+                              <div 
+                                key={imgMsg.id} 
+                                className="relative cursor-pointer overflow-hidden"
+                                style={{ 
+                                  gridColumn: spanTwo ? 'span 2' : undefined,
+                                  aspectRatio: spanTwo ? '2/1' : (displayImages.length <= 2 ? '4/3' : '1/1'),
+                                  minHeight: '80px',
+                                  maxHeight: spanTwo ? '200px' : '180px',
+                                }}
+                                onClick={() => {
+                                  // Find this image's index in allConversationImages
+                                  const globalIdx = allConversationImages.findIndex(
+                                    (ci: any) => ci.src === imgMsg.mediaUrl
+                                  );
+                                  setGallery({
+                                    images: allConversationImages,
+                                    currentIndex: globalIdx >= 0 ? globalIdx : 0,
+                                  });
+                                }}
+                              >
+                                <img
+                                  src={imgMsg.mediaUrl}
+                                  alt={imgMsg.mediaMetadata?.caption || `Görsel ${idx + 1}`}
+                                  className="w-full h-full object-cover hover:opacity-90 transition-opacity"
+                                  loading="lazy"
+                                  draggable={false}
+                                />
+                                {isLastWithOverflow && (
+                                  <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                                    <span className="text-white text-2xl font-bold">+{overflow}</span>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
                         {/* Timestamp on last image */}
                         <div className="absolute bottom-1 right-2 flex items-center gap-1 text-[10px] font-semibold tracking-wide" style={{ color: "rgba(255,255,255,0.85)", textShadow: "0 1px 3px rgba(0,0,0,0.5)" }}>
                           <span>
-                            {item.messages && item.messages[item.messages.length - 1]?.timeMs 
-                              ? new Date(item.messages[item.messages.length - 1].timeMs).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) 
+                            {allGroupImages[allGroupImages.length - 1]?.timeMs 
+                              ? new Date(allGroupImages[allGroupImages.length - 1].timeMs).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) 
                               : ''}
                           </span>
                           <span className="ml-0.5">
@@ -977,7 +1293,8 @@ export function ConversationViewport() {
                         </div>
                       </div>
                     </div>
-                  ) : (
+                    );
+                  })() : (
                     <div className="flex flex-col q-bubble-in w-full pb-4">
                       {item.message.sender === "system" ? (
                         <div className="flex w-full justify-center">
@@ -1028,7 +1345,13 @@ export function ConversationViewport() {
                             {item.message.mediaType && item.message.mediaUrl && (
                               <MediaBubbleContent
                                 message={item.message}
-                                onLightbox={(src, type, caption) => setLightbox({ src, type, caption })}
+                                onGalleryOpen={(src) => {
+                                  const idx = allConversationImages.findIndex((ci: any) => ci.src === src);
+                                  setGallery({
+                                    images: allConversationImages,
+                                    currentIndex: idx >= 0 ? idx : 0,
+                                  });
+                                }}
                               />
                             )}
 
@@ -1182,35 +1505,94 @@ export function ConversationViewport() {
 
       {/* ── Input Area ── */}
       <div className="p-6 q-glass-strong z-10" style={{ borderTop: "1px solid var(--q-border-default)", boxShadow: "0 -1px 10px rgba(0,0,0,0.02)" }}>
+        {/* Upload Preview Bar */}
+        {uploadFile && (
+          <div 
+            className="mb-3 flex items-center gap-3 px-4 py-3 rounded-xl"
+            style={{ background: "var(--q-bg-secondary)", border: "1px solid var(--q-border-default)" }}
+          >
+            {uploadFile.preview ? (
+              <img src={uploadFile.preview} alt="" className="w-12 h-12 rounded-lg object-cover flex-shrink-0" />
+            ) : (
+              <div className="w-12 h-12 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "var(--q-bg-hover)" }}>
+                {uploadFile.mediaType === 'audio' ? (
+                  <Mic className="w-5 h-5" style={{ color: "var(--q-text-secondary)" }} />
+                ) : (
+                  <FileText className="w-5 h-5" style={{ color: "var(--q-text-secondary)" }} />
+                )}
+              </div>
+            )}
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold truncate" style={{ color: "var(--q-text-primary)" }}>
+                {uploadFile.file.name}
+              </p>
+              <p className="text-xs" style={{ color: "var(--q-text-secondary)" }}>
+                {(uploadFile.file.size / 1024).toFixed(0)} KB • {uploadFile.mediaType === 'image' ? 'Görsel' : uploadFile.mediaType === 'audio' ? 'Ses' : 'Belge'}
+              </p>
+            </div>
+            <button
+              onClick={handleCancelUpload}
+              className="p-1.5 rounded-full hover:bg-[--q-bg-hover] transition-colors"
+              title="İptal"
+            >
+              <X className="w-4 h-4" style={{ color: "var(--q-text-secondary)" }} />
+            </button>
+          </div>
+        )}
+
+        {/* Hidden file input */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp,application/pdf,audio/mpeg,audio/ogg,audio/aac,audio/amr"
+          className="hidden"
+          onChange={handleFileSelect}
+        />
+
         <div
           className="flex items-end gap-3 p-2 rounded-2xl transition-all focus-within:ring-4"
           style={{ background: "rgba(255,255,255,0.8)", border: "1px solid var(--q-border-default)", boxShadow: "var(--q-shadow-sm)" }}
         >
-          <button className="p-2.5 rounded-xl transition-all duration-200 cursor-pointer hover:bg-[--q-bg-hover]" style={{ color: "var(--q-text-secondary)" }}>
+          <button 
+            className="p-2.5 rounded-xl transition-all duration-200 cursor-pointer hover:bg-[--q-bg-hover]" 
+            style={{ color: "var(--q-text-secondary)" }}
+            onClick={() => fileInputRef.current?.click()}
+            title="Dosya ekle (Görsel, PDF, Ses)"
+          >
             <Paperclip className="w-5 h-5" />
           </button>
 
           <textarea
             value={inputText}
             onChange={handleInputChange}
-            onKeyDown={handleKeyDown}
-            placeholder="Mesajınızı yazın..."
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                if (uploadFile) {
+                  handleFileUploadAndSend();
+                } else {
+                  handleSend();
+                }
+                if (activePhone) setTypingStatus(false, "human");
+              }
+            }}
+            placeholder={uploadFile ? "Açıklama ekleyin (opsiyonel)..." : "Mesajınızı yazın..."}
             className="flex-1 max-h-32 min-h-[44px] bg-transparent resize-none outline-none py-2.5 text-[15px] font-medium"
             style={{ color: "var(--q-text-primary)" }}
             rows={1}
-            disabled={isSending}
+            disabled={isSending || isUploading}
           />
 
           <button
-            onClick={handleSend}
-            disabled={isSending || !inputText.trim()}
+            onClick={uploadFile ? handleFileUploadAndSend : handleSend}
+            disabled={(isSending || isUploading) || (!uploadFile && !inputText.trim())}
             className="p-2.5 text-white rounded-xl transition-all duration-200 flex items-center justify-center cursor-pointer q-press"
             style={{
-              background: inputText.trim() && !isSending ? "var(--q-blue)" : "rgba(134,134,139,0.5)",
-              boxShadow: inputText.trim() && !isSending ? "0 4px 10px rgba(0,122,255,0.3)" : "none",
+              background: (uploadFile || inputText.trim()) && !isSending && !isUploading ? "var(--q-blue)" : "rgba(134,134,139,0.5)",
+              boxShadow: (uploadFile || inputText.trim()) && !isSending && !isUploading ? "0 4px 10px rgba(0,122,255,0.3)" : "none",
             }}
           >
-            {isSending ? (
+            {isSending || isUploading ? (
               <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin ml-0.5" />
             ) : (
               <Send className="w-5 h-5 ml-0.5" />

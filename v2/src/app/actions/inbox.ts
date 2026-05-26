@@ -469,6 +469,150 @@ export async function sendMessage(phone: string, text: string) {
   });
 }
 
+export async function sendMediaMessage(phone: string, mediaUrl: string, mediaType: string, filename: string, mimeType: string, fileSize: number, caption?: string) {
+  if (!phone || !mediaUrl || !mediaType) return { success: false, error: "Missing data" };
+
+  const sanitizedPhone = phone.replace(/[^\d+]/g, "");
+  if (sanitizedPhone.length < 6 || sanitizedPhone.length > 20) {
+    return { success: false, error: "Invalid phone number" };
+  }
+
+  return withActionGuard(
+    { actionName: 'sendMediaMessage' },
+    async (ctx) => {
+      // Resolve channel
+      const convRows = await ctx.db.executeSafe({
+        text: `SELECT channel FROM conversations WHERE phone_number = $1 AND tenant_id = $2 LIMIT 1`,
+        values: [phone, ctx.tenantId]
+      });
+      const channel = convRows[0]?.channel || 'whatsapp';
+
+      const provider = (channel === 'messenger' || channel === 'instagram' ? channel : 'whatsapp') as 'whatsapp' | 'messenger' | 'instagram';
+      const credentials = await CredentialsService.resolveCredentials(ctx.tenantId, provider);
+      const META_ACCESS_TOKEN = credentials.accessToken;
+      const PHONE_NUMBER_ID = credentials.whatsappPhoneNumberId;
+
+      let providerMessageId: string | null = null;
+      let messageStatus = 'pending';
+
+      if (META_ACCESS_TOKEN && PHONE_NUMBER_ID && channel === 'whatsapp') {
+        // Determine WhatsApp media type
+        let waType = 'image';
+        let waMediaPayload: any = {};
+
+        if (mediaType === 'image') {
+          waType = 'image';
+          waMediaPayload = { link: mediaUrl };
+          if (caption) waMediaPayload.caption = caption;
+        } else if (mediaType === 'document') {
+          waType = 'document';
+          waMediaPayload = { link: mediaUrl, filename: filename || 'document' };
+          if (caption) waMediaPayload.caption = caption;
+        } else if (mediaType === 'audio') {
+          waType = 'audio';
+          waMediaPayload = { link: mediaUrl };
+        }
+
+        try {
+          const response = await fetch(`https://graph.facebook.com/v25.0/${PHONE_NUMBER_ID}/messages`, {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${META_ACCESS_TOKEN}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              messaging_product: "whatsapp",
+              to: phone,
+              type: waType,
+              [waType]: waMediaPayload,
+            }),
+          });
+
+          if (response.ok) {
+            const resData = await response.json();
+            providerMessageId = resData.messages?.[0]?.id || null;
+            messageStatus = 'sent';
+          } else {
+            const errData = await response.json().catch(() => ({}));
+            const { logger: inboxLog } = await import("@/lib/core/logger");
+            inboxLog.withContext({ module: 'Inbox' }).error(`WhatsApp media send failed`, undefined, { error: errData });
+          }
+        } catch (sendErr) {
+          const { logger: inboxLog } = await import("@/lib/core/logger");
+          inboxLog.withContext({ module: 'Inbox' }).error(`WhatsApp media send exception`, sendErr instanceof Error ? sendErr : new Error(String(sendErr)));
+        }
+      }
+
+      // Build content text
+      const { MediaStorageService } = await import("@/lib/services/media-storage.service");
+      const contentText = caption || MediaStorageService.getMediaContentText(mediaType, { filename });
+
+      // Save to DB with media fields
+      const msgInsert = await ctx.db.executeSafe({
+        text: `INSERT INTO messages (tenant_id, phone_number, direction, content, channel, status, provider_message_id, media_type, media_url, media_metadata)
+               VALUES ($1, $2, 'out', $3, $4, $5, $6, $7, $8, $9)
+               RETURNING id`,
+        values: [
+          ctx.tenantId, phone, contentText, channel, messageStatus, providerMessageId,
+          mediaType, mediaUrl,
+          JSON.stringify({ filename, mime_type: mimeType, size: fileSize, caption: caption || null })
+        ]
+      });
+
+      const messageId = Array.isArray(msgInsert) ? msgInsert[0]?.id : (msgInsert as any)?.rows?.[0]?.id;
+
+      // Update conversation
+      await ctx.db.executeSafe({
+        text: `UPDATE conversations 
+               SET last_message_at = NOW(), 
+                   last_message_content = $1,
+                   last_message_channel = $2,
+                   last_message_status = $3,
+                   last_message_direction = 'out',
+                   message_count = message_count + 1
+               WHERE phone_number = $4 AND tenant_id = $5`,
+        values: [contentText, channel, messageStatus, phone, ctx.tenantId]
+      });
+
+      // Realtime event
+      if (messageId) {
+        try {
+          const { RealtimePublisher } = await import("@/lib/realtime/publisher");
+          const conversationRows = await ctx.db.executeSafe({
+            text: `SELECT id FROM conversations WHERE phone_number = $1 AND tenant_id = $2 LIMIT 1`,
+            values: [phone, ctx.tenantId]
+          });
+          const conversationId = Array.isArray(conversationRows) ? conversationRows[0]?.id : (conversationRows as any)?.rows?.[0]?.id;
+          
+          if (conversationId) {
+            await RealtimePublisher.publishMessageCreated(
+              ctx.tenantId,
+              {
+                id: messageId,
+                conversation_id: conversationId,
+                phone_number: phone,
+                content: contentText,
+                direction: 'out',
+                status: messageStatus,
+                media_type: mediaType,
+                media_url: mediaUrl,
+                created_at: new Date().toISOString()
+              }
+            );
+          }
+        } catch (err) {
+          console.error("Failed to publish realtime event for media message:", err);
+        }
+      }
+
+      return { success: true };
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error };
+    return { success: true };
+  });
+}
+
 export async function updateCrmData(phone: string, stage: string, department: string, country?: string, notes?: string) {
   if (!phone) return { success: false };
 
