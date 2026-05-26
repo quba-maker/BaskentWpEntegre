@@ -800,6 +800,48 @@ export class QueueWorkerEngine {
       }
     }
 
+    // 3.7 MEDIA BURST DEBOUNCE — Prevent bot from replying to each photo individually
+    // When user sends multiple photos/docs rapidly, only the first triggers AI response.
+    // Subsequent media within 45s window are saved but bot reply is skipped.
+    if (mediaType && !skipBotReply) {
+      try {
+        const recentBotMediaResponses = await db.executeSafe({
+          text: `
+            SELECT COUNT(*) as cnt FROM messages 
+            WHERE phone_number = $1 AND tenant_id = $2 
+              AND direction = 'out'
+              AND model_used IS NOT NULL
+              AND created_at > NOW() - INTERVAL '45 seconds'
+          `,
+          values: [phoneNumber, tenantId]
+        }) as any[];
+        
+        const recentIncomingMedia = await db.executeSafe({
+          text: `
+            SELECT COUNT(*) as cnt FROM messages 
+            WHERE phone_number = $1 AND tenant_id = $2 
+              AND direction = 'in'
+              AND media_type IS NOT NULL
+              AND created_at > NOW() - INTERVAL '45 seconds'
+          `,
+          values: [phoneNumber, tenantId]
+        }) as any[];
+        
+        const botRepliedRecently = parseInt(recentBotMediaResponses[0]?.cnt) > 0;
+        const mediaCount = parseInt(recentIncomingMedia[0]?.cnt) || 0;
+        
+        if (botRepliedRecently && mediaCount > 1) {
+          skipBotReply = true;
+          this.log.info(`[MEDIA_BURST_SKIP] Skipping AI response — bot already replied to media burst (${mediaCount} media in 45s window)`, { 
+            traceId, phoneNumber, mediaType, mediaCount 
+          });
+        }
+      } catch (debounceErr) {
+        // Non-fatal — if check fails, proceed normally
+        this.log.warn(`[MEDIA_BURST_CHECK_FAILED] Non-fatal`, { traceId, error: String(debounceErr) });
+      }
+    }
+
     // 4. State & FSM Transition
     const state = await convService.getState(phoneNumber);
     const currentPhase = state.phase as ConversationPhase;

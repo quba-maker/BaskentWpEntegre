@@ -344,9 +344,10 @@ const VirtualItemWrapper = React.memo(function VirtualItemWrapper({
 
 interface FlatItem {
   id: string;
-  type: "header" | "message";
+  type: "header" | "message" | "media_group";
   dateLabel?: string;
   message?: any;
+  messages?: any[]; // For media_group: array of consecutive image messages
 }
 
 export function ConversationViewport() {
@@ -642,13 +643,60 @@ export function ConversationViewport() {
         type: "header",
         dateLabel,
       });
-      groupMsgs.forEach((msg: any) => {
-        items.push({
-          id: String(msg.id),
-          type: "message",
-          message: msg,
-        });
-      });
+      // Group consecutive images from same sender into media_group items
+      let i = 0;
+      while (i < groupMsgs.length) {
+        const msg = groupMsgs[i];
+        const isImage = (msg.mediaType === 'image' || msg.mediaType === 'sticker') && msg.mediaUrl;
+        
+        if (isImage) {
+          // Collect consecutive images from same sender
+          const group: any[] = [msg];
+          let j = i + 1;
+          while (j < groupMsgs.length) {
+            const next = groupMsgs[j];
+            const nextIsImage = (next.mediaType === 'image' || next.mediaType === 'sticker') && next.mediaUrl;
+            const sameSender = next.sender === msg.sender;
+            // Within 2 minutes of previous
+            const timeDiff = next.timeMs && group[group.length - 1].timeMs 
+              ? Math.abs(next.timeMs - group[group.length - 1].timeMs) 
+              : 0;
+            const withinWindow = timeDiff < 120000; // 2 min
+            
+            if (nextIsImage && sameSender && withinWindow) {
+              group.push(next);
+              j++;
+            } else {
+              break;
+            }
+          }
+          
+          if (group.length > 1) {
+            // Multiple images → media_group
+            items.push({
+              id: `media-group-${group[0].id}`,
+              type: "media_group",
+              messages: group,
+              message: group[0], // Keep first for sender info
+            });
+          } else {
+            // Single image → normal message
+            items.push({
+              id: String(msg.id),
+              type: "message",
+              message: msg,
+            });
+          }
+          i = j;
+        } else {
+          items.push({
+            id: String(msg.id),
+            type: "message",
+            message: msg,
+          });
+          i++;
+        }
+      }
     });
     
     return items;
@@ -872,6 +920,62 @@ export function ConversationViewport() {
                       >
                         {item.dateLabel}
                       </span>
+                    </div>
+                  ) : item.type === "media_group" ? (
+                    /* ── WhatsApp-style Image Grid ── */
+                    <div className={`flex w-full ${item.message.sender === "user" ? "justify-start" : "justify-end"} pb-4`}>
+                      <div 
+                        className={`relative max-w-[85%] md:max-w-[65%] overflow-hidden shadow-sm transition-all duration-200 hover:shadow-md ${
+                          item.message.sender === "user" 
+                            ? "rounded-2xl rounded-tl-sm" 
+                            : "rounded-2xl rounded-tr-sm"
+                        }`}
+                        style={
+                          item.message.sender === "user"
+                            ? { background: "var(--q-chat-in)" }
+                            : { background: "var(--q-chat-out)" }
+                        }
+                      >
+                        <div 
+                          className="grid gap-[2px]"
+                          style={{ 
+                            gridTemplateColumns: (item.messages?.length || 0) === 1 
+                              ? '1fr' 
+                              : 'repeat(2, 1fr)' 
+                          }}
+                        >
+                          {item.messages?.map((imgMsg: any, idx: number) => (
+                            <img
+                              key={imgMsg.id}
+                              src={imgMsg.mediaUrl}
+                              alt={imgMsg.mediaMetadata?.caption || `Görsel ${idx + 1}`}
+                              className="w-full h-full object-cover cursor-pointer hover:opacity-90 transition-opacity"
+                              style={{ 
+                                aspectRatio: (item.messages?.length || 0) <= 2 ? '4/3' : '1/1',
+                                minHeight: '100px',
+                                maxHeight: '220px',
+                              }}
+                              loading="lazy"
+                              onClick={() => setLightbox({ 
+                                src: imgMsg.mediaUrl, 
+                                type: 'image', 
+                                caption: imgMsg.mediaMetadata?.caption 
+                              })}
+                            />
+                          ))}
+                        </div>
+                        {/* Timestamp on last image */}
+                        <div className="absolute bottom-1 right-2 flex items-center gap-1 text-[10px] font-semibold tracking-wide" style={{ color: "rgba(255,255,255,0.85)", textShadow: "0 1px 3px rgba(0,0,0,0.5)" }}>
+                          <span>
+                            {item.messages && item.messages[item.messages.length - 1]?.timeMs 
+                              ? new Date(item.messages[item.messages.length - 1].timeMs).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) 
+                              : ''}
+                          </span>
+                          <span className="ml-0.5">
+                            {item.message.sender !== "user" && <CheckCheck className="w-3.5 h-3.5" />}
+                          </span>
+                        </div>
+                      </div>
                     </div>
                   ) : (
                     <div className="flex flex-col q-bubble-in w-full pb-4">
