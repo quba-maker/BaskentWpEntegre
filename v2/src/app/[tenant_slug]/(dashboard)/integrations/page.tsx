@@ -493,24 +493,8 @@ function TelegramChannelSection() {
     );
   }
 
-  if (isLoading) {
-    return (
-      <div className="rounded-2xl border overflow-hidden mb-8" style={{ borderColor: "var(--q-border-default)", backgroundColor: "#fff" }}>
-        <div className="flex items-center gap-3 px-4 py-3">
-          <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ backgroundColor: "#0088cc12" }}>
-            <Send className="w-5 h-5" style={{ color: "#0088cc" }} />
-          </div>
-          <div>
-            <h3 className="text-[14px] font-bold" style={{ color: "var(--q-text-primary)" }}>Telegram Bildirimleri</h3>
-            <p className="text-[10px] font-medium" style={{ color: "var(--q-text-secondary)" }}>Yükleniyor...</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="rounded-2xl border overflow-hidden mb-8" style={{ borderColor: "var(--q-border-default)", backgroundColor: "#fff" }}>
+    <div data-testid="telegram-section" className="rounded-2xl border overflow-hidden mb-8" style={{ borderColor: "var(--q-border-default)", backgroundColor: "#fff", minHeight: "80px" }}>
       {/* Section Header */}
       <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: `1px solid var(--q-border-default)` }}>
         <div className="flex items-center gap-3">
@@ -520,14 +504,15 @@ function TelegramChannelSection() {
           <div>
             <h3 className="text-[14px] font-bold" style={{ color: "var(--q-text-primary)" }}>Telegram Bildirimleri</h3>
             <p className="text-[10px] font-medium" style={{ color: "var(--q-text-secondary)" }}>
-              Panel bildirimlerini Telegram grubunuza gönderin
+              {isLoading ? "Ayarlar yükleniyor..." : loadError ? `⚠️ ${loadError}` : "Panel bildirimlerini Telegram grubunuza gönderin"}
             </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
           <button
             onClick={() => setIsEnabled(!isEnabled)}
-            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${isEnabled ? 'bg-emerald-500' : 'bg-gray-300'}`}
+            disabled={isLoading}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${isEnabled ? 'bg-emerald-500' : 'bg-gray-300'} ${isLoading ? 'opacity-50' : ''}`}
           >
             <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${isEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
           </button>
@@ -537,8 +522,8 @@ function TelegramChannelSection() {
         </div>
       </div>
 
-      {/* Config Form */}
-      <div className="px-4 py-4 space-y-4">
+      {/* Config Form — always visible, disabled during loading */}
+      <div className={`px-4 py-4 space-y-4 ${isLoading ? 'opacity-60 pointer-events-none' : ''}`}>
         {/* Bot Token */}
         <div>
           <label className="text-[11px] font-semibold mb-1.5 block" style={{ color: "var(--q-text-secondary)" }}>
