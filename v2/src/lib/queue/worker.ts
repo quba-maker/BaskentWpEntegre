@@ -415,9 +415,8 @@ export class QueueWorkerEngine {
         return;
       }
 
-      // Check: has a bot already responded to media in this window?
-      // Use model_used='media_batch_auto' marker — robust, language-independent
-      const alreadyProcessed = await db.executeSafe({
+      // Check 1: has a batch response already been sent?
+      const alreadyBatched = await db.executeSafe({
         text: `
           SELECT COUNT(*) as cnt FROM messages 
           WHERE phone_number = $1 AND tenant_id = $2 
@@ -428,10 +427,34 @@ export class QueueWorkerEngine {
         values: [phoneNumber, tenantId]
       }) as any[];
       
-      if (parseInt(alreadyProcessed[0]?.cnt) > 0) {
+      if (parseInt(alreadyBatched[0]?.cnt) > 0) {
         this.log.info(`[MEDIA_BATCH_ALREADY_PROCESSED] Batch already responded, skipping`, { traceId, phoneNumber });
         AIEventEmitter.emit({ tenantId, type: 'media_batch_skipped_already_processed', category: 'pipeline', payload: { phoneNumber, reason: 'already_responded' } });
         return;
+      }
+
+      // Check 2: did the user send a TEXT message after the photos, triggering a normal AI response?
+      // If yes, AI already acknowledged the photos in context → batch response is redundant.
+      const firstMediaAt = data.firstMediaAt ? new Date(data.firstMediaAt) : null;
+      if (firstMediaAt) {
+        const aiRespondedAfterMedia = await db.executeSafe({
+          text: `
+            SELECT COUNT(*) as cnt FROM messages 
+            WHERE phone_number = $1 AND tenant_id = $2 
+              AND direction = 'out'
+              AND model_used IS NOT NULL
+              AND model_used != 'media_batch_auto'
+              AND model_used != 'privacy_pre_detector'
+              AND created_at > $3
+          `,
+          values: [phoneNumber, tenantId, firstMediaAt.toISOString()]
+        }) as any[];
+        
+        if (parseInt(aiRespondedAfterMedia[0]?.cnt) > 0) {
+          this.log.info(`[MEDIA_BATCH_SKIP_TEXT_RESPONSE] AI already responded to a follow-up text after media`, { traceId, phoneNumber });
+          AIEventEmitter.emit({ tenantId, type: 'media_batch_skipped_already_processed', category: 'pipeline', payload: { phoneNumber, reason: 'text_response_covers_media' } });
+          return;
+        }
       }
 
       // Count all media types in the batch window
