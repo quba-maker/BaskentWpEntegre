@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, Component, type ReactNode, type ErrorInfo } from "react";
 import { Link2, MessageCircle, FileSpreadsheet, Instagram, Facebook, Webhook, Activity, AlertTriangle, Plus, X, Bot, ChevronRight, RotateCcw, Archive, Trash2, Bell, Send, Check, Loader2 } from "lucide-react";
 import {
   getTelegramChannelConfig,
@@ -364,10 +364,53 @@ const NOTIFICATION_CATEGORIES = [
 ];
 
 // ==========================================
+// TELEGRAM ERROR BOUNDARY + WRAPPER
+// ==========================================
+class TelegramErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; error: string }> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: "" };
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error: error.message };
+  }
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error("[TelegramChannelSection] React Error Boundary caught:", error, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="rounded-2xl border overflow-hidden mb-8" style={{ borderColor: "#fbbf24", backgroundColor: "#fffbeb" }}>
+          <div className="flex items-center gap-3 px-4 py-3">
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ backgroundColor: "#0088cc12" }}>
+              <Send className="w-5 h-5" style={{ color: "#0088cc" }} />
+            </div>
+            <div>
+              <h3 className="text-[14px] font-bold" style={{ color: "var(--q-text-primary)" }}>Telegram Bildirimleri</h3>
+              <p className="text-[11px] font-medium" style={{ color: "#92400e" }}>⚠️ Yükleme hatası: {this.state.error || "Bilinmeyen hata"}</p>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function TelegramChannelWrapper() {
+  return (
+    <TelegramErrorBoundary>
+      <TelegramChannelSection />
+    </TelegramErrorBoundary>
+  );
+}
+
+// ==========================================
 // TELEGRAM NOTIFICATION CHANNEL SECTION
 // ==========================================
 function TelegramChannelSection() {
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; error?: string } | null>(null);
@@ -384,9 +427,11 @@ function TelegramChannelSection() {
 
   // Load existing config
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       try {
         const res = await getTelegramChannelConfig();
+        if (cancelled) return;
         if (res.success && res.config) {
           setIsEnabled(res.config.isEnabled);
           setHasExistingToken(res.config.hasToken);
@@ -395,9 +440,13 @@ function TelegramChannelSection() {
           setEnabledCategories(res.config.enabledCategories || []);
           setMinPriority(res.config.minPriority || "high");
         }
-      } catch {}
-      setIsLoading(false);
+      } catch (err) {
+        console.error("[TelegramChannelSection] Config load error:", err);
+        if (!cancelled) setLoadError(err instanceof Error ? err.message : String(err));
+      }
+      if (!cancelled) setIsLoading(false);
     })();
+    return () => { cancelled = true; };
   }, []);
 
   async function handleSave() {
@@ -763,7 +812,7 @@ export default function IntegrationsPage() {
       </div>
 
       {/* Telegram Notification Channel */}
-      <TelegramChannelSection />
+      <TelegramChannelWrapper />
 
       {/* Telemetry Cards */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
