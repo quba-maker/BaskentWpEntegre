@@ -2,6 +2,7 @@ import { TenantBrain } from '../../brain/tenant-brain';
 import { defaultPrompts } from '../../domain/conversation/prompts';
 import { SecurityIsolationError } from '../../security/tenant-firewall';
 import { telemetry } from '../../observability/telemetry';
+import { buildTimeContext } from '@/lib/utils/timezone';
 
 export class PromptBuilder {
   /**
@@ -135,10 +136,23 @@ MEDYA MESAJI KURALI:
 - Rapor/fotoğraf/dosya geldiğinde değerlendirme için doktor veya uzman ekibe iletileceğini belirt.
 =======================================================\n`;
     
+    // ═══ PHASE 2J: Time Intelligence Context ═══
+    // Bot needs current date/time to interpret "yarın", "Salı 15:00" etc.
+    // Patient country (if known) enables timezone-aware scheduling.
+    let timeContext = '';
+    try {
+      const patientCountry = unifiedContext?.opportunity?.country 
+        || unifiedContext?.profile?.country 
+        || null;
+      timeContext = buildTimeContext(brain.context.config?.timezone || 'Europe/Istanbul', patientCountry);
+    } catch {
+      // Non-fatal: time context is optional enhancement
+    }
+
     // Güvenli birleştirme: Eğer base prompt içinde "--- CONSTRAINTS ---" varsa,
     // CRM bağlamının CONSTRAINTS'in hemen üzerine yerleştirilmesi SaaS standartlarında en sağlıklısıdır.
     // Ancak base string'i parçalamak riskli olduğundan, hiyerarşik olarak önce base, sonra dinamik CRM, en son kurallar ve evre eklenir.
     // Safety guardrails are appended LAST so they take highest priority in the context window.
-    return `${base}\n${crmContext}\n${knowledgeInjection}\n${phaseContext}\n${safetyGuardrails}`;
+    return `${base}\n${crmContext}\n${knowledgeInjection}\n${timeContext}\n${phaseContext}\n${safetyGuardrails}`;
   }
 }

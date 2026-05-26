@@ -2070,6 +2070,87 @@ export class QueueWorkerEngine {
             }
           }
 
+          // ═══ PHASE 2K: Auto-generate follow-up tasks + panel notifications ═══
+          if (afterOpp?.id && crmData) {
+            try {
+              const { TaskService } = await import('../services/task.service');
+              const { NotificationService } = await import('../services/notification.service');
+              const taskService = new TaskService(db);
+              const notifService = new NotificationService(db);
+
+              // 1. Auto-generate tasks from CRM signals
+              const taskIds = await taskService.generateFromCrm({
+                tenantId,
+                opportunityId: afterOpp.id,
+                phoneNumber,
+                conversationId,
+                crmData,
+                patientName: crmData.patient_name,
+              });
+              if (taskIds.length > 0) {
+                this.log.info(`[TASK_AUTO_GEN] Created ${taskIds.length} tasks`, { traceId, oppId: afterOpp.id, taskIds });
+              }
+
+              // 2. Hot lead notification
+              if (crmData.opportunity_priority === 'hot') {
+                await notifService.send({
+                  tenantId,
+                  category: 'hot_lead',
+                  title: '🔥 Yeni Sıcak Fırsat',
+                  body: `${crmData.patient_name || phoneNumber} — ${crmData.department || 'Genel'} (${crmData.country || ''})`.trim(),
+                  priority: 'high',
+                  opportunityId: afterOpp.id,
+                  conversationId,
+                  phoneNumber,
+                });
+              }
+
+              // 3. Callback requested notification
+              if (crmData.requested_callback_datetime) {
+                await notifService.send({
+                  tenantId,
+                  category: 'callback_requested',
+                  title: '📞 Hasta Aranmak İstiyor',
+                  body: `${crmData.patient_name || phoneNumber} — ${crmData.requested_callback_datetime}`,
+                  priority: 'high',
+                  opportunityId: afterOpp.id,
+                  conversationId,
+                  phoneNumber,
+                });
+              }
+
+              // 4. Report received notification
+              if (crmData.report_status === 'sent') {
+                await notifService.send({
+                  tenantId,
+                  category: 'report_received',
+                  title: '📄 Rapor/Belge Alındı',
+                  body: `${crmData.patient_name || phoneNumber} rapor/belge gönderdi.`,
+                  priority: 'normal',
+                  opportunityId: afterOpp.id,
+                  conversationId,
+                  phoneNumber,
+                });
+              }
+
+              // 5. Appointment request notification
+              if (crmData.intent_type === 'appointment_request') {
+                await notifService.send({
+                  tenantId,
+                  category: 'appointment_request',
+                  title: '📅 Randevu Talebi',
+                  body: `${crmData.patient_name || phoneNumber} — ${crmData.department || ''} randevu talep etti.`,
+                  priority: 'high',
+                  opportunityId: afterOpp.id,
+                  conversationId,
+                  phoneNumber,
+                });
+              }
+            } catch (taskErr) {
+              this.log.error('[PHASE_2K_TASK_GEN] Non-fatal task/notification error', taskErr instanceof Error ? taskErr : new Error(String(taskErr)), { traceId });
+            }
+          }
+
         } catch (oppErr) {
           this.log.error(`[WORKER_OPP_FAILED] Non-fatal opportunity error`, oppErr instanceof Error ? oppErr : new Error(String(oppErr)), { traceId });
         }

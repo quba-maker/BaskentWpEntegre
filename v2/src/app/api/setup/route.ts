@@ -469,6 +469,103 @@ export async function GET(req: NextRequest) {
     await execute`ALTER TABLE tenant_integrations ADD COLUMN IF NOT EXISTS cron_last_run_at TIMESTAMPTZ`;
     results.push("✅ PHASE 2M-P0: tenant_integrations health monitoring kolonları eklendi");
 
+    // =====================================================
+    // 23. PHASE 2K-P0: Follow-Up Task Engine + Notifications
+    // Only 2 tables for P0. automation_rules, automation_runs,
+    // notification_channels will be added in P1.
+    // =====================================================
+
+    // 23a. FOLLOW_UP_TASKS — Central task management table
+    await execute`
+      CREATE TABLE IF NOT EXISTS follow_up_tasks (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        opportunity_id UUID,
+        conversation_id TEXT,
+        phone_number TEXT NOT NULL,
+        
+        task_type TEXT NOT NULL DEFAULT 'follow_up_no_response',
+        title TEXT NOT NULL,
+        description TEXT,
+        
+        due_at TIMESTAMPTZ NOT NULL,
+        remind_at TIMESTAMPTZ,
+        
+        assigned_to UUID,
+        status TEXT NOT NULL DEFAULT 'pending',
+        
+        is_automated BOOLEAN NOT NULL DEFAULT false,
+        automation_template TEXT,
+        automation_executed_at TIMESTAMPTZ,
+        
+        completed_at TIMESTAMPTZ,
+        completed_by UUID,
+        completion_note TEXT,
+        skipped_reason TEXT,
+        
+        created_by TEXT NOT NULL DEFAULT 'system',
+        source_event TEXT,
+        
+        patient_segment TEXT,
+        
+        metadata JSONB DEFAULT '{}',
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `;
+    await execute`CREATE INDEX IF NOT EXISTS idx_tasks_tenant_status ON follow_up_tasks(tenant_id, status) WHERE status IN ('pending', 'in_progress')`;
+    await execute`CREATE INDEX IF NOT EXISTS idx_tasks_due ON follow_up_tasks(due_at) WHERE status = 'pending'`;
+    await execute`CREATE INDEX IF NOT EXISTS idx_tasks_opp ON follow_up_tasks(opportunity_id) WHERE opportunity_id IS NOT NULL`;
+    await execute`CREATE INDEX IF NOT EXISTS idx_tasks_phone ON follow_up_tasks(phone_number, tenant_id)`;
+    results.push("✅ PHASE 2K-P0: follow_up_tasks tablosu hazır");
+
+    // 23b. NOTIFICATIONS — Panel notification center
+    await execute`
+      CREATE TABLE IF NOT EXISTS notifications (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        
+        recipient_type TEXT NOT NULL DEFAULT 'coordinator',
+        recipient_id UUID,
+        
+        category TEXT NOT NULL,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        
+        opportunity_id UUID,
+        task_id UUID,
+        conversation_id TEXT,
+        phone_number TEXT,
+        
+        channels_sent JSONB DEFAULT '["panel"]',
+        
+        is_read BOOLEAN DEFAULT false,
+        read_at TIMESTAMPTZ,
+        
+        priority TEXT DEFAULT 'normal',
+        
+        metadata JSONB DEFAULT '{}',
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `;
+    await execute`CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(tenant_id, is_read, created_at DESC) WHERE is_read = false`;
+    await execute`CREATE INDEX IF NOT EXISTS idx_notifications_tenant ON notifications(tenant_id, created_at DESC)`;
+    results.push("✅ PHASE 2K-P0: notifications tablosu hazır");
+
+    // 23c. RLS for new tables (shadow mode — bypass for now)
+    try {
+      await execute`ALTER TABLE follow_up_tasks ENABLE ROW LEVEL SECURITY`;
+      await execute`DROP POLICY IF EXISTS tasks_app_access ON follow_up_tasks`;
+      await execute`CREATE POLICY tasks_app_access ON follow_up_tasks FOR ALL USING (true) WITH CHECK (true)`;
+      
+      await execute`ALTER TABLE notifications ENABLE ROW LEVEL SECURITY`;
+      await execute`DROP POLICY IF EXISTS notifications_app_access ON notifications`;
+      await execute`CREATE POLICY notifications_app_access ON notifications FOR ALL USING (true) WITH CHECK (true)`;
+      results.push("✅ PHASE 2K-P0: RLS policies oluşturuldu (follow_up_tasks + notifications)");
+    } catch (e: any) {
+      results.push("⚠️ PHASE 2K-P0: RLS policies: " + e.message);
+    }
+
     if (isDryRun) {
       return NextResponse.json({ success: true, mode: "dryRun", results, executedQueries: dryRunLogs });
     }

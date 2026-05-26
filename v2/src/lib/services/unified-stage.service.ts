@@ -244,6 +244,20 @@ export class UnifiedStageService {
         oppId: opp.id, mirrorLeadStage, actorId
       });
 
+      // ═══ PHASE 2K: Cancel pending tasks when stage becomes terminal ═══
+      if (['lost', 'not_qualified', 'arrived'].includes(normalizedTarget)) {
+        try {
+          const { TaskService } = await import('./task.service');
+          const taskService = new TaskService(db);
+          const cancelled = await taskService.cancelForTerminalOpp(opp.id, tenantId);
+          if (cancelled > 0) {
+            log.info(`[TASK_TERMINAL_CANCEL] Cancelled ${cancelled} tasks`, { oppId: opp.id, stage: normalizedTarget });
+          }
+        } catch (taskErr) {
+          log.error('[TASK_CANCEL_FAIL] Non-fatal', taskErr instanceof Error ? taskErr : new Error(String(taskErr)));
+        }
+      }
+
       return {
         success: true,
         opportunityId: opp.id,

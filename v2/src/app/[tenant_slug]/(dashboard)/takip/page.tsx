@@ -1,16 +1,18 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, lazy, Suspense } from "react";
 import useSWR from "swr";
 import { 
   Radar, Search, ChevronDown, CheckCircle2, MessageCircle, 
   Phone, StickyNote, X, Flame, Thermometer, Snowflake,
-  Clock, ArrowRight, Calendar, XCircle, Filter, ExternalLink
+  Clock, ArrowRight, Calendar, XCircle, Filter, ExternalLink,
+  ClipboardList
 } from "lucide-react";
 import { getOpportunities, getOpportunityStats, updateOpportunityStage, addOpportunityNote } from "@/app/actions/pipeline";
 import { useInboxStore } from "@/store/inbox-store";
 import { useRouter, useParams } from "next/navigation";
 import { getCountryFlag } from "@/lib/utils/country";
+import TasksTab from "@/components/features/takip/tasks-tab";
 
 // ── Formatters ──
 
@@ -129,6 +131,7 @@ export default function TakipPage() {
   const params = useParams();
   const tenantSlug = typeof params.tenant_slug === 'string' ? params.tenant_slug : '';
   const { setActiveContact } = useInboxStore();
+  const [activeTab, setActiveTab] = useState<'firsatlar' | 'gorevler'>('firsatlar');
   
   // Filters
   const [stageFilter, setStageFilter] = useState("all");
@@ -219,9 +222,31 @@ export default function TakipPage() {
             <Radar className="w-7 h-7 text-[#5856D6]" />
             Takip Merkezi
           </h1>
-          <p className="text-[#86868B] mt-1 text-sm font-medium">
-            Sıcak fırsatları takip edin, hiçbir hastayı kaybetmeyin
-          </p>
+          {/* Tab Switcher */}
+          <div className="flex items-center gap-1 mt-2 bg-black/[0.04] rounded-lg p-0.5 w-fit">
+            <button
+              onClick={() => setActiveTab('firsatlar')}
+              className={`px-4 py-1.5 rounded-md text-[12px] font-semibold transition-all ${
+                activeTab === 'firsatlar' 
+                  ? 'bg-white text-[#1D1D1F] shadow-sm' 
+                  : 'text-[#86868B] hover:text-[#1D1D1F]'
+              }`}
+            >
+              <Radar className="w-3.5 h-3.5 inline mr-1.5 -mt-0.5" />
+              Fırsatlar
+            </button>
+            <button
+              onClick={() => setActiveTab('gorevler')}
+              className={`px-4 py-1.5 rounded-md text-[12px] font-semibold transition-all ${
+                activeTab === 'gorevler' 
+                  ? 'bg-white text-[#1D1D1F] shadow-sm' 
+                  : 'text-[#86868B] hover:text-[#1D1D1F]'
+              }`}
+            >
+              <ClipboardList className="w-3.5 h-3.5 inline mr-1.5 -mt-0.5" />
+              Görevler
+            </button>
+          </div>
         </div>
 
         {/* Stats */}
@@ -239,6 +264,13 @@ export default function TakipPage() {
         </div>
       </div>
 
+      {/* TASKS TAB */}
+      {activeTab === 'gorevler' && (
+        <TasksTab />
+      )}
+
+      {/* OPPORTUNITIES TAB */}
+      {activeTab === 'firsatlar' && (<>
       {/* Filters Bar */}
       <div className="mb-4 flex flex-col md:flex-row items-start md:items-center gap-3">
         {/* Search */}
@@ -508,6 +540,7 @@ export default function TakipPage() {
           setNoteText={setNoteText}
         />
       )}
+      </>)}
     </div>
   );
 }

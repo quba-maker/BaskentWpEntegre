@@ -19,6 +19,8 @@ import { getSession, logout, stopImpersonation } from "@/lib/auth/session";
 import { redirect } from "next/navigation";
 import type { TenantBootstrapData } from "@/lib/domain/tenant/bootstrap";
 
+import NotificationBell from "@/components/features/notifications/notification-bell";
+
 // ==========================================
 // QUBA AI — Sidebar (Server Component)
 // ==========================================
@@ -47,8 +49,8 @@ export async function Sidebar({ tenantData }: { tenantData?: TenantBootstrapData
       <div className="p-5 border-b border-black/5">
         <div className="flex items-center gap-3">
           <img src={brandingLogo} alt={brandingName} className="w-9 h-9 rounded-xl object-cover shadow-sm" />
-          <div>
-            <h1 className="text-[15px] font-bold tracking-tight text-[--q-text-primary] truncate w-40">{brandingName}</h1>
+          <div className="flex-1 min-w-0">
+            <h1 className="text-[15px] font-bold tracking-tight text-[--q-text-primary] truncate">{brandingName}</h1>
             <p className="text-[10px] text-[--q-text-secondary] font-medium">
               {session?.impersonatedTenantId ? (
                 <span className="text-[--q-purple-alt] font-semibold flex items-center gap-1">
@@ -59,6 +61,8 @@ export async function Sidebar({ tenantData }: { tenantData?: TenantBootstrapData
               )}
             </p>
           </div>
+          {/* Notification Bell */}
+          <NotificationBell />
         </div>
       </div>
       
