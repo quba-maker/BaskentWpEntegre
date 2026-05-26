@@ -59,14 +59,7 @@ export default function NotificationBell() {
     };
   }, [isOpen]);
 
-  // Close on outside click
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setIsOpen(false);
-    };
-    if (isOpen) document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [isOpen]);
+  // Outside click is handled by the portal backdrop — no separate handler needed
 
   // ── Data ──
   const { data: count, mutate: mutateCount } = useSWR(
