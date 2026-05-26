@@ -47,12 +47,15 @@ export default function NotificationBell() {
   const tenantSlug = typeof params.tenant_slug === 'string' ? params.tenant_slug : '';
 
   // Calculate dropdown position from bell button
-  const dropdownStyle = useMemo(() => {
-    if (!isOpen || !bellBtnRef.current) return { top: 60, right: 12 };
+  const dropdownStyle = useMemo((): React.CSSProperties => {
+    if (!isOpen || !bellBtnRef.current) return { top: 60, left: 12 };
     const rect = bellBtnRef.current.getBoundingClientRect();
+    const panelWidth = Math.min(380, window.innerWidth - 24);
+    // Start from bell's left edge, clamp so panel doesn't overflow right
+    const left = Math.min(rect.left, window.innerWidth - panelWidth - 12);
     return {
       top: rect.bottom + 8,
-      right: Math.max(12, window.innerWidth - rect.right),
+      left: Math.max(12, left),
     };
   }, [isOpen]);
 
