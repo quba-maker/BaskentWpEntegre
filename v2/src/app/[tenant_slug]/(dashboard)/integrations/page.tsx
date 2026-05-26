@@ -494,7 +494,7 @@ function TelegramChannelSection() {
   }
 
   return (
-    <div data-testid="telegram-section" className="rounded-2xl border mb-8" style={{ borderColor: "var(--q-border-default)", backgroundColor: "#fff", minHeight: "80px" }}>
+    <div data-testid="telegram-section" className="rounded-2xl border mb-8 flex-shrink-0" style={{ borderColor: "var(--q-border-default)", backgroundColor: "#fff" }}>
       {/* Section Header */}
       <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: `1px solid var(--q-border-default)` }}>
         <div className="flex items-center gap-3">
