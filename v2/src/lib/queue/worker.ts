@@ -3,6 +3,7 @@ import { withTenantDB } from "@/lib/core/tenant-db";
 import { ConversationService } from "@/lib/services/conversation.service";
 import { MessageService } from "@/lib/services/message.service";
 import { WorkflowService, ConversationPhase } from "@/lib/services/workflow.service";
+import { after } from "next/server";
 import { AIOrchestrator, ChatMessage } from "@/lib/services/ai/orchestrator";
 import { ResponsePolicy } from "@/lib/services/ai/response-policy";
 import { PromptBuilder } from "@/lib/services/ai/prompt-builder";
@@ -1440,12 +1441,14 @@ export class QueueWorkerEngine {
 
     } // end skipBotReply else
 
-    // 10. CRM Intelligence Extraction (Async & Non-blocking — Feature Flag gated)
-    const isCrmEnabled = await FeatureFlagService.isEnabled(tenantId, 'crm_extraction', true);
-    if (isCrmEnabled) {
-    try {
-      this.log.info(`[WORKER_CRM] Initiating CRM extraction`, { traceId });
-      const { crmExtractorService } = await import('../services/ai/crm-extractor');
+    // 10. CRM Intelligence Extraction (Async & Non-blocking — Feature Flag gated via next/server after)
+    after(async () => {
+      try {
+        const isCrmEnabled = await FeatureFlagService.isEnabled(tenantId, 'crm_extraction', true);
+        if (isCrmEnabled) {
+          try {
+            this.log.info(`[WORKER_CRM] Initiating CRM extraction in background`, { traceId });
+            const { crmExtractorService } = await import('../services/ai/crm-extractor');
       
       // Deterministik Ülke (Layer 1)
       let deterministicCountry = undefined;
@@ -2095,6 +2098,10 @@ export class QueueWorkerEngine {
         AIEventEmitter.logHealth(tenantId, 'memory_failure', { traceId });
       }
     }
+      } catch (backgroundErr) {
+        this.log.error(`[BACKGROUND_TASK_ERROR] Critical background pipeline failed`, backgroundErr instanceof Error ? backgroundErr : new Error(String(backgroundErr)), { traceId });
+      }
+    });
 
     // Telemetry updated immediately upon ingestion above
 
