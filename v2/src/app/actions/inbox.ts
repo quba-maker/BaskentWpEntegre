@@ -294,12 +294,17 @@ export async function sendMessage(phone: string, text: string) {
   return withActionGuard(
     { actionName: 'sendMessage' },
     async (ctx) => {
-      // Hangi kanaldan geldiğini bul
+      // Hangi kanaldan geldiğini bul ve conversation_id'yi çöz
       const convRows = await ctx.db.executeSafe({
-        text: `SELECT channel FROM conversations WHERE phone_number = $1 AND tenant_id = $2 LIMIT 1`,
+        text: `SELECT id, channel FROM conversations WHERE phone_number = $1 AND tenant_id = $2 LIMIT 1`,
         values: [phone, ctx.tenantId]
       });
       const channel = convRows[0]?.channel || 'whatsapp';
+      const conversationId = convRows[0]?.id;
+
+      if (!conversationId) {
+        throw new Error(`Aktif bir konuşma kaydı bulunamadı (Telefon: ${phone})`);
+      }
 
       // Credentials Service ile kimlik bilgilerini çöz
       const provider = (channel === 'messenger' || channel === 'instagram' ? channel : 'whatsapp') as 'whatsapp' | 'messenger' | 'instagram';
@@ -397,10 +402,10 @@ export async function sendMessage(phone: string, text: string) {
       }
 
       const msgInsert = await ctx.db.executeSafe({
-        text: `INSERT INTO messages (tenant_id, phone_number, direction, content, channel, status, provider_message_id)
-               VALUES ($1, $2, 'out', $3, $4, $5, $6)
+        text: `INSERT INTO messages (tenant_id, conversation_id, phone_number, direction, content, channel, status, provider_message_id)
+               VALUES ($1, $2, $3, 'out', $4, $5, $6, $7)
                RETURNING id`,
-        values: [ctx.tenantId, phone, text, channel, messageStatus, providerMessageId]
+        values: [ctx.tenantId, conversationId, phone, text, channel, messageStatus, providerMessageId]
       });
 
       const messageId = Array.isArray(msgInsert) ? msgInsert[0]?.id : (msgInsert as any)?.rows?.[0]?.id;
@@ -483,12 +488,17 @@ export async function sendMediaMessage(phone: string, mediaUrl: string, mediaTyp
   return withActionGuard(
     { actionName: 'sendMediaMessage' },
     async (ctx) => {
-      // Resolve channel
+      // Resolve channel and conversation_id
       const convRows = await ctx.db.executeSafe({
-        text: `SELECT channel FROM conversations WHERE phone_number = $1 AND tenant_id = $2 LIMIT 1`,
+        text: `SELECT id, channel FROM conversations WHERE phone_number = $1 AND tenant_id = $2 LIMIT 1`,
         values: [phone, ctx.tenantId]
       });
       const channel = convRows[0]?.channel || 'whatsapp';
+      const conversationId = convRows[0]?.id;
+
+      if (!conversationId) {
+        throw new Error(`Aktif bir konuşma kaydı bulunamadı (Telefon: ${phone})`);
+      }
 
       const provider = (channel === 'messenger' || channel === 'instagram' ? channel : 'whatsapp') as 'whatsapp' | 'messenger' | 'instagram';
       const credentials = await CredentialsService.resolveCredentials(ctx.tenantId, provider);
@@ -550,13 +560,13 @@ export async function sendMediaMessage(phone: string, mediaUrl: string, mediaTyp
       const { MediaStorageService } = await import("@/lib/services/media-storage.service");
       const contentText = caption || MediaStorageService.getMediaContentText(mediaType, { filename });
 
-      // Save to DB with media fields
+      // Save to DB with media fields and conversation_id
       const msgInsert = await ctx.db.executeSafe({
-        text: `INSERT INTO messages (tenant_id, phone_number, direction, content, channel, status, provider_message_id, media_type, media_url, media_metadata)
-               VALUES ($1, $2, 'out', $3, $4, $5, $6, $7, $8, $9)
+        text: `INSERT INTO messages (tenant_id, conversation_id, phone_number, direction, content, channel, status, provider_message_id, media_type, media_url, media_metadata)
+               VALUES ($1, $2, $3, 'out', $4, $5, $6, $7, $8, $9, $10)
                RETURNING id`,
         values: [
-          ctx.tenantId, phone, contentText, channel, messageStatus, providerMessageId,
+          ctx.tenantId, conversationId, phone, contentText, channel, messageStatus, providerMessageId,
           mediaType, mediaUrl,
           JSON.stringify({ filename, mime_type: mimeType, size: fileSize, caption: caption || null })
         ]
