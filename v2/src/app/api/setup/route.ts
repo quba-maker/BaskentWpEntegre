@@ -566,6 +566,42 @@ export async function GET(req: NextRequest) {
       results.push("⚠️ PHASE 2K-P0: RLS policies: " + e.message);
     }
 
+    // =====================================================
+    // 24. PHASE 2K-P1: Notification Channels
+    // Tenant-isolated external notification dispatch config.
+    // Bot token is encrypted via encryptPayload() before storage.
+    // =====================================================
+
+    await execute`
+      CREATE TABLE IF NOT EXISTS notification_channels (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        channel_type TEXT NOT NULL,
+        is_enabled BOOLEAN DEFAULT true,
+        config JSONB DEFAULT '{}',
+        enabled_categories TEXT[] DEFAULT '{}',
+        min_priority TEXT DEFAULT 'normal',
+        quiet_hours_start TEXT,
+        quiet_hours_end TEXT,
+        quiet_hours_tz TEXT DEFAULT 'Europe/Istanbul',
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(tenant_id, channel_type)
+      )
+    `;
+    await execute`CREATE INDEX IF NOT EXISTS idx_notif_channels_tenant ON notification_channels(tenant_id)`;
+    results.push("✅ PHASE 2K-P1: notification_channels tablosu hazır");
+
+    // 24a. RLS for notification_channels (shadow mode)
+    try {
+      await execute`ALTER TABLE notification_channels ENABLE ROW LEVEL SECURITY`;
+      await execute`DROP POLICY IF EXISTS notif_channels_app_access ON notification_channels`;
+      await execute`CREATE POLICY notif_channels_app_access ON notification_channels FOR ALL USING (true) WITH CHECK (true)`;
+      results.push("✅ PHASE 2K-P1: notification_channels RLS policies oluşturuldu");
+    } catch (e: any) {
+      results.push("⚠️ PHASE 2K-P1: notification_channels RLS: " + e.message);
+    }
+
     if (isDryRun) {
       return NextResponse.json({ success: true, mode: "dryRun", results, executedQueries: dryRunLogs });
     }

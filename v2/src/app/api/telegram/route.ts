@@ -1,14 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withTenantDB } from "@/lib/core/tenant-db";
 import { logger } from "@/lib/core/logger";
-import { CredentialsService } from "@/lib/services/credentials.service";
 
 const log = logger.withContext({ module: 'TelegramWebhook' });
 
 // ==========================================
 // QUBA AI — Telegram Webhook (Native Next.js)
-// CRM buton aksiyonları + Telegram reply → Hasta mesajı
+// P1 Hardened: Patient messaging blocked, V1 callbacks disabled
 // ==========================================
+
+/**
+ * Feature flags for P1 safety
+ */
+const ENABLE_TELEGRAM_PATIENT_MESSAGING = process.env.ENABLE_TELEGRAM_PATIENT_MESSAGING === 'true'; // P2 only
+const ENABLE_V1_TELEGRAM_CALLBACKS = process.env.ENABLE_V1_TELEGRAM_CALLBACKS === 'true'; // P1.1 refactor needed
 
 export async function POST(req: NextRequest) {
   try {
@@ -26,11 +31,36 @@ export async function POST(req: NextRequest) {
     if (callback_query) {
       const data = callback_query.data;
       const chatId = callback_query.message.chat.id;
-      const messageId = callback_query.message.message_id;
       const callbackId = callback_query.id;
-      const userFirstName = callback_query.from.first_name || "Danışman";
 
       if (data?.startsWith("crm_")) {
+        // ══════════════════════════════════════════════
+        // P1 SAFETY: V1 callbacks are DISABLED by default
+        // These callbacks bypass UnifiedStageService and can
+        // desync opportunity.stage. Refactor → P1.1 scope.
+        // ══════════════════════════════════════════════
+        if (!ENABLE_V1_TELEGRAM_CALLBACKS) {
+          log.warn('[TELEGRAM_V1_CALLBACK_BLOCKED] V1 callback action blocked by feature flag', {
+            action: data,
+            user: callback_query.from?.first_name || 'unknown',
+          });
+
+          await answerCallback(botToken, callbackId, 
+            "⚠️ Bu Telegram aksiyonu geçici olarak devre dışı. Lütfen panelden işlem yapın."
+          );
+          
+          // Update the message to show it's disabled
+          try {
+            await editMessage(botToken, chatId, callback_query.message.message_id,
+              `${callback_query.message.text}\n\n━━━━━━━━━━━━━━\n⚠️ Telegram buton aksiyonları geçici olarak devre dışı.\n📌 Lütfen panelden (ai.qubamedya.com) işlem yapın.`,
+              []
+            );
+          } catch {}
+
+          return NextResponse.json({ ok: true, blocked: true });
+        }
+
+        // ── LEGACY V1 CALLBACK LOGIC (only if ENABLE_V1_TELEGRAM_CALLBACKS=true) ──
         const parts = data.split("_");
         const action = parts[1];
         const phone = parts.slice(2).join("_");
@@ -38,7 +68,6 @@ export async function POST(req: NextRequest) {
         const searchP = cleanP.length > 10 ? cleanP.substring(cleanP.length - 10) : cleanP;
         const likePattern = `%${searchP}%`;
 
-        // 1. Resolve Tenant Context globally first
         const convCheck = await systemDb.executeSafe({
           text: `SELECT tenant_id FROM conversations WHERE phone_number LIKE $1 LIMIT 1`,
           values: [likePattern]
@@ -51,6 +80,7 @@ export async function POST(req: NextRequest) {
 
         const tenantId = convCheck[0].tenant_id;
         const db = withTenantDB(tenantId);
+        const userFirstName = callback_query.from.first_name || "Danışman";
 
         let newStage = "";
         let newStatus = "active";
@@ -58,7 +88,6 @@ export async function POST(req: NextRequest) {
         let telegramAlertText = callback_query.message.text;
         let statusBadge = "";
 
-        // 📞 ARADIM - ULAŞTIM
         if (action === "contacted") {
           feedbackMsg = "✅ Görüşme kaydedildi! Sonucu seçin.";
           statusBadge = `📞 Arandı - Ulaşıldı (${userFirstName})`;
@@ -77,7 +106,7 @@ export async function POST(req: NextRequest) {
           });
 
           await answerCallback(botToken, callbackId, feedbackMsg);
-          await editMessage(botToken, chatId, messageId,
+          await editMessage(botToken, chatId, callback_query.message.message_id,
             `${telegramAlertText}\n\n━━━━━━━━━━━━━━\n${statusBadge}\n\n❓ Görüşme sonucu nedir?`,
             [
               [
@@ -93,14 +122,11 @@ export async function POST(req: NextRequest) {
           return NextResponse.json({ ok: true });
         }
 
-        // ✅ Randevu Verildi
         if (action === "appoint") {
           newStage = "appointed"; newStatus = "closed";
           feedbackMsg = "✅ CRM Güncellendi: Randevu Verildi!";
           statusBadge = `✅ Randevu Verildi (${userFirstName})`;
-        }
-        // 💬 Düşünecek
-        else if (action === "thinking") {
+        } else if (action === "thinking") {
           newStage = "negotiation"; newStatus = "active";
           feedbackMsg = "💬 CRM Güncellendi: Hasta düşünecek. 24 saat sonra otomatik takip.";
           statusBadge = `💬 Düşünecek — 24s Takip Kuruldu (${userFirstName})`;
@@ -109,15 +135,11 @@ export async function POST(req: NextRequest) {
             text: `UPDATE conversations SET follow_up_count = 0, last_follow_up_at = NULL, last_message_at = NOW() WHERE phone_number LIKE $1`,
             values: [likePattern]
           });
-        }
-        // 🔄 Tekrar Aranacak
-        else if (action === "recall") {
+        } else if (action === "recall") {
           newStage = "hot_lead";
           feedbackMsg = "🔄 CRM Güncellendi: Tekrar aranacak!";
           statusBadge = `🔄 Tekrar Aranacak (${userFirstName})`;
-        }
-        // 📞 Ulaşılamadı
-        else if (action === "callmiss") {
+        } else if (action === "callmiss") {
           newStage = "hot_lead";
           const conv = await db.executeSafe({
             text: `SELECT notes FROM conversations WHERE phone_number LIKE $1 LIMIT 1`,
@@ -134,15 +156,12 @@ export async function POST(req: NextRequest) {
             feedbackMsg = `📞 ${missCount}. arama — Ulaşılamadı. ${3 - missCount} deneme kaldı.`;
             statusBadge = `📞 ${missCount}/3 Ulaşılamadı (${userFirstName})`;
           }
-        }
-        // ❌ İlgilenmiyor
-        else if (action === "lost") {
+        } else if (action === "lost") {
           newStage = "lost"; newStatus = "closed";
           feedbackMsg = "❌ CRM Güncellendi: İptal / Kayıp!";
           statusBadge = `❌ İptal / İlgilenmiyor (${userFirstName})`;
         }
 
-        // DB güncelle
         if (newStage) {
           await db.executeSafe({
             text: `UPDATE leads SET stage = $1 WHERE phone_number LIKE $2`,
@@ -177,7 +196,7 @@ export async function POST(req: NextRequest) {
           }
 
           await answerCallback(botToken, callbackId, feedbackMsg);
-          await editMessage(botToken, chatId, messageId,
+          await editMessage(botToken, chatId, callback_query.message.message_id,
             `${telegramAlertText}\n\n━━━━━━━━━━━━━━\n${statusBadge}`,
             []
           );
@@ -191,14 +210,60 @@ export async function POST(req: NextRequest) {
       const originalText = message.reply_to_message.text;
       const userFirstName = message.from.first_name || "Danışman";
 
-      const phoneMatch = originalText.match(/Tel:\s*(\d+)/);
+      // ══════════════════════════════════════════════
+      // P1 SAFETY: Patient messaging is HARD-BLOCKED
+      // ENABLE_TELEGRAM_PATIENT_MESSAGING must be explicitly true.
+      // WhatsApp Graph API call is UNREACHABLE when flag is false.
+      // ══════════════════════════════════════════════
+      if (!ENABLE_TELEGRAM_PATIENT_MESSAGING) {
+        log.info('[TELEGRAM_PATIENT_MSG_BLOCKED] Patient messaging blocked by feature flag', {
+          user: userFirstName,
+          hasReplyText: !!replyText,
+        });
+
+        // Still allow CRM note if we can parse the phone
+        const phoneMatch = originalText?.match(/Tel:\s*(\d+)/);
+        if (phoneMatch?.[1] && replyText) {
+          const phone = phoneMatch[1];
+          const cleanP = phone.replace(/\D/g, "");
+          const searchP = cleanP.length > 10 ? cleanP.substring(cleanP.length - 10) : cleanP;
+          const likePattern = `%${searchP}%`;
+
+          const conv = await systemDb.executeSafe({
+            text: `SELECT notes, tenant_id FROM conversations WHERE phone_number LIKE $1 LIMIT 1`,
+            values: [likePattern]
+          }) as any[];
+
+          if (conv && conv.length > 0) {
+            const oldNotes = conv[0].notes || "";
+            const convTenantId = conv[0].tenant_id;
+            const db = withTenantDB(convTenantId);
+            const ts = new Date().toLocaleTimeString("tr-TR", { timeZone: "Europe/Istanbul", hour: "2-digit", minute: "2-digit" });
+            const newNote = `[${userFirstName} - ${ts}]: ${replyText}`;
+            
+            await db.executeSafe({
+              text: `UPDATE conversations SET notes = $1, updated_at = NOW() WHERE phone_number LIKE $2`,
+              values: [oldNotes ? oldNotes + "\n" + newNote : newNote, likePattern]
+            });
+
+            await sendTelegramMessage(botToken, message.chat.id,
+              `📝 CRM'e Not Eklendi.\n⚠️ Hasta mesajı gönderme bu sürümde devre dışı. Mesaj hastaya iletilmedi.\n📌 Hastaya mesaj göndermek için panelden WhatsApp kullanın.`,
+              message.message_id
+            );
+          }
+        }
+
+        return NextResponse.json({ ok: true, patientMsgBlocked: true });
+      }
+
+      // ── LEGACY REPLY LOGIC (only if ENABLE_TELEGRAM_PATIENT_MESSAGING=true) ──
+      const phoneMatch = originalText?.match(/Tel:\s*(\d+)/);
       if (phoneMatch?.[1]) {
         const phone = phoneMatch[1];
         const cleanP = phone.replace(/\D/g, "");
         const searchP = cleanP.length > 10 ? cleanP.substring(cleanP.length - 10) : cleanP;
         const likePattern = `%${searchP}%`;
 
-        // Resolve Tenant Context globally first
         const conv = await systemDb.executeSafe({
           text: `SELECT notes, last_channel, tenant_id FROM conversations WHERE phone_number LIKE $1 LIMIT 1`,
           values: [likePattern]
@@ -221,7 +286,7 @@ export async function POST(req: NextRequest) {
           let sentToPatient = false;
           try {
             if (targetChannel === "whatsapp" || phone.match(/^9\d{10,}/)) {
-              // Tenant'ın kendi token'ını DB'den çek
+              const { CredentialsService } = await import("@/lib/services/credentials.service");
               let META: string | null = null;
               let PHONE_ID: string | null = null;
               if (convTenantId) {
@@ -250,7 +315,6 @@ export async function POST(req: NextRequest) {
             log.error("Telegram→Hasta hata", e instanceof Error ? e : new Error(String(e)));
           }
 
-          // Danışmana onay mesajı
           const confirmMsg = sentToPatient
             ? `✅ Mesaj hastaya ${targetChannel.toUpperCase()} üzerinden iletildi + CRM'e not eklendi`
             : `📝 CRM'e Not Eklendi (Mesaj hastaya iletilemedi)`;
