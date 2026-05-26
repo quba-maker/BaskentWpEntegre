@@ -784,12 +784,17 @@ export function ConversationViewport() {
     setIsUploading(true);
     setSendError('');
 
-    const filesToSend = [...uploadFiles];
     const captionText = inputText.trim();
+    let sentCount = 0;
     
     try {
-      for (let i = 0; i < filesToSend.length; i++) {
-        const currentFile = filesToSend[i];
+      // Process files one by one, removing each from state after success
+      while (true) {
+        // Read current state — files may have been removed as we go
+        const remaining = uploadFiles;
+        if (sentCount >= remaining.length) break;
+        
+        const currentFile = remaining[sentCount];
         
         // 1. Upload to Vercel Blob
         const formData = new FormData();
@@ -808,7 +813,7 @@ export function ConversationViewport() {
         const { url: blobUrl, filename, mimeType, size } = await uploadRes.json();
 
         // 2. Optimistic UI
-        const optimisticId = `temp-media-${Date.now()}-${i}`;
+        const optimisticId = `temp-media-${Date.now()}-${sentCount}`;
         const contentText = currentFile.mediaType === 'image' ? '📷 Fotoğraf' 
           : currentFile.mediaType === 'video' ? '🎬 Video'
           : currentFile.mediaType === 'audio' ? '🎵 Ses' 
@@ -831,7 +836,7 @@ export function ConversationViewport() {
         scrollToBottom("smooth");
 
         // 3. Send via server action (caption only on first file)
-        const fileCaption = i === 0 ? captionText || undefined : undefined;
+        const fileCaption = sentCount === 0 ? captionText || undefined : undefined;
         const res = await sendMediaMessage(
           activePhone,
           blobUrl,
@@ -845,13 +850,23 @@ export function ConversationViewport() {
         if (!res.success) {
           throw new Error(res.error || `${currentFile.file.name} gönderilemedi`);
         }
+
+        sentCount++;
       }
 
-      // Success — clear all
+      // All sent — clear
       uploadFiles.forEach(f => { if (f.preview) URL.revokeObjectURL(f.preview); });
       setUploadFiles([]);
       setInputText('');
     } catch (err: any) {
+      // Remove successfully sent files from preview, keep remaining
+      if (sentCount > 0) {
+        setUploadFiles(prev => {
+          prev.slice(0, sentCount).forEach(f => { if (f.preview) URL.revokeObjectURL(f.preview); });
+          return prev.slice(sentCount);
+        });
+        setInputText(''); // Caption was sent with first file
+      }
       setSendError('Dosya gönderilemedi: ' + err.message);
       setTimeout(() => setSendError(''), 5000);
     } finally {

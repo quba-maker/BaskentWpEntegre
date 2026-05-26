@@ -466,6 +466,9 @@ export async function sendMessage(phone: string, text: string) {
   ).then(res => {
     if (!res.success) return { success: false, error: res.error };
     return { success: true };
+  }).catch((err: any) => {
+    console.error('[sendMessage_CATCH]', err?.message || err);
+    return { success: false, error: `Mesaj gönderilemedi: ${err?.message || 'Bilinmeyen hata'}` };
   });
 }
 
@@ -610,6 +613,10 @@ export async function sendMediaMessage(phone: string, mediaUrl: string, mediaTyp
   ).then(res => {
     if (!res.success) return { success: false, error: res.error };
     return { success: true };
+  }).catch((err: any) => {
+    // Surface real error for debugging (withActionGuard hides it in production)
+    console.error('[sendMediaMessage_CATCH]', err?.message || err);
+    return { success: false, error: `Medya gönderilemedi: ${err?.message || 'Bilinmeyen hata'}` };
   });
 }
 
