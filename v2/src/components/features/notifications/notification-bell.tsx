@@ -113,7 +113,10 @@ export default function NotificationBell() {
 
       {/* Dropdown Panel */}
       {isOpen && (
-        <div className="absolute right-0 top-full mt-2 w-[380px] max-h-[480px] bg-white rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.15)] border border-black/5 flex flex-col z-50 overflow-hidden">
+        <>
+        {/* Mobile backdrop */}
+        <div className="fixed inset-0 bg-black/20 z-40 md:hidden" onClick={() => setIsOpen(false)} />
+        <div className="fixed inset-x-3 top-[60px] max-h-[calc(100vh-80px)] md:absolute md:inset-x-auto md:right-0 md:top-full md:mt-2 md:w-[380px] md:max-h-[480px] bg-white rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.15)] border border-black/5 flex flex-col z-50 overflow-hidden">
           
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-black/5">
@@ -199,6 +202,7 @@ export default function NotificationBell() {
             </div>
           )}
         </div>
+        </>
       )}
     </div>
   );
