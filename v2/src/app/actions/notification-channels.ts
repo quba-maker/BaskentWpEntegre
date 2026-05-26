@@ -16,7 +16,6 @@ import { encryptPayload } from "@/lib/core/encryption";
  */
 export async function getTelegramChannelConfig() {
   const session = await getSession();
-  console.log("[getTelegramChannelConfig] session tenantId:", session?.tenantId);
   if (!session?.tenantId) return { success: false, error: "Unauthorized" };
 
   const db = withTenantDB(session.tenantId);
@@ -32,10 +31,9 @@ export async function getTelegramChannelConfig() {
       values: [session.tenantId]
     }) as any[];
 
-    console.log("[getTelegramChannelConfig] rows count:", rows?.length, "first row keys:", rows?.[0] ? Object.keys(rows[0]) : "N/A");
 
     if (!rows || rows.length === 0) {
-      console.log("[getTelegramChannelConfig] No rows found — returning empty config");
+
       return {
         success: true,
         exists: false,
@@ -89,7 +87,7 @@ export async function getTelegramChannelConfig() {
     };
   } catch (err) {
     // Table might not exist yet — or RLS is blocking
-    console.error("[getTelegramChannelConfig] DB error:", err instanceof Error ? err.message : String(err));
+
     return {
       success: true,
       exists: false,
