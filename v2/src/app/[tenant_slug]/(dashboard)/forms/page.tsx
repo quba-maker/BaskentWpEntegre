@@ -15,8 +15,8 @@ import { MapPin, Building2, Calendar, Flame, TrendingUp, User } from "lucide-rea
 const OUTREACH_BADGE_CONFIG: Record<string, { label: string; color: string; icon: string }> = {
   'greeting_sent': { label: 'Mesaj Gönderildi', color: '#25D366', icon: '💬' },
   'bot_activated': { label: 'Bot Aktif', color: '#007AFF', icon: '🤖' },
-  'call_reached': { label: 'Arandı / Ulaşıldı', color: '#0F9D58', icon: '📞' },
-  'call_missed': { label: 'Arandı / Ulaşılamadı', color: '#FF9500', icon: '📵' },
+  'called_reached': { label: 'Arandı / Ulaşıldı', color: '#0F9D58', icon: '📞' },
+  'called_missed': { label: 'Arandı / Ulaşılamadı', color: '#FF9500', icon: '📵' },
   'callback_scheduled': { label: 'Geri Arama Planlandı', color: '#5856D6', icon: '🔄' },
   'not_interested': { label: 'İlgilenmiyor', color: '#FF3B30', icon: '🚫' },
   'lead_created': { label: 'Lead Oluşturuldu', color: '#FF9500', icon: '📋' },
@@ -1016,7 +1016,10 @@ export default function FormsPage() {
                               <PhoneForwarded className="w-3.5 h-3.5" /> Geri Arama
                             </button>
                             <button
-                              onClick={() => handleCallAction('not_interested', selectedForm)}
+                              onClick={() => {
+                                if (!window.confirm('Bu lead "İlgilenmiyor" olarak işaretlenecek ve takip süreci kapatılacak. Emin misiniz?')) return;
+                                handleCallAction('not_interested', selectedForm);
+                              }}
                               disabled={outreachLoading === 'call_action'}
                               className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-[12px] font-semibold bg-[#FF3B30]/10 text-[#FF3B30] border border-[#FF3B30]/20 hover:bg-[#FF3B30]/20 transition-all cursor-pointer disabled:opacity-50"
                             >

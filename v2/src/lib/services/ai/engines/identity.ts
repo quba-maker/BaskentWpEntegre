@@ -130,6 +130,50 @@ export class IdentityEngine {
          memory = memories[0];
       }
 
+      // ═══ B2 FIX: Outreach context for form lead bot handoff ═══
+      // When a coordinator has already contacted this form lead (greeting, call, bot activation),
+      // produce outreachContext so PromptBuilder can inject it into the bot's system prompt.
+      let outreachContext = null;
+      if (lead) {
+        try {
+          // Get the lead_id for this customer's latest lead
+          const leadRows = await db.executeSafe({
+            text: `SELECT id FROM leads WHERE tenant_id = $1 AND customer_id = $2 ORDER BY created_at DESC LIMIT 1`,
+            values: [tenantId, customerId]
+          }) as any[];
+
+          if (leadRows.length > 0) {
+            const leadId = leadRows[0].id;
+
+            // Fetch outreach history for this lead
+            const outreachRows = await db.executeSafe({
+              text: `SELECT action, metadata, created_at FROM outreach_logs 
+                     WHERE lead_id = $1 AND tenant_id = $2 
+                     ORDER BY created_at DESC LIMIT 10`,
+              values: [leadId, tenantId]
+            }) as any[];
+
+            if (outreachRows.length > 0) {
+              const greetingSent = outreachRows.some((r: any) => r.action === 'greeting_sent');
+              const botActivated = outreachRows.some((r: any) => r.action === 'bot_activated');
+              const lastCallRow = outreachRows.find((r: any) => 
+                ['called_reached', 'called_missed', 'callback_scheduled'].includes(r.action)
+              );
+
+              outreachContext = {
+                source: 'form_lead',
+                greetingSent,
+                botActivated,
+                lastCallAction: lastCallRow?.action || null,
+                lastCallNote: lastCallRow?.metadata?.note || null,
+              };
+            }
+          }
+        } catch (ocErr) {
+          console.warn('[IdentityEngine] Non-fatal: outreachContext query failed', ocErr);
+        }
+      }
+
       return {
         profile,
         latestForm: lead ? { name: lead.form_name, data: lead.raw_data } : null,
@@ -138,7 +182,8 @@ export class IdentityEngine {
            intent: memory.buying_intent,
            sentiment: memory.sentiment,
            objections: memory.objections
-        } : null
+        } : null,
+        outreachContext,
       };
     } catch (e) {
       console.error('[IdentityEngine] Failed to get context', e);
