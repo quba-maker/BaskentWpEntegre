@@ -14,6 +14,7 @@
 import { logger } from '@/lib/core/logger';
 import { encryptPayload, decryptPayload, EncryptedPayload } from '@/lib/core/encryption';
 import type { NotificationInput, NotificationCategory, NotificationPriority } from './notification.service';
+import { formatHumanDate, cleanString } from './sanitizers';
 
 const log = logger.withContext({ module: 'TelegramService' });
 
@@ -215,6 +216,8 @@ export class TelegramService {
    * - NO `Tel:` pattern (prevents V1 reply parser from sending patient messages)
    * - Phone numbers are MASKED (+90 *** ** 33 06)
    * - No actionable data that could trigger unintended automation
+   * - P1.1: Uses aggregated metadata.signals for secondary signal display
+   * - P1.1: Human-readable dates (no raw ISO)
    */
   static formatMessage(notification: NotificationInput): string {
     const header = CATEGORY_HEADER[notification.category] || { emoji: '🔔', title: 'BİLDİRİM' };
@@ -222,27 +225,32 @@ export class TelegramService {
 
     const lines: string[] = [];
 
-    // Header
+    // Header (category emoji + title)
     lines.push(`${header.emoji} ${header.title}`);
     lines.push('━━━━━━━━━━━━━━');
 
-    // Title + Body
-    lines.push(notification.title);
+    // Body only (title is already represented by the header — no duplication)
     if (notification.body) {
       lines.push(notification.body);
     }
 
-    // Metadata enrichment (from worker CRM data embedded in notification)
-    if (meta.patientName) {
-      lines.push(`👤 Hasta: ${meta.patientName}`);
+    // P1.1: Metadata enrichment from aggregated signals
+    if (meta.patient_name && cleanString(meta.patient_name)) {
+      lines.push(`👤 Hasta: ${cleanString(meta.patient_name)}`);
+    } else if (meta.patientName && cleanString(meta.patientName)) {
+      lines.push(`👤 Hasta: ${cleanString(meta.patientName)}`);
     }
-    if (meta.country) {
-      lines.push(`🌍 Ülke: ${meta.country}`);
+    if (meta.country && cleanString(meta.country)) {
+      lines.push(`🌍 Ülke: ${cleanString(meta.country)}`);
     }
-    if (meta.department) {
-      lines.push(`🏥 Bölüm: ${meta.department}`);
+    if (meta.department && cleanString(meta.department)) {
+      lines.push(`🏥 Bölüm: ${cleanString(meta.department)}`);
     }
-    if (meta.patientLocalTime && meta.turkeyTime) {
+
+    // P1.1: Callback datetime in human format (not raw ISO)
+    if (meta.callback_datetime && cleanString(meta.callback_datetime)) {
+      lines.push(`🕒 Arama zamanı: ${formatHumanDate(meta.callback_datetime)}`);
+    } else if (meta.patientLocalTime && meta.turkeyTime) {
       lines.push(`🕒 Hasta saati: ${meta.patientLocalTime}`);
       lines.push(`🕒 Türkiye saati: ${meta.turkeyTime}`);
     }
@@ -250,6 +258,25 @@ export class TelegramService {
     // Masked phone (NEVER full phone, NEVER `Tel:` format)
     if (notification.phoneNumber) {
       lines.push(`📱 ${TelegramService.maskPhone(notification.phoneNumber)}`);
+    }
+
+    // P1.1: Signal summary
+    const SIGNAL_EMOJI: Record<string, string> = {
+      appointment_request: '📅 randevu talebi',
+      callback_requested: '📞 arama talebi',
+      hot_lead: '🔥 sıcak fırsat',
+      report_sent: '📄 rapor gönderildi',
+      report_waiting: '📄 rapor bekleniyor',
+      requires_human: '👤 onay gerekiyor',
+      human_escalation: '🚨 eskalasyon',
+    };
+    if (meta.signals && Array.isArray(meta.signals) && meta.signals.length > 1) {
+      const signalLabels = meta.signals
+        .map((s: string) => SIGNAL_EMOJI[s])
+        .filter(Boolean);
+      if (signalLabels.length > 0) {
+        lines.push(`📋 Sinyaller: ${signalLabels.join(' | ')}`);
+      }
     }
 
     // Priority badge

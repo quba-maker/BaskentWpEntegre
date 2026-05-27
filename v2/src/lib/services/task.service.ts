@@ -4,6 +4,10 @@
  * Central task management for all follow-up activities.
  * CRUD + auto-generation from CRM extraction + stop rule integration.
  * 
+ * P1.1: Signal aggregation via SignalAggregator.
+ *   - generateFromCrm() delegates to SignalAggregator for dedup.
+ *   - createAggregated() handles group-based task dedup.
+ * 
  * STATUS SEMANTICS:
  * - pending: waiting to be actioned
  * - in_progress: coordinator working on it
@@ -13,6 +17,8 @@
  */
 
 import type { TenantDB } from '@/lib/core/tenant-db';
+import { SignalAggregator, type TaskGroup } from './signal-aggregator';
+import { cleanString } from './sanitizers';
 
 // ═══════════════════════════════════════════════════════════
 // TYPES
@@ -76,6 +82,21 @@ export interface CreateTaskInput {
   createdBy?: string;
   sourceEvent?: string;
   patientSegment?: string;
+  metadata?: Record<string, any>;
+}
+
+export interface AggregatedTaskInput {
+  tenantId: string;
+  opportunityId: string;
+  conversationId?: string;
+  phoneNumber: string;
+  primaryTaskType: TaskType;
+  primaryTaskGroup: TaskGroup;
+  taskTitle: string;
+  taskDescription: string;
+  dueAt: string;
+  priority?: string;
+  signals: string[];
   metadata?: Record<string, any>;
 }
 
@@ -391,7 +412,7 @@ export class TaskService {
     return result.length;
   }
 
-  // ── AUTO-GENERATION FROM CRM ──
+  // ── AUTO-GENERATION FROM CRM (P1.1: Delegates to SignalAggregator) ──
   async generateFromCrm(input: {
     tenantId: string;
     opportunityId: string;
@@ -400,58 +421,151 @@ export class TaskService {
     crmData: any;
     patientName?: string;
   }): Promise<string[]> {
-    const createdIds: string[] = [];
+    // P1.1: Use SignalAggregator for dedup + aggregation
+    const aggregator = new SignalAggregator();
+    const aggregated = aggregator.aggregate(input.crmData, {
+      patientName: input.crmData?.patient_name || input.patientName,
+      phoneNumber: input.phoneNumber,
+      department: input.crmData?.department,
+      country: input.crmData?.country,
+    });
 
-    for (const rule of CRM_TASK_RULES) {
-      if (!rule.condition(input.crmData)) continue;
+    if (!aggregated) return [];
 
-      // Idempotency: skip if pending task of same type exists for this opportunity
-      const exists = await this.hasPendingTask(
-        input.opportunityId, rule.taskType, input.tenantId
+    try {
+      const taskId = await this.createAggregated({
+        tenantId: input.tenantId,
+        opportunityId: input.opportunityId,
+        conversationId: input.conversationId,
+        phoneNumber: input.phoneNumber,
+        primaryTaskType: aggregated.primaryTaskType,
+        primaryTaskGroup: aggregated.primaryTaskGroup,
+        taskTitle: aggregated.taskTitle,
+        taskDescription: aggregated.taskDescription,
+        dueAt: aggregated.dueAt,
+        priority: aggregated.priority,
+        signals: aggregated.signals,
+        metadata: aggregated.metadata,
+      });
+      return taskId ? [taskId] : [];
+    } catch (err) {
+      console.error(`[TASK_AGGREGATED_ERROR] Failed:`, err);
+      return [];
+    }
+  }
+
+  // ── CREATE AGGREGATED (P1.1: Group-based dedup) ──
+  async createAggregated(input: AggregatedTaskInput): Promise<string | null> {
+    // 1. Check for existing pending task in same task group for this opportunity
+    const existing = await this.findPendingInGroup(
+      input.opportunityId, input.primaryTaskGroup, input.tenantId
+    );
+
+    if (existing) {
+      // Merge new signals into existing task
+      await this.mergeSignals(
+        existing.id, 
+        input.tenantId, 
+        input.signals, 
+        input.taskDescription,
+        input.dueAt,
+        input.priority
       );
-      if (exists) continue;
-
-      // Calculate due_at
-      let dueAt: string;
-      if (rule.exactDueAt) {
-        const exact = rule.exactDueAt(input.crmData);
-        if (exact) {
-          // Try to parse the exact datetime
-          const parsed = new Date(exact);
-          dueAt = isNaN(parsed.getTime())
-            ? new Date(Date.now() + 2 * 3600 * 1000).toISOString() // fallback: 2h
-            : parsed.toISOString();
-        } else {
-          continue; // No valid datetime, skip this rule
-        }
-      } else {
-        const hours = typeof rule.dueOffsetHours === 'function' 
-          ? rule.dueOffsetHours(input.crmData) 
-          : rule.dueOffsetHours;
-        dueAt = new Date(Date.now() + hours * 3600 * 1000).toISOString();
-      }
-
-      try {
-        const id = await this.create({
-          tenantId: input.tenantId,
-          opportunityId: input.opportunityId,
-          conversationId: input.conversationId,
-          phoneNumber: input.phoneNumber,
-          taskType: rule.taskType,
-          title: rule.title(input.crmData),
-          description: rule.description?.(input.crmData),
-          dueAt,
-          isAutomated: true,
-          createdBy: 'crm_auto',
-          sourceEvent: 'crm_extraction',
-        });
-        createdIds.push(id);
-      } catch (err) {
-        console.error(`[TASK_AUTO_GEN_ERROR] Failed to create ${rule.taskType}:`, err);
-      }
+      return existing.id;
     }
 
-    return createdIds;
+    // 2. Create new aggregated task
+    return this.create({
+      tenantId: input.tenantId,
+      opportunityId: input.opportunityId,
+      conversationId: input.conversationId,
+      phoneNumber: input.phoneNumber,
+      taskType: input.primaryTaskType,
+      title: input.taskTitle,
+      description: input.taskDescription,
+      dueAt: input.dueAt,
+      isAutomated: true,
+      createdBy: 'crm_auto',
+      sourceEvent: 'crm_extraction',
+      metadata: input.metadata,
+    });
+  }
+
+  // ── FIND PENDING IN SAME TASK GROUP ──
+  private async findPendingInGroup(
+    oppId: string, taskGroup: TaskGroup, tenantId: string
+  ): Promise<{ id: string; metadata: any } | null> {
+    // Map task group to possible task types
+    const groupTypes: Record<TaskGroup, string[]> = {
+      appointment_followup: ['coordinator_review', 'callback_scheduled', 'appointment_reminder'],
+      callback_followup: ['callback_scheduled', 'call_patient'],
+      doctor_review: ['doctor_review_pending'],
+      report_followup: ['send_report_reminder'],
+      coordinator_review: ['coordinator_review'],
+    };
+
+    const types = groupTypes[taskGroup] || [taskGroup];
+
+    const rows = await this.db.executeSafe({
+      text: `SELECT id, metadata FROM follow_up_tasks 
+             WHERE opportunity_id = $1 AND task_type = ANY($2) AND tenant_id = $3
+               AND status IN ('pending', 'in_progress')
+             ORDER BY created_at DESC
+             LIMIT 1`,
+      values: [oppId, types, tenantId]
+    }) as any[];
+
+    if (rows.length === 0) return null;
+    return { id: rows[0].id, metadata: rows[0].metadata || {} };
+  }
+
+  // ── MERGE SIGNALS INTO EXISTING TASK ──
+  private async mergeSignals(
+    taskId: string, 
+    tenantId: string, 
+    newSignals: string[],
+    newDescription: string,
+    newDueAt: string,
+    newPriority?: string
+  ): Promise<void> {
+    // Read current metadata
+    const rows = await this.db.executeSafe({
+      text: `SELECT metadata, due_at, description FROM follow_up_tasks WHERE id = $1 AND tenant_id = $2`,
+      values: [taskId, tenantId]
+    }) as any[];
+
+    if (rows.length === 0) return;
+
+    const current = rows[0];
+    const currentMeta = current.metadata || {};
+    const existingSignals: string[] = currentMeta.signals || [];
+
+    // Merge signals (deduplicate)
+    const mergedSignals = [...new Set([...existingSignals, ...newSignals])];
+
+    // Keep the earlier (more urgent) due_at
+    const currentDue = new Date(current.due_at);
+    const incomingDue = new Date(newDueAt);
+    const keepDue = (!isNaN(incomingDue.getTime()) && incomingDue < currentDue) 
+      ? newDueAt 
+      : current.due_at;
+
+    const updatedMeta = {
+      ...currentMeta,
+      signals: mergedSignals,
+      merged_count: mergedSignals.length,
+      last_merged_at: new Date().toISOString(),
+    };
+
+    await this.db.executeSafe({
+      text: `UPDATE follow_up_tasks 
+             SET metadata = $3::jsonb, 
+                 description = $4,
+                 due_at = $5,
+                 updated_at = NOW()
+             WHERE id = $1 AND tenant_id = $2 AND status IN ('pending', 'in_progress')`,
+      values: [taskId, tenantId, JSON.stringify(updatedMeta), newDescription, keepDue]
+    });
   }
 
   // ── IDEMPOTENCY GUARD ──
