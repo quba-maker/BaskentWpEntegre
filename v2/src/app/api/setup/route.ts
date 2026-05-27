@@ -602,6 +602,40 @@ export async function GET(req: NextRequest) {
       results.push("⚠️ PHASE 2K-P1: notification_channels RLS: " + e.message);
     }
 
+    // =====================================================
+    // 25. PHASE 2L-P0: Outreach Logs — Coordinator action audit trail
+    // Tracks manual outreach actions: greetings sent, bot activations,
+    // manual messages. Enables conversion funnel analysis in P1.
+    // =====================================================
+
+    await execute`
+      CREATE TABLE IF NOT EXISTS outreach_logs (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id TEXT NOT NULL,
+        lead_id UUID NOT NULL,
+        conversation_id TEXT,
+        opportunity_id TEXT,
+        action TEXT NOT NULL,
+        channel TEXT DEFAULT 'whatsapp',
+        actor_id TEXT NOT NULL,
+        metadata JSONB DEFAULT '{}',
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `;
+    await execute`CREATE INDEX IF NOT EXISTS idx_outreach_logs_lead ON outreach_logs(lead_id, tenant_id)`;
+    await execute`CREATE INDEX IF NOT EXISTS idx_outreach_logs_tenant ON outreach_logs(tenant_id, created_at DESC)`;
+    results.push("✅ PHASE 2L-P0: outreach_logs tablosu hazır");
+
+    // 25a. RLS for outreach_logs (shadow mode)
+    try {
+      await execute`ALTER TABLE outreach_logs ENABLE ROW LEVEL SECURITY`;
+      await execute`DROP POLICY IF EXISTS outreach_logs_app_access ON outreach_logs`;
+      await execute`CREATE POLICY outreach_logs_app_access ON outreach_logs FOR ALL USING (true) WITH CHECK (true)`;
+      results.push("✅ PHASE 2L-P0: outreach_logs RLS policies oluşturuldu");
+    } catch (e: any) {
+      results.push("⚠️ PHASE 2L-P0: outreach_logs RLS: " + e.message);
+    }
+
     if (isDryRun) {
       return NextResponse.json({ success: true, mode: "dryRun", results, executedQueries: dryRunLogs });
     }

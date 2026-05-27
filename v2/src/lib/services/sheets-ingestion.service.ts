@@ -281,18 +281,32 @@ export async function ingestSheetRow(params: IngestRowParams): Promise<IngestRow
     const leadId = leadResult?.[0]?.id;
 
     // ── 6. Identity Engine: Link lead to customer profile ──
-    // Skip in batch sync mode — identity linking happens via webhook/conversation events
-    if (!skipAutoMessage) {
+    if (leadId) {
       try {
         const { IdentityEngine } = await import('@/lib/services/ai/engines/identity');
         const customerId = await IdentityEngine.resolveIdentity({
           tenantId, phoneNumber: phone1, email: email || undefined, firstName: name || undefined
         });
-        if (leadId) {
-          await IdentityEngine.linkLead(tenantId, leadId, customerId);
-        }
+        await IdentityEngine.linkLead(tenantId, leadId, customerId);
       } catch (idErr) {
         log.error('[INGEST_IDENTITY] Non-fatal identity link error', idErr instanceof Error ? idErr : new Error(String(idErr)));
+      }
+    }
+
+    // ── 6.5. PHASE 2L-P0: Activate lead in operational pipeline ──
+    // Creates: conversation → opportunity → task → notification → Telegram
+    // Idempotent: skips if lead already has linked_opportunity_id
+    if (leadId) {
+      try {
+        const { FormLeadActivationService } = await import('./form-lead-activation.service');
+        await FormLeadActivationService.activate({
+          tenantId, tenantName, leadId, phoneNumber: phone1,
+          patientName: name || undefined, formName, email: email || undefined,
+          source: source || 'webhook'
+        });
+      } catch (activationErr) {
+        log.error('[INGEST_ACTIVATION] Non-fatal activation error',
+          activationErr instanceof Error ? activationErr : new Error(String(activationErr)));
       }
     }
 

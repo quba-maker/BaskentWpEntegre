@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import useSWRInfinite from "swr/infinite";
-import { Search, MessageCircle, X, FileText, ChevronRight, CheckCircle2, Bot, Save, StickyNote, Sparkles, RefreshCw, ChevronDown, Filter, Zap } from "lucide-react";
+import { Search, MessageCircle, X, FileText, ChevronRight, CheckCircle2, Bot, Save, StickyNote, Sparkles, RefreshCw, ChevronDown, Filter, Zap, Send, Clock, CheckCheck } from "lucide-react";
 import { getForms, getCampaignNames, updateLeadNotes, updateLeadStage, syncGoogleSheets } from "@/app/actions/forms";
 import { toggleBotStatus } from "@/app/actions/inbox";
+import { sendGreeting, activateBot, getOutreachHistory, type OutreachLogEntry } from "@/app/actions/outreach";
 import { useInboxStore } from "@/store/inbox-store";
 import { useRouter, useParams } from "next/navigation";
 import { resolveCountry, deduplicatePhones, getCountryInfoByName } from "@/lib/utils/country";
@@ -150,6 +151,12 @@ export default function FormsPage() {
   const [notes, setNotes] = useState("");
   const [isSavingNotes, setIsSavingNotes] = useState(false);
 
+  // PHASE 2L-P0: Outreach state
+  const [outreachLoading, setOutreachLoading] = useState<'greeting' | 'bot' | null>(null);
+  const [outreachTimeline, setOutreachTimeline] = useState<OutreachLogEntry[]>([]);
+  const [outreachError, setOutreachError] = useState<string | null>(null);
+  const [greetingSent, setGreetingSent] = useState(false);
+
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncProgress, setSyncProgress] = useState({ status: '', progress: 0, message: '' });
 
@@ -229,6 +236,80 @@ export default function FormsPage() {
     );
     await updateLeadStage(form.id, newStage);
     mutate();
+  };
+
+  // PHASE 2L-P0: Load outreach timeline when modal opens
+  const loadOutreachTimeline = useCallback(async (leadId: string) => {
+    try {
+      const history = await getOutreachHistory(leadId);
+      setOutreachTimeline(history);
+      // Check if greeting was already sent
+      const hasGreeting = history.some((h: OutreachLogEntry) => h.action === 'greeting_sent');
+      setGreetingSent(hasGreeting);
+    } catch (_) {
+      setOutreachTimeline([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (selectedForm?.id) {
+      setOutreachError(null);
+      setGreetingSent(false);
+      loadOutreachTimeline(selectedForm.id);
+    } else {
+      setOutreachTimeline([]);
+      setGreetingSent(false);
+      setOutreachError(null);
+    }
+  }, [selectedForm?.id, loadOutreachTimeline]);
+
+  // PHASE 2L-P0: Coordinator sends greeting
+  const handleSendGreeting = async (form: any) => {
+    setOutreachLoading('greeting');
+    setOutreachError(null);
+    try {
+      const result = await sendGreeting(form.id);
+      if (result.success) {
+        setGreetingSent(true);
+        // Update stage optimistically
+        mutate(
+          data?.map(page => page.map((f: any) => f.id === form.id ? { ...f, stage: 'contacted' } : f)),
+          false
+        );
+        setSelectedForm({ ...form, stage: 'contacted' });
+        // Refresh timeline
+        await loadOutreachTimeline(form.id);
+      } else {
+        setOutreachError(result.error || 'Selamlama gönderilemedi.');
+      }
+    } catch (err: any) {
+      setOutreachError(err?.message || 'Beklenmeyen bir hata oluştu.');
+    } finally {
+      setOutreachLoading(null);
+    }
+  };
+
+  // PHASE 2L-P0: Coordinator activates bot
+  const handleOutreachBotActivate = async (form: any) => {
+    setOutreachLoading('bot');
+    setOutreachError(null);
+    try {
+      const result = await activateBot(form.id);
+      if (result.success) {
+        setSelectedForm({ ...form, isBotActive: true });
+        mutate(
+          data?.map(page => page.map((f: any) => f.id === form.id ? { ...f, isBotActive: true } : f)),
+          false
+        );
+        await loadOutreachTimeline(form.id);
+      } else {
+        setOutreachError(result.error || 'Bot aktifleştirilemedi.');
+      }
+    } catch (err: any) {
+      setOutreachError(err?.message || 'Beklenmeyen bir hata oluştu.');
+    } finally {
+      setOutreachLoading(null);
+    }
   };
 
   return (
@@ -620,23 +701,112 @@ export default function FormsPage() {
               {/* Content */}
               <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-6">
               
-              {/* Quick Actions */}
-              <div className="flex gap-3">
-                <button 
-                  onClick={(e) => handleMessageClick(selectedForm, e as any)}
-                  className="flex-1 flex items-center justify-center gap-2 py-3 bg-[#25D366] text-white rounded-xl font-semibold shadow-[0_4px_14px_rgba(37,211,102,0.39)] hover:bg-[#1DA851] transition-colors"
-                >
-                  <MessageCircle className="w-5 h-5" />
-                  Mesaj Gönder
-                </button>
-                <button 
-                  onClick={(e) => handleBotHandoff(selectedForm, e as any)}
-                  disabled={isBotHandoffLoading || selectedForm.isBotActive}
-                  className="flex-1 flex items-center justify-center gap-2 py-3 bg-[#007AFF] text-white rounded-xl font-semibold shadow-[0_4px_14px_rgba(0,122,255,0.3)] hover:bg-[#0056b3] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <Zap className="w-5 h-5" />
-                  {selectedForm.isBotActive ? 'Bot Aktif' : isBotHandoffLoading ? 'Devrediliyor...' : 'Bota Devret'}
-                </button>
+              {/* PHASE 2L-P0: Outreach Actions */}
+              <div className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
+                <div className="px-5 py-3 border-b border-black/5 bg-gradient-to-r from-[#25D366]/5 to-[#007AFF]/5">
+                  <h3 className="text-sm font-bold text-[#1D1D1F] flex items-center gap-2">
+                    <Send className="w-4 h-4 text-[#25D366]" />
+                    İlk İletişim (Outreach)
+                  </h3>
+                  <p className="text-[11px] text-[#86868B] font-medium mt-0.5">Koordinatör onayı ile karşılama mesajı gönder</p>
+                </div>
+                <div className="p-4 space-y-3">
+                  {/* Error Banner */}
+                  {outreachError && (
+                    <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-[12px] font-medium flex items-center gap-2">
+                      <X className="w-3.5 h-3.5 shrink-0" />
+                      {outreachError}
+                    </div>
+                  )}
+
+                  {/* Action Buttons */}
+                  <div className="flex gap-3">
+                    <button 
+                      onClick={() => handleSendGreeting(selectedForm)}
+                      disabled={greetingSent || outreachLoading === 'greeting' || selectedForm.stage !== 'new'}
+                      className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-semibold transition-all ${
+                        greetingSent 
+                          ? 'bg-emerald-50 text-emerald-600 border border-emerald-200 cursor-default'
+                          : selectedForm.stage !== 'new'
+                          ? 'bg-gray-100 text-[#86868B] cursor-not-allowed'
+                          : 'bg-[#25D366] text-white shadow-[0_4px_14px_rgba(37,211,102,0.39)] hover:bg-[#1DA851] cursor-pointer'
+                      } disabled:opacity-70`}
+                    >
+                      {greetingSent ? (
+                        <><CheckCheck className="w-5 h-5" /> Selamlama Gönderildi</>
+                      ) : outreachLoading === 'greeting' ? (
+                        <><RefreshCw className="w-4 h-4 animate-spin" /> Gönderiliyor...</>
+                      ) : selectedForm.stage !== 'new' ? (
+                        <><CheckCircle2 className="w-5 h-5" /> Zaten İletişime Geçildi</>
+                      ) : (
+                        <><Send className="w-5 h-5" /> Selamlama Gönder</>
+                      )}
+                    </button>
+                    <button 
+                      onClick={() => handleOutreachBotActivate(selectedForm)}
+                      disabled={selectedForm.isBotActive || outreachLoading === 'bot' || !greetingSent}
+                      title={!greetingSent ? 'Önce selamlama gönderilmeli' : selectedForm.isBotActive ? 'Bot zaten aktif' : 'AI Bota devret'}
+                      className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-semibold transition-all ${
+                        selectedForm.isBotActive
+                          ? 'bg-[#0F9D58]/10 text-[#0F9D58] border border-[#0F9D58]/20 cursor-default'
+                          : !greetingSent
+                          ? 'bg-gray-100 text-[#86868B] cursor-not-allowed'
+                          : 'bg-[#007AFF] text-white shadow-[0_4px_14px_rgba(0,122,255,0.3)] hover:bg-[#0056b3] cursor-pointer'
+                      } disabled:opacity-70`}
+                    >
+                      {selectedForm.isBotActive ? (
+                        <><Bot className="w-5 h-5 animate-pulse" /> Bot Aktif</>
+                      ) : outreachLoading === 'bot' ? (
+                        <><RefreshCw className="w-4 h-4 animate-spin" /> Aktifleştiriliyor...</>
+                      ) : (
+                        <><Zap className="w-5 h-5" /> Bota Devret</>
+                      )}
+                    </button>
+                  </div>
+
+                  {/* Quick Navigate to Inbox */}
+                  <button 
+                    onClick={(e) => handleMessageClick(selectedForm, e as any)}
+                    className="w-full flex items-center justify-center gap-2 py-2.5 bg-black/[0.03] hover:bg-black/[0.06] rounded-xl text-[13px] font-semibold text-[#1D1D1F] transition-colors"
+                  >
+                    <MessageCircle className="w-4 h-4 text-[#25D366]" />
+                    Inbox'ta Görüntüle
+                  </button>
+                </div>
+
+                {/* Outreach Timeline */}
+                {outreachTimeline.length > 0 && (
+                  <div className="border-t border-black/5 px-5 py-3">
+                    <h4 className="text-[11px] font-bold text-[#86868B] uppercase tracking-wider mb-2 flex items-center gap-1">
+                      <Clock className="w-3 h-3" /> Outreach Geçmişi
+                    </h4>
+                    <div className="space-y-2">
+                      {outreachTimeline.map((entry) => (
+                        <div key={entry.id} className="flex items-start gap-2.5">
+                          <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${
+                            entry.action === 'greeting_sent' ? 'bg-[#25D366]' 
+                            : entry.action === 'bot_activated' ? 'bg-[#007AFF]'
+                            : entry.action === 'lead_created' ? 'bg-[#FF9500]'
+                            : 'bg-[#86868B]'
+                          }`} />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-[12px] font-semibold text-[#1D1D1F]">
+                              {entry.action === 'greeting_sent' ? '🟢 Selamlama gönderildi'
+                                : entry.action === 'bot_activated' ? '🤖 Bot aktifleştirildi'
+                                : entry.action === 'lead_created' ? '📋 Lead oluşturuldu'
+                                : entry.action === 'opportunity_created' ? '🎯 Fırsat oluşturuldu'
+                                : entry.action === 'notification_sent' ? '🔔 Bildirim gönderildi'
+                                : entry.action}
+                            </p>
+                            <p className="text-[11px] text-[#86868B] font-medium">
+                              {entry.actor_name} · {new Date(entry.created_at).toLocaleString('tr-TR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul' })}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Meta Info */}

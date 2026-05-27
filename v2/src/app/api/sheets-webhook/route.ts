@@ -150,7 +150,7 @@ export async function POST(request: NextRequest) {
       data: rowData,
       outboundChannelId,
       greetingGroupId,
-      skipAutoMessage: false, // Webhook = new row → send auto-message
+      skipAutoMessage: true, // PHASE 2L-P0: Coordinator-initiated outreach only
       source: 'webhook'
     });
 
