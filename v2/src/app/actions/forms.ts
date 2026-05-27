@@ -115,7 +115,7 @@ export async function getForms(page: number = 1, search: string = "", source: st
                LEFT JOIN LATERAL (
                  SELECT ol.action as last_outreach_action, ol.created_at as last_outreach_at
                  FROM outreach_logs ol
-                 WHERE ol.lead_id = l.id AND ol.tenant_id = l.tenant_id
+                 WHERE ol.lead_id = l.id AND ol.tenant_id = l.tenant_id::text
                  ORDER BY ol.created_at DESC
                  LIMIT 1
                ) last_outreach ON true
