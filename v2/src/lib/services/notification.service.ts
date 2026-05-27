@@ -91,6 +91,27 @@ export class NotificationService {
     const channelsSent = ['panel'];
     const dispatchErrors: Record<string, string> = {};
 
+    // ── SANITIZATION GUARD: Catch null strings & raw ISO in title/body ──
+    const sanitize = (val: string): string => {
+      let s = val;
+      // Replace literal "null" strings
+      s = s.replace(/\bnull\b/gi, '').replace(/\bundefined\b/gi, '');
+      // Replace raw ISO datetime patterns with human readable
+      s = s.replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+\-]\d{2}:\d{2}/g, (match) => {
+        try {
+          const d = new Date(match);
+          if (isNaN(d.getTime())) return match;
+          return d.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', weekday: 'long' }) 
+            + ' ' + d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul' });
+        } catch { return match; }
+      });
+      // Clean up resulting artifacts: double spaces, leading/trailing dashes
+      s = s.replace(/\s{2,}/g, ' ').replace(/—\s*—/g, '—').replace(/^\s*—\s*/g, '').trim();
+      return s || val; // fallback to original if sanitize empties it
+    };
+    input.title = sanitize(input.title);
+    input.body = sanitize(input.body);
+
     // ── STEP 1: Panel DB insert (always first, never fails silently) ──
     const rows = await this.db.executeSafe({
       text: `INSERT INTO notifications (

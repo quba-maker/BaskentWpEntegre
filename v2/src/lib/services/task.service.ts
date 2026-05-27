@@ -462,11 +462,12 @@ export class TaskService {
     );
 
     if (existing) {
-      // Merge new signals into existing task
+      // Merge new signals into existing task (+ fix dirty titles)
       await this.mergeSignals(
         existing.id, 
         input.tenantId, 
         input.signals, 
+        input.taskTitle,
         input.taskDescription,
         input.dueAt,
         input.priority
@@ -519,18 +520,31 @@ export class TaskService {
     return { id: rows[0].id, metadata: rows[0].metadata || {} };
   }
 
+  // ── DIRTY TITLE GUARD ──
+  private isDirtyTitle(title?: string | null): boolean {
+    if (!title || title.trim() === '') return true;
+    const t = title.toLowerCase();
+    return (
+      t.includes('null') ||
+      t.includes('undefined') ||
+      t.endsWith('— hasta') ||
+      t.endsWith('— patient')
+    );
+  }
+
   // ── MERGE SIGNALS INTO EXISTING TASK ──
   private async mergeSignals(
     taskId: string, 
     tenantId: string, 
     newSignals: string[],
+    newTitle: string,
     newDescription: string,
     newDueAt: string,
     newPriority?: string
   ): Promise<void> {
-    // Read current metadata
+    // Read current metadata + title
     const rows = await this.db.executeSafe({
-      text: `SELECT metadata, due_at, description FROM follow_up_tasks WHERE id = $1 AND tenant_id = $2`,
+      text: `SELECT title, metadata, due_at, description FROM follow_up_tasks WHERE id = $1 AND tenant_id = $2`,
       values: [taskId, tenantId]
     }) as any[];
 
@@ -550,6 +564,10 @@ export class TaskService {
       ? newDueAt 
       : current.due_at;
 
+    // Fix dirty titles: if existing title contains null/undefined, replace with clean title
+    const shouldUpdateTitle = this.isDirtyTitle(current.title);
+    const finalTitle = shouldUpdateTitle ? newTitle : current.title;
+
     const updatedMeta = {
       ...currentMeta,
       signals: mergedSignals,
@@ -559,12 +577,13 @@ export class TaskService {
 
     await this.db.executeSafe({
       text: `UPDATE follow_up_tasks 
-             SET metadata = $3::jsonb, 
-                 description = $4,
-                 due_at = $5,
+             SET title = $3,
+                 metadata = $4::jsonb, 
+                 description = $5,
+                 due_at = $6,
                  updated_at = NOW()
              WHERE id = $1 AND tenant_id = $2 AND status IN ('pending', 'in_progress')`,
-      values: [taskId, tenantId, JSON.stringify(updatedMeta), newDescription, keepDue]
+      values: [taskId, tenantId, finalTitle, JSON.stringify(updatedMeta), newDescription, keepDue]
     });
   }
 
