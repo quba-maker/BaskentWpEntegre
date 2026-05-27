@@ -96,6 +96,28 @@ export class PromptBuilder {
         crmContext += `- İtirazlar: ${(unifiedContext.memory.objections || []).join(', ')}\n`;
         crmContext += `>> DİKKAT: Bu kişiyle geçmiş bir konuşmanız var. Konuşmayı bu özet doğrultusunda, kaldığı yerden sürdür. Kendini ilk defa tanışıyormuş gibi tanıtma.\n`;
       }
+
+      // ═══ P1: Form Lead Outreach Context ═══
+      // When a coordinator has already contacted this form lead (greeting sent, phone call, etc.),
+      // inject that context so the bot knows the patient was already approached.
+      if (unifiedContext.outreachContext) {
+        const oc = unifiedContext.outreachContext;
+        crmContext += `\n--- FORM LEAD OUTREACH DURUMU ---\n`;
+        crmContext += `Bu kişi bir form lead'idir (doğrudan WhatsApp'tan yazmadı, form doldurdu ve koordinatör tarafından ulaşıldı).\n`;
+        if (oc.greetingSent) {
+          crmContext += `- Koordinatör karşılama mesajı GÖNDERİLDİ.\n`;
+        }
+        if (oc.lastCallAction) {
+          crmContext += `- Son telefon aksiyonu: ${oc.lastCallAction}\n`;
+        }
+        if (oc.lastCallNote) {
+          crmContext += `- Koordinatör notu: ${oc.lastCallNote}\n`;
+        }
+        crmContext += `>> KURAL: Bu kişi form lead olduğu için proaktif satış yapma. Hastanın sorularına cevap ver, bilgi iste, ama agresif upsell yapma. Hasta zaten ilgilenerek form doldurmuş — güven inşa et, bilgi ver, yönlendir.\n`;
+        crmContext += `>> KURAL: Koordinatör zaten bu hastaya ulaşmış. Kendini ilk kez tanıştığını söyleme. "Size daha önce ulaşan ekibimizin devamı olarak" gibi yumuşak geçiş yap.\n`;
+        crmContext += `-----------------------------------\n`;
+      }
+
       crmContext += `============================================\n`;
     }
 

@@ -2,14 +2,27 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import useSWRInfinite from "swr/infinite";
-import { Search, MessageCircle, X, FileText, ChevronRight, CheckCircle2, Bot, Save, StickyNote, Sparkles, RefreshCw, ChevronDown, Filter, Zap, Send, Clock, CheckCheck, Edit3 } from "lucide-react";
+import { Search, MessageCircle, X, FileText, ChevronRight, CheckCircle2, Bot, Save, StickyNote, Sparkles, RefreshCw, ChevronDown, Filter, Zap, Send, Clock, CheckCheck, Edit3, Phone, PhoneOff, PhoneForwarded, XCircle } from "lucide-react";
 import { getForms, getCampaignNames, updateLeadNotes, updateLeadStage, syncGoogleSheets } from "@/app/actions/forms";
 import { toggleBotStatus } from "@/app/actions/inbox";
-import { prepareGreetingDraft, sendGreetingMessage, activateBot, getOutreachHistory, type OutreachLogEntry } from "@/app/actions/outreach";
+import { prepareGreetingDraft, sendGreetingMessage, activateBot, getOutreachHistory, logCallReached, logCallMissed, logCallbackScheduled, logNotInterested, getGreetingTemplates, type OutreachLogEntry } from "@/app/actions/outreach";
 import { useInboxStore } from "@/store/inbox-store";
 import { useRouter, useParams } from "next/navigation";
 import { resolveCountry, deduplicatePhones, getCountryInfoByName } from "@/lib/utils/country";
 import { MapPin, Building2, Calendar, Flame, TrendingUp, User } from "lucide-react";
+
+// ═══ P1: Outreach status badge config ═══
+const OUTREACH_BADGE_CONFIG: Record<string, { label: string; color: string; icon: string }> = {
+  'greeting_sent': { label: 'Mesaj Gönderildi', color: '#25D366', icon: '💬' },
+  'bot_activated': { label: 'Bot Aktif', color: '#007AFF', icon: '🤖' },
+  'call_reached': { label: 'Arandı / Ulaşıldı', color: '#0F9D58', icon: '📞' },
+  'call_missed': { label: 'Arandı / Ulaşılamadı', color: '#FF9500', icon: '📵' },
+  'callback_scheduled': { label: 'Geri Arama Planlandı', color: '#5856D6', icon: '🔄' },
+  'not_interested': { label: 'İlgilenmiyor', color: '#FF3B30', icon: '🚫' },
+  'lead_created': { label: 'Lead Oluşturuldu', color: '#FF9500', icon: '📋' },
+  'opportunity_created': { label: 'Fırsat Oluşturuldu', color: '#30B0C7', icon: '🎯' },
+  'notification_sent': { label: 'Bildirim Gönderildi', color: '#86868B', icon: '🔔' },
+};
 
 const formatDate = (dateString: string) => {
   if (!dateString) return "";
@@ -152,7 +165,7 @@ export default function FormsPage() {
   const [isSavingNotes, setIsSavingNotes] = useState(false);
 
   // PHASE 2L-P0v2: Outreach state — two-step draft→send flow
-  const [outreachLoading, setOutreachLoading] = useState<'draft' | 'sending' | 'bot' | null>(null);
+  const [outreachLoading, setOutreachLoading] = useState<'draft' | 'sending' | 'bot' | 'call_action' | null>(null);
   const [outreachTimeline, setOutreachTimeline] = useState<OutreachLogEntry[]>([]);
   const [outreachError, setOutreachError] = useState<string | null>(null);
   const [outreachSuccess, setOutreachSuccess] = useState<string | null>(null);
@@ -160,6 +173,12 @@ export default function FormsPage() {
   // Draft state
   const [draftMessage, setDraftMessage] = useState<string | null>(null);
   const [isDraftOpen, setIsDraftOpen] = useState(false);
+  // P1: Template selector
+  const [templates, setTemplates] = useState<{id: string; name: string; body: string}[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
+  // P1: Call action note
+  const [callActionNote, setCallActionNote] = useState('');
+  const [showCallActions, setShowCallActions] = useState(false);
 
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncProgress, setSyncProgress] = useState({ status: '', progress: 0, message: '' });
@@ -262,7 +281,12 @@ export default function FormsPage() {
       setGreetingSent(false);
       setDraftMessage(null);
       setIsDraftOpen(false);
+      setCallActionNote('');
+      setShowCallActions(false);
+      setSelectedTemplateId(null);
       loadOutreachTimeline(selectedForm.id);
+      // Load templates for selector
+      getGreetingTemplates().then((t: any[]) => setTemplates(t)).catch(() => setTemplates([]));
     } else {
       setOutreachTimeline([]);
       setGreetingSent(false);
@@ -270,6 +294,9 @@ export default function FormsPage() {
       setOutreachSuccess(null);
       setDraftMessage(null);
       setIsDraftOpen(false);
+      setCallActionNote('');
+      setShowCallActions(false);
+      setSelectedTemplateId(null);
     }
   }, [selectedForm?.id, loadOutreachTimeline]);
 
@@ -331,6 +358,60 @@ export default function FormsPage() {
     setIsDraftOpen(false);
     setDraftMessage(null);
     setOutreachError(null);
+    setSelectedTemplateId(null);
+  };
+
+  // ═══ P1: Call action handlers ═══
+  const handleCallAction = async (action: 'reached' | 'missed' | 'callback' | 'not_interested', form: any) => {
+    setOutreachLoading('call_action');
+    setOutreachError(null);
+    setOutreachSuccess(null);
+    try {
+      let result;
+      switch (action) {
+        case 'reached':
+          result = await logCallReached(form.id, callActionNote || undefined);
+          break;
+        case 'missed':
+          result = await logCallMissed(form.id, callActionNote || undefined);
+          break;
+        case 'callback':
+          result = await logCallbackScheduled(form.id, callActionNote || undefined);
+          break;
+        case 'not_interested':
+          result = await logNotInterested(form.id, callActionNote || undefined);
+          break;
+      }
+      if (result?.success) {
+        setOutreachSuccess(result.message || 'İşlem başarıyla kaydedildi.');
+        setCallActionNote('');
+        setShowCallActions(false);
+        await loadOutreachTimeline(form.id);
+        mutate();
+      } else {
+        setOutreachError(result?.error || 'İşlem kaydedilemedi.');
+      }
+    } catch (err: any) {
+      setOutreachError(err?.message || 'Beklenmeyen bir hata oluştu.');
+    } finally {
+      setOutreachLoading(null);
+    }
+  };
+
+  // P1: Template change handler — swap draft text when template selected
+  const handleTemplateSelect = (templateId: string) => {
+    setSelectedTemplateId(templateId);
+    const tpl = templates.find(t => t.id === templateId);
+    if (tpl) {
+      // Replace placeholders in template body with form data
+      let body = tpl.body;
+      if (selectedForm) {
+        const name = getDisplayName(selectedForm);
+        body = body.replace(/\{\{patient_name\}\}/g, name);
+        body = body.replace(/\{\{name\}\}/g, name);
+      }
+      setDraftMessage(body);
+    }
   };
 
   // PHASE 2L-P0: Coordinator activates bot
@@ -616,6 +697,24 @@ export default function FormsPage() {
                           <Bot className="w-3 h-3 animate-pulse" /> Bot
                         </span>
                       )}
+                      {/* C8: Outreach status badge */}
+                      {form.last_outreach_action && !form.isBotActive && (() => {
+                        const badge = OUTREACH_BADGE_CONFIG[form.last_outreach_action];
+                        if (!badge) return null;
+                        return (
+                          <span 
+                            className="px-1.5 py-0.5 shrink-0 rounded text-[10px] font-bold uppercase flex items-center gap-1 border"
+                            style={{ 
+                              backgroundColor: `${badge.color}15`,
+                              color: badge.color,
+                              borderColor: `${badge.color}30`
+                            }}
+                            title={`Son outreach: ${badge.label}`}
+                          >
+                            <span className="text-[9px]">{badge.icon}</span> {badge.label}
+                          </span>
+                        );
+                      })()}
                       {form.notes && form.notes.trim() !== '' && (
                         <span className="px-1.5 py-0.5 shrink-0 bg-[#007AFF]/10 text-[#007AFF] border border-[#007AFF]/20 rounded text-[10px] font-bold uppercase flex items-center gap-1" title="Not Eklendi">
                           <StickyNote className="w-3 h-3" /> Notlu
@@ -774,10 +873,28 @@ export default function FormsPage() {
                   {/* Draft Textarea — visible after "Karşılama Hazırla" clicked */}
                   {isDraftOpen && draftMessage !== null && (
                     <div className="space-y-2">
-                      <div className="flex items-center gap-2 mb-1">
-                        <Edit3 className="w-3.5 h-3.5 text-[#007AFF]" />
-                        <span className="text-[11px] font-bold text-[#007AFF] uppercase tracking-wider">Mesaj Taslağı — Düzenleyebilirsiniz</span>
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center gap-2">
+                          <Edit3 className="w-3.5 h-3.5 text-[#007AFF]" />
+                          <span className="text-[11px] font-bold text-[#007AFF] uppercase tracking-wider">Mesaj Taslağı — Düzenleyebilirsiniz</span>
+                        </div>
                       </div>
+                      {/* C12: Template selector dropdown */}
+                      {templates.length > 1 && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] font-semibold text-[#86868B] shrink-0">Şablon:</span>
+                          <select
+                            value={selectedTemplateId || ''}
+                            onChange={(e) => handleTemplateSelect(e.target.value)}
+                            className="flex-1 text-[12px] font-medium bg-[#F5F5F7] border border-black/10 rounded-lg px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-[#007AFF]/30 transition-all cursor-pointer appearance-none"
+                          >
+                            <option value="" disabled>Şablon seçin…</option>
+                            {templates.map((tpl: any) => (
+                              <option key={tpl.id} value={tpl.id}>{tpl.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
                       <textarea
                         value={draftMessage}
                         onChange={(e) => setDraftMessage(e.target.value)}
@@ -855,6 +972,67 @@ export default function FormsPage() {
                     </div>
                   )}
 
+                  {/* C9: Expanded Call Action Buttons */}
+                  {!isDraftOpen && (
+                    <div className="space-y-2">
+                      <button
+                        onClick={() => setShowCallActions(!showCallActions)}
+                        className="w-full flex items-center justify-center gap-2 py-2 bg-black/[0.03] hover:bg-black/[0.06] rounded-xl text-[12px] font-semibold text-[#86868B] transition-colors cursor-pointer"
+                      >
+                        <Phone className="w-3.5 h-3.5" />
+                        {showCallActions ? 'Arama Aksiyonlarını Gizle' : 'Arama Aksiyonları'}
+                        <ChevronDown className={`w-3 h-3 transition-transform ${showCallActions ? 'rotate-180' : ''}`} />
+                      </button>
+                      {showCallActions && (
+                        <div className="space-y-2 animate-in slide-in-from-top-1 duration-150">
+                          {/* Call action note */}
+                          <input
+                            type="text"
+                            value={callActionNote}
+                            onChange={(e) => setCallActionNote(e.target.value)}
+                            placeholder="Kısa not (opsiyonel)…"
+                            className="w-full bg-[#F5F5F7] border border-black/10 rounded-lg px-3 py-2 text-[12px] text-[#1D1D1F] font-medium outline-none focus:ring-2 focus:ring-[#007AFF]/30 transition-all"
+                          />
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              onClick={() => handleCallAction('reached', selectedForm)}
+                              disabled={outreachLoading === 'call_action'}
+                              className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-[12px] font-semibold bg-[#0F9D58]/10 text-[#0F9D58] border border-[#0F9D58]/20 hover:bg-[#0F9D58]/20 transition-all cursor-pointer disabled:opacity-50"
+                            >
+                              <Phone className="w-3.5 h-3.5" /> Ulaşıldı
+                            </button>
+                            <button
+                              onClick={() => handleCallAction('missed', selectedForm)}
+                              disabled={outreachLoading === 'call_action'}
+                              className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-[12px] font-semibold bg-[#FF9500]/10 text-[#FF9500] border border-[#FF9500]/20 hover:bg-[#FF9500]/20 transition-all cursor-pointer disabled:opacity-50"
+                            >
+                              <PhoneOff className="w-3.5 h-3.5" /> Ulaşılamadı
+                            </button>
+                            <button
+                              onClick={() => handleCallAction('callback', selectedForm)}
+                              disabled={outreachLoading === 'call_action'}
+                              className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-[12px] font-semibold bg-[#5856D6]/10 text-[#5856D6] border border-[#5856D6]/20 hover:bg-[#5856D6]/20 transition-all cursor-pointer disabled:opacity-50"
+                            >
+                              <PhoneForwarded className="w-3.5 h-3.5" /> Geri Arama
+                            </button>
+                            <button
+                              onClick={() => handleCallAction('not_interested', selectedForm)}
+                              disabled={outreachLoading === 'call_action'}
+                              className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-[12px] font-semibold bg-[#FF3B30]/10 text-[#FF3B30] border border-[#FF3B30]/20 hover:bg-[#FF3B30]/20 transition-all cursor-pointer disabled:opacity-50"
+                            >
+                              <XCircle className="w-3.5 h-3.5" /> İlgilenmiyor
+                            </button>
+                          </div>
+                          {outreachLoading === 'call_action' && (
+                            <div className="flex items-center justify-center gap-2 py-2 text-[11px] font-medium text-[#86868B]">
+                              <RefreshCw className="w-3 h-3 animate-spin" /> Kaydediliyor…
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {/* Quick Navigate to Inbox */}
                   <button 
                     onClick={(e) => handleMessageClick(selectedForm, e as any)}
@@ -872,29 +1050,31 @@ export default function FormsPage() {
                       <Clock className="w-3 h-3" /> Outreach Geçmişi
                     </h4>
                     <div className="space-y-2">
-                      {outreachTimeline.map((entry) => (
+                      {outreachTimeline.map((entry) => {
+                        const badgeInfo = OUTREACH_BADGE_CONFIG[entry.action];
+                        const dotColor = badgeInfo?.color || '#86868B';
+                        const displayLabel = badgeInfo 
+                          ? `${badgeInfo.icon} ${badgeInfo.label}` 
+                          : entry.action;
+                        return (
                         <div key={entry.id} className="flex items-start gap-2.5">
-                          <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${
-                            entry.action === 'greeting_sent' ? 'bg-[#25D366]' 
-                            : entry.action === 'bot_activated' ? 'bg-[#007AFF]'
-                            : entry.action === 'lead_created' ? 'bg-[#FF9500]'
-                            : 'bg-[#86868B]'
-                          }`} />
+                          <div className="w-2 h-2 rounded-full mt-1.5 shrink-0" style={{ backgroundColor: dotColor }} />
                           <div className="flex-1 min-w-0">
                             <p className="text-[12px] font-semibold text-[#1D1D1F]">
-                              {entry.action === 'greeting_sent' ? '🟢 Selamlama gönderildi'
-                                : entry.action === 'bot_activated' ? '🤖 Bot aktifleştirildi'
-                                : entry.action === 'lead_created' ? '📋 Lead oluşturuldu'
-                                : entry.action === 'opportunity_created' ? '🎯 Fırsat oluşturuldu'
-                                : entry.action === 'notification_sent' ? '🔔 Bildirim gönderildi'
-                                : entry.action}
+                              {displayLabel}
                             </p>
+                            {(entry as any).metadata?.note && (
+                              <p className="text-[11px] text-[#1D1D1F] font-medium mt-0.5 italic">
+                                "{(entry as any).metadata.note}"
+                              </p>
+                            )}
                             <p className="text-[11px] text-[#86868B] font-medium">
                               {entry.actor_name} · {new Date(entry.created_at).toLocaleString('tr-TR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul' })}
                             </p>
                           </div>
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 )}

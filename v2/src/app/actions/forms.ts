@@ -48,6 +48,7 @@ export async function getForms(page: number = 1, search: string = "", source: st
       // Layer 2: phone match ONLY if exactly ONE conversation exists (no ambiguity)
       // Layer 3: no match → null summary (safe empty state)
       // Layer 4: LATERAL opportunity (most recent, no row duplication)
+      // Layer 5: LATERAL outreach (last outreach action for status badge)
       const rows = await ctx.db.executeSafe({
         text: `SELECT l.*, 
                COALESCE(c_identity.status, c_phone.status) as conversation_status, 
@@ -65,6 +66,8 @@ export async function getForms(page: number = 1, search: string = "", source: st
                opp.opp_travel_date,
                opp.opp_next_follow_up_at,
                opp.opp_summary,
+               last_outreach.last_outreach_action,
+               last_outreach.last_outreach_at,
                CASE 
                  WHEN c_identity.id IS NOT NULL THEN 'customer_id'
                  WHEN c_phone.id IS NOT NULL THEN 'phone_unique'
@@ -108,6 +111,14 @@ export async function getForms(page: number = 1, search: string = "", source: st
                    o.updated_at DESC
                  LIMIT 1
                ) opp ON COALESCE(c_identity.id, c_phone.id) IS NOT NULL
+               -- Layer 5: P1 — Last outreach action for status badge
+               LEFT JOIN LATERAL (
+                 SELECT ol.action as last_outreach_action, ol.created_at as last_outreach_at
+                 FROM outreach_logs ol
+                 WHERE ol.lead_id = l.id AND ol.tenant_id = l.tenant_id
+                 ORDER BY ol.created_at DESC
+                 LIMIT 1
+               ) last_outreach ON true
                WHERE ${conditions.join(' AND ')}
                ORDER BY l.created_at DESC LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
         values: params
@@ -144,6 +155,9 @@ export async function getForms(page: number = 1, search: string = "", source: st
         current_ai_summary: r.opp_summary || "",
         patient_relation: r.opp_patient_relation || null,
         link_confidence: r.summary_link_method || 'none',
+        // ═══ P1: Outreach status for badge rendering ═══
+        last_outreach_action: r.last_outreach_action || null,
+        last_outreach_at: r.last_outreach_at || null,
       }));
     }
   ).then(res => res.data || []);

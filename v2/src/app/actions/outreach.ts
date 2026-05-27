@@ -27,7 +27,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // ═══════════════════════════════════════════════════════════
 
 /**
- * Generates a greeting draft based on lead data + tenant config.
+ * Generates a greeting draft based on lead data + tenant template config.
  * 
  * DOES NOT:
  * - Call WhatsApp API
@@ -35,19 +35,19 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * - Write to outreach_logs
  * - Change any stage
  * 
- * RETURNS: { success, draft, patientName, phone, alreadySent }
+ * RETURNS: { success, draft, patientName, phone, language, templateId, templateName, channelReady, channelError }
  */
 export async function prepareGreetingDraft(leadId: string) {
-  if (!leadId) return { success: false, error: "Lead ID gerekli." };
-  if (!UUID_RE.test(leadId)) return { success: false, error: "Geçersiz Lead ID formatı." };
+  if (!leadId) return { success: false as const, error: "Lead ID gerekli." };
+  if (!UUID_RE.test(leadId)) return { success: false as const, error: "Geçersiz Lead ID formatı." };
 
   return withActionGuard(
     { actionName: 'prepareGreetingDraft' },
     async (ctx) => {
-      // ── 1. Resolve lead data ──
+      // ── 1. Resolve lead data (extended: form_name, country, raw_data) ──
       const leads = await ctx.db.executeSafe({
         text: `SELECT l.id, l.phone_number, l.patient_name, l.form_name,
-                      l.linked_opportunity_id, l.customer_id
+                      l.linked_opportunity_id, l.customer_id, l.country, l.raw_data
                FROM leads l
                WHERE l.id = $1 AND l.tenant_id = $2`,
         values: [leadId, ctx.tenantId]
@@ -88,7 +88,7 @@ export async function prepareGreetingDraft(leadId: string) {
         if (tenantRes.length > 0) tenantName = tenantRes[0].name;
       } catch (_) {}
 
-      // ── 4. Resolve greeting config ──
+      // ── 4. Resolve greeting language config from channel_ai_profiles ──
       let greetingLang = 'auto';
       try {
         const profileRes = await ctx.db.executeSafe({
@@ -103,24 +103,79 @@ export async function prepareGreetingDraft(leadId: string) {
         }
       } catch (_) {}
 
-      // ── 5. Build greeting text (DRAFT ONLY — not sent!) ──
-      const cleanPhone = phone.replace(/\D/g, '');
-      const isTurkish = greetingLang === 'tr' ? true : greetingLang === 'en' ? false : cleanPhone.startsWith('90');
-      const patientName = lead.patient_name || '';
-      const greeting = patientName 
-        ? (isTurkish ? `Merhaba ${patientName}!` : `Hello ${patientName}!`) 
-        : (isTurkish ? 'Merhaba!' : 'Hello!');
-      const draft = isTurkish
-        ? `${greeting} ${tenantName} olarak size yazıyoruz 🙏\n\nDoldurduğunuz form bize ulaştı. Talebiniz hakkında detaylı bilgi alabilir miyiz?`
-        : `${greeting} We are reaching out from ${tenantName} 🙏\n\nWe received your form. Could you provide more details about your request?`;
+      // ── 5. Extract lead-level language hint from raw_data ──
+      let leadLanguage: string | undefined;
+      let leadDepartment: string | undefined;
+      try {
+        const rawData = typeof lead.raw_data === 'string' ? JSON.parse(lead.raw_data) : (lead.raw_data || {});
+        leadLanguage = rawData.language || rawData.Language || rawData.dil || rawData.Dil || undefined;
+        leadDepartment = rawData.department || rawData.Department || rawData.departman || rawData.Departman || rawData.bolum || rawData.Bölüm || undefined;
+      } catch (_) {}
 
-      // Return draft ONLY — no API call, no DB write
+      // ── 6. Resolve opportunity department if not in raw_data ──
+      if (!leadDepartment && lead.linked_opportunity_id) {
+        try {
+          const oppRes = await ctx.db.executeSafe({
+            text: `SELECT department FROM opportunities WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+            values: [lead.linked_opportunity_id, ctx.tenantId]
+          }) as any[];
+          if (oppRes.length > 0) leadDepartment = oppRes[0].department || undefined;
+        } catch (_) {}
+      }
+
+      // ── 7. Resolve coordinator name ──
+      let coordinatorName = '';
+      try {
+        const userRes = await ctx.db.executeSafe({
+          text: `SELECT name FROM users WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+          values: [ctx.userId, ctx.tenantId]
+        }) as any[];
+        if (userRes.length > 0) coordinatorName = userRes[0].name || '';
+      } catch (_) {}
+
+      // ── 8. Resolve template via TemplateResolverService ──
+      const { TemplateResolverService } = await import('@/lib/services/template-resolver.service');
+      const resolved = await TemplateResolverService.resolve(ctx.db, {
+        tenantId: ctx.tenantId,
+        tenantName,
+        patientName: lead.patient_name || '',
+        formName: lead.form_name || undefined,
+        department: leadDepartment || undefined,
+        country: lead.country || undefined,
+        coordinatorName,
+        language: leadLanguage || undefined,
+        phoneNumber: phone,
+      }, greetingLang);
+
+      // ── 9. Channel readiness pre-check (NO API call) ──
+      let channelReady = false;
+      let channelError: string | undefined;
+      try {
+        const creds = await CredentialsService.resolveCredentials(ctx.tenantId, 'whatsapp');
+        if (!creds.accessToken) {
+          channelError = 'WhatsApp Access Token bulunamadı.';
+        } else if (!creds.whatsappPhoneNumberId) {
+          channelError = 'WhatsApp Phone Number ID eksik.';
+        } else {
+          channelReady = true;
+        }
+      } catch (credErr: any) {
+        channelError = `Kanal kimlik bilgileri çözülemedi: ${credErr?.message || 'Bilinmeyen hata'}`;
+      }
+
+      // Return draft + channel status — no API call, no DB write
       return { 
         success: true, 
-        draft, 
-        patientName, 
+        draft: resolved.rendered, 
+        patientName: lead.patient_name || '',
         phone,
         tenantName,
+        language: resolved.language,
+        templateId: resolved.templateId || undefined,
+        templateName: resolved.templateName,
+        templateSource: resolved.source,
+        channelReady,
+        channelError,
       };
     }
   ).then(res => {
@@ -130,6 +185,11 @@ export async function prepareGreetingDraft(leadId: string) {
       draft: res.data?.draft as string, 
       patientName: res.data?.patientName as string, 
       phone: res.data?.phone as string,
+      language: res.data?.language as string,
+      templateId: res.data?.templateId as string | undefined,
+      templateName: res.data?.templateName as string,
+      channelReady: res.data?.channelReady as boolean,
+      channelError: res.data?.channelError as string | undefined,
     };
   });
 }
@@ -434,4 +494,289 @@ export async function getOutreachHistory(leadId: string): Promise<OutreachLogEnt
   );
 
   return result.data || [];
+}
+
+
+// ═══════════════════════════════════════════════════════════
+// 5. LOG CALL REACHED — Arandı / Ulaşıldı
+// ═══════════════════════════════════════════════════════════
+
+export async function logCallReached(leadId: string, note?: string) {
+  if (!leadId || !UUID_RE.test(leadId)) return { success: false, error: "Geçersiz Lead ID." };
+
+  return withActionGuard(
+    { actionName: 'logCallReached' },
+    async (ctx) => {
+      const leads = await ctx.db.executeSafe({
+        text: `SELECT phone_number, linked_opportunity_id FROM leads WHERE id = $1 AND tenant_id = $2`,
+        values: [leadId, ctx.tenantId]
+      }) as any[];
+      if (leads.length === 0) return { success: false, error: "Lead bulunamadı." };
+
+      const phone = leads[0].phone_number;
+
+      // Resolve conversation_id
+      let conversationId: string | null = null;
+      try {
+        const convRes = await ctx.db.executeSafe({
+          text: `SELECT id FROM conversations WHERE tenant_id = $1 AND RIGHT(phone_number, 10) = RIGHT($2, 10) LIMIT 1`,
+          values: [ctx.tenantId, phone]
+        }) as any[];
+        conversationId = convRes[0]?.id || null;
+      } catch (_) {}
+
+      // Write outreach log
+      await ctx.db.executeSafe({
+        text: `INSERT INTO outreach_logs (tenant_id, lead_id, conversation_id, opportunity_id, action, channel, actor_id, metadata)
+               VALUES ($1, $2, $3, $4, 'called_reached', 'phone', $5, $6)`,
+        values: [
+          ctx.tenantId, leadId, conversationId,
+          leads[0].linked_opportunity_id || null,
+          ctx.userId,
+          JSON.stringify({ phone, note: note || '' })
+        ]
+      });
+
+      // Stage update → first_contact or responded (via UnifiedStageService)
+      try {
+        const { UnifiedStageService } = await import('@/lib/services/unified-stage.service');
+        await UnifiedStageService.update({
+          tenantId: ctx.tenantId,
+          source: 'system',
+          opportunityId: leads[0].linked_opportunity_id || undefined,
+          phoneNumber: phone,
+          targetStage: 'responded',
+          actorId: ctx.userId,
+          reason: 'outreach_call_reached',
+        });
+      } catch (_) {}
+
+      logAudit({
+        tenantId: ctx.tenantId,
+        userId: ctx.userId,
+        userEmail: ctx.email,
+        action: 'outreach_call_reached',
+        entityType: 'lead',
+        entityId: leadId,
+        details: { phone, note },
+      });
+
+      return { success: true };
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error || res.data?.error };
+    return { success: true };
+  });
+}
+
+
+// ═══════════════════════════════════════════════════════════
+// 6. LOG CALL MISSED — Arandı / Ulaşılamadı
+// ═══════════════════════════════════════════════════════════
+
+export async function logCallMissed(leadId: string, note?: string) {
+  if (!leadId || !UUID_RE.test(leadId)) return { success: false, error: "Geçersiz Lead ID." };
+
+  return withActionGuard(
+    { actionName: 'logCallMissed' },
+    async (ctx) => {
+      const leads = await ctx.db.executeSafe({
+        text: `SELECT phone_number, linked_opportunity_id FROM leads WHERE id = $1 AND tenant_id = $2`,
+        values: [leadId, ctx.tenantId]
+      }) as any[];
+      if (leads.length === 0) return { success: false, error: "Lead bulunamadı." };
+
+      const phone = leads[0].phone_number;
+
+      let conversationId: string | null = null;
+      try {
+        const convRes = await ctx.db.executeSafe({
+          text: `SELECT id FROM conversations WHERE tenant_id = $1 AND RIGHT(phone_number, 10) = RIGHT($2, 10) LIMIT 1`,
+          values: [ctx.tenantId, phone]
+        }) as any[];
+        conversationId = convRes[0]?.id || null;
+      } catch (_) {}
+
+      // Write outreach log — NO stage change for missed calls
+      await ctx.db.executeSafe({
+        text: `INSERT INTO outreach_logs (tenant_id, lead_id, conversation_id, opportunity_id, action, channel, actor_id, metadata)
+               VALUES ($1, $2, $3, $4, 'called_missed', 'phone', $5, $6)`,
+        values: [
+          ctx.tenantId, leadId, conversationId,
+          leads[0].linked_opportunity_id || null,
+          ctx.userId,
+          JSON.stringify({ phone, note: note || '' })
+        ]
+      });
+
+      logAudit({
+        tenantId: ctx.tenantId,
+        userId: ctx.userId,
+        userEmail: ctx.email,
+        action: 'outreach_call_missed',
+        entityType: 'lead',
+        entityId: leadId,
+        details: { phone, note },
+      });
+
+      return { success: true };
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error || res.data?.error };
+    return { success: true };
+  });
+}
+
+
+// ═══════════════════════════════════════════════════════════
+// 7. LOG CALLBACK SCHEDULED — Geri Aranacak
+// ═══════════════════════════════════════════════════════════
+
+export async function logCallbackScheduled(leadId: string, note?: string) {
+  if (!leadId || !UUID_RE.test(leadId)) return { success: false, error: "Geçersiz Lead ID." };
+
+  return withActionGuard(
+    { actionName: 'logCallbackScheduled' },
+    async (ctx) => {
+      const leads = await ctx.db.executeSafe({
+        text: `SELECT phone_number, linked_opportunity_id FROM leads WHERE id = $1 AND tenant_id = $2`,
+        values: [leadId, ctx.tenantId]
+      }) as any[];
+      if (leads.length === 0) return { success: false, error: "Lead bulunamadı." };
+
+      const phone = leads[0].phone_number;
+
+      let conversationId: string | null = null;
+      try {
+        const convRes = await ctx.db.executeSafe({
+          text: `SELECT id FROM conversations WHERE tenant_id = $1 AND RIGHT(phone_number, 10) = RIGHT($2, 10) LIMIT 1`,
+          values: [ctx.tenantId, phone]
+        }) as any[];
+        conversationId = convRes[0]?.id || null;
+      } catch (_) {}
+
+      // Write outreach log — NO stage change for callback scheduling
+      await ctx.db.executeSafe({
+        text: `INSERT INTO outreach_logs (tenant_id, lead_id, conversation_id, opportunity_id, action, channel, actor_id, metadata)
+               VALUES ($1, $2, $3, $4, 'callback_scheduled', 'phone', $5, $6)`,
+        values: [
+          ctx.tenantId, leadId, conversationId,
+          leads[0].linked_opportunity_id || null,
+          ctx.userId,
+          JSON.stringify({ phone, note: note || '' })
+        ]
+      });
+
+      logAudit({
+        tenantId: ctx.tenantId,
+        userId: ctx.userId,
+        userEmail: ctx.email,
+        action: 'outreach_callback_scheduled',
+        entityType: 'lead',
+        entityId: leadId,
+        details: { phone, note },
+      });
+
+      return { success: true };
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error || res.data?.error };
+    return { success: true };
+  });
+}
+
+
+// ═══════════════════════════════════════════════════════════
+// 8. LOG NOT INTERESTED — İlgilenmiyor
+// ═══════════════════════════════════════════════════════════
+
+export async function logNotInterested(leadId: string, reason?: string) {
+  if (!leadId || !UUID_RE.test(leadId)) return { success: false, error: "Geçersiz Lead ID." };
+
+  return withActionGuard(
+    { actionName: 'logNotInterested' },
+    async (ctx) => {
+      const leads = await ctx.db.executeSafe({
+        text: `SELECT phone_number, linked_opportunity_id FROM leads WHERE id = $1 AND tenant_id = $2`,
+        values: [leadId, ctx.tenantId]
+      }) as any[];
+      if (leads.length === 0) return { success: false, error: "Lead bulunamadı." };
+
+      const phone = leads[0].phone_number;
+
+      let conversationId: string | null = null;
+      try {
+        const convRes = await ctx.db.executeSafe({
+          text: `SELECT id FROM conversations WHERE tenant_id = $1 AND RIGHT(phone_number, 10) = RIGHT($2, 10) LIMIT 1`,
+          values: [ctx.tenantId, phone]
+        }) as any[];
+        conversationId = convRes[0]?.id || null;
+      } catch (_) {}
+
+      // Write outreach log
+      await ctx.db.executeSafe({
+        text: `INSERT INTO outreach_logs (tenant_id, lead_id, conversation_id, opportunity_id, action, channel, actor_id, metadata)
+               VALUES ($1, $2, $3, $4, 'not_interested', 'phone', $5, $6)`,
+        values: [
+          ctx.tenantId, leadId, conversationId,
+          leads[0].linked_opportunity_id || null,
+          ctx.userId,
+          JSON.stringify({ phone, reason: reason || '' })
+        ]
+      });
+
+      // Stage update → not_qualified (via UnifiedStageService)
+      try {
+        const { UnifiedStageService } = await import('@/lib/services/unified-stage.service');
+        await UnifiedStageService.update({
+          tenantId: ctx.tenantId,
+          source: 'system',
+          opportunityId: leads[0].linked_opportunity_id || undefined,
+          phoneNumber: phone,
+          targetStage: 'not_qualified',
+          actorId: ctx.userId,
+          reason: 'outreach_not_interested',
+        });
+      } catch (_) {}
+
+      // Cancel pending tasks for this lead's phone
+      try {
+        await ctx.db.executeSafe({
+          text: `UPDATE follow_up_tasks SET status = 'cancelled', skipped_reason = 'Lead ilgilenmiyor', updated_at = NOW()
+                 WHERE tenant_id = $1 AND phone_number = $2 AND status IN ('pending', 'in_progress')`,
+          values: [ctx.tenantId, phone]
+        });
+      } catch (_) {}
+
+      logAudit({
+        tenantId: ctx.tenantId,
+        userId: ctx.userId,
+        userEmail: ctx.email,
+        action: 'outreach_not_interested',
+        entityType: 'lead',
+        entityId: leadId,
+        details: { phone, reason },
+      });
+
+      return { success: true };
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error || res.data?.error };
+    return { success: true };
+  });
+}
+
+
+// ═══════════════════════════════════════════════════════════
+// 9. GET GREETING TEMPLATES — Template selector data
+// ═══════════════════════════════════════════════════════════
+
+export async function getGreetingTemplates() {
+  return withActionGuard(
+    { actionName: 'getGreetingTemplates' },
+    async (ctx) => {
+      const { TemplateResolverService } = await import('@/lib/services/template-resolver.service');
+      return TemplateResolverService.listGreetingTemplates(ctx.db, ctx.tenantId);
+    }
+  ).then(res => res.data || []);
 }

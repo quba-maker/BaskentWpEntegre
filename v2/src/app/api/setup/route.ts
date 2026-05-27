@@ -636,6 +636,77 @@ export async function GET(req: NextRequest) {
       results.push("⚠️ PHASE 2L-P0: outreach_logs RLS: " + e.message);
     }
 
+    // =====================================================
+    // 26. PHASE 2L-P1: Message Templates — Reusable outreach templates
+    // Coordinator can use pre-configured greeting messages per
+    // tenant/form/department/language. Default templates seeded on setup.
+    // =====================================================
+
+    await execute`
+      CREATE TABLE IF NOT EXISTS message_templates (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        template_type TEXT NOT NULL DEFAULT 'greeting',
+        name TEXT NOT NULL,
+        language TEXT NOT NULL DEFAULT 'tr',
+        form_name TEXT,
+        department TEXT,
+        body TEXT NOT NULL,
+        variables JSONB DEFAULT '[]',
+        is_default BOOLEAN DEFAULT false,
+        is_active BOOLEAN DEFAULT true,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `;
+    // Only one default template per tenant + type + language
+    await execute`CREATE UNIQUE INDEX IF NOT EXISTS idx_msg_tpl_tenant_default ON message_templates(tenant_id, template_type, language) WHERE is_default = true`;
+    await execute`CREATE INDEX IF NOT EXISTS idx_msg_tpl_tenant ON message_templates(tenant_id, template_type)`;
+    results.push("✅ PHASE 2L-P1: message_templates tablosu hazır");
+
+    // 26a. RLS for message_templates (shadow mode)
+    try {
+      await execute`ALTER TABLE message_templates ENABLE ROW LEVEL SECURITY`;
+      await execute`DROP POLICY IF EXISTS msg_tpl_app_access ON message_templates`;
+      await execute`CREATE POLICY msg_tpl_app_access ON message_templates FOR ALL USING (true) WITH CHECK (true)`;
+      results.push("✅ PHASE 2L-P1: message_templates RLS policies oluşturuldu");
+    } catch (e: any) {
+      results.push("⚠️ PHASE 2L-P1: message_templates RLS: " + e.message);
+    }
+
+    // 26b. Seed default greeting templates for all tenants
+    try {
+      const allTenants = await execute`SELECT id, name FROM tenants WHERE status = 'active'` as any[];
+      for (const t of allTenants) {
+        const tName = t.name || 'Ekibimiz';
+        // TR default
+        await systemDb.executeSafe({
+          text: `INSERT INTO message_templates (tenant_id, template_type, name, language, body, is_default, variables)
+                 VALUES ($1, 'greeting', 'Varsayılan Türkçe Karşılama', 'tr', $2, true, $3)
+                 ON CONFLICT DO NOTHING`,
+          values: [
+            t.id,
+            `Merhaba {{patient_name}}! ${tName} olarak size yazıyoruz 🙏\n\nDoldurduğunuz form bize ulaştı. Talebiniz hakkında detaylı bilgi alabilir miyiz?`,
+            JSON.stringify(['patient_name', 'tenant_name', 'form_name', 'department', 'country', 'coordinator_name'])
+          ]
+        });
+        // EN default
+        await systemDb.executeSafe({
+          text: `INSERT INTO message_templates (tenant_id, template_type, name, language, body, is_default, variables)
+                 VALUES ($1, 'greeting', 'Default English Greeting', 'en', $2, true, $3)
+                 ON CONFLICT DO NOTHING`,
+          values: [
+            t.id,
+            `Hello {{patient_name}}! We are reaching out from ${tName} 🙏\n\nWe received your form. Could you provide more details about your request?`,
+            JSON.stringify(['patient_name', 'tenant_name', 'form_name', 'department', 'country', 'coordinator_name'])
+          ]
+        });
+      }
+      results.push(`✅ PHASE 2L-P1: ${allTenants.length} tenant için varsayılan greeting template'leri oluşturuldu`);
+    } catch (e: any) {
+      results.push("⚠️ PHASE 2L-P1: Template seed: " + e.message);
+    }
+
     if (isDryRun) {
       return NextResponse.json({ success: true, mode: "dryRun", results, executedQueries: dryRunLogs });
     }
