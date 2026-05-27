@@ -1,12 +1,16 @@
 "use server";
 
 /**
- * PHASE 2L-P0: Outreach Server Actions
+ * PHASE 2L-P0: Outreach Server Actions (v2 — Two-Step Draft→Send)
  * 
  * Coordinator-initiated actions for form leads:
- * 1. sendGreeting — WhatsApp karşılama mesajı gönder
- * 2. activateBot — Bota devret (conversation status → bot)
- * 3. getOutreachHistory — Outreach log timeline
+ * 1. prepareGreetingDraft — Taslak mesaj üret (NO WhatsApp API call)
+ * 2. sendGreetingMessage  — Koordinatör onayladığı mesajı WhatsApp ile gönder
+ * 3. activateBot          — Bota devret (conversation status → bot)
+ * 4. getOutreachHistory   — Outreach log timeline
+ * 
+ * P0 PRINCIPLE: Hastaya kontrolsüz otomatik mesaj yok.
+ * Karşılama mesajı mutlaka koordinatör tarafından onaylanmalı.
  * 
  * All actions write to outreach_logs for audit trail.
  * All actions use withActionGuard for auth + tenant isolation.
@@ -16,16 +20,29 @@ import { withActionGuard } from "@/lib/core/action-guard";
 import { CredentialsService } from "@/lib/services/credentials.service";
 import { logAudit } from "@/lib/audit";
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 // ═══════════════════════════════════════════════════════════
-// 1. SEND GREETING — Manual WhatsApp karşılama mesajı
+// 1. PREPARE GREETING DRAFT — Taslak mesaj üret (NO API CALL)
 // ═══════════════════════════════════════════════════════════
 
-export async function sendGreeting(leadId: string) {
+/**
+ * Generates a greeting draft based on lead data + tenant config.
+ * 
+ * DOES NOT:
+ * - Call WhatsApp API
+ * - Write to messages table
+ * - Write to outreach_logs
+ * - Change any stage
+ * 
+ * RETURNS: { success, draft, patientName, phone, alreadySent }
+ */
+export async function prepareGreetingDraft(leadId: string) {
   if (!leadId) return { success: false, error: "Lead ID gerekli." };
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(leadId)) return { success: false, error: "Geçersiz Lead ID formatı." };
+  if (!UUID_RE.test(leadId)) return { success: false, error: "Geçersiz Lead ID formatı." };
 
   return withActionGuard(
-    { actionName: 'sendGreeting' },
+    { actionName: 'prepareGreetingDraft' },
     async (ctx) => {
       // ── 1. Resolve lead data ──
       const leads = await ctx.db.executeSafe({
@@ -47,7 +64,7 @@ export async function sendGreeting(leadId: string) {
         return { success: false, error: "Telefon numarası eksik." };
       }
 
-      // ── 2. Check if greeting already sent ──
+      // ── 2. Check if greeting already sent (informational for UI) ──
       const existingGreeting = await ctx.db.executeSafe({
         text: `SELECT id FROM outreach_logs 
                WHERE lead_id = $1 AND tenant_id = $2 AND action = 'greeting_sent'
@@ -86,18 +103,102 @@ export async function sendGreeting(leadId: string) {
         }
       } catch (_) {}
 
-      // ── 5. Build greeting text ──
+      // ── 5. Build greeting text (DRAFT ONLY — not sent!) ──
       const cleanPhone = phone.replace(/\D/g, '');
       const isTurkish = greetingLang === 'tr' ? true : greetingLang === 'en' ? false : cleanPhone.startsWith('90');
       const patientName = lead.patient_name || '';
       const greeting = patientName 
         ? (isTurkish ? `Merhaba ${patientName}!` : `Hello ${patientName}!`) 
         : (isTurkish ? 'Merhaba!' : 'Hello!');
-      const welcomeMsg = isTurkish
+      const draft = isTurkish
         ? `${greeting} ${tenantName} olarak size yazıyoruz 🙏\n\nDoldurduğunuz form bize ulaştı. Talebiniz hakkında detaylı bilgi alabilir miyiz?`
         : `${greeting} We are reaching out from ${tenantName} 🙏\n\nWe received your form. Could you provide more details about your request?`;
 
-      // ── 6. Resolve WhatsApp credentials & send ──
+      // Return draft ONLY — no API call, no DB write
+      return { 
+        success: true, 
+        draft, 
+        patientName, 
+        phone,
+        tenantName,
+      };
+    }
+  ).then(res => {
+    if (!res.success) return { success: false as const, error: res.error || res.data?.error, alreadySent: res.data?.alreadySent };
+    return { 
+      success: true as const, 
+      draft: res.data?.draft as string, 
+      patientName: res.data?.patientName as string, 
+      phone: res.data?.phone as string,
+    };
+  });
+}
+
+
+// ═══════════════════════════════════════════════════════════
+// 2. SEND GREETING MESSAGE — Koordinatör onayladığı mesajı gönder
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * Sends the coordinator-approved greeting message via WhatsApp.
+ * 
+ * @param leadId - The lead UUID
+ * @param message - The coordinator-approved message text (edited or default draft)
+ * 
+ * DOES:
+ * - Duplicate guard (outreach_logs check)
+ * - WhatsApp credentials check
+ * - WhatsApp API call
+ * - messages table insert (outbound)
+ * - conversations last_message update
+ * - UnifiedStageService → first_contact
+ * - outreach_logs → greeting_sent
+ * - Audit log
+ */
+export async function sendGreetingMessage(leadId: string, message: string) {
+  if (!leadId) return { success: false, error: "Lead ID gerekli." };
+  if (!UUID_RE.test(leadId)) return { success: false, error: "Geçersiz Lead ID formatı." };
+  if (!message || message.trim().length === 0) return { success: false, error: "Mesaj metni boş olamaz." };
+  if (message.trim().length > 4096) return { success: false, error: "Mesaj çok uzun (max 4096 karakter)." };
+
+  const cleanMessage = message.trim();
+
+  return withActionGuard(
+    { actionName: 'sendGreetingMessage' },
+    async (ctx) => {
+      // ── 1. Resolve lead data ──
+      const leads = await ctx.db.executeSafe({
+        text: `SELECT l.id, l.phone_number, l.patient_name, l.form_name,
+                      l.linked_opportunity_id, l.customer_id
+               FROM leads l
+               WHERE l.id = $1 AND l.tenant_id = $2`,
+        values: [leadId, ctx.tenantId]
+      }) as any[];
+
+      if (leads.length === 0) {
+        return { success: false, error: "Lead bulunamadı." };
+      }
+
+      const lead = leads[0];
+      const phone = lead.phone_number;
+
+      if (!phone) {
+        return { success: false, error: "Telefon numarası eksik." };
+      }
+
+      // ── 2. Duplicate guard ──
+      const existingGreeting = await ctx.db.executeSafe({
+        text: `SELECT id FROM outreach_logs 
+               WHERE lead_id = $1 AND tenant_id = $2 AND action = 'greeting_sent'
+               LIMIT 1`,
+        values: [leadId, ctx.tenantId]
+      }) as any[];
+
+      if (existingGreeting.length > 0) {
+        return { success: false, error: "Bu lead'e zaten selamlama gönderilmiş.", alreadySent: true };
+      }
+
+      // ── 3. Resolve WhatsApp credentials ──
       const creds = await CredentialsService.resolveCredentials(ctx.tenantId, 'whatsapp');
       const META_ACCESS_TOKEN = creds.accessToken;
       const PHONE_NUMBER_ID = creds.whatsappPhoneNumberId;
@@ -106,6 +207,7 @@ export async function sendGreeting(leadId: string) {
         return { success: false, error: "WhatsApp kimlik bilgileri eksik. Lütfen entegrasyon ayarlarını kontrol edin." };
       }
 
+      // ── 4. Send via WhatsApp API ──
       const response = await fetch(`https://graph.facebook.com/v25.0/${PHONE_NUMBER_ID}/messages`, {
         method: 'POST',
         headers: {
@@ -116,7 +218,7 @@ export async function sendGreeting(leadId: string) {
           messaging_product: 'whatsapp',
           to: phone,
           type: 'text',
-          text: { body: welcomeMsg },
+          text: { body: cleanMessage },
         }),
       });
 
@@ -131,7 +233,7 @@ export async function sendGreeting(leadId: string) {
         providerMessageId = resData.messages?.[0]?.id || null;
       } catch (_) {}
 
-      // ── 7. Resolve conversation_id ──
+      // ── 5. Resolve conversation_id ──
       let conversationId: string | null = null;
       try {
         const convRes = await ctx.db.executeSafe({
@@ -143,12 +245,12 @@ export async function sendGreeting(leadId: string) {
         conversationId = convRes[0]?.id || null;
       } catch (_) {}
 
-      // ── 8. Save message record ──
+      // ── 6. Save message record ──
       if (conversationId) {
         await ctx.db.executeSafe({
           text: `INSERT INTO messages (tenant_id, conversation_id, phone_number, direction, content, channel, status, provider_message_id)
                  VALUES ($1, $2, $3, 'out', $4, 'whatsapp', 'sent', $5)`,
-          values: [ctx.tenantId, conversationId, phone, welcomeMsg, providerMessageId]
+          values: [ctx.tenantId, conversationId, phone, cleanMessage, providerMessageId]
         });
 
         // Update conversation last_message
@@ -161,11 +263,11 @@ export async function sendGreeting(leadId: string) {
                      last_message_direction = 'out',
                      message_count = COALESCE(message_count, 0) + 1
                  WHERE id = $2 AND tenant_id = $3`,
-          values: [welcomeMsg, conversationId, ctx.tenantId]
+          values: [cleanMessage, conversationId, ctx.tenantId]
         });
       }
 
-      // ── 9. Update stage → first_contact (via UnifiedStageService for atomic mirror sync) ──
+      // ── 7. Update stage → first_contact (via UnifiedStageService for atomic mirror sync) ──
       try {
         const { UnifiedStageService } = await import('@/lib/services/unified-stage.service');
         await UnifiedStageService.update({
@@ -179,7 +281,7 @@ export async function sendGreeting(leadId: string) {
         });
       } catch (_) {}
 
-      // ── 10. Write outreach log ──
+      // ── 8. Write outreach log ──
       await ctx.db.executeSafe({
         text: `INSERT INTO outreach_logs (tenant_id, lead_id, conversation_id, opportunity_id, action, channel, actor_id, metadata)
                VALUES ($1, $2, $3, $4, 'greeting_sent', 'whatsapp', $5, $6)`,
@@ -190,15 +292,15 @@ export async function sendGreeting(leadId: string) {
           lead.linked_opportunity_id || null,
           ctx.userId,
           JSON.stringify({
-            message_text: welcomeMsg,
+            message_text: cleanMessage,
             provider_message_id: providerMessageId,
-            patient_name: patientName,
+            patient_name: lead.patient_name || '',
             phone,
           })
         ]
       });
 
-      // ── 11. Audit ──
+      // ── 9. Audit ──
       logAudit({
         tenantId: ctx.tenantId,
         userId: ctx.userId,
@@ -219,12 +321,12 @@ export async function sendGreeting(leadId: string) {
 
 
 // ═══════════════════════════════════════════════════════════
-// 2. ACTIVATE BOT — Bota devret
+// 3. ACTIVATE BOT — Bota devret
 // ═══════════════════════════════════════════════════════════
 
 export async function activateBot(leadId: string) {
   if (!leadId) return { success: false, error: "Lead ID gerekli." };
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(leadId)) return { success: false, error: "Geçersiz Lead ID formatı." };
+  if (!UUID_RE.test(leadId)) return { success: false, error: "Geçersiz Lead ID formatı." };
 
   return withActionGuard(
     { actionName: 'activateBot' },
@@ -290,7 +392,7 @@ export async function activateBot(leadId: string) {
 
 
 // ═══════════════════════════════════════════════════════════
-// 3. GET OUTREACH HISTORY — Timeline data
+// 4. GET OUTREACH HISTORY — Timeline data
 // ═══════════════════════════════════════════════════════════
 
 export interface OutreachLogEntry {
@@ -304,7 +406,7 @@ export interface OutreachLogEntry {
 }
 
 export async function getOutreachHistory(leadId: string): Promise<OutreachLogEntry[]> {
-  if (!leadId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(leadId)) return [];
+  if (!leadId || !UUID_RE.test(leadId)) return [];
 
   const result = await withActionGuard(
     { actionName: 'getOutreachHistory' },

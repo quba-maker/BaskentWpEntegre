@@ -2,10 +2,10 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import useSWRInfinite from "swr/infinite";
-import { Search, MessageCircle, X, FileText, ChevronRight, CheckCircle2, Bot, Save, StickyNote, Sparkles, RefreshCw, ChevronDown, Filter, Zap, Send, Clock, CheckCheck } from "lucide-react";
+import { Search, MessageCircle, X, FileText, ChevronRight, CheckCircle2, Bot, Save, StickyNote, Sparkles, RefreshCw, ChevronDown, Filter, Zap, Send, Clock, CheckCheck, Edit3 } from "lucide-react";
 import { getForms, getCampaignNames, updateLeadNotes, updateLeadStage, syncGoogleSheets } from "@/app/actions/forms";
 import { toggleBotStatus } from "@/app/actions/inbox";
-import { sendGreeting, activateBot, getOutreachHistory, type OutreachLogEntry } from "@/app/actions/outreach";
+import { prepareGreetingDraft, sendGreetingMessage, activateBot, getOutreachHistory, type OutreachLogEntry } from "@/app/actions/outreach";
 import { useInboxStore } from "@/store/inbox-store";
 import { useRouter, useParams } from "next/navigation";
 import { resolveCountry, deduplicatePhones, getCountryInfoByName } from "@/lib/utils/country";
@@ -151,11 +151,15 @@ export default function FormsPage() {
   const [notes, setNotes] = useState("");
   const [isSavingNotes, setIsSavingNotes] = useState(false);
 
-  // PHASE 2L-P0: Outreach state
-  const [outreachLoading, setOutreachLoading] = useState<'greeting' | 'bot' | null>(null);
+  // PHASE 2L-P0v2: Outreach state — two-step draft→send flow
+  const [outreachLoading, setOutreachLoading] = useState<'draft' | 'sending' | 'bot' | null>(null);
   const [outreachTimeline, setOutreachTimeline] = useState<OutreachLogEntry[]>([]);
   const [outreachError, setOutreachError] = useState<string | null>(null);
+  const [outreachSuccess, setOutreachSuccess] = useState<string | null>(null);
   const [greetingSent, setGreetingSent] = useState(false);
+  // Draft state
+  const [draftMessage, setDraftMessage] = useState<string | null>(null);
+  const [isDraftOpen, setIsDraftOpen] = useState(false);
 
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncProgress, setSyncProgress] = useState({ status: '', progress: 0, message: '' });
@@ -254,23 +258,56 @@ export default function FormsPage() {
   useEffect(() => {
     if (selectedForm?.id) {
       setOutreachError(null);
+      setOutreachSuccess(null);
       setGreetingSent(false);
+      setDraftMessage(null);
+      setIsDraftOpen(false);
       loadOutreachTimeline(selectedForm.id);
     } else {
       setOutreachTimeline([]);
       setGreetingSent(false);
       setOutreachError(null);
+      setOutreachSuccess(null);
+      setDraftMessage(null);
+      setIsDraftOpen(false);
     }
   }, [selectedForm?.id, loadOutreachTimeline]);
 
-  // PHASE 2L-P0: Coordinator sends greeting
-  const handleSendGreeting = async (form: any) => {
-    setOutreachLoading('greeting');
+  // PHASE 2L-P0v2: Step 1 — Prepare greeting draft (NO WhatsApp API call)
+  const handlePrepareDraft = async (form: any) => {
+    setOutreachLoading('draft');
+    setOutreachError(null);
+    setOutreachSuccess(null);
+    try {
+      const result = await prepareGreetingDraft(form.id);
+      if (result.success && result.draft) {
+        setDraftMessage(result.draft);
+        setIsDraftOpen(true);
+      } else {
+        setOutreachError(result.error || 'Taslak hazırlanamadı.');
+      }
+    } catch (err: any) {
+      setOutreachError(err?.message || 'Beklenmeyen bir hata oluştu.');
+    } finally {
+      setOutreachLoading(null);
+    }
+  };
+
+  // PHASE 2L-P0v2: Step 2 — Send coordinator-approved message via WhatsApp
+  const handleConfirmSend = async (form: any) => {
+    if (!draftMessage || draftMessage.trim().length === 0) {
+      setOutreachError('Mesaj metni boş olamaz.');
+      return;
+    }
+    setOutreachLoading('sending');
     setOutreachError(null);
     try {
-      const result = await sendGreeting(form.id);
+      const result = await sendGreetingMessage(form.id, draftMessage);
       if (result.success) {
         setGreetingSent(true);
+        setIsDraftOpen(false);
+        setDraftMessage(null);
+        setOutreachSuccess('✅ Karşılama mesajı başarıyla gönderildi.');
         // Update stage optimistically
         mutate(
           data?.map(page => page.map((f: any) => f.id === form.id ? { ...f, stage: 'contacted' } : f)),
@@ -280,13 +317,20 @@ export default function FormsPage() {
         // Refresh timeline
         await loadOutreachTimeline(form.id);
       } else {
-        setOutreachError(result.error || 'Selamlama gönderilemedi.');
+        setOutreachError(result.error || 'Mesaj gönderilemedi.');
       }
     } catch (err: any) {
       setOutreachError(err?.message || 'Beklenmeyen bir hata oluştu.');
     } finally {
       setOutreachLoading(null);
     }
+  };
+
+  // PHASE 2L-P0v2: Cancel draft — no message sent, no DB write
+  const handleCancelDraft = () => {
+    setIsDraftOpen(false);
+    setDraftMessage(null);
+    setOutreachError(null);
   };
 
   // PHASE 2L-P0: Coordinator activates bot
@@ -719,50 +763,97 @@ export default function FormsPage() {
                     </div>
                   )}
 
-                  {/* Action Buttons */}
-                  <div className="flex gap-3">
-                    <button 
-                      onClick={() => handleSendGreeting(selectedForm)}
-                      disabled={greetingSent || outreachLoading === 'greeting' || selectedForm.stage !== 'new'}
-                      className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-semibold transition-all ${
-                        greetingSent 
-                          ? 'bg-emerald-50 text-emerald-600 border border-emerald-200 cursor-default'
-                          : selectedForm.stage !== 'new'
-                          ? 'bg-gray-100 text-[#86868B] cursor-not-allowed'
-                          : 'bg-[#25D366] text-white shadow-[0_4px_14px_rgba(37,211,102,0.39)] hover:bg-[#1DA851] cursor-pointer'
-                      } disabled:opacity-70`}
-                    >
-                      {greetingSent ? (
-                        <><CheckCheck className="w-5 h-5" /> Selamlama Gönderildi</>
-                      ) : outreachLoading === 'greeting' ? (
-                        <><RefreshCw className="w-4 h-4 animate-spin" /> Gönderiliyor...</>
-                      ) : selectedForm.stage !== 'new' ? (
-                        <><CheckCircle2 className="w-5 h-5" /> Zaten İletişime Geçildi</>
-                      ) : (
-                        <><Send className="w-5 h-5" /> Selamlama Gönder</>
-                      )}
-                    </button>
-                    <button 
-                      onClick={() => handleOutreachBotActivate(selectedForm)}
-                      disabled={selectedForm.isBotActive || outreachLoading === 'bot' || !greetingSent}
-                      title={!greetingSent ? 'Önce selamlama gönderilmeli' : selectedForm.isBotActive ? 'Bot zaten aktif' : 'AI Bota devret'}
-                      className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-semibold transition-all ${
-                        selectedForm.isBotActive
-                          ? 'bg-[#0F9D58]/10 text-[#0F9D58] border border-[#0F9D58]/20 cursor-default'
-                          : !greetingSent
-                          ? 'bg-gray-100 text-[#86868B] cursor-not-allowed'
-                          : 'bg-[#007AFF] text-white shadow-[0_4px_14px_rgba(0,122,255,0.3)] hover:bg-[#0056b3] cursor-pointer'
-                      } disabled:opacity-70`}
-                    >
-                      {selectedForm.isBotActive ? (
-                        <><Bot className="w-5 h-5 animate-pulse" /> Bot Aktif</>
-                      ) : outreachLoading === 'bot' ? (
-                        <><RefreshCw className="w-4 h-4 animate-spin" /> Aktifleştiriliyor...</>
-                      ) : (
-                        <><Zap className="w-5 h-5" /> Bota Devret</>
-                      )}
-                    </button>
-                  </div>
+                  {/* Success Banner */}
+                  {outreachSuccess && (
+                    <div className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 text-[12px] font-medium flex items-center gap-2">
+                      <CheckCheck className="w-3.5 h-3.5 shrink-0" />
+                      {outreachSuccess}
+                    </div>
+                  )}
+
+                  {/* Draft Textarea — visible after "Karşılama Hazırla" clicked */}
+                  {isDraftOpen && draftMessage !== null && (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Edit3 className="w-3.5 h-3.5 text-[#007AFF]" />
+                        <span className="text-[11px] font-bold text-[#007AFF] uppercase tracking-wider">Mesaj Taslağı — Düzenleyebilirsiniz</span>
+                      </div>
+                      <textarea
+                        value={draftMessage}
+                        onChange={(e) => setDraftMessage(e.target.value)}
+                        rows={5}
+                        className="w-full bg-[#F5F5F7] border border-black/10 rounded-xl p-3 text-[13px] text-[#1D1D1F] font-medium focus:ring-2 focus:ring-[#25D366]/40 focus:border-[#25D366]/30 resize-none outline-none transition-all leading-relaxed"
+                        placeholder="Karşılama mesajınızı buraya yazın..."
+                      />
+                      <div className="flex gap-2">
+                        <button 
+                          onClick={() => handleConfirmSend(selectedForm)}
+                          disabled={outreachLoading === 'sending' || !draftMessage?.trim()}
+                          className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl font-semibold bg-[#25D366] text-white shadow-[0_4px_14px_rgba(37,211,102,0.39)] hover:bg-[#1DA851] cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {outreachLoading === 'sending' ? (
+                            <><RefreshCw className="w-4 h-4 animate-spin" /> Gönderiliyor...</>
+                          ) : (
+                            <><Send className="w-4 h-4" /> Gönder</>
+                          )}
+                        </button>
+                        <button 
+                          onClick={handleCancelDraft}
+                          disabled={outreachLoading === 'sending'}
+                          className="px-4 py-2.5 rounded-xl font-semibold bg-black/[0.04] hover:bg-black/[0.08] text-[#1D1D1F] transition-colors cursor-pointer disabled:opacity-50"
+                        >
+                          İptal
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Action Buttons — Primary Row */}
+                  {!isDraftOpen && (
+                    <div className="flex gap-3">
+                      <button 
+                        onClick={() => handlePrepareDraft(selectedForm)}
+                        disabled={greetingSent || outreachLoading === 'draft' || selectedForm.stage !== 'new'}
+                        className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-semibold transition-all ${
+                          greetingSent 
+                            ? 'bg-emerald-50 text-emerald-600 border border-emerald-200 cursor-default'
+                            : selectedForm.stage !== 'new'
+                            ? 'bg-gray-100 text-[#86868B] cursor-not-allowed'
+                            : 'bg-[#25D366] text-white shadow-[0_4px_14px_rgba(37,211,102,0.39)] hover:bg-[#1DA851] cursor-pointer'
+                        } disabled:opacity-70`}
+                      >
+                        {greetingSent ? (
+                          <><CheckCheck className="w-5 h-5" /> Selamlama Gönderildi</>
+                        ) : outreachLoading === 'draft' ? (
+                          <><RefreshCw className="w-4 h-4 animate-spin" /> Hazırlanıyor...</>
+                        ) : selectedForm.stage !== 'new' ? (
+                          <><CheckCircle2 className="w-5 h-5" /> Zaten İletişime Geçildi</>
+                        ) : (
+                          <><Edit3 className="w-5 h-5" /> Karşılama Hazırla</>
+                        )}
+                      </button>
+                      <button 
+                        onClick={() => handleOutreachBotActivate(selectedForm)}
+                        disabled={selectedForm.isBotActive || outreachLoading === 'bot' || !greetingSent}
+                        title={!greetingSent ? 'Önce selamlama gönderilmeli' : selectedForm.isBotActive ? 'Bot zaten aktif' : 'AI Bota devret'}
+                        className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-semibold transition-all ${
+                          selectedForm.isBotActive
+                            ? 'bg-[#0F9D58]/10 text-[#0F9D58] border border-[#0F9D58]/20 cursor-default'
+                            : !greetingSent
+                            ? 'bg-gray-100 text-[#86868B] cursor-not-allowed'
+                            : 'bg-[#007AFF] text-white shadow-[0_4px_14px_rgba(0,122,255,0.3)] hover:bg-[#0056b3] cursor-pointer'
+                        } disabled:opacity-70`}
+                      >
+                        {selectedForm.isBotActive ? (
+                          <><Bot className="w-5 h-5 animate-pulse" /> Bot Aktif</>
+                        ) : outreachLoading === 'bot' ? (
+                          <><RefreshCw className="w-4 h-4 animate-spin" /> Aktifleştiriliyor...</>
+                        ) : (
+                          <><Zap className="w-5 h-5" /> Bota Devret</>
+                        )}
+                      </button>
+                    </div>
+                  )}
 
                   {/* Quick Navigate to Inbox */}
                   <button 
