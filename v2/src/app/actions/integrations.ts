@@ -245,6 +245,10 @@ export async function getIntegrationHealth() {
         detail: string;
         lastMessage?: any;
         lastSyncAt?: any;
+        botName?: string;
+        botId?: string;
+        botColor?: string;
+        hasBinding?: boolean;
       }[] = [];
 
       for (const row of dbChannels) {
@@ -669,6 +673,51 @@ export async function getBotListForDropdown(): Promise<{ success: boolean; bots?
   ).then(res => {
     if (!res.success) return { success: false, error: res.error };
     return { success: true, bots: res.data as any[] };
+  });
+}
+
+/**
+ * Backward compatibility wrapper for V1 setupIntegrationChannel calls
+ */
+export async function setupIntegrationChannel(provider: string, identifier: string, name: string, token: string) {
+  return withActionGuard(
+    { actionName: 'setupIntegrationChannel', roles: ['owner', 'admin'] },
+    async (ctx) => {
+      // Find the first active bot to assign this channel to
+      const activeBots = await ctx.db.executeSafe({
+        text: `SELECT id FROM channel_groups WHERE tenant_id = $1 AND status = 'active' ORDER BY sort_order LIMIT 1`,
+        values: [ctx.tenantId]
+      }) as any[];
+      
+      const botGroupId = activeBots[0]?.id;
+      if (!botGroupId) throw new Error('Entegrasyon için en az bir aktif Bot/Grup bulunmalıdır.');
+
+      if (provider === 'whatsapp') {
+        return connectWhatsAppChannel({
+          name,
+          phoneNumberId: identifier,
+          accessToken: token,
+          botGroupId
+        });
+      } else if (provider === 'instagram') {
+        return connectInstagramChannel({
+          name,
+          instagramBusinessAccountId: identifier,
+          accessToken: token,
+          botGroupId
+        });
+      } else {
+        return connectMessengerPage({
+          name,
+          pageId: identifier,
+          pageAccessToken: token,
+          botGroupId
+        });
+      }
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error };
+    return { success: true };
   });
 }
 

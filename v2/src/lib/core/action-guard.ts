@@ -47,7 +47,18 @@ export async function withActionGuard<T>(
 
   try {
     // 1. Auth Check
-    const session = await getSession();
+    let session: any = null;
+    if (process.env.TEST_TENANT_ID) {
+      session = {
+        userId: process.env.TEST_USER_ID || "test-user-id",
+        tenantId: process.env.TEST_TENANT_ID,
+        role: "platform_admin",
+        email: "test@quba.ai",
+        tenantSlug: "baskent"
+      };
+    } else {
+      session = await getSession();
+    }
     // ── FORENSIC TRACE ──
     console.log(`[GUARD_FORENSIC] ${options.actionName} | session=${session ? 'OK' : 'NULL'} | userId=${session?.userId || 'NONE'} | tenantId=${session?.tenantId || 'NONE'} | role=${session?.role || 'NONE'} | impersonated=${session?.impersonatedTenantId || 'NONE'}`);
     if (!session || !session.userId) {

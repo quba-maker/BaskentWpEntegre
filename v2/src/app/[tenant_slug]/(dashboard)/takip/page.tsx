@@ -13,6 +13,7 @@ import { useInboxStore } from "@/store/inbox-store";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { getCountryFlag } from "@/lib/utils/country";
 import TasksTab from "@/components/features/takip/tasks-tab";
+import OperationsTab from "@/components/features/takip/operations-tab";
 
 // ── Formatters ──
 
@@ -133,7 +134,7 @@ export default function TakipPage() {
   const tenantSlug = typeof params.tenant_slug === 'string' ? params.tenant_slug : '';
   const { setActiveContact } = useInboxStore();
   const deepLinkOppId = searchParams.get('opp');
-  const [activeTab, setActiveTab] = useState<'firsatlar' | 'gorevler'>('firsatlar');
+  const [activeTab, setActiveTab] = useState<'firsatlar' | 'gorevler' | 'operasyon'>('firsatlar');
   
   // Filters
   const [stageFilter, setStageFilter] = useState("all");
@@ -260,6 +261,17 @@ export default function TakipPage() {
               <ClipboardList className="w-3.5 h-3.5 inline mr-1.5 -mt-0.5" />
               Görevler
             </button>
+            <button
+              onClick={() => setActiveTab('operasyon')}
+              className={`px-4 py-1.5 rounded-md text-[12px] font-semibold transition-all ${
+                activeTab === 'operasyon' 
+                  ? 'bg-white text-[#1D1D1F] shadow-sm' 
+                  : 'text-[#86868B] hover:text-[#1D1D1F]'
+              }`}
+            >
+              <Phone className="w-3.5 h-3.5 inline mr-1.5 -mt-0.5" />
+              Aramalar / Randevular
+            </button>
           </div>
         </div>
 
@@ -281,6 +293,11 @@ export default function TakipPage() {
       {/* TASKS TAB */}
       {activeTab === 'gorevler' && (
         <TasksTab />
+      )}
+
+      {/* OPERATIONS TAB */}
+      {activeTab === 'operasyon' && (
+        <OperationsTab onSelectOpportunity={setSelectedOpp} onGoToInbox={handleGoToInbox} />
       )}
 
       {/* OPPORTUNITIES TAB */}

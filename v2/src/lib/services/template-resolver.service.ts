@@ -133,7 +133,12 @@ export class TemplateResolverService {
    * Resolves the best template for a given context.
    * Falls back gracefully through 5 layers.
    */
-  static async resolve(db: TenantDB, ctx: TemplateResolveContext, greetingLang?: string): Promise<ResolvedTemplate> {
+  static async resolve(
+    db: TenantDB, 
+    ctx: TemplateResolveContext, 
+    greetingLang?: string, 
+    templateType: 'greeting' | 'remarketing' = 'greeting'
+  ): Promise<ResolvedTemplate> {
     const lang = detectLanguage(ctx, greetingLang);
     
     try {
@@ -141,10 +146,10 @@ export class TemplateResolverService {
       if (ctx.formName) {
         const rows = await db.executeSafe({
           text: `SELECT id, name, language, body FROM message_templates
-                 WHERE tenant_id = $1 AND template_type = 'greeting'
+                 WHERE tenant_id = $1 AND template_type = $4
                    AND form_name = $2 AND language = $3 AND is_active = true
                  ORDER BY created_at DESC LIMIT 1`,
-          values: [ctx.tenantId, ctx.formName, lang]
+          values: [ctx.tenantId, ctx.formName, lang, templateType]
         }) as any[];
 
         if (rows.length > 0) {
@@ -163,11 +168,11 @@ export class TemplateResolverService {
       if (ctx.department) {
         const rows = await db.executeSafe({
           text: `SELECT id, name, language, body FROM message_templates
-                 WHERE tenant_id = $1 AND template_type = 'greeting'
+                 WHERE tenant_id = $1 AND template_type = $4
                    AND department = $2 AND language = $3 AND is_active = true
                    AND form_name IS NULL
                  ORDER BY created_at DESC LIMIT 1`,
-          values: [ctx.tenantId, ctx.department, lang]
+          values: [ctx.tenantId, ctx.department, lang, templateType]
         }) as any[];
 
         if (rows.length > 0) {
@@ -185,10 +190,10 @@ export class TemplateResolverService {
       // ── Layer 3: default template for detected language ──
       const defaultRows = await db.executeSafe({
         text: `SELECT id, name, language, body FROM message_templates
-               WHERE tenant_id = $1 AND template_type = 'greeting'
+               WHERE tenant_id = $1 AND template_type = $3
                  AND language = $2 AND is_default = true AND is_active = true
                LIMIT 1`,
-        values: [ctx.tenantId, lang]
+        values: [ctx.tenantId, lang, templateType]
       }) as any[];
 
       if (defaultRows.length > 0) {
@@ -206,10 +211,10 @@ export class TemplateResolverService {
       if (lang !== 'tr') {
         const trRows = await db.executeSafe({
           text: `SELECT id, name, language, body FROM message_templates
-                 WHERE tenant_id = $1 AND template_type = 'greeting'
+                 WHERE tenant_id = $1 AND template_type = $2
                    AND language = 'tr' AND is_default = true AND is_active = true
                  LIMIT 1`,
-          values: [ctx.tenantId]
+          values: [ctx.tenantId, templateType]
         }) as any[];
 
         if (trRows.length > 0) {
@@ -227,9 +232,9 @@ export class TemplateResolverService {
       // ── Layer 5: Any available template ──
       const anyRows = await db.executeSafe({
         text: `SELECT id, name, language, body FROM message_templates
-               WHERE tenant_id = $1 AND template_type = 'greeting' AND is_active = true
+               WHERE tenant_id = $1 AND template_type = $2 AND is_active = true
                ORDER BY is_default DESC, created_at ASC LIMIT 1`,
-        values: [ctx.tenantId]
+        values: [ctx.tenantId, templateType]
       }) as any[];
 
       if (anyRows.length > 0) {
@@ -247,28 +252,42 @@ export class TemplateResolverService {
     }
 
     // ── Layer 6: System hardcoded — zero-dependency guaranteed ──
-    return this.getSystemFallback(ctx, lang);
+    return this.getSystemFallback(ctx, lang, templateType);
   }
 
   /**
    * Hardcoded fallback — identical to P0 behavior.
    * Ensures system never breaks even if message_templates table is empty/missing.
    */
-  private static getSystemFallback(ctx: TemplateResolveContext, lang: string): ResolvedTemplate {
+  private static getSystemFallback(
+    ctx: TemplateResolveContext, 
+    lang: string, 
+    templateType: 'greeting' | 'remarketing' = 'greeting'
+  ): ResolvedTemplate {
     const isTurkish = lang === 'tr';
     const name = ctx.patientName?.trim();
     const greeting = name
       ? (isTurkish ? `Merhaba ${name}!` : `Hello ${name}!`)
       : (isTurkish ? 'Merhaba!' : 'Hello!');
     const tenantName = ctx.tenantName || 'Ekibimiz';
+    const dept = ctx.department || (isTurkish ? 'bölüm' : 'department');
 
-    const body = isTurkish
-      ? `${greeting} ${tenantName} olarak size yazıyoruz 🙏\n\nDoldurduğunuz form bize ulaştı. Talebiniz hakkında detaylı bilgi alabilir miyiz?`
-      : `${greeting} We are reaching out from ${tenantName} 🙏\n\nWe received your form. Could you provide more details about your request?`;
+    let body = "";
+    if (templateType === 'remarketing') {
+      body = isTurkish
+        ? `${greeting} Sizinle daha önce ${dept} bölümümüz için görüşmüştük. Tedavi planınızla ilgili sormak istediğiniz veya netleştirmek istediğiniz bir konu var mıdır? 😊`
+        : `${greeting} We previously discussed your request for the ${dept} department. Do you have any questions or need further assistance regarding your treatment plan? 😊`;
+    } else {
+      body = isTurkish
+        ? `${greeting} ${tenantName} olarak size yazıyoruz 🙏\n\nDoldurduğunuz form bize ulaştı. Talebiniz hakkında detaylı bilgi alabilir miyiz?`
+        : `${greeting} We are reaching out from ${tenantName} 🙏\n\nWe received your form. Could you provide more details about your request?`;
+    }
 
     return {
       templateId: null,
-      templateName: isTurkish ? 'Sistem Varsayılanı (TR)' : 'System Default (EN)',
+      templateName: isTurkish 
+        ? (templateType === 'remarketing' ? 'Sistem Varsayılan Takip (TR)' : 'Sistem Varsayılanı (TR)') 
+        : (templateType === 'remarketing' ? 'System Default Follow-up (EN)' : 'System Default (EN)'),
       language: lang,
       body,
       rendered: body,
@@ -289,13 +308,24 @@ export class TemplateResolverService {
    * Used for the template selector dropdown.
    */
   static async listGreetingTemplates(db: TenantDB, tenantId: string): Promise<TemplateListItem[]> {
+    return this.listTemplates(db, tenantId, 'greeting');
+  }
+
+  /**
+   * Generic template listing for any type (greeting, remarketing).
+   */
+  static async listTemplates(
+    db: TenantDB, 
+    tenantId: string, 
+    templateType: 'greeting' | 'remarketing' = 'greeting'
+  ): Promise<TemplateListItem[]> {
     try {
       const rows = await db.executeSafe({
         text: `SELECT id, name, language, body, form_name, department, is_default
                FROM message_templates
-               WHERE tenant_id = $1 AND template_type = 'greeting' AND is_active = true
+               WHERE tenant_id = $1 AND template_type = $2 AND is_active = true
                ORDER BY is_default DESC, language ASC, name ASC`,
-        values: [tenantId]
+        values: [tenantId, templateType]
       }) as any[];
 
       return rows.map((r: any) => ({

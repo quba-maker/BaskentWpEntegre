@@ -41,7 +41,10 @@ export type AIEventType =
   | 'brain_resolved'
   | 'message_status_updated'
   | 'stage_changed'
-  | 'cancellation_stage_guard';
+  | 'cancellation_stage_guard'
+  | 'media_batch_skipped_already_processed'
+  | 'media_batch_processed'
+  | 'media_batch_started';
 
 export type AIEventCategory = 
   | 'identity'

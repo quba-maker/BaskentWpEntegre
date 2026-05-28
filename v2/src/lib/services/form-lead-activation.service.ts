@@ -252,6 +252,49 @@ export class FormLeadActivationService {
       log.error('[ACTIVATION_NOTIF_ERROR]', err instanceof Error ? err : new Error(String(err)));
     }
 
+    // ── STEP 7: Trigger RuleEvaluatorService (Automation Rules Foundation) ──
+    try {
+      const { RuleEvaluatorService } = await import('./automation/rule-evaluator.service');
+      const evaluator = new RuleEvaluatorService(db);
+      
+      const leadData = await db.executeSafe({
+        text: `SELECT country FROM leads WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+        values: [leadId, params.tenantId]
+      }) as any[];
+      const resolvedCountry = leadData[0]?.country || null;
+
+      const context = {
+        tenantId,
+        entityType: 'lead' as const,
+        entityId: leadId,
+        dedupeKey: `form_submission:${leadId}`,
+        phone_number: phoneNumber,
+        opportunity_id: opportunityId || null,
+        lead_id: leadId,
+        patient_name: displayName,
+        patient: {
+          name: displayName,
+          country: resolvedCountry,
+        },
+        lead: {
+          form_name: formName,
+          source,
+          email: email || null
+        },
+        opportunity: {
+          stage: 'new_lead',
+          priority: 'warm',
+          department: 'Genel',
+          intent_type: 'form_submission'
+        }
+      };
+
+      await evaluator.evaluate('form_submission', context);
+      log.info('[ACTIVATION_AUTOMATION_EVALUATE] Rule evaluator matching finished', { leadId });
+    } catch (autoErr) {
+      log.error('[ACTIVATION_AUTOMATION_ERROR] Rule evaluator failed non-fatally', autoErr instanceof Error ? autoErr : new Error(String(autoErr)));
+    }
+
     log.info('[ACTIVATION_COMPLETE]', {
       leadId,
       conversationId,

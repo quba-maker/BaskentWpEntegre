@@ -383,7 +383,7 @@ export default function FormsPage() {
           break;
       }
       if (result?.success) {
-        setOutreachSuccess(result.message || 'İşlem başarıyla kaydedildi.');
+        setOutreachSuccess('İşlem başarıyla kaydedildi.');
         setCallActionNote('');
         setShowCallActions(false);
         await loadOutreachTimeline(form.id);

@@ -674,12 +674,12 @@ export async function GET(req: NextRequest) {
       results.push("⚠️ PHASE 2L-P1: message_templates RLS: " + e.message);
     }
 
-    // 26b. Seed default greeting templates for all tenants
+    // 26b. Seed default templates for all tenants
     try {
       const allTenants = await execute`SELECT id, name FROM tenants WHERE status = 'active'` as any[];
       for (const t of allTenants) {
         const tName = t.name || 'Ekibimiz';
-        // TR default
+        // TR default greeting
         await systemDb.executeSafe({
           text: `INSERT INTO message_templates (tenant_id, template_type, name, language, body, is_default, variables)
                  VALUES ($1, 'greeting', 'Varsayılan Türkçe Karşılama', 'tr', $2, true, $3)
@@ -690,7 +690,7 @@ export async function GET(req: NextRequest) {
             JSON.stringify(['patient_name', 'tenant_name', 'form_name', 'department', 'country', 'coordinator_name'])
           ]
         });
-        // EN default
+        // EN default greeting
         await systemDb.executeSafe({
           text: `INSERT INTO message_templates (tenant_id, template_type, name, language, body, is_default, variables)
                  VALUES ($1, 'greeting', 'Default English Greeting', 'en', $2, true, $3)
@@ -701,11 +701,92 @@ export async function GET(req: NextRequest) {
             JSON.stringify(['patient_name', 'tenant_name', 'form_name', 'department', 'country', 'coordinator_name'])
           ]
         });
+        // TR default remarketing
+        await systemDb.executeSafe({
+          text: `INSERT INTO message_templates (tenant_id, template_type, name, language, body, is_default, variables)
+                 VALUES ($1, 'remarketing', 'Varsayılan Türkçe Takip', 'tr', $2, true, $3)
+                 ON CONFLICT DO NOTHING`,
+          values: [
+            t.id,
+            `Merhaba {{patient_name}}! Sizinle daha önce {{department}} bölümümüz için görüşmüştük. Tedavi planınızla ilgili sormak istediğiniz veya netleştirmek istediğiniz bir konu var mıdır? 😊`,
+            JSON.stringify(['patient_name', 'tenant_name', 'form_name', 'department', 'country', 'coordinator_name'])
+          ]
+        });
+        // EN default remarketing
+        await systemDb.executeSafe({
+          text: `INSERT INTO message_templates (tenant_id, template_type, name, language, body, is_default, variables)
+                 VALUES ($1, 'remarketing', 'Default English Follow-up', 'en', $2, true, $3)
+                 ON CONFLICT DO NOTHING`,
+          values: [
+            t.id,
+            `Hello {{patient_name}}! We previously discussed your request for the {{department}} department. Do you have any questions or need further assistance regarding your treatment plan? 😊`,
+            JSON.stringify(['patient_name', 'tenant_name', 'form_name', 'department', 'country', 'coordinator_name'])
+          ]
+        });
       }
-      results.push(`✅ PHASE 2L-P1: ${allTenants.length} tenant için varsayılan greeting template'leri oluşturuldu`);
+      results.push(`✅ PHASE 2L-P1/2P-P0: ${allTenants.length} tenant için varsayılan greeting & remarketing template'leri oluşturuldu`);
     } catch (e: any) {
-      results.push("⚠️ PHASE 2L-P1: Template seed: " + e.message);
+      results.push("⚠️ PHASE 2L-P1/2P-P0: Template seed: " + e.message);
     }
+
+    // 27. PHASE 2N-P0: Automation Rules & Runs tables
+    await execute`
+      CREATE TABLE IF NOT EXISTS automation_rules (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        description TEXT,
+        trigger_event TEXT NOT NULL,
+        conditions JSONB DEFAULT '[]'::jsonb,
+        actions JSONB DEFAULT '[]'::jsonb,
+        is_active BOOLEAN DEFAULT false,
+        created_by UUID,
+        metadata JSONB DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `;
+    await execute`CREATE INDEX IF NOT EXISTS idx_auto_rules_trigger ON automation_rules(tenant_id, trigger_event, is_active)`;
+    
+    await execute`
+      CREATE TABLE IF NOT EXISTS automation_runs (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        rule_id UUID NOT NULL REFERENCES automation_rules(id) ON DELETE CASCADE,
+        trigger_event TEXT NOT NULL,
+        entity_type TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        dedupe_key TEXT NOT NULL,
+        action_hash TEXT,
+        dry_run BOOLEAN DEFAULT false,
+        executed_actions JSONB DEFAULT '[]'::jsonb,
+        error_message TEXT,
+        duration_ms INTEGER,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `;
+    await execute`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_auto_runs_dedupe
+      ON automation_runs(tenant_id, rule_id, trigger_event, entity_type, entity_id, dedupe_key)
+      WHERE status = 'success' AND dry_run = false
+    `;
+    
+    // 27a. RLS for automation tables (shadow mode)
+    try {
+      await execute`ALTER TABLE automation_rules ENABLE ROW LEVEL SECURITY`;
+      await execute`DROP POLICY IF EXISTS auto_rules_app_access ON automation_rules`;
+      await execute`CREATE POLICY auto_rules_app_access ON automation_rules FOR ALL USING (true) WITH CHECK (true)`;
+      
+      await execute`ALTER TABLE automation_runs ENABLE ROW LEVEL SECURITY`;
+      await execute`DROP POLICY IF EXISTS auto_runs_app_access ON automation_runs`;
+      await execute`CREATE POLICY auto_runs_app_access ON automation_runs FOR ALL USING (true) WITH CHECK (true)`;
+      results.push("✅ PHASE 2N-P0: automation_rules ve automation_runs RLS policies oluşturuldu");
+    } catch (e: any) {
+      results.push("⚠️ PHASE 2N-P0: RLS: " + e.message);
+    }
+    
+    results.push("✅ PHASE 2N-P0: automation_rules ve automation_runs tabloları hazır");
 
     if (isDryRun) {
       return NextResponse.json({ success: true, mode: "dryRun", results, executedQueries: dryRunLogs });

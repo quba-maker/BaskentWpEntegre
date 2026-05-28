@@ -828,7 +828,12 @@ export async function createBot(input: {
         values: [groupId, ctx.tenantId]
       });
 
-      await logAudit(ctx.tenantId, ctx.userId || 'system', 'bot.created', { botId: groupId, displayName });
+      await logAudit({
+        tenantId: ctx.tenantId,
+        userId: ctx.userId || 'system',
+        action: 'bot.created',
+        details: { botId: groupId, displayName }
+      });
 
       return groupId;
     }
@@ -928,7 +933,12 @@ export async function updateBot(
         });
       }
 
-      await logAudit(ctx.tenantId, ctx.userId || 'system', 'bot.updated', { botId, fields: Object.keys(updates) });
+      await logAudit({
+        tenantId: ctx.tenantId,
+        userId: ctx.userId || 'system',
+        action: 'bot.updated',
+        details: { botId, fields: Object.keys(updates) }
+      });
       return true;
     }
   ).then(res => {
@@ -974,7 +984,12 @@ export async function archiveBot(botId: string): Promise<{ success: boolean; err
         values: [botId, ctx.tenantId]
       });
 
-      await logAudit(ctx.tenantId, ctx.userId || 'system', 'bot.archived', { botId, name: ownership[0].display_name });
+      await logAudit({
+        tenantId: ctx.tenantId,
+        userId: ctx.userId || 'system',
+        action: 'bot.archived',
+        details: { botId, name: ownership[0].display_name }
+      });
       return true;
     }
   ).then(res => {
@@ -1046,11 +1061,16 @@ export async function assignChannelToBot(
         });
       }
 
-      await logAudit(ctx.tenantId, ctx.userId || 'system', 'channel.assigned', { 
-        channelId, 
-        channelName: channel[0].name,
-        fromBotId: channel[0].group_id, 
-        toBotId: targetBotId 
+      await logAudit({
+        tenantId: ctx.tenantId,
+        userId: ctx.userId || 'system',
+        action: 'channel.assigned',
+        details: { 
+          channelId, 
+          channelName: channel[0].name,
+          fromBotId: channel[0].group_id, 
+          toBotId: targetBotId 
+        }
       });
 
       return true;

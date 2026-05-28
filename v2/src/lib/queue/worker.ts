@@ -361,7 +361,7 @@ export class QueueWorkerEngine {
               result[result.length - 1].phone_number,
               validStatus,
               1,
-              { traceId }
+              { traceId, spanId: traceId }
             );
           } catch (rtErr) {
             // Non-fatal
@@ -436,7 +436,7 @@ export class QueueWorkerEngine {
 
       // Check 2: did the user send a TEXT message after the photos, triggering a normal AI response?
       // If yes, AI already acknowledged the photos in context → batch response is redundant.
-      const firstMediaAt = data.firstMediaAt ? new Date(data.firstMediaAt) : null;
+      const firstMediaAt = payload.firstMediaAt ? new Date(payload.firstMediaAt) : null;
       if (firstMediaAt) {
         const aiRespondedAfterMedia = await db.executeSafe({
           text: `
@@ -736,7 +736,7 @@ export class QueueWorkerEngine {
           break;
         case 'sticker':
           mediaType = 'sticker';
-          mediaId = incomingMsg.sticker?.id || null;
+          mediaId = (incomingMsg as any).sticker?.id || null;
           mediaMetadata = { mime_type: 'image/webp' };
           content = '';
           break;

@@ -13,7 +13,8 @@ import {
   Eye,
   Terminal,
   Radar,
-  ShieldAlert
+  ShieldAlert,
+  Zap
 } from "lucide-react";
 import { getSession, logout, stopImpersonation } from "@/lib/auth/session";
 import { redirect } from "next/navigation";
@@ -99,7 +100,10 @@ export async function Sidebar({ tenantData }: { tenantData?: TenantBootstrapData
         
         {/* ADMIN ONLY */}
         {(session?.role === "platform_admin" || session?.role === "admin" || session?.role === "owner") && (
-          <NavLink href={`/${session?.tenantSlug || ''}/ai-developer`} icon={<Terminal className="w-[18px] h-[18px]" />} label="AI Developer" />
+          <>
+            <NavLink href={`/${session?.tenantSlug || ''}/ai-developer`} icon={<Terminal className="w-[18px] h-[18px]" />} label="AI Developer" />
+            <NavLink href={`/${session?.tenantSlug || ''}/automation`} icon={<Zap className="w-[18px] h-[18px]" />} label="Otomasyon" />
+          </>
         )}
         {(session?.role === "platform_admin" || session?.role === "admin" || session?.role === "owner") && (
           <>
