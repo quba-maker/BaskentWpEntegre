@@ -153,8 +153,9 @@ export interface AppointmentRow {
   phoneNumber: string;
   country?: string;
   department?: string;
+  priority: 'cold' | 'warm' | 'hot';
 
-  appointmentType: 'phone_call' | 'clinic_visit' | 'consultation' | 'doctor_review' | 'report_followup';
+  appointmentType: 'phone_call' | 'clinic_visit' | 'pre_consultation' | 'doctor_review' | 'report_followup';
   appointmentTypeLabel: string;
 
   dueAtUtc?: string;
@@ -166,7 +167,9 @@ export interface AppointmentRow {
   statusLabel: string;
   statusColor: string;
 
-  confirmationStatus: 'pending' | 'confirmed' | 'none';
+  confirmationStatus: 'pending' | 'confirmed' | 'declined' | 'no_response' | 'not_required' | 'none';
+  appointmentResult?: 'completed' | 'arrived' | 'no_show' | 'cancelled' | 'rescheduled';
+  appointmentNote?: string;
 
   taskTitle: string;
   taskDescription?: string;
@@ -176,6 +179,8 @@ export interface AppointmentRow {
 export interface AppointmentFilters {
   appointmentType?: 'phone_call' | 'clinic_visit' | 'all';
   status?: string;
+  confirmationStatus?: string;
+  completed?: boolean;
   dueRange?: 'today' | 'tomorrow' | 'overdue' | 'week' | 'all';
   search?: string;
 }
@@ -817,10 +822,25 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
       if (filters?.status && filters.status !== 'all') {
         if (filters.status === 'pending') conditions.push(`t.status IN ('pending', 'in_progress')`);
         else if (filters.status === 'completed') conditions.push(`t.status = 'completed'`);
+        else if (filters.status === 'cancelled') conditions.push(`t.status = 'cancelled'`);
         else if (filters.status === 'overdue') conditions.push(`t.status IN ('pending', 'in_progress') AND t.due_at < NOW()`);
       } else {
-        // Default: show pending/in_progress
-        conditions.push(`t.status IN ('pending', 'in_progress')`);
+        // Default: show pending/in_progress unless completed flag is explicitly true
+        if (filters?.completed) {
+            conditions.push(`t.status = 'completed'`);
+        } else {
+            conditions.push(`t.status IN ('pending', 'in_progress')`);
+        }
+      }
+
+      // Confirmation Status
+      if (filters?.confirmationStatus && filters.confirmationStatus !== 'all') {
+        if (filters.confirmationStatus === 'none') {
+            conditions.push(`(t.metadata->>'confirmation_status' IS NULL OR t.metadata->>'confirmation_status' = 'none')`);
+        } else {
+            conditions.push(`t.metadata->>'confirmation_status' = $${values.length + 1}`);
+            values.push(filters.confirmationStatus);
+        }
       }
 
       // Due range
@@ -840,8 +860,10 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
         }
       }
 
-      // Exclude terminal opportunities
-      conditions.push(`(o.stage IS NULL OR o.stage NOT IN ('lost', 'not_qualified', 'arrived', 'not_interested', 'cancelled', 'completed'))`);
+      // Exclude terminal opportunities unless looking at completed/cancelled tasks
+      if (filters?.status !== 'completed' && filters?.status !== 'cancelled' && !filters?.completed) {
+        conditions.push(`(o.stage IS NULL OR o.stage NOT IN ('lost', 'not_qualified', 'arrived', 'not_interested', 'cancelled', 'completed'))`);
+      }
 
       const query = `
         SELECT
@@ -877,9 +899,13 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
         // Determine appointment type
         let appointmentType: AppointmentRow['appointmentType'] = 'phone_call';
         const metaType = row.task_metadata?.appointment_type;
-        if (metaType === 'clinic_visit') appointmentType = 'clinic_visit';
-        else if (row.task_type === 'doctor_review_pending') appointmentType = 'doctor_review';
-        else if (row.task_type === 'send_report_reminder') appointmentType = 'report_followup';
+        if (metaType === 'clinic_visit' || metaType === 'phone_call' || metaType === 'pre_consultation' || metaType === 'doctor_review' || metaType === 'report_followup') {
+            appointmentType = metaType;
+        } else if (row.task_type === 'doctor_review_pending') {
+            appointmentType = 'doctor_review';
+        } else if (row.task_type === 'send_report_reminder') {
+            appointmentType = 'report_followup';
+        }
 
         const TYPE_LABELS: Record<string, string> = {
           phone_call: 'Telefon Görüşmesi',
@@ -896,7 +922,12 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
 
         if (row.task_status === 'completed') {
           status = 'completed'; statusLabel = 'Tamamlandı'; statusColor = 'bg-green-100 text-green-700';
-        } else if (row.task_status === 'cancelled') {
+          if (row.task_metadata?.appointment_result === 'arrived') {
+              status = 'arrived'; statusLabel = 'Geldi'; statusColor = 'bg-emerald-100 text-emerald-800';
+          } else if (row.task_metadata?.appointment_result === 'no_show') {
+              status = 'no_show'; statusLabel = 'Gelmedi'; statusColor = 'bg-red-100 text-red-800';
+          }
+        } else if (row.task_status === 'cancelled' || row.task_metadata?.appointment_result === 'cancelled') {
           status = 'cancelled'; statusLabel = 'İptal'; statusColor = 'bg-gray-100 text-gray-500';
         } else if (row.due_at && isOverdue(row.due_at)) {
           status = 'overdue'; statusLabel = 'Gecikti'; statusColor = 'bg-red-100 text-red-700';
@@ -910,8 +941,7 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
 
         // Confirmation status
         const confirmationStatus: AppointmentRow['confirmationStatus'] = 
-          row.task_metadata?.confirmed ? 'confirmed' : 
-          (row.task_type === 'callback_scheduled' ? 'pending' : 'none');
+          row.task_metadata?.confirmation_status || (row.task_metadata?.confirmed ? 'confirmed' : 'pending');
 
         return {
           taskId: row.task_id,
@@ -920,6 +950,7 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
           phoneNumber: row.phone_number || '',
           country: resolvedCountry || undefined,
           department: row.opp_department || undefined,
+          priority: row.opp_priority || 'warm',
           appointmentType,
           appointmentTypeLabel: TYPE_LABELS[appointmentType] || appointmentType,
           dueAtUtc: row.due_at || undefined,
@@ -930,6 +961,8 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
           statusLabel,
           statusColor,
           confirmationStatus,
+          appointmentResult: row.task_metadata?.appointment_result,
+          appointmentNote: row.task_metadata?.note,
           taskTitle: row.task_title || '',
           taskDescription: row.task_description || undefined,
           metadata: row.task_metadata || undefined,
@@ -952,36 +985,300 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
 }
 
 // ══════════════════════════════════════════
-// 5. createClinicAppointmentTask
+// 5. APPOINTMENT MANAGEMENT ACTIONS (Phase 2T-P0)
 // ══════════════════════════════════════════
 
-export async function createClinicAppointmentTask(opportunityId: string, dueAtUtc: string, note?: string) {
+export async function createAppointmentTask(
+  opportunityId: string, 
+  dueAtUtc: string, 
+  appointmentType: 'phone_call' | 'clinic_visit' | 'pre_consultation' | 'doctor_review' | 'report_followup',
+  options?: { note?: string; requireConfirmation?: boolean }
+) {
   return withActionGuard(
-    { actionName: 'createClinicAppointmentTask' },
+    { actionName: 'createAppointmentTask' },
     async (ctx) => {
+      // 1. Duplication Guard
+      const existing = await ctx.db.executeSafe({
+        text: `SELECT id FROM follow_up_tasks 
+               WHERE opportunity_id = $1 AND tenant_id = $2 
+               AND status IN ('pending', 'in_progress')
+               AND metadata->>'appointment_type' = $3
+               LIMIT 1`,
+        values: [opportunityId, ctx.tenantId, appointmentType]
+      }) as any[];
+
+      if (existing.length > 0) {
+        return { success: false, error: 'Bu fırsat için zaten açık bir randevu bulunuyor.' };
+      }
+
+      // 2. Fetch Lead/Conversation Info for logs
+      const oppRes = await ctx.db.executeSafe({
+        text: `SELECT phone_number, id, patient_name FROM opportunities WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+        values: [opportunityId, ctx.tenantId]
+      }) as any[];
+      if (oppRes.length === 0) return { success: false, error: 'Fırsat bulunamadı.' };
+      const opp = oppRes[0];
+
+      let conversationId: string | null = null;
+      let leadId: string | null = null;
+      try {
+        const convRes = await ctx.db.executeSafe({
+          text: `SELECT c.id as conv_id, l.id as lead_id 
+                 FROM conversations c
+                 LEFT JOIN leads l ON l.phone_number = c.phone_number AND l.tenant_id = c.tenant_id
+                 WHERE c.tenant_id = $1 AND RIGHT(c.phone_number, 10) = RIGHT($2, 10) 
+                 LIMIT 1`,
+          values: [ctx.tenantId, opp.phone_number]
+        }) as any[];
+        if (convRes.length > 0) {
+          conversationId = convRes[0].conv_id || null;
+          leadId = convRes[0].lead_id || null;
+        }
+      } catch (_) {}
+
       const metadata = {
-        appointment_type: 'clinic_visit',
-        note: note || '',
+        appointment_type: appointmentType,
+        note: options?.note || '',
+        confirmation_status: options?.requireConfirmation ? 'pending' : 'not_required',
+        zero_outbound_p0: true,
+        initiated_from: 'appointment_management'
       };
 
-      await ctx.db.executeSafe({
+      const titleMap: Record<string, string> = {
+        phone_call: 'Telefon Görüşmesi',
+        clinic_visit: 'Klinik Randevusu',
+        pre_consultation: 'Ön Görüşme',
+        doctor_review: 'Doktor İncelemesi',
+        report_followup: 'Rapor Takibi'
+      };
+
+      const res = await ctx.db.executeSafe({
         text: `
-          INSERT INTO follow_up_tasks (tenant_id, opportunity_id, task_type, title, description, status, due_at, metadata)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+          INSERT INTO follow_up_tasks (tenant_id, opportunity_id, phone_number, task_type, title, description, status, due_at, metadata)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
           RETURNING id
         `,
         values: [
           ctx.tenantId,
           opportunityId,
-          'callback_scheduled', // Reuse existing type for compatibility
-          'Klinik Randevusu',
-          note || 'Hasta için klinik randevusu planlandı.',
+          opp.phone_number,
+          'callback_scheduled', // Reuse for compatibility
+          titleMap[appointmentType] || 'Randevu',
+          options?.note || `${titleMap[appointmentType]} planlandı.`,
           'pending',
           dueAtUtc,
           JSON.stringify(metadata)
         ]
+      }) as any[];
+      
+      const taskId = res[0].id;
+
+      // 3. Write outreach_log
+      await ctx.db.executeSafe({
+        text: `INSERT INTO outreach_logs (tenant_id, lead_id, conversation_id, opportunity_id, action, channel, actor_id, metadata)
+               VALUES ($1, $2, $3, $4, 'appointment_scheduled', 'system', $5, $6)`,
+        values: [
+          ctx.tenantId, leadId, conversationId, opportunityId, ctx.userId,
+          JSON.stringify({
+            appointment_type: appointmentType,
+            task_id: taskId,
+            due_at: dueAtUtc,
+            initiated_from: 'appointment_management',
+            zero_outbound_p0: true
+          })
+        ]
       });
+
+      return { success: true, taskId };
+    }
+  );
+}
+
+export async function rescheduleAppointmentTask(taskId: string, newDueAtUtc: string, note?: string) {
+  return withActionGuard(
+    { actionName: 'rescheduleAppointmentTask' },
+    async (ctx) => {
+      const tasks = await ctx.db.executeSafe({
+        text: `SELECT due_at, metadata, opportunity_id, phone_number FROM follow_up_tasks WHERE id = $1 AND tenant_id = $2`,
+        values: [taskId, ctx.tenantId]
+      }) as any[];
+      if (tasks.length === 0) return { success: false, error: 'Görev bulunamadı.' };
+
+      const task = tasks[0];
+      const oldDueAt = task.due_at;
+      const metadata = typeof task.metadata === 'string' ? JSON.parse(task.metadata) : (task.metadata || {});
+      
+      metadata.previous_due_at = oldDueAt;
+      metadata.reschedule_count = (metadata.reschedule_count || 0) + 1;
+      metadata.last_rescheduled_at = new Date().toISOString();
+      if (note) metadata.note = note;
+
+      await ctx.db.executeSafe({
+        text: `UPDATE follow_up_tasks SET due_at = $1, metadata = $2, updated_at = NOW() WHERE id = $3 AND tenant_id = $4`,
+        values: [newDueAtUtc, JSON.stringify(metadata), taskId, ctx.tenantId]
+      });
+
+      // Outreach log
+      await ctx.db.executeSafe({
+        text: `INSERT INTO outreach_logs (tenant_id, opportunity_id, action, channel, actor_id, metadata)
+               VALUES ($1, $2, 'appointment_rescheduled', 'system', $3, $4)`,
+        values: [
+          ctx.tenantId, task.opportunity_id, ctx.userId,
+          JSON.stringify({
+            appointment_type: metadata.appointment_type,
+            task_id: taskId,
+            due_at: newDueAtUtc,
+            previous_due_at: oldDueAt,
+            initiated_from: 'appointment_management',
+            zero_outbound_p0: true
+          })
+        ]
+      });
+
       return { success: true };
     }
   );
+}
+
+export async function updateAppointmentConfirmation(taskId: string, status: 'confirmed' | 'declined' | 'no_response' | 'pending', note?: string) {
+  return withActionGuard(
+    { actionName: 'updateAppointmentConfirmation' },
+    async (ctx) => {
+      const tasks = await ctx.db.executeSafe({
+        text: `SELECT metadata, opportunity_id, due_at FROM follow_up_tasks WHERE id = $1 AND tenant_id = $2`,
+        values: [taskId, ctx.tenantId]
+      }) as any[];
+      if (tasks.length === 0) return { success: false, error: 'Görev bulunamadı.' };
+
+      const task = tasks[0];
+      const metadata = typeof task.metadata === 'string' ? JSON.parse(task.metadata) : (task.metadata || {});
+      
+      metadata.confirmation_status = status;
+      if (note) metadata.note = note;
+
+      await ctx.db.executeSafe({
+        text: `UPDATE follow_up_tasks SET metadata = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3`,
+        values: [JSON.stringify(metadata), taskId, ctx.tenantId]
+      });
+
+      // Outreach log action name based on status
+      let actionName = 'appointment_confirmed';
+      if (status === 'no_response') actionName = 'appointment_no_response';
+      else if (status === 'declined') actionName = 'appointment_cancelled';
+
+      await ctx.db.executeSafe({
+        text: `INSERT INTO outreach_logs (tenant_id, opportunity_id, action, channel, actor_id, metadata)
+               VALUES ($1, $2, $3, 'system', $4, $5)`,
+        values: [
+          ctx.tenantId, task.opportunity_id, actionName, ctx.userId,
+          JSON.stringify({
+            appointment_type: metadata.appointment_type,
+            task_id: taskId,
+            confirmation_status: status,
+            due_at: task.due_at,
+            initiated_from: 'appointment_management',
+            zero_outbound_p0: true
+          })
+        ]
+      });
+
+      return { success: true };
+    }
+  );
+}
+
+export async function completeAppointmentTask(taskId: string, result: 'completed' | 'arrived' | 'no_show' | 'cancelled', note?: string) {
+  return withActionGuard(
+    { actionName: 'completeAppointmentTask' },
+    async (ctx) => {
+      const tasks = await ctx.db.executeSafe({
+        text: `SELECT metadata, opportunity_id, phone_number, due_at FROM follow_up_tasks WHERE id = $1 AND tenant_id = $2`,
+        values: [taskId, ctx.tenantId]
+      }) as any[];
+      if (tasks.length === 0) return { success: false, error: 'Görev bulunamadı.' };
+
+      const task = tasks[0];
+      const metadata = typeof task.metadata === 'string' ? JSON.parse(task.metadata) : (task.metadata || {});
+      
+      metadata.appointment_result = result;
+      if (note) metadata.note = note;
+
+      let taskStatus = 'completed';
+      if (result === 'cancelled') taskStatus = 'cancelled';
+      else if (result === 'no_show') taskStatus = 'completed'; // We mark it complete but with no_show result
+
+      await ctx.db.executeSafe({
+        text: `UPDATE follow_up_tasks SET status = $1, metadata = $2, updated_at = NOW() WHERE id = $3 AND tenant_id = $4`,
+        values: [taskStatus, JSON.stringify(metadata), taskId, ctx.tenantId]
+      });
+
+      let actionName = 'appointment_completed';
+      if (result === 'arrived') actionName = 'appointment_arrived';
+      else if (result === 'no_show') actionName = 'appointment_no_show';
+      else if (result === 'cancelled') actionName = 'appointment_cancelled';
+
+      await ctx.db.executeSafe({
+        text: `INSERT INTO outreach_logs (tenant_id, opportunity_id, action, channel, actor_id, metadata)
+               VALUES ($1, $2, $3, 'system', $4, $5)`,
+        values: [
+          ctx.tenantId, task.opportunity_id, actionName, ctx.userId,
+          JSON.stringify({
+            appointment_type: metadata.appointment_type,
+            task_id: taskId,
+            appointment_result: result,
+            due_at: task.due_at,
+            initiated_from: 'appointment_management',
+            zero_outbound_p0: true
+          })
+        ]
+      });
+
+      // Integration with UnifiedStageService for terminal states
+      if (result === 'arrived' && metadata.appointment_type === 'clinic_visit') {
+        try {
+          const { UnifiedStageService } = await import('@/lib/services/unified-stage.service');
+          await UnifiedStageService.update({
+            tenantId: ctx.tenantId,
+            source: 'system',
+            opportunityId: task.opportunity_id || undefined,
+            phoneNumber: task.phone_number,
+            targetStage: 'arrived',
+            actorId: ctx.userId,
+            reason: 'appointment_arrived'
+          });
+        } catch (_) {}
+      } else if (result === 'no_show') {
+        // We could also update stage to not_show or lost if desired, but user said Geldi/Kayip -> Stage service
+        // We'll let the user decide if they want to manually mark lost or if this is enough.
+      }
+
+      return { success: true };
+    }
+  );
+}
+
+export async function getAppointmentStats() {
+  return withActionGuard(
+    { actionName: 'getAppointmentStats' },
+    async (ctx) => {
+      // Base condition
+      const baseCond = `t.tenant_id = $1 AND t.status IN ('pending', 'in_progress') AND (o.stage IS NULL OR o.stage NOT IN ('lost', 'not_qualified', 'arrived', 'not_interested', 'cancelled', 'completed'))`;
+
+      const statsQuery = `
+        SELECT
+          COUNT(*) FILTER (WHERE t.due_at::date = CURRENT_DATE) as due_today,
+          COUNT(*) FILTER (WHERE t.due_at < NOW()) as overdue,
+          COUNT(*) FILTER (WHERE t.metadata->>'confirmation_status' = 'pending') as confirmation_pending,
+          COUNT(*) FILTER (WHERE t.task_type = 'callback_scheduled' OR t.metadata->>'appointment_type' IN ('phone_call', 'pre_consultation')) as total_phone,
+          COUNT(*) FILTER (WHERE t.metadata->>'appointment_type' = 'clinic_visit') as total_clinic
+        FROM follow_up_tasks t
+        LEFT JOIN opportunities o ON o.id = t.opportunity_id AND o.tenant_id = t.tenant_id
+        WHERE ${baseCond}
+          AND (t.task_type IN ('callback_scheduled', 'doctor_review_pending', 'send_report_reminder') OR t.metadata->>'appointment_type' IS NOT NULL)
+      `;
+
+      const rows = await ctx.db.executeSafe({ text: statsQuery, values: [ctx.tenantId] }) as any[];
+      return rows[0] || { due_today: 0, overdue: 0, confirmation_pending: 0, total_phone: 0, total_clinic: 0 };
+    }
+  ).then(res => res.data || { due_today: 0, overdue: 0, confirmation_pending: 0, total_phone: 0, total_clinic: 0 });
 }
