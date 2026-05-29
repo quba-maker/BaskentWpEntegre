@@ -61,7 +61,7 @@ export default function PatientDetailDrawer({ opportunityId, onClose, onGoToInbo
   const [confirmDialog, setConfirmDialog] = useState<'lost' | 'not_interested' | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
-  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['action', 'profile', 'ai', 'timeline']));
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['action', 'profile', 'time', 'ai', 'timeline']));
 
   const { data, isLoading, mutate } = useSWR(
     opportunityId ? ['patient-detail', opportunityId] : null,

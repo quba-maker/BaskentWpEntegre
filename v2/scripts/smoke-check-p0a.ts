@@ -12,8 +12,8 @@ async function runSmoke() {
   const db = withTenantDB(TEST_TENANT_ID, true);
   
   // 1. Merve in queue?
-  const res = await getFocusQueueItems(TEST_TENANT_ID);
-  const items = res.data || [];
+  const res = await getFocusQueueItems();
+  const items = res.items || [];
   const merve = items.find((i: any) => i.opportunityId === TEST_OPPORTUNITY_ID);
   console.log("3. Merve in queue:", !!merve);
   if (merve) {
