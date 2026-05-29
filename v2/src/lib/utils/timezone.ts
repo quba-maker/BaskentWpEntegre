@@ -155,11 +155,12 @@ export function resolvePatientTimezone(country?: string | null): TimezoneResolut
  * Example: "26 May 2026, 14:30"
  */
 export function formatForDisplay(
-  utcDate: string | Date,
+  utcDate: string | Date | null | undefined,
   tz: string = TENANT_DEFAULT_TZ
 ): string {
+  if (!utcDate) return '';
   const d = typeof utcDate === 'string' ? new Date(utcDate) : utcDate;
-  if (isNaN(d.getTime())) return '';
+  if (!(d instanceof Date) || isNaN(d.getTime())) return '';
   return d.toLocaleString('tr-TR', {
     timeZone: tz,
     day: 'numeric', month: 'short', year: 'numeric',
@@ -171,11 +172,12 @@ export function formatForDisplay(
  * Format just the time portion. Example: "14:30"
  */
 export function formatTimeTR(
-  utcDate: string | Date,
+  utcDate: string | Date | null | undefined,
   tz: string = TENANT_DEFAULT_TZ
 ): string {
+  if (!utcDate) return '';
   const d = typeof utcDate === 'string' ? new Date(utcDate) : utcDate;
-  if (isNaN(d.getTime())) return '';
+  if (!(d instanceof Date) || isNaN(d.getTime())) return '';
   return d.toLocaleTimeString('tr-TR', {
     timeZone: tz,
     hour: '2-digit', minute: '2-digit',
@@ -187,11 +189,12 @@ export function formatTimeTR(
  * Example: "5 dk önce", "2 saat sonra", "Yarın 14:00"
  */
 export function formatRelativeTR(
-  utcDate: string | Date,
+  utcDate: string | Date | null | undefined,
   tz: string = TENANT_DEFAULT_TZ
 ): string {
+  if (!utcDate) return '';
   const d = typeof utcDate === 'string' ? new Date(utcDate) : utcDate;
-  if (isNaN(d.getTime())) return '';
+  if (!(d instanceof Date) || isNaN(d.getTime())) return '';
 
   const diff = Math.round((Date.now() - d.getTime()) / 1000);
 
@@ -260,12 +263,15 @@ export interface DualClockResult {
  *   → { tenantTime: '14:00', patientTime: '13:00', combined: '14:00 TR / 13:00 DE' }
  */
 export function formatDualClock(
-  utcDate: string | Date,
+  utcDate: string | Date | null | undefined,
   patientCountry?: string | null,
   tenantTz: string = TENANT_DEFAULT_TZ
 ): DualClockResult {
+  if (!utcDate) {
+    return { tenantTime: '', patientTime: null, combined: '', needsConfirmation: false };
+  }
   const d = typeof utcDate === 'string' ? new Date(utcDate) : utcDate;
-  if (isNaN(d.getTime())) {
+  if (!(d instanceof Date) || isNaN(d.getTime())) {
     return { tenantTime: '', patientTime: null, combined: '', needsConfirmation: false };
   }
 
@@ -300,17 +306,19 @@ export function formatDualClock(
 /**
  * Check if a date is in the past (overdue).
  */
-export function isOverdue(utcDate: string | Date): boolean {
+export function isOverdue(utcDate: string | Date | null | undefined): boolean {
+  if (!utcDate) return false;
   const d = typeof utcDate === 'string' ? new Date(utcDate) : utcDate;
-  return !isNaN(d.getTime()) && d.getTime() < Date.now();
+  return d instanceof Date && !isNaN(d.getTime()) && d.getTime() < Date.now();
 }
 
 /**
  * Check if a date is within N hours from now (upcoming).
  */
-export function isWithinHours(utcDate: string | Date, hours: number): boolean {
+export function isWithinHours(utcDate: string | Date | null | undefined, hours: number): boolean {
+  if (!utcDate) return false;
   const d = typeof utcDate === 'string' ? new Date(utcDate) : utcDate;
-  if (isNaN(d.getTime())) return false;
+  if (!(d instanceof Date) || isNaN(d.getTime())) return false;
   const diff = d.getTime() - Date.now();
   return diff > 0 && diff <= hours * 3600 * 1000;
 }
@@ -318,9 +326,10 @@ export function isWithinHours(utcDate: string | Date, hours: number): boolean {
 /**
  * Check if a date is today in the given timezone.
  */
-export function isToday(utcDate: string | Date, tz: string = TENANT_DEFAULT_TZ): boolean {
+export function isToday(utcDate: string | Date | null | undefined, tz: string = TENANT_DEFAULT_TZ): boolean {
+  if (!utcDate) return false;
   const d = typeof utcDate === 'string' ? new Date(utcDate) : utcDate;
-  if (isNaN(d.getTime())) return false;
+  if (!(d instanceof Date) || isNaN(d.getTime())) return false;
   const now = new Date();
   const dateStr = d.toLocaleDateString('en-CA', { timeZone: tz }); // YYYY-MM-DD
   const todayStr = now.toLocaleDateString('en-CA', { timeZone: tz });
