@@ -7,7 +7,7 @@ import {
   Calendar, CheckCircle2, XCircle, Search, Filter, Globe,
   FileText, ExternalLink, ChevronDown, Check, Trash2, Bot, Info, Activity, FastForward
 } from "lucide-react";
-import { getFocusQueueItems, createBotDelegationTask, type FocusQueueItem } from "@/app/actions/focus-queue";
+import { getFocusQueueItems, createBotDelegationTask, schedulePhoneCallTask, type FocusQueueItem } from "@/app/actions/focus-queue";
 import { logCallReached, logCallMissed, logCallbackScheduled, logNotInterested } from "@/app/actions/outreach";
 import { completeTask, rescheduleTask } from "@/app/actions/tasks";
 import { getCountryFlag } from "@/lib/utils/country";
@@ -46,6 +46,8 @@ export default function FocusTab({ onGoToInbox }: FocusTabProps) {
   // Action Modals State
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [botMode, setBotMode] = useState<string>('unreachable_followup');
+  const [showPhoneSchedule, setShowPhoneSchedule] = useState(false);
+  const [phoneScheduleDate, setPhoneScheduleDate] = useState("");
 
   // SWR Fetching
   const { data, isLoading, mutate } = useSWR(
@@ -105,6 +107,22 @@ export default function FocusTab({ onGoToInbox }: FocusTabProps) {
         goal: 'Kullanıcı odak merkezinden bota devretti.',
       });
       mutate();
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleSchedulePhoneCall = async () => {
+    if (!selectedItem?.opportunity_id || !phoneScheduleDate) return;
+    setIsSubmitting(true);
+    try {
+      const utcDate = new Date(phoneScheduleDate).toISOString();
+      await schedulePhoneCallTask(selectedItem.opportunity_id, utcDate, "Odak Merkezi üzerinden telefon randevusu planlandı.");
+      mutate();
+      setShowPhoneSchedule(false);
+      setPhoneScheduleDate("");
+    } catch (e) {
+      console.error(e);
     } finally {
       setIsSubmitting(false);
     }
@@ -244,6 +262,33 @@ export default function FocusTab({ onGoToInbox }: FocusTabProps) {
                     <Phone className="w-4 h-4 text-rose-500" />
                     Ulaşılamadı (Cevapsız)
                   </button>
+                  <button
+                    onClick={() => setShowPhoneSchedule(!showPhoneSchedule)}
+                    disabled={isSubmitting}
+                    className="w-full md:w-48 flex items-center justify-center gap-2 px-4 py-2.5 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+                  >
+                    <Calendar className="w-4 h-4 text-purple-600" />
+                    Telefon Randevusu Al
+                  </button>
+                  
+                  {showPhoneSchedule && (
+                    <div className="w-full md:w-48 p-3 bg-gray-50 border border-gray-200 rounded-lg shadow-sm mt-1">
+                      <label className="block text-xs font-semibold text-gray-600 mb-1">Tarih & Saat</label>
+                      <input 
+                        type="datetime-local" 
+                        value={phoneScheduleDate}
+                        onChange={e => setPhoneScheduleDate(e.target.value)}
+                        className="w-full text-sm p-1.5 border border-gray-300 rounded mb-2"
+                      />
+                      <button 
+                        onClick={handleSchedulePhoneCall}
+                        disabled={isSubmitting || !phoneScheduleDate}
+                        className="w-full py-1.5 bg-purple-600 text-white text-xs font-semibold rounded hover:bg-purple-700 disabled:opacity-50"
+                      >
+                        Planla
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

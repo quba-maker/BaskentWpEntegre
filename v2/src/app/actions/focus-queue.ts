@@ -372,3 +372,46 @@ export async function createBotDelegationTask(opportunityId: string, options: Bo
     }
   );
 }
+
+export async function schedulePhoneCallTask(opportunityId: string, dueAtUtc: string, note?: string) {
+  return withActionGuard(
+    { actionName: 'schedulePhoneCallTask' },
+    async (ctx) => {
+      const query = `
+        INSERT INTO follow_up_tasks (
+          tenant_id, 
+          opportunity_id, 
+          task_type, 
+          title, 
+          description, 
+          status, 
+          due_at, 
+          metadata
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        RETURNING id
+      `;
+
+      const metadata = {
+        appointment_type: 'phone_call',
+        note: note || '',
+      };
+
+      await ctx.db.executeSafe({
+        text: query,
+        values: [
+          ctx.tenantId,
+          opportunityId,
+          'callback_scheduled',
+          'Telefon Randevusu',
+          note || 'Hastayla telefon görüşmesi planlandı.',
+          'pending',
+          dueAtUtc,
+          JSON.stringify(metadata)
+        ]
+      });
+
+      return { success: true };
+    }
+  );
+}
