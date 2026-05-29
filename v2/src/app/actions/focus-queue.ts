@@ -39,6 +39,16 @@ export interface FocusQueueItem extends OperationItem {
   priorityScore: number;
   nextBestAction: NextBestAction;
   groupId: string;
+  last_outreach_at?: string;
+  last_message_preview?: string;
+  summary?: string;
+  ai_reason?: string;
+  notes?: any[];
+  language?: string;
+  lead_raw_data?: any;
+  is_test_whitelist?: boolean;
+  is_patient_sleeping?: boolean;
+  metadata: Record<string, any>;
 }
 
 // Compute journey status based on the data
@@ -243,6 +253,22 @@ export async function getFocusQueueItems(): Promise<{ items: FocusQueueItem[]; t
         const nextBestAction = computeNextBestAction(row, journeyStatus);
         const priorityScore = computePriorityScore(row, journeyStatus, nextBestAction);
 
+        const isTestWhitelist = !!process.env.TEST_BOT_WHITELIST_NUMBERS && 
+          process.env.TEST_BOT_WHITELIST_NUMBERS.split(',').map(s => s.trim()).includes(row.phone_number);
+
+        let isPatientSleeping = false;
+        if (tzRes.timezone && !tzRes.needs_confirmation) {
+          try {
+            const patientNow = new Date().toLocaleString('en-US', { timeZone: tzRes.timezone, hour12: false });
+            const hour = new Date(patientNow).getHours();
+            if (hour >= 22 || hour < 8) {
+              isPatientSleeping = true;
+            }
+          } catch (e) {
+            // Ignore timezone errors
+          }
+        }
+
         const item: FocusQueueItem = {
           id: row.task_id, // we might have multiple tasks per group, but FocusQueueItem represents the group's "lead" task
           tenant_id: row.tenant_id,
@@ -264,6 +290,7 @@ export async function getFocusQueueItems(): Promise<{ items: FocusQueueItem[]; t
           due_at_patient_local: dualClock.patientTime || undefined,
           patient_timezone: tzRes.timezone,
           timezone_needs_confirmation: tzRes.needs_confirmation,
+          is_patient_sleeping: isPatientSleeping,
           last_outreach_action: row.last_outreach_action || undefined,
           last_outreach_at: row.last_outreach_at || undefined,
           last_message_preview: row.conv_last_message || undefined,
@@ -271,6 +298,8 @@ export async function getFocusQueueItems(): Promise<{ items: FocusQueueItem[]; t
           ai_reason: row.opp_ai_reason || undefined,
           notes: typeof row.opp_notes === 'string' ? JSON.parse(row.opp_notes) : (row.opp_notes || []),
           language: row.opp_language || undefined,
+          lead_raw_data: typeof row.lead_raw_data === 'string' ? JSON.parse(row.lead_raw_data) : (row.lead_raw_data || {}),
+          is_test_whitelist: isTestWhitelist,
           metadata: {
             ...row.task_metadata,
             opp_language: row.opp_language,
@@ -408,6 +437,139 @@ export async function schedulePhoneCallTask(opportunityId: string, dueAtUtc: str
           'pending',
           dueAtUtc,
           JSON.stringify(metadata)
+        ]
+      });
+      return { success: true };
+    }
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
+// TEST-ONLY OUTBOUND MESSAGING (24H GUARDED)
+// ═══════════════════════════════════════════════════════════
+export async function sendTestBotMessage(opportunityId: string, customMessage: string) {
+  if (!opportunityId) return { success: false, error: "Fırsat ID gerekli." };
+  if (!customMessage || customMessage.trim().length === 0) return { success: false, error: "Mesaj boş olamaz." };
+
+  return withActionGuard(
+    { actionName: 'sendTestBotMessage' },
+    async (ctx) => {
+      if (process.env.ENABLE_TEST_BOT_OUTBOUND !== 'true') {
+        return { success: false, error: "Sistemde test bot outbound özelliği kapalıdır." };
+      }
+
+      // 1. Fetch Opportunity and Phone
+      const opps = await ctx.db.executeSafe({
+        text: `SELECT c.phone_number, c.last_message_at, c.last_message_direction, c.id as conversation_id
+               FROM conversations c
+               WHERE c.active_opportunity_id = $1 AND c.tenant_id = $2
+               LIMIT 1`,
+        values: [opportunityId, ctx.tenantId]
+      }) as any[];
+
+      if (opps.length === 0) {
+        return { success: false, error: "Bu fırsata ait aktif bir konuşma bulunamadı." };
+      }
+
+      const phone = opps[0].phone_number;
+      const conversationId = opps[0].conversation_id;
+
+      // 2. Validate Whitelist
+      const whitelist = (process.env.TEST_BOT_WHITELIST_NUMBERS || '').split(',').map((s: string) => s.trim());
+      if (!whitelist.includes(phone)) {
+        return { success: false, error: "Bu numara test whitelist içinde değil. Güvenlik sebebiyle işlem engellendi." };
+      }
+
+      // 3. Validate 24h Window
+      const inboundCheck = await ctx.db.executeSafe({
+        text: `SELECT created_at FROM messages 
+               WHERE conversation_id = $1 AND tenant_id = $2 AND direction = 'in' 
+               ORDER BY created_at DESC LIMIT 1`,
+        values: [conversationId, ctx.tenantId]
+      }) as any[];
+
+      if (inboundCheck.length === 0) {
+        return { success: false, error: "24 saatlik WhatsApp penceresi kapalı. Test için önce test numarasından inbound mesaj gönderin." };
+      }
+
+      const lastInboundAt = new Date(inboundCheck[0].created_at);
+      const hoursSinceInbound = (Date.now() - lastInboundAt.getTime()) / (1000 * 60 * 60);
+
+      if (hoursSinceInbound > 24) {
+        return { success: false, error: "24 saatlik WhatsApp penceresi kapalı. Test için önce test numarasından inbound mesaj gönderin." };
+      }
+
+      // 4. Send Meta Message
+      const { CredentialsService } = await import('@/lib/services/credentials.service');
+      const creds = await CredentialsService.resolveCredentials(ctx.tenantId, 'whatsapp');
+      if (!creds.accessToken || !creds.whatsappPhoneNumberId) {
+        return { success: false, error: "WhatsApp kimlik bilgileri eksik." };
+      }
+
+      const response = await fetch(`https://graph.facebook.com/v19.0/${creds.whatsappPhoneNumberId}/messages`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${creds.accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp',
+          to: phone,
+          type: 'text',
+          text: { body: customMessage.trim() },
+        }),
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        return { success: false, error: `WhatsApp gönderim hatası: ${errData?.error?.message || response.statusText}` };
+      }
+
+      let providerMessageId = null;
+      try {
+        const resData = await response.json();
+        providerMessageId = resData.messages?.[0]?.id || null;
+      } catch (_) {}
+
+      // 5. Update DB
+      await ctx.db.executeSafe({
+        text: `INSERT INTO messages (tenant_id, conversation_id, phone_number, direction, content, channel, status, provider_message_id, metadata)
+               VALUES ($1, $2, $3, 'out', $4, 'whatsapp', 'sent', $5, $6)`,
+        values: [
+          ctx.tenantId, 
+          conversationId, 
+          phone, 
+          customMessage.trim(), 
+          providerMessageId, 
+          JSON.stringify({ test_outbound: true, initiated_from: 'focus_station' })
+        ]
+      });
+
+      await ctx.db.executeSafe({
+        text: `UPDATE conversations 
+               SET last_message_at = NOW(), 
+                   last_message_content = $1,
+                   last_channel = 'whatsapp',
+                   last_message_status = 'sent',
+                   last_message_direction = 'out',
+                   message_count = COALESCE(message_count, 0) + 1
+               WHERE id = $2 AND tenant_id = $3`,
+        values: [customMessage.trim(), conversationId, ctx.tenantId]
+      });
+
+      await ctx.db.executeSafe({
+        text: `INSERT INTO outreach_logs (tenant_id, conversation_id, opportunity_id, action, channel, actor_id, metadata)
+               VALUES ($1, $2, $3, 'test_bot_message_sent', 'whatsapp', $4, $5)`,
+        values: [
+          ctx.tenantId,
+          conversationId,
+          opportunityId,
+          ctx.userId,
+          JSON.stringify({
+            message_text: customMessage.trim(),
+            test_outbound: true,
+            initiated_from: 'focus_station'
+          })
         ]
       });
 

@@ -7,7 +7,7 @@ import {
   Calendar, CheckCircle2, XCircle, Search, Filter, Globe,
   FileText, ExternalLink, ChevronDown, Check, Trash2, Bot, Info, Activity, FastForward
 } from "lucide-react";
-import { getFocusQueueItems, createBotDelegationTask, schedulePhoneCallTask, type FocusQueueItem } from "@/app/actions/focus-queue";
+import { getFocusQueueItems, createBotDelegationTask, schedulePhoneCallTask, sendTestBotMessage, type FocusQueueItem } from "@/app/actions/focus-queue";
 import { logCallReached, logCallMissed, logCallbackScheduled, logNotInterested } from "@/app/actions/outreach";
 import { completeTask, rescheduleTask } from "@/app/actions/tasks";
 import { getCountryFlag } from "@/lib/utils/country";
@@ -48,6 +48,10 @@ export default function FocusTab({ onGoToInbox }: FocusTabProps) {
   const [botMode, setBotMode] = useState<string>('unreachable_followup');
   const [showPhoneSchedule, setShowPhoneSchedule] = useState(false);
   const [phoneScheduleDate, setPhoneScheduleDate] = useState("");
+  
+  // New States for P0A
+  const [showFormDrawer, setShowFormDrawer] = useState(false);
+  const [draftMessage, setDraftMessage] = useState("");
 
   // SWR Fetching
   const { data, isLoading, mutate } = useSWR(
@@ -123,6 +127,26 @@ export default function FocusTab({ onGoToInbox }: FocusTabProps) {
       setPhoneScheduleDate("");
     } catch (e) {
       console.error(e);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleTestBotMessage = async () => {
+    if (!selectedItem?.opportunity_id || !draftMessage) return;
+    setIsSubmitting(true);
+    try {
+      const res = await sendTestBotMessage(selectedItem.opportunity_id, draftMessage);
+      if (!res.success) {
+        alert(res.error);
+      } else {
+        alert("Test mesajı başarıyla gönderildi.");
+        setDraftMessage("");
+        mutate();
+      }
+    } catch (e) {
+      console.error(e);
+      alert("Gönderim sırasında hata oluştu.");
     } finally {
       setIsSubmitting(false);
     }
@@ -209,17 +233,47 @@ export default function FocusTab({ onGoToInbox }: FocusTabProps) {
                   {selectedItem.patient_name}
                   <span title={selectedItem.country} className="text-lg">{getCountryFlag(selectedItem.country)}</span>
                 </h1>
-                <div className="text-sm text-gray-500 font-medium">
+                <div className="text-sm text-gray-500 font-medium flex items-center gap-2">
                   {selectedItem.phone_number} • {selectedItem.department}
+                  <button 
+                    onClick={() => { navigator.clipboard.writeText(selectedItem.phone_number); }}
+                    className="text-indigo-600 hover:text-indigo-800 ml-2"
+                    title="Numarayı Kopyala"
+                  >
+                    <ClipboardList className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               </div>
-              <button
-                onClick={handleGoToInbox}
-                className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors shadow-sm"
-              >
-                <MessageCircle className="w-4 h-4" />
-                Gelen Kutusu
-              </button>
+              
+              <div className="flex flex-col items-end gap-2">
+                <div className="flex items-center gap-2">
+                  {selectedItem.is_test_whitelist ? (
+                    <span className="px-2.5 py-1 bg-amber-100 text-amber-800 text-xs font-bold rounded flex items-center gap-1 border border-amber-200">
+                      🧪 TEST MODU - Bot cevap verebilir
+                    </span>
+                  ) : (
+                    <span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 text-xs font-bold rounded flex items-center gap-1 border border-emerald-200">
+                      🛡️ GÜVENLİ MOD - Otomatik mesaj kapalı
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setShowFormDrawer(true)}
+                    className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors shadow-sm"
+                  >
+                    <FileText className="w-4 h-4" />
+                    Form Bilgisi
+                  </button>
+                  <button
+                    onClick={handleGoToInbox}
+                    className="flex items-center gap-2 px-4 py-2 bg-indigo-50 border border-indigo-200 rounded-lg text-sm font-medium text-indigo-700 hover:bg-indigo-100 transition-colors shadow-sm"
+                  >
+                    <MessageCircle className="w-4 h-4" />
+                    Gelen Kutusu
+                  </button>
+                </div>
+              </div>
             </div>
 
             {/* BLOCK 1: Action */}
@@ -355,33 +409,72 @@ export default function FocusTab({ onGoToInbox }: FocusTabProps) {
     {/* BLOCK 4 & 5: Collected Info and Draft */ }
     <div className = "grid grid-cols-1 lg:grid-cols-2 gap-6" >
 
-      {/* Collected Info */ }
-      <div className = "bg-white rounded-xl border border-gray-200 p-5 shadow-sm" >
-                  <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4 flex items-center gap-2">
-                    <Info className="w-4 h-4" />
-                    Hasta Bilgileri
-                  </h3>
-                  <div className="grid grid-cols-2 gap-y-4 gap-x-2 text-sm">
-                    <div>
-                      <div className="text-gray-500 text-xs mb-1">Departman</div>
-                      <div className="font-medium text-gray-900">{selectedItem.department}</div>
-                    </div>
-                    <div>
-                      <div className="text-gray-500 text-xs mb-1">Ülke</div>
-                      <div className="font-medium text-gray-900 flex items-center gap-1">
-                        {getCountryFlag(selectedItem.country)} {selectedItem.country || 'Belirtilmedi'}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-gray-500 text-xs mb-1">Kaynak</div>
-                      <div className="font-medium text-gray-900">{selectedItem.metadata.opp_source || 'Whatsapp'}</div>
-                    </div>
-                    <div>
-                      <div className="text-gray-500 text-xs mb-1">Aşama</div>
-                      <div className="font-medium text-gray-900">{selectedItem.stage || 'Yeni'}</div>
-                    </div>
-                  </div>
+      {/* Time Intelligence & Collected Info */}
+      <div className="grid grid-cols-1 gap-4">
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex flex-col sm:flex-row divide-y sm:divide-y-0 sm:divide-x divide-gray-100">
+          
+          {/* Time Intelligence Card */}
+          <div className="p-5 flex-1 bg-gradient-to-br from-white to-gray-50/50">
+            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+              <Globe className="w-4 h-4" />
+              Zaman & Lokasyon (Time Intelligence)
+            </h3>
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-500">🇹🇷 Türkiye Saati:</span>
+                <span className="text-sm font-bold text-gray-900">{selectedItem.due_at_turkey?.split(' ')[1] || 'Bilinmiyor'}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-500">🌍 Hasta Lokal Saati:</span>
+                <span className="text-sm font-bold text-gray-900">
+                  {selectedItem.due_at_patient_local?.split(' ')[1] || (selectedItem.timezone_needs_confirmation ? 'Teyit Gerekiyor' : 'Bilinmiyor')}
+                </span>
+              </div>
+              
+              {selectedItem.timezone_needs_confirmation ? (
+                <div className="mt-2 p-2 bg-amber-50 rounded text-xs font-medium text-amber-800 border border-amber-200">
+                  ⚠️ Birden fazla saat dilimi olan ülke. Şehir teyidi gerekiyor.
                 </div>
+              ) : selectedItem.is_patient_sleeping ? (
+                <div className="mt-2 p-2 bg-rose-50 rounded text-xs font-bold text-rose-700 border border-rose-200 flex items-center gap-2">
+                  <span>🌙</span> Hasta şu an uyku saatinde (22:00 - 08:00)
+                </div>
+              ) : (
+                <div className="mt-2 p-2 bg-emerald-50 rounded text-xs font-medium text-emerald-700 border border-emerald-200 flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500"></span> Arama için uygun saat
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Patient Info Basic */}
+          <div className="p-5 flex-1">
+            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+              <Info className="w-4 h-4" />
+              Özet Bilgiler
+            </h3>
+            <div className="grid grid-cols-2 gap-y-4 gap-x-2 text-sm">
+              <div>
+                <div className="text-gray-500 text-[11px] mb-1 uppercase tracking-wider">Departman</div>
+                <div className="font-medium text-gray-900 truncate">{selectedItem.department}</div>
+              </div>
+              <div>
+                <div className="text-gray-500 text-[11px] mb-1 uppercase tracking-wider">Aşama</div>
+                <div className="font-medium text-gray-900">{selectedItem.stage || 'Yeni'}</div>
+              </div>
+              <div>
+                <div className="text-gray-500 text-[11px] mb-1 uppercase tracking-wider">Kaynak</div>
+                <div className="font-medium text-gray-900 truncate">{selectedItem.metadata.opp_source || 'Whatsapp'}</div>
+              </div>
+              <div>
+                <div className="text-gray-500 text-[11px] mb-1 uppercase tracking-wider">Dil</div>
+                <div className="font-medium text-gray-900">{selectedItem.language || 'Bilinmiyor'}</div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
 
     {/* Draft Block */ }
     <div className = "bg-white rounded-xl border border-gray-200 p-5 shadow-sm" >
@@ -393,16 +486,31 @@ export default function FocusTab({ onGoToInbox }: FocusTabProps) {
                     Manuel gönderim için taslak oluşturabilirsiniz. (Buradan mesaj doğrudan gönderilmez).
                   </p>
                   <textarea 
+                    value={draftMessage}
+                    onChange={(e) => setDraftMessage(e.target.value)}
                     className="w-full h-24 p-3 border border-gray-300 rounded-lg text-sm bg-gray-50 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 resize-none"
                     placeholder="Hastaya gönderilecek mesaj taslağını buraya yazabilirsiniz..."
                   />
-                  <div className="mt-3 flex justify-end gap-2">
-                    <button className="px-3 py-1.5 text-xs font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-lg transition-colors">
-                      Kopyala
-                    </button>
-                    <button className="px-3 py-1.5 text-xs font-medium bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 rounded-lg transition-colors">
-                      Taslağı Kaydet
-                    </button>
+                  <div className="mt-3 flex justify-between items-center">
+                    <div>
+                      {selectedItem.is_test_whitelist && (
+                        <button 
+                          onClick={handleTestBotMessage}
+                          disabled={isSubmitting || !draftMessage}
+                          className="px-3 py-1.5 text-xs font-bold bg-amber-500 text-white hover:bg-amber-600 rounded-lg transition-colors shadow-sm disabled:opacity-50"
+                        >
+                          Test Mesajı Gönder
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      <button 
+                        onClick={() => navigator.clipboard.writeText(draftMessage)}
+                        className="px-3 py-1.5 text-xs font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-lg transition-colors"
+                      >
+                        Kopyala
+                      </button>
+                    </div>
                   </div>
                 </div>
 
@@ -447,6 +555,91 @@ export default function FocusTab({ onGoToInbox }: FocusTabProps) {
   )
 }
       </div>
+      
+      {/* Form Details Drawer / Slide-Over */}
+      {showFormDrawer && selectedItem && (
+        <>
+          <div 
+            className="fixed inset-0 bg-black/20 z-40 transition-opacity" 
+            onClick={() => setShowFormDrawer(false)}
+          />
+          <div className="fixed inset-y-0 right-0 w-full md:w-[450px] bg-white shadow-2xl z-50 border-l border-gray-200 flex flex-col animate-in slide-in-from-right duration-300">
+            <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+              <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                <FileText className="w-5 h-5 text-indigo-600" />
+                Form Bilgisi
+              </h2>
+              <button 
+                onClick={() => setShowFormDrawer(false)}
+                className="p-2 hover:bg-gray-200 rounded-full transition-colors"
+              >
+                <XCircle className="w-5 h-5 text-gray-500" />
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-6">
+              <div className="mb-6">
+                <div className="text-sm font-semibold text-gray-900 mb-1">Genel Bilgiler</div>
+                <div className="bg-gray-50 rounded-lg p-4 border border-gray-100 space-y-3">
+                  <div className="flex justify-between">
+                    <span className="text-gray-500 text-xs">Form Adı</span>
+                    <span className="text-gray-900 text-xs font-medium">{selectedItem.lead_raw_data?.form_name || selectedItem.metadata.opp_source || 'Bilinmiyor'}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500 text-xs">Hasta Adı</span>
+                    <span className="text-gray-900 text-xs font-medium">{selectedItem.patient_name}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500 text-xs">Telefon</span>
+                    <span className="text-gray-900 text-xs font-medium">{selectedItem.phone_number}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500 text-xs">Ülke</span>
+                    <span className="text-gray-900 text-xs font-medium">{selectedItem.country || 'Bilinmiyor'}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500 text-xs">Departman</span>
+                    <span className="text-gray-900 text-xs font-medium">{selectedItem.department || 'Bilinmiyor'}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <div className="text-sm font-semibold text-gray-900 mb-2">Form Cevapları (Raw Data)</div>
+                {selectedItem.lead_raw_data && Object.keys(selectedItem.lead_raw_data).length > 0 ? (
+                  <div className="space-y-2">
+                    {Object.entries(selectedItem.lead_raw_data).map(([key, value]) => {
+                      // Filter out empty or extremely long internal IDs if necessary
+                      if (!value || typeof value !== 'string' || value.trim() === '') return null;
+                      if (key.includes('id') && value.length > 30) return null; // skip long fb ids
+                      
+                      return (
+                        <div key={key} className="bg-white border border-gray-100 rounded-lg p-3 shadow-sm">
+                          <div className="text-xs text-gray-400 font-medium uppercase tracking-wider mb-1">{key}</div>
+                          <div className="text-sm text-gray-800 whitespace-pre-wrap">{value}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="text-center p-6 bg-gray-50 rounded-lg border border-gray-100 border-dashed text-gray-400 text-sm">
+                    Bu hastaya ait detaylı form cevabı bulunamadı.
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            <div className="p-4 border-t border-gray-100 bg-gray-50 flex justify-end">
+              <button 
+                onClick={() => setShowFormDrawer(false)}
+                className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50"
+              >
+                Kapat
+              </button>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
