@@ -32,7 +32,9 @@ export type NextBestAction =
   | 'request_report'
   | 'doctor_review_needed'
   | 'call_today'
-  | 'prepare_followup_draft';
+  | 'prepare_followup_draft'
+  | 'scheduled_followup'
+  | 'continue_appointment_planning';
 
 export interface FocusQueueItem extends OperationItem {
   journeyStatus: JourneyStatus;
@@ -84,6 +86,14 @@ function computeJourneyStatus(row: any): JourneyStatus {
 function computeNextBestAction(row: any, journeyStatus: JourneyStatus): NextBestAction {
   if (journeyStatus === 'Geldi' || journeyStatus === 'Kapatıldı' || journeyStatus === 'Gelmedi / İptal') return 'no_action';
   
+  if (row.task_due_at && !isOverdue(row.task_due_at) && !isToday(row.task_due_at)) {
+    return 'scheduled_followup';
+  }
+
+  if (row.opp_stage === 'appointment_planning' && row.opp_priority === 'hot') {
+    return 'continue_appointment_planning';
+  }
+
   if (row.conv_status === 'handoff' || row.task_type === 'bot_handoff_followup') return 'call_now';
   
   if (row.task_type === 'callback_scheduled' && isOverdue(row.task_due_at)) return 'call_now';
@@ -94,7 +104,7 @@ function computeNextBestAction(row: any, journeyStatus: JourneyStatus): NextBest
   
   if (journeyStatus === 'Doktor İncelemesi') return 'doctor_review_needed';
   
-  if (isOverdue(row.task_due_at)) return 'call_today'; // could also be prepare_followup_draft
+  if (isOverdue(row.task_due_at)) return 'call_now'; // could also be prepare_followup_draft
   
   return 'call_today';
 }
@@ -137,9 +147,9 @@ export async function getFocusQueueItems(): Promise<{ items: FocusQueueItem[]; t
         SELECT 
           t.id as task_id,
           t.tenant_id,
-          t.opportunity_id,
+          COALESCE(o.id, t.opportunity_id) as opportunity_id,
           t.conversation_id,
-          t.phone_number,
+          COALESCE(o.phone_number, t.phone_number) as phone_number,
           t.task_type,
           t.title as task_title,
           t.description as task_description,
@@ -180,20 +190,94 @@ export async function getFocusQueueItems(): Promise<{ items: FocusQueueItem[]; t
           ol.action as last_outreach_action,
           ol.created_at as last_outreach_at,
           ol.metadata as last_outreach_metadata
-        FROM follow_up_tasks t
-        LEFT JOIN opportunities o ON o.id = t.opportunity_id AND o.tenant_id = t.tenant_id
-        LEFT JOIN conversations c ON c.id::text = t.conversation_id AND c.tenant_id = t.tenant_id
-        LEFT JOIN leads l ON l.linked_opportunity_id = o.id AND l.tenant_id = t.tenant_id
+        FROM opportunities o
+        LEFT JOIN LATERAL (
+          SELECT * FROM follow_up_tasks 
+          WHERE opportunity_id = o.id AND tenant_id = o.tenant_id AND status IN ('pending', 'in_progress')
+          ORDER BY due_at ASC LIMIT 1
+        ) t ON TRUE
+        LEFT JOIN conversations c ON c.active_opportunity_id = o.id AND c.tenant_id = o.tenant_id
+        LEFT JOIN leads l ON l.linked_opportunity_id = o.id AND l.tenant_id = o.tenant_id
         LEFT JOIN LATERAL (
           SELECT action, created_at, metadata
           FROM outreach_logs
-          WHERE (opportunity_id = t.opportunity_id::text OR lead_id = l.id) AND tenant_id = t.tenant_id::text
+          WHERE (opportunity_id = o.id::text OR lead_id = l.id) AND tenant_id = o.tenant_id::text
+          ORDER BY created_at DESC
+          LIMIT 1
+        ) ol ON TRUE
+        WHERE o.tenant_id = $1 
+          AND o.stage NOT IN ('lost', 'not_qualified', 'arrived', 'not_interested', 'cancelled', 'completed')
+          AND (
+            t.id IS NOT NULL
+            OR o.priority IN ('hot', 'high', 'sıcak')
+            OR o.stage IN ('new_lead', 'first_contact', 'engaged', 'qualified', 'appointment_planning', 'appointment_booked', 'report_waiting', 'doctor_review')
+            OR o.intent_type IN ('appointment_request', 'follow_up_needed', 'hot_lead')
+            OR o.next_follow_up_at IS NOT NULL
+            OR ol.action IN ('called_missed', 'callback_scheduled', 'greeting_sent', 'bot_activated')
+            OR t.metadata->>'bot_delegation' IS NOT NULL
+          )
+
+        UNION ALL
+
+        SELECT 
+          t.id as task_id,
+          t.tenant_id,
+          t.opportunity_id,
+          t.conversation_id,
+          t.phone_number,
+          t.task_type,
+          t.title as task_title,
+          t.description as task_description,
+          t.due_at as task_due_at,
+          t.status as task_status,
+          t.metadata as task_metadata,
+          t.created_at as task_created_at,
+          
+          -- Opportunity details
+          null as opp_patient_name,
+          null as opp_country,
+          null as opp_department,
+          null as opp_stage,
+          null as opp_priority,
+          null as opp_intent_type,
+          false as opp_requires_human_confirmation,
+          null as opp_ai_reason,
+          null as opp_summary,
+          null as opp_notes,
+          null as opp_language,
+          null as opp_source,
+          null as opp_created_at,
+          null as opp_updated_at,
+
+          -- Conversation details
+          c.status as conv_status,
+          c.last_message_content as conv_last_message,
+          c.last_message_at as conv_last_message_at,
+          c.active_opportunity_id as conv_active_opportunity_id,
+
+          -- Lead details
+          l.id as lead_id,
+          l.form_name as lead_form_name,
+          l.raw_data as lead_raw_data,
+          l.linked_opportunity_id as lead_linked_opportunity_id,
+
+          -- Outreach details
+          ol.action as last_outreach_action,
+          ol.created_at as last_outreach_at,
+          ol.metadata as last_outreach_metadata
+        FROM follow_up_tasks t
+        LEFT JOIN conversations c ON c.id::text = t.conversation_id AND c.tenant_id = t.tenant_id
+        LEFT JOIN leads l ON (l.id = (t.metadata->>'lead_id')::uuid) AND l.tenant_id = t.tenant_id
+        LEFT JOIN LATERAL (
+          SELECT action, created_at, metadata
+          FROM outreach_logs
+          WHERE (lead_id = l.id OR conversation_id = c.id::text) AND tenant_id = t.tenant_id::text
           ORDER BY created_at DESC
           LIMIT 1
         ) ol ON TRUE
         WHERE t.tenant_id = $1 
           AND t.status IN ('pending', 'in_progress')
-          AND (o.stage IS NULL OR o.stage NOT IN ('lost', 'not_qualified', 'arrived'))
+          AND t.opportunity_id IS NULL
       `;
 
       const rows = await ctx.db.executeSafe({
@@ -356,11 +440,19 @@ export async function createBotDelegationTask(opportunityId: string, options: Bo
   return withActionGuard(
     { actionName: 'createBotDelegationTask' },
     async (ctx) => {
+      // Fetch phone_number for the opportunity
+      const oppQuery = await ctx.db.executeSafe({
+        text: `SELECT phone_number FROM conversations WHERE active_opportunity_id = $1 LIMIT 1`,
+        values: [opportunityId]
+      }) as any[];
+      const phoneNumber = oppQuery[0]?.phone_number || '';
+
       // Create a follow-up task representing bot delegation without sending messages outward.
       const query = `
         INSERT INTO follow_up_tasks (
           tenant_id, 
           opportunity_id, 
+          phone_number,
           task_type, 
           title, 
           description, 
@@ -368,7 +460,7 @@ export async function createBotDelegationTask(opportunityId: string, options: Bo
           due_at, 
           metadata
         )
-        VALUES ($1, $2, $3, $4, $5, $6, NOW() + INTERVAL '5 minutes', $7)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, NOW() + INTERVAL '5 minutes', $8)
         RETURNING id
       `;
 
@@ -389,6 +481,7 @@ export async function createBotDelegationTask(opportunityId: string, options: Bo
         values: [
           ctx.tenantId,
           opportunityId,
+          phoneNumber,
           'bot_handoff_followup', // Or a custom type
           `Bot Takip: ${options.mode}`,
           options.goal,

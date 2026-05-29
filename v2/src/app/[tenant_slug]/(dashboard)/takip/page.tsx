@@ -309,7 +309,7 @@ export default function TakipPage() {
       {/* FOCUS TAB */}
       {activeTab === 'odak' && (
         <div className="flex-1 bg-white rounded-2xl overflow-hidden shadow-sm border border-gray-200">
-          <FocusTab onGoToInbox={handleGoToInbox} />
+          <FocusTab onGoToInbox={handleGoToInbox} onSelectOpportunity={setSelectedOpp} />
         </div>
       )}
 

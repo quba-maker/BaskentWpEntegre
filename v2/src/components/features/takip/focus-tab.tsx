@@ -5,11 +5,12 @@ import useSWR from "swr";
 import {
   Phone, MessageCircle, ClipboardList, Clock, AlertTriangle,
   Calendar, CheckCircle2, XCircle, Search, Filter, Globe,
-  FileText, ExternalLink, ChevronDown, Check, Trash2, Bot, Info, Activity, FastForward
+  FileText, ExternalLink, ChevronDown, Check, Trash2, Bot, Info, Activity, FastForward, StickyNote
 } from "lucide-react";
 import { getFocusQueueItems, createBotDelegationTask, schedulePhoneCallTask, sendTestBotMessage, type FocusQueueItem } from "@/app/actions/focus-queue";
 import { logCallReached, logCallMissed, logCallbackScheduled, logNotInterested } from "@/app/actions/outreach";
 import { completeTask, rescheduleTask } from "@/app/actions/tasks";
+import { addOpportunityNote, updateOpportunityStage } from "@/app/actions/pipeline";
 import { getCountryFlag } from "@/lib/utils/country";
 
 // P0 UI Configurations
@@ -38,9 +39,10 @@ const NBA_CONFIG: Record<string, { label: string, icon: any, colorClass: string 
 
 interface FocusTabProps {
   onGoToInbox: (opp: any) => void;
+  onSelectOpportunity?: (opp: any) => void;
 }
 
-export default function FocusTab({ onGoToInbox }: FocusTabProps) {
+export default function FocusTab({ onGoToInbox, onSelectOpportunity }: FocusTabProps) {
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
 
   // Action Modals State
@@ -52,6 +54,8 @@ export default function FocusTab({ onGoToInbox }: FocusTabProps) {
   // New States for P0A
   const [showFormDrawer, setShowFormDrawer] = useState(false);
   const [draftMessage, setDraftMessage] = useState("");
+  const [noteText, setNoteText] = useState("");
+  const [showActionDropdown, setShowActionDropdown] = useState(false);
 
   // SWR Fetching
   const { data, isLoading, mutate } = useSWR(
@@ -150,6 +154,60 @@ export default function FocusTab({ onGoToInbox }: FocusTabProps) {
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleAddNote = async () => {
+    if (!selectedItem?.opportunity_id || !noteText.trim()) return;
+    setIsSubmitting(true);
+    try {
+      await addOpportunityNote(selectedItem.opportunity_id, noteText.trim());
+      setNoteText("");
+      mutate();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleMarkLost = async () => {
+    if (!selectedItem?.opportunity_id) return;
+    const confirm = window.confirm("Bu hasta ilgilenmiyor/kayıp olarak işaretlenecek ve açık takip görevleri kapatılacak. Emin misiniz?");
+    if (!confirm) return;
+    
+    setIsSubmitting(true);
+    try {
+      await updateOpportunityStage(selectedItem.opportunity_id, 'lost', 'Odak Merkezi üzerinden manuel kayıp/ilgilenmiyor işaretlendi.');
+      mutate();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsSubmitting(false);
+      setShowActionDropdown(false);
+    }
+  };
+
+  const handleOpenDetail = () => {
+    if (!selectedItem || !onSelectOpportunity) return;
+    onSelectOpportunity({
+      id: selectedItem.opportunity_id,
+      patient_name: selectedItem.patient_name,
+      display_name: selectedItem.patient_name,
+      phone_number: selectedItem.phone_number,
+      country: selectedItem.country,
+      department: selectedItem.department,
+      stage: selectedItem.stage,
+      priority: selectedItem.priority,
+      intent_type: selectedItem.metadata?.intent_type,
+      next_follow_up_at: selectedItem.due_at_utc,
+      ai_reason: selectedItem.ai_reason,
+      summary: selectedItem.summary,
+      notes: selectedItem.notes,
+      source: selectedItem.metadata?.opp_source,
+      language: selectedItem.language,
+      created_at: selectedItem.metadata?.opp_created_at,
+      updated_at: selectedItem.metadata?.opp_updated_at,
+    });
   };
 
   return (
@@ -258,13 +316,24 @@ export default function FocusTab({ onGoToInbox }: FocusTabProps) {
                   )}
                 </div>
                 <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setShowFormDrawer(true)}
-                    className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors shadow-sm"
-                  >
-                    <FileText className="w-4 h-4" />
-                    Form Bilgisi
-                  </button>
+                  {selectedItem.lead_raw_data && Object.keys(selectedItem.lead_raw_data).length > 0 && (
+                    <button
+                      onClick={() => setShowFormDrawer(true)}
+                      className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors shadow-sm"
+                    >
+                      <FileText className="w-4 h-4" />
+                      <span className="hidden sm:inline">Form Bilgisi</span>
+                    </button>
+                  )}
+                  {onSelectOpportunity && selectedItem.opportunity_id && (
+                    <button
+                      onClick={handleOpenDetail}
+                      className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors shadow-sm"
+                    >
+                      <ExternalLink className="w-4 h-4" />
+                      <span className="hidden sm:inline">Takipte Aç</span>
+                    </button>
+                  )}
                   <button
                     onClick={handleGoToInbox}
                     className="flex items-center gap-2 px-4 py-2 bg-indigo-50 border border-indigo-200 rounded-lg text-sm font-medium text-indigo-700 hover:bg-indigo-100 transition-colors shadow-sm"
@@ -325,6 +394,26 @@ export default function FocusTab({ onGoToInbox }: FocusTabProps) {
                     Telefon Randevusu Al
                   </button>
                   
+                  <div className="relative w-full md:w-auto">
+                    <button
+                      onClick={() => setShowActionDropdown(!showActionDropdown)}
+                      disabled={isSubmitting}
+                      className="w-full md:w-auto flex items-center justify-center gap-1 px-3 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+                    >
+                      Diğer <ChevronDown className="w-4 h-4" />
+                    </button>
+                    {showActionDropdown && (
+                      <div className="absolute top-full right-0 mt-1 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-10">
+                        {onSelectOpportunity && selectedItem.opportunity_id && (
+                          <button onClick={() => { handleOpenDetail(); setShowActionDropdown(false); }} className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Takipte Aç / Detay</button>
+                        )}
+                        <button onClick={handleMarkLost} className="w-full text-left px-4 py-2 text-sm font-bold text-rose-600 hover:bg-rose-50 flex items-center justify-between">
+                          Kayıp / İlgilenmiyor <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
                   {showPhoneSchedule && (
                     <div className="w-full md:w-48 p-3 bg-gray-50 border border-gray-200 rounded-lg shadow-sm mt-1">
                       <label className="block text-xs font-semibold text-gray-600 mb-1">Tarih & Saat</label>
@@ -463,12 +552,28 @@ export default function FocusTab({ onGoToInbox }: FocusTabProps) {
                 <div className="font-medium text-gray-900">{selectedItem.stage || 'Yeni'}</div>
               </div>
               <div>
+                <div className="text-gray-500 text-[11px] mb-1 uppercase tracking-wider">Öncelik</div>
+                <div className="font-medium text-gray-900 capitalize">{selectedItem.priority}</div>
+              </div>
+              <div>
+                <div className="text-gray-500 text-[11px] mb-1 uppercase tracking-wider">Niyet</div>
+                <div className="font-medium text-gray-900 capitalize truncate">{selectedItem.metadata?.intent_type || 'Bilinmiyor'}</div>
+              </div>
+              <div>
                 <div className="text-gray-500 text-[11px] mb-1 uppercase tracking-wider">Kaynak</div>
                 <div className="font-medium text-gray-900 truncate">{selectedItem.metadata.opp_source || 'Whatsapp'}</div>
               </div>
               <div>
                 <div className="text-gray-500 text-[11px] mb-1 uppercase tracking-wider">Dil</div>
                 <div className="font-medium text-gray-900">{selectedItem.language || 'Bilinmiyor'}</div>
+              </div>
+              <div className="col-span-2 mt-2 pt-2 border-t border-gray-100 flex justify-between text-[11px] text-gray-500">
+                <div>
+                  <span className="font-semibold">Son Msj:</span> {selectedItem.metadata?.conv_last_message_at ? new Date(selectedItem.metadata.conv_last_message_at).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'Yok'}
+                </div>
+                <div>
+                  <span className="font-semibold">Oluşturulma:</span> {selectedItem.metadata?.opp_created_at ? new Date(selectedItem.metadata.opp_created_at).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' }) : 'Yok'}
+                </div>
               </div>
             </div>
           </div>
@@ -517,30 +622,74 @@ export default function FocusTab({ onGoToInbox }: FocusTabProps) {
 
               </div>
 
-    {/* TIMELINE (Collapsible or truncated) */ }
-    <div className = "bg-white rounded-xl border border-gray-200 p-5 shadow-sm" >
+    {/* Hızlı Not Block */}
+    <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+      <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+        <StickyNote className="w-4 h-4" />
+        Hızlı Not Ekle
+      </h3>
+      <div className="flex gap-3">
+        <input 
+          type="text" 
+          value={noteText}
+          onChange={(e) => setNoteText(e.target.value)}
+          placeholder="Hasta hakkında kısa not girin..."
+          className="flex-1 p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+          onKeyDown={(e) => { if (e.key === 'Enter') handleAddNote(); }}
+        />
+        <button 
+          onClick={handleAddNote}
+          disabled={isSubmitting || !noteText.trim()}
+          className="px-4 py-2 bg-gray-900 text-white font-medium rounded-lg text-sm hover:bg-gray-800 transition-colors disabled:opacity-50 shrink-0"
+        >
+          Not Ekle
+        </button>
+      </div>
+    </div>
+
+    {/* TIMELINE (Collapsible or truncated) */}
+    <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
       <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4 flex items-center gap-2">
         <Clock className="w-4 h-4" />
-        Geçmiş Loglar
+        Geçmiş Loglar & Notlar
       </h3>
-  {
-    selectedItem.last_outreach_action ? (
-      <div className="text-sm text-gray-600 flex items-center justify-between py-2 border-b border-gray-100 last:border-0">
-        <div className="flex items-center gap-2">
-          <CheckCircle2 className="w-4 h-4 text-gray-400" />
-          <span>
-            Son Aksiyon: <span className="font-semibold text-gray-700">{selectedItem.last_outreach_action}</span>
-          </span>
-        </div>
-        <span className="text-xs text-gray-400">
-          {selectedItem.last_outreach_at ? new Date(selectedItem.last_outreach_at).toLocaleString('tr-TR') : ''}
-        </span>
-      </div>
-    ) : (
-      <div className="text-sm text-gray-400 italic text-center py-4">Henüz kayıtlı aksiyon yok.</div>
-    )
-  }
+      <div className="space-y-3">
+        {selectedItem.last_outreach_action && (
+          <div className="text-sm text-gray-600 flex items-center justify-between py-2 border-b border-gray-100">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-gray-400" />
+              <span>
+                Son Aksiyon: <span className="font-semibold text-gray-700">{selectedItem.last_outreach_action}</span>
+              </span>
+            </div>
+            <span className="text-xs text-gray-400">
+              {selectedItem.last_outreach_at ? new Date(selectedItem.last_outreach_at).toLocaleString('tr-TR') : ''}
+            </span>
+          </div>
+        )}
+        
+        {selectedItem.notes && selectedItem.notes.length > 0 && (
+          <div className="flex flex-col gap-2">
+            {selectedItem.notes.slice().reverse().slice(0, 3).map((note: any, i: number) => (
+              <div key={i} className="text-sm text-gray-600 flex items-start gap-2 py-2 border-b border-gray-100 last:border-0">
+                <StickyNote className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <div className="text-xs font-semibold text-gray-500 mb-0.5">{note.author}</div>
+                  <div className="text-gray-800">{note.text}</div>
+                </div>
+                <span className="text-xs text-gray-400 whitespace-nowrap">
+                  {note.created_at ? new Date(note.created_at).toLocaleString('tr-TR') : ''}
+                </span>
               </div>
+            ))}
+          </div>
+        )}
+
+        {!selectedItem.last_outreach_action && (!selectedItem.notes || selectedItem.notes.length === 0) && (
+          <div className="text-sm text-gray-400 italic text-center py-4">Henüz kayıtlı aksiyon veya not yok.</div>
+        )}
+      </div>
+    </div>
 
             </div>
           </div>
