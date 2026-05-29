@@ -14,6 +14,7 @@ import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { getCountryFlag } from "@/lib/utils/country";
 import TasksTab from "@/components/features/takip/tasks-tab";
 import OperationsTab from "@/components/features/takip/operations-tab";
+import FocusTab from "@/components/features/takip/focus-tab";
 
 // ── Formatters ──
 
@@ -134,7 +135,8 @@ export default function TakipPage() {
   const tenantSlug = typeof params.tenant_slug === 'string' ? params.tenant_slug : '';
   const { setActiveContact } = useInboxStore();
   const deepLinkOppId = searchParams.get('opp');
-  const [activeTab, setActiveTab] = useState<'firsatlar' | 'gorevler' | 'operasyon'>('firsatlar');
+  const [activeTab, setActiveTab] = useState<'odak' | 'firsatlar' | 'gorevler' | 'operasyon'>('odak');
+  const advancedViewDropdown = useDropdown();
   
   // Filters
   const [stageFilter, setStageFilter] = useState("all");
@@ -238,40 +240,54 @@ export default function TakipPage() {
             Takip Merkezi
           </h1>
           {/* Tab Switcher */}
-          <div className="flex items-center gap-1 mt-2 bg-black/[0.04] rounded-lg p-0.5 w-fit">
+          <div className="flex items-center gap-2 mt-2 w-fit">
             <button
-              onClick={() => setActiveTab('firsatlar')}
-              className={`px-4 py-1.5 rounded-md text-[12px] font-semibold transition-all ${
-                activeTab === 'firsatlar' 
-                  ? 'bg-white text-[#1D1D1F] shadow-sm' 
-                  : 'text-[#86868B] hover:text-[#1D1D1F]'
+              onClick={() => setActiveTab('odak')}
+              className={`px-4 py-1.5 rounded-lg text-[13px] font-semibold transition-all flex items-center gap-2 ${
+                activeTab === 'odak' 
+                  ? 'bg-indigo-600 text-white shadow-md' 
+                  : 'bg-black/[0.04] text-[#86868B] hover:text-[#1D1D1F]'
               }`}
             >
-              <Radar className="w-3.5 h-3.5 inline mr-1.5 -mt-0.5" />
-              Fırsatlar
+              <Radar className="w-4 h-4" />
+              Odak Akışı
             </button>
-            <button
-              onClick={() => setActiveTab('gorevler')}
-              className={`px-4 py-1.5 rounded-md text-[12px] font-semibold transition-all ${
-                activeTab === 'gorevler' 
-                  ? 'bg-white text-[#1D1D1F] shadow-sm' 
-                  : 'text-[#86868B] hover:text-[#1D1D1F]'
-              }`}
-            >
-              <ClipboardList className="w-3.5 h-3.5 inline mr-1.5 -mt-0.5" />
-              Görevler
-            </button>
-            <button
-              onClick={() => setActiveTab('operasyon')}
-              className={`px-4 py-1.5 rounded-md text-[12px] font-semibold transition-all ${
-                activeTab === 'operasyon' 
-                  ? 'bg-white text-[#1D1D1F] shadow-sm' 
-                  : 'text-[#86868B] hover:text-[#1D1D1F]'
-              }`}
-            >
-              <Phone className="w-3.5 h-3.5 inline mr-1.5 -mt-0.5" />
-              Aramalar / Randevular
-            </button>
+            
+            <div ref={advancedViewDropdown.ref} className="relative">
+              <button
+                onClick={() => advancedViewDropdown.setIsOpen(!advancedViewDropdown.isOpen)}
+                className={`px-4 py-1.5 rounded-lg text-[13px] font-semibold transition-all flex items-center gap-2 ${
+                  ['firsatlar', 'gorevler', 'operasyon'].includes(activeTab)
+                    ? 'bg-white border border-gray-200 text-[#1D1D1F] shadow-sm'
+                    : 'bg-black/[0.04] text-[#86868B] hover:text-[#1D1D1F]'
+                }`}
+              >
+                ⚙️ Gelişmiş Görünüm
+                <ChevronDown className="w-3.5 h-3.5" />
+              </button>
+              {advancedViewDropdown.isOpen && (
+                <div className="absolute top-full left-0 mt-1 w-48 bg-white rounded-xl shadow-lg border border-gray-100 py-1 z-50">
+                  <button
+                    onClick={() => { setActiveTab('firsatlar'); advancedViewDropdown.setIsOpen(false); }}
+                    className={`w-full text-left px-4 py-2 text-[12px] font-semibold hover:bg-gray-50 flex items-center gap-2 ${activeTab === 'firsatlar' ? 'text-indigo-600' : 'text-gray-700'}`}
+                  >
+                    <Radar className="w-3.5 h-3.5" /> Fırsatlar Listesi
+                  </button>
+                  <button
+                    onClick={() => { setActiveTab('gorevler'); advancedViewDropdown.setIsOpen(false); }}
+                    className={`w-full text-left px-4 py-2 text-[12px] font-semibold hover:bg-gray-50 flex items-center gap-2 ${activeTab === 'gorevler' ? 'text-indigo-600' : 'text-gray-700'}`}
+                  >
+                    <ClipboardList className="w-3.5 h-3.5" /> Teknik Görevler
+                  </button>
+                  <button
+                    onClick={() => { setActiveTab('operasyon'); advancedViewDropdown.setIsOpen(false); }}
+                    className={`w-full text-left px-4 py-2 text-[12px] font-semibold hover:bg-gray-50 flex items-center gap-2 ${activeTab === 'operasyon' ? 'text-indigo-600' : 'text-gray-700'}`}
+                  >
+                    <Phone className="w-3.5 h-3.5" /> Aramalar & Randevular
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -289,6 +305,13 @@ export default function TakipPage() {
           )}
         </div>
       </div>
+
+      {/* FOCUS TAB */}
+      {activeTab === 'odak' && (
+        <div className="flex-1 bg-white rounded-2xl overflow-hidden shadow-sm border border-gray-200">
+          <FocusTab onGoToInbox={handleGoToInbox} />
+        </div>
+      )}
 
       {/* TASKS TAB */}
       {activeTab === 'gorevler' && (
