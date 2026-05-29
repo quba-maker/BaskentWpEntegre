@@ -204,17 +204,17 @@ export async function getFocusQueueItems(): Promise<{ items: FocusQueueItem[]; t
       rows.forEach(row => {
         let groupId = '';
         if (row.conv_active_opportunity_id) {
-          groupId = \`opp_\${row.conv_active_opportunity_id}\`;
+          groupId = `opp_${row.conv_active_opportunity_id}`;
         } else if (row.opportunity_id) {
-          groupId = \`opp_\${row.opportunity_id}\`;
+          groupId = `opp_${row.opportunity_id}`;
         } else if (row.lead_linked_opportunity_id) {
-          groupId = \`opp_\${row.lead_linked_opportunity_id}\`;
+          groupId = `opp_${row.lead_linked_opportunity_id}`;
         } else if (row.conversation_id) {
-          groupId = \`conv_\${row.conversation_id}\`;
+          groupId = `conv_${row.conversation_id}`;
         } else if (row.phone_number) {
-          groupId = \`phone_\${row.phone_number}\`;
+          groupId = `phone_${row.phone_number}`;
         } else {
-          groupId = \`task_\${row.task_id}\`;
+          groupId = `task_${row.task_id}`;
         }
 
         const resolvedCountry = row.opp_country || row.lead_raw_data?.country || null;
@@ -328,7 +328,7 @@ export async function createBotDelegationTask(opportunityId: string, options: Bo
     { actionName: 'createBotDelegationTask' },
     async (ctx) => {
       // Create a follow-up task representing bot delegation without sending messages outward.
-      const query = \`
+      const query = `
         INSERT INTO follow_up_tasks (
           tenant_id, 
           opportunity_id, 
@@ -341,7 +341,7 @@ export async function createBotDelegationTask(opportunityId: string, options: Bo
         )
         VALUES ($1, $2, $3, $4, $5, $6, NOW() + INTERVAL '5 minutes', $7)
         RETURNING id
-      \`;
+      `;
 
       const metadata = {
         bot_delegation: {
@@ -361,7 +361,7 @@ export async function createBotDelegationTask(opportunityId: string, options: Bo
           ctx.tenantId,
           opportunityId,
           'bot_handoff_followup', // Or a custom type
-          \`Bot Takip: \${options.mode}\`,
+          `Bot Takip: ${options.mode}`,
           options.goal,
           'pending',
           JSON.stringify(metadata)
