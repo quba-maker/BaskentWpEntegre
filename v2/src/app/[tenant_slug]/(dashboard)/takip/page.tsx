@@ -6,7 +6,7 @@ import {
   Radar, Search, ChevronDown, CheckCircle2, MessageCircle, 
   Phone, StickyNote, X, Flame, Thermometer, Snowflake,
   Clock, ArrowRight, Calendar, XCircle, Filter, ExternalLink,
-  ClipboardList
+  ClipboardList, Users, CalendarClock
 } from "lucide-react";
 import { getOpportunities, getOpportunityStats, updateOpportunityStage, addOpportunityNote } from "@/app/actions/pipeline";
 import { useInboxStore } from "@/store/inbox-store";
@@ -14,7 +14,9 @@ import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { getCountryFlag } from "@/lib/utils/country";
 import TasksTab from "@/components/features/takip/tasks-tab";
 import OperationsTab from "@/components/features/takip/operations-tab";
-import FocusTab from "@/components/features/takip/focus-tab";
+import PatientTrackingTab from "@/components/features/takip/patient-tracking-tab";
+import AppointmentsTab from "@/components/features/takip/appointments-tab";
+import PatientDetailDrawer from "@/components/features/takip/patient-detail-drawer";
 
 // ── Formatters ──
 
@@ -135,16 +137,18 @@ export default function TakipPage() {
   const tenantSlug = typeof params.tenant_slug === 'string' ? params.tenant_slug : '';
   const { setActiveContact } = useInboxStore();
   const deepLinkOppId = searchParams.get('opp');
-  const [activeTab, setActiveTab] = useState<'odak' | 'firsatlar' | 'gorevler' | 'operasyon'>('odak');
+  const [activeTab, setActiveTab] = useState<'hasta_takibi' | 'randevu' | 'firsatlar' | 'gorevler' | 'operasyon'>('hasta_takibi');
   const advancedViewDropdown = useDropdown();
   
-  // Filters
+  // Filters (for firsatlar legacy tab)
   const [stageFilter, setStageFilter] = useState("all");
   const [priorityFilter, setPriorityFilter] = useState("all");
   const [searchInput, setSearchInput] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
 
-  // Detail
+  // Detail drawer
+  const [drawerOppId, setDrawerOppId] = useState<string | null>(null);
+  // Legacy detail modal
   const [selectedOpp, setSelectedOpp] = useState<any>(null);
   const [noteText, setNoteText] = useState("");
 
@@ -239,18 +243,29 @@ export default function TakipPage() {
             <Radar className="w-7 h-7 text-[#5856D6]" />
             Takip Merkezi
           </h1>
-          {/* Tab Switcher */}
+          {/* Tab Switcher — Primary: Hasta Takibi + Randevu */}
           <div className="flex items-center gap-2 mt-2 w-fit">
             <button
-              onClick={() => setActiveTab('odak')}
+              onClick={() => setActiveTab('hasta_takibi')}
               className={`px-4 py-1.5 rounded-lg text-[13px] font-semibold transition-all flex items-center gap-2 ${
-                activeTab === 'odak' 
+                activeTab === 'hasta_takibi' 
                   ? 'bg-indigo-600 text-white shadow-md' 
                   : 'bg-black/[0.04] text-[#86868B] hover:text-[#1D1D1F]'
               }`}
             >
-              <Radar className="w-4 h-4" />
-              Odak Akışı
+              <Users className="w-4 h-4" />
+              Hasta Takibi
+            </button>
+            <button
+              onClick={() => setActiveTab('randevu')}
+              className={`px-4 py-1.5 rounded-lg text-[13px] font-semibold transition-all flex items-center gap-2 ${
+                activeTab === 'randevu' 
+                  ? 'bg-indigo-600 text-white shadow-md' 
+                  : 'bg-black/[0.04] text-[#86868B] hover:text-[#1D1D1F]'
+              }`}
+            >
+              <CalendarClock className="w-4 h-4" />
+              Randevu Yönetimi
             </button>
             
             <div ref={advancedViewDropdown.ref} className="relative">
@@ -306,10 +321,17 @@ export default function TakipPage() {
         </div>
       </div>
 
-      {/* FOCUS TAB */}
-      {activeTab === 'odak' && (
+      {/* HASTA TAKİBİ TAB */}
+      {activeTab === 'hasta_takibi' && (
         <div className="flex-1 bg-white rounded-2xl overflow-hidden shadow-sm border border-gray-200">
-          <FocusTab onGoToInbox={handleGoToInbox} onSelectOpportunity={setSelectedOpp} />
+          <PatientTrackingTab onGoToInbox={handleGoToInbox} onOpenDrawer={(id) => setDrawerOppId(id)} />
+        </div>
+      )}
+
+      {/* RANDEVU YÖNETİMİ TAB */}
+      {activeTab === 'randevu' && (
+        <div className="flex-1 bg-white rounded-2xl overflow-hidden shadow-sm border border-gray-200">
+          <AppointmentsTab onGoToInbox={handleGoToInbox} onOpenDrawer={(id) => setDrawerOppId(id)} />
         </div>
       )}
 
@@ -577,7 +599,7 @@ export default function TakipPage() {
         </div>
       </div>
 
-      {/* Detail Modal */}
+      {/* Detail Modal (legacy for firsatlar tab) */}
       {selectedOpp && (
         <OppDetailModal 
           opp={selectedOpp} 
@@ -595,6 +617,16 @@ export default function TakipPage() {
         />
       )}
       </>)}
+
+      {/* Patient Detail Drawer (new) */}
+      {drawerOppId && (
+        <PatientDetailDrawer
+          opportunityId={drawerOppId}
+          onClose={() => setDrawerOppId(null)}
+          onGoToInbox={handleGoToInbox}
+          onRefresh={() => { mutate(); mutateStats(); }}
+        />
+      )}
     </div>
   );
 }
