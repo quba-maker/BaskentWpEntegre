@@ -69,6 +69,26 @@ export interface WorkerMetadata {
 }
 
 /**
+ * Helper to convert standard markdown formatting to WhatsApp friendly formatting:
+ * - Bold: **text** -> *text*
+ * - List items: '*' or '-' -> '•'
+ * This completely avoids double-asterisk conflicts since WhatsApp uses * for bold.
+ */
+function formatForWhatsApp(text: string): string {
+  if (!text) return text;
+  
+  let formatted = text;
+  
+  // 1. Convert standard markdown lists starting with * or - (with potential indent) to bullet points (•)
+  formatted = formatted.replace(/^(\s*)[\*\-]\s+/gm, '$1• ');
+  
+  // 2. Convert standard markdown bold (**text**) to WhatsApp bold (*text*)
+  formatted = formatted.replace(/\*\*([^*]+)\*\*/g, '*$1*');
+  
+  return formatted;
+}
+
+/**
  * Enterprise Queue Worker Engine
  * Abstracted worker logic to keep API routes clean and testable.
  */
@@ -1349,6 +1369,11 @@ export class QueueWorkerEngine {
         text: `UPDATE conversations SET status = 'human' WHERE phone_number = $1 AND tenant_id = $2`,
         values: [phoneNumber, tenantId]
       });
+    }
+
+    // Format for WhatsApp to translate Markdown (* -> bullets, ** -> *)
+    if (channel === 'whatsapp' && finalResponseText) {
+      finalResponseText = formatForWhatsApp(finalResponseText);
     }
 
     // 8. Meta Channel Send — V2 Credential Isolation (NO ENV FALLBACK)
