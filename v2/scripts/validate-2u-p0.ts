@@ -1,8 +1,5 @@
 import dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
-import { withTenantDB } from "../src/lib/core/tenant-db";
-import { createAppointmentTask, rescheduleAppointmentTask, completeAppointmentTask } from "../src/app/actions/patient-tracking";
-import { StopRuleEngine } from "../src/lib/services/stop-rules.service";
 
 const TENANT_ID = "caab9ea1-9591-45e4-bbc5-9c9b498982c8";
 const USER_ID = "00000000-0000-0000-0000-000000000000";
@@ -10,6 +7,11 @@ const USER_ID = "00000000-0000-0000-0000-000000000000";
 async function runValidation() {
   process.env.TEST_TENANT_ID = TENANT_ID;
   process.env.TEST_USER_ID = USER_ID;
+
+  // Dynamic imports to ensure process.env is populated before module evaluation
+  const { withTenantDB } = await import("../src/lib/core/tenant-db");
+  const { createAppointmentTask, rescheduleAppointmentTask, completeAppointmentTask } = await import("../src/app/actions/patient-tracking");
+  const { StopRuleEngine } = await import("../src/lib/services/stop-rules.service");
 
   const db = withTenantDB(TENANT_ID, true);
 
@@ -36,6 +38,16 @@ async function runValidation() {
   const createdLogIds: number[] = [];
 
   try {
+    // Clean up any existing tasks and logs for this test opportunity to start fresh
+    await db.executeSafe({
+      text: `DELETE FROM follow_up_tasks WHERE opportunity_id = $1 AND tenant_id = $2`,
+      values: [opp.id, TENANT_ID]
+    });
+    await db.executeSafe({
+      text: `DELETE FROM outreach_logs WHERE opportunity_id = $1 AND tenant_id = $2`,
+      values: [opp.id, TENANT_ID]
+    });
+
     // ══════════════════════════════════════════════════
     // TEST 1: Appointment & Reminder Generation
     // ══════════════════════════════════════════════════
@@ -59,10 +71,10 @@ async function runValidation() {
       ]
     });
 
-    if (!createRes.success) {
-      throw new Error(`Failed to create appointment task: ${createRes.error}`);
+    console.log("createRes:", createRes);
+    if (!createRes || !createRes.success || !createRes.data?.success) {
+      throw new Error(`Failed to create appointment task: ${createRes?.error || createRes?.data?.error || "unknown"}`);
     }
-
     const parentTaskId = createRes.data?.taskId;
     if (!parentTaskId) {
       throw new Error("No parent task ID returned.");
@@ -72,7 +84,7 @@ async function runValidation() {
 
     // Fetch the parent task and associated reminder tasks
     const tasks = await db.executeSafe({
-      text: `SELECT * FROM follow_up_tasks WHERE tenant_id = $1 AND (id = $2 OR metadata->>'parent_task_id' = $2)`,
+      text: `SELECT * FROM follow_up_tasks WHERE tenant_id = $1 AND (id = $2::uuid OR metadata->>'parent_task_id' = $2::text)`,
       values: [TENANT_ID, parentTaskId]
     }) as any[];
 
@@ -208,7 +220,7 @@ async function runValidation() {
 
     // Fetch the newly created 1 day before reminder
     let activeReminders = await db.executeSafe({
-      text: `SELECT * FROM follow_up_tasks WHERE tenant_id = $1 AND task_type = 'appointment_reminder' AND metadata->>'parent_task_id' = $2`,
+      text: `SELECT * FROM follow_up_tasks WHERE tenant_id = $1 AND task_type = 'appointment_reminder' AND metadata->>'parent_task_id' = $2::text`,
       values: [TENANT_ID, activeParentId]
     }) as any[];
 
@@ -267,7 +279,7 @@ async function runValidation() {
     createdTaskIds.push(dueParentId);
 
     const dueReminders = await db.executeSafe({
-      text: `SELECT * FROM follow_up_tasks WHERE tenant_id = $1 AND task_type = 'appointment_reminder' AND metadata->>'parent_task_id' = $2`,
+      text: `SELECT * FROM follow_up_tasks WHERE tenant_id = $1 AND task_type = 'appointment_reminder' AND metadata->>'parent_task_id' = $2::text`,
       values: [TENANT_ID, dueParentId]
     }) as any[];
 

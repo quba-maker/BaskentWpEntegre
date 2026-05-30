@@ -201,19 +201,22 @@ export class StopRuleEngine {
       }
 
       // ── Rule 4: Coordinator took over ──
-      const convRows = await this.db.executeSafe({
-        text: `SELECT status FROM conversations 
-               WHERE phone_number = $1 AND tenant_id = $2
-               ORDER BY last_message_at DESC NULLS LAST LIMIT 1`,
-        values: [input.phoneNumber, input.tenantId]
-      }) as any[];
+      // CRITICAL: Only blocks automated customer outreach, NOT internal coordinator tasks
+      if (input.taskType && !INTERNAL_TASK_TYPES.has(input.taskType)) {
+        const convRows = await this.db.executeSafe({
+          text: `SELECT status FROM conversations 
+                 WHERE phone_number = $1 AND tenant_id = $2
+                 ORDER BY last_message_at DESC NULLS LAST LIMIT 1`,
+          values: [input.phoneNumber, input.tenantId]
+        }) as any[];
 
-      if (convRows.length > 0 && convRows[0].status === 'human') {
-        return {
-          shouldStop: true,
-          reason: 'coordinator_took_over',
-          detail: 'Conversation handed over to human coordinator',
-        };
+        if (convRows.length > 0 && convRows[0].status === 'human') {
+          return {
+            shouldStop: true,
+            reason: 'coordinator_took_over',
+            detail: 'Conversation handed over to human coordinator',
+          };
+        }
       }
 
       // ── Rule 5: Max attempts reached ──
