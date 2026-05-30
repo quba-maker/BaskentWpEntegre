@@ -190,28 +190,28 @@ export async function getOperationQualityItems(filters?: {
                  lo.action as last_outreach_action,
                  at.id as active_task_id
           FROM opportunities o
-          LEFT JOIN conversations c ON c.id::text = o.conversation_id::text AND c.tenant_id = o.tenant_id
+          LEFT JOIN conversations c ON c.id::text = o.conversation_id::text AND c.tenant_id::text = o.tenant_id::text
           LEFT JOIN LATERAL (
             SELECT created_at, direction 
             FROM messages m 
-            WHERE m.phone_number = o.phone_number AND m.tenant_id = o.tenant_id 
+            WHERE m.phone_number = o.phone_number AND m.tenant_id::text = o.tenant_id::text 
             ORDER BY m.created_at DESC 
             LIMIT 1
           ) lm ON TRUE
           LEFT JOIN LATERAL (
             SELECT created_at, action 
             FROM outreach_logs ol 
-            WHERE ol.opportunity_id = o.id AND ol.tenant_id = o.tenant_id 
+            WHERE ol.opportunity_id::text = o.id::text AND ol.tenant_id::text = o.tenant_id::text 
             ORDER BY ol.created_at DESC 
             LIMIT 1
           ) lo ON TRUE
           LEFT JOIN LATERAL (
             SELECT id 
             FROM follow_up_tasks t 
-            WHERE t.opportunity_id = o.id AND t.tenant_id = o.tenant_id AND t.status IN ('pending', 'in_progress') 
+            WHERE t.opportunity_id::text = o.id::text AND t.tenant_id::text = o.tenant_id::text AND t.status IN ('pending', 'in_progress') 
             LIMIT 1
           ) at ON TRUE
-          WHERE o.tenant_id = $1
+          WHERE o.tenant_id::text = $1::text
             AND o.stage NOT IN (${TERMINAL_STAGES})
         `,
         values: [tenantId]

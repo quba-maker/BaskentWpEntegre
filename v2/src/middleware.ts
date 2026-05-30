@@ -21,7 +21,6 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
   '/bot': ['platform_admin', 'admin', 'agent'],
   '/inbox': ['platform_admin', 'admin', 'agent', 'viewer'],
   '/forms': ['platform_admin', 'admin', 'agent', 'viewer'],
-  '/calendar': ['platform_admin', 'admin', 'agent', 'viewer'],
   '/': ['platform_admin', 'admin', 'agent', 'viewer'],
 };
 
