@@ -9,7 +9,11 @@ export function CustomerAiBrainPanel({ phoneNumber }: { phoneNumber: string }) {
   const { data: brain, isLoading } = useSWR(
     phoneNumber ? ["ai_brain", phoneNumber] : null,
     () => getCustomerAiBrain(phoneNumber),
-    { refreshInterval: 10000 }
+    { 
+      refreshInterval: 60000,
+      refreshWhenHidden: false,
+      revalidateOnFocus: true
+    }
   );
 
   if (isLoading) {

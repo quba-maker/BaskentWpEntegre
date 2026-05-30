@@ -98,13 +98,21 @@ export default function AppointmentsTab({ onOpenDrawer, onGoToInbox }: Appointme
   const { data, isLoading, mutate } = useSWR(
     ['appointments', debouncedSearch, dueRange, appointmentType, statusFilter, confirmFilter],
     () => getAppointmentRows(filters),
-    { refreshInterval: 20000 }
+    { 
+      refreshInterval: 60000,
+      refreshWhenHidden: false,
+      revalidateOnFocus: true
+    }
   );
 
   const { data: stats, mutate: mutateStats } = useSWR(
     'appointment-stats',
     () => getAppointmentStats(),
-    { refreshInterval: 30000 }
+    { 
+      refreshInterval: 90000,
+      refreshWhenHidden: false,
+      revalidateOnFocus: true
+    }
   );
 
   const items = data?.items || [];

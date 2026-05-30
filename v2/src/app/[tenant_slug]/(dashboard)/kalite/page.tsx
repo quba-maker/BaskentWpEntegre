@@ -108,7 +108,11 @@ export default function KalitePage() {
   const { data: stats, mutate: mutateStats } = useSWR(
     ["operation-quality-stats"],
     () => getOperationQualityDashboard(),
-    { refreshInterval: 15000 }
+    { 
+      refreshInterval: 90000,
+      refreshWhenHidden: false,
+      revalidateOnFocus: true
+    }
   );
 
   // SWR for items
@@ -118,7 +122,11 @@ export default function KalitePage() {
       risk_type: riskTypeFilter !== "all" ? riskTypeFilter : undefined,
       priority: priorityFilter !== "all" ? priorityFilter : undefined
     }),
-    { refreshInterval: 15000 }
+    { 
+      refreshInterval: 90000,
+      refreshWhenHidden: false,
+      revalidateOnFocus: true
+    }
   );
 
   // Handle drawer detail loading

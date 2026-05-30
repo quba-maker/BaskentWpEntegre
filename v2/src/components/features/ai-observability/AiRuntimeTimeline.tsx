@@ -11,7 +11,11 @@ export function AiRuntimeTimeline({ conversationId }: { conversationId: string }
   const { data: traces, isLoading } = useSWR(
     conversationId ? ["traces", conversationId] : null,
     () => getConversationTraces(conversationId),
-    { refreshInterval: 5000 }
+    { 
+      refreshInterval: isExpanded ? 30000 : 0,
+      refreshWhenHidden: false,
+      revalidateOnFocus: true
+    }
   );
 
   if (!traces || traces.length === 0) return null;

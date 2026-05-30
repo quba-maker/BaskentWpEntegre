@@ -6,7 +6,11 @@ import { Wrench, Clock, CheckCircle2, XCircle, Gauge, Ghost } from "lucide-react
 import { getToolActivityStats } from "@/app/actions/ai-control";
 
 export function ToolActivityMonitor() {
-  const { data: toolsRes } = useSWR('tool-activity', getToolActivityStats, { refreshInterval: 15000 });
+  const { data: toolsRes } = useSWR('tool-activity', getToolActivityStats, { 
+    refreshInterval: 90000,
+    refreshWhenHidden: false,
+    revalidateOnFocus: true
+  });
   const tools = toolsRes?.success ? (toolsRes.data as any[]) : null;
 
   return (

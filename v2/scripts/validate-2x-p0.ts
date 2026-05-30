@@ -572,6 +572,7 @@ async function runValidation2X() {
 
     console.log("\n🎉 ALL PHASE 2X-P0 QUALITY AUDIT CENTER E2E TESTS PASSED SUCCESSFULLY!");
     console.log("==========================================================\n");
+    process.exit(0);
   }
 }
 

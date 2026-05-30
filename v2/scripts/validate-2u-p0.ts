@@ -434,6 +434,7 @@ async function runValidation() {
 
     console.log("\n🎉 ALL TESTS IN PHASE 2U-P0 SUCCESSFULLY PASSED! ZERO ERRORS.");
     console.log("==================================================\n");
+    process.exit(0);
   }
 }
 

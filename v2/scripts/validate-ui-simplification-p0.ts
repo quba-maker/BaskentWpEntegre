@@ -197,6 +197,7 @@ async function runValidationP0() {
 
   console.log("\n🎉 ALL PHASE 2Z-P0 UI ARCHITECTURE AND INTEGRATION TESTS PASSED SUCCESSFULLY!");
   console.log("==========================================================\n");
+  process.exit(0);
 }
 
 runValidationP0().catch((e) => {

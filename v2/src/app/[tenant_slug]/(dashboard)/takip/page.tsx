@@ -32,7 +32,11 @@ export default function TakipPage() {
   const { data: stats, mutate: mutateStats } = useSWR(
     'opportunity-stats',
     () => getOpportunityStats(),
-    { refreshInterval: 30000 }
+    { 
+      refreshInterval: 90000,
+      refreshWhenHidden: false,
+      revalidateOnFocus: true
+    }
   );
 
   // Deep link auto-routing: open drawer directly from notification url click

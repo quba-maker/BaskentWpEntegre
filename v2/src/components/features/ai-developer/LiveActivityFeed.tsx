@@ -42,8 +42,16 @@ function StatCard({ label, value, color }: { label: string; value: number | stri
 }
 
 export function LiveActivityFeed() {
-  const { data: feedRes } = useSWR('ai-activity-feed', () => getLiveActivityFeed(80), { refreshInterval: 5000 });
-  const { data: statsRes } = useSWR('ai-activity-stats', getActivityStats, { refreshInterval: 10000 });
+  const { data: feedRes } = useSWR('ai-activity-feed', () => getLiveActivityFeed(80), { 
+    refreshInterval: 30000,
+    refreshWhenHidden: false,
+    revalidateOnFocus: true
+  });
+  const { data: statsRes } = useSWR('ai-activity-stats', getActivityStats, { 
+    refreshInterval: 60000,
+    refreshWhenHidden: false,
+    revalidateOnFocus: true
+  });
 
   const feedData = feedRes?.success ? (feedRes.data as any) : null;
   const stats = statsRes?.success ? (statsRes.data as any) : null;
@@ -70,7 +78,7 @@ export function LiveActivityFeed() {
           </div>
           <div className="flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="text-[10px] font-medium" style={{ color: 'var(--q-text-secondary)' }}>5 sn yenilenir</span>
+            <span className="text-[10px] font-medium" style={{ color: 'var(--q-text-secondary)' }}>30 sn yenilenir</span>
           </div>
         </div>
 

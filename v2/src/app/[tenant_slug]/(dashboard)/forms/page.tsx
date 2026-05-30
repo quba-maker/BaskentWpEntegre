@@ -228,7 +228,11 @@ export default function FormsPage() {
   const { data, size, setSize, isLoading, mutate } = useSWRInfinite(
     getKey, 
     ([_, page, search, source, stage]: any) => getForms(page, search, source, stage), 
-    { refreshInterval: 15000 }
+    { 
+      refreshInterval: 90000,
+      refreshWhenHidden: false,
+      revalidateOnFocus: true
+    }
   );
 
   const forms = data ? data.flat() : [];

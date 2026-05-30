@@ -557,6 +557,7 @@ async function runValidation() {
 
     console.log("\n🎉 ALL 2V-P0 BOT DELEGATION ORCHESTRATOR TESTS SUCCESSFULLY PASSED!");
     console.log("==========================================================\n");
+    process.exit(0);
   }
 }
 

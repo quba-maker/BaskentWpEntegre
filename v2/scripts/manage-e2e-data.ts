@@ -182,10 +182,12 @@ async function run() {
 
     fs.unlinkSync(DATA_FILE);
     console.log("✅ Cleanup complete.");
+    process.exit(0);
   } else {
     console.error("❌ Invalid mode. Use --prepare or --cleanup");
     process.exit(1);
   }
+  process.exit(0);
 }
 
 run().catch(e => {

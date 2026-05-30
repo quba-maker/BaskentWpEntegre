@@ -366,6 +366,7 @@ async function runValidation2W() {
 
     console.log("\n🎉 ALL 2W-P0 DRAFT APPROVAL CENTER TESTS SUCCESSFULLY PASSED!");
     console.log("==========================================================\n");
+    process.exit(0);
   }
 }
 

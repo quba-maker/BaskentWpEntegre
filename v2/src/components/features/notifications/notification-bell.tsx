@@ -65,13 +65,21 @@ export default function NotificationBell() {
   const { data: count, mutate: mutateCount } = useSWR(
     'notification-count',
     () => getNotificationCount(),
-    { refreshInterval: 10000 }
+    { 
+      refreshInterval: 60000,
+      refreshWhenHidden: false,
+      revalidateOnFocus: true
+    }
   );
 
   const { data: notifications, mutate: mutateNotifs } = useSWR(
     isOpen ? 'unread-notifications' : null,
     () => getUnreadNotifications(10),
-    { refreshInterval: 10000 }
+    { 
+      refreshInterval: 60000,
+      refreshWhenHidden: false,
+      revalidateOnFocus: true
+    }
   );
 
   // ── Actions ──

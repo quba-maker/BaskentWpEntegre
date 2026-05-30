@@ -108,7 +108,11 @@ export default function PatientTrackingTab({ onGoToInbox, onOpenDrawer }: Patien
   const { data, isLoading } = useSWR(
     ['patient-tracking', debouncedSearch, stageFilter, priorityFilter],
     () => getPatientTrackingRows(filters),
-    { refreshInterval: 20000 }
+    { 
+      refreshInterval: 60000,
+      refreshWhenHidden: false,
+      revalidateOnFocus: true
+    }
   );
 
   const items = data?.items || [];
