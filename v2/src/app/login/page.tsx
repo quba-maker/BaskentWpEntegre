@@ -75,9 +75,7 @@ export default function LoginPage() {
         
         {/* Top: Branding */}
         <div className="flex items-center gap-3 relative z-10">
-          <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center shadow-lg shadow-blue-500/20">
-            <Bot className="w-5 h-5 text-white" />
-          </div>
+            <img src="/quba-logo.svg" alt="Quba AI Logo" className="w-10 h-10 object-contain animate-fade-in" />
           <span className="text-xl font-bold tracking-tight text-white">Quba AI</span>
         </div>
 
@@ -123,9 +121,7 @@ export default function LoginPage() {
 
         {/* Brand logo for mobile only */}
         <div className="flex lg:hidden items-center gap-3 mb-12">
-          <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center shadow-md">
-            <Bot className="w-4 h-4 text-white" />
-          </div>
+            <img src="/quba-logo.svg" alt="Quba AI Logo" className="w-8 h-8 object-contain" />
           <span className="text-lg font-bold tracking-tight text-slate-900">Quba AI</span>
         </div>
 

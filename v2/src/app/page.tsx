@@ -55,9 +55,7 @@ export default function LandingPage() {
       <header className="sticky top-0 z-40 bg-white/70 backdrop-blur-md border-b border-slate-200/50">
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center shadow-md shadow-blue-500/20">
-              <Bot className="w-5 h-5 text-white" />
-            </div>
+            <img src="/quba-logo.svg" alt="Quba AI Logo" className="w-9 h-9 object-contain" />
             <span className="text-lg font-bold tracking-tight text-slate-900">Quba AI</span>
           </div>
           
@@ -391,9 +389,7 @@ export default function LandingPage() {
       <footer className="bg-slate-950 text-slate-500 py-12 border-t border-slate-900 text-xs">
         <div className="max-w-6xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-6">
           <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-md bg-blue-600 flex items-center justify-center">
-              <Bot className="w-3.5 h-3.5 text-white" />
-            </div>
+            <img src="/quba-logo.svg" alt="Quba AI Logo" className="w-6 h-6 object-contain" />
             <span className="font-bold text-white tracking-tight">Quba AI</span>
           </div>
 

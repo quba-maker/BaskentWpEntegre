@@ -13,9 +13,7 @@ export default function DataDeletionPage() {
           </Link>
           
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-blue-600 flex items-center justify-center">
-              <Bot className="w-4 h-4 text-white" />
-            </div>
+            <img src="/quba-logo.svg" alt="Quba AI Logo" className="w-7 h-7 object-contain" />
             <span className="text-sm font-bold tracking-tight text-slate-900">Quba AI</span>
           </div>
         </div>
