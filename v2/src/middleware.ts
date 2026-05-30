@@ -10,7 +10,7 @@ const SECRET = new TextEncoder().encode(
 );
 
 // Giriş gerektirmeyen public route'lar
-const PUBLIC_ROUTES = ["/login", "/privacy", "/terms", "/api/webhook", "/api/telegram"];
+const PUBLIC_ROUTES = ["/login", "/privacy", "/terms", "/data-deletion", "/legal", "/support"];
 
 // Hangi yollar hangi rollere açık?
 const ROLE_PERMISSIONS: Record<string, string[]> = {
@@ -28,19 +28,55 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // Public ve API route'larını pas geç
-  if (PUBLIC_ROUTES.some((r) => pathname.startsWith(r)) || pathname.startsWith("/api/")) {
-    // Sadece /login ise auth kontrolü yapıp içeri at
-    if (pathname === '/login') {
-      const token = req.cookies.get("quba_session")?.value;
-      if (token) {
-        try {
-          const { payload } = await jwtVerify(token, SECRET);
-          const tSlug = payload.tenantSlug as string;
+  // 1. Trailing slash normalizasyonu (Kök dizin "/" hariç)
+  let cleanPath = pathname;
+  if (cleanPath !== "/" && cleanPath.endsWith("/")) {
+    cleanPath = cleanPath.slice(0, -1);
+  }
+
+  // 2. Sayfa düzeyinde tam eşleşme kontrolü (Exact match)
+  const isPublicPage = PUBLIC_ROUTES.includes(cleanPath) || cleanPath === "/";
+
+  // 3. API düzeyinde güvenli önek kontrolü (API routes are NOT public by default)
+  const allowedPublicApiPrefixes = [
+    "/api/webhooks/",
+    "/api/sheets-webhook",
+    "/api/telegram",
+    "/api/health",
+    "/api/cron/",
+    "/api/cron-",
+    "/api/follow-up"
+  ];
+
+  const isPublicApi = allowedPublicApiPrefixes.some(prefix => 
+    cleanPath === prefix || cleanPath.startsWith(prefix + "/")
+  );
+
+  const isPublicRoute = isPublicPage || isPublicApi;
+
+  if (isPublicRoute) {
+    const token = req.cookies.get("quba_session")?.value;
+    
+    // Giriş yapmış kullanıcı / veya /login sayfasına gelirse dashboard'a yönlendir
+    if (token && (cleanPath === '/login' || cleanPath === '/')) {
+      try {
+        const { payload } = await jwtVerify(token, SECRET);
+        const tSlug = payload.tenantSlug as string;
+        const userRole = payload.role as string;
+        
+        if (cleanPath === '/login') {
           if (process.env.NODE_ENV !== 'production') console.log(`[AUTH AUDIT] User already logged in, redirecting /login -> /${tSlug}`);
           return NextResponse.redirect(new URL(`/${tSlug}`, req.url));
-        } catch (err) {}
-      }
+        } else {
+          // cleanPath === '/'
+          if (userRole === 'platform_admin') {
+            return NextResponse.redirect(new URL("/admin", req.url));
+          }
+          if (tSlug) {
+            return NextResponse.redirect(new URL(`/${tSlug}`, req.url));
+          }
+        }
+      } catch (err) {}
     }
     return NextResponse.next();
   }
