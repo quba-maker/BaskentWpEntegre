@@ -171,7 +171,8 @@ export async function login(
     const user = users[0];
 
     // Şifre kontrolü — bcryptjs dynamic import (edge uyumluluğu)
-    const bcrypt = await import("bcryptjs");
+    const bcryptModule = await import("bcryptjs");
+    const bcrypt = (bcryptModule as any).default || bcryptModule;
     const isValid = await bcrypt.compare(password, user.password_hash);
     
     if (process.env.NODE_ENV !== 'production') console.log(`[AUTH AUDIT] Password compare result: ${isValid}`);

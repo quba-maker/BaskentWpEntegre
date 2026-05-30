@@ -33,7 +33,8 @@ export async function createUser(data: {
     );
     if (existing.length > 0) throw new Error("Bu e-posta bu firmada zaten kullanılıyor.");
 
-    const bcrypt = await import("bcryptjs");
+    const bcryptModule = await import("bcryptjs");
+    const bcrypt = (bcryptModule as any).default || bcryptModule;
     const hash = await bcrypt.hash(data.password, 10);
 
     await ctx.db.executeSafe(
@@ -105,7 +106,8 @@ export async function resetUserPassword(userId: string) {
       tempPassword += chars.charAt(Math.floor(Math.random() * chars.length));
     }
 
-    const bcrypt = await import("bcryptjs");
+    const bcryptModule = await import("bcryptjs");
+    const bcrypt = (bcryptModule as any).default || bcryptModule;
     const hash = await bcrypt.hash(tempPassword, 10);
 
     await ctx.db.executeSafe(
@@ -132,7 +134,8 @@ export async function changeMyPassword(currentPassword: string, newPassword: str
     );
     if (user.length === 0) throw new Error("Kullanıcı bulunamadı.");
 
-    const bcrypt = await import("bcryptjs");
+    const bcryptModule = await import("bcryptjs");
+    const bcrypt = (bcryptModule as any).default || bcryptModule;
     const valid = await bcrypt.compare(currentPassword, user[0].password_hash);
     if (!valid) throw new Error("Mevcut şifre yanlış.");
 

@@ -14,7 +14,8 @@ import {
   Terminal,
   Radar,
   ShieldAlert,
-  Zap
+  Zap,
+  CheckSquare
 } from "lucide-react";
 import { getSession, logout, stopImpersonation } from "@/lib/auth/session";
 import { redirect } from "next/navigation";
@@ -87,6 +88,9 @@ export async function Sidebar({ tenantData }: { tenantData?: TenantBootstrapData
         
         {/* PIPELINE / TAKİP MERKEZİ */}
         <NavLink href={`/${session?.tenantSlug || ''}/takip`} icon={<Radar className="w-[18px] h-[18px]" />} label="Takip Merkezi" />
+        
+        {/* DRAFT APPROVAL CENTER */}
+        <NavLink href={`/${session?.tenantSlug || ''}/onay`} icon={<CheckSquare className="w-[18px] h-[18px]" />} label="Onay Merkezi" />
         
         {/* AI MODULES */}
         {session?.role !== "viewer" && (

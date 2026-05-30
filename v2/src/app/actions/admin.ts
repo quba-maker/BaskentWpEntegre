@@ -162,7 +162,8 @@ export async function createTenantUser(tenantId: string, user: {
     const existing = await sql`SELECT id FROM users WHERE email = ${user.email} AND tenant_id = ${tenantId}`;
     if (existing.length > 0) throw new Error("Bu e-posta bu firmada zaten kayıtlı.");
 
-    const bcrypt = await import("bcryptjs");
+    const bcryptModule = await import("bcryptjs");
+    const bcrypt = (bcryptModule as any).default || bcryptModule;
     const hash = await bcrypt.hash(user.password, 12);
 
     await sql`
