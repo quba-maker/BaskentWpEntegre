@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withTenantDB } from "@/lib/core/tenant-db";
 import { logger } from "@/lib/core/logger";
-import { CredentialsService } from "@/lib/services/credentials.service";
 
 const log = logger.withContext({ module: 'FollowUpCron' });
 
