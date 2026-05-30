@@ -39,7 +39,7 @@ export default function TermsPage() {
           <div className="p-4 rounded-xl bg-blue-50/50 border border-blue-100 flex gap-3 text-slate-700 text-[13px] leading-relaxed mb-10">
             <Info className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
             <p>
-              <strong>Yasal Bilgilendirme:</strong> Quba AI, Muhammed Mustafa Ercan şahıs işletmesine ait Quba Medya markası altında sunulan B2B SaaS (Software-as-a-Service) platformudur. Bu platformu kullanan işletmeler (Tenant), aşağıda belirtilen kullanım şartlarına uymayı taahhüt eder.
+              <strong>Yasal Bilgilendirme:</strong> Quba AI, Quba Medya markası altında sunulan B2B SaaS (Software-as-a-Service) platformudur. Bu platformu kullanan işletmeler (Tenant), aşağıda belirtilen kullanım şartlarına uymayı taahhüt eder.
             </p>
           </div>
 
@@ -180,7 +180,7 @@ export default function TermsPage() {
 
         {/* Footer info inside main */}
         <div className="mt-8 text-center text-xs text-slate-500">
-          <p>© 2026 Quba AI. Tüm hakları saklıdır. Muhammed Mustafa Ercan — Quba Medya iştirakidir.</p>
+          <p>© 2026 Quba AI. Tüm hakları saklıdır. Quba AI, Quba Medya markası altında sunulur.</p>
         </div>
       </main>
     </div>

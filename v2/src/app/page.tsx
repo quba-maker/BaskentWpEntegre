@@ -36,7 +36,7 @@ export default function LandingPage() {
     "provider": {
       "@type": "Organization",
       "name": "Quba Medya",
-      "legalName": "Muhammed Mustafa Ercan"
+      "url": "https://www.qubamedya.com"
     }
   };
 
@@ -405,9 +405,9 @@ export default function LandingPage() {
             <Link href="/support" className="hover:text-white transition-colors">Destek &amp; İletişim</Link>
           </div>
 
-          <div className="text-center md:text-right">
+          <div className="text-center md:text-right text-[11px] text-slate-600">
             <p>© 2026 Quba AI. Tüm hakları saklıdır.</p>
-            <p className="text-[10px] text-slate-600 mt-1">Muhammed Mustafa Ercan — Quba Medya iştirakidir.</p>
+            <p className="mt-1">Quba AI, Quba Medya markası altında sunulur.</p>
           </div>
         </div>
       </footer>

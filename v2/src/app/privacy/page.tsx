@@ -39,7 +39,7 @@ export default function PrivacyPage() {
           <div className="p-4 rounded-xl bg-blue-50/50 border border-blue-100 flex gap-3 text-slate-700 text-[13px] leading-relaxed mb-10">
             <Info className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
             <p>
-              <strong>Yasal Bilgilendirme:</strong> Quba AI, Muhammed Mustafa Ercan şahıs işletmesine ait Quba Medya markası altında geliştirilen B2B yapay zeka iletişim ve CRM platformudur. Bu politika kapsamında veri sorumlusu sıfatı Muhammed Mustafa Ercan (Quba Medya) işletmesine aittir.
+              <strong>Yasal Bilgilendirme:</strong> Quba AI, Quba Medya markası altında geliştirilen B2B yapay zeka iletişim ve CRM platformudur. Bu politika kapsamında veri sorumlusu sıfatı Quba Medya işletmesine aittir.
             </p>
           </div>
 
@@ -52,10 +52,9 @@ export default function PrivacyPage() {
                 1. Veri Sorumlusu ve İşletme Bilgisi
               </h2>
               <p>
-                Quba AI platformu üzerinden toplanan veya işlenen tüm kişisel veriler açısından veri sorumlusu, Türkiye Cumhuriyeti kanunlarına uygun olarak kurulmuş ve faaliyet gösteren, <strong>Muhammed Mustafa Ercan</strong> şahıs işletmesidir (Bundan böyle &quot;Quba Medya&quot; veya &quot;İşletme&quot; olarak anılacaktır). İşletme ve iletişim bilgileri aşağıdaki gibidir:
+                Quba AI platformu üzerinden toplanan veya işlenen tüm kişisel veriler açısından veri sorumlusu, Türkiye Cumhuriyeti kanunlarına uygun olarak kurulmuş ve faaliyet gösteren Quba Medya markasıdır (Bundan böyle &quot;Quba Medya&quot; veya &quot;İşletme&quot; olarak anılacaktır). İşletme ve iletişim bilgileri aşağıdaki gibidir:
               </p>
               <ul className="list-disc pl-6 space-y-1 mt-2 text-slate-600">
-                <li><strong>Yasal Ünvan:</strong> Muhammed Mustafa Ercan</li>
                 <li><strong>Vergi Dairesi &amp; VKN:</strong> Meram VD. / 3410314137</li>
                 <li><strong>Adres:</strong> Hacıkaymak Mah. Hatım Sk. B Blok No: 4 İç Kapı No: 18, Selçuklu / Konya 42000, Türkiye</li>
                 <li><strong>İrtibat E-postası:</strong> mercan@qubamedya.com</li>
@@ -198,7 +197,7 @@ export default function PrivacyPage() {
 
         {/* Footer info inside main */}
         <div className="mt-8 text-center text-xs text-slate-500">
-          <p>© 2026 Quba AI. Tüm hakları saklıdır. Muhammed Mustafa Ercan — Quba Medya iştirakidir.</p>
+          <p>© 2026 Quba AI. Tüm hakları saklıdır. Quba AI, Quba Medya markası altında sunulur.</p>
         </div>
       </main>
     </div>

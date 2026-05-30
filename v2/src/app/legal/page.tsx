@@ -7,7 +7,6 @@ export default function LegalPage() {
     "@context": "https://schema.org",
     "@type": "Organization",
     "name": "Quba Medya",
-    "legalName": "Muhammed Mustafa Ercan",
     "taxID": "3410314137",
     "address": {
       "@type": "PostalAddress",
@@ -62,20 +61,13 @@ export default function LegalPage() {
           </div>
 
           <p className="text-[14px] text-slate-600 leading-relaxed mb-8">
-            Aşağıda, Quba AI platformunun yasal sağlayıcısı olan şahıs işletmesine ait resmi künye, iletişim ve tescilli işletme verileri yer almaktadır. Platformumuz üzerinden sunulan tüm hizmetler Türkiye Cumhuriyeti yasalarına tabidir.
+            Aşağıda, Quba AI platformunun yasal sağlayıcısı olan Quba Medya markasına ait resmi künye, iletişim ve tescilli işletme verileri yer almaktadır. Platformumuz üzerinden sunulan tüm hizmetler Türkiye Cumhuriyeti yasalarına tabidir.
           </p>
 
           {/* Legal Details Grid/Table */}
           <div className="border border-slate-100 rounded-2xl overflow-hidden bg-slate-50/50 mb-10">
             <table className="w-full text-left text-[13px] border-collapse">
               <tbody>
-                <tr className="border-b border-slate-100/80">
-                  <td className="p-4 font-bold text-slate-900 w-1/3 bg-slate-100/30 flex items-center gap-2">
-                    <Building2 className="w-4 h-4 text-slate-400" />
-                    Yasal Ünvan
-                  </td>
-                  <td className="p-4 text-slate-700 font-medium">Muhammed Mustafa Ercan</td>
-                </tr>
                 <tr className="border-b border-slate-100/80">
                   <td className="p-4 font-bold text-slate-900 bg-slate-100/30 flex items-center gap-2">
                     <Bot className="w-4 h-4 text-slate-400" />
@@ -156,7 +148,7 @@ export default function LegalPage() {
 
         {/* Footer info inside main */}
         <div className="mt-8 text-center text-xs text-slate-500">
-          <p>© 2026 Quba AI. Tüm hakları saklıdır. Muhammed Mustafa Ercan — Quba Medya iştirakidir.</p>
+          <p>© 2026 Quba AI. Tüm hakları saklıdır. Quba AI, Quba Medya markası altında sunulur.</p>
         </div>
       </main>
     </div>

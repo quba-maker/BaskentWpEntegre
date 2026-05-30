@@ -150,7 +150,7 @@ export default function DataDeletionPage() {
 
         {/* Footer info inside main */}
         <div className="mt-8 text-center text-xs text-slate-500">
-          <p>© 2026 Quba AI. Tüm hakları saklıdır. Muhammed Mustafa Ercan — Quba Medya iştirakidir.</p>
+          <p>© 2026 Quba AI. Tüm hakları saklıdır. Quba AI, Quba Medya markası altında sunulur.</p>
         </div>
       </main>
     </div>
