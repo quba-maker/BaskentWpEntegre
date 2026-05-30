@@ -426,12 +426,18 @@ export type BotDelegationMode =
   | 'collect_phone_call_time'
   | 'confirm_phone_call'
   | 'clinic_appointment_reminder'
-  | 'request_report'
-  | 'no_response_followup';
+  | 'no_response_followup'
+  | 'report_request'
+  | 'appointment_reschedule_request';
 
 export interface BotDelegationOptions {
   mode: BotDelegationMode;
-  goal: string;
+  source?: string;
+  reason?: string;
+  parentTaskId?: string | null;
+  appointmentTaskId?: string | null;
+  reminderTaskId?: string | null;
+  goal?: string;
   maxAttempts?: number;
   attemptIntervalMinutes?: number;
 }
@@ -440,57 +446,22 @@ export async function createBotDelegationTask(opportunityId: string, options: Bo
   return withActionGuard(
     { actionName: 'createBotDelegationTask' },
     async (ctx) => {
-      // Fetch phone_number for the opportunity
-      const oppQuery = await ctx.db.executeSafe({
-        text: `SELECT phone_number FROM conversations WHERE active_opportunity_id = $1 LIMIT 1`,
-        values: [opportunityId]
-      }) as any[];
-      const phoneNumber = oppQuery[0]?.phone_number || '';
-
-      // Create a follow-up task representing bot delegation without sending messages outward.
-      const query = `
-        INSERT INTO follow_up_tasks (
-          tenant_id, 
-          opportunity_id, 
-          phone_number,
-          task_type, 
-          title, 
-          description, 
-          status, 
-          due_at, 
-          metadata
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, NOW() + INTERVAL '5 minutes', $8)
-        RETURNING id
-      `;
-
-      const metadata = {
-        bot_delegation: {
-          mode: options.mode,
-          goal: options.goal,
-          max_attempts: options.maxAttempts || 3,
-          attempt_interval_minutes: options.attemptIntervalMinutes || 120,
-          attempt_count: 0,
-          status: 'pending',
-          zero_outbound_p0: true
-        }
-      };
-
-      await ctx.db.executeSafe({
-        text: query,
-        values: [
-          ctx.tenantId,
-          opportunityId,
-          phoneNumber,
-          'bot_handoff_followup', // Or a custom type
-          `Bot Takip: ${options.mode}`,
-          options.goal,
-          'pending',
-          JSON.stringify(metadata)
-        ]
+      const { BotDelegationService } = await import('@/lib/services/bot-delegation.service');
+      const botDelegationService = new BotDelegationService(ctx.db);
+      
+      const res = await botDelegationService.create(opportunityId, ctx.userId || 'system', {
+        mode: options.mode,
+        source: options.source || 'patient_tracking',
+        reason: options.reason || 'manual_trigger',
+        parentTaskId: options.parentTaskId || null,
+        appointmentTaskId: options.appointmentTaskId || null,
+        reminderTaskId: options.reminderTaskId || null
       });
 
-      return { success: true };
+      if (!res.success) {
+        return { success: false, error: res.error };
+      }
+      return { success: true, taskId: res.taskId };
     }
   );
 }
@@ -662,6 +633,112 @@ export async function sendTestBotMessage(opportunityId: string, customMessage: s
             message_text: customMessage.trim(),
             test_outbound: true,
             initiated_from: 'focus_station'
+          })
+        ]
+      });
+
+      return { success: true };
+    }
+  );
+}
+
+export async function completeBotDelegationTask(taskId: string) {
+  return withActionGuard(
+    { actionName: 'completeBotDelegationTask' },
+    async (ctx) => {
+      // 1. Fetch task
+      const taskRows = await ctx.db.executeSafe({
+        text: `SELECT opportunity_id, metadata FROM follow_up_tasks WHERE id = $1 AND tenant_id = $2`,
+        values: [taskId, ctx.tenantId]
+      }) as any[];
+      if (taskRows.length === 0) return { success: false, error: 'Görev bulunamadı.' };
+      const task = taskRows[0];
+      const metadata = typeof task.metadata === 'string' ? JSON.parse(task.metadata) : (task.metadata || {});
+      const botDel = metadata.bot_delegation || {};
+
+      const updatedBotDel = {
+        ...botDel,
+        status: 'completed',
+        completed_at: new Date().toISOString()
+      };
+      const newMeta = {
+        ...metadata,
+        bot_delegation: updatedBotDel
+      };
+
+      // Update task
+      await ctx.db.executeSafe({
+        text: `UPDATE follow_up_tasks SET status = 'completed', metadata = $1::jsonb, updated_at = NOW() WHERE id = $2 AND tenant_id = $3`,
+        values: [JSON.stringify(newMeta), taskId, ctx.tenantId]
+      });
+
+      // Write outreach log
+      await ctx.db.executeSafe({
+        text: `INSERT INTO outreach_logs (tenant_id, opportunity_id, action, channel, actor_id, metadata)
+               VALUES ($1, $2, 'bot_delegation_completed', 'system', $3, $4)`,
+        values: [
+          ctx.tenantId,
+          task.opportunity_id,
+          ctx.userId || 'system',
+          JSON.stringify({
+            mode: botDel.mode,
+            task_id: taskId,
+            initiated_from: 'bot_delegation_orchestrator',
+            zero_outbound_p0: true
+          })
+        ]
+      });
+
+      return { success: true };
+    }
+  );
+}
+
+export async function cancelBotDelegationTask(taskId: string, reason: string = 'coordinator_cancelled') {
+  return withActionGuard(
+    { actionName: 'cancelBotDelegationTask' },
+    async (ctx) => {
+      // 1. Fetch task
+      const taskRows = await ctx.db.executeSafe({
+        text: `SELECT opportunity_id, metadata FROM follow_up_tasks WHERE id = $1 AND tenant_id = $2`,
+        values: [taskId, ctx.tenantId]
+      }) as any[];
+      if (taskRows.length === 0) return { success: false, error: 'Görev bulunamadı.' };
+      const task = taskRows[0];
+      const metadata = typeof task.metadata === 'string' ? JSON.parse(task.metadata) : (task.metadata || {});
+      const botDel = metadata.bot_delegation || {};
+
+      const updatedBotDel = {
+        ...botDel,
+        status: 'cancelled',
+        cancelled_at: new Date().toISOString(),
+        cancel_reason: reason
+      };
+      const newMeta = {
+        ...metadata,
+        bot_delegation: updatedBotDel
+      };
+
+      // Update task to cancelled
+      await ctx.db.executeSafe({
+        text: `UPDATE follow_up_tasks SET status = 'cancelled', skipped_reason = $1, metadata = $2::jsonb, updated_at = NOW() WHERE id = $3 AND tenant_id = $4`,
+        values: [`Manual: ${reason}`, JSON.stringify(newMeta), taskId, ctx.tenantId]
+      });
+
+      // Write outreach log
+      await ctx.db.executeSafe({
+        text: `INSERT INTO outreach_logs (tenant_id, opportunity_id, action, channel, actor_id, metadata)
+               VALUES ($1, $2, 'bot_delegation_cancelled', 'system', $3, $4)`,
+        values: [
+          ctx.tenantId,
+          task.opportunity_id,
+          ctx.userId || 'system',
+          JSON.stringify({
+            mode: botDel.mode,
+            task_id: taskId,
+            reason: reason,
+            initiated_from: 'bot_delegation_orchestrator',
+            zero_outbound_p0: true
           })
         ]
       });

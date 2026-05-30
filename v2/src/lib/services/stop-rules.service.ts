@@ -36,7 +36,13 @@ export type StopReason =
   | 'parent_appointment_arrived'
   | 'parent_appointment_no_show'
   | 'parent_appointment_rescheduled'
-  | 'opportunity_terminal_stage';
+  | 'opportunity_terminal_stage'
+  | 'parent_reminder_cancelled'
+  | 'patient_responded_after_delegation'
+  | 'coordinator_cancelled'
+  | 'duplicate_active_delegation'
+  | 'parent_appointment_completed'
+  | 'parent_appointment_cancelled';
 
 export interface StopRuleResult {
   shouldStop: boolean;
@@ -62,6 +68,7 @@ const INTERNAL_TASK_TYPES = new Set([
   'doctor_review_pending',
   'custom',
   'appointment_reminder', // YENİ: Reminders are internal
+  'bot_handoff_followup', // YENİ: Bot handoffs are internal
 ]);
 
 // Terminal opportunity stages
@@ -146,6 +153,111 @@ export class StopRuleEngine {
               };
             }
           }
+        }
+      }
+
+      // ── Rule 0.1: Bot Handoff stop rules (Phase 2V-P0) ──
+      if (input.taskType === 'bot_handoff_followup' && input.taskId) {
+        const taskRows = await this.db.executeSafe({
+          text: `SELECT metadata FROM follow_up_tasks WHERE id = $1 AND tenant_id = $2`,
+          values: [input.taskId, input.tenantId]
+        }) as any[];
+
+        if (taskRows.length > 0) {
+          const taskMeta = typeof taskRows[0].metadata === 'string'
+            ? JSON.parse(taskRows[0].metadata)
+            : (taskRows[0].metadata || {});
+          
+          const botDel = taskMeta.bot_delegation || {};
+          
+          // 1. Check parent appointment tasks
+          const parentApptId = botDel.appointment_task_id || botDel.parent_task_id;
+          if (parentApptId) {
+            const parentRows = await this.db.executeSafe({
+              text: `SELECT status, metadata FROM follow_up_tasks WHERE id = $1 AND tenant_id = $2`,
+              values: [parentApptId, input.tenantId]
+            }) as any[];
+
+            if (parentRows.length > 0) {
+              const parent = parentRows[0];
+              const parentMeta = typeof parent.metadata === 'string'
+                ? JSON.parse(parent.metadata)
+                : (parent.metadata || {});
+
+              if (parent.status === 'completed') {
+                const result = parentMeta.appointment_result || 'completed';
+                let mappedReason: StopReason = 'parent_appointment_completed';
+                if (result === 'arrived') mappedReason = 'parent_appointment_arrived';
+                else if (result === 'no_show') mappedReason = 'parent_appointment_no_show';
+
+                return {
+                  shouldStop: true,
+                  reason: mappedReason,
+                  detail: `Parent appointment completed with result: ${result}`,
+                };
+              }
+
+              if (parent.status === 'cancelled') {
+                const isRescheduled = parent.skipped_reason === 'parent_appointment_rescheduled';
+                return {
+                  shouldStop: true,
+                  reason: isRescheduled ? 'parent_appointment_rescheduled' : 'parent_appointment_cancelled',
+                  detail: isRescheduled
+                    ? 'Parent appointment has been rescheduled'
+                    : 'Parent appointment has been cancelled',
+                };
+              }
+            }
+          }
+
+          // 2. Check parent reminder tasks
+          const parentReminderId = botDel.reminder_task_id;
+          if (parentReminderId) {
+            const reminderRows = await this.db.executeSafe({
+              text: `SELECT status FROM follow_up_tasks WHERE id = $1 AND tenant_id = $2`,
+              values: [parentReminderId, input.tenantId]
+            }) as any[];
+
+            if (reminderRows.length > 0) {
+              const reminder = reminderRows[0];
+              if (reminder.status === 'cancelled' || reminder.status === 'skipped') {
+                return {
+                  shouldStop: true,
+                  reason: 'parent_reminder_cancelled',
+                  detail: 'Parent reminder task has been cancelled or skipped',
+                };
+              }
+            }
+          }
+
+          // 3. Check coordinator cancelled manual action
+          if (botDel.status === 'cancelled') {
+            return {
+              shouldStop: true,
+              reason: 'coordinator_cancelled',
+              detail: 'Bot delegation cancelled by coordinator manually',
+            };
+          }
+        }
+      }
+
+      // ── Rule 0.2: patient_responded_after_delegation stop rule (Phase 2V-P0) ──
+      if (input.taskType === 'bot_handoff_followup' && input.taskCreatedAt) {
+        const inboundRows = await this.db.executeSafe({
+          text: `SELECT 1 FROM messages
+                 WHERE phone_number = $1 AND tenant_id = $2
+                   AND direction = 'in'
+                   AND created_at > $3::timestamptz
+                 LIMIT 1`,
+          values: [input.phoneNumber, input.tenantId, input.taskCreatedAt]
+        }) as any[];
+
+        if (inboundRows.length > 0) {
+          return {
+            shouldStop: true,
+            reason: 'patient_responded_after_delegation',
+            detail: 'Patient sent inbound message after bot delegation task creation',
+          };
         }
       }
 

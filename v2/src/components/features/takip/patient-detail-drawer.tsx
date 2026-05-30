@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { getPatientTrackingDetail, getPatientTimeline, createAppointmentTask, type PatientDetailData, type TimelineEntry } from "@/app/actions/patient-tracking";
 import { addOpportunityNote, updateOpportunityStage } from "@/app/actions/pipeline";
-import { createBotDelegationTask, schedulePhoneCallTask, type BotDelegationMode } from "@/app/actions/focus-queue";
+import { createBotDelegationTask, schedulePhoneCallTask, completeBotDelegationTask, cancelBotDelegationTask, type BotDelegationMode } from "@/app/actions/focus-queue";
 import { logCallReached, logCallMissed, logCallbackScheduled, logNotInterested } from "@/app/actions/outreach";
 
 // ── Stage Config ──
@@ -130,6 +130,44 @@ export default function PatientDetailDrawer({ opportunityId, onClose, onGoToInbo
     setActionSuccess('İşlem kaydedildi.');
     mutate();
     onRefresh?.();
+  };
+
+  const handleCompleteBotTask = async (taskId: string) => {
+    setActionLoading(taskId);
+    try {
+      const res = await completeBotDelegationTask(taskId);
+      if (res.success) {
+        setActionSuccess('Takip başarıyla tamamlandı.');
+        mutate();
+        onRefresh?.();
+      } else {
+        alert(res.error || 'İşlem başarısız.');
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleCancelBotTask = async (taskId: string) => {
+    const reason = prompt("Lütfen iptal sebebini belirtin:", "Koordinatör iptal etti");
+    if (reason === null) return; // user cancelled prompt
+    setActionLoading(taskId);
+    try {
+      const res = await cancelBotDelegationTask(taskId, reason);
+      if (res.success) {
+        setActionSuccess('Takip başarıyla iptal edildi.');
+        mutate();
+        onRefresh?.();
+      } else {
+        alert(res.error || 'İşlem başarısız.');
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setActionLoading(null);
+    }
   };
 
   if (!opportunityId) return null;
@@ -403,17 +441,137 @@ export default function PatientDetailDrawer({ opportunityId, onClose, onGoToInbo
               )}
 
               {/* 7. Bot Delegation */}
-              {data.hasBotDelegation && (
-                <DrawerSection title="Bot Takip Modu" sectionKey="bot" expanded={expandedSections} onToggle={toggleSection}>
-                  <div className="p-3 bg-cyan-50 border border-cyan-200 rounded-xl">
-                    <div className="flex items-center gap-2">
-                      <Bot className="w-4 h-4 text-cyan-600" />
-                      <span className="text-[12px] font-bold text-cyan-700">Bot Aktif — {data.botDelegationMode || 'Takip'}</span>
+              {(() => {
+                const activeBotTasks = data.tasks.filter((t: any) => t.taskType === 'bot_handoff_followup' && (t.status === 'pending' || t.status === 'in_progress'));
+                const hasBot = data.hasBotDelegation || activeBotTasks.length > 0;
+                
+                const modeLabels: Record<string, string> = {
+                  unreachable_followup: 'Ulaşılamadı Takibi',
+                  collect_phone_call_time: 'Uygun Saat İsteme',
+                  confirm_phone_call: 'Telefon Randevu Teyidi',
+                  clinic_appointment_reminder: 'Randevu Teyidi',
+                  no_response_followup: 'Cevapsız Fırsat Takibi',
+                  report_request: 'Rapor/Belge İsteme',
+                  appointment_reschedule_request: 'Randevu Erteleme Takibi'
+                };
+
+                const warningLabels: Record<string, string> = {
+                  missing_patient_name: 'Hasta Adı Eksik',
+                  missing_timezone: 'Saat Dilimi Eksik',
+                  missing_appointment_time: 'Randevu Zamanı Eksik',
+                  missing_conversation: 'Geçmiş Konuşma Bulunamadı',
+                  missing_summary: 'Fırsat Özeti Eksik'
+                };
+
+                if (!hasBot) return null;
+
+                return (
+                  <DrawerSection title="Bot Takip Modu" sectionKey="bot" expanded={expandedSections} onToggle={toggleSection}>
+                    <div className="flex flex-col gap-3">
+                      {activeBotTasks.length === 0 ? (
+                        <div className="p-3 bg-cyan-50 border border-cyan-200 rounded-xl">
+                          <div className="flex items-center gap-2">
+                            <Bot className="w-4 h-4 text-cyan-600" />
+                            <span className="text-[12px] font-bold text-cyan-700">Bot Aktif — {(data.botDelegationMode && modeLabels[data.botDelegationMode]) || data.botDelegationMode || 'Takip'}</span>
+                          </div>
+                          <p className="text-[11px] text-cyan-600 mt-1">Bot, hastaya otomatik takip mesajları göndermek üzere atanmış. (Metadata-only, P0 outbound yok)</p>
+                        </div>
+                      ) : (
+                        activeBotTasks.map((task: any) => {
+                          const botDel = task.metadata?.bot_delegation || {};
+                          const isDraftReady = task.status === 'in_progress' && botDel.status === 'draft_ready';
+                          
+                          return (
+                            <div key={task.id} className="p-4 bg-white border border-black/5 rounded-xl shadow-sm flex flex-col gap-2.5">
+                              {/* Header */}
+                              <div className="flex items-center justify-between flex-wrap gap-2">
+                                <div className="flex items-center gap-1.5">
+                                  <Bot className="w-4 h-4 text-cyan-600 animate-pulse" />
+                                  <span className="text-[12px] font-bold text-[#1D1D1F]">
+                                    {modeLabels[botDel.mode] || botDel.mode}
+                                  </span>
+                                </div>
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                  isDraftReady 
+                                    ? 'bg-emerald-50 text-emerald-600 border border-emerald-200' 
+                                    : 'bg-amber-50 text-amber-600 border border-amber-200'
+                                }`}>
+                                  {isDraftReady ? 'Taslak Hazır' : 'Hazırlanıyor'}
+                                </span>
+                              </div>
+
+                              {/* Source / Reason */}
+                              <div className="text-[10px] text-[#86868B] flex flex-col gap-0.5">
+                                <div>Kaynak: <span className="font-semibold text-[#1D1D1F]">{botDel.source || 'patient_tracking'}</span></div>
+                                <div>Sebep: <span className="font-semibold text-[#1D1D1F]">{botDel.reason || 'manual_trigger'}</span></div>
+                                {botDel.generated_draft_at && (
+                                  <div>Taslak Zamanı: <span className="font-semibold text-[#1D1D1F]">{new Date(botDel.generated_draft_at).toLocaleString('tr-TR')}</span></div>
+                                )}
+                              </div>
+
+                              {/* Context Warnings */}
+                              {botDel.context_warnings && botDel.context_warnings.length > 0 && (
+                                <div className="p-2 bg-amber-50 border border-amber-200 rounded-lg flex flex-col gap-1">
+                                  <div className="flex items-center gap-1 text-amber-700 text-[10px] font-bold">
+                                    <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                                    <span>Bazı Bilgiler Eksik:</span>
+                                  </div>
+                                  <div className="flex flex-wrap gap-1">
+                                    {botDel.context_warnings.map((w: string) => (
+                                      <span key={w} className="px-1.5 py-0.5 bg-white border border-amber-200 text-amber-700 text-[9px] rounded font-medium">
+                                        {warningLabels[w] || w}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Generated Draft */}
+                              {botDel.generated_draft && (
+                                <div className="p-3 bg-[#F5F5F7] border border-black/5 rounded-lg flex flex-col gap-2">
+                                  <p className="text-[10px] font-bold text-red-600 italic">
+                                    Bu taslak sadece koordinatör içindir. Hastaya otomatik gönderilmez.
+                                  </p>
+                                  <div className="text-[11px] text-[#1D1D1F] bg-white p-2.5 rounded border border-black/5 whitespace-pre-wrap select-all font-mono leading-relaxed">
+                                    {botDel.generated_draft}
+                                  </div>
+                                  <button
+                                    onClick={() => {
+                                      navigator.clipboard.writeText(botDel.generated_draft);
+                                      alert("Taslak kopyalandı!");
+                                    }}
+                                    className="self-end flex items-center gap-1.5 px-3 py-1 bg-white hover:bg-black/5 text-[11px] font-bold text-indigo-600 rounded-lg border border-black/5 shadow-sm transition-colors"
+                                  >
+                                    <Copy className="w-3.5 h-3.5" /> Taslağı Kopyala
+                                  </button>
+                                </div>
+                              )}
+
+                              {/* Action Buttons */}
+                              <div className="flex items-center justify-end gap-2 pt-1 border-t border-black/5">
+                                <button
+                                  onClick={() => handleCancelBotTask(task.id)}
+                                  disabled={actionLoading === task.id}
+                                  className="px-3 py-1.5 border border-red-200 hover:bg-red-50 text-red-600 disabled:opacity-40 text-[11px] font-bold rounded-lg transition-colors"
+                                >
+                                  {actionLoading === task.id ? '...' : 'İptal Et'}
+                                </button>
+                                <button
+                                  onClick={() => handleCompleteBotTask(task.id)}
+                                  disabled={actionLoading === task.id}
+                                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-40 text-[11px] font-bold rounded-lg transition-colors"
+                                >
+                                  {actionLoading === task.id ? '...' : 'Tamamla'}
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
                     </div>
-                    <p className="text-[11px] text-cyan-600 mt-1">Bot, hastaya otomatik takip mesajları göndermek üzere atanmış. (Metadata-only, P0 outbound yok)</p>
-                  </div>
-                </DrawerSection>
-              )}
+                  </DrawerSection>
+                );
+              })()}
 
               {/* 9. Quick Note */}
               <DrawerSection title="Hızlı Not" sectionKey="note" expanded={expandedSections} onToggle={toggleSection}>

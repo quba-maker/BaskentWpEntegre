@@ -155,6 +155,55 @@ async function handleV2TaskEngine(request: NextRequest) {
             continue;
           }
 
+          // YENİ: IF task type is bot_handoff_followup, handle bot delegation specific lifecycle (Phase 2V-P0)
+          if (task.task_type === 'bot_handoff_followup') {
+            const { BotDelegationService } = await import('@/lib/services/bot-delegation.service');
+            const botDelegationService = new BotDelegationService(db);
+            const processRes = await botDelegationService.process(task.id, dryRun);
+            
+            if (processRes.success) {
+              if (processRes.stopped) {
+                skipped++;
+                totalSkipped++;
+                simulatedActions.push({
+                  tenant: tenant.slug,
+                  taskId: task.id,
+                  action: 'bot_delegation_stopped',
+                  reason: processRes.reason
+                });
+              } else if (processRes.skipped) {
+                skipped++;
+                totalSkipped++;
+                simulatedActions.push({
+                  tenant: tenant.slug,
+                  taskId: task.id,
+                  action: 'bot_delegation_skipped_duplicate',
+                  reason: processRes.reason
+                });
+              } else {
+                notified++;
+                totalNotified++;
+                processed++;
+                totalProcessed++;
+                simulatedActions.push({
+                  tenant: tenant.slug,
+                  taskId: task.id,
+                  action: 'bot_delegation_processed',
+                  mode: processRes.mode,
+                  draft: processRes.draft
+                });
+              }
+            } else {
+              simulatedActions.push({
+                tenant: tenant.slug,
+                taskId: task.id,
+                action: 'bot_delegation_error',
+                error: processRes.error
+              });
+            }
+            continue;
+          }
+
           // YENİ: IF task type is appointment_reminder, handle reminder specific lifecycle (Phase 2U-P0)
           if (task.task_type === 'appointment_reminder') {
             const pName = task.patient_name || 'Değerli Hastamız';

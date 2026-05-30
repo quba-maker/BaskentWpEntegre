@@ -79,6 +79,7 @@ const CATEGORY_HEADER: Record<string, { emoji: string; title: string }> = {
   bot_error:              { emoji: '🤖', title: 'BOT HATASI' },
   coordinator_action:     { emoji: '👤', title: 'KOORDİNATÖR AKSİYONU GEREKLİ' },
   human_escalation:       { emoji: '🚨', title: 'İNSAN MÜDAHALESİ GEREKLİ' },
+  bot_delegation_ready:   { emoji: '🤖', title: 'BOT TAKİP TASLAĞI HAZIR' },
   system_alert:           { emoji: '⚙️', title: 'SİSTEM UYARISI' },
 };
 

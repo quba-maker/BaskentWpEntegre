@@ -35,6 +35,7 @@ export type NotificationCategory =
   | 'coordinator_action'
   | 'callback_requested'
   | 'human_escalation'
+  | 'bot_delegation_ready'
   | 'system_alert';
 
 export type NotificationPriority = 'low' | 'normal' | 'high' | 'critical';
