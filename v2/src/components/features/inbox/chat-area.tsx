@@ -345,6 +345,10 @@ const AI_EVENT_LABELS: Record<string, string> = {
   'crm_raw_extracted': 'CRM Veri Analizi',
   'crm_resolved_for_conversation': 'Görüşme Analizi',
   'ai_response_generated': 'AI Yanıtladı',
+  'crm_extraction_completed': 'CRM Güncellendi',
+  'crm_extraction_failed': 'CRM Hatası',
+  'stage_changed': 'Aşama Değiştirildi',
+  'message_status_updated': 'Mesaj Durumu Güncellendi',
 };
 
 function AiStatusBadge({ phoneNumber }: { phoneNumber: string }) {
