@@ -183,9 +183,34 @@ export async function getOperationQualityItems(filters?: {
       const activeOpps = await db.executeSafe({
         text: `
           SELECT o.id, o.patient_name, o.phone_number, o.priority, o.source, o.department, o.country, o.stage, o.created_at, o.updated_at, o.summary, o.ai_reason,
-                 c.id as conv_id
+                 c.id as conv_id,
+                 lm.created_at as last_msg_time,
+                 lm.direction as last_msg_direction,
+                 lo.created_at as last_outreach_time,
+                 lo.action as last_outreach_action,
+                 at.id as active_task_id
           FROM opportunities o
           LEFT JOIN conversations c ON c.id::text = o.conversation_id::text AND c.tenant_id = o.tenant_id
+          LEFT JOIN LATERAL (
+            SELECT created_at, direction 
+            FROM messages m 
+            WHERE m.phone_number = o.phone_number AND m.tenant_id = o.tenant_id 
+            ORDER BY m.created_at DESC 
+            LIMIT 1
+          ) lm ON TRUE
+          LEFT JOIN LATERAL (
+            SELECT created_at, action 
+            FROM outreach_logs ol 
+            WHERE ol.opportunity_id = o.id AND ol.tenant_id = o.tenant_id 
+            ORDER BY ol.created_at DESC 
+            LIMIT 1
+          ) lo ON TRUE
+          LEFT JOIN LATERAL (
+            SELECT id 
+            FROM follow_up_tasks t 
+            WHERE t.opportunity_id = o.id AND t.tenant_id = o.tenant_id AND t.status IN ('pending', 'in_progress') 
+            LIMIT 1
+          ) at ON TRUE
           WHERE o.tenant_id = $1
             AND o.stage NOT IN (${TERMINAL_STAGES})
         `,
@@ -197,20 +222,9 @@ export async function getOperationQualityItems(filters?: {
         const phone = opp.phone_number || '';
         const priority = opp.priority || 'warm';
 
-        // Get last action / message / outreach time
-        const lastMsg = await db.executeSafe({
-          text: `SELECT created_at, direction FROM messages WHERE phone_number = $1 AND tenant_id = $2 ORDER BY created_at DESC LIMIT 1`,
-          values: [phone, tenantId]
-        }) as any[];
-        const lastMsgTime = lastMsg[0]?.created_at ? new Date(lastMsg[0].created_at) : null;
-        const lastMsgDirection = lastMsg[0]?.direction;
-
-        const lastOutreach = await db.executeSafe({
-          text: `SELECT created_at, action FROM outreach_logs WHERE opportunity_id = $1 AND tenant_id = $2 ORDER BY created_at DESC LIMIT 1`,
-          values: [oppId, tenantId]
-        }) as any[];
-        const lastOutreachTime = lastOutreach[0]?.created_at ? new Date(lastOutreach[0].created_at) : null;
-
+        const lastMsgTime = opp.last_msg_time ? new Date(opp.last_msg_time) : null;
+        const lastMsgDirection = opp.last_msg_direction;
+        const lastOutreachTime = opp.last_outreach_time ? new Date(opp.last_outreach_time) : null;
         const lastUpdateTime = new Date(opp.updated_at);
         
         let lastActionTime: Date = lastUpdateTime;
@@ -237,11 +251,8 @@ export async function getOperationQualityItems(filters?: {
         if (!hasTimezone) missingFlags.push('timezone');
 
         // Check if has active task
-        const activeTasks = await db.executeSafe({
-          text: `SELECT id FROM follow_up_tasks WHERE opportunity_id = $1 AND tenant_id = $2 AND status IN ('pending', 'in_progress') LIMIT 1`,
-          values: [oppId, tenantId]
-        }) as any[];
-        if (activeTasks.length === 0) missingFlags.push('active_task');
+        const hasActiveTask = !!opp.active_task_id;
+        if (!hasActiveTask) missingFlags.push('active_task');
 
         if (missingFlags.length > 0) {
           const score = calculateRiskScore({ priority }, { isMissingData: true, missingFlagsCount: missingFlags.length });
@@ -274,7 +285,7 @@ export async function getOperationQualityItems(filters?: {
         if (priority === 'hot') {
           const slaLimit = QUALITY_SLA.hotLeadMaxIdleMinutes;
           if (idleMinutes > slaLimit) {
-            const hasPendingTasks = activeTasks.length > 0;
+            const hasPendingTasks = hasActiveTask;
             // Higher risk if no active tasks
             const score = calculateRiskScore({ priority }, { isHot: true, isIdleOverSLA: true, isNoResponse: !hasPendingTasks });
             allRisks.push({
@@ -340,7 +351,7 @@ export async function getOperationQualityItems(filters?: {
           } else {
             // Patient not responding (we sent last message, patient hasn't answered for too long)
             const responseSla = priority === 'hot' ? 360 : 1440; // 6h for hot, 24h for warm
-            if (unansweredMinutes > responseSla && activeTasks.length === 0) {
+            if (unansweredMinutes > responseSla && !hasActiveTask) {
               const score = calculateRiskScore({ priority }, { isIdleOverSLA: true, isNoResponse: false });
               allRisks.push({
                 id: `patient-stale-${oppId}`,
