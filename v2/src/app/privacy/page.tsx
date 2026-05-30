@@ -56,7 +56,7 @@ export default function PrivacyPage() {
               </p>
               <ul className="list-disc pl-6 space-y-1 mt-2 text-slate-600">
                 <li><strong>Vergi Dairesi &amp; VKN:</strong> Meram VD. / 3410314137</li>
-                <li><strong>Adres:</strong> Hacıkaymak Mah. Hatım Sk. B Blok No: 4 İç Kapı No: 18, Selçuklu / Konya 42000, Türkiye</li>
+                <li><strong>Adres:</strong> Hacıkaymak Mah. Hatim Sk. B Blok No: 4 İç Kapı No: 18, Selçuklu / Konya 42000, Türkiye</li>
                 <li><strong>İrtibat E-postası:</strong> mercan@qubamedya.com</li>
               </ul>
             </section>
@@ -197,7 +197,7 @@ export default function PrivacyPage() {
 
         {/* Footer info inside main */}
         <div className="mt-8 text-center text-xs text-slate-500">
-          <p>© 2026 Quba AI. Tüm hakları saklıdır. Quba AI, Quba Medya markası altında sunulur.</p>
+          <p>© 2026 Quba AI. Tüm hakları saklıdır. Quba AI, bir Quba Medya markasıdır.</p>
         </div>
       </main>
     </div>

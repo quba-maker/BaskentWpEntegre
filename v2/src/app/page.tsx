@@ -407,7 +407,7 @@ export default function LandingPage() {
 
           <div className="text-center md:text-right text-[11px] text-slate-600">
             <p>© 2026 Quba AI. Tüm hakları saklıdır.</p>
-            <p className="mt-1">Quba AI, Quba Medya markası altında sunulur.</p>
+            <p className="mt-1">Quba AI, bir Quba Medya markasıdır.</p>
           </div>
         </div>
       </footer>

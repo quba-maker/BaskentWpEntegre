@@ -10,7 +10,7 @@ export default function LegalPage() {
     "taxID": "3410314137",
     "address": {
       "@type": "PostalAddress",
-      "streetAddress": "Hacıkaymak Mah. Hatım Sk. B Blok No: 4 İç Kapı No: 18",
+      "streetAddress": "Hacıkaymak Mah. Hatim Sk. B Blok No: 4 İç Kapı No: 18",
       "addressLocality": "Selçuklu",
       "addressRegion": "Konya",
       "postalCode": "42000",
@@ -95,7 +95,7 @@ export default function LegalPage() {
                     Resmi Adres
                   </td>
                   <td className="p-4 text-slate-700 leading-relaxed">
-                    Hacıkaymak Mah. Hatım Sk. B Blok No: 4 İç Kapı No: 18, Selçuklu / Konya 42000, Türkiye
+                    Hacıkaymak Mah. Hatim Sk. B Blok No: 4 İç Kapı No: 18, Selçuklu / Konya 42000, Türkiye
                   </td>
                 </tr>
                 <tr className="border-b border-slate-100/80">
@@ -148,7 +148,7 @@ export default function LegalPage() {
 
         {/* Footer info inside main */}
         <div className="mt-8 text-center text-xs text-slate-500">
-          <p>© 2026 Quba AI. Tüm hakları saklıdır. Quba AI, Quba Medya markası altında sunulur.</p>
+          <p>© 2026 Quba AI. Tüm hakları saklıdır. Quba AI, bir Quba Medya markasıdır.</p>
         </div>
       </main>
     </div>
