@@ -339,6 +339,12 @@ const AI_EVENT_LABELS: Record<string, string> = {
   'brain_resolved': 'AI Hazır',
   'brain_started': 'Analiz Ediliyor',
   'brain_error': 'Analiz Hatası',
+  'opp_update_result': 'Fırsat Güncellendi',
+  'opp_resolved_for_update': 'Fırsat Analizi',
+  'crm_conversation_update_result': 'CRM Eşitlendi',
+  'crm_raw_extracted': 'CRM Veri Analizi',
+  'crm_resolved_for_conversation': 'Görüşme Analizi',
+  'ai_response_generated': 'AI Yanıtladı',
 };
 
 function AiStatusBadge({ phoneNumber }: { phoneNumber: string }) {
