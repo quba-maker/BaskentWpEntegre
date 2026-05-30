@@ -48,9 +48,16 @@ export async function middleware(req: NextRequest) {
     "/api/follow-up"
   ];
 
-  const isPublicApi = allowedPublicApiPrefixes.some(prefix => 
-    cleanPath === prefix || cleanPath.startsWith(prefix + "/")
-  );
+  const isPublicApi = allowedPublicApiPrefixes.some(prefix => {
+    if (prefix.endsWith("/")) {
+      const base = prefix.slice(0, -1);
+      return cleanPath === base || cleanPath.startsWith(prefix);
+    }
+    if (prefix.endsWith("-")) {
+      return cleanPath.startsWith(prefix);
+    }
+    return cleanPath === prefix || cleanPath.startsWith(prefix + "/");
+  });
 
   const isPublicRoute = isPublicPage || isPublicApi;
 
