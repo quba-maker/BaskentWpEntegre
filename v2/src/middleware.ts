@@ -88,7 +88,24 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // Session kontrolü
+  // ── API Route Bypass (BEFORE session check) ──
+  // /api/* paths are NOT UI pages — they must NOT require session cookies.
+  // Each API route manages its own auth guard internally:
+  //   /api/ably/auth       → JWT session + rate limit
+  //   /api/panel/upload    → getSession() JWT
+  //   /api/sse/*           → JWT token verify
+  //   /api/admin/*         → CRON_SECRET / platform_admin check
+  //   /api/cron*           → CRON_SECRET Bearer
+  //   /api/webhooks/*      → Meta signature / QStash Receiver
+  //   /api/follow-up       → CRON_SECRET Bearer
+  //   /api/setup           → ADMIN_SETUP_KEY
+  //   /api/health          → public read-only
+  //   /api/queue-worker    → QStash signature verify
+  if (cleanPath.startsWith("/api/")) {
+    return NextResponse.next();
+  }
+
+  // Session kontrolü (UI pages only)
   const token = req.cookies.get("quba_session")?.value;
   if (!token) {
     if (process.env.NODE_ENV !== 'production') console.log(`[AUTH AUDIT] Request missing session token for ${pathname}, redirecting to /login`);
@@ -99,22 +116,6 @@ export async function middleware(req: NextRequest) {
     const { payload } = await jwtVerify(token, SECRET);
     const userRole = payload.role as string;
     const sessionTenantSlug = payload.tenantSlug as string;
-    
-    // ── API Route Bypass ──
-    // /api/* paths are NOT UI pages — they must NOT go through tenant slug isolation.
-    // Each API route manages its own auth guard:
-    //   /api/ably/auth       → JWT session + rate limit
-    //   /api/panel/upload    → getSession() JWT
-    //   /api/sse/*           → JWT token verify
-    //   /api/admin/*         → CRON_SECRET / platform_admin check
-    //   /api/cron*           → CRON_SECRET Bearer
-    //   /api/webhooks/*      → Meta signature / QStash Receiver
-    //   /api/follow-up       → CRON_SECRET Bearer
-    //   /api/setup           → ADMIN_SETUP_KEY
-    //   /api/health          → public read-only
-    if (cleanPath.startsWith("/api/")) {
-      return NextResponse.next();
-    }
 
     // URL Analizi (Path-based routing) — UI pages only
     // Örn: /baskent/forms -> parts = ['baskent', 'forms']
