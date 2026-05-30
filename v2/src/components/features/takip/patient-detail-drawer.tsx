@@ -13,6 +13,7 @@ import { getPatientTrackingDetail, getPatientTimeline, createAppointmentTask, ty
 import { addOpportunityNote, updateOpportunityStage } from "@/app/actions/pipeline";
 import { createBotDelegationTask, schedulePhoneCallTask, completeBotDelegationTask, cancelBotDelegationTask, type BotDelegationMode } from "@/app/actions/focus-queue";
 import { logCallReached, logCallMissed, logCallbackScheduled, logNotInterested } from "@/app/actions/outreach";
+import { formatPhoneReadable } from "@/lib/utils/patient-name-resolver";
 
 // ── Stage Config ──
 
@@ -61,7 +62,7 @@ export default function PatientDetailDrawer({ opportunityId, onClose, onGoToInbo
   const [confirmDialog, setConfirmDialog] = useState<'lost' | 'not_interested' | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
-  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['action', 'appointment', 'profile', 'time', 'ai', 'timeline']));
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['action', 'appointment', 'profile']));
 
   const { data, isLoading, mutate } = useSWR(
     opportunityId ? ['patient-detail', opportunityId] : null,
@@ -196,10 +197,38 @@ export default function PatientDetailDrawer({ opportunityId, onClose, onGoToInbo
                   <span className="px-1.5 py-0.5 bg-emerald-50 text-emerald-600 border border-emerald-200 rounded text-[9px] font-bold uppercase">TEST</span>
                 )}
               </div>
-              <div className="flex items-center gap-2 mt-1 text-[12px] text-[#86868B] font-medium">
-                <span>{data.phoneNumber}</span>
-                {data.source && <span>· {data.source}</span>}
-                {data.department && <span>· {data.department}</span>}
+              <div className="flex items-center gap-3 mt-1.5 text-[12px] text-[#86868B] font-medium flex-wrap">
+                <span className="text-[#1D1D1F] font-semibold">{formatPhoneReadable(data.phoneNumber)}</span>
+                {data.source && <span>· Kaynak: {data.source}</span>}
+                {data.department && <span>· Departman: {data.department}</span>}
+                {data.stage && (
+                  <span className="px-1.5 py-0.5 bg-black/[0.04] text-[#1D1D1F] font-bold rounded text-[10px] uppercase">
+                    {getStageInfo(data.stage).label}
+                  </span>
+                )}
+              </div>
+              {/* Quick links */}
+              <div className="flex items-center gap-3 mt-2 pt-2 border-t border-black/5 flex-wrap">
+                <button
+                  onClick={() => onGoToInbox({ phone_number: data.phoneNumber, display_name: data.patientName, source: data.source })}
+                  className="text-[11px] font-bold text-indigo-600 hover:text-indigo-700 transition-colors flex items-center gap-1"
+                >
+                  💬 Mesaja Git
+                </button>
+                {data.leadRawData && Object.keys(data.leadRawData).length > 0 && (
+                  <button
+                    onClick={() => toggleSection('form')}
+                    className="text-[11px] font-bold text-indigo-600 hover:text-indigo-700 transition-colors flex items-center gap-1"
+                  >
+                    📋 Formu Gör
+                  </button>
+                )}
+                <button
+                  onClick={() => toggleSection('appointment')}
+                  className="text-[11px] font-bold text-indigo-600 hover:text-indigo-700 transition-colors flex items-center gap-1"
+                >
+                  📅 Randevu/Görev Planla
+                </button>
               </div>
             </div>
           ) : null}
@@ -214,21 +243,28 @@ export default function PatientDetailDrawer({ opportunityId, onClose, onGoToInbo
             <>
               {/* 1. Next Best Action Banner */}
               <DrawerSection title="Sıradaki Aksiyon" sectionKey="action" expanded={expandedSections} onToggle={toggleSection}>
-                <div className="flex items-center gap-3 p-4 bg-white rounded-xl border border-black/5 shadow-sm">
-                  <span className="text-2xl">{ACTION_ICONS[data.nextBestAction] || '❓'}</span>
-                  <div className="flex-1">
-                    <p className="text-sm font-bold text-[#1D1D1F]">{data.actionLabel}</p>
-                    <p className="text-xs text-[#86868B] mt-0.5">Journey: {data.journeyStatus}</p>
+                <div className="flex flex-col gap-3 p-4 bg-white rounded-xl border border-black/5 shadow-sm">
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl">{ACTION_ICONS[data.nextBestAction] || '❓'}</span>
+                    <div className="flex-1">
+                      <p className="text-sm font-bold text-[#1D1D1F]">{data.actionLabel}</p>
+                      <p className="text-xs text-[#86868B] mt-0.5">Durum: {data.journeyStatus}</p>
+                    </div>
+                    {/* Quick action buttons */}
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => onGoToInbox({ phone_number: data.phoneNumber, display_name: data.patientName, source: data.source })}
+                        className="flex items-center gap-1.5 px-3 py-2 bg-indigo-600 text-white rounded-lg text-[12px] font-semibold hover:bg-indigo-700 transition-colors"
+                      >
+                        <MessageCircle className="w-3.5 h-3.5" /> Mesaj
+                      </button>
+                    </div>
                   </div>
-                  {/* Quick action buttons */}
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => onGoToInbox({ phone_number: data.phoneNumber, display_name: data.patientName, source: data.source })}
-                      className="flex items-center gap-1.5 px-3 py-2 bg-indigo-600 text-white rounded-lg text-[12px] font-semibold hover:bg-indigo-700 transition-colors"
-                    >
-                      <MessageCircle className="w-3.5 h-3.5" /> Mesaj
-                    </button>
-                  </div>
+                  {data.aiReason && (
+                    <div className="text-[11px] font-medium text-indigo-600 bg-indigo-50/50 p-2.5 rounded border border-indigo-100/80 leading-relaxed">
+                      🎯 <strong>Gerekçe:</strong> {data.aiReason}
+                    </div>
+                  )}
                 </div>
 
                 {/* Call Actions */}
@@ -320,7 +356,7 @@ export default function PatientDetailDrawer({ opportunityId, onClose, onGoToInbo
                   )}
                   {data.timezoneNeedsConfirmation && (
                     <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-amber-50 border border-amber-200 rounded-lg text-[11px] font-semibold text-amber-700">
-                      <AlertTriangle className="w-3.5 h-3.5" /> Saat dilimi onaylanmamış — hastadan doğrulama gerekli
+                      <AlertTriangle className="w-3.5 h-3.5" /> Hasta yerel saati teyitsiz. Aramadan önce saat teyidi önerilir.
                     </div>
                   )}
                   {data.nextFollowUpTurkey && (
@@ -768,7 +804,7 @@ function FormDataDisplay({ rawData, formName }: { rawData: Record<string, any>; 
 
 function TimelineDisplay({ timeline }: { timeline: TimelineEntry[] }) {
   const [showAll, setShowAll] = useState(false);
-  const displayed = showAll ? timeline : timeline.slice(0, 8);
+  const displayed = showAll ? timeline : timeline.slice(0, 3);
 
   if (timeline.length === 0) {
     return (
@@ -804,7 +840,7 @@ function TimelineDisplay({ timeline }: { timeline: TimelineEntry[] }) {
           </div>
         ))}
       </div>
-      {timeline.length > 8 && !showAll && (
+      {timeline.length > 3 && !showAll && (
         <button
           onClick={() => setShowAll(true)}
           className="w-full py-2 text-center text-[11px] font-semibold text-indigo-600 hover:bg-indigo-50 transition-colors border-t border-black/5"

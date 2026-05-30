@@ -10,6 +10,7 @@ import {
   getAppointmentRows, getAppointmentStats, completeAppointmentTask, updateAppointmentConfirmation, rescheduleAppointmentTask,
   type AppointmentRow, type AppointmentFilters 
 } from "@/app/actions/patient-tracking";
+import { formatPhoneReadable } from "@/lib/utils/patient-name-resolver";
 
 // ── Dropdown Hook ──
 function useDropdown() {
@@ -52,13 +53,7 @@ const CONFIRM_TABS = [
 
 // ── Phone formatter ──
 const formatPhone = (phone: string): string => {
-  if (!phone) return '';
-  const clean = phone.replace(/[^0-9]/g, '');
-  if (clean.startsWith('90') && clean.length >= 12) {
-    return `+${clean.slice(0,2)} ${clean.slice(2,5)} ${clean.slice(5,8)} ${clean.slice(8,10)} ${clean.slice(10)}`;
-  }
-  if (clean.length >= 10) return `+${clean}`;
-  return clean;
+  return formatPhoneReadable(phone);
 };
 
 // ── Country flag ──
@@ -160,9 +155,9 @@ export default function AppointmentsTab({ onOpenDrawer, onGoToInbox }: Appointme
             <tr>
               <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase">Tarih & Saat</th>
               <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase">Hasta</th>
-              <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase">Tür</th>
-              <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase">Durum</th>
-              <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase">Teyit</th>
+              <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase">Randevu Türü</th>
+              <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase">Randevu Durumu</th>
+              <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase">Teyit Durumu</th>
               <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase">Saat Bilgisi</th>
               <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase text-right">Aksiyon</th>
             </tr>

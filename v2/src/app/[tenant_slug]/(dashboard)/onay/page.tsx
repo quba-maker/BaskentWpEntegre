@@ -37,6 +37,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { resolvePatientDisplayName, formatPhoneReadable } from "@/lib/utils/patient-name-resolver";
 
 export default function DraftApprovalCenterPage() {
   const params = useParams();
@@ -358,8 +359,14 @@ export default function DraftApprovalCenterPage() {
                 {/* Left: Patient Details & Source */}
                 <div className="space-y-1.5 max-w-sm">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-[13px] font-extrabold text-[#1D1D1F]">{draft.patient_name}</span>
-                    <span className="text-[11px] font-semibold text-[#86868B]">{draft.masked_phone}</span>
+                    <span className="text-[13px] font-extrabold text-[#1D1D1F]">
+                      {resolvePatientDisplayName({
+                        oppPatientName: draft.patient_name,
+                        convPatientName: draft.patient_name,
+                        whatsappProfileName: draft.patient_name
+                      })}
+                    </span>
+                    <span className="text-[11px] font-semibold text-[#86868B]">{formatPhoneReadable(draft.phone)}</span>
                     
                     {draft.risk_flags.length > 0 && (
                       <span className="p-0.5 bg-amber-50 text-amber-600 border border-amber-200 text-[9px] rounded font-bold inline-flex items-center gap-0.5">
@@ -466,8 +473,14 @@ export default function DraftApprovalCenterPage() {
               
               {/* Patient Badge Summary */}
               <div className="bg-white border border-black/5 rounded-2xl p-4 shadow-sm grid grid-cols-2 gap-3 text-[11px] font-semibold text-[#86868B]">
-                <div>Hasta Adı: <span className="text-[#1D1D1F] block mt-0.5">{selectedDraft.patient_name}</span></div>
-                <div>Telefon: <span className="text-[#1D1D1F] block mt-0.5">{selectedDraft.masked_phone}</span></div>
+                <div>Hasta Adı: <span className="text-[#1D1D1F] block mt-0.5">
+                  {resolvePatientDisplayName({
+                    oppPatientName: selectedDraft.patient_name,
+                    convPatientName: selectedDraft.patient_name,
+                    whatsappProfileName: selectedDraft.patient_name
+                  })}
+                </span></div>
+                <div>Telefon: <span className="text-[#1D1D1F] block mt-0.5">{formatPhoneReadable(selectedDraft.phone)}</span></div>
                 <div>Ülke: <span className="text-[#1D1D1F] block mt-0.5">{selectedDraft.country || 'TR'}</span></div>
                 <div>Bölüm: <span className="text-[#1D1D1F] block mt-0.5">{selectedDraft.department || '—'}</span></div>
                 <div>Aşama: <span className="text-[#1D1D1F] block mt-0.5 uppercase tracking-wide text-[9px] font-bold">{selectedDraft.stage}</span></div>

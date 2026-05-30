@@ -2,11 +2,12 @@
 
 import { useState, useEffect } from "react";
 import { useSWRConfig } from "swr";
-import { User, MapPin, Building, Activity, Tag, ChevronDown, ChevronRight, Save, X, Plus, ChevronLeft, Check, Loader2, Sparkles, FileText, Brain } from "lucide-react";
+import { User, MapPin, Building, Activity, Tag, ChevronDown, ChevronRight, Save, X, Plus, ChevronLeft, Check, Loader2, Sparkles, FileText, Brain, Link } from "lucide-react";
 import { useInboxStore } from "@/store/inbox-store";
 import { updateCrmData, addTag, removeTag } from "@/app/actions/inbox";
 import { CustomerAiBrainPanel } from "@/components/features/ai-observability/CustomerAiBrain";
 import { AiTimelinePanel } from "@/components/features/ai-observability/AiTimeline";
+import { resolvePatientDisplayName, formatPhoneReadable } from "@/lib/utils/patient-name-resolver";
 
 const tagTranslationMap: Record<string, string> = {
   "price_sensitive": "fiyat_odaklı",
@@ -196,13 +197,22 @@ export function ContextPanel() {
       </div>
 
       {/* Profile Card */}
-      <div className="p-8 flex flex-col items-center text-center" style={{ borderBottom: "1px solid var(--q-border-default)" }}>
-        <div className="w-24 h-24 rounded-full flex items-center justify-center mb-5 shadow-sm" style={{ background: "rgba(255,255,255,0.6)", border: "1px solid rgba(255,255,255,0.8)" }}>
-          <User className="w-12 h-12 opacity-50" style={{ color: "var(--q-text-secondary)" }} />
+      <div className="p-6 flex flex-col items-center text-center" style={{ borderBottom: "1px solid var(--q-border-default)" }}>
+        <div className="w-20 h-20 rounded-full flex items-center justify-center mb-4 shadow-sm" style={{ background: "rgba(255,255,255,0.6)", border: "1px solid rgba(255,255,255,0.8)" }}>
+          <User className="w-10 h-10 opacity-50" style={{ color: "var(--q-text-secondary)" }} />
         </div>
-        <h2 className="text-xl font-bold tracking-tight" style={{ color: "var(--q-text-primary)" }}>
-          {activeContact.name || activeContact.id}
+        <h2 className="text-lg font-bold tracking-tight" style={{ color: "var(--q-text-primary)" }}>
+          {resolvePatientDisplayName({
+            oppPatientName: activeContact.opp_patient_name || activeContact.patientName || activeContact.patient_name,
+            convPatientName: activeContact.name || activeContact.patientName,
+            whatsappProfileName: activeContact.name || activeContact.patientName,
+            formPatientName: activeContact.form_patient_name || activeContact.formData?.patient_name
+          })}
         </h2>
+        <p className="text-[11px] text-[#86868B] font-semibold mt-1">
+          {formatPhoneReadable(activeContact.id)}
+        </p>
+
         <div className="flex items-center gap-2 mt-3 w-full justify-center">
           <div className="relative group">
             <div className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none">
@@ -224,15 +234,38 @@ export function ContextPanel() {
             </div>
           </div>
         </div>
+
+        {/* Quick Links */}
+        <div className="flex items-center gap-3 mt-3 pt-2.5 border-t border-black/5 flex-wrap justify-center w-full">
+          <a
+            href={`./takip?opp=${activeContact.active_opportunity_id || activeContact.opportunity_id || ''}`}
+            className="text-[11px] font-bold text-indigo-600 hover:text-indigo-700 transition-colors"
+          >
+            🎯 Takipte Aç
+          </a>
+          <a
+            href={`./takip`}
+            className="text-[11px] font-bold text-indigo-600 hover:text-indigo-700 transition-colors"
+          >
+            📅 Randevu Yönetimi
+          </a>
+          {activeContact.formData && (
+            <a
+              href={`./forms`}
+              className="text-[11px] font-bold text-indigo-600 hover:text-indigo-700 transition-colors"
+            >
+              📋 Formu Gör
+            </a>
+          )}
+        </div>
       </div>
 
       <div className="p-5 space-y-7 flex-1">
         {/* Core CRM Data */}
         <div className="space-y-4">
           <div>
-            <label className="text-[10px] font-bold uppercase tracking-widest mb-1.5 block ml-1 flex justify-between" style={{ color: "var(--q-text-secondary)" }}>
+            <label className="text-[10px] font-bold uppercase tracking-widest mb-1.5 block ml-1" style={{ color: "var(--q-text-secondary)" }}>
               Bölüm / Departman
-              <span className="text-[8px] px-1.5 py-0.5 rounded" style={{ color: "var(--q-blue)", background: "var(--q-blue-bg)" }}>AI Destekli</span>
             </label>
             <div className="relative">
               <div className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none">
@@ -290,9 +323,8 @@ export function ContextPanel() {
 
           {/* Görüşme Notları & AI Özeti */}
           <div className="pt-2">
-            <label className="text-[10px] font-bold uppercase tracking-widest mb-1.5 block ml-1 flex justify-between" style={{ color: "var(--q-text-secondary)" }}>
+            <label className="text-[10px] font-bold uppercase tracking-widest mb-1.5 block ml-1" style={{ color: "var(--q-text-secondary)" }}>
               Görüşme Notları & AI Özeti
-              <span className="text-[8px] px-1.5 py-0.5 rounded" style={{ color: "var(--q-blue)", background: "var(--q-blue-bg)" }}>CRM Entegre</span>
             </label>
             <textarea
               value={notes}
@@ -382,33 +414,11 @@ export function ContextPanel() {
           </div>
         </div>
 
-        {/* Lead Score */}
-        <div
-          className="rounded-2xl p-5 relative overflow-hidden"
-          style={{ background: "rgba(255,255,255,0.6)", border: "1px solid var(--q-border-default)", boxShadow: "var(--q-shadow-sm)" }}
-        >
-          <div className="absolute top-0 left-0 w-full h-1 opacity-30" style={{ background: `linear-gradient(to right, transparent, var(--q-green), transparent)` }} />
-          <div className="flex justify-between items-center mb-3">
-            <div className="flex items-center gap-2">
-              <Activity className="w-4 h-4" style={{ color: "var(--q-green)" }} />
-              <span className="text-[13px] font-bold uppercase tracking-wider" style={{ color: "var(--q-text-secondary)" }}>Lead Skoru</span>
-            </div>
-            <span className="text-2xl font-black" style={{ color: "var(--q-text-primary)" }}>{activeContact.score || 0}</span>
-          </div>
-          <div className="h-2 w-full rounded-full overflow-hidden shadow-inner" style={{ background: "var(--q-bg-hover)", border: "1px solid var(--q-border-default)" }}>
-            <div
-              className="h-full rounded-full"
-              style={{ width: `${activeContact.score || 0}%`, background: `linear-gradient(to right, rgba(52,199,89,0.8), var(--q-green))`, boxShadow: "0 0 10px var(--q-green-bg)" }}
-            />
-          </div>
-        </div>
-
         {/* Tags */}
         <div>
           <div className="flex items-center justify-between mb-2">
-            <label className="text-[10px] font-bold uppercase tracking-widest ml-1 flex items-center gap-1.5" style={{ color: "var(--q-text-secondary)" }}>
+            <label className="text-[10px] font-bold uppercase tracking-widest ml-1" style={{ color: "var(--q-text-secondary)" }}>
               Etiketler
-              <span className="text-[8px] px-1.5 py-0.5 rounded" style={{ color: "var(--q-blue)", background: "var(--q-blue-bg)" }}>AI Destekli</span>
             </label>
             {!isAddingTag && (
               <button

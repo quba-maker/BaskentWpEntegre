@@ -8,6 +8,7 @@ import {
   ChevronRight, Moon, AlertTriangle, Bot, Phone
 } from "lucide-react";
 import { getPatientTrackingRows, type PatientTrackingRow, type PatientTrackingFilters } from "@/app/actions/patient-tracking";
+import { formatPhoneReadable } from "@/lib/utils/patient-name-resolver";
 
 // ── Stage Config (same as takip/page) ──
 
@@ -36,13 +37,7 @@ const PRIORITY_CONFIG: Record<string, { label: string; color: string; icon: type
 // ── Phone formatter ──
 
 const formatPhone = (phone: string): string => {
-  if (!phone) return '';
-  const clean = phone.replace(/[^0-9]/g, '');
-  if (clean.startsWith('90') && clean.length >= 12) {
-    return `+${clean.slice(0,2)} ${clean.slice(2,5)} ${clean.slice(5,8)} ${clean.slice(8,10)} ${clean.slice(10)}`;
-  }
-  if (clean.length >= 10) return `+${clean}`;
-  return clean;
+  return formatPhoneReadable(phone);
 };
 
 // ── Dropdown Hook ──
@@ -241,11 +236,11 @@ export default function PatientTrackingTab({ onGoToInbox, onOpenDrawer }: Patien
             <tr>
               <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase w-[140px]">Son Aktivite</th>
               <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase min-w-[200px]">Hasta</th>
-              <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase w-[160px]">Pipeline</th>
-              <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase min-w-[180px]">AI Özet</th>
-              <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase w-[170px]">Aksiyon</th>
+              <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase w-[160px]">Durum</th>
+              <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase min-w-[180px]">Kısa Özet</th>
+              <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase w-[170px]">Sonraki Aksiyon</th>
               <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase w-[140px]">Sonraki Takip</th>
-              <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase text-right w-[100px]"></th>
+              <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase text-right w-[100px]">Aksiyon</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-black/5">
@@ -346,21 +341,21 @@ function PatientRow({ item, onGoToInbox, onOpenDrawer }: {
         </div>
       </td>
 
-      {/* Pipeline */}
+      {/* Durum */}
       <td className="py-3.5 px-4">
         <span className={`inline-flex items-center px-2 py-1 rounded-md text-[10px] font-bold tracking-wide ${item.journeyStatusColor}`}>
           {item.journeyStatus}
         </span>
       </td>
 
-      {/* AI Özet */}
+      {/* Kısa Özet */}
       <td className="py-3.5 px-4">
-        <p className="text-[11px] text-[#1D1D1F] font-medium line-clamp-2 leading-relaxed max-w-[220px]">
+        <p className="text-[11px] text-[#1D1D1F] font-medium line-clamp-1 leading-relaxed max-w-[220px]" title={item.shortSummary}>
           {item.shortSummary}
         </p>
       </td>
 
-      {/* Aksiyon */}
+      {/* Sonraki Aksiyon */}
       <td className="py-3.5 px-4">
         <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold tracking-wide ${item.actionColorClass}`}>
           {item.nextBestAction === 'call_now' && <Phone className="w-3 h-3" />}
@@ -379,13 +374,13 @@ function PatientRow({ item, onGoToInbox, onOpenDrawer }: {
               {item.nextFollowUpTurkey}
             </div>
             {item.nextFollowUpPatientLocal && (
-              <div className="text-[10px] text-[#86868B] mt-0.5">
+              <div className="text-[9px] text-[#86868B] mt-0.5">
                 🌍 {item.nextFollowUpPatientLocal}
               </div>
             )}
             {item.timezoneNeedsConfirmation && (
               <div className="flex items-center gap-0.5 text-[9px] text-amber-600 font-semibold mt-0.5">
-                <AlertTriangle className="w-2.5 h-2.5" /> Saat dilimi onaylanmamış
+                <AlertTriangle className="w-2.5 h-2.5" /> Saat teyidi gerekli
               </div>
             )}
           </div>

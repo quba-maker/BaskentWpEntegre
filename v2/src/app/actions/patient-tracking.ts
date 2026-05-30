@@ -3,6 +3,7 @@
 import { withActionGuard } from "@/lib/core/action-guard";
 import { resolvePatientTimezone, formatDualClock, isOverdue, isToday } from "@/lib/utils/timezone";
 import type { JourneyStatus, NextBestAction } from "./focus-queue";
+import { resolvePatientDisplayName } from "@/lib/utils/patient-name-resolver";
 
 // ═══════════════════════════════════════════════════════════
 // PHASE 2S-P0 — Patient Tracking & Appointment Management
@@ -423,12 +424,9 @@ export async function getPatientTrackingRows(filters?: PatientTrackingFilters): 
 
       rows.forEach(row => {
         let groupId = '';
-        if (row.conv_active_opportunity_id) {
-          groupId = `opp_${row.conv_active_opportunity_id}`;
-        } else if (row.opportunity_id) {
-          groupId = `opp_${row.opportunity_id}`;
-        } else if (row.lead_linked_opportunity_id) {
-          groupId = `opp_${row.lead_linked_opportunity_id}`;
+        const oppId = row.opportunity_id || row.conv_active_opportunity_id || row.lead_linked_opportunity_id;
+        if (oppId) {
+          groupId = `opp_${oppId}`;
         } else if (row.conversation_id) {
           groupId = `conv_${row.conversation_id}`;
         } else if (row.phone_number) {
@@ -486,10 +484,21 @@ export async function getPatientTrackingRows(filters?: PatientTrackingFilters): 
 
         const hasLeadRawData = !!(row.lead_raw_data && typeof row.lead_raw_data === 'object' && Object.keys(row.lead_raw_data).length > 0);
 
+        const formRawData = row.lead_raw_data && typeof row.lead_raw_data === 'object' ? row.lead_raw_data : {};
+        const formFullName = formRawData.full_name || formRawData['full name'] || formRawData['Full Name'] || formRawData['full_name'];
+        const resolvedName = resolvePatientDisplayName({
+          manualPatientName: row.opp_patient_name,
+          oppPatientName: row.opp_patient_name,
+          convPatientName: row.patient_name || row.patientName,
+          whatsappProfileName: row.patient_name || row.patientName,
+          formPatientName: row.lead_raw_data?.patient_name,
+          formRawDataName: formFullName,
+        });
+
         return {
           opportunityId: row.opportunity_id,
           tenantId: row.tenant_id,
-          patientName: row.opp_patient_name || row.lead_raw_data?.patient_name || row.lead_raw_data?.Name || 'İsimsiz',
+          patientName: resolvedName,
           phoneNumber: row.phone_number || '',
           country: resolvedCountry || undefined,
           department: row.opp_department || row.lead_raw_data?.department || 'Genel',
@@ -812,10 +821,10 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
       const conditions = [`t.tenant_id = $1`];
       const values: any[] = [ctx.tenantId];
 
-      // Only appointment-related tasks
+      // Only appointment-relevant tasks (Phone Call, Clinic Visit, Pre-Consultation)
       conditions.push(`(
-        t.task_type IN ('callback_scheduled', 'doctor_review_pending', 'send_report_reminder')
-        OR t.metadata->>'appointment_type' IS NOT NULL
+        t.task_type = 'callback_scheduled'
+        OR t.metadata->>'appointment_type' IN ('phone_call', 'clinic_visit', 'pre_consultation', 'consultation')
       )`);
 
       // Status filter
@@ -943,10 +952,17 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
         const confirmationStatus: AppointmentRow['confirmationStatus'] = 
           row.task_metadata?.confirmation_status || (row.task_metadata?.confirmed ? 'confirmed' : 'pending');
 
+        const resolvedName = resolvePatientDisplayName({
+          manualPatientName: row.opp_patient_name,
+          oppPatientName: row.opp_patient_name,
+          convPatientName: row.patient_name || row.patientName,
+          whatsappProfileName: row.patient_name || row.patientName,
+        });
+
         return {
           taskId: row.task_id,
           opportunityId: row.opportunity_id || undefined,
-          patientName: row.opp_patient_name || 'İsimsiz',
+          patientName: resolvedName,
           phoneNumber: row.phone_number || '',
           country: resolvedCountry || undefined,
           department: row.opp_department || undefined,

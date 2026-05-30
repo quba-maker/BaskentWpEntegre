@@ -17,6 +17,7 @@ import OperationsTab from "@/components/features/takip/operations-tab";
 import PatientTrackingTab from "@/components/features/takip/patient-tracking-tab";
 import AppointmentsTab from "@/components/features/takip/appointments-tab";
 import PatientDetailDrawer from "@/components/features/takip/patient-detail-drawer";
+import AppointmentDetailDrawer from "@/components/features/takip/appointment-detail-drawer";
 
 // ── Formatters ──
 
@@ -147,6 +148,8 @@ export default function TakipPage() {
 
   // Detail drawer
   const [drawerOppId, setDrawerOppId] = useState<string | null>(null);
+  const [drawerMode, setDrawerMode] = useState<'patient' | 'appointment'>('patient');
+  const [drawerTaskId, setDrawerTaskId] = useState<string | null>(null);
   // Legacy detail modal
   const [selectedOpp, setSelectedOpp] = useState<any>(null);
   const [noteText, setNoteText] = useState("");
@@ -287,23 +290,51 @@ export default function TakipPage() {
       {/* HASTA TAKİBİ TAB */}
       {activeTab === 'hasta_takibi' && (
         <div className="flex-1 bg-white rounded-2xl overflow-hidden shadow-sm border border-gray-200">
-          <PatientTrackingTab onGoToInbox={handleGoToInbox} onOpenDrawer={(id) => setDrawerOppId(id)} />
+          <PatientTrackingTab 
+            onGoToInbox={handleGoToInbox} 
+            onOpenDrawer={(id) => {
+              setDrawerOppId(id);
+              setDrawerMode('patient');
+              setDrawerTaskId(null);
+            }} 
+          />
         </div>
       )}
 
       {/* RANDEVU YÖNETİMİ TAB */}
       {activeTab === 'randevu' && (
         <div className="flex-1 bg-white rounded-2xl overflow-hidden shadow-sm border border-gray-200">
-          <AppointmentsTab onGoToInbox={handleGoToInbox} onOpenDrawer={(id) => setDrawerOppId(id)} />
+          <AppointmentsTab 
+            onGoToInbox={handleGoToInbox} 
+            onOpenDrawer={(id) => {
+              setDrawerOppId(id);
+              setDrawerMode('appointment');
+              setDrawerTaskId(null);
+            }} 
+          />
         </div>
       )}
 
-      {/* Patient Detail Drawer (new) */}
-      {drawerOppId && (
+      {/* Patient Detail Drawer */}
+      {drawerOppId && drawerMode === 'patient' && (
         <PatientDetailDrawer
           opportunityId={drawerOppId}
           onClose={() => setDrawerOppId(null)}
           onGoToInbox={handleGoToInbox}
+          onRefresh={() => { mutate(); mutateStats(); }}
+        />
+      )}
+
+      {/* Appointment Detail Drawer */}
+      {drawerOppId && drawerMode === 'appointment' && (
+        <AppointmentDetailDrawer
+          opportunityId={drawerOppId}
+          taskId={drawerTaskId}
+          onClose={() => { setDrawerOppId(null); setDrawerTaskId(null); }}
+          onGoToInbox={handleGoToInbox}
+          onOpenPatientDetail={(id) => {
+            setDrawerMode('patient');
+          }}
           onRefresh={() => { mutate(); mutateStats(); }}
         />
       )}

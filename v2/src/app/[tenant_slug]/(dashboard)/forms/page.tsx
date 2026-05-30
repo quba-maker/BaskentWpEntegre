@@ -8,8 +8,9 @@ import { toggleBotStatus } from "@/app/actions/inbox";
 import { prepareGreetingDraft, sendGreetingMessage, activateBot, getOutreachHistory, logCallReached, logCallMissed, logCallbackScheduled, logNotInterested, getGreetingTemplates, type OutreachLogEntry } from "@/app/actions/outreach";
 import { useInboxStore } from "@/store/inbox-store";
 import { useRouter, useParams } from "next/navigation";
-import { resolveCountry, deduplicatePhones, getCountryInfoByName } from "@/lib/utils/country";
 import { MapPin, Building2, Calendar, Flame, TrendingUp, User } from "lucide-react";
+import { resolvePatientDisplayName, formatPhoneReadable } from "@/lib/utils/patient-name-resolver";
+import { resolveCountry, deduplicatePhones, getCountryInfoByName } from "@/lib/utils/country";
 
 // ═══ P1: Outreach status badge config ═══
 const OUTREACH_BADGE_CONFIG: Record<string, { label: string; color: string; icon: string }> = {
@@ -38,12 +39,40 @@ const formatTime = (dateString: string) => {
   return d.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Istanbul" });
 };
 
-// Get best display name: raw_data.full_name > patient_name
+const isTechnicalKey = (key: string): boolean => {
+  const k = key.toLowerCase();
+  return (
+    k === 'id' ||
+    k === 'leadgen_id' ||
+    k === 'form_id' ||
+    k === 'ad_id' ||
+    k === 'adset_id' ||
+    k === 'campaign_id' ||
+    k === 'platform' ||
+    k === 'is_organic' ||
+    k === 'created_time' ||
+    k === 'phone_number_id' ||
+    k === 'ad_name' ||
+    k === 'adset_name' ||
+    k === 'campaign_name' ||
+    k === 'full_name' ||
+    k === 'phone_number' ||
+    k.startsWith('_') ||
+    k.includes('campaign') ||
+    k.includes('adset') ||
+    k.includes('ad_')
+  );
+};
+
+// Get best display name: resolved using the patient-name-resolver utility
 const getDisplayName = (form: any): string => {
-  const rd = form.raw_data || {};
-  const fullName = rd.full_name || rd['full name'] || rd['Full Name'] || rd['full_name'];
-  if (fullName && fullName.trim()) return fullName.trim();
-  return form.patient_name || 'İsimsiz';
+  return resolvePatientDisplayName({
+    oppPatientName: form.current_display_name || form.patient_name,
+    convPatientName: form.patient_name,
+    whatsappProfileName: form.patient_name,
+    formPatientName: form.patient_name,
+    formRawDataName: form.raw_data?.full_name || form.raw_data?.['full name'] || form.raw_data?.['Full Name'] || form.raw_data?.['full_name']
+  });
 };
 
 // Get best date: raw_data.created_time > created_at
@@ -71,15 +100,9 @@ const getAllPhones = (form: any): string[] => {
   return deduplicatePhones(phones);
 };
 
-// Format phone display
+// Format phone display using formatPhoneReadable
 const formatPhone = (phone: string): string => {
-  if (!phone) return '';
-  const clean = phone.replace(/[^0-9]/g, '');
-  if (clean.startsWith('90') && clean.length >= 12) {
-    return `+${clean.slice(0,2)} ${clean.slice(2,5)} ${clean.slice(5,8)} ${clean.slice(8,10)} ${clean.slice(10)}`;
-  }
-  if (clean.length >= 10) return `+${clean}`;
-  return clean;
+  return formatPhoneReadable(phone);
 };
 
 // Stage definitions
@@ -163,6 +186,7 @@ export default function FormsPage() {
   const [selectedForm, setSelectedForm] = useState<any>(null);
   const [notes, setNotes] = useState("");
   const [isSavingNotes, setIsSavingNotes] = useState(false);
+  const [techOpen, setTechOpen] = useState(false);
 
   // PHASE 2L-P0v2: Outreach state — two-step draft→send flow
   const [outreachLoading, setOutreachLoading] = useState<'draft' | 'sending' | 'bot' | 'call_action' | null>(null);
@@ -284,6 +308,7 @@ export default function FormsPage() {
       setCallActionNote('');
       setShowCallActions(false);
       setSelectedTemplateId(null);
+      setTechOpen(false);
       loadOutreachTimeline(selectedForm.id);
       // Load templates for selector
       getGreetingTemplates().then((t: any[]) => setTemplates(t)).catch(() => setTemplates([]));
@@ -297,6 +322,7 @@ export default function FormsPage() {
       setCallActionNote('');
       setShowCallActions(false);
       setSelectedTemplateId(null);
+      setTechOpen(false);
     }
   }, [selectedForm?.id, loadOutreachTimeline]);
 
@@ -1314,20 +1340,61 @@ export default function FormsPage() {
                   <h3 className="text-sm font-bold text-[#1D1D1F]">Form Yanıtları</h3>
                 </div>
                 <div className="divide-y divide-black/5">
-                  {Object.entries(selectedForm.raw_data || {}).map(([key, value]: [string, any], index) => {
-                    if (!value || typeof value === 'object') return null;
+                  {(() => {
+                    const entries = Object.entries(selectedForm.raw_data || {});
+                    const operationalEntries = entries.filter(([k]) => !isTechnicalKey(k));
+                    const technicalEntries = entries.filter(([k]) => isTechnicalKey(k));
+
                     return (
-                      <div key={index} className="px-4 py-3 flex flex-col">
-                        <span className="text-xs font-semibold text-[#86868B] uppercase tracking-wider mb-1">{key}</span>
-                        <span className="text-[14px] font-medium text-[#1D1D1F] break-words whitespace-pre-wrap">{String(value)}</span>
-                      </div>
+                      <>
+                        {operationalEntries.map(([key, value]: [string, any], index) => {
+                          if (!value || typeof value === 'object') return null;
+                          return (
+                            <div key={index} className="px-4 py-3 flex flex-col">
+                              <span className="text-xs font-semibold text-[#86868B] uppercase tracking-wider mb-1">{key}</span>
+                              <span className="text-[14px] font-medium text-[#1D1D1F] break-words whitespace-pre-wrap">{String(value)}</span>
+                            </div>
+                          );
+                        })}
+                        {operationalEntries.length === 0 && (
+                          <div className="px-4 py-6 text-center text-[#86868B] text-sm font-medium">
+                            Bu formda ek veri bulunmuyor.
+                          </div>
+                        )}
+
+                        {/* Collapsed Technical Ad Data Accordion */}
+                        {technicalEntries.length > 0 && (
+                          <div className="border-t border-black/5 bg-[#F5F5F7]/30">
+                            <button
+                              type="button"
+                              onClick={() => setTechOpen(!techOpen)}
+                              className="w-full px-4 py-3 flex items-center justify-between text-left transition-colors hover:bg-black/[0.02]"
+                            >
+                              <span className="text-xs font-bold text-[#86868B] uppercase tracking-wider">Teknik Reklam Verileri</span>
+                              {techOpen ? (
+                                <ChevronDown className="w-4 h-4 text-[#86868B]" />
+                              ) : (
+                                <ChevronRight className="w-4 h-4 text-[#86868B]" />
+                              )}
+                            </button>
+                            {techOpen && (
+                              <div className="divide-y divide-black/5 border-t border-black/5 bg-white/50">
+                                {technicalEntries.map(([key, value]: [string, any], index) => {
+                                  if (!value || typeof value === 'object') return null;
+                                  return (
+                                    <div key={index} className="px-4 py-2.5 flex flex-col">
+                                      <span className="text-[10px] font-bold text-[#86868B] uppercase tracking-wider mb-0.5">{key}</span>
+                                      <span className="text-xs font-semibold text-[#555] break-all">{String(value)}</span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </>
                     );
-                  })}
-                  {Object.keys(selectedForm.raw_data || {}).length === 0 && (
-                    <div className="px-4 py-6 text-center text-[#86868B] text-sm font-medium">
-                      Bu formda ek veri bulunmuyor.
-                    </div>
-                  )}
+                  })()}
                 </div>
               </div>
 

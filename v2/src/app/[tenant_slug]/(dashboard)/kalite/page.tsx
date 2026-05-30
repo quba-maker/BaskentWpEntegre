@@ -12,6 +12,7 @@ import {
   type QualityRiskItem, type QualityDashboardStats, type RiskType 
 } from "@/app/actions/operation-quality";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
+import { resolvePatientDisplayName, formatPhoneMasked } from "@/lib/utils/patient-name-resolver";
 
 // ── Country Flag Formatter ──
 const getCountryFlag = (country?: string): string => {
@@ -27,31 +28,7 @@ const getCountryFlag = (country?: string): string => {
 
 // ── Phone Masking Helper ──
 const maskPhone = (phone: string): string => {
-  if (!phone) return "";
-  const cleaned = phone.replace(/\D/g, "");
-  if (cleaned.length < 6) return "***";
-
-  let prefix = "";
-  const lastFour = cleaned.slice(-4);
-
-  if (cleaned.startsWith("90") && cleaned.length >= 10) {
-    prefix = "+90";
-  } else if (cleaned.startsWith("49") && cleaned.length >= 10) {
-    prefix = "+49";
-  } else if (cleaned.startsWith("33") && cleaned.length >= 10) {
-    prefix = "+33";
-  } else if (cleaned.startsWith("44") && cleaned.length >= 10) {
-    prefix = "+44";
-  } else if (cleaned.startsWith("1") && cleaned.length >= 10) {
-    prefix = "+1";
-  } else {
-    prefix = `+${cleaned.substring(0, 2)}`;
-  }
-
-  const last2a = lastFour.substring(0, 2);
-  const last2b = lastFour.substring(2, 4);
-
-  return `${prefix} *** ** ${last2a} ${last2b}`;
+  return formatPhoneMasked(phone);
 };
 
 // ── Dropdown Hook ──
@@ -338,7 +315,11 @@ export default function KalitePage() {
                     <td className="py-3.5 px-4">
                       <div>
                         <div className="text-[13px] font-bold text-[#1D1D1F] flex items-center gap-1.5">
-                          {item.patient_name}
+                          {resolvePatientDisplayName({
+                            oppPatientName: item.patient_name,
+                            convPatientName: item.patient_name,
+                            whatsappProfileName: item.patient_name
+                          })}
                           {item.country && (
                             <span className="text-[10px] font-semibold text-[#86868B] bg-[#F5F5F7] px-1 py-0.5 rounded border border-black/5">
                               {getCountryFlag(item.country)} {item.country}
@@ -346,7 +327,7 @@ export default function KalitePage() {
                           )}
                         </div>
                         <div className="text-[11px] text-[#86868B] font-medium mt-0.5">
-                          {item.masked_phone}
+                          {formatPhoneMasked(item.phone)}
                         </div>
                       </div>
                     </td>
@@ -474,11 +455,17 @@ export default function KalitePage() {
                       <div className="grid grid-cols-2 gap-4">
                         <div>
                           <p className="text-[10px] font-bold text-[#86868B] uppercase tracking-wider">İsim</p>
-                          <p className="text-sm font-bold text-[#1D1D1F] mt-0.5">{drawerData.opportunity.patient_name}</p>
+                          <p className="text-sm font-bold text-[#1D1D1F] mt-0.5">
+                            {resolvePatientDisplayName({
+                              oppPatientName: drawerData.opportunity.patient_name,
+                              convPatientName: drawerData.opportunity.patient_name,
+                              whatsappProfileName: drawerData.opportunity.patient_name
+                            })}
+                          </p>
                         </div>
                         <div>
                           <p className="text-[10px] font-bold text-[#86868B] uppercase tracking-wider">Telefon</p>
-                          <p className="text-sm font-bold text-[#1D1D1F] mt-0.5">{maskPhone(drawerData.opportunity.phone_number)}</p>
+                          <p className="text-sm font-bold text-[#1D1D1F] mt-0.5">{formatPhoneMasked(drawerData.opportunity.phone_number)}</p>
                         </div>
                         <div>
                           <p className="text-[10px] font-bold text-[#86868B] uppercase tracking-wider">Departman / Ülke</p>
