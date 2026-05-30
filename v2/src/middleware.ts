@@ -100,7 +100,23 @@ export async function middleware(req: NextRequest) {
     const userRole = payload.role as string;
     const sessionTenantSlug = payload.tenantSlug as string;
     
-    // URL Analizi (Path-based routing)
+    // ── API Route Bypass ──
+    // /api/* paths are NOT UI pages — they must NOT go through tenant slug isolation.
+    // Each API route manages its own auth guard:
+    //   /api/ably/auth       → JWT session + rate limit
+    //   /api/panel/upload    → getSession() JWT
+    //   /api/sse/*           → JWT token verify
+    //   /api/admin/*         → CRON_SECRET / platform_admin check
+    //   /api/cron*           → CRON_SECRET Bearer
+    //   /api/webhooks/*      → Meta signature / QStash Receiver
+    //   /api/follow-up       → CRON_SECRET Bearer
+    //   /api/setup           → ADMIN_SETUP_KEY
+    //   /api/health          → public read-only
+    if (cleanPath.startsWith("/api/")) {
+      return NextResponse.next();
+    }
+
+    // URL Analizi (Path-based routing) — UI pages only
     // Örn: /baskent/forms -> parts = ['baskent', 'forms']
     const parts = pathname.split('/').filter(Boolean);
     const urlTenantSlug = parts[0];
