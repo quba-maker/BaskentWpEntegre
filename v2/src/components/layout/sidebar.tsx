@@ -15,7 +15,8 @@ import {
   Radar,
   ShieldAlert,
   Zap,
-  CheckSquare
+  CheckSquare,
+  Activity
 } from "lucide-react";
 import { getSession, logout, stopImpersonation } from "@/lib/auth/session";
 import { redirect } from "next/navigation";
@@ -91,6 +92,9 @@ export async function Sidebar({ tenantData }: { tenantData?: TenantBootstrapData
         
         {/* DRAFT APPROVAL CENTER */}
         <NavLink href={`/${session?.tenantSlug || ''}/onay`} icon={<CheckSquare className="w-[18px] h-[18px]" />} label="Onay Merkezi" />
+        
+        {/* OPERASYON KALİTESİ */}
+        <NavLink href={`/${session?.tenantSlug || ''}/kalite`} icon={<Activity className="w-[18px] h-[18px]" />} label="Operasyon Kalitesi" />
         
         {/* AI MODULES */}
         {session?.role !== "viewer" && (
