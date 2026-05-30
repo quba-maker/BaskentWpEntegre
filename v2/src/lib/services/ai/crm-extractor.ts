@@ -71,7 +71,7 @@ export class CRMExtractorService {
         modelId: llmModel,
         apiKey: apiKey,
         temperature: 0.1, // Düşük temperature, deterministik çıktı için
-        maxTokens: 1500, // CRM JSON has ~20 fields, 600 was causing truncation
+        maxTokens: 8000, // Increased to 8000 to accommodate reasoning/thinking tokens
         responseFormat: 'json' as const
       };
 

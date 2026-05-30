@@ -147,9 +147,10 @@ export class ConversationService {
       optOutRequested?: boolean;
       cancellationReason?: string;
       shouldStopFollowUp?: boolean;
+      newIdentityDetected?: boolean;
     }
   ): Promise<void> {
-    if (!data.patientName && !data.country && !data.department && !data.pipelineStage && !data.tags && !data.explicitCancellation) {
+    if (!data.patientName && !data.country && !data.department && !data.pipelineStage && !data.tags && !data.explicitCancellation && !data.newIdentityDetected) {
       return;
     }
 
@@ -183,7 +184,7 @@ export class ConversationService {
       await this.db.executeSafe(sql`
         UPDATE conversations 
         SET 
-          patient_name = COALESCE(${data.patientName || null}, patient_name),
+          patient_name = CASE WHEN ${data.newIdentityDetected || false} = true THEN ${data.patientName || null} ELSE COALESCE(${data.patientName || null}, patient_name) END,
           country = COALESCE(${normalizedCountry}, country),
           department = COALESCE(${data.department || null}, department),
           tags = ${JSON.stringify(mergedTags)}::jsonb

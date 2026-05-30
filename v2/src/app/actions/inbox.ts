@@ -630,7 +630,7 @@ export async function sendMediaMessage(phone: string, mediaUrl: string, mediaTyp
   });
 }
 
-export async function updateCrmData(phone: string, stage: string, department: string, country?: string, notes?: string) {
+export async function updateCrmData(phone: string, stage: string, department: string, country?: string, notes?: string, patientName?: string) {
   if (!phone) return { success: false };
 
   return withActionGuard(
@@ -660,6 +660,14 @@ export async function updateCrmData(phone: string, stage: string, department: st
             oppUpdateFields.push(`country = $${oppIdx++}`);
             oppValues.push(country);
           }
+          if (notes !== undefined && notes !== null) {
+            oppUpdateFields.push(`summary = $${oppIdx++}`);
+            oppValues.push(notes);
+          }
+          if (patientName !== undefined && patientName !== null) {
+            oppUpdateFields.push(`patient_name = $${oppIdx++}`);
+            oppValues.push(patientName);
+          }
           if (oppUpdateFields.length > 0) {
             oppUpdateFields.push(`updated_at = NOW()`);
             oppValues.push(activeOppId, ctx.tenantId);
@@ -675,19 +683,19 @@ export async function updateCrmData(phone: string, stage: string, department: st
       if (country !== undefined) {
         try {
           await ctx.db.executeSafe({
-            text: `UPDATE conversations SET department = $1, country = $2, notes = $3 WHERE phone_number = $4 AND tenant_id = $5`,
-            values: [department, country, notes !== undefined ? notes : null, phone, ctx.tenantId]
+            text: `UPDATE conversations SET department = $1, country = $2, notes = $3, patient_name = COALESCE(NULLIF($4, ''), patient_name) WHERE phone_number = $5 AND tenant_id = $6`,
+            values: [department, country, notes !== undefined ? notes : null, patientName || '', phone, ctx.tenantId]
           });
         } catch (e) {
           await ctx.db.executeSafe({
-            text: `UPDATE conversations SET department = $1, notes = $2 WHERE phone_number = $3 AND tenant_id = $4`,
-            values: [department, notes !== undefined ? notes : null, phone, ctx.tenantId]
+            text: `UPDATE conversations SET department = $1, notes = $2, patient_name = COALESCE(NULLIF($3, ''), patient_name) WHERE phone_number = $4 AND tenant_id = $5`,
+            values: [department, notes !== undefined ? notes : null, patientName || '', phone, ctx.tenantId]
           });
         }
       } else {
         await ctx.db.executeSafe({
-          text: `UPDATE conversations SET department = $1, notes = $2 WHERE phone_number = $3 AND tenant_id = $4`,
-          values: [department, notes !== undefined ? notes : null, phone, ctx.tenantId]
+          text: `UPDATE conversations SET department = $1, notes = $2, patient_name = COALESCE(NULLIF($3, ''), patient_name) WHERE phone_number = $4 AND tenant_id = $5`,
+          values: [department, notes !== undefined ? notes : null, patientName || '', phone, ctx.tenantId]
         });
       }
 

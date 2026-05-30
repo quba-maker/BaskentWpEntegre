@@ -1618,7 +1618,7 @@ export class QueueWorkerEngine {
       }
       
       await convService.updateCrmIntelligence(phoneNumber, {
-        patientName: crmData?.patient_name,
+        patientName: crmData?.patient_name || crmData?.requester_name || detectedNewName || undefined,
         country: resolvedCountryForConv,
         department: crmData?.department,
         pipelineStage: effectivePipelineStage,
@@ -1627,6 +1627,7 @@ export class QueueWorkerEngine {
         optOutRequested,
         cancellationReason: cancellationReason || undefined,
         shouldStopFollowUp,
+        newIdentityDetected: newIdentityDetected || crmData?.new_identity_detected || false,
       });
 
       // ═══ P0-4: CRM_CONVERSATION_UPDATE_RESULT — after-snapshot ═══
@@ -1877,9 +1878,10 @@ export class QueueWorkerEngine {
             const newOppCountry = crmData.country || deterministicCountry;
             const newOppId = await oppService.upsertFromCrm({
               tenantId, conversationId, phoneNumber, channel,
-              patientName: detectedNewName || crmData.patient_name,
+              patientName: detectedNewName || crmData.patient_name || crmData.requester_name || undefined,
               crmData: newOppCrmData, lastCustomerMessageAt: new Date().toISOString(),
-              traceId, externalCountry: newOppCountry
+              traceId, externalCountry: newOppCountry,
+              newIdentityDetected: newIdentityDetected || crmData?.new_identity_detected || false
             });
             
             if (newOppId) {
@@ -1931,9 +1933,10 @@ export class QueueWorkerEngine {
             if (crmData.should_create_opportunity) {
               const oppId = await oppService.upsertFromCrm({
                 tenantId, conversationId, phoneNumber, channel,
-                patientName: crmData.patient_name,
+                patientName: crmData.patient_name || crmData.requester_name || detectedNewName || undefined,
                 crmData, lastCustomerMessageAt: new Date().toISOString(),
-                traceId, externalCountry: resolvedCountryForOpp
+                traceId, externalCountry: resolvedCountryForOpp,
+                newIdentityDetected: newIdentityDetected || crmData?.new_identity_detected || false
               });
               if (oppId) {
                 this.log.info(`[WORKER_OPP_OK] Opportunity upserted`, { traceId, oppId });

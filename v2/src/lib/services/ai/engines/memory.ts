@@ -126,23 +126,28 @@ export class MemoryEngine {
         modelId: 'gemini-2.5-flash',
         apiKey: apiKey,
         temperature: 0.2,
-        maxTokens: 2000
+        maxTokens: 8000
       });
 
       const rawText = aiResult.text.trim();
       
-      // Strip markdown code fences (```json ... ``` or ``` ... ```)
-      let strippedText = rawText;
-      const fenceMatch = rawText.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
-      if (fenceMatch) {
-        strippedText = fenceMatch[1].trim();
+      // Bulletproof JSON extraction: find outermost curly braces
+      const firstBrace = rawText.indexOf('{');
+      const lastBrace = rawText.lastIndexOf('}');
+      
+      if (firstBrace === -1 || lastBrace === -1 || lastBrace < firstBrace) {
+        throw new Error(`Invalid JSON format returned by LLM. No matching braces found in response: ${rawText}`);
       }
       
-      // Robust JSON extraction to ignore any conversational prefix/suffix
-      const jsonMatch = strippedText.match(/\{[\s\S]*\}/);
-      const cleanedJson = jsonMatch ? jsonMatch[0] : strippedText;
+      const cleanedJson = rawText.substring(firstBrace, lastBrace + 1).trim();
       
-      const parsed = JSON.parse(cleanedJson);
+      let parsed;
+      try {
+        parsed = JSON.parse(cleanedJson);
+      } catch (jsonErr: any) {
+        log.error('[MEMORY_JSON_PARSE_ERROR] Cleaned JSON parsing failed:', jsonErr, { cleanedJson });
+        throw new Error(`JSON parsing failed: ${jsonErr.message}. Raw text: ${rawText}`);
+      }
       
       // P1B: Two-tier summary extraction
       const crmSummary = parsed.crm_summary || parsed.summary_text || parsed.summary || parsed.text || "Özet oluşturulamadı.";

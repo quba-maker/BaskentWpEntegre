@@ -1,5 +1,6 @@
 export interface PatientNameContext {
   manualPatientName?: string | null;
+  oppRequesterName?: string | null;
   oppPatientName?: string | null;
   convPatientName?: string | null;
   customerDisplayName?: string | null;
@@ -20,7 +21,12 @@ export function resolvePatientDisplayName(ctx?: PatientNameContext | null): stri
     return ctx.manualPatientName.trim();
   }
 
-  // 2. Aktif opportunity patient_name
+  // 2. Aktif opportunity requester_name (who is actively chatting)
+  if (ctx.oppRequesterName && ctx.oppRequesterName.trim()) {
+    return ctx.oppRequesterName.trim();
+  }
+
+  // 3. Aktif opportunity patient_name
   if (ctx.oppPatientName && ctx.oppPatientName.trim()) {
     return ctx.oppPatientName.trim();
   }

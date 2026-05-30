@@ -75,6 +75,7 @@ export interface OpportunityUpsertInput {
   lastCustomerMessageAt?: string;
   traceId: string;
   externalCountry?: string; // Deterministic country from phone prefix
+  newIdentityDetected?: boolean;
 }
 
 export class OpportunityService {
@@ -120,7 +121,7 @@ export class OpportunityService {
   }
 
   async upsertFromCrm(input: OpportunityUpsertInput): Promise<string | null> {
-    const { tenantId, conversationId, phoneNumber, channel, patientName, crmData, lastCustomerMessageAt, traceId, externalCountry } = input;
+    const { tenantId, conversationId, phoneNumber, channel, patientName, crmData, lastCustomerMessageAt, traceId, externalCountry, newIdentityDetected } = input;
 
     // Resolve country: externalCountry (deterministic) > crmData.country
     // Resolve country: AI extraction (patient's own words) > phone prefix (deterministic guess)
@@ -178,7 +179,8 @@ export class OpportunityService {
           new_country_param: resolvedCountry || '(empty→will keep existing)',
           travel_date_param: travelDate || '(null→will keep existing)',
           currentStage: current.stage,
-          priority: `${current.priority} → ${finalPriority}`
+          priority: `${current.priority} → ${finalPriority}`,
+          newIdentityDetected: !!newIdentityDetected
         });
 
         await this.db.executeSafe({
@@ -188,7 +190,7 @@ export class OpportunityService {
                    department = COALESCE(NULLIF($3, ''), department),
                    country = COALESCE(NULLIF($4, ''), country),
                    language = COALESCE(NULLIF($5, ''), language),
-                   patient_name = COALESCE(NULLIF($6, ''), patient_name),
+                   patient_name = CASE WHEN $17 = true THEN NULLIF($6, '') ELSE COALESCE(NULLIF($6, ''), patient_name) END,
                    -- P1B: summary NOT written here — exclusively owned by MemoryEngine
                    ai_reason = COALESCE(NULLIF($7, ''), ai_reason),
                    next_follow_up_at = COALESCE($8, next_follow_up_at),
@@ -216,7 +218,8 @@ export class OpportunityService {
             crmData.requires_human_confirmation || false,
             JSON.stringify(metadata),
             current.id,
-            tenantId
+            tenantId,
+            newIdentityDetected || false
           ]
         });
 

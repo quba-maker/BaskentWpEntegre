@@ -53,10 +53,27 @@ export function ContextPanel() {
   const { activeContact, mobileView, setMobileView } = useInboxStore();
   const [formOpen, setFormOpen] = useState(false);
   const [aiSummaryOpen, setAiSummaryOpen] = useState(true);
+  const getInitialNotes = (contact: typeof activeContact) => {
+    if (!contact) return "";
+    return contact.notes || contact.ai_crm_summary || contact.aiSummary?.text || contact.ai_summary || "";
+  };
+  const getInitialPatientName = (contact: typeof activeContact) => {
+    if (!contact) return "";
+    return resolvePatientDisplayName({
+      oppRequesterName: contact.opp_requester_name,
+      oppPatientName: contact.opp_patient_name || contact.patientName || contact.patient_name,
+      convPatientName: contact.name || contact.patientName,
+      whatsappProfileName: contact.name || contact.patientName,
+      formPatientName: contact.form_patient_name || contact.formData?.patient_name
+    });
+  };
+
   const [stage, setStage] = useState(activeContact?.stage || "new");
   const [department, setDepartment] = useState(activeContact?.department || "");
   const [country, setCountry] = useState(activeContact?.country || "");
-  const [notes, setNotes] = useState(activeContact?.notes || "");
+  const [notes, setNotes] = useState(getInitialNotes(activeContact));
+  const [patientName, setPatientName] = useState(getInitialPatientName(activeContact));
+  const [isEditingName, setIsEditingName] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
 
@@ -78,12 +95,14 @@ export function ContextPanel() {
       setStage(activeContact.stage || "new");
       setDepartment(activeContact.department || "");
       setCountry(activeContact.country || "");
-      setNotes(activeContact.notes || "");
+      setNotes(getInitialNotes(activeContact));
+      setPatientName(getInitialPatientName(activeContact));
+      setIsEditingName(false);
       setIsAddingTag(false);
       setNewTagVal("");
       setSaveStatus("idle");
     }
-  }, [contactId, contactDept, contactCountry, contactNotes, contactStage]);
+  }, [contactId, contactDept, contactCountry, contactNotes, contactStage, activeContact?.opp_requester_name, activeContact?.opp_patient_name, activeContact?.patient_name]);
 
   if (!activeContact) {
     return (
@@ -99,11 +118,13 @@ export function ContextPanel() {
     setIsSaving(true);
     setSaveStatus("saving");
 
-    const res = await updateCrmData(activeContact.id, stage, department, country, notes);
+    const res = await updateCrmData(activeContact.id, stage, department, country, notes, patientName);
     if (res.success) {
       useInboxStore.getState().setActiveContact(activeContact.id, {
         ...activeContact,
         stage, department, country, notes,
+        name: patientName,
+        opp_patient_name: patientName
       });
       mutate((key) => Array.isArray(key) && key[0] === "conversations");
       setSaveStatus("saved");
@@ -201,14 +222,43 @@ export function ContextPanel() {
         <div className="w-20 h-20 rounded-full flex items-center justify-center mb-4 shadow-sm" style={{ background: "rgba(255,255,255,0.6)", border: "1px solid rgba(255,255,255,0.8)" }}>
           <User className="w-10 h-10 opacity-50" style={{ color: "var(--q-text-secondary)" }} />
         </div>
-        <h2 className="text-lg font-bold tracking-tight" style={{ color: "var(--q-text-primary)" }}>
-          {resolvePatientDisplayName({
-            oppPatientName: activeContact.opp_patient_name || activeContact.patientName || activeContact.patient_name,
-            convPatientName: activeContact.name || activeContact.patientName,
-            whatsappProfileName: activeContact.name || activeContact.patientName,
-            formPatientName: activeContact.form_patient_name || activeContact.formData?.patient_name
-          })}
-        </h2>
+        {isEditingName ? (
+          <div className="flex items-center gap-2 justify-center w-full max-w-[220px]">
+            <input
+              type="text"
+              value={patientName}
+              onChange={(e) => setPatientName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") setIsEditingName(false);
+                if (e.key === "Escape") {
+                  setPatientName(getInitialPatientName(activeContact));
+                  setIsEditingName(false);
+                }
+              }}
+              className="text-center font-bold text-[15px] px-2 py-1 rounded-lg w-full outline-none"
+              style={{ background: "var(--q-bg-hover)", border: "1px solid var(--q-blue)", color: "var(--q-text-primary)" }}
+              autoFocus
+            />
+            <button
+              onClick={() => setIsEditingName(false)}
+              className="p-1 rounded-md transition-colors hover:bg-black/5 cursor-pointer flex-shrink-0"
+              title="Tamam"
+            >
+              <Check className="w-4 h-4" style={{ color: "var(--q-green)" }} />
+            </button>
+          </div>
+        ) : (
+          <div 
+            onClick={() => setIsEditingName(true)}
+            className="group flex items-center gap-1.5 justify-center cursor-pointer rounded-lg px-2.5 py-0.5 hover:bg-black/[0.04] transition-all"
+            title="İsmi düzenlemek için tıklayın"
+          >
+            <h2 className="text-lg font-bold tracking-tight" style={{ color: "var(--q-text-primary)" }}>
+              {patientName || "İsimsiz"}
+            </h2>
+            <Sparkles className="w-3.5 h-3.5 opacity-0 group-hover:opacity-60 transition-opacity" style={{ color: "var(--q-blue)" }} />
+          </div>
+        )}
         <p className="text-[11px] text-[#86868B] font-semibold mt-1">
           {formatPhoneReadable(activeContact.id)}
         </p>
@@ -321,96 +371,50 @@ export function ContextPanel() {
             </select>
           </div>
 
-          {/* Görüşme Notları & AI Özeti */}
+          {/* AI Görüşme Özeti */}
           <div className="pt-2">
-            <label className="text-[10px] font-bold uppercase tracking-widest mb-1.5 block ml-1" style={{ color: "var(--q-text-secondary)" }}>
-              Görüşme Notları & AI Özeti
-            </label>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Görüşmeyle ilgili notlarınızı yazın..."
-              className="w-full h-24 bg-white/60 border border-black/5 rounded-xl p-3 text-sm text-[#1D1D1F] placeholder:text-[#86868B] focus:ring-2 focus:ring-[#007AFF]/40 resize-none outline-none transition-all shadow-sm"
-              style={{ border: "1px solid var(--q-border-default)" }}
-            />
-
-            {/* P1B: AI CRM Summary Panel (from active opportunity.summary) */}
-            {(() => {
-              // P1B: Primary source is ai_crm_summary (opportunity.summary via MemoryEngine)
-              const aiText = activeContact.ai_crm_summary || activeContact.aiSummary?.text || activeContact.ai_summary;
-              const aiIntent = activeContact.aiSummary?.buying_intent || activeContact.ai_buying_intent;
-              const aiSentiment = activeContact.aiSummary?.sentiment || activeContact.ai_sentiment;
-              
-              if (!aiText) return null;
-
-              return (
-                <div className="mt-4 p-4 rounded-2xl relative overflow-hidden transition-all duration-300 shadow-sm border"
-                     style={{ background: "rgba(175, 82, 222, 0.05)", borderColor: "rgba(175, 82, 222, 0.2)" }}>
-                  <div className="absolute top-0 left-0 w-full h-[2px] opacity-70" style={{ background: "linear-gradient(to right, transparent, #AF52DE, transparent)" }} />
-                  
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-2">
-                      <div className="w-2 h-2 rounded-full" style={{ background: "#AF52DE" }} />
-                      <span className="text-[11px] font-bold uppercase tracking-wider flex items-center gap-1" style={{ color: "var(--q-purple)" }}>
-                        <Brain className="w-3.5 h-3.5" /> AI CRM Özeti
-                      </span>
-                    </div>
-                    
-                    <div className="flex gap-1.5">
+            <div className="flex items-center justify-between mb-1.5 ml-1">
+              <label className="text-[10px] font-bold uppercase tracking-widest block" style={{ color: "var(--q-text-secondary)" }}>
+                AI Görüşme Özeti
+              </label>
+              <div className="flex items-center gap-1.5">
+                {(() => {
+                  const aiIntent = activeContact.aiSummary?.buying_intent || activeContact.ai_buying_intent;
+                  const aiSentiment = activeContact.aiSummary?.sentiment || activeContact.ai_sentiment;
+                  return (
+                    <>
                       {aiIntent && (
-                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded shadow-sm" style={{ background: "var(--q-bg-primary)", color: "var(--q-text-secondary)", border: "1px solid var(--q-border-default)" }}>
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded shadow-sm" 
+                              style={{ background: "var(--q-bg-primary)", color: "var(--q-text-secondary)", border: "1px solid var(--q-border-default)" }}>
                           {aiIntent}
                         </span>
                       )}
                       {aiSentiment && (
-                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded shadow-sm" style={{ background: "var(--q-bg-primary)", color: "var(--q-text-secondary)", border: "1px solid var(--q-border-default)" }}>
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded shadow-sm" 
+                              style={{ background: "var(--q-bg-primary)", color: "var(--q-text-secondary)", border: "1px solid var(--q-border-default)" }}>
                           {aiSentiment}
                         </span>
                       )}
-                    </div>
-                  </div>
-                  
-                  <p className="text-[12px] font-medium leading-relaxed italic mb-3" style={{ color: "var(--q-text-primary)" }}>
-                    "{aiText}"
-                  </p>
-                  
-                  {notes !== aiText && (
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        // 1. Instantly update local UI
-                        setNotes(aiText);
-                        setIsSaving(true);
-                        setSaveStatus("saving");
-                        
-                        // 2. Instantly update the store to prevent the `useEffect` from resetting it during the await
-                        useInboxStore.getState().setActiveContact(activeContact.id, {
-                          ...activeContact,
-                          notes: aiText,
-                        });
-
-                        // 3. Send request
-                        const res = await updateCrmData(activeContact.id, stage, department, country, aiText);
-                        if (res.success) {
-                          mutate((key) => Array.isArray(key) && key[0] === "conversations");
-                          setSaveStatus("saved");
-                          setTimeout(() => setSaveStatus("idle"), 2000);
-                        } else {
-                          setSaveStatus("error");
-                          setTimeout(() => setSaveStatus("idle"), 3000);
-                        }
-                        setIsSaving(false);
-                      }}
-                      disabled={isSaving}
-                      className="w-full py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-md cursor-pointer disabled:opacity-50 hover:opacity-90"
-                      style={{ background: "#AF52DE", color: "white" }}
-                    >
-                      <FileText className="w-3.5 h-3.5" /> {(!notes || notes.trim() === "") ? "Nota Aktar ve Kaydet" : "AI ile Güncelle ve Kaydet"}
-                    </button>
-                  )}
-                </div>
-              );
-            })()}
+                    </>
+                  );
+                })()}
+                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full flex items-center gap-1 shadow-sm transition-all duration-300"
+                      style={{ 
+                        background: "rgba(175, 82, 222, 0.08)", 
+                        color: "#AF52DE", 
+                        border: "1px solid rgba(175, 82, 222, 0.2)" 
+                      }}>
+                  <Brain className="w-2.5 h-2.5" /> AI AKTİF
+                </span>
+              </div>
+            </div>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Görüşmeyle ilgili özet veya notlar..."
+              className="w-full h-32 bg-white/60 border border-black/5 rounded-xl p-3 text-sm text-[#1D1D1F] placeholder:text-[#86868B] focus:ring-2 focus:ring-[#AF52DE]/30 resize-none outline-none transition-all shadow-sm focus:border-[#AF52DE]/40"
+              style={{ border: "1px solid var(--q-border-default)" }}
+            />
           </div>
         </div>
 
