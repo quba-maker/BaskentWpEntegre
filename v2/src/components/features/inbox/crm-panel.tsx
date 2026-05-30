@@ -272,12 +272,27 @@ export function ContextPanel() {
               value={country}
               onChange={(e) => setCountry(e.target.value)}
               className="pl-8 pr-6 py-1.5 rounded-full text-xs font-semibold outline-none transition-all appearance-none cursor-pointer"
-              style={{ background: "var(--q-bg-hover)", color: "var(--q-text-primary)", border: "1px solid transparent" }}
+              style={{ background: "var(--q-bg-hover)", color: "var(--q-text-primary)", border: "1px solid var(--q-border-default)" }}
             >
               <option value="" disabled>Ülke Seç...</option>
-              {["Türkiye", "Almanya", "İngiltere", "Fransa", "Hollanda", "Belçika", "Portekiz", "İspanya", "İtalya", "İsviçre", "Avusturya", "İsveç", "Danimarka", "Norveç", "Polonya", "Yunanistan", "Romanya", "Bulgaristan", "Ukrayna", "Rusya", "Azerbaycan", "Özbekistan", "Kazakistan", "Gürcistan", "Irak", "Ürdün", "Lübnan", "Suudi Arabistan", "BAE", "ABD", "Avustralya", "Diğer"].map((c) => (
-                <option key={c} value={c}>{c}</option>
-              ))}
+              {(() => {
+                const predefined = [
+                  "Türkiye", "Almanya", "Finlandiya", "İngiltere", "Fransa", 
+                  "Hollanda", "Belçika", "Portekiz", "İspanya", "İtalya", 
+                  "İsviçre", "Avusturya", "İsveç", "Danimarka", "Norveç", 
+                  "Polonya", "Yunanistan", "Romanya", "Bulgaristan", "Ukrayna", 
+                  "Rusya", "Azerbaycan", "Özbekistan", "Kazakistan", "Gürcistan", 
+                  "Irak", "Ürdün", "Lübnan", "Suudi Arabistan", "BAE", 
+                  "ABD", "Avustralya", "Diğer"
+                ];
+                const allCountries = [...predefined];
+                if (country && !predefined.includes(country)) {
+                  allCountries.splice(2, 0, country);
+                }
+                return allCountries.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ));
+              })()}
             </select>
             <div className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none">
               <ChevronDown className="w-3 h-3" style={{ color: "var(--q-text-secondary)" }} />
