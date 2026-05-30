@@ -319,10 +319,15 @@ export default function PatientDetailDrawer({ opportunityId, onClose, onGoToInbo
               )}
 
               {/* 6. Tasks / Appointments */}
-              {data.tasks.length > 0 && (
-                <DrawerSection title={`Aktif Görevler (${data.tasks.length})`} sectionKey="tasks" expanded={expandedSections} onToggle={toggleSection}>
+              {data.tasks.filter(t => t.taskType !== 'appointment_reminder').length > 0 && (
+                <DrawerSection 
+                  title={`Aktif Görevler (${data.tasks.filter(t => t.taskType !== 'appointment_reminder').length})`} 
+                  sectionKey="tasks" 
+                  expanded={expandedSections} 
+                  onToggle={toggleSection}
+                >
                   <div className="space-y-2">
-                    {data.tasks.map(task => (
+                    {data.tasks.filter(t => t.taskType !== 'appointment_reminder').map(task => (
                       <div key={task.id} className="p-3 bg-white rounded-xl border border-black/5 shadow-sm">
                         <div className="flex items-center justify-between">
                           <span className="text-[12px] font-bold text-[#1D1D1F]">{task.title}</span>
@@ -341,6 +346,58 @@ export default function PatientDetailDrawer({ opportunityId, onClose, onGoToInbo
                         )}
                       </div>
                     ))}
+                  </div>
+                </DrawerSection>
+              )}
+
+              {/* 6.5. Reminder Tasks list */}
+              {data.tasks.filter(t => t.taskType === 'appointment_reminder').length > 0 && (
+                <DrawerSection 
+                  title={`Planlanmış Hatırlatıcılar (${data.tasks.filter(t => t.taskType === 'appointment_reminder').length})`} 
+                  sectionKey="reminders" 
+                  expanded={expandedSections} 
+                  onToggle={toggleSection}
+                >
+                  <div className="space-y-2">
+                    {data.tasks.filter(t => t.taskType === 'appointment_reminder').map(task => {
+                      const meta = typeof task.metadata === 'string' ? JSON.parse(task.metadata) : (task.metadata || {});
+                      const typeLabel = meta.reminder_type === '3_days_before' ? '3 Gün Önce teyit' : meta.reminder_type === '1_day_before' ? '1 Gün Önce teyit' : meta.reminder_type === 'same_day' ? 'Aynı Gün hatırlatma' : 'Özel Hatırlatma';
+                      return (
+                        <div key={task.id} className="p-3 bg-white rounded-xl border border-black/5 shadow-sm space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[12px] font-bold text-[#1D1D1F] flex items-center gap-1.5">
+                              ⏰ {typeLabel}
+                            </span>
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                              task.status === 'pending' ? 'bg-blue-50 text-blue-700' : 'bg-green-50 text-green-700'
+                            }`}>
+                              {task.status === 'pending' ? 'Bekliyor' : task.status}
+                            </span>
+                          </div>
+                          
+                          <div className="grid grid-cols-2 gap-2 text-[11px] text-[#86868B] font-medium">
+                            <div>🇹🇷 TR: {meta.operation_due_at_tr || '—'}</div>
+                            <div>🌍 Hasta Yerel: {meta.patient_local_time || '—'}</div>
+                          </div>
+
+                          {meta.generated_draft && (
+                            <div className="mt-2 p-2 bg-[#F5F5F7] rounded-lg border border-black/5 flex flex-col gap-1.5">
+                              <p className="text-[11px] text-[#1D1D1F] italic font-semibold">Hazır Taslak (Koordinatör İçin):</p>
+                              <p className="text-[11px] text-[#1D1D1F] bg-white p-2 rounded border border-black/5 whitespace-pre-wrap">{meta.generated_draft}</p>
+                              <button
+                                onClick={() => {
+                                  navigator.clipboard.writeText(meta.generated_draft);
+                                  alert("Taslak kopyalandı!");
+                                }}
+                                className="self-end flex items-center gap-1 text-[10px] font-bold text-indigo-600 hover:text-indigo-700 transition-colors"
+                              >
+                                <Copy className="w-3 h-3" /> Kopyala
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </DrawerSection>
               )}
@@ -622,6 +679,20 @@ function AppointmentForm({ opportunityId, onComplete }: { opportunityId: string;
   const [note, setNote] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // Reminder Planning Selection States (Phase 2U-P0)
+  const [remind3Days, setRemind3Days] = useState(false);
+  const [remind1Day, setRemind1Day] = useState(true);
+  const [remindSameDay, setRemindSameDay] = useState(true);
+
+  // Auto-select 3 days reminder for clinic visits to assist coordinator
+  useEffect(() => {
+    if (type === 'clinic_visit') {
+      setRemind3Days(true);
+    } else {
+      setRemind3Days(false);
+    }
+  }, [type]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!date || !time) return;
@@ -629,10 +700,16 @@ function AppointmentForm({ opportunityId, onComplete }: { opportunityId: string;
     try {
       const localDateStr = `${date}T${time}:00`;
       const dateObj = new Date(localDateStr);
+
+      const reminders: { type: '3_days_before' | '1_day_before' | 'same_day' }[] = [];
+      if (remind3Days) reminders.push({ type: '3_days_before' });
+      if (remind1Day) reminders.push({ type: '1_day_before' });
+      if (remindSameDay) reminders.push({ type: 'same_day' });
       
       const res = await createAppointmentTask(opportunityId, dateObj.toISOString(), type, { 
         note, 
-        requireConfirmation: type === 'clinic_visit' 
+        requireConfirmation: type === 'clinic_visit',
+        reminders
       });
       
       if (res.success) {
@@ -676,6 +753,43 @@ function AppointmentForm({ opportunityId, onComplete }: { opportunityId: string;
           <input type="time" value={time} onChange={e => setTime(e.target.value)} required className="w-full px-3 py-2 bg-[#F5F5F7] rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-500/40" />
         </div>
       </div>
+
+      {/* Reminder Selection Checkboxes (Phase 2U-P0) */}
+      <div className="pt-2 border-t border-black/5 space-y-2">
+        <span className="block text-[11px] font-semibold text-[#86868B] mb-1">⏰ Planlı Hatırlatıcılar</span>
+        <div className="flex flex-col gap-2">
+          <label className="flex items-center gap-2 text-[12px] font-medium text-[#1D1D1F] cursor-pointer">
+            <input 
+              type="checkbox" 
+              checked={remind3Days} 
+              onChange={e => setRemind3Days(e.target.checked)} 
+              className="w-3.5 h-3.5 rounded border-black/10 text-indigo-600 focus:ring-indigo-500/40 cursor-pointer"
+            />
+            <span>3 Gün Önce Teyit Arama Görevi Planla</span>
+          </label>
+          
+          <label className="flex items-center gap-2 text-[12px] font-medium text-[#1D1D1F] cursor-pointer">
+            <input 
+              type="checkbox" 
+              checked={remind1Day} 
+              onChange={e => setRemind1Day(e.target.checked)} 
+              className="w-3.5 h-3.5 rounded border-black/10 text-indigo-600 focus:ring-indigo-500/40 cursor-pointer"
+            />
+            <span>1 Gün Önce Teyit Arama Görevi Planla</span>
+          </label>
+
+          <label className="flex items-center gap-2 text-[12px] font-medium text-[#1D1D1F] cursor-pointer">
+            <input 
+              type="checkbox" 
+              checked={remindSameDay} 
+              onChange={e => setRemindSameDay(e.target.checked)} 
+              className="w-3.5 h-3.5 rounded border-black/10 text-indigo-600 focus:ring-indigo-500/40 cursor-pointer"
+            />
+            <span>Aynı Gün Hatırlatma Arama Görevi Planla</span>
+          </label>
+        </div>
+      </div>
+
       <button type="submit" disabled={loading || !date || !time} className="w-full py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold disabled:opacity-40 hover:bg-indigo-700 transition-colors mt-2">
         {loading ? 'Oluşturuluyor...' : 'Planla'}
       </button>

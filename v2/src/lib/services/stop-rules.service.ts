@@ -30,7 +30,13 @@ export type StopReason =
   | 'automation_disabled_opp'
   | 'automation_disabled_tenant'
   | 'max_attempts_reached'
-  | 'appointment_booked';
+  | 'appointment_booked'
+  | 'parent_task_completed'
+  | 'parent_task_cancelled'
+  | 'parent_appointment_arrived'
+  | 'parent_appointment_no_show'
+  | 'parent_appointment_rescheduled'
+  | 'opportunity_terminal_stage';
 
 export interface StopRuleResult {
   shouldStop: boolean;
@@ -46,6 +52,7 @@ export interface StopRuleInput {
   taskCreatedAt?: string;       // ISO string — for patient_responded check
   maxAttempts?: number;
   currentAttempt?: number;
+  taskId?: string;              // YENİ: Görevin kendi ID'si
 }
 
 // Internal task types that should NOT be blocked by patient_responded
@@ -54,6 +61,7 @@ const INTERNAL_TASK_TYPES = new Set([
   'coordinator_review',
   'doctor_review_pending',
   'custom',
+  'appointment_reminder', // YENİ: Reminders are internal
 ]);
 
 // Terminal opportunity stages
@@ -71,6 +79,7 @@ export class StopRuleEngine {
    * Returns { shouldStop: false } if no rule triggered.
    * 
    * Rule evaluation order (first match wins):
+   * 0. Parent task check (for appointment reminders)
    * 1. Opportunity stage is terminal
    * 2. Opportunity automation_status = 'stopped' or 'paused'
    * 3. Opportunity opt_out_requested = true
@@ -81,13 +90,72 @@ export class StopRuleEngine {
    */
   async evaluate(input: StopRuleInput): Promise<StopRuleResult> {
     try {
+      // ── Rule 0: Parent task check (for reminders) ──
+      if (input.taskType === 'appointment_reminder' && input.taskId) {
+        const taskRows = await this.db.executeSafe({
+          text: `SELECT metadata FROM follow_up_tasks WHERE id = $1 AND tenant_id = $2`,
+          values: [input.taskId, input.tenantId]
+        }) as any[];
+        
+        if (taskRows.length > 0) {
+          const taskMeta = typeof taskRows[0].metadata === 'string' 
+            ? JSON.parse(taskRows[0].metadata) 
+            : (taskRows[0].metadata || {});
+            
+          const parentTaskId = taskMeta.parent_task_id;
+          if (parentTaskId) {
+            const parentRows = await this.db.executeSafe({
+              text: `SELECT status, metadata FROM follow_up_tasks WHERE id = $1 AND tenant_id = $2`,
+              values: [parentTaskId, input.tenantId]
+            }) as any[];
+            
+            if (parentRows.length > 0) {
+              const parent = parentRows[0];
+              const parentMeta = typeof parent.metadata === 'string'
+                ? JSON.parse(parent.metadata)
+                : (parent.metadata || {});
+
+              if (parent.status === 'completed') {
+                const result = parentMeta.appointment_result || 'completed';
+                let mappedReason: StopReason = 'parent_task_completed';
+                if (result === 'arrived') mappedReason = 'parent_appointment_arrived';
+                else if (result === 'no_show') mappedReason = 'parent_appointment_no_show';
+                
+                return {
+                  shouldStop: true,
+                  reason: mappedReason,
+                  detail: `Parent appointment completed with result: ${result}`,
+                };
+              }
+              
+              if (parent.status === 'cancelled') {
+                const isRescheduled = parent.skipped_reason === 'parent_appointment_rescheduled';
+                return {
+                  shouldStop: true,
+                  reason: isRescheduled ? 'parent_appointment_rescheduled' : 'parent_task_cancelled',
+                  detail: isRescheduled 
+                    ? 'Parent appointment has been rescheduled' 
+                    : 'Parent appointment has been cancelled',
+                };
+              }
+            } else {
+              return {
+                shouldStop: true,
+                reason: 'parent_task_cancelled',
+                detail: 'Parent appointment task not found',
+              };
+            }
+          }
+        }
+      }
+
       // ── Rule 1-3: Opportunity-level checks (single query) ──
       if (input.opportunityId) {
         const oppRows = await this.db.executeSafe({
           text: `SELECT stage, automation_status, 
-                        COALESCE((metadata->>'opt_out_requested')::boolean, false) as opt_out
-                 FROM opportunities 
-                 WHERE id = $1 AND tenant_id = $2`,
+                         COALESCE((metadata->>'opt_out_requested')::boolean, false) as opt_out
+                  FROM opportunities 
+                  WHERE id = $1 AND tenant_id = $2`,
           values: [input.opportunityId, input.tenantId]
         }) as any[];
 
@@ -98,7 +166,7 @@ export class StopRuleEngine {
           if (TERMINAL_STAGES.has(opp.stage)) {
             return {
               shouldStop: true,
-              reason: 'stage_terminal',
+              reason: 'opportunity_terminal_stage',
               detail: `Opportunity stage is terminal: ${opp.stage}`,
             };
           }

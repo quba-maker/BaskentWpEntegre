@@ -116,6 +116,7 @@ async function handleV2TaskEngine(request: NextRequest) {
             phoneNumber: task.phone_number,
             taskType: task.task_type,
             taskCreatedAt: task.created_at,
+            taskId: task.id, // YENİ: Pass task ID to evaluate parent task checks!
           });
 
           if (stopResult.shouldStop) {
@@ -123,7 +124,7 @@ async function handleV2TaskEngine(request: NextRequest) {
             
             if (!dryRun) {
               // Semantic status mapping: skipped vs cancelled
-              if (['lost', 'not_qualified', 'arrived', 'not_interested', 'appointment_booked', 'stage_terminal', 'patient_opted_out'].includes(stopReason)) {
+              if (['lost', 'not_qualified', 'arrived', 'not_interested', 'appointment_booked', 'stage_terminal', 'patient_opted_out', 'opportunity_terminal_stage', 'parent_task_completed', 'parent_task_cancelled', 'parent_appointment_arrived', 'parent_appointment_no_show', 'parent_appointment_rescheduled'].includes(stopReason)) {
                 await taskService.cancel(task.id, tenant.id, `StopRule: ${stopReason}`);
               } else {
                 await taskService.skip(task.id, tenant.id, `StopRule: ${stopReason}`);
@@ -134,7 +135,7 @@ async function handleV2TaskEngine(request: NextRequest) {
             simulatedActions.push({ 
               tenant: tenant.slug,
               taskId: task.id, 
-              action: ['lost', 'not_qualified', 'arrived', 'not_interested', 'appointment_booked', 'stage_terminal', 'patient_opted_out'].includes(stopReason) ? 'cancelled' : 'skipped', 
+              action: ['lost', 'not_qualified', 'arrived', 'not_interested', 'appointment_booked', 'stage_terminal', 'patient_opted_out', 'opportunity_terminal_stage', 'parent_task_completed', 'parent_task_cancelled', 'parent_appointment_arrived', 'parent_appointment_no_show', 'parent_appointment_rescheduled'].includes(stopReason) ? 'cancelled' : 'skipped', 
               reason: stopReason 
             });
             continue;
@@ -150,6 +151,129 @@ async function handleV2TaskEngine(request: NextRequest) {
               taskId: task.id,
               action: 'skipped_deduplicated',
               reason: 'already_notified'
+            });
+            continue;
+          }
+
+          // YENİ: IF task type is appointment_reminder, handle reminder specific lifecycle (Phase 2U-P0)
+          if (task.task_type === 'appointment_reminder') {
+            const pName = task.patient_name || 'Değerli Hastamız';
+            const apptType = metadata.appointment_type === 'clinic_visit' ? 'Klinik Randevusu' : 'Görüşme/Randevu';
+            let apptTimeStr = '';
+            try {
+              apptTimeStr = new Date(metadata.scheduled_for_appointment_at).toLocaleString('tr-TR', {
+                timeZone: 'Europe/Istanbul',
+                day: 'numeric',
+                month: 'long',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+              });
+            } catch (_) {
+              apptTimeStr = metadata.scheduled_for_appointment_at;
+            }
+
+            let draftMsg = '';
+            if (metadata.reminder_type === '3_days_before') {
+              draftMsg = `Merhaba ${pName}, ${apptTimeStr} tarihindeki ${apptType}nuzu teyit etmek için sizinle iletişime geçmek istedik. Uygunluğunuzu teyit edebilir misiniz?`;
+            } else if (metadata.reminder_type === '1_day_before') {
+              draftMsg = `Merhaba ${pName}, yarın (${apptTimeStr}) gerçekleşecek olan ${apptType}nuzu hatırlatmak istedik. Herhangi bir değişiklik var mıdır?`;
+            } else if (metadata.reminder_type === 'same_day') {
+              draftMsg = `Merhaba ${pName}, bugün saat ${apptTimeStr.split(',')[1]?.trim() || ''}da gerçekleşecek olan ${apptType}nuzu hatırlatmak istedik. Görüşmek üzere.`;
+            } else {
+              draftMsg = `Merhaba ${pName}, ${apptTimeStr} tarihindeki ${apptType}nuzu hatırlatmak istedik.`;
+            }
+
+            // Zero Outbound Safety: Bu taslak sadece koordinatör içindir. Hastaya otomatik gönderilmez!
+            draftMsg += '\n\n*(Not: Bu taslak sadece koordinatör içindir, hastaya otomatik gönderilmez.)*';
+
+            if (!dryRun) {
+              // 1. Send Panel + Telegram internal notification
+              await notifService.send({
+                tenantId: tenant.id,
+                category: 'appointment_approaching',
+                title: `⏰ Randevu Hatırlatma (${metadata.reminder_type === '3_days_before' ? '3 Gün Önce' : metadata.reminder_type === '1_day_before' ? '1 Gün Önce' : 'Aynı Gün'} Teyit)`,
+                body: `Hasta: ${task.patient_name || 'Bilinmiyor'}. Koordinatör için hazır taslak hazırlandı.\n\nTaslak: "${draftMsg}"`,
+                priority: 'normal',
+                opportunityId: task.opportunity_id,
+                taskId: task.id,
+                conversationId: task.conversation_id,
+                phoneNumber: task.phone_number,
+                metadata: {
+                  patient_name: task.patient_name,
+                  country: task.country,
+                  turkeyTime: metadata.operation_due_at_tr,
+                  patientLocalTime: metadata.patient_local_time,
+                  draft: draftMsg,
+                }
+              });
+
+              // 2. Add draft to parent task metadata
+              const parentTaskId = metadata.parent_task_id;
+              if (parentTaskId) {
+                const parentRes = await db.executeSafe({
+                  text: `SELECT metadata FROM follow_up_tasks WHERE id = $1 AND tenant_id = $2`,
+                  values: [parentTaskId, tenant.id]
+                }) as any[];
+                if (parentRes.length > 0) {
+                  const parentMeta = typeof parentRes[0].metadata === 'string'
+                    ? JSON.parse(parentRes[0].metadata)
+                    : (parentRes[0].metadata || {});
+                  
+                  if (!parentMeta.reminder_drafts) parentMeta.reminder_drafts = [];
+                  parentMeta.reminder_drafts.push({
+                    reminder_type: metadata.reminder_type,
+                    draft: draftMsg,
+                    generated_at: new Date().toISOString()
+                  });
+                  
+                  await db.executeSafe({
+                    text: `UPDATE follow_up_tasks SET metadata = $1::jsonb WHERE id = $2 AND tenant_id = $3`,
+                    values: [JSON.stringify(parentMeta), parentTaskId, tenant.id]
+                  });
+                }
+              }
+
+              // 3. Mark reminder task completed and store draft
+              const updatedMetadata = { 
+                ...metadata, 
+                generated_draft: draftMsg,
+                generated_draft_at: new Date().toISOString(),
+                notification_sent_at: new Date().toISOString()
+              };
+              await db.executeSafe({
+                text: `UPDATE follow_up_tasks SET status = 'completed', metadata = $1::jsonb, updated_at = NOW() WHERE id = $2 AND tenant_id = $3`,
+                values: [JSON.stringify(updatedMetadata), task.id, tenant.id]
+              });
+
+              // 4. outreach_logs (Action: appointment_reminder_draft_prepared)
+              await db.executeSafe({
+                text: `INSERT INTO outreach_logs (tenant_id, opportunity_id, action, channel, actor_id, metadata)
+                       VALUES ($1, $2, 'appointment_reminder_draft_prepared', 'system', 'cron_v2', $3)`,
+                values: [
+                  tenant.id,
+                  task.opportunity_id,
+                  JSON.stringify({
+                    parent_task_id: parentTaskId,
+                    reminder_task_id: task.id,
+                    reminder_type: metadata.reminder_type,
+                    draft: draftMsg,
+                    zero_outbound_p0: true
+                  })
+                ]
+              });
+            }
+
+            notified++;
+            totalNotified++;
+            processed++;
+            totalProcessed++;
+            simulatedActions.push({
+              tenant: tenant.slug,
+              taskId: task.id,
+              action: 'reminder_processed',
+              reminder_type: metadata.reminder_type,
+              draft: draftMsg
             });
             continue;
           }
