@@ -62,7 +62,7 @@ export default function PatientDetailDrawer({ opportunityId, onClose, onGoToInbo
   const [confirmDialog, setConfirmDialog] = useState<'lost' | 'not_interested' | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
-  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['action', 'appointment', 'profile']));
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['action', 'ai']));
 
   const { data, isLoading, mutate } = useSWR(
     opportunityId ? ['patient-detail', opportunityId] : null,
@@ -133,6 +133,44 @@ export default function PatientDetailDrawer({ opportunityId, onClose, onGoToInbo
     onRefresh?.();
   };
 
+  const handleUnreachableAction = async () => {
+    if (!opportunityId) return;
+    setActionLoading('missed');
+    try {
+      await logCallMissed(opportunityId);
+      setActionSuccess('Ulaşılamadı kaydedildi, otopilot devam ediyor.');
+      mutate();
+      onRefresh?.();
+      setTimeout(() => {
+        onClose();
+      }, 1000);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleReachedAction = async () => {
+    if (!opportunityId) return;
+    setActionLoading('reached');
+    try {
+      await logCallReached(opportunityId);
+      setActionSuccess('Ulaşıldı olarak işaretlendi. Lütfen randevu planlayın.');
+      mutate();
+      onRefresh?.();
+      setExpandedSections(prev => {
+        const next = new Set(prev);
+        next.add('appointment');
+        return next;
+      });
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   const handleCompleteBotTask = async (taskId: string) => {
     setActionLoading(taskId);
     try {
@@ -192,23 +230,50 @@ export default function PatientDetailDrawer({ opportunityId, onClose, onGoToInbo
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
                 <h2 className="text-lg font-bold text-[#1D1D1F] truncate">{data.patientName}</h2>
-                {data.country && <span className="text-sm">{getCountryFlag(data.country)} {data.country}</span>}
                 {data.isTestWhitelist && (
                   <span className="px-1.5 py-0.5 bg-emerald-50 text-emerald-600 border border-emerald-200 rounded text-[9px] font-bold uppercase">TEST</span>
                 )}
               </div>
+              
+              {/* Sub-header text info */}
               <div className="flex items-center gap-3 mt-1.5 text-[12px] text-[#86868B] font-medium flex-wrap">
                 <span className="text-[#1D1D1F] font-semibold">{formatPhoneReadable(data.phoneNumber)}</span>
                 {data.source && <span>· Kaynak: {data.source}</span>}
                 {data.department && <span>· Departman: {data.department}</span>}
-                {data.stage && (
-                  <span className="px-1.5 py-0.5 bg-black/[0.04] text-[#1D1D1F] font-bold rounded text-[10px] uppercase">
-                    {getStageInfo(data.stage).label}
+              </div>
+
+              {/* Notion-style Metadata Tags */}
+              <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                {data.country && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-black/[0.04] text-[#1D1D1F]/80 rounded-md text-[10px] font-semibold">
+                    <Globe className="w-3 h-3 text-[#86868B]" /> {getCountryFlag(data.country)} {data.country}
+                  </span>
+                )}
+                {data.language && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-black/[0.04] text-[#1D1D1F]/80 rounded-md text-[10px] font-semibold">
+                    🗣️ {data.language}
+                  </span>
+                )}
+                {data.priority && (
+                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase ${
+                    data.priority.toLowerCase() === 'hot'
+                      ? 'bg-red-50 text-red-600 border border-red-100'
+                      : 'bg-black/[0.04] text-[#1D1D1F]/80'
+                  }`}>
+                    🔥 {data.priority}
+                  </span>
+                )}
+                {data.intentType && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-black/[0.04] text-[#1D1D1F]/80 rounded-md text-[10px] font-semibold">
+                    🎯 {data.intentType}
                   </span>
                 )}
               </div>
-              {/* Quick links */}
-              <div className="flex items-center gap-3 mt-2 pt-2 border-t border-black/5 flex-wrap">
+
+              {/* Quick links & Stage Selector (Linear style) */}
+              <div className="flex items-center gap-3 mt-3 pt-2.5 border-t border-black/5 flex-wrap">
+                <StageSelector currentStage={data.stage || 'new_lead'} onStageChange={handleStageChange} />
+                <span className="text-black/10">|</span>
                 <button
                   onClick={() => onGoToInbox({ phone_number: data.phoneNumber, display_name: data.patientName, source: data.source })}
                   className="text-[11px] font-bold text-indigo-600 hover:text-indigo-700 transition-colors flex items-center gap-1"
@@ -268,42 +333,50 @@ export default function PatientDetailDrawer({ opportunityId, onClose, onGoToInbo
                 </div>
 
                 {/* Call Actions */}
-                <div className="flex gap-2 mt-2 flex-wrap">
-                  <button
-                    onClick={() => handleCallAction('reached')}
-                    disabled={!!actionLoading}
-                    className="flex items-center gap-1 px-3 py-1.5 bg-green-50 text-green-700 border border-green-200 rounded-lg text-[11px] font-semibold hover:bg-green-100 transition-colors disabled:opacity-50"
-                  >
-                    <Phone className="w-3 h-3" /> Ulaşıldı
-                  </button>
-                  <button
-                    onClick={() => handleCallAction('missed')}
-                    disabled={!!actionLoading}
-                    className="flex items-center gap-1 px-3 py-1.5 bg-orange-50 text-orange-700 border border-orange-200 rounded-lg text-[11px] font-semibold hover:bg-orange-100 transition-colors disabled:opacity-50"
-                  >
-                    <Phone className="w-3 h-3" /> Ulaşılamadı
-                  </button>
-                  <button
-                    onClick={() => handleCallAction('callback')}
-                    disabled={!!actionLoading}
-                    className="flex items-center gap-1 px-3 py-1.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg text-[11px] font-semibold hover:bg-purple-100 transition-colors disabled:opacity-50"
-                  >
-                    <Calendar className="w-3 h-3" /> Geri Arama
-                  </button>
-                  <button
-                    onClick={() => setConfirmDialog('lost')}
-                    disabled={!!actionLoading}
-                    className="flex items-center gap-1 px-3 py-1.5 bg-red-50 text-red-600 border border-red-200 rounded-lg text-[11px] font-semibold hover:bg-red-100 transition-colors disabled:opacity-50"
-                  >
-                    <XCircle className="w-3 h-3" /> Kayıp
-                  </button>
-                  <button
-                    onClick={() => setConfirmDialog('not_interested')}
-                    disabled={!!actionLoading}
-                    className="flex items-center gap-1 px-3 py-1.5 bg-gray-50 text-gray-600 border border-gray-200 rounded-lg text-[11px] font-semibold hover:bg-gray-100 transition-colors disabled:opacity-50"
-                  >
-                    <XCircle className="w-3 h-3" /> İlgilenmiyor
-                  </button>
+                <div className="flex flex-col gap-2 mt-3">
+                  <div className="flex gap-3">
+                    <button
+                      onClick={handleReachedAction}
+                      disabled={!!actionLoading}
+                      className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all duration-200 hover:shadow-md disabled:opacity-50"
+                    >
+                      <CheckCircle2 className="w-4 h-4" /> Ulaşıldı (Randevu Planla)
+                    </button>
+                    <button
+                      onClick={handleUnreachableAction}
+                      disabled={!!actionLoading}
+                      className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold shadow-sm transition-all duration-200 hover:shadow-md disabled:opacity-50"
+                    >
+                      <XCircle className="w-4 h-4" /> Ulaşılamadı (Bot Takip Devam)
+                    </button>
+                  </div>
+                  
+                  {/* Secondary/Admin Actions */}
+                  <div className="flex gap-4 mt-2.5 pt-2 border-t border-black/5 justify-between flex-wrap">
+                    <button
+                      onClick={() => handleCallAction('callback')}
+                      disabled={!!actionLoading}
+                      className="text-[10px] font-bold text-[#86868B] hover:text-indigo-600 transition-colors flex items-center gap-1"
+                    >
+                      📅 Geri Arama Planla
+                    </button>
+                    <div className="flex gap-3">
+                      <button
+                        onClick={() => setConfirmDialog('lost')}
+                        disabled={!!actionLoading}
+                        className="text-[10px] font-bold text-red-500 hover:text-red-600 transition-colors flex items-center gap-1"
+                      >
+                        ❌ Fırsatı Kaybet
+                      </button>
+                      <button
+                        onClick={() => setConfirmDialog('not_interested')}
+                        disabled={!!actionLoading}
+                        className="text-[10px] font-bold text-[#86868B] hover:text-red-500 transition-colors flex items-center gap-1"
+                      >
+                        🚫 İlgilenmiyor
+                      </button>
+                    </div>
+                  </div>
                 </div>
 
                 {actionSuccess && (
@@ -318,23 +391,7 @@ export default function PatientDetailDrawer({ opportunityId, onClose, onGoToInbo
                 <AppointmentForm opportunityId={opportunityId!} onComplete={() => { mutate(); onRefresh?.(); }} />
               </DrawerSection>
 
-              {/* 2. Profile Card */}
-              <DrawerSection title="Hasta Künyesi" sectionKey="profile" expanded={expandedSections} onToggle={toggleSection}>
-                <div className="grid grid-cols-2 gap-3 p-4 bg-white rounded-xl border border-black/5 shadow-sm">
-                  <InfoField icon={<Building2 className="w-3.5 h-3.5" />} label="Departman" value={data.department || '—'} />
-                  <InfoField icon={<Globe className="w-3.5 h-3.5" />} label="Ülke" value={data.country ? `${getCountryFlag(data.country)} ${data.country}` : '—'} />
-                  <InfoField icon={<Globe className="w-3.5 h-3.5" />} label="Dil" value={data.language || '—'} />
-                  <InfoField icon={<Zap className="w-3.5 h-3.5" />} label="Kaynak" value={data.source || '—'} />
-                  <InfoField icon={<Flame className="w-3.5 h-3.5" />} label="Öncelik" value={data.priority || '—'} />
-                  <InfoField icon={<Sparkles className="w-3.5 h-3.5" />} label="Niyet" value={data.intentType || '—'} />
-                  <div className="col-span-2">
-                    <p className="text-[10px] font-semibold text-[#86868B] uppercase tracking-wider mb-1">Aşama</p>
-                    <StageSelector currentStage={data.stage || 'new_lead'} onStageChange={handleStageChange} />
-                  </div>
-                  <InfoField icon={<Calendar className="w-3.5 h-3.5" />} label="Oluşturulma" value={data.createdAt ? new Date(data.createdAt).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Europe/Istanbul' }) : '—'} />
-                  <InfoField icon={<Calendar className="w-3.5 h-3.5" />} label="Son Güncelleme" value={data.updatedAt ? new Date(data.updatedAt).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Europe/Istanbul' }) : '—'} />
-                </div>
-              </DrawerSection>
+
 
               {/* 3. Time Intelligence */}
               <DrawerSection title="Zaman & Lokasyon" sectionKey="time" expanded={expandedSections} onToggle={toggleSection}>
