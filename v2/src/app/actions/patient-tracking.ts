@@ -2167,7 +2167,7 @@ export async function recordBotDirectiveSent(taskId: string, type: 'teyit' | 'ha
   );
 }
 
-export async function approveBotSuggestion(taskId: string, proposedDate: string) {
+export async function approveBotSuggestion(taskId: string, proposedDate?: string) {
   return withActionGuard(
     { actionName: 'approveBotSuggestion' },
     async (ctx) => {
@@ -2198,11 +2198,13 @@ export async function approveBotSuggestion(taskId: string, proposedDate: string)
       metadata.confirmation_status = 'confirmed';
       metadata.confirmed = true;
 
+      const targetDate = (proposedDate && proposedDate.trim().length > 0) ? proposedDate : null;
+
       await ctx.db.executeSafe({
         text: `UPDATE follow_up_tasks 
-               SET due_at = $1, status = 'pending', metadata = $2, updated_at = NOW() 
+               SET due_at = COALESCE($1::timestamp with time zone, due_at), status = 'pending', metadata = $2, updated_at = NOW() 
                WHERE id = $3 AND tenant_id = $4`,
-        values: [proposedDate, JSON.stringify(metadata), taskId, ctx.tenantId]
+        values: [targetDate, JSON.stringify(metadata), taskId, ctx.tenantId]
       });
 
       // 4. Log successful approval to outreach logs
