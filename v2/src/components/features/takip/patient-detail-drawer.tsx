@@ -7,7 +7,7 @@ import useSWR from "swr";
 import {
   X, MessageCircle, Phone, Bot, Calendar, Clock, MapPin,
   ChevronDown, ChevronUp, Flame, Thermometer, Snowflake,
-  Moon, AlertTriangle, FileText, StickyNote, Send,
+  Moon, AlertTriangle, AlertCircle, FileText, StickyNote, Send,
   XCircle, Sparkles, User, Globe, Building2, Zap, Copy,
   CheckCircle2, ExternalLink, Trash2, Edit3, Check,
   Play, Download, Image, Mic, ChevronLeft, ChevronRight,
@@ -227,6 +227,56 @@ export default function PatientDetailDrawer({
   const [manualConfirmation, setManualConfirmation] = useState<string>("");
   const [isUpdatingManualStatus, setIsUpdatingManualStatus] = useState(false);
 
+  // Custom premium dialog states & helpers
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  }>({
+    isOpen: false,
+    title: "",
+    message: "",
+    onConfirm: () => {},
+  });
+
+  const [alertModal, setAlertModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+  }>({
+    isOpen: false,
+    title: "",
+    message: "",
+  });
+
+  const [cancelPromptModal, setCancelPromptModal] = useState<{
+    isOpen: boolean;
+    taskId: string;
+    reason: string;
+  }>({
+    isOpen: false,
+    taskId: "",
+    reason: "Koordinatör iptal etti",
+  });
+
+  const showConfirm = (title: string, message: string, onConfirm: () => void) => {
+    setConfirmModal({
+      isOpen: true,
+      title,
+      message,
+      onConfirm,
+    });
+  };
+
+  const showAlert = (title: string, message: string) => {
+    setAlertModal({
+      isOpen: true,
+      title,
+      message,
+    });
+  };
+
   // Selector Option Computations
   const yearsOptions = useMemo(() => {
     const currentYear = new Date().getFullYear();
@@ -387,11 +437,11 @@ export default function PatientDetailDrawer({
         mutate();
         onRefresh?.();
       } else {
-        alert(res.error || "Güncelleme başarısız.");
+        showAlert("Hata", res.error || "Güncelleme başarısız.");
       }
     } catch (err: any) {
       console.error(err);
-      alert("Hata oluştu.");
+      showAlert("Hata", "Hata oluştu.");
     } finally {
       setIsUpdatingManualStatus(false);
     }
@@ -448,7 +498,29 @@ export default function PatientDetailDrawer({
     if (!opportunityId) return;
     const targetTaskId = activeTaskId || activeTask?.id;
     if (!targetTaskId) {
-      alert("Randevu görevi bulunamadı.");
+      showAlert("Hata", "Randevu görevi bulunamadı.");
+      return;
+    }
+
+    if (action === 'cancel') {
+      showConfirm(
+        "Randevuyu İptal Et",
+        "Bu randevuyu iptal etmek istediğinize emin misiniz? Bu işlem geri alınamaz.",
+        async () => {
+          setActionLoading(action);
+          try {
+            await completeAppointmentTask(targetTaskId, 'cancelled');
+            setActionSuccess('Aksiyon başarıyla kaydedildi.');
+            mutate();
+            onRefresh?.();
+          } catch (e) {
+            console.error(e);
+            showAlert("Hata", "İşlem sırasında bir hata oluştu.");
+          } finally {
+            setActionLoading(null);
+          }
+        }
+      );
       return;
     }
 
@@ -461,20 +533,13 @@ export default function PatientDetailDrawer({
       else if (action === 'no_response') await updateAppointmentConfirmation(targetTaskId, 'no_response');
       else if (action === 'arrived') await completeAppointmentTask(targetTaskId, 'arrived');
       else if (action === 'no_show') await completeAppointmentTask(targetTaskId, 'no_show');
-      else if (action === 'cancel') {
-        if (confirm("Bu randevuyu iptal etmek istediğinize emin misiniz?")) {
-          await completeAppointmentTask(targetTaskId, 'cancelled');
-        } else {
-          setActionLoading(null);
-          return;
-        }
-      }
+      
       setActionSuccess('Aksiyon başarıyla kaydedildi.');
       mutate();
       onRefresh?.();
     } catch (e) {
       console.error(e);
-      alert("İşlem sırasında bir hata oluştu.");
+      showAlert("Hata", "İşlem sırasında bir hata oluştu.");
     } finally {
       setActionLoading(null);
     }
@@ -524,7 +589,7 @@ export default function PatientDetailDrawer({
 
       if (planType === 'clinic_visit') {
         if (!planYear || !planMonth) {
-          alert("Lütfen Yıl ve Ay seçiniz.");
+          showAlert("Hata", "Lütfen Yıl ve Ay seçiniz.");
           setPlanLoading(false);
           return;
         }
@@ -586,10 +651,10 @@ export default function PatientDetailDrawer({
         mutate();
         onRefresh?.();
       } else {
-        alert(res.error || "Hata oluştu");
+        showAlert("Hata", res.error || "Hata oluştu");
       }
     } catch(err) {
-      alert("Hata oluştu");
+      showAlert("Hata", "Hata oluştu");
     } finally {
       setPlanLoading(false);
     }
@@ -607,7 +672,7 @@ export default function PatientDetailDrawer({
 
       if (isClinicVisit) {
         if (!editTaskYear || !editTaskMonth) {
-          alert("Lütfen Yıl ve Ay seçiniz.");
+          showAlert("Hata", "Lütfen Yıl ve Ay seçiniz.");
           setIsUpdatingTask(false);
           return;
         }
@@ -646,52 +711,62 @@ export default function PatientDetailDrawer({
         mutate();
         onRefresh?.();
       } else {
-        alert(res.error || "Güncelleme sırasında hata oluştu");
+        showAlert("Hata", res.error || "Güncelleme sırasında hata oluştu");
       }
     } catch(err) {
-      alert("Güncelleme sırasında hata oluştu");
+      showAlert("Hata", "Güncelleme sırasında hata oluştu");
     } finally {
       setIsUpdatingTask(false);
     }
   };
 
-  const handleDeleteTask = async (taskId: string) => {
-    if (!confirm("Bu planlı görevi silmek istediğinize emin misiniz?")) return;
-    setActionLoading("delete_task");
-    try {
-      const res = await deletePatientTask(taskId);
-      if (res.success) {
-        setActionSuccess('Görev başarıyla silindi.');
-        mutate();
-        onRefresh?.();
-      } else {
-        alert(res.error || "Silme sırasında hata oluştu");
+  const handleDeleteTask = (taskId: string) => {
+    showConfirm(
+      "Görevi Sil",
+      "Bu planlı görevi silmek istediğinize emin misiniz? Bu işlem geri alınamaz.",
+      async () => {
+        setActionLoading("delete_task");
+        try {
+          const res = await deletePatientTask(taskId);
+          if (res.success) {
+            setActionSuccess('Görev başarıyla silindi.');
+            mutate();
+            onRefresh?.();
+          } else {
+            showAlert("Hata", res.error || "Silme sırasında hata oluştu");
+          }
+        } catch(err) {
+          showAlert("Hata", "Silme sırasında hata oluştu");
+        } finally {
+          setActionLoading(null);
+        }
       }
-    } catch(err) {
-      alert("Silme sırasında hata oluştu");
-    } finally {
-      setActionLoading(null);
-    }
+    );
   };
 
-  const handleCompleteTask = async (taskId: string, result: 'completed' | 'cancelled') => {
+  const handleCompleteTask = (taskId: string, result: 'completed' | 'cancelled') => {
     const actionLabel = result === 'completed' ? 'tamamlandı' : 'iptal edildi';
-    if (!confirm(`Bu görevi ${actionLabel} olarak işaretlemek istediğinize emin misiniz?`)) return;
-    setActionLoading("complete_task");
-    try {
-      const res = await completeAppointmentTask(taskId, result);
-      if (res.success) {
-        setActionSuccess(`Görev başarıyla ${actionLabel} olarak işaretlendi.`);
-        mutate();
-        onRefresh?.();
-      } else {
-        alert(res.error || "İşlem sırasında hata oluştu");
+    showConfirm(
+      result === 'completed' ? "Görevi Tamamla" : "Görevi İptal Et",
+      `Bu görevi ${actionLabel} olarak işaretlemek istediğinize emin misiniz?`,
+      async () => {
+        setActionLoading("complete_task");
+        try {
+          const res = await completeAppointmentTask(taskId, result);
+          if (res.success) {
+            setActionSuccess(`Görev başarıyla ${actionLabel} olarak işaretlendi.`);
+            mutate();
+            onRefresh?.();
+          } else {
+            showAlert("Hata", res.error || "İşlem sırasında hata oluştu");
+          }
+        } catch(err) {
+          showAlert("Hata", "İşlem sırasında hata oluştu");
+        } finally {
+          setActionLoading(null);
+        }
       }
-    } catch(err) {
-      alert("İşlem sırasında hata oluştu");
-    } finally {
-      setActionLoading(null);
-    }
+    );
   };
 
   const handleSendBotFreeMessage = async () => {
@@ -714,10 +789,10 @@ export default function PatientDetailDrawer({
         
         onRefresh?.();
       } else {
-        alert(res.error || 'Mesaj gönderilemedi.');
+        showAlert("Hata", res.error || 'Mesaj gönderilemedi.');
       }
     } catch (err: any) {
-      alert(err?.message || 'Hata oluştu.');
+      showAlert("Hata", err?.message || 'Hata oluştu.');
     } finally {
       setIsSendingBotDirect(false);
     }
@@ -745,10 +820,10 @@ export default function PatientDetailDrawer({
         
         onRefresh?.();
       } else {
-        alert(res.error || 'Şablon gönderilemedi.');
+        showAlert("Hata", res.error || 'Şablon gönderilemedi.');
       }
     } catch (err: any) {
-      alert(err?.message || 'Hata oluştu.');
+      showAlert("Hata", err?.message || 'Hata oluştu.');
     } finally {
       setIsSendingBotDirect(false);
     }
@@ -769,10 +844,10 @@ export default function PatientDetailDrawer({
         mutate();
         onRefresh?.();
       } else {
-        alert(res.error || 'Talimat iletilemedi.');
+        showAlert("Hata", res.error || 'Talimat iletilemedi.');
       }
     } catch (err: any) {
-      alert(err?.message || 'Hata oluştu.');
+      showAlert("Hata", err?.message || 'Hata oluştu.');
     } finally {
       setIsSavingDirective(false);
     }
@@ -787,33 +862,22 @@ export default function PatientDetailDrawer({
         mutate();
         onRefresh?.();
       } else {
-        alert(res.error || 'İşlem başarısız.');
+        showAlert("Hata", res.error || 'İşlem başarısız.');
       }
     } catch (err) {
       console.error(err);
+      showAlert("Hata", 'İşlem sırasında hata oluştu.');
     } finally {
       setActionLoading(null);
     }
   };
 
-  const handleCancelBotTask = async (taskId: string) => {
-    const reason = prompt("Lütfen iptal sebebini belirtin:", "Koordinatör iptal etti");
-    if (reason === null) return;
-    setActionLoading(taskId);
-    try {
-      const res = await cancelBotDelegationTask(taskId, reason);
-      if (res.success) {
-        setActionSuccess('Takip başarıyla iptal edildi.');
-        mutate();
-        onRefresh?.();
-      } else {
-        alert(res.error || 'İşlem başarısız.');
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setActionLoading(null);
-    }
+  const handleCancelBotTask = (taskId: string) => {
+    setCancelPromptModal({
+      isOpen: true,
+      taskId,
+      reason: "Koordinatör iptal etti",
+    });
   };
 
   if (!opportunityId) return null;
@@ -1487,7 +1551,7 @@ export default function PatientDetailDrawer({
                                 <button
                                   onClick={() => {
                                     navigator.clipboard.writeText(rMeta.generated_draft);
-                                    alert("Taslak kopyalandı!");
+                                    showAlert("Başarılı", "Taslak kopyalandı!");
                                   }}
                                   className="self-end flex items-center gap-1 text-[10px] font-bold text-indigo-600 hover:text-indigo-700 transition-colors cursor-pointer"
                                 >
@@ -2440,7 +2504,7 @@ export default function PatientDetailDrawer({
                       <button
                         onClick={() => {
                           navigator.clipboard.writeText(editableDraft);
-                          alert("Taslak kopyalandı!");
+                          showAlert("Başarılı", "Taslak kopyalandı!");
                         }}
                         className="px-3 py-1.5 bg-white hover:bg-black/5 text-indigo-600 border border-black/5 shadow-sm rounded-lg font-bold transition-all"
                       >
@@ -2506,6 +2570,143 @@ export default function PatientDetailDrawer({
             onClose={() => setGallery(null)} 
             onNavigate={(idx) => setGallery(prev => prev ? { ...prev, currentIndex: idx } : null)}
           />,
+          document.body
+        )}
+
+        {/* Custom Premium Confirm Modal */}
+        {confirmModal.isOpen && createPortal(
+          <div className="fixed inset-0 bg-black/45 backdrop-blur-[4px] flex items-center justify-center z-[9999] animate-in fade-in duration-200" onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}>
+            <div className="bg-white rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.18)] border border-black/5 w-full max-w-sm p-6 mx-4 text-center animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+              <div className="mx-auto w-12 h-12 rounded-2xl bg-rose-50 flex items-center justify-center mb-4">
+                <AlertTriangle className="w-6 h-6 text-rose-500" />
+              </div>
+              
+              <h3 className="text-sm font-extrabold text-[#1D1D1F] mb-2">
+                {confirmModal.title}
+              </h3>
+              
+              <p className="text-[11px] font-semibold text-[#86868B] leading-relaxed px-2 mb-6">
+                {confirmModal.message}
+              </p>
+
+              <div className="flex items-center justify-center gap-2 pt-2 border-t border-black/5">
+                <button
+                  onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+                  className="flex-1 py-2.5 bg-[#F5F5F7] hover:bg-[#E8E8ED] text-[#1D1D1F] rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer text-center"
+                >
+                  Vazgeç
+                </button>
+                <button
+                  onClick={() => {
+                    setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                    confirmModal.onConfirm();
+                  }}
+                  className="flex-1 py-2.5 bg-rose-500 hover:bg-rose-600 text-white rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer shadow-sm hover:shadow text-center"
+                >
+                  Onayla
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+
+        {/* Custom Premium Alert Modal */}
+        {alertModal.isOpen && createPortal(
+          <div className="fixed inset-0 bg-black/45 backdrop-blur-[4px] flex items-center justify-center z-[9999] animate-in fade-in duration-200" onClick={() => setAlertModal(prev => ({ ...prev, isOpen: false }))}>
+            <div className="bg-white rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.18)] border border-black/5 w-full max-w-sm p-6 mx-4 text-center animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+              <div className="mx-auto w-12 h-12 rounded-2xl bg-indigo-50 flex items-center justify-center mb-4">
+                <AlertCircle className="w-6 h-6 text-indigo-500" />
+              </div>
+              
+              <h3 className="text-sm font-extrabold text-[#1D1D1F] mb-2">
+                {alertModal.title}
+              </h3>
+              
+              <p className="text-[11px] font-semibold text-[#86868B] leading-relaxed px-2 mb-6">
+                {alertModal.message}
+              </p>
+
+              <div className="pt-2 border-t border-black/5">
+                <button
+                  onClick={() => setAlertModal(prev => ({ ...prev, isOpen: false }))}
+                  className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer shadow-sm hover:shadow text-center"
+                >
+                  Tamam
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+
+        {/* Custom Premium Cancel Prompt Modal */}
+        {cancelPromptModal.isOpen && createPortal(
+          <div className="fixed inset-0 bg-black/45 backdrop-blur-[4px] flex items-center justify-center z-[9999] animate-in fade-in duration-200" onClick={() => setCancelPromptModal(prev => ({ ...prev, isOpen: false }))}>
+            <div className="bg-white rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.18)] border border-black/5 w-full max-w-sm p-6 mx-4 text-left animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+              <div className="text-center">
+                <div className="mx-auto w-12 h-12 rounded-2xl bg-amber-50 flex items-center justify-center mb-4">
+                  <XCircle className="w-6 h-6 text-amber-500" />
+                </div>
+                
+                <h3 className="text-sm font-extrabold text-[#1D1D1F] mb-2 text-center">
+                  Bot Takibini İptal Et
+                </h3>
+                
+                <p className="text-[11px] font-semibold text-[#86868B] leading-relaxed px-2 mb-4 text-center">
+                  Lütfen bu bot takip görevinin iptal edilme sebebini belirtin:
+                </p>
+              </div>
+
+              <div className="mb-6 px-2">
+                <input
+                  type="text"
+                  value={cancelPromptModal.reason}
+                  onChange={(e) => setCancelPromptModal(prev => ({ ...prev, reason: e.target.value }))}
+                  className="w-full px-3 py-2.5 bg-[#F5F5F7] border border-black/5 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500 text-[#1D1D1F]"
+                  placeholder="İptal sebebi..."
+                  autoFocus
+                />
+              </div>
+
+              <div className="flex items-center justify-center gap-2 pt-2 border-t border-black/5">
+                <button
+                  onClick={() => setCancelPromptModal(prev => ({ ...prev, isOpen: false }))}
+                  className="flex-1 py-2.5 bg-[#F5F5F7] hover:bg-[#E8E8ED] text-[#1D1D1F] rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer text-center"
+                >
+                  Vazgeç
+                </button>
+                <button
+                  onClick={async () => {
+                    const taskId = cancelPromptModal.taskId;
+                    const reason = cancelPromptModal.reason;
+                    setCancelPromptModal(prev => ({ ...prev, isOpen: false }));
+                    
+                    setActionLoading(taskId);
+                    try {
+                      const res = await cancelBotDelegationTask(taskId, reason);
+                      if (res.success) {
+                        setActionSuccess('Takip başarıyla iptal edildi.');
+                        mutate();
+                        onRefresh?.();
+                      } else {
+                        showAlert("Hata", res.error || 'İşlem başarısız.');
+                      }
+                    } catch (err) {
+                      console.error(err);
+                      showAlert("Hata", 'İşlem sırasında hata oluştu.');
+                    } finally {
+                      setActionLoading(null);
+                    }
+                  }}
+                  disabled={!cancelPromptModal.reason.trim()}
+                  className="flex-1 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer shadow-sm hover:shadow disabled:opacity-50 text-center"
+                >
+                  Görevi İptal Et
+                </button>
+              </div>
+            </div>
+          </div>,
           document.body
         )}
       </div>

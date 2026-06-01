@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { 
   getPendingDrafts, 
   getDraftApprovalStats, 
@@ -17,7 +18,7 @@ import {
   Sparkles, 
   Copy, 
   Check, 
-  X, 
+  X, XCircle, 
   Search, 
   Filter, 
   AlertTriangle, 
@@ -61,6 +62,56 @@ export default function DraftApprovalCenterPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Custom premium dialog states & helpers
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  }>({
+    isOpen: false,
+    title: "",
+    message: "",
+    onConfirm: () => {},
+  });
+
+  const [alertModal, setAlertModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+  }>({
+    isOpen: false,
+    title: "",
+    message: "",
+  });
+
+  const [rejectPromptModal, setRejectPromptModal] = useState<{
+    isOpen: boolean;
+    draft: DraftRow | null;
+    reason: string;
+  }>({
+    isOpen: false,
+    draft: null,
+    reason: "Koordinatör uygun görmedi",
+  });
+
+  const showConfirm = (title: string, message: string, onConfirm: () => void) => {
+    setConfirmModal({
+      isOpen: true,
+      title,
+      message,
+      onConfirm,
+    });
+  };
+
+  const showAlert = (title: string, message: string) => {
+    setAlertModal({
+      isOpen: true,
+      title,
+      message,
+    });
+  };
 
   // Load Data
   const loadData = async () => {
@@ -126,10 +177,11 @@ export default function DraftApprovalCenterPage() {
         setSelectedDraft(prev => prev ? { ...prev, draft_text: editedText } : null);
         setTimeout(() => setToastMessage(null), 3000);
       } else {
-        alert(res.error || "Taslak kaydedilemedi.");
+        showAlert("Hata", res.error || "Taslak kaydedilemedi.");
       }
     } catch (err) {
       console.error(err);
+      showAlert("Hata", "Bir hata oluştu.");
     } finally {
       setSavingText(false);
     }
@@ -146,35 +198,22 @@ export default function DraftApprovalCenterPage() {
         await loadData();
         setTimeout(() => setToastMessage(null), 3000);
       } else {
-        alert(res.error || "İşlem başarısız.");
+        showAlert("Hata", res.error || "İşlem başarısız.");
       }
     } catch (err) {
       console.error(err);
+      showAlert("Hata", "Bir hata oluştu.");
     } finally {
       setActionLoading(null);
     }
   };
 
-  const handleReject = async (draft: DraftRow) => {
-    const reason = prompt("Lütfen reddetme sebebini belirtin (isteğe bağlı):", "Koordinatör uygun görmedi");
-    if (reason === null) return; // user cancelled prompt
-
-    setActionLoading("reject");
-    try {
-      const res = await markDraftRejected(draft.draft_id, draft.source, reason);
-      if (res.success) {
-        setToastMessage("Taslak reddedildi.");
-        setSelectedDraft(null);
-        await loadData();
-        setTimeout(() => setToastMessage(null), 3000);
-      } else {
-        alert(res.error || "İşlem başarısız.");
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setActionLoading(null);
-    }
+  const handleReject = (draft: DraftRow) => {
+    setRejectPromptModal({
+      isOpen: true,
+      draft,
+      reason: "Koordinatör uygun görmedi",
+    });
   };
 
   const getSourceBadgeColor = (source: string) => {
@@ -632,6 +671,144 @@ export default function DraftApprovalCenterPage() {
             </div>
           </div>
         </>
+      )}
+
+      {/* Custom Premium Confirm Modal */}
+      {confirmModal.isOpen && createPortal(
+        <div className="fixed inset-0 bg-black/45 backdrop-blur-[4px] flex items-center justify-center z-[9999] animate-in fade-in duration-200" onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}>
+          <div className="bg-white rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.18)] border border-black/5 w-full max-w-sm p-6 mx-4 text-center animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+            <div className="mx-auto w-12 h-12 rounded-2xl bg-rose-50 flex items-center justify-center mb-4">
+              <AlertTriangle className="w-6 h-6 text-rose-500" />
+            </div>
+            
+            <h3 className="text-sm font-extrabold text-[#1D1D1F] mb-2">
+              {confirmModal.title}
+            </h3>
+            
+            <p className="text-[11px] font-semibold text-[#86868B] leading-relaxed px-2 mb-6">
+              {confirmModal.message}
+            </p>
+
+            <div className="flex items-center justify-center gap-2 pt-2 border-t border-black/5">
+              <button
+                onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+                className="flex-1 py-2.5 bg-[#F5F5F7] hover:bg-[#E8E8ED] text-[#1D1D1F] rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer text-center"
+              >
+                Vazgeç
+              </button>
+              <button
+                onClick={() => {
+                  setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                  confirmModal.onConfirm();
+                }}
+                className="flex-1 py-2.5 bg-rose-500 hover:bg-rose-600 text-white rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer shadow-sm hover:shadow text-center"
+              >
+                Onayla
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Custom Premium Alert Modal */}
+      {alertModal.isOpen && createPortal(
+        <div className="fixed inset-0 bg-black/45 backdrop-blur-[4px] flex items-center justify-center z-[9999] animate-in fade-in duration-200" onClick={() => setAlertModal(prev => ({ ...prev, isOpen: false }))}>
+          <div className="bg-white rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.18)] border border-black/5 w-full max-w-sm p-6 mx-4 text-center animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+            <div className="mx-auto w-12 h-12 rounded-2xl bg-indigo-50 flex items-center justify-center mb-4">
+              <AlertCircle className="w-6 h-6 text-indigo-500" />
+            </div>
+            
+            <h3 className="text-sm font-extrabold text-[#1D1D1F] mb-2">
+              {alertModal.title}
+            </h3>
+            
+            <p className="text-[11px] font-semibold text-[#86868B] leading-relaxed px-2 mb-6">
+              {alertModal.message}
+            </p>
+
+            <div className="pt-2 border-t border-black/5">
+              <button
+                onClick={() => setAlertModal(prev => ({ ...prev, isOpen: false }))}
+                className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer shadow-sm hover:shadow text-center"
+              >
+                Tamam
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Custom Premium Reject Prompt Modal */}
+      {rejectPromptModal.isOpen && createPortal(
+        <div className="fixed inset-0 bg-black/45 backdrop-blur-[4px] flex items-center justify-center z-[9999] animate-in fade-in duration-200" onClick={() => setRejectPromptModal(prev => ({ ...prev, isOpen: false }))}>
+          <div className="bg-white rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.18)] border border-black/5 w-full max-w-sm p-6 mx-4 text-left animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+            <div className="text-center">
+              <div className="mx-auto w-12 h-12 rounded-2xl bg-amber-50 flex items-center justify-center mb-4">
+                <XCircle className="w-6 h-6 text-amber-500" />
+              </div>
+              
+              <h3 className="text-sm font-extrabold text-[#1D1D1F] mb-2 text-center">
+                Taslağı Reddet
+              </h3>
+              
+              <p className="text-[11px] font-semibold text-[#86868B] leading-relaxed px-2 mb-4 text-center">
+                Lütfen bu taslak mesajı reddetme sebebini belirtin (isteğe bağlı):
+              </p>
+            </div>
+
+            <div className="mb-6 px-2">
+              <input
+                type="text"
+                value={rejectPromptModal.reason}
+                onChange={(e) => setRejectPromptModal(prev => ({ ...prev, reason: e.target.value }))}
+                className="w-full px-3 py-2.5 bg-[#F5F5F7] border border-black/5 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500 text-[#1D1D1F]"
+                placeholder="Reddedilme sebebi..."
+                autoFocus
+              />
+            </div>
+
+            <div className="flex items-center justify-center gap-2 pt-2 border-t border-black/5">
+              <button
+                onClick={() => setRejectPromptModal(prev => ({ ...prev, isOpen: false }))}
+                className="flex-1 py-2.5 bg-[#F5F5F7] hover:bg-[#E8E8ED] text-[#1D1D1F] rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer text-center"
+              >
+                Vazgeç
+              </button>
+              <button
+                onClick={async () => {
+                  const draft = rejectPromptModal.draft;
+                  if (!draft) return;
+                  const reason = rejectPromptModal.reason;
+                  setRejectPromptModal(prev => ({ ...prev, isOpen: false }));
+                  
+                  setActionLoading("reject");
+                  try {
+                    const res = await markDraftRejected(draft.draft_id, draft.source, reason);
+                    if (res.success) {
+                      setToastMessage("Taslak reddedildi.");
+                      setSelectedDraft(null);
+                      await loadData();
+                      setTimeout(() => setToastMessage(null), 3000);
+                    } else {
+                      showAlert("Hata", res.error || "İşlem başarısız.");
+                    }
+                  } catch (err) {
+                    console.error(err);
+                    showAlert("Hata", "Bir hata oluştu.");
+                  } finally {
+                    setActionLoading(null);
+                  }
+                }}
+                className="flex-1 py-2.5 bg-rose-500 hover:bg-rose-600 text-white rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer shadow-sm hover:shadow text-center"
+              >
+                Taslağı Reddet
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
     </div>
   );

@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import useSWR from "swr";
 import {
   Search, ChevronDown, CheckCircle2, Phone, Calendar,
-  Clock, AlertTriangle, X, Filter, Building2, MapPin, MoreVertical, Check, Ban, XCircle, CalendarClock, Moon, Zap,
+  Clock, AlertTriangle, AlertCircle, X, Filter, Building2, MapPin, MoreVertical, Check, Ban, XCircle, CalendarClock, Moon, Zap,
   RotateCcw, Bot, FileText
 } from "lucide-react";
 import { 
@@ -630,6 +630,49 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
   const [activeBotPopup, setActiveBotPopup] = useState<'teyit' | 'hatirlat' | 'devret' | null>(null);
   const [directiveText, setDirectiveText] = useState('');
   const isSuggestionPending = apt.metadata?.bot_suggestion?.status === 'pending';
+  // Premium Custom Alert & Confirm Modals
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+    type?: 'danger' | 'info';
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: () => {},
+  });
+
+  const [alertModal, setAlertModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    type?: 'error' | 'success' | 'info';
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+  });
+
+  const showConfirm = (title: string, message: string, onConfirm: () => void, type: 'danger' | 'info' = 'danger') => {
+    setConfirmModal({
+      isOpen: true,
+      title,
+      message,
+      onConfirm,
+      type,
+    });
+  };
+
+  const showAlert = (title: string, message: string, type: 'error' | 'success' | 'info' = 'error') => {
+    setAlertModal({
+      isOpen: true,
+      title,
+      message,
+      type,
+    });
+  };
 
   // Arama Notu Ekleme/Görüntüleme Modern Modalleri
   const [noteModalOpen, setNoteModalOpen] = useState(false);
@@ -704,14 +747,24 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
       else if (action === 'arrived') await completeAppointmentTask(apt.taskId, 'arrived');
       else if (action === 'no_show') await completeAppointmentTask(apt.taskId, 'no_show');
       else if (action === 'cancel') {
-        if (confirm("Bu randevuyu iptal etmek istediğinize emin misiniz?")) {
-          await completeAppointmentTask(apt.taskId, 'cancelled');
-        }
+        showConfirm(
+          "Randevuyu İptal Et",
+          "Bu randevuyu iptal etmek istediğinize emin misiniz? Bu işlem geri alınamaz.",
+          async () => {
+            try {
+              await completeAppointmentTask(apt.taskId, 'cancelled');
+              onActionComplete();
+            } catch (err) {
+              showAlert("Hata", "İşlem sırasında bir hata oluştu.");
+            }
+          }
+        );
+        return;
       }
       onActionComplete();
     } catch (e) {
       console.error(e);
-      alert("İşlem sırasında bir hata oluştu.");
+      showAlert("Hata", "İşlem sırasında bir hata oluştu.");
     }
   };
 
@@ -734,8 +787,7 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
       await manuallyUpdateAppointmentStatus(apt.taskId, status, result, confirmStat);
       onActionComplete();
     } catch (e) {
-      console.error(e);
-      alert("Durum güncellenirken bir hata oluştu.");
+      showAlert("Hata", "Durum güncellenirken bir hata oluştu.");
     }
   };
 
@@ -1059,7 +1111,7 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
                         await updateAppointmentConfirmation(apt.taskId, 'confirmed');
                         onActionComplete();
                       } catch (err) {
-                        alert("İşlem başarısız oldu.");
+                        showAlert("Hata", "İşlem başarısız oldu.");
                       }
                     }}
                     className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-white border border-emerald-600/20 text-emerald-700 rounded-lg shadow-sm hover:bg-emerald-50/50 hover:border-emerald-600/40 transition-all text-[11px] font-bold cursor-pointer"
@@ -1166,7 +1218,7 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
                                   await completeAppointmentTask(apt.taskId, 'arrived');
                                   onActionComplete();
                               } catch (err) {
-                                alert("İşlem başarısız oldu.");
+                                showAlert("Hata", "İşlem başarısız oldu.");
                               }
                             }} 
                           />
@@ -1180,7 +1232,7 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
                                 await completeAppointmentTask(apt.taskId, 'no_show');
                                 onActionComplete();
                               } catch (err) {
-                                alert("İşlem başarısız oldu.");
+                                showAlert("Hata", "İşlem başarısız oldu.");
                               }
                             }} 
                           />
@@ -1194,7 +1246,7 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
                                 await updateAppointmentConfirmation(apt.taskId, 'no_response');
                                 onActionComplete();
                               } catch (err) {
-                                alert("İşlem başarısız oldu.");
+                                showAlert("Hata", "İşlem başarısız oldu.");
                               }
                             }} 
                           />
@@ -1204,14 +1256,18 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
                             color="text-gray-500 hover:bg-gray-50" 
                             onClick={async () => {
                               randevuAksiyonuDropdown.setIsOpen(false);
-                              if (confirm("Bu randevuyu iptal etmek istediğinize emin misiniz?")) {
-                                try {
-                                  await completeAppointmentTask(apt.taskId, 'cancelled');
-                                  onActionComplete();
-                                } catch (err) {
-                                  alert("İşlem başarısız oldu.");
+                              showConfirm(
+                                "Randevuyu İptal Et",
+                                "Bu randevuyu iptal etmek istediğinize emin misiniz? Bu işlem geri alınamaz.",
+                                async () => {
+                                  try {
+                                    await completeAppointmentTask(apt.taskId, 'cancelled');
+                                    onActionComplete();
+                                  } catch (err) {
+                                    showAlert("Hata", "İşlem başarısız oldu.");
+                                  }
                                 }
-                              }
+                              );
                             }} 
                           />
                         </div>
@@ -1486,7 +1542,7 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
                           await completeAppointmentTask(apt.taskId, 'no_show');
                           onActionComplete();
                         } catch (err) {
-                          alert("İşlem başarısız oldu.");
+                          showAlert("Hata", "İşlem başarısız oldu.");
                         }
                       }} 
                     />
@@ -1496,14 +1552,18 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
                       color="text-gray-500 hover:bg-gray-50" 
                       onClick={async () => {
                         randevuAksiyonuDropdown.setIsOpen(false);
-                        if (confirm("Bu arama görevini iptal etmek istediğinize emin misiniz?")) {
-                          try {
-                            await completeAppointmentTask(apt.taskId, 'cancelled');
-                            onActionComplete();
-                          } catch (err) {
-                            alert("İşlem başarısız oldu.");
+                        showConfirm(
+                          "Arama Görevini İptal Et",
+                          "Bu arama görevini iptal etmek istediğinize emin misiniz? Bu işlem geri alınamaz.",
+                          async () => {
+                            try {
+                              await completeAppointmentTask(apt.taskId, 'cancelled');
+                              onActionComplete();
+                            } catch (err) {
+                              showAlert("Hata", "İşlem başarısız oldu.");
+                            }
                           }
-                        }
+                        );
                       }} 
                     />
                   </div>
@@ -1661,10 +1721,10 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
                               setIsSuccess(true);
                               onActionComplete();
                             } else {
-                              alert(res.error || res.data?.error || "İşlem başarısız oldu.");
+                              showAlert("Hata", res.error || res.data?.error || "İşlem başarısız oldu.");
                             }
                           } catch (err) {
-                            alert("Bir hata oluştu.");
+                            showAlert("Hata", "Bir hata oluştu.");
                           } finally {
                             setIsSending(false);
                             setSendingStep(0);
@@ -1782,10 +1842,10 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
                       if (res.success) {
                         onActionComplete();
                       } else {
-                        alert(res.error || "İşlem başarısız oldu.");
+                        showAlert("Hata", res.error || "İşlem başarısız oldu.");
                       }
                     } catch (err) {
-                      alert("Bir hata oluştu.");
+                      showAlert("Hata", "Bir hata oluştu.");
                     }
                   }}
                   className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white border border-indigo-700 rounded-lg text-xs font-bold transition-all shadow-sm hover:shadow active:scale-95 cursor-pointer flex items-center gap-1"
@@ -1801,10 +1861,10 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
                       if (res.success) {
                         onActionComplete();
                       } else {
-                        alert(res.error || "İşlem başarısız oldu.");
+                        showAlert("Hata", res.error || "İşlem başarısız oldu.");
                       }
                     } catch (err) {
-                      alert("Bir hata oluştu.");
+                      showAlert("Hata", "Bir hata oluştu.");
                     }
                   }}
                   className="px-3 py-1.5 bg-white hover:bg-[#F5F5F7] border border-black/5 text-[#86868B] hover:text-[#1D1D1F] rounded-lg text-xs font-bold transition-all shadow-sm active:scale-95 cursor-pointer"
@@ -1863,7 +1923,7 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
                     await completeAppointmentTask(apt.taskId, activeNoteResult, noteInputText);
                     onActionComplete();
                   } catch (err) {
-                    alert("İşlem başarısız oldu.");
+                    showAlert("Hata", "İşlem başarısız oldu.");
                   }
                 }}
                 disabled={!noteInputText.trim()}
@@ -1915,6 +1975,75 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
                 className="px-4 py-2 bg-[#007AFF] hover:bg-[#007AFF]/90 text-white rounded-lg text-xs font-bold transition-all active:scale-95 cursor-pointer shadow-sm hover:shadow"
               >
                 Kapat
+              </button>
+            </div>
+          </div>
+        </td>
+      </tr>
+    )}
+
+    {/* Apple/Stripe-level Custom Confirm Modal */}
+    {confirmModal.isOpen && (
+      <tr className="fixed inset-0 bg-black/45 backdrop-blur-[4px] flex items-center justify-center z-50 animate-in fade-in duration-200" onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}>
+        <td className="p-0 border-0" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-white rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.18)] border border-black/5 w-full max-w-sm p-6 mx-4 text-center animate-in zoom-in-95 duration-200">
+            <div className="mx-auto w-12 h-12 rounded-2xl bg-rose-50 flex items-center justify-center mb-4">
+              <AlertTriangle className="w-6 h-6 text-rose-500" />
+            </div>
+            
+            <h3 className="text-sm font-extrabold text-[#1D1D1F] mb-2">
+              {confirmModal.title}
+            </h3>
+            
+            <p className="text-[11px] font-semibold text-[#86868B] leading-relaxed px-2 mb-6">
+              {confirmModal.message}
+            </p>
+
+            <div className="flex items-center justify-center gap-2 pt-2 border-t border-black/5">
+              <button
+                onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+                className="flex-1 py-2.5 bg-[#F5F5F7] hover:bg-[#E8E8ED] text-[#1D1D1F] rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer"
+              >
+                Vazgeç
+              </button>
+              <button
+                onClick={() => {
+                  setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                  confirmModal.onConfirm();
+                }}
+                className="flex-1 py-2.5 bg-rose-500 hover:bg-rose-600 text-white rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer shadow-sm hover:shadow"
+              >
+                Onayla
+              </button>
+            </div>
+          </div>
+        </td>
+      </tr>
+    )}
+
+    {/* Apple/Stripe-level Custom Alert Modal */}
+    {alertModal.isOpen && (
+      <tr className="fixed inset-0 bg-black/45 backdrop-blur-[4px] flex items-center justify-center z-50 animate-in fade-in duration-200" onClick={() => setAlertModal(prev => ({ ...prev, isOpen: false }))}>
+        <td className="p-0 border-0" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-white rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.18)] border border-black/5 w-full max-w-sm p-6 mx-4 text-center animate-in zoom-in-95 duration-200">
+            <div className="mx-auto w-12 h-12 rounded-2xl bg-indigo-50 flex items-center justify-center mb-4">
+              <AlertCircle className="w-6 h-6 text-indigo-500" />
+            </div>
+            
+            <h3 className="text-sm font-extrabold text-[#1D1D1F] mb-2">
+              {alertModal.title}
+            </h3>
+            
+            <p className="text-[11px] font-semibold text-[#86868B] leading-relaxed px-2 mb-6">
+              {alertModal.message}
+            </p>
+
+            <div className="pt-2 border-t border-black/5">
+              <button
+                onClick={() => setAlertModal(prev => ({ ...prev, isOpen: false }))}
+                className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer shadow-sm hover:shadow"
+              >
+                Tamam
               </button>
             </div>
           </div>
