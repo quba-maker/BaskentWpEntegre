@@ -110,6 +110,7 @@ export interface PatientDetailData {
   // Conversation
   conversationId?: string;
   lastMessageAt?: string;
+  lastIncomingMessageAt?: string;
   lastMessageContent?: string;
   lastOutreachAction?: string;
   lastOutreachAt?: string;
@@ -135,6 +136,15 @@ export interface PatientDetailData {
 
   // Timeline
   timeline: TimelineEntry[];
+
+  // Media & Documents
+  mediaFiles?: Array<{
+    id: string;
+    mediaType: string;
+    mediaUrl: string;
+    mediaMetadata: any;
+    createdAt: string;
+  }>;
 }
 
 export interface TimelineEntry {
@@ -155,6 +165,7 @@ export interface AppointmentRow {
   country?: string;
   department?: string;
   priority: 'cold' | 'warm' | 'hot';
+  hasClinicVisit?: boolean;
 
   appointmentType: 'phone_call' | 'clinic_visit' | 'pre_consultation' | 'doctor_review' | 'report_followup';
   appointmentTypeLabel: string;
@@ -569,7 +580,7 @@ export async function getPatientTrackingRows(filters?: PatientTrackingFilters): 
 // 2. getPatientTrackingDetail
 // ══════════════════════════════════════════
 
-export async function getPatientTrackingDetail(opportunityId: string): Promise<PatientDetailData | null> {
+export async function getPatientTrackingDetail(opportunityId: string, activeTaskId?: string | null): Promise<PatientDetailData | null> {
   if (!opportunityId) return null;
 
   return withActionGuard(
@@ -577,7 +588,7 @@ export async function getPatientTrackingDetail(opportunityId: string): Promise<P
     async (ctx) => {
       // Main opportunity query
       const oppQuery = `
-        SELECT 
+        SELECT DISTINCT ON (o.id)
           o.*,
           c.id as conv_id,
           c.status as conv_status,
@@ -590,22 +601,35 @@ export async function getPatientTrackingDetail(opportunityId: string): Promise<P
           l.created_at as lead_created_at
         FROM opportunities o
         LEFT JOIN conversations c ON c.active_opportunity_id = o.id AND c.tenant_id = o.tenant_id
-        LEFT JOIN leads l ON l.linked_opportunity_id = o.id AND l.tenant_id = o.tenant_id
+        LEFT JOIN leads l ON (l.linked_opportunity_id = o.id OR RIGHT(l.phone_number, 10) = RIGHT(o.phone_number, 10)) AND l.tenant_id = o.tenant_id
         WHERE o.id = $1 AND o.tenant_id = $2
+        ORDER BY o.id, l.linked_opportunity_id DESC NULLS LAST, l.created_at DESC
         LIMIT 1
       `;
       const oppRows = await ctx.db.executeSafe({ text: oppQuery, values: [opportunityId, ctx.tenantId] }) as any[];
       if (oppRows.length === 0) return null;
       const opp = oppRows[0];
 
-      // Tasks for this opportunity
-      const tasksQuery = `
-        SELECT id, task_type, title, description, due_at, status, metadata, created_at
-        FROM follow_up_tasks
-        WHERE opportunity_id = $1 AND tenant_id = $2 AND status IN ('pending', 'in_progress')
-        ORDER BY due_at ASC
-      `;
-      const tasks = await ctx.db.executeSafe({ text: tasksQuery, values: [opportunityId, ctx.tenantId] }) as any[];
+      // Tasks for this opportunity (always include pending/in_progress, and conditionally activeTaskId even if completed)
+      let tasksQuery = '';
+      const values: any[] = [opportunityId, ctx.tenantId];
+      if (activeTaskId) {
+        tasksQuery = `
+          SELECT id, task_type, title, description, due_at, status, metadata, created_at
+          FROM follow_up_tasks
+          WHERE opportunity_id = $1 AND tenant_id = $2 AND (status IN ('pending', 'in_progress') OR id = $3)
+          ORDER BY due_at ASC
+        `;
+        values.push(activeTaskId);
+      } else {
+        tasksQuery = `
+          SELECT id, task_type, title, description, due_at, status, metadata, created_at
+          FROM follow_up_tasks
+          WHERE opportunity_id = $1 AND tenant_id = $2 AND status IN ('pending', 'in_progress')
+          ORDER BY due_at ASC
+        `;
+      }
+      const tasks = await ctx.db.executeSafe({ text: tasksQuery, values }) as any[];
 
       // Last outreach
       const outreachQuery = `
@@ -619,6 +643,35 @@ export async function getPatientTrackingDetail(opportunityId: string): Promise<P
 
       // Timeline
       const timeline = await getPatientTimelineInternal(ctx, opportunityId, opp.lead_id);
+
+      // Last incoming message from patient
+      let lastIncomingMessageAt: string | undefined;
+      if (opp.conv_id) {
+        const inboundRes = await ctx.db.executeSafe({
+          text: `SELECT created_at FROM messages 
+                 WHERE conversation_id = $1 AND tenant_id = $2 AND direction = 'in'
+                 ORDER BY created_at DESC LIMIT 1`,
+          values: [opp.conv_id, ctx.tenantId]
+        }) as any[];
+        if (inboundRes.length > 0) {
+          lastIncomingMessageAt = inboundRes[0].created_at;
+        }
+      }
+
+      // Media Files query
+      const mediaFilesQuery = `
+        SELECT id, media_type, media_url, media_metadata, created_at
+        FROM messages
+        WHERE (conversation_id = $1 OR RIGHT(phone_number, 10) = RIGHT($2, 10))
+          AND tenant_id = $3
+          AND media_url IS NOT NULL
+          AND media_url <> ''
+        ORDER BY created_at DESC
+      `;
+      const mediaFiles = await ctx.db.executeSafe({
+        text: mediaFilesQuery,
+        values: [opp.conv_id || '', opp.phone_number || '', ctx.tenantId]
+      }) as any[];
 
       // Compute
       const resolvedCountry = opp.country || opp.lead_raw_data?.country || null;
@@ -649,11 +702,21 @@ export async function getPatientTrackingDetail(opportunityId: string): Promise<P
 
       if (tzRes.timezone && !tzRes.needs_confirmation) {
         try {
-          const patientNow = new Date().toLocaleString('en-US', { timeZone: tzRes.timezone, hour12: false });
-          const d = new Date(patientNow);
-          const hour = d.getHours();
+          const patientHourStr = new Intl.DateTimeFormat('en-US', {
+            timeZone: tzRes.timezone,
+            hour: 'numeric',
+            hour12: false
+          }).format(new Date());
+          const hour = parseInt(patientHourStr, 10);
+          
           if (hour >= 22 || hour < 8) isPatientSleeping = true;
-          patientLocalTimeNow = d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', hour12: false });
+          
+          patientLocalTimeNow = new Intl.DateTimeFormat('tr-TR', {
+            timeZone: tzRes.timezone,
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false
+          }).format(new Date());
         } catch (_) {}
       }
 
@@ -703,6 +766,7 @@ export async function getPatientTrackingDetail(opportunityId: string): Promise<P
 
         conversationId: opp.conv_id || undefined,
         lastMessageAt: opp.last_message_at || undefined,
+        lastIncomingMessageAt: lastIncomingMessageAt || undefined,
         lastMessageContent: opp.last_message_content || undefined,
         lastOutreachAction: outreach[0]?.action || undefined,
         lastOutreachAt: outreach[0]?.created_at || undefined,
@@ -723,6 +787,13 @@ export async function getPatientTrackingDetail(opportunityId: string): Promise<P
 
         isTestWhitelist,
         timeline,
+        mediaFiles: mediaFiles.map((m: any) => ({
+          id: m.id,
+          mediaType: m.media_type,
+          mediaUrl: m.media_url,
+          mediaMetadata: typeof m.media_metadata === 'string' ? JSON.parse(m.media_metadata) : (m.media_metadata || {}),
+          createdAt: m.created_at
+        })),
       };
     }
   ).then(res => res.data || null);
@@ -821,11 +892,14 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
       const conditions = [`t.tenant_id = $1`];
       const values: any[] = [ctx.tenantId];
 
-      // Only appointment-relevant tasks (Phone Call, Clinic Visit, Pre-Consultation)
+      // Only actual patient appointments (Phone Call, Clinic Visit, Pre-Consultation)
       conditions.push(`(
         t.task_type = 'callback_scheduled'
         OR t.metadata->>'appointment_type' IN ('phone_call', 'clinic_visit', 'pre_consultation', 'consultation')
       )`);
+
+      // Exclude child reminders from appearing as standalone parent rows
+      conditions.push(`t.task_type != 'appointment_reminder'`);
 
       // Status filter
       if (filters?.status && filters.status !== 'all') {
@@ -833,6 +907,13 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
         else if (filters.status === 'completed') conditions.push(`t.status = 'completed'`);
         else if (filters.status === 'cancelled') conditions.push(`t.status = 'cancelled'`);
         else if (filters.status === 'overdue') conditions.push(`t.status IN ('pending', 'in_progress') AND t.due_at < NOW()`);
+        else if (filters.status === 'arrived') conditions.push(`t.status = 'completed' AND t.metadata->>'appointment_result' = 'arrived'`);
+        else if (filters.status === 'no_show') conditions.push(`(t.status = 'completed' AND t.metadata->>'appointment_result' = 'no_show') OR t.status = 'no_show'`);
+        else if (filters.status === 'no_response') conditions.push(`(t.metadata->>'confirmation_status' = 'no_response' OR (t.status IN ('pending', 'in_progress') AND t.due_at < NOW()))`);
+        else if (filters.status === 'confirmed') {
+          conditions.push(`t.status IN ('pending', 'in_progress')`);
+          conditions.push(`t.metadata->>'confirmation_status' = 'confirmed'`);
+        }
       } else {
         // Default: show pending/in_progress unless completed flag is explicitly true
         if (filters?.completed) {
@@ -863,14 +944,23 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
       // Appointment type filter
       if (filters?.appointmentType && filters.appointmentType !== 'all') {
         if (filters.appointmentType === 'phone_call') {
-          conditions.push(`(t.task_type = 'callback_scheduled' OR t.metadata->>'appointment_type' = 'phone_call')`);
+          conditions.push(`(
+            (t.task_type = 'callback_scheduled' AND (t.metadata->>'appointment_type' IS NULL OR t.metadata->>'appointment_type' != 'clinic_visit'))
+            OR t.metadata->>'appointment_type' IN ('phone_call', 'pre_consultation', 'doctor_review', 'report_followup')
+          )`);
         } else if (filters.appointmentType === 'clinic_visit') {
           conditions.push(`t.metadata->>'appointment_type' = 'clinic_visit'`);
         }
       }
 
       // Exclude terminal opportunities unless looking at completed/cancelled tasks
-      if (filters?.status !== 'completed' && filters?.status !== 'cancelled' && !filters?.completed) {
+      const isTerminalFilter = filters?.status === 'completed' || 
+                               filters?.status === 'cancelled' || 
+                               filters?.status === 'arrived' || 
+                               filters?.status === 'no_show' || 
+                               filters?.status === 'no_response' || 
+                               !!filters?.completed;
+      if (!isTerminalFilter) {
         conditions.push(`(o.stage IS NULL OR o.stage NOT IN ('lost', 'not_qualified', 'arrived', 'not_interested', 'cancelled', 'completed'))`);
       }
 
@@ -890,7 +980,20 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
           o.country as opp_country,
           o.department as opp_department,
           o.stage as opp_stage,
-          o.priority as opp_priority
+          o.priority as opp_priority,
+          (
+            SELECT EXISTS(
+              SELECT 1 FROM follow_up_tasks ft 
+              WHERE ft.tenant_id = t.tenant_id 
+                AND ft.metadata->>'appointment_type' = 'clinic_visit' 
+                AND ft.status IN ('pending', 'in_progress')
+                AND (
+                  (ft.opportunity_id = t.opportunity_id AND t.opportunity_id IS NOT NULL)
+                  OR 
+                  (RIGHT(ft.phone_number, 10) = RIGHT(t.phone_number, 10) AND t.phone_number IS NOT NULL AND t.phone_number != '')
+                )
+            )
+          ) as has_clinic_visit
         FROM follow_up_tasks t
         LEFT JOIN opportunities o ON o.id = t.opportunity_id AND o.tenant_id = t.tenant_id
         WHERE ${conditions.join(' AND ')}
@@ -967,6 +1070,7 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
           country: resolvedCountry || undefined,
           department: row.opp_department || undefined,
           priority: row.opp_priority || 'warm',
+          hasClinicVisit: !!row.has_clinic_visit,
           appointmentType,
           appointmentTypeLabel: TYPE_LABELS[appointmentType] || appointmentType,
           dueAtUtc: row.due_at || undefined,
@@ -1010,7 +1114,7 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
 
 function calculateReminderTime(
   dueAtUtc: string, 
-  type: '3_days_before' | '1_day_before' | 'same_day' | 'custom', 
+  type: '30_days_before' | '14_days_before' | '7_days_before' | '5_days_before' | '3_days_before' | '1_day_before' | 'same_day' | 'custom', 
   customTime?: string
 ): string | null {
   const appointmentDate = new Date(dueAtUtc);
@@ -1028,7 +1132,23 @@ function calculateReminderTime(
     
     const baseDate = new Date(Date.UTC(year, month, day));
     
-    if (type === '3_days_before') {
+    if (type === '30_days_before') {
+      baseDate.setUTCDate(baseDate.getUTCDate() - 30);
+      // Set to 10:00 local time = 07:00 UTC
+      return new Date(baseDate.getTime() + (7 * 3600 * 1000)).toISOString();
+    } else if (type === '14_days_before') {
+      baseDate.setUTCDate(baseDate.getUTCDate() - 14);
+      // Set to 10:00 local time = 07:00 UTC
+      return new Date(baseDate.getTime() + (7 * 3600 * 1000)).toISOString();
+    } else if (type === '7_days_before') {
+      baseDate.setUTCDate(baseDate.getUTCDate() - 7);
+      // Set to 10:00 local time = 07:00 UTC
+      return new Date(baseDate.getTime() + (7 * 3600 * 1000)).toISOString();
+    } else if (type === '5_days_before') {
+      baseDate.setUTCDate(baseDate.getUTCDate() - 5);
+      // Set to 10:00 local time = 07:00 UTC
+      return new Date(baseDate.getTime() + (7 * 3600 * 1000)).toISOString();
+    } else if (type === '3_days_before') {
       baseDate.setUTCDate(baseDate.getUTCDate() - 3);
       // Set to 10:00 local time = 07:00 UTC
       return new Date(baseDate.getTime() + (7 * 3600 * 1000)).toISOString();
@@ -1057,7 +1177,7 @@ async function scheduleReminderTasks(
   parentTaskId: string,
   appointmentType: string,
   scheduledForAppointmentAt: string,
-  reminders: { type: '3_days_before' | '1_day_before' | 'same_day' | 'custom'; customTime?: string }[]
+  reminders: { type: '30_days_before' | '14_days_before' | '7_days_before' | '5_days_before' | '3_days_before' | '1_day_before' | 'same_day' | 'custom'; customTime?: string }[]
 ) {
   const oppRes = await db.executeSafe({
     text: `SELECT country FROM opportunities WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
@@ -1067,15 +1187,14 @@ async function scheduleReminderTasks(
   const tzRes = resolvePatientTimezone(country);
 
   for (const r of reminders) {
-    const reminderDueAtUtc = calculateReminderTime(scheduledForAppointmentAt, r.type, r.customTime);
+    let reminderDueAtUtc = calculateReminderTime(scheduledForAppointmentAt, r.type as any, r.customTime);
     if (!reminderDueAtUtc) continue;
 
-    // Guard: Past or after/at appointment time
-    if (
-      new Date(reminderDueAtUtc).getTime() <= Date.now() || 
-      new Date(reminderDueAtUtc).getTime() >= new Date(scheduledForAppointmentAt).getTime()
-    ) {
-      continue;
+     // Guard: Past or after/at appointment time
+    if (new Date(reminderDueAtUtc).getTime() <= Date.now()) {
+      continue; // Skip completely if the reminder time has already passed!
+    } else if (new Date(reminderDueAtUtc).getTime() >= new Date(scheduledForAppointmentAt).getTime()) {
+      continue; // Skip if it falls after/at the appointment itself
     }
 
     // Idempotency / Duplication Guard
@@ -1118,6 +1237,10 @@ async function scheduleReminderTasks(
     } catch (_) {}
 
     const titleMap: Record<string, string> = {
+      '30_days_before': '1 Ay Kala Teyit / Hatırlatma',
+      '14_days_before': '2 Hafta Kala Teyit / Hatırlatma',
+      '7_days_before': '1 Hafta Kala Teyit / Hatırlatma',
+      '5_days_before': '5 Gün Önce Teyit / Hatırlatma',
       '3_days_before': '3 Gün Önce Teyit / Hatırlatma',
       '1_day_before': '1 Gün Önce Teyit / Hatırlatma',
       'same_day': 'Aynı Gün Teyit / Hatırlatma',
@@ -1190,24 +1313,26 @@ export async function createAppointmentTask(
   options?: { 
     note?: string; 
     requireConfirmation?: boolean;
-    reminders?: { type: '3_days_before' | '1_day_before' | 'same_day' | 'custom'; customTime?: string }[];
+    reminders?: { type: '30_days_before' | '14_days_before' | '7_days_before' | '5_days_before' | '3_days_before' | '1_day_before' | 'same_day' | 'custom'; customTime?: string }[];
+    customMetadata?: Record<string, any>;
   }
 ) {
   return withActionGuard(
     { actionName: 'createAppointmentTask' },
     async (ctx) => {
-      // 1. Duplication Guard
+      // 1. Duplication Guard (Only block exact duplicate times for this type)
       const existing = await ctx.db.executeSafe({
         text: `SELECT id FROM follow_up_tasks 
                WHERE opportunity_id = $1 AND tenant_id = $2 
                AND status IN ('pending', 'in_progress')
                AND metadata->>'appointment_type' = $3
+               AND due_at = $4
                LIMIT 1`,
-        values: [opportunityId, ctx.tenantId, appointmentType]
+        values: [opportunityId, ctx.tenantId, appointmentType, dueAtUtc]
       }) as any[];
 
       if (existing.length > 0) {
-        return { success: false, error: 'Bu fırsat için zaten açık bir randevu bulunuyor.' };
+        return { success: false, error: 'Bu tarih ve saatte zaten planlanmış bir randevunuz bulunuyor.' };
       }
 
       // 2. Fetch Lead/Conversation Info for logs
@@ -1235,13 +1360,22 @@ export async function createAppointmentTask(
         }
       } catch (_) {}
 
+      const approvedReminders: Record<string, boolean> = {};
+      if (options?.reminders) {
+        options.reminders.forEach(r => {
+          approvedReminders[r.type] = true;
+        });
+      }
+
       const metadata = {
         appointment_type: appointmentType,
         note: options?.note || '',
         confirmation_status: options?.requireConfirmation ? 'pending' : 'not_required',
         zero_outbound_p0: true,
         initiated_from: 'appointment_management',
-        reminder_drafts: []
+        reminder_drafts: [],
+        approved_reminders: approvedReminders,
+        ...(options?.customMetadata || {})
       };
 
       const titleMap: Record<string, string> = {
@@ -1289,7 +1423,7 @@ export async function createAppointmentTask(
         ]
       });
 
-      // 4. Schedule Reminders if provided
+      // 4. Schedule Reminders: Only schedule approved reminders if passed explicitly
       if (options?.reminders && options.reminders.length > 0) {
         await scheduleReminderTasks(
           ctx.db,
@@ -1350,86 +1484,37 @@ export async function rescheduleAppointmentTask(taskId: string, newDueAtUtc: str
         ]
       });
 
-      // Ertelenen randevunun henüz çalışmamış (pending/in_progress) reminder'larını cancelled/skipped yap
-      const activeReminders = await ctx.db.executeSafe({
-        text: `SELECT id, metadata, due_at FROM follow_up_tasks 
+      // Ertelenen randevunun henüz çalışmamış (pending/in_progress) reminder'larını temizle ve yeniden oluştur
+      await ctx.db.executeSafe({
+        text: `DELETE FROM follow_up_tasks 
                WHERE tenant_id = $1 AND opportunity_id = $2 
                  AND status IN ('pending', 'in_progress')
                  AND task_type = 'appointment_reminder'
                  AND metadata->>'parent_task_id' = $3`,
         values: [ctx.tenantId, task.opportunity_id, taskId]
-      }) as any[];
+      });
 
-      if (activeReminders.length > 0) {
-        const reminderIds = activeReminders.map(r => r.id);
-        
-        await ctx.db.executeSafe({
-          text: `UPDATE follow_up_tasks 
-                 SET status = 'cancelled', 
-                     skipped_reason = 'parent_appointment_rescheduled',
-                     updated_at = NOW()
-                 WHERE id = ANY($1) AND tenant_id = $2`,
-          values: [reminderIds, ctx.tenantId]
-        });
-
-        // Write outreach logs for each cancelled reminder
-        for (const rem of activeReminders) {
-          const remMeta = typeof rem.metadata === 'string' ? JSON.parse(rem.metadata) : rem.metadata;
-          await ctx.db.executeSafe({
-            text: `INSERT INTO outreach_logs (tenant_id, opportunity_id, action, channel, actor_id, metadata)
-                   VALUES ($1, $2, 'appointment_reminder_cancelled', 'system', $3, $4)`,
-            values: [
-              ctx.tenantId,
-              task.opportunity_id,
-              ctx.userId,
-              JSON.stringify({
-                parent_task_id: taskId,
-                reminder_task_id: rem.id,
-                reminder_type: remMeta.reminder_type,
-                reason: 'parent_appointment_rescheduled',
-                zero_outbound_p0: true
-              })
-            ]
-          });
+      if (metadata.appointment_type === 'clinic_visit') {
+        let remindersToSchedule: { type: '30_days_before' | '14_days_before' | '7_days_before' | '5_days_before' | '3_days_before' | '1_day_before' | 'same_day' | 'custom'; customTime?: string }[] = [];
+        if (metadata.approved_reminders) {
+          remindersToSchedule = Object.keys(metadata.approved_reminders)
+            .filter(k => metadata.approved_reminders[k])
+            .map(k => ({ type: k as any }));
         }
 
-        // outreach_logs for rescheduled summary
-        await ctx.db.executeSafe({
-          text: `INSERT INTO outreach_logs (tenant_id, opportunity_id, action, channel, actor_id, metadata)
-                 VALUES ($1, $2, 'appointment_reminders_rescheduled', 'system', $3, $4)`,
-          values: [
+        if (remindersToSchedule.length > 0) {
+          await scheduleReminderTasks(
+            ctx.db,
             ctx.tenantId,
-            task.opportunity_id,
             ctx.userId,
-            JSON.stringify({
-              parent_task_id: taskId,
-              cancelled_reminder_ids: reminderIds,
-              new_due_at: newDueAtUtc,
-              zero_outbound_p0: true
-            })
-          ]
-        });
-
-        // Re-create new reminder tasks based on the active ones that were cancelled
-        const remindersToReplan = activeReminders.map(r => {
-          const remMeta = typeof r.metadata === 'string' ? JSON.parse(r.metadata) : r.metadata;
-          return {
-            type: remMeta.reminder_type as '3_days_before' | '1_day_before' | 'same_day' | 'custom',
-            customTime: remMeta.reminder_type === 'custom' ? r.due_at : undefined
-          };
-        });
-
-        await scheduleReminderTasks(
-          ctx.db,
-          ctx.tenantId,
-          ctx.userId,
-          task.opportunity_id,
-          task.phone_number,
-          taskId,
-          metadata.appointment_type,
-          newDueAtUtc,
-          remindersToReplan
-        );
+            task.opportunity_id,
+            task.phone_number,
+            taskId,
+            metadata.appointment_type,
+            newDueAtUtc,
+            remindersToSchedule
+          );
+        }
       }
 
       return { success: true };
@@ -1451,6 +1536,14 @@ export async function updateAppointmentConfirmation(taskId: string, status: 'con
       const metadata = typeof task.metadata === 'string' ? JSON.parse(task.metadata) : (task.metadata || {});
       
       metadata.confirmation_status = status;
+      if (status === 'pending') {
+        metadata.bot_teyit_sent = false;
+        delete metadata.bot_teyit_sent_at;
+        metadata.bot_hatirlat_sent = false;
+        delete metadata.bot_hatirlat_sent_at;
+        metadata.bot_devret_sent = false;
+        delete metadata.bot_devret_sent_at;
+      }
       if (note) metadata.note = note;
 
       await ctx.db.executeSafe({
@@ -1604,24 +1697,520 @@ export async function getAppointmentStats() {
   return withActionGuard(
     { actionName: 'getAppointmentStats' },
     async (ctx) => {
-      // Base condition
-      const baseCond = `t.tenant_id = $1 AND t.status IN ('pending', 'in_progress') AND (o.stage IS NULL OR o.stage NOT IN ('lost', 'not_qualified', 'arrived', 'not_interested', 'cancelled', 'completed'))`;
+      // Base condition (exclude child reminders)
+      const baseCond = `t.tenant_id = $1 AND t.status IN ('pending', 'in_progress') AND t.task_type != 'appointment_reminder' AND (o.stage IS NULL OR o.stage NOT IN ('lost', 'not_qualified', 'arrived', 'not_interested', 'cancelled', 'completed'))`;
 
       const statsQuery = `
         SELECT
           COUNT(*) FILTER (WHERE t.due_at::date = CURRENT_DATE) as due_today,
+          
+          -- Overdue splits
           COUNT(*) FILTER (WHERE t.due_at < NOW()) as overdue,
+          COUNT(*) FILTER (WHERE t.due_at < NOW() AND (
+            (t.task_type = 'callback_scheduled' AND (t.metadata->>'appointment_type' IS NULL OR t.metadata->>'appointment_type' != 'clinic_visit'))
+            OR t.metadata->>'appointment_type' IN ('phone_call', 'pre_consultation', 'doctor_review', 'report_followup')
+          )) as overdue_phone,
+          COUNT(*) FILTER (WHERE t.due_at < NOW() AND t.metadata->>'appointment_type' = 'clinic_visit') as overdue_clinic,
+
+          -- Confirmation pending splits
           COUNT(*) FILTER (WHERE t.metadata->>'confirmation_status' = 'pending') as confirmation_pending,
-          COUNT(*) FILTER (WHERE t.task_type = 'callback_scheduled' OR t.metadata->>'appointment_type' IN ('phone_call', 'pre_consultation')) as total_phone,
-          COUNT(*) FILTER (WHERE t.metadata->>'appointment_type' = 'clinic_visit') as total_clinic
+          COUNT(*) FILTER (WHERE t.metadata->>'confirmation_status' = 'pending' AND (
+            (t.task_type = 'callback_scheduled' AND (t.metadata->>'appointment_type' IS NULL OR t.metadata->>'appointment_type' != 'clinic_visit'))
+            OR t.metadata->>'appointment_type' IN ('phone_call', 'pre_consultation', 'doctor_review', 'report_followup')
+          )) as confirmation_pending_phone,
+          COUNT(*) FILTER (WHERE t.metadata->>'confirmation_status' = 'pending' AND t.metadata->>'appointment_type' = 'clinic_visit') as confirmation_pending_clinic,
+
+          -- Totals splits
+          COUNT(*) FILTER (WHERE (
+            (t.task_type = 'callback_scheduled' AND (t.metadata->>'appointment_type' IS NULL OR t.metadata->>'appointment_type' != 'clinic_visit'))
+            OR t.metadata->>'appointment_type' IN ('phone_call', 'pre_consultation', 'doctor_review', 'report_followup')
+          )) as total_phone,
+          COUNT(*) FILTER (WHERE t.metadata->>'appointment_type' = 'clinic_visit') as total_clinic,
+
+          -- Confirmed splits (Planlandı ve Onaylandı)
+          COUNT(*) FILTER (WHERE t.metadata->>'confirmation_status' = 'confirmed' AND (
+            (t.task_type = 'callback_scheduled' AND (t.metadata->>'appointment_type' IS NULL OR t.metadata->>'appointment_type' != 'clinic_visit'))
+            OR t.metadata->>'appointment_type' IN ('phone_call', 'pre_consultation', 'doctor_review', 'report_followup')
+          )) as confirmed_phone,
+          COUNT(*) FILTER (WHERE t.metadata->>'confirmation_status' = 'confirmed' AND t.metadata->>'appointment_type' = 'clinic_visit') as confirmed_clinic
         FROM follow_up_tasks t
         LEFT JOIN opportunities o ON o.id = t.opportunity_id AND o.tenant_id = t.tenant_id
         WHERE ${baseCond}
-          AND (t.task_type IN ('callback_scheduled', 'doctor_review_pending', 'send_report_reminder') OR t.metadata->>'appointment_type' IS NOT NULL)
+          AND (
+            t.task_type = 'callback_scheduled'
+            OR t.metadata->>'appointment_type' IN ('phone_call', 'clinic_visit', 'pre_consultation', 'consultation', 'doctor_review', 'report_followup')
+          )
       `;
 
       const rows = await ctx.db.executeSafe({ text: statsQuery, values: [ctx.tenantId] }) as any[];
-      return rows[0] || { due_today: 0, overdue: 0, confirmation_pending: 0, total_phone: 0, total_clinic: 0 };
+      return rows[0] || { 
+        due_today: 0, 
+        overdue: 0, overdue_phone: 0, overdue_clinic: 0,
+        confirmation_pending: 0, confirmation_pending_phone: 0, confirmation_pending_clinic: 0,
+        total_phone: 0, total_clinic: 0,
+        confirmed_phone: 0, confirmed_clinic: 0
+      };
     }
-  ).then(res => res.data || { due_today: 0, overdue: 0, confirmation_pending: 0, total_phone: 0, total_clinic: 0 });
+  ).then(res => res.data || { 
+    due_today: 0, 
+    overdue: 0, overdue_phone: 0, overdue_clinic: 0,
+    confirmation_pending: 0, confirmation_pending_phone: 0, confirmation_pending_clinic: 0,
+    total_phone: 0, total_clinic: 0,
+    confirmed_phone: 0, confirmed_clinic: 0
+  });
 }
+
+export async function deletePatientTask(taskId: string) {
+  return withActionGuard(
+    { actionName: 'deletePatientTask' },
+    async (ctx) => {
+      // Get opportunity id for outreach logs before deleting
+      const taskRes = await ctx.db.executeSafe({
+        text: `SELECT opportunity_id, metadata FROM follow_up_tasks WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+        values: [taskId, ctx.tenantId]
+      }) as any[];
+      
+      if (taskRes.length > 0) {
+        const task = taskRes[0];
+        const metadata = typeof task.metadata === 'string' ? JSON.parse(task.metadata) : (task.metadata || {});
+        
+        await ctx.db.executeSafe({
+          text: `INSERT INTO outreach_logs (tenant_id, opportunity_id, action, channel, actor_id, metadata)
+                 VALUES ($1, $2, 'task_deleted', 'system', $3, $4)`,
+          values: [
+            ctx.tenantId, task.opportunity_id, ctx.userId,
+            JSON.stringify({
+              task_id: taskId,
+              appointment_type: metadata.appointment_type,
+              zero_outbound_p0: true
+            })
+          ]
+        });
+      }
+
+      // Delete the task itself
+      await ctx.db.executeSafe({
+        text: `DELETE FROM follow_up_tasks WHERE id = $1 AND tenant_id = $2`,
+        values: [taskId, ctx.tenantId]
+      });
+
+      // Also delete any pending reminders of this task
+      await ctx.db.executeSafe({
+        text: `DELETE FROM follow_up_tasks WHERE tenant_id = $1 AND metadata->>'parent_task_id' = $2`,
+        values: [ctx.tenantId, taskId]
+      });
+
+      return { success: true };
+    }
+  );
+}
+
+export async function updatePatientTask(
+  taskId: string, 
+  dueAtUtc: string, 
+  description: string, 
+  note: string,
+  options?: { 
+    reminders?: { type: '30_days_before' | '14_days_before' | '7_days_before' | '5_days_before' | '3_days_before' | '1_day_before' | 'same_day' | 'custom'; customTime?: string }[];
+    customMetadata?: Record<string, any>;
+  }
+) {
+  return withActionGuard(
+    { actionName: 'updatePatientTask' },
+    async (ctx) => {
+      const taskRes = await ctx.db.executeSafe({
+        text: `SELECT opportunity_id, phone_number, metadata FROM follow_up_tasks WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+        values: [taskId, ctx.tenantId]
+      }) as any[];
+
+      if (taskRes.length === 0) return { success: false, error: 'Görev bulunamadı.' };
+      const task = taskRes[0];
+      const metadata = typeof task.metadata === 'string' ? JSON.parse(task.metadata) : (task.metadata || {});
+
+      metadata.note = note;
+      metadata.last_edited_at = new Date().toISOString();
+
+      if (options?.customMetadata) {
+        Object.assign(metadata, options.customMetadata);
+      }
+
+      if (options?.reminders) {
+        const approvedReminders: Record<string, boolean> = {};
+        options.reminders.forEach(r => {
+          approvedReminders[r.type] = true;
+        });
+        metadata.approved_reminders = approvedReminders;
+      }
+
+      await ctx.db.executeSafe({
+        text: `UPDATE follow_up_tasks 
+               SET due_at = $1, description = $2, metadata = $3, updated_at = NOW() 
+               WHERE id = $4 AND tenant_id = $5`,
+        values: [dueAtUtc, description, JSON.stringify(metadata), taskId, ctx.tenantId]
+      });
+
+      // Write outreach log for task edit
+      await ctx.db.executeSafe({
+        text: `INSERT INTO outreach_logs (tenant_id, opportunity_id, action, channel, actor_id, metadata)
+               VALUES ($1, $2, 'task_updated', 'system', $3, $4)`,
+        values: [
+          ctx.tenantId, task.opportunity_id, ctx.userId,
+          JSON.stringify({
+            task_id: taskId,
+            appointment_type: metadata.appointment_type,
+            due_at: dueAtUtc,
+            zero_outbound_p0: true
+          })
+        ]
+      });
+
+      // Cascade update reminders if this is a clinic visit
+      if (metadata.appointment_type === 'clinic_visit') {
+        // Delete pending reminders of this task
+        await ctx.db.executeSafe({
+          text: `DELETE FROM follow_up_tasks 
+                 WHERE tenant_id = $1 AND opportunity_id = $2 
+                   AND status IN ('pending', 'in_progress')
+                   AND task_type = 'appointment_reminder'
+                   AND metadata->>'parent_task_id' = $3`,
+          values: [ctx.tenantId, task.opportunity_id, taskId]
+        });
+
+        // Re-schedule reminders based on the new date and approved reminders list
+        let remindersToSchedule = options?.reminders;
+        if (!remindersToSchedule && metadata.approved_reminders) {
+          remindersToSchedule = Object.keys(metadata.approved_reminders)
+            .filter(k => metadata.approved_reminders[k])
+            .map(k => ({ type: k as any }));
+        }
+
+        if (remindersToSchedule && remindersToSchedule.length > 0) {
+          await scheduleReminderTasks(
+            ctx.db,
+            ctx.tenantId,
+            ctx.userId,
+            task.opportunity_id,
+            task.phone_number,
+            taskId,
+            metadata.appointment_type,
+            dueAtUtc,
+            remindersToSchedule
+          );
+        }
+      }
+
+      return { success: true };
+    }
+  );
+}
+
+export async function manuallyUpdateAppointmentStatus(
+  taskId: string, 
+  status: 'pending' | 'completed' | 'cancelled', 
+  appointmentResult?: 'completed' | 'arrived' | 'no_show' | 'cancelled' | 'none',
+  confirmationStatus?: 'pending' | 'confirmed' | 'declined' | 'no_response' | 'none'
+) {
+  return withActionGuard(
+    { actionName: 'manuallyUpdateAppointmentStatus' },
+    async (ctx) => {
+      const tasks = await ctx.db.executeSafe({
+        text: `SELECT t.metadata, t.opportunity_id, t.phone_number, t.due_at, o.stage as opp_stage 
+               FROM follow_up_tasks t
+               LEFT JOIN opportunities o ON o.id = t.opportunity_id AND o.tenant_id = t.tenant_id
+               WHERE t.id = $1 AND t.tenant_id = $2`,
+        values: [taskId, ctx.tenantId]
+      }) as any[];
+      if (tasks.length === 0) return { success: false, error: 'Görev bulunamadı.' };
+
+      const task = tasks[0];
+      const metadata = typeof task.metadata === 'string' ? JSON.parse(task.metadata) : (task.metadata || {});
+
+      // 1. Update confirmation status in metadata
+      if (confirmationStatus) {
+        if (confirmationStatus === 'none') {
+          delete metadata.confirmation_status;
+        } else {
+          metadata.confirmation_status = confirmationStatus;
+        }
+      }
+
+      // 2. Update status and result
+      let finalStatus = status;
+      if (status === 'pending') {
+        delete metadata.appointment_result;
+        metadata.bot_teyit_sent = false;
+        delete metadata.bot_teyit_sent_at;
+        metadata.bot_hatirlat_sent = false;
+        delete metadata.bot_hatirlat_sent_at;
+        metadata.bot_devret_sent = false;
+        delete metadata.bot_devret_sent_at;
+        
+        // Reset opportunity stage if it's currently a terminal stage
+        const oppStage = task.opp_stage;
+        const terminalStages = ['lost', 'not_qualified', 'arrived', 'not_interested', 'cancelled', 'completed'];
+        if (oppStage && terminalStages.includes(oppStage)) {
+          const newStage = metadata.appointment_type === 'clinic_visit' ? 'appointment_booked' : 'engaged';
+          
+          try {
+            const { UnifiedStageService } = await import('@/lib/services/unified-stage.service');
+            await UnifiedStageService.update({
+              tenantId: ctx.tenantId,
+              source: 'system',
+              opportunityId: task.opportunity_id || undefined,
+              phoneNumber: task.phone_number,
+              targetStage: newStage,
+              actorId: ctx.userId,
+              reason: 'appointment_reverted_to_pending'
+            });
+          } catch (err) {
+            // Direct SQL fallback if UnifiedStageService has problems
+            await ctx.db.executeSafe({
+              text: `UPDATE opportunities SET stage = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3`,
+              values: [newStage, task.opportunity_id, ctx.tenantId]
+            });
+          }
+        }
+
+        // Reactivate reminders that were cancelled due to parent completion
+        await ctx.db.executeSafe({
+          text: `UPDATE follow_up_tasks 
+                 SET status = 'pending', skipped_reason = null, updated_at = NOW() 
+                 WHERE tenant_id = $1 AND opportunity_id = $2 
+                   AND status = 'cancelled'
+                   AND task_type = 'appointment_reminder'
+                   AND metadata->>'parent_task_id' = $3
+                   AND due_at > NOW()`,
+          values: [ctx.tenantId, task.opportunity_id, taskId]
+        });
+      } else if (status === 'completed') {
+        metadata.appointment_result = appointmentResult && appointmentResult !== 'none' ? appointmentResult : 'completed';
+      } else if (status === 'cancelled') {
+        metadata.appointment_result = 'cancelled';
+      }
+
+      // 3. Update task row
+      await ctx.db.executeSafe({
+        text: `UPDATE follow_up_tasks SET status = $1, metadata = $2, updated_at = NOW() WHERE id = $3 AND tenant_id = $4`,
+        values: [finalStatus, JSON.stringify(metadata), taskId, ctx.tenantId]
+      });
+
+      // 4. Cancel active reminders if completed/cancelled
+      if (finalStatus === 'completed' || finalStatus === 'cancelled') {
+        const activeReminders = await ctx.db.executeSafe({
+          text: `SELECT id, metadata FROM follow_up_tasks 
+                 WHERE tenant_id = $1 AND opportunity_id = $2 
+                   AND status IN ('pending', 'in_progress')
+                   AND task_type = 'appointment_reminder'
+                   AND metadata->>'parent_task_id' = $3`,
+          values: [ctx.tenantId, task.opportunity_id, taskId]
+        }) as any[];
+
+        if (activeReminders.length > 0) {
+          const reminderIds = activeReminders.map(r => r.id);
+          const cancelReason = finalStatus === 'cancelled' 
+            ? 'parent_appointment_cancelled' 
+            : `parent_appointment_${metadata.appointment_result || 'completed'}`;
+
+          await ctx.db.executeSafe({
+            text: `UPDATE follow_up_tasks 
+                   SET status = 'cancelled', 
+                       skipped_reason = $1,
+                       updated_at = NOW()
+                   WHERE id = ANY($2) AND tenant_id = $3`,
+            values: [cancelReason, reminderIds, ctx.tenantId]
+          });
+        }
+      }
+
+      // 5. Audit Log (Outreach)
+      await ctx.db.executeSafe({
+        text: `INSERT INTO outreach_logs (tenant_id, opportunity_id, action, channel, actor_id, metadata)
+               VALUES ($1, $2, 'appointment_status_manually_updated', 'system', $3, $4)`,
+        values: [
+          ctx.tenantId, task.opportunity_id, ctx.userId,
+          JSON.stringify({
+            appointment_type: metadata.appointment_type,
+            task_id: taskId,
+            status: finalStatus,
+            appointment_result: metadata.appointment_result,
+            confirmation_status: metadata.confirmation_status,
+            due_at: task.due_at,
+            initiated_from: 'manual_update',
+            zero_outbound_p0: true
+          })
+        ]
+      });
+
+      return { success: true };
+    }
+  );
+}
+
+export async function recordAppointmentReminder(taskId: string) {
+  return withActionGuard(
+    { actionName: 'recordAppointmentReminder' },
+    async (ctx) => {
+      const tasks = await ctx.db.executeSafe({
+        text: `SELECT metadata, opportunity_id FROM follow_up_tasks WHERE id = $1 AND tenant_id = $2`,
+        values: [taskId, ctx.tenantId]
+      }) as any[];
+      if (tasks.length === 0) return { success: false, error: 'Görev bulunamadı.' };
+
+      const task = tasks[0];
+      const metadata = typeof task.metadata === 'string' ? JSON.parse(task.metadata) : (task.metadata || {});
+
+      metadata.last_manual_reminder_at = new Date().toISOString();
+
+      await ctx.db.executeSafe({
+        text: `UPDATE follow_up_tasks SET metadata = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3`,
+        values: [JSON.stringify(metadata), taskId, ctx.tenantId]
+      });
+
+      return { success: true };
+    }
+  );
+}
+
+export async function recordBotDirectiveSent(taskId: string, type: 'teyit' | 'hatirlat' | 'devret') {
+  return withActionGuard(
+    { actionName: 'recordBotDirectiveSent' },
+    async (ctx) => {
+      const tasks = await ctx.db.executeSafe({
+        text: `SELECT metadata FROM follow_up_tasks WHERE id = $1 AND tenant_id = $2`,
+        values: [taskId, ctx.tenantId]
+      }) as any[];
+      if (tasks.length === 0) return { success: false, error: 'Görev bulunamadı.' };
+
+      const task = tasks[0];
+      const metadata = typeof task.metadata === 'string' ? JSON.parse(task.metadata) : (task.metadata || {});
+
+      if (type === 'teyit') {
+        metadata.bot_teyit_sent = true;
+        metadata.bot_teyit_sent_at = new Date().toISOString();
+      } else if (type === 'hatirlat') {
+        metadata.bot_hatirlat_sent = true;
+        metadata.bot_hatirlat_sent_at = new Date().toISOString();
+      } else if (type === 'devret') {
+        metadata.bot_devret_sent = true;
+        metadata.bot_devret_sent_at = new Date().toISOString();
+      }
+
+      await ctx.db.executeSafe({
+        text: `UPDATE follow_up_tasks SET metadata = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3`,
+        values: [JSON.stringify(metadata), taskId, ctx.tenantId]
+      });
+
+      return { success: true };
+    }
+  );
+}
+
+export async function approveBotSuggestion(taskId: string, proposedDate: string) {
+  return withActionGuard(
+    { actionName: 'approveBotSuggestion' },
+    async (ctx) => {
+      const tasks = await ctx.db.executeSafe({
+        text: `SELECT metadata, opportunity_id, conversation_id FROM follow_up_tasks WHERE id = $1 AND tenant_id = $2`,
+        values: [taskId, ctx.tenantId]
+      }) as any[];
+      if (tasks.length === 0) return { success: false, error: 'Görev bulunamadı.' };
+
+      const task = tasks[0];
+      const metadata = typeof task.metadata === 'string' ? JSON.parse(task.metadata) : (task.metadata || {});
+
+      // 1. Update suggestion status
+      if (metadata.bot_suggestion) {
+        metadata.bot_suggestion.status = 'approved';
+        metadata.bot_suggestion.approved_at = new Date().toISOString();
+      }
+
+      // 2. Clear bot delegation flags
+      metadata.bot_teyit_sent = false;
+      metadata.bot_hatirlat_sent = false;
+      metadata.bot_devret_sent = false;
+      delete metadata.bot_teyit_sent_at;
+      delete metadata.bot_hatirlat_sent_at;
+      delete metadata.bot_devret_sent_at;
+
+      // 3. Reschedule and confirm status
+      metadata.confirmation_status = 'confirmed';
+      metadata.confirmed = true;
+
+      await ctx.db.executeSafe({
+        text: `UPDATE follow_up_tasks 
+               SET due_at = $1, status = 'pending', metadata = $2, updated_at = NOW() 
+               WHERE id = $3 AND tenant_id = $4`,
+        values: [proposedDate, JSON.stringify(metadata), taskId, ctx.tenantId]
+      });
+
+      // 4. Log successful approval to outreach logs
+      await ctx.db.executeSafe({
+        text: `INSERT INTO outreach_logs (tenant_id, opportunity_id, conversation_id, action, channel, actor_id, metadata)
+               VALUES ($1, $2, $3, 'bot_suggestion_approved', 'system', $4, $5::jsonb)`,
+        values: [
+          ctx.tenantId,
+          task.opportunity_id || null,
+          task.conversation_id || null,
+          ctx.userId,
+          JSON.stringify({
+            task_id: taskId,
+            approved_date: proposedDate,
+            approved_at: new Date().toISOString()
+          })
+        ]
+      });
+
+      return { success: true };
+    }
+  );
+}
+
+export async function rejectBotSuggestion(taskId: string) {
+  return withActionGuard(
+    { actionName: 'rejectBotSuggestion' },
+    async (ctx) => {
+      const tasks = await ctx.db.executeSafe({
+        text: `SELECT metadata, opportunity_id, conversation_id FROM follow_up_tasks WHERE id = $1 AND tenant_id = $2`,
+        values: [taskId, ctx.tenantId]
+      }) as any[];
+      if (tasks.length === 0) return { success: false, error: 'Görev bulunamadı.' };
+
+      const task = tasks[0];
+      const metadata = typeof task.metadata === 'string' ? JSON.parse(task.metadata) : (task.metadata || {});
+
+      // 1. Update suggestion status
+      if (metadata.bot_suggestion) {
+        metadata.bot_suggestion.status = 'rejected';
+        metadata.bot_suggestion.rejected_at = new Date().toISOString();
+      }
+
+      await ctx.db.executeSafe({
+        text: `UPDATE follow_up_tasks SET metadata = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3`,
+        values: [JSON.stringify(metadata), taskId, ctx.tenantId]
+      });
+
+      // 2. Log rejection to outreach logs
+      await ctx.db.executeSafe({
+        text: `INSERT INTO outreach_logs (tenant_id, opportunity_id, conversation_id, action, channel, actor_id, metadata)
+               VALUES ($1, $2, $3, 'bot_suggestion_rejected', 'system', $4, $5::jsonb)`,
+        values: [
+          ctx.tenantId,
+          task.opportunity_id || null,
+          task.conversation_id || null,
+          ctx.userId,
+          JSON.stringify({
+            task_id: taskId,
+            rejected_at: new Date().toISOString()
+          })
+        ]
+      });
+
+      return { success: true };
+    }
+  );
+}
+
+
+
+
+
