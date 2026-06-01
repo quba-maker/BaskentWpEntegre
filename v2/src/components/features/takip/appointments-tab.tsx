@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import useSWR from "swr";
 import {
   Search, ChevronDown, CheckCircle2, Phone, Calendar,
@@ -10,7 +11,7 @@ import {
 import { 
   getAppointmentRows, getAppointmentStats, completeAppointmentTask, updateAppointmentConfirmation, rescheduleAppointmentTask,
   manuallyUpdateAppointmentStatus, recordAppointmentReminder, recordBotDirectiveSent,
-  approveBotSuggestion, rejectBotSuggestion,
+  approveBotSuggestion, rejectBotSuggestion, createAppointmentTask,
   type AppointmentRow, type AppointmentFilters 
 } from "@/app/actions/patient-tracking";
 import { formatPhoneReadable } from "@/lib/utils/patient-name-resolver";
@@ -674,6 +675,136 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
     });
   };
 
+  // Smart defaults for scheduling (Tomorrow at 10:00 AM)
+  const getTomorrowString = () => {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const year = tomorrow.getFullYear();
+    const month = String(tomorrow.getMonth() + 1).padStart(2, '0');
+    const day = String(tomorrow.getDate()).padStart(2, '0');
+    return { date: `${year}-${month}-${day}`, year: String(year), month };
+  };
+
+  const tomorrowVals = getTomorrowString();
+
+  const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
+  const [planType, setPlanType] = useState<'phone_call' | 'clinic_visit'>('phone_call');
+  const [planDate, setPlanDate] = useState(tomorrowVals.date);
+  const [planTime, setPlanTime] = useState("10:00");
+  const [planNote, setPlanNote] = useState("");
+  const [planLoading, setPlanLoading] = useState(false);
+
+  // Clinic Visit Precision Date & Reminders States
+  const [planYear, setPlanYear] = useState<string>(tomorrowVals.year);
+  const [planMonth, setPlanMonth] = useState<string>(tomorrowVals.month);
+  const [planDay, setPlanDay] = useState<string>("");
+  const [planTimeCv, setPlanTimeCv] = useState<string>(""); // Clinic Visit optional time
+  const [approvedReminders, setApprovedReminders] = useState<Record<string, boolean>>({
+    '30_days_before': false,
+    '14_days_before': false,
+    '7_days_before': false,
+    '1_day_before': false,
+  });
+
+  const yearsOptions = [
+    String(new Date().getFullYear()),
+    String(new Date().getFullYear() + 1),
+    String(new Date().getFullYear() + 2),
+    String(new Date().getFullYear() + 3),
+  ];
+
+  const daysOptions = Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, '0'));
+
+  const timesOptions = (() => {
+    const times = [];
+    for (let h = 8; h <= 20; h++) {
+      const hh = String(h).padStart(2, '0');
+      times.push(`${hh}:00`);
+      times.push(`${hh}:30`);
+    }
+    return times;
+  })();
+
+  const handleCreatePlan = async () => {
+    if (!apt.opportunityId) return;
+    setPlanLoading(true);
+    try {
+      let dateObj: Date;
+      let customMetadata: any = null;
+      let remindersToSend: any[] = [];
+
+      if (planType === 'clinic_visit') {
+        if (!planYear || !planMonth) {
+          showAlert("Hata", "Lütfen Yıl ve Ay seçiniz.");
+          setPlanLoading(false);
+          return;
+        }
+
+        const day = planDay || '01';
+        const time = planTimeCv || '10:00';
+        const localDateStr = `${planYear}-${planMonth}-${day}T${time}:00`;
+        dateObj = new Date(localDateStr);
+
+        customMetadata = {
+          is_partial_date: !planDay || !planTimeCv,
+          partial_precision: !planDay ? 'year_month' : (!planTimeCv ? 'year_month_day' : 'full'),
+          selected_year: planYear,
+          selected_month: planMonth,
+          selected_day: planDay || null,
+          selected_time: planTimeCv || null,
+        };
+
+        remindersToSend = Object.keys(approvedReminders)
+          .filter(k => approvedReminders[k])
+          .map(k => ({ type: k as any }));
+      } else {
+        if (!planDate || !planTime) return;
+        const localDateStr = `${planDate}T${planTime}:00`;
+        dateObj = new Date(localDateStr);
+      }
+
+      const res = await createAppointmentTask(apt.opportunityId, dateObj.toISOString(), planType, { 
+        note: planNote, 
+        requireConfirmation: planType === 'clinic_visit',
+        reminders: remindersToSend,
+        customMetadata
+      });
+      
+      if (res.success) {
+        setPlanNote("");
+        
+        // Reset states
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const year = tomorrow.getFullYear();
+        const month = String(tomorrow.getMonth() + 1).padStart(2, '0');
+        
+        setPlanDate(`${year}-${month}-${tomorrow.getDate()}`);
+        setPlanTime("10:00");
+        setPlanYear(String(year));
+        setPlanMonth(month);
+        setPlanDay("");
+        setPlanTimeCv("");
+        setApprovedReminders({
+          '30_days_before': false,
+          '14_days_before': false,
+          '7_days_before': false,
+          '1_day_before': false,
+        });
+
+        setIsPlanModalOpen(false);
+        showAlert("Başarılı", planType === 'clinic_visit' ? 'Randevu başarıyla planlandı.' : 'Görev başarıyla planlandı.', 'success');
+        onActionComplete();
+      } else {
+        showAlert("Hata", res.error || "Hata oluştu");
+      }
+    } catch(err) {
+      showAlert("Hata", "Hata oluştu");
+    } finally {
+      setPlanLoading(false);
+    }
+  };
+
   // Arama Notu Ekleme/Görüntüleme Modern Modalleri
   const [noteModalOpen, setNoteModalOpen] = useState(false);
   const [noteInputText, setNoteInputText] = useState('');
@@ -1318,7 +1449,7 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            if (apt.opportunityId) onOpenDrawer(apt.opportunityId, apt.taskId);
+                            setIsPlanModalOpen(true);
                           }}
                           className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-emerald-50 border border-emerald-200/50 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800 rounded-lg shadow-sm transition-all text-[11px] font-bold cursor-pointer shrink-0"
                           title="Randevu Planla"
@@ -2049,6 +2180,342 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
           </div>
         </td>
       </tr>
+    )}
+
+    {/* Custom Premium Randevu & Görev Planla Modal */}
+    {isPlanModalOpen && createPortal(
+      <div className="fixed inset-0 bg-black/45 backdrop-blur-[4px] flex items-center justify-center z-[9999] animate-in fade-in duration-200" onClick={() => setIsPlanModalOpen(false)}>
+        <div className="bg-white rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.18)] border border-black/5 w-full max-w-lg p-6 mx-4 animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+          
+          {/* Modal Header */}
+          <div className="flex items-center justify-between pb-3 border-b border-black/[0.04] mb-4">
+            <span className="text-[11px] font-extrabold text-[#1D1D1F] uppercase tracking-wider flex items-center gap-1.5">
+              <Zap className="w-3.5 h-3.5 text-indigo-600 animate-pulse" /> RANDEVU & GÖREV PLANLA
+            </span>
+            <button 
+              onClick={() => setIsPlanModalOpen(false)}
+              className="p-1.5 bg-[#F5F5F7] hover:bg-black/5 text-[#86868B] rounded-full transition-colors cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Form Content */}
+          <div className="space-y-4 max-h-[75vh] overflow-y-auto pr-1 no-scrollbar text-left">
+            {/* Tür Segmented Group */}
+            <div>
+              <label className="block text-[10px] font-bold text-[#86868B] uppercase tracking-wider mb-1.5">Görev/Randevu Türü</label>
+              <div className="grid grid-cols-2 gap-1 bg-[#F5F5F7] p-1 rounded-xl">
+                {[
+                  { id: 'phone_call', label: 'Telefon Görüşmesi', icon: <Phone className="w-3.5 h-3.5" /> },
+                  { id: 'clinic_visit', label: 'Klinik Randevusu', icon: <Building2 className="w-3.5 h-3.5" /> },
+                ].map(item => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setPlanType(item.id as any)}
+                    className={`flex flex-col items-center justify-center gap-1.5 py-2.5 rounded-lg text-[10px] font-bold transition-all duration-200 cursor-pointer ${
+                      planType === item.id 
+                        ? 'bg-white text-indigo-600 shadow-sm border border-black/[0.02]' 
+                        : 'text-[#86868B] hover:text-[#1D1D1F]'
+                    }`}
+                  >
+                    {item.icon}
+                    <span>{item.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Hızlı Planlama Şablonları (Sadece Telefon Görüşmesi için) */}
+            {planType === 'phone_call' ? (
+              <div>
+                <label className="block text-[10px] font-bold text-[#86868B] uppercase tracking-wider mb-1.5">Hızlı Planlama Şablonları</label>
+                <div className="flex gap-1.5 flex-wrap">
+                  {(() => {
+                    const presets = [
+                      { label: 'Bugün (+2s)', getValue: () => {
+                        const d = new Date();
+                        d.setHours(d.getHours() + 2);
+                        return { date: d.toISOString().split('T')[0], time: String(d.getHours()).padStart(2, '0') + ':00' };
+                      }},
+                      { label: 'Yarın (10:00)', getValue: () => {
+                        const d = new Date();
+                        d.setDate(d.getDate() + 1);
+                        return { date: d.toISOString().split('T')[0], time: '10:00' };
+                      }},
+                      { label: '3 Gün Sonra', getValue: () => {
+                        const d = new Date();
+                        d.setDate(d.getDate() + 3);
+                        return { date: d.toISOString().split('T')[0], time: '14:00' };
+                      }},
+                      { label: '5 Gün Sonra', getValue: () => {
+                        const d = new Date();
+                        d.setDate(d.getDate() + 5);
+                        return { date: d.toISOString().split('T')[0], time: '11:00' };
+                      }}
+                    ];
+
+                    const matchedPreset = presets.find(p => {
+                      const vals = p.getValue();
+                      return planDate === vals.date && planTime === vals.time;
+                    });
+
+                    const isCustomActive = !matchedPreset && planDate && planTime;
+
+                    return (
+                      <>
+                        {presets.map(p => {
+                          const vals = p.getValue();
+                          const isActive = planDate === vals.date && planTime === vals.time;
+                          return (
+                            <button
+                              key={p.label}
+                              type="button"
+                              onClick={() => {
+                                setPlanDate(vals.date);
+                                setPlanTime(vals.time);
+                              }}
+                              className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold border transition-all duration-200 cursor-pointer ${
+                                isActive 
+                                  ? 'bg-indigo-50 border-indigo-200 text-indigo-700 shadow-sm'
+                                  : 'bg-white hover:bg-[#F5F5F7] border-black/5 text-[#86868B] hover:text-[#1D1D1F]'
+                              }`}
+                            >
+                              {p.label}
+                            </button>
+                          );
+                        })}
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const now = new Date();
+                            const year = now.getFullYear();
+                            const month = String(now.getMonth() + 1).padStart(2, '0');
+                            const day = String(now.getDate()).padStart(2, '0');
+                            const hours = String(now.getHours()).padStart(2, '0');
+                            const mins = String(now.getMinutes()).padStart(2, '0');
+                            setPlanDate(`${year}-${month}-${day}`);
+                            setPlanTime(`${hours}:${mins}`);
+                          }}
+                          className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold border transition-all duration-200 cursor-pointer ${
+                            isCustomActive 
+                              ? 'bg-indigo-50 border-indigo-200 text-indigo-700 shadow-sm'
+                              : 'bg-white hover:bg-[#F5F5F7] border-black/5 text-[#86868B] hover:text-[#1D1D1F]'
+                          }`}
+                        >
+                          ⏱️ Özel Zaman
+                        </button>
+                      </>
+                    );
+                  })()}
+                </div>
+              </div>
+            ) : (
+              /* Klinik Randevusu için Teyit Akışı Canlı Ön İzleme */
+              planYear && planMonth && (
+                <div className="bg-white rounded-xl border border-black/5 p-3 space-y-2.5 animate-in fade-in duration-200">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[9.5px] font-bold text-[#86868B] uppercase tracking-wider block">
+                      🔔 Teyit & Hatırlatıcı Takvimi (Onaylamak için tıklayın)
+                    </span>
+                    <span className="text-[8px] font-extrabold text-indigo-600 bg-indigo-50 border border-indigo-100 rounded-full px-1.5 py-0.2 uppercase tracking-wide">
+                      Tıkla-Onayla
+                    </span>
+                  </div>
+                  
+                  {(() => {
+                    try {
+                      const day = planDay || '01';
+                      const time = planTimeCv || '10:00';
+                      const baseDate = new Date(`${planYear}-${planMonth}-${day}T${time}:00`);
+                      if (isNaN(baseDate.getTime())) return <p className="text-[10px] text-red-500">Geçersiz tarih</p>;
+
+                      const offsets = [
+                        { label: '1 Ay Kala', days: 30, key: '30_days_before' },
+                        { label: '2 Hafta Kala', days: 14, key: '14_days_before' },
+                        { label: '1 Hafta Kala', days: 7, key: '7_days_before' },
+                        { label: '1 Gün Önce', days: 1, key: '1_day_before' },
+                      ];
+
+                      return (
+                        <div className="grid grid-cols-4 gap-2 relative pt-2">
+                          {/* Horizontal connector line */}
+                          <div className="absolute left-[12%] right-[12%] top-[20px] h-0.5 bg-indigo-100" />
+                          
+                          {offsets.map((o, idx) => {
+                            const remDate = new Date(baseDate.getTime());
+                            remDate.setDate(remDate.getDate() - o.days);
+                            remDate.setHours(10, 0, 0, 0);
+
+                            const isPast = remDate.getTime() <= Date.now();
+                            const dateStr = remDate.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' });
+                            const isApproved = approvedReminders[o.key];
+
+                            return (
+                              <div key={o.label} className="flex flex-col items-center text-center relative z-10">
+                                <button 
+                                  type="button"
+                                  disabled={isPast}
+                                  onClick={() => {
+                                    setApprovedReminders(prev => ({
+                                      ...prev,
+                                      [o.key]: !prev[o.key]
+                                    }));
+                                  }}
+                                  className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-extrabold transition-all duration-300 cursor-pointer ${
+                                    isPast 
+                                      ? 'bg-[#F5F5F7] border border-black/10 text-[#86868B] cursor-not-allowed' 
+                                      : isApproved
+                                        ? 'bg-indigo-600 border-2 border-indigo-600 text-white shadow-md shadow-indigo-600/20 hover:scale-105 active:scale-95'
+                                        : 'bg-white border-2 border-[#86868B]/30 text-[#86868B] hover:border-indigo-400 hover:text-indigo-500 hover:scale-105 active:scale-95'
+                                  }`} 
+                                  title={isPast ? 'Süreç geçmişte kalmıştır.' : 'Teyit hatırlatıcısını onaylamak için tıklayın.'}
+                                >
+                                  {isPast ? '—' : isApproved ? '✓' : '+'}
+                                </button>
+                                <span className={`text-[9px] font-bold mt-1.5 block truncate w-full px-0.5 ${
+                                  isPast ? 'text-[#86868B] opacity-60' : isApproved ? 'text-indigo-600 font-bold' : 'text-[#1D1D1F]'
+                                }`}>
+                                  {o.label}
+                                </span>
+                                <span className={`text-[8.5px] font-bold mt-0.5 ${
+                                  isPast ? 'text-[#86868B] opacity-50' : isApproved ? 'text-indigo-600 font-extrabold' : 'text-[#86868B]'
+                                }`}>
+                                  {isPast ? 'Kurulmayacak' : isApproved ? `${dateStr}` : 'Pasif'}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    } catch (_) {
+                      return null;
+                    }
+                  })()}
+                </div>
+              )
+            )}
+
+            {/* Date & Time Grid */}
+            {planType === 'phone_call' ? (
+              <div className="grid grid-cols-2 gap-3 animate-in fade-in duration-200">
+                <div>
+                  <label className="block text-[10px] font-bold text-[#86868B] uppercase tracking-wider mb-1">Tarih</label>
+                  <input 
+                    type="date" 
+                    value={planDate} 
+                    onChange={e => setPlanDate(e.target.value)} 
+                    required 
+                    className="w-full px-3 py-2 bg-[#F5F5F7] rounded-xl text-xs font-semibold outline-none border border-transparent focus:border-indigo-500/25 focus:bg-white transition-all duration-200" 
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-[#86868B] uppercase tracking-wider mb-1">Saat (TR)</label>
+                  <input 
+                    type="time" 
+                    value={planTime} 
+                    onChange={e => setPlanTime(e.target.value)} 
+                    required 
+                    className="w-full px-3 py-2 bg-[#F5F5F7] rounded-xl text-xs font-semibold outline-none border border-transparent focus:border-indigo-500/25 focus:bg-white transition-all duration-200" 
+                  />
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3 animate-in fade-in duration-200">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[10px] font-bold text-[#86868B] uppercase tracking-wider mb-1">Yıl</label>
+                    <select
+                      value={planYear}
+                      onChange={e => setPlanYear(e.target.value)}
+                      className="w-full px-3 py-2 bg-[#F5F5F7] rounded-xl text-xs font-semibold outline-none border border-transparent focus:border-indigo-500/25 focus:bg-white transition-all duration-200 appearance-none cursor-pointer"
+                    >
+                      {yearsOptions.map(y => (
+                        <option key={y} value={y}>{y}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-[#86868B] uppercase tracking-wider mb-1">Ay</label>
+                    <select
+                      value={planMonth}
+                      onChange={e => setPlanMonth(e.target.value)}
+                      className="w-full px-3 py-2 bg-[#F5F5F7] rounded-xl text-xs font-semibold outline-none border border-transparent focus:border-indigo-500/25 focus:bg-white transition-all duration-200 appearance-none cursor-pointer"
+                    >
+                      {MONTHS_TR.map((m: any) => (
+                        <option key={m.value} value={m.value}>{m.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[10px] font-bold text-[#86868B] uppercase tracking-wider mb-1">Gün (İsteğe Bağlı)</label>
+                    <select
+                      value={planDay}
+                      onChange={e => setPlanDay(e.target.value)}
+                      className="w-full px-3 py-2 bg-[#F5F5F7] rounded-xl text-xs font-semibold outline-none border border-transparent focus:border-indigo-500/25 focus:bg-white transition-all duration-200 appearance-none cursor-pointer"
+                    >
+                      <option value="">Seçilmedi (Ay Geneli)</option>
+                      {daysOptions.map(d => (
+                        <option key={d} value={d}>{d}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-[#86868B] uppercase tracking-wider mb-1">Saat (İsteğe Bağlı)</label>
+                    <select
+                      value={planTimeCv}
+                      onChange={e => setPlanTimeCv(e.target.value)}
+                      disabled={!planDay}
+                      className="w-full px-3 py-2 bg-[#F5F5F7] rounded-xl text-xs font-semibold outline-none border border-transparent focus:border-indigo-500/25 focus:bg-white transition-all duration-200 appearance-none disabled:opacity-50 cursor-pointer"
+                    >
+                      <option value="">Saat Seçilmedi (10:00)</option>
+                      {timesOptions.map(t => (
+                        <option key={t} value={t}>{t}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Görev Notu */}
+            <div>
+              <label className="block text-[10px] font-bold text-[#86868B] uppercase tracking-wider mb-1">Görev Notu</label>
+              <input 
+                type="text" 
+                value={planNote} 
+                onChange={e => setPlanNote(e.target.value)} 
+                placeholder="Eklemek istediğiniz özel not veya detay..." 
+                className="w-full px-3 py-2.5 bg-[#F5F5F7] rounded-xl text-xs font-semibold outline-none border border-transparent focus:border-indigo-500/25 focus:bg-white transition-all duration-200" 
+              />
+            </div>
+
+            <div className="pt-2 border-t border-black/5 flex items-center gap-2">
+              <button 
+                type="button"
+                onClick={() => setIsPlanModalOpen(false)}
+                className="flex-1 py-2.5 bg-[#F5F5F7] hover:bg-[#E8E8ED] text-[#1D1D1F] rounded-xl text-xs font-bold transition-all duration-200 cursor-pointer text-center"
+              >
+                Vazgeç
+              </button>
+              <button 
+                type="button" 
+                onClick={handleCreatePlan}
+                disabled={planLoading || (planType === 'phone_call' ? (!planDate || !planTime) : (!planYear || !planMonth))} 
+                className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold disabled:opacity-40 shadow-sm transition-all duration-200 cursor-pointer text-center"
+              >
+                {planLoading ? 'Oluşturuluyor...' : (planType === 'clinic_visit' ? 'Randevuyu Planla' : 'Görevi Planla')}
+              </button>
+            </div>
+          </div>
+
+        </div>
+      </div>,
+      document.body
     )}
   </>
 );
