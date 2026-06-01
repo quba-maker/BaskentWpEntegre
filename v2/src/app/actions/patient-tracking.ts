@@ -903,12 +903,24 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
 
       // Status filter
       if (filters?.status && filters.status !== 'all') {
-        if (filters.status === 'pending') conditions.push(`t.status IN ('pending', 'in_progress')`);
-        else if (filters.status === 'completed') conditions.push(`t.status = 'completed'`);
-        else if (filters.status === 'cancelled') conditions.push(`t.status = 'cancelled'`);
+        if (filters.status === 'pending') {
+          conditions.push(`t.status IN ('pending', 'in_progress')`);
+          conditions.push(`(t.metadata->>'confirmation_status' IS NULL OR t.metadata->>'confirmation_status' != 'confirmed')`);
+        }
+        else if (filters.status === 'completed') {
+          conditions.push(`t.status = 'completed'`);
+          conditions.push(`(t.metadata->>'appointment_result' IS NULL OR t.metadata->>'appointment_result' NOT IN ('no_show', 'cancelled'))`);
+        }
+        else if (filters.status === 'cancelled') {
+          conditions.push(`(t.status = 'cancelled' OR t.metadata->>'appointment_result' = 'cancelled')`);
+        }
         else if (filters.status === 'overdue') conditions.push(`t.status IN ('pending', 'in_progress') AND t.due_at < NOW()`);
-        else if (filters.status === 'arrived') conditions.push(`t.status = 'completed' AND t.metadata->>'appointment_result' = 'arrived'`);
-        else if (filters.status === 'no_show') conditions.push(`(t.status = 'completed' AND t.metadata->>'appointment_result' = 'no_show') OR t.status = 'no_show'`);
+        else if (filters.status === 'arrived') {
+          conditions.push(`t.status = 'completed' AND t.metadata->>'appointment_result' = 'arrived'`);
+        }
+        else if (filters.status === 'no_show') {
+          conditions.push(`((t.status = 'completed' AND t.metadata->>'appointment_result' = 'no_show') OR t.status = 'no_show')`);
+        }
         else if (filters.status === 'no_response') conditions.push(`(t.metadata->>'confirmation_status' = 'no_response' OR (t.status IN ('pending', 'in_progress') AND t.due_at < NOW()))`);
         else if (filters.status === 'confirmed') {
           conditions.push(`t.status IN ('pending', 'in_progress')`);
@@ -917,9 +929,10 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
       } else {
         // Default: show pending/in_progress unless completed flag is explicitly true
         if (filters?.completed) {
-            conditions.push(`t.status = 'completed'`);
+          conditions.push(`t.status = 'completed'`);
+          conditions.push(`(t.metadata->>'appointment_result' IS NULL OR t.metadata->>'appointment_result' NOT IN ('no_show', 'cancelled'))`);
         } else {
-            conditions.push(`t.status IN ('pending', 'in_progress')`);
+          conditions.push(`t.status IN ('pending', 'in_progress')`);
         }
       }
 
@@ -1697,45 +1710,96 @@ export async function getAppointmentStats() {
   return withActionGuard(
     { actionName: 'getAppointmentStats' },
     async (ctx) => {
-      // Base condition (exclude child reminders)
-      const baseCond = `t.tenant_id = $1 AND t.status IN ('pending', 'in_progress') AND t.task_type != 'appointment_reminder' AND (o.stage IS NULL OR o.stage NOT IN ('lost', 'not_qualified', 'arrived', 'not_interested', 'cancelled', 'completed'))`;
-
       const statsQuery = `
         SELECT
-          COUNT(*) FILTER (WHERE t.due_at::date = CURRENT_DATE) as due_today,
-          
-          -- Overdue splits
-          COUNT(*) FILTER (WHERE t.due_at < NOW()) as overdue,
-          COUNT(*) FILTER (WHERE t.due_at < NOW() AND (
+          -- Overdue splits (for badge warnings)
+          COUNT(*) FILTER (WHERE t.status IN ('pending', 'in_progress') AND t.due_at < NOW() AND (
             (t.task_type = 'callback_scheduled' AND (t.metadata->>'appointment_type' IS NULL OR t.metadata->>'appointment_type' != 'clinic_visit'))
             OR t.metadata->>'appointment_type' IN ('phone_call', 'pre_consultation', 'doctor_review', 'report_followup')
           )) as overdue_phone,
-          COUNT(*) FILTER (WHERE t.due_at < NOW() AND t.metadata->>'appointment_type' = 'clinic_visit') as overdue_clinic,
+          COUNT(*) FILTER (WHERE t.status IN ('pending', 'in_progress') AND t.due_at < NOW() AND t.metadata->>'appointment_type' = 'clinic_visit') as overdue_clinic,
 
-          -- Confirmation pending splits
-          COUNT(*) FILTER (WHERE t.metadata->>'confirmation_status' = 'pending') as confirmation_pending,
-          COUNT(*) FILTER (WHERE t.metadata->>'confirmation_status' = 'pending' AND (
-            (t.task_type = 'callback_scheduled' AND (t.metadata->>'appointment_type' IS NULL OR t.metadata->>'appointment_type' != 'clinic_visit'))
-            OR t.metadata->>'appointment_type' IN ('phone_call', 'pre_consultation', 'doctor_review', 'report_followup')
-          )) as confirmation_pending_phone,
-          COUNT(*) FILTER (WHERE t.metadata->>'confirmation_status' = 'pending' AND t.metadata->>'appointment_type' = 'clinic_visit') as confirmation_pending_clinic,
+          -- PHONE TABS COUNTS
+          -- 1. Açık (Pending & Unconfirmed)
+          COUNT(*) FILTER (
+            WHERE t.status IN ('pending', 'in_progress')
+              AND (t.metadata->>'confirmation_status' IS NULL OR t.metadata->>'confirmation_status' != 'confirmed')
+              AND ((t.task_type = 'callback_scheduled' AND (t.metadata->>'appointment_type' IS NULL OR t.metadata->>'appointment_type' != 'clinic_visit')) OR t.metadata->>'appointment_type' IN ('phone_call', 'pre_consultation', 'doctor_review', 'report_followup'))
+              AND (o.stage IS NULL OR o.stage NOT IN ('lost', 'not_qualified', 'arrived', 'not_interested', 'cancelled', 'completed'))
+          ) as phone_open,
 
-          -- Totals splits
-          COUNT(*) FILTER (WHERE (
-            (t.task_type = 'callback_scheduled' AND (t.metadata->>'appointment_type' IS NULL OR t.metadata->>'appointment_type' != 'clinic_visit'))
-            OR t.metadata->>'appointment_type' IN ('phone_call', 'pre_consultation', 'doctor_review', 'report_followup')
-          )) as total_phone,
-          COUNT(*) FILTER (WHERE t.metadata->>'appointment_type' = 'clinic_visit') as total_clinic,
+          -- 2. Planlandı ve Onaylandı (Confirmed)
+          COUNT(*) FILTER (
+            WHERE t.status IN ('pending', 'in_progress')
+              AND t.metadata->>'confirmation_status' = 'confirmed'
+              AND ((t.task_type = 'callback_scheduled' AND (t.metadata->>'appointment_type' IS NULL OR t.metadata->>'appointment_type' != 'clinic_visit')) OR t.metadata->>'appointment_type' IN ('phone_call', 'pre_consultation', 'doctor_review', 'report_followup'))
+              AND (o.stage IS NULL OR o.stage NOT IN ('lost', 'not_qualified', 'arrived', 'not_interested', 'cancelled', 'completed'))
+          ) as phone_confirmed,
 
-          -- Confirmed splits (Planlandı ve Onaylandı)
-          COUNT(*) FILTER (WHERE t.metadata->>'confirmation_status' = 'confirmed' AND (
-            (t.task_type = 'callback_scheduled' AND (t.metadata->>'appointment_type' IS NULL OR t.metadata->>'appointment_type' != 'clinic_visit'))
-            OR t.metadata->>'appointment_type' IN ('phone_call', 'pre_consultation', 'doctor_review', 'report_followup')
-          )) as confirmed_phone,
-          COUNT(*) FILTER (WHERE t.metadata->>'confirmation_status' = 'confirmed' AND t.metadata->>'appointment_type' = 'clinic_visit') as confirmed_clinic
+          -- 3. Arandı ve Ulaşıldı (Completed & Reached)
+          COUNT(*) FILTER (
+            WHERE t.status = 'completed'
+              AND (t.metadata->>'appointment_result' IS NULL OR t.metadata->>'appointment_result' NOT IN ('no_show', 'cancelled'))
+              AND ((t.task_type = 'callback_scheduled' AND (t.metadata->>'appointment_type' IS NULL OR t.metadata->>'appointment_type' != 'clinic_visit')) OR t.metadata->>'appointment_type' IN ('phone_call', 'pre_consultation', 'doctor_review', 'report_followup'))
+          ) as phone_completed,
+
+          -- 4. Ulaşılamadı
+          COUNT(*) FILTER (
+            WHERE ((t.status = 'completed' AND t.metadata->>'appointment_result' = 'no_show') OR t.status = 'no_show')
+              AND ((t.task_type = 'callback_scheduled' AND (t.metadata->>'appointment_type' IS NULL OR t.metadata->>'appointment_type' != 'clinic_visit')) OR t.metadata->>'appointment_type' IN ('phone_call', 'pre_consultation', 'doctor_review', 'report_followup'))
+          ) as phone_no_show,
+
+          -- 5. İptal Edildi
+          COUNT(*) FILTER (
+            WHERE (t.status = 'cancelled' OR t.metadata->>'appointment_result' = 'cancelled')
+              AND ((t.task_type = 'callback_scheduled' AND (t.metadata->>'appointment_type' IS NULL OR t.metadata->>'appointment_type' != 'clinic_visit')) OR t.metadata->>'appointment_type' IN ('phone_call', 'pre_consultation', 'doctor_review', 'report_followup'))
+          ) as phone_cancelled,
+
+          -- CLINIC TABS COUNTS
+          -- 1. Planlandı (Pending & Unconfirmed)
+          COUNT(*) FILTER (
+            WHERE t.status IN ('pending', 'in_progress')
+              AND (t.metadata->>'confirmation_status' IS NULL OR t.metadata->>'confirmation_status' != 'confirmed')
+              AND t.metadata->>'appointment_type' = 'clinic_visit'
+              AND (o.stage IS NULL OR o.stage NOT IN ('lost', 'not_qualified', 'arrived', 'not_interested', 'cancelled', 'completed'))
+          ) as clinic_open,
+
+          -- 2. Planlandı ve Onaylandı (Confirmed)
+          COUNT(*) FILTER (
+            WHERE t.status IN ('pending', 'in_progress')
+              AND t.metadata->>'confirmation_status' = 'confirmed'
+              AND t.metadata->>'appointment_type' = 'clinic_visit'
+              AND (o.stage IS NULL OR o.stage NOT IN ('lost', 'not_qualified', 'arrived', 'not_interested', 'cancelled', 'completed'))
+          ) as clinic_confirmed,
+
+          -- 3. Geldi (Arrived)
+          COUNT(*) FILTER (
+            WHERE t.status = 'completed'
+              AND t.metadata->>'appointment_result' = 'arrived'
+              AND t.metadata->>'appointment_type' = 'clinic_visit'
+          ) as clinic_arrived,
+
+          -- 4. Gelmedi (No Show)
+          COUNT(*) FILTER (
+            WHERE ((t.status = 'completed' AND t.metadata->>'appointment_result' = 'no_show') OR t.status = 'no_show')
+              AND t.metadata->>'appointment_type' = 'clinic_visit'
+          ) as clinic_no_show,
+
+          -- 5. Ulaşılamadı (No Response / Confirmation no_response or Overdue Pending)
+          COUNT(*) FILTER (
+            WHERE t.metadata->>'appointment_type' = 'clinic_visit'
+              AND (t.metadata->>'confirmation_status' = 'no_response' OR (t.status IN ('pending', 'in_progress') AND t.due_at < NOW()))
+          ) as clinic_no_response,
+
+          -- 6. İptal Edildi
+          COUNT(*) FILTER (
+            WHERE (t.status = 'cancelled' OR t.metadata->>'appointment_result' = 'cancelled')
+              AND t.metadata->>'appointment_type' = 'clinic_visit'
+          ) as clinic_cancelled
         FROM follow_up_tasks t
         LEFT JOIN opportunities o ON o.id = t.opportunity_id AND o.tenant_id = t.tenant_id
-        WHERE ${baseCond}
+        WHERE t.tenant_id = $1
+          AND t.task_type != 'appointment_reminder'
           AND (
             t.task_type = 'callback_scheduled'
             OR t.metadata->>'appointment_type' IN ('phone_call', 'clinic_visit', 'pre_consultation', 'consultation', 'doctor_review', 'report_followup')
@@ -1744,19 +1808,15 @@ export async function getAppointmentStats() {
 
       const rows = await ctx.db.executeSafe({ text: statsQuery, values: [ctx.tenantId] }) as any[];
       return rows[0] || { 
-        due_today: 0, 
-        overdue: 0, overdue_phone: 0, overdue_clinic: 0,
-        confirmation_pending: 0, confirmation_pending_phone: 0, confirmation_pending_clinic: 0,
-        total_phone: 0, total_clinic: 0,
-        confirmed_phone: 0, confirmed_clinic: 0
+        overdue_phone: 0, overdue_clinic: 0,
+        phone_open: 0, phone_confirmed: 0, phone_completed: 0, phone_no_show: 0, phone_cancelled: 0,
+        clinic_open: 0, clinic_confirmed: 0, clinic_arrived: 0, clinic_no_show: 0, clinic_no_response: 0, clinic_cancelled: 0
       };
     }
   ).then(res => res.data || { 
-    due_today: 0, 
-    overdue: 0, overdue_phone: 0, overdue_clinic: 0,
-    confirmation_pending: 0, confirmation_pending_phone: 0, confirmation_pending_clinic: 0,
-    total_phone: 0, total_clinic: 0,
-    confirmed_phone: 0, confirmed_clinic: 0
+    overdue_phone: 0, overdue_clinic: 0,
+    phone_open: 0, phone_confirmed: 0, phone_completed: 0, phone_no_show: 0, phone_cancelled: 0,
+    clinic_open: 0, clinic_confirmed: 0, clinic_arrived: 0, clinic_no_show: 0, clinic_no_response: 0, clinic_cancelled: 0
   });
 }
 

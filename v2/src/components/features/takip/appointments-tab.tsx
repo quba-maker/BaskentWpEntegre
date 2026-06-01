@@ -229,10 +229,36 @@ export default function AppointmentsTab({ onOpenDrawer, onGoToInbox, viewType, o
   const total = data?.total || 0;
 
   const openCount = stats ? (
-    viewType === 'phone' ? Number(stats.total_phone || 0) :
-    viewType === 'clinic' ? Number(stats.total_clinic || 0) :
-    (Number(stats.total_phone || 0) + Number(stats.total_clinic || 0))
+    viewType === 'phone' ? Number(stats.phone_open || 0) :
+    viewType === 'clinic' ? Number(stats.clinic_open || 0) :
+    (Number(stats.phone_open || 0) + Number(stats.clinic_open || 0))
   ) : 0;
+
+  const confirmedCount = stats ? (
+    viewType === 'phone' ? Number(stats.phone_confirmed || 0) :
+    viewType === 'clinic' ? Number(stats.clinic_confirmed || 0) :
+    (Number(stats.phone_confirmed || 0) + Number(stats.clinic_confirmed || 0))
+  ) : 0;
+
+  const completedCount = stats ? (
+    viewType === 'phone' ? Number(stats.phone_completed || 0) :
+    viewType === 'clinic' ? Number(stats.clinic_arrived || 0) :
+    (Number(stats.phone_completed || 0) + Number(stats.clinic_arrived || 0))
+  ) : 0;
+
+  const noShowCount = stats ? (
+    viewType === 'phone' ? Number(stats.phone_no_show || 0) :
+    viewType === 'clinic' ? Number(stats.clinic_no_show || 0) :
+    (Number(stats.phone_no_show || 0) + Number(stats.clinic_no_show || 0))
+  ) : 0;
+
+  const cancelledCount = stats ? (
+    viewType === 'phone' ? Number(stats.phone_cancelled || 0) :
+    viewType === 'clinic' ? Number(stats.clinic_cancelled || 0) :
+    (Number(stats.phone_cancelled || 0) + Number(stats.clinic_cancelled || 0))
+  ) : 0;
+
+  const clinicNoResponseCount = stats ? Number(stats.clinic_no_response || 0) : 0;
 
   return (
     <div className="flex flex-col h-full bg-[#F5F5F7]">
@@ -262,7 +288,7 @@ export default function AppointmentsTab({ onOpenDrawer, onGoToInbox, viewType, o
                       : 'text-[#86868B] hover:text-[#1D1D1F]'
                   }`}
                 >
-                  Planlandı ve Onaylandı ({stats ? Number(stats.confirmed_phone || 0) : 0})
+                  Planlandı ve Onaylandı ({confirmedCount})
                 </button>
                 <button
                   onClick={() => setStatusFilter("completed")}
@@ -272,7 +298,7 @@ export default function AppointmentsTab({ onOpenDrawer, onGoToInbox, viewType, o
                       : 'text-[#86868B] hover:text-[#1D1D1F]'
                   }`}
                 >
-                  Arandı ve Ulaşıldı
+                  Arandı ve Ulaşıldı ({completedCount})
                 </button>
                 <button
                   onClick={() => setStatusFilter("no_show")}
@@ -282,7 +308,7 @@ export default function AppointmentsTab({ onOpenDrawer, onGoToInbox, viewType, o
                       : 'text-[#86868B] hover:text-[#1D1D1F]'
                   }`}
                 >
-                  Ulaşılamadı
+                  Ulaşılamadı ({noShowCount})
                 </button>
                 <button
                   onClick={() => setStatusFilter("cancelled")}
@@ -292,7 +318,7 @@ export default function AppointmentsTab({ onOpenDrawer, onGoToInbox, viewType, o
                       : 'text-[#86868B] hover:text-[#1D1D1F]'
                   }`}
                 >
-                  İptal Edildi
+                  İptal Edildi ({cancelledCount})
                 </button>
               </>
             ) : (
@@ -315,7 +341,7 @@ export default function AppointmentsTab({ onOpenDrawer, onGoToInbox, viewType, o
                       : 'text-[#86868B] hover:text-[#1D1D1F]'
                   }`}
                 >
-                  Geldi
+                  Geldi ({completedCount})
                 </button>
                 <button
                   onClick={() => setStatusFilter("no_show")}
@@ -325,7 +351,7 @@ export default function AppointmentsTab({ onOpenDrawer, onGoToInbox, viewType, o
                       : 'text-[#86868B] hover:text-[#1D1D1F]'
                   }`}
                 >
-                  Gelmedi
+                  Gelmedi ({noShowCount})
                 </button>
                 <button
                   onClick={() => setStatusFilter("no_response")}
@@ -335,7 +361,7 @@ export default function AppointmentsTab({ onOpenDrawer, onGoToInbox, viewType, o
                       : 'text-[#86868B] hover:text-[#1D1D1F]'
                   }`}
                 >
-                  Ulaşılamadı
+                  Ulaşılamadı ({clinicNoResponseCount})
                 </button>
                 <button
                   onClick={() => setStatusFilter("cancelled")}
@@ -345,7 +371,7 @@ export default function AppointmentsTab({ onOpenDrawer, onGoToInbox, viewType, o
                       : 'text-[#86868B] hover:text-[#1D1D1F]'
                   }`}
                 >
-                  İptal Edildi
+                  İptal Edildi ({cancelledCount})
                 </button>
                 <button
                   onClick={() => setStatusFilter("completed")}
