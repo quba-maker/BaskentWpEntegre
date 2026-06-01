@@ -67,6 +67,26 @@ function formatDateTr(dateStr: string | undefined): string {
   }
 }
 
+function parsePartialDateToDate(meta: any): Date | null {
+  if (!meta || !meta.selected_year || !meta.selected_month) return null;
+  const year = parseInt(meta.selected_year, 10);
+  const month = parseInt(meta.selected_month, 10) - 1; // JS months are 0-indexed
+  const day = meta.selected_day ? parseInt(meta.selected_day, 10) : 1;
+  
+  let hours = 12; // Default to mid-day to avoid timezone boundary shifts
+  let minutes = 0;
+  if (meta.selected_time) {
+    const parts = meta.selected_time.split(':');
+    if (parts.length >= 2) {
+      hours = parseInt(parts[0], 10);
+      minutes = parseInt(parts[1], 10);
+    }
+  }
+  
+  const d = new Date(year, month, day, hours, minutes);
+  return isNaN(d.getTime()) ? null : d;
+}
+
 function formatKalanTime(dueAtUtc: string | undefined, type: 'phone' | 'clinic') {
   if (!dueAtUtc) return '—';
   const due = new Date(dueAtUtc).getTime();
@@ -1041,7 +1061,16 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
   };
 
   const isTerminalState = ['completed', 'arrived', 'no_show', 'cancelled'].includes(apt.status);
-  const kalanStr = isTerminalState ? '—' : formatKalanTime(apt.dueAtUtc, viewType || 'clinic');
+  
+  let targetDueAt = apt.dueAtUtc;
+  if (apt.metadata?.is_partial_date && apt.metadata?.selected_year && apt.metadata?.selected_month) {
+    const parsedDate = parsePartialDateToDate(apt.metadata);
+    if (parsedDate) {
+      targetDueAt = parsedDate.toISOString();
+    }
+  }
+
+  const kalanStr = isTerminalState ? '—' : formatKalanTime(targetDueAt, viewType || 'clinic');
   const isOverdueTask = !isTerminalState && kalanStr.includes('Gecikti');
 
   return (
