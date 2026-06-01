@@ -905,7 +905,10 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
       if (filters?.status && filters.status !== 'all') {
         if (filters.status === 'pending') {
           conditions.push(`t.status IN ('pending', 'in_progress')`);
-          conditions.push(`(t.metadata->>'confirmation_status' IS NULL OR t.metadata->>'confirmation_status' != 'confirmed')`);
+          // Only exclude confirmed appointments in phone view (where they are displayed in a separate tab)
+          if (filters.appointmentType === 'phone_call') {
+            conditions.push(`(t.metadata->>'confirmation_status' IS NULL OR t.metadata->>'confirmation_status' != 'confirmed')`);
+          }
         }
         else if (filters.status === 'completed') {
           conditions.push(`t.status = 'completed'`);
@@ -1756,10 +1759,9 @@ export async function getAppointmentStats() {
           ) as phone_cancelled,
 
           -- CLINIC TABS COUNTS
-          -- 1. Planlandı (Pending & Unconfirmed)
+          -- 1. Planlandı (Pending - both unconfirmed and confirmed)
           COUNT(*) FILTER (
             WHERE t.status IN ('pending', 'in_progress')
-              AND (t.metadata->>'confirmation_status' IS NULL OR t.metadata->>'confirmation_status' != 'confirmed')
               AND t.metadata->>'appointment_type' = 'clinic_visit'
               AND (o.stage IS NULL OR o.stage NOT IN ('lost', 'not_qualified', 'arrived', 'not_interested', 'cancelled', 'completed'))
           ) as clinic_open,
