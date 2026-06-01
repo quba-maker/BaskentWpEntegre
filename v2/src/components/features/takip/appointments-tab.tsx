@@ -335,6 +335,16 @@ export default function AppointmentsTab({ onOpenDrawer, onGoToInbox, viewType, o
                   Açık ({openCount})
                 </button>
                 <button
+                  onClick={() => setStatusFilter("confirmed")}
+                  className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                    statusFilter === 'confirmed'
+                      ? 'bg-white text-green-700 shadow-sm border border-green-100/50'
+                      : 'text-[#86868B] hover:text-[#1D1D1F]'
+                  }`}
+                >
+                  Planlandı ve Teyit Alındı ({confirmedCount})
+                </button>
+                <button
                   onClick={() => setStatusFilter("arrived")}
                   className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
                     statusFilter === 'arrived'
