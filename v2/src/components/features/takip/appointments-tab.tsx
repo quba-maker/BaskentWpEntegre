@@ -632,9 +632,9 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
       } else if (apt.status === 'cancelled') {
         defaultTemplate = "Hastanın neden aramadan vazgeçtiğini anla ve ona göre ikna taktikleri uygula.";
       } else if (apt.status === 'completed' || apt.status === 'arrived') {
-        const cleanNote = apt.appointmentNote ? apt.appointmentNote.trim() : '';
-        if (cleanNote) {
-          defaultTemplate = `${cleanNote} bu şekilde hasta ile görüşüldü. hastayı randevuya bu bilgileri de anlayıp analiz ederek ikna etme çalışmalarına başla.`;
+        const rawNote = (apt.appointmentNote || apt.metadata?.note || '').trim();
+        if (rawNote) {
+          defaultTemplate = `Arama Notu: ${rawNote} - bu şekilde hasta ile görüşüldü. hastayı randevuya bu bilgileri de anlayıp analiz ederek ikna etme çalışmalarına başla.`;
         } else {
           defaultTemplate = "Hasta ile görüşüldü, hastayı randevuya ikna etme çalışmalarına başla.";
         }
@@ -645,8 +645,10 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
     
     const saved = typeof window !== 'undefined' ? localStorage.getItem(`baskent_bot_template_${mode}_${apt.status}`) : null;
     
+    const hasActiveNote = !!(apt.appointmentNote?.trim() || apt.metadata?.note?.trim());
+    
     // For completed/arrived status, if they have an active note, we ALWAYS want to prioritize the dynamic patient-specific note template.
-    if (mode === 'devret' && (apt.status === 'completed' || apt.status === 'arrived') && apt.appointmentNote?.trim()) {
+    if (mode === 'devret' && (apt.status === 'completed' || apt.status === 'arrived') && hasActiveNote) {
       setDirectiveText(defaultTemplate);
     } else {
       setDirectiveText(saved || defaultTemplate);
