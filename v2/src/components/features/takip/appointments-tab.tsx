@@ -570,8 +570,8 @@ export default function AppointmentsTab({ onOpenDrawer, onGoToInbox, viewType, o
         <table className="w-full text-left border-collapse min-w-[900px]">
           <thead className="sticky top-0 bg-white/90 backdrop-blur-md z-10 border-b border-black/5 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
             <tr>
-              <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase">Tarih & Saat</th>
               <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase">Hasta</th>
+              <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase">Tarih & Saat</th>
               
               {!viewType ? (
                 <>
@@ -1081,6 +1081,20 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
           apt.status === 'overdue' ? 'bg-red-50/30' : ''
         }`}
       >
+      <td className="py-3.5 px-4 min-w-[180px]">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="font-bold text-[13px] text-[#1D1D1F]">{apt.patientName}</span>
+          {apt.country && (
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/[0.04] text-[10px] font-semibold text-[#86868B] border border-black/5">
+              {flag} {apt.country}
+            </span>
+          )}
+          {apt.priority === 'hot' && <Zap className="w-3 h-3 text-[#FF3B30] fill-[#FF3B30]" />}
+        </div>
+        <div className="text-[11px] text-[#86868B] font-medium mt-0.5 flex items-center gap-1">
+          {formatPhone(apt.phoneNumber)}
+        </div>
+      </td>
       <td className="py-3.5 px-4">
         {apt.dueAtUtc ? (
           <div>
@@ -1108,20 +1122,6 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
         ) : (
           <span className="text-[11px] text-[#C7C7CC] font-medium">Tarih yok</span>
         )}
-      </td>
-      <td className="py-3.5 px-4 min-w-[180px]">
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="font-bold text-[13px] text-[#1D1D1F]">{apt.patientName}</span>
-          {apt.country && (
-            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/[0.04] text-[10px] font-semibold text-[#86868B] border border-black/5">
-              {flag} {apt.country}
-            </span>
-          )}
-          {apt.priority === 'hot' && <Zap className="w-3 h-3 text-[#FF3B30] fill-[#FF3B30]" />}
-        </div>
-        <div className="text-[11px] text-[#86868B] font-medium mt-0.5 flex items-center gap-1">
-          {formatPhone(apt.phoneNumber)}
-        </div>
       </td>
 
       {/* Dynamic columns based on viewType */}
