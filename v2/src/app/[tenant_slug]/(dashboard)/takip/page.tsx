@@ -2,14 +2,13 @@
 
 import { useState, useEffect } from "react";
 import useSWR from "swr";
-import { Radar, Users, CalendarClock } from "lucide-react";
+import { Radar, Users, CalendarClock, Phone } from "lucide-react";
 import { getOpportunityStats } from "@/app/actions/pipeline";
 import { useInboxStore } from "@/store/inbox-store";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import PatientTrackingTab from "@/components/features/takip/patient-tracking-tab";
 import AppointmentsTab from "@/components/features/takip/appointments-tab";
 import PatientDetailDrawer from "@/components/features/takip/patient-detail-drawer";
-import AppointmentDetailDrawer from "@/components/features/takip/appointment-detail-drawer";
 
 // ── MAIN PAGE COMPONENT ──
 
@@ -21,12 +20,12 @@ export default function TakipPage() {
   const { setActiveContact } = useInboxStore();
   
   const deepLinkOppId = searchParams.get('opp');
-  const [activeTab, setActiveTab] = useState<'hasta_takibi' | 'randevu'>('hasta_takibi');
+  const [activeTab, setActiveTab] = useState<'hasta_takibi' | 'telefon' | 'randevu'>('hasta_takibi');
   
   // Detail drawer states
   const [drawerOppId, setDrawerOppId] = useState<string | null>(null);
-  const [drawerMode, setDrawerMode] = useState<'patient' | 'appointment'>('patient');
   const [drawerTaskId, setDrawerTaskId] = useState<string | null>(null);
+  const [drawerInitialTab, setDrawerInitialTab] = useState<'profile' | 'appointment'>('profile');
 
   // ── Stats (SWR) ──
   const { data: stats, mutate: mutateStats } = useSWR(
@@ -43,8 +42,8 @@ export default function TakipPage() {
   useEffect(() => {
     if (deepLinkOppId) {
       setDrawerOppId(deepLinkOppId);
-      setDrawerMode('patient');
       setDrawerTaskId(null);
+      setDrawerInitialTab('profile');
       // Clean up URL parameters dynamically without full-page reloads
       router.replace(`/${tenantSlug}/takip`, { scroll: false });
     }
@@ -78,7 +77,7 @@ export default function TakipPage() {
           <div className="flex items-center gap-2 mt-2 w-fit">
             <button
               onClick={() => setActiveTab('hasta_takibi')}
-              className={`px-4 py-1.5 rounded-lg text-[13px] font-semibold transition-all flex items-center gap-2 ${
+              className={`px-4 py-1.5 rounded-lg text-[13px] font-semibold transition-all flex items-center gap-2 cursor-pointer ${
                 activeTab === 'hasta_takibi' 
                   ? 'bg-indigo-600 text-white shadow-md' 
                   : 'bg-black/[0.04] text-[#86868B] hover:text-[#1D1D1F]'
@@ -88,8 +87,19 @@ export default function TakipPage() {
               Hasta Takibi
             </button>
             <button
+              onClick={() => setActiveTab('telefon')}
+              className={`px-4 py-1.5 rounded-lg text-[13px] font-semibold transition-all flex items-center gap-2 cursor-pointer ${
+                activeTab === 'telefon' 
+                  ? 'bg-indigo-600 text-white shadow-md' 
+                  : 'bg-black/[0.04] text-[#86868B] hover:text-[#1D1D1F]'
+              }`}
+            >
+              <Phone className="w-4 h-4" />
+              Telefon Takibi
+            </button>
+            <button
               onClick={() => setActiveTab('randevu')}
-              className={`px-4 py-1.5 rounded-lg text-[13px] font-semibold transition-all flex items-center gap-2 ${
+              className={`px-4 py-1.5 rounded-lg text-[13px] font-semibold transition-all flex items-center gap-2 cursor-pointer ${
                 activeTab === 'randevu' 
                   ? 'bg-indigo-600 text-white shadow-md' 
                   : 'bg-black/[0.04] text-[#86868B] hover:text-[#1D1D1F]'
@@ -123,47 +133,53 @@ export default function TakipPage() {
             onGoToInbox={handleGoToInbox} 
             onOpenDrawer={(id) => {
               setDrawerOppId(id);
-              setDrawerMode('patient');
               setDrawerTaskId(null);
+              setDrawerInitialTab('profile');
             }} 
           />
         </div>
       )}
 
+      {/* TELEFON TAKİBİ TAB */}
+      {activeTab === 'telefon' && (
+        <div className="flex-1 bg-white rounded-2xl overflow-hidden shadow-sm border border-gray-200">
+          <AppointmentsTab 
+            viewType="phone"
+            onGoToInbox={handleGoToInbox} 
+            onOpenDrawer={(id, taskId) => {
+              setDrawerOppId(id);
+              setDrawerTaskId(taskId || null);
+              setDrawerInitialTab('appointment');
+            }} 
+            onSwitchTab={(tab) => setActiveTab(tab)}
+          />
+        </div>
+      )}
+ 
       {/* RANDEVU YÖNETİMİ TAB */}
       {activeTab === 'randevu' && (
         <div className="flex-1 bg-white rounded-2xl overflow-hidden shadow-sm border border-gray-200">
           <AppointmentsTab 
+            viewType="clinic"
             onGoToInbox={handleGoToInbox} 
-            onOpenDrawer={(id) => {
+            onOpenDrawer={(id, taskId) => {
               setDrawerOppId(id);
-              setDrawerMode('appointment');
-              setDrawerTaskId(null);
+              setDrawerTaskId(taskId || null);
+              setDrawerInitialTab('appointment');
             }} 
+            onSwitchTab={(tab) => setActiveTab(tab)}
           />
         </div>
       )}
 
-      {/* Patient Detail Drawer */}
-      {drawerOppId && drawerMode === 'patient' && (
+      {/* Unified Patient & Appointment Details Drawer */}
+      {drawerOppId && (
         <PatientDetailDrawer
           opportunityId={drawerOppId}
-          onClose={() => setDrawerOppId(null)}
-          onGoToInbox={handleGoToInbox}
-          onRefresh={() => { mutateStats(); }}
-        />
-      )}
-
-      {/* Appointment Detail Drawer */}
-      {drawerOppId && drawerMode === 'appointment' && (
-        <AppointmentDetailDrawer
-          opportunityId={drawerOppId}
-          taskId={drawerTaskId}
+          activeTaskId={drawerTaskId}
+          initialTab={drawerInitialTab}
           onClose={() => { setDrawerOppId(null); setDrawerTaskId(null); }}
           onGoToInbox={handleGoToInbox}
-          onOpenPatientDetail={(id) => {
-            setDrawerMode('patient');
-          }}
           onRefresh={() => { mutateStats(); }}
         />
       )}

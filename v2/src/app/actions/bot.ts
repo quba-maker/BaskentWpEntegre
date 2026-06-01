@@ -487,7 +487,7 @@ export async function testBotPrompt(prompt: string, testMessage: string, channel
           body: JSON.stringify({
             systemInstruction: { parts: [{ text: finalPrompt }] },
             contents: [{ role: 'user', parts: [{ text: testMessage }] }],
-            generationConfig: { temperature: 0.7, maxOutputTokens: 1024 }
+            generationConfig: { temperature: 0.7, maxOutputTokens: 8192 }
           })
         }
       );

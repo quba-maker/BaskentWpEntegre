@@ -27,6 +27,7 @@ export const CrmExtractionSchema = z.object({
   travel_date: z.string().optional(),
   report_status: z.enum(['none', 'waiting', 'sent', 'received', 'reviewed']).optional(),
   requires_human_confirmation: z.boolean().optional(),
+  appointment_confirmed: z.boolean().optional(),
   // P1A-FIX: Explicit Cancellation / Opt-Out Detection
   explicit_cancellation: z.boolean().optional(),
   opt_out_requested: z.boolean().optional(),
@@ -115,6 +116,7 @@ Format:
   "travel_date": "string ISO date (Hasta 'Haziran 20'de geleceğim' derse → '2026-06-20'. Kesin tarih yoksa boş bırak)",
   "report_status": "none | waiting | sent | received | reviewed (Hastanın rapor/tetkik durumu: henüz yok, göndereceğini söylüyor, gönderdi, alındı, doktor inceledi)",
   "requires_human_confirmation": boolean (Hasta randevu onayı, arama zamanı onayı, doktor randevusu gibi İNSAN ONAYI gerektiren bir talep belirttiyse true),
+  "appointment_confirmed": boolean (Hasta randevusunu, telefon görüşmesi gün/saatini onayladığını veya teyit ettiğini belirttiyse true. Örn: 'onaylıyorum', 'uygundur', 'teyit ediyorum', 'telefon randevumu onaylıyorum'. Yoksa false veya boş bırakın),
 
   "explicit_cancellation": boolean (Hasta AÇIKÇA gelmeyeceğini, vazgeçtiğini, iptal istediğini belirttiyse true. Örn: 'gelmeyeceğim', 'vazgeçtim', 'istemiyorum', 'iptal edin', 'randevuyu iptal edin', 'gelmekten vazgeçtik'. 'Şimdilik düşünmüyorum' gibi belirsiz ifadeler İÇİN FALSE — sadece kesin beyanlar),
   "opt_out_requested": boolean (Hasta aranmamak/mesaj almamak istiyorsa true. Örn: 'aramayın', 'beni bir daha aramayın', 'rahatsız etmeyin', 'mesaj atmayın', 'görüşmek istemiyorum'),

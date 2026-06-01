@@ -72,6 +72,8 @@ const getCountryFlag = (country?: string): string => {
     'Azerbaycan': '🇦🇿', 'Gürcistan': '🇬🇪', 'Kazakistan': '🇰🇿',
     'Özbekistan': '🇺🇿', 'İtalya': '🇮🇹', 'İspanya': '🇪🇸',
     'Romanya': '🇷🇴', 'Bulgaristan': '🇧🇬', 'Yunanistan': '🇬🇷',
+    'Finlandiya': '🇫🇮', 'Finland': '🇫🇮', 'İsveç': '🇸🇪', 'Sweden': '🇸🇪',
+    'Norveç': '🇳🇴', 'Norway': '🇳🇴',
   };
   return FLAGS[country] || '🌍';
 };

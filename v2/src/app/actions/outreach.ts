@@ -780,3 +780,138 @@ export async function getGreetingTemplates() {
     }
   ).then(res => res.data || []);
 }
+
+// ═══════════════════════════════════════════════════════════
+// 10. SEND META TEMPLATE MESSAGE — Oturum kapalıyken şablon gönder
+// ═══════════════════════════════════════════════════════════
+
+export async function sendMetaTemplateMessage(opportunityId: string, templateName: string, languageCode: string = 'tr', templateText: string) {
+  if (!opportunityId) return { success: false, error: "Fırsat ID gerekli." };
+  if (!templateName) return { success: false, error: "Şablon ismi gerekli." };
+  if (!templateText) return { success: false, error: "Şablon metni gerekli." };
+
+  return withActionGuard(
+    { actionName: 'sendMetaTemplateMessage' },
+    async (ctx) => {
+      // 1. Fetch Opportunity and Phone
+      const opps = await ctx.db.executeSafe({
+        text: `SELECT patient_name, phone_number FROM opportunities WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+        values: [opportunityId, ctx.tenantId]
+      }) as any[];
+
+      if (opps.length === 0) {
+        return { success: false, error: "Fırsat bulunamadı." };
+      }
+
+      const phone = opps[0].phone_number;
+      if (!phone) {
+        return { success: false, error: "Telefon numarası bulunamadı." };
+      }
+
+      // 2. Resolve WhatsApp credentials
+      const creds = await CredentialsService.resolveCredentials(ctx.tenantId, 'whatsapp');
+      const META_ACCESS_TOKEN = creds.accessToken;
+      const PHONE_NUMBER_ID = creds.whatsappPhoneNumberId;
+
+      if (!META_ACCESS_TOKEN || !PHONE_NUMBER_ID) {
+        return { success: false, error: "WhatsApp entegrasyon kimlik bilgileri eksik." };
+      }
+
+      // 3. Send Meta Template Message via Graph API
+      const response = await fetch(`https://graph.facebook.com/v25.0/${PHONE_NUMBER_ID}/messages`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${META_ACCESS_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp',
+          to: phone,
+          type: 'template',
+          template: {
+            name: templateName,
+            language: {
+              code: languageCode
+            }
+          }
+        }),
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        return { success: false, error: `Meta API Şablon hatası: ${errData?.error?.message || response.statusText}` };
+      }
+
+      let providerMessageId: string | null = null;
+      try {
+        const resData = await response.json();
+        providerMessageId = resData.messages?.[0]?.id || null;
+      } catch (_) {}
+
+      // 4. Resolve conversation_id
+      let conversationId: string | null = null;
+      try {
+        const convRes = await ctx.db.executeSafe({
+          text: `SELECT id FROM conversations WHERE tenant_id = $1 AND phone_number = $2 LIMIT 1`,
+          values: [ctx.tenantId, phone]
+        }) as any[];
+        conversationId = convRes[0]?.id || null;
+      } catch (_) {}
+
+      // 5. Save message record & update conversation
+      if (conversationId) {
+        await ctx.db.executeSafe({
+          text: `INSERT INTO messages (tenant_id, conversation_id, phone_number, direction, content, channel, status, provider_message_id)
+                 VALUES ($1, $2, $3, 'out', $4, 'whatsapp', 'sent', $5)`,
+          values: [ctx.tenantId, conversationId, phone, templateText, 'whatsapp', providerMessageId]
+        });
+
+        await ctx.db.executeSafe({
+          text: `UPDATE conversations 
+                 SET last_message_at = NOW(), 
+                     last_message_content = $1,
+                     last_channel = 'whatsapp',
+                     last_message_status = 'sent',
+                     last_message_direction = 'out',
+                     message_count = COALESCE(message_count, 0) + 1
+                 WHERE id = $2 AND tenant_id = $3`,
+          values: [templateText, conversationId, ctx.tenantId]
+        });
+      }
+
+      // 6. Write outreach log
+      await ctx.db.executeSafe({
+        text: `INSERT INTO outreach_logs (tenant_id, conversation_id, opportunity_id, action, channel, actor_id, metadata)
+               VALUES ($1, $2, $3, 'template_sent', 'whatsapp', $4, $5)`,
+        values: [
+          ctx.tenantId,
+          conversationId,
+          opportunityId,
+          ctx.userId,
+          JSON.stringify({
+            template_name: templateName,
+            message_text: templateText,
+            provider_message_id: providerMessageId,
+            phone,
+          })
+        ]
+      });
+
+      // 7. Audit
+      logAudit({
+        tenantId: ctx.tenantId,
+        userId: ctx.userId,
+        userEmail: ctx.email,
+        action: 'outreach_template_sent',
+        entityType: 'opportunity',
+        entityId: opportunityId,
+        details: { phone, templateName },
+      });
+
+      return { success: true };
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error || res.data?.error };
+    return { success: true };
+  });
+}

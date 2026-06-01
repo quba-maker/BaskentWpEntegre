@@ -313,3 +313,43 @@ export function detectCancellation(messageText: string): IntentDetection {
     matched_phrases: matched,
   };
 }
+
+const CONFIRMATION_PHRASES: RegExp[] = [
+  /evet\s+ge[cç]erli/i,
+  /ge[cç]erlidir/i,
+  /teyit\s+ediyorum/i,
+  /evet\s+teyit/i,
+  /onayl[iı]yorum/i,
+  /evet\s+onay/i,
+  /uygundur/i,
+  /evet\s+uygun/i,
+  /do[gğ]rudur/i,
+  /evet\s+do[gğ]ru/i,
+  /g[oö]r[uü][sş]elim/i,
+  /tamamd[iı]r/i,
+  /okey/i,
+  /^\s*evet\s*$/i,
+  /i\s+confirm/i,
+  /yes\s+confirm/i,
+  /sounds\s+good/i,
+  /all\s+good/i,
+  /correct/i
+];
+
+export function detectConfirmation(messageText: string): boolean {
+  if (!messageText || messageText.length < 2) return false;
+  
+  const normalizedText = messageText
+    .toLowerCase()
+    .replace(/[''`]/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  for (const pattern of CONFIRMATION_PHRASES) {
+    if (pattern.test(normalizedText)) {
+      return true;
+    }
+  }
+  
+  return false;
+}

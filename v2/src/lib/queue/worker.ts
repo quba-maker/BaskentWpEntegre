@@ -1589,11 +1589,17 @@ export class QueueWorkerEngine {
       let newIdentityDetected = false;
       let newTreatmentInterest = false;
       let detectedNewName: string | null = null;
+      let deterministicConfirmation = false;
       
       if (content) {
         try {
-          const { detectCancellation } = await import('../services/ai/cancellation-detector');
+          const { detectCancellation, detectConfirmation } = await import('../services/ai/cancellation-detector');
           const detection = detectCancellation(content);
+          
+          deterministicConfirmation = detectConfirmation(content);
+          if (deterministicConfirmation) {
+            this.log.info(`[CONFIRMATION_LAYER4] Deterministic confirmation detected`, { traceId, phoneNumber });
+          }
           
           // Cancellation override (existing behavior)
           if (detection.explicit_cancellation && !explicitCancellation) {
@@ -2119,7 +2125,6 @@ export class QueueWorkerEngine {
               if (taskIds.length > 0) {
                 this.log.info(`[TASK_AGGREGATED] Created/merged ${taskIds.length} tasks`, { traceId, oppId: afterOpp.id, taskIds });
               }
-
               // 2. Single aggregated notification dispatch
               const aggregator = new SignalAggregator();
               const aggregated = aggregator.aggregate(crmData, {
@@ -2148,6 +2153,45 @@ export class QueueWorkerEngine {
                   mergedCount: aggregated.signals.length,
                 });
               }
+
+              // 3. Bot Date Rescheduling Suggestion (HITL Triage Interception)
+              if (crmData.requested_callback_datetime) {
+                try {
+                  const activeBotTasks = await db.executeSafe({
+                    text: `SELECT id, metadata FROM follow_up_tasks
+                           WHERE RIGHT(phone_number, 10) = RIGHT($1, 10) AND tenant_id = $2
+                             AND status IN ('pending', 'in_progress')
+                           ORDER BY updated_at DESC LIMIT 1`,
+                    values: [phoneNumber, tenantId]
+                  }) as any[];
+
+                  if (activeBotTasks.length > 0) {
+                    const targetTask = activeBotTasks[0];
+                    const taskMeta = typeof targetTask.metadata === 'string' 
+                      ? JSON.parse(targetTask.metadata) 
+                      : (targetTask.metadata || {});
+
+                    taskMeta.bot_suggestion = {
+                      proposed_date: crmData.requested_callback_datetime,
+                      status: 'pending',
+                      detected_at: new Date().toISOString(),
+                      user_message: content || ''
+                    };
+
+                    await db.executeSafe({
+                      text: `UPDATE follow_up_tasks 
+                             SET metadata = $1::jsonb, updated_at = NOW() 
+                             WHERE id = $2 AND tenant_id = $3`,
+                      values: [JSON.stringify(taskMeta), targetTask.id, tenantId]
+                    });
+
+                    this.log.info(`[BOT_TRIAGE_SUGGESTION_CAPTURED] Saved proposed date ${crmData.requested_callback_datetime} to task ${targetTask.id}`, { traceId });
+                  }
+                } catch (triageErr) {
+                  this.log.error('[BOT_TRIAGE_SUGGESTION_FAILED] Non-fatal triage suggestion error', triageErr instanceof Error ? triageErr : new Error(String(triageErr)), { traceId });
+                }
+              }
+
             } catch (taskErr) {
               this.log.error('[PHASE_2K_TASK_GEN] Non-fatal task/notification error', taskErr instanceof Error ? taskErr : new Error(String(taskErr)), { traceId });
             }
@@ -2155,6 +2199,52 @@ export class QueueWorkerEngine {
 
         } catch (oppErr) {
           this.log.error(`[WORKER_OPP_FAILED] Non-fatal opportunity error`, oppErr instanceof Error ? oppErr : new Error(String(oppErr)), { traceId });
+        }
+      }
+
+      // ═══════════════════════════════════════════════════════════
+      // Bot Appointment/Callback Confirmation Auto-Detection (P0)
+      // Runs even when crmData is null or opportunity upsert failed,
+      // as long as either LLM or deterministic detector triggers.
+      // ═══════════════════════════════════════════════════════════
+      const isConfirmed = !!((crmData as any)?.appointment_confirmed || deterministicConfirmation);
+      if (isConfirmed) {
+        try {
+          const activeBotTasks = await db.executeSafe({
+            text: `SELECT id, metadata FROM follow_up_tasks
+                   WHERE RIGHT(phone_number, 10) = RIGHT($1, 10) AND tenant_id = $2
+                     AND status IN ('pending', 'in_progress')
+                     AND task_type != 'appointment_reminder'
+                   ORDER BY updated_at DESC`,
+            values: [phoneNumber, tenantId]
+          }) as any[];
+
+          for (const targetTask of activeBotTasks) {
+            const taskMeta = typeof targetTask.metadata === 'string' 
+              ? JSON.parse(targetTask.metadata) 
+              : (targetTask.metadata || {});
+
+            taskMeta.confirmation_status = 'confirmed';
+            
+            taskMeta.bot_suggestion = {
+              proposed_date: targetTask.due_at,
+              status: 'pending',
+              detected_at: new Date().toISOString(),
+              user_message: content || 'evet onaylıyorum',
+              is_confirmation_only: true
+            };
+
+            await db.executeSafe({
+              text: `UPDATE follow_up_tasks 
+                     SET metadata = $1::jsonb, updated_at = NOW() 
+                     WHERE id = $2 AND tenant_id = $3`,
+              values: [JSON.stringify(taskMeta), targetTask.id, tenantId]
+            });
+
+            this.log.info(`[BOT_CONFIRMATION_AUTO_DETECTED] Automatically confirmed task ${targetTask.id} due to confirmation signal (LLM=${!!(crmData as any)?.appointment_confirmed}, Deterministic=${deterministicConfirmation})`, { traceId });
+          }
+        } catch (confirmErr) {
+          this.log.error('[BOT_CONFIRMATION_AUTO_DETECTED_FAILED] Non-fatal auto-confirmation error', confirmErr instanceof Error ? confirmErr : new Error(String(confirmErr)), { traceId });
         }
       }
     } catch (crmErr) {

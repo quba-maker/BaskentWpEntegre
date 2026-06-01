@@ -40,6 +40,7 @@ export const COUNTRY_TZ_MAP: Record<string, string> = {
   'Danimarka': 'Europe/Copenhagen', 'Denmark': 'Europe/Copenhagen', 'DK': 'Europe/Copenhagen',
   'İsveç': 'Europe/Stockholm', 'Sweden': 'Europe/Stockholm', 'SE': 'Europe/Stockholm',
   'Norveç': 'Europe/Oslo', 'Norway': 'Europe/Oslo', 'NO': 'Europe/Oslo',
+  'Finlandiya': 'Europe/Helsinki', 'Finland': 'Europe/Helsinki', 'FI': 'Europe/Helsinki',
 
   // Southern/Eastern Europe
   'İtalya': 'Europe/Rome', 'Italy': 'Europe/Rome', 'IT': 'Europe/Rome',

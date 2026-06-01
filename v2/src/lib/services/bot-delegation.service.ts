@@ -315,7 +315,7 @@ export class BotDelegationService {
       warnings.push('missing_conversation');
     }
 
-    // 4. Draft Generation Standard
+    const apiKey = process.env.GEMINI_API_KEY;
     const patientDisplayName = pName || 'Değerli Hastamız';
     let draftMsg = '';
 
@@ -333,22 +333,114 @@ export class BotDelegationService {
       } catch (_) {}
     }
 
-    if (botDel.mode === 'unreachable_followup') {
-      draftMsg = `Merhaba ${patientDisplayName}, bugün sizi aradık ancak ulaşamadık. Sizin için uygun olan bir görüşme saatini paylaşabilir misiniz?`;
-    } else if (botDel.mode === 'collect_phone_call_time') {
-      draftMsg = `Merhaba ${patientDisplayName}, ön görüşme için sizi arayabileceğimiz uygun bir gün ve saat paylaşabilir misiniz?`;
-    } else if (botDel.mode === 'confirm_phone_call') {
-      draftMsg = `Merhaba ${patientDisplayName}, ${dateStr} tarihindeki telefon görüşmeniz için uygunluğunuzu teyit etmek isteriz.`;
-    } else if (botDel.mode === 'clinic_appointment_reminder') {
-      draftMsg = `Merhaba ${patientDisplayName}, ${dateStr} tarihindeki randevunuz için katılım durumunuzu teyit etmek isteriz.`;
-    } else if (botDel.mode === 'no_response_followup') {
-      draftMsg = `Merhaba ${patientDisplayName}, size yardımcı olabileceğimiz bir konu var mıydı? Sorularınız varsa seve seve yanıtlayabiliriz.`;
-    } else if (botDel.mode === 'report_request') {
-      draftMsg = `Merhaba ${patientDisplayName}, değerlendirme süreciniz için varsa ilgili rapor veya tetkik belgelerinizi paylaşabilir misiniz?`;
-    } else if (botDel.mode === 'appointment_reschedule_request') {
-      draftMsg = `Merhaba ${patientDisplayName}, size ulaşamadığımız için randevu/görüşme zamanınızı yeniden planlamak isteriz. Size uygun yeni bir zaman paylaşabilir misiniz?`;
-    } else {
-      draftMsg = `Merhaba ${patientDisplayName}, sizinle randevu ve takip detaylarını görüşmek isteriz.`;
+    const activeDirective = botDel.active_bot_directive || metadata.active_bot_directive || task.metadata?.active_bot_directive;
+
+    if (activeDirective) {
+      if (apiKey) {
+        try {
+          const tenantRows = await this.db.executeSafe({
+            text: `SELECT name FROM tenants WHERE id = $1 /* tenant_id */ LIMIT 1`,
+            values: [this.db.tenantId]
+          }) as any[];
+          const tenantName = tenantRows[0]?.name || 'Başkent Sağlık';
+
+          // 1. Fetch active WhatsApp prompt template for the tenant
+          const { defaultPrompts } = await import('@/lib/domain/conversation/prompts');
+          const promptsData = await this.db.executeSafe({
+            text: `SELECT prompt_text FROM channel_prompts 
+                   WHERE tenant_id = $1 AND name = 'WhatsApp System Prompt' AND is_active = true LIMIT 1`,
+            values: [this.db.tenantId]
+          }) as any[];
+          const basePrompt = promptsData[0]?.prompt_text || defaultPrompts.whatsapp;
+
+          // 2. Fetch recent conversation history
+          const historyRows = await this.db.executeSafe({
+            text: `SELECT direction, content FROM messages 
+                   WHERE phone_number = $1 AND tenant_id = $2 
+                   ORDER BY created_at DESC LIMIT 15`,
+            values: [task.phone_number, this.db.tenantId]
+          }) as any[];
+
+          let conversationTranscript = '';
+          if (historyRows && historyRows.length > 0) {
+            conversationTranscript = historyRows
+              .reverse()
+              .map((m: any) => `[${m.direction === 'in' ? 'Hasta' : tenantName}]: "${m.content}"`)
+              .join('\n');
+          } else {
+            conversationTranscript = '(Henüz konuşma geçmişi bulunmuyor)';
+          }
+
+          const systemInstruction = `Sen ${tenantName} AI Asistanısın. Görevin, koordinatörün verdiği taktik talimat doğrultusunda hastaya gönderilmek üzere ${tenantName} adına samimi, güven veren ve ikna edici bir WhatsApp mesajı yazmaktır.`;
+
+          const prompt = `Aşağıdaki genel kurum kurallarını ve konuşma geçmişini baz alarak, koordinatörün belirttiği taktik talimata uygun olarak hastaya gönderilecek bir sonraki WhatsApp mesajını yaz.
+
+=== GENEL KURUM VE ASİSTAN KURALLARI ===
+${basePrompt}
+
+=== HASTA İLE GÖRÜŞME GEÇMİŞİ (WHATSAPP TRANSCRIPT) ===
+${conversationTranscript}
+
+=== KOORDİNATÖRÜN TAKTİK TALİMATI ===
+Lütfen hastamız ${patientDisplayName} için şu talimat doğrultusunda bir yanıt mesajı oluştur:
+👉 "${activeDirective}"
+
+=== BOTA ÖZEL YAZIM TALİMATI (ÖNEMLİ) ===
+- Yazacağın mesaj, yukarıdaki konuşma geçmişinin tam olarak KALDIĞI YERDEN DEVAM ETMELİDİR.
+- Son mesaj hastadan geldiyse, hastanın yazdığına (yukarıdaki son mesaja) doğrudan ve samimi bir şekilde cevap ver.
+- Jenerik karşılama, kopuk başlangıçlar (Örn: "Merhaba İsa, nasılsınız?" gibi baştan alma) yapma. Eğer hastaya zaten hal hatır sorulduysa veya konuşmanın ortasındaysanız, doğrudan hastanın son ifadesine cevap vererek konuya gir.
+- Sadece ve sadece hastaya gönderilecek mesajı yaz. Başına veya sonuna açıklama, tırnak işareti, "Koordinatör Notu:" gibi ifadeler KESİNLİKLE EKLEME.`;
+          
+          const payload = {
+            systemInstruction: { parts: [{ text: systemInstruction }] },
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            generationConfig: {
+              temperature: 0.7,
+              maxOutputTokens: 8192
+            }
+          };
+
+          const response = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+            }
+          );
+
+          if (response.ok) {
+            const resData = await response.json();
+            const text = resData.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (text && text.trim().length > 0) {
+              draftMsg = text.trim();
+            }
+          }
+        } catch (err) {
+          log.error("Gemini dynamic draft generation failed, falling back to static templates", err instanceof Error ? err : new Error(String(err)));
+        }
+      }
+    }
+
+    if (!draftMsg) {
+      let reason = !apiKey ? '[API Key Missing]' : '[Gemini Fetch Failed]';
+      if (botDel.mode === 'unreachable_followup') {
+        draftMsg = `Merhaba ${patientDisplayName}, bugün sizi aradık ancak ulaşamadık. Sizin için uygun olan bir görüşme saatini paylaşabilir misiniz? ${reason}`;
+      } else if (botDel.mode === 'collect_phone_call_time') {
+        draftMsg = `Merhaba ${patientDisplayName}, ön görüşme için sizi arayabileceğimiz uygun bir gün ve saat paylaşabilir misiniz? ${reason}`;
+      } else if (botDel.mode === 'confirm_phone_call') {
+        draftMsg = `Merhaba ${patientDisplayName}, ${dateStr} tarihindeki telefon görüşmeniz için uygunluğunuzu teyit etmek isteriz. ${reason}`;
+      } else if (botDel.mode === 'clinic_appointment_reminder') {
+        draftMsg = `Merhaba ${patientDisplayName}, ${dateStr} tarihindeki randevunuz için katılım durumunuzu teyit etmek isteriz. ${reason}`;
+      } else if (botDel.mode === 'no_response_followup') {
+        draftMsg = `Merhaba ${patientDisplayName}, size yardımcı olabileceğimiz bir konu var mıydı? Sorularınız varsa seve seve yanıtlayabiliriz. ${reason}`;
+      } else if (botDel.mode === 'report_request') {
+        draftMsg = `Merhaba ${patientDisplayName}, değerlendirme süreciniz için varsa ilgili rapor veya tetkik belgelerinizi paylaşabilir misiniz?`;
+      } else if (botDel.mode === 'appointment_reschedule_request') {
+        draftMsg = `Merhaba ${patientDisplayName}, size ulaşamadığımız için randevu/görüşme zamanınızı yeniden planlamak isteriz. Size uygun yeni bir zaman paylaşabilir misiniz?`;
+      } else {
+        draftMsg = `Merhaba ${patientDisplayName}, sizinle randevu ve takip detaylarını görüşmek isteriz.`;
+      }
     }
 
     // Under P0: Append coordinator only footer
