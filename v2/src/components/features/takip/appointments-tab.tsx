@@ -37,14 +37,20 @@ function formatPartialDate(meta: any) {
   const monthLabel = MONTHS_TR.find(m => m.value === meta.selected_month)?.label || '';
   if (meta.partial_precision === 'year_month') {
     return `${monthLabel} ${meta.selected_year}`;
-  } else if (meta.partial_precision === 'year_month_day') {
-    const day = meta.selected_day?.replace(/^0/, '') || '';
-    return `${day} ${monthLabel} ${meta.selected_year}`;
-  } else if (meta.partial_precision === 'full') {
-    const day = meta.selected_day?.replace(/^0/, '') || '';
-    return `${day} ${monthLabel} ${meta.selected_year}, Saat ${meta.selected_time}`;
   }
-  return '';
+  
+  const parsedDate = parsePartialDateToDate(meta);
+  if (parsedDate) {
+    return parsedDate.toLocaleDateString('tr-TR', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+      weekday: 'long'
+    });
+  }
+  
+  const day = meta.selected_day?.replace(/^0/, '') || '';
+  return `${day} ${monthLabel} ${meta.selected_year}`;
 }
 
 function formatDateTr(dateStr: string | undefined): string {
@@ -1101,11 +1107,13 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
             <div className="text-[13px] font-bold text-[#1D1D1F]">
               {apt.metadata?.is_partial_date 
                 ? formatPartialDate(apt.metadata)
-                : new Date(apt.dueAtUtc).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short', timeZone: 'Europe/Istanbul' })}
+                : new Date(apt.dueAtUtc).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric', weekday: 'long', timeZone: 'Europe/Istanbul' })}
             </div>
-            {!apt.metadata?.is_partial_date && (
+            {(!apt.metadata?.is_partial_date || (apt.metadata?.is_partial_date && apt.metadata?.partial_precision === 'full' && apt.metadata?.selected_time)) && (
               <div className="text-[11px] font-semibold text-[#007AFF] mt-0.5">
-                {new Date(apt.dueAtUtc).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul' })}
+                {apt.metadata?.is_partial_date 
+                  ? apt.metadata.selected_time 
+                  : new Date(apt.dueAtUtc).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul' })}
               </div>
             )}
             {apt.metadata?.is_partial_date && apt.metadata?.partial_precision === 'year_month' && (
