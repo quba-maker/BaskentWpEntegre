@@ -102,15 +102,21 @@ export class CredentialsService {
           log.info("[CREDENTIAL_RESOLVED] V2 channel credentials found", {
             tenantId, provider, channelId: row.channel_id, source: "v2_channels"
           });
+          
+          const isCoexistence = provider === "whatsapp" && process.env.ENABLE_360DIALOG_COEXISTENCE === "true";
+          const finalToken = isCoexistence 
+            ? (process.env.THREE_SIXTY_DIALOG_API_KEY_FALLBACK || accessToken)
+            : accessToken;
+
           return {
-            accessToken,
+            accessToken: finalToken,
             whatsappPhoneNumberId: provider === "whatsapp" ? (row.__decryptedPhoneNumberId || row.identifier) : null,
             whatsappBusinessAccountId: null,
             metaPageId: provider === "messenger" ? row.identifier : null,
             instagramId: provider === "instagram" ? row.identifier : null,
             source: "v2_channels",
             channelId: row.channel_id,
-            provider: row.provider
+            provider: isCoexistence ? "360dialog" : row.provider
           };
         }
       }
