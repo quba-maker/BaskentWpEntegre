@@ -1,7 +1,5 @@
 import dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
-import { withTenantDB } from "../src/lib/core/tenant-db";
-import { getFocusQueueItems } from "../src/app/actions/focus-queue";
 
 const TEST_TENANT_ID = "caab9ea1-9591-45e4-bbc5-9c9b498982c8";
 const TEST_OPPORTUNITY_ID = "0a05b03a-d526-4c88-8806-1230faaac3ea"; // Merve
@@ -9,6 +7,9 @@ process.env.TEST_TENANT_ID = TEST_TENANT_ID;
 process.env.TEST_USER_ID = "00000000-0000-0000-0000-000000000000";
 
 async function runSmoke() {
+  const { withTenantDB } = await import("../src/lib/core/tenant-db");
+  const { getFocusQueueItems } = await import("../src/app/actions/focus-queue");
+
   const db = withTenantDB(TEST_TENANT_ID, true);
   
   // 1. Merve in queue?
@@ -36,3 +37,4 @@ async function runSmoke() {
 }
 
 runSmoke().catch(console.error);
+
