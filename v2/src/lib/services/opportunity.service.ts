@@ -2,6 +2,7 @@ import { logger } from "@/lib/core/logger";
 import type { TenantDB } from "@/lib/core/tenant-db";
 import type { CrmExtractionType } from "./ai/crm-extractor";
 import { oppStageToLeadStage } from '@/lib/config/stage-mapping';
+import { PatientNameSyncService } from "./patient-name-sync";
 
 const log = logger.withContext({ module: 'OpportunityService' });
 
@@ -9,17 +10,13 @@ const log = logger.withContext({ module: 'OpportunityService' });
 export const STAGE_LABELS: Record<string, string> = {
   new_lead: 'Yeni',
   first_contact: 'İlk İletişim',
-  engaged: 'Cevap Verdi',
-  discovery: 'Keşif',
-  report_waiting: 'Rapor Bekleniyor',
-  report_received: 'Rapor Geldi',
-  doctor_review: 'Doktor İncelemesi',
+  engaged: 'Cevap Alındı',
+  discovery: 'Keşif/Analiz',
   qualified: 'Nitelikli',
-  offer_sent: 'Teklif Gönderildi',
+  phone_call_planning: 'Telefon Görüşmesi Planlanıyor',
   appointment_planning: 'Randevu Planlanıyor',
   appointment_booked: 'Randevu Alındı',
   arrived: 'Geldi',
-  lost: 'Kayıp',
   not_qualified: 'Uygun Değil',
 };
 
@@ -53,13 +50,12 @@ function mapPipelineToOpportunityStage(pipelineStage: string | undefined, intent
     'discovery': 'discovery',
     'qualified': 'qualified',
     'appointed': 'appointment_booked',
-    'lost': 'lost',
+    'lost': 'not_qualified',
   };
 
-  // Intent-based override (more specific stage)
-  if (intentType === 'report_sent') return 'report_received';
-  if (intentType === 'report_waiting') return 'report_waiting';
-  if (intentType === 'doctor_review') return 'doctor_review';
+  // Intent-based override (more specific stage mapping to the new 10-stage progression)
+  if (intentType === 'report_sent' || intentType === 'report_waiting') return 'discovery';
+  if (intentType === 'doctor_review') return 'qualified';
   if (intentType === 'appointment_request' && pipelineStage === 'qualified') return 'appointment_planning';
 
   return stageMap[pipelineStage] || 'new_lead';
@@ -135,6 +131,15 @@ export class OpportunityService {
     }
 
     try {
+      // Systemic Patient Name Sync (Propagates validated name updates to all opportunities, conversations, and leads)
+      if (patientName && patientName.trim()) {
+        try {
+          await PatientNameSyncService.syncName(this.db, phoneNumber, patientName);
+        } catch (syncErr) {
+          log.error(`[OPP_NAME_SYNC_ERROR] Failed system name sync`, syncErr instanceof Error ? syncErr : new Error(String(syncErr)));
+        }
+      }
+
       // 1. Check for existing active opportunity for this conversation
       const existing = await this.db.executeSafe({
         text: `SELECT id, stage, priority, intent_type FROM opportunities 

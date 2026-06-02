@@ -2,6 +2,7 @@ import { sql } from "@/lib/db";
 import { TenantDB } from "@/lib/core/tenant-db";
 import { normalizeCountryName } from "@/lib/utils/country";
 import { logger } from "@/lib/core/logger";
+import { PatientNameSyncService } from "./patient-name-sync";
 
 // ==========================================
 // CONVERSATION SERVICE (State Extraction & Locking)
@@ -176,6 +177,15 @@ export class ConversationService {
       
       if (data.tags && Array.isArray(data.tags)) {
         mergedTags = Array.from(new Set([...mergedTags, ...data.tags]));
+      }
+
+      // Systemic Patient Name Sync (Propagates validated name updates to all opportunities, conversations, and leads)
+      if (data.patientName && data.patientName.trim()) {
+        try {
+          await PatientNameSyncService.syncName(this.db, phoneNumber, data.patientName);
+        } catch (syncErr) {
+          console.error("Failed to sync patient name in updateCrmIntelligence:", syncErr);
+        }
       }
 
       this.log.info(`[CONV_CRM_UPDATE] input`, { phone: phoneNumber, rawCountry: data.country, normalized: normalizedCountry, department: data.department, stage: data.pipelineStage });

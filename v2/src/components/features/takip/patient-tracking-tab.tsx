@@ -5,7 +5,7 @@ import useSWR from "swr";
 import {
   Search, ChevronDown, CheckCircle2, MessageCircle,
   Clock, Flame, Thermometer, Snowflake, Filter, X,
-  ChevronRight, Moon, AlertTriangle, Bot, Phone
+  ChevronRight, Moon, AlertTriangle, Bot, Phone, Building2
 } from "lucide-react";
 import { getPatientTrackingRows, type PatientTrackingRow, type PatientTrackingFilters } from "@/app/actions/patient-tracking";
 import { formatPhoneReadable } from "@/lib/utils/patient-name-resolver";
@@ -15,15 +15,14 @@ import { formatPhoneReadable } from "@/lib/utils/patient-name-resolver";
 const STAGES = [
   { value: 'new_lead', label: 'Yeni', color: '#007AFF', icon: '🆕' },
   { value: 'first_contact', label: 'İlk İletişim', color: '#FF9500', icon: '📞' },
-  { value: 'engaged', label: 'Cevap Verdi', color: '#34C759', icon: '💬' },
-  { value: 'discovery', label: 'Keşif', color: '#5856D6', icon: '🔍' },
-  { value: 'report_waiting', label: 'Rapor Bekleniyor', color: '#FF9500', icon: '📋' },
-  { value: 'report_received', label: 'Rapor Geldi', color: '#30B0C7', icon: '📄' },
-  { value: 'doctor_review', label: 'Doktor İncelemesi', color: '#AF52DE', icon: '🩺' },
+  { value: 'engaged', label: 'Cevap Alındı', color: '#34C759', icon: '💬' },
+  { value: 'discovery', label: 'Keşif/Analiz', color: '#5856D6', icon: '🔍' },
   { value: 'qualified', label: 'Nitelikli', color: '#30B0C7', icon: '⭐' },
-  { value: 'offer_sent', label: 'Teklif Gönderildi', color: '#FF6482', icon: '💰' },
+  { value: 'phone_call_planning', label: 'Telefon Görüşmesi Planlanıyor', color: '#AF52DE', icon: '📞' },
   { value: 'appointment_planning', label: 'Randevu Planlanıyor', color: '#FFD60A', icon: '📅' },
   { value: 'appointment_booked', label: 'Randevu Alındı', color: '#0F9D58', icon: '✅' },
+  { value: 'arrived', label: 'Geldi', color: '#0F9D58', icon: '🏥' },
+  { value: 'not_qualified', label: 'Uygun Değil', color: '#8E8E93', icon: '🚫' },
 ];
 
 const getStageInfo = (stage: string) => STAGES.find(s => s.value === stage) || { value: stage, label: stage, color: '#86868B', icon: '❓' };
@@ -84,7 +83,7 @@ const getCountryFlag = (country?: string): string => {
 
 interface PatientTrackingTabProps {
   onGoToInbox: (item: any) => void;
-  onOpenDrawer: (opportunityId: string) => void;
+  onOpenDrawer: (opportunityId: string, initialTab?: 'profile' | 'appointment', targetPageTab?: 'hasta_takibi' | 'telefon' | 'randevu') => void;
 }
 
 export default function PatientTrackingTab({ onGoToInbox, onOpenDrawer }: PatientTrackingTabProps) {
@@ -244,8 +243,7 @@ export default function PatientTrackingTab({ onGoToInbox, onOpenDrawer }: Patien
               <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase min-w-[200px]">Hasta</th>
               <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase w-[160px]">Durum</th>
               <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase min-w-[180px]">Kısa Özet</th>
-              <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase w-[170px]">Sonraki Aksiyon</th>
-              <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase w-[140px]">Sonraki Takip</th>
+              <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase w-[200px]">Manuel Notlar</th>
               <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase text-right w-[100px]">Aksiyon</th>
             </tr>
           </thead>
@@ -261,7 +259,7 @@ export default function PatientTrackingTab({ onGoToInbox, onOpenDrawer }: Patien
 
             {items.length === 0 && !isLoading && (
               <tr>
-                <td colSpan={7} className="py-16 text-center">
+                <td colSpan={6} className="py-16 text-center">
                   <Phone className="w-10 h-10 text-[#C7C7CC] mx-auto mb-3" />
                   <p className="text-[#86868B] font-semibold text-sm">Aktif hasta bulunamadı</p>
                   <p className="text-[#C7C7CC] text-xs mt-1">Filtreleri değiştirmeyi deneyin</p>
@@ -271,7 +269,7 @@ export default function PatientTrackingTab({ onGoToInbox, onOpenDrawer }: Patien
 
             {isLoading && (
               <tr>
-                <td colSpan={7} className="py-16 text-center">
+                <td colSpan={6} className="py-16 text-center">
                   <div className="inline-flex items-center gap-2 text-[#86868B] text-sm font-medium">
                     <div className="w-5 h-5 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
                     Yükleniyor...
@@ -291,7 +289,7 @@ export default function PatientTrackingTab({ onGoToInbox, onOpenDrawer }: Patien
 function PatientRow({ item, onGoToInbox, onOpenDrawer }: { 
   item: PatientTrackingRow; 
   onGoToInbox: (item: any) => void; 
-  onOpenDrawer: (opportunityId: string) => void;
+  onOpenDrawer: (opportunityId: string, initialTab?: 'profile' | 'appointment', targetPageTab?: 'hasta_takibi' | 'telefon' | 'randevu') => void;
 }) {
   const prioConfig = PRIORITY_CONFIG[item.priority] || PRIORITY_CONFIG.warm;
   const PrioIcon = prioConfig.icon;
@@ -339,60 +337,95 @@ function PatientRow({ item, onGoToInbox, onOpenDrawer }: {
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2 mt-0.5">
+        <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
           <span className="text-[11px] font-medium text-[#86868B]">{formatPhone(item.phoneNumber)}</span>
-          {item.department && item.department !== 'Genel' && (
-            <span className="text-[10px] font-medium text-[#86868B]">· {item.department}</span>
+          {item.department && (
+            <>
+              <span className="text-[#C7C7CC]">·</span>
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-indigo-50 border border-indigo-100 rounded text-[9px] font-bold text-indigo-700 uppercase tracking-wide">
+                <Building2 className="w-2.5 h-2.5 text-indigo-600" />
+                {item.department}
+              </span>
+            </>
           )}
         </div>
       </td>
 
       {/* Durum */}
       <td className="py-3.5 px-4">
-        <span className={`inline-flex items-center px-2 py-1 rounded-md text-[10px] font-bold tracking-wide ${item.journeyStatusColor}`}>
-          {item.journeyStatus}
-        </span>
+        <div className="flex flex-col gap-1 items-start">
+          {/* Evrensel Aşama Durumu */}
+          <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold tracking-wide ${item.journeyStatusColor}`}>
+            {item.journeyStatus}
+          </span>
+          
+          {/* Telefon Takibi Alıcı Durumu */}
+          {item.phoneTaskStatus && (
+            <span 
+              onClick={(e) => {
+                e.stopPropagation();
+                if (item.opportunityId) {
+                  onOpenDrawer(item.opportunityId, 'appointment', 'telefon');
+                }
+              }}
+              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold border shrink-0 select-none cursor-pointer hover:opacity-85 hover:scale-[1.02] active:scale-95 transition-all shadow-sm ${
+                item.phoneTaskStatus === 'Gecikti' 
+                  ? 'bg-red-50 border-red-200 text-red-700 hover:bg-red-100/50' 
+                  : item.phoneTaskStatus === 'Planlandı'
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100/50'
+                  : 'bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100/50'
+              }`}
+            >
+              <Phone className="w-2.5 h-2.5 shrink-0" />
+              <span>Telefon: {item.phoneTaskStatus}</span>
+            </span>
+          )}
+
+          {/* Randevu Yönetimi Alıcı Durumu */}
+          {item.clinicTaskStatus && (
+            <span 
+              onClick={(e) => {
+                e.stopPropagation();
+                if (item.opportunityId) {
+                  onOpenDrawer(item.opportunityId, 'appointment', 'randevu');
+                }
+              }}
+              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold border shrink-0 select-none cursor-pointer hover:opacity-85 hover:scale-[1.02] active:scale-95 transition-all shadow-sm ${
+                item.clinicTaskStatus === 'Geldi'
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100/50'
+                  : item.clinicTaskStatus === 'Gelmedi'
+                  ? 'bg-rose-50 border-rose-200 text-rose-700 hover:bg-rose-100/50'
+                  : item.clinicTaskStatus === 'Gecikti'
+                  ? 'bg-red-50 border-red-200 text-red-700 hover:bg-red-100/50'
+                  : 'bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100/50'
+              }`}
+            >
+              <Building2 className="w-2.5 h-2.5 shrink-0" />
+              <span>Randevu: {item.clinicTaskStatus}</span>
+            </span>
+          )}
+        </div>
       </td>
 
       {/* Kısa Özet */}
       <td className="py-3.5 px-4">
-        <p className="text-[11px] text-[#1D1D1F] font-medium line-clamp-1 leading-relaxed max-w-[220px]" title={item.shortSummary}>
-          {item.shortSummary}
+        <div className="max-w-[220px]">
+          {item.aiReason && (
+            <p className="text-[11px] text-[#FF3B30] font-bold leading-tight mb-1" title={item.aiReason}>
+              🔥 Neden Fırsat: <span className="font-semibold text-slate-700">{item.aiReason}</span>
+            </p>
+          )}
+          <p className="text-[11px] text-[#1D1D1F] font-medium line-clamp-2 leading-relaxed" title={item.shortSummary}>
+            {item.shortSummary}
+          </p>
+        </div>
+      </td>
+
+      {/* Manuel Notlar */}
+      <td className="py-3.5 px-4">
+        <p className="text-[11px] text-slate-700 font-medium line-clamp-2 leading-relaxed max-w-[180px]" title={item.mostRecentNote}>
+          {item.mostRecentNote || <span className="text-[#C7C7CC]">—</span>}
         </p>
-      </td>
-
-      {/* Sonraki Aksiyon */}
-      <td className="py-3.5 px-4">
-        <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold tracking-wide ${item.actionColorClass}`}>
-          {item.nextBestAction === 'call_now' && <Phone className="w-3 h-3" />}
-          {item.nextBestAction === 'call_today' && <Phone className="w-3 h-3" />}
-          {item.nextBestAction === 'delegate_unreachable_followup_to_bot' && <Bot className="w-3 h-3" />}
-          {item.actionLabel}
-        </span>
-      </td>
-
-      {/* Sonraki Takip */}
-      <td className="py-3.5 px-4">
-        {item.nextFollowUpTurkey ? (
-          <div>
-            <div className="flex items-center gap-1 text-[11px] font-semibold text-[#1D1D1F]">
-              <Clock className="w-3 h-3 text-[#86868B]" />
-              {item.nextFollowUpTurkey}
-            </div>
-            {item.nextFollowUpPatientLocal && (
-              <div className="text-[9px] text-[#86868B] mt-0.5">
-                🌍 {item.nextFollowUpPatientLocal}
-              </div>
-            )}
-            {item.timezoneNeedsConfirmation && (
-              <div className="flex items-center gap-0.5 text-[9px] text-amber-600 font-semibold mt-0.5">
-                <AlertTriangle className="w-2.5 h-2.5" /> Saat teyidi gerekli
-              </div>
-            )}
-          </div>
-        ) : (
-          <span className="text-[11px] text-[#C7C7CC]">—</span>
-        )}
       </td>
 
       {/* Aksiyon Buttons */}
@@ -403,20 +436,11 @@ function PatientRow({ item, onGoToInbox, onOpenDrawer }: {
               e.stopPropagation(); 
               onGoToInbox({ phone_number: item.phoneNumber, display_name: item.patientName, source: item.source }); 
             }}
-            className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-white border border-black/5 rounded-lg shadow-sm hover:bg-green-50 hover:border-green-200 hover:text-green-600 transition-all text-[11px] font-semibold text-[#1D1D1F]"
-            title="Mesaja Git"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#007AFF] hover:bg-[#007AFF]/90 text-white rounded-lg shadow-sm hover:shadow transition-all text-[11px] font-bold cursor-pointer shrink-0 active:scale-95"
+            title="Mesajları Gör"
           >
-            <MessageCircle className="w-3.5 h-3.5" />
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              if (item.opportunityId) onOpenDrawer(item.opportunityId);
-            }}
-            className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-white border border-black/5 rounded-lg shadow-sm hover:bg-indigo-50 hover:border-indigo-200 hover:text-indigo-600 transition-all text-[11px] font-semibold text-[#1D1D1F]"
-            title="Detay"
-          >
-            <ChevronRight className="w-3.5 h-3.5" />
+            <MessageCircle className="w-3.5 h-3.5 text-white" />
+            <span>Mesajları Gör</span>
           </button>
         </div>
       </td>

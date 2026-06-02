@@ -3,8 +3,20 @@
 import { withActionGuard } from "@/lib/core/action-guard";
 import { resolvePatientTimezone, formatDualClock, isOverdue, isToday } from "@/lib/utils/timezone";
 import { OperationItem } from "./operations"; // We can reuse or extend this type
+import { resolvePatientDisplayName } from "@/lib/utils/patient-name-resolver";
 
 export type JourneyStatus = 
+  | 'Yeni'
+  | 'İlk İletişim'
+  | 'Cevap Alındı'
+  | 'Keşif/Analiz'
+  | 'Nitelikli'
+  | 'Telefon Görüşmesi Planlanıyor'
+  | 'Randevu Planlanıyor'
+  | 'Randevu Alındı'
+  | 'Geldi'
+  | 'Uygun Değil'
+  // Existing ones for fallback / backwards compatibility
   | 'Yeni Form Geldi'
   | 'Bot Karşılıyor'
   | 'Bot Cevap Bekliyor'
@@ -21,7 +33,6 @@ export type JourneyStatus =
   | 'Klinik Randevusu Alındı'
   | 'Teyit Bekliyor'
   | 'Randevu Yaklaşıyor'
-  | 'Geldi'
   | 'Gelmedi / İptal'
   | 'Kapatıldı';
 
@@ -55,36 +66,42 @@ export interface FocusQueueItem extends OperationItem {
 
 // Compute journey status based on the data
 function computeJourneyStatus(row: any): JourneyStatus {
-  if (row.opp_stage === 'arrived') return 'Geldi';
-  if (row.opp_stage === 'not_show' || row.opp_stage === 'cancelled') return 'Gelmedi / İptal';
-  if (row.opp_stage === 'lost' || row.opp_stage === 'not_qualified') return 'Kapatıldı';
+  if (row.opp_stage) {
+    if (row.opp_stage === 'new_lead') return 'Yeni';
+    if (row.opp_stage === 'first_contact') return 'İlk İletişim';
+    if (row.opp_stage === 'engaged') return 'Cevap Alındı';
+    if (row.opp_stage === 'discovery') return 'Keşif/Analiz';
+    if (row.opp_stage === 'qualified') return 'Nitelikli';
+    if (row.opp_stage === 'phone_call_planning') return 'Telefon Görüşmesi Planlanıyor';
+    if (row.opp_stage === 'appointment_planning') return 'Randevu Planlanıyor';
+    if (row.opp_stage === 'appointment_booked') return 'Randevu Alındı';
+    if (row.opp_stage === 'arrived') return 'Geldi';
+    if (row.opp_stage === 'not_qualified' || row.opp_stage === 'lost') return 'Uygun Değil';
+    
+    // Backwards compatibility for old stages
+    if (row.opp_stage === 'report_waiting' || row.opp_stage === 'report_received') return 'Keşif/Analiz';
+    if (row.opp_stage === 'doctor_review') return 'Nitelikli';
+  }
   
   if (row.task_metadata?.bot_delegation) return 'Bot Takipte';
-  
   if (row.last_outreach_action === 'called_missed') return 'Ulaşılamadı';
-  
-  if (row.opp_stage === 'report_waiting' || row.task_type === 'send_report_reminder') return 'Rapor Bekleniyor';
-  if (row.opp_stage === 'doctor_review' || row.task_type === 'doctor_review_pending') return 'Doktor İncelemesi';
   
   if (row.task_type === 'callback_scheduled') return 'Telefon Randevusu Planlandı';
   
   if (row.conv_status === 'bot') {
-    if (row.lead_form_name) return 'Bot Karşılıyor'; // or Bot Cevap Bekliyor
+    if (row.lead_form_name) return 'Yeni';
     return 'Bot Cevap Bekliyor';
   }
   
   if (row.conv_status === 'handoff' || row.task_type === 'bot_handoff_followup') return 'İnsan Devri Gerekli';
+  if (row.lead_form_name && !row.opp_stage) return 'Yeni';
 
-  if (row.task_type === 'appointment_request' || row.opp_stage === 'appointment_planning') return 'Danışman Arayacak';
-  
-  if (row.lead_form_name && !row.opp_stage) return 'Yeni Form Geldi';
-
-  return 'Danışman Arayacak'; // Default fallback
+  return 'Yeni'; // Default fallback
 }
 
 // Compute Next Best Action
 function computeNextBestAction(row: any, journeyStatus: JourneyStatus): NextBestAction {
-  if (journeyStatus === 'Geldi' || journeyStatus === 'Kapatıldı' || journeyStatus === 'Gelmedi / İptal') return 'no_action';
+  if (journeyStatus === 'Geldi' || journeyStatus === 'Kapatıldı' || journeyStatus === 'Gelmedi / İptal' || journeyStatus === 'Uygun Değil') return 'no_action';
   
   if (row.task_due_at && !isOverdue(row.task_due_at) && !isToday(row.task_due_at)) {
     return 'scheduled_followup';
@@ -100,9 +117,9 @@ function computeNextBestAction(row: any, journeyStatus: JourneyStatus): NextBest
   
   if (row.last_outreach_action === 'called_missed') return 'delegate_unreachable_followup_to_bot';
   
-  if (journeyStatus === 'Rapor Bekleniyor') return 'request_report';
+  if (journeyStatus === 'Rapor Bekleniyor' || journeyStatus === 'Keşif/Analiz') return 'request_report';
   
-  if (journeyStatus === 'Doktor İncelemesi') return 'doctor_review_needed';
+  if (journeyStatus === 'Doktor İncelemesi' || journeyStatus === 'Nitelikli') return 'doctor_review_needed';
   
   if (isOverdue(row.task_due_at)) return 'call_now'; // could also be prepare_followup_draft
   
@@ -113,7 +130,7 @@ function computeNextBestAction(row: any, journeyStatus: JourneyStatus): NextBest
 function computePriorityScore(row: any, journeyStatus: JourneyStatus, nextBestAction: NextBestAction): number {
   let score = 0;
   
-  if (journeyStatus === 'Kapatıldı' || journeyStatus === 'Geldi' || journeyStatus === 'Gelmedi / İptal') return -200;
+  if (journeyStatus === 'Kapatıldı' || journeyStatus === 'Uygun Değil' || journeyStatus === 'Geldi' || journeyStatus === 'Gelmedi / İptal') return -200;
   
   if (journeyStatus === 'İnsan Devri Gerekli') score += 130;
   else if (journeyStatus === 'Telefon Randevusu Planlandı' && isOverdue(row.task_due_at)) score += 120;
@@ -121,10 +138,10 @@ function computePriorityScore(row: any, journeyStatus: JourneyStatus, nextBestAc
   else if (isOverdue(row.task_due_at)) score += 100;
   else if (row.opp_priority === 'hot' || row.task_metadata?.priority === 'high') score += 90;
   else if (isToday(row.task_due_at)) score += 80;
-  else if (journeyStatus === 'Yeni Form Geldi') score += 70;
+  else if (journeyStatus === 'Yeni Form Geldi' || journeyStatus === 'Yeni') score += 70;
   else if (journeyStatus === 'Ulaşılamadı') score += 60;
-  else if (journeyStatus === 'Rapor Bekleniyor') score += 50;
-  else if (journeyStatus === 'Doktor İncelemesi') score += 40;
+  else if (journeyStatus === 'Rapor Bekleniyor' || journeyStatus === 'Keşif/Analiz') score += 50;
+  else if (journeyStatus === 'Doktor İncelemesi' || journeyStatus === 'Nitelikli') score += 40;
   else if (journeyStatus === 'Bot Takipte') score += 30;
 
   // Timezone penalty
@@ -175,6 +192,7 @@ export async function getFocusQueueItems(): Promise<{ items: FocusQueueItem[]; t
           o.updated_at as opp_updated_at,
 
           -- Conversation details
+          c.patient_name as conv_patient_name,
           c.status as conv_status,
           c.last_message_content as conv_last_message,
           c.last_message_at as conv_last_message_at,
@@ -196,7 +214,7 @@ export async function getFocusQueueItems(): Promise<{ items: FocusQueueItem[]; t
           WHERE opportunity_id = o.id AND tenant_id = o.tenant_id AND status IN ('pending', 'in_progress')
           ORDER BY due_at ASC LIMIT 1
         ) t ON TRUE
-        LEFT JOIN conversations c ON c.active_opportunity_id = o.id AND c.tenant_id = o.tenant_id
+        LEFT JOIN conversations c ON c.phone_number = o.phone_number AND c.tenant_id = o.tenant_id
         LEFT JOIN leads l ON l.linked_opportunity_id = o.id AND l.tenant_id = o.tenant_id
         LEFT JOIN LATERAL (
           SELECT action, created_at, metadata
@@ -206,11 +224,11 @@ export async function getFocusQueueItems(): Promise<{ items: FocusQueueItem[]; t
           LIMIT 1
         ) ol ON TRUE
         WHERE o.tenant_id = $1 
-          AND o.stage NOT IN ('lost', 'not_qualified', 'arrived', 'not_interested', 'cancelled', 'completed')
+          AND o.stage NOT IN ('not_qualified', 'arrived')
           AND (
             t.id IS NOT NULL
             OR o.priority IN ('hot', 'high', 'sıcak')
-            OR o.stage IN ('new_lead', 'first_contact', 'engaged', 'qualified', 'appointment_planning', 'appointment_booked', 'report_waiting', 'doctor_review')
+            OR o.stage IN ('new_lead', 'first_contact', 'engaged', 'discovery', 'qualified', 'phone_call_planning', 'appointment_planning', 'appointment_booked')
             OR o.intent_type IN ('appointment_request', 'follow_up_needed', 'hot_lead')
             OR o.next_follow_up_at IS NOT NULL
             OR ol.action IN ('called_missed', 'callback_scheduled', 'greeting_sent', 'bot_activated')
@@ -250,6 +268,7 @@ export async function getFocusQueueItems(): Promise<{ items: FocusQueueItem[]; t
           null as opp_updated_at,
 
           -- Conversation details
+          c.patient_name as conv_patient_name,
           c.status as conv_status,
           c.last_message_content as conv_last_message,
           c.last_message_at as conv_last_message_at,
@@ -361,7 +380,13 @@ export async function getFocusQueueItems(): Promise<{ items: FocusQueueItem[]; t
           opportunity_id: row.opportunity_id || undefined,
           conversation_id: row.conversation_id || undefined,
           lead_id: row.lead_id || undefined,
-          patient_name: row.opp_patient_name || row.lead_raw_data?.patient_name || row.lead_raw_data?.Name || 'İsimsiz Form',
+          patient_name: resolvePatientDisplayName({
+            manualPatientName: row.conv_patient_name || row.opp_patient_name,
+            oppPatientName: row.opp_patient_name,
+            convPatientName: row.conv_patient_name,
+            whatsappProfileName: row.conv_patient_name,
+            formPatientName: row.lead_raw_data?.patient_name || row.lead_raw_data?.Name
+          }),
           phone_number: row.phone_number,
           country: resolvedCountry || undefined,
           department: row.opp_department || row.lead_raw_data?.department || row.lead_raw_data?.Bölüm || 'Genel',

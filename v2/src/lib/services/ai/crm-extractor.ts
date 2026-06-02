@@ -95,7 +95,7 @@ Bu bilgiyi "yarın", "bugün", "gelecek hafta", "Haziran 20" gibi ifadeleri ISO 
 
 Format:
 {
-  "patient_name": "string (Hastanın GERÇEK adı. Konuşmada 'ismim Mustafa' veya 'ben Ali' gibi ifadelerden çıkar. Instagram/Facebook profil adı DEĞİL, hastanın söylediği gerçek isim. Emin değilsen boş bırak)",
+  "patient_name": "string (Hastanın GERÇEK adı. Konuşmada 'ismim Mustafa' veya 'ben Ali' gibi ifadelerden çıkar. Instagram/Facebook profil adı DEĞİL. ASLA şehir isimlerini (örn: Konya, konyaya, Ankara, İstanbul), yer adlarını, genel hitapları (örn: selam, merhaba, nasılsınız), fiilleri veya edatları isim olarak çıkarma. SADECE gerçek şahıs adlarını çıkar. Emin değilsen boş bırak)",
   "language": "string (örn: German, English, Turkish)",
   "country": "string (Hastanın yaşadığı ülke — Türkçe olarak yaz. Örn: Almanya, Türkiye, İngiltere. Emin değilsen boş bırak)",
   "country_confidence": number (0.0 ile 1.0 arası),
@@ -123,7 +123,7 @@ Format:
   "cancellation_reason": "string (İptal/vazgeçme sebebi. Hasta söylediyse yazılır. Örn: 'başka hastaneye gitti', 'maddi nedenler', 'gelmekten vazgeçti'. Yoksa boş bırak)",
   "should_stop_follow_up": boolean (true ise tüm otomatik takip durdurulmalı. explicit_cancellation veya opt_out_requested true ise bu da true olmalı),
 
-  "requester_name": "string (Başvuran kişinin gerçek adı. 'ismim Mustafa', 'ben Mehmet' gibi ifadelerden çıkar. patient_name aynı kişi ise aynı olabilir. Emin değilsen boş bırak)",
+  "requester_name": "string (Başvuran kişinin gerçek adı. 'ismim Mustafa', 'ben Mehmet' gibi ifadelerden çıkar. ASLA şehir isimlerini, yer adlarını, hitapları veya edatları çıkarma. SADECE gerçek şahıs adlarını çıkar. Emin değilsen boş bırak)",
   "patient_relation": "string (Başvuran kişinin hasta ile ilişkisi. Örn: 'kendisi', 'anne', 'baba', 'eş', 'kardeş', 'çocuk'. 'annem için', 'babam için' gibi ifadelerden çıkar. Yoksa boş bırak)",
   "new_identity_detected": boolean (Konuşmada daha önce farklı bir kişi konuşuyorken ŞİMDİ yeni/farklı bir kişi konuşmaya başladıysa true. Örn: önceki mesajlarda Mustafa konuşuyordu, şimdi 'ben Mehmet' diyen biri geldi. İLK mesaj veya aynı kişi devam ediyorsa FALSE),
   "reset_conversation_requested": boolean (Kullanıcı açıkça 'baştan başlayalım', 'sıfırdan başlayalım', 'yeni talep' gibi ifade kullandıysa true),
@@ -207,6 +207,7 @@ Pipeline Aşama Kuralları (sırayla ilerler, geri gitmez):
 - requester_name: Konuşmada 'ismim X', 'ben X', 'adım X' diyorsa → requester_name = X. patient_name ile aynı kişi olabilir.
 - patient_relation: 'annem için', 'babam için', 'eşim için' → patient_relation = anne/baba/eş. Kendisi için geliyorsa 'kendisi'.
 - new_identity_detected: SADECE önceki mesajlarda farklı biri konuşuyorken şimdi yeni biri geldiyse true. İlk mesaj veya aynı kişi devam ediyorsa FALSE.
+- DİKKAT (HALÜSİNASYON ENGELİ): ASLA şehir isimlerini (Konya, konyaya, Ankara, İstanbul, Almanya, Türkiye vb.), yer adlarını, edatları veya hitap ifadelerini isim (patient_name, requester_name) olarak çıkarma! "ben konyaya nasıl gelecem" cümlesinden "Konyaya" ismini çıkarma; burada isim yoktur.
 - Örnek: Önceki mesajlarda "Mustafa" konuşuyor, şimdi "ben Mehmet, saç ekimi için bilgi almak istiyorum" → new_identity_detected = true
 
 🔄 OPPORTUNITY BOUNDARY DETECTION (ÇOK ÖNEMLİ):

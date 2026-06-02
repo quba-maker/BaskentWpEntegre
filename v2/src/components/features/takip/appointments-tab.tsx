@@ -202,6 +202,75 @@ const getCountryFlag = (country?: string): string => {
   return FLAGS[country] || '🌍';
 };
 
+// ── Patient Timezone GMT Offset ──
+function getTimezoneOffset(country?: string): string {
+  if (!country) return '';
+  try {
+    const tzMap: Record<string, string> = {
+      'Türkiye': 'Europe/Istanbul', 'Turkey': 'Europe/Istanbul', 'TR': 'Europe/Istanbul',
+      'Almanya': 'Europe/Berlin', 'Germany': 'Europe/Berlin', 'DE': 'Europe/Berlin',
+      'Hollanda': 'Europe/Amsterdam', 'Netherlands': 'Europe/Amsterdam', 'NL': 'Europe/Amsterdam',
+      'Fransa': 'Europe/Paris', 'France': 'Europe/Paris', 'FR': 'Europe/Paris',
+      'Belçika': 'Europe/Brussels', 'Belgium': 'Europe/Brussels', 'BE': 'Europe/Brussels',
+      'Avusturya': 'Europe/Vienna', 'Austria': 'Europe/Vienna', 'AT': 'Europe/Vienna',
+      'İsviçre': 'Europe/Zurich', 'Switzerland': 'Europe/Zurich', 'CH': 'Europe/Zurich',
+      'İngiltere': 'Europe/London', 'UK': 'Europe/London', 'England': 'Europe/London',
+      'United Kingdom': 'Europe/London', 'GB': 'Europe/London',
+      'Danimarka': 'Europe/Copenhagen', 'Denmark': 'Europe/Copenhagen', 'DK': 'Europe/Copenhagen',
+      'İsveç': 'Europe/Stockholm', 'Sweden': 'Europe/Stockholm', 'SE': 'Europe/Stockholm',
+      'Norveç': 'Europe/Oslo', 'Norway': 'Europe/Oslo', 'NO': 'Europe/Oslo',
+      'Finlandiya': 'Europe/Helsinki', 'Finland': 'Europe/Helsinki', 'FI': 'Europe/Helsinki',
+      'İtalya': 'Europe/Rome', 'Italy': 'Europe/Rome', 'IT': 'Europe/Rome',
+      'İspanya': 'Europe/Madrid', 'Spain': 'Europe/Madrid', 'ES': 'Europe/Madrid',
+      'Yunanistan': 'Europe/Athens', 'Greece': 'Europe/Athens', 'GR': 'Europe/Athens',
+      'Bulgaristan': 'Europe/Sofia', 'Bulgaria': 'Europe/Sofia', 'BG': 'Europe/Sofia',
+      'Romanya': 'Europe/Bucharest', 'Romania': 'Europe/Bucharest', 'RO': 'Europe/Bucharest',
+      'Polonya': 'Europe/Warsaw', 'Poland': 'Europe/Warsaw', 'PL': 'Europe/Warsaw',
+      'Irak': 'Asia/Baghdad', 'Iraq': 'Asia/Baghdad', 'IQ': 'Asia/Baghdad',
+      'Suriye': 'Asia/Damascus', 'Syria': 'Asia/Damascus', 'SY': 'Asia/Damascus',
+      'Libya': 'Africa/Tripoli', 'LY': 'Africa/Tripoli',
+      'Suudi Arabistan': 'Asia/Riyadh', 'Saudi Arabia': 'Asia/Riyadh', 'SA': 'Asia/Riyadh',
+      'BAE': 'Asia/Dubai', 'UAE': 'Asia/Dubai', 'AE': 'Asia/Dubai',
+      'Katar': 'Asia/Qatar', 'Qatar': 'Asia/Qatar', 'QA': 'Asia/Qatar',
+      'Kuveyt': 'Asia/Kuwait', 'Kuwait': 'Asia/Kuwait', 'KW': 'Asia/Kuwait',
+      'Bahreyn': 'Asia/Bahrain', 'Bahrain': 'Asia/Bahrain', 'BH': 'Asia/Bahrain',
+      'Ürdün': 'Asia/Amman', 'Jordan': 'Asia/Amman', 'JO': 'Asia/Amman',
+      'Lübnan': 'Asia/Beirut', 'Lebanon': 'Asia/Beirut', 'LB': 'Asia/Beirut',
+      'Filistin': 'Asia/Hebron', 'Palestine': 'Asia/Hebron', 'PS': 'Asia/Hebron',
+      'Azerbaycan': 'Asia/Baku', 'Azerbaijan': 'Asia/Baku', 'AZ': 'Asia/Baku',
+      'Gürcistan': 'Asia/Tbilisi', 'Georgia': 'Asia/Tbilisi', 'GE': 'Asia/Tbilisi',
+      'Kazakistan': 'Asia/Almaty', 'Kazakhstan': 'Asia/Almaty', 'KZ': 'Asia/Almaty',
+      'Özbekistan': 'Asia/Tashkent', 'Uzbekistan': 'Asia/Tashkent', 'UZ': 'Asia/Tashkent',
+      'Türkmenistan': 'Asia/Ashgabat', 'Turkmenistan': 'Asia/Ashgabat', 'TM': 'Asia/Ashgabat',
+      'Mısır': 'Africa/Cairo', 'Egypt': 'Africa/Cairo', 'EG': 'Africa/Cairo',
+      'Tunus': 'Africa/Tunis', 'Tunisia': 'Africa/Tunis', 'TN': 'Africa/Tunis',
+      'Cezayir': 'Africa/Algiers', 'Algeria': 'Africa/Algiers', 'DZ': 'Africa/Algiers',
+      'Fas': 'Africa/Casablanca', 'Morocco': 'Africa/Casablanca', 'MA': 'Africa/Casablanca',
+      'Somali': 'Africa/Mogadishu', 'Somalia': 'Africa/Mogadishu', 'SO': 'Africa/Mogadishu',
+      'Sudan': 'Africa/Khartoum', 'SD': 'Africa/Khartoum',
+      'Nijerya': 'Africa/Lagos', 'Nigeria': 'Africa/Lagos', 'NG': 'Africa/Lagos',
+      'ABD': 'America/New_York', 'USA': 'America/New_York', 'US': 'America/New_York',
+      'Kanada': 'America/Toronto', 'Canada': 'America/Toronto', 'CA': 'America/Toronto',
+      'Rusya': 'Europe/Moscow', 'Russia': 'Europe/Moscow', 'RU': 'Europe/Moscow',
+      'Avustralya': 'Australia/Sydney', 'Australia': 'Australia/Sydney', 'AU': 'Australia/Sydney',
+      'Brezilya': 'America/Sao_Paulo', 'Brazil': 'America/Sao_Paulo', 'BR': 'America/Sao_Paulo',
+      'Hindistan': 'Asia/Kolkata', 'India': 'Asia/Kolkata', 'IN': 'Asia/Kolkata',
+      'Çin': 'Asia/Shanghai', 'China': 'Asia/Shanghai', 'CN': 'Asia/Shanghai',
+      'Endonezya': 'Asia/Jakarta', 'Indonesia': 'Asia/Jakarta', 'ID': 'Asia/Jakarta',
+    };
+    const tz = tzMap[country] || 'Europe/Istanbul';
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      timeZoneName: 'shortOffset'
+    });
+    const parts = formatter.formatToParts(new Date());
+    const tzPart = parts.find(p => p.type === 'timeZoneName');
+    return tzPart ? tzPart.value : '';
+  } catch (e) {
+    return '';
+  }
+}
+
 // ── Main Component ──
 interface AppointmentsTabProps {
   onOpenDrawer: (opportunityId: string, taskId?: string) => void;
@@ -285,6 +354,12 @@ export default function AppointmentsTab({ onOpenDrawer, onGoToInbox, viewType, o
     (Number(stats.phone_cancelled || 0) + Number(stats.clinic_cancelled || 0))
   ) : 0;
 
+  const overdueCount = stats ? (
+    viewType === 'phone' ? Number(stats.overdue_phone || 0) :
+    viewType === 'clinic' ? Number(stats.overdue_clinic || 0) :
+    (Number(stats.overdue_phone || 0) + Number(stats.overdue_clinic || 0))
+  ) : 0;
+
   const clinicNoResponseCount = stats ? Number(stats.clinic_no_response || 0) : 0;
 
   return (
@@ -336,6 +411,16 @@ export default function AppointmentsTab({ onOpenDrawer, onGoToInbox, viewType, o
                   }`}
                 >
                   Ulaşılamadı ({noShowCount})
+                </button>
+                <button
+                  onClick={() => setStatusFilter("overdue")}
+                  className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                    statusFilter === 'overdue'
+                      ? 'bg-white text-red-700 shadow-sm border border-red-100/50'
+                      : 'text-[#86868B] hover:text-[#1D1D1F]'
+                  }`}
+                >
+                  Gecikti ({overdueCount})
                 </button>
                 <button
                   onClick={() => setStatusFilter("cancelled")}
@@ -409,16 +494,6 @@ export default function AppointmentsTab({ onOpenDrawer, onGoToInbox, viewType, o
                   }`}
                 >
                   İptal Edildi ({cancelledCount})
-                </button>
-                <button
-                  onClick={() => setStatusFilter("completed")}
-                  className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
-                    statusFilter === 'completed'
-                      ? 'bg-white text-[#1D1D1F] shadow-sm'
-                      : 'text-[#86868B] hover:text-[#1D1D1F]'
-                  }`}
-                >
-                  Tamamlananlar
                 </button>
               </>
             )}
@@ -588,16 +663,19 @@ export default function AppointmentsTab({ onOpenDrawer, onGoToInbox, viewType, o
               ) : viewType === 'clinic' ? (
                 <>
                   <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase">Randevu Durumu</th>
-                  <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase">Randevuya Kalan</th>
+                  <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase">
+                    {(statusFilter === 'arrived' || statusFilter === 'no_show') ? 'Randevu Notu' : 'Randevuya Kalan'}
+                  </th>
                 </>
               ) : (
                 <>
                   <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase">Arama Durumu</th>
-                  <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase">Aramaya Kalan</th>
+                  {(statusFilter === 'pending' || statusFilter === 'confirmed' || statusFilter === 'overdue') && (
+                    <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase">Aramaya Kalan</th>
+                  )}
                 </>
               )}
 
-              <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase">Saat Bilgisi</th>
               <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase text-right">Aksiyon</th>
             </tr>
           </thead>
@@ -611,11 +689,21 @@ export default function AppointmentsTab({ onOpenDrawer, onGoToInbox, viewType, o
                 onActionComplete={() => { mutate(); mutateStats(); }}
                 viewType={viewType}
                 onSwitchTab={onSwitchTab}
+                statusFilter={statusFilter}
               />
             ))}
             {items.length === 0 && !isLoading && (
               <tr>
-                <td colSpan={viewType ? 6 : 7} className="py-16 text-center">
+                <td 
+                  colSpan={
+                    !viewType 
+                      ? 6 
+                      : viewType === 'phone'
+                        ? (statusFilter === 'pending' || statusFilter === 'confirmed' || statusFilter === 'overdue' ? 5 : 4)
+                        : 5
+                  } 
+                  className="py-16 text-center"
+                >
                   <CalendarClock className="w-10 h-10 text-[#C7C7CC] mx-auto mb-3" />
                   <p className="text-[#86868B] font-semibold text-sm">
                     {viewType === 'phone' ? 'Arama görevi bulunamadı' : 'Randevu bulunamadı'}
@@ -650,17 +738,240 @@ function FilterGroup({ tabs, active, onChange }: { tabs: any[]; active: string; 
   );
 }
 
+// ── Note Cell Component ──
+function NoteCell({ note }: { note: string }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const isLong = note.length > 50;
+  const displayedNote = isLong && !isExpanded ? `${note.slice(0, 47)}...` : note;
+
+  return (
+    <div 
+      onClick={(e) => {
+        if (isLong) {
+          e.stopPropagation();
+          setIsExpanded(!isExpanded);
+        }
+      }}
+      className={`text-[11px] font-semibold text-[#1D1D1F] bg-[#F5F5F7] hover:bg-[#E8E8ED] border border-black/5 rounded-lg px-2.5 py-1.5 shadow-sm transition-all duration-200 w-fit max-w-[250px] text-left break-words ${
+        isLong ? 'cursor-pointer hover:scale-[1.02] active:scale-[0.98]' : ''
+      }`}
+      title={isLong && !isExpanded ? "Tamamını görmek için tıklayın" : undefined}
+    >
+      <div className="flex items-start gap-1.5">
+        <FileText className="w-3.5 h-3.5 text-[#86868B] shrink-0 mt-0.5" />
+        <span className="whitespace-pre-wrap leading-relaxed">{displayedNote}</span>
+      </div>
+      {isLong && !isExpanded && (
+        <span className="block text-[9px] font-bold text-[#007AFF] mt-1 hover:underline">Tıkla ve Genişlet</span>
+      )}
+      {isLong && isExpanded && (
+        <span className="block text-[9px] font-bold text-[#86868B] mt-1 hover:underline">Küçült</span>
+      )}
+    </div>
+  );
+}
+
 // ── Appointment Row ──
 
-function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionComplete, viewType, onSwitchTab }: { 
+function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionComplete, viewType, onSwitchTab, statusFilter }: { 
   apt: AppointmentRow; 
   onOpenDrawer: (opportunityId: string, taskId?: string) => void;
   onGoToInbox: (item: any) => void;
   onActionComplete: () => void;
   viewType?: 'phone' | 'clinic';
   onSwitchTab?: (tab: 'hasta_takibi' | 'telefon' | 'randevu') => void;
+  statusFilter?: string;
 }) {
   const flag = getCountryFlag(apt.country);
+
+  // ── Live Patient Local Time Ticker ──
+  const [patientLocalTime, setPatientLocalTime] = useState<{
+    timeStr: string;
+    tzLabel: string;
+    isSleeping: boolean;
+  } | null>(() => {
+    if (typeof window === 'undefined') return null;
+    try {
+      let tz = apt.patientTimezone;
+      if (!tz && apt.country) {
+        const tzMap: Record<string, string> = {
+          'Türkiye': 'Europe/Istanbul', 'Turkey': 'Europe/Istanbul', 'TR': 'Europe/Istanbul',
+          'Almanya': 'Europe/Berlin', 'Germany': 'Europe/Berlin', 'DE': 'Europe/Berlin',
+          'Hollanda': 'Europe/Amsterdam', 'Netherlands': 'Europe/Amsterdam', 'NL': 'Europe/Amsterdam',
+          'Fransa': 'Europe/Paris', 'France': 'Europe/Paris', 'FR': 'Europe/Paris',
+          'Belçika': 'Europe/Brussels', 'Belgium': 'Europe/Brussels', 'BE': 'Europe/Brussels',
+          'Avusturya': 'Europe/Vienna', 'Austria': 'Europe/Vienna', 'AT': 'Europe/Vienna',
+          'İsviçre': 'Europe/Zurich', 'Switzerland': 'Europe/Zurich', 'CH': 'Europe/Zurich',
+          'İngiltere': 'Europe/London', 'UK': 'Europe/London', 'England': 'Europe/London',
+          'United Kingdom': 'Europe/London', 'GB': 'Europe/London',
+          'Danimarka': 'Europe/Copenhagen', 'Denmark': 'Europe/Copenhagen', 'DK': 'Europe/Copenhagen',
+          'İsveç': 'Europe/Stockholm', 'Sweden': 'Europe/Stockholm', 'SE': 'Europe/Stockholm',
+          'Norveç': 'Europe/Oslo', 'Norway': 'Europe/Oslo', 'NO': 'Europe/Oslo',
+          'Finlandiya': 'Europe/Helsinki', 'Finland': 'Europe/Helsinki', 'FI': 'Europe/Helsinki',
+          'İtalya': 'Europe/Rome', 'Italy': 'Europe/Rome', 'IT': 'Europe/Rome',
+          'İspanya': 'Europe/Madrid', 'Spain': 'Europe/Madrid', 'ES': 'Europe/Madrid',
+          'Yunanistan': 'Europe/Athens', 'Greece': 'Europe/Athens', 'GR': 'Europe/Athens',
+          'Bulgaristan': 'Europe/Sofia', 'Bulgaria': 'Europe/Sofia', 'BG': 'Europe/Sofia',
+          'Romanya': 'Europe/Bucharest', 'Romania': 'Europe/Bucharest', 'RO': 'Europe/Bucharest',
+          'Polonya': 'Europe/Warsaw', 'Poland': 'Europe/Warsaw', 'PL': 'Europe/Warsaw',
+          'Irak': 'Asia/Baghdad', 'Iraq': 'Asia/Baghdad', 'IQ': 'Asia/Baghdad',
+          'Suriye': 'Asia/Damascus', 'Syria': 'Asia/Damascus', 'SY': 'Asia/Damascus',
+          'Libya': 'Africa/Tripoli', 'LY': 'Africa/Tripoli',
+          'Suudi Arabistan': 'Asia/Riyadh', 'Saudi Arabia': 'Asia/Riyadh', 'SA': 'Asia/Riyadh',
+          'BAE': 'Asia/Dubai', 'UAE': 'Asia/Dubai', 'AE': 'Asia/Dubai',
+          'Katar': 'Asia/Qatar', 'Qatar': 'Asia/Qatar', 'QA': 'Asia/Qatar',
+          'Kuveyt': 'Asia/Kuwait', 'Kuwait': 'Asia/Kuwait', 'KW': 'Asia/Kuwait',
+          'Bahreyn': 'Asia/Bahrain', 'Bahrain': 'Asia/Bahrain', 'BH': 'Asia/Bahrain',
+          'Ürdün': 'Asia/Amman', 'Jordan': 'Asia/Amman', 'JO': 'Asia/Amman',
+          'Lübnan': 'Asia/Beirut', 'Lebanon': 'Asia/Beirut', 'LB': 'Asia/Beirut',
+          'Filistin': 'Asia/Hebron', 'Palestine': 'Asia/Hebron', 'PS': 'Asia/Hebron',
+          'Azerbaycan': 'Asia/Baku', 'Azerbaijan': 'Asia/Baku', 'AZ': 'Asia/Baku',
+          'Gürcistan': 'Asia/Tbilisi', 'Georgia': 'Asia/Tbilisi', 'GE': 'Asia/Tbilisi',
+          'Kazakistan': 'Asia/Almaty', 'Kazakhstan': 'Asia/Almaty', 'KZ': 'Asia/Almaty',
+          'Özbekistan': 'Asia/Tashkent', 'Uzbekistan': 'Asia/Tashkent', 'UZ': 'Asia/Tashkent',
+          'Türkmenistan': 'Asia/Ashgabat', 'Turkmenistan': 'Asia/Ashgabat', 'TM': 'Asia/Ashgabat',
+          'Mısır': 'Africa/Cairo', 'Egypt': 'Africa/Cairo', 'EG': 'Africa/Cairo',
+          'Tunus': 'Africa/Tunis', 'Tunisia': 'Africa/Tunis', 'TN': 'Africa/Tunis',
+          'Cezayir': 'Africa/Algiers', 'Algeria': 'Africa/Algiers', 'DZ': 'Africa/Algiers',
+          'Fas': 'Africa/Casablanca', 'Morocco': 'Africa/Casablanca', 'MA': 'Africa/Casablanca',
+          'Somali': 'Africa/Mogadishu', 'Somalia': 'Africa/Mogadishu', 'SO': 'Africa/Mogadishu',
+          'Sudan': 'Africa/Khartoum', 'SD': 'Africa/Khartoum',
+          'Nijerya': 'Africa/Lagos', 'Nigeria': 'Africa/Lagos', 'NG': 'Africa/Lagos',
+          'ABD': 'America/New_York', 'USA': 'America/New_York', 'US': 'America/New_York',
+          'Kanada': 'America/Toronto', 'Canada': 'America/Toronto', 'CA': 'America/Toronto',
+          'Rusya': 'Europe/Moscow', 'Russia': 'Europe/Moscow', 'RU': 'Europe/Moscow',
+          'Avustralya': 'Australia/Sydney', 'Australia': 'Australia/Sydney', 'AU': 'Australia/Sydney',
+          'Brezilya': 'America/Sao_Paulo', 'Brazil': 'America/Sao_Paulo', 'BR': 'America/Sao_Paulo',
+          'Hindistan': 'Asia/Kolkata', 'India': 'Asia/Kolkata', 'IN': 'Asia/Kolkata',
+          'Çin': 'Asia/Shanghai', 'China': 'Asia/Shanghai', 'CN': 'Asia/Shanghai',
+          'Endonezya': 'Asia/Jakarta', 'Indonesia': 'Asia/Jakarta', 'ID': 'Asia/Jakarta',
+        };
+        tz = tzMap[apt.country];
+      }
+      if (!tz) return null;
+
+      const now = new Date();
+      const timeStr = new Intl.DateTimeFormat('tr-TR', {
+        timeZone: tz,
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+      }).format(now);
+
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: tz,
+        timeZoneName: 'shortOffset'
+      }).formatToParts(now);
+      const tzLabel = parts.find(p => p.type === 'timeZoneName')?.value || "";
+
+      let isSleeping = false;
+      const timeMatch = timeStr.match(/(\d{2}):(\d{2})/);
+      if (timeMatch) {
+        const hour = parseInt(timeMatch[1], 10);
+        if (hour >= 22 || hour < 8) isSleeping = true;
+      }
+      return { timeStr, tzLabel, isSleeping };
+    } catch (_) {
+      return null;
+    }
+  });
+
+  useEffect(() => {
+    const updateTime = () => {
+      let tz = apt.patientTimezone;
+      if (!tz && apt.country) {
+        const tzMap: Record<string, string> = {
+          'Türkiye': 'Europe/Istanbul', 'Turkey': 'Europe/Istanbul', 'TR': 'Europe/Istanbul',
+          'Almanya': 'Europe/Berlin', 'Germany': 'Europe/Berlin', 'DE': 'Europe/Berlin',
+          'Hollanda': 'Europe/Amsterdam', 'Netherlands': 'Europe/Amsterdam', 'NL': 'Europe/Amsterdam',
+          'Fransa': 'Europe/Paris', 'France': 'Europe/Paris', 'FR': 'Europe/Paris',
+          'Belçika': 'Europe/Brussels', 'Belgium': 'Europe/Brussels', 'BE': 'Europe/Brussels',
+          'Avusturya': 'Europe/Vienna', 'Austria': 'Europe/Vienna', 'AT': 'Europe/Vienna',
+          'İsviçre': 'Europe/Zurich', 'Switzerland': 'Europe/Zurich', 'CH': 'Europe/Zurich',
+          'İngiltere': 'Europe/London', 'UK': 'Europe/London', 'England': 'Europe/London',
+          'United Kingdom': 'Europe/London', 'GB': 'Europe/London',
+          'Danimarka': 'Europe/Copenhagen', 'Denmark': 'Europe/Copenhagen', 'DK': 'Europe/Copenhagen',
+          'İsveç': 'Europe/Stockholm', 'Sweden': 'Europe/Stockholm', 'SE': 'Europe/Stockholm',
+          'Norveç': 'Europe/Oslo', 'Norway': 'Europe/Oslo', 'NO': 'Europe/Oslo',
+          'Finlandiya': 'Europe/Helsinki', 'Finland': 'Europe/Helsinki', 'FI': 'Europe/Helsinki',
+          'İtalya': 'Europe/Rome', 'Italy': 'Europe/Rome', 'IT': 'Europe/Rome',
+          'İspanya': 'Europe/Madrid', 'Spain': 'Europe/Madrid', 'ES': 'Europe/Madrid',
+          'Yunanistan': 'Europe/Athens', 'Greece': 'Europe/Athens', 'GR': 'Europe/Athens',
+          'Bulgaristan': 'Europe/Sofia', 'Bulgaria': 'Europe/Sofia', 'BG': 'Europe/Sofia',
+          'Romanya': 'Europe/Bucharest', 'Romania': 'Europe/Bucharest', 'RO': 'Europe/Bucharest',
+          'Polonya': 'Europe/Warsaw', 'Poland': 'Europe/Warsaw', 'PL': 'Europe/Warsaw',
+          'Irak': 'Asia/Baghdad', 'Iraq': 'Asia/Baghdad', 'IQ': 'Asia/Baghdad',
+          'Suriye': 'Asia/Damascus', 'Syria': 'Asia/Damascus', 'SY': 'Asia/Damascus',
+          'Libya': 'Africa/Tripoli', 'LY': 'Africa/Tripoli',
+          'Suudi Arabistan': 'Asia/Riyadh', 'Saudi Arabia': 'Asia/Riyadh', 'SA': 'Asia/Riyadh',
+          'BAE': 'Asia/Dubai', 'UAE': 'Asia/Dubai', 'AE': 'Asia/Dubai',
+          'Katar': 'Asia/Qatar', 'Qatar': 'Asia/Qatar', 'QA': 'Asia/Qatar',
+          'Kuveyt': 'Asia/Kuwait', 'Kuwait': 'Asia/Kuwait', 'KW': 'Asia/Kuwait',
+          'Bahreyn': 'Asia/Bahrain', 'Bahrain': 'Asia/Bahrain', 'BH': 'Asia/Bahrain',
+          'Ürdün': 'Asia/Amman', 'Jordan': 'Asia/Amman', 'JO': 'Asia/Amman',
+          'Lübnan': 'Asia/Beirut', 'Lebanon': 'Asia/Beirut', 'LB': 'Asia/Beirut',
+          'Filistin': 'Asia/Hebron', 'Palestine': 'Asia/Hebron', 'PS': 'Asia/Hebron',
+          'Azerbaycan': 'Asia/Baku', 'Azerbaijan': 'Asia/Baku', 'AZ': 'Asia/Baku',
+          'Gürcistan': 'Asia/Tbilisi', 'Georgia': 'Asia/Tbilisi', 'GE': 'Asia/Tbilisi',
+          'Kazakistan': 'Asia/Almaty', 'Kazakhstan': 'Asia/Almaty', 'KZ': 'Asia/Almaty',
+          'Özbekistan': 'Asia/Tashkent', 'Uzbekistan': 'Asia/Tashkent', 'UZ': 'Asia/Tashkent',
+          'Türkmenistan': 'Asia/Ashgabat', 'Turkmenistan': 'Asia/Ashgabat', 'TM': 'Asia/Ashgabat',
+          'Mısır': 'Africa/Cairo', 'Egypt': 'Africa/Cairo', 'EG': 'Africa/Cairo',
+          'Tunus': 'Africa/Tunis', 'Tunisia': 'Africa/Tunis', 'TN': 'Africa/Tunis',
+          'Cezayir': 'Africa/Algiers', 'Algeria': 'Africa/Algiers', 'DZ': 'Africa/Algiers',
+          'Fas': 'Africa/Casablanca', 'Morocco': 'Africa/Casablanca', 'MA': 'Africa/Casablanca',
+          'Somali': 'Africa/Mogadishu', 'Somalia': 'Africa/Mogadishu', 'SO': 'Africa/Mogadishu',
+          'Sudan': 'Africa/Khartoum', 'SD': 'Africa/Khartoum',
+          'Nijerya': 'Africa/Lagos', 'Nigeria': 'Africa/Lagos', 'NG': 'Africa/Lagos',
+          'ABD': 'America/New_York', 'USA': 'America/New_York', 'US': 'America/New_York',
+          'Kanada': 'America/Toronto', 'Canada': 'America/Toronto', 'CA': 'America/Toronto',
+          'Rusya': 'Europe/Moscow', 'Russia': 'Europe/Moscow', 'RU': 'Europe/Moscow',
+          'Avustralya': 'Australia/Sydney', 'Australia': 'Australia/Sydney', 'AU': 'Australia/Sydney',
+          'Brezilya': 'America/Sao_Paulo', 'Brazil': 'America/Sao_Paulo', 'BR': 'America/Sao_Paulo',
+          'Hindistan': 'Asia/Kolkata', 'India': 'Asia/Kolkata', 'IN': 'Asia/Kolkata',
+          'Çin': 'Asia/Shanghai', 'China': 'Asia/Shanghai', 'CN': 'Asia/Shanghai',
+          'Endonezya': 'Asia/Jakarta', 'Indonesia': 'Asia/Jakarta', 'ID': 'Asia/Jakarta',
+        };
+        tz = tzMap[apt.country];
+      }
+      if (!tz) {
+        setPatientLocalTime(null);
+        return;
+      }
+
+      try {
+        const now = new Date();
+        const timeStr = new Intl.DateTimeFormat('tr-TR', {
+          timeZone: tz,
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false
+        }).format(now);
+
+        const parts = new Intl.DateTimeFormat('en-US', {
+          timeZone: tz,
+          timeZoneName: 'shortOffset'
+        }).formatToParts(now);
+        const tzLabel = parts.find(p => p.type === 'timeZoneName')?.value || "";
+
+        let isSleeping = false;
+        const timeMatch = timeStr.match(/(\d{2}):(\d{2})/);
+        if (timeMatch) {
+          const hour = parseInt(timeMatch[1], 10);
+          if (hour >= 22 || hour < 8) isSleeping = true;
+        }
+
+        setPatientLocalTime({ timeStr, tzLabel, isSleeping });
+      } catch (e) {
+        setPatientLocalTime(null);
+      }
+    };
+
+    updateTime();
+    const interval = setInterval(updateTime, 20000);
+    return () => clearInterval(interval);
+  }, [apt.patientTimezone, apt.country]);
+
   const actionDropdown = useDropdown();
   const statusDropdown = useDropdown();
   const randevuAksiyonuDropdown = useDropdown();
@@ -844,7 +1155,7 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
   // Arama Notu Ekleme/Görüntüleme Modern Modalleri
   const [noteModalOpen, setNoteModalOpen] = useState(false);
   const [noteInputText, setNoteInputText] = useState('');
-  const [activeNoteResult, setActiveNoteResult] = useState<'completed' | 'arrived'>('completed');
+  const [activeNoteResult, setActiveNoteResult] = useState<'completed' | 'arrived' | 'no_show'>('completed');
   const [viewNoteModalOpen, setViewNoteModalOpen] = useState(false);
   const [saveAsDefault, setSaveAsDefault] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
@@ -865,6 +1176,8 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
     } else if (mode === 'devret') {
       if (apt.status === 'no_show') {
         defaultTemplate = "Sizi aradık ulaşamadık, müsait olduğunuzda tekrar aramak isteriz gibi bir mesaj gönder ve tekrar telefon görüşmesi günü almaya çalış.";
+      } else if (apt.status === 'overdue') {
+        defaultTemplate = "size ulaşamadık, müsait olduğunuz bir zamanda yeniden aramamızı ister misiniz mantığında cevap ver";
       } else if (apt.status === 'cancelled') {
         defaultTemplate = "Hastanın neden aramadan vazgeçtiğini anla ve ona göre ikna taktikleri uygula.";
       } else if (apt.status === 'completed' || apt.status === 'arrived') {
@@ -892,43 +1205,55 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
     setSaveAsDefault(false);
   };
 
-  // Sleep detection (basic heuristic)
-  let isPatientSleeping = false;
-  if (apt.dueAtPatientLocal) {
-    const timeMatch = apt.dueAtPatientLocal.match(/(\d{2}):(\d{2})/);
-    if (timeMatch) {
-      const hour = parseInt(timeMatch[1], 10);
-      if (hour >= 22 || hour < 8) isPatientSleeping = true;
-    }
-  }
+  // Live ticking patient time handles sleep status and emoji dynamically.
 
   // Handle Actions
   const handleAction = async (action: string) => {
     actionDropdown.setIsOpen(false);
     try {
-      if (action === 'call_completed') await completeAppointmentTask(apt.taskId, 'completed');
-      else if (action === 'call_missed') await completeAppointmentTask(apt.taskId, 'no_show'); 
-      else if (action === 'confirm') await updateAppointmentConfirmation(apt.taskId, 'confirmed');
-      else if (action === 'pending') await updateAppointmentConfirmation(apt.taskId, 'pending');
-      else if (action === 'no_response') await updateAppointmentConfirmation(apt.taskId, 'no_response');
-      else if (action === 'arrived') await completeAppointmentTask(apt.taskId, 'arrived');
-      else if (action === 'no_show') await completeAppointmentTask(apt.taskId, 'no_show');
+      let res: any = null;
+      if (action === 'call_completed') res = await completeAppointmentTask(apt.taskId, 'completed');
+      else if (action === 'call_missed') res = await completeAppointmentTask(apt.taskId, 'no_show'); 
+      else if (action === 'confirm') res = await updateAppointmentConfirmation(apt.taskId, 'confirmed');
+      else if (action === 'pending') res = await updateAppointmentConfirmation(apt.taskId, 'pending');
+      else if (action === 'no_response') res = await updateAppointmentConfirmation(apt.taskId, 'no_response');
+      else if (action === 'arrived') {
+        setActiveNoteResult('arrived');
+        setNoteInputText('');
+        setNoteModalOpen(true);
+        return; // Handled by modal save
+      }
+      else if (action === 'no_show') {
+        setActiveNoteResult('no_show');
+        setNoteInputText('');
+        setNoteModalOpen(true);
+        return; // Handled by modal save
+      }
       else if (action === 'cancel') {
         showConfirm(
           "Randevuyu İptal Et",
           "Bu randevuyu iptal etmek istediğinize emin misiniz? Bu işlem geri alınamaz.",
           async () => {
             try {
-              await completeAppointmentTask(apt.taskId, 'cancelled');
-              onActionComplete();
+              const r = await completeAppointmentTask(apt.taskId, 'cancelled');
+              if (r && r.success) {
+                onActionComplete();
+              } else {
+                showAlert("Hata", r?.error || "İşlem sırasında bir hata oluştu.");
+              }
             } catch (err) {
+              console.error(err);
               showAlert("Hata", "İşlem sırasında bir hata oluştu.");
             }
           }
         );
         return;
       }
-      onActionComplete();
+      if (res && res.success) {
+        onActionComplete();
+      } else {
+        showAlert("Hata", res?.error || "İşlem sırasında bir hata oluştu.");
+      }
     } catch (e) {
       console.error(e);
       showAlert("Hata", "İşlem sırasında bir hata oluştu.");
@@ -939,11 +1264,11 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
   const handleStatusChange = async (
     status: 'pending' | 'completed' | 'cancelled', 
     result?: 'completed' | 'arrived' | 'no_show' | 'cancelled' | 'none',
-    confirmStat?: 'pending' | 'confirmed' | 'declined' | 'no_response' | 'none'
+    confirmStat?: 'pending' | 'confirmed' | 'declined' | 'no_response' | 'none' | 'overdue'
   ) => {
     statusDropdown.setIsOpen(false);
     
-    if (status === 'completed' && (result === 'completed' || result === 'arrived')) {
+    if (status === 'completed' && (result === 'completed' || result === 'arrived' || result === 'no_show')) {
       setActiveNoteResult(result);
       setNoteInputText('');
       setNoteModalOpen(true);
@@ -1023,7 +1348,10 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
     } else if (apt.confirmationStatus === 'confirmed') {
       label = 'Planlandı ve Onaylandı';
       colorClasses = 'bg-green-50 text-green-700 border-green-200 hover:bg-green-100/80';
-    } else if (apt.status === 'overdue' || apt.status === 'no_show') {
+    } else if (apt.status === 'overdue') {
+      label = 'Gecikti';
+      colorClasses = 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100/80';
+    } else if (apt.status === 'no_show') {
       label = 'Ulaşılamadı';
       colorClasses = 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100/80';
     }
@@ -1059,6 +1387,7 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
             <StatusOption label="Planlandı ve Onaylandı" active={label === 'Planlandı ve Onaylandı'} onClick={() => handleStatusChange('pending', 'none', 'confirmed')} />
             <StatusOption label="Arandı ve Ulaşıldı" active={label === 'Arandı ve Ulaşıldı'} onClick={() => handleStatusChange('completed', 'completed', 'confirmed')} />
             <StatusOption label="Ulaşılamadı" active={label === 'Ulaşılamadı'} onClick={() => handleStatusChange('completed', 'no_show', 'no_response')} />
+            <StatusOption label="Gecikti" active={label === 'Gecikti'} onClick={() => handleStatusChange('pending', 'none', 'overdue')} />
             <StatusOption label="İptal Edildi" active={label === 'İptal Edildi'} onClick={() => handleStatusChange('cancelled', 'cancelled', 'none')} />
           </div>
         )}
@@ -1082,23 +1411,68 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
   return (
     <>
       <tr 
-        onClick={() => apt.opportunityId && onOpenDrawer(apt.opportunityId, apt.taskId)}
+        onClick={() => {
+          const oppId = apt.opportunityId || (apt as any).opportunity_id;
+          if (oppId) {
+            onOpenDrawer(oppId, apt.taskId);
+          }
+        }}
         className={`hover:bg-[#007AFF]/5 transition-colors group cursor-pointer ${
           apt.status === 'overdue' ? 'bg-red-50/30' : ''
         }`}
       >
-      <td className="py-3.5 px-4 min-w-[180px]">
+      <td className="py-3.5 px-4 min-w-[200px]">
         <div className="flex items-center gap-1.5 flex-wrap">
           <span className="font-bold text-[13px] text-[#1D1D1F]">{apt.patientName}</span>
+          {apt.priority === 'hot' && <Zap className="w-3 h-3 text-[#FF3B30] fill-[#FF3B30]" />}
+          
+          {/* Ülke Bayrağı ve İsmi */}
           {apt.country && (
-            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/[0.04] text-[10px] font-semibold text-[#86868B] border border-black/5">
-              {flag} {apt.country}
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/[0.04] text-[10px] font-semibold text-[#86868B] border border-black/5 shadow-sm">
+              <span className="text-xs">{flag}</span>
+              <span>{apt.country}</span>
             </span>
           )}
-          {apt.priority === 'hot' && <Zap className="w-3 h-3 text-[#FF3B30] fill-[#FF3B30]" />}
+
+          {/* Hasta Yerel Saati & Saat Dilimi Badge */}
+          {viewType === 'phone' && (
+            patientLocalTime ? (
+              <span 
+                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-bold shadow-sm select-none transition-all duration-200 shrink-0 ${
+                  patientLocalTime.isSleeping 
+                    ? 'bg-amber-50 border-amber-250 text-amber-700' 
+                    : 'bg-green-50 border-green-250 text-green-700'
+                }`}
+                title={`Hasta Yerel Saati: ${patientLocalTime.timeStr} (${apt.patientTimezone || apt.country || ""}) — ${
+                  patientLocalTime.isSleeping 
+                    ? 'Hasta yerel saatinde gece — arama uygun değil' 
+                    : 'Hasta yerel saatinde gündüz — arama uygun'
+                }`}
+              >
+                <span>{patientLocalTime.isSleeping ? '😴' : '☀️'}</span>
+                <span>{patientLocalTime.timeStr}</span>
+                {patientLocalTime.tzLabel && (
+                  <span className="opacity-80 text-[8px] font-medium ml-0.5">({patientLocalTime.tzLabel})</span>
+                )}
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200/50 text-[10px] font-bold shadow-sm select-none">
+                ⚠️ Teyit Gerekli
+              </span>
+            )
+          )}
         </div>
-        <div className="text-[11px] text-[#86868B] font-medium mt-0.5 flex items-center gap-1">
-          {formatPhone(apt.phoneNumber)}
+        <div className="text-[11px] text-[#86868B] font-medium mt-0.5 flex items-center gap-1.5 flex-wrap">
+          <span>{formatPhone(apt.phoneNumber)}</span>
+          {apt.department && (
+            <>
+              <span className="text-[#C7C7CC]">•</span>
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-indigo-50 border border-indigo-100 rounded text-[9px] font-bold text-indigo-700 uppercase tracking-wide">
+                <Building2 className="w-2.5 h-2.5 text-indigo-600" />
+                {apt.department}
+              </span>
+            </>
+          )}
         </div>
       </td>
       <td className="py-3.5 px-4">
@@ -1109,6 +1483,7 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
                 ? formatPartialDate(apt.metadata)
                 : new Date(apt.dueAtUtc).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric', weekday: 'long', timeZone: 'Europe/Istanbul' })}
             </div>
+            
             {(!apt.metadata?.is_partial_date || (apt.metadata?.is_partial_date && apt.metadata?.partial_precision === 'full' && apt.metadata?.selected_time)) && (
               <div className="text-[11px] font-semibold text-[#007AFF] mt-0.5">
                 {apt.metadata?.is_partial_date 
@@ -1116,6 +1491,7 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
                   : new Date(apt.dueAtUtc).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul' })}
               </div>
             )}
+
             {apt.metadata?.is_partial_date && apt.metadata?.partial_precision === 'year_month' && (
               <div className="text-[10px] font-semibold text-[#86868B] mt-0.5">
                 Ay Geneli Plan
@@ -1216,12 +1592,20 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
             </div>
           </td>
           <td className="py-3.5 px-4">
-            <span className={`text-[12px] font-bold flex items-center gap-1.5 ${
-              isOverdueTask ? 'text-[#FF3B30]' : 'text-[#1D1D1F]'
-            }`}>
-              <Calendar className="w-3.5 h-3.5 text-[#86868B]" />
-              {kalanStr}
-            </span>
+            {(statusFilter === 'arrived' || statusFilter === 'no_show') ? (
+              apt.appointmentNote ? (
+                <NoteCell note={apt.appointmentNote} />
+              ) : (
+                <span className="text-[11px] text-[#C7C7CC] font-medium italic">Not eklenmemiş</span>
+              )
+            ) : (
+              <span className={`text-[12px] font-bold flex items-center gap-1.5 ${
+                isOverdueTask ? 'text-[#FF3B30]' : 'text-[#1D1D1F]'
+              }`}>
+                <Calendar className="w-3.5 h-3.5 text-[#86868B]" />
+                {kalanStr}
+              </span>
+            )}
           </td>
         </>
       ) : (
@@ -1241,38 +1625,20 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
               )}
             </div>
           </td>
-          <td className="py-3.5 px-4">
-            <span className={`text-[12px] font-bold flex items-center gap-1.5 ${
-              isOverdueTask ? 'text-[#FF3B30]' : 'text-[#1D1D1F]'
-            }`}>
-              <Calendar className="w-3.5 h-3.5 text-[#86868B]" />
-              {kalanStr}
-            </span>
-          </td>
+          {(statusFilter === 'pending' || statusFilter === 'confirmed' || statusFilter === 'overdue') && (
+            <td className="py-3.5 px-4">
+              <span className={`text-[12px] font-bold flex items-center gap-1.5 ${
+                isOverdueTask ? 'text-[#FF3B30]' : 'text-[#1D1D1F]'
+              }`}>
+                <Calendar className="w-3.5 h-3.5 text-[#86868B]" />
+                {kalanStr}
+              </span>
+            </td>
+          )}
         </>
       )}
 
-      <td className="py-3.5 px-4">
-        {apt.dueAtTurkey && (!apt.metadata?.is_partial_date || apt.metadata?.partial_precision === 'full') ? (
-          <div>
-            <div className="flex items-center gap-1 text-[11px] font-semibold text-[#1D1D1F]">
-              <Clock className="w-3 h-3 text-[#86868B]" /> 🇹🇷 {apt.dueAtTurkey}
-            </div>
-            {apt.dueAtPatientLocal ? (
-              <div className="flex items-center gap-1 text-[10px] font-semibold text-[#86868B] mt-0.5">
-                {flag} {apt.dueAtPatientLocal}
-                {isPatientSleeping && <span title="Hasta muhtemelen uyuyor"><Moon className="w-3 h-3 text-indigo-500 fill-indigo-500" /></span>}
-              </div>
-            ) : (
-              <div className="flex items-center gap-1 text-[10px] font-semibold text-amber-600 mt-0.5 bg-amber-50 rounded px-1 w-fit">
-                <AlertTriangle className="w-3 h-3" /> Teyit Gerekli
-              </div>
-            )}
-          </div>
-        ) : (
-          <span className="text-[11px] text-[#C7C7CC] font-semibold">—</span>
-        )}
-      </td>
+
 
       <td className="py-3.5 px-4 text-right" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-end gap-1.5 relative">
@@ -1285,12 +1651,7 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
                   <button
                     onClick={async (e) => {
                       e.stopPropagation();
-                      try {
-                        await updateAppointmentConfirmation(apt.taskId, 'confirmed');
-                        onActionComplete();
-                      } catch (err) {
-                        showAlert("Hata", "İşlem başarısız oldu.");
-                      }
+                      await handleAction('confirm');
                     }}
                     className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-white border border-emerald-600/20 text-emerald-700 rounded-lg shadow-sm hover:bg-emerald-50/50 hover:border-emerald-600/40 transition-all text-[11px] font-bold cursor-pointer"
                     title="Randevuyu Teyit Et"
@@ -1392,12 +1753,7 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
                             color="text-emerald-600 hover:bg-emerald-50/50" 
                             onClick={async () => {
                               randevuAksiyonuDropdown.setIsOpen(false);
-                              try {
-                                  await completeAppointmentTask(apt.taskId, 'arrived');
-                                  onActionComplete();
-                              } catch (err) {
-                                showAlert("Hata", "İşlem başarısız oldu.");
-                              }
+                              await handleAction('arrived');
                             }} 
                           />
                           <DropdownItem 
@@ -1406,12 +1762,7 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
                             color="text-red-600 hover:bg-red-50/50" 
                             onClick={async () => {
                               randevuAksiyonuDropdown.setIsOpen(false);
-                              try {
-                                await completeAppointmentTask(apt.taskId, 'no_show');
-                                onActionComplete();
-                              } catch (err) {
-                                showAlert("Hata", "İşlem başarısız oldu.");
-                              }
+                              await handleAction('no_show');
                             }} 
                           />
                           <DropdownItem 
@@ -1420,12 +1771,7 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
                             color="text-amber-600 hover:bg-amber-50/50" 
                             onClick={async () => {
                               randevuAksiyonuDropdown.setIsOpen(false);
-                              try {
-                                await updateAppointmentConfirmation(apt.taskId, 'no_response');
-                                onActionComplete();
-                              } catch (err) {
-                                showAlert("Hata", "İşlem başarısız oldu.");
-                              }
+                              await handleAction('no_response');
                             }} 
                           />
                           <DropdownItem 
@@ -1434,18 +1780,7 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
                             color="text-gray-500 hover:bg-gray-50" 
                             onClick={async () => {
                               randevuAksiyonuDropdown.setIsOpen(false);
-                              showConfirm(
-                                "Randevuyu İptal Et",
-                                "Bu randevuyu iptal etmek istediğinize emin misiniz? Bu işlem geri alınamaz.",
-                                async () => {
-                                  try {
-                                    await completeAppointmentTask(apt.taskId, 'cancelled');
-                                    onActionComplete();
-                                  } catch (err) {
-                                    showAlert("Hata", "İşlem başarısız oldu.");
-                                  }
-                                }
-                              );
+                              await handleAction('cancel');
                             }} 
                           />
                         </div>
@@ -1608,6 +1943,41 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
                     );
                   }
                   
+                  if (apt.status === 'overdue') {
+                    return (
+                      <>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenBotPopup('devret');
+                          }}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-indigo-50 border border-indigo-200/50 text-indigo-700 hover:bg-indigo-100 hover:text-indigo-800 rounded-lg shadow-sm transition-all text-[11px] font-bold cursor-pointer shrink-0"
+                          title="Bota Yeniden Randevu Aldırt"
+                        >
+                          <Zap className="w-3.5 h-3.5 text-indigo-500 fill-indigo-500" />
+                          <span className="hidden sm:inline">Bota Yeniden Randevu Aldırt</span>
+                        </button>
+                        {apt.metadata?.bot_devret_sent && (
+                          <div className="flex items-center gap-1 ml-0.5 shrink-0">
+                            <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center shadow-sm" title="Bota devredildi">
+                              <Check className="w-3 h-3 text-white stroke-[3.5]" />
+                            </div>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenBotPopup('devret');
+                              }}
+                              className="w-5 h-5 rounded-full bg-white hover:bg-[#F5F5F7] border border-black/5 flex items-center justify-center shadow-sm transition-all cursor-pointer hover:scale-105 active:scale-95 text-[#86868B] hover:text-[#1D1D1F] shrink-0"
+                              title="Yeniden Bota Devret"
+                            >
+                              <RotateCcw className="w-3 h-3" />
+                            </button>
+                          </div>
+                        )}
+                      </>
+                    );
+                  }
+                  
                   if (apt.confirmationStatus !== 'confirmed') {
                     return (
                       <>
@@ -1716,12 +2086,7 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
                       color="text-amber-600 hover:bg-amber-50/50" 
                       onClick={async () => {
                         randevuAksiyonuDropdown.setIsOpen(false);
-                        try {
-                          await completeAppointmentTask(apt.taskId, 'no_show');
-                          onActionComplete();
-                        } catch (err) {
-                          showAlert("Hata", "İşlem başarısız oldu.");
-                        }
+                        await handleAction('call_missed');
                       }} 
                     />
                     <DropdownItem 
@@ -1730,18 +2095,7 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
                       color="text-gray-500 hover:bg-gray-50" 
                       onClick={async () => {
                         randevuAksiyonuDropdown.setIsOpen(false);
-                        showConfirm(
-                          "Arama Görevini İptal Et",
-                          "Bu arama görevini iptal etmek istediğinize emin misiniz? Bu işlem geri alınamaz.",
-                          async () => {
-                            try {
-                              await completeAppointmentTask(apt.taskId, 'cancelled');
-                              onActionComplete();
-                            } catch (err) {
-                              showAlert("Hata", "İşlem başarısız oldu.");
-                            }
-                          }
-                        );
+                        await handleAction('cancel');
                       }} 
                     />
                   </div>
@@ -1996,7 +2350,17 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
 
       return (
         <tr className="bg-indigo-50/10 hover:bg-indigo-50/20 transition-colors">
-          <td colSpan={viewType ? 6 : 7} className="px-4 py-2.5 border-b border-black/5" onClick={(e) => e.stopPropagation()}>
+          <td 
+            colSpan={
+              !viewType 
+                ? 6 
+                : viewType === 'phone'
+                  ? (statusFilter === 'pending' || statusFilter === 'confirmed' ? 5 : 4)
+                  : 5
+            } 
+            className="px-4 py-2.5 border-b border-black/5" 
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-indigo-50/65 border border-indigo-100/80 rounded-xl p-3 shadow-sm">
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-lg bg-indigo-600/10 border border-indigo-200 flex items-center justify-center text-indigo-700">
@@ -2098,9 +2462,14 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
                 onClick={async () => {
                   setNoteModalOpen(false);
                   try {
-                    await completeAppointmentTask(apt.taskId, activeNoteResult, noteInputText);
-                    onActionComplete();
+                    const res = await completeAppointmentTask(apt.taskId, activeNoteResult, noteInputText);
+                    if (res && res.success) {
+                      onActionComplete();
+                    } else {
+                      showAlert("Hata", res?.error || "İşlem başarısız oldu.");
+                    }
                   } catch (err) {
+                    console.error("completeAppointmentTask error:", err);
                     showAlert("Hata", "İşlem başarısız oldu.");
                   }
                 }}
@@ -2447,23 +2816,13 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
 
             {/* Date & Time Grid */}
             {planType === 'phone_call' ? (
-              <div className="grid grid-cols-2 gap-3 animate-in fade-in duration-200">
+              <div className="animate-in fade-in duration-200">
                 <div>
                   <label className="block text-[10px] font-bold text-[#86868B] uppercase tracking-wider mb-1">Tarih</label>
                   <input 
                     type="date" 
                     value={planDate} 
                     onChange={e => setPlanDate(e.target.value)} 
-                    required 
-                    className="w-full px-3 py-2 bg-[#F5F5F7] rounded-xl text-xs font-semibold outline-none border border-transparent focus:border-indigo-500/25 focus:bg-white transition-all duration-200" 
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-[#86868B] uppercase tracking-wider mb-1">Saat (TR)</label>
-                  <input 
-                    type="time" 
-                    value={planTime} 
-                    onChange={e => setPlanTime(e.target.value)} 
                     required 
                     className="w-full px-3 py-2 bg-[#F5F5F7] rounded-xl text-xs font-semibold outline-none border border-transparent focus:border-indigo-500/25 focus:bg-white transition-all duration-200" 
                   />
@@ -2497,34 +2856,18 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
                     </select>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[10px] font-bold text-[#86868B] uppercase tracking-wider mb-1">Gün (İsteğe Bağlı)</label>
-                    <select
-                      value={planDay}
-                      onChange={e => setPlanDay(e.target.value)}
-                      className="w-full px-3 py-2 bg-[#F5F5F7] rounded-xl text-xs font-semibold outline-none border border-transparent focus:border-indigo-500/25 focus:bg-white transition-all duration-200 appearance-none cursor-pointer"
-                    >
-                      <option value="">Seçilmedi (Ay Geneli)</option>
-                      {daysOptions.map(d => (
-                        <option key={d} value={d}>{d}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-[#86868B] uppercase tracking-wider mb-1">Saat (İsteğe Bağlı)</label>
-                    <select
-                      value={planTimeCv}
-                      onChange={e => setPlanTimeCv(e.target.value)}
-                      disabled={!planDay}
-                      className="w-full px-3 py-2 bg-[#F5F5F7] rounded-xl text-xs font-semibold outline-none border border-transparent focus:border-indigo-500/25 focus:bg-white transition-all duration-200 appearance-none disabled:opacity-50 cursor-pointer"
-                    >
-                      <option value="">Saat Seçilmedi (10:00)</option>
-                      {timesOptions.map(t => (
-                        <option key={t} value={t}>{t}</option>
-                      ))}
-                    </select>
-                  </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-[#86868B] uppercase tracking-wider mb-1">Gün (İsteğe Bağlı)</label>
+                  <select
+                    value={planDay}
+                    onChange={e => setPlanDay(e.target.value)}
+                    className="w-full px-3 py-2 bg-[#F5F5F7] rounded-xl text-xs font-semibold outline-none border border-transparent focus:border-indigo-500/25 focus:bg-white transition-all duration-200 appearance-none cursor-pointer"
+                  >
+                    <option value="">Seçilmedi (Ay Geneli)</option>
+                    {daysOptions.map(d => (
+                      <option key={d} value={d}>{d}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
             )}

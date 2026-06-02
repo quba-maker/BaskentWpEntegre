@@ -5,7 +5,7 @@
  * Safe for import in both client components and server actions.
  * 
  * Two stage systems coexist:
- * - Opportunity stages: 14 granular stages (master system)
+ * - Opportunity stages: 10 granular stages (master system)
  * - Lead/Conversation stages: 7 simplified stages (mirror system)
  */
 
@@ -16,17 +16,13 @@
 export const OPP_STAGES = [
   { value: 'new_lead', label: 'Yeni', color: '#007AFF', icon: '🆕' },
   { value: 'first_contact', label: 'İlk İletişim', color: '#FF9500', icon: '📞' },
-  { value: 'engaged', label: 'Cevap Verdi', color: '#34C759', icon: '💬' },
-  { value: 'discovery', label: 'Keşif', color: '#5856D6', icon: '🔍' },
-  { value: 'report_waiting', label: 'Rapor Bekleniyor', color: '#FF9500', icon: '📋' },
-  { value: 'report_received', label: 'Rapor Geldi', color: '#30B0C7', icon: '📄' },
-  { value: 'doctor_review', label: 'Doktor İncelemesi', color: '#AF52DE', icon: '🩺' },
+  { value: 'engaged', label: 'Cevap Alındı', color: '#34C759', icon: '💬' },
+  { value: 'discovery', label: 'Keşif/Analiz', color: '#5856D6', icon: '🔍' },
   { value: 'qualified', label: 'Nitelikli', color: '#30B0C7', icon: '⭐' },
-  { value: 'offer_sent', label: 'Teklif Gönderildi', color: '#FF6482', icon: '💰' },
+  { value: 'phone_call_planning', label: 'Telefon Görüşmesi Planlanıyor', color: '#AF52DE', icon: '📞' },
   { value: 'appointment_planning', label: 'Randevu Planlanıyor', color: '#FFD60A', icon: '📅' },
   { value: 'appointment_booked', label: 'Randevu Alındı', color: '#0F9D58', icon: '✅' },
   { value: 'arrived', label: 'Geldi', color: '#0F9D58', icon: '🏥' },
-  { value: 'lost', label: 'Kayıp', color: '#FF3B30', icon: '❌' },
   { value: 'not_qualified', label: 'Uygun Değil', color: '#8E8E93', icon: '🚫' },
 ] as const;
 
@@ -44,12 +40,12 @@ export function getOppStageInfo(stage: string) {
 
 export const LEAD_STAGES = [
   { value: 'new', label: 'Yeni Lead', color: '#007AFF', icon: '🆕' },
-  { value: 'contacted', label: 'İletişime Geçildi', color: '#FF9500', icon: '📞' },
-  { value: 'responded', label: 'Yanıt Alındı', color: '#34C759', icon: '💬' },
+  { value: 'contacted', label: 'İlk İletişim', color: '#FF9500', icon: '📞' },
+  { value: 'responded', label: 'Cevap Alındı', color: '#34C759', icon: '💬' },
   { value: 'discovery', label: 'Keşif / Analiz', color: '#5856D6', icon: '🔍' },
   { value: 'qualified', label: 'Nitelikli', color: '#30B0C7', icon: '⭐' },
   { value: 'appointed', label: 'Randevu Aldı', color: '#0F9D58', icon: '✅' },
-  { value: 'lost', label: 'Kaybedildi', color: '#FF3B30', icon: '❌' },
+  { value: 'lost', label: 'Uygun Değil', color: '#8E8E93', icon: '🚫' },
 ] as const;
 
 export const LEAD_STAGE_ORDER: string[] = LEAD_STAGES.map(s => s.value);
@@ -66,7 +62,7 @@ export const LEAD_TO_OPP_MAP: Record<string, string> = {
   'discovery': 'discovery',
   'qualified': 'qualified',
   'appointed': 'appointment_booked',
-  'lost': 'lost',
+  'lost': 'not_qualified',
 };
 
 /** Opportunity stage → Lead/Conv mirror stage (reverse mapping) */
@@ -75,15 +71,11 @@ export const OPP_TO_LEAD_MAP: Record<string, string> = {
   'first_contact': 'contacted',
   'engaged': 'responded',
   'discovery': 'discovery',
-  'report_waiting': 'discovery',
-  'report_received': 'discovery',
-  'doctor_review': 'qualified',
   'qualified': 'qualified',
-  'offer_sent': 'qualified',
+  'phone_call_planning': 'qualified',
   'appointment_planning': 'qualified',
   'appointment_booked': 'appointed',
   'arrived': 'appointed',
-  'lost': 'lost',
   'not_qualified': 'lost',
 };
 
@@ -95,7 +87,6 @@ export const OPP_TO_LEAD_MAP: Record<string, string> = {
 export const AI_FORBIDDEN_STAGES: ReadonlySet<string> = new Set([
   'appointment_booked',
   'arrived',
-  'lost',
   'not_qualified',
 ]);
 
@@ -126,7 +117,7 @@ export function isOppStageAhead(stageA: string, stageB: string): boolean {
 
 /** Check if a stage is a terminal/closed state */
 export function isTerminalStage(stage: string): boolean {
-  return ['lost', 'not_qualified', 'arrived'].includes(stage);
+  return ['not_qualified', 'arrived'].includes(stage);
 }
 
 /** Check if AI is allowed to set this stage */

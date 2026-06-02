@@ -7,7 +7,7 @@ import { getForms, getCampaignNames, updateLeadNotes, updateLeadStage, syncGoogl
 import { toggleBotStatus } from "@/app/actions/inbox";
 import { prepareGreetingDraft, sendGreetingMessage, activateBot, getOutreachHistory, logCallReached, logCallMissed, logCallbackScheduled, logNotInterested, getGreetingTemplates, type OutreachLogEntry } from "@/app/actions/outreach";
 import { useInboxStore } from "@/store/inbox-store";
-import { useRouter, useParams } from "next/navigation";
+import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { MapPin, Building2, Calendar, Flame, TrendingUp, User } from "lucide-react";
 import { resolvePatientDisplayName, formatPhoneReadable } from "@/lib/utils/patient-name-resolver";
 import { resolveCountry, deduplicatePhones, getCountryInfoByName } from "@/lib/utils/country";
@@ -108,12 +108,12 @@ const formatPhone = (phone: string): string => {
 // Stage definitions
 const STAGES = [
   { value: 'new', label: 'Yeni Lead', color: '#007AFF', bg: '#007AFF/10' },
-  { value: 'contacted', label: 'İletişime Geçildi', color: '#FF9500', bg: '#FF9500/10' },
-  { value: 'responded', label: 'Yanıt Alındı', color: '#34C759', bg: '#34C759/10' },
+  { value: 'contacted', label: 'İlk İletişim', color: '#FF9500', bg: '#FF9500/10' },
+  { value: 'responded', label: 'Cevap Alındı', color: '#34C759', bg: '#34C759/10' },
   { value: 'discovery', label: 'Keşif / Analiz', color: '#5856D6', bg: '#5856D6/10' },
   { value: 'qualified', label: 'Nitelikli', color: '#30B0C7', bg: '#30B0C7/10' },
   { value: 'appointed', label: 'Randevu Aldı', color: '#0F9D58', bg: '#0F9D58/10' },
-  { value: 'lost', label: 'Kaybedildi', color: '#FF3B30', bg: '#FF3B30/10' },
+  { value: 'lost', label: 'Uygun Değil', color: '#8E8E93', bg: '#8E8E93/10' },
 ] as const;
 
 const getStageInfo = (stage: string) => STAGES.find(s => s.value === stage) || STAGES[0];
@@ -139,17 +139,13 @@ const PRIORITY_CONFIG: Record<string, { label: string; color: string; icon: stri
 const OPP_STAGES: { value: string; label: string; color: string; icon: string }[] = [
   { value: 'new_lead', label: 'Yeni', color: '#007AFF', icon: '🆕' },
   { value: 'first_contact', label: 'İlk İletişim', color: '#FF9500', icon: '📞' },
-  { value: 'engaged', label: 'Cevap Verdi', color: '#34C759', icon: '💬' },
-  { value: 'discovery', label: 'Keşif', color: '#5856D6', icon: '🔍' },
-  { value: 'report_waiting', label: 'Rapor Bekleniyor', color: '#FF9500', icon: '📋' },
-  { value: 'report_received', label: 'Rapor Geldi', color: '#30B0C7', icon: '📄' },
-  { value: 'doctor_review', label: 'Doktor İncelemesi', color: '#AF52DE', icon: '🩺' },
+  { value: 'engaged', label: 'Cevap Alındı', color: '#34C759', icon: '💬' },
+  { value: 'discovery', label: 'Keşif/Analiz', color: '#5856D6', icon: '🔍' },
   { value: 'qualified', label: 'Nitelikli', color: '#30B0C7', icon: '⭐' },
-  { value: 'offer_sent', label: 'Teklif Gönderildi', color: '#FF6482', icon: '💰' },
+  { value: 'phone_call_planning', label: 'Telefon Görüşmesi Planlanıyor', color: '#AF52DE', icon: '📞' },
   { value: 'appointment_planning', label: 'Randevu Planlanıyor', color: '#FFD60A', icon: '📅' },
   { value: 'appointment_booked', label: 'Randevu Alındı', color: '#0F9D58', icon: '✅' },
   { value: 'arrived', label: 'Geldi', color: '#0F9D58', icon: '🏥' },
-  { value: 'lost', label: 'Kayıp', color: '#FF3B30', icon: '❌' },
   { value: 'not_qualified', label: 'Uygun Değil', color: '#8E8E93', icon: '🚫' },
 ];
 
@@ -174,8 +170,12 @@ function useDropdown() {
 export default function FormsPage() {
   const router = useRouter();
   const params = useParams();
+  const searchParams = useSearchParams();
   const tenantId = typeof params.tenant_slug === 'string' ? params.tenant_slug : 'baskent';
   const { setActiveContact } = useInboxStore();
+  
+  const deepLinkPhone = searchParams.get('phone');
+  const deepLinkSearch = searchParams.get('search');
   
   const [searchInput, setSearchInput] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -187,6 +187,16 @@ export default function FormsPage() {
   const [notes, setNotes] = useState("");
   const [isSavingNotes, setIsSavingNotes] = useState(false);
   const [techOpen, setTechOpen] = useState(false);
+
+  useEffect(() => {
+    if (deepLinkPhone) {
+      setSearchInput(deepLinkPhone);
+      setDebouncedSearch(deepLinkPhone);
+    } else if (deepLinkSearch) {
+      setSearchInput(deepLinkSearch);
+      setDebouncedSearch(deepLinkSearch);
+    }
+  }, [deepLinkPhone, deepLinkSearch]);
 
   // PHASE 2L-P0v2: Outreach state — two-step draft→send flow
   const [outreachLoading, setOutreachLoading] = useState<'draft' | 'sending' | 'bot' | 'call_action' | null>(null);

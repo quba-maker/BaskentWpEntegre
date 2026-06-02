@@ -5,6 +5,7 @@ import { withActionGuard } from "@/lib/core/action-guard";
 import { logAudit } from "@/lib/audit";
 import { enqueueRetry } from "@/lib/retry";
 import { CredentialsService } from "@/lib/services/credentials.service";
+import { PatientNameSyncService } from "@/lib/services/patient-name-sync";
 
 // ==========================================
 // QUBA AI — Inbox Actions (Zero-Trust Migrated)
@@ -636,6 +637,15 @@ export async function updateCrmData(phone: string, stage: string, department: st
   return withActionGuard(
     { actionName: 'updateCrmData' },
     async (ctx) => {
+      // Systemic Patient Name Sync (Propagates validated name updates to all opportunities, conversations, and leads)
+      if (patientName && patientName.trim()) {
+        try {
+          await PatientNameSyncService.syncName(ctx.db, phone, patientName);
+        } catch (syncErr) {
+          console.error("Failed to sync patient name in updateCrmData:", syncErr);
+        }
+      }
+
       // P1B: Update active opportunity FIRST (source of truth), then mirror to conversation
       let conversationId: string | undefined;
       try {

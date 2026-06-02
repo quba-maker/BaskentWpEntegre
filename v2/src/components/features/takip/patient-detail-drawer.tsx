@@ -55,17 +55,13 @@ function formatPartialDate(meta: any) {
 const STAGES = [
   { value: 'new_lead', label: 'Yeni', color: '#007AFF', icon: '🆕' },
   { value: 'first_contact', label: 'İlk İletişim', color: '#FF9500', icon: '📞' },
-  { value: 'engaged', label: 'Cevap Verdi', color: '#34C759', icon: '💬' },
-  { value: 'discovery', label: 'Keşif', color: '#5856D6', icon: '🔍' },
-  { value: 'report_waiting', label: 'Rapor Bekleniyor', color: '#FF9500', icon: '📋' },
-  { value: 'report_received', label: 'Rapor Geldi', color: '#30B0C7', icon: '📄' },
-  { value: 'doctor_review', label: 'Doktor İncelemesi', color: '#AF52DE', icon: '🩺' },
+  { value: 'engaged', label: 'Cevap Alındı', color: '#34C759', icon: '💬' },
+  { value: 'discovery', label: 'Keşif/Analiz', color: '#5856D6', icon: '🔍' },
   { value: 'qualified', label: 'Nitelikli', color: '#30B0C7', icon: '⭐' },
-  { value: 'offer_sent', label: 'Teklif Gönderildi', color: '#FF6482', icon: '💰' },
+  { value: 'phone_call_planning', label: 'Telefon Görüşmesi Planlanıyor', color: '#AF52DE', icon: '📞' },
   { value: 'appointment_planning', label: 'Randevu Planlanıyor', color: '#FFD60A', icon: '📅' },
   { value: 'appointment_booked', label: 'Randevu Alındı', color: '#0F9D58', icon: '✅' },
   { value: 'arrived', label: 'Geldi', color: '#0F9D58', icon: '🏥' },
-  { value: 'lost', label: 'Kayıp', color: '#FF3B30', icon: '❌' },
   { value: 'not_qualified', label: 'Uygun Değil', color: '#8E8E93', icon: '🚫' },
 ];
 const getStageInfo = (stage: string) => STAGES.find(s => s.value === stage) || STAGES[0];
@@ -96,6 +92,16 @@ interface PatientDetailDrawerProps {
   onRefresh?: () => void;
 }
 
+function safeJsonParse(str: any, fallback: any = {}): any {
+  if (!str) return fallback;
+  if (typeof str !== 'string') return str;
+  try {
+    return JSON.parse(str);
+  } catch (_) {
+    return fallback;
+  }
+}
+
 export default function PatientDetailDrawer({
   opportunityId,
   initialTab = 'profile',
@@ -113,7 +119,7 @@ export default function PatientDetailDrawer({
   // ── Unified Appointment Extraction Logic ──
   const appointmentTasks = data?.tasks?.filter((t: any) => {
     if (t.taskType === 'appointment_reminder') return false;
-    const tMeta = t.metadata ? (typeof t.metadata === 'string' ? JSON.parse(t.metadata) : t.metadata) : {};
+    const tMeta = safeJsonParse(t.metadata, {});
     return (
       t.taskType === 'callback_scheduled' ||
       ['phone_call', 'clinic_visit', 'pre_consultation', 'consultation'].includes(tMeta?.appointment_type)
@@ -121,7 +127,7 @@ export default function PatientDetailDrawer({
   }) || [];
 
   const activeTask = (activeTaskId ? data?.tasks?.find((t: any) => t.id === activeTaskId) : undefined) || appointmentTasks[0];
-  const meta = activeTask?.metadata ? (typeof activeTask.metadata === 'string' ? JSON.parse(activeTask.metadata) : activeTask.metadata) : {};
+  const meta = safeJsonParse(activeTask?.metadata, {});
 
   // Extract appointment type safely
   const appointmentType = meta?.appointment_type || (activeTask?.taskType === 'callback_scheduled' ? 'phone_call' : 'phone_call');
@@ -129,7 +135,7 @@ export default function PatientDetailDrawer({
   // Group reminders ONLY for this active appointment
   const reminders = data?.tasks?.filter((t: any) => {
     if (t.taskType !== 'appointment_reminder') return false;
-    const rMeta = t.metadata ? (typeof t.metadata === 'string' ? JSON.parse(t.metadata) : t.metadata) : {};
+    const rMeta = safeJsonParse(t.metadata, {});
     return rMeta.parent_task_id === activeTask?.id;
   }) || [];
 
@@ -509,10 +515,14 @@ export default function PatientDetailDrawer({
         async () => {
           setActionLoading(action);
           try {
-            await completeAppointmentTask(targetTaskId, 'cancelled');
-            setActionSuccess('Aksiyon başarıyla kaydedildi.');
-            mutate();
-            onRefresh?.();
+            const res = await completeAppointmentTask(targetTaskId, 'cancelled');
+            if (res && res.success) {
+              setActionSuccess('Aksiyon başarıyla kaydedildi.');
+              mutate();
+              onRefresh?.();
+            } else {
+              showAlert("Hata", res?.error || "İşlem sırasında bir hata oluştu.");
+            }
           } catch (e) {
             console.error(e);
             showAlert("Hata", "İşlem sırasında bir hata oluştu.");
@@ -527,16 +537,21 @@ export default function PatientDetailDrawer({
     setActionLoading(action);
     setActionSuccess(null);
     try {
-      if (action === 'call_completed') await completeAppointmentTask(targetTaskId, 'completed');
-      else if (action === 'call_missed') await completeAppointmentTask(targetTaskId, 'no_show');
-      else if (action === 'confirm') await updateAppointmentConfirmation(targetTaskId, 'confirmed');
-      else if (action === 'no_response') await updateAppointmentConfirmation(targetTaskId, 'no_response');
-      else if (action === 'arrived') await completeAppointmentTask(targetTaskId, 'arrived');
-      else if (action === 'no_show') await completeAppointmentTask(targetTaskId, 'no_show');
+      let res: any = null;
+      if (action === 'call_completed') res = await completeAppointmentTask(targetTaskId, 'completed');
+      else if (action === 'call_missed') res = await completeAppointmentTask(targetTaskId, 'no_show');
+      else if (action === 'confirm') res = await updateAppointmentConfirmation(targetTaskId, 'confirmed');
+      else if (action === 'no_response') res = await updateAppointmentConfirmation(targetTaskId, 'no_response');
+      else if (action === 'arrived') res = await completeAppointmentTask(targetTaskId, 'arrived');
+      else if (action === 'no_show') res = await completeAppointmentTask(targetTaskId, 'no_show');
       
-      setActionSuccess('Aksiyon başarıyla kaydedildi.');
-      mutate();
-      onRefresh?.();
+      if (res && res.success) {
+        setActionSuccess('Aksiyon başarıyla kaydedildi.');
+        mutate();
+        onRefresh?.();
+      } else {
+        showAlert("Hata", res?.error || "İşlem sırasında bir hata oluştu.");
+      }
     } catch (e) {
       console.error(e);
       showAlert("Hata", "İşlem sırasında bir hata oluştu.");
@@ -944,7 +959,10 @@ export default function PatientDetailDrawer({
                     <span className="text-[12px] text-[#86868B] font-semibold">· 🗣️ {getLanguageLabel(data.language)}</span>
                   )}
                   {data.department && (
-                    <span className="text-[12px] text-[#86868B] font-semibold">· {data.department}</span>
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-indigo-50 border border-indigo-150 rounded-lg text-[10px] font-bold text-indigo-700 uppercase tracking-wide shrink-0 shadow-sm select-none">
+                      <Building2 className="w-3 h-3 text-indigo-600" />
+                      {data.department}
+                    </span>
                   )}
                 </div>
 
@@ -1518,7 +1536,7 @@ export default function PatientDetailDrawer({
                       </p>
                       
                       {reminders.map(task => {
-                        const rMeta = typeof task.metadata === 'string' ? JSON.parse(task.metadata) : (task.metadata || {});
+                        const rMeta = safeJsonParse(task.metadata, {});
                         const typeLabel = rMeta.reminder_type === '30_days_before' ? '30 Gün Önce Teyit' :
                                           rMeta.reminder_type === '14_days_before' ? '14 Gün Önce Teyit' :
                                           rMeta.reminder_type === '7_days_before' ? '7 Gün Önce Teyit' :
@@ -1785,23 +1803,13 @@ export default function PatientDetailDrawer({
 
                       {/* Date & Time Input / Dropdowns Grid */}
                       {planType === 'phone_call' ? (
-                        <div className="grid grid-cols-2 gap-3 animate-in fade-in duration-200">
+                        <div className="animate-in fade-in duration-200">
                           <div>
                             <label className="block text-[10px] font-bold text-[#86868B] uppercase tracking-wider mb-1">Tarih</label>
                             <input 
                               type="date" 
                               value={planDate} 
                               onChange={e => setPlanDate(e.target.value)} 
-                              required 
-                              className="w-full px-3 py-2 bg-[#F5F5F7] rounded-xl text-xs font-semibold outline-none border border-transparent focus:border-indigo-500/25 focus:bg-white transition-all duration-200" 
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-[10px] font-bold text-[#86868B] uppercase tracking-wider mb-1">Saat (TR)</label>
-                            <input 
-                              type="time" 
-                              value={planTime} 
-                              onChange={e => setPlanTime(e.target.value)} 
                               required 
                               className="w-full px-3 py-2 bg-[#F5F5F7] rounded-xl text-xs font-semibold outline-none border border-transparent focus:border-indigo-500/25 focus:bg-white transition-all duration-200" 
                             />
@@ -1835,34 +1843,18 @@ export default function PatientDetailDrawer({
                               </select>
                             </div>
                           </div>
-                          <div className="grid grid-cols-2 gap-3">
-                            <div>
-                              <label className="block text-[10px] font-bold text-[#86868B] uppercase tracking-wider mb-1">Gün (İsteğe Bağlı)</label>
-                              <select
-                                value={planDay}
-                                onChange={e => setPlanDay(e.target.value)}
-                                className="w-full px-3 py-2 bg-[#F5F5F7] rounded-xl text-xs font-semibold outline-none border border-transparent focus:border-indigo-500/25 focus:bg-white transition-all duration-200 appearance-none"
-                              >
-                                <option value="">Seçilmedi (Ay Geneli)</option>
-                                {daysOptions.map(d => (
-                                  <option key={d} value={d}>{d}</option>
-                                ))}
-                              </select>
-                            </div>
-                            <div>
-                              <label className="block text-[10px] font-bold text-[#86868B] uppercase tracking-wider mb-1">Saat (İsteğe Bağlı)</label>
-                              <select
-                                value={planTimeCv}
-                                onChange={e => setPlanTimeCv(e.target.value)}
-                                disabled={!planDay}
-                                className="w-full px-3 py-2 bg-[#F5F5F7] rounded-xl text-xs font-semibold outline-none border border-transparent focus:border-indigo-500/25 focus:bg-white transition-all duration-200 appearance-none disabled:opacity-50"
-                              >
-                                <option value="">Saat Seçilmedi (10:00)</option>
-                                {timesOptions.map(t => (
-                                  <option key={t} value={t}>{t}</option>
-                                ))}
-                              </select>
-                            </div>
+                          <div>
+                            <label className="block text-[10px] font-bold text-[#86868B] uppercase tracking-wider mb-1">Gün (İsteğe Bağlı)</label>
+                            <select
+                              value={planDay}
+                              onChange={e => setPlanDay(e.target.value)}
+                              className="w-full px-3 py-2 bg-[#F5F5F7] rounded-xl text-xs font-semibold outline-none border border-transparent focus:border-indigo-500/25 focus:bg-white transition-all duration-200 appearance-none"
+                            >
+                              <option value="">Seçilmedi (Ay Geneli)</option>
+                              {daysOptions.map(d => (
+                                <option key={d} value={d}>{d}</option>
+                              ))}
+                            </select>
                           </div>
                         </div>
                       )}
@@ -1926,22 +1918,13 @@ export default function PatientDetailDrawer({
                                   </div>
                                   
                                   {!isClinicVisit ? (
-                                    <div className="grid grid-cols-2 gap-2">
+                                    <div className="animate-in fade-in duration-200">
                                       <div>
                                         <label className="block text-[9px] font-bold text-[#86868B] uppercase tracking-wider mb-1">Tarih</label>
                                         <input 
                                           type="date" 
                                           value={editTaskDate} 
                                           onChange={e => setEditTaskDate(e.target.value)} 
-                                          className="w-full px-2.5 py-1.5 bg-white rounded-lg text-xs font-semibold outline-none border border-black/10 focus:border-indigo-500 transition-all duration-200" 
-                                        />
-                                      </div>
-                                      <div>
-                                        <label className="block text-[9px] font-bold text-[#86868B] uppercase tracking-wider mb-1">Saat (TR)</label>
-                                        <input 
-                                          type="time" 
-                                          value={editTaskTime} 
-                                          onChange={e => setEditTaskTime(e.target.value)} 
                                           className="w-full px-2.5 py-1.5 bg-white rounded-lg text-xs font-semibold outline-none border border-black/10 focus:border-indigo-500 transition-all duration-200" 
                                         />
                                       </div>
@@ -1974,34 +1957,18 @@ export default function PatientDetailDrawer({
                                           </select>
                                         </div>
                                       </div>
-                                      <div className="grid grid-cols-2 gap-2">
-                                        <div>
-                                          <label className="block text-[9px] font-bold text-[#86868B] uppercase tracking-wider mb-1">Gün (İsteğe Bağlı)</label>
-                                          <select
-                                            value={editTaskDay}
-                                            onChange={e => setEditTaskDay(e.target.value)}
-                                            className="w-full px-2.5 py-1.5 bg-white rounded-lg text-xs font-semibold outline-none border border-black/10 focus:border-indigo-500 transition-all duration-200 appearance-none"
-                                          >
-                                            <option value="">Seçilmedi (Ay Geneli)</option>
-                                            {daysOptions.map(d => (
-                                              <option key={d} value={d}>{d}</option>
-                                            ))}
-                                          </select>
-                                        </div>
-                                        <div>
-                                          <label className="block text-[9px] font-bold text-[#86868B] uppercase tracking-wider mb-1">Saat (İsteğe Bağlı)</label>
-                                          <select
-                                            value={editTaskTimeCv}
-                                            onChange={e => setEditTaskTimeCv(e.target.value)}
-                                            disabled={!editTaskDay}
-                                            className="w-full px-2.5 py-1.5 bg-white rounded-lg text-xs font-semibold outline-none border border-black/10 focus:border-indigo-500 transition-all duration-200 appearance-none disabled:opacity-50"
-                                          >
-                                            <option value="">Saat Seçilmedi (10:00)</option>
-                                            {timesOptions.map(t => (
-                                              <option key={t} value={t}>{t}</option>
-                                            ))}
-                                          </select>
-                                        </div>
+                                      <div>
+                                        <label className="block text-[9px] font-bold text-[#86868B] uppercase tracking-wider mb-1">Gün (İsteğe Bağlı)</label>
+                                        <select
+                                          value={editTaskDay}
+                                          onChange={e => setEditTaskDay(e.target.value)}
+                                          className="w-full px-2.5 py-1.5 bg-white rounded-lg text-xs font-semibold outline-none border border-black/10 focus:border-indigo-500 transition-all duration-200 appearance-none"
+                                        >
+                                          <option value="">Seçilmedi (Ay Geneli)</option>
+                                          {daysOptions.map(d => (
+                                            <option key={d} value={d}>{d}</option>
+                                          ))}
+                                        </select>
                                       </div>
 
                                       {/* Teyit & Hatırlatıcı Akışını Düzenle */}
@@ -2222,7 +2189,7 @@ export default function PatientDetailDrawer({
                                     </div>
 
                                     {childReminders.map(rem => {
-                                      const remMeta = typeof rem.metadata === 'string' ? JSON.parse(rem.metadata) : (rem.metadata || {});
+                                      const remMeta = safeJsonParse(rem.metadata, {});
                                       const isCompleted = rem.status === 'completed';
 
                                       return (

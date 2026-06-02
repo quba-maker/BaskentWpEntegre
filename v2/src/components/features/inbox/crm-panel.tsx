@@ -2,12 +2,13 @@
 
 import { useState, useEffect } from "react";
 import { useSWRConfig } from "swr";
-import { User, MapPin, Building, Activity, Tag, ChevronDown, ChevronRight, Save, X, Plus, ChevronLeft, Check, Loader2, Sparkles, FileText, Brain, Link } from "lucide-react";
+import { User, MapPin, Building, Activity, Tag, ChevronDown, ChevronRight, Save, X, Plus, ChevronLeft, Check, Loader2, Sparkles, FileText, Brain, Link, Clock, Moon, Calendar, CalendarClock } from "lucide-react";
 import { useInboxStore } from "@/store/inbox-store";
 import { updateCrmData, addTag, removeTag } from "@/app/actions/inbox";
 import { CustomerAiBrainPanel } from "@/components/features/ai-observability/CustomerAiBrain";
 import { AiTimelinePanel } from "@/components/features/ai-observability/AiTimeline";
 import { resolvePatientDisplayName, formatPhoneReadable } from "@/lib/utils/patient-name-resolver";
+import { resolvePatientTimezone } from "@/lib/utils/timezone";
 
 const tagTranslationMap: Record<string, string> = {
   "price_sensitive": "fiyat_odaklı",
@@ -20,6 +21,29 @@ const tagTranslationMap: Record<string, string> = {
 function formatTag(tag: string) {
   const t = tag.trim().toLowerCase();
   return tagTranslationMap[t] || tag;
+}
+
+const aiLabelTranslation: Record<string, string> = {
+  warm: "Ilık",
+  hot: "Sıcak",
+  cold: "Soğuk",
+  neutral: "Nötr",
+  positive: "Pozitif",
+  negative: "Negatif",
+  frustrated: "Kızgın",
+  price_sensitive: "Fiyat Duyarlı",
+  high: "Yüksek",
+  medium: "Orta",
+  low: "Düşük",
+  engaged: "İlgili",
+  interested: "İlgili",
+  not_interested: "İlgisiz",
+};
+
+function translateAiLabel(label?: string) {
+  if (!label) return "";
+  const key = label.trim().toLowerCase();
+  return aiLabelTranslation[key] || label;
 }
 
 // ==========================================
@@ -76,6 +100,8 @@ export function ContextPanel() {
   const [isEditingName, setIsEditingName] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [localTime, setLocalTime] = useState<string>("");
+  const [isSleeping, setIsSleeping] = useState<boolean>(false);
 
   // Tag state
   const [isAddingTag, setIsAddingTag] = useState(false);
@@ -103,6 +129,44 @@ export function ContextPanel() {
       setSaveStatus("idle");
     }
   }, [contactId, contactDept, contactCountry, contactNotes, contactStage, activeContact?.opp_requester_name, activeContact?.opp_patient_name, activeContact?.patient_name]);
+
+  useEffect(() => {
+    if (!country) {
+      setLocalTime("");
+      setIsSleeping(false);
+      return;
+    }
+
+    const updateClock = () => {
+      try {
+        const tzRes = resolvePatientTimezone(country);
+        const timeZone = tzRes.timezone;
+        
+        // Get localized time in that timezone
+        const options: Intl.DateTimeFormatOptions = {
+          timeZone,
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false
+        };
+        const formatter = new Intl.DateTimeFormat("tr-TR", options);
+        const timeStr = formatter.format(new Date());
+        setLocalTime(timeStr);
+
+        // Check if patient is sleeping (22:00 to 08:00)
+        const hour = parseInt(timeStr.split(":")[0], 10);
+        setIsSleeping(hour >= 22 || hour < 8);
+      } catch (err) {
+        console.error("Error formatting timezone clock", err);
+        setLocalTime("");
+        setIsSleeping(false);
+      }
+    };
+
+    updateClock();
+    const interval = setInterval(updateClock, 10000); // update every 10 seconds
+    return () => clearInterval(interval);
+  }, [country]);
 
   if (!activeContact) {
     return (
@@ -298,30 +362,75 @@ export function ContextPanel() {
               <ChevronDown className="w-3 h-3" style={{ color: "var(--q-text-secondary)" }} />
             </div>
           </div>
+
+          {localTime && (
+            <div 
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold border transition-all duration-300 ${
+                isSleeping 
+                  ? "bg-slate-900/5 text-slate-700 border-slate-200" 
+                  : "bg-indigo-50 text-indigo-600 border-indigo-100"
+              }`}
+              title={isSleeping ? "Hasta uyku saatinde (22:00 - 08:00)" : "Hasta aktif saatte"}
+            >
+              {isSleeping ? (
+                <Moon className="w-3.5 h-3.5 text-slate-500 animate-pulse" />
+              ) : (
+                <Clock className="w-3.5 h-3.5 text-indigo-500" />
+              )}
+              <span>{localTime}</span>
+            </div>
+          )}
         </div>
 
-        {/* Quick Links */}
-        <div className="flex items-center gap-3 mt-3 pt-2.5 border-t border-black/5 flex-wrap justify-center w-full">
+        {/* Quick Action Grid Cards */}
+        <div className="grid grid-cols-3 gap-2 mt-4 w-full pt-3 border-t border-black/5">
           <a
-            href={`./takip?opp=${activeContact.active_opportunity_id || activeContact.opportunity_id || ''}`}
-            className="text-[11px] font-bold text-indigo-600 hover:text-indigo-700 transition-colors"
+            href={`./takip?opp=${activeContact.active_opp_id || activeContact.active_opportunity_id || activeContact.opportunity_id || ''}`}
+            className="flex flex-col items-center justify-center p-2.5 rounded-xl border text-center transition-all duration-200 group hover:scale-[1.02] active:scale-[0.98]"
+            style={{
+              backgroundColor: "rgba(88, 86, 214, 0.04)",
+              borderColor: "rgba(88, 86, 214, 0.12)",
+              color: "#5856D6"
+            }}
           >
-            🎯 Takipte Aç
+            <div className="w-7 h-7 rounded-full flex items-center justify-center mb-1.5 transition-all duration-200 group-hover:scale-110"
+                 style={{ backgroundColor: "rgba(88, 86, 214, 0.08)" }}>
+              <Activity className="w-3.5 h-3.5" />
+            </div>
+            <span className="text-[10px] font-bold tracking-tight">Takipte Aç</span>
           </a>
+
           <a
-            href={`./takip`}
-            className="text-[11px] font-bold text-indigo-600 hover:text-indigo-700 transition-colors"
+            href={`./takip?opp=${activeContact.active_opp_id || activeContact.active_opportunity_id || activeContact.opportunity_id || ''}&tab=randevu&drawerTab=appointment`}
+            className="flex flex-col items-center justify-center p-2.5 rounded-xl border text-center transition-all duration-200 group hover:scale-[1.02] active:scale-[0.98]"
+            style={{
+              backgroundColor: "rgba(52, 199, 89, 0.04)",
+              borderColor: "rgba(52, 199, 89, 0.12)",
+              color: "#34C759"
+            }}
           >
-            📅 Randevu Yönetimi
+            <div className="w-7 h-7 rounded-full flex items-center justify-center mb-1.5 transition-all duration-200 group-hover:scale-110"
+                 style={{ backgroundColor: "rgba(52, 199, 89, 0.08)" }}>
+              <CalendarClock className="w-3.5 h-3.5" />
+            </div>
+            <span className="text-[10px] font-bold tracking-tight leading-tight">Randevu<br/>Planla</span>
           </a>
-          {activeContact.formData && (
-            <a
-              href={`./forms`}
-              className="text-[11px] font-bold text-indigo-600 hover:text-indigo-700 transition-colors"
-            >
-              📋 Formu Gör
-            </a>
-          )}
+
+          <a
+            href={`./forms?phone=${activeContact.id}`}
+            className="flex flex-col items-center justify-center p-2.5 rounded-xl border text-center transition-all duration-200 group hover:scale-[1.02] active:scale-[0.98]"
+            style={{
+              backgroundColor: "rgba(255, 149, 0, 0.04)",
+              borderColor: "rgba(255, 149, 0, 0.12)",
+              color: "#FF9500"
+            }}
+          >
+            <div className="w-7 h-7 rounded-full flex items-center justify-center mb-1.5 transition-all duration-200 group-hover:scale-110"
+                 style={{ backgroundColor: "rgba(255, 149, 0, 0.08)" }}>
+              <FileText className="w-3.5 h-3.5" />
+            </div>
+            <span className="text-[10px] font-bold tracking-tight">Formlarda Aç</span>
+          </a>
         </div>
       </div>
 
@@ -389,9 +498,16 @@ export function ContextPanel() {
           {/* AI Görüşme Özeti */}
           <div className="pt-2">
             <div className="flex items-center justify-between mb-1.5 ml-1">
-              <label className="text-[10px] font-bold uppercase tracking-widest block" style={{ color: "var(--q-text-secondary)" }}>
-                AI Görüşme Özeti
-              </label>
+              <div className="flex items-center gap-2">
+                {/* Pulsating green animation indicating AI is active */}
+                <div className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </div>
+                <label className="text-[10px] font-bold uppercase tracking-widest block" style={{ color: "var(--q-text-secondary)" }}>
+                  AI Görüşme Özeti
+                </label>
+              </div>
               <div className="flex items-center gap-1.5">
                 {(() => {
                   const aiIntent = activeContact.aiSummary?.buying_intent || activeContact.ai_buying_intent;
@@ -401,26 +517,18 @@ export function ContextPanel() {
                       {aiIntent && (
                         <span className="text-[9px] font-bold px-1.5 py-0.5 rounded shadow-sm" 
                               style={{ background: "var(--q-bg-primary)", color: "var(--q-text-secondary)", border: "1px solid var(--q-border-default)" }}>
-                          {aiIntent}
+                          {translateAiLabel(aiIntent)}
                         </span>
                       )}
                       {aiSentiment && (
                         <span className="text-[9px] font-bold px-1.5 py-0.5 rounded shadow-sm" 
                               style={{ background: "var(--q-bg-primary)", color: "var(--q-text-secondary)", border: "1px solid var(--q-border-default)" }}>
-                          {aiSentiment}
+                          {translateAiLabel(aiSentiment)}
                         </span>
                       )}
                     </>
                   );
                 })()}
-                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full flex items-center gap-1 shadow-sm transition-all duration-300"
-                      style={{ 
-                        background: "rgba(175, 82, 222, 0.08)", 
-                        color: "#AF52DE", 
-                        border: "1px solid rgba(175, 82, 222, 0.2)" 
-                      }}>
-                  <Brain className="w-2.5 h-2.5" /> AI AKTİF
-                </span>
               </div>
             </div>
             <textarea

@@ -40,14 +40,24 @@ export default function TakipPage() {
 
   // Deep link auto-routing: open drawer directly from notification url click
   useEffect(() => {
+    const tabParam = searchParams.get('tab');
+    const drawerTabParam = searchParams.get('drawerTab');
+
+    if (tabParam === 'telefon' || tabParam === 'randevu' || tabParam === 'hasta_takibi') {
+      setActiveTab(tabParam as any);
+    }
+
     if (deepLinkOppId) {
       setDrawerOppId(deepLinkOppId);
       setDrawerTaskId(null);
-      setDrawerInitialTab('profile');
+      setDrawerInitialTab(drawerTabParam === 'appointment' ? 'appointment' : 'profile');
+    }
+
+    if (deepLinkOppId || tabParam) {
       // Clean up URL parameters dynamically without full-page reloads
       router.replace(`/${tenantSlug}/takip`, { scroll: false });
     }
-  }, [deepLinkOppId, router, tenantSlug]);
+  }, [deepLinkOppId, searchParams, router, tenantSlug]);
 
   const handleGoToInbox = (opp: any) => {
     setActiveContact(opp.phone_number, {
@@ -119,7 +129,7 @@ export default function TakipPage() {
               <StatBadge label="Sıcak" value={stats.hot} color="#FF3B30" />
               <StatBadge label="Bugün Takip" value={stats.due_today} color="#FF9500" />
               {Number(stats.overdue) > 0 && (
-                <StatBadge label="Gecikmiş" value={stats.overdue} color="#FF3B30" pulse />
+                <StatBadge label="Gecikti" value={stats.overdue} color="#FF3B30" pulse />
               )}
             </>
           )}
@@ -131,10 +141,13 @@ export default function TakipPage() {
         <div className="flex-1 bg-white rounded-2xl overflow-hidden shadow-sm border border-gray-200">
           <PatientTrackingTab 
             onGoToInbox={handleGoToInbox} 
-            onOpenDrawer={(id) => {
+            onOpenDrawer={(id, tab = 'profile', targetPageTab) => {
               setDrawerOppId(id);
               setDrawerTaskId(null);
-              setDrawerInitialTab('profile');
+              setDrawerInitialTab(tab);
+              if (targetPageTab) {
+                setActiveTab(targetPageTab);
+              }
             }} 
           />
         </div>

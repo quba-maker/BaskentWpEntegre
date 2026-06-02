@@ -55,6 +55,9 @@ export interface PatientTrackingRow {
   isTestWhitelist: boolean;
   hasBotDelegation: boolean;
   hasLeadRawData: boolean;
+  phoneTaskStatus?: string;
+  clinicTaskStatus?: string;
+  mostRecentNote?: string;
 }
 
 export interface PatientTrackingFilters {
@@ -200,31 +203,41 @@ export interface AppointmentFilters {
 // ── SHARED COMPUTE FUNCTIONS (reuse from focus-queue logic) ──
 
 function computeJourneyStatus(row: any): JourneyStatus {
-  if (row.opp_stage === 'arrived') return 'Geldi';
-  if (row.opp_stage === 'not_show' || row.opp_stage === 'cancelled') return 'Gelmedi / İptal';
-  if (row.opp_stage === 'lost' || row.opp_stage === 'not_qualified') return 'Kapatıldı';
+  if (row.opp_stage) {
+    if (row.opp_stage === 'new_lead') return 'Yeni';
+    if (row.opp_stage === 'first_contact') return 'İlk İletişim';
+    if (row.opp_stage === 'engaged') return 'Cevap Alındı';
+    if (row.opp_stage === 'discovery') return 'Keşif/Analiz';
+    if (row.opp_stage === 'qualified') return 'Nitelikli';
+    if (row.opp_stage === 'phone_call_planning') return 'Telefon Görüşmesi Planlanıyor';
+    if (row.opp_stage === 'appointment_planning') return 'Randevu Planlanıyor';
+    if (row.opp_stage === 'appointment_booked') return 'Randevu Alındı';
+    if (row.opp_stage === 'arrived') return 'Geldi';
+    if (row.opp_stage === 'not_qualified' || row.opp_stage === 'lost') return 'Uygun Değil';
+    
+    // Backwards compatibility for old stages
+    if (row.opp_stage === 'report_waiting' || row.opp_stage === 'report_received') return 'Keşif/Analiz';
+    if (row.opp_stage === 'doctor_review') return 'Nitelikli';
+  }
   
   if (row.task_metadata?.bot_delegation) return 'Bot Takipte';
   if (row.last_outreach_action === 'called_missed') return 'Ulaşılamadı';
-  if (row.opp_stage === 'report_waiting' || row.task_type === 'send_report_reminder') return 'Rapor Bekleniyor';
-  if (row.opp_stage === 'doctor_review' || row.task_type === 'doctor_review_pending') return 'Doktor İncelemesi';
+  
   if (row.task_type === 'callback_scheduled') return 'Telefon Randevusu Planlandı';
-  if (row.opp_stage === 'appointment_booked') return 'Klinik Randevusu Alındı';
+  
   if (row.conv_status === 'bot') {
-    if (row.lead_form_name) return 'Bot Karşılıyor';
+    if (row.lead_form_name) return 'Yeni';
     return 'Bot Cevap Bekliyor';
   }
+  
   if (row.conv_status === 'handoff' || row.task_type === 'bot_handoff_followup') return 'İnsan Devri Gerekli';
-  if (row.task_type === 'appointment_request' || row.opp_stage === 'appointment_planning') return 'Danışman Arayacak';
-  if (row.lead_form_name && !row.opp_stage) return 'Yeni Form Geldi';
-  if (row.opp_stage === 'new_lead') return 'Yeni Form Geldi';
-  if (row.opp_stage === 'first_contact') return 'Danışman Arayacak';
-  if (row.opp_stage === 'engaged') return 'Telefon Görüşmesi Bekliyor';
-  return 'Danışman Arayacak';
+  if (row.lead_form_name && !row.opp_stage) return 'Yeni';
+
+  return 'Yeni'; // Default fallback
 }
 
 function computeNextBestAction(row: any, journeyStatus: JourneyStatus): NextBestAction {
-  if (journeyStatus === 'Geldi' || journeyStatus === 'Kapatıldı' || journeyStatus === 'Gelmedi / İptal') return 'no_action';
+  if (journeyStatus === 'Geldi' || journeyStatus === 'Kapatıldı' || journeyStatus === 'Gelmedi / İptal' || journeyStatus === 'Uygun Değil') return 'no_action';
   
   if (row.task_due_at && !isOverdue(row.task_due_at) && !isToday(row.task_due_at)) {
     return 'scheduled_followup';
@@ -237,8 +250,8 @@ function computeNextBestAction(row: any, journeyStatus: JourneyStatus): NextBest
   if (row.conv_status === 'handoff' || row.task_type === 'bot_handoff_followup') return 'call_now';
   if (row.task_type === 'callback_scheduled' && isOverdue(row.task_due_at)) return 'call_now';
   if (row.last_outreach_action === 'called_missed') return 'delegate_unreachable_followup_to_bot';
-  if (journeyStatus === 'Rapor Bekleniyor') return 'request_report';
-  if (journeyStatus === 'Doktor İncelemesi') return 'doctor_review_needed';
+  if (journeyStatus === 'Rapor Bekleniyor' || journeyStatus === 'Keşif/Analiz') return 'request_report';
+  if (journeyStatus === 'Doktor İncelemesi' || journeyStatus === 'Nitelikli') return 'doctor_review_needed';
   if (isOverdue(row.task_due_at)) return 'call_now';
   return 'call_today';
 }
@@ -265,7 +278,18 @@ function computePriorityScore(row: any, journeyStatus: JourneyStatus, nextBestAc
 // ── LABEL CONFIGS ──
 
 const JOURNEY_STATUS_COLORS: Record<string, string> = {
-  'Yeni Form Geldi': 'bg-emerald-100 text-emerald-700',
+  'Yeni': 'bg-[#E6F0FF] text-[#007AFF]',
+  'İlk İletişim': 'bg-[#FFF2E6] text-[#FF9500]',
+  'Cevap Alındı': 'bg-[#EAF8EB] text-[#34C759]',
+  'Keşif/Analiz': 'bg-[#ECEBFC] text-[#5856D6]',
+  'Nitelikli': 'bg-[#E6F7F9] text-[#30B0C7]',
+  'Telefon Görüşmesi Planlanıyor': 'bg-[#F4EAFB] text-[#AF52DE]',
+  'Randevu Planlanıyor': 'bg-[#FFFBE6] text-[#D0A000]',
+  'Randevu Alındı': 'bg-[#E6F6EC] text-[#0F9D58]',
+  'Geldi': 'bg-[#E6F6EC] text-[#0F9D58]',
+  'Uygun Değil': 'bg-[#F2F2F7] text-[#8E8E93]',
+  // Backwards compatibility
+  'Yeni Form Geldi': 'bg-[#E6F0FF] text-[#007AFF]',
   'Bot Karşılıyor': 'bg-blue-100 text-blue-700',
   'Bot Cevap Bekliyor': 'bg-blue-100 text-blue-700',
   'İnsan Devri Gerekli': 'bg-amber-100 text-amber-800',
@@ -281,7 +305,6 @@ const JOURNEY_STATUS_COLORS: Record<string, string> = {
   'Klinik Randevusu Alındı': 'bg-green-100 text-green-700',
   'Teyit Bekliyor': 'bg-yellow-100 text-yellow-700',
   'Randevu Yaklaşıyor': 'bg-purple-100 text-purple-700',
-  'Geldi': 'bg-emerald-100 text-emerald-700',
   'Gelmedi / İptal': 'bg-red-100 text-red-700',
   'Kapatıldı': 'bg-gray-100 text-gray-500',
 };
@@ -383,6 +406,7 @@ export async function getPatientTrackingRows(filters?: PatientTrackingFilters): 
           o.updated_at as opp_updated_at,
           o.next_follow_up_at as opp_next_follow_up_at,
 
+          c.patient_name as conv_patient_name,
           c.status as conv_status,
           c.last_message_content as conv_last_message,
           c.last_message_at as conv_last_message_at,
@@ -396,14 +420,60 @@ export async function getPatientTrackingRows(filters?: PatientTrackingFilters): 
 
           ol.action as last_outreach_action,
           ol.created_at as last_outreach_at,
-          ol.metadata as last_outreach_metadata
+          ol.metadata as last_outreach_metadata,
+          (
+            SELECT 
+              CASE 
+                WHEN ft.due_at < NOW() THEN 'Gecikti'
+                WHEN ft.task_type = 'callback_scheduled' THEN 'Planlandı'
+                ELSE 'Açık'
+              END
+            FROM follow_up_tasks ft 
+            WHERE ft.opportunity_id = o.id 
+              AND ft.tenant_id = o.tenant_id
+              AND (ft.metadata->>'appointment_type' IS NULL OR ft.metadata->>'appointment_type' != 'clinic_visit')
+              AND ft.status IN ('pending', 'in_progress')
+            ORDER BY ft.due_at ASC LIMIT 1
+          ) as active_phone_task_status,
+          (
+            SELECT 
+              CASE 
+                WHEN ft.status = 'completed' AND ft.metadata->>'appointment_result' = 'arrived' THEN 'Geldi'
+                WHEN ft.status = 'completed' AND ft.metadata->>'appointment_result' = 'no_show' THEN 'Gelmedi'
+                WHEN ft.status = 'completed' THEN 'Tamamlandı'
+                WHEN ft.due_at < NOW() THEN 'Gecikti'
+                ELSE 'Planlandı'
+              END
+            FROM follow_up_tasks ft 
+            WHERE ft.opportunity_id = o.id 
+              AND ft.tenant_id = o.tenant_id
+              AND ft.metadata->>'appointment_type' = 'clinic_visit'
+              AND ft.status != 'cancelled'
+            ORDER BY ft.due_at DESC LIMIT 1
+          ) as active_clinic_task_status,
+          (
+            SELECT ft.metadata->>'note' FROM follow_up_tasks ft 
+            WHERE ft.opportunity_id = o.id 
+              AND ft.tenant_id = o.tenant_id
+              AND ft.metadata->>'note' IS NOT NULL 
+              AND ft.metadata->>'note' != ''
+            ORDER BY ft.updated_at DESC LIMIT 1
+          ) as last_task_note,
+          (
+            SELECT ft.updated_at FROM follow_up_tasks ft 
+            WHERE ft.opportunity_id = o.id 
+              AND ft.tenant_id = o.tenant_id
+              AND ft.metadata->>'note' IS NOT NULL 
+              AND ft.metadata->>'note' != ''
+            ORDER BY ft.updated_at DESC LIMIT 1
+          ) as last_task_note_at
         FROM opportunities o
         LEFT JOIN LATERAL (
           SELECT * FROM follow_up_tasks 
           WHERE opportunity_id = o.id AND tenant_id = o.tenant_id AND status IN ('pending', 'in_progress')
           ORDER BY due_at ASC LIMIT 1
         ) t ON TRUE
-        LEFT JOIN conversations c ON c.active_opportunity_id = o.id AND c.tenant_id = o.tenant_id
+        LEFT JOIN conversations c ON c.phone_number = o.phone_number AND c.tenant_id = o.tenant_id
         LEFT JOIN leads l ON l.linked_opportunity_id = o.id AND l.tenant_id = o.tenant_id
         LEFT JOIN LATERAL (
           SELECT action, created_at, metadata
@@ -413,11 +483,11 @@ export async function getPatientTrackingRows(filters?: PatientTrackingFilters): 
           LIMIT 1
         ) ol ON TRUE
         WHERE o.tenant_id = $1 
-          AND o.stage NOT IN ('lost', 'not_qualified', 'arrived', 'not_interested', 'cancelled', 'completed')
+          AND o.stage NOT IN ('not_qualified', 'arrived')
           AND (
             t.id IS NOT NULL
             OR o.priority IN ('hot', 'high', 'sıcak')
-            OR o.stage IN ('new_lead', 'first_contact', 'engaged', 'qualified', 'appointment_planning', 'appointment_booked', 'report_waiting', 'doctor_review')
+            OR o.stage IN ('new_lead', 'first_contact', 'engaged', 'discovery', 'qualified', 'phone_call_planning', 'appointment_planning', 'appointment_booked')
             OR o.intent_type IN ('appointment_request', 'follow_up_needed', 'hot_lead')
             OR o.next_follow_up_at IS NOT NULL
             OR ol.action IN ('called_missed', 'callback_scheduled', 'greeting_sent', 'bot_activated')
@@ -498,13 +568,49 @@ export async function getPatientTrackingRows(filters?: PatientTrackingFilters): 
         const formRawData = row.lead_raw_data && typeof row.lead_raw_data === 'object' ? row.lead_raw_data : {};
         const formFullName = formRawData.full_name || formRawData['full name'] || formRawData['Full Name'] || formRawData['full_name'];
         const resolvedName = resolvePatientDisplayName({
-          manualPatientName: row.opp_patient_name,
+          manualPatientName: row.conv_patient_name || row.opp_patient_name,
           oppPatientName: row.opp_patient_name,
-          convPatientName: row.patient_name || row.patientName,
-          whatsappProfileName: row.patient_name || row.patientName,
+          convPatientName: row.conv_patient_name,
+          whatsappProfileName: row.conv_patient_name,
           formPatientName: row.lead_raw_data?.patient_name,
           formRawDataName: formFullName,
         });
+
+        // Resolve most recent note (from manual notes, phone task notes, clinic visit notes)
+        let mostRecentNote = '';
+        let mostRecentNoteAt: Date | null = null;
+
+        // 1. Process task notes
+        if (row.last_task_note) {
+          mostRecentNote = row.last_task_note;
+          if (row.last_task_note_at) {
+            mostRecentNoteAt = new Date(row.last_task_note_at);
+          }
+        }
+
+        // 2. Process manual notes
+        if (row.opp_notes) {
+          let manualNotes: any[] = [];
+          if (typeof row.opp_notes === 'string') {
+            try { manualNotes = JSON.parse(row.opp_notes); } catch (_) {}
+          } else {
+            manualNotes = row.opp_notes;
+          }
+
+          if (Array.isArray(manualNotes)) {
+            manualNotes.forEach((n: any) => {
+              const noteText = typeof n === 'string' ? n : (n.text || '');
+              const noteDateStr = typeof n === 'object' ? (n.created_at || n.date) : null;
+              if (noteText) {
+                const noteDate = noteDateStr ? new Date(noteDateStr) : new Date(row.opp_created_at || Date.now());
+                if (!mostRecentNoteAt || noteDate > mostRecentNoteAt) {
+                  mostRecentNote = noteText;
+                  mostRecentNoteAt = noteDate;
+                }
+              }
+            });
+          }
+        }
 
         return {
           opportunityId: row.opportunity_id,
@@ -544,6 +650,9 @@ export async function getPatientTrackingRows(filters?: PatientTrackingFilters): 
           isTestWhitelist,
           hasBotDelegation: !!row.task_metadata?.bot_delegation,
           hasLeadRawData,
+          phoneTaskStatus: row.active_phone_task_status || undefined,
+          clinicTaskStatus: row.active_clinic_task_status || undefined,
+          mostRecentNote: mostRecentNote || undefined,
         };
       });
 
@@ -591,6 +700,7 @@ export async function getPatientTrackingDetail(opportunityId: string, activeTask
         SELECT DISTINCT ON (o.id)
           o.*,
           c.id as conv_id,
+          c.patient_name as conv_patient_name,
           c.status as conv_status,
           c.last_message_content,
           c.last_message_at,
@@ -600,7 +710,7 @@ export async function getPatientTrackingDetail(opportunityId: string, activeTask
           l.raw_data as lead_raw_data,
           l.created_at as lead_created_at
         FROM opportunities o
-        LEFT JOIN conversations c ON c.active_opportunity_id = o.id AND c.tenant_id = o.tenant_id
+        LEFT JOIN conversations c ON c.phone_number = o.phone_number AND c.tenant_id = o.tenant_id
         LEFT JOIN leads l ON (l.linked_opportunity_id = o.id OR RIGHT(l.phone_number, 10) = RIGHT(o.phone_number, 10)) AND l.tenant_id = o.tenant_id
         WHERE o.id = $1 AND o.tenant_id = $2
         ORDER BY o.id, l.linked_opportunity_id DESC NULLS LAST, l.created_at DESC
@@ -725,15 +835,36 @@ export async function getPatientTrackingDetail(opportunityId: string, activeTask
 
       const botTask = tasks.find((t: any) => t.metadata?.bot_delegation);
 
-      const notes = typeof opp.notes === 'string' ? JSON.parse(opp.notes) : (opp.notes || []);
-      const leadRawData = typeof opp.lead_raw_data === 'string' ? JSON.parse(opp.lead_raw_data) : (opp.lead_raw_data || null);
+      let notes = [];
+      if (opp.notes) {
+        if (typeof opp.notes === 'string') {
+          try { notes = JSON.parse(opp.notes); } catch (_) {}
+        } else {
+          notes = opp.notes;
+        }
+      }
+
+      let leadRawData = null;
+      if (opp.lead_raw_data) {
+        if (typeof opp.lead_raw_data === 'string') {
+          try { leadRawData = JSON.parse(opp.lead_raw_data); } catch (_) {}
+        } else {
+          leadRawData = opp.lead_raw_data;
+        }
+      }
 
       return {
         opportunityId: opp.id,
-        patientName: opp.patient_name || leadRawData?.patient_name || 'İsimsiz',
+        patientName: resolvePatientDisplayName({
+          manualPatientName: opp.conv_patient_name || opp.patient_name,
+          oppPatientName: opp.patient_name,
+          convPatientName: opp.conv_patient_name,
+          whatsappProfileName: opp.conv_patient_name,
+          formPatientName: leadRawData?.patient_name,
+        }),
         phoneNumber: opp.phone_number || opp.conv_phone || '',
         country: resolvedCountry || undefined,
-        department: opp.department || undefined,
+        department: opp.department || leadRawData?.department || 'Genel',
         stage: opp.stage || undefined,
         priority: opp.priority || 'warm',
         intentType: opp.intent_type || undefined,
@@ -892,11 +1023,8 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
       const conditions = [`t.tenant_id = $1`];
       const values: any[] = [ctx.tenantId];
 
-      // Only actual patient appointments (Phone Call, Clinic Visit, Pre-Consultation)
-      conditions.push(`(
-        t.task_type = 'callback_scheduled'
-        OR t.metadata->>'appointment_type' IN ('phone_call', 'clinic_visit', 'pre_consultation', 'consultation')
-      )`);
+      // Only patient follow-up and appointment tasks (excluding reminder tasks)
+      conditions.push(`t.task_type != 'appointment_reminder'`);
 
       // Exclude child reminders from appearing as standalone parent rows
       conditions.push(`t.task_type != 'appointment_reminder'`);
@@ -957,10 +1085,7 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
       // Appointment type filter
       if (filters?.appointmentType && filters.appointmentType !== 'all') {
         if (filters.appointmentType === 'phone_call') {
-          conditions.push(`(
-            (t.task_type = 'callback_scheduled' AND (t.metadata->>'appointment_type' IS NULL OR t.metadata->>'appointment_type' != 'clinic_visit'))
-            OR t.metadata->>'appointment_type' IN ('phone_call', 'pre_consultation', 'doctor_review', 'report_followup')
-          )`);
+          conditions.push(`(t.metadata->>'appointment_type' IS NULL OR t.metadata->>'appointment_type' != 'clinic_visit')`);
         } else if (filters.appointmentType === 'clinic_visit') {
           conditions.push(`t.metadata->>'appointment_type' = 'clinic_visit'`);
         }
@@ -974,7 +1099,7 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
                                filters?.status === 'no_response' || 
                                !!filters?.completed;
       if (!isTerminalFilter) {
-        conditions.push(`(o.stage IS NULL OR o.stage NOT IN ('lost', 'not_qualified', 'arrived', 'not_interested', 'cancelled', 'completed'))`);
+        conditions.push(`(o.stage IS NULL OR o.stage NOT IN ('not_qualified', 'arrived'))`);
       }
 
       const query = `
@@ -989,6 +1114,7 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
           t.status as task_status,
           t.metadata as task_metadata,
           t.created_at as task_created_at,
+          c.patient_name as conv_patient_name,
           o.patient_name as opp_patient_name,
           o.country as opp_country,
           o.department as opp_department,
@@ -999,7 +1125,7 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
               SELECT 1 FROM follow_up_tasks ft 
               WHERE ft.tenant_id = t.tenant_id 
                 AND ft.metadata->>'appointment_type' = 'clinic_visit' 
-                AND ft.status IN ('pending', 'in_progress')
+                AND ft.status != 'cancelled'
                 AND (
                   (ft.opportunity_id = t.opportunity_id AND t.opportunity_id IS NOT NULL)
                   OR 
@@ -1009,6 +1135,7 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
           ) as has_clinic_visit
         FROM follow_up_tasks t
         LEFT JOIN opportunities o ON o.id = t.opportunity_id AND o.tenant_id = t.tenant_id
+        LEFT JOIN conversations c ON c.phone_number = COALESCE(o.phone_number, t.phone_number) AND c.tenant_id = t.tenant_id
         WHERE ${conditions.join(' AND ')}
         ORDER BY t.due_at ASC
         LIMIT 100
@@ -1069,10 +1196,10 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
           row.task_metadata?.confirmation_status || (row.task_metadata?.confirmed ? 'confirmed' : 'pending');
 
         const resolvedName = resolvePatientDisplayName({
-          manualPatientName: row.opp_patient_name,
+          manualPatientName: row.conv_patient_name || row.opp_patient_name,
           oppPatientName: row.opp_patient_name,
-          convPatientName: row.patient_name || row.patientName,
-          whatsappProfileName: row.patient_name || row.patientName,
+          convPatientName: row.conv_patient_name,
+          whatsappProfileName: row.conv_patient_name,
         });
 
         return {
@@ -1713,10 +1840,7 @@ export async function getAppointmentStats() {
       const statsQuery = `
         SELECT
           -- Overdue splits (for badge warnings)
-          COUNT(*) FILTER (WHERE t.status IN ('pending', 'in_progress') AND t.due_at < NOW() AND (
-            (t.task_type = 'callback_scheduled' AND (t.metadata->>'appointment_type' IS NULL OR t.metadata->>'appointment_type' != 'clinic_visit'))
-            OR t.metadata->>'appointment_type' IN ('phone_call', 'pre_consultation', 'doctor_review', 'report_followup')
-          )) as overdue_phone,
+          COUNT(*) FILTER (WHERE t.status IN ('pending', 'in_progress') AND t.due_at < NOW() AND (t.metadata->>'appointment_type' IS NULL OR t.metadata->>'appointment_type' != 'clinic_visit')) as overdue_phone,
           COUNT(*) FILTER (WHERE t.status IN ('pending', 'in_progress') AND t.due_at < NOW() AND t.metadata->>'appointment_type' = 'clinic_visit') as overdue_clinic,
 
           -- PHONE TABS COUNTS
@@ -1724,35 +1848,35 @@ export async function getAppointmentStats() {
           COUNT(*) FILTER (
             WHERE t.status IN ('pending', 'in_progress')
               AND (t.metadata->>'confirmation_status' IS NULL OR t.metadata->>'confirmation_status' != 'confirmed')
-              AND ((t.task_type = 'callback_scheduled' AND (t.metadata->>'appointment_type' IS NULL OR t.metadata->>'appointment_type' != 'clinic_visit')) OR t.metadata->>'appointment_type' IN ('phone_call', 'pre_consultation', 'doctor_review', 'report_followup'))
-              AND (o.stage IS NULL OR o.stage NOT IN ('lost', 'not_qualified', 'arrived', 'not_interested', 'cancelled', 'completed'))
+              AND (t.metadata->>'appointment_type' IS NULL OR t.metadata->>'appointment_type' != 'clinic_visit')
+              AND (o.stage IS NULL OR o.stage NOT IN ('not_qualified', 'arrived'))
           ) as phone_open,
 
           -- 2. Planlandı ve Onaylandı (Confirmed)
           COUNT(*) FILTER (
             WHERE t.status IN ('pending', 'in_progress')
               AND t.metadata->>'confirmation_status' = 'confirmed'
-              AND ((t.task_type = 'callback_scheduled' AND (t.metadata->>'appointment_type' IS NULL OR t.metadata->>'appointment_type' != 'clinic_visit')) OR t.metadata->>'appointment_type' IN ('phone_call', 'pre_consultation', 'doctor_review', 'report_followup'))
-              AND (o.stage IS NULL OR o.stage NOT IN ('lost', 'not_qualified', 'arrived', 'not_interested', 'cancelled', 'completed'))
+              AND (t.metadata->>'appointment_type' IS NULL OR t.metadata->>'appointment_type' != 'clinic_visit')
+              AND (o.stage IS NULL OR o.stage NOT IN ('not_qualified', 'arrived'))
           ) as phone_confirmed,
 
           -- 3. Arandı ve Ulaşıldı (Completed & Reached)
           COUNT(*) FILTER (
             WHERE t.status = 'completed'
               AND (t.metadata->>'appointment_result' IS NULL OR t.metadata->>'appointment_result' NOT IN ('no_show', 'cancelled'))
-              AND ((t.task_type = 'callback_scheduled' AND (t.metadata->>'appointment_type' IS NULL OR t.metadata->>'appointment_type' != 'clinic_visit')) OR t.metadata->>'appointment_type' IN ('phone_call', 'pre_consultation', 'doctor_review', 'report_followup'))
+              AND (t.metadata->>'appointment_type' IS NULL OR t.metadata->>'appointment_type' != 'clinic_visit')
           ) as phone_completed,
 
           -- 4. Ulaşılamadı
           COUNT(*) FILTER (
             WHERE ((t.status = 'completed' AND t.metadata->>'appointment_result' = 'no_show') OR t.status = 'no_show')
-              AND ((t.task_type = 'callback_scheduled' AND (t.metadata->>'appointment_type' IS NULL OR t.metadata->>'appointment_type' != 'clinic_visit')) OR t.metadata->>'appointment_type' IN ('phone_call', 'pre_consultation', 'doctor_review', 'report_followup'))
+              AND (t.metadata->>'appointment_type' IS NULL OR t.metadata->>'appointment_type' != 'clinic_visit')
           ) as phone_no_show,
 
           -- 5. İptal Edildi
           COUNT(*) FILTER (
             WHERE (t.status = 'cancelled' OR t.metadata->>'appointment_result' = 'cancelled')
-              AND ((t.task_type = 'callback_scheduled' AND (t.metadata->>'appointment_type' IS NULL OR t.metadata->>'appointment_type' != 'clinic_visit')) OR t.metadata->>'appointment_type' IN ('phone_call', 'pre_consultation', 'doctor_review', 'report_followup'))
+              AND (t.metadata->>'appointment_type' IS NULL OR t.metadata->>'appointment_type' != 'clinic_visit')
           ) as phone_cancelled,
 
           -- CLINIC TABS COUNTS
@@ -1761,7 +1885,7 @@ export async function getAppointmentStats() {
             WHERE t.status IN ('pending', 'in_progress')
               AND (t.metadata->>'confirmation_status' IS NULL OR t.metadata->>'confirmation_status' != 'confirmed')
               AND t.metadata->>'appointment_type' = 'clinic_visit'
-              AND (o.stage IS NULL OR o.stage NOT IN ('lost', 'not_qualified', 'arrived', 'not_interested', 'cancelled', 'completed'))
+              AND (o.stage IS NULL OR o.stage NOT IN ('not_qualified', 'arrived'))
           ) as clinic_open,
 
           -- 2. Planlandı ve Onaylandı (Confirmed)
@@ -1769,7 +1893,7 @@ export async function getAppointmentStats() {
             WHERE t.status IN ('pending', 'in_progress')
               AND t.metadata->>'confirmation_status' = 'confirmed'
               AND t.metadata->>'appointment_type' = 'clinic_visit'
-              AND (o.stage IS NULL OR o.stage NOT IN ('lost', 'not_qualified', 'arrived', 'not_interested', 'cancelled', 'completed'))
+              AND (o.stage IS NULL OR o.stage NOT IN ('not_qualified', 'arrived'))
           ) as clinic_confirmed,
 
           -- 3. Geldi (Arrived)
@@ -1800,10 +1924,6 @@ export async function getAppointmentStats() {
         LEFT JOIN opportunities o ON o.id = t.opportunity_id AND o.tenant_id = t.tenant_id
         WHERE t.tenant_id = $1
           AND t.task_type != 'appointment_reminder'
-          AND (
-            t.task_type = 'callback_scheduled'
-            OR t.metadata->>'appointment_type' IN ('phone_call', 'clinic_visit', 'pre_consultation', 'consultation', 'doctor_review', 'report_followup')
-          )
       `;
 
       const rows = await ctx.db.executeSafe({ text: statsQuery, values: [ctx.tenantId] }) as any[];
@@ -1968,7 +2088,7 @@ export async function manuallyUpdateAppointmentStatus(
   taskId: string, 
   status: 'pending' | 'completed' | 'cancelled', 
   appointmentResult?: 'completed' | 'arrived' | 'no_show' | 'cancelled' | 'none',
-  confirmationStatus?: 'pending' | 'confirmed' | 'declined' | 'no_response' | 'none'
+  confirmationStatus?: 'pending' | 'confirmed' | 'declined' | 'no_response' | 'none' | 'overdue'
 ) {
   return withActionGuard(
     { actionName: 'manuallyUpdateAppointmentStatus' },
@@ -1987,7 +2107,7 @@ export async function manuallyUpdateAppointmentStatus(
 
       // 1. Update confirmation status in metadata
       if (confirmationStatus) {
-        if (confirmationStatus === 'none') {
+        if (confirmationStatus === 'none' || confirmationStatus === 'overdue') {
           delete metadata.confirmation_status;
         } else {
           metadata.confirmation_status = confirmationStatus;
@@ -2048,10 +2168,15 @@ export async function manuallyUpdateAppointmentStatus(
         metadata.appointment_result = 'cancelled';
       }
 
+      let finalDueAt = task.due_at;
+      if (confirmationStatus === 'overdue') {
+        finalDueAt = new Date(Date.now() - 24 * 60 * 60 * 1000); // 1 day ago
+      }
+
       // 3. Update task row
       await ctx.db.executeSafe({
-        text: `UPDATE follow_up_tasks SET status = $1, metadata = $2, updated_at = NOW() WHERE id = $3 AND tenant_id = $4`,
-        values: [finalStatus, JSON.stringify(metadata), taskId, ctx.tenantId]
+        text: `UPDATE follow_up_tasks SET status = $1, metadata = $2, due_at = $3, updated_at = NOW() WHERE id = $4 AND tenant_id = $5`,
+        values: [finalStatus, JSON.stringify(metadata), finalDueAt, taskId, ctx.tenantId]
       });
 
       // 4. Cancel active reminders if completed/cancelled
