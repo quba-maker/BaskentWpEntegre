@@ -176,6 +176,11 @@ export async function POST(req: NextRequest) {
       // Map incoming payload to standard MetaWebhookPayload structure
       const normalizedPayload = {
         object: "whatsapp_business_account",
+        tenantId: tenantId,
+        channelId: channelRow.channel_id,
+        provider: "whatsapp",
+        routingSource: "360dialog_channel_id",
+        resolvedChannelIdentifier: channelRow.identifier,
         entry: [
           {
             id: wabaId,
@@ -254,6 +259,11 @@ export async function POST(req: NextRequest) {
       // Map status payload to standard MetaWebhookPayload structure
       const normalizedPayload = {
         object: "whatsapp_business_account",
+        tenantId: tenantId,
+        channelId: channelRow.channel_id,
+        provider: "whatsapp",
+        routingSource: "360dialog_channel_id",
+        resolvedChannelIdentifier: channelRow.identifier,
         entry: [
           {
             id: wabaId,

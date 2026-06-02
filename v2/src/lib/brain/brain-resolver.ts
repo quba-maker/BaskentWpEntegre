@@ -61,14 +61,15 @@ export class BrainResolver {
   public static async resolveTenantBrain(
     payload: any,
     channel: string, // e.g., 'whatsapp'
-    webhookPayloadId: string
+    webhookPayloadId: string,
+    preResolvedChannelId?: string
   ): Promise<TenantBrain> {
     
     // 1. Resolve Tenant Config safely
     const resolver = new TenantResolverService();
     let tenantConfig;
     try {
-      tenantConfig = await resolver.resolve(payload);
+      tenantConfig = await resolver.resolve(payload, preResolvedChannelId);
     } catch (e) {
       // Intentionally suppressing to throw the structured error below
     }

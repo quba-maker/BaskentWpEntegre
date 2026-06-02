@@ -669,7 +669,7 @@ export class QueueWorkerEngine {
     
     let brain;
     try {
-      brain = await BrainResolver.resolveTenantBrain(payload, channel, traceId);
+      brain = await BrainResolver.resolveTenantBrain(payload, channel, traceId, metadata.channelId);
     } catch (e) {
       this.log.error(`[TENANT_RESOLUTION_FAILED] Could not resolve brain`, undefined, { tenantId, traceId });
       throw e;
