@@ -4,6 +4,15 @@ import { logger } from "@/lib/core/logger";
 const log = logger.withContext({ module: "MediaStorageService" });
 
 /**
+ * Securely masks a media ID for safe logging (e.g. 1323******1413)
+ */
+function maskMediaId(id: string): string {
+  if (!id) return "N/A";
+  if (id.length < 8) return "***";
+  return `${id.substring(0, 4)}***${id.substring(id.length - 4)}`;
+}
+
+/**
  * SaaS Media Storage Service
  *
  * Tenant-isolated blob storage for WhatsApp/Instagram/Messenger media.
@@ -34,37 +43,45 @@ export class MediaStorageService {
       provider?: string;
     }
   ): Promise<{ blobUrl: string; fileSize: number } | null> {
+    const maskedId = maskMediaId(mediaId);
+    const is360dialog =
+      metadata.provider === "360dialog" ||
+      metadata.provider === "360dialog_whatsapp" ||
+      process.env.ENABLE_360DIALOG_COEXISTENCE === "true";
+    
+    const endpointVariant = is360dialog ? "360dialog" : "meta_graph";
+
     try {
       // Pre-check: BLOB_READ_WRITE_TOKEN must exist
       if (!process.env.BLOB_READ_WRITE_TOKEN) {
         log.error(`[MEDIA_NO_BLOB_TOKEN] BLOB_READ_WRITE_TOKEN env variable is missing. Create a Blob Store in Vercel Dashboard → Storage.`, undefined, {
           tenantId,
-          mediaId,
+          mediaId: maskedId,
+          stage: "metadata_resolve",
+          endpointVariant,
         });
         return null;
       }
 
       let downloadUrl = "";
-      const is360dialog =
-        metadata.provider === "360dialog" ||
-        metadata.provider === "360dialog_whatsapp" ||
-        process.env.ENABLE_360DIALOG_COEXISTENCE === "true";
 
       if (is360dialog) {
         // Step 1: Get the download URL from 360dialog API
-        const d360Res = await fetch(
-          `https://waba-v2.360dialog.io/${mediaId}`,
-          {
-            headers: { "D360-API-KEY": accessToken },
-          }
-        );
+        const targetUrl = `https://waba-v2.360dialog.io/${mediaId}`;
+        const d360Res = await fetch(targetUrl, {
+          headers: { "D360-API-KEY": accessToken },
+        });
 
         if (!d360Res.ok) {
           const errText = await d360Res.text();
           log.error(`[MEDIA_RESOLVE_FAILED] 360dialog media URL resolve failed`, new Error(errText), {
-            mediaId,
+            mediaId: maskedId,
             tenantId,
             status: d360Res.status,
+            stage: "metadata_resolve",
+            endpointVariant,
+            provider: metadata.provider,
+            mediaType: metadata.mediaType,
           });
           return null;
         }
@@ -73,19 +90,21 @@ export class MediaStorageService {
         downloadUrl = d360Data.url;
       } else {
         // Step 1: Get the download URL from Meta Graph API
-        const metaRes = await fetch(
-          `https://graph.facebook.com/v25.0/${mediaId}`,
-          {
-            headers: { Authorization: `Bearer ${accessToken}` },
-          }
-        );
+        const targetUrl = `https://graph.facebook.com/v25.0/${mediaId}`;
+        const metaRes = await fetch(targetUrl, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
 
         if (!metaRes.ok) {
           const errText = await metaRes.text();
           log.error(`[MEDIA_RESOLVE_FAILED] Meta media URL resolve failed`, new Error(errText), {
-            mediaId,
+            mediaId: maskedId,
             tenantId,
             status: metaRes.status,
+            stage: "metadata_resolve",
+            endpointVariant,
+            provider: metadata.provider,
+            mediaType: metadata.mediaType,
           });
           return null;
         }
@@ -96,12 +115,24 @@ export class MediaStorageService {
 
       if (!downloadUrl) {
         log.error(`[MEDIA_NO_URL] Media returned no download URL`, undefined, {
-          mediaId,
+          mediaId: maskedId,
           tenantId,
           provider: metadata.provider,
+          stage: "metadata_resolve",
+          endpointVariant,
         });
         return null;
       }
+
+      log.info(`[MEDIA_METADATA_RESOLVED] Media metadata successfully fetched`, {
+        mediaId: maskedId,
+        tenantId,
+        stage: "metadata_resolve",
+        endpointVariant,
+        provider: metadata.provider,
+        mediaType: metadata.mediaType,
+        hasDownloadUrl: !!downloadUrl,
+      });
 
       // Step 2: Download the actual file with scoped credentials
       const headers: Record<string, string> = {};
@@ -122,10 +153,15 @@ export class MediaStorageService {
       const fileRes = await fetch(downloadUrl, { headers });
 
       if (!fileRes.ok) {
-        log.error(`[MEDIA_DOWNLOAD_FAILED] Failed to download media from CDN`, new Error(`HTTP ${fileRes.status}`), {
-          mediaId,
+        log.error(`[MEDIA_BINARY_DOWNLOAD_FAILED] Failed to download media from CDN`, new Error(`HTTP ${fileRes.status}`), {
+          mediaId: maskedId,
           tenantId,
+          status: fileRes.status,
+          stage: "binary_download",
+          endpointVariant,
           provider: metadata.provider,
+          mediaType: metadata.mediaType,
+          downloadHost: new URL(downloadUrl).host,
         });
         return null;
       }
@@ -152,11 +188,14 @@ export class MediaStorageService {
 
       log.info(`[MEDIA_STORED] Blob uploaded`, {
         tenantId,
-        mediaId,
+        mediaId: maskedId,
         blobPath,
         fileSize,
         mediaType: metadata.mediaType,
         provider: metadata.provider,
+        stage: "binary_download",
+        endpointVariant,
+        status: 200,
       });
 
       return { blobUrl: blob.url, fileSize };
@@ -164,7 +203,7 @@ export class MediaStorageService {
       log.error(
         `[MEDIA_STORE_FAILED] Unexpected error in downloadAndStore`,
         err instanceof Error ? err : new Error(String(err)),
-        { tenantId, mediaId, provider: metadata.provider }
+        { tenantId, mediaId: maskedId, provider: metadata.provider, stage: "binary_download", endpointVariant }
       );
       return null;
     }
