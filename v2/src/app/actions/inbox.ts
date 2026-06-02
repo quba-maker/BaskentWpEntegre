@@ -1063,8 +1063,8 @@ export async function removeTag(phone: string, tagToRemove: string) {
   ).then(res => res.data || { success: false });
 }
 
-export async function toggleBotStatus(conversationIdOrPhone: string, isBotActive: boolean) {
-  if (!conversationIdOrPhone) return { success: false };
+export async function toggleBotStatus(conversationIdOrPhone: string, isBotActive: boolean): Promise<{ success: boolean; error?: string }> {
+  if (!conversationIdOrPhone) return { success: false, error: undefined };
   
   return withActionGuard(
     { actionName: 'toggleBotStatus' },
@@ -1086,6 +1086,11 @@ export async function toggleBotStatus(conversationIdOrPhone: string, isBotActive
       const phone = convRows[0].phone_number;
       const channelId = convRows[0].channel_id;
       const newStatus = isBotActive ? 'bot' : 'human';
+
+      // Security Kill-switch Gate
+      if (isBotActive && process.env.ENABLE_SELECTED_AUTOPILOT !== 'true') {
+        return { success: false, error: "Otopilot sistemi şu anda genel olarak kapalıdır. Lütfen sistem yöneticiniz ile iletişime geçin." };
+      }
       
       // Update DB: status and autopilot_enabled
       await ctx.db.executeSafe({
@@ -1155,5 +1160,5 @@ export async function toggleBotStatus(conversationIdOrPhone: string, isBotActive
 
       return { success: true };
     }
-  ).then(res => res.success ? { success: true } : { success: false });
+  ).then(res => res.success ? (res.data || { success: true }) : { success: false, error: res.error });
 }

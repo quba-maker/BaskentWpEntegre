@@ -917,7 +917,7 @@ export function ConversationViewport() {
         ...activeContact,
         isBotActive: !newBotState,
       });
-      setSendError("Bot durumu değiştirilirken hata oluştu.");
+      setSendError(res.error || "Bot durumu değiştirilirken hata oluştu.");
       setTimeout(() => setSendError(""), 4000);
     }
     setIsTogglingBot(false);
