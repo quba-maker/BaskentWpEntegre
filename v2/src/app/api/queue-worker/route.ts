@@ -6,16 +6,17 @@ import fs from "fs";
 import path from "path";
 
 // Initialize global debug logs in dev
-if (!global.debugLogs) {
-  global.debugLogs = [];
+const globalAny = global as any;
+if (!globalAny.debugLogs) {
+  globalAny.debugLogs = [];
 }
 function addLog(entry: any) {
-  global.debugLogs = global.debugLogs || [];
-  global.debugLogs.push({
+  globalAny.debugLogs = globalAny.debugLogs || [];
+  globalAny.debugLogs.push({
     timestamp: new Date().toISOString(),
     ...entry
   });
-  if (global.debugLogs.length > 200) global.debugLogs.shift();
+  if (globalAny.debugLogs.length > 200) globalAny.debugLogs.shift();
 }
 
 const receiver = new Receiver({

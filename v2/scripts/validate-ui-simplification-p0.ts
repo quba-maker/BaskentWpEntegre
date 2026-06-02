@@ -146,22 +146,22 @@ async function runValidationP0() {
 
   // 7. Validate Appointment Detail Drawer Component
   console.log("\n🧪 [Assertion 20] Auditing Appointment Detail Drawer Component File...");
-  const apptDrawerPath = path.join(__dirname, "../src/components/features/takip/appointment-detail-drawer.tsx");
+  const apptDrawerPath = path.join(__dirname, "../src/components/features/takip/patient-detail-drawer.tsx");
   if (!fs.existsSync(apptDrawerPath)) {
-    throw new Error("A20 failed: appointment-detail-drawer.tsx file does not exist.");
+    throw new Error("A20 failed: patient-detail-drawer.tsx file does not exist.");
   }
   const apptDrawerContent = fs.readFileSync(apptDrawerPath, "utf8");
-  if (!apptDrawerContent.includes("AppointmentDetailDrawer")) {
-    throw new Error("A20b failed: AppointmentDetailDrawer component definition is missing.");
+  if (!apptDrawerContent.includes("PatientDetailDrawer")) {
+    throw new Error("A20b failed: PatientDetailDrawer component definition is missing.");
   }
-  console.log("   ✅ Assertion 20 (Appointment Detail Drawer existence): PASS");
+  console.log("   ✅ Assertion 20 (Patient Detail Drawer existence): PASS");
 
   // 8. Validate Patient Tracking Tab Standardized Columns
   console.log("\n🧪 [Assertion 21] Auditing Patient Tracking Tab Column Headers...");
   const trackingTabPath = path.join(__dirname, "../src/components/features/takip/patient-tracking-tab.tsx");
   const trackingTabContent = fs.readFileSync(trackingTabPath, "utf8");
 
-  const requiredHeaders = ["Durum", "Hasta", "Son Aktivite", "Kısa Özet", "Sonraki Aksiyon", "Sonraki Takip", "Aksiyon"];
+  const requiredHeaders = ["Durum", "Hasta", "Son Aktivite", "Kısa Özet", "Manuel Notlar", "Aksiyon"];
   for (const header of requiredHeaders) {
     if (!trackingTabContent.includes(header)) {
       throw new Error(`A21 failed: Standardised header '${header}' is missing in patient-tracking-tab.tsx.`);

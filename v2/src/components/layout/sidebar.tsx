@@ -97,27 +97,27 @@ export async function Sidebar({ tenantData }: { tenantData?: TenantBootstrapData
         <NavLink href={`/${session?.tenantSlug || ''}/kalite`} icon={<Activity className="w-[18px] h-[18px]" />} label="Operasyon Kalitesi" />
         
         {/* AI MODULES */}
-        {session?.role !== "viewer" && (
+        {(session?.role === "platform_admin" || session?.role === "admin" || session?.role === "owner") && (
           <NavLink href={`/${session?.tenantSlug || ''}/bot`} icon={<Bot className="w-[18px] h-[18px]" />} label="AI Asistan" />
         )}
         
         {/* ANALYTICS */}
-        {session?.role !== "viewer" && (
+        {(session?.role === "platform_admin" || session?.role === "admin" || session?.role === "owner") && (
           <NavLink href={`/${session?.tenantSlug || ''}/analytics`} icon={<BarChart3 className="w-[18px] h-[18px]" />} label="Performans" />
         )}
         
-        {/* ADMIN ONLY */}
-        {(session?.role === "platform_admin" || session?.role === "admin" || session?.role === "owner") && (
+        {/* ADMIN/DEVELOPER ONLY */}
+        {session?.role === "platform_admin" && (
           <>
             <NavLink href={`/${session?.tenantSlug || ''}/ai-developer`} icon={<Terminal className="w-[18px] h-[18px]" />} label="AI Developer" />
             <NavLink href={`/${session?.tenantSlug || ''}/automation`} icon={<Zap className="w-[18px] h-[18px]" />} label="Otomasyon" />
           </>
         )}
         {(session?.role === "platform_admin" || session?.role === "admin" || session?.role === "owner") && (
-          <>
-            <NavLink href={`/${session?.tenantSlug || ''}/integrations`} icon={<Link2 className="w-[18px] h-[18px]" />} label="Entegrasyonlar" />
-            <NavLink href={`/${session?.tenantSlug || ''}/recovery`} icon={<ShieldAlert className="w-[18px] h-[18px]" />} label="Sistem Kurtarma" />
-          </>
+          <NavLink href={`/${session?.tenantSlug || ''}/integrations`} icon={<Link2 className="w-[18px] h-[18px]" />} label="Entegrasyonlar" />
+        )}
+        {session?.role === "platform_admin" && (
+          <NavLink href={`/${session?.tenantSlug || ''}/recovery`} icon={<ShieldAlert className="w-[18px] h-[18px]" />} label="Sistem Kurtarma" />
         )}
       </nav>
 
