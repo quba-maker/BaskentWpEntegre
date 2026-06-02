@@ -732,7 +732,7 @@ export class QueueWorkerEngine {
         case 'image':
           mediaType = 'image';
           mediaId = incomingMsg.image?.id || null;
-          mediaUrl = incomingMsg.image?.url || null;
+          mediaUrl = (incomingMsg.image as any)?.url || null;
           mediaMetadata = {
             mime_type: incomingMsg.image?.mime_type,
             caption: incomingMsg.image?.caption,
@@ -742,7 +742,7 @@ export class QueueWorkerEngine {
         case 'document':
           mediaType = 'document';
           mediaId = incomingMsg.document?.id || null;
-          mediaUrl = incomingMsg.document?.url || null;
+          mediaUrl = (incomingMsg.document as any)?.url || null;
           mediaMetadata = {
             mime_type: incomingMsg.document?.mime_type,
             filename: incomingMsg.document?.filename,
@@ -752,7 +752,7 @@ export class QueueWorkerEngine {
         case 'audio':
           mediaType = 'audio';
           mediaId = incomingMsg.audio?.id || null;
-          mediaUrl = incomingMsg.audio?.url || null;
+          mediaUrl = (incomingMsg.audio as any)?.url || null;
           mediaMetadata = {
             mime_type: incomingMsg.audio?.mime_type,
           };
@@ -761,7 +761,7 @@ export class QueueWorkerEngine {
         case 'video':
           mediaType = 'video';
           mediaId = incomingMsg.video?.id || null;
-          mediaUrl = incomingMsg.video?.url || null;
+          mediaUrl = (incomingMsg.video as any)?.url || null;
           mediaMetadata = {
             mime_type: incomingMsg.video?.mime_type,
             caption: incomingMsg.video?.caption,

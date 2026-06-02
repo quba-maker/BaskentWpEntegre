@@ -78,6 +78,12 @@ import { WebhookDedupeService } from "../src/lib/services/webhook-dedupe.service
 import { FeatureFlagService } from "../src/lib/services/feature-flag.service";
 import { RealtimePublisher } from "../src/lib/realtime/publisher";
 import { RealtimeBus } from "../src/lib/realtime/bus";
+import { CredentialsService } from "../src/lib/services/credentials.service";
+import { ThreeSixtyDialogService } from "../src/lib/services/providers/three-sixty-dialog.service";
+
+// Set test tenant credentials env configuration
+process.env.TEST_TENANT_ID = "test-tenant-uuid";
+process.env.TEST_USER_ID = "test-user-uuid";
 
 // Realtime states to verify side effects
 let publishedMessages: any[] = [];
@@ -88,6 +94,10 @@ let loggedEvents: any[] = [];
 let featureFlagStates: Record<string, boolean> = {
   whatsapp_auto_reply: false, // DEFAULT IS LISTENING MODE (false)
 };
+let mockLastInboundTime = Date.now() - 5000; // 5 seconds ago by default
+let mockThreeSixtySendFailure = false;
+let lastThreeSixtySendParams: any = null;
+let capturedUpdates: any[] = [];
 
 // ── MONKEYPATCH REALTIME BUS TO BYPASS ABLY & ZOD SCHEMA VALIDATION ──
 RealtimeBus.publish = async function (tenantId: string, event: any) {
@@ -133,7 +143,8 @@ TenantDB.prototype.executeSafe = async function (queryObj: any) {
 
   // 4. Inbound/outbound message insertion check
   if (sql.includes("INSERT INTO messages")) {
-    return [{ id: "mock_saved_msg_id", conversation_id: "mock_conv_id" }];
+    savedMessages.push({ sql, values: vals });
+    return [{ id: "mock_saved_msg_id", conversation_id: "mock-conv-uuid" }];
   }
 
   // 5. Conversation status check
@@ -141,9 +152,28 @@ TenantDB.prototype.executeSafe = async function (queryObj: any) {
     return [{ status: mockConversationsStatus }];
   }
 
-  // 6. Handover status update
+  // 6. Conversations resolve channel & ID
+  if (sql.toLowerCase().includes("from conversations")) {
+    return [{ id: "mock-conv-uuid", channel: "whatsapp", channel_id: "test-channel-uuid", status: mockConversationsStatus }];
+  }
+
+  // 7. Last inbound message query for 24h service window check
+  if (sql.includes("direction = 'in'") && sql.toLowerCase().includes("from messages")) {
+    return [{ created_at: new Date(mockLastInboundTime).toISOString() }];
+  }
+
+  // 8. Handover status update
   if (sql.includes("UPDATE conversations SET status = 'human'") || sql.includes("SET status = 'human'")) {
     mockConversationsStatus = "human";
+    capturedUpdates.push({ sql, values: vals });
+    return [];
+  }
+
+  if (sql.includes("UPDATE conversations")) {
+    capturedUpdates.push({ sql, values: vals });
+    if (sql.includes("status = 'human'") || sql.includes("status = $")) {
+      mockConversationsStatus = "human";
+    }
     return [];
   }
 
@@ -175,6 +205,29 @@ FeatureFlagService.getFlags = async function (tenantId: string) {
 // ── MONKEYPATCH REALTIME_PUBLISHER ──
 RealtimePublisher.publishMessageCreated = async function (tenantId: string, message: any, metadata: any) {
   publishedMessages.push({ tenantId, message, metadata });
+};
+
+// ── MONKEYPATCH CREDENTIALS_SERVICE ──
+CredentialsService.resolveCredentials = async function (tenantId: string, provider: string) {
+  return {
+    accessToken: "mock_api_key_abc",
+    whatsappPhoneNumberId: "+905527641397",
+    whatsappBusinessAccountId: null,
+    metaPageId: null,
+    instagramId: null,
+    source: "v2_channels",
+    channelId: "test-channel-uuid",
+    provider: "360dialog"
+  };
+};
+
+// ── MONKEYPATCH THREE_SIXTY_DIALOG_SERVICE ──
+ThreeSixtyDialogService.sendMessage = async function (apiKey: string, to: string, content: string, media?: any) {
+  lastThreeSixtySendParams = { apiKey, to, content, media };
+  if (mockThreeSixtySendFailure) {
+    return { success: false };
+  }
+  return { success: true, providerMessageId: "wamid.mock_panel_sent_123" };
 };
 
 // Now require the mockable routes and worker dependencies
@@ -505,6 +558,135 @@ async function runValidationTests() {
   console.log("   ✅ Dynamic 360dialog endpoint routing: PASS");
   console.log("   ✅ D360-API-KEY authentication headers verified: PASS");
   console.log("   ✅ Zero API Key leak to Meta CDN: PASS");
+
+  // ----------------------------------------------------
+  // TEST 6: Panel Outbound & 24h Service Window Gate
+  // ----------------------------------------------------
+  console.log("\n🧪 [TEST 6] Panel Outbound Messaging & 24h Service Window Gate...");
+
+  const { sendMessage, sendMediaMessage } = require("../src/app/actions/inbox");
+
+  // A: 24h service window check - BLOCKED when last message is older than 24h
+  mockLastInboundTime = Date.now() - 25 * 60 * 60 * 1000; // 25 hours ago
+  
+  const textSendBlockedRes = await sendMessage("905001112233", "Merhaba");
+  if (textSendBlockedRes.success) {
+    throw new Error("Validation failure: outbound text send should have been blocked outside the 24-hour service window!");
+  }
+  if (!textSendBlockedRes.error?.includes("24 saatten fazla zaman geçmiş")) {
+    throw new Error(`Expected service window warning, got: ${textSendBlockedRes.error}`);
+  }
+  console.log("   ✅ Text sending blocked outside 24h window: PASS");
+
+  const mediaSendBlockedRes = await sendMediaMessage(
+    "905001112233",
+    "https://sample.vercel-storage.com/image.png",
+    "image",
+    "image.png",
+    "image/png",
+    1024,
+    "Altyazı"
+  );
+  if (mediaSendBlockedRes.success) {
+    throw new Error("Validation failure: outbound media send should have been blocked outside the 24-hour service window!");
+  }
+  if (!mediaSendBlockedRes.error?.includes("24 saatten fazla zaman geçmiş")) {
+    throw new Error(`Expected service window warning for media, got: ${mediaSendBlockedRes.error}`);
+  }
+  console.log("   ✅ Media sending blocked outside 24h window: PASS");
+
+  // B: Vercel Blob URL verification check - BLOCKED when mediaUrl is not .vercel-storage.com
+  mockLastInboundTime = Date.now() - 5 * 1000; // 5 seconds ago (within window)
+  
+  const mediaSendBadUrlRes = await sendMediaMessage(
+    "905001112233",
+    "https://external-hacker-site.com/malicious.png",
+    "image",
+    "malicious.png",
+    "image/png",
+    1024,
+    "Altyazı"
+  );
+  if (mediaSendBadUrlRes.success) {
+    throw new Error("Security failure: sendMediaMessage accepted a non-Vercel-Blob URL!");
+  }
+  if (!mediaSendBadUrlRes.error?.includes("sistem tarafından yüklenen medya dosyalarını")) {
+    throw new Error(`Expected security URL error message, got: ${mediaSendBadUrlRes.error}`);
+  }
+  console.log("   ✅ External media URL rejected: PASS");
+
+  // C: Successful Outbound text sending via 360dialog
+  lastThreeSixtySendParams = null;
+  savedMessages = [];
+  capturedUpdates = [];
+  mockConversationsStatus = "ai"; // Start in AI mode
+
+  const textSendRes = await sendMessage("905001112233", "Operator Merhaba");
+  if (!textSendRes.success) {
+    throw new Error(`Text message sending failed: ${textSendRes.error}`);
+  }
+  if (lastThreeSixtySendParams?.content !== "Operator Merhaba" || lastThreeSixtySendParams?.to !== "905001112233") {
+    throw new Error("Outbound text parameters did not match inside ThreeSixtyDialogService");
+  }
+  
+  // Verify status updated to human
+  if (mockConversationsStatus !== "human") {
+    throw new Error(`Status update to 'human' failed: expected human, got ${mockConversationsStatus}`);
+  }
+
+  // Verify message inserted to database with audit metadata
+  const textDbMsg = savedMessages.find(m => m.values.includes("Operator Merhaba"));
+  if (!textDbMsg) {
+    throw new Error("Outgoing text message not saved to database!");
+  }
+  const textMetadata = JSON.parse(textDbMsg.values[textDbMsg.values.length - 1]);
+  if (textMetadata.initiated_from !== "inbox_panel" || textMetadata.source !== "panel_operator") {
+    throw new Error("Audit metadata missing or incorrect on text message insert!");
+  }
+  console.log("   ✅ Text messaging routed via 360dialog, conversation status set to 'human', audit metadata verified: PASS");
+
+  // D: Successful Outbound media sending via 360dialog
+  lastThreeSixtySendParams = null;
+  savedMessages = [];
+  capturedUpdates = [];
+  mockConversationsStatus = "ai"; // Start in AI mode
+
+  const mediaSendRes = await sendMediaMessage(
+    "905001112233",
+    "https://mybucket.vercel-storage.com/cat.jpg",
+    "image",
+    "cat.jpg",
+    "image/jpeg",
+    51200,
+    "Sevimli Kedi"
+  );
+
+  if (!mediaSendRes.success) {
+    throw new Error(`Media message sending failed: ${mediaSendRes.error}`);
+  }
+  if (lastThreeSixtySendParams?.content !== "Sevimli Kedi" || lastThreeSixtySendParams?.media?.url !== "https://mybucket.vercel-storage.com/cat.jpg") {
+    throw new Error("Outbound media parameters did not match inside ThreeSixtyDialogService");
+  }
+
+  // Verify status updated to human
+  if (mockConversationsStatus !== "human") {
+    throw new Error(`Status update to 'human' failed for media: expected human, got ${mockConversationsStatus}`);
+  }
+
+  // Verify message inserted to database with media properties and audit metadata merged
+  const mediaDbMsg = savedMessages[0];
+  if (!mediaDbMsg) {
+    throw new Error("Outgoing media message not saved to database!");
+  }
+  // The last value is media_metadata JSONB string
+  const mediaMetadata = JSON.parse(mediaDbMsg.values[mediaDbMsg.values.length - 1]);
+  if (mediaMetadata.initiated_from !== "inbox_panel" || mediaMetadata.source !== "panel_operator") {
+    throw new Error("Audit metadata missing or incorrect on media message insert!");
+  }
+  if (mediaMetadata.filename !== "cat.jpg" || mediaMetadata.caption !== "Sevimli Kedi") {
+    throw new Error("Original media fields lost on media message insert!");
+  }
+  console.log("   ✅ Media messaging routed via 360dialog, Vercel Blob URL verification passed, audit metadata verified: PASS");
 
   console.log("\n🎉 ALL 360DIALOG COEXISTENCE ADAPTER VALIDATION TESTS PASSED!");
   console.log("==========================================================\n");

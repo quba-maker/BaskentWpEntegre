@@ -12,7 +12,12 @@ export class ThreeSixtyDialogService {
   static async sendMessage(
     apiKey: string,
     to: string,
-    content: string
+    content: string,
+    media?: {
+      type: "image" | "document" | "audio" | "video";
+      url: string;
+      filename?: string;
+    }
   ): Promise<{ success: boolean; providerMessageId?: string }> {
     const url = "https://waba-v2.360dialog.io/v1/messages";
     
@@ -21,18 +26,39 @@ export class ThreeSixtyDialogService {
     }
 
     try {
+      let bodyData: any;
+
+      if (media) {
+        const mediaPayload: any = { link: media.url.trim() };
+        if (media.filename) {
+          mediaPayload.filename = media.filename;
+        }
+        if (content && (media.type === "image" || media.type === "document")) {
+          mediaPayload.caption = content;
+        }
+
+        bodyData = {
+          to: to,
+          recipient_type: "individual",
+          type: media.type,
+          [media.type]: mediaPayload
+        };
+      } else {
+        bodyData = {
+          to: to,
+          recipient_type: "individual",
+          type: "text",
+          text: { body: content }
+        };
+      }
+
       const response = await fetch(url, {
         method: "POST",
         headers: {
           "D360-API-KEY": apiKey.trim(),
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({
-          to: to,
-          type: "text",
-          recipient_type: "individual",
-          text: { body: content }
-        })
+        body: JSON.stringify(bodyData)
       });
 
       if (!response.ok) {

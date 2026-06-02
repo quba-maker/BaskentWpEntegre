@@ -297,14 +297,38 @@ export async function sendMessage(phone: string, text: string) {
     async (ctx) => {
       // Hangi kanaldan geldiğini bul ve conversation_id'yi çöz
       const convRows = await ctx.db.executeSafe({
-        text: `SELECT id, channel FROM conversations WHERE phone_number = $1 AND tenant_id = $2 LIMIT 1`,
+        text: `SELECT id, channel, channel_id FROM conversations WHERE phone_number = $1 AND tenant_id = $2 LIMIT 1`,
         values: [phone, ctx.tenantId]
       });
       const channel = convRows[0]?.channel || 'whatsapp';
       const conversationId = convRows[0]?.id;
+      const channelId = convRows[0]?.channel_id;
 
       if (!conversationId) {
-        throw new Error(`Aktif bir konuşma kaydı bulunamadı (Telefon: ${phone})`);
+        return { success: false, error: `Aktif bir konuşma kaydı bulunamadı (Telefon: ${phone})` };
+      }
+
+      // ─── WhatsApp 24-Hour Service Window Check ───
+      if (channel === 'whatsapp') {
+        const lastInboundRow = await ctx.db.executeSafe({
+          text: `SELECT created_at 
+                 FROM messages 
+                 WHERE conversation_id = $1 
+                   AND tenant_id = $2 
+                   AND (channel_id = $3 OR channel_id IS NULL)
+                   AND direction = 'in'
+                 ORDER BY created_at DESC 
+                 LIMIT 1`,
+          values: [conversationId, ctx.tenantId, channelId]
+        });
+        
+        const lastInboundTime = lastInboundRow?.[0]?.created_at;
+        if (!lastInboundTime || (Date.now() - new Date(lastInboundTime).getTime()) > 24 * 60 * 60 * 1000) {
+          return {
+            success: false,
+            error: "Müşteri ile son etkileşiminiz üzerinden 24 saatten fazla zaman geçmiş. WhatsApp kuralları gereği serbest metin gönderilemez, sadece onaylı şablon gönderebilirsiniz."
+          };
+        }
       }
 
       // Credentials Service ile kimlik bilgilerini çöz
@@ -317,7 +341,25 @@ export async function sendMessage(phone: string, text: string) {
       let providerMessageId: string | null = null;
       let messageStatus = 'pending';
 
-      if (!META_ACCESS_TOKEN) {
+      const isThreeSixty = channel === 'whatsapp' && (credentials.provider === '360dialog' || credentials.provider === '360dialog_whatsapp');
+
+      if (isThreeSixty && credentials.accessToken) {
+        const { ThreeSixtyDialogService } = await import("@/lib/services/providers/three-sixty-dialog.service");
+        try {
+          const res = await ThreeSixtyDialogService.sendMessage(
+            credentials.accessToken,
+            phone,
+            text
+          );
+          providerMessageId = res.providerMessageId || null;
+          messageStatus = res.success ? 'sent' : 'failed';
+          if (!res.success) {
+            return { success: false, error: "360dialog API call returned failure" };
+          }
+        } catch (e: any) {
+          return { success: false, error: e.message || "360dialog gönderme hatası" };
+        }
+      } else if (!META_ACCESS_TOKEN) {
         const { logger: inboxLogger } = await import("@/lib/core/logger");
         inboxLogger.withContext({ module: 'Inbox' }).warn("Meta credentials missing, only saving to DB");
       } else {
@@ -403,10 +445,19 @@ export async function sendMessage(phone: string, text: string) {
       }
 
       const msgInsert = await ctx.db.executeSafe({
-        text: `INSERT INTO messages (tenant_id, conversation_id, phone_number, direction, content, channel, status, provider_message_id)
-               VALUES ($1, $2, $3, 'out', $4, $5, $6, $7)
+        text: `INSERT INTO messages (tenant_id, conversation_id, phone_number, direction, content, channel, status, provider_message_id, media_metadata)
+               VALUES ($1, $2, $3, 'out', $4, $5, $6, $7, $8)
                RETURNING id`,
-        values: [ctx.tenantId, conversationId, phone, text, channel, messageStatus, providerMessageId]
+        values: [
+          ctx.tenantId, 
+          conversationId, 
+          phone, 
+          text, 
+          channel, 
+          messageStatus, 
+          providerMessageId,
+          JSON.stringify({ initiated_from: "inbox_panel", source: "panel_operator" })
+        ]
       });
 
       const messageId = Array.isArray(msgInsert) ? msgInsert[0]?.id : (msgInsert as any)?.rows?.[0]?.id;
@@ -418,7 +469,8 @@ export async function sendMessage(phone: string, text: string) {
                    last_channel = $2,
                    last_message_status = $3,
                    last_message_direction = 'out',
-                   message_count = message_count + 1
+                   message_count = message_count + 1,
+                   status = 'human'
                WHERE phone_number = $4 AND tenant_id = $5`,
         values: [text, channel, messageStatus, phone, ctx.tenantId]
       });
@@ -471,6 +523,7 @@ export async function sendMessage(phone: string, text: string) {
     }
   ).then(res => {
     if (!res.success) return { success: false, error: res.error };
+    if (res.data && !res.data.success) return { success: false, error: res.data.error };
     return { success: true };
   }).catch((err: any) => {
     console.error('[sendMessage_CATCH]', err?.message || err);
@@ -486,19 +539,59 @@ export async function sendMediaMessage(phone: string, mediaUrl: string, mediaTyp
     return { success: false, error: "Invalid phone number" };
   }
 
+  // ─── SECURITY: Enforce Vercel Blob URLs only ───
+  try {
+    const parsedUrl = new URL(mediaUrl);
+    if (!parsedUrl.hostname.endsWith('.vercel-storage.com')) {
+      return {
+        success: false,
+        error: "Güvenlik nedeniyle sadece sistem tarafından yüklenen medya dosyalarını gönderebilirsiniz."
+      };
+    }
+  } catch (err) {
+    return {
+      success: false,
+      error: "Geçersiz medya bağlantısı."
+    };
+  }
+
   return withActionGuard(
     { actionName: 'sendMediaMessage' },
     async (ctx) => {
-      // Resolve channel and conversation_id
+      // Resolve channel, channel_id and conversation_id
       const convRows = await ctx.db.executeSafe({
-        text: `SELECT id, channel FROM conversations WHERE phone_number = $1 AND tenant_id = $2 LIMIT 1`,
+        text: `SELECT id, channel, channel_id FROM conversations WHERE phone_number = $1 AND tenant_id = $2 LIMIT 1`,
         values: [phone, ctx.tenantId]
       });
       const channel = convRows[0]?.channel || 'whatsapp';
       const conversationId = convRows[0]?.id;
+      const channelId = convRows[0]?.channel_id;
 
       if (!conversationId) {
-        throw new Error(`Aktif bir konuşma kaydı bulunamadı (Telefon: ${phone})`);
+        return { success: false, error: `Aktif bir konuşma kaydı bulunamadı (Telefon: ${phone})` };
+      }
+
+      // ─── WhatsApp 24-Hour Service Window Check ───
+      if (channel === 'whatsapp') {
+        const lastInboundRow = await ctx.db.executeSafe({
+          text: `SELECT created_at 
+                 FROM messages 
+                 WHERE conversation_id = $1 
+                   AND tenant_id = $2 
+                   AND (channel_id = $3 OR channel_id IS NULL)
+                   AND direction = 'in'
+                 ORDER BY created_at DESC 
+                 LIMIT 1`,
+          values: [conversationId, ctx.tenantId, channelId]
+        });
+        
+        const lastInboundTime = lastInboundRow?.[0]?.created_at;
+        if (!lastInboundTime || (Date.now() - new Date(lastInboundTime).getTime()) > 24 * 60 * 60 * 1000) {
+          return {
+            success: false,
+            error: "Müşteri ile son etkileşiminiz üzerinden 24 saatten fazla zaman geçmiş. WhatsApp kuralları gereği serbest metin gönderilemez, sadece onaylı şablon gönderebilirsiniz."
+          };
+        }
       }
 
       const provider = (channel === 'messenger' || channel === 'instagram' ? channel : 'whatsapp') as 'whatsapp' | 'messenger' | 'instagram';
@@ -509,7 +602,34 @@ export async function sendMediaMessage(phone: string, mediaUrl: string, mediaTyp
       let providerMessageId: string | null = null;
       let messageStatus = 'pending';
 
-      if (META_ACCESS_TOKEN && PHONE_NUMBER_ID && channel === 'whatsapp') {
+      const isThreeSixty = channel === 'whatsapp' && (credentials.provider === '360dialog' || credentials.provider === '360dialog_whatsapp');
+
+      if (isThreeSixty && credentials.accessToken) {
+        const { ThreeSixtyDialogService } = await import("@/lib/services/providers/three-sixty-dialog.service");
+        try {
+          let waType: "image" | "document" | "audio" | "video" = "image";
+          if (mediaType === "document" || mediaType === "audio" || mediaType === "video") {
+            waType = mediaType;
+          }
+          const res = await ThreeSixtyDialogService.sendMessage(
+            credentials.accessToken,
+            phone,
+            caption || '',
+            {
+              type: waType,
+              url: mediaUrl,
+              filename: filename || undefined
+            }
+          );
+          providerMessageId = res.providerMessageId || null;
+          messageStatus = res.success ? 'sent' : 'failed';
+          if (!res.success) {
+            return { success: false, error: "360dialog API call returned failure" };
+          }
+        } catch (e: any) {
+          return { success: false, error: e.message || "360dialog medya gönderme hatası" };
+        }
+      } else if (META_ACCESS_TOKEN && PHONE_NUMBER_ID && channel === 'whatsapp') {
         // Determine WhatsApp media type
         let waType = 'image';
         let waMediaPayload: any = {};
@@ -569,7 +689,14 @@ export async function sendMediaMessage(phone: string, mediaUrl: string, mediaTyp
         values: [
           ctx.tenantId, conversationId, phone, contentText, channel, messageStatus, providerMessageId,
           mediaType, mediaUrl,
-          JSON.stringify({ filename, mime_type: mimeType, size: fileSize, caption: caption || null })
+          JSON.stringify({ 
+            filename, 
+            mime_type: mimeType, 
+            size: fileSize, 
+            caption: caption || null,
+            initiated_from: "inbox_panel",
+            source: "panel_operator"
+          })
         ]
       });
 
@@ -583,7 +710,8 @@ export async function sendMediaMessage(phone: string, mediaUrl: string, mediaTyp
                    last_channel = $2,
                    last_message_status = $3,
                    last_message_direction = 'out',
-                   message_count = message_count + 1
+                   message_count = message_count + 1,
+                   status = 'human'
                WHERE phone_number = $4 AND tenant_id = $5`,
         values: [contentText, channel, messageStatus, phone, ctx.tenantId]
       });
@@ -623,6 +751,7 @@ export async function sendMediaMessage(phone: string, mediaUrl: string, mediaTyp
     }
   ).then(res => {
     if (!res.success) return { success: false, error: res.error };
+    if (res.data && !res.data.success) return { success: false, error: res.data.error };
     return { success: true };
   }).catch((err: any) => {
     // Surface real error for debugging (withActionGuard hides it in production)
