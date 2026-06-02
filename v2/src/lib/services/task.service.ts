@@ -470,7 +470,8 @@ export class TaskService {
         input.taskTitle,
         input.taskDescription,
         input.dueAt,
-        input.priority
+        input.priority,
+        input.metadata
       );
       return existing.id;
     }
@@ -540,7 +541,8 @@ export class TaskService {
     newTitle: string,
     newDescription: string,
     newDueAt: string,
-    newPriority?: string
+    newPriority?: string,
+    newMetadata?: Record<string, any>
   ): Promise<void> {
     // Read current metadata + title
     const rows = await this.db.executeSafe({
@@ -568,8 +570,30 @@ export class TaskService {
     const shouldUpdateTitle = this.isDirtyTitle(current.title);
     const finalTitle = shouldUpdateTitle ? newTitle : current.title;
 
+    const timeKeys = [
+      'callback_time_tr',
+      'patient_local_time',
+      'patient_timezone',
+      'timezone_source',
+      'time_confirmed_by_patient',
+      'needs_timezone_clarification',
+      'operation_window_valid',
+      'scheduled_for_utc',
+      'patient_city'
+    ];
+
+    const timeMetaToMerge: Record<string, any> = {};
+    if (newMetadata) {
+      for (const k of timeKeys) {
+        if (newMetadata[k] !== undefined) {
+          timeMetaToMerge[k] = newMetadata[k];
+        }
+      }
+    }
+
     const updatedMeta = {
       ...currentMeta,
+      ...timeMetaToMerge, // Merge incoming timezone metadata
       signals: mergedSignals,
       merged_count: mergedSignals.length,
       last_merged_at: new Date().toISOString(),

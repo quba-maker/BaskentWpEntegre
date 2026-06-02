@@ -3,6 +3,7 @@ import type { TenantDB } from "@/lib/core/tenant-db";
 import type { CrmExtractionType } from "./ai/crm-extractor";
 import { oppStageToLeadStage } from '@/lib/config/stage-mapping';
 import { PatientNameSyncService } from "./patient-name-sync";
+import { computeTimeMetadata } from "../utils/timezone";
 
 const log = logger.withContext({ module: 'OpportunityService' });
 
@@ -106,13 +107,34 @@ export class OpportunityService {
   /**
    * Build metadata JSONB from CRM extraction.
    */
-  private buildMetadata(crmData: CrmExtractionType): Record<string, any> {
+  private buildMetadata(crmData: CrmExtractionType, country?: string | null): Record<string, any> {
     const meta: Record<string, any> = {};
     if (crmData.requested_callback_datetime) meta.requested_callback_datetime = crmData.requested_callback_datetime;
     if (crmData.travel_date) meta.travel_date_raw = crmData.travel_date;
     if (crmData.report_status && crmData.report_status !== 'none') meta.report_status = crmData.report_status;
     if (crmData.next_best_action) meta.next_best_action = crmData.next_best_action;
     if (crmData.requires_human_confirmation) meta.requires_human_confirmation = true;
+
+    // Timezone metadata resolution
+    if (crmData.requested_callback_datetime) {
+      const timeMeta = computeTimeMetadata(
+        crmData.requested_callback_datetime,
+        country || crmData.country,
+        crmData.patient_city,
+        {
+          needs_timezone_clarification: crmData.needs_timezone_clarification,
+          timezone_source: crmData.timezone_source,
+          time_confirmed_by_patient: crmData.time_confirmed_by_patient,
+          patient_timezone: crmData.patient_timezone
+        }
+      );
+      if (timeMeta) {
+        Object.assign(meta, timeMeta);
+      }
+    }
+
+    if (crmData.patient_city) meta.patient_city = crmData.patient_city;
+
     return meta;
   }
 
@@ -152,7 +174,7 @@ export class OpportunityService {
       const newStage = mapPipelineToOpportunityStage(crmData.pipeline_stage, crmData.intent_type);
       const priority = crmData.opportunity_priority || 'warm';
       const nextFollowUp = this.computeNextFollowUp(crmData);
-      const metadata = this.buildMetadata(crmData);
+      const metadata = this.buildMetadata(crmData, resolvedCountry);
 
       // Parse travel_date
       let travelDate: string | null = null;
@@ -315,7 +337,7 @@ export class OpportunityService {
       // Resolve country: AI extraction (patient's own words) > phone prefix (deterministic guess)
     // Medical tourism: patient may have +90 phone but live in Germany
     const resolvedCountry = crmData.country || externalCountry || null;
-      const metadata = this.buildMetadata(crmData);
+      const metadata = this.buildMetadata(crmData, resolvedCountry);
       let travelDate: string | null = null;
       if (crmData.travel_date) {
         try {

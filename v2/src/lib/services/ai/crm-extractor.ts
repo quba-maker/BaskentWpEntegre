@@ -41,6 +41,12 @@ export const CrmExtractionSchema = z.object({
   data_deletion_request: z.boolean().optional(),
   different_department_detected: z.boolean().optional(),
   raw_department: z.string().optional(),
+  // Timezone and callback scheduling intelligence
+  patient_city: z.string().optional(),
+  patient_timezone: z.string().optional(),
+  timezone_source: z.enum(['patient_city', 'country', 'manual_confirmed', 'unknown']).optional(),
+  time_confirmed_by_patient: z.boolean().optional(),
+  needs_timezone_clarification: z.boolean().optional(),
 });
 
 export type CrmExtractionType = z.infer<typeof CrmExtractionSchema>;
@@ -129,7 +135,12 @@ Format:
   "reset_conversation_requested": boolean (Kullanıcı açıkça 'baştan başlayalım', 'sıfırdan başlayalım', 'yeni talep' gibi ifade kullandıysa true),
   "data_deletion_request": boolean (Kullanıcı açıkça 'bilgilerimi sil', 'beni unut', 'verilerimi sil', 'kaydımı sil' gibi GDPR/KVKK talebi belirttiyse true),
   "different_department_detected": boolean (Mevcut görüşme bağlamından FARKLI bir departman/tedavi talebi tespit edildiyse true. Örn: görüşme Kardiyoloji iken 'saç ekimi için bilgi almak istiyorum' dendi. AYNI departman devam ediyorsa false. İLK mesajda departman belirtiliyorsa false — çünkü henüz 'farklı' olacak bir önceki yok),
-  "raw_department": "string (Kullanıcının söylediği ham departman/tedavi ifadesi. Normalizasyon YAPMA. Örn: 'saç ekimi', 'kalp ameliyatı', 'diş beyazlatma'. Boş bırakılabilir)"
+  "raw_department": "string (Kullanıcının söylediği ham departman/tedavi ifadesi. Normalizasyon YAPMA. Örn: 'saç ekimi', 'kalp ameliyatı', 'diş beyazlatma'. Boş bırakılabilir)",
+  "patient_city": "string (Hastanın bulunduğu şehir/eyalet. Örn: 'Miami', 'Berlin', 'Köln'. Yoksa boş bırak)",
+  "patient_timezone": "string (Hastanın şehrine/saat dilimine göre geçerli IANA saat dilimi adı. Örn: 'America/New_York', 'Europe/Berlin', 'Europe/London'. Emin değilsen boş bırak)",
+  "timezone_source": "string ('patient_city' | 'country' | 'manual_confirmed' | 'unknown' — Saat diliminin kaynağı. Şehir biliniyorsa 'patient_city', sadece ülkeye göre belirlendiyse 'country', hasta onayladıysa 'manual_confirmed', belirsizse 'unknown')",
+  "time_confirmed_by_patient": boolean (Hasta randevu saatini açıkça teyit edip onayladıysa true. Örn: 'uygundur', 'teyit ediyorum', 'o saatte arayın'. Teyit etmediyse veya henüz teyit edilmemiş bir öneriyse false),
+  "needs_timezone_clarification": boolean (Eğer hasta Amerika/Kanada/Rusya gibi çok timezone'lu bir ülkede olduğunu söyleyip henüz şehir belirtmediyse, veya 'benim saatime göre/bize göre' deyip hangi saat diliminde olduğu belirsizse true)
 }
 
 Pipeline Aşama Kuralları (sırayla ilerler, geri gitmez):
@@ -173,14 +184,23 @@ Pipeline Aşama Kuralları (sırayla ilerler, geri gitmez):
   • WARM: Fiyat soruyor, bilgi alıyor, tedavi seçeneklerini araştırıyor
   • COLD: Genel soru, henüz net niyet yok ama potansiyel var
 
-📞 CALLBACK / RANDEVU TARİH ÇÖZÜMLEME:
+📞 CALLBACK / RANDEVU TARİH VE SAAT DİLİMİ ÇÖZÜMLEME:
 - "yarın" = bugün + 1 gün
 - "bugün saat 3'te" = bugün 15:00
 - "öğlen 2'de" = 14:00
 - "pazartesi" = gelecek pazartesi
 - "Haziran 20" veya "20 Haziran" = 2026-06-20 (yıl yoksa mevcut yılı kullan, geçmişte kalıyorsa gelecek yılı kullan)
-- Timezone: Europe/Istanbul (+03:00)
-- Emin değilsen requested_callback_datetime boş bırak
+- Timezone Yorumlama Kuralları:
+  1. HASTA YEREL SAATİ ("bana/bize göre"): Hasta "bize göre olsun", "bizim saate göre", "buradaki saate göre", "benim saatime göre", "buradaki saatle", "local time" gibi ifadeler kullanırsa bunu HASTANIN YEREL SAATİ olarak yorumla.
+     - Eğer hastanın ülkesi/şehri biliniyorsa, requested_callback_datetime değerini hastanın kendi yerel saatine göre hesaplayıp Türkiye saatine (+03:00) dönüştürerek yaz.
+     - Eğer hastanın ülkesi belirsizse veya birden fazla saat dilimi olan (ABD, Kanada, Rusya gibi) bir ülkede olup şehir belirtmediyse, requested_callback_datetime değerini boş veya tahmini bırak, "needs_timezone_clarification" = true ve "timezone_source" = "unknown" set et.
+  2. TÜRKİYE SAATİ ("sizin saate göre"): Hasta "sizin saate göre", "Türkiye saatiyle", "hastane saatine göre", "Konya saatine göre", "sizin oranın saatine göre" derse bunu TÜRKİYE SAATİ (Europe/Istanbul, +03:00) olarak yorumla.
+- Emin değilsen requested_callback_datetime boş bırak.
+- patient_city: Konuşmada şehir adı geçtiyse yaz (Örn: "Houston", "Berlin").
+- patient_timezone: Şehir/eyalet biliniyorsa IANA formatında yaz (Örn: "America/New_York", "Europe/Berlin"). Yoksa boş bırak.
+- timezone_source: Şehir veya timezone LLM tarafından başarıyla çözümlendiyse "patient_city", sadece ülkeye göre belirlendiyse "country", belirsizse "unknown".
+- time_confirmed_by_patient: Hasta sunulan saati kesin onayladıysa true.
+- needs_timezone_clarification: Hasta timezone-belirsiz bir ülkede (ABD, Kanada, Rusya vb.) olduğunu söyledi ama şehir belirtmediyse veya "benim saatime göre" deyip konumu bilinmiyorsa true.
 
 🚨 İNSAN ONAYI GEREKTİREN DURUMLAR (requires_human_confirmation = true):
 - Hasta "randevumu onaylayın" / "randevu kesinleştirin" derse
@@ -317,7 +337,7 @@ Pipeline Aşama Kuralları (sırayla ilerler, geri gitmez):
           coerced.country_confidence = parseFloat(coerced.country_confidence) || undefined;
         }
         // Nulls → undefined for optional string fields
-        for (const key of ['opportunity_reason', 'requested_callback_datetime', 'travel_date', 'cancellation_reason', 'requester_name', 'patient_relation', 'raw_department']) {
+        for (const key of ['opportunity_reason', 'requested_callback_datetime', 'travel_date', 'cancellation_reason', 'requester_name', 'patient_relation', 'raw_department', 'patient_city', 'patient_timezone', 'timezone_source']) {
           if (coerced[key] === null) coerced[key] = undefined;
         }
         
@@ -349,6 +369,12 @@ Pipeline Aşama Kuralları (sırayla ilerler, geri gitmez):
             data_deletion_request: typeof parsedObj.data_deletion_request === 'boolean' ? parsedObj.data_deletion_request : undefined,
             different_department_detected: typeof parsedObj.different_department_detected === 'boolean' ? parsedObj.different_department_detected : undefined,
             raw_department: typeof parsedObj.raw_department === 'string' ? parsedObj.raw_department : undefined,
+            // Callback & Timezone
+            patient_city: typeof parsedObj.patient_city === 'string' ? parsedObj.patient_city : undefined,
+            patient_timezone: typeof parsedObj.patient_timezone === 'string' ? parsedObj.patient_timezone : undefined,
+            timezone_source: ['patient_city', 'country', 'manual_confirmed', 'unknown'].includes(parsedObj.timezone_source) ? parsedObj.timezone_source : undefined,
+            time_confirmed_by_patient: typeof parsedObj.time_confirmed_by_patient === 'boolean' ? parsedObj.time_confirmed_by_patient : undefined,
+            needs_timezone_clarification: typeof parsedObj.needs_timezone_clarification === 'boolean' ? parsedObj.needs_timezone_clarification : undefined,
           } as CrmExtractionType;
           this.log.warn(`[CRM_ZOD_MANUAL_RECOVERY] Manual field extraction as last resort`, { traceId });
         }

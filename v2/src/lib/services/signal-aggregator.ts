@@ -30,6 +30,7 @@
 import { cleanString, safeName, formatHumanDate } from './sanitizers';
 import type { TaskType } from './task.service';
 import type { NotificationCategory, NotificationPriority } from './notification.service';
+import { computeTimeMetadata } from '../utils/timezone';
 
 // ═══════════════════════════════════════════════════════════
 // TYPES
@@ -187,24 +188,35 @@ export class SignalAggregator {
     // ── 4. Build sanitized content ──
     const name = safeName(input.patientName, input.phoneNumber);
     const dept = cleanString(input.department) || 'Genel';
+    const callbackDt = cleanString(crmData.requested_callback_datetime) || null;
     const country = cleanString(input.country) || '';
-    const callbackDt = cleanString(crmData.requested_callback_datetime);
-
-    // Task title
     const taskTitle = this.buildTaskTitle(taskGroup, name);
-
-    // Task description
-    const taskDescription = this.buildTaskDescription(signals, name, dept, callbackDt);
-
-    // Notification title + body
-    const notifTitle = NOTIF_TITLES[notifCategory] || '🔔 Bildirim';
-    const notifBody = this.buildNotifBody(signals, notifCategory, name, dept, country, callbackDt);
-
-    // Priority
-    const priority = this.resolvePriority(signals);
 
     // Due date: callback datetime → 1h from now → 2h from now
     const dueAt = this.resolveDueAt(signals, callbackDt);
+
+    // Resolve callback timezone metadata
+    const timeMeta = computeTimeMetadata(
+      callbackDt,
+      input.country,
+      crmData.patient_city,
+      {
+        needs_timezone_clarification: crmData.needs_timezone_clarification,
+        timezone_source: crmData.timezone_source,
+        time_confirmed_by_patient: crmData.time_confirmed_by_patient,
+        patient_timezone: crmData.patient_timezone
+      }
+    );
+
+    // Task description
+    const taskDescription = this.buildTaskDescription(signals, name, dept, callbackDt, timeMeta);
+
+    // Notification title + body
+    const notifTitle = NOTIF_TITLES[notifCategory] || '🔔 Bildirim';
+    const notifBody = this.buildNotifBody(signals, notifCategory, name, dept, country, callbackDt, timeMeta);
+
+    // Priority
+    const priority = this.resolvePriority(signals);
 
     return {
       signals,
@@ -228,6 +240,7 @@ export class SignalAggregator {
         department: cleanString(input.department) || undefined,
         country: cleanString(input.country) || undefined,
         callback_datetime: callbackDt || undefined,
+        ...(timeMeta || {})
       },
     };
   }
@@ -294,7 +307,8 @@ export class SignalAggregator {
     signals: string[], 
     name: string, 
     dept: string, 
-    callbackDt?: string | null
+    callbackDt: string | null,
+    timeMeta: any | null
   ): string {
     const parts: string[] = [];
 
@@ -303,9 +317,20 @@ export class SignalAggregator {
       parts.push(`${name}, ${dept} bölümü için randevu talep ediyor.`);
     } else if (signals.includes('callback_requested')) {
       if (callbackDt) {
-        parts.push(`${name} aranmak istiyor. Tercih edilen zaman: ${formatHumanDate(callbackDt)}.`);
+        let timeStr = formatHumanDate(callbackDt);
+        if (timeMeta && timeMeta.patient_local_time && timeMeta.callback_time_tr) {
+          const tzLabel = timeMeta.patient_timezone ? timeMeta.patient_timezone.split('/').pop()?.replace('_', ' ') : 'Yerel';
+          timeStr = `${timeMeta.callback_time_tr} TS (Türkiye) / ${timeMeta.patient_local_time} ${tzLabel}`;
+        }
+        parts.push(`${name} aranmak istiyor. Tercih edilen zaman: ${timeStr}.`);
       } else {
-        parts.push(`${name} aranmak istiyor. Arama zamanı net değil; saat teyidi gerekiyor.`);
+        parts.push(`${name} aranmak istiyor. Arama zamanı teyidi gerekiyor.`);
+      }
+      if (timeMeta?.needs_timezone_clarification) {
+        parts.push(`UYARI: Saat dilimi belirsiz; şehir/eyalet teyidi gerekiyor.`);
+      }
+      if (timeMeta?.operation_window_valid === false) {
+        parts.push(`UYARI: Talep edilen saat Türkiye operasyon saati dışında!`);
       }
     } else if (signals.includes('report_sent')) {
       parts.push(`${name} rapor/belge gönderdi, doktor incelemesi bekleniyor.`);
@@ -348,7 +373,8 @@ export class SignalAggregator {
     name: string,
     dept: string,
     country: string,
-    callbackDt?: string | null
+    callbackDt: string | null,
+    timeMeta: any | null
   ): string {
     const parts: string[] = [];
     
@@ -358,7 +384,12 @@ export class SignalAggregator {
 
     // Callback time (human readable)
     if (signals.includes('callback_requested') && callbackDt) {
-      parts.push(`Tercih edilen arama: ${formatHumanDate(callbackDt)}`);
+      let timeStr = formatHumanDate(callbackDt);
+      if (timeMeta && timeMeta.patient_local_time && timeMeta.callback_time_tr) {
+        const tzLabel = timeMeta.patient_timezone ? timeMeta.patient_timezone.split('/').pop()?.replace('_', ' ') : 'Yerel';
+        timeStr = `${timeMeta.callback_time_tr} TR / ${timeMeta.patient_local_time} ${tzLabel}`;
+      }
+      parts.push(`Tercih edilen arama: ${timeStr}`);
     }
 
     // Extra signals summary

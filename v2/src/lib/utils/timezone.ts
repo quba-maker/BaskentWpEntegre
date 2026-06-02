@@ -353,7 +353,9 @@ export function isToday(utcDate: string | Date | null | undefined, tz: string = 
  */
 export function buildTimeContext(
   tenantTz: string = TENANT_DEFAULT_TZ,
-  patientCountry?: string | null
+  patientCountry?: string | null,
+  isHealthcare: boolean = false,
+  operatingHours: { start: string; end: string } | null = null
 ): string {
   const now = new Date();
   const formatted = now.toLocaleString('tr-TR', {
@@ -366,17 +368,42 @@ export function buildTimeContext(
     minute: '2-digit',
   });
 
+  const opStart = operatingHours?.start || '09:00';
+  const opEnd = operatingHours?.end || '21:00';
+
+  const subject = isHealthcare ? 'hasta' : 'müşteri';
+  const subjectGen = isHealthcare ? 'hastanın' : 'müşterinin';
+  const subjectDat = isHealthcare ? 'hastaya' : 'müşteriye';
+  const subjectCapital = isHealthcare ? 'Hasta' : 'Müşteri';
+  const subjectGenCapital = isHealthcare ? 'Hastanın' : 'Müşterinin';
+
   let tzRules = '';
+  let opRules = '';
+  let comfortRules = '';
+
+  if (isHealthcare || operatingHours) {
+    opRules = `
+OPERASYON SAATİ SINIRI (Türkiye Saati):
+- Koordinatörlerin çalışma saatleri Türkiye saatiyle ${opStart} - ${opEnd} arasındadır.
+- KURAL: Bu aralık dışındaki saatler için (örn: Türkiye saatiyle 23:00) arama/görüşme randevusu ONAYLAMA VEYA ÖNERME.
+- Eğer ${subject} operasyon saati dışında bir zaman önerirse: "Bu saat Türkiye saatiyle çalışma saatlerimizin (${opStart}-${opEnd}) dışında kalıyor. Size uygun Türkiye saatiyle ${opStart} ile ${opEnd} arasında başka bir saat belirleyebilir miyiz?" şeklinde alternatif iste.`;
+  }
 
   if (patientCountry) {
     const resolution = resolvePatientTimezone(patientCountry);
 
+    comfortRules = `
+${subjectCapital.toUpperCase()} YEREL SAATİ UYGUNLUK SINIRI:
+- ${subjectGenCapital} yerel saatinde çok geç gece veya çok erken saatlerden (yerel saatle 22:00 sonrasından 08:00 öncesine kadar) kaçın.
+- Mümkünse ${subjectGen} yerel saatine göre 08:00 - 22:00 aralığında kalın.
+- Türkiye operasyon saati (${opStart} - ${opEnd}) ile ${subjectGen} yerel makul saati (08:00 - 22:00) arasındaki ortak kesişen saat dilimlerini tercih edin ve önerin.`;
+
     if (resolution.needs_confirmation) {
       // Ambiguous timezone country — bot must ask for city
       tzRules = `
-Hasta ülkesi: ${patientCountry} (birden fazla saat dilimi olan ülke).
-KURAL: Hasta belirli bir saat söylerse (örn: "Salı 15:00") ASLA kesin kabul etme.
-Önce hastanın şehrini veya saat dilimini sor: "Hangi şehirdesiniz? Saati doğru kaydetmek istiyoruz."
+${subjectCapital} ülkesi: ${patientCountry} (birden fazla saat dilimi olan ülke).
+KURAL: ${subjectCapital} belirli bir saat söylerse (örn: "Salı 15:00") ASLA kesin kabul etme.
+Önce ${subjectGen} şehrini veya saat dilimini sor: "${patientCountry === 'ABD' || patientCountry === 'USA' || patientCountry === 'US' || patientCountry.includes('Amerika') ? 'Amerika’da' : patientCountry + '’da'} bulunduğunuz şehir veya eyaleti paylaşabilir misiniz? Saat farkını doğru hesaplayıp size uygun arama saatini netleştirelim."
 Şehir bilgisi alınana kadar "tahmini saat" olarak not al, kesinleştirme.`;
     } else if (resolution.timezone !== tenantTz) {
       // Known timezone, different from tenant
@@ -386,20 +413,157 @@ KURAL: Hasta belirli bir saat söylerse (örn: "Salı 15:00") ASLA kesin kabul e
         minute: '2-digit',
       });
       tzRules = `
-Hasta ülkesi: ${patientCountry} (saat dilimi: ${resolution.timezone}).
-Hasta şu an yerel saat: ${patientNow}.
-KURAL: Hasta bir saat söylediğinde (örn: "15:00'te arayın") bunu HASTANIN YEREL SAATİ olarak yorumla.
-İç sistemde Türkiye saatine çevirip kaydet. Hastaya her zaman kendi yerel saatini söyle.`;
+${subjectCapital} ülkesi: ${patientCountry} (saat dilimi: ${resolution.timezone}).
+${subjectCapital} şu an yerel saat: ${patientNow}.
+KURAL: ${subjectCapital} bir saat söylediğinde bunu ${subjectCapital.toUpperCase()} YEREL SAATİ olarak yorumla.
+İç sistemde Türkiye saatine çevirip kaydet. ${subjectDat.charAt(0).toUpperCase() + subjectDat.slice(1)} her zaman kendi yerel saatini söyle.`;
     }
   }
+
+  const hostOrCompanyTimeLabel = isHealthcare ? 'TÜRKİYE / HASTANE SAATİ' : 'TÜRKİYE / FİRMA SAATİ';
+  const hostOrCompanyTimePhrases = isHealthcare 
+    ? '"sizin saate göre", "Türkiye saatiyle", "hastane saatine göre", "Konya saatine göre", "sizin oranın saatine göre"'
+    : '"sizin saate göre", "Türkiye saatiyle", "firma saatine göre", "sizin oranın saatine göre"';
+
+  const interpretationRules = `
+SAAT İFADELERİNİN YORUMLANMASI:
+1. ${subjectCapital.toUpperCase()} YEREL SAATİ ("bana/bize göre"): ${subjectCapital} "bize göre olsun", "bizim saate göre", "buradaki saate göre", "benim saatime göre", "buradaki saatle", "local time" veya benzeri bir ifade kullanırsa bunu ${subjectGenCapital.toUpperCase()} KENDİ YEREL SAATİ olarak yorumla.
+   - Eğer ${subjectGen} ülkesi/şehri biliniyorsa, bu saati ${subjectGen} yerel saati olarak kabul edip Türkiye saatine çevirerek iç sistem için belirt.
+   - Eğer ${subject} timezone-belirsiz bir ülkede (ABD, Kanada, Rusya vb.) ise ve şehir belirtmediyse, kesin hesaplama yapmadan şehir/eyalet sor.
+2. ${hostOrCompanyTimeLabel} ("sizin saate göre"): ${subjectCapital} ${hostOrCompanyTimePhrases} derse bunu TÜRKİYE SAATİ olarak yorumla. Kesin saati doğrudan Türkiye saatiyle teyit et.`;
 
   return `\n\n=== ZAMAN BAĞLAMI ===
 Şu anki tarih ve saat (Türkiye): ${formatted}
 ${tzRules}
+${opRules}
+${comfortRules}
+${interpretationRules}
 GENEL KURALLAR:
 - "Yarın", "bugün", "pazartesi" gibi göreceli ifadeleri doğru yorumla.
-- Hastaya cevap verirken TAM TARİH kullan: "27 Mayıs 2026 Çarşamba, saat 14:00" gibi.
+- ${subjectDat.charAt(0).toUpperCase() + subjectDat.slice(1)} cevap verirken TAM TARİH kullan: "27 Mayıs 2026 Çarşamba, saat 14:00" gibi.
 - Sadece "yarın" veya "Salı" deme, her zaman tarihi de belirt.
 - Saat söylerken 24 saat formatı kullan.
+- Emin değilsen kesin tarih/saat söylemekten kaçın, onay iste.
 ====================`;
+}
+
+export interface TimeMetadata {
+  callback_time_tr: string;
+  patient_local_time: string | null;
+  patient_timezone: string | null;
+  timezone_source: 'patient_city' | 'country' | 'manual_confirmed' | 'unknown';
+  time_confirmed_by_patient: boolean;
+  needs_timezone_clarification: boolean;
+  operation_window_valid: boolean;
+  scheduled_for_utc: string;
+}
+
+/**
+ * Computes all callback timezone/operating hours metadata for task/opportunity persistence.
+ */
+export function computeTimeMetadata(
+  requestedCallbackDatetime?: string | null,
+  patientCountry?: string | null,
+  patientCity?: string | null,
+  llmExtracted?: {
+    needs_timezone_clarification?: boolean;
+    timezone_source?: 'patient_city' | 'country' | 'manual_confirmed' | 'unknown';
+    time_confirmed_by_patient?: boolean;
+    patient_timezone?: string;
+  },
+  operatingHours?: { start: string; end: string } | null
+): TimeMetadata | null {
+  if (!requestedCallbackDatetime) return null;
+
+  const date = new Date(requestedCallbackDatetime);
+  if (isNaN(date.getTime())) return null;
+
+  const scheduled_for_utc = date.toISOString();
+
+  // callback_time_tr: e.g., "17:00" Turkey time (Europe/Istanbul)
+  const callback_time_tr = date.toLocaleTimeString('tr-TR', {
+    timeZone: 'Europe/Istanbul',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  });
+
+  // Default operating hours: 09:00 - 21:00 (TR time)
+  const opStart = operatingHours?.start || '09:00';
+  const opEnd = operatingHours?.end || '21:00';
+
+  const trHour = parseInt(callback_time_tr.split(':')[0], 10);
+  const trMinute = parseInt(callback_time_tr.split(':')[1], 10);
+  const trMinutesTotal = trHour * 60 + trMinute;
+
+  const [startHour, startMin] = opStart.split(':').map(Number);
+  const startMinutesTotal = startHour * 60 + (startMin || 0);
+
+  const [endHour, endMin] = opEnd.split(':').map(Number);
+  const endMinutesTotal = endHour * 60 + (endMin || 0);
+
+  const operation_window_valid = trMinutesTotal >= startMinutesTotal && trMinutesTotal <= endMinutesTotal;
+
+  // Resolve timezone
+  let timezone: string | null = null;
+  let source: 'patient_city' | 'country' | 'manual_confirmed' | 'unknown' = 'unknown';
+  let needs_timezone_clarification = false;
+
+  // 1. If IANA timezone was manually confirmed or extracted by LLM
+  if (llmExtracted?.patient_timezone) {
+    try {
+      Intl.DateTimeFormat(undefined, { timeZone: llmExtracted.patient_timezone });
+      timezone = llmExtracted.patient_timezone;
+      source = llmExtracted.timezone_source || 'manual_confirmed';
+    } catch {
+      // invalid timezone name from LLM, fallback
+    }
+  }
+
+  // 2. From country resolution (fallback/check if ambiguous)
+  const countryRes = resolvePatientTimezone(patientCountry);
+
+  if (!timezone) {
+    timezone = countryRes.timezone;
+    source = 'country';
+  }
+
+  if (countryRes.needs_confirmation) {
+    // Ambiguous country (e.g. USA, Canada, Russia)
+    if (patientCity && patientCity.trim()) {
+      source = 'patient_city';
+    } else {
+      needs_timezone_clarification = true;
+      source = 'unknown';
+    }
+  }
+
+  if (llmExtracted?.needs_timezone_clarification !== undefined) {
+    needs_timezone_clarification = llmExtracted.needs_timezone_clarification;
+    if (needs_timezone_clarification) {
+      source = 'unknown';
+    }
+  }
+
+  // Calculate patient local time if timezone is resolved and not unknown
+  let patient_local_time: string | null = null;
+  if (timezone && source !== 'unknown' && !needs_timezone_clarification) {
+    patient_local_time = date.toLocaleTimeString('tr-TR', {
+      timeZone: timezone,
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    });
+  }
+
+  return {
+    callback_time_tr,
+    patient_local_time,
+    patient_timezone: timezone,
+    timezone_source: source,
+    time_confirmed_by_patient: llmExtracted?.time_confirmed_by_patient ?? false,
+    needs_timezone_clarification,
+    operation_window_valid,
+    scheduled_for_utc
+  };
 }

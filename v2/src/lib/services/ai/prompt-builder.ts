@@ -230,7 +230,16 @@ MEDYA MESAJI KURALI:
       const patientCountry = unifiedContext?.opportunity?.country 
         || unifiedContext?.profile?.country 
         || null;
-      timeContext = buildTimeContext(brain.context.config?.timezone || 'Europe/Istanbul', patientCountry);
+      const wh = brain.context.settings?.workingHours;
+      const operatingHours = (wh && wh.enabled && wh.start && wh.end)
+        ? { start: wh.start, end: wh.end }
+        : null;
+      timeContext = buildTimeContext(
+        brain.context.config?.timezone || 'Europe/Istanbul',
+        patientCountry,
+        isHealthcare,
+        operatingHours
+      );
     } catch {
       // Non-fatal
     }

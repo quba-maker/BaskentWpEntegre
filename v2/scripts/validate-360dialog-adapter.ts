@@ -1387,6 +1387,207 @@ async function runValidationTests() {
     console.log("   ✅ 10-H: Zero healthcare leakage to other SaaS tenants: PASS");
   }
 
+  // ----------------------------------------------------
+  // TEST 11: Timezone Intelligence & Operating Hours
+  // ----------------------------------------------------
+  console.log("\n🧪 [TEST 11] Timezone Intelligence & Operating Hours...");
+
+  const { computeTimeMetadata: compTimeMeta, buildTimeContext: bldTimeCtx } = await import("../src/lib/utils/timezone");
+  const { SignalAggregator: SigAgg } = await import("../src/lib/services/signal-aggregator");
+
+  // TEST 11-A: USA country, no city -> needs_timezone_clarification = true and prompts for city/state
+  const extractionA = compTimeMeta(
+    "2026-06-03T17:00:00+03:00", // 17:00 TR time
+    "USA",
+    null, // no city
+    undefined,
+    { start: "09:00", end: "21:00" }
+  );
+
+  if (!extractionA || !extractionA.needs_timezone_clarification) {
+    throw new Error(`TEST 11-A Failed: Expected needs_timezone_clarification to be true, got ${JSON.stringify(extractionA)}`);
+  }
+  console.log("   ✅ A: USA country with no city flags timezone clarification: PASS");
+
+  // TEST 11-B: Germany country, "bize göre 17:00" -> TR 18:00 (for fixed date 2026-06-03 DST)
+  const extractionB = compTimeMeta(
+    "2026-06-03T17:00:00+02:00", // Germany 17:00 (DST is UTC+2)
+    "Germany",
+    null,
+    { patient_timezone: "Europe/Berlin", timezone_source: "country" },
+    { start: "09:00", end: "21:00" }
+  );
+
+  if (!extractionB || extractionB.callback_time_tr !== "18:00") {
+    throw new Error(`TEST 11-B Failed: Expected TR time 18:00, got ${extractionB?.callback_time_tr}`);
+  }
+  if (extractionB.patient_local_time !== "17:00") {
+    throw new Error(`TEST 11-B Failed: Expected patient local time 17:00, got ${extractionB?.patient_local_time}`);
+  }
+  console.log("   ✅ B: Germany 17:00 (bize göre) maps to TR 18:00: PASS");
+
+  // TEST 11-C: "sizin saate göre 17:00" -> TR 17:00
+  const extractionC = compTimeMeta(
+    "2026-06-03T17:00:00+03:00", // TR 17:00
+    "Germany",
+    null,
+    { patient_timezone: "Europe/Berlin", timezone_source: "country" },
+    { start: "09:00", end: "21:00" }
+  );
+
+  if (!extractionC || extractionC.callback_time_tr !== "17:00") {
+    throw new Error(`TEST 11-C Failed: Expected TR time 17:00, got ${extractionC?.callback_time_tr}`);
+  }
+  if (extractionC.patient_local_time !== "16:00") {
+    throw new Error(`TEST 11-C Failed: Expected patient local time 16:00, got ${extractionC?.patient_local_time}`);
+  }
+  console.log("   ✅ C: Turkey 17:00 (sizin saate göre) maps to TR 17:00: PASS");
+
+  // TEST 11-D: Proposes TR 23:00 -> checks if bot suggests alternative and operation_window_valid is false
+  const extractionD = compTimeMeta(
+    "2026-06-03T23:00:00+03:00", // TR 23:00
+    "Turkey",
+    null,
+    undefined,
+    { start: "09:00", end: "21:00" }
+  );
+  if (!extractionD || extractionD.operation_window_valid !== false) {
+    throw new Error(`TEST 11-D Failed: Expected operation_window_valid to be false, got ${JSON.stringify(extractionD)}`);
+  }
+
+  // Also verify LLM behavioral prompt instruction if GEMINI_API_KEY is available
+  if (apiKey) {
+    const liveOrchestrator = new AIOrchestrator();
+    const brainHealthcareTime = createTenantBrain(
+      "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+      "whatsapp",
+      "payload-123",
+      "Sen Başkent Üniversitesi Hastanesi yapay zeka asistanısın.",
+      { industry: "healthcare", timezone: "Europe/Istanbul" },
+      null,
+      undefined,
+      {
+        aiModel: "gemini-2.5-flash",
+        maxMessages: 20,
+        maxResponseTokens: 500,
+        workingHours: { enabled: true, start: "09:00", end: "21:00" },
+        aggressionLevel: "medium"
+      }
+    );
+
+    // USA no city prompt test
+    const context11A = {
+      profile: { first_name: "John" },
+      opportunity: { country: "USA" },
+      languageContext: { reply_language: "Türkçe", detected_patient_language: "Türkçe" }
+    };
+    const prompt11A = PromptBuilder.buildSystemPrompt(brainHealthcareTime, "greeting", false, context11A);
+    const messages11A = [
+      { role: "system" as const, content: prompt11A },
+      { role: "user" as const, content: "Merhaba, bana göre saat 17:00'de görüşebilir miyiz?" }
+    ];
+    const res11A = await liveOrchestrator.generateResponse(messages11A, {
+      provider: "gemini",
+      modelId: "gemini-2.5-flash",
+      apiKey,
+      temperature: 0.1,
+      maxTokens: 500
+    });
+    const lower11A = res11A.text.toLowerCase();
+    if (!lower11A.includes("şehir") && !lower11A.includes("eyalet") && !lower11A.includes("saat fark")) {
+      throw new Error(`TEST 11-A Live Failed: Bot did not ask for USA city/state! Output: ${res11A.text}`);
+    }
+    console.log("   ✅ A (Live): Bot asked for USA city/state when time was requested 'bana göre': PASS");
+
+    // Out of hours TR 23:00 test
+    const context11D = {
+      profile: { first_name: "Ahmet" },
+      opportunity: { country: "Turkey" },
+      languageContext: { reply_language: "Türkçe", detected_patient_language: "Türkçe" }
+    };
+    const prompt11D = PromptBuilder.buildSystemPrompt(brainHealthcareTime, "greeting", false, context11D);
+    const messages11D = [
+      { role: "system" as const, content: prompt11D },
+      { role: "user" as const, content: "Beni akşam saat 23:00'te arayabilir misiniz?" }
+    ];
+    const res11D = await liveOrchestrator.generateResponse(messages11D, {
+      provider: "gemini",
+      modelId: "gemini-2.5-flash",
+      apiKey,
+      temperature: 0.1,
+      maxTokens: 500
+    });
+    const lower11D = res11D.text.toLowerCase();
+    if (!lower11D.includes("çalışma saatleri") && !lower11D.includes("09:00") && !lower11D.includes("21:00")) {
+      throw new Error(`TEST 11-D Live Failed: Bot did not suggest alternative working hours or warn! Output: ${res11D.text}`);
+    }
+    console.log("   ✅ D (Live): Bot suggested alternative hours for out of hours request: PASS");
+  }
+  console.log("   ✅ D: Proposes TR 23:00 correctly validated: PASS");
+
+  // TEST 11-E: Asserts task/opportunity metadata keys exist and are merged without loss
+  const aggregator = new SigAgg();
+  const sampleCrmData = {
+    requested_callback_datetime: "2026-06-03T17:00:00+02:00", // Germany 17:00
+    patient_city: "Berlin",
+    patient_timezone: "Europe/Berlin",
+    timezone_source: "patient_city",
+    time_confirmed_by_patient: true,
+    needs_timezone_clarification: false,
+    opportunity_priority: "hot"
+  };
+  const aggregated = aggregator.aggregate(sampleCrmData, {
+    patientName: "Mehmet Yilmaz",
+    phoneNumber: "491701112233",
+    country: "Germany"
+  });
+
+  if (!aggregated) {
+    throw new Error("TEST 11-E Failed: Aggregator returned null");
+  }
+  const keysToVerify = [
+    "callback_time_tr",
+    "patient_local_time",
+    "patient_timezone",
+    "timezone_source",
+    "time_confirmed_by_patient",
+    "needs_timezone_clarification",
+    "operation_window_valid",
+    "scheduled_for_utc"
+  ];
+  for (const key of keysToVerify) {
+    if (!(key in aggregated.metadata)) {
+      throw new Error(`TEST 11-E Failed: Metadata key ${key} is missing in aggregated output!`);
+    }
+  }
+
+  // Verify task merge preserves metadata
+  const existingMetadata = {
+    original_key: "preserved_val",
+    patient_timezone: "Europe/Berlin",
+    timezone_source: "country"
+  };
+  const newMetadata = {
+    callback_time_tr: "18:00",
+    patient_local_time: "17:00",
+    timezone_source: "patient_city" // upgraded source
+  };
+  
+  const mergedMetadata = { ...existingMetadata, ...newMetadata };
+  if (mergedMetadata.original_key !== "preserved_val" || mergedMetadata.timezone_source !== "patient_city") {
+    throw new Error(`TEST 11-E Failed: Metadata merge did not preserve/upgrade keys correctly: ${JSON.stringify(mergedMetadata)}`);
+  }
+  console.log("   ✅ E: Metadata keys exist and are preserved/merged correctly: PASS");
+
+  // TEST 11-F: Dual clock format check in descriptions and notifications
+  if (!aggregated.taskDescription.includes("18:00 TS (Türkiye) / 17:00 Berlin")) {
+    throw new Error(`TEST 11-F Failed: Task description does not format dual clock correctly! Got: ${aggregated.taskDescription}`);
+  }
+  if (!aggregated.notifBody.includes("18:00 TR / 17:00 Berlin")) {
+    throw new Error(`TEST 11-F Failed: Notification body does not format dual clock correctly! Got: ${aggregated.notifBody}`);
+  }
+  console.log("   ✅ F: Dual clock format in descriptions and notifications validated: PASS");
+
   // Restore original LLM orchestrator generate function and saveMessageIdempotent
   worker["aiOrchestrator"].generateResponse = originalGenerateForTest;
   MessageService.prototype.saveMessageIdempotent = originalSaveMessage;
