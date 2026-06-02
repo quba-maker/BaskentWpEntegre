@@ -45,7 +45,10 @@ export class MediaStorageService {
       }
 
       let downloadUrl = "";
-      const is360dialog = metadata.provider === "360dialog" || metadata.provider === "360dialog_whatsapp";
+      const is360dialog =
+        metadata.provider === "360dialog" ||
+        metadata.provider === "360dialog_whatsapp" ||
+        process.env.ENABLE_360DIALOG_COEXISTENCE === "true";
 
       if (is360dialog) {
         // Step 1: Get the download URL from 360dialog API
