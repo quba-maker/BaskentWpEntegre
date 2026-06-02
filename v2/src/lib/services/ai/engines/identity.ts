@@ -316,6 +316,45 @@ export class IdentityEngine {
         }
       }
 
+      // ── Step 5: Active task & bot directive loading ──
+      let activeTask = null;
+      let activeBotDirective = null;
+      try {
+        if (opportunity) {
+          const taskRows = await db.executeSafe({
+            text: `SELECT id, task_type, title, metadata FROM follow_up_tasks 
+                   WHERE opportunity_id = $1 AND tenant_id = $2 AND status IN ('pending', 'in_progress')
+                   ORDER BY created_at DESC LIMIT 1`,
+            values: [opportunity.id, tenantId]
+          }) as any[];
+          activeTask = taskRows[0] || null;
+        } else if (conversationId) {
+          const taskRows = await db.executeSafe({
+            text: `SELECT id, task_type, title, metadata FROM follow_up_tasks 
+                   WHERE conversation_id = $1 AND tenant_id = $2 AND status IN ('pending', 'in_progress')
+                   ORDER BY created_at DESC LIMIT 1`,
+            values: [conversationId, tenantId]
+          }) as any[];
+          activeTask = taskRows[0] || null;
+        }
+
+        if (activeTask) {
+          const taskMeta = activeTask.metadata || {};
+          const state = taskMeta.bot_directive_state;
+          if (state && state.directive_status === 'pending') {
+            activeBotDirective = state.active_bot_directive;
+          } else if (taskMeta.active_bot_directive) {
+            // Backward compatibility check
+            const isPending = taskMeta.bot_teyit_sent || taskMeta.bot_hatirlat_sent || taskMeta.bot_devret_sent;
+            if (isPending) {
+              activeBotDirective = taskMeta.active_bot_directive;
+            }
+          }
+        }
+      } catch (taskErr) {
+        console.warn('[IdentityEngine] Non-fatal: active task query failed', taskErr);
+      }
+
       return {
         profile,
         latestForm: lead ? { name: lead.form_name, data: lead.raw_data } : null,
@@ -338,6 +377,12 @@ export class IdentityEngine {
            resolvedFrom
         } : null,
         outreachContext,
+        active_task: activeTask ? {
+          id: activeTask.id,
+          task_type: activeTask.task_type,
+          title: activeTask.title,
+          active_bot_directive: activeBotDirective
+        } : null,
       };
     } catch (e) {
       console.error('[IdentityEngine] Failed to get context', e);

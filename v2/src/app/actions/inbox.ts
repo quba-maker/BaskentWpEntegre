@@ -58,6 +58,7 @@ export async function getConversations(page: number = 1, search: string = "", st
           active_opp.country as opp_country,
           active_opp.department as opp_department,
           active_opp.summary as opp_summary,
+          active_opp.ai_reason as opp_ai_reason,
           active_opp.stage as opp_stage,
           active_opp.priority as opp_priority,
           active_opp.patient_relation as opp_patient_relation,
@@ -171,13 +172,14 @@ export async function getConversations(page: number = 1, search: string = "", st
           // P1B Summary Unification — separate fields for manual vs AI
           // ai_crm_summary: long CRM summary from MemoryEngine (opportunity.summary)
           // notes: textarea content — manual if user edited, else ai_crm_summary
-          ai_crm_summary: r.opp_summary || '',
+          opp_ai_reason: r.opp_ai_reason || null,
+          ai_crm_summary: r.opp_summary || r.opp_ai_reason || '',
           notes: (() => {
-            const oppSummary = r.opp_summary || '';
+            const oppSummary = r.opp_summary || r.opp_ai_reason || '';
             const convNotes = r.notes || '';
-            // If conv.notes has content AND it's different from opp.summary → user edited manually
+            // If conv.notes has content AND it's different from oppSummary → user edited manually
             if (convNotes && oppSummary && convNotes !== oppSummary) return convNotes;
-            // Otherwise use opp_summary as primary (AI-managed)
+            // Otherwise use oppSummary as primary (AI-managed)
             if (oppSummary) return oppSummary;
             return convNotes;
           })(),
@@ -187,8 +189,8 @@ export async function getConversations(page: number = 1, search: string = "", st
             date: r.form_date_ms ? new Date(parseFloat(r.form_date_ms)).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' }) : '',
             raw: r.form_raw_data
           } : null,
-          aiSummary: r.ai_summary ? {
-            text: r.ai_summary,
+          aiSummary: (r.opp_summary || r.opp_ai_reason || r.ai_summary) ? {
+            text: r.opp_summary || r.opp_ai_reason || r.ai_summary,
             buying_intent: r.ai_buying_intent,
             sentiment: r.ai_sentiment
           } : null
@@ -478,6 +480,27 @@ export async function sendMessage(phone: string, text: string) {
                WHERE id = $4 AND tenant_id = $5`,
         values: [text, channel, messageStatus, conversationId, ctx.tenantId]
       });
+
+      // Cancel/Takeover active bot directive on operator message
+      try {
+        const activeTasks = await ctx.db.executeSafe({
+          text: `SELECT id, metadata FROM follow_up_tasks 
+                 WHERE conversation_id = $1 AND tenant_id = $2 AND status IN ('pending', 'in_progress')
+                 ORDER BY created_at DESC`,
+          values: [conversationId, ctx.tenantId]
+        }) as any[];
+        if (activeTasks.length > 0) {
+          const taskMeta = activeTasks[0].metadata || {};
+          const directiveState = taskMeta.bot_directive_state;
+          if (directiveState && ['pending', 'waiting_patient'].includes(directiveState.directive_status)) {
+            const { PatientOperationsLifecycleService } = await import('@/lib/services/patient-operations-lifecycle');
+            const lifecycleService = new PatientOperationsLifecycleService(ctx.db);
+            await lifecycleService.completeBotDirective(activeTasks[0].id, ctx.tenantId, 'operator_takeover');
+          }
+        }
+      } catch (takeoverErr) {
+        console.warn('[INBOX_DIRECTIVE_TAKEOVER_FAILED] Non-fatal directive cancellation', takeoverErr);
+      }
 
       // Write structural audit log
       await ctx.db.executeSafe({

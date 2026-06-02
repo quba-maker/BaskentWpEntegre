@@ -495,6 +495,18 @@ export function ContextPanel() {
             </select>
           </div>
 
+          {/* Fırsat Gerekçesi (AI Reason) */}
+          {activeContact?.opp_ai_reason && (
+            <div className="pt-2">
+              <label className="text-[10px] font-bold uppercase tracking-widest block mb-1.5 ml-1 animate-pulse" style={{ color: "var(--q-text-secondary)" }}>
+                ⚡ Fırsat Gerekçesi
+              </label>
+              <div className="p-3 bg-indigo-50/60 border border-indigo-100/60 rounded-2xl text-[11px] font-bold leading-relaxed text-indigo-900/90 shadow-sm mb-2">
+                {activeContact.opp_ai_reason}
+              </div>
+            </div>
+          )}
+
           {/* AI Görüşme Özeti */}
           <div className="pt-2">
             <div className="flex items-center justify-between mb-1.5 ml-1">

@@ -433,6 +433,7 @@ export async function getPatientTrackingRows(filters?: PatientTrackingFilters): 
               AND ft.tenant_id = o.tenant_id
               AND (ft.metadata->>'appointment_type' IS NULL OR ft.metadata->>'appointment_type' != 'clinic_visit')
               AND ft.status IN ('pending', 'in_progress')
+              AND (ft.metadata->>'parent_task_id' IS NULL OR (ft.metadata->>'is_primary' IS NOT NULL AND ft.metadata->>'is_primary' = 'true'))
             ORDER BY ft.due_at ASC LIMIT 1
           ) as active_phone_task_status,
           (
@@ -449,6 +450,7 @@ export async function getPatientTrackingRows(filters?: PatientTrackingFilters): 
               AND ft.tenant_id = o.tenant_id
               AND ft.metadata->>'appointment_type' = 'clinic_visit'
               AND ft.status != 'cancelled'
+              AND (ft.metadata->>'parent_task_id' IS NULL OR (ft.metadata->>'is_primary' IS NOT NULL AND ft.metadata->>'is_primary' = 'true'))
             ORDER BY ft.due_at DESC LIMIT 1
           ) as active_clinic_task_status,
           (
@@ -471,6 +473,7 @@ export async function getPatientTrackingRows(filters?: PatientTrackingFilters): 
         LEFT JOIN LATERAL (
           SELECT * FROM follow_up_tasks 
           WHERE opportunity_id = o.id AND tenant_id = o.tenant_id AND status IN ('pending', 'in_progress')
+            AND (metadata->>'parent_task_id' IS NULL OR (metadata->>'is_primary' IS NOT NULL AND metadata->>'is_primary' = 'true'))
           ORDER BY due_at ASC LIMIT 1
         ) t ON TRUE
         LEFT JOIN conversations c ON c.phone_number = o.phone_number AND c.tenant_id = o.tenant_id
@@ -1026,14 +1029,19 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
       // Only patient follow-up and appointment tasks (excluding reminder tasks)
       conditions.push(`t.task_type != 'appointment_reminder'`);
 
-      // Exclude child reminders from appearing as standalone parent rows
-      conditions.push(`t.task_type != 'appointment_reminder'`);
+      // Filter by primary tasks only (exclude child tasks from appearing as standalone parent rows)
+      conditions.push(`t.metadata->>'parent_task_id' IS NULL AND (t.metadata->>'is_primary' IS NULL OR t.metadata->>'is_primary' != 'false')`);
 
       // Status filter
       if (filters?.status && filters.status !== 'all') {
         if (filters.status === 'pending') {
           conditions.push(`t.status IN ('pending', 'in_progress')`);
           conditions.push(`(t.metadata->>'confirmation_status' IS NULL OR t.metadata->>'confirmation_status' != 'confirmed')`);
+          conditions.push(`(t.metadata->'bot_suggestion'->>'status' IS NULL OR t.metadata->'bot_suggestion'->>'status' != 'pending')`);
+        }
+        else if (filters.status === 'bot_suggestion') {
+          conditions.push(`t.status IN ('pending', 'in_progress')`);
+          conditions.push(`t.metadata->'bot_suggestion'->>'status' = 'pending'`);
         }
         else if (filters.status === 'completed') {
           conditions.push(`t.status = 'completed'`);
@@ -1844,13 +1852,22 @@ export async function getAppointmentStats() {
           COUNT(*) FILTER (WHERE t.status IN ('pending', 'in_progress') AND t.due_at < NOW() AND t.metadata->>'appointment_type' = 'clinic_visit') as overdue_clinic,
 
           -- PHONE TABS COUNTS
-          -- 1. Açık (Pending & Unconfirmed)
+          -- 1. Açık (Pending & Unconfirmed & No suggestion)
           COUNT(*) FILTER (
             WHERE t.status IN ('pending', 'in_progress')
               AND (t.metadata->>'confirmation_status' IS NULL OR t.metadata->>'confirmation_status' != 'confirmed')
+              AND (t.metadata->'bot_suggestion'->>'status' IS NULL OR t.metadata->'bot_suggestion'->>'status' != 'pending')
               AND (t.metadata->>'appointment_type' IS NULL OR t.metadata->>'appointment_type' != 'clinic_visit')
               AND (o.stage IS NULL OR o.stage NOT IN ('not_qualified', 'arrived'))
           ) as phone_open,
+
+          -- 1b. Bot Önerisi / Onay Bekleyen
+          COUNT(*) FILTER (
+            WHERE t.status IN ('pending', 'in_progress')
+              AND t.metadata->'bot_suggestion'->>'status' = 'pending'
+              AND (t.metadata->>'appointment_type' IS NULL OR t.metadata->>'appointment_type' != 'clinic_visit')
+              AND (o.stage IS NULL OR o.stage NOT IN ('not_qualified', 'arrived'))
+          ) as phone_bot_suggestion,
 
           -- 2. Planlandı ve Onaylandı (Confirmed)
           COUNT(*) FILTER (
@@ -1880,13 +1897,22 @@ export async function getAppointmentStats() {
           ) as phone_cancelled,
 
           -- CLINIC TABS COUNTS
-          -- 1. Planlandı (Pending & Unconfirmed)
+          -- 1. Planlandı (Pending & Unconfirmed & No suggestion)
           COUNT(*) FILTER (
             WHERE t.status IN ('pending', 'in_progress')
               AND (t.metadata->>'confirmation_status' IS NULL OR t.metadata->>'confirmation_status' != 'confirmed')
+              AND (t.metadata->'bot_suggestion'->>'status' IS NULL OR t.metadata->'bot_suggestion'->>'status' != 'pending')
               AND t.metadata->>'appointment_type' = 'clinic_visit'
               AND (o.stage IS NULL OR o.stage NOT IN ('not_qualified', 'arrived'))
           ) as clinic_open,
+
+          -- 1b. Bot Önerisi / Onay Bekleyen
+          COUNT(*) FILTER (
+            WHERE t.status IN ('pending', 'in_progress')
+              AND t.metadata->'bot_suggestion'->>'status' = 'pending'
+              AND t.metadata->>'appointment_type' = 'clinic_visit'
+              AND (o.stage IS NULL OR o.stage NOT IN ('not_qualified', 'arrived'))
+          ) as clinic_bot_suggestion,
 
           -- 2. Planlandı ve Onaylandı (Confirmed)
           COUNT(*) FILTER (
@@ -1924,6 +1950,8 @@ export async function getAppointmentStats() {
         LEFT JOIN opportunities o ON o.id = t.opportunity_id AND o.tenant_id = t.tenant_id
         WHERE t.tenant_id = $1
           AND t.task_type != 'appointment_reminder'
+          AND t.metadata->>'parent_task_id' IS NULL
+          AND (t.metadata->>'is_primary' IS NULL OR t.metadata->>'is_primary' != 'false')
       `;
 
       const rows = await ctx.db.executeSafe({ text: statsQuery, values: [ctx.tenantId] }) as any[];
@@ -2267,22 +2295,33 @@ export async function recordBotDirectiveSent(taskId: string, type: 'teyit' | 'ha
       if (tasks.length === 0) return { success: false, error: 'Görev bulunamadı.' };
 
       const task = tasks[0];
-      const metadata = typeof task.metadata === 'string' ? JSON.parse(task.metadata) : (task.metadata || {});
+      const metadata = task.metadata || {};
+      const directiveText = metadata.active_bot_directive || (
+        type === 'teyit' ? 'Hastanın randevu/arama zamanını teyit et.' :
+        type === 'hatirlat' ? 'Hastaya planlanan arama/randevu vaktini hatırlat.' :
+        'Hastadan arama veya klinik ön görüşmesi için uygun gün ve saat bilgisini öğren.'
+      );
 
+      let directiveType: 'ask_callback_time' | 'confirm_callback_time' | 'remind_callback' | 'ask_clinic_appointment_time' | 'confirm_clinic_appointment' | 'request_documents' = 'ask_callback_time';
+      
+      const apptType = metadata.appointment_type;
       if (type === 'teyit') {
-        metadata.bot_teyit_sent = true;
-        metadata.bot_teyit_sent_at = new Date().toISOString();
+        directiveType = apptType === 'clinic_visit' ? 'confirm_clinic_appointment' : 'confirm_callback_time';
       } else if (type === 'hatirlat') {
-        metadata.bot_hatirlat_sent = true;
-        metadata.bot_hatirlat_sent_at = new Date().toISOString();
+        directiveType = 'remind_callback';
       } else if (type === 'devret') {
-        metadata.bot_devret_sent = true;
-        metadata.bot_devret_sent_at = new Date().toISOString();
+        directiveType = apptType === 'clinic_visit' ? 'ask_clinic_appointment_time' : 'ask_callback_time';
       }
 
-      await ctx.db.executeSafe({
-        text: `UPDATE follow_up_tasks SET metadata = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3`,
-        values: [JSON.stringify(metadata), taskId, ctx.tenantId]
+      const { PatientOperationsLifecycleService } = await import('@/lib/services/patient-operations-lifecycle');
+      const lifecycleService = new PatientOperationsLifecycleService(ctx.db);
+      await lifecycleService.setBotDirective({
+        taskId,
+        tenantId: ctx.tenantId,
+        directiveType,
+        directiveText,
+        userId: ctx.userId,
+        sourceUi: 'phone_tracking'
       });
 
       return { success: true };

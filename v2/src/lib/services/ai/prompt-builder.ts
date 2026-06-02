@@ -259,6 +259,15 @@ MEDYA MESAJI KURALI:
       langContextText += `==============================\n`;
     }
 
-    return `${base}\n${crmContext}\n${healthcareOverlay}\n${knowledgeInjection}\n${timeContext}\n${phaseContext}\n${langContextText}\n${safetyGuardrails}`;
+    let directiveContext = '';
+    if (unifiedContext?.active_task?.active_bot_directive) {
+      directiveContext = `\n\n=== 🚨 DİREKT KOORDİNATÖR TALİMATI (İŞARETLİ BOTA DEVRET AKSİYONU) ===\n`;
+      directiveContext += `Koordinatör bu görüşmeyi sana devretti ve özellikle şu talimatı verdi:\n`;
+      directiveContext += `👉 "${unifiedContext.active_task.active_bot_directive}"\n`;
+      directiveContext += `Bu talimatı kesinlikle uygula ve hastaya yanıtı bu doğrultuda yaz. Jenerik başlangıç yapma, doğrudan talimatın konusuna gir.\n`;
+      directiveContext += `====================================================================\n`;
+    }
+
+    return `${base}\n${crmContext}\n${healthcareOverlay}\n${knowledgeInjection}\n${timeContext}\n${phaseContext}\n${langContextText}\n${directiveContext}\n${safetyGuardrails}`;
   }
 }

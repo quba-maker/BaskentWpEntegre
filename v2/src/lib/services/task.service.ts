@@ -454,30 +454,11 @@ export class TaskService {
     }
   }
 
-  // ── CREATE AGGREGATED (P1.1: Group-based dedup) ──
+  // ── CREATE AGGREGATED (P1.1: Redirected to PatientOperationsLifecycleService facade) ──
   async createAggregated(input: AggregatedTaskInput): Promise<string | null> {
-    // 1. Check for existing pending task in same task group for this opportunity
-    const existing = await this.findPendingInGroup(
-      input.opportunityId, input.primaryTaskGroup, input.tenantId
-    );
-
-    if (existing) {
-      // Merge new signals into existing task (+ fix dirty titles)
-      await this.mergeSignals(
-        existing.id, 
-        input.tenantId, 
-        input.signals, 
-        input.taskTitle,
-        input.taskDescription,
-        input.dueAt,
-        input.priority,
-        input.metadata
-      );
-      return existing.id;
-    }
-
-    // 2. Create new aggregated task
-    return this.create({
+    const { PatientOperationsLifecycleService } = await import('./patient-operations-lifecycle');
+    const lifecycleService = new PatientOperationsLifecycleService(this.db);
+    return lifecycleService.createOrMergeTask({
       tenantId: input.tenantId,
       opportunityId: input.opportunityId,
       conversationId: input.conversationId,
@@ -489,7 +470,10 @@ export class TaskService {
       isAutomated: true,
       createdBy: 'crm_auto',
       sourceEvent: 'crm_extraction',
-      metadata: input.metadata,
+      metadata: {
+        ...input.metadata,
+        signals: input.signals
+      }
     });
   }
 

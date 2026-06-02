@@ -383,6 +383,16 @@ export default function AppointmentsTab({ onOpenDrawer, onGoToInbox, viewType, o
                   Açık ({openCount})
                 </button>
                 <button
+                  onClick={() => setStatusFilter("bot_suggestion")}
+                  className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                    statusFilter === 'bot_suggestion'
+                      ? 'bg-white text-indigo-700 shadow-sm border border-indigo-100/50'
+                      : 'text-[#86868B] hover:text-[#1D1D1F]'
+                  }`}
+                >
+                  Bot Önerisi ({stats ? Number((stats as any).phone_bot_suggestion || 0) : 0})
+                </button>
+                <button
                   onClick={() => setStatusFilter("confirmed")}
                   className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
                     statusFilter === 'confirmed'
@@ -444,6 +454,16 @@ export default function AppointmentsTab({ onOpenDrawer, onGoToInbox, viewType, o
                   }`}
                 >
                   Açık ({openCount})
+                </button>
+                <button
+                  onClick={() => setStatusFilter("bot_suggestion")}
+                  className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                    statusFilter === 'bot_suggestion'
+                      ? 'bg-white text-indigo-700 shadow-sm border border-indigo-100/50'
+                      : 'text-[#86868B] hover:text-[#1D1D1F]'
+                  }`}
+                >
+                  Bot Önerisi ({stats ? Number((stats as any).clinic_bot_suggestion || 0) : 0})
                 </button>
                 <button
                   onClick={() => setStatusFilter("confirmed")}
@@ -977,7 +997,7 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
   const randevuAksiyonuDropdown = useDropdown();
   const [activeBotPopup, setActiveBotPopup] = useState<'teyit' | 'hatirlat' | 'devret' | null>(null);
   const [directiveText, setDirectiveText] = useState('');
-  const isSuggestionPending = apt.metadata?.bot_suggestion?.status === 'pending';
+  const isSuggestionPending = apt.metadata?.bot_suggestion?.status === 'pending' && !['completed', 'cancelled', 'arrived', 'no_show'].includes(apt.status) && statusFilter !== 'confirmed';
   // Premium Custom Alert & Confirm Modals
   const [confirmModal, setConfirmModal] = useState<{
     isOpen: boolean;

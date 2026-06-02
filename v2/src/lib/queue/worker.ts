@@ -945,6 +945,30 @@ export class QueueWorkerEngine {
         values: [phoneNumber, tenantId]
       });
 
+      // Takeover/Cancel active bot directive on echo
+      if (conversationId) {
+        try {
+          const activeTasks = await db.executeSafe({
+            text: `SELECT id, metadata FROM follow_up_tasks
+                   WHERE conversation_id = $1 AND tenant_id = $2 AND status IN ('pending', 'in_progress')
+                   ORDER BY created_at DESC`,
+            values: [conversationId, tenantId]
+          }) as any[];
+          if (activeTasks.length > 0) {
+            const taskMeta = activeTasks[0].metadata || {};
+            const directiveState = taskMeta.bot_directive_state;
+            if (directiveState && ['pending', 'waiting_patient'].includes(directiveState.directive_status)) {
+              const { PatientOperationsLifecycleService } = await import('../services/patient-operations-lifecycle');
+              const lifecycleService = new PatientOperationsLifecycleService(db);
+              await lifecycleService.completeBotDirective(activeTasks[0].id, tenantId, 'operator_takeover');
+              this.log.info(`[APP_ECHO_DIRECTIVE_TAKEOVER] Cancelled bot directive for task ${activeTasks[0].id}`, { traceId });
+            }
+          }
+        } catch (takeoverErr) {
+          this.log.warn(`[ECHO_DIRECTIVE_TAKEOVER_FAILED] Non-fatal`, takeoverErr instanceof Error ? takeoverErr : new Error(String(takeoverErr)));
+        }
+      }
+
       // Get conversation details for audit log / realtime
       const convDetails = await db.executeSafe({
         text: `SELECT id, channel_id FROM conversations WHERE phone_number = $1 AND tenant_id = $2 LIMIT 1`,
@@ -1829,6 +1853,18 @@ export class QueueWorkerEngine {
 
     this.log.info(`[DB_COMMITTED] [OUTGOING MESSAGE] Saved to DB. MsgId: ${outMsgResult.messageId}`, { traceId, outProviderMessageId });
 
+    // Consume Bot Directive on successful outbound response
+    if (unifiedContext?.active_task?.id && unifiedContext?.active_task?.active_bot_directive) {
+      try {
+        const { PatientOperationsLifecycleService } = await import('../services/patient-operations-lifecycle');
+        const lifecycleService = new PatientOperationsLifecycleService(db);
+        await lifecycleService.consumeBotDirective(unifiedContext.active_task.id, tenantId);
+        this.log.info(`[BOT_DIRECTIVE_CONSUMED] Directive consumed for task ${unifiedContext.active_task.id}`, { traceId });
+      } catch (consumeErr) {
+        this.log.error(`[BOT_DIRECTIVE_CONSUME_FAILED] Non-fatal`, consumeErr instanceof Error ? consumeErr : new Error(String(consumeErr)), { traceId });
+      }
+    }
+
     // [NEW] Realtime Event: Message Created (Outgoing)
     if (outMsgResult.messageId) {
       try {
@@ -2293,6 +2329,18 @@ export class QueueWorkerEngine {
               ]
             });
 
+            // Cancel tasks on superseded opportunity
+            try {
+              const { PatientOperationsLifecycleService } = await import('../services/patient-operations-lifecycle');
+              const lifecycleService = new PatientOperationsLifecycleService(db);
+              const cancelled = await lifecycleService.cancelTasksForOpp(beforeOpp.id, tenantId, 'superseded_by_new_opportunity');
+              this.log.info(`[OPP_SUPERSEDED_TASK_CANCEL] Cancelled ${cancelled} tasks for old opportunity`, {
+                oldOppId: beforeOpp.id, tenantId
+              });
+            } catch (taskErr) {
+              this.log.error(`[OPP_SUPERSEDED_TASK_CANCEL_FAIL] Non-fatal`, taskErr instanceof Error ? taskErr : new Error(String(taskErr)));
+            }
+
             // Force create new opportunity (bypass existing check)
             const newOppCrmData = { ...crmData, should_create_opportunity: true };
             // Use new country for the new opp
@@ -2635,6 +2683,50 @@ export class QueueWorkerEngine {
           }
         } catch (confirmErr) {
           this.log.error('[BOT_CONFIRMATION_AUTO_DETECTED_FAILED] Non-fatal auto-confirmation error', confirmErr instanceof Error ? confirmErr : new Error(String(confirmErr)), { traceId });
+        }
+      }
+
+      // ═══════════════════════════════════════════════════════════
+      // Bot Directive Completion Hook (Phase 2 & 5)
+      // ═══════════════════════════════════════════════════════════
+      if (conversationId) {
+        try {
+          const activeTasks = await db.executeSafe({
+            text: `SELECT id, metadata FROM follow_up_tasks
+                   WHERE conversation_id = $1 AND tenant_id = $2
+                     AND status IN ('pending', 'in_progress')
+                   ORDER BY created_at DESC`,
+            values: [conversationId, tenantId]
+          }) as any[];
+
+          const { PatientOperationsLifecycleService } = await import('../services/patient-operations-lifecycle');
+          const lifecycleService = new PatientOperationsLifecycleService(db);
+
+          for (const targetTask of activeTasks) {
+            const taskMeta = targetTask.metadata || {};
+            const directiveState = taskMeta.bot_directive_state;
+            if (directiveState && ['pending', 'waiting_patient'].includes(directiveState.directive_status)) {
+              const directiveType = directiveState.directive_type;
+              let resolvedResult: 'confirmed' | 'declined' | null = null;
+
+              if (crmData?.explicit_cancellation || crmData?.should_stop_follow_up) {
+                resolvedResult = 'declined';
+              } else if (directiveType === 'ask_callback_time' && crmData?.requested_callback_datetime) {
+                resolvedResult = 'confirmed';
+              } else if (directiveType === 'confirm_callback_time' && (crmData?.time_confirmed_by_patient || crmData?.appointment_confirmed || isConfirmed)) {
+                resolvedResult = 'confirmed';
+              } else if (directiveType === 'request_documents' && (crmData?.report_status === 'sent' || crmData?.report_status === 'received' || ['document', 'image', 'video'].includes(mediaType || ''))) {
+                resolvedResult = 'confirmed';
+              }
+
+              if (resolvedResult) {
+                this.log.info(`[BOT_DIRECTIVE_COMPLETED] Completing directive ${directiveType} on task ${targetTask.id} with result: ${resolvedResult}`, { traceId });
+                await lifecycleService.completeBotDirective(targetTask.id, tenantId, resolvedResult);
+              }
+            }
+          }
+        } catch (directiveErr) {
+          this.log.error('[BOT_DIRECTIVE_COMPLETION_FAILED] Non-fatal directive completion error', directiveErr instanceof Error ? directiveErr : new Error(String(directiveErr)), { traceId });
         }
       }
     } catch (crmErr) {
