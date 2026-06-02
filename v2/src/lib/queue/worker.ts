@@ -732,6 +732,7 @@ export class QueueWorkerEngine {
         case 'image':
           mediaType = 'image';
           mediaId = incomingMsg.image?.id || null;
+          mediaUrl = incomingMsg.image?.url || null;
           mediaMetadata = {
             mime_type: incomingMsg.image?.mime_type,
             caption: incomingMsg.image?.caption,
@@ -741,6 +742,7 @@ export class QueueWorkerEngine {
         case 'document':
           mediaType = 'document';
           mediaId = incomingMsg.document?.id || null;
+          mediaUrl = incomingMsg.document?.url || null;
           mediaMetadata = {
             mime_type: incomingMsg.document?.mime_type,
             filename: incomingMsg.document?.filename,
@@ -750,6 +752,7 @@ export class QueueWorkerEngine {
         case 'audio':
           mediaType = 'audio';
           mediaId = incomingMsg.audio?.id || null;
+          mediaUrl = incomingMsg.audio?.url || null;
           mediaMetadata = {
             mime_type: incomingMsg.audio?.mime_type,
           };
@@ -758,6 +761,7 @@ export class QueueWorkerEngine {
         case 'video':
           mediaType = 'video';
           mediaId = incomingMsg.video?.id || null;
+          mediaUrl = incomingMsg.video?.url || null;
           mediaMetadata = {
             mime_type: incomingMsg.video?.mime_type,
             caption: incomingMsg.video?.caption,
@@ -842,14 +846,14 @@ export class QueueWorkerEngine {
     }
 
     // ── MEDIA DOWNLOAD & BLOB UPLOAD (tenant-isolated) ──
-    if (mediaType && mediaId) {
+    if (mediaType && (mediaId || mediaUrl)) {
       try {
         const mediaCreds = await CredentialsService.resolveCredentials(tenantId, channel === 'whatsapp' ? 'whatsapp' : channel as any);
         if (mediaCreds.accessToken) {
           const { MediaStorageService } = await import('@/lib/services/media-storage.service');
           const blobResult = await MediaStorageService.downloadAndStore(
             tenantId,
-            mediaId,
+            mediaId || `media_${Date.now()}`,
             mediaCreds.accessToken,
             providerMessageId || `msg_${Date.now()}`,
             {
@@ -859,6 +863,7 @@ export class QueueWorkerEngine {
               provider: ((payload as any).routingSource === '360dialog_channel_id' || process.env.ENABLE_360DIALOG_COEXISTENCE === 'true')
                 ? '360dialog'
                 : (mediaCreds.provider || undefined),
+              directUrl: mediaUrl || undefined,
             }
           );
           if (blobResult) {
@@ -866,11 +871,15 @@ export class QueueWorkerEngine {
             // Track storage usage for SaaS billing
             await MediaStorageService.trackUsage(db, tenantId, mediaType, blobResult.fileSize);
             this.log.info(`[MEDIA_OK] Media stored in blob`, { tenantId, mediaType, fileSize: blobResult.fileSize, traceId });
+          } else {
+            mediaUrl = null; // Prevent storing raw lookaside URLs in database if download fails
           }
         } else {
+          mediaUrl = null;
           this.log.warn(`[MEDIA_NO_CREDS] No access token for media download`, { tenantId, traceId });
         }
       } catch (mediaErr) {
+        mediaUrl = null; // Ensure clean state on error
         // Non-fatal: save message even if media download fails
         this.log.error(`[MEDIA_DOWNLOAD_FAILED] Non-fatal media error`, mediaErr instanceof Error ? mediaErr : new Error(String(mediaErr)), { tenantId, traceId });
       }

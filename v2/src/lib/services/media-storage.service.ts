@@ -41,6 +41,7 @@ export class MediaStorageService {
       filename?: string;
       mediaType: string;
       provider?: string;
+      directUrl?: string;
     }
   ): Promise<{ blobUrl: string; fileSize: number } | null> {
     const maskedId = maskMediaId(mediaId);
@@ -63,54 +64,56 @@ export class MediaStorageService {
         return null;
       }
 
-      let downloadUrl = "";
+      let downloadUrl = metadata.directUrl || "";
 
-      if (is360dialog) {
-        // Step 1: Get the download URL from 360dialog API
-        const targetUrl = `https://waba-v2.360dialog.io/${mediaId}`;
-        const d360Res = await fetch(targetUrl, {
-          headers: { "D360-API-KEY": accessToken },
-        });
-
-        if (!d360Res.ok) {
-          const errText = await d360Res.text();
-          log.error(`[MEDIA_RESOLVE_FAILED] 360dialog media URL resolve failed`, new Error(errText), {
-            mediaId: maskedId,
-            tenantId,
-            status: d360Res.status,
-            stage: "metadata_resolve",
-            endpointVariant,
-            provider: metadata.provider,
-            mediaType: metadata.mediaType,
+      if (!downloadUrl) {
+        if (is360dialog) {
+          // Step 1: Get the download URL from 360dialog API
+          const targetUrl = `https://waba-v2.360dialog.io/${mediaId}`;
+          const d360Res = await fetch(targetUrl, {
+            headers: { "D360-API-KEY": accessToken },
           });
-          return null;
-        }
 
-        const d360Data = await d360Res.json();
-        downloadUrl = d360Data.url;
-      } else {
-        // Step 1: Get the download URL from Meta Graph API
-        const targetUrl = `https://graph.facebook.com/v25.0/${mediaId}`;
-        const metaRes = await fetch(targetUrl, {
-          headers: { Authorization: `Bearer ${accessToken}` },
-        });
+          if (!d360Res.ok) {
+            const errText = await d360Res.text();
+            log.error(`[MEDIA_RESOLVE_FAILED] 360dialog media URL resolve failed`, new Error(errText), {
+              mediaId: maskedId,
+              tenantId,
+              status: d360Res.status,
+              stage: "metadata_resolve",
+              endpointVariant,
+              provider: metadata.provider,
+              mediaType: metadata.mediaType,
+            });
+            return null;
+          }
 
-        if (!metaRes.ok) {
-          const errText = await metaRes.text();
-          log.error(`[MEDIA_RESOLVE_FAILED] Meta media URL resolve failed`, new Error(errText), {
-            mediaId: maskedId,
-            tenantId,
-            status: metaRes.status,
-            stage: "metadata_resolve",
-            endpointVariant,
-            provider: metadata.provider,
-            mediaType: metadata.mediaType,
+          const d360Data = await d360Res.json();
+          downloadUrl = d360Data.url;
+        } else {
+          // Step 1: Get the download URL from Meta Graph API
+          const targetUrl = `https://graph.facebook.com/v25.0/${mediaId}`;
+          const metaRes = await fetch(targetUrl, {
+            headers: { Authorization: `Bearer ${accessToken}` },
           });
-          return null;
-        }
 
-        const metaData = await metaRes.json();
-        downloadUrl = metaData.url;
+          if (!metaRes.ok) {
+            const errText = await metaRes.text();
+            log.error(`[MEDIA_RESOLVE_FAILED] Meta media URL resolve failed`, new Error(errText), {
+              mediaId: maskedId,
+              tenantId,
+              status: metaRes.status,
+              stage: "metadata_resolve",
+              endpointVariant,
+              provider: metadata.provider,
+              mediaType: metadata.mediaType,
+            });
+            return null;
+          }
+
+          const metaData = await metaRes.json();
+          downloadUrl = metaData.url;
+        }
       }
 
       if (!downloadUrl) {
