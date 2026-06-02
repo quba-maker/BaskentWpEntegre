@@ -111,12 +111,51 @@ export async function POST(req: NextRequest) {
     const dedupeService = new WebhookDedupeService(tenantDb);
     const queue = new QueueService();
 
-    // 5. Inbound Message Processing
-    if (body.messages?.[0]) {
-      const msg = body.messages[0];
-      const senderPhone = body.contacts?.[0]?.wa_id || msg.from;
+    // 5. Ingestion Extraction Layer (Handles both 360dialog flat format and Meta nested format)
+    let messagesList: any[] = [];
+    let statusesList: any[] = [];
+    let contactsList: any[] = [];
+    let wabaId = "360dialog_coexistence";
+    let activeIdentifier = channelRow.identifier;
 
-      log.info(`[360DIALOG] [INBOUND] Processing message: ${msg.id} from ${senderPhone}`, {
+    if (body.messages?.[0]) {
+      messagesList = body.messages;
+      contactsList = body.contacts || [];
+    } else if (body.statuses?.[0]) {
+      statusesList = body.statuses;
+    } else if (body.entry?.[0]?.changes?.[0]?.value) {
+      const value = body.entry[0].changes[0].value;
+      wabaId = body.entry[0].id || wabaId;
+      contactsList = value.contacts || [];
+      if (value.metadata?.display_phone_number) {
+        activeIdentifier = value.metadata.display_phone_number;
+      }
+
+      if (value.messages?.[0]) {
+        messagesList = value.messages;
+      } else if (value.message_echoes?.[0]) {
+        messagesList = value.message_echoes;
+      } else if (value.statuses?.[0]) {
+        statusesList = value.statuses;
+      }
+    }
+
+    // 6. Inbound Message Processing (Includes App Echoes)
+    if (messagesList.length > 0) {
+      const msg = messagesList[0];
+      const valueObj = body.entry?.[0]?.changes?.[0]?.value;
+
+      // Echo detection: sent from display_phone_number, phone_number_id, or channel identifier
+      const isEcho = msg.from === channelRow.identifier || 
+                     msg.from === valueObj?.metadata?.phone_number_id || 
+                     msg.from === valueObj?.metadata?.display_phone_number;
+
+      // For outbound app echoes, the consumer of this webhook expects the customer number (msg.to) as sender
+      const senderPhone = isEcho 
+        ? (msg.to || contactsList[0]?.wa_id || msg.from)
+        : (contactsList[0]?.wa_id || msg.from);
+
+      log.info(`[360DIALOG] [${isEcho ? 'OUTBOUND_ECHO' : 'INBOUND'}] Processing message: ${msg.id} from ${senderPhone}`, {
         tenantSlug,
         traceId
       });
@@ -134,30 +173,31 @@ export async function POST(req: NextRequest) {
         return new NextResponse("EVENT_RECEIVED_DUPLICATE", { status: 200 });
       }
 
-      // Map 360dialog flat incoming payload to core-compatible nested MetaWebhookPayload structure
+      // Map incoming payload to standard MetaWebhookPayload structure
       const normalizedPayload = {
         object: "whatsapp_business_account",
         entry: [
           {
-            id: body.contacts?.[0]?.profile?.name || "360dialog_coexistence", // WABA identifier
+            id: wabaId,
             changes: [
               {
                 field: "messages",
                 value: {
                   messaging_product: "whatsapp",
                   metadata: {
-                    display_phone_number: channelRow.identifier,
-                    phone_number_id: channelRow.identifier // Channel Phone Number ID
+                    display_phone_number: activeIdentifier,
+                    phone_number_id: activeIdentifier
                   },
-                  contacts: body.contacts || [
+                  contacts: contactsList.length > 0 ? contactsList : [
                     {
-                      profile: { name: body.contacts?.[0]?.profile?.name || "Customer" },
-                      wa_id: msg.from
+                      profile: { name: contactsList[0]?.profile?.name || (isEcho ? "Quba Business App" : "Customer") },
+                      wa_id: senderPhone
                     }
                   ],
                   messages: [
                     {
                       from: msg.from,
+                      to: msg.to,
                       id: msg.id,
                       timestamp: msg.timestamp,
                       type: msg.type,
@@ -188,9 +228,9 @@ export async function POST(req: NextRequest) {
       return new NextResponse("EVENT_RECEIVED", { status: 200 });
     }
 
-    // 6. Inbound Status (Receipts) Processing
-    if (body.statuses?.[0]) {
-      const statusObj = body.statuses[0];
+    // 7. Status Receipts Processing
+    if (statusesList.length > 0) {
+      const statusObj = statusesList[0];
       const statusId = statusObj.id;
 
       log.info(`[360DIALOG] [STATUS] Ingesting status receipt: ${statusObj.status} for msg_id: ${statusId}`, {
@@ -211,20 +251,20 @@ export async function POST(req: NextRequest) {
         return new NextResponse("EVENT_RECEIVED_DUPLICATE", { status: 200 });
       }
 
-      // Map 360dialog flat status payload to nested MetaWebhookPayload structure
+      // Map status payload to standard MetaWebhookPayload structure
       const normalizedPayload = {
         object: "whatsapp_business_account",
         entry: [
           {
-            id: "360dialog_coexistence",
+            id: wabaId,
             changes: [
               {
                 field: "messages",
                 value: {
                   messaging_product: "whatsapp",
                   metadata: {
-                    display_phone_number: channelRow.identifier,
-                    phone_number_id: channelRow.identifier
+                    display_phone_number: activeIdentifier,
+                    phone_number_id: activeIdentifier
                   },
                   statuses: [
                     {

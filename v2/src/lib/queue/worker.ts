@@ -705,7 +705,15 @@ export class QueueWorkerEngine {
         return;
       }
       const incomingMsg = messages[0];
-      phoneNumber = incomingMsg.from || '';
+
+      // Echo Detection: If incomingMsg.from is the business display number, then it is an outbound app echo
+      const isEcho = incomingMsg.from === value?.metadata?.phone_number_id || 
+                     incomingMsg.from === value?.metadata?.display_phone_number ||
+                     incomingMsg.from === brain.context.config?.identifier;
+
+      phoneNumber = isEcho && (incomingMsg as any).to
+        ? (incomingMsg as any).to
+        : (incomingMsg.from || '');
       providerMessageId = incomingMsg.id || '';
       profileName = value?.contacts?.[0]?.profile?.name;
 
