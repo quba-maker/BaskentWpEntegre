@@ -38,6 +38,7 @@ export class ThreeSixtyDialogService {
         }
 
         bodyData = {
+          messaging_product: "whatsapp",
           to: to,
           recipient_type: "individual",
           type: media.type,
@@ -45,6 +46,7 @@ export class ThreeSixtyDialogService {
         };
       } else {
         bodyData = {
+          messaging_product: "whatsapp",
           to: to,
           recipient_type: "individual",
           type: "text",
