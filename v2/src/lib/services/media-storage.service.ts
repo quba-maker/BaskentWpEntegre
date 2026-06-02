@@ -53,7 +53,7 @@ export class MediaStorageService {
       if (is360dialog) {
         // Step 1: Get the download URL from 360dialog API
         const d360Res = await fetch(
-          `https://waba-v2.360dialog.io/${mediaId}`,
+          `https://waba-v2.360dialog.io/v1/media/${mediaId}`,
           {
             headers: { "D360-API-KEY": accessToken },
           }
@@ -108,6 +108,10 @@ export class MediaStorageService {
       if (is360dialog) {
         if (downloadUrl.includes("360dialog.io")) {
           headers["D360-API-KEY"] = accessToken;
+        } else if (downloadUrl.includes("facebook.com") || downloadUrl.includes("fbsbx.com")) {
+          // Robust fallback: if URL is from Meta/Facebook CDN, authorize via the Meta page token
+          const metaToken = process.env.META_ACCESS_TOKEN || accessToken;
+          headers["Authorization"] = `Bearer ${metaToken}`;
         }
       } else {
         if (downloadUrl.includes("facebook.com") || downloadUrl.includes("fbsbx.com")) {
