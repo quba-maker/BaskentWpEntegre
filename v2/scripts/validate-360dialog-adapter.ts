@@ -464,6 +464,21 @@ async function runValidationTests() {
     }
   );
 
+  // Test directUrl bypass download path
+  const mediaDirectResult = await MediaStorageService.downloadAndStore(
+    "test-tenant-uuid",
+    "media_id_12345_direct",
+    "mock_api_key_abc",
+    "test_msg_id_456",
+    {
+      mimeType: "image/png",
+      filename: "test_image_direct.png",
+      mediaType: "image",
+      provider: "360dialog",
+      directUrl: "https://lookaside.fbsbx.com/whatsapp_business/attachments/?mid=media_id_12345_direct&ext=123&hash=abc"
+    }
+  );
+
   // Restore fetch
   global.fetch = originalFetch;
 
@@ -473,6 +488,14 @@ async function runValidationTests() {
 
   if (mediaResult.fileSize !== 500) {
     throw new Error(`Expected file size 500, got ${mediaResult.fileSize}`);
+  }
+
+  if (!mediaDirectResult) {
+    throw new Error("360dialog direct media downloader returned null");
+  }
+
+  if (mediaDirectResult.fileSize !== 500) {
+    throw new Error(`Expected direct file size 500, got ${mediaDirectResult.fileSize}`);
   }
 
   console.log("   ✅ Dynamic 360dialog endpoint routing: PASS");

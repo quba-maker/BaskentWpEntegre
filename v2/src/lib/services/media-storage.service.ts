@@ -127,29 +127,47 @@ export class MediaStorageService {
         return null;
       }
 
-      log.info(`[MEDIA_METADATA_RESOLVED] Media metadata successfully fetched`, {
+      const directUrlUsed = !!metadata.directUrl;
+      const resolveStage = directUrlUsed ? "direct_binary_download" : "metadata_resolve";
+
+      log.info(`[MEDIA_METADATA_RESOLVED] Media metadata successfully resolved`, {
         mediaId: maskedId,
         tenantId,
-        stage: "metadata_resolve",
+        stage: resolveStage,
         endpointVariant,
         provider: metadata.provider,
         mediaType: metadata.mediaType,
         hasDownloadUrl: !!downloadUrl,
+        directUrlUsed,
+        source: directUrlUsed ? "webhook_presigned_url" : "api_metadata_fetch",
       });
 
       // Step 2: Download the actual file with scoped credentials
       const headers: Record<string, string> = {};
-      if (is360dialog) {
-        if (downloadUrl.includes("360dialog.io")) {
-          headers["D360-API-KEY"] = accessToken;
-        } else if (downloadUrl.includes("facebook.com") || downloadUrl.includes("fbsbx.com")) {
-          // Robust fallback: if URL is from Meta/Facebook CDN, authorize via the Meta page token
-          const metaToken = process.env.META_ACCESS_TOKEN || accessToken;
-          headers["Authorization"] = `Bearer ${metaToken}`;
-        }
+      // If URL is pre-signed (e.g. Lookaside link containing signature params like hash and ext),
+      // we must omit the Authorization header to avoid 401 token mismatches.
+      const isPresignedUrl = downloadUrl.includes("hash=") && downloadUrl.includes("ext=");
+
+      if (isPresignedUrl) {
+        log.info(`[MEDIA_DOWNLOAD_PREAUTH] Lookaside URL is pre-signed. Fetching without Authorization header to avoid 401 token mismatch.`, {
+          mediaId: maskedId,
+          tenantId,
+          stage: "binary_download",
+          endpointVariant,
+        });
       } else {
-        if (downloadUrl.includes("facebook.com") || downloadUrl.includes("fbsbx.com")) {
-          headers["Authorization"] = `Bearer ${accessToken}`;
+        if (is360dialog) {
+          if (downloadUrl.includes("360dialog.io")) {
+            headers["D360-API-KEY"] = accessToken;
+          } else if (downloadUrl.includes("facebook.com") || downloadUrl.includes("fbsbx.com")) {
+            // Robust fallback: if URL is from Meta/Facebook CDN, authorize via the Meta page token
+            const metaToken = process.env.META_ACCESS_TOKEN || accessToken;
+            headers["Authorization"] = `Bearer ${metaToken}`;
+          }
+        } else {
+          if (downloadUrl.includes("facebook.com") || downloadUrl.includes("fbsbx.com")) {
+            headers["Authorization"] = `Bearer ${accessToken}`;
+          }
         }
       }
 
