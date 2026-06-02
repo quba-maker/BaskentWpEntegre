@@ -1091,6 +1091,20 @@ export async function toggleBotStatus(conversationIdOrPhone: string, isBotActive
       if (isBotActive && process.env.ENABLE_SELECTED_AUTOPILOT !== 'true') {
         return { success: false, error: "Otopilot sistemi şu anda genel olarak kapalıdır. Lütfen sistem yöneticiniz ile iletişime geçin." };
       }
+
+      // Security Whitelist Toggle Gate (Only active if AUTOPILOT_ENFORCE_WHITELIST is 'true')
+      if (isBotActive && process.env.AUTOPILOT_ENFORCE_WHITELIST === 'true') {
+        const whitelistRaw = process.env.AUTOPILOT_WHITELIST;
+        if (!whitelistRaw || whitelistRaw.trim() === "") {
+          return { success: false, error: "Otopilot sistemi whitelist modu aktif ancak test listesi tanımsız. Lütfen sistem yöneticiniz ile iletişime geçin." };
+        }
+        const whitelist = whitelistRaw.split(',').map(num => num.trim().replace(/\D/g, ''));
+        const cleanPhone = phone.replace(/\D/g, '');
+        const isWhitelisted = whitelist.some(whNum => cleanPhone.endsWith(whNum) || whNum === cleanPhone);
+        if (!isWhitelisted) {
+          return { success: false, error: "Bu numara otopilot test listesinde değil. Sistem yöneticisi tarafından onaylanmadan otopilot açılamaz." };
+        }
+      }
       
       // Update DB: status and autopilot_enabled
       await ctx.db.executeSafe({

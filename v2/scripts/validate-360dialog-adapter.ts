@@ -159,6 +159,7 @@ TenantDB.prototype.executeSafe = async function (queryObj: any) {
   if (sql.toLowerCase().includes("from conversations")) {
     return [{ 
       id: "mock-conv-uuid", 
+      phone_number: "905001112233",
       channel: "whatsapp", 
       channel_id: "test-channel-uuid", 
       status: mockConversationsStatus,
@@ -182,11 +183,15 @@ TenantDB.prototype.executeSafe = async function (queryObj: any) {
 
   if (sql.includes("UPDATE conversations")) {
     capturedUpdates.push({ sql, values: vals });
-    if (sql.includes("status = 'human'") || sql.includes("status = $")) {
+    if (/\bstatus\s*=\s*['"]human['"]/i.test(sql)) {
       mockConversationsStatus = "human";
+    } else if (/\bstatus\s*=\s*\$/i.test(sql)) {
+      mockConversationsStatus = vals[0];
     }
-    if (sql.includes("autopilot_enabled = false") || sql.includes("autopilot_enabled = $")) {
+    if (/\bautopilot_enabled\s*=\s*false/i.test(sql)) {
       mockAutopilotEnabled = false;
+    } else if (/\bautopilot_enabled\s*=\s*\$/i.test(sql)) {
+      mockAutopilotEnabled = vals[1];
     }
     return [];
   }
@@ -739,6 +744,7 @@ async function runValidationTests() {
 
   // A: Global Kill-Switch Gate (ENABLE_SELECTED_AUTOPILOT = false)
   process.env.ENABLE_SELECTED_AUTOPILOT = "false";
+  process.env.AUTOPILOT_ENFORCE_WHITELIST = "true";
   process.env.AUTOPILOT_WHITELIST = "";
   
   await worker.processEvent(
@@ -753,8 +759,9 @@ async function runValidationTests() {
   }
   console.log("   ✅ A: Global kill-switch blocks response: PASS");
 
-  // B: Whitelist Gate (ENABLE_SELECTED_AUTOPILOT = true, number NOT whitelisted)
+  // B: Whitelist Gate (ENABLE_SELECTED_AUTOPILOT = true, AUTOPILOT_ENFORCE_WHITELIST = true, number NOT whitelisted)
   process.env.ENABLE_SELECTED_AUTOPILOT = "true";
+  process.env.AUTOPILOT_ENFORCE_WHITELIST = "true";
   process.env.AUTOPILOT_WHITELIST = "905556667788"; // Whitelist a different number
   wasLLMResponseGenerated = false;
 
@@ -770,8 +777,9 @@ async function runValidationTests() {
   }
   console.log("   ✅ B: Whitelist blocks non-matching numbers: PASS");
 
-  // B.2: Whitelist Gate (ENABLE_SELECTED_AUTOPILOT = true, whitelist is empty/undefined)
+  // B.2: Whitelist Gate (ENABLE_SELECTED_AUTOPILOT = true, AUTOPILOT_ENFORCE_WHITELIST = true, whitelist is empty/undefined)
   process.env.ENABLE_SELECTED_AUTOPILOT = "true";
+  process.env.AUTOPILOT_ENFORCE_WHITELIST = "true";
   process.env.AUTOPILOT_WHITELIST = ""; // Empty whitelist
   wasLLMResponseGenerated = false;
 
@@ -787,16 +795,54 @@ async function runValidationTests() {
   }
   console.log("   ✅ B.2: Empty whitelist blocks response (closed gate by default): PASS");
 
-  // C: Whitelist Gate (ENABLE_SELECTED_AUTOPILOT = true, number IS whitelisted)
-  process.env.AUTOPILOT_WHITELIST = "905001112233"; // Match customer from payload
+  // B.3: Whitelist Gate (ENABLE_SELECTED_AUTOPILOT = true, AUTOPILOT_ENFORCE_WHITELIST = false/undefined -> whitelist bypassed)
+  process.env.ENABLE_SELECTED_AUTOPILOT = "true";
+  process.env.AUTOPILOT_ENFORCE_WHITELIST = "false";
+  process.env.AUTOPILOT_WHITELIST = ""; // Empty whitelist but bypassed
   wasLLMResponseGenerated = false;
-  
+
   // Temporarily intercept LLM generator to return a dummy reply
   const originalGenerateForTest = worker["aiOrchestrator"].generateResponse;
   worker["aiOrchestrator"].generateResponse = async function () {
     wasLLMResponseGenerated = true;
     return { text: "Merhaba, autopilot devrede!", latencyMs: 150, modelUsed: "mock-model" } as any;
   };
+
+  await worker.processEvent(
+    "whatsapp.message.received",
+    "test-tenant-uuid",
+    mockMsgEvent.payload, // from: "905001112233"
+    mockMsgEvent.metadata
+  );
+
+  if (!wasLLMResponseGenerated) {
+    throw new Error("TEST 7-B.3 Failed: Bot failed to respond when whitelist was bypassed!");
+  }
+  console.log("   ✅ B.3: Whitelist bypass allows responses without list match: PASS");
+
+  // B.4: Autopilot Disabled check (autopilot_enabled = false)
+  mockAutopilotEnabled = false;
+  wasLLMResponseGenerated = false;
+
+  await worker.processEvent(
+    "whatsapp.message.received",
+    "test-tenant-uuid",
+    mockMsgEvent.payload,
+    mockMsgEvent.metadata
+  );
+
+  if (wasLLMResponseGenerated) {
+    throw new Error("TEST 7-B.4 Failed: Bot responded when autopilot_enabled was false!");
+  }
+  console.log("   ✅ B.4: Bot does not respond when autopilot_enabled is false: PASS");
+
+  // Restore mockAutopilotEnabled to true for remaining tests
+  mockAutopilotEnabled = true;
+
+  // C: Whitelist Gate (ENABLE_SELECTED_AUTOPILOT = true, AUTOPILOT_ENFORCE_WHITELIST = true, number IS whitelisted)
+  process.env.AUTOPILOT_ENFORCE_WHITELIST = "true";
+  process.env.AUTOPILOT_WHITELIST = "905001112233"; // Match customer from payload
+  wasLLMResponseGenerated = false;
 
   await worker.processEvent(
     "whatsapp.message.received",
@@ -942,6 +988,80 @@ async function runValidationTests() {
     throw new Error("TEST 7-G Failed: Failed outbound message was not saved with status 'failed'!");
   }
   console.log("   ✅ G: API sending failures auto-disable autopilot: PASS");
+
+  // ----------------------------------------------------
+  // TEST 8: toggleBotStatus Security validation
+  // ----------------------------------------------------
+  console.log("\n🧪 [TEST 8] toggleBotStatus Security validation...");
+
+  // Import the action dynamically to prevent circular dependencies or premature loading
+  const { toggleBotStatus } = await import("../src/app/actions/inbox");
+
+  // Mock global config: Kill-switch is OFF
+  process.env.ENABLE_SELECTED_AUTOPILOT = "false";
+  process.env.AUTOPILOT_ENFORCE_WHITELIST = "false";
+  mockConversationsStatus = "human";
+  mockAutopilotEnabled = false;
+
+  // Try to toggle ON
+  let toggleRes = await toggleBotStatus("905001112233", true);
+  if (toggleRes.success || !toggleRes.error?.includes("kapalıdır")) {
+    throw new Error("TEST 8-A Failed: Allowed manual toggle when global kill-switch was disabled!");
+  }
+  if (mockAutopilotEnabled !== false) {
+    throw new Error("TEST 8-A Failed: DB state modified when global kill-switch blocked toggle!");
+  }
+  console.log("   ✅ A: Manual toggle blocked when global kill-switch is disabled: PASS");
+
+  // Mock global config: Kill-switch is ON, Whitelist Enforced = true, number NOT whitelisted
+  process.env.ENABLE_SELECTED_AUTOPILOT = "true";
+  process.env.AUTOPILOT_ENFORCE_WHITELIST = "true";
+  process.env.AUTOPILOT_WHITELIST = "905556667788"; // A different number
+  mockConversationsStatus = "human";
+  mockAutopilotEnabled = false;
+
+  toggleRes = await toggleBotStatus("905001112233", true);
+  if (toggleRes.success || !toggleRes.error?.includes("test listesinde değil")) {
+    throw new Error("TEST 8-B Failed: Allowed manual toggle when whitelist enforcement was active and number not whitelisted!");
+  }
+  if (mockAutopilotEnabled !== false) {
+    throw new Error("TEST 8-B Failed: DB state modified when whitelist enforcement blocked toggle!");
+  }
+  console.log("   ✅ B: Manual toggle blocked when whitelist enforcement active and number not whitelisted: PASS");
+
+  // Mock global config: Kill-switch is ON, Whitelist Enforced = true, number IS whitelisted
+  process.env.ENABLE_SELECTED_AUTOPILOT = "true";
+  process.env.AUTOPILOT_ENFORCE_WHITELIST = "true";
+  process.env.AUTOPILOT_WHITELIST = "905001112233"; // Matching number
+  mockConversationsStatus = "human";
+  mockAutopilotEnabled = false;
+  capturedUpdates = [];
+
+  toggleRes = await toggleBotStatus("905001112233", true);
+  if (!toggleRes.success) {
+    throw new Error(`TEST 8-C Failed: Blocked toggle on whitelisted number: ${toggleRes.error}`);
+  }
+  if ((mockAutopilotEnabled as boolean) !== true || mockConversationsStatus !== "bot") {
+    throw new Error("TEST 8-C Failed: DB state not updated successfully on whitelisted toggle!");
+  }
+  console.log("   ✅ C: Manual toggle allowed when whitelist enforcement active and number matches: PASS");
+
+  // Mock global config: Kill-switch is ON, Whitelist Enforced = false, number NOT whitelisted
+  process.env.ENABLE_SELECTED_AUTOPILOT = "true";
+  process.env.AUTOPILOT_ENFORCE_WHITELIST = "false";
+  process.env.AUTOPILOT_WHITELIST = ""; // Empty whitelist
+  mockConversationsStatus = "human";
+  mockAutopilotEnabled = false;
+  capturedUpdates = [];
+
+  toggleRes = await toggleBotStatus("905001112233", true);
+  if (!toggleRes.success) {
+    throw new Error(`TEST 8-D Failed: Blocked toggle when whitelist enforcement was disabled: ${toggleRes.error}`);
+  }
+  if ((mockAutopilotEnabled as boolean) !== true || mockConversationsStatus !== "bot") {
+    throw new Error("TEST 8-D Failed: DB state not updated successfully when whitelist bypassed!");
+  }
+  console.log("   ✅ D: Manual toggle allowed on any number when whitelist enforcement is disabled: PASS");
 
   // Restore original LLM orchestrator generate function and saveMessageIdempotent
   worker["aiOrchestrator"].generateResponse = originalGenerateForTest;

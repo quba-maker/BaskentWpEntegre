@@ -1216,20 +1216,22 @@ export class QueueWorkerEngine {
 
     // Run active autopilot safety check gates
     if (isAutopilotResponding) {
-      // 1. Whitelist Gate
-      const whitelistRaw = process.env.AUTOPILOT_WHITELIST;
-      if (!whitelistRaw || whitelistRaw.trim() === "") {
-        this.log.info(`[AUTOPILOT_GATE] AUTOPILOT_WHITELIST is empty or undefined. Skipping bot response.`, { traceId });
-        skipBotReply = true;
-        isAutopilotResponding = false;
-      } else {
-        const whitelist = whitelistRaw.split(',').map(num => num.trim().replace(/\D/g, ''));
-        const cleanPhone = phoneNumber.replace(/\D/g, '');
-        const isWhitelisted = whitelist.some(whNum => cleanPhone.endsWith(whNum) || whNum === cleanPhone);
-        if (!isWhitelisted) {
-          this.log.info(`[AUTOPILOT_GATE] Phone number ${phoneNumber} is not whitelisted in AUTOPILOT_WHITELIST. Skipping bot response.`, { traceId });
+      // 1. Whitelist Gate (Only checked if AUTOPILOT_ENFORCE_WHITELIST is 'true')
+      if (process.env.AUTOPILOT_ENFORCE_WHITELIST === 'true') {
+        const whitelistRaw = process.env.AUTOPILOT_WHITELIST;
+        if (!whitelistRaw || whitelistRaw.trim() === "") {
+          this.log.info(`[AUTOPILOT_GATE] Whitelist enforcement active but AUTOPILOT_WHITELIST is empty or undefined. Skipping bot response.`, { traceId });
           skipBotReply = true;
           isAutopilotResponding = false;
+        } else {
+          const whitelist = whitelistRaw.split(',').map(num => num.trim().replace(/\D/g, ''));
+          const cleanPhone = phoneNumber.replace(/\D/g, '');
+          const isWhitelisted = whitelist.some(whNum => cleanPhone.endsWith(whNum) || whNum === cleanPhone);
+          if (!isWhitelisted) {
+            this.log.info(`[AUTOPILOT_GATE] Phone number ${phoneNumber} is not whitelisted in AUTOPILOT_WHITELIST. Skipping bot response.`, { traceId });
+            skipBotReply = true;
+            isAutopilotResponding = false;
+          }
         }
       }
 
