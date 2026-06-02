@@ -245,6 +245,30 @@ export function useRealtimeReconciliation(tenantId: string) {
     }, false);
   };
 
+  // Internal handler for autopilot updates
+  const handleAutopilotUpdated = (event: any) => {
+    const { payload, eventId } = event;
+    logReconciliation("cache_updated", { eventId, id: payload.conversationId, type: "autopilot_update" });
+
+    // Update conversation in query cache
+    updateConversationPreview(payload.conversationId, {
+      autopilot_enabled: payload.enabled,
+      status: payload.status,
+      isBotActive: payload.enabled
+    }, false);
+
+    // If this is the active contact, also update store state to sync UI
+    const store = useInboxStore.getState();
+    if (store.activePhone === payload.phone || store.activePhone === payload.conversationId) {
+      if (store.activeContact) {
+        store.setActiveContact(store.activePhone!, {
+          ...store.activeContact,
+          isBotActive: payload.enabled
+        });
+      }
+    }
+  };
+
   // Subscribe to Ably events
   useRealtimeSubscription(tenantId, (event: ProjectionEvent) => {
     if (IS_DEV) {
@@ -260,6 +284,9 @@ export function useRealtimeReconciliation(tenantId: string) {
         break;
       case "conversation.memory_updated":
         handleMemoryUpdated(event as ConversationMemoryUpdatedEvent);
+        break;
+      case "conversation.autopilot_updated":
+        handleAutopilotUpdated(event);
         break;
       default:
         // Future extensions (ai.stream.delta, etc.)

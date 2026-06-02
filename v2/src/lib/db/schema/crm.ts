@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, integer, numeric, jsonb } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, uuid, integer, numeric, jsonb, boolean } from 'drizzle-orm/pg-core';
 import { tenants, users } from './tenants';
 import { channels } from './channels';
 
@@ -60,6 +60,7 @@ export const conversations = pgTable('conversations', {
   handedOffAt: timestamp('handed_off_at', { withTimezone: true }),
   handoffReason: text('handoff_reason'),
   aiDisabledUntil: timestamp('ai_disabled_until', { withTimezone: true }),
+  autopilotEnabled: boolean('autopilot_enabled').default(false).notNull(),
 
   lastMessageAt: timestamp('last_message_at', { withTimezone: true }).defaultNow(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),

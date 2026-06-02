@@ -88,6 +88,9 @@ process.env.TEST_USER_ID = "test-user-uuid";
 // Realtime states to verify side effects
 let publishedMessages: any[] = [];
 let mockConversationsStatus = "ai";
+let mockAutopilotEnabled: boolean = false;
+let mockLeadStage: string | null = null;
+let auditLogsWritten: any[] = [];
 let savedMessages: any[] = [];
 let publishedQueueEvents: any[] = [];
 let loggedEvents: any[] = [];
@@ -154,7 +157,14 @@ TenantDB.prototype.executeSafe = async function (queryObj: any) {
 
   // 6. Conversations resolve channel & ID
   if (sql.toLowerCase().includes("from conversations")) {
-    return [{ id: "mock-conv-uuid", channel: "whatsapp", channel_id: "test-channel-uuid", status: mockConversationsStatus }];
+    return [{ 
+      id: "mock-conv-uuid", 
+      channel: "whatsapp", 
+      channel_id: "test-channel-uuid", 
+      status: mockConversationsStatus,
+      autopilot_enabled: mockAutopilotEnabled,
+      lead_stage: mockLeadStage
+    }];
   }
 
   // 7. Last inbound message query for 24h service window check
@@ -165,6 +175,7 @@ TenantDB.prototype.executeSafe = async function (queryObj: any) {
   // 8. Handover status update
   if (sql.includes("UPDATE conversations SET status = 'human'") || sql.includes("SET status = 'human'")) {
     mockConversationsStatus = "human";
+    mockAutopilotEnabled = false;
     capturedUpdates.push({ sql, values: vals });
     return [];
   }
@@ -174,6 +185,15 @@ TenantDB.prototype.executeSafe = async function (queryObj: any) {
     if (sql.includes("status = 'human'") || sql.includes("status = $")) {
       mockConversationsStatus = "human";
     }
+    if (sql.includes("autopilot_enabled = false") || sql.includes("autopilot_enabled = $")) {
+      mockAutopilotEnabled = false;
+    }
+    return [];
+  }
+
+  // 9. INSERT INTO ai_audit_logs
+  if (sql.includes("INSERT INTO ai_audit_logs")) {
+    auditLogsWritten.push({ sql, values: vals });
     return [];
   }
 
@@ -687,6 +707,228 @@ async function runValidationTests() {
     throw new Error("Original media fields lost on media message insert!");
   }
   console.log("   ✅ Media messaging routed via 360dialog, Vercel Blob URL verification passed, audit metadata verified: PASS");
+
+  // ----------------------------------------------------
+  // TEST 7: Selected Conversation Autopilot Security & Trigger Gates
+  // ----------------------------------------------------
+  console.log("\n🧪 [TEST 7] Selected Conversation Autopilot Security & Trigger Gates...");
+
+  // Setup initial mock states
+  mockConversationsStatus = "bot";
+  mockAutopilotEnabled = true;
+  mockLeadStage = null;
+  mockLastInboundTime = Date.now() - 5 * 1000; // 5s ago (within window)
+  wasLLMResponseGenerated = false;
+  savedMessages = [];
+  auditLogsWritten = [];
+  capturedUpdates = [];
+  lastThreeSixtySendParams = null;
+  mockThreeSixtySendFailure = false;
+
+  // Let's mock saveMessageIdempotent for TEST 7 to trace saved messages
+  const originalSaveMessage = MessageService.prototype.saveMessageIdempotent;
+  MessageService.prototype.saveMessageIdempotent = async function (params: any) {
+    savedMessages.push({ values: Object.values(params), params });
+    return {
+      success: true,
+      isDuplicate: false,
+      messageId: "mock_saved_msg_id",
+      conversationId: "mock-conv-uuid"
+    };
+  };
+
+  // A: Global Kill-Switch Gate (ENABLE_SELECTED_AUTOPILOT = false)
+  process.env.ENABLE_SELECTED_AUTOPILOT = "false";
+  process.env.AUTOPILOT_WHITELIST = "";
+  
+  await worker.processEvent(
+    "whatsapp.message.received",
+    "test-tenant-uuid",
+    mockMsgEvent.payload,
+    mockMsgEvent.metadata
+  );
+
+  if (wasLLMResponseGenerated) {
+    throw new Error("TEST 7-A Failed: Bot responded when ENABLE_SELECTED_AUTOPILOT was false!");
+  }
+  console.log("   ✅ A: Global kill-switch blocks response: PASS");
+
+  // B: Whitelist Gate (ENABLE_SELECTED_AUTOPILOT = true, number NOT whitelisted)
+  process.env.ENABLE_SELECTED_AUTOPILOT = "true";
+  process.env.AUTOPILOT_WHITELIST = "905556667788"; // Whitelist a different number
+  wasLLMResponseGenerated = false;
+
+  await worker.processEvent(
+    "whatsapp.message.received",
+    "test-tenant-uuid",
+    mockMsgEvent.payload, // from: "905001112233"
+    mockMsgEvent.metadata
+  );
+
+  if (wasLLMResponseGenerated) {
+    throw new Error("TEST 7-B Failed: Bot responded when number was not in whitelist!");
+  }
+  console.log("   ✅ B: Whitelist blocks non-matching numbers: PASS");
+
+  // C: Whitelist Gate (ENABLE_SELECTED_AUTOPILOT = true, number IS whitelisted)
+  process.env.AUTOPILOT_WHITELIST = "905001112233"; // Match customer from payload
+  wasLLMResponseGenerated = false;
+  
+  // Temporarily intercept LLM generator to return a dummy reply
+  const originalGenerateForTest = worker["aiOrchestrator"].generateResponse;
+  worker["aiOrchestrator"].generateResponse = async function () {
+    wasLLMResponseGenerated = true;
+    return { text: "Merhaba, autopilot devrede!", latencyMs: 150, modelUsed: "mock-model" } as any;
+  };
+
+  await worker.processEvent(
+    "whatsapp.message.received",
+    "test-tenant-uuid",
+    mockMsgEvent.payload,
+    mockMsgEvent.metadata
+  );
+
+  if (!wasLLMResponseGenerated) {
+    throw new Error("TEST 7-C Failed: Bot failed to respond when number was whitelisted!");
+  }
+  if (lastThreeSixtySendParams?.content !== "Merhaba, autopilot devrede!") {
+    throw new Error("TEST 7-C Failed: Message was not sent via 360dialog");
+  }
+  console.log("   ✅ C: Whitelist allows matching numbers: PASS");
+
+  // D: 24h Window Gate (Previous customer message was 25 hours ago)
+  mockConversationsStatus = "bot";
+  mockAutopilotEnabled = true;
+  mockLastInboundTime = Date.now() - 25 * 60 * 60 * 1000; // 25 hours ago
+  wasLLMResponseGenerated = false;
+  auditLogsWritten = [];
+  capturedUpdates = [];
+
+  await worker.processEvent(
+    "whatsapp.message.received",
+    "test-tenant-uuid",
+    mockMsgEvent.payload,
+    mockMsgEvent.metadata
+  );
+
+  if (wasLLMResponseGenerated) {
+    throw new Error("TEST 7-D Failed: Bot responded when 24h window was expired!");
+  }
+  if ((mockAutopilotEnabled as boolean) !== false || mockConversationsStatus !== "human") {
+    throw new Error("TEST 7-D Failed: Autopilot was not disabled on 24h expiration!");
+  }
+  const last24hAuditLog = auditLogsWritten.find(log => log.values.includes("autopilot_disabled"));
+  if (!last24hAuditLog || !last24hAuditLog.values[3].includes("24h_expired")) {
+    throw new Error("TEST 7-D Failed: Audit log for 24h_expired not written correctly!");
+  }
+  console.log("   ✅ D: 24h service window expiration disables autopilot: PASS");
+
+  // E: Stop Rules Gate (Opt-Out keyword detected)
+  mockConversationsStatus = "bot";
+  mockAutopilotEnabled = true;
+  mockLastInboundTime = Date.now() - 5 * 1000; // Reset inbound to 5s ago
+  wasLLMResponseGenerated = false;
+  auditLogsWritten = [];
+  capturedUpdates = [];
+
+  // Create payload containing opt-out keyword "istemiyorum"
+  const mockOptOutPayload = {
+    ...mockMsgEvent.payload,
+    entry: [{
+      ...mockMsgEvent.payload.entry[0],
+      changes: [{
+        ...mockMsgEvent.payload.entry[0].changes[0],
+        value: {
+          ...mockMsgEvent.payload.entry[0].changes[0].value,
+          messages: [{
+            ...mockMsgEvent.payload.entry[0].changes[0].value.messages[0],
+            text: { body: "Bana artık mesaj göndermeyin, istemiyorum." }
+          }]
+        }
+      }]
+    }]
+  };
+
+  await worker.processEvent(
+    "whatsapp.message.received",
+    "test-tenant-uuid",
+    mockOptOutPayload,
+    mockMsgEvent.metadata
+  );
+
+  if (wasLLMResponseGenerated) {
+    throw new Error("TEST 7-E Failed: Bot responded when opt-out keyword was present!");
+  }
+  if ((mockAutopilotEnabled as boolean) !== false || mockConversationsStatus !== "human") {
+    throw new Error("TEST 7-E Failed: Autopilot was not disabled on opt-out!");
+  }
+  const optOutAuditLog = auditLogsWritten.find(log => log.values.includes("autopilot_disabled"));
+  if (!optOutAuditLog || !optOutAuditLog.values[3].includes("stop_rule")) {
+    throw new Error("TEST 7-E Failed: Audit log for stop_rule not written correctly!");
+  }
+  console.log("   ✅ E: Opt-out stop rule disables autopilot: PASS");
+
+  // F: Stop Rules Gate (Terminal opportunity stage 'lost')
+  mockConversationsStatus = "bot";
+  mockAutopilotEnabled = true;
+  mockLeadStage = "lost";
+  wasLLMResponseGenerated = false;
+  auditLogsWritten = [];
+  capturedUpdates = [];
+
+  await worker.processEvent(
+    "whatsapp.message.received",
+    "test-tenant-uuid",
+    mockMsgEvent.payload, // Standard text message
+    mockMsgEvent.metadata
+  );
+
+  if (wasLLMResponseGenerated) {
+    throw new Error("TEST 7-F Failed: Bot responded when conversation was in a terminal stage!");
+  }
+  if ((mockAutopilotEnabled as boolean) !== false || mockConversationsStatus !== "human") {
+    throw new Error("TEST 7-F Failed: Autopilot was not disabled on terminal stage!");
+  }
+  const stageAuditLog = auditLogsWritten.find(log => log.values.includes("autopilot_disabled"));
+  if (!stageAuditLog || !stageAuditLog.values[3].includes("coordinator_takeover")) {
+    throw new Error("TEST 7-F Failed: Audit log for coordinator_takeover not written correctly!");
+  }
+  console.log("   ✅ F: Terminal opportunity stage disables autopilot: PASS");
+
+  // G: API Send Error Safety
+  mockConversationsStatus = "bot";
+  mockAutopilotEnabled = true;
+  mockLeadStage = null;
+  wasLLMResponseGenerated = false;
+  auditLogsWritten = [];
+  capturedUpdates = [];
+  mockThreeSixtySendFailure = true; // Inject API transmission error
+
+  await worker.processEvent(
+    "whatsapp.message.received",
+    "test-tenant-uuid",
+    mockMsgEvent.payload,
+    mockMsgEvent.metadata
+  );
+
+  if ((mockAutopilotEnabled as boolean) !== false || mockConversationsStatus !== "human") {
+    throw new Error("TEST 7-G Failed: Autopilot was not disabled upon transmission error!");
+  }
+  const errAuditLog = auditLogsWritten.find(log => log.values.includes("autopilot_disabled"));
+  if (!errAuditLog || !errAuditLog.values[3].includes("error")) {
+    throw new Error("TEST 7-G Failed: Audit log for error not written correctly!");
+  }
+  
+  // Verify message saved to DB as failed
+  const failedMsg = savedMessages.find(m => m.values.includes("failed"));
+  if (!failedMsg) {
+    throw new Error("TEST 7-G Failed: Failed outbound message was not saved with status 'failed'!");
+  }
+  console.log("   ✅ G: API sending failures auto-disable autopilot: PASS");
+
+  // Restore original LLM orchestrator generate function and saveMessageIdempotent
+  worker["aiOrchestrator"].generateResponse = originalGenerateForTest;
+  MessageService.prototype.saveMessageIdempotent = originalSaveMessage;
 
   console.log("\n🎉 ALL 360DIALOG COEXISTENCE ADAPTER VALIDATION TESTS PASSED!");
   console.log("==========================================================\n");

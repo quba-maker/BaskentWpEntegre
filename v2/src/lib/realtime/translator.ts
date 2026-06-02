@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from "uuid";
-import { ChatMessageCreatedEvent, ChatMessageStatusUpdatedEvent, ConversationMemoryUpdatedEvent } from "./contracts";
+import { ChatMessageCreatedEvent, ChatMessageStatusUpdatedEvent, ConversationMemoryUpdatedEvent, ConversationAutopilotUpdatedEvent } from "./contracts";
 
 /**
  * Internal message payload from DB/worker.
@@ -132,6 +132,36 @@ export class RealtimeTranslator {
         aiBuyingIntent: memoryPayload.aiBuyingIntent,
         aiSentiment: memoryPayload.aiSentiment,
         objections: memoryPayload.objections
+      }
+    };
+  }
+
+  static toAutopilotUpdated(
+    tenantId: string,
+    conversationId: string,
+    phone: string,
+    channelId: string | null,
+    enabled: boolean,
+    status: "bot" | "human" | "open",
+    traceContext: TraceContext
+  ): ConversationAutopilotUpdatedEvent {
+    return {
+      eventId: uuidv4(),
+      traceId: traceContext.traceId,
+      spanId: traceContext.spanId,
+      parentSpanId: traceContext.parentSpanId,
+      timestamp: Date.now() * 1000,
+      entityVersion: 1,
+      eventVersion: "1.0",
+      schemaVersion: "1.0",
+      tenantId,
+      type: "conversation.autopilot_updated",
+      payload: {
+        conversationId,
+        phone,
+        channelId,
+        enabled,
+        status
       }
     };
   }

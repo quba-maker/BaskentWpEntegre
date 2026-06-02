@@ -667,6 +667,7 @@ export class QueueWorkerEngine {
   private async handleIncomingMessage(tenantId: string, payload: MetaWebhookPayload, metadata: WorkerMetadata, channel: 'whatsapp' | 'messenger' | 'instagram') {
     const traceId = metadata.messageId;
     this.log.info(`[WORKER_PROCESSING] [${channel.toUpperCase()}] Processing incoming message`, { tenantId, traceId });
+    let skipBotReply = false;
 
     // 1. Resolve Hybrid Isolated Tenant Brain
     const { BrainResolver } = await import('../brain/brain-resolver');
@@ -935,13 +936,67 @@ export class QueueWorkerEngine {
     }
 
     if (isAppEcho) {
-      this.log.info(`[APP_ECHO_DETECTED] Outbound echo from mobile WhatsApp App. Auto-handover to human.`, { phoneNumber, traceId });
+      this.log.info(`[APP_ECHO_DETECTED] Outbound echo from mobile WhatsApp App. Auto-handover to human and disabling autopilot.`, { phoneNumber, traceId });
       
-      // Auto-handover: update conversation status to human
+      // Auto-handover: update conversation status to human and disable autopilot
       await db.executeSafe({
-        text: `UPDATE conversations SET status = 'human' WHERE phone_number = $1 AND tenant_id = $2`,
+        text: `UPDATE conversations SET status = 'human', autopilot_enabled = false WHERE phone_number = $1 AND tenant_id = $2`,
         values: [phoneNumber, tenantId]
       });
+
+      // Get conversation details for audit log / realtime
+      const convDetails = await db.executeSafe({
+        text: `SELECT id, channel_id FROM conversations WHERE phone_number = $1 AND tenant_id = $2 LIMIT 1`,
+        values: [phoneNumber, tenantId]
+      }) as any[];
+      const resolvedConvId = convDetails[0]?.id || conversationId;
+      const resolvedChannelId = convDetails[0]?.channel_id || metadata.channelId;
+
+      // Write structural audit log
+      await db.executeSafe({
+        text: `INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
+               VALUES ($1, $2, $3, $4)`,
+        values: [
+          tenantId,
+          'autopilot_disabled',
+          'Autopilot disabled by WhatsApp App Echo',
+          JSON.stringify({
+            conversation_id: resolvedConvId,
+            phone: phoneNumber,
+            channel_id: resolvedChannelId,
+            tenant_id: tenantId,
+            enabled: false,
+            user_id: 'system_webhook',
+            timestamp: new Date().toISOString(),
+            reason: 'app_echo'
+          })
+        ]
+      });
+
+      // Broadcast autopilot updated realtime update
+      try {
+        const { RealtimeBus } = await import("@/lib/realtime/bus");
+        await RealtimeBus.publish(tenantId, {
+          eventId: require("uuid").v4(),
+          traceId: "app-echo-trace-" + Date.now(),
+          spanId: require("uuid").v4(),
+          timestamp: Date.now() * 1000,
+          entityVersion: 1,
+          eventVersion: "1.0",
+          schemaVersion: "1.0",
+          tenantId: tenantId,
+          type: "conversation.autopilot_updated" as any,
+          payload: {
+            conversationId: resolvedConvId,
+            phone: phoneNumber,
+            channelId: resolvedChannelId,
+            enabled: false,
+            status: 'human'
+          }
+        });
+      } catch (realtimeErr) {
+        this.log.error("Failed to publish autopilot echo realtime update:", realtimeErr instanceof Error ? realtimeErr : new Error(String(realtimeErr)));
+      }
 
       // Realtime publish for the human outbound message
       if (messageId && conversationId) {
@@ -1052,18 +1107,104 @@ export class QueueWorkerEngine {
       }
     }
 
-    // 3. Conversation Load / State Check
-    const status = await convService.getStatus(phoneNumber);
-    if (status === 'human') {
-      this.log.info(`[SKIP] Conversation is handled by human, triggering memory summarization asynchronously`, { phoneNumber, traceId });
-      if (conversationId) {
-        // Fire-and-forget memory summarization in human mode so it doesn't block the worker execution
+    // 3. Conversation Load / State Check & Autopilot Gates
+    const convQuery = await db.executeSafe({
+      text: `SELECT id, status, autopilot_enabled, channel_id, lead_stage FROM conversations WHERE phone_number = $1 AND tenant_id = $2 LIMIT 1`,
+      values: [phoneNumber, tenantId]
+    }) as any[];
+    
+    const convRecord = convQuery[0] || null;
+    const conversationIdVal = convRecord?.id || conversationId;
+    const autopilotEnabled = convRecord?.autopilot_enabled || false;
+    const currentStatus = convRecord?.status || 'human';
+    const resolvedChannelId = convRecord?.channel_id || metadata.channelId;
+    const leadStage = convRecord?.lead_stage || null;
+
+    const isGlobalAutopilotEnabled = process.env.ENABLE_SELECTED_AUTOPILOT === 'true';
+    let isAutopilotResponding = isGlobalAutopilotEnabled && autopilotEnabled;
+
+    const disableAutopilot = async (reason: string, details?: string) => {
+      this.log.info(`[AUTOPILOT_AUTO_DISABLE] Disabling autopilot. Reason: ${reason} | Details: ${details || 'none'}`);
+      
+      // Update DB
+      await db.executeSafe({
+        text: `UPDATE conversations 
+               SET status = 'human', autopilot_enabled = false 
+               WHERE id = $1 AND tenant_id = $2`,
+        values: [conversationIdVal, tenantId]
+      });
+
+      // Write structural audit log
+      await db.executeSafe({
+        text: `INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
+               VALUES ($1, $2, $3, $4)`,
+        values: [
+          tenantId,
+          'autopilot_disabled',
+          `Autopilot automatically disabled. Reason: ${reason}. Details: ${details || ''}`,
+          JSON.stringify({
+            conversation_id: conversationIdVal,
+            phone: phoneNumber,
+            channel_id: resolvedChannelId,
+            tenant_id: tenantId,
+            enabled: false,
+            user_id: 'system_worker',
+            timestamp: new Date().toISOString(),
+            reason: reason,
+            details: details || null
+          })
+        ]
+      });
+
+      // Broadcast realtime update
+      try {
+        const { RealtimeBus } = await import("@/lib/realtime/bus");
+        await RealtimeBus.publish(tenantId, {
+          eventId: require("uuid").v4(),
+          traceId: "worker-auto-disable-" + Date.now(),
+          spanId: require("uuid").v4(),
+          timestamp: Date.now() * 1000,
+          entityVersion: 1,
+          eventVersion: "1.0",
+          schemaVersion: "1.0",
+          tenantId: tenantId,
+          type: "conversation.autopilot_updated" as any,
+          payload: {
+            conversationId: conversationIdVal,
+            phone: phoneNumber,
+            channelId: resolvedChannelId,
+            enabled: false,
+            status: 'human'
+          }
+        });
+      } catch (realtimeErr) {
+        this.log.error("Failed to publish autopilot auto-disable realtime update:", realtimeErr instanceof Error ? realtimeErr : new Error(String(realtimeErr)));
+      }
+    };
+
+    // Check if we should proceed with bot response generation
+    let shouldProceedWithBot = false;
+    
+    if (isAutopilotResponding) {
+      shouldProceedWithBot = true;
+    } else if (currentStatus !== 'human') {
+      // Fallback: If not selected autopilot, check old global auto-reply setting
+      const isAutoReplyEnabled = await FeatureFlagService.isEnabled(tenantId, 'whatsapp_auto_reply', false);
+      if (isAutoReplyEnabled) {
+        shouldProceedWithBot = true;
+      }
+    }
+
+    if (!shouldProceedWithBot) {
+      this.log.info(`[SKIP] Conversation is handled by human or autopilot/auto-reply is disabled`, { phoneNumber, traceId });
+      if (conversationIdVal) {
+        // Fire-and-forget memory summarization in human/inactive mode
         (async () => {
           try {
             const isMemoryEnabled = await FeatureFlagService.isEnabled(tenantId, 'memory_engine', true);
             if (isMemoryEnabled) {
               const { MemoryEngine } = await import('@/lib/services/ai/engines/memory');
-              await MemoryEngine.summarizeConversation(tenantId, conversationId);
+              await MemoryEngine.summarizeConversation(tenantId, conversationIdVal);
             }
           } catch (memErr) {
             this.log.error(`[WORKER_HUMAN_MEMORY_FAILED] Human mode memory summarization error`, memErr instanceof Error ? memErr : new Error(String(memErr)), { traceId });
@@ -1071,6 +1212,63 @@ export class QueueWorkerEngine {
         })();
       }
       return;
+    }
+
+    // Run active autopilot safety check gates
+    if (isAutopilotResponding) {
+      // 1. Whitelist Gate
+      if (process.env.AUTOPILOT_WHITELIST) {
+        const whitelist = process.env.AUTOPILOT_WHITELIST.split(',').map(num => num.trim().replace(/\D/g, ''));
+        const cleanPhone = phoneNumber.replace(/\D/g, '');
+        const isWhitelisted = whitelist.some(whNum => cleanPhone.endsWith(whNum) || whNum === cleanPhone);
+        if (!isWhitelisted) {
+          this.log.info(`[AUTOPILOT_GATE] Phone number ${phoneNumber} is not whitelisted in AUTOPILOT_WHITELIST. Skipping bot response.`, { traceId });
+          skipBotReply = true;
+          isAutopilotResponding = false;
+        }
+      }
+
+      // 2. 24h Service Window Gate (tenant_id + channel_id + conversation_id)
+      if (isAutopilotResponding && !skipBotReply) {
+        const prevInboundQuery = await db.executeSafe({
+          text: `SELECT created_at FROM messages 
+                 WHERE tenant_id = $1 
+                   AND conversation_id = $2 
+                   AND channel_id = $3
+                   AND direction = 'in'
+                   AND id != $4
+                 ORDER BY created_at DESC 
+                 LIMIT 1`,
+          values: [tenantId, conversationIdVal, resolvedChannelId, messageId]
+        }) as any[];
+
+        if (prevInboundQuery.length > 0) {
+          const lastInboundTime = new Date(prevInboundQuery[0].created_at).getTime();
+          const diffHours = (Date.now() - lastInboundTime) / (1000 * 60 * 60);
+          if (diffHours > 24) {
+            await disableAutopilot('24h_expired', `Last inbound was ${diffHours.toFixed(1)} hours ago`);
+            skipBotReply = true;
+            isAutopilotResponding = false;
+          }
+        }
+      }
+
+      // 3. Stop Rules Gate (Opt-Out and Terminal Opportunity Stages)
+      if (isAutopilotResponding && !skipBotReply) {
+        const optOutKeywords = ["opt-out", "istemiyorum", "rahatsız etmeyin", "listeden çıkar", "iptal", "stop", "mesaj atmayın", "üye olmak istemiyorum"];
+        const hasOptOutKeyword = content && optOutKeywords.some(kw => content.toLowerCase().includes(kw));
+        const isTerminalStage = leadStage && ['lost', 'not_interested', 'arrived', 'terminal'].includes(leadStage);
+
+        if (hasOptOutKeyword) {
+          await disableAutopilot('stop_rule', `Opt-out keyword detected: "${content}"`);
+          skipBotReply = true;
+          isAutopilotResponding = false;
+        } else if (isTerminalStage) {
+          await disableAutopilot('coordinator_takeover', `Terminal stage detected: "${leadStage}"`);
+          skipBotReply = true;
+          isAutopilotResponding = false;
+        }
+      }
     }
 
     // 3.5 WORKING HOURS GATE — Tenant settings'den okunan mesai kontrolü
@@ -1142,7 +1340,6 @@ export class QueueWorkerEngine {
     // Only counts BOT-generated messages (model_used IS NOT NULL) since bot_activated_at
     // This prevents human agent messages from counting and allows admin to re-enable bot
     // IMPORTANT: skipBotReply flag allows CRM extraction to still run even when bot limit reached
-    let skipBotReply = false;
     const maxMsg = brain.context.settings.maxMessages;
     if (maxMsg > 0) {
       const botMsgCount = await db.executeSafe({
@@ -1372,7 +1569,7 @@ export class QueueWorkerEngine {
     this.log.info(`[PROMPT_BUILT] Prepared LLM payload`, { historyLength: history.length, traceId });
 
     // Check if auto-reply is disabled for whatsapp channel (Listening Mode)
-    if (channel === 'whatsapp' && !skipBotReply) {
+    if (channel === 'whatsapp' && !skipBotReply && !isAutopilotResponding) {
       const isAutoReplyEnabled = await FeatureFlagService.isEnabled(tenantId, 'whatsapp_auto_reply', false);
       if (!isAutoReplyEnabled) {
         skipBotReply = true;
@@ -1498,7 +1695,12 @@ export class QueueWorkerEngine {
          tenantId, traceId, channel, source: outboundCreds.source,
          hasToken: !!accessToken, hasPhoneId: !!phoneId
        });
-       throw new Error(`CREDENTIAL_MISSING: No ${channel} credentials for tenant ${tenantId}`);
+       const err = new Error(`CREDENTIAL_MISSING: No ${channel} credentials for tenant ${tenantId}`);
+       if (isAutopilotResponding) {
+         await disableAutopilot('error', err.message);
+         return;
+       }
+       throw err;
     }
 
     let outProviderMessageId: string | null = null;
@@ -1512,6 +1714,9 @@ export class QueueWorkerEngine {
           finalResponseText,
           outboundCreds.provider
         );
+        if (!outRes.success) {
+          throw new Error("WhatsApp message sending returned success=false");
+        }
         outProviderMessageId = outRes.providerMessageId || null;
       } else {
         const outRes = await msgService.sendSocialMessage(
@@ -1520,13 +1725,59 @@ export class QueueWorkerEngine {
           finalResponseText,
           channel
         );
+        if (!outRes.success) {
+          throw new Error("Social message sending returned success=false");
+        }
         outProviderMessageId = outRes.providerMessageId || null;
       }
       messageStatus = 'sent';
       this.log.info(`[SEND_OK] Message delivered to Meta via ${channel}`, { traceId, providerMessageId: outProviderMessageId, credentialSource: outboundCreds.source });
     } catch (e: any) {
        this.log.error(`[SEND_FAILED] Meta API rejection for ${channel}`, e, { traceId });
-       throw e; // Retry tetikle
+       if (isAutopilotResponding) {
+         await disableAutopilot('error', e.message || String(e));
+         
+         // Save the failed outgoing message to the DB so the UI shows it failed
+         try {
+           const outMsgResult = await msgService.saveMessageIdempotent({
+             phoneNumber,
+             direction: 'out',
+             content: finalResponseText,
+             channel: channel,
+             channelId: metadata.channelId,
+             groupId: metadata.groupId,
+             modelUsed: aiResponse.modelUsed || llmModel,
+             promptTokens: aiResponse.inputTokens || 0,
+             completionTokens: aiResponse.outputTokens || 0,
+             providerMessageId: null,
+             status: 'failed'
+           });
+           
+           // Also broadcast to realtime so UI shows the failed message immediately
+           if (outMsgResult.messageId) {
+             const outConvId = outMsgResult.conversationId || conversationId;
+             const { RealtimePublisher } = await import('@/lib/realtime/publisher');
+             await RealtimePublisher.publishMessageCreated(
+               tenantId,
+               {
+                 id: outMsgResult.messageId,
+                 conversation_id: outConvId,
+                 phone_number: phoneNumber,
+                 content: finalResponseText,
+                 direction: 'out',
+                 model_used: aiResponse.modelUsed || llmModel,
+                 status: 'failed', 
+                 created_at: new Date().toISOString()
+               },
+               { traceId, spanId: traceId }
+             );
+           }
+         } catch (saveErr) {
+           this.log.error(`[SAVE_FAILED_MSG_ERROR] Could not save failed message`, saveErr instanceof Error ? saveErr : new Error(String(saveErr)), { traceId });
+         }
+         return; // Exit cleanly on autopilot error to prevent QStash infinite retry loops
+       }
+       throw e; // Retry tetikle (non-autopilot/manual message error fallback)
     }
 
     const outMsgResult = await msgService.saveMessageIdempotent({

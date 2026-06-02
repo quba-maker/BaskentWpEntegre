@@ -27,11 +27,14 @@ export async function getConversations(page: number = 1, search: string = "", st
       const rows = await ctx.db.executeSafe({
         text: `
         SELECT 
+          c.id as conversation_id,
+          c.id as conversationId,
           c.phone_number as id,
           c.patient_name as name,
           c.department,
           c.country,
           c.status,
+          c.autopilot_enabled,
           c.phase,
           c.lead_stage as stage,
           -- P1B: Tags from active opportunity (scoped), fallback to conversation tags
@@ -160,7 +163,7 @@ export async function getConversations(page: number = 1, search: string = "", st
           country: resolvedCountry,
           department: resolvedDepartment,
           score: r.stage === 'appointed' ? 100 : r.stage === 'contacted' ? 60 : 30,
-          isBotActive: r.status !== 'human',
+          isBotActive: r.autopilot_enabled,
           formattedTime,
           channel: r.channel || 'whatsapp',
           lastMessageStatus: r.last_message_status || 'sent',
@@ -470,10 +473,57 @@ export async function sendMessage(phone: string, text: string) {
                    last_message_status = $3,
                    last_message_direction = 'out',
                    message_count = message_count + 1,
-                   status = 'human'
-               WHERE phone_number = $4 AND tenant_id = $5`,
-        values: [text, channel, messageStatus, phone, ctx.tenantId]
+                   status = 'human',
+                   autopilot_enabled = false
+               WHERE id = $4 AND tenant_id = $5`,
+        values: [text, channel, messageStatus, conversationId, ctx.tenantId]
       });
+
+      // Write structural audit log
+      await ctx.db.executeSafe({
+        text: `INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
+               VALUES ($1, $2, $3, $4)`,
+        values: [
+          ctx.tenantId,
+          'autopilot_disabled',
+          'Autopilot disabled by manual operator message',
+          JSON.stringify({
+            conversation_id: conversationId,
+            phone: phone,
+            channel_id: channelId,
+            tenant_id: ctx.tenantId,
+            enabled: false,
+            user_id: ctx.userId,
+            timestamp: new Date().toISOString(),
+            reason: "panel_operator_message"
+          })
+        ]
+      });
+
+      // Broadcast autopilot updated realtime update
+      try {
+        const { RealtimeBus } = await import("@/lib/realtime/bus");
+        await RealtimeBus.publish(ctx.tenantId, {
+          eventId: require("uuid").v4(),
+          traceId: "manual-message-trace-" + Date.now(),
+          spanId: require("uuid").v4(),
+          timestamp: Date.now() * 1000,
+          entityVersion: 1,
+          eventVersion: "1.0",
+          schemaVersion: "1.0",
+          tenantId: ctx.tenantId,
+          type: "conversation.autopilot_updated" as any,
+          payload: {
+            conversationId: conversationId,
+            phone: phone,
+            channelId: channelId,
+            enabled: false,
+            status: "human"
+          }
+        });
+      } catch (realtimeErr) {
+        console.error("Failed to publish autopilot toggle realtime update on manual send:", realtimeErr);
+      }
 
       // Publish Realtime Event
       if (messageId) {
@@ -711,10 +761,57 @@ export async function sendMediaMessage(phone: string, mediaUrl: string, mediaTyp
                    last_message_status = $3,
                    last_message_direction = 'out',
                    message_count = message_count + 1,
-                   status = 'human'
-               WHERE phone_number = $4 AND tenant_id = $5`,
-        values: [contentText, channel, messageStatus, phone, ctx.tenantId]
+                   status = 'human',
+                   autopilot_enabled = false
+               WHERE id = $4 AND tenant_id = $5`,
+        values: [contentText, channel, messageStatus, conversationId, ctx.tenantId]
       });
+
+      // Write structural audit log
+      await ctx.db.executeSafe({
+        text: `INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
+               VALUES ($1, $2, $3, $4)`,
+        values: [
+          ctx.tenantId,
+          'autopilot_disabled',
+          'Autopilot disabled by manual operator media message',
+          JSON.stringify({
+            conversation_id: conversationId,
+            phone: phone,
+            channel_id: channelId,
+            tenant_id: ctx.tenantId,
+            enabled: false,
+            user_id: ctx.userId,
+            timestamp: new Date().toISOString(),
+            reason: "panel_operator_message"
+          })
+        ]
+      });
+
+      // Broadcast autopilot updated realtime update
+      try {
+        const { RealtimeBus } = await import("@/lib/realtime/bus");
+        await RealtimeBus.publish(ctx.tenantId, {
+          eventId: require("uuid").v4(),
+          traceId: "manual-media-trace-" + Date.now(),
+          spanId: require("uuid").v4(),
+          timestamp: Date.now() * 1000,
+          entityVersion: 1,
+          eventVersion: "1.0",
+          schemaVersion: "1.0",
+          tenantId: ctx.tenantId,
+          type: "conversation.autopilot_updated" as any,
+          payload: {
+            conversationId: conversationId,
+            phone: phone,
+            channelId: channelId,
+            enabled: false,
+            status: "human"
+          }
+        });
+      } catch (realtimeErr) {
+        console.error("Failed to publish autopilot toggle realtime update on manual media send:", realtimeErr);
+      }
 
       // Realtime event
       if (messageId) {
@@ -966,27 +1063,87 @@ export async function removeTag(phone: string, tagToRemove: string) {
   ).then(res => res.data || { success: false });
 }
 
-export async function toggleBotStatus(phone: string, isBotActive: boolean) {
-  if (!phone) return { success: false };
+export async function toggleBotStatus(conversationIdOrPhone: string, isBotActive: boolean) {
+  if (!conversationIdOrPhone) return { success: false };
   
   return withActionGuard(
     { actionName: 'toggleBotStatus' },
     async (ctx) => {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(conversationIdOrPhone);
+      
+      const convRows = await ctx.db.executeSafe({
+        text: isUuid
+          ? `SELECT id, phone_number, channel_id FROM conversations WHERE id = $1 AND tenant_id = $2 LIMIT 1`
+          : `SELECT id, phone_number, channel_id FROM conversations WHERE phone_number = $1 AND tenant_id = $2 LIMIT 1`,
+        values: [conversationIdOrPhone, ctx.tenantId]
+      }) as any[];
+      
+      if (convRows.length === 0) {
+        return { success: false, error: "Konuşma bulunamadı" };
+      }
+      
+      const conversationId = convRows[0].id;
+      const phone = convRows[0].phone_number;
+      const channelId = convRows[0].channel_id;
       const newStatus = isBotActive ? 'bot' : 'human';
       
-      if (isBotActive) {
-        // Bot enabled: set bot_activated_at to reset the max messages counter
-        await ctx.db.executeSafe({
-          text: `UPDATE conversations SET status = $1, bot_activated_at = NOW() WHERE phone_number = $2 AND tenant_id = $3`,
-          values: [newStatus, phone, ctx.tenantId]
+      // Update DB: status and autopilot_enabled
+      await ctx.db.executeSafe({
+        text: `UPDATE conversations 
+               SET status = $1, 
+                   autopilot_enabled = $2,
+                   bot_activated_at = CASE WHEN $2 = true THEN NOW() ELSE bot_activated_at END
+               WHERE id = $3 AND tenant_id = $4`,
+        values: [newStatus, isBotActive, conversationId, ctx.tenantId]
+      });
+
+      // Write structural audit log
+      await ctx.db.executeSafe({
+        text: `INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
+               VALUES ($1, $2, $3, $4)`,
+        values: [
+          ctx.tenantId,
+          isBotActive ? 'autopilot_enabled' : 'autopilot_disabled',
+          isBotActive ? 'Manual autopilot activation' : 'Manual autopilot deactivation',
+          JSON.stringify({
+            conversation_id: conversationId,
+            phone: phone,
+            channel_id: channelId,
+            tenant_id: ctx.tenantId,
+            enabled: isBotActive,
+            user_id: ctx.userId,
+            timestamp: new Date().toISOString(),
+            reason: isBotActive ? "manual_enable" : "manual_disable"
+          })
+        ]
+      });
+
+      // Ably Realtime Sync (publish event)
+      try {
+        const { RealtimeBus } = await import("@/lib/realtime/bus");
+        await RealtimeBus.publish(ctx.tenantId, {
+          eventId: require("uuid").v4(),
+          traceId: "toggle-status-trace-" + Date.now(),
+          spanId: require("uuid").v4(),
+          timestamp: Date.now() * 1000,
+          entityVersion: 1,
+          eventVersion: "1.0",
+          schemaVersion: "1.0",
+          tenantId: ctx.tenantId,
+          type: "conversation.autopilot_updated" as any,
+          payload: {
+            conversationId: conversationId,
+            phone: phone,
+            channelId: channelId,
+            enabled: isBotActive,
+            status: newStatus
+          }
         });
-      } else {
-        await ctx.db.executeSafe({
-          text: `UPDATE conversations SET status = $1 WHERE phone_number = $2 AND tenant_id = $3`,
-          values: [newStatus, phone, ctx.tenantId]
-        });
+      } catch (realtimeErr) {
+        console.error("Failed to publish autopilot toggle realtime update:", realtimeErr);
       }
 
+      // Backward compatible logAudit
       logAudit({
         tenantId: ctx.tenantId,
         userId: ctx.userId,
