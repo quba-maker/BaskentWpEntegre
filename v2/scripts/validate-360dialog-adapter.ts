@@ -770,6 +770,23 @@ async function runValidationTests() {
   }
   console.log("   ✅ B: Whitelist blocks non-matching numbers: PASS");
 
+  // B.2: Whitelist Gate (ENABLE_SELECTED_AUTOPILOT = true, whitelist is empty/undefined)
+  process.env.ENABLE_SELECTED_AUTOPILOT = "true";
+  process.env.AUTOPILOT_WHITELIST = ""; // Empty whitelist
+  wasLLMResponseGenerated = false;
+
+  await worker.processEvent(
+    "whatsapp.message.received",
+    "test-tenant-uuid",
+    mockMsgEvent.payload, // from: "905001112233"
+    mockMsgEvent.metadata
+  );
+
+  if (wasLLMResponseGenerated) {
+    throw new Error("TEST 7-B.2 Failed: Bot responded when whitelist was empty!");
+  }
+  console.log("   ✅ B.2: Empty whitelist blocks response (closed gate by default): PASS");
+
   // C: Whitelist Gate (ENABLE_SELECTED_AUTOPILOT = true, number IS whitelisted)
   process.env.AUTOPILOT_WHITELIST = "905001112233"; // Match customer from payload
   wasLLMResponseGenerated = false;

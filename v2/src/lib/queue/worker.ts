@@ -1217,8 +1217,13 @@ export class QueueWorkerEngine {
     // Run active autopilot safety check gates
     if (isAutopilotResponding) {
       // 1. Whitelist Gate
-      if (process.env.AUTOPILOT_WHITELIST) {
-        const whitelist = process.env.AUTOPILOT_WHITELIST.split(',').map(num => num.trim().replace(/\D/g, ''));
+      const whitelistRaw = process.env.AUTOPILOT_WHITELIST;
+      if (!whitelistRaw || whitelistRaw.trim() === "") {
+        this.log.info(`[AUTOPILOT_GATE] AUTOPILOT_WHITELIST is empty or undefined. Skipping bot response.`, { traceId });
+        skipBotReply = true;
+        isAutopilotResponding = false;
+      } else {
+        const whitelist = whitelistRaw.split(',').map(num => num.trim().replace(/\D/g, ''));
         const cleanPhone = phoneNumber.replace(/\D/g, '');
         const isWhitelisted = whitelist.some(whNum => cleanPhone.endsWith(whNum) || whNum === cleanPhone);
         if (!isWhitelisted) {
