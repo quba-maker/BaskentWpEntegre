@@ -95,6 +95,49 @@ export class IdentityEngine {
       values: [customerId, leadId, tenantId]
     });
   }
+  private static sanitizeFormFacts(rawData: any): string[] {
+    if (!rawData) return [];
+    let formObj: any = rawData;
+    if (typeof rawData === 'string') {
+      try {
+        formObj = JSON.parse(rawData);
+      } catch {
+        return [];
+      }
+    }
+    if (!formObj || typeof formObj !== 'object') return [];
+
+    const facts: string[] = [];
+    const getVal = (keys: string[]) => {
+      for (const key of keys) {
+        if (key in formObj) {
+          const val = formObj[key];
+          if (val !== undefined && val !== null && String(val).trim() !== '') {
+            return String(val).trim();
+          }
+        }
+      }
+      return null;
+    };
+
+    const name = getVal(['full_name', 'ad_soyad', 'name']);
+    const age = getVal(['yas', 'yaş', 'age']);
+    const country = getVal(['ulke', 'ülke', 'country', 'nerede_yaşıyorsunuz']);
+    const complaint = getVal(['sikayet', 'şikayet', 'şikayetiniz_nedir', 'sikayetiniz_nedir']);
+    const duration = getVal(['sure', 'süre', 'ne_kadardir_suruyor']);
+    const randevu = getVal(['randevu_ayi', 'randevu_tarihi', 'ne_zaman_gelmek_istiyorsunuz']);
+    const phone = getVal(['telefon', 'phone']);
+
+    if (name) facts.push(`Hastanın adı: ${name}.`);
+    if (age) facts.push(`Hastanın yaşı: ${age}.`);
+    if (country) facts.push(`Hastanın yaşadığı ülke/yer: ${country}.`);
+    if (complaint) facts.push(`Hastanın şikayeti: ${complaint}.`);
+    if (duration) facts.push(`Hastanın şikayet süresi: ${duration}.`);
+    if (randevu) facts.push(`Hastanın randevu/gelme planı: ${randevu}.`);
+    if (phone) facts.push(`Hastanın iletişim numarası: ${phone}.`);
+
+    return facts;
+  }
 
   /**
    * Unified context based ONLY on customer_id, no fuzzy matching here.
@@ -111,7 +154,7 @@ export class IdentityEngine {
 
       const leads = await db.executeSafe({
         text: `
-          SELECT form_name, raw_data 
+          SELECT id, form_name, raw_data 
           FROM leads 
           WHERE tenant_id = $1 AND customer_id = $2
           ORDER BY created_at DESC 
@@ -130,13 +173,113 @@ export class IdentityEngine {
          memory = memories[0];
       }
 
+      // ── Step 1: Explicit active_opportunity_id from conversation ──
+      let opportunity = null;
+      let resolvedFrom = 'none';
+
+      if (conversationId) {
+        const convRows = await db.executeSafe({
+          text: `SELECT active_opportunity_id FROM conversations WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+          values: [conversationId, tenantId]
+        }) as any[];
+        const activeOppId = convRows[0]?.active_opportunity_id;
+        if (activeOppId) {
+          const oppRows = await db.executeSafe({
+            text: `SELECT * FROM opportunities WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+            values: [activeOppId, tenantId]
+          }) as any[];
+          if (oppRows.length > 0) {
+            opportunity = oppRows[0];
+            resolvedFrom = 'explicit_active_id';
+          }
+        }
+      }
+
+      // ── Step 2: Active opportunity in same conversation + tenant ──
+      if (!opportunity && conversationId) {
+        const oppRows = await db.executeSafe({
+          text: `
+            SELECT * FROM opportunities 
+            WHERE conversation_id = $1 AND tenant_id = $2 
+              AND stage NOT IN ('lost', 'not_qualified', 'arrived')
+            ORDER BY updated_at DESC
+            LIMIT 1
+          `,
+          values: [conversationId, tenantId]
+        }) as any[];
+        if (oppRows.length > 0) {
+          opportunity = oppRows[0];
+          resolvedFrom = 'active_conv_opp';
+        }
+      }
+
+      // ── Step 3: Same lead/form active opportunity ──
+      if (!opportunity && lead) {
+        const leadIdQuery = await db.executeSafe({
+          text: `SELECT id, linked_opportunity_id FROM leads WHERE tenant_id = $1 AND customer_id = $2 ORDER BY created_at DESC LIMIT 1`,
+          values: [tenantId, customerId]
+        }) as any[];
+        if (leadIdQuery.length > 0) {
+          const lId = leadIdQuery[0].id;
+          const lLinkedOppId = leadIdQuery[0].linked_opportunity_id;
+          
+          if (lLinkedOppId) {
+            const oppRows = await db.executeSafe({
+              text: `
+                SELECT * FROM opportunities 
+                WHERE id = $1 AND tenant_id = $2 
+                  AND stage NOT IN ('lost', 'not_qualified', 'arrived')
+                LIMIT 1
+              `,
+              values: [lLinkedOppId, tenantId]
+            }) as any[];
+            if (oppRows.length > 0) {
+              opportunity = oppRows[0];
+              resolvedFrom = 'lead_linked_active_opp';
+            }
+          }
+          
+          if (!opportunity) {
+            const oppRows = await db.executeSafe({
+              text: `
+                SELECT * FROM opportunities 
+                WHERE lead_id = $1 AND tenant_id = $2 
+                  AND stage NOT IN ('lost', 'not_qualified', 'arrived')
+                ORDER BY updated_at DESC
+                LIMIT 1
+              `,
+              values: [lId, tenantId]
+            }) as any[];
+            if (oppRows.length > 0) {
+              opportunity = oppRows[0];
+              resolvedFrom = 'lead_id_active_opp';
+            }
+          }
+        }
+      }
+
+      // ── Step 4: Fallback - Latest non-terminal (inactive/terminal in same conversation and tenant) ──
+      if (!opportunity && conversationId) {
+        const oppRows = await db.executeSafe({
+          text: `
+            SELECT * FROM opportunities 
+            WHERE conversation_id = $1 AND tenant_id = $2
+              AND stage IN ('lost', 'not_qualified', 'arrived')
+            ORDER BY updated_at DESC
+            LIMIT 1
+          `,
+          values: [conversationId, tenantId]
+        }) as any[];
+        if (oppRows.length > 0) {
+          opportunity = oppRows[0];
+          resolvedFrom = 'inactive_conv_opp_fallback';
+        }
+      }
+
       // ═══ B2 FIX: Outreach context for form lead bot handoff ═══
-      // When a coordinator has already contacted this form lead (greeting, call, bot activation),
-      // produce outreachContext so PromptBuilder can inject it into the bot's system prompt.
       let outreachContext = null;
       if (lead) {
         try {
-          // Get the lead_id for this customer's latest lead
           const leadRows = await db.executeSafe({
             text: `SELECT id FROM leads WHERE tenant_id = $1 AND customer_id = $2 ORDER BY created_at DESC LIMIT 1`,
             values: [tenantId, customerId]
@@ -145,7 +288,6 @@ export class IdentityEngine {
           if (leadRows.length > 0) {
             const leadId = leadRows[0].id;
 
-            // Fetch outreach history for this lead
             const outreachRows = await db.executeSafe({
               text: `SELECT action, metadata, created_at FROM outreach_logs 
                      WHERE lead_id = $1 AND tenant_id = $2 
@@ -177,11 +319,23 @@ export class IdentityEngine {
       return {
         profile,
         latestForm: lead ? { name: lead.form_name, data: lead.raw_data } : null,
+        patient_known_facts: lead ? IdentityEngine.sanitizeFormFacts(lead.raw_data) : [],
         memory: memory ? {
            summary: memory.summary_text,
            intent: memory.buying_intent,
            sentiment: memory.sentiment,
            objections: memory.objections
+        } : null,
+        opportunity: opportunity ? {
+           id: opportunity.id,
+           summary: opportunity.summary,
+           ai_reason: opportunity.ai_reason,
+           patient_name: opportunity.patient_name,
+           country: opportunity.country,
+           department: opportunity.department,
+           travel_date: opportunity.travel_date,
+           stage: opportunity.stage,
+           resolvedFrom
         } : null,
         outreachContext,
       };

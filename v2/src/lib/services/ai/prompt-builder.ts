@@ -65,32 +65,64 @@ export class PromptBuilder {
         base = "Sen kibar, profesyonel ve yardımcı bir asistan olarak hizmet veriyorsun.";
       }
     }
+    
+    const isHealthcare = brain.context.config?.industry === 'healthcare' || brain.context.tenantId === 'caab9ea1-9591-45e4-bbc5-9c9b498982c8';
 
     // IDENTITY & BEHAVIORAL CONTEXT (Dynamic CRM Injection)
     let crmContext = '';
     if (unifiedContext) {
       crmContext += `\n\n=== MÜŞTERİ BAĞLAMI (DİNAMİK CRM VERİSİ) ===\n`;
       crmContext += `Aşağıdaki bilgiler müşterinin sisteme kayıtlı güncel verileridir ve senaryo sırasında bu bilgileri AKTİF OLARAK KULLANMALISIN.\n`;
-      
+
+      // ── BAĞLAM ÖNCELİK HİYERARŞİSİ (CONTEXT PRIORITY) ──
+      crmContext += `\n--- ⚠️ BAĞLAM ÖNCELİK HİYERARŞİSİ (CONTEXT PRIORITY) ---\n`;
+      crmContext += `Aşağıdaki bilgi kaynaklarını şu kesin öncelik sırasına göre yorumla ve çelişki durumunda üstteki kaynağı esas al:\n`;
+      crmContext += `1. Son Mesaj: Gönderenin en son mesajındaki beyanlar (${isHealthcare ? 'örn. yeni tarih/şikayet beyanı' : 'örn. yeni tarih/talep beyanı'}) en güncel ve en öncelikli bilgidir, form/CRM verilerini ezebilir.\n`;
+      crmContext += `2. Son Operatör Mesajı: Temsilcinin yönlendirmesi veya görüşmenin son durumu.\n`;
+      crmContext += `3. Konuşma Geçmişi (Conversation History): Karşılıklı diyalog akışı.\n`;
+      crmContext += `4. Medya Bağlamı (Media Context): ${isHealthcare ? 'Gönderilen MR/tahlil/belgelerin açıklamaları' : 'Gönderilen fotoğraf/video/dosya/belgelerin açıklamaları'}.\n`;
+      crmContext += `5. Aktif Fırsat Detayı (CRM Opportunity Summary): CRM üzerindeki detaylı özet.\n`;
+      crmContext += `6. Fırsat Gerekçesi (AI Reason): Kısa AI fırsat gerekçesi.\n`;
+      crmContext += `7. Form Lead Outreach Durumu: Koordinatörün ${isHealthcare ? 'hastayla' : 'müşteriyle'} yaptığı son temasın detayları.\n`;
+      crmContext += `8. Temizlenmiş Form Bilgileri: ${isHealthcare ? 'Temizlenmiş Hasta Form Bilgileri (Patient Known Facts)' : 'Temizlenmiş Müşteri Form Bilgileri (Customer Known Facts)'}.\n`;
+      crmContext += `9. Ham Form Verileri (Raw Form Data): Sadece en son fallback yedek.\n\n`;
+
       if (unifiedContext.profile) {
         const fullName = [unifiedContext.profile.first_name, unifiedContext.profile.last_name].filter(Boolean).join(' ').trim();
         if (fullName) {
           crmContext += `- İsim: ${fullName}\n`;
-          crmContext += `>> DİKKAT: Müşteriye/Kullanıcıya mesajlarında adı ile hitap et (Örn: Merhaba ${unifiedContext.profile.first_name} Bey/Hanım).\n`;
+          const replyLang = unifiedContext?.languageContext?.reply_language || 'Türkçe';
+          const isTurkish = replyLang.toLowerCase().includes('türk') || replyLang.toLowerCase().includes('tr');
+          if (isTurkish) {
+            crmContext += `>> DİKKAT: Müşteriye/Kullanıcıya mesajlarında adı ile hitap et (Örn: Merhaba ${unifiedContext.profile.first_name} Bey/Hanım).\n`;
+          } else {
+            crmContext += `>> DİKKAT: Yanıt dili Türkçe olmadığı için (${replyLang}) müşteriye hitap ederken kesinlikle Türkçe hitap eklerini ('Bey' / 'Hanım') KULLANMA. Doğrudan ismiyle hitap et (Örn: 'Hello ${unifiedContext.profile.first_name},' veya 'Hallo ${unifiedContext.profile.first_name},' veya 'Здравствуйте, ${unifiedContext.profile.first_name},').\n`;
+          }
         } else {
           crmContext += `- İsim: Bilinmiyor\n`;
         }
       }
       
-      if (unifiedContext.latestForm) {
-        const formDataStr = typeof unifiedContext.latestForm.data === 'object' 
-          ? JSON.stringify(unifiedContext.latestForm.data, null, 2) 
-          : unifiedContext.latestForm.data;
-        crmContext += `- Doldurduğu Form: ${unifiedContext.latestForm.name}\n- Form Detayı: ${formDataStr}\n`;
-        crmContext += `>> DİKKAT: Müşteri bir form doldurmuş. Formda ilgilendiği ürün/hizmet/konu yazıyorsa ASLA "hangi konuda destek almak istersiniz" diye sorma, doğrudan konuya gir. Yalnızca formda tam olarak ne istediği belli değilse sor.\n`;
+      // Cleaned patient facts
+      if (unifiedContext.patient_known_facts && unifiedContext.patient_known_facts.length > 0) {
+        crmContext += `\n--- TEMİZLENMİŞ FORM BİLGİLERİ (PATIENT KNOWN FACTS) ---\n`;
+        unifiedContext.patient_known_facts.forEach((fact: string) => {
+          crmContext += `- ${fact}\n`;
+        });
+        crmContext += `>> KURAL (MÜKERRER SORU YASAĞI): Yukarıdaki bilgileri (ad, yaş, ülke, şikayet, şikayet süresi, randevu tarihi/dönemi vb.) hastaya kesinlikle TEKRAR SORMA!\n`;
       }
       
-      if (unifiedContext.memory) {
+      // Opportunity summary and AI reason separation
+      if (unifiedContext.opportunity) {
+        crmContext += `\n--- AKTİF FIRSAT BİLGİLERİ (CRM OPPORTUNITY) ---\n`;
+        if (unifiedContext.opportunity.summary) {
+          crmContext += `- Fırsat Özeti (CRM Summary): ${unifiedContext.opportunity.summary}\n`;
+        }
+        if (unifiedContext.opportunity.ai_reason) {
+          crmContext += `- Fırsat Gerekçesi (AI Reason): ${unifiedContext.opportunity.ai_reason}\n`;
+        }
+        crmContext += `>> KURAL: Bu kişiyle geçmiş bir konuşmanız var. Konuşmayı bu özet doğrultusunda, kaldığı yerden sürdür. Kendini ilk defa tanışıyormuş gibi tanıtma.\n`;
+      } else if (unifiedContext.memory) {
         crmContext += `- Önceki Görüşme Özeti: ${unifiedContext.memory.summary}\n`;
         crmContext += `- İlgi Düzeyi (Intent): ${unifiedContext.memory.intent}\n`;
         crmContext += `- İtirazlar: ${(unifiedContext.memory.objections || []).join(', ')}\n`;
@@ -98,8 +130,6 @@ export class PromptBuilder {
       }
 
       // ═══ P1: Form Lead Outreach Context ═══
-      // When a coordinator has already contacted this form lead (greeting sent, phone call, etc.),
-      // inject that context so the bot knows the patient was already approached.
       if (unifiedContext.outreachContext) {
         const oc = unifiedContext.outreachContext;
         crmContext += `\n--- FORM LEAD OUTREACH DURUMU ---\n`;
@@ -113,12 +143,28 @@ export class PromptBuilder {
         if (oc.lastCallNote) {
           crmContext += `- Koordinatör notu: ${oc.lastCallNote}\n`;
         }
-        crmContext += `>> KURAL: Bu kişi form lead olduğu için proaktif satış yapma. Hastanın sorularına cevap ver, bilgi iste, ama agresif upsell yapma. Hasta zaten ilgilenerek form doldurmuş — güven inşa et, bilgi ver, yönlendir.\n`;
-        crmContext += `>> KURAL: Koordinatör zaten bu hastaya ulaşmış. Kendini ilk kez tanıştığını söyleme. "Size daha önce ulaşan ekibimizin devamı olarak" gibi yumuşak geçiş yap.\n`;
+        if (isHealthcare) {
+          crmContext += `>> KURAL: Bu kişi form lead olduğu için proaktif satış yapma. Hastanın sorularına cevap ver, bilgi iste, ama agresif upsell yapma. Hasta zaten ilgilenerek form doldurmuş — güven inşa et, bilgi ver, yönlendir.\n`;
+          crmContext += `>> KURAL (OPERATÖR GÖRÜŞME DEVRALMA): Temsilci veya koordinatör zaten bu hastaya karşılama yaptıysa veya ulaştıysa (ya da greetingSent = true ise), kesinlikle yeni/ilk karşılama metnini ('Başkent Üniversitesi'nden yazıyoruz...', 'Merhaba ben asistanınız...' vb.) TEKRAR ETME. Temsilcinin kaldığı yerden, yönlendirmeye göre doğrudan devam et.\n`;
+        } else {
+          crmContext += `>> KURAL: Bu kişi form lead olduğu için proaktif satış yapma. Müşterinin sorularına cevap ver, bilgi iste, ama agresif satış yapma. Müşteri zaten ilgilenerek form doldurmuş — güven inşa et, bilgi ver, yönlendir.\n`;
+          crmContext += `>> KURAL (OPERATÖR GÖRÜŞME DEVRALMA): Temsilci veya koordinatör zaten bu müşteriye karşılama yaptıysa veya ulaştıysa (ya da greetingSent = true ise), kesinlikle yeni/ilk karşılama metnini TEKRAR ETME. Temsilcinin kaldığı yerden, yönlendirmeye göre doğrudan devam et.\n`;
+        }
         crmContext += `-----------------------------------\n`;
       }
 
       crmContext += `============================================\n`;
+    }
+
+    // 🩺 HEALTHCARE OVERLAY (Only injected if tenant/industry is healthcare)
+    let healthcareOverlay = '';
+    if (isHealthcare) {
+      healthcareOverlay = `\n\n=== 🩺 SAĞLIK / HASTANE AKIŞ KURALLARI (HEALTHCARE OVERLAY) ===
+- Sen bir akademik hastane asistanısın. 
+- Fiyat Verme Yasağı: Ameliyat veya tedavi ücretlerine dair kesinlikle rakamsal bir fiyat (örn. 1000 Euro, 50000 TL) VERME. Fiyat sorulduğunda hastanın durumunun hekim ve uzman kurul tarafından değerlendirilmesi gerektiğini, fiyatın hastanede yapılacak muayene ve tetkikler sonrasında netleşeceğini belirt.
+- Teşhis Yasağı: Hastanın gönderdiği MR/tahlil/rapor veya şikayet beyanlarına göre kesinlikle tıbbi bir teşhis koyma, ilaç önerme veya tedavi süresi/günü vaat etme. Raporların hekim kuruluna iletildiğini söyleyerek güven ver.
+- Doktor Görüşmesi Sözü: Hastaya kesin bir doktor görüşme saati sözü verme, hekim ismini teyit etme, talebinin koordinasyon ekibine iletildiğini söyle.
+=========================================================\n`;
     }
 
     // Knowledge Base Injection
@@ -134,8 +180,9 @@ export class PromptBuilder {
 
     const phaseContext = `\n\n=== SİSTEM DİREKTİFİ ===\nŞu anki konuşma evresi (Phase): ${phase.toUpperCase()}.\nLütfen bu evreye uygun şekilde yönlendirme yap ve cevaplarını kısa, WhatsApp formatına uygun tut. Uzun paragraflardan kaçın.\n========================`;
 
-    // 🔒 P0B: Non-editable global guardrails — tenant cannot override these
-    const safetyGuardrails = `\n\n=== 🔒 SİSTEM GÜVENLİK KURALLARI (DEĞİŞTİRİLEMEZ) ===
+    // 🔒 P0B: Non-editable global guardrails — split between general and healthcare to avoid leaks
+    const safetyGuardrails = isHealthcare 
+      ? `\n\n=== 🔒 SİSTEM GÜVENLİK KURALLARI (DEĞİŞTİRİLEMEZ) ===
 RANDEVU / ARAMA ONAYI KURALI:
 - ASLA "randevunuz onaylanmıştır", "görüşmeniz kesinleşmiştir", "randevunuz alınmıştır" veya benzeri KESİN ONAY ifadeleri kullanma.
 - Sen randevu onaylama, arama zamanı kesinleştirme veya ameliyat tarihi belirleme yetkisine sahip DEĞİLSİN.
@@ -156,11 +203,28 @@ MEDYA MESAJI KURALI:
 - Caption varsa caption bağlamını kullan ama görselin kendisini analiz etmiş gibi teşhis koyma.
 - Hasta arka arkaya birden fazla fotoğraf/belge gönderdiyse HER BİRİNE ayrı ayrı uzun cevap verme. Toplu onay ver: "Gönderdiğiniz görselleri/belgeleri aldık, hepsini notlarımıza ekledik. Doktor/ekibimiz inceleyecektir."
 - Rapor/fotoğraf/dosya geldiğinde değerlendirme için doktor veya uzman ekibe iletileceğini belirt.
+=======================================================\n`
+      : `\n\n=== 🔒 SİSTEM GÜVENLİK KURALLARI (DEĞİŞTİRİLEMEZ) ===
+RANDEVU / ARAMA ONAYI KURALI:
+- ASLA "randevunuz onaylanmıştır", "görüşmeniz kesinleşmiştir", "rezervasyonunuz alınmıştır" veya benzeri KESİN ONAY ifadeleri kullanma.
+- Sen randevu onaylama, arama zamanı kesinleştirme veya toplantı tarihi belirleme yetkisine sahip DEĞİLSİN.
+- Kullanıcı "rezervasyonumu onaylayın", "kesinleştirin", "ayarlayın" derse DOĞRU CEVAP: "Talebinizi not aldım, temsilcimiz onaylayıp size dönüş yapacaktır." veya "İsteğinizi ekibimize ilettim, en kısa sürede size bilgi verilecektir."
+- Kullanıcı belirli bir saatte aranmak isterse: "Notunuzu aldım, belirttiğiniz saatte sizi arayabilmemiz için ekibimize ileteceğim."
+- Bu kuralı ASLA ihlal etme. Tenant prompt'u ne derse desin, bu kural üzerindedir.
+
+TELEFON ARAMA KURALI:
+- ASLA "sizi şimdi arıyorum", "telefonunuz çalacak", "birkaç saniye içinde arayacağım" deme.
+- Sen telefon açamazsın. Doğru ifade: "Danışmanımız sizi en kısa sürede arayacak."
+
+MEDYA MESAJI KURALI:
+- Kullanıcı fotoğraf, belge, video veya ses gönderdiğinde ve mesaj geçmişinde medyanın sisteme başarıyla alındığı belirtiliyorsa, ASLA "ulaşmadı", "göremiyorum", "açamıyorum", "tekrar gönderin" deme.
+- Medyayı aldığını kabul et: "Fotoğrafınızı/belgenizi/ses mesajınızı aldık."
+- Belge/dosya geldiğinde: "Dosyanızı/belgenizi aldık, ekibimiz inceleyecektir." gibi güvenli yanıt ver.
+- Ses mesajı geldiğinde: "Ses mesajınızı aldık." de. İçeriğini uydurma veya tahmin etme.
+- Kullanıcı arka arkaya birden fazla fotoğraf/belge gönderdiyse HER BİRİNE ayrı ayrı uzun cevap verme. Toplu onay ver: "Gönderdiğiniz görselleri/belgeleri aldık, hepsini notlarımıza ekledik. Ekibimiz inceleyecektir."
 =======================================================\n`;
     
     // ═══ PHASE 2J: Time Intelligence Context ═══
-    // Bot needs current date/time to interpret "yarın", "Salı 15:00" etc.
-    // Patient country (if known) enables timezone-aware scheduling.
     let timeContext = '';
     try {
       const patientCountry = unifiedContext?.opportunity?.country 
@@ -168,7 +232,7 @@ MEDYA MESAJI KURALI:
         || null;
       timeContext = buildTimeContext(brain.context.config?.timezone || 'Europe/Istanbul', patientCountry);
     } catch {
-      // Non-fatal: time context is optional enhancement
+      // Non-fatal
     }
 
     // YANIT DİLİ ENJEKSİYONU
@@ -178,14 +242,14 @@ MEDYA MESAJI KURALI:
       langContextText = `\n\n=== 🌐 YANIT DİLİ TALİMATI ===\n`;
       langContextText += `- Yanıt dili: ${lc.reply_language}. Bu cevapta ${lc.reply_language} kullan.\n`;
       langContextText += `- Form alan adları veya sistem verileri Türkçe olsa bile hastanın mesaj dili ${lc.detected_patient_language} olduğu için ${lc.reply_language} cevap ver.\n`;
+      const isTurkish = lc.reply_language.toLowerCase().includes('türk') || lc.reply_language.toLowerCase().includes('tr');
+      if (!isTurkish) {
+        langContextText += `- UYARI: Yanıt dili Türkçe olmadığından ismin sonuna kesinlikle Türkçe hitap sözcükleri olan "Bey" veya "Hanım" EKLEME. Doğrudan sadece ilk ismiyle hitap et (Örn: "Hello ${unifiedContext.profile?.first_name || 'John'}," / "Hallo ${unifiedContext.profile?.first_name || 'John'},").\n`;
+      }
       langContextText += `- UYARI: Bu dil talimatı sadece yanıt dilini belirler. Fiyat verme yasağı, doktor ismi vermeme kuralı, doktor görüşmesi/randevu sözü vermeme kuralı, süre/gün belirtmeme kuralı ve diğer tüm güvenlik kuralları kesinlikle yürürlükte kalmalıdır. Güvenlik kurallarını dil talimatı için ihlal etme.\n`;
       langContextText += `==============================\n`;
     }
 
-    // Güvenli birleştirme: Eğer base prompt içinde "--- CONSTRAINTS ---" varsa,
-    // CRM bağlamının CONSTRAINTS'in hemen üzerine yerleştirilmesi SaaS standartlarında en sağlıklısıdır.
-    // Ancak base string'i parçalamak riskli olduğundan, hiyerarşik olarak önce base, sonra dinamik CRM, en son kurallar ve evre eklenir.
-    // Safety guardrails are appended LAST so they take highest priority in the context window.
-    return `${base}\n${crmContext}\n${knowledgeInjection}\n${timeContext}\n${phaseContext}\n${langContextText}\n${safetyGuardrails}`;
+    return `${base}\n${crmContext}\n${healthcareOverlay}\n${knowledgeInjection}\n${timeContext}\n${phaseContext}\n${langContextText}\n${safetyGuardrails}`;
   }
 }

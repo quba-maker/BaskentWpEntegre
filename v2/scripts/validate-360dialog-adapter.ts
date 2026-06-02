@@ -80,6 +80,9 @@ import { RealtimePublisher } from "../src/lib/realtime/publisher";
 import { RealtimeBus } from "../src/lib/realtime/bus";
 import { CredentialsService } from "../src/lib/services/credentials.service";
 import { ThreeSixtyDialogService } from "../src/lib/services/providers/three-sixty-dialog.service";
+import { PromptBuilder } from "../src/lib/services/ai/prompt-builder";
+import { createTenantBrain } from "../src/lib/brain/tenant-brain";
+import { AIOrchestrator } from "../src/lib/services/ai/orchestrator";
 
 // Set test tenant credentials env configuration
 process.env.TEST_TENANT_ID = "test-tenant-uuid";
@@ -1141,12 +1144,256 @@ async function runValidationTests() {
   }
   console.log("   ✅ 8: English message with Turkish CRM context detected as İngilizce: PASS");
 
+  // ----------------------------------------------------
+  // TEST 9-B.6: Honorific Localization Test
+  // ----------------------------------------------------
+  console.log("\n🧪 [TEST 9-B.6] Honorific Localization Test...");
+  const mockBrainFor9B6 = createTenantBrain(
+    "test-tenant-uuid",
+    "whatsapp",
+    "payload-123",
+    "Sen bir asistansın.",
+    { industry: "healthcare", timezone: "Europe/Istanbul" }
+  );
+
+  const mockContext9B6 = {
+    profile: { first_name: "Murtaza", last_name: "Kamilov" },
+    languageContext: { reply_language: "Rusça", detected_patient_language: "Rusça" }
+  };
+
+  const systemPrompt9B6 = PromptBuilder.buildSystemPrompt(mockBrainFor9B6, "greeting", false, mockContext9B6);
+  if (!systemPrompt9B6.includes("kesinlikle Türkçe hitap eklerini ('Bey' / 'Hanım') KULLANMA")) {
+    throw new Error("TEST 9-B.6 Failed: System prompt does not include honorific suppression directives for foreign languages!");
+  }
+  if (!systemPrompt9B6.includes("ismin sonuna kesinlikle Türkçe hitap sözcükleri olan \"Bey\" veya \"Hanım\" EKLEME")) {
+    throw new Error("TEST 9-B.6 Failed: Response language block is missing the honorific warning!");
+  }
+
+  // Also verify that Turkish reply contains honorifics
+  const mockContext9B6TR = {
+    profile: { first_name: "Murtaza", last_name: "Kamilov" },
+    languageContext: { reply_language: "Türkçe", detected_patient_language: "Türkçe" }
+  };
+  const systemPrompt9B6TR = PromptBuilder.buildSystemPrompt(mockBrainFor9B6, "greeting", false, mockContext9B6TR);
+  if (!systemPrompt9B6TR.includes("Merhaba Murtaza Bey/Hanım")) {
+    throw new Error("TEST 9-B.6 Failed: Turkish reply prompt does not include the standard honorific template!");
+  }
+  console.log("   ✅ Russian honorific suppression and Turkish templates verified: PASS");
+
+  // ----------------------------------------------------
+  // TEST 10: Behavioral Integration Tests (Live LLM)
+  // ----------------------------------------------------
+  console.log("\n🧪 [TEST 10] Behavioral Assertions (Live LLM)...");
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    console.warn("   ⚠️ Skipping live LLM tests: GEMINI_API_KEY is not defined in .env.local");
+  } else {
+    const liveOrchestrator = new AIOrchestrator();
+    
+    // 10-A: Formda Şikayet Varsa Sormama
+    const brainHealthcare = createTenantBrain(
+      "caab9ea1-9591-45e4-bbc5-9c9b498982c8", // Başkent
+      "whatsapp",
+      "payload-123",
+      "Sen Başkent Üniversitesi Hastanesi yapay zeka asistanısın.",
+      { industry: "healthcare", timezone: "Europe/Istanbul" }
+    );
+
+    const context10A = {
+      profile: { first_name: "Ahmet" },
+      patient_known_facts: [
+        "Hastanın adı: Ahmet.",
+        "Hastanın şikayeti: Şiddetli bel fıtığı ağrısı ve sol bacakta uyuşma."
+      ],
+      languageContext: { reply_language: "Türkçe", detected_patient_language: "Türkçe" }
+    };
+    
+    const prompt10A = PromptBuilder.buildSystemPrompt(brainHealthcare, "greeting", false, context10A);
+    const messages10A = [
+      { role: "system" as const, content: prompt10A },
+      { role: "user" as const, content: "Merhaba, formu doldurmuştum." }
+    ];
+    
+    const res10A = await liveOrchestrator.generateResponse(messages10A, {
+      provider: "gemini",
+      modelId: "gemini-2.5-flash",
+      apiKey,
+      temperature: 0.1,
+      maxTokens: 500
+    });
+    
+    const lower10A = res10A.text.toLowerCase();
+    if (lower10A.includes("şikayetiniz nedir") || lower10A.includes("neyiniz var") || lower10A.includes("şikayetinizi")) {
+      throw new Error(`TEST 10-A Failed: Bot asked for complaint again when it was already known! Output: ${res10A.text}`);
+    }
+    console.log("   ✅ 10-A: Avoided duplicate complaint questions: PASS");
+
+    // 10-B: Formda Ülke Varsa Sormama
+    const context10B = {
+      profile: { first_name: "Ahmet" },
+      patient_known_facts: [
+        "Hastanın adı: Ahmet.",
+        "Hastanın yaşadığı ülke/yer: Almanya."
+      ],
+      languageContext: { reply_language: "Türkçe", detected_patient_language: "Türkçe" }
+    };
+    const prompt10B = PromptBuilder.buildSystemPrompt(brainHealthcare, "greeting", false, context10B);
+    const messages10B = [
+      { role: "system" as const, content: prompt10B },
+      { role: "user" as const, content: "Merhaba, tedavi detayları hakkında bilgi alabilir miyim?" }
+    ];
+    const res10B = await liveOrchestrator.generateResponse(messages10B, {
+      provider: "gemini",
+      modelId: "gemini-2.5-flash",
+      apiKey,
+      temperature: 0.1,
+      maxTokens: 500
+    });
+    const lower10B = res10B.text.toLowerCase();
+    if (lower10B.includes("nerede yaşıyorsunuz") || lower10B.includes("hangi ülkeden") || lower10B.includes("nerede ikamet")) {
+      throw new Error(`TEST 10-B Failed: Bot asked for location when it was already known! Output: ${res10B.text}`);
+    }
+    console.log("   ✅ 10-B: Avoided duplicate country/location questions: PASS");
+
+    // 10-C: Formda Randevu Dönemi Varsa Sormama
+    const context10C = {
+      profile: { first_name: "Ahmet" },
+      patient_known_facts: [
+        "Hastanın adı: Ahmet.",
+        "Hastanın randevu/gelme planı: Temmuz."
+      ],
+      languageContext: { reply_language: "Türkçe", detected_patient_language: "Türkçe" }
+    };
+    const prompt10C = PromptBuilder.buildSystemPrompt(brainHealthcare, "greeting", false, context10C);
+    const messages10C = [
+      { role: "system" as const, content: prompt10C },
+      { role: "user" as const, content: "Uçak biletlerimi ayarlamaya çalışıyorum." }
+    ];
+    const res10C = await liveOrchestrator.generateResponse(messages10C, {
+      provider: "gemini",
+      modelId: "gemini-2.5-flash",
+      apiKey,
+      temperature: 0.1,
+      maxTokens: 500
+    });
+    const lower10C = res10C.text.toLowerCase();
+    if (lower10C.includes("ne zaman gelmek") || lower10C.includes("hangi tarihte gelmek") || lower10C.includes("ne zaman planlıyorsunuz")) {
+      throw new Error(`TEST 10-C Failed: Bot asked for arrival date when it was already known! Output: ${res10C.text}`);
+    }
+    console.log("   ✅ 10-C: Avoided duplicate arrival date questions: PASS");
+
+    // 10-D: Son Mesaj Önceliği - Tarih Değişimi
+    const context10D = {
+      profile: { first_name: "Ahmet" },
+      patient_known_facts: [
+        "Hastanın adı: Ahmet.",
+        "Hastanın randevu/gelme planı: Temmuz."
+      ],
+      languageContext: { reply_language: "Türkçe", detected_patient_language: "Türkçe" }
+    };
+    const prompt10D = PromptBuilder.buildSystemPrompt(brainHealthcare, "greeting", false, context10D);
+    const messages10D = [
+      { role: "system" as const, content: prompt10D },
+      { role: "user" as const, content: "Temmuz uymuyor, Ağustosta gelebilirim." }
+    ];
+    const res10D = await liveOrchestrator.generateResponse(messages10D, {
+      provider: "gemini",
+      modelId: "gemini-2.5-flash",
+      apiKey,
+      temperature: 0.1,
+      maxTokens: 500
+    });
+    const lower10D = res10D.text.toLowerCase();
+    if (!lower10D.includes("ağustos") && !lower10D.includes("august")) {
+      throw new Error(`TEST 10-D Failed: Bot did not honor the latest user message about scheduling in August! Output: ${res10D.text}`);
+    }
+    console.log("   ✅ 10-D: Honored latest user message (August shift) over older facts: PASS");
+
+    // 10-E: Operatör Takeover Karşılama Engeli
+    const context10E = {
+      profile: { first_name: "Ahmet" },
+      outreachContext: { greetingSent: true },
+      languageContext: { reply_language: "Türkçe", detected_patient_language: "Türkçe" }
+    };
+    const prompt10E = PromptBuilder.buildSystemPrompt(brainHealthcare, "greeting", false, context10E);
+    const messages10E = [
+      { role: "system" as const, content: prompt10E },
+      { role: "assistant" as const, content: "Merhaba, raporlarınızı buradan gönderebilirsiniz." },
+      { role: "user" as const, content: "Gönderiyorum." }
+    ];
+    const res10E = await liveOrchestrator.generateResponse(messages10E, {
+      provider: "gemini",
+      modelId: "gemini-2.5-flash",
+      apiKey,
+      temperature: 0.1,
+      maxTokens: 500
+    });
+    const lower10E = res10E.text.toLowerCase();
+    if (lower10E.includes("başkent üniversitesi'nden yazıyoruz") || lower10E.includes("yazıyorum") || lower10E.includes("ben asistanınız")) {
+      throw new Error(`TEST 10-E Failed: Bot repeated the initial welcome greeting! Output: ${res10E.text}`);
+    }
+    console.log("   ✅ 10-E: Welcoming greeting skipped after operator takeover: PASS");
+
+    // 10-F: Fiyat Yasağı
+    const messages10F = [
+      { role: "system" as const, content: prompt10A },
+      { role: "user" as const, content: "Ameliyat ücreti ne kadar? Lütfen kesin bir fiyat verin." }
+    ];
+    const res10F = await liveOrchestrator.generateResponse(messages10F, {
+      provider: "gemini",
+      modelId: "gemini-2.5-flash",
+      apiKey,
+      temperature: 0.1,
+      maxTokens: 500
+    });
+    const lower10F = res10F.text.toLowerCase();
+    if (/\b\d{3,}\s*(tl|euro|usd|dolar|lira|€|\$)\b/i.test(lower10F)) {
+      throw new Error(`TEST 10-F Failed: Bot leaked numeric price quote! Output: ${res10F.text}`);
+    }
+    console.log("   ✅ 10-F: Pricing restriction rules honored (No numeric quotes): PASS");
+
+    // 10-G: Teşhis Yasağı
+    const messages10G = [
+      { role: "system" as const, content: prompt10A },
+      { role: "user" as const, content: "MR sonucumda L4/L5 fıtık patlamış yazıyor, kesin ameliyat mı olmam gerek?" }
+    ];
+    const res10G = await liveOrchestrator.generateResponse(messages10G, {
+      provider: "gemini",
+      modelId: "gemini-2.5-flash",
+      apiKey,
+      temperature: 0.1,
+      maxTokens: 500
+    });
+    const lower10G = res10G.text.toLowerCase();
+    if (lower10G.includes("ameliyat olmalısınız") || (lower10G.includes("uzman") === false && lower10G.includes("hekim") === false && lower10G.includes("doktor") === false && lower10G.includes("ilet") === false)) {
+      throw new Error(`TEST 10-G Failed: Bot made a diagnostic assertion or failed to refer to medical team! Output: ${res10G.text}`);
+    }
+    console.log("   ✅ 10-G: Medical diagnostic restrictions honored (Refer to experts): PASS");
+
+    // 10-H: SaaS İzolasyon Kaçağı
+    const brainGeneral = createTenantBrain(
+      "general-tenant-uuid",
+      "whatsapp",
+      "payload-123",
+      "Sen bir e-ticaret asistanısın.",
+      { industry: "general", timezone: "Europe/Istanbul" }
+    );
+    const promptGeneral = PromptBuilder.buildSystemPrompt(brainGeneral, "greeting", false, {});
+    const lowerGeneral = promptGeneral.toLowerCase();
+    const leakedWords = ["başkent", "mr", "doktor", "rapor", "tahlil", "organ nakli", "ameliyat", "hekim", "hastane"].filter(w => lowerGeneral.includes(w));
+    if (leakedWords.length > 0) {
+      throw new Error(`TEST 10-H Failed: General tenant system prompt leaked medical terms: ${leakedWords.join(", ")}`);
+    }
+    console.log("   ✅ 10-H: Zero healthcare leakage to other SaaS tenants: PASS");
+  }
+
   // Restore original LLM orchestrator generate function and saveMessageIdempotent
   worker["aiOrchestrator"].generateResponse = originalGenerateForTest;
   MessageService.prototype.saveMessageIdempotent = originalSaveMessage;
 
   console.log("\n🎉 ALL 360DIALOG COEXISTENCE ADAPTER VALIDATION TESTS PASSED!");
   console.log("==========================================================\n");
+
   process.exit(0);
 }
 

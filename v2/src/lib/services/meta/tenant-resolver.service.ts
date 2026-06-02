@@ -20,6 +20,7 @@ export interface TenantRuntimeConfig {
   channelId: string;
   groupId: string;
   provider: string; // 'whatsapp' | 'messenger' | 'instagram'
+  industry: string;
 
   // Meta App Credentials (tenant-isolated, for validating webhook signature)
   metaAppId: string | null;
@@ -132,6 +133,7 @@ export class TenantResolverService {
               t.instagram_app_secret,
               t.plan,
               t.status,
+              t.industry,
               t.whatsapp_phone_id,
               t.whatsapp_business_id,
               t.meta_page_id,
@@ -171,6 +173,7 @@ export class TenantResolverService {
               t.instagram_app_secret,
               t.plan,
               t.status,
+              t.industry,
               t.whatsapp_phone_id,
               t.whatsapp_business_id,
               t.meta_page_id,
@@ -242,6 +245,7 @@ export class TenantResolverService {
             instagramId: t.instagram_id || null,
             plan: t.plan || 'starter',
             status: t.status,
+            industry: t.industry || 'general',
             raw: t
           };
         }
@@ -330,6 +334,7 @@ export class TenantResolverService {
         instagramId: row.instagram_id || null,
         plan: row.plan || 'starter',
         status: row.status,
+        industry: row.industry || 'general',
         raw: row
       };
 
