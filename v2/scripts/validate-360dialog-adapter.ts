@@ -5,11 +5,22 @@ dotenv.config({ path: path.join(__dirname, "../.env.local") });
 // Setup test secret for validation
 process.env.THREE_SIXTY_DIALOG_WEBHOOK_SECRET = "super_secure_360dialog_secret_123456";
 process.env.THREE_SIXTY_DIALOG_API_KEY_FALLBACK = "test_fallback_api_key_789";
+process.env.BLOB_READ_WRITE_TOKEN = "mock_blob_token_123456";
 
 import Module from "module";
 
 const originalRequire = Module.prototype.require;
 (Module.prototype as any).require = function (id: string) {
+  if (id === "@vercel/blob") {
+    return {
+      put: async (pathStr: string, buffer: any, options: any) => {
+        return { url: `https://blob.vercel-storage.com/${pathStr}` };
+      },
+      del: async (url: string) => true,
+      list: async () => ({ blobs: [] })
+    };
+  }
+
   if (id.includes("next/server") || id === "next/server") {
     class MockNextRequest {
       nextUrl: URL;
@@ -396,6 +407,77 @@ async function runValidationTests() {
     throw new Error("Realtime publish failed to broadcast the app echo message.");
   }
   console.log("   ✅ Realtime event broadcasted for the echo outbound: PASS");
+
+  // ----------------------------------------------------
+  // TEST 5: 360dialog Media Storage Retrieval Resolution
+  // ----------------------------------------------------
+  console.log("\n🧪 [TEST 5] 360dialog Media Storage Retrieval Resolution...");
+  const { MediaStorageService } = require("../src/lib/services/media-storage.service");
+
+  // Mock global fetch for media tests
+  const originalFetch = global.fetch;
+  let resolvedUrlsFetched: string[] = [];
+
+  global.fetch = async function (url: any, options: any) {
+    const urlStr = String(url);
+    resolvedUrlsFetched.push(urlStr);
+
+    if (urlStr.includes("waba-v2.360dialog.io/media_id_12345")) {
+      // Assert D360-API-KEY header is sent
+      if (options?.headers?.["D360-API-KEY"] !== "mock_api_key_abc") {
+        throw new Error("Security check failed: D360-API-KEY header is missing or incorrect in media lookup");
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          messaging_product: "whatsapp",
+          url: "https://lookaside.fbsbx.com/whatsapp_business/attachments/?mid=media_id_12345&ext=123&hash=abc"
+        })
+      } as any;
+    }
+
+    if (urlStr.includes("lookaside.fbsbx.com/whatsapp_business/attachments")) {
+      // Assert D360-API-KEY header is NOT leaked to Meta CDN
+      if (options?.headers?.["D360-API-KEY"]) {
+        throw new Error("SECURITY LEAK: D360-API-KEY header was sent to fbsbx.com Meta CDN!");
+      }
+      return {
+        ok: true,
+        arrayBuffer: async () => new ArrayBuffer(500)
+      } as any;
+    }
+
+    return originalFetch(url, options);
+  } as any;
+
+  // Let's call downloadAndStore
+  const mediaResult = await MediaStorageService.downloadAndStore(
+    "test-tenant-uuid",
+    "media_id_12345",
+    "mock_api_key_abc",
+    "test_msg_id_123",
+    {
+      mimeType: "image/png",
+      filename: "test_image.png",
+      mediaType: "image",
+      provider: "360dialog"
+    }
+  );
+
+  // Restore fetch
+  global.fetch = originalFetch;
+
+  if (!mediaResult) {
+    throw new Error("360dialog media downloader returned null");
+  }
+
+  if (mediaResult.fileSize !== 500) {
+    throw new Error(`Expected file size 500, got ${mediaResult.fileSize}`);
+  }
+
+  console.log("   ✅ Dynamic 360dialog endpoint routing: PASS");
+  console.log("   ✅ D360-API-KEY authentication headers verified: PASS");
+  console.log("   ✅ Zero API Key leak to Meta CDN: PASS");
 
   console.log("\n🎉 ALL 360DIALOG COEXISTENCE ADAPTER VALIDATION TESTS PASSED!");
   console.log("==========================================================\n");

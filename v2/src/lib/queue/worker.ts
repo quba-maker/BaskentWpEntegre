@@ -851,6 +851,7 @@ export class QueueWorkerEngine {
               mimeType: mediaMetadata?.mime_type,
               filename: mediaMetadata?.filename,
               mediaType,
+              provider: mediaCreds.provider || undefined,
             }
           );
           if (blobResult) {

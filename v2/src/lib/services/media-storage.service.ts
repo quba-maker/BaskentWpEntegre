@@ -31,6 +31,7 @@ export class MediaStorageService {
       mimeType?: string;
       filename?: string;
       mediaType: string;
+      provider?: string;
     }
   ): Promise<{ blobUrl: string; fileSize: number } | null> {
     try {
@@ -42,44 +43,82 @@ export class MediaStorageService {
         });
         return null;
       }
-      // Step 1: Get the download URL from Meta Graph API
-      const metaRes = await fetch(
-        `https://graph.facebook.com/v25.0/${mediaId}`,
-        {
-          headers: { Authorization: `Bearer ${accessToken}` },
+
+      let downloadUrl = "";
+      const is360dialog = metadata.provider === "360dialog" || metadata.provider === "360dialog_whatsapp";
+
+      if (is360dialog) {
+        // Step 1: Get the download URL from 360dialog API
+        const d360Res = await fetch(
+          `https://waba-v2.360dialog.io/${mediaId}`,
+          {
+            headers: { "D360-API-KEY": accessToken },
+          }
+        );
+
+        if (!d360Res.ok) {
+          const errText = await d360Res.text();
+          log.error(`[MEDIA_RESOLVE_FAILED] 360dialog media URL resolve failed`, new Error(errText), {
+            mediaId,
+            tenantId,
+            status: d360Res.status,
+          });
+          return null;
         }
-      );
 
-      if (!metaRes.ok) {
-        const errText = await metaRes.text();
-        log.error(`[MEDIA_RESOLVE_FAILED] Meta media URL resolve failed`, new Error(errText), {
-          mediaId,
-          tenantId,
-          status: metaRes.status,
-        });
-        return null;
+        const d360Data = await d360Res.json();
+        downloadUrl = d360Data.url;
+      } else {
+        // Step 1: Get the download URL from Meta Graph API
+        const metaRes = await fetch(
+          `https://graph.facebook.com/v25.0/${mediaId}`,
+          {
+            headers: { Authorization: `Bearer ${accessToken}` },
+          }
+        );
+
+        if (!metaRes.ok) {
+          const errText = await metaRes.text();
+          log.error(`[MEDIA_RESOLVE_FAILED] Meta media URL resolve failed`, new Error(errText), {
+            mediaId,
+            tenantId,
+            status: metaRes.status,
+          });
+          return null;
+        }
+
+        const metaData = await metaRes.json();
+        downloadUrl = metaData.url;
       }
-
-      const metaData = await metaRes.json();
-      const downloadUrl = metaData.url;
 
       if (!downloadUrl) {
-        log.error(`[MEDIA_NO_URL] Meta returned no download URL`, undefined, {
+        log.error(`[MEDIA_NO_URL] Media returned no download URL`, undefined, {
           mediaId,
           tenantId,
+          provider: metadata.provider,
         });
         return null;
       }
 
-      // Step 2: Download the actual file from Meta CDN
-      const fileRes = await fetch(downloadUrl, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
+      // Step 2: Download the actual file with scoped credentials
+      const headers: Record<string, string> = {};
+      if (is360dialog) {
+        if (downloadUrl.includes("360dialog.io")) {
+          headers["D360-API-KEY"] = accessToken;
+        }
+      } else {
+        if (downloadUrl.includes("facebook.com") || downloadUrl.includes("fbsbx.com")) {
+          headers["Authorization"] = `Bearer ${accessToken}`;
+        }
+      }
+
+      const fileRes = await fetch(downloadUrl, { headers });
 
       if (!fileRes.ok) {
         log.error(`[MEDIA_DOWNLOAD_FAILED] Failed to download media from CDN`, new Error(`HTTP ${fileRes.status}`), {
           mediaId,
           tenantId,
+          provider: metadata.provider,
         });
         return null;
       }
@@ -110,6 +149,7 @@ export class MediaStorageService {
         blobPath,
         fileSize,
         mediaType: metadata.mediaType,
+        provider: metadata.provider,
       });
 
       return { blobUrl: blob.url, fileSize };
@@ -117,7 +157,7 @@ export class MediaStorageService {
       log.error(
         `[MEDIA_STORE_FAILED] Unexpected error in downloadAndStore`,
         err instanceof Error ? err : new Error(String(err)),
-        { tenantId, mediaId }
+        { tenantId, mediaId, provider: metadata.provider }
       );
       return null;
     }
