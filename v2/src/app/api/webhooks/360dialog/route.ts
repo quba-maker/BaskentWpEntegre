@@ -98,7 +98,8 @@ export async function POST(req: NextRequest) {
 
     // 4. Provider raw payload logging (to channel_events with zero-secret exposure)
     const tenantDb = withTenantDB(tenantId);
-    await tenantDb.executeSafe({
+    const adminDb = withTenantDB(tenantId, true); // Admin bypass needed because channel_events table lacks direct tenant_id column
+    await adminDb.executeSafe({
       text: `
         INSERT INTO channel_events (channel_id, event_type, payload, correlation_id)
         VALUES ($1, '360dialog_webhook_received', $2::jsonb, $3)
