@@ -252,7 +252,12 @@ export class QueueWorkerEngine {
             text: `
               UPDATE channel_integrations 
               SET last_sync_at = NOW(), health_status = 'healthy' 
-              WHERE channel_id = $1 AND tenant_id = $2
+              WHERE channel_id = $1
+                AND channel_id IN (
+                  SELECT c.id FROM channels c
+                  JOIN channel_groups cg ON c.group_id = cg.id
+                  WHERE cg.tenant_id = $2
+                )
             `,
             values: [resolvedChannelId, tenantId]
           });

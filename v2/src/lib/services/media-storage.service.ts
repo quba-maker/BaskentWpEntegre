@@ -53,7 +53,7 @@ export class MediaStorageService {
       if (is360dialog) {
         // Step 1: Get the download URL from 360dialog API
         const d360Res = await fetch(
-          `https://waba-v2.360dialog.io/v1/media/${mediaId}`,
+          `https://waba-v2.360dialog.io/${mediaId}`,
           {
             headers: { "D360-API-KEY": accessToken },
           }
