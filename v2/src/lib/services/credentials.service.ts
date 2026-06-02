@@ -11,8 +11,9 @@ export interface ResolvedCredentials {
   whatsappBusinessAccountId: string | null;
   metaPageId: string | null;
   instagramId: string | null;
-  source: "v2_channels" | "v1_legacy" | "none";
+  source: "v2_channels" | "v1_legacy" | "none" | "env_fallback";
   channelId?: string | null;
+  provider?: string | null;
 }
 
 /**
@@ -31,9 +32,10 @@ export class CredentialsService {
    * Resolution chain:
    *   1. V2: channel_integrations.credentials_encrypted (tenant-isolated) — ALWAYS PRIMARY
    *   2. V1: tenants.meta_page_token (ONLY if USE_V1_CREDENTIAL_FALLBACK=true)
-   *   3. HARD FAIL: returns nulls (caller must handle)
+   *   3. ENV Fallback: THREE_SIXTY_DIALOG_API_KEY_FALLBACK (for 360dialog first deploy/rollback)
+   *   4. HARD FAIL: returns nulls (caller must handle)
    * 
-   * ENV fallback has been permanently removed (cross-tenant isolation risk).
+   * ENV fallback has been permanently removed for Meta but supported as fallback for 360dialog.
    */
   static async resolveCredentials(
     tenantId: string,
@@ -47,7 +49,7 @@ export class CredentialsService {
       const providerAliases = getProviderAliases(provider);
       const v2Results = await db.executeSafe({
         text: `
-          SELECT ci.credentials_encrypted, c.identifier, c.id as channel_id
+          SELECT ci.credentials_encrypted, c.identifier, c.id as channel_id, c.provider
           FROM channels c
           JOIN channel_groups cg ON c.group_id = cg.id
           LEFT JOIN channel_integrations ci ON ci.channel_id = c.id
@@ -107,7 +109,8 @@ export class CredentialsService {
             metaPageId: provider === "messenger" ? row.identifier : null,
             instagramId: provider === "instagram" ? row.identifier : null,
             source: "v2_channels",
-            channelId: row.channel_id
+            channelId: row.channel_id,
+            provider: row.provider
           };
         }
       }
@@ -136,7 +139,8 @@ export class CredentialsService {
               whatsappBusinessAccountId: t.whatsapp_business_id || null,
               metaPageId: t.meta_page_id || null,
               instagramId: t.instagram_id || null,
-              source: "v1_legacy"
+              source: "v1_legacy",
+              provider: provider
             };
           }
         }
@@ -144,6 +148,23 @@ export class CredentialsService {
         log.info("[V1_CREDENTIAL_FALLBACK_DISABLED] V1 tenants fallback skipped", {
           tenantId, provider
         });
+      }
+
+      // ── LAYER 3: 360dialog Coexistence Fallback API Key from environment variables ──
+      const fallbackApiKey = process.env.THREE_SIXTY_DIALOG_API_KEY_FALLBACK;
+      if (provider === "whatsapp" && fallbackApiKey) {
+        log.info("[CREDENTIAL_RESOLVED] Using fallback 360dialog API Key from environment variables", {
+          tenantId, provider, source: "env_fallback"
+        });
+        return {
+          accessToken: fallbackApiKey,
+          whatsappPhoneNumberId: "+905527641397", // 360dialog live phone fallback number
+          whatsappBusinessAccountId: null,
+          metaPageId: null,
+          instagramId: null,
+          source: "env_fallback",
+          provider: "360dialog"
+        };
       }
     } catch (err) {
       log.error("[CREDENTIAL_MISSING] DB credential resolution failed", err instanceof Error ? err : new Error(String(err)), {

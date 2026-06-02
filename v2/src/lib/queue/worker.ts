@@ -564,11 +564,17 @@ export class QueueWorkerEngine {
       
       try {
         if (provider === 'whatsapp' && credentials.whatsappPhoneNumberId) {
+          const isAutoReplyEnabled = await FeatureFlagService.isEnabled(tenantId, 'whatsapp_auto_reply', false);
+          if (!isAutoReplyEnabled) {
+            this.log.info(`[MEDIA_BATCH_AUTO_REPLY_DISABLED] whatsapp_auto_reply is false, skipping batch auto-reply`, { tenantId, traceId });
+            return;
+          }
           const res = await msgService.sendWhatsAppMessage(
             credentials.whatsappPhoneNumberId,
             credentials.accessToken,
             phoneNumber,
-            responseText
+            responseText,
+            credentials.provider
           );
           outProviderMessageId = res.providerMessageId || null;
         } else {
@@ -866,10 +872,25 @@ export class QueueWorkerEngine {
     // Phase 6: Emit identity resolution event
     AIEventEmitter.emit({ tenantId, customerId, type: 'identity_resolved', category: 'identity', payload: { phoneNumber, source: channel } });
 
-    // 3. Save Incoming Message (Idempotency and locking handled atomically in CTE)
+    // ── APP ECHO DETECTION (360dialog Coexistence) ──
+    const valueObj = channel === 'whatsapp' ? payload.entry?.[0]?.changes?.[0]?.value : null;
+    const incomingMsgObj = channel === 'whatsapp'
+      ? valueObj?.messages?.[0]
+      : payload.entry?.[0]?.messaging?.[0];
+
+    const isAppEcho = channel === 'whatsapp' && incomingMsgObj && 
+      ((incomingMsgObj as any).from === valueObj?.metadata?.phone_number_id || 
+       (incomingMsgObj as any).from === valueObj?.metadata?.display_phone_number ||
+       (incomingMsgObj as any).from === brain.context.config?.identifier);
+
+    const direction = isAppEcho ? 'out' as const : 'in' as const;
+    const modelUsed = isAppEcho ? null : undefined;
+    const statusVal = isAppEcho ? 'sent' : 'delivered';
+
+    // 3. Save Message (Idempotency and locking handled atomically in CTE)
     const { isDuplicate, conversationId, messageId } = await msgService.saveMessageIdempotent({
       phoneNumber,
-      direction: 'in',
+      direction,
       content,
       channel: channel,
       channelId: metadata.channelId,
@@ -878,11 +899,48 @@ export class QueueWorkerEngine {
       mediaType,
       mediaUrl,
       mediaMetadata,
+      modelUsed,
+      status: statusVal
     });
 
     if (isDuplicate) {
       this.log.warn(`[DUPLICATE_DROPPED] Message already processed`, { providerMessageId, traceId });
       AIEventEmitter.emit({ tenantId, customerId, type: 'duplicate_message_dropped', category: 'pipeline', severity: 'warning', payload: { providerMessageId } });
+      return;
+    }
+
+    if (isAppEcho) {
+      this.log.info(`[APP_ECHO_DETECTED] Outbound echo from mobile WhatsApp App. Auto-handover to human.`, { phoneNumber, traceId });
+      
+      // Auto-handover: update conversation status to human
+      await db.executeSafe({
+        text: `UPDATE conversations SET status = 'human' WHERE phone_number = $1 AND tenant_id = $2`,
+        values: [phoneNumber, tenantId]
+      });
+
+      // Realtime publish for the human outbound message
+      if (messageId && conversationId) {
+        try {
+          const { RealtimePublisher } = await import('@/lib/realtime/publisher');
+          await RealtimePublisher.publishMessageCreated(
+            tenantId,
+            {
+              id: messageId,
+              conversation_id: conversationId,
+              phone_number: phoneNumber,
+              content,
+              direction: 'out',
+              status: 'sent',
+              created_at: new Date().toISOString()
+            },
+            { traceId, spanId: 'app_echo' }
+          );
+        } catch (realtimeErr) {
+          this.log.error(`[APP_ECHO_REALTIME_FAILED]`, realtimeErr instanceof Error ? realtimeErr : new Error(String(realtimeErr)), { traceId });
+        }
+      }
+
+      // Bypass any AI response or pipeline summary since human answered
       return;
     }
 
@@ -999,6 +1057,14 @@ export class QueueWorkerEngine {
         ? (currentTime >= wh.start && currentTime <= wh.end)
         : (currentTime >= wh.start || currentTime <= wh.end);
       if (!isInRange) {
+        // Check if auto-reply is enabled for whatsapp (Listening Mode check)
+        if (channel === 'whatsapp') {
+          const isAutoReplyEnabled = await FeatureFlagService.isEnabled(tenantId, 'whatsapp_auto_reply', false);
+          if (!isAutoReplyEnabled) {
+            this.log.info(`[WORKING_HOURS_AUTO_REPLY_DISABLED] whatsapp_auto_reply is false, skipping working hours off-message outbound`, { tenantId, traceId });
+            return;
+          }
+        }
         const offMsg = wh.offMessage || 'Mesai saatlerimiz dışındasınız. En kısa sürede dönüş yapılacaktır.';
         // V2 Credential Resolution — NO ENV FALLBACK
         const whCreds = await CredentialsService.resolveCredentials(tenantId, 'whatsapp');
@@ -1006,7 +1072,7 @@ export class QueueWorkerEngine {
         const accessToken = whCreds.accessToken || '';
         const phoneId = whCreds.whatsappPhoneNumberId || '';
         if (phoneId && accessToken) {
-          const outRes = await msgService.sendWhatsAppMessage(phoneId, accessToken, phoneNumber, offMsg);
+          const outRes = await msgService.sendWhatsAppMessage(phoneId, accessToken, phoneNumber, offMsg, whCreds.provider);
           const offMsgResult = await msgService.saveMessageIdempotent({ 
             phoneNumber, 
             direction: 'out', 
@@ -1215,8 +1281,13 @@ export class QueueWorkerEngine {
             try {
               let privOutResult;
               if (channel === 'whatsapp') {
-                const outRes = await msgService.sendWhatsAppMessage(privPhoneId, privAccessToken, phoneNumber, safeResponse);
-                privOutResult = outRes;
+                const isAutoReplyEnabled = await FeatureFlagService.isEnabled(tenantId, 'whatsapp_auto_reply', false);
+                if (!isAutoReplyEnabled) {
+                  this.log.info(`[PRIVACY_PRE_AUTO_REPLY_DISABLED] whatsapp_auto_reply is false, skipping privacy pre-detector auto-reply`, { tenantId, traceId });
+                } else {
+                  const outRes = await msgService.sendWhatsAppMessage(privPhoneId, privAccessToken, phoneNumber, safeResponse, privCreds.provider);
+                  privOutResult = outRes;
+                }
               } else {
                 const outRes = await msgService.sendSocialMessage(privAccessToken, phoneNumber, safeResponse, channel);
                 privOutResult = outRes;
@@ -1274,6 +1345,15 @@ export class QueueWorkerEngine {
     ];
 
     this.log.info(`[PROMPT_BUILT] Prepared LLM payload`, { historyLength: history.length, traceId });
+
+    // Check if auto-reply is disabled for whatsapp channel (Listening Mode)
+    if (channel === 'whatsapp' && !skipBotReply) {
+      const isAutoReplyEnabled = await FeatureFlagService.isEnabled(tenantId, 'whatsapp_auto_reply', false);
+      if (!isAutoReplyEnabled) {
+        skipBotReply = true;
+        this.log.info(`[AUTO_REPLY_DISABLED] whatsapp_auto_reply is false. Skipping AI bot reply generation.`, { tenantId, traceId });
+      }
+    }
 
     // 6. AI Orchestrator Call (with Timeout Safety)
     const tenantConfig = brain.context.config;
@@ -1404,7 +1484,8 @@ export class QueueWorkerEngine {
           phoneId,
           accessToken,
           phoneNumber,
-          finalResponseText
+          finalResponseText,
+          outboundCreds.provider
         );
         outProviderMessageId = outRes.providerMessageId || null;
       } else {

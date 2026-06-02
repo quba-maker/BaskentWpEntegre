@@ -62,7 +62,7 @@ const originalRequire = Module.prototype.require;
       NextResponse: MockNextResponse
     };
   }
-  return originalRequire.apply(this, arguments);
+  return originalRequire.apply(this, arguments as any);
 };
 
 // Now import the middleware and mock request/response classes

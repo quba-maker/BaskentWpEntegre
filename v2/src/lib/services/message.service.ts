@@ -138,7 +138,18 @@ export class MessageService {
   /**
    * Send outgoing WhatsApp message via Meta Graph API
    */
-  async sendWhatsAppMessage(phoneId: string, accessToken: string, to: string, content: string): Promise<{ success: boolean; providerMessageId?: string }> {
+  async sendWhatsAppMessage(
+    phoneId: string,
+    accessToken: string,
+    to: string,
+    content: string,
+    provider?: string | null
+  ): Promise<{ success: boolean; providerMessageId?: string }> {
+    if (provider === '360dialog' || provider === '360dialog_whatsapp') {
+      const { ThreeSixtyDialogService } = await import("./providers/three-sixty-dialog.service");
+      return ThreeSixtyDialogService.sendMessage(accessToken, to, content);
+    }
+
     const url = `https://graph.facebook.com/v25.0/${phoneId}/messages`;
     try {
       const response = await fetch(url, {

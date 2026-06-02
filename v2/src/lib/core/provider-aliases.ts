@@ -16,7 +16,9 @@ export function getProviderAliases(provider: string): string[] {
     case 'meta_instagram':
       return ['instagram', 'meta_instagram'];
     case 'whatsapp':
-      return ['whatsapp'];
+    case '360dialog':
+    case '360dialog_whatsapp':
+      return ['whatsapp', '360dialog', '360dialog_whatsapp'];
     case 'messenger':
       return ['messenger'];
     default:
@@ -30,6 +32,7 @@ export function getProviderAliases(provider: string): string[] {
  */
 export function canonicalProvider(provider: string): string {
   if (provider === 'meta_instagram') return 'instagram';
+  if (provider === '360dialog' || provider === '360dialog_whatsapp') return 'whatsapp';
   return provider;
 }
 
