@@ -19,7 +19,7 @@ export class ThreeSixtyDialogService {
       filename?: string;
     }
   ): Promise<{ success: boolean; providerMessageId?: string }> {
-    const url = "https://waba-v2.360dialog.io/v1/messages";
+    const url = "https://waba-v2.360dialog.io/messages";
     
     if (!apiKey) {
       throw new Error("360dialog API error: D360-API-KEY is missing.");
