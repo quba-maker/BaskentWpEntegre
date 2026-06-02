@@ -127,8 +127,36 @@ export class MediaStorageService {
         return null;
       }
 
+      let originalHost = "";
+      let rewrittenHost = "";
+      let isHostRewritten = false;
+
+      if (is360dialog && (downloadUrl.includes("facebook.com") || downloadUrl.includes("fbsbx.com"))) {
+        try {
+          const parsedUrl = new URL(downloadUrl);
+          originalHost = parsedUrl.host;
+          parsedUrl.host = "waba-v2.360dialog.io";
+          downloadUrl = parsedUrl.toString();
+          rewrittenHost = parsedUrl.host;
+          isHostRewritten = true;
+
+          log.info(`[MEDIA_HOST_REWRITE] Rewriting Meta lookaside URL to 360dialog media proxy`, {
+            mediaId: maskedId,
+            tenantId,
+            stage: "host_rewrite_binary_download",
+            originalHost,
+            rewrittenHost,
+            endpointVariant,
+          });
+        } catch (e) {
+          log.warn("[MEDIA_REWRITE_FAILED] Failed to parse and rewrite download URL", { downloadUrl });
+        }
+      }
+
       const directUrlUsed = !!metadata.directUrl;
-      const resolveStage = directUrlUsed ? "direct_binary_download" : "metadata_resolve";
+      const resolveStage = isHostRewritten 
+        ? "host_rewrite_binary_download" 
+        : (directUrlUsed ? "direct_binary_download" : "metadata_resolve");
 
       log.info(`[MEDIA_METADATA_RESOLVED] Media metadata successfully resolved`, {
         mediaId: maskedId,
@@ -140,34 +168,23 @@ export class MediaStorageService {
         hasDownloadUrl: !!downloadUrl,
         directUrlUsed,
         source: directUrlUsed ? "webhook_presigned_url" : "api_metadata_fetch",
+        originalHost: originalHost || undefined,
+        rewrittenHost: rewrittenHost || undefined,
       });
 
       // Step 2: Download the actual file with scoped credentials
       const headers: Record<string, string> = {};
-      // If URL is pre-signed (e.g. Lookaside link containing signature params like hash and ext),
-      // we must omit the Authorization header to avoid 401 token mismatches.
-      const isPresignedUrl = downloadUrl.includes("hash=") && downloadUrl.includes("ext=");
-
-      if (isPresignedUrl) {
-        log.info(`[MEDIA_DOWNLOAD_PREAUTH] Lookaside URL is pre-signed. Fetching without Authorization header to avoid 401 token mismatch.`, {
-          mediaId: maskedId,
-          tenantId,
-          stage: "binary_download",
-          endpointVariant,
-        });
+      if (is360dialog) {
+        if (downloadUrl.includes("360dialog.io")) {
+          headers["D360-API-KEY"] = accessToken;
+        } else if (downloadUrl.includes("facebook.com") || downloadUrl.includes("fbsbx.com")) {
+          // Robust fallback: if URL is from Meta/Facebook CDN, authorize via the Meta page token
+          const metaToken = process.env.META_ACCESS_TOKEN || accessToken;
+          headers["Authorization"] = `Bearer ${metaToken}`;
+        }
       } else {
-        if (is360dialog) {
-          if (downloadUrl.includes("360dialog.io")) {
-            headers["D360-API-KEY"] = accessToken;
-          } else if (downloadUrl.includes("facebook.com") || downloadUrl.includes("fbsbx.com")) {
-            // Robust fallback: if URL is from Meta/Facebook CDN, authorize via the Meta page token
-            const metaToken = process.env.META_ACCESS_TOKEN || accessToken;
-            headers["Authorization"] = `Bearer ${metaToken}`;
-          }
-        } else {
-          if (downloadUrl.includes("facebook.com") || downloadUrl.includes("fbsbx.com")) {
-            headers["Authorization"] = `Bearer ${accessToken}`;
-          }
+        if (downloadUrl.includes("facebook.com") || downloadUrl.includes("fbsbx.com")) {
+          headers["Authorization"] = `Bearer ${accessToken}`;
         }
       }
 
@@ -178,11 +195,13 @@ export class MediaStorageService {
           mediaId: maskedId,
           tenantId,
           status: fileRes.status,
-          stage: "binary_download",
+          stage: isHostRewritten ? "host_rewrite_binary_download" : "binary_download",
           endpointVariant,
           provider: metadata.provider,
           mediaType: metadata.mediaType,
           downloadHost: new URL(downloadUrl).host,
+          originalHost: originalHost || undefined,
+          rewrittenHost: rewrittenHost || undefined,
         });
         return null;
       }
@@ -214,9 +233,11 @@ export class MediaStorageService {
         fileSize,
         mediaType: metadata.mediaType,
         provider: metadata.provider,
-        stage: "binary_download",
+        stage: isHostRewritten ? "host_rewrite_binary_download" : "binary_download",
         endpointVariant,
         status: 200,
+        originalHost: originalHost || undefined,
+        rewrittenHost: rewrittenHost || undefined,
       });
 
       return { blobUrl: blob.url, fileSize };

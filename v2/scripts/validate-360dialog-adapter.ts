@@ -436,10 +436,14 @@ async function runValidationTests() {
       } as any;
     }
 
-    if (urlStr.includes("lookaside.fbsbx.com/whatsapp_business/attachments")) {
+    if (urlStr.includes("lookaside.fbsbx.com/whatsapp_business/attachments") || urlStr.includes("waba-v2.360dialog.io/whatsapp_business/attachments")) {
       // Assert D360-API-KEY header is NOT leaked to Meta CDN
-      if (options?.headers?.["D360-API-KEY"]) {
+      if (urlStr.includes("lookaside.fbsbx.com") && options?.headers?.["D360-API-KEY"]) {
         throw new Error("SECURITY LEAK: D360-API-KEY header was sent to fbsbx.com Meta CDN!");
+      }
+      // Assert D360-API-KEY header IS sent to waba-v2.360dialog.io
+      if (urlStr.includes("waba-v2.360dialog.io") && options?.headers?.["D360-API-KEY"] !== "mock_api_key_abc") {
+        throw new Error("Security check failed: D360-API-KEY header is missing or incorrect in media proxy download");
       }
       return {
         ok: true,
