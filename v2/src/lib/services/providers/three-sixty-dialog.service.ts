@@ -30,7 +30,7 @@ export class ThreeSixtyDialogService {
 
       if (media) {
         const mediaPayload: any = { link: media.url.trim() };
-        if (media.filename) {
+        if (media.filename && media.type === "document") {
           mediaPayload.filename = media.filename;
         }
         if (content && (media.type === "image" || media.type === "document")) {
