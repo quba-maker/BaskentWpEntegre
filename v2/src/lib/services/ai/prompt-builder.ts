@@ -171,10 +171,21 @@ MEDYA MESAJI KURALI:
       // Non-fatal: time context is optional enhancement
     }
 
+    // YANIT DİLİ ENJEKSİYONU
+    let langContextText = '';
+    if (unifiedContext && unifiedContext.languageContext) {
+      const lc = unifiedContext.languageContext;
+      langContextText = `\n\n=== 🌐 YANIT DİLİ TALİMATI ===\n`;
+      langContextText += `- Yanıt dili: ${lc.reply_language}. Bu cevapta ${lc.reply_language} kullan.\n`;
+      langContextText += `- Form alan adları veya sistem verileri Türkçe olsa bile hastanın mesaj dili ${lc.detected_patient_language} olduğu için ${lc.reply_language} cevap ver.\n`;
+      langContextText += `- UYARI: Bu dil talimatı sadece yanıt dilini belirler. Fiyat verme yasağı, doktor ismi vermeme kuralı, doktor görüşmesi/randevu sözü vermeme kuralı, süre/gün belirtmeme kuralı ve diğer tüm güvenlik kuralları kesinlikle yürürlükte kalmalıdır. Güvenlik kurallarını dil talimatı için ihlal etme.\n`;
+      langContextText += `==============================\n`;
+    }
+
     // Güvenli birleştirme: Eğer base prompt içinde "--- CONSTRAINTS ---" varsa,
     // CRM bağlamının CONSTRAINTS'in hemen üzerine yerleştirilmesi SaaS standartlarında en sağlıklısıdır.
     // Ancak base string'i parçalamak riskli olduğundan, hiyerarşik olarak önce base, sonra dinamik CRM, en son kurallar ve evre eklenir.
     // Safety guardrails are appended LAST so they take highest priority in the context window.
-    return `${base}\n${crmContext}\n${knowledgeInjection}\n${timeContext}\n${phaseContext}\n${safetyGuardrails}`;
+    return `${base}\n${crmContext}\n${knowledgeInjection}\n${timeContext}\n${phaseContext}\n${langContextText}\n${safetyGuardrails}`;
   }
 }

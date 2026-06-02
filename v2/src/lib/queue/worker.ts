@@ -7,6 +7,7 @@ import { after } from "next/server";
 import { AIOrchestrator, ChatMessage } from "@/lib/services/ai/orchestrator";
 import { ResponsePolicy } from "@/lib/services/ai/response-policy";
 import { PromptBuilder } from "@/lib/services/ai/prompt-builder";
+import { detectLanguage } from "@/lib/utils/language-detector";
 import { TenantResolverService } from "@/lib/services/meta/tenant-resolver.service";
 import { assertTenant } from "@/lib/security/assertions";
 import { AIEventEmitter } from "@/lib/services/ai/core/event-emitter";
@@ -1562,11 +1563,36 @@ export class QueueWorkerEngine {
       }
     }
 
+    // Fetch conversation history first so we can use it for language detection and AI orchestration
+    const history = await convService.getHistory(phoneNumber, 10);
+
+    // Run programmatic language detection
+    let languageContext = null;
+    try {
+      languageContext = detectLanguage(content, history);
+      
+      // Safe metadata logging (no customer phone number or medical data)
+      this.log.info(`[LANGUAGE_DETECTED] Ingestion language determined`, {
+        detected_patient_language: languageContext.detected_patient_language,
+        reply_language: languageContext.reply_language,
+        language_confidence: languageContext.language_confidence,
+        language_detection_source: languageContext.language_detection_source,
+        traceId
+      });
+
+      if (unifiedContext) {
+        unifiedContext.languageContext = languageContext;
+      } else {
+        unifiedContext = { languageContext };
+      }
+    } catch (langErr) {
+      this.log.error(`[LANGUAGE_DETECTION_FAILED] Non-fatal language detection error`, langErr instanceof Error ? langErr : new Error(String(langErr)), { traceId });
+    }
+
     // 6. Build System Prompt & History strictly via TenantBrain
     let systemPromptText = PromptBuilder.buildSystemPrompt(brain, targetPhase, false, unifiedContext);
     
     // In future phases, history and AI Orchestrator will use brain.namespaces.memory()
-    const history = await convService.getHistory(phoneNumber, 10);
     const aiMessages: ChatMessage[] = [
       { role: 'system' as const, content: String(systemPromptText) },
       ...history,

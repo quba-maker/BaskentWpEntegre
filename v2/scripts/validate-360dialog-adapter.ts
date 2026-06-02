@@ -1063,6 +1063,84 @@ async function runValidationTests() {
   }
   console.log("   ✅ D: Manual toggle allowed on any number when whitelist enforcement is disabled: PASS");
 
+  // ----------------------------------------------------
+  // TEST 9: Dinamik Dil Algılama ve Context Testleri
+  // ----------------------------------------------------
+  console.log("\n🧪 [TEST 9] Dinamik Dil Algılama ve Context Doğrulama...");
+  const { detectLanguage } = await import("../src/lib/utils/language-detector");
+
+  // Case 1: Almanca Form
+  const input1 = "Hallo! Ich habe dein Formular ausgefüllt...\nfull_name: Salih Aydin\nşikayetiniz_nedir?: L4/L5\nnerede_yaşıyorsunuz?: Almanya";
+  const res1 = detectLanguage(input1);
+  if (res1.reply_language !== "Almanca" || res1.language_detection_source !== "form_intro_text") {
+    throw new Error(`TEST 9-1 Failed: Expected Almanca from form_intro_text, got ${res1.reply_language} from ${res1.language_detection_source}`);
+  }
+  console.log("   ✅ 1: German Form message detected as Almanca: PASS");
+
+  // Case 2: Türkçe Form
+  const input2 = "Merhaba, formu doldurdum. Bel fıtığım var.";
+  const res2 = detectLanguage(input2);
+  if (res2.reply_language !== "Türkçe" || res2.language_detection_source !== "latest_patient_message") {
+    throw new Error(`TEST 9-2 Failed: Expected Türkçe, got ${res2.reply_language}`);
+  }
+  console.log("   ✅ 2: Turkish message detected as Türkçe: PASS");
+
+  // Case 3: İngilizce Form
+  const input3 = "I filled out the form. I have knee pain.";
+  const res3 = detectLanguage(input3);
+  if (res3.reply_language !== "İngilizce" || res3.language_detection_source !== "latest_patient_message") {
+    throw new Error(`TEST 9-3 Failed: Expected İngilizce, got ${res3.reply_language}`);
+  }
+  console.log("   ✅ 3: English message detected as İngilizce: PASS");
+
+  // Case 4: Arapça Form
+  const input4 = "مرحبا، لقد ملأت النموذج\nfull_name: Salih Aydin\nşikayetiniz_nedir?: L4/L5";
+  const res4 = detectLanguage(input4);
+  if (res4.reply_language !== "Arapça" || res4.language_detection_source !== "form_intro_text") {
+    throw new Error(`TEST 9-4 Failed: Expected Arapça from form_intro_text, got ${res4.reply_language}`);
+  }
+  console.log("   ✅ 4: Arabic Form message detected as Arapça: PASS");
+
+  // Case 5: Dil Değişimi (German first, then Turkish "Türkçe yazabilir misiniz?")
+  const input5 = "Türkçe yazabilir misiniz?";
+  const history5 = [
+    { role: 'user' as const, content: "Hallo! Ich habe dein Formular ausgefüllt..." },
+    { role: 'assistant' as const, content: "Hallo, wie kann ich Ihnen helfen?" }
+  ];
+  const res5 = detectLanguage(input5, history5);
+  if (res5.reply_language !== "Türkçe") {
+    throw new Error(`TEST 9-5 Failed: Expected language shift to Türkçe, got ${res5.reply_language}`);
+  }
+  console.log("   ✅ 5: Language shift to Türkçe correctly handled: PASS");
+
+  // Case 6: Kısa/Belirsiz Mesaj (History fallback)
+  const input6 = "Ok";
+  const history6 = [
+    { role: 'user' as const, content: "Hallo, ich habe Rückenschmerzen." },
+    { role: 'assistant' as const, content: "Hallo!..." }
+  ];
+  const res6 = detectLanguage(input6, history6);
+  if (res6.reply_language !== "Almanca" || res6.language_detection_source !== "conversation_history") {
+    throw new Error(`TEST 9-6 Failed: Expected Almanca from history, got ${res6.reply_language} from ${res6.language_detection_source}`);
+  }
+  console.log("   ✅ 6: Ambiguous input fallback to history language: PASS");
+
+  // Case 7: Almanya'da yaşayan Türk isimli hasta Almanca yazarsa
+  const input7 = "Hallo! Ich brauche einen Termin bei der Orthopädie.\nfull_name: Mehmet Yilmaz\ncountry: Germany";
+  const res7 = detectLanguage(input7);
+  if (res7.reply_language !== "Almanca") {
+    throw new Error(`TEST 9-7 Failed: Expected Almanca for Turkish name writing German, got ${res7.reply_language}`);
+  }
+  console.log("   ✅ 7: German message from Turkish name detected as Almanca: PASS");
+
+  // Case 8: CRM özeti Türkçe, son hasta mesajı İngilizce ise
+  const input8 = "I need details about kidney transplant services.";
+  const res8 = detectLanguage(input8);
+  if (res8.reply_language !== "İngilizce") {
+    throw new Error(`TEST 9-8 Failed: Expected İngilizce when patient writes English despite Turkish CRM contexts, got ${res8.reply_language}`);
+  }
+  console.log("   ✅ 8: English message with Turkish CRM context detected as İngilizce: PASS");
+
   // Restore original LLM orchestrator generate function and saveMessageIdempotent
   worker["aiOrchestrator"].generateResponse = originalGenerateForTest;
   MessageService.prototype.saveMessageIdempotent = originalSaveMessage;
