@@ -30,12 +30,94 @@ export function parseDeterministicSuggestion(
   let date: string | null = null;
   let timezoneBasis: 'turkey_time' | 'patient_local_time' | 'unknown' = 'unknown';
 
+  // We keep a copy of the normalized string to extract time from,
+  // by removing date-related parts to avoid day-vs-hour confusion.
+  let normalizedForTime = normalized;
+
+  // 1. Pre-extract Date Parts
+  const weekdays = [
+    { name: 'pazartesi', index: 1 },
+    { name: 'salı', index: 2 },
+    { name: 'çarşamba', index: 3 },
+    { name: 'perşembe', index: 4 },
+    { name: 'cuma', index: 5 },
+    { name: 'cumartesi', index: 6 },
+    { name: 'pazar', index: 0 }
+  ];
+
+  const months = [
+    { name: 'ocak', index: 0 },
+    { name: 'şubat', index: 1 },
+    { name: 'mart', index: 2 },
+    { name: 'nisan', index: 3 },
+    { name: 'mayıs', index: 4 },
+    { name: 'haziran', index: 5 },
+    { name: 'temmuz', index: 6 },
+    { name: 'ağustos', index: 7 },
+    { name: 'eylül', index: 8 },
+    { name: 'ekim', index: 9 },
+    { name: 'kasım', index: 10 },
+    { name: 'aralık', index: 11 }
+  ];
+
+  let foundMonth: number | null = null;
+  let foundDay: number | null = null;
+  let matchedWeekdayIndex: number | null = null;
+  let hasBugun = false;
+  let hasYarin = false;
+
+  // A. Check month-based dates first, e.g. "8 haziran", "haziran 8"
+  for (const m of months) {
+    const pattern = new RegExp(`\\b(\\d{1,2})\\s+${m.name}\\b|\\b${m.name}\\s+(\\d{1,2})\\b`, 'i');
+    const match = normalized.match(pattern);
+    if (match) {
+      foundMonth = m.index;
+      foundDay = parseInt(match[1] || match[2], 10);
+      normalizedForTime = normalizedForTime.replace(match[0], ' '.repeat(match[0].length));
+      break;
+    }
+  }
+
+  // B. Check dot/slash dates if month names didn't match, e.g. "08.06", "08/06"
+  if (foundMonth === null) {
+    const dotDateMatch = normalized.match(/\b(\d{1,2})[./](\d{1,2})\b/);
+    if (dotDateMatch) {
+      const dd = parseInt(dotDateMatch[1], 10);
+      const mm = parseInt(dotDateMatch[2], 10) - 1;
+      if (dd >= 1 && dd <= 31 && mm >= 0 && mm < 12) {
+        foundDay = dd;
+        foundMonth = mm;
+        normalizedForTime = normalizedForTime.replace(dotDateMatch[0], ' '.repeat(dotDateMatch[0].length));
+      }
+    }
+  }
+
+  // C. Check relative today/tomorrow keywords
+  if (/\b(bugün|bu gün)\b/i.test(normalized)) {
+    hasBugun = true;
+    normalizedForTime = normalizedForTime.replace(/\b(bugün|bu gün)\b/gi, (match) => ' '.repeat(match.length));
+  }
+  if (/\b(yarın|ertesi gün)\b/i.test(normalized)) {
+    hasYarin = true;
+    normalizedForTime = normalizedForTime.replace(/\b(yarın|ertesi gün)\b/gi, (match) => ' '.repeat(match.length));
+  }
+
+  // D. Check relative weekday keywords
+  for (const wd of weekdays) {
+    const wdPattern = new RegExp(`\\b${wd.name}\\b`, 'i');
+    if (wdPattern.test(normalized)) {
+      matchedWeekdayIndex = wd.index;
+      normalizedForTime = normalizedForTime.replace(wdPattern, (match) => ' '.repeat(match.length));
+      break;
+    }
+  }
+
   // ────────────────────────────────────────────────────────────────────────
-  // 1. Time Extraction
+  // 2. Time Extraction (run on the remaining text)
   // ────────────────────────────────────────────────────────────────────────
   // Formats like: "17:00", "17.00", "14:30", "14.30"
   const timeRegex = /\b(\d{1,2})[:.](\d{2})\b/;
-  const timeMatch = normalized.match(timeRegex);
+  const timeMatch = normalizedForTime.match(timeRegex);
 
   if (timeMatch) {
     const hh = parseInt(timeMatch[1], 10);
@@ -46,7 +128,7 @@ export function parseDeterministicSuggestion(
   } else {
     // Formats like: "saat 17", "17 olur", "akşam 5", "sabah 10", "öğlen 2", "gece 11"
     const hourRegex = /\b(?:saat\s*)?(\d{1,2})(?:\s*olur|\s*uygun|\s*gibi|\s*civari|\s*sularında|\b)/;
-    const hourMatch = normalized.match(hourRegex);
+    const hourMatch = normalizedForTime.match(hourRegex);
     if (hourMatch) {
       let hh = parseInt(hourMatch[1], 10);
       
@@ -75,12 +157,9 @@ export function parseDeterministicSuggestion(
   }
 
   // ────────────────────────────────────────────────────────────────────────
-  // 2. Date Extraction (Europe/Istanbul Reference)
+  // 3. Date Extraction/Resolution (Europe/Istanbul Reference)
   // ────────────────────────────────────────────────────────────────────────
-  // Calculate relative date offsets using Europe/Istanbul offsets to avoid server/browser timezone shift.
-  // Today's local date in Europe/Istanbul:
   const getTurkeyLocalDate = (d: Date): Date => {
-    // Offset for Europe/Istanbul is UTC+3
     const utc = d.getTime() + d.getTimezoneOffset() * 60000;
     const turkeyTime = utc + (3 * 3600000);
     return new Date(turkeyTime);
@@ -92,112 +171,42 @@ export function parseDeterministicSuggestion(
   const currentDate = localTrDate.getUTCDate();
   const currentDay = localTrDate.getUTCDay(); // 0 is Sunday, 1 is Monday
 
-  const hasYarin = /\b(yarın|ertesi gün)\b/i.test(normalized);
-  const hasBugun = /\b(bugün|bu gün)\b/i.test(normalized);
-
-  const weekdays = [
-    { name: 'pazartesi', index: 1 },
-    { name: 'salı', index: 2 },
-    { name: 'çarşamba', index: 3 },
-    { name: 'perşembe', index: 4 },
-    { name: 'cuma', index: 5 },
-    { name: 'cumartesi', index: 6 },
-    { name: 'pazar', index: 0 }
-  ];
-
-  let dayOffset = -1;
-  for (const wd of weekdays) {
-    if (new RegExp(`\\b${wd.name}\\b`, 'i').test(normalized)) {
-      let diff = wd.index - currentDay;
-      if (diff < 0) {
-        diff += 7; // Next week
-      } else if (diff === 0) {
-        // Today is the same day. If a time is specified, check if it already passed.
-        if (time) {
-          const [hh, mm] = time.split(':').map(Number);
-          const trHour = localTrDate.getUTCHours();
-          const trMin = localTrDate.getUTCMinutes();
-          if (hh < trHour || (hh === trHour && mm <= trMin)) {
-            // Already passed today, shift to next week
-            diff = 7;
-          }
-        } else {
-          // If no time is specified, assume next week
-          diff = 7;
-        }
-      }
-      dayOffset = diff;
-      break;
+  if (foundMonth !== null && foundDay !== null && foundDay >= 1 && foundDay <= 31) {
+    const d = new Date(Date.UTC(currentYear, foundMonth, foundDay));
+    // If selected date is in the past, push to next year
+    const trCompare = new Date(Date.UTC(currentYear, currentMonth, currentDate));
+    if (d.getTime() < trCompare.getTime()) {
+      d.setUTCFullYear(currentYear + 1);
     }
-  }
-
-  if (hasBugun) {
+    date = d.toISOString().split('T')[0];
+  } else if (hasBugun) {
     const d = new Date(Date.UTC(currentYear, currentMonth, currentDate));
     date = d.toISOString().split('T')[0];
   } else if (hasYarin) {
     const d = new Date(Date.UTC(currentYear, currentMonth, currentDate + 1));
     date = d.toISOString().split('T')[0];
-  } else if (dayOffset !== -1) {
-    const d = new Date(Date.UTC(currentYear, currentMonth, currentDate + dayOffset));
+  } else if (matchedWeekdayIndex !== null) {
+    let diff = matchedWeekdayIndex - currentDay;
+    if (diff < 0) {
+      diff += 7; // Next week
+    } else if (diff === 0) {
+      if (time) {
+        const [hh, mm] = time.split(':').map(Number);
+        const trHour = localTrDate.getUTCHours();
+        const trMin = localTrDate.getUTCMinutes();
+        if (hh < trHour || (hh === trHour && mm <= trMin)) {
+          diff = 7;
+        }
+      } else {
+        diff = 7;
+      }
+    }
+    const d = new Date(Date.UTC(currentYear, currentMonth, currentDate + diff));
     date = d.toISOString().split('T')[0];
-  } else {
-    // Specific date parsing, e.g. "5 haziran" or "haziran 5" or "05.06"
-    const months = [
-      { name: 'ocak', index: 0 },
-      { name: 'şubat', index: 1 },
-      { name: 'mart', index: 2 },
-      { name: 'nisan', index: 3 },
-      { name: 'mayıs', index: 4 },
-      { name: 'haziran', index: 5 },
-      { name: 'temmuz', index: 6 },
-      { name: 'ağustos', index: 7 },
-      { name: 'eylül', index: 8 },
-      { name: 'ekim', index: 9 },
-      { name: 'kasım', index: 10 },
-      { name: 'aralık', index: 11 }
-    ];
-
-    let foundMonth: number | null = null;
-    let foundDay: number | null = null;
-
-    for (const m of months) {
-      if (new RegExp(`\\b${m.name}\\b`, 'i').test(normalized)) {
-        foundMonth = m.index;
-        const dayMatch = normalized.match(new RegExp(`(\\d{1,2})\\s+${m.name}|${m.name}\\s+(\\d{1,2})`, 'i'));
-        if (dayMatch) {
-          foundDay = parseInt(dayMatch[1] || dayMatch[2], 10);
-        }
-        break;
-      }
-    }
-
-    if (foundMonth !== null && foundDay !== null && foundDay >= 1 && foundDay <= 31) {
-      const d = new Date(Date.UTC(currentYear, foundMonth, foundDay));
-      // If selected date is in the past, push to next year
-      const trCompare = new Date(Date.UTC(currentYear, currentMonth, currentDate));
-      if (d.getTime() < trCompare.getTime()) {
-        d.setUTCFullYear(currentYear + 1);
-      }
-      date = d.toISOString().split('T')[0];
-    } else {
-      const dotDateMatch = normalized.match(/\b(\d{1,2})[./](\d{1,2})\b/);
-      if (dotDateMatch) {
-        const dd = parseInt(dotDateMatch[1], 10);
-        const mm = parseInt(dotDateMatch[2], 10) - 1;
-        if (dd >= 1 && dd <= 31 && mm >= 0 && mm < 12) {
-          const d = new Date(Date.UTC(currentYear, mm, dd));
-          const trCompare = new Date(Date.UTC(currentYear, currentMonth, currentDate));
-          if (d.getTime() < trCompare.getTime()) {
-            d.setUTCFullYear(currentYear + 1);
-          }
-          date = d.toISOString().split('T')[0];
-        }
-      }
-    }
   }
 
   // ────────────────────────────────────────────────────────────────────────
-  // 3. Fallback to previousSuggestedDate or lastAssistantMessage if time is resolved but date is not
+  // 4. Fallback to previousSuggestedDate or lastAssistantMessage if time is resolved but date is not
   // ────────────────────────────────────────────────────────────────────────
   if (time && !date && previousSuggestedDate) {
     const prevDate = typeof previousSuggestedDate === 'string' ? new Date(previousSuggestedDate) : previousSuggestedDate;
@@ -215,7 +224,7 @@ export function parseDeterministicSuggestion(
   }
 
   // ────────────────────────────────────────────────────────────────────────
-  // 4. Timezone Basis Detection
+  // 5. Timezone Basis Detection
   // ────────────────────────────────────────────────────────────────────────
   // Context-aware checking using current patient message and last assistant message
   const mergedContext = `${normalized} ${lastAssistantMessage ? lastAssistantMessage.toLowerCase() : ''}`;
@@ -233,7 +242,7 @@ export function parseDeterministicSuggestion(
   }
 
   // ────────────────────────────────────────────────────────────────────────
-  // 5. Operation Window Validation (09:00 - 21:00 TR Time)
+  // 6. Operation Window Validation (09:00 - 21:00 TR Time)
   // ────────────────────────────────────────────────────────────────────────
   let operationWindowValid = true;
   if (time) {
@@ -245,7 +254,7 @@ export function parseDeterministicSuggestion(
   }
 
   // ────────────────────────────────────────────────────────────────────────
-  // 6. Proposed Date Composition (UTC ISO string)
+  // 7. Proposed Date Composition (UTC ISO string)
   // ────────────────────────────────────────────────────────────────────────
   let proposedDate: string | null = null;
   if (date && time) {
