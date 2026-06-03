@@ -14,6 +14,7 @@ import {
   approveBotSuggestion, rejectBotSuggestion, createAppointmentTask,
   type AppointmentRow, type AppointmentFilters 
 } from "@/app/actions/patient-tracking";
+import { triggerBotInterventionAction } from "@/app/actions/bot-intervention";
 import { parseTurkeyLocalToUtc } from "@/lib/utils/timezone";
 import { formatPhoneReadable } from "@/lib/utils/patient-name-resolver";
 import { saveBotDirective } from "@/app/actions/focus-queue";
@@ -2258,22 +2259,32 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
                             const t2 = setTimeout(() => setSendingStep(3), 1300);
                             const t3 = setTimeout(() => setSendingStep(4), 2100);
 
-                            const res = await saveBotDirective(apt.opportunityId, directiveText);
+                            let interventionType: any = 'send_custom_instruction';
+                            if (activeBotPopup === 'teyit') interventionType = 'confirm_clinic_appointment';
+                            if (activeBotPopup === 'hatirlat') interventionType = 'remind_callback';
+                            
+                            const res = await triggerBotInterventionAction(apt.opportunityId, interventionType, directiveText);
 
                             clearTimeout(t1);
                             clearTimeout(t2);
                             clearTimeout(t3);
 
-                            if (res.success && res.data?.success) {
+                            if (res.success) {
                               if (saveAsDefault) {
                                 localStorage.setItem(`baskent_bot_template_${activeBotPopup}_${apt.status}`, directiveText);
                               }
                               await recordBotDirectiveSent(apt.taskId, activeBotPopup);
-                              setSentMessagePreview(res.data.draftMessage || '');
+                              setSentMessagePreview(res.draftMsg || '');
                               setIsSuccess(true);
                               onActionComplete();
                             } else {
-                              showAlert("Hata", res.error || res.data?.error || "İşlem başarısız oldu.");
+                              if (res.errorCode === 'WHATSAPP_24H_WINDOW_CLOSED') {
+                                showAlert("Hata", "24 saatlik WhatsApp mesajlaşma penceresi kapalı. Şablon mesaj gerekli.");
+                              } else if (res.errorCode === 'MISSING_CHANNEL_ID') {
+                                showAlert("Hata", "WhatsApp kanal bilgisi eksik. Kanal yapılandırması kontrol edilmeli.");
+                              } else {
+                                showAlert("Hata", res.error || "İşlem başarısız oldu.");
+                              }
                             }
                           } catch (err) {
                             showAlert("Hata", "Bir hata oluştu.");

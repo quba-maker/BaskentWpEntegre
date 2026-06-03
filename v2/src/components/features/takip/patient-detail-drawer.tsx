@@ -16,7 +16,8 @@ import {
 import { getPatientTrackingDetail, getPatientTimeline, createAppointmentTask, completeAppointmentTask, deletePatientTask, updatePatientTask, updateAppointmentConfirmation, manuallyUpdateAppointmentStatus, type PatientDetailData, type TimelineEntry } from "@/app/actions/patient-tracking";
 import { parseTurkeyLocalToUtc, resolvePatientTimezone, getTurkeyParts, resolvePatientTimeDisplay } from "@/lib/utils/timezone";
 import { addOpportunityNote, updateOpportunityStage } from "@/app/actions/pipeline";
-import { createBotDelegationTask, schedulePhoneCallTask, completeBotDelegationTask, cancelBotDelegationTask, sendTestBotMessage, saveBotDirective, type BotDelegationMode } from "@/app/actions/focus-queue";
+import { createBotDelegationTask, schedulePhoneCallTask, completeBotDelegationTask, cancelBotDelegationTask, sendTestBotMessage, type BotDelegationMode } from "@/app/actions/focus-queue";
+import { triggerBotInterventionAction } from "@/app/actions/bot-intervention";
 import { logCallReached, logCallMissed, logCallbackScheduled, logNotInterested, sendMetaTemplateMessage } from "@/app/actions/outreach";
 import { sendMessage } from "@/app/actions/inbox";
 import { formatPhoneReadable } from "@/lib/utils/patient-name-resolver";
@@ -872,18 +873,20 @@ export default function PatientDetailDrawer({
     if (!opportunityId || !botDirectiveText.trim()) return;
     setIsSavingDirective(true);
     try {
-      const res = await saveBotDirective(opportunityId, botDirectiveText.trim());
+      const res = await triggerBotInterventionAction(opportunityId, 'send_custom_instruction', botDirectiveText.trim());
       if (res.success) {
-        if (res.data?.sessionClosed) {
-          setActionSuccess('Talimat bota kaydedildi ancak 24s WhatsApp oturumu kapalı olduğu için mesaj gönderilemedi. Lütfen Şablon Mesaj sekmelerini kullanın.');
-        } else {
-          setActionSuccess('Taktik talimatı bota iletildi ve hastaya özel AI mesajı başarıyla gönderildi!');
-          setBotDirectiveText(""); // Clear text area on successful dispatch
-        }
+        setActionSuccess('Taktik talimatı bota iletildi ve hastaya özel AI mesajı başarıyla gönderildi!');
+        setBotDirectiveText("");
         mutate();
         onRefresh?.();
       } else {
-        showAlert("Hata", res.error || 'Talimat iletilemedi.');
+        if (res.errorCode === 'WHATSAPP_24H_WINDOW_CLOSED') {
+          showAlert("Hata", "24 saatlik WhatsApp mesajlaşma penceresi kapalı. Şablon mesaj gerekli.");
+        } else if (res.errorCode === 'MISSING_CHANNEL_ID') {
+          showAlert("Hata", "WhatsApp kanal bilgisi eksik. Kanal yapılandırması kontrol edilmeli.");
+        } else {
+          showAlert("Hata", res.error || 'Talimat iletilemedi.');
+        }
       }
     } catch (err: any) {
       showAlert("Hata", err?.message || 'Hata oluştu.');

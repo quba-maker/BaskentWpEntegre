@@ -588,61 +588,23 @@ export async function sendTestBotMessage(opportunityId: string, customMessage: s
         return { success: false, error: "24 saatlik WhatsApp penceresi kapalı. Test için önce test numarasından inbound mesaj gönderin." };
       }
 
-      // 4. Send Meta Message
-      const { CredentialsService } = await import('@/lib/services/credentials.service');
-      const creds = await CredentialsService.resolveCredentials(ctx.tenantId, 'whatsapp');
-      if (!creds.accessToken || !creds.whatsappPhoneNumberId) {
-        return { success: false, error: "WhatsApp kimlik bilgileri eksik." };
+      // 4. Send Provider-Aware Message
+      const { sendMessage } = await import('@/app/actions/inbox');
+      const sendRes = await sendMessage(phone, customMessage.trim());
+
+      if (!sendRes.success) {
+        return { success: false, error: `Gönderim hatası: ${sendRes.error}` };
       }
 
-      const response = await fetch(`https://graph.facebook.com/v19.0/${creds.whatsappPhoneNumberId}/messages`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${creds.accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          messaging_product: 'whatsapp',
-          to: phone,
-          type: 'text',
-          text: { body: customMessage.trim() },
-        }),
-      });
-
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        return { success: false, error: `WhatsApp gönderim hatası: ${errData?.error?.message || response.statusText}` };
-      }
-
-      let providerMessageId = null;
-      try {
-        const resData = await response.json();
-        providerMessageId = resData.messages?.[0]?.id || null;
-      } catch (_) {}
-
-      // 5. Update DB
-      await ctx.db.executeSafe({
-        text: `INSERT INTO messages (tenant_id, conversation_id, phone_number, direction, content, channel, status, provider_message_id)
-               VALUES ($1, $2, $3, 'out', $4, 'whatsapp', 'sent', $5)`,
-        values: [
-          ctx.tenantId, 
-          conversationId, 
-          phone, 
-          customMessage.trim(), 
-          providerMessageId
-        ]
-      });
-
+      // The sendMessage from inbox.ts already updates the DB (messages and conversations tables).
+      // We don't need to manually insert into messages or update conversations here.
+      // But we should update the bot status if we want to mimic the old behavior.
       await ctx.db.executeSafe({
         text: `UPDATE conversations 
-               SET last_message_at = NOW(), 
-                   last_message_content = $1,
-                   last_channel = 'whatsapp',
-                   last_message_status = 'sent',
-                   last_message_direction = 'out',
-                   message_count = COALESCE(message_count, 0) + 1
-               WHERE id = $2 AND tenant_id = $3`,
-        values: [customMessage.trim(), conversationId, ctx.tenantId]
+               SET status = 'bot',
+                   bot_activated_at = NOW()
+               WHERE id = $1 AND tenant_id = $2`,
+        values: [conversationId, ctx.tenantId]
       });
 
       await ctx.db.executeSafe({
@@ -776,297 +738,19 @@ export async function cancelBotDelegationTask(taskId: string, reason: string = '
 // 10. SAVE BOT DIRECTIVE (Human-in-the-Loop Steering Preset)
 // ═══════════════════════════════════════════════════════════
 export async function saveBotDirective(opportunityId: string, directiveText: string) {
-  if (!opportunityId) return { success: false, error: "Fırsat ID gerekli." };
-  if (!directiveText || directiveText.trim().length === 0) return { success: false, error: "Talimat boş olamaz." };
-
-  return withActionGuard(
-    { actionName: 'saveBotDirective' },
-    async (ctx) => {
-      const cleanDirective = directiveText.trim();
-
-      // 1. Fetch Opportunity details
-      const opps = await ctx.db.executeSafe({
-        text: `SELECT patient_name, phone_number, department, language, country
-               FROM opportunities 
-               WHERE id = $1 AND tenant_id = $2 
-               LIMIT 1`,
-        values: [opportunityId, ctx.tenantId]
-      }) as any[];
-
-      if (opps.length === 0) {
-        return { success: false, error: "Fırsat bulunamadı." };
-      }
-
-      const opp = opps[0];
-      const phone = opp.phone_number;
-
-      if (!phone) {
-        return { success: false, error: "Bu fırsata ait telefon numarası bulunamadı." };
-      }
-
-      // 2. Fetch Conversation details
-      const convs = await ctx.db.executeSafe({
-        text: `SELECT id FROM conversations WHERE active_opportunity_id = $1 AND tenant_id = $2 LIMIT 1`,
-        values: [opportunityId, ctx.tenantId]
-      }) as any[];
-
-      const conversationId = convs.length > 0 ? convs[0].id : null;
-
-      // 3. Dynamically compose follow-up message using Google Gemini 2.5 Flash
-      const patientDisplayName = opp.patient_name || 'Değerli Hastamız';
-      let draftMsg = '';
-
-      const apiKey = process.env.GEMINI_API_KEY;
-      let fetchError = '';
-      if (apiKey) {
-        try {
-          const tenantRows = await ctx.db.executeSafe({
-            text: `SELECT name FROM tenants WHERE id = $1 /* tenant_id */ LIMIT 1`,
-            values: [ctx.tenantId]
-          }) as any[];
-          const tenantName = tenantRows[0]?.name || 'Başkent Sağlık';
-
-          // 1. Fetch active WhatsApp prompt template for the tenant
-          const { defaultPrompts } = await import('@/lib/domain/conversation/prompts');
-          const promptsData = await ctx.db.executeSafe({
-            text: `SELECT prompt_text FROM channel_prompts 
-                   WHERE tenant_id = $1 AND name = 'WhatsApp System Prompt' AND is_active = true LIMIT 1`,
-            values: [ctx.tenantId]
-          }) as any[];
-          const basePrompt = promptsData[0]?.prompt_text || defaultPrompts.whatsapp;
-
-          // 2. Fetch recent conversation history
-          const historyRows = await ctx.db.executeSafe({
-            text: `SELECT direction, content FROM messages 
-                   WHERE phone_number = $1 AND tenant_id = $2 
-                   ORDER BY created_at DESC LIMIT 15`,
-            values: [phone, ctx.tenantId]
-          }) as any[];
-
-          let conversationTranscript = '';
-          if (historyRows && historyRows.length > 0) {
-            conversationTranscript = historyRows
-              .reverse()
-              .map((m: any) => `[${m.direction === 'in' ? 'Hasta' : tenantName}]: "${m.content}"`)
-              .join('\n');
-          } else {
-            conversationTranscript = '(Henüz konuşma geçmişi bulunmuyor)';
-          }
-
-          const systemInstruction = `Sen ${tenantName} AI Asistanısın. Görevin, koordinatörün verdiği taktik talimat doğrultusunda hastaya gönderilmek üzere ${tenantName} adına samimi, güven veren ve ikna edici bir WhatsApp mesajı yazmaktır.`;
-
-          const prompt = `Aşağıdaki genel kurum kurallarını ve konuşma geçmişini baz alarak, koordinatörün belirttiği taktik talimata uygun olarak hastaya gönderilecek bir sonraki WhatsApp mesajını yaz.
-
-=== GENEL KURUM VE ASİSTAN KURALLARI ===
-${basePrompt}
-
-=== HASTA İLE GÖRÜŞME GEÇMİŞİ (WHATSAPP TRANSCRIPT) ===
-${conversationTranscript}
-
-=== KOORDİNATÖRÜN TAKTİK TALİMATI ===
-Lütfen hastamız ${patientDisplayName} için şu talimat doğrultusunda bir yanıt mesajı oluştur:
-👉 "${cleanDirective}"
-
-=== BOTA ÖZEL YAZIM TALİMATI (ÖNEMLİ) ===
-- Yazacağın mesaj, yukarıdaki konuşma geçmişinin tam olarak KALDIĞI YERDEN DEVAM ETMELİDİR.
-- Son mesaj hastadan geldiyse, hastanın yazdığına (yukarıdaki son mesaja) doğrudan ve samimi bir şekilde cevap ver.
-- Jenerik karşılama, kopuk başlangıçlar (Örn: "Merhaba İsa, nasılsınız?" gibi baştan alma) yapma. Eğer hastaya zaten hal hatır sorulduysa veya konuşmanın ortasındaysanız, doğrudan hastanın son ifadesine cevap vererek konuya gir.
-- Sadece ve sadece hastaya gönderilecek mesajı yaz. Başına veya sonuna açıklama, tırnak işareti, "Koordinatör Notu:" gibi ifadeler KESİNLİKLE EKLEME.`;
-          
-          const payload = {
-            systemInstruction: { parts: [{ text: systemInstruction }] },
-            contents: [{ role: 'user', parts: [{ text: prompt }] }],
-            generationConfig: {
-              temperature: 0.7,
-              maxOutputTokens: 8192
-            }
-          };
-
-          const response = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(payload)
-            }
-          );
-
-          if (response.ok) {
-            const resData = await response.json();
-            const text = resData.candidates?.[0]?.content?.parts?.[0]?.text;
-            if (text && text.trim().length > 0) {
-              draftMsg = text.trim();
-            } else {
-              fetchError = `Empty text returned. Candidates: ${JSON.stringify(resData.candidates)}`;
-            }
-          } else {
-            const errData = await response.text();
-            fetchError = `HTTP ${response.status}: ${errData}`;
-          }
-        } catch (err: any) {
-          fetchError = `Catch Error: ${err?.message || String(err)}`;
-        }
-      }
-
-      // Fallback if Gemini is offline or failed
-      if (!draftMsg) {
-        let reason = !apiKey ? '[API Key Missing]' : `[Fetch Failed: ${fetchError}]`;
-        draftMsg = `Merhaba ${patientDisplayName}, tedavi sürecinizle ilgili durumunuzu takip etmek ve yardımcı olmak amacıyla yazıyorum. ${cleanDirective} ${reason}`;
-      }
-
-      // 4. Verify WhatsApp 24-Hour Session Status
-      let isSessionActive = false;
-      if (conversationId) {
-        const inboundCheck = await ctx.db.executeSafe({
-          text: `SELECT created_at FROM messages 
-                 WHERE conversation_id = $1 AND tenant_id = $2 AND direction = 'in' 
-                 ORDER BY created_at DESC LIMIT 1`,
-          values: [conversationId, ctx.tenantId]
-        }) as any[];
-
-        if (inboundCheck.length > 0) {
-          const lastInboundAt = new Date(inboundCheck[0].created_at);
-          const hoursSinceInbound = (Date.now() - lastInboundAt.getTime()) / (1000 * 60 * 60);
-          if (hoursSinceInbound <= 24) {
-            isSessionActive = true;
-          }
-        }
-      }
-
-      // Fetch pending tasks
-      const pendingTasks = await ctx.db.executeSafe({
-        text: `SELECT id, metadata FROM follow_up_tasks 
-               WHERE opportunity_id = $1 AND tenant_id = $2 
-                 AND task_type = 'bot_handoff_followup' 
-                 AND status IN ('pending', 'in_progress')`,
-        values: [opportunityId, ctx.tenantId]
-      }) as any[];
-
-      // 5. Handle WhatsApp send if session is active
-      if (isSessionActive) {
-        const { CredentialsService } = await import('@/lib/services/credentials.service');
-        const creds = await CredentialsService.resolveCredentials(ctx.tenantId, 'whatsapp');
-        const META_ACCESS_TOKEN = creds.accessToken;
-        const PHONE_NUMBER_ID = creds.whatsappPhoneNumberId;
-
-        if (!META_ACCESS_TOKEN || !PHONE_NUMBER_ID) {
-          return { success: false, error: "WhatsApp kimlik bilgileri eksik. Entegrasyon ayarlarını kontrol edin." };
-        }
-
-        const response = await fetch(`https://graph.facebook.com/v25.0/${PHONE_NUMBER_ID}/messages`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${META_ACCESS_TOKEN}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            messaging_product: 'whatsapp',
-            to: phone,
-            type: 'text',
-            text: { body: draftMsg },
-          }),
-        });
-
-        if (!response.ok) {
-          const errData = await response.json().catch(() => ({}));
-          return { success: false, error: `WhatsApp gönderim hatası: ${errData?.error?.message || response.statusText}` };
-        }
-
-        let providerMessageId = null;
-        try {
-          const resData = await response.json();
-          providerMessageId = resData.messages?.[0]?.id || null;
-        } catch (_) {}
-
-        // Save sent message in messages table
-        if (conversationId) {
-          await ctx.db.executeSafe({
-            text: `INSERT INTO messages (tenant_id, conversation_id, phone_number, direction, content, channel, status, provider_message_id)
-                   VALUES ($1, $2, $3, 'out', $4, 'whatsapp', 'sent', $5)`,
-            values: [
-              ctx.tenantId, 
-              conversationId, 
-              phone, 
-              draftMsg, 
-              providerMessageId
-            ]
-          });
-
-          // Update conversation and activate bot autopilot
-          await ctx.db.executeSafe({
-            text: `UPDATE conversations 
-                   SET last_message_at = NOW(), 
-                       last_message_content = $1,
-                       last_channel = 'whatsapp',
-                       last_message_status = 'sent',
-                       last_message_direction = 'out',
-                       message_count = COALESCE(message_count, 0) + 1,
-                       status = 'bot',
-                       bot_activated_at = NOW()
-                   WHERE id = $2 AND tenant_id = $3`,
-            values: [draftMsg, conversationId, ctx.tenantId]
-          });
-        }
-
-        // Mark pending delegation tasks as completed since follow-up was successfully dispatched
-        for (const t of pendingTasks) {
-          const metadata = typeof t.metadata === 'string' ? JSON.parse(t.metadata) : (t.metadata || {});
-          const updatedBotDel = {
-            ...(metadata.bot_delegation || {}),
-            status: 'completed',
-            completed_at: new Date().toISOString(),
-            generated_draft: draftMsg,
-            active_bot_directive: cleanDirective
-          };
-          const newMeta = {
-            ...metadata,
-            bot_delegation: updatedBotDel,
-            active_bot_directive: cleanDirective
-          };
-
-          await ctx.db.executeSafe({
-            text: `UPDATE follow_up_tasks 
-                   SET status = 'completed', 
-                       metadata = $1::jsonb, 
-                       updated_at = NOW() 
-                   WHERE id = $2 AND tenant_id = $3`,
-            values: [JSON.stringify(newMeta), t.id, ctx.tenantId]
-          });
-        }
-
-        // Log successful send to outreach logs
-        await ctx.db.executeSafe({
-          text: `INSERT INTO outreach_logs (tenant_id, opportunity_id, conversation_id, action, channel, actor_id, metadata)
-                 VALUES ($1, $2, $3, 'bot_directive_sent', 'whatsapp', $4, $5::jsonb)`,
-          values: [
-            ctx.tenantId,
-            opportunityId,
-            conversationId ? conversationId.toString() : null,
-            ctx.userId,
-            JSON.stringify({
-              directive: cleanDirective,
-              sent_message: draftMsg,
-              sent_at: new Date().toISOString()
-            })
-          ]
-        });
-
-        return { success: true, messageSent: true, draftMessage: draftMsg };
-      } else {
-        // If session is closed, save the directive to the task metadata for future replies
-        for (const t of pendingTasks) {
-          await ctx.db.executeSafe({
-            text: `UPDATE follow_up_tasks 
-                   SET metadata = COALESCE(metadata, '{}'::jsonb) 
-                         || JSONB_BUILD_OBJECT('active_bot_directive', $1::text, 'active_bot_directive_assigned_at', NOW()::text)
-                   WHERE id = $2 AND tenant_id = $3`,
-            values: [cleanDirective, t.id, ctx.tenantId]
-          });
-        }
-
-        return { success: true, messageSent: false, sessionClosed: true, draftMessage: draftMsg };
-      }
-    }
-  );
+  console.warn('[DEPRECATED] saveBotDirective is deprecated. Using triggerBotInterventionAction instead.');
+  const { triggerBotInterventionAction } = await import('@/app/actions/bot-intervention');
+  const res = await triggerBotInterventionAction(opportunityId, 'send_custom_instruction', directiveText);
+  if (!res.success) {
+    return { success: false, error: res.error, data: { success: false, error: res.error } };
+  }
+  return { 
+    success: true, 
+    data: { 
+      success: true, 
+      messageSent: true, 
+      draftMessage: res.draftMsg 
+    } 
+  };
 }
 
