@@ -58,11 +58,11 @@ export class MessageService {
             UPDATE conversations 
             SET 
               last_message_at = CASE 
-                WHEN $19 IS NOT NULL THEN 
-                  CASE WHEN TO_TIMESTAMP($19) > last_message_at THEN TO_TIMESTAMP($19) ELSE last_message_at END
+                WHEN $19::double precision IS NOT NULL THEN 
+                  CASE WHEN TO_TIMESTAMP($19::double precision) > last_message_at THEN TO_TIMESTAMP($19::double precision) ELSE last_message_at END
                 ELSE NOW() 
               END,
-              history_imported_at = CASE WHEN $20::boolean = true THEN NOW() ELSE history_imported_at END,
+              history_imported_at = CASE WHEN COALESCE($20::boolean, false) = true THEN NOW() ELSE history_imported_at END,
               message_count = message_count + 1, 
               channel = $5,
               channel_id = COALESCE($6, channel_id),
@@ -77,7 +77,7 @@ export class MessageService {
               tenant_id, phone_number, message_count, channel, channel_id, last_channel,
               last_message_content, last_message_direction, last_message_status, last_message_at, history_imported_at
             )
-            SELECT $1, $2, 1, $5, $6, CASE WHEN $3 = 'in' THEN $5 ELSE NULL END, $4, $3, $14, COALESCE(TO_TIMESTAMP($19), NOW()), CASE WHEN $20::boolean = true THEN NOW() ELSE NULL END
+            SELECT $1, $2, 1, $5, $6, CASE WHEN $3 = 'in' THEN $5 ELSE NULL END, $4, $3, $14, COALESCE(TO_TIMESTAMP($19::double precision), NOW()), CASE WHEN COALESCE($20::boolean, false) = true THEN NOW() ELSE NULL END
             WHERE NOT EXISTS (SELECT 1 FROM dup_check) AND NOT EXISTS (SELECT 1 FROM conv_update)
             RETURNING id
           ), resolved_conv AS (
@@ -94,7 +94,7 @@ export class MessageService {
               media_type, media_url, media_metadata, provider_timestamp
             )
             SELECT $1, rc.conv_id, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-                   $16, $17, $18::jsonb, TO_TIMESTAMP($19)
+                   $16, $17, $18::jsonb, CASE WHEN $19::double precision IS NOT NULL THEN TO_TIMESTAMP($19::double precision) ELSE NULL END
             FROM resolved_conv rc
             WHERE rc.conv_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM dup_check)
             RETURNING id
@@ -123,8 +123,8 @@ export class MessageService {
           payload.mediaType || null,         // $16
           payload.mediaUrl || null,          // $17
           payload.mediaMetadata ? JSON.stringify(payload.mediaMetadata) : null,  // $18
-          payload.providerTimestamp || null, // $19
-          payload.isHistoryImport || false   // $20
+          payload.providerTimestamp != null ? Number(payload.providerTimestamp) : null, // $19 — explicit number or null
+          payload.isHistoryImport === true   // $20 — explicit boolean
         ]
       }) as any[];
 
