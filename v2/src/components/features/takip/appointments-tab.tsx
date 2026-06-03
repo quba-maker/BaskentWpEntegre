@@ -17,7 +17,7 @@ import {
 import { triggerBotInterventionAction } from "@/app/actions/bot-intervention";
 import { parseTurkeyLocalToUtc } from "@/lib/utils/timezone";
 import { formatPhoneReadable } from "@/lib/utils/patient-name-resolver";
-import { saveBotDirective } from "@/app/actions/focus-queue";
+
 
 const MONTHS_TR = [
   { value: '01', label: 'Ocak' },

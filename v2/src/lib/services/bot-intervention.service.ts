@@ -98,6 +98,14 @@ export class BotInterventionService {
       throw new BotInterventionError('MISSING_CHANNEL_ID', 'WhatsApp kanal bilgisi eksik. Kanal yapılandırması kontrol edilmeli.');
     }
 
+    const ctxLog = log.withContext({
+      tenantId: this.db.tenantId,
+      conversationId,
+      opportunityId,
+      channelId,
+      interventionType
+    });
+
     // 3. Verify 24-Hour WhatsApp Session Window
     if (channel === 'whatsapp') {
       const inboundCheck = await this.db.executeSafe({
@@ -122,9 +130,9 @@ export class BotInterventionService {
     }
 
     // 4. Generate AI Draft Message
-    const draftMsg = await this.generateBotMessage(opp.patient_name, phone, interventionType, customInstruction);
+    const { draftMsg, isFallback } = await this.generateBotMessage(opp.patient_name, phone, interventionType, customInstruction, ctxLog);
     if (!draftMsg) {
-      throw new BotInterventionError('DRAFT_GENERATION_FAILED', 'AI taslak mesajı oluşturulamadı.');
+      throw new BotInterventionError('DRAFT_GENERATION_FAILED', 'Bot mesaj taslağı oluşturulamadı. Lütfen manuel mesaj gönderin.');
     }
 
     // 5. Resolve Credentials and Provider
@@ -191,7 +199,7 @@ export class BotInterventionService {
     }
 
     // 7. Save DB Metadata
-    const dbMetadata = {
+    const dbMetadata: any = {
       source: "bot_intervention",
       initiated_from: "patient_tracking",
       intervention_type: interventionType,
@@ -203,6 +211,12 @@ export class BotInterventionService {
       channel_id: channelId,
       provider: usedProviderName
     };
+
+    if (isFallback) {
+      dbMetadata.draft_source = "fallback_template";
+      dbMetadata.draft_generation_failed = true;
+      dbMetadata.draft_error_code = "TENANT_ISOLATION_FAULT"; // Re-used generic code indicating generation failed
+    }
 
     const msgInsert = await this.db.executeSafe({
       text: `INSERT INTO messages (tenant_id, conversation_id, phone_number, direction, content, channel, status, provider_message_id, media_metadata)
@@ -263,7 +277,7 @@ export class BotInterventionService {
           created_at: new Date().toISOString()
         });
       } catch (err) {
-        log.warn('Failed to publish realtime event for bot intervention', { err: err instanceof Error ? err.message : String(err) });
+        ctxLog.warn('Failed to publish realtime event for bot intervention', { err: err instanceof Error ? err.message : String(err) });
       }
     }
 
@@ -271,53 +285,48 @@ export class BotInterventionService {
   }
 
   /**
-   * Generates the message using Gemini.
+   * Generates the message using Gemini, or falls back to a safe template if possible.
    */
   private async generateBotMessage(
     patientName: string, 
     phone: string, 
     interventionType: BotInterventionType, 
-    customInstruction?: string
-  ): Promise<string | null> {
-    const patientDisplayName = patientName || 'Değerli Hastamız';
+    customInstruction: string | undefined,
+    ctxLog: any
+  ): Promise<{ draftMsg: string | null; isFallback: boolean }> {
+    const patientDisplayName = patientName || 'Müşterimiz';
     const directiveInstruction = this.getInstructionForType(interventionType, customInstruction);
     
     const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) return `Merhaba ${patientDisplayName}, durumunuzla ilgili yardımcı olmak için size ulaşıyoruz. (API Key eksik)`;
+    
+    if (apiKey) {
+      try {
+        const { defaultPrompts } = await import('@/lib/domain/conversation/prompts');
+        const promptsData = await this.db.executeSafe({
+          text: `SELECT prompt_text FROM channel_prompts 
+                 WHERE tenant_id = $1 AND name = 'WhatsApp System Prompt' AND is_active = true LIMIT 1`,
+          values: [this.db.tenantId]
+        }) as any[];
+        const basePrompt = promptsData[0]?.prompt_text || defaultPrompts.whatsapp;
 
-    try {
-      const tenantRows = await this.db.executeSafe({
-        text: `SELECT name FROM tenants WHERE id = $1 LIMIT 1`,
-        values: [this.db.tenantId]
-      }) as any[];
-      const tenantName = tenantRows[0]?.name || 'Başkent Sağlık';
+        const historyRows = await this.db.executeSafe({
+          text: `SELECT direction, content FROM messages 
+                 WHERE phone_number = $1 AND tenant_id = $2 
+                 ORDER BY created_at DESC LIMIT 15`,
+          values: [phone, this.db.tenantId]
+        }) as any[];
 
-      const { defaultPrompts } = await import('@/lib/domain/conversation/prompts');
-      const promptsData = await this.db.executeSafe({
-        text: `SELECT prompt_text FROM channel_prompts 
-               WHERE tenant_id = $1 AND name = 'WhatsApp System Prompt' AND is_active = true LIMIT 1`,
-        values: [this.db.tenantId]
-      }) as any[];
-      const basePrompt = promptsData[0]?.prompt_text || defaultPrompts.whatsapp;
+        let conversationTranscript = '(Henüz konuşma geçmişi bulunmuyor)';
+        if (historyRows && historyRows.length > 0) {
+          conversationTranscript = historyRows
+            .reverse()
+            .map((m: any) => `[${m.direction === 'in' ? 'Hasta' : 'Kurum Asistanı'}]: "${m.content}"`)
+            .join('\n');
+        }
 
-      const historyRows = await this.db.executeSafe({
-        text: `SELECT direction, content FROM messages 
-               WHERE phone_number = $1 AND tenant_id = $2 
-               ORDER BY created_at DESC LIMIT 15`,
-        values: [phone, this.db.tenantId]
-      }) as any[];
+        const systemInstruction = `Sen Kurum Asistanısın. Görevin, koordinatörün verdiği taktik talimat doğrultusunda hastaya gönderilmek üzere kurum adına samimi, güven veren ve ikna edici bir WhatsApp mesajı yazmaktır.`;
 
-      let conversationTranscript = '(Henüz konuşma geçmişi bulunmuyor)';
-      if (historyRows && historyRows.length > 0) {
-        conversationTranscript = historyRows
-          .reverse()
-          .map((m: any) => `[${m.direction === 'in' ? 'Hasta' : tenantName}]: "${m.content}"`)
-          .join('\n');
-      }
-
-      const systemInstruction = `Sen ${tenantName} AI Asistanısın. Görevin, koordinatörün verdiği taktik talimat doğrultusunda hastaya gönderilmek üzere ${tenantName} adına samimi, güven veren ve ikna edici bir WhatsApp mesajı yazmaktır.`;
-
-      const prompt = `Aşağıdaki genel kurum kurallarını ve konuşma geçmişini baz alarak, koordinatörün belirttiği taktik talimata uygun olarak hastaya gönderilecek bir sonraki WhatsApp mesajını yaz.
+        const prompt = `Aşağıdaki genel kurum kurallarını ve konuşma geçmişini baz alarak, koordinatörün belirttiği taktik talimata uygun olarak hastaya gönderilecek bir sonraki WhatsApp mesajını yaz.
 
 === GENEL KURUM VE ASİSTAN KURALLARI ===
 ${basePrompt}
@@ -335,33 +344,60 @@ Lütfen hastamız ${patientDisplayName} için şu talimat doğrultusunda bir yan
 - Jenerik karşılama, kopuk başlangıçlar (Örn: "Merhaba İsa, nasılsınız?" gibi baştan alma) yapma. Eğer hastaya zaten hal hatır sorulduysa veya konuşmanın ortasındaysanız, doğrudan hastanın son ifadesine cevap vererek konuya gir.
 - Sadece ve sadece hastaya gönderilecek mesajı yaz. Başına veya sonuna açıklama, tırnak işareti, "Koordinatör Notu:" gibi ifadeler KESİNLİKLE EKLEME.`;
 
-      const payload = {
-        systemInstruction: { parts: [{ text: systemInstruction }] },
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.7, maxOutputTokens: 8192 }
-      };
+        const payload = {
+          systemInstruction: { parts: [{ text: systemInstruction }] },
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.7, maxOutputTokens: 8192 }
+        };
 
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          }
+        );
+
+        if (response.ok) {
+          const resData = await response.json();
+          const text = resData.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (text && text.trim().length > 0) return { draftMsg: text.trim(), isFallback: false };
         }
-      );
-
-      if (response.ok) {
-        const resData = await response.json();
-        const text = resData.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (text && text.trim().length > 0) return text.trim();
+        
+        ctxLog.warn('Gemini failed to return text', { responseText: await response.text() });
+      } catch (err) {
+        ctxLog.error('Gemini Draft Error', err instanceof Error ? err : new Error(String(err)));
       }
-      
-      log.warn('Gemini failed to return text', { responseText: await response.text() });
-    } catch (err) {
-      log.error('Gemini Draft Error', err instanceof Error ? err : new Error(String(err)));
+    } else {
+      ctxLog.warn('Gemini API Key missing');
     }
 
-    // Fallback
-    return `Merhaba ${patientDisplayName}, sizinle bir konu hakkında iletişime geçmek istedik. (Otomatik taslak oluşturulamadı)`;
+    // Fallback behavior
+    const patientFirstName = patientDisplayName.split(' ')[0] || 'Müşterimiz';
+    let fallbackMsg: string | null = null;
+
+    switch (interventionType) {
+      case 'confirm_callback_time':
+        fallbackMsg = `Merhaba ${patientFirstName} Bey/Hanım, telefon görüşmesi için belirttiğiniz zamanı teyit etmek isteriz. Uygun olduğunu onaylayabilir misiniz?`;
+        break;
+      case 'ask_new_callback_time':
+        fallbackMsg = `Merhaba ${patientFirstName} Bey/Hanım, telefon görüşmesi için size uygun gün ve saat aralığını bizimle paylaşabilir misiniz?`;
+        break;
+      case 'remind_callback':
+        fallbackMsg = `Merhaba ${patientFirstName} Bey/Hanım, telefon görüşmesi planlamanızla ilgili sizi bilgilendirmek istedik. Görüşme saatinde telefonunuzun ulaşılabilir olması yeterlidir.`;
+        break;
+      case 'request_documents':
+        fallbackMsg = `Merhaba ${patientFirstName} Bey/Hanım, değerlendirme süreciniz için varsa güncel rapor, tetkik veya görüntülerinizi bizimle paylaşabilirsiniz.`;
+        break;
+      case 'confirm_clinic_appointment':
+        fallbackMsg = `Merhaba ${patientFirstName} Bey/Hanım, planlanan yüz yüze klinik randevunuzu teyit etmek isteriz. Katılım durumunuzu bildirebilir misiniz?`;
+        break;
+      case 'ask_new_clinic_appointment_time':
+        fallbackMsg = `Merhaba ${patientFirstName} Bey/Hanım, yüz yüze klinik randevunuz için size uygun yeni bir tarih ve saat aralığı paylaşabilir misiniz?`;
+        break;
+    }
+
+    return { draftMsg: fallbackMsg, isFallback: true };
   }
 }

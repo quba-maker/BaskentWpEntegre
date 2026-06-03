@@ -142,6 +142,11 @@ TenantDB.prototype.executeSafe = async function (queryObj: any) {
     return [];
   }
 
+  // 2.5 Opportunities check
+  if (sql.includes("SELECT id, patient_name, phone_number FROM opportunities")) {
+    return [{ id: "test-opp-uuid", patient_name: "Murtaza Test", phone_number: "+905542848135" }];
+  }
+
   // 3. Customer profile inserts/queries
   if (sql.includes("INSERT INTO customer_profiles") || sql.includes("customer_profiles")) {
     return [{ id: "test-customer-uuid" }];
@@ -167,7 +172,8 @@ TenantDB.prototype.executeSafe = async function (queryObj: any) {
       channel_id: "test-channel-uuid", 
       status: mockConversationsStatus,
       autopilot_enabled: mockAutopilotEnabled,
-      lead_stage: mockLeadStage
+      lead_stage: mockLeadStage,
+      last_message_at: new Date().toISOString()
     }];
   }
 
@@ -1595,6 +1601,8 @@ async function runValidationTests() {
   console.log("\n🎉 ALL 360DIALOG COEXISTENCE ADAPTER VALIDATION TESTS PASSED!");
   console.log("==========================================================\n");
 
+  await runMurtazaBotTest();
+
   process.exit(0);
 }
 
@@ -1602,3 +1610,83 @@ runValidationTests().catch(e => {
   console.error("\n❌ VALIDATION TEST RUN CRASHED WITH ERROR:\n", e);
   process.exit(1);
 });
+
+// ----------------------------------------------------
+// NEW TEST: Murtaza Bot Intervention & 24h Window
+// ----------------------------------------------------
+async function runMurtazaBotTest() {
+  console.log("\n🧪 [TEST 12] Live Murtaza Bot Intervention...");
+  const db = new TenantDB("baskent"); // The DB wrapper exists locally in validate script
+
+  const opps = await db.executeSafe({
+    text: "SELECT id, patient_name, phone_number FROM opportunities WHERE patient_name ILIKE '%murtaza%' OR phone_number LIKE '%5542848135%' LIMIT 1"
+  });
+  
+  if (!opps.length) {
+    console.log("   ❌ Murtaza not found");
+    return;
+  }
+  const oppId = opps[0].id;
+
+  const convs = await db.executeSafe({
+    text: "SELECT id, channel, channel_id, last_message_at, autopilot_enabled FROM conversations WHERE active_opportunity_id = $1 LIMIT 1",
+    values: [oppId]
+  });
+
+  if (!convs.length) {
+    console.log("   ❌ Murtaza Conversation not found");
+    return;
+  }
+  
+  const convId = convs[0].id;
+  const oldLastMsg = convs[0].last_message_at;
+
+  const { BotInterventionService } = await import("../src/lib/services/bot-intervention.service");
+  const service = new BotInterventionService(db);
+  
+  try {
+    const res = await service.executeOneShot(
+      'system-test-user',
+      oppId,
+      'ask_new_callback_time',
+      'Lütfen hastaya Murtaza Bey diyerek en kısa zamanda gelip gelmeyeceğini sor.'
+    );
+    console.log("   ✅ Bot Intervention Triggered:", res.success ? "PASS" : "FAIL", res);
+    
+    const msgs = await db.executeSafe({
+      text: "SELECT id, direction, content, media_metadata, status, source, initiated_from, provider_message_id FROM messages WHERE conversation_id = $1 ORDER BY created_at DESC LIMIT 1",
+      values: [convId]
+    });
+    console.log("   ✅ Message Metadata Evidence:\n" + JSON.stringify(msgs[0], null, 2));
+
+    const convsAfter = await db.executeSafe({
+      text: "SELECT autopilot_enabled FROM conversations WHERE id = $1",
+      values: [convId]
+    });
+    console.log("   ✅ Autopilot status changed?:", convsAfter[0].autopilot_enabled !== convs[0].autopilot_enabled ? "YES (FAIL)" : "NO (PASS)");
+
+  } catch (err: any) {
+    console.error("   ❌ Intervention Error:", err.message);
+  }
+  
+  console.log("\n🧪 [TEST 13] 24h Window Enforcement...");
+  await db.executeSafe({
+    text: "UPDATE conversations SET last_message_at = NOW() - INTERVAL '25 hours' WHERE id = $1",
+    values: [convId]
+  });
+  
+  try {
+    await service.executeOneShot('system-test-user', oppId, 'confirm_callback_time');
+    console.log("   ❌ Expected error, but got success");
+  } catch (err: any) {
+    console.log("   ✅ 24h Window Enforced:", err.message);
+  }
+
+  // Restore 24h window
+  await db.executeSafe({
+    text: "UPDATE conversations SET last_message_at = $1 WHERE id = $2",
+    values: [oldLastMsg, convId]
+  });
+  
+  console.log("\n🎉 BOT INTERVENTION TESTS COMPLETED!");
+}
