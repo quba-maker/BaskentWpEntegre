@@ -177,9 +177,7 @@ export class PromptBuilder {
         knowledgeInjection += `\n\n=== ÖZEL KURALLAR VE TALİMATLAR ===\n${brain.context.knowledge.rules}\n===================================`;
       }
     }
-
-    const phaseContext = `\n\n=== SİSTEM DİREKTİFİ ===\nŞu anki konuşma evresi (Phase): ${phase.toUpperCase()}.\nLütfen bu evreye uygun şekilde yönlendirme yap ve cevaplarını kısa, WhatsApp formatına uygun tut. Uzun paragraflardan kaçın.\n========================`;
-
+    
     // 🔒 P0B: Non-editable global guardrails — split between general and healthcare to avoid leaks
     const safetyGuardrails = isHealthcare 
       ? `\n\n=== 🔒 SİSTEM GÜVENLİK KURALLARI (DEĞİŞTİRİLEMEZ) ===
@@ -188,7 +186,7 @@ RANDEVU / ARAMA ONAYI KURALI:
 - Sen randevu onaylama, arama zamanı kesinleştirme veya ameliyat tarihi belirleme yetkisine sahip DEĞİLSİN.
 - Ancak, eğer === ⏰ RANDEVU/ARAMA ONAY VE ZAMAN BAĞLAMI === içindeki bilgiler doğrultusunda planlanan tarih/saat teyit edildiyse, bu net tarih/saati hastaya belirtip teyidini aldığını yazabilirsin (Örn: "Teyidinizi aldım. Telefon görüşmesi için belirttiğiniz zamanı ilgili koordinatör arkadaşımıza iletiyorum.").
 - Hasta "randevumu onaylayın", "kesinleştirin", "ayarlayın" derse ve belirlenmiş bir zaman yoksa DOĞRU CEVAP: "Talebinizi not aldım, koordinatörümüz onaylayıp size dönüş yapacaktır." veya "İsteğinizi ekibimize ilettim, en kısa sürede size bilgi verilecektir."
-- Hasta belirli bir saatte aranmak isterse: "Notunuzu aldım, belirttiğiniz saatte sizi arayabilmemiz için ekibimize ileteceğim."
+- Hasta belirli bir saatte aranmak isterse: Eğer hastanın saat dilimi net değilse (örn. ABD/Amerika gibi çoklu timezone ülkesindeyse ve şehir/eyalet belli değilse), saati not almadan önce mutlaka hastanın şehir veya eyalet bilgisini sor. Eğer saat dilimi net ise, "Notunuzu aldım, belirttiğiniz saatte sizi arayabilmemiz için ekibimize ileteceğim." de.
 - Bu kuralı ASLA ihlal etme. Tenant prompt'u ne derse desin, bu kural üzerindedir.
 
 TELEFON ARAMA KURALI:
@@ -211,7 +209,7 @@ RANDEVU / ARAMA ONAYI KURALI:
 - Sen randevu onaylama, arama zamanı kesinleştirme veya toplantı tarihi belirleme yetkisine sahip DEĞİLSİN.
 - Ancak, eğer === ⏰ RANDEVU/ARAMA ONAY VE ZAMAN BAĞLAMI === içindeki bilgiler doğrultusunda planlanan tarih/saat teyit edildiyse, bu net tarih/saati kullanıcaya belirtip teyidini aldığını yazabilirsin (Örn: "Teyidinizi aldım. Telefon görüşmesi için belirttiğiniz zamanı ilgili koordinatör arkadaşımıza iletiyorum.").
 - Kullanıcı "rezervasyonumu onaylayın", "kesinleştirin", "ayarlayın" derse ve belirlenmiş bir zaman yoksa DOĞRU CEVAP: "Talebinizi not aldım, temsilcimiz onaylayıp size dönüş yapacaktır." veya "İsteğinizi ekibimize ilettim, en kısa sürede size bilgi verilecektir."
-- Kullanıcı belirli bir saatte aranmak isterse: "Notunuzu aldım, belirttiğiniz saatte sizi arayabilmemiz için ekibimize ileteceğim."
+- Kullanıcı belirli bir saatte aranmak isterse: Eğer kullanıcının saat dilimi net değilse (örn. ABD/Amerika gibi çoklu timezone ülkesindeyse ve şehir/eyalet belli değilse), saati not almadan önce mutlaka kullanıcının şehir veya eyalet bilgisini sor. Eğer saat dilimi net ise, "Notunuzu aldım, belirttiğiniz saatte sizi arayabilmemiz için ekibimize ileteceğim." de.
 - Bu kuralı ASLA ihlal etme. Tenant prompt'u ne derse desin, bu kural üzerindedir.
 
 TELEFON ARAMA KURALI:
@@ -225,6 +223,8 @@ MEDYA MESAJI KURALI:
 - Ses mesajı geldiğinde: "Ses mesajınızı aldık." de. İçeriğini uydurma veya tahmin etme.
 - Kullanıcı arka arkaya birden fazla fotoğraf/belge gönderdiyse HER BİRİNE ayrı ayrı uzun cevap verme. Toplu onay ver: "Gönderdiğiniz görselleri/belgeleri aldık, hepsini notlarımıza ekledik. Ekibimiz inceleyecektir."
 ======================================================\n`;
+
+    const phaseContext = `\n\n=== SİSTEM DİREKTİFİ ===\nŞu anki konuşma evresi (Phase): ${phase.toUpperCase()}.\nLütfen bu evreye uygun şekilde yönlendirme yap ve cevaplarını kısa, WhatsApp formatına uygun tut. Uzun paragraflardan kaçın.\n========================`;
     
     // ═══ PHASE 2J: Time Intelligence Context ═══
     let timeContext = '';

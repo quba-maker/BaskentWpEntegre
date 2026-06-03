@@ -21,7 +21,7 @@ export class MemoryEngine {
           SELECT c.phone_number, c.active_opportunity_id, c.notes as current_notes,
                  o.summary as current_opp_summary,
                  o.requester_name, o.patient_name, o.country, o.department,
-                 o.patient_relation
+                 o.patient_relation, o.metadata as opp_metadata
           FROM conversations c
           LEFT JOIN opportunities o ON o.id = c.active_opportunity_id AND o.tenant_id = c.tenant_id
           WHERE c.id::text = $1::text AND c.tenant_id = $2
@@ -45,6 +45,67 @@ export class MemoryEngine {
         department: conv[0].department || '',
         relation: conv[0].patient_relation || ''
       };
+      const oppMetadata = conv[0].opp_metadata || {};
+
+      // Determine canonical timezone details to enforce safety restrictions in AI summarization
+      let timezoneDisplayContext = '';
+      try {
+        const { resolvePatientTimeDisplay } = await import('@/lib/utils/timezone');
+        const timeDisplayRes = resolvePatientTimeDisplay({
+          country: conv[0].country,
+          metadata: oppMetadata
+        });
+        
+        if (timeDisplayRes.needsTimezoneClarification) {
+          timezoneDisplayContext = `\n⚠️ KRİTİK ZAMAN VE SAAT DİLİMİ SINIRLAMASI:
+Hastanın bulunduğu ülke için saat dilimi doğrulanmamıştır (şehir/eyalet bilgisi eksik veya belirsiz).
+- Kesinlikle "New York saati", "Almanya saati" veya herhangi bir yerel saat (örn: 10:00, 15:00 local saat vb.) yazma!
+- Sadece Türkiye saati (TR) yazabilirsin ve hasta yerel saati için "şehir/eyalet netleşmediği için yerel saat hesaplanamamıştır" şeklinde belirtmelisin.
+- Kesin olmayan, doğrulanmamış yerel saatlerin özete sızmasını 100% engelle.`;
+        } else if (timeDisplayRes.patientTimezone && timeDisplayRes.patientLocalTime) {
+          timezoneDisplayContext = `\nZAMAN BİLGİSİ: Hastanın yerel saat dilimi ${timeDisplayRes.countryLabel} (${timeDisplayRes.patientTimezone}) olarak teyit edilmiştir. Zaman belirtirken hem Türkiye saati (TR) hem de hastanın kendi yerel saatini (${timeDisplayRes.patientLocalTime}) gösterebilirsin.`;
+        } else {
+          timezoneDisplayContext = `\n⚠️ KRİTİK ZAMAN SINIRLAMASI: Hastanın yerel saat dilimi belirsizdir. Özet içerisinde hasta yerel saati yazma, sadece Türkiye saati (TR) yaz ve yerel saat için "net değil" olarak belirt.`;
+        }
+      } catch (err) {
+        // Non-fatal
+      }
+
+      // Query active task to get canonical times
+      let activeTaskCanonicalTime = '';
+      if (activeOppId) {
+        try {
+          const activeTasks = await db.executeSafe({
+            text: `SELECT due_at, metadata FROM follow_up_tasks
+                   WHERE opportunity_id = $1 AND tenant_id = $2 AND status IN ('pending', 'in_progress')
+                   ORDER BY created_at DESC LIMIT 1`,
+            values: [activeOppId, tenantId]
+          }) as any[];
+          
+          if (activeTasks.length > 0) {
+            const task = activeTasks[0];
+            const tMeta = typeof task.metadata === 'string' ? JSON.parse(task.metadata) : (task.metadata || {});
+            
+            const scheduledFor = tMeta.scheduled_for_utc;
+            const trTime = tMeta.callback_time_tr;
+            const timeConfirmed = tMeta.time_confirmed_by_patient === true;
+            const botSugg = tMeta.bot_suggestion;
+            
+            if (scheduledFor) {
+              if (timeConfirmed) {
+                activeTaskCanonicalTime = `[KANONİK ZAMAN (ONAYLANMIŞ/TEYİTLİ)]: Arama/görüşme tarihi teyit edilmiştir. Türkiye saati (TR): ${trTime || 'Belirtilmemiş'}, UTC Zamanı: ${scheduledFor}.`;
+              } else if (botSugg && botSugg.status === 'pending') {
+                activeTaskCanonicalTime = `[KANONİK ZAMAN (TEYİTSİZ ÖNERİ)]: Bot tarafından önerilen zaman (Henüz teyit edilmedi/Onay bekliyor): Tarih: ${botSugg.suggested_date || 'Eksik'}, Saat: ${botSugg.suggested_time || 'Eksik'}.`;
+                if (botSugg.needs_date_clarification || botSugg.needs_timezone_clarification) {
+                  activeTaskCanonicalTime += ` (Önemli Not: Saat dilimi veya tarih eksik/net değil!).`;
+                }
+              }
+            }
+          }
+        } catch (taskErr) {
+          // Non-fatal
+        }
+      }
 
       // 2. Fetch raw messages to summarize (linked by phone_number)
       const messages = await db.executeSafe({
@@ -93,6 +154,11 @@ export class MemoryEngine {
       const prompt = `
         Sen bir hastane CRM koordinatörüsün. Aşağıdaki WhatsApp görüşmesini analiz et ve koordinatör/satış ekibinin hızlıca okuyacağı profesyonel bir CRM notu oluştur.
         ${contextHint}
+        ${timezoneDisplayContext}
+
+        Zaman Kaynağı Yönergesi:
+        Özet içinde herhangi bir görüşme/arama saati yazarken yalnızca şu canonical zaman bilgisini referans al:
+        ${activeTaskCanonicalTime ? activeTaskCanonicalTime : 'Görüşmede teyit edilmiş veya bot tarafından önerilmiş aktif bir randevu saati bulunmuyor. Özete kesinlikle uydurma randevu/arama zamanı yazma.'}
 
         SADECE AŞAĞIDAKİ JSON FORMATINDA CEVAP VER. BAŞKA METİN YAZMA.
         
@@ -112,6 +178,8 @@ export class MemoryEngine {
         - Asistan cevaplarını birebir kopyalama, sadece önemli verileri çıkar.
         - Profesyonel, net, sonuca odaklı CRM satış notu gibi yaz.
         - Eksik aksiyonları açıkça belirt ("Sonraki aksiyon: ...", "Beklenen: ...").
+        - Zamanları özete eklerken yukarıdaki "Zaman Kaynağı Yönergesi"ne 100% sadık kal. Kanonik zaman kaynağında bulunmayan uydurma saat/tarih yazma.
+        - Eğer yukarıda "⚠️ KRİTİK ZAMAN VE SAAT DİLİMİ SINIRLAMASI" uyarısı aktif ise, özette kesinlikle New York yerel saati gibi doğrulanmamış yerel saatler yazma! Sadece TR saati yazabilir ve "yerel saat dilimi belirsiz" uyarısı ekleyebilirsin.
 
         Görüşme:
         ${conversationText}

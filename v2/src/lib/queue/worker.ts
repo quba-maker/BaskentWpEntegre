@@ -2661,27 +2661,82 @@ export class QueueWorkerEngine {
               }
 
               // 3. Bot Date Rescheduling Suggestion (HITL Triage Interception)
-              if (crmData.requested_callback_datetime) {
-                try {
-                  const activeBotTasks = await db.executeSafe({
-                    text: `SELECT id, metadata FROM follow_up_tasks
-                           WHERE RIGHT(phone_number, 10) = RIGHT($1, 10) AND tenant_id = $2
-                             AND status IN ('pending', 'in_progress')
-                           ORDER BY updated_at DESC LIMIT 1`,
-                    values: [phoneNumber, tenantId]
-                  }) as any[];
+              try {
+                const activeBotTasks = await db.executeSafe({
+                  text: `SELECT id, metadata FROM follow_up_tasks
+                         WHERE RIGHT(phone_number, 10) = RIGHT($1, 10) AND tenant_id = $2
+                           AND status IN ('pending', 'in_progress')
+                           AND task_type != 'appointment_reminder'
+                         ORDER BY updated_at DESC LIMIT 1`,
+                  values: [phoneNumber, tenantId]
+                }) as any[];
 
-                  if (activeBotTasks.length > 0) {
-                    const targetTask = activeBotTasks[0];
-                    const taskMeta = typeof targetTask.metadata === 'string' 
-                      ? JSON.parse(targetTask.metadata) 
-                      : (targetTask.metadata || {});
+                if (activeBotTasks.length > 0) {
+                  const targetTask = activeBotTasks[0];
+                  const taskMeta = typeof targetTask.metadata === 'string' 
+                    ? JSON.parse(targetTask.metadata) 
+                    : (targetTask.metadata || {});
+
+                  // Resolve safe previousSuggestedDate
+                  let prevSuggestedDate: string | null = null;
+                  if (taskMeta.bot_suggestion?.suggested_date) {
+                    prevSuggestedDate = taskMeta.bot_suggestion.suggested_date;
+                  } else if (taskMeta.bot_directive_state?.suggested_date) {
+                    prevSuggestedDate = taskMeta.bot_directive_state.suggested_date;
+                  } else if (taskMeta.last_offered_callback_date) {
+                    prevSuggestedDate = taskMeta.last_offered_callback_date;
+                  } else if (taskMeta.time_confirmed_by_patient === true && taskMeta.scheduled_for_utc) {
+                    prevSuggestedDate = taskMeta.scheduled_for_utc.split('T')[0];
+                  }
+
+                  // Get last assistant message
+                  const assistantMessages = history.filter(m => m.role === 'assistant').slice(-1);
+                  const lastAssMsg = assistantMessages[0]?.content || null;
+
+                  // Parse patient message deterministically
+                  const { parseDeterministicSuggestion } = await import('../utils/date-parser');
+                  const parsedSugg = parseDeterministicSuggestion(content || '', new Date(), prevSuggestedDate, lastAssMsg);
+
+                  // If deterministic parser did not extract suggested_time, but LLM extracted requested_callback_datetime,
+                  // we use the LLM extracted value as a fallback, as long as it's not midnight 00:00 (unless patient explicitly said 00:00).
+                  if (!parsedSugg.suggested_time && crmData?.requested_callback_datetime) {
+                    const dt = new Date(crmData.requested_callback_datetime);
+                    if (!isNaN(dt.getTime())) {
+                      const trHourStr = dt.toLocaleTimeString('tr-TR', { timeZone: 'Europe/Istanbul', hour: '2-digit', minute: '2-digit', hour12: false });
+                      if (trHourStr !== '00:00' || /00:00|gece\s*(yarı|0)/i.test(content || '')) {
+                        parsedSugg.suggested_time = trHourStr;
+                        parsedSugg.suggested_date = crmData.requested_callback_datetime.split('T')[0];
+                        parsedSugg.proposed_date = crmData.requested_callback_datetime;
+                        
+                        const [hh, mm] = trHourStr.split(':').map(Number);
+                        parsedSugg.operation_window_valid = (hh * 60 + mm >= 9 * 60 && hh * 60 + mm <= 21 * 60);
+                      }
+                    }
+                  }
+
+                  // If we found a suggestion (time is extracted), save it
+                  if (parsedSugg.suggested_time) {
+                    // Strict validation: if suggested_date is null, proposed_date is null
+                    if (!parsedSugg.suggested_date) {
+                      parsedSugg.proposed_date = null;
+                      parsedSugg.needs_date_clarification = true;
+                    }
 
                     taskMeta.bot_suggestion = {
-                      proposed_date: crmData.requested_callback_datetime,
+                      bot_suggestion_type: 'callback_time',
+                      suggested_date: parsedSugg.suggested_date,
+                      suggested_time: parsedSugg.suggested_time,
+                      suggested_timezone_basis: parsedSugg.suggested_timezone_basis,
+                      needs_date_clarification: parsedSugg.needs_date_clarification,
+                      needs_timezone_clarification: parsedSugg.needs_timezone_clarification,
+                      source_message_text: content || '',
+                      source_message_id: null,
+                      extraction_confidence: 'high',
+                      proposed_date: parsedSugg.proposed_date, // Combined date & time ISO string or null
                       status: 'pending',
                       detected_at: new Date().toISOString(),
-                      user_message: content || ''
+                      user_message: content || '',
+                      operation_window_valid: parsedSugg.operation_window_valid
                     };
 
                     await db.executeSafe({
@@ -2691,11 +2746,16 @@ export class QueueWorkerEngine {
                       values: [JSON.stringify(taskMeta), targetTask.id, tenantId]
                     });
 
-                    this.log.info(`[BOT_TRIAGE_SUGGESTION_CAPTURED] Saved proposed date ${crmData.requested_callback_datetime} to task ${targetTask.id}`, { traceId });
+                    this.log.info(`[BOT_TRIAGE_SUGGESTION_CAPTURED] Saved deterministic proposed suggestion to task ${targetTask.id}`, { 
+                      traceId, 
+                      suggested_date: parsedSugg.suggested_date,
+                      suggested_time: parsedSugg.suggested_time,
+                      proposed_date: parsedSugg.proposed_date 
+                    });
                   }
-                } catch (triageErr) {
-                  this.log.error('[BOT_TRIAGE_SUGGESTION_FAILED] Non-fatal triage suggestion error', triageErr instanceof Error ? triageErr : new Error(String(triageErr)), { traceId });
                 }
+              } catch (triageErr) {
+                this.log.error('[BOT_TRIAGE_SUGGESTION_FAILED] Non-fatal triage suggestion error', triageErr instanceof Error ? triageErr : new Error(String(triageErr)), { traceId });
               }
 
             } catch (taskErr) {
