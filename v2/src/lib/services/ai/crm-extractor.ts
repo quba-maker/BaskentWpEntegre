@@ -136,11 +136,11 @@ Format:
   "data_deletion_request": boolean (Kullanıcı açıkça 'bilgilerimi sil', 'beni unut', 'verilerimi sil', 'kaydımı sil' gibi GDPR/KVKK talebi belirttiyse true),
   "different_department_detected": boolean (Mevcut görüşme bağlamından FARKLI bir departman/tedavi talebi tespit edildiyse true. Örn: görüşme Kardiyoloji iken 'saç ekimi için bilgi almak istiyorum' dendi. AYNI departman devam ediyorsa false. İLK mesajda departman belirtiliyorsa false — çünkü henüz 'farklı' olacak bir önceki yok),
   "raw_department": "string (Kullanıcının söylediği ham departman/tedavi ifadesi. Normalizasyon YAPMA. Örn: 'saç ekimi', 'kalp ameliyatı', 'diş beyazlatma'. Boş bırakılabilir)",
-  "patient_city": "string (Hastanın bulunduğu şehir/eyalet. Örn: 'Miami', 'Berlin', 'Köln'. Yoksa boş bırak)",
+  "patient_city": "string (Hastanın YAŞADIĞI veya ŞU AN BULUNDUĞU şehir/eyalet. Örn: 'Miami', 'Berlin', 'Köln'. DİKKAT: Hastanın gelmek istediği şehir, hastanenin bulunduğu şehir veya 'Konya'ya gelebilirim / İstanbul'a geleceğim' gibi HEDEF/SEYAHAT şehirleri patient_city DEĞİLDİR. Yoksa boş bırak)",
   "patient_timezone": "string (Hastanın şehrine/saat dilimine göre geçerli IANA saat dilimi adı. Örn: 'America/New_York', 'Europe/Berlin', 'Europe/London'. Emin değilsen boş bırak)",
   "timezone_source": "string ('patient_city' | 'country' | 'manual_confirmed' | 'unknown' — Saat diliminin kaynağı. Şehir biliniyorsa 'patient_city', sadece ülkeye göre belirlendiyse 'country', hasta onayladıysa 'manual_confirmed', belirsizse 'unknown')",
   "time_confirmed_by_patient": boolean (Hasta randevu saatini açıkça teyit edip onayladıysa true. Örn: 'uygundur', 'teyit ediyorum', 'o saatte arayın'. Teyit etmediyse veya henüz teyit edilmemiş bir öneriyse false),
-  "needs_timezone_clarification": boolean (Eğer hasta Amerika/Kanada/Rusya gibi çok timezone'lu bir ülkede olduğunu söyleyip henüz şehir belirtmediyse, veya 'benim saatime göre/bize göre' deyip hangi saat diliminde olduğu belirsizse true)
+  "needs_timezone_clarification": boolean (SADECE hasta ile arama/randevu/görüşme zamanı planlanıyorsa VE hasta çoklu saat dilimli bir ülkedeyse true döndür. Hasta sadece bilgi, fiyat, tedavi süreci veya genel soru soruyorsa şehir/eyalet eksik diye true DÖNDÜRME.)
 }
 
 Pipeline Aşama Kuralları (sırayla ilerler, geri gitmez):

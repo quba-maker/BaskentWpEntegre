@@ -157,7 +157,7 @@ export function ContextPanel() {
         });
 
         if (displayRes.needsTimezoneClarification) {
-          setLocalTime(displayRes.shortBadge === "Şehir gerekli" ? "Şehir gerekli" : "Saat net değil");
+          setLocalTime(displayRes.shortBadge || "Konum/saat net değil");
           setIsSleeping(false);
         } else if (displayRes.isFallback) {
           setLocalTime("Saat net değil");

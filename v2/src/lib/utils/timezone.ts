@@ -399,12 +399,11 @@ ${subjectCapital.toUpperCase()} YEREL SAATİ UYGUNLUK SINIRI:
 - Türkiye operasyon saati (${opStart} - ${opEnd}) ile ${subjectGen} yerel makul saati (08:00 - 22:00) arasındaki ortak kesişen saat dilimlerini tercih edin ve önerin.`;
 
     if (resolution.needs_confirmation) {
-      // Ambiguous timezone country — bot must ask for city
+      // Ambiguous timezone country — bot must ask for city ONLY IF SCHEDULING
       tzRules = `
 ${subjectCapital} ülkesi: ${patientCountry} (birden fazla saat dilimi olan ülke).
-KURAL: ${subjectCapital} belirli bir saat söylerse (örn: "Salı 15:00") ASLA kesin kabul etme.
-Önce ${subjectGen} şehrini veya saat dilimini sor: "${patientCountry === 'ABD' || patientCountry === 'USA' || patientCountry === 'US' || patientCountry.includes('Amerika') ? 'Amerika’da' : patientCountry + '’da'} bulunduğunuz şehir veya eyaleti paylaşabilir misiniz? Saat farkını doğru hesaplayıp size uygun arama saatini netleştirelim."
-Şehir bilgisi alınana kadar "tahmini saat" olarak not al, kesinleştirme.`;
+KURAL: EĞER ${subject} aranmak için belirli bir saat söylerse VEYA telefon görüşmesi randevusu planlanıyorsa, önce saat dilimini/şehrini sor: "${patientCountry === 'ABD' || patientCountry === 'USA' || patientCountry === 'US' || patientCountry.includes('Amerika') ? 'Amerika’da' : patientCountry + '’da'} bulunduğunuz şehir veya eyaleti paylaşabilir misiniz? Saat farkını doğru hesaplayıp size uygun arama saatini netleştirelim."
+DİKKAT: ${subjectCapital} sadece fiyat, tedavi bilgisi veya genel bilgi soruyorsa, arama saati konusu geçmiyorsa DURDUK YERE şehir/eyalet sorma, muhabbeti bölme. Şehir bilgisi sadece arama planlanırken gereklidir.`;
     } else if (resolution.timezone !== tenantTz) {
       // Known timezone, different from tenant
       const patientNow = now.toLocaleString('tr-TR', {
@@ -429,7 +428,7 @@ KURAL: ${subjectCapital} bir saat söylediğinde bunu ${subjectCapital.toUpperCa
 SAAT İFADELERİNİN YORUMLANMASI:
 1. ${subjectCapital.toUpperCase()} YEREL SAATİ ("bana/bize göre"): ${subjectCapital} "bize göre olsun", "bizim saate göre", "buradaki saate göre", "benim saatime göre", "buradaki saatle", "local time" veya benzeri bir ifade kullanırsa bunu ${subjectGenCapital.toUpperCase()} KENDİ YEREL SAATİ olarak yorumla.
    - Eğer ${subjectGen} ülkesi/şehri biliniyorsa, bu saati ${subjectGen} yerel saati olarak kabul edip Türkiye saatine çevirerek iç sistem için belirt.
-   - Eğer ${subject} timezone-belirsiz bir ülkede (ABD, Kanada, Rusya vb.) ise ve şehir belirtmediyse, kesin hesaplama yapmadan şehir/eyalet sor.
+   - Eğer ${subject} timezone-belirsiz bir ülkede (ABD, Kanada, Rusya vb.) ise ve şehir belirtmediyse, SADECE aranma/görüşme saati planlanıyorsa şehir/eyalet sor.
 2. ${hostOrCompanyTimeLabel} ("sizin saate göre"): ${subjectCapital} ${hostOrCompanyTimePhrases} derse bunu TÜRKİYE SAATİ olarak yorumla. Kesin saati doğrudan Türkiye saatiyle teyit et.`;
 
   return `\n\n=== ZAMAN BAĞLAMI ===
@@ -1042,9 +1041,13 @@ export function resolvePatientTimeDisplay(input: PatientTimeDisplayInput): Patie
   let shortBadge = '';
 
   if (needsTimezoneClarification) {
-    const label = residenceCountryLabel !== 'Bilinmeyen Ülke' ? residenceCountryLabel : 'Bilinmeyen Ülke';
-    displayLabel = `${countryEmoji} ${label} • Konum/saat net değil`;
-    shortBadge = sourceMismatch ? 'Konum net değil' : 'Şehir gerekli';
+    if (sourceMismatch || residenceCountryLabel === 'Bilinmeyen Ülke' || residenceCountryLabel === 'Türkiye') {
+      displayLabel = 'Konum/saat net değil';
+      shortBadge = 'Konum/saat net değil';
+    } else {
+      displayLabel = `${countryEmoji} ${residenceCountryLabel} • Şehir gerekli`;
+      shortBadge = 'Şehir gerekli';
+    }
   } else if (isFallback) {
     displayLabel = `TR: ${turkeyTime} / Hasta saati net değil`;
     shortBadge = 'Saat net değil';
