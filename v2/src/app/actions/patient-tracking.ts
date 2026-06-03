@@ -631,14 +631,18 @@ export async function getPatientTrackingRows(filters?: PatientTrackingFilters): 
         ) ol ON TRUE
         WHERE o.tenant_id = $1 
           AND o.stage NOT IN ('not_qualified', 'arrived')
-          AND (
-            t.id IS NOT NULL
-            OR o.priority IN ('hot', 'high', 'sıcak')
-            OR o.stage IN ('new_lead', 'first_contact', 'engaged', 'discovery', 'qualified', 'phone_call_planning', 'appointment_planning', 'appointment_booked')
-            OR o.intent_type IN ('appointment_request', 'follow_up_needed', 'hot_lead')
-            OR o.next_follow_up_at IS NOT NULL
-            OR ol.action IN ('called_missed', 'callback_scheduled', 'greeting_sent', 'bot_activated')
-            OR t.metadata->>'bot_delegation' IS NOT NULL
+          AND EXISTS (
+            SELECT 1 FROM messages m 
+            WHERE m.tenant_id = o.tenant_id 
+              AND (
+                m.conversation_id = c.id 
+                OR REGEXP_REPLACE(m.phone_number, '\\D', '', 'g') = REGEXP_REPLACE(o.phone_number, '\\D', '', 'g')
+                OR RIGHT(REGEXP_REPLACE(m.phone_number, '\\D', '', 'g'), 10) = RIGHT(REGEXP_REPLACE(o.phone_number, '\\D', '', 'g'), 10)
+              )
+              AND (
+                m.direction = 'in' 
+                OR (m.direction = 'out' AND m.status IN ('sent', 'delivered', 'read'))
+              )
           )
       `;
 

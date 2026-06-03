@@ -195,7 +195,7 @@ export async function getConversations(page: number = 1, search: string = "", st
 
 import { unstable_noStore as noStore } from "next/cache";
 
-export async function getMessages(phone: string) {
+export async function getMessages(phone: string, page: number = 1, limit: number = 50) {
   noStore();
   if (!phone) return [];
   
@@ -207,21 +207,23 @@ export async function getMessages(phone: string) {
         // Create the string pattern with % wildcards
         const phoneLike = `%${cleanPhone}%`;
 
+        const offset = (page - 1) * limit;
+
         const rows = await ctx.db.executeSafe({
           text: `
             SELECT * FROM (
               SELECT id, content as text, direction, status, model_used,
                      media_type, media_url, media_metadata,
-                     EXTRACT(EPOCH FROM created_at) * 1000 as created_at_ms
+                     EXTRACT(EPOCH FROM COALESCE(provider_timestamp, created_at)) * 1000 as created_at_ms
               FROM messages
               WHERE phone_number LIKE $1 
                 AND (tenant_id = $2)
-              ORDER BY created_at DESC
-              LIMIT 100
+              ORDER BY COALESCE(provider_timestamp, created_at) DESC
+              LIMIT $3 OFFSET $4
             ) sub
             ORDER BY created_at_ms ASC
           `,
-          values: [phoneLike, ctx.tenantId]
+          values: [phoneLike, ctx.tenantId, limit, offset]
         });
 
       const validRows = Array.isArray(rows) ? rows : ((rows as any)?.rows || []);

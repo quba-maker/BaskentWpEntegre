@@ -714,15 +714,22 @@ export class QueueWorkerEngine {
       const incomingMsg = messages[0];
 
       // Echo Detection: If incomingMsg.from is the business display number, then it is an outbound app echo
-      const isEcho = incomingMsg.from === value?.metadata?.phone_number_id || 
-                     incomingMsg.from === value?.metadata?.display_phone_number ||
-                     incomingMsg.from === brain.context.config?.identifier;
+      const isEchoFromField = incomingMsg.from === value?.metadata?.phone_number_id || 
+                              incomingMsg.from === value?.metadata?.display_phone_number ||
+                              incomingMsg.from === brain.context.config?.identifier;
 
+      const isSmbEchoPayload = (incomingMsg as any).is_smb_echo === true;
+      const isEcho = isEchoFromField || isSmbEchoPayload;
+
+      // Extract the patient phone number
       phoneNumber = isEcho && (incomingMsg as any).to
         ? (incomingMsg as any).to
         : (incomingMsg.from || '');
       providerMessageId = incomingMsg.id || '';
       profileName = value?.contacts?.[0]?.profile?.name;
+      
+      const isHistoryImport = (incomingMsg as any).is_history_import === true;
+      const providerTimestamp = incomingMsg.timestamp ? parseInt(incomingMsg.timestamp, 10) : undefined;
 
       // ── MEDIA TYPE EXTRACTION ──
       const msgType = incomingMsg.type || 'text';
@@ -882,6 +889,10 @@ export class QueueWorkerEngine {
         }
       } catch (mediaErr) {
         mediaUrl = null; // Ensure clean state on error
+        // Fallback for UI if media couldn't be downloaded (especially for history imports)
+        mediaMetadata = mediaMetadata || {};
+        mediaMetadata.media_unavailable = true;
+        mediaMetadata.media_unavailable_reason = "media_expired_or_unavailable";
         // Non-fatal: save message even if media download fails
         this.log.error(`[MEDIA_DOWNLOAD_FAILED] Non-fatal media error`, mediaErr instanceof Error ? mediaErr : new Error(String(mediaErr)), { tenantId, traceId });
       }
@@ -908,11 +919,15 @@ export class QueueWorkerEngine {
     const isAppEcho = channel === 'whatsapp' && incomingMsgObj && 
       ((incomingMsgObj as any).from === valueObj?.metadata?.phone_number_id || 
        (incomingMsgObj as any).from === valueObj?.metadata?.display_phone_number ||
-       (incomingMsgObj as any).from === brain.context.config?.identifier);
+       (incomingMsgObj as any).from === brain.context.config?.identifier ||
+       (incomingMsgObj as any).is_smb_echo === true);
+       
+    const isHistory = channel === 'whatsapp' && incomingMsgObj && (incomingMsgObj as any).is_history_import === true;
+    const incomingTimestamp = channel === 'whatsapp' && incomingMsgObj ? parseInt((incomingMsgObj as any).timestamp, 10) : undefined;
 
     const direction = isAppEcho ? 'out' as const : 'in' as const;
     const modelUsed = isAppEcho ? null : undefined;
-    const statusVal = isAppEcho ? 'sent' : 'delivered';
+    const statusVal = isAppEcho ? 'sent' : (isHistory ? 'delivered' : 'delivered');
 
     // 3. Save Message (Idempotency and locking handled atomically in CTE)
     const { isDuplicate, conversationId, messageId } = await msgService.saveMessageIdempotent({
@@ -925,9 +940,11 @@ export class QueueWorkerEngine {
       providerMessageId,
       mediaType,
       mediaUrl,
-      mediaMetadata,
+      mediaMetadata: mediaMetadata ? { ...mediaMetadata, is_history_import: isHistory } : (isHistory ? { is_history_import: true } : null),
       modelUsed,
-      status: statusVal
+      status: statusVal,
+      providerTimestamp: incomingTimestamp,
+      isHistoryImport: isHistory
     });
 
     if (isDuplicate) {
@@ -1046,6 +1063,11 @@ export class QueueWorkerEngine {
       }
 
       // Bypass any AI response or pipeline summary since human answered
+      return;
+    }
+
+    if (isHistory) {
+      this.log.info(`[HISTORY_IMPORT] Skipping AI/tasks for history message`, { traceId, phoneNumber });
       return;
     }
 
@@ -1967,7 +1989,7 @@ export class QueueWorkerEngine {
       } catch (_) { /* non-blocking */ }
 
       const existingConvCountry = beforeConv?.country || null;
-      const resolvedCountryForConv = crmData?.country || existingConvCountry;
+      const resolvedCountryForConv = crmData?.country || existingConvCountry || null;
 
       // ═══ P0-1: CRM_RESOLVED_FOR_CONVERSATION ═══
       await AIEventEmitter.emitSync({
@@ -2271,7 +2293,7 @@ export class QueueWorkerEngine {
 
           // ═══ P1A-FIX3: Opp country priority — CRM > existingOpp > conv ═══
           const existingOppCountry = beforeOpp?.country || null;
-          const resolvedCountryForOpp = crmData.country || existingOppCountry || existingConvCountry;
+          const resolvedCountryForOpp = crmData.country || existingOppCountry || existingConvCountry || null;
 
           // ═══ P1B: Non-Aggressive Boundary Detection ═══
           // Country correction = update existing, NOT new opp

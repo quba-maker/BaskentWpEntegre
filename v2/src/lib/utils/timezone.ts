@@ -515,6 +515,13 @@ export function computeTimeMetadata(
       Intl.DateTimeFormat(undefined, { timeZone: llmExtracted.patient_timezone });
       timezone = llmExtracted.patient_timezone;
       source = llmExtracted.timezone_source || 'manual_confirmed';
+      
+      // PREVENT POLLUTION: Reject timezone if it explicitly mismatches the resolved country
+      if (patientCountry && !isTimezoneValidForCountry(timezone, patientCountry)) {
+        timezone = null;
+        source = 'unknown';
+        needs_timezone_clarification = true;
+      }
     } catch {
       // invalid timezone name from LLM, fallback
     }

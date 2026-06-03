@@ -138,6 +138,16 @@ export async function POST(req: NextRequest) {
       } else if (value.statuses?.[0]) {
         statusesList = value.statuses;
       }
+
+      // Explicit check for history or smb_message_echoes field root
+      const fieldName = body.entry[0].changes[0].field;
+      if (fieldName === 'history' && value.messages) {
+        messagesList = value.messages;
+        value.is_history_import = true;
+      } else if (fieldName === 'smb_message_echoes' && value.message_echoes) {
+        messagesList = value.message_echoes;
+        value.is_smb_echo = true;
+      }
     }
 
     // 6. Inbound Message Processing (Includes App Echoes)
@@ -152,8 +162,8 @@ export async function POST(req: NextRequest) {
 
       // For outbound app echoes, the consumer of this webhook expects the customer number (msg.to) as sender
       const senderPhone = isEcho 
-        ? (msg.to || contactsList[0]?.wa_id || msg.from)
-        : (contactsList[0]?.wa_id || msg.from);
+        ? (msg.to || contactsList?.[0]?.wa_id || msg.from)
+        : (contactsList?.[0]?.wa_id || msg.from);
 
       log.info(`[360DIALOG] [${isEcho ? 'OUTBOUND_ECHO' : 'INBOUND'}] Processing message: ${msg.id} from ${senderPhone}`, {
         tenantSlug,
@@ -214,7 +224,9 @@ export async function POST(req: NextRequest) {
                       location: msg.location ? { latitude: msg.location.latitude, longitude: msg.location.longitude, name: msg.location.name } : undefined,
                       sticker: msg.sticker ? { id: msg.sticker.id, mime_type: msg.sticker.mime_type } : undefined,
                       button: msg.button ? { text: msg.button.text, payload: msg.button.payload } : undefined,
-                      interactive: msg.interactive ? { button_reply: msg.interactive.button_reply, list_reply: msg.interactive.list_reply } : undefined
+                      interactive: msg.interactive ? { button_reply: msg.interactive.button_reply, list_reply: msg.interactive.list_reply } : undefined,
+                      is_history_import: body.entry?.[0]?.changes?.[0]?.field === 'history' || valueObj?.is_history_import,
+                      is_smb_echo: body.entry?.[0]?.changes?.[0]?.field === 'smb_message_echoes' || valueObj?.is_smb_echo
                     }
                   ]
                 }

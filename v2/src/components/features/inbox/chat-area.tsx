@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from "@tanstack/react-query";
 import { Send, Paperclip, User, MessageCircle, ChevronLeft, ChevronRight, ChevronDown, ArrowDown, Info, ShieldAlert, Sparkles, Zap, Check, CheckCheck, Clock, FileText, Play, Mic, MapPin, X, Download } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { getMessages, sendMessage, sendMediaMessage, toggleBotStatus } from "@/app/actions/inbox";
@@ -488,6 +488,9 @@ export function ConversationViewport() {
   const tenantId = useRealtimeTenant();
   const isRealtimeDown = useDiagnosticsStore((state) => state.isRealtimeDown);
 
+  // Intersection observer ref for load more
+  const loadMoreRef = useRef<HTMLDivElement>(null);
+
   // CRITICAL: We must use the REAL tenantId (UUID) for Ably, not the slug!
   const channelName = tenantId ? `presence:tenant:${tenantId}` : "";
   const { typingClients, setTypingStatus } = usePresence(tenantId || "", channelName);
@@ -576,9 +579,20 @@ export function ConversationViewport() {
     setShowScrollDown(false);
   };
 
-  const { data: messages, isLoading } = useQuery({
+  const { 
+    data: messagesData, 
+    isLoading,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage
+  } = useInfiniteQuery({
     queryKey: ["messages", activePhone],
-    queryFn: () => getMessages(activePhone!),
+    queryFn: ({ pageParam = 1 }) => getMessages(activePhone!, pageParam as number, 50),
+    getNextPageParam: (lastPage: any[], allPages: any[][]) => {
+      if (lastPage.length < 50) return undefined;
+      return allPages.length + 1;
+    },
+    initialPageParam: 1,
     enabled: !!activePhone,
     // Realtime operates now, fallback polling if disconnected
     refetchInterval: isRealtimeDown ? 5000 : false,
@@ -586,6 +600,31 @@ export function ConversationViewport() {
     // GC: evict cache for conversations not visited in 5 minutes
     gcTime: 5 * 60 * 1000,
   });
+
+  const messages = useMemo(() => {
+    if (!messagesData?.pages) return [];
+    // Page 1 has latest messages (sorted ASC internally).
+    // Page 2 has older messages (sorted ASC internally).
+    // To display from oldest (top) to newest (bottom), we reverse the pages array before flattening.
+    return [...messagesData.pages].reverse().flat();
+  }, [messagesData]);
+
+  // Load more intersection observer
+  useEffect(() => {
+    if (!loadMoreRef.current || !hasNextPage || isFetchingNextPage) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          fetchNextPage();
+        }
+      },
+      { root: chatContainerRef.current, threshold: 0.1 }
+    );
+
+    observer.observe(loadMoreRef.current);
+    return () => observer.disconnect();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   // Auto-scroll on new messages ONLY — status updates must NOT trigger scroll
   const prevMessageCount = useRef(0);
@@ -1333,6 +1372,17 @@ export function ConversationViewport() {
           <ChatSkeleton />
         ) : (
           <>
+            {/* Load More trigger */}
+            {hasNextPage && (
+              <div ref={loadMoreRef} className="py-4 flex justify-center items-center">
+                {isFetchingNextPage ? (
+                  <div className="w-5 h-5 border-2 border-q-blue border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <span className="text-xs text-gray-400">Daha eski mesajları yükle</span>
+                )}
+              </div>
+            )}
+
             {/* Top Virtual Spacer */}
             {topSpacerHeight > 0 && (
               <div 
