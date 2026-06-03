@@ -308,6 +308,7 @@ function buildOperationsTaskProjection(
     country: opp?.opp_country || opp?.country,
     city: opp?.lead_raw_data?.city || opp?.lead_raw_data?.patient_city || metadata.patient_city || opp?.opp_metadata?.patient_city || opp?.metadata?.patient_city,
     timezone: metadata.patient_timezone || opp?.opp_metadata?.patient_timezone || opp?.metadata?.patient_timezone,
+    phoneNumber: opp?.phone_number || null,
     metadata: metadata,
     oppMetadata: opp?.opp_metadata || opp?.metadata,
     referenceDate: scheduledUtc
@@ -695,6 +696,7 @@ export async function getPatientTrackingRows(filters?: PatientTrackingFilters): 
           country: resolvedCountry,
           city: row.lead_raw_data?.city || row.lead_raw_data?.patient_city || row.task_metadata?.patient_city || row.opp_metadata?.patient_city,
           timezone: row.task_metadata?.patient_timezone || row.opp_metadata?.patient_timezone || row.conv_metadata?.patient_timezone,
+          phoneNumber: row.phone_number || null,
           metadata: row.task_metadata,
           oppMetadata: row.opp_metadata || row.opp_lead_raw_data || row.lead_raw_data,
           referenceDate: dueAt
@@ -959,6 +961,7 @@ export async function getPatientTrackingDetail(opportunityId: string, activeTask
         country: resolvedCountry,
         city: opp.lead_raw_data?.city || opp.lead_raw_data?.patient_city || opp.metadata?.patient_city || opp.opp_metadata?.patient_city,
         timezone: opp.metadata?.patient_timezone || opp.opp_metadata?.patient_timezone || opp.timezone,
+        phoneNumber: opp.phone_number || null,
         metadata: leadTask?.metadata || opp.metadata,
         oppMetadata: opp.opp_metadata || opp.metadata,
         referenceDate: dueAt
@@ -968,6 +971,7 @@ export async function getPatientTrackingDetail(opportunityId: string, activeTask
         country: resolvedCountry,
         city: opp.lead_raw_data?.city || opp.lead_raw_data?.patient_city || opp.metadata?.patient_city || opp.opp_metadata?.patient_city,
         timezone: opp.metadata?.patient_timezone || opp.opp_metadata?.patient_timezone || opp.timezone,
+        phoneNumber: opp.phone_number || null,
         metadata: opp.metadata,
         oppMetadata: opp.opp_metadata || opp.metadata,
         referenceDate: new Date()

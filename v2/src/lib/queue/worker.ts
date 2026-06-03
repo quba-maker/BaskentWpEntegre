@@ -1967,7 +1967,7 @@ export class QueueWorkerEngine {
       } catch (_) { /* non-blocking */ }
 
       const existingConvCountry = beforeConv?.country || null;
-      const resolvedCountryForConv = crmData?.country || existingConvCountry || deterministicCountry;
+      const resolvedCountryForConv = crmData?.country || existingConvCountry;
 
       // ═══ P0-1: CRM_RESOLVED_FOR_CONVERSATION ═══
       await AIEventEmitter.emitSync({
@@ -2269,9 +2269,9 @@ export class QueueWorkerEngine {
             beforeOpp = oppSnap[0] || null;
           } catch (_) { /* non-blocking */ }
 
-          // ═══ P1A-FIX3: Opp country priority — CRM > existingOpp > conv > phone prefix ═══
+          // ═══ P1A-FIX3: Opp country priority — CRM > existingOpp > conv ═══
           const existingOppCountry = beforeOpp?.country || null;
-          const resolvedCountryForOpp = crmData.country || existingOppCountry || existingConvCountry || deterministicCountry;
+          const resolvedCountryForOpp = crmData.country || existingOppCountry || existingConvCountry;
 
           // ═══ P1B: Non-Aggressive Boundary Detection ═══
           // Country correction = update existing, NOT new opp
@@ -2406,7 +2406,7 @@ export class QueueWorkerEngine {
             // Force create new opportunity (bypass existing check)
             const newOppCrmData = { ...crmData, should_create_opportunity: true };
             // Use new country for the new opp
-            const newOppCountry = crmData.country || deterministicCountry;
+            const newOppCountry = crmData.country || undefined;
             const newOppId = await oppService.upsertFromCrm({
               tenantId, conversationId, phoneNumber, channel,
               patientName: detectedNewName || crmData.patient_name || crmData.requester_name || undefined,

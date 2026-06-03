@@ -63,7 +63,7 @@ Hastanın bulunduğu ülke için saat dilimi doğrulanmamıştır (şehir/eyalet
 - Sadece Türkiye saati (TR) yazabilirsin ve hasta yerel saati için "şehir/eyalet netleşmediği için yerel saat hesaplanamamıştır" şeklinde belirtmelisin.
 - Kesin olmayan, doğrulanmamış yerel saatlerin özete sızmasını 100% engelle.`;
         } else if (timeDisplayRes.patientTimezone && timeDisplayRes.patientLocalTime) {
-          timezoneDisplayContext = `\nZAMAN BİLGİSİ: Hastanın yerel saat dilimi ${timeDisplayRes.countryLabel} (${timeDisplayRes.patientTimezone}) olarak teyit edilmiştir. Zaman belirtirken hem Türkiye saati (TR) hem de hastanın kendi yerel saatini (${timeDisplayRes.patientLocalTime}) gösterebilirsin.`;
+          timezoneDisplayContext = `\nZAMAN BİLGİSİ: Hastanın yerel saat dilimi ${timeDisplayRes.residenceCountryLabel} (${timeDisplayRes.patientTimezone}) olarak teyit edilmiştir. Zaman belirtirken hem Türkiye saati (TR) hem de hastanın kendi yerel saatini (${timeDisplayRes.patientLocalTime}) gösterebilirsin.`;
         } else {
           timezoneDisplayContext = `\n⚠️ KRİTİK ZAMAN SINIRLAMASI: Hastanın yerel saat dilimi belirsizdir. Özet içerisinde hasta yerel saati yazma, sadece Türkiye saati (TR) yaz ve yerel saat için "net değil" olarak belirt.`;
         }
