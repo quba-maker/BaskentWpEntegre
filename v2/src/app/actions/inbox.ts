@@ -64,6 +64,7 @@ export async function getConversations(page: number = 1, search: string = "", st
           active_opp.patient_relation as opp_patient_relation,
           -- P1B FIX: No global fallback — prevents Mehmet/Irak leaking into Almanya/Kardiyoloji
           active_opp.summary as ai_summary,
+          mem.summary_text as legacy_ai_summary,
           mem.buying_intent as ai_buying_intent,
           mem.sentiment as ai_sentiment,
           0 as unread
@@ -169,28 +170,19 @@ export async function getConversations(page: number = 1, search: string = "", st
           channel: r.channel || 'whatsapp',
           lastMessageStatus: r.last_message_status || 'sent',
           lastMessageDirection: r.last_message_direction || 'in',
-          // P1B Summary Unification — separate fields for manual vs AI
-          // ai_crm_summary: long CRM summary from MemoryEngine (opportunity.summary)
-          // notes: textarea content — manual if user edited, else ai_crm_summary
+          opp_summary: r.opp_summary || null,
           opp_ai_reason: r.opp_ai_reason || null,
-          ai_crm_summary: r.opp_summary || r.opp_ai_reason || '',
-          notes: (() => {
-            const oppSummary = r.opp_summary || r.opp_ai_reason || '';
-            const convNotes = r.notes || '';
-            // If conv.notes has content AND it's different from oppSummary → user edited manually
-            if (convNotes && oppSummary && convNotes !== oppSummary) return convNotes;
-            // Otherwise use oppSummary as primary (AI-managed)
-            if (oppSummary) return oppSummary;
-            return convNotes;
-          })(),
+          legacy_ai_summary: r.legacy_ai_summary || null,
+          ai_crm_summary: r.opp_summary || r.legacy_ai_summary || '',
+          notes: r.notes || '',
           patientRelation: r.opp_patient_relation || null,
           formData: r.form_name ? {
             name: r.form_name,
             date: r.form_date_ms ? new Date(parseFloat(r.form_date_ms)).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' }) : '',
             raw: r.form_raw_data
           } : null,
-          aiSummary: (r.opp_summary || r.opp_ai_reason || r.ai_summary) ? {
-            text: r.opp_summary || r.opp_ai_reason || r.ai_summary,
+          aiSummary: (r.opp_summary || r.legacy_ai_summary) ? {
+            text: r.opp_summary || r.legacy_ai_summary || '',
             buying_intent: r.ai_buying_intent,
             sentiment: r.ai_sentiment
           } : null
@@ -918,10 +910,6 @@ export async function updateCrmData(phone: string, stage: string, department: st
           if (country !== undefined && country) {
             oppUpdateFields.push(`country = $${oppIdx++}`);
             oppValues.push(country);
-          }
-          if (notes !== undefined && notes !== null) {
-            oppUpdateFields.push(`summary = $${oppIdx++}`);
-            oppValues.push(notes);
           }
           if (patientName !== undefined && patientName !== null) {
             oppUpdateFields.push(`patient_name = $${oppIdx++}`);

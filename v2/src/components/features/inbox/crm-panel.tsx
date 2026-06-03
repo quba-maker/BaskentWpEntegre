@@ -9,6 +9,10 @@ import { CustomerAiBrainPanel } from "@/components/features/ai-observability/Cus
 import { AiTimelinePanel } from "@/components/features/ai-observability/AiTimeline";
 import { resolvePatientDisplayName, formatPhoneReadable } from "@/lib/utils/patient-name-resolver";
 import { resolvePatientTimezone } from "@/lib/utils/timezone";
+import { useParams } from "next/navigation";
+import { resolveUniversalAISummary, getTenantEntityType } from "@/lib/utils/universal-summary-resolver";
+import { UniversalAISummaryCard } from "@/components/features/takip/universal-ai-summary-card";
+import { useTenant } from "@/components/providers/tenant-provider";
 
 const tagTranslationMap: Record<string, string> = {
   "price_sensitive": "fiyat_odaklı",
@@ -75,11 +79,15 @@ function CrmSkeleton() {
 
 export function ContextPanel() {
   const { activeContact, mobileView, setMobileView } = useInboxStore();
+  const params = useParams();
+  const tenantSlug = typeof params?.tenant_slug === 'string' ? params.tenant_slug : 'baskent';
+  const { tenant } = useTenant();
+  const entityType = getTenantEntityType(tenantSlug, tenant?.profile?.industry);
   const [formOpen, setFormOpen] = useState(false);
   const [aiSummaryOpen, setAiSummaryOpen] = useState(true);
   const getInitialNotes = (contact: typeof activeContact) => {
     if (!contact) return "";
-    return contact.notes || contact.ai_crm_summary || contact.aiSummary?.text || contact.ai_summary || "";
+    return contact.notes || "";
   };
   const getInitialPatientName = (contact: typeof activeContact) => {
     if (!contact) return "";
@@ -495,58 +503,36 @@ export function ContextPanel() {
             </select>
           </div>
 
-          {/* Fırsat Gerekçesi (AI Reason) */}
-          {activeContact?.opp_ai_reason && (
-            <div className="pt-2">
-              <label className="text-[10px] font-bold uppercase tracking-widest block mb-1.5 ml-1 animate-pulse" style={{ color: "var(--q-text-secondary)" }}>
-                ⚡ Fırsat Gerekçesi
-              </label>
-              <div className="p-3 bg-indigo-50/60 border border-indigo-100/60 rounded-2xl text-[11px] font-bold leading-relaxed text-indigo-900/90 shadow-sm mb-2">
-                {activeContact.opp_ai_reason}
-              </div>
-            </div>
-          )}
+          {/* Universal AI Summary & Opportunity Reason Card */}
+          {(() => {
+            const summaryInput = {
+              oppSummary: activeContact?.opp_summary,
+              oppAiReason: activeContact?.opp_ai_reason,
+              legacyAiSummary: activeContact?.legacy_ai_summary,
+              priority: activeContact?.opp_priority || activeContact?.priority,
+              updatedAt: activeContact?.last_message_at
+            };
+            const resolvedSummary = resolveUniversalAISummary(
+              summaryInput,
+              entityType,
+              patientName
+            );
+            return <UniversalAISummaryCard summary={resolvedSummary} className="pt-2" />;
+          })()}
 
-          {/* AI Görüşme Özeti */}
+          {/* Manuel Notlar Textarea */}
           <div className="pt-2">
             <div className="flex items-center justify-between mb-1.5 ml-1">
               <div className="flex items-center gap-2">
-                {/* Pulsating green animation indicating AI is active */}
-                <div className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                </div>
                 <label className="text-[10px] font-bold uppercase tracking-widest block" style={{ color: "var(--q-text-secondary)" }}>
-                  AI Görüşme Özeti
+                  {entityType === 'patient' ? '✍️ Koordinatör Notları' : '✍️ Manuel Notlar'}
                 </label>
-              </div>
-              <div className="flex items-center gap-1.5">
-                {(() => {
-                  const aiIntent = activeContact.aiSummary?.buying_intent || activeContact.ai_buying_intent;
-                  const aiSentiment = activeContact.aiSummary?.sentiment || activeContact.ai_sentiment;
-                  return (
-                    <>
-                      {aiIntent && (
-                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded shadow-sm" 
-                              style={{ background: "var(--q-bg-primary)", color: "var(--q-text-secondary)", border: "1px solid var(--q-border-default)" }}>
-                          {translateAiLabel(aiIntent)}
-                        </span>
-                      )}
-                      {aiSentiment && (
-                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded shadow-sm" 
-                              style={{ background: "var(--q-bg-primary)", color: "var(--q-text-secondary)", border: "1px solid var(--q-border-default)" }}>
-                          {translateAiLabel(aiSentiment)}
-                        </span>
-                      )}
-                    </>
-                  );
-                })()}
               </div>
             </div>
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="Görüşmeyle ilgili özet veya notlar..."
+              placeholder={entityType === 'patient' ? 'Hastayla ilgili manuel takip notları...' : 'Müşteriyle ilgili manuel notlar...'}
               className="w-full h-32 bg-white/60 border border-black/5 rounded-xl p-3 text-sm text-[#1D1D1F] placeholder:text-[#86868B] focus:ring-2 focus:ring-[#AF52DE]/30 resize-none outline-none transition-all shadow-sm focus:border-[#AF52DE]/40"
               style={{ border: "1px solid var(--q-border-default)" }}
             />

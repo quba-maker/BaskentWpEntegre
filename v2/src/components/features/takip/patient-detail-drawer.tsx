@@ -20,6 +20,10 @@ import { createBotDelegationTask, schedulePhoneCallTask, completeBotDelegationTa
 import { logCallReached, logCallMissed, logCallbackScheduled, logNotInterested, sendMetaTemplateMessage } from "@/app/actions/outreach";
 import { sendMessage } from "@/app/actions/inbox";
 import { formatPhoneReadable } from "@/lib/utils/patient-name-resolver";
+import { useParams } from "next/navigation";
+import { resolveUniversalAISummary, getTenantEntityType } from "@/lib/utils/universal-summary-resolver";
+import { UniversalAISummaryCard } from "@/components/features/takip/universal-ai-summary-card";
+import { useTenant } from "@/components/providers/tenant-provider";
 
 const MONTHS_TR = [
   { value: '01', label: 'Ocak' },
@@ -111,11 +115,31 @@ export default function PatientDetailDrawer({
   onGoToInbox,
   onRefresh
 }: PatientDetailDrawerProps) {
+  const params = useParams();
+  const tenantSlug = typeof params?.tenant_slug === 'string' ? params.tenant_slug : 'baskent';
+  const { tenant } = useTenant();
+  const entityType = getTenantEntityType(tenantSlug, tenant?.profile?.industry);
+
   const { data, isLoading, mutate } = useSWR(
     opportunityId ? ['patient-detail', opportunityId, activeTaskId] : null,
     () => getPatientTrackingDetail(opportunityId!, activeTaskId),
     { revalidateOnFocus: false }
   );
+
+  const resolvedSummary = useMemo(() => {
+    if (!data) return null;
+    return resolveUniversalAISummary(
+      {
+        oppSummary: data.summary,
+        oppAiReason: data.aiReason,
+        priority: data.priority,
+        nextBestAction: data.nextBestAction,
+        updatedAt: data.updatedAt
+      },
+      entityType,
+      data.patientName
+    );
+  }, [data, entityType]);
 
   // ── Unified Appointment Extraction Logic ──
   const appointmentTasks = data?.tasks?.filter((t: any) => {
@@ -1074,24 +1098,10 @@ export default function PatientDetailDrawer({
                             </div>
 
                             {/* Özet Detayları */}
-                            <div className="space-y-3">
-                              {data.aiReason && (
-                                <div className="px-3 py-2 bg-indigo-50 border border-indigo-100 rounded-xl">
-                                  <p className="text-[11px] font-semibold text-indigo-600 leading-normal flex items-start gap-1">
-                                    <span>🎯</span>
-                                    <span><strong>Neden Fırsat:</strong> {data.aiReason}</span>
-                                  </p>
-                                </div>
-                              )}
-                              {data.summary ? (
-                                <p className="text-[13px] text-[#1D1D1F] leading-relaxed font-semibold bg-[#F5F5F7]/60 p-3 rounded-xl border border-black/5">
-                                  {data.summary}
-                                </p>
-                              ) : (
-                                <p className="text-[12px] text-[#86868B] italic px-1">Henüz AI özeti oluşmamış.</p>
-                              )}
+                            {resolvedSummary && (
+                              <UniversalAISummaryCard summary={resolvedSummary} />
+                            )}
                             </div>
-                          </div>
 
                           {/* 🎯 Hasta Talebi Intent Card (Görüşme Özeti Altına Alındı) */}
                           {data.intentType && (
