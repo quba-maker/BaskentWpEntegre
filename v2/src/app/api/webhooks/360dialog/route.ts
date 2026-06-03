@@ -150,97 +150,127 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 6. Inbound Message Processing (Includes App Echoes)
+    // 6. Inbound Message Processing — Multi-Message Loop (Includes App Echoes)
+    // HOTFIX: Process ALL messages in the payload, not just messagesList[0].
+    // WhatsApp/360dialog can batch multiple messages in a single webhook delivery
+    // (especially during history imports and high-traffic windows).
     if (messagesList.length > 0) {
-      const msg = messagesList[0];
       const valueObj = body.entry?.[0]?.changes?.[0]?.value;
+      const isHistoryField = body.entry?.[0]?.changes?.[0]?.field === 'history';
+      const isSmbEchoField = body.entry?.[0]?.changes?.[0]?.field === 'smb_message_echoes';
 
-      // Echo detection: sent from display_phone_number, phone_number_id, or channel identifier
-      const isEcho = msg.from === channelRow.identifier || 
-                     msg.from === valueObj?.metadata?.phone_number_id || 
-                     msg.from === valueObj?.metadata?.display_phone_number;
+      let processedCount = 0;
+      let duplicateCount = 0;
+      let errorCount = 0;
 
-      // For outbound app echoes, the consumer of this webhook expects the customer number (msg.to) as sender
-      const senderPhone = isEcho 
-        ? (msg.to || contactsList?.[0]?.wa_id || msg.from)
-        : (contactsList?.[0]?.wa_id || msg.from);
+      for (const msg of messagesList) {
+        try {
+          // Per-message echo detection: sent from display_phone_number, phone_number_id, or channel identifier
+          const isEcho = msg.from === channelRow.identifier || 
+                         msg.from === valueObj?.metadata?.phone_number_id || 
+                         msg.from === valueObj?.metadata?.display_phone_number;
 
-      log.info(`[360DIALOG] [${isEcho ? 'OUTBOUND_ECHO' : 'INBOUND'}] Processing message: ${msg.id} from ${senderPhone}`, {
-        tenantSlug,
-        traceId
-      });
+          // For outbound app echoes, the consumer expects the customer number (msg.to) as sender
+          const senderPhone = isEcho 
+            ? (msg.to || contactsList?.[0]?.wa_id || msg.from)
+            : (contactsList?.[0]?.wa_id || msg.from);
 
-      // Idempotency check with locking
-      const { isDuplicate } = await dedupeService.checkAndLock({
-        provider: 'whatsapp',
-        providerMessageId: msg.id,
-        senderId: senderPhone,
-        timestamp: msg.timestamp ? parseInt(msg.timestamp) : Date.now()
-      });
+          log.info(`[360DIALOG] [${isEcho ? 'OUTBOUND_ECHO' : 'INBOUND'}] Processing message: ${msg.id} from ${senderPhone} [${processedCount + duplicateCount + errorCount + 1}/${messagesList.length}]`, {
+            tenantSlug,
+            traceId
+          });
 
-      if (isDuplicate) {
-        log.warn(`[360DIALOG] [DUPLICATE] Suppressing duplicate message: ${msg.id}`);
-        return new NextResponse("EVENT_RECEIVED_DUPLICATE", { status: 200 });
-      }
+          // Per-message idempotency check with locking
+          const { isDuplicate } = await dedupeService.checkAndLock({
+            provider: 'whatsapp',
+            providerMessageId: msg.id,
+            senderId: senderPhone,
+            timestamp: msg.timestamp ? parseInt(msg.timestamp) : Date.now()
+          });
 
-      // Map incoming payload to standard MetaWebhookPayload structure
-      const normalizedPayload = {
-        object: "whatsapp_business_account",
-        tenantId: tenantId,
-        channelId: channelRow.channel_id,
-        provider: "whatsapp",
-        routingSource: "360dialog_channel_id",
-        resolvedChannelIdentifier: channelRow.identifier,
-        entry: [
-          {
-            id: wabaId,
-            changes: [
+          if (isDuplicate) {
+            log.warn(`[360DIALOG] [DUPLICATE] Suppressing duplicate message: ${msg.id} [${duplicateCount + 1} dupes so far]`);
+            duplicateCount++;
+            continue; // Skip this message, process the rest
+          }
+
+          // Build per-message normalized payload (each message gets its own queue job)
+          const normalizedPayload = {
+            object: "whatsapp_business_account",
+            tenantId: tenantId,
+            channelId: channelRow.channel_id,
+            provider: "whatsapp",
+            routingSource: "360dialog_channel_id",
+            resolvedChannelIdentifier: channelRow.identifier,
+            entry: [
               {
-                field: "messages",
-                value: {
-                  messaging_product: "whatsapp",
-                  metadata: {
-                    display_phone_number: activeIdentifier,
-                    phone_number_id: activeIdentifier
-                  },
-                  contacts: contactsList.length > 0 ? contactsList : [
-                    {
-                      profile: { name: contactsList[0]?.profile?.name || (isEcho ? "Quba Business App" : "Customer") },
-                      wa_id: senderPhone
+                id: wabaId,
+                changes: [
+                  {
+                    field: "messages",
+                    value: {
+                      messaging_product: "whatsapp",
+                      metadata: {
+                        display_phone_number: activeIdentifier,
+                        phone_number_id: activeIdentifier
+                      },
+                      contacts: contactsList.length > 0 ? contactsList : [
+                        {
+                          profile: { name: contactsList[0]?.profile?.name || (isEcho ? "Quba Business App" : "Customer") },
+                          wa_id: senderPhone
+                        }
+                      ],
+                      messages: [
+                        {
+                          from: msg.from,
+                          to: msg.to,
+                          id: msg.id,
+                          timestamp: msg.timestamp,
+                          type: msg.type,
+                          text: msg.text ? { body: msg.text.body } : undefined,
+                          image: msg.image ? { id: msg.image.id, caption: msg.image.caption, mime_type: msg.image.mime_type, url: msg.image.url } : undefined,
+                          document: msg.document ? { id: msg.document.id, filename: msg.document.filename, mime_type: msg.document.mime_type, url: msg.document.url } : undefined,
+                          audio: msg.audio ? { id: msg.audio.id, mime_type: msg.audio.mime_type, url: msg.audio.url } : undefined,
+                          video: msg.video ? { id: msg.video.id, caption: msg.video.caption, mime_type: msg.video.mime_type, url: msg.video.url } : undefined,
+                          location: msg.location ? { latitude: msg.location.latitude, longitude: msg.location.longitude, name: msg.location.name } : undefined,
+                          sticker: msg.sticker ? { id: msg.sticker.id, mime_type: msg.sticker.mime_type } : undefined,
+                          button: msg.button ? { text: msg.button.text, payload: msg.button.payload } : undefined,
+                          interactive: msg.interactive ? { button_reply: msg.interactive.button_reply, list_reply: msg.interactive.list_reply } : undefined,
+                          is_history_import: isHistoryField || valueObj?.is_history_import,
+                          is_smb_echo: isSmbEchoField || valueObj?.is_smb_echo
+                        }
+                      ]
                     }
-                  ],
-                  messages: [
-                    {
-                      from: msg.from,
-                      to: msg.to,
-                      id: msg.id,
-                      timestamp: msg.timestamp,
-                      type: msg.type,
-                      text: msg.text ? { body: msg.text.body } : undefined,
-                      image: msg.image ? { id: msg.image.id, caption: msg.image.caption, mime_type: msg.image.mime_type, url: msg.image.url } : undefined,
-                      document: msg.document ? { id: msg.document.id, filename: msg.document.filename, mime_type: msg.document.mime_type, url: msg.document.url } : undefined,
-                      audio: msg.audio ? { id: msg.audio.id, mime_type: msg.audio.mime_type, url: msg.audio.url } : undefined,
-                      video: msg.video ? { id: msg.video.id, caption: msg.video.caption, mime_type: msg.video.mime_type, url: msg.video.url } : undefined,
-                      location: msg.location ? { latitude: msg.location.latitude, longitude: msg.location.longitude, name: msg.location.name } : undefined,
-                      sticker: msg.sticker ? { id: msg.sticker.id, mime_type: msg.sticker.mime_type } : undefined,
-                      button: msg.button ? { text: msg.button.text, payload: msg.button.payload } : undefined,
-                      interactive: msg.interactive ? { button_reply: msg.interactive.button_reply, list_reply: msg.interactive.list_reply } : undefined,
-                      is_history_import: body.entry?.[0]?.changes?.[0]?.field === 'history' || valueObj?.is_history_import,
-                      is_smb_echo: body.entry?.[0]?.changes?.[0]?.field === 'smb_message_echoes' || valueObj?.is_smb_echo
-                    }
-                  ]
-                }
+                  }
+                ]
               }
             ]
-          }
-        ]
-      };
+          };
 
-      // Publish to the queue
-      waitUntil(queue.publish(tenantId, 'whatsapp.message.received', normalizedPayload, {
-        channelId: channelRow.channel_id,
-        groupId: channelRow.group_id
-      }));
+          // Publish each message as an independent queue job
+          waitUntil(queue.publish(tenantId, 'whatsapp.message.received', normalizedPayload, {
+            channelId: channelRow.channel_id,
+            groupId: channelRow.group_id
+          }));
+
+          processedCount++;
+        } catch (msgError: any) {
+          // Error isolation: log and continue with remaining messages
+          errorCount++;
+          log.error(`[360DIALOG] [MSG_LOOP_ERROR] Failed to process message ${msg?.id || 'unknown'}, continuing with remaining messages`, msgError, {
+            tenantSlug,
+            traceId,
+            messageIndex: processedCount + duplicateCount + errorCount,
+            totalMessages: messagesList.length
+          });
+        }
+      }
+
+      log.info(`[360DIALOG] [BATCH_COMPLETE] Processed ${processedCount} messages, ${duplicateCount} duplicates skipped, ${errorCount} errors`, {
+        tenantSlug,
+        traceId,
+        totalInPayload: messagesList.length
+      });
 
       return new NextResponse("EVENT_RECEIVED", { status: 200 });
     }

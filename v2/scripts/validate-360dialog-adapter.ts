@@ -1598,6 +1598,259 @@ async function runValidationTests() {
   worker["aiOrchestrator"].generateResponse = originalGenerateForTest;
   MessageService.prototype.saveMessageIdempotent = originalSaveMessage;
 
+  // ----------------------------------------------------
+  // TEST 14: Multi-Message Payload Loop Processing (HOTFIX VALIDATION)
+  // Validates the critical fix: messagesList[0] → for...of loop
+  // ----------------------------------------------------
+  console.log("\n🧪 [TEST 14] Multi-Message Payload Loop Processing (Hotfix Validation)...");
+
+  // 14-A: Multi-message inbound flat payload (body.messages with 3 messages)
+  publishedQueueEvents = [];
+  loggedEvents = [];
+
+  const reqMultiInbound = new NextRequest("http://localhost:3000/api/webhooks/360dialog?channel_id=test-channel-uuid", {
+    method: "POST",
+    headers: { "x-360dialog-secret": "super_secure_360dialog_secret_123456" },
+    body: JSON.stringify({
+      messages: [
+        { id: "multi_msg_001", from: "905001112233", type: "text", text: { body: "Merhaba" }, timestamp: "1780000100" },
+        { id: "multi_msg_002", from: "905001112233", type: "text", text: { body: "Ben geliyorum" }, timestamp: "1780000101" },
+        { id: "multi_msg_003", from: "905001112233", type: "image", image: { id: "img_123", caption: "Röntgen", mime_type: "image/jpeg" }, timestamp: "1780000102" }
+      ],
+      contacts: [{ profile: { name: "Multi Test" }, wa_id: "905001112233" }]
+    })
+  });
+
+  const resMultiInbound = await POST(reqMultiInbound);
+  if (resMultiInbound.status !== 200) {
+    throw new Error(`TEST 14-A: Multi-inbound returned status ${resMultiInbound.status}`);
+  }
+  if (publishedQueueEvents.length !== 3) {
+    throw new Error(`TEST 14-A: Expected 3 queue events, got ${publishedQueueEvents.length}`);
+  }
+  // Verify each message has correct content
+  const msg1 = publishedQueueEvents[0].payload.entry[0].changes[0].value.messages[0];
+  const msg2 = publishedQueueEvents[1].payload.entry[0].changes[0].value.messages[0];
+  const msg3 = publishedQueueEvents[2].payload.entry[0].changes[0].value.messages[0];
+  if (msg1.text?.body !== "Merhaba" || msg1.id !== "multi_msg_001") {
+    throw new Error(`TEST 14-A: Message 1 content mismatch`);
+  }
+  if (msg2.text?.body !== "Ben geliyorum" || msg2.id !== "multi_msg_002") {
+    throw new Error(`TEST 14-A: Message 2 content mismatch`);
+  }
+  if (msg3.type !== "image" || msg3.id !== "multi_msg_003" || msg3.image?.caption !== "Röntgen") {
+    throw new Error(`TEST 14-A: Message 3 (image) content mismatch`);
+  }
+  console.log("   ✅ 14-A: Multi-message inbound flat payload → 3 separate queue jobs: PASS");
+
+  // 14-B: Provider timestamp preserved per message
+  if (msg1.timestamp !== "1780000100" || msg2.timestamp !== "1780000101" || msg3.timestamp !== "1780000102") {
+    throw new Error(`TEST 14-B: Provider timestamps not preserved per message`);
+  }
+  console.log("   ✅ 14-B: Provider timestamp preserved per message: PASS");
+
+  // 14-C: Multi-message echo payload (value.message_echoes with 2 echoes)
+  publishedQueueEvents = [];
+
+  const reqMultiEcho = new NextRequest("http://localhost:3000/api/webhooks/360dialog?channel_id=test-channel-uuid", {
+    method: "POST",
+    headers: { "x-360dialog-secret": "super_secure_360dialog_secret_123456" },
+    body: JSON.stringify({
+      entry: [{
+        id: "waba_multi_echo",
+        changes: [{
+          field: "smb_message_echoes",
+          value: {
+            metadata: { display_phone_number: "+905527641397", phone_number_id: "+905527641397" },
+            message_echoes: [
+              { id: "echo_001", from: "+905527641397", to: "905001112233", type: "text", text: { body: "Merhaba hasta" }, timestamp: "1780000200" },
+              { id: "echo_002", from: "+905527641397", to: "905001112233", type: "text", text: { body: "Randevunuz onaylandı" }, timestamp: "1780000201" }
+            ],
+            contacts: [{ profile: { name: "Quba Business App" }, wa_id: "+905527641397" }]
+          }
+        }]
+      }]
+    })
+  });
+
+  const resMultiEcho = await POST(reqMultiEcho);
+  if (resMultiEcho.status !== 200) {
+    throw new Error(`TEST 14-C: Multi-echo returned status ${resMultiEcho.status}`);
+  }
+  if (publishedQueueEvents.length !== 2) {
+    throw new Error(`TEST 14-C: Expected 2 queue events for echoes, got ${publishedQueueEvents.length}`);
+  }
+  // Verify is_smb_echo flag set on each
+  const echo1 = publishedQueueEvents[0].payload.entry[0].changes[0].value.messages[0];
+  const echo2 = publishedQueueEvents[1].payload.entry[0].changes[0].value.messages[0];
+  if (!echo1.is_smb_echo || !echo2.is_smb_echo) {
+    throw new Error(`TEST 14-C: is_smb_echo flag missing on echo messages`);
+  }
+  if (echo1.text?.body !== "Merhaba hasta" || echo2.text?.body !== "Randevunuz onaylandı") {
+    throw new Error(`TEST 14-C: Echo message content mismatch`);
+  }
+  console.log("   ✅ 14-C: Multi-message echo payload → 2 separate queue jobs with is_smb_echo=true: PASS");
+
+  // 14-D: Multi-message history import payload
+  publishedQueueEvents = [];
+
+  const reqMultiHistory = new NextRequest("http://localhost:3000/api/webhooks/360dialog?channel_id=test-channel-uuid", {
+    method: "POST",
+    headers: { "x-360dialog-secret": "super_secure_360dialog_secret_123456" },
+    body: JSON.stringify({
+      entry: [{
+        id: "waba_history",
+        changes: [{
+          field: "history",
+          value: {
+            metadata: { display_phone_number: "+905527641397" },
+            messages: [
+              { id: "hist_001", from: "905001112233", type: "text", text: { body: "Eski mesaj 1" }, timestamp: "1770000000" },
+              { id: "hist_002", from: "905001112233", type: "text", text: { body: "Eski mesaj 2" }, timestamp: "1770000001" },
+              { id: "hist_003", from: "+905527641397", to: "905001112233", type: "text", text: { body: "Eski cevap" }, timestamp: "1770000002" }
+            ],
+            contacts: [{ profile: { name: "History User" }, wa_id: "905001112233" }]
+          }
+        }]
+      }]
+    })
+  });
+
+  const resMultiHistory = await POST(reqMultiHistory);
+  if (resMultiHistory.status !== 200) {
+    throw new Error(`TEST 14-D: Multi-history returned status ${resMultiHistory.status}`);
+  }
+  if (publishedQueueEvents.length !== 3) {
+    throw new Error(`TEST 14-D: Expected 3 queue events for history, got ${publishedQueueEvents.length}`);
+  }
+  // Verify is_history_import flag set on each
+  const hist1 = publishedQueueEvents[0].payload.entry[0].changes[0].value.messages[0];
+  const hist2 = publishedQueueEvents[1].payload.entry[0].changes[0].value.messages[0];
+  const hist3 = publishedQueueEvents[2].payload.entry[0].changes[0].value.messages[0];
+  if (!hist1.is_history_import || !hist2.is_history_import || !hist3.is_history_import) {
+    throw new Error(`TEST 14-D: is_history_import flag missing on history messages`);
+  }
+  console.log("   ✅ 14-D: Multi-message history import → 3 queue jobs with is_history_import=true: PASS");
+
+  // 14-E: Partial duplicate handling (message 2 is duplicate, 1 and 3 should still process)
+  publishedQueueEvents = [];
+
+  // Monkeypatch dedupe to return isDuplicate for specific ID
+  const originalCheckAndLock = WebhookDedupeService.prototype.checkAndLock;
+  let dedupeCallCount = 0;
+  WebhookDedupeService.prototype.checkAndLock = async function (params: any) {
+    dedupeCallCount++;
+    if (params.providerMessageId === "partial_dup_002") {
+      return { isDuplicate: true, lockHash: 99999 };
+    }
+    return { isDuplicate: false, lockHash: 99999 };
+  };
+
+  const reqPartialDup = new NextRequest("http://localhost:3000/api/webhooks/360dialog?channel_id=test-channel-uuid", {
+    method: "POST",
+    headers: { "x-360dialog-secret": "super_secure_360dialog_secret_123456" },
+    body: JSON.stringify({
+      messages: [
+        { id: "partial_dup_001", from: "905001112233", type: "text", text: { body: "Yeni mesaj" }, timestamp: "1780000300" },
+        { id: "partial_dup_002", from: "905001112233", type: "text", text: { body: "Duplicate mesaj" }, timestamp: "1780000301" },
+        { id: "partial_dup_003", from: "905001112233", type: "text", text: { body: "Başka yeni mesaj" }, timestamp: "1780000302" }
+      ],
+      contacts: [{ profile: { name: "Dup Test" }, wa_id: "905001112233" }]
+    })
+  });
+
+  dedupeCallCount = 0;
+  const resPartialDup = await POST(reqPartialDup);
+  if (resPartialDup.status !== 200) {
+    throw new Error(`TEST 14-E: Partial dup returned status ${resPartialDup.status}`);
+  }
+  // All 3 messages should have been checked for dedupe
+  if (dedupeCallCount !== 3) {
+    throw new Error(`TEST 14-E: Expected 3 dedupe checks, got ${dedupeCallCount}`);
+  }
+  // Only 2 should be published (msg 2 was duplicate)
+  if (publishedQueueEvents.length !== 2) {
+    throw new Error(`TEST 14-E: Expected 2 queue events (1 dup skipped), got ${publishedQueueEvents.length}`);
+  }
+  const pubMsg1 = publishedQueueEvents[0].payload.entry[0].changes[0].value.messages[0];
+  const pubMsg3 = publishedQueueEvents[1].payload.entry[0].changes[0].value.messages[0];
+  if (pubMsg1.id !== "partial_dup_001" || pubMsg3.id !== "partial_dup_003") {
+    throw new Error(`TEST 14-E: Wrong messages published after partial dup skip`);
+  }
+  console.log("   ✅ 14-E: Partial duplicate → 1 skipped, 2 processed, 3 dedupe checks: PASS");
+
+  // Restore original dedupe
+  WebhookDedupeService.prototype.checkAndLock = originalCheckAndLock;
+
+  // 14-F: Direction per message (mixed inbound + echo in same payload via Meta nested format)
+  publishedQueueEvents = [];
+
+  const reqMixedDirection = new NextRequest("http://localhost:3000/api/webhooks/360dialog?channel_id=test-channel-uuid", {
+    method: "POST",
+    headers: { "x-360dialog-secret": "super_secure_360dialog_secret_123456" },
+    body: JSON.stringify({
+      entry: [{
+        id: "waba_mixed",
+        changes: [{
+          field: "messages",
+          value: {
+            metadata: { display_phone_number: "+905527641397", phone_number_id: "+905527641397" },
+            messages: [
+              { id: "dir_inbound_001", from: "905001112233", type: "text", text: { body: "Hasta mesajı" }, timestamp: "1780000400" },
+              { id: "dir_echo_001", from: "+905527641397", to: "905001112233", type: "text", text: { body: "İşletme cevabı" }, timestamp: "1780000401" }
+            ],
+            contacts: [{ profile: { name: "Direction Test" }, wa_id: "905001112233" }]
+          }
+        }]
+      }]
+    })
+  });
+
+  const resMixed = await POST(reqMixedDirection);
+  if (resMixed.status !== 200) {
+    throw new Error(`TEST 14-F: Mixed direction returned status ${resMixed.status}`);
+  }
+  if (publishedQueueEvents.length !== 2) {
+    throw new Error(`TEST 14-F: Expected 2 queue events, got ${publishedQueueEvents.length}`);
+  }
+  // First message is inbound (from patient), second is echo (from business number)
+  const dirMsg1 = publishedQueueEvents[0].payload.entry[0].changes[0].value.messages[0];
+  const dirMsg2 = publishedQueueEvents[1].payload.entry[0].changes[0].value.messages[0];
+  if (dirMsg1.from !== "905001112233") {
+    throw new Error(`TEST 14-F: Inbound message 'from' field wrong: ${dirMsg1.from}`);
+  }
+  if (dirMsg2.from !== "+905527641397") {
+    throw new Error(`TEST 14-F: Echo message 'from' field wrong: ${dirMsg2.from}`);
+  }
+  console.log("   ✅ 14-F: Mixed direction (inbound + echo) per-message detection: PASS");
+
+  // 14-G: Single message payload still works (regression guard)
+  publishedQueueEvents = [];
+
+  const reqSingle = new NextRequest("http://localhost:3000/api/webhooks/360dialog?channel_id=test-channel-uuid", {
+    method: "POST",
+    headers: { "x-360dialog-secret": "super_secure_360dialog_secret_123456" },
+    body: JSON.stringify({
+      messages: [
+        { id: "single_msg_001", from: "905001112233", type: "text", text: { body: "Tek mesaj" }, timestamp: "1780000500" }
+      ],
+      contacts: [{ profile: { name: "Single Test" }, wa_id: "905001112233" }]
+    })
+  });
+
+  const resSingle = await POST(reqSingle);
+  if (resSingle.status !== 200) {
+    throw new Error(`TEST 14-G: Single message returned status ${resSingle.status}`);
+  }
+  if (publishedQueueEvents.length !== 1) {
+    throw new Error(`TEST 14-G: Expected exactly 1 queue event, got ${publishedQueueEvents.length}`);
+  }
+  const singleMsg = publishedQueueEvents[0].payload.entry[0].changes[0].value.messages[0];
+  if (singleMsg.text?.body !== "Tek mesaj" || singleMsg.id !== "single_msg_001") {
+    throw new Error(`TEST 14-G: Single message content mismatch`);
+  }
+  console.log("   ✅ 14-G: Single message payload backward compatibility: PASS");
+
   console.log("\n🎉 ALL 360DIALOG COEXISTENCE ADAPTER VALIDATION TESTS PASSED!");
   console.log("==========================================================\n");
 
