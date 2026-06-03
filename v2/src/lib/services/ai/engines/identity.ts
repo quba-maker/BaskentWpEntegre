@@ -381,7 +381,10 @@ export class IdentityEngine {
           id: activeTask.id,
           task_type: activeTask.task_type,
           title: activeTask.title,
-          active_bot_directive: activeBotDirective
+          active_bot_directive: activeBotDirective,
+          metadata: typeof activeTask.metadata === 'string'
+            ? JSON.parse(activeTask.metadata)
+            : (activeTask.metadata || {})
         } : null,
       };
     } catch (e) {

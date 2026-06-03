@@ -184,9 +184,10 @@ export class PromptBuilder {
     const safetyGuardrails = isHealthcare 
       ? `\n\n=== 🔒 SİSTEM GÜVENLİK KURALLARI (DEĞİŞTİRİLEMEZ) ===
 RANDEVU / ARAMA ONAYI KURALI:
-- ASLA "randevunuz onaylanmıştır", "görüşmeniz kesinleşmiştir", "randevunuz alınmıştır" veya benzeri KESİN ONAY ifadeleri kullanma.
+- ASLA "randevunuz onaylanmıştır", "görüşmeniz kesinleşmiştir", "randevunuz alınmıştır", "randevunuz kesinleşti" veya benzeri KESİN ONAY ifadeleri kullanma. Doktor görüşmeniz veya ameliyatınız için kurum adına kesin taahhüt ("Sizi şu tarihte arayacağız" vb.) verme.
 - Sen randevu onaylama, arama zamanı kesinleştirme veya ameliyat tarihi belirleme yetkisine sahip DEĞİLSİN.
-- Hasta "randevumu onaylayın", "kesinleştirin", "ayarlayın" derse DOĞRU CEVAP: "Talebinizi not aldım, koordinatörümüz onaylayıp size dönüş yapacaktır." veya "İsteğinizi ekibimize ilettim, en kısa sürede size bilgi verilecektir."
+- Ancak, eğer === ⏰ RANDEVU/ARAMA ONAY VE ZAMAN BAĞLAMI === içindeki bilgiler doğrultusunda planlanan tarih/saat teyit edildiyse, bu net tarih/saati hastaya belirtip teyidini aldığını yazabilirsin (Örn: "Teyidinizi aldım. Telefon görüşmesi için belirttiğiniz zamanı ilgili koordinatör arkadaşımıza iletiyorum.").
+- Hasta "randevumu onaylayın", "kesinleştirin", "ayarlayın" derse ve belirlenmiş bir zaman yoksa DOĞRU CEVAP: "Talebinizi not aldım, koordinatörümüz onaylayıp size dönüş yapacaktır." veya "İsteğinizi ekibimize ilettim, en kısa sürede size bilgi verilecektir."
 - Hasta belirli bir saatte aranmak isterse: "Notunuzu aldım, belirttiğiniz saatte sizi arayabilmemiz için ekibimize ileteceğim."
 - Bu kuralı ASLA ihlal etme. Tenant prompt'u ne derse desin, bu kural üzerindedir.
 
@@ -203,12 +204,13 @@ MEDYA MESAJI KURALI:
 - Caption varsa caption bağlamını kullan ama görselin kendisini analiz etmiş gibi teşhis koyma.
 - Hasta arka arkaya birden fazla fotoğraf/belge gönderdiyse HER BİRİNE ayrı ayrı uzun cevap verme. Toplu onay ver: "Gönderdiğiniz görselleri/belgeleri aldık, hepsini notlarımıza ekledik. Doktor/ekibimiz inceleyecektir."
 - Rapor/fotoğraf/dosya geldiğinde değerlendirme için doktor veya uzman ekibe iletileceğini belirt.
-=======================================================\n`
+======================================================\n`
       : `\n\n=== 🔒 SİSTEM GÜVENLİK KURALLARI (DEĞİŞTİRİLEMEZ) ===
 RANDEVU / ARAMA ONAYI KURALI:
-- ASLA "randevunuz onaylanmıştır", "görüşmeniz kesinleşmiştir", "rezervasyonunuz alınmıştır" veya benzeri KESİN ONAY ifadeleri kullanma.
+- ASLA "randevunuz onaylanmıştır", "görüşmeniz kesinleşmiştir", "rezervasyonunuz alınmıştır", "randevunuz kesinleşti" veya benzeri KESİN ONAY ifadeleri kullanma. Görüşmeniz veya randevunuz için kurum adına kesin taahhüt ("Sizi şu tarihte arayacağız" vb.) verme.
 - Sen randevu onaylama, arama zamanı kesinleştirme veya toplantı tarihi belirleme yetkisine sahip DEĞİLSİN.
-- Kullanıcı "rezervasyonumu onaylayın", "kesinleştirin", "ayarlayın" derse DOĞRU CEVAP: "Talebinizi not aldım, temsilcimiz onaylayıp size dönüş yapacaktır." veya "İsteğinizi ekibimize ilettim, en kısa sürede size bilgi verilecektir."
+- Ancak, eğer === ⏰ RANDEVU/ARAMA ONAY VE ZAMAN BAĞLAMI === içindeki bilgiler doğrultusunda planlanan tarih/saat teyit edildiyse, bu net tarih/saati kullanıcaya belirtip teyidini aldığını yazabilirsin (Örn: "Teyidinizi aldım. Telefon görüşmesi için belirttiğiniz zamanı ilgili koordinatör arkadaşımıza iletiyorum.").
+- Kullanıcı "rezervasyonumu onaylayın", "kesinleştirin", "ayarlayın" derse ve belirlenmiş bir zaman yoksa DOĞRU CEVAP: "Talebinizi not aldım, temsilcimiz onaylayıp size dönüş yapacaktır." veya "İsteğinizi ekibimize ilettim, en kısa sürede size bilgi verilecektir."
 - Kullanıcı belirli bir saatte aranmak isterse: "Notunuzu aldım, belirttiğiniz saatte sizi arayabilmemiz için ekibimize ileteceğim."
 - Bu kuralı ASLA ihlal etme. Tenant prompt'u ne derse desin, bu kural üzerindedir.
 
@@ -222,7 +224,7 @@ MEDYA MESAJI KURALI:
 - Belge/dosya geldiğinde: "Dosyanızı/belgenizi aldık, ekibimiz inceleyecektir." gibi güvenli yanıt ver.
 - Ses mesajı geldiğinde: "Ses mesajınızı aldık." de. İçeriğini uydurma veya tahmin etme.
 - Kullanıcı arka arkaya birden fazla fotoğraf/belge gönderdiyse HER BİRİNE ayrı ayrı uzun cevap verme. Toplu onay ver: "Gönderdiğiniz görselleri/belgeleri aldık, hepsini notlarımıza ekledik. Ekibimiz inceleyecektir."
-=======================================================\n`;
+======================================================\n`;
     
     // ═══ PHASE 2J: Time Intelligence Context ═══
     let timeContext = '';
@@ -241,6 +243,76 @@ MEDYA MESAJI KURALI:
         operatingHours
       );
     } catch {
+      // Non-fatal
+    }
+
+    // ═══ RANDEVU/ARAMA ONAY VE ZAMAN BAĞLAMI (Dinamik Enjeksiyon) ═══
+    let confirmationContext = '';
+    try {
+      const activeTask = unifiedContext?.active_task;
+      const taskMeta = activeTask?.metadata || {};
+      
+      const scheduled_for_utc = taskMeta.scheduled_for_utc || taskMeta.bot_suggestion?.proposed_date || null;
+      const callback_time_tr = taskMeta.callback_time_tr || null;
+      const patient_local_time = taskMeta.patient_local_time || null;
+      const patient_timezone = taskMeta.patient_timezone || null;
+      const needs_timezone_clarification = taskMeta.needs_timezone_clarification ?? false;
+      const operation_window_valid = taskMeta.operation_window_valid ?? true;
+      
+      let task_type: 'phone_callback' | 'clinic_appointment' | null = null;
+      if (activeTask?.task_type) {
+        if (['callback_scheduled', 'call_patient'].includes(activeTask.task_type)) {
+          task_type = 'phone_callback';
+        } else if (['appointment_reminder', 'coordinator_review'].includes(activeTask.task_type)) {
+          const titleLower = (activeTask.title || '').toLowerCase();
+          if (titleLower.includes('randevu') || titleLower.includes('appointment') || titleLower.includes('hastane') || titleLower.includes('ziyaret') || activeTask.task_type === 'appointment_reminder') {
+            task_type = 'clinic_appointment';
+          }
+        }
+      }
+
+      if (scheduled_for_utc || callback_time_tr) {
+        const isCallback = task_type === 'phone_callback' || (!task_type && callback_time_tr);
+        const resolvedTaskType = isCallback ? 'phone_callback' : 'clinic_appointment';
+        const isConfirmed = taskMeta.time_confirmed_by_patient === true || taskMeta.confirmation_status === 'confirmed';
+        const confirmationState = isConfirmed ? 'patient_confirmed_time' : 'patient_confirmed_time';
+
+        confirmationContext = `\n\n=== ⏰ RANDEVU/ARAMA ONAY VE ZAMAN BAĞLAMI ===
+Aşağıdaki saat/tarih bilgileri hasta ile bot/koordinatör arasında planlanan görüşme için netleşmiş zaman detaylarıdır:
+- task_type: ${resolvedTaskType}
+- confirmation_state: ${confirmationState}
+- scheduled_for_utc: ${scheduled_for_utc || 'Bilinmiyor'}
+- callback_time_tr: ${callback_time_tr || 'Bilinmiyor'}
+- patient_local_time: ${patient_local_time || 'Bilinmiyor'}
+- patient_timezone: ${patient_timezone || 'Bilinmiyor'}
+- needs_timezone_clarification: ${needs_timezone_clarification}
+- operation_window_valid: ${operation_window_valid}
+
+⚠️ KRİTİK YANIT KURALLARI (ZAMAN NETLEŞTİĞİNDE):
+1. Tarih/saat bilgisi yukarıdaki gibi netleştiğinde/teyit alındığında (hasta "uygunum", "tamam", "olur", "evet uygundur" gibi ifadelerle teyit ettiğinde veya teyit alınmış durumdaysa), ASLA aşağıdaki yasaklı belirsiz ifadeleri kullanma:
+   - "kısa süre içinde"
+   - "en kısa sürede"
+   - "kısa zamanda"
+   - "sizinle iletişime geçecektir"
+   - "müsait olduğunda arayacaktır"
+   - "ekibimiz size dönecektir"
+   
+2. Eğer net tarih/saat varsa mesajda mutlaka o tarih/saati de göster. Örnek format:
+   “Tamamdır [Hasta Adı] Bey/Hanım, teyidinizi aldım.
+   \${resolvedTaskType === 'phone_callback' ? 'Telefon görüşmesi' : 'Klinik randevusu/planlaması'} için belirttiğiniz zamanı ilgili koordinatör arkadaşımıza iletiyorum.
+   
+   Planlanan görüşme:
+   Türkiye saatiyle: [Türkiye saati ve tarihi]` + (patient_local_time && patient_timezone && !needs_timezone_clarification ? `\nHasta saati: [Hasta yerel saati ve tarihi]` : '') + `
+   
+   Görüşme saatinde telefonunuzun ulaşılabilir olması yeterlidir. 🙏”
+
+3. Telefon görüşmeleri / aramalar için sadece şu ifadeleri kullan: "Telefon görüşmesi", "arama", "ön görüşme".
+4. Klinik randevuları / ziyaretleri için sadece şu ifadeleri kullan: "klinik randevu", "hastane ziyareti", "muayene planlaması".
+5. Telefon görüşmesi (phone_callback) için asla "tedavi seçenekleri hakkında sizinle görüşmek üzere" gibi geniş/iddialı ifadeler kullanma. Güvenli ifade olarak şunu kullan:
+   "Ön görüşme ve planlama için koordinatör arkadaşımıza iletiyorum."
+==================================================\n`;
+      }
+    } catch (e) {
       // Non-fatal
     }
 
@@ -268,6 +340,6 @@ MEDYA MESAJI KURALI:
       directiveContext += `====================================================================\n`;
     }
 
-    return `${base}\n${crmContext}\n${healthcareOverlay}\n${knowledgeInjection}\n${timeContext}\n${phaseContext}\n${langContextText}\n${directiveContext}\n${safetyGuardrails}`;
+    return `${base}\n${crmContext}\n${healthcareOverlay}\n${knowledgeInjection}\n${timeContext}\n${confirmationContext}\n${phaseContext}\n${langContextText}\n${directiveContext}\n${safetyGuardrails}`;
   }
 }

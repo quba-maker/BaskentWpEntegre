@@ -2087,6 +2087,68 @@ export class QueueWorkerEngine {
         newIdentityDetected: newIdentityDetected || crmData?.new_identity_detected || false,
       });
 
+      // ═══════════════════════════════════════════════════════════
+      // Bot Appointment/Callback Confirmation Context Pre-Calculation (P0)
+      // ═══════════════════════════════════════════════════════════
+      let isConfirmed = false;
+      let activeBotTasks: any[] = [];
+      try {
+        activeBotTasks = await db.executeSafe({
+          text: `SELECT id, metadata, due_at, task_type, title, opportunity_id FROM follow_up_tasks
+                 WHERE RIGHT(phone_number, 10) = RIGHT($1, 10) AND tenant_id = $2
+                   AND status IN ('pending', 'in_progress')
+                   AND task_type != 'appointment_reminder'
+                 ORDER BY updated_at DESC`,
+          values: [phoneNumber, tenantId]
+        }) as any[];
+
+        isConfirmed = !!((crmData as any)?.appointment_confirmed || deterministicConfirmation);
+        if (isConfirmed && content) {
+          const isGenericShortConfirmation = /^\s*(tamam|olur|uygunum|okey|ok|yes|evet)\s*$/i.test(content);
+          if (isGenericShortConfirmation) {
+            let hasContextTimeSuggestion = false;
+
+            // Check active tasks for confirm directive
+            const hasPendingConfirmDirective = activeBotTasks.some(t => {
+              const tMeta = typeof t.metadata === 'string' ? JSON.parse(t.metadata) : (t.metadata || {});
+              const ds = tMeta.bot_directive_state;
+              return ds && 
+                     ['confirm_callback_time', 'confirm_clinic_appointment'].includes(ds.directive_type) &&
+                     ['pending', 'waiting_patient'].includes(ds.directive_status);
+            });
+
+            if (hasPendingConfirmDirective) {
+              hasContextTimeSuggestion = true;
+            } else {
+              // Check last 3 assistant messages
+              const assistantMessages = history
+                .filter(m => m.role === 'assistant')
+                .slice(-3);
+              
+              const timeSuggestRegex = /\b(saat|tarih|randevu|arama|uygun|pazartesi|salı|çarşamba|perşembe|cuma|cumartesi|pazar|ocak|şubat|mart|nisan|mayıs|haziran|temmuz|ağustos|eylül|ekim|kasım|aralık)\b|\d{1,2}[:.]\d{2}/i;
+              
+              for (const msg of assistantMessages) {
+                if (timeSuggestRegex.test(msg.content)) {
+                  hasContextTimeSuggestion = true;
+                  break;
+                }
+              }
+            }
+
+            if (!hasContextTimeSuggestion) {
+              this.log.info(`[CONFIRMATION_BYPASSED] Overriding confirmation for generic message "${content}" because no proposed date/time suggestion was found in context.`, { traceId });
+              isConfirmed = false;
+              if (crmData) {
+                crmData.appointment_confirmed = false;
+                crmData.time_confirmed_by_patient = false;
+              }
+            }
+          }
+        }
+      } catch (confirmPreErr) {
+        this.log.error('[BOT_CONFIRMATION_PRE_CALC_FAILED] Non-fatal pre-calculation error', confirmPreErr instanceof Error ? confirmPreErr : new Error(String(confirmPreErr)), { traceId });
+      }
+
       // ═══ P0-4: CRM_CONVERSATION_UPDATE_RESULT — after-snapshot ═══
       let afterConv: any = null;
       try {
@@ -2551,25 +2613,31 @@ export class QueueWorkerEngine {
               const taskService = new TaskService(db);
               const notifService = new NotificationService(db);
 
+              // Prevent duplicate task by cloning crmData and deleting requested_callback_datetime if confirmed
+              const crmDataForTaskGeneration = { ...crmData };
+              if (isConfirmed) {
+                delete crmDataForTaskGeneration.requested_callback_datetime;
+              }
+
               // 1. Generate aggregated task (internally uses SignalAggregator + group-based dedup)
               const taskIds = await taskService.generateFromCrm({
                 tenantId,
                 opportunityId: afterOpp.id,
                 phoneNumber,
                 conversationId,
-                crmData,
-                patientName: crmData.patient_name,
+                crmData: crmDataForTaskGeneration,
+                patientName: crmDataForTaskGeneration.patient_name,
               });
               if (taskIds.length > 0) {
                 this.log.info(`[TASK_AGGREGATED] Created/merged ${taskIds.length} tasks`, { traceId, oppId: afterOpp.id, taskIds });
               }
               // 2. Single aggregated notification dispatch
               const aggregator = new SignalAggregator();
-              const aggregated = aggregator.aggregate(crmData, {
-                patientName: crmData.patient_name,
+              const aggregated = aggregator.aggregate(crmDataForTaskGeneration, {
+                patientName: crmDataForTaskGeneration.patient_name,
                 phoneNumber,
-                department: crmData.department,
-                country: crmData.country,
+                department: crmDataForTaskGeneration.department,
+                country: crmDataForTaskGeneration.country,
               });
 
               if (aggregated) {
@@ -2642,49 +2710,9 @@ export class QueueWorkerEngine {
 
       // ═══════════════════════════════════════════════════════════
       // Bot Appointment/Callback Confirmation Auto-Detection (P0)
-      // Runs even when crmData is null or opportunity upsert failed,
-      // as long as either LLM or deterministic detector triggers.
+      // Already handled during top-level pre-calculation block to avoid double-writes
+      // and ensure correct FSM directive transitions.
       // ═══════════════════════════════════════════════════════════
-      const isConfirmed = !!((crmData as any)?.appointment_confirmed || deterministicConfirmation);
-      if (isConfirmed) {
-        try {
-          const activeBotTasks = await db.executeSafe({
-            text: `SELECT id, metadata FROM follow_up_tasks
-                   WHERE RIGHT(phone_number, 10) = RIGHT($1, 10) AND tenant_id = $2
-                     AND status IN ('pending', 'in_progress')
-                     AND task_type != 'appointment_reminder'
-                   ORDER BY updated_at DESC`,
-            values: [phoneNumber, tenantId]
-          }) as any[];
-
-          for (const targetTask of activeBotTasks) {
-            const taskMeta = typeof targetTask.metadata === 'string' 
-              ? JSON.parse(targetTask.metadata) 
-              : (targetTask.metadata || {});
-
-            taskMeta.confirmation_status = 'confirmed';
-            
-            taskMeta.bot_suggestion = {
-              proposed_date: targetTask.due_at,
-              status: 'pending',
-              detected_at: new Date().toISOString(),
-              user_message: content || 'evet onaylıyorum',
-              is_confirmation_only: true
-            };
-
-            await db.executeSafe({
-              text: `UPDATE follow_up_tasks 
-                     SET metadata = $1::jsonb, updated_at = NOW() 
-                     WHERE id = $2 AND tenant_id = $3`,
-              values: [JSON.stringify(taskMeta), targetTask.id, tenantId]
-            });
-
-            this.log.info(`[BOT_CONFIRMATION_AUTO_DETECTED] Automatically confirmed task ${targetTask.id} due to confirmation signal (LLM=${!!(crmData as any)?.appointment_confirmed}, Deterministic=${deterministicConfirmation})`, { traceId });
-          }
-        } catch (confirmErr) {
-          this.log.error('[BOT_CONFIRMATION_AUTO_DETECTED_FAILED] Non-fatal auto-confirmation error', confirmErr instanceof Error ? confirmErr : new Error(String(confirmErr)), { traceId });
-        }
-      }
 
       // ═══════════════════════════════════════════════════════════
       // Bot Directive Completion Hook (Phase 2 & 5)
