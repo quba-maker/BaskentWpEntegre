@@ -464,3 +464,5 @@ async function handleV1Legacy() {
     message: 'Legacy follow-up engine is disabled. Use V2 Task Engine.'
   }, { status: 410 });
 }
+
+export const POST = GET;

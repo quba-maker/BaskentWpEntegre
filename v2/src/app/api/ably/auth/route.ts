@@ -44,8 +44,8 @@ export async function GET(request: Request) {
 
     if (!token) {
       return NextResponse.json(
-        { error: "Unauthorized: No session" },
-        { status: 401 }
+        { error: "Forbidden: No session" },
+        { status: 403 }
       );
     }
 
@@ -55,8 +55,8 @@ export async function GET(request: Request) {
       payload = result.payload;
     } catch {
       return NextResponse.json(
-        { error: "Unauthorized: Invalid session" },
-        { status: 401 }
+        { error: "Forbidden: Invalid session" },
+        { status: 403 }
       );
     }
 
