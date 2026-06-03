@@ -14,7 +14,7 @@ import {
   Bell
 } from "lucide-react";
 import { getPatientTrackingDetail, getPatientTimeline, createAppointmentTask, completeAppointmentTask, deletePatientTask, updatePatientTask, updateAppointmentConfirmation, manuallyUpdateAppointmentStatus, type PatientDetailData, type TimelineEntry } from "@/app/actions/patient-tracking";
-import { parseTurkeyLocalToUtc, resolvePatientTimezone } from "@/lib/utils/timezone";
+import { parseTurkeyLocalToUtc, resolvePatientTimezone, getTurkeyParts, resolvePatientTimeDisplay } from "@/lib/utils/timezone";
 import { addOpportunityNote, updateOpportunityStage } from "@/app/actions/pipeline";
 import { createBotDelegationTask, schedulePhoneCallTask, completeBotDelegationTask, cancelBotDelegationTask, sendTestBotMessage, saveBotDirective, type BotDelegationMode } from "@/app/actions/focus-queue";
 import { logCallReached, logCallMissed, logCallbackScheduled, logNotInterested, sendMetaTemplateMessage } from "@/app/actions/outreach";
@@ -707,7 +707,8 @@ export default function PatientDetailDrawer({
       let remindersToSend: any[] = [];
       
       const task = data?.tasks.find((t: any) => t.id === taskId);
-      const isClinicVisit = task?.metadata?.appointment_type === 'clinic_visit';
+      const taskMeta = task ? safeJsonParse(task.metadata, {}) : {};
+      const isClinicVisit = taskMeta.appointment_type === 'clinic_visit';
 
       if (isClinicVisit) {
         if (!editTaskYear || !editTaskMonth) {
@@ -1606,7 +1607,13 @@ export default function PatientDetailDrawer({
                     </span>
 
                     {/* Mükerrer Görev Uyarı Bandı */}
-                    {data.tasks.filter(t => t.taskType !== 'appointment_reminder' && !t.metadata?.parent_task_id && t.metadata?.is_primary !== false && t.status === 'pending').length > 0 && (
+                    {data.tasks.filter(t => {
+                      const tMeta = safeJsonParse(t.metadata, {});
+                      return t.taskType !== 'appointment_reminder' && 
+                        !tMeta.parent_task_id && 
+                        tMeta.is_primary !== false && 
+                        t.status === 'pending';
+                    }).length > 0 && (
                       <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl flex items-center gap-2 text-[10px] text-amber-700 font-semibold leading-relaxed">
                         <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
                         <span>Aktif bir planlı göreviniz zaten bulunuyor. Mükerrer planlama yapmamaya dikkat edin.</span>
@@ -1893,11 +1900,12 @@ export default function PatientDetailDrawer({
 
                   {/* Planlanmış Görevler & Hatırlatıcılar (LIST AT THE BOTTOM) */}
                   {(() => {
-                    const activeTasks = data.tasks.filter(t => 
-                      t.taskType !== 'appointment_reminder' && 
-                      !t.metadata?.parent_task_id && 
-                      t.metadata?.is_primary !== false
-                    );
+                    const activeTasks = data.tasks.filter(t => {
+                      const tMeta = safeJsonParse(t.metadata, {});
+                      return t.taskType !== 'appointment_reminder' && 
+                        !tMeta.parent_task_id && 
+                        tMeta.is_primary !== false;
+                    });
                     const hasTasks = activeTasks.length > 0;
 
                     if (!hasTasks) return null;
@@ -1910,13 +1918,15 @@ export default function PatientDetailDrawer({
                         
                         <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1">
                           {activeTasks.map(task => {
+                            const taskMeta = safeJsonParse(task.metadata, {});
                             const isEditing = editingTaskId === task.id;
-                            const childTasks = data.tasks.filter(
-                              r => r.metadata?.parent_task_id === task.id
-                            );
+                            const childTasks = data.tasks.filter(r => {
+                              const rMeta = safeJsonParse(r.metadata, {});
+                              return rMeta.parent_task_id === task.id;
+                            });
 
                             if (isEditing) {
-                              const isClinicVisit = task.metadata?.appointment_type === 'clinic_visit';
+                              const isClinicVisit = taskMeta.appointment_type === 'clinic_visit';
                               return (
                                 <div key={task.id} className="p-3.5 bg-indigo-50/50 rounded-xl border border-indigo-150 space-y-3 text-[11px] animate-in fade-in duration-200">
                                   <div className="font-bold text-[#1D1D1F] flex items-center justify-between">
@@ -2090,7 +2100,7 @@ export default function PatientDetailDrawer({
                               );
                             }
 
-                            const isClinicVisit = task.metadata?.appointment_type === 'clinic_visit';
+                            const isClinicVisit = taskMeta.appointment_type === 'clinic_visit';
 
                             return (
                               <div key={task.id} className="bg-[#F5F5F7] rounded-xl border border-black/5 overflow-hidden flex flex-col text-[11px] hover:shadow-[0_2px_8px_rgba(0,0,0,0.02)] transition-all duration-300">
@@ -2112,8 +2122,8 @@ export default function PatientDetailDrawer({
                                       {task.dueAt && (
                                         <p className="text-[10px] text-[#86868B] font-bold flex items-center gap-1">
                                           <span>📅</span>
-                                          <span>Tarih: {task.metadata?.is_partial_date 
-                                            ? formatPartialDate(task.metadata) 
+                                          <span>Tarih: {taskMeta.is_partial_date 
+                                            ? formatPartialDate(taskMeta) 
                                             : new Date(task.dueAt).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul' })}</span>
                                         </p>
                                       )}
@@ -2132,27 +2142,22 @@ export default function PatientDetailDrawer({
                                         type="button"
                                         onClick={() => {
                                           setEditingTaskId(task.id);
-                                          const taskDateObj = new Date(task.dueAt || '');
-                                          const year = taskDateObj.getFullYear();
-                                          const month = String(taskDateObj.getMonth() + 1).padStart(2, '0');
-                                          const day = String(taskDateObj.getDate()).padStart(2, '0');
-                                          setEditTaskDate(`${year}-${month}-${day}`);
-                                          const hours = String(taskDateObj.getHours()).padStart(2, '0');
-                                          const mins = String(taskDateObj.getMinutes()).padStart(2, '0');
-                                          setEditTaskTime(`${hours}:${mins}`);
+                                          const trParts = getTurkeyParts(task.dueAt);
+                                          setEditTaskDate(`${trParts.year}-${trParts.month}-${trParts.day}`);
+                                          setEditTaskTime(`${trParts.hour}:${trParts.minute}`);
                                           
-                                          setEditTaskNote(task.metadata?.note || "");
+                                          setEditTaskNote(taskMeta.note || "");
                                           setEditTaskDescription(task.description || "");
 
                                           // Initialize CV editing states
-                                          const isCv = task.metadata?.appointment_type === 'clinic_visit';
+                                          const isCv = taskMeta.appointment_type === 'clinic_visit';
                                           if (isCv) {
-                                            setEditTaskYear(task.metadata?.selected_year || String(year));
-                                            setEditTaskMonth(task.metadata?.selected_month || month);
-                                            setEditTaskDay(task.metadata?.selected_day || "");
-                                            setEditTaskTimeCv(task.metadata?.selected_time || "");
+                                            setEditTaskYear(taskMeta.selected_year || trParts.year);
+                                            setEditTaskMonth(taskMeta.selected_month || trParts.month);
+                                            setEditTaskDay(taskMeta.selected_day || "");
+                                            setEditTaskTimeCv(taskMeta.selected_time || "");
                                             
-                                            const appRems = task.metadata?.approved_reminders || {};
+                                            const appRems = taskMeta.approved_reminders || {};
                                             setEditApprovedReminders({
                                               '30_days_before': !!appRems['30_days_before'],
                                               '14_days_before': !!appRems['14_days_before'],
@@ -2218,20 +2223,29 @@ export default function PatientDetailDrawer({
                                         } catch (_) {}
                                       }
 
-                                      let patientLocalTime = remMeta.patient_local_time;
-                                      if (!patientLocalTime && rem.dueAt && data?.country) {
-                                        const tzRes = resolvePatientTimezone(data.country);
-                                        if (tzRes.timezone) {
-                                          try {
-                                            patientLocalTime = new Intl.DateTimeFormat('tr-TR', {
-                                              timeZone: tzRes.timezone,
-                                              hour: '2-digit',
-                                              minute: '2-digit',
-                                              hour12: false
-                                            }).format(new Date(rem.dueAt));
-                                          } catch (_) {}
-                                        }
-                                      }
+                                       let patientLocalTime = remMeta.patient_local_time;
+                                       if (!patientLocalTime && rem.dueAt) {
+                                         try {
+                                           const displayRes = resolvePatientTimeDisplay({
+                                             country: data?.country,
+                                             city: data?.leadRawData?.city || data?.leadRawData?.patient_city,
+                                              timezone: data?.patientTimezone,
+                                              metadata: data?.leadRawData,
+                                             referenceDate: new Date(rem.dueAt)
+                                           });
+                                           
+                                           if (displayRes.needsTimezoneClarification) {
+                                             patientLocalTime = displayRes.shortBadge === "Şehir gerekli" ? "Şehir gerekli" : "Saat net değil";
+                                           } else if (displayRes.isFallback) {
+                                             patientLocalTime = "Saat net değil";
+                                           } else {
+                                             patientLocalTime = displayRes.patientLocalTime;
+                                             if (displayRes.offsetLabel) {
+                                               patientLocalTime = `${patientLocalTime} (${displayRes.offsetLabel})`;
+                                             }
+                                           }
+                                         } catch (_) {}
+                                       }
 
                                       const remStatusLabel = isCompleted 
                                         ? (rem.taskType === 'appointment_reminder' ? 'İletildi' : 'Tamamlandı')

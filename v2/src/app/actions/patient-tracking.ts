@@ -1,7 +1,7 @@
 "use server";
 
 import { withActionGuard } from "@/lib/core/action-guard";
-import { resolvePatientTimezone, formatDualClock, isOverdue, isToday, formatTimeTR } from "@/lib/utils/timezone";
+import { resolvePatientTimezone, formatDualClock, isOverdue, isToday, formatTimeTR, resolvePatientTimeDisplay } from "@/lib/utils/timezone";
 import type { JourneyStatus, NextBestAction } from "./focus-queue";
 import { resolvePatientDisplayName } from "@/lib/utils/patient-name-resolver";
 
@@ -301,27 +301,23 @@ function buildOperationsTaskProjection(
     appointmentType = 'phone_call';
   }
 
-  // 3. Time Display
+  // 3. Time Display using resolvePatientTimeDisplay
   let scheduledUtc = metadata.scheduled_for_utc || dueAt || null;
-  let trTime = metadata.callback_time_tr;
-  let patientTime = metadata.patient_local_time;
-  let patientTz = metadata.patient_timezone;
-  let needsClarification = !!metadata.needs_timezone_clarification;
+  
+  const timeDisplayRes = resolvePatientTimeDisplay({
+    country: opp?.opp_country || opp?.country,
+    city: opp?.lead_raw_data?.city || opp?.lead_raw_data?.patient_city || metadata.patient_city || opp?.opp_metadata?.patient_city || opp?.metadata?.patient_city,
+    timezone: metadata.patient_timezone || opp?.opp_metadata?.patient_timezone || opp?.metadata?.patient_timezone,
+    metadata: metadata,
+    oppMetadata: opp?.opp_metadata || opp?.metadata,
+    referenceDate: scheduledUtc
+  });
 
-  if (!trTime && dueAt) {
-    trTime = formatTimeTR(dueAt, 'Europe/Istanbul');
-    needsClarification = true;
-  }
-
-  let timeDisplay = 'Saat belirtilmemiş';
-  if (trTime) {
-    if (needsClarification || !patientTime) {
-      timeDisplay = `Türkiye saati: ${trTime} / Hasta saati net değil`;
-    } else {
-      const city = getTzCityLabel(patientTz);
-      timeDisplay = `${trTime} TR / ${patientTime} ${city || 'Hasta'}`;
-    }
-  }
+  const trTime = timeDisplayRes.turkeyTime;
+  const patientTime = timeDisplayRes.patientLocalTime;
+  const patientTz = timeDisplayRes.patientTimezone;
+  const needsClarification = timeDisplayRes.needsTimezoneClarification;
+  const timeDisplay = timeDisplayRes.displayLabel;
 
   // 4. Primary Task check
   const isPrimary = metadata.is_primary === true || (!metadata.parent_task_id && metadata.is_primary !== false);
@@ -693,22 +689,36 @@ export async function getPatientTrackingRows(filters?: PatientTrackingFilters): 
         const nextBestAction = computeNextBestAction(row, journeyStatus);
         const priorityScore = computePriorityScore(row, journeyStatus, nextBestAction);
         const resolvedCountry = row.opp_country || row.lead_raw_data?.country || null;
-        const tzRes = resolvePatientTimezone(resolvedCountry);
         const dueAt = row.task_due_at || row.opp_next_follow_up_at;
-        const dualClock = dueAt ? formatDualClock(dueAt, resolvedCountry) : { tenantTime: undefined, patientTime: undefined };
+        
+        const timeDisplayRes = resolvePatientTimeDisplay({
+          country: resolvedCountry,
+          city: row.lead_raw_data?.city || row.lead_raw_data?.patient_city || row.task_metadata?.patient_city || row.opp_metadata?.patient_city,
+          timezone: row.task_metadata?.patient_timezone || row.opp_metadata?.patient_timezone || row.conv_metadata?.patient_timezone,
+          metadata: row.task_metadata,
+          oppMetadata: row.opp_metadata || row.opp_lead_raw_data || row.lead_raw_data,
+          referenceDate: dueAt
+        });
+
+        const isPatientSleeping = (() => {
+          if (timeDisplayRes.patientTimezone && !timeDisplayRes.needsTimezoneClarification) {
+            try {
+              const patientHourStr = new Intl.DateTimeFormat('en-US', {
+                timeZone: timeDisplayRes.patientTimezone,
+                hour: 'numeric',
+                hour12: false
+              }).format(new Date());
+              const hour = parseInt(patientHourStr, 10);
+              return hour >= 22 || hour < 8;
+            } catch (_) {}
+          }
+          return false;
+        })();
+        
         const lastActivity = computeLastActivity(row);
 
         const isTestWhitelist = !!process.env.TEST_BOT_WHITELIST_NUMBERS &&
           process.env.TEST_BOT_WHITELIST_NUMBERS.split(',').map(s => s.trim()).includes(row.phone_number);
-
-        let isPatientSleeping = false;
-        if (tzRes.timezone && !tzRes.needs_confirmation) {
-          try {
-            const patientNow = new Date().toLocaleString('en-US', { timeZone: tzRes.timezone, hour12: false });
-            const hour = new Date(patientNow).getHours();
-            if (hour >= 22 || hour < 8) isPatientSleeping = true;
-          } catch (_) {}
-        }
 
         const rawSummary = row.opp_summary || '';
         const shortSummary = rawSummary.length > 80 ? rawSummary.substring(0, 80) + '…' : (rawSummary || 'Henüz AI özeti oluşmamış.');
@@ -791,11 +801,11 @@ export async function getPatientTrackingRows(filters?: PatientTrackingFilters): 
           lastActivityAt: lastActivity.at || undefined,
           lastActivityLabel: lastActivity.label,
           nextFollowUpAt: dueAt || undefined,
-          nextFollowUpTurkey: dualClock.tenantTime || undefined,
-          nextFollowUpPatientLocal: dualClock.patientTime || undefined,
-          patientTimezone: tzRes.timezone,
-          timezoneNeedsConfirmation: tzRes.needs_confirmation,
-          isPatientSleeping,
+           nextFollowUpTurkey: timeDisplayRes.turkeyTime || undefined,
+           nextFollowUpPatientLocal: timeDisplayRes.patientLocalTime || undefined,
+           patientTimezone: timeDisplayRes.patientTimezone || undefined,
+           timezoneNeedsConfirmation: timeDisplayRes.needsTimezoneClarification,
+           isPatientSleeping,
 
           shortSummary,
           aiReason: row.opp_ai_reason || undefined,
@@ -942,10 +952,26 @@ export async function getPatientTrackingDetail(opportunityId: string, activeTask
 
       // Compute
       const resolvedCountry = opp.country || opp.lead_raw_data?.country || null;
-      const tzRes = resolvePatientTimezone(resolvedCountry);
       const leadTask = tasks[0];
       const dueAt = leadTask?.due_at || opp.next_follow_up_at;
-      const dualClock = dueAt ? formatDualClock(dueAt, resolvedCountry) : { tenantTime: undefined, patientTime: undefined };
+      
+      const dueTimeRes = resolvePatientTimeDisplay({
+        country: resolvedCountry,
+        city: opp.lead_raw_data?.city || opp.lead_raw_data?.patient_city || opp.metadata?.patient_city || opp.opp_metadata?.patient_city,
+        timezone: opp.metadata?.patient_timezone || opp.opp_metadata?.patient_timezone || opp.timezone,
+        metadata: leadTask?.metadata || opp.metadata,
+        oppMetadata: opp.opp_metadata || opp.metadata,
+        referenceDate: dueAt
+      });
+
+      const liveTimeRes = resolvePatientTimeDisplay({
+        country: resolvedCountry,
+        city: opp.lead_raw_data?.city || opp.lead_raw_data?.patient_city || opp.metadata?.patient_city || opp.opp_metadata?.patient_city,
+        timezone: opp.metadata?.patient_timezone || opp.opp_metadata?.patient_timezone || opp.timezone,
+        metadata: opp.metadata,
+        oppMetadata: opp.opp_metadata || opp.metadata,
+        referenceDate: new Date()
+      });
 
       const fakeRow = {
         opp_stage: opp.stage,
@@ -963,29 +989,22 @@ export async function getPatientTrackingDetail(opportunityId: string, activeTask
       const nextBestAction = computeNextBestAction(fakeRow, journeyStatus);
       const actionConfig = ACTION_LABELS[nextBestAction] || ACTION_LABELS['no_action'];
 
-      let isPatientSleeping = false;
-      let patientLocalTimeNow: string | undefined;
-      const turkeyTimeNow = new Date().toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul', hour: '2-digit', minute: '2-digit', hour12: false });
-
-      if (tzRes.timezone && !tzRes.needs_confirmation) {
-        try {
-          const patientHourStr = new Intl.DateTimeFormat('en-US', {
-            timeZone: tzRes.timezone,
-            hour: 'numeric',
-            hour12: false
-          }).format(new Date());
-          const hour = parseInt(patientHourStr, 10);
-          
-          if (hour >= 22 || hour < 8) isPatientSleeping = true;
-          
-          patientLocalTimeNow = new Intl.DateTimeFormat('tr-TR', {
-            timeZone: tzRes.timezone,
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: false
-          }).format(new Date());
-        } catch (_) {}
-      }
+      const turkeyTimeNow = liveTimeRes.turkeyTime;
+      const patientLocalTimeNow = liveTimeRes.patientLocalTime || undefined;
+      const isPatientSleeping = (() => {
+        if (liveTimeRes.patientTimezone && !liveTimeRes.needsTimezoneClarification) {
+          try {
+            const patientHourStr = new Intl.DateTimeFormat('en-US', {
+              timeZone: liveTimeRes.patientTimezone,
+              hour: 'numeric',
+              hour12: false
+            }).format(new Date());
+            const hour = parseInt(patientHourStr, 10);
+            return hour >= 22 || hour < 8;
+          } catch (_) {}
+        }
+        return false;
+      })();
 
       const isTestWhitelist = !!process.env.TEST_BOT_WHITELIST_NUMBERS &&
         process.env.TEST_BOT_WHITELIST_NUMBERS.split(',').map(s => s.trim()).includes(opp.phone_number || opp.conv_phone);
@@ -1039,10 +1058,10 @@ export async function getPatientTrackingDetail(opportunityId: string, activeTask
         actionLabel: actionConfig.label,
 
         nextFollowUpAt: dueAt || undefined,
-        nextFollowUpTurkey: dualClock.tenantTime || undefined,
-        nextFollowUpPatientLocal: dualClock.patientTime || undefined,
-        patientTimezone: tzRes.timezone,
-        timezoneNeedsConfirmation: tzRes.needs_confirmation,
+        nextFollowUpTurkey: dueTimeRes.turkeyTime || undefined,
+        nextFollowUpPatientLocal: dueTimeRes.patientLocalTime || undefined,
+        patientTimezone: liveTimeRes.patientTimezone || undefined,
+        timezoneNeedsConfirmation: liveTimeRes.needsTimezoneClarification,
         isPatientSleeping,
         turkeyTimeNow,
         patientLocalTimeNow,

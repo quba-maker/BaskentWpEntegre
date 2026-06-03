@@ -647,3 +647,419 @@ export function adjustToOperatingHours(utcDateString: string): AdjustToOperating
     originalUtc,
   };
 }
+
+// ═══════════════════════════════════════════════════════════
+// UNIVERSAL TIMEZONE DISPLAY RESOLVER
+// ═══════════════════════════════════════════════════════════
+
+export interface PatientTimeDisplayInput {
+  country?: string | null;
+  city?: string | null;
+  timezone?: string | null;
+  timezoneSource?: string | null;
+  metadata?: any | null;
+  oppMetadata?: any | null;
+  convMetadata?: any | null;
+  referenceDate?: Date | string | null;
+}
+
+export interface PatientTimeDisplayResult {
+  countryLabel: string;
+  countryEmoji: string;
+  patientTimezone: string | null;
+  timezoneSource: 'patient_city' | 'patient_country' | 'manual_confirmed' | 'unknown';
+  patientLocalTime: string | null;
+  turkeyTime: string;
+  displayLabel: string;
+  shortBadge: string;
+  offsetLabel: string | null;
+  needsTimezoneClarification: boolean;
+  isFallback: boolean;
+  warning?: 'timezone_ambiguous' | 'country_has_multiple_timezones' | 'fallback_turkey_time';
+}
+
+const NORMALIZE_COUNTRY_MAP: Record<string, { label: string; emoji: string }> = {
+  'türkiye': { label: 'Türkiye', emoji: '🇹🇷' },
+  'turkey': { label: 'Türkiye', emoji: '🇹🇷' },
+  'tr': { label: 'Türkiye', emoji: '🇹🇷' },
+  'almanya': { label: 'Almanya', emoji: '🇩🇪' },
+  'germany': { label: 'Almanya', emoji: '🇩🇪' },
+  'de': { label: 'Almanya', emoji: '🇩🇪' },
+  'hollanda': { label: 'Hollanda', emoji: '🇳🇱' },
+  'netherlands': { label: 'Hollanda', emoji: '🇳🇱' },
+  'nl': { label: 'Hollanda', emoji: '🇳🇱' },
+  'fransa': { label: 'Fransa', emoji: '🇫🇷' },
+  'france': { label: 'Fransa', emoji: '🇫🇷' },
+  'fr': { label: 'Fransa', emoji: '🇫🇷' },
+  'belçika': { label: 'Belçika', emoji: '🇧🇪' },
+  'belgium': { label: 'Belçika', emoji: '🇧🇪' },
+  'be': { label: 'Belçika', emoji: '🇧🇪' },
+  'avusturya': { label: 'Avusturya', emoji: '🇦🇹' },
+  'austria': { label: 'Avusturya', emoji: '🇦🇹' },
+  'at': { label: 'Avusturya', emoji: '🇦🇹' },
+  'isviçre': { label: 'İsviçre', emoji: '🇨🇭' },
+  'switzerland': { label: 'İsviçre', emoji: '🇨🇭' },
+  'ch': { label: 'İsviçre', emoji: '🇨🇭' },
+  'ingiltere': { label: 'İngiltere', emoji: '🇬🇧' },
+  'uk': { label: 'İngiltere', emoji: '🇬🇧' },
+  'england': { label: 'İngiltere', emoji: '🇬🇧' },
+  'united kingdom': { label: 'İngiltere', emoji: '🇬🇧' },
+  'gb': { label: 'İngiltere', emoji: '🇬🇧' },
+  'danimarka': { label: 'Danimarka', emoji: '🇩🇰' },
+  'denmark': { label: 'Danimarka', emoji: '🇩🇰' },
+  'dk': { label: 'Danimarka', emoji: '🇩🇰' },
+  'isveç': { label: 'İsveç', emoji: '🇸🇪' },
+  'sweden': { label: 'İsveç', emoji: '🇸🇪' },
+  'se': { label: 'İsveç', emoji: '🇸🇪' },
+  'norveç': { label: 'Norveç', emoji: '🇳🇴' },
+  'norway': { label: 'Norveç', emoji: '🇳🇴' },
+  'no': { label: 'Norveç', emoji: '🇳🇴' },
+  'finlandiya': { label: 'Finlandiya', emoji: '🇫🇮' },
+  'finland': { label: 'Finlandiya', emoji: '🇫🇮' },
+  'fi': { label: 'Finlandiya', emoji: '🇫🇮' },
+  'italya': { label: 'İtalya', emoji: '🇮🇹' },
+  'italy': { label: 'İtalya', emoji: '🇮🇹' },
+  'it': { label: 'İtalya', emoji: '🇮🇹' },
+  'ispanya': { label: 'İspanya', emoji: '🇪🇸' },
+  'spain': { label: 'İspanya', emoji: '🇪🇸' },
+  'es': { label: 'İspanya', emoji: '🇪🇸' },
+  'yunanistan': { label: 'Yunanistan', emoji: '🇬🇷' },
+  'greece': { label: 'Yunanistan', emoji: '🇬🇷' },
+  'gr': { label: 'Yunanistan', emoji: '🇬🇷' },
+  'bulgaristan': { label: 'Bulgaristan', emoji: '🇧🇬' },
+  'bulgaria': { label: 'Bulgaristan', emoji: '🇧🇬' },
+  'bg': { label: 'Bulgaristan', emoji: '🇧🇬' },
+  'romanya': { label: 'Romanya', emoji: '🇷🇴' },
+  'romania': { label: 'Romanya', emoji: '🇷🇴' },
+  'ro': { label: 'Romanya', emoji: '🇷🇴' },
+  'polonya': { label: 'Polonya', emoji: '🇵🇱' },
+  'poland': { label: 'Polonya', emoji: '🇵🇱' },
+  'pl': { label: 'Polonya', emoji: '🇵🇱' },
+  'irak': { label: 'Irak', emoji: '🇮🇶' },
+  'iraq': { label: 'Irak', emoji: '🇮🇶' },
+  'iq': { label: 'Irak', emoji: '🇮🇶' },
+  'suriye': { label: 'Suriye', emoji: '🇸🇾' },
+  'syria': { label: 'Suriye', emoji: '🇸🇾' },
+  'sy': { label: 'Suriye', emoji: '🇸🇾' },
+  'libya': { label: 'Libya', emoji: '🇱🇾' },
+  'ly': { label: 'Libya', emoji: '🇱🇾' },
+  'suudi arabistan': { label: 'Suudi Arabistan', emoji: '🇸🇦' },
+  'saudi arabia': { label: 'Suudi Arabistan', emoji: '🇸🇦' },
+  'sa': { label: 'Suudi Arabistan', emoji: '🇸🇦' },
+  'bae': { label: 'BAE', emoji: '🇦🇪' },
+  'uae': { label: 'BAE', emoji: '🇦🇪' },
+  'ae': { label: 'BAE', emoji: '🇦🇪' },
+  'katar': { label: 'Katar', emoji: '🇶🇦' },
+  'qatar': { label: 'Katar', emoji: '🇶🇦' },
+  'qa': { label: 'Katar', emoji: '🇶🇦' },
+  'kuveyt': { label: 'Kuveyt', emoji: '🇰🇼' },
+  'kuwait': { label: 'Kuveyt', emoji: '🇰🇼' },
+  'kw': { label: 'Kuveyt', emoji: '🇰🇼' },
+  'bahreyn': { label: 'Bahreyn', emoji: '🇧🇭' },
+  'bahrain': { label: 'Bahreyn', emoji: '🇧🇭' },
+  'bh': { label: 'Bahreyn', emoji: '🇧🇭' },
+  'ürdün': { label: 'Ürdün', emoji: '🇯🇴' },
+  'jordan': { label: 'Ürdün', emoji: '🇯🇴' },
+  'jo': { label: 'Ürdün', emoji: '🇯🇴' },
+  'lübnan': { label: 'Lübnan', emoji: '🇱🇧' },
+  'lebanon': { label: 'Lübnan', emoji: '🇱🇧' },
+  'lb': { label: 'Lübnan', emoji: '🇱🇧' },
+  'filistin': { label: 'Filistin', emoji: '🇵🇸' },
+  'palestine': { label: 'Filistin', emoji: '🇵🇸' },
+  'ps': { label: 'Filistin', emoji: '🇵🇸' },
+  'azerbaycan': { label: 'Azerbaycan', emoji: '🇦🇿' },
+  'azerbaijan': { label: 'Azerbaycan', emoji: '🇦🇿' },
+  'az': { label: 'Azerbaycan', emoji: '🇦🇿' },
+  'gürcistan': { label: 'Gürcistan', emoji: '🇬🇪' },
+  'georgia': { label: 'Gürcistan', emoji: '🇬🇪' },
+  'ge': { label: 'Gürcistan', emoji: '🇬🇪' },
+  'kazakistan': { label: 'Kazakistan', emoji: '🇰🇿' },
+  'kazakhstan': { label: 'Kazakistan', emoji: '🇰🇿' },
+  'kz': { label: 'Kazakistan', emoji: '🇰🇿' },
+  'özbekistan': { label: 'Özbekistan', emoji: '🇺🇿' },
+  'uzbekistan': { label: 'Özbekistan', emoji: '🇺🇿' },
+  'uz': { label: 'Özbekistan', emoji: '🇺🇿' },
+  'türkmenistan': { label: 'Türkmenistan', emoji: '🇹🇲' },
+  'turkmenistan': { label: 'Türkmenistan', emoji: '🇹🇲' },
+  'tm': { label: 'Türkmenistan', emoji: '🇹🇲' },
+  'mısır': { label: 'Mısır', emoji: '🇪🇬' },
+  'egypt': { label: 'Mısır', emoji: '🇪🇬' },
+  'eg': { label: 'Mısır', emoji: '🇪🇬' },
+  'tunus': { label: 'Tunus', emoji: '🇹🇳' },
+  'tunisia': { label: 'Tunus', emoji: '🇹🇳' },
+  'tn': { label: 'Tunus', emoji: '🇹🇳' },
+  'cezayir': { label: 'Cezayir', emoji: '🇩🇿' },
+  'algeria': { label: 'Cezayir', emoji: '🇩🇿' },
+  'dz': { label: 'Cezayir', emoji: '🇩🇿' },
+  'fas': { label: 'Fas', emoji: '🇲🇦' },
+  'morocco': { label: 'Fas', emoji: '🇲🇦' },
+  'ma': { label: 'Fas', emoji: '🇲🇦' },
+  'somali': { label: 'Somali', emoji: '🇸🇴' },
+  'somalia': { label: 'Somali', emoji: '🇸🇴' },
+  'so': { label: 'Somali', emoji: '🇸🇴' },
+  'sudan': { label: 'Sudan', emoji: '🇸🇩' },
+  'sd': { label: 'Sudan', emoji: '🇸🇩' },
+  'nijerya': { label: 'Nijerya', emoji: '🇳🇬' },
+  'nigeria': { label: 'Nijerya', emoji: '🇳🇬' },
+  'ng': { label: 'Nijerya', emoji: '🇳🇬' },
+  
+  // USA normalizations
+  'abd': { label: 'ABD', emoji: '🌎' },
+  'usa': { label: 'ABD', emoji: '🌎' },
+  'us': { label: 'ABD', emoji: '🌎' },
+  'america': { label: 'ABD', emoji: '🌎' },
+  'amerika': { label: 'ABD', emoji: '🌎' },
+  'united states': { label: 'ABD', emoji: '🌎' },
+  'amerika birleşik devletleri': { label: 'ABD', emoji: '🌎' },
+
+  // Canada normalizations
+  'kanada': { label: 'Kanada', emoji: '🇨🇦' },
+  'canada': { label: 'Kanada', emoji: '🇨🇦' },
+  'ca': { label: 'Kanada', emoji: '🇨🇦' },
+
+  // Russia normalizations
+  'rusya': { label: 'Rusya', emoji: '🇷🇺' },
+  'russia': { label: 'Rusya', emoji: '🇷🇺' },
+  'ru': { label: 'Rusya', emoji: '🇷🇺' },
+
+  // Australia normalizations
+  'avustralya': { label: 'Avustralya', emoji: '🇦🇺' },
+  'australia': { label: 'Avustralya', emoji: '🇦🇺' },
+  'au': { label: 'Avustralya', emoji: '🇦🇺' },
+
+  // Brazil normalizations
+  'brezilya': { label: 'Brezilya', emoji: '🇧🇷' },
+  'brazil': { label: 'Brezilya', emoji: '🇧🇷' },
+  'br': { label: 'Brezilya', emoji: '🇧🇷' },
+
+  // Mexico normalizations
+  'meksika': { label: 'Meksika', emoji: '🇲🇽' },
+  'mexico': { label: 'Meksika', emoji: '🇲🇽' },
+  'mx': { label: 'Meksika', emoji: '🇲🇽' },
+
+  // Indonesia normalizations
+  'endonezya': { label: 'Endonezya', emoji: '🇮🇩' },
+  'indonesia': { label: 'Endonezya', emoji: '🇮🇩' },
+  'id': { label: 'Endonezya', emoji: '🇮🇩' },
+};
+
+const MULTI_TZ_COUNTRIES = new Set([
+  'abd', 'usa', 'us', 'united states', 'america', 'amerika', 'amerika birleşik devletleri',
+  'kanada', 'canada', 'ca',
+  'rusya', 'russia', 'ru',
+  'avustralya', 'australia', 'au',
+  'brezilya', 'brazil', 'br',
+  'endonezya', 'indonesia', 'id',
+  'meksika', 'mexico', 'mx',
+  'kazakistan', 'kazakhstan', 'kz'
+]);
+
+function cleanTzCityLabel(tzString?: string | null): string {
+  if (!tzString) return '';
+  const parts = tzString.split('/');
+  return parts[parts.length - 1].replace(/_/g, ' ');
+}
+
+export function resolvePatientTimeDisplay(input: PatientTimeDisplayInput): PatientTimeDisplayResult {
+  const refDate = input.referenceDate 
+    ? (typeof input.referenceDate === 'string' ? new Date(input.referenceDate) : input.referenceDate) 
+    : new Date();
+  
+  const now = isNaN(refDate.getTime()) ? new Date() : refDate;
+
+  const metadata = input.metadata || {};
+  const oppMetadata = input.oppMetadata || {};
+  const convMetadata = input.convMetadata || {};
+
+  // Retrieve values according to strict structured field priority
+  let rawCountry = input.country || metadata.patient_country || oppMetadata.patient_country || convMetadata.patient_country || null;
+  let rawCity = input.city || metadata.patient_city || oppMetadata.patient_city || convMetadata.patient_city || null;
+  let resolvedTz = input.timezone || metadata.patient_timezone || oppMetadata.patient_timezone || convMetadata.patient_timezone || null;
+  let tzSource = input.timezoneSource || metadata.timezone_source || oppMetadata.timezone_source || convMetadata.timezone_source || null;
+
+  // Normalize Country Label & Emoji
+  let countryLabel = 'Bilinmeyen Ülke';
+  let countryEmoji = '🌎';
+  let isMultiTz = false;
+
+  if (rawCountry) {
+    const cleanCountry = rawCountry.trim();
+    const key = cleanCountry.toLowerCase();
+    
+    const norm = NORMALIZE_COUNTRY_MAP[key];
+    if (norm) {
+      countryLabel = norm.label;
+      countryEmoji = norm.emoji;
+    } else {
+      countryLabel = cleanCountry;
+      countryEmoji = '🌎';
+    }
+
+    if (MULTI_TZ_COUNTRIES.has(key)) {
+      isMultiTz = true;
+    }
+  }
+
+  // Sanitize City
+  const cityLabel = rawCity && rawCity.trim() ? rawCity.trim() : null;
+
+  // 1. Resolve Timezone if not explicitly provided
+  if (!resolvedTz && rawCountry) {
+    const tzRes = resolvePatientTimezone(rawCountry);
+    if (tzRes.source === 'country_map') {
+      resolvedTz = tzRes.timezone;
+      if (!tzSource || tzSource === 'unknown') {
+        tzSource = 'patient_country';
+      }
+    }
+  }
+
+  // Map timezone source
+  let finalSource: PatientTimeDisplayResult['timezoneSource'] = 'unknown';
+  if (tzSource) {
+    if (['patient_city', 'city'].includes(tzSource)) finalSource = 'patient_city';
+    else if (['patient_country', 'country'].includes(tzSource)) finalSource = 'patient_country';
+    else if (['manual_confirmed', 'manual'].includes(tzSource)) finalSource = 'manual_confirmed';
+  } else if (resolvedTz) {
+    finalSource = 'patient_country';
+  }
+
+  // Determine timezone clarification/ambiguity checks
+  let needsTimezoneClarification = false;
+  let warning: PatientTimeDisplayResult['warning'] = undefined;
+
+  const metadataClarification = metadata.needs_timezone_clarification ?? oppMetadata.needs_timezone_clarification ?? convMetadata.needs_timezone_clarification;
+
+  if (metadataClarification === true) {
+    needsTimezoneClarification = true;
+    warning = 'timezone_ambiguous';
+  } else if (isMultiTz) {
+    // For multi-timezone countries, we must have specific timezone source matching city or manual confirmation
+    const isSpecificTz = resolvedTz && (finalSource === 'patient_city' || finalSource === 'manual_confirmed' || (metadata.patient_timezone && !metadata.needs_timezone_clarification));
+    if (!isSpecificTz) {
+      needsTimezoneClarification = true;
+      warning = 'country_has_multiple_timezones';
+    }
+  }
+
+  // Fallback to Europe/Istanbul if timezone is still missing
+  let isFallback = false;
+  if (!resolvedTz) {
+    resolvedTz = 'Europe/Istanbul';
+    finalSource = 'unknown';
+    isFallback = true;
+    warning = 'fallback_turkey_time';
+  }
+
+  // Format Turkey Time
+  const turkeyTime = now.toLocaleTimeString('tr-TR', {
+    timeZone: 'Europe/Istanbul',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  });
+
+  // Calculate Patient Local Time and Offset
+  let patientLocalTime: string | null = null;
+  let offsetLabel: string | null = null;
+
+  if (resolvedTz && !needsTimezoneClarification) {
+    try {
+      patientLocalTime = now.toLocaleTimeString('tr-TR', {
+        timeZone: resolvedTz,
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+      });
+
+      // Get short offset label (e.g. GMT-4, GMT+2)
+      const formatObj = new Intl.DateTimeFormat('en-US', {
+        timeZone: resolvedTz,
+        timeZoneName: 'shortOffset'
+      });
+      const parts = formatObj.formatToParts(now);
+      const tzPart = parts.find(p => p.type === 'timeZoneName')?.value || '';
+      if (tzPart === 'GMT') {
+        offsetLabel = 'GMT+0';
+      } else {
+        offsetLabel = tzPart;
+      }
+    } catch {
+      needsTimezoneClarification = true;
+      warning = 'timezone_ambiguous';
+    }
+  }
+
+  // Build display label and short badge
+  let displayLabel = '';
+  let shortBadge = '';
+
+  if (needsTimezoneClarification) {
+    const label = countryLabel !== 'Bilinmeyen Ülke' ? countryLabel : 'ABD';
+    displayLabel = `${countryEmoji} ${label} • Saat dilimi net değil`;
+    shortBadge = 'Şehir gerekli';
+  } else if (isFallback) {
+    displayLabel = `TR: ${turkeyTime} / Hasta saati net değil`;
+    shortBadge = 'Saat net değil';
+  } else {
+    // If patient is in Turkey, no need for dual clock
+    if (resolvedTz === 'Europe/Istanbul') {
+      displayLabel = `🇹🇷 Türkiye • ${turkeyTime} (GMT+3)`;
+      shortBadge = turkeyTime;
+      offsetLabel = 'GMT+3';
+    } else {
+      const location = cityLabel || cleanTzCityLabel(resolvedTz) || countryLabel;
+      displayLabel = `${patientLocalTime} ${location} / ${turkeyTime} TR`;
+      shortBadge = patientLocalTime || '';
+    }
+  }
+
+  return {
+    countryLabel,
+    countryEmoji,
+    patientTimezone: (needsTimezoneClarification || isFallback) ? null : resolvedTz,
+    timezoneSource: finalSource,
+    patientLocalTime: (needsTimezoneClarification || isFallback) ? null : patientLocalTime,
+    turkeyTime,
+    displayLabel,
+    shortBadge,
+    offsetLabel: (needsTimezoneClarification || isFallback) ? null : offsetLabel,
+    needsTimezoneClarification,
+    isFallback,
+    warning
+  };
+}
+
+/**
+ * Extract Turkey local time parts (year, month, day, hour, minute) from any Date or UTC string.
+ * Helps initialize edit forms without browser timezone offset pollution.
+ */
+export function getTurkeyParts(dateInput: Date | string | null | undefined) {
+  if (!dateInput) {
+    return { year: '', month: '', day: '', hour: '', minute: '' };
+  }
+  const d = typeof dateInput === 'string' ? new Date(dateInput) : dateInput;
+  if (isNaN(d.getTime())) {
+    return { year: '', month: '', day: '', hour: '', minute: '' };
+  }
+  
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Europe/Istanbul',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  });
+  
+  const parts = formatter.formatToParts(d);
+  const year = parts.find(p => p.type === 'year')?.value || '';
+  const month = parts.find(p => p.type === 'month')?.value || '';
+  const day = parts.find(p => p.type === 'day')?.value || '';
+  const hour = parts.find(p => p.type === 'hour')?.value || '';
+  const minute = parts.find(p => p.type === 'minute')?.value || '';
+  
+  return { year, month, day, hour, minute };
+}
+

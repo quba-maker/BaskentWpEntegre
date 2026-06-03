@@ -8,7 +8,7 @@ import { updateCrmData, addTag, removeTag } from "@/app/actions/inbox";
 import { CustomerAiBrainPanel } from "@/components/features/ai-observability/CustomerAiBrain";
 import { AiTimelinePanel } from "@/components/features/ai-observability/AiTimeline";
 import { resolvePatientDisplayName, formatPhoneReadable } from "@/lib/utils/patient-name-resolver";
-import { resolvePatientTimezone } from "@/lib/utils/timezone";
+import { resolvePatientTimeDisplay } from "@/lib/utils/timezone";
 import { useParams } from "next/navigation";
 import { resolveUniversalAISummary, getTenantEntityType } from "@/lib/utils/universal-summary-resolver";
 import { UniversalAISummaryCard } from "@/components/features/takip/universal-ai-summary-card";
@@ -147,23 +147,31 @@ export function ContextPanel() {
 
     const updateClock = () => {
       try {
-        const tzRes = resolvePatientTimezone(country);
-        const timeZone = tzRes.timezone;
-        
-        // Get localized time in that timezone
-        const options: Intl.DateTimeFormatOptions = {
-          timeZone,
-          hour: "2-digit",
-          minute: "2-digit",
-          hour12: false
-        };
-        const formatter = new Intl.DateTimeFormat("tr-TR", options);
-        const timeStr = formatter.format(new Date());
-        setLocalTime(timeStr);
+        const displayRes = resolvePatientTimeDisplay({
+          country: country || activeContact.country || activeContact.opp_country,
+          city: activeContact.city || activeContact.patient_city || activeContact.opp_metadata?.patient_city || activeContact.formData?.patient_city || activeContact.formData?.city,
+          timezone: activeContact.timezone || activeContact.patient_timezone || activeContact.opp_metadata?.patient_timezone || activeContact.metadata?.patient_timezone,
+          metadata: activeContact.metadata,
+          oppMetadata: activeContact.opp_metadata || activeContact.formData,
+          referenceDate: new Date()
+        });
 
-        // Check if patient is sleeping (22:00 to 08:00)
-        const hour = parseInt(timeStr.split(":")[0], 10);
-        setIsSleeping(hour >= 22 || hour < 8);
+        if (displayRes.needsTimezoneClarification) {
+          setLocalTime(displayRes.shortBadge === "Şehir gerekli" ? "Şehir gerekli" : "Saat net değil");
+          setIsSleeping(false);
+        } else if (displayRes.isFallback) {
+          setLocalTime("Saat net değil");
+          setIsSleeping(false);
+        } else {
+          setLocalTime(displayRes.patientLocalTime || "");
+          
+          if (displayRes.patientLocalTime) {
+            const hour = parseInt(displayRes.patientLocalTime.split(":")[0], 10);
+            setIsSleeping(hour >= 22 || hour < 8);
+          } else {
+            setIsSleeping(false);
+          }
+        }
       } catch (err) {
         console.error("Error formatting timezone clock", err);
         setLocalTime("");
@@ -174,7 +182,7 @@ export function ContextPanel() {
     updateClock();
     const interval = setInterval(updateClock, 10000); // update every 10 seconds
     return () => clearInterval(interval);
-  }, [country]);
+  }, [country, activeContact]);
 
   if (!activeContact) {
     return (
