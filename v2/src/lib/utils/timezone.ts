@@ -564,6 +564,86 @@ export function computeTimeMetadata(
     time_confirmed_by_patient: llmExtracted?.time_confirmed_by_patient ?? false,
     needs_timezone_clarification,
     operation_window_valid,
-    scheduled_for_utc
+    scheduled_for_utc,
+  };
+}
+
+/**
+ * Parse a date and time string in Turkey local time (+03:00) to a UTC ISO string.
+ * This is browser-timezone independent.
+ * 
+ * @param dateStr Format: "YYYY-MM-DD"
+ * @param timeStr Format: "HH:MM" or "HH:MM:SS"
+ */
+export function parseTurkeyLocalToUtc(dateStr: string, timeStr: string): string {
+  if (!dateStr || !timeStr) {
+    throw new Error('Date and time strings are required');
+  }
+  const cleanDate = dateStr.trim();
+  let cleanTime = timeStr.trim();
+  if (cleanTime.length === 5) {
+    cleanTime = `${cleanTime}:00`;
+  }
+  const isoWithOffset = `${cleanDate}T${cleanTime}+03:00`;
+  const date = new Date(isoWithOffset);
+  if (isNaN(date.getTime())) {
+    throw new Error(`Invalid date/time combination: ${isoWithOffset}`);
+  }
+  return date.toISOString();
+}
+
+export interface AdjustToOperatingHoursResult {
+  adjustedUtc: string;
+  adjusted: boolean;
+  originalUtc: string;
+}
+
+/**
+ * Automatically shift UTC dates falling outside the 09:00 - 21:00 Turkey time window
+ * to the nearest valid operational window (09:00 TRT).
+ */
+export function adjustToOperatingHours(utcDateString: string): AdjustToOperatingHoursResult {
+  const d = new Date(utcDateString);
+  if (isNaN(d.getTime())) {
+    throw new Error(`Invalid UTC date: ${utcDateString}`);
+  }
+
+  const originalUtc = d.toISOString();
+  // Get Turkey local date by shifting by +3 hours
+  const trTime = d.getTime() + 3 * 60 * 60 * 1000;
+  const trDate = new Date(trTime);
+
+  const trHour = trDate.getUTCHours();
+  const trMinute = trDate.getUTCMinutes();
+  const trTotalMinutes = trHour * 60 + trMinute;
+
+  const startMinutes = 9 * 60; // 09:00
+  const endMinutes = 21 * 60;  // 21:00
+
+  if (trTotalMinutes >= startMinutes && trTotalMinutes <= endMinutes) {
+    return {
+      adjustedUtc: originalUtc,
+      adjusted: false,
+      originalUtc,
+    };
+  }
+
+  // Outside operating hours. Need to adjust.
+  // If TR hour is < 9 (or total minutes < 09:00) -> shift to 09:00 on the same TR day
+  if (trTotalMinutes < startMinutes) {
+    trDate.setUTCHours(9, 0, 0, 0);
+  } else {
+    // If TR hour is > 21 (or total minutes > 21:00) -> shift to 09:00 on the next TR day
+    trDate.setUTCDate(trDate.getUTCDate() + 1);
+    trDate.setUTCHours(9, 0, 0, 0);
+  }
+
+  // Convert back to UTC by shifting by -3 hours
+  const adjustedUtc = new Date(trDate.getTime() - 3 * 60 * 60 * 1000).toISOString();
+
+  return {
+    adjustedUtc,
+    adjusted: true,
+    originalUtc,
   };
 }

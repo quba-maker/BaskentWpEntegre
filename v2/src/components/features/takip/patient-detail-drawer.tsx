@@ -14,6 +14,7 @@ import {
   Bell
 } from "lucide-react";
 import { getPatientTrackingDetail, getPatientTimeline, createAppointmentTask, completeAppointmentTask, deletePatientTask, updatePatientTask, updateAppointmentConfirmation, manuallyUpdateAppointmentStatus, type PatientDetailData, type TimelineEntry } from "@/app/actions/patient-tracking";
+import { parseTurkeyLocalToUtc, resolvePatientTimezone } from "@/lib/utils/timezone";
 import { addOpportunityNote, updateOpportunityStage } from "@/app/actions/pipeline";
 import { createBotDelegationTask, schedulePhoneCallTask, completeBotDelegationTask, cancelBotDelegationTask, sendTestBotMessage, saveBotDirective, type BotDelegationMode } from "@/app/actions/focus-queue";
 import { logCallReached, logCallMissed, logCallbackScheduled, logNotInterested, sendMetaTemplateMessage } from "@/app/actions/outreach";
@@ -598,7 +599,7 @@ export default function PatientDetailDrawer({
     if (!opportunityId) return;
     setPlanLoading(true);
     try {
-      let dateObj: Date;
+      let utcIsoString: string;
       let customMetadata: any = null;
       let remindersToSend: any[] = [];
 
@@ -611,8 +612,8 @@ export default function PatientDetailDrawer({
 
         const day = planDay || '01';
         const time = planTimeCv || '10:00';
-        const localDateStr = `${planYear}-${planMonth}-${day}T${time}:00`;
-        dateObj = new Date(localDateStr);
+        const dateStr = `${planYear}-${planMonth}-${day}`;
+        utcIsoString = parseTurkeyLocalToUtc(dateStr, time);
 
         customMetadata = {
           is_partial_date: !planDay || !planTimeCv,
@@ -628,11 +629,10 @@ export default function PatientDetailDrawer({
           .map(k => ({ type: k as any }));
       } else {
         if (!planDate || !planTime) return;
-        const localDateStr = `${planDate}T${planTime}:00`;
-        dateObj = new Date(localDateStr);
+        utcIsoString = parseTurkeyLocalToUtc(planDate, planTime);
       }
 
-      const res = await createAppointmentTask(opportunityId, dateObj.toISOString(), planType, { 
+      const res = await createAppointmentTask(opportunityId, utcIsoString, planType, { 
         note: planNote, 
         requireConfirmation: planType === 'clinic_visit',
         reminders: remindersToSend,
@@ -678,7 +678,7 @@ export default function PatientDetailDrawer({
   const handleUpdateTask = async (taskId: string) => {
     setIsUpdatingTask(true);
     try {
-      let dateObj: Date;
+      let utcIsoString: string;
       let customMetadata: any = null;
       let remindersToSend: any[] = [];
       
@@ -694,8 +694,8 @@ export default function PatientDetailDrawer({
 
         const day = editTaskDay || '01';
         const time = editTaskTimeCv || '10:00';
-        const localDateStr = `${editTaskYear}-${editTaskMonth}-${day}T${time}:00`;
-        dateObj = new Date(localDateStr);
+        const dateStr = `${editTaskYear}-${editTaskMonth}-${day}`;
+        utcIsoString = parseTurkeyLocalToUtc(dateStr, time);
 
         customMetadata = {
           is_partial_date: !editTaskDay || !editTaskTimeCv,
@@ -711,11 +711,10 @@ export default function PatientDetailDrawer({
           .map(k => ({ type: k as any }));
       } else {
         if (!editTaskDate || !editTaskTime) return;
-        const localDateStr = `${editTaskDate}T${editTaskTime}:00`;
-        dateObj = new Date(localDateStr);
+        utcIsoString = parseTurkeyLocalToUtc(editTaskDate, editTaskTime);
       }
 
-      const res = await updatePatientTask(taskId, dateObj.toISOString(), editTaskDescription, editTaskNote, {
+      const res = await updatePatientTask(taskId, utcIsoString, editTaskDescription, editTaskNote, {
         reminders: remindersToSend,
         customMetadata
       });
@@ -1597,7 +1596,7 @@ export default function PatientDetailDrawer({
                     </span>
 
                     {/* Mükerrer Görev Uyarı Bandı */}
-                    {data.tasks.filter(t => t.taskType !== 'appointment_reminder' && t.status === 'pending').length > 0 && (
+                    {data.tasks.filter(t => t.taskType !== 'appointment_reminder' && !t.metadata?.parent_task_id && t.metadata?.is_primary !== false && t.status === 'pending').length > 0 && (
                       <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl flex items-center gap-2 text-[10px] text-amber-700 font-semibold leading-relaxed">
                         <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
                         <span>Aktif bir planlı göreviniz zaten bulunuyor. Mükerrer planlama yapmamaya dikkat edin.</span>
@@ -1884,8 +1883,12 @@ export default function PatientDetailDrawer({
 
                   {/* Planlanmış Görevler & Hatırlatıcılar (LIST AT THE BOTTOM) */}
                   {(() => {
-                    const activeTasks = data.tasks.filter(t => t.taskType !== 'appointment_reminder');
-                    const hasTasks = data.tasks.length > 0;
+                    const activeTasks = data.tasks.filter(t => 
+                      t.taskType !== 'appointment_reminder' && 
+                      !t.metadata?.parent_task_id && 
+                      t.metadata?.is_primary !== false
+                    );
+                    const hasTasks = activeTasks.length > 0;
 
                     if (!hasTasks) return null;
 
@@ -1898,8 +1901,8 @@ export default function PatientDetailDrawer({
                         <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1">
                           {activeTasks.map(task => {
                             const isEditing = editingTaskId === task.id;
-                            const childReminders = data.tasks.filter(
-                              r => r.taskType === 'appointment_reminder' && r.metadata?.parent_task_id === task.id
+                            const childTasks = data.tasks.filter(
+                              r => r.metadata?.parent_task_id === task.id
                             );
 
                             if (isEditing) {
@@ -2178,19 +2181,51 @@ export default function PatientDetailDrawer({
                                   )}
                                 </div>
 
-                                {/* Child Reminders Indented Timeline View */}
-                                {childReminders.length > 0 && (
+                                {/* Child Tasks Indented Timeline View */}
+                                {childTasks.length > 0 && (
                                   <div className="px-3.5 pb-3.5 pt-2 bg-[#FAFAFC] border-t border-black/[0.03] space-y-2.5 relative">
                                     {/* Timeline vertical connector line */}
                                     <div className="absolute left-[21px] top-4 bottom-7 w-0.5 bg-indigo-100/50" />
 
                                     <div className="text-[8.5px] font-bold text-indigo-950/60 uppercase tracking-wider mb-1 flex items-center gap-1">
-                                      <span>🔔 AI HATIRLATICI VE TEYİT AKIŞI</span>
+                                      <span>🔔 ALT İŞLEMLER VE HATIRLATICI AKIŞI</span>
                                     </div>
 
-                                    {childReminders.map(rem => {
+                                    {childTasks.map(rem => {
                                       const remMeta = safeJsonParse(rem.metadata, {});
                                       const isCompleted = rem.status === 'completed';
+
+                                      let trTime = remMeta.operation_due_at_tr;
+                                      if (!trTime && rem.dueAt) {
+                                        try {
+                                          trTime = new Intl.DateTimeFormat('tr-TR', {
+                                            timeZone: 'Europe/Istanbul',
+                                            day: 'numeric',
+                                            month: 'short',
+                                            hour: '2-digit',
+                                            minute: '2-digit'
+                                          }).format(new Date(rem.dueAt));
+                                        } catch (_) {}
+                                      }
+
+                                      let patientLocalTime = remMeta.patient_local_time;
+                                      if (!patientLocalTime && rem.dueAt && data?.country) {
+                                        const tzRes = resolvePatientTimezone(data.country);
+                                        if (tzRes.timezone) {
+                                          try {
+                                            patientLocalTime = new Intl.DateTimeFormat('tr-TR', {
+                                              timeZone: tzRes.timezone,
+                                              hour: '2-digit',
+                                              minute: '2-digit',
+                                              hour12: false
+                                            }).format(new Date(rem.dueAt));
+                                          } catch (_) {}
+                                        }
+                                      }
+
+                                      const remStatusLabel = isCompleted 
+                                        ? (rem.taskType === 'appointment_reminder' ? 'İletildi' : 'Tamamlandı')
+                                        : (rem.taskType === 'appointment_reminder' ? 'Kuyrukta' : 'Bekliyor');
 
                                       return (
                                         <div key={rem.id} className="flex items-start gap-2.5 relative group text-[10.5px]">
@@ -2215,16 +2250,16 @@ export default function PatientDetailDrawer({
                                                   {rem.title}
                                                 </span>
                                                 <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-1 text-[9.5px] text-[#86868B] font-semibold">
-                                                  <span className="flex items-center gap-0.5">🇹🇷 {remMeta.operation_due_at_tr || '—'}</span>
+                                                  <span className="flex items-center gap-0.5">🇹🇷 {trTime || '—'}</span>
                                                   <span className="text-black/5">•</span>
-                                                  <span className="flex items-center gap-0.5">🌍 {remMeta.patient_local_time || '—'}</span>
+                                                  <span className="flex items-center gap-0.5">🌍 {patientLocalTime || '—'}</span>
                                                 </div>
                                               </div>
                                               <div className="flex items-center gap-1.5 shrink-0">
                                                 <span className={`text-[8.5px] font-bold px-1.2 py-0.4 rounded ${
                                                   isCompleted ? 'bg-emerald-50 text-emerald-700' : 'bg-indigo-50 text-indigo-700'
                                                 }`}>
-                                                  {isCompleted ? 'İletildi' : 'Kuyrukta'}
+                                                  {remStatusLabel}
                                                 </span>
                                                 {rem.status === 'pending' && (
                                                   <button

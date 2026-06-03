@@ -14,6 +14,7 @@ import {
   approveBotSuggestion, rejectBotSuggestion, createAppointmentTask,
   type AppointmentRow, type AppointmentFilters 
 } from "@/app/actions/patient-tracking";
+import { parseTurkeyLocalToUtc } from "@/lib/utils/timezone";
 import { formatPhoneReadable } from "@/lib/utils/patient-name-resolver";
 import { saveBotDirective } from "@/app/actions/focus-queue";
 
@@ -1096,7 +1097,7 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
     if (!apt.opportunityId) return;
     setPlanLoading(true);
     try {
-      let dateObj: Date;
+      let utcIsoString: string;
       let customMetadata: any = null;
       let remindersToSend: any[] = [];
 
@@ -1109,8 +1110,8 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
 
         const day = planDay || '01';
         const time = planTimeCv || '10:00';
-        const localDateStr = `${planYear}-${planMonth}-${day}T${time}:00`;
-        dateObj = new Date(localDateStr);
+        const dateStr = `${planYear}-${planMonth}-${day}`;
+        utcIsoString = parseTurkeyLocalToUtc(dateStr, time);
 
         customMetadata = {
           is_partial_date: !planDay || !planTimeCv,
@@ -1126,11 +1127,10 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
           .map(k => ({ type: k as any }));
       } else {
         if (!planDate || !planTime) return;
-        const localDateStr = `${planDate}T${planTime}:00`;
-        dateObj = new Date(localDateStr);
+        utcIsoString = parseTurkeyLocalToUtc(planDate, planTime);
       }
 
-      const res = await createAppointmentTask(apt.opportunityId, dateObj.toISOString(), planType, { 
+      const res = await createAppointmentTask(apt.opportunityId, utcIsoString, planType, { 
         note: planNote, 
         requireConfirmation: planType === 'clinic_visit',
         reminders: remindersToSend,

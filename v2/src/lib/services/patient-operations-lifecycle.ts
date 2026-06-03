@@ -1,6 +1,7 @@
 import type { TenantDB } from '@/lib/core/tenant-db';
 import { logger } from '@/lib/core/logger';
 import { TASK_LANES, getTaskLane, LANE_PRECEDENCE, type TaskLane } from '../domain/task/lanes';
+import { adjustToOperatingHours } from '../utils/timezone';
 
 const log = logger.withContext({ module: 'PatientOperationsLifecycleService' });
 
@@ -35,6 +36,29 @@ export class PatientOperationsLifecycleService {
     const lane = getTaskLane(input.taskType);
     const laneTypes = TASK_LANES[lane];
     const isPrimaryLane = lane === 'appointment_lifecycle' || lane === 'communication_lifecycle';
+
+    let dueAtToUse = input.dueAt;
+    const additionalMetadata: Record<string, any> = {};
+
+    if (input.isAutomated) {
+      try {
+        const adjustment = adjustToOperatingHours(input.dueAt);
+        if (adjustment.adjusted) {
+          dueAtToUse = adjustment.adjustedUtc;
+          additionalMetadata.operation_window_adjusted = true;
+          additionalMetadata.original_due_at = adjustment.originalUtc;
+          additionalMetadata.adjusted_due_at = adjustment.adjustedUtc;
+          additionalMetadata.adjust_reason = "outside_operating_hours";
+          log.info(`[LIFECYCLE_OPERATING_HOURS_ADJUST] Shifted automated task due date to operational window`, {
+            oppId: input.opportunityId,
+            original: adjustment.originalUtc,
+            adjusted: adjustment.adjustedUtc
+          });
+        }
+      } catch (err) {
+        log.error(`[LIFECYCLE_OPERATING_HOURS_ADJUST_ERROR] Failed to adjust due_at to operating hours`, err as Error);
+      }
+    }
 
     // Deduplication key parameters (tenant, active opp, conversation, lane)
     const existingOppTasks = await this.db.executeSafe({
@@ -87,8 +111,8 @@ export class PatientOperationsLifecycleService {
 
       // Keep more urgent due date
       const existingDue = new Date(sameLaneTask.due_at);
-      const incomingDue = new Date(input.dueAt);
-      const dueAtToUse = (!isNaN(incomingDue.getTime()) && incomingDue < existingDue) ? input.dueAt : sameLaneTask.due_at;
+      const incomingDue = new Date(dueAtToUse);
+      const finalDueAt = (!isNaN(incomingDue.getTime()) && incomingDue < existingDue) ? dueAtToUse : sameLaneTask.due_at;
 
       // Check if we should update parent/primary settings of the merged task
       const otherPrimary = existingOppTasks.find(t => t.id !== sameLaneTask.id && t.metadata?.is_primary === true);
@@ -134,6 +158,7 @@ export class PatientOperationsLifecycleService {
       const mergedMeta = {
         ...existingMeta,
         ...incomingMeta,
+        ...additionalMetadata,
         lane,
         last_merged_at: new Date().toISOString(),
         signals: mergedSignals,
@@ -148,7 +173,7 @@ export class PatientOperationsLifecycleService {
         text: `UPDATE follow_up_tasks 
                SET task_type = $1, title = $2, due_at = $3, metadata = $4::jsonb, updated_at = NOW()
                WHERE id = $5 AND tenant_id = $6`,
-        values: [taskTypeToUse, titleToUse, dueAtToUse, JSON.stringify(mergedMeta), sameLaneTask.id, input.tenantId]
+        values: [taskTypeToUse, titleToUse, finalDueAt, JSON.stringify(mergedMeta), sameLaneTask.id, input.tenantId]
       });
 
       return sameLaneTask.id;
@@ -206,12 +231,13 @@ export class PatientOperationsLifecycleService {
             input.taskType,
             input.title,
             input.description || null,
-            input.dueAt,
+            dueAtToUse,
             input.isAutomated ?? false,
             input.createdBy || 'system',
             input.sourceEvent || null,
             JSON.stringify({
               ...(input.metadata || {}),
+              ...additionalMetadata,
               lane,
               is_primary: true
             })
@@ -234,6 +260,7 @@ export class PatientOperationsLifecycleService {
 
     const newTaskMeta = {
       ...(input.metadata || {}),
+      ...additionalMetadata,
       lane,
       is_primary: finalIsPrimary,
       ...(parentTaskId ? { parent_task_id: parentTaskId } : {})
@@ -253,7 +280,7 @@ export class PatientOperationsLifecycleService {
         input.taskType,
         input.title,
         input.description || null,
-        input.dueAt,
+        dueAtToUse,
         input.isAutomated ?? false,
         input.createdBy || 'system',
         input.sourceEvent || null,

@@ -19,6 +19,7 @@
 import type { TenantDB } from '@/lib/core/tenant-db';
 import { SignalAggregator, type TaskGroup } from './signal-aggregator';
 import { cleanString } from './sanitizers';
+import { adjustToOperatingHours } from '../utils/timezone';
 
 // ═══════════════════════════════════════════════════════════
 // TYPES
@@ -181,6 +182,29 @@ export class TaskService {
 
   // ── CREATE ──
   async create(input: CreateTaskInput): Promise<string> {
+    let dueAtToUse = input.dueAt;
+    const additionalMetadata: Record<string, any> = {};
+
+    if (input.isAutomated) {
+      try {
+        const adjustment = adjustToOperatingHours(input.dueAt);
+        if (adjustment.adjusted) {
+          dueAtToUse = adjustment.adjustedUtc;
+          additionalMetadata.operation_window_adjusted = true;
+          additionalMetadata.original_due_at = adjustment.originalUtc;
+          additionalMetadata.adjusted_due_at = adjustment.adjustedUtc;
+          additionalMetadata.adjust_reason = "outside_operating_hours";
+        }
+      } catch (err) {
+        console.error(`[TASK_SERVICE_CREATE_ADJUST_ERROR] Failed to adjust due_at to operating hours`, err);
+      }
+    }
+
+    const mergedMetadata = {
+      ...(input.metadata || {}),
+      ...additionalMetadata
+    };
+
     const rows = await this.db.executeSafe({
       text: `INSERT INTO follow_up_tasks (
                tenant_id, opportunity_id, conversation_id, phone_number,
@@ -198,14 +222,14 @@ export class TaskService {
         input.taskType,
         input.title,
         input.description || null,
-        input.dueAt,
+        dueAtToUse,
         input.remindAt || null,
         input.assignedTo || null,
         input.isAutomated ?? false,
         input.createdBy || 'system',
         input.sourceEvent || null,
         input.patientSegment || null,
-        JSON.stringify(input.metadata || {}),
+        JSON.stringify(mergedMetadata),
       ]
     }) as any[];
 

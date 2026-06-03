@@ -1,7 +1,7 @@
 "use server";
 
 import { withActionGuard } from "@/lib/core/action-guard";
-import { resolvePatientTimezone, formatDualClock, isOverdue, isToday } from "@/lib/utils/timezone";
+import { resolvePatientTimezone, formatDualClock, isOverdue, isToday, formatTimeTR } from "@/lib/utils/timezone";
 import type { JourneyStatus, NextBestAction } from "./focus-queue";
 import { resolvePatientDisplayName } from "@/lib/utils/patient-name-resolver";
 
@@ -170,7 +170,7 @@ export interface AppointmentRow {
   priority: 'cold' | 'warm' | 'hot';
   hasClinicVisit?: boolean;
 
-  appointmentType: 'phone_call' | 'clinic_visit' | 'pre_consultation' | 'doctor_review' | 'report_followup';
+  appointmentType: 'phone_call' | 'clinic_visit' | 'pre_consultation' | 'consultation' | 'doctor_review' | 'report_followup';
   appointmentTypeLabel: string;
 
   dueAtUtc?: string;
@@ -198,6 +198,153 @@ export interface AppointmentFilters {
   completed?: boolean;
   dueRange?: 'today' | 'tomorrow' | 'overdue' | 'week' | 'all';
   search?: string;
+}
+
+function getTzCityLabel(tzString?: string | null): string {
+  if (!tzString) return '';
+  const parts = tzString.split('/');
+  return parts[parts.length - 1].replace(/_/g, ' ');
+}
+
+function safeJsonParse(str: any, fallback: any = {}): any {
+  if (!str) return fallback;
+  if (typeof str !== 'string') return str;
+  try {
+    return JSON.parse(str);
+  } catch (_) {
+    return fallback;
+  }
+}
+
+export type UiBucket =
+  | 'bot_suggestion_pending'
+  | 'open'
+  | 'scheduled'
+  | 'confirmed'
+  | 'overdue'
+  | 'completed'
+  | 'unreachable'
+  | 'cancelled';
+
+export interface OperationsTaskProjected {
+  taskId: string | null;
+  opportunityId: string | null;
+  phoneNumber: string;
+  taskType: string;
+  taskTitle: string;
+  taskDescription: string | null;
+  dueAtUtc: string | null;
+  dueAtTurkey: string | null;
+  dueAtPatientLocal: string | null;
+  patientTimezone: string | null;
+  isPrimary: boolean;
+  status: string;
+  uiBucket: UiBucket;
+  confirmationStatus: 'pending' | 'confirmed' | 'declined' | 'no_response' | 'none';
+  appointmentType: 'phone_call' | 'clinic_visit' | 'consultation' | 'doctor_review' | 'report_followup';
+  timeDisplay: string;
+  timezoneNeedsClarification: boolean;
+}
+
+function buildOperationsTaskProjection(
+  task: any,
+  opp?: any
+): OperationsTaskProjected {
+  const metadata = task?.metadata || {};
+  const status = task?.status || 'pending';
+  const dueAt = task?.due_at;
+
+  const isClinic = metadata.appointment_type === 'clinic_visit';
+  const confirmationStatus = metadata.confirmation_status || 'none';
+
+  // 1. uiBucket Calculation
+  let uiBucket: UiBucket = 'open';
+
+  if (status === 'cancelled' || metadata.appointment_result === 'cancelled') {
+    uiBucket = 'cancelled';
+  } else if (status === 'completed') {
+    if (metadata.appointment_result === 'no_show') {
+      uiBucket = 'unreachable';
+    } else {
+      uiBucket = 'completed';
+    }
+  } else if (status === 'no_show' || metadata.appointment_result === 'no_show') {
+    uiBucket = 'unreachable';
+  } else if (isClinic && confirmationStatus === 'no_response') {
+    uiBucket = 'unreachable';
+  } else if (status === 'pending' || status === 'in_progress') {
+    const isTaskOverdue = dueAt && new Date(dueAt).getTime() < Date.now();
+    if (isTaskOverdue) {
+      uiBucket = 'overdue';
+    } else if (metadata.bot_suggestion?.status === 'pending') {
+      uiBucket = 'bot_suggestion_pending';
+    } else if (confirmationStatus === 'confirmed') {
+      uiBucket = 'confirmed';
+    } else if (task?.task_type === 'callback_scheduled' || isClinic) {
+      uiBucket = 'scheduled';
+    } else {
+      uiBucket = 'open';
+    }
+  }
+
+  // 2. Appointment Type
+  let appointmentType: OperationsTaskProjected['appointmentType'] = 'phone_call';
+  if (isClinic) {
+    appointmentType = 'clinic_visit';
+  } else if (metadata.appointment_type === 'consultation') {
+    appointmentType = 'consultation';
+  } else if (task?.task_type === 'doctor_review_pending') {
+    appointmentType = 'doctor_review';
+  } else if (task?.task_type === 'send_report_reminder') {
+    appointmentType = 'report_followup';
+  } else if (metadata.appointment_type === 'phone_call') {
+    appointmentType = 'phone_call';
+  }
+
+  // 3. Time Display
+  let scheduledUtc = metadata.scheduled_for_utc || dueAt || null;
+  let trTime = metadata.callback_time_tr;
+  let patientTime = metadata.patient_local_time;
+  let patientTz = metadata.patient_timezone;
+  let needsClarification = !!metadata.needs_timezone_clarification;
+
+  if (!trTime && dueAt) {
+    trTime = formatTimeTR(dueAt, 'Europe/Istanbul');
+    needsClarification = true;
+  }
+
+  let timeDisplay = 'Saat belirtilmemiş';
+  if (trTime) {
+    if (needsClarification || !patientTime) {
+      timeDisplay = `Türkiye saati: ${trTime} / Hasta saati net değil`;
+    } else {
+      const city = getTzCityLabel(patientTz);
+      timeDisplay = `${trTime} TR / ${patientTime} ${city || 'Hasta'}`;
+    }
+  }
+
+  // 4. Primary Task check
+  const isPrimary = metadata.is_primary === true || (!metadata.parent_task_id && metadata.is_primary !== false);
+
+  return {
+    taskId: task?.id || null,
+    opportunityId: task?.opportunity_id || null,
+    phoneNumber: task?.phone_number || '',
+    taskType: task?.task_type || '',
+    taskTitle: task?.title || '',
+    taskDescription: task?.description || null,
+    dueAtUtc: scheduledUtc,
+    dueAtTurkey: trTime || null,
+    dueAtPatientLocal: patientTime || null,
+    patientTimezone: patientTz || null,
+    isPrimary,
+    status,
+    uiBucket,
+    confirmationStatus,
+    appointmentType,
+    timeDisplay,
+    timezoneNeedsClarification: needsClarification
+  };
 }
 
 // ── SHARED COMPUTE FUNCTIONS (reuse from focus-queue logic) ──
@@ -503,41 +650,48 @@ export async function getPatientTrackingRows(filters?: PatientTrackingFilters): 
         values: [ctx.tenantId]
       }) as any[];
 
-      // Group by opportunity (same logic as focus-queue)
-      const groupedMap = new Map<string, any>();
+      // Group by phone number (or conversation_id) to avoid duplicates for the same patient
+      const groupedMap = new Map<string, any[]>();
 
       rows.forEach(row => {
-        let groupId = '';
-        const oppId = row.opportunity_id || row.conv_active_opportunity_id || row.lead_linked_opportunity_id;
-        if (oppId) {
-          groupId = `opp_${oppId}`;
-        } else if (row.conversation_id) {
-          groupId = `conv_${row.conversation_id}`;
-        } else if (row.phone_number) {
-          groupId = `phone_${row.phone_number}`;
-        } else {
-          groupId = `task_${row.task_id}`;
+        const key = row.phone_number || row.conversation_id || `opp_${row.opportunity_id}`;
+        if (!groupedMap.has(key)) {
+          groupedMap.set(key, []);
+        }
+        groupedMap.get(key)!.push(row);
+      });
+
+      // Transform and select the primary representative row for each patient
+      let items: PatientTrackingRow[] = [];
+
+      for (const [key, groupRows] of groupedMap.entries()) {
+        // 1. Choose representative: matching active_opportunity_id
+        let representative = groupRows.find(
+          r => r.opportunity_id && r.opportunity_id === r.conv_active_opportunity_id
+        );
+
+        // 2. Fallback: choose the one with the highest priority score
+        if (!representative) {
+          let bestScore = -999999;
+          groupRows.forEach(r => {
+            const journeyStatus = computeJourneyStatus(r);
+            const nextBestAction = computeNextBestAction(r, journeyStatus);
+            const priorityScore = computePriorityScore(r, journeyStatus, nextBestAction);
+            if (priorityScore > bestScore) {
+              bestScore = priorityScore;
+              representative = r;
+            }
+          });
         }
 
+        if (!representative) {
+          representative = groupRows[0];
+        }
+
+        const row = representative;
         const journeyStatus = computeJourneyStatus(row);
         const nextBestAction = computeNextBestAction(row, journeyStatus);
         const priorityScore = computePriorityScore(row, journeyStatus, nextBestAction);
-
-        if (groupedMap.has(groupId)) {
-          const existing = groupedMap.get(groupId)!;
-          if (priorityScore > existing._priorityScore) {
-            groupedMap.set(groupId, { ...row, _journeyStatus: journeyStatus, _nextBestAction: nextBestAction, _priorityScore: priorityScore });
-          }
-        } else {
-          groupedMap.set(groupId, { ...row, _journeyStatus: journeyStatus, _nextBestAction: nextBestAction, _priorityScore: priorityScore });
-        }
-      });
-
-      // Transform to PatientTrackingRow
-      let items: PatientTrackingRow[] = Array.from(groupedMap.values()).map(row => {
-        const journeyStatus = row._journeyStatus as JourneyStatus;
-        const nextBestAction = row._nextBestAction as NextBestAction;
-        const priorityScore = row._priorityScore as number;
         const resolvedCountry = row.opp_country || row.lead_raw_data?.country || null;
         const tzRes = resolvePatientTimezone(resolvedCountry);
         const dueAt = row.task_due_at || row.opp_next_follow_up_at;
@@ -615,7 +769,7 @@ export async function getPatientTrackingRows(filters?: PatientTrackingFilters): 
           }
         }
 
-        return {
+        items.push({
           opportunityId: row.opportunity_id,
           tenantId: row.tenant_id,
           patientName: resolvedName,
@@ -656,8 +810,8 @@ export async function getPatientTrackingRows(filters?: PatientTrackingFilters): 
           phoneTaskStatus: row.active_phone_task_status || undefined,
           clinicTaskStatus: row.active_clinic_task_status || undefined,
           mostRecentNote: mostRecentNote || undefined,
-        };
-      });
+        });
+      }
 
       // Client-side search filter
       if (filters?.search) {
@@ -1032,47 +1186,37 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
       // Filter by primary tasks only (exclude child tasks from appearing as standalone parent rows)
       conditions.push(`t.metadata->>'parent_task_id' IS NULL AND (t.metadata->>'is_primary' IS NULL OR t.metadata->>'is_primary' != 'false')`);
 
-      // Status filter
+      // Search filter
+      if (filters?.search) {
+        conditions.push(`(t.title ILIKE $${values.length + 1} OR t.description ILIKE $${values.length + 1} OR o.patient_name ILIKE $${values.length + 1} OR c.patient_name ILIKE $${values.length + 1} OR t.phone_number LIKE $${values.length + 1})`);
+        values.push(`%${filters.search}%`);
+      }
+
+      // Map status tab filter to database status query to narrow down the dataset
       if (filters?.status && filters.status !== 'all') {
-        if (filters.status === 'pending') {
-          conditions.push(`t.status IN ('pending', 'in_progress')`);
-          conditions.push(`(t.metadata->>'confirmation_status' IS NULL OR t.metadata->>'confirmation_status' != 'confirmed')`);
-          conditions.push(`(t.metadata->'bot_suggestion'->>'status' IS NULL OR t.metadata->'bot_suggestion'->>'status' != 'pending')`);
-        }
-        else if (filters.status === 'bot_suggestion') {
-          conditions.push(`t.status IN ('pending', 'in_progress')`);
-          conditions.push(`t.metadata->'bot_suggestion'->>'status' = 'pending'`);
-        }
-        else if (filters.status === 'completed') {
+        if (filters.status === 'completed' || filters.status === 'arrived') {
           conditions.push(`t.status = 'completed'`);
-          conditions.push(`(t.metadata->>'appointment_result' IS NULL OR t.metadata->>'appointment_result' NOT IN ('no_show', 'cancelled'))`);
-        }
-        else if (filters.status === 'cancelled') {
+        } else if (filters.status === 'cancelled') {
           conditions.push(`(t.status = 'cancelled' OR t.metadata->>'appointment_result' = 'cancelled')`);
-        }
-        else if (filters.status === 'overdue') conditions.push(`t.status IN ('pending', 'in_progress') AND t.due_at < NOW()`);
-        else if (filters.status === 'arrived') {
-          conditions.push(`t.status = 'completed' AND t.metadata->>'appointment_result' = 'arrived'`);
-        }
-        else if (filters.status === 'no_show') {
-          conditions.push(`((t.status = 'completed' AND t.metadata->>'appointment_result' = 'no_show') OR t.status = 'no_show')`);
-        }
-        else if (filters.status === 'no_response') conditions.push(`(t.metadata->>'confirmation_status' = 'no_response' OR (t.status IN ('pending', 'in_progress') AND t.due_at < NOW()))`);
-        else if (filters.status === 'confirmed') {
+        } else if (filters.status === 'no_show') {
+          conditions.push(`(t.status = 'completed' OR t.status = 'no_show')`);
+        } else if (filters.status === 'no_response') {
+          conditions.push(`(t.status IN ('pending', 'in_progress') OR t.metadata->>'confirmation_status' = 'no_response')`);
+        } else if (filters.status === 'overdue') {
+          conditions.push(`t.status IN ('pending', 'in_progress') AND t.due_at < NOW()`);
+        } else {
+          // pending, bot_suggestion, confirmed
           conditions.push(`t.status IN ('pending', 'in_progress')`);
-          conditions.push(`t.metadata->>'confirmation_status' = 'confirmed'`);
         }
       } else {
-        // Default: show pending/in_progress unless completed flag is explicitly true
         if (filters?.completed) {
           conditions.push(`t.status = 'completed'`);
-          conditions.push(`(t.metadata->>'appointment_result' IS NULL OR t.metadata->>'appointment_result' NOT IN ('no_show', 'cancelled'))`);
         } else {
           conditions.push(`t.status IN ('pending', 'in_progress')`);
         }
       }
 
-      // Confirmation Status
+      // Confirmation Status SQL helper
       if (filters?.confirmationStatus && filters.confirmationStatus !== 'all') {
         if (filters.confirmationStatus === 'none') {
             conditions.push(`(t.metadata->>'confirmation_status' IS NULL OR t.metadata->>'confirmation_status' = 'none')`);
@@ -1082,7 +1226,7 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
         }
       }
 
-      // Due range
+      // Due range SQL helper
       if (filters?.dueRange && filters.dueRange !== 'all') {
         if (filters.dueRange === 'today') conditions.push(`t.due_at::date = CURRENT_DATE`);
         else if (filters.dueRange === 'tomorrow') conditions.push(`t.due_at::date = (CURRENT_DATE + INTERVAL '1 day')::date`);
@@ -1090,7 +1234,7 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
         else if (filters.dueRange === 'week') conditions.push(`t.due_at BETWEEN NOW() AND NOW() + INTERVAL '7 days'`);
       }
 
-      // Appointment type filter
+      // Appointment type SQL helper
       if (filters?.appointmentType && filters.appointmentType !== 'all') {
         if (filters.appointmentType === 'phone_call') {
           conditions.push(`(t.metadata->>'appointment_type' IS NULL OR t.metadata->>'appointment_type' != 'clinic_visit')`);
@@ -1152,20 +1296,19 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
       const rows = await ctx.db.executeSafe({ text: query, values }) as any[];
 
       const items: AppointmentRow[] = rows.map((row: any) => {
-        const resolvedCountry = row.opp_country || null;
-        const tzRes = resolvePatientTimezone(resolvedCountry);
-        const dualClock = row.due_at ? formatDualClock(row.due_at, resolvedCountry) : { tenantTime: undefined, patientTime: undefined };
+        const taskObj = {
+          id: row.task_id,
+          status: row.task_status,
+          due_at: row.due_at,
+          task_type: row.task_type,
+          title: row.task_title,
+          description: row.task_description,
+          metadata: typeof row.task_metadata === 'string' 
+            ? safeJsonParse(row.task_metadata, {}) 
+            : (row.task_metadata || {})
+        };
 
-        // Determine appointment type
-        let appointmentType: AppointmentRow['appointmentType'] = 'phone_call';
-        const metaType = row.task_metadata?.appointment_type;
-        if (metaType === 'clinic_visit' || metaType === 'phone_call' || metaType === 'pre_consultation' || metaType === 'doctor_review' || metaType === 'report_followup') {
-            appointmentType = metaType;
-        } else if (row.task_type === 'doctor_review_pending') {
-            appointmentType = 'doctor_review';
-        } else if (row.task_type === 'send_report_reminder') {
-            appointmentType = 'report_followup';
-        }
+        const proj = buildOperationsTaskProjection(taskObj, row);
 
         const TYPE_LABELS: Record<string, string> = {
           phone_call: 'Telefon Görüşmesi',
@@ -1175,33 +1318,33 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
           report_followup: 'Rapor Takibi',
         };
 
-        // Status
-        let status: AppointmentRow['status'] = 'planned';
-        let statusLabel = 'Planlandı';
+        // Map projection status/colors
         let statusColor = 'bg-blue-100 text-blue-700';
+        let statusLabel = 'Planlandı';
 
-        if (row.task_status === 'completed') {
-          status = 'completed'; statusLabel = 'Tamamlandı'; statusColor = 'bg-green-100 text-green-700';
+        if (proj.uiBucket === 'cancelled') {
+          statusColor = 'bg-gray-100 text-gray-500'; statusLabel = 'İptal';
+        } else if (proj.uiBucket === 'completed') {
           if (row.task_metadata?.appointment_result === 'arrived') {
-              status = 'arrived'; statusLabel = 'Geldi'; statusColor = 'bg-emerald-100 text-emerald-800';
-          } else if (row.task_metadata?.appointment_result === 'no_show') {
-              status = 'no_show'; statusLabel = 'Gelmedi'; statusColor = 'bg-red-100 text-red-800';
+            statusColor = 'bg-emerald-100 text-emerald-800'; statusLabel = 'Geldi';
+          } else {
+            statusColor = 'bg-green-100 text-green-700'; statusLabel = 'Tamamlandı';
           }
-        } else if (row.task_status === 'cancelled' || row.task_metadata?.appointment_result === 'cancelled') {
-          status = 'cancelled'; statusLabel = 'İptal'; statusColor = 'bg-gray-100 text-gray-500';
-        } else if (row.due_at && isOverdue(row.due_at)) {
-          status = 'overdue'; statusLabel = 'Gecikti'; statusColor = 'bg-red-100 text-red-700';
-        } else if (row.due_at && isToday(row.due_at)) {
-          // Check if approaching (within 2 hours)
-          const diff = new Date(row.due_at).getTime() - Date.now();
-          if (diff > 0 && diff < 7200000) {
-            status = 'approaching'; statusLabel = 'Yaklaşıyor'; statusColor = 'bg-amber-100 text-amber-700';
+        } else if (proj.uiBucket === 'unreachable') {
+          if (row.task_metadata?.appointment_result === 'no_show') {
+            statusColor = 'bg-red-100 text-red-800'; statusLabel = 'Gelmedi';
+          } else {
+            statusColor = 'bg-amber-100 text-amber-700'; statusLabel = 'Ulaşılamadı';
           }
+        } else if (proj.uiBucket === 'overdue') {
+          statusColor = 'bg-red-100 text-red-700'; statusLabel = 'Gecikti';
+        } else if (proj.uiBucket === 'bot_suggestion_pending') {
+          statusColor = 'bg-indigo-100 text-indigo-700'; statusLabel = 'Öneri Bekliyor';
+        } else if (proj.uiBucket === 'confirmed') {
+          statusColor = 'bg-green-150 text-green-850'; statusLabel = 'Onaylandı';
+        } else if (proj.uiBucket === 'scheduled') {
+          statusColor = 'bg-blue-100 text-blue-700'; statusLabel = 'Planlandı';
         }
-
-        // Confirmation status
-        const confirmationStatus: AppointmentRow['confirmationStatus'] = 
-          row.task_metadata?.confirmation_status || (row.task_metadata?.confirmed ? 'confirmed' : 'pending');
 
         const resolvedName = resolvePatientDisplayName({
           manualPatientName: row.conv_patient_name || row.opp_patient_name,
@@ -1209,6 +1352,9 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
           convPatientName: row.conv_patient_name,
           whatsappProfileName: row.conv_patient_name,
         });
+
+        const resolvedCountry = row.opp_country || null;
+        const tzRes = resolvePatientTimezone(resolvedCountry);
 
         return {
           taskId: row.task_id,
@@ -1219,32 +1365,69 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
           department: row.opp_department || undefined,
           priority: row.opp_priority || 'warm',
           hasClinicVisit: !!row.has_clinic_visit,
-          appointmentType,
-          appointmentTypeLabel: TYPE_LABELS[appointmentType] || appointmentType,
-          dueAtUtc: row.due_at || undefined,
-          dueAtTurkey: dualClock.tenantTime || undefined,
-          dueAtPatientLocal: dualClock.patientTime || undefined,
+          appointmentType: proj.appointmentType,
+          appointmentTypeLabel: TYPE_LABELS[proj.appointmentType] || proj.appointmentType,
+          dueAtUtc: proj.dueAtUtc || undefined,
+          dueAtTurkey: proj.dueAtTurkey || undefined,
+          dueAtPatientLocal: proj.dueAtPatientLocal || undefined,
           patientTimezone: tzRes.timezone,
-          status,
+          status: proj.uiBucket === 'cancelled' ? 'cancelled' :
+                  proj.uiBucket === 'completed' ? 'completed' :
+                  proj.uiBucket === 'unreachable' ? 'no_show' :
+                  proj.uiBucket === 'overdue' ? 'overdue' : 'planned',
           statusLabel,
           statusColor,
-          confirmationStatus,
+          confirmationStatus: proj.confirmationStatus,
           appointmentResult: row.task_metadata?.appointment_result,
           appointmentNote: row.task_metadata?.note,
           taskTitle: row.task_title || '',
           taskDescription: row.task_description || undefined,
-          metadata: row.task_metadata || undefined,
+          metadata: {
+            ...taskObj.metadata,
+            uiBucket: proj.uiBucket,
+            timeDisplay: proj.timeDisplay,
+            timezoneNeedsClarification: proj.timezoneNeedsClarification,
+            rawStatus: row.task_status
+          },
         };
       });
 
-      // Client-side search
+      // Filter items to ensure strict mutual-exclusion based on projected uiBucket
       let filtered = items;
-      if (filters?.search) {
-        const s = filters.search.toLowerCase();
-        filtered = items.filter(i => 
-          i.patientName.toLowerCase().includes(s) ||
-          i.phoneNumber.includes(s)
-        );
+      if (filters?.status && filters.status !== 'all') {
+        filtered = items.filter(item => {
+          const bucket = item.metadata?.uiBucket;
+          
+          if (filters.status === 'pending') {
+            return bucket === 'open' || bucket === 'scheduled';
+          }
+          if (filters.status === 'bot_suggestion') {
+            return bucket === 'bot_suggestion_pending';
+          }
+          if (filters.status === 'confirmed') {
+            return bucket === 'confirmed';
+          }
+          if (filters.status === 'completed' || filters.status === 'arrived') {
+            return bucket === 'completed';
+          }
+          if (filters.status === 'no_show') {
+            if (item.appointmentType === 'clinic_visit') {
+              return bucket === 'unreachable' && (item.appointmentResult === 'no_show' || item.metadata?.rawStatus === 'no_show');
+            } else {
+              return bucket === 'unreachable';
+            }
+          }
+          if (filters.status === 'no_response') {
+            return (bucket === 'unreachable' && item.confirmationStatus === 'no_response' && item.appointmentResult !== 'no_show' && item.metadata?.rawStatus !== 'no_show') || bucket === 'overdue';
+          }
+          if (filters.status === 'overdue') {
+            return bucket === 'overdue';
+          }
+          if (filters.status === 'cancelled') {
+            return bucket === 'cancelled';
+          }
+          return true;
+        });
       }
 
       return { items: filtered, total: filtered.length };
@@ -1847,122 +2030,96 @@ export async function getAppointmentStats() {
     async (ctx) => {
       const statsQuery = `
         SELECT
-          -- Overdue splits (for badge warnings)
-          COUNT(*) FILTER (WHERE t.status IN ('pending', 'in_progress') AND t.due_at < NOW() AND (t.metadata->>'appointment_type' IS NULL OR t.metadata->>'appointment_type' != 'clinic_visit')) as overdue_phone,
-          COUNT(*) FILTER (WHERE t.status IN ('pending', 'in_progress') AND t.due_at < NOW() AND t.metadata->>'appointment_type' = 'clinic_visit') as overdue_clinic,
-
-          -- PHONE TABS COUNTS
-          -- 1. Açık (Pending & Unconfirmed & No suggestion)
-          COUNT(*) FILTER (
-            WHERE t.status IN ('pending', 'in_progress')
-              AND (t.metadata->>'confirmation_status' IS NULL OR t.metadata->>'confirmation_status' != 'confirmed')
-              AND (t.metadata->'bot_suggestion'->>'status' IS NULL OR t.metadata->'bot_suggestion'->>'status' != 'pending')
-              AND (t.metadata->>'appointment_type' IS NULL OR t.metadata->>'appointment_type' != 'clinic_visit')
-              AND (o.stage IS NULL OR o.stage NOT IN ('not_qualified', 'arrived'))
-          ) as phone_open,
-
-          -- 1b. Bot Önerisi / Onay Bekleyen
-          COUNT(*) FILTER (
-            WHERE t.status IN ('pending', 'in_progress')
-              AND t.metadata->'bot_suggestion'->>'status' = 'pending'
-              AND (t.metadata->>'appointment_type' IS NULL OR t.metadata->>'appointment_type' != 'clinic_visit')
-              AND (o.stage IS NULL OR o.stage NOT IN ('not_qualified', 'arrived'))
-          ) as phone_bot_suggestion,
-
-          -- 2. Planlandı ve Onaylandı (Confirmed)
-          COUNT(*) FILTER (
-            WHERE t.status IN ('pending', 'in_progress')
-              AND t.metadata->>'confirmation_status' = 'confirmed'
-              AND (t.metadata->>'appointment_type' IS NULL OR t.metadata->>'appointment_type' != 'clinic_visit')
-              AND (o.stage IS NULL OR o.stage NOT IN ('not_qualified', 'arrived'))
-          ) as phone_confirmed,
-
-          -- 3. Arandı ve Ulaşıldı (Completed & Reached)
-          COUNT(*) FILTER (
-            WHERE t.status = 'completed'
-              AND (t.metadata->>'appointment_result' IS NULL OR t.metadata->>'appointment_result' NOT IN ('no_show', 'cancelled'))
-              AND (t.metadata->>'appointment_type' IS NULL OR t.metadata->>'appointment_type' != 'clinic_visit')
-          ) as phone_completed,
-
-          -- 4. Ulaşılamadı
-          COUNT(*) FILTER (
-            WHERE ((t.status = 'completed' AND t.metadata->>'appointment_result' = 'no_show') OR t.status = 'no_show')
-              AND (t.metadata->>'appointment_type' IS NULL OR t.metadata->>'appointment_type' != 'clinic_visit')
-          ) as phone_no_show,
-
-          -- 5. İptal Edildi
-          COUNT(*) FILTER (
-            WHERE (t.status = 'cancelled' OR t.metadata->>'appointment_result' = 'cancelled')
-              AND (t.metadata->>'appointment_type' IS NULL OR t.metadata->>'appointment_type' != 'clinic_visit')
-          ) as phone_cancelled,
-
-          -- CLINIC TABS COUNTS
-          -- 1. Planlandı (Pending & Unconfirmed & No suggestion)
-          COUNT(*) FILTER (
-            WHERE t.status IN ('pending', 'in_progress')
-              AND (t.metadata->>'confirmation_status' IS NULL OR t.metadata->>'confirmation_status' != 'confirmed')
-              AND (t.metadata->'bot_suggestion'->>'status' IS NULL OR t.metadata->'bot_suggestion'->>'status' != 'pending')
-              AND t.metadata->>'appointment_type' = 'clinic_visit'
-              AND (o.stage IS NULL OR o.stage NOT IN ('not_qualified', 'arrived'))
-          ) as clinic_open,
-
-          -- 1b. Bot Önerisi / Onay Bekleyen
-          COUNT(*) FILTER (
-            WHERE t.status IN ('pending', 'in_progress')
-              AND t.metadata->'bot_suggestion'->>'status' = 'pending'
-              AND t.metadata->>'appointment_type' = 'clinic_visit'
-              AND (o.stage IS NULL OR o.stage NOT IN ('not_qualified', 'arrived'))
-          ) as clinic_bot_suggestion,
-
-          -- 2. Planlandı ve Onaylandı (Confirmed)
-          COUNT(*) FILTER (
-            WHERE t.status IN ('pending', 'in_progress')
-              AND t.metadata->>'confirmation_status' = 'confirmed'
-              AND t.metadata->>'appointment_type' = 'clinic_visit'
-              AND (o.stage IS NULL OR o.stage NOT IN ('not_qualified', 'arrived'))
-          ) as clinic_confirmed,
-
-          -- 3. Geldi (Arrived)
-          COUNT(*) FILTER (
-            WHERE t.status = 'completed'
-              AND t.metadata->>'appointment_result' = 'arrived'
-              AND t.metadata->>'appointment_type' = 'clinic_visit'
-          ) as clinic_arrived,
-
-          -- 4. Gelmedi (No Show)
-          COUNT(*) FILTER (
-            WHERE ((t.status = 'completed' AND t.metadata->>'appointment_result' = 'no_show') OR t.status = 'no_show')
-              AND t.metadata->>'appointment_type' = 'clinic_visit'
-          ) as clinic_no_show,
-
-          -- 5. Ulaşılamadı (No Response / Confirmation no_response or Overdue Pending)
-          COUNT(*) FILTER (
-            WHERE t.metadata->>'appointment_type' = 'clinic_visit'
-              AND (t.metadata->>'confirmation_status' = 'no_response' OR (t.status IN ('pending', 'in_progress') AND t.due_at < NOW()))
-          ) as clinic_no_response,
-
-          -- 6. İptal Edildi
-          COUNT(*) FILTER (
-            WHERE (t.status = 'cancelled' OR t.metadata->>'appointment_result' = 'cancelled')
-              AND t.metadata->>'appointment_type' = 'clinic_visit'
-          ) as clinic_cancelled
+          t.id as task_id,
+          t.status as task_status,
+          t.due_at,
+          t.task_type,
+          t.title as task_title,
+          t.description as task_description,
+          t.metadata as task_metadata,
+          o.stage as opp_stage
         FROM follow_up_tasks t
         LEFT JOIN opportunities o ON o.id = t.opportunity_id AND o.tenant_id = t.tenant_id
         WHERE t.tenant_id = $1
           AND t.task_type != 'appointment_reminder'
           AND t.metadata->>'parent_task_id' IS NULL
           AND (t.metadata->>'is_primary' IS NULL OR t.metadata->>'is_primary' != 'false')
+          AND (t.status IN ('pending', 'in_progress') OR t.updated_at >= NOW() - INTERVAL '30 days')
       `;
 
       const rows = await ctx.db.executeSafe({ text: statsQuery, values: [ctx.tenantId] }) as any[];
-      return rows[0] || { 
-        overdue_phone: 0, overdue_clinic: 0,
-        phone_open: 0, phone_confirmed: 0, phone_completed: 0, phone_no_show: 0, phone_cancelled: 0,
-        clinic_open: 0, clinic_confirmed: 0, clinic_arrived: 0, clinic_no_show: 0, clinic_no_response: 0, clinic_cancelled: 0
+      
+      const stats = {
+        overdue_phone: 0, overdue_clinic: 0, overdue: 0,
+        confirmation_pending_phone: 0, confirmation_pending_clinic: 0, confirmation_pending: 0,
+        phone_open: 0, phone_bot_suggestion: 0, phone_confirmed: 0, phone_completed: 0, phone_no_show: 0, phone_cancelled: 0,
+        clinic_open: 0, clinic_bot_suggestion: 0, clinic_confirmed: 0, clinic_arrived: 0, clinic_no_show: 0, clinic_no_response: 0, clinic_cancelled: 0
       };
+
+      rows.forEach((row: any) => {
+        const taskObj = {
+          id: row.task_id,
+          status: row.task_status,
+          due_at: row.due_at,
+          task_type: row.task_type,
+          title: row.task_title,
+          description: row.task_description,
+          metadata: typeof row.task_metadata === 'string' 
+            ? safeJsonParse(row.task_metadata, {}) 
+            : (row.task_metadata || {})
+        };
+
+        const proj = buildOperationsTaskProjection(taskObj, row);
+        const isClinic = proj.appointmentType === 'clinic_visit';
+
+        const isTerminal = proj.uiBucket === 'completed' || proj.uiBucket === 'cancelled' || proj.uiBucket === 'unreachable';
+        if (!isTerminal && proj.confirmationStatus === 'pending') {
+          if (isClinic) {
+            stats.confirmation_pending_clinic++;
+          } else {
+            stats.confirmation_pending_phone++;
+          }
+        }
+
+        if (isClinic) {
+          if (proj.uiBucket === 'cancelled') stats.clinic_cancelled++;
+          else if (proj.uiBucket === 'completed') stats.clinic_arrived++;
+          else if (proj.uiBucket === 'unreachable') {
+            if (taskObj.metadata.appointment_result === 'no_show' || taskObj.status === 'no_show') {
+              stats.clinic_no_show++;
+            } else {
+              stats.clinic_no_response++;
+            }
+          }
+          else if (proj.uiBucket === 'overdue') {
+            stats.overdue_clinic++;
+            stats.clinic_no_response++; // clinic overdue is counted under ulaşılamadı tab
+          }
+          else if (proj.uiBucket === 'bot_suggestion_pending') stats.clinic_bot_suggestion++;
+          else if (proj.uiBucket === 'confirmed') stats.clinic_confirmed++;
+          else if (proj.uiBucket === 'scheduled' || proj.uiBucket === 'open') stats.clinic_open++;
+        } else {
+          // Phone
+          if (proj.uiBucket === 'cancelled') stats.phone_cancelled++;
+          else if (proj.uiBucket === 'completed') stats.phone_completed++;
+          else if (proj.uiBucket === 'unreachable') stats.phone_no_show++;
+          else if (proj.uiBucket === 'overdue') {
+            stats.overdue_phone++;
+          }
+          else if (proj.uiBucket === 'bot_suggestion_pending') stats.phone_bot_suggestion++;
+          else if (proj.uiBucket === 'confirmed') stats.phone_confirmed++;
+          else if (proj.uiBucket === 'scheduled' || proj.uiBucket === 'open') stats.phone_open++;
+        }
+      });
+
+      stats.overdue = stats.overdue_phone + stats.overdue_clinic;
+      stats.confirmation_pending = stats.confirmation_pending_phone + stats.confirmation_pending_clinic;
+
+      return stats;
     }
   ).then(res => res.data || { 
-    overdue_phone: 0, overdue_clinic: 0,
+    overdue_phone: 0, overdue_clinic: 0, overdue: 0,
+    confirmation_pending_phone: 0, confirmation_pending_clinic: 0, confirmation_pending: 0,
     phone_open: 0, phone_confirmed: 0, phone_completed: 0, phone_no_show: 0, phone_cancelled: 0,
     clinic_open: 0, clinic_confirmed: 0, clinic_arrived: 0, clinic_no_show: 0, clinic_no_response: 0, clinic_cancelled: 0
   });
