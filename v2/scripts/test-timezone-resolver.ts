@@ -86,11 +86,12 @@ function runTests() {
   if (!s7.needsTimezoneClarification) throw new Error("Scenario 7 failed: Expected needsTimezoneClarification to be true");
   console.log("✅ Passed.\n");
 
-  // Scenario 8: metadata.patient_timezone varsa ülke mapping'i ezilir
-  console.log("Scenario 8: metadata.patient_timezone ve ülke uyumsuzluğu");
+  // Scenario 8: metadata.patient_timezone varsa ülke mapping'i ezilir (Almanya vb. tek timezone için)
+  console.log("Scenario 8: metadata.patient_timezone ve ülke uyumsuzluğu (Tek Timezone)");
   const s8 = resolvePatientTimeDisplay({
-    country: "Türkiye",
+    country: "Almanya",
     timezone: "Europe/London",
+    timezoneSource: "manual_confirmed",
     referenceDate: refDate
   });
   console.log(JSON.stringify(s8, null, 2));
@@ -108,7 +109,75 @@ function runTests() {
   if (s9.shortBadge !== "Saat net değil") throw new Error("Scenario 9 failed: Expected badge 'Saat net değil'");
   console.log("✅ Passed.\n");
 
-  console.log("🎉 ALL TIMEZONE RESOLVER SCENARIOS PASSED SUCCESSFULLY! 🎉");
+  // === NEW CRITICAL SECURITY TRUST RULE SCENARIOS ===
+
+  // 10. ABD + patient_timezone=America/New_York + timezone_source=country + şehir yok
+  console.log("Scenario 10: ABD + patient_timezone + timezone_source=country (Güvensiz)");
+  const s10 = resolvePatientTimeDisplay({
+    country: "Amerika",
+    timezone: "America/New_York",
+    timezoneSource: "country",
+    referenceDate: refDate
+  });
+  console.log(JSON.stringify(s10, null, 2));
+  if (!s10.needsTimezoneClarification) throw new Error("Scenario 10 failed: Expected needsTimezoneClarification = true");
+  if (s10.patientTimezone !== null) throw new Error("Scenario 10 failed: Expected patientTimezone = null");
+  if (s10.patientLocalTime !== null) throw new Error("Scenario 10 failed: Expected patientLocalTime = null");
+  console.log("✅ Passed.\n");
+
+  // 11. ABD + patient_timezone=America/New_York + timezone_source=manual_confirmed
+  console.log("Scenario 11: ABD + patient_timezone + timezone_source=manual_confirmed (Güvenli)");
+  const s11 = resolvePatientTimeDisplay({
+    country: "Amerika",
+    timezone: "America/New_York",
+    timezoneSource: "manual_confirmed",
+    referenceDate: refDate
+  });
+  console.log(JSON.stringify(s11, null, 2));
+  if (s11.needsTimezoneClarification) throw new Error("Scenario 11 failed: Expected needsTimezoneClarification = false");
+  if (s11.patientTimezone !== "America/New_York") throw new Error("Scenario 11 failed: Expected America/New_York");
+  console.log("✅ Passed.\n");
+
+  // 12. ABD + patient_city=New York
+  console.log("Scenario 12: ABD + patient_city=New York (Güvenli)");
+  const s12 = resolvePatientTimeDisplay({
+    country: "Amerika",
+    city: "New York",
+    timezone: "America/New_York",
+    referenceDate: refDate
+  });
+  console.log(JSON.stringify(s12, null, 2));
+  if (s12.needsTimezoneClarification) throw new Error("Scenario 12 failed: Expected needsTimezoneClarification = false");
+  if (s12.patientTimezone !== "America/New_York") throw new Error("Scenario 12 failed: Expected America/New_York");
+  console.log("✅ Passed.\n");
+
+  // 13. ABD + eski metadata fallback (timezone_source boş veya inferred_country vb.)
+  console.log("Scenario 13: ABD + eski metadata fallback (Güvensiz)");
+  const s13 = resolvePatientTimeDisplay({
+    country: "Amerika",
+    timezone: "America/New_York",
+    timezoneSource: "inferred_country",
+    referenceDate: refDate
+  });
+  console.log(JSON.stringify(s13, null, 2));
+  if (!s13.needsTimezoneClarification) throw new Error("Scenario 13 failed: Expected needsTimezoneClarification = true");
+  if (s13.patientLocalTime !== null) throw new Error("Scenario 13 failed: Expected patientLocalTime = null");
+  console.log("✅ Passed.\n");
+
+  // 14. Murtaza canlı projection (şehir/eyalet yoksa, timezone_source = country ise)
+  console.log("Scenario 14: Murtaza canlı projection (Teyitsiz ABD)");
+  const s14 = resolvePatientTimeDisplay({
+    country: "Amerika",
+    timezone: "America/New_York",
+    timezoneSource: "country",
+    referenceDate: refDate
+  });
+  console.log(JSON.stringify(s14, null, 2));
+  if (s14.shortBadge !== "Şehir gerekli") throw new Error("Scenario 14 failed: Expected shortBadge = 'Şehir gerekli'");
+  if (s14.displayLabel !== "🌎 ABD • Saat dilimi net değil") throw new Error("Scenario 14 failed: Expected displayLabel = '🌎 ABD • Saat dilimi net değil'");
+  console.log("✅ Passed.\n");
+
+  console.log("🎉 ALL 14 TIMEZONE RESOLVER SCENARIOS PASSED SUCCESSFULLY! 🎉");
 }
 
 runTests();

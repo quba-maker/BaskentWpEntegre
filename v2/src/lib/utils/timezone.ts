@@ -667,7 +667,7 @@ export interface PatientTimeDisplayResult {
   countryLabel: string;
   countryEmoji: string;
   patientTimezone: string | null;
-  timezoneSource: 'patient_city' | 'patient_country' | 'manual_confirmed' | 'unknown';
+  timezoneSource: 'patient_city' | 'patient_country' | 'manual_confirmed' | 'patient_state' | 'unknown';
   patientLocalTime: string | null;
   turkeyTime: string;
   displayLabel: string;
@@ -918,8 +918,11 @@ export function resolvePatientTimeDisplay(input: PatientTimeDisplayInput): Patie
   let finalSource: PatientTimeDisplayResult['timezoneSource'] = 'unknown';
   if (tzSource) {
     if (['patient_city', 'city'].includes(tzSource)) finalSource = 'patient_city';
-    else if (['patient_country', 'country'].includes(tzSource)) finalSource = 'patient_country';
+    else if (['patient_state', 'state'].includes(tzSource)) finalSource = 'patient_state';
+    else if (['patient_country', 'country', 'inferred_country'].includes(tzSource)) finalSource = 'patient_country';
     else if (['manual_confirmed', 'manual'].includes(tzSource)) finalSource = 'manual_confirmed';
+  } else if (cityLabel) {
+    finalSource = 'patient_city';
   } else if (resolvedTz) {
     finalSource = 'patient_country';
   }
@@ -930,13 +933,21 @@ export function resolvePatientTimeDisplay(input: PatientTimeDisplayInput): Patie
 
   const metadataClarification = metadata.needs_timezone_clarification ?? oppMetadata.needs_timezone_clarification ?? convMetadata.needs_timezone_clarification;
 
+  const isConfidenceHigh = metadata.timezone_confidence === 'high' || 
+                           oppMetadata.timezone_confidence === 'high' || 
+                           convMetadata.timezone_confidence === 'high';
+
+  const isTrustedTzSource = finalSource === 'patient_city' || 
+                            finalSource === 'patient_state' || 
+                            finalSource === 'manual_confirmed' || 
+                            isConfidenceHigh;
+
   if (metadataClarification === true) {
     needsTimezoneClarification = true;
     warning = 'timezone_ambiguous';
   } else if (isMultiTz) {
-    // For multi-timezone countries, we must have specific timezone source matching city or manual confirmation
-    const isSpecificTz = resolvedTz && (finalSource === 'patient_city' || finalSource === 'manual_confirmed' || (metadata.patient_timezone && !metadata.needs_timezone_clarification));
-    if (!isSpecificTz) {
+    // For multi-timezone countries, we must have specific trusted timezone source matching city, state or manual confirmation
+    if (!resolvedTz || !isTrustedTzSource) {
       needsTimezoneClarification = true;
       warning = 'country_has_multiple_timezones';
     }
