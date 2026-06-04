@@ -307,9 +307,38 @@ export async function GET() {
     await sql`CREATE INDEX IF NOT EXISTS idx_ai_runtime_metrics_tenant ON ai_runtime_metrics(tenant_id, created_at DESC)`;
     results.push('ai_runtime_metrics: OK');
 
+    // Phase 1.3 migrations
+    await sql`
+      CREATE TABLE IF NOT EXISTS conversation_pins (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(tenant_id, user_id, conversation_id)
+      )
+    `;
+    await sql`CREATE INDEX IF NOT EXISTS idx_conversation_pins_user ON conversation_pins(tenant_id, user_id, created_at DESC)`;
+
+    await sql`
+      CREATE TABLE IF NOT EXISTS conversation_read_states (
+        tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        last_read_at TIMESTAMPTZ,
+        last_read_message_id UUID REFERENCES messages(id) ON DELETE SET NULL,
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (tenant_id, user_id, conversation_id)
+      )
+    `;
+    await sql`CREATE INDEX IF NOT EXISTS idx_conv_read_states_user ON conversation_read_states(tenant_id, user_id, conversation_id)`;
+
+    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_message_model TEXT`;
+    results.push('phase_1_3_tables: OK');
+
     return NextResponse.json({ 
       success: true, 
-      message: 'Migration completed successfully (Phase 6 included)!',
+      message: 'Migration completed successfully (Phase 6 and 1.3 included)!',
       details: results 
     });
   } catch (error: any) {
@@ -337,7 +366,8 @@ export async function POST() {
       'settings', 'customer_profiles', 'conversation_memory',
       'ai_module_settings', 'ai_events', 'brain_versions',
       'ai_runtime_logs', 'tool_permissions', 'feature_flags',
-      'ai_audit_logs', 'ai_runtime_metrics'
+      'ai_audit_logs', 'ai_runtime_metrics', 'conversation_pins',
+      'conversation_read_states'
     ];
 
     const existingTables = await sql`

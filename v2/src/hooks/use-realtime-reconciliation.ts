@@ -201,6 +201,11 @@ export function useRealtimeReconciliation(tenantId: string) {
           unread: nextUnread
         };
       }, true);
+
+      // Dispatch unread refresh event for global sidebar badge
+      if (payload.sender === "user" && !isFocused && typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('inbox-unread-refresh'));
+      }
     }
   };
 

@@ -48,6 +48,7 @@ export async function getConversations(page: number = 1, search: string = "", st
           COALESCE(c.last_message_content, m.content) as last_message,
           COALESCE(c.last_message_status, m.status) as last_message_status,
           COALESCE(c.last_message_direction, m.direction) as last_message_direction,
+          COALESCE(c.last_message_model, m.model_used) as last_message_model,
           l.form_name,
           l.patient_name as form_patient_name,
           l.raw_data as form_raw_data,
@@ -68,10 +69,22 @@ export async function getConversations(page: number = 1, search: string = "", st
           mem.summary_text as legacy_ai_summary,
           mem.buying_intent as ai_buying_intent,
           mem.sentiment as ai_sentiment,
-          0 as unread
+          (
+            SELECT COUNT(*)::int 
+            FROM messages m_unread
+            WHERE m_unread.conversation_id = c.id
+              AND m_unread.tenant_id = c.tenant_id
+              AND m_unread.direction = 'in'
+              AND (m_unread.media_metadata IS NULL OR COALESCE(m_unread.media_metadata->'native'->>'message_type', '') != 'reaction')
+              AND m_unread.created_at > COALESCE(
+                (SELECT last_read_at FROM conversation_read_states rs WHERE rs.tenant_id = c.tenant_id AND rs.user_id = $6 AND rs.conversation_id = c.id),
+                '1970-01-01'::timestamptz
+              )
+          ) as unread,
+          (cp.id IS NOT NULL) as is_pinned
         FROM conversations c
         LEFT JOIN LATERAL (
-          SELECT content, status, direction
+          SELECT content, status, direction, model_used
           FROM messages 
           WHERE phone_number = c.phone_number 
             AND messages.tenant_id = $1
@@ -94,13 +107,18 @@ export async function getConversations(page: number = 1, search: string = "", st
           ON active_opp.id = c.active_opportunity_id 
           AND active_opp.tenant_id = c.tenant_id
           AND active_opp.conversation_id = c.id
+        -- Pinned Join
+        LEFT JOIN conversation_pins cp
+          ON c.id = cp.conversation_id
+          AND cp.user_id = $6
+          AND cp.tenant_id = c.tenant_id
         WHERE c.tenant_id = $1
           AND ($2::text IS NULL OR c.patient_name ILIKE $2 OR c.phone_number ILIKE $2)
           AND ($3::text IS NULL OR c.lead_stage = $3)
-        ORDER BY c.last_message_at DESC NULLS LAST
+        ORDER BY (cp.id IS NOT NULL) DESC, c.last_message_at DESC NULLS LAST
         LIMIT $4 OFFSET $5
         `,
-        values: [ctx.tenantId, searchFilter, stageFilter, limit, offset]
+        values: [ctx.tenantId, searchFilter, stageFilter, limit, offset, ctx.userId]
       });
 
       const validRows = Array.isArray(rows) ? rows : ((rows as any)?.rows || []);
@@ -161,6 +179,9 @@ export async function getConversations(page: number = 1, search: string = "", st
           channel: r.channel || 'whatsapp',
           lastMessageStatus: r.last_message_status || 'sent',
           lastMessageDirection: r.last_message_direction || 'in',
+          lastMessageModel: r.last_message_model || null,
+          isPinned: !!r.is_pinned,
+          unread: r.unread || 0,
           opp_summary: r.opp_summary || null,
           opp_ai_reason: r.opp_ai_reason || null,
           legacy_ai_summary: r.legacy_ai_summary || null,
@@ -495,6 +516,7 @@ export async function sendMessage(phone: string, text: string, replyToProviderMe
                    last_channel = $2,
                    last_message_status = $3,
                    last_message_direction = 'out',
+                   last_message_model = NULL,
                    message_count = message_count + 1,
                    status = 'human',
                    autopilot_enabled = false
@@ -807,6 +829,7 @@ export async function sendMediaMessage(phone: string, mediaUrl: string, mediaTyp
                    last_channel = $2,
                    last_message_status = $3,
                    last_message_direction = 'out',
+                   last_message_model = NULL,
                    message_count = message_count + 1,
                    status = 'human',
                    autopilot_enabled = false
@@ -1464,4 +1487,138 @@ export async function sendReaction(phone: string, targetProviderMessageId: strin
       return { success: true };
     }
   ).then(res => res.success ? (res.data || { success: true }) : { success: false, error: res.error });
+}
+
+export async function markConversationRead(phone: string) {
+  if (!phone) return { success: false, error: "Phone number is required." };
+  return withActionGuard(
+    { actionName: 'markConversationRead' },
+    async (ctx) => {
+      const cleanPhone = phone.replace(/\D/g, '').slice(-10);
+      const phoneLike = `%${cleanPhone}%`;
+
+      // 1. Get conversation ID
+      const conv = await ctx.db.executeSafe({
+        text: `SELECT id FROM conversations WHERE phone_number LIKE $1 AND tenant_id = $2 LIMIT 1`,
+        values: [phoneLike, ctx.tenantId]
+      }) as any[];
+
+      if (conv.length === 0) {
+        return { success: false, error: "Conversation not found" };
+      }
+      const convId = conv[0].id;
+
+      // 2. Get last inbound message ID to track last read message
+      const lastMsg = await ctx.db.executeSafe({
+        text: `SELECT id FROM messages 
+               WHERE conversation_id = $1 AND tenant_id = $2 AND direction = 'in' 
+               ORDER BY created_at DESC LIMIT 1`,
+        values: [convId, ctx.tenantId]
+      }) as any[];
+      const lastMsgId = lastMsg[0]?.id || null;
+
+      // 3. Upsert read state
+      await ctx.db.executeSafe({
+        text: `
+          INSERT INTO conversation_read_states (tenant_id, user_id, conversation_id, last_read_at, last_read_message_id, updated_at)
+          VALUES ($1, $2, $3, NOW(), $4, NOW())
+          ON CONFLICT (tenant_id, user_id, conversation_id)
+          DO UPDATE SET 
+            last_read_at = NOW(),
+            last_read_message_id = COALESCE(EXCLUDED.last_read_message_id, conversation_read_states.last_read_message_id),
+            updated_at = NOW()
+        `,
+        values: [ctx.tenantId, ctx.userId, convId, lastMsgId]
+      });
+
+      return { success: true };
+    }
+  ).then(res => res.success ? (res.data || { success: true }) : { success: false, error: res.error });
+}
+
+export async function togglePin(phone: string) {
+  if (!phone) return { success: false, error: "Phone number is required." };
+  return withActionGuard(
+    { actionName: 'togglePin' },
+    async (ctx) => {
+      const cleanPhone = phone.replace(/\D/g, '').slice(-10);
+      const phoneLike = `%${cleanPhone}%`;
+
+      // 1. Get conversation ID
+      const conv = await ctx.db.executeSafe({
+        text: `SELECT id FROM conversations WHERE phone_number LIKE $1 AND tenant_id = $2 LIMIT 1`,
+        values: [phoneLike, ctx.tenantId]
+      }) as any[];
+
+      if (conv.length === 0) {
+        return { success: false, error: "Conversation not found" };
+      }
+      const convId = conv[0].id;
+
+      // 2. Check if already pinned
+      const existing = await ctx.db.executeSafe({
+        text: `SELECT id FROM conversation_pins WHERE tenant_id = $1 AND user_id = $2 AND conversation_id = $3`,
+        values: [ctx.tenantId, ctx.userId, convId]
+      }) as any[];
+
+      if (existing.length > 0) {
+        // Unpin
+        await ctx.db.executeSafe({
+          text: `DELETE FROM conversation_pins WHERE tenant_id = $1 AND user_id = $2 AND conversation_id = $3`,
+          values: [ctx.tenantId, ctx.userId, convId]
+        });
+        return { success: true, isPinned: false };
+      } else {
+        // Enforce limit: MAX_PINNED_CONVERSATIONS = 5
+        const countRow = await ctx.db.executeSafe({
+          text: `SELECT COUNT(*)::int as cnt FROM conversation_pins WHERE tenant_id = $1 AND user_id = $2`,
+          values: [ctx.tenantId, ctx.userId]
+        }) as any[];
+        
+        if ((countRow[0]?.cnt || 0) >= 5) {
+          return { success: false, error: "En fazla 5 konuşma sabitleyebilirsiniz. Yeni bir sohbet sabitlemek için önce bir sabitlemeyi kaldırın." };
+        }
+
+        // Pin
+        await ctx.db.executeSafe({
+          text: `INSERT INTO conversation_pins (tenant_id, user_id, conversation_id) VALUES ($1, $2, $3)`,
+          values: [ctx.tenantId, ctx.userId, convId]
+        });
+        return { success: true, isPinned: true };
+      }
+    }
+  ).then(res => res.success ? (res.data || { success: true }) : { success: false, error: res.error });
+}
+
+export async function getGlobalUnreadCount() {
+  return withActionGuard(
+    { actionName: 'getGlobalUnreadCount' },
+    async (ctx) => {
+      const rows = await ctx.db.executeSafe({
+        text: `
+          SELECT COALESCE(SUM(unread_sub.unread), 0)::int as total_unread
+          FROM (
+            SELECT 
+              (
+                SELECT COUNT(*)::int 
+                FROM messages m_unread
+                WHERE m_unread.conversation_id = c.id
+                  AND m_unread.tenant_id = c.tenant_id
+                  AND m_unread.direction = 'in'
+                  AND (m_unread.media_metadata IS NULL OR COALESCE(m_unread.media_metadata->'native'->>'message_type', '') != 'reaction')
+                  AND m_unread.created_at > COALESCE(
+                    (SELECT last_read_at FROM conversation_read_states rs WHERE rs.tenant_id = c.tenant_id AND rs.user_id = $2 AND rs.conversation_id = c.id),
+                    '1970-01-01'::timestamptz
+                  )
+              ) as unread
+            FROM conversations c
+            WHERE c.tenant_id = $1
+          ) unread_sub
+        `,
+        values: [ctx.tenantId, ctx.userId]
+      }) as any[];
+
+      return rows[0]?.total_unread || 0;
+    }
+  );
 }

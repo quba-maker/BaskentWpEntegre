@@ -788,6 +788,51 @@ export async function GET(req: NextRequest) {
     
     results.push("✅ PHASE 2N-P0: automation_rules ve automation_runs tabloları hazır");
 
+    // =====================================================
+    // 28. PHASE 1.3: INBOX PARITY, NOTIFICATIONS & PINS
+    // =====================================================
+    await execute`
+      CREATE TABLE IF NOT EXISTS conversation_pins (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(tenant_id, user_id, conversation_id)
+      )
+    `;
+    await execute`CREATE INDEX IF NOT EXISTS idx_conversation_pins_user ON conversation_pins(tenant_id, user_id, created_at DESC)`;
+    
+    await execute`
+      CREATE TABLE IF NOT EXISTS conversation_read_states (
+        tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        last_read_at TIMESTAMPTZ,
+        last_read_message_id UUID REFERENCES messages(id) ON DELETE SET NULL,
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (tenant_id, user_id, conversation_id)
+      )
+    `;
+    await execute`CREATE INDEX IF NOT EXISTS idx_conv_read_states_user ON conversation_read_states(tenant_id, user_id, conversation_id)`;
+
+    await execute`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_message_model TEXT`;
+
+    // RLS (shadow mode - bypass for now, to ensure compatibility)
+    try {
+      await execute`ALTER TABLE conversation_pins ENABLE ROW LEVEL SECURITY`;
+      await execute`DROP POLICY IF EXISTS pins_app_access ON conversation_pins`;
+      await execute`CREATE POLICY pins_app_access ON conversation_pins FOR ALL USING (true) WITH CHECK (true)`;
+
+      await execute`ALTER TABLE conversation_read_states ENABLE ROW LEVEL SECURITY`;
+      await execute`DROP POLICY IF EXISTS read_states_app_access ON conversation_read_states`;
+      await execute`CREATE POLICY read_states_app_access ON conversation_read_states FOR ALL USING (true) WITH CHECK (true)`;
+      results.push("✅ PHASE 1.3: conversation_pins ve conversation_read_states RLS policies oluşturuldu");
+    } catch (e: any) {
+      results.push("⚠️ PHASE 1.3: RLS policies: " + e.message);
+    }
+    results.push("✅ PHASE 1.3: Pin ve Read State tabloları hazır");
+
     if (isDryRun) {
       return NextResponse.json({ success: true, mode: "dryRun", results, executedQueries: dryRunLogs });
     }

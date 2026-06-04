@@ -252,6 +252,30 @@ function MediaGalleryLightbox({
     </motion.div>
   );
 }
+// -- Image Bubble with Error Fallback --
+function ImageBubble({ url, alt, onGalleryOpen }: { url: string; alt: string; onGalleryOpen: (src: string) => void }) {
+  const [hasError, setHasError] = useState(false);
+  if (hasError) {
+    return (
+      <div 
+        className="flex items-center gap-2 p-3.5 rounded-xl text-xs mb-1"
+        style={{ border: '1px dashed var(--q-border-default)', color: 'var(--q-text-secondary)', background: 'rgba(0,0,0,0.03)' }}
+      >
+        <span>📷 Görsel yüklenemedi</span>
+      </div>
+    );
+  }
+  return (
+    <img
+      src={url}
+      alt={alt}
+      className="rounded-lg max-w-full max-h-64 object-cover cursor-pointer hover:opacity-90 transition-opacity mb-1"
+      loading="lazy"
+      onClick={() => onGalleryOpen(url)}
+      onError={() => setHasError(true)}
+    />
+  );
+}
 
 // -- Media Bubble Renderer --
 function MediaBubbleContent({ message, onGalleryOpen }: { message: any; onGalleryOpen: (src: string) => void }) {
@@ -265,20 +289,15 @@ function MediaBubbleContent({ message, onGalleryOpen }: { message: any; onGaller
     case 'image':
     case 'sticker':
       return (
-        <img
-          src={url}
-          alt={meta?.caption || 'Görsel'}
-          className="rounded-lg max-w-full max-h-64 object-cover cursor-pointer hover:opacity-90 transition-opacity mb-1"
-          loading="lazy"
-          onClick={() => onGalleryOpen(url)}
-        />
+        <ImageBubble url={url} alt={meta?.caption || 'Görsel'} onGalleryOpen={onGalleryOpen} />
       );
     case 'video':
+      const posterUrl = meta?.thumbnail_url || undefined;
       return (
-        <div className="relative cursor-pointer mb-1" onClick={() => onGalleryOpen(url)}>
-          <video src={url} className="rounded-lg max-w-full max-h-64 object-cover" preload="metadata" />
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="w-12 h-12 rounded-full bg-black/50 flex items-center justify-center">
+        <div className="relative cursor-pointer mb-1 group" onClick={() => onGalleryOpen(url)}>
+          <video src={url} poster={posterUrl} className="rounded-lg max-w-full max-h-64 object-cover" preload="metadata" />
+          <div className="absolute inset-0 flex items-center justify-center bg-black/10 rounded-lg group-hover:bg-black/25 transition-colors">
+            <div className="w-12 h-12 rounded-full bg-black/50 backdrop-blur-xs flex items-center justify-center shadow-md">
               <Play className="w-6 h-6 text-white ml-0.5" />
             </div>
           </div>
@@ -292,18 +311,30 @@ function MediaBubbleContent({ message, onGalleryOpen }: { message: any; onGaller
         </div>
       );
     case 'document':
+      const sizeStr = meta?.size || meta?.file_size ? (
+        (meta.size || meta.file_size) > 1024 * 1024 
+          ? `${((meta.size || meta.file_size) / (1024 * 1024)).toFixed(1)} MB`
+          : `${((meta.size || meta.file_size) / 1024).toFixed(0)} KB`
+      ) : "";
       return (
         <a
           href={url}
           target="_blank"
           rel="noopener noreferrer"
-          className="flex items-center gap-2 px-3 py-2 rounded-lg mb-1 transition-colors hover:opacity-80"
+          className="flex items-center gap-2.5 px-3.5 py-2 rounded-xl mb-1 transition-colors hover:opacity-85"
           style={{ background: 'rgba(0,0,0,0.05)', border: '1px solid var(--q-border-default)' }}
         >
           <FileText className="w-5 h-5 flex-shrink-0" style={{ color: 'var(--q-blue)' }} />
-          <span className="text-[13px] font-semibold truncate max-w-[180px]">
-            {meta?.filename || 'Belge'}
-          </span>
+          <div className="flex flex-col min-w-0">
+            <span className="text-[13px] font-semibold truncate max-w-[180px]">
+              {meta?.filename || 'Belge'}
+            </span>
+            {sizeStr && (
+              <span className="text-[10px] text-left" style={{ color: "var(--q-text-secondary)" }}>
+                {sizeStr}
+              </span>
+            )}
+          </div>
           <Download className="w-4 h-4 flex-shrink-0 ml-auto" style={{ color: 'var(--q-text-secondary)' }} />
         </a>
       );
@@ -338,8 +369,8 @@ function QuotedMessagePreview({ native, isOwnMessage }: { native: any; isOwnMess
       <div 
         className="flex flex-col px-3 py-2 rounded-lg mb-2 text-[12px] opacity-70"
         style={{ 
-          background: isOwnMessage ? "rgba(0,0,0,0.05)" : "rgba(255,255,255,0.05)",
-          borderLeft: "4px solid var(--q-border-strong)"
+          background: isOwnMessage ? "rgba(255,255,255,0.15)" : "rgba(0,0,0,0.05)",
+          borderLeft: `4px solid ${isOwnMessage ? "rgba(255,255,255,0.4)" : "rgba(0,0,0,0.15)"}`
         }}
       >
         <div className="font-semibold mb-0.5">Yanıtlanan mesaj bulunamadı</div>
@@ -370,8 +401,8 @@ function QuotedMessagePreview({ native, isOwnMessage }: { native: any; isOwnMess
     <div 
       className="flex flex-col px-3 py-2 rounded-lg mb-2 text-[12px] cursor-pointer transition-colors"
       style={{ 
-        background: isOwnMessage ? "rgba(0,0,0,0.04)" : "rgba(255,255,255,0.05)",
-        borderLeft: `4px solid ${isOwnMessage ? "rgba(0,0,0,0.2)" : "rgba(255,255,255,0.3)"}` 
+        background: isOwnMessage ? "rgba(255,255,255,0.15)" : "rgba(0,0,0,0.05)",
+        borderLeft: `4px solid ${isOwnMessage ? "rgba(255,255,255,0.4)" : "rgba(0,0,0,0.15)"}` 
       }}
       onClick={(e) => {
         e.stopPropagation();
@@ -1817,7 +1848,7 @@ export function ConversationViewport() {
                           </div>
                         </div>
                       ) : (
-                        <div className={`flex w-full ${item.message.sender === "user" ? "justify-start" : "justify-end"} group relative`}>
+                        <div className={`flex w-full ${item.message.sender === "user" ? "justify-start" : "justify-end"} group relative ${item.message.reactions && item.message.reactions.length > 0 ? "mb-3" : ""}`}>
                           {/* ── QUICK ACTIONS TOOLBAR ── */}
                           {item.message.providerMessageId && (
                             <div className={`absolute top-1/2 -translate-y-1/2 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-20 ${
@@ -1990,12 +2021,11 @@ export function ConversationViewport() {
                             {/* ── REACTIONS DISPLAY ── */}
                             {item.message.reactions && item.message.reactions.length > 0 && (
                               <div 
-                                className={`absolute bottom-[-10px] ${item.message.sender === 'user' ? 'right-2' : 'left-2'} z-10 flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs shadow-sm bg-[var(--q-bg-primary)] border border-[var(--q-border-default)] cursor-pointer select-none`}
-                                onClick={() => {
-                                  // Click reaction badge to remove agent's reaction (if any)
-                                  const agentReaction = item.message.reactions.find((r: any) => r.actorLabel === 'Sen');
-                                  if (agentReaction && item.message.providerMessageId) {
-                                    handleSendReaction(item.message.providerMessageId, "");
+                                className={`absolute bottom-[-11px] ${item.message.sender === 'user' ? 'right-2' : 'left-2'} z-10 flex items-center gap-0.5 px-1 py-[1.5px] rounded-full text-[10px] shadow-sm bg-[var(--q-bg-primary)] border border-[var(--q-border-default)] cursor-pointer select-none`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (item.message.sender === 'user') {
+                                    setActiveReactionPickerMsgId(activeReactionPickerMsgId === item.message.id ? null : item.message.id);
                                   }
                                 }}
                               >

@@ -6,6 +6,7 @@ import { getSession } from "@/lib/auth/session";
 import { getTenantBootstrapData } from "@/lib/domain/tenant/bootstrap";
 import { Metadata } from "next";
 import { ImpersonationBanner } from "@/components/layout/impersonation-banner";
+import InboxUnreadBadge from "@/components/features/inbox/inbox-unread-badge";
 
 // ==========================================
 // Dashboard Layout — Sidebar + Mobile Nav
@@ -92,7 +93,7 @@ export default async function DashboardLayout({
       {/* Mobile Bottom Navigation (iOS Style, Role-Aware) */}
       <nav className="md:hidden flex-none w-full h-[72px] bg-white/80 backdrop-blur-[30px] border-t border-black/5 flex items-center justify-around px-2 z-50 pb-[env(safe-area-inset-bottom)] overflow-x-auto no-scrollbar">
         <MobileNavLink href={`/${slug}`} icon={<LayoutDashboard className="w-6 h-6" />} label="Panel" />
-        <MobileNavLink href={`/${slug}/inbox`} icon={<MessageSquare className="w-6 h-6" />} label="Mesajlar" active />
+        <MobileNavLink href={`/${slug}/inbox`} icon={<MessageSquare className="w-6 h-6" />} label="Mesajlar" active badge={<InboxUnreadBadge />} />
         <MobileNavLink href={`/${slug}/forms`} icon={<ClipboardList className="w-6 h-6" />} label="Formlar" />
         {canManageBot && (
           <>
@@ -108,16 +109,17 @@ export default async function DashboardLayout({
   );
 }
 
-function MobileNavLink({ href, icon, label, active }: { href: string; icon: React.ReactNode; label: string; active?: boolean }) {
+function MobileNavLink({ href, icon, label, active, badge }: { href: string; icon: React.ReactNode; label: string; active?: boolean; badge?: React.ReactNode }) {
   return (
     <Link
       href={href}
-      className={`flex flex-col items-center gap-1 p-2 transition-colors ${
+      className={`relative flex flex-col items-center gap-1 p-2 transition-colors ${
         active ? "text-[--q-blue]" : "text-[--q-text-secondary] hover:text-[--q-blue]"
       }`}
     >
       {icon}
       <span className="text-[10px] font-medium">{label}</span>
+      {badge && <div className="absolute top-1 right-2">{badge}</div>}
     </Link>
   );
 }

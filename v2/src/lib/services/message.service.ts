@@ -70,13 +70,14 @@ export class MessageService {
               last_channel = CASE WHEN $3 = 'in' THEN $5 ELSE last_channel END,
               last_message_content = CASE WHEN $3 = 'system' THEN last_message_content ELSE $4 END,
               last_message_direction = CASE WHEN $3 = 'system' THEN last_message_direction ELSE $3 END,
-              last_message_status = CASE WHEN $3 = 'system' THEN last_message_status ELSE $14 END
+              last_message_status = CASE WHEN $3 = 'system' THEN last_message_status ELSE $14 END,
+              last_message_model = CASE WHEN $3 = 'system' THEN last_message_model ELSE $11 END
             WHERE phone_number = $2 AND tenant_id = $1 AND NOT EXISTS (SELECT 1 FROM dup_check)
             RETURNING id
           ), conv_insert AS (
             INSERT INTO conversations (
               tenant_id, phone_number, message_count, channel, channel_id, last_channel,
-              last_message_content, last_message_direction, last_message_status, last_message_at, history_imported_at
+              last_message_content, last_message_direction, last_message_status, last_message_model, last_message_at, history_imported_at
             )
             SELECT $1, $2, 
                    CASE WHEN $3 = 'system' THEN 0 ELSE 1 END, 
@@ -85,6 +86,7 @@ export class MessageService {
                    CASE WHEN $3 = 'system' THEN NULL ELSE $4 END, 
                    CASE WHEN $3 = 'system' THEN NULL ELSE $3 END, 
                    CASE WHEN $3 = 'system' THEN NULL ELSE $14 END, 
+                   CASE WHEN $3 = 'system' THEN NULL ELSE $11 END, 
                    COALESCE(TO_TIMESTAMP($19::double precision), NOW()), 
                    CASE WHEN COALESCE($20::boolean, false) = true THEN NOW() ELSE NULL END
             WHERE NOT EXISTS (SELECT 1 FROM dup_check) AND NOT EXISTS (SELECT 1 FROM conv_update)

@@ -3,11 +3,90 @@
 import { useState, useEffect } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
-import { Search, MessageCircle, Check, CheckCheck, Clock, WifiOff } from "lucide-react";
-import { getConversations } from "@/app/actions/inbox";
+import { Search, Check, CheckCheck, Clock, WifiOff, MessageCircle } from "lucide-react";
+import { getConversations, togglePin, markConversationRead } from "@/app/actions/inbox";
 import { useInboxStore } from "@/store/inbox-store";
 import { useDiagnosticsStore } from "@/lib/realtime/diagnostics-store";
 import { getCountryFromPhone, normalizeCountryName, getCountryFlag } from "@/lib/utils/country";
+
+function getInitialsColor(name: string) {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const h = Math.abs(hash) % 360;
+  return `hsl(${h}, 55%, 35%)`; // Premium elegant color
+}
+
+function getInitials(name: string) {
+  const clean = name.trim().replace(/\s+/g, ' ');
+  if (!clean) return "Q";
+  const parts = clean.split(' ');
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
+}
+
+interface InitialsAvatarProps {
+  name: string;
+  channel: string;
+  unread: number;
+}
+
+function InitialsAvatar({ name, channel, unread }: InitialsAvatarProps) {
+  const initials = getInitials(name);
+  const bgColor = getInitialsColor(name);
+
+  // Overlay channel color badge
+  const channelColors: Record<string, string> = {
+    whatsapp: "#25D366", // WhatsApp Green
+    instagram: "#E1306C", // Instagram Pink/Purple
+    messenger: "#1877F2", // Messenger Blue
+  };
+  const badgeColor = channelColors[channel] || "#8E8E93";
+
+  return (
+    <div className="relative mt-1 shrink-0 select-none">
+      <div 
+        className="w-10 h-10 rounded-full flex items-center justify-center text-white text-[13px] font-bold shadow-[0_2px_8px_rgba(0,0,0,0.08)]"
+        style={{ backgroundColor: bgColor }}
+      >
+        {initials}
+      </div>
+      
+      {/* Channel overlay badge */}
+      <span 
+        className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full border-2 border-white shadow-sm flex items-center justify-center text-[7px] font-black text-white uppercase"
+        style={{ backgroundColor: badgeColor }}
+      >
+        {channel === 'whatsapp' && 'w'}
+        {channel === 'instagram' && 'i'}
+        {channel === 'messenger' && 'f'}
+      </span>
+
+      {unread > 0 && (
+        <span
+          className="absolute -top-1.5 -right-1.5 text-white text-[9px] font-bold px-1.5 min-w-[18px] h-[18px] flex items-center justify-center rounded-full border-2 border-white shadow-sm"
+          style={{ background: "var(--q-red, #FF3B30)" }}
+        >
+          {unread}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function formatMessagePreview(text: string | null) {
+  if (!text) return "";
+  
+  if (text.startsWith("📷 Fotoğraf") || text.includes("Fotoğraf")) return "📷 Fotoğraf";
+  if (text.startsWith("🎬 Video") || text.includes("Video")) return "🎬 Video";
+  if (text.startsWith("🎵 Ses kaydı") || text.startsWith("🎤 Sesli mesaj") || text.includes("Ses kaydı") || text.includes("Sesli mesaj")) return "🎵 Ses kaydı";
+  if (text.startsWith("📎 Belge") || text.startsWith("📄 Belge") || text.includes("Belge") || text.includes("pdf") || text.includes("doc")) return "📄 Belge";
+  if (text.startsWith("📍 Konum") || text.includes("Konum")) return "📍 Konum";
+  if (text.startsWith("🏷️ Sticker") || text.includes("Sticker")) return "🏷️ Sticker";
+  
+  return text;
+}
 
 // ==========================================
 // CONTACT RAIL — Left navigation panel
@@ -101,6 +180,14 @@ export function ContactRail() {
   const [searchInput, setSearchInput] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const isRealtimeDown = useDiagnosticsStore((state) => state.isRealtimeDown);
+  const [errorToast, setErrorToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (errorToast) {
+      const timer = setTimeout(() => setErrorToast(null), 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [errorToast]);
 
   // Debounce
   useEffect(() => {
@@ -205,6 +292,62 @@ export function ContactRail() {
     }
   }, [activePhone, contacts, queryClient]);
 
+  // Mark conversation read in database when active conversation is selected
+  useEffect(() => {
+    if (activePhone) {
+      markConversationRead(activePhone).then((res) => {
+        if (res?.success) {
+          // Trigger local refresh event for the sidebar global count
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('inbox-unread-refresh'));
+          }
+        }
+      });
+    }
+  }, [activePhone]);
+
+  const handleTogglePin = async (phone: string) => {
+    try {
+      const res = await togglePin(phone) as any;
+      if (res.success) {
+        // Mutate the query cache instantly
+        queryClient.setQueriesData({ queryKey: ["conversations"] }, (oldData: any) => {
+          if (!oldData || !oldData.pages) return oldData;
+          
+          const newPages = oldData.pages.map((page: any[]) =>
+            page.map(conv => {
+              if (conv.id === phone) {
+                return { ...conv, isPinned: res.isPinned };
+              }
+              return conv;
+            })
+          );
+
+          // Re-sort the cache pages in-place instantly
+          const flattened = newPages.flat();
+          flattened.sort((a: any, b: any) => {
+            const aPinned = !!a.isPinned;
+            const bPinned = !!b.isPinned;
+            if (aPinned && !bPinned) return -1;
+            if (!aPinned && bPinned) return 1;
+            return new Date(b.last_message_at || 0).getTime() - new Date(a.last_message_at || 0).getTime();
+          });
+
+          const pageSize = 50;
+          const sortedPages = [];
+          for (let i = 0; i < flattened.length; i += pageSize) {
+            sortedPages.push(flattened.slice(i, i + pageSize));
+          }
+          return { ...oldData, pages: sortedPages };
+        });
+      } else {
+        setErrorToast(res.error || "Sabitleme işlemi başarısız.");
+      }
+    } catch (err) {
+      console.error("Pin toggle error:", err);
+    }
+  };
+
   return (
     <div className={`w-full md:w-80 border-r flex-col h-full z-10 q-glass shadow-sm ${mobileView === "list" ? "flex" : "hidden md:flex"}`}
       style={{ borderColor: "var(--q-border-default)" }}
@@ -292,86 +435,103 @@ export function ContactRail() {
           <div className="q-stagger">
             {(contacts || [])
               .filter((c: any) => filter === "all" || c.channel === filter)
-              .map((c: any) => (
-                <button
-                  key={c.id}
-                  onClick={() => setActiveContact(c.id, { ...c, unread: 0 })}
-                  className="w-full text-left p-3.5 rounded-2xl transition-all duration-200 flex items-start gap-3.5 border q-list-item"
-                  style={{
-                    backgroundColor: activePhone === c.id ? "var(--q-bg-primary)" : "transparent",
-                    borderColor: activePhone === c.id ? "var(--q-border-default)" : "transparent",
-                    boxShadow: activePhone === c.id ? "var(--q-shadow-sm)" : "none",
-                  }}
-                >
-                  {/* Channel Icon */}
-                  <div className="relative mt-1">
-                    <ChannelIcon channel={c.channel} />
-                    {c.unread > 0 && (
-                      <span
-                        className="absolute -top-1 -right-1 text-white text-[10px] font-bold w-4 h-4 flex items-center justify-center rounded-full border-2 border-white shadow-sm"
-                        style={{ background: "var(--q-red)" }}
-                      >
-                        {c.unread}
-                      </span>
-                    )}
-                  </div>
+              .map((c: any) => {
+                let senderPrefix = "";
+                if (c.lastMessageDirection === 'out') {
+                  if (c.lastMessageModel) {
+                    senderPrefix = "AI: ";
+                  } else {
+                    senderPrefix = "Sen: ";
+                  }
+                }
+                
+                return (
+                  <button
+                    key={c.id}
+                    onClick={() => setActiveContact(c.id, { ...c, unread: 0 })}
+                    className="w-full text-left p-3.5 rounded-2xl transition-all duration-200 flex items-start gap-3.5 border q-list-item group"
+                    style={{
+                      backgroundColor: activePhone === c.id ? "var(--q-bg-primary)" : "transparent",
+                      borderColor: activePhone === c.id ? "var(--q-border-default)" : "transparent",
+                      boxShadow: activePhone === c.id ? "var(--q-shadow-sm)" : "none",
+                    }}
+                  >
+                    {/* Initials Avatar */}
+                    <InitialsAvatar name={c.name || c.id} channel={c.channel} unread={c.unread} />
 
-                  {/* Content */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex justify-between items-baseline mb-0.5">
-                      <div className="flex items-center min-w-0 flex-1 mr-2">
-                        <span className="font-bold text-[14px] truncate" style={{ color: "var(--q-text-primary)" }}>
-                          {c.name || c.id}
-                        </span>
-                        {(() => {
-                          // Country priority: DB (AI-extracted) > phone prefix (deterministic guess)
-                          // Medical tourism: patient may have +90 phone but live in Germany
-                          const cn = c.country ? normalizeCountryName(c.country) : '';
-                          const country = (c.country ? { flag: getCountryFlag(cn), name: cn, code: '' } : null) || getCountryFromPhone(c.id);
-                          return country ? (
-                            <span className="ml-1.5 inline-flex items-center gap-0.5 px-1 py-0.5 rounded bg-black/[0.04] text-[10px] font-semibold flex-shrink-0" style={{ color: 'var(--q-text-secondary)' }}>
-                              {country.flag} {country.name}
-                            </span>
-                          ) : null;
-                        })()}
+                    {/* Content */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex justify-between items-baseline mb-0.5">
+                        <div className="flex items-center min-w-0 flex-1 mr-2">
+                          <span className="font-bold text-[14px] truncate" style={{ color: "var(--q-text-primary)" }}>
+                            {c.name || c.id}
+                          </span>
+                          {(() => {
+                            // Country priority: DB (AI-extracted) > phone prefix (deterministic guess)
+                            // Medical tourism: patient may have +90 phone but live in Germany
+                            const cn = c.country ? normalizeCountryName(c.country) : '';
+                            const country = (c.country ? { flag: getCountryFlag(cn), name: cn, code: '' } : null) || getCountryFromPhone(c.id);
+                            return country ? (
+                              <span className="ml-1.5 inline-flex items-center gap-0.5 px-1 py-0.5 rounded bg-black/[0.04] text-[10px] font-semibold flex-shrink-0" style={{ color: 'var(--q-text-secondary)' }}>
+                                {country.flag} {country.name}
+                              </span>
+                            ) : null;
+                          })()}
+                        </div>
                       </div>
-                      <span className="text-[10px] font-semibold tracking-wide whitespace-nowrap ml-2" style={{ color: "var(--q-text-secondary)" }}>
-                        {c.formattedTime}
-                      </span>
-                    </div>
-                    <p
-                      className={`text-[13px] truncate flex items-center gap-1.5 ${c.unread > 0 ? "font-bold" : "font-medium"}`}
-                      style={{ color: c.unread > 0 ? "var(--q-text-primary)" : "var(--q-text-secondary)" }}
-                    >
-                      {(c.lastMessageDirection === 'out' || c.lastMessageDirection === 'system') && (
-                        <span className="flex-shrink-0 opacity-70">
-                          {(!c.lastMessageStatus || c.lastMessageStatus === 'pending') && <Clock className="w-3.5 h-3.5" />}
-                          {c.lastMessageStatus === 'sent' && <Check className="w-4 h-4" />}
-                          {c.lastMessageStatus === 'delivered' && <CheckCheck className="w-4 h-4" />}
-                          {c.lastMessageStatus === 'read' && <CheckCheck className="w-4 h-4" style={{ color: "var(--q-blue)" }} />}
-                        </span>
-                      )}
-                      <span className="truncate">{c.last_message || "Görsel veya medya"}</span>
-                    </p>
-                    <div className="flex gap-2 mt-2">
-                      <span
-                        className="text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded shadow-sm"
-                        style={{ background: "var(--q-bg-primary)", border: "1px solid var(--q-border-default)", color: "var(--q-text-secondary)" }}
+                      <p
+                        className={`text-[13px] truncate flex items-center gap-1.5 ${c.unread > 0 ? "font-bold" : "font-medium"}`}
+                        style={{ color: c.unread > 0 ? "var(--q-text-primary)" : "var(--q-text-secondary)" }}
                       >
-                        {stageLabel(c.stage)}
-                      </span>
-                      {!c.isBotActive && (
+                        {(c.lastMessageDirection === 'out' || c.lastMessageDirection === 'system') && (
+                          <span className="flex-shrink-0 opacity-70">
+                            {(!c.lastMessageStatus || c.lastMessageStatus === 'pending') && <Clock className="w-3.5 h-3.5" />}
+                            {c.lastMessageStatus === 'sent' && <Check className="w-4 h-4" />}
+                            {c.lastMessageStatus === 'delivered' && <CheckCheck className="w-4 h-4" />}
+                            {c.lastMessageStatus === 'read' && <CheckCheck className="w-4 h-4" style={{ color: "var(--q-blue)" }} />}
+                          </span>
+                        )}
+                        <span className="truncate">{senderPrefix}{formatMessagePreview(c.last_message)}</span>
+                      </p>
+                      <div className="flex gap-2 mt-2">
                         <span
                           className="text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded shadow-sm"
-                          style={{ background: "var(--q-blue-bg)", color: "var(--q-blue)", border: "1px solid rgba(0,122,255,0.2)" }}
+                          style={{ background: "var(--q-bg-primary)", border: "1px solid var(--q-border-default)", color: "var(--q-text-secondary)" }}
                         >
-                          Sen
+                          {stageLabel(c.stage)}
                         </span>
-                      )}
+                        {!c.isBotActive && (
+                          <span
+                            className="text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded shadow-sm"
+                            style={{ background: "var(--q-blue-bg)", color: "var(--q-blue)", border: "1px solid rgba(0,122,255,0.2)" }}
+                          >
+                            Sen
+                          </span>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                </button>
-              ))}
+
+                    {/* Date and Pin Toggle */}
+                    <div className="flex flex-col items-end justify-between self-stretch shrink-0 min-h-[44px]">
+                      <span className="text-[10px] font-semibold tracking-wide whitespace-nowrap" style={{ color: "var(--q-text-secondary)" }}>
+                        {c.formattedTime}
+                      </span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleTogglePin(c.id);
+                        }}
+                        className={`p-1 rounded-lg hover:bg-black/5 transition-all text-xs ${
+                          c.isPinned ? "opacity-100" : "opacity-0 group-hover:opacity-60 hover:opacity-100"
+                        }`}
+                        title={c.isPinned ? "Sabitlemeyi Kaldır" : "Sabitle"}
+                      >
+                        📌
+                      </button>
+                    </div>
+                  </button>
+                );
+              })}
           </div>
         )}
 
@@ -387,6 +547,12 @@ export function ContactRail() {
           </button>
         )}
       </div>
+      {errorToast && (
+        <div className="fixed bottom-5 left-5 z-[9999] px-4 py-3 rounded-xl shadow-lg border text-xs font-semibold animate-in fade-in slide-in-from-bottom-5 duration-300"
+             style={{ background: "var(--q-red)", color: "white", borderColor: "rgba(255,255,255,0.1)" }}>
+          {errorToast}
+        </div>
+      )}
     </div>
   );
 }

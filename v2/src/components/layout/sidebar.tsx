@@ -23,6 +23,7 @@ import { redirect } from "next/navigation";
 import type { TenantBootstrapData } from "@/lib/domain/tenant/bootstrap";
 
 import NotificationBell from "@/components/features/notifications/notification-bell";
+import InboxUnreadBadge from "@/components/features/inbox/inbox-unread-badge";
 
 // ==========================================
 // QUBA AI — Sidebar (Server Component)
@@ -80,7 +81,7 @@ export async function Sidebar({ tenantData }: { tenantData?: TenantBootstrapData
         <NavLink href={`/${session?.tenantSlug || ''}`} icon={<LayoutDashboard className="w-[18px] h-[18px]" />} label="Workspace" />
         
         {/* INBOX (Always enabled for now, or check module) */}
-        <NavLink href={`/${session?.tenantSlug || ''}/inbox`} icon={<MessageSquare className="w-[18px] h-[18px]" />} label="Mesajlar" />
+        <NavLink href={`/${session?.tenantSlug || ''}/inbox`} icon={<MessageSquare className="w-[18px] h-[18px]" />} label="Mesajlar" badge={<InboxUnreadBadge />} />
         
         {/* FORMS */}
         {true && (
@@ -171,14 +172,17 @@ export async function Sidebar({ tenantData }: { tenantData?: TenantBootstrapData
 }
 
 // Nav link component
-function NavLink({ href, icon, label }: { href: string; icon: React.ReactNode; label: string }) {
+function NavLink({ href, icon, label, badge }: { href: string; icon: React.ReactNode; label: string; badge?: React.ReactNode }) {
   return (
     <Link 
       href={href} 
-      className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium text-[--q-text-primary] hover:bg-black/[0.04] hover:text-[--q-text-primary] transition-all duration-150"
+      className="flex items-center justify-between px-3 py-2.5 rounded-lg text-[13px] font-medium text-[--q-text-primary] hover:bg-black/[0.04] hover:text-[--q-text-primary] transition-all duration-150"
     >
-      <span className="opacity-60">{icon}</span>
-      {label}
+      <div className="flex items-center gap-3">
+        <span className="opacity-60">{icon}</span>
+        {label}
+      </div>
+      {badge}
     </Link>
   );
 }
