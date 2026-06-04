@@ -760,8 +760,10 @@ export class QueueWorkerEngine {
               sender_label: qMsg.direction === 'in' ? 'Hasta' : 'Bot',
               created_at: qMsg.created_at
             };
+            this.log.info(`[NATIVE_CONTEXT_DETECTED] type=reply hasContext=true hasQuotedSnapshot=true`, { traceId });
           } else {
             native.quoted_message_missing = true;
+            this.log.info(`[NATIVE_CONTEXT_DETECTED] type=reply hasContext=true hasQuotedSnapshot=false`, { traceId });
           }
         } catch (err) {
           this.log.error(`[QUOTED_LOOKUP_ERROR]`, err as Error, { traceId });
@@ -834,6 +836,7 @@ export class QueueWorkerEngine {
           content = incomingMsg.reaction?.emoji || '👍';
           native.reaction_payload = incomingMsg.reaction;
           skipBotReply = true; // Reactions don't trigger AI
+          this.log.info(`[NATIVE_REACTION_DETECTED] type=reaction skipBotReply=true`, { traceId });
           break;
         case 'button':
           content = incomingMsg.button?.text || incomingMsg.button?.payload || '';
@@ -841,6 +844,7 @@ export class QueueWorkerEngine {
         case 'interactive':
           content = incomingMsg.interactive?.button_reply?.title || incomingMsg.interactive?.list_reply?.title || '';
           native.interactive_payload = incomingMsg.interactive;
+          this.log.info(`[NATIVE_INTERACTIVE_DETECTED] type=${incomingMsg.interactive?.type || 'interactive'} id=${incomingMsg.interactive?.button_reply?.id || incomingMsg.interactive?.list_reply?.id || 'unknown'}`, { traceId });
           break;
         default:
           content = '';
