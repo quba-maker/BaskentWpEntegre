@@ -2208,7 +2208,7 @@ async function runValidationTests() {
     if (sql.includes("SELECT id, media_metadata FROM messages WHERE provider_message_id = $1")) {
       return [{ id: "target-msg-local-id", media_metadata: { native: { reactions: [] } } }];
     }
-    if (sql.includes("UPDATE messages SET media_metadata = $1 WHERE id = $2")) {
+    if (sql.includes("UPDATE messages SET media_metadata = $1 WHERE id = $2") || sql.includes("UPDATE messages SET media_metadata = $1 WHERE tenant_id = $2 AND id = $3")) {
       targetMetadataUpdated = true;
       targetMetadataVal = vals[0];
       return [];
@@ -2247,7 +2247,7 @@ async function runValidationTests() {
       // Simulate existing reaction by agent
       return [{ id: "target-msg-local-id", media_metadata: { native: { reactions: [{ emoji: "❤️", actor: "agent" }] } } }];
     }
-    if (sql.includes("UPDATE messages SET media_metadata = $1 WHERE id = $2")) {
+    if (sql.includes("UPDATE messages SET media_metadata = $1 WHERE id = $2") || sql.includes("UPDATE messages SET media_metadata = $1 WHERE tenant_id = $2 AND id = $3")) {
       targetMetadataUpdated = true;
       targetMetadataVal = vals[0];
       return [];

@@ -41,7 +41,7 @@ export const ChatMessageProjectionSchema = z.object({
   id: z.string(),
   conversationId: z.string(),
   content: z.string(),
-  sender: z.enum(["agent", "bot", "user"]),
+  sender: z.enum(["agent", "bot", "user", "system"]),
   status: z.enum(["sent", "delivered", "read", "failed"]).optional(),
   createdAt: z.string(), // ISO Date string
   // Media fields

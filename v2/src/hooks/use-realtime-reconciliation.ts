@@ -183,19 +183,25 @@ export function useRealtimeReconciliation(tenantId: string) {
     const activePhone = useInboxStore.getState().activePhone;
     const isFocused = activePhone === payload.conversationId;
 
-    // Update conversation list preview AND REORDER TO TOP
-    updateConversationPreview(payload.conversationId, (conv: any) => {
-      let nextUnread = conv.unread || 0;
-      if (isFocused) {
-        nextUnread = 0;
-      } else if (payload.sender === "user") {
-        nextUnread = nextUnread + 1;
-      }
-      return {
-        ...projection.conversationData,
-        unread: nextUnread
-      };
-    }, true);
+    const isReaction = payload.sender === 'system' ||
+      payload.mediaMetadata?.native?.message_type === 'reaction' ||
+      !!payload.mediaMetadata?.native?.reaction_payload;
+
+    if (!isReaction) {
+      // Update conversation list preview AND REORDER TO TOP
+      updateConversationPreview(payload.conversationId, (conv: any) => {
+        let nextUnread = conv.unread || 0;
+        if (isFocused) {
+          nextUnread = 0;
+        } else if (payload.sender === "user") {
+          nextUnread = nextUnread + 1;
+        }
+        return {
+          ...projection.conversationData,
+          unread: nextUnread
+        };
+      }, true);
+    }
   };
 
   // Internal handler for status updates

@@ -1912,11 +1912,10 @@ export function ConversationViewport() {
                                 </span>
                               </div>
                             )}
-                            {/* ── QUOTED MESSAGE PREVIEW ── */}
                             {item.message.mediaMetadata?.native && (item.message.mediaMetadata.native.reply_to_provider_message_id || item.message.mediaMetadata.native.reply_to_message_id) && (
                               <QuotedMessagePreview 
                                 native={item.message.mediaMetadata.native} 
-                                isOwnMessage={item.message.sender === "user"} 
+                                isOwnMessage={item.message.sender !== "user"} 
                               />
                             )}
 

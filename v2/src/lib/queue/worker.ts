@@ -1051,7 +1051,8 @@ export class QueueWorkerEngine {
     const isHistory = channel === 'whatsapp' && incomingMsgObj && (incomingMsgObj as any).is_history_import === true;
     const incomingTimestamp = channel === 'whatsapp' && incomingMsgObj ? parseInt((incomingMsgObj as any).timestamp, 10) : undefined;
 
-    const direction = isAppEcho ? 'out' : (mediaMetadata?.native?.message_type === 'reaction' ? 'system' : 'in') as any;
+    const msgType = channel === 'whatsapp' ? ((incomingMsgObj as any)?.type || 'text') : 'text';
+    const direction = (msgType === 'reaction' || mediaMetadata?.native?.message_type === 'reaction') ? 'system' : (isAppEcho ? 'out' : 'in') as any;
     const modelUsed = isAppEcho ? null : undefined;
     const statusVal = isAppEcho ? 'sent' : (isHistory ? 'delivered' : 'delivered');
 
@@ -2186,6 +2187,12 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
     // 10. CRM Intelligence Extraction (Async & Non-blocking — Feature Flag gated via next/server after)
     after(async () => {
       try {
+        const isReactionMessage = msgType === 'reaction' || direction === 'system';
+        if (isReactionMessage) {
+          this.log.info(`[WORKER_REACTION] Skipping CRM and memory summarization for reaction message`, { traceId });
+          return;
+        }
+
         const isCrmEnabled = await FeatureFlagService.isEnabled(tenantId, 'crm_extraction', true);
         if (isCrmEnabled) {
           try {

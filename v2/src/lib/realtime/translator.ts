@@ -42,11 +42,11 @@ export class RealtimeTranslator {
   ): ChatMessageCreatedEvent {
     
     // Convert logic (e.g. sender identification)
-    let senderType: "agent" | "bot" | "user" = "user";
+    let senderType: "agent" | "bot" | "user" | "system" = "user";
     if (internalMessage.direction === "out") {
       senderType = internalMessage.model_used ? "bot" : "agent";
     } else if (internalMessage.direction === "system") {
-      senderType = "bot";
+      senderType = "system";
     }
 
     return {

@@ -73,7 +73,10 @@ export async function getConversations(page: number = 1, search: string = "", st
         LEFT JOIN LATERAL (
           SELECT content, status, direction
           FROM messages 
-          WHERE phone_number = c.phone_number AND messages.tenant_id = $1
+          WHERE phone_number = c.phone_number 
+            AND messages.tenant_id = $1
+            AND direction != 'system'
+            AND (media_metadata IS NULL OR COALESCE(media_metadata->'native'->>'message_type', '') != 'reaction')
           ORDER BY created_at DESC 
           LIMIT 1
         ) m ON c.last_message_content IS NULL
@@ -586,6 +589,7 @@ export async function sendMessage(phone: string, text: string, replyToProviderMe
                 content: text,
                 direction: 'out',
                 status: messageStatus,
+                media_metadata: mediaMetadata,
                 created_at: new Date().toISOString()
               }
             );
@@ -772,6 +776,15 @@ export async function sendMediaMessage(phone: string, mediaUrl: string, mediaTyp
       const { MediaStorageService } = await import("@/lib/services/media-storage.service");
       const contentText = caption || MediaStorageService.getMediaContentText(mediaType, { filename });
 
+      const mediaMetadataObj = { 
+        filename, 
+        mime_type: mimeType, 
+        size: fileSize, 
+        caption: caption || null,
+        initiated_from: "inbox_panel",
+        source: "panel_operator"
+      };
+
       // Save to DB with media fields and conversation_id
       const msgInsert = await ctx.db.executeSafe({
         text: `INSERT INTO messages (tenant_id, conversation_id, phone_number, direction, content, channel, status, provider_message_id, media_type, media_url, media_metadata)
@@ -780,14 +793,7 @@ export async function sendMediaMessage(phone: string, mediaUrl: string, mediaTyp
         values: [
           ctx.tenantId, conversationId, phone, contentText, channel, messageStatus, providerMessageId,
           mediaType, mediaUrl,
-          JSON.stringify({ 
-            filename, 
-            mime_type: mimeType, 
-            size: fileSize, 
-            caption: caption || null,
-            initiated_from: "inbox_panel",
-            source: "panel_operator"
-          })
+          JSON.stringify(mediaMetadataObj)
         ]
       });
 
@@ -876,6 +882,7 @@ export async function sendMediaMessage(phone: string, mediaUrl: string, mediaTyp
                 status: messageStatus,
                 media_type: mediaType,
                 media_url: mediaUrl,
+                media_metadata: mediaMetadataObj,
                 created_at: new Date().toISOString()
               }
             );
@@ -1361,11 +1368,22 @@ export async function sendReaction(phone: string, targetProviderMessageId: strin
           });
         }
 
-        // Save back to DB
-        await ctx.db.executeSafe({
-          text: `UPDATE messages SET media_metadata = $1 WHERE id = $2`,
-          values: [JSON.stringify(metadata), targetMessageId]
-        });
+        // Save back to DB with explicit tenant isolation guard
+        try {
+          await ctx.db.executeSafe({
+            text: `UPDATE messages SET media_metadata = $1 WHERE tenant_id = $2 AND id = $3`,
+            values: [JSON.stringify(metadata), ctx.tenantId, targetMessageId]
+          });
+        } catch (dbErr: any) {
+          const { logger: inboxLogger } = await import("@/lib/core/logger");
+          inboxLogger.withContext({ module: 'Inbox' }).error("Partial success: WhatsApp reaction sent, but database persistence failed", dbErr, {
+            tenantId: ctx.tenantId,
+            targetMessageId: targetMessageId,
+            targetProviderMessageId: targetProviderMessageId,
+            action: 'sendReaction'
+          });
+          // Do not fail the user action since Meta API send was successful
+        }
       } else {
         // Fallback: target not found, insert a system row (Priority 2)
         const fallbackNative = {
@@ -1378,19 +1396,29 @@ export async function sendReaction(phone: string, targetProviderMessageId: strin
           reply_to_provider_message_id: targetProviderMessageId,
           actor: 'agent'
         };
-        await ctx.db.executeSafe({
-          text: `INSERT INTO messages (tenant_id, conversation_id, phone_number, direction, content, channel, status, provider_message_id, media_metadata)
-                 VALUES ($1, $2, $3, 'system', $4, $5, 'sent', $6, $7)`,
-          values: [
-            ctx.tenantId,
-            conversationId,
-            phone,
-            emoji || '',
-            channel,
-            providerMessageId || `temp-system-reaction-${Date.now()}`,
-            JSON.stringify({ native: fallbackNative })
-          ]
-        });
+        try {
+          await ctx.db.executeSafe({
+            text: `INSERT INTO messages (tenant_id, conversation_id, phone_number, direction, content, channel, status, provider_message_id, media_metadata)
+                   VALUES ($1, $2, $3, 'system', $4, $5, 'sent', $6, $7)`,
+            values: [
+              ctx.tenantId,
+              conversationId,
+              phone,
+              emoji || '',
+              channel,
+              providerMessageId || `temp-system-reaction-${Date.now()}`,
+              JSON.stringify({ native: fallbackNative })
+            ]
+          });
+        } catch (dbErr: any) {
+          const { logger: inboxLogger } = await import("@/lib/core/logger");
+          inboxLogger.withContext({ module: 'Inbox' }).error("Partial success: WhatsApp reaction sent, but fallback message insertion failed", dbErr, {
+            tenantId: ctx.tenantId,
+            targetProviderMessageId: targetProviderMessageId,
+            action: 'sendReaction'
+          });
+          // Do not fail the user action since Meta API send was successful
+        }
       }
 
       // 5. Broadcast realtime sync update

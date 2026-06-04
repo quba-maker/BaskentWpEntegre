@@ -58,18 +58,19 @@ export class MessageService {
             UPDATE conversations 
             SET 
               last_message_at = CASE 
+                WHEN $3 = 'system' THEN last_message_at
                 WHEN $19::double precision IS NOT NULL THEN 
                   CASE WHEN TO_TIMESTAMP($19::double precision) > last_message_at THEN TO_TIMESTAMP($19::double precision) ELSE last_message_at END
                 ELSE NOW() 
               END,
               history_imported_at = CASE WHEN COALESCE($20::boolean, false) = true THEN NOW() ELSE history_imported_at END,
-              message_count = message_count + 1, 
-              channel = $5,
-              channel_id = COALESCE($6, channel_id),
+              message_count = CASE WHEN $3 = 'system' THEN message_count ELSE message_count + 1 END, 
+              channel = CASE WHEN $3 = 'system' THEN channel ELSE $5 END,
+              channel_id = CASE WHEN $3 = 'system' THEN channel_id ELSE COALESCE($6, channel_id) END,
               last_channel = CASE WHEN $3 = 'in' THEN $5 ELSE last_channel END,
-              last_message_content = $4,
-              last_message_direction = $3,
-              last_message_status = $14
+              last_message_content = CASE WHEN $3 = 'system' THEN last_message_content ELSE $4 END,
+              last_message_direction = CASE WHEN $3 = 'system' THEN last_message_direction ELSE $3 END,
+              last_message_status = CASE WHEN $3 = 'system' THEN last_message_status ELSE $14 END
             WHERE phone_number = $2 AND tenant_id = $1 AND NOT EXISTS (SELECT 1 FROM dup_check)
             RETURNING id
           ), conv_insert AS (
@@ -77,7 +78,15 @@ export class MessageService {
               tenant_id, phone_number, message_count, channel, channel_id, last_channel,
               last_message_content, last_message_direction, last_message_status, last_message_at, history_imported_at
             )
-            SELECT $1, $2, 1, $5, $6, CASE WHEN $3 = 'in' THEN $5 ELSE NULL END, $4, $3, $14, COALESCE(TO_TIMESTAMP($19::double precision), NOW()), CASE WHEN COALESCE($20::boolean, false) = true THEN NOW() ELSE NULL END
+            SELECT $1, $2, 
+                   CASE WHEN $3 = 'system' THEN 0 ELSE 1 END, 
+                   $5, $6, 
+                   CASE WHEN $3 = 'in' THEN $5 ELSE NULL END, 
+                   CASE WHEN $3 = 'system' THEN NULL ELSE $4 END, 
+                   CASE WHEN $3 = 'system' THEN NULL ELSE $3 END, 
+                   CASE WHEN $3 = 'system' THEN NULL ELSE $14 END, 
+                   COALESCE(TO_TIMESTAMP($19::double precision), NOW()), 
+                   CASE WHEN COALESCE($20::boolean, false) = true THEN NOW() ELSE NULL END
             WHERE NOT EXISTS (SELECT 1 FROM dup_check) AND NOT EXISTS (SELECT 1 FROM conv_update)
             RETURNING id
           ), resolved_conv AS (
