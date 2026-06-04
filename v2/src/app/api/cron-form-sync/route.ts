@@ -3,6 +3,7 @@ import { withTenantDB } from '@/lib/core/tenant-db';
 import { logger } from '@/lib/core/logger';
 import { ingestSheetBatch, updateSheetsHealthStatus } from '@/lib/services/sheets-ingestion.service';
 import { CredentialsService } from '@/lib/services/credentials.service';
+import { redis } from '@/lib/redis';
 import crypto from 'crypto';
 
 const log = logger.withContext({ module: 'CronFormSync' });
@@ -24,6 +25,9 @@ const log = logger.withContext({ module: 'CronFormSync' });
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60; // Hobby plan max
 
+const SYNC_LOCK_KEY = 'cron:form-sync:lock';
+const SYNC_LOCK_TTL = 120; // seconds — auto-expire if process crashes/times out
+
 // ── HMAC Verification (shared with webhook) ──
 function verifyHmac(secret: string, timestamp: string, rawBody: string, signature: string): boolean {
   const expectedSig = 'sha256=' + crypto
@@ -39,6 +43,22 @@ function verifyHmac(secret: string, timestamp: string, rawBody: string, signatur
 }
 
 export async function POST(request: NextRequest) {
+  // ── 0. Overlap Guard: prevent concurrent sync runs ──
+  let lockAcquired = false;
+  if (redis) {
+    try {
+      const lock = await redis.set(SYNC_LOCK_KEY, Date.now().toString(), { ex: SYNC_LOCK_TTL, nx: true });
+      if (!lock) {
+        log.warn('[CRON_SYNC_OVERLAP] Previous sync still running, skipping this run');
+        return NextResponse.json({ skipped: true, reason: 'previous_sync_still_running' });
+      }
+      lockAcquired = true;
+    } catch (lockErr) {
+      // Redis failure is non-blocking — proceed without lock
+      log.warn('[CRON_SYNC_LOCK_ERROR] Redis lock failed, proceeding without guard', { error: lockErr instanceof Error ? lockErr.message : String(lockErr) });
+    }
+  }
+
   try {
     const rawBody = await request.text();
 
@@ -199,5 +219,15 @@ export async function POST(request: NextRequest) {
   } catch (error: any) {
     log.error('[CRON_SYNC_FATAL]', error instanceof Error ? error : new Error(String(error)));
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  } finally {
+    // ── Release overlap lock ──
+    if (lockAcquired && redis) {
+      try {
+        await redis.del(SYNC_LOCK_KEY);
+      } catch (unlockErr) {
+        // Non-blocking — TTL will auto-expire the lock
+        log.warn('[CRON_SYNC_UNLOCK_ERROR] Failed to release lock, TTL will auto-expire', { error: unlockErr instanceof Error ? unlockErr.message : String(unlockErr) });
+      }
+    }
   }
 }
