@@ -837,6 +837,81 @@ export class QueueWorkerEngine {
           native.reaction_payload = incomingMsg.reaction;
           skipBotReply = true; // Reactions don't trigger AI
           this.log.info(`[NATIVE_REACTION_DETECTED] type=reaction skipBotReply=true`, { traceId });
+          
+          const reactionMessageId = incomingMsg.reaction?.message_id;
+          if (reactionMessageId) {
+            native.reply_to_provider_message_id = reactionMessageId;
+            try {
+              const qRes = await dbTemp.executeSafe({
+                text: `SELECT id, direction, content, media_type, status, created_at FROM messages WHERE provider_message_id = $1 AND tenant_id = $2 LIMIT 1`,
+                values: [reactionMessageId, tenantId]
+              }) as any[];
+              if (qRes.length > 0) {
+                const qMsg = qRes[0];
+                native.reply_to_message_id = qMsg.id;
+                native.reaction_target_message_id = qMsg.id;
+                native.reaction_target_message_snapshot = {
+                  direction: qMsg.direction,
+                  text: qMsg.content,
+                  type: qMsg.media_type || 'text',
+                  sender_label: qMsg.direction === 'in' ? 'Hasta' : 'Bot',
+                  created_at: qMsg.created_at
+                };
+                
+                // Reaction intent classification
+                const emoji = incomingMsg.reaction?.emoji || '👍';
+                const targetText = qMsg.content || '';
+                const isBotTarget = qMsg.direction === 'out';
+                
+                let intent = 'unclear';
+                let confidence = 'low';
+                
+                const positiveEmojis = ["👍", "✅", "👌", "❤️", "🙏"];
+                const negativeEmojis = ["👎", "❌"];
+                
+                if (positiveEmojis.includes(emoji)) {
+                  intent = 'positive';
+                } else if (negativeEmojis.includes(emoji)) {
+                  intent = 'negative';
+                }
+                
+                // If it is a bot message containing a query for time/confirmation/action
+                const isConfirmationTarget = isBotTarget && (
+                  targetText.includes('uygun mu') ||
+                  targetText.includes('teyit') ||
+                  targetText.includes('onay') ||
+                  targetText.includes('istiyor musunuz') ||
+                  targetText.includes('görüşme') ||
+                  targetText.includes('saat') ||
+                  targetText.includes('gün') ||
+                  targetText.includes('randevu')
+                );
+                
+                if (isConfirmationTarget) {
+                  if (intent === 'positive') {
+                    intent = 'positive_confirmation';
+                    confidence = 'high';
+                  } else if (intent === 'negative') {
+                    intent = 'negative_signal';
+                    confidence = 'high';
+                  }
+                }
+                
+                native.reaction_intent = {
+                  intent,
+                  confidence,
+                  target_message_type: isConfirmationTarget ? 'appointment_or_callback_confirmation' : 'other'
+                };
+                
+                this.log.info(`[NATIVE_REACTION_DETECTED] targetResolved=true intent=${intent} confidence=${confidence}`, { traceId });
+              } else {
+                native.reaction_target_missing = true;
+                this.log.info(`[NATIVE_REACTION_DETECTED] targetResolved=false`, { traceId });
+              }
+            } catch (err) {
+              this.log.error(`[REACTION_LOOKUP_ERROR]`, err as Error, { traceId });
+            }
+          }
           break;
         case 'button':
           content = incomingMsg.button?.text || incomingMsg.button?.payload || '';
@@ -1685,7 +1760,10 @@ export class QueueWorkerEngine {
       this.log.error(`[LANGUAGE_DETECTION_FAILED] Non-fatal language detection error`, langErr instanceof Error ? langErr : new Error(String(langErr)), { traceId });
     }
 
-    if (content) {
+    // ── WHATSAPP REPLY & AI CONTEXT INJECTION (P1.1) ──
+    const hasQuotedReply = !!(mediaMetadata?.native?.quoted_message_snapshot || mediaMetadata?.native?.reply_to_provider_message_id);
+
+    if (content && !hasQuotedReply) {
       const lowerContent = content.toLowerCase().trim();
       const greetings = ['merhaba', 'merhabalar', 'selam', 'iyi günler', 'iyi akşamlar', 'iyi sabahlar', 'günaydın', 'kolay gelsin', 'iyi çalışmalar'];
       if (greetings.includes(lowerContent) || (lowerContent.length < 20 && greetings.some(g => lowerContent.includes(g)))) {
@@ -1695,14 +1773,63 @@ export class QueueWorkerEngine {
       }
     }
 
+    if (!unifiedContext) unifiedContext = {};
+    unifiedContext.quotedContext = mediaMetadata?.native?.quoted_message_snapshot || null;
+
     // 6. Build System Prompt & History strictly via TenantBrain
     let systemPromptText = PromptBuilder.buildSystemPrompt(brain, targetPhase, false, unifiedContext);
     
+    let finalUserContent = String(content);
+    if (mediaMetadata?.native?.quoted_message_snapshot) {
+      const snapshot = mediaMetadata.native.quoted_message_snapshot;
+      const quotedSender = snapshot.sender_label || (snapshot.direction === 'in' ? 'Hasta' : 'Bot');
+      const quotedType = snapshot.type || 'text';
+      let quotedText = snapshot.text || '';
+      
+      if (!quotedText && snapshot.type && snapshot.type !== 'text') {
+        const typeLabels: Record<string, string> = {
+          image: 'Görsel',
+          document: 'Belge',
+          audio: 'Ses kaydı',
+          video: 'Video',
+          sticker: 'Sticker',
+          location: 'Konum'
+        };
+        quotedText = typeLabels[snapshot.type] || snapshot.type;
+      }
+      
+      if (quotedText.length > 600) {
+        quotedText = quotedText.substring(0, 600) + '... (kısaltıldı)';
+      }
+
+      const quotedContextPrompt = `=== WHATSAPP YANIT / ALINTI BAĞLAMI ===
+Hasta önceki bir mesaja yanıt verdi.
+
+Alıntılanan mesaj:
+Gönderen: ${quotedSender}
+Mesaj tipi: ${quotedType}
+İçerik: "${quotedText}"
+
+Hastanın bu alıntıya yazdığı yeni mesaj:
+"${content}"
+
+ÖNEMLİ:
+Bu mesaj bir WhatsApp yanıtıdır. Hastanın yazdığı yeni metin kısa, belirsiz, nokta, soru işareti veya tek kelime olsa bile, cevabını öncelikle alıntılanan mesaja göre ver.
+
+Alıntılanan mesajı kısa ve sade şekilde açıkla veya alıntılanan mesajın bağlamına uygun cevap ver.
+
+Genel CRM özetine gereksiz sapma.
+Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için gerekiyorsa kısa kullan.`;
+
+      finalUserContent = `${quotedContextPrompt}\n\n${content}`;
+      this.log.info(`[QUOTED_AI_CONTEXT_INJECTED] hasQuotedSnapshot=true messageType=${quotedType} senderLabel=${quotedSender} currentTextLength=${content.length} quotedTextLength=${quotedText.length}`, { traceId });
+    }
+
     // In future phases, history and AI Orchestrator will use brain.namespaces.memory()
     const aiMessages: ChatMessage[] = [
       { role: 'system' as const, content: String(systemPromptText) },
       ...history,
-      { role: 'user' as const, content: String(content) } // Add current message explicitly if not in history
+      { role: 'user' as const, content: finalUserContent } // Add current message explicitly if not in history
     ];
 
     this.log.info(`[PROMPT_BUILT] Prepared LLM payload`, { historyLength: history.length, traceId });
@@ -2173,6 +2300,11 @@ export class QueueWorkerEngine {
       let newTreatmentInterest = false;
       let detectedNewName: string | null = null;
       let deterministicConfirmation = false;
+      const isPositiveReaction = mediaMetadata?.native?.reaction_intent?.intent === 'positive_confirmation';
+      if (isPositiveReaction) {
+        deterministicConfirmation = true;
+        this.log.info(`[CONFIRMATION_LAYER4] Positive reaction confirmation detected`, { traceId, phoneNumber });
+      }
       
       if (content) {
         try {

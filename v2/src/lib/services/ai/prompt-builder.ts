@@ -75,17 +75,27 @@ export class PromptBuilder {
       crmContext += `Aşağıdaki bilgiler müşterinin sisteme kayıtlı güncel verileridir ve senaryo sırasında bu bilgileri AKTİF OLARAK KULLANMALISIN.\n`;
 
       // ── BAĞLAM ÖNCELİK HİYERARŞİSİ (CONTEXT PRIORITY) ──
-      crmContext += `\n--- ⚠️ BAĞLAM ÖNCELİK HİYERARŞİSİ (CONTEXT PRIORITY) ---\n`;
-      crmContext += `Aşağıdaki bilgi kaynaklarını şu kesin öncelik sırasına göre yorumla ve çelişki durumunda üstteki kaynağı esas al:\n`;
-      crmContext += `1. Son Mesaj: Gönderenin en son mesajındaki beyanlar (${isHealthcare ? 'örn. yeni tarih/şikayet beyanı' : 'örn. yeni tarih/talep beyanı'}) en güncel ve en öncelikli bilgidir, form/CRM verilerini ezebilir.\n`;
-      crmContext += `2. Son Operatör Mesajı: Temsilcinin yönlendirmesi veya görüşmenin son durumu.\n`;
-      crmContext += `3. Konuşma Geçmişi (Conversation History): Karşılıklı diyalog akışı.\n`;
-      crmContext += `4. Medya Bağlamı (Media Context): ${isHealthcare ? 'Gönderilen MR/tahlil/belgelerin açıklamaları' : 'Gönderilen fotoğraf/video/dosya/belgelerin açıklamaları'}.\n`;
-      crmContext += `5. Aktif Fırsat Detayı (CRM Opportunity Summary): CRM üzerindeki detaylı özet.\n`;
-      crmContext += `6. Fırsat Gerekçesi (AI Reason): Kısa AI fırsat gerekçesi.\n`;
-      crmContext += `7. Form Lead Outreach Durumu: Koordinatörün ${isHealthcare ? 'hastayla' : 'müşteriyle'} yaptığı son temasın detayları.\n`;
-      crmContext += `8. Temizlenmiş Form Bilgileri: ${isHealthcare ? 'Temizlenmiş Hasta Form Bilgileri (Patient Known Facts)' : 'Temizlenmiş Müşteri Form Bilgileri (Customer Known Facts)'}.\n`;
-      crmContext += `9. Ham Form Verileri (Raw Form Data): Sadece en son fallback yedek.\n\n`;
+      if (unifiedContext.quotedContext) {
+        crmContext += `\n--- ⚠️ BAĞLAM ÖNCELİK HİYERARŞİSİ (CONTEXT PRIORITY - QUOTED REPLY AKTİF) ---\n`;
+        crmContext += `Hasta önceki bir mesaja doğrudan yanıt verdi (quoted reply). Bu durumda bilgi kaynaklarını şu kesin öncelik sırasına göre yorumla ve çelişki durumunda üstteki kaynağı esas al:\n`;
+        crmContext += `1. Alıntılanan Mesaj (Quoted Snapshot): Yanıt verilen önceki mesajın içeriği ve bağlamı en yüksek önceliğe sahiptir.\n`;
+        crmContext += `2. Son Mesaj: Hastanın bu alıntıya yazdığı yeni mesaj (kısa, belirsiz, nokta veya emoji olsa dahi alıntıyla birleştirilmelidir).\n`;
+        crmContext += `3. Kısa Hasta/CRM Özeti (CRM Summary / AI Reason).\n`;
+        crmContext += `4. Eski Task/Randevu/Opportunity Detayları.\n`;
+        crmContext += `⚠️ KRİTİK KURAL: Eski randevu, overdue arama veya CRM özeti gibi bağlamlar alıntılanan mesajın önüne geçemez ve onun açıklanmasını engelleyemez.\n\n`;
+      } else {
+        crmContext += `\n--- ⚠️ BAĞLAM ÖNCELİK HİYERARŞİSİ (CONTEXT PRIORITY) ---\n`;
+        crmContext += `Aşağıdaki bilgi kaynaklarını şu kesin öncelik sırasına göre yorumla ve çelişki durumunda üstteki kaynağı esas al:\n`;
+        crmContext += `1. Son Mesaj: Gönderenin en son mesajındaki beyanlar (${isHealthcare ? 'örn. yeni tarih/şikayet beyanı' : 'örn. yeni tarih/talep beyanı'}) en güncel ve en öncelikli bilgidir, form/CRM verilerini ezebilir.\n`;
+        crmContext += `2. Son Operatör Mesajı: Temsilcinin yönlendirmesi veya görüşmenin son durumu.\n`;
+        crmContext += `3. Konuşma Geçmişi (Conversation History): Karşılıklı diyalog akışı.\n`;
+        crmContext += `4. Medya Bağlamı (Media Context): ${isHealthcare ? 'Gönderilen MR/tahlil/belgelerin açıklamaları' : 'Gönderilen fotoğraf/video/dosya/belgelerin açıklamaları'}.\n`;
+        crmContext += `5. Aktif Fırsat Detayı (CRM Opportunity Summary): CRM üzerindeki detaylı özet.\n`;
+        crmContext += `6. Fırsat Gerekçesi (AI Reason): Kısa AI fırsat gerekçesi.\n`;
+        crmContext += `7. Form Lead Outreach Durumu: Koordinatörün ${isHealthcare ? 'hastayla' : 'müşteriyle'} yaptığı son temasın detayları.\n`;
+        crmContext += `8. Temizlenmiş Form Bilgileri: ${isHealthcare ? 'Temizlenmiş Hasta Form Bilgileri (Patient Known Facts)' : 'Temizlenmiş Müşteri Form Bilgileri (Customer Known Facts)'}.\n`;
+        crmContext += `9. Ham Form Verileri (Raw Form Data): Sadece en son fallback yedek.\n\n`;
+      }
 
       if (unifiedContext.profile) {
         const fullName = [unifiedContext.profile.first_name, unifiedContext.profile.last_name].filter(Boolean).join(' ').trim();

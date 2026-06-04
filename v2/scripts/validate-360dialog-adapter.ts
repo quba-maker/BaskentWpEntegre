@@ -1851,6 +1851,299 @@ async function runValidationTests() {
   }
   console.log("   ✅ 14-G: Single message payload backward compatibility: PASS");
 
+  // ── TEST 15: WhatsApp Quoted Reply & Reaction Intent Awareness (P1.1) ──
+  console.log("\n🧪 [TEST 15] Quoted Reply AI Context & Reaction Intent (P1.1)...");
+  
+  // Set Feature Flag to TRUE
+  featureFlagStates.whatsapp_auto_reply = true;
+  mockConversationsStatus = "bot";
+  mockAutopilotEnabled = true;
+  mockLastInboundTime = Date.now(); // reset 24h window
+  
+  // Mock TenantDB executeSafe for message retrieval
+  const originalExecuteSafe = TenantDB.prototype.executeSafe;
+  let mockQuotedMessage: any = null;
+  
+  TenantDB.prototype.executeSafe = async function (queryObj: any) {
+    const sql = queryObj.text ? queryObj.text.trim() : String(queryObj).trim();
+    const vals = queryObj.values || [];
+    
+    // Intercept quoted lookup
+    if (sql.includes("FROM messages WHERE provider_message_id =")) {
+      if (mockQuotedMessage) {
+        return [mockQuotedMessage];
+      }
+      return [];
+    }
+    
+    return originalExecuteSafe.call(this, queryObj);
+  };
+
+  let lastPromptMessages: any[] = [];
+  const originalGenerate15 = worker["aiOrchestrator"].generateResponse;
+  worker["aiOrchestrator"].generateResponse = async function (messages: any[], config: any, tenantId: string, conversationId?: string) {
+    lastPromptMessages = messages;
+    return { text: "Bu alıntılanan mesajda kardiyoloji ön değerlendirmesinden bahsetmiştik.", latencyMs: 50, modelUsed: "mock-model" } as any;
+  };
+
+  const originalSendWhatsAppMessage15 = MessageService.prototype.sendWhatsAppMessage;
+  MessageService.prototype.sendWhatsAppMessage = async function () {
+    return { success: true, providerMessageId: "mock-outbound-msg-id" };
+  };
+
+  const originalSaveMessage15 = MessageService.prototype.saveMessageIdempotent;
+  MessageService.prototype.saveMessageIdempotent = async function (params: any) {
+    return {
+      success: true,
+      isDuplicate: false,
+      messageId: "mock_saved_msg_id",
+      conversationId: "mock_conv_id"
+    };
+  };
+
+  // 15-A: Quoted message + "burda ne dedin"
+  mockAutopilotEnabled = true;
+  mockConversationsStatus = "bot";
+  mockQuotedMessage = {
+    id: "quoted_msg_001",
+    direction: "out",
+    content: "Merhaba Mustafa Bey, Kardiyoloji ön değerlendirme görüşmeniz için...",
+    media_type: "text",
+    status: "delivered",
+    created_at: new Date().toISOString()
+  };
+
+  let mockQuotedPayload = {
+    entry: [{
+      changes: [{
+        value: {
+          messages: [
+            {
+              id: "inbound_reply_001",
+              from: "905001112233",
+              type: "text",
+              text: { body: "burda ne dedin" },
+              timestamp: String(Math.floor(Date.now() / 1000)),
+              context: { id: "quoted_msg_provider_id" }
+            }
+          ],
+          contacts: [{ profile: { name: "Mustafa" }, wa_id: "905001112233" }]
+        }
+      }]
+    }]
+  };
+  
+  await worker.processEvent(
+    "whatsapp.message.received",
+    "test-tenant-uuid",
+    mockQuotedPayload,
+    { messageId: "test-msg-id-15a", channelId: "test-channel-uuid" }
+  );
+  
+  const systemPrompt = lastPromptMessages.find(m => m.role === 'system')?.content || '';
+  const finalUserMsg = lastPromptMessages[lastPromptMessages.length - 1]?.content || '';
+  
+  if (!systemPrompt.includes("QUOTED REPLY AKTİF")) {
+    throw new Error("TEST 15-A Failed: System prompt did not include QUOTED REPLY priority instructions");
+  }
+  if (!finalUserMsg.includes("=== WHATSAPP YANIT / ALINTI BAĞLAMI ===")) {
+    throw new Error("TEST 15-A Failed: Final user message did not include quoted context block");
+  }
+  if (!finalUserMsg.includes("burda ne dedin")) {
+    throw new Error("TEST 15-A Failed: Final user message content missing user response text");
+  }
+  console.log("   ✅ 15-A: Quoted message + deictic phrase context injection: PASS");
+
+  // 15-B: Quoted message + "."
+  mockAutopilotEnabled = true;
+  mockConversationsStatus = "bot";
+  let mockDotPayload = {
+    entry: [{
+      changes: [{
+        value: {
+          messages: [
+            {
+              id: "inbound_reply_002",
+              from: "905001112233",
+              type: "text",
+              text: { body: "." },
+              timestamp: String(Math.floor(Date.now() / 1000)),
+              context: { id: "quoted_msg_provider_id" }
+            }
+          ],
+          contacts: [{ profile: { name: "Mustafa" }, wa_id: "905001112233" }]
+        }
+      }]
+    }]
+  };
+  
+  lastPromptMessages = [];
+  await worker.processEvent(
+    "whatsapp.message.received",
+    "test-tenant-uuid",
+    mockDotPayload,
+    { messageId: "test-msg-id-15b", channelId: "test-channel-uuid" }
+  );
+  
+  const finalUserMsgDot = lastPromptMessages[lastPromptMessages.length - 1]?.content || '';
+  if (!finalUserMsgDot.includes("=== WHATSAPP YANIT / ALINTI BAĞLAMI ===")) {
+    throw new Error("TEST 15-B Failed: Final user message did not include quoted context block for dot input");
+  }
+  const systemPromptDot = lastPromptMessages.find(m => m.role === 'system')?.content || '';
+  if (systemPromptDot.includes("SELAM VERDİ") || systemPromptDot.includes("greeting_only")) {
+    throw new Error("TEST 15-B Failed: Greeting-only mode incorrectly triggered for quoted dot input");
+  }
+  console.log("   ✅ 15-B: Quoted message + '.' input bypasses greeting-only: PASS");
+
+  // 15-C: Quoted message + "?"
+  mockAutopilotEnabled = true;
+  mockConversationsStatus = "bot";
+  let mockQuestionPayload = {
+    entry: [{
+      changes: [{
+        value: {
+          messages: [
+            {
+              id: "inbound_reply_003",
+              from: "905001112233",
+              type: "text",
+              text: { body: "?" },
+              timestamp: String(Math.floor(Date.now() / 1000)),
+              context: { id: "quoted_msg_provider_id" }
+            }
+          ],
+          contacts: [{ profile: { name: "Mustafa" }, wa_id: "905001112233" }]
+        }
+      }]
+    }]
+  };
+  
+  lastPromptMessages = [];
+  await worker.processEvent(
+    "whatsapp.message.received",
+    "test-tenant-uuid",
+    mockQuestionPayload,
+    { messageId: "test-msg-id-15c", channelId: "test-channel-uuid" }
+  );
+  
+  const finalUserMsgQuestion = lastPromptMessages[lastPromptMessages.length - 1]?.content || '';
+  if (!finalUserMsgQuestion.includes("=== WHATSAPP YANIT / ALINTI BAĞLAMI ===")) {
+    throw new Error("TEST 15-C Failed: Final user message did not include quoted context block for question input");
+  }
+  console.log("   ✅ 15-C: Quoted message + '?' input works: PASS");
+
+  // 15-D: Quoted message missing/not in DB (should fall back and not crash)
+  mockAutopilotEnabled = true;
+  mockConversationsStatus = "bot";
+  mockQuotedMessage = null; // simulate missing message
+  
+  let mockMissingPayload = {
+    entry: [{
+      changes: [{
+        value: {
+          messages: [
+            {
+              id: "inbound_reply_004",
+              from: "905001112233",
+              type: "text",
+              text: { body: "bu ne" },
+              timestamp: String(Math.floor(Date.now() / 1000)),
+              context: { id: "missing_quoted_msg_provider_id" }
+            }
+          ],
+          contacts: [{ profile: { name: "Mustafa" }, wa_id: "905001112233" }]
+        }
+      }]
+    }]
+  };
+  
+  lastPromptMessages = [];
+  await worker.processEvent(
+    "whatsapp.message.received",
+    "test-tenant-uuid",
+    mockMissingPayload,
+    { messageId: "test-msg-id-15d", channelId: "test-channel-uuid" }
+  );
+  
+  const finalUserMsgMissing = lastPromptMessages[lastPromptMessages.length - 1]?.content || '';
+  if (finalUserMsgMissing.includes("=== WHATSAPP YANIT / ALINTI BAĞLAMI ===")) {
+    throw new Error("TEST 15-D Failed: Quoted context was incorrectly injected when snapshot is missing");
+  }
+  console.log("   ✅ 15-D: Quoted message missing does not crash and falls back: PASS");
+
+  // 15-E: Reaction + Positive confirmation detection
+  mockAutopilotEnabled = true;
+  mockConversationsStatus = "bot";
+  let savedMsg: any = null;
+  MessageService.prototype.saveMessageIdempotent = async function (params: any) {
+    savedMsg = params;
+    return {
+      success: true,
+      isDuplicate: false,
+      messageId: "mock_saved_msg_id",
+      conversationId: "mock_conv_id"
+    };
+  };
+
+  mockQuotedMessage = {
+    id: "quoted_msg_002",
+    direction: "out",
+    content: "Bu randevu saati sizin için uygun mu?",
+    media_type: "text",
+    status: "delivered",
+    created_at: new Date().toISOString()
+  };
+
+  let mockReactionPayload = {
+    entry: [{
+      changes: [{
+        value: {
+          messages: [
+            {
+              id: "reaction_msg_001",
+              from: "905001112233",
+              type: "reaction",
+              reaction: {
+                message_id: "quoted_msg_provider_id",
+                emoji: "👍"
+              },
+              timestamp: String(Math.floor(Date.now() / 1000))
+            }
+          ],
+          contacts: [{ profile: { name: "Mustafa" }, wa_id: "905001112233" }]
+        }
+      }]
+    }]
+  };
+
+  await worker.processEvent(
+    "whatsapp.message.received",
+    "test-tenant-uuid",
+    mockReactionPayload,
+    { messageId: "test-msg-id-15e", channelId: "test-channel-uuid" }
+  );
+
+  if (!savedMsg) {
+    throw new Error("TEST 15-E Failed: Reaction was not saved to database");
+  }
+  const nativeReaction = savedMsg.mediaMetadata?.native;
+  if (!nativeReaction) {
+    throw new Error("TEST 15-E Failed: Native reaction metadata was not saved");
+  }
+  if (nativeReaction.reaction_intent?.intent !== "positive_confirmation") {
+    throw new Error(`TEST 15-E Failed: Expected reaction intent to be positive_confirmation, got: ${nativeReaction.reaction_intent?.intent}`);
+  }
+  if (nativeReaction.reaction_intent?.confidence !== "high") {
+    throw new Error(`TEST 15-E Failed: Expected confidence to be high, got: ${nativeReaction.reaction_intent?.confidence}`);
+  }
+  console.log("   ✅ 15-E: WhatsApp Reaction Intent Classification: PASS");
+
+  // Restore original functions
+  TenantDB.prototype.executeSafe = originalExecuteSafe;
+  worker["aiOrchestrator"].generateResponse = originalGenerate15;
+  MessageService.prototype.saveMessageIdempotent = originalSaveMessage15;
+  MessageService.prototype.sendWhatsAppMessage = originalSendWhatsAppMessage15;
+
   console.log("\n🎉 ALL 360DIALOG COEXISTENCE ADAPTER VALIDATION TESTS PASSED!");
   console.log("==========================================================\n");
 
