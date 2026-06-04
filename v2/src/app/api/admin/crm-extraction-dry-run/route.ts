@@ -38,7 +38,6 @@ export async function GET(req: NextRequest) {
           c.country,
           c.last_message_content,
           c.last_message_direction,
-          c.last_message_type,
           c.customer_id,
           opp.id as opp_id,
           opp.department as opp_department,
@@ -161,7 +160,7 @@ export async function GET(req: NextRequest) {
       const aiEligible = shouldRunAiExtractor(
         c.last_message_content || '',
         c.last_message_direction || 'in',
-        c.last_message_type || 'text',
+        'text',
         isDeptLocked && isCountryLocked
       );
 
