@@ -259,11 +259,14 @@ export function useRealtimeReconciliation(tenantId: string) {
     logReconciliation("cache_updated", { eventId, id: payload.conversationId, type: "memory_update" });
 
     // Update conversation list preview with new AI summary fields (both snake_case and camelCase objects for strict UI compatibility)
+    // CRITICAL: DO NOT set `notes` here — notes is the coordinator's manual notes field.
+    // AI summary must only update ai_summary / aiSummary / legacy_ai_summary fields.
+    // Setting notes here would overwrite coordinator's manual notes with AI-generated text (P1.4-HF1).
     updateConversationPreview(payload.conversationId, {
-      notes: payload.aiSummary, // Instantly sync to CRM notes field per user request
       ai_summary: payload.aiSummary,
       ai_buying_intent: payload.aiBuyingIntent,
       ai_sentiment: payload.aiSentiment,
+      legacy_ai_summary: payload.aiSummary,
       aiSummary: payload.aiSummary ? {
         text: payload.aiSummary,
         buying_intent: payload.aiBuyingIntent,
