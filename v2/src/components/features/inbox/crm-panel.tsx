@@ -8,6 +8,8 @@ import { updateCrmData, addTag, removeTag } from "@/app/actions/inbox";
 import { CustomerAiBrainPanel } from "@/components/features/ai-observability/CustomerAiBrain";
 import { AiTimelinePanel } from "@/components/features/ai-observability/AiTimeline";
 import { resolvePatientDisplayName, formatPhoneReadable } from "@/lib/utils/patient-name-resolver";
+import { normalizeCountry } from "@/lib/utils/country-normalizer";
+import { extractFromPatientMessageDeterministic } from "@/lib/utils/patient-message-extractor";
 import { resolvePatientTimeDisplay } from "@/lib/utils/timezone";
 import { useParams } from "next/navigation";
 import { resolveUniversalAISummary, getTenantEntityType } from "@/lib/utils/universal-summary-resolver";
@@ -109,9 +111,16 @@ export function ContextPanel() {
     });
   };
 
+  const getInitialCountry = (contact: typeof activeContact) => {
+    if (!contact) return "";
+    const rawVal = contact.country || contact.opp_country || "";
+    const norm = normalizeCountry(rawVal, contact.id || contact.phone_number);
+    return norm.country || rawVal;
+  };
+
   const [stage, setStage] = useState(activeContact?.stage || "new");
   const [department, setDepartment] = useState(activeContact?.department || "");
-  const [country, setCountry] = useState(activeContact?.country || "");
+  const [country, setCountry] = useState(getInitialCountry(activeContact));
   const [notes, setNotes] = useState(getInitialNotes(activeContact));
   const [patientName, setPatientName] = useState(getInitialPatientName(activeContact));
   const [isEditingName, setIsEditingName] = useState(false);
@@ -137,7 +146,7 @@ export function ContextPanel() {
     if (activeContact) {
       setStage(activeContact.stage || "new");
       setDepartment(activeContact.department || "");
-      setCountry(activeContact.country || "");
+      setCountry(getInitialCountry(activeContact));
       setNotes(getInitialNotes(activeContact));
       setPatientName(getInitialPatientName(activeContact));
       setIsEditingName(false);
@@ -273,10 +282,12 @@ export function ContextPanel() {
 
   // Parse form data
   let formDataEntries: { key: string; value: string }[] = [];
+  let campaignName: string | null = null;
   if (activeContact?.formData?.raw) {
     try {
       const rawObj = typeof activeContact.formData.raw === "string" ? JSON.parse(activeContact.formData.raw) : activeContact.formData.raw;
-      const skipKeys = ["id", "leadgen_id", "form_id", "ad_id", "adset_id", "campaign_id", "platform", "is_organic", "created_time", "phone_number_id", "full_name", "phone_number"];
+      campaignName = rawObj.campaign_name || rawObj.campaignName || rawObj.utm_campaign || rawObj.utmCampaign || null;
+      const skipKeys = ["id", "leadgen_id", "form_id", "ad_id", "adset_id", "campaign_id", "platform", "is_organic", "created_time", "phone_number_id", "full_name", "phone_number", "_all_phones"];
       formDataEntries = Object.entries(rawObj)
         .filter(([k]) => !skipKeys.includes(k.toLowerCase()))
         .map(([k, v]) => ({
@@ -285,6 +296,28 @@ export function ContextPanel() {
         }));
     } catch (e) {
       console.error("Error parsing form data", e);
+    }
+  } else if (activeContact?.form_raw_data) {
+    try {
+      const rawObj = typeof activeContact.form_raw_data === "string" ? JSON.parse(activeContact.form_raw_data) : activeContact.form_raw_data;
+      campaignName = rawObj.campaign_name || rawObj.campaignName || rawObj.utm_campaign || rawObj.utmCampaign || null;
+    } catch (_) {}
+  }
+
+  // Compute recommendations
+  const msgExt = activeContact?.last_message ? extractFromPatientMessageDeterministic(activeContact.last_message) : null;
+  
+  // Suggestion priority: form department first, then patient message candidate
+  let suggestedDept: string | null = null;
+  let suggestedConfidence: 'high' | 'medium' | 'low' = 'low';
+
+  if (!department) {
+    if (activeContact.formDepartment) {
+      suggestedDept = activeContact.formDepartment;
+      suggestedConfidence = (activeContact.formDepartmentSource === 'complaint_keyword') ? 'medium' : 'high';
+    } else if (msgExt?.departmentCandidate) {
+      suggestedDept = msgExt.departmentCandidate;
+      suggestedConfidence = msgExt.departmentConfidence;
     }
   }
 
@@ -412,6 +445,15 @@ export function ContextPanel() {
               <ChevronDown className="w-3 h-3" style={{ color: "var(--q-text-secondary)" }} />
             </div>
           </div>
+
+          {(() => {
+            const countryNormal = normalizeCountry(activeContact?.country || activeContact?.opp_country, activeContact?.id || activeContact?.phone_number);
+            return countryNormal.countryConfirmationNeeded ? (
+              <div className="text-[10px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1 bg-amber-50 text-amber-700 border border-amber-200" title="Ülke doğruluğundan emin olun. Teyit gerekebilir.">
+                Teyit Gerekli
+              </div>
+            ) : null;
+          })()}
 
           {localTime && (
             <div 
@@ -541,6 +583,57 @@ export function ContextPanel() {
                 ))}
               </select>
             </div>
+            {suggestedDept && (
+              <div className="mt-2.5 p-3.5 rounded-xl border flex items-center justify-between transition-all duration-200"
+                   style={{ 
+                     backgroundColor: suggestedConfidence === 'medium' ? "rgba(255, 149, 0, 0.04)" : "rgba(175, 82, 222, 0.04)", 
+                     borderColor: suggestedConfidence === 'medium' ? "rgba(255, 149, 0, 0.15)" : "rgba(175, 82, 222, 0.15)" 
+                   }}>
+                <div className="flex items-center gap-2.5">
+                  <Sparkles className="w-4 h-4 shrink-0 animate-pulse" style={{ color: suggestedConfidence === 'medium' ? "#FF9500" : "#AF52DE" }} />
+                  <div className="flex flex-col text-left">
+                    <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: suggestedConfidence === 'medium' ? "#FF9500" : "#AF52DE" }}>
+                      Önerilen Bölüm
+                    </span>
+                    <span className="text-[13px] font-semibold" style={{ color: "var(--q-text-primary)" }}>
+                      {suggestedDept} {suggestedConfidence === 'medium' ? "— Teyit Edin" : ""}
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setDepartment(suggestedDept!);
+                    // Automatically trigger manual save to DB + set locks
+                    setIsSaving(true);
+                    setSaveStatus("saving");
+                    const res = await updateCrmData(activeContact.id, stage, suggestedDept!, country, notes, patientName);
+                    if (res.success) {
+                      useInboxStore.getState().setActiveContact(activeContact.id, {
+                        ...activeContact,
+                        department: suggestedDept!,
+                        name: patientName,
+                        opp_patient_name: patientName
+                      });
+                      mutate((key) => Array.isArray(key) && key[0] === "conversations");
+                      setSaveStatus("saved");
+                      setTimeout(() => setSaveStatus("idle"), 2000);
+                    } else {
+                      setSaveStatus("error");
+                      setTimeout(() => setSaveStatus("idle"), 3000);
+                    }
+                    setIsSaving(false);
+                  }}
+                  className="px-2.5 py-1.5 text-[11px] font-bold rounded-lg cursor-pointer bg-white border transition-all hover:scale-[1.02]"
+                  style={{ 
+                    color: suggestedConfidence === 'medium' ? "#FF9500" : "#AF52DE",
+                    borderColor: suggestedConfidence === 'medium' ? "rgba(255, 149, 0, 0.2)" : "rgba(175, 82, 222, 0.2)"
+                  }}
+                >
+                  Onayla
+                </button>
+              </div>
+            )}
           </div>
 
           <div>
@@ -670,6 +763,87 @@ export function ContextPanel() {
             )}
           </div>
         </div>
+
+        {/* Form Bilgileri */}
+        {activeContact.formData && (
+          <div className="pt-6" style={{ borderTop: "1px solid var(--q-border-default)" }}>
+            <label className="text-[10px] font-bold uppercase tracking-widest mb-3 block ml-1" style={{ color: "var(--q-text-secondary)" }}>
+              📋 Form Bilgileri
+            </label>
+
+            <div className="p-4 space-y-3.5 rounded-2xl text-left" style={{ background: "rgba(255,255,255,0.6)", border: "1px solid var(--q-border-default)", boxShadow: "var(--q-shadow-sm)" }}>
+              {activeContact.formComplaint && (
+                <div>
+                  <span className="block text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: "var(--q-text-secondary)" }}>
+                    Şikayet
+                  </span>
+                  <span className="text-[13px] font-semibold leading-relaxed" style={{ color: "var(--q-text-primary)" }}>
+                    {activeContact.formComplaint}
+                  </span>
+                </div>
+              )}
+
+              {activeContact.formReportStatus && activeContact.formReportStatus !== 'none' && (
+                <div>
+                  <span className="block text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: "var(--q-text-secondary)" }}>
+                    MR / Röntgen Raporu
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold rounded-lg" 
+                        style={{ 
+                          backgroundColor: activeContact.formReportStatus === 'sent' ? "rgba(52, 199, 89, 0.08)" : "rgba(255, 149, 0, 0.08)",
+                          color: activeContact.formReportStatus === 'sent' ? "#34C759" : "#FF9500"
+                        }}>
+                    {activeContact.formReportStatus === 'sent' ? 'Gönderildi' : activeContact.formReportStatus === 'waiting' ? 'Bekliyor' : activeContact.formReportStatus}
+                  </span>
+                </div>
+              )}
+
+              {activeContact.formAppointmentPref && (
+                <div>
+                  <span className="block text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: "var(--q-text-secondary)" }}>
+                    Randevu Tercihi
+                  </span>
+                  <span className="text-[13px] font-semibold leading-relaxed" style={{ color: "var(--q-text-primary)" }}>
+                    {activeContact.formAppointmentPref}
+                  </span>
+                </div>
+              )}
+
+              {activeContact.formAge && (
+                <div>
+                  <span className="block text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: "var(--q-text-secondary)" }}>
+                    Yaş
+                  </span>
+                  <span className="text-[13px] font-semibold" style={{ color: "var(--q-text-primary)" }}>
+                    {activeContact.formAge}
+                  </span>
+                </div>
+              )}
+
+              {campaignName && (
+                <div>
+                  <span className="block text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: "var(--q-text-secondary)" }}>
+                    Kampanya
+                  </span>
+                  <span className="text-[13px] font-semibold break-all" style={{ color: "var(--q-text-primary)" }}>
+                    {campaignName}
+                  </span>
+                </div>
+              )}
+
+              {activeContact.formData.name && (
+                <div>
+                  <span className="block text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: "var(--q-text-secondary)" }}>
+                    Form Adı
+                  </span>
+                  <span className="text-[13px] font-semibold" style={{ color: "var(--q-text-primary)" }}>
+                    {activeContact.formData.name}
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Form History */}
         {activeContact.formData && (

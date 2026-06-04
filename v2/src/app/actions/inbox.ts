@@ -6,7 +6,9 @@ import { enqueueRetry } from "@/lib/retry";
 import { CredentialsService } from "@/lib/services/credentials.service";
 import { PatientNameSyncService } from "@/lib/services/patient-name-sync";
 import { resolvePatientDisplayName } from "@/lib/utils/patient-name-resolver";
-import { getCountryFromPhone, normalizeCountryName } from "@/lib/utils/country";
+import { getCountryFromPhone } from "@/lib/utils/country";
+import { extractFormFields } from "@/lib/utils/form-field-extractor";
+import { normalizeCountry, getCountryDisplayLabel } from "@/lib/utils/country-normalizer";
 
 // ==========================================
 // QUBA AI — Inbox Actions (Zero-Trust Migrated)
@@ -64,6 +66,7 @@ export async function getConversations(page: number = 1, search: string = "", st
           active_opp.stage as opp_stage,
           active_opp.priority as opp_priority,
           active_opp.patient_relation as opp_patient_relation,
+          active_opp.metadata as opp_metadata,
           -- P1B FIX: No global fallback — prevents Mehmet/Irak leaking into Almanya/Kardiyoloji
           active_opp.summary as ai_summary,
           mem.summary_text as legacy_ai_summary,
@@ -199,85 +202,58 @@ export async function getConversations(page: number = 1, search: string = "", st
           phoneFallback: r.id,
         });
 
-        // Parse country from form raw_data if available
-        const rawDataCountry = r.form_raw_data ? (() => {
-          try {
-            const parsed = typeof r.form_raw_data === 'string' ? JSON.parse(r.form_raw_data) : r.form_raw_data;
-            if (parsed && typeof parsed === 'object') {
-              // Priority list of standard keys first
-              let rawVal = parsed.country || 
-                           parsed['ülke'] || 
-                           parsed['ulke'] || 
-                           parsed['Country'] || 
-                           parsed['Ülke'] || 
-                           parsed['Ulke'] || 
-                           parsed['nerede_yaşıyorsunuz?'] || 
-                           parsed['nerede yaşıyorsunuz?'] || 
-                           parsed['nerede_yaşıyorsunuz'] || 
-                           parsed['nerede yaşıyorsunuz'];
-              
-              if (!rawVal) {
-                const cleanKey = (k: string) => k.toLowerCase()
-                  .replace(/ı/g, 'i')
-                  .replace(/ş/g, 's')
-                  .replace(/ğ/g, 'g')
-                  .replace(/ü/g, 'u')
-                  .replace(/ö/g, 'o')
-                  .replace(/ç/g, 'c')
-                  .replace(/[^a-z0-9]/g, '');
-                
-                for (const key of Object.keys(parsed)) {
-                  const normKey = cleanKey(key);
-                  if (
-                    normKey === 'country' || 
-                    normKey === 'ulke' || 
-                    normKey === 'neredeyasiyorsunuz' || 
-                    normKey === 'ulkeniz'
-                  ) {
-                    rawVal = parsed[key];
-                    break;
-                  }
-                }
-              }
-
-              if (rawVal && typeof rawVal === 'string' && rawVal.trim()) {
-                return normalizeCountryName(rawVal.trim());
-              }
-            }
-          } catch {
-            return null;
-          }
-          return null;
-        })() : null;
+        // Parse fields via new deterministic Form Field Extractor
+        const formExtraction = r.form_raw_data ? extractFormFields(
+          typeof r.form_raw_data === 'string' ? JSON.parse(r.form_raw_data) : r.form_raw_data
+        ) : null;
 
         // Resolve country and source
         let resolvedCountry = null;
         let countrySource: 'confirmed' | 'form' | 'phone_prefix' = 'confirmed';
+        let countryConfirmationNeeded = false;
 
-        if (r.opp_country) {
-          resolvedCountry = normalizeCountryName(r.opp_country);
+        const dbCountry = r.opp_country || r.country;
+        if (dbCountry) {
+          const norm = normalizeCountry(dbCountry, r.id || r.phone_number);
+          resolvedCountry = norm.country;
+          countryConfirmationNeeded = norm.countryConfirmationNeeded;
           countrySource = 'confirmed';
-        } else if (rawDataCountry) {
-          resolvedCountry = rawDataCountry;
+        } else if (formExtraction?.country) {
+          const norm = normalizeCountry(formExtraction.country, r.id || r.phone_number, 'form');
+          resolvedCountry = norm.country;
+          countryConfirmationNeeded = norm.countryConfirmationNeeded;
           countrySource = 'form';
-        } else if (r.country) {
-          resolvedCountry = normalizeCountryName(r.country);
-          countrySource = 'confirmed';
         } else {
           const phoneCountryInfo = getCountryFromPhone(r.id || r.phone_number);
           if (phoneCountryInfo) {
             resolvedCountry = phoneCountryInfo.name;
+            countryConfirmationNeeded = true;
             countrySource = 'phone_prefix';
           }
         }
-        const resolvedDepartment = r.opp_department || r.department;
+
+        // Run UI label generator to format "tc d" or similar messy existing data cleanly
+        const countryDisplay = getCountryDisplayLabel(resolvedCountry, r.id || r.phone_number);
+        resolvedCountry = countryDisplay.display;
+        if (countryDisplay.needsConfirmation) {
+          countryConfirmationNeeded = true;
+        }
+
+        const resolvedDepartment = r.opp_department || r.department || null;
 
         return {
           ...r,
           name: resolvedName,
           country: resolvedCountry,
           country_source: countrySource,
+          country_confirmation_needed: countryConfirmationNeeded,
           department: resolvedDepartment,
+          formDepartment: formExtraction?.department || null,
+          formComplaint: formExtraction?.complaint || null,
+          formReportStatus: formExtraction?.reportStatus || null,
+          formAppointmentPref: formExtraction?.appointmentPref || null,
+          formAge: formExtraction?.age || null,
+          formDepartmentSource: formExtraction?.departmentSource || null,
           score: r.stage === 'appointed' ? 100 : r.stage === 'contacted' ? 60 : 30,
           isBotActive: r.autopilot_enabled,
           formattedTime,
@@ -1076,6 +1052,16 @@ export async function updateCrmData(phone: string, stage: string, department: st
             oppUpdateFields.push(`patient_name = $${oppIdx++}`);
             oppValues.push(patientName);
           }
+
+          // Add manual lock metadata to prevent extractor overrides
+          if (department || (country !== undefined && country)) {
+            const lockObj: Record<string, boolean> = {};
+            if (department) lockObj.department_locked = true;
+            if (country !== undefined && country) lockObj.country_locked = true;
+            oppUpdateFields.push(`metadata = COALESCE(metadata, '{}'::jsonb) || $${oppIdx++}::jsonb`);
+            oppValues.push(JSON.stringify(lockObj));
+          }
+
           if (oppUpdateFields.length > 0) {
             oppUpdateFields.push(`updated_at = NOW()`);
             oppValues.push(activeOppId, ctx.tenantId);
@@ -1088,11 +1074,12 @@ export async function updateCrmData(phone: string, stage: string, department: st
       } catch (_) { /* non-blocking */ }
 
       // 1. Update conversation fields (mirror)
+      const normCountry = country ? (normalizeCountry(country, phone).country || country) : null;
       if (country !== undefined) {
         try {
           await ctx.db.executeSafe({
             text: `UPDATE conversations SET department = $1, country = $2, notes = $3, patient_name = COALESCE(NULLIF($4, ''), patient_name) WHERE phone_number = $5 AND tenant_id = $6`,
-            values: [department, country, notes !== undefined ? notes : null, patientName || '', phone, ctx.tenantId]
+            values: [department, normCountry, notes !== undefined ? notes : null, patientName || '', phone, ctx.tenantId]
           });
         } catch (e) {
           await ctx.db.executeSafe({

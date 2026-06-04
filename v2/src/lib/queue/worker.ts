@@ -2170,7 +2170,6 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
             content: finalResponseText,
             direction: 'out',
             model_used: aiResponse.modelUsed || llmModel,
-            status: messageStatus, 
             created_at: new Date().toISOString(),
             provider_message_id: outProviderMessageId || undefined
           },
@@ -2198,91 +2197,255 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
           try {
             this.log.info(`[WORKER_CRM] Initiating CRM extraction in background`, { traceId });
             const { crmExtractorService } = await import('../services/ai/crm-extractor');
+            const { extractFormFields } = await import('../utils/form-field-extractor');
+            const { normalizeCountry } = await import('../utils/country-normalizer');
+            const { extractFromPatientMessageDeterministic, shouldRunAiExtractor } = await import('../utils/patient-message-extractor');
+
+            // 1. Get current conversation and active opportunity states early to check locks and existing fields
+            let beforeConv: any = null;
+            try {
+              const snap = await db.executeSafe({
+                text: `SELECT id, country, department, lead_stage, customer_id, active_opportunity_id, real_phone, phone_number 
+                       FROM conversations WHERE id = $1 AND tenant_id = $2`,
+                values: [conversationId, tenantId]
+              }) as any[];
+              beforeConv = snap[0] || null;
+            } catch (_) {}
+
+            let beforeOpp: any = null;
+            if (conversationId) {
+              try {
+                const oppSnap = await db.executeSafe({
+                  text: `SELECT id, country, department, stage, priority, metadata FROM opportunities 
+                         WHERE conversation_id = $1 AND tenant_id = $2 
+                         AND stage NOT IN ('lost', 'not_qualified', 'arrived')
+                         ORDER BY created_at DESC LIMIT 1`,
+                  values: [conversationId, tenantId]
+                }) as any[];
+                beforeOpp = oppSnap[0] || null;
+              } catch (_) {}
+            }
+
+            const isDeptLocked = beforeOpp?.metadata?.department_locked === true;
+            const isCountryLocked = beforeOpp?.metadata?.country_locked === true;
+            const existingDept = beforeOpp?.department || beforeConv?.department || null;
+            const existingCountry = beforeOpp?.country || beforeConv?.country || null;
+
+            // 2. Multi-Phone Lead Routing Lookup (A1.5-compliant sequence)
+            let matchedLead: any = null;
+            if (beforeConv) {
+              // Step 1: customer_id match
+              if (beforeConv.customer_id) {
+                const leadsByCust = await db.executeSafe({
+                  text: `SELECT form_name, raw_data, created_at FROM leads 
+                         WHERE customer_id = $1 AND tenant_id = $2 
+                         ORDER BY created_at DESC LIMIT 1`,
+                  values: [beforeConv.customer_id, tenantId]
+                }) as any[];
+                if (leadsByCust.length > 0) matchedLead = leadsByCust[0];
+              }
+
+              // Step 3: Normalized E.164 match
+              const cleanPhone = phoneNumber.replace(/\D/g, '');
+              const rawPhonesToTry = [cleanPhone, beforeConv.real_phone, beforeConv.phone_number]
+                .map(p => p?.replace(/\D/g, ''))
+                .filter(Boolean) as string[];
+
+              if (!matchedLead && rawPhonesToTry.length > 0) {
+                const leadsByPhone = await db.executeSafe({
+                  text: `SELECT form_name, raw_data, created_at FROM leads 
+                         WHERE phone_number = ANY($1) AND tenant_id = $2 
+                         ORDER BY created_at DESC LIMIT 1`,
+                  values: [rawPhonesToTry, tenantId]
+                }) as any[];
+                if (leadsByPhone.length > 0) matchedLead = leadsByPhone[0];
+              }
+
+              // Step 4: _all_phones JSON array match
+              if (!matchedLead && rawPhonesToTry.length > 0) {
+                for (const phoneAttempt of rawPhonesToTry) {
+                  const leadsByAllPhones = await db.executeSafe({
+                    text: `SELECT form_name, raw_data, created_at FROM leads 
+                           WHERE tenant_id = $1 AND raw_data IS NOT NULL AND raw_data != ''
+                             AND (
+                               CASE
+                                 WHEN jsonb_typeof(raw_data::jsonb->'_all_phones') = 'array' 
+                                   THEN (raw_data::jsonb->'_all_phones') @> jsonb_build_array($2::text)
+                                 WHEN jsonb_typeof(raw_data::jsonb->'_all_phones') = 'string' 
+                                   THEN (raw_data::jsonb->>'_all_phones')::jsonb @> jsonb_build_array($2::text)
+                                 ELSE false
+                               END
+                             )
+                           ORDER BY created_at DESC LIMIT 1`,
+                    values: [tenantId, phoneAttempt]
+                  }) as any[];
+                  if (leadsByAllPhones.length > 0) {
+                    matchedLead = leadsByAllPhones[0];
+                    break;
+                  }
+                }
+              }
+
+              // Step 5: Suffix fallback (unique candidate matching last 10 digits)
+              if (!matchedLead) {
+                const last10 = cleanPhone.slice(-10);
+                if (last10.length === 10) {
+                  const leadsBySuffix = await db.executeSafe({
+                    text: `SELECT id, form_name, raw_data, created_at FROM leads 
+                           WHERE phone_number LIKE '%' || $1 AND tenant_id = $2`,
+                    values: [last10, tenantId]
+                  }) as any[];
+                  if (leadsBySuffix.length === 1) {
+                    matchedLead = leadsBySuffix[0];
+                  }
+                }
+              }
+            }
+
+            // 3. Run Deterministic Form Extractor
+            let formExt: any = null;
+            if (matchedLead?.raw_data) {
+              const parsedForm = typeof matchedLead.raw_data === 'string' ? JSON.parse(matchedLead.raw_data) : matchedLead.raw_data;
+              formExt = extractFormFields(parsedForm);
+            }
+
+            // 4. Run Deterministic Patient Message Extractor
+            const msgExt = extractFromPatientMessageDeterministic(content || '');
+
+            // 5. Evaluate AI Fallback eligibility
+            const shouldRunAI = shouldRunAiExtractor(content || '', direction || 'in', msgType || 'text', isDeptLocked && isCountryLocked) && (
+              !existingDept || !existingCountry || !formExt?.complaint
+            );
+
+            let crmData: any = null;
+            let extractionError: any = null;
+
+            if (shouldRunAI) {
+              this.log.info(`[WORKER_CRM] Running AI extraction fallback`, { traceId, phoneNumber });
+              try {
+                crmData = await crmExtractorService.extract(aiMessages, tenantConfig, traceId);
+                if (crmData && crmData._extractionError) {
+                  extractionError = crmData._extractionError;
+                  crmData = null;
+                }
+              } catch (err) {
+                crmData = null;
+                extractionError = err;
+              }
+            } else {
+              this.log.info(`[WORKER_CRM] AI extraction fallback bypassed (deterministic match / locked / non-medical message)`, { traceId, phoneNumber });
+            }
+
+            // 6. DB Write Logic with Enums, Canonical, and Confidence Gates
+            const validEnums = [
+              'Ortopedi', 'Kardiyoloji', 'Gastroenteroloji', 'Estetik', 'Diş', 'Diş Estetiği', 
+              'Göz', 'Tüp Bebek', 'Organ Nakli', 'Onkoloji', 'Obezite', 'Nöroloji', 'Üroloji', 
+              'Dermatoloji', 'Genel Cerrahi', 'Beyin Cerrahi', 'KBB', 'Göğüs Hastalıkları', 
+              'Endokrinoloji', 'Fizik Tedavi', 'Çocuk Sağlığı', 'Kadın Doğum', 'Psikiyatri', 'Check-Up'
+            ];
+
+            let resolvedDept = null;
+            if (!isDeptLocked && !existingDept) {
+              if (formExt?.department && formExt.confidence >= 0.8) {
+                resolvedDept = formExt.department;
+              } else if (msgExt?.departmentCandidate && msgExt.departmentConfidence === 'high') {
+                resolvedDept = msgExt.departmentCandidate;
+              } else if (crmData?.department && validEnums.includes(crmData.department)) {
+                resolvedDept = crmData.department;
+              }
+            }
+
+            let resolvedCountryForConv = existingCountry;
+            if (!isCountryLocked && !existingCountry) {
+              if (formExt?.country) {
+                const norm = normalizeCountry(formExt.country, phoneNumber);
+                if (norm.countryConfidence === 'high' && !norm.countryConfirmationNeeded) {
+                  resolvedCountryForConv = norm.country;
+                }
+              } else if (crmData?.country) {
+                const norm = normalizeCountry(crmData.country, phoneNumber);
+                if (norm.countryConfidence === 'high' && !norm.countryConfirmationNeeded) {
+                  resolvedCountryForConv = norm.country;
+                }
+              } else {
+                const norm = normalizeCountry(null, phoneNumber);
+                if (norm.countryConfidence === 'high' && !norm.countryConfirmationNeeded) {
+                  resolvedCountryForConv = norm.country;
+                }
+              }
+            }
+
+            // Overwrite crmData with validated and filtered properties for updates
+            if (crmData) {
+              crmData.department = resolvedDept || undefined;
+              crmData.country = resolvedCountryForConv || undefined;
+            } else {
+              // Stub crmData if deterministic was resolved, so opportunity updates still trigger
+              crmData = {
+                department: resolvedDept || undefined,
+                country: resolvedCountryForConv || undefined,
+                should_create_opportunity: false
+              };
+            }
       
-      // Deterministik Ülke (Layer 1)
-      let deterministicCountry = undefined;
-      if (phoneNumber.startsWith("90")) deterministicCountry = "Türkiye";
-      else if (phoneNumber.startsWith("49")) deterministicCountry = "Almanya";
-      else if (phoneNumber.startsWith("44")) deterministicCountry = "İngiltere";
-      else if (phoneNumber.startsWith("33")) deterministicCountry = "Fransa";
-      else if (phoneNumber.startsWith("31")) deterministicCountry = "Hollanda";
-      else if (phoneNumber.startsWith("32")) deterministicCountry = "Belçika";
-      else if (phoneNumber.startsWith("998")) deterministicCountry = "Özbekistan";
-      else if (phoneNumber.startsWith("994")) deterministicCountry = "Azerbaycan";
-      else if (phoneNumber.startsWith("7")) deterministicCountry = "Rusya";
-      else if (phoneNumber.startsWith("1")) deterministicCountry = "ABD";
-
-      // AI Inference (Layer 2-4)
-      let crmData = await crmExtractorService.extract(aiMessages, tenantConfig, traceId);
+            // Deterministik Ülke (Layer 1) for events
+            let deterministicCountry = undefined;
+            if (phoneNumber.startsWith("90")) deterministicCountry = "Türkiye";
+            else if (phoneNumber.startsWith("49")) deterministicCountry = "Almanya";
+            else if (phoneNumber.startsWith("44")) deterministicCountry = "İngiltere";
+            else if (phoneNumber.startsWith("33")) deterministicCountry = "Fransa";
+            else if (phoneNumber.startsWith("31")) deterministicCountry = "Hollanda";
+            else if (phoneNumber.startsWith("32")) deterministicCountry = "Belçika";
+            else if (phoneNumber.startsWith("998")) deterministicCountry = "Özbekistan";
+            else if (phoneNumber.startsWith("994")) deterministicCountry = "Azerbaycan";
+            else if (phoneNumber.startsWith("7")) deterministicCountry = "Rusya";
+            else if (phoneNumber.startsWith("1")) deterministicCountry = "ABD";
       
-      // Handle extraction error (extractor returns { _extractionError: {...} } on failure)
-      let extractionError: any = null;
-      if (crmData && (crmData as any)._extractionError) {
-        extractionError = (crmData as any)._extractionError;
-        crmData = null;
-      }
-      
-      // ═══ P0-1: CRM_RAW_EXTRACTED — ai_events (reliable, nullable conversation_id) ═══
-      await AIEventEmitter.emitSync({
-        tenantId, conversationId, customerId,
-        type: 'crm_raw_extracted',
-        category: 'crm',
-        payload: {
-          traceId,
-          phoneNumber,
-          isNull: crmData === null,
-          extractionFailed: !!extractionError,
-          extractionErrorMessage: extractionError?.message || null,
-          extractionErrorName: extractionError?.name || null,
-          extractionIsTimeout: extractionError?.isTimeout || false,
-          country: crmData?.country || null,
-          department: crmData?.department || null,
-          travelDate: crmData?.travel_date || null,
-          requestedCallbackDatetime: crmData?.requested_callback_datetime || null,
-          shouldCreateOpportunity: crmData?.should_create_opportunity ?? null,
-          shouldUpdateExistingOpportunity: crmData?.should_update_existing_opportunity ?? null,
-          intentType: crmData?.intent_type || null,
-          priority: crmData?.opportunity_priority || null,
-          patientName: crmData?.patient_name || null,
-          pipelineStage: crmData?.pipeline_stage || null,
-          reportStatus: crmData?.report_status || null,
-          requiresHumanConfirmation: crmData?.requires_human_confirmation ?? null,
-          rawUserMessage: String(content).substring(0, 200)
-        }
-      });
+            // ═══ P0-1: CRM_RAW_EXTRACTED — ai_events (reliable, nullable conversation_id) ═══
+            await AIEventEmitter.emitSync({
+              tenantId, conversationId, customerId,
+              type: 'crm_raw_extracted',
+              category: 'crm',
+              payload: {
+                traceId,
+                phoneNumber,
+                isNull: crmData === null,
+                extractionFailed: !!extractionError,
+                extractionErrorMessage: extractionError?.message || null,
+                extractionErrorName: extractionError?.name || null,
+                extractionIsTimeout: extractionError?.isTimeout || false,
+                country: crmData?.country || null,
+                department: crmData?.department || null,
+                travelDate: crmData?.travel_date || null,
+                requestedCallbackDatetime: crmData?.requested_callback_datetime || null,
+                shouldCreateOpportunity: crmData?.should_create_opportunity ?? null,
+                shouldUpdateExistingOpportunity: crmData?.should_update_existing_opportunity ?? null,
+                intentType: crmData?.intent_type || null,
+                priority: crmData?.opportunity_priority || null,
+                patientName: crmData?.patient_name || null,
+                pipelineStage: crmData?.pipeline_stage || null,
+                reportStatus: crmData?.report_status || null,
+                requiresHumanConfirmation: crmData?.requires_human_confirmation ?? null,
+                rawUserMessage: String(content).substring(0, 200)
+              }
+            });
 
-      // ═══ P1A-FIX3: Country priority — CRM > existing DB > phone prefix ═══
-      // Medical tourism: patient with +90 phone may live in Germany
-      // When LLM returns null country, we MUST preserve existing validated country
-      // Phone-prefix is LAST RESORT only
-      let beforeConv: any = null;
-      try {
-        const snap = await db.executeSafe({
-          text: `SELECT country, department, lead_stage FROM conversations WHERE phone_number = $1 AND tenant_id = $2`,
-          values: [phoneNumber, tenantId]
-        }) as any[];
-        beforeConv = snap[0] || null;
-      } catch (_) { /* non-blocking */ }
-
-      const existingConvCountry = beforeConv?.country || null;
-      const resolvedCountryForConv = crmData?.country || existingConvCountry || null;
-
-      // ═══ P0-1: CRM_RESOLVED_FOR_CONVERSATION ═══
-      await AIEventEmitter.emitSync({
-        tenantId, conversationId, customerId,
-        type: 'crm_resolved_for_conversation',
-        category: 'crm',
-        payload: {
-          traceId,
-          deterministicCountry: deterministicCountry || null,
-          crmCountry: crmData?.country || null,
-          finalCountryForConversation: resolvedCountryForConv || null,
-          crmDepartment: crmData?.department || null,
-          previousConversationCountry: beforeConv?.country || null,
-          previousConversationDepartment: beforeConv?.department || null,
-          previousLeadStage: beforeConv?.lead_stage || null
-        }
-      });
+            // ═══ P0-1: CRM_RESOLVED_FOR_CONVERSATION ═══
+            await AIEventEmitter.emitSync({
+              tenantId, conversationId, customerId,
+              type: 'crm_resolved_for_conversation',
+              category: 'crm',
+              payload: {
+                traceId,
+                deterministicCountry: deterministicCountry || null,
+                crmCountry: crmData?.country || null,
+                finalCountryForConversation: resolvedCountryForConv || null,
+                crmDepartment: crmData?.department || null,
+                previousConversationCountry: beforeConv?.country || null,
+                previousConversationDepartment: beforeConv?.department || null,
+                previousLeadStage: beforeConv?.lead_stage || null
+              }
+            });
       // ═══ P1A-FIX2: Multi-Layer Cancellation Detection ═══
       // Layer 1: LLM explicit boolean (new field — may not be set by older deployments)
       let explicitCancellation = crmData?.explicit_cancellation || false;
@@ -2574,7 +2737,7 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
 
           // ═══ P1A-FIX3: Opp country priority — CRM > existingOpp > conv ═══
           const existingOppCountry = beforeOpp?.country || null;
-          const resolvedCountryForOpp = crmData.country || existingOppCountry || existingConvCountry || null;
+          const resolvedCountryForOpp = crmData.country || existingOppCountry || existingCountry || null;
 
           // ═══ P1B: Non-Aggressive Boundary Detection ═══
           // Country correction = update existing, NOT new opp
