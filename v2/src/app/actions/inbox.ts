@@ -6,6 +6,7 @@ import { logAudit } from "@/lib/audit";
 import { enqueueRetry } from "@/lib/retry";
 import { CredentialsService } from "@/lib/services/credentials.service";
 import { PatientNameSyncService } from "@/lib/services/patient-name-sync";
+import { resolvePatientDisplayName } from "@/lib/utils/patient-name-resolver";
 
 // ==========================================
 // QUBA AI — Inbox Actions (Zero-Trust Migrated)
@@ -127,31 +128,18 @@ export async function getConversations(page: number = 1, search: string = "", st
           }
         }
 
-        // P1B Priority name resolution: opp.requester_name > opp.patient_name > form full_name > form patient_name > conversation name
-        let resolvedName = r.name;
-        
-        // Highest priority: Active opportunity identity
-        if (r.opp_requester_name && r.opp_requester_name.trim()) {
-          resolvedName = r.opp_requester_name.trim();
-        } else if (r.opp_patient_name && r.opp_patient_name.trim()) {
-          resolvedName = r.opp_patient_name.trim();
-        } else if (r.form_raw_data) {
-          try {
-            const rawData = typeof r.form_raw_data === 'string' ? JSON.parse(r.form_raw_data) : r.form_raw_data;
-            const formFullName = rawData.full_name || rawData['full name'] || rawData['Full Name'] || rawData['full_name'];
-            if (formFullName && formFullName.trim()) {
-              resolvedName = formFullName.trim();
-            } else if (r.form_patient_name && r.form_patient_name.trim()) {
-              resolvedName = r.form_patient_name.trim();
-            }
-          } catch {
-            if (r.form_patient_name && r.form_patient_name.trim()) {
-              resolvedName = r.form_patient_name.trim();
-            }
-          }
-        } else if (r.form_patient_name && r.form_patient_name.trim()) {
-          resolvedName = r.form_patient_name.trim();
-        }
+        let resolvedName = resolvePatientDisplayName({
+          oppRequesterName: r.opp_requester_name,
+          oppPatientName: r.opp_patient_name,
+          formRawDataName: typeof r.form_raw_data === 'string' ? (() => {
+            try { 
+              const parsed = JSON.parse(r.form_raw_data);
+              return parsed.full_name || parsed['full name'] || parsed['Full Name'];
+            } catch { return null; }
+          })() : (r.form_raw_data?.full_name || r.form_raw_data?.['full name'] || r.form_raw_data?.['Full Name']),
+          formPatientName: r.form_patient_name,
+          convPatientName: r.name,
+        });
 
         // P1B: Country/Department from active opp (source of truth)
         const resolvedCountry = r.opp_country || r.country || 

@@ -1,3 +1,34 @@
+
+/**
+ * Validates whether a given string is a plausible patient name.
+ * Programmatically filters out AI hallucinations (Turkish city names, prepositions, hitaps, etc.)
+ */
+export function isValidPatientName(name?: string | null): boolean {
+  if (!name || !name.trim()) return false;
+  const cleaned = name.trim();
+  const lower = cleaned.toLowerCase();
+
+  const blacklist = [
+    "konya", "konyaya", "konya'ya", "istanbul", "ankara", "izmir", "antalya", 
+    "adana", "bursa", "samsun", "trabzon", "merhaba", "selam", "selamlar", 
+    "hayırlı", "isler", "gunler", "aksamlar", "sabahlar", "telefon", "randevu", 
+    "hastane", "doktor", "hemsire", "tedavi", "klinik", "baskent", "evet", "hayır", 
+    "tabiki", "tamam", "ok", "yes", "no", "hello", "hi", "annem", "babam", 
+    "kardesim", "esim", "kendisi", "turkiye", "türkiye", "almanya", "ingiltere", 
+    "fransa", "belçika", "hollanda", "isimsiz"
+  ];
+
+  if (blacklist.includes(lower)) return false;
+  if (cleaned.length < 2 || cleaned.length > 50) return false;
+  if (/[0-9]/.test(cleaned)) return false;
+
+  const words = lower.split(/\s+/);
+  for (const word of words) {
+    if (blacklist.includes(word)) return false;
+  }
+  return true;
+}
+
 export interface PatientNameContext {
   manualPatientName?: string | null;
   oppRequesterName?: string | null;
@@ -13,48 +44,26 @@ export interface PatientNameContext {
  * Resolves a unified patient display name based on a strict priority chain.
  * Null-safe and robust.
  */
+
+/**
+ * Resolves a unified patient display name based on a strict priority chain.
+ * Null-safe and robust.
+ */
 export function resolvePatientDisplayName(ctx?: PatientNameContext | null): string {
   if (!ctx) return 'İsimsiz';
 
-  // 1. Manuel düzeltilmiş hasta adı
-  if (ctx.manualPatientName && ctx.manualPatientName.trim()) {
-    return ctx.manualPatientName.trim();
-  }
+  if (ctx.manualPatientName && isValidPatientName(ctx.manualPatientName)) return ctx.manualPatientName.trim();
+  if (ctx.oppRequesterName && isValidPatientName(ctx.oppRequesterName)) return ctx.oppRequesterName.trim();
+  if (ctx.oppPatientName && isValidPatientName(ctx.oppPatientName)) return ctx.oppPatientName.trim();
+  if (ctx.convPatientName && isValidPatientName(ctx.convPatientName)) return ctx.convPatientName.trim();
+  if (ctx.customerDisplayName && isValidPatientName(ctx.customerDisplayName)) return ctx.customerDisplayName.trim();
+  if (ctx.formRawDataName && isValidPatientName(ctx.formRawDataName)) return ctx.formRawDataName.trim();
+  if (ctx.formPatientName && isValidPatientName(ctx.formPatientName)) return ctx.formPatientName.trim();
+  if (ctx.whatsappProfileName && isValidPatientName(ctx.whatsappProfileName)) return ctx.whatsappProfileName.trim();
 
-  // 2. Aktif opportunity requester_name (who is actively chatting)
-  if (ctx.oppRequesterName && ctx.oppRequesterName.trim()) {
-    return ctx.oppRequesterName.trim();
-  }
-
-  // 3. Aktif opportunity patient_name
-  if (ctx.oppPatientName && ctx.oppPatientName.trim()) {
-    return ctx.oppPatientName.trim();
-  }
-
-  // 3. Conversation/customer display name
-  if (ctx.convPatientName && ctx.convPatientName.trim()) {
-    return ctx.convPatientName.trim();
-  }
-  if (ctx.customerDisplayName && ctx.customerDisplayName.trim()) {
-    return ctx.customerDisplayName.trim();
-  }
-
-  // 4. WhatsApp / kanal profil adı
-  if (ctx.whatsappProfileName && ctx.whatsappProfileName.trim()) {
-    return ctx.whatsappProfileName.trim();
-  }
-
-  // 5. Form adı / raw_data içindeki ad
-  if (ctx.formPatientName && ctx.formPatientName.trim()) {
-    return ctx.formPatientName.trim();
-  }
-  if (ctx.formRawDataName && ctx.formRawDataName.trim()) {
-    return ctx.formRawDataName.trim();
-  }
-
-  // 6. Hiçbiri yoksa İsimsiz
   return 'İsimsiz';
 }
+
 
 /**
  * Clean phone numbers to digits only.
