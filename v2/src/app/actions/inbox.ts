@@ -7,6 +7,7 @@ import { enqueueRetry } from "@/lib/retry";
 import { CredentialsService } from "@/lib/services/credentials.service";
 import { PatientNameSyncService } from "@/lib/services/patient-name-sync";
 import { resolvePatientDisplayName } from "@/lib/utils/patient-name-resolver";
+import { getCountryFromPhone, normalizeCountryName } from "@/lib/utils/country";
 
 // ==========================================
 // QUBA AI — Inbox Actions (Zero-Trust Migrated)
@@ -81,8 +82,22 @@ export async function getConversations(page: number = 1, search: string = "", st
                 '1970-01-01'::timestamptz
               )
           ) as unread,
-          (cp.id IS NOT NULL) as is_pinned
+          (cp.id IS NOT NULL) as is_pinned,
+          NULLIF(TRIM(CONCAT(cprof.first_name, ' ', cprof.last_name)), '') as customer_display_name,
+          wa.wa_profile_name
         FROM conversations c
+        LEFT JOIN customer_profiles cprof
+          ON cprof.id = c.customer_id
+          AND cprof.tenant_id = c.tenant_id
+        LEFT JOIN LATERAL (
+          SELECT media_metadata->'native'->>'whatsapp_profile_name' as wa_profile_name
+          FROM messages
+          WHERE conversation_id = c.id 
+            AND tenant_id = c.tenant_id
+            AND media_metadata->'native'->>'whatsapp_profile_name' IS NOT NULL
+          ORDER BY created_at DESC
+          LIMIT 1
+        ) wa ON true
         LEFT JOIN LATERAL (
           SELECT content, status, direction, model_used
           FROM messages 
@@ -160,18 +175,52 @@ export async function getConversations(page: number = 1, search: string = "", st
           })() : (r.form_raw_data?.full_name || r.form_raw_data?.['full name'] || r.form_raw_data?.['Full Name']),
           formPatientName: r.form_patient_name,
           convPatientName: r.name,
+          customerDisplayName: r.customer_display_name,
+          whatsappProfileName: r.wa_profile_name,
+          phoneFallback: r.id,
         });
 
-        // P1B: Country/Department from active opp (source of truth)
-        const resolvedCountry = r.opp_country || r.country || 
-          (r.form_raw_data && typeof r.form_raw_data === 'string' && r.form_raw_data.includes('country') ? JSON.parse(r.form_raw_data).country : null) || 
-          (r.id.startsWith('90') || r.id.startsWith('+90') ? 'Türkiye' : r.id.startsWith('49') || r.id.startsWith('+49') ? 'Almanya' : null);
+        // Parse country from form raw_data if available
+        const rawDataCountry = r.form_raw_data ? (() => {
+          try {
+            const parsed = typeof r.form_raw_data === 'string' ? JSON.parse(r.form_raw_data) : r.form_raw_data;
+            const rawVal = parsed?.country || parsed?.['ülke'] || parsed?.['ulke'] || parsed?.['Country'] || parsed?.['Ülke'] || parsed?.['Ulke'];
+            if (rawVal && typeof rawVal === 'string' && rawVal.trim()) {
+              return normalizeCountryName(rawVal.trim());
+            }
+          } catch {
+            return null;
+          }
+          return null;
+        })() : null;
+
+        // Resolve country and source
+        let resolvedCountry = null;
+        let countrySource: 'confirmed' | 'form' | 'phone_prefix' = 'confirmed';
+
+        if (r.opp_country) {
+          resolvedCountry = normalizeCountryName(r.opp_country);
+          countrySource = 'confirmed';
+        } else if (rawDataCountry) {
+          resolvedCountry = rawDataCountry;
+          countrySource = 'form';
+        } else if (r.country) {
+          resolvedCountry = normalizeCountryName(r.country);
+          countrySource = 'confirmed';
+        } else {
+          const phoneCountryInfo = getCountryFromPhone(r.id || r.phone_number);
+          if (phoneCountryInfo) {
+            resolvedCountry = phoneCountryInfo.name;
+            countrySource = 'phone_prefix';
+          }
+        }
         const resolvedDepartment = r.opp_department || r.department;
 
         return {
           ...r,
           name: resolvedName,
           country: resolvedCountry,
+          country_source: countrySource,
           department: resolvedDepartment,
           score: r.stage === 'appointed' ? 100 : r.stage === 'contacted' ? 60 : 30,
           isBotActive: r.autopilot_enabled,

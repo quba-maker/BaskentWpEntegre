@@ -91,12 +91,21 @@ export function ContextPanel() {
   };
   const getInitialPatientName = (contact: typeof activeContact) => {
     if (!contact) return "";
+    const rawData = contact.formData?.raw || contact.form_raw_data;
     return resolvePatientDisplayName({
       oppRequesterName: contact.opp_requester_name,
-      oppPatientName: contact.opp_patient_name || contact.patientName || contact.patient_name,
-      convPatientName: contact.name || contact.patientName,
-      whatsappProfileName: contact.name || contact.patientName,
-      formPatientName: contact.form_patient_name || contact.formData?.patient_name
+      oppPatientName: contact.opp_patient_name,
+      convPatientName: contact.patient_name,
+      customerDisplayName: contact.customer_display_name,
+      whatsappProfileName: contact.wa_profile_name,
+      formPatientName: contact.form_patient_name,
+      formRawDataName: rawData ? (typeof rawData === 'string' ? (() => {
+        try { 
+          const parsed = JSON.parse(rawData);
+          return parsed.full_name || parsed['full name'] || parsed['Full Name'];
+        } catch { return null; }
+      })() : (rawData?.full_name || rawData?.['full name'] || rawData?.['Full Name'])) : null,
+      phoneFallback: contact.id || contact.phone_number
     });
   };
 

@@ -471,11 +471,21 @@ export function ContactRail() {
                             // Medical tourism: patient may have +90 phone but live in Germany
                             const cn = c.country ? normalizeCountryName(c.country) : '';
                             const country = (c.country ? { flag: getCountryFlag(cn), name: cn, code: '' } : null) || getCountryFromPhone(c.id);
-                            return country ? (
-                              <span className="ml-1.5 inline-flex items-center gap-0.5 px-1 py-0.5 rounded bg-black/[0.04] text-[10px] font-semibold flex-shrink-0" style={{ color: 'var(--q-text-secondary)' }}>
-                                {country.flag} {country.name}
+                            if (!country) return null;
+                            const isEstimated = !c.country || c.country_source === 'phone_prefix';
+                            return (
+                              <span 
+                                className="ml-1.5 inline-flex items-center gap-0.5 px-1 py-0.5 rounded text-[10px] font-semibold flex-shrink-0" 
+                                style={{ 
+                                  color: 'var(--q-text-secondary)',
+                                  backgroundColor: isEstimated ? 'rgba(0,0,0,0.02)' : 'rgba(0,0,0,0.04)',
+                                  border: isEstimated ? '1px dashed var(--q-border-default)' : 'none'
+                                }}
+                                title={isEstimated ? "Tahmini ülke (telefon numarasından)" : undefined}
+                              >
+                                {country.flag} {country.name}{isEstimated ? '?' : ''}
                               </span>
-                            ) : null;
+                            );
                           })()}
                         </div>
                       </div>

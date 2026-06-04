@@ -1588,11 +1588,21 @@ export function ConversationViewport() {
               {(() => {
                 const normalizedName = activeContact.country ? normalizeCountryName(activeContact.country) : '';
                 const country = (activeContact.country ? { flag: getCountryFlag(normalizedName), name: normalizedName, code: '' } : null) || getCountryFromPhone(activeContact.id);
-                return country ? (
-                  <span className="ml-1.5 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] font-semibold flex-shrink-0" style={{ background: 'rgba(0,0,0,0.04)', color: 'var(--q-text-secondary)' }}>
-                    {country.flag} {country.name}
+                if (!country) return null;
+                const isEstimated = !activeContact.country || activeContact.country_source === 'phone_prefix';
+                return (
+                  <span 
+                    className="ml-1.5 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] font-semibold flex-shrink-0" 
+                    style={{ 
+                      color: 'var(--q-text-secondary)',
+                      backgroundColor: isEstimated ? 'rgba(0,0,0,0.02)' : 'rgba(0,0,0,0.04)',
+                      border: isEstimated ? '1px dashed var(--q-border-default)' : 'none'
+                    }}
+                    title={isEstimated ? "Tahmini ülke (telefon numarasından)" : undefined}
+                  >
+                    {country.flag} {country.name}{isEstimated ? '?' : ''}
                   </span>
-                ) : null;
+                );
               })()}
             </div>
             <div className="flex items-center gap-2 mt-0.5">

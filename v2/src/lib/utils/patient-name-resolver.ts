@@ -6,6 +6,13 @@
 export function isValidPatientName(name?: string | null): boolean {
   if (!name || !name.trim()) return false;
   const cleaned = name.trim();
+  
+  // Reject username patterns containing underscores
+  if (/_/.test(cleaned)) return false;
+  
+  // Reject strings containing digits (username/nickname with numbers, phone numbers)
+  if (/[0-9]/.test(cleaned)) return false;
+
   const lower = cleaned.toLowerCase();
 
   const blacklist = [
@@ -15,12 +22,13 @@ export function isValidPatientName(name?: string | null): boolean {
     "hastane", "doktor", "hemsire", "tedavi", "klinik", "baskent", "evet", "hayır", 
     "tabiki", "tamam", "ok", "yes", "no", "hello", "hi", "annem", "babam", 
     "kardesim", "esim", "kendisi", "turkiye", "türkiye", "almanya", "ingiltere", 
-    "fransa", "belçika", "hollanda", "isimsiz"
+    "fransa", "belçika", "hollanda", "isimsiz",
+    "user", "test", "admin", "deneme", "guest", "unknown", "undefined", "null", "bot", "sistem",
+    "ülke", "sehir", "şehir", "departman", "country", "city", "department"
   ];
 
   if (blacklist.includes(lower)) return false;
   if (cleaned.length < 2 || cleaned.length > 50) return false;
-  if (/[0-9]/.test(cleaned)) return false;
 
   const words = lower.split(/\s+/);
   for (const word of words) {
@@ -38,12 +46,8 @@ export interface PatientNameContext {
   whatsappProfileName?: string | null;
   formPatientName?: string | null;
   formRawDataName?: string | null;
+  phoneFallback?: string | null;
 }
-
-/**
- * Resolves a unified patient display name based on a strict priority chain.
- * Null-safe and robust.
- */
 
 /**
  * Resolves a unified patient display name based on a strict priority chain.
@@ -52,14 +56,27 @@ export interface PatientNameContext {
 export function resolvePatientDisplayName(ctx?: PatientNameContext | null): string {
   if (!ctx) return 'İsimsiz';
 
+  // 1. Manual locked name
   if (ctx.manualPatientName && isValidPatientName(ctx.manualPatientName)) return ctx.manualPatientName.trim();
-  if (ctx.oppRequesterName && isValidPatientName(ctx.oppRequesterName)) return ctx.oppRequesterName.trim();
+
+  // 2. Valid WhatsApp profile name (valid ve nickname değilse formdan önce kullanılabilir)
+  if (ctx.whatsappProfileName && isValidPatientName(ctx.whatsappProfileName)) return ctx.whatsappProfileName.trim();
+
+  // 3. Valid form full name
+  if (ctx.formPatientName && isValidPatientName(ctx.formPatientName)) return ctx.formPatientName.trim();
+  if (ctx.formRawDataName && isValidPatientName(ctx.formRawDataName)) return ctx.formRawDataName.trim();
+
+  // 4. Valid AI extracted name / Opportunity name / Customer profiles
   if (ctx.oppPatientName && isValidPatientName(ctx.oppPatientName)) return ctx.oppPatientName.trim();
+  if (ctx.oppRequesterName && isValidPatientName(ctx.oppRequesterName)) return ctx.oppRequesterName.trim();
   if (ctx.convPatientName && isValidPatientName(ctx.convPatientName)) return ctx.convPatientName.trim();
   if (ctx.customerDisplayName && isValidPatientName(ctx.customerDisplayName)) return ctx.customerDisplayName.trim();
-  if (ctx.formRawDataName && isValidPatientName(ctx.formRawDataName)) return ctx.formRawDataName.trim();
-  if (ctx.formPatientName && isValidPatientName(ctx.formPatientName)) return ctx.formPatientName.trim();
-  if (ctx.whatsappProfileName && isValidPatientName(ctx.whatsappProfileName)) return ctx.whatsappProfileName.trim();
+
+  // 5. Phone fallback
+  if (ctx.phoneFallback) {
+    const formatted = formatPhoneReadable(ctx.phoneFallback);
+    if (formatted) return formatted;
+  }
 
   return 'İsimsiz';
 }

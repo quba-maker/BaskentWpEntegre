@@ -1,88 +1,9 @@
 import { sql } from "@/lib/db";
 import { TenantDB } from "@/lib/core/tenant-db";
 import { logger } from "@/lib/core/logger";
+import { isValidPatientName } from "@/lib/utils/patient-name-resolver";
 
 const log = logger.withContext({ module: "PatientNameSyncService" });
-
-/**
- * Validates whether a given string is a plausible patient name.
- * Programmatically filters out AI hallucinations (Turkish city names, prepositions, hitaps, etc.)
- */
-export function isValidPatientName(name?: string | null): boolean {
-  if (!name || !name.trim()) return false;
-  const cleaned = name.trim();
-  const lower = cleaned.toLowerCase();
-
-  // List of common Turkish city names, prepositions, pronouns, and hitaps
-  const blacklist = [
-    "konya",
-    "konyaya",
-    "konya'ya",
-    "istanbul",
-    "ankara",
-    "izmir",
-    "antalya",
-    "adana",
-    "bursa",
-    "samsun",
-    "trabzon",
-    "merhaba",
-    "selam",
-    "selamlar",
-    "hayırlı",
-    "isler",
-    "gunler",
-    "aksamlar",
-    "sabahlar",
-    "telefon",
-    "randevu",
-    "hastane",
-    "doktor",
-    "hemsire",
-    "tedavi",
-    "klinik",
-    "baskent",
-    "evet",
-    "hayır",
-    "tabiki",
-    "tamam",
-    "ok",
-    "yes",
-    "no",
-    "hello",
-    "hi",
-    "annem",
-    "babam",
-    "kardesim",
-    "esim",
-    "kendisi",
-    "turkiye",
-    "türkiye",
-    "almanya",
-    "ingiltere",
-    "fransa",
-    "belçika",
-    "hollanda",
-    "isimsiz"
-  ];
-
-  // 1. Exact match blacklist check
-  if (blacklist.includes(lower)) return false;
-
-  // 2. Length check (too short or excessively long strings are likely not names)
-  if (cleaned.length < 2 || cleaned.length > 50) return false;
-
-  // 3. Numeric check (names shouldn't contain digits)
-  if (/[0-9]/.test(cleaned)) return false;
-
-  // 4. City names inside strings (e.g. "Konya'dan")
-  const words = lower.split(/\s+/);
-  for (const word of words) {
-    if (blacklist.includes(word)) return false;
-  }
-
-  return true;
-}
 
 export class PatientNameSyncService {
   /**
@@ -133,30 +54,5 @@ export class PatientNameSyncService {
     } catch (err) {
       log.error(`[PATIENT_NAME_SYNC_FAILED] Failed to sync patient name`, err instanceof Error ? err : new Error(String(err)));
     }
-  }
-}
-
-/**
- * Resolves the display name for a patient based on a strict priority rule:
- * Manual > Form > Patient Statement > WA Profile > AI > Phone
- */
-export class PatientDisplayNameResolver {
-  static resolve(params: {
-    manualName?: string | null;
-    formName?: string | null;
-    patientStatementName?: string | null;
-    waProfileName?: string | null;
-    aiName?: string | null;
-    phoneFallback?: string | null;
-  }): string {
-    if (params.manualName && isValidPatientName(params.manualName)) return params.manualName;
-    if (params.formName && isValidPatientName(params.formName)) return params.formName;
-    if (params.patientStatementName && isValidPatientName(params.patientStatementName)) return params.patientStatementName;
-    if (params.waProfileName && isValidPatientName(params.waProfileName)) return params.waProfileName;
-    if (params.aiName && isValidPatientName(params.aiName)) return params.aiName;
-    
-    // Fallback to phone number or default text
-    if (params.phoneFallback) return params.phoneFallback;
-    return "İsimsiz";
   }
 }
