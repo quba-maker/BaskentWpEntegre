@@ -705,6 +705,7 @@ export class QueueWorkerEngine {
     let mediaMetadata: Record<string, any> | null = null;
 
     if (channel === 'whatsapp') {
+      const dbTemp = withTenantDB(tenantId);
       const value = payload.entry?.[0]?.changes?.[0]?.value;
       const messages = value?.messages;
       if (!messages || messages.length === 0) {
@@ -731,8 +732,41 @@ export class QueueWorkerEngine {
       const isHistoryImport = (incomingMsg as any).is_history_import === true;
       const providerTimestamp = incomingMsg.timestamp ? parseInt(incomingMsg.timestamp, 10) : undefined;
 
-      // ── MEDIA TYPE EXTRACTION ──
+      // ── NATIVE METADATA BUILDING (P0) ──
       const msgType = incomingMsg.type || 'text';
+      const native: any = {
+        provider: '360dialog',
+        message_type: msgType,
+      };
+      
+      if (profileName) {
+        native.whatsapp_profile_name = profileName;
+      }
+
+      if ((incomingMsg as any).context?.id) {
+        native.reply_to_provider_message_id = (incomingMsg as any).context.id;
+        try {
+          const qRes = await dbTemp.executeSafe({
+            text: `SELECT id, direction, content, media_type, status, created_at FROM messages WHERE provider_message_id = $1 AND tenant_id = $2 LIMIT 1`,
+            values: [(incomingMsg as any).context.id, tenantId]
+          }) as any[];
+          if (qRes.length > 0) {
+            const qMsg = qRes[0];
+            native.reply_to_message_id = qMsg.id;
+            native.quoted_message_snapshot = {
+              direction: qMsg.direction,
+              text: qMsg.content,
+              type: qMsg.media_type || 'text',
+              sender_label: qMsg.direction === 'in' ? 'Hasta' : 'Bot',
+              created_at: qMsg.created_at
+            };
+          } else {
+            native.quoted_message_missing = true;
+          }
+        } catch (err) {
+          this.log.error(`[QUOTED_LOOKUP_ERROR]`, err as Error, { traceId });
+        }
+      }
 
       switch (msgType) {
         case 'text':
@@ -747,6 +781,7 @@ export class QueueWorkerEngine {
             caption: incomingMsg.image?.caption,
           };
           content = incomingMsg.image?.caption || '';
+          if (content) native.media_caption = content;
           break;
         case 'document':
           mediaType = 'document';
@@ -756,7 +791,9 @@ export class QueueWorkerEngine {
             mime_type: incomingMsg.document?.mime_type,
             filename: incomingMsg.document?.filename,
           };
-          content = '';
+          content = (incomingMsg.document as any)?.caption || '';
+          if (content) native.media_caption = content;
+          if (incomingMsg.document?.filename) native.media_filename = incomingMsg.document.filename;
           break;
         case 'audio':
           mediaType = 'audio';
@@ -776,6 +813,7 @@ export class QueueWorkerEngine {
             caption: incomingMsg.video?.caption,
           };
           content = incomingMsg.video?.caption || '';
+          if (content) native.media_caption = content;
           break;
         case 'location':
           mediaType = 'location';
@@ -794,17 +832,25 @@ export class QueueWorkerEngine {
           break;
         case 'reaction':
           content = incomingMsg.reaction?.emoji || '👍';
+          native.reaction_payload = incomingMsg.reaction;
+          skipBotReply = true; // Reactions don't trigger AI
           break;
         case 'button':
           content = incomingMsg.button?.text || incomingMsg.button?.payload || '';
           break;
         case 'interactive':
           content = incomingMsg.interactive?.button_reply?.title || incomingMsg.interactive?.list_reply?.title || '';
+          native.interactive_payload = incomingMsg.interactive;
           break;
         default:
           content = '';
           break;
       }
+      
+      // Inject native payload into mediaMetadata (which serves as our JSONB metadata column)
+      if (!mediaMetadata) mediaMetadata = {};
+      mediaMetadata.native = native;
+
     } else {
       // Messenger / Instagram
       const incomingMsg = payload.entry?.[0]?.messaging?.[0];
@@ -925,7 +971,7 @@ export class QueueWorkerEngine {
     const isHistory = channel === 'whatsapp' && incomingMsgObj && (incomingMsgObj as any).is_history_import === true;
     const incomingTimestamp = channel === 'whatsapp' && incomingMsgObj ? parseInt((incomingMsgObj as any).timestamp, 10) : undefined;
 
-    const direction = isAppEcho ? 'out' as const : 'in' as const;
+    const direction = isAppEcho ? 'out' : (mediaMetadata?.native?.message_type === 'reaction' ? 'system' : 'in') as any;
     const modelUsed = isAppEcho ? null : undefined;
     const statusVal = isAppEcho ? 'sent' : (isHistory ? 'delivered' : 'delivered');
 

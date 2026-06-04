@@ -235,7 +235,9 @@ export async function POST(req: NextRequest) {
                           location: msg.location ? { latitude: msg.location.latitude, longitude: msg.location.longitude, name: msg.location.name } : undefined,
                           sticker: msg.sticker ? { id: msg.sticker.id, mime_type: msg.sticker.mime_type } : undefined,
                           button: msg.button ? { text: msg.button.text, payload: msg.button.payload } : undefined,
-                          interactive: msg.interactive ? { button_reply: msg.interactive.button_reply, list_reply: msg.interactive.list_reply } : undefined,
+                          interactive: msg.interactive ? msg.interactive : undefined,
+                          context: msg.context ? { id: msg.context.id, from: msg.context.from } : undefined,
+                          reaction: msg.reaction ? { message_id: msg.reaction.message_id, emoji: msg.reaction.emoji } : undefined,
                           is_history_import: isHistoryField || valueObj?.is_history_import,
                           is_smb_echo: isSmbEchoField || valueObj?.is_smb_echo
                         }

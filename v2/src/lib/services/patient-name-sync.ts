@@ -135,3 +135,28 @@ export class PatientNameSyncService {
     }
   }
 }
+
+/**
+ * Resolves the display name for a patient based on a strict priority rule:
+ * Manual > Form > Patient Statement > WA Profile > AI > Phone
+ */
+export class PatientDisplayNameResolver {
+  static resolve(params: {
+    manualName?: string | null;
+    formName?: string | null;
+    patientStatementName?: string | null;
+    waProfileName?: string | null;
+    aiName?: string | null;
+    phoneFallback?: string | null;
+  }): string {
+    if (params.manualName && isValidPatientName(params.manualName)) return params.manualName;
+    if (params.formName && isValidPatientName(params.formName)) return params.formName;
+    if (params.patientStatementName && isValidPatientName(params.patientStatementName)) return params.patientStatementName;
+    if (params.waProfileName && isValidPatientName(params.waProfileName)) return params.waProfileName;
+    if (params.aiName && isValidPatientName(params.aiName)) return params.aiName;
+    
+    // Fallback to phone number or default text
+    if (params.phoneFallback) return params.phoneFallback;
+    return "İsimsiz";
+  }
+}

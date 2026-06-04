@@ -12,8 +12,9 @@ export class IdentityEngine {
     email?: string;
     firstName?: string;
     lastName?: string;
+    source?: 'manual' | 'form' | 'patient_statement' | 'whatsapp_profile' | 'ai_extracted' | 'phone_fallback';
   }): Promise<string> {
-    const { tenantId, phoneNumber, email, firstName, lastName } = params;
+    const { tenantId, phoneNumber, email, firstName, lastName, source = 'whatsapp_profile' } = params;
 
     if (!phoneNumber) {
       throw new Error('[IdentityEngine] Phone number is required for identity resolution.');
@@ -23,20 +24,50 @@ export class IdentityEngine {
 
     try {
       const db = withTenantDB(tenantId);
-      const result = await db.executeSafe({
-        text: `
-          INSERT INTO customer_profiles (tenant_id, primary_phone, primary_email, first_name, last_name)
-          VALUES ($1, $2, $3, $4, $5)
-          ON CONFLICT (tenant_id, primary_phone) DO UPDATE SET
-            primary_email = COALESCE(customer_profiles.primary_email, EXCLUDED.primary_email),
-            first_name = COALESCE(customer_profiles.first_name, EXCLUDED.first_name),
-            last_name = COALESCE(customer_profiles.last_name, EXCLUDED.last_name),
-            updated_at = NOW()
-          RETURNING id;
-        `,
-        values: [tenantId, normalizedPhone, email || null, firstName || null, lastName || null]
+      let cid: string;
+
+      const existing = await db.executeSafe({
+        text: `SELECT id, first_name FROM customer_profiles WHERE tenant_id = $1 AND primary_phone = $2`,
+        values: [tenantId, normalizedPhone]
       }) as any[];
-      const cid = result[0].id;
+
+      if (existing.length > 0) {
+        cid = existing[0].id;
+        const currentName = existing[0].first_name;
+        
+        let shouldUpdate = false;
+        const isPhoneLike = !currentName || /^[0-9+\-\s()]+$/.test(currentName);
+        const isIsimsiz = /isimsiz/i.test(currentName || '');
+
+        if (!currentName || isPhoneLike || isIsimsiz) {
+          shouldUpdate = true;
+        } else if (source === 'manual' || source === 'form') {
+          shouldUpdate = true;
+        }
+
+        if (shouldUpdate && firstName && firstName.trim() !== '' && firstName !== currentName) {
+          await db.executeSafe({
+            text: `
+              UPDATE customer_profiles 
+              SET first_name = $1, 
+                  primary_email = COALESCE(primary_email, $2),
+                  updated_at = NOW() 
+              WHERE id = $3
+            `,
+            values: [firstName, email || null, cid]
+          });
+        }
+      } else {
+        const result = await db.executeSafe({
+          text: `
+            INSERT INTO customer_profiles (tenant_id, primary_phone, primary_email, first_name, last_name)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id;
+          `,
+          values: [tenantId, normalizedPhone, email || null, firstName || null, lastName || null]
+        }) as any[];
+        cid = result[0].id;
+      }
 
       // Retroactive SaaS identity merge for orphaned records
       try {

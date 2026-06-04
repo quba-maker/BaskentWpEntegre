@@ -1228,9 +1228,9 @@ async function runValidationTests() {
       maxTokens: 500
     });
     
-    const lower10A = res10A.text.toLowerCase();
+    const lower10A = res10A.text!.toLowerCase();
     if (lower10A.includes("şikayetiniz nedir") || lower10A.includes("neyiniz var") || lower10A.includes("şikayetinizi")) {
-      throw new Error(`TEST 10-A Failed: Bot asked for complaint again when it was already known! Output: ${res10A.text}`);
+      throw new Error(`TEST 10-A Failed: Bot asked for complaint again when it was already known! Output: ${res10A.text!}`);
     }
     console.log("   ✅ 10-A: Avoided duplicate complaint questions: PASS");
 
@@ -1255,9 +1255,9 @@ async function runValidationTests() {
       temperature: 0.1,
       maxTokens: 500
     });
-    const lower10B = res10B.text.toLowerCase();
+    const lower10B = res10B.text!.toLowerCase();
     if (lower10B.includes("nerede yaşıyorsunuz") || lower10B.includes("hangi ülkeden") || lower10B.includes("nerede ikamet")) {
-      throw new Error(`TEST 10-B Failed: Bot asked for location when it was already known! Output: ${res10B.text}`);
+      throw new Error(`TEST 10-B Failed: Bot asked for location when it was already known! Output: ${res10B.text!}`);
     }
     console.log("   ✅ 10-B: Avoided duplicate country/location questions: PASS");
 
@@ -1282,9 +1282,9 @@ async function runValidationTests() {
       temperature: 0.1,
       maxTokens: 500
     });
-    const lower10C = res10C.text.toLowerCase();
+    const lower10C = res10C.text!.toLowerCase();
     if (lower10C.includes("ne zaman gelmek") || lower10C.includes("hangi tarihte gelmek") || lower10C.includes("ne zaman planlıyorsunuz")) {
-      throw new Error(`TEST 10-C Failed: Bot asked for arrival date when it was already known! Output: ${res10C.text}`);
+      throw new Error(`TEST 10-C Failed: Bot asked for arrival date when it was already known! Output: ${res10C.text!}`);
     }
     console.log("   ✅ 10-C: Avoided duplicate arrival date questions: PASS");
 
@@ -1309,9 +1309,9 @@ async function runValidationTests() {
       temperature: 0.1,
       maxTokens: 500
     });
-    const lower10D = res10D.text.toLowerCase();
+    const lower10D = res10D.text!.toLowerCase();
     if (!lower10D.includes("ağustos") && !lower10D.includes("august")) {
-      throw new Error(`TEST 10-D Failed: Bot did not honor the latest user message about scheduling in August! Output: ${res10D.text}`);
+      throw new Error(`TEST 10-D Failed: Bot did not honor the latest user message about scheduling in August! Output: ${res10D.text!}`);
     }
     console.log("   ✅ 10-D: Honored latest user message (August shift) over older facts: PASS");
 
@@ -1334,9 +1334,9 @@ async function runValidationTests() {
       temperature: 0.1,
       maxTokens: 500
     });
-    const lower10E = res10E.text.toLowerCase();
+    const lower10E = res10E.text!.toLowerCase();
     if (lower10E.includes("başkent üniversitesi'nden yazıyoruz") || lower10E.includes("yazıyorum") || lower10E.includes("ben asistanınız")) {
-      throw new Error(`TEST 10-E Failed: Bot repeated the initial welcome greeting! Output: ${res10E.text}`);
+      throw new Error(`TEST 10-E Failed: Bot repeated the initial welcome greeting! Output: ${res10E.text!}`);
     }
     console.log("   ✅ 10-E: Welcoming greeting skipped after operator takeover: PASS");
 
@@ -1352,9 +1352,9 @@ async function runValidationTests() {
       temperature: 0.1,
       maxTokens: 500
     });
-    const lower10F = res10F.text.toLowerCase();
+    const lower10F = res10F.text!.toLowerCase();
     if (/\b\d{3,}\s*(tl|euro|usd|dolar|lira|€|\$)\b/i.test(lower10F)) {
-      throw new Error(`TEST 10-F Failed: Bot leaked numeric price quote! Output: ${res10F.text}`);
+      throw new Error(`TEST 10-F Failed: Bot leaked numeric price quote! Output: ${res10F.text!}`);
     }
     console.log("   ✅ 10-F: Pricing restriction rules honored (No numeric quotes): PASS");
 
@@ -1370,9 +1370,9 @@ async function runValidationTests() {
       temperature: 0.1,
       maxTokens: 500
     });
-    const lower10G = res10G.text.toLowerCase();
+    const lower10G = res10G.text!.toLowerCase();
     if (lower10G.includes("ameliyat olmalısınız") || (lower10G.includes("uzman") === false && lower10G.includes("hekim") === false && lower10G.includes("doktor") === false && lower10G.includes("ilet") === false)) {
-      throw new Error(`TEST 10-G Failed: Bot made a diagnostic assertion or failed to refer to medical team! Output: ${res10G.text}`);
+      throw new Error(`TEST 10-G Failed: Bot made a diagnostic assertion or failed to refer to medical team! Output: ${res10G.text!}`);
     }
     console.log("   ✅ 10-G: Medical diagnostic restrictions honored (Refer to experts): PASS");
 
@@ -1499,9 +1499,9 @@ async function runValidationTests() {
       temperature: 0.1,
       maxTokens: 500
     });
-    const lower11A = res11A.text.toLowerCase();
+    const lower11A = res11A.text!.toLowerCase();
     if (!lower11A.includes("şehir") && !lower11A.includes("eyalet") && !lower11A.includes("saat fark")) {
-      throw new Error(`TEST 11-A Live Failed: Bot did not ask for USA city/state! Output: ${res11A.text}`);
+      throw new Error(`TEST 11-A Live Failed: Bot did not ask for USA city/state! Output: ${res11A.text!}`);
     }
     console.log("   ✅ A (Live): Bot asked for USA city/state when time was requested 'bana göre': PASS");
 
@@ -1523,9 +1523,9 @@ async function runValidationTests() {
       temperature: 0.1,
       maxTokens: 500
     });
-    const lower11D = res11D.text.toLowerCase();
+    const lower11D = res11D.text!.toLowerCase();
     if (!lower11D.includes("çalışma saatleri") && !lower11D.includes("09:00") && !lower11D.includes("21:00")) {
-      throw new Error(`TEST 11-D Live Failed: Bot did not suggest alternative working hours or warn! Output: ${res11D.text}`);
+      throw new Error(`TEST 11-D Live Failed: Bot did not suggest alternative working hours or warn! Output: ${res11D.text!}`);
     }
     console.log("   ✅ D (Live): Bot suggested alternative hours for out of hours request: PASS");
   }
