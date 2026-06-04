@@ -203,9 +203,46 @@ export async function getConversations(page: number = 1, search: string = "", st
         const rawDataCountry = r.form_raw_data ? (() => {
           try {
             const parsed = typeof r.form_raw_data === 'string' ? JSON.parse(r.form_raw_data) : r.form_raw_data;
-            const rawVal = parsed?.country || parsed?.['ülke'] || parsed?.['ulke'] || parsed?.['Country'] || parsed?.['Ülke'] || parsed?.['Ulke'];
-            if (rawVal && typeof rawVal === 'string' && rawVal.trim()) {
-              return normalizeCountryName(rawVal.trim());
+            if (parsed && typeof parsed === 'object') {
+              // Priority list of standard keys first
+              let rawVal = parsed.country || 
+                           parsed['ülke'] || 
+                           parsed['ulke'] || 
+                           parsed['Country'] || 
+                           parsed['Ülke'] || 
+                           parsed['Ulke'] || 
+                           parsed['nerede_yaşıyorsunuz?'] || 
+                           parsed['nerede yaşıyorsunuz?'] || 
+                           parsed['nerede_yaşıyorsunuz'] || 
+                           parsed['nerede yaşıyorsunuz'];
+              
+              if (!rawVal) {
+                const cleanKey = (k: string) => k.toLowerCase()
+                  .replace(/ı/g, 'i')
+                  .replace(/ş/g, 's')
+                  .replace(/ğ/g, 'g')
+                  .replace(/ü/g, 'u')
+                  .replace(/ö/g, 'o')
+                  .replace(/ç/g, 'c')
+                  .replace(/[^a-z0-9]/g, '');
+                
+                for (const key of Object.keys(parsed)) {
+                  const normKey = cleanKey(key);
+                  if (
+                    normKey === 'country' || 
+                    normKey === 'ulke' || 
+                    normKey === 'neredeyasiyorsunuz' || 
+                    normKey === 'ulkeniz'
+                  ) {
+                    rawVal = parsed[key];
+                    break;
+                  }
+                }
+              }
+
+              if (rawVal && typeof rawVal === 'string' && rawVal.trim()) {
+                return normalizeCountryName(rawVal.trim());
+              }
             }
           } catch {
             return null;
