@@ -1,6 +1,5 @@
 "use server";
 
-// sql import removed — all queries use parameterized {text, values} format for proper RLS enforcement
 import { withActionGuard } from "@/lib/core/action-guard";
 import { logAudit } from "@/lib/audit";
 import { enqueueRetry } from "@/lib/retry";
@@ -112,7 +111,27 @@ export async function getConversations(page: number = 1, search: string = "", st
           SELECT form_name, patient_name, raw_data, created_at 
           FROM leads 
           WHERE leads.tenant_id = $1
-            AND leads.phone_number LIKE '%' || RIGHT(COALESCE(c.real_phone, c.phone_number), 10) || '%'
+            AND (
+              (c.customer_id IS NOT NULL AND leads.customer_id = c.customer_id)
+              OR
+              (
+                leads.phone_number LIKE '%' || RIGHT(COALESCE(c.real_phone, c.phone_number), 10) || '%'
+                OR (
+                  leads.raw_data IS NOT NULL 
+                  AND leads.raw_data != ''
+                  AND leads.raw_data LIKE '%_all_phones%'
+                  AND (
+                    CASE
+                      WHEN jsonb_typeof(leads.raw_data::jsonb->'_all_phones') = 'array' 
+                        THEN (leads.raw_data::jsonb->'_all_phones') @> jsonb_build_array(COALESCE(c.real_phone, c.phone_number))
+                      WHEN jsonb_typeof(leads.raw_data::jsonb->'_all_phones') = 'string' 
+                        THEN (leads.raw_data::jsonb->>'_all_phones')::jsonb @> jsonb_build_array(COALESCE(c.real_phone, c.phone_number))
+                      ELSE false
+                    END
+                  )
+                )
+              )
+            )
           ORDER BY created_at DESC 
           LIMIT 1
         ) l ON true

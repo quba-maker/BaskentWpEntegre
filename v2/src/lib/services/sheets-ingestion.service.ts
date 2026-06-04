@@ -2,6 +2,7 @@ import { withTenantDB } from '@/lib/core/tenant-db';
 import { logger } from '@/lib/core/logger';
 import { CredentialsService } from '@/lib/services/credentials.service';
 import { logAudit } from '@/lib/audit';
+import { normalizePhoneForIdentity } from '@/lib/utils/phone-identity';
 
 const log = logger.withContext({ module: 'SheetsIngestion' });
 
@@ -227,8 +228,16 @@ export async function ingestSheetRow(params: IngestRowParams): Promise<IngestRow
     }
 
     // ── 3. Extract & normalize values ──
-    let phone1 = normalizePhone(lowercaseData[primaryPhoneKey]);
-    let phone2 = secondaryPhoneKey ? normalizePhone(lowercaseData[secondaryPhoneKey]) : '';
+    const country = countryKey ? String(lowercaseData[countryKey]) : null;
+
+    const idObj1 = normalizePhoneForIdentity(lowercaseData[primaryPhoneKey], country || undefined);
+    let phone1 = idObj1.e164 || idObj1.digits;
+
+    let phone2 = '';
+    if (secondaryPhoneKey && lowercaseData[secondaryPhoneKey]) {
+      const idObj2 = normalizePhoneForIdentity(lowercaseData[secondaryPhoneKey], country || undefined);
+      phone2 = idObj2.e164 || idObj2.digits;
+    }
 
     // If phone1 is too short but phone2 is valid, swap
     if (phone1.length < 10 && phone2.length >= 10) {
@@ -246,7 +255,6 @@ export async function ingestSheetRow(params: IngestRowParams): Promise<IngestRow
     const formName = formNameKey && lowercaseData[formNameKey] ? String(lowercaseData[formNameKey]).substring(0, 200) : sheetName;
     const dateStr = dateKey ? lowercaseData[dateKey] : null;
     const noteStr = noteKey && lowercaseData[noteKey] ? String(lowercaseData[noteKey]).substring(0, 5000) : null;
-    const country = countryKey ? String(lowercaseData[countryKey]) : null;
     const createdAt = parseDate(dateStr);
 
     // Build raw_data with full context
@@ -258,6 +266,8 @@ export async function ingestSheetRow(params: IngestRowParams): Promise<IngestRow
     raw_data['_detected_fields'] = {
       primaryPhoneKey, secondaryPhoneKey, nameKey, emailKey, dateKey, formNameKey
     };
+    const allPhones = [phone1, phone2].filter(Boolean);
+    raw_data['_all_phones'] = JSON.stringify(allPhones);
 
     // ── 4. Duplicate check ──
     const existing = await db.executeSafe({
@@ -285,7 +295,12 @@ export async function ingestSheetRow(params: IngestRowParams): Promise<IngestRow
       try {
         const { IdentityEngine } = await import('@/lib/services/ai/engines/identity');
         const customerId = await IdentityEngine.resolveIdentity({
-          tenantId, phoneNumber: phone1, email: email || undefined, firstName: name || undefined
+          tenantId,
+          phoneNumber: phone1,
+          email: email || undefined,
+          firstName: name || undefined,
+          allPhones: allPhones.length > 0 ? allPhones : undefined,
+          source: 'form'
         });
         await IdentityEngine.linkLead(tenantId, leadId, customerId);
       } catch (idErr) {
@@ -799,8 +814,9 @@ export async function ingestSheetBatch(params: IngestBatchParams): Promise<Inges
         for (const pc of phoneCols) {
           const raw = getCell(pc.idx);
           if (!raw) continue;
-          const normalized = normalizePhoneAdvanced(raw, referenceCountryCode);
-          if (normalized.length >= 10) {
+          const idResult = normalizePhoneForIdentity(raw, referenceCountryCode || undefined);
+          const normalized = idResult.e164 || idResult.digits;
+          if (normalized && normalized.length >= 10) {
             rawPhones.push(normalized);
             if (pc.isWhatsapp && !whatsappPhone) whatsappPhone = normalized;
             if (!pc.isWhatsapp && !metaPhone) metaPhone = normalized;
@@ -983,13 +999,55 @@ export async function ingestSheetBatch(params: IngestBatchParams): Promise<Inges
       }
 
       try {
-        await db.executeSafe({
+        const insertedLeads = await db.executeSafe({
           text: `INSERT INTO leads (tenant_id, phone_number, patient_name, email, form_name, raw_data, stage, created_at, notes)
                  VALUES ${valueParts.join(', ')}
-                 ON CONFLICT DO NOTHING`,
+                 ON CONFLICT DO NOTHING
+                 RETURNING id, phone_number, patient_name, email, raw_data`,
           values: insertParams
-        });
-        created += chunk.length;
+        }) as any[];
+
+        created += (insertedLeads || []).length;
+
+        // BATCH INGESTION IDENTITY ENGINE RESOLUTION
+        // Performance-guarded, time budget protected, non-fatal
+        if (insertedLeads && insertedLeads.length > 0) {
+          const { IdentityEngine } = await import('@/lib/services/ai/engines/identity');
+          for (const lead of insertedLeads) {
+            // Guard: Check time budget to prevent Lambda timeout
+            if (Date.now() - startTime > timeBudgetMs) {
+              log.warn('[BATCH_INSERT_IDENTITY_BUDGET] Skipping identity resolution for remaining new leads in this batch due to time budget limits');
+              break;
+            }
+            try {
+              let allPhones: string[] = [];
+              if (lead.raw_data) {
+                try {
+                  const parsedRaw = typeof lead.raw_data === 'string' ? JSON.parse(lead.raw_data) : lead.raw_data;
+                  if (parsedRaw && parsedRaw._all_phones) {
+                    const parsedPhones = typeof parsedRaw._all_phones === 'string' ? JSON.parse(parsedRaw._all_phones) : parsedRaw._all_phones;
+                    if (Array.isArray(parsedPhones)) {
+                      allPhones = parsedPhones.map(String);
+                    }
+                  }
+                } catch (_) {}
+              }
+              const customerId = await IdentityEngine.resolveIdentity({
+                tenantId,
+                phoneNumber: lead.phone_number,
+                email: lead.email || undefined,
+                firstName: lead.patient_name || undefined,
+                allPhones: allPhones.length > 0 ? allPhones : undefined,
+                source: 'form'
+              });
+              if (customerId) {
+                await IdentityEngine.linkLead(tenantId, lead.id, customerId);
+              }
+            } catch (idErr) {
+              log.error('[BATCH_INGESTION_IDENTITY_ERROR] Non-fatal link error for lead ' + lead.id, idErr instanceof Error ? idErr : new Error(String(idErr)));
+            }
+          }
+        }
       } catch (insertErr: any) {
         log.error('[BATCH_INSERT_ERROR]', insertErr instanceof Error ? insertErr : new Error(String(insertErr)));
         errors += chunk.length;

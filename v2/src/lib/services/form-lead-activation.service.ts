@@ -95,18 +95,60 @@ export class FormLeadActivationService {
     let taskId: string | undefined;
     let notificationId: string | undefined;
 
+    // Resolve all potential phone numbers from lead raw_data
+    let allPhones: string[] = [];
+    try {
+      const leadData = await db.executeSafe({
+        text: `SELECT phone_number, raw_data FROM leads WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+        values: [leadId, tenantId]
+      }) as any[];
+      if (leadData.length > 0) {
+        const leadRow = leadData[0];
+        const { parseAllPhones } = await import('@/lib/utils/phone-identity');
+        let parsedRaw: any = {};
+        if (leadRow.raw_data) {
+          parsedRaw = typeof leadRow.raw_data === 'string' ? JSON.parse(leadRow.raw_data) : leadRow.raw_data;
+        }
+        allPhones = parseAllPhones(parsedRaw?._all_phones);
+      }
+    } catch (err) {
+      log.warn('[ACTIVATION_GET_PHONES_ERROR] Non-fatal', { leadId, error: String(err) });
+    }
+    if (!allPhones.includes(phoneNumber)) {
+      allPhones.unshift(phoneNumber);
+    }
+
+    let existingActiveOpportunityId: string | null = null;
+
     // ── STEP 1: Ensure conversation exists ──
     try {
-      // Check existing conversation by phone (last 10 digits)
+      const suffixes = allPhones.map(p => p.slice(-10));
+      // Check existing conversation by phone (last 10 digits) matching any of lead's phones
       const existing = await db.executeSafe({
-        text: `SELECT id FROM conversations 
-               WHERE tenant_id = $1 AND RIGHT(phone_number, 10) = RIGHT($2, 10)
+        text: `SELECT id, active_opportunity_id, phone_number FROM conversations 
+               WHERE tenant_id = $1 AND RIGHT(phone_number, 10) = ANY($2)
+               ORDER BY CASE WHEN phone_number = $3 THEN 0 ELSE 1 END ASC
                LIMIT 1`,
-        values: [tenantId, phoneNumber]
+        values: [tenantId, suffixes, phoneNumber]
       }) as any[];
 
       if (existing.length > 0) {
         conversationId = existing[0].id;
+        const potentialOppId = existing[0].active_opportunity_id;
+        if (potentialOppId) {
+          // Verify if the referenced opportunity is actually active (not in lost, not_qualified, arrived stage)
+          const oppCheck = await db.executeSafe({
+            text: `SELECT id, stage FROM opportunities WHERE id = $1 AND tenant_id = $2`,
+            values: [potentialOppId, tenantId]
+          }) as any[];
+          if (oppCheck.length > 0) {
+            const stage = oppCheck[0].stage;
+            const isTerminal = ['lost', 'not_qualified', 'arrived'].includes(stage);
+            if (!isTerminal) {
+              existingActiveOpportunityId = potentialOppId;
+            }
+          }
+        }
       } else {
         // Create new conversation
         const tags = [formName].filter(Boolean);
@@ -119,42 +161,47 @@ export class FormLeadActivationService {
         conversationId = newConv?.[0]?.id;
       }
 
-      log.info('[ACTIVATION_CONV]', { leadId, conversationId, isNew: existing.length === 0 });
+      log.info('[ACTIVATION_CONV]', { leadId, conversationId, isNew: existing.length === 0, existingActiveOpportunityId });
     } catch (err) {
       log.error('[ACTIVATION_CONV_ERROR]', err instanceof Error ? err : new Error(String(err)));
     }
 
-    // ── STEP 2: Create opportunity ──
-    try {
-      const oppResult = await db.executeSafe({
-        text: `INSERT INTO opportunities (
-                 tenant_id, conversation_id, phone_number,
-                 patient_name, requester_name,
-                 stage, priority, source,
-                 department, automation_status,
-                 intent_type, metadata
-               ) VALUES ($1, $2, $3, $4, $5, 'new_lead', 'warm', 'form', 'Genel', 'manual', 'form_submission', $6)
-               RETURNING id`,
-        values: [
-          tenantId,
-          conversationId || null,
-          phoneNumber,
-          displayName,
-          displayName,
-          JSON.stringify({
-            form_name: formName,
-            lead_id: leadId,
-            source,
-            email: email || null,
-            activated_at: new Date().toISOString(),
-          })
-        ]
-      }) as any[];
+    // ── STEP 2: Create or reuse opportunity ──
+    if (existingActiveOpportunityId) {
+      opportunityId = existingActiveOpportunityId;
+      log.info('[ACTIVATION_OPP_REUSED] Reusing active opportunity to prevent duplicate opportunities', { leadId, opportunityId });
+    } else {
+      try {
+        const oppResult = await db.executeSafe({
+          text: `INSERT INTO opportunities (
+                   tenant_id, conversation_id, phone_number,
+                   patient_name, requester_name,
+                   stage, priority, source,
+                   department, automation_status,
+                   intent_type, metadata
+                 ) VALUES ($1, $2, $3, $4, $5, 'new_lead', 'warm', 'form', 'Genel', 'manual', 'form_submission', $6)
+                 RETURNING id`,
+          values: [
+            tenantId,
+            conversationId || null,
+            phoneNumber,
+            displayName,
+            displayName,
+            JSON.stringify({
+              form_name: formName,
+              lead_id: leadId,
+              source,
+              email: email || null,
+              activated_at: new Date().toISOString(),
+            })
+          ]
+        }) as any[];
 
-      opportunityId = oppResult?.[0]?.id;
-      log.info('[ACTIVATION_OPP]', { leadId, opportunityId });
-    } catch (err) {
-      log.error('[ACTIVATION_OPP_ERROR]', err instanceof Error ? err : new Error(String(err)));
+        opportunityId = oppResult?.[0]?.id;
+        log.info('[ACTIVATION_OPP_CREATED] Created new opportunity', { leadId, opportunityId });
+      } catch (err) {
+        log.error('[ACTIVATION_OPP_ERROR]', err instanceof Error ? err : new Error(String(err)));
+      }
     }
 
     // ── STEP 3: Link conversation → active_opportunity_id ──

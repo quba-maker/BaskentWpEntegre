@@ -288,6 +288,31 @@ export function ContextPanel() {
     }
   }
 
+  // Parse all phones
+  let allPhones: string[] = [];
+  const rawObj = activeContact.formData?.raw || activeContact.form_raw_data;
+  if (rawObj) {
+    try {
+      const parsedRaw = typeof rawObj === "string" ? JSON.parse(rawObj) : rawObj;
+      if (parsedRaw && parsedRaw._all_phones) {
+        const parsedPhones = typeof parsedRaw._all_phones === "string" ? JSON.parse(parsedRaw._all_phones) : parsedRaw._all_phones;
+        if (Array.isArray(parsedPhones)) {
+          allPhones = parsedPhones.map(String).filter(Boolean);
+        }
+      }
+    } catch (e) {
+      console.error("Error parsing all phones from raw_data", e);
+    }
+  }
+
+  const activePhone = activeContact.id;
+  if (allPhones.length === 0) {
+    allPhones = [activePhone];
+  }
+
+  const primaryPhone = allPhones[0] || activePhone;
+  const isSecondaryActive = activePhone !== primaryPhone && allPhones.includes(activePhone);
+
   return (
     <div
       key={activeContact.id}
@@ -406,6 +431,40 @@ export function ContextPanel() {
             </div>
           )}
         </div>
+
+        {/* Multi-phone list */}
+        <div className="w-full text-left mt-4 px-3.5 py-3 rounded-2xl border bg-white/40 space-y-2.5" style={{ borderColor: "var(--q-border-default)" }}>
+          <span className="block text-[10px] font-bold uppercase tracking-widest text-[#86868B] mb-1 px-0.5">Telefon Numaraları</span>
+          {allPhones.map((phone, idx) => {
+            const isPrimary = idx === 0;
+            const isActive = phone === activePhone;
+            return (
+              <div key={phone} className="flex items-center justify-between px-0.5 text-xs">
+                <div className="flex items-center gap-2">
+                  <div className={`w-2 h-2 rounded-full ${isActive ? 'bg-green-500' : 'bg-transparent border border-black/30'}`} />
+                  <span className="font-semibold text-[13px]" style={{ color: "var(--q-text-primary)" }}>
+                    {formatPhoneReadable(phone)}
+                  </span>
+                </div>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                  isPrimary 
+                    ? 'bg-blue-100 text-blue-700' 
+                    : 'bg-gray-100 text-gray-600'
+                }`}>
+                  {isPrimary ? 'Birincil' : 'İkincil'} {isActive && '— Aktif'}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Warning badge if active on secondary phone */}
+        {isSecondaryActive && (
+          <div className="w-full mt-3 px-3.5 py-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold text-left flex items-start gap-2 shadow-sm">
+            <span className="text-amber-500 font-bold shrink-0">⚠️</span>
+            <p className="leading-snug">Bu konuşma formdaki ikincil numara üzerinden yürütülüyor.</p>
+          </div>
+        )}
 
         {/* Quick Action Grid Cards */}
         <div className="grid grid-cols-3 gap-2 mt-4 w-full pt-3 border-t border-black/5">

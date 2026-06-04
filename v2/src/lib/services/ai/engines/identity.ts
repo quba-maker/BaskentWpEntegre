@@ -13,25 +13,113 @@ export class IdentityEngine {
     firstName?: string;
     lastName?: string;
     source?: 'manual' | 'form' | 'patient_statement' | 'whatsapp_profile' | 'ai_extracted' | 'phone_fallback';
+    allPhones?: string[];
   }): Promise<string> {
-    const { tenantId, phoneNumber, email, firstName, lastName, source = 'whatsapp_profile' } = params;
+    const { tenantId, phoneNumber, email, firstName, lastName, source = 'whatsapp_profile', allPhones } = params;
 
     if (!phoneNumber) {
       throw new Error('[IdentityEngine] Phone number is required for identity resolution.');
     }
 
-    const normalizedPhone = normalizePhone(phoneNumber);
+    const { normalizePhoneForIdentity } = await import('@/lib/utils/phone-identity');
+
+    const idObj = normalizePhoneForIdentity(phoneNumber);
+    const normalizedPhone = idObj.e164 || idObj.digits;
+
+    const searchPhones = new Set<string>();
+    searchPhones.add(normalizedPhone);
+    if (allPhones && allPhones.length > 0) {
+      for (const p of allPhones) {
+        const parsedId = normalizePhoneForIdentity(p);
+        const norm = parsedId.e164 || parsedId.digits;
+        if (norm) searchPhones.add(norm);
+      }
+    }
+    const phonesList = Array.from(searchPhones);
 
     try {
       const db = withTenantDB(tenantId);
       let cid: string;
 
       const existing = await db.executeSafe({
-        text: `SELECT id, first_name FROM customer_profiles WHERE tenant_id = $1 AND primary_phone = $2`,
-        values: [tenantId, normalizedPhone]
+        text: `SELECT id, first_name, primary_phone FROM customer_profiles WHERE tenant_id = $1 AND primary_phone = ANY($2)`,
+        values: [tenantId, phonesList]
       }) as any[];
 
-      if (existing.length > 0) {
+      if (existing.length > 1) {
+        console.warn(`[IdentityEngine] COLLISION: Multiple customer profiles found for phones ${phonesList.join(', ')}. Linking requires manual review.`);
+        
+        // Find if one matches the primary phone exactly
+        const exactPrimaryMatch = existing.find(p => p.primary_phone === normalizedPhone);
+        if (exactPrimaryMatch) {
+          cid = exactPrimaryMatch.id;
+        } else {
+          // If no profile matches the primary phone exactly, create a new one to avoid wrong merge
+          const result = await db.executeSafe({
+            text: `
+              INSERT INTO customer_profiles (tenant_id, primary_phone, primary_email, first_name, last_name)
+              VALUES ($1, $2, $3, $4, $5)
+              RETURNING id;
+            `,
+            values: [tenantId, normalizedPhone, email || null, firstName || null, lastName || null]
+          }) as any[];
+          cid = result[0].id;
+        }
+
+        // Flag needs_manual_review on the conversation tag and insert system timeline message
+        try {
+          await db.executeSafe({
+            text: `
+              UPDATE conversations
+              SET tags = CASE 
+                WHEN tags IS NULL OR tags = '' OR tags = '[]' THEN '["needs_manual_review"]'
+                WHEN tags::jsonb @> '["needs_manual_review"]' THEN tags
+                ELSE (tags::jsonb || '["needs_manual_review"]'::jsonb)::text
+              END
+              WHERE tenant_id = $1 AND phone_number = ANY($2)
+            `,
+            values: [tenantId, phonesList]
+          });
+
+          // Insert system message for each conversation
+          for (const phone of phonesList) {
+            const conv = await db.executeSafe({
+              text: `SELECT id FROM conversations WHERE phone_number = $1 AND tenant_id = $2`,
+              values: [phone, tenantId]
+            }) as any[];
+            if (conv.length > 0) {
+              await db.executeSafe({
+                text: `INSERT INTO messages (tenant_id, conversation_id, phone_number, direction, content, channel, status)
+                       VALUES ($1, $2, $3, 'system', $4, 'whatsapp', 'sent')`,
+                values: [
+                  tenantId,
+                  conv[0].id,
+                  phone,
+                  `[Sistem Uyarısı] Çoklu telefon çakışması tespit edildi. Bu konuşma manuel inceleme gerektiriyor.`
+                ]
+              });
+            }
+          }
+
+          // Write audit log
+          await db.executeSafe({
+            text: `INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
+                   VALUES ($1, $2, $3, $4)`,
+            values: [
+              tenantId,
+              'identity_collision_detected',
+              'Multiple customer profiles found matching allPhones array during resolveIdentity',
+              JSON.stringify({
+                phones: phonesList,
+                profiles_found: existing.map(e => ({ id: e.id, name: e.first_name })),
+                assigned_customer_id: cid
+              })
+            ]
+          });
+        } catch (tagErr) {
+          console.warn('[IdentityEngine] Failed to flag needs_manual_review for collision', tagErr);
+        }
+      } else if (existing.length === 1) {
         cid = existing[0].id;
         const currentName = existing[0].first_name;
         
@@ -71,13 +159,30 @@ export class IdentityEngine {
 
       // Retroactive SaaS identity merge for orphaned records
       try {
+        // 1. High-confidence exact matches
         await db.executeSafe({
           text: `
             UPDATE leads
             SET customer_id = $1
             WHERE tenant_id = $2 
               AND customer_id IS NULL
-              AND phone_number LIKE '%' || RIGHT($3, 10) || '%'
+              AND (
+                phone_number = $3
+                OR (
+                  raw_data IS NOT NULL 
+                  AND raw_data != ''
+                  AND raw_data LIKE '%_all_phones%'
+                  AND (
+                    CASE
+                      WHEN jsonb_typeof(raw_data::jsonb->'_all_phones') = 'array' 
+                        THEN (raw_data::jsonb->'_all_phones') @> jsonb_build_array($3)
+                      WHEN jsonb_typeof(raw_data::jsonb->'_all_phones') = 'string' 
+                        THEN (raw_data::jsonb->>'_all_phones')::jsonb @> jsonb_build_array($3)
+                      ELSE false
+                    END
+                  )
+                )
+              )
           `,
           values: [cid, tenantId, normalizedPhone]
         });
@@ -88,10 +193,47 @@ export class IdentityEngine {
             SET customer_id = $1
             WHERE tenant_id = $2
               AND customer_id IS NULL
-              AND phone_number LIKE '%' || RIGHT($3, 10) || '%'
+              AND phone_number = $3
           `,
           values: [cid, tenantId, normalizedPhone]
         });
+
+        // 2. Safe suffix match fallback (checked for uniqueness and country compatibility)
+        const suffix = normalizedPhone.slice(-10);
+
+        const leadCandidates = await db.executeSafe({
+          text: `SELECT id, phone_number FROM leads WHERE tenant_id = $1 AND customer_id IS NULL AND RIGHT(phone_number, 10) = $2`,
+          values: [tenantId, suffix]
+        }) as any[];
+
+        if (leadCandidates.length === 1) {
+          const cand = leadCandidates[0];
+          const idCand = normalizePhoneForIdentity(cand.phone_number);
+          const idOrig = normalizePhoneForIdentity(normalizedPhone);
+          if (idCand.nationalSuffix === idOrig.nationalSuffix && idCand.countryHint === idOrig.countryHint) {
+            await db.executeSafe({
+              text: `UPDATE leads SET customer_id = $1 WHERE id = $2 AND tenant_id = $3`,
+              values: [cid, cand.id, tenantId]
+            });
+          }
+        }
+
+        const convCandidates = await db.executeSafe({
+          text: `SELECT id, phone_number FROM conversations WHERE tenant_id = $1 AND customer_id IS NULL AND RIGHT(phone_number, 10) = $2`,
+          values: [tenantId, suffix]
+        }) as any[];
+
+        if (convCandidates.length === 1) {
+          const cand = convCandidates[0];
+          const idCand = normalizePhoneForIdentity(cand.phone_number);
+          const idOrig = normalizePhoneForIdentity(normalizedPhone);
+          if (idCand.nationalSuffix === idOrig.nationalSuffix && idCand.countryHint === idOrig.countryHint) {
+            await db.executeSafe({
+              text: `UPDATE conversations SET customer_id = $1 WHERE id = $2 AND tenant_id = $3`,
+              values: [cid, cand.id, tenantId]
+            });
+          }
+        }
       } catch (mergeError) {
         console.warn('[IdentityEngine] Non-fatal: Orphaned records merge failed', mergeError);
       }

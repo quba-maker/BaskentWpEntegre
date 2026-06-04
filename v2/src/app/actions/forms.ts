@@ -24,7 +24,7 @@ export async function getForms(page: number = 1, search: string = "", source: st
       let paramIdx = 2;
 
       if (searchFilter) {
-        conditions.push(`(l.patient_name ILIKE $${paramIdx} OR l.phone_number ILIKE $${paramIdx} OR l.email ILIKE $${paramIdx})`);
+        conditions.push(`(l.patient_name ILIKE $${paramIdx} OR l.phone_number ILIKE $${paramIdx} OR l.email ILIKE $${paramIdx} OR (l.raw_data IS NOT NULL AND l.raw_data LIKE $${paramIdx}))`);
         params.push(searchFilter);
         paramIdx++;
       }
