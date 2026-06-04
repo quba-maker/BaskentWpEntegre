@@ -1635,6 +1635,16 @@ export class QueueWorkerEngine {
       this.log.error(`[LANGUAGE_DETECTION_FAILED] Non-fatal language detection error`, langErr instanceof Error ? langErr : new Error(String(langErr)), { traceId });
     }
 
+    if (content) {
+      const lowerContent = content.toLowerCase().trim();
+      const greetings = ['merhaba', 'merhabalar', 'selam', 'iyi günler', 'iyi akşamlar', 'iyi sabahlar', 'günaydın', 'kolay gelsin', 'iyi çalışmalar'];
+      if (greetings.includes(lowerContent) || (lowerContent.length < 20 && greetings.some(g => lowerContent.includes(g)))) {
+        if (!unifiedContext) unifiedContext = {};
+        unifiedContext.isGreetingOnly = true;
+        this.log.info(`[CONTEXT_COMPRESSION] Detected greeting_only mode for content: "${content}"`, { traceId });
+      }
+    }
+
     // 6. Build System Prompt & History strictly via TenantBrain
     let systemPromptText = PromptBuilder.buildSystemPrompt(brain, targetPhase, false, unifiedContext);
     
@@ -1677,27 +1687,102 @@ export class QueueWorkerEngine {
     this.log.info(`[LLM_STARTED] Requesting AI response`, { provider: aiConfig.provider, traceId });
     
     const timeoutMs = 25000; // 25s timeout
-    const aiPromise = this.aiOrchestrator.generateResponse(aiMessages, aiConfig);
-    const timeoutPromise = new Promise<never>((_, reject) => 
-      setTimeout(() => reject(new Error("AI_TIMEOUT")), timeoutMs)
-    );
+    let aiResponse: any;
+    let isRetry = false;
+    let qualityGateFailed = false;
+    let qualityGateReason = '';
 
-    let aiResponse;
+    const executeLLM = async (messages: any[]) => {
+      const aiPromise = this.aiOrchestrator.generateResponse(messages, aiConfig, tenantId, conversationId);
+      const timeoutPromise = new Promise<never>((_, reject) => 
+        setTimeout(() => reject(new Error("AI_TIMEOUT")), timeoutMs)
+      );
+      return Promise.race([aiPromise, timeoutPromise]);
+    };
+
     try {
-      aiResponse = await Promise.race([aiPromise, timeoutPromise]);
-      this.log.info(`[LLM_RESPONSE_OK] AI execution completed`, { latencyMs: aiResponse.latencyMs, traceId });
+      try {
+        aiResponse = await executeLLM(aiMessages);
+        
+        // Final heuristic validation (Layer 2)
+        const completeness = this.responsePolicy.validateCompleteness(aiResponse.text, aiResponse.finishReason);
+        if (!completeness.valid) {
+          throw new Error(`INCOMPLETE_HEURISTIC: ${completeness.reason}`);
+        }
+      } catch (e: any) {
+        if (e.name === 'IncompleteResponseError' || e.message?.startsWith('INCOMPLETE_HEURISTIC')) {
+          this.log.warn(`[QUALITY_GATE_BLOCKED] AI response incomplete, attempting retry`, { reason: e.message, traceId });
+          isRetry = true;
+          
+          const retryContextMessages = [...aiMessages];
+          retryContextMessages.push({
+            role: 'user',
+            content: `DİKKAT: Önceki yanıt tamamlanmamış olabilir. Tek bir kısa, tamamlanmış WhatsApp mesajı üret. Yarım cümle bırakma. Hastanın son mesajı önceliklidir. Eski randevu/arama bağlamını sadece gerekiyorsa yumuşakça an.`
+          });
+
+          aiResponse = await executeLLM(retryContextMessages);
+          
+          const retryCompleteness = this.responsePolicy.validateCompleteness(aiResponse.text, aiResponse.finishReason);
+          if (!retryCompleteness.valid) {
+            throw new Error(`INCOMPLETE_RETRY_FAILED: ${retryCompleteness.reason}`);
+          }
+        } else {
+          throw e; // throw timeout or other critical errors
+        }
+      }
+
+      this.log.info(`[LLM_RESPONSE_OK] AI execution completed`, { latencyMs: aiResponse.latencyMs, isRetry, traceId });
 
       // Phase 6: Emit AI response event
-      AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'ai_response_generated', category: 'pipeline', payload: { latencyMs: aiResponse.latencyMs, model: aiResponse.modelUsed } });
+      AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'ai_response_generated', category: 'pipeline', payload: { latencyMs: aiResponse.latencyMs, model: aiResponse.modelUsed, isRetry } });
     } catch (e: any) {
       if (e.message === "AI_TIMEOUT") {
         this.log.error(`[LLM_TIMEOUT] Execution exceeded 25s limit`, e, { traceId });
         AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'ai_timeout', category: 'pipeline', severity: 'error', payload: { timeoutMs } });
         AIEventEmitter.logHealth(tenantId, 'timeout', { traceId });
+        throw e; // Let QStash retry on timeouts
+      }
+      if (e.message?.startsWith('INCOMPLETE_RETRY_FAILED') || e.name === 'IncompleteResponseError' || e.message?.startsWith('INCOMPLETE_HEURISTIC')) {
+        this.log.error(`[LLM_QUALITY_GATE_FAILED] Retry failed, stopping execution`, e, { traceId });
+        qualityGateFailed = true;
+        qualityGateReason = e.message;
+        // DO NOT THROW. We handle this cleanly so QStash doesn't spam retries.
+      } else {
+        this.log.error(`[LLM_FAILED] Orchestrator exception`, e, { traceId });
         throw e;
       }
-      this.log.error(`[LLM_FAILED] Orchestrator exception`, e, { traceId });
-      throw e;
+    }
+
+    if (qualityGateFailed) {
+      this.log.warn(`[QUALITY_GATE_BLOCKED_FINAL] Cancelling send pipeline.`, { traceId, tenantId });
+      
+      // Update conversation to human and save metadata, don't overwrite opportunity or summary
+      await db.executeSafe({
+        text: `
+          UPDATE conversations 
+          SET status = 'human', 
+              metadata = jsonb_set(
+                           jsonb_set(
+                             jsonb_set(COALESCE(metadata, '{}'::jsonb), '{ai_response_incomplete}', 'true'),
+                             '{quality_gate_handled}', 'true'
+                           ),
+                           '{retry_attempted}', 'true'
+                         )
+          WHERE phone_number = $1 AND tenant_id = $2
+        `,
+        values: [phoneNumber, tenantId]
+      });
+
+      // Insert internal system note (visible_to_patient: false, send_to_whatsapp: false implicit because direction=system)
+      await db.executeSafe({
+        text: `
+          INSERT INTO messages (tenant_id, phone_number, direction, content, channel, provider_message_id)
+          VALUES ($1, $2, 'system', $3, $4, 'system_alert')
+        `,
+        values: [tenantId, phoneNumber, 'AI yanıtı tamamlanmadı, manuel kontrol gerekli. (Quality Gate Blocked)', channel]
+      });
+
+      return; // Exit worker successfully without sending any outbound message
     }
 
     // 7. Response Policy Check (Egress DLP)

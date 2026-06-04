@@ -32,6 +32,15 @@ export interface ChatMessage {
   };
 }
 
+export class IncompleteResponseError extends Error {
+  public finishReason?: string;
+  constructor(message: string, finishReason?: string) {
+    super(message);
+    this.name = 'IncompleteResponseError';
+    this.finishReason = finishReason;
+  }
+}
+
 export interface AIResponse {
   text: string;
   providerUsed: string;
@@ -39,6 +48,7 @@ export interface AIResponse {
   latencyMs: number;
   inputTokens?: number;
   outputTokens?: number;
+  finishReason?: string;
 }
 
 /**
@@ -52,12 +62,14 @@ export class AIOrchestrator {
 
   public async generateResponse(
     initialMessages: ChatMessage[],
-    config: AIProviderConfig
-  ): Promise<AIResponse> {
+    config: AIProviderConfig,
+    tenantId: string = 'unknown',
+    conversationId: string = 'unknown'
+  ): Promise<{ text?: string, providerUsed?: string, modelUsed?: string, inputTokens?: number, outputTokens?: number, latencyMs?: number, providerMessageId?: string, finishReason?: string }> {
     const startTime = Date.now();
     const traceCtx = getTraceContext();
-    const tenantId = traceCtx?.tenantId || 'unknown';
-    const conversationId = traceCtx?.conversationId || 'unknown';
+    const _tenantId = tenantId !== 'unknown' ? tenantId : (traceCtx?.tenantId || 'unknown');
+    const _conversationId = conversationId !== 'unknown' ? conversationId : (traceCtx?.conversationId || 'unknown');
     const phoneNumber = traceCtx?.metadata?.phone || 'unknown';
     
     // Sandbox mode layer (Prevents real execution if true)
@@ -104,13 +116,18 @@ export class AIOrchestrator {
             });
           }
 
+          if (rawResponse.finishReason && rawResponse.finishReason !== 'STOP') {
+            throw new IncompleteResponseError(`Incomplete AI response blocked by Orchestrator. finishReason=${rawResponse.finishReason}`, rawResponse.finishReason);
+          }
+
           return {
             text: rawResponse.text,
             providerUsed: config.provider,
             modelUsed: config.modelId,
             latencyMs,
             inputTokens: totalInputTokens,
-            outputTokens: totalOutputTokens
+            outputTokens: totalOutputTokens,
+            finishReason: rawResponse.finishReason
           };
         }
 
@@ -195,12 +212,13 @@ export class AIOrchestrator {
         text: fallbackText,
         providerUsed: 'fallback',
         modelUsed: 'fallback',
-        latencyMs: Date.now() - startTime
+        latencyMs: Date.now() - startTime,
+        finishReason: 'error'
       };
     }
   }
 
-  private async callGemini(messages: ChatMessage[], config: AIProviderConfig): Promise<{text?: string, functionCall?: {name: string, args: any}, usageMetadata?: any}> {
+  private async callGemini(messages: ChatMessage[], config: AIProviderConfig): Promise<{text?: string, functionCall?: {name: string, args: any}, usageMetadata?: any, finishReason?: string}> {
     const systemMsg = messages.find(m => m.role === 'system');
     
     // Map standard messages to Gemini format
@@ -274,6 +292,9 @@ export class AIOrchestrator {
     const usageMetadata = data.usageMetadata;
 
     if (!part) {
+      if (candidate?.finishReason) {
+         throw new IncompleteResponseError(`Gemini stopped with finishReason=${candidate.finishReason} but no part`, candidate.finishReason);
+      }
       throw new Error("No response parts received from Gemini");
     }
 
@@ -283,11 +304,12 @@ export class AIOrchestrator {
           name: part.functionCall.name,
           args: part.functionCall.args
         },
-        usageMetadata
+        usageMetadata,
+        finishReason: candidate.finishReason
       };
     }
 
-    return { text: part.text || '', usageMetadata };
+    return { text: part.text || '', usageMetadata, finishReason: candidate.finishReason };
   }
 }
 

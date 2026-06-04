@@ -197,7 +197,7 @@ Hastanın bulunduğu ülke için saat dilimi doğrulanmamıştır (şehir/eyalet
         maxTokens: 8000
       });
 
-      const rawText = aiResult.text.trim();
+      const rawText = aiResult.text || "".trim();
       
       // Bulletproof JSON extraction: find outermost curly braces
       const firstBrace = rawText.indexOf('{');

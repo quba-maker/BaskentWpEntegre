@@ -115,11 +115,15 @@ export class PromptBuilder {
       // Opportunity summary and AI reason separation
       if (unifiedContext.opportunity) {
         crmContext += `\n--- AKTİF FIRSAT BİLGİLERİ (CRM OPPORTUNITY) ---\n`;
-        if (unifiedContext.opportunity.summary) {
-          crmContext += `- Fırsat Özeti (CRM Summary): ${unifiedContext.opportunity.summary}\n`;
-        }
-        if (unifiedContext.opportunity.ai_reason) {
-          crmContext += `- Fırsat Gerekçesi (AI Reason): ${unifiedContext.opportunity.ai_reason}\n`;
+        if (unifiedContext.isGreetingOnly) {
+           crmContext += `- Özet: Müşteri/hasta bilgisi sistemde kayıtlı.\n`;
+        } else {
+          if (unifiedContext.opportunity.summary) {
+            crmContext += `- Fırsat Özeti (CRM Summary): ${unifiedContext.opportunity.summary}\n`;
+          }
+          if (unifiedContext.opportunity.ai_reason) {
+            crmContext += `- Fırsat Gerekçesi (AI Reason): ${unifiedContext.opportunity.ai_reason}\n`;
+          }
         }
         crmContext += `>> KURAL: Bu kişiyle geçmiş bir konuşmanız var. Konuşmayı bu özet doğrultusunda, kaldığı yerden sürdür. Kendini ilk defa tanışıyormuş gibi tanıtma.\n`;
       } else if (unifiedContext.memory) {
@@ -277,7 +281,12 @@ MEDYA MESAJI KURALI:
         const isConfirmed = taskMeta.time_confirmed_by_patient === true || taskMeta.confirmation_status === 'confirmed';
         const confirmationState = isConfirmed ? 'patient_confirmed_time' : 'patient_confirmed_time';
 
-        confirmationContext = `\n\n=== ⏰ RANDEVU/ARAMA ONAY VE ZAMAN BAĞLAMI ===
+        if (unifiedContext?.isGreetingOnly) {
+          confirmationContext = `\n\n=== ⏰ RANDEVU/ARAMA BAĞLAMI ===\n` + 
+            `- Sistemde hastaya dair bekleyen bir ${resolvedTaskType} (tarih: ${callback_time_tr || scheduled_for_utc}) var.\n` + 
+            `⚠️ DİKKAT: Hasta sadece selam verdi (greeting_only mode). Eski arama zamanını çok agresif veya uzun uzun detaylandırma. Sadece hastanın selamına karşılık ver ve "Daha önce planladığımız görüşmeyle ilgili yeni bir zaman belirlemek ister misiniz?" şeklinde yumuşakça sorarak son mesajına odaklan. Uzun bağlamla hastayı yorma.\n==================================================\n`;
+        } else {
+          confirmationContext = `\n\n=== ⏰ RANDEVU/ARAMA ONAY VE ZAMAN BAĞLAMI ===
 Aşağıdaki saat/tarih bilgileri hasta ile bot/koordinatör arasında planlanan görüşme için netleşmiş zaman detaylarıdır:
 - task_type: ${resolvedTaskType}
 - confirmation_state: ${confirmationState}
@@ -311,6 +320,7 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/koordinatör arasında planlanan
 5. Telefon görüşmesi (phone_callback) için asla "tedavi seçenekleri hakkında sizinle görüşmek üzere" gibi geniş/iddialı ifadeler kullanma. Güvenli ifade olarak şunu kullan:
    "Ön görüşme ve planlama için koordinatör arkadaşımıza iletiyorum."
 ==================================================\n`;
+        }
       }
     } catch (e) {
       // Non-fatal

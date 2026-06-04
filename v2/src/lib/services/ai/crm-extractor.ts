@@ -266,7 +266,7 @@ Pipeline Aşama Kuralları (sırayla ilerler, geri gitmez):
       );
 
       const aiResponse = await Promise.race([aiPromise, timeoutPromise]);
-      let jsonText = aiResponse.text;
+      let jsonText = aiResponse?.text || '';
 
       this.log.info(`[CRM_EXTRACTION_RAW] Raw LLM output (first 800 chars)`, { traceId, raw: jsonText.substring(0, 800) });
 
