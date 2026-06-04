@@ -113,6 +113,7 @@ export function ContactRail() {
     queryFn: ({ pageParam = 1 }) => getConversations(pageParam, debouncedSearch, stageFilter),
     initialPageParam: 1,
     getNextPageParam: (lastPage, allPages) => {
+      if (!Array.isArray(lastPage) || !Array.isArray(allPages)) return undefined;
       return lastPage.length === 50 ? allPages.length + 1 : undefined;
     },
     // Realtime operates now, fallback polling if disconnected
@@ -122,7 +123,7 @@ export function ContactRail() {
     gcTime: 10 * 60 * 1000,
   });
 
-  const contacts = data ? data.pages.flat() : [];
+  const contacts = data?.pages ? data.pages.flat() : [];
   const isLoadingMore = isFetchingNextPage || isLoading;
   const isReachingEnd = !hasNextPage;
 

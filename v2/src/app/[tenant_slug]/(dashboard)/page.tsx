@@ -41,8 +41,10 @@ export default function DashboardPage() {
     { label: "Bugün Aktif", value: stats.activeToday, icon: <Activity className="w-5 h-5" />, color: "var(--q-red)" },
   ];
 
-  // 7 günlük mesaj grafiği
-  const maxMsg = Math.max(...stats.dailyMessages.map((d: any) => d.count), 1);
+  // 7 günlük mesaj grafiği — defensive guards against undefined arrays
+  const dailyMessages = Array.isArray(stats?.dailyMessages) ? stats.dailyMessages : [];
+  const recentLeads = Array.isArray(stats?.recentLeads) ? stats.recentLeads : [];
+  const maxMsg = Math.max(...dailyMessages.map((d: any) => d.count), 1);
 
   return (
     <div className="h-full overflow-auto">
@@ -82,11 +84,11 @@ export default function DashboardPage() {
         </div>
 
         {/* 7 Gün Mesaj Grafiği */}
-        {stats.dailyMessages.length > 0 && (
+        {dailyMessages.length > 0 && (
           <SectionCard>
             <h2 className="text-[15px] font-semibold mb-4" style={{ color: "var(--q-text-primary)" }}>Son 7 Gün</h2>
             <div className="flex items-end gap-2 h-32">
-              {stats.dailyMessages.map((d: any, i: number) => {
+              {dailyMessages.map((d: any, i: number) => {
                 const height = (d.count / maxMsg) * 100;
                 const dayLabel = new Date(d.day).toLocaleDateString('tr-TR', { weekday: 'short' });
                 return (
@@ -105,13 +107,13 @@ export default function DashboardPage() {
         )}
 
         {/* Son Başvurular */}
-        {stats.recentLeads.length > 0 && (
+        {recentLeads.length > 0 && (
           <SectionCard noPadding>
             <div className="px-5 py-4" style={{ borderBottom: "1px solid var(--q-border-default)" }}>
               <h2 className="text-[15px] font-semibold" style={{ color: "var(--q-text-primary)" }}>Son Başvurular</h2>
             </div>
             <div className="divide-y divide-black/5">
-              {stats.recentLeads.map((lead: any, i: number) => (
+              {recentLeads.map((lead: any, i: number) => (
                 <div key={i} className="px-5 py-3 flex items-center justify-between">
                   <div>
                     <p className="text-[14px] font-medium" style={{ color: "var(--q-text-primary)" }}>{lead.patient_name || 'İsimsiz'}</p>

@@ -2,6 +2,13 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useRealtimeSubscription } from "./use-realtime-subscription";
 import { ProjectionEvent, ChatMessageCreatedEvent, ChatMessageStatusUpdatedEvent, ConversationMemoryUpdatedEvent } from "@/lib/realtime/contracts";
 import { useInboxStore } from "@/store/inbox-store";
+import {
+  normalizeInfiniteData,
+  appendToInfiniteData,
+  updateInfiniteDataItem,
+  replaceInfiniteDataItems,
+  flattenInfiniteData,
+} from "@/lib/utils/infinite-query-cache";
 
 // Production-safe logging (stripped in prod via dead-code elimination)
 const IS_DEV = process.env.NODE_ENV === "development";
@@ -114,16 +121,22 @@ export function useRealtimeReconciliation(tenantId: string) {
     const queryKey = ["messages", payload.conversationId];
     const projection = mapRealtimeMessageToUIProjection(payload);
 
-    queryClient.setQueryData(queryKey, (oldData: any[]) => {
-      if (!oldData) return [projection.messageData]; // Cache miss
+    queryClient.setQueryData(queryKey, (oldData: unknown) => {
+      const allMessages = flattenInfiniteData<any>(oldData);
+
+      if (allMessages.length === 0) {
+        // Cache miss — create new InfiniteData with single message
+        logReconciliation("cache_miss", { eventId, id: payload.id });
+        return appendToInfiniteData(oldData, projection.messageData);
+      }
 
       // 1. Deduplication (Optimistic ID or ProviderMessageID)
-      let existingMsgIndex = oldData.findIndex((m) => m.id === payload.id);
+      let existingMsgIndex = allMessages.findIndex((m: any) => m.id === payload.id);
 
       // Fallback for optimistic UI matching: match 'temp-' / 'temp-media-' ids by mediaUrl or text/sender within 60s window
       if (existingMsgIndex === -1 && payload.sender === 'agent') {
         const payloadTimeMs = new Date(payload.createdAt || Date.now()).getTime();
-        existingMsgIndex = oldData.findIndex((m) => {
+        existingMsgIndex = allMessages.findIndex((m: any) => {
           const isTemp = String(m.id).startsWith("temp-") || String(m.id).startsWith("temp-media-");
           if (!isTemp || m.sender !== payload.sender) return false;
 
@@ -138,7 +151,7 @@ export function useRealtimeReconciliation(tenantId: string) {
       }
 
       if (existingMsgIndex !== -1) {
-        const existing = oldData[existingMsgIndex];
+        const existing = allMessages[existingMsgIndex];
         
         // Protect against status downgrade or stale update
         const currentRank = STATUS_RANK[existing.status as keyof typeof STATUS_RANK] ?? 0;
@@ -146,25 +159,23 @@ export function useRealtimeReconciliation(tenantId: string) {
 
         if (newRank < currentRank && payload.status !== "failed") {
           logReconciliation("stale_event_dropped", { eventId, reason: "Status downgrade attempted", current: existing.status, incoming: payload.status });
-          return oldData; // Ignore
+          return normalizeInfiniteData(oldData); // Return normalized shape without changes
         }
 
         logReconciliation("optimistic_reconciled", { eventId, id: payload.id });
         
         // Deterministic merge: canonical (server) data wins over optimistic
-        // but preserve any fields the optimistic has that canonical doesn't
-        const newData = [...oldData];
-        newData[existingMsgIndex] = { ...existing, ...projection.messageData };
+        allMessages[existingMsgIndex] = { ...existing, ...projection.messageData };
         
-        // Stable sort: guarantee monotonic ordering by timeMs
-        return stableSortMessages(newData);
+        // Stable sort and rebuild InfiniteData (collapses to single page)
+        return replaceInfiniteDataItems(oldData, stableSortMessages(allMessages));
       }
 
       // 2. Append new message (from another client or external source)
       logReconciliation("cache_updated", { eventId, id: payload.id, type: "append" });
       
-      // Insert with stable sort to handle out-of-order delivery
-      return stableSortMessages([...oldData, projection.messageData]);
+      // Insert with stable sort — collapses to single page; pagination re-established on next fetch
+      return replaceInfiniteDataItems(oldData, stableSortMessages([...allMessages, projection.messageData]));
     });
 
     // Read the active phone directly from the store to prevent unread count bumps on focused conversation
@@ -192,17 +203,18 @@ export function useRealtimeReconciliation(tenantId: string) {
     const queryKey = ["messages", payload.conversationId];
     
     // 1. Deduplication check via providerMessageId or id
-    queryClient.setQueryData(queryKey, (oldData: any[]) => {
-      if (!oldData) return oldData;
+    queryClient.setQueryData(queryKey, (oldData: unknown) => {
+      const allMessages = flattenInfiniteData<any>(oldData);
+      if (allMessages.length === 0) return normalizeInfiniteData(oldData);
 
-      const existingMsgIndex = oldData.findIndex((m) => m.id === payload.id);
+      const existingMsgIndex = allMessages.findIndex((m: any) => m.id === payload.id);
 
       if (existingMsgIndex === -1) {
         logReconciliation("cache_miss", { eventId, id: payload.id, type: "status_update" });
-        return oldData;
+        return normalizeInfiniteData(oldData);
       }
 
-      const existing = oldData[existingMsgIndex];
+      const existing = allMessages[existingMsgIndex];
 
       // 2. Status ranking protection (don't downgrade read -> delivered)
       const currentRank = STATUS_RANK[existing.status as keyof typeof STATUS_RANK] ?? 0;
@@ -210,14 +222,17 @@ export function useRealtimeReconciliation(tenantId: string) {
 
       if (newRank < currentRank && payload.status !== "failed") {
         logReconciliation("status_ignored", { eventId, id: payload.id, current: existing.status, new: payload.status });
-        return oldData;
+        return normalizeInfiniteData(oldData);
       }
 
       logReconciliation("cache_updated", { eventId, id: payload.id, type: "status_update", status: payload.status });
 
-      const newData = [...oldData];
-      newData[existingMsgIndex] = { ...existing, status: payload.status, updatedAt: payload.updatedAt };
-      return newData;
+      // Update in-place using the helper to preserve InfiniteData shape
+      return updateInfiniteDataItem(
+        oldData,
+        (m: any) => m.id === payload.id,
+        (m: any) => ({ ...m, status: payload.status, updatedAt: payload.updatedAt })
+      );
     });
 
     // Update conversation list preview (WITHOUT reordering to top, status update doesn't bump the thread)

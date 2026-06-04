@@ -16,6 +16,7 @@ import { useBufferedStream } from "@/hooks/use-buffered-stream";
 import { AblyStreamTransport } from "@/lib/ai/streaming/stream-transport";
 import { StreamBubble } from "@/components/components/../features/realtime/stream-bubble";
 import { getCountryFromPhone, normalizeCountryName, getCountryFlag } from "@/lib/utils/country";
+import { appendToInfiniteData } from "@/lib/utils/infinite-query-cache";
 
 import { useRealtimeTenant } from "@/components/providers/realtime-provider";
 import { useDiagnosticsStore } from "@/lib/realtime/diagnostics-store";
@@ -589,6 +590,7 @@ export function ConversationViewport() {
     queryKey: ["messages", activePhone],
     queryFn: ({ pageParam = 1 }) => getMessages(activePhone!, pageParam as number, 50),
     getNextPageParam: (lastPage: any[], allPages: any[][]) => {
+      if (!Array.isArray(lastPage) || !Array.isArray(allPages)) return undefined;
       if (lastPage.length < 50) return undefined;
       return allPages.length + 1;
     },
@@ -694,9 +696,9 @@ export function ConversationViewport() {
     // Snapshot the previous value
     const previousMessages = queryClient.getQueryData(["messages", activePhone]);
 
-    // Optimistically update to the new value
-    queryClient.setQueryData(["messages", activePhone], (oldData: any[]) => {
-      return [...(oldData || []), optimisticMsg];
+    // Optimistically update to the new value (preserves InfiniteData shape)
+    queryClient.setQueryData(["messages", activePhone], (oldData: unknown) => {
+      return appendToInfiniteData(oldData, optimisticMsg);
     });
 
     // Eğer bot aktifse, manuel mesaj atıldığı için botu otomatik kapat (Optimistic UI Update)
@@ -877,8 +879,8 @@ export function ConversationViewport() {
             : `📎 Belge — ${filename}`;
         }
         
-        queryClient.setQueryData(["messages", activePhone], (oldData: any[]) => {
-          return [...(oldData || []), {
+        queryClient.setQueryData(["messages", activePhone], (oldData: unknown) => {
+          return appendToInfiniteData(oldData, {
             id: optimisticId,
             sender: "agent",
             text: contentText,
@@ -888,7 +890,7 @@ export function ConversationViewport() {
             mediaType: currentFile.mediaType,
             mediaUrl: blobUrl,
             mediaMetadata: { filename, mime_type: mimeType },
-          }];
+          });
         });
 
         scrollToBottom("smooth");

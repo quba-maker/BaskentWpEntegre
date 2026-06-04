@@ -12,7 +12,14 @@ export default function DashboardError({
   reset: () => void;
 }) {
   useEffect(() => {
-    console.error("[WORKSPACE ERROR]", error);
+    console.error("[WORKSPACE ERROR]", {
+      message: error.message,
+      digest: error.digest,
+      stack: error.stack?.slice(0, 500),
+      route: typeof window !== 'undefined' ? window.location.pathname : 'unknown',
+      buildId: process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA?.slice(0, 7) || 'dev',
+      timestamp: new Date().toISOString(),
+    });
   }, [error]);
 
   return (
