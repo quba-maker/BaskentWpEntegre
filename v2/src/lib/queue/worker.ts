@@ -624,7 +624,8 @@ export class QueueWorkerEngine {
             content: responseText,
             direction: 'out',
             status: 'sent',
-            created_at: new Date().toISOString()
+            created_at: new Date().toISOString(),
+            provider_message_id: outProviderMessageId || undefined
           }, { traceId, spanId: 'media_batch' });
         } catch (rtErr) {
           this.log.error(`[MEDIA_BATCH_REALTIME]`, rtErr instanceof Error ? rtErr : new Error(String(rtErr)), { traceId });
@@ -1178,7 +1179,8 @@ export class QueueWorkerEngine {
               content,
               direction: 'out',
               status: 'sent',
-              created_at: new Date().toISOString()
+              created_at: new Date().toISOString(),
+              provider_message_id: providerMessageId || undefined
             },
             { traceId, spanId: 'app_echo' }
           );
@@ -1234,12 +1236,13 @@ export class QueueWorkerEngine {
             conversation_id: conversationId,
             phone_number: phoneNumber,
             content,
-            direction: 'in',
+            direction: direction,
             status: 'delivered',
             created_at: new Date().toISOString(),
             media_type: mediaType || undefined,
             media_url: mediaUrl || undefined,
             media_metadata: mediaMetadata || undefined,
+            provider_message_id: providerMessageId || undefined
           },
           { traceId, spanId: providerMessageId }
         );
@@ -1498,7 +1501,8 @@ export class QueueWorkerEngine {
                   content: offMsg,
                   direction: 'out',
                   status: 'sent', 
-                  created_at: new Date().toISOString()
+                  created_at: new Date().toISOString(),
+                  provider_message_id: outRes.providerMessageId || undefined
                 },
                 { traceId, spanId: outRes.providerMessageId || traceId }
               );
@@ -1714,6 +1718,7 @@ export class QueueWorkerEngine {
                     direction: 'out',
                     status: 'sent',
                     created_at: new Date().toISOString(),
+                    provider_message_id: privOutResult?.providerMessageId || undefined
                   }, { traceId, spanId: privOutResult?.providerMessageId || traceId });
                 } catch (realtimeErr) {
                   this.log.error(`[P1B_PRIVACY_REALTIME]`, realtimeErr instanceof Error ? realtimeErr : new Error(String(realtimeErr)), { traceId });
@@ -1998,7 +2003,8 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
               content: 'Güvenlik Politikası Devrede: ' + validation.reason,
               direction: 'system', // Handled as bot/system in translator
               status: 'delivered', 
-              created_at: new Date().toISOString()
+              created_at: new Date().toISOString(),
+              provider_message_id: 'system_alert'
             },
             { traceId, spanId: 'system_alert' }
           );
@@ -2164,7 +2170,8 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
             direction: 'out',
             model_used: aiResponse.modelUsed || llmModel,
             status: messageStatus, 
-            created_at: new Date().toISOString()
+            created_at: new Date().toISOString(),
+            provider_message_id: outProviderMessageId || undefined
           },
           { traceId, spanId: outProviderMessageId || traceId }
         );

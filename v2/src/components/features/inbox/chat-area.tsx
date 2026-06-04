@@ -686,6 +686,17 @@ export function ConversationViewport() {
     const messageIdMap = new Map<string, any>();
     // Pre-populate target messages
     rawMsgs.forEach((m: any) => {
+      // Normalize mediaMetadata (parse if string)
+      let meta = m.mediaMetadata;
+      if (typeof meta === 'string') {
+        try {
+          meta = JSON.parse(meta);
+        } catch (e) {
+          meta = {};
+        }
+      }
+      m.mediaMetadata = meta;
+
       if (m.providerMessageId) {
         messageIdMap.set(m.providerMessageId, m);
       }
@@ -711,16 +722,55 @@ export function ConversationViewport() {
     const missingTargetReactions: any[] = [];
 
     rawMsgs.forEach((m: any) => {
-      const isReaction = m.mediaMetadata?.native?.message_type === 'reaction';
+      // Normalize mediaMetadata
+      let meta = m.mediaMetadata;
+      if (typeof meta === 'string') {
+        try {
+          meta = JSON.parse(meta);
+        } catch (e) {
+          meta = {};
+        }
+      }
+      m.mediaMetadata = meta;
+
+      const native = m.mediaMetadata?.native;
+      const isReaction = 
+        native?.message_type === 'reaction' || 
+        !!native?.reaction_payload ||
+        (m.sender === 'system' && ['👍', '😂', '❤️', '🙏', '👌', '✅', '👎', '❌'].includes(m.text || ''));
+
       if (isReaction) {
-        const targetProviderId = m.mediaMetadata?.native?.reply_to_provider_message_id;
-        const emoji = m.text || m.mediaMetadata?.native?.reaction_payload?.emoji || '';
-        const actor = m.mediaMetadata?.native?.actor === 'agent' ? 'agent' : 'patient';
+        const targetProviderId = 
+          native?.reply_to_provider_message_id || 
+          native?.reaction_payload?.target_provider_message_id || 
+          native?.reaction_payload?.message_id || 
+          native?.context?.id;
+
+        const emoji = m.text || native?.reaction_payload?.emoji || '';
+        const actor = native?.actor === 'agent' ? 'agent' : 'patient';
         const actorLabel = actor === 'agent' ? 'Sen' : 'Hasta';
         const direction = actor === 'agent' ? 'out' : 'in';
 
+        let targetMsg = null;
         if (targetProviderId && messageIdMap.has(targetProviderId)) {
-          const targetMsg = messageIdMap.get(targetProviderId);
+          targetMsg = messageIdMap.get(targetProviderId);
+        } else if (targetProviderId) {
+          // Proximity heuristic fallback: find the closest preceding non-reaction message
+          // within a 1-hour window (3,600,000 ms) in the loaded list
+          const maxWindow = 60 * 60 * 1000;
+          targetMsg = rawMsgs
+            .filter((x: any) => {
+              const xNative = x.mediaMetadata?.native;
+              const xIsReaction = 
+                xNative?.message_type === 'reaction' || 
+                !!xNative?.reaction_payload ||
+                (x.sender === 'system' && ['👍', '😂', '❤️', '🙏', '👌', '✅', '👎', '❌'].includes(x.text || ''));
+              return x.timeMs < m.timeMs && (m.timeMs - x.timeMs) <= maxWindow && !xIsReaction;
+            })
+            .sort((a: any, b: any) => b.timeMs - a.timeMs)[0];
+        }
+
+        if (targetMsg) {
           const reactions = targetMsg.reactions || [];
           
           // WhatsApp only allows one reaction per message per user (actorLabel)
@@ -748,7 +798,7 @@ export function ConversationViewport() {
           }
           targetMsg.reactions = reactions;
         } else if (targetProviderId) {
-          // Fallback: target not in list, render system timeline event (if not a removal)
+          // Fallback: target not found anywhere, render system timeline event (if not a removal)
           if (emoji) {
             missingTargetReactions.push({
               id: m.id,
