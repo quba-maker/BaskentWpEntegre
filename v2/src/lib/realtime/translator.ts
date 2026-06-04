@@ -18,6 +18,7 @@ export interface InternalMessagePayload {
   media_type?: string;    // 'image' | 'document' | 'audio' | 'video' | 'location' | 'sticker'
   media_url?: string;     // Vercel Blob permanent URL
   media_metadata?: Record<string, any>;  // { filename, mime_type, caption, ... }
+  provider_message_id?: string;
 }
 
 interface TraceContext {
@@ -71,6 +72,7 @@ export class RealtimeTranslator {
         mediaType: internalMessage.media_type,
         mediaUrl: internalMessage.media_url,
         mediaMetadata: internalMessage.media_metadata,
+        providerMessageId: internalMessage.provider_message_id,
       }
     };
   }

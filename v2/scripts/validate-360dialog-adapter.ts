@@ -103,6 +103,7 @@ let featureFlagStates: Record<string, boolean> = {
 let mockLastInboundTime = Date.now() - 5000; // 5 seconds ago by default
 let mockThreeSixtySendFailure = false;
 let lastThreeSixtySendParams: any = null;
+let lastThreeSixtyReactionParams: any = null;
 let capturedUpdates: any[] = [];
 
 // ── MONKEYPATCH REALTIME BUS TO BYPASS ABLY & ZOD SCHEMA VALIDATION ──
@@ -256,12 +257,17 @@ CredentialsService.resolveCredentials = async function (tenantId: string, provid
 };
 
 // ── MONKEYPATCH THREE_SIXTY_DIALOG_SERVICE ──
-ThreeSixtyDialogService.sendMessage = async function (apiKey: string, to: string, content: string, media?: any) {
-  lastThreeSixtySendParams = { apiKey, to, content, media };
+ThreeSixtyDialogService.sendMessage = async function (apiKey: string, to: string, content: string, media?: any, context?: any) {
+  lastThreeSixtySendParams = { apiKey, to, content, media, context };
   if (mockThreeSixtySendFailure) {
     return { success: false };
   }
   return { success: true, providerMessageId: "wamid.mock_panel_sent_123" };
+};
+
+ThreeSixtyDialogService.sendReaction = async function (apiKey: string, to: string, targetProviderMessageId: string, emoji: string) {
+  lastThreeSixtyReactionParams = { apiKey, to, targetProviderMessageId, emoji };
+  return { success: true, providerMessageId: "wamid.mock_reaction_sent_123" };
 };
 
 // Now require the mockable routes and worker dependencies
@@ -2137,6 +2143,132 @@ async function runValidationTests() {
     throw new Error(`TEST 15-E Failed: Expected confidence to be high, got: ${nativeReaction.reaction_intent?.confidence}`);
   }
   console.log("   ✅ 15-E: WhatsApp Reaction Intent Classification: PASS");
+
+  // ----------------------------------------------------
+  // TEST 16: Panel Reactions & Native Quoted Reply Context
+  // ----------------------------------------------------
+  console.log("\n🧪 [TEST 16] Panel Reactions & Native Quoted Reply Context...");
+  
+  // A: Test sendMessage action with quoted reply context
+  const { sendMessage: panelSendMessage } = require("../src/app/actions/inbox");
+  
+  mockThreeSixtySendFailure = false;
+  lastThreeSixtySendParams = null;
+  const originalExecuteSafe16 = TenantDB.prototype.executeSafe;
+  TenantDB.prototype.executeSafe = async function(queryObj: any) {
+    const sql = queryObj.text ? queryObj.text.trim() : String(queryObj).trim();
+    if (sql.includes("SELECT id, channel, channel_id FROM conversations")) {
+      return [{ id: "test-conv-id", channel: "whatsapp", channel_id: "test-channel-uuid" }];
+    }
+    if (sql.includes("SELECT created_at") && sql.includes("FROM messages")) {
+      return [{ created_at: new Date() }];
+    }
+    if (sql.includes("SELECT id, media_metadata FROM messages WHERE provider_message_id = $1")) {
+      return [{ id: "quoted-msg-local-id", media_metadata: { native: {} } }];
+    }
+    if (sql.includes("SELECT channel, id FROM conversations WHERE phone_number LIKE $1")) {
+      return [{ channel: "whatsapp", id: "test-conv-id" }];
+    }
+    if (sql.includes("INSERT INTO messages")) {
+      return [{ id: "new-sent-msg-id" }];
+    }
+    if (sql.includes("UPDATE conversations")) {
+      return [];
+    }
+    if (sql.includes("SELECT id, metadata FROM follow_up_tasks")) {
+      return [];
+    }
+    return [];
+  };
+
+  const replyRes = await panelSendMessage("905001112233", "Bu bir yanıttır", "wamid.quoted_target_123");
+  if (!replyRes.success) {
+    throw new Error(`TEST 16-A Failed: Panel sendMessage returned failure: ${replyRes.error}`);
+  }
+  if (lastThreeSixtySendParams?.context?.message_id !== "wamid.quoted_target_123") {
+    throw new Error(`TEST 16-A Failed: WhatsApp context message_id did not match, got: ${JSON.stringify(lastThreeSixtySendParams)}`);
+  }
+  console.log("   ✅ 16-A: Panel Native Quoted Reply context propagation: PASS");
+
+  // B: Test sendReaction action (Priority 1: Target metadata update)
+  const { sendReaction: panelSendReaction } = require("../src/app/actions/inbox");
+  let targetMetadataUpdated = false;
+  let targetMetadataVal: any = null;
+
+  TenantDB.prototype.executeSafe = async function(queryObj: any) {
+    const sql = queryObj.text ? queryObj.text.trim() : String(queryObj).trim();
+    const vals = queryObj.values || [];
+
+    if (sql.includes("SELECT channel, id FROM conversations")) {
+      return [{ channel: "whatsapp", id: "test-conv-id" }];
+    }
+    if (sql.includes("SELECT created_at") && sql.includes("FROM messages")) {
+      return [{ created_at: new Date() }];
+    }
+    if (sql.includes("SELECT id, media_metadata FROM messages WHERE provider_message_id = $1")) {
+      return [{ id: "target-msg-local-id", media_metadata: { native: { reactions: [] } } }];
+    }
+    if (sql.includes("UPDATE messages SET media_metadata = $1 WHERE id = $2")) {
+      targetMetadataUpdated = true;
+      targetMetadataVal = vals[0];
+      return [];
+    }
+    return [];
+  };
+
+  const reactionRes = await panelSendReaction("905001112233", "wamid.target_msg_123", "❤️");
+  if (!reactionRes.success) {
+    throw new Error(`TEST 16-B Failed: Panel sendReaction returned failure: ${reactionRes.error}`);
+  }
+  if (!targetMetadataUpdated) {
+    throw new Error("TEST 16-B Failed: Target message media_metadata was not updated");
+  }
+  const parsedTargetMeta = JSON.parse(targetMetadataVal);
+  const targetReactions = parsedTargetMeta.native?.reactions;
+  if (!targetReactions || targetReactions.length === 0 || targetReactions[0].emoji !== "❤️" || targetReactions[0].actor !== "agent") {
+    throw new Error(`TEST 16-B Failed: Target message reactions array not updated correctly: ${targetMetadataVal}`);
+  }
+  console.log("   ✅ 16-B: Panel Outbound Reaction (Target Metadata Update): PASS");
+
+  // C: Test sendReaction action (Remove/Change reaction)
+  targetMetadataUpdated = false;
+  targetMetadataVal = null;
+  TenantDB.prototype.executeSafe = async function(queryObj: any) {
+    const sql = queryObj.text ? queryObj.text.trim() : String(queryObj).trim();
+    const vals = queryObj.values || [];
+
+    if (sql.includes("SELECT channel, id FROM conversations")) {
+      return [{ channel: "whatsapp", id: "test-conv-id" }];
+    }
+    if (sql.includes("SELECT created_at") && sql.includes("FROM messages")) {
+      return [{ created_at: new Date() }];
+    }
+    if (sql.includes("SELECT id, media_metadata FROM messages WHERE provider_message_id = $1")) {
+      // Simulate existing reaction by agent
+      return [{ id: "target-msg-local-id", media_metadata: { native: { reactions: [{ emoji: "❤️", actor: "agent" }] } } }];
+    }
+    if (sql.includes("UPDATE messages SET media_metadata = $1 WHERE id = $2")) {
+      targetMetadataUpdated = true;
+      targetMetadataVal = vals[0];
+      return [];
+    }
+    return [];
+  };
+
+  // Remove reaction with empty emoji
+  const removeReactionRes = await panelSendReaction("905001112233", "wamid.target_msg_123", "");
+  if (!removeReactionRes.success) {
+    throw new Error(`TEST 16-C Failed: Panel sendReaction (remove) returned failure: ${removeReactionRes.error}`);
+  }
+  if (!targetMetadataUpdated) {
+    throw new Error("TEST 16-C Failed: Target message media_metadata was not updated on removal");
+  }
+  const parsedRemovedMeta = JSON.parse(targetMetadataVal);
+  const removedReactions = parsedRemovedMeta.native?.reactions || [];
+  if (removedReactions.length !== 0) {
+    throw new Error(`TEST 16-C Failed: Reactions array not cleared on empty string emoji, got: ${targetMetadataVal}`);
+  }
+  console.log("   ✅ 16-C: Panel Outbound Reaction Removal/Change: PASS");
 
   // Restore original functions
   TenantDB.prototype.executeSafe = originalExecuteSafe;

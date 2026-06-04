@@ -3,9 +3,9 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from "@tanstack/react-query";
-import { Send, Paperclip, User, MessageCircle, ChevronLeft, ChevronRight, ChevronDown, ArrowDown, Info, ShieldAlert, Sparkles, Zap, Check, CheckCheck, Clock, FileText, Play, Mic, MapPin, X, Download } from "lucide-react";
+import { Send, Paperclip, User, MessageCircle, ChevronLeft, ChevronRight, ChevronDown, ArrowDown, Info, ShieldAlert, Sparkles, Zap, Check, CheckCheck, Clock, FileText, Play, Mic, MapPin, X, Download, Smile, CornerUpLeft } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { getMessages, sendMessage, sendMediaMessage, toggleBotStatus } from "@/app/actions/inbox";
+import { getMessages, sendMessage, sendMediaMessage, toggleBotStatus, sendReaction } from "@/app/actions/inbox";
 import { useInboxStore } from "@/store/inbox-store";
 import { AiRuntimeTimeline } from "@/components/features/ai-observability/AiRuntimeTimeline";
 import { getAiStatusForConversation } from "@/app/actions/ai-observability";
@@ -547,7 +547,19 @@ export function ConversationViewport() {
   type UploadFileItem = { file: File; preview?: string; mediaType: 'image' | 'document' | 'audio' | 'video' };
   const [uploadFiles, setUploadFiles] = useState<UploadFileItem[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [replyingToMessage, setReplyingToMessage] = useState<any | null>(null);
+  const [activeReactionPickerMsgId, setActiveReactionPickerMsgId] = useState<string | null>(null);
   const queryClient = useQueryClient();
+
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (activeReactionPickerMsgId && !(e.target as HTMLElement).closest('.reaction-picker-container')) {
+        setActiveReactionPickerMsgId(null);
+      }
+    };
+    document.addEventListener('click', handleOutsideClick);
+    return () => document.removeEventListener('click', handleOutsideClick);
+  }, [activeReactionPickerMsgId]);
   const params = useParams();
   const tenantSlug = params?.tenant_slug as string;
   const tenantId = useRealtimeTenant();
@@ -669,11 +681,156 @@ export function ConversationViewport() {
 
   const messages = useMemo(() => {
     if (!messagesData?.pages) return [];
-    // Page 1 has latest messages (sorted ASC internally).
-    // Page 2 has older messages (sorted ASC internally).
-    // To display from oldest (top) to newest (bottom), we reverse the pages array before flattening.
-    return [...messagesData.pages].reverse().flat();
+    const rawMsgs = [...messagesData.pages].reverse().flat();
+
+    const messageIdMap = new Map<string, any>();
+    // Pre-populate target messages
+    rawMsgs.forEach((m: any) => {
+      if (m.providerMessageId) {
+        messageIdMap.set(m.providerMessageId, m);
+      }
+      m.reactions = []; // Initialize reactions
+      
+      // Load reactions from target message metadata first
+      const metadataReactions = m.mediaMetadata?.native?.reactions || [];
+      if (Array.isArray(metadataReactions)) {
+        metadataReactions.forEach((r: any) => {
+          if (!r.emoji) return; // skip removed/empty
+          m.reactions.push({
+            emoji: r.emoji,
+            direction: r.direction || (r.actor === 'agent' ? 'out' : 'in'),
+            actorLabel: r.actor === 'agent' ? 'Sen' : 'Hasta',
+            createdAt: r.created_at ? new Date(r.created_at).getTime() : m.timeMs,
+            targetProviderMessageId: r.target_provider_message_id || m.providerMessageId
+          });
+        });
+      }
+    });
+
+    const nonReactionMsgs: any[] = [];
+    const missingTargetReactions: any[] = [];
+
+    rawMsgs.forEach((m: any) => {
+      const isReaction = m.mediaMetadata?.native?.message_type === 'reaction';
+      if (isReaction) {
+        const targetProviderId = m.mediaMetadata?.native?.reply_to_provider_message_id;
+        const emoji = m.text || m.mediaMetadata?.native?.reaction_payload?.emoji || '';
+        const actor = m.mediaMetadata?.native?.actor === 'agent' ? 'agent' : 'patient';
+        const actorLabel = actor === 'agent' ? 'Sen' : 'Hasta';
+        const direction = actor === 'agent' ? 'out' : 'in';
+
+        if (targetProviderId && messageIdMap.has(targetProviderId)) {
+          const targetMsg = messageIdMap.get(targetProviderId);
+          const reactions = targetMsg.reactions || [];
+          
+          // WhatsApp only allows one reaction per message per user (actorLabel)
+          const existingIdx = reactions.findIndex((r: any) => r.actorLabel === actorLabel);
+          if (existingIdx !== -1) {
+            if (!emoji) {
+              reactions.splice(existingIdx, 1);
+            } else {
+              reactions[existingIdx] = {
+                emoji,
+                direction,
+                actorLabel,
+                createdAt: m.timeMs,
+                targetProviderMessageId: targetProviderId
+              };
+            }
+          } else if (emoji) {
+            reactions.push({
+              emoji,
+              direction,
+              actorLabel,
+              createdAt: m.timeMs,
+              targetProviderMessageId: targetProviderId
+            });
+          }
+          targetMsg.reactions = reactions;
+        } else if (targetProviderId) {
+          // Fallback: target not in list, render system timeline event (if not a removal)
+          if (emoji) {
+            missingTargetReactions.push({
+              id: m.id,
+              sender: 'system',
+              text: `${actorLabel === 'Sen' ? 'Koordinatör' : 'Hasta'} bir mesaja ${emoji} tepkisi verdi.`,
+              timeMs: m.timeMs,
+              dateLabel: m.dateLabel,
+              status: m.status,
+              mediaType: null,
+              mediaUrl: null,
+              mediaMetadata: m.mediaMetadata
+            });
+          }
+        }
+      } else {
+        nonReactionMsgs.push(m);
+      }
+    });
+
+    const merged = [...nonReactionMsgs, ...missingTargetReactions].sort((a, b) => a.timeMs - b.timeMs);
+    return merged;
   }, [messagesData]);
+
+  const handleSendReaction = async (targetProviderMessageId: string, emoji: string) => {
+    if (!activePhone || !targetProviderMessageId) return;
+
+    const previousMessages = queryClient.getQueryData(["messages", activePhone]);
+
+    // Optimistically update the local message reactions
+    queryClient.setQueryData(["messages", activePhone], (oldData: any) => {
+      if (!oldData?.pages) return oldData;
+
+      return {
+        ...oldData,
+        pages: oldData.pages.map((page: any[]) => {
+          return page.map((msg: any) => {
+            if (msg.providerMessageId === targetProviderMessageId) {
+              const reactions = [...(msg.reactions || [])];
+              const existingIdx = reactions.findIndex((r: any) => r.actorLabel === 'Sen');
+              
+              if (existingIdx !== -1) {
+                if (!emoji) {
+                  reactions.splice(existingIdx, 1);
+                } else {
+                  reactions[existingIdx] = {
+                    ...reactions[existingIdx],
+                    emoji
+                  };
+                }
+              } else if (emoji) {
+                reactions.push({
+                  emoji,
+                  direction: 'out',
+                  actorLabel: 'Sen',
+                  createdAt: Date.now(),
+                  targetProviderMessageId
+                });
+              }
+
+              return {
+                ...msg,
+                reactions
+              };
+            }
+            return msg;
+          });
+        })
+      };
+    });
+
+    try {
+      const res = await sendReaction(activePhone, targetProviderMessageId, emoji);
+      if (!res.success) {
+        throw new Error(res.error || "Tepki gönderilemedi");
+      }
+    } catch (err: any) {
+      // Rollback on failure
+      queryClient.setQueryData(["messages", activePhone], previousMessages);
+      setSendError("Tepki gönderilemedi: " + err.message);
+      setTimeout(() => setSendError(""), 4000);
+    }
+  };
 
   // Load more intersection observer
   useEffect(() => {
@@ -748,13 +905,27 @@ export function ConversationViewport() {
     scrollToBottom("smooth");
 
     const optimisticId = `temp-${Date.now()}`;
-    const optimisticMsg = {
+    const optimisticMsg: any = {
       id: optimisticId,
       sender: "agent",
       text: textToSend,
       timeMs: Date.now(),
       dateLabel: new Date().toLocaleDateString("tr-TR"),
-      status: "pending"
+      status: "pending",
+      mediaMetadata: replyingToMessage ? {
+        native: {
+          message_type: 'text',
+          reply_to_provider_message_id: replyingToMessage.providerMessageId,
+          reply_to_message_id: replyingToMessage.id,
+          quoted_message_snapshot: {
+            direction: replyingToMessage.sender === 'user' ? 'in' : 'out',
+            text: replyingToMessage.text,
+            type: replyingToMessage.mediaType || 'text',
+            sender_label: replyingToMessage.sender === 'user' ? 'Hasta' : 'Bot',
+            created_at: new Date(replyingToMessage.timeMs).toISOString()
+          }
+        }
+      } : null
     };
 
     // Snapshot the previous value
@@ -779,8 +950,11 @@ export function ConversationViewport() {
       });
     }
 
+    const targetReplyId = replyingToMessage?.providerMessageId;
+    setReplyingToMessage(null); // Clear replying state immediately
+
     try {
-      const res = await sendMessage(activePhone, textToSend);
+      const res = await sendMessage(activePhone, textToSend, targetReplyId);
       if (!res.success) {
         throw new Error(res.error || "Bilinmeyen hata");
       }
@@ -1593,7 +1767,77 @@ export function ConversationViewport() {
                           </div>
                         </div>
                       ) : (
-                        <div className={`flex w-full ${item.message.sender === "user" ? "justify-start" : "justify-end"} group`}>
+                        <div className={`flex w-full ${item.message.sender === "user" ? "justify-start" : "justify-end"} group relative`}>
+                          {/* ── QUICK ACTIONS TOOLBAR ── */}
+                          {item.message.providerMessageId && (
+                            <div className={`absolute top-1/2 -translate-y-1/2 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-20 ${
+                              item.message.sender === "user" 
+                                ? "left-[calc(85%+8px)] md:left-[calc(65%+8px)] flex-row" 
+                                : "right-[calc(85%+8px)] md:right-[calc(65%+8px)] flex-row-reverse"
+                            }`}>
+                              {/* Quoted Reply Action */}
+                              <button
+                                onClick={() => setReplyingToMessage(item.message)}
+                                className="p-1.5 rounded-full hover:bg-[var(--q-bg-hover)] text-[var(--q-text-secondary)] transition-colors border border-[var(--q-border-default)] bg-[var(--q-bg-primary)] shadow-sm cursor-pointer"
+                                title="Yanıtla"
+                              >
+                                <CornerUpLeft className="w-3.5 h-3.5" />
+                              </button>
+
+                              {/* Reaction Picker Button */}
+                              {item.message.sender === "user" ? (
+                                <div className="relative reaction-picker-container">
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setActiveReactionPickerMsgId(activeReactionPickerMsgId === item.message.id ? null : item.message.id);
+                                    }}
+                                    className="p-1.5 rounded-full hover:bg-[var(--q-bg-hover)] text-[var(--q-text-secondary)] transition-colors border border-[var(--q-border-default)] bg-[var(--q-bg-primary)] shadow-sm cursor-pointer"
+                                    title="Tepki Ekle"
+                                  >
+                                    <Smile className="w-3.5 h-3.5" />
+                                  </button>
+                                  
+                                  {activeReactionPickerMsgId === item.message.id && (
+                                    <div className={`absolute bottom-full mb-1.5 z-30 flex items-center gap-1 p-1 rounded-full shadow-lg border border-[var(--q-border-default)] bg-[var(--q-bg-primary)] ${
+                                      item.message.sender === 'user' ? 'left-0' : 'right-0'
+                                    }`}>
+                                      {["👍", "❤️", "✅", "🙏", "👌", "👎"].map((emoji) => {
+                                        const isSelected = item.message.reactions?.some((r: any) => r.actorLabel === 'Sen' && r.emoji === emoji);
+                                        return (
+                                          <button
+                                            key={emoji}
+                                            onClick={() => {
+                                              handleSendReaction(item.message.providerMessageId, isSelected ? "" : emoji);
+                                              setActiveReactionPickerMsgId(null);
+                                            }}
+                                            className={`w-7 h-7 flex items-center justify-center text-sm rounded-full hover:bg-[var(--q-bg-hover)] transition-colors cursor-pointer ${
+                                              isSelected ? 'bg-[var(--q-purple-bg)] text-[var(--q-purple)]' : ''
+                                            }`}
+                                          >
+                                            {emoji}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <div className="relative group/tooltip">
+                                  <button
+                                    disabled
+                                    className="p-1.5 rounded-full opacity-40 text-[var(--q-text-secondary)] border border-[var(--q-border-default)] bg-[var(--q-bg-primary)] cursor-not-allowed"
+                                  >
+                                    <Smile className="w-3.5 h-3.5" />
+                                  </button>
+                                  <div className="absolute bottom-full mb-1.5 left-1/2 -translate-x-1/2 scale-0 group-hover/tooltip:scale-100 transition-all duration-150 origin-bottom bg-black/85 text-white text-[10px] px-2 py-1 rounded whitespace-nowrap z-20 shadow-md">
+                                    WhatsApp API bu mesaj için reaction göndermeyi desteklemeyebilir.
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
                           <div
                             className={`relative max-w-[85%] md:max-w-[65%] px-3 py-2 md:px-4 md:py-2.5 shadow-sm transition-all duration-200 hover:shadow-md ${
                               item.message.sender === "user" 
@@ -1693,6 +1937,31 @@ export function ConversationViewport() {
                                 </span>
                               )}
                             </div>
+
+                            {/* ── REACTIONS DISPLAY ── */}
+                            {item.message.reactions && item.message.reactions.length > 0 && (
+                              <div 
+                                className={`absolute bottom-[-10px] ${item.message.sender === 'user' ? 'right-2' : 'left-2'} z-10 flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs shadow-sm bg-[var(--q-bg-primary)] border border-[var(--q-border-default)] cursor-pointer select-none`}
+                                onClick={() => {
+                                  // Click reaction badge to remove agent's reaction (if any)
+                                  const agentReaction = item.message.reactions.find((r: any) => r.actorLabel === 'Sen');
+                                  if (agentReaction && item.message.providerMessageId) {
+                                    handleSendReaction(item.message.providerMessageId, "");
+                                  }
+                                }}
+                              >
+                                {item.message.reactions.map((r: any, idx: number) => (
+                                  <span key={idx} title={`${r.actorLabel}: ${r.emoji}`}>
+                                    {r.emoji}
+                                  </span>
+                                ))}
+                                {item.message.reactions.length > 1 && (
+                                  <span className="text-[9px] font-bold text-[var(--q-text-secondary)]">
+                                    {item.message.reactions.length}
+                                  </span>
+                                )}
+                              </div>
+                            )}
                           </div>
                         </div>
                       )}
@@ -1790,6 +2059,35 @@ export function ConversationViewport() {
 
       {/* ── Input Area ── */}
       <div className="p-6 q-glass-strong z-10" style={{ borderTop: "1px solid var(--q-border-default)", boxShadow: "0 -1px 10px rgba(0,0,0,0.02)" }}>
+        {/* Quoted Reply Preview Bar */}
+        {replyingToMessage && (
+          <div 
+            className="mb-3 px-3 py-2 rounded-xl flex items-center justify-between animate-in fade-in slide-in-from-bottom-2 duration-200"
+            style={{ 
+              background: "var(--q-chat-in)", 
+              borderLeft: "4px solid var(--q-blue)", 
+              border: "1px solid var(--q-border-default)", 
+              borderLeftWidth: "4px" 
+            }}
+          >
+            <div className="flex flex-col text-left overflow-hidden">
+              <span className="text-[10px] font-bold tracking-wide uppercase opacity-75 animate-pulse" style={{ color: "var(--q-blue)" }}>
+                {replyingToMessage.sender === 'user' ? 'Hasta' : (replyingToMessage.sender === 'bot' ? 'AI' : 'Koordinatör')} Mesajına Yanıt
+              </span>
+              <span className="text-xs truncate font-medium opacity-80" style={{ color: "var(--q-text-primary)" }}>
+                {replyingToMessage.text || (replyingToMessage.mediaType ? `[${replyingToMessage.mediaType}]` : "Reaction")}
+              </span>
+            </div>
+            <button
+              onClick={() => setReplyingToMessage(null)}
+              className="p-1 rounded-full hover:bg-[var(--q-bg-hover)] text-[var(--q-text-secondary)] transition-colors cursor-pointer"
+              title="Yanıtı iptal et"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
         {/* Upload Preview Bar (multi-file) */}
         {uploadFiles.length > 0 && (
           <div 

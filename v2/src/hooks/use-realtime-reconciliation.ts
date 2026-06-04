@@ -64,6 +64,7 @@ const mapRealtimeMessageToUIProjection = (payload: any) => {
       mediaType: payload.mediaType || null,
       mediaUrl: payload.mediaUrl || null,
       mediaMetadata: payload.mediaMetadata || null,
+      providerMessageId: payload.providerMessageId || null,
     },
     conversationData: {
       last_message: payload.content,

@@ -48,6 +48,7 @@ export const ChatMessageProjectionSchema = z.object({
   mediaType: z.string().optional(),
   mediaUrl: z.string().optional(),
   mediaMetadata: z.record(z.string(), z.any()).optional(),
+  providerMessageId: z.string().optional(),
 });
 
 export const ChatMessageStatusProjectionSchema = z.object({

@@ -201,7 +201,7 @@ export async function getMessages(phone: string, page: number = 1, limit: number
           text: `
             SELECT * FROM (
               SELECT id, content as text, direction, status, model_used,
-                     media_type, media_url, media_metadata,
+                     media_type, media_url, media_metadata, provider_message_id,
                      EXTRACT(EPOCH FROM COALESCE(provider_timestamp, created_at)) * 1000 as created_at_ms
               FROM messages
               WHERE phone_number LIKE $1 
@@ -253,6 +253,7 @@ export async function getMessages(phone: string, page: number = 1, limit: number
           mediaType: r.media_type || null,
           mediaUrl: r.media_url || null,
           mediaMetadata: r.media_metadata || null,
+          providerMessageId: r.provider_message_id || null,
         };
       });
       } catch(err: any) {
@@ -265,7 +266,7 @@ export async function getMessages(phone: string, page: number = 1, limit: number
   });
 }
 
-export async function sendMessage(phone: string, text: string) {
+export async function sendMessage(phone: string, text: string, replyToProviderMessageId?: string) {
   if (!phone || !text) return { success: false, error: "Missing data" };
   
   // ─── SECURITY: Input validation ───
@@ -336,7 +337,9 @@ export async function sendMessage(phone: string, text: string) {
           const res = await ThreeSixtyDialogService.sendMessage(
             credentials.accessToken,
             phone,
-            text
+            text,
+            undefined,
+            replyToProviderMessageId ? { message_id: replyToProviderMessageId } : undefined
           );
           providerMessageId = res.providerMessageId || null;
           messageStatus = res.success ? 'sent' : 'failed';
@@ -351,18 +354,22 @@ export async function sendMessage(phone: string, text: string) {
         inboxLogger.withContext({ module: 'Inbox' }).warn("Meta credentials missing, only saving to DB");
       } else {
         if (channel === 'whatsapp' && PHONE_NUMBER_ID) {
+          const bodyPayload: any = {
+            messaging_product: "whatsapp",
+            to: phone,
+            type: "text",
+            text: { body: text },
+          };
+          if (replyToProviderMessageId) {
+            bodyPayload.context = { message_id: replyToProviderMessageId };
+          }
           response = await fetch(`https://graph.facebook.com/v25.0/${PHONE_NUMBER_ID}/messages`, {
             method: "POST",
             headers: {
               "Authorization": `Bearer ${META_ACCESS_TOKEN}`,
               "Content-Type": "application/json",
             },
-            body: JSON.stringify({
-              messaging_product: "whatsapp",
-              to: phone,
-              type: "text",
-              text: { body: text },
-            }),
+            body: JSON.stringify(bodyPayload),
           });
 
           if (response.ok) {
@@ -431,6 +438,35 @@ export async function sendMessage(phone: string, text: string) {
         }
       }
 
+      // Prepare metadata with WhatsApp context if replyToProviderMessageId is set
+      const mediaMetadata: any = { initiated_from: "inbox_panel", source: "panel_operator" };
+      if (replyToProviderMessageId) {
+        mediaMetadata.native = {
+          provider: credentials.provider || 'whatsapp',
+          message_type: 'text',
+          reply_to_provider_message_id: replyToProviderMessageId
+        };
+        try {
+          const qRes = await ctx.db.executeSafe({
+            text: `SELECT id, direction, content, media_type, status, created_at FROM messages WHERE provider_message_id = $1 AND tenant_id = $2 LIMIT 1`,
+            values: [replyToProviderMessageId, ctx.tenantId]
+          }) as any[];
+          if (qRes.length > 0) {
+            const qMsg = qRes[0];
+            mediaMetadata.native.reply_to_message_id = qMsg.id;
+            mediaMetadata.native.quoted_message_snapshot = {
+              direction: qMsg.direction,
+              text: qMsg.content,
+              type: qMsg.media_type || 'text',
+              sender_label: qMsg.direction === 'in' ? 'Hasta' : 'Bot',
+              created_at: qMsg.created_at
+            };
+          }
+        } catch (e) {
+          console.error("Error fetching reply message snapshot:", e);
+        }
+      }
+
       const msgInsert = await ctx.db.executeSafe({
         text: `INSERT INTO messages (tenant_id, conversation_id, phone_number, direction, content, channel, status, provider_message_id, media_metadata)
                VALUES ($1, $2, $3, 'out', $4, $5, $6, $7, $8)
@@ -443,7 +479,7 @@ export async function sendMessage(phone: string, text: string) {
           channel, 
           messageStatus, 
           providerMessageId,
-          JSON.stringify({ initiated_from: "inbox_panel", source: "panel_operator" })
+          JSON.stringify(mediaMetadata)
         ]
       });
 
@@ -1172,6 +1208,230 @@ export async function toggleBotStatus(conversationIdOrPhone: string, isBotActive
         entityType: "conversation",
         entityId: phone,
       });
+
+      return { success: true };
+    }
+  ).then(res => res.success ? (res.data || { success: true }) : { success: false, error: res.error });
+}
+
+export async function sendReaction(phone: string, targetProviderMessageId: string, emoji: string) {
+  if (!phone || !targetProviderMessageId) return { success: false, error: "Missing data" };
+
+  return withActionGuard(
+    { actionName: 'sendReaction' },
+    async (ctx) => {
+      // 1. Get channel / conversation context
+      const convRow = await ctx.db.executeSafe({
+        text: `SELECT channel, id FROM conversations WHERE phone_number LIKE $1 AND tenant_id = $2 LIMIT 1`,
+        values: [`%${phone.replace(/\D/g, '').slice(-10)}%`, ctx.tenantId]
+      }) as any[];
+      
+      if (convRow.length === 0) {
+        return { success: false, error: "Conversation not found" };
+      }
+      
+      const channel = convRow[0].channel || 'whatsapp';
+      const conversationId = convRow[0].id;
+
+      // 2. 24h Window check
+      const lastInboundRow = await ctx.db.executeSafe({
+        text: `SELECT created_at FROM messages 
+               WHERE phone_number LIKE $1 AND tenant_id = $2 AND direction = 'in'
+               ORDER BY created_at DESC LIMIT 1`,
+        values: [`%${phone.replace(/\D/g, '').slice(-10)}%`, ctx.tenantId]
+      }) as any[];
+      
+      const lastInboundTime = lastInboundRow?.[0]?.created_at;
+      if (!lastInboundTime || (Date.now() - new Date(lastInboundTime).getTime()) > 24 * 60 * 60 * 1000) {
+        return {
+          success: false,
+          error: "Müşteri ile son etkileşiminiz üzerinden 24 saatten fazla zaman geçmiş. 24 saatlik pencere kapalı."
+        };
+      }
+
+      // 3. Resolve credentials
+      const credentials = await CredentialsService.resolveCredentials(ctx.tenantId, 'whatsapp');
+      const isThreeSixty = channel === 'whatsapp' && (credentials.provider === '360dialog' || credentials.provider === '360dialog_whatsapp');
+      const META_ACCESS_TOKEN = credentials.accessToken;
+      const PHONE_NUMBER_ID = credentials.whatsappPhoneNumberId;
+
+      let providerMessageId: string | null = null;
+      let messageStatus = 'pending';
+
+      if (isThreeSixty && credentials.accessToken) {
+        const { ThreeSixtyDialogService } = await import("@/lib/services/providers/three-sixty-dialog.service");
+        try {
+          const res = await ThreeSixtyDialogService.sendReaction(
+            credentials.accessToken,
+            phone,
+            targetProviderMessageId,
+            emoji
+          );
+          providerMessageId = res.providerMessageId || null;
+          messageStatus = res.success ? 'sent' : 'failed';
+          if (!res.success) {
+            return { success: false, error: "360dialog reaction API failure" };
+          }
+        } catch (e: any) {
+          return { success: false, error: e.message || "360dialog reaction error" };
+        }
+      } else if (!META_ACCESS_TOKEN) {
+        return { success: false, error: "WhatsApp API credentials missing" };
+      } else {
+        if (channel === 'whatsapp' && PHONE_NUMBER_ID) {
+          const res = await fetch(`https://graph.facebook.com/v25.0/${PHONE_NUMBER_ID}/messages`, {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${META_ACCESS_TOKEN}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              messaging_product: "whatsapp",
+              recipient_type: "individual",
+              to: phone,
+              type: "reaction",
+              reaction: {
+                message_id: targetProviderMessageId,
+                emoji: emoji
+              }
+            }),
+          });
+
+          if (res.ok) {
+            try {
+              const resData = await res.json();
+              providerMessageId = resData.messages?.[0]?.id || resData.message_id || null;
+              messageStatus = 'sent';
+            } catch (e) {
+              messageStatus = 'sent';
+            }
+          } else {
+            const errData = await res.json();
+            return { success: false, error: errData.error?.message || "WhatsApp API reaction error" };
+          }
+        } else {
+          return { success: false, error: "Reactions only supported on WhatsApp channel" };
+        }
+      }
+
+      // 4. Update target message's media_metadata directly in the database (Priority 1)
+      let targetMessageId: string | null = null;
+      let targetResolved = false;
+
+      const qTargetRes = await ctx.db.executeSafe({
+        text: `SELECT id, media_metadata FROM messages WHERE provider_message_id = $1 AND tenant_id = $2 LIMIT 1`,
+        values: [targetProviderMessageId, ctx.tenantId]
+      }) as any[];
+
+      if (qTargetRes.length > 0) {
+        targetResolved = true;
+        const targetMsg = qTargetRes[0];
+        targetMessageId = targetMsg.id;
+
+        // Parse existing metadata
+        let metadata = targetMsg.media_metadata || {};
+        if (typeof metadata === 'string') {
+          try { metadata = JSON.parse(metadata); } catch(e) { metadata = {}; }
+        }
+        if (!metadata.native) metadata.native = {};
+        if (!metadata.native.reactions) metadata.native.reactions = [];
+
+        // Check if there is an existing reaction by this actor (agent)
+        const reactions = metadata.native.reactions;
+        const existingIdx = reactions.findIndex((r: any) => r.actor === 'agent');
+
+        if (existingIdx !== -1) {
+          if (!emoji) {
+            // Remove reaction
+            reactions.splice(existingIdx, 1);
+          } else {
+            // Update emoji
+            reactions[existingIdx].emoji = emoji;
+            reactions[existingIdx].created_at = new Date().toISOString();
+          }
+        } else if (emoji) {
+          // Add new reaction
+          reactions.push({
+            emoji: emoji,
+            direction: 'out',
+            actor: 'agent',
+            target_provider_message_id: targetProviderMessageId,
+            created_at: new Date().toISOString(),
+            source: 'panel_operator'
+          });
+        }
+
+        // Save back to DB
+        await ctx.db.executeSafe({
+          text: `UPDATE messages SET media_metadata = $1 WHERE id = $2`,
+          values: [JSON.stringify(metadata), targetMessageId]
+        });
+      } else {
+        // Fallback: target not found, insert a system row (Priority 2)
+        const fallbackNative = {
+          provider: credentials.provider || 'whatsapp',
+          message_type: 'reaction',
+          reaction_payload: {
+            message_id: targetProviderMessageId,
+            emoji: emoji
+          },
+          reply_to_provider_message_id: targetProviderMessageId,
+          actor: 'agent'
+        };
+        await ctx.db.executeSafe({
+          text: `INSERT INTO messages (tenant_id, conversation_id, phone_number, direction, content, channel, status, provider_message_id, media_metadata)
+                 VALUES ($1, $2, $3, 'system', $4, $5, 'sent', $6, $7)`,
+          values: [
+            ctx.tenantId,
+            conversationId,
+            phone,
+            emoji || '',
+            channel,
+            providerMessageId || `temp-system-reaction-${Date.now()}`,
+            JSON.stringify({ native: fallbackNative })
+          ]
+        });
+      }
+
+      // 5. Broadcast realtime sync update
+      try {
+        const { RealtimeBus } = await import("@/lib/realtime/bus");
+        await RealtimeBus.publish(ctx.tenantId, {
+          eventId: require("uuid").v4(),
+          traceId: "reaction-sync-trace-" + Date.now(),
+          spanId: require("uuid").v4(),
+          timestamp: Date.now() * 1000,
+          entityVersion: 1,
+          eventVersion: "1.0",
+          schemaVersion: "1.0",
+          tenantId: ctx.tenantId,
+          type: "chat.message.created" as any, // reuse message.created event type so it invalidates/updates cache
+          payload: {
+            id: `reaction-${Date.now()}`,
+            conversationId: phone,
+            content: emoji,
+            sender: "bot", // direction system maps to bot
+            status: "delivered",
+            createdAt: new Date().toISOString(),
+            mediaType: undefined,
+            mediaUrl: undefined,
+            mediaMetadata: {
+              native: {
+                message_type: 'reaction',
+                reply_to_provider_message_id: targetProviderMessageId,
+                reaction_payload: {
+                  message_id: targetProviderMessageId,
+                  emoji: emoji
+                },
+                actor: 'agent'
+              }
+            },
+            providerMessageId: providerMessageId || `reaction-${Date.now()}`
+          }
+        });
+      } catch (realtimeErr) {
+        console.error("Failed to publish reaction realtime sync update:", realtimeErr);
+      }
 
       return { success: true };
     }
