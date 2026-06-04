@@ -329,6 +329,70 @@ function MediaBubbleContent({ message, onGalleryOpen }: { message: any; onGaller
 
 
 
+// -- Quoted Message Preview --
+function QuotedMessagePreview({ native, isOwnMessage }: { native: any; isOwnMessage: boolean }) {
+  if (!native) return null;
+
+  if (native.quoted_message_missing) {
+    return (
+      <div 
+        className="flex flex-col px-3 py-2 rounded-lg mb-2 text-[12px] opacity-70"
+        style={{ 
+          background: isOwnMessage ? "rgba(0,0,0,0.05)" : "rgba(255,255,255,0.05)",
+          borderLeft: "4px solid var(--q-border-strong)"
+        }}
+      >
+        <div className="font-semibold mb-0.5">Yanıtlanan mesaj bulunamadı</div>
+      </div>
+    );
+  }
+
+  const snapshot = native.quoted_message_snapshot;
+  if (!snapshot) return null;
+
+  const senderName = snapshot.sender_label || (snapshot.direction === 'in' ? 'Hasta' : 'Bot');
+  
+  let textPreview = snapshot.text || '';
+  if (textPreview.length > 60) textPreview = textPreview.substring(0, 60) + '...';
+
+  let mediaLabel = '';
+  switch(snapshot.type) {
+    case 'image': mediaLabel = '📷 Görsel'; break;
+    case 'video': mediaLabel = '🎬 Video'; break;
+    case 'document': mediaLabel = '📎 Belge'; break;
+    case 'audio': mediaLabel = '🎵 Ses kaydı'; break;
+    case 'location': mediaLabel = '📍 Konum'; break;
+    case 'interactive': mediaLabel = '🔘 Buton'; break;
+    case 'reaction': mediaLabel = '👍 Tepki'; break;
+  }
+
+  return (
+    <div 
+      className="flex flex-col px-3 py-2 rounded-lg mb-2 text-[12px] cursor-pointer transition-colors"
+      style={{ 
+        background: isOwnMessage ? "rgba(0,0,0,0.04)" : "rgba(255,255,255,0.05)",
+        borderLeft: `4px solid ${isOwnMessage ? "rgba(0,0,0,0.2)" : "rgba(255,255,255,0.3)"}` 
+      }}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (native.reply_to_message_id) {
+          const el = document.getElementById(`msg-${native.reply_to_message_id}`);
+          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }}
+    >
+      <div className="font-bold flex items-center justify-between opacity-90 mb-0.5">
+        <span>{senderName}</span>
+      </div>
+      
+      <div className="flex items-center gap-1.5 opacity-80 line-clamp-2">
+        {mediaLabel && <span className="font-medium whitespace-nowrap">{mediaLabel}</span>}
+        {textPreview && <span className="truncate leading-tight">{textPreview}</span>}
+      </div>
+    </div>
+  );
+}
+
 // -- AI Status Badge --
 const AI_EVENT_LABELS: Record<string, string> = {
   'memory_updated': 'Hafıza Eşlendi',
@@ -453,7 +517,7 @@ const VirtualItemWrapper = React.memo(function VirtualItemWrapper({
   }
 
   return (
-    <div ref={elementRef} className="w-full">
+    <div ref={elementRef} className="w-full" id={`msg-${id}`}>
       {children}
     </div>
   );
@@ -1554,6 +1618,14 @@ export function ConversationViewport() {
                                 </span>
                               </div>
                             )}
+                            {/* ── QUOTED MESSAGE PREVIEW ── */}
+                            {item.message.mediaMetadata?.native && (item.message.mediaMetadata.native.reply_to_provider_message_id || item.message.mediaMetadata.native.reply_to_message_id) && (
+                              <QuotedMessagePreview 
+                                native={item.message.mediaMetadata.native} 
+                                isOwnMessage={item.message.sender === "user"} 
+                              />
+                            )}
+
                             {/* ── MEDIA CONTENT ── */}
                             {item.message.mediaType && item.message.mediaUrl && (
                               <MediaBubbleContent
