@@ -2344,15 +2344,22 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
               'Endokrinoloji', 'Fizik Tedavi', 'Çocuk Sağlığı', 'Kadın Doğum', 'Psikiyatri', 'Check-Up'
             ];
 
+            const { resolveDepartmentWithConflict } = await import('../utils/crm-conflict-resolver');
+            const resolvedDeptObj = resolveDepartmentWithConflict({
+              existingDept,
+              formCampaignDept: formExt?.departmentSource === 'campaign_name' || formExt?.departmentSource === 'form_name' ? formExt.department : null,
+              formCampaignConfidence: formExt?.departmentSource === 'campaign_name' || formExt?.departmentSource === 'form_name' ? formExt.confidence : 0,
+              formComplaintDept: formExt?.departmentSource === 'complaint_keyword' ? formExt.department : null,
+              formComplaintConfidence: formExt?.departmentSource === 'complaint_keyword' ? formExt.confidence : 0,
+              patientMsgDept: msgExt?.departmentCandidate || null,
+              patientMsgConfidence: msgExt?.departmentConfidence || 'low',
+              aiExtractedDept: crmData?.department && validEnums.includes(crmData.department) ? crmData.department : null,
+              isLocked: isDeptLocked
+            });
+
             let resolvedDept = null;
-            if (!isDeptLocked && !existingDept) {
-              if (formExt?.department && formExt.confidence >= 0.8) {
-                resolvedDept = formExt.department;
-              } else if (msgExt?.departmentCandidate && msgExt.departmentConfidence === 'high') {
-                resolvedDept = msgExt.departmentCandidate;
-              } else if (crmData?.department && validEnums.includes(crmData.department)) {
-                resolvedDept = crmData.department;
-              }
+            if (resolvedDeptObj.writeAllowed) {
+              resolvedDept = resolvedDeptObj.suggestedDept;
             }
 
             let resolvedCountryForConv = existingCountry;

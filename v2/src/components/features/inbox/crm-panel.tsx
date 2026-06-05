@@ -10,6 +10,7 @@ import { AiTimelinePanel } from "@/components/features/ai-observability/AiTimeli
 import { resolvePatientDisplayName, formatPhoneReadable } from "@/lib/utils/patient-name-resolver";
 import { normalizeCountry } from "@/lib/utils/country-normalizer";
 import { extractFromPatientMessageDeterministic } from "@/lib/utils/patient-message-extractor";
+import { resolveDepartmentWithConflict } from "@/lib/utils/crm-conflict-resolver";
 import { resolvePatientTimeDisplay } from "@/lib/utils/timezone";
 import { useParams } from "next/navigation";
 import { resolveUniversalAISummary, getTenantEntityType } from "@/lib/utils/universal-summary-resolver";
@@ -306,20 +307,24 @@ export function ContextPanel() {
 
   // Compute recommendations
   const msgExt = activeContact?.last_message ? extractFromPatientMessageDeterministic(activeContact.last_message) : null;
+  const isDeptLocked = activeContact?.opp_metadata?.department_locked === true;
   
-  // Suggestion priority: form department first, then patient message candidate
-  let suggestedDept: string | null = null;
-  let suggestedConfidence: 'high' | 'medium' | 'low' = 'low';
+  const resolvedDeptObj = resolveDepartmentWithConflict({
+    existingDept: department || null,
+    formCampaignDept: activeContact?.formDepartmentSource === 'campaign_name' || activeContact?.formDepartmentSource === 'form_name' ? activeContact.formDepartment : null,
+    formCampaignConfidence: activeContact?.formDepartmentSource === 'campaign_name' || activeContact?.formDepartmentSource === 'form_name' ? 1.0 : 0.0,
+    formComplaintDept: activeContact?.formDepartmentSource === 'complaint_keyword' ? activeContact.formDepartment : null,
+    formComplaintConfidence: activeContact?.formDepartmentSource === 'complaint_keyword' ? 1.0 : 0.0,
+    patientMsgDept: msgExt?.departmentCandidate || null,
+    patientMsgConfidence: msgExt?.departmentConfidence || 'low',
+    isLocked: isDeptLocked
+  });
 
-  if (!department) {
-    if (activeContact.formDepartment) {
-      suggestedDept = activeContact.formDepartment;
-      suggestedConfidence = (activeContact.formDepartmentSource === 'complaint_keyword') ? 'medium' : 'high';
-    } else if (msgExt?.departmentCandidate) {
-      suggestedDept = msgExt.departmentCandidate;
-      suggestedConfidence = msgExt.departmentConfidence;
-    }
-  }
+  const suggestedDept = !department ? resolvedDeptObj.suggestedDept : null;
+  const suggestedConfidence = resolvedDeptObj.confidence;
+  const hasConflict = resolvedDeptObj.hasConflict;
+  const conflictReason = resolvedDeptObj.conflictReason;
+  const suggestedSource = resolvedDeptObj.source;
 
   // Parse all phones
   let allPhones: string[] = [];
@@ -584,54 +589,66 @@ export function ContextPanel() {
               </select>
             </div>
             {suggestedDept && (
-              <div className="mt-2.5 p-3.5 rounded-xl border flex items-center justify-between transition-all duration-200"
+              <div className="mt-2.5 flex flex-col gap-2.5 p-3.5 rounded-xl border transition-all duration-200"
                    style={{ 
-                     backgroundColor: suggestedConfidence === 'medium' ? "rgba(255, 149, 0, 0.04)" : "rgba(175, 82, 222, 0.04)", 
-                     borderColor: suggestedConfidence === 'medium' ? "rgba(255, 149, 0, 0.15)" : "rgba(175, 82, 222, 0.15)" 
+                     backgroundColor: hasConflict ? "rgba(255, 149, 0, 0.04)" : suggestedConfidence === 'medium' ? "rgba(255, 149, 0, 0.04)" : "rgba(175, 82, 222, 0.04)", 
+                     borderColor: hasConflict ? "rgba(255, 149, 0, 0.25)" : suggestedConfidence === 'medium' ? "rgba(255, 149, 0, 0.15)" : "rgba(175, 82, 222, 0.15)" 
                    }}>
-                <div className="flex items-center gap-2.5">
-                  <Sparkles className="w-4 h-4 shrink-0 animate-pulse" style={{ color: suggestedConfidence === 'medium' ? "#FF9500" : "#AF52DE" }} />
-                  <div className="flex flex-col text-left">
-                    <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: suggestedConfidence === 'medium' ? "#FF9500" : "#AF52DE" }}>
-                      Önerilen Bölüm
-                    </span>
-                    <span className="text-[13px] font-semibold" style={{ color: "var(--q-text-primary)" }}>
-                      {suggestedDept} {suggestedConfidence === 'medium' ? "— Teyit Edin" : ""}
-                    </span>
+                <div className="flex items-center justify-between w-full">
+                  <div className="flex items-center gap-2.5">
+                    <Sparkles className="w-4 h-4 shrink-0 animate-pulse" style={{ color: hasConflict || suggestedConfidence === 'medium' ? "#FF9500" : "#AF52DE" }} />
+                    <div className="flex flex-col text-left">
+                      <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: hasConflict || suggestedConfidence === 'medium' ? "#FF9500" : "#AF52DE" }}>
+                        Önerilen Bölüm
+                      </span>
+                      <span className="text-[13px] font-semibold" style={{ color: "var(--q-text-primary)" }}>
+                        {suggestedDept} {hasConflict ? "— Çakışma Var" : suggestedConfidence === 'medium' ? "— Teyit Edin" : ""}
+                      </span>
+                    </div>
                   </div>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setDepartment(suggestedDept!);
+                      // Automatically trigger manual save to DB + set locks
+                      setIsSaving(true);
+                      setSaveStatus("saving");
+                      const res = await updateCrmData(activeContact.id, stage, suggestedDept!, country, notes, patientName);
+                      if (res.success) {
+                        useInboxStore.getState().setActiveContact(activeContact.id, {
+                          ...activeContact,
+                          department: suggestedDept!,
+                          name: patientName,
+                          opp_patient_name: patientName
+                        });
+                        mutate((key) => Array.isArray(key) && key[0] === "conversations");
+                        setSaveStatus("saved");
+                        setTimeout(() => setSaveStatus("idle"), 2000);
+                      } else {
+                        setSaveStatus("error");
+                        setTimeout(() => setSaveStatus("idle"), 3000);
+                      }
+                      setIsSaving(false);
+                    }}
+                    className="px-2.5 py-1.5 text-[11px] font-bold rounded-lg cursor-pointer bg-white border transition-all hover:scale-[1.02]"
+                    style={{ 
+                      color: hasConflict || suggestedConfidence === 'medium' ? "#FF9500" : "#AF52DE",
+                      borderColor: hasConflict || suggestedConfidence === 'medium' ? "rgba(255, 149, 0, 0.2)" : "rgba(175, 82, 222, 0.2)"
+                    }}
+                  >
+                    Onayla
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    setDepartment(suggestedDept!);
-                    // Automatically trigger manual save to DB + set locks
-                    setIsSaving(true);
-                    setSaveStatus("saving");
-                    const res = await updateCrmData(activeContact.id, stage, suggestedDept!, country, notes, patientName);
-                    if (res.success) {
-                      useInboxStore.getState().setActiveContact(activeContact.id, {
-                        ...activeContact,
-                        department: suggestedDept!,
-                        name: patientName,
-                        opp_patient_name: patientName
-                      });
-                      mutate((key) => Array.isArray(key) && key[0] === "conversations");
-                      setSaveStatus("saved");
-                      setTimeout(() => setSaveStatus("idle"), 2000);
-                    } else {
-                      setSaveStatus("error");
-                      setTimeout(() => setSaveStatus("idle"), 3000);
-                    }
-                    setIsSaving(false);
-                  }}
-                  className="px-2.5 py-1.5 text-[11px] font-bold rounded-lg cursor-pointer bg-white border transition-all hover:scale-[1.02]"
-                  style={{ 
-                    color: suggestedConfidence === 'medium' ? "#FF9500" : "#AF52DE",
-                    borderColor: suggestedConfidence === 'medium' ? "rgba(255, 149, 0, 0.2)" : "rgba(175, 82, 222, 0.2)"
-                  }}
-                >
-                  Onayla
-                </button>
+                {hasConflict && conflictReason && (
+                  <span className="text-[11px] font-semibold leading-relaxed text-left pt-1.5 block" style={{ color: "#FF9500", borderTop: "1px solid rgba(255, 149, 0, 0.15)" }}>
+                    ⚠️ {conflictReason}
+                  </span>
+                )}
+                {suggestedSource === 'patient_message' && activeContact.last_message && (
+                  <span className="text-[11px] font-semibold leading-relaxed text-left block" style={{ color: "var(--q-text-secondary)" }}>
+                    Kaynak: Hasta mesajı — "{activeContact.last_message}"
+                  </span>
+                )}
               </div>
             )}
           </div>

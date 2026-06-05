@@ -4,6 +4,7 @@ import { withTenantDB } from "@/lib/core/tenant-db";
 import { extractFormFields } from "@/lib/utils/form-field-extractor";
 import { normalizeCountry } from "@/lib/utils/country-normalizer";
 import { extractFromPatientMessageDeterministic, shouldRunAiExtractor } from "@/lib/utils/patient-message-extractor";
+import { resolveDepartmentWithConflict } from "@/lib/utils/crm-conflict-resolver";
 import { logger } from "@/lib/core/logger";
 
 export const dynamic = 'force-dynamic';
@@ -80,6 +81,7 @@ export async function GET(req: NextRequest) {
       countryNormalization: 0,
       skippedDueLocks: 0,
       skippedDueExisting: 0,
+      departmentConflicts: 0,
       noChange: 0
     };
 
@@ -164,27 +166,23 @@ export async function GET(req: NextRequest) {
         isDeptLocked && isCountryLocked
       );
 
-      // Determine extracted dept and country candidates
-      let candidateDept: string | null = null;
-      let deptConfidence: 'high' | 'medium' | 'low' = 'low';
-      let deptSource = 'None';
+      // Use the resolveDepartmentWithConflict utility to handle priorities and conflicts
+      const resolvedDeptObj = resolveDepartmentWithConflict({
+        existingDept,
+        formCampaignDept: formExt?.departmentSource === 'campaign_name' || formExt?.departmentSource === 'form_name' ? formExt.department : null,
+        formCampaignConfidence: formExt?.departmentSource === 'campaign_name' || formExt?.departmentSource === 'form_name' ? formExt.confidence : 0,
+        formComplaintDept: formExt?.departmentSource === 'complaint_keyword' ? formExt.department : null,
+        formComplaintConfidence: formExt?.departmentSource === 'complaint_keyword' ? formExt.confidence : 0,
+        patientMsgDept: msgExt?.departmentCandidate || null,
+        patientMsgConfidence: msgExt?.departmentConfidence || 'low',
+        isLocked: isDeptLocked
+      });
 
-      if (formExt?.department && formExt.confidence >= 0.8) {
-        candidateDept = formExt.department;
-        deptConfidence = 'high';
-        deptSource = `Form Campaign: ${formExt.departmentSource || 'campaign'}`;
-      } else if (msgExt?.departmentCandidate && msgExt.departmentConfidence === 'high') {
-        candidateDept = msgExt.departmentCandidate;
-        deptConfidence = 'high';
-        deptSource = 'Deterministic Message (High)';
-      } else if (msgExt?.departmentCandidate && msgExt.departmentConfidence === 'medium') {
-        candidateDept = msgExt.departmentCandidate;
-        deptConfidence = 'medium';
-        deptSource = 'Deterministic Message (Medium)';
-      } else if (aiEligible) {
-        deptConfidence = 'low';
-        deptSource = 'Eligible for AI Fallback';
-      }
+      const candidateDept = resolvedDeptObj.suggestedDept;
+      const deptConfidence = resolvedDeptObj.confidence;
+      const deptSource = resolvedDeptObj.source;
+      const hasConflict = resolvedDeptObj.hasConflict;
+      const writeAllowed = resolvedDeptObj.writeAllowed;
 
       // Normalization of country
       const rawCountryText = formExt?.country || existingCountry || null;
@@ -196,33 +194,34 @@ export async function GET(req: NextRequest) {
 
       // Stats increment and action resolution
       let action = 'No Change';
-      let rowConfidence = 'None';
+      let rowConfidence = deptConfidence.toUpperCase();
 
-      if (isDeptLocked || isCountryLocked) {
+      if (hasConflict) {
+        stats.departmentConflicts++;
+        action = `Conflict: ${resolvedDeptObj.conflictReason}`;
+      } else if (isDeptLocked || isCountryLocked) {
         stats.skippedDueLocks++;
         action = 'Skipped (Locked)';
       } else if (existingDept) {
         stats.skippedDueExisting++;
         action = 'Skipped (Existing Dept Set)';
       } else if (deptConfidence === 'high') {
-        if (deptSource.startsWith('Form')) {
+        if (deptSource === 'form_campaign') {
           stats.formCampaignHigh++;
         } else {
           stats.freeTextHigh++;
         }
         action = `Will Update: ${candidateDept}`;
-        rowConfidence = 'High';
       } else if (deptConfidence === 'medium') {
         stats.mediumCandidate++;
         action = `UI Candidate Only: ${candidateDept}`;
-        rowConfidence = 'Medium';
       } else {
         stats.noChange++;
       }
 
       if (countryNormalizedVal && isCountryDirtyVal) {
         stats.countryNormalization++;
-        if (action === 'No Change') {
+        if (action === 'No Change' || action.startsWith('Skipped')) {
           action = `Will Normalize Country: ${countryNormalizedVal}`;
         } else {
           action += ` & Normalize Country: ${countryNormalizedVal}`;
@@ -233,13 +232,17 @@ export async function GET(req: NextRequest) {
         conversationId: c.conversation_id,
         patientName: c.patient_name || 'Isimsiz Hasta',
         phoneNumber: c.phone_number,
-        existingDept: existingDept || 'Belirtilmemiş',
-        extractedDept: candidateDept || 'Belirlenemedi',
-        deptSource,
-        existingCountry: existingCountry || 'Belirtilmemiş',
-        normalizedCountry: countryNormalizedVal || 'Belirlenemedi',
-        confidence: rowConfidence,
-        action
+        current_department: existingDept || 'Belirtilmemiş',
+        suggested_department: candidateDept || 'Belirlenemedi',
+        department_confidence: rowConfidence,
+        current_country: existingCountry || 'Belirtilmemiş',
+        suggested_country: countryNormalizedVal || 'Belirlenemedi',
+        country_confidence: countryConf.toUpperCase(),
+        recommended_action: action,
+        write_allowed: writeAllowed ? 'Yes' : 'No',
+        form_campaign_department: formExt?.departmentSource === 'campaign_name' || formExt?.departmentSource === 'form_name' ? formExt.department : null,
+        patient_message_department: msgExt?.departmentCandidate || null,
+        has_department_conflict: hasConflict
       });
     }
 
