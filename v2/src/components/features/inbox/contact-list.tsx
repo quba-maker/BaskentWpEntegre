@@ -12,7 +12,13 @@ import {
   markConversationsUnread, 
   bulkSetBotMode, 
   prepareBulkFollowUpDrafts,
-  sendApprovedFollowUp
+  sendApprovedFollowUp,
+  toggleConversationFavorite,
+  archiveConversation,
+  unarchiveConversation,
+  bulkToggleFavorite,
+  bulkArchiveConversations,
+  bulkUnarchiveConversations
 } from "@/app/actions/inbox";
 import { useInboxStore } from "@/store/inbox-store";
 import { useDiagnosticsStore } from "@/lib/realtime/diagnostics-store";
@@ -84,7 +90,16 @@ function InitialsAvatar({ name, channel, unread }: InitialsAvatarProps) {
   );
 }
 
-function formatMessagePreview(text: string | null) {
+function formatMessagePreview(text: string | null, mediaType?: string | null) {
+  if (mediaType) {
+    const cleanText = text ? text.replace(/^(📷 Fotoğraf|🎬 Video|🎵 Ses kaydı|🎤 Sesli mesaj|📎 Belge|📄 Belge|📍 Konum|🏷️ Sticker):\s*/i, "").trim() : "";
+    if (mediaType.startsWith("image")) return "📷 Fotoğraf" + (cleanText ? `: ${cleanText}` : "");
+    if (mediaType.startsWith("video")) return "🎬 Video" + (cleanText ? `: ${cleanText}` : "");
+    if (mediaType.startsWith("audio")) return "🎵 Ses kaydı";
+    if (mediaType.startsWith("document") || mediaType.startsWith("application")) return "📄 Belge" + (cleanText ? `: ${cleanText}` : "");
+    if (mediaType.startsWith("sticker")) return "🏷️ Sticker";
+  }
+
   if (!text) return "";
   
   if (text.startsWith("📷 Fotoğraf") || text.includes("Fotoğraf")) return "📷 Fotoğraf";
@@ -300,6 +315,46 @@ export function ContactRail() {
         clearSelection();
       } else {
         setBulkActionError(res.error || "İşlem başarısız.");
+        setTimeout(() => setBulkActionError(null), 4000);
+      }
+    } catch (err: any) {
+      setBulkActionError("Sistem hatası. Lütfen tekrar deneyin.");
+      setTimeout(() => setBulkActionError(null), 4000);
+    }
+    setBulkActionLoading(false);
+  };
+
+const handleBulkFavorite = async (favorite: boolean) => {
+    setBulkActionLoading(true);
+    setBulkActionError(null);
+    try {
+      const res = await bulkToggleFavorite(selectedIds, favorite);
+      if (res && res.success) {
+        queryClient.invalidateQueries({ queryKey: ["conversations"] });
+        clearSelection();
+      } else {
+        setBulkActionError((res && res.error) || "İşlem başarısız.");
+        setTimeout(() => setBulkActionError(null), 4000);
+      }
+    } catch (err: any) {
+      setBulkActionError("Sistem hatası. Lütfen tekrar deneyin.");
+      setTimeout(() => setBulkActionError(null), 4000);
+    }
+    setBulkActionLoading(false);
+  };
+
+const handleBulkArchive = async (archive: boolean) => {
+    setBulkActionLoading(true);
+    setBulkActionError(null);
+    try {
+      const res = archive
+        ? await bulkArchiveConversations(selectedIds)
+        : await bulkUnarchiveConversations(selectedIds);
+      if (res && res.success) {
+        queryClient.invalidateQueries({ queryKey: ["conversations"] });
+        clearSelection();
+      } else {
+        setBulkActionError((res && res.error) || "İşlem başarısız.");
         setTimeout(() => setBulkActionError(null), 4000);
       }
     } catch (err: any) {
@@ -560,6 +615,31 @@ export function ContactRail() {
             }}
           />
         </div>
+
+        {/* Segment Quick Filters */}
+        <div className="flex p-0.5 mt-2.5 rounded-xl bg-black/[0.04] p-1 gap-1">
+          {[
+            { id: "all", label: "Tümü" },
+            { id: "unread", label: "Okunmamış" },
+            { id: "favorites", label: "⭐ Favoriler" },
+            { id: "archived", label: "📁 Arşiv" }
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => {
+                setStageFilter(tab.id);
+              }}
+              className="flex-1 py-1 text-[11px] font-bold rounded-lg transition-all text-center whitespace-nowrap cursor-pointer select-none"
+              style={{
+                background: stageFilter === tab.id ? "white" : "transparent",
+                color: stageFilter === tab.id ? "var(--q-blue)" : "var(--q-text-secondary)",
+                boxShadow: stageFilter === tab.id ? "0 1px 3px rgba(0,0,0,0.08)" : "none"
+              }}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* ── Channel Chips ── */}
@@ -645,7 +725,7 @@ export function ContactRail() {
                     )}
 
                     {/* Initials Avatar */}
-                    <InitialsAvatar name={c.name || c.id} channel={c.channel} unread={c.unread} />
+                    <InitialsAvatar name={c.name || c.id} channel={c.channel} unread={0} />
 
                     {/* Content */}
                     <div className="flex-1 min-w-0">
@@ -654,6 +734,12 @@ export function ContactRail() {
                           <span className="font-bold text-[14px] truncate" style={{ color: "var(--q-text-primary)" }}>
                             {c.name || c.id}
                           </span>
+                          {c.isFavorite && (
+                            <span className="ml-1 text-[11px] select-none" title="Favori">⭐</span>
+                          )}
+                          {c.isArchived && (
+                            <span className="ml-1 text-[11px] select-none" title="Arşivlenmiş">📁</span>
+                          )}
                           {(() => {
                             // Country priority: DB (AI-extracted) > phone prefix (deterministic guess)
                             // Medical tourism: patient may have +90 phone but live in Germany
@@ -689,7 +775,7 @@ export function ContactRail() {
                             {c.lastMessageStatus === 'read' && <CheckCheck className="w-4 h-4" style={{ color: "var(--q-blue)" }} />}
                           </span>
                         )}
-                        <span className="truncate">{senderPrefix}{formatMessagePreview(c.last_message)}</span>
+                        <span className="truncate">{senderPrefix}{formatMessagePreview(c.last_message, c.lastMessageMediaType)}</span>
                       </p>
                       <div className="flex gap-2 mt-2">
                         <span
@@ -717,17 +803,30 @@ export function ContactRail() {
                       </div>
                     </div>
 
-                    {/* Date and Pin Toggle */}
-                    <div className="flex flex-col items-end justify-between self-stretch shrink-0 min-h-[44px]">
-                      <span className="text-[10px] font-semibold tracking-wide whitespace-nowrap" style={{ color: "var(--q-text-secondary)" }}>
-                        {c.formattedTime}
-                      </span>
+                    {/* Date, Unread and Pin Toggle */}
+                    <div className="flex flex-col items-end justify-between self-stretch shrink-0 min-h-[50px] w-16">
+                      <div className="flex flex-col items-end gap-1.5 w-full">
+                        <span 
+                          className={`text-[10px] tracking-wide whitespace-nowrap ${c.unread > 0 ? "font-bold text-[#007AFF]" : "font-semibold text-gray-500"}`}
+                          style={{ color: c.unread > 0 ? "var(--q-blue, #007AFF)" : "var(--q-text-secondary)" }}
+                        >
+                          {c.formattedTime}
+                        </span>
+                        {c.unread > 0 && (
+                          <span
+                            className="text-white text-[9px] font-bold px-1.5 min-w-[18px] h-[18px] flex items-center justify-center rounded-full border border-white shadow-sm flex-shrink-0"
+                            style={{ background: "var(--q-blue, #007AFF)" }}
+                          >
+                            {c.unread}
+                          </span>
+                        )}
+                      </div>
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
                           handleTogglePin(c.id);
                         }}
-                        className={`p-1 rounded-lg hover:bg-black/5 transition-all text-xs ${
+                        className={`p-1 rounded-lg hover:bg-black/5 transition-all text-xs flex-shrink-0 ${
                           c.isPinned ? "opacity-100" : "opacity-0 group-hover:opacity-60 hover:opacity-100"
                         }`}
                         title={c.isPinned ? "Sabitlemeyi Kaldır" : "Sabitle"}
@@ -754,102 +853,127 @@ export function ContactRail() {
         )}
       </div>
       {/* ── Floating Bulk Actions Bar ── */}
-      {isSelectionMode && selectedIds.length > 0 && (
-        <div 
-          className="absolute bottom-4 left-4 right-4 z-20 p-3 rounded-2xl border flex flex-col gap-2 shadow-xl animate-fade-in"
-          style={{ 
-            borderColor: "rgba(0,122,255,0.15)",
-            background: "rgba(255, 255, 255, 0.9)",
-            backdropFilter: "blur(12px)"
-          }}
-        >
-          <div className="flex justify-between items-center px-1">
-            <span className="text-[11px] font-bold text-indigo-600">{selectedIds.length} sohbet seçildi</span>
-            <button 
-              onClick={() => clearSelection()}
-              className="text-[10px] font-semibold text-gray-500 hover:text-black transition-colors cursor-pointer"
-            >
-              Vazgeç
-            </button>
-          </div>
+      {isSelectionMode && selectedIds.length > 0 && (() => {
+        const isAnyFavorite = selectedIds.some(id => {
+          const c = contacts.find((x: any) => x.conversation_id === id);
+          return !!c?.isFavorite;
+        });
+        const isAnyArchived = selectedIds.some(id => {
+          const c = contacts.find((x: any) => x.conversation_id === id);
+          return !!c?.isArchived;
+        });
 
-          <div className="grid grid-cols-2 gap-1.5">
-            <button
-              onClick={() => handleBulkAction('read', selectedIds)}
-              disabled={bulkActionLoading}
-              className="py-1.5 px-2 bg-gray-50 hover:bg-gray-100 border rounded-xl text-[10px] font-bold text-gray-800 transition-all flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50"
-            >
-              Okundu Yap
-            </button>
-            <button
-              onClick={() => handleBulkAction('unread', selectedIds)}
-              disabled={bulkActionLoading}
-              className="py-1.5 px-2 bg-gray-50 hover:bg-gray-100 border rounded-xl text-[10px] font-bold text-gray-800 transition-all flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50"
-            >
-              Okunmadı Yap
-            </button>
-            <button
-              onClick={() => handleBulkAction('bot', selectedIds)}
-              disabled={bulkActionLoading}
-              className="py-1.5 px-2 bg-gray-50 hover:bg-gray-100 border rounded-xl text-[10px] font-bold text-indigo-700 transition-all flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50"
-            >
-              Bota Devret
-            </button>
-            <button
-              onClick={() => handleBulkAction('manual', selectedIds)}
-              disabled={bulkActionLoading}
-              className="py-1.5 px-2 bg-gray-50 hover:bg-gray-100 border rounded-xl text-[10px] font-bold text-amber-700 transition-all flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50"
-            >
-              Manuele Al
-            </button>
-          </div>
+        return (
+          <div 
+            className="absolute bottom-4 left-4 right-4 z-20 p-3 rounded-2xl border flex flex-col gap-2 shadow-xl animate-fade-in"
+            style={{ 
+              borderColor: "rgba(0,122,255,0.15)",
+              background: "rgba(255, 255, 255, 0.9)",
+              backdropFilter: "blur(12px)"
+            }}
+          >
+            <div className="flex justify-between items-center px-1">
+              <span className="text-[11px] font-bold text-indigo-600">{selectedIds.length} sohbet seçildi</span>
+              <button 
+                onClick={() => clearSelection()}
+                className="text-[10px] font-semibold text-gray-500 hover:text-black transition-colors cursor-pointer"
+              >
+                Vazgeç
+              </button>
+            </div>
 
-          <button
-            onClick={async () => {
-              if (selectedIds.length > 10) {
-                setBulkActionError("En fazla 10 sohbet için aynı anda taslak hazırlanabilir.");
-                setTimeout(() => setBulkActionError(null), 4000);
-                return;
-              }
-              setIsLoadingBulkDrafts(true);
-              setBulkActionError(null);
-              try {
-                const res = await prepareBulkFollowUpDrafts(selectedIds);
-                if (res.success && 'results' in res) {
-                  setBulkDraftsModal({ isOpen: true, results: res.results });
-                } else {
-                  setBulkActionError((res as any).error || "Taslaklar hazırlanamadı.");
+            <div className="grid grid-cols-3 gap-1.5">
+              <button
+                onClick={() => handleBulkAction('read', selectedIds)}
+                disabled={bulkActionLoading}
+                className="py-1.5 px-2 bg-gray-50 hover:bg-gray-100 border rounded-xl text-[10px] font-bold text-gray-800 transition-all flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50"
+              >
+                Okundu Yap
+              </button>
+              <button
+                onClick={() => handleBulkAction('unread', selectedIds)}
+                disabled={bulkActionLoading}
+                className="py-1.5 px-2 bg-gray-50 hover:bg-gray-100 border rounded-xl text-[10px] font-bold text-gray-800 transition-all flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50"
+              >
+                Okunmadı Yap
+              </button>
+              <button
+                onClick={() => handleBulkFavorite(!isAnyFavorite)}
+                disabled={bulkActionLoading}
+                className="py-1.5 px-2 bg-gray-50 hover:bg-gray-100 border rounded-xl text-[10px] font-bold text-gray-800 transition-all flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50"
+              >
+                {isAnyFavorite ? "⭐ Yıldız Kaldır" : "⭐ Yıldızla"}
+              </button>
+              <button
+                onClick={() => handleBulkAction('bot', selectedIds)}
+                disabled={bulkActionLoading}
+                className="py-1.5 px-2 bg-gray-50 hover:bg-gray-100 border rounded-xl text-[10px] font-bold text-indigo-700 transition-all flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50"
+              >
+                Bota Devret
+              </button>
+              <button
+                onClick={() => handleBulkAction('manual', selectedIds)}
+                disabled={bulkActionLoading}
+                className="py-1.5 px-2 bg-gray-50 hover:bg-gray-100 border rounded-xl text-[10px] font-bold text-amber-700 transition-all flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50"
+              >
+                Manuele Al
+              </button>
+              <button
+                onClick={() => handleBulkArchive(!isAnyArchived)}
+                disabled={bulkActionLoading}
+                className="py-1.5 px-2 bg-gray-50 hover:bg-gray-100 border rounded-xl text-[10px] font-bold text-gray-800 transition-all flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50"
+              >
+                {isAnyArchived ? "📁 Arşiv Kaldır" : "📁 Arşivle"}
+              </button>
+            </div>
+
+            <button
+              onClick={async () => {
+                if (selectedIds.length > 10) {
+                  setBulkActionError("En fazla 10 sohbet için aynı anda taslak hazırlanabilir.");
+                  setTimeout(() => setBulkActionError(null), 4000);
+                  return;
+                }
+                setIsLoadingBulkDrafts(true);
+                setBulkActionError(null);
+                try {
+                  const res = await prepareBulkFollowUpDrafts(selectedIds);
+                  if (res.success && 'results' in res) {
+                    setBulkDraftsModal({ isOpen: true, results: res.results });
+                  } else {
+                    setBulkActionError((res as any).error || "Taslaklar hazırlanamadı.");
+                    setTimeout(() => setBulkActionError(null), 4000);
+                  }
+                } catch (e) {
+                  setBulkActionError("Bir sistem hatası oluştu.");
                   setTimeout(() => setBulkActionError(null), 4000);
                 }
-              } catch (e) {
-                setBulkActionError("Bir sistem hatası oluştu.");
-                setTimeout(() => setBulkActionError(null), 4000);
-              }
-              setIsLoadingBulkDrafts(false);
-            }}
-            disabled={bulkActionLoading || isLoadingBulkDrafts}
-            className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-[10px] font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
-          >
-            {isLoadingBulkDrafts ? (
-              <>
-                <Loader2 className="w-3 h-3 animate-spin" />
-                <span>Hazırlanıyor...</span>
-              </>
-            ) : (
-              <>
-                <Sparkles className="w-3 h-3" />
-                <span>Taslakları Önizle</span>
-              </>
-            )}
-          </button>
+                setIsLoadingBulkDrafts(false);
+              }}
+              disabled={bulkActionLoading || isLoadingBulkDrafts}
+              className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-[10px] font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+            >
+              {isLoadingBulkDrafts ? (
+                <>
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  <span>Hazırlanıyor...</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-3 h-3" />
+                  <span>Taslakları Önizle</span>
+                </>
+              )}
+            </button>
 
-          {bulkActionError && (
-            <div className="text-[10px] font-bold text-red-600 bg-red-50 border border-red-100 rounded-lg p-1.5 text-center mt-1 leading-snug">
-              ⚠️ {bulkActionError}
-            </div>
-          )}
-        </div>
-      )}
+            {bulkActionError && (
+              <div className="text-[10px] font-bold text-red-600 bg-red-50 border border-red-100 rounded-lg p-1.5 text-center mt-1 leading-snug">
+                ⚠️ {bulkActionError}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* ── Context Menu (Sağ Tık) ── */}
       {contextMenu && (
@@ -936,23 +1060,50 @@ export function ContactRail() {
           <div className="h-[1px] my-1 bg-gray-100" />
 
           <button
-            disabled
-            className="w-full px-3.5 py-2 text-xs font-semibold opacity-40 flex items-center gap-2 cursor-not-allowed text-left"
-            style={{ color: "var(--q-text-secondary)" }}
-            title="A1.7d-2 fazında eklenecektir."
+            onClick={async () => {
+              const convId = contextMenu.conversationId;
+              setContextMenu(null);
+              try {
+                const res = await toggleConversationFavorite(convId);
+                if (res && res.success) {
+                   queryClient.invalidateQueries({ queryKey: ["conversations"] });
+                } else {
+                  setErrorToast((res && res.error) || "İşlem başarısız.");
+                }
+              } catch (e) {
+                setErrorToast("Bir hata oluştu.");
+              }
+            }}
+            className="w-full px-3.5 py-2 text-xs font-semibold hover:bg-black/5 flex items-center gap-2 cursor-pointer transition-colors text-left"
+            style={{ color: "var(--q-text-primary)" }}
           >
             <span>⭐</span>
-            <span>Favoriye ekle <span className="text-[10px] text-gray-400 font-normal">(Yakında)</span></span>
+            <span>{contacts.find((x: any) => x.conversation_id === contextMenu.conversationId)?.isFavorite ? "Favoriden çıkar" : "Favoriye ekle"}</span>
           </button>
 
           <button
-            disabled
-            className="w-full px-3.5 py-2 text-xs font-semibold opacity-40 flex items-center gap-2 cursor-not-allowed text-left"
-            style={{ color: "var(--q-text-secondary)" }}
-            title="A1.7d-2 fazında eklenecektir."
+            onClick={async () => {
+              const convId = contextMenu.conversationId;
+              setContextMenu(null);
+              try {
+                const isArch = !!contacts.find((x: any) => x.conversation_id === contextMenu.conversationId)?.isArchived;
+                const res = isArch 
+                  ? await unarchiveConversation(convId)
+                  : await archiveConversation(convId);
+                if (res && res.success) {
+                   queryClient.invalidateQueries({ queryKey: ["conversations"] });
+                } else {
+                  setErrorToast((res && res.error) || "İşlem başarısız.");
+                }
+              } catch (e) {
+                setErrorToast("Bir hata oluştu.");
+              }
+            }}
+            className="w-full px-3.5 py-2 text-xs font-semibold hover:bg-black/5 flex items-center gap-2 cursor-pointer transition-colors text-left"
+            style={{ color: "var(--q-text-primary)" }}
           >
             <span>📁</span>
-            <span>Arşivle <span className="text-[10px] text-gray-400 font-normal">(Yakında)</span></span>
+            <span>{contacts.find((x: any) => x.conversation_id === contextMenu.conversationId)?.isArchived ? "Arşivden çıkar" : "Arşivle"}</span>
           </button>
 
           <button

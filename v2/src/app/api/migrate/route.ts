@@ -336,9 +336,62 @@ export async function GET() {
     await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_message_model TEXT`;
     results.push('phase_1_3_tables: OK');
 
+    // Phase A1.7d-2 - Favorites and Archives user-scoped tables
+    await sql`
+      CREATE TABLE IF NOT EXISTS conversation_favorites (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(tenant_id, user_id, conversation_id)
+      )
+    `;
+    await sql`CREATE INDEX IF NOT EXISTS idx_conversation_favorites_user ON conversation_favorites(tenant_id, user_id, created_at DESC)`;
+
+    await sql`
+      CREATE TABLE IF NOT EXISTS conversation_archives (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(tenant_id, user_id, conversation_id)
+      )
+    `;
+    await sql`CREATE INDEX IF NOT EXISTS idx_conversation_archives_user ON conversation_archives(tenant_id, user_id, created_at DESC)`;
+
+    // Enable RLS
+    await sql`ALTER TABLE conversation_favorites ENABLE ROW LEVEL SECURITY`;
+    await sql`ALTER TABLE conversation_archives ENABLE ROW LEVEL SECURITY`;
+
+    // Drop existing policies if any
+    await sql`DROP POLICY IF EXISTS tenant_isolation_policy ON conversation_favorites`;
+    await sql`DROP POLICY IF EXISTS tenant_isolation_policy ON conversation_archives`;
+
+    // Create strict RLS policies matching expected pattern
+    await sql`
+      CREATE POLICY tenant_isolation_policy ON conversation_favorites
+      FOR ALL
+      USING (
+        (current_setting('app.bypass_rls', true) = 'true')
+        OR (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)
+      )
+    `;
+    await sql`
+      CREATE POLICY tenant_isolation_policy ON conversation_archives
+      FOR ALL
+      USING (
+        (current_setting('app.bypass_rls', true) = 'true')
+        OR (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)
+      )
+    `;
+
+    results.push('conversation_favorites and conversation_archives: OK');
+
     return NextResponse.json({ 
       success: true, 
-      message: 'Migration completed successfully (Phase 6 and 1.3 included)!',
+      message: 'Migration completed successfully (Phase 6, 1.3 and Favorites/Archives included)!',
       details: results 
     });
   } catch (error: any) {
@@ -367,7 +420,8 @@ export async function POST() {
       'ai_module_settings', 'ai_events', 'brain_versions',
       'ai_runtime_logs', 'tool_permissions', 'feature_flags',
       'ai_audit_logs', 'ai_runtime_metrics', 'conversation_pins',
-      'conversation_read_states'
+      'conversation_read_states', 'conversation_favorites',
+      'conversation_archives'
     ];
 
     const existingTables = await sql`
@@ -381,6 +435,19 @@ export async function POST() {
         check: `table:${table}`,
         status: tableNames.has(table) ? 'pass' : 'fail',
         detail: tableNames.has(table) ? 'exists' : 'MISSING'
+      });
+    }
+
+    // Verify RLS enablement status on new tables
+    const rlsChecked = await sql`
+      SELECT tablename, rowsecurity FROM pg_tables
+      WHERE schemaname = 'public' AND tablename IN ('conversation_favorites', 'conversation_archives')
+    `;
+    for (const row of rlsChecked) {
+      checks.push({
+        check: `rls:${row.tablename}`,
+        status: row.rowsecurity ? 'pass' : 'fail',
+        detail: row.rowsecurity ? 'enabled' : 'DISABLED'
       });
     }
 

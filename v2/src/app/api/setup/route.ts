@@ -833,6 +833,62 @@ export async function GET(req: NextRequest) {
     }
     results.push("✅ PHASE 1.3: Pin ve Read State tabloları hazır");
 
+    // =====================================================
+    // 29. PHASE A1.7d-2: FAVORITES & ARCHIVES
+    // =====================================================
+    await execute`
+      CREATE TABLE IF NOT EXISTS conversation_favorites (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(tenant_id, user_id, conversation_id)
+      )
+    `;
+    await execute`CREATE INDEX IF NOT EXISTS idx_conversation_favorites_user ON conversation_favorites(tenant_id, user_id, created_at DESC)`;
+
+    await execute`
+      CREATE TABLE IF NOT EXISTS conversation_archives (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(tenant_id, user_id, conversation_id)
+      )
+    `;
+    await execute`CREATE INDEX IF NOT EXISTS idx_conversation_archives_user ON conversation_archives(tenant_id, user_id, created_at DESC)`;
+
+    try {
+      await execute`ALTER TABLE conversation_favorites ENABLE ROW LEVEL SECURITY`;
+      await execute`ALTER TABLE conversation_archives ENABLE ROW LEVEL SECURITY`;
+
+      await execute`DROP POLICY IF EXISTS tenant_isolation_policy ON conversation_favorites`;
+      await execute`
+        CREATE POLICY tenant_isolation_policy ON conversation_favorites
+        FOR ALL
+        USING (
+          (current_setting('app.bypass_rls', true) = 'true')
+          OR (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)
+        )
+      `;
+
+      await execute`DROP POLICY IF EXISTS tenant_isolation_policy ON conversation_archives`;
+      await execute`
+        CREATE POLICY tenant_isolation_policy ON conversation_archives
+        FOR ALL
+        USING (
+          (current_setting('app.bypass_rls', true) = 'true')
+          OR (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)
+        )
+      `;
+      results.push("✅ PHASE A1.7d-2: conversation_favorites ve conversation_archives RLS policies oluşturuldu");
+    } catch (e: any) {
+      results.push("⚠️ PHASE A1.7d-2: RLS policies: " + e.message);
+    }
+    results.push("✅ PHASE A1.7d-2: Favorites ve Archives tabloları hazır");
+
     if (isDryRun) {
       return NextResponse.json({ success: true, mode: "dryRun", results, executedQueries: dryRunLogs });
     }

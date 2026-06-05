@@ -728,6 +728,22 @@ export function ConversationViewport() {
       }
       m.mediaMetadata = meta;
 
+      // Normalize mediaType if missing but mediaUrl is present
+      if (!m.mediaType && m.mediaUrl) {
+        const cleanUrl = m.mediaUrl.split('?')[0].split('#')[0].toLowerCase();
+        if (cleanUrl.match(/\.(jpg|jpeg|png|webp|gif|bmp|svg|tiff)$/)) {
+          m.mediaType = 'image';
+        } else if (cleanUrl.match(/\.(mp4|mkv|avi|mov|webm|flv|3gp|m4v)$/)) {
+          m.mediaType = 'video';
+        } else if (cleanUrl.match(/\.(mp3|wav|ogg|m4a|aac|amr|opus)$/)) {
+          m.mediaType = 'audio';
+        } else if (cleanUrl.match(/\.(pdf|doc|docx|xls|xlsx|ppt|pptx|txt|csv|zip|rar|tar|gz|7z)$/)) {
+          m.mediaType = 'document';
+        } else {
+          m.mediaType = 'document'; // default fallback
+        }
+      }
+
       if (m.providerMessageId) {
         messageIdMap.set(m.providerMessageId, m);
       }
@@ -1288,11 +1304,32 @@ export function ConversationViewport() {
     if (!messages || messages.length === 0) return [];
     return messages
       .filter((m: any) => (m.mediaType === 'image' || m.mediaType === 'sticker') && m.mediaUrl)
-      .map((m: any) => ({
-        src: m.mediaUrl,
-        caption: m.mediaMetadata?.caption || undefined,
-        timeMs: m.timeMs,
-      }));
+      .map((m: any) => {
+        let caption = m.mediaMetadata?.caption || undefined;
+        if (!caption && m.text) {
+          const placeholders = ['📷 Fotoğraf', '📎 Belge', '🎵 Ses kaydı', '🎬 Video', '📍 Konum', '🏷️ Sticker'];
+          const emojiPrefixes = ['📷', '📎', '🎵', '🎬', '📍', '🏷️', '📦'];
+          
+          if (!placeholders.includes(m.text) && !emojiPrefixes.includes(m.text)) {
+            const colonIdx = m.text.indexOf(': ');
+            if (colonIdx !== -1) {
+              const before = m.text.substring(0, colonIdx);
+              if (emojiPrefixes.some(p => before.startsWith(p))) {
+                caption = m.text.substring(colonIdx + 2).trim();
+              }
+            } else {
+              if (!emojiPrefixes.some(p => m.text.startsWith(p))) {
+                caption = m.text.trim();
+              }
+            }
+          }
+        }
+        return {
+          src: m.mediaUrl,
+          caption: caption,
+          timeMs: m.timeMs,
+        };
+      });
   }, [messages]);
 
   // Flatten date-grouped messages into a dynamic virtualization feed

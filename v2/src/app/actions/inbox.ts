@@ -27,6 +27,9 @@ export async function getConversations(page: number = 1, search: string = "", st
       
       const isNoReplyFilter = stage && stage.startsWith('noReply');
       const isUnreadFilter = stage === 'unread';
+      const isFavoritesFilter = stage === 'favorites';
+      const isArchivedFilter = stage === 'archived';
+
       let noReplyHours: number | null = null;
       if (isNoReplyFilter) {
         const match = stage.match(/noReply_(\d+)h/);
@@ -35,7 +38,9 @@ export async function getConversations(page: number = 1, search: string = "", st
         }
       }
 
-      const stageFilter = (isNoReplyFilter || isUnreadFilter) ? null : (stage !== "all" ? stage : null);
+      const stageFilter = (isNoReplyFilter || isUnreadFilter || isFavoritesFilter || isArchivedFilter) 
+        ? null 
+        : (stage !== "all" ? stage : null);
 
       const optOutPhones = new Set<string>();
       if (isNoReplyFilter) {
@@ -112,10 +117,12 @@ export async function getConversations(page: number = 1, search: string = "", st
           c.notes as notes,
           c.last_message_at,
           EXTRACT(EPOCH FROM c.last_message_at) * 1000 as last_message_time_ms,
-          COALESCE(c.last_message_content, m.content) as last_message,
-          COALESCE(c.last_message_status, m.status) as last_message_status,
-          COALESCE(c.last_message_direction, m.direction) as last_message_direction,
-          COALESCE(c.last_message_model, m.model_used) as last_message_model,
+          m.content as last_message,
+          m.status as last_message_status,
+          m.direction as last_message_direction,
+          m.model_used as last_message_model,
+          m.media_type as last_message_media_type,
+          m.media_url as last_message_media_url,
           l.id as lead_id,
           l.form_name,
           l.patient_name as form_patient_name,
@@ -152,6 +159,8 @@ export async function getConversations(page: number = 1, search: string = "", st
               )
           ) as unread,
           (cp.id IS NOT NULL) as is_pinned,
+          (cf.id IS NOT NULL) as is_favorite,
+          (ca.id IS NOT NULL) as is_archived,
           NULLIF(TRIM(CONCAT(cprof.first_name, ' ', cprof.last_name)), '') as customer_display_name,
           wa.wa_profile_name
         FROM conversations c
@@ -168,15 +177,15 @@ export async function getConversations(page: number = 1, search: string = "", st
           LIMIT 1
         ) wa ON true
         LEFT JOIN LATERAL (
-          SELECT content, status, direction, model_used
+          SELECT content, status, direction, model_used, media_type, media_url
           FROM messages 
-          WHERE phone_number = c.phone_number 
-            AND messages.tenant_id = $1
-            AND direction != 'system'
+          WHERE conversation_id = c.id 
+            AND tenant_id = c.tenant_id
+            AND direction IN ('in', 'out')
             AND (media_metadata IS NULL OR COALESCE(media_metadata->'native'->>'message_type', '') != 'reaction')
           ORDER BY created_at DESC 
           LIMIT 1
-        ) m ON c.last_message_content IS NULL
+        ) m ON true
         LEFT JOIN LATERAL (
           SELECT id, form_name, patient_name, raw_data, created_at 
           FROM leads 
@@ -216,9 +225,37 @@ export async function getConversations(page: number = 1, search: string = "", st
           ON c.id = cp.conversation_id
           AND cp.user_id = $6
           AND cp.tenant_id = c.tenant_id
+        -- Favorites Join
+        LEFT JOIN conversation_favorites cf
+          ON c.id = cf.conversation_id
+          AND cf.user_id = $6
+          AND cf.tenant_id = c.tenant_id
+        -- Archives Join
+        LEFT JOIN conversation_archives ca
+          ON c.id = ca.conversation_id
+          AND ca.user_id = $6
+          AND ca.tenant_id = c.tenant_id
         WHERE c.tenant_id = $1
           AND ($2::text IS NULL OR c.patient_name ILIKE $2 OR c.phone_number ILIKE $2)
           AND ($3::text IS NULL OR c.lead_stage = $3)
+          ${isFavoritesFilter ? 'AND cf.id IS NOT NULL AND ca.id IS NULL' : ''}
+          ${isArchivedFilter ? 'AND ca.id IS NOT NULL' : (isFavoritesFilter ? '' : `
+            AND (
+              ca.id IS NULL 
+              OR EXISTS (
+                SELECT 1 
+                FROM messages m_unread
+                WHERE m_unread.conversation_id = c.id
+                  AND m_unread.tenant_id = c.tenant_id
+                  AND m_unread.direction = 'in'
+                  AND (m_unread.media_metadata IS NULL OR COALESCE(m_unread.media_metadata->'native'->>'message_type', '') != 'reaction')
+                  AND m_unread.created_at > COALESCE(
+                    (SELECT last_read_at FROM conversation_read_states rs WHERE rs.tenant_id = c.tenant_id AND rs.user_id = $6 AND rs.conversation_id = c.id),
+                    '1970-01-01'::timestamptz
+                  )
+              )
+            )
+          `)}
       `;
 
       const values: any[] = [ctx.tenantId, searchFilter, stageFilter, limit, offset, ctx.userId];
@@ -373,7 +410,11 @@ export async function getConversations(page: number = 1, search: string = "", st
           lastMessageStatus: r.last_message_status || 'sent',
           lastMessageDirection: r.last_message_direction || 'in',
           lastMessageModel: r.last_message_model || null,
+          lastMessageMediaType: r.last_message_media_type || null,
+          lastMessageMediaUrl: r.last_message_media_url || null,
           isPinned: !!r.is_pinned,
+          isFavorite: !!r.is_favorite,
+          isArchived: !!r.is_archived,
           unread: r.unread || 0,
           opp_summary: r.opp_summary || null,
           opp_ai_reason: r.opp_ai_reason || null,
@@ -3053,6 +3094,276 @@ export async function prepareBulkFollowUpDrafts(conversationIds: string[]) {
         windowOpen?: boolean;
       }[]
     };
+  });
+}
+
+export async function toggleConversationFavorite(conversationId: string) {
+  if (!conversationId) return { success: false, error: "Missing conversationId" };
+  return withActionGuard(
+    { actionName: 'toggleConversationFavorite' },
+    async (ctx) => {
+      // 1. Verify conversation belongs to tenant
+      const convRows = await ctx.db.executeSafe({
+        text: `SELECT id FROM conversations WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+        values: [conversationId, ctx.tenantId]
+      });
+      const convList = Array.isArray(convRows) ? convRows : ((convRows as any)?.rows || []);
+      if (convList.length === 0) {
+        return { success: false, error: "Sohbet bulunamadı veya yetkisiz erişim." };
+      }
+
+      // 2. Check if already favorited
+      const favRows = await ctx.db.executeSafe({
+        text: `SELECT 1 FROM conversation_favorites WHERE tenant_id = $1 AND user_id = $2 AND conversation_id = $3 LIMIT 1`,
+        values: [ctx.tenantId, ctx.userId, conversationId]
+      });
+      const favList = Array.isArray(favRows) ? favRows : ((favRows as any)?.rows || []);
+      const isFavorite = favList.length > 0;
+
+      if (isFavorite) {
+        await ctx.db.executeSafe({
+          text: `DELETE FROM conversation_favorites WHERE tenant_id = $1 AND user_id = $2 AND conversation_id = $3`,
+          values: [ctx.tenantId, ctx.userId, conversationId]
+        });
+      } else {
+        await ctx.db.executeSafe({
+          text: `INSERT INTO conversation_favorites (tenant_id, user_id, conversation_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+          values: [ctx.tenantId, ctx.userId, conversationId]
+        });
+      }
+
+      await logAudit({
+        tenantId: ctx.tenantId,
+        userId: ctx.userId,
+        action: isFavorite ? "remove_favorite" : "add_favorite",
+        entityType: "conversation",
+        entityId: conversationId,
+        details: { conversationId }
+      });
+
+      return { success: true, isFavorite: !isFavorite };
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error };
+    return res.data;
+  });
+}
+
+export async function archiveConversation(conversationId: string) {
+  if (!conversationId) return { success: false, error: "Missing conversationId" };
+  return withActionGuard(
+    { actionName: 'archiveConversation' },
+    async (ctx) => {
+      // 1. Verify conversation belongs to tenant
+      const convRows = await ctx.db.executeSafe({
+        text: `SELECT id FROM conversations WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+        values: [conversationId, ctx.tenantId]
+      });
+      const convList = Array.isArray(convRows) ? convRows : ((convRows as any)?.rows || []);
+      if (convList.length === 0) {
+        return { success: false, error: "Sohbet bulunamadı veya yetkisiz erişim." };
+      }
+
+      await ctx.db.executeSafe({
+        text: `INSERT INTO conversation_archives (tenant_id, user_id, conversation_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+        values: [ctx.tenantId, ctx.userId, conversationId]
+      });
+
+      await logAudit({
+        tenantId: ctx.tenantId,
+        userId: ctx.userId,
+        action: "archive_conversation",
+        entityType: "conversation",
+        entityId: conversationId,
+        details: { conversationId }
+      });
+
+      return { success: true };
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error };
+    return res.data;
+  });
+}
+
+export async function unarchiveConversation(conversationId: string) {
+  if (!conversationId) return { success: false, error: "Missing conversationId" };
+  return withActionGuard(
+    { actionName: 'unarchiveConversation' },
+    async (ctx) => {
+      // 1. Verify conversation belongs to tenant
+      const convRows = await ctx.db.executeSafe({
+        text: `SELECT id FROM conversations WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+        values: [conversationId, ctx.tenantId]
+      });
+      const convList = Array.isArray(convRows) ? convRows : ((convRows as any)?.rows || []);
+      if (convList.length === 0) {
+        return { success: false, error: "Sohbet bulunamadı veya yetkisiz erişim." };
+      }
+
+      await ctx.db.executeSafe({
+        text: `DELETE FROM conversation_archives WHERE tenant_id = $1 AND user_id = $2 AND conversation_id = $3`,
+        values: [ctx.tenantId, ctx.userId, conversationId]
+      });
+
+      await logAudit({
+        tenantId: ctx.tenantId,
+        userId: ctx.userId,
+        action: "unarchive_conversation",
+        entityType: "conversation",
+        entityId: conversationId,
+        details: { conversationId }
+      });
+
+      return { success: true };
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error };
+    return res.data;
+  });
+}
+
+export async function bulkToggleFavorite(conversationIds: string[], favorite: boolean) {
+  if (!conversationIds || conversationIds.length === 0) return { success: false, error: "Missing conversationIds" };
+  return withActionGuard(
+    { actionName: 'bulkToggleFavorite' },
+    async (ctx) => {
+      const ids = conversationIds.slice(0, 50);
+
+      // Verify conversations belong to tenant
+      const convRows = await ctx.db.executeSafe({
+        text: `SELECT id FROM conversations WHERE id = ANY($1::uuid[]) AND tenant_id = $2`,
+        values: [ids, ctx.tenantId]
+      });
+      const convList = Array.isArray(convRows) ? convRows : ((convRows as any)?.rows || []);
+      const validIds = convList.map((r: any) => r.id);
+
+      if (validIds.length === 0) {
+        return { success: false, error: "Geçerli sohbet bulunamadı." };
+      }
+
+      if (favorite) {
+        await ctx.db.executeSafe({
+          text: `
+            INSERT INTO conversation_favorites (tenant_id, user_id, conversation_id)
+            SELECT $1, $2, unnest($3::uuid[])
+            ON CONFLICT DO NOTHING
+          `,
+          values: [ctx.tenantId, ctx.userId, validIds]
+        });
+      } else {
+        await ctx.db.executeSafe({
+          text: `
+            DELETE FROM conversation_favorites
+            WHERE tenant_id = $1 AND user_id = $2 AND conversation_id = ANY($3::uuid[])
+          `,
+          values: [ctx.tenantId, ctx.userId, validIds]
+        });
+      }
+
+      await logAudit({
+        tenantId: ctx.tenantId,
+        userId: ctx.userId,
+        action: favorite ? "bulk_add_favorite" : "bulk_remove_favorite",
+        entityType: "conversation",
+        entityId: validIds[0],
+        details: { count: validIds.length }
+      });
+
+      return { success: true, count: validIds.length };
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error };
+    return res.data;
+  });
+}
+
+export async function bulkArchiveConversations(conversationIds: string[]) {
+  if (!conversationIds || conversationIds.length === 0) return { success: false, error: "Missing conversationIds" };
+  return withActionGuard(
+    { actionName: 'bulkArchiveConversations' },
+    async (ctx) => {
+      const ids = conversationIds.slice(0, 50);
+
+      // Verify conversations belong to tenant
+      const convRows = await ctx.db.executeSafe({
+        text: `SELECT id FROM conversations WHERE id = ANY($1::uuid[]) AND tenant_id = $2`,
+        values: [ids, ctx.tenantId]
+      });
+      const convList = Array.isArray(convRows) ? convRows : ((convRows as any)?.rows || []);
+      const validIds = convList.map((r: any) => r.id);
+
+      if (validIds.length === 0) {
+        return { success: false, error: "Geçerli sohbet bulunamadı." };
+      }
+
+      await ctx.db.executeSafe({
+        text: `
+          INSERT INTO conversation_archives (tenant_id, user_id, conversation_id)
+          SELECT $1, $2, unnest($3::uuid[])
+          ON CONFLICT DO NOTHING
+        `,
+        values: [ctx.tenantId, ctx.userId, validIds]
+      });
+
+      await logAudit({
+        tenantId: ctx.tenantId,
+        userId: ctx.userId,
+        action: "bulk_archive_conversations",
+        entityType: "conversation",
+        entityId: validIds[0],
+        details: { count: validIds.length }
+      });
+
+      return { success: true, count: validIds.length };
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error };
+    return res.data;
+  });
+}
+
+export async function bulkUnarchiveConversations(conversationIds: string[]) {
+  if (!conversationIds || conversationIds.length === 0) return { success: false, error: "Missing conversationIds" };
+  return withActionGuard(
+    { actionName: 'bulkUnarchiveConversations' },
+    async (ctx) => {
+      const ids = conversationIds.slice(0, 50);
+
+      // Verify conversations belong to tenant
+      const convRows = await ctx.db.executeSafe({
+        text: `SELECT id FROM conversations WHERE id = ANY($1::uuid[]) AND tenant_id = $2`,
+        values: [ids, ctx.tenantId]
+      });
+      const convList = Array.isArray(convRows) ? convRows : ((convRows as any)?.rows || []);
+      const validIds = convList.map((r: any) => r.id);
+
+      if (validIds.length === 0) {
+        return { success: false, error: "Geçerli sohbet bulunamadı." };
+      }
+
+      await ctx.db.executeSafe({
+        text: `
+          DELETE FROM conversation_archives
+          WHERE tenant_id = $1 AND user_id = $2 AND conversation_id = ANY($3::uuid[])
+        `,
+        values: [ctx.tenantId, ctx.userId, validIds]
+      });
+
+      await logAudit({
+        tenantId: ctx.tenantId,
+        userId: ctx.userId,
+        action: "bulk_unarchive_conversations",
+        entityType: "conversation",
+        entityId: validIds[0],
+        details: { count: validIds.length }
+      });
+
+      return { success: true, count: validIds.length };
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error };
+    return res.data;
   });
 }
 
