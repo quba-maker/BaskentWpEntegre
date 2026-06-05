@@ -2505,3 +2505,93 @@ export async function sendApprovedFollowUp(conversationId: string, editedMessage
   });
 }
 
+
+// ==========================================
+// A1.7b — Secondary Phone Fallback Actions
+// ==========================================
+
+export async function checkSecondaryFallback(conversationId: string) {
+  if (!conversationId) return { eligible: false, reason: "Konuşma ID gerekli." };
+
+  return withActionGuard(
+    { actionName: 'checkSecondaryFallback' },
+    async (ctx) => {
+      const { SecondaryPhoneFallbackService } = await import("@/lib/services/secondary-phone-fallback.service");
+      const service = new SecondaryPhoneFallbackService(ctx.db, ctx.tenantId);
+      return await service.checkEligibility(conversationId);
+    }
+  ).then(res => {
+    if (!res.success) return { eligible: false, reason: res.error || "Kontrol başarısız." };
+    return res.data as any;
+  });
+}
+
+export async function prepareSecondaryDraft(conversationId: string) {
+  if (!conversationId) return { success: false as const, error: "Konuşma ID gerekli." };
+
+  return withActionGuard(
+    { actionName: 'prepareSecondaryDraft' },
+    async (ctx) => {
+      const { SecondaryPhoneFallbackService } = await import("@/lib/services/secondary-phone-fallback.service");
+      const service = new SecondaryPhoneFallbackService(ctx.db, ctx.tenantId);
+      return await service.prepareDraft(conversationId);
+    }
+  ).then(res => {
+    if (!res.success) return { success: false as const, error: res.error || res.data?.error };
+    return {
+      success: true as const,
+      draft: res.data?.draft as string,
+      draftType: res.data?.draftType as "freeform" | "template_required",
+      windowOpen: res.data?.windowOpen as boolean,
+      secondaryPhone: res.data?.secondaryPhone as string,
+      secondaryConversationId: res.data?.secondaryConversationId as string | null,
+      patientName: res.data?.patientName as string,
+    };
+  });
+}
+
+
+// ==========================================
+// A1.7c — Form Greeting Handoff Actions
+// ==========================================
+
+export async function checkFormGreetingEligibility(conversationId: string) {
+  if (!conversationId) return { eligible: false, reason: "Konuşma ID gerekli." };
+
+  return withActionGuard(
+    { actionName: 'checkFormGreetingEligibility' },
+    async (ctx) => {
+      const { FormGreetingHandoffService } = await import("@/lib/services/form-greeting-handoff.service");
+      const service = new FormGreetingHandoffService(ctx.db, ctx.tenantId);
+      return await service.checkEligibility(conversationId);
+    }
+  ).then(res => {
+    if (!res.success) return { eligible: false, reason: res.error || "Kontrol başarısız." };
+    return res.data as any;
+  });
+}
+
+export async function prepareFormGreetingDraft(conversationId: string) {
+  if (!conversationId) return { success: false as const, error: "Konuşma ID gerekli." };
+
+  return withActionGuard(
+    { actionName: 'prepareFormGreetingDraft' },
+    async (ctx) => {
+      const { FormGreetingHandoffService } = await import("@/lib/services/form-greeting-handoff.service");
+      const service = new FormGreetingHandoffService(ctx.db, ctx.tenantId);
+      return await service.prepareDraft(conversationId);
+    }
+  ).then(res => {
+    if (!res.success) return { success: false as const, error: res.error || res.data?.error };
+    return {
+      success: true as const,
+      draft: res.data?.draft as string,
+      draftType: res.data?.draftType as "freeform" | "template_required",
+      windowOpen: res.data?.windowOpen as boolean,
+      patientName: res.data?.patientName as string,
+      phone: res.data?.phone as string,
+      templateConfigExists: res.data?.templateConfigExists as boolean,
+    };
+  });
+}
+

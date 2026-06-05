@@ -2,9 +2,9 @@
 
 import { useState, useEffect } from "react";
 import { useSWRConfig } from "swr";
-import { User, MapPin, Building, Activity, Tag, ChevronDown, ChevronRight, Save, X, Plus, ChevronLeft, Check, Loader2, Sparkles, FileText, Brain, Link, Clock, Moon, Calendar, CalendarClock } from "lucide-react";
+import { User, MapPin, Building, Activity, Tag, ChevronDown, ChevronRight, Save, X, Plus, ChevronLeft, Check, Loader2, Sparkles, FileText, Brain, Link, Clock, Moon, Calendar, CalendarClock, PhoneForwarded, MailPlus } from "lucide-react";
 import { useInboxStore } from "@/store/inbox-store";
-import { updateCrmData, addTag, removeTag, prepareFollowUpDraft, sendApprovedFollowUp } from "@/app/actions/inbox";
+import { updateCrmData, addTag, removeTag, prepareFollowUpDraft, sendApprovedFollowUp, checkSecondaryFallback, prepareSecondaryDraft, checkFormGreetingEligibility, prepareFormGreetingDraft } from "@/app/actions/inbox";
 import { CustomerAiBrainPanel } from "@/components/features/ai-observability/CustomerAiBrain";
 import { AiTimelinePanel } from "@/components/features/ai-observability/AiTimeline";
 import { resolvePatientDisplayName, formatPhoneReadable } from "@/lib/utils/patient-name-resolver";
@@ -143,6 +143,22 @@ export function ContextPanel() {
   const [followUpError, setFollowUpError] = useState<string | null>(null);
   const [followUpSuccess, setFollowUpSuccess] = useState<string | null>(null);
 
+  // A1.7b — Secondary fallback states
+  const [secondaryEligibility, setSecondaryEligibility] = useState<any>(null);
+  const [secondaryChecked, setSecondaryChecked] = useState(false);
+  const [isCheckingSecondary, setIsCheckingSecondary] = useState(false);
+  const [secondaryDraftData, setSecondaryDraftData] = useState<any>(null);
+  const [isLoadingSecondaryDraft, setIsLoadingSecondaryDraft] = useState(false);
+  const [secondaryError, setSecondaryError] = useState<string | null>(null);
+
+  // A1.7c — Form greeting states
+  const [formGreetingEligibility, setFormGreetingEligibility] = useState<any>(null);
+  const [formGreetingChecked, setFormGreetingChecked] = useState(false);
+  const [isCheckingFormGreeting, setIsCheckingFormGreeting] = useState(false);
+  const [formGreetingDraftData, setFormGreetingDraftData] = useState<any>(null);
+  const [isLoadingFormGreetingDraft, setIsLoadingFormGreetingDraft] = useState(false);
+  const [formGreetingError, setFormGreetingError] = useState<string | null>(null);
+
   // Reset local state when contact changes or active opp fields update
   // P1B: Granular deps ensure refresh on opp switch (same contact, different opp fields)
   const contactId = activeContact?.id;
@@ -166,6 +182,15 @@ export function ContextPanel() {
       setEditedMessage("");
       setFollowUpError(null);
       setFollowUpSuccess(null);
+      // Reset A1.7b/c states
+      setSecondaryEligibility(null);
+      setSecondaryChecked(false);
+      setSecondaryDraftData(null);
+      setSecondaryError(null);
+      setFormGreetingEligibility(null);
+      setFormGreetingChecked(false);
+      setFormGreetingDraftData(null);
+      setFormGreetingError(null);
     }
   }, [contactId, contactDept, contactCountry, contactNotes, contactStage, activeContact?.opp_requester_name, activeContact?.opp_patient_name, activeContact?.patient_name]);
 
@@ -522,6 +547,107 @@ export function ContextPanel() {
           <div className="w-full mt-3 px-3.5 py-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold text-left flex items-start gap-2 shadow-sm">
             <span className="text-amber-500 font-bold shrink-0">⚠️</span>
             <p className="leading-snug">Bu konuşma formdaki ikincil numara üzerinden yürütülüyor.</p>
+          </div>
+        )}
+
+        {/* A1.7b — Secondary Phone Fallback Section */}
+        {allPhones.length >= 2 && !isSecondaryActive && (
+          <div className="w-full mt-3 p-3.5 rounded-xl border space-y-2.5 bg-white/40 text-left" style={{ borderColor: 'var(--q-border-default)' }}>
+            <div className="flex items-center gap-2">
+              <PhoneForwarded className="w-4 h-4 text-amber-500" />
+              <span className="text-[10px] font-bold uppercase tracking-widest text-amber-700">İkincil Numara Fallback</span>
+            </div>
+
+            {secondaryError && (
+              <div className="text-[11px] font-semibold text-red-600 bg-red-50 border border-red-100 rounded-lg p-2 leading-snug">
+                ⚠️ {secondaryError}
+              </div>
+            )}
+
+            {!secondaryChecked ? (
+              <button
+                onClick={async () => {
+                  setIsCheckingSecondary(true);
+                  setSecondaryError(null);
+                  try {
+                    const res = await checkSecondaryFallback(activeContact.conversation_id || activeContact.id);
+                    setSecondaryEligibility(res);
+                    setSecondaryChecked(true);
+                    if (!res.eligible) {
+                      setSecondaryError(res.reason);
+                    }
+                  } catch {
+                    setSecondaryError('Kontrol sırasında hata oluştu.');
+                  }
+                  setIsCheckingSecondary(false);
+                }}
+                disabled={isCheckingSecondary}
+                className="w-full py-2 px-3 bg-amber-50 border border-amber-200 hover:bg-amber-100 text-amber-700 text-[11px] font-bold rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isCheckingSecondary ? (
+                  <><Loader2 className="w-3 h-3 animate-spin" /><span>Kontrol Ediliyor...</span></>
+                ) : (
+                  <><PhoneForwarded className="w-3 h-3" /><span>İkincil Numara Uygunluğunu Kontrol Et</span></>
+                )}
+              </button>
+            ) : secondaryEligibility?.eligible && !secondaryDraftData ? (
+              <div className="space-y-2">
+                <div className="text-[11px] font-semibold text-amber-800 bg-amber-50/80 border border-amber-200 rounded-lg p-2.5 leading-snug">
+                  ⏳ Birincil numaradan {secondaryEligibility.noReplyHoursPrimary} saattir cevap alınamadı.<br />
+                  İkincil numara: <strong>{secondaryEligibility.secondaryPhone}</strong>
+                </div>
+                <button
+                  onClick={async () => {
+                    setIsLoadingSecondaryDraft(true);
+                    setSecondaryError(null);
+                    try {
+                      const res = await prepareSecondaryDraft(activeContact.conversation_id || activeContact.id);
+                      if (res.success) {
+                        setSecondaryDraftData(res);
+                      } else {
+                        setSecondaryError(res.error || 'Taslak hazırlanamadı.');
+                      }
+                    } catch {
+                      setSecondaryError('Taslak hazırlama hatası.');
+                    }
+                    setIsLoadingSecondaryDraft(false);
+                  }}
+                  disabled={isLoadingSecondaryDraft}
+                  className="w-full py-2 px-3 bg-amber-100 border border-amber-300 hover:bg-amber-200 text-amber-800 text-[11px] font-bold rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all disabled:opacity-50"
+                >
+                  {isLoadingSecondaryDraft ? (
+                    <><Loader2 className="w-3 h-3 animate-spin" /><span>Taslak Hazırlanıyor...</span></>
+                  ) : (
+                    <><Sparkles className="w-3 h-3" /><span>İkincil Numara Taslağı Hazırla</span></>
+                  )}
+                </button>
+              </div>
+            ) : secondaryDraftData ? (
+              <div className="space-y-2.5">
+                <div className="flex justify-between items-center text-[10px]">
+                  <span className="font-bold text-amber-700 uppercase tracking-wider">Taslak Önizleme</span>
+                  <span className={`px-2 py-0.5 rounded-full font-bold ${
+                    secondaryDraftData.windowOpen ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
+                  }`}>
+                    {secondaryDraftData.windowOpen ? '24s Açık' : '24s Kapalı — Şablon Gerekli'}
+                  </span>
+                </div>
+                {!secondaryDraftData.windowOpen && (
+                  <div className="text-[11px] font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2 leading-snug">
+                    ⚠️ İkincil numara için 24 saatlik WhatsApp penceresi kapalı. Onaylı şablon gönderimi bu fazda devre dışıdır.
+                  </div>
+                )}
+                <div className="text-[12px] font-medium text-gray-700 bg-white border border-gray-200 rounded-lg p-2.5 leading-relaxed">
+                  {secondaryDraftData.draft}
+                </div>
+                <button
+                  onClick={() => setSecondaryDraftData(null)}
+                  className="w-full py-1.5 px-3 border border-gray-200 hover:bg-gray-50 text-gray-600 text-[11px] font-bold rounded-lg cursor-pointer transition-all"
+                >
+                  Kapat
+                </button>
+              </div>
+            ) : null}
           </div>
         )}
 
@@ -935,6 +1061,109 @@ export function ContextPanel() {
             )}
           </div>
         </div>
+
+        {/* A1.7c — Form Greeting Handoff Section */}
+        {activeContact.formData && (
+          <div className="p-3.5 rounded-xl border space-y-2.5 bg-white/40 text-left" style={{ borderColor: 'var(--q-border-default)' }}>
+            <div className="flex items-center gap-2">
+              <MailPlus className="w-4 h-4 text-emerald-500" />
+              <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-700">Form Karşılama</span>
+            </div>
+
+            {formGreetingError && (
+              <div className="text-[11px] font-semibold text-red-600 bg-red-50 border border-red-100 rounded-lg p-2 leading-snug">
+                ⚠️ {formGreetingError}
+              </div>
+            )}
+
+            {!formGreetingChecked ? (
+              <button
+                onClick={async () => {
+                  setIsCheckingFormGreeting(true);
+                  setFormGreetingError(null);
+                  try {
+                    const res = await checkFormGreetingEligibility(activeContact.conversation_id || activeContact.id);
+                    setFormGreetingEligibility(res);
+                    setFormGreetingChecked(true);
+                    if (!res.eligible) {
+                      setFormGreetingError(res.reason);
+                    }
+                  } catch {
+                    setFormGreetingError('Kontrol sırasında hata oluştu.');
+                  }
+                  setIsCheckingFormGreeting(false);
+                }}
+                disabled={isCheckingFormGreeting}
+                className="w-full py-2 px-3 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 text-emerald-700 text-[11px] font-bold rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isCheckingFormGreeting ? (
+                  <><Loader2 className="w-3 h-3 animate-spin" /><span>Kontrol Ediliyor...</span></>
+                ) : (
+                  <><MailPlus className="w-3 h-3" /><span>Form Karşılama Uygunluğunu Kontrol Et</span></>
+                )}
+              </button>
+            ) : formGreetingEligibility?.eligible && !formGreetingDraftData ? (
+              <div className="space-y-2">
+                <div className="text-[11px] font-semibold text-emerald-800 bg-emerald-50/80 border border-emerald-200 rounded-lg p-2.5 leading-snug">
+                  📋 Form doldurmuş, WhatsApp üzerinden hiç mesaj göndermemiş.
+                  {formGreetingEligibility.requiresTemplate && (
+                    <><br />⚠️ 24s penceresi kapalı — onaylı şablon gerekli.</>
+                  )}
+                </div>
+                <button
+                  onClick={async () => {
+                    setIsLoadingFormGreetingDraft(true);
+                    setFormGreetingError(null);
+                    try {
+                      const res = await prepareFormGreetingDraft(activeContact.conversation_id || activeContact.id);
+                      if (res.success) {
+                        setFormGreetingDraftData(res);
+                      } else {
+                        setFormGreetingError(res.error || 'Taslak hazırlanamadı.');
+                      }
+                    } catch {
+                      setFormGreetingError('Taslak hazırlama hatası.');
+                    }
+                    setIsLoadingFormGreetingDraft(false);
+                  }}
+                  disabled={isLoadingFormGreetingDraft}
+                  className="w-full py-2 px-3 bg-emerald-100 border border-emerald-300 hover:bg-emerald-200 text-emerald-800 text-[11px] font-bold rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all disabled:opacity-50"
+                >
+                  {isLoadingFormGreetingDraft ? (
+                    <><Loader2 className="w-3 h-3 animate-spin" /><span>Taslak Hazırlanıyor...</span></>
+                  ) : (
+                    <><Sparkles className="w-3 h-3" /><span>Karşılama Taslağı Hazırla</span></>
+                  )}
+                </button>
+              </div>
+            ) : formGreetingDraftData ? (
+              <div className="space-y-2.5">
+                <div className="flex justify-between items-center text-[10px]">
+                  <span className="font-bold text-emerald-700 uppercase tracking-wider">Karşılama Taslağı</span>
+                  <span className={`px-2 py-0.5 rounded-full font-bold ${
+                    formGreetingDraftData.windowOpen ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
+                  }`}>
+                    {formGreetingDraftData.windowOpen ? '24s Açık' : 'Şablon Gerekli'}
+                  </span>
+                </div>
+                {!formGreetingDraftData.templateConfigExists && formGreetingDraftData.draftType === 'template_required' && (
+                  <div className="text-[11px] font-semibold text-red-700 bg-red-50 border border-red-200 rounded-lg p-2 leading-snug">
+                    ⛔ Onaylı şablon bulunamadı. Lütfen 360dialog template ayarlarını yapın.
+                  </div>
+                )}
+                <div className="text-[12px] font-medium text-gray-700 bg-white border border-gray-200 rounded-lg p-2.5 leading-relaxed">
+                  {formGreetingDraftData.draft}
+                </div>
+                <button
+                  onClick={() => setFormGreetingDraftData(null)}
+                  className="w-full py-1.5 px-3 border border-gray-200 hover:bg-gray-50 text-gray-600 text-[11px] font-bold rounded-lg cursor-pointer transition-all"
+                >
+                  Kapat
+                </button>
+              </div>
+            ) : null}
+          </div>
+        )}
 
         {/* Form Bilgileri */}
         {activeContact.formData && (
