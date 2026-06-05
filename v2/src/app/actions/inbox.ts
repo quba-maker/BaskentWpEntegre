@@ -26,6 +26,7 @@ export async function getConversations(page: number = 1, search: string = "", st
       const searchFilter = search.trim() ? `%${search.trim()}%` : null;
       
       const isNoReplyFilter = stage && stage.startsWith('noReply');
+      const isUnreadFilter = stage === 'unread';
       let noReplyHours: number | null = null;
       if (isNoReplyFilter) {
         const match = stage.match(/noReply_(\d+)h/);
@@ -34,7 +35,7 @@ export async function getConversations(page: number = 1, search: string = "", st
         }
       }
 
-      const stageFilter = isNoReplyFilter ? null : (stage !== "all" ? stage : null);
+      const stageFilter = (isNoReplyFilter || isUnreadFilter) ? null : (stage !== "all" ? stage : null);
 
       const optOutPhones = new Set<string>();
       if (isNoReplyFilter) {
@@ -237,6 +238,23 @@ export async function getConversations(page: number = 1, search: string = "", st
             ) sub
             WHERE sub.direction = 'out'
               AND ($7::integer IS NULL OR sub.created_at <= NOW() - ($7::integer || ' hour')::interval)
+          )
+        `;
+      }
+
+      if (isUnreadFilter) {
+        queryText += `
+          AND EXISTS (
+            SELECT 1 
+            FROM messages m_unread
+            WHERE m_unread.conversation_id = c.id
+              AND m_unread.tenant_id = c.tenant_id
+              AND m_unread.direction = 'in'
+              AND (m_unread.media_metadata IS NULL OR COALESCE(m_unread.media_metadata->'native'->>'message_type', '') != 'reaction')
+              AND m_unread.created_at > COALESCE(
+                (SELECT last_read_at FROM conversation_read_states rs WHERE rs.tenant_id = c.tenant_id AND rs.user_id = $6 AND rs.conversation_id = c.id),
+                '1970-01-01'::timestamptz
+              )
           )
         `;
       }
@@ -2570,7 +2588,6 @@ export async function checkFormGreetingEligibility(conversationId: string) {
     return res.data as any;
   });
 }
-
 export async function prepareFormGreetingDraft(conversationId: string) {
   if (!conversationId) return { success: false as const, error: "Konuşma ID gerekli." };
 
@@ -2591,6 +2608,450 @@ export async function prepareFormGreetingDraft(conversationId: string) {
       patientName: res.data?.patientName as string,
       phone: res.data?.phone as string,
       templateConfigExists: res.data?.templateConfigExists as boolean,
+    };
+  });
+}
+
+// ==========================================
+// A1.7d — Bulk operations server actions
+// ==========================================
+
+export async function markConversationsRead(conversationIds: string[]) {
+  if (!Array.isArray(conversationIds) || conversationIds.length === 0) {
+    return { success: false, error: "Konuşma ID listesi boş olamaz." };
+  }
+  if (conversationIds.length > 50) {
+    return { success: false, error: "Tek seferde en fazla 50 sohbet güncellenebilir." };
+  }
+  return withActionGuard(
+    { actionName: 'markConversationsRead' },
+    async (ctx) => {
+      await ctx.db.executeSafe({
+        text: `
+          INSERT INTO conversation_read_states (tenant_id, user_id, conversation_id, last_read_at, last_read_message_id, updated_at)
+          SELECT 
+            $1 as tenant_id, 
+            $2 as user_id, 
+            c_id as conversation_id, 
+            NOW() as last_read_at, 
+            (SELECT id FROM messages m WHERE m.conversation_id = c_id AND m.tenant_id = $1 AND m.direction = 'in' ORDER BY created_at DESC LIMIT 1) as last_read_message_id, 
+            NOW() as updated_at
+          FROM unnest($3::uuid[]) as c_id
+          ON CONFLICT (tenant_id, user_id, conversation_id)
+          DO UPDATE SET 
+            last_read_at = NOW(),
+            last_read_message_id = COALESCE(EXCLUDED.last_read_message_id, conversation_read_states.last_read_message_id),
+            updated_at = NOW()
+        `,
+        values: [ctx.tenantId, ctx.userId, conversationIds]
+      });
+
+      for (const convId of conversationIds) {
+        await ctx.db.executeSafe({
+          text: `
+            INSERT INTO outreach_logs (tenant_id, conversation_id, action, actor_id, metadata)
+            VALUES ($1, $2, 'bulk_mark_read', $3, $4)
+          `,
+          values: [ctx.tenantId, convId, ctx.userId, JSON.stringify({ source: "bulk_inbox_action" })]
+        });
+      }
+
+      return { success: true };
+    }
+  ).then(res => res.success ? (res.data || { success: true }) : { success: false, error: res.error });
+}
+
+export async function markConversationsUnread(conversationIds: string[]) {
+  if (!Array.isArray(conversationIds) || conversationIds.length === 0) {
+    return { success: false, error: "Konuşma ID listesi boş olamaz." };
+  }
+  if (conversationIds.length > 50) {
+    return { success: false, error: "Tek seferde en fazla 50 sohbet güncellenebilir." };
+  }
+  return withActionGuard(
+    { actionName: 'markConversationsUnread' },
+    async (ctx) => {
+      const updatedRows = await ctx.db.executeSafe({
+        text: `
+          INSERT INTO conversation_read_states (tenant_id, user_id, conversation_id, last_read_at, last_read_message_id, updated_at)
+          SELECT 
+            $1 as tenant_id, 
+            $2 as user_id, 
+            c_id as conversation_id, 
+            (SELECT created_at - INTERVAL '1 millisecond' FROM messages m WHERE m.conversation_id = c_id AND m.tenant_id = $1 AND m.direction = 'in' ORDER BY created_at DESC LIMIT 1) as last_read_at, 
+            (SELECT id FROM messages m WHERE m.conversation_id = c_id AND m.tenant_id = $1 AND m.direction = 'in' ORDER BY created_at DESC LIMIT 2 OFFSET 1) as last_read_message_id,
+            NOW() as updated_at
+          FROM unnest($3::uuid[]) as c_id
+          WHERE EXISTS (
+            SELECT 1 FROM messages m WHERE m.conversation_id = c_id AND m.tenant_id = $1 AND m.direction = 'in'
+          )
+          ON CONFLICT (tenant_id, user_id, conversation_id)
+          DO UPDATE SET 
+            last_read_at = EXCLUDED.last_read_at,
+            last_read_message_id = EXCLUDED.last_read_message_id,
+            updated_at = NOW()
+          RETURNING conversation_id
+        `,
+        values: [ctx.tenantId, ctx.userId, conversationIds]
+      }) as any[];
+
+      const updatedIds = updatedRows.map(r => r.conversation_id);
+
+      for (const convId of updatedIds) {
+        await ctx.db.executeSafe({
+          text: `
+            INSERT INTO outreach_logs (tenant_id, conversation_id, action, actor_id, metadata)
+            VALUES ($1, $2, 'bulk_mark_unread', $3, $4)
+          `,
+          values: [ctx.tenantId, convId, ctx.userId, JSON.stringify({ source: "bulk_inbox_action" })]
+        });
+      }
+
+      return { success: true };
+    }
+  ).then(res => res.success ? (res.data || { success: true }) : { success: false, error: res.error });
+}
+
+export async function bulkSetBotMode(conversationIds: string[], mode: 'bot' | 'human') {
+  if (!Array.isArray(conversationIds) || conversationIds.length === 0) {
+    return { success: false, error: "Konuşma ID listesi boş olamaz." };
+  }
+  if (conversationIds.length > 50) {
+    return { success: false, error: "Tek seferde en fazla 50 sohbet güncellenebilir." };
+  }
+  if (mode !== 'bot' && mode !== 'human') {
+    return { success: false, error: "Mod 'bot' veya 'human' olmalıdır." };
+  }
+  return withActionGuard(
+    { actionName: 'bulkSetBotMode' },
+    async (ctx) => {
+      const autopilotEnabled = mode === 'bot';
+
+      await ctx.db.executeSafe({
+        text: `
+          UPDATE conversations
+          SET autopilot_enabled = $1, updated_at = NOW()
+          WHERE tenant_id = $2 AND id = ANY($3::uuid[])
+        `,
+        values: [autopilotEnabled, ctx.tenantId, conversationIds]
+      });
+
+      for (const convId of conversationIds) {
+        await ctx.db.executeSafe({
+          text: `
+            INSERT INTO outreach_logs (tenant_id, conversation_id, action, actor_id, metadata)
+            VALUES ($1, $2, 'bulk_bot_mode_change', $3, $4)
+          `,
+          values: [ctx.tenantId, convId, ctx.userId, JSON.stringify({ source: "bulk_inbox_action", mode })]
+        });
+      }
+
+      return { success: true };
+    }
+  ).then(res => res.success ? (res.data || { success: true }) : { success: false, error: res.error });
+}
+
+export async function prepareBulkFollowUpDrafts(conversationIds: string[]) {
+  if (!Array.isArray(conversationIds) || conversationIds.length === 0) {
+    return { success: false, error: "Konuşma ID listesi boş olamaz." };
+  }
+  if (conversationIds.length > 10) {
+    return { success: false, error: "En fazla 10 sohbet için aynı anda taslak hazırlanabilir." };
+  }
+  return withActionGuard(
+    { actionName: 'prepareBulkFollowUpDrafts' },
+    async (ctx) => {
+      const results: {
+        conversationId: string;
+        patientName: string;
+        status: 'prepared' | 'blocked' | 'template_required' | 'skipped';
+        draft?: string;
+        reason?: string;
+        windowOpen?: boolean;
+      }[] = [];
+
+      for (const conversationId of conversationIds) {
+        try {
+          const convRows = await ctx.db.executeSafe({
+            text: `
+              SELECT c.id as conversation_id, c.phone_number, c.customer_id, c.active_opportunity_id, c.patient_name,
+                     active_opp.stage as opp_stage, active_opp.metadata as opp_metadata, active_opp.automation_status as opp_automation_status,
+                     l.id as lead_id, l.raw_data as form_raw_data
+              FROM conversations c
+              LEFT JOIN opportunities active_opp 
+                ON active_opp.id = c.active_opportunity_id 
+                AND active_opp.tenant_id = c.tenant_id
+              LEFT JOIN LATERAL (
+                SELECT id, raw_data 
+                FROM leads 
+                WHERE leads.tenant_id = c.tenant_id
+                  AND (
+                    (c.customer_id IS NOT NULL AND leads.customer_id = c.customer_id)
+                    OR
+                    (leads.phone_number LIKE '%' || RIGHT(c.phone_number, 10))
+                  )
+                ORDER BY created_at DESC 
+                LIMIT 1
+              ) l ON true
+              WHERE c.id = $1 AND c.tenant_id = $2
+              LIMIT 1
+            `,
+            values: [conversationId, ctx.tenantId]
+          }) as any[];
+
+          if (convRows.length === 0) {
+            results.push({
+              conversationId,
+              patientName: "Bilinmeyen",
+              status: 'skipped',
+              reason: "Konuşma bulunamadı."
+            });
+            continue;
+          }
+
+          const conv = convRows[0];
+          const phone = conv.phone_number;
+          const patientName = conv.patient_name || "Hasta";
+
+          const currentStage = conv.opp_stage || '';
+          if (['lost', 'not_qualified', 'arrived'].includes(currentStage)) {
+            results.push({
+              conversationId,
+              patientName,
+              status: 'blocked',
+              reason: `Fırsat terminal aşamada: ${currentStage}`
+            });
+            continue;
+          }
+
+          const primaryNorm = normalizePhoneForIdentity(phone).e164;
+          const optOutPhones = new Set<string>();
+
+          const optOutOpps = await ctx.db.executeSafe({
+            text: `
+              SELECT phone_number 
+              FROM opportunities 
+              WHERE tenant_id = $1 
+                AND (COALESCE(metadata->>'opt_out_requested', 'false') = 'true')
+            `,
+            values: [ctx.tenantId]
+          }) as any[];
+          for (const o of optOutOpps) {
+            const norm = normalizePhoneForIdentity(o.phone_number).e164;
+            if (norm) optOutPhones.add(norm);
+          }
+
+          const lastInbounds = await ctx.db.executeSafe({
+            text: `
+              SELECT phone_number, content 
+              FROM messages 
+              WHERE tenant_id = $1 AND direction = 'in'
+                AND phone_number LIKE '%' || RIGHT($2, 10)
+                AND (media_metadata IS NULL OR COALESCE(media_metadata->'native'->>'message_type', '') != 'reaction')
+              ORDER BY created_at DESC
+              LIMIT 1
+            `,
+            values: [ctx.tenantId, phone]
+          }) as any[];
+
+          const hasOptOutKeywords = (text: string): boolean => {
+            const clean = (text || '').toLowerCase().trim();
+            const optOuts = [
+              "dur", "stop", "istemiyorum", "rahatsız etmeyin", "mesaj atmayın", 
+              "bırakın", "silin", "arama", "yazma", "unsubscribe", "don't write"
+            ];
+            return optOuts.some(kw => clean.includes(kw));
+          };
+
+          if (lastInbounds.length > 0 && hasOptOutKeywords(lastInbounds[0].content)) {
+            if (primaryNorm) optOutPhones.add(primaryNorm);
+          }
+
+          const isPrimaryOptedOut = (conv.opp_metadata?.opt_out_requested === true) || 
+                                    (conv.opp_metadata?.opt_out_requested === 'true') ||
+                                    (primaryNorm && optOutPhones.has(primaryNorm));
+
+          let hasOptOutKeywordInFamily = false;
+          let parsedRaw = conv.form_raw_data;
+          if (typeof parsedRaw === 'string') {
+            try { parsedRaw = JSON.parse(parsedRaw); } catch(_) {}
+          }
+          if (parsedRaw && parsedRaw._all_phones) {
+            const parsed = parseAllPhones(parsedRaw._all_phones);
+            for (const p of parsed) {
+              const pNorm = normalizePhoneForIdentity(p).e164;
+              if (pNorm && optOutPhones.has(pNorm)) {
+                hasOptOutKeywordInFamily = true;
+                break;
+              }
+            }
+          }
+
+          if (isPrimaryOptedOut || hasOptOutKeywordInFamily) {
+            results.push({
+              conversationId,
+              patientName,
+              status: 'blocked',
+              reason: "Hasta opt-out (istemiyorum) talep etmiştir."
+            });
+            continue;
+          }
+
+          if (conv.opp_automation_status === 'stopped' || conv.opp_automation_status === 'paused') {
+            results.push({
+              conversationId,
+              patientName,
+              status: 'blocked',
+              reason: "Fırsat otomasyonu durdurulmuş."
+            });
+            continue;
+          }
+
+          const lastMsgRows = await ctx.db.executeSafe({
+            text: `
+              SELECT id, content, direction, created_at
+              FROM messages
+              WHERE conversation_id = $1 AND tenant_id = $2
+                AND direction != 'system'
+                AND (media_metadata IS NULL OR COALESCE(media_metadata->'native'->>'message_type', '') != 'reaction')
+              ORDER BY created_at DESC
+              LIMIT 1
+            `,
+            values: [conversationId, ctx.tenantId]
+          }) as any[];
+
+          if (lastMsgRows.length === 0) {
+            results.push({
+              conversationId,
+              patientName,
+              status: 'skipped',
+              reason: "Konuşmada mesaj bulunamadı."
+            });
+            continue;
+          }
+
+          const lastMsg = lastMsgRows[0];
+          if (lastMsg.direction !== 'out') {
+            results.push({
+              conversationId,
+              patientName,
+              status: 'skipped',
+              reason: "Son mesaj hastadan gelmiş."
+            });
+            continue;
+          }
+
+          const classification = ExpectsReplyClassifier.classify(lastMsg.content);
+          if (!classification.expectsReply) {
+            results.push({
+              conversationId,
+              patientName,
+              status: 'skipped',
+              reason: "Son asistan mesajı cevap bekleyen bir mesaj değil."
+            });
+            continue;
+          }
+
+          if (currentStage === 'booked' && classification.isClosingMessage) {
+            results.push({
+              conversationId,
+              patientName,
+              status: 'blocked',
+              reason: "Booked aşamasında kapanış mesajı atılmış."
+            });
+            continue;
+          }
+
+          const lastInboundMsgRows = await ctx.db.executeSafe({
+            text: `
+              SELECT created_at
+              FROM messages
+              WHERE conversation_id = $1 AND tenant_id = $2 AND direction = 'in'
+                AND (media_metadata IS NULL OR COALESCE(media_metadata->'native'->>'message_type', '') != 'reaction')
+              ORDER BY created_at DESC
+              LIMIT 1
+            `,
+            values: [conversationId, ctx.tenantId]
+          }) as any[];
+
+          let windowOpen = false;
+          let lastInboundTimeMs = 0;
+          if (lastInboundMsgRows.length > 0) {
+            lastInboundTimeMs = new Date(lastInboundMsgRows[0].created_at).getTime();
+            windowOpen = (Date.now() - lastInboundTimeMs) <= 24 * 60 * 60 * 1000;
+          }
+
+          const lastOutboundTimeMs = new Date(lastMsg.created_at).getTime();
+          const noReplyHours = Math.round(((Date.now() - lastOutboundTimeMs) / (1000 * 60 * 60)) * 10) / 10;
+
+          let draftText = "";
+          let status: 'prepared' | 'template_required' = 'prepared';
+
+          if (windowOpen) {
+            draftText = "Merhaba, müsait olduğunuzda geri dönüş yapabilirseniz size yardımcı olmaktan memnuniyet duyarız. İyi günler dileriz.";
+            status = "prepared";
+          } else {
+            draftText = "24 saatlik WhatsApp penceresi kapandığı için serbest mesaj gönderilemez. Lütfen onaylı bir şablon seçin.";
+            status = "template_required";
+          }
+
+          await ctx.db.executeSafe({
+            text: `
+              INSERT INTO outreach_logs (tenant_id, lead_id, conversation_id, opportunity_id, action, channel, actor_id, metadata)
+              VALUES ($1, $2, $3, $4, 'followup_draft_prepared', 'whatsapp', $5, $6)
+            `,
+            values: [
+              ctx.tenantId,
+              conv.lead_id || null,
+              conversationId,
+              conv.active_opportunity_id || null,
+              ctx.userId,
+              JSON.stringify({
+                source: "bulk_inbox_no_reply",
+                last_outbound_message_id: lastMsg.id,
+                expects_reply_reason: classification.reason,
+                no_reply_hours: noReplyHours,
+                window_open: windowOpen,
+                draft_type: status === 'prepared' ? 'freeform' : 'template_required',
+                draft_message: draftText,
+                sent: false
+              })
+            ]
+          });
+
+          results.push({
+            conversationId,
+            patientName,
+            status,
+            draft: draftText,
+            windowOpen
+          });
+
+        } catch (err: any) {
+          console.error(`[BULK_DRAFT_ERROR] Failed on conversation ${conversationId}:`, err);
+          results.push({
+            conversationId,
+            patientName: "Hata",
+            status: 'skipped',
+            reason: `Hata: ${err.message || 'Sistem Hatası'}`
+          });
+        }
+      }
+
+      return results;
+    }
+  ).then(res => {
+    if (!res.success) return { success: false as const, error: res.error };
+    return {
+      success: true as const,
+      results: res.data as {
+        conversationId: string;
+        patientName: string;
+        status: 'prepared' | 'blocked' | 'template_required' | 'skipped';
+        draft?: string;
+        reason?: string;
+        windowOpen?: boolean;
+      }[]
     };
   });
 }
