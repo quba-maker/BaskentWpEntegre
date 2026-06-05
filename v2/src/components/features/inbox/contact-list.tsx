@@ -380,6 +380,10 @@ export function ContactRail() {
             style={{ color: "var(--q-blue)" }}
           >
             <option value="all">Tüm Aşamalar</option>
+            <option value="noReply_3h">⏳ Cevap Bekleyenler (3s+)</option>
+            <option value="noReply_6h">⏳ Cevap Bekleyenler (6s+)</option>
+            <option value="noReply_9h">⏳ Cevap Bekleyenler (9s+)</option>
+            <option value="noReply_24h">⏳ Cevap Bekleyenler (24s+)</option>
             <option value="new">Yeni Lead</option>
             <option value="contacted">İletişime Geçildi</option>
             <option value="responded">Yanıt Alındı</option>
@@ -510,6 +514,14 @@ export function ContactRail() {
                         >
                           {stageLabel(c.stage)}
                         </span>
+                        {c.is_no_reply_eligible && (
+                          <span
+                            className="text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded shadow-sm flex items-center gap-1"
+                            style={{ background: "rgba(255, 59, 48, 0.1)", border: "1px solid rgba(255, 59, 48, 0.2)", color: "#FF3B30" }}
+                          >
+                            ⏳ {c.no_reply_hours} saattir cevap yok
+                          </span>
+                        )}
                         {!c.isBotActive && (
                           <span
                             className="text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded shadow-sm"

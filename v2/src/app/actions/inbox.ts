@@ -9,6 +9,8 @@ import { resolvePatientDisplayName } from "@/lib/utils/patient-name-resolver";
 import { getCountryFromPhone } from "@/lib/utils/country";
 import { extractFormFields } from "@/lib/utils/form-field-extractor";
 import { normalizeCountry, getCountryDisplayLabel } from "@/lib/utils/country-normalizer";
+import { ExpectsReplyClassifier } from "@/lib/services/classification/expects-reply-classifier";
+import { normalizePhoneForIdentity, parseAllPhones } from "@/lib/utils/phone-identity";
 
 // ==========================================
 // QUBA AI — Inbox Actions (Zero-Trust Migrated)
@@ -22,16 +24,78 @@ export async function getConversations(page: number = 1, search: string = "", st
       const limit = 50;
       const offset = (page - 1) * limit;
       const searchFilter = search.trim() ? `%${search.trim()}%` : null;
-      const stageFilter = stage !== "all" ? stage : null;
+      
+      const isNoReplyFilter = stage && stage.startsWith('noReply');
+      let noReplyHours: number | null = null;
+      if (isNoReplyFilter) {
+        const match = stage.match(/noReply_(\d+)h/);
+        if (match) {
+          noReplyHours = parseInt(match[1], 10);
+        }
+      }
+
+      const stageFilter = isNoReplyFilter ? null : (stage !== "all" ? stage : null);
+
+      const optOutPhones = new Set<string>();
+      if (isNoReplyFilter) {
+        // Query active opt-out opportunities
+        try {
+          const optOutOpps = await ctx.db.executeSafe({
+            text: `
+              SELECT phone_number, metadata 
+              FROM opportunities 
+              WHERE tenant_id = $1 
+                AND (COALESCE(metadata->>'opt_out_requested', 'false') = 'true')
+            `,
+            values: [ctx.tenantId]
+          });
+          const optOutOppRows = Array.isArray(optOutOpps) ? optOutOpps : ((optOutOpps as any)?.rows || []);
+          for (const o of optOutOppRows) {
+            const norm = normalizePhoneForIdentity(o.phone_number);
+            if (norm.e164) optOutPhones.add(norm.e164);
+          }
+
+          // Query last inbound messages containing opt-out keywords
+          const lastInbounds = await ctx.db.executeSafe({
+            text: `
+              SELECT DISTINCT ON (phone_number) phone_number, content 
+              FROM messages 
+              WHERE tenant_id = $1 AND direction = 'in'
+                AND (media_metadata IS NULL OR COALESCE(media_metadata->'native'->>'message_type', '') != 'reaction')
+              ORDER BY phone_number, created_at DESC
+            `,
+            values: [ctx.tenantId]
+          });
+          const lastInboundRows = Array.isArray(lastInbounds) ? lastInbounds : ((lastInbounds as any)?.rows || []);
+          
+          const hasOptOutKeywords = (text: string): boolean => {
+            const clean = (text || '').toLowerCase().trim();
+            const optOuts = [
+              "dur", "stop", "istemiyorum", "rahatsız etmeyin", "mesaj atmayın", 
+              "bırakın", "silin", "arama", "yazma", "unsubscribe", "don't write"
+            ];
+            return optOuts.some(kw => clean.includes(kw));
+          };
+
+          for (const m of lastInboundRows) {
+            if (hasOptOutKeywords(m.content)) {
+              const norm = normalizePhoneForIdentity(m.phone_number);
+              if (norm.e164) optOutPhones.add(norm.e164);
+            }
+          }
+        } catch (e) {
+          console.error("[INBOX_FORENSIC] Failed to fetch optOutPhones:", e);
+        }
+      }
 
       // ── FORENSIC TRACE: Log the tenant context being used ──
-      console.log(`[INBOX_FORENSIC] getConversations called | tenantId=${ctx.tenantId} | page=${page} | search="${search}" | stage="${stage}"`);
+      console.log(`[INBOX_FORENSIC] getConversations called | tenantId=${ctx.tenantId} | page=${page} | search="${search}" | stage="${stage}" | noReplyHours=${noReplyHours}`);
 
-      const rows = await ctx.db.executeSafe({
-        text: `
+      let queryText = `
         SELECT 
           c.id as conversation_id,
           c.id as conversationId,
+          c.customer_id,
           c.phone_number as id,
           c.patient_name as name,
           c.department,
@@ -51,6 +115,7 @@ export async function getConversations(page: number = 1, search: string = "", st
           COALESCE(c.last_message_status, m.status) as last_message_status,
           COALESCE(c.last_message_direction, m.direction) as last_message_direction,
           COALESCE(c.last_message_model, m.model_used) as last_message_model,
+          l.id as lead_id,
           l.form_name,
           l.patient_name as form_patient_name,
           l.raw_data as form_raw_data,
@@ -67,6 +132,7 @@ export async function getConversations(page: number = 1, search: string = "", st
           active_opp.priority as opp_priority,
           active_opp.patient_relation as opp_patient_relation,
           active_opp.metadata as opp_metadata,
+          active_opp.automation_status as opp_automation_status,
           -- P1B FIX: No global fallback — prevents Mehmet/Irak leaking into Almanya/Kardiyoloji
           active_opp.summary as ai_summary,
           mem.summary_text as legacy_ai_summary,
@@ -111,7 +177,7 @@ export async function getConversations(page: number = 1, search: string = "", st
           LIMIT 1
         ) m ON c.last_message_content IS NULL
         LEFT JOIN LATERAL (
-          SELECT form_name, patient_name, raw_data, created_at 
+          SELECT id, form_name, patient_name, raw_data, created_at 
           FROM leads 
           WHERE leads.tenant_id = $1
             AND (
@@ -152,10 +218,38 @@ export async function getConversations(page: number = 1, search: string = "", st
         WHERE c.tenant_id = $1
           AND ($2::text IS NULL OR c.patient_name ILIKE $2 OR c.phone_number ILIKE $2)
           AND ($3::text IS NULL OR c.lead_stage = $3)
-        ORDER BY (cp.id IS NOT NULL) DESC, c.last_message_at DESC NULLS LAST
-        LIMIT $4 OFFSET $5
-        `,
-        values: [ctx.tenantId, searchFilter, stageFilter, limit, offset, ctx.userId]
+      `;
+
+      const values: any[] = [ctx.tenantId, searchFilter, stageFilter, limit, offset, ctx.userId];
+
+      if (isNoReplyFilter) {
+        values.push(noReplyHours);
+        queryText += `
+          AND c.id IN (
+            SELECT sub.conversation_id
+            FROM (
+              SELECT DISTINCT ON (m.conversation_id) m.conversation_id, m.direction, m.created_at
+              FROM messages m
+              WHERE m.tenant_id = $1
+                AND m.direction != 'system'
+                AND (m.media_metadata IS NULL OR COALESCE(m.media_metadata->'native'->>'message_type', '') != 'reaction')
+              ORDER BY m.conversation_id, m.created_at DESC
+            ) sub
+            WHERE sub.direction = 'out'
+              AND ($7::integer IS NULL OR sub.created_at <= NOW() - ($7::integer || ' hour')::interval)
+          )
+        `;
+      }
+
+      queryText += ` ORDER BY (cp.id IS NOT NULL) DESC, c.last_message_at DESC NULLS LAST `;
+
+      if (!isNoReplyFilter) {
+        queryText += ` LIMIT $4 OFFSET $5 `;
+      }
+
+      const rows = await ctx.db.executeSafe({
+        text: queryText,
+        values
       });
 
       const validRows = Array.isArray(rows) ? rows : ((rows as any)?.rows || []);
@@ -163,7 +257,7 @@ export async function getConversations(page: number = 1, search: string = "", st
       // ── FORENSIC TRACE: Log row count ──
       console.log(`[INBOX_FORENSIC] Query returned ${validRows.length} rows for tenant ${ctx.tenantId}`);
 
-      return validRows.map((r: any) => {
+      const processedRows = validRows.map((r: any) => {
         let formattedTime = '';
         if (r.last_message_time_ms) {
           const date = new Date(parseFloat(r.last_message_time_ms));
@@ -281,6 +375,154 @@ export async function getConversations(page: number = 1, search: string = "", st
           } : null
         };
       });
+
+      if (isNoReplyFilter) {
+        // 1. Filter candidates based on expectsReply, opt-out, stages
+        const eligibleCandidates = processedRows.filter((r: any) => {
+          const lastMsg = r.last_message || '';
+          const lastMsgDir = r.lastMessageDirection || 'in';
+          
+          if (lastMsgDir !== 'out') return false;
+
+          const classification = ExpectsReplyClassifier.classify(lastMsg);
+          
+          if (!classification.expectsReply) return false;
+
+          const normPhone = normalizePhoneForIdentity(r.id || r.phone_number);
+          const isPrimaryOptedOut = (r.opp_metadata?.opt_out_requested === true) || 
+                                    (r.opp_metadata?.opt_out_requested === 'true') ||
+                                    (normPhone.e164 && optOutPhones.has(normPhone.e164));
+          
+          let hasOptOutKeywordInFamily = false;
+          let parsedRaw = r.form_raw_data;
+          if (typeof parsedRaw === 'string') {
+            try { parsedRaw = JSON.parse(parsedRaw); } catch(_) {}
+          }
+          if (parsedRaw && parsedRaw._all_phones) {
+            const parsed = parseAllPhones(parsedRaw._all_phones);
+            for (const p of parsed) {
+              const pNorm = normalizePhoneForIdentity(p).e164;
+              if (pNorm && optOutPhones.has(pNorm)) {
+                hasOptOutKeywordInFamily = true;
+                break;
+              }
+            }
+          }
+
+          if (isPrimaryOptedOut || hasOptOutKeywordInFamily) return false;
+
+          const currentStage = r.opp_stage || r.stage;
+          if (['lost', 'not_qualified', 'arrived'].includes(currentStage)) return false;
+
+          if (currentStage === 'booked' && classification.isClosingMessage) return false;
+
+          if (r.opp_automation_status === 'stopped' || r.opp_automation_status === 'paused') return false;
+
+          const lastOutboundTime = r.last_message_time_ms ? parseFloat(r.last_message_time_ms) : 0;
+          const hoursElapsed = lastOutboundTime > 0 ? (Date.now() - lastOutboundTime) / (1000 * 60 * 60) : 0;
+
+          r.no_reply_classification = {
+            ...classification,
+            no_reply_hours: Math.round(hoursElapsed * 10) / 10
+          };
+          r.is_no_reply_eligible = true;
+          r.no_reply_hours = Math.round(hoursElapsed * 10) / 10;
+
+          return true;
+        });
+
+        // 2. Patient-level Deduplication
+        const groups: Array<{
+          conversations: any[];
+          oppIds: Set<string>;
+          customerIds: Set<string>;
+          leadIds: Set<string>;
+          phones: Set<string>;
+        }> = [];
+
+        for (const r of eligibleCandidates) {
+          const oppId = r.active_opp_id;
+          const customerId = r.customer_id;
+          const leadId = r.lead_id;
+          
+          const primaryNorm = normalizePhoneForIdentity(r.id || r.phone_number).e164;
+          const conversationPhones = new Set<string>();
+          if (primaryNorm) conversationPhones.add(primaryNorm);
+          
+          let rawData = r.form_raw_data;
+          if (typeof rawData === 'string') {
+            try { rawData = JSON.parse(rawData); } catch(_) {}
+          }
+          if (rawData && rawData._all_phones) {
+            const parsed = parseAllPhones(rawData._all_phones);
+            for (const p of parsed) {
+              const pNorm = normalizePhoneForIdentity(p).e164;
+              if (pNorm) conversationPhones.add(pNorm);
+            }
+          }
+
+          let foundGroupIndex = -1;
+          for (let i = 0; i < groups.length; i++) {
+            const g = groups[i];
+            const matchOpp = oppId && g.oppIds.has(oppId);
+            const matchCustomer = customerId && g.customerIds.has(customerId);
+            const matchLead = leadId && g.leadIds.has(leadId);
+            
+            let matchPhone = false;
+            for (const p of conversationPhones) {
+              if (g.phones.has(p)) {
+                matchPhone = true;
+                break;
+              }
+            }
+
+            if (matchOpp || matchCustomer || matchLead || matchPhone) {
+              foundGroupIndex = i;
+              break;
+            }
+          }
+
+          if (foundGroupIndex !== -1) {
+            const g = groups[foundGroupIndex];
+            g.conversations.push(r);
+            if (oppId) g.oppIds.add(oppId);
+            if (customerId) g.customerIds.add(customerId);
+            if (leadId) g.leadIds.add(leadId);
+            for (const p of conversationPhones) g.phones.add(p);
+          } else {
+            groups.push({
+              conversations: [r],
+              oppIds: new Set(oppId ? [oppId] : []),
+              customerIds: new Set(customerId ? [customerId] : []),
+              leadIds: new Set(leadId ? [leadId] : []),
+              phones: conversationPhones
+            });
+          }
+        }
+
+        const finalEligibleList: any[] = [];
+        for (const g of groups) {
+          g.conversations.sort((a, b) => {
+            const tA = a.last_message_at ? new Date(a.last_message_at).getTime() : 0;
+            const tB = b.last_message_at ? new Date(b.last_message_at).getTime() : 0;
+            return tB - tA;
+          });
+          
+          const primaryConv = g.conversations[0];
+          
+          for (let i = 1; i < g.conversations.length; i++) {
+            g.conversations[i].is_duplicate_candidate = true;
+            g.conversations[i].duplicate_parent_id = primaryConv.conversation_id;
+          }
+          
+          finalEligibleList.push(primaryConv);
+        }
+
+        const offsetVal = (page - 1) * limit;
+        return finalEligibleList.slice(offsetVal, offsetVal + limit);
+      }
+
+      return processedRows;
     }
   ).then(res => res.data || []);
 }
@@ -1714,3 +1956,552 @@ export async function getGlobalUnreadCount() {
     }
   );
 }
+
+export async function prepareFollowUpDraft(conversationId: string) {
+  if (!conversationId) return { success: false as const, error: "Konuşma ID gerekli." };
+
+  return withActionGuard(
+    { actionName: 'prepareFollowUpDraft' },
+    async (ctx) => {
+      // 1. Resolve conversation data, customer profiles, active opportunities, and leads
+      const convRows = await ctx.db.executeSafe({
+        text: `
+          SELECT c.id as conversation_id, c.phone_number, c.customer_id, c.active_opportunity_id, c.patient_name,
+                 active_opp.stage as opp_stage, active_opp.metadata as opp_metadata, active_opp.automation_status as opp_automation_status,
+                 l.id as lead_id, l.raw_data as form_raw_data
+          FROM conversations c
+          LEFT JOIN opportunities active_opp 
+            ON active_opp.id = c.active_opportunity_id 
+            AND active_opp.tenant_id = c.tenant_id
+          LEFT JOIN LATERAL (
+            SELECT id, raw_data 
+            FROM leads 
+            WHERE leads.tenant_id = c.tenant_id
+              AND (
+                (c.customer_id IS NOT NULL AND leads.customer_id = c.customer_id)
+                OR
+                (leads.phone_number LIKE '%' || RIGHT(c.phone_number, 10))
+              )
+            ORDER BY created_at DESC 
+            LIMIT 1
+          ) l ON true
+          WHERE c.id = $1 AND c.tenant_id = $2
+          LIMIT 1
+        `,
+        values: [conversationId, ctx.tenantId]
+      });
+
+      const convs = Array.isArray(convRows) ? convRows : ((convRows as any)?.rows || []);
+      if (convs.length === 0) {
+        return { success: false, error: "Konuşma bulunamadı." };
+      }
+
+      const conv = convs[0];
+      const phone = conv.phone_number;
+
+      // 2. StopRule Evaluation & Exclusions
+      const currentStage = conv.opp_stage || '';
+      if (['lost', 'not_qualified', 'arrived'].includes(currentStage)) {
+        return { success: false, error: `Terminal aşamadaki fırsat için taslak hazırlanamaz: ${currentStage}` };
+      }
+
+      const primaryNorm = normalizePhoneForIdentity(phone).e164;
+      const optOutPhones = new Set<string>();
+
+      try {
+        const optOutOpps = await ctx.db.executeSafe({
+          text: `
+            SELECT phone_number 
+            FROM opportunities 
+            WHERE tenant_id = $1 
+              AND (COALESCE(metadata->>'opt_out_requested', 'false') = 'true')
+          `,
+          values: [ctx.tenantId]
+        });
+        const optOutOppRows = Array.isArray(optOutOpps) ? optOutOpps : ((optOutOpps as any)?.rows || []);
+        for (const o of optOutOppRows) {
+          const norm = normalizePhoneForIdentity(o.phone_number).e164;
+          if (norm) optOutPhones.add(norm);
+        }
+
+        const lastInbounds = await ctx.db.executeSafe({
+          text: `
+            SELECT phone_number, content 
+            FROM messages 
+            WHERE tenant_id = $1 AND direction = 'in'
+              AND phone_number LIKE '%' || RIGHT($2, 10)
+              AND (media_metadata IS NULL OR COALESCE(media_metadata->'native'->>'message_type', '') != 'reaction')
+            ORDER BY created_at DESC
+            LIMIT 1
+          `,
+          values: [ctx.tenantId, phone]
+        });
+        const lastInboundRows = Array.isArray(lastInbounds) ? lastInbounds : ((lastInbounds as any)?.rows || []);
+        
+        const hasOptOutKeywords = (text: string): boolean => {
+          const clean = (text || '').toLowerCase().trim();
+          const optOuts = [
+            "dur", "stop", "istemiyorum", "rahatsız etmeyin", "mesaj atmayın", 
+            "bırakın", "silin", "arama", "yazma", "unsubscribe", "don't write"
+          ];
+          return optOuts.some(kw => clean.includes(kw));
+        };
+
+        if (lastInboundRows.length > 0 && hasOptOutKeywords(lastInboundRows[0].content)) {
+          if (primaryNorm) optOutPhones.add(primaryNorm);
+        }
+      } catch (e) {
+        console.error("[INBOX_FORENSIC] Failed during opt-out check in prepareFollowUpDraft:", e);
+      }
+
+      const isPrimaryOptedOut = (conv.opp_metadata?.opt_out_requested === true) || 
+                                (conv.opp_metadata?.opt_out_requested === 'true') ||
+                                (primaryNorm && optOutPhones.has(primaryNorm));
+
+      let hasOptOutKeywordInFamily = false;
+      let parsedRaw = conv.form_raw_data;
+      if (typeof parsedRaw === 'string') {
+        try { parsedRaw = JSON.parse(parsedRaw); } catch(_) {}
+      }
+      if (parsedRaw && parsedRaw._all_phones) {
+        const parsed = parseAllPhones(parsedRaw._all_phones);
+        for (const p of parsed) {
+          const pNorm = normalizePhoneForIdentity(p).e164;
+          if (pNorm && optOutPhones.has(pNorm)) {
+            hasOptOutKeywordInFamily = true;
+            break;
+          }
+        }
+      }
+
+      if (isPrimaryOptedOut || hasOptOutKeywordInFamily) {
+        return { success: false, error: "Hasta opt-out (istemiyorum/rahatsız etmeyin) talep etmiştir. Taslak hazırlanamaz." };
+      }
+
+      if (conv.opp_automation_status === 'stopped' || conv.opp_automation_status === 'paused') {
+        return { success: false, error: "Bu fırsat için otomasyon durdurulmuş." };
+      }
+
+      const lastMsgRows = await ctx.db.executeSafe({
+        text: `
+          SELECT id, content, direction, created_at
+          FROM messages
+          WHERE conversation_id = $1 AND tenant_id = $2
+            AND direction != 'system'
+            AND (media_metadata IS NULL OR COALESCE(media_metadata->'native'->>'message_type', '') != 'reaction')
+          ORDER BY created_at DESC
+          LIMIT 1
+        `,
+        values: [conversationId, ctx.tenantId]
+      });
+      const lastMsgs = Array.isArray(lastMsgRows) ? lastMsgRows : ((lastMsgRows as any)?.rows || []);
+      if (lastMsgs.length === 0) {
+        return { success: false, error: "Konuşmada mesaj bulunamadı." };
+      }
+
+      const lastMsg = lastMsgs[0];
+      if (lastMsg.direction !== 'out') {
+        return { success: false, error: "Son mesaj hastadan gelmiş, hatırlatma taslağı hazırlanamaz." };
+      }
+
+      const classification = ExpectsReplyClassifier.classify(lastMsg.content);
+      if (!classification.expectsReply) {
+        return { success: false, error: "Son asistan mesajı cevap bekleyen bir mesaj değildir." };
+      }
+
+      if (currentStage === 'booked' && classification.isClosingMessage) {
+        return { success: false, error: "Booked aşamasında kapanış mesajı atılmış, taslak hazırlanamaz." };
+      }
+
+      // 3. 24-Hour WhatsApp Service Window Check
+      const lastInboundMsgRows = await ctx.db.executeSafe({
+        text: `
+          SELECT created_at
+          FROM messages
+          WHERE conversation_id = $1 AND tenant_id = $2 AND direction = 'in'
+            AND (media_metadata IS NULL OR COALESCE(media_metadata->'native'->>'message_type', '') != 'reaction')
+          ORDER BY created_at DESC
+          LIMIT 1
+        `,
+        values: [conversationId, ctx.tenantId]
+      });
+      const lastInboundMsgs = Array.isArray(lastInboundMsgRows) ? lastInboundMsgRows : ((lastInboundMsgRows as any)?.rows || []);
+      
+      let windowOpen = false;
+      let lastInboundTimeMs = 0;
+      if (lastInboundMsgs.length > 0) {
+        lastInboundTimeMs = new Date(lastInboundMsgs[0].created_at).getTime();
+        windowOpen = (Date.now() - lastInboundTimeMs) <= 24 * 60 * 60 * 1000;
+      }
+
+      const lastOutboundTimeMs = new Date(lastMsg.created_at).getTime();
+      const noReplyHours = Math.round(((Date.now() - lastOutboundTimeMs) / (1000 * 60 * 60)) * 10) / 10;
+
+      let draftText = "";
+      let draftType: "freeform" | "template_required" = "freeform";
+
+      if (windowOpen) {
+        draftText = "Merhaba, müsait olduğunuzda geri dönüş yapabilirseniz size yardımcı olmaktan memnuniyet duyarız. İyi günler dileriz.";
+        draftType = "freeform";
+      } else {
+        draftText = "24 saatlik WhatsApp penceresi kapandığı için serbest mesaj gönderilemez. Lütfen onaylı bir şablon seçin.";
+        draftType = "template_required";
+      }
+
+      // 5. Log Draft Preparation in outreach_logs
+      await ctx.db.executeSafe({
+        text: `
+          INSERT INTO outreach_logs (tenant_id, lead_id, conversation_id, opportunity_id, action, channel, actor_id, metadata)
+          VALUES ($1, $2, $3, $4, 'followup_draft_prepared', 'whatsapp', $5, $6)
+        `,
+        values: [
+          ctx.tenantId,
+          conv.lead_id || null,
+          conversationId,
+          conv.active_opportunity_id || null,
+          ctx.userId,
+          JSON.stringify({
+            source: "inbox_no_reply",
+            last_outbound_message_id: lastMsg.id,
+            expects_reply_reason: classification.reason,
+            no_reply_hours: noReplyHours,
+            window_open: windowOpen,
+            draft_type: draftType,
+            draft_message: draftText,
+            sent: false
+          })
+        ]
+      });
+
+      return {
+        success: true,
+        draft: draftText,
+        draftType,
+        windowOpen,
+        noReplyHours,
+        patientName: conv.patient_name || "Hasta",
+        phone
+      };
+    }
+  ).then(res => {
+    if (!res.success) return { success: false as const, error: res.error || res.data?.error };
+    return {
+      success: true as const,
+      draft: res.data?.draft as string,
+      draftType: res.data?.draftType as "freeform" | "template_required",
+      windowOpen: res.data?.windowOpen as boolean,
+      noReplyHours: res.data?.noReplyHours as number,
+      patientName: res.data?.patientName as string,
+      phone: res.data?.phone as string
+    };
+  });
+}
+
+export async function sendApprovedFollowUp(conversationId: string, editedMessage: string) {
+  if (!conversationId) return { success: false as const, error: "Konuşma ID gerekli." };
+  if (!editedMessage || editedMessage.trim().length === 0) return { success: false as const, error: "Mesaj metni boş olamaz." };
+
+  const cleanMessage = editedMessage.trim();
+
+  return withActionGuard(
+    { actionName: 'sendApprovedFollowUp' },
+    async (ctx) => {
+      // 1. Fetch conversation data and active opportunity
+      const convRows = await ctx.db.executeSafe({
+        text: `
+          SELECT c.id as conversation_id, c.phone_number, c.customer_id, c.active_opportunity_id, c.patient_name,
+                 active_opp.stage as opp_stage, active_opp.metadata as opp_metadata, active_opp.automation_status as opp_automation_status,
+                 l.id as lead_id, l.raw_data as form_raw_data
+          FROM conversations c
+          LEFT JOIN opportunities active_opp 
+            ON active_opp.id = c.active_opportunity_id 
+            AND active_opp.tenant_id = c.tenant_id
+          LEFT JOIN LATERAL (
+            SELECT id, raw_data 
+            FROM leads 
+            WHERE leads.tenant_id = c.tenant_id
+              AND (
+                (c.customer_id IS NOT NULL AND leads.customer_id = c.customer_id)
+                OR
+                (leads.phone_number LIKE '%' || RIGHT(c.phone_number, 10))
+              )
+            ORDER BY created_at DESC 
+            LIMIT 1
+          ) l ON true
+          WHERE c.id = $1 AND c.tenant_id = $2
+          LIMIT 1
+        `,
+        values: [conversationId, ctx.tenantId]
+      });
+
+      const convs = Array.isArray(convRows) ? convRows : ((convRows as any)?.rows || []);
+      if (convs.length === 0) {
+        return { success: false, error: "Konuşma bulunamadı." };
+      }
+
+      const conv = convs[0];
+      const phone = conv.phone_number;
+
+      // 2. Validate StopRules & Exclusions
+      const currentStage = conv.opp_stage || '';
+      if (['lost', 'not_qualified', 'arrived'].includes(currentStage)) {
+        return { success: false, error: `Terminal aşamadaki fırsat için hatırlatma gönderilemez: ${currentStage}` };
+      }
+
+      const primaryNorm = normalizePhoneForIdentity(phone).e164;
+      const optOutPhones = new Set<string>();
+
+      try {
+        const optOutOpps = await ctx.db.executeSafe({
+          text: `
+            SELECT phone_number 
+            FROM opportunities 
+            WHERE tenant_id = $1 
+              AND (COALESCE(metadata->>'opt_out_requested', 'false') = 'true')
+          `,
+          values: [ctx.tenantId]
+        });
+        const optOutOppRows = Array.isArray(optOutOpps) ? optOutOpps : ((optOutOpps as any)?.rows || []);
+        for (const o of optOutOppRows) {
+          const norm = normalizePhoneForIdentity(o.phone_number).e164;
+          if (norm) optOutPhones.add(norm);
+        }
+
+        const lastInbounds = await ctx.db.executeSafe({
+          text: `
+            SELECT phone_number, content 
+            FROM messages 
+            WHERE tenant_id = $1 AND direction = 'in'
+              AND phone_number LIKE '%' || RIGHT($2, 10)
+              AND (media_metadata IS NULL OR COALESCE(media_metadata->'native'->>'message_type', '') != 'reaction')
+            ORDER BY created_at DESC
+            LIMIT 1
+          `,
+          values: [ctx.tenantId, phone]
+        });
+        const lastInboundRows = Array.isArray(lastInbounds) ? lastInbounds : ((lastInbounds as any)?.rows || []);
+        
+        const hasOptOutKeywords = (text: string): boolean => {
+          const clean = (text || '').toLowerCase().trim();
+          const optOuts = [
+            "dur", "stop", "istemiyorum", "rahatsız etmeyin", "mesaj atmayın", 
+            "bırakın", "silin", "arama", "yazma", "unsubscribe", "don't write"
+          ];
+          return optOuts.some(kw => clean.includes(kw));
+        };
+
+        if (lastInboundRows.length > 0 && hasOptOutKeywords(lastInboundRows[0].content)) {
+          if (primaryNorm) optOutPhones.add(primaryNorm);
+        }
+      } catch (e) {
+        console.error("[INBOX_FORENSIC] Failed during opt-out check in sendApprovedFollowUp:", e);
+      }
+
+      const isPrimaryOptedOut = (conv.opp_metadata?.opt_out_requested === true) || 
+                                (conv.opp_metadata?.opt_out_requested === 'true') ||
+                                (primaryNorm && optOutPhones.has(primaryNorm));
+
+      let hasOptOutKeywordInFamily = false;
+      let parsedRaw = conv.form_raw_data;
+      if (typeof parsedRaw === 'string') {
+        try { parsedRaw = JSON.parse(parsedRaw); } catch(_) {}
+      }
+      if (parsedRaw && parsedRaw._all_phones) {
+        const parsed = parseAllPhones(parsedRaw._all_phones);
+        for (const p of parsed) {
+          const pNorm = normalizePhoneForIdentity(p).e164;
+          if (pNorm && optOutPhones.has(pNorm)) {
+            hasOptOutKeywordInFamily = true;
+            break;
+          }
+        }
+      }
+
+      if (isPrimaryOptedOut || hasOptOutKeywordInFamily) {
+        return { success: false, error: "Hasta opt-out talep etmiştir. Hatırlatma gönderilemez." };
+      }
+
+      if (conv.opp_automation_status === 'stopped' || conv.opp_automation_status === 'paused') {
+        return { success: false, error: "Bu fırsat için otomasyon durdurulmuş." };
+      }
+
+      const lastMsgRows = await ctx.db.executeSafe({
+        text: `
+          SELECT content, direction, created_at
+          FROM messages
+          WHERE conversation_id = $1 AND tenant_id = $2
+            AND direction != 'system'
+            AND (media_metadata IS NULL OR COALESCE(media_metadata->'native'->>'message_type', '') != 'reaction')
+          ORDER BY created_at DESC
+          LIMIT 1
+        `,
+        values: [conversationId, ctx.tenantId]
+      });
+      const lastMsgs = Array.isArray(lastMsgRows) ? lastMsgRows : ((lastMsgRows as any)?.rows || []);
+      if (lastMsgs.length === 0) {
+        return { success: false, error: "Konuşmada mesaj bulunamadı." };
+      }
+
+      const lastMsg = lastMsgs[0];
+      if (lastMsg.direction !== 'out') {
+        return { success: false, error: "Son mesaj hastadan gelmiş, hatırlatma gönderilemez." };
+      }
+
+      const lastInboundMsgRows = await ctx.db.executeSafe({
+        text: `
+          SELECT created_at
+          FROM messages
+          WHERE conversation_id = $1 AND tenant_id = $2 AND direction = 'in'
+            AND (media_metadata IS NULL OR COALESCE(media_metadata->'native'->>'message_type', '') != 'reaction')
+          ORDER BY created_at DESC
+          LIMIT 1
+        `,
+        values: [conversationId, ctx.tenantId]
+      });
+      const lastInboundMsgs = Array.isArray(lastInboundMsgRows) ? lastInboundMsgRows : ((lastInboundMsgRows as any)?.rows || []);
+      
+      let windowOpen = false;
+      if (lastInboundMsgs.length > 0) {
+        const lastInboundTimeMs = new Date(lastInboundMsgs[0].created_at).getTime();
+        windowOpen = (Date.now() - lastInboundTimeMs) <= 24 * 60 * 60 * 1000;
+      }
+
+      if (!windowOpen) {
+        return { success: false, error: "24 saatlik WhatsApp penceresi kapalı. Şablon gönderimi A1.7a kapsamında devre dışıdır." };
+      }
+
+      const lastDraftLog = await ctx.db.executeSafe({
+        text: `
+          SELECT created_at 
+          FROM outreach_logs 
+          WHERE conversation_id = $1 AND tenant_id = $2 AND action = 'followup_draft_prepared'
+          ORDER BY created_at DESC 
+          LIMIT 1
+        `,
+        values: [conversationId, ctx.tenantId]
+      });
+      const lastDraftLogRows = Array.isArray(lastDraftLog) ? lastDraftLog : ((lastDraftLog as any)?.rows || []);
+      if (lastDraftLogRows.length > 0) {
+        const draftTime = lastDraftLogRows[0].created_at;
+        const newInbounds = await ctx.db.executeSafe({
+          text: `
+            SELECT 1 FROM messages 
+            WHERE conversation_id = $1 AND tenant_id = $2 AND direction = 'in' AND created_at > $3
+            LIMIT 1
+          `,
+          values: [conversationId, ctx.tenantId, draftTime]
+        });
+        const newInboundRows = Array.isArray(newInbounds) ? newInbounds : ((newInbounds as any)?.rows || []);
+        if (newInboundRows.length > 0) {
+          return { success: false, error: "Taslak hazırlandıktan sonra hastadan yeni bir mesaj gelmiştir. Gönderim iptal edildi." };
+        }
+      }
+
+      const recentSends = await ctx.db.executeSafe({
+        text: `
+          SELECT 1 FROM outreach_logs 
+          WHERE conversation_id = $1 AND tenant_id = $2 
+            AND action = 'followup_sent'
+            AND created_at > NOW() - INTERVAL '24 hour'
+          LIMIT 1
+        `,
+        values: [conversationId, ctx.tenantId]
+      });
+      const recentSendRows = Array.isArray(recentSends) ? recentSends : ((recentSends as any)?.rows || []);
+      if (recentSendRows.length > 0) {
+        return { success: false, error: "Son 24 saat içinde bu hastaya zaten bir hatırlatma mesajı gönderilmiştir." };
+      }
+
+      // 3. Resolve WhatsApp credentials
+      const creds = await CredentialsService.resolveCredentials(ctx.tenantId, 'whatsapp');
+      const META_ACCESS_TOKEN = creds.accessToken;
+      const PHONE_NUMBER_ID = creds.whatsappPhoneNumberId;
+
+      if (!META_ACCESS_TOKEN || !PHONE_NUMBER_ID) {
+        return { success: false, error: "WhatsApp kimlik bilgileri eksik. Entegrasyon ayarlarını kontrol edin." };
+      }
+
+      // 4. Send via WhatsApp API
+      const response = await fetch(`https://graph.facebook.com/v25.0/${PHONE_NUMBER_ID}/messages`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${META_ACCESS_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp',
+          to: phone,
+          type: 'text',
+          text: { body: cleanMessage },
+        }),
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        return { success: false, error: `WhatsApp gönderim hatası: ${errData?.error?.message || response.statusText}` };
+      }
+
+      let providerMessageId: string | null = null;
+      try {
+        const resData = await response.json();
+        providerMessageId = resData.messages?.[0]?.id || null;
+      } catch (_) {}
+
+      // 5. Save message record
+      await ctx.db.executeSafe({
+        text: `INSERT INTO messages (tenant_id, conversation_id, phone_number, direction, content, channel, status, provider_message_id)
+               VALUES ($1, $2, $3, 'out', $4, 'whatsapp', 'sent', $5)`,
+        values: [ctx.tenantId, conversationId, phone, cleanMessage, providerMessageId]
+      });
+
+      // Update conversation last_message
+      await ctx.db.executeSafe({
+        text: `UPDATE conversations 
+               SET last_message_at = NOW(), 
+                   last_message_content = $1,
+                   last_channel = 'whatsapp',
+                   last_message_status = 'sent',
+                   last_message_direction = 'out',
+                   message_count = COALESCE(message_count, 0) + 1
+               WHERE id = $2 AND tenant_id = $3`,
+        values: [cleanMessage, conversationId, ctx.tenantId]
+      });
+
+      // 6. Write outreach log
+      await ctx.db.executeSafe({
+        text: `INSERT INTO outreach_logs (tenant_id, lead_id, conversation_id, opportunity_id, action, channel, actor_id, metadata)
+               VALUES ($1, $2, $3, $4, 'followup_sent', 'whatsapp', $5, $6)`,
+        values: [
+          ctx.tenantId,
+          conv.lead_id || null,
+          conversationId,
+          conv.active_opportunity_id || null,
+          ctx.userId,
+          JSON.stringify({
+            message_text: cleanMessage,
+            provider_message_id: providerMessageId,
+            patient_name: conv.patient_name || '',
+            phone,
+          })
+        ]
+      });
+
+      // 7. Audit
+      logAudit({
+        tenantId: ctx.tenantId,
+        userId: ctx.userId,
+        userEmail: ctx.email,
+        action: 'outreach_followup_sent',
+        entityType: 'conversation',
+        entityId: conversationId,
+        details: { phone, messageText: cleanMessage },
+      });
+
+      return { success: true, messageSent: true };
+    }
+  ).then(res => {
+    if (!res.success) return { success: false as const, error: res.error || res.data?.error };
+    return { success: true as const, messageSent: res.data?.messageSent as boolean };
+  });
+}
+

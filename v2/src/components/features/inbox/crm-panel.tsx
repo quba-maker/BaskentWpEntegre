@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useSWRConfig } from "swr";
 import { User, MapPin, Building, Activity, Tag, ChevronDown, ChevronRight, Save, X, Plus, ChevronLeft, Check, Loader2, Sparkles, FileText, Brain, Link, Clock, Moon, Calendar, CalendarClock } from "lucide-react";
 import { useInboxStore } from "@/store/inbox-store";
-import { updateCrmData, addTag, removeTag } from "@/app/actions/inbox";
+import { updateCrmData, addTag, removeTag, prepareFollowUpDraft, sendApprovedFollowUp } from "@/app/actions/inbox";
 import { CustomerAiBrainPanel } from "@/components/features/ai-observability/CustomerAiBrain";
 import { AiTimelinePanel } from "@/components/features/ai-observability/AiTimeline";
 import { resolvePatientDisplayName, formatPhoneReadable } from "@/lib/utils/patient-name-resolver";
@@ -135,6 +135,14 @@ export function ContextPanel() {
   const [newTagVal, setNewTagVal] = useState("");
   const { mutate } = useSWRConfig();
 
+  // Follow-up draft states
+  const [draftData, setDraftData] = useState<{ draft: string; draftType: string; windowOpen: boolean; noReplyHours: number } | null>(null);
+  const [editedMessage, setEditedMessage] = useState("");
+  const [isLoadingDraft, setIsLoadingDraft] = useState(false);
+  const [isSendingFollowUp, setIsSendingFollowUp] = useState(false);
+  const [followUpError, setFollowUpError] = useState<string | null>(null);
+  const [followUpSuccess, setFollowUpSuccess] = useState<string | null>(null);
+
   // Reset local state when contact changes or active opp fields update
   // P1B: Granular deps ensure refresh on opp switch (same contact, different opp fields)
   const contactId = activeContact?.id;
@@ -154,6 +162,10 @@ export function ContextPanel() {
       setIsAddingTag(false);
       setNewTagVal("");
       setSaveStatus("idle");
+      setDraftData(null);
+      setEditedMessage("");
+      setFollowUpError(null);
+      setFollowUpSuccess(null);
     }
   }, [contactId, contactDept, contactCountry, contactNotes, contactStage, activeContact?.opp_requester_name, activeContact?.opp_patient_name, activeContact?.patient_name]);
 
@@ -566,6 +578,149 @@ export function ContextPanel() {
       </div>
 
       <div className="p-5 space-y-7 flex-1">
+        {/* Hatırlatma Taslağı (Follow-Up) Panel Section */}
+        {(activeContact.lastMessageDirection === 'out' || activeContact.lastMessageDirection === 'system') && (
+          <div className="p-4 rounded-2xl border space-y-3 bg-white/50 shadow-sm text-left" style={{ borderColor: "var(--q-border-default)" }}>
+            <span className="block text-[10px] font-bold uppercase tracking-widest text-[#86868B]">Hatırlatma Yönetimi</span>
+            
+            {activeContact.is_no_reply_eligible && (
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-[#FF3B30] bg-red-50 border border-red-100 rounded-lg px-2.5 py-1.5 leading-snug">
+                <span>⏳</span>
+                <span>{activeContact.no_reply_hours} saattir hastadan cevap alınamadı.</span>
+              </div>
+            )}
+
+            {followUpError && (
+              <div className="text-xs font-bold text-red-600 bg-red-50 border border-red-100 rounded-lg p-2.5 leading-snug">
+                ⚠️ {followUpError}
+              </div>
+            )}
+
+            {followUpSuccess && (
+              <div className="text-xs font-bold text-green-600 bg-green-50 border border-green-100 rounded-lg p-2.5 leading-snug">
+                ✅ {followUpSuccess}
+              </div>
+            )}
+
+            {!draftData ? (
+              <button
+                onClick={async () => {
+                  setIsLoadingDraft(true);
+                  setFollowUpError(null);
+                  setFollowUpSuccess(null);
+                  try {
+                    const res = await prepareFollowUpDraft(activeContact.conversation_id || activeContact.id);
+                    if (res.success) {
+                      setDraftData({
+                        draft: res.draft,
+                        draftType: res.draftType,
+                        windowOpen: res.windowOpen,
+                        noReplyHours: res.noReplyHours
+                      });
+                      setEditedMessage(res.draft);
+                    } else {
+                      setFollowUpError(res.error || "Taslak hazırlanamadı.");
+                    }
+                  } catch (err) {
+                    setFollowUpError("Sistem hatası. Lütfen tekrar deneyin.");
+                  }
+                  setIsLoadingDraft(false);
+                }}
+                disabled={isLoadingDraft}
+                className="w-full py-2.5 px-4 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isLoadingDraft ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Taslak Hazırlanıyor...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Hatırlatma Taslağı Hazırla</span>
+                  </>
+                )}
+              </button>
+            ) : (
+              <div className="space-y-3 pt-1">
+                <div className="flex justify-between items-center text-xs">
+                  <span className="font-bold text-indigo-600 uppercase tracking-wider text-[10px]">Taslak Önizleme</span>
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                    draftData.windowOpen ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"
+                  }`}>
+                    {draftData.windowOpen ? "24s Penceresi Açık" : "24s Penceresi Kapalı"}
+                  </span>
+                </div>
+
+                {!draftData.windowOpen && (
+                  <div className="text-[11px] font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2.5 leading-snug">
+                    ⚠️ 24 saatlik WhatsApp penceresi kapandığı için sadece onaylı şablon (template) gönderilebilir. Şablon gönderimi A1.7a kapsamında devre dışıdır.
+                  </div>
+                )}
+
+                <textarea
+                  value={editedMessage}
+                  onChange={(e) => setEditedMessage(e.target.value)}
+                  disabled={!draftData.windowOpen || isSendingFollowUp}
+                  className="w-full text-xs p-3 rounded-xl border outline-none font-medium leading-relaxed bg-white resize-none h-24 disabled:opacity-85 disabled:bg-gray-50"
+                  style={{ borderColor: "var(--q-border-default)", color: "var(--q-text-primary)" }}
+                  placeholder="Mesajınızı yazın..."
+                />
+
+                <div className="flex gap-2.5">
+                  <button
+                    onClick={() => setDraftData(null)}
+                    disabled={isSendingFollowUp}
+                    className="flex-1 py-2 px-3 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-bold rounded-xl cursor-pointer transition-all disabled:opacity-50"
+                  >
+                    Vazgeç
+                  </button>
+                  <button
+                    onClick={async () => {
+                      setIsSendingFollowUp(true);
+                      setFollowUpError(null);
+                      setFollowUpSuccess(null);
+                      try {
+                        const res = await sendApprovedFollowUp(activeContact.conversation_id || activeContact.id, editedMessage);
+                        if (res.success) {
+                          setFollowUpSuccess("Hatırlatma başarıyla gönderildi.");
+                          mutate((key) => Array.isArray(key) && key[0] === "conversations");
+                          if (typeof window !== 'undefined') {
+                            window.dispatchEvent(new CustomEvent('inbox-unread-refresh'));
+                          }
+                          setTimeout(() => {
+                            setDraftData(null);
+                            setFollowUpSuccess(null);
+                          }, 3000);
+                        } else {
+                          setFollowUpError(res.error || "Gönderim başarısız.");
+                        }
+                      } catch (err) {
+                        setFollowUpError("Sistem hatası. Gönderilemedi.");
+                      }
+                      setIsSendingFollowUp(false);
+                    }}
+                    disabled={!draftData.windowOpen || isSendingFollowUp}
+                    className="flex-[2] py-2 px-4 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all disabled:bg-gray-300 disabled:text-gray-500 disabled:cursor-not-allowed disabled:hover:bg-gray-300 hover:scale-[1.01] active:scale-[0.99]"
+                  >
+                    {isSendingFollowUp ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Gönderiyor...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Taslağı Gönder</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Core CRM Data */}
         <div className="space-y-4">
           <div>
