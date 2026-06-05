@@ -50,7 +50,17 @@ export interface FormGreetingDraftResult {
   windowOpen?: boolean;
   patientName?: string;
   phone?: string;
-  templateConfigExists?: boolean;
+  
+  // Phase a2.1: Unified Template Readiness Properties
+  draftTemplateAvailable: boolean;
+  approvedWhatsappTemplateAvailable: boolean; // always false in this schema
+  templateConfigExists: boolean;
+  templateSendable: boolean;
+  templateNonCompliant: boolean;
+  complianceWarning: string | null;
+  source: 'message_templates' | 'system_hardcoded' | 'none';
+  isWithin24hWindow: boolean;
+  hardBlockedBecausePatientAlreadyInbound?: boolean;
 }
 
 // Terminal stages
@@ -73,6 +83,53 @@ export class FormGreetingHandoffService {
   constructor(db: TenantDB, tenantId: string) {
     this.db = db;
     this.tenantId = tenantId;
+  }
+
+  /**
+   * Helper method for side-effect-free checkGreetingReadiness API.
+   * Resolves eligibility metrics using a raw lead object instead of starting database mutations.
+   */
+  async checkEligibilityForLead(lead: any): Promise<{
+    requiresTemplate: boolean;
+    windowOpen: boolean;
+    hasPatientMessagedBefore: boolean;
+  }> {
+    const phone = lead.phone_number;
+    let parsedRaw = lead.raw_data;
+    if (typeof parsedRaw === 'string') {
+      try { parsedRaw = JSON.parse(parsedRaw); } catch (_) {}
+    }
+    const allPhones = parsedRaw?._all_phones ? parseAllPhones(parsedRaw._all_phones) : [phone];
+
+    // Check if patient has EVER sent inbound on any family phone
+    const hasPatientMessaged = await this.hasPatientMessagedBefore(allPhones);
+
+    // Check last inbound timestamp on the conversation matching phone
+    const lastInboundRows = await this.db.executeSafe({
+      text: `
+        SELECT m.created_at FROM messages m
+        JOIN conversations c ON c.id = m.conversation_id AND c.tenant_id = m.tenant_id
+        WHERE m.tenant_id = $1 
+          AND RIGHT(c.phone_number, 10) = RIGHT($2, 10) 
+          AND m.direction = 'in'
+          AND (m.media_metadata IS NULL OR COALESCE(m.media_metadata->'native'->>'message_type', '') != 'reaction')
+        ORDER BY m.created_at DESC LIMIT 1
+      `,
+      values: [this.tenantId, phone]
+    });
+    const lastInbounds = Array.isArray(lastInboundRows) ? lastInboundRows : ((lastInboundRows as any)?.rows || []);
+
+    let windowOpen = false;
+    if (lastInbounds.length > 0) {
+      const lastInboundTime = new Date(lastInbounds[0].created_at).getTime();
+      windowOpen = (Date.now() - lastInboundTime) <= 24 * 60 * 60 * 1000;
+    }
+
+    return {
+      requiresTemplate: !windowOpen,
+      windowOpen,
+      hasPatientMessagedBefore: hasPatientMessaged,
+    };
   }
 
   /**
@@ -188,7 +245,7 @@ export class FormGreetingHandoffService {
       return { ...defaultResult, reason: 'Hasta veya aile numarası opt-out talep etmiş. Karşılama yapılamaz.' };
     }
 
-    // 8. Check if patient has EVER sent an inbound message on ANY known phone
+    // 8. Check if patient has EVER sent an inbound message on any known phone
     const hasPatientMessaged = await this.hasPatientMessagedBefore(allPhones);
     defaultResult.hasPatientMessagedBefore = hasPatientMessaged;
 
@@ -209,10 +266,6 @@ export class FormGreetingHandoffService {
     const msgCountArr = Array.isArray(msgCountRows) ? msgCountRows : ((msgCountRows as any)?.rows || []);
     const messageCount = msgCountArr[0]?.cnt || 0;
     defaultResult.messageCount = messageCount;
-
-    // If there are already outbound messages, this isn't a pure "never contacted" case
-    // but we still allow form greeting if patient never replied
-    // (coordinator may have sent but patient never responded)
 
     // 10. Check 24h window (based on last inbound from patient)
     const lastInboundRows = await this.db.executeSafe({
@@ -252,11 +305,12 @@ export class FormGreetingHandoffService {
       return { ...defaultResult, reason: 'Son 72 saat içinde zaten form karşılama taslağı hazırlanmış.' };
     }
 
-    // 12. Check template config existence
+    // 12. Check template config existence (Phase a2.1: check message_templates table for 'greeting' type)
     const templateConfigRows = await this.db.executeSafe({
       text: `
-        SELECT 1 FROM greeting_templates 
+        SELECT 1 FROM message_templates 
         WHERE tenant_id = $1 
+          AND template_type = 'greeting'
           AND is_active = true
         LIMIT 1
       `,
@@ -278,52 +332,129 @@ export class FormGreetingHandoffService {
   async prepareDraft(conversationId: string): Promise<FormGreetingDraftResult> {
     const eligibility = await this.checkEligibility(conversationId);
 
-    if (!eligibility.eligible) {
-      return { success: false, error: eligibility.reason };
+    // If eligibility fails but the reason is "Already Messaged", we return it as a hard block
+    const isHardBlocked = eligibility.hasPatientMessagedBefore;
+
+    if (!eligibility.eligible && !isHardBlocked) {
+      return {
+        success: false,
+        error: eligibility.reason,
+        draftTemplateAvailable: false,
+        approvedWhatsappTemplateAvailable: false,
+        templateConfigExists: false,
+        templateSendable: false,
+        templateNonCompliant: false,
+        complianceWarning: null,
+        source: 'none',
+        isWithin24hWindow: eligibility.windowOpen,
+        hardBlockedBecausePatientAlreadyInbound: isHardBlocked
+      };
     }
 
     const draftType: 'freeform' | 'template_required' = eligibility.requiresTemplate ? 'template_required' : 'freeform';
     
-    let draftText: string;
-    if (!eligibility.requiresTemplate) {
-      // 24h window open — freeform allowed
-      const { sanitizePatientFacingMessage } = await import('@/lib/utils/patient-message-sanitizer');
-      draftText = sanitizePatientFacingMessage(`Merhaba, Başkent Hastanesi'nden iletişime geçiyoruz. Formunuzu aldık ve size yardımcı olmak istiyoruz. Randevu ve tedavi sürecinizle ilgili bilgi almak isterseniz bize yazabilirsiniz.`);
-    } else {
-      // Template required
-      if (!eligibility.templateConfigExists) {
-        draftText = '⚠️ 24 saatlik WhatsApp penceresi kapalı ve onaylı şablon (template) konfigürasyonu bulunamadı. Lütfen 360dialog template ayarlarını yapın.';
+    // Resolve greeting language config from channel_ai_profiles if available
+    let greetingLang = 'auto';
+    try {
+      const profileRes = await this.db.executeSafe({
+        text: `SELECT cap.greeting_language FROM channel_ai_profiles cap
+               JOIN channel_groups cg ON cap.group_id = cg.id
+               WHERE cg.tenant_id = $1 AND cg.status = 'active'
+               ORDER BY cg.sort_order ASC LIMIT 1`,
+        values: [this.tenantId]
+      }) as any[];
+      if (profileRes.length > 0) {
+        greetingLang = profileRes[0].greeting_language || 'auto';
+      }
+    } catch (_) {}
+
+    // Resolve tenant name
+    let tenantName = 'Başkent Üniversitesi Hastanesi';
+    try {
+      const { withTenantDB } = await import('@/lib/core/tenant-db');
+      const sysDb = withTenantDB('admin-system', true);
+      const tenantRes = await sysDb.executeSafe({
+        text: `SELECT name FROM tenants WHERE id = $1 LIMIT 1`,
+        values: [this.tenantId]
+      }) as any[];
+      if (tenantRes.length > 0) tenantName = tenantRes[0].name;
+    } catch (_) {}
+
+    // Resolve template using TemplateResolverService
+    const { TemplateResolverService } = await import('@/lib/services/template-resolver.service');
+    const resolved = await TemplateResolverService.resolve(this.db, {
+      tenantId: this.tenantId,
+      tenantName,
+      patientName: eligibility.patientName,
+      formName: eligibility.formName || undefined,
+      phoneNumber: eligibility.phone || undefined,
+    }, greetingLang, 'greeting');
+
+    const hasRealTemplate = resolved.templateId !== null && resolved.source !== 'system_hardcoded';
+    const isNonCompliant = resolved.template_non_compliant || false;
+
+    // Resolve template sendability logic:
+    // - If hardblocked, false
+    // - If non-compliant, false
+    // - If 24h window open, true (we can use either fallback or resolved template)
+    // - If 24h window closed, we require an approved template (which is false in this schema, so false)
+    let templateSendable = false;
+    if (!isHardBlocked && !isNonCompliant) {
+      if (eligibility.windowOpen) {
+        templateSendable = true;
       } else {
-        draftText = '24 saatlik WhatsApp penceresi kapalı. Onaylı şablon ile gönderim yapılabilir. Şablon önizlemesi için template seçin.';
+        // Closed window requires approved template (which is false)
+        templateSendable = false;
       }
     }
 
-    // Log draft preparation
-    await this.db.executeSafe({
-      text: `
-        INSERT INTO outreach_logs (tenant_id, lead_id, conversation_id, opportunity_id, action, channel, metadata)
-        VALUES ($1, $2, $3, $4, 'form_greeting_draft_prepared', 'whatsapp', $5)
-      `,
-      values: [
-        this.tenantId,
-        eligibility.leadId || null,
-        conversationId,
-        eligibility.opportunityId || null,
-        JSON.stringify({
-          phone: eligibility.phone,
-          patient_name: eligibility.patientName,
-          form_name: eligibility.formName,
-          lead_created_at: eligibility.leadCreatedAt,
-          message_count: eligibility.messageCount,
-          window_open: eligibility.windowOpen,
-          requires_template: eligibility.requiresTemplate,
-          template_config_exists: eligibility.templateConfigExists,
-          draft_type: draftType,
-          draft_message: draftText,
-          sent: false,
-        })
-      ]
-    });
+    let draftText: string;
+    if (isHardBlocked) {
+      draftText = '⚠️ Hasta zaten bize yazdı. Karşılama engellendi.';
+    } else if (eligibility.windowOpen) {
+      // 24h window open — freeform allowed
+      draftText = resolved.rendered;
+    } else {
+      // Template required
+      if (!hasRealTemplate) {
+        draftText = '⚠️ 24 saatlik WhatsApp penceresi kapalı ve onaylı şablon (template) konfigürasyonu bulunamadı. Lütfen 360dialog template ayarlarını yapın.';
+      } else {
+        draftText = resolved.rendered;
+      }
+    }
+
+    // Log draft preparation only if not hard blocked
+    if (!isHardBlocked) {
+      await this.db.executeSafe({
+        text: `
+          INSERT INTO outreach_logs (tenant_id, lead_id, conversation_id, opportunity_id, action, channel, metadata)
+          VALUES ($1, $2, $3, $4, 'form_greeting_draft_prepared', 'whatsapp', $5)
+        `,
+        values: [
+          this.tenantId,
+          eligibility.leadId || null,
+          conversationId,
+          eligibility.opportunityId || null,
+          JSON.stringify({
+            phone: eligibility.phone,
+            patient_name: eligibility.patientName,
+            form_name: eligibility.formName,
+            lead_created_at: eligibility.leadCreatedAt,
+            message_count: eligibility.messageCount,
+            window_open: eligibility.windowOpen,
+            requires_template: eligibility.requiresTemplate,
+            template_config_exists: hasRealTemplate,
+            draft_type: draftType,
+            draft_message: draftText,
+            template_id: resolved.templateId,
+            template_name: resolved.templateName,
+            template_non_compliant: isNonCompliant,
+            compliance_warning: resolved.compliance_warning,
+            sent: false,
+          })
+        ]
+      });
+    }
 
     return {
       success: true,
@@ -332,7 +463,17 @@ export class FormGreetingHandoffService {
       windowOpen: eligibility.windowOpen,
       patientName: eligibility.patientName,
       phone: eligibility.phone,
-      templateConfigExists: eligibility.templateConfigExists,
+      
+      // Phase a2.1 flags
+      draftTemplateAvailable: true,
+      approvedWhatsappTemplateAvailable: false,
+      templateConfigExists: hasRealTemplate,
+      templateSendable,
+      templateNonCompliant: isNonCompliant,
+      complianceWarning: resolved.compliance_warning || null,
+      source: resolved.source === 'system_hardcoded' ? 'system_hardcoded' : (hasRealTemplate ? 'message_templates' : 'none'),
+      isWithin24hWindow: eligibility.windowOpen,
+      hardBlockedBecausePatientAlreadyInbound: isHardBlocked
     };
   }
 

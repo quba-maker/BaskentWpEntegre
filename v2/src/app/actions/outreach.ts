@@ -194,6 +194,167 @@ export async function prepareGreetingDraft(leadId: string) {
   });
 }
 
+/**
+ * Purely read-only, side-effect-free check for lead greeting readiness.
+ * Does not write messages, outreach_logs, notifications, follow_up_tasks,
+ * and does not call WhatsApp API or AI.
+ */
+export async function checkGreetingReadiness(leadId: string) {
+  if (!leadId) return { success: false as const, error: "Lead ID gerekli." };
+  if (!UUID_RE.test(leadId)) return { success: false as const, error: "Geçersiz Lead ID formatı." };
+
+  return withActionGuard(
+    { actionName: 'checkGreetingReadiness' },
+    async (ctx) => {
+      // 1. Fetch lead
+      const leads = await ctx.db.executeSafe({
+        text: `SELECT l.id, l.phone_number, l.patient_name, l.form_name,
+                      l.linked_opportunity_id, l.customer_id, l.country, l.raw_data, l.created_at
+               FROM leads l
+               WHERE l.id = $1 AND l.tenant_id = $2`,
+        values: [leadId, ctx.tenantId]
+      }) as any[];
+
+      if (leads.length === 0) {
+        return { success: false, error: "Lead bulunamadı." };
+      }
+
+      const lead = leads[0];
+      const phone = lead.phone_number;
+
+      if (!phone) {
+        return { success: false, error: "Telefon numarası eksik." };
+      }
+
+      // Check if greeting was already sent
+      const existingGreetingLog = await ctx.db.executeSafe({
+        text: `SELECT id FROM outreach_logs 
+               WHERE lead_id = $1 AND tenant_id = $2 AND action = 'greeting_sent'
+               LIMIT 1`,
+        values: [leadId, ctx.tenantId]
+      }) as any[];
+      const greetingSent = existingGreetingLog.length > 0;
+
+      const { FormGreetingHandoffService } = await import("@/lib/services/form-greeting-handoff.service");
+      const service = new FormGreetingHandoffService(ctx.db, ctx.tenantId);
+
+      // Check eligibility parameters without database mutations
+      const elig = await service.checkEligibilityForLead(lead);
+
+      // Resolve greeting language config from channel_ai_profiles
+      let greetingLang = 'auto';
+      try {
+        const profileRes = await ctx.db.executeSafe({
+          text: `SELECT cap.greeting_language FROM channel_ai_profiles cap
+                 JOIN channel_groups cg ON cap.group_id = cg.id
+                 WHERE cg.tenant_id = $1 AND cg.status = 'active'
+                 ORDER BY cg.sort_order ASC LIMIT 1`,
+          values: [ctx.tenantId]
+        }) as any[];
+        if (profileRes.length > 0) {
+          greetingLang = profileRes[0].greeting_language || 'auto';
+        }
+      } catch (_) {}
+
+      // Extract lead-level language hint from raw_data
+      let leadLanguage: string | undefined;
+      let leadDepartment: string | undefined;
+      try {
+        const rawData = typeof lead.raw_data === 'string' ? JSON.parse(lead.raw_data) : (lead.raw_data || {});
+        leadLanguage = rawData.language || rawData.Language || rawData.dil || rawData.Dil || undefined;
+        leadDepartment = rawData.department || rawData.Department || rawData.departman || rawData.Departman || rawData.bolum || rawData.Bölüm || undefined;
+      } catch (_) {}
+
+      if (!leadDepartment && lead.linked_opportunity_id) {
+        try {
+          const oppRes = await ctx.db.executeSafe({
+            text: `SELECT department FROM opportunities WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+            values: [lead.linked_opportunity_id, ctx.tenantId]
+          }) as any[];
+          if (oppRes.length > 0) leadDepartment = oppRes[0].department || undefined;
+        } catch (_) {}
+      }
+
+      // Resolve tenant name
+      let tenantName = 'Başkent Üniversitesi Hastanesi';
+      try {
+        const { withTenantDB } = await import('@/lib/core/tenant-db');
+        const sysDb = withTenantDB('admin-system', true);
+        const tenantRes = await sysDb.executeSafe({
+          text: `SELECT name FROM tenants WHERE id = $1 LIMIT 1`,
+          values: [ctx.tenantId]
+        }) as any[];
+        if (tenantRes.length > 0) tenantName = tenantRes[0].name;
+      } catch (_) {}
+
+      const { TemplateResolverService } = await import('@/lib/services/template-resolver.service');
+      const resolved = await TemplateResolverService.resolve(ctx.db, {
+        tenantId: ctx.tenantId,
+        tenantName,
+        patientName: lead.patient_name || '',
+        formName: lead.form_name || undefined,
+        department: leadDepartment || undefined,
+        country: lead.country || undefined,
+        phoneNumber: phone,
+      }, greetingLang);
+
+      const hasRealTemplate = resolved.templateId !== null && resolved.source !== 'system_hardcoded';
+      const isNonCompliant = resolved.template_non_compliant || false;
+
+      // Calculate sendability rules:
+      // - hard block if patient already inbound (hasPatientMessagedBefore = true) => false
+      // - non-compliant => false
+      // - 24h window open => true
+      // - 24h window closed => approvedWhatsappTemplateAvailable (always false) => false
+      const isHardBlocked = elig.hasPatientMessagedBefore;
+      let templateSendable = false;
+      if (!isHardBlocked && !isNonCompliant) {
+        if (elig.windowOpen) {
+          templateSendable = true;
+        } else {
+          templateSendable = false;
+        }
+      }
+
+      return {
+        success: true,
+        data: {
+          draftTemplateAvailable: true,
+          approvedWhatsappTemplateAvailable: false,
+          templateConfigExists: hasRealTemplate,
+          templateSendable,
+          templateNonCompliant: isNonCompliant,
+          complianceWarning: resolved.compliance_warning || null,
+          source: resolved.source === 'system_hardcoded' ? 'system_hardcoded' : (hasRealTemplate ? 'message_templates' : 'none'),
+          isWithin24hWindow: elig.windowOpen,
+          hardBlockedBecausePatientAlreadyInbound: isHardBlocked,
+          draftText: resolved.rendered,
+          greetingSent
+        }
+      };
+    }
+  ).then(res => {
+    if (!res.success) return { success: false as const, error: res.error || "Kontrol başarısız." };
+    const data = (res.data || {}) as any;
+    return {
+      success: true as const,
+      data: {
+        draftTemplateAvailable: !!data.draftTemplateAvailable,
+        approvedWhatsappTemplateAvailable: !!data.approvedWhatsappTemplateAvailable,
+        templateConfigExists: !!data.templateConfigExists,
+        templateSendable: !!data.templateSendable,
+        templateNonCompliant: !!data.templateNonCompliant,
+        complianceWarning: (data.complianceWarning || null) as string | null,
+        source: (data.source || 'none') as 'message_templates' | 'system_hardcoded' | 'none',
+        isWithin24hWindow: !!data.isWithin24hWindow,
+        hardBlockedBecausePatientAlreadyInbound: !!data.hardBlockedBecausePatientAlreadyInbound,
+        draftText: (data.draftText || "") as string,
+        greetingSent: !!data.greetingSent
+      }
+    };
+  });
+}
+
 
 // ═══════════════════════════════════════════════════════════
 // 2. SEND GREETING MESSAGE — Koordinatör onayladığı mesajı gönder

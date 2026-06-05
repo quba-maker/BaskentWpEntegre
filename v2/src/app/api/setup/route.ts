@@ -686,8 +686,8 @@ export async function GET(req: NextRequest) {
                  ON CONFLICT DO NOTHING`,
           values: [
             t.id,
-            `Merhaba {{patient_name}}! ${tName} olarak size yazıyoruz 🙏\n\nDoldurduğunuz form bize ulaştı. Talebiniz hakkında detaylı bilgi alabilir miyiz?`,
-            JSON.stringify(['patient_name', 'tenant_name', 'form_name', 'department', 'country', 'coordinator_name'])
+            `Merhaba, ${tName} olarak size yazıyoruz 🙏\n\nDoldurduğunuz form bize ulaştı. Talebiniz hakkında detaylı bilgi alabilir miyiz?`,
+            JSON.stringify(['tenant_name', 'form_name', 'department', 'country', 'coordinator_name'])
           ]
         });
         // EN default greeting
@@ -697,8 +697,8 @@ export async function GET(req: NextRequest) {
                  ON CONFLICT DO NOTHING`,
           values: [
             t.id,
-            `Hello {{patient_name}}! We are reaching out from ${tName} 🙏\n\nWe received your form. Could you provide more details about your request?`,
-            JSON.stringify(['patient_name', 'tenant_name', 'form_name', 'department', 'country', 'coordinator_name'])
+            `Hello, We are reaching out from ${tName} 🙏\n\nWe received your form. Could you provide more details about your request?`,
+            JSON.stringify(['tenant_name', 'form_name', 'department', 'country', 'coordinator_name'])
           ]
         });
         // TR default remarketing
@@ -708,8 +708,8 @@ export async function GET(req: NextRequest) {
                  ON CONFLICT DO NOTHING`,
           values: [
             t.id,
-            `Merhaba {{patient_name}}! Sizinle daha önce {{department}} bölümümüz için görüşmüştük. Tedavi planınızla ilgili sormak istediğiniz veya netleştirmek istediğiniz bir konu var mıdır? 😊`,
-            JSON.stringify(['patient_name', 'tenant_name', 'form_name', 'department', 'country', 'coordinator_name'])
+            `Merhaba, Sizinle daha önce {{department}} bölümümüz için görüşmüştük. Tedavi planınızla ilgili sormak istediğiniz veya netleştirmek istediğiniz bir konu var mıdır? 😊`,
+            JSON.stringify(['tenant_name', 'form_name', 'department', 'country', 'coordinator_name'])
           ]
         });
         // EN default remarketing
@@ -719,8 +719,8 @@ export async function GET(req: NextRequest) {
                  ON CONFLICT DO NOTHING`,
           values: [
             t.id,
-            `Hello {{patient_name}}! We previously discussed your request for the {{department}} department. Do you have any questions or need further assistance regarding your treatment plan? 😊`,
-            JSON.stringify(['patient_name', 'tenant_name', 'form_name', 'department', 'country', 'coordinator_name'])
+            `Hello, We previously discussed your request for the {{department}} department. Do you have any questions or need further assistance regarding your treatment plan? 😊`,
+            JSON.stringify(['tenant_name', 'form_name', 'department', 'country', 'coordinator_name'])
           ]
         });
       }

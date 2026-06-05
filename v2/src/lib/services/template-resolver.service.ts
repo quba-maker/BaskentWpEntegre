@@ -276,7 +276,9 @@ export class TemplateResolverService {
     }
 
     // Freeform draft/preview/bot response can be sanitized
-    resolved.rendered = sanitizePatientFacingMessage(resolved.rendered);
+    if (resolved.source === 'system_hardcoded') {
+      resolved.rendered = sanitizePatientFacingMessage(resolved.rendered);
+    }
 
     return resolved;
   }

@@ -5,7 +5,7 @@ import useSWRInfinite from "swr/infinite";
 import { Search, MessageCircle, X, FileText, ChevronRight, CheckCircle2, Bot, Save, StickyNote, Sparkles, RefreshCw, ChevronDown, Filter, Zap, Send, Clock, CheckCheck, Edit3, Phone, PhoneOff, PhoneForwarded, XCircle } from "lucide-react";
 import { getForms, getCampaignNames, updateLeadNotes, updateLeadStage, syncGoogleSheets } from "@/app/actions/forms";
 import { toggleBotStatus } from "@/app/actions/inbox";
-import { prepareGreetingDraft, sendGreetingMessage, activateBot, getOutreachHistory, logCallReached, logCallMissed, logCallbackScheduled, logNotInterested, getGreetingTemplates, type OutreachLogEntry } from "@/app/actions/outreach";
+import { prepareGreetingDraft, sendGreetingMessage, activateBot, getOutreachHistory, logCallReached, logCallMissed, logCallbackScheduled, logNotInterested, getGreetingTemplates, checkGreetingReadiness, type OutreachLogEntry } from "@/app/actions/outreach";
 import { useInboxStore } from "@/store/inbox-store";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { MapPin, Building2, Calendar, Flame, TrendingUp, User } from "lucide-react";
@@ -216,6 +216,22 @@ export default function FormsPage() {
   // P1: Call action note
   const [callActionNote, setCallActionNote] = useState('');
   const [showCallActions, setShowCallActions] = useState(false);
+  
+  // Phase a2.1: unified greeting readiness state
+  const [readiness, setReadiness] = useState<{
+    draftTemplateAvailable: boolean;
+    approvedWhatsappTemplateAvailable: boolean;
+    templateConfigExists: boolean;
+    templateSendable: boolean;
+    templateNonCompliant: boolean;
+    complianceWarning: string | null;
+    source: 'message_templates' | 'system_hardcoded' | 'none';
+    isWithin24hWindow: boolean;
+    hardBlockedBecausePatientAlreadyInbound: boolean;
+    draftText: string;
+    greetingSent: boolean;
+  } | null>(null);
+  const [readinessLoading, setReadinessLoading] = useState(false);
 
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncProgress, setSyncProgress] = useState({ status: '', progress: 0, message: '' });
@@ -326,9 +342,26 @@ export default function FormsPage() {
       setShowCallActions(false);
       setSelectedTemplateId(null);
       setTechOpen(false);
+      setReadiness(null);
       loadOutreachTimeline(selectedForm.id);
       // Load templates for selector
       getGreetingTemplates().then((t: any[]) => setTemplates(t)).catch(() => setTemplates([]));
+      
+      // Fetch readiness status
+      setReadinessLoading(true);
+      checkGreetingReadiness(selectedForm.id)
+        .then((res) => {
+          if (res.success && res.data) {
+            setReadiness(res.data);
+            if (res.data.greetingSent) {
+              setGreetingSent(true);
+            }
+          } else {
+            setReadiness(null);
+          }
+        })
+        .catch(() => setReadiness(null))
+        .finally(() => setReadinessLoading(false));
     } else {
       setOutreachTimeline([]);
       setGreetingSent(false);
@@ -340,6 +373,7 @@ export default function FormsPage() {
       setShowCallActions(false);
       setSelectedTemplateId(null);
       setTechOpen(false);
+      setReadiness(null);
     }
   }, [selectedForm?.id, loadOutreachTimeline]);
 
@@ -938,7 +972,72 @@ export default function FormsPage() {
                 </div>
                 <div className="p-4 space-y-3">
                   {/* WhatsApp Window & Template Required Status */}
-                  {!selectedForm.has_inbound_messages && (
+                  {/* Readiness loading or state badges */}
+                  {readinessLoading ? (
+                    <div className="flex gap-2 flex-wrap mb-1">
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-gray-50 text-gray-500 border border-gray-200 animate-pulse">
+                        ⏳ Uygunluk durumu kontrol ediliyor...
+                      </span>
+                    </div>
+                  ) : readiness ? (
+                    <div className="space-y-2.5 mb-1 text-left">
+                      <div className="flex gap-2 flex-wrap">
+                        {readiness.isWithin24hWindow ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            🟢 24s WhatsApp Penceresi Açık
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                            ⏳ 24s WhatsApp Penceresi Kapalı
+                          </span>
+                        )}
+
+                        {readiness.templateConfigExists ? (
+                          readiness.approvedWhatsappTemplateAvailable ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              🟢 Onaylı Şablon Bulundu
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200">
+                              📋 Şablon (Template) Taslağı Var
+                            </span>
+                          )
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
+                            ⚠️ Şablon Tanımlanmamış
+                          </span>
+                        )}
+                        
+                        {readiness.templateNonCompliant && (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-red-100 text-red-800 border border-red-200">
+                            ⚠️ Uyumsuz Şablon
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Compliance warning message if template is non-compliant */}
+                      {readiness.templateNonCompliant && (
+                        <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-semibold flex items-start gap-2.5 leading-relaxed">
+                          <span className="text-sm shrink-0">⚠️</span>
+                          <div>
+                            <p className="font-bold text-amber-900">Şablon Standartlara Aykırı</p>
+                            <p className="text-amber-700 font-medium">Bu şablon hasta mesaj standartlarına uygun değil ({readiness.complianceWarning}). Gönderim yapılamaz.</p>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Not sendable due to 24h closed and no approved template */}
+                      {!readiness.isWithin24hWindow && !readiness.approvedWhatsappTemplateAvailable && !readiness.hardBlockedBecausePatientAlreadyInbound && (
+                        <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-semibold flex items-start gap-2.5 leading-relaxed">
+                          <span className="text-sm shrink-0">⏳</span>
+                          <div>
+                            <p className="font-bold text-amber-900">Onaylı Şablon Gerekli</p>
+                            <p className="text-amber-700 font-medium">24 saatlik WhatsApp iletişim penceresi kapalı olduğu için sadece Meta/360dialog onaylı şablon gönderilebilir. Onaylı şablon bulunmadığından gönderim kilitlenmiştir.</p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : !selectedForm.has_inbound_messages && (
                     <div className="flex gap-2 flex-wrap mb-1">
                       <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
                         ⏳ 24s WhatsApp Penceresi Kapalı
@@ -950,8 +1049,8 @@ export default function FormsPage() {
                   )}
 
                   {/* Known Inbound Guard Hard Block */}
-                  {selectedForm.has_inbound_messages && (
-                    <div className="p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs font-semibold flex items-start gap-2.5 shadow-sm">
+                  {(selectedForm.has_inbound_messages || (readiness && readiness.hardBlockedBecausePatientAlreadyInbound)) && (
+                    <div className="p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs font-semibold flex items-start gap-2.5 shadow-sm text-left">
                       <XCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
                       <div className="space-y-1">
                         <p className="font-bold text-red-900">Karşılama Engellendi</p>
@@ -990,9 +1089,9 @@ export default function FormsPage() {
                         <div className="flex items-center gap-2">
                           <span className="text-[11px] font-semibold text-[#86868B] shrink-0">Şablon:</span>
                           <select
-                            value={selectedTemplateId || ''}
-                            onChange={(e) => handleTemplateSelect(e.target.value)}
-                            className="flex-1 text-[12px] font-medium bg-[#F5F5F7] border border-black/10 rounded-lg px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-[#007AFF]/30 transition-all cursor-pointer appearance-none"
+                             value={selectedTemplateId || ''}
+                             onChange={(e) => handleTemplateSelect(e.target.value)}
+                             className="flex-1 text-[12px] font-medium bg-[#F5F5F7] border border-black/10 rounded-lg px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-[#007AFF]/30 transition-all cursor-pointer appearance-none"
                           >
                             <option value="" disabled>Şablon seçin…</option>
                             {templates.map((tpl: any) => (
@@ -1036,25 +1135,44 @@ export default function FormsPage() {
                     <div className="flex gap-3">
                       <button 
                         onClick={() => handlePrepareDraft(selectedForm)}
-                        disabled={greetingSent || outreachLoading === 'draft' || selectedForm.stage !== 'new' || !!selectedForm.has_inbound_messages}
+                        disabled={
+                          greetingSent || 
+                          outreachLoading === 'draft' || 
+                          readinessLoading ||
+                          selectedForm.stage !== 'new' || 
+                          !!selectedForm.has_inbound_messages ||
+                          (readiness !== null && !readiness.templateSendable)
+                        }
                         className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-semibold transition-all ${
-                          selectedForm.has_inbound_messages
+                          selectedForm.has_inbound_messages || (readiness && readiness.hardBlockedBecausePatientAlreadyInbound)
                             ? 'bg-red-50 text-red-600 border border-red-200 cursor-not-allowed'
                             : greetingSent 
                             ? 'bg-emerald-50 text-emerald-600 border border-emerald-200 cursor-default'
                             : selectedForm.stage !== 'new'
                             ? 'bg-gray-100 text-[#86868B] cursor-not-allowed'
+                            : readinessLoading
+                            ? 'bg-gray-100 text-[#86868B] cursor-not-allowed animate-pulse'
+                            : (readiness && !readiness.templateSendable)
+                            ? 'bg-amber-50 text-amber-600 border border-amber-200 cursor-not-allowed'
                             : 'bg-[#25D366] text-white shadow-[0_4px_14px_rgba(37,211,102,0.39)] hover:bg-[#1DA851] cursor-pointer'
                         } disabled:opacity-70`}
                       >
-                        {selectedForm.has_inbound_messages ? (
+                        {selectedForm.has_inbound_messages || (readiness && readiness.hardBlockedBecausePatientAlreadyInbound) ? (
                           <><XCircle className="w-5 h-5" /> Zaten Bize Yazdı</>
                         ) : greetingSent ? (
                           <><CheckCheck className="w-5 h-5" /> Selamlama Gönderildi</>
                         ) : outreachLoading === 'draft' ? (
                           <><RefreshCw className="w-4 h-4 animate-spin" /> Hazırlanıyor...</>
+                        ) : readinessLoading ? (
+                          <><RefreshCw className="w-4 h-4 animate-spin" /> Yükleniyor...</>
                         ) : selectedForm.stage !== 'new' ? (
                           <><CheckCircle2 className="w-5 h-5" /> Zaten İletişime Geçildi</>
+                        ) : (readiness && !readiness.templateSendable) ? (
+                          readiness.templateNonCompliant ? (
+                            <><XCircle className="w-5 h-5" /> Uyumsuz Şablon</>
+                          ) : (
+                            <><Clock className="w-5 h-5" /> Şablon Onayı Yok</>
+                          )
                         ) : (
                           <><Edit3 className="w-5 h-5" /> Karşılama Hazırla</>
                         )}

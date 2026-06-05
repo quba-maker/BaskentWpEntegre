@@ -2690,7 +2690,17 @@ export async function prepareFormGreetingDraft(conversationId: string) {
       windowOpen: res.data?.windowOpen as boolean,
       patientName: res.data?.patientName as string,
       phone: res.data?.phone as string,
+      
+      // Phase a2.1 flags
+      draftTemplateAvailable: res.data?.draftTemplateAvailable as boolean,
+      approvedWhatsappTemplateAvailable: res.data?.approvedWhatsappTemplateAvailable as boolean,
       templateConfigExists: res.data?.templateConfigExists as boolean,
+      templateSendable: res.data?.templateSendable as boolean,
+      templateNonCompliant: res.data?.templateNonCompliant as boolean,
+      complianceWarning: res.data?.complianceWarning as string | null,
+      source: res.data?.source as 'message_templates' | 'system_hardcoded' | 'none',
+      isWithin24hWindow: res.data?.isWithin24hWindow as boolean,
+      hardBlockedBecausePatientAlreadyInbound: res.data?.hardBlockedBecausePatientAlreadyInbound as boolean,
     };
   });
 }
