@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
-import { Search, Check, CheckCheck, Clock, WifiOff, MessageCircle, MoreVertical, Loader2, Sparkles, AlertCircle, X, ChevronLeft, ChevronRight, UserCheck, UserX, Trash2, Sliders, ChevronDown, Bot, User } from "lucide-react";
+import { Search, Check, CheckCheck, Clock, WifiOff, MessageCircle, MoreVertical, Loader2, Sparkles, AlertCircle, X, ChevronLeft, ChevronRight, UserCheck, UserX, Trash2, Sliders, ChevronDown, Bot, User, Pin } from "lucide-react";
 import { 
   getConversations, 
   togglePin, 
@@ -974,10 +974,10 @@ const handleBulkArchive = async (archive: boolean) => {
                                 e.stopPropagation();
                               }
                             }}
-                            className="p-0.5 rounded hover:bg-black/5 text-xs opacity-60 hover:opacity-100 transition-all cursor-pointer flex-shrink-0"
+                            className="p-1 rounded hover:bg-black/5 opacity-60 hover:opacity-100 transition-all cursor-pointer flex-shrink-0"
                             title="Sabitlemeyi Kaldır"
                           >
-                            📌
+                            <Pin className="w-3.5 h-3.5 rotate-45 text-gray-500 fill-gray-500" />
                           </button>
                         )}
                         {!c.isPinned && (
@@ -992,10 +992,10 @@ const handleBulkArchive = async (archive: boolean) => {
                                 e.stopPropagation();
                               }
                             }}
-                            className="p-0.5 rounded hover:bg-black/5 text-xs opacity-0 group-hover:opacity-60 hover:opacity-100 transition-all cursor-pointer flex-shrink-0"
+                            className="p-1 rounded hover:bg-black/5 opacity-0 group-hover:opacity-60 hover:opacity-100 transition-all cursor-pointer flex-shrink-0"
                             title="Sabitle"
                           >
-                            📌
+                            <Pin className="w-3.5 h-3.5 rotate-45 text-gray-400" />
                           </button>
                         )}
                         {c.unread > 0 && (
