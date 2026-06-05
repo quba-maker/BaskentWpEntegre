@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
-import { Search, Check, CheckCheck, Clock, WifiOff, MessageCircle, MoreVertical, Loader2, Sparkles, AlertCircle, X, ChevronLeft, ChevronRight, UserCheck, UserX, Trash2, Sliders, ChevronDown, Bot, User, Pin } from "lucide-react";
+import { Search, Check, CheckCheck, Clock, WifiOff, MessageCircle, MoreVertical, Loader2, Sparkles, AlertCircle, X, ChevronLeft, ChevronRight, UserCheck, UserX, Trash2, Sliders, ChevronDown, Bot, User, Pin, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { 
   getConversations, 
   togglePin, 
@@ -260,7 +260,9 @@ export function ContactRail() {
     setSelectionMode,
     toggleSelected,
     setSelectedIds,
-    clearSelection
+    clearSelection,
+    isSidebarCollapsed,
+    toggleSidebar
   } = useInboxStore();
   const queryClient = useQueryClient();
   const searchParams = useSearchParams();
@@ -583,6 +585,13 @@ const handleBulkArchive = async (archive: boolean) => {
       <div className="p-5 pb-3">
         <div className="flex justify-between items-center mb-4">
           <div className="flex items-center gap-2">
+            <button
+              onClick={toggleSidebar}
+              className="p-1.5 rounded-lg text-gray-500 hover:text-gray-700 hover:bg-black/5 active:scale-95 transition-all cursor-pointer flex items-center justify-center mr-1"
+              title={isSidebarCollapsed ? "Menüyü Göster" : "Menüyü Gizle"}
+            >
+              {isSidebarCollapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
+            </button>
             <h2 className="text-xl font-bold tracking-tight" style={{ color: "var(--q-text-primary)" }}>Mesajlar</h2>
             <button
               onClick={() => {

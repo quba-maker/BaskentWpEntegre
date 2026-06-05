@@ -1,4 +1,5 @@
 import { Sidebar } from "@/components/layout/sidebar";
+import { SidebarLayoutWrapper } from "@/components/layout/sidebar-layout-wrapper";
 import { DashboardProviders } from "@/components/layout/dashboard-providers";
 import { LayoutDashboard, MessageSquare, ClipboardList, Settings, Bot, BarChart3 } from "lucide-react";
 import Link from "next/link";
@@ -76,9 +77,9 @@ export default async function DashboardLayout({
   return (
     <div className="h-full flex flex-col md:flex-row overflow-hidden" data-tenant={slug}>
       {/* Desktop Sidebar */}
-      <div className="hidden md:flex h-full">
+      <SidebarLayoutWrapper>
         <Sidebar tenantData={tenantData} />
-      </div>
+      </SidebarLayoutWrapper>
 
       {/* Main Content */}
       <main className="flex-1 overflow-auto h-full flex flex-col relative pb-[env(safe-area-inset-bottom)] md:pb-0 bg-[--q-light-bg]">

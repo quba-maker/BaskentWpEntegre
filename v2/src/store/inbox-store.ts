@@ -15,6 +15,11 @@ interface InboxState {
   toggleSelected: (id: string) => void;
   setSelectedIds: (ids: string[]) => void;
   clearSelection: () => void;
+
+  // Sidebar collapse states
+  isSidebarCollapsed: boolean;
+  toggleSidebar: () => void;
+  setSidebarCollapsed: (val: boolean) => void;
 }
 
 export const useInboxStore = create<InboxState>((set) => ({
@@ -37,4 +42,15 @@ export const useInboxStore = create<InboxState>((set) => ({
   }),
   setSelectedIds: (ids) => set({ selectedIds: ids }),
   clearSelection: () => set({ selectedIds: [], isSelectionMode: false }),
+
+  // Sidebar collapse initial values and actions
+  isSidebarCollapsed: false,
+  toggleSidebar: () => set((state) => {
+    const nextVal = !state.isSidebarCollapsed;
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('q_sidebar_collapsed', String(nextVal));
+    }
+    return { isSidebarCollapsed: nextVal };
+  }),
+  setSidebarCollapsed: (val) => set({ isSidebarCollapsed: val }),
 }));
