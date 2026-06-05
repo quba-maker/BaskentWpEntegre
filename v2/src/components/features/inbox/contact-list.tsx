@@ -724,14 +724,14 @@ const handleBulkArchive = async (archive: boolean) => {
                 if (c.lastMessageDirection === 'out') {
                   if (c.lastMessageModel) {
                     senderPrefixNode = (
-                      <span className="inline-flex items-center gap-0.5 mr-1 text-indigo-600 font-bold select-none align-middle">
-                        <Bot className="w-3.5 h-3.5 inline animate-pulse" /> Bot:
+                      <span className="font-semibold text-gray-600 mr-1 select-none">
+                        Bot:
                       </span>
                     );
                   } else {
                     senderPrefixNode = (
-                      <span className="inline-flex items-center gap-0.5 mr-1 text-gray-500 font-bold select-none align-middle">
-                        <User className="w-3.5 h-3.5 inline" /> Sen:
+                      <span className="font-semibold text-gray-500 mr-1 select-none">
+                        Sen:
                       </span>
                     );
                   }
