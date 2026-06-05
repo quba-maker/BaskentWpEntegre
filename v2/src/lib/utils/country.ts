@@ -144,12 +144,10 @@ const COUNTRY_NAME_TR_MAP: Record<string, string> = {
   'oman': 'Umman',
 };
 
-/**
- * Normalize country name to Turkish (handles AI-detected English names)
- */
 export function normalizeCountryName(name: string): string {
-  const lower = name.trim().toLowerCase();
-  return COUNTRY_NAME_TR_MAP[lower] || name;
+  const clean = name.replace(/[?]/g, '').trim();
+  const lower = clean.toLowerCase();
+  return COUNTRY_NAME_TR_MAP[lower] || clean;
 }
 
 // Turkish country name → flag emoji map (built from PHONE_PREFIX_MAP for consistency)
@@ -163,7 +161,8 @@ const COUNTRY_FLAG_MAP: Record<string, string> = Object.fromEntries(
  */
 export function getCountryFlag(countryName: string | null | undefined): string {
   if (!countryName) return '🌍';
-  const lower = countryName.trim().toLowerCase();
+  const clean = countryName.replace(/[?]/g, '').trim();
+  const lower = clean.toLowerCase();
   return COUNTRY_FLAG_MAP[lower] || '🌍';
 }
 
@@ -179,7 +178,7 @@ export function resolveCountry(phone: string | null | undefined, rawData?: Recor
   if (rawData) {
     const country = rawData['nerede_yaşıyorsunuz?'] || rawData['ülke'] || rawData['country'] || rawData['nerede yaşıyorsunuz'];
     if (country) {
-      const c = String(country).toLowerCase();
+      const c = String(country).replace(/[?]/g, '').toLowerCase().trim();
       for (const [, info] of PHONE_PREFIX_MAP) {
         if (c.includes(info.name.toLowerCase())) return info;
       }
@@ -196,7 +195,8 @@ export function resolveCountry(phone: string | null | undefined, rawData?: Recor
  */
 export function getCountryInfoByName(name: string | null | undefined): CountryInfo | null {
   if (!name) return null;
-  const lower = name.toLowerCase().trim();
+  const clean = name.replace(/[?]/g, '').trim();
+  const lower = clean.toLowerCase();
   for (const [, info] of PHONE_PREFIX_MAP) {
     if (info.name.toLowerCase() === lower) return info;
   }
@@ -208,7 +208,7 @@ export function getCountryInfoByName(name: string | null | undefined): CountryIn
     }
   }
   // Last resort: return with globe flag
-  return { name, flag: '🌍', code: '??' };
+  return { name: clean, flag: '🌍', code: '??' };
 }
 
 /**

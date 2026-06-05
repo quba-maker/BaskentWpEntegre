@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
-import { Search, Check, CheckCheck, Clock, WifiOff, MessageCircle, MoreVertical, Loader2, Sparkles, AlertCircle, X, ChevronLeft, ChevronRight, UserCheck, UserX, Trash2, Sliders } from "lucide-react";
+import { Search, Check, CheckCheck, Clock, WifiOff, MessageCircle, MoreVertical, Loader2, Sparkles, AlertCircle, X, ChevronLeft, ChevronRight, UserCheck, UserX, Trash2, Sliders, ChevronDown } from "lucide-react";
 import { 
   getConversations, 
   togglePin, 
@@ -520,7 +520,7 @@ const handleBulkArchive = async (archive: boolean) => {
   };
 
   return (
-    <div className={`w-full md:w-80 border-r flex-col h-full z-10 q-glass shadow-sm ${mobileView === "list" ? "flex" : "hidden md:flex"}`}
+    <div className={`w-full md:w-[350px] lg:w-[380px] shrink-0 border-r flex flex-col h-full z-10 q-glass shadow-sm ${mobileView === "list" ? "flex" : "hidden md:flex"}`}
       style={{ borderColor: "var(--q-border-default)" }}
     >
       {/* ── Header ── */}
@@ -690,10 +690,98 @@ const handleBulkArchive = async (archive: boolean) => {
                     senderPrefix = "Sen: ";
                   }
                 }
-                
+
+                const cn = c.country ? normalizeCountryName(c.country) : '';
+                const country = (c.country ? { flag: getCountryFlag(cn), name: cn, code: '' } : null) || getCountryFromPhone(c.id);
+                const isEstimated = !c.country || c.country_source === 'phone_prefix';
+
+                // Pre-calculate chips for priority and collapse detection
+                const rawChips = [];
+
+                // 1. Cevap Bekliyor / No Reply (Priority 1)
+                if (c.is_no_reply_eligible) {
+                  rawChips.push({
+                    id: 'no-reply',
+                    label: `⏳ ${c.no_reply_hours}s cevap yok`,
+                    style: { background: "rgba(255, 59, 48, 0.1)", border: "1px solid rgba(255, 59, 48, 0.2)", color: "#FF3B30" }
+                  });
+                }
+                if (c.active_task_type) {
+                  if (c.active_task_type === 'no_reply_followup' || c.active_task_type === 'bot_handoff_followup') {
+                    rawChips.push({
+                      id: 'task-draft',
+                      label: "📋 Takip taslağı",
+                      style: { background: "rgba(255, 149, 0, 0.1)", border: "1px solid rgba(255, 149, 0, 0.2)", color: "#FF9500" }
+                    });
+                  } else if (c.active_task_type === 'template_required_task') {
+                    rawChips.push({
+                      id: 'task-template',
+                      label: "📋 Template gerekli",
+                      style: { background: "rgba(175, 82, 222, 0.1)", border: "1px solid rgba(175, 82, 222, 0.2)", color: "#AF52DE" }
+                    });
+                  } else {
+                    rawChips.push({
+                      id: 'task-pending',
+                      label: "📋 Cevap bekliyor",
+                      style: { background: "rgba(0, 122, 255, 0.1)", border: "1px solid rgba(0, 122, 255, 0.2)", color: "#007AFF" }
+                    });
+                  }
+                }
+
+                // 2. Bot / Manuel (Priority 2)
+                if (c.isBotActive) {
+                  rawChips.push({
+                    id: 'bot-mode',
+                    label: "🤖 Botta",
+                    style: { background: "rgba(52, 199, 89, 0.1)", color: "#34C759", border: "1px solid rgba(52,199,89,0.2)" }
+                  });
+                } else {
+                  rawChips.push({
+                    id: 'manual-mode',
+                    label: "👤 Manuel",
+                    style: { background: "var(--q-blue-bg)", color: "var(--q-blue)", border: "1px solid rgba(0,122,255,0.2)" }
+                  });
+                }
+
+                // 3. Stage (Priority 3)
+                rawChips.push({
+                  id: 'stage',
+                  label: stageLabel(c.stage),
+                  style: { background: "var(--q-bg-primary)", border: "1px solid var(--q-border-default)", color: "var(--q-text-secondary)" }
+                });
+
+                // 4. Country (Priority 4)
+                if (country) {
+                  rawChips.push({
+                    id: 'country',
+                    label: `${country.flag} ${country.name}${isEstimated ? '?' : ''}`,
+                    style: {
+                      color: 'var(--q-text-secondary)',
+                      backgroundColor: isEstimated ? 'rgba(0,0,0,0.02)' : 'rgba(0,0,0,0.04)',
+                      border: isEstimated ? '1px dashed var(--q-border-default)' : 'none'
+                    }
+                  });
+                }
+
+                // Calculate which chips are shown where and if country is collapsed
+                const countryIndex = rawChips.findIndex(x => x.id === 'country');
+                let flagFallbackClass = "hidden";
+                if (country && countryIndex >= 0) {
+                  if (countryIndex >= 2) {
+                    flagFallbackClass = "inline-block"; // collapsed on both mobile/tablet and desktop
+                  } else if (countryIndex === 1) {
+                    flagFallbackClass = "inline-block xl:hidden"; // collapsed on tablet/mobile only (since it's index 1 and under xl only 1 chip shows)
+                  }
+                }
+
+                const isMenuOpen = contextMenu?.conversationId === c.conversation_id;
+
                 return (
-                  <button
+                  <div
                     key={c.id}
+                    role="button"
+                    tabIndex={0}
+                    aria-selected={activePhone === c.id}
                     onClick={() => {
                       if (isSelectionMode) {
                         toggleSelected(c.conversation_id);
@@ -701,8 +789,19 @@ const handleBulkArchive = async (archive: boolean) => {
                         setActiveContact(c.id, { ...c, unread: 0 });
                       }
                     }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        if (isSelectionMode) {
+                          toggleSelected(c.conversation_id);
+                        } else {
+                          setActiveContact(c.id, { ...c, unread: 0 });
+                        }
+                      }
+                    }}
                     onContextMenu={(e) => {
                       e.preventDefault();
+                      e.stopPropagation();
                       setContextMenu({
                         x: e.clientX,
                         y: e.clientY,
@@ -713,10 +812,12 @@ const handleBulkArchive = async (archive: boolean) => {
                         unread: c.unread
                       });
                     }}
-                    className="w-full text-left p-3.5 rounded-2xl transition-all duration-200 flex items-start gap-3.5 border q-list-item group"
+                    className={`w-full text-left p-3.5 rounded-2xl transition-all duration-200 flex items-start gap-3.5 border q-list-item group cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#007AFF] focus-visible:ring-offset-2 ${
+                      isMenuOpen ? "bg-black/[0.03] border-gray-300" : ""
+                    }`}
                     style={{
-                      backgroundColor: activePhone === c.id ? "var(--q-bg-primary)" : "transparent",
-                      borderColor: activePhone === c.id ? "var(--q-border-default)" : "transparent",
+                      backgroundColor: activePhone === c.id ? "var(--q-bg-primary)" : isMenuOpen ? "rgba(0,0,0,0.03)" : "transparent",
+                      borderColor: activePhone === c.id ? "var(--q-border-default)" : isMenuOpen ? "var(--q-border-default)" : "transparent",
                       boxShadow: activePhone === c.id ? "var(--q-shadow-sm)" : "none",
                     }}
                   >
@@ -735,47 +836,35 @@ const handleBulkArchive = async (archive: boolean) => {
                       </div>
                     )}
 
-                    {/* Initials Avatar */}
+                    {/* Left Column: Avatar + Channel overlay */}
                     <InitialsAvatar name={c.name || c.id} channel={c.channel} unread={0} />
 
-                    {/* Content */}
+                    {/* Middle Column: Content */}
                     <div className="flex-1 min-w-0">
-                      <div className="flex justify-between items-baseline mb-0.5">
-                        <div className="flex items-center min-w-0 flex-1 mr-2">
-                          <span className="font-bold text-[14px] truncate" style={{ color: "var(--q-text-primary)" }}>
-                            {c.name || c.id}
+                      {/* Name & Indicators Row */}
+                      <div className="flex items-center mb-0.5 min-w-0 w-full">
+                        <span className="font-bold text-[14.5px] truncate flex-shrink min-w-0" style={{ color: "var(--q-text-primary)" }}>
+                          {c.name || c.id}
+                        </span>
+                        {c.isFavorite && (
+                          <span className="ml-1.5 text-[11px] select-none flex-shrink-0" title="Favori">⭐</span>
+                        )}
+                        {c.isArchived && (
+                          <span className="ml-1.5 text-[11px] select-none flex-shrink-0" title="Arşivlenmiş">📁</span>
+                        )}
+                        {country && (
+                          <span 
+                            className={`ml-1.5 text-[13px] select-none flex-shrink-0 cursor-help ${flagFallbackClass}`}
+                            title={`${country.name}${isEstimated ? ' (Tahmini)' : ''}`}
+                          >
+                            {country.flag}
                           </span>
-                          {c.isFavorite && (
-                            <span className="ml-1 text-[11px] select-none" title="Favori">⭐</span>
-                          )}
-                          {c.isArchived && (
-                            <span className="ml-1 text-[11px] select-none" title="Arşivlenmiş">📁</span>
-                          )}
-                          {(() => {
-                            // Country priority: DB (AI-extracted) > phone prefix (deterministic guess)
-                            // Medical tourism: patient may have +90 phone but live in Germany
-                            const cn = c.country ? normalizeCountryName(c.country) : '';
-                            const country = (c.country ? { flag: getCountryFlag(cn), name: cn, code: '' } : null) || getCountryFromPhone(c.id);
-                            if (!country) return null;
-                            const isEstimated = !c.country || c.country_source === 'phone_prefix';
-                            return (
-                              <span 
-                                className="ml-1.5 inline-flex items-center gap-0.5 px-1 py-0.5 rounded text-[10px] font-semibold flex-shrink-0" 
-                                style={{ 
-                                  color: 'var(--q-text-secondary)',
-                                  backgroundColor: isEstimated ? 'rgba(0,0,0,0.02)' : 'rgba(0,0,0,0.04)',
-                                  border: isEstimated ? '1px dashed var(--q-border-default)' : 'none'
-                                }}
-                                title={isEstimated ? "Tahmini ülke (telefon numarasından)" : undefined}
-                              >
-                                {country.flag} {country.name}{isEstimated ? '?' : ''}
-                              </span>
-                            );
-                          })()}
-                        </div>
+                        )}
                       </div>
+
+                      {/* Message Preview Row */}
                       <p
-                        className={`text-[13px] truncate flex items-center gap-1.5 ${c.unread > 0 ? "font-bold" : "font-medium"}`}
+                        className={`text-[13px] truncate flex items-center gap-1.5 ${c.unread > 0 ? "font-bold text-gray-900" : "font-medium text-gray-500"}`}
                         style={{ color: c.unread > 0 ? "var(--q-text-primary)" : "var(--q-text-secondary)" }}
                       >
                         {(c.lastMessageDirection === 'out' || c.lastMessageDirection === 'system') && (
@@ -786,81 +875,162 @@ const handleBulkArchive = async (archive: boolean) => {
                             {c.lastMessageStatus === 'read' && <CheckCheck className="w-4 h-4" style={{ color: "var(--q-blue)" }} />}
                           </span>
                         )}
-                        <span className="truncate">{senderPrefix}{formatMessagePreview(c.last_message, c.lastMessageMediaType)}</span>
-                      </p>
-                      <div className="flex gap-2 mt-2">
-                        <span
-                          className="text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded shadow-sm"
-                          style={{ background: "var(--q-bg-primary)", border: "1px solid var(--q-border-default)", color: "var(--q-text-secondary)" }}
-                        >
-                          {stageLabel(c.stage)}
+                        <span className="truncate">
+                          {senderPrefix && <span className="opacity-60 font-semibold">{senderPrefix}</span>}
+                          {formatMessagePreview(c.last_message, c.lastMessageMediaType)}
                         </span>
-                        {c.is_no_reply_eligible && (
-                          <span
-                            className="text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded shadow-sm flex items-center gap-1"
-                            style={{ background: "rgba(255, 59, 48, 0.1)", border: "1px solid rgba(255, 59, 48, 0.2)", color: "#FF3B30" }}
-                          >
-                            ⏳ {c.no_reply_hours} saattir cevap yok
-                          </span>
-                        )}
+                      </p>
+
+                      {/* Chips Row (Compact Priority System) */}
+                      <div className="flex flex-wrap items-center gap-1.5 mt-2">
                         {(() => {
-                          if (!c.active_task_type) return null;
-                          if (c.active_task_type === 'no_reply_followup' || c.active_task_type === 'bot_handoff_followup') {
-                            return (
-                              <span
-                                className="text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded shadow-sm flex items-center gap-1"
-                                style={{ background: "rgba(255, 149, 0, 0.1)", border: "1px solid rgba(255, 149, 0, 0.2)", color: "#FF9500" }}
-                              >
-                                📋 Takip taslağı
-                              </span>
-                            );
-                          }
-                          if (c.active_task_type === 'template_required_task') {
-                            return (
-                              <span
-                                className="text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded shadow-sm flex items-center gap-1"
-                                style={{ background: "rgba(175, 82, 222, 0.1)", border: "1px solid rgba(175, 82, 222, 0.2)", color: "#AF52DE" }}
-                              >
-                                📋 Template gerekli
-                              </span>
-                            );
-                          }
+                          const chip1 = rawChips[0];
+                          const chip2 = rawChips[1];
+                          const collapsedCount = rawChips.length;
+
                           return (
-                            <span
-                              className="text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded shadow-sm flex items-center gap-1"
-                              style={{ background: "rgba(0, 122, 255, 0.1)", border: "1px solid rgba(0, 122, 255, 0.2)", color: "#007AFF" }}
-                            >
-                              📋 Cevap bekliyor
-                            </span>
+                            <>
+                              {chip1 && (
+                                <span
+                                  key={chip1.id}
+                                  className="text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded shadow-sm whitespace-nowrap inline-flex items-center max-w-[110px] truncate"
+                                  style={chip1.style}
+                                >
+                                  {chip1.label}
+                                </span>
+                              )}
+                              {chip2 && (
+                                <span
+                                  key={chip2.id}
+                                  className="text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded shadow-sm whitespace-nowrap inline-flex items-center max-w-[110px] truncate hidden xl:inline-flex"
+                                  style={chip2.style}
+                                >
+                                  {chip2.label}
+                                </span>
+                              )}
+                              {/* Tablet/mobile badge (only shows when rawChips.length > 1) */}
+                              {collapsedCount > 1 && (
+                                <span
+                                  className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 border border-gray-200 shadow-sm inline-block xl:hidden flex-shrink-0"
+                                  title={`Gizlenen chipler: ${rawChips.slice(1).map(x => x.label).join(', ')}`}
+                                >
+                                  +{collapsedCount - 1}
+                                </span>
+                              )}
+                              {/* Desktop badge (only shows when rawChips.length > 2) */}
+                              {collapsedCount > 2 && (
+                                <span
+                                  className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 border border-gray-200 shadow-sm hidden xl:inline-block flex-shrink-0"
+                                  title={`Gizlenen chipler: ${rawChips.slice(2).map(x => x.label).join(', ')}`}
+                                >
+                                  +{collapsedCount - 2}
+                                </span>
+                              )}
+                            </>
                           );
                         })()}
-                        {c.isBotActive ? (
-                          <span
-                            className="text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded shadow-sm flex items-center gap-1"
-                            style={{ background: "rgba(52, 199, 89, 0.1)", color: "#34C759", border: "1px solid rgba(52,199,89,0.2)" }}
-                          >
-                            🤖 Botta
-                          </span>
-                        ) : (
-                          <span
-                            className="text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded shadow-sm flex items-center gap-1"
-                            style={{ background: "var(--q-blue-bg)", color: "var(--q-blue)", border: "1px solid rgba(0,122,255,0.2)" }}
-                          >
-                            👤 Manuel
-                          </span>
-                        )}
                       </div>
                     </div>
 
-                    {/* Date, Unread and Pin Toggle */}
-                    <div className="flex flex-col items-end justify-between self-stretch shrink-0 min-h-[50px] w-16">
-                      <div className="flex flex-col items-end gap-1.5 w-full">
-                        <span 
-                          className={`text-[10px] tracking-wide whitespace-nowrap ${c.unread > 0 ? "font-bold text-[#007AFF]" : "font-semibold text-gray-500"}`}
-                          style={{ color: c.unread > 0 ? "var(--q-blue, #007AFF)" : "var(--q-text-secondary)" }}
-                        >
-                          {c.formattedTime}
-                        </span>
+                    {/* Right Column: Time, Unread, Pin & Chevron Dropdown */}
+                    <div className="relative flex flex-col items-end justify-between self-stretch shrink-0 w-16 select-none min-h-[50px] text-right">
+                      {/* Top: Time */}
+                      <span 
+                        className={`text-[10px] tracking-wide whitespace-nowrap transition-all duration-150 pr-7 md:pr-0 md:group-hover:opacity-0 md:group-focus-within:opacity-0 ${
+                          c.unread > 0 ? "font-bold text-[#007AFF]" : "font-semibold text-gray-500"
+                        }`}
+                        style={{ color: c.unread > 0 ? "var(--q-blue, #007AFF)" : "var(--q-text-secondary)" }}
+                      >
+                        {c.formattedTime}
+                      </span>
+                      
+                      {/* Middle: Chevron Dropdown Trigger */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          
+                          // Position guard against screen edges
+                          const menuHeight = 220;
+                          const menuWidth = 192;
+                          const windowWidth = typeof window !== 'undefined' ? window.innerWidth : 1200;
+                          const windowHeight = typeof window !== 'undefined' ? window.innerHeight : 800;
+                          
+                          let calculatedX = rect.left;
+                          let calculatedY = rect.bottom;
+                          
+                          if (calculatedX + menuWidth > windowWidth) {
+                            calculatedX = windowWidth - menuWidth - 8;
+                          }
+                          if (calculatedY + menuHeight > windowHeight) {
+                            calculatedY = rect.top - menuHeight;
+                          }
+
+                          calculatedX = Math.max(8, calculatedX);
+                          calculatedY = Math.max(8, calculatedY);
+
+                          setContextMenu({
+                            x: calculatedX,
+                            y: calculatedY,
+                            conversationId: c.conversation_id,
+                            phone: c.id,
+                            patientName: c.name || c.id,
+                            isBotActive: !!c.isBotActive,
+                            unread: c.unread
+                          });
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.stopPropagation();
+                          }
+                        }}
+                        className={`absolute top-0 right-0 p-1 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-black/5 active:scale-95 transition-all opacity-100 md:opacity-0 md:group-hover:opacity-100 group-focus-within:opacity-100 cursor-pointer flex items-center justify-center ${
+                          activePhone === c.id ? "md:opacity-100" : ""
+                        }`}
+                        title="Seçenekler"
+                      >
+                        <ChevronDown className="w-4 h-4" />
+                      </button>
+
+                      {/* Bottom indicators: Pinned or Unread */}
+                      <div className="flex items-center gap-1.5 mt-auto">
+                        {c.isPinned && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              e.preventDefault();
+                              handleTogglePin(c.id);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.stopPropagation();
+                              }
+                            }}
+                            className="p-0.5 rounded hover:bg-black/5 text-xs opacity-60 hover:opacity-100 transition-all cursor-pointer flex-shrink-0"
+                            title="Sabitlemeyi Kaldır"
+                          >
+                            📌
+                          </button>
+                        )}
+                        {!c.isPinned && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              e.preventDefault();
+                              handleTogglePin(c.id);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.stopPropagation();
+                              }
+                            }}
+                            className="p-0.5 rounded hover:bg-black/5 text-xs opacity-0 group-hover:opacity-60 hover:opacity-100 transition-all cursor-pointer flex-shrink-0"
+                            title="Sabitle"
+                          >
+                            📌
+                          </button>
+                        )}
                         {c.unread > 0 && (
                           <span
                             className="text-white text-[9px] font-bold px-1.5 min-w-[18px] h-[18px] flex items-center justify-center rounded-full border border-white shadow-sm flex-shrink-0"
@@ -870,20 +1040,8 @@ const handleBulkArchive = async (archive: boolean) => {
                           </span>
                         )}
                       </div>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleTogglePin(c.id);
-                        }}
-                        className={`p-1 rounded-lg hover:bg-black/5 transition-all text-xs flex-shrink-0 ${
-                          c.isPinned ? "opacity-100" : "opacity-0 group-hover:opacity-60 hover:opacity-100"
-                        }`}
-                        title={c.isPinned ? "Sabitlemeyi Kaldır" : "Sabitle"}
-                      >
-                        📌
-                      </button>
                     </div>
-                  </button>
+                  </div>
                 );
               })}
           </div>
