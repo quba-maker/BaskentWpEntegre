@@ -73,7 +73,8 @@ export class PromptBuilder {
     // IDENTITY & BEHAVIORAL CONTEXT (Dynamic CRM Injection)
     let crmContext = '';
     let currentTurnMentionsReportTopic = false;
-    let currentTurnHasReportEvidence = false;
+    let currentTurnClaimsReportSent = false;
+    let currentTurnHasActualAttachmentEvidence = false;
     let currentMessageTextLower = '';
 
     if (unifiedContext) {
@@ -83,7 +84,7 @@ export class PromptBuilder {
 
       if (isHealthcare) {
         const currentMessageMediaType = unifiedContext.currentMessageMediaType || null;
-        const hasAttachment = currentMessageMediaType === 'document' || currentMessageMediaType === 'image';
+        currentTurnHasActualAttachmentEvidence = currentMessageMediaType === 'document' || currentMessageMediaType === 'image';
         
         const reportKeywords = ['rapor', 'mr', 'tahlil', 'tetkik', 'görüntü', 'dosya', 'belge', 'epikriz', 'sonuç'];
         const actionKeywords = ['gönderdim', 'attım', 'yükledim', 'paylaştım', 'ilettim', 'yolladım', 'paylastım', 'yoladım'];
@@ -99,12 +100,13 @@ export class PromptBuilder {
         const mentionsAction = actionKeywords.some(kw => currentMessageTextLower.includes(kw));
         const containsNegationOrQuestion = negationsAndQuestions.some(kw => currentMessageTextLower.includes(kw));
 
-        const hasTextualEvidence = currentTurnMentionsReportTopic && mentionsAction && !containsNegationOrQuestion;
-        currentTurnHasReportEvidence = hasAttachment || hasTextualEvidence;
+        currentTurnClaimsReportSent = currentTurnMentionsReportTopic && mentionsAction && !containsNegationOrQuestion;
 
-        crmContext += `\n--- ⚠️ RAPOR KANITI (REPORT EVIDENCE FOR THIS TURN) ---\n`;
-        crmContext += `- Bu görüşme turunda (current turn) hastanın rapor/belge paylaştığına dair veri/kanıt: ${currentTurnHasReportEvidence ? 'VAR' : 'YOK'}\n`;
-        crmContext += `>> KRİTİK KURAL: Eğer kanıt YOK ise, geçmiş CRM özetlerinde veya memory kayıtlarında rapor bilgisi geçse dahi hastaya "gönderdiğiniz rapor", "raporunuz", "raporunuz inceleniyor/değerlendiriliyor" deme. Rapor varsayımı yapma!\n\n`;
+        crmContext += `\n--- ⚠️ RAPOR / BELGE DURUMU (REPORT / ATTACHMENT STATUS FOR THIS TURN) ---\n`;
+        crmContext += `- Hastanın bu turda (current turn) fiilen belge/medya gönderdiğine dair kanıt (Attachment Evidence): ${currentTurnHasActualAttachmentEvidence ? 'VAR' : 'YOK'}\n`;
+        crmContext += `- Hastanın bu turda (current turn) metinle rapor gönderdiğini iddia etmesi (Claims Report Sent): ${currentTurnClaimsReportSent ? 'VAR' : 'YOK'}\n`;
+        crmContext += `>> KRİTİK KURAL 1: Eğer gerçek belge gönderim kanıtı (Attachment Evidence) YOK ise, geçmiş CRM özetlerinde rapor bilgisi geçse veya hasta bu turda "gönderdim/attım" dese dahi hastaya "belgeniz ulaştı", "raporunuzu aldık", "notlarımıza ekledik" deme! Rapor varsayımı yapma!\n`;
+        crmContext += `>> KRİTİK KURAL 2: Eğer hasta "raporu attım / gönderdim" diye iddia ediyorsa (Claims Report Sent = VAR) fakat gerçek belge kanıtı (Attachment Evidence) YOK ise, "Belgeniz ulaştı/aldık" demeden doğrudan şu şekilde cevap ver: "Anladım. Belge sistemimize ulaştığında notlarımıza eklenir. Kesin değerlendirme hastanede ilgili uzman ekip tarafından yapılır."\n\n`;
       }
 
       // ── BAĞLAM ÖNCELİK HİYERARŞİSİ (CONTEXT PRIORITY) ──
@@ -223,6 +225,7 @@ export class PromptBuilder {
 - Sen bir akademik hastane asistanısın. 
 - PROAKTİF RAPOR İSTEME YASAĞI: Hastadan aktif şekilde rapor, MR, tahlil, görüntüleme veya belge İSTEME. Hasta kendiliğinden gönderirse kabul et ve ilgili birime iletileceğini söyle, ama raporun tek başına yeterli olmadığını, hastanede fiziksel değerlendirme gerektiğini vurgula.
 - RAPOR VARSAYIMI YAPMA YASAĞI: Müşteri/hasta en son mesajında/media context'inde belge veya rapor göndermediyse (veya açıkça "rapor gönderdim" diyerek sistemde medya ulaştığı belirtilmediyse), geçmiş CRM/AI summary veya memory kayıtlarında "rapor gönderildi" bilgisi geçse dahi "gönderdiğiniz rapor", "raporunuz", "raporunuz inceleniyor/değerlendiriliyor" gibi ifadeler KULLANMA. Rapor varsayımı yapma!
+- FİİLİ BELGE EKİ YOKSA ALINDI VARSAYIMI YASAKTIR: Hasta "raporu attım/gönderdim" diye iddia etse bile current turn'da fiilen bir belge/görsel/medya eki (Attachment Evidence) ulaştırılmadıysa asla "belgeniz ulaştı", "aldık", "notlarımıza ekledik" deme. Bunun yerine doğrudan: "Anladım. Belge sistemimize ulaştığında notlarımıza eklenir. Kesin değerlendirme hastanede ilgili uzman ekip tarafından yapılır." şeklinde cevap ver.
 - BOT ELEŞTİRİSİ VE SAVUNMASIZ DÜZELTME KURALI: Hasta botu veya asistanı düzelttiğinde ya da "yasak", "bunu söylemen yasak", "rapor göndermedim", "inceleyecek deme", "hangi rapor" gibi itirazlarda bulunduğunda, asla uzun açıklamalar, robotik ve savunmacı cümleler ("teşhis koymak benim yetkimde değil", "dikkatli olmamız gerekir" vb.) kurma. Doğrudan "Haklısınız, rapor varsayımı yapmayalım. WhatsApp üzerinden tıbbi yorum yapmadan ilerleyelim. İsterseniz geliş/randevu sürecinizi netleştirebiliriz." şeklinde kısa ve net düzeltme yaparak konuya dön. Adını sorma, tartışmaya girme.
 - TÜRKÇE SADELİK VE GRAMER KURALLARI: Cümlelerinde peş peşe sahiplik/üyelik ekleri yığma (örn. "süreciniziniz", "raporunuzun", "şikayetleriniz hakkında" gibi kelimeleri arka arkaya kullanma). "hastanemizin ilgili uzman ekibinizin" gibi hatalı tamlamalar yapma. Özellikle düzeltme/itiraz cevapları en fazla 2-3 kısa cümle olmalı, yalın ve temiz bir Türkçe ile yazılmalıdır.
 - HASTA-FACING YASAKLI İFADELER: Aşağıdaki ifadelerin hasta-facing mesajlarında kullanılması kesinlikle yasaktır:
@@ -514,7 +517,7 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/koordinatör arasında planlanan
         });
 
         // Resolve decision flags
-        const isCorrectionTurn = isHealthcare && (currentTurnMentionsReportTopic || ['yasak', 'doğru değil', 'yalan', 'yanlış', 'bot', 'asistan', 'yapma', 'söyleme', 'hata'].some(kw => currentMessageTextLower.includes(kw))) && !currentTurnHasReportEvidence;
+        const isCorrectionTurn = isHealthcare && (currentTurnMentionsReportTopic || ['yasak', 'doğru değil', 'yalan', 'yanlış', 'bot', 'asistan', 'yapma', 'söyleme', 'hata'].some(kw => currentMessageTextLower.includes(kw))) && !currentTurnHasActualAttachmentEvidence && !currentTurnClaimsReportSent;
 
         const shouldAskName = detailedName.nameConfirmationNeeded && !nameLocked && !patientGaveNameInLast3 && !askedNameRecently && !isTerminalStage && !hasOptOutKeyword && !isHumanMode && !isCorrectionTurn;
         const shouldAskCountry = detailedCountry.countryConfirmationNeeded && !countryLocked && !patientGaveCountryInLast3 && !askedCountryRecently && !isTerminalStage && !hasOptOutKeyword && !isHumanMode && !isCorrectionTurn;
