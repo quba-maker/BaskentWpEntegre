@@ -11,7 +11,7 @@ async function main() {
   // Enforce test tenant context
   const systemDb = withTenantDB('admin-system', true);
   const tenants = await systemDb.executeSafe({
-    text: "SELECT id, slug FROM tenants WHERE status = 'active' LIMIT 1"
+    text: "SELECT id, slug FROM tenants WHERE slug = 'baskent'"
   }) as any[];
 
   if (tenants.length === 0) {
