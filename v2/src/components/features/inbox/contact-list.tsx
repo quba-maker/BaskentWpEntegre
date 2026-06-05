@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
-import { Search, Check, CheckCheck, Clock, WifiOff, MessageCircle, MoreVertical, Loader2, Sparkles, AlertCircle, X, ChevronLeft, ChevronRight, UserCheck, UserX, Trash2, Sliders, ChevronDown } from "lucide-react";
+import { Search, Check, CheckCheck, Clock, WifiOff, MessageCircle, MoreVertical, Loader2, Sparkles, AlertCircle, X, ChevronLeft, ChevronRight, UserCheck, UserX, Trash2, Sliders, ChevronDown, Bot, User } from "lucide-react";
 import { 
   getConversations, 
   togglePin, 
@@ -61,9 +61,9 @@ function InitialsAvatar({ name, channel, unread }: InitialsAvatarProps) {
   const badgeColor = channelColors[channel] || "#8E8E93";
 
   return (
-    <div className="relative mt-1 shrink-0 select-none">
+    <div className="relative mt-0.5 shrink-0 select-none">
       <div 
-        className="w-10 h-10 rounded-full flex items-center justify-center text-white text-[13px] font-bold shadow-[0_2px_8px_rgba(0,0,0,0.08)]"
+        className="w-12 h-12 rounded-full flex items-center justify-center text-white text-[14px] font-bold shadow-[0_2px_8px_rgba(0,0,0,0.08)]"
         style={{ backgroundColor: bgColor }}
       >
         {initials}
@@ -71,7 +71,7 @@ function InitialsAvatar({ name, channel, unread }: InitialsAvatarProps) {
       
       {/* Channel overlay badge */}
       <span 
-        className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full border-2 border-white shadow-sm flex items-center justify-center text-[7px] font-black text-white uppercase"
+        className="absolute -bottom-0.5 -right-0.5 w-4.5 h-4.5 rounded-full border-2 border-white shadow-sm flex items-center justify-center text-[8px] font-black text-white uppercase"
         style={{ backgroundColor: badgeColor }}
       >
         {channel === 'whatsapp' && 'w'}
@@ -682,97 +682,26 @@ const handleBulkArchive = async (archive: boolean) => {
             {(contacts || [])
               .filter((c: any) => filter === "all" || c.channel === filter)
               .map((c: any) => {
-                let senderPrefix = "";
+                let senderPrefixNode = null;
                 if (c.lastMessageDirection === 'out') {
                   if (c.lastMessageModel) {
-                    senderPrefix = "Bot: ";
+                    senderPrefixNode = (
+                      <span className="inline-flex items-center gap-0.5 mr-1 text-indigo-600 font-bold select-none align-middle">
+                        <Bot className="w-3.5 h-3.5 inline animate-pulse" /> Bot:
+                      </span>
+                    );
                   } else {
-                    senderPrefix = "Sen: ";
+                    senderPrefixNode = (
+                      <span className="inline-flex items-center gap-0.5 mr-1 text-gray-500 font-bold select-none align-middle">
+                        <User className="w-3.5 h-3.5 inline" /> Sen:
+                      </span>
+                    );
                   }
                 }
 
                 const cn = c.country ? normalizeCountryName(c.country) : '';
                 const country = (c.country ? { flag: getCountryFlag(cn), name: cn, code: '' } : null) || getCountryFromPhone(c.id);
                 const isEstimated = !c.country || c.country_source === 'phone_prefix';
-
-                // Pre-calculate chips for priority and collapse detection
-                const rawChips = [];
-
-                // 1. Cevap Bekliyor / No Reply (Priority 1)
-                if (c.is_no_reply_eligible) {
-                  rawChips.push({
-                    id: 'no-reply',
-                    label: `⏳ ${c.no_reply_hours}s cevap yok`,
-                    style: { background: "rgba(255, 59, 48, 0.1)", border: "1px solid rgba(255, 59, 48, 0.2)", color: "#FF3B30" }
-                  });
-                }
-                if (c.active_task_type) {
-                  if (c.active_task_type === 'no_reply_followup' || c.active_task_type === 'bot_handoff_followup') {
-                    rawChips.push({
-                      id: 'task-draft',
-                      label: "📋 Takip taslağı",
-                      style: { background: "rgba(255, 149, 0, 0.1)", border: "1px solid rgba(255, 149, 0, 0.2)", color: "#FF9500" }
-                    });
-                  } else if (c.active_task_type === 'template_required_task') {
-                    rawChips.push({
-                      id: 'task-template',
-                      label: "📋 Template gerekli",
-                      style: { background: "rgba(175, 82, 222, 0.1)", border: "1px solid rgba(175, 82, 222, 0.2)", color: "#AF52DE" }
-                    });
-                  } else {
-                    rawChips.push({
-                      id: 'task-pending',
-                      label: "📋 Cevap bekliyor",
-                      style: { background: "rgba(0, 122, 255, 0.1)", border: "1px solid rgba(0, 122, 255, 0.2)", color: "#007AFF" }
-                    });
-                  }
-                }
-
-                // 2. Bot / Manuel (Priority 2)
-                if (c.isBotActive) {
-                  rawChips.push({
-                    id: 'bot-mode',
-                    label: "🤖 Botta",
-                    style: { background: "rgba(52, 199, 89, 0.1)", color: "#34C759", border: "1px solid rgba(52,199,89,0.2)" }
-                  });
-                } else {
-                  rawChips.push({
-                    id: 'manual-mode',
-                    label: "👤 Manuel",
-                    style: { background: "var(--q-blue-bg)", color: "var(--q-blue)", border: "1px solid rgba(0,122,255,0.2)" }
-                  });
-                }
-
-                // 3. Stage (Priority 3)
-                rawChips.push({
-                  id: 'stage',
-                  label: stageLabel(c.stage),
-                  style: { background: "var(--q-bg-primary)", border: "1px solid var(--q-border-default)", color: "var(--q-text-secondary)" }
-                });
-
-                // 4. Country (Priority 4)
-                if (country) {
-                  rawChips.push({
-                    id: 'country',
-                    label: `${country.flag} ${country.name}${isEstimated ? '?' : ''}`,
-                    style: {
-                      color: 'var(--q-text-secondary)',
-                      backgroundColor: isEstimated ? 'rgba(0,0,0,0.02)' : 'rgba(0,0,0,0.04)',
-                      border: isEstimated ? '1px dashed var(--q-border-default)' : 'none'
-                    }
-                  });
-                }
-
-                // Calculate which chips are shown where and if country is collapsed
-                const countryIndex = rawChips.findIndex(x => x.id === 'country');
-                let flagFallbackClass = "hidden";
-                if (country && countryIndex >= 0) {
-                  if (countryIndex >= 2) {
-                    flagFallbackClass = "inline-block"; // collapsed on both mobile/tablet and desktop
-                  } else if (countryIndex === 1) {
-                    flagFallbackClass = "inline-block xl:hidden"; // collapsed on tablet/mobile only (since it's index 1 and under xl only 1 chip shows)
-                  }
-                }
 
                 const isMenuOpen = contextMenu?.conversationId === c.conversation_id;
 
@@ -812,7 +741,7 @@ const handleBulkArchive = async (archive: boolean) => {
                         unread: c.unread
                       });
                     }}
-                    className={`w-full text-left p-3.5 rounded-2xl transition-all duration-200 flex items-start gap-3.5 border q-list-item group cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#007AFF] focus-visible:ring-offset-2 ${
+                    className={`w-full text-left p-4 rounded-2xl transition-all duration-200 flex items-start gap-3.5 border q-list-item group cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#007AFF] focus-visible:ring-offset-2 ${
                       isMenuOpen ? "bg-black/[0.03] border-gray-300" : ""
                     }`}
                     style={{
@@ -840,10 +769,10 @@ const handleBulkArchive = async (archive: boolean) => {
                     <InitialsAvatar name={c.name || c.id} channel={c.channel} unread={0} />
 
                     {/* Middle Column: Content */}
-                    <div className="flex-1 min-w-0">
+                    <div className="flex-1 min-w-0 flex flex-col justify-between self-stretch py-0.5">
                       {/* Name & Indicators Row */}
-                      <div className="flex items-center mb-0.5 min-w-0 w-full">
-                        <span className="font-bold text-[14.5px] truncate flex-shrink min-w-0" style={{ color: "var(--q-text-primary)" }}>
+                      <div className="flex items-center min-w-0 w-full mb-0.5">
+                        <span className="font-bold text-[15px] truncate flex-shrink min-w-0" style={{ color: "var(--q-text-primary)" }}>
                           {c.name || c.id}
                         </span>
                         {c.isFavorite && (
@@ -851,14 +780,6 @@ const handleBulkArchive = async (archive: boolean) => {
                         )}
                         {c.isArchived && (
                           <span className="ml-1.5 text-[11px] select-none flex-shrink-0" title="Arşivlenmiş">📁</span>
-                        )}
-                        {country && (
-                          <span 
-                            className={`ml-1.5 text-[13px] select-none flex-shrink-0 cursor-help ${flagFallbackClass}`}
-                            title={`${country.name}${isEstimated ? ' (Tahmini)' : ''}`}
-                          >
-                            {country.flag}
-                          </span>
                         )}
                       </div>
 
@@ -876,64 +797,67 @@ const handleBulkArchive = async (archive: boolean) => {
                           </span>
                         )}
                         <span className="truncate">
-                          {senderPrefix && <span className="opacity-60 font-semibold">{senderPrefix}</span>}
+                          {senderPrefixNode}
                           {formatMessagePreview(c.last_message, c.lastMessageMediaType)}
                         </span>
                       </p>
 
-                      {/* Chips Row (Compact Priority System) */}
-                      <div className="flex flex-wrap items-center gap-1.5 mt-2">
-                        {(() => {
-                          const chip1 = rawChips[0];
-                          const chip2 = rawChips[1];
-                          const collapsedCount = rawChips.length;
-
+                      {/* Status Badges Row (No reply, Bot status, Stage, Country name+flag) */}
+                      <div className="flex flex-wrap items-center gap-1.5 mt-2 w-full select-none">
+                        {/* No Reply / Follow up alerts */}
+                        {c.is_no_reply_eligible && (
+                          <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-red-50 text-[#FF3B30] border border-red-100 shadow-sm flex-shrink-0">
+                            ⏳ {c.no_reply_hours}s cevap yok
+                          </span>
+                        )}
+                        {c.active_task_type && (() => {
+                          let label = "Cevap bekliyor";
+                          let colorClass = "bg-blue-50 text-[#007AFF] border-blue-100";
+                          if (c.active_task_type === 'no_reply_followup' || c.active_task_type === 'bot_handoff_followup') {
+                            label = "Takip taslağı";
+                            colorClass = "bg-amber-50 text-[#FF9500] border-amber-100";
+                          } else if (c.active_task_type === 'template_required_task') {
+                            label = "Template gerekli";
+                            colorClass = "bg-purple-50 text-[#AF52DE] border-purple-100";
+                          }
                           return (
-                            <>
-                              {chip1 && (
-                                <span
-                                  key={chip1.id}
-                                  className="text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded shadow-sm whitespace-nowrap inline-flex items-center max-w-[110px] truncate"
-                                  style={chip1.style}
-                                >
-                                  {chip1.label}
-                                </span>
-                              )}
-                              {chip2 && (
-                                <span
-                                  key={chip2.id}
-                                  className="text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded shadow-sm whitespace-nowrap inline-flex items-center max-w-[110px] truncate hidden xl:inline-flex"
-                                  style={chip2.style}
-                                >
-                                  {chip2.label}
-                                </span>
-                              )}
-                              {/* Tablet/mobile badge (only shows when rawChips.length > 1) */}
-                              {collapsedCount > 1 && (
-                                <span
-                                  className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 border border-gray-200 shadow-sm inline-block xl:hidden flex-shrink-0"
-                                  title={`Gizlenen chipler: ${rawChips.slice(1).map(x => x.label).join(', ')}`}
-                                >
-                                  +{collapsedCount - 1}
-                                </span>
-                              )}
-                              {/* Desktop badge (only shows when rawChips.length > 2) */}
-                              {collapsedCount > 2 && (
-                                <span
-                                  className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 border border-gray-200 shadow-sm hidden xl:inline-block flex-shrink-0"
-                                  title={`Gizlenen chipler: ${rawChips.slice(2).map(x => x.label).join(', ')}`}
-                                >
-                                  +{collapsedCount - 2}
-                                </span>
-                              )}
-                            </>
+                            <span className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border shadow-sm flex-shrink-0 ${colorClass}`}>
+                              📋 {label}
+                            </span>
                           );
                         })()}
+
+                        {/* Bot Mode */}
+                        {c.isBotActive ? (
+                          <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-green-50 text-[#34C759] border border-green-100 shadow-sm flex-shrink-0">
+                            <Bot className="w-3 h-3" /> Botta
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-blue-50 text-[#007AFF] border border-blue-100 shadow-sm flex-shrink-0">
+                            <User className="w-3 h-3" /> Manuel
+                          </span>
+                        )}
+
+                        {/* Pipeline Stage */}
+                        <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-50 text-gray-600 border border-gray-200 shadow-sm flex-shrink-0">
+                          {stageLabel(c.stage)}
+                        </span>
+
+                        {/* Country Flag & Full Name */}
+                        {country && (
+                          <span 
+                            className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-50 text-slate-600 border border-slate-200 shadow-sm max-w-[120px] truncate flex-shrink-0"
+                            title={`${country.name}${isEstimated ? ' (Tahmini)' : ''}`}
+                          >
+                            <span>{country.flag}</span>
+                            <span className="truncate">{country.name}</span>
+                          </span>
+                        )}
                       </div>
                     </div>
 
                     {/* Right Column: Time, Unread, Pin & Chevron Dropdown */}
-                    <div className="relative flex flex-col items-end justify-between self-stretch shrink-0 w-16 select-none min-h-[50px] text-right">
+                    <div className="relative flex flex-col items-end justify-between self-stretch shrink-0 w-16 select-none min-h-[60px] text-right">
                       {/* Top: Time */}
                       <span 
                         className={`text-[10px] tracking-wide whitespace-nowrap transition-all duration-150 pr-7 md:pr-0 md:group-hover:opacity-0 md:group-focus-within:opacity-0 ${
