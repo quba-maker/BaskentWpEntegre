@@ -38,6 +38,8 @@ export interface ResolvedTemplate {
   body: string;        // raw template body with {{variables}}
   rendered: string;    // final rendered text ready to send
   source: 'form_match' | 'department_match' | 'default' | 'fallback' | 'system_hardcoded';
+  template_non_compliant?: boolean;
+  compliance_warning?: string;
 }
 
 export interface TemplateListItem {
@@ -140,6 +142,7 @@ export class TemplateResolverService {
     templateType: 'greeting' | 'remarketing' = 'greeting'
   ): Promise<ResolvedTemplate> {
     const lang = detectLanguage(ctx, greetingLang);
+    let resolved: ResolvedTemplate | null = null;
     
     try {
       // ── Layer 1: form_name + language match ──
@@ -153,7 +156,7 @@ export class TemplateResolverService {
         }) as any[];
 
         if (rows.length > 0) {
-          return {
+          resolved = {
             templateId: rows[0].id,
             templateName: rows[0].name,
             language: lang,
@@ -165,7 +168,7 @@ export class TemplateResolverService {
       }
 
       // ── Layer 2: department + language match ──
-      if (ctx.department) {
+      if (!resolved && ctx.department) {
         const rows = await db.executeSafe({
           text: `SELECT id, name, language, body FROM message_templates
                  WHERE tenant_id = $1 AND template_type = $4
@@ -176,7 +179,7 @@ export class TemplateResolverService {
         }) as any[];
 
         if (rows.length > 0) {
-          return {
+          resolved = {
             templateId: rows[0].id,
             templateName: rows[0].name,
             language: lang,
@@ -188,27 +191,29 @@ export class TemplateResolverService {
       }
 
       // ── Layer 3: default template for detected language ──
-      const defaultRows = await db.executeSafe({
-        text: `SELECT id, name, language, body FROM message_templates
-               WHERE tenant_id = $1 AND template_type = $3
-                 AND language = $2 AND is_default = true AND is_active = true
-               LIMIT 1`,
-        values: [ctx.tenantId, lang, templateType]
-      }) as any[];
+      if (!resolved) {
+        const defaultRows = await db.executeSafe({
+          text: `SELECT id, name, language, body FROM message_templates
+                 WHERE tenant_id = $1 AND template_type = $3
+                   AND language = $2 AND is_default = true AND is_active = true
+                 LIMIT 1`,
+          values: [ctx.tenantId, lang, templateType]
+        }) as any[];
 
-      if (defaultRows.length > 0) {
-        return {
-          templateId: defaultRows[0].id,
-          templateName: defaultRows[0].name,
-          language: lang,
-          body: defaultRows[0].body,
-          rendered: renderTemplate(defaultRows[0].body, ctx),
-          source: 'default',
-        };
+        if (defaultRows.length > 0) {
+          resolved = {
+            templateId: defaultRows[0].id,
+            templateName: defaultRows[0].name,
+            language: lang,
+            body: defaultRows[0].body,
+            rendered: renderTemplate(defaultRows[0].body, ctx),
+            source: 'default',
+          };
+        }
       }
 
       // ── Layer 4: Turkish default fallback ──
-      if (lang !== 'tr') {
+      if (!resolved && lang !== 'tr') {
         const trRows = await db.executeSafe({
           text: `SELECT id, name, language, body FROM message_templates
                  WHERE tenant_id = $1 AND template_type = $2
@@ -218,7 +223,7 @@ export class TemplateResolverService {
         }) as any[];
 
         if (trRows.length > 0) {
-          return {
+          resolved = {
             templateId: trRows[0].id,
             templateName: trRows[0].name,
             language: 'tr',
@@ -230,29 +235,50 @@ export class TemplateResolverService {
       }
 
       // ── Layer 5: Any available template ──
-      const anyRows = await db.executeSafe({
-        text: `SELECT id, name, language, body FROM message_templates
-               WHERE tenant_id = $1 AND template_type = $2 AND is_active = true
-               ORDER BY is_default DESC, created_at ASC LIMIT 1`,
-        values: [ctx.tenantId, templateType]
-      }) as any[];
+      if (!resolved) {
+        const anyRows = await db.executeSafe({
+          text: `SELECT id, name, language, body FROM message_templates
+                 WHERE tenant_id = $1 AND template_type = $2 AND is_active = true
+                 ORDER BY is_default DESC, created_at ASC LIMIT 1`,
+          values: [ctx.tenantId, templateType]
+        }) as any[];
 
-      if (anyRows.length > 0) {
-        return {
-          templateId: anyRows[0].id,
-          templateName: anyRows[0].name,
-          language: anyRows[0].language,
-          body: anyRows[0].body,
-          rendered: renderTemplate(anyRows[0].body, ctx),
-          source: 'fallback',
-        };
+        if (anyRows.length > 0) {
+          resolved = {
+            templateId: anyRows[0].id,
+            templateName: anyRows[0].name,
+            language: anyRows[0].language,
+            body: anyRows[0].body,
+            rendered: renderTemplate(anyRows[0].body, ctx),
+            source: 'fallback',
+          };
+        }
       }
     } catch (_) {
       // Template table might not exist yet — fall through to hardcoded
     }
 
-    // ── Layer 6: System hardcoded — zero-dependency guaranteed ──
-    return this.getSystemFallback(ctx, lang, templateType);
+    if (!resolved) {
+      // ── Layer 6: System hardcoded — zero-dependency guaranteed ──
+      resolved = this.getSystemFallback(ctx, lang, templateType);
+    }
+
+    // Dynamic import to avoid circular dependencies
+    const { isNonCompliant, sanitizePatientFacingMessage } = await import('@/lib/utils/patient-message-sanitizer');
+    
+    // Check template compliance
+    const nonCompliant = isNonCompliant(resolved.body) || isNonCompliant(resolved.rendered);
+    if (nonCompliant) {
+      resolved.template_non_compliant = true;
+      resolved.compliance_warning = "İsimli/cinsiyetli hitap barındırıyor.";
+    } else {
+      resolved.template_non_compliant = false;
+    }
+
+    // Freeform draft/preview/bot response can be sanitized
+    resolved.rendered = sanitizePatientFacingMessage(resolved.rendered);
+
+    return resolved;
   }
 
   /**
@@ -265,10 +291,7 @@ export class TemplateResolverService {
     templateType: 'greeting' | 'remarketing' = 'greeting'
   ): ResolvedTemplate {
     const isTurkish = lang === 'tr';
-    const name = ctx.patientName?.trim();
-    const greeting = name
-      ? (isTurkish ? `Merhaba ${name}!` : `Hello ${name}!`)
-      : (isTurkish ? 'Merhaba!' : 'Hello!');
+    const greeting = isTurkish ? 'Merhaba!' : 'Hello!';
     const tenantName = ctx.tenantName || 'Ekibimiz';
     const dept = ctx.department || (isTurkish ? 'bölüm' : 'department');
 

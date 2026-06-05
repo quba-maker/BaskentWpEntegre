@@ -1174,21 +1174,21 @@ async function runValidationTests() {
   };
 
   const systemPrompt9B6 = PromptBuilder.buildSystemPrompt(mockBrainFor9B6, "greeting", false, mockContext9B6);
-  if (!systemPrompt9B6.includes("kesinlikle Türkçe hitap eklerini ('Bey' / 'Hanım') KULLANMA")) {
+  if (!systemPrompt9B6.includes("ismiyle hitap etme, cinsiyetli veya resmi hitap sözcükleri") || !systemPrompt9B6.includes("KULLANMA")) {
     throw new Error("TEST 9-B.6 Failed: System prompt does not include honorific suppression directives for foreign languages!");
   }
-  if (!systemPrompt9B6.includes("ismin sonuna kesinlikle Türkçe hitap sözcükleri olan \"Bey\" veya \"Hanım\" EKLEME")) {
-    throw new Error("TEST 9-B.6 Failed: Response language block is missing the honorific warning!");
-  }
 
-  // Also verify that Turkish reply contains honorifics
+  // Verify that Turkish reply prompt enforces no names and sizli tone
   const mockContext9B6TR = {
     profile: { first_name: "Murtaza", last_name: "Kamilov" },
     languageContext: { reply_language: "Türkçe", detected_patient_language: "Türkçe" }
   };
   const systemPrompt9B6TR = PromptBuilder.buildSystemPrompt(mockBrainFor9B6, "greeting", false, mockContext9B6TR);
-  if (!systemPrompt9B6TR.includes("Merhaba Murtaza Bey/Hanım")) {
-    throw new Error("TEST 9-B.6 Failed: Turkish reply prompt does not include the standard honorific template!");
+  if (systemPrompt9B6TR.includes("Murtaza Bey/Hanım") || systemPrompt9B6TR.includes("Merhaba Murtaza")) {
+    throw new Error("TEST 9-B.6 Failed: Turkish reply prompt still contains name-based or gendered templates!");
+  }
+  if (!systemPrompt9B6TR.includes("sizli")) {
+    throw new Error("TEST 9-B.6 Failed: Turkish reply prompt does not enforce sizli tone!");
   }
   console.log("   ✅ Russian honorific suppression and Turkish templates verified: PASS");
 

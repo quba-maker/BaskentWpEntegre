@@ -287,8 +287,8 @@ export class FormGreetingHandoffService {
     let draftText: string;
     if (!eligibility.requiresTemplate) {
       // 24h window open — freeform allowed
-      const patientName = eligibility.patientName || 'Hasta';
-      draftText = `Merhaba ${patientName}, Başkent Hastanesi'nden iletişime geçiyoruz. Formunuzu aldık ve size yardımcı olmak istiyoruz. Randevu ve tedavi sürecinizle ilgili bilgi almak isterseniz bize yazabilirsiniz.`;
+      const { sanitizePatientFacingMessage } = await import('@/lib/utils/patient-message-sanitizer');
+      draftText = sanitizePatientFacingMessage(`Merhaba, Başkent Hastanesi'nden iletişime geçiyoruz. Formunuzu aldık ve size yardımcı olmak istiyoruz. Randevu ve tedavi sürecinizle ilgili bilgi almak isterseniz bize yazabilirsiniz.`);
     } else {
       // Template required
       if (!eligibility.templateConfigExists) {

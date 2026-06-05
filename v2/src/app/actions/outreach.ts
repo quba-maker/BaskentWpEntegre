@@ -793,6 +793,15 @@ export async function sendMetaTemplateMessage(opportunityId: string, templateNam
   return withActionGuard(
     { actionName: 'sendMetaTemplateMessage' },
     async (ctx) => {
+      // 0. Compliance Check
+      const { isNonCompliant } = await import('@/lib/utils/patient-message-sanitizer');
+      if (isNonCompliant(templateText)) {
+        return {
+          success: false,
+          error: "Bu şablon isimli veya cinsiyetli hitap barındırdığı için (non-compliant) gönderimi engellenmiştir. Lütfen yeni nötr bir şablon onaylatın."
+        };
+      }
+
       // 1. Fetch Opportunity and Phone
       const opps = await ctx.db.executeSafe({
         text: `SELECT patient_name, phone_number FROM opportunities WHERE id = $1 AND tenant_id = $2 LIMIT 1`,

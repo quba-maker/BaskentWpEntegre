@@ -2226,7 +2226,8 @@ export async function prepareFollowUpDraft(conversationId: string) {
       let draftType: "freeform" | "template_required" = "freeform";
 
       if (windowOpen) {
-        draftText = "Merhaba, müsait olduğunuzda geri dönüş yapabilirseniz size yardımcı olmaktan memnuniyet duyarız. İyi günler dileriz.";
+        const { sanitizePatientFacingMessage } = await import("@/lib/utils/patient-message-sanitizer");
+        draftText = sanitizePatientFacingMessage("Merhaba, müsait olduğunuzda geri dönüş yapabilirseniz size yardımcı olmaktan memnuniyet duyarız. İyi günler dileriz.");
         draftType = "freeform";
       } else {
         draftText = "24 saatlik WhatsApp penceresi kapandığı için serbest mesaj gönderilemez. Lütfen onaylı bir şablon seçin.";

@@ -306,8 +306,8 @@ export class SecondaryPhoneFallbackService {
     
     let draftText: string;
     if (eligibility.windowOpenSecondary) {
-      const patientName = eligibility.patientName || 'Hasta';
-      draftText = `Merhaba, ${patientName} için Başkent Hastanesi'nden ulaşıyoruz. Diğer numaranızdan yanıt alamadık. Müsait olduğunuzda bize dönüş yapabilirseniz çok seviniriz. İyi günler dileriz.`;
+      const { sanitizePatientFacingMessage } = await import('@/lib/utils/patient-message-sanitizer');
+      draftText = sanitizePatientFacingMessage(`Merhaba, Başkent Hastanesi'nden ulaşıyoruz. Diğer numaranızdan yanıt alamadık. Müsait olduğunuzda bize dönüş yapabilirseniz çok seviniriz. İyi günler dileriz.`);
     } else {
       draftText = '24 saatlik WhatsApp penceresi kapalı. Onaylı şablon (template) gereklidir. Şablon konfigürasyonu yapılmadan gönderim devre dışıdır.';
     }

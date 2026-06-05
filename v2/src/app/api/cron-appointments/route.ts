@@ -71,12 +71,14 @@ export async function GET() {
               day: '2-digit', month: 'long', hour: '2-digit', minute: '2-digit'
             });
             
-            // SaaS Logic: Use tenant's custom reminder template or fallback
-            const template = tenant.reminder_template || "Merhaba {{patient_name}} 🙏 Yarın {{time}} için planlanan randevunuzu hatırlatmak istiyoruz. Görüşmek üzere!";
-            const msg = template
-              .replace("{{patient_name}}", apt.patient_name || '')
+            const template = tenant.reminder_template || "Merhaba, yarın {{time}} için planlanan randevunuzu hatırlatmak istiyoruz. Görüşmek üzere! 🙏";
+            let msg = template
+              .replace("{{patient_name}}", "")
               .replace("{{time}}", dateStr)
               .replace("{{date}}", dateStr);
+            
+            const { sanitizePatientFacingMessage } = await import("@/lib/utils/patient-message-sanitizer");
+            msg = sanitizePatientFacingMessage(msg);
             
             const creds = await CredentialsService.resolveCredentials(tenant.id, "whatsapp");
             const token = creds.accessToken;

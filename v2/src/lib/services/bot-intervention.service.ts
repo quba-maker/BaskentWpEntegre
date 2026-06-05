@@ -362,7 +362,10 @@ Lütfen hastamız ${patientDisplayName} için şu talimat doğrultusunda bir yan
         if (response.ok) {
           const resData = await response.json();
           const text = resData.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (text && text.trim().length > 0) return { draftMsg: text.trim(), isFallback: false };
+          if (text && text.trim().length > 0) {
+            const { sanitizePatientFacingMessage } = await import('@/lib/utils/patient-message-sanitizer');
+            return { draftMsg: sanitizePatientFacingMessage(text.trim()), isFallback: false };
+          }
         }
         
         ctxLog.warn('Gemini failed to return text', { responseText: await response.text() });
@@ -374,28 +377,32 @@ Lütfen hastamız ${patientDisplayName} için şu talimat doğrultusunda bir yan
     }
 
     // Fallback behavior
-    const patientFirstName = patientDisplayName.split(' ')[0] || 'Müşterimiz';
     let fallbackMsg: string | null = null;
 
     switch (interventionType) {
       case 'confirm_callback_time':
-        fallbackMsg = `Merhaba ${patientFirstName} Bey/Hanım, telefon görüşmesi için belirttiğiniz zamanı teyit etmek isteriz. Uygun olduğunu onaylayabilir misiniz?`;
+        fallbackMsg = `Merhaba, telefon görüşmesi için belirttiğiniz zamanı teyit etmek isteriz. Uygun olduğunu onaylayabilir misiniz?`;
         break;
       case 'ask_new_callback_time':
-        fallbackMsg = `Merhaba ${patientFirstName} Bey/Hanım, telefon görüşmesi için size uygun gün ve saat aralığını bizimle paylaşabilir misiniz?`;
+        fallbackMsg = `Merhaba, telefon görüşmesi için size uygun gün ve saat aralığını bizimle paylaşabilir misiniz?`;
         break;
       case 'remind_callback':
-        fallbackMsg = `Merhaba ${patientFirstName} Bey/Hanım, telefon görüşmesi planlamanızla ilgili sizi bilgilendirmek istedik. Görüşme saatinde telefonunuzun ulaşılabilir olması yeterlidir.`;
+        fallbackMsg = `Merhaba, telefon görüşmesi planlamanızla ilgili sizi bilgilendirmek istedik. Görüşme saatinde telefonunuzun ulaşılabilir olması yeterlidir.`;
         break;
       case 'request_documents':
-        fallbackMsg = `Merhaba ${patientFirstName} Bey/Hanım, değerlendirme süreciniz için varsa güncel rapor, tetkik veya görüntülerinizi bizimle paylaşabilirsiniz.`;
+        fallbackMsg = `Merhaba, değerlendirme süreciniz için varsa güncel rapor, tetkik veya görüntülerinizi bizimle paylaşabilirsiniz.`;
         break;
       case 'confirm_clinic_appointment':
-        fallbackMsg = `Merhaba ${patientFirstName} Bey/Hanım, planlanan yüz yüze klinik randevunuzu teyit etmek isteriz. Katılım durumunuzu bildirebilir misiniz?`;
+        fallbackMsg = `Merhaba, planlanan yüz yüze klinik randevunuzu teyit etmek isteriz. Katılım durumunuzu bildirebilir misiniz?`;
         break;
       case 'ask_new_clinic_appointment_time':
-        fallbackMsg = `Merhaba ${patientFirstName} Bey/Hanım, yüz yüze klinik randevunuz için size uygun yeni bir tarih ve saat aralığı paylaşabilir misiniz?`;
+        fallbackMsg = `Merhaba, yüz yüze klinik randevunuz için size uygun yeni bir tarih ve saat aralığı paylaşabilir misiniz?`;
         break;
+    }
+
+    if (fallbackMsg) {
+      const { sanitizePatientFacingMessage } = await import('@/lib/utils/patient-message-sanitizer');
+      fallbackMsg = sanitizePatientFacingMessage(fallbackMsg);
     }
 
     return { draftMsg: fallbackMsg, isFallback: true };

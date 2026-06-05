@@ -2022,6 +2022,12 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       });
     }
 
+    // Run final sanitizer on the patient-facing message
+    if (finalResponseText) {
+      const { sanitizePatientFacingMessage } = await import('@/lib/utils/patient-message-sanitizer');
+      finalResponseText = sanitizePatientFacingMessage(finalResponseText);
+    }
+
     // Format for WhatsApp to translate Markdown (* -> bullets, ** -> *)
     if (channel === 'whatsapp' && finalResponseText) {
       finalResponseText = formatForWhatsApp(finalResponseText);

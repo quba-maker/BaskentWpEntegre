@@ -564,6 +564,10 @@ export class NoReplyAutomationService {
             draftText = "24 saat penceresi kapalı. Onaylı WhatsApp template tanımlanmadan otomatik gönderim yapılamaz.";
           }
         }
+        if (draftText && !templateRequired) {
+          const { sanitizePatientFacingMessage } = await import('@/lib/utils/patient-message-sanitizer');
+          draftText = sanitizePatientFacingMessage(draftText);
+        }
 
         // Generate dedupe_key
         const dedupeKey = `no_reply_att_${attempt}_msg_${c.last_message_id}`;

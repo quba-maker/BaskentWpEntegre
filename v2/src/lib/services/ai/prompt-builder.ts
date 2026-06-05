@@ -103,17 +103,12 @@ export class PromptBuilder {
         const fullName = [unifiedContext.profile.first_name, unifiedContext.profile.last_name].filter(Boolean).join(' ').trim();
         if (fullName) {
           crmContext += `- İsim: ${fullName}\n`;
-          const replyLang = unifiedContext?.languageContext?.reply_language || 'Türkçe';
-          const isTurkish = replyLang.toLowerCase().includes('türk') || replyLang.toLowerCase().includes('tr');
-          if (isTurkish) {
-            crmContext += `>> DİKKAT: Müşteriye/Kullanıcıya mesajlarında adı ile hitap et (Örn: Merhaba ${unifiedContext.profile.first_name} Bey/Hanım).\n`;
-          } else {
-            crmContext += `>> DİKKAT: Yanıt dili Türkçe olmadığı için (${replyLang}) müşteriye hitap ederken kesinlikle Türkçe hitap eklerini ('Bey' / 'Hanım') KULLANMA. Doğrudan ismiyle hitap et (Örn: 'Hello ${unifiedContext.profile.first_name},' veya 'Hallo ${unifiedContext.profile.first_name},' veya 'Здравствуйте, ${unifiedContext.profile.first_name},').\n`;
-          }
         } else {
           crmContext += `- İsim: Bilinmiyor\n`;
         }
       }
+      crmContext += `>> UYARI (KRİTİK): Hastaya/kullanıcıya ismiyle hitap etme, cinsiyetli veya resmi hitap sözcükleri (Bey, Hanım, Bay, Bayan, Sayın, M.r., M.s., M.r.s., D.e.a.r. vb.) KULLANMA. Mesajlarına isimsiz ve nötr bir selamlama ile başla (Örn. Türkçe için sadece "Merhaba,", İngilizce için sadece "Hello,").\n`;
+      crmContext += `>> UYARI: Türkçe yanıt verirken kesinlikle samimi/senli dil kullanma. Her zaman kurumsal, nazik ve formal "sizli" tonu kullan (Örn. "yardımcı olabiliriz", "paylaşabilir misiniz", "düşünür müsünüz").\n`;
       
       // Cleaned patient facts
       if (unifiedContext.patient_known_facts && unifiedContext.patient_known_facts.length > 0) {
@@ -319,7 +314,7 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/koordinatör arasında planlanan
    - "ekibimiz size dönecektir"
    
 2. Eğer net tarih/saat varsa mesajda mutlaka o tarih/saati de göster. Örnek format:
-   “Tamamdır [Hasta Adı] Bey/Hanım, teyidinizi aldım.
+    “Harika, teyidinizi aldım.
    \${resolvedTaskType === 'phone_callback' ? 'Telefon görüşmesi' : 'Klinik randevusu/planlaması'} için belirttiğiniz zamanı ilgili koordinatör arkadaşımıza iletiyorum.
    
    Planlanan görüşme:
@@ -347,7 +342,7 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/koordinatör arasında planlanan
       langContextText += `- Form alan adları veya sistem verileri Türkçe olsa bile hastanın mesaj dili ${lc.detected_patient_language} olduğu için ${lc.reply_language} cevap ver.\n`;
       const isTurkish = lc.reply_language.toLowerCase().includes('türk') || lc.reply_language.toLowerCase().includes('tr');
       if (!isTurkish) {
-        langContextText += `- UYARI: Yanıt dili Türkçe olmadığından ismin sonuna kesinlikle Türkçe hitap sözcükleri olan "Bey" veya "Hanım" EKLEME. Doğrudan sadece ilk ismiyle hitap et (Örn: "Hello ${unifiedContext.profile?.first_name || 'John'}," / "Hallo ${unifiedContext.profile?.first_name || 'John'},").\n`;
+        langContextText += `- UYARI: Hastaya ismiyle hitap etme, cinsiyetli veya resmi hitap sözcükleri (Bey, Hanım, Bay, Bayan, Sayın, M.r., M.s., M.r.s., D.e.a.r. vb.) KULLANMA. Mesajlarına isimsiz ve nötr bir selamlama ile başla (Örn: "Hello,", "Hallo,").\n`;
       }
       langContextText += `- UYARI: Bu dil talimatı sadece yanıt dilini belirler. Fiyat verme yasağı, doktor ismi vermeme kuralı, doktor görüşmesi/randevu sözü vermeme kuralı, süre/gün belirtmeme kuralı ve diğer tüm güvenlik kuralları kesinlikle yürürlükte kalmalıdır. Güvenlik kurallarını dil talimatı için ihlal etme.\n`;
       langContextText += `==============================\n`;
