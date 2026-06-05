@@ -188,16 +188,16 @@ export default async function handler(req, res) {
                 }
                 
                 const deptLabel = department || 'sağlık';
-                const greeting = name ? (isTurkish ? `Merhaba ${name}!` : `Hello ${name}!`) : (isTurkish ? 'Merhaba!' : 'Hello!');
+                const greeting = isTurkish ? 'Merhaba!' : 'Hello!';
 
                 let welcomeMsg;
                 if (isTurkish) {
                   welcomeMsg = greetingTr
-                    ? greetingTr.replace('{isim}', name || '').replace('{bolum}', deptLabel).trim()
+                    ? greetingTr.replace('{isim}', '').replace('{bolum}', deptLabel).replace(/\s+/g, ' ').replace(/\s+([.,!?])/g, '$1').trim()
                     : `${greeting} Başkent Üniversitesi Konya Hastanesi'nden yazıyoruz 🙏\n\n${deptLabel} konusunda bize ulaştığınızı gördük. Şikayetiniz ne zamandır devam ediyor?\n\nDurumunuzu daha iyi anlamamız için birkaç soru sormak istiyoruz, sonrasında size en uygun değerlendirmeyi sunalım.`;
                 } else {
                   welcomeMsg = greetingEn
-                    ? greetingEn.replace('{name}', name || '').replace('{department}', deptLabel).trim()
+                    ? greetingEn.replace('{name}', '').replace('{department}', deptLabel).replace(/\s+/g, ' ').replace(/\s+([.,!?])/g, '$1').trim()
                     : `${greeting} We're reaching out from Başkent University Konya Hospital 🙏\n\nWe noticed your interest in ${deptLabel}. How long have you been experiencing this issue?\n\nWe'd like to understand your situation better so we can recommend the best course of action for you.`;
                 }
 

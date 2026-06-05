@@ -43,7 +43,7 @@ export class BotInterventionService {
       case 'ask_new_clinic_appointment_time':
         return 'Hastanın yüz yüze klinik randevusu için yeni bir tarih/saat talep et.';
       case 'request_documents':
-        return 'Hastadan süreci değerlendirebilmek için varsa tıbbi rapor, tetkik veya fotoğraflarını göndermesini iste.';
+        return 'Hastaya nazikçe belge paylaşma fırsatı sun. Aktif şekilde rapor isteme. "Elinizde paylaşmak istediğiniz belgeler varsa buradan iletebilirsiniz" gibi yumuşak bir ifade kullan. Raporun tek başına kesin değerlendirme için yeterli olmadığını, hastanede ilgili uzman ekip tarafından fiziksel muayene gerektiğini ekle.';
       case 'send_custom_instruction':
         return customInstruction || 'Sıradaki işlemi hastaya ilet.';
       default:
@@ -390,7 +390,7 @@ Lütfen hastamız ${patientDisplayName} için şu talimat doğrultusunda bir yan
         fallbackMsg = `Merhaba, telefon görüşmesi planlamanızla ilgili sizi bilgilendirmek istedik. Görüşme saatinde telefonunuzun ulaşılabilir olması yeterlidir.`;
         break;
       case 'request_documents':
-        fallbackMsg = `Merhaba, değerlendirme süreciniz için varsa güncel rapor, tetkik veya görüntülerinizi bizimle paylaşabilirsiniz.`;
+        fallbackMsg = `Merhaba, elinizde paylaşmak istediğiniz belgeler varsa buradan iletebilirsiniz. Kesin değerlendirme ise hastanede ilgili uzman ekibimizin fiziksel değerlendirmesi sonrasında yapılacaktır.`;
         break;
       case 'confirm_clinic_appointment':
         fallbackMsg = `Merhaba, planlanan yüz yüze klinik randevunuzu teyit etmek isteriz. Katılım durumunuzu bildirebilir misiniz?`;

@@ -97,8 +97,9 @@ function detectLanguage(ctx: TemplateResolveContext, greetingLang?: string): str
 const MAX_RENDERED_LENGTH = 4096;
 
 function renderTemplate(body: string, ctx: TemplateResolveContext): string {
+  const isBaskent = ctx.tenantId === 'caab9ea1-9591-45e4-bbc5-9c9b498982c8';
   const variables: Record<string, string> = {
-    patient_name: ctx.patientName?.trim() || '',
+    patient_name: isBaskent ? '' : (ctx.patientName?.trim() || ''),
     tenant_name: ctx.tenantName || 'Ekibimiz',
     form_name: ctx.formName || '',
     department: ctx.department || '',
@@ -112,8 +113,10 @@ function renderTemplate(body: string, ctx: TemplateResolveContext): string {
   }
 
   // Clean up: remove "Merhaba !" (empty patient_name) → "Merhaba!"
-  rendered = rendered.replace(/Merhaba\s+!/g, 'Merhaba!');
-  rendered = rendered.replace(/Hello\s+!/g, 'Hello!');
+  rendered = rendered.replace(/Merhaba\s*,/g, 'Merhaba,');
+  rendered = rendered.replace(/Hello\s*,/g, 'Hello,');
+  rendered = rendered.replace(/Merhaba\s*!/g, 'Merhaba!');
+  rendered = rendered.replace(/Hello\s*!/g, 'Hello!');
 
   // Clean up double spaces from empty variables
   rendered = rendered.replace(/\s{2,}/g, ' ').trim();

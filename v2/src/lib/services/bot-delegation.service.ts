@@ -425,21 +425,21 @@ Lütfen hastamız ${patientDisplayName} için şu talimat doğrultusunda bir yan
     if (!draftMsg) {
       let reason = !apiKey ? '[API Key Missing]' : '[Gemini Fetch Failed]';
       if (botDel.mode === 'unreachable_followup') {
-        draftMsg = `Merhaba ${patientDisplayName}, bugün sizi aradık ancak ulaşamadık. Sizin için uygun olan bir görüşme saatini paylaşabilir misiniz? ${reason}`;
+        draftMsg = `Merhaba, bugün sizi aradık ancak ulaşamadık. Sizin için uygun olan bir görüşme saatini paylaşabilir misiniz? ${reason}`;
       } else if (botDel.mode === 'collect_phone_call_time') {
-        draftMsg = `Merhaba ${patientDisplayName}, ön görüşme için sizi arayabileceğimiz uygun bir gün ve saat paylaşabilir misiniz? ${reason}`;
+        draftMsg = `Merhaba, telefon görüşmesi için sizi arayabileceğimiz uygun bir gün ve saat paylaşabilir misiniz? ${reason}`;
       } else if (botDel.mode === 'confirm_phone_call') {
-        draftMsg = `Merhaba ${patientDisplayName}, ${dateStr} tarihindeki telefon görüşmeniz için uygunluğunuzu teyit etmek isteriz. ${reason}`;
+        draftMsg = `Merhaba, ${dateStr} tarihindeki telefon görüşmeniz için uygunluğunuzu teyit etmek isteriz. ${reason}`;
       } else if (botDel.mode === 'clinic_appointment_reminder') {
-        draftMsg = `Merhaba ${patientDisplayName}, ${dateStr} tarihindeki randevunuz için katılım durumunuzu teyit etmek isteriz. ${reason}`;
+        draftMsg = `Merhaba, ${dateStr} tarihindeki randevunuz için katılım durumunuzu teyit etmek isteriz. ${reason}`;
       } else if (botDel.mode === 'no_response_followup') {
-        draftMsg = `Merhaba ${patientDisplayName}, size yardımcı olabileceğimiz bir konu var mıydı? Sorularınız varsa seve seve yanıtlayabiliriz. ${reason}`;
+        draftMsg = `Merhaba, size yardımcı olabileceğimiz bir konu var mıydı? Sorularınız varsa seve seve yanıtlayabiliriz. ${reason}`;
       } else if (botDel.mode === 'report_request') {
-        draftMsg = `Merhaba ${patientDisplayName}, değerlendirme süreciniz için varsa ilgili rapor veya tetkik belgelerinizi paylaşabilir misiniz?`;
+        draftMsg = `Merhaba, elinizde paylaşmak istediğiniz belgeler varsa buradan iletebilirsiniz. Kesin değerlendirme ise hastanede ilgili uzman ekibimizin fiziksel değerlendirmesi sonrasında yapılacaktır.`;
       } else if (botDel.mode === 'appointment_reschedule_request') {
-        draftMsg = `Merhaba ${patientDisplayName}, size ulaşamadığımız için randevu/görüşme zamanınızı yeniden planlamak isteriz. Size uygun yeni bir zaman paylaşabilir misiniz?`;
+        draftMsg = `Merhaba, size ulaşamadığımız için randevu/görüşme zamanınızı yeniden planlamak isteriz. Size uygun yeni bir zaman paylaşabilir misiniz?`;
       } else {
-        draftMsg = `Merhaba ${patientDisplayName}, sizinle randevu ve takip detaylarını görüşmek isteriz.`;
+        draftMsg = `Merhaba, sizinle randevu ve takip detaylarını görüşmek isteriz.`;
       }
     }
 

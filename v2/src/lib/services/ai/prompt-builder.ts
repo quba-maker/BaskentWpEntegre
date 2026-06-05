@@ -156,11 +156,29 @@ export class PromptBuilder {
         }
         if (isHealthcare) {
           crmContext += `>> KURAL: Bu kişi form lead olduğu için proaktif satış yapma. Hastanın sorularına cevap ver, bilgi iste, ama agresif upsell yapma. Hasta zaten ilgilenerek form doldurmuş — güven inşa et, bilgi ver, yönlendir.\n`;
+          crmContext += `>> KURAL (FORM LEAD ÖZEL): Form lead'ler kuruma gelme konusunda zaten ilgi göstermiş kişilerdir. Randevu yönlendirmesi yapılabilir ama baskı yapılmaz. Kararsızlık durumunda danışman/koordinasyon ekibiyle bilgilendirme amaçlı telefon görüşmesi öner.\n`;
           crmContext += `>> KURAL (OPERATÖR GÖRÜŞME DEVRALMA): Temsilci veya koordinatör zaten bu hastaya karşılama yaptıysa veya ulaştıysa (ya da greetingSent = true ise), kesinlikle yeni/ilk karşılama metnini ('Başkent Üniversitesi'nden yazıyoruz...', 'Merhaba ben asistanınız...' vb.) TEKRAR ETME. Temsilcinin kaldığı yerden, yönlendirmeye göre doğrudan devam et.\n`;
         } else {
           crmContext += `>> KURAL: Bu kişi form lead olduğu için proaktif satış yapma. Müşterinin sorularına cevap ver, bilgi iste, ama agresif satış yapma. Müşteri zaten ilgilenerek form doldurmuş — güven inşa et, bilgi ver, yönlendir.\n`;
           crmContext += `>> KURAL (OPERATÖR GÖRÜŞME DEVRALMA): Temsilci veya koordinatör zaten bu müşteriye karşılama yaptıysa veya ulaştıysa (ya da greetingSent = true ise), kesinlikle yeni/ilk karşılama metnini TEKRAR ETME. Temsilcinin kaldığı yerden, yönlendirmeye göre doğrudan devam et.\n`;
         }
+        crmContext += `-----------------------------------\n`;
+      }
+
+      // WhatsApp-only hasta belirleme (robust form lead detection — patient_known_facts hariç)
+      const hasExplicitFormSignal = !!(
+        unifiedContext.outreachContext ||
+        unifiedContext.latestForm ||
+        unifiedContext.opportunity?.resolvedFrom === 'lead_linked_active_opp' ||
+        unifiedContext.opportunity?.resolvedFrom === 'lead_id_active_opp'
+      );
+      const isFormLead = hasExplicitFormSignal;
+
+      if (!isFormLead && isHealthcare) {
+        crmContext += `\n--- WHATSAPP DOĞRUDAN HASTA KURALI ---\n`;
+        crmContext += `Bu kişi form doldurmamış, doğrudan WhatsApp'tan yazmıştır. Hakkında ön bilgi sınırlı olabilir.\n`;
+        crmContext += `>> KURAL: Daha pasif ve dinleyici ol. Önce şikayetini ve durumunu anla. Rapor/belge isteme.\n`;
+        crmContext += `>> KURAL: Kararsızlık durumunda doğrudan danışman/koordinasyon ekibiyle bilgilendirme amaçlı telefon görüşmesi öner. Fiziksel randevu baskısı minimum olmalı.\n`;
         crmContext += `-----------------------------------\n`;
       }
 
@@ -172,6 +190,8 @@ export class PromptBuilder {
     if (isHealthcare) {
       healthcareOverlay = `\n\n=== 🩺 SAĞLIK / HASTANE AKIŞ KURALLARI (HEALTHCARE OVERLAY) ===
 - Sen bir akademik hastane asistanısın. 
+- PROAKTİF RAPOR İSTEME YASAĞI: Hastadan aktif şekilde rapor, MR, tahlil, görüntüleme veya belge İSTEME. Hasta kendiliğinden gönderirse kabul et ve ilgili birime iletileceğini söyle, ama raporun tek başına yeterli olmadığını, hastanede fiziksel değerlendirme gerektiğini vurgula.
+- KARARSIZ HASTA ESKALASYONu: Hasta fiziksel randevuya net cevap vermiyorsa baskı yapma. Kurumun danışman/koordinasyon ekibiyle bilgilendirme amaçlı telefon görüşmesi planlamayı öner. Bu görüşme doktor görüşmesi, uzaktan muayene veya tıbbi değerlendirme olarak sunulamaz.
 - Fiyat Verme Yasağı: Ameliyat veya tedavi ücretlerine dair kesinlikle rakamsal bir fiyat (örn. 1000 Euro, 50000 TL) VERME. Fiyat sorulduğunda hastanın durumunun hekim ve uzman kurul tarafından değerlendirilmesi gerektiğini, fiyatın hastanede yapılacak muayene ve tetkikler sonrasında netleşeceğini belirt.
 - Teşhis Yasağı: Hastanın gönderdiği MR/tahlil/rapor veya şikayet beyanlarına göre kesinlikle tıbbi bir teşhis koyma, ilaç önerme veya tedavi süresi/günü vaat etme. Teşhis veya tıbbi değerlendirme taleplerinde tıbbi yorum yapmaktan kaçın, durumu hekim/uzman ekibimize iletip inceleteceğini söyle. Raporların hekim kuruluna iletildiğini söyleyerek güven ver.
 - Doktor Görüşmesi Sözü: Hastaya kesin bir doktor görüşme saati sözü verme, hekim ismini teyit etme, talebinin koordinasyon ekibine iletildiğini söyle.

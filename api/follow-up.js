@@ -52,36 +52,36 @@ function detectLang(text) {
 const followUpMessages = {
   tr: [
     // Kademe 0 (2 saat) — Nazik hatırlatma
-    (n, dept) => `${n ? n + ', m' : 'M'}esajımızı gördünüz mü? ${dept ? dept + ' konusunda' : 'Sağlığınızla ilgili'} sizinle konuşmak istiyoruz 🙏`,
+    (n, dept) => `Mesajımızı gördünüz mü? ${dept ? dept + ' konusunda' : 'Sağlığınızla ilgili'} sizinle konuşmak istiyoruz 🙏`,
     // Kademe 1 (6 saat) — Sosyal kanıt + değer
-    (n, dept) => `${n ? n + ', g' : 'G'}eçen ay ${dept || 'benzer şikayetle'} gelen hastalarımız tedavilerinden çok memnun kaldı. Sizin durumunuzu da değerlendirebiliriz — ücretsiz ön görüşme hakkınız var.`,
+    (n, dept) => `Geçen ay ${dept || 'benzer şikayetle'} gelen hastalarımız tedavilerinden çok memnun kaldı. Sizin durumunuzu da değerlendirebiliriz — ücretsiz ön görüşme hakkınız var.`,
     // Kademe 2 (24 saat) — Son çağrı
-    (n, dept) => `${n ? n + ', s' : 'S'}on hatırlatma 🙏 ${dept || 'Sağlık'} konusundaki ücretsiz ön değerlendirme hakkınız hala geçerli. Erken teşhis tedavi başarısını önemli ölçüde artırıyor. Bize yazmak ister misiniz?`,
+    (n, dept) => `Son hatırlatma 🙏 ${dept || 'Sağlık'} konusundaki ücretsiz ön değerlendirme hakkınız hala geçerli. Erken teşhis tedavi başarısını önemli ölçüde artırıyor. Bize yazmak ister misiniz?`,
   ],
   en: [
-    (n, dept) => `${n ? n + ', d' : 'D'}id you see our message? We'd love to discuss your ${dept || 'health'} concern 🙏`,
-    (n, dept) => `${n ? n + ', l' : 'L'}ast month, patients with similar ${dept || 'conditions'} were very satisfied with their treatment. You have a free preliminary consultation available.`,
-    (n, dept) => `${n ? n + ', f' : 'F'}inal reminder 🙏 Your free ${dept || 'health'} evaluation is still available. Early diagnosis significantly improves treatment success.`,
+    (n, dept) => `Did you see our message? We'd love to discuss your ${dept || 'health'} concern 🙏`,
+    (n, dept) => `Last month, patients with similar ${dept || 'conditions'} were very satisfied with their treatment. You have a free preliminary consultation available.`,
+    (n, dept) => `Final reminder 🙏 Your free ${dept || 'health'} evaluation is still available. Early diagnosis significantly improves treatment success.`,
   ],
   ar: [
-    (n, dept) => `${n ? n + '، ' : ''}هل رأيت رسالتنا؟ نود مناقشة حالتك ${dept ? 'في ' + dept : 'الصحية'} 🙏`,
-    (n, dept) => `${n ? n + '، ' : ''}المرضى الذين زارونا الشهر الماضي كانوا راضين جداً. لديك استشارة أولية مجانية.`,
-    (n, dept) => `${n ? n + '، ' : ''}تذكير أخير 🙏 التشخيص المبكر يحسن نتائج العلاج بشكل كبير. هل تود التواصل معنا؟`,
+    (n, dept) => `هل رأيت رسالتنا؟ نود مناقشة حالتك ${dept ? 'في ' + dept : 'الصحية'} 🙏`,
+    (n, dept) => `المرضى الذين زارونا الشهر الماضي كانوا راضين جداً. لديك استشارة أولية مجانية.`,
+    (n, dept) => `تذكير أخير 🙏 التشخيص المبكر يحسن نتائج العلاج بشكل كبير. هل تود التواصل معنا؟`,
   ],
   de: [
-    (n, dept) => `${n ? n + ', h' : 'H'}aben Sie unsere Nachricht gesehen? Wir möchten gerne über Ihr ${dept || 'Gesundheits'}anliegen sprechen 🙏`,
-    (n, dept) => `${n ? n + ', l' : 'L'}etzten Monat waren Patienten mit ähnlichen Beschwerden sehr zufrieden. Sie haben eine kostenlose Erstberatung.`,
-    (n, dept) => `${n ? n + ', l' : 'L'}etzte Erinnerung 🙏 Ihre kostenlose Bewertung ist noch verfügbar. Früherkennung verbessert den Behandlungserfolg erheblich.`,
+    (n, dept) => `Haben Sie unsere Nachricht gesehen? Wir möchten gerne über Ihr ${dept || 'Gesundheits'}anliegen sprechen 🙏`,
+    (n, dept) => `Letzten Monat waren Patienten mit ähnlichen Beschwerden sehr zufrieden. Sie haben eine kostenlose Erstberatung.`,
+    (n, dept) => `Letzte Erinnerung 🙏 Ihre kostenlose Bewertung ist noch verfügbar. Früherkennung verbessert den Behandlungserfolg erheblich.`,
   ],
   fr: [
-    (n, dept) => `${n ? n + ', a' : 'A'}vez-vous vu notre message ? Nous aimerions discuter de votre ${dept || 'santé'} 🙏`,
-    (n, dept) => `${n ? n + ', l' : 'L'}e mois dernier, des patients similaires étaient très satisfaits. Vous avez une consultation préliminaire gratuite.`,
-    (n, dept) => `${n ? n + ', d' : 'D'}ernier rappel 🙏 Votre évaluation gratuite est toujours disponible. Un diagnostic précoce améliore considérablement les résultats.`,
+    (n, dept) => `Avez-vous vu notre message ? Nous aimerions discuter de votre ${dept || 'santé'} 🙏`,
+    (n, dept) => `Le mois dernier, des patients similaires étaient très satisfaits. Vous avez une consultation préliminaire gratuite.`,
+    (n, dept) => `Dernier rappel 🙏 Votre évaluation gratuite est toujours disponible. Un diagnostic précoce améliore considérablement les résultats.`,
   ],
   ru: [
-    (n, dept) => `${n ? n + ', в' : 'В'}ы видели наше сообщение? Мы хотели бы обсудить ваш ${dept || 'вопрос здоровья'} 🙏`,
-    (n, dept) => `${n ? n + ', в' : 'В'} прошлом месяце пациенты с похожими проблемами были очень довольны лечением. У вас есть бесплатная первичная консультация.`,
-    (n, dept) => `${n ? n + ', п' : 'П'}оследнее напоминание 🙏 Ваша бесплатная оценка всё ещё доступна. Ранняя диагностика значительно улучшает результаты лечения.`,
+    (n, dept) => `Вы видели наше сообщение? Мы хотели бы обсудить ваш ${dept || 'вопрос здоровья'} 🙏`,
+    (n, dept) => `В прошлом месяце пациенты с похожими проблемами были очень довольны лечением. У вас есть бесплатная первичная консультация.`,
+    (n, dept) => `Последнее напоминание 🙏 Ваша бесплатная оценка всё ещё доступна. Ранняя диагностика значительно улучшает результаты лечения.`,
   ]
 };
 
@@ -151,15 +151,15 @@ export default async function handler(req, res) {
         greetingEn = enSet.length > 0 ? enSet[0].value : '';
       } catch(e) {}
 
-      const greeting = name ? (isTurkish ? `Merhaba ${name}!` : `Hello ${name}!`) : (isTurkish ? 'Merhaba!' : 'Hello!');
+      const greeting = isTurkish ? 'Merhaba!' : 'Hello!';
       let welcomeMsg;
       if (isTurkish) {
         welcomeMsg = greetingTr
-          ? greetingTr.replace('{isim}', name).replace('{bolum}', dept).trim()
+          ? greetingTr.replace('{isim}', '').replace('{bolum}', dept).replace(/\s+/g, ' ').replace(/\s+([.,!?])/g, '$1').trim()
           : `${greeting} Başkent Üniversitesi Konya Hastanesi'nden yazıyoruz 🙏\n\n${dept} konusunda bize ulaştığınızı gördük. Şikayetiniz ne zamandır devam ediyor?\n\nDurumunuzu daha iyi anlamamız için birkaç soru sormak istiyoruz, sonrasında size en uygun değerlendirmeyi sunalım.`;
       } else {
         welcomeMsg = greetingEn
-          ? greetingEn.replace('{name}', name).replace('{department}', dept).trim()
+          ? greetingEn.replace('{name}', '').replace('{department}', dept).replace(/\s+/g, ' ').replace(/\s+([.,!?])/g, '$1').trim()
           : `${greeting} We're reaching out from Başkent University Konya Hospital 🙏\n\nWe noticed your interest in ${dept}. How long have you been experiencing this issue?\n\nWe'd like to understand your situation better so we can recommend the best course of action for you.`;
       }
 
@@ -394,11 +394,11 @@ export default async function handler(req, res) {
       
       let reminderMsg = null;
       if (daysUntil === 3) {
-        reminderMsg = `${name ? name + ', r' : 'R'}andevunuza 3 gün kaldı 📅\n\n📍 Başkent Üniversitesi Konya Hastanesi\n🕒 ${dateStr}\n\nHerhangi bir sorunuz varsa bize yazabilirsiniz 🙏`;
+        reminderMsg = `Randevunuza 3 gün kaldı 📅\n\n📍 Başkent Üniversitesi Konya Hastanesi\n🕒 ${dateStr}\n\nHerhangi bir sorunuz varsa bize yazabilirsiniz 🙏`;
       } else if (daysUntil === 1) {
-        reminderMsg = `${name ? name + ', y' : 'Y'}arın randevunuz var! 📅\n\n📍 Başkent Üniversitesi Konya Hastanesi\n🕒 ${dateStr}\n\nSizi bekliyoruz 🙏`;
+        reminderMsg = `Yarın randevunuz var! 📅\n\n📍 Başkent Üniversitesi Konya Hastanesi\n🕒 ${dateStr}\n\nSizi bekliyoruz 🙏`;
       } else if (daysUntil === 0) {
-        reminderMsg = `${name ? name + ', b' : 'B'}ugün randevunuz var! 🏥\n\n📍 Başkent Üniversitesi Konya Hastanesi\n🕒 ${dateStr}\n\nGörüşmek üzere, geçmiş olsun 🙏`;
+        reminderMsg = `Bugün randevunuz var! 🏥\n\n📍 Başkent Üniversitesi Konya Hastanesi\n🕒 ${dateStr}\n\nGörüşmek üzere, geçmiş olsun 🙏`;
       }
       
       if (reminderMsg) {
@@ -448,11 +448,11 @@ export default async function handler(req, res) {
       let recoveryMsg = null;
       
       if (days >= 28 && days <= 35) {
-        recoveryMsg = `${name ? name + ', g' : 'G'}eçen ay ${dept} konusunda bize ulaşmıştınız. Durumunuzda bir değişiklik oldu mu? Ücretsiz ön değerlendirme hakkınız hala geçerli 🙏`;
+        recoveryMsg = `Geçen ay ${dept} konusunda bize ulaşmıştınız. Durumunuzda bir değişiklik oldu mu? Ücretsiz ön değerlendirme hakkınız hala geçerli 🙏`;
       } else if (days >= 55 && days <= 65) {
-        recoveryMsg = `${name ? name + ', s' : 'S'}ağlığınız bizim için hala önemli 🙏 ${dept} konusunda uzman ekibimiz sizi değerlendirmeye hazır. İsterseniz size uygun bir zamanda sizi arayalım.`;
+        recoveryMsg = `Sağlığınız bizim için hala önemli 🙏 ${dept} konusunda uzman ekibimiz sizi değerlendirmeye hazır. İsterseniz size uygun bir zamanda sizi arayalım.`;
       } else if (days >= 85 && days <= 95) {
-        recoveryMsg = `${name ? name + ', B' : 'B'}aşkent Üniversitesi Konya Hastanesi'nden yazıyoruz. ${dept} konusundaki durumunuzu merak ettik. Sağlığınızla ilgili herhangi bir konuda yardımcı olabiliriz — bize yazmaktan çekinmeyin 🙏`;
+        recoveryMsg = `Başkent Üniversitesi Konya Hastanesi'nden yazıyoruz. ${dept} konusundaki durumunuzu merak ettik. Sağlığınızla ilgili herhangi bir konuda yardımcı olabiliriz — bize yazmaktan çekinmeyin 🙏`;
       }
       
       if (recoveryMsg && lead.ch === 'whatsapp') {
@@ -485,8 +485,7 @@ export default async function handler(req, res) {
     `;
     
     for (const ev of completed) {
-      const name = ev.patient_name || '';
-      const surveyMsg = `${name ? name + ', t' : 'T'}edavinizin tamamlandığını öğrendik! Sizin için her şey yolunda mı? 🙏\n\nDeneyiminizi 1-5 arası puanlasanız kaç verirdiniz?\n⭐ 1 — Memnun değilim\n⭐⭐ 2 — Az memnun\n⭐⭐⭐ 3 — Orta\n⭐⭐⭐⭐ 4 — Memnun\n⭐⭐⭐⭐⭐ 5 — Çok memnun\n\nGörüşleriniz bizim için çok değerli!`;
+      const surveyMsg = `Tedavinizin tamamlandığını öğrendik! Sizin için her şey yolunda mı? 🙏\n\nDeneyiminizi 1-5 arası puanlasanız kaç verirdiniz?\n⭐ 1 — Memnun değilim\n⭐⭐ 2 — Az memnun\n⭐⭐⭐ 3 — Orta\n⭐⭐⭐⭐ 4 — Memnun\n⭐⭐⭐⭐⭐ 5 — Çok memnun\n\nGörüşleriniz bizim için çok değerli!`;
       
       try {
         if (ev.ch === 'whatsapp') {

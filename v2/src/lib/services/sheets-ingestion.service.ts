@@ -364,8 +364,8 @@ export async function ingestSheetRow(params: IngestRowParams): Promise<IngestRow
 
       if (META_ACCESS_TOKEN && PHONE_NUMBER_ID && autoGreetingEnabled) {
         const isTurkish = greetingLang === 'tr' ? true : greetingLang === 'en' ? false : phone1.startsWith('90');
-        const displayName = tenantName || 'Ekibimiz';
-        const greeting = name ? (isTurkish ? `Merhaba ${name}!` : `Hello ${name}!`) : (isTurkish ? 'Merhaba!' : 'Hello!');
+                const displayName = tenantName || 'Ekibimiz';
+        const greeting = isTurkish ? 'Merhaba!' : 'Hello!';
         const welcomeMsg = isTurkish
           ? `${greeting} ${displayName} olarak size yazıyoruz 🙏\n\nDoldurduğunuz form bize ulaştı. Talebiniz hakkında detaylı bilgi alabilir miyiz?`
           : `${greeting} We are reaching out from ${displayName} 🙏\n\nWe received your form. Could you provide more details about your request?`;
