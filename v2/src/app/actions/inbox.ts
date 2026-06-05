@@ -5,10 +5,10 @@ import { logAudit } from "@/lib/audit";
 import { enqueueRetry } from "@/lib/retry";
 import { CredentialsService } from "@/lib/services/credentials.service";
 import { PatientNameSyncService } from "@/lib/services/patient-name-sync";
-import { resolvePatientDisplayName } from "@/lib/utils/patient-name-resolver";
+import { resolvePatientDisplayName, checkNameValidity, resolvePatientNameDetailed } from "@/lib/utils/patient-name-resolver";
 import { getCountryFromPhone } from "@/lib/utils/country";
 import { extractFormFields } from "@/lib/utils/form-field-extractor";
-import { normalizeCountry, getCountryDisplayLabel } from "@/lib/utils/country-normalizer";
+import { normalizeCountry, getCountryDisplayLabel, resolvePatientCountryDetailed } from "@/lib/utils/country-normalizer";
 import { ExpectsReplyClassifier } from "@/lib/services/classification/expects-reply-classifier";
 import { normalizePhoneForIdentity, parseAllPhones } from "@/lib/utils/phone-identity";
 
@@ -335,7 +335,7 @@ export async function getConversations(page: number = 1, search: string = "", st
           }
         }
 
-        let resolvedName = resolvePatientDisplayName({
+        const detailedName = resolvePatientNameDetailed({
           oppRequesterName: r.opp_requester_name,
           oppPatientName: r.opp_patient_name,
           formRawDataName: typeof r.form_raw_data === 'string' ? (() => {
@@ -349,6 +349,9 @@ export async function getConversations(page: number = 1, search: string = "", st
           customerDisplayName: r.customer_display_name,
           whatsappProfileName: r.wa_profile_name,
           phoneFallback: r.id,
+          metadata: typeof r.opp_metadata === 'string' ? (() => {
+            try { return JSON.parse(r.opp_metadata); } catch { return {}; }
+          })() : (r.opp_metadata || {})
         });
 
         // Parse fields via new deterministic Form Field Extractor
@@ -356,46 +359,28 @@ export async function getConversations(page: number = 1, search: string = "", st
           typeof r.form_raw_data === 'string' ? JSON.parse(r.form_raw_data) : r.form_raw_data
         ) : null;
 
-        // Resolve country and source
-        let resolvedCountry = null;
-        let countrySource: 'confirmed' | 'form' | 'phone_prefix' = 'confirmed';
-        let countryConfirmationNeeded = false;
-
-        const dbCountry = r.opp_country || r.country;
-        if (dbCountry) {
-          const norm = normalizeCountry(dbCountry, r.id || r.phone_number);
-          resolvedCountry = norm.country;
-          countryConfirmationNeeded = norm.countryConfirmationNeeded;
-          countrySource = 'confirmed';
-        } else if (formExtraction?.country) {
-          const norm = normalizeCountry(formExtraction.country, r.id || r.phone_number, 'form');
-          resolvedCountry = norm.country;
-          countryConfirmationNeeded = norm.countryConfirmationNeeded;
-          countrySource = 'form';
-        } else {
-          const phoneCountryInfo = getCountryFromPhone(r.id || r.phone_number);
-          if (phoneCountryInfo) {
-            resolvedCountry = phoneCountryInfo.name;
-            countryConfirmationNeeded = true;
-            countrySource = 'phone_prefix';
-          }
-        }
-
-        // Run UI label generator to format "tc d" or similar messy existing data cleanly
-        const countryDisplay = getCountryDisplayLabel(resolvedCountry, r.id || r.phone_number);
-        resolvedCountry = countryDisplay.display;
-        if (countryDisplay.needsConfirmation) {
-          countryConfirmationNeeded = true;
-        }
+        // Resolve country and source via unified country resolver
+        const detailedCountry = resolvePatientCountryDetailed({
+          manualCountry: r.opp_country || r.country,
+          formCountry: formExtraction?.country,
+          phoneFallback: r.id || r.phone_number,
+          metadata: typeof r.opp_metadata === 'string' ? (() => {
+            try { return JSON.parse(r.opp_metadata); } catch { return {}; }
+          })() : (r.opp_metadata || {})
+        });
 
         const resolvedDepartment = r.opp_department || r.department || null;
 
         return {
           ...r,
-          name: resolvedName,
-          country: resolvedCountry,
-          country_source: countrySource,
-          country_confirmation_needed: countryConfirmationNeeded,
+          name: detailedName.displayName,
+          name_source: detailedName.nameSource,
+          name_confidence: detailedName.nameConfidence,
+          name_confirmation_needed: detailedName.nameConfirmationNeeded,
+          country: detailedCountry.displayCountry,
+          country_source: detailedCountry.countrySource,
+          country_confirmation_needed: detailedCountry.countryConfirmationNeeded,
+          country_conflict: detailedCountry.conflict || null,
           department: resolvedDepartment,
           formDepartment: formExtraction?.department || null,
           formComplaint: formExtraction?.complaint || null,
@@ -1316,10 +1301,28 @@ export async function updateCrmData(phone: string, stage: string, department: st
   return withActionGuard(
     { actionName: 'updateCrmData' },
     async (ctx) => {
+      // 1. Validate Patient Name
+      if (patientName && patientName.trim()) {
+        const val = checkNameValidity(patientName);
+        if (!val.isValid) {
+          return { success: false, error: `Bu değer kullanıcı adı gibi görünüyor, gerçek ad olarak kaydedilemez: ${val.reason}` };
+        }
+      }
+
+      // 2. Validate/Normalize Country
+      let normCountry = country ? (normalizeCountry(country, phone).country || country) : null;
+      if (country !== undefined && country !== null && country.trim()) {
+        const val = normalizeCountry(country, phone);
+        if (!val.country || val.countryConfidence === 'low') {
+          return { success: false, error: "Ülke net değil, lütfen listeden seçin." };
+        }
+        normCountry = val.country;
+      }
+
       // Systemic Patient Name Sync (Propagates validated name updates to all opportunities, conversations, and leads)
       if (patientName && patientName.trim()) {
         try {
-          await PatientNameSyncService.syncName(ctx.db, phone, patientName);
+          await PatientNameSyncService.syncName(ctx.db, phone, patientName, true);
         } catch (syncErr) {
           console.error("Failed to sync patient name in updateCrmData:", syncErr);
         }
@@ -1327,13 +1330,20 @@ export async function updateCrmData(phone: string, stage: string, department: st
 
       // P1B: Update active opportunity FIRST (source of truth), then mirror to conversation
       let conversationId: string | undefined;
+      let activeOppId: string | undefined;
+      let warning: string | undefined;
+
       try {
         const convRows = await ctx.db.executeSafe({
           text: `SELECT id, active_opportunity_id FROM conversations WHERE phone_number = $1 AND tenant_id = $2 LIMIT 1`,
           values: [phone, ctx.tenantId]
         });
         conversationId = convRows[0]?.id;
-        const activeOppId = convRows[0]?.active_opportunity_id;
+        activeOppId = convRows[0]?.active_opportunity_id;
+
+        if (!activeOppId) {
+          warning = 'kilit_kalici_uygulanamadi';
+        }
 
         // Update active opportunity if exists
         if (activeOppId) {
@@ -1347,7 +1357,7 @@ export async function updateCrmData(phone: string, stage: string, department: st
           }
           if (country !== undefined && country) {
             oppUpdateFields.push(`country = $${oppIdx++}`);
-            oppValues.push(country);
+            oppValues.push(normCountry || country);
           }
           if (patientName !== undefined && patientName !== null) {
             oppUpdateFields.push(`patient_name = $${oppIdx++}`);
@@ -1355,10 +1365,22 @@ export async function updateCrmData(phone: string, stage: string, department: st
           }
 
           // Add manual lock metadata to prevent extractor overrides
-          if (department || (country !== undefined && country)) {
-            const lockObj: Record<string, boolean> = {};
-            if (department) lockObj.department_locked = true;
-            if (country !== undefined && country) lockObj.country_locked = true;
+          const lockObj: Record<string, any> = {};
+          if (department) {
+            lockObj.department_locked = true;
+          }
+          if (country !== undefined && country && country.trim()) {
+            lockObj.country_locked = true;
+            lockObj.country_locked_by = ctx.userId;
+            lockObj.country_locked_at = new Date().toISOString();
+          }
+          if (patientName && patientName.trim()) {
+            lockObj.name_locked = true;
+            lockObj.name_locked_by = ctx.userId;
+            lockObj.name_locked_at = new Date().toISOString();
+          }
+
+          if (Object.keys(lockObj).length > 0) {
             oppUpdateFields.push(`metadata = COALESCE(metadata, '{}'::jsonb) || $${oppIdx++}::jsonb`);
             oppValues.push(JSON.stringify(lockObj));
           }
@@ -1375,7 +1397,6 @@ export async function updateCrmData(phone: string, stage: string, department: st
       } catch (_) { /* non-blocking */ }
 
       // 1. Update conversation fields (mirror)
-      const normCountry = country ? (normalizeCountry(country, phone).country || country) : null;
       if (country !== undefined) {
         try {
           await ctx.db.executeSafe({
@@ -1455,9 +1476,14 @@ export async function updateCrmData(phone: string, stage: string, department: st
         details: { stage, department, has_notes: notes !== undefined }
       });
 
-      return { success: true };
+      return { success: true, warning };
     }
-  ).then(res => res.success ? { success: true } : { success: false });
+  ).then(res => {
+    if (res.success) {
+      return res.data || { success: true };
+    }
+    return { success: false, error: res.error };
+  });
 }
 
 export async function addTag(phone: string, tag: string) {

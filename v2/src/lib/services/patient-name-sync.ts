@@ -11,7 +11,7 @@ export class PatientNameSyncService {
    * sharing the same phone number and tenant ID. Prevents name fragmentation.
    * Null-safe, thread-safe, and validated.
    */
-  static async syncName(db: TenantDB, phoneNumber: string, newName: string): Promise<void> {
+  static async syncName(db: TenantDB, phoneNumber: string, newName: string, forceManualOverride: boolean = false): Promise<void> {
     if (!phoneNumber || !newName || !newName.trim()) return;
     const cleanName = newName.trim();
 
@@ -23,6 +23,30 @@ export class PatientNameSyncService {
 
     const cleanPhone = phoneNumber.replace(/\D/g, "");
     const last10 = cleanPhone.length > 10 ? cleanPhone.substring(cleanPhone.length - 10) : cleanPhone;
+
+    // Check if name is manually locked for this phone number
+    if (!forceManualOverride) {
+      try {
+        const lockCheck = await db.executeSafe(sql`
+          SELECT metadata FROM opportunities
+          WHERE phone_number = ${phoneNumber} AND tenant_id = ${db.tenantId}
+            AND stage NOT IN ('lost', 'not_qualified', 'arrived')
+          ORDER BY updated_at DESC
+          LIMIT 1
+        `);
+        if (lockCheck.length > 0) {
+          const metadata = typeof lockCheck[0].metadata === 'string'
+            ? JSON.parse(lockCheck[0].metadata)
+            : (lockCheck[0].metadata || {});
+          if (metadata.name_locked === true || metadata.name_locked === 'true') {
+            log.info(`[PATIENT_NAME_SYNC] Skipped sync because patient name is manually locked. Name: "${cleanName}" for phone: ${phoneNumber}`);
+            return;
+          }
+        }
+      } catch (lockErr) {
+        log.warn(`[PATIENT_NAME_SYNC] Lock check failed, proceeding safely`, { error: String(lockErr) });
+      }
+    }
 
     log.info(`[PATIENT_NAME_SYNC] Syncing validated name to "${cleanName}" for phone: ${phoneNumber}`, { tenantId: db.tenantId });
 

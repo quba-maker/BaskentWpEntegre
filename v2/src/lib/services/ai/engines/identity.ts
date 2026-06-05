@@ -349,21 +349,25 @@ export class IdentityEngine {
       // ── Step 1: Explicit active_opportunity_id from conversation ──
       let opportunity = null;
       let resolvedFrom = 'none';
+      let conversationRow = null;
 
       if (conversationId) {
         const convRows = await db.executeSafe({
-          text: `SELECT active_opportunity_id FROM conversations WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+          text: `SELECT * FROM conversations WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
           values: [conversationId, tenantId]
         }) as any[];
-        const activeOppId = convRows[0]?.active_opportunity_id;
-        if (activeOppId) {
-          const oppRows = await db.executeSafe({
-            text: `SELECT * FROM opportunities WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
-            values: [activeOppId, tenantId]
-          }) as any[];
-          if (oppRows.length > 0) {
-            opportunity = oppRows[0];
-            resolvedFrom = 'explicit_active_id';
+        if (convRows.length > 0) {
+          conversationRow = convRows[0];
+          const activeOppId = conversationRow.active_opportunity_id;
+          if (activeOppId) {
+            const oppRows = await db.executeSafe({
+              text: `SELECT * FROM opportunities WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+              values: [activeOppId, tenantId]
+            }) as any[];
+            if (oppRows.length > 0) {
+              opportunity = oppRows[0];
+              resolvedFrom = 'explicit_active_id';
+            }
           }
         }
       }
@@ -547,9 +551,26 @@ export class IdentityEngine {
            department: opportunity.department,
            travel_date: opportunity.travel_date,
            stage: opportunity.stage,
+           metadata: typeof opportunity.metadata === 'string'
+             ? JSON.parse(opportunity.metadata)
+             : (opportunity.metadata || {}),
            resolvedFrom
         } : null,
         outreachContext,
+        conversation: conversationRow ? {
+          id: conversationRow.id,
+          status: conversationRow.status,
+          patient_name: conversationRow.patient_name,
+          country: conversationRow.country,
+          department: conversationRow.department,
+          notes: conversationRow.notes,
+          wa_profile_name: conversationRow.wa_profile_name,
+          name: conversationRow.name,
+          tags: conversationRow.tags,
+          metadata: typeof conversationRow.metadata === 'string'
+            ? JSON.parse(conversationRow.metadata)
+            : (conversationRow.metadata || {})
+        } : null,
         active_task: activeTask ? {
           id: activeTask.id,
           task_type: activeTask.task_type,

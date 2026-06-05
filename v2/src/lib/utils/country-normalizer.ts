@@ -100,6 +100,174 @@ export function normalizeCountry(
   return result;
 }
 
+export interface PatientCountryContext {
+  manualCountry?: string | null;
+  oppCountry?: string | null;
+  convCountry?: string | null;
+  formCountry?: string | null;
+  phoneFallback?: string | null;
+  patientStatementCountry?: string | null;
+  aiExtractedCountry?: string | null;
+  metadata?: any;
+}
+
+export interface CountryResolution {
+  country: string | null;
+  displayCountry: string;
+  countrySource: 'manual' | 'patient_confirmed' | 'form' | 'patient_statement' | 'phone_prefix' | 'ai_extracted' | 'unknown';
+  countryConfidence: 'high' | 'medium' | 'low';
+  countryConfirmationNeeded: boolean;
+  conflict?: {
+    sources: Array<{ source: string; value: string }>;
+  };
+}
+
+/**
+ * Resolves country using a structured priority chain and performs multi-source conflict checking
+ */
+export function resolvePatientCountryDetailed(ctx?: PatientCountryContext | null): CountryResolution {
+  const fallbackRes: CountryResolution = {
+    country: null,
+    displayCountry: 'Ülke net değil',
+    countrySource: 'unknown',
+    countryConfidence: 'low',
+    countryConfirmationNeeded: false
+  };
+
+  if (ctx?.phoneFallback) {
+    const fromPhone = getCountryFromPhone(ctx.phoneFallback);
+    if (fromPhone) {
+      fallbackRes.country = fromPhone.name;
+      fallbackRes.displayCountry = `${fromPhone.name}?`;
+      fallbackRes.countrySource = 'phone_prefix';
+      fallbackRes.countryConfirmationNeeded = true;
+    }
+  }
+
+  if (!ctx) return fallbackRes;
+
+  // 1. Collect all raw source inputs to detect conflicts
+  const sourcesList: Array<{ source: string; value: string }> = [];
+  if (ctx.formCountry) {
+    const norm = normalizeCountry(ctx.formCountry, ctx.phoneFallback, 'form').country;
+    if (norm) sourcesList.push({ source: 'Form', value: norm });
+  }
+  if (ctx.phoneFallback) {
+    const fromPhone = getCountryFromPhone(ctx.phoneFallback)?.name;
+    if (fromPhone) sourcesList.push({ source: 'Telefon Prefix', value: fromPhone });
+  }
+  if (ctx.patientStatementCountry) {
+    const norm = normalizeCountry(ctx.patientStatementCountry, ctx.phoneFallback, 'patient_statement').country;
+    if (norm) sourcesList.push({ source: 'Hasta Mesajı', value: norm });
+  }
+  
+  // Scoped AI extraction fields
+  const rawAiVal = ctx.aiExtractedCountry || ctx.oppCountry || ctx.convCountry;
+  // If manual lock is active, ignore AI/Form conflict detection on manual values
+  const isLocked = ctx.metadata?.country_locked === true;
+
+  if (rawAiVal && !isLocked) {
+    const norm = normalizeCountry(rawAiVal, ctx.phoneFallback, 'ai_extracted').country;
+    if (norm) sourcesList.push({ source: 'AI / Sistem', value: norm });
+  }
+
+  // Conflict Checking Heuristic
+  const activeNormalizedCountries = sourcesList.map(s => s.value);
+  const uniqueCountries = Array.from(new Set(activeNormalizedCountries));
+  const hasConflict = uniqueCountries.length > 1;
+
+  // 2. Priority Resolution
+  // 2-A. Manual locked country
+  if (isLocked && ctx.manualCountry) {
+    const norm = normalizeCountry(ctx.manualCountry, ctx.phoneFallback).country;
+    if (norm) {
+      return {
+        country: norm,
+        displayCountry: norm,
+        countrySource: 'manual',
+        countryConfidence: 'high',
+        countryConfirmationNeeded: false
+      };
+    }
+  }
+  
+  // If manualCountry is set even without explicit metadata lock, trust it
+  if (ctx.manualCountry) {
+    const norm = normalizeCountry(ctx.manualCountry, ctx.phoneFallback).country;
+    if (norm) {
+      return {
+        country: norm,
+        displayCountry: norm,
+        countrySource: 'manual',
+        countryConfidence: 'high',
+        countryConfirmationNeeded: false
+      };
+    }
+  }
+
+  // 2-B. Form Country
+  if (ctx.formCountry) {
+    const norm = normalizeCountry(ctx.formCountry, ctx.phoneFallback, 'form');
+    if (norm.country) {
+      return {
+        country: norm.country,
+        displayCountry: norm.countryConfirmationNeeded ? `${norm.country} (Teyit Gerekli)` : norm.country,
+        countrySource: 'form',
+        countryConfidence: hasConflict ? 'low' : norm.countryConfidence,
+        countryConfirmationNeeded: norm.countryConfirmationNeeded || hasConflict,
+        conflict: hasConflict ? { sources: sourcesList } : undefined
+      };
+    }
+  }
+
+  // 2-C. Patient Statement
+  if (ctx.patientStatementCountry) {
+    const norm = normalizeCountry(ctx.patientStatementCountry, ctx.phoneFallback, 'patient_statement');
+    if (norm.country) {
+      return {
+        country: norm.country,
+        displayCountry: norm.countryConfirmationNeeded ? `${norm.country} (Teyit Gerekli)` : norm.country,
+        countrySource: 'patient_statement',
+        countryConfidence: hasConflict ? 'low' : norm.countryConfidence,
+        countryConfirmationNeeded: norm.countryConfirmationNeeded || hasConflict,
+        conflict: hasConflict ? { sources: sourcesList } : undefined
+      };
+    }
+  }
+
+  // 2-D. Phone prefix
+  if (ctx.phoneFallback) {
+    const fromPhone = getCountryFromPhone(ctx.phoneFallback);
+    if (fromPhone) {
+      return {
+        country: fromPhone.name,
+        displayCountry: `${fromPhone.name}?`,
+        countrySource: 'phone_prefix',
+        countryConfidence: hasConflict ? 'low' : 'medium',
+        countryConfirmationNeeded: true,
+        conflict: hasConflict ? { sources: sourcesList } : undefined
+      };
+    }
+  }
+
+  // 2-E. AI Extracted (not locked)
+  if (rawAiVal) {
+    const norm = normalizeCountry(rawAiVal, ctx.phoneFallback, 'ai_extracted');
+    if (norm.country) {
+      return {
+        country: norm.country,
+        displayCountry: norm.countryConfirmationNeeded ? `${norm.country} (Teyit Gerekli)` : norm.country,
+        countrySource: 'ai_extracted',
+        countryConfidence: hasConflict ? 'low' : norm.countryConfidence,
+        countryConfirmationNeeded: norm.countryConfirmationNeeded || hasConflict,
+        conflict: hasConflict ? { sources: sourcesList } : undefined
+      };
+    }
+  }
+
+  return fallbackRes;
+}
+
 /**
  * Normalizes country field for UI rendering safely.
  * Replaces messy database text values (like "tc d") with clean display strings.
@@ -108,24 +276,13 @@ export function getCountryDisplayLabel(
   countryName: string | null | undefined,
   phone?: string | null
 ): { display: string; needsConfirmation: boolean } {
-  if (!countryName || !countryName.trim()) {
-    if (phone) {
-      const fromPhone = getCountryFromPhone(phone);
-      if (fromPhone) {
-        return { display: `${fromPhone.name}?`, needsConfirmation: true };
-      }
-    }
-    return { display: 'Ülke net değil', needsConfirmation: false };
-  }
+  const detailed = resolvePatientCountryDetailed({
+    manualCountry: countryName,
+    phoneFallback: phone
+  });
 
-  const norm = normalizeCountry(countryName, phone);
-  if (!norm.country) {
-    return { display: 'Ülke net değil', needsConfirmation: false };
-  }
-
-  if (norm.countryConfirmationNeeded) {
-    return { display: `${norm.country} (Teyit Gerekli)`, needsConfirmation: true };
-  }
-
-  return { display: norm.country, needsConfirmation: false };
+  return {
+    display: detailed.displayCountry,
+    needsConfirmation: detailed.countryConfirmationNeeded
+  };
 }

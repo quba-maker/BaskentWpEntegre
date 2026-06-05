@@ -179,8 +179,34 @@ export class ConversationService {
         mergedTags = Array.from(new Set([...mergedTags, ...data.tags]));
       }
 
+      // Check for manual locks in active opportunity metadata
+      let nameLocked = false;
+      let countryLocked = false;
+      try {
+        const lockCheck = await this.db.executeSafe(sql`
+          SELECT metadata FROM opportunities
+          WHERE phone_number = ${phoneNumber} AND tenant_id = ${this.db.tenantId}
+            AND stage NOT IN ('lost', 'not_qualified', 'arrived')
+          ORDER BY updated_at DESC
+          LIMIT 1
+        `);
+        if (lockCheck.length > 0) {
+          const metadata = typeof lockCheck[0].metadata === 'string'
+            ? JSON.parse(lockCheck[0].metadata)
+            : (lockCheck[0].metadata || {});
+          if (metadata.name_locked === true || metadata.name_locked === 'true') {
+            nameLocked = true;
+          }
+          if (metadata.country_locked === true || metadata.country_locked === 'true') {
+            countryLocked = true;
+          }
+        }
+      } catch (lockErr) {
+        this.log.warn(`[CONV_CRM_UPDATE] Lock check failed`, { error: String(lockErr) });
+      }
+
       // Systemic Patient Name Sync (Propagates validated name updates to all opportunities, conversations, and leads)
-      if (data.patientName && data.patientName.trim()) {
+      if (data.patientName && data.patientName.trim() && !nameLocked) {
         try {
           await PatientNameSyncService.syncName(this.db, phoneNumber, data.patientName);
         } catch (syncErr) {
@@ -188,14 +214,24 @@ export class ConversationService {
         }
       }
 
-      this.log.info(`[CONV_CRM_UPDATE] input`, { phone: phoneNumber, rawCountry: data.country, normalized: normalizedCountry, department: data.department, stage: data.pipelineStage });
+      this.log.info(`[CONV_CRM_UPDATE] input`, { phone: phoneNumber, rawCountry: data.country, nameLocked, countryLocked, normalized: normalizedCountry, department: data.department, stage: data.pipelineStage });
+
+      const finalNameVal = nameLocked ? null : (data.patientName || null);
+      const finalCountryVal = countryLocked ? null : normalizedCountry;
 
       // Update non-stage fields directly (country, department, name, tags)
       await this.db.executeSafe(sql`
         UPDATE conversations 
         SET 
-          patient_name = CASE WHEN ${data.newIdentityDetected || false} = true THEN ${data.patientName || null} ELSE COALESCE(${data.patientName || null}, patient_name) END,
-          country = COALESCE(${normalizedCountry}, country),
+          patient_name = CASE 
+            WHEN ${nameLocked} = true THEN patient_name
+            WHEN ${data.newIdentityDetected || false} = true THEN ${finalNameVal} 
+            ELSE COALESCE(${finalNameVal}, patient_name) 
+          END,
+          country = CASE
+            WHEN ${countryLocked} = true THEN country
+            ELSE COALESCE(${finalCountryVal}, country)
+          END,
           department = COALESCE(${data.department || null}, department),
           tags = ${JSON.stringify(mergedTags)}::jsonb
         WHERE phone_number = ${phoneNumber} AND tenant_id = ${this.db.tenantId}

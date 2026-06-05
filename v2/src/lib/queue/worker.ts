@@ -1781,6 +1781,7 @@ export class QueueWorkerEngine {
 
     if (!unifiedContext) unifiedContext = {};
     unifiedContext.quotedContext = mediaMetadata?.native?.quoted_message_snapshot || null;
+    unifiedContext.history = history;
 
     // 6. Build System Prompt & History strictly via TenantBrain
     let systemPromptText = PromptBuilder.buildSystemPrompt(brain, targetPhase, false, unifiedContext);

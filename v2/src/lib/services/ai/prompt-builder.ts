@@ -3,6 +3,8 @@ import { defaultPrompts } from '../../domain/conversation/prompts';
 import { SecurityIsolationError } from '../../security/tenant-firewall';
 import { telemetry } from '../../observability/telemetry';
 import { buildTimeContext } from '@/lib/utils/timezone';
+import { resolvePatientNameDetailed } from '@/lib/utils/patient-name-resolver';
+import { resolvePatientCountryDetailed } from '@/lib/utils/country-normalizer';
 
 export class PromptBuilder {
   /**
@@ -360,6 +362,127 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/koordinatör arasında planlanan
       directiveContext += `====================================================================\n`;
     }
 
-    return `${base}\n${crmContext}\n${healthcareOverlay}\n${knowledgeInjection}\n${timeContext}\n${confirmationContext}\n${phaseContext}\n${langContextText}\n${directiveContext}\n${safetyGuardrails}`;
+    // ═══ IDENTITY & COUNTRY CONFIRMATION GATES (A1.8-3) ═══
+    let confirmationDirective = '';
+    try {
+      if (unifiedContext) {
+        const r = unifiedContext;
+        
+        // 1. Prepare PatientNameContext
+        const nameCtx = {
+          oppRequesterName: r.opportunity?.requester_name || null,
+          oppPatientName: r.opportunity?.patient_name || null,
+          formRawDataName: r.latestForm?.data ? (() => {
+            try {
+              const parsed = typeof r.latestForm.data === 'string' ? JSON.parse(r.latestForm.data) : r.latestForm.data;
+              return parsed.full_name || parsed['full name'] || parsed['Full Name'] || null;
+            } catch { return null; }
+          })() : null,
+          formPatientName: r.latestForm?.data?.full_name || null,
+          convPatientName: r.conversation?.patient_name || r.conversation?.name || null,
+          customerDisplayName: r.profile ? [r.profile.first_name, r.profile.last_name].filter(Boolean).join(' ') : null,
+          whatsappProfileName: r.conversation?.wa_profile_name || null,
+          phoneFallback: r.profile?.primary_phone || null,
+          metadata: r.opportunity?.metadata || {}
+        };
+
+        const detailedName = resolvePatientNameDetailed(nameCtx);
+
+        // 2. Prepare PatientCountryContext
+        const formCountryVal = r.latestForm?.data ? (() => {
+          try {
+            const parsed = typeof r.latestForm.data === 'string' ? JSON.parse(r.latestForm.data) : r.latestForm.data;
+            const countryKey = ['ulke', 'ülke', 'country', 'nerede_yaşıyorsunuz'].find(k => k in parsed);
+            return countryKey ? parsed[countryKey] : null;
+          } catch { return null; }
+        })() : null;
+
+        const detailedCountry = resolvePatientCountryDetailed({
+          manualCountry: r.opportunity?.country || r.conversation?.country || null,
+          formCountry: formCountryVal,
+          phoneFallback: r.profile?.primary_phone || null,
+          metadata: r.opportunity?.metadata || {}
+        });
+
+        // 3. Evaluate Guardrails
+        const isHumanMode = r.conversation?.status === 'human';
+        const nameLocked = r.opportunity?.metadata?.name_locked === true;
+        const countryLocked = r.opportunity?.metadata?.country_locked === true;
+        
+        const userMessages = (r.history || [])
+          .filter((m: any) => m.role === 'user')
+          .slice(-3);
+
+        const mentionsName = (text: string) => {
+          const lower = text.toLowerCase();
+          return ['adım', 'ismim', 'adımın', 'ismimin', 'benim adım', 'benim ismim', 'ben ...', 'adım ', 'ismim '].some(kw => lower.includes(kw));
+        };
+
+        const mentionsCountry = (text: string) => {
+          const lower = text.toLowerCase();
+          const countryKeywords = [
+            'türkiye', 'turkiye', 'turkıye', 'almanya', 'germany', 'deutschland', 'fransa', 'france',
+            'ingiltere', 'england', 'united kingdom', 'uk', 'hollanda', 'netherlands', 'belçika', 'belgium',
+            'isviçre', 'switzerland', 'avusturya', 'austria', 'yaşıyorum', 'yasiyorum', 'yaşarım', 'yasarim',
+            'ülkem', 'ulkem', 'ülke', 'ulke'
+          ];
+          return countryKeywords.some(kw => lower.includes(kw));
+        };
+
+        const patientGaveNameInLast3 = userMessages.some((m: any) => mentionsName(m.content));
+        const patientGaveCountryInLast3 = userMessages.some((m: any) => mentionsCountry(m.content));
+
+        const assistantMessages = (r.history || [])
+          .filter((m: any) => m.role === 'assistant');
+
+        const askedNameRecently = assistantMessages.some((m: any) => {
+          const lower = m.content.toLowerCase();
+          return ['adınız', 'isminiz', 'adınızı', 'isminizi', 'adını öğrenebilir'].some(kw => lower.includes(kw));
+        });
+
+        const askedCountryRecently = assistantMessages.some((m: any) => {
+          const lower = m.content.toLowerCase();
+          return ['yaşadığınız ülke', 'hangi ülkede', 'ülkenizi öğrenebilir', 'nerede yaşıyorsunuz'].some(kw => lower.includes(kw));
+        });
+
+        const isTerminalStage = ['lost', 'not_interested', 'arrived', 'terminal', 'not_qualified'].includes(r.opportunity?.stage || '');
+
+        const hasOptOutKeyword = (r.history || []).some((m: any) => {
+          if (m.role !== 'user') return false;
+          const lower = m.content.toLowerCase();
+          return ["opt-out", "istemiyorum", "rahatsız etmeyin", "listeden çıkar", "iptal", "stop", "mesaj atmayın", "üye olmak istemiyorum"].some(kw => lower.includes(kw));
+        });
+
+        // Resolve decision flags
+        const shouldAskName = detailedName.nameConfirmationNeeded && !nameLocked && !patientGaveNameInLast3 && !askedNameRecently && !isTerminalStage && !hasOptOutKeyword && !isHumanMode;
+        const shouldAskCountry = detailedCountry.countryConfirmationNeeded && !countryLocked && !patientGaveCountryInLast3 && !askedCountryRecently && !isTerminalStage && !hasOptOutKeyword && !isHumanMode;
+
+        if (shouldAskName || shouldAskCountry) {
+          confirmationDirective += `\n\n=== ⚠️ HASTA KİMLİK / ÜLKE BİLGİSİ DOĞRULAMA TALİMATI ===\n`;
+          confirmationDirective += `Hastanın kayıtlarında eksik veya teyit edilmesi gereken bilgiler bulunmaktadır. Doğal konuşma akışında bu bilgileri hastadan talep etmelisin.\n`;
+
+          if (shouldAskName && shouldAskCountry) {
+            confirmationDirective += `- TALEP: Hem HASTA ADI hem de YAŞADIĞI ÜLKE eksik veya teyit gerekli. Doğal bir şekilde adını ve hangi ülkede yaşadığını sor.\n`;
+            confirmationDirective += `- Örnek Doğal Cümle: "Size daha doğru yardımcı olabilmem için adınızı ve hangi ülkede yaşadığınızı öğrenebilir miyim?"\n`;
+          } else if (shouldAskName) {
+            confirmationDirective += `- TALEP: HASTA ADI eksik veya teyit gerekli. Doğal bir şekilde adını sor.\n`;
+            confirmationDirective += `- Örnek Doğal Cümle: "Size daha doğru yardımcı olabilmem için adınızı öğrenebilir miyim?"\n`;
+          } else if (shouldAskCountry) {
+            confirmationDirective += `- TALEP: YAŞADIĞI ÜLKE eksik veya teyit gerekli. Doğal bir şekilde hangi ülkede yaşadığını sor.\n`;
+            confirmationDirective += `- Örnek Doğal Cümle: "Size daha doğru yardımcı olabilmem için hangi ülkede yaşadığınızı öğrenebilir miyim?"\n`;
+          }
+
+          confirmationDirective += `⚠️ KRİTİK KURALLAR:\n`;
+          confirmationDirective += `1. Eğer hasta tıbbi veya medikal bir soru sorduysa, kesinlikle doğrudan isim/ülke sorma. ÖNCE hastanın sorusuna kısa ve güven verici bir tıbbi yönlendirme cevabı ver, ARDINDAN isim/ülke bilgisini sor. (Örn: "Bu konuda sizi ilgili birime yönlendirebiliriz. Size doğru yardımcı olabilmemiz için adınızı ve hangi ülkede yaşadığınızı öğrenebilir miyim?")\n`;
+          confirmationDirective += `2. Asla proaktif outbound/spam şeklinde sorma, sadece hasta zaten yazdıysa doğal bir yanıtın parçası olarak sor.\n`;
+          confirmationDirective += `3. Robotik veya kalıp şeklinde ("Adınız nedir?", "Ülkenizi söyleyin") sorma. Cümlelerin kibar, kurumsal ve akıcı olsun.\n`;
+          confirmationDirective += `=======================================================\n`;
+        }
+      }
+    } catch (err) {
+      // Non-fatal, prevent crashing during prompt build
+    }
+
+    return `${base}\n${crmContext}\n${healthcareOverlay}\n${knowledgeInjection}\n${timeContext}\n${confirmationContext}\n${phaseContext}\n${langContextText}\n${directiveContext}\n${confirmationDirective}\n${safetyGuardrails}`;
   }
 }

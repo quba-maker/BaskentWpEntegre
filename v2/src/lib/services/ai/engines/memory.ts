@@ -268,21 +268,9 @@ Hastanın bulunduğu ülke için saat dilimi doğrulanmamıştır (şehir/eyalet
         log.info(`[MEMORY_OPP_SYNC] Active opportunity ${activeOppId} CRM summary updated (${crmSummary.length} chars)`);
       }
 
-      // 6. P1B: Conditional conversations.notes write
-      // Only update if: notes is empty OR notes matches previous AI summary (not manually edited)
-      const isNotesEmpty = !currentNotes || currentNotes.trim() === '';
-      const isNotesSameAsOldSummary = currentNotes.trim() === currentOppSummary.trim();
-      const shouldUpdateNotes = isNotesEmpty || isNotesSameAsOldSummary;
-      
-      if (shouldUpdateNotes) {
-        await db.executeSafe({
-          text: `UPDATE conversations SET notes = $1 WHERE id::text = $2::text AND tenant_id = $3;`,
-          values: [crmSummary, conversationId, tenantId]
-        });
-        log.info(`[MEMORY_NOTES_SYNC] conversations.notes updated (was ${isNotesEmpty ? 'empty' : 'AI-managed'})`);
-      } else {
-        log.info(`[MEMORY_NOTES_SKIP] conversations.notes preserved (manual notes detected, ${currentNotes.length} chars)`);
-      }
+      // 6. [DISABLED] conversations.notes is now strictly coordinator-only.
+      // AI summaries are stored in opportunities.summary and should never overwrite or mix with manual notes.
+      log.info(`[MEMORY_NOTES_SKIP] conversations.notes sync disabled for Phase A1.8 (strictly coordinator manual notes)`);
 
       // 7. Sync to matching leads + Google Sheets
       try {
