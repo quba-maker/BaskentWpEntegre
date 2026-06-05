@@ -825,6 +825,16 @@ const handleBulkArchive = async (archive: boolean) => {
                         {c.isArchived && (
                           <span className="ml-1.5 text-[11px] select-none flex-shrink-0" title="Arşivlenmiş">📁</span>
                         )}
+                        {/* Country Flag & Full Name */}
+                        {country && (
+                          <span 
+                            className="ml-2 inline-flex items-center gap-1 text-[10px] font-medium text-slate-500 flex-shrink-0 max-w-[120px] truncate"
+                            title={`${country.name}${isEstimated ? ' (Tahmini)' : ''}`}
+                          >
+                            <span>{country.flag}</span>
+                            <span className="truncate">{country.name}</span>
+                          </span>
+                        )}
                       </div>
 
                       {/* Message Preview Row */}
@@ -846,7 +856,7 @@ const handleBulkArchive = async (archive: boolean) => {
                         </span>
                       </p>
 
-                      {/* Status Badges Row (No reply, Bot status) */}
+                      {/* Status Badges Row (No reply, Bot status, Pipeline Stage) */}
                       <div className="flex flex-wrap items-center gap-1.5 mt-2 w-full select-none">
                         {/* No Reply / Follow up alerts */}
                         {c.is_no_reply_eligible && (
@@ -881,39 +891,25 @@ const handleBulkArchive = async (archive: boolean) => {
                             <User className="w-3 h-3" /> Manuel
                           </span>
                         )}
-                      </div>
-                    </div>
 
-                    {/* Right Column: Time, Unread, Pin & Chevron Dropdown */}
-                    <div className="relative flex flex-col items-end justify-between self-stretch shrink-0 select-none min-h-[60px] text-right ml-2 gap-1.5">
-                      {/* Top: Badges & Time Row */}
-                      <div className="flex items-center gap-1.5 justify-end w-full">
                         {/* Pipeline Stage */}
                         <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-50 text-gray-600 border border-gray-200 shadow-sm flex-shrink-0">
                           {stageLabel(c.stage)}
                         </span>
-
-                        {/* Country Flag & Full Name */}
-                        {country && (
-                          <span 
-                            className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-50 text-slate-600 border border-slate-200 shadow-sm max-w-[120px] truncate flex-shrink-0"
-                            title={`${country.name}${isEstimated ? ' (Tahmini)' : ''}`}
-                          >
-                            <span>{country.flag}</span>
-                            <span className="truncate hidden sm:inline">{country.name}</span>
-                          </span>
-                        )}
-
-                        {/* Time */}
-                        <span 
-                          className={`text-[10px] tracking-wide whitespace-nowrap transition-all duration-150 pr-7 md:pr-0 md:group-hover:opacity-0 md:group-focus-within:opacity-0 ${
-                            c.unread > 0 ? "font-bold text-[#007AFF]" : "font-semibold text-gray-500"
-                          }`}
-                          style={{ color: c.unread > 0 ? "var(--q-blue, #007AFF)" : "var(--q-text-secondary)" }}
-                        >
-                          {c.formattedTime}
-                        </span>
                       </div>
+                    </div>
+
+                    {/* Right Column: Time, Unread, Pin & Chevron Dropdown */}
+                    <div className="relative flex flex-col items-end justify-between self-stretch shrink-0 w-16 select-none min-h-[60px] text-right">
+                      {/* Top: Time */}
+                      <span 
+                        className={`text-[10px] tracking-wide whitespace-nowrap transition-all duration-150 pr-7 md:pr-0 md:group-hover:opacity-0 md:group-focus-within:opacity-0 ${
+                          c.unread > 0 ? "font-bold text-[#007AFF]" : "font-semibold text-gray-500"
+                        }`}
+                        style={{ color: c.unread > 0 ? "var(--q-blue, #007AFF)" : "var(--q-text-secondary)" }}
+                      >
+                        {c.formattedTime}
+                      </span>
                       
                       {/* Middle: Chevron Dropdown Trigger */}
                       <button
