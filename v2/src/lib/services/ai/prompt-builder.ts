@@ -72,20 +72,35 @@ export class PromptBuilder {
 
     // IDENTITY & BEHAVIORAL CONTEXT (Dynamic CRM Injection)
     let crmContext = '';
+    let currentTurnMentionsReportTopic = false;
+    let currentTurnHasReportEvidence = false;
+    let currentMessageTextLower = '';
+
     if (unifiedContext) {
+      currentMessageTextLower = (unifiedContext.currentMessageText || '').toLowerCase().trim();
       crmContext += `\n\n=== MÜŞTERİ BAĞLAMI (DİNAMİK CRM VERİSİ) ===\n`;
       crmContext += `Aşağıdaki bilgiler müşterinin sisteme kayıtlı güncel verileridir ve senaryo sırasında bu bilgileri AKTİF OLARAK KULLANMALISIN.\n`;
 
       if (isHealthcare) {
-        const currentMessageText = unifiedContext.currentMessageText || '';
         const currentMessageMediaType = unifiedContext.currentMessageMediaType || null;
-        const currentMessageTextLower = currentMessageText.toLowerCase();
+        const hasAttachment = currentMessageMediaType === 'document' || currentMessageMediaType === 'image';
         
-        const textMentionsReport = ['rapor', 'mr', 'tahlil', 'tetkik', 'görüntüleme', 'dosya', 'belge', 'epikriz', 'sonuç'].some(kw => currentMessageTextLower.includes(kw));
-        const currentTurnHasReportEvidence = 
-          currentMessageMediaType === 'document' || 
-          currentMessageMediaType === 'image' || 
-          textMentionsReport;
+        const reportKeywords = ['rapor', 'mr', 'tahlil', 'tetkik', 'görüntü', 'dosya', 'belge', 'epikriz', 'sonuç'];
+        const actionKeywords = ['gönderdim', 'attım', 'yükledim', 'paylaştım', 'ilettim', 'yolladım', 'paylastım', 'yoladım'];
+        const negationsAndQuestions = [
+          'göndermedim', 'atmadım', 'yüklemedim', 'paylaşmadım', 'iletmedim', 'yollamadım',
+          'göndereyim mi', 'atayım mı', 'yükleyeyim mi', 'paylaşayım mı', 'ileteyim mi', 'yollayayım mı',
+          'göndereyimmi', 'atayımmi', 'yükleyeyimmi', 'paylaşayımmi', 'ileteyimmi', 'yollayayımmi',
+          'göndermediniz', 'iletmediniz', 'atmadınız', 'yüklemediniz', 'gönderdiniz mi', 'gönderdinizmi',
+          'hangi', 'nerede', 'nerde', 'yok', 'var mı', 'varmi', 'istemiyorum', 'yasak', 'bakılmayacaktı'
+        ];
+
+        currentTurnMentionsReportTopic = reportKeywords.some(kw => currentMessageTextLower.includes(kw));
+        const mentionsAction = actionKeywords.some(kw => currentMessageTextLower.includes(kw));
+        const containsNegationOrQuestion = negationsAndQuestions.some(kw => currentMessageTextLower.includes(kw));
+
+        const hasTextualEvidence = currentTurnMentionsReportTopic && mentionsAction && !containsNegationOrQuestion;
+        currentTurnHasReportEvidence = hasAttachment || hasTextualEvidence;
 
         crmContext += `\n--- ⚠️ RAPOR KANITI (REPORT EVIDENCE FOR THIS TURN) ---\n`;
         crmContext += `- Bu görüşme turunda (current turn) hastanın rapor/belge paylaştığına dair veri/kanıt: ${currentTurnHasReportEvidence ? 'VAR' : 'YOK'}\n`;
@@ -208,7 +223,7 @@ export class PromptBuilder {
 - Sen bir akademik hastane asistanısın. 
 - PROAKTİF RAPOR İSTEME YASAĞI: Hastadan aktif şekilde rapor, MR, tahlil, görüntüleme veya belge İSTEME. Hasta kendiliğinden gönderirse kabul et ve ilgili birime iletileceğini söyle, ama raporun tek başına yeterli olmadığını, hastanede fiziksel değerlendirme gerektiğini vurgula.
 - RAPOR VARSAYIMI YAPMA YASAĞI: Müşteri/hasta en son mesajında/media context'inde belge veya rapor göndermediyse (veya açıkça "rapor gönderdim" diyerek sistemde medya ulaştığı belirtilmediyse), geçmiş CRM/AI summary veya memory kayıtlarında "rapor gönderildi" bilgisi geçse dahi "gönderdiğiniz rapor", "raporunuz", "raporunuz inceleniyor/değerlendiriliyor" gibi ifadeler KULLANMA. Rapor varsayımı yapma!
-- BOT ELEŞTİRİSİ VE SAVUNMASIZ DÜZELTME KURALI: Hasta botu veya asistanı düzelttiğinde ya da "yasak", "bunu söylemen yasak", "rapor göndermedim", "inceleyecek deme", "hangi rapor" gibi itirazlarda bulunduğunda, asla uzun açıklamalar, robotik ve savunmacı cümleler ("teşhis koymak benim yetkimde değil", "dikkatli olmamız gerekir" vb.) kurma. Doğrudan "Haklısınız, yanlış ifade ettim. Rapor yorumu yapmadan ilerleyelim. Doğru değerlendirme hastanede yapılır, dilerseniz geliş/randevu planınızı netleştirelim." şeklinde kısa ve net düzeltme yaparak konuya dön.
+- BOT ELEŞTİRİSİ VE SAVUNMASIZ DÜZELTME KURALI: Hasta botu veya asistanı düzelttiğinde ya da "yasak", "bunu söylemen yasak", "rapor göndermedim", "inceleyecek deme", "hangi rapor" gibi itirazlarda bulunduğunda, asla uzun açıklamalar, robotik ve savunmacı cümleler ("teşhis koymak benim yetkimde değil", "dikkatli olmamız gerekir" vb.) kurma. Doğrudan "Haklısınız, rapor varsayımı yapmayalım. WhatsApp üzerinden tıbbi yorum yapmadan ilerleyelim. İsterseniz geliş/randevu sürecinizi netleştirebiliriz." şeklinde kısa ve net düzeltme yaparak konuya dön. Adını sorma, tartışmaya girme.
 - TÜRKÇE SADELİK VE GRAMER KURALLARI: Cümlelerinde peş peşe sahiplik/üyelik ekleri yığma (örn. "süreciniziniz", "raporunuzun", "şikayetleriniz hakkında" gibi kelimeleri arka arkaya kullanma). "hastanemizin ilgili uzman ekibinizin" gibi hatalı tamlamalar yapma. Özellikle düzeltme/itiraz cevapları en fazla 2-3 kısa cümle olmalı, yalın ve temiz bir Türkçe ile yazılmalıdır.
 - HASTA-FACING YASAKLI İFADELER: Aşağıdaki ifadelerin hasta-facing mesajlarında kullanılması kesinlikle yasaktır:
   * "gönderdiğiniz raporunuz değerlendiriliyor"
@@ -499,8 +514,10 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/koordinatör arasında planlanan
         });
 
         // Resolve decision flags
-        const shouldAskName = detailedName.nameConfirmationNeeded && !nameLocked && !patientGaveNameInLast3 && !askedNameRecently && !isTerminalStage && !hasOptOutKeyword && !isHumanMode;
-        const shouldAskCountry = detailedCountry.countryConfirmationNeeded && !countryLocked && !patientGaveCountryInLast3 && !askedCountryRecently && !isTerminalStage && !hasOptOutKeyword && !isHumanMode;
+        const isCorrectionTurn = isHealthcare && (currentTurnMentionsReportTopic || ['yasak', 'doğru değil', 'yalan', 'yanlış', 'bot', 'asistan', 'yapma', 'söyleme', 'hata'].some(kw => currentMessageTextLower.includes(kw))) && !currentTurnHasReportEvidence;
+
+        const shouldAskName = detailedName.nameConfirmationNeeded && !nameLocked && !patientGaveNameInLast3 && !askedNameRecently && !isTerminalStage && !hasOptOutKeyword && !isHumanMode && !isCorrectionTurn;
+        const shouldAskCountry = detailedCountry.countryConfirmationNeeded && !countryLocked && !patientGaveCountryInLast3 && !askedCountryRecently && !isTerminalStage && !hasOptOutKeyword && !isHumanMode && !isCorrectionTurn;
 
         if (shouldAskName || shouldAskCountry) {
           confirmationDirective += `\n\n=== ⚠️ HASTA KİMLİK / ÜLKE BİLGİSİ DOĞRULAMA TALİMATI ===\n`;
