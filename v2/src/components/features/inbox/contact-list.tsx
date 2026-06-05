@@ -46,38 +46,76 @@ interface InitialsAvatarProps {
   name: string;
   channel: string;
   unread: number;
+  lastMessageDirection?: string | null;
+  lastMessageModel?: string | null;
 }
 
-function InitialsAvatar({ name, channel, unread }: InitialsAvatarProps) {
+function InitialsAvatar({ name, channel, unread, lastMessageDirection, lastMessageModel }: InitialsAvatarProps) {
   const initials = getInitials(name);
   const bgColor = getInitialsColor(name);
 
-  // Overlay channel color badge
-  const channelColors: Record<string, string> = {
-    whatsapp: "#25D366", // WhatsApp Green
-    instagram: "#E1306C", // Instagram Pink/Purple
-    messenger: "#1877F2", // Messenger Blue
+  // Check if bot is active (only bot overlay, no "sen/user" overlay)
+  const isBotActiveMessage = lastMessageDirection === 'out' && !!lastMessageModel;
+
+  // Real WhatsApp, Instagram, Messenger SVG overlays
+  const renderChannelBadge = () => {
+    if (channel === 'whatsapp') {
+      return (
+        <span 
+          className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full border border-white shadow-sm flex items-center justify-center bg-[#25D366]"
+          title="WhatsApp"
+        >
+          <svg className="w-3 h-3 text-white fill-current" viewBox="0 0 24 24">
+            <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946C.06 5.348 5.397.01 12.008.01c3.202.001 6.212 1.246 8.477 3.514 2.266 2.268 3.507 5.28 3.505 8.484-.004 6.657-5.34 11.997-11.953 11.997-2.005-.001-3.973-.502-5.724-1.457L0 24zm6.59-4.846c1.6.95 3.188 1.449 4.825 1.451 5.436 0 9.86-4.42 9.864-9.858.002-2.634-1.023-5.11-2.885-6.974C16.59 1.908 14.11 1.887 11.5 1.887c-5.44 0-9.866 4.418-9.87 9.856 0 1.702.449 3.366 1.305 4.82l-.995 3.637 3.707-.972zm12.338-7.07c-.093-.156-.343-.248-.717-.435-.373-.186-2.208-1.09-2.55-1.214-.343-.124-.593-.186-.843.186-.25.373-.966 1.214-1.184 1.462-.218.248-.435.279-.809.093-.373-.186-1.577-.58-3.003-1.853-1.11-1-.186-2.2-1.186-2.483.373-.093.25-.373.373-.559.124-.186.062-.373-.03-.559-.093-.186-.843-2.03-.966-2.33-.124-.31-.248-.279-.343-.279-.093-.001-.218-.001-.343-.001-.124 0-.343.047-.528.248-.186.202-.715.7-.715 1.707 0 1.007.73 1.984.83 2.122.1.138 1.44 2.214 3.49 3.093.488.209.868.335 1.164.429.49.156.937.134 1.29.08.393-.06 1.214-.496 1.385-.95.17-.456.17-.846.12-.927-.05-.081-.2-.13-.574-.316z"/>
+          </svg>
+        </span>
+      );
+    }
+    if (channel === 'instagram') {
+      return (
+        <span 
+          className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full border border-white shadow-sm flex items-center justify-center bg-gradient-to-tr from-[#f9ce34] via-[#ee2a7b] to-[#6228d7]"
+          title="Instagram"
+        >
+          <svg className="w-3 h-3 text-white fill-current" viewBox="0 0 24 24">
+            <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.051.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 1 0 0 12.324 6.162 6.162 0 0 0 0-12.324zM12 16a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm6.406-11.845a1.44 1.44 0 1 0 0 2.881 1.44 1.44 0 0 0 0-2.881z"/>
+          </svg>
+        </span>
+      );
+    }
+    if (channel === 'messenger') {
+      return (
+        <span 
+          className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full border border-white shadow-sm flex items-center justify-center bg-[#0084FF]"
+          title="Messenger"
+        >
+          <svg className="w-3 h-3 text-white fill-current" viewBox="0 0 24 24">
+            <path d="M12 0C5.373 0 0 4.974 0 11.111c0 3.498 1.744 6.614 4.469 8.654V24l4.088-2.254c1.077.3 2.215.465 3.443.465 6.627 0 12-4.975 12-11.111C24 4.974 18.627 0 12 0zm1.293 14.333L10.3 11.23l-3.88 3.103 4.268-4.542 2.993 3.103 3.88-3.103-4.268 4.542z"/>
+          </svg>
+        </span>
+      );
+    }
+    return null;
   };
-  const badgeColor = channelColors[channel] || "#8E8E93";
 
   return (
     <div className="relative mt-0.5 shrink-0 select-none">
       <div 
-        className="w-12 h-12 rounded-full flex items-center justify-center text-white text-[14px] font-bold shadow-[0_2px_8px_rgba(0,0,0,0.08)]"
+        className="w-12 h-12 rounded-full flex items-center justify-center text-white text-[14px] font-bold shadow-[0_2px_8px_rgba(0,0,0,0.08)] relative"
         style={{ backgroundColor: bgColor }}
       >
         {initials}
+        
+        {/* Bot overlay icon - only if last message was by bot */}
+        {isBotActiveMessage && (
+          <span className="absolute -top-1 -left-1 w-5 h-5 rounded-full bg-gradient-to-tr from-violet-600 to-indigo-600 border border-white flex items-center justify-center text-[10px] shadow-sm animate-pulse" title="Bot Aktif">
+            🤖
+          </span>
+        )}
       </div>
       
       {/* Channel overlay badge */}
-      <span 
-        className="absolute -bottom-0.5 -right-0.5 w-4.5 h-4.5 rounded-full border-2 border-white shadow-sm flex items-center justify-center text-[8px] font-black text-white uppercase"
-        style={{ backgroundColor: badgeColor }}
-      >
-        {channel === 'whatsapp' && 'w'}
-        {channel === 'instagram' && 'i'}
-        {channel === 'messenger' && 'f'}
-      </span>
+      {renderChannelBadge()}
 
       {unread > 0 && (
         <span
@@ -766,7 +804,13 @@ const handleBulkArchive = async (archive: boolean) => {
                     )}
 
                     {/* Left Column: Avatar + Channel overlay */}
-                    <InitialsAvatar name={c.name || c.id} channel={c.channel} unread={0} />
+                    <InitialsAvatar 
+                      name={c.name || c.id} 
+                      channel={c.channel} 
+                      unread={0} 
+                      lastMessageDirection={c.lastMessageDirection}
+                      lastMessageModel={c.lastMessageModel}
+                    />
 
                     {/* Middle Column: Content */}
                     <div className="flex-1 min-w-0 flex flex-col justify-between self-stretch py-0.5">
@@ -802,7 +846,7 @@ const handleBulkArchive = async (archive: boolean) => {
                         </span>
                       </p>
 
-                      {/* Status Badges Row (No reply, Bot status, Stage, Country name+flag) */}
+                      {/* Status Badges Row (No reply, Bot status) */}
                       <div className="flex flex-wrap items-center gap-1.5 mt-2 w-full select-none">
                         {/* No Reply / Follow up alerts */}
                         {c.is_no_reply_eligible && (
@@ -837,7 +881,13 @@ const handleBulkArchive = async (archive: boolean) => {
                             <User className="w-3 h-3" /> Manuel
                           </span>
                         )}
+                      </div>
+                    </div>
 
+                    {/* Right Column: Time, Unread, Pin & Chevron Dropdown */}
+                    <div className="relative flex flex-col items-end justify-between self-stretch shrink-0 select-none min-h-[60px] text-right ml-2 gap-1.5">
+                      {/* Top: Badges & Time Row */}
+                      <div className="flex items-center gap-1.5 justify-end w-full">
                         {/* Pipeline Stage */}
                         <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-50 text-gray-600 border border-gray-200 shadow-sm flex-shrink-0">
                           {stageLabel(c.stage)}
@@ -850,23 +900,20 @@ const handleBulkArchive = async (archive: boolean) => {
                             title={`${country.name}${isEstimated ? ' (Tahmini)' : ''}`}
                           >
                             <span>{country.flag}</span>
-                            <span className="truncate">{country.name}</span>
+                            <span className="truncate hidden sm:inline">{country.name}</span>
                           </span>
                         )}
-                      </div>
-                    </div>
 
-                    {/* Right Column: Time, Unread, Pin & Chevron Dropdown */}
-                    <div className="relative flex flex-col items-end justify-between self-stretch shrink-0 w-16 select-none min-h-[60px] text-right">
-                      {/* Top: Time */}
-                      <span 
-                        className={`text-[10px] tracking-wide whitespace-nowrap transition-all duration-150 pr-7 md:pr-0 md:group-hover:opacity-0 md:group-focus-within:opacity-0 ${
-                          c.unread > 0 ? "font-bold text-[#007AFF]" : "font-semibold text-gray-500"
-                        }`}
-                        style={{ color: c.unread > 0 ? "var(--q-blue, #007AFF)" : "var(--q-text-secondary)" }}
-                      >
-                        {c.formattedTime}
-                      </span>
+                        {/* Time */}
+                        <span 
+                          className={`text-[10px] tracking-wide whitespace-nowrap transition-all duration-150 pr-7 md:pr-0 md:group-hover:opacity-0 md:group-focus-within:opacity-0 ${
+                            c.unread > 0 ? "font-bold text-[#007AFF]" : "font-semibold text-gray-500"
+                          }`}
+                          style={{ color: c.unread > 0 ? "var(--q-blue, #007AFF)" : "var(--q-text-secondary)" }}
+                        >
+                          {c.formattedTime}
+                        </span>
+                      </div>
                       
                       {/* Middle: Chevron Dropdown Trigger */}
                       <button
