@@ -685,7 +685,7 @@ const handleBulkArchive = async (archive: boolean) => {
                 let senderPrefix = "";
                 if (c.lastMessageDirection === 'out') {
                   if (c.lastMessageModel) {
-                    senderPrefix = "AI: ";
+                    senderPrefix = "Bot: ";
                   } else {
                     senderPrefix = "Sen: ";
                   }
@@ -803,12 +803,50 @@ const handleBulkArchive = async (archive: boolean) => {
                             ⏳ {c.no_reply_hours} saattir cevap yok
                           </span>
                         )}
-                        {!c.isBotActive && (
+                        {(() => {
+                          if (!c.active_task_type) return null;
+                          if (c.active_task_type === 'no_reply_followup' || c.active_task_type === 'bot_handoff_followup') {
+                            return (
+                              <span
+                                className="text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded shadow-sm flex items-center gap-1"
+                                style={{ background: "rgba(255, 149, 0, 0.1)", border: "1px solid rgba(255, 149, 0, 0.2)", color: "#FF9500" }}
+                              >
+                                📋 Takip taslağı
+                              </span>
+                            );
+                          }
+                          if (c.active_task_type === 'template_required_task') {
+                            return (
+                              <span
+                                className="text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded shadow-sm flex items-center gap-1"
+                                style={{ background: "rgba(175, 82, 222, 0.1)", border: "1px solid rgba(175, 82, 222, 0.2)", color: "#AF52DE" }}
+                              >
+                                📋 Template gerekli
+                              </span>
+                            );
+                          }
+                          return (
+                            <span
+                              className="text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded shadow-sm flex items-center gap-1"
+                              style={{ background: "rgba(0, 122, 255, 0.1)", border: "1px solid rgba(0, 122, 255, 0.2)", color: "#007AFF" }}
+                            >
+                              📋 Cevap bekliyor
+                            </span>
+                          );
+                        })()}
+                        {c.isBotActive ? (
                           <span
-                            className="text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded shadow-sm"
+                            className="text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded shadow-sm flex items-center gap-1"
+                            style={{ background: "rgba(52, 199, 89, 0.1)", color: "#34C759", border: "1px solid rgba(52,199,89,0.2)" }}
+                          >
+                            🤖 Botta
+                          </span>
+                        ) : (
+                          <span
+                            className="text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded shadow-sm flex items-center gap-1"
                             style={{ background: "var(--q-blue-bg)", color: "var(--q-blue)", border: "1px solid rgba(0,122,255,0.2)" }}
                           >
-                            Sen
+                            👤 Manuel
                           </span>
                         )}
                       </div>

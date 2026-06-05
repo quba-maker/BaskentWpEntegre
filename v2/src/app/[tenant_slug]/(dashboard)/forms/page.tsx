@@ -119,14 +119,17 @@ const STAGES = [
 const getStageInfo = (stage: string) => STAGES.find(s => s.value === stage) || STAGES[0];
 
 // P0C: Resolve country with live CRM priority
-const getFormCountry = (form: any): { name: string; flag: string } | null => {
+const getFormCountry = (form: any): { name: string; flag: string; isEstimated: boolean } | null => {
   // Priority 1: Live CRM data from conversation/opportunity
   if (form.current_country) {
-    return getCountryInfoByName(form.current_country);
+    const isEstimated = !form.country;
+    const info = getCountryInfoByName(form.current_country);
+    return info ? { ...info, isEstimated } : null;
   }
   // Priority 2: Phone prefix detection (fallback)
   const phones = getAllPhones(form);
-  return resolveCountry(phones[0] || form.phone_number, form.raw_data);
+  const info = resolveCountry(phones[0] || form.phone_number, form.raw_data);
+  return info ? { ...info, isEstimated: true } : null;
 };
 
 const PRIORITY_CONFIG: Record<string, { label: string; color: string; icon: string }> = {
@@ -728,8 +731,16 @@ export default function FormsPage() {
                         {displayName}
                       </span>
                       {country && (
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/[0.04] text-[11px] font-semibold text-[#86868B] shrink-0">
-                          {country.flag} {country.name}
+                        <span 
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold text-[#86868B] shrink-0 border"
+                          style={{
+                            backgroundColor: country.isEstimated ? 'rgba(0,0,0,0.01)' : 'rgba(0,0,0,0.04)',
+                            borderStyle: country.isEstimated ? 'dashed' : 'solid',
+                            borderColor: country.isEstimated ? 'rgba(0,0,0,0.15)' : 'rgba(0,0,0,0.05)'
+                          }}
+                          title={country.isEstimated ? "Tahmini Ülke" : undefined}
+                        >
+                          {country.flag} {country.name}{country.isEstimated ? '?' : ''}
                         </span>
                       )}
                       {form.isBotActive && (
@@ -864,11 +875,20 @@ export default function FormsPage() {
                     <span className="break-words whitespace-pre-wrap max-w-full">{getDisplayName(selectedForm)}</span>
                     {(() => {
                       const c = getFormCountry(selectedForm);
-                      return c ? (
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/[0.04] text-[12px] font-semibold text-[#86868B] shrink-0">
-                          {c.flag} {c.name}
+                      if (!c) return null;
+                      return (
+                        <span 
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[12px] font-semibold shrink-0"
+                          style={{
+                            color: 'var(--q-text-secondary)',
+                            backgroundColor: c.isEstimated ? 'rgba(0,0,0,0.02)' : 'rgba(0,0,0,0.04)',
+                            border: c.isEstimated ? '1px dashed var(--q-border-default)' : 'none'
+                          }}
+                          title={c.isEstimated ? "Tahmini ülke (telefon numarasından)" : undefined}
+                        >
+                          {c.flag} {c.name}{c.isEstimated ? '?' : ''}
                         </span>
-                      ) : null;
+                      );
                     })()}
                   </h2>
                   <p className="text-[#86868B] text-sm font-medium mt-1 break-words">{formatPhone(selectedForm.phone_number)}</p>
@@ -883,6 +903,29 @@ export default function FormsPage() {
 
               {/* Content */}
               <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-6">
+
+              {/* Phone Numbers List */}
+              <div className="bg-white rounded-2xl border border-black/5 shadow-sm p-4 space-y-2.5 text-left">
+                <span className="block text-[10px] font-bold uppercase tracking-widest text-[#86868B] mb-1">Telefon Numaraları</span>
+                {getAllPhones(selectedForm).map((phone, idx) => {
+                  const isPrimary = idx === 0;
+                  const isLastOutreachTarget = selectedForm.last_outreach_action && selectedForm.phone_number === phone;
+                  return (
+                    <div key={phone} className="flex items-center justify-between text-xs">
+                      <span className="font-semibold text-[13px] text-[#1D1D1F]">
+                        {formatPhone(phone)}
+                      </span>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                        isPrimary 
+                          ? 'bg-blue-100 text-blue-700' 
+                          : 'bg-gray-100 text-gray-600'
+                      }`}>
+                        {isPrimary ? 'Birincil' : 'İkincil'} {isLastOutreachTarget && '— Denendi'}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
               
               {/* PHASE 2L-P0: Outreach Actions */}
               <div className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
@@ -894,6 +937,29 @@ export default function FormsPage() {
                   <p className="text-[11px] text-[#86868B] font-medium mt-0.5">Koordinatör onayı ile karşılama mesajı gönder</p>
                 </div>
                 <div className="p-4 space-y-3">
+                  {/* WhatsApp Window & Template Required Status */}
+                  {!selectedForm.has_inbound_messages && (
+                    <div className="flex gap-2 flex-wrap mb-1">
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                        ⏳ 24s WhatsApp Penceresi Kapalı
+                      </span>
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200">
+                        📋 Şablon (Template) Gerekli
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Known Inbound Guard Hard Block */}
+                  {selectedForm.has_inbound_messages && (
+                    <div className="p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs font-semibold flex items-start gap-2.5 shadow-sm">
+                      <XCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+                      <div className="space-y-1">
+                        <p className="font-bold text-red-900">Karşılama Engellendi</p>
+                        <p className="text-red-700 leading-snug font-medium">Bu hasta daha önce sistemdeki numaralarımızdan biri üzerinden bizimle iletişime geçmiştir. Tekrar karşılama mesajı gönderilmesi engellenmiştir.</p>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Error Banner */}
                   {outreachError && (
                     <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-[12px] font-medium flex items-center gap-2">
@@ -970,16 +1036,20 @@ export default function FormsPage() {
                     <div className="flex gap-3">
                       <button 
                         onClick={() => handlePrepareDraft(selectedForm)}
-                        disabled={greetingSent || outreachLoading === 'draft' || selectedForm.stage !== 'new'}
+                        disabled={greetingSent || outreachLoading === 'draft' || selectedForm.stage !== 'new' || !!selectedForm.has_inbound_messages}
                         className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-semibold transition-all ${
-                          greetingSent 
+                          selectedForm.has_inbound_messages
+                            ? 'bg-red-50 text-red-600 border border-red-200 cursor-not-allowed'
+                            : greetingSent 
                             ? 'bg-emerald-50 text-emerald-600 border border-emerald-200 cursor-default'
                             : selectedForm.stage !== 'new'
                             ? 'bg-gray-100 text-[#86868B] cursor-not-allowed'
                             : 'bg-[#25D366] text-white shadow-[0_4px_14px_rgba(37,211,102,0.39)] hover:bg-[#1DA851] cursor-pointer'
                         } disabled:opacity-70`}
                       >
-                        {greetingSent ? (
+                        {selectedForm.has_inbound_messages ? (
+                          <><XCircle className="w-5 h-5" /> Zaten Bize Yazdı</>
+                        ) : greetingSent ? (
                           <><CheckCheck className="w-5 h-5" /> Selamlama Gönderildi</>
                         ) : outreachLoading === 'draft' ? (
                           <><RefreshCw className="w-4 h-4 animate-spin" /> Hazırlanıyor...</>
@@ -1076,14 +1146,49 @@ export default function FormsPage() {
                     </div>
                   )}
 
-                  {/* Quick Navigate to Inbox */}
-                  <button 
-                    onClick={(e) => handleMessageClick(selectedForm, e as any)}
-                    className="w-full flex items-center justify-center gap-2 py-2.5 bg-black/[0.03] hover:bg-black/[0.06] rounded-xl text-[13px] font-semibold text-[#1D1D1F] transition-colors"
-                  >
-                    <MessageCircle className="w-4 h-4 text-[#25D366]" />
-                    Inbox'ta Görüntüle
-                  </button>
+                  {/* Deep Links Section */}
+                  {!isDraftOpen && (
+                    <div className="pt-3 border-t border-black/5 space-y-2">
+                      <span className="block text-[10px] font-bold uppercase tracking-widest text-[#86868B] mb-2 text-center">
+                        Operasyonel Yönlendirmeler
+                      </span>
+                      <div className="grid grid-cols-3 gap-2">
+                        {selectedForm.linked_conversation_id ? (
+                          <button
+                            onClick={(e) => handleMessageClick(selectedForm, e as any)}
+                            className="flex flex-col items-center justify-center p-2.5 rounded-xl border border-blue-200 bg-blue-50/30 text-blue-600 text-center transition-all duration-200 hover:bg-blue-50 active:scale-[0.98] cursor-pointer"
+                          >
+                            <MessageCircle className="w-4 h-4 mb-1 text-[#25D366]" />
+                            <span className="text-[9px] font-bold leading-tight">Konuşmaya Git</span>
+                          </button>
+                        ) : (
+                          <button
+                            disabled
+                            className="flex flex-col items-center justify-center p-2.5 rounded-xl border border-gray-200 bg-gray-50 text-gray-400 text-center cursor-not-allowed opacity-60"
+                          >
+                            <MessageCircle className="w-4 h-4 mb-1" />
+                            <span className="text-[9px] font-bold leading-tight">Sohbet Yok</span>
+                          </button>
+                        )}
+
+                        <a
+                          href={`./takip?tab=telefon&opp=${selectedForm.linked_opportunity_id || ''}`}
+                          className="flex flex-col items-center justify-center p-2.5 rounded-xl border border-indigo-200 bg-indigo-50/30 text-indigo-600 text-center transition-all duration-200 hover:bg-indigo-50 active:scale-[0.98]"
+                        >
+                          <PhoneForwarded className="w-4 h-4 mb-1" />
+                          <span className="text-[9px] font-bold leading-tight">Telefon Takibi</span>
+                        </a>
+
+                        <a
+                          href={`./takip?tab=randevu&opp=${selectedForm.linked_opportunity_id || ''}`}
+                          className="flex flex-col items-center justify-center p-2.5 rounded-xl border border-emerald-200 bg-emerald-50/30 text-emerald-600 text-center transition-all duration-200 hover:bg-emerald-50 active:scale-[0.98]"
+                        >
+                          <Calendar className="w-4 h-4 mb-1" />
+                          <span className="text-[9px] font-bold leading-tight">Randevu Planla</span>
+                        </a>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Outreach Timeline */}
@@ -1217,12 +1322,25 @@ export default function FormsPage() {
                         </p>
                       </div>
                     )}
-                    {selectedForm.current_country && (() => {
-                      const ci = getCountryInfoByName(selectedForm.current_country);
+                    {(() => {
+                      const country = getFormCountry(selectedForm);
+                      if (!country) return null;
                       return (
                         <div>
                           <p className="text-[10px] font-semibold text-[#86868B] uppercase tracking-wider flex items-center gap-1"><MapPin className="w-3 h-3" /> Ülke</p>
-                          <p className="text-[14px] font-semibold text-[#1D1D1F] mt-1">{ci?.flag} {selectedForm.current_country}</p>
+                          <p className="text-[14px] font-semibold text-[#1D1D1F] mt-1 flex items-center gap-1.5">
+                            <span 
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold text-[#86868B] border"
+                              style={{
+                                backgroundColor: country.isEstimated ? 'rgba(0,0,0,0.01)' : 'rgba(0,0,0,0.04)',
+                                borderStyle: country.isEstimated ? 'dashed' : 'solid',
+                                borderColor: country.isEstimated ? 'rgba(0,0,0,0.15)' : 'rgba(0,0,0,0.05)'
+                              }}
+                              title={country.isEstimated ? "Tahmini Ülke" : undefined}
+                            >
+                              {country.flag} {country.name}{country.isEstimated ? '?' : ''}
+                            </span>
+                          </p>
                         </div>
                       );
                     })()}

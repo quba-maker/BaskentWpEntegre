@@ -17,6 +17,7 @@ import {
 import { triggerBotInterventionAction } from "@/app/actions/bot-intervention";
 import { parseTurkeyLocalToUtc } from "@/lib/utils/timezone";
 import { formatPhoneReadable } from "@/lib/utils/patient-name-resolver";
+import { getCountryFromPhone, normalizeCountryName } from "@/lib/utils/country";
 
 
 const MONTHS_TR = [
@@ -1448,12 +1449,26 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
           {apt.priority === 'hot' && <Zap className="w-3 h-3 text-[#FF3B30] fill-[#FF3B30]" />}
           
           {/* Ülke Bayrağı ve İsmi */}
-          {apt.country && (
-            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/[0.04] text-[10px] font-semibold text-[#86868B] border border-black/5 shadow-sm">
-              <span className="text-xs">{flag}</span>
-              <span>{apt.country}</span>
-            </span>
-          )}
+          {(() => {
+            const cn = apt.country ? normalizeCountryName(apt.country) : '';
+            const countryInfo = (apt.country ? { flag: getCountryFlag(cn), name: cn, code: '' } : null) || getCountryFromPhone(apt.phoneNumber);
+            if (!countryInfo) return null;
+            const isEstimated = !apt.country || (apt as any).countrySource === 'phone_prefix' || (apt as any).metadata?.country_source === 'phone_prefix';
+            return (
+              <span 
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold border shadow-sm"
+                style={{ 
+                  color: 'var(--q-text-secondary)',
+                  backgroundColor: isEstimated ? 'rgba(0,0,0,0.02)' : 'rgba(0,0,0,0.04)',
+                  border: isEstimated ? '1px dashed var(--q-border-default)' : '1px solid var(--q-border-default)'
+                }}
+                title={isEstimated ? "Tahmini ülke (telefon numarasından)" : undefined}
+              >
+                <span className="text-xs">{countryInfo.flag}</span>
+                <span>{countryInfo.name}{isEstimated ? '?' : ''}</span>
+              </span>
+            );
+          })()}
 
           {/* Hasta Yerel Saati & Saat Dilimi Badge */}
           {viewType === 'phone' && (

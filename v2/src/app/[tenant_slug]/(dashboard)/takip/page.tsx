@@ -20,7 +20,7 @@ export default function TakipPage() {
   const { setActiveContact } = useInboxStore();
   
   const deepLinkOppId = searchParams.get('opp');
-  const [activeTab, setActiveTab] = useState<'hasta_takibi' | 'telefon' | 'randevu'>('hasta_takibi');
+  const [activeTab, setActiveTab] = useState<'hasta_takibi' | 'telefon' | 'randevu'>('telefon');
   
   // Detail drawer states
   const [drawerOppId, setDrawerOppId] = useState<string | null>(null);
@@ -86,17 +86,6 @@ export default function TakipPage() {
           {/* Tab Switcher */}
           <div className="flex items-center gap-2 mt-2 w-fit">
             <button
-              onClick={() => setActiveTab('hasta_takibi')}
-              className={`px-4 py-1.5 rounded-lg text-[13px] font-semibold transition-all flex items-center gap-2 cursor-pointer ${
-                activeTab === 'hasta_takibi' 
-                  ? 'bg-indigo-600 text-white shadow-md' 
-                  : 'bg-black/[0.04] text-[#86868B] hover:text-[#1D1D1F]'
-              }`}
-            >
-              <Users className="w-4 h-4" />
-              Hasta Takibi
-            </button>
-            <button
               onClick={() => setActiveTab('telefon')}
               className={`px-4 py-1.5 rounded-lg text-[13px] font-semibold transition-all flex items-center gap-2 cursor-pointer ${
                 activeTab === 'telefon' 
@@ -117,6 +106,17 @@ export default function TakipPage() {
             >
               <CalendarClock className="w-4 h-4" />
               Randevu Yönetimi
+            </button>
+            <button
+              onClick={() => setActiveTab('hasta_takibi')}
+              className={`px-4 py-1.5 rounded-lg text-[13px] font-semibold transition-all flex items-center gap-2 cursor-pointer ${
+                activeTab === 'hasta_takibi' 
+                  ? 'bg-indigo-600 text-white shadow-md' 
+                  : 'bg-black/[0.04] text-[#86868B] hover:text-[#1D1D1F] opacity-75 hover:opacity-100'
+              }`}
+            >
+              <Users className="w-4 h-4" />
+              Hasta Takibi (Gelişmiş)
             </button>
           </div>
         </div>

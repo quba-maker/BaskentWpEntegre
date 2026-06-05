@@ -162,7 +162,10 @@ export async function getConversations(page: number = 1, search: string = "", st
           (cf.id IS NOT NULL) as is_favorite,
           (ca.id IS NOT NULL) as is_archived,
           NULLIF(TRIM(CONCAT(cprof.first_name, ' ', cprof.last_name)), '') as customer_display_name,
-          wa.wa_profile_name
+          wa.wa_profile_name,
+          active_task.active_task_id,
+          active_task.active_task_type,
+          active_task.active_task_status
         FROM conversations c
         LEFT JOIN customer_profiles cprof
           ON cprof.id = c.customer_id
@@ -220,6 +223,15 @@ export async function getConversations(page: number = 1, search: string = "", st
           ON active_opp.id = c.active_opportunity_id 
           AND active_opp.tenant_id = c.tenant_id
           AND active_opp.conversation_id = c.id
+        LEFT JOIN LATERAL (
+          SELECT id as active_task_id, task_type as active_task_type, status as active_task_status
+          FROM follow_up_tasks
+          WHERE opportunity_id = active_opp.id
+            AND tenant_id = c.tenant_id
+            AND status = 'pending'
+          ORDER BY due_at ASC, created_at DESC
+          LIMIT 1
+        ) active_task ON true
         -- Pinned Join
         LEFT JOIN conversation_pins cp
           ON c.id = cp.conversation_id
@@ -401,6 +413,9 @@ export async function getConversations(page: number = 1, search: string = "", st
           isFavorite: !!r.is_favorite,
           isArchived: !!r.is_archived,
           unread: r.unread || 0,
+          active_task_id: r.active_task_id || null,
+          active_task_type: r.active_task_type || null,
+          active_task_status: r.active_task_status || null,
           opp_summary: r.opp_summary || null,
           opp_ai_reason: r.opp_ai_reason || null,
           legacy_ai_summary: r.legacy_ai_summary || null,

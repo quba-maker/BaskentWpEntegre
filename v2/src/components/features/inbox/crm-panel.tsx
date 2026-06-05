@@ -550,6 +550,86 @@ export function ContextPanel() {
           </div>
         )}
 
+        {/* Task-based Action Required Deep Link Card */}
+        {activeContact.active_task_type && (
+          <div className="w-full mt-3 p-3.5 rounded-xl border space-y-2.5 text-left bg-indigo-50/30" style={{ borderColor: 'var(--q-blue)' }}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-indigo-500" />
+                <span className="text-[10px] font-bold uppercase tracking-widest text-indigo-700">Aksiyon Gerekli</span>
+              </div>
+              <span className="text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded shadow-sm bg-indigo-100 text-indigo-700">
+                Bekliyor
+              </span>
+            </div>
+            
+            <p className="text-xs font-semibold text-gray-700 leading-snug">
+              {(() => {
+                switch (activeContact.active_task_type) {
+                  case 'no_reply_followup': return 'Müşteriden yanıt alınamadığı için takip taslağı oluşturuldu.';
+                  case 'template_required_task': return '24 saatlik WhatsApp penceresi kapandığı için şablon onayı gerekiyor.';
+                  case 'bot_handoff_followup': return 'Bot konuşmayı manuele devretti, takip gerekiyor.';
+                  case 'call_patient': return 'Hastanın telefonla aranması gerekiyor.';
+                  case 'callback_scheduled': return 'Geri arama randevusu tanımlandı.';
+                  case 'follow_up_no_response': return 'Cevap vermeyen hastaya takip araması gerekiyor.';
+                  case 'coordinator_review': return 'Koordinatör onayı/incelemesi bekleniyor.';
+                  case 'travel_planning': return 'Seyahat planlaması yapılması gerekiyor.';
+                  case 'payment_follow_up': return 'Ödeme takibi yapılması gerekiyor.';
+                  case 'appointment_reminder': return 'Randevu hatırlatması yapılması gerekiyor.';
+                  default: return 'Aktif bir takip görevi bulunuyor.';
+                }
+              })()}
+            </p>
+
+            {(() => {
+              const isPhoneTask = [
+                'call_patient', 'callback_scheduled', 'follow_up_no_response',
+                'no_reply_followup', 'template_required_task', 'bot_handoff_followup'
+              ].includes(activeContact.active_task_type);
+
+              const isAppointmentTask = [
+                'coordinator_review', 'travel_planning', 'payment_follow_up', 'appointment_reminder'
+              ].includes(activeContact.active_task_type);
+
+              const oppId = activeContact.active_opp_id || activeContact.active_opportunity_id || activeContact.opportunity_id || '';
+
+              if (isPhoneTask) {
+                return (
+                  <a
+                    href={`./takip?tab=telefon&opp=${oppId}`}
+                    className="w-full py-2 px-3 bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all shadow-sm"
+                  >
+                    <PhoneForwarded className="w-3.5 h-3.5" />
+                    <span>Telefon Takibinde Aç</span>
+                  </a>
+                );
+              }
+
+              if (isAppointmentTask) {
+                return (
+                  <a
+                    href={`./takip?tab=randevu&opp=${oppId}`}
+                    className="w-full py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all shadow-sm"
+                  >
+                    <Calendar className="w-3.5 h-3.5" />
+                    <span>Randevu Yönetiminde Aç</span>
+                  </a>
+                );
+              }
+
+              return (
+                <a
+                  href={`./takip?opp=${oppId}`}
+                  className="w-full py-2 px-3 bg-gray-800 hover:bg-gray-900 text-white text-[11px] font-bold rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all shadow-sm"
+                >
+                  <Activity className="w-3.5 h-3.5" />
+                  <span>Takip Merkezinde Aç</span>
+                </a>
+              );
+            })()}
+          </div>
+        )}
+
         {/* A1.7b — Secondary Phone Fallback Section */}
         {allPhones.length >= 2 && !isSecondaryActive && (
           <div className="w-full mt-3 p-3.5 rounded-xl border space-y-2.5 bg-white/40 text-left" style={{ borderColor: 'var(--q-border-default)' }}>

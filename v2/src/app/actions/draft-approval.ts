@@ -409,70 +409,8 @@ export async function getPendingDrafts(filters?: {
           });
         }
 
-        // Fetch No-Reply Automation tasks
-        const noReplyTasks = await db.executeSafe({
-          text: `
-            SELECT t.id, t.opportunity_id, t.phone_number, t.created_at, t.metadata,
-                   o.patient_name, o.stage, o.department, o.country, o.summary, o.ai_reason,
-                   c.id as conv_id
-            FROM follow_up_tasks t
-            LEFT JOIN opportunities o ON o.id::text = t.opportunity_id::text AND o.tenant_id = t.tenant_id
-            LEFT JOIN conversations c ON c.id::text = t.conversation_id::text AND c.tenant_id = t.tenant_id
-            WHERE t.tenant_id = $1
-              AND t.task_type IN ('no_reply_followup', 'template_required_task')
-              AND t.status = 'pending'
-          `,
-          values: [ctx.tenantId]
-        }) as any[];
-
-        for (const task of noReplyTasks) {
-          const meta = typeof task.metadata === 'string' ? JSON.parse(task.metadata) : (task.metadata || {});
-          
-          const lastInbound = await db.executeSafe({
-            text: `SELECT created_at FROM messages WHERE phone_number = $1 AND tenant_id = $2 AND direction = 'in' ORDER BY created_at DESC LIMIT 1`,
-            values: [task.phone_number, ctx.tenantId]
-          }) as any[];
-          const lastInboundAt = lastInbound[0]?.created_at;
-
-          const txt = meta.draft_text || meta.draft || '';
-          const riskFlags = calculateRiskFlags({
-            text: txt,
-            patientName: task.patient_name,
-            phone: task.phone_number,
-            stage: task.stage,
-            optOut: meta.opt_out_requested === true,
-            country: task.country,
-            lastInboundAt
-          });
-
-          allDrafts.push({
-            draft_id: task.id,
-            source: 'remarketing',
-            draft_type: task.task_type === 'template_required_task' ? 'template_required_task' : 'no_reply_followup',
-            patient_name: task.patient_name || 'İsimsiz Hasta',
-            masked_phone: maskPhone(task.phone_number),
-            phone: task.phone_number || '',
-            opportunity_id: task.opportunity_id,
-            conversation_id: task.conv_id || null,
-            lead_id: null,
-            channel: 'whatsapp',
-            language: 'tr',
-            priority: task.priority || 'normal',
-            stage: task.stage || 'first_contact',
-            department: task.department || '',
-            country: task.country || 'TR',
-            draft_text: txt,
-            draft_preview: txt.slice(0, 100) + (txt.length > 100 ? '...' : ''),
-            generated_at: task.created_at,
-            status: 'pending_review',
-            risk_flags: riskFlags,
-            whatsapp_24h_window_status: lastInboundAt 
-              ? ((Date.now() - new Date(lastInboundAt).getTime()) / (1000 * 60 * 60) <= 24 ? 'open' : 'closed')
-              : 'unknown',
-            ai_summary: task.summary || undefined,
-            ai_reason: task.ai_reason || undefined
-          });
-        }
+        // Fetch No-Reply Automation tasks (Disabled for Onay Merkezi - handled inbox-native & takip)
+        const noReplyTasks: any[] = [];
       }
 
       // ────────────────────────────────────────────────────────

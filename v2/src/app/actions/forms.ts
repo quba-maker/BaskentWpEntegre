@@ -72,7 +72,37 @@ export async function getForms(page: number = 1, search: string = "", source: st
                  WHEN c_identity.id IS NOT NULL THEN 'customer_id'
                  WHEN c_phone.id IS NOT NULL THEN 'phone_unique'
                  ELSE 'none'
-               END as summary_link_method
+               END as summary_link_method,
+               (
+                 SELECT EXISTS (
+                   SELECT 1
+                   FROM conversations c_all
+                   JOIN messages m_all ON m_all.conversation_id = c_all.id AND m_all.tenant_id = c_all.tenant_id
+                   WHERE c_all.tenant_id = l.tenant_id
+                     AND m_all.direction = 'in'
+                     AND (m_all.media_metadata IS NULL OR COALESCE(m_all.media_metadata->'native'->>'message_type', '') != 'reaction')
+                     AND (
+                       (l.customer_id IS NOT NULL AND c_all.customer_id = l.customer_id)
+                       OR
+                       RIGHT(c_all.phone_number, 10) = RIGHT(l.phone_number, 10)
+                       OR
+                       (
+                         l.raw_data IS NOT NULL 
+                         AND l.raw_data != ''
+                         AND l.raw_data LIKE '%_all_phones%'
+                         AND (
+                           CASE
+                             WHEN jsonb_typeof(l.raw_data::jsonb->'_all_phones') = 'array' 
+                               THEN (l.raw_data::jsonb->'_all_phones') @> jsonb_build_array(c_all.phone_number)
+                             WHEN jsonb_typeof(l.raw_data::jsonb->'_all_phones') = 'string' 
+                               THEN (l.raw_data::jsonb->>'_all_phones')::jsonb @> jsonb_build_array(c_all.phone_number)
+                             ELSE false
+                           END
+                         )
+                       )
+                     )
+                 )
+               ) as has_inbound_messages
                FROM leads l
                -- Layer 1: Safe link via customer_id (identity-based, no ambiguity)
                LEFT JOIN conversations c_identity ON c_identity.tenant_id = l.tenant_id 
@@ -158,6 +188,7 @@ export async function getForms(page: number = 1, search: string = "", source: st
         // ═══ P1: Outreach status for badge rendering ═══
         last_outreach_action: r.last_outreach_action || null,
         last_outreach_at: r.last_outreach_at || null,
+        has_inbound_messages: !!r.has_inbound_messages,
       }));
     }
   ).then(res => res.data || []);

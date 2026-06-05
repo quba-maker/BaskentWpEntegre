@@ -35,6 +35,9 @@ export const TASK_TYPES = [
   'doctor_review_pending',
   'travel_planning',
   'payment_follow_up',
+  'no_reply_followup',
+  'template_required_task',
+  'bot_handoff_followup',
   'custom',
 ] as const;
 

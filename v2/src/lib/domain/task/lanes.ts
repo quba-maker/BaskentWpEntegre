@@ -1,5 +1,5 @@
 export const TASK_LANES = {
-  communication_lifecycle: ['callback_scheduled', 'call_patient', 'follow_up_no_response'],
+  communication_lifecycle: ['callback_scheduled', 'call_patient', 'follow_up_no_response', 'no_reply_followup', 'template_required_task', 'bot_handoff_followup'],
   appointment_lifecycle: ['coordinator_review', 'travel_planning', 'payment_follow_up'],
   clinical_review_lifecycle: ['doctor_review_pending', 'send_report_reminder'],
   reminder_lifecycle: ['appointment_reminder'],
@@ -19,6 +19,9 @@ export const LANE_PRECEDENCE: Record<TaskLane, Record<string, number>> = {
     callback_scheduled: 1,
     call_patient: 2,
     follow_up_no_response: 3,
+    no_reply_followup: 4,
+    template_required_task: 5,
+    bot_handoff_followup: 6,
   },
   appointment_lifecycle: {
     coordinator_review: 1,
