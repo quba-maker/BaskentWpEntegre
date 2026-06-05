@@ -216,7 +216,10 @@ export default function DraftApprovalCenterPage() {
     });
   };
 
-  const getSourceBadgeColor = (source: string) => {
+  const getSourceBadgeColor = (source: string, draftType?: string) => {
+    if (source === "remarketing" && (draftType === "no_reply_followup" || draftType === "template_required_task")) {
+      return "bg-amber-50 text-amber-700 border-amber-200/50"; // Use distinct amber badge for no-reply follow-ups
+    }
     switch (source) {
       case "bot_delegation":
         return "bg-cyan-50 text-cyan-700 border-cyan-200/50";
@@ -231,7 +234,10 @@ export default function DraftApprovalCenterPage() {
     }
   };
 
-  const getSourceLabel = (source: string) => {
+  const getSourceLabel = (source: string, draftType?: string) => {
+    if (source === "remarketing" && (draftType === "no_reply_followup" || draftType === "template_required_task")) {
+      return "Cevap Bekleyen Takip Taslağı";
+    }
     switch (source) {
       case "bot_delegation": return "Bot Takip";
       case "appointment_reminder": return "Randevu Hatırlatma";
@@ -416,8 +422,8 @@ export default function DraftApprovalCenterPage() {
                   </div>
                   
                   <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${getSourceBadgeColor(draft.source)}`}>
-                      {getSourceLabel(draft.source)}
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${getSourceBadgeColor(draft.source, draft.draft_type)}`}>
+                      {getSourceLabel(draft.source, draft.draft_type)}
                     </span>
                     {draft.department && (
                       <span className="px-1.5 py-0.5 bg-slate-100 text-[#86868B] text-[9px] rounded font-bold">
@@ -493,7 +499,7 @@ export default function DraftApprovalCenterPage() {
             <div className="bg-white border-b border-black/5 p-5 flex items-center justify-between">
               <div>
                 <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-widest block mb-0.5">
-                  {getSourceLabel(selectedDraft.source)} İncelemesi
+                  {getSourceLabel(selectedDraft.source, selectedDraft.draft_type)} İncelemesi
                 </span>
                 <h3 className="text-[15px] font-bold text-[#1D1D1F]">
                   {selectedDraft.patient_name}

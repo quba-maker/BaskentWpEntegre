@@ -414,6 +414,15 @@ async function handleV2TaskEngine(request: NextRequest) {
           }
         }
 
+        // A1.7e — No-Reply Automation Tick Integration
+        try {
+          const { NoReplyAutomationService } = await import('@/lib/services/automation/no-reply-automation.service');
+          const noReplyResult = await NoReplyAutomationService.runNoReplyAutomationTick(db, tenant.id, { dryRun: false });
+          log.info(`[NO_REPLY_TICK] Completed tick for tenant: ${tenant.slug}`, noReplyResult);
+        } catch (noReplyErr: any) {
+          log.error(`[NO_REPLY_TICK_ERROR] Failed to run no-reply automation tick for tenant ${tenant.slug}`, noReplyErr);
+        }
+
         results.push({
           tenant: tenant.slug,
           mode: 'v2_task_engine',

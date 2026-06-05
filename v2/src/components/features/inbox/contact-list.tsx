@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
-import { Search, Check, CheckCheck, Clock, WifiOff, MessageCircle, MoreVertical, Loader2, Sparkles, AlertCircle, X, ChevronLeft, ChevronRight, UserCheck, UserX, Trash2 } from "lucide-react";
+import { Search, Check, CheckCheck, Clock, WifiOff, MessageCircle, MoreVertical, Loader2, Sparkles, AlertCircle, X, ChevronLeft, ChevronRight, UserCheck, UserX, Trash2, Sliders } from "lucide-react";
 import { 
   getConversations, 
   togglePin, 
@@ -23,6 +23,7 @@ import {
 import { useInboxStore } from "@/store/inbox-store";
 import { useDiagnosticsStore } from "@/lib/realtime/diagnostics-store";
 import { getCountryFromPhone, normalizeCountryName, getCountryFlag } from "@/lib/utils/country";
+import NoReplyAutomationModal from "./no-reply-automation-modal";
 
 function getInitialsColor(name: string) {
   let hash = 0;
@@ -216,6 +217,7 @@ export function ContactRail() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const isRealtimeDown = useDiagnosticsStore((state) => state.isRealtimeDown);
   const [errorToast, setErrorToast] = useState<string | null>(null);
+  const [isAutomationOpen, setIsAutomationOpen] = useState(false);
 
   // Bulk UI local states
   const [contextMenu, setContextMenu] = useState<{
@@ -559,26 +561,35 @@ const handleBulkArchive = async (archive: boolean) => {
               </div>
             )}
           </div>
-          <select
-            value={stageFilter}
-            onChange={(e) => setStageFilter(e.target.value)}
-            className="bg-transparent text-xs font-semibold outline-none cursor-pointer appearance-none text-right pr-2"
-            style={{ color: "var(--q-blue)" }}
-          >
-            <option value="all">Tüm Aşamalar</option>
-            <option value="unread">Okunmamış</option>
-            <option value="noReply">⏳ Cevap Bekleyenler (Tümü)</option>
-            <option value="noReply_3h">⏳ Cevap Bekleyenler (3s+)</option>
-            <option value="noReply_6h">⏳ Cevap Bekleyenler (6s+)</option>
-            <option value="noReply_9h">⏳ Cevap Bekleyenler (9s+)</option>
-            <option value="noReply_24h">⏳ Cevap Bekleyenler (24s+)</option>
-            <option value="new">Yeni Lead</option>
-            <option value="contacted">İletişime Geçildi</option>
-            <option value="responded">Yanıt Alındı</option>
-            <option value="discovery">Keşif / Bilgi</option>
-            <option value="appointed">Randevu Aldı</option>
-            <option value="lost">Kaybedildi</option>
-          </select>
+          <div className="flex items-center gap-1.5">
+            <select
+              value={stageFilter}
+              onChange={(e) => setStageFilter(e.target.value)}
+              className="bg-transparent text-xs font-semibold outline-none cursor-pointer appearance-none text-right pr-2"
+              style={{ color: "var(--q-blue)" }}
+            >
+              <option value="all">Tüm Aşamalar</option>
+              <option value="unread">Okunmamış</option>
+              <option value="noReply">⏳ Cevap Bekleyenler (Tümü)</option>
+              <option value="noReply_3h">⏳ Cevap Bekleyenler (3s+)</option>
+              <option value="noReply_6h">⏳ Cevap Bekleyenler (6s+)</option>
+              <option value="noReply_9h">⏳ Cevap Bekleyenler (9s+)</option>
+              <option value="noReply_24h">⏳ Cevap Bekleyenler (24s+)</option>
+              <option value="new">Yeni Lead</option>
+              <option value="contacted">İletişime Geçildi</option>
+              <option value="responded">Yanıt Alındı</option>
+              <option value="discovery">Keşif / Bilgi</option>
+              <option value="appointed">Randevu Aldı</option>
+              <option value="lost">Kaybedildi</option>
+            </select>
+            <button
+              onClick={() => setIsAutomationOpen(true)}
+              className="p-1 rounded text-gray-400 hover:text-gray-600 hover:bg-black/5 active:scale-95 transition-all cursor-pointer flex items-center justify-center"
+              title="No-Reply Otomasyon Ayarları"
+            >
+              <Sliders className="w-3.5 h-3.5" style={{ color: "var(--q-text-secondary)" }} />
+            </button>
+          </div>
         </div>
 
         {/* Selection Sub-Header */}
@@ -1280,6 +1291,8 @@ const handleBulkArchive = async (archive: boolean) => {
           {errorToast}
         </div>
       )}
+
+      <NoReplyAutomationModal isOpen={isAutomationOpen} onClose={() => setIsAutomationOpen(false)} />
     </div>
   );
 }

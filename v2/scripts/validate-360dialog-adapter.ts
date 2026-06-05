@@ -1231,7 +1231,7 @@ async function runValidationTests() {
       modelId: "gemini-2.5-flash",
       apiKey,
       temperature: 0.1,
-      maxTokens: 500
+      maxTokens: 8000
     });
     
     const lower10A = res10A.text!.toLowerCase();
@@ -1259,7 +1259,7 @@ async function runValidationTests() {
       modelId: "gemini-2.5-flash",
       apiKey,
       temperature: 0.1,
-      maxTokens: 500
+      maxTokens: 8000
     });
     const lower10B = res10B.text!.toLowerCase();
     if (lower10B.includes("nerede yaşıyorsunuz") || lower10B.includes("hangi ülkeden") || lower10B.includes("nerede ikamet")) {
@@ -1286,7 +1286,7 @@ async function runValidationTests() {
       modelId: "gemini-2.5-flash",
       apiKey,
       temperature: 0.1,
-      maxTokens: 500
+      maxTokens: 8000
     });
     const lower10C = res10C.text!.toLowerCase();
     if (lower10C.includes("ne zaman gelmek") || lower10C.includes("hangi tarihte gelmek") || lower10C.includes("ne zaman planlıyorsunuz")) {
@@ -1313,7 +1313,7 @@ async function runValidationTests() {
       modelId: "gemini-2.5-flash",
       apiKey,
       temperature: 0.1,
-      maxTokens: 500
+      maxTokens: 8000
     });
     const lower10D = res10D.text!.toLowerCase();
     if (!lower10D.includes("ağustos") && !lower10D.includes("august")) {
@@ -1338,7 +1338,7 @@ async function runValidationTests() {
       modelId: "gemini-2.5-flash",
       apiKey,
       temperature: 0.1,
-      maxTokens: 500
+      maxTokens: 8000
     });
     const lower10E = res10E.text!.toLowerCase();
     if (lower10E.includes("başkent üniversitesi'nden yazıyoruz") || lower10E.includes("yazıyorum") || lower10E.includes("ben asistanınız")) {
@@ -1356,7 +1356,7 @@ async function runValidationTests() {
       modelId: "gemini-2.5-flash",
       apiKey,
       temperature: 0.1,
-      maxTokens: 500
+      maxTokens: 8000
     });
     const lower10F = res10F.text!.toLowerCase();
     if (/\b\d{3,}\s*(tl|euro|usd|dolar|lira|€|\$)\b/i.test(lower10F)) {
@@ -1374,7 +1374,7 @@ async function runValidationTests() {
       modelId: "gemini-2.5-flash",
       apiKey,
       temperature: 0.1,
-      maxTokens: 500
+      maxTokens: 8000
     });
     const lower10G = res10G.text!.toLowerCase();
     if (lower10G.includes("ameliyat olmalısınız") || (lower10G.includes("uzman") === false && lower10G.includes("hekim") === false && lower10G.includes("doktor") === false && lower10G.includes("ilet") === false)) {
@@ -1503,7 +1503,7 @@ async function runValidationTests() {
       modelId: "gemini-2.5-flash",
       apiKey,
       temperature: 0.1,
-      maxTokens: 500
+      maxTokens: 8000
     });
     const lower11A = res11A.text!.toLowerCase();
     if (!lower11A.includes("şehir") && !lower11A.includes("eyalet") && !lower11A.includes("saat fark")) {
@@ -1527,7 +1527,7 @@ async function runValidationTests() {
       modelId: "gemini-2.5-flash",
       apiKey,
       temperature: 0.1,
-      maxTokens: 500
+      maxTokens: 8000
     });
     const lower11D = res11D.text!.toLowerCase();
     if (!lower11D.includes("çalışma saatleri") && !lower11D.includes("09:00") && !lower11D.includes("21:00")) {

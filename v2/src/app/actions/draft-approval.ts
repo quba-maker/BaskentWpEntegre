@@ -408,6 +408,71 @@ export async function getPendingDrafts(filters?: {
             ai_reason: logItem.ai_reason || undefined
           });
         }
+
+        // Fetch No-Reply Automation tasks
+        const noReplyTasks = await db.executeSafe({
+          text: `
+            SELECT t.id, t.opportunity_id, t.phone_number, t.created_at, t.metadata,
+                   o.patient_name, o.stage, o.department, o.country, o.summary, o.ai_reason,
+                   c.id as conv_id
+            FROM follow_up_tasks t
+            LEFT JOIN opportunities o ON o.id::text = t.opportunity_id::text AND o.tenant_id = t.tenant_id
+            LEFT JOIN conversations c ON c.id::text = t.conversation_id::text AND c.tenant_id = t.tenant_id
+            WHERE t.tenant_id = $1
+              AND t.task_type IN ('no_reply_followup', 'template_required_task')
+              AND t.status = 'pending'
+          `,
+          values: [ctx.tenantId]
+        }) as any[];
+
+        for (const task of noReplyTasks) {
+          const meta = typeof task.metadata === 'string' ? JSON.parse(task.metadata) : (task.metadata || {});
+          
+          const lastInbound = await db.executeSafe({
+            text: `SELECT created_at FROM messages WHERE phone_number = $1 AND tenant_id = $2 AND direction = 'in' ORDER BY created_at DESC LIMIT 1`,
+            values: [task.phone_number, ctx.tenantId]
+          }) as any[];
+          const lastInboundAt = lastInbound[0]?.created_at;
+
+          const txt = meta.draft_text || meta.draft || '';
+          const riskFlags = calculateRiskFlags({
+            text: txt,
+            patientName: task.patient_name,
+            phone: task.phone_number,
+            stage: task.stage,
+            optOut: meta.opt_out_requested === true,
+            country: task.country,
+            lastInboundAt
+          });
+
+          allDrafts.push({
+            draft_id: task.id,
+            source: 'remarketing',
+            draft_type: task.task_type === 'template_required_task' ? 'template_required_task' : 'no_reply_followup',
+            patient_name: task.patient_name || 'İsimsiz Hasta',
+            masked_phone: maskPhone(task.phone_number),
+            phone: task.phone_number || '',
+            opportunity_id: task.opportunity_id,
+            conversation_id: task.conv_id || null,
+            lead_id: null,
+            channel: 'whatsapp',
+            language: 'tr',
+            priority: task.priority || 'normal',
+            stage: task.stage || 'first_contact',
+            department: task.department || '',
+            country: task.country || 'TR',
+            draft_text: txt,
+            draft_preview: txt.slice(0, 100) + (txt.length > 100 ? '...' : ''),
+            generated_at: task.created_at,
+            status: 'pending_review',
+            risk_flags: riskFlags,
+            whatsapp_24h_window_status: lastInboundAt 
+              ? ((Date.now() - new Date(lastInboundAt).getTime()) / (1000 * 60 * 60) <= 24 ? 'open' : 'closed')
+              : 'unknown',
+            ai_summary: task.summary || undefined,
+            ai_reason: task.ai_reason || undefined
+          });
+        }
       }
 
       // ────────────────────────────────────────────────────────
@@ -594,6 +659,21 @@ export async function updateDraftText(draftId: string, source: 'bot_delegation' 
           meta.generated_draft = editedText;
           await db.executeSafe(`UPDATE follow_up_tasks SET metadata = $1::jsonb WHERE id = $2 AND tenant_id = $3`, [JSON.stringify(meta), draftId, ctx.tenantId]);
         }
+      } else if (source === 'remarketing') {
+        const task = await db.executeSafe(`SELECT metadata FROM follow_up_tasks WHERE id = $1 AND tenant_id = $2`, [draftId, ctx.tenantId]);
+        if (task.length > 0) {
+          const meta = typeof task[0].metadata === 'string' ? JSON.parse(task[0].metadata) : task[0].metadata;
+          meta.draft_text = editedText;
+          await db.executeSafe(`UPDATE follow_up_tasks SET metadata = $1::jsonb WHERE id = $2 AND tenant_id = $3`, [JSON.stringify(meta), draftId, ctx.tenantId]);
+        } else {
+          const logItem = await db.executeSafe(`SELECT metadata FROM outreach_logs WHERE id = $1 AND tenant_id = $2`, [draftId, ctx.tenantId]);
+          if (logItem.length > 0) {
+            const meta = typeof logItem[0].metadata === 'string' ? JSON.parse(logItem[0].metadata) : logItem[0].metadata;
+            if (meta.draftText !== undefined) meta.draftText = editedText;
+            if (meta.draft !== undefined) meta.draft = editedText;
+            await db.executeSafe(`UPDATE outreach_logs SET metadata = $1::jsonb WHERE id = $2 AND tenant_id = $3`, [JSON.stringify(meta), draftId, ctx.tenantId]);
+          }
+        }
       }
 
       return { success: true };
@@ -652,15 +732,42 @@ export async function markDraftApproved(draftId: string, source: 'bot_delegation
           ]
         });
       } else if (source === 'remarketing') {
-        // Mark as approved in outreach logs so it disappears from queue
-        await db.executeSafe({
-          text: `INSERT INTO outreach_logs (tenant_id, opportunity_id, action, actor_id, metadata)
-                 VALUES ($1, $2, 'remarketing_draft_approved', $3, $4::jsonb)`,
-          values: [
-            ctx.tenantId, oppId, ctx.userId,
-            JSON.stringify({ remarketing_log_id: draftId, draft: editedText, zero_outbound_p0: true })
-          ]
-        });
+        const task = await db.executeSafe(`SELECT metadata FROM follow_up_tasks WHERE id = $1 AND tenant_id = $2`, [draftId, ctx.tenantId]);
+        if (task.length > 0) {
+          const meta = typeof task[0].metadata === 'string' ? JSON.parse(task[0].metadata) : task[0].metadata;
+          meta.sent = true;
+          meta.approved_at = new Date().toISOString();
+          meta.approved_draft = editedText;
+
+          await db.executeSafe(`
+            UPDATE follow_up_tasks 
+            SET status = 'completed', metadata = $1::jsonb, updated_at = NOW() 
+            WHERE id = $2 AND tenant_id = $3
+          `, [JSON.stringify(meta), draftId, ctx.tenantId]);
+
+          await db.executeSafe({
+            text: `INSERT INTO outreach_logs (tenant_id, opportunity_id, action, actor_id, metadata)
+                   VALUES ($1, $2, 'no_reply_automation_draft_approved', $3, $4::jsonb)`,
+            values: [
+              ctx.tenantId, oppId, ctx.userId,
+              JSON.stringify({
+                dedupe_key: meta.dedupe_key,
+                attempt_number: meta.attempt_number,
+                draft: editedText,
+                zero_outbound_p0: true
+              })
+            ]
+          });
+        } else {
+          await db.executeSafe({
+            text: `INSERT INTO outreach_logs (tenant_id, opportunity_id, action, actor_id, metadata)
+                   VALUES ($1, $2, 'remarketing_draft_approved', $3, $4::jsonb)`,
+            values: [
+              ctx.tenantId, oppId, ctx.userId,
+              JSON.stringify({ remarketing_log_id: draftId, draft: editedText, zero_outbound_p0: true })
+            ]
+          });
+        }
       } else if (source === 'greeting') {
         // Mark as approved in outreach logs so it disappears from queue
         await db.executeSafe({
@@ -734,14 +841,41 @@ export async function markDraftRejected(draftId: string, source: 'bot_delegation
           ]
         });
       } else if (source === 'remarketing') {
-        await db.executeSafe({
-          text: `INSERT INTO outreach_logs (tenant_id, opportunity_id, action, actor_id, metadata)
-                 VALUES ($1, $2, 'remarketing_draft_rejected', $3, $4::jsonb)`,
-          values: [
-            ctx.tenantId, oppId, ctx.userId,
-            JSON.stringify({ remarketing_log_id: draftId, reason: reason || 'Reddedildi', zero_outbound_p0: true })
-          ]
-        });
+        const task = await db.executeSafe(`SELECT metadata FROM follow_up_tasks WHERE id = $1 AND tenant_id = $2`, [draftId, ctx.tenantId]);
+        if (task.length > 0) {
+          const meta = typeof task[0].metadata === 'string' ? JSON.parse(task[0].metadata) : task[0].metadata;
+          meta.rejected_at = new Date().toISOString();
+          meta.reject_reason = reason || 'Reddedildi';
+
+          await db.executeSafe(`
+            UPDATE follow_up_tasks 
+            SET status = 'cancelled', skipped_reason = $1, metadata = $2::jsonb, updated_at = NOW() 
+            WHERE id = $3 AND tenant_id = $4
+          `, [`Rejected: ${reason || 'Reddedildi'}`, JSON.stringify(meta), draftId, ctx.tenantId]);
+
+          await db.executeSafe({
+            text: `INSERT INTO outreach_logs (tenant_id, opportunity_id, action, actor_id, metadata)
+                   VALUES ($1, $2, 'no_reply_automation_draft_rejected', $3, $4::jsonb)`,
+            values: [
+              ctx.tenantId, oppId, ctx.userId,
+              JSON.stringify({
+                dedupe_key: meta.dedupe_key,
+                attempt_number: meta.attempt_number,
+                reason: reason || 'Reddedildi',
+                zero_outbound_p0: true
+              })
+            ]
+          });
+        } else {
+          await db.executeSafe({
+            text: `INSERT INTO outreach_logs (tenant_id, opportunity_id, action, actor_id, metadata)
+                   VALUES ($1, $2, 'remarketing_draft_rejected', $3, $4::jsonb)`,
+            values: [
+              ctx.tenantId, oppId, ctx.userId,
+              JSON.stringify({ remarketing_log_id: draftId, reason: reason || 'Reddedildi', zero_outbound_p0: true })
+            ]
+          });
+        }
       } else if (source === 'greeting') {
         await db.executeSafe({
           text: `INSERT INTO outreach_logs (tenant_id, lead_id, opportunity_id, action, actor_id, metadata)
