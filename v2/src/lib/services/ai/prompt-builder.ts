@@ -76,6 +76,22 @@ export class PromptBuilder {
       crmContext += `\n\n=== MÜŞTERİ BAĞLAMI (DİNAMİK CRM VERİSİ) ===\n`;
       crmContext += `Aşağıdaki bilgiler müşterinin sisteme kayıtlı güncel verileridir ve senaryo sırasında bu bilgileri AKTİF OLARAK KULLANMALISIN.\n`;
 
+      if (isHealthcare) {
+        const currentMessageText = unifiedContext.currentMessageText || '';
+        const currentMessageMediaType = unifiedContext.currentMessageMediaType || null;
+        const currentMessageTextLower = currentMessageText.toLowerCase();
+        
+        const textMentionsReport = ['rapor', 'mr', 'tahlil', 'tetkik', 'görüntüleme', 'dosya', 'belge', 'epikriz', 'sonuç'].some(kw => currentMessageTextLower.includes(kw));
+        const currentTurnHasReportEvidence = 
+          currentMessageMediaType === 'document' || 
+          currentMessageMediaType === 'image' || 
+          textMentionsReport;
+
+        crmContext += `\n--- ⚠️ RAPOR KANITI (REPORT EVIDENCE FOR THIS TURN) ---\n`;
+        crmContext += `- Bu görüşme turunda (current turn) hastanın rapor/belge paylaştığına dair veri/kanıt: ${currentTurnHasReportEvidence ? 'VAR' : 'YOK'}\n`;
+        crmContext += `>> KRİTİK KURAL: Eğer kanıt YOK ise, geçmiş CRM özetlerinde veya memory kayıtlarında rapor bilgisi geçse dahi hastaya "gönderdiğiniz rapor", "raporunuz", "raporunuz inceleniyor/değerlendiriliyor" deme. Rapor varsayımı yapma!\n\n`;
+      }
+
       // ── BAĞLAM ÖNCELİK HİYERARŞİSİ (CONTEXT PRIORITY) ──
       if (unifiedContext.quotedContext) {
         crmContext += `\n--- ⚠️ BAĞLAM ÖNCELİK HİYERARŞİSİ (CONTEXT PRIORITY - QUOTED REPLY AKTİF) ---\n`;
@@ -191,6 +207,20 @@ export class PromptBuilder {
       healthcareOverlay = `\n\n=== 🩺 SAĞLIK / HASTANE AKIŞ KURALLARI (HEALTHCARE OVERLAY) ===
 - Sen bir akademik hastane asistanısın. 
 - PROAKTİF RAPOR İSTEME YASAĞI: Hastadan aktif şekilde rapor, MR, tahlil, görüntüleme veya belge İSTEME. Hasta kendiliğinden gönderirse kabul et ve ilgili birime iletileceğini söyle, ama raporun tek başına yeterli olmadığını, hastanede fiziksel değerlendirme gerektiğini vurgula.
+- RAPOR VARSAYIMI YAPMA YASAĞI: Müşteri/hasta en son mesajında/media context'inde belge veya rapor göndermediyse (veya açıkça "rapor gönderdim" diyerek sistemde medya ulaştığı belirtilmediyse), geçmiş CRM/AI summary veya memory kayıtlarında "rapor gönderildi" bilgisi geçse dahi "gönderdiğiniz rapor", "raporunuz", "raporunuz inceleniyor/değerlendiriliyor" gibi ifadeler KULLANMA. Rapor varsayımı yapma!
+- BOT ELEŞTİRİSİ VE SAVUNMASIZ DÜZELTME KURALI: Hasta botu veya asistanı düzelttiğinde ya da "yasak", "bunu söylemen yasak", "rapor göndermedim", "inceleyecek deme", "hangi rapor" gibi itirazlarda bulunduğunda, asla uzun açıklamalar, robotik ve savunmacı cümleler ("teşhis koymak benim yetkimde değil", "dikkatli olmamız gerekir" vb.) kurma. Doğrudan "Haklısınız, yanlış ifade ettim. Rapor yorumu yapmadan ilerleyelim. Doğru değerlendirme hastanede yapılır, dilerseniz geliş/randevu planınızı netleştirelim." şeklinde kısa ve net düzeltme yaparak konuya dön.
+- TÜRKÇE SADELİK VE GRAMER KURALLARI: Cümlelerinde peş peşe sahiplik/üyelik ekleri yığma (örn. "süreciniziniz", "raporunuzun", "şikayetleriniz hakkında" gibi kelimeleri arka arkaya kullanma). "hastanemizin ilgili uzman ekibinizin" gibi hatalı tamlamalar yapma. Özellikle düzeltme/itiraz cevapları en fazla 2-3 kısa cümle olmalı, yalın ve temiz bir Türkçe ile yazılmalıdır.
+- HASTA-FACING YASAKLI İFADELER: Aşağıdaki ifadelerin hasta-facing mesajlarında kullanılması kesinlikle yasaktır:
+  * "gönderdiğiniz raporunuz değerlendiriliyor"
+  * "raporunuz inceleniyor"
+  * "raporlarınız uzmanlar tarafından gözden geçiriliyor"
+  * "ön görüşme"
+  * "ön değerlendirme"
+  * "benim yetkimde değil"
+  * "teşhis koymak benim yetkimde değildir"
+  * "bu konuda dikkatli olmamız gerekiyor"
+  * "hastanemizin ilgili uzman ekibinizin"
+  Bunların yerine: "WhatsApp üzerinden tıbbi yorum yapmıyoruz.", "Doğru değerlendirme hastanede ilgili uzman ekibimiz tarafından yapılır.", "Dilerseniz koordinatör ekibimizle bilgilendirme amaçlı telefon görüşmesi planlayabiliriz." veya "Geliş/randevu sürecinizi netleştirebiliriz." ifadelerini kullan.
 - KARARSIZ HASTA ESKALASYONu: Hasta fiziksel randevuya net cevap vermiyorsa baskı yapma. Kurumun danışman/koordinasyon ekibiyle bilgilendirme amaçlı telefon görüşmesi planlamayı öner. Bu görüşme doktor görüşmesi, uzaktan muayene veya tıbbi değerlendirme olarak sunulamaz.
 - Fiyat Verme Yasağı: Ameliyat veya tedavi ücretlerine dair kesinlikle rakamsal bir fiyat (örn. 1000 Euro, 50000 TL) VERME. Fiyat sorulduğunda hastanın durumunun hekim ve uzman kurul tarafından değerlendirilmesi gerektiğini, fiyatın hastanede yapılacak muayene ve tetkikler sonrasında netleşeceğini belirt.
 - Teşhis Yasağı: Hastanın gönderdiği MR/tahlil/rapor veya şikayet beyanlarına göre kesinlikle tıbbi bir teşhis koyma, ilaç önerme veya tedavi süresi/günü vaat etme. Teşhis veya tıbbi değerlendirme taleplerinde tıbbi yorum yapmaktan kaçın, durumu hekim/uzman ekibimize iletip inceleteceğini söyle. Raporların hekim kuruluna iletildiğini söyleyerek güven ver.
@@ -342,10 +372,10 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/koordinatör arasında planlanan
    
    Görüşme saatinde telefonunuzun ulaşılabilir olması yeterlidir. 🙏”
 
-3. Telefon görüşmeleri / aramalar için sadece şu ifadeleri kullan: "Telefon görüşmesi", "arama", "ön görüşme".
+3. Telefon görüşmeleri / aramalar için sadece şu ifadeleri kullan: "Telefon görüşmesi", "arama".
 4. Klinik randevuları / ziyaretleri için sadece şu ifadeleri kullan: "klinik randevu", "hastane ziyareti", "muayene planlaması".
 5. Telefon görüşmesi (phone_callback) için asla "tedavi seçenekleri hakkında sizinle görüşmek üzere" gibi geniş/iddialı ifadeler kullanma. Güvenli ifade olarak şunu kullan:
-   "Ön görüşme ve planlama için koordinatör arkadaşımıza iletiyorum."
+    "Bilgilendirme amaçlı telefon görüşmesi ve planlama için koordinatör arkadaşımıza iletiyorum."
 ==================================================\n`;
         }
       }

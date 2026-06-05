@@ -103,7 +103,7 @@ export interface SignalInput {
 
 const SIGNAL_LABELS: Record<string, string> = {
   appointment_request: 'randevu talebi',
-  callback_requested: 'arama/ön görüşme talebi',
+  callback_requested: 'arama/telefon görüşmesi talebi',
   hot_lead: 'sıcak fırsat',
   report_sent: 'belge/rapor gönderdi',
   report_waiting: 'rapor bekleniyor',
@@ -288,7 +288,7 @@ export class SignalAggregator {
   private buildTaskTitle(group: TaskGroup, name: string): string {
     switch (group) {
       case 'appointment_followup':
-        return `📅 Randevu / Ön Görüşme Takibi — ${name}`;
+        return `📅 Randevu / Telefon Görüşmesi Takibi — ${name}`;
       case 'callback_followup':
         return `📞 Geri Arama Takibi — ${name}`;
       case 'doctor_review':

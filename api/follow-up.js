@@ -54,9 +54,9 @@ const followUpMessages = {
     // Kademe 0 (2 saat) — Nazik hatırlatma
     (n, dept) => `Mesajımızı gördünüz mü? ${dept ? dept + ' konusunda' : 'Sağlığınızla ilgili'} sizinle konuşmak istiyoruz 🙏`,
     // Kademe 1 (6 saat) — Sosyal kanıt + değer
-    (n, dept) => `Geçen ay ${dept || 'benzer şikayetle'} gelen hastalarımız tedavilerinden çok memnun kaldı. Sizin durumunuzu da değerlendirebiliriz — ücretsiz ön görüşme hakkınız var.`,
+    (n, dept) => `Geçen ay ${dept || 'benzer şikayetle'} gelen hastalarımız tedavilerinden çok memnun kaldı. Sizin durumunuzu da değerlendirebiliriz — dilerseniz koordinatör ekibimizle bilgilendirme amaçlı kısa bir telefon görüşmesi planlayabiliriz.`,
     // Kademe 2 (24 saat) — Son çağrı
-    (n, dept) => `Son hatırlatma 🙏 ${dept || 'Sağlık'} konusundaki ücretsiz ön değerlendirme hakkınız hala geçerli. Erken teşhis tedavi başarısını önemli ölçüde artırıyor. Bize yazmak ister misiniz?`,
+    (n, dept) => `Son hatırlatma 🙏 İlgilendiğiniz ${dept || 'sağlık'} konusuyla ilgili bilgilendirme amaçlı koordinatör ekibimizle telefon görüşmesi yapabilirsiniz. Bize yazmak ister misiniz?`,
   ],
   en: [
     (n, dept) => `Did you see our message? We'd love to discuss your ${dept || 'health'} concern 🙏`,
@@ -448,7 +448,7 @@ export default async function handler(req, res) {
       let recoveryMsg = null;
       
       if (days >= 28 && days <= 35) {
-        recoveryMsg = `Geçen ay ${dept} konusunda bize ulaşmıştınız. Durumunuzda bir değişiklik oldu mu? Ücretsiz ön değerlendirme hakkınız hala geçerli 🙏`;
+        recoveryMsg = `Geçen ay ${dept} konusunda bize ulaşmıştınız. Durumunuzda bir değişiklik oldu mu? Dilerseniz koordinatör ekibimizle bilgilendirme amaçlı telefon görüşmesi planlayabiliriz 🙏`;
       } else if (days >= 55 && days <= 65) {
         recoveryMsg = `Sağlığınız bizim için hala önemli 🙏 ${dept} konusunda uzman ekibimiz sizi değerlendirmeye hazır. İsterseniz size uygun bir zamanda sizi arayalım.`;
       } else if (days >= 85 && days <= 95) {
