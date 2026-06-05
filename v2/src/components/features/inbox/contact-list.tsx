@@ -26,12 +26,28 @@ import { getCountryFromPhone, normalizeCountryName, getCountryFlag } from "@/lib
 import NoReplyAutomationModal from "./no-reply-automation-modal";
 
 function getInitialsColor(name: string) {
+  const colors = [
+    "#51A5FA", // Soft Blue
+    "#17E17E", // Soft Green
+    "#FFAF1A", // Soft Yellow-Orange
+    "#FF6C5F", // Soft Red/Coral
+    "#B085FF", // Soft Purple
+    "#FF7BB0", // Soft Pink
+    "#00D0C6", // Soft Teal
+    "#8B9CA9", // Soft Slate/Grey
+    "#59C3FF", // Soft Light Blue
+    "#8AD75A", // Soft Lime-Green
+    "#FFA159", // Soft Peach
+    "#E289F2", // Soft Violet
+    "#22D3EE", // Soft Cyan
+    "#F43F5E", // Soft Rose
+  ];
   let hash = 0;
   for (let i = 0; i < name.length; i++) {
     hash = name.charCodeAt(i) + ((hash << 5) - hash);
   }
-  const h = Math.abs(hash) % 360;
-  return `hsl(${h}, 55%, 35%)`; // Premium elegant color
+  const index = Math.abs(hash) % colors.length;
+  return colors[index];
 }
 
 function getInitials(name: string) {
@@ -51,7 +67,6 @@ interface InitialsAvatarProps {
 }
 
 function InitialsAvatar({ name, channel, unread, lastMessageDirection, lastMessageModel }: InitialsAvatarProps) {
-  const initials = getInitials(name);
   const bgColor = getInitialsColor(name);
 
   // Check if bot is active (only bot overlay, no "sen/user" overlay)
@@ -62,11 +77,11 @@ function InitialsAvatar({ name, channel, unread, lastMessageDirection, lastMessa
     if (channel === 'whatsapp') {
       return (
         <span 
-          className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full border border-white shadow-sm flex items-center justify-center bg-[#25D366]"
+          className="absolute -bottom-1 -right-1 w-[22px] h-[22px] rounded-full border-2 border-white shadow-md flex items-center justify-center bg-[#25D366] select-none"
           title="WhatsApp"
         >
-          <svg className="w-3 h-3 text-white fill-current" viewBox="0 0 24 24">
-            <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946C.06 5.348 5.397.01 12.008.01c3.202.001 6.212 1.246 8.477 3.514 2.266 2.268 3.507 5.28 3.505 8.484-.004 6.657-5.34 11.997-11.953 11.997-2.005-.001-3.973-.502-5.724-1.457L0 24zm6.59-4.846c1.6.95 3.188 1.449 4.825 1.451 5.436 0 9.86-4.42 9.864-9.858.002-2.634-1.023-5.11-2.885-6.974C16.59 1.908 14.11 1.887 11.5 1.887c-5.44 0-9.866 4.418-9.87 9.856 0 1.702.449 3.366 1.305 4.82l-.995 3.637 3.707-.972zm12.338-7.07c-.093-.156-.343-.248-.717-.435-.373-.186-2.208-1.09-2.55-1.214-.343-.124-.593-.186-.843.186-.25.373-.966 1.214-1.184 1.462-.218.248-.435.279-.809.093-.373-.186-1.577-.58-3.003-1.853-1.11-1-.186-2.2-1.186-2.483.373-.093.25-.373.373-.559.124-.186.062-.373-.03-.559-.093-.186-.843-2.03-.966-2.33-.124-.31-.248-.279-.343-.279-.093-.001-.218-.001-.343-.001-.124 0-.343.047-.528.248-.186.202-.715.7-.715 1.707 0 1.007.73 1.984.83 2.122.1.138 1.44 2.214 3.49 3.093.488.209.868.335 1.164.429.49.156.937.134 1.29.08.393-.06 1.214-.496 1.385-.95.17-.456.17-.846.12-.927-.05-.081-.2-.13-.574-.316z"/>
+          <svg className="w-3.5 h-3.5 text-white" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L0 24l6.335-1.662c1.746.953 3.71 1.458 5.704 1.459h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
           </svg>
         </span>
       );
@@ -101,10 +116,12 @@ function InitialsAvatar({ name, channel, unread, lastMessageDirection, lastMessa
   return (
     <div className="relative mt-0.5 shrink-0 select-none">
       <div 
-        className="w-12 h-12 rounded-full flex items-center justify-center text-white text-[14px] font-bold shadow-[0_2px_8px_rgba(0,0,0,0.08)] relative"
+        className="w-12 h-12 rounded-full flex items-center justify-center text-white shadow-[0_2px_8px_rgba(0,0,0,0.06)] relative"
         style={{ backgroundColor: bgColor }}
       >
-        {initials}
+        <svg className="w-6.5 h-6.5 text-white/90" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10zm-7 9a7 7 0 0 1 14 0c0 .55-.45 1-1 1H6c-.55 0-1-.45-1-1z" />
+        </svg>
         
         {/* Bot overlay icon - only if last message was by bot */}
         {isBotActiveMessage && (
@@ -256,6 +273,7 @@ export function ContactRail() {
   const isRealtimeDown = useDiagnosticsStore((state) => state.isRealtimeDown);
   const [errorToast, setErrorToast] = useState<string | null>(null);
   const [isAutomationOpen, setIsAutomationOpen] = useState(false);
+  const [isNoReplyDropdownOpen, setIsNoReplyDropdownOpen] = useState(false);
 
   // Bulk UI local states
   const [contextMenu, setContextMenu] = useState<{
@@ -558,7 +576,7 @@ const handleBulkArchive = async (archive: boolean) => {
   };
 
   return (
-    <div className={`w-full md:w-[350px] lg:w-[380px] shrink-0 border-r flex flex-col h-full z-10 q-glass shadow-sm ${mobileView === "list" ? "flex" : "hidden md:flex"}`}
+    <div className={`w-full md:w-[390px] lg:w-[420px] shrink-0 border-r flex flex-col h-full z-10 q-glass shadow-sm ${mobileView === "list" ? "flex" : "hidden md:flex"}`}
       style={{ borderColor: "var(--q-border-default)" }}
     >
       {/* ── Header ── */}
@@ -574,14 +592,18 @@ const handleBulkArchive = async (archive: boolean) => {
                   setSelectionMode(true);
                 }
               }}
-              className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-lg border transition-all cursor-pointer hover:bg-black/5 active:scale-95"
-              style={{
-                color: isSelectionMode ? "var(--q-text-secondary)" : "var(--q-blue)",
+              className={isSelectionMode 
+                ? "px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-lg border transition-all cursor-pointer hover:bg-black/5 active:scale-95"
+                : "p-1.5 rounded-lg text-gray-500 hover:text-gray-700 hover:bg-black/5 active:scale-95 transition-all cursor-pointer flex items-center justify-center"
+              }
+              style={isSelectionMode ? {
+                color: "var(--q-text-secondary)",
                 borderColor: "var(--q-border-default)",
-                background: isSelectionMode ? "rgba(0,0,0,0.02)" : "rgba(0,122,255,0.05)"
-              }}
+                background: "rgba(0,0,0,0.02)"
+              } : undefined}
+              title={isSelectionMode ? "Seçimi İptal Et" : "Seçenekler"}
             >
-              {isSelectionMode ? "İptal" : "Seç"}
+              {isSelectionMode ? "İptal" : <MoreVertical className="w-4 h-4" />}
             </button>
             {isRealtimeDown && (
               <div
@@ -607,18 +629,13 @@ const handleBulkArchive = async (archive: boolean) => {
               style={{ color: "var(--q-blue)" }}
             >
               <option value="all">Tüm Aşamalar</option>
-              <option value="unread">Okunmamış</option>
-              <option value="noReply">⏳ Cevap Bekleyenler (Tümü)</option>
-              <option value="noReply_3h">⏳ Cevap Bekleyenler (3s+)</option>
-              <option value="noReply_6h">⏳ Cevap Bekleyenler (6s+)</option>
-              <option value="noReply_9h">⏳ Cevap Bekleyenler (9s+)</option>
-              <option value="noReply_24h">⏳ Cevap Bekleyenler (24s+)</option>
               <option value="new">Yeni Lead</option>
               <option value="contacted">İletişime Geçildi</option>
               <option value="responded">Yanıt Alındı</option>
               <option value="discovery">Keşif / Bilgi</option>
               <option value="appointed">Randevu Aldı</option>
               <option value="lost">Kaybedildi</option>
+              <option value="archived">📁 Arşiv</option>
             </select>
             <button
               onClick={() => setIsAutomationOpen(true)}
@@ -666,19 +683,102 @@ const handleBulkArchive = async (archive: boolean) => {
         </div>
 
         {/* Segment Quick Filters */}
-        <div className="flex p-0.5 mt-2.5 rounded-xl bg-black/[0.04] p-1 gap-1">
+        <div className="flex p-0.5 mt-2.5 rounded-xl bg-black/[0.04] p-1 gap-1 relative">
           {[
             { id: "all", label: "Tümü" },
             { id: "unread", label: "Okunmamış" },
-            { id: "favorites", label: "⭐ Favoriler" },
-            { id: "archived", label: "📁 Arşiv" }
+            { id: "botActive", label: "🤖 Botta" }
           ].map((tab) => (
             <button
               key={tab.id}
               onClick={() => {
                 setStageFilter(tab.id);
               }}
-              className="flex-1 py-1 text-[11px] font-bold rounded-lg transition-all text-center whitespace-nowrap cursor-pointer select-none"
+              className="flex-1 py-1 text-[11px] font-bold rounded-lg transition-all text-center whitespace-nowrap cursor-pointer select-none px-1"
+              style={{
+                background: stageFilter === tab.id ? "white" : "transparent",
+                color: stageFilter === tab.id ? "var(--q-blue)" : "var(--q-text-secondary)",
+                boxShadow: stageFilter === tab.id ? "0 1px 3px rgba(0,0,0,0.08)" : "none"
+              }}
+            >
+              {tab.label}
+            </button>
+          ))}
+
+          {/* Cevap Bekleyenler Dropdown Tab */}
+          {(() => {
+            const isNoReplyActive = stageFilter.startsWith("noReply");
+            const getNoReplyLabel = () => {
+              if (stageFilter === "noReply_3h") return "⏳ 3s+";
+              if (stageFilter === "noReply_6h") return "⏳ 6s+";
+              if (stageFilter === "noReply_9h") return "⏳ 9s+";
+              if (stageFilter === "noReply_24h") return "⏳ 24s+";
+              return "⏳ Cevap";
+            };
+
+            return (
+              <div className="relative flex-1 flex">
+                <button
+                  onClick={() => {
+                    if (!isNoReplyActive) {
+                      setStageFilter("noReply");
+                    }
+                    setIsNoReplyDropdownOpen((prev) => !prev);
+                  }}
+                  className="w-full py-1 text-[11px] font-bold rounded-lg transition-all text-center whitespace-nowrap cursor-pointer select-none flex items-center justify-center gap-0.5 px-1"
+                  style={{
+                    background: isNoReplyActive ? "white" : "transparent",
+                    color: isNoReplyActive ? "var(--q-blue)" : "var(--q-text-secondary)",
+                    boxShadow: isNoReplyActive ? "0 1px 3px rgba(0,0,0,0.08)" : "none"
+                  }}
+                >
+                  <span>{getNoReplyLabel()}</span>
+                  <ChevronDown className="w-2.5 h-2.5 shrink-0 opacity-75" />
+                </button>
+
+                {isNoReplyDropdownOpen && (
+                  <>
+                    <div className="fixed inset-0 z-20" onClick={() => setIsNoReplyDropdownOpen(false)} />
+                    <div 
+                      className="absolute top-full left-0 mt-1.5 w-44 rounded-xl border bg-white shadow-xl py-1 z-30 animate-fade-in text-left"
+                      style={{ borderColor: "var(--q-border-default)" }}
+                    >
+                      {[
+                        { id: "noReply", label: "⏳ Tümü (Cevap Yok)" },
+                        { id: "noReply_3h", label: "⏳ 3 Saat Üzeri" },
+                        { id: "noReply_6h", label: "⏳ 6 Saat Üzeri" },
+                        { id: "noReply_9h", label: "⏳ 9 Saat Üzeri" },
+                        { id: "noReply_24h", label: "⏳ 24 Saat Üzeri" },
+                      ].map((opt) => (
+                        <button
+                          key={opt.id}
+                          onClick={() => {
+                            setStageFilter(opt.id);
+                            setIsNoReplyDropdownOpen(false);
+                          }}
+                          className="w-full text-left px-3 py-1.5 text-xs font-semibold hover:bg-black/5 transition-all text-gray-700 flex items-center justify-between cursor-pointer"
+                        >
+                          <span>{opt.label}</span>
+                          {stageFilter === opt.id && <Check className="w-3.5 h-3.5 text-[#007AFF]" />}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* Favoriler Tab */}
+          {[
+            { id: "favorites", label: "⭐ Favoriler" }
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => {
+                setStageFilter(tab.id);
+              }}
+              className="flex-1 py-1 text-[11px] font-bold rounded-lg transition-all text-center whitespace-nowrap cursor-pointer select-none px-1"
               style={{
                 background: stageFilter === tab.id ? "white" : "transparent",
                 color: stageFilter === tab.id ? "var(--q-blue)" : "var(--q-text-secondary)",
@@ -865,12 +965,14 @@ const handleBulkArchive = async (archive: boolean) => {
                           </span>
                         )}
                         {c.active_task_type && (() => {
-                          let label = "Cevap bekliyor";
-                          let colorClass = "bg-blue-50 text-[#007AFF] border-blue-100";
-                          if (c.active_task_type === 'no_reply_followup' || c.active_task_type === 'bot_handoff_followup') {
-                            label = "Takip taslağı";
-                            colorClass = "bg-amber-50 text-[#FF9500] border-amber-100";
-                          } else if (c.active_task_type === 'template_required_task') {
+                          if (c.active_task_type !== 'no_reply_followup' && 
+                              c.active_task_type !== 'bot_handoff_followup' && 
+                              c.active_task_type !== 'template_required_task') {
+                            return null;
+                          }
+                          let label = "Takip taslağı";
+                          let colorClass = "bg-amber-50 text-[#FF9500] border-amber-100";
+                          if (c.active_task_type === 'template_required_task') {
                             label = "Template gerekli";
                             colorClass = "bg-purple-50 text-[#AF52DE] border-purple-100";
                           }
@@ -900,68 +1002,72 @@ const handleBulkArchive = async (archive: boolean) => {
                     </div>
 
                     {/* Right Column: Time, Unread, Pin & Chevron Dropdown */}
-                    <div className="relative flex flex-col items-end justify-between self-stretch shrink-0 w-16 select-none min-h-[60px] text-right">
-                      {/* Top: Time */}
-                      <span 
-                        className={`text-[10px] tracking-wide whitespace-nowrap transition-all duration-150 pr-7 md:pr-0 md:group-hover:opacity-0 md:group-focus-within:opacity-0 ${
-                          c.unread > 0 ? "font-bold text-[#007AFF]" : "font-semibold text-gray-500"
-                        }`}
-                        style={{ color: c.unread > 0 ? "var(--q-blue, #007AFF)" : "var(--q-text-secondary)" }}
-                      >
-                        {c.formattedTime}
-                      </span>
-                      
-                      {/* Middle: Chevron Dropdown Trigger */}
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          e.preventDefault();
-                          const rect = e.currentTarget.getBoundingClientRect();
-                          
-                          // Position guard against screen edges
-                          const menuHeight = 220;
-                          const menuWidth = 192;
-                          const windowWidth = typeof window !== 'undefined' ? window.innerWidth : 1200;
-                          const windowHeight = typeof window !== 'undefined' ? window.innerHeight : 800;
-                          
-                          let calculatedX = rect.left;
-                          let calculatedY = rect.bottom;
-                          
-                          if (calculatedX + menuWidth > windowWidth) {
-                            calculatedX = windowWidth - menuWidth - 8;
-                          }
-                          if (calculatedY + menuHeight > windowHeight) {
-                            calculatedY = rect.top - menuHeight;
-                          }
-
-                          calculatedX = Math.max(8, calculatedX);
-                          calculatedY = Math.max(8, calculatedY);
-
-                          setContextMenu({
-                            x: calculatedX,
-                            y: calculatedY,
-                            conversationId: c.conversation_id,
-                            phone: c.id,
-                            patientName: c.name || c.id,
-                            isBotActive: !!c.isBotActive,
-                            unread: c.unread
-                          });
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
+                    <div className="relative flex flex-col justify-between self-stretch shrink-0 w-[84px] select-none py-0.5 text-right">
+                      {/* Row 1: Time & Option dropdown */}
+                      <div className="relative flex items-center justify-end h-5 mb-0.5 overflow-hidden">
+                        <span 
+                          className={`text-[10px] tracking-wide whitespace-nowrap transition-all duration-150 ${
+                            c.unread > 0 ? "font-bold text-[#007AFF]" : "font-semibold text-gray-500"
+                          }`}
+                          style={{ color: c.unread > 0 ? "var(--q-blue, #007AFF)" : "var(--q-text-secondary)" }}
+                        >
+                          {c.formattedTime}
+                        </span>
+                        
+                        {/* Chevron Dropdown Trigger */}
+                        <button
+                          onClick={(e) => {
                             e.stopPropagation();
-                          }
-                        }}
-                        className={`absolute top-0 right-0 p-1 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-black/5 active:scale-95 transition-all opacity-100 md:opacity-0 md:group-hover:opacity-100 group-focus-within:opacity-100 cursor-pointer flex items-center justify-center ${
-                          activePhone === c.id ? "md:opacity-100" : ""
-                        }`}
-                        title="Seçenekler"
-                      >
-                        <ChevronDown className="w-4 h-4" />
-                      </button>
+                            e.preventDefault();
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            
+                            // Position guard against screen edges
+                            const menuHeight = 220;
+                            const menuWidth = 192;
+                            const windowWidth = typeof window !== 'undefined' ? window.innerWidth : 1200;
+                            const windowHeight = typeof window !== 'undefined' ? window.innerHeight : 800;
+                            
+                            let calculatedX = rect.left;
+                            let calculatedY = rect.bottom;
+                            
+                            if (calculatedX + menuWidth > windowWidth) {
+                              calculatedX = windowWidth - menuWidth - 8;
+                            }
+                            if (calculatedY + menuHeight > windowHeight) {
+                              calculatedY = rect.top - menuHeight;
+                            }
 
-                      {/* Bottom indicators: Pinned or Unread */}
-                      <div className="flex items-center gap-1.5 mt-auto">
+                            calculatedX = Math.max(8, calculatedX);
+                            calculatedY = Math.max(8, calculatedY);
+
+                            setContextMenu({
+                              x: calculatedX,
+                              y: calculatedY,
+                              conversationId: c.conversation_id,
+                              phone: c.id,
+                              patientName: c.name || c.id,
+                              isBotActive: !!c.isBotActive,
+                              unread: c.unread
+                            });
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.stopPropagation();
+                            }
+                          }}
+                          className={`p-0.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-black/5 active:scale-95 transition-all duration-150 cursor-pointer flex items-center justify-center shrink-0 ml-1 ${
+                            activePhone === c.id 
+                              ? "w-5 opacity-100 scale-100" 
+                              : "w-5 md:w-0 opacity-100 md:opacity-0 scale-90 md:scale-90 overflow-hidden md:group-hover:w-5 md:group-hover:opacity-100 md:group-hover:scale-100 group-focus-within:w-5 group-focus-within:opacity-100 group-focus-within:scale-100"
+                          }`}
+                          title="Seçenekler"
+                        >
+                          <ChevronDown className="w-4 h-4" />
+                        </button>
+                      </div>
+
+                      {/* Row 2: Pinned or Unread (Aligned with Message Preview) */}
+                      <div className="flex items-center justify-end gap-1.5 h-5">
                         {c.isPinned && (
                           <button
                             onClick={(e) => {
@@ -1007,6 +1113,9 @@ const handleBulkArchive = async (archive: boolean) => {
                           </span>
                         )}
                       </div>
+
+                      {/* Row 3: Spacer matching Status Badges Row height */}
+                      <div className="h-5 mt-2 flex-shrink-0" />
                     </div>
                   </div>
                 );
