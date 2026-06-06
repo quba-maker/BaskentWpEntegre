@@ -241,6 +241,22 @@ export default function FormsPage() {
   const [readinessLoading, setReadinessLoading] = useState(false);
   const hasUsableTemplate = readiness?.templateConfigExists === true && readiness?.templateNonCompliant !== true;
 
+  // DIAGNOSTIC LOG FOR RENDER STATE
+  useEffect(() => {
+    if (selectedForm?.id) {
+      console.log('[FORM_OUTREACH_CARD_RENDER_STATE]', {
+        selectedFormId: selectedForm?.id,
+        readiness,
+        templateConfigExists: readiness?.templateConfigExists,
+        templateName: readiness?.templateName,
+        templateLanguage: readiness?.templateLanguage,
+        templateNonCompliant: readiness?.templateNonCompliant,
+        templateSendable: readiness?.templateSendable,
+        hasUsableTemplate,
+      });
+    }
+  }, [selectedForm?.id, readiness, hasUsableTemplate]);
+
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncProgress, setSyncProgress] = useState({ status: '', progress: 0, message: '' });
 
