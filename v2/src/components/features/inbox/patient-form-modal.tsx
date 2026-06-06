@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { X, Calendar, Globe, Phone, FileText, ChevronDown, ChevronRight, Share2, ClipboardList, Info, HelpCircle } from "lucide-react";
 import { formatPhoneReadable } from "@/lib/utils/patient-name-resolver";
+import { normalizeCountryName } from "@/lib/utils/country";
 
 interface PatientFormModalProps {
   isOpen: boolean;
@@ -74,7 +75,7 @@ export function PatientFormModal({ isOpen, onClose, formData, patientName }: Pat
   const formDate = formData.date || rawObj.created_time || rawObj.timestamp || "Bilinmiyor";
   const platform = rawObj.platform || (rawObj.is_organic ? "Organik" : "Facebook / Meta");
   const phone = rawObj.phone_number || formData.raw?.phone_number || "";
-  const country = rawObj.country || "Belirtilmemiş";
+  const country = rawObj.country ? normalizeCountryName(rawObj.country) : "Belirtilmemiş";
   const age = formData.formAge || rawObj.age || rawObj.yas || "Belirtilmemiş";
 
   return createPortal(

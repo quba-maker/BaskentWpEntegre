@@ -51,7 +51,7 @@ export function normalizeCountry(
     countryConfirmationNeeded: false
   };
 
-  const cleanRaw = String(rawCountry || '').trim().toLowerCase();
+  const cleanRaw = String(rawCountry || '').replace(/\?+$/, '').trim().toLowerCase();
 
   // Try parsing raw string against explicit mappings
   if (cleanRaw && COUNTRY_MAPPINGS[cleanRaw]) {
@@ -88,7 +88,7 @@ export function normalizeCountry(
 
   if (rawCountry) {
     // If not matching, but has a value, return low confidence
-    result.country = rawCountry.trim();
+    result.country = rawCountry.replace(/\?+$/, '').trim();
     result.countryConfidence = 'low';
     result.countryConfirmationNeeded = true;
   } else {
@@ -138,7 +138,7 @@ export function resolvePatientCountryDetailed(ctx?: PatientCountryContext | null
     const fromPhone = getCountryFromPhone(ctx.phoneFallback);
     if (fromPhone) {
       fallbackRes.country = fromPhone.name;
-      fallbackRes.displayCountry = `${fromPhone.name}?`;
+      fallbackRes.displayCountry = fromPhone.name;
       fallbackRes.countrySource = 'phone_prefix';
       fallbackRes.countryConfirmationNeeded = true;
     }
@@ -241,7 +241,7 @@ export function resolvePatientCountryDetailed(ctx?: PatientCountryContext | null
     if (fromPhone) {
       return {
         country: fromPhone.name,
-        displayCountry: `${fromPhone.name}?`,
+        displayCountry: fromPhone.name,
         countrySource: 'phone_prefix',
         countryConfidence: hasConflict ? 'low' : 'medium',
         countryConfirmationNeeded: true,
@@ -282,7 +282,7 @@ export function getCountryDisplayLabel(
   });
 
   return {
-    display: detailed.displayCountry,
+    display: detailed.displayCountry.replace(/\?+$/, ''),
     needsConfirmation: detailed.countryConfirmationNeeded
   };
 }

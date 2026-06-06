@@ -861,7 +861,21 @@ export function ContextPanel() {
                   </div>
                 ) : !formGreetingEligibility?.eligible ? (
                   <div className="text-[10px] font-semibold text-[#86868B] bg-black/[0.02] border border-black/5 rounded-xl p-2.5 leading-snug">
-                    ℹ️ Uygun Değil: {formGreetingEligibility?.reason || "Bu hasta karşılama için uygun kriterleri sağlamıyor."}
+                    {(() => {
+                      const reason = formGreetingEligibility?.reason || "Bu hasta karşılama için uygun kriterleri sağlamıyor.";
+                      const has72h = reason.includes("72 saat");
+                      if (has72h) {
+                        const hoursMatch = reason.match(/(\d+)\s*saat/);
+                        const hoursText = hoursMatch ? `${hoursMatch[1]} saat önce` : "";
+                        return (
+                          <div className="space-y-0.5">
+                            <p className="text-gray-700 font-semibold">Bu form için otomatik karşılama önerilmiyor. Form tarihi 72 saat sınırını aşmış.</p>
+                            {hoursText && <p className="text-[9px] text-[#86868B] font-medium">({hoursText} oluşturulmuş)</p>}
+                          </div>
+                        );
+                      }
+                      return <span>ℹ️ Uygun Değil: {reason}</span>;
+                    })()}
                   </div>
                 ) : !formGreetingDraftData ? (
                   <button
@@ -1012,7 +1026,7 @@ export function ContextPanel() {
                   <textarea
                     value={botDirectiveText}
                     onChange={(e) => setBotDirectiveText(e.target.value)}
-                    placeholder="Örn: Fiyat ver ama indirim yapma. Hastaya bütçe hassasiyetini sorgula..."
+                    placeholder="Örn: Hastanın geliş tarihini netleştir, kararsızsa telefon görüşmesine yönlendir."
                     disabled={isSavingBotSteering}
                     rows={3}
                     className="w-full bg-white/70 border rounded-xl p-2.5 text-[11.5px] text-[#1D1D1F] leading-normal resize-none outline-none focus:ring-2 focus:ring-indigo-500/25 transition-all shadow-sm"

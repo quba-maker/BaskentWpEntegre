@@ -1465,7 +1465,7 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
                 title={isEstimated ? "Tahmini ülke (telefon numarasından)" : undefined}
               >
                 <span className="text-xs">{countryInfo.flag}</span>
-                <span>{countryInfo.name}{isEstimated ? '?' : ''}</span>
+                <span>{countryInfo.name}</span>
               </span>
             );
           })()}

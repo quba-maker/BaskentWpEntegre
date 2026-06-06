@@ -1637,7 +1637,7 @@ export function ConversationViewport() {
                     }}
                     title={isEstimated ? "Tahmini ülke (telefon numarasından)" : undefined}
                   >
-                    {country.flag} {country.name}{isEstimated ? '?' : ''}
+                    {country.flag} {country.name}
                   </span>
                 );
               })()}

@@ -105,8 +105,8 @@ async function run() {
       await page.waitForTimeout(1000);
 
       console.log("Entering bot directive...");
-      const directiveInput = page.locator("textarea[placeholder*='Fiyat ver ama indirim yapma']").first();
-      await directiveInput.fill("Hastadan bütçe hassasiyetini sorgula");
+      const directiveInput = page.locator("textarea[placeholder*='geliş tarihini']").first();
+      await directiveInput.fill("Hastanın geliş tarihini netleştir, telefon araması planla.");
       await page.waitForTimeout(1000);
 
       console.log("Capturing directive input view...");

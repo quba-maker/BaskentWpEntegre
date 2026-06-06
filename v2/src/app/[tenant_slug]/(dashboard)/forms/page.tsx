@@ -774,7 +774,7 @@ export default function FormsPage() {
                           }}
                           title={country.isEstimated ? "Tahmini Ülke" : undefined}
                         >
-                          {country.flag} {country.name}{country.isEstimated ? '?' : ''}
+                          {country.flag} {country.name}
                         </span>
                       )}
                       {form.isBotActive && (
@@ -920,7 +920,7 @@ export default function FormsPage() {
                           }}
                           title={c.isEstimated ? "Tahmini ülke (telefon numarasından)" : undefined}
                         >
-                          {c.flag} {c.name}{c.isEstimated ? '?' : ''}
+                          {c.flag} {c.name}
                         </span>
                       );
                     })()}
@@ -1456,7 +1456,7 @@ export default function FormsPage() {
                               }}
                               title={country.isEstimated ? "Tahmini Ülke" : undefined}
                             >
-                              {country.flag} {country.name}{country.isEstimated ? '?' : ''}
+                              {country.flag} {country.name}
                             </span>
                           </p>
                         </div>
