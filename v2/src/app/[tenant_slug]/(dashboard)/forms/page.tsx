@@ -1098,8 +1098,8 @@ export default function FormsPage() {
                             🟢 Sistemde aktif şablon var: {readiness.templateName || 'Belirsiz'}
                           </span>
                         ) : (
-                          <span data-testid="template-status-badge" className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
-                            ⚠️ Şablon tanımlanmamış
+                          <span data-testid="template-status-badge" className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                            🟠 Şablon Eklenmeli
                           </span>
                         )}
                         
@@ -1128,17 +1128,15 @@ export default function FormsPage() {
                       )}
 
                       {/* Info Text Logic */}
-                      <div className={`p-3 rounded-xl border text-[11px] font-semibold flex items-start gap-2.5 leading-relaxed ${hasUsableTemplate ? 'bg-blue-50 border-blue-200 text-blue-800' : 'bg-amber-50 border-amber-200 text-amber-800'}`}>
-                        <span className="text-sm shrink-0">{hasUsableTemplate ? '💬' : '⏳'}</span>
-                        <div data-testid="template-info-text">
-                          <p className={`font-bold ${hasUsableTemplate ? 'text-blue-900' : 'text-amber-900'}`}>WhatsApp Şablonu Gerekli</p>
-                          {hasUsableTemplate ? (
+                      {hasUsableTemplate && (
+                        <div className="p-3 rounded-xl border bg-blue-50 border-blue-200 text-blue-800 text-[11px] font-semibold flex items-start gap-2.5 leading-relaxed">
+                          <span className="text-sm shrink-0">💬</span>
+                          <div data-testid="template-info-text">
+                            <p className="font-bold text-blue-900">WhatsApp Şablonu Gerekli</p>
                             <p className="text-blue-700 font-medium">Kullanılacak şablon: {readiness.templateName}. Provider panelinde onaylı olduğundan emin olun.</p>
-                          ) : (
-                            <p className="text-amber-700 font-medium">Form Yönetimi / Şablon ayarlarından greeting template ekleyin.</p>
-                          )}
+                          </div>
                         </div>
-                      </div>
+                      )}
                     </div>
                   ) : !selectedForm.has_inbound_messages && (
                     <div className="flex gap-2 flex-wrap mb-1" data-testid="form-outreach-card">
