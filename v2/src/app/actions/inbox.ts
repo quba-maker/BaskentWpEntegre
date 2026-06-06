@@ -2927,6 +2927,62 @@ export async function getActiveBotDirectiveAction(conversationId: string) {
   });
 }
 
+export async function getActiveTasksForSteeringAction(conversationId: string) {
+  if (!conversationId) return { success: false, tasks: [] };
+
+  return withActionGuard(
+    { actionName: 'getActiveTasksForSteeringAction' },
+    async (ctx) => {
+      // 1. Verify conversation belongs to this tenant and fetch active_opportunity_id
+      const convRows = await ctx.db.executeSafe({
+        text: `SELECT id, active_opportunity_id FROM conversations 
+               WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+        values: [conversationId, ctx.tenantId]
+      }) as any[];
+
+      if (convRows.length === 0) {
+        return { success: false, error: "Konuşma bulunamadı veya yetkisiz erişim." };
+      }
+
+      const activeOpportunityId = convRows[0].active_opportunity_id;
+
+      // 2. Verify opportunity belongs to this tenant if activeOpportunityId is present
+      if (activeOpportunityId) {
+        const oppRows = await ctx.db.executeSafe({
+          text: `SELECT id FROM opportunities WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+          values: [activeOpportunityId, ctx.tenantId]
+        }) as any[];
+
+        if (oppRows.length === 0) {
+          // If opportunity doesn't match this tenant, do not use it for task queries
+          return { success: false, error: "Fırsat bulunamadı veya yetkisiz erişim." };
+        }
+      }
+
+      // 3. Fetch active tasks with strict tenant isolation, excluding bot_handoff_followup
+      const taskRows = await ctx.db.executeSafe({
+        text: `SELECT id, task_type, title, description, status, due_at, metadata, opportunity_id, conversation_id
+               FROM follow_up_tasks 
+               WHERE tenant_id = $1 
+                 AND status IN ('pending', 'in_progress')
+                 AND task_type != 'bot_handoff_followup'
+                 AND (
+                   conversation_id = $2 
+                   OR (opportunity_id = $3 AND opportunity_id IS NOT NULL)
+                 )
+               ORDER BY due_at ASC, created_at DESC`,
+        values: [ctx.tenantId, conversationId, activeOpportunityId || null]
+      }) as any[];
+
+      return { success: true, tasks: taskRows };
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, tasks: [], error: res.error };
+    return { success: true, tasks: res.data?.tasks || [] };
+  });
+}
+
+
 // ==========================================
 // A1.7d — Bulk operations server actions
 // ==========================================
