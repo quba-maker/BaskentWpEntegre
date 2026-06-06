@@ -393,6 +393,8 @@ export async function checkGreetingReadiness(leadId: string) {
           hasSoftDuplicate,
           hasUnsupportedVariables,
           draftText: resolved.rendered,
+          templateName: resolved.templateName,
+          templateLanguage: resolved.language,
           greetingSent
         }
       };
@@ -416,6 +418,8 @@ export async function checkGreetingReadiness(leadId: string) {
         hasSoftDuplicate: !!data.hasSoftDuplicate,
         hasUnsupportedVariables: !!data.hasUnsupportedVariables,
         draftText: (data.draftText || "") as string,
+        templateName: (data.templateName || "") as string,
+        templateLanguage: (data.templateLanguage || "") as string,
         greetingSent: !!data.greetingSent
       }
     };

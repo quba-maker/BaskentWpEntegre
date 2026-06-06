@@ -152,7 +152,7 @@ export class TemplateResolverService {
       if (ctx.formName) {
         const rows = await db.executeSafe({
           text: `SELECT id, name, language, body FROM message_templates
-                 WHERE tenant_id = $1 AND template_type = $4
+                 WHERE tenant_id = $1::uuid AND template_type = $4
                    AND form_name = $2 AND language = $3 AND is_active = true
                  ORDER BY created_at DESC LIMIT 1`,
           values: [ctx.tenantId, ctx.formName, lang, templateType]
@@ -174,7 +174,7 @@ export class TemplateResolverService {
       if (!resolved && ctx.department) {
         const rows = await db.executeSafe({
           text: `SELECT id, name, language, body FROM message_templates
-                 WHERE tenant_id = $1 AND template_type = $4
+                 WHERE tenant_id = $1::uuid AND template_type = $4
                    AND department = $2 AND language = $3 AND is_active = true
                    AND form_name IS NULL
                  ORDER BY created_at DESC LIMIT 1`,
@@ -197,7 +197,7 @@ export class TemplateResolverService {
       if (!resolved) {
         const defaultRows = await db.executeSafe({
           text: `SELECT id, name, language, body FROM message_templates
-                 WHERE tenant_id = $1 AND template_type = $3
+                 WHERE tenant_id = $1::uuid AND template_type = $3
                    AND language = $2 AND is_default = true AND is_active = true
                  LIMIT 1`,
           values: [ctx.tenantId, lang, templateType]
@@ -219,7 +219,7 @@ export class TemplateResolverService {
       if (!resolved && lang !== 'tr') {
         const trRows = await db.executeSafe({
           text: `SELECT id, name, language, body FROM message_templates
-                 WHERE tenant_id = $1 AND template_type = $2
+                 WHERE tenant_id = $1::uuid AND template_type = $2
                    AND language = 'tr' AND is_default = true AND is_active = true
                  LIMIT 1`,
           values: [ctx.tenantId, templateType]
@@ -241,7 +241,7 @@ export class TemplateResolverService {
       if (!resolved) {
         const anyRows = await db.executeSafe({
           text: `SELECT id, name, language, body FROM message_templates
-                 WHERE tenant_id = $1 AND template_type = $2 AND is_active = true
+                 WHERE tenant_id = $1::uuid AND template_type = $2 AND is_active = true
                  ORDER BY is_default DESC, created_at ASC LIMIT 1`,
           values: [ctx.tenantId, templateType]
         }) as any[];
@@ -351,7 +351,7 @@ export class TemplateResolverService {
       const rows = await db.executeSafe({
         text: `SELECT id, name, language, body, form_name, department, is_default
                FROM message_templates
-               WHERE tenant_id = $1 AND template_type = $2 AND is_active = true
+               WHERE tenant_id = $1::uuid AND template_type = $2 AND is_active = true
                ORDER BY is_default DESC, language ASC, name ASC`,
         values: [tenantId, templateType]
       }) as any[];

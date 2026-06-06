@@ -231,7 +231,12 @@ export default function FormsPage() {
     source: 'message_templates' | 'system_hardcoded' | 'none';
     isWithin24hWindow: boolean;
     hardBlockedBecausePatientAlreadyInbound: boolean;
+    hasHardDuplicate?: boolean;
+    hasSoftDuplicate?: boolean;
+    hasUnsupportedVariables?: boolean;
     draftText: string;
+    templateName?: string;
+    templateLanguage?: string;
     greetingSent: boolean;
   } | null>(null);
   const [readinessLoading, setReadinessLoading] = useState(false);
@@ -1053,7 +1058,7 @@ export default function FormsPage() {
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
-                            ⏳ 24s pencere kapalı: Şablonlu taslak gerekli
+                            ⏳ 24s pencere kapalı: WhatsApp template gerekli
                           </span>
                         )}
 
@@ -1064,7 +1069,7 @@ export default function FormsPage() {
                             </span>
                           ) : (
                             <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                              🟢 Şablon hazır
+                              🟢 Sistemde aktif şablon var: {readiness.templateName || 'Belirsiz'}
                             </span>
                           )
                         ) : (
@@ -1097,13 +1102,17 @@ export default function FormsPage() {
                         </div>
                       )}
 
-                      {/* Not sendable due to 24h closed and no approved template */}
-                      {!readiness.isWithin24hWindow && !readiness.approvedWhatsappTemplateAvailable && !readiness.hardBlockedBecausePatientAlreadyInbound && (
-                        <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-semibold flex items-start gap-2.5 leading-relaxed">
+                      {/* 24h closed warning + Template config missing/present warning */}
+                      {!readiness.isWithin24hWindow && !readiness.hardBlockedBecausePatientAlreadyInbound && (
+                        <div className={`p-3 rounded-xl border text-[11px] font-semibold flex items-start gap-2.5 leading-relaxed ${readiness.templateConfigExists ? 'bg-blue-50 border-blue-200 text-blue-800' : 'bg-amber-50 border-amber-200 text-amber-800'}`}>
                           <span className="text-sm shrink-0">⏳</span>
                           <div>
-                            <p className="font-bold text-amber-900">Onaylı Şablon Gerekli</p>
-                            <p className="text-amber-700 font-medium">24 saatlik WhatsApp iletişim penceresi kapalı olduğu için sadece Meta/360dialog onaylı şablon gönderilebilir. Onaylı şablon bulunmadığından gönderim kilitlenmiştir.</p>
+                            <p className={`font-bold ${readiness.templateConfigExists ? 'text-blue-900' : 'text-amber-900'}`}>WhatsApp Şablonu Gerekli</p>
+                            {readiness.templateConfigExists ? (
+                              <p className="text-blue-700 font-medium">Şablon sistemde tanımlı. Provider panelinde onaylı olduğundan emin olun. (Kullanılacak şablon: {readiness.templateName})</p>
+                            ) : (
+                              <p className="text-amber-700 font-medium">Form Yönetimi / Şablon ayarlarından greeting template ekleyin.</p>
+                            )}
                           </div>
                         </div>
                       )}
@@ -1111,7 +1120,7 @@ export default function FormsPage() {
                   ) : !selectedForm.has_inbound_messages && (
                     <div className="flex gap-2 flex-wrap mb-1">
                       <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
-                        ⏳ 24s pencere kapalı: Şablonlu taslak gerekli
+                        ⏳ 24s pencere kapalı: WhatsApp template gerekli
                       </span>
                       <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200">
                         📋 Şablon (Template) Gerekli
