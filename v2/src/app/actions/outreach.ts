@@ -211,7 +211,7 @@ export async function checkGreetingReadiness(leadId: string) {
         text: `SELECT l.id, l.phone_number, l.patient_name, l.form_name,
                       l.linked_opportunity_id, l.customer_id, l.country, l.raw_data, l.created_at
                FROM leads l
-               WHERE l.id = $1 AND l.tenant_id = $2`,
+               WHERE l.id = $1::uuid AND l.tenant_id = $2::uuid`,
         values: [leadId, ctx.tenantId]
       }) as any[];
 
@@ -229,7 +229,7 @@ export async function checkGreetingReadiness(leadId: string) {
       // 2. Check if patient has EVER sent inbound on this phone
       const inbounds = await ctx.db.executeSafe({
         text: `SELECT 1 FROM messages 
-               WHERE tenant_id = $1 AND RIGHT(phone_number, 10) = RIGHT($2, 10) AND direction = 'in'
+               WHERE tenant_id = $1::uuid AND RIGHT(phone_number, 10) = RIGHT($2, 10) AND direction = 'in'
                LIMIT 1`,
         values: [ctx.tenantId, phone]
       }) as any[];
@@ -240,7 +240,7 @@ export async function checkGreetingReadiness(leadId: string) {
       let conversationId = null;
       if (oppId) {
         const opp = await ctx.db.executeSafe({
-          text: `SELECT conversation_id FROM opportunities WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+          text: `SELECT conversation_id FROM opportunities WHERE id = $1::uuid AND tenant_id = $2::uuid LIMIT 1`,
           values: [oppId, ctx.tenantId]
         }) as any[];
         conversationId = opp[0]?.conversation_id || null;
@@ -248,7 +248,7 @@ export async function checkGreetingReadiness(leadId: string) {
 
       if (!conversationId) {
         const convRes = await ctx.db.executeSafe({
-          text: `SELECT id FROM conversations WHERE tenant_id = $1 AND RIGHT(phone_number, 10) = RIGHT($2, 10) LIMIT 1`,
+          text: `SELECT id FROM conversations WHERE tenant_id = $1::uuid AND RIGHT(phone_number, 10) = RIGHT($2, 10) LIMIT 1`,
           values: [ctx.tenantId, phone]
         }) as any[];
         conversationId = convRes[0]?.id || null;
@@ -260,12 +260,12 @@ export async function checkGreetingReadiness(leadId: string) {
           SELECT ol.action, ol.created_at
           FROM outreach_logs ol
           LEFT JOIN leads l ON l.id = ol.lead_id AND l.tenant_id = ol.tenant_id
-          WHERE ol.tenant_id = $1
+          WHERE ol.tenant_id = $1::uuid
             AND ol.action IN ('greeting_sent', 'template_sent', 'form_greeting_template_sent')
             AND (
-              ol.lead_id = $2
-              OR (ol.opportunity_id = $3 AND $3 IS NOT NULL)
-              OR (ol.conversation_id = $4 AND $4 IS NOT NULL)
+              ol.lead_id = $2::uuid
+              OR (ol.opportunity_id = $3::uuid AND $3 IS NOT NULL)
+              OR (ol.conversation_id = $4::uuid AND $4 IS NOT NULL)
               OR (
                 RIGHT(ol.metadata->>'phone', 10) = RIGHT($5, 10)
                 AND (l.form_name = $6 OR ol.metadata->>'form_name' = $6)
@@ -281,7 +281,7 @@ export async function checkGreetingReadiness(leadId: string) {
       // 5. Check Soft Duplicate (Outbound message exists)
       const outMessages = await ctx.db.executeSafe({
         text: `SELECT 1 FROM messages 
-               WHERE tenant_id = $1 AND RIGHT(phone_number, 10) = RIGHT($2, 10) AND direction = 'out'
+               WHERE tenant_id = $1::uuid AND RIGHT(phone_number, 10) = RIGHT($2, 10) AND direction = 'out'
                LIMIT 1`,
         values: [ctx.tenantId, phone]
       }) as any[];
@@ -1026,7 +1026,7 @@ export async function sendFormGreetingTemplateAction(
         text: `SELECT l.id, l.phone_number, l.patient_name, l.form_name,
                       l.linked_opportunity_id, l.customer_id, l.raw_data
                FROM leads l
-               WHERE l.id = $1 AND l.tenant_id = $2`,
+               WHERE l.id = $1::uuid AND l.tenant_id = $2::uuid`,
         values: [leadId, ctx.tenantId]
       }) as any[];
 
@@ -1053,7 +1053,7 @@ export async function sendFormGreetingTemplateAction(
       // Check if patient wrote to us (inbound)
       const inbounds = await ctx.db.executeSafe({
         text: `SELECT 1 FROM messages 
-               WHERE tenant_id = $1 AND RIGHT(phone_number, 10) = RIGHT($2, 10) AND direction = 'in' 
+               WHERE tenant_id = $1::uuid AND RIGHT(phone_number, 10) = RIGHT($2, 10) AND direction = 'in' 
                LIMIT 1`,
         values: [ctx.tenantId, phone]
       }) as any[];
@@ -1066,7 +1066,7 @@ export async function sendFormGreetingTemplateAction(
       let conversationId = null;
       if (oppId) {
         const opp = await ctx.db.executeSafe({
-          text: `SELECT conversation_id FROM opportunities WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+          text: `SELECT conversation_id FROM opportunities WHERE id = $1::uuid AND tenant_id = $2::uuid LIMIT 1`,
           values: [oppId, ctx.tenantId]
         }) as any[];
         conversationId = opp[0]?.conversation_id || null;
@@ -1074,7 +1074,7 @@ export async function sendFormGreetingTemplateAction(
 
       if (!conversationId) {
         const convRes = await ctx.db.executeSafe({
-          text: `SELECT id FROM conversations WHERE tenant_id = $1 AND RIGHT(phone_number, 10) = RIGHT($2, 10) LIMIT 1`,
+          text: `SELECT id FROM conversations WHERE tenant_id = $1::uuid AND RIGHT(phone_number, 10) = RIGHT($2, 10) LIMIT 1`,
           values: [ctx.tenantId, phone]
         }) as any[];
         conversationId = convRes[0]?.id || null;
@@ -1085,12 +1085,12 @@ export async function sendFormGreetingTemplateAction(
           SELECT ol.action 
           FROM outreach_logs ol
           LEFT JOIN leads l ON l.id = ol.lead_id AND l.tenant_id = ol.tenant_id
-          WHERE ol.tenant_id = $1
+          WHERE ol.tenant_id = $1::uuid
             AND ol.action IN ('greeting_sent', 'template_sent', 'form_greeting_template_sent')
             AND (
-              ol.lead_id = $2
-              OR (ol.opportunity_id = $3 AND $3 IS NOT NULL)
-              OR (ol.conversation_id = $4 AND $4 IS NOT NULL)
+              ol.lead_id = $2::uuid
+              OR (ol.opportunity_id = $3::uuid AND $3 IS NOT NULL)
+              OR (ol.conversation_id = $4::uuid AND $4 IS NOT NULL)
               OR (
                 RIGHT(ol.metadata->>'phone', 10) = RIGHT($5, 10)
                 AND (l.form_name = $6 OR ol.metadata->>'form_name' = $6)
@@ -1198,7 +1198,7 @@ export async function sendFormGreetingTemplateAction(
 
       if (finalOppId && !finalConvId) {
         const opp = await ctx.db.executeSafe({
-          text: `SELECT conversation_id FROM opportunities WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+          text: `SELECT conversation_id FROM opportunities WHERE id = $1::uuid AND tenant_id = $2::uuid LIMIT 1`,
           values: [finalOppId, ctx.tenantId]
         }) as any[];
         finalConvId = opp[0]?.conversation_id || null;
@@ -1207,7 +1207,7 @@ export async function sendFormGreetingTemplateAction(
       if (!finalConvId) {
         const suffixes = [phone.slice(-10)];
         const conv = await ctx.db.executeSafe({
-          text: `SELECT id FROM conversations WHERE tenant_id = $1 AND RIGHT(phone_number, 10) = ANY($2) LIMIT 1`,
+          text: `SELECT id FROM conversations WHERE tenant_id = $1::uuid AND RIGHT(phone_number, 10) = ANY($2) LIMIT 1`,
           values: [ctx.tenantId, suffixes]
         }) as any[];
         finalConvId = conv[0]?.id || null;
@@ -1230,7 +1230,7 @@ export async function sendFormGreetingTemplateAction(
                      last_message_status = 'sent',
                      last_message_direction = 'out',
                      message_count = COALESCE(message_count, 0) + 1
-                 WHERE id = $2 AND tenant_id = $3`,
+                 WHERE id = $2::uuid AND tenant_id = $3::uuid`,
           values: [templateText, finalConvId, ctx.tenantId]
         });
       }
@@ -1446,7 +1446,7 @@ export async function saveGreetingDraftInternal(leadId: string, approvedText: st
       const leads = await ctx.db.executeSafe({
         text: `SELECT l.id, l.phone_number, l.patient_name, l.linked_opportunity_id, l.customer_id
                FROM leads l
-               WHERE l.id = $1 AND l.tenant_id = $2`,
+               WHERE l.id = $1::uuid AND l.tenant_id = $2::uuid`,
         values: [leadId, ctx.tenantId]
       }) as any[];
 
@@ -1464,7 +1464,7 @@ export async function saveGreetingDraftInternal(leadId: string, approvedText: st
       // 2. Find conversation
       const convRes = await ctx.db.executeSafe({
         text: `SELECT id FROM conversations 
-               WHERE tenant_id = $1 AND RIGHT(phone_number, 10) = RIGHT($2, 10)
+               WHERE tenant_id = $1::uuid AND RIGHT(phone_number, 10) = RIGHT($2, 10)
                LIMIT 1`,
         values: [ctx.tenantId, phone]
       }) as any[];

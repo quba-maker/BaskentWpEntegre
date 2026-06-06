@@ -1152,112 +1152,124 @@ export default function FormsPage() {
                   )}
 
                   {/* Draft Textarea — visible after "Karşılama Hazırla" clicked */}
-                  {isDraftOpen && draftMessage !== null && (
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between mb-1">
-                        <div className="flex items-center gap-2">
-                          <Edit3 className="w-3.5 h-3.5 text-[#007AFF]" />
-                          <span className="text-[11px] font-bold text-[#007AFF] uppercase tracking-wider">Mesaj Taslağı — Düzenleyebilirsiniz</span>
-                        </div>
-                      </div>
-                      {/* C12: Template selector dropdown */}
-                      {templates.length > 1 && (
-                        <div className="flex items-center gap-2">
-                          <span className="text-[11px] font-semibold text-[#86868B] shrink-0">Şablon:</span>
-                          <select
-                             value={selectedTemplateId || ''}
-                             onChange={(e) => handleTemplateSelect(e.target.value)}
-                             className="flex-1 text-[12px] font-medium bg-[#F5F5F7] border border-black/10 rounded-lg px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-[#007AFF]/30 transition-all cursor-pointer appearance-none"
-                          >
-                            <option value="" disabled>Şablon seçin…</option>
-                            {templates.map((tpl: any) => (
-                              <option key={tpl.id} value={tpl.id}>{tpl.name}</option>
-                            ))}
-                          </select>
-                        </div>
-                      )}
-                      <textarea
-                        value={draftMessage}
-                        onChange={(e) => setDraftMessage(e.target.value)}
-                        rows={5}
-                        className="w-full bg-[#F5F5F7] border border-black/10 rounded-xl p-3 text-[13px] text-[#1D1D1F] font-medium focus:ring-2 focus:ring-[#25D366]/40 focus:border-[#25D366]/30 resize-none outline-none transition-all leading-relaxed"
-                        placeholder="Karşılama mesajınızı buraya yazın..."
-                      />
-
-                      {/* Bota Kısa Not/Direktif */}
-                      <div className="space-y-1 text-left">
-                        <label className="block text-[10.5px] font-bold text-[#86868B] uppercase tracking-wider">
-                          🤖 Bota kısa not/direktif ekle (opsiyonel)
-                        </label>
-                        <input
-                          type="text"
-                          value={botNote}
-                          onChange={(e) => setBotNote(e.target.value)}
-                          placeholder="Örn: Hastanın geliş tarihini netleştir, kararsızsa telefon görüşmesine yönlendir."
-                          className="w-full bg-[#F5F5F7] border border-black/10 rounded-xl px-3 py-2 text-[12px] text-[#1D1D1F] font-medium outline-none focus:ring-2 focus:ring-[#007AFF]/30 transition-all"
-                        />
-                        {!selectedForm.linked_conversation_id && (
-                          <span className="block text-[10px] text-amber-600 font-semibold leading-relaxed mt-0.5">
-                            ⚠️ Bu lead henüz sohbetle eşleşmediği için bot direktifi sadece iç not olarak kaydedildi.
+                  {isDraftOpen && draftMessage !== null && (() => {
+                    const originalTpl = templates.find((t: any) => t.id === selectedTemplateId);
+                    const isVariableless = originalTpl ? !originalTpl.body.includes('{{') : true;
+                    return (
+                      <div className="space-y-3">
+                        <div className="flex flex-col mb-1 text-left">
+                          <div className="flex items-center gap-2">
+                            <Edit3 className="w-3.5 h-3.5 text-[#007AFF]" />
+                            <span className="text-[11px] font-bold text-[#007AFF] uppercase tracking-wider">Şablon Önizlemesi</span>
+                          </div>
+                          <span className="text-[10px] text-[#86868B] mt-0.5 leading-relaxed">
+                            Bu alan seçili WhatsApp şablonunun önizlemesidir. Gerçek gönderimde onaylı template adı kullanılır.
                           </span>
+                        </div>
+                        {/* C12: Template selector dropdown */}
+                        {templates.length > 1 && (
+                          <div className="flex items-center gap-2">
+                            <span className="text-[11px] font-semibold text-[#86868B] shrink-0">Şablon:</span>
+                            <select
+                               value={selectedTemplateId || ''}
+                               onChange={(e) => handleTemplateSelect(e.target.value)}
+                               className="flex-1 text-[12px] font-medium bg-[#F5F5F7] border border-black/10 rounded-lg px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-[#007AFF]/30 transition-all cursor-pointer appearance-none"
+                            >
+                              <option value="" disabled>Şablon seçin…</option>
+                              {templates.map((tpl: any) => (
+                                <option key={tpl.id} value={tpl.id}>{tpl.name}</option>
+                              ))}
+                            </select>
+                          </div>
                         )}
-                      </div>
+                        <textarea
+                          value={draftMessage}
+                          onChange={(e) => setDraftMessage(e.target.value)}
+                          readOnly={isVariableless}
+                          rows={5}
+                          className={`w-full border border-black/10 rounded-xl p-3 text-[13px] text-[#1D1D1F] font-medium resize-none outline-none transition-all leading-relaxed ${
+                            isVariableless
+                              ? 'bg-[#F5F5F7] text-[#86868B] cursor-not-allowed'
+                              : 'bg-white focus:ring-2 focus:ring-[#25D366]/40 focus:border-[#25D366]/30'
+                          }`}
+                          placeholder="Karşılama mesajınızı buraya yazın..."
+                        />
 
-                      {/* Warning and Action Buttons */}
-                      <div className="space-y-2.5 pt-2 border-t border-black/5">
-                        {/* Primary Safe Action */}
-                        <button 
-                          onClick={() => handleSaveInternal(selectedForm)}
-                          disabled={outreachLoading === 'sending' || !draftMessage?.trim()}
-                          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl font-bold bg-[#007AFF] text-white shadow-[0_4px_14px_rgba(0,122,255,0.3)] hover:bg-[#0056b3] cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          {outreachLoading === 'sending' ? (
-                            <><RefreshCw className="w-4 h-4 animate-spin" /> Kaydediliyor...</>
-                          ) : (
-                            <><Save className="w-4 h-4" /> Taslağı İç Not Olarak Kaydet</>
+                        {/* Bota Kısa Not/Direktif */}
+                        <div className="space-y-1 text-left">
+                          <label className="block text-[10.5px] font-bold text-[#86868B] uppercase tracking-wider">
+                            🤖 Bota kısa not/direktif ekle (opsiyonel)
+                          </label>
+                          <input
+                            type="text"
+                            value={botNote}
+                            onChange={(e) => setBotNote(e.target.value)}
+                            placeholder="Örn: Hastanın geliş tarihini netleştir, kararsızsa telefon görüşmesine yönlendir."
+                            className="w-full bg-[#F5F5F7] border border-black/10 rounded-xl px-3 py-2 text-[12px] text-[#1D1D1F] font-medium outline-none focus:ring-2 focus:ring-[#007AFF]/30 transition-all"
+                          />
+                          {!selectedForm.linked_conversation_id && (
+                            <span className="block text-[10px] text-amber-600 font-semibold leading-relaxed mt-0.5">
+                              ⚠️ Bu lead için henüz sohbet oluşmadı. Bot notu sadece iç kayıt olarak saklanır.
+                            </span>
                           )}
-                        </button>
-
-                        {/* Soft / Hard Readiness Warnings */}
-                        {readiness && readiness.greetingSent && !readiness.hardBlockedBecausePatientAlreadyInbound && (
-                          <div className="text-[10px] font-bold text-[#FF9500] text-center bg-orange-50 border border-orange-100 rounded-lg py-1 px-2.5">
-                            ⚠️ Bu kişiye daha önce mesaj gönderilmiş olabilir.
-                          </div>
-                        )}
-                        {readiness && !readiness.templateSendable && readiness.templateNonCompliant && (
-                          <div className="text-[10px] font-bold text-[#FF3B30] text-center bg-red-50 border border-red-100 rounded-lg py-1 px-2.5">
-                            ⛔ Şablon Uyumsuz: {readiness.complianceWarning}
-                          </div>
-                        )}
-
-                        {/* WhatsApp Outbound Warning */}
-                        <div className="text-[10px] font-bold text-[#FF3B30] text-center bg-red-50 border border-red-100 rounded-lg py-1 px-2.5">
-                          ⚠️ Bu işlem hastaya gerçek WhatsApp mesajı gönderir. Lütfen şablonun onaylı olduğundan emin olun.
                         </div>
 
-                        <div className="flex gap-2">
+                        {/* Warning and Action Buttons */}
+                        <div className="space-y-2.5 pt-2 border-t border-black/5">
+                          {/* Primary Safe Action */}
                           <button 
-                            onClick={() => handleConfirmSend(selectedForm)}
-                            disabled={
-                              outreachLoading === 'sending' || 
-                              !draftMessage?.trim() || 
-                              (readiness !== null && !readiness.templateSendable)
-                            }
-                            className="flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-[12px] font-bold bg-[#F5F5F7] hover:bg-rose-50 hover:text-rose-600 text-[#1D1D1F] border border-[#D2D2D7] hover:border-rose-200 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                            onClick={() => handleSaveInternal(selectedForm)}
+                            disabled={outreachLoading === 'sending' || !draftMessage?.trim()}
+                            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl font-bold bg-[#007AFF] text-white shadow-[0_4px_14px_rgba(0,122,255,0.3)] hover:bg-[#0056b3] cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                           >
-                            <Send className="w-3.5 h-3.5" /> WhatsApp ile Gönder
+                            {outreachLoading === 'sending' ? (
+                              <><RefreshCw className="w-4 h-4 animate-spin" /> Kaydediliyor...</>
+                            ) : (
+                              <><Save className="w-4 h-4" /> Taslağı İç Not Olarak Kaydet</>
+                            )}
                           </button>
-                          <button 
-                            onClick={handleCancelDraft}
-                            disabled={outreachLoading === 'sending'}
-                            className="px-4 py-2 rounded-xl text-[12px] font-bold bg-black/[0.04] hover:bg-black/[0.08] text-[#1D1D1F] transition-colors cursor-pointer disabled:opacity-50"
-                          >
-                            İptal
-                          </button>
+
+                          {/* Soft / Hard Readiness Warnings */}
+                          {readiness && readiness.greetingSent && !readiness.hardBlockedBecausePatientAlreadyInbound && (
+                            <div className="text-[10px] font-bold text-[#FF9500] text-center bg-orange-50 border border-orange-100 rounded-lg py-1 px-2.5">
+                              ⚠️ Bu kişiye daha önce mesaj gönderilmiş olabilir.
+                            </div>
+                          )}
+                          {readiness && !readiness.templateSendable && readiness.templateNonCompliant && (
+                            <div className="text-[10px] font-bold text-[#FF3B30] text-center bg-red-50 border border-red-100 rounded-lg py-1 px-2.5">
+                              ⛔ Şablon Uyumsuz: {readiness.complianceWarning}
+                            </div>
+                          )}
+
+                          {/* WhatsApp Outbound Warning */}
+                          <div className="text-[10px] font-bold text-[#FF3B30] text-center bg-red-50 border border-red-100 rounded-lg py-1 px-2.5">
+                            ⚠️ Bu buton hastaya gerçek WhatsApp template mesajı gönderir.
+                          </div>
+
+                          <div className="flex gap-2">
+                            <button 
+                              onClick={() => handleConfirmSend(selectedForm)}
+                              disabled={
+                                outreachLoading === 'sending' || 
+                                !draftMessage?.trim() || 
+                                (readiness !== null && !readiness.templateSendable)
+                              }
+                              className="flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-[12px] font-bold bg-[#F5F5F7] hover:bg-rose-50 hover:text-rose-600 text-[#1D1D1F] border border-[#D2D2D7] hover:border-rose-200 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              <Send className="w-3.5 h-3.5" /> WhatsApp Şablonu ile Gönder
+                            </button>
+                            <button 
+                              onClick={handleCancelDraft}
+                              disabled={outreachLoading === 'sending'}
+                              className="px-4 py-2 rounded-xl text-[12px] font-bold bg-black/[0.04] hover:bg-black/[0.08] text-[#1D1D1F] transition-colors cursor-pointer disabled:opacity-50"
+                            >
+                              İptal
+                            </button>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  )}
+                    );
+                  })()}
 
                   {/* Action Buttons — Primary Row */}
                   {!isDraftOpen && (
