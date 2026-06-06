@@ -396,97 +396,9 @@ export function ContextPanel() {
     mutate((key) => Array.isArray(key) && key[0] === "conversations");
   };
 
-  // Categorize tasks for steering
-  const phoneTasks = steeringTasks.filter((task) => {
-    const isAppt = (task.task_type === 'callback_scheduled' && task.metadata?.appointment_type === 'clinic_visit') ||
-                   task.task_type === 'appointment_reminder' ||
-                   task.metadata?.appointment_type === 'clinic_visit';
-    return !isAppt && (
-      task.task_type === 'callback_scheduled' ||
-      task.task_type === 'call_patient' ||
-      task.metadata?.appointment_type === 'phone_call'
-    );
-  });
-
-  const apptTasks = steeringTasks.filter((task) => {
-    return (task.task_type === 'callback_scheduled' && task.metadata?.appointment_type === 'clinic_visit') ||
-           task.task_type === 'appointment_reminder' ||
-           task.metadata?.appointment_type === 'clinic_visit';
-  });
-
-  const getTaskUrgency = (task: any): number => {
-    const isOverdue = new Date(task.due_at).getTime() < Date.now();
-    const confirmationStatus = task.metadata?.confirmation_status;
-    if (isOverdue) return 4;
-    if (confirmationStatus === 'no_response') return 3;
-    if (confirmationStatus === 'pending') return 2;
-    return 1;
-  };
-
-  const sortedPhoneTasks = [...phoneTasks].sort((a, b) => getTaskUrgency(b) - getTaskUrgency(a));
-  const sortedApptTasks = [...apptTasks].sort((a, b) => getTaskUrgency(b) - getTaskUrgency(a));
-
-  const activePhoneTask = sortedPhoneTasks[0] || null;
-  const activeApptTask = sortedApptTasks[0] || null;
-
-  let phoneSuggestion: { title: string; text: string; isPassive?: boolean } | null = null;
-  if (activePhoneTask) {
-    const isOverdue = new Date(activePhoneTask.due_at).getTime() < Date.now();
-    const confirmationStatus = activePhoneTask.metadata?.confirmation_status;
-
-    if (isOverdue) {
-      phoneSuggestion = {
-        title: "🔄 Bota alternatif zaman sordur",
-        text: "Hastaya daha uygun bir telefon görüşmesi zamanı olup olmadığını sor. Kısa, yumuşak ve bilgilendirici yaz."
-      };
-    } else if (confirmationStatus === 'no_response') {
-      phoneSuggestion = {
-        title: "🔔 Bota kısa hatırlatma yaptır",
-        text: "Hastaya kısa ve nazik bir hatırlatma yap. Telefon görüşmesi için uygun olduğu zamanı paylaşabileceğini belirt. Baskı yapma."
-      };
-    } else if (confirmationStatus === 'pending') {
-      phoneSuggestion = {
-        title: "⏰ Bota telefon görüşmesini teyit ettir",
-        text: "Hastadan telefon görüşmesi için uygun gün ve saat aralığını kibarca teyit etmesini iste. Kısa ve net yaz. Rapor isteme, fiyat verme, doktor görüşmesi sözü verme."
-      };
-    } else if (confirmationStatus === 'confirmed') {
-      phoneSuggestion = {
-        title: "Telefon görüşmesi teyitli",
-        text: "",
-        isPassive: true
-      };
-    }
-  }
-
-  let apptSuggestion: { title: string; text: string; isPassive?: boolean } | null = null;
-  if (activeApptTask) {
-    const isReschedule = activeApptTask.metadata?.reschedule_requested === true || 
-                        activeApptTask.metadata?.reschedule === true;
-    const confirmationStatus = activeApptTask.metadata?.confirmation_status;
-
-    if (isReschedule) {
-      apptSuggestion = {
-        title: "📍 Bota yeni tarih/saat netleştirt",
-        text: "Hastaya randevu planlaması için uygun tarih ve saat aralığını sor. Kısa ve anlaşılır yaz. Baskı yapma."
-      };
-    } else if (confirmationStatus === 'no_response') {
-      apptSuggestion = {
-        title: "🔔 Bota randevu hatırlatması yaptır",
-        text: "Hastaya randevu planlaması için kısa ve nazik bir hatırlatma yap. Uygunluğunu paylaşabileceğini belirt."
-      };
-    } else if (confirmationStatus === 'pending') {
-      apptSuggestion = {
-        title: "🗓️ Bota randevu teyidi aldır",
-        text: "Hastadan randevu tarih ve saatini teyit etmesini kibarca iste. Kısa ve net yaz. Rapor isteme, fiyat verme, doktor görüşmesi sözü verme."
-      };
-    } else if (confirmationStatus === 'confirmed') {
-      apptSuggestion = {
-        title: "Randevu teyitli",
-        text: "",
-        isPassive: true
-      };
-    }
-  }
+  // Mapped steering suggestions from the server
+  const phoneSuggestion = steeringTasks.find(t => t.appointment_type === 'phone_call') || null;
+  const apptSuggestion = steeringTasks.find(t => t.appointment_type === 'clinic_visit') || null;
 
   // Parse tags
   let parsedTags: string[] = [];
@@ -1150,7 +1062,7 @@ export function ContextPanel() {
                               className="px-2.5 py-1.5 rounded-xl border bg-green-50/50 border-green-100 text-green-700 text-[10px] font-semibold flex items-center gap-1.5"
                             >
                               <Check className="w-3.5 h-3.5 text-green-600" />
-                              <span>{suggestion.title}</span>
+                              <span>{suggestion.passiveText}</span>
                             </div>
                           );
                         }
@@ -1161,13 +1073,13 @@ export function ContextPanel() {
                             className="p-2.5 rounded-xl border bg-white border-[#E5E5EA] flex flex-col gap-2 text-left shadow-sm"
                           >
                             <div className="space-y-0.5">
-                              <span className="block text-[10.5px] font-bold text-[#1D1D1F]">{suggestion.title}</span>
-                              <span className="block text-[10px] text-[#86868B] leading-relaxed font-medium">"{suggestion.text}"</span>
+                              <span className="block text-[10.5px] font-bold text-[#1D1D1F]">{suggestion.suggestionTitle}</span>
+                              <span className="block text-[10px] text-[#86868B] leading-relaxed font-medium">"{suggestion.suggestionText}"</span>
                             </div>
                             <button
                               type="button"
                               onClick={() => {
-                                setBotDirectiveText(suggestion.text);
+                                setBotDirectiveText(suggestion.suggestionText || "");
                                 directiveTextareaRef.current?.focus();
                               }}
                               className="self-end px-2.5 py-1 bg-[#F5F5F7] hover:bg-[#E5E5EA] text-[#1D1D1F] text-[9.5px] font-bold rounded-lg cursor-pointer transition-all active:scale-95 border border-[#D2D2D7]"

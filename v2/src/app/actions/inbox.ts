@@ -2926,7 +2926,6 @@ export async function getActiveBotDirectiveAction(conversationId: string) {
     return { success: true, directive: res.data?.directive as string | null };
   });
 }
-
 export async function getActiveTasksForSteeringAction(conversationId: string) {
   if (!conversationId) return { success: false, tasks: [] };
 
@@ -2961,7 +2960,7 @@ export async function getActiveTasksForSteeringAction(conversationId: string) {
 
       // 3. Fetch active tasks with strict tenant isolation, excluding bot_handoff_followup
       const taskRows = await ctx.db.executeSafe({
-        text: `SELECT id, task_type, title, description, status, due_at, metadata, opportunity_id, conversation_id
+        text: `SELECT id, task_type, due_at, metadata
                FROM follow_up_tasks 
                WHERE tenant_id = $1 
                  AND status IN ('pending', 'in_progress')
@@ -2974,14 +2973,127 @@ export async function getActiveTasksForSteeringAction(conversationId: string) {
         values: [ctx.tenantId, conversationId, activeOpportunityId || null]
       }) as any[];
 
-      return { success: true, tasks: taskRows };
+      // Map on the server side
+      const phoneTasks = taskRows.filter((task) => {
+        const isAppt = (task.task_type === 'callback_scheduled' && task.metadata?.appointment_type === 'clinic_visit') ||
+                       task.task_type === 'appointment_reminder' ||
+                       task.metadata?.appointment_type === 'clinic_visit';
+        return !isAppt && (
+          task.task_type === 'callback_scheduled' ||
+          task.task_type === 'call_patient' ||
+          task.metadata?.appointment_type === 'phone_call'
+        );
+      });
+
+      const apptTasks = taskRows.filter((task) => {
+        return (task.task_type === 'callback_scheduled' && task.metadata?.appointment_type === 'clinic_visit') ||
+               task.task_type === 'appointment_reminder' ||
+               task.metadata?.appointment_type === 'clinic_visit';
+      });
+
+      const getTaskUrgency = (task: any): number => {
+        const isOverdue = new Date(task.due_at).getTime() < Date.now();
+        const confirmationStatus = task.metadata?.confirmation_status;
+        if (isOverdue) return 4;
+        if (confirmationStatus === 'no_response') return 3;
+        if (confirmationStatus === 'pending') return 2;
+        return 1;
+      };
+
+      const sortedPhoneTasks = [...phoneTasks].sort((a, b) => getTaskUrgency(b) - getTaskUrgency(a));
+      const sortedApptTasks = [...apptTasks].sort((a, b) => getTaskUrgency(b) - getTaskUrgency(a));
+
+      const activePhoneTask = sortedPhoneTasks[0] || null;
+      const activeApptTask = sortedApptTasks[0] || null;
+
+      const suggestions: any[] = [];
+
+      if (activePhoneTask) {
+        const isOverdue = new Date(activePhoneTask.due_at).getTime() < Date.now();
+        const confirmationStatus = activePhoneTask.metadata?.confirmation_status;
+        
+        let title: string | null = null;
+        let text: string | null = null;
+        let passiveText: string | null = null;
+        let isPassive = false;
+
+        if (isOverdue) {
+          title = "🔄 Bota alternatif zaman sordur";
+          text = "Hastaya daha uygun bir telefon görüşmesi zamanı olup olmadığını sor. Kısa, yumuşak ve bilgilendirici yaz.";
+        } else if (confirmationStatus === 'no_response') {
+          title = "🔔 Bota kısa hatırlatma yaptır";
+          text = "Hastaya kısa ve nazik bir hatırlatma yap. Telefon görüşmesi için uygun olduğu zamanı paylaşabileceğini belirt. Baskı yapma.";
+        } else if (confirmationStatus === 'pending') {
+          title = "⏰ Bota telefon görüşmesini teyit ettir";
+          text = "Hastadan telefon görüşmesi için uygun gün ve saat aralığını kibarca teyit etmesini iste. Kısa ve net yaz. Rapor isteme, fiyat verme, doktor görüşmesi sözü verme.";
+        } else if (confirmationStatus === 'confirmed') {
+          title = "Telefon görüşmesi teyitli";
+          passiveText = "Telefon görüşmesi teyitli";
+          isPassive = true;
+        }
+
+        if (title) {
+          suggestions.push({
+            id: activePhoneTask.id,
+            task_type: activePhoneTask.task_type,
+            due_at: activePhoneTask.due_at,
+            appointment_type: activePhoneTask.metadata?.appointment_type || 'phone_call',
+            confirmation_status: confirmationStatus || null,
+            suggestionTitle: title,
+            suggestionText: text,
+            passiveText,
+            isPassive
+          });
+        }
+      }
+
+      if (activeApptTask) {
+        const isReschedule = activeApptTask.metadata?.reschedule_requested === true || 
+                            activeApptTask.metadata?.reschedule === true;
+        const confirmationStatus = activeApptTask.metadata?.confirmation_status;
+
+        let title: string | null = null;
+        let text: string | null = null;
+        let passiveText: string | null = null;
+        let isPassive = false;
+
+        if (isReschedule) {
+          title = "📍 Bota yeni tarih/saat netleştirt";
+          text = "Hastaya randevu planlaması için uygun tarih ve saat aralığını sor. Kısa ve anlaşılır yaz. Baskı yapma.";
+        } else if (confirmationStatus === 'no_response') {
+          title = "🔔 Bota randevu hatırlatması yaptır";
+          text = "Hastaya randevu planlaması için kısa ve nazik bir hatırlatma yap. Uygunluğunu paylaşabileceğini belirt.";
+        } else if (confirmationStatus === 'pending') {
+          title = "🗓️ Bota randevu teyidi aldır";
+          text = "Hastadan randevu tarih ve saatini teyit etmesini kibarca iste. Kısa ve net yaz. Rapor isteme, fiyat verme, doktor görüşmesi sözü verme.";
+        } else if (confirmationStatus === 'confirmed') {
+          title = "Randevu teyitli";
+          passiveText = "Randevu teyitli";
+          isPassive = true;
+        }
+
+        if (title) {
+          suggestions.push({
+            id: activeApptTask.id,
+            task_type: activeApptTask.task_type,
+            due_at: activeApptTask.due_at,
+            appointment_type: activeApptTask.metadata?.appointment_type || 'clinic_visit',
+            confirmation_status: confirmationStatus || null,
+            suggestionTitle: title,
+            suggestionText: text,
+            passiveText,
+            isPassive
+          });
+        }
+      }
+
+      return { success: true, tasks: suggestions };
     }
   ).then(res => {
     if (!res.success) return { success: false, tasks: [], error: res.error };
     return { success: true, tasks: res.data?.tasks || [] };
   });
 }
-
 
 // ==========================================
 // A1.7d — Bulk operations server actions
