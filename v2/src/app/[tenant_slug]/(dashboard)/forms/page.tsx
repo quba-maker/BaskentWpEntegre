@@ -1077,7 +1077,7 @@ export default function FormsPage() {
                   {readinessLoading ? (
                     <div className="flex gap-2 flex-wrap mb-1">
                       <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-gray-50 text-gray-500 border border-gray-200 animate-pulse">
-                        ⏳ Uygunluk durumu kontrol ediliyor...
+                        ⏳ Şablon durumu kontrol ediliyor...
                       </span>
                     </div>
                   ) : readiness ? (

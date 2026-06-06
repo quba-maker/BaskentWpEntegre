@@ -421,26 +421,39 @@ export async function checkGreetingReadiness(leadId: string) {
   ).then(res => {
     if (!res.success) return { success: false as const, error: res.error || "Kontrol başarısız." };
     const data = (res.data || {}) as any;
+    const finalData = {
+      draftTemplateAvailable: !!data.draftTemplateAvailable,
+      approvedWhatsappTemplateAvailable: !!data.approvedWhatsappTemplateAvailable,
+      templateConfigExists: !!data.templateConfigExists,
+      templateSendable: !!data.templateSendable,
+      templateNonCompliant: !!data.templateNonCompliant,
+      complianceWarning: (data.complianceWarning || null) as string | null,
+      source: (data.source || 'none') as 'message_templates' | 'system_hardcoded' | 'none',
+      isWithin24hWindow: !!data.isWithin24hWindow,
+      hardBlockedBecausePatientAlreadyInbound: !!data.hardBlockedBecausePatientAlreadyInbound,
+      hasHardDuplicate: !!data.hasHardDuplicate,
+      hasSoftDuplicate: !!data.hasSoftDuplicate,
+      hasUnsupportedVariables: !!data.hasUnsupportedVariables,
+      draftText: (data.draftText || "") as string,
+      templateName: (data.templateName || "") as string,
+      templateLanguage: (data.templateLanguage || "") as string,
+      greetingSent: !!data.greetingSent
+    };
+
+    console.info('[GREETING_READINESS_RESULT]', {
+      leadId: leadId.substring(0, 8) + '***',
+      templateConfigExists: finalData.templateConfigExists,
+      templateName: finalData.templateName,
+      templateLanguage: finalData.templateLanguage,
+      templateNonCompliant: finalData.templateNonCompliant,
+      templateSendable: finalData.templateSendable,
+      isWithin24hWindow: finalData.isWithin24hWindow,
+      source: finalData.source
+    });
+
     return {
       success: true as const,
-      data: {
-        draftTemplateAvailable: !!data.draftTemplateAvailable,
-        approvedWhatsappTemplateAvailable: !!data.approvedWhatsappTemplateAvailable,
-        templateConfigExists: !!data.templateConfigExists,
-        templateSendable: !!data.templateSendable,
-        templateNonCompliant: !!data.templateNonCompliant,
-        complianceWarning: (data.complianceWarning || null) as string | null,
-        source: (data.source || 'none') as 'message_templates' | 'system_hardcoded' | 'none',
-        isWithin24hWindow: !!data.isWithin24hWindow,
-        hardBlockedBecausePatientAlreadyInbound: !!data.hardBlockedBecausePatientAlreadyInbound,
-        hasHardDuplicate: !!data.hasHardDuplicate,
-        hasSoftDuplicate: !!data.hasSoftDuplicate,
-        hasUnsupportedVariables: !!data.hasUnsupportedVariables,
-        draftText: (data.draftText || "") as string,
-        templateName: (data.templateName || "") as string,
-        templateLanguage: (data.templateLanguage || "") as string,
-        greetingSent: !!data.greetingSent
-      }
+      data: finalData
     };
   });
 }
