@@ -1085,3 +1085,91 @@ export async function sendMetaTemplateMessage(opportunityId: string, templateNam
     return { success: true };
   });
 }
+
+export async function saveGreetingDraftInternal(leadId: string, approvedText: string, coordinatorNote?: string) {
+  if (!leadId) return { success: false as const, error: "Lead ID gerekli." };
+  if (!approvedText || approvedText.trim().length === 0) return { success: false as const, error: "Taslak metni boş olamaz." };
+
+  return withActionGuard(
+    { actionName: 'saveGreetingDraftInternal' },
+    async (ctx) => {
+      // 1. Fetch lead
+      const leads = await ctx.db.executeSafe({
+        text: `SELECT l.id, l.phone_number, l.patient_name, l.linked_opportunity_id, l.customer_id
+               FROM leads l
+               WHERE l.id = $1 AND l.tenant_id = $2`,
+        values: [leadId, ctx.tenantId]
+      }) as any[];
+
+      if (leads.length === 0) {
+        return { success: false, error: "Lead bulunamadı." };
+      }
+
+      const lead = leads[0];
+      const phone = lead.phone_number;
+
+      if (!phone) {
+        return { success: false, error: "Telefon numarası eksik." };
+      }
+
+      // 2. Find conversation
+      const convRes = await ctx.db.executeSafe({
+        text: `SELECT id FROM conversations 
+               WHERE tenant_id = $1 AND RIGHT(phone_number, 10) = RIGHT($2, 10)
+               LIMIT 1`,
+        values: [ctx.tenantId, phone]
+      }) as any[];
+      const conversationId = convRes[0]?.id || null;
+
+      // 3. Write outreach log (Zero-Outbound, stage unchanged)
+      await ctx.db.executeSafe({
+        text: `INSERT INTO outreach_logs (tenant_id, lead_id, conversation_id, opportunity_id, action, channel, actor_id, metadata)
+               VALUES ($1, $2, $3, $4, 'form_greeting_draft_saved_internal', 'system', $5, $6)`,
+        values: [
+          ctx.tenantId,
+          leadId,
+          conversationId,
+          lead.linked_opportunity_id || null,
+          ctx.userId,
+          JSON.stringify({
+            zero_outbound: true,
+            patient_visible: false,
+            draft_only: true,
+            stage_changed: false,
+            source: "forms_page",
+            message_text: approvedText,
+            coordinator_note: coordinatorNote || null,
+            phone,
+            patient_name: lead.patient_name || ''
+          })
+        ]
+      });
+
+      // 4. Save Bot Directive if conversation exists and note is provided
+      let directiveSaved = false;
+      if (conversationId && coordinatorNote && coordinatorNote.trim().length > 0) {
+        try {
+          const { saveBotSteeringDirectiveAction } = await import("./inbox");
+          const steeringRes = await saveBotSteeringDirectiveAction(conversationId, coordinatorNote);
+          directiveSaved = steeringRes.success;
+        } catch (err) {
+          console.error("Failed to save bot steering from forms page:", err);
+        }
+      }
+
+      return { 
+        success: true, 
+        hasConversation: !!conversationId, 
+        directiveSaved 
+      };
+    }
+  ).then(res => {
+    if (!res.success) return { success: false as const, error: res.error || "İşlem başarısız." };
+    return { 
+      success: true as const, 
+      hasConversation: !!res.data?.hasConversation,
+      directiveSaved: !!res.data?.directiveSaved
+    };
+  });
+}
+

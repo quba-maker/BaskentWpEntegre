@@ -5,7 +5,7 @@ import useSWRInfinite from "swr/infinite";
 import { Search, MessageCircle, X, FileText, ChevronRight, CheckCircle2, Bot, Save, StickyNote, Sparkles, RefreshCw, ChevronDown, Filter, Zap, Send, Clock, CheckCheck, Edit3, Phone, PhoneOff, PhoneForwarded, XCircle } from "lucide-react";
 import { getForms, getCampaignNames, updateLeadNotes, updateLeadStage, syncGoogleSheets } from "@/app/actions/forms";
 import { toggleBotStatus } from "@/app/actions/inbox";
-import { prepareGreetingDraft, sendGreetingMessage, activateBot, getOutreachHistory, logCallReached, logCallMissed, logCallbackScheduled, logNotInterested, getGreetingTemplates, checkGreetingReadiness, type OutreachLogEntry } from "@/app/actions/outreach";
+import { prepareGreetingDraft, sendGreetingMessage, activateBot, getOutreachHistory, logCallReached, logCallMissed, logCallbackScheduled, logNotInterested, getGreetingTemplates, checkGreetingReadiness, saveGreetingDraftInternal, type OutreachLogEntry } from "@/app/actions/outreach";
 import { useInboxStore } from "@/store/inbox-store";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { MapPin, Building2, Calendar, Flame, TrendingUp, User } from "lucide-react";
@@ -23,6 +23,7 @@ const OUTREACH_BADGE_CONFIG: Record<string, { label: string; color: string; icon
   'lead_created': { label: 'Lead Oluşturuldu', color: '#FF9500', icon: '📋' },
   'opportunity_created': { label: 'Fırsat Oluşturuldu', color: '#30B0C7', icon: '🎯' },
   'notification_sent': { label: 'Bildirim Gönderildi', color: '#86868B', icon: '🔔' },
+  'form_greeting_draft_saved_internal': { label: 'Taslak İç Not Kaydedildi', color: '#8E8E93', icon: '📝' },
 };
 
 const formatDate = (dateString: string) => {
@@ -216,6 +217,7 @@ export default function FormsPage() {
   // P1: Call action note
   const [callActionNote, setCallActionNote] = useState('');
   const [showCallActions, setShowCallActions] = useState(false);
+  const [botNote, setBotNote] = useState('');
   
   // Phase a2.1: unified greeting readiness state
   const [readiness, setReadiness] = useState<{
@@ -340,6 +342,7 @@ export default function FormsPage() {
       setIsDraftOpen(false);
       setCallActionNote('');
       setShowCallActions(false);
+      setBotNote('');
       setSelectedTemplateId(null);
       setTechOpen(false);
       setReadiness(null);
@@ -371,6 +374,7 @@ export default function FormsPage() {
       setIsDraftOpen(false);
       setCallActionNote('');
       setShowCallActions(false);
+      setBotNote('');
       setSelectedTemplateId(null);
       setTechOpen(false);
       setReadiness(null);
@@ -403,6 +407,12 @@ export default function FormsPage() {
       setOutreachError('Mesaj metni boş olamaz.');
       return;
     }
+
+    // Explicit confirmation gate
+    if (!window.confirm("Bu mesaj hastaya WhatsApp üzerinden gönderilecek. Onaylıyor musunuz?")) {
+      return;
+    }
+
     setOutreachLoading('sending');
     setOutreachError(null);
     try {
@@ -411,6 +421,7 @@ export default function FormsPage() {
         setGreetingSent(true);
         setIsDraftOpen(false);
         setDraftMessage(null);
+        setBotNote('');
         setOutreachSuccess('✅ Karşılama mesajı başarıyla gönderildi.');
         // Update stage optimistically
         mutate(
@@ -422,6 +433,36 @@ export default function FormsPage() {
         await loadOutreachTimeline(form.id);
       } else {
         setOutreachError(result.error || 'Mesaj gönderilemedi.');
+      }
+    } catch (err: any) {
+      setOutreachError(err?.message || 'Beklenmeyen bir hata oluştu.');
+    } finally {
+      setOutreachLoading(null);
+    }
+  };
+
+  // PHASE 2L-P0v2: Safe Alternative — Save Draft as Internal Note (Zero-Outbound)
+  const handleSaveInternal = async (form: any) => {
+    if (!draftMessage || draftMessage.trim().length === 0) {
+      setOutreachError('Mesaj metni boş olamaz.');
+      return;
+    }
+    setOutreachLoading('sending');
+    setOutreachError(null);
+    setOutreachSuccess(null);
+    try {
+      const result = await saveGreetingDraftInternal(form.id, draftMessage, botNote);
+      if (result.success) {
+        setGreetingSent(true);
+        setIsDraftOpen(false);
+        setDraftMessage(null);
+        setBotNote('');
+        setOutreachSuccess('✅ Taslak başarıyla iç not olarak kaydedildi.');
+        
+        // Refresh timeline
+        await loadOutreachTimeline(form.id);
+      } else {
+        setOutreachError(result.error || 'Taslak kaydedilemedi.');
       }
     } catch (err: any) {
       setOutreachError(err?.message || 'Beklenmeyen bir hata oluştu.');
@@ -984,33 +1025,39 @@ export default function FormsPage() {
                       <div className="flex gap-2 flex-wrap">
                         {readiness.isWithin24hWindow ? (
                           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                            🟢 24s WhatsApp Penceresi Açık
+                            🟢 24s pencere açık: Taslak hazırlanabilir
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
-                            ⏳ 24s WhatsApp Penceresi Kapalı
+                            ⏳ 24s pencere kapalı: Şablonlu taslak gerekli
                           </span>
                         )}
 
                         {readiness.templateConfigExists ? (
-                          readiness.approvedWhatsappTemplateAvailable ? (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                              🟢 Onaylı Şablon Bulundu
+                          readiness.templateNonCompliant ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
+                              ⚠️ Şablon uygun değil
                             </span>
                           ) : (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200">
-                              📋 Şablon (Template) Taslağı Var
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              🟢 Şablon hazır
                             </span>
                           )
                         ) : (
                           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
-                            ⚠️ Şablon Tanımlanmamış
+                            ⚠️ Şablon tanımlanmamış
                           </span>
                         )}
                         
-                        {readiness.templateNonCompliant && (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-red-100 text-red-800 border border-red-200">
-                            ⚠️ Uyumsuz Şablon
+                        {readiness.hardBlockedBecausePatientAlreadyInbound && (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
+                            ⚠️ Hasta zaten mesaj attı
+                          </span>
+                        )}
+
+                        {selectedForm && ((Date.now() - new Date(getBestDate(selectedForm)).getTime()) / (1000 * 60 * 60) > 72) && (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-gray-100 text-gray-600 border border-gray-200">
+                            ⏳ Karşılama süresi geçmiş. Manuel takip önerilir.
                           </span>
                         )}
                       </div>
@@ -1040,11 +1087,16 @@ export default function FormsPage() {
                   ) : !selectedForm.has_inbound_messages && (
                     <div className="flex gap-2 flex-wrap mb-1">
                       <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
-                        ⏳ 24s WhatsApp Penceresi Kapalı
+                        ⏳ 24s pencere kapalı: Şablonlu taslak gerekli
                       </span>
                       <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200">
                         📋 Şablon (Template) Gerekli
                       </span>
+                      {selectedForm && ((Date.now() - new Date(getBestDate(selectedForm)).getTime()) / (1000 * 60 * 60) > 72) && (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-gray-100 text-gray-600 border border-gray-200">
+                          ⏳ Karşılama süresi geçmiş. Manuel takip önerilir.
+                        </span>
+                      )}
                     </div>
                   )}
 
@@ -1077,7 +1129,7 @@ export default function FormsPage() {
 
                   {/* Draft Textarea — visible after "Karşılama Hazırla" clicked */}
                   {isDraftOpen && draftMessage !== null && (
-                    <div className="space-y-2">
+                    <div className="space-y-3">
                       <div className="flex items-center justify-between mb-1">
                         <div className="flex items-center gap-2">
                           <Edit3 className="w-3.5 h-3.5 text-[#007AFF]" />
@@ -1107,25 +1159,66 @@ export default function FormsPage() {
                         className="w-full bg-[#F5F5F7] border border-black/10 rounded-xl p-3 text-[13px] text-[#1D1D1F] font-medium focus:ring-2 focus:ring-[#25D366]/40 focus:border-[#25D366]/30 resize-none outline-none transition-all leading-relaxed"
                         placeholder="Karşılama mesajınızı buraya yazın..."
                       />
-                      <div className="flex gap-2">
+
+                      {/* Bota Kısa Not/Direktif */}
+                      <div className="space-y-1 text-left">
+                        <label className="block text-[10.5px] font-bold text-[#86868B] uppercase tracking-wider">
+                          🤖 Bota kısa not/direktif ekle (opsiyonel)
+                        </label>
+                        <input
+                          type="text"
+                          value={botNote}
+                          onChange={(e) => setBotNote(e.target.value)}
+                          placeholder="Örn: Hastanın geliş tarihini netleştir, kararsızsa telefon görüşmesine yönlendir."
+                          className="w-full bg-[#F5F5F7] border border-black/10 rounded-xl px-3 py-2 text-[12px] text-[#1D1D1F] font-medium outline-none focus:ring-2 focus:ring-[#007AFF]/30 transition-all"
+                        />
+                        {!selectedForm.linked_conversation_id && (
+                          <span className="block text-[10px] text-amber-600 font-semibold leading-relaxed mt-0.5">
+                            ⚠️ Bu lead henüz sohbetle eşleşmediği için bot direktifi sadece iç not olarak kaydedildi.
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Warning and Action Buttons */}
+                      <div className="space-y-2.5 pt-2 border-t border-black/5">
+                        {/* Primary Safe Action */}
                         <button 
-                          onClick={() => handleConfirmSend(selectedForm)}
+                          onClick={() => handleSaveInternal(selectedForm)}
                           disabled={outreachLoading === 'sending' || !draftMessage?.trim()}
-                          className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl font-semibold bg-[#25D366] text-white shadow-[0_4px_14px_rgba(37,211,102,0.39)] hover:bg-[#1DA851] cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl font-bold bg-[#007AFF] text-white shadow-[0_4px_14px_rgba(0,122,255,0.3)] hover:bg-[#0056b3] cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           {outreachLoading === 'sending' ? (
-                            <><RefreshCw className="w-4 h-4 animate-spin" /> Gönderiliyor...</>
+                            <><RefreshCw className="w-4 h-4 animate-spin" /> Kaydediliyor...</>
                           ) : (
-                            <><Send className="w-4 h-4" /> Gönder</>
+                            <><Save className="w-4 h-4" /> Taslağı İç Not Olarak Kaydet</>
                           )}
                         </button>
-                        <button 
-                          onClick={handleCancelDraft}
-                          disabled={outreachLoading === 'sending'}
-                          className="px-4 py-2.5 rounded-xl font-semibold bg-black/[0.04] hover:bg-black/[0.08] text-[#1D1D1F] transition-colors cursor-pointer disabled:opacity-50"
-                        >
-                          İptal
-                        </button>
+
+                        {/* WhatsApp Outbound Warning */}
+                        <div className="text-[10px] font-bold text-[#FF3B30] text-center bg-red-50 border border-red-100 rounded-lg py-1 px-2.5">
+                          ⚠️ Bu işlem hastaya gerçek WhatsApp mesajı gönderir.
+                        </div>
+
+                        <div className="flex gap-2">
+                          <button 
+                            onClick={() => handleConfirmSend(selectedForm)}
+                            disabled={
+                              outreachLoading === 'sending' || 
+                              !draftMessage?.trim() || 
+                              (readiness !== null && !readiness.templateSendable)
+                            }
+                            className="flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-[12px] font-bold bg-[#F5F5F7] hover:bg-rose-50 hover:text-rose-600 text-[#1D1D1F] border border-[#D2D2D7] hover:border-rose-200 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <Send className="w-3.5 h-3.5" /> WhatsApp ile Gönder
+                          </button>
+                          <button 
+                            onClick={handleCancelDraft}
+                            disabled={outreachLoading === 'sending'}
+                            className="px-4 py-2 rounded-xl text-[12px] font-bold bg-black/[0.04] hover:bg-black/[0.08] text-[#1D1D1F] transition-colors cursor-pointer disabled:opacity-50"
+                          >
+                            İptal
+                          </button>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -1329,12 +1422,31 @@ export default function FormsPage() {
                             <p className="text-[12px] font-semibold text-[#1D1D1F]">
                               {displayLabel}
                             </p>
-                            {(entry as any).metadata?.note && (
-                              <p className="text-[11px] text-[#1D1D1F] font-medium mt-0.5 italic">
-                                "{(entry as any).metadata.note}"
-                              </p>
+                            {entry.action === 'form_greeting_draft_saved_internal' && (
+                              <span className="text-[10px] text-[#86868B] font-semibold block mt-0.5">
+                                🔒 Hasta görmez. WhatsApp gönderilmedi.
+                              </span>
                             )}
-                            <p className="text-[11px] text-[#86868B] font-medium">
+                            {((entry as any).metadata?.note || (entry as any).metadata?.message_text || (entry as any).metadata?.coordinator_note) && (
+                              <div className="text-[11px] text-[#1D1D1F] font-medium mt-1 p-2 bg-[#F5F5F7] rounded-xl border border-black/5 leading-relaxed space-y-1 text-left">
+                                {(entry as any).metadata?.message_text && (
+                                  <div>
+                                    <span className="block text-[9.5px] font-bold text-[#86868B] uppercase tracking-wider mb-0.5">Kaydedilen Taslak:</span>
+                                    <p className="italic">"{(entry as any).metadata.message_text}"</p>
+                                  </div>
+                                )}
+                                {(entry as any).metadata?.coordinator_note && (
+                                  <div className="pt-1.5 border-t border-black/5">
+                                    <span className="block text-[9.5px] font-bold text-[#86868B] uppercase tracking-wider mb-0.5">Bota Kısa Not/Direktif:</span>
+                                    <p className="text-[#007AFF] font-semibold">🤖 "{(entry as any).metadata.coordinator_note}"</p>
+                                  </div>
+                                )}
+                                {!(entry as any).metadata?.message_text && (entry as any).metadata?.note && (
+                                  <p className="italic">"{(entry as any).metadata.note}"</p>
+                                )}
+                              </div>
+                            )}
+                            <p className="text-[11px] text-[#86868B] font-medium mt-1">
                               {entry.actor_name} · {new Date(entry.created_at).toLocaleString('tr-TR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul' })}
                             </p>
                           </div>
