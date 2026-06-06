@@ -408,6 +408,18 @@ export function ContextPanel() {
   const primaryPhone = allPhones[0] || activePhone;
   const isSecondaryActive = activePhone !== primaryPhone && allPhones.includes(activePhone);
 
+  const getCleanValue = (val: string | null | undefined) => {
+    return (val || "").trim();
+  };
+
+  const isStageDirty = getCleanValue(stage) !== getCleanValue(activeContact.stage);
+  const isDeptDirty = getCleanValue(department) !== getCleanValue(activeContact.department);
+  const isCountryDirty = getCleanValue(country) !== getCleanValue(getInitialCountry(activeContact));
+  const isNotesDirty = getCleanValue(notes) !== getCleanValue(activeContact.notes);
+  const isNameDirty = getCleanValue(patientName) !== getCleanValue(getInitialPatientName(activeContact));
+
+  const isDirty = isStageDirty || isDeptDirty || isCountryDirty || isNotesDirty || isNameDirty;
+
   return (
     <div
       key={activeContact.id}
@@ -427,9 +439,7 @@ export function ContextPanel() {
         </button>
         <span className="ml-3 font-semibold" style={{ color: "var(--q-text-primary)" }}>Hasta Profili</span>
       </div>
-
-      {/* Profile Card */}
-      <div className="p-6 flex flex-col items-center text-center" style={{ borderBottom: "1px solid var(--q-border-default)" }}>
+      <div className="p-4 flex flex-col items-center text-center" style={{ borderBottom: "1px solid var(--q-border-default)" }}>
         {(() => {
           const cleanName = patientName.trim();
           const initials = cleanName
@@ -449,7 +459,7 @@ export function ContextPanel() {
 
           return (
             <div 
-              className="w-20 h-20 rounded-full flex items-center justify-center mb-4 shadow-md text-xl font-bold select-none transition-transform duration-300 hover:scale-105"
+              className="w-12 h-12 rounded-full flex items-center justify-center mb-2 shadow-sm text-sm font-bold select-none transition-transform duration-300 hover:scale-105"
               style={{ background: avatar.bg, color: avatar.text }}
             >
               {initials}
@@ -457,7 +467,7 @@ export function ContextPanel() {
           );
         })()}
         {isEditingName ? (
-          <div className="flex items-center gap-2 justify-center w-full max-w-[220px]">
+          <div className="flex items-center gap-1.5 justify-center w-full max-w-[180px]">
             <input
               type="text"
               value={patientName}
@@ -469,43 +479,43 @@ export function ContextPanel() {
                   setIsEditingName(false);
                 }
               }}
-              className="text-center font-bold text-[15px] px-2 py-1 rounded-lg w-full outline-none"
+              className="text-center font-bold text-[13px] px-1.5 py-0.5 rounded-lg w-full outline-none"
               style={{ background: "var(--q-bg-hover)", border: "1px solid var(--q-blue)", color: "var(--q-text-primary)" }}
               autoFocus
             />
             <button
               onClick={() => setIsEditingName(false)}
-              className="p-1 rounded-md transition-colors hover:bg-black/5 cursor-pointer flex-shrink-0"
+              className="p-0.5 rounded-md transition-colors hover:bg-black/5 cursor-pointer flex-shrink-0"
               title="Tamam"
             >
-              <Check className="w-4 h-4" style={{ color: "var(--q-green)" }} />
+              <Check className="w-3.5 h-3.5" style={{ color: "var(--q-green)" }} />
             </button>
           </div>
         ) : (
           <div 
             onClick={() => setIsEditingName(true)}
-            className="group flex items-center gap-1.5 justify-center cursor-pointer rounded-lg px-2.5 py-0.5 hover:bg-black/[0.04] transition-all"
+            className="group flex items-center gap-1 justify-center cursor-pointer rounded-lg px-2 py-0.5 hover:bg-black/[0.04] transition-all max-w-full"
             title="İsmi düzenlemek için tıklayın"
           >
-            <h2 className="text-lg font-bold tracking-tight" style={{ color: "var(--q-text-primary)" }}>
+            <h2 className="text-[15px] font-bold tracking-tight truncate max-w-[180px]" style={{ color: "var(--q-text-primary)" }}>
               {patientName || "İsimsiz"}
             </h2>
-            <Sparkles className="w-3.5 h-3.5 opacity-0 group-hover:opacity-60 transition-opacity" style={{ color: "var(--q-blue)" }} />
+            <Sparkles className="w-3 h-3 opacity-0 group-hover:opacity-60 transition-opacity shrink-0" style={{ color: "var(--q-blue)" }} />
           </div>
         )}
-        <p className="text-[11px] text-[#86868B] font-semibold mt-1">
+        <p className="text-[10px] text-[#86868B] font-semibold mt-0.5">
           {formatPhoneReadable(activeContact.id)}
         </p>
 
-        <div className="flex items-center gap-2 mt-3 w-full justify-center">
+        <div className="flex items-center gap-1.5 mt-2 w-full justify-center flex-wrap">
           <div className="relative group">
-            <div className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none">
-              <MapPin className="w-3.5 h-3.5" style={{ color: "var(--q-blue)" }} />
+            <div className="absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none">
+              <MapPin className="w-3 h-3" style={{ color: "var(--q-blue)" }} />
             </div>
             <select
               value={country}
               onChange={(e) => setCountry(e.target.value)}
-              className="pl-8 pr-6 py-1.5 rounded-full text-xs font-semibold outline-none transition-all appearance-none cursor-pointer"
+              className="pl-6 pr-5 py-0.5 rounded-full text-[10px] font-semibold outline-none transition-all appearance-none cursor-pointer"
               style={{ background: "var(--q-bg-hover)", color: "var(--q-text-primary)", border: "1px solid var(--q-border-default)" }}
             >
               <option value="" disabled>Ülke Seç...</option>
@@ -528,15 +538,15 @@ export function ContextPanel() {
                 ));
               })()}
             </select>
-            <div className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none">
-              <ChevronDown className="w-3 h-3" style={{ color: "var(--q-text-secondary)" }} />
+            <div className="absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none">
+              <ChevronDown className="w-2.5 h-2.5" style={{ color: "var(--q-text-secondary)" }} />
             </div>
           </div>
 
           {(() => {
             const countryNormal = normalizeCountry(activeContact?.country || activeContact?.opp_country, activeContact?.id || activeContact?.phone_number);
             return countryNormal.countryConfirmationNeeded ? (
-              <div className="text-[10px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1 bg-amber-50 text-amber-700 border border-amber-200" title="Ülke doğruluğundan emin olun. Teyit gerekebilir.">
+              <div className="text-[9px] font-bold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 bg-amber-50 text-amber-700 border border-amber-200" title="Ülke doğruluğundan emin olun. Teyit gerekebilir.">
                 Teyit Gerekli
               </div>
             ) : null;
@@ -544,7 +554,7 @@ export function ContextPanel() {
 
           {localTime && (
             <div 
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold border transition-all duration-300 ${
+              className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border transition-all duration-300 ${
                 isSleeping 
                   ? "bg-slate-900/5 text-slate-700 border-slate-200" 
                   : "bg-indigo-50 text-indigo-600 border-indigo-100"
@@ -552,9 +562,9 @@ export function ContextPanel() {
               title={isSleeping ? "Hasta uyku saatinde (22:00 - 08:00)" : "Hasta aktif saatte"}
             >
               {isSleeping ? (
-                <Moon className="w-3.5 h-3.5 text-slate-500 animate-pulse" />
+                <Moon className="w-3 h-3 text-slate-500 animate-pulse" />
               ) : (
-                <Clock className="w-3.5 h-3.5 text-indigo-500" />
+                <Clock className="w-3 h-3 text-indigo-500" />
               )}
               <span>{localTime}</span>
             </div>
@@ -562,20 +572,20 @@ export function ContextPanel() {
         </div>
 
         {/* Multi-phone list */}
-        <div className="w-full text-left mt-4 px-3.5 py-3 rounded-2xl border bg-white/40 space-y-2.5" style={{ borderColor: "var(--q-border-default)" }}>
-          <span className="block text-[10px] font-bold uppercase tracking-widest text-[#86868B] mb-1 px-0.5">Telefon Numaraları</span>
+        <div className="w-full text-left mt-2.5 px-2.5 py-2 rounded-2xl border bg-white/40 space-y-1.5" style={{ borderColor: "var(--q-border-default)" }}>
+          <span className="block text-[9px] font-bold uppercase tracking-widest text-[#86868B] mb-0.5 px-0.5">Telefon Numaraları</span>
           {allPhones.map((phone, idx) => {
             const isPrimary = idx === 0;
             const isActive = phone === activePhone;
             return (
               <div key={phone} className="flex items-center justify-between px-0.5 text-xs">
-                <div className="flex items-center gap-2">
-                  <div className={`w-2 h-2 rounded-full ${isActive ? 'bg-green-500' : 'bg-transparent border border-black/30'}`} />
-                  <span className="font-semibold text-[13px]" style={{ color: "var(--q-text-primary)" }}>
+                <div className="flex items-center gap-1.5">
+                  <div className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-green-500' : 'bg-transparent border border-black/30'}`} />
+                  <span className="font-semibold text-[11px]" style={{ color: "var(--q-text-primary)" }}>
                     {formatPhoneReadable(phone)}
                   </span>
                 </div>
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                <span className={`text-[8px] font-bold px-1.5 py-0.2 rounded-full ${
                   isPrimary 
                     ? 'bg-blue-100 text-blue-700' 
                     : 'bg-gray-100 text-gray-600'
@@ -589,7 +599,7 @@ export function ContextPanel() {
 
         {/* Warning badge if active on secondary phone */}
         {isSecondaryActive && (
-          <div className="w-full mt-3 px-3.5 py-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold text-left flex items-start gap-2 shadow-sm">
+          <div className="w-full mt-2 px-2.5 py-1.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-[10px] font-semibold text-left flex items-start gap-1.5 shadow-sm">
             <span className="text-amber-500 font-bold shrink-0">⚠️</span>
             <p className="leading-snug">Bu konuşma formdaki ikincil numara üzerinden yürütülüyor.</p>
           </div>
@@ -597,18 +607,18 @@ export function ContextPanel() {
 
         {/* Task-based Action Required Deep Link Card */}
         {activeContact.active_task_type && (
-          <div className="w-full mt-3 p-3.5 rounded-xl border space-y-2.5 text-left bg-indigo-50/30 shadow-sm" style={{ borderColor: 'var(--q-blue)' }}>
+          <div className="w-full mt-2 p-2.5 rounded-xl border space-y-1.5 text-left bg-indigo-50/30 shadow-sm" style={{ borderColor: 'var(--q-blue)' }}>
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5">
-                <Clock className="w-3.5 h-3.5 text-indigo-500" />
-                <span className="text-[10px] font-bold uppercase tracking-widest text-indigo-700">Aksiyon Gerekli</span>
+              <div className="flex items-center gap-1">
+                <Clock className="w-3 h-3 text-indigo-500" />
+                <span className="text-[9px] font-bold uppercase tracking-widest text-indigo-700">Aksiyon Gerekli</span>
               </div>
-              <span className="text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded shadow-sm bg-indigo-100 text-indigo-700">
+              <span className="text-[8px] font-bold uppercase tracking-widest px-1.5 py-0.2 rounded shadow-sm bg-indigo-100 text-indigo-700">
                 Bekliyor
               </span>
             </div>
             
-            <p className="text-xs font-semibold text-gray-700 leading-snug">
+            <p className="text-[11px] font-semibold text-gray-700 leading-snug">
               {(() => {
                 switch (activeContact.active_task_type) {
                   case 'no_reply_followup': return 'Müşteriden yanıt alınamadığı için takip taslağı oluşturuldu.';
@@ -636,9 +646,9 @@ export function ContextPanel() {
                 return (
                   <a
                     href={`/${tenantSlug}/takip?tab=telefon&opp=${oppId}`}
-                    className="w-full py-2 px-3 bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all shadow-sm"
+                    className="w-full py-1 px-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all shadow-sm"
                   >
-                    <PhoneForwarded className="w-3.5 h-3.5" />
+                    <PhoneForwarded className="w-3 h-3" />
                     <span>Telefon Takibinde Aç</span>
                   </a>
                 );
@@ -648,9 +658,9 @@ export function ContextPanel() {
               return (
                 <a
                   href={`/${tenantSlug}/takip?tab=randevu&opp=${oppId}`}
-                  className="w-full py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all shadow-sm"
+                  className="w-full py-1 px-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all shadow-sm"
                 >
-                  <Calendar className="w-3.5 h-3.5" />
+                  <Calendar className="w-3 h-3" />
                   <span>Randevu Yönetiminde Aç</span>
                 </a>
               );
@@ -660,14 +670,14 @@ export function ContextPanel() {
 
         {/* A1.7b — Secondary Phone Fallback Section */}
         {allPhones.length >= 2 && !isSecondaryActive && (
-          <div className="w-full mt-3 p-3.5 rounded-xl border space-y-2.5 bg-white/40 text-left" style={{ borderColor: 'var(--q-border-default)' }}>
-            <div className="flex items-center gap-2">
-              <PhoneForwarded className="w-4 h-4 text-amber-500" />
-              <span className="text-[10px] font-bold uppercase tracking-widest text-amber-700">İkincil Numara Fallback</span>
+          <div className="w-full mt-2 p-2.5 rounded-xl border space-y-1.5 bg-white/40 text-left" style={{ borderColor: 'var(--q-border-default)' }}>
+            <div className="flex items-center gap-1.5">
+              <PhoneForwarded className="w-3.5 h-3.5 text-amber-500" />
+              <span className="text-[9px] font-bold uppercase tracking-widest text-amber-700">İkincil Numara Fallback</span>
             </div>
 
             {secondaryError && (
-              <div className="text-[11px] font-semibold text-red-600 bg-red-50 border border-red-100 rounded-lg p-2 leading-snug">
+              <div className="text-[10px] font-semibold text-red-600 bg-red-50 border border-red-100 rounded-lg p-1.5 leading-snug">
                 ⚠️ {secondaryError}
               </div>
             )}
@@ -685,12 +695,12 @@ export function ContextPanel() {
                       setSecondaryError(res.reason);
                     }
                   } catch {
-                    setSecondaryError('Kontrol sırasında hata oluştu.');
+                     setSecondaryError('Kontrol sırasında hata oluştu.');
                   }
                   setIsCheckingSecondary(false);
                 }}
                 disabled={isCheckingSecondary}
-                className="w-full py-2 px-3 bg-amber-50 border border-amber-200 hover:bg-amber-100 text-amber-700 text-[11px] font-bold rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full py-1.5 px-2.5 bg-amber-50 border border-amber-200 hover:bg-amber-100 text-amber-700 text-[10px] font-bold rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isCheckingSecondary ? (
                   <><Loader2 className="w-3 h-3 animate-spin" /><span>Kontrol Ediliyor...</span></>
@@ -699,8 +709,8 @@ export function ContextPanel() {
                 )}
               </button>
             ) : secondaryEligibility?.eligible && !secondaryDraftData ? (
-              <div className="space-y-2">
-                <div className="text-[11px] font-semibold text-amber-800 bg-amber-50/80 border border-amber-200 rounded-lg p-2.5 leading-snug">
+              <div className="space-y-1.5">
+                <div className="text-[10px] font-semibold text-amber-800 bg-amber-50/80 border border-amber-200 rounded-lg p-2 leading-snug">
                   ⏳ Birincil numaradan {secondaryEligibility.noReplyHoursPrimary} saattir cevap alınamadı.<br />
                   İkincil numara: <strong>{secondaryEligibility.secondaryPhone}</strong>
                 </div>
@@ -721,7 +731,7 @@ export function ContextPanel() {
                     setIsLoadingSecondaryDraft(false);
                   }}
                   disabled={isLoadingSecondaryDraft}
-                  className="w-full py-2 px-3 bg-amber-100 border border-amber-300 hover:bg-amber-200 text-amber-800 text-[11px] font-bold rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all disabled:opacity-50"
+                  className="w-full py-1.5 px-2.5 bg-amber-100 border border-amber-300 hover:bg-amber-200 text-amber-800 text-[10px] font-bold rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all disabled:opacity-50"
                 >
                   {isLoadingSecondaryDraft ? (
                     <><Loader2 className="w-3 h-3 animate-spin" /><span>Taslak Hazırlanıyor...</span></>
@@ -731,26 +741,26 @@ export function ContextPanel() {
                 </button>
               </div>
             ) : secondaryDraftData ? (
-              <div className="space-y-2.5">
-                <div className="flex justify-between items-center text-[10px]">
+              <div className="space-y-1.5">
+                <div className="flex justify-between items-center text-[9px]">
                   <span className="font-bold text-amber-700 uppercase tracking-wider">Taslak Önizleme</span>
-                  <span className={`px-2 py-0.5 rounded-full font-bold ${
+                  <span className={`px-1.5 py-0.2 rounded-full font-bold ${
                     secondaryDraftData.windowOpen ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
                   }`}>
                     {secondaryDraftData.windowOpen ? '24s Açık' : '24s Kapalı — Şablon Gerekli'}
                   </span>
                 </div>
                 {!secondaryDraftData.windowOpen && (
-                  <div className="text-[11px] font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2 leading-snug">
+                  <div className="text-[10px] font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-1.5 leading-snug">
                     ⚠️ İkincil numara için 24 saatlik WhatsApp penceresi kapalı. Onaylı şablon gönderimi bu fazda devre dışıdır.
                   </div>
                 )}
-                <div className="text-[12px] font-medium text-gray-700 bg-white border border-gray-200 rounded-lg p-2.5 leading-relaxed">
+                <div className="text-[11px] font-medium text-gray-700 bg-white border border-gray-200 rounded-lg p-2 leading-relaxed">
                   {secondaryDraftData.draft}
                 </div>
                 <button
                   onClick={() => setSecondaryDraftData(null)}
-                  className="w-full py-1.5 px-3 border border-gray-200 hover:bg-gray-50 text-gray-600 text-[11px] font-bold rounded-lg cursor-pointer transition-all"
+                  className="w-full py-1 px-2.5 border border-gray-200 hover:bg-gray-50 text-gray-600 text-[10px] font-bold rounded-lg cursor-pointer transition-all"
                 >
                   Kapat
                 </button>
@@ -760,20 +770,20 @@ export function ContextPanel() {
         )}
 
         {/* Quick Action Grid Cards */}
-        <div className="grid grid-cols-3 gap-2 mt-4 w-full pt-3 border-t border-black/5">
+        <div className="grid grid-cols-3 gap-2 mt-2.5 w-full pt-2 border-t border-black/5">
           <button
             type="button"
             onClick={() => setIsPhoneCallModalOpen(true)}
-            className="flex flex-col items-center justify-center p-2.5 rounded-xl border text-center transition-all duration-200 group hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
+            className="flex flex-col items-center justify-center p-1.5 rounded-xl border text-center transition-all duration-200 group hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
             style={{
               backgroundColor: "rgba(88, 86, 214, 0.04)",
               borderColor: "rgba(88, 86, 214, 0.12)",
               color: "#5856D6"
             }}
           >
-            <div className="w-7 h-7 rounded-full flex items-center justify-center mb-1.5 transition-all duration-200 group-hover:scale-110"
+            <div className="w-6 h-6 rounded-full flex items-center justify-center mb-1 transition-all duration-200 group-hover:scale-110"
                  style={{ backgroundColor: "rgba(88, 86, 214, 0.08)" }}>
-              <Phone className="w-3.5 h-3.5" />
+              <Phone className="w-3 h-3" />
             </div>
             <span className="text-[10px] font-bold tracking-tight">Arama Planla</span>
           </button>
@@ -781,16 +791,16 @@ export function ContextPanel() {
           <button
             type="button"
             onClick={() => setIsAppointmentModalOpen(true)}
-            className="flex flex-col items-center justify-center p-2.5 rounded-xl border text-center transition-all duration-200 group hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
+            className="flex flex-col items-center justify-center p-1.5 rounded-xl border text-center transition-all duration-200 group hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
             style={{
               backgroundColor: "rgba(52, 199, 89, 0.04)",
               borderColor: "rgba(52, 199, 89, 0.12)",
               color: "#34C759"
             }}
           >
-            <div className="w-7 h-7 rounded-full flex items-center justify-center mb-1.5 transition-all duration-200 group-hover:scale-110"
+            <div className="w-6 h-6 rounded-full flex items-center justify-center mb-1 transition-all duration-200 group-hover:scale-110"
                  style={{ backgroundColor: "rgba(52, 199, 89, 0.08)" }}>
-              <CalendarClock className="w-3.5 h-3.5" />
+              <CalendarClock className="w-3 h-3" />
             </div>
             <span className="text-[10px] font-bold tracking-tight leading-tight">Randevu Planla</span>
           </button>
@@ -798,156 +808,157 @@ export function ContextPanel() {
           <button
             type="button"
             onClick={() => setIsFormModalOpen(true)}
-            className="flex flex-col items-center justify-center p-2.5 rounded-xl border text-center transition-all duration-200 group hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
+            className="flex flex-col items-center justify-center p-1.5 rounded-xl border text-center transition-all duration-200 group hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
             style={{
               backgroundColor: "rgba(255, 149, 0, 0.04)",
               borderColor: "rgba(255, 149, 0, 0.12)",
               color: "#FF9500"
             }}
           >
-            <div className="w-7 h-7 rounded-full flex items-center justify-center mb-1.5 transition-all duration-200 group-hover:scale-110"
+            <div className="w-6 h-6 rounded-full flex items-center justify-center mb-1 transition-all duration-200 group-hover:scale-110"
                  style={{ backgroundColor: "rgba(255, 149, 0, 0.08)" }}>
-              <FileText className="w-3.5 h-3.5" />
+              <FileText className="w-3 h-3" />
             </div>
             <span className="text-[10px] font-bold tracking-tight">Form Detayı</span>
           </button>
         </div>
       </div>
 
-      <div className="p-5 space-y-7 flex-1">
+      <div className="p-3 space-y-3.5 flex-1">
         {/* CRM Bilgileri Card */}
-        <div className="p-5 rounded-2xl border bg-white/40 space-y-5 shadow-sm text-left" style={{ borderColor: "var(--q-border-default)" }}>
-          <div className="flex items-center justify-between pb-2 border-b border-black/[0.03]">
-            <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#86868B]">CRM Bilgileri</span>
-            <span className="text-[9px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full uppercase tracking-wider">Manuel Takip</span>
+        <div className="p-3 rounded-2xl border bg-white/40 space-y-3 shadow-sm text-left" style={{ borderColor: "var(--q-border-default)" }}>
+          <div className="flex items-center justify-between pb-1.5 border-b border-black/[0.03]">
+            <span className="text-[9px] font-extrabold uppercase tracking-widest text-[#86868B]">CRM Bilgileri</span>
+            <span className="text-[8px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 px-1.5 py-0.2 rounded-full uppercase tracking-wider">Manuel Takip</span>
           </div>
 
-          {/* Stage/Durum */}
-          <div className="space-y-1.5 text-left">
-            <label className="text-[10px] font-bold uppercase tracking-widest text-[#86868B] ml-1">Durum / Aşama</label>
-            <div className="relative">
-              <select
-                value={stage}
-                onChange={(e) => setStage(e.target.value)}
-                className="w-full px-4 py-2.5 rounded-xl text-[13px] font-semibold outline-none transition-all appearance-none cursor-pointer bg-white/60 border hover:border-indigo-500/30"
-                style={{ borderColor: "var(--q-border-default)", color: "var(--q-text-primary)", boxShadow: "var(--q-shadow-sm)" }}
-              >
-                <option value="new">Yeni Lead</option>
-                <option value="contacted">İletişime Geçildi</option>
-                <option value="responded">Yanıt Alındı</option>
-                <option value="discovery">Keşif / Analiz</option>
-                <option value="qualified">Nitelikli</option>
-                <option value="appointed">Randevu Aldı</option>
-                <option value="lost">Kaybedildi</option>
-                {/* Opportunity stage fallbacks */}
-                {stage && !["new","contacted","responded","discovery","qualified","appointed","lost"].includes(stage) && (
-                  <>
-                    {stage === "new_lead" && <option value="new_lead">Yeni Lead</option>}
-                    {stage === "first_contact" && <option value="first_contact">İlk İletişim</option>}
-                    {stage === "engaged" && <option value="engaged">Yanıt Alındı</option>}
-                    {stage === "report_waiting" && <option value="report_waiting">Rapor Bekleniyor</option>}
-                    {stage === "report_received" && <option value="report_received">Rapor Geldi</option>}
-                    {stage === "doctor_review" && <option value="doctor_review">Doktor İncelemesi</option>}
-                    {stage === "offer_sent" && <option value="offer_sent">Teklif Gönderildi</option>}
-                    {stage === "appointment_planning" && <option value="appointment_planning">Randevu Planlanıyor</option>}
-                    {stage === "appointment_booked" && <option value="appointment_booked">Randevu Alındı</option>}
-                    {stage === "arrived" && <option value="arrived">Geldi</option>}
-                    {stage === "not_qualified" && <option value="not_qualified">Uygun Değil</option>}
-                  </>
-                )}
-              </select>
-              <div className="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none">
-                <ChevronDown className="w-4 h-4 text-[#86868B]" />
-              </div>
-            </div>
-          </div>
-
-          {/* Department/Bölüm */}
-          <div className="space-y-1.5 text-left">
-            <label className="text-[10px] font-bold uppercase tracking-widest text-[#86868B] ml-1">Bölüm / Departman</label>
-            <div className="relative">
-              <div className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none">
-                <Building className="w-4 h-4 text-indigo-500/80" />
-              </div>
-              <select
-                value={department}
-                onChange={(e) => setDepartment(e.target.value)}
-                className="w-full pl-10 pr-10 py-2.5 rounded-xl text-[13px] font-semibold outline-none transition-all appearance-none cursor-pointer bg-white/60 border hover:border-indigo-500/30"
-                style={{ borderColor: "var(--q-border-default)", color: "var(--q-text-primary)", boxShadow: "var(--q-shadow-sm)" }}
-              >
-                <option value="">Belirtilmemiş</option>
-                {["Ortopedi", "Kardiyoloji", "Gastroenteroloji", "Estetik", "Diş", "Diş Estetiği", "Göz", "Tüp Bebek", "Organ Nakli", "Onkoloji", "Obezite", "Nöroloji", "Üroloji", "Dermatoloji", "Genel Cerrahi", "Beyin Cerrahi", "KBB", "Göğüs Hastalıkları", "Endokrinoloji", "Fizik Tedavi", "Çocuk Sağlığı", "Kadın Doğum", "Psikiyatri", "Check-Up"].map((d) => (
-                  <option key={d} value={d}>{d}</option>
-                ))}
-              </select>
-              <div className="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none">
-                <ChevronDown className="w-4 h-4 text-[#86868B]" />
-              </div>
-            </div>
-
-            {suggestedDept && (
-              <div className="mt-2.5 flex flex-col gap-2 p-3 rounded-xl border transition-all duration-200"
-                   style={{ 
-                     backgroundColor: hasConflict ? "rgba(255, 149, 0, 0.04)" : suggestedConfidence === 'medium' ? "rgba(255, 149, 0, 0.04)" : "rgba(175, 82, 222, 0.04)", 
-                     borderColor: hasConflict ? "rgba(255, 149, 0, 0.25)" : suggestedConfidence === 'medium' ? "rgba(255, 149, 0, 0.15)" : "rgba(175, 82, 222, 0.15)" 
-                   }}>
-                <div className="flex items-center justify-between w-full">
-                  <div className="flex items-center gap-2">
-                    <Sparkles className="w-3.5 h-3.5 shrink-0 animate-pulse" style={{ color: hasConflict || suggestedConfidence === 'medium' ? "#FF9500" : "#AF52DE" }} />
-                    <div className="flex flex-col text-left">
-                      <span className="text-[9px] font-bold uppercase tracking-wider" style={{ color: hasConflict || suggestedConfidence === 'medium' ? "#FF9500" : "#AF52DE" }}>
-                        Önerilen Bölüm
-                      </span>
-                      <span className="text-[12px] font-semibold text-[#1D1D1F]">
-                        {suggestedDept} {hasConflict ? "— Çakışma Var" : suggestedConfidence === 'medium' ? "— Teyit Edin" : ""}
-                      </span>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      setDepartment(suggestedDept!);
-                      setIsSaving(true);
-                      setSaveStatus("saving");
-                      const res = await updateCrmData(activeContact.id, stage, suggestedDept!, country, notes, patientName);
-                      if (res.success) {
-                        useInboxStore.getState().setActiveContact(activeContact.id, {
-                          ...activeContact,
-                          department: suggestedDept!,
-                          name: patientName,
-                          opp_patient_name: patientName
-                        });
-                        mutate((key) => Array.isArray(key) && key[0] === "conversations");
-                        setSaveStatus("saved");
-                        setTimeout(() => setSaveStatus("idle"), 2000);
-                      } else {
-                        setSaveStatus("error");
-                        setTimeout(() => setSaveStatus("idle"), 3000);
-                      }
-                      setIsSaving(false);
-                    }}
-                    className="px-2.5 py-1 text-[10px] font-bold rounded-lg cursor-pointer bg-white border transition-all hover:scale-[1.02]"
-                    style={{ 
-                      color: hasConflict || suggestedConfidence === 'medium' ? "#FF9500" : "#AF52DE",
-                      borderColor: hasConflict || suggestedConfidence === 'medium' ? "rgba(255, 149, 0, 0.2)" : "rgba(175, 82, 222, 0.2)"
-                    }}
-                  >
-                    Onayla
-                  </button>
+          {/* Stage & Department Grid */}
+          <div className="grid grid-cols-2 gap-2">
+            {/* Stage/Durum */}
+            <div className="space-y-1 text-left">
+              <label className="text-[9px] font-bold uppercase tracking-widest text-[#86868B] ml-1">Durum / Aşama</label>
+              <div className="relative">
+                <select
+                  value={stage}
+                  onChange={(e) => setStage(e.target.value)}
+                  className="w-full pl-2 pr-6 py-1.5 rounded-lg text-[11px] font-bold outline-none transition-all appearance-none cursor-pointer bg-white/60 border hover:border-indigo-500/30"
+                  style={{ borderColor: "var(--q-border-default)", color: "var(--q-text-primary)", boxShadow: "var(--q-shadow-sm)" }}
+                >
+                  <option value="new">Yeni Lead</option>
+                  <option value="contacted">İletişime Geçildi</option>
+                  <option value="responded">Yanıt Alındı</option>
+                  <option value="discovery">Keşif / Analiz</option>
+                  <option value="qualified">Nitelikli</option>
+                  <option value="appointed">Randevu Aldı</option>
+                  <option value="lost">Kaybedildi</option>
+                  {/* Opportunity stage fallbacks */}
+                  {stage && !["new","contacted","responded","discovery","qualified","appointed","lost"].includes(stage) && (
+                    <>
+                      {stage === "new_lead" && <option value="new_lead">Yeni Lead</option>}
+                      {stage === "first_contact" && <option value="first_contact">İlk İletişim</option>}
+                      {stage === "engaged" && <option value="engaged">Yanıt Alındı</option>}
+                      {stage === "report_waiting" && <option value="report_waiting">Rapor Bekleniyor</option>}
+                      {stage === "report_received" && <option value="report_received">Rapor Geldi</option>}
+                      {stage === "doctor_review" && <option value="doctor_review">Doktor İncelemesi</option>}
+                      {stage === "offer_sent" && <option value="offer_sent">Teklif Gönderildi</option>}
+                      {stage === "appointment_planning" && <option value="appointment_planning">Randevu Planlanıyor</option>}
+                      {stage === "appointment_booked" && <option value="appointment_booked">Randevu Alındı</option>}
+                      {stage === "arrived" && <option value="arrived">Geldi</option>}
+                      {stage === "not_qualified" && <option value="not_qualified">Uygun Değil</option>}
+                    </>
+                  )}
+                </select>
+                <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none">
+                  <ChevronDown className="w-3.5 h-3.5 text-[#86868B]" />
                 </div>
-                {hasConflict && conflictReason && (
-                  <span className="text-[10px] font-semibold leading-relaxed text-left pt-1.5 block" style={{ color: "#FF9500", borderTop: "1px solid rgba(255, 149, 0, 0.15)" }}>
-                    ⚠️ {conflictReason}
-                  </span>
-                )}
-                {suggestedSource === 'patient_message' && activeContact.last_message && (
-                  <span className="text-[10px] font-semibold leading-relaxed text-left block text-[#86868B]">
-                    Kaynak: Hasta mesajı — "{activeContact.last_message}"
-                  </span>
-                )}
               </div>
-            )}
+            </div>
+
+            {/* Department/Bölüm */}
+            <div className="space-y-1 text-left">
+              <label className="text-[9px] font-bold uppercase tracking-widest text-[#86868B] ml-1">Bölüm / Departman</label>
+              <div className="relative">
+                <select
+                  value={department}
+                  onChange={(e) => setDepartment(e.target.value)}
+                  className="w-full pl-2 pr-6 py-1.5 rounded-lg text-[11px] font-bold outline-none transition-all appearance-none cursor-pointer bg-white/60 border hover:border-indigo-500/30"
+                  style={{ borderColor: "var(--q-border-default)", color: "var(--q-text-primary)", boxShadow: "var(--q-shadow-sm)" }}
+                >
+                  <option value="">Belirtilmemiş</option>
+                  {["Ortopedi", "Kardiyoloji", "Gastroenteroloji", "Estetik", "Diş", "Diş Estetiği", "Göz", "Tüp Bebek", "Organ Nakli", "Onkoloji", "Obezite", "Nöroloji", "Üroloji", "Dermatoloji", "Genel Cerrahi", "Beyin Cerrahi", "KBB", "Göğüs Hastalıkları", "Endokrinoloji", "Fizik Tedavi", "Çocuk Sağlığı", "Kadın Doğum", "Psikiyatri", "Check-Up"].map((d) => (
+                    <option key={d} value={d}>{d}</option>
+                  ))}
+                </select>
+                <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none">
+                  <ChevronDown className="w-3.5 h-3.5 text-[#86868B]" />
+                </div>
+              </div>
+            </div>
           </div>
+
+          {/* Department Recommendation */}
+          {suggestedDept && (
+            <div className="mt-2 p-2 flex flex-col gap-1.5 rounded-xl border transition-all duration-200"
+                 style={{ 
+                   backgroundColor: hasConflict ? "rgba(255, 149, 0, 0.04)" : suggestedConfidence === 'medium' ? "rgba(255, 149, 0, 0.04)" : "rgba(175, 82, 222, 0.04)", 
+                   borderColor: hasConflict ? "rgba(255, 149, 0, 0.25)" : suggestedConfidence === 'medium' ? "rgba(255, 149, 0, 0.15)" : "rgba(175, 82, 222, 0.15)" 
+                 }}>
+              <div className="flex items-center justify-between w-full">
+                <div className="flex items-center gap-1.5">
+                  <Sparkles className="w-3 h-3 shrink-0 animate-pulse" style={{ color: hasConflict || suggestedConfidence === 'medium' ? "#FF9500" : "#AF52DE" }} />
+                  <div className="flex flex-col text-left">
+                    <span className="text-[8px] font-bold uppercase tracking-wider" style={{ color: hasConflict || suggestedConfidence === 'medium' ? "#FF9500" : "#AF52DE" }}>
+                      Önerilen Bölüm
+                    </span>
+                    <span className="text-[11px] font-semibold text-[#1D1D1F]">
+                      {suggestedDept} {hasConflict ? "— Çakışma Var" : suggestedConfidence === 'medium' ? "— Teyit Edin" : ""}
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setDepartment(suggestedDept!);
+                    setIsSaving(true);
+                    setSaveStatus("saving");
+                    const res = await updateCrmData(activeContact.id, stage, suggestedDept!, country, notes, patientName);
+                    if (res.success) {
+                      useInboxStore.getState().setActiveContact(activeContact.id, {
+                        ...activeContact,
+                        department: suggestedDept!,
+                        name: patientName,
+                        opp_patient_name: patientName
+                      });
+                      mutate((key) => Array.isArray(key) && key[0] === "conversations");
+                      setSaveStatus("saved");
+                      setTimeout(() => setSaveStatus("idle"), 2000);
+                    } else {
+                      setSaveStatus("error");
+                      setTimeout(() => setSaveStatus("idle"), 3000);
+                    }
+                    setIsSaving(false);
+                  }}
+                  className="px-2 py-0.5 text-[9px] font-bold rounded-lg cursor-pointer bg-white border transition-all hover:scale-[1.02]"
+                  style={{ 
+                    color: hasConflict || suggestedConfidence === 'medium' ? "#FF9500" : "#AF52DE",
+                    borderColor: hasConflict || suggestedConfidence === 'medium' ? "rgba(255, 149, 0, 0.2)" : "rgba(175, 82, 222, 0.2)"
+                  }}
+                >
+                  Onayla
+                </button>
+              </div>
+              {hasConflict && conflictReason && (
+                <span className="text-[9px] font-semibold leading-relaxed text-left pt-1 block" style={{ color: "#FF9500", borderTop: "1px solid rgba(255, 149, 0, 0.15)" }}>
+                  ⚠️ {conflictReason}
+                </span>
+              )}
+              {suggestedSource === 'patient_message' && activeContact.last_message && (
+                <span className="text-[9px] font-semibold leading-relaxed text-left block text-[#86868B]">
+                  Kaynak: Hasta mesajı — "{activeContact.last_message}"
+                </span>
+              )}
+            </div>
+          )}
 
           {/* AI Summary Card */}
           {(() => {
@@ -963,55 +974,55 @@ export function ContextPanel() {
               entityType,
               patientName
             );
-            return <UniversalAISummaryCard summary={resolvedSummary} className="pt-1" />;
+            return <UniversalAISummaryCard summary={resolvedSummary} compact={true} defaultCollapsed={true} maxLines={3} className="pt-0.5" />;
           })()}
 
           {/* Notes */}
-          <div className="space-y-1.5 text-left pt-1">
-            <label className="text-[10px] font-bold uppercase tracking-widest text-[#86868B] ml-1">
+          <div className="space-y-1 text-left pt-0.5">
+            <label className="text-[9px] font-bold uppercase tracking-widest text-[#86868B] ml-1">
               {entityType === 'patient' ? '✍️ Koordinatör Notları' : '✍️ Manuel Notlar'}
             </label>
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               placeholder={entityType === 'patient' ? 'Hastayla ilgili manuel takip notları...' : 'Müşteriyle ilgili manuel notlar...'}
-              className="w-full h-24 bg-white/60 border rounded-xl p-3 text-xs text-[#1D1D1F] placeholder:text-[#86868B] focus:ring-2 focus:ring-[#AF52DE]/20 resize-none outline-none transition-all shadow-sm focus:border-indigo-500/40"
+              className="w-full h-16 bg-white/60 border rounded-xl p-2.5 text-[11.5px] text-[#1D1D1F] placeholder:text-[#86868B] focus:ring-2 focus:ring-[#AF52DE]/20 resize-none outline-none transition-all shadow-sm focus:border-indigo-500/40"
               style={{ borderColor: "var(--q-border-default)" }}
             />
           </div>
 
           {/* Tags */}
-          <div className="space-y-2 text-left pt-1">
+          <div className="space-y-1.5 text-left pt-0.5">
             <div className="flex items-center justify-between">
-              <label className="text-[10px] font-bold uppercase tracking-widest text-[#86868B] ml-1">Etiketler</label>
+              <label className="text-[9px] font-bold uppercase tracking-widest text-[#86868B] ml-1">Etiketler</label>
               {!isAddingTag && (
                 <button
                   onClick={() => setIsAddingTag(true)}
-                  className="transition-colors text-[10px] font-bold tracking-wide flex items-center gap-0.5 text-indigo-600 hover:text-indigo-800 cursor-pointer"
+                  className="transition-colors text-[9px] font-bold tracking-wide flex items-center gap-0.5 text-indigo-600 hover:text-indigo-800 cursor-pointer"
                 >
-                  <Plus className="w-3 h-3" /> EKLE
+                  <Plus className="w-2.5 h-2.5" /> EKLE
                 </button>
               )}
             </div>
 
-            <div className="flex flex-wrap gap-1.5">
+            <div className="flex flex-wrap gap-1">
               {parsedTags.length > 0 ? (
                 parsedTags.map((tag: string, i: number) => (
                   <span
                     key={i}
-                    className="px-2.5 py-0.5 text-xs font-bold rounded-lg flex items-center gap-1 shadow-sm group bg-indigo-50 text-indigo-600 border border-indigo-100"
+                    className="px-1.5 py-0.2 text-[10px] font-bold rounded-lg flex items-center gap-0.5 shadow-sm group bg-indigo-50 text-indigo-600 border border-indigo-100"
                   >
-                    <Tag className="w-3 h-3 text-indigo-400" /> {formatTag(tag)}
+                    <Tag className="w-2.5 h-2.5 text-indigo-400" /> {formatTag(tag)}
                     <button
                       onClick={() => handleRemoveTag(tag)}
-                      className="ml-1 w-3.5 h-3.5 rounded-full flex items-center justify-center hover:bg-indigo-100 transition-all text-indigo-400 hover:text-indigo-700"
+                      className="ml-0.5 w-3 h-3 rounded-full flex items-center justify-center hover:bg-indigo-100 transition-all text-indigo-400 hover:text-indigo-700"
                     >
-                      <X className="w-2.5 h-2.5" />
+                      <X className="w-2 h-2" />
                     </button>
                   </span>
                 ))
               ) : (
-                !isAddingTag && <span className="text-[11px] italic text-[#86868B]">Etiket eklenmemiş</span>
+                !isAddingTag && <span className="text-[10px] italic text-[#86868B]">Etiket eklenmemiş</span>
               )}
               {isAddingTag && (
                 <form onSubmit={handleAddTag} className="flex items-center">
@@ -1022,7 +1033,7 @@ export function ContextPanel() {
                     onChange={(e) => setNewTagVal(e.target.value)}
                     onBlur={() => handleAddTag()}
                     placeholder="Etiket..."
-                    className="px-2 py-0.5 text-xs font-bold rounded-lg outline-none w-20 bg-white border border-indigo-300 focus:border-indigo-500 shadow-sm"
+                    className="px-1.5 py-0.2 text-[10px] font-bold rounded-lg outline-none w-16 bg-white border border-indigo-300 focus:border-indigo-500 shadow-sm"
                   />
                 </form>
               )}
@@ -1032,42 +1043,42 @@ export function ContextPanel() {
 
         {/* Form Geçmişi */}
         {activeContact.formData && (
-          <div className="p-4 rounded-2xl border bg-white/40 space-y-3 shadow-sm text-left" style={{ borderColor: "var(--q-border-default)" }}>
+          <div className="p-2.5 rounded-2xl border bg-white/40 space-y-2 shadow-sm text-left" style={{ borderColor: "var(--q-border-default)" }}>
             <div className="flex items-center justify-between pb-1 border-b border-black/[0.03]">
-              <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#86868B]">Form Geçmişi</span>
-              <span className="text-[9px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 rounded-full px-2 py-0.5">1 Form</span>
+              <span className="text-[9px] font-extrabold uppercase tracking-widest text-[#86868B]">Form Geçmişi</span>
+              <span className="text-[8px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 rounded-full px-1.5 py-0.2">1 Form</span>
             </div>
             
             <div 
               onClick={() => setIsFormModalOpen(true)}
-              className="p-3 rounded-xl text-left transition-all duration-200 hover:scale-[1.01] active:scale-[0.99] cursor-pointer hover:bg-white bg-white/50 border border-black/5 shadow-sm space-y-2"
+              className="p-2 rounded-xl text-left transition-all duration-200 hover:scale-[1.01] active:scale-[0.99] cursor-pointer hover:bg-white bg-white/50 border border-black/5 shadow-sm space-y-1.5"
             >
               <div className="flex items-center justify-between">
-                <span className="text-xs font-extrabold text-[#1D1D1F] line-clamp-1">
+                <span className="text-[11px] font-extrabold text-[#1D1D1F] line-clamp-1">
                   {activeContact.formData.name || "Estetik ve Tedavi Formu"}
                 </span>
-                <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 rounded-full px-2 py-0.5 shrink-0">
-                  Detayları Gör
+                <span className="text-[9px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 rounded-full px-1.5 py-0.2 shrink-0">
+                  Detay
                 </span>
               </div>
               
-              <div className="flex items-center gap-3 text-[10px] text-[#86868B] font-semibold">
-                <div className="flex items-center gap-1">
-                  <Calendar className="w-3 h-3 text-indigo-400" />
+              <div className="flex items-center gap-2 text-[9px] text-[#86868B] font-semibold">
+                <div className="flex items-center gap-0.5">
+                  <Calendar className="w-2.5 h-2.5 text-indigo-400" />
                   <span>{activeContact.formData.date || "Belirtilmemiş"}</span>
                 </div>
                 {campaignName && (
-                  <div className="flex items-center gap-1 max-w-[150px]">
-                    <Share2 className="w-3 h-3 text-indigo-400 shrink-0" />
+                  <div className="flex items-center gap-0.5 max-w-[120px]">
+                    <Share2 className="w-2.5 h-2.5 text-indigo-400 shrink-0" />
                     <span className="truncate">{campaignName}</span>
                   </div>
                 )}
               </div>
 
               {(activeContact.formComplaint || rawObj?.complaint || rawObj?.sikayet) && (
-                <div className="pt-2 border-t border-black/[0.03]">
-                  <span className="block text-[9px] font-bold text-[#86868B] uppercase tracking-wider mb-0.5">Şikayet Özeti</span>
-                  <p className="text-[11px] font-semibold text-[#1D1D1F] line-clamp-2 leading-relaxed">
+                <div className="pt-1 border-t border-black/[0.03]">
+                  <span className="block text-[8px] font-bold text-[#86868B] uppercase tracking-wider mb-0.5">Şikayet Özeti</span>
+                  <p className="text-[10px] font-semibold text-[#1D1D1F] line-clamp-1 leading-snug">
                     {activeContact.formComplaint || rawObj?.complaint || rawObj?.sikayet}
                   </p>
                 </div>
@@ -1080,28 +1091,29 @@ export function ContextPanel() {
         <AiTimelinePanel phoneNumber={activeContact.id} />
       </div>
 
-      {/* Save Button — Governance-compliant lifecycle */}
-      <div className="p-5 mt-auto q-glass-strong" style={{ borderTop: "1px solid var(--q-border-default)" }}>
-        <button
-          onClick={handleSave}
-          disabled={isSaving}
-          className="w-full py-3 rounded-xl text-[14px] font-bold transition-all duration-200 flex items-center justify-center gap-2 shadow-md cursor-pointer disabled:opacity-70 disabled:hover:scale-100 q-press"
-          style={{
-            background: saveStatus === "saved" ? "var(--q-green)" : saveStatus === "error" ? "var(--q-red)" : "var(--q-text-primary)",
-            color: "white",
-          }}
-        >
-          {saveStatus === "saving" ? (
-            <><Loader2 className="w-4 h-4 animate-spin" /> Kaydediliyor...</>
-          ) : saveStatus === "saved" ? (
-            <><Check className="w-4 h-4" /> Kaydedildi!</>
-          ) : saveStatus === "error" ? (
-            <><X className="w-4 h-4" /> Hata oluştu</>
-          ) : (
-            <><Save className="w-4 h-4" /> Değişiklikleri Kaydet</>
-          )}
-        </button>
-      </div>
+      {/* Save Button — Only shown in dirty states to optimize dikey alan */}
+      {isDirty && (
+        <div className="p-3 mt-auto q-glass-strong border-t animate-fade-in" style={{ borderColor: "var(--q-border-default)" }}>
+          <button
+            onClick={handleSave}
+            disabled={isSaving}
+            className="w-full py-2 rounded-xl text-[12px] font-bold transition-all duration-200 flex items-center justify-center gap-1.5 shadow-md cursor-pointer disabled:opacity-70 q-press text-white"
+            style={{
+              background: saveStatus === "saved" ? "var(--q-green)" : saveStatus === "error" ? "var(--q-red)" : "var(--q-text-primary)",
+            }}
+          >
+            {saveStatus === "saving" ? (
+              <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Kaydediliyor...</>
+            ) : saveStatus === "saved" ? (
+              <><Check className="w-3.5 h-3.5" /> Kaydedildi!</>
+            ) : saveStatus === "error" ? (
+              <><X className="w-3.5 h-3.5" /> Hata oluştu</>
+            ) : (
+              <><Save className="w-3.5 h-3.5" /> Değişiklikleri Kaydet</>
+            )}
+          </button>
+        </div>
+      )}
 
       {/* Form Details Popup Modal */}
       {activeContact.formData && (
