@@ -256,7 +256,6 @@ export async function checkGreetingReadiness(leadId: string) {
         return { success: false, error: "Lead bulunamadı." };
       }
 
-      const lead = leads[0];
       const phone = lead.phone_number;
 
       if (!phone) {
@@ -462,7 +461,6 @@ export async function checkGreetingReadiness(leadId: string) {
       templateLanguage: finalData.templateLanguage,
       templateNonCompliant: finalData.templateNonCompliant,
       templateSendable: finalData.templateSendable,
-      source: finalData.source,
       isWithin24hWindow: finalData.isWithin24hWindow,
       source: finalData.source
     });
