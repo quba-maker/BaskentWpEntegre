@@ -200,6 +200,11 @@ export async function prepareGreetingDraft(leadId: string) {
  * and does not call WhatsApp API or AI.
  */
 export async function checkGreetingReadiness(leadId: string) {
+  console.info('[GREETING_READINESS_INPUT]', {
+    receivedId: String(leadId).slice(0, 8) + '***',
+    idType: typeof leadId,
+  });
+
   const safeLeadId = leadId && leadId.trim() ? leadId.trim() : null;
   if (!safeLeadId || !UUID_RE.test(safeLeadId)) {
     return { success: false as const, error: "Geçersiz Lead ID formatı." };
@@ -236,6 +241,16 @@ export async function checkGreetingReadiness(leadId: string) {
                WHERE l.id = $1::uuid AND l.tenant_id = $2::uuid`,
         values: [safeLeadId, ctx.tenantId]
       }) as any[];
+
+      const lead = leads[0];
+
+      console.info('[GREETING_READINESS_LEAD_LOOKUP]', {
+        receivedId: String(leadId).slice(0, 8) + '***',
+        foundLead: !!lead,
+        foundLeadId: lead?.id ? String(lead.id).slice(0, 8) + '***' : null,
+        formName: lead?.form_name || null,
+        department: lead?.department || null,
+      });
 
       if (leads.length === 0) {
         return { success: false, error: "Lead bulunamadı." };
@@ -447,6 +462,7 @@ export async function checkGreetingReadiness(leadId: string) {
       templateLanguage: finalData.templateLanguage,
       templateNonCompliant: finalData.templateNonCompliant,
       templateSendable: finalData.templateSendable,
+      source: finalData.source,
       isWithin24hWindow: finalData.isWithin24hWindow,
       source: finalData.source
     });
