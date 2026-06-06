@@ -5,7 +5,7 @@ import useSWRInfinite from "swr/infinite";
 import { Search, MessageCircle, X, FileText, ChevronRight, CheckCircle2, Bot, Save, StickyNote, Sparkles, RefreshCw, ChevronDown, Filter, Zap, Send, Clock, CheckCheck, Edit3, Phone, PhoneOff, PhoneForwarded, XCircle } from "lucide-react";
 import { getForms, getCampaignNames, updateLeadNotes, updateLeadStage, syncGoogleSheets } from "@/app/actions/forms";
 import { toggleBotStatus } from "@/app/actions/inbox";
-import { prepareGreetingDraft, sendGreetingMessage, activateBot, getOutreachHistory, logCallReached, logCallMissed, logCallbackScheduled, logNotInterested, getGreetingTemplates, checkGreetingReadiness, saveGreetingDraftInternal, type OutreachLogEntry } from "@/app/actions/outreach";
+import { prepareGreetingDraft, sendGreetingMessage, sendFormGreetingTemplateAction, activateBot, getOutreachHistory, logCallReached, logCallMissed, logCallbackScheduled, logNotInterested, getGreetingTemplates, checkGreetingReadiness, saveGreetingDraftInternal, type OutreachLogEntry } from "@/app/actions/outreach";
 import { useInboxStore } from "@/store/inbox-store";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { MapPin, Building2, Calendar, Flame, TrendingUp, User } from "lucide-react";
@@ -15,6 +15,7 @@ import { resolveCountry, deduplicatePhones, getCountryInfoByName } from "@/lib/u
 // ═══ P1: Outreach status badge config ═══
 const OUTREACH_BADGE_CONFIG: Record<string, { label: string; color: string; icon: string }> = {
   'greeting_sent': { label: 'Mesaj Gönderildi', color: '#25D366', icon: '💬' },
+  'form_greeting_template_sent': { label: 'Şablon Gönderildi', color: '#25D366', icon: '💬' },
   'bot_activated': { label: 'Bot Aktif', color: '#007AFF', icon: '🤖' },
   'called_reached': { label: 'Arandı / Ulaşıldı', color: '#0F9D58', icon: '📞' },
   'called_missed': { label: 'Arandı / Ulaşılamadı', color: '#FF9500', icon: '📵' },
@@ -212,7 +213,7 @@ export default function FormsPage() {
   const [draftMessage, setDraftMessage] = useState<string | null>(null);
   const [isDraftOpen, setIsDraftOpen] = useState(false);
   // P1: Template selector
-  const [templates, setTemplates] = useState<{id: string; name: string; body: string}[]>([]);
+  const [templates, setTemplates] = useState<{id: string; name: string; language: string; body: string}[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   // P1: Call action note
   const [callActionNote, setCallActionNote] = useState('');
@@ -408,15 +409,32 @@ export default function FormsPage() {
       return;
     }
 
+    if (!selectedTemplateId) {
+      setOutreachError('Lütfen bir WhatsApp şablonu seçin.');
+      return;
+    }
+
+    const tpl = templates.find(t => t.id === selectedTemplateId);
+    if (!tpl) {
+      setOutreachError('Seçilen şablon bulunamadı.');
+      return;
+    }
+
     // Explicit confirmation gate
-    if (!window.confirm("Bu mesaj hastaya WhatsApp üzerinden gönderilecek. Onaylıyor musunuz?")) {
+    if (!window.confirm("Bu mesaj hastaya WhatsApp üzerinden gönderilecek. Lütfen bu şablonun Meta / 360dialog panelinde onaylı ve aktif olduğundan emin olun. Onaylıyor musunuz?")) {
       return;
     }
 
     setOutreachLoading('sending');
     setOutreachError(null);
     try {
-      const result = await sendGreetingMessage(form.id, draftMessage);
+      const result = await sendFormGreetingTemplateAction(
+        form.id, 
+        tpl.id, 
+        tpl.name, 
+        tpl.language || 'tr', 
+        draftMessage
+      );
       if (result.success) {
         setGreetingSent(true);
         setIsDraftOpen(false);
@@ -895,7 +913,13 @@ export default function FormsPage() {
                   </td>
                   <td className="py-4 px-4 text-right">
                     <button 
-                      onClick={(e) => handleMessageClick(form, e)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedForm(form);
+                        setNotes(form.notes || "");
+                        setIsDraftOpen(true);
+                        handlePrepareDraft(form);
+                      }}
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-black/5 rounded-lg shadow-sm hover:bg-[#25D366]/10 hover:border-[#25D366]/20 hover:text-[#25D366] transition-all text-[13px] font-semibold text-[#1D1D1F]"
                     >
                       <MessageCircle className="w-4 h-4" />
@@ -1194,9 +1218,21 @@ export default function FormsPage() {
                           )}
                         </button>
 
+                        {/* Soft / Hard Readiness Warnings */}
+                        {readiness && readiness.greetingSent && !readiness.hardBlockedBecausePatientAlreadyInbound && (
+                          <div className="text-[10px] font-bold text-[#FF9500] text-center bg-orange-50 border border-orange-100 rounded-lg py-1 px-2.5">
+                            ⚠️ Bu kişiye daha önce mesaj gönderilmiş olabilir.
+                          </div>
+                        )}
+                        {readiness && !readiness.templateSendable && readiness.templateNonCompliant && (
+                          <div className="text-[10px] font-bold text-[#FF3B30] text-center bg-red-50 border border-red-100 rounded-lg py-1 px-2.5">
+                            ⛔ Şablon Uyumsuz: {readiness.complianceWarning}
+                          </div>
+                        )}
+
                         {/* WhatsApp Outbound Warning */}
                         <div className="text-[10px] font-bold text-[#FF3B30] text-center bg-red-50 border border-red-100 rounded-lg py-1 px-2.5">
-                          ⚠️ Bu işlem hastaya gerçek WhatsApp mesajı gönderir.
+                          ⚠️ Bu işlem hastaya gerçek WhatsApp mesajı gönderir. Lütfen şablonun onaylı olduğundan emin olun.
                         </div>
 
                         <div className="flex gap-2">

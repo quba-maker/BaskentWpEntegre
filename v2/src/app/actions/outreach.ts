@@ -226,19 +226,70 @@ export async function checkGreetingReadiness(leadId: string) {
         return { success: false, error: "Telefon numarası eksik." };
       }
 
-      // Check if greeting was already sent
-      const existingGreetingLog = await ctx.db.executeSafe({
-        text: `SELECT id FROM outreach_logs 
-               WHERE lead_id = $1 AND tenant_id = $2 AND action = 'greeting_sent'
+      // 2. Check if patient has EVER sent inbound on this phone
+      const inbounds = await ctx.db.executeSafe({
+        text: `SELECT 1 FROM messages 
+               WHERE tenant_id = $1 AND RIGHT(phone_number, 10) = RIGHT($2, 10) AND direction = 'in'
                LIMIT 1`,
-        values: [leadId, ctx.tenantId]
+        values: [ctx.tenantId, phone]
       }) as any[];
-      const greetingSent = existingGreetingLog.length > 0;
+      const hardBlockedBecausePatientAlreadyInbound = inbounds.length > 0;
 
+      // 3. Resolve active opportunity and conversation context
+      const oppId = lead.linked_opportunity_id || null;
+      let conversationId = null;
+      if (oppId) {
+        const opp = await ctx.db.executeSafe({
+          text: `SELECT conversation_id FROM opportunities WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+          values: [oppId, ctx.tenantId]
+        }) as any[];
+        conversationId = opp[0]?.conversation_id || null;
+      }
+
+      if (!conversationId) {
+        const convRes = await ctx.db.executeSafe({
+          text: `SELECT id FROM conversations WHERE tenant_id = $1 AND RIGHT(phone_number, 10) = RIGHT($2, 10) LIMIT 1`,
+          values: [ctx.tenantId, phone]
+        }) as any[];
+        conversationId = convRes[0]?.id || null;
+      }
+
+      // 4. Check Hard Duplicate logs
+      const dupLogs = await ctx.db.executeSafe({
+        text: `
+          SELECT ol.action, ol.created_at
+          FROM outreach_logs ol
+          LEFT JOIN leads l ON l.id = ol.lead_id AND l.tenant_id = ol.tenant_id
+          WHERE ol.tenant_id = $1
+            AND ol.action IN ('greeting_sent', 'template_sent', 'form_greeting_template_sent')
+            AND (
+              ol.lead_id = $2
+              OR (ol.opportunity_id = $3 AND $3 IS NOT NULL)
+              OR (ol.conversation_id = $4 AND $4 IS NOT NULL)
+              OR (
+                RIGHT(ol.metadata->>'phone', 10) = RIGHT($5, 10)
+                AND (l.form_name = $6 OR ol.metadata->>'form_name' = $6)
+              )
+            )
+          LIMIT 1
+        `,
+        values: [ctx.tenantId, leadId, oppId, conversationId, phone, lead.form_name]
+      }) as any[];
+      const hasHardDuplicate = dupLogs.length > 0;
+      const greetingSent = hasHardDuplicate; // legacy UI compatibility mapping
+
+      // 5. Check Soft Duplicate (Outbound message exists)
+      const outMessages = await ctx.db.executeSafe({
+        text: `SELECT 1 FROM messages 
+               WHERE tenant_id = $1 AND RIGHT(phone_number, 10) = RIGHT($2, 10) AND direction = 'out'
+               LIMIT 1`,
+        values: [ctx.tenantId, phone]
+      }) as any[];
+      const hasSoftDuplicate = outMessages.length > 0;
+
+      // 6. Resolve greeting template
       const { FormGreetingHandoffService } = await import("@/lib/services/form-greeting-handoff.service");
       const service = new FormGreetingHandoffService(ctx.db, ctx.tenantId);
-
-      // Check eligibility parameters without database mutations
       const elig = await service.checkEligibilityForLead(lead);
 
       // Resolve greeting language config from channel_ai_profiles
@@ -301,33 +352,40 @@ export async function checkGreetingReadiness(leadId: string) {
       const hasRealTemplate = resolved.templateId !== null && resolved.source !== 'system_hardcoded';
       const isNonCompliant = resolved.template_non_compliant || false;
 
-      // Calculate sendability rules:
-      // - hard block if patient already inbound (hasPatientMessagedBefore = true) => false
-      // - non-compliant => false
-      // - 24h window open => true
-      // - 24h window closed => approvedWhatsappTemplateAvailable (always false) => false
-      const isHardBlocked = elig.hasPatientMessagedBefore;
-      let templateSendable = false;
-      if (!isHardBlocked && !isNonCompliant) {
-        if (elig.windowOpen) {
-          templateSendable = true;
-        } else {
-          templateSendable = false;
+      // 7. Validate template variables (unsupported variables guard)
+      const safeVars = new Set(['patient_name', 'tenant_name', 'form_name', 'department', 'country', 'coordinator_name']);
+      const matches = resolved.body ? (resolved.body.match(/\{\{([^}]+)\}\}/g) || []) : [];
+      let hasUnsupportedVariables = false;
+      for (const match of matches) {
+        const varName = match.replace(/[\{\}]/g, '').trim();
+        if (!safeVars.has(varName)) {
+          hasUnsupportedVariables = true;
+          break;
         }
       }
+
+      // Calculate sendability rules
+      const templateSendable = !hardBlockedBecausePatientAlreadyInbound &&
+                               !hasHardDuplicate &&
+                               hasRealTemplate &&
+                               !isNonCompliant &&
+                               !hasUnsupportedVariables;
 
       return {
         success: true,
         data: {
           draftTemplateAvailable: true,
-          approvedWhatsappTemplateAvailable: false,
+          approvedWhatsappTemplateAvailable: hasRealTemplate && !isNonCompliant && !hasUnsupportedVariables,
           templateConfigExists: hasRealTemplate,
           templateSendable,
           templateNonCompliant: isNonCompliant,
           complianceWarning: resolved.compliance_warning || null,
           source: resolved.source === 'system_hardcoded' ? 'system_hardcoded' : (hasRealTemplate ? 'message_templates' : 'none'),
           isWithin24hWindow: elig.windowOpen,
-          hardBlockedBecausePatientAlreadyInbound: isHardBlocked,
+          hardBlockedBecausePatientAlreadyInbound,
+          hasHardDuplicate,
+          hasSoftDuplicate,
+          hasUnsupportedVariables,
           draftText: resolved.rendered,
           greetingSent
         }
@@ -348,6 +406,9 @@ export async function checkGreetingReadiness(leadId: string) {
         source: (data.source || 'none') as 'message_templates' | 'system_hardcoded' | 'none',
         isWithin24hWindow: !!data.isWithin24hWindow,
         hardBlockedBecausePatientAlreadyInbound: !!data.hardBlockedBecausePatientAlreadyInbound,
+        hasHardDuplicate: !!data.hasHardDuplicate,
+        hasSoftDuplicate: !!data.hasSoftDuplicate,
+        hasUnsupportedVariables: !!data.hasUnsupportedVariables,
         draftText: (data.draftText || "") as string,
         greetingSent: !!data.greetingSent
       }
@@ -940,6 +1001,294 @@ export async function getGreetingTemplates() {
       return TemplateResolverService.listGreetingTemplates(ctx.db, ctx.tenantId);
     }
   ).then(res => res.data || []);
+}
+
+// ═══════════════════════════════════════════════════════════
+// 9b. SEND FORM GREETING TEMPLATE ACTION — Şablonlu karşılama gönder (360dialog/Meta)
+// ═══════════════════════════════════════════════════════════
+
+export async function sendFormGreetingTemplateAction(
+  leadId: string,
+  templateId: string,
+  templateName: string,
+  languageCode: string,
+  templateText: string
+) {
+  if (!leadId) return { success: false, error: "Lead ID gerekli." };
+  if (!templateName) return { success: false, error: "Şablon ismi gerekli." };
+  if (!templateText) return { success: false, error: "Şablon metni gerekli." };
+
+  return withActionGuard(
+    { actionName: 'sendFormGreetingTemplateAction' },
+    async (ctx) => {
+      // 1. Fetch Lead
+      const leads = await ctx.db.executeSafe({
+        text: `SELECT l.id, l.phone_number, l.patient_name, l.form_name,
+                      l.linked_opportunity_id, l.customer_id, l.raw_data
+               FROM leads l
+               WHERE l.id = $1 AND l.tenant_id = $2`,
+        values: [leadId, ctx.tenantId]
+      }) as any[];
+
+      if (leads.length === 0) {
+        return { success: false, error: "Lead bulunamadı." };
+      }
+
+      const lead = leads[0];
+      const phone = lead.phone_number;
+
+      if (!phone) {
+        return { success: false, error: "Telefon numarası eksik." };
+      }
+
+      // Parse raw_data
+      let rawData: any = {};
+      try {
+        if (lead.raw_data) {
+          rawData = typeof lead.raw_data === 'string' ? JSON.parse(lead.raw_data) : lead.raw_data;
+        }
+      } catch (_) {}
+
+      // 2. Duplicate Check (Hard Guard)
+      // Check if patient wrote to us (inbound)
+      const inbounds = await ctx.db.executeSafe({
+        text: `SELECT 1 FROM messages 
+               WHERE tenant_id = $1 AND RIGHT(phone_number, 10) = RIGHT($2, 10) AND direction = 'in' 
+               LIMIT 1`,
+        values: [ctx.tenantId, phone]
+      }) as any[];
+      if (inbounds.length > 0) {
+        return { success: false, error: "Hasta zaten bize yazdı. Karşılama engellendi." };
+      }
+
+      // Check if hard duplicate in outreach_logs
+      const oppId = lead.linked_opportunity_id || null;
+      let conversationId = null;
+      if (oppId) {
+        const opp = await ctx.db.executeSafe({
+          text: `SELECT conversation_id FROM opportunities WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+          values: [oppId, ctx.tenantId]
+        }) as any[];
+        conversationId = opp[0]?.conversation_id || null;
+      }
+
+      if (!conversationId) {
+        const convRes = await ctx.db.executeSafe({
+          text: `SELECT id FROM conversations WHERE tenant_id = $1 AND RIGHT(phone_number, 10) = RIGHT($2, 10) LIMIT 1`,
+          values: [ctx.tenantId, phone]
+        }) as any[];
+        conversationId = convRes[0]?.id || null;
+      }
+
+      const dupLogs = await ctx.db.executeSafe({
+        text: `
+          SELECT ol.action 
+          FROM outreach_logs ol
+          LEFT JOIN leads l ON l.id = ol.lead_id AND l.tenant_id = ol.tenant_id
+          WHERE ol.tenant_id = $1
+            AND ol.action IN ('greeting_sent', 'template_sent', 'form_greeting_template_sent')
+            AND (
+              ol.lead_id = $2
+              OR (ol.opportunity_id = $3 AND $3 IS NOT NULL)
+              OR (ol.conversation_id = $4 AND $4 IS NOT NULL)
+              OR (
+                RIGHT(ol.metadata->>'phone', 10) = RIGHT($5, 10)
+                AND (l.form_name = $6 OR ol.metadata->>'form_name' = $6)
+              )
+            )
+          LIMIT 1
+        `,
+        values: [ctx.tenantId, leadId, oppId, conversationId, phone, lead.form_name]
+      }) as any[];
+      if (dupLogs.length > 0) {
+        return { success: false, error: "Bu hastaya daha önce karşılama şablonu gönderilmiştir." };
+      }
+
+      // 3. Resolve active WhatsApp provider details
+      const creds = await CredentialsService.resolveCredentials(ctx.tenantId, 'whatsapp');
+      if (!creds.accessToken) {
+        return { success: false, error: "WhatsApp sağlayıcı erişim anahtarı bulunamadı." };
+      }
+
+      let providerMessageId: string | null = null;
+      let sendSuccess = false;
+
+      // 4. Call Meta / 360dialog template send API
+      try {
+        if (creds.provider === '360dialog' || creds.provider === '360dialog_whatsapp') {
+          const { ThreeSixtyDialogService } = await import('@/lib/services/providers/three-sixty-dialog.service');
+          const res = await ThreeSixtyDialogService.sendTemplate(
+            creds.accessToken,
+            phone,
+            templateName,
+            languageCode
+          );
+          sendSuccess = res.success;
+          providerMessageId = res.providerMessageId || null;
+        } else {
+          // Default: Meta Cloud API via Graph API
+          const phoneId = creds.whatsappPhoneNumberId;
+          if (!phoneId) {
+            return { success: false, error: "WhatsApp Phone Number ID eksik." };
+          }
+          const response = await fetch(`https://graph.facebook.com/v25.0/${phoneId}/messages`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${creds.accessToken}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              messaging_product: 'whatsapp',
+              to: phone,
+              recipient_type: 'individual',
+              type: 'template',
+              template: {
+                name: templateName,
+                language: {
+                  code: languageCode
+                }
+              }
+            }),
+          });
+
+          if (!response.ok) {
+            const errData = await response.json().catch(() => ({}));
+            const rawErrorMsg = errData?.error?.message || response.statusText;
+            throw new Error(`Meta API error: ${rawErrorMsg}`);
+          }
+
+          const resData = await response.json().catch(() => ({}));
+          providerMessageId = resData.messages?.[0]?.id || null;
+          sendSuccess = true;
+        }
+      } catch (err: any) {
+        // Safe scrubbing of credentials in the returned error message
+        const safeErrorMsg = (err instanceof Error ? err.message : String(err))
+          .replace(new RegExp(creds.accessToken || 'NON_EXISTENT_KEY', 'g'), '[SCRUBBED_API_KEY]');
+        return { success: false, error: `WhatsApp gönderimi başarısız oldu: ${safeErrorMsg}` };
+      }
+
+      if (!sendSuccess) {
+        return { success: false, error: "WhatsApp sağlayıcı şablon gönderimi başarısız oldu." };
+      }
+
+      // 5. Ensure conversation/opportunity exist in compliance with FormLeadActivationService
+      let finalOppId = lead.linked_opportunity_id;
+      let finalConvId = conversationId;
+
+      if (!finalOppId) {
+        try {
+          const { FormLeadActivationService } = await import('@/lib/services/form-lead-activation.service');
+          const actRes = await FormLeadActivationService.activate({
+            tenantId: ctx.tenantId,
+            leadId: lead.id,
+            phoneNumber: phone,
+            patientName: lead.patient_name || undefined,
+            formName: lead.form_name || 'Bilinmeyen Form',
+            email: rawData?.email || undefined,
+            source: rawData?.source || 'manual'
+          });
+          finalOppId = actRes.opportunityId || null;
+          finalConvId = actRes.conversationId || null;
+        } catch (actErr) {
+          // Non-fatal fallback for activation
+          console.error("Form lead activation error:", actErr);
+        }
+      }
+
+      if (finalOppId && !finalConvId) {
+        const opp = await ctx.db.executeSafe({
+          text: `SELECT conversation_id FROM opportunities WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+          values: [finalOppId, ctx.tenantId]
+        }) as any[];
+        finalConvId = opp[0]?.conversation_id || null;
+      }
+
+      if (!finalConvId) {
+        const suffixes = [phone.slice(-10)];
+        const conv = await ctx.db.executeSafe({
+          text: `SELECT id FROM conversations WHERE tenant_id = $1 AND RIGHT(phone_number, 10) = ANY($2) LIMIT 1`,
+          values: [ctx.tenantId, suffixes]
+        }) as any[];
+        finalConvId = conv[0]?.id || null;
+      }
+
+      // 6. Write messages record
+      if (finalConvId) {
+        await ctx.db.executeSafe({
+          text: `INSERT INTO messages (tenant_id, conversation_id, phone_number, direction, content, channel, status, provider_message_id)
+                 VALUES ($1, $2, $3, 'out', $4, 'whatsapp', 'sent', $5)`,
+          values: [ctx.tenantId, finalConvId, phone, templateText, providerMessageId]
+        });
+
+        // Update conversation last_message
+        await ctx.db.executeSafe({
+          text: `UPDATE conversations 
+                 SET last_message_at = NOW(), 
+                     last_message_content = $1,
+                     last_channel = 'whatsapp',
+                     last_message_status = 'sent',
+                     last_message_direction = 'out',
+                     message_count = COALESCE(message_count, 0) + 1
+                 WHERE id = $2 AND tenant_id = $3`,
+          values: [templateText, finalConvId, ctx.tenantId]
+        });
+      }
+
+      // 7. Update Opportunity/Conversation stage to 'first_contact'
+      if (finalOppId) {
+        try {
+          const { UnifiedStageService } = await import('@/lib/services/unified-stage.service');
+          await UnifiedStageService.update({
+            tenantId: ctx.tenantId,
+            source: 'system',
+            opportunityId: finalOppId,
+            phoneNumber: phone,
+            targetStage: 'first_contact',
+            actorId: ctx.userId,
+            reason: 'form_greeting_template_sent',
+          });
+        } catch (_) {}
+      }
+
+      // 8. Write outreach log
+      await ctx.db.executeSafe({
+        text: `INSERT INTO outreach_logs (tenant_id, lead_id, conversation_id, opportunity_id, action, channel, actor_id, metadata)
+               VALUES ($1, $2, $3, $4, 'form_greeting_template_sent', 'whatsapp', $5, $6)`,
+        values: [
+          ctx.tenantId,
+          leadId,
+          finalConvId,
+          finalOppId,
+          ctx.userId,
+          JSON.stringify({
+            template_id: templateId,
+            template_name: templateName,
+            message_text: templateText,
+            provider_message_id: providerMessageId,
+            phone,
+            form_name: lead.form_name
+          })
+        ]
+      });
+
+      // 9. Audit Log
+      logAudit({
+        tenantId: ctx.tenantId,
+        userId: ctx.userId,
+        userEmail: ctx.email,
+        action: 'outreach_form_greeting_template_sent',
+        entityType: 'lead',
+        entityId: leadId,
+        details: { phone, templateName, providerMessageId },
+      });
+
+      return { success: true, providerMessageId };
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error || res.data?.error };
+    return { success: true, providerMessageId: res.data?.providerMessageId };
+  });
 }
 
 // ═══════════════════════════════════════════════════════════

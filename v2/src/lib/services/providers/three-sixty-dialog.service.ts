@@ -96,6 +96,74 @@ export class ThreeSixtyDialogService {
   }
 
   /**
+   * Sends an outgoing template message to a customer via the 360dialog WhatsApp Business API.
+   * 
+   * SECURITY: The apiKey parameter is never logged, printed in error stacks, or exposed
+   * to the console/telemetry under any circumstance.
+   */
+  static async sendTemplate(
+    apiKey: string,
+    to: string,
+    templateName: string,
+    languageCode: string = "tr",
+    components: any[] = []
+  ): Promise<{ success: boolean; providerMessageId?: string }> {
+    const url = "https://waba-v2.360dialog.io/messages";
+    
+    if (!apiKey) {
+      throw new Error("360dialog API error: D360-API-KEY is missing.");
+    }
+
+    try {
+      const bodyData = {
+        messaging_product: "whatsapp",
+        to: to,
+        recipient_type: "individual",
+        type: "template",
+        template: {
+          name: templateName,
+          language: {
+            code: languageCode
+          },
+          ...(components.length > 0 ? { components } : {})
+        }
+      };
+
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "D360-API-KEY": apiKey.trim(),
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(bodyData)
+      });
+
+      if (!response.ok) {
+        const err = await response.text();
+        throw new Error(`360dialog API HTTP ${response.status} Error: ${err}`);
+      }
+
+      const data = await response.json();
+      const providerMessageId = data.messages?.[0]?.id || null;
+      
+      this.log.info("Template sent successfully via 360dialog", { 
+        to, 
+        templateName,
+        hasMessageId: !!providerMessageId 
+      });
+
+      return { success: true, providerMessageId };
+    } catch (e: any) {
+      const safeErrorMsg = e instanceof Error ? e.message : String(e);
+      this.log.error("360dialog API template request failed", new Error(safeErrorMsg.replace(apiKey, "[SCRUBBED_API_KEY]")), {
+        to,
+        templateName
+      });
+      throw new Error(`360dialog template sending failed: ${safeErrorMsg.replace(apiKey, "[SCRUBBED_API_KEY]")}`);
+    }
+  }
+
+  /**
    * Sends a reaction to a message via the 360dialog WhatsApp Business API.
    */
   static async sendReaction(
