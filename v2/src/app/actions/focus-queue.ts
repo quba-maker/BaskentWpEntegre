@@ -495,10 +495,19 @@ export async function schedulePhoneCallTask(opportunityId: string, dueAtUtc: str
   return withActionGuard(
     { actionName: 'schedulePhoneCallTask' },
     async (ctx) => {
+      // Fetch opportunity to get the phone_number
+      const oppRes = await ctx.db.executeSafe({
+        text: `SELECT phone_number FROM opportunities WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+        values: [opportunityId, ctx.tenantId]
+      }) as any[];
+      if (oppRes.length === 0) return { success: false, error: 'Fırsat bulunamadı.' };
+      const opp = oppRes[0];
+
       const query = `
         INSERT INTO follow_up_tasks (
           tenant_id, 
           opportunity_id, 
+          phone_number,
           task_type, 
           title, 
           description, 
@@ -506,7 +515,7 @@ export async function schedulePhoneCallTask(opportunityId: string, dueAtUtc: str
           due_at, 
           metadata
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         RETURNING id
       `;
 
@@ -520,6 +529,7 @@ export async function schedulePhoneCallTask(opportunityId: string, dueAtUtc: str
         values: [
           ctx.tenantId,
           opportunityId,
+          opp.phone_number,
           'callback_scheduled',
           'Telefon Randevusu',
           note || 'Hastayla telefon görüşmesi planlandı.',

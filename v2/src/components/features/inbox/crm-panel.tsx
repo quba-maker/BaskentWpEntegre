@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useSWRConfig } from "swr";
-import { User, MapPin, Building, Activity, Tag, ChevronDown, ChevronRight, Save, X, Plus, ChevronLeft, Check, Loader2, Sparkles, FileText, Brain, Link, Clock, Moon, Calendar, CalendarClock, PhoneForwarded, MailPlus } from "lucide-react";
+import { User, MapPin, Building, Activity, Tag, ChevronDown, ChevronRight, Save, X, Plus, ChevronLeft, Check, Loader2, Sparkles, FileText, Brain, Link, Clock, Moon, Calendar, CalendarClock, PhoneForwarded, MailPlus, Share2 } from "lucide-react";
 import { useInboxStore } from "@/store/inbox-store";
 import { updateCrmData, addTag, removeTag, prepareFollowUpDraft, sendApprovedFollowUp, checkSecondaryFallback, prepareSecondaryDraft, checkFormGreetingEligibility, prepareFormGreetingDraft } from "@/app/actions/inbox";
 import { CustomerAiBrainPanel } from "@/components/features/ai-observability/CustomerAiBrain";
@@ -16,6 +16,11 @@ import { useParams } from "next/navigation";
 import { resolveUniversalAISummary, getTenantEntityType } from "@/lib/utils/universal-summary-resolver";
 import { UniversalAISummaryCard } from "@/components/features/takip/universal-ai-summary-card";
 import { useTenant } from "@/components/providers/tenant-provider";
+import { PatientFormModal } from "./patient-form-modal";
+import { PhoneCallModal } from "./phone-call-modal";
+import { AppointmentModal } from "./appointment-modal";
+import { useQueryClient } from "@tanstack/react-query";
+import { Phone } from "lucide-react";
 
 const tagTranslationMap: Record<string, string> = {
   "price_sensitive": "fiyat_odaklı",
@@ -88,6 +93,18 @@ export function ContextPanel() {
   const entityType = getTenantEntityType(tenantSlug, tenant?.profile?.industry);
   const [formOpen, setFormOpen] = useState(false);
   const [aiSummaryOpen, setAiSummaryOpen] = useState(true);
+  const [isFormModalOpen, setIsFormModalOpen] = useState(false);
+  const [isPhoneCallModalOpen, setIsPhoneCallModalOpen] = useState(false);
+  const [isAppointmentModalOpen, setIsAppointmentModalOpen] = useState(false);
+  const queryClient = useQueryClient();
+
+  const oppId = activeContact?.active_opp_id || activeContact?.active_opportunity_id || activeContact?.opportunity_id || "";
+
+  const handleModalSuccess = () => {
+    queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    mutate((key) => Array.isArray(key) && key[0] === "conversations");
+    window.dispatchEvent(new CustomEvent('inbox-unread-refresh'));
+  };
   const getInitialNotes = (contact: typeof activeContact) => {
     if (!contact) return "";
     return contact.notes || "";
@@ -323,9 +340,10 @@ export function ContextPanel() {
   // Parse form data
   let formDataEntries: { key: string; value: string }[] = [];
   let campaignName: string | null = null;
+  let rawObj: any = null;
   if (activeContact?.formData?.raw) {
     try {
-      const rawObj = typeof activeContact.formData.raw === "string" ? JSON.parse(activeContact.formData.raw) : activeContact.formData.raw;
+      rawObj = typeof activeContact.formData.raw === "string" ? JSON.parse(activeContact.formData.raw) : activeContact.formData.raw;
       campaignName = rawObj.campaign_name || rawObj.campaignName || rawObj.utm_campaign || rawObj.utmCampaign || null;
       const skipKeys = ["id", "leadgen_id", "form_id", "ad_id", "adset_id", "campaign_id", "platform", "is_organic", "created_time", "phone_number_id", "full_name", "phone_number", "_all_phones"];
       formDataEntries = Object.entries(rawObj)
@@ -339,7 +357,7 @@ export function ContextPanel() {
     }
   } else if (activeContact?.form_raw_data) {
     try {
-      const rawObj = typeof activeContact.form_raw_data === "string" ? JSON.parse(activeContact.form_raw_data) : activeContact.form_raw_data;
+      rawObj = typeof activeContact.form_raw_data === "string" ? JSON.parse(activeContact.form_raw_data) : activeContact.form_raw_data;
       campaignName = rawObj.campaign_name || rawObj.campaignName || rawObj.utm_campaign || rawObj.utmCampaign || null;
     } catch (_) {}
   }
@@ -367,10 +385,10 @@ export function ContextPanel() {
 
   // Parse all phones
   let allPhones: string[] = [];
-  const rawObj = activeContact.formData?.raw || activeContact.form_raw_data;
-  if (rawObj) {
+  const contactRawObj = activeContact.formData?.raw || activeContact.form_raw_data;
+  if (contactRawObj) {
     try {
-      const parsedRaw = typeof rawObj === "string" ? JSON.parse(rawObj) : rawObj;
+      const parsedRaw = typeof contactRawObj === "string" ? JSON.parse(contactRawObj) : contactRawObj;
       if (parsedRaw && parsedRaw._all_phones) {
         const parsedPhones = typeof parsedRaw._all_phones === "string" ? JSON.parse(parsedRaw._all_phones) : parsedRaw._all_phones;
         if (Array.isArray(parsedPhones)) {
@@ -412,9 +430,32 @@ export function ContextPanel() {
 
       {/* Profile Card */}
       <div className="p-6 flex flex-col items-center text-center" style={{ borderBottom: "1px solid var(--q-border-default)" }}>
-        <div className="w-20 h-20 rounded-full flex items-center justify-center mb-4 shadow-sm" style={{ background: "rgba(255,255,255,0.6)", border: "1px solid rgba(255,255,255,0.8)" }}>
-          <User className="w-10 h-10 opacity-50" style={{ color: "var(--q-text-secondary)" }} />
-        </div>
+        {(() => {
+          const cleanName = patientName.trim();
+          const initials = cleanName
+            ? cleanName.split(/\s+/).map(p => p[0]).filter(Boolean).slice(0, 2).join("").toUpperCase()
+            : "?";
+          
+          const colors = [
+            { bg: "linear-gradient(135deg, #FF5E3A 0%, #FF2A68 100%)", text: "#FFFFFF" }, // Red/Pink
+            { bg: "linear-gradient(135deg, #007AFF 0%, #0051A8 100%)", text: "#FFFFFF" }, // Blue
+            { bg: "linear-gradient(135deg, #5856D6 0%, #3533CD 100%)", text: "#FFFFFF" }, // Purple
+            { bg: "linear-gradient(135deg, #4CD964 0%, #28A745 100%)", text: "#FFFFFF" }, // Green
+            { bg: "linear-gradient(135deg, #FF9500 0%, #FF5E00 100%)", text: "#FFFFFF" }, // Orange
+            { bg: "linear-gradient(135deg, #30B0C7 0%, #178097 100%)", text: "#FFFFFF" }, // Teal
+          ];
+          const index = activeContact.id ? parseInt(activeContact.id.slice(-3)) % colors.length || 0 : initials.charCodeAt(0) % colors.length;
+          const avatar = colors[index];
+
+          return (
+            <div 
+              className="w-20 h-20 rounded-full flex items-center justify-center mb-4 shadow-md text-xl font-bold select-none transition-transform duration-300 hover:scale-105"
+              style={{ background: avatar.bg, color: avatar.text }}
+            >
+              {initials}
+            </div>
+          );
+        })()}
         {isEditingName ? (
           <div className="flex items-center gap-2 justify-center w-full max-w-[220px]">
             <input
@@ -556,7 +597,7 @@ export function ContextPanel() {
 
         {/* Task-based Action Required Deep Link Card */}
         {activeContact.active_task_type && (
-          <div className="w-full mt-3 p-3.5 rounded-xl border space-y-2.5 text-left bg-indigo-50/30" style={{ borderColor: 'var(--q-blue)' }}>
+          <div className="w-full mt-3 p-3.5 rounded-xl border space-y-2.5 text-left bg-indigo-50/30 shadow-sm" style={{ borderColor: 'var(--q-blue)' }}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5">
                 <Clock className="w-3.5 h-3.5 text-indigo-500" />
@@ -591,16 +632,10 @@ export function ContextPanel() {
                 'no_reply_followup', 'template_required_task', 'bot_handoff_followup'
               ].includes(activeContact.active_task_type);
 
-              const isAppointmentTask = [
-                'coordinator_review', 'travel_planning', 'payment_follow_up', 'appointment_reminder'
-              ].includes(activeContact.active_task_type);
-
-              const oppId = activeContact.active_opp_id || activeContact.active_opportunity_id || activeContact.opportunity_id || '';
-
               if (isPhoneTask) {
                 return (
                   <a
-                    href={`./takip?tab=telefon&opp=${oppId}`}
+                    href={`/${tenantSlug}/takip?tab=telefon&opp=${oppId}`}
                     className="w-full py-2 px-3 bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all shadow-sm"
                   >
                     <PhoneForwarded className="w-3.5 h-3.5" />
@@ -609,25 +644,14 @@ export function ContextPanel() {
                 );
               }
 
-              if (isAppointmentTask) {
-                return (
-                  <a
-                    href={`./takip?tab=randevu&opp=${oppId}`}
-                    className="w-full py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all shadow-sm"
-                  >
-                    <Calendar className="w-3.5 h-3.5" />
-                    <span>Randevu Yönetiminde Aç</span>
-                  </a>
-                );
-              }
-
+              // All other tasks (including isAppointmentTask or unknown fallbacks)
               return (
                 <a
-                  href={`./takip?opp=${oppId}`}
-                  className="w-full py-2 px-3 bg-gray-800 hover:bg-gray-900 text-white text-[11px] font-bold rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all shadow-sm"
+                  href={`/${tenantSlug}/takip?tab=randevu&opp=${oppId}`}
+                  className="w-full py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all shadow-sm"
                 >
-                  <Activity className="w-3.5 h-3.5" />
-                  <span>Takip Merkezinde Aç</span>
+                  <Calendar className="w-3.5 h-3.5" />
+                  <span>Randevu Yönetiminde Aç</span>
                 </a>
               );
             })()}
@@ -737,9 +761,10 @@ export function ContextPanel() {
 
         {/* Quick Action Grid Cards */}
         <div className="grid grid-cols-3 gap-2 mt-4 w-full pt-3 border-t border-black/5">
-          <a
-            href={`./takip?opp=${activeContact.active_opp_id || activeContact.active_opportunity_id || activeContact.opportunity_id || ''}`}
-            className="flex flex-col items-center justify-center p-2.5 rounded-xl border text-center transition-all duration-200 group hover:scale-[1.02] active:scale-[0.98]"
+          <button
+            type="button"
+            onClick={() => setIsPhoneCallModalOpen(true)}
+            className="flex flex-col items-center justify-center p-2.5 rounded-xl border text-center transition-all duration-200 group hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
             style={{
               backgroundColor: "rgba(88, 86, 214, 0.04)",
               borderColor: "rgba(88, 86, 214, 0.12)",
@@ -748,14 +773,15 @@ export function ContextPanel() {
           >
             <div className="w-7 h-7 rounded-full flex items-center justify-center mb-1.5 transition-all duration-200 group-hover:scale-110"
                  style={{ backgroundColor: "rgba(88, 86, 214, 0.08)" }}>
-              <Activity className="w-3.5 h-3.5" />
+              <Phone className="w-3.5 h-3.5" />
             </div>
-            <span className="text-[10px] font-bold tracking-tight">Takipte Aç</span>
-          </a>
+            <span className="text-[10px] font-bold tracking-tight">Arama Planla</span>
+          </button>
 
-          <a
-            href={`./takip?opp=${activeContact.active_opp_id || activeContact.active_opportunity_id || activeContact.opportunity_id || ''}&tab=randevu&drawerTab=appointment`}
-            className="flex flex-col items-center justify-center p-2.5 rounded-xl border text-center transition-all duration-200 group hover:scale-[1.02] active:scale-[0.98]"
+          <button
+            type="button"
+            onClick={() => setIsAppointmentModalOpen(true)}
+            className="flex flex-col items-center justify-center p-2.5 rounded-xl border text-center transition-all duration-200 group hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
             style={{
               backgroundColor: "rgba(52, 199, 89, 0.04)",
               borderColor: "rgba(52, 199, 89, 0.12)",
@@ -766,12 +792,13 @@ export function ContextPanel() {
                  style={{ backgroundColor: "rgba(52, 199, 89, 0.08)" }}>
               <CalendarClock className="w-3.5 h-3.5" />
             </div>
-            <span className="text-[10px] font-bold tracking-tight leading-tight">Randevu<br/>Planla</span>
-          </a>
+            <span className="text-[10px] font-bold tracking-tight leading-tight">Randevu Planla</span>
+          </button>
 
-          <a
-            href={`./forms?phone=${activeContact.id}`}
-            className="flex flex-col items-center justify-center p-2.5 rounded-xl border text-center transition-all duration-200 group hover:scale-[1.02] active:scale-[0.98]"
+          <button
+            type="button"
+            onClick={() => setIsFormModalOpen(true)}
+            className="flex flex-col items-center justify-center p-2.5 rounded-xl border text-center transition-all duration-200 group hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
             style={{
               backgroundColor: "rgba(255, 149, 0, 0.04)",
               borderColor: "rgba(255, 149, 0, 0.12)",
@@ -782,191 +809,96 @@ export function ContextPanel() {
                  style={{ backgroundColor: "rgba(255, 149, 0, 0.08)" }}>
               <FileText className="w-3.5 h-3.5" />
             </div>
-            <span className="text-[10px] font-bold tracking-tight">Formlarda Aç</span>
-          </a>
+            <span className="text-[10px] font-bold tracking-tight">Form Detayı</span>
+          </button>
         </div>
       </div>
 
       <div className="p-5 space-y-7 flex-1">
-        {/* Hatırlatma Taslağı (Follow-Up) Panel Section */}
-        {(activeContact.lastMessageDirection === 'out' || activeContact.lastMessageDirection === 'system') && (
-          <div className="p-4 rounded-2xl border space-y-3 bg-white/50 shadow-sm text-left" style={{ borderColor: "var(--q-border-default)" }}>
-            <span className="block text-[10px] font-bold uppercase tracking-widest text-[#86868B]">Hatırlatma Yönetimi</span>
-            
-            {activeContact.is_no_reply_eligible && (
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-[#FF3B30] bg-red-50 border border-red-100 rounded-lg px-2.5 py-1.5 leading-snug">
-                <span>⏳</span>
-                <span>{activeContact.no_reply_hours} saattir hastadan cevap alınamadı.</span>
-              </div>
-            )}
-
-            {followUpError && (
-              <div className="text-xs font-bold text-red-600 bg-red-50 border border-red-100 rounded-lg p-2.5 leading-snug">
-                ⚠️ {followUpError}
-              </div>
-            )}
-
-            {followUpSuccess && (
-              <div className="text-xs font-bold text-green-600 bg-green-50 border border-green-100 rounded-lg p-2.5 leading-snug">
-                ✅ {followUpSuccess}
-              </div>
-            )}
-
-            {!draftData ? (
-              <button
-                onClick={async () => {
-                  setIsLoadingDraft(true);
-                  setFollowUpError(null);
-                  setFollowUpSuccess(null);
-                  try {
-                    const res = await prepareFollowUpDraft(activeContact.conversation_id || activeContact.id);
-                    if (res.success) {
-                      setDraftData({
-                        draft: res.draft,
-                        draftType: res.draftType,
-                        windowOpen: res.windowOpen,
-                        noReplyHours: res.noReplyHours
-                      });
-                      setEditedMessage(res.draft);
-                    } else {
-                      setFollowUpError(res.error || "Taslak hazırlanamadı.");
-                    }
-                  } catch (err) {
-                    setFollowUpError("Sistem hatası. Lütfen tekrar deneyin.");
-                  }
-                  setIsLoadingDraft(false);
-                }}
-                disabled={isLoadingDraft}
-                className="w-full py-2.5 px-4 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isLoadingDraft ? (
-                  <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span>Taslak Hazırlanıyor...</span>
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="w-3.5 h-3.5" />
-                    <span>Hatırlatma Taslağı Hazırla</span>
-                  </>
-                )}
-              </button>
-            ) : (
-              <div className="space-y-3 pt-1">
-                <div className="flex justify-between items-center text-xs">
-                  <span className="font-bold text-indigo-600 uppercase tracking-wider text-[10px]">Taslak Önizleme</span>
-                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                    draftData.windowOpen ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"
-                  }`}>
-                    {draftData.windowOpen ? "24s Penceresi Açık" : "24s Penceresi Kapalı"}
-                  </span>
-                </div>
-
-                {!draftData.windowOpen && (
-                  <div className="text-[11px] font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2.5 leading-snug">
-                    ⚠️ 24 saatlik WhatsApp penceresi kapandığı için sadece onaylı şablon (template) gönderilebilir. Şablon gönderimi A1.7a kapsamında devre dışıdır.
-                  </div>
-                )}
-
-                <textarea
-                  value={editedMessage}
-                  onChange={(e) => setEditedMessage(e.target.value)}
-                  disabled={!draftData.windowOpen || isSendingFollowUp}
-                  className="w-full text-xs p-3 rounded-xl border outline-none font-medium leading-relaxed bg-white resize-none h-24 disabled:opacity-85 disabled:bg-gray-50"
-                  style={{ borderColor: "var(--q-border-default)", color: "var(--q-text-primary)" }}
-                  placeholder="Mesajınızı yazın..."
-                />
-
-                <div className="flex gap-2.5">
-                  <button
-                    onClick={() => setDraftData(null)}
-                    disabled={isSendingFollowUp}
-                    className="flex-1 py-2 px-3 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-bold rounded-xl cursor-pointer transition-all disabled:opacity-50"
-                  >
-                    Vazgeç
-                  </button>
-                  <button
-                    onClick={async () => {
-                      setIsSendingFollowUp(true);
-                      setFollowUpError(null);
-                      setFollowUpSuccess(null);
-                      try {
-                        const res = await sendApprovedFollowUp(activeContact.conversation_id || activeContact.id, editedMessage);
-                        if (res.success) {
-                          setFollowUpSuccess("Hatırlatma başarıyla gönderildi.");
-                          mutate((key) => Array.isArray(key) && key[0] === "conversations");
-                          if (typeof window !== 'undefined') {
-                            window.dispatchEvent(new CustomEvent('inbox-unread-refresh'));
-                          }
-                          setTimeout(() => {
-                            setDraftData(null);
-                            setFollowUpSuccess(null);
-                          }, 3000);
-                        } else {
-                          setFollowUpError(res.error || "Gönderim başarısız.");
-                        }
-                      } catch (err) {
-                        setFollowUpError("Sistem hatası. Gönderilemedi.");
-                      }
-                      setIsSendingFollowUp(false);
-                    }}
-                    disabled={!draftData.windowOpen || isSendingFollowUp}
-                    className="flex-[2] py-2 px-4 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all disabled:bg-gray-300 disabled:text-gray-500 disabled:cursor-not-allowed disabled:hover:bg-gray-300 hover:scale-[1.01] active:scale-[0.99]"
-                  >
-                    {isSendingFollowUp ? (
-                      <>
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        <span>Gönderiyor...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Check className="w-3.5 h-3.5" />
-                        <span>Taslağı Gönder</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-              </div>
-            )}
+        {/* CRM Bilgileri Card */}
+        <div className="p-5 rounded-2xl border bg-white/40 space-y-5 shadow-sm text-left" style={{ borderColor: "var(--q-border-default)" }}>
+          <div className="flex items-center justify-between pb-2 border-b border-black/[0.03]">
+            <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#86868B]">CRM Bilgileri</span>
+            <span className="text-[9px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full uppercase tracking-wider">Manuel Takip</span>
           </div>
-        )}
 
-        {/* Core CRM Data */}
-        <div className="space-y-4">
-          <div>
-            <label className="text-[10px] font-bold uppercase tracking-widest mb-1.5 block ml-1" style={{ color: "var(--q-text-secondary)" }}>
-              Bölüm / Departman
-            </label>
+          {/* Stage/Durum */}
+          <div className="space-y-1.5 text-left">
+            <label className="text-[10px] font-bold uppercase tracking-widest text-[#86868B] ml-1">Durum / Aşama</label>
             <div className="relative">
-              <div className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none">
-                <Building className="w-4 h-4 opacity-80" style={{ color: "var(--q-blue)" }} />
+              <select
+                value={stage}
+                onChange={(e) => setStage(e.target.value)}
+                className="w-full px-4 py-2.5 rounded-xl text-[13px] font-semibold outline-none transition-all appearance-none cursor-pointer bg-white/60 border hover:border-indigo-500/30"
+                style={{ borderColor: "var(--q-border-default)", color: "var(--q-text-primary)", boxShadow: "var(--q-shadow-sm)" }}
+              >
+                <option value="new">Yeni Lead</option>
+                <option value="contacted">İletişime Geçildi</option>
+                <option value="responded">Yanıt Alındı</option>
+                <option value="discovery">Keşif / Analiz</option>
+                <option value="qualified">Nitelikli</option>
+                <option value="appointed">Randevu Aldı</option>
+                <option value="lost">Kaybedildi</option>
+                {/* Opportunity stage fallbacks */}
+                {stage && !["new","contacted","responded","discovery","qualified","appointed","lost"].includes(stage) && (
+                  <>
+                    {stage === "new_lead" && <option value="new_lead">Yeni Lead</option>}
+                    {stage === "first_contact" && <option value="first_contact">İlk İletişim</option>}
+                    {stage === "engaged" && <option value="engaged">Yanıt Alındı</option>}
+                    {stage === "report_waiting" && <option value="report_waiting">Rapor Bekleniyor</option>}
+                    {stage === "report_received" && <option value="report_received">Rapor Geldi</option>}
+                    {stage === "doctor_review" && <option value="doctor_review">Doktor İncelemesi</option>}
+                    {stage === "offer_sent" && <option value="offer_sent">Teklif Gönderildi</option>}
+                    {stage === "appointment_planning" && <option value="appointment_planning">Randevu Planlanıyor</option>}
+                    {stage === "appointment_booked" && <option value="appointment_booked">Randevu Alındı</option>}
+                    {stage === "arrived" && <option value="arrived">Geldi</option>}
+                    {stage === "not_qualified" && <option value="not_qualified">Uygun Değil</option>}
+                  </>
+                )}
+              </select>
+              <div className="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none">
+                <ChevronDown className="w-4 h-4 text-[#86868B]" />
+              </div>
+            </div>
+          </div>
+
+          {/* Department/Bölüm */}
+          <div className="space-y-1.5 text-left">
+            <label className="text-[10px] font-bold uppercase tracking-widest text-[#86868B] ml-1">Bölüm / Departman</label>
+            <div className="relative">
+              <div className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none">
+                <Building className="w-4 h-4 text-indigo-500/80" />
               </div>
               <select
                 value={department}
                 onChange={(e) => setDepartment(e.target.value)}
-                className="w-full pl-11 pr-4 py-2.5 rounded-xl text-[14px] font-semibold outline-none transition-all appearance-none cursor-pointer"
-                style={{ background: "rgba(255,255,255,0.6)", border: "1px solid var(--q-border-default)", color: "var(--q-text-primary)", boxShadow: "var(--q-shadow-sm)" }}
+                className="w-full pl-10 pr-10 py-2.5 rounded-xl text-[13px] font-semibold outline-none transition-all appearance-none cursor-pointer bg-white/60 border hover:border-indigo-500/30"
+                style={{ borderColor: "var(--q-border-default)", color: "var(--q-text-primary)", boxShadow: "var(--q-shadow-sm)" }}
               >
                 <option value="">Belirtilmemiş</option>
                 {["Ortopedi", "Kardiyoloji", "Gastroenteroloji", "Estetik", "Diş", "Diş Estetiği", "Göz", "Tüp Bebek", "Organ Nakli", "Onkoloji", "Obezite", "Nöroloji", "Üroloji", "Dermatoloji", "Genel Cerrahi", "Beyin Cerrahi", "KBB", "Göğüs Hastalıkları", "Endokrinoloji", "Fizik Tedavi", "Çocuk Sağlığı", "Kadın Doğum", "Psikiyatri", "Check-Up"].map((d) => (
                   <option key={d} value={d}>{d}</option>
                 ))}
               </select>
+              <div className="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none">
+                <ChevronDown className="w-4 h-4 text-[#86868B]" />
+              </div>
             </div>
+
             {suggestedDept && (
-              <div className="mt-2.5 flex flex-col gap-2.5 p-3.5 rounded-xl border transition-all duration-200"
+              <div className="mt-2.5 flex flex-col gap-2 p-3 rounded-xl border transition-all duration-200"
                    style={{ 
                      backgroundColor: hasConflict ? "rgba(255, 149, 0, 0.04)" : suggestedConfidence === 'medium' ? "rgba(255, 149, 0, 0.04)" : "rgba(175, 82, 222, 0.04)", 
                      borderColor: hasConflict ? "rgba(255, 149, 0, 0.25)" : suggestedConfidence === 'medium' ? "rgba(255, 149, 0, 0.15)" : "rgba(175, 82, 222, 0.15)" 
                    }}>
                 <div className="flex items-center justify-between w-full">
-                  <div className="flex items-center gap-2.5">
-                    <Sparkles className="w-4 h-4 shrink-0 animate-pulse" style={{ color: hasConflict || suggestedConfidence === 'medium' ? "#FF9500" : "#AF52DE" }} />
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-3.5 h-3.5 shrink-0 animate-pulse" style={{ color: hasConflict || suggestedConfidence === 'medium' ? "#FF9500" : "#AF52DE" }} />
                     <div className="flex flex-col text-left">
-                      <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: hasConflict || suggestedConfidence === 'medium' ? "#FF9500" : "#AF52DE" }}>
+                      <span className="text-[9px] font-bold uppercase tracking-wider" style={{ color: hasConflict || suggestedConfidence === 'medium' ? "#FF9500" : "#AF52DE" }}>
                         Önerilen Bölüm
                       </span>
-                      <span className="text-[13px] font-semibold" style={{ color: "var(--q-text-primary)" }}>
+                      <span className="text-[12px] font-semibold text-[#1D1D1F]">
                         {suggestedDept} {hasConflict ? "— Çakışma Var" : suggestedConfidence === 'medium' ? "— Teyit Edin" : ""}
                       </span>
                     </div>
@@ -975,7 +907,6 @@ export function ContextPanel() {
                     type="button"
                     onClick={async () => {
                       setDepartment(suggestedDept!);
-                      // Automatically trigger manual save to DB + set locks
                       setIsSaving(true);
                       setSaveStatus("saving");
                       const res = await updateCrmData(activeContact.id, stage, suggestedDept!, country, notes, patientName);
@@ -995,7 +926,7 @@ export function ContextPanel() {
                       }
                       setIsSaving(false);
                     }}
-                    className="px-2.5 py-1.5 text-[11px] font-bold rounded-lg cursor-pointer bg-white border transition-all hover:scale-[1.02]"
+                    className="px-2.5 py-1 text-[10px] font-bold rounded-lg cursor-pointer bg-white border transition-all hover:scale-[1.02]"
                     style={{ 
                       color: hasConflict || suggestedConfidence === 'medium' ? "#FF9500" : "#AF52DE",
                       borderColor: hasConflict || suggestedConfidence === 'medium' ? "rgba(255, 149, 0, 0.2)" : "rgba(175, 82, 222, 0.2)"
@@ -1005,12 +936,12 @@ export function ContextPanel() {
                   </button>
                 </div>
                 {hasConflict && conflictReason && (
-                  <span className="text-[11px] font-semibold leading-relaxed text-left pt-1.5 block" style={{ color: "#FF9500", borderTop: "1px solid rgba(255, 149, 0, 0.15)" }}>
+                  <span className="text-[10px] font-semibold leading-relaxed text-left pt-1.5 block" style={{ color: "#FF9500", borderTop: "1px solid rgba(255, 149, 0, 0.15)" }}>
                     ⚠️ {conflictReason}
                   </span>
                 )}
                 {suggestedSource === 'patient_message' && activeContact.last_message && (
-                  <span className="text-[11px] font-semibold leading-relaxed text-left block" style={{ color: "var(--q-text-secondary)" }}>
+                  <span className="text-[10px] font-semibold leading-relaxed text-left block text-[#86868B]">
                     Kaynak: Hasta mesajı — "{activeContact.last_message}"
                   </span>
                 )}
@@ -1018,43 +949,7 @@ export function ContextPanel() {
             )}
           </div>
 
-          <div>
-            <label className="text-[10px] font-bold uppercase tracking-widest mb-1.5 block ml-1" style={{ color: "var(--q-text-secondary)" }}>
-              Durum
-            </label>
-            <select
-              value={stage}
-              onChange={(e) => setStage(e.target.value)}
-              className="w-full px-4 py-2.5 rounded-xl text-[14px] font-semibold outline-none transition-all appearance-none cursor-pointer"
-              style={{ background: "rgba(255,255,255,0.6)", border: "1px solid var(--q-border-default)", color: "var(--q-text-primary)", boxShadow: "var(--q-shadow-sm)" }}
-            >
-              <option value="new">Yeni Lead</option>
-              <option value="contacted">İletişime Geçildi</option>
-              <option value="responded">Yanıt Alındı</option>
-              <option value="discovery">Keşif / Analiz</option>
-              <option value="qualified">Nitelikli</option>
-              <option value="appointed">Randevu Aldı</option>
-              <option value="lost">Kaybedildi</option>
-              {/* Opportunity-system fallback values (shown only if data has opp-stage) */}
-              {stage && !["new","contacted","responded","discovery","qualified","appointed","lost"].includes(stage) && (
-                <>
-                  {stage === "new_lead" && <option value="new_lead">Yeni Lead</option>}
-                  {stage === "first_contact" && <option value="first_contact">İlk İletişim</option>}
-                  {stage === "engaged" && <option value="engaged">Yanıt Alındı</option>}
-                  {stage === "report_waiting" && <option value="report_waiting">Rapor Bekleniyor</option>}
-                  {stage === "report_received" && <option value="report_received">Rapor Geldi</option>}
-                  {stage === "doctor_review" && <option value="doctor_review">Doktor İncelemesi</option>}
-                  {stage === "offer_sent" && <option value="offer_sent">Teklif Gönderildi</option>}
-                  {stage === "appointment_planning" && <option value="appointment_planning">Randevu Planlanıyor</option>}
-                  {stage === "appointment_booked" && <option value="appointment_booked">Randevu Alındı</option>}
-                  {stage === "arrived" && <option value="arrived">Geldi</option>}
-                  {stage === "not_qualified" && <option value="not_qualified">Uygun Değil</option>}
-                </>
-              )}
-            </select>
-          </div>
-
-          {/* Universal AI Summary & Opportunity Reason Card */}
+          {/* AI Summary Card */}
           {(() => {
             const summaryInput = {
               oppSummary: activeContact?.opp_summary,
@@ -1068,318 +963,118 @@ export function ContextPanel() {
               entityType,
               patientName
             );
-            return <UniversalAISummaryCard summary={resolvedSummary} className="pt-2" />;
+            return <UniversalAISummaryCard summary={resolvedSummary} className="pt-1" />;
           })()}
 
-          {/* Manuel Notlar Textarea */}
-          <div className="pt-2">
-            <div className="flex items-center justify-between mb-1.5 ml-1">
-              <div className="flex items-center gap-2">
-                <label className="text-[10px] font-bold uppercase tracking-widest block" style={{ color: "var(--q-text-secondary)" }}>
-                  {entityType === 'patient' ? '✍️ Koordinatör Notları' : '✍️ Manuel Notlar'}
-                </label>
-              </div>
-            </div>
+          {/* Notes */}
+          <div className="space-y-1.5 text-left pt-1">
+            <label className="text-[10px] font-bold uppercase tracking-widest text-[#86868B] ml-1">
+              {entityType === 'patient' ? '✍️ Koordinatör Notları' : '✍️ Manuel Notlar'}
+            </label>
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               placeholder={entityType === 'patient' ? 'Hastayla ilgili manuel takip notları...' : 'Müşteriyle ilgili manuel notlar...'}
-              className="w-full h-32 bg-white/60 border border-black/5 rounded-xl p-3 text-sm text-[#1D1D1F] placeholder:text-[#86868B] focus:ring-2 focus:ring-[#AF52DE]/30 resize-none outline-none transition-all shadow-sm focus:border-[#AF52DE]/40"
-              style={{ border: "1px solid var(--q-border-default)" }}
+              className="w-full h-24 bg-white/60 border rounded-xl p-3 text-xs text-[#1D1D1F] placeholder:text-[#86868B] focus:ring-2 focus:ring-[#AF52DE]/20 resize-none outline-none transition-all shadow-sm focus:border-indigo-500/40"
+              style={{ borderColor: "var(--q-border-default)" }}
             />
           </div>
-        </div>
 
-        {/* Tags */}
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <label className="text-[10px] font-bold uppercase tracking-widest ml-1" style={{ color: "var(--q-text-secondary)" }}>
-              Etiketler
-            </label>
-            {!isAddingTag && (
-              <button
-                onClick={() => setIsAddingTag(true)}
-                className="transition-colors text-[11px] font-bold tracking-wide flex items-center gap-0.5 q-press"
-                style={{ color: "var(--q-blue)" }}
-              >
-                <Plus className="w-3 h-3" /> EKLE
-              </button>
-            )}
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            {parsedTags.length > 0 ? (
-              parsedTags.map((tag: string, i: number) => (
-                <span
-                  key={i}
-                  className="px-3 py-1 text-xs font-bold rounded-lg flex items-center gap-1 shadow-sm group"
-                  style={{ background: "var(--q-blue-bg)", color: "var(--q-blue)", border: "1px solid rgba(0,122,255,0.2)" }}
+          {/* Tags */}
+          <div className="space-y-2 text-left pt-1">
+            <div className="flex items-center justify-between">
+              <label className="text-[10px] font-bold uppercase tracking-widest text-[#86868B] ml-1">Etiketler</label>
+              {!isAddingTag && (
+                <button
+                  onClick={() => setIsAddingTag(true)}
+                  className="transition-colors text-[10px] font-bold tracking-wide flex items-center gap-0.5 text-indigo-600 hover:text-indigo-800 cursor-pointer"
                 >
-                  <Tag className="w-3 h-3" /> {formatTag(tag)}
-                  <button
-                    onClick={() => handleRemoveTag(tag)}
-                    className="ml-1 w-3.5 h-3.5 rounded-full flex items-center justify-center opacity-50 hover:opacity-100 transition-all"
-                    style={{ background: "var(--q-blue-bg)" }}
-                  >
-                    <X className="w-2.5 h-2.5" />
-                  </button>
-                </span>
-              ))
-            ) : (
-              !isAddingTag && <span className="text-xs" style={{ color: "var(--q-text-secondary)" }}>Etiket yok</span>
-            )}
-
-            {isAddingTag && (
-              <form onSubmit={handleAddTag} className="flex items-center">
-                <input
-                  autoFocus
-                  type="text"
-                  value={newTagVal}
-                  onChange={(e) => setNewTagVal(e.target.value)}
-                  onBlur={() => handleAddTag()}
-                  placeholder="Etiket..."
-                  className="px-3 py-1 text-xs font-bold rounded-lg outline-none w-24"
-                  style={{ background: "var(--q-bg-primary)", color: "var(--q-text-primary)", border: "1px solid rgba(0,122,255,0.3)", boxShadow: "var(--q-shadow-sm)" }}
-                />
-              </form>
-            )}
-          </div>
-        </div>
-
-        {/* A1.7c — Form Greeting Handoff Section */}
-        {activeContact.formData && (
-          <div className="p-3.5 rounded-xl border space-y-2.5 bg-white/40 text-left" style={{ borderColor: 'var(--q-border-default)' }}>
-            <div className="flex items-center gap-2">
-              <MailPlus className="w-4 h-4 text-emerald-500" />
-              <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-700">Form Karşılama</span>
+                  <Plus className="w-3 h-3" /> EKLE
+                </button>
+              )}
             </div>
 
-            {formGreetingError && (
-              <div className="text-[11px] font-semibold text-red-600 bg-red-50 border border-red-100 rounded-lg p-2 leading-snug">
-                ⚠️ {formGreetingError}
-              </div>
-            )}
-
-            {!formGreetingChecked ? (
-              <button
-                onClick={async () => {
-                  setIsCheckingFormGreeting(true);
-                  setFormGreetingError(null);
-                  try {
-                    const res = await checkFormGreetingEligibility(activeContact.conversation_id || activeContact.id);
-                    setFormGreetingEligibility(res);
-                    setFormGreetingChecked(true);
-                    if (!res.eligible) {
-                      setFormGreetingError(res.reason);
-                    }
-                  } catch {
-                    setFormGreetingError('Kontrol sırasında hata oluştu.');
-                  }
-                  setIsCheckingFormGreeting(false);
-                }}
-                disabled={isCheckingFormGreeting}
-                className="w-full py-2 px-3 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 text-emerald-700 text-[11px] font-bold rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isCheckingFormGreeting ? (
-                  <><Loader2 className="w-3 h-3 animate-spin" /><span>Kontrol Ediliyor...</span></>
-                ) : (
-                  <><MailPlus className="w-3 h-3" /><span>Form Karşılama Uygunluğunu Kontrol Et</span></>
-                )}
-              </button>
-            ) : formGreetingEligibility?.eligible && !formGreetingDraftData ? (
-              <div className="space-y-2">
-                <div className="text-[11px] font-semibold text-emerald-800 bg-emerald-50/80 border border-emerald-200 rounded-lg p-2.5 leading-snug">
-                  📋 Form doldurmuş, WhatsApp üzerinden hiç mesaj göndermemiş.
-                  {formGreetingEligibility.requiresTemplate && (
-                    <><br />⚠️ 24s penceresi kapalı — onaylı şablon gerekli.</>
-                  )}
-                </div>
-                <button
-                  onClick={async () => {
-                    setIsLoadingFormGreetingDraft(true);
-                    setFormGreetingError(null);
-                    try {
-                      const res = await prepareFormGreetingDraft(activeContact.conversation_id || activeContact.id);
-                      if (res.success) {
-                        setFormGreetingDraftData(res);
-                      } else {
-                        setFormGreetingError(res.error || 'Taslak hazırlanamadı.');
-                      }
-                    } catch {
-                      setFormGreetingError('Taslak hazırlama hatası.');
-                    }
-                    setIsLoadingFormGreetingDraft(false);
-                  }}
-                  disabled={isLoadingFormGreetingDraft}
-                  className="w-full py-2 px-3 bg-emerald-100 border border-emerald-300 hover:bg-emerald-200 text-emerald-800 text-[11px] font-bold rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all disabled:opacity-50"
-                >
-                  {isLoadingFormGreetingDraft ? (
-                    <><Loader2 className="w-3 h-3 animate-spin" /><span>Taslak Hazırlanıyor...</span></>
-                  ) : (
-                    <><Sparkles className="w-3 h-3" /><span>Karşılama Taslağı Hazırla</span></>
-                  )}
-                </button>
-              </div>
-            ) : formGreetingDraftData ? (
-              <div className="space-y-2.5">
-                <div className="flex justify-between items-center text-[10px]">
-                  <span className="font-bold text-emerald-700 uppercase tracking-wider">Karşılama Taslağı</span>
-                  <span className={`px-2 py-0.5 rounded-full font-bold ${
-                    formGreetingDraftData.windowOpen ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
-                  }`}>
-                    {formGreetingDraftData.windowOpen ? '24s Açık' : 'Şablon Gerekli'}
+            <div className="flex flex-wrap gap-1.5">
+              {parsedTags.length > 0 ? (
+                parsedTags.map((tag: string, i: number) => (
+                  <span
+                    key={i}
+                    className="px-2.5 py-0.5 text-xs font-bold rounded-lg flex items-center gap-1 shadow-sm group bg-indigo-50 text-indigo-600 border border-indigo-100"
+                  >
+                    <Tag className="w-3 h-3 text-indigo-400" /> {formatTag(tag)}
+                    <button
+                      onClick={() => handleRemoveTag(tag)}
+                      className="ml-1 w-3.5 h-3.5 rounded-full flex items-center justify-center hover:bg-indigo-100 transition-all text-indigo-400 hover:text-indigo-700"
+                    >
+                      <X className="w-2.5 h-2.5" />
+                    </button>
                   </span>
+                ))
+              ) : (
+                !isAddingTag && <span className="text-[11px] italic text-[#86868B]">Etiket eklenmemiş</span>
+              )}
+              {isAddingTag && (
+                <form onSubmit={handleAddTag} className="flex items-center">
+                  <input
+                    autoFocus
+                    type="text"
+                    value={newTagVal}
+                    onChange={(e) => setNewTagVal(e.target.value)}
+                    onBlur={() => handleAddTag()}
+                    placeholder="Etiket..."
+                    className="px-2 py-0.5 text-xs font-bold rounded-lg outline-none w-20 bg-white border border-indigo-300 focus:border-indigo-500 shadow-sm"
+                  />
+                </form>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Form Geçmişi */}
+        {activeContact.formData && (
+          <div className="p-4 rounded-2xl border bg-white/40 space-y-3 shadow-sm text-left" style={{ borderColor: "var(--q-border-default)" }}>
+            <div className="flex items-center justify-between pb-1 border-b border-black/[0.03]">
+              <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#86868B]">Form Geçmişi</span>
+              <span className="text-[9px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 rounded-full px-2 py-0.5">1 Form</span>
+            </div>
+            
+            <div 
+              onClick={() => setIsFormModalOpen(true)}
+              className="p-3 rounded-xl text-left transition-all duration-200 hover:scale-[1.01] active:scale-[0.99] cursor-pointer hover:bg-white bg-white/50 border border-black/5 shadow-sm space-y-2"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-extrabold text-[#1D1D1F] line-clamp-1">
+                  {activeContact.formData.name || "Estetik ve Tedavi Formu"}
+                </span>
+                <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 rounded-full px-2 py-0.5 shrink-0">
+                  Detayları Gör
+                </span>
+              </div>
+              
+              <div className="flex items-center gap-3 text-[10px] text-[#86868B] font-semibold">
+                <div className="flex items-center gap-1">
+                  <Calendar className="w-3 h-3 text-indigo-400" />
+                  <span>{activeContact.formData.date || "Belirtilmemiş"}</span>
                 </div>
-                {!formGreetingDraftData.templateConfigExists && formGreetingDraftData.draftType === 'template_required' && (
-                  <div className="text-[11px] font-semibold text-red-700 bg-red-50 border border-red-200 rounded-lg p-2 leading-snug">
-                    ⛔ Onaylı şablon bulunamadı. Lütfen 360dialog template ayarlarını yapın.
+                {campaignName && (
+                  <div className="flex items-center gap-1 max-w-[150px]">
+                    <Share2 className="w-3 h-3 text-indigo-400 shrink-0" />
+                    <span className="truncate">{campaignName}</span>
                   </div>
                 )}
-                <div className="text-[12px] font-medium text-gray-700 bg-white border border-gray-200 rounded-lg p-2.5 leading-relaxed">
-                  {formGreetingDraftData.draft}
-                </div>
-                <button
-                  onClick={() => setFormGreetingDraftData(null)}
-                  className="w-full py-1.5 px-3 border border-gray-200 hover:bg-gray-50 text-gray-600 text-[11px] font-bold rounded-lg cursor-pointer transition-all"
-                >
-                  Kapat
-                </button>
               </div>
-            ) : null}
-          </div>
-        )}
 
-        {/* Form Bilgileri */}
-        {activeContact.formData && (
-          <div className="pt-6" style={{ borderTop: "1px solid var(--q-border-default)" }}>
-            <label className="text-[10px] font-bold uppercase tracking-widest mb-3 block ml-1" style={{ color: "var(--q-text-secondary)" }}>
-              📋 Form Bilgileri
-            </label>
-
-            <div className="p-4 space-y-3.5 rounded-2xl text-left" style={{ background: "rgba(255,255,255,0.6)", border: "1px solid var(--q-border-default)", boxShadow: "var(--q-shadow-sm)" }}>
-              {activeContact.formComplaint && (
-                <div>
-                  <span className="block text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: "var(--q-text-secondary)" }}>
-                    Şikayet
-                  </span>
-                  <span className="text-[13px] font-semibold leading-relaxed" style={{ color: "var(--q-text-primary)" }}>
-                    {activeContact.formComplaint}
-                  </span>
-                </div>
-              )}
-
-              {activeContact.formReportStatus && activeContact.formReportStatus !== 'none' && (
-                <div>
-                  <span className="block text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: "var(--q-text-secondary)" }}>
-                    MR / Röntgen Raporu
-                  </span>
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold rounded-lg" 
-                        style={{ 
-                          backgroundColor: activeContact.formReportStatus === 'sent' ? "rgba(52, 199, 89, 0.08)" : "rgba(255, 149, 0, 0.08)",
-                          color: activeContact.formReportStatus === 'sent' ? "#34C759" : "#FF9500"
-                        }}>
-                    {activeContact.formReportStatus === 'sent' ? 'Gönderildi' : activeContact.formReportStatus === 'waiting' ? 'Bekliyor' : activeContact.formReportStatus}
-                  </span>
-                </div>
-              )}
-
-              {activeContact.formAppointmentPref && (
-                <div>
-                  <span className="block text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: "var(--q-text-secondary)" }}>
-                    Randevu Tercihi
-                  </span>
-                  <span className="text-[13px] font-semibold leading-relaxed" style={{ color: "var(--q-text-primary)" }}>
-                    {activeContact.formAppointmentPref}
-                  </span>
-                </div>
-              )}
-
-              {activeContact.formAge && (
-                <div>
-                  <span className="block text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: "var(--q-text-secondary)" }}>
-                    Yaş
-                  </span>
-                  <span className="text-[13px] font-semibold" style={{ color: "var(--q-text-primary)" }}>
-                    {activeContact.formAge}
-                  </span>
-                </div>
-              )}
-
-              {campaignName && (
-                <div>
-                  <span className="block text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: "var(--q-text-secondary)" }}>
-                    Kampanya
-                  </span>
-                  <span className="text-[13px] font-semibold break-all" style={{ color: "var(--q-text-primary)" }}>
-                    {campaignName}
-                  </span>
-                </div>
-              )}
-
-              {activeContact.formData.name && (
-                <div>
-                  <span className="block text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: "var(--q-text-secondary)" }}>
-                    Form Adı
-                  </span>
-                  <span className="text-[13px] font-semibold" style={{ color: "var(--q-text-primary)" }}>
-                    {activeContact.formData.name}
-                  </span>
+              {(activeContact.formComplaint || rawObj?.complaint || rawObj?.sikayet) && (
+                <div className="pt-2 border-t border-black/[0.03]">
+                  <span className="block text-[9px] font-bold text-[#86868B] uppercase tracking-wider mb-0.5">Şikayet Özeti</span>
+                  <p className="text-[11px] font-semibold text-[#1D1D1F] line-clamp-2 leading-relaxed">
+                    {activeContact.formComplaint || rawObj?.complaint || rawObj?.sikayet}
+                  </p>
                 </div>
               )}
             </div>
           </div>
         )}
-
-        {/* Form History */}
-        {activeContact.formData && (
-          <div className="pt-6" style={{ borderTop: "1px solid var(--q-border-default)" }}>
-            <label className="text-[10px] font-bold uppercase tracking-widest mb-3 block ml-1" style={{ color: "var(--q-text-secondary)" }}>
-              Form Geçmişi
-            </label>
-
-            <div className="rounded-2xl overflow-hidden transition-all duration-300" style={{ background: "rgba(255,255,255,0.6)", border: "1px solid var(--q-border-default)", boxShadow: "var(--q-shadow-sm)" }}>
-              <button
-                onClick={() => setFormOpen(!formOpen)}
-                className="w-full px-4 py-3.5 flex items-center justify-between transition-colors cursor-pointer q-list-item"
-              >
-                <div className="flex flex-col items-start text-left">
-                  <span className="text-[14px] font-bold line-clamp-1 pr-2" style={{ color: "var(--q-text-primary)" }}>
-                    {activeContact.formData.name || "İsimsiz Form"}
-                  </span>
-                  <span className="text-[11px] mt-0.5 font-medium tracking-wide" style={{ color: "var(--q-text-secondary)" }}>
-                    {activeContact.formData.date}
-                  </span>
-                </div>
-                {formOpen ? (
-                  <ChevronDown className="w-4 h-4 shrink-0" style={{ color: "var(--q-text-secondary)" }} />
-                ) : (
-                  <ChevronRight className="w-4 h-4 shrink-0" style={{ color: "var(--q-text-secondary)" }} />
-                )}
-              </button>
-
-              {formOpen && formDataEntries.length > 0 && (
-                <div className="px-4 pb-4 pt-1 space-y-3 max-h-[300px] overflow-y-auto" style={{ background: "rgba(255,255,255,0.4)", borderTop: "1px solid var(--q-border-default)" }}>
-                  {formDataEntries.map((entry, idx) => (
-                    <div key={idx} className="p-3 rounded-xl" style={{ background: "var(--q-bg-primary)", border: "1px solid var(--q-border-default)", boxShadow: "var(--q-shadow-sm)" }}>
-                      <span className="block text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: "var(--q-text-secondary)" }}>
-                        {entry.key}
-                      </span>
-                      <span className="text-[13px] font-semibold leading-relaxed whitespace-pre-wrap" style={{ color: "var(--q-text-primary)" }}>
-                        {entry.value}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {formOpen && formDataEntries.length === 0 && (
-                <div className="px-4 pb-4 pt-1" style={{ background: "rgba(255,255,255,0.4)", borderTop: "1px solid var(--q-border-default)" }}>
-                  <p className="text-xs text-center italic py-2" style={{ color: "var(--q-text-secondary)" }}>Detaylı yanıt bulunamadı.</p>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
 
         {/* Phase 6: AI Activity Timeline */}
         <AiTimelinePanel phoneNumber={activeContact.id} />
@@ -1407,6 +1102,50 @@ export function ContextPanel() {
           )}
         </button>
       </div>
+
+      {/* Form Details Popup Modal */}
+      {activeContact.formData && (
+        <PatientFormModal 
+          isOpen={isFormModalOpen}
+          onClose={() => setIsFormModalOpen(false)}
+          formData={{
+            name: activeContact.formData?.name || activeContact.formData?.form_name || "İsimsiz Form",
+            date: activeContact.formData?.date || activeContact.formData?.created_time,
+            raw: activeContact.formData?.raw || activeContact.form_raw_data,
+            formComplaint: activeContact.formComplaint || activeContact.formData?.formComplaint,
+            formReportStatus: activeContact.formReportStatus || activeContact.formData?.formReportStatus,
+            formAppointmentPref: activeContact.formAppointmentPref || activeContact.formData?.formAppointmentPref,
+            formAge: activeContact.formAge || activeContact.formData?.formAge
+          }}
+          patientName={patientName}
+        />
+      )}
+
+      {/* Phone Call Planning Modal */}
+      {oppId && (
+        <PhoneCallModal
+          isOpen={isPhoneCallModalOpen}
+          onClose={() => setIsPhoneCallModalOpen(false)}
+          opportunityId={oppId}
+          tenantSlug={tenantSlug}
+          patientName={patientName}
+          phoneNumber={activeContact.id}
+          onSuccess={handleModalSuccess}
+        />
+      )}
+
+      {/* Appointment Planning Modal */}
+      {oppId && (
+        <AppointmentModal
+          isOpen={isAppointmentModalOpen}
+          onClose={() => setIsAppointmentModalOpen(false)}
+          opportunityId={oppId}
+          tenantSlug={tenantSlug}
+          patientName={patientName}
+          phoneNumber={activeContact.id}
+          onSuccess={handleModalSuccess}
+        />
+      )}
     </div>
   );
 }

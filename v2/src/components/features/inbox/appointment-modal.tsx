@@ -1,0 +1,302 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
+import { X, Calendar, Clock, FileText, Check, Loader2, CalendarClock } from "lucide-react";
+import { parseTurkeyLocalToUtc } from "@/lib/utils/timezone";
+import { createAppointmentTask } from "@/app/actions/patient-tracking";
+
+interface AppointmentModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  opportunityId: string;
+  tenantSlug: string;
+  patientName: string;
+  phoneNumber: string;
+  onSuccess?: () => void;
+}
+
+export function AppointmentModal({
+  isOpen,
+  onClose,
+  opportunityId,
+  tenantSlug,
+  patientName,
+  phoneNumber,
+  onSuccess
+}: AppointmentModalProps) {
+  const [mounted, setMounted] = useState(false);
+  const [date, setDate] = useState("");
+  const [time, setTime] = useState("10:00");
+  const [note, setNote] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "success" | "error">("idle");
+  const [errorMessage, setErrorMessage] = useState("");
+
+  // Reminder states
+  const [reminders, setReminders] = useState({
+    one_day_before: true,
+    same_day: true,
+    three_days_before: false,
+    seven_days_before: false,
+  });
+
+  // Set default date to tomorrow
+  useEffect(() => {
+    setMounted(true);
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const yyyy = tomorrow.getFullYear();
+    const mm = String(tomorrow.getMonth() + 1).padStart(2, "0");
+    const dd = String(tomorrow.getDate()).padStart(2, "0");
+    setDate(`${yyyy}-${mm}-${dd}`);
+    return () => setMounted(false);
+  }, []);
+
+  if (!isOpen || !mounted) return null;
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!date || !time) return;
+
+    setIsSaving(true);
+    setSaveStatus("idle");
+    setErrorMessage("");
+
+    try {
+      // 1. Convert local Turkey time to UTC
+      const dueAtUtc = parseTurkeyLocalToUtc(date, time);
+
+      // 2. Prepare reminders array
+      const remindersList: { type: '1_day_before' | 'same_day' | '3_days_before' | '7_days_before' }[] = [];
+      if (reminders.one_day_before) remindersList.push({ type: "1_day_before" });
+      if (reminders.same_day) remindersList.push({ type: "same_day" });
+      if (reminders.three_days_before) remindersList.push({ type: "3_days_before" });
+      if (reminders.seven_days_before) remindersList.push({ type: "7_days_before" });
+
+      // 3. Call the server action createAppointmentTask with clinic_visit (exclude phone_call)
+      const res = await createAppointmentTask(opportunityId, dueAtUtc, "clinic_visit", {
+        note: note.trim(),
+        requireConfirmation: true, // Always true for clinic visits to enforce task confirmation logic
+        reminders: remindersList,
+        customMetadata: {
+          zero_outbound_p0: true,
+          initiated_from: "crm_panel_inbox"
+        }
+      });
+
+      if (res.success) {
+        setSaveStatus("success");
+        if (onSuccess) {
+          onSuccess();
+        }
+      } else {
+        setSaveStatus("error");
+        setErrorMessage(res.error || "Randevu kaydedilirken bir hata oluştu.");
+      }
+    } catch (err: any) {
+      console.error("Error creating appointment task:", err);
+      setSaveStatus("error");
+      setErrorMessage(err.message || "Geçersiz tarih veya saat girişi yapıldı.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return createPortal(
+    <div className="fixed inset-0 bg-black/45 backdrop-blur-[4px] flex items-center justify-center z-[9999] animate-in fade-in duration-200" onClick={onClose}>
+      <div 
+        className="bg-white rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.18)] border border-black/5 w-full max-w-md overflow-hidden flex flex-col mx-4 animate-in zoom-in-95 duration-200"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="px-6 py-4 border-b border-black/[0.05] flex items-center justify-between bg-slate-50/50">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center text-emerald-600">
+              <CalendarClock className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-sm font-extrabold text-[#1D1D1F]">
+                Randevu Planla
+              </h3>
+              <p className="text-[11px] font-semibold text-[#86868B]">
+                {patientName}
+              </p>
+            </div>
+          </div>
+          <button 
+            onClick={onClose}
+            className="w-8 h-8 rounded-full bg-[#F5F5F7] hover:bg-[#E8E8ED] flex items-center justify-center text-gray-500 hover:text-black transition-all cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Form Content */}
+        <form onSubmit={handleSave} className="p-6 space-y-4 text-left">
+          {saveStatus === "success" ? (
+            <div className="space-y-4 text-center py-4">
+              <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto shadow-sm">
+                <Check className="w-6 h-6" />
+              </div>
+              <div className="space-y-2">
+                <h4 className="text-sm font-bold text-[#1D1D1F]">Klinik Randevusu Başarıyla Kaydedildi</h4>
+                <p className="text-xs text-[#86868B] max-w-xs mx-auto">
+                  Klinik randevusu oluşturuldu. Bu görevi Randevu Yönetimi ekranından inceleyebilirsiniz.
+                </p>
+              </div>
+              <div className="pt-2 flex flex-col gap-2">
+                <a
+                  href={`/${tenantSlug}/takip?tab=randevu&opp=${opportunityId}`}
+                  className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white text-[12px] font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all shadow-sm"
+                >
+                  Randevu Yönetiminde Aç
+                </a>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="w-full py-2 px-4 border border-black/5 hover:bg-black/[0.02] text-[#86868B] hover:text-[#1D1D1F] text-[12px] font-bold rounded-xl cursor-pointer transition-all"
+                >
+                  Kapat
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              {saveStatus === "error" && (
+                <div className="p-3 bg-red-50 border border-red-100 rounded-xl text-red-700 text-xs font-semibold leading-relaxed">
+                  ⚠️ {errorMessage}
+                </div>
+              )}
+
+              {/* Date */}
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-[#86868B] ml-1 flex items-center gap-1">
+                  <Calendar className="w-3 h-3" /> Tarih
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                  className="w-full px-4 py-2.5 rounded-xl text-[13px] font-semibold outline-none transition-all bg-white border border-[#E8E8ED] focus:border-emerald-500/50"
+                  style={{ color: "var(--q-text-primary)", boxShadow: "var(--q-shadow-sm)" }}
+                />
+              </div>
+
+              {/* Time */}
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-[#86868B] ml-1 flex items-center gap-1">
+                  <Clock className="w-3 h-3" /> Saat
+                </label>
+                <input
+                  type="time"
+                  required
+                  value={time}
+                  onChange={(e) => setTime(e.target.value)}
+                  className="w-full px-4 py-2.5 rounded-xl text-[13px] font-semibold outline-none transition-all bg-white border border-[#E8E8ED] focus:border-emerald-500/50"
+                  style={{ color: "var(--q-text-primary)", boxShadow: "var(--q-shadow-sm)" }}
+                />
+              </div>
+
+              {/* Note */}
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-[#86868B] ml-1 flex items-center gap-1">
+                  <FileText className="w-3 h-3" /> Randevu Notu
+                </label>
+                <textarea
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder="Klinik randevusu notları (Lokasyon, hekim vb. detaylar)..."
+                  className="w-full h-20 px-4 py-3 bg-white border border-[#E8E8ED] rounded-xl text-xs text-[#1D1D1F] placeholder:text-[#86868B] focus:ring-2 focus:ring-emerald-500/20 resize-none outline-none transition-all shadow-sm focus:border-emerald-500/40"
+                />
+              </div>
+
+              {/* Reminders / Teyit Seçenekleri */}
+              <div className="space-y-2 p-3 rounded-2xl border border-slate-100 bg-slate-50/50">
+                <span className="block text-[10px] font-bold uppercase tracking-widest text-[#86868B] mb-1">
+                  Hatırlatma & Teyit Seçenekleri
+                </span>
+                
+                <div className="space-y-2 text-xs">
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={reminders.one_day_before}
+                      onChange={(e) => setReminders({ ...reminders, one_day_before: e.target.checked })}
+                      className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <span className="font-semibold text-gray-700">1 Gün Önce Teyit Hatırlatması</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={reminders.same_day}
+                      onChange={(e) => setReminders({ ...reminders, same_day: e.target.checked })}
+                      className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <span className="font-semibold text-gray-700">Randevu Günü Hatırlatması</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={reminders.three_days_before}
+                      onChange={(e) => setReminders({ ...reminders, three_days_before: e.target.checked })}
+                      className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <span className="font-semibold text-gray-700">3 Gün Önce Hatırlatması</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={reminders.seven_days_before}
+                      onChange={(e) => setReminders({ ...reminders, seven_days_before: e.target.checked })}
+                      className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <span className="font-semibold text-gray-700">7 Gün Önce Hatırlatması</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* Submit Buttons */}
+              <div className="pt-2 flex gap-2">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="w-1/3 py-3 border border-black/5 hover:bg-black/[0.02] text-[#86868B] hover:text-[#1D1D1F] text-[13px] font-bold rounded-xl cursor-pointer transition-all"
+                >
+                  İptal
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSaving}
+                  className="w-2/3 py-3 bg-emerald-600 hover:bg-emerald-700 text-white text-[13px] font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all shadow-md disabled:opacity-75"
+                >
+                  {isSaving ? (
+                    <><Loader2 className="w-4 h-4 animate-spin" /> Kaydediliyor...</>
+                  ) : (
+                    "Randevu Yönetimine Kaydet"
+                  )}
+                </button>
+              </div>
+
+              {/* Immediate Open Link */}
+              <div className="text-center pt-1">
+                <a
+                  href={`/${tenantSlug}/takip?tab=randevu&opp=${opportunityId}`}
+                  className="text-[11px] font-bold text-emerald-600 hover:text-emerald-800 transition-colors cursor-pointer"
+                >
+                  Randevu Yönetiminde Aç
+                </a>
+              </div>
+            </>
+          )}
+        </form>
+      </div>
+    </div>,
+    document.body
+  );
+}
