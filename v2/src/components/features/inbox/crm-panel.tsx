@@ -81,7 +81,7 @@ function CrmSkeleton() {
 }
 
 export function ContextPanel() {
-  const { activeContact, mobileView, setMobileView } = useInboxStore();
+  const { activeContact, mobileView, setMobileView, isSidebarCollapsed } = useInboxStore();
   const params = useParams();
   const tenantSlug = typeof params?.tenant_slug === 'string' ? params.tenant_slug : 'baskent';
   const { tenant } = useTenant();
@@ -243,7 +243,9 @@ export function ContextPanel() {
   if (!activeContact) {
     return (
       <div
-        className="w-[340px] h-full z-10 hidden lg:block q-glass"
+        className={`h-full z-10 hidden lg:block q-glass transition-all duration-300 ease-in-out ${
+          isSidebarCollapsed ? "w-[616px]" : "w-[360px]"
+        }`}
         style={{ borderLeft: "1px solid var(--q-border-default)" }}
       />
     );
@@ -391,7 +393,9 @@ export function ContextPanel() {
   return (
     <div
       key={activeContact.id}
-      className={`w-full lg:w-[340px] h-full flex-col overflow-y-auto z-10 q-glass shadow-sm ${mobileView === "crm" ? "flex absolute inset-0 lg:relative" : "hidden lg:flex"}`}
+      className={`w-full h-full flex-col overflow-y-auto z-10 q-glass shadow-sm transition-all duration-300 ease-in-out ${
+        isSidebarCollapsed ? "lg:w-[616px]" : "lg:w-[360px]"
+      } ${mobileView === "crm" ? "flex absolute inset-0 lg:relative" : "hidden lg:flex"}`}
       style={{ borderLeft: "1px solid var(--q-border-default)" }}
     >
       {/* Mobile Header */}
