@@ -209,6 +209,25 @@ export async function checkGreetingReadiness(leadId: string) {
     { actionName: 'checkGreetingReadiness' },
     async (ctx) => {
       // 1. Fetch lead
+      try {
+        const dbUrlLog = process.env.DATABASE_URL ? (process.env.DATABASE_URL.includes('@') ? process.env.DATABASE_URL.split('@')[1] : process.env.DATABASE_URL) : 'NOT_SET';
+        console.log('[PRODUCTION_DB_DIAGNOSTICS] URL Host:', dbUrlLog);
+        
+        const countRes = await ctx.db.executeSafe({
+          text: `SELECT count(*) FROM message_templates WHERE tenant_id = $1::uuid`,
+          values: [ctx.tenantId]
+        }) as any[];
+        console.log('[PRODUCTION_DB_DIAGNOSTICS] Templates Count:', countRes[0]?.count);
+
+        const activeTemplates = await ctx.db.executeSafe({
+          text: `SELECT id, name, is_active, is_default FROM message_templates WHERE tenant_id = $1::uuid`,
+          values: [ctx.tenantId]
+        }) as any[];
+        console.log('[PRODUCTION_DB_DIAGNOSTICS] Active Templates Detail:', activeTemplates);
+      } catch (err: any) {
+        console.error('[PRODUCTION_DB_DIAGNOSTICS] Error:', err.message);
+      }
+
       const leads = await ctx.db.executeSafe({
         text: `/* checkGreetingReadiness:fetchLead */
                SELECT l.id, l.phone_number, l.patient_name, l.form_name,

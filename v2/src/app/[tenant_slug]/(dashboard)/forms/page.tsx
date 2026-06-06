@@ -965,17 +965,15 @@ export default function FormsPage() {
       </div>
 
       {selectedForm && (() => {
-        console.log('[OUTREACH_CARD_STATE] Card render:', {
-          leadId: selectedForm.id,
-          formId: selectedForm.id,
+        console.log('[FORM_OUTREACH_CARD_RENDER_STATE]', {
+          selectedFormId: selectedForm?.id,
+          readiness,
           templateConfigExists: readiness?.templateConfigExists,
           templateName: readiness?.templateName,
           templateLanguage: readiness?.templateLanguage,
           templateNonCompliant: readiness?.templateNonCompliant,
-          approvedWhatsappTemplateAvailable: readiness?.approvedWhatsappTemplateAvailable,
           templateSendable: readiness?.templateSendable,
-          hardBlockedBecausePatientAlreadyInbound: readiness?.hardBlockedBecausePatientAlreadyInbound,
-          readinessSource: readiness?.source,
+          hasUsableTemplate,
         });
         return null;
       })()}
