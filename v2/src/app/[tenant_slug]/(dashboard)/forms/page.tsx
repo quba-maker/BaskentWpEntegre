@@ -1109,7 +1109,7 @@ export default function FormsPage() {
                           <div>
                             <p className={`font-bold ${readiness.templateConfigExists ? 'text-blue-900' : 'text-amber-900'}`}>WhatsApp Şablonu Gerekli</p>
                             {readiness.templateConfigExists ? (
-                              <p className="text-blue-700 font-medium">Şablon sistemde tanımlı. Provider panelinde onaylı olduğundan emin olun. (Kullanılacak şablon: {readiness.templateName})</p>
+                              <p className="text-blue-700 font-medium">Kullanılacak şablon: {readiness.templateName}. Provider panelinde onaylı olduğundan emin olun.</p>
                             ) : (
                               <p className="text-amber-700 font-medium">Form Yönetimi / Şablon ayarlarından greeting template ekleyin.</p>
                             )}
@@ -1261,7 +1261,8 @@ export default function FormsPage() {
                               disabled={
                                 outreachLoading === 'sending' || 
                                 !draftMessage?.trim() || 
-                                (readiness !== null && !readiness.templateSendable)
+                                (readiness !== null && !readiness.templateConfigExists) ||
+                                (readiness !== null && readiness.templateNonCompliant)
                               }
                               className="flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-[12px] font-bold bg-[#F5F5F7] hover:bg-rose-50 hover:text-rose-600 text-[#1D1D1F] border border-[#D2D2D7] hover:border-rose-200 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                             >
@@ -1291,7 +1292,8 @@ export default function FormsPage() {
                           readinessLoading ||
                           selectedForm.stage !== 'new' || 
                           !!selectedForm.has_inbound_messages ||
-                          (readiness !== null && !readiness.templateSendable)
+                          (readiness !== null && !readiness.templateConfigExists) ||
+                          (readiness !== null && readiness.templateNonCompliant)
                         }
                         className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-semibold transition-all ${
                           selectedForm.has_inbound_messages || (readiness && readiness.hardBlockedBecausePatientAlreadyInbound)
@@ -1302,7 +1304,9 @@ export default function FormsPage() {
                             ? 'bg-gray-100 text-[#86868B] cursor-not-allowed'
                             : readinessLoading
                             ? 'bg-gray-100 text-[#86868B] cursor-not-allowed animate-pulse'
-                            : (readiness && !readiness.templateSendable)
+                            : (readiness && !readiness.templateConfigExists)
+                            ? 'bg-amber-50 text-amber-600 border border-amber-200 cursor-not-allowed'
+                            : (readiness && readiness.templateNonCompliant)
                             ? 'bg-amber-50 text-amber-600 border border-amber-200 cursor-not-allowed'
                             : 'bg-[#25D366] text-white shadow-[0_4px_14px_rgba(37,211,102,0.39)] hover:bg-[#1DA851] cursor-pointer'
                         } disabled:opacity-70`}
@@ -1317,12 +1321,10 @@ export default function FormsPage() {
                           <><RefreshCw className="w-4 h-4 animate-spin" /> Yükleniyor...</>
                         ) : selectedForm.stage !== 'new' ? (
                           <><CheckCircle2 className="w-5 h-5" /> Zaten İletişime Geçildi</>
-                        ) : (readiness && !readiness.templateSendable) ? (
-                          readiness.templateNonCompliant ? (
-                            <><XCircle className="w-5 h-5" /> Uyumsuz Şablon</>
-                          ) : (
-                            <><Clock className="w-5 h-5" /> Şablon Eklenmeli</>
-                          )
+                        ) : (readiness && !readiness.templateConfigExists) ? (
+                          <><Clock className="w-5 h-5" /> Şablon Eklenmeli</>
+                        ) : (readiness && readiness.templateNonCompliant) ? (
+                          <><XCircle className="w-5 h-5" /> Uyumsuz Şablon</>
                         ) : (
                           <><Edit3 className="w-5 h-5" /> Karşılama Hazırla</>
                         )}

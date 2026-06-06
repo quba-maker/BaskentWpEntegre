@@ -397,14 +397,13 @@ export class FormGreetingHandoffService {
     // - If hardblocked, false
     // - If non-compliant, false
     // - If 24h window open, true (we can use either fallback or resolved template)
-    // - If 24h window closed, we require an approved template (which is false in this schema, so false)
+    // - If 24h window closed, templateSendable is true if we have a valid template config
     let templateSendable = false;
     if (!isHardBlocked && !isNonCompliant) {
       if (eligibility.windowOpen) {
         templateSendable = true;
       } else {
-        // Closed window requires approved template (which is false)
-        templateSendable = false;
+        templateSendable = hasRealTemplate;
       }
     }
 
