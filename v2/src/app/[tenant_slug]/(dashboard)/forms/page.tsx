@@ -1321,7 +1321,7 @@ export default function FormsPage() {
                           readiness.templateNonCompliant ? (
                             <><XCircle className="w-5 h-5" /> Uyumsuz Şablon</>
                           ) : (
-                            <><Clock className="w-5 h-5" /> Şablon Onayı Yok</>
+                            <><Clock className="w-5 h-5" /> Şablon Eklenmeli</>
                           )
                         ) : (
                           <><Edit3 className="w-5 h-5" /> Karşılama Hazırla</>
