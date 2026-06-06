@@ -146,6 +146,38 @@ export class TemplateResolverService {
   ): Promise<ResolvedTemplate> {
     const lang = detectLanguage(ctx, greetingLang);
     let resolved: ResolvedTemplate | null = null;
+    let firstNonCompliantFallback: ResolvedTemplate | null = null;
+    
+    // Dynamic import to avoid circular dependencies
+    const { isNonCompliant, sanitizePatientFacingMessage } = await import('@/lib/utils/patient-message-sanitizer');
+
+    const checkAndSetResolved = (rows: any[], source: ResolvedTemplate['source']) => {
+      for (const row of rows) {
+        const body = row.body;
+        const rendered = renderTemplate(body, ctx);
+        const nonCompliant = isNonCompliant(body) || isNonCompliant(rendered);
+        
+        const candidate: ResolvedTemplate = {
+          templateId: row.id,
+          templateName: row.name,
+          language: row.language || lang,
+          body,
+          rendered,
+          source,
+          template_non_compliant: nonCompliant,
+          compliance_warning: nonCompliant ? "İsimli/cinsiyetli hitap barındırıyor." : undefined
+        };
+
+        if (!nonCompliant) {
+          resolved = candidate;
+          return true; // Found a compliant template!
+        } else if (!firstNonCompliantFallback) {
+          // Save the very first non-compliant template we see to fallback on if NO compliant template exists
+          firstNonCompliantFallback = candidate;
+        }
+      }
+      return false; // No compliant template in this batch
+    };
     
     try {
       // ── Layer 1: form_name + language match ──
@@ -154,20 +186,10 @@ export class TemplateResolverService {
           text: `SELECT id, name, language, body FROM message_templates
                  WHERE tenant_id = $1::uuid AND template_type = $4
                    AND form_name = $2 AND language = $3 AND is_active = true
-                 ORDER BY created_at DESC LIMIT 1`,
+                 ORDER BY created_at DESC`,
           values: [ctx.tenantId, ctx.formName, lang, templateType]
         }) as any[];
-
-        if (rows.length > 0) {
-          resolved = {
-            templateId: rows[0].id,
-            templateName: rows[0].name,
-            language: lang,
-            body: rows[0].body,
-            rendered: renderTemplate(rows[0].body, ctx),
-            source: 'form_match',
-          };
-        }
+        checkAndSetResolved(rows, 'form_match');
       }
 
       // ── Layer 2: department + language match ──
@@ -177,20 +199,10 @@ export class TemplateResolverService {
                  WHERE tenant_id = $1::uuid AND template_type = $4
                    AND department = $2 AND language = $3 AND is_active = true
                    AND form_name IS NULL
-                 ORDER BY created_at DESC LIMIT 1`,
+                 ORDER BY created_at DESC`,
           values: [ctx.tenantId, ctx.department, lang, templateType]
         }) as any[];
-
-        if (rows.length > 0) {
-          resolved = {
-            templateId: rows[0].id,
-            templateName: rows[0].name,
-            language: lang,
-            body: rows[0].body,
-            rendered: renderTemplate(rows[0].body, ctx),
-            source: 'department_match',
-          };
-        }
+        checkAndSetResolved(rows, 'department_match');
       }
 
       // ── Layer 3: default template for detected language ──
@@ -199,20 +211,10 @@ export class TemplateResolverService {
           text: `SELECT id, name, language, body FROM message_templates
                  WHERE tenant_id = $1::uuid AND template_type = $3
                    AND language = $2 AND is_default = true AND is_active = true
-                 LIMIT 1`,
+                 ORDER BY created_at ASC`,
           values: [ctx.tenantId, lang, templateType]
         }) as any[];
-
-        if (defaultRows.length > 0) {
-          resolved = {
-            templateId: defaultRows[0].id,
-            templateName: defaultRows[0].name,
-            language: lang,
-            body: defaultRows[0].body,
-            rendered: renderTemplate(defaultRows[0].body, ctx),
-            source: 'default',
-          };
-        }
+        checkAndSetResolved(defaultRows, 'default');
       }
 
       // ── Layer 4: Turkish default fallback ──
@@ -221,20 +223,10 @@ export class TemplateResolverService {
           text: `SELECT id, name, language, body FROM message_templates
                  WHERE tenant_id = $1::uuid AND template_type = $2
                    AND language = 'tr' AND is_default = true AND is_active = true
-                 LIMIT 1`,
+                 ORDER BY created_at ASC`,
           values: [ctx.tenantId, templateType]
         }) as any[];
-
-        if (trRows.length > 0) {
-          resolved = {
-            templateId: trRows[0].id,
-            templateName: trRows[0].name,
-            language: 'tr',
-            body: trRows[0].body,
-            rendered: renderTemplate(trRows[0].body, ctx),
-            source: 'fallback',
-          };
-        }
+        checkAndSetResolved(trRows, 'fallback');
       }
 
       // ── Layer 5: Any available template ──
@@ -242,44 +234,28 @@ export class TemplateResolverService {
         const anyRows = await db.executeSafe({
           text: `SELECT id, name, language, body FROM message_templates
                  WHERE tenant_id = $1::uuid AND template_type = $2 AND is_active = true
-                 ORDER BY is_default DESC, created_at ASC LIMIT 1`,
+                 ORDER BY is_default DESC, created_at ASC`,
           values: [ctx.tenantId, templateType]
         }) as any[];
-
-        if (anyRows.length > 0) {
-          resolved = {
-            templateId: anyRows[0].id,
-            templateName: anyRows[0].name,
-            language: anyRows[0].language,
-            body: anyRows[0].body,
-            rendered: renderTemplate(anyRows[0].body, ctx),
-            source: 'fallback',
-          };
-        }
+        checkAndSetResolved(anyRows, 'fallback');
       }
     } catch (_) {
       // Template table might not exist yet — fall through to hardcoded
     }
 
+    // If no compliant template was found anywhere, use the first non-compliant one we saw
+    if (!resolved && firstNonCompliantFallback) {
+      resolved = firstNonCompliantFallback;
+    }
+
     if (!resolved) {
       // ── Layer 6: System hardcoded — zero-dependency guaranteed ──
       resolved = this.getSystemFallback(ctx, lang, templateType);
-    }
-
-    // Dynamic import to avoid circular dependencies
-    const { isNonCompliant, sanitizePatientFacingMessage } = await import('@/lib/utils/patient-message-sanitizer');
-    
-    // Check template compliance
-    const nonCompliant = isNonCompliant(resolved.body) || isNonCompliant(resolved.rendered);
-    if (nonCompliant) {
-      resolved.template_non_compliant = true;
-      resolved.compliance_warning = "İsimli/cinsiyetli hitap barındırıyor.";
-    } else {
-      resolved.template_non_compliant = false;
-    }
-
-    // Freeform draft/preview/bot response can be sanitized
-    if (resolved.source === 'system_hardcoded') {
+      const nonCompliant = isNonCompliant(resolved.body) || isNonCompliant(resolved.rendered);
+      resolved.template_non_compliant = nonCompliant;
+      if (nonCompliant) {
+        resolved.compliance_warning = "İsimli/cinsiyetli hitap barındırıyor.";
+      }
       resolved.rendered = sanitizePatientFacingMessage(resolved.rendered);
     }
 
