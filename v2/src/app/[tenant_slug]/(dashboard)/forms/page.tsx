@@ -1075,13 +1075,13 @@ export default function FormsPage() {
                   {/* WhatsApp Window & Template Required Status */}
                   {/* Readiness loading or state badges */}
                   {readinessLoading ? (
-                    <div className="flex gap-2 flex-wrap mb-1">
+                    <div className="flex gap-2 flex-wrap mb-1" data-testid="form-outreach-card">
                       <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-gray-50 text-gray-500 border border-gray-200 animate-pulse">
                         ⏳ Şablon durumu kontrol ediliyor...
                       </span>
                     </div>
                   ) : readiness ? (
-                    <div className="space-y-2.5 mb-1 text-left">
+                    <div className="space-y-2.5 mb-1 text-left" data-testid="form-outreach-card">
                       <div className="flex gap-2 flex-wrap">
                         {readiness.isWithin24hWindow ? (
                           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
@@ -1094,15 +1094,11 @@ export default function FormsPage() {
                         )}
 
                         {hasUsableTemplate ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          <span data-testid="template-status-badge" className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
                             🟢 Sistemde aktif şablon var: {readiness.templateName || 'Belirsiz'}
                           </span>
-                        ) : readiness.templateConfigExists ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
-                            ⚠️ Şablon uygun değil
-                          </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
+                          <span data-testid="template-status-badge" className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
                             ⚠️ Şablon tanımlanmamış
                           </span>
                         )}
@@ -1131,23 +1127,21 @@ export default function FormsPage() {
                         </div>
                       )}
 
-                      {/* 24h closed warning + Template config missing/present warning */}
-                      {!readiness.isWithin24hWindow && !readiness.hardBlockedBecausePatientAlreadyInbound && (
-                        <div className={`p-3 rounded-xl border text-[11px] font-semibold flex items-start gap-2.5 leading-relaxed ${hasUsableTemplate ? 'bg-blue-50 border-blue-200 text-blue-800' : 'bg-amber-50 border-amber-200 text-amber-800'}`}>
-                          <span className="text-sm shrink-0">⏳</span>
-                          <div>
-                            <p className={`font-bold ${hasUsableTemplate ? 'text-blue-900' : 'text-amber-900'}`}>WhatsApp Şablonu Gerekli</p>
-                            {hasUsableTemplate ? (
-                              <p className="text-blue-700 font-medium">Kullanılacak şablon: {readiness.templateName}. Provider panelinde onaylı olduğundan emin olun.</p>
-                            ) : (
-                              <p className="text-amber-700 font-medium">Form Yönetimi / Şablon ayarlarından greeting template ekleyin.</p>
-                            )}
-                          </div>
+                      {/* Info Text Logic */}
+                      <div className={`p-3 rounded-xl border text-[11px] font-semibold flex items-start gap-2.5 leading-relaxed ${hasUsableTemplate ? 'bg-blue-50 border-blue-200 text-blue-800' : 'bg-amber-50 border-amber-200 text-amber-800'}`}>
+                        <span className="text-sm shrink-0">{hasUsableTemplate ? '💬' : '⏳'}</span>
+                        <div data-testid="template-info-text">
+                          <p className={`font-bold ${hasUsableTemplate ? 'text-blue-900' : 'text-amber-900'}`}>WhatsApp Şablonu Gerekli</p>
+                          {hasUsableTemplate ? (
+                            <p className="text-blue-700 font-medium">Kullanılacak şablon: {readiness.templateName}. Provider panelinde onaylı olduğundan emin olun.</p>
+                          ) : (
+                            <p className="text-amber-700 font-medium">Form Yönetimi / Şablon ayarlarından greeting template ekleyin.</p>
+                          )}
                         </div>
-                      )}
+                      </div>
                     </div>
                   ) : !selectedForm.has_inbound_messages && (
-                    <div className="flex gap-2 flex-wrap mb-1">
+                    <div className="flex gap-2 flex-wrap mb-1" data-testid="form-outreach-card">
                       <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
                         ⏳ 24s pencere kapalı: WhatsApp template gerekli
                       </span>
