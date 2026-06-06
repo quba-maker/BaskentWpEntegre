@@ -329,7 +329,7 @@ export class FormGreetingHandoffService {
   /**
    * Prepare a coordinator-reviewable greeting draft.
    */
-  async prepareDraft(conversationId: string): Promise<FormGreetingDraftResult> {
+  async prepareDraft(conversationId: string, actorId?: string): Promise<FormGreetingDraftResult> {
     const eligibility = await this.checkEligibility(conversationId);
 
     // If eligibility fails but the reason is "Already Messaged", we return it as a hard block
@@ -427,14 +427,15 @@ export class FormGreetingHandoffService {
     if (!isHardBlocked) {
       await this.db.executeSafe({
         text: `
-          INSERT INTO outreach_logs (tenant_id, lead_id, conversation_id, opportunity_id, action, channel, metadata)
-          VALUES ($1, $2, $3, $4, 'form_greeting_draft_prepared', 'whatsapp', $5)
+          INSERT INTO outreach_logs (tenant_id, lead_id, conversation_id, opportunity_id, action, channel, actor_id, metadata)
+          VALUES ($1, $2, $3, $4, 'form_greeting_draft_prepared', 'whatsapp', $5, $6)
         `,
         values: [
           this.tenantId,
           eligibility.leadId || null,
           conversationId,
           eligibility.opportunityId || null,
+          actorId || 'system',
           JSON.stringify({
             phone: eligibility.phone,
             patient_name: eligibility.patientName,

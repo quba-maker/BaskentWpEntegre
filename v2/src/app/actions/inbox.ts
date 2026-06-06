@@ -2637,7 +2637,7 @@ export async function prepareSecondaryDraft(conversationId: string) {
     async (ctx) => {
       const { SecondaryPhoneFallbackService } = await import("@/lib/services/secondary-phone-fallback.service");
       const service = new SecondaryPhoneFallbackService(ctx.db, ctx.tenantId);
-      return await service.prepareDraft(conversationId);
+      return await service.prepareDraft(conversationId, ctx.userId);
     }
   ).then(res => {
     if (!res.success) return { success: false as const, error: res.error || res.data?.error };
@@ -2681,7 +2681,7 @@ export async function prepareFormGreetingDraft(conversationId: string) {
     async (ctx) => {
       const { FormGreetingHandoffService } = await import("@/lib/services/form-greeting-handoff.service");
       const service = new FormGreetingHandoffService(ctx.db, ctx.tenantId);
-      return await service.prepareDraft(conversationId);
+      return await service.prepareDraft(conversationId, ctx.userId);
     }
   ).then(res => {
     if (!res.success) return { success: false as const, error: res.error || res.data?.error };
@@ -2704,6 +2704,226 @@ export async function prepareFormGreetingDraft(conversationId: string) {
       isWithin24hWindow: res.data?.isWithin24hWindow as boolean,
       hardBlockedBecausePatientAlreadyInbound: res.data?.hardBlockedBecausePatientAlreadyInbound as boolean,
     };
+  });
+}
+
+export async function saveBotSteeringDirectiveAction(conversationId: string, directiveText: string) {
+  if (!conversationId) return { success: false, error: "Konuşma ID gerekli." };
+  if (!directiveText || directiveText.trim().length === 0) return { success: false, error: "Direktif metni boş olamaz." };
+
+  return withActionGuard(
+    { actionName: 'saveBotSteeringDirectiveAction' },
+    async (ctx) => {
+      const taskRows = await ctx.db.executeSafe({
+        text: `SELECT id, opportunity_id, phone_number, metadata FROM follow_up_tasks 
+               WHERE conversation_id = $1 AND tenant_id = $2 AND status IN ('pending', 'in_progress')
+               ORDER BY created_at DESC LIMIT 1`,
+        values: [conversationId, ctx.tenantId]
+      }) as any[];
+
+      const activeTask = taskRows[0] || null;
+
+      const { PatientOperationsLifecycleService } = await import('@/lib/services/patient-operations-lifecycle');
+      const lifecycleService = new PatientOperationsLifecycleService(ctx.db);
+
+      let oppId = activeTask?.opportunity_id;
+      let phone = activeTask?.phone_number;
+      let taskId = activeTask?.id;
+
+      if (!taskId) {
+        const convRows = await ctx.db.executeSafe({
+          text: `SELECT active_opportunity_id, phone_number FROM conversations WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+          values: [conversationId, ctx.tenantId]
+        }) as any[];
+
+        if (convRows.length === 0) {
+          return { success: false, error: "Konuşma bulunamadı." };
+        }
+
+        oppId = convRows[0].active_opportunity_id;
+        phone = convRows[0].phone_number;
+
+        if (!oppId) {
+          return { success: false, error: "Aktif fırsat/lead kaydı bulunamadı. Lütfen önce fırsat oluşturun." };
+        }
+
+        const metadata = {
+          zero_outbound_p0: true,
+          zero_outbound: true,
+          patient_visible: false,
+          internal_directive_only: true,
+          source: "crm_panel_bot_steering",
+          bot_directive_state: {
+            directive_type: 'ask_callback_time',
+            directive_status: 'pending',
+            active_bot_directive: directiveText.trim(),
+            created_by: ctx.userId || 'system',
+            created_at: new Date().toISOString(),
+            source_ui: 'inbox_crm_panel'
+          },
+          active_bot_directive: directiveText.trim()
+        };
+
+        const res = await ctx.db.executeSafe({
+          text: `
+            INSERT INTO follow_up_tasks (
+              tenant_id, opportunity_id, conversation_id, phone_number,
+              task_type, title, description, status, due_at, metadata
+            ) VALUES ($1, $2, $3, $4, 'bot_handoff_followup', 'Manuel Bot Yönlendirme', $5, 'pending', NOW(), $6)
+            RETURNING id
+          `,
+          values: [
+            ctx.tenantId,
+            oppId,
+            conversationId,
+            phone,
+            'Manuel bot yönlendirmesi ile oluşturuldu.',
+            JSON.stringify(metadata)
+          ]
+        }) as any[];
+
+        taskId = res[0].id;
+      } else {
+        await lifecycleService.setBotDirective({
+          taskId,
+          tenantId: ctx.tenantId,
+          directiveType: 'ask_callback_time',
+          directiveText: directiveText.trim(),
+          userId: ctx.userId,
+          sourceUi: 'inbox_crm_panel'
+        });
+
+        const currentMeta = activeTask.metadata || {};
+        const updatedMeta = {
+          ...currentMeta,
+          zero_outbound_p0: true,
+          zero_outbound: true,
+          patient_visible: false,
+          internal_directive_only: true,
+          source: "crm_panel_bot_steering",
+          bot_directive_state: {
+            ...(currentMeta.bot_directive_state || {}),
+            directive_type: 'ask_callback_time',
+            directive_status: 'pending',
+            active_bot_directive: directiveText.trim(),
+            created_by: ctx.userId || 'system',
+            created_at: new Date().toISOString(),
+            source_ui: 'inbox_crm_panel'
+          },
+          active_bot_directive: directiveText.trim()
+        };
+
+        await ctx.db.executeSafe({
+          text: `UPDATE follow_up_tasks SET metadata = $1::jsonb, updated_at = NOW() WHERE id = $2 AND tenant_id = $3`,
+          values: [JSON.stringify(updatedMeta), taskId, ctx.tenantId]
+        });
+      }
+
+      await ctx.db.executeSafe({
+        text: `INSERT INTO outreach_logs (tenant_id, conversation_id, opportunity_id, action, channel, actor_id, metadata)
+               VALUES ($1, $2, $3, 'bot_steering_saved', 'system', $4, $5)`,
+        values: [
+          ctx.tenantId,
+          conversationId,
+          oppId || null,
+          ctx.userId,
+          JSON.stringify({
+            directiveText: directiveText.trim(),
+            task_id: taskId,
+            zero_outbound: true,
+            patient_visible: false,
+            internal_directive_only: true
+          })
+        ]
+      });
+
+      return { success: true };
+    }
+  );
+}
+
+export async function saveFormGreetingDraftInternalAction(conversationId: string, approvedText: string) {
+  if (!conversationId) return { success: false, error: "Konuşma ID gerekli." };
+  if (!approvedText || approvedText.trim().length === 0) return { success: false, error: "Taslak metni boş olamaz." };
+
+  return withActionGuard(
+    { actionName: 'saveFormGreetingDraftInternalAction' },
+    async (ctx) => {
+      const convRows = await ctx.db.executeSafe({
+        text: `
+          SELECT c.id, c.phone_number, c.patient_name, c.active_opportunity_id,
+                 l.id as lead_id, l.form_name
+          FROM conversations c
+          LEFT JOIN leads l ON l.tenant_id = c.tenant_id AND (
+            (c.customer_id IS NOT NULL AND l.customer_id = c.customer_id)
+            OR l.phone_number = c.phone_number
+          )
+          WHERE c.id = $1 AND c.tenant_id = $2
+          ORDER BY l.created_at DESC
+          LIMIT 1
+        `,
+        values: [conversationId, ctx.tenantId]
+      }) as any[];
+
+      if (convRows.length === 0) {
+        return { success: false, error: "Konuşma bulunamadı." };
+      }
+
+      const conv = convRows[0];
+      const oppId = conv.active_opportunity_id;
+
+      await ctx.db.executeSafe({
+        text: `
+          INSERT INTO outreach_logs (tenant_id, lead_id, conversation_id, opportunity_id, action, channel, actor_id, metadata)
+          VALUES ($1, $2, $3, $4, 'form_greeting_draft_saved_internal', 'system', $5, $6)
+        `,
+        values: [
+          ctx.tenantId,
+          conv.lead_id || null,
+          conversationId,
+          oppId || null,
+          ctx.userId,
+          JSON.stringify({
+            zero_outbound: true,
+            patient_visible: false,
+            stage_changed: false,
+            draft_only: true,
+            message_text: approvedText,
+            phone: conv.phone_number,
+            patient_name: conv.patient_name || ''
+          })
+        ]
+      });
+
+      return { success: true };
+    }
+  );
+}
+
+export async function getActiveBotDirectiveAction(conversationId: string) {
+  if (!conversationId) return { success: false, directive: null };
+
+  return withActionGuard(
+    { actionName: 'getActiveBotDirectiveAction' },
+    async (ctx) => {
+      const taskRows = await ctx.db.executeSafe({
+        text: `SELECT metadata FROM follow_up_tasks 
+               WHERE conversation_id = $1 AND tenant_id = $2 AND status IN ('pending', 'in_progress')
+               ORDER BY created_at DESC LIMIT 1`,
+        values: [conversationId, ctx.tenantId]
+      }) as any[];
+
+      if (taskRows.length === 0) return { success: true, directive: null };
+
+      const metadata = taskRows[0].metadata || {};
+      const directiveState = metadata.bot_directive_state;
+      const directive = directiveState?.active_bot_directive || metadata.active_bot_directive || null;
+
+      return { success: true, directive };
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, directive: null };
+    return { success: true, directive: res.data?.directive as string | null };
   });
 }
 

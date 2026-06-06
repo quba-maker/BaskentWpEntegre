@@ -2,9 +2,9 @@
 
 import { useState, useEffect } from "react";
 import { useSWRConfig } from "swr";
-import { User, MapPin, Building, Activity, Tag, ChevronDown, ChevronRight, Save, X, Plus, ChevronLeft, Check, Loader2, Sparkles, FileText, Brain, Link, Clock, Moon, Calendar, CalendarClock, PhoneForwarded, MailPlus, Share2 } from "lucide-react";
+import { User, MapPin, Building, Activity, Tag, ChevronDown, ChevronRight, Save, X, Plus, ChevronLeft, Check, Loader2, Sparkles, FileText, Brain, Link, Clock, Moon, Calendar, CalendarClock, PhoneForwarded, MailPlus, Share2, Eye, EyeOff } from "lucide-react";
 import { useInboxStore } from "@/store/inbox-store";
-import { updateCrmData, addTag, removeTag, prepareFollowUpDraft, sendApprovedFollowUp, checkSecondaryFallback, prepareSecondaryDraft, checkFormGreetingEligibility, prepareFormGreetingDraft } from "@/app/actions/inbox";
+import { updateCrmData, addTag, removeTag, prepareFollowUpDraft, sendApprovedFollowUp, checkSecondaryFallback, prepareSecondaryDraft, checkFormGreetingEligibility, prepareFormGreetingDraft, saveBotSteeringDirectiveAction, saveFormGreetingDraftInternalAction, getActiveBotDirectiveAction } from "@/app/actions/inbox";
 import { CustomerAiBrainPanel } from "@/components/features/ai-observability/CustomerAiBrain";
 import { AiTimelinePanel } from "@/components/features/ai-observability/AiTimeline";
 import { resolvePatientDisplayName, formatPhoneReadable } from "@/lib/utils/patient-name-resolver";
@@ -175,6 +175,16 @@ export function ContextPanel() {
   const [formGreetingDraftData, setFormGreetingDraftData] = useState<any>(null);
   const [isLoadingFormGreetingDraft, setIsLoadingFormGreetingDraft] = useState(false);
   const [formGreetingError, setFormGreetingError] = useState<string | null>(null);
+  const [formGreetingEditedMsg, setFormGreetingEditedMsg] = useState<string>("");
+  const [formGreetingSavedMsg, setFormGreetingSavedMsg] = useState<boolean>(false);
+  const [isSavingFormGreeting, setIsSavingFormGreeting] = useState<boolean>(false);
+
+  // Bot steering states
+  const [botDirectiveText, setBotDirectiveText] = useState<string>("");
+  const [activeBotDirective, setActiveBotDirective] = useState<string | null>(null);
+  const [isBotSteeringOpen, setIsBotSteeringOpen] = useState<boolean>(false);
+  const [isSavingBotSteering, setIsSavingBotSteering] = useState<boolean>(false);
+  const [botSteeringStatus, setBotSteeringStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
 
   // Reset local state when contact changes or active opp fields update
   // P1B: Granular deps ensure refresh on opp switch (same contact, different opp fields)
@@ -208,8 +218,51 @@ export function ContextPanel() {
       setFormGreetingChecked(false);
       setFormGreetingDraftData(null);
       setFormGreetingError(null);
+      setFormGreetingEditedMsg("");
+      setFormGreetingSavedMsg(false);
+      setIsSavingFormGreeting(false);
+      setBotDirectiveText("");
+      setActiveBotDirective(null);
+      setBotSteeringStatus("idle");
     }
   }, [contactId, contactDept, contactCountry, contactNotes, contactStage, activeContact?.opp_requester_name, activeContact?.opp_patient_name, activeContact?.patient_name]);
+
+  useEffect(() => {
+    if (activeContact) {
+      // 1. Fetch active bot directive
+      getActiveBotDirectiveAction(activeContact.conversation_id || activeContact.id)
+        .then((res) => {
+          if (res.success && res.directive) {
+            setActiveBotDirective(res.directive);
+          } else {
+            setActiveBotDirective(null);
+          }
+        })
+        .catch(() => setActiveBotDirective(null));
+
+      // 2. Fetch Form Greeting eligibility if form connection exists
+      const hasFormConnection = !!(activeContact.formData || activeContact.form_raw_data);
+      if (hasFormConnection) {
+        setIsCheckingFormGreeting(true);
+        checkFormGreetingEligibility(activeContact.conversation_id || activeContact.id)
+          .then((res) => {
+            setFormGreetingEligibility(res);
+            setFormGreetingChecked(true);
+          })
+          .catch((err) => {
+            console.error("Error checking form greeting eligibility:", err);
+            setFormGreetingEligibility(null);
+            setFormGreetingChecked(true);
+          })
+          .finally(() => {
+            setIsCheckingFormGreeting(false);
+          });
+      } else {
+        setFormGreetingEligibility(null);
+        setFormGreetingChecked(true);
+      }
+    }
+  }, [contactId]);
 
   useEffect(() => {
     if (!country) {
@@ -766,6 +819,252 @@ export function ContextPanel() {
                 </button>
               </div>
             ) : null}
+          </div>
+        )}
+
+        {/* Form Greeting Section (Only shown if form connection exists) */}
+        {(activeContact.formData || activeContact.form_raw_data) && (
+          <div className="w-full mt-2.5 p-3 rounded-2xl border bg-white/40 space-y-3 shadow-sm text-left transition-all duration-300" style={{ borderColor: "var(--q-border-default)" }}>
+            <div className="flex items-center justify-between pb-1.5 border-b border-black/[0.03]">
+              <div className="flex items-center gap-1.5">
+                <FileText className="w-4 h-4 text-indigo-500" />
+                <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#86868B]">👋 Form Karşılama</span>
+              </div>
+              {formGreetingSavedMsg ? (
+                <span className="text-[8px] font-bold text-green-600 bg-green-50 border border-green-100 px-1.5 py-0.5 rounded-full">Kaydedildi</span>
+              ) : formGreetingEligibility?.eligible ? (
+                <span className="text-[8px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 px-1.5 py-0.5 rounded-full">Karşılama Hazır</span>
+              ) : (
+                <span className="text-[8px] font-bold text-[#86868B] bg-black/[0.04] border border-black/10 px-1.5 py-0.5 rounded-full">Karşılama Dışı</span>
+              )}
+            </div>
+
+            {formGreetingError && (
+              <div className="text-[10px] font-semibold text-red-600 bg-red-50 border border-red-100 rounded-lg p-2 leading-snug">
+                ⚠️ {formGreetingError}
+              </div>
+            )}
+
+            {formGreetingSavedMsg && (
+              <div className="text-[11px] font-semibold text-green-700 bg-green-50/80 border border-green-150 rounded-xl p-2.5 leading-snug flex items-center gap-1.5">
+                <Check className="w-4 h-4 text-green-600 shrink-0" />
+                <span>Karşılama taslağı iç not olarak kaydedildi.</span>
+              </div>
+            )}
+
+            {!formGreetingSavedMsg && (
+              <>
+                {!formGreetingChecked && isCheckingFormGreeting ? (
+                  <div className="flex items-center gap-2 text-[10px] font-semibold text-[#86868B] py-2">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Karşılama durumu kontrol ediliyor...</span>
+                  </div>
+                ) : !formGreetingEligibility?.eligible ? (
+                  <div className="text-[10px] font-semibold text-[#86868B] bg-black/[0.02] border border-black/5 rounded-xl p-2.5 leading-snug">
+                    ℹ️ Uygun Değil: {formGreetingEligibility?.reason || "Bu hasta karşılama için uygun kriterleri sağlamıyor."}
+                  </div>
+                ) : !formGreetingDraftData ? (
+                  <button
+                    onClick={async () => {
+                      setIsLoadingFormGreetingDraft(true);
+                      setFormGreetingError(null);
+                      try {
+                        const res = await prepareFormGreetingDraft(activeContact.conversation_id || activeContact.id);
+                        if (res.success && res.draft) {
+                          setFormGreetingDraftData(res);
+                          setFormGreetingEditedMsg(res.draft);
+                        } else {
+                          setFormGreetingError(res.error || "Taslak hazırlanırken hata oluştu.");
+                        }
+                      } catch (err: any) {
+                        setFormGreetingError(err?.message || "Taslak hazırlama hatası.");
+                      } finally {
+                        setIsLoadingFormGreetingDraft(false);
+                      }
+                    }}
+                    disabled={isLoadingFormGreetingDraft}
+                    className="w-full py-2 px-3 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100/80 text-indigo-700 text-[10px] font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all disabled:opacity-50"
+                  >
+                    {isLoadingFormGreetingDraft ? (
+                      <><Loader2 className="w-3.5 h-3.5 animate-spin" /><span>Taslak Hazırlanıyor...</span></>
+                    ) : (
+                      <><Sparkles className="w-3.5 h-3.5" /><span>Karşılama Taslağı Hazırla</span></>
+                    )}
+                  </button>
+                ) : (
+                  <div className="space-y-2.5">
+                    <div className="flex flex-wrap gap-1">
+                      {formGreetingDraftData.isWithin24hWindow ? (
+                        <span className="px-1.5 py-0.5 rounded-md text-[9px] font-bold bg-green-50 text-green-700 border border-green-200">
+                          24s Penceresi Açık: Taslak hazırlanabilir
+                        </span>
+                      ) : (
+                        <span className="px-1.5 py-0.5 rounded-md text-[9px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                          24s Penceresi Kapalı: Şablonlu taslak gerekli
+                        </span>
+                      )}
+
+                      {!formGreetingDraftData.templateConfigExists && (
+                        <span className="px-1.5 py-0.5 rounded-md text-[9px] font-bold bg-red-50 text-red-700 border border-red-200">
+                          Taslak için uygun şablon yok
+                        </span>
+                      )}
+
+                      {formGreetingDraftData.templateConfigExists && !formGreetingDraftData.templateSendable && (
+                        <span className="px-1.5 py-0.5 rounded-md text-[9px] font-bold bg-red-50 text-red-700 border border-red-200">
+                          Şablon uygun değil
+                        </span>
+                      )}
+
+                      {formGreetingDraftData.hardBlockedBecausePatientAlreadyInbound && (
+                        <span className="px-1.5 py-0.5 rounded-md text-[9px] font-bold bg-red-50 text-red-700 border border-red-200">
+                          Hasta Zaten Mesaj Attı
+                        </span>
+                      )}
+                    </div>
+
+                    <textarea
+                      value={formGreetingEditedMsg}
+                      onChange={(e) => setFormGreetingEditedMsg(e.target.value)}
+                      disabled={formGreetingDraftData.hardBlockedBecausePatientAlreadyInbound || isSavingFormGreeting}
+                      rows={4}
+                      className="w-full bg-white/70 border rounded-xl p-2.5 text-[11.5px] text-[#1D1D1F] leading-relaxed resize-none outline-none focus:ring-2 focus:ring-indigo-500/25 transition-all shadow-sm"
+                      style={{ borderColor: "var(--q-border-default)" }}
+                    />
+
+                    <div className="flex gap-2">
+                      <button
+                        onClick={async () => {
+                          if (!formGreetingEditedMsg.trim()) return;
+                          setIsSavingFormGreeting(true);
+                          setFormGreetingError(null);
+                          try {
+                            const res = await saveFormGreetingDraftInternalAction(
+                              activeContact.conversation_id || activeContact.id,
+                              formGreetingEditedMsg
+                            );
+                            if (res.success) {
+                              setFormGreetingSavedMsg(true);
+                              mutate((key) => Array.isArray(key) && key[0] === "conversations");
+                            } else {
+                              setFormGreetingError(res.error || "Kaydetme sırasında hata oluştu.");
+                            }
+                          } catch (err: any) {
+                            setFormGreetingError(err?.message || "Kaydetme hatası.");
+                          } finally {
+                            setIsSavingFormGreeting(false);
+                          }
+                        }}
+                        disabled={isSavingFormGreeting || !formGreetingEditedMsg.trim() || formGreetingDraftData.hardBlockedBecausePatientAlreadyInbound}
+                        className="flex-1 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all disabled:opacity-50"
+                      >
+                        {isSavingFormGreeting ? (
+                          <><Loader2 className="w-3.5 h-3.5 animate-spin" /><span>Kaydediliyor...</span></>
+                        ) : (
+                          <span>Taslağı İç Not Olarak Kaydet</span>
+                        )}
+                      </button>
+                      <button
+                        onClick={() => {
+                          setFormGreetingDraftData(null);
+                          setFormGreetingEditedMsg("");
+                        }}
+                        className="px-3 py-1.5 border border-gray-200 hover:bg-gray-50 text-gray-600 text-[10px] font-bold rounded-lg cursor-pointer transition-all"
+                      >
+                        Vazgeç
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Botu Yönlendir Accordion (Visible when oppId exists) */}
+        {oppId && (
+          <div className="w-full mt-2.5 p-3 rounded-2xl border bg-white/40 space-y-2.5 shadow-sm text-left transition-all duration-300" style={{ borderColor: "var(--q-border-default)" }}>
+            <button
+              onClick={() => setIsBotSteeringOpen(!isBotSteeringOpen)}
+              className="flex items-center justify-between w-full font-extrabold text-[#86868B] transition-colors hover:text-indigo-600 cursor-pointer"
+            >
+              <div className="flex items-center gap-1.5">
+                <Brain className="w-4 h-4 text-indigo-500" />
+                <span className="text-[10px] uppercase tracking-widest font-extrabold">🤖 Botu Yönlendir</span>
+              </div>
+              <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isBotSteeringOpen ? 'rotate-180' : ''}`} />
+            </button>
+
+            {isBotSteeringOpen && (
+              <div className="pt-2 space-y-2.5 border-t border-black/[0.03] animate-fade-in">
+                {activeBotDirective ? (
+                  <div className="p-2.5 rounded-xl bg-indigo-50/70 border border-indigo-100 text-indigo-905 text-[11px] font-medium leading-relaxed">
+                    <span className="block text-[8px] font-bold text-indigo-500 uppercase tracking-widest mb-0.5">Aktif Bot Yönlendirmesi</span>
+                    "{activeBotDirective}"
+                  </div>
+                ) : (
+                  <div className="text-[10px] text-[#86868B] font-medium leading-snug">
+                    Botun bir sonraki adımda hastaya vereceği yanıta müdahale edin. Direktif vererek bota yol gösterin.
+                  </div>
+                )}
+
+                <div className="space-y-1.5">
+                  <textarea
+                    value={botDirectiveText}
+                    onChange={(e) => setBotDirectiveText(e.target.value)}
+                    placeholder="Örn: Fiyat ver ama indirim yapma. Hastaya bütçe hassasiyetini sorgula..."
+                    disabled={isSavingBotSteering}
+                    rows={3}
+                    className="w-full bg-white/70 border rounded-xl p-2.5 text-[11.5px] text-[#1D1D1F] leading-normal resize-none outline-none focus:ring-2 focus:ring-indigo-500/25 transition-all shadow-sm"
+                    style={{ borderColor: "var(--q-border-default)" }}
+                  />
+                  
+                  {botSteeringStatus === "error" && (
+                    <div className="text-[10px] font-semibold text-red-600 bg-red-50 p-1.5 rounded-lg">
+                      ⚠️ Direktif kaydedilemedi.
+                    </div>
+                  )}
+
+                  <button
+                    onClick={async () => {
+                      if (!botDirectiveText.trim()) return;
+                      setIsSavingBotSteering(true);
+                      setBotSteeringStatus("saving");
+                      try {
+                        const res = await saveBotSteeringDirectiveAction(
+                          activeContact.conversation_id || activeContact.id,
+                          botDirectiveText
+                        );
+                        if (res.success) {
+                          setActiveBotDirective(botDirectiveText.trim());
+                          setBotDirectiveText("");
+                          setBotSteeringStatus("saved");
+                          setTimeout(() => setBotSteeringStatus("idle"), 2000);
+                          mutate((key) => Array.isArray(key) && key[0] === "conversations");
+                        } else {
+                          setBotSteeringStatus("error");
+                        }
+                      } catch (err) {
+                        console.error("Steering error:", err);
+                        setBotSteeringStatus("error");
+                      } finally {
+                        setIsSavingBotSteering(false);
+                      }
+                    }}
+                    disabled={isSavingBotSteering || !botDirectiveText.trim()}
+                    className="w-full py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all disabled:opacity-50"
+                  >
+                    {isSavingBotSteering ? (
+                      <><Loader2 className="w-3.5 h-3.5 animate-spin" /><span>Kaydediliyor...</span></>
+                    ) : botSteeringStatus === "saved" ? (
+                      <><Check className="w-3.5 h-3.5" /><span>Kaydedildi!</span></>
+                    ) : (
+                      <span>Direktifi Kaydet</span>
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
