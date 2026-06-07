@@ -140,9 +140,9 @@ export class IdentityEngine {
               SET first_name = $1, 
                   primary_email = COALESCE(primary_email, $2),
                   updated_at = NOW() 
-              WHERE id = $3
+              WHERE id = $3 AND tenant_id = $4
             `,
-            values: [firstName, email || null, cid]
+            values: [firstName, email || null, cid, tenantId]
           });
         }
       } else {

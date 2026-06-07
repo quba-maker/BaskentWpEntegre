@@ -694,15 +694,15 @@ export function ConversationViewport() {
     hasNextPage,
     isFetchingNextPage
   } = useInfiniteQuery({
-    queryKey: ["messages", activePhone],
-    queryFn: ({ pageParam = 1 }) => getMessages(activePhone!, pageParam as number, 50),
+    queryKey: ["messages", activeContact?.conversation_id || activeContact?.conversationId || activePhone],
+    queryFn: ({ pageParam = 1 }) => getMessages((activeContact?.conversation_id || activeContact?.conversationId || activePhone)!, pageParam as number, 50),
     getNextPageParam: (lastPage: any[], allPages: any[][]) => {
       if (!Array.isArray(lastPage) || !Array.isArray(allPages)) return undefined;
       if (lastPage.length < 50) return undefined;
       return allPages.length + 1;
     },
     initialPageParam: 1,
-    enabled: !!activePhone,
+    enabled: !!(activeContact?.conversation_id || activeContact?.conversationId || activePhone),
     // Realtime operates now, fallback polling if disconnected
     refetchInterval: isRealtimeDown ? 5000 : false,
     staleTime: Infinity,

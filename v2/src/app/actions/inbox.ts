@@ -618,27 +618,55 @@ export async function getMessages(phone: string, page: number = 1, limit: number
     { actionName: 'getMessages' },
     async (ctx) => {
       try {
-        const cleanPhone = phone.replace(/\D/g, '').slice(-10);
-        // Create the string pattern with % wildcards
-        const phoneLike = `%${cleanPhone}%`;
-
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(phone);
         const offset = (page - 1) * limit;
+
+        let resolvedConvId: string | null = null;
+
+        if (isUuid) {
+          resolvedConvId = phone;
+        } else {
+          const cleanPhone = phone.replace(/\D/g, '');
+          const convRow = await ctx.db.executeSafe({
+            text: `
+              SELECT id 
+              FROM conversations 
+              WHERE tenant_id = $1 
+                AND (
+                  phone_number = $2 
+                  OR phone_number = '+' || $2
+                  OR phone_number = SUBSTRING($2, 3)
+                  OR phone_number LIKE '%' || $3
+                )
+              LIMIT 1
+            `,
+            values: [ctx.tenantId, cleanPhone, cleanPhone.slice(-10)]
+          }) as any[];
+
+          if (convRow.length > 0) {
+            resolvedConvId = convRow[0].id;
+          }
+        }
+
+        if (!resolvedConvId) {
+          return [];
+        }
 
         const rows = await ctx.db.executeSafe({
           text: `
             SELECT * FROM (
               SELECT id, content as text, direction, status, model_used,
                      media_type, media_url, media_metadata, provider_message_id,
-                     EXTRACT(EPOCH FROM COALESCE(provider_timestamp, created_at)) * 1000 as created_at_ms
+                     EXTRACT(EPOCH FROM created_at) * 1000 as created_at_ms
               FROM messages
-              WHERE phone_number LIKE $1 
+              WHERE conversation_id = $1::uuid 
                 AND (tenant_id = $2)
-              ORDER BY COALESCE(provider_timestamp, created_at) DESC
+              ORDER BY created_at DESC
               LIMIT $3 OFFSET $4
             ) sub
             ORDER BY created_at_ms ASC
           `,
-          values: [phoneLike, ctx.tenantId, limit, offset]
+          values: [resolvedConvId, ctx.tenantId, limit, offset]
         });
 
       const validRows = Array.isArray(rows) ? rows : ((rows as any)?.rows || []);
