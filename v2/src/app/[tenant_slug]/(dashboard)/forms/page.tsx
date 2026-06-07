@@ -5,7 +5,7 @@ import useSWRInfinite from "swr/infinite";
 import { Search, MessageCircle, X, FileText, ChevronRight, CheckCircle2, Bot, Save, StickyNote, Sparkles, RefreshCw, ChevronDown, Filter, Zap, Send, Clock, CheckCheck, Edit3, Phone, PhoneOff, PhoneForwarded, XCircle } from "lucide-react";
 import { getForms, getCampaignNames, updateLeadNotes, updateLeadStage, syncGoogleSheets } from "@/app/actions/forms";
 import { toggleBotStatus } from "@/app/actions/inbox";
-import { prepareGreetingDraft, sendGreetingMessage, sendFormGreetingTemplateAction, activateBot, getOutreachHistory, logCallReached, logCallMissed, logCallbackScheduled, logNotInterested, getGreetingTemplates, checkGreetingReadiness, saveGreetingDraftInternal, prepareBulkSmartGreetingDraftsAction, prepareSmartGreetingDraftAction, type OutreachLogEntry } from "@/app/actions/outreach";
+import { prepareGreetingDraft, sendGreetingMessage, sendFormGreetingTemplateAction, activateBot, getOutreachHistory, logCallReached, logCallMissed, logCallbackScheduled, logNotInterested, getGreetingTemplates, resolveFirstContactAction, saveGreetingDraftInternal, prepareBulkSmartGreetingDraftsAction, prepareSmartGreetingDraftAction, type OutreachLogEntry } from "@/app/actions/outreach";
 import { useInboxStore } from "@/store/inbox-store";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { MapPin, Building2, Calendar, Flame, TrendingUp, User } from "lucide-react";
@@ -27,6 +27,8 @@ const OUTREACH_BADGE_CONFIG: Record<string, { label: string; color: string; icon
   'opportunity_created': { label: 'Fırsat Oluşturuldu', color: '#30B0C7', icon: '🎯' },
   'notification_sent': { label: 'Bildirim Gönderildi', color: '#86868B', icon: '🔔' },
   'form_greeting_draft_saved_internal': { label: 'Taslak İç Not Kaydedildi', color: '#8E8E93', icon: '📝' },
+  'smart_greeting_draft_edited': { label: 'Taslak Düzenlendi / Kaydedildi', color: '#8E8E93', icon: '📝' },
+  'smart_greeting_draft_prepared': { label: 'Taslak Hazırlandı', color: '#8E8E93', icon: '📝' },
 };
 
 const formatDate = (dateString: string) => {
@@ -222,24 +224,7 @@ export default function FormsPage() {
   const [showCallActions, setShowCallActions] = useState(false);
   const [botNote, setBotNote] = useState('');
   
-  const [readiness, setReadiness] = useState<{
-    draftTemplateAvailable: boolean;
-    approvedWhatsappTemplateAvailable: boolean;
-    templateConfigExists: boolean;
-    templateSendable: boolean;
-    templateNonCompliant: boolean;
-    complianceWarning: string | null;
-    source: 'message_templates' | 'system_hardcoded' | 'none';
-    isWithin24hWindow: boolean;
-    hardBlockedBecausePatientAlreadyInbound: boolean;
-    hasHardDuplicate?: boolean;
-    hasSoftDuplicate?: boolean;
-    hasUnsupportedVariables?: boolean;
-    draftText: string;
-    templateName?: string;
-    templateLanguage?: string;
-    greetingSent: boolean;
-  } | null>(null);
+  const [readiness, setReadiness] = useState<any | null>(null);
   const [readinessLoading, setReadinessLoading] = useState(false);
   const hasUsableTemplate = readiness?.templateConfigExists === true && readiness?.templateNonCompliant !== true;
 
@@ -394,14 +379,17 @@ export default function FormsPage() {
       // Load templates for selector
       getGreetingTemplates().then((t: any[]) => setTemplates(t)).catch(() => setTemplates([]));
       
-      // Fetch readiness status
-      setReadinessLoading(true);
-      checkGreetingReadiness(selectedForm.id)
-        .then((res) => {
-          if (res.success && res.data) {
-            console.log('[OUTREACH_CARD_STATE] checkGreetingReadiness res:', res.data);
-            setReadiness(res.data);
-            if (res.data.greetingSent) {
+      resolveFirstContactAction(selectedForm.id)
+        .then((res: any) => {
+          if (res && res.success && res.resolution) {
+            console.log('[OUTREACH_CARD_STATE] resolveFirstContactAction res:', res.resolution);
+            setReadiness(res.resolution);
+            
+            // Derive greetingSent from phones
+            const anySent = res.resolution.phones.some((p: any) => 
+               p.hasManualGreetingConfirmed || p.hasInboxGreetingSent || p.hasApiGreetingSent
+            );
+            if (anySent) {
               setGreetingSent(true);
             }
           } else {
@@ -510,13 +498,14 @@ export default function FormsPage() {
       return;
     }
 
-    if (!form.phone_number) {
+    const targetPhone = readiness?.recommendedPhone?.phone || form.phone_number;
+    if (!targetPhone) {
       setOutreachError('Telefon numarası eksik.');
       return;
     }
 
     // 1. Phone Normalization
-    let cleanPhone = form.phone_number.replace(/[\s+\-()]/g, '');
+    let cleanPhone = targetPhone.replace(/[\s+\-()]/g, '');
     if (cleanPhone.startsWith('05')) {
       cleanPhone = '90' + cleanPhone.substring(1);
     } else if (cleanPhone.startsWith('5') && cleanPhone.length === 10) {
@@ -1444,121 +1433,76 @@ export default function FormsPage() {
                         </div>
 
                         {/* Warning and Action Buttons */}
-                        <div className="space-y-2.5 pt-2 border-t border-black/5">
+                        <div className="space-y-3 pt-4 border-t border-black/5">
+                          
+                          {/* Option 1: Manual App Open */}
+                          <button 
+                            onClick={() => handleOpenWhatsAppApp(selectedForm)}
+                            disabled={outreachLoading === 'sending' || !draftMessage?.trim()}
+                            className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-[13px] font-bold bg-[#25D366] hover:bg-[#1DA851] text-white shadow-[0_4px_14px_rgba(37,211,102,0.39)] transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <Send className="w-4 h-4" /> WhatsApp Uygulamasında Aç
+                          </button>
+
                           {/* Primary Safe Action */}
                           <button 
                             onClick={() => handleSaveInternal(selectedForm)}
                             disabled={outreachLoading === 'sending' || !draftMessage?.trim()}
-                            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl font-bold bg-[#007AFF] text-white shadow-[0_4px_14px_rgba(0,122,255,0.3)] hover:bg-[#0056b3] cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl font-bold bg-[#007AFF]/10 text-[#007AFF] hover:bg-[#007AFF]/20 cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                           >
                             {outreachLoading === 'sending' ? (
                               <><RefreshCw className="w-4 h-4 animate-spin" /> Kaydediliyor...</>
                             ) : (
-                              <><Save className="w-4 h-4" /> Taslağı İç Not Olarak Kaydet</>
+                              <><Save className="w-4 h-4" /> Sadece Not Olarak Kaydet</>
                             )}
                           </button>
-
-                          {/* Soft / Hard Readiness Warnings */}
-                          {readiness && readiness.greetingSent && !readiness.hardBlockedBecausePatientAlreadyInbound && (
-                            <div className="text-[10px] font-bold text-[#FF9500] text-center bg-orange-50 border border-orange-100 rounded-lg py-1 px-2.5">
-                              ⚠️ Bu kişiye daha önce mesaj gönderilmiş olabilir.
-                            </div>
-                          )}
-                          {readiness && !readiness.templateSendable && readiness.templateNonCompliant && (
-                            <div className="text-[10px] font-bold text-[#FF3B30] text-center bg-red-50 border border-red-100 rounded-lg py-1 px-2.5">
-                              ⛔ Şablon Uyumsuz: {readiness.complianceWarning}
-                            </div>
-                          )}
-
-                          <div className="flex flex-col gap-4">
-                            {/* Option 1: Manual App Open */}
-                            <div className="p-3 border border-[#E5E5EA] rounded-xl bg-white/50 space-y-2">
-                              <h4 className="text-xs font-semibold text-[#1D1D1F]">Ücretsiz manuel gönderim</h4>
-                              <p className="text-[10px] text-[#86868B] leading-snug">
-                                Mesaj WhatsApp uygulamasında hazır açılır. Gönderimi personel manuel yapar. API/template ücreti oluşmaz.
-                              </p>
-                              <button 
-                                onClick={() => handleOpenWhatsAppApp(selectedForm)}
-                                disabled={outreachLoading === 'sending' || !draftMessage?.trim()}
-                                className="w-full flex items-center justify-center gap-2 py-2 rounded-lg text-[12px] font-bold bg-[#25D366] hover:bg-[#1DA851] text-white transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                              >
-                                <Send className="w-3.5 h-3.5" /> WhatsApp Uygulamasında Aç
-                              </button>
-                            </div>
-
-                            {/* Option 2: API Template Send */}
-                            <div className="p-3 border border-[#E5E5EA] rounded-xl bg-white/50 space-y-2">
-                              <h4 className="text-xs font-semibold text-[#1D1D1F]">API ile şablon gönderimi</h4>
-                              <p className="text-[10px] text-[#86868B] leading-snug">
-                                Bu işlem hastaya gerçek WhatsApp template mesajı gönderir. 360dialog/Meta ücretlendirmesi uygulanabilir.
-                              </p>
-                              <button 
-                                onClick={() => handleConfirmSend(selectedForm)}
-                                disabled={
-                                  outreachLoading === 'sending' || 
-                                  !draftMessage?.trim() || 
-                                  !hasUsableTemplate
-                                }
-                                className="w-full flex items-center justify-center gap-2 py-2 rounded-lg text-[12px] font-bold bg-[#F5F5F7] hover:bg-rose-50 hover:text-rose-600 text-[#1D1D1F] border border-[#D2D2D7] hover:border-rose-200 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                              >
-                                <Send className="w-3.5 h-3.5" /> WhatsApp Şablonu ile Gönder
-                              </button>
-                            </div>
-                            
-                            <button 
-                              onClick={handleCancelDraft}
-                              disabled={outreachLoading === 'sending'}
-                              className="w-full py-2 rounded-xl text-[12px] font-bold bg-black/[0.04] hover:bg-black/[0.08] text-[#1D1D1F] transition-colors cursor-pointer disabled:opacity-50"
-                            >
-                              İptal
-                            </button>
-                          </div>
+                          
+                          <button 
+                            onClick={handleCancelDraft}
+                            disabled={outreachLoading === 'sending'}
+                            className="w-full py-2.5 rounded-xl text-[13px] font-bold bg-black/[0.04] hover:bg-black/[0.08] text-[#1D1D1F] transition-colors cursor-pointer disabled:opacity-50"
+                          >
+                            İptal
+                          </button>
                         </div>
                       </div>
                     );
                   })()}
 
+                  
+
                   {/* Action Buttons — Primary Row */}
                   {!isDraftOpen && (
                     <div className="flex gap-3">
                       <button 
-                        onClick={() => handlePrepareDraft(selectedForm)}
+                        onClick={() => {
+                           if (readiness?.primaryAction === "Inbox'ta Karşıla" || readiness?.primaryAction === "Inbox'a Git" || readiness?.primaryAction === "Mesaja Git") {
+                               // Navigation uses activeContact logic
+                               // Will navigate using router.push
+                               window.location.href = `/${params.tenant_slug}/inbox?phone=${readiness.recommendedPhone?.phone || selectedForm.phone_number}`;
+                           } else {
+                               handlePrepareDraft(selectedForm);
+                           }
+                        }}
                         disabled={
-                          greetingSent || 
                           outreachLoading === 'draft' || 
                           readinessLoading ||
-                          selectedForm.stage !== 'new' || 
-                          !!selectedForm.has_inbound_messages ||
-                          (readiness !== null && !hasUsableTemplate)
+                          !readiness
                         }
-                        className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-semibold transition-all ${
-                          selectedForm.has_inbound_messages || (readiness && readiness.hardBlockedBecausePatientAlreadyInbound)
-                            ? 'bg-red-50 text-red-600 border border-red-200 cursor-not-allowed'
-                            : greetingSent 
-                            ? 'bg-emerald-50 text-emerald-600 border border-emerald-200 cursor-default'
-                            : selectedForm.stage !== 'new'
-                            ? 'bg-gray-100 text-[#86868B] cursor-not-allowed'
-                            : readinessLoading
-                            ? 'bg-gray-100 text-[#86868B] cursor-not-allowed animate-pulse'
-                            : (readiness && !hasUsableTemplate)
-                            ? 'bg-amber-50 text-amber-600 border border-amber-200 cursor-not-allowed'
-                            : 'bg-[#25D366] text-white shadow-[0_4px_14px_rgba(37,211,102,0.39)] hover:bg-[#1DA851] cursor-pointer'
-                        } disabled:opacity-70`}
+                        className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-semibold transition-all bg-[#25D366] text-white shadow-[0_4px_14px_rgba(37,211,102,0.39)] hover:bg-[#1DA851] cursor-pointer disabled:opacity-70 disabled:bg-gray-100 disabled:text-gray-400 disabled:shadow-none`}
                       >
-                        {selectedForm.has_inbound_messages || (readiness && readiness.hardBlockedBecausePatientAlreadyInbound) ? (
-                          <><XCircle className="w-5 h-5" /> Karşılama Engellendi</>
-                        ) : greetingSent ? (
-                          <><CheckCheck className="w-5 h-5" /> Karşılama Gönderildi / Açıldı</>
-                        ) : readinessLoading ? (
+                        {readinessLoading ? (
                           <><RefreshCw className="w-4 h-4 animate-spin" /> Yükleniyor...</>
                         ) : outreachLoading === 'draft' ? (
                           <><RefreshCw className="w-4 h-4 animate-spin" /> Hazırlanıyor...</>
-                        ) : selectedForm.stage !== 'new' ? (
-                          <><CheckCircle2 className="w-5 h-5" /> Zaten İletişime Geçildi</>
-                        ) : (readiness && !hasUsableTemplate) ? (
-                          <><Clock className="w-5 h-5" /> Şablon Eklenmeli</>
                         ) : (
-                          <><Sparkles className="w-5 h-5" /> Forma Göre Akıllı Taslak Oluştur</>
+                          <>
+                            {readiness?.primaryAction === "Inbox'ta Karşıla" && <MessageCircle className="w-5 h-5" />}
+                            {readiness?.primaryAction === "WhatsApp'ta Karşıla" && <Sparkles className="w-5 h-5" />}
+                            {readiness?.primaryAction === "Tekrar Aç" && <MessageCircle className="w-5 h-5" />}
+                            {(readiness?.primaryAction === "Inbox'a Git" || readiness?.primaryAction === "Mesaja Git") && <MessageCircle className="w-5 h-5" />}
+                            {readiness?.primaryAction || 'İşlem'}
+                          </>
                         )}
                       </button>
                       <button 
@@ -1713,7 +1657,7 @@ export default function FormsPage() {
                             <p className="text-[12px] font-semibold text-[#1D1D1F]">
                               {displayLabel}
                             </p>
-                            {entry.action === 'form_greeting_draft_saved_internal' && (
+                            {(entry.action === 'form_greeting_draft_saved_internal' || entry.action === 'smart_greeting_draft_edited') && (
                               <span className="text-[10px] text-[#86868B] font-semibold block mt-0.5">
                                 🔒 Hasta görmez. WhatsApp gönderilmedi.
                               </span>

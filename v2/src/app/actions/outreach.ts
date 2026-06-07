@@ -199,6 +199,230 @@ export async function prepareGreetingDraft(leadId: string) {
  * Does not write messages, outreach_logs, notifications, follow_up_tasks,
  * and does not call WhatsApp API or AI.
  */
+export async function checkGreetingReadinessCore(
+  db: any,
+  tenantId: string,
+  userId: string,
+  leadId: string
+) {
+  const safeLeadId = leadId && leadId.trim() ? leadId.trim() : null;
+  if (!safeLeadId || !UUID_RE.test(safeLeadId)) {
+    throw new Error("Geçersiz Lead ID formatı.");
+  }
+
+  // 1. Fetch lead
+  let dbDiagnostics = {};
+  try {
+    const dbUrlLog = process.env.DATABASE_URL ? (process.env.DATABASE_URL.includes('@') ? process.env.DATABASE_URL.split('@')[1] : process.env.DATABASE_URL) : 'NOT_SET';
+    
+    const countRes = await db.executeSafe({
+      text: `SELECT count(*) FROM message_templates WHERE tenant_id = $1::uuid`,
+      values: [tenantId]
+    }) as any[];
+
+    const activeTemplates = await db.executeSafe({
+      text: `SELECT id, name, is_active, is_default FROM message_templates WHERE tenant_id = $1::uuid`,
+      values: [tenantId]
+    }) as any[];
+    
+    dbDiagnostics = {
+      urlHost: dbUrlLog,
+      count: countRes[0]?.count,
+      templates: activeTemplates
+    };
+  } catch (err: any) {
+    dbDiagnostics = { error: err.message };
+  }
+
+  const leads = await db.executeSafe({
+    text: `/* checkGreetingReadiness:fetchLead */
+           SELECT l.id, l.phone_number, l.patient_name, l.form_name,
+                  l.linked_opportunity_id, l.customer_id, l.country, l.raw_data, l.created_at
+           FROM leads l
+           WHERE l.id = $1::uuid AND l.tenant_id = $2::uuid`,
+    values: [safeLeadId, tenantId]
+  }) as any[];
+
+  if (leads.length === 0) {
+    throw new Error("Lead bulunamadı.");
+  }
+
+  const lead = leads[0];
+  const phone = lead.phone_number;
+
+  if (!phone) {
+    throw new Error("Telefon numarası eksik.");
+  }
+
+  // 2. Check if patient has EVER sent inbound on this phone
+  const inbounds = await db.executeSafe({
+    text: `/* checkGreetingReadiness:inboundBlock */
+           SELECT 1 FROM messages 
+           WHERE tenant_id = $1::uuid AND RIGHT(phone_number, 10) = RIGHT($2, 10) AND direction = 'in'
+           LIMIT 1`,
+    values: [tenantId, phone]
+  }) as any[];
+  const hardBlockedBecausePatientAlreadyInbound = inbounds.length > 0;
+
+  // 3. Resolve active opportunity and conversation context
+  const oppId = lead.linked_opportunity_id || null;
+  let conversationId = null;
+  if (oppId) {
+    const opp = await db.executeSafe({
+      text: `/* checkGreetingReadiness:fetchOpportunity */
+             SELECT conversation_id FROM opportunities WHERE id = $1::uuid AND tenant_id = $2::uuid LIMIT 1`,
+      values: [oppId, tenantId]
+    }) as any[];
+    conversationId = opp[0]?.conversation_id || null;
+  }
+
+  if (!conversationId) {
+    const convRes = await db.executeSafe({
+      text: `/* checkGreetingReadiness:fetchConversation */
+             SELECT id FROM conversations WHERE tenant_id = $1::uuid AND RIGHT(phone_number, 10) = RIGHT($2, 10) LIMIT 1`,
+      values: [tenantId, phone]
+    }) as any[];
+    conversationId = convRes[0]?.id || null;
+  }
+
+  // 4. Check Hard Duplicate logs
+  const dupLogs = await db.executeSafe({
+    text: `/* checkGreetingReadiness:duplicateLogs */
+      SELECT ol.action, ol.created_at
+      FROM outreach_logs ol
+      LEFT JOIN leads l ON l.id = ol.lead_id AND l.tenant_id::text = ol.tenant_id
+      WHERE ol.tenant_id = $1::text
+        AND ol.action IN ('greeting_sent', 'template_sent', 'form_greeting_template_sent', 'manual_whatsapp_greeting_echo_confirmed')
+        AND (
+          ol.lead_id = $2::uuid
+          OR (ol.opportunity_id = $3::text AND $3 IS NOT NULL)
+          OR (ol.conversation_id = $4::text AND $4 IS NOT NULL)
+          OR (
+            RIGHT(ol.metadata->>'phone', 10) = RIGHT($5, 10)
+            AND (l.form_name = $6 OR ol.metadata->>'form_name' = $6)
+          )
+        )
+      LIMIT 1
+    `,
+    values: [tenantId, safeLeadId, oppId, conversationId, phone, lead.form_name]
+  }) as any[];
+  const hasHardDuplicate = dupLogs.length > 0;
+  const greetingSent = hasHardDuplicate; // legacy UI compatibility mapping
+
+  // 5. Check Soft Duplicate (Outbound message exists)
+  const outMessages = await db.executeSafe({
+    text: `SELECT 1 FROM messages 
+           WHERE tenant_id = $1::uuid AND RIGHT(phone_number, 10) = RIGHT($2, 10) AND direction = 'out'
+           LIMIT 1`,
+    values: [tenantId, phone]
+  }) as any[];
+  const hasSoftDuplicate = outMessages.length > 0;
+
+  // 6. Resolve greeting template
+  const { FormGreetingHandoffService } = await import("@/lib/services/form-greeting-handoff.service");
+  const service = new FormGreetingHandoffService(db, tenantId);
+  const elig = await service.checkEligibilityForLead(lead);
+
+  // Resolve greeting language config from channel_ai_profiles
+  let greetingLang = 'auto';
+  try {
+    const profileRes = await db.executeSafe({
+      text: `SELECT cap.greeting_language FROM channel_ai_profiles cap
+             JOIN channel_groups cg ON cap.group_id = cg.id
+             WHERE cg.tenant_id = $1 AND cg.status = 'active'
+             ORDER BY cg.sort_order ASC LIMIT 1`,
+      values: [tenantId]
+    }) as any[];
+    if (profileRes.length > 0) {
+      greetingLang = profileRes[0].greeting_language || 'auto';
+    }
+  } catch (_) {}
+
+  // Extract lead-level language hint from raw_data
+  let leadLanguage: string | undefined;
+  let leadDepartment: string | undefined;
+  try {
+    const rawData = typeof lead.raw_data === 'string' ? JSON.parse(lead.raw_data) : (lead.raw_data || {});
+    leadLanguage = rawData.language || rawData.Language || rawData.dil || rawData.Dil || undefined;
+    leadDepartment = rawData.department || rawData.Department || rawData.departman || rawData.Departman || rawData.bolum || rawData.Bölüm || undefined;
+  } catch (_) {}
+
+  if (!leadDepartment && lead.linked_opportunity_id) {
+    try {
+      const oppRes = await db.executeSafe({
+        text: `SELECT department FROM opportunities WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+        values: [lead.linked_opportunity_id, tenantId]
+      }) as any[];
+      if (oppRes.length > 0) leadDepartment = oppRes[0].department || undefined;
+    } catch (_) {}
+  }
+
+  // Resolve tenant name
+  let tenantName = 'Başkent Üniversitesi Hastanesi';
+  try {
+    const { withTenantDB } = await import('@/lib/core/tenant-db');
+    const sysDb = withTenantDB('admin-system', true);
+    const tenantRes = await sysDb.executeSafe({
+      text: `SELECT name FROM tenants WHERE id = $1 LIMIT 1`,
+      values: [tenantId]
+    }) as any[];
+    if (tenantRes.length > 0) tenantName = tenantRes[0].name;
+  } catch (_) {}
+
+  const { TemplateResolverService } = await import('@/lib/services/template-resolver.service');
+  const resolved = await TemplateResolverService.resolve(db, {
+    tenantId: tenantId,
+    tenantName,
+    patientName: lead.patient_name || '',
+    formName: lead.form_name || undefined,
+    department: leadDepartment || undefined,
+    country: lead.country || undefined,
+    phoneNumber: phone,
+  }, greetingLang);
+
+  const hasRealTemplate = resolved.templateId !== null && resolved.source !== 'system_hardcoded';
+  const isNonCompliant = resolved.template_non_compliant || false;
+
+  // 7. Validate template variables (unsupported variables guard)
+  const safeVars = new Set(['patient_name', 'tenant_name', 'form_name', 'department', 'country', 'coordinator_name']);
+  const matches = resolved.body ? (resolved.body.match(/\{\{([^}]+)\}\}/g) || []) : [];
+  let hasUnsupportedVariables = false;
+  for (const match of matches) {
+    const varName = match.replace(/[\{\}]/g, '').trim();
+    if (!safeVars.has(varName)) {
+      hasUnsupportedVariables = true;
+      break;
+    }
+  }
+
+  // Calculate sendability rules
+  const templateSendable = !hardBlockedBecausePatientAlreadyInbound &&
+                           !hasHardDuplicate &&
+                           hasRealTemplate &&
+                           !isNonCompliant &&
+                           !hasUnsupportedVariables;
+
+  return {
+    draftTemplateAvailable: true,
+    approvedWhatsappTemplateAvailable: hasRealTemplate && !isNonCompliant && !hasUnsupportedVariables,
+    templateConfigExists: hasRealTemplate,
+    templateSendable,
+    templateNonCompliant: isNonCompliant,
+    complianceWarning: resolved.compliance_warning || null,
+    source: resolved.source === 'system_hardcoded' ? 'system_hardcoded' : (hasRealTemplate ? 'message_templates' : 'none'),
+    isWithin24hWindow: elig.windowOpen,
+    hardBlockedBecausePatientAlreadyInbound,
+    hasHardDuplicate,
+    hasSoftDuplicate,
+    hasUnsupportedVariables,
+    draftText: resolved.rendered,
+    templateName: resolved.templateName,
+    templateLanguage: resolved.language,
+    greetingSent,
+    _diagnostics: dbDiagnostics
+  };
+}
+
 export async function checkGreetingReadiness(leadId: string) {
   console.info('[GREETING_READINESS_INPUT]', {
     receivedId: String(leadId).slice(0, 8) + '***',
@@ -213,229 +437,11 @@ export async function checkGreetingReadiness(leadId: string) {
   return withActionGuard(
     { actionName: 'checkGreetingReadiness' },
     async (ctx) => {
-      // 1. Fetch lead
-      let dbDiagnostics = {};
-      try {
-        const dbUrlLog = process.env.DATABASE_URL ? (process.env.DATABASE_URL.includes('@') ? process.env.DATABASE_URL.split('@')[1] : process.env.DATABASE_URL) : 'NOT_SET';
-        
-        const countRes = await ctx.db.executeSafe({
-          text: `SELECT count(*) FROM message_templates WHERE tenant_id = $1::uuid`,
-          values: [ctx.tenantId]
-        }) as any[];
-
-        const activeTemplates = await ctx.db.executeSafe({
-          text: `SELECT id, name, is_active, is_default FROM message_templates WHERE tenant_id = $1::uuid`,
-          values: [ctx.tenantId]
-        }) as any[];
-        
-        dbDiagnostics = {
-          urlHost: dbUrlLog,
-          count: countRes[0]?.count,
-          templates: activeTemplates
-        };
-      } catch (err: any) {
-        dbDiagnostics = { error: err.message };
-      }
-
-      const leads = await ctx.db.executeSafe({
-        text: `/* checkGreetingReadiness:fetchLead */
-               SELECT l.id, l.phone_number, l.patient_name, l.form_name,
-                      l.linked_opportunity_id, l.customer_id, l.country, l.raw_data, l.created_at
-               FROM leads l
-               WHERE l.id = $1::uuid AND l.tenant_id = $2::uuid`,
-        values: [safeLeadId, ctx.tenantId]
-      }) as any[];
-
-      const lead = leads[0];
-
-      console.info('[GREETING_READINESS_LEAD_LOOKUP]', {
-        receivedId: String(leadId).slice(0, 8) + '***',
-        foundLead: !!lead,
-        foundLeadId: lead?.id ? String(lead.id).slice(0, 8) + '***' : null,
-        formName: lead?.form_name || null,
-        department: lead?.department || null,
-      });
-
-      if (leads.length === 0) {
-        return { success: false, error: "Lead bulunamadı." };
-      }
-
-      const phone = lead.phone_number;
-
-      if (!phone) {
-        return { success: false, error: "Telefon numarası eksik." };
-      }
-
-      // 2. Check if patient has EVER sent inbound on this phone
-      const inbounds = await ctx.db.executeSafe({
-        text: `/* checkGreetingReadiness:inboundBlock */
-               SELECT 1 FROM messages 
-               WHERE tenant_id = $1::uuid AND RIGHT(phone_number, 10) = RIGHT($2, 10) AND direction = 'in'
-               LIMIT 1`,
-        values: [ctx.tenantId, phone]
-      }) as any[];
-      const hardBlockedBecausePatientAlreadyInbound = inbounds.length > 0;
-
-      // 3. Resolve active opportunity and conversation context
-      const oppId = lead.linked_opportunity_id || null;
-      let conversationId = null;
-      if (oppId) {
-        const opp = await ctx.db.executeSafe({
-          text: `/* checkGreetingReadiness:fetchOpportunity */
-                 SELECT conversation_id FROM opportunities WHERE id = $1::uuid AND tenant_id = $2::uuid LIMIT 1`,
-          values: [oppId, ctx.tenantId]
-        }) as any[];
-        conversationId = opp[0]?.conversation_id || null;
-      }
-
-      if (!conversationId) {
-        const convRes = await ctx.db.executeSafe({
-          text: `/* checkGreetingReadiness:fetchConversation */
-                 SELECT id FROM conversations WHERE tenant_id = $1::uuid AND RIGHT(phone_number, 10) = RIGHT($2, 10) LIMIT 1`,
-          values: [ctx.tenantId, phone]
-        }) as any[];
-        conversationId = convRes[0]?.id || null;
-      }
-
-      // 4. Check Hard Duplicate logs
-      const dupLogs = await ctx.db.executeSafe({
-        text: `/* checkGreetingReadiness:duplicateLogs */
-          SELECT ol.action, ol.created_at
-          FROM outreach_logs ol
-          LEFT JOIN leads l ON l.id = ol.lead_id AND l.tenant_id::text = ol.tenant_id
-          WHERE ol.tenant_id = $1::text
-            AND ol.action IN ('greeting_sent', 'template_sent', 'form_greeting_template_sent', 'manual_whatsapp_greeting_echo_confirmed')
-            AND (
-              ol.lead_id = $2::uuid
-              OR (ol.opportunity_id = $3::text AND $3 IS NOT NULL)
-              OR (ol.conversation_id = $4::text AND $4 IS NOT NULL)
-              OR (
-                RIGHT(ol.metadata->>'phone', 10) = RIGHT($5, 10)
-                AND (l.form_name = $6 OR ol.metadata->>'form_name' = $6)
-              )
-            )
-          LIMIT 1
-        `,
-        values: [ctx.tenantId, safeLeadId, oppId, conversationId, phone, lead.form_name]
-      }) as any[];
-      const hasHardDuplicate = dupLogs.length > 0;
-      const greetingSent = hasHardDuplicate; // legacy UI compatibility mapping
-
-      // 5. Check Soft Duplicate (Outbound message exists)
-      const outMessages = await ctx.db.executeSafe({
-        text: `SELECT 1 FROM messages 
-               WHERE tenant_id = $1::uuid AND RIGHT(phone_number, 10) = RIGHT($2, 10) AND direction = 'out'
-               LIMIT 1`,
-        values: [ctx.tenantId, phone]
-      }) as any[];
-      const hasSoftDuplicate = outMessages.length > 0;
-
-      // 6. Resolve greeting template
-      const { FormGreetingHandoffService } = await import("@/lib/services/form-greeting-handoff.service");
-      const service = new FormGreetingHandoffService(ctx.db, ctx.tenantId);
-      const elig = await service.checkEligibilityForLead(lead);
-
-      // Resolve greeting language config from channel_ai_profiles
-      let greetingLang = 'auto';
-      try {
-        const profileRes = await ctx.db.executeSafe({
-          text: `SELECT cap.greeting_language FROM channel_ai_profiles cap
-                 JOIN channel_groups cg ON cap.group_id = cg.id
-                 WHERE cg.tenant_id = $1 AND cg.status = 'active'
-                 ORDER BY cg.sort_order ASC LIMIT 1`,
-          values: [ctx.tenantId]
-        }) as any[];
-        if (profileRes.length > 0) {
-          greetingLang = profileRes[0].greeting_language || 'auto';
-        }
-      } catch (_) {}
-
-      // Extract lead-level language hint from raw_data
-      let leadLanguage: string | undefined;
-      let leadDepartment: string | undefined;
-      try {
-        const rawData = typeof lead.raw_data === 'string' ? JSON.parse(lead.raw_data) : (lead.raw_data || {});
-        leadLanguage = rawData.language || rawData.Language || rawData.dil || rawData.Dil || undefined;
-        leadDepartment = rawData.department || rawData.Department || rawData.departman || rawData.Departman || rawData.bolum || rawData.Bölüm || undefined;
-      } catch (_) {}
-
-      if (!leadDepartment && lead.linked_opportunity_id) {
-        try {
-          const oppRes = await ctx.db.executeSafe({
-            text: `SELECT department FROM opportunities WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
-            values: [lead.linked_opportunity_id, ctx.tenantId]
-          }) as any[];
-          if (oppRes.length > 0) leadDepartment = oppRes[0].department || undefined;
-        } catch (_) {}
-      }
-
-      // Resolve tenant name
-      let tenantName = 'Başkent Üniversitesi Hastanesi';
-      try {
-        const { withTenantDB } = await import('@/lib/core/tenant-db');
-        const sysDb = withTenantDB('admin-system', true);
-        const tenantRes = await sysDb.executeSafe({
-          text: `SELECT name FROM tenants WHERE id = $1 LIMIT 1`,
-          values: [ctx.tenantId]
-        }) as any[];
-        if (tenantRes.length > 0) tenantName = tenantRes[0].name;
-      } catch (_) {}
-
-      const { TemplateResolverService } = await import('@/lib/services/template-resolver.service');
-      const resolved = await TemplateResolverService.resolve(ctx.db, {
-        tenantId: ctx.tenantId,
-        tenantName,
-        patientName: lead.patient_name || '',
-        formName: lead.form_name || undefined,
-        department: leadDepartment || undefined,
-        country: lead.country || undefined,
-        phoneNumber: phone,
-      }, greetingLang);
-
-      const hasRealTemplate = resolved.templateId !== null && resolved.source !== 'system_hardcoded';
-      const isNonCompliant = resolved.template_non_compliant || false;
-
-      // 7. Validate template variables (unsupported variables guard)
-      const safeVars = new Set(['patient_name', 'tenant_name', 'form_name', 'department', 'country', 'coordinator_name']);
-      const matches = resolved.body ? (resolved.body.match(/\{\{([^}]+)\}\}/g) || []) : [];
-      let hasUnsupportedVariables = false;
-      for (const match of matches) {
-        const varName = match.replace(/[\{\}]/g, '').trim();
-        if (!safeVars.has(varName)) {
-          hasUnsupportedVariables = true;
-          break;
-        }
-      }
-
-      // Calculate sendability rules
-      const templateSendable = !hardBlockedBecausePatientAlreadyInbound &&
-                               !hasHardDuplicate &&
-                               hasRealTemplate &&
-                               !isNonCompliant &&
-                               !hasUnsupportedVariables;
-
-      return {
-        draftTemplateAvailable: true,
-        approvedWhatsappTemplateAvailable: hasRealTemplate && !isNonCompliant && !hasUnsupportedVariables,
-        templateConfigExists: hasRealTemplate,
-        templateSendable,
-        templateNonCompliant: isNonCompliant,
-        complianceWarning: resolved.compliance_warning || null,
-        source: resolved.source === 'system_hardcoded' ? 'system_hardcoded' : (hasRealTemplate ? 'message_templates' : 'none'),
-        isWithin24hWindow: elig.windowOpen,
-        hardBlockedBecausePatientAlreadyInbound,
-        hasHardDuplicate,
-        hasSoftDuplicate,
-        hasUnsupportedVariables,
-        draftText: resolved.rendered,
-        templateName: resolved.templateName,
-        templateLanguage: resolved.language,
-        greetingSent,
-        _diagnostics: dbDiagnostics
-      };
+      const res = await checkGreetingReadinessCore(ctx.db, ctx.tenantId, ctx.userId, leadId);
+      return res;
     }
   ).then(res => {
-    if (!res.success || res.data?.success === false) return { success: false as const, error: res.error || "Kontrol başarısız." };
+    if (!res.success || !res.data) return { success: false as const, error: res.error || "Kontrol başarısız." };
     const data = (res.data || {}) as any;
     const finalData = {
       draftTemplateAvailable: !!data.draftTemplateAvailable,
@@ -1555,7 +1561,7 @@ export async function saveGreetingDraftInternal(leadId: string, approvedText: st
       await ctx.db.executeSafe({
         text: `/* saveGreetingDraftInternal:insertOutreachLog */
                INSERT INTO outreach_logs (tenant_id, lead_id, conversation_id, opportunity_id, action, channel, actor_id, metadata)
-               VALUES ($1, $2::uuid, $3, $4, 'form_greeting_draft_saved_internal', 'system', $5, $6)`,
+               VALUES ($1, $2::uuid, $3, $4, 'smart_greeting_draft_edited', 'system', $5, $6)`,
         values: [
           ctx.tenantId,
           safeLeadId,
@@ -1672,34 +1678,102 @@ export async function logWhatsappAppOpenedForGreetingAction(
 // ═══════════════════════════════════════════════════════════
 import { generateSmartDraft } from '@/lib/utils/smart-draft-generator';
 
+export async function prepareSmartGreetingDraftCore(
+  db: any,
+  tenantId: string,
+  userId: string,
+  leadId: string
+) {
+  const resolutionCore = await resolveFirstContactCore(db, tenantId, leadId);
+  let readinessData: any = {};
+  try {
+    readinessData = await checkGreetingReadinessCore(db, tenantId, userId, leadId);
+  } catch (e) {
+    console.error("prepareSmartGreetingDraftCore: failed to fetch greeting readiness:", e);
+  }
+  const resolution = {
+    ...resolutionCore,
+    ...readinessData
+  };
+
+  // Get the existing logs to check for existing draft
+  const logsRes = await db.executeSafe({
+    text: `SELECT action, created_at, metadata->>'draft' as draft, metadata->>'draftText' as draft_text, metadata->>'message_text' as message_text
+           FROM outreach_logs
+           WHERE lead_id = $1::uuid AND tenant_id = $2::text
+           ORDER BY created_at DESC`,
+    values: [leadId, tenantId]
+  }) as any[];
+
+  // Hard duplicates definition
+  const hardDuplicateActions = [
+    'greeting_sent',
+    'template_sent',
+    'form_greeting_template_sent',
+    'manual_whatsapp_greeting_echo_confirmed',
+    'inbox_form_greeting_sent'
+  ];
+  
+  // Soft duplicates definition
+  const softDuplicateActions = [
+    'smart_greeting_draft_prepared',
+    'smart_greeting_draft_edited',
+    'form_greeting_draft_saved_internal',
+    'whatsapp_app_opened_for_greeting'
+  ];
+
+  let existingDraft = '';
+  
+  for (const log of logsRes) {
+    if (hardDuplicateActions.includes(log.action)) {
+       break;
+    }
+    if (softDuplicateActions.includes(log.action) && (log.draft || log.draft_text || log.message_text)) {
+       existingDraft = log.draft || log.draft_text || log.message_text;
+       break;
+    }
+  }
+
+  let draftText = existingDraft;
+  if (!draftText) {
+    const leads = await db.executeSafe({
+      text: `SELECT form_name, raw_data FROM leads WHERE id = $1::uuid AND tenant_id = $2::uuid LIMIT 1`,
+      values: [leadId, tenantId]
+    }) as any[];
+    
+    if (leads.length > 0) {
+      const { generateSmartDraft } = await import('@/lib/utils/smart-draft-generator');
+      draftText = await generateSmartDraft(leads[0].raw_data, leads[0].form_name);
+    } else {
+      draftText = "Merhaba, Başkent Üniversitesi Konya Hastanesi’nden, doldurduğunuz form doğrultusunda sizinle iletişime geçiyoruz.";
+    }
+    
+    // Log the newly prepared draft
+    await db.executeSafe({
+      text: `INSERT INTO outreach_logs (tenant_id, lead_id, action, metadata) VALUES ($1, $2, 'smart_greeting_draft_prepared', $3)`,
+      values: [tenantId, leadId, JSON.stringify({ draft: draftText })]
+    });
+  }
+
+  return {
+    draftText,
+    source: 'smart_form_draft' as const,
+    recommendedPhone: resolution.recommendedPhone?.phone,
+    phones: resolution.phones
+  };
+}
+
 export async function prepareSmartGreetingDraftAction(leadId: string) {
   try {
     return await withActionGuard({ actionName: 'prepareSmartGreetingDraftAction' }, async (ctx) => {
-      const res = await checkGreetingReadiness(leadId);
-      if (!res.success) return res;
-
-      const leads = await ctx.db.executeSafe({
-        text: `SELECT form_name, raw_data FROM leads WHERE id = $1::uuid AND tenant_id = $2::uuid LIMIT 1`,
-        values: [leadId, ctx.tenantId]
-      });
-
-      let draftText = res.data?.draftText || '';
-      if (leads.length > 0) {
-        draftText = await generateSmartDraft(leads[0].raw_data, leads[0].form_name);
-      } else {
-        draftText = "Merhaba, Başkent Üniversitesi Konya Hastanesi’nden, doldurduğunuz form doğrultusunda sizinle iletişime geçiyoruz.";
-      }
-
-      return {
-        ...res.data,
-        draftText,
-        source: 'smart_form_draft'
-      };
+      const data = await prepareSmartGreetingDraftCore(ctx.db, ctx.tenantId, ctx.userId, leadId);
+      return { success: true, data };
     }).then(res => {
-      if (!res.success || (res.data as any)?.success === false) {
-        return { success: false, error: res.error || (res.data as any)?.error || "Taslak hazırlanamadı." };
-      }
-      return { success: true, data: res.data };
+      if (!res.success) return { success: false, error: res.error || "Taslak hazırlanamadı." };
+      return {
+        success: true as const,
+        data: res.data
+      };
     });
   } catch (err: any) {
     return { success: false, error: err.message };
@@ -1713,63 +1787,49 @@ export async function prepareBulkSmartGreetingDraftsAction(leadIds: string[]) {
   try {
     return await withActionGuard({ actionName: 'prepareBulkSmartGreetingDraftsAction' }, async (ctx) => {
       const safeIds = leadIds.slice(0, 10);
-      
-      const leadsRes = await ctx.db.executeSafe({
-        text: `SELECT id, form_name, raw_data FROM leads WHERE id = ANY($1::uuid[]) AND tenant_id = $2::uuid`,
-        values: [safeIds, ctx.tenantId]
-      });
-
-      const leadsMap = new Map(leadsRes.map((l: any) => [l.id, l]));
 
       const draftPromises = safeIds.map(async (id) => {
-        const res = await checkGreetingReadiness(id);
-        if (!res.success) {
+        try {
+          const draftRes = await prepareSmartGreetingDraftCore(ctx.db, ctx.tenantId, ctx.userId, id);
+          
+          // Check eligibility
+          const resolutionCore = await resolveFirstContactCore(ctx.db, ctx.tenantId, id);
+          
+          let isEligible = true;
+          let status = 'Hazır';
+          let reason = '';
+
+          // Strict Bulk Eligibility: Only 'needs_greeting' allowed
+          if (resolutionCore.patientLevelStatus !== 'needs_greeting') {
+            isEligible = false;
+            status = 'Atlandı';
+            if (resolutionCore.patientLevelStatus === 'waiting_inbox_reply' || resolutionCore.patientLevelStatus === 'patient_replied') {
+              reason = 'Hasta Inbox mesajı göndermiş';
+            } else if (resolutionCore.patientLevelStatus === 'whatsapp_opened') {
+              reason = 'Uygulama zaten açılmış (Tekli ekranı kullanın)';
+            } else if (resolutionCore.patientLevelStatus === 'manual_greeting_confirmed' || resolutionCore.patientLevelStatus === 'inbox_greeting_sent') {
+              reason = 'Karşılama zaten yapılmış';
+            } else {
+              reason = 'Lead durumu needs_greeting değil (' + resolutionCore.patientLevelStatus + ')';
+            }
+          }
+
           return {
             id,
-            draftText: "",
-            isEligible: false,
-            status: 'Hata',
-            reason: res.error || "Bilinmeyen hata"
+            draftText: isEligible ? draftRes.draftText : "",
+            isEligible,
+            status,
+            reason,
+            source: 'smart_form_draft',
+            recommendedPhone: draftRes.recommendedPhone,
           };
+        } catch (e: any) {
+          return { id, draftText: "", isEligible: false, status: 'Hata', reason: e.message || "Bilinmeyen hata" };
         }
-        
-        const data = res.data!;
-        let isEligible = true;
-        let status = 'Hazır';
-        let reason = '';
-
-        if (data.hardBlockedBecausePatientAlreadyInbound) {
-          isEligible = false;
-          status = 'Atlandı';
-          reason = 'Hasta zaten inbound mesaj attı';
-        } else if (data.hasHardDuplicate || data.greetingSent) {
-          isEligible = false;
-          status = 'Atlandı';
-          reason = 'Daha önce karşılama mesajı/şablon gönderilmiş';
-        }
-
-        const leadRow = leadsMap.get(id);
-        let draftText = data.draftText;
-        if (leadRow) {
-          draftText = await generateSmartDraft(leadRow.raw_data, leadRow.form_name);
-        }
-
-        return {
-          id,
-          draftText,
-          isEligible,
-          status,
-          reason,
-          source: 'smart_form_draft',
-          hardBlockedBecausePatientAlreadyInbound: data.hardBlockedBecausePatientAlreadyInbound,
-          hasHardDuplicate: data.hasHardDuplicate,
-          hasSoftDuplicate: data.hasSoftDuplicate,
-          greetingSent: data.greetingSent
-        };
       });
 
       const results = await Promise.all(draftPromises);
-      return { queueItems: results };
+      return { success: true, data: { queueItems: results } };
     }).then(res => {
       if (!res.success) return { success: false, error: res.error || "Kuyruk hazırlanamadı." };
       return { success: true, queueItems: (res.data as any)?.queueItems || [] };
@@ -1777,4 +1837,35 @@ export async function prepareBulkSmartGreetingDraftsAction(leadIds: string[]) {
   } catch (err: any) {
     return { success: false, error: err.message };
   }
+}
+
+import { resolveFirstContactCore, type ContactPhoneStatus } from "@/lib/utils/first-contact-status-resolver";
+import { deduplicatePhones } from "@/lib/utils/country";
+
+export async function resolveFirstContactAction(leadId: string): Promise<{ success: boolean; resolution?: any; error?: string }> {
+  return withActionGuard(
+    { actionName: 'resolveFirstContactAction' },
+    async (ctx) => {
+      const resolution = await resolveFirstContactCore(ctx.db, ctx.tenantId, leadId);
+      
+      let readinessData: any = {};
+      try {
+        readinessData = await checkGreetingReadinessCore(ctx.db, ctx.tenantId, ctx.userId, leadId);
+      } catch (e) {
+        console.error("resolveFirstContactAction: failed to fetch greeting readiness:", e);
+      }
+
+      const combined = {
+        ...resolution,
+        ...readinessData
+      };
+
+      return { success: true, resolution: combined };
+    }
+  ).then(res => {
+    if (res.success && res.data) {
+      return { success: true, resolution: res.data.resolution };
+    }
+    return { success: false, error: res.error };
+  });
 }

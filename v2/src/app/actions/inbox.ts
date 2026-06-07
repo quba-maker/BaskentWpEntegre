@@ -2664,9 +2664,45 @@ export async function checkFormGreetingEligibility(conversationId: string) {
   return withActionGuard(
     { actionName: 'checkFormGreetingEligibility' },
     async (ctx) => {
-      const { FormGreetingHandoffService } = await import("@/lib/services/form-greeting-handoff.service");
-      const service = new FormGreetingHandoffService(ctx.db, ctx.tenantId);
-      return await service.checkEligibility(conversationId);
+      const convRows = await ctx.db.executeSafe({
+        text: `
+          SELECT c.id, c.phone_number, c.patient_name, c.customer_id,
+                 l.id as lead_id
+          FROM conversations c
+          LEFT JOIN LATERAL (
+            SELECT id, raw_data 
+            FROM leads 
+            WHERE leads.tenant_id = c.tenant_id
+              AND (
+                (c.customer_id IS NOT NULL AND leads.customer_id = c.customer_id)
+                OR
+                (leads.phone_number LIKE '%' || RIGHT(c.phone_number, 10))
+              )
+            ORDER BY created_at DESC 
+            LIMIT 1
+          ) l ON true
+          WHERE c.id = $1 AND c.tenant_id = $2
+          LIMIT 1
+        `,
+        values: [conversationId, ctx.tenantId]
+      }) as any[];
+
+      if (convRows.length === 0 || !convRows[0].lead_id) {
+        return { eligible: false, reason: "Bu konuşmaya bağlı bir form bulunamadı." };
+      }
+
+      const leadId = convRows[0].lead_id;
+      const { resolveFirstContactCore } = await import("@/lib/utils/first-contact-status-resolver");
+      const statusObj = await resolveFirstContactCore(ctx.db, ctx.tenantId, leadId);
+
+      // Sadece 'waiting_inbox_reply' (Hiç formdan mesaj atılmamış ama kendisi yazmış) durumundaysa Inbox'ta göster
+      const isEligible = statusObj.patientLevelStatus === 'waiting_inbox_reply';
+
+      return {
+        eligible: isEligible,
+        patientLevelStatus: statusObj.patientLevelStatus,
+        reason: isEligible ? "" : "Sadece 'waiting_inbox_reply' durumundaki hasta için form karşılama aktif edilir."
+      };
     }
   ).then(res => {
     if (!res.success) return { eligible: false, reason: res.error || "Kontrol başarısız." };
@@ -2679,30 +2715,42 @@ export async function prepareFormGreetingDraft(conversationId: string) {
   return withActionGuard(
     { actionName: 'prepareFormGreetingDraft' },
     async (ctx) => {
-      const { FormGreetingHandoffService } = await import("@/lib/services/form-greeting-handoff.service");
-      const service = new FormGreetingHandoffService(ctx.db, ctx.tenantId);
-      return await service.prepareDraft(conversationId, ctx.userId);
+      const convRows = await ctx.db.executeSafe({
+        text: `
+          SELECT c.id, c.phone_number, c.customer_id, l.id as lead_id
+          FROM conversations c
+          LEFT JOIN LATERAL (
+            SELECT id 
+            FROM leads 
+            WHERE leads.tenant_id = c.tenant_id
+              AND (
+                (c.customer_id IS NOT NULL AND leads.customer_id = c.customer_id)
+                OR
+                (leads.phone_number LIKE '%' || RIGHT(c.phone_number, 10))
+              )
+            ORDER BY created_at DESC 
+            LIMIT 1
+          ) l ON true
+          WHERE c.id = $1 AND c.tenant_id = $2
+          LIMIT 1
+        `,
+        values: [conversationId, ctx.tenantId]
+      }) as any[];
+
+      if (convRows.length === 0 || !convRows[0].lead_id) {
+        return { error: "Form bulunamadı." };
+      }
+
+      const { prepareSmartGreetingDraftCore } = await import("@/app/actions/outreach");
+      const draftRes = await prepareSmartGreetingDraftCore(ctx.db, ctx.tenantId, ctx.userId, convRows[0].lead_id);
+      
+      return { draft: draftRes.draftText };
     }
   ).then(res => {
     if (!res.success) return { success: false as const, error: res.error || res.data?.error };
     return {
       success: true as const,
       draft: res.data?.draft as string,
-      draftType: res.data?.draftType as "freeform" | "template_required",
-      windowOpen: res.data?.windowOpen as boolean,
-      patientName: res.data?.patientName as string,
-      phone: res.data?.phone as string,
-      
-      // Phase a2.1 flags
-      draftTemplateAvailable: res.data?.draftTemplateAvailable as boolean,
-      approvedWhatsappTemplateAvailable: res.data?.approvedWhatsappTemplateAvailable as boolean,
-      templateConfigExists: res.data?.templateConfigExists as boolean,
-      templateSendable: res.data?.templateSendable as boolean,
-      templateNonCompliant: res.data?.templateNonCompliant as boolean,
-      complianceWarning: res.data?.complianceWarning as string | null,
-      source: res.data?.source as 'message_templates' | 'system_hardcoded' | 'none',
-      isWithin24hWindow: res.data?.isWithin24hWindow as boolean,
-      hardBlockedBecausePatientAlreadyInbound: res.data?.hardBlockedBecausePatientAlreadyInbound as boolean,
     };
   });
 }
@@ -2875,7 +2923,7 @@ export async function saveFormGreetingDraftInternalAction(conversationId: string
       await ctx.db.executeSafe({
         text: `
           INSERT INTO outreach_logs (tenant_id, lead_id, conversation_id, opportunity_id, action, channel, actor_id, metadata)
-          VALUES ($1, $2, $3, $4, 'form_greeting_draft_saved_internal', 'system', $5, $6)
+          VALUES ($1, $2, $3, $4, 'smart_greeting_draft_edited', 'system', $5, $6)
         `,
         values: [
           ctx.tenantId,
@@ -2893,6 +2941,121 @@ export async function saveFormGreetingDraftInternalAction(conversationId: string
             patient_name: conv.patient_name || ''
           })
         ]
+      });
+
+      return { success: true };
+    }
+  );
+}
+
+export async function sendFormGreetingFromInboxAction(conversationId: string, messageText: string) {
+  if (!conversationId) return { success: false, error: "Konuşma ID gerekli." };
+  if (!messageText || messageText.trim().length === 0) return { success: false, error: "Mesaj metni boş olamaz." };
+
+  return withActionGuard(
+    { actionName: 'sendFormGreetingFromInboxAction' },
+    async (ctx) => {
+      // 1. Fetch conversation details
+      const convRows = await ctx.db.executeSafe({
+        text: `SELECT c.id, c.phone_number, c.patient_name, c.active_opportunity_id,
+                      l.id as lead_id
+               FROM conversations c
+               LEFT JOIN leads l ON l.tenant_id = c.tenant_id AND (
+                 (c.customer_id IS NOT NULL AND l.customer_id = c.customer_id)
+                 OR l.phone_number = c.phone_number
+               )
+               WHERE c.id = $1 AND c.tenant_id = $2
+               ORDER BY l.created_at DESC
+               LIMIT 1`,
+        values: [conversationId, ctx.tenantId]
+      }) as any[];
+
+      if (convRows.length === 0) {
+        return { success: false, error: "Konuşma bulunamadı." };
+      }
+
+      const conv = convRows[0];
+      const phone = conv.phone_number;
+      const cleanMessage = messageText.trim();
+
+      // 2. Resolve WhatsApp credentials
+      const creds = await CredentialsService.resolveCredentials(ctx.tenantId, 'whatsapp');
+      const META_ACCESS_TOKEN = creds.accessToken;
+      const PHONE_NUMBER_ID = creds.whatsappPhoneNumberId;
+
+      if (!META_ACCESS_TOKEN || !PHONE_NUMBER_ID) {
+        return { success: false, error: "WhatsApp kimlik bilgileri eksik. Entegrasyon ayarlarını kontrol edin." };
+      }
+
+      // 3. Send via WhatsApp API using unified MessageService
+      const { MessageService } = await import("@/lib/services/message.service");
+      const { TenantDB } = await import("@/lib/core/tenant-db");
+      const tenantDb = new TenantDB(ctx.tenantId);
+      const messageService = new MessageService(tenantDb);
+
+      let providerMessageId: string | null = null;
+      try {
+        const sendRes = await messageService.sendWhatsAppMessage(
+          PHONE_NUMBER_ID,
+          META_ACCESS_TOKEN,
+          phone,
+          cleanMessage,
+          creds.provider
+        );
+        providerMessageId = sendRes.providerMessageId || null;
+      } catch (err: any) {
+        return { success: false, error: `WhatsApp gönderim hatası: ${err.message || err}` };
+      }
+
+      // 4. Save message record with direction = 'out'
+      await ctx.db.executeSafe({
+        text: `INSERT INTO messages (tenant_id, conversation_id, phone_number, direction, content, channel, status, provider_message_id)
+               VALUES ($1, $2, $3, 'out', $4, 'whatsapp', 'sent', $5)`,
+        values: [ctx.tenantId, conversationId, phone, cleanMessage, providerMessageId]
+      });
+
+      // Update conversation last_message
+      await ctx.db.executeSafe({
+        text: `UPDATE conversations 
+               SET last_message_at = NOW(), 
+                   last_message_content = $1,
+                   last_channel = 'whatsapp',
+                   last_message_status = 'sent',
+                   last_message_direction = 'out',
+                   message_count = COALESCE(message_count, 0) + 1
+               WHERE id = $2 AND tenant_id = $3`,
+        values: [cleanMessage, conversationId, ctx.tenantId]
+      });
+
+      // 5. Write outreach log with action = 'inbox_form_greeting_sent'
+      // Note: Stage and conversation status remain unchanged (delta 0)
+      await ctx.db.executeSafe({
+        text: `INSERT INTO outreach_logs (tenant_id, lead_id, conversation_id, opportunity_id, action, channel, actor_id, metadata)
+               VALUES ($1, $2, $3, $4, 'inbox_form_greeting_sent', 'whatsapp', $5, $6)`,
+        values: [
+          ctx.tenantId,
+          conv.lead_id || null,
+          conversationId,
+          conv.active_opportunity_id || null,
+          ctx.userId,
+          JSON.stringify({
+            message_text: cleanMessage,
+            provider_message_id: providerMessageId,
+            patient_name: conv.patient_name || '',
+            phone,
+          })
+        ]
+      });
+
+      // 6. Audit
+      logAudit({
+        tenantId: ctx.tenantId,
+        userId: ctx.userId,
+        userEmail: ctx.email,
+        action: 'inbox_form_greeting_sent',
+        entityType: 'conversation',
+        entityId: conversationId,
+        details: { phone, messageText: cleanMessage },
       });
 
       return { success: true };

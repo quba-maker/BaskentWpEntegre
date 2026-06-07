@@ -74,35 +74,37 @@ export async function getForms(page: number = 1, search: string = "", source: st
                  ELSE 'none'
                END as summary_link_method,
                (
-                 SELECT EXISTS (
-                   SELECT 1
-                   FROM conversations c_all
-                   JOIN messages m_all ON m_all.conversation_id = c_all.id AND m_all.tenant_id = c_all.tenant_id
-                   WHERE c_all.tenant_id = l.tenant_id
-                     AND m_all.direction = 'in'
-                     AND (m_all.media_metadata IS NULL OR COALESCE(m_all.media_metadata->'native'->>'message_type', '') != 'reaction')
-                     AND (
-                       (l.customer_id IS NOT NULL AND c_all.customer_id = l.customer_id)
-                       OR
-                       RIGHT(c_all.phone_number, 10) = RIGHT(l.phone_number, 10)
-                       OR
-                       (
-                         l.raw_data IS NOT NULL 
-                         AND l.raw_data != ''
-                         AND l.raw_data LIKE '%_all_phones%'
-                         AND (
-                           CASE
-                             WHEN jsonb_typeof(l.raw_data::jsonb->'_all_phones') = 'array' 
-                               THEN (l.raw_data::jsonb->'_all_phones') @> jsonb_build_array(c_all.phone_number)
-                             WHEN jsonb_typeof(l.raw_data::jsonb->'_all_phones') = 'string' 
-                               THEN (l.raw_data::jsonb->>'_all_phones')::jsonb @> jsonb_build_array(c_all.phone_number)
-                             ELSE false
-                           END
-                         )
+                 SELECT json_build_object(
+                   'has_inbound', count(m_all.id) > 0,
+                   'first_inbound_at', min(m_all.created_at),
+                   'last_inbound_at', max(m_all.created_at)
+                 )
+                 FROM conversations c_all
+                 JOIN messages m_all ON m_all.conversation_id = c_all.id AND m_all.tenant_id = c_all.tenant_id
+                 WHERE c_all.tenant_id = l.tenant_id
+                   AND m_all.direction = 'in'
+                   AND (m_all.media_metadata IS NULL OR COALESCE(m_all.media_metadata->'native'->>'message_type', '') != 'reaction')
+                   AND (
+                     (l.customer_id IS NOT NULL AND c_all.customer_id = l.customer_id)
+                     OR
+                     RIGHT(c_all.phone_number, 10) = RIGHT(l.phone_number, 10)
+                     OR
+                     (
+                       l.raw_data IS NOT NULL 
+                       AND l.raw_data != ''
+                       AND l.raw_data LIKE '%_all_phones%'
+                       AND (
+                         CASE
+                           WHEN jsonb_typeof(l.raw_data::jsonb->'_all_phones') = 'array' 
+                             THEN (l.raw_data::jsonb->'_all_phones') @> jsonb_build_array(c_all.phone_number)
+                           WHEN jsonb_typeof(l.raw_data::jsonb->'_all_phones') = 'string' 
+                             THEN (l.raw_data::jsonb->>'_all_phones')::jsonb @> jsonb_build_array(c_all.phone_number)
+                           ELSE false
+                         END
                        )
                      )
-                 )
-               ) as has_inbound_messages
+                   )
+               ) as inbound_stats
                FROM leads l
                -- Layer 1: Safe link via customer_id (identity-based, no ambiguity)
                LEFT JOIN conversations c_identity ON c_identity.tenant_id = l.tenant_id 
@@ -143,7 +145,16 @@ export async function getForms(page: number = 1, search: string = "", source: st
                ) opp ON COALESCE(c_identity.id, c_phone.id) IS NOT NULL
                -- Layer 5: P1 — Last outreach action for status badge
                LEFT JOIN LATERAL (
-                 SELECT ol.action as last_outreach_action, ol.created_at as last_outreach_at
+                 SELECT 
+                   ol.action as last_outreach_action, 
+                   ol.created_at as last_outreach_at,
+                   (
+                     SELECT created_at 
+                     FROM outreach_logs 
+                     WHERE lead_id = l.id AND tenant_id = l.tenant_id::text 
+                       AND action IN ('greeting_sent', 'template_sent', 'form_greeting_template_sent', 'manual_whatsapp_greeting_echo_confirmed', 'inbox_form_greeting_sent')
+                     ORDER BY created_at ASC LIMIT 1
+                   ) as first_greeting_at
                  FROM outreach_logs ol
                  WHERE ol.lead_id = l.id AND ol.tenant_id = l.tenant_id::text
                  ORDER BY ol.created_at DESC
@@ -154,42 +165,73 @@ export async function getForms(page: number = 1, search: string = "", source: st
         values: params
       });
 
-      return rows.map((r: any) => ({
-        id: r.id,
-        phone_number: r.phone_number,
-        // Raw form identity — always preserved as submitted
-        patient_name: r.patient_name || "İsimsiz Form",
-        // P1B: Current opportunity identity — for "Güncel Takip Bilgisi" display
-        current_display_name: r.opp_requester_name || r.opp_patient_name || null,
-        email: r.email,
-        city: r.city,
-        form_name: r.form_name || "Bilinmeyen Form",
-        stage: r.conv_lead_stage || r.stage || "new",
-        created_at: r.created_at,
-        raw_data: r.raw_data ? JSON.parse(r.raw_data) : {},
-        country: r.country,
-        notes: r.notes || "",
-        ai_summary: r.ai_summary || "",
-        isBotActive: r.conversation_status === 'bot',
-        summaryLinkMethod: r.summary_link_method || 'none',
-        // ═══ P1B: Live CRM data from active opportunity ═══
-        linked_conversation_id: r.linked_conv_id || null,
-        linked_opportunity_id: r.opp_id || null,
-        current_country: r.opp_country || r.conv_country || r.country || null,
-        current_department: r.opp_department || r.conv_department || null,
-        current_stage: r.opp_stage || null,
-        current_priority: r.opp_priority || null,
-        current_intent_type: r.opp_intent_type || null,
-        current_travel_date: r.opp_travel_date || null,
-        current_next_follow_up_at: r.opp_next_follow_up_at || null,
-        current_ai_summary: r.opp_summary || "",
-        patient_relation: r.opp_patient_relation || null,
-        link_confidence: r.summary_link_method || 'none',
-        // ═══ P1: Outreach status for badge rendering ═══
-        last_outreach_action: r.last_outreach_action || null,
-        last_outreach_at: r.last_outreach_at || null,
-        has_inbound_messages: !!r.has_inbound_messages,
-      }));
+      return rows.map((r: any) => {
+        let firstContactStatus = 'needs_greeting';
+        const hasInbound = r.inbound_stats?.has_inbound;
+        const lastInbound = r.inbound_stats?.last_inbound_at ? new Date(r.inbound_stats.last_inbound_at) : null;
+        const firstGreeting = r.first_greeting_at ? new Date(r.first_greeting_at) : null;
+        
+        if (hasInbound) {
+          if (firstGreeting && lastInbound && firstGreeting < lastInbound) {
+             firstContactStatus = 'patient_replied';
+          } else if (r.last_outreach_action === 'manual_whatsapp_greeting_echo_confirmed') {
+             firstContactStatus = 'manual_greeting_confirmed';
+          } else if (r.last_outreach_action === 'inbox_form_greeting_sent') {
+             firstContactStatus = 'inbox_greeting_sent';
+          } else if (firstGreeting) { 
+             firstContactStatus = 'patient_replied'; // Sent API, but they replied? Wait, if firstGreeting > lastInbound, it means we sent greeting AFTER they replied. So it's 'inbox_greeting_sent' or similar.
+             // Actually, if firstGreeting > lastInbound, we replied to them.
+             firstContactStatus = 'inbox_greeting_sent';
+          } else {
+             firstContactStatus = 'waiting_inbox_reply';
+          }
+        } else {
+          if (r.last_outreach_action === 'manual_whatsapp_greeting_echo_confirmed') {
+            firstContactStatus = 'manual_greeting_confirmed';
+          } else if (r.last_outreach_action === 'inbox_form_greeting_sent' || firstGreeting) {
+            firstContactStatus = 'inbox_greeting_sent';
+          } else if (r.last_outreach_action === 'whatsapp_app_opened_for_greeting') {
+            firstContactStatus = 'whatsapp_opened';
+          } else {
+            firstContactStatus = 'needs_greeting';
+          }
+        }
+
+        return {
+          id: r.id,
+          phone_number: r.phone_number,
+          patient_name: r.patient_name || "İsimsiz Form",
+          current_display_name: r.opp_requester_name || r.opp_patient_name || null,
+          email: r.email,
+          city: r.city,
+          form_name: r.form_name || "Bilinmeyen Form",
+          stage: r.conv_lead_stage || r.stage || "new",
+          created_at: r.created_at,
+          raw_data: r.raw_data ? JSON.parse(r.raw_data) : {},
+          country: r.country,
+          notes: r.notes || "",
+          ai_summary: r.ai_summary || "",
+          isBotActive: r.conversation_status === 'bot',
+          summaryLinkMethod: r.summary_link_method || 'none',
+          linked_conversation_id: r.linked_conv_id || null,
+          linked_opportunity_id: r.opp_id || null,
+          current_country: r.opp_country || r.conv_country || r.country || null,
+          current_department: r.opp_department || r.conv_department || null,
+          current_stage: r.opp_stage || null,
+          current_priority: r.opp_priority || null,
+          current_intent_type: r.opp_intent_type || null,
+          current_travel_date: r.opp_travel_date || null,
+          current_next_follow_up_at: r.opp_next_follow_up_at || null,
+          current_ai_summary: r.opp_summary || "",
+          patient_relation: r.opp_patient_relation || null,
+          link_confidence: r.summary_link_method || 'none',
+          last_outreach_action: r.last_outreach_action || null,
+          last_outreach_at: r.last_outreach_at || null,
+          first_greeting_at: r.first_greeting_at || null,
+          inbound_stats: r.inbound_stats || { has_inbound: false },
+          firstContactStatus,
+        };
+      });
     }
   ).then(res => res.data || []);
 }
