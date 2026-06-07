@@ -1685,7 +1685,7 @@ export async function prepareSmartGreetingDraftAction(leadId: string) {
 
       let draftText = res.data?.draftText || '';
       if (leads.length > 0) {
-        draftText = generateSmartDraft(leads[0].raw_data, leads[0].form_name);
+        draftText = await generateSmartDraft(leads[0].raw_data, leads[0].form_name);
       } else {
         draftText = "Merhaba, Başkent Üniversitesi Konya Hastanesi’nden, doldurduğunuz form doğrultusunda sizinle iletişime geçiyoruz.";
       }
@@ -1711,10 +1711,7 @@ export async function prepareSmartGreetingDraftAction(leadId: string) {
 // ═══════════════════════════════════════════════════════════
 export async function prepareBulkSmartGreetingDraftsAction(leadIds: string[]) {
   try {
-    // Only wrap the DB query in ActionGuard to get DB context securely.
-    // checkGreetingReadiness already handles its own Guard internally.
     return await withActionGuard({ actionName: 'prepareBulkSmartGreetingDraftsAction' }, async (ctx) => {
-      const results = [];
       const safeIds = leadIds.slice(0, 10);
       
       const leadsRes = await ctx.db.executeSafe({
@@ -1724,17 +1721,16 @@ export async function prepareBulkSmartGreetingDraftsAction(leadIds: string[]) {
 
       const leadsMap = new Map(leadsRes.map((l: any) => [l.id, l]));
 
-      for (const id of safeIds) {
+      const draftPromises = safeIds.map(async (id) => {
         const res = await checkGreetingReadiness(id);
         if (!res.success) {
-          results.push({
+          return {
             id,
             draftText: "",
             isEligible: false,
             status: 'Hata',
             reason: res.error || "Bilinmeyen hata"
-          });
-          continue;
+          };
         }
         
         const data = res.data!;
@@ -1755,23 +1751,24 @@ export async function prepareBulkSmartGreetingDraftsAction(leadIds: string[]) {
         const leadRow = leadsMap.get(id);
         let draftText = data.draftText;
         if (leadRow) {
-          draftText = generateSmartDraft(leadRow.raw_data, leadRow.form_name);
+          draftText = await generateSmartDraft(leadRow.raw_data, leadRow.form_name);
         }
 
-        results.push({
+        return {
           id,
           draftText,
           isEligible,
           status,
           reason,
           source: 'smart_form_draft',
-          // Legacy fields
           hardBlockedBecausePatientAlreadyInbound: data.hardBlockedBecausePatientAlreadyInbound,
           hasHardDuplicate: data.hasHardDuplicate,
           hasSoftDuplicate: data.hasSoftDuplicate,
           greetingSent: data.greetingSent
-        });
-      }
+        };
+      });
+
+      const results = await Promise.all(draftPromises);
       return { queueItems: results };
     }).then(res => {
       if (!res.success) return { success: false, error: res.error || "Kuyruk hazırlanamadı." };
