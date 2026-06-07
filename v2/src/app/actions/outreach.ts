@@ -1708,9 +1708,8 @@ export async function prepareSmartGreetingDraftCore(
     ...readinessData
   };
 
-  // Get the existing logs to check for existing draft
   const logsRes = await db.executeSafe({
-    text: `SELECT action, created_at, metadata->>'draft' as draft, metadata->>'draftText' as draft_text, metadata->>'message_text' as message_text
+    text: `SELECT action, created_at, metadata
            FROM outreach_logs
            WHERE lead_id = $1::uuid AND tenant_id = $2::text
            ORDER BY created_at DESC`,
