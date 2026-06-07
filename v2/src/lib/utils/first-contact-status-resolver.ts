@@ -42,10 +42,38 @@ export interface InboundMessageMinimal {
   phone?: string; // which phone sent it
 }
 
+export const FIRST_CONTACT_HARD_DUPLICATE_ACTIONS = [
+  'manual_whatsapp_greeting_echo_confirmed',
+  'inbox_form_greeting_sent',
+  'greeting_sent',
+  'template_sent',
+  'form_greeting_template_sent'
+];
+
+export const FIRST_CONTACT_GREETING_ACTIONS = FIRST_CONTACT_HARD_DUPLICATE_ACTIONS;
+
+export const FIRST_CONTACT_SOFT_DRAFT_ACTIONS = [
+  'form_greeting_draft_saved_internal',
+  'smart_greeting_draft_edited',
+  'smart_greeting_draft_prepared'
+];
+
+export const FIRST_CONTACT_STATUS_LABELS: Record<FirstContactStatus, string> = {
+  needs_greeting: 'Karşılama Bekliyor',
+  waiting_inbox_reply: 'Panelden Cevap Bekliyor',
+  whatsapp_opened: 'WhatsApp\'ta Açıldı',
+  manual_greeting_confirmed: 'Manuel WhatsApp Doğrulandı',
+  inbox_greeting_sent: 'Cevap Gönderildi',
+  patient_replied: 'Cevap Geldi',
+  blocked_or_invalid: 'Sorunlu',
+  out_of_scope: 'Kapsam Dışı'
+};
+
 export function resolveFirstContactStatus(
   leadPhones: { phone: string; label: ContactPhoneStatus['label']; isPrimary: boolean }[],
   outreachLogs: OutreachLogMinimal[],
-  inboundMessages: InboundMessageMinimal[]
+  inboundMessages: InboundMessageMinimal[],
+  options?: { stage?: string }
 ): FirstContactResolution {
   
   const phones: ContactPhoneStatus[] = leadPhones.map(lp => ({
@@ -117,13 +145,7 @@ export function resolveFirstContactStatus(
 
   // Calculate chronological patientLevelStatus
   const greetingLogs = outreachLogs.filter(log => 
-    [
-      'manual_whatsapp_greeting_echo_confirmed', 
-      'inbox_form_greeting_sent', 
-      'greeting_sent', 
-      'template_sent', 
-      'form_greeting_template_sent'
-    ].includes(log.action)
+    FIRST_CONTACT_GREETING_ACTIONS.includes(log.action)
   );
 
   const firstGreetingLog = greetingLogs.length > 0 ? greetingLogs[greetingLogs.length - 1] : null; // assuming logs are sorted DESC
@@ -164,8 +186,10 @@ export function resolveFirstContactStatus(
     } else if (anyOpened) {
       patientLevelStatus = 'whatsapp_opened';
     } else {
-      if (phones.length === 0 || phones.every(p => !p.phone)) {
+      if (phones.length === 0 || phones.every(p => !p.phone || !p.phone.trim())) {
         patientLevelStatus = 'blocked_or_invalid';
+      } else if (options?.stage && !['new', 'contacted'].includes(options.stage)) {
+        patientLevelStatus = 'out_of_scope';
       } else {
         patientLevelStatus = 'needs_greeting';
       }
@@ -205,6 +229,7 @@ export function resolveFirstContactStatus(
     case 'inbox_greeting_sent': primaryAction = 'Mesaja Git'; break;
     case 'patient_replied': primaryAction = 'Inbox\'a Git'; break;
     case 'blocked_or_invalid': primaryAction = 'Detay'; break;
+    case 'out_of_scope': primaryAction = 'Detay'; break;
   }
 
   return {
@@ -226,7 +251,7 @@ export async function resolveFirstContactCore(
 ): Promise<FirstContactResolution> {
   // 1. Fetch Lead
   const leadRes = await db.executeSafe({
-    text: `SELECT phone_number, raw_data, customer_id FROM leads WHERE id = $1::uuid AND tenant_id = $2::uuid LIMIT 1`,
+    text: `SELECT phone_number, raw_data, customer_id, stage FROM leads WHERE id = $1::uuid AND tenant_id = $2::uuid LIMIT 1`,
     values: [leadId, tenantId]
   }) as any[];
   
@@ -258,7 +283,7 @@ export async function resolveFirstContactCore(
              FROM conversations c
              WHERE c.tenant_id = $1::uuid
                AND (
-                 (c.customer_id IS NOT NULL AND c.customer_id = $2::text)
+                 (c.customer_id IS NOT NULL AND c.customer_id = $2::uuid)
                  OR RIGHT(c.phone_number, 10) = RIGHT($3, 10)
                )`,
       values: [tenantId, lead.customer_id || null, lead.phone_number]
@@ -304,6 +329,6 @@ export async function resolveFirstContactCore(
     }) as any[];
   }
 
-  return resolveFirstContactStatus(phoneList, logsRes, inboundMessages);
+  return resolveFirstContactStatus(phoneList, logsRes, inboundMessages, { stage: lead.stage });
 }
 

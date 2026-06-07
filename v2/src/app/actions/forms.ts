@@ -3,12 +3,13 @@
 // sql import removed — all queries use parameterized {text, values} format for proper RLS enforcement
 import { withActionGuard } from "@/lib/core/action-guard";
 import { logAudit } from "@/lib/audit";
+import { FIRST_CONTACT_HARD_DUPLICATE_ACTIONS } from "@/lib/utils/first-contact-status-resolver";
 
 // ==========================================
 // QUBA AI — Forms & Leads Actions (Zero-Trust)
 // ==========================================
 
-export async function getForms(page: number = 1, search: string = "", source: string = "all", stageFilter: string = "all") {
+export async function getForms(page: number = 1, search: string = "", source: string = "all", firstContactFilter: string = "all", stageFilter: string = "all") {
   return withActionGuard(
     { actionName: 'getForms' },
     async (ctx) => {
@@ -17,186 +18,213 @@ export async function getForms(page: number = 1, search: string = "", source: st
       const searchFilter = search.trim() ? `%${search.trim()}%` : null;
       const sourceFilter = source !== "all" ? `%${source}%` : null;
       const stageParam = stageFilter !== "all" ? stageFilter : null;
+      const firstContactParam = firstContactFilter !== "all" ? firstContactFilter : null;
 
-      // Dynamic WHERE builder
-      const conditions: string[] = [`l.tenant_id = $1`];
+      // Dynamic WHERE builder matching the cl columns
+      const conditions: string[] = [`cl.tenant_id = $1`];
       const params: any[] = [ctx.tenantId];
       let paramIdx = 2;
 
       if (searchFilter) {
-        conditions.push(`(l.patient_name ILIKE $${paramIdx} OR l.phone_number ILIKE $${paramIdx} OR l.email ILIKE $${paramIdx} OR (l.raw_data IS NOT NULL AND l.raw_data LIKE $${paramIdx}))`);
+        conditions.push(`(cl.patient_name ILIKE $${paramIdx} OR cl.phone_number ILIKE $${paramIdx} OR cl.email ILIKE $${paramIdx} OR (cl.raw_data IS NOT NULL AND cl.raw_data LIKE $${paramIdx}))`);
         params.push(searchFilter);
         paramIdx++;
       }
       if (sourceFilter) {
-        conditions.push(`l.form_name ILIKE $${paramIdx}`);
+        conditions.push(`cl.form_name ILIKE $${paramIdx}`);
         params.push(sourceFilter);
         paramIdx++;
       }
       if (stageParam) {
-        conditions.push(`l.stage = $${paramIdx}`);
+        conditions.push(`cl.stage = $${paramIdx}`);
         params.push(stageParam);
         paramIdx++;
+      }
+      if (firstContactParam) {
+        if (firstContactParam === 'sent') {
+          conditions.push(`cl.first_contact_status IN ('manual_greeting_confirmed', 'inbox_greeting_sent')`);
+        } else {
+          conditions.push(`cl.first_contact_status = $${paramIdx}`);
+          params.push(firstContactParam);
+          paramIdx++;
+        }
       }
 
       params.push(limit, offset);
       const limitIdx = paramIdx;
       const offsetIdx = paramIdx + 1;
 
-      // Safe AI summary + CRM linking strategy:
-      // Layer 1: customer_id link (identity match)
-      // Layer 2: phone match ONLY if exactly ONE conversation exists (no ambiguity)
-      // Layer 3: no match → null summary (safe empty state)
-      // Layer 4: LATERAL opportunity (most recent, no row duplication)
-      // Layer 5: LATERAL outreach (last outreach action for status badge)
+      const hardDuplicateActionsSql = FIRST_CONTACT_HARD_DUPLICATE_ACTIONS.map(a => `'${a}'`).join(', ');
+
       const rows = await ctx.db.executeSafe({
-        text: `SELECT l.*, 
-               COALESCE(c_identity.status, c_phone.status) as conversation_status, 
-               COALESCE(c_identity.lead_stage, c_phone.lead_stage) as conv_lead_stage, 
-               COALESCE(mem_identity.summary_text, mem_phone.summary_text) as ai_summary,
-               COALESCE(c_identity.id, c_phone.id) as linked_conv_id,
-               COALESCE(c_identity.country, c_phone.conv_country) as conv_country,
-               COALESCE(c_identity.department, c_phone.conv_department) as conv_department,
-               opp.opp_id,
-               opp.opp_country,
-               opp.opp_department,
-               opp.opp_stage,
-               opp.opp_priority,
-               opp.opp_intent_type,
-               opp.opp_travel_date,
-               opp.opp_next_follow_up_at,
-               opp.opp_summary,
-               last_outreach.last_outreach_action,
-               last_outreach.last_outreach_at,
-               CASE 
-                 WHEN c_identity.id IS NOT NULL THEN 'customer_id'
-                 WHEN c_phone.id IS NOT NULL THEN 'phone_unique'
-                 ELSE 'none'
-               END as summary_link_method,
-               (
-                 SELECT json_build_object(
-                   'has_inbound', count(m_all.id) > 0,
-                   'first_inbound_at', min(m_all.created_at),
-                   'last_inbound_at', max(m_all.created_at)
-                 )
-                 FROM conversations c_all
-                 JOIN messages m_all ON m_all.conversation_id = c_all.id AND m_all.tenant_id = c_all.tenant_id
-                 WHERE c_all.tenant_id = l.tenant_id
-                   AND m_all.direction = 'in'
-                   AND (m_all.media_metadata IS NULL OR COALESCE(m_all.media_metadata->'native'->>'message_type', '') != 'reaction')
-                   AND (
-                     (l.customer_id IS NOT NULL AND c_all.customer_id = l.customer_id)
-                     OR
-                     RIGHT(c_all.phone_number, 10) = RIGHT(l.phone_number, 10)
-                     OR
-                     (
-                       l.raw_data IS NOT NULL 
-                       AND l.raw_data != ''
-                       AND l.raw_data LIKE '%_all_phones%'
-                       AND (
+        text: `WITH base_leads AS (
+                  SELECT l.*, 
+                         COALESCE(c_identity.status, c_phone.status) as conversation_status, 
+                         COALESCE(c_identity.lead_stage, c_phone.lead_stage) as conv_lead_stage, 
+                         COALESCE(mem_identity.summary_text, mem_phone.summary_text) as ai_summary,
+                         COALESCE(c_identity.id, c_phone.id) as linked_conv_id,
+                         COALESCE(c_identity.country, c_phone.conv_country) as conv_country,
+                         COALESCE(c_identity.department, c_phone.conv_department) as conv_department,
+                         opp.opp_id,
+                         opp.opp_country,
+                         opp.opp_department,
+                         opp.opp_stage,
+                         opp.opp_priority,
+                         opp.opp_intent_type,
+                         opp.opp_travel_date,
+                         opp.opp_next_follow_up_at,
+                         opp.opp_summary,
+                         opp.opp_requester_name,
+                         opp.opp_patient_name,
+                         opp.opp_patient_relation,
+                         (SELECT action FROM outreach_logs WHERE lead_id = l.id AND tenant_id = l.tenant_id::text ORDER BY created_at DESC LIMIT 1) as last_outreach_action,
+                         (SELECT created_at FROM outreach_logs WHERE lead_id = l.id AND tenant_id = l.tenant_id::text ORDER BY created_at DESC LIMIT 1) as last_outreach_at,
+                         (
+                           SELECT created_at 
+                           FROM outreach_logs 
+                           WHERE lead_id = l.id AND tenant_id = l.tenant_id::text 
+                             AND action IN (${hardDuplicateActionsSql})
+                           ORDER BY created_at ASC LIMIT 1
+                         ) as first_greeting_at,
+                         EXISTS (
+                           SELECT 1 FROM outreach_logs 
+                           WHERE lead_id = l.id AND tenant_id = l.tenant_id::text 
+                             AND action = 'manual_whatsapp_greeting_echo_confirmed'
+                         ) as any_confirmed,
+                         EXISTS (
+                           SELECT 1 FROM outreach_logs 
+                           WHERE lead_id = l.id AND tenant_id = l.tenant_id::text 
+                             AND action = 'inbox_form_greeting_sent'
+                         ) as any_inbox_sent,
+                         EXISTS (
+                           SELECT 1 FROM outreach_logs 
+                           WHERE lead_id = l.id AND tenant_id = l.tenant_id::text 
+                             AND action IN ('greeting_sent', 'template_sent', 'form_greeting_template_sent')
+                         ) as any_api_sent,
+                         EXISTS (
+                           SELECT 1 FROM outreach_logs 
+                           WHERE lead_id = l.id AND tenant_id = l.tenant_id::text 
+                             AND action = 'whatsapp_app_opened_for_greeting'
+                         ) as any_opened,
+                         CASE 
+                           WHEN c_identity.id IS NOT NULL THEN 'customer_id'
+                           WHEN c_phone.id IS NOT NULL THEN 'phone_unique'
+                           ELSE 'none'
+                         END as summary_link_method,
+                         (
+                           SELECT json_build_object(
+                             'has_inbound', count(m_all.id) > 0,
+                             'first_inbound_at', min(m_all.created_at),
+                             'last_inbound_at', max(m_all.created_at)
+                           )
+                           FROM conversations c_all
+                           JOIN messages m_all ON m_all.conversation_id = c_all.id AND m_all.tenant_id = c_all.tenant_id
+                           WHERE c_all.tenant_id = l.tenant_id
+                             AND m_all.direction = 'in'
+                             AND (m_all.media_metadata IS NULL OR COALESCE(m_all.media_metadata->'native'->>'message_type', '') != 'reaction')
+                             AND (
+                               (l.customer_id IS NOT NULL AND c_all.customer_id = l.customer_id)
+                               OR
+                               RIGHT(c_all.phone_number, 10) = RIGHT(l.phone_number, 10)
+                               OR
+                               (
+                                 l.raw_data IS NOT NULL 
+                                 AND l.raw_data != ''
+                                 AND l.raw_data LIKE '%_all_phones%'
+                                 AND (
+                                   CASE
+                                     WHEN jsonb_typeof(l.raw_data::jsonb->'_all_phones') = 'array' 
+                                       THEN (l.raw_data::jsonb->'_all_phones') @> jsonb_build_array(c_all.phone_number)
+                                     WHEN jsonb_typeof(l.raw_data::jsonb->'_all_phones') = 'string' 
+                                       THEN (l.raw_data::jsonb->>'_all_phones')::jsonb @> jsonb_build_array(c_all.phone_number)
+                                     ELSE false
+                                   END
+                                 )
+                               )
+                             )
+                         ) as inbound_stats
+                  FROM leads l
+                  -- Layer 1: Safe link via customer_id (identity-based, no ambiguity)
+                  LEFT JOIN conversations c_identity ON c_identity.tenant_id = l.tenant_id 
+                    AND l.customer_id IS NOT NULL 
+                    AND c_identity.customer_id = l.customer_id
+                  LEFT JOIN conversation_memory mem_identity ON mem_identity.conversation_id = c_identity.id
+                  -- Layer 2: Phone match only if EXACTLY ONE conversation matches (prevents cross-leak)
+                  LEFT JOIN LATERAL (
+                    SELECT c2.id, c2.status, c2.lead_stage, c2.country as conv_country, c2.department as conv_department
+                    FROM conversations c2 
+                    WHERE c2.tenant_id = l.tenant_id 
+                      AND RIGHT(c2.phone_number, 10) = RIGHT(l.phone_number, 10)
+                      AND l.customer_id IS NULL  -- Only use phone fallback when customer_id link unavailable
+                      AND (SELECT COUNT(*) FROM conversations cx 
+                           WHERE cx.tenant_id = l.tenant_id 
+                           AND RIGHT(cx.phone_number, 10) = RIGHT(l.phone_number, 10)) = 1
+                    LIMIT 1
+                  ) c_phone ON c_identity.id IS NULL
+                  LEFT JOIN conversation_memory mem_phone ON mem_phone.conversation_id = c_phone.id AND c_identity.id IS NULL
+                  -- Layer 4: Active opportunity preferred
+                  LEFT JOIN LATERAL (
+                    SELECT o.id as opp_id, 
+                           o.country as opp_country, o.department as opp_department,
+                           o.stage as opp_stage, o.priority as opp_priority,
+                           o.intent_type as opp_intent_type, o.travel_date as opp_travel_date,
+                           o.next_follow_up_at as opp_next_follow_up_at,
+                           o.summary as opp_summary,
+                           o.requester_name as opp_requester_name,
+                           o.patient_name as opp_patient_name,
+                           o.patient_relation as opp_patient_relation
+                    FROM opportunities o
+                    WHERE o.tenant_id = l.tenant_id
+                      AND o.conversation_id = COALESCE(c_identity.id, c_phone.id)
+                    ORDER BY 
+                      CASE WHEN o.id = COALESCE(c_identity.active_opportunity_id, (SELECT active_opportunity_id FROM conversations WHERE id = c_phone.id AND tenant_id = l.tenant_id)) THEN 0 ELSE 1 END,
+                      o.updated_at DESC
+                    LIMIT 1
+                  ) opp ON COALESCE(c_identity.id, c_phone.id) IS NOT NULL
+                ),
+                calculated_leads AS (
+                  SELECT bl.*,
                          CASE
-                           WHEN jsonb_typeof(l.raw_data::jsonb->'_all_phones') = 'array' 
-                             THEN (l.raw_data::jsonb->'_all_phones') @> jsonb_build_array(c_all.phone_number)
-                           WHEN jsonb_typeof(l.raw_data::jsonb->'_all_phones') = 'string' 
-                             THEN (l.raw_data::jsonb->>'_all_phones')::jsonb @> jsonb_build_array(c_all.phone_number)
-                           ELSE false
-                         END
-                       )
-                     )
-                   )
-               ) as inbound_stats
-               FROM leads l
-               -- Layer 1: Safe link via customer_id (identity-based, no ambiguity)
-               LEFT JOIN conversations c_identity ON c_identity.tenant_id = l.tenant_id 
-                 AND l.customer_id IS NOT NULL 
-                 AND c_identity.customer_id = l.customer_id
-               LEFT JOIN conversation_memory mem_identity ON mem_identity.conversation_id = c_identity.id
-               -- Layer 2: Phone match only if EXACTLY ONE conversation matches (prevents cross-leak)
-               LEFT JOIN LATERAL (
-                 SELECT c2.id, c2.status, c2.lead_stage, c2.country as conv_country, c2.department as conv_department
-                 FROM conversations c2 
-                 WHERE c2.tenant_id = l.tenant_id 
-                   AND RIGHT(c2.phone_number, 10) = RIGHT(l.phone_number, 10)
-                   AND l.customer_id IS NULL  -- Only use phone fallback when customer_id link unavailable
-                   AND (SELECT COUNT(*) FROM conversations cx 
-                        WHERE cx.tenant_id = l.tenant_id 
-                        AND RIGHT(cx.phone_number, 10) = RIGHT(l.phone_number, 10)) = 1
-                 LIMIT 1
-               ) c_phone ON c_identity.id IS NULL
-               LEFT JOIN conversation_memory mem_phone ON mem_phone.conversation_id = c_phone.id AND c_identity.id IS NULL
-               -- Layer 4: P1B — Active opportunity preferred, fallback to most recent
-               LEFT JOIN LATERAL (
-                 SELECT o.id as opp_id, 
-                        o.country as opp_country, o.department as opp_department,
-                        o.stage as opp_stage, o.priority as opp_priority,
-                        o.intent_type as opp_intent_type, o.travel_date as opp_travel_date,
-                        o.next_follow_up_at as opp_next_follow_up_at,
-                        o.summary as opp_summary,
-                        o.requester_name as opp_requester_name,
-                        o.patient_name as opp_patient_name,
-                        o.patient_relation as opp_patient_relation
-                 FROM opportunities o
-                 WHERE o.tenant_id = l.tenant_id
-                   AND o.conversation_id = COALESCE(c_identity.id, c_phone.id)
-                 ORDER BY 
-                   CASE WHEN o.id = COALESCE(c_identity.active_opportunity_id, (SELECT active_opportunity_id FROM conversations WHERE id = c_phone.id AND tenant_id = l.tenant_id)) THEN 0 ELSE 1 END,
-                   o.updated_at DESC
-                 LIMIT 1
-               ) opp ON COALESCE(c_identity.id, c_phone.id) IS NOT NULL
-               -- Layer 5: P1 — Last outreach action for status badge
-               LEFT JOIN LATERAL (
-                 SELECT 
-                   ol.action as last_outreach_action, 
-                   ol.created_at as last_outreach_at,
-                   (
-                     SELECT created_at 
-                     FROM outreach_logs 
-                     WHERE lead_id = l.id AND tenant_id = l.tenant_id::text 
-                       AND action IN ('greeting_sent', 'template_sent', 'form_greeting_template_sent', 'manual_whatsapp_greeting_echo_confirmed', 'inbox_form_greeting_sent')
-                     ORDER BY created_at ASC LIMIT 1
-                   ) as first_greeting_at
-                 FROM outreach_logs ol
-                 WHERE ol.lead_id = l.id AND ol.tenant_id = l.tenant_id::text
-                 ORDER BY ol.created_at DESC
-                 LIMIT 1
-               ) last_outreach ON true
-               WHERE ${conditions.join(' AND ')}
-               ORDER BY l.created_at DESC LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+                           -- 1. anyInbound is true
+                           WHEN (bl.inbound_stats->>'has_inbound')::boolean = true THEN
+                             CASE
+                               -- We greeted them
+                               WHEN bl.first_greeting_at IS NOT NULL THEN
+                                 CASE
+                                   -- If patient replied after we greeted them
+                                   WHEN (bl.inbound_stats->>'last_inbound_at') IS NOT NULL AND bl.first_greeting_at < (bl.inbound_stats->>'last_inbound_at')::timestamp THEN 'patient_replied'
+                                   WHEN bl.any_inbox_sent = true THEN 'inbox_greeting_sent'
+                                   WHEN bl.any_confirmed = true THEN 'manual_greeting_confirmed'
+                                   WHEN bl.any_api_sent = true THEN 'inbox_greeting_sent'
+                                   ELSE 'inbox_greeting_sent'
+                                 END
+                               ELSE 'waiting_inbox_reply'
+                             END
+                           -- 2. no inbound message
+                           ELSE
+                             CASE
+                               WHEN bl.any_confirmed = true THEN 'manual_greeting_confirmed'
+                               WHEN bl.any_inbox_sent = true THEN 'inbox_greeting_sent'
+                               WHEN bl.any_api_sent = true THEN 'inbox_greeting_sent'
+                               WHEN bl.any_opened = true THEN 'whatsapp_opened'
+                               ELSE
+                                 CASE
+                                   WHEN bl.phone_number IS NULL OR bl.phone_number = '' THEN 'blocked_or_invalid'
+                                   WHEN bl.stage NOT IN ('new', 'contacted') THEN 'out_of_scope'
+                                   ELSE 'needs_greeting'
+                                 END
+                             END
+                         END as first_contact_status
+                  FROM base_leads bl
+                )
+                SELECT cl.* 
+                FROM calculated_leads cl
+                WHERE ${conditions.join(' AND ')}
+                ORDER BY cl.created_at DESC LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
         values: params
       });
 
       return rows.map((r: any) => {
-        let firstContactStatus = 'needs_greeting';
-        const hasInbound = r.inbound_stats?.has_inbound;
-        const lastInbound = r.inbound_stats?.last_inbound_at ? new Date(r.inbound_stats.last_inbound_at) : null;
-        const firstGreeting = r.first_greeting_at ? new Date(r.first_greeting_at) : null;
-        
-        if (hasInbound) {
-          if (firstGreeting && lastInbound && firstGreeting < lastInbound) {
-             firstContactStatus = 'patient_replied';
-          } else if (r.last_outreach_action === 'manual_whatsapp_greeting_echo_confirmed') {
-             firstContactStatus = 'manual_greeting_confirmed';
-          } else if (r.last_outreach_action === 'inbox_form_greeting_sent') {
-             firstContactStatus = 'inbox_greeting_sent';
-          } else if (firstGreeting) { 
-             firstContactStatus = 'patient_replied'; // Sent API, but they replied? Wait, if firstGreeting > lastInbound, it means we sent greeting AFTER they replied. So it's 'inbox_greeting_sent' or similar.
-             // Actually, if firstGreeting > lastInbound, we replied to them.
-             firstContactStatus = 'inbox_greeting_sent';
-          } else {
-             firstContactStatus = 'waiting_inbox_reply';
-          }
-        } else {
-          if (r.last_outreach_action === 'manual_whatsapp_greeting_echo_confirmed') {
-            firstContactStatus = 'manual_greeting_confirmed';
-          } else if (r.last_outreach_action === 'inbox_form_greeting_sent' || firstGreeting) {
-            firstContactStatus = 'inbox_greeting_sent';
-          } else if (r.last_outreach_action === 'whatsapp_app_opened_for_greeting') {
-            firstContactStatus = 'whatsapp_opened';
-          } else {
-            firstContactStatus = 'needs_greeting';
-          }
-        }
-
         return {
           id: r.id,
           phone_number: r.phone_number,
@@ -229,7 +257,7 @@ export async function getForms(page: number = 1, search: string = "", source: st
           last_outreach_at: r.last_outreach_at || null,
           first_greeting_at: r.first_greeting_at || null,
           inbound_stats: r.inbound_stats || { has_inbound: false },
-          firstContactStatus,
+          firstContactStatus: r.first_contact_status,
         };
       });
     }

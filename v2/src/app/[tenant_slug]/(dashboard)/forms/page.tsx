@@ -14,10 +14,19 @@ import { resolveCountry, deduplicatePhones, getCountryInfoByName } from "@/lib/u
 
 // ═══ P1: Outreach status badge config ═══
 const OUTREACH_BADGE_CONFIG: Record<string, { label: string; color: string; icon: string }> = {
+  // First Contact status badges:
+  'needs_greeting': { label: 'Karşılama Bekliyor', color: '#FF9500', icon: '👋' },
+  'waiting_inbox_reply': { label: 'Panelden Cevap Bekliyor', color: '#5856D6', icon: '💬' },
+  'whatsapp_opened': { label: 'WhatsApp’ta Açıldı', color: '#007AFF', icon: '📲' },
+  'manual_greeting_confirmed': { label: 'Manuel Gönderildi', color: '#34C759', icon: '✅' },
+  'inbox_greeting_sent': { label: 'Panelden Gönderildi', color: '#34C759', icon: '✅' },
+  'patient_replied': { label: 'Cevap Geldi', color: '#10B981', icon: '↩️' },
+  'blocked_or_invalid': { label: 'Sorunlu', color: '#FF3B30', icon: '⚠️' },
+  'out_of_scope': { label: 'Kapsam Dışı', color: '#8E8E93', icon: '⛔' },
+
+  // outreach timeline action fallbacks
   'greeting_sent': { label: 'Mesaj Gönderildi', color: '#25D366', icon: '💬' },
   'form_greeting_template_sent': { label: 'Şablon Gönderildi', color: '#25D366', icon: '💬' },
-  'manual_whatsapp_greeting_echo_confirmed': { label: 'Manuel Karşılama Gönderildi', color: '#0F9D58', icon: '✅' },
-  'whatsapp_app_opened_for_greeting': { label: 'WhatsApp’ta Açıldı', color: '#007AFF', icon: '📲' },
   'bot_activated': { label: 'Bot Aktif', color: '#007AFF', icon: '🤖' },
   'called_reached': { label: 'Arandı / Ulaşıldı', color: '#0F9D58', icon: '📞' },
   'called_missed': { label: 'Arandı / Ulaşılamadı', color: '#FF9500', icon: '📵' },
@@ -29,6 +38,19 @@ const OUTREACH_BADGE_CONFIG: Record<string, { label: string; color: string; icon
   'form_greeting_draft_saved_internal': { label: 'Taslak İç Not Kaydedildi', color: '#8E8E93', icon: '📝' },
   'smart_greeting_draft_edited': { label: 'Taslak Düzenlendi / Kaydedildi', color: '#8E8E93', icon: '📝' },
   'smart_greeting_draft_prepared': { label: 'Taslak Hazırlandı', color: '#8E8E93', icon: '📝' },
+};
+
+const getCheckboxTooltip = (status: string) => {
+  switch (status) {
+    case 'waiting_inbox_reply': return "Hasta mesaj attı, Inbox’tan cevaplanmalı.";
+    case 'whatsapp_opened': return "WhatsApp’ta açıldı, tekil detaydan tekrar açılabilir.";
+    case 'manual_greeting_confirmed':
+    case 'inbox_greeting_sent': return "Karşılama yapılmış.";
+    case 'patient_replied': return "Hasta cevap verdi, Inbox’tan devam edin.";
+    case 'blocked_or_invalid': return "Telefon/veri kontrolü gerekli.";
+    case 'out_of_scope': return "İlk temas kapsamı dışında.";
+    default: return "";
+  }
 };
 
 const formatDate = (dateString: string) => {
@@ -189,7 +211,9 @@ export default function FormsPage() {
   const [searchInput, setSearchInput] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [sourceFilter, setSourceFilter] = useState("all");
-  const [stageFilter, setStageFilter] = useState("all");
+  const [firstContactFilter, setFirstContactFilter] = useState("all");
+  const [leadStageFilter, setLeadStageFilter] = useState("all");
+  const [selectedPhone, setSelectedPhone] = useState("");
   const [campaigns, setCampaigns] = useState<string[]>([]);
   
   const [selectedForm, setSelectedForm] = useState<any>(null);
@@ -245,7 +269,7 @@ export default function FormsPage() {
 
   useEffect(() => {
     setSelectedLeadIds([]);
-  }, [debouncedSearch, sourceFilter, stageFilter]);
+  }, [debouncedSearch, sourceFilter, firstContactFilter, leadStageFilter]);
 
 
   // DIAGNOSTIC LOG FOR RENDER STATE
@@ -282,12 +306,12 @@ export default function FormsPage() {
 
   const getKey = (pageIndex: number, previousPageData: any) => {
     if (previousPageData && previousPageData.length < 50) return null;
-    return ["forms", pageIndex + 1, debouncedSearch, sourceFilter, stageFilter];
+    return ["forms", pageIndex + 1, debouncedSearch, sourceFilter, firstContactFilter, leadStageFilter];
   };
 
   const { data, size, setSize, isLoading, mutate } = useSWRInfinite(
     getKey, 
-    ([_, page, search, source, stage]: any) => getForms(page, search, source, stage), 
+    ([_, page, search, source, fContact, lStage]: any) => getForms(page, search, source, fContact, lStage), 
     { 
       refreshInterval: 90000,
       refreshWhenHidden: false,
@@ -364,9 +388,11 @@ export default function FormsPage() {
 
   useEffect(() => {
     if (selectedForm?.id) {
+      setReadinessLoading(true);
+      setOutreachTimeline([]);
+      setGreetingSent(false);
       setOutreachError(null);
       setOutreachSuccess(null);
-      setGreetingSent(false);
       setDraftMessage(null);
       setIsDraftOpen(false);
       setCallActionNote('');
@@ -375,14 +401,16 @@ export default function FormsPage() {
       setSelectedTemplateId(null);
       setTechOpen(false);
       setReadiness(null);
+      
+      const phones = getAllPhones(selectedForm);
+      setSelectedPhone(phones[0] || selectedForm.phone_number || "");
+
       loadOutreachTimeline(selectedForm.id);
-      // Load templates for selector
       getGreetingTemplates().then((t: any[]) => setTemplates(t)).catch(() => setTemplates([]));
       
       resolveFirstContactAction(selectedForm.id)
         .then((res: any) => {
           if (res && res.success && res.resolution) {
-            console.log('[OUTREACH_CARD_STATE] resolveFirstContactAction res:', res.resolution);
             setReadiness(res.resolution);
             
             // Derive greetingSent from phones
@@ -391,6 +419,10 @@ export default function FormsPage() {
             );
             if (anySent) {
               setGreetingSent(true);
+            }
+
+            if (res.resolution.recommendedPhone?.phone) {
+              setSelectedPhone(res.resolution.recommendedPhone.phone);
             }
           } else {
             setReadiness(null);
@@ -411,6 +443,7 @@ export default function FormsPage() {
       setSelectedTemplateId(null);
       setTechOpen(false);
       setReadiness(null);
+      setSelectedPhone("");
     }
   }, [selectedForm?.id, loadOutreachTimeline]);
 
@@ -498,7 +531,7 @@ export default function FormsPage() {
       return;
     }
 
-    const targetPhone = readiness?.recommendedPhone?.phone || form.phone_number;
+    const targetPhone = selectedPhone || readiness?.recommendedPhone?.phone || form.phone_number;
     if (!targetPhone) {
       setOutreachError('Telefon numarası eksik.');
       return;
@@ -527,7 +560,7 @@ export default function FormsPage() {
     setOutreachSuccess(null);
     try {
       const { logWhatsappAppOpenedForGreetingAction } = await import('@/app/actions/outreach');
-      const result = await logWhatsappAppOpenedForGreetingAction(form.id, draftMessage);
+      const result = await logWhatsappAppOpenedForGreetingAction(form.id, draftMessage, { targetPhone });
       
       if (!result.success) {
         setOutreachSuccess('WhatsApp açıldı, ancak sistem logu kaydedilemedi.');
@@ -552,7 +585,7 @@ export default function FormsPage() {
     setOutreachError(null);
     setOutreachSuccess(null);
     try {
-      const result = await saveGreetingDraftInternal(form.id, draftMessage, botNote);
+      const result = await saveGreetingDraftInternal(form.id, draftMessage, botNote, selectedPhone || undefined);
       if (result.success) {
         setGreetingSent(true);
         setIsDraftOpen(false);
@@ -818,7 +851,7 @@ export default function FormsPage() {
       </div>
       
       {/* Active Filters Bar */}
-      {(sourceFilter !== 'all' || stageFilter !== 'all') && (
+      {(sourceFilter !== 'all' || firstContactFilter !== 'all' || leadStageFilter !== 'all') && (
         <div className="mb-3 flex items-center gap-2 flex-wrap">
           <span className="text-[11px] font-semibold text-[#86868B] uppercase tracking-wider">Filtreler:</span>
           {sourceFilter !== 'all' && (
@@ -831,21 +864,32 @@ export default function FormsPage() {
               <X className="w-3 h-3 ml-1" />
             </button>
           )}
-          {stageFilter !== 'all' && (
+          {firstContactFilter !== 'all' && (
             <button 
-              onClick={() => setStageFilter('all')}
-              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold hover:opacity-80 transition-colors"
+              onClick={() => setFirstContactFilter('all')}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 text-[11px] font-bold hover:bg-indigo-100 transition-colors border border-indigo-200"
+            >
+              <Filter className="w-3 h-3" />
+              {OUTREACH_BADGE_CONFIG[firstContactFilter]?.label || firstContactFilter}
+              <X className="w-3 h-3 ml-1" />
+            </button>
+          )}
+          {leadStageFilter !== 'all' && (
+            <button 
+              onClick={() => setLeadStageFilter('all')}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold hover:opacity-80 transition-colors border"
               style={{ 
-                backgroundColor: `${getStageInfo(stageFilter).color}15`,
-                color: getStageInfo(stageFilter).color 
+                backgroundColor: `${getStageInfo(leadStageFilter).color}15`,
+                color: getStageInfo(leadStageFilter).color,
+                borderColor: `${getStageInfo(leadStageFilter).color}30`
               }}
             >
-              {getStageInfo(stageFilter).label}
+              {getStageInfo(leadStageFilter).label}
               <X className="w-3 h-3 ml-1" />
             </button>
           )}
           <button 
-            onClick={() => { setSourceFilter('all'); setStageFilter('all'); }}
+            onClick={() => { setSourceFilter('all'); setFirstContactFilter('all'); setLeadStageFilter('all'); }}
             className="text-[11px] font-semibold text-[#86868B] hover:text-[#1D1D1F] transition-colors ml-1"
           >
             Tümünü temizle
@@ -869,6 +913,35 @@ export default function FormsPage() {
         </div>
       )}
 
+      {/* Premium Horizontal Tabs for First Contact Status */}
+      <div className="mb-4 flex flex-wrap items-center gap-1.5 p-1 bg-black/[0.03] rounded-xl border border-black/5 self-start shadow-sm">
+        {[
+          { value: 'all', label: 'Tümü', icon: '📁' },
+          { value: 'needs_greeting', label: 'Karşılama Bekliyor', icon: '👋' },
+          { value: 'waiting_inbox_reply', label: 'Panelden Cevap Bekliyor', icon: '💬' },
+          { value: 'whatsapp_opened', label: 'WhatsApp’ta Açıldı', icon: '📲' },
+          { value: 'sent', label: 'Gönderildi', icon: '✅' },
+          { value: 'patient_replied', label: 'Cevap Geldi', icon: '↩️' },
+          { value: 'blocked_or_invalid', label: 'Sorunlu', icon: '⚠️' }
+        ].map((tab) => {
+          const isActive = firstContactFilter === tab.value;
+          return (
+            <button
+              key={tab.value}
+              onClick={() => setFirstContactFilter(tab.value)}
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer select-none border border-transparent ${
+                isActive 
+                  ? 'bg-white text-[#1D1D1F] shadow-sm border-black/5' 
+                  : 'text-[#86868B] hover:text-[#1D1D1F] hover:bg-white/40'
+              }`}
+            >
+              <span>{tab.icon}</span>
+              <span>{tab.label}</span>
+            </button>
+          );
+        })}
+      </div>
+
       {/* Table Container */}
       <div className="flex-1 overflow-hidden flex flex-col bg-white/40 backdrop-blur-xl border border-white/50 rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
         <div className="overflow-x-auto flex-1">
@@ -879,11 +952,11 @@ export default function FormsPage() {
                   <input 
                     type="checkbox"
                     className="w-4 h-4 rounded border-gray-300 text-[#007AFF] focus:ring-[#007AFF]"
-                    checked={forms.length > 0 && selectedLeadIds.length > 0 && selectedLeadIds.length === Math.min(10, forms.filter((f:any) => !f.isBotActive && f.stage !== 'contacted' && !f.last_outreach_action?.includes('sent')).length)}
+                    checked={forms.length > 0 && selectedLeadIds.length > 0 && selectedLeadIds.length === Math.min(10, forms.filter((f:any) => f.firstContactStatus === 'needs_greeting').length)}
                     onChange={(e) => {
                       if (e.target.checked) {
                         const selectableIds = forms
-                          .filter((f:any) => !f.isBotActive && !f.last_outreach_action?.includes('sent') && f.stage !== 'contacted')
+                          .filter((f:any) => f.firstContactStatus === 'needs_greeting')
                           .map((f:any) => f.id)
                           .slice(0, 10);
                         setSelectedLeadIds(selectableIds);
@@ -944,7 +1017,7 @@ export default function FormsPage() {
                     <button 
                       onClick={() => stageDropdown.setIsOpen(!stageDropdown.isOpen)}
                       className={`inline-flex items-center gap-1 hover:text-[#1D1D1F] transition-colors cursor-pointer select-none rounded-md px-1.5 py-0.5 -mx-1.5 -my-0.5 ${
-                        stageFilter !== 'all' ? 'bg-[#007AFF]/10 text-[#007AFF]' : 'hover:bg-black/5'
+                        leadStageFilter !== 'all' ? 'bg-[#007AFF]/10 text-[#007AFF]' : 'hover:bg-black/5'
                       }`}
                     >
                       Durum
@@ -954,27 +1027,27 @@ export default function FormsPage() {
                     {stageDropdown.isOpen && (
                       <div className="absolute top-full left-0 mt-1 w-52 bg-white rounded-xl shadow-[0_8px_30px_rgba(0,0,0,0.12)] border border-black/5 py-1 z-50">
                         <button 
-                          onClick={() => { setStageFilter('all'); stageDropdown.setIsOpen(false); }}
+                          onClick={() => { setLeadStageFilter('all'); stageDropdown.setIsOpen(false); }}
                           className={`w-full text-left px-3 py-2 text-[12px] font-semibold hover:bg-black/5 transition-colors flex items-center gap-2 ${
-                            stageFilter === 'all' ? 'text-[#007AFF]' : 'text-[#1D1D1F]'
+                            leadStageFilter === 'all' ? 'text-[#007AFF]' : 'text-[#1D1D1F]'
                           }`}
                         >
-                          {stageFilter === 'all' && <CheckCircle2 className="w-3.5 h-3.5" />}
+                          {leadStageFilter === 'all' && <CheckCircle2 className="w-3.5 h-3.5" />}
                           Tüm Durumlar
                         </button>
                         <div className="h-px bg-black/5 my-1" />
                         {STAGES.map(s => (
                           <button 
                             key={s.value}
-                            onClick={() => { setStageFilter(s.value); stageDropdown.setIsOpen(false); }}
+                            onClick={() => { setLeadStageFilter(s.value); stageDropdown.setIsOpen(false); }}
                             className={`w-full text-left px-3 py-2 text-[12px] font-medium hover:bg-black/5 transition-colors flex items-center gap-2 ${
-                              stageFilter === s.value ? 'font-semibold' : ''
+                              leadStageFilter === s.value ? 'font-semibold' : ''
                             }`}
-                            style={{ color: stageFilter === s.value ? s.color : '#1D1D1F' }}
+                            style={{ color: leadStageFilter === s.value ? s.color : '#1D1D1F' }}
                           >
                             <div className="w-2 h-2 rounded-full" style={{ backgroundColor: s.color }} />
                             {s.label}
-                            {stageFilter === s.value && <CheckCircle2 className="w-3.5 h-3.5 ml-auto" />}
+                            {leadStageFilter === s.value && <CheckCircle2 className="w-3.5 h-3.5 ml-auto" />}
                           </button>
                         ))}
                       </div>
@@ -982,7 +1055,7 @@ export default function FormsPage() {
                   </div>
                 </th>
                 
-                <th className="py-3 px-4 text-xs font-semibold text-[#86868B] tracking-wider uppercase">Geri Dönüş</th>
+                <th className="py-3 px-4 text-xs font-semibold text-[#86868B] tracking-wider uppercase">İlk Temas</th>
                 <th className="py-3 px-4 text-xs font-semibold text-[#86868B] tracking-wider uppercase text-right">Aksiyon</th>
               </tr>
             </thead>
@@ -1008,8 +1081,9 @@ export default function FormsPage() {
                   <td className="py-4 px-4 w-12 text-center border-r border-black/5" onClick={(e) => e.stopPropagation()}>
                     <input 
                       type="checkbox"
-                      className="w-4 h-4 rounded border-gray-300 text-[#007AFF] focus:ring-[#007AFF] disabled:opacity-50"
-                      disabled={form.isBotActive || form.stage === 'contacted' || form.last_outreach_action?.includes('sent')}
+                      className="w-4 h-4 rounded border-gray-300 text-[#007AFF] focus:ring-[#007AFF] disabled:opacity-50 cursor-pointer"
+                      disabled={form.firstContactStatus !== 'needs_greeting'}
+                      title={getCheckboxTooltip(form.firstContactStatus)}
                       checked={selectedLeadIds.includes(form.id)}
                       onChange={(e) => {
                         if (e.target.checked) {
@@ -1055,24 +1129,6 @@ export default function FormsPage() {
                           <Bot className="w-3 h-3 animate-pulse" /> Bot
                         </span>
                       )}
-                      {/* C8: Outreach status badge */}
-                      {form.last_outreach_action && !form.isBotActive && (() => {
-                        const badge = OUTREACH_BADGE_CONFIG[form.last_outreach_action];
-                        if (!badge) return null;
-                        return (
-                          <span 
-                            className="px-1.5 py-0.5 shrink-0 rounded text-[10px] font-bold uppercase flex items-center gap-1 border"
-                            style={{ 
-                              backgroundColor: `${badge.color}15`,
-                              color: badge.color,
-                              borderColor: `${badge.color}30`
-                            }}
-                            title={`Son outreach: ${badge.label}`}
-                          >
-                            <span className="text-[9px]">{badge.icon}</span> {badge.label}
-                          </span>
-                        );
-                      })()}
                       {form.notes && form.notes.trim() !== '' && (
                         <span className="px-1.5 py-0.5 shrink-0 bg-[#007AFF]/10 text-[#007AFF] border border-[#007AFF]/20 rounded text-[10px] font-bold uppercase flex items-center gap-1" title="Not Eklendi">
                           <StickyNote className="w-3 h-3" /> Notlu
@@ -1116,29 +1172,88 @@ export default function FormsPage() {
                       onStageChange={(newStage) => handleStageChange(form, newStage)}
                     />
                   </td>
-                  <td className="py-4 px-4">
-                    {form.notes && form.notes.trim() !== '' ? (
-                      <span className="text-[12px] text-[#1D1D1F] font-medium line-clamp-2 max-w-[200px]" title={form.notes}>
-                        {form.notes.length > 60 ? form.notes.substring(0, 60) + '…' : form.notes}
-                      </span>
-                    ) : (
-                      <span className="text-[11px] text-[#C7C7CC] italic">—</span>
-                    )}
+                  <td className="py-4 px-4 whitespace-nowrap">
+                    {(() => {
+                      const badge = OUTREACH_BADGE_CONFIG[form.firstContactStatus];
+                      if (!badge) return <span className="text-[11px] text-[#86868B] italic">—</span>;
+                      return (
+                        <span 
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-bold border uppercase tracking-wide shadow-sm"
+                          style={{ 
+                            backgroundColor: `${badge.color}15`,
+                            color: badge.color,
+                            borderColor: `${badge.color}25`
+                          }}
+                        >
+                          <span className="text-[11px]">{badge.icon}</span> {badge.label}
+                        </span>
+                      );
+                    })()}
                   </td>
                   <td className="py-4 px-4 text-right">
-                    <button 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedForm(form);
-                        setNotes(form.notes || "");
-                        setIsDraftOpen(true);
-                        handlePrepareDraft(form);
-                      }}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-black/5 rounded-lg shadow-sm hover:bg-[#25D366]/10 hover:border-[#25D366]/20 hover:text-[#25D366] transition-all text-[13px] font-semibold text-[#1D1D1F]"
-                    >
-                      <MessageCircle className="w-4 h-4" />
-                      <span className="hidden md:inline">Mesaj Gönder</span>
-                    </button>
+                    {(() => {
+                      let label = 'Detay';
+                      let icon = <ChevronRight className="w-3.5 h-3.5" />;
+                      let btnClass = "bg-white border border-black/5 hover:bg-black/5 text-[#1D1D1F]";
+                      
+                      switch (form.firstContactStatus) {
+                        case 'needs_greeting':
+                          label = 'WhatsApp’ta Karşıla';
+                          icon = <MessageCircle className="w-3.5 h-3.5" />;
+                          btnClass = "bg-[#25D366]/10 border border-[#25D366]/20 text-[#25D366] hover:bg-[#25D366]/20";
+                          break;
+                        case 'waiting_inbox_reply':
+                          label = 'Inbox’ta Karşıla';
+                          icon = <MessageCircle className="w-3.5 h-3.5" />;
+                          btnClass = "bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100";
+                          break;
+                        case 'whatsapp_opened':
+                          label = 'Tekrar Aç';
+                          icon = <MessageCircle className="w-3.5 h-3.5" />;
+                          btnClass = "bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100";
+                          break;
+                        case 'manual_greeting_confirmed':
+                        case 'inbox_greeting_sent':
+                          label = 'Mesaja Git';
+                          icon = <MessageCircle className="w-3.5 h-3.5" />;
+                          btnClass = "bg-emerald-50 border border-emerald-250 text-emerald-700 hover:bg-emerald-100";
+                          break;
+                        case 'patient_replied':
+                          label = 'Inbox’a Git';
+                          icon = <MessageCircle className="w-3.5 h-3.5" />;
+                          btnClass = "bg-emerald-50 border border-emerald-250 text-emerald-700 hover:bg-emerald-100";
+                          break;
+                        case 'blocked_or_invalid':
+                        case 'out_of_scope':
+                        default:
+                          label = 'Detay';
+                          icon = <ChevronRight className="w-3.5 h-3.5" />;
+                          btnClass = "bg-white border border-black/5 hover:bg-black/5 text-[#1D1D1F]";
+                          break;
+                      }
+
+                      return (
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedForm(form);
+                            setNotes(form.notes || "");
+                            
+                            if (['Inbox’ta Karşıla', 'Mesaja Git', 'Inbox’a Git'].includes(label)) {
+                              const phone = getAllPhones(form)[0] || form.phone_number;
+                              window.location.href = `/${params.tenant_slug}/inbox?phone=${phone}`;
+                            } else if (label === 'WhatsApp’ta Karşıla' || label === 'Tekrar Aç') {
+                              setIsDraftOpen(true);
+                              handlePrepareDraft(form);
+                            }
+                          }}
+                          className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg shadow-sm transition-all text-[11px] font-bold ${btnClass}`}
+                        >
+                          {icon}
+                          <span>{label}</span>
+                        </button>
+                      );
+                    })()}
                   </td>
                 </tr>
                 );
@@ -1234,24 +1349,51 @@ export default function FormsPage() {
               {/* Phone Numbers List */}
               <div className="bg-white rounded-2xl border border-black/5 shadow-sm p-4 space-y-2.5 text-left">
                 <span className="block text-[10px] font-bold uppercase tracking-widest text-[#86868B] mb-1">Telefon Numaraları</span>
-                {getAllPhones(selectedForm).map((phone, idx) => {
-                  const isPrimary = idx === 0;
-                  const isLastOutreachTarget = selectedForm.last_outreach_action && selectedForm.phone_number === phone;
-                  return (
-                    <div key={phone} className="flex items-center justify-between text-xs">
-                      <span className="font-semibold text-[13px] text-[#1D1D1F]">
-                        {formatPhone(phone)}
-                      </span>
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                        isPrimary 
-                          ? 'bg-blue-100 text-blue-700' 
-                          : 'bg-gray-100 text-gray-600'
-                      }`}>
-                        {isPrimary ? 'Birincil' : 'İkincil'} {isLastOutreachTarget && '— Denendi'}
-                      </span>
-                    </div>
-                  );
-                })}
+                <div className="space-y-2">
+                  {getAllPhones(selectedForm).map((phone, idx) => {
+                    const isRecommended = readiness?.recommendedPhone?.phone === phone || (idx === 0 && !readiness?.recommendedPhone);
+                    const isSelected = selectedPhone === phone;
+                    return (
+                      <label 
+                        key={phone} 
+                        className={`flex items-center justify-between p-2.5 rounded-xl border cursor-pointer transition-all ${
+                          isSelected 
+                            ? 'border-[#007AFF] bg-[#007AFF]/5 shadow-sm' 
+                            : 'border-black/5 hover:bg-black/[0.02]'
+                        }`}
+                        onClick={() => setSelectedPhone(phone)}
+                      >
+                        <div className="flex items-center gap-2">
+                          <input 
+                            type="radio" 
+                            name="selected_phone" 
+                            checked={isSelected}
+                            onChange={() => setSelectedPhone(phone)}
+                            className="w-3.5 h-3.5 text-[#007AFF] focus:ring-[#007AFF]" 
+                          />
+                          <span className="font-semibold text-[13.5px] text-[#1D1D1F]">
+                            {formatPhone(phone)}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 font-semibold">
+                          {isRecommended && (
+                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 uppercase tracking-wider">
+                              Önerilen
+                            </span>
+                          )}
+                          <span className="text-[9.5px] font-medium text-[#86868B]">
+                            {idx === 0 ? 'Birincil' : 'İkincil'}
+                          </span>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+                {selectedPhone && (
+                  <div className="text-[10.5px] font-semibold text-[#86868B] bg-black/[0.02] p-2 rounded-lg text-center mt-1 border border-black/[0.03]">
+                    📲 Karşılama için seçilen numara: <span className="text-[#1D1D1F] font-bold">{formatPhone(selectedPhone)}</span>
+                  </div>
+                )}
               </div>
               
               {/* PHASE 2L-P0: Outreach Actions */}
@@ -1261,272 +1403,184 @@ export default function FormsPage() {
                     <Send className="w-4 h-4 text-[#25D366]" />
                     İlk İletişim (Outreach)
                   </h3>
-                  <p className="text-[11px] text-[#86868B] font-medium mt-0.5">Koordinatör onayı ile karşılama mesajı gönder</p>
+                  <p className="text-[11px] text-[#86868B] font-medium mt-0.5">Karşılama mesajı durumunu ve taslağını yönetin</p>
                 </div>
                 <div className="p-4 space-y-3">
-                  {/* WhatsApp Window & Template Required Status */}
-                  {/* Readiness loading or state badges */}
-                  {readinessLoading ? (
-                    <div className="flex gap-2 flex-wrap mb-1" data-testid="form-outreach-card">
-                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-gray-50 text-gray-500 border border-gray-200 animate-pulse">
-                        ⏳ Şablon durumu kontrol ediliyor...
-                      </span>
-                    </div>
-                  ) : readiness ? (
-                    <div className="space-y-2.5 mb-1 text-left" data-testid="form-outreach-card">
-                      <div className="flex gap-2 flex-wrap">
-                        {readiness.isWithin24hWindow ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                            🟢 24s pencere açık: Taslak hazırlanabilir
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
-                            ⏳ 24s pencere kapalı: WhatsApp template gerekli
-                          </span>
-                        )}
+                  {(() => {
+                    const currentStatus = readiness?.patientLevelStatus || selectedForm.firstContactStatus;
+                    const badge = OUTREACH_BADGE_CONFIG[currentStatus];
+                    
+                    const getStatusDesc = (status: string) => {
+                      switch (status) {
+                        case 'needs_greeting': return "Hasta henüz WhatsApp’tan mesaj atmadı. Hazır taslağı WhatsApp uygulamasında açarak manuel gönderebilirsiniz.";
+                        case 'waiting_inbox_reply': return "Hasta WhatsApp’tan mesaj attı. Karşılama cevabını Inbox üzerinden gönderebilirsiniz.";
+                        case 'whatsapp_opened': return "Taslak WhatsApp uygulamasında açıldı. Gönderim doğrulaması bekleniyor.";
+                        case 'manual_greeting_confirmed':
+                        case 'inbox_greeting_sent': return "İlk karşılama tamamlandı.";
+                        case 'patient_replied': return "Hasta cevap verdi. Görüşmeyi Inbox üzerinden devam ettirin.";
+                        case 'blocked_or_invalid': return "Telefon veya veri kontrolü gerekli.";
+                        case 'out_of_scope': return "İlk temas kapsamı dışında.";
+                        default: return "";
+                      }
+                    };
 
-                        {hasUsableTemplate ? (
-                          <span data-testid="template-status-badge" className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                            🟢 Sistemde aktif şablon var: {readiness.templateName || 'Belirsiz'}
-                          </span>
-                        ) : (
-                          <span data-testid="template-status-badge" className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
-                            🟠 Şablon Eklenmeli
-                          </span>
-                        )}
-                        
-                        {readiness.hardBlockedBecausePatientAlreadyInbound && (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
-                            ⚠️ Hasta zaten mesaj attı
-                          </span>
-                        )}
-
-                        {selectedForm && ((Date.now() - new Date(getBestDate(selectedForm)).getTime()) / (1000 * 60 * 60) > 72) && (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-gray-100 text-gray-600 border border-gray-200">
-                            ⏳ Karşılama süresi geçmiş. Manuel takip önerilir.
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Compliance warning message if template is non-compliant */}
-                      {readiness.templateNonCompliant && (
-                        <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-semibold flex items-start gap-2.5 leading-relaxed">
-                          <span className="text-sm shrink-0">⚠️</span>
-                          <div>
-                            <p className="font-bold text-amber-900">Şablon Standartlara Aykırı</p>
-                            <p className="text-amber-700 font-medium">Bu şablon hasta mesaj standartlarına uygun değil ({readiness.complianceWarning}). Gönderim yapılamaz.</p>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Info Text Logic */}
-                      {hasUsableTemplate && (
-                        <div className="p-3 rounded-xl border bg-blue-50 border-blue-200 text-blue-800 text-[11px] font-semibold flex items-start gap-2.5 leading-relaxed">
-                          <span className="text-sm shrink-0">💬</span>
-                          <div data-testid="template-info-text">
-                            <p className="font-bold text-blue-900">WhatsApp Şablonu Gerekli</p>
-                            <p className="text-blue-700 font-medium">Kullanılacak şablon: {readiness.templateName}. Provider panelinde onaylı olduğundan emin olun.</p>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ) : !selectedForm.has_inbound_messages && (
-                    <div className="flex gap-2 flex-wrap mb-1" data-testid="form-outreach-card">
-                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
-                        ⏳ 24s pencere kapalı: WhatsApp template gerekli
-                      </span>
-                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200">
-                        📋 Şablon (Template) Gerekli
-                      </span>
-                      {selectedForm && ((Date.now() - new Date(getBestDate(selectedForm)).getTime()) / (1000 * 60 * 60) > 72) && (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-gray-100 text-gray-600 border border-gray-200">
-                          ⏳ Karşılama süresi geçmiş. Manuel takip önerilir.
-                        </span>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Known Inbound Guard Hard Block */}
-                  {(selectedForm.has_inbound_messages || (readiness && readiness.hardBlockedBecausePatientAlreadyInbound)) && (
-                    <div className="p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs font-semibold flex items-start gap-2.5 shadow-sm text-left">
-                      <XCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
-                      <div className="space-y-1">
-                        <p className="font-bold text-red-900">Karşılama Engellendi</p>
-                        <p className="text-red-700 leading-snug font-medium">Bu hasta daha önce sistemdeki numaralarımızdan biri üzerinden bizimle iletişime geçmiştir. Tekrar karşılama mesajı gönderilmesi engellenmiştir.</p>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Error Banner */}
-                  {outreachError && (
-                    <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-[12px] font-medium flex items-center gap-2">
-                      <X className="w-3.5 h-3.5 shrink-0" />
-                      {outreachError}
-                    </div>
-                  )}
-
-                  {/* Success Banner */}
-                  {outreachSuccess && (
-                    <div className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 text-[12px] font-medium flex items-center gap-2">
-                      <CheckCheck className="w-3.5 h-3.5 shrink-0" />
-                      {outreachSuccess}
-                    </div>
-                  )}
-
-                  {/* Draft Textarea — visible after "Karşılama Hazırla" clicked */}
-                  {isDraftOpen && draftMessage !== null && (() => {
-                    const originalTpl = templates.find((t: any) => t.id === selectedTemplateId);
-                    const isVariableless = originalTpl ? !originalTpl.body.includes('{{') : true;
                     return (
                       <div className="space-y-3">
-                        <div className="flex flex-col mb-1 text-left">
-                          <div className="flex items-center gap-2">
-                            <Edit3 className="w-3.5 h-3.5 text-[#007AFF]" />
-                            <span className="text-[11px] font-bold text-[#007AFF] uppercase tracking-wider">Forma Göre Hazırlanan Karşılama Taslağı</span>
-                          </div>
-                          <span className="text-[10px] text-[#86868B] mt-0.5 leading-relaxed">
-                            Bu taslak form cevaplarına göre otomatik hazırlanır. Göndermeden önce operatör tarafından kontrol edilmelidir.
-                          </span>
-                        </div>
-                        {/* C12: Template selector dropdown */}
-                        {templates.length > 1 && (
-                          <div className="flex items-center gap-2">
-                            <span className="text-[11px] font-semibold text-[#86868B] shrink-0">Şablon:</span>
-                            <select
-                               value={selectedTemplateId || ''}
-                               onChange={(e) => handleTemplateSelect(e.target.value)}
-                               className="flex-1 text-[12px] font-medium bg-[#F5F5F7] border border-black/10 rounded-lg px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-[#007AFF]/30 transition-all cursor-pointer appearance-none"
+                        {/* Status Badge & Desc */}
+                        <div className="text-left space-y-1.5 p-3 bg-black/[0.02] border border-black/[0.04] rounded-xl shadow-sm">
+                          {badge && (
+                            <span 
+                              className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10.5px] font-bold border uppercase"
+                              style={{ 
+                                backgroundColor: `${badge.color}15`,
+                                color: badge.color,
+                                borderColor: `${badge.color}30`
+                              }}
                             >
-                              <option value="" disabled>Şablon seçin…</option>
-                              {templates.map((tpl: any) => (
-                                <option key={tpl.id} value={tpl.id}>{tpl.name}</option>
-                              ))}
-                            </select>
-                          </div>
-                        )}
-                        <textarea
-                          value={draftMessage}
-                          onChange={(e) => setDraftMessage(e.target.value)}
-                          readOnly={false}
-                          rows={6}
-                          className={`w-full border border-black/10 rounded-xl p-3 text-[13px] text-[#1D1D1F] font-medium resize-none outline-none transition-all leading-relaxed bg-white focus:ring-2 focus:ring-[#25D366]/40 focus:border-[#25D366]/30`}
-                          placeholder="Karşılama mesajınızı buraya yazın..."
-                        />
-
-                        {/* Bota Kısa Not/Direktif */}
-                        <div className="space-y-1 text-left">
-                          <label className="block text-[10.5px] font-bold text-[#86868B] uppercase tracking-wider">
-                            🤖 Bota kısa not/direktif ekle (opsiyonel)
-                          </label>
-                          <input
-                            type="text"
-                            value={botNote}
-                            onChange={(e) => setBotNote(e.target.value)}
-                            placeholder="Örn: Hastanın geliş tarihini netleştir, kararsızsa telefon görüşmesine yönlendir."
-                            className="w-full bg-[#F5F5F7] border border-black/10 rounded-xl px-3 py-2 text-[12px] text-[#1D1D1F] font-medium outline-none focus:ring-2 focus:ring-[#007AFF]/30 transition-all"
-                          />
-                          {!selectedForm.linked_conversation_id && (
-                            <span className="block text-[10px] text-amber-600 font-semibold leading-relaxed mt-0.5">
-                              ⚠️ Bu lead için henüz sohbet oluşmadı. Bot notu sadece iç kayıt olarak saklanır.
+                              {badge.icon} {badge.label}
                             </span>
                           )}
+                          <p className="text-[12px] text-[#555558] font-medium leading-relaxed">
+                            {getStatusDesc(currentStatus)}
+                          </p>
                         </div>
 
-                        {/* Warning and Action Buttons */}
-                        <div className="space-y-3 pt-4 border-t border-black/5">
-                          
-                          {/* Option 1: Manual App Open */}
-                          <button 
-                            onClick={() => handleOpenWhatsAppApp(selectedForm)}
-                            disabled={outreachLoading === 'sending' || !draftMessage?.trim()}
-                            className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-[13px] font-bold bg-[#25D366] hover:bg-[#1DA851] text-white shadow-[0_4px_14px_rgba(37,211,102,0.39)] transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            <Send className="w-4 h-4" /> WhatsApp Uygulamasında Aç
-                          </button>
+                        {/* Error and Success banners */}
+                        {outreachError && (
+                          <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-[12px] font-medium flex items-center gap-2">
+                            <X className="w-3.5 h-3.5 shrink-0" />
+                            {outreachError}
+                          </div>
+                        )}
+                        {outreachSuccess && (
+                          <div className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 text-[12px] font-medium flex items-center gap-2">
+                            <CheckCheck className="w-3.5 h-3.5 shrink-0" />
+                            {outreachSuccess}
+                          </div>
+                        )}
 
-                          {/* Primary Safe Action */}
-                          <button 
-                            onClick={() => handleSaveInternal(selectedForm)}
-                            disabled={outreachLoading === 'sending' || !draftMessage?.trim()}
-                            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl font-bold bg-[#007AFF]/10 text-[#007AFF] hover:bg-[#007AFF]/20 cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            {outreachLoading === 'sending' ? (
-                              <><RefreshCw className="w-4 h-4 animate-spin" /> Kaydediliyor...</>
-                            ) : (
-                              <><Save className="w-4 h-4" /> Sadece Not Olarak Kaydet</>
+                        {/* Active Greeting Draft Textarea if Open */}
+                        {isDraftOpen && draftMessage !== null && (
+                          <div className="space-y-3 pt-2">
+                            {templates.length > 1 && (
+                              <div className="flex items-center gap-2">
+                                <span className="text-[11px] font-semibold text-[#86868B] shrink-0">Şablon:</span>
+                                <select
+                                  value={selectedTemplateId || ''}
+                                  onChange={(e) => handleTemplateSelect(e.target.value)}
+                                  className="flex-1 text-[12px] font-medium bg-[#F5F5F7] border border-black/10 rounded-lg px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-[#007AFF]/30 transition-all cursor-pointer appearance-none"
+                                >
+                                  <option value="" disabled>Şablon seçin…</option>
+                                  {templates.map((tpl: any) => (
+                                    <option key={tpl.id} value={tpl.id}>{tpl.name}</option>
+                                  ))}
+                                </select>
+                              </div>
                             )}
-                          </button>
-                          
-                          <button 
-                            onClick={handleCancelDraft}
-                            disabled={outreachLoading === 'sending'}
-                            className="w-full py-2.5 rounded-xl text-[13px] font-bold bg-black/[0.04] hover:bg-black/[0.08] text-[#1D1D1F] transition-colors cursor-pointer disabled:opacity-50"
-                          >
-                            İptal
-                          </button>
-                        </div>
+                            <textarea
+                              value={draftMessage}
+                              onChange={(e) => setDraftMessage(e.target.value)}
+                              rows={5}
+                              className="w-full border border-black/10 rounded-xl p-3 text-[13px] text-[#1D1D1F] font-medium resize-none outline-none transition-all leading-relaxed bg-white focus:ring-2 focus:ring-[#25D366]/40 focus:border-[#25D366]/30"
+                              placeholder="Karşılama mesajınızı buraya yazın..."
+                            />
+
+                            <div className="space-y-1 text-left">
+                              <label className="block text-[10.5px] font-bold text-[#86868B] uppercase tracking-wider">
+                                🤖 Bota kısa not/direktif ekle (opsiyonel)
+                              </label>
+                              <input
+                                type="text"
+                                value={botNote}
+                                onChange={(e) => setBotNote(e.target.value)}
+                                placeholder="Örn: Geliş tarihini netleştir..."
+                                className="w-full bg-[#F5F5F7] border border-black/10 rounded-xl px-3 py-2 text-[12px] text-[#1D1D1F] font-medium outline-none focus:ring-2 focus:ring-[#007AFF]/30 transition-all"
+                              />
+                            </div>
+
+                            <div className="space-y-2 pt-3 border-t border-black/5">
+                              <button 
+                                onClick={() => handleOpenWhatsAppApp(selectedForm)}
+                                disabled={outreachLoading === 'sending' || !draftMessage?.trim()}
+                                className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-[13px] font-bold bg-[#25D366] hover:bg-[#1DA851] text-white shadow-[0_4px_14px_rgba(37,211,102,0.39)] transition-all cursor-pointer disabled:opacity-50"
+                              >
+                                <Send className="w-4 h-4" /> WhatsApp Uygulamasında Aç
+                              </button>
+                              <button 
+                                onClick={() => handleSaveInternal(selectedForm)}
+                                disabled={outreachLoading === 'sending' || !draftMessage?.trim()}
+                                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl font-bold bg-[#007AFF]/10 text-[#007AFF] hover:bg-[#007AFF]/20 cursor-pointer transition-all disabled:opacity-50"
+                              >
+                                {outreachLoading === 'sending' ? (
+                                  <><RefreshCw className="w-4 h-4 animate-spin" /> Kaydediliyor...</>
+                                ) : (
+                                  <><Save className="w-4 h-4" /> Taslağı Kaydet</>
+                                )}
+                              </button>
+                              <button 
+                                onClick={handleCancelDraft}
+                                disabled={outreachLoading === 'sending'}
+                                className="w-full py-2.5 rounded-xl text-[13px] font-bold bg-black/[0.04] hover:bg-black/[0.08] text-[#1D1D1F] transition-colors cursor-pointer disabled:opacity-50"
+                              >
+                                İptal
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Standard Action Button if Draft is NOT Open */}
+                        {!isDraftOpen && ['needs_greeting', 'waiting_inbox_reply', 'whatsapp_opened', 'manual_greeting_confirmed', 'inbox_greeting_sent', 'patient_replied'].includes(currentStatus) && (
+                          <div className="flex gap-3 pt-2">
+                            <button
+                              onClick={() => {
+                                if (['waiting_inbox_reply', 'patient_replied', 'manual_greeting_confirmed', 'inbox_greeting_sent'].includes(currentStatus)) {
+                                  window.location.href = `/${params.tenant_slug}/inbox?phone=${selectedPhone || selectedForm.phone_number}`;
+                                } else {
+                                  handlePrepareDraft(selectedForm);
+                                }
+                              }}
+                              disabled={outreachLoading === 'draft' || readinessLoading}
+                              className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold transition-all bg-[#25D366] text-white shadow-[0_4px_14px_rgba(37,211,102,0.39)] hover:bg-[#1DA851] cursor-pointer disabled:opacity-70 disabled:bg-gray-100 disabled:text-gray-400 disabled:shadow-none"
+                            >
+                              {readinessLoading ? (
+                                <><RefreshCw className="w-4 h-4 animate-spin" /> Yükleniyor...</>
+                              ) : outreachLoading === 'draft' ? (
+                                <><RefreshCw className="w-4 h-4 animate-spin" /> Hazırlanıyor...</>
+                              ) : (
+                                <>
+                                  {currentStatus === 'needs_greeting' && 'WhatsApp’ta Karşıla'}
+                                  {currentStatus === 'whatsapp_opened' && 'Tekrar Aç'}
+                                  {currentStatus === 'waiting_inbox_reply' && 'Inbox’ta Karşıla'}
+                                  {['manual_greeting_confirmed', 'inbox_greeting_sent'].includes(currentStatus) && 'Mesaja Git'}
+                                  {currentStatus === 'patient_replied' && 'Inbox’a Git'}
+                                </>
+                              )}
+                            </button>
+                            <button 
+                              onClick={() => handleOutreachBotActivate(selectedForm)}
+                              disabled={selectedForm.isBotActive || outreachLoading === 'bot' || !greetingSent}
+                              title={!greetingSent ? 'Önce selamlama gönderilmeli' : selectedForm.isBotActive ? 'Bot zaten aktif' : 'AI Bota devret'}
+                              className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold transition-all ${
+                                selectedForm.isBotActive
+                                  ? 'bg-[#0F9D58]/10 text-[#0F9D58] border border-[#0F9D58]/20 cursor-default'
+                                  : !greetingSent
+                                  ? 'bg-gray-100 text-[#86868B] cursor-not-allowed'
+                                  : 'bg-[#007AFF] text-white shadow-[0_4px_14px_rgba(0,122,255,0.3)] hover:bg-[#0056b3] cursor-pointer'
+                              } disabled:opacity-70`}
+                            >
+                              {selectedForm.isBotActive ? (
+                                <><Bot className="w-5 h-5 animate-pulse" /> Bot Aktif</>
+                              ) : outreachLoading === 'bot' ? (
+                                <><RefreshCw className="w-4 h-4 animate-spin" /> Aktifleştiriliyor...</>
+                              ) : (
+                                <><Zap className="w-5 h-5" /> Bota Devret</>
+                              )}
+                            </button>
+                          </div>
+                        )}
                       </div>
                     );
                   })()}
-
-                  
-
-                  {/* Action Buttons — Primary Row */}
-                  {!isDraftOpen && (
-                    <div className="flex gap-3">
-                      <button 
-                        onClick={() => {
-                           if (readiness?.primaryAction === "Inbox'ta Karşıla" || readiness?.primaryAction === "Inbox'a Git" || readiness?.primaryAction === "Mesaja Git") {
-                               // Navigation uses activeContact logic
-                               // Will navigate using router.push
-                               window.location.href = `/${params.tenant_slug}/inbox?phone=${readiness.recommendedPhone?.phone || selectedForm.phone_number}`;
-                           } else {
-                               handlePrepareDraft(selectedForm);
-                           }
-                        }}
-                        disabled={
-                          outreachLoading === 'draft' || 
-                          readinessLoading ||
-                          !readiness
-                        }
-                        className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-semibold transition-all bg-[#25D366] text-white shadow-[0_4px_14px_rgba(37,211,102,0.39)] hover:bg-[#1DA851] cursor-pointer disabled:opacity-70 disabled:bg-gray-100 disabled:text-gray-400 disabled:shadow-none`}
-                      >
-                        {readinessLoading ? (
-                          <><RefreshCw className="w-4 h-4 animate-spin" /> Yükleniyor...</>
-                        ) : outreachLoading === 'draft' ? (
-                          <><RefreshCw className="w-4 h-4 animate-spin" /> Hazırlanıyor...</>
-                        ) : (
-                          <>
-                            {readiness?.primaryAction === "Inbox'ta Karşıla" && <MessageCircle className="w-5 h-5" />}
-                            {readiness?.primaryAction === "WhatsApp'ta Karşıla" && <Sparkles className="w-5 h-5" />}
-                            {readiness?.primaryAction === "Tekrar Aç" && <MessageCircle className="w-5 h-5" />}
-                            {(readiness?.primaryAction === "Inbox'a Git" || readiness?.primaryAction === "Mesaja Git") && <MessageCircle className="w-5 h-5" />}
-                            {readiness?.primaryAction || 'İşlem'}
-                          </>
-                        )}
-                      </button>
-                      <button 
-                        onClick={() => handleOutreachBotActivate(selectedForm)}
-                        disabled={selectedForm.isBotActive || outreachLoading === 'bot' || !greetingSent}
-                        title={!greetingSent ? 'Önce selamlama gönderilmeli' : selectedForm.isBotActive ? 'Bot zaten aktif' : 'AI Bota devret'}
-                        className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-semibold transition-all ${
-                          selectedForm.isBotActive
-                            ? 'bg-[#0F9D58]/10 text-[#0F9D58] border border-[#0F9D58]/20 cursor-default'
-                            : !greetingSent
-                            ? 'bg-gray-100 text-[#86868B] cursor-not-allowed'
-                            : 'bg-[#007AFF] text-white shadow-[0_4px_14px_rgba(0,122,255,0.3)] hover:bg-[#0056b3] cursor-pointer'
-                        } disabled:opacity-70`}
-                      >
-                        {selectedForm.isBotActive ? (
-                          <><Bot className="w-5 h-5 animate-pulse" /> Bot Aktif</>
-                        ) : outreachLoading === 'bot' ? (
-                          <><RefreshCw className="w-4 h-4 animate-spin" /> Aktifleştiriliyor...</>
-                        ) : (
-                          <><Zap className="w-5 h-5" /> Bota Devret</>
-                        )}
-                      </button>
-                    </div>
-                  )}
 
                   {/* C9: Expanded Call Action Buttons */}
                   {!isDraftOpen && (
@@ -2032,28 +2086,43 @@ export default function FormsPage() {
                     return (
                       <div 
                         key={item.id}
-                        className={`p-3 rounded-xl border flex items-center justify-between transition-all ${
+                        className={`p-3 rounded-xl border flex flex-col gap-2 transition-all ${
                           isCurrent ? 'bg-[#007AFF]/5 border-[#007AFF]/20 shadow-sm' : 
                           isPast ? 'bg-black/5 border-transparent opacity-70' : 
                           'bg-white border-black/10'
                         }`}
                       >
-                        <div className="flex flex-col">
-                          <span className={`text-sm font-semibold ${isCurrent ? 'text-[#007AFF]' : 'text-[#1D1D1F]'}`}>
-                            {item.patient_name}
-                          </span>
-                          <span className="text-xs text-[#86868B] mt-0.5">{item.phone}</span>
+                        <div className="flex items-center justify-between">
+                          <div className="flex flex-col">
+                            <span className={`text-sm font-semibold ${isCurrent ? 'text-[#007AFF]' : 'text-[#1D1D1F]'}`}>
+                              {item.patient_name}
+                            </span>
+                            <span className="text-xs text-[#86868B] mt-0.5">{item.phone}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md ${
+                              item.status === 'Hazır' ? 'bg-emerald-100 text-emerald-700' :
+                              item.status === "WhatsApp'ta açıldı" ? 'bg-[#007AFF]/10 text-[#007AFF]' :
+                              item.status === 'Atlandı' ? 'bg-gray-100 text-gray-600' :
+                              'bg-red-100 text-red-600'
+                            }`}>
+                              {item.status}
+                            </span>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md ${
-                            item.status === 'Hazır' ? 'bg-emerald-100 text-emerald-700' :
-                            item.status === "WhatsApp'ta açıldı" ? 'bg-[#007AFF]/10 text-[#007AFF]' :
-                            item.status === 'Atlandı' ? 'bg-gray-100 text-gray-600' :
-                            'bg-red-100 text-red-600'
-                          }`}>
-                            {item.status}
-                          </span>
-                        </div>
+
+                        {isCurrent && item.draftText && (
+                          <div className="mt-1 w-full bg-white/50 p-2.5 rounded-lg border border-black/5">
+                            <label className="text-[9px] font-bold text-[#86868B] uppercase tracking-wider block mb-1">
+                              Gönderilecek Taslak Mesaj
+                            </label>
+                            <textarea
+                              readOnly
+                              value={item.draftText}
+                              className="w-full h-20 text-xs p-2 rounded-md border border-black/10 bg-white text-[#1D1D1F] resize-none focus:outline-none focus:ring-1 focus:ring-[#007AFF]"
+                            />
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -2075,7 +2144,7 @@ export default function FormsPage() {
                   className="px-6 py-2 bg-[#007AFF] text-white text-sm font-semibold rounded-lg hover:bg-[#0056b3] transition-colors shadow-sm disabled:opacity-50 flex items-center gap-2"
                 >
                   <MessageCircle className="w-4 h-4" />
-                  Sıradakini Aç
+                  Sıradakini WhatsApp'ta Aç
                 </button>
               </div>
             )}

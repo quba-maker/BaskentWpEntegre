@@ -1519,7 +1519,7 @@ export async function sendMetaTemplateMessage(opportunityId: string, templateNam
   });
 }
 
-export async function saveGreetingDraftInternal(leadId: string, approvedText: string, coordinatorNote?: string) {
+export async function saveGreetingDraftInternal(leadId: string, approvedText: string, coordinatorNote?: string, targetPhone?: string) {
   const safeLeadId = leadId && leadId.trim() ? leadId.trim() : null;
   if (!safeLeadId || !UUID_RE.test(safeLeadId)) return { success: false as const, error: "Geçersiz Lead ID formatı." };
   if (!approvedText || approvedText.trim().length === 0) return { success: false as const, error: "Taslak metni boş olamaz." };
@@ -1541,7 +1541,7 @@ export async function saveGreetingDraftInternal(leadId: string, approvedText: st
       }
 
       const lead = leads[0];
-      const phone = lead.phone_number;
+      const phone = targetPhone || lead.phone_number;
 
       if (!phone) {
         return { success: false, error: "Telefon numarası eksik." };
@@ -1577,6 +1577,7 @@ export async function saveGreetingDraftInternal(leadId: string, approvedText: st
             message_text: approvedText,
             coordinator_note: coordinatorNote || null,
             phone,
+            target_phone: phone,
             patient_name: lead.patient_name || ''
           })
         ]
@@ -1617,7 +1618,7 @@ export async function saveGreetingDraftInternal(leadId: string, approvedText: st
 export async function logWhatsappAppOpenedForGreetingAction(
   leadId: string, 
   messageText: string,
-  options?: { source?: string, queue_index?: number, queue_total?: number }
+  options?: { source?: string, queue_index?: number, queue_total?: number, targetPhone?: string }
 ) {
   const safeLeadId = leadId?.replace(/['";\\]/g, "");
   if (!safeLeadId || !UUID_RE.test(safeLeadId)) return { success: false, error: "Geçersiz Lead ID." };
@@ -1635,7 +1636,7 @@ export async function logWhatsappAppOpenedForGreetingAction(
 
       if (leads.length === 0) return { success: false, error: "Lead bulunamadı." };
       const lead = leads[0];
-      const phone = lead.phone_number;
+      const phone = options?.targetPhone || lead.phone_number;
 
       // Mask phone for metadata
       const maskPhone = (p: string) => {
@@ -1658,6 +1659,7 @@ export async function logWhatsappAppOpenedForGreetingAction(
             opened_via: 'wa_me_link',
             message_text: messageText,
             phone_masked: maskPhone(phone),
+            target_phone: phone,
             source: options?.source || 'forms_page',
             queue_index: options?.queue_index,
             queue_total: options?.queue_total

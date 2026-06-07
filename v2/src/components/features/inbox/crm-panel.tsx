@@ -850,18 +850,21 @@ export function ContextPanel() {
         {/* Form Greeting Section (Only shown if form connection exists AND is eligible for greeting) */}
         {(activeContact.formData || activeContact.form_raw_data) && formGreetingEligibility?.patientLevelStatus === 'waiting_inbox_reply' && (
           <div className="w-full mt-2.5 p-3 rounded-2xl border bg-white/40 space-y-3 shadow-sm text-left transition-all duration-300" style={{ borderColor: "var(--q-border-default)" }}>
-            <div className="flex items-center justify-between pb-1.5 border-b border-black/[0.03]">
-              <div className="flex items-center gap-1.5">
-                <FileText className="w-4 h-4 text-indigo-500" />
-                <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#86868B]">👋 Form Karşılama</span>
+            <div className="flex flex-col gap-1 pb-1.5 border-b border-black/[0.03]">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <FileText className="w-4 h-4 text-indigo-500" />
+                  <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#86868B]">👋 Karşılama Cevabı Bekliyor</span>
+                </div>
+                {formGreetingSentSuccess ? (
+                  <span className="text-[8px] font-bold text-green-600 bg-green-50 border border-green-100 px-1.5 py-0.5 rounded-full">Gönderildi</span>
+                ) : formGreetingSavedMsg ? (
+                  <span className="text-[8px] font-bold text-green-600 bg-green-50 border border-green-100 px-1.5 py-0.5 rounded-full">Kaydedildi</span>
+                ) : (
+                  <span className="text-[8px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 px-1.5 py-0.5 rounded-full">Bekliyor</span>
+                )}
               </div>
-              {formGreetingSentSuccess ? (
-                <span className="text-[8px] font-bold text-green-600 bg-green-50 border border-green-100 px-1.5 py-0.5 rounded-full">Gönderildi</span>
-              ) : formGreetingSavedMsg ? (
-                <span className="text-[8px] font-bold text-green-600 bg-green-50 border border-green-100 px-1.5 py-0.5 rounded-full">Kaydedildi</span>
-              ) : (
-                <span className="text-[8px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 px-1.5 py-0.5 rounded-full">Karşılama Hazır</span>
-              )}
+              <p className="text-[11px] text-[#86868B] mt-1">Hasta mesaj attı, henüz karşılama cevabı verilmemiş.</p>
             </div>
 
             {formGreetingError && (
@@ -911,7 +914,7 @@ export function ContextPanel() {
                     {isLoadingFormGreetingDraft ? (
                       <><Loader2 className="w-3.5 h-3.5 animate-spin" /><span>Taslak Hazırlanıyor...</span></>
                     ) : (
-                      <><Sparkles className="w-3.5 h-3.5" /><span>Karşılama Taslağı Hazırla</span></>
+                      <><Sparkles className="w-3.5 h-3.5" /><span>Karşılama Hazırla</span></>
                     )}
                   </button>
                 ) : (
@@ -924,6 +927,10 @@ export function ContextPanel() {
                       className="w-full bg-white/70 border rounded-xl p-2.5 text-[11.5px] text-[#1D1D1F] leading-relaxed resize-none outline-none focus:ring-2 focus:ring-indigo-500/25 transition-all shadow-sm"
                       style={{ borderColor: "var(--q-border-default)" }}
                     />
+
+                    <p className="text-[10px] text-amber-600 bg-amber-50/50 border border-amber-100 p-2 rounded-lg font-medium leading-normal">
+                      Bu mesaj hastaya WhatsApp üzerinden gönderilecek.
+                    </p>
 
                     <div className="space-y-2">
                       <button
