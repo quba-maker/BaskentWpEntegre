@@ -1906,10 +1906,10 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
         const firstInboundAt = oldestUnrepliedQuery.length > 0 ? new Date(oldestUnrepliedQuery[0].created_at) : new Date();
         const now = new Date();
         const scheduledTime = new Date(Math.min(
-          now.getTime() + 45000,
-          firstInboundAt.getTime() + 90000
+          now.getTime() + 25000,
+          firstInboundAt.getTime() + 35000
         ));
-        const delayMs = Math.max(25000, scheduledTime.getTime() - now.getTime());
+        const delayMs = Math.max(15000, scheduledTime.getTime() - now.getTime());
 
         const { QueueService } = await import('./queue.service');
         const queue = new QueueService();
