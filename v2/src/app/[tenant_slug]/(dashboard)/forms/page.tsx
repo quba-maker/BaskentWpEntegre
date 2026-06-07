@@ -5,7 +5,7 @@ import useSWRInfinite from "swr/infinite";
 import { Search, MessageCircle, X, FileText, ChevronRight, CheckCircle2, Bot, Save, StickyNote, Sparkles, RefreshCw, ChevronDown, Filter, Zap, Send, Clock, CheckCheck, Edit3, Phone, PhoneOff, PhoneForwarded, XCircle } from "lucide-react";
 import { getForms, getCampaignNames, updateLeadNotes, updateLeadStage, syncGoogleSheets } from "@/app/actions/forms";
 import { toggleBotStatus } from "@/app/actions/inbox";
-import { prepareGreetingDraft, sendGreetingMessage, sendFormGreetingTemplateAction, activateBot, getOutreachHistory, logCallReached, logCallMissed, logCallbackScheduled, logNotInterested, getGreetingTemplates, checkGreetingReadiness, saveGreetingDraftInternal, type OutreachLogEntry } from "@/app/actions/outreach";
+import { prepareGreetingDraft, sendGreetingMessage, sendFormGreetingTemplateAction, activateBot, getOutreachHistory, logCallReached, logCallMissed, logCallbackScheduled, logNotInterested, getGreetingTemplates, checkGreetingReadiness, saveGreetingDraftInternal, prepareManualGreetingQueueAction, type OutreachLogEntry } from "@/app/actions/outreach";
 import { useInboxStore } from "@/store/inbox-store";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { MapPin, Building2, Calendar, Flame, TrendingUp, User } from "lucide-react";
@@ -240,6 +240,26 @@ export default function FormsPage() {
   } | null>(null);
   const [readinessLoading, setReadinessLoading] = useState(false);
   const hasUsableTemplate = readiness?.templateConfigExists === true && readiness?.templateNonCompliant !== true;
+
+  // PHASE 3: Bulk Manual WhatsApp Greeting Queue
+  const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([]);
+  const [isQueueModalOpen, setIsQueueModalOpen] = useState(false);
+  const [currentQueueIndex, setCurrentQueueIndex] = useState(0);
+  const [queueItems, setQueueItems] = useState<any[]>([]);
+  const [isPreparingQueue, setIsPreparingQueue] = useState(false);
+
+  const normalizePhoneForWaMe = (p: string) => {
+    if (!p) return "";
+    let c = p.replace(/[\s+\-()]/g, "");
+    if (c.startsWith("05") && c.length === 11) return "90" + c.slice(1);
+    if (c.startsWith("5") && c.length === 10) return "90" + c;
+    return c;
+  };
+
+  useEffect(() => {
+    setSelectedLeadIds([]);
+  }, [debouncedSearch, sourceFilter, stageFilter]);
+
 
   // DIAGNOSTIC LOG FOR RENDER STATE
   useEffect(() => {
@@ -645,6 +665,81 @@ export default function FormsPage() {
     }
   };
 
+  // PHASE 3: Bulk Manual Queue Functions
+  const handleBulkQueueStart = async () => {
+    if (selectedLeadIds.length === 0) return;
+    setIsPreparingQueue(true);
+    setIsQueueModalOpen(true);
+    try {
+      const result = await prepareManualGreetingQueueAction(selectedLeadIds);
+      if (result.success && result.queueItems) {
+        const items = result.queueItems.map((qItem: any) => {
+          const lead = forms.find((f: any) => f.id === qItem.id);
+          let status = 'Hazır';
+          if (!normalizePhoneForWaMe(lead?.phone_number)) {
+            status = 'Eksik Telefon';
+          } else if (qItem.hardBlockedBecausePatientAlreadyInbound) {
+            status = 'Hasta zaten mesaj attı';
+          } else if (qItem.hasHardDuplicate || qItem.greetingSent) {
+            status = 'Daha önce karşılama gönderilmiş';
+          }
+          return {
+            ...qItem,
+            patient_name: lead?.patient_name || 'Bilinmiyor',
+            phone: lead?.phone_number || '',
+            status
+          };
+        });
+        setQueueItems(items);
+        setCurrentQueueIndex(0);
+      } else {
+        alert("Kuyruk hazırlanamadı: " + result.error);
+        setIsQueueModalOpen(false);
+      }
+    } catch (err) {
+      console.error(err);
+      setIsQueueModalOpen(false);
+    } finally {
+      setIsPreparingQueue(false);
+    }
+  };
+
+  const handleOpenNextInQueue = async (action: 'open' | 'skip') => {
+    if (currentQueueIndex >= queueItems.length) return;
+    
+    const currentItem = queueItems[currentQueueIndex];
+    const newItems = [...queueItems];
+    
+    if (action === 'skip' || currentItem.status !== 'Hazır') {
+      newItems[currentQueueIndex].status = currentItem.status !== 'Hazır' ? currentItem.status : 'Atlandı';
+      setQueueItems(newItems);
+      setCurrentQueueIndex(prev => prev + 1);
+      return;
+    }
+
+    const cleanPhone = normalizePhoneForWaMe(currentItem.phone);
+    const draftText = currentItem.draftText || "Merhaba, Başkent Üniversitesi Konya Hastanesi’nden, doldurduğunuz form doğrultusunda sizinle iletişime geçiyoruz.";
+    const waUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(draftText)}`;
+    
+    // 1. Synchronous window.open to bypass popup blockers
+    window.open(waUrl, '_blank', 'noopener,noreferrer');
+
+    // 2. Mark opened
+    newItems[currentQueueIndex].status = "WhatsApp'ta açıldı";
+    setQueueItems(newItems);
+
+    // 3. Asynchronous log (zero outbound)
+    import('@/app/actions/outreach').then(m => {
+      m.logWhatsappAppOpenedForGreetingAction(currentItem.id, draftText, {
+        source: 'forms_bulk_manual_queue',
+        queue_index: currentQueueIndex + 1,
+        queue_total: queueItems.length
+      });
+    }).catch(console.error);
+
+    setCurrentQueueIndex(prev => prev + 1);
+  };
+
   return (
     <div className="p-4 md:p-8 h-full flex flex-col relative overflow-hidden">
       {/* Background blobs for premium feel */}
@@ -764,12 +859,46 @@ export default function FormsPage() {
         </div>
       )}
 
+      {/* PHASE 3: Sticky Bulk Action Bar */}
+      {selectedLeadIds.length > 0 && (
+        <div className="mb-4 bg-[#007AFF]/10 border border-[#007AFF]/20 rounded-xl p-3 flex items-center justify-between shadow-sm animate-in fade-in slide-in-from-top-4">
+          <div className="flex items-center gap-3 text-[#007AFF]">
+            <CheckCircle2 className="w-5 h-5" />
+            <span className="font-semibold text-sm">{selectedLeadIds.length} kişi seçildi</span>
+          </div>
+          <button
+            onClick={handleBulkQueueStart}
+            className="px-4 py-1.5 bg-[#007AFF] text-white text-sm font-semibold rounded-lg hover:bg-[#0056b3] transition-colors shadow-sm"
+          >
+            Seçilenleri Manuel Karşılama Kuyruğuna Al
+          </button>
+        </div>
+      )}
+
       {/* Table Container */}
       <div className="flex-1 overflow-hidden flex flex-col bg-white/40 backdrop-blur-xl border border-white/50 rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
         <div className="overflow-x-auto flex-1">
           <table className="w-full text-left border-collapse">
             <thead className="sticky top-0 bg-white/80 backdrop-blur-md z-10 border-b border-black/5 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
               <tr>
+                <th className="py-3 px-4 w-12 text-center border-r border-black/5">
+                  <input 
+                    type="checkbox"
+                    className="w-4 h-4 rounded border-gray-300 text-[#007AFF] focus:ring-[#007AFF]"
+                    checked={forms.length > 0 && selectedLeadIds.length > 0 && selectedLeadIds.length === Math.min(10, forms.filter((f:any) => !f.isBotActive && f.stage !== 'contacted' && !f.last_outreach_action?.includes('sent')).length)}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        const selectableIds = forms
+                          .filter((f:any) => !f.isBotActive && !f.last_outreach_action?.includes('sent') && f.stage !== 'contacted')
+                          .map((f:any) => f.id)
+                          .slice(0, 10);
+                        setSelectedLeadIds(selectableIds);
+                      } else {
+                        setSelectedLeadIds([]);
+                      }
+                    }}
+                  />
+                </th>
                 <th className="py-3 px-4 text-xs font-semibold text-[#86868B] tracking-wider uppercase">Tarih</th>
                 <th className="py-3 px-4 text-xs font-semibold text-[#86868B] tracking-wider uppercase">Hasta Adı & İletişim</th>
                 
@@ -882,6 +1011,25 @@ export default function FormsPage() {
                   }}
                   className="hover:bg-white/50 transition-colors group cursor-pointer"
                 >
+                  <td className="py-4 px-4 w-12 text-center border-r border-black/5" onClick={(e) => e.stopPropagation()}>
+                    <input 
+                      type="checkbox"
+                      className="w-4 h-4 rounded border-gray-300 text-[#007AFF] focus:ring-[#007AFF] disabled:opacity-50"
+                      disabled={form.isBotActive || form.stage === 'contacted' || form.last_outreach_action?.includes('sent')}
+                      checked={selectedLeadIds.includes(form.id)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          if (selectedLeadIds.length >= 10) {
+                            alert("En fazla 10 kişi seçebilirsiniz.");
+                            return;
+                          }
+                          setSelectedLeadIds([...selectedLeadIds, form.id]);
+                        } else {
+                          setSelectedLeadIds(selectedLeadIds.filter(id => id !== form.id));
+                        }
+                      }}
+                    />
+                  </td>
                   <td className="py-4 px-4 whitespace-nowrap">
                     <div className="text-[13px] font-semibold text-[#1D1D1F]">
                       {formatDate(bestDate)}
@@ -1906,6 +2054,101 @@ export default function FormsPage() {
           </div>
           </div>
         </>
+      )}
+
+      {/* PHASE 3: Bulk Queue Modal */}
+      {isQueueModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[85vh]">
+            <div className="px-5 py-4 border-b border-black/5 flex items-center justify-between bg-[#F5F5F7]">
+              <h3 className="font-semibold text-[#1D1D1F]">
+                Manuel Karşılama Kuyruğu ({currentQueueIndex}/{queueItems.length})
+              </h3>
+              <button 
+                onClick={() => setIsQueueModalOpen(false)}
+                className="p-1.5 hover:bg-black/5 rounded-lg text-[#86868B] transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="p-5 flex-1 overflow-y-auto">
+              {isPreparingQueue ? (
+                <div className="py-8 flex flex-col items-center justify-center text-center">
+                  <div className="w-8 h-8 border-2 border-[#007AFF] border-t-transparent rounded-full animate-spin mb-3"></div>
+                  <p className="text-sm text-[#86868B]">Kuyruk hazırlanıyor, lütfen bekleyin...</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {queueItems.map((item, index) => {
+                    const isCurrent = index === currentQueueIndex;
+                    const isPast = index < currentQueueIndex;
+                    
+                    return (
+                      <div 
+                        key={item.id}
+                        className={`p-3 rounded-xl border flex items-center justify-between transition-all ${
+                          isCurrent ? 'bg-[#007AFF]/5 border-[#007AFF]/20 shadow-sm' : 
+                          isPast ? 'bg-black/5 border-transparent opacity-70' : 
+                          'bg-white border-black/10'
+                        }`}
+                      >
+                        <div className="flex flex-col">
+                          <span className={`text-sm font-semibold ${isCurrent ? 'text-[#007AFF]' : 'text-[#1D1D1F]'}`}>
+                            {item.patient_name}
+                          </span>
+                          <span className="text-xs text-[#86868B] mt-0.5">{item.phone}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md ${
+                            item.status === 'Hazır' ? 'bg-emerald-100 text-emerald-700' :
+                            item.status === "WhatsApp'ta açıldı" ? 'bg-[#007AFF]/10 text-[#007AFF]' :
+                            item.status === 'Atlandı' ? 'bg-gray-100 text-gray-600' :
+                            'bg-red-100 text-red-600'
+                          }`}>
+                            {item.status}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            
+            {!isPreparingQueue && currentQueueIndex < queueItems.length && (
+              <div className="p-4 border-t border-black/5 bg-white flex items-center justify-end gap-3">
+                <button
+                  onClick={() => handleOpenNextInQueue('skip')}
+                  className="px-4 py-2 text-sm font-semibold text-[#86868B] hover:bg-black/5 rounded-lg transition-colors"
+                >
+                  Atla
+                </button>
+                <button
+                  onClick={() => handleOpenNextInQueue('open')}
+                  disabled={queueItems[currentQueueIndex].status !== 'Hazır'}
+                  className="px-6 py-2 bg-[#007AFF] text-white text-sm font-semibold rounded-lg hover:bg-[#0056b3] transition-colors shadow-sm disabled:opacity-50 flex items-center gap-2"
+                >
+                  <MessageCircle className="w-4 h-4" />
+                  Sıradakini Aç
+                </button>
+              </div>
+            )}
+            {!isPreparingQueue && currentQueueIndex >= queueItems.length && (
+              <div className="p-4 border-t border-black/5 bg-white flex justify-center">
+                <button
+                  onClick={() => {
+                    setIsQueueModalOpen(false);
+                    setSelectedLeadIds([]);
+                  }}
+                  className="px-6 py-2 bg-[#1D1D1F] text-white text-sm font-semibold rounded-lg hover:bg-black transition-colors"
+                >
+                  Tamamla ve Kapat
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );

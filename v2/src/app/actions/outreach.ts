@@ -1608,7 +1608,11 @@ export async function saveGreetingDraftInternal(leadId: string, approvedText: st
 // ═══════════════════════════════════════════════════════════
 // 12. WHATSAPP APP OPEN LOG — Ücretsiz Manuel Seçenek Logu
 // ═══════════════════════════════════════════════════════════
-export async function logWhatsappAppOpenedForGreetingAction(leadId: string, messageText: string) {
+export async function logWhatsappAppOpenedForGreetingAction(
+  leadId: string, 
+  messageText: string,
+  options?: { source?: string, queue_index?: number, queue_total?: number }
+) {
   const safeLeadId = leadId?.replace(/['";\\]/g, "");
   if (!safeLeadId || !UUID_RE.test(safeLeadId)) return { success: false, error: "Geçersiz Lead ID." };
 
@@ -1648,7 +1652,9 @@ export async function logWhatsappAppOpenedForGreetingAction(leadId: string, mess
             opened_via: 'wa_me_link',
             message_text: messageText,
             phone_masked: maskPhone(phone),
-            source: 'forms_page'
+            source: options?.source || 'forms_page',
+            queue_index: options?.queue_index,
+            queue_total: options?.queue_total
           })
         ]
       });
@@ -1659,4 +1665,32 @@ export async function logWhatsappAppOpenedForGreetingAction(leadId: string, mess
     if (!res.success || res.data?.success === false) return { success: false, error: res.error || res.data?.error };
     return { success: true };
   });
+}
+
+// ═══════════════════════════════════════════════════════════
+// 13. PREPARE MANUAL GREETING QUEUE — Bulk WhatsApp Açılışı İçin
+// ═══════════════════════════════════════════════════════════
+export async function prepareManualGreetingQueueAction(leadIds: string[]) {
+  try {
+    const results = [];
+    // Max 10 ids
+    const safeIds = leadIds.slice(0, 10);
+    
+    for (const id of safeIds) {
+      const res = await checkGreetingReadiness(id);
+      if (res.success && res.data) {
+        results.push({
+          id,
+          draftText: res.data.draftText,
+          hardBlockedBecausePatientAlreadyInbound: res.data.hardBlockedBecausePatientAlreadyInbound,
+          hasHardDuplicate: res.data.hasHardDuplicate,
+          hasSoftDuplicate: res.data.hasSoftDuplicate,
+          greetingSent: res.data.greetingSent
+        });
+      }
+    }
+    return { success: true, queueItems: results };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
 }
