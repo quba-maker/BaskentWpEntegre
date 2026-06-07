@@ -117,6 +117,10 @@ export class QueueWorkerEngine {
       case "whatsapp.message.received":
         await this.handleIncomingMessage(tenantId, payload, metadata, 'whatsapp');
         break;
+
+      case "whatsapp.message.received.delayed":
+        await this.handleIncomingMessageDelayed(tenantId, payload, metadata, 'whatsapp');
+        break;
         
       case "whatsapp.status.received":
         await this.handleWhatsAppStatus(tenantId, payload, metadata);
@@ -126,8 +130,16 @@ export class QueueWorkerEngine {
         await this.handleIncomingMessage(tenantId, payload, metadata, 'messenger');
         break;
 
+      case "messenger.message.received.delayed":
+        await this.handleIncomingMessageDelayed(tenantId, payload, metadata, 'messenger');
+        break;
+
       case "instagram.message.received":
         await this.handleIncomingMessage(tenantId, payload, metadata, 'instagram');
+        break;
+
+      case "instagram.message.received.delayed":
+        await this.handleIncomingMessageDelayed(tenantId, payload, metadata, 'instagram');
         break;
 
       case "social.status.received":
@@ -1858,6 +1870,44 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
 
     this.log.info(`[PROMPT_BUILT] Prepared LLM payload`, { historyLength: history.length, traceId });
 
+    // Debounce / natural delay scheduling: If autopilot is responding, bypass immediate reply and queue delayed job
+    if (isAutopilotResponding && !mediaType && !skipBotReply) {
+      skipBotReply = true;
+      try {
+        const oldestUnrepliedQuery = await db.executeSafe({
+          text: `
+            SELECT created_at FROM messages 
+            WHERE tenant_id = $1 AND conversation_id = $2 AND direction = 'in'
+              AND created_at > COALESCE(
+                (SELECT created_at FROM messages WHERE tenant_id = $1 AND conversation_id = $2 AND direction = 'out' ORDER BY created_at DESC LIMIT 1),
+                '1970-01-01'::timestamptz
+              )
+            ORDER BY created_at ASC LIMIT 1
+          `,
+          values: [tenantId, conversationIdVal]
+        }) as any[];
+
+        const firstInboundAt = oldestUnrepliedQuery.length > 0 ? new Date(oldestUnrepliedQuery[0].created_at) : new Date();
+        const now = new Date();
+        const scheduledTime = new Date(Math.min(
+          now.getTime() + 45000,
+          firstInboundAt.getTime() + 90000
+        ));
+        const delayMs = Math.max(25000, scheduledTime.getTime() - now.getTime());
+
+        const { QueueService } = await import('./queue.service');
+        const queue = new QueueService();
+        await queue.publish(tenantId, `${channel}.message.received.delayed`, {
+          ...payload,
+          targetMessageId: providerMessageId
+        }, { delayMs });
+
+        this.log.info(`[DEBOUNCE_DELAYED] Scheduled delayed autopilot reply in ${delayMs}ms for message ${providerMessageId}`, { traceId });
+      } catch (delayErr) {
+        this.log.error(`[DEBOUNCE_DELAY_FAILED] Failed to schedule delayed autopilot reply`, delayErr as Error, { traceId });
+      }
+    }
+
     // Check if auto-reply is disabled for whatsapp channel (Listening Mode)
     if (channel === 'whatsapp' && !skipBotReply && !isAutopilotResponding) {
       const isAutoReplyEnabled = await FeatureFlagService.isEnabled(tenantId, 'whatsapp_auto_reply', false);
@@ -3346,6 +3396,427 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
     // Telemetry updated immediately upon ingestion above
 
     this.log.info(`[WORKER_COMPLETED] End-to-end pipeline finished successfully`, { traceId });
+  }
+
+  /**
+   * Delayed handler for debounced autopilot message processing.
+   */
+  private async handleIncomingMessageDelayed(
+    tenantId: string,
+    payload: any,
+    metadata: WorkerMetadata,
+    channel: 'whatsapp' | 'messenger' | 'instagram'
+  ) {
+    const traceId = metadata.messageId;
+    const targetMessageId = payload.targetMessageId;
+    this.log.info(`[DEBOUNCE_WORKER] Delayed worker execution started`, { tenantId, traceId, targetMessageId });
+
+    const db = withTenantDB(tenantId);
+    
+    // Resolve Identity phone number from payload
+    let phoneNumber = '';
+    if (channel === 'whatsapp') {
+      const value = payload.entry?.[0]?.changes?.[0]?.value;
+      const incomingMsg = value?.messages?.[0];
+      if (incomingMsg) {
+        const isEcho = incomingMsg.from === value?.metadata?.phone_number_id || 
+                       incomingMsg.from === value?.metadata?.display_phone_number;
+        phoneNumber = isEcho && (incomingMsg as any).to ? (incomingMsg as any).to : (incomingMsg.from || '');
+      }
+    } else {
+      const incomingMsg = payload.entry?.[0]?.messaging?.[0];
+      phoneNumber = incomingMsg?.sender?.id || '';
+    }
+
+    if (!phoneNumber) {
+      this.log.error(`[DEBOUNCE_WORKER] Phone number missing in payload`, undefined, { traceId });
+      return;
+    }
+
+    // Load conversation details
+    const convQuery = await db.executeSafe({
+      text: `SELECT id, status, autopilot_enabled, channel_id, lead_stage, customer_id FROM conversations WHERE phone_number = $1 AND tenant_id = $2 LIMIT 1`,
+      values: [phoneNumber, tenantId]
+    }) as any[];
+    
+    const convRecord = convQuery[0] || null;
+    if (!convRecord) {
+      this.log.info(`[DEBOUNCE_WORKER] Conversation not found, exit`, { traceId, phoneNumber });
+      return;
+    }
+
+    const conversationId = convRecord.id;
+    const autopilotEnabled = convRecord.autopilot_enabled;
+    const currentStatus = convRecord.status;
+    const resolvedChannelId = convRecord.channel_id || metadata.channelId;
+    const customerId = convRecord.customer_id;
+
+    // Check 1: Autopilot is still active
+    const isGlobalAutopilotEnabled = process.env.ENABLE_SELECTED_AUTOPILOT === 'true';
+    if (!isGlobalAutopilotEnabled || !autopilotEnabled) {
+      this.log.info(`[DEBOUNCE_WORKER] Autopilot is disabled, exit`, { traceId, autopilotEnabled });
+      return;
+    }
+
+    // Check 2: Status is not human takeover
+    if (currentStatus === 'human') {
+      this.log.info(`[DEBOUNCE_WORKER] Conversation status is human, exit`, { traceId });
+      return;
+    }
+
+    // Check 3: The targetMessageId is still the latest inbound message in the conversation
+    const latestInboundQuery = await db.executeSafe({
+      text: `SELECT provider_message_id, content FROM messages WHERE tenant_id = $1 AND conversation_id = $2 AND direction = 'in' ORDER BY created_at DESC LIMIT 1`,
+      values: [tenantId, conversationId]
+    }) as any[];
+
+    if (latestInboundQuery.length === 0) {
+      this.log.info(`[DEBOUNCE_WORKER] No inbound messages found, exit`, { traceId });
+      return;
+    }
+
+    const latestInboundProviderId = latestInboundQuery[0].provider_message_id;
+    const latestInboundContent = latestInboundQuery[0].content || '';
+
+    if (latestInboundProviderId !== targetMessageId) {
+      this.log.info(`[DEBOUNCE_WORKER] Debounced: message ${targetMessageId} is superseded by ${latestInboundProviderId}. Exit silently.`, { traceId });
+      return;
+    }
+
+    // Check 4: No operator outbound messages exist after this inbound message
+    const operatorOutboundQuery = await db.executeSafe({
+      text: `
+        SELECT id FROM messages 
+        WHERE tenant_id = $1 AND conversation_id = $2 AND direction = 'out' 
+          AND model_used IS NULL
+          AND created_at > (SELECT created_at FROM messages WHERE provider_message_id = $3 AND tenant_id = $1 LIMIT 1)
+      `,
+      values: [tenantId, conversationId, targetMessageId]
+    }) as any[];
+
+    if (operatorOutboundQuery.length > 0) {
+      this.log.info(`[DEBOUNCE_WORKER] Operator outbound exists after target message, exit`, { traceId });
+      return;
+    }
+
+    // Check 5: No bot outbound has already been sent for this inbound sequence (latest outbound is before the latest inbound)
+    const latestOutboundQuery = await db.executeSafe({
+      text: `SELECT created_at FROM messages WHERE tenant_id = $1 AND conversation_id = $2 AND direction = 'out' ORDER BY created_at DESC LIMIT 1`,
+      values: [tenantId, conversationId]
+    }) as any[];
+
+    const latestInboundTime = await db.executeSafe({
+      text: `SELECT created_at FROM messages WHERE provider_message_id = $1 AND tenant_id = $2 LIMIT 1`,
+      values: [targetMessageId, tenantId]
+    }) as any[];
+
+    if (latestOutboundQuery.length > 0 && latestInboundTime.length > 0) {
+      const outTime = new Date(latestOutboundQuery[0].created_at).getTime();
+      const inTime = new Date(latestInboundTime[0].created_at).getTime();
+      if (outTime > inTime) {
+        this.log.info(`[DEBOUNCE_WORKER] Bot response already sent for this inbound sequence, exit`, { traceId });
+        return;
+      }
+    }
+
+    // All checks pass! Now run Stop Rules / Deterministic responses BEFORE LLM generation.
+    const normalizedContent = latestInboundContent
+      .replace(/İ/g, 'i')
+      .replace(/I/g, 'ı')
+      .toLowerCase()
+      .trim();
+
+    const postponePatterns = [
+      /tarih.*netle/i,
+      /tarih.*belir/i,
+      /sonra yazar/i,
+      /netleşince.*dönüş/i,
+      /netleşince.*döner/i,
+      /şu an belli değil/i,
+      /belli olunca/i,
+      /daha sonra.*dön/i,
+      /daha sonra.*yazar/i
+    ];
+
+    const thankYouPatterns = [
+      /teşekkür.*eder/i,
+      /teşekkürler/i,
+      /sağol/i,
+      /sağolasın/i,
+      /görüşmek üzere/i,
+      /hoşçakal/i,
+      /iyi günler/i,
+      /iyi akşamlar/i
+    ];
+
+    let deterministicReply = '';
+    if (postponePatterns.some(pat => pat.test(normalizedContent))) {
+      deterministicReply = 'Tabii, tarihiniz netleştiğinde bize bu numara üzerinden yazabilirsiniz. Size uygun şekilde randevu planlaması için yardımcı oluruz. Geçmiş olsun, sağlıklı günler dileriz.';
+    } else if (thankYouPatterns.some(pat => pat.test(normalizedContent))) {
+      deterministicReply = 'Rica ederiz, size de iyi günler dileriz.';
+    }
+
+    const msgService = new MessageService(db);
+
+    if (deterministicReply) {
+      this.log.info(`[DEBOUNCE_WORKER] Stop rule triggered. Sending deterministic response: "${deterministicReply}"`, { traceId });
+      
+      const { CredentialsService } = await import('../services/credentials.service');
+      const outboundCreds = await CredentialsService.resolveCredentials(tenantId, channel);
+      const accessToken = outboundCreds.accessToken || '';
+      const phoneId = outboundCreds.whatsappPhoneNumberId || '';
+
+      if (!accessToken || (channel === 'whatsapp' && !phoneId)) {
+        this.log.error(`[DEBOUNCE_WORKER] Missing credentials for deterministic response`, undefined, { traceId });
+        return;
+      }
+
+      let outProviderMessageId: string | null = null;
+      try {
+        if (channel === 'whatsapp') {
+          const outRes = await msgService.sendWhatsAppMessage(phoneId, accessToken, phoneNumber, deterministicReply, outboundCreds.provider);
+          outProviderMessageId = outRes.providerMessageId || null;
+        } else {
+          const outRes = await msgService.sendSocialMessage(accessToken, phoneNumber, deterministicReply, channel);
+          outProviderMessageId = outRes.providerMessageId || null;
+        }
+      } catch (sendErr) {
+        this.log.error(`[DEBOUNCE_WORKER] Failed to send deterministic response`, sendErr as Error, { traceId });
+        return;
+      }
+
+      // Save message
+      const outMsgResult = await msgService.saveMessageIdempotent({
+        phoneNumber,
+        direction: 'out',
+        content: deterministicReply,
+        channel,
+        channelId: resolvedChannelId,
+        groupId: metadata.groupId,
+        modelUsed: 'stop_rule_auto',
+        status: 'sent'
+      });
+
+      // Realtime publish
+      if (outMsgResult.messageId) {
+        try {
+          const { RealtimePublisher } = await import('@/lib/realtime/publisher');
+          await RealtimePublisher.publishMessageCreated(tenantId, {
+            id: outMsgResult.messageId,
+            conversation_id: conversationId,
+            phone_number: phoneNumber,
+            content: deterministicReply,
+            direction: 'out',
+            model_used: 'stop_rule_auto',
+            status: 'sent',
+            created_at: new Date().toISOString(),
+            provider_message_id: outProviderMessageId || undefined
+          }, { traceId, spanId: outProviderMessageId || traceId });
+        } catch (rtErr) {
+          this.log.error(`[DEBOUNCE_WORKER] Realtime publish failed for deterministic response`, rtErr as Error, { traceId });
+        }
+      }
+
+      return;
+    }
+
+    // No stop rule matched, proceed to LLM generation.
+    this.log.info(`[DEBOUNCE_WORKER] No stop rule matched. Generating AI response.`, { traceId });
+
+    // Fetch brain & build prompts
+    const { BrainResolver } = await import('../brain/brain-resolver');
+    let brain;
+    try {
+      brain = await BrainResolver.resolveTenantBrain(payload, channel, traceId, metadata.channelId);
+    } catch (e) {
+      this.log.error(`[DEBOUNCE_WORKER] Could not resolve brain`, undefined, { tenantId, traceId });
+      return;
+    }
+
+    const { ConversationService } = await import('../services/conversation.service');
+    const convService = new ConversationService(db);
+    const history = await convService.getHistory(phoneNumber, 10);
+
+    let unifiedContext: any = null;
+    try {
+      const { IdentityEngine } = await import('@/lib/services/ai/engines/identity');
+      if (customerId && conversationId) {
+        unifiedContext = await IdentityEngine.getContext(tenantId, customerId, conversationId);
+      }
+    } catch (e) {
+      this.log.error('[DEBOUNCE_WORKER] Error fetching identity context', e as Error, { traceId });
+    }
+
+    if (!unifiedContext) unifiedContext = {};
+    unifiedContext.history = history;
+    unifiedContext.currentMessageText = latestInboundContent;
+
+    const { PromptBuilder } = await import('../services/ai/prompt-builder');
+    const systemPromptText = PromptBuilder.buildSystemPrompt(brain, convRecord.lead_stage, false, unifiedContext);
+
+    const aiMessages: ChatMessage[] = [
+      { role: 'system' as const, content: String(systemPromptText) },
+      ...history
+    ];
+
+    const llmModel = brain.context.settings.aiModel || 'gemini-2.5-flash';
+    const apiKey = brain.context.config?.raw?.gemini_api_key || process.env.GEMINI_API_KEY || '';
+
+    const aiConfig = {
+      provider: 'gemini' as 'gemini' | 'openai',
+      modelId: llmModel,
+      apiKey: apiKey,
+      temperature: 0.7,
+      maxTokens: brain.context.settings.maxResponseTokens || 1000
+    };
+
+    const timeoutMs = 25000;
+    let aiResponse: any;
+
+    const executeLLM = async (messages: any[]) => {
+      const aiPromise = this.aiOrchestrator.generateResponse(messages, aiConfig, tenantId, conversationId);
+      const timeoutPromise = new Promise<never>((_, reject) => 
+        setTimeout(() => reject(new Error("AI_TIMEOUT")), timeoutMs)
+      );
+      return Promise.race([aiPromise, timeoutPromise]);
+    };
+
+    // Quality gate validation & retry logic
+    const { TurkishReplyQualityGate } = await import('@/lib/services/ai/turkish-quality-gate');
+
+    try {
+      aiResponse = await executeLLM(aiMessages);
+      let qualityGate = TurkishReplyQualityGate.validate(aiResponse.text);
+
+      if (!qualityGate.valid) {
+        this.log.warn(`[DEBOUNCE_WORKER] Quality gate failed on first attempt: ${qualityGate.reason}. Retrying...`, { traceId });
+        
+        const retryMessages = [
+          ...aiMessages,
+          { role: 'assistant' as const, content: aiResponse.text },
+          {
+            role: 'user' as const,
+            content: `DİKKAT: Ürettiğin Türkçe metinde ek hatası veya gereksiz iyelik eki/çift ek (örneğin "ağrınızız", "ameliyatınızızı", "planızı", "aklınızızdaki") tespit edildi. Lütfen bu hataları düzelterek resmi ama sade Türkçe ile kısa bir cevap üret. Tanı koyma, fiyat verme, gereksiz sahiplik ekleri kullanma.`
+          }
+        ];
+
+        aiResponse = await executeLLM(retryMessages);
+        qualityGate = TurkishReplyQualityGate.validate(aiResponse.text);
+      }
+
+      if (!qualityGate.valid) {
+        this.log.error(`[DEBOUNCE_WORKER] Quality gate failed on second attempt: ${qualityGate.reason}. Blocking send, taking over to human.`, undefined, { traceId });
+        
+        // Takeover conversation to human
+        await db.executeSafe({
+          text: `UPDATE conversations SET status = 'human' WHERE id = $1 AND tenant_id = $2`,
+          values: [conversationId, tenantId]
+        });
+
+        // Log ai_response_failed warning event
+        AIEventEmitter.emit({
+          tenantId,
+          conversationId,
+          customerId,
+          type: 'ai_response_failed',
+          category: 'pipeline',
+          severity: 'warning',
+          payload: { reason: qualityGate.reason }
+        });
+
+        // Insert non-patient-visible system message
+        await db.executeSafe({
+          text: `
+            INSERT INTO messages (tenant_id, conversation_id, phone_number, direction, content, channel, provider_message_id, status)
+            VALUES ($1, $2, $3, 'system', $4, $5, 'system_alert', 'delivered')
+          `,
+          values: [tenantId, conversationId, phoneNumber, 'AI yanıtı Türkçe kalite kontrolünü geçemedi, manuel kontrol gerekli. (Quality Gate Blocked)', channel]
+        });
+
+        return;
+      }
+
+      // Format & sanitize response
+      let finalResponseText = aiResponse.text;
+      const { ResponsePolicy } = await import('../services/ai/response-policy');
+      const policy = new ResponsePolicy();
+      const validation = policy.validate(finalResponseText, brain);
+
+      if (!validation.valid) {
+        this.log.error(`[DEBOUNCE_WORKER] Policy block: ${validation.reason}`, undefined, { traceId });
+        // Takeover conversation to human
+        await db.executeSafe({
+          text: `UPDATE conversations SET status = 'human' WHERE id = $1 AND tenant_id = $2`,
+          values: [conversationId, tenantId]
+        });
+        return;
+      }
+
+      const { sanitizePatientFacingMessage } = await import('@/lib/utils/patient-message-sanitizer');
+      finalResponseText = sanitizePatientFacingMessage(finalResponseText);
+
+      if (channel === 'whatsapp') {
+        finalResponseText = formatForWhatsApp(finalResponseText);
+      }
+
+      // Send response
+      const outboundCreds = await CredentialsService.resolveCredentials(tenantId, channel);
+      const accessToken = outboundCreds.accessToken || '';
+      const phoneId = outboundCreds.whatsappPhoneNumberId || '';
+
+      if (!accessToken || (channel === 'whatsapp' && !phoneId)) {
+        this.log.error(`[DEBOUNCE_WORKER] Missing credentials for send`, undefined, { traceId });
+        return;
+      }
+
+      let outProviderMessageId: string | null = null;
+      if (channel === 'whatsapp') {
+        const outRes = await msgService.sendWhatsAppMessage(phoneId, accessToken, phoneNumber, finalResponseText, outboundCreds.provider);
+        outProviderMessageId = outRes.providerMessageId || null;
+      } else {
+        const outRes = await msgService.sendSocialMessage(accessToken, phoneNumber, finalResponseText, channel);
+        outProviderMessageId = outRes.providerMessageId || null;
+      }
+
+      // Save message
+      const outMsgResult = await msgService.saveMessageIdempotent({
+        phoneNumber,
+        direction: 'out',
+        content: finalResponseText,
+        channel,
+        channelId: resolvedChannelId,
+        groupId: metadata.groupId,
+        modelUsed: llmModel,
+        promptTokens: aiResponse.inputTokens || 0,
+        completionTokens: aiResponse.outputTokens || 0,
+        providerMessageId: outProviderMessageId,
+        status: 'sent'
+      });
+
+      // Realtime publish
+      if (outMsgResult.messageId) {
+        try {
+          const { RealtimePublisher } = await import('@/lib/realtime/publisher');
+          await RealtimePublisher.publishMessageCreated(tenantId, {
+            id: outMsgResult.messageId,
+            conversation_id: conversationId,
+            phone_number: phoneNumber,
+            content: finalResponseText,
+            direction: 'out',
+            model_used: llmModel,
+            status: 'sent',
+            created_at: new Date().toISOString(),
+            provider_message_id: outProviderMessageId || undefined
+          }, { traceId, spanId: outProviderMessageId || traceId });
+        } catch (rtErr) {
+          this.log.error(`[DEBOUNCE_WORKER] Realtime publish failed for response`, rtErr as Error, { traceId });
+        }
+      }
+
+    } catch (llmErr) {
+      this.log.error(`[DEBOUNCE_WORKER] LLM or send failed`, llmErr as Error, { traceId });
+      throw llmErr;
+    }
   }
 
   /**

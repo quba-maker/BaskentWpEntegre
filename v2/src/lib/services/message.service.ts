@@ -3,7 +3,7 @@ import { logger } from "@/lib/core/logger";
 
 export interface MessagePayload {
   phoneNumber: string;
-  direction: 'in' | 'out';
+  direction: 'in' | 'out' | 'system';
   content: string;
   channel: string;
   channelId?: string | null;

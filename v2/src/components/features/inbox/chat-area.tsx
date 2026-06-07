@@ -1913,7 +1913,7 @@ export function ConversationViewport() {
                               </button>
 
                               {/* Reaction Picker Button */}
-                              {item.message.sender === "user" ? (
+                              {item.message.sender === "user" && (
                                 <div className="relative reaction-picker-container">
                                   <button
                                     onClick={(e) => {
@@ -1949,18 +1949,6 @@ export function ConversationViewport() {
                                       })}
                                     </div>
                                   )}
-                                </div>
-                              ) : (
-                                <div className="relative group/tooltip">
-                                  <button
-                                    disabled
-                                    className="p-1.5 rounded-full opacity-40 text-[var(--q-text-secondary)] border border-[var(--q-border-default)] bg-[var(--q-bg-primary)] cursor-not-allowed"
-                                  >
-                                    <Smile className="w-3.5 h-3.5" />
-                                  </button>
-                                  <div className="absolute bottom-full mb-1.5 left-1/2 -translate-x-1/2 scale-0 group-hover/tooltip:scale-100 transition-all duration-150 origin-bottom bg-black/85 text-white text-[10px] px-2 py-1 rounded whitespace-nowrap z-20 shadow-md">
-                                    WhatsApp API bu mesaj için reaction göndermeyi desteklemeyebilir.
-                                  </div>
                                 </div>
                               )}
                             </div>

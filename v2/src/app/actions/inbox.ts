@@ -4272,3 +4272,123 @@ export async function sendNoReplyReminderAction(conversationId: string, messageT
   });
 }
 
+export async function scheduleReminderTaskAction(
+  opportunityId: string,
+  dueAtUtc: string,
+  note?: string
+) {
+  noStore();
+  return withActionGuard(
+    { actionName: 'scheduleReminderTaskAction' },
+    async (ctx) => {
+      if (!ctx.userId) {
+        return { success: false, error: "Kullanıcı kimliği bulunamadı (oturum kapalı)." };
+      }
+
+      // 1. Fetch opportunity details
+      const oppQuery = await ctx.db.executeSafe({
+        text: `SELECT id, conversation_id, phone_number, lead_id FROM opportunities WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+        values: [opportunityId, ctx.tenantId]
+      }) as any[];
+
+      if (oppQuery.length === 0) {
+        return { success: false, error: "Fırsat bulunamadı." };
+      }
+
+      const opp = oppQuery[0];
+      const conversationId = opp.conversation_id;
+      const phone = opp.phone_number;
+      const leadId = opp.lead_id;
+
+      // 2. Check for active duplicate task
+      const activeTasks = await ctx.db.executeSafe({
+        text: `
+          SELECT id, metadata FROM follow_up_tasks 
+          WHERE tenant_id = $1 AND task_type = 'date_pending_followup' AND status IN ('pending', 'in_progress')
+            AND (opportunity_id = $2 OR conversation_id = $3)
+          ORDER BY created_at DESC LIMIT 1
+        `,
+        values: [ctx.tenantId, opportunityId, conversationId]
+      }) as any[];
+
+      const metadata = {
+        zero_outbound_p0: true,
+        zero_outbound: true,
+        source: "inbox_action_intent",
+        intent: "date_pending_followup",
+        actor_id: ctx.userId
+      };
+
+      let taskId: string;
+      let isUpdate = false;
+
+      if (activeTasks.length > 0) {
+        // Update existing task
+        taskId = activeTasks[0].id;
+        isUpdate = true;
+        const mergedMeta = { ...activeTasks[0].metadata, ...metadata };
+
+        await ctx.db.executeSafe({
+          text: `
+            UPDATE follow_up_tasks 
+            SET due_at = $1, 
+                description = $2, 
+                metadata = $3::jsonb, 
+                updated_at = NOW() 
+            WHERE id = $4 AND tenant_id = $5
+          `,
+          values: [dueAtUtc, note || 'Takip hatırlatması güncellendi.', JSON.stringify(mergedMeta), taskId, ctx.tenantId]
+        });
+      } else {
+        // Insert new task
+        const insertRes = await ctx.db.executeSafe({
+          text: `
+            INSERT INTO follow_up_tasks (
+              tenant_id, opportunity_id, conversation_id, phone_number,
+              task_type, title, description, status, due_at, metadata
+            ) VALUES ($1, $2, $3, $4, 'date_pending_followup', 'Takip Hatırlatması', $5, 'pending', $6, $7::jsonb)
+            RETURNING id
+          `,
+          values: [
+            ctx.tenantId,
+            opportunityId,
+            conversationId,
+            phone,
+            note || 'Hasta tarih netleşince geri döneceğini belirtti.',
+            dueAtUtc,
+            JSON.stringify(metadata)
+          ]
+        }) as any[];
+        taskId = insertRes[0].id;
+      }
+
+      // 3. Write outreach log
+      await ctx.db.executeSafe({
+        text: `
+          INSERT INTO outreach_logs (tenant_id, lead_id, conversation_id, opportunity_id, action, channel, actor_id, metadata)
+          VALUES ($1, $2, $3, $4, 'reminder_scheduled', 'system', $5, $6::jsonb)
+        `,
+        values: [
+          ctx.tenantId,
+          leadId || null,
+          conversationId,
+          opportunityId,
+          ctx.userId,
+          JSON.stringify({
+            task_id: taskId,
+            due_at: dueAtUtc,
+            is_update: isUpdate,
+            note
+          })
+        ]
+      });
+
+      return { success: true, taskId, isUpdate };
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error };
+    return res.data;
+  });
+}
+
+

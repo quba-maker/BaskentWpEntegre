@@ -4,12 +4,13 @@ import { useState, useEffect, useRef } from "react";
 import { useSWRConfig } from "swr";
 import { User, MapPin, Building, Activity, Tag, ChevronDown, ChevronRight, Save, X, Plus, ChevronLeft, Check, Loader2, Sparkles, FileText, Brain, Link, Clock, Moon, Calendar, CalendarClock, PhoneForwarded, MailPlus, Share2, Eye, EyeOff, Send } from "lucide-react";
 import { useInboxStore } from "@/store/inbox-store";
-import { updateCrmData, addTag, removeTag, prepareFollowUpDraft, sendApprovedFollowUp, checkSecondaryFallback, prepareSecondaryDraft, checkFormGreetingEligibility, prepareFormGreetingDraft, saveBotSteeringDirectiveAction, saveFormGreetingDraftInternalAction, getActiveBotDirectiveAction, getActiveTasksForSteeringAction, sendFormGreetingFromInboxAction, prepareNoReplyReminderDraftAction, sendNoReplyReminderAction } from "@/app/actions/inbox";
+import { updateCrmData, addTag, removeTag, prepareFollowUpDraft, sendApprovedFollowUp, checkSecondaryFallback, prepareSecondaryDraft, checkFormGreetingEligibility, prepareFormGreetingDraft, saveBotSteeringDirectiveAction, saveFormGreetingDraftInternalAction, getActiveBotDirectiveAction, getActiveTasksForSteeringAction, sendFormGreetingFromInboxAction, prepareNoReplyReminderDraftAction, sendNoReplyReminderAction, scheduleReminderTaskAction } from "@/app/actions/inbox";
 import { CustomerAiBrainPanel } from "@/components/features/ai-observability/CustomerAiBrain";
 import { AiTimelinePanel } from "@/components/features/ai-observability/AiTimeline";
 import { resolvePatientDisplayName, formatPhoneReadable } from "@/lib/utils/patient-name-resolver";
 import { normalizeCountry } from "@/lib/utils/country-normalizer";
 import { extractFromPatientMessageDeterministic } from "@/lib/utils/patient-message-extractor";
+import { resolveInboxActionIntent } from "@/lib/utils/intent-resolver";
 import { resolveDepartmentWithConflict } from "@/lib/utils/crm-conflict-resolver";
 import { resolvePatientTimeDisplay } from "@/lib/utils/timezone";
 import { useParams } from "next/navigation";
@@ -19,6 +20,7 @@ import { useTenant } from "@/components/providers/tenant-provider";
 import { PatientFormModal } from "./patient-form-modal";
 import { PhoneCallModal } from "./phone-call-modal";
 import { AppointmentModal } from "./appointment-modal";
+import { FollowUpReminderModal } from "./follow-up-reminder-modal";
 import { useQueryClient } from "@tanstack/react-query";
 import { Phone } from "lucide-react";
 
@@ -96,6 +98,7 @@ export function ContextPanel() {
   const [isFormModalOpen, setIsFormModalOpen] = useState(false);
   const [isPhoneCallModalOpen, setIsPhoneCallModalOpen] = useState(false);
   const [isAppointmentModalOpen, setIsAppointmentModalOpen] = useState(false);
+  const [isReminderModalOpen, setIsReminderModalOpen] = useState(false);
   const queryClient = useQueryClient();
 
   const oppId = activeContact?.active_opp_id || activeContact?.active_opportunity_id || activeContact?.opportunity_id || "";
@@ -696,68 +699,185 @@ export function ContextPanel() {
           </div>
         )}
 
-        {/* Task-based Action Required Deep Link Card */}
-        {activeContact.active_task_type && (
-          <div className="w-full mt-2 p-2.5 rounded-xl border space-y-1.5 text-left bg-indigo-50/30 shadow-sm" style={{ borderColor: 'var(--q-blue)' }}>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1">
-                <Clock className="w-3 h-3 text-indigo-500" />
-                <span className="text-[9px] font-bold uppercase tracking-widest text-indigo-700">Aksiyon Gerekli</span>
+        {/* Task-based Action Required Deep Link Card (Steered by Intent Resolver) */}
+        {(() => {
+          if (!activeContact) return null;
+
+          const lastMsg = activeContact.last_message || "";
+          const lastMsgDir = activeContact.last_message_direction || "";
+          
+          let resolvedIntent = "no_action";
+          if (lastMsgDir === "in") {
+            resolvedIntent = resolveInboxActionIntent(lastMsg);
+          }
+
+          // If conversation is closed, hide the card
+          if (resolvedIntent === "conversation_closed") {
+            return null;
+          }
+
+          // If date_pending_followup
+          if (resolvedIntent === "date_pending_followup") {
+            return (
+              <div className="w-full mt-2 p-2.5 rounded-xl border space-y-1.5 text-left bg-indigo-50/30 shadow-sm" style={{ borderColor: 'var(--q-blue)' }}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1">
+                    <Clock className="w-3 h-3 text-indigo-500" />
+                    <span className="text-[9px] font-bold uppercase tracking-widest text-indigo-700">Takip Hatırlatması Gerekli</span>
+                  </div>
+                  <span className="text-[8px] font-bold uppercase tracking-widest px-1.5 py-0.2 rounded shadow-sm bg-indigo-100 text-indigo-700">
+                    Bekliyor
+                  </span>
+                </div>
+                
+                <p className="text-[11px] font-semibold text-gray-700 leading-snug">
+                  Hasta tarih netleşince geri döneceğini belirtti.
+                </p>
+
+                <button
+                  type="button"
+                  onClick={() => setIsReminderModalOpen(true)}
+                  className="w-full py-1 px-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all shadow-sm"
+                >
+                  <CalendarClock className="w-3 h-3" />
+                  <span>Hatırlatma Planla</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsFormModalOpen(true)}
+                  className="w-full py-1 px-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all shadow-sm border border-black/5"
+                >
+                  <FileText className="w-3 h-3" />
+                  <span>Form Detayı</span>
+                </button>
               </div>
-              <span className="text-[8px] font-bold uppercase tracking-widest px-1.5 py-0.2 rounded shadow-sm bg-indigo-100 text-indigo-700">
-                Bekliyor
-              </span>
-            </div>
-            
-            <p className="text-[11px] font-semibold text-gray-700 leading-snug">
-              {(() => {
-                switch (activeContact.active_task_type) {
-                  case 'no_reply_followup': return 'Müşteriden yanıt alınamadığı için takip taslağı oluşturuldu.';
-                  case 'template_required_task': return '24 saatlik WhatsApp penceresi kapandığı için şablon onayı gerekiyor.';
-                  case 'bot_handoff_followup': return 'Bot konuşmayı manuele devretti, takip gerekiyor.';
-                  case 'call_patient': return 'Hastanın telefonla aranması gerekiyor.';
-                  case 'callback_scheduled': return 'Geri arama randevusu tanımlandı.';
-                  case 'follow_up_no_response': return 'Cevap vermeyen hastaya takip araması gerekiyor.';
-                  case 'coordinator_review': return 'Koordinatör onayı/incelemesi bekleniyor.';
-                  case 'travel_planning': return 'Seyahat planlaması yapılması gerekiyor.';
-                  case 'payment_follow_up': return 'Ödeme takibi yapılması gerekiyor.';
-                  case 'appointment_reminder': return 'Randevu hatırlatması yapılması gerekiyor.';
-                  default: return 'Aktif bir takip görevi bulunuyor.';
-                }
-              })()}
-            </p>
+            );
+          }
 
-            {(() => {
-              const isPhoneTask = [
-                'call_patient', 'callback_scheduled', 'follow_up_no_response',
-                'no_reply_followup', 'template_required_task', 'bot_handoff_followup'
-              ].includes(activeContact.active_task_type);
+          if (resolvedIntent === "call_request") {
+            return (
+              <div className="w-full mt-2 p-2.5 rounded-xl border space-y-1.5 text-left bg-indigo-50/30 shadow-sm" style={{ borderColor: 'var(--q-blue)' }}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1">
+                    <Clock className="w-3 h-3 text-indigo-500" />
+                    <span className="text-[9px] font-bold uppercase tracking-widest text-indigo-700">Arama Gerekli</span>
+                  </div>
+                  <span className="text-[8px] font-bold uppercase tracking-widest px-1.5 py-0.2 rounded shadow-sm bg-indigo-100 text-indigo-700">
+                    Arama Talebi
+                  </span>
+                </div>
+                
+                <p className="text-[11px] font-semibold text-gray-700 leading-snug">
+                  Hasta kendisiyle iletişime geçilmesini / aranmayı talep etti.
+                </p>
 
-              if (isPhoneTask) {
-                return (
-                  <a
-                    href={`/${tenantSlug}/takip?tab=telefon&opp=${oppId}`}
-                    className="w-full py-1 px-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all shadow-sm"
-                  >
-                    <PhoneForwarded className="w-3 h-3" />
-                    <span>Telefon Takibinde Aç</span>
-                  </a>
-                );
-              }
+                <button
+                  type="button"
+                  onClick={() => setIsPhoneCallModalOpen(true)}
+                  className="w-full py-1 px-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all shadow-sm"
+                >
+                  <PhoneForwarded className="w-3 h-3" />
+                  <span>Arama Planla</span>
+                </button>
+              </div>
+            );
+          }
 
-              // All other tasks (including isAppointmentTask or unknown fallbacks)
-              return (
-                <a
-                  href={`/${tenantSlug}/takip?tab=randevu&opp=${oppId}`}
+          if (resolvedIntent === "appointment_request") {
+            return (
+              <div className="w-full mt-2 p-2.5 rounded-xl border space-y-1.5 text-left bg-indigo-50/30 shadow-sm" style={{ borderColor: 'var(--q-blue)' }}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1">
+                    <Clock className="w-3 h-3 text-indigo-500" />
+                    <span className="text-[9px] font-bold uppercase tracking-widest text-indigo-700">Randevu Talebi</span>
+                  </div>
+                  <span className="text-[8px] font-bold uppercase tracking-widest px-1.5 py-0.2 rounded shadow-sm bg-emerald-100 text-emerald-700">
+                    Randevu
+                  </span>
+                </div>
+                
+                <p className="text-[11px] font-semibold text-gray-700 leading-snug">
+                  Hasta tedavi veya randevu detayları için uygunluk sordu.
+                </p>
+
+                <button
+                  type="button"
+                  onClick={() => setIsAppointmentModalOpen(true)}
                   className="w-full py-1 px-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all shadow-sm"
                 >
                   <Calendar className="w-3 h-3" />
-                  <span>Randevu Yönetiminde Aç</span>
-                </a>
-              );
-            })()}
-          </div>
-        )}
+                  <span>Randevu Planla</span>
+                </button>
+              </div>
+            );
+          }
+
+          // Default fallback to task-based Action Required card:
+          if (activeContact.active_task_type) {
+            return (
+              <div className="w-full mt-2 p-2.5 rounded-xl border space-y-1.5 text-left bg-indigo-50/30 shadow-sm" style={{ borderColor: 'var(--q-blue)' }}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1">
+                    <Clock className="w-3 h-3 text-indigo-500" />
+                    <span className="text-[9px] font-bold uppercase tracking-widest text-indigo-700">Aksiyon Gerekli</span>
+                  </div>
+                  <span className="text-[8px] font-bold uppercase tracking-widest px-1.5 py-0.2 rounded shadow-sm bg-indigo-100 text-indigo-700">
+                    Bekliyor
+                  </span>
+                </div>
+                
+                <p className="text-[11px] font-semibold text-gray-700 leading-snug">
+                  {(() => {
+                    switch (activeContact.active_task_type) {
+                      case 'no_reply_followup': return 'Müşteriden yanıt alınamadığı için takip taslağı oluşturuldu.';
+                      case 'template_required_task': return '24 saatlik WhatsApp penceresi kapandığı için şablon onayı gerekiyor.';
+                      case 'bot_handoff_followup': return 'Bot konuşmayı manuele devretti, takip gerekiyor.';
+                      case 'call_patient': return 'Hastanın telefonla aranması gerekiyor.';
+                      case 'callback_scheduled': return 'Geri arama randevusu tanımlandı.';
+                      case 'follow_up_no_response': return 'Cevap vermeyen hastaya takip araması gerekiyor.';
+                      case 'coordinator_review': return 'Koordinatör onayı/incelemesi bekleniyor.';
+                      case 'travel_planning': return 'Seyahat planlaması yapılması gerekiyor.';
+                      case 'payment_follow_up': return 'Ödeme takibi yapılması gerekiyor.';
+                      case 'appointment_reminder': return 'Randevu hatırlatması yapılması gerekiyor.';
+                      default: return 'Aktif bir takip görevi bulunuyor.';
+                    }
+                  })()}
+                </p>
+
+                {(() => {
+                  const isPhoneTask = [
+                    'call_patient', 'callback_scheduled', 'follow_up_no_response',
+                    'no_reply_followup', 'template_required_task', 'bot_handoff_followup'
+                  ].includes(activeContact.active_task_type);
+
+                  if (isPhoneTask) {
+                    return (
+                      <a
+                        href={`/${tenantSlug}/takip?tab=telefon&opp=${oppId}`}
+                        className="w-full py-1 px-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all shadow-sm"
+                      >
+                        <PhoneForwarded className="w-3 h-3" />
+                        <span>Telefon Takibinde Aç</span>
+                      </a>
+                    );
+                  }
+
+                  return (
+                    <a
+                      href={`/${tenantSlug}/takip?tab=randevu&opp=${oppId}`}
+                      className="w-full py-1 px-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all shadow-sm"
+                    >
+                      <Calendar className="w-3 h-3" />
+                      <span>Randevu Yönetiminde Aç</span>
+                    </a>
+                  );
+                })()}
+              </div>
+            );
+          }
+
+          return null;
+        })()}
 
         {/* A1.7b — Secondary Phone Fallback Section */}
         {allPhones.length >= 2 && !isSecondaryActive && (
@@ -1306,7 +1426,7 @@ export function ContextPanel() {
         )}
 
         {/* Quick Action Grid Cards */}
-        <div className="grid grid-cols-3 gap-2 mt-2.5 w-full pt-2 border-t border-black/5">
+        <div className="grid grid-cols-2 gap-2 mt-2.5 w-full pt-2 border-t border-black/5">
           <button
             type="button"
             onClick={() => setIsPhoneCallModalOpen(true)}
@@ -1339,6 +1459,23 @@ export function ContextPanel() {
               <CalendarClock className="w-3 h-3" />
             </div>
             <span className="text-[10px] font-bold tracking-tight leading-tight">Randevu Planla</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIsReminderModalOpen(true)}
+            className="flex flex-col items-center justify-center p-1.5 rounded-xl border text-center transition-all duration-200 group hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
+            style={{
+              backgroundColor: "rgba(0, 122, 255, 0.04)",
+              borderColor: "rgba(0, 122, 255, 0.12)",
+              color: "#007AFF"
+            }}
+          >
+            <div className="w-6 h-6 rounded-full flex items-center justify-center mb-1 transition-all duration-200 group-hover:scale-110"
+                 style={{ backgroundColor: "rgba(0, 122, 255, 0.08)" }}>
+              <Clock className="w-3 h-3" />
+            </div>
+            <span className="text-[10px] font-bold tracking-tight">Hatırlatma Planla</span>
           </button>
 
           <button
@@ -1691,6 +1828,20 @@ export function ContextPanel() {
           tenantSlug={tenantSlug}
           patientName={patientName}
           phoneNumber={activeContact.id}
+          onSuccess={handleModalSuccess}
+        />
+      )}
+
+      {/* Follow Up Reminder Modal */}
+      {oppId && (
+        <FollowUpReminderModal
+          isOpen={isReminderModalOpen}
+          onClose={() => setIsReminderModalOpen(false)}
+          opportunityId={oppId}
+          tenantSlug={tenantSlug}
+          patientName={patientName}
+          phoneNumber={activeContact.id}
+          activeContact={activeContact}
           onSuccess={handleModalSuccess}
         />
       )}
