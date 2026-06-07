@@ -179,7 +179,7 @@ export async function prepareGreetingDraft(leadId: string) {
       };
     }
   ).then(res => {
-    if (!res.success) return { success: false as const, error: res.error || res.data?.error, alreadySent: res.data?.alreadySent };
+    if (!res.success || res.data?.success === false) return { success: false as const, error: res.error || res.data?.error, alreadySent: res.data?.alreadySent };
     return { 
       success: true as const, 
       draft: res.data?.draft as string, 
@@ -435,7 +435,7 @@ export async function checkGreetingReadiness(leadId: string) {
       };
     }
   ).then(res => {
-    if (!res.success) return { success: false as const, error: res.error || "Kontrol başarısız." };
+    if (!res.success || res.data?.success === false) return { success: false as const, error: res.error || "Kontrol başarısız." };
     const data = (res.data || {}) as any;
     const finalData = {
       draftTemplateAvailable: !!data.draftTemplateAvailable,
@@ -655,7 +655,7 @@ export async function sendGreetingMessage(leadId: string, message: string) {
       return { success: true, messageSent: true };
     }
   ).then(res => {
-    if (!res.success) return { success: false, error: res.error || res.data?.error, alreadySent: res.data?.alreadySent };
+    if (!res.success || res.data?.success === false) return { success: false, error: res.error || res.data?.error, alreadySent: res.data?.alreadySent };
     return { success: true, messageSent: res.data?.messageSent };
   });
 }
@@ -726,7 +726,7 @@ export async function activateBot(leadId: string) {
       return { success: true };
     }
   ).then(res => {
-    if (!res.success) return { success: false, error: res.error || res.data?.error };
+    if (!res.success || res.data?.success === false) return { success: false, error: res.error || res.data?.error };
     return { success: true };
   });
 }
@@ -847,7 +847,7 @@ export async function logCallReached(leadId: string, note?: string) {
       return { success: true };
     }
   ).then(res => {
-    if (!res.success) return { success: false, error: res.error || res.data?.error };
+    if (!res.success || res.data?.success === false) return { success: false, error: res.error || res.data?.error };
     return { success: true };
   });
 }
@@ -905,7 +905,7 @@ export async function logCallMissed(leadId: string, note?: string) {
       return { success: true };
     }
   ).then(res => {
-    if (!res.success) return { success: false, error: res.error || res.data?.error };
+    if (!res.success || res.data?.success === false) return { success: false, error: res.error || res.data?.error };
     return { success: true };
   });
 }
@@ -963,7 +963,7 @@ export async function logCallbackScheduled(leadId: string, note?: string) {
       return { success: true };
     }
   ).then(res => {
-    if (!res.success) return { success: false, error: res.error || res.data?.error };
+    if (!res.success || res.data?.success === false) return { success: false, error: res.error || res.data?.error };
     return { success: true };
   });
 }
@@ -1044,7 +1044,7 @@ export async function logNotInterested(leadId: string, reason?: string) {
       return { success: true };
     }
   ).then(res => {
-    if (!res.success) return { success: false, error: res.error || res.data?.error };
+    if (!res.success || res.data?.success === false) return { success: false, error: res.error || res.data?.error };
     return { success: true };
   });
 }
@@ -1359,7 +1359,7 @@ export async function sendFormGreetingTemplateAction(
       return { success: true, providerMessageId };
     }
   ).then(res => {
-    if (!res.success) return { success: false, error: res.error || res.data?.error };
+    if (!res.success || res.data?.success === false) return { success: false, error: res.error || res.data?.error };
     return { success: true, providerMessageId: res.data?.providerMessageId };
   });
 }
@@ -1503,7 +1503,7 @@ export async function sendMetaTemplateMessage(opportunityId: string, templateNam
       return { success: true };
     }
   ).then(res => {
-    if (!res.success) return { success: false, error: res.error || res.data?.error };
+    if (!res.success || res.data?.success === false) return { success: false, error: res.error || res.data?.error };
     return { success: true };
   });
 }
@@ -1590,7 +1590,7 @@ export async function saveGreetingDraftInternal(leadId: string, approvedText: st
       };
     }
   ).then(res => {
-    if (!res.success) return { success: false as const, error: res.error || "İşlem başarısız." };
+    if (!res.success || res.data?.success === false) return { success: false as const, error: res.error || "İşlem başarısız." };
     return { 
       success: true as const, 
       hasConversation: !!res.data?.hasConversation,
