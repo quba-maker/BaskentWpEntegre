@@ -267,6 +267,9 @@ export async function getConversations(
           AND ($2::text IS NULL OR c.patient_name ILIKE $2 OR c.phone_number ILIKE $2)
           AND ($3::text IS NULL OR c.channel = $3)
           AND ($4::text IS NULL OR c.lead_stage = $4)
+          AND ($5::integer IS NULL OR 1=1)
+          AND ($6::integer IS NULL OR 1=1)
+          AND ($8::integer IS NULL OR 1=1)
           ${isFavoritesFilter ? 'AND cf.id IS NOT NULL AND ca.id IS NULL' : ''}
           ${isBotActiveFilter ? 'AND c.autopilot_enabled = true' : ''}
           ${isArchivedFilter ? 'AND ca.id IS NOT NULL' : (isFavoritesFilter ? '' : `
