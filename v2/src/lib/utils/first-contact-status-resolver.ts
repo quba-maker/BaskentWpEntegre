@@ -186,15 +186,10 @@ export function resolveFirstContactStatus(
 
       if (lastInbound && lastInbound.getTime() > lastResponseTime) {
         patientLevelStatus = 'patient_replied';
-      } else if (hasGreetingConfirmed) {
-        if (anyConfirmed) {
-          patientLevelStatus = 'manual_greeting_confirmed';
-        } else {
-          patientLevelStatus = 'inbox_greeting_sent';
-        }
+      } else if (anyConfirmed) {
+        patientLevelStatus = 'manual_greeting_confirmed';
       } else {
-        // No greeting log but we have sent an outbound, and patient hasn't replied since
-        patientLevelStatus = 'out_of_scope';
+        patientLevelStatus = 'inbox_greeting_sent';
       }
     } else {
       // Patient wrote, and we have NOT responded (no greeting logs, and no outbound after first inbound)

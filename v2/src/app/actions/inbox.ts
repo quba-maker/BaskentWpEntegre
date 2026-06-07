@@ -2937,8 +2937,11 @@ export async function saveFormGreetingDraftInternalAction(conversationId: string
           oppId || null,
           actorId,
           JSON.stringify({
-            zero_outbound: true,
+            draft_text: approvedText,
+            source: 'smart_draft',
             patient_visible: false,
+            zero_api_outbound: true,
+            zero_outbound: true,
             stage_changed: false,
             draft_only: true,
             message_text: approvedText,

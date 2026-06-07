@@ -261,14 +261,8 @@ export async function getForms(page: number = 1, search: string = "", source: st
                                              ELSE (bl.message_stats->>'last_outbound_at')::timestamp
                                            END
                                          ) THEN 'patient_replied'
-                                    -- We responded but patient has not replied since:
-                                    -- Check if we have formal greeting logs (any_confirmed, any_inbox_sent, any_api_sent, first_greeting_at)
-                                    WHEN bl.any_confirmed = true OR bl.any_inbox_sent = true OR bl.any_api_sent = true OR bl.first_greeting_at IS NOT NULL THEN
-                                      CASE
-                                        WHEN bl.any_confirmed = true THEN 'manual_greeting_confirmed'
-                                        ELSE 'inbox_greeting_sent'
-                                      END
-                                    ELSE 'out_of_scope'
+                                    WHEN bl.any_confirmed = true THEN 'manual_greeting_confirmed'
+                                    ELSE 'inbox_greeting_sent'
                                   END
                                 ELSE 'waiting_inbox_reply'
                               END

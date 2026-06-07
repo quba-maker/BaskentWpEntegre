@@ -1573,11 +1573,13 @@ export async function saveGreetingDraftInternal(leadId: string, approvedText: st
           lead.linked_opportunity_id || null,
           actorId,
           JSON.stringify({
-            zero_outbound: true,
+            draft_text: approvedText,
+            source: 'smart_draft',
             patient_visible: false,
+            zero_api_outbound: true,
+            zero_outbound: true,
             draft_only: true,
             stage_changed: false,
-            source: "forms_page",
             message_text: approvedText,
             coordinator_note: coordinatorNote || null,
             phone,
@@ -1738,9 +1740,13 @@ export async function prepareSmartGreetingDraftCore(
     if (hardDuplicateActions.includes(log.action)) {
        break;
     }
-    if (softDuplicateActions.includes(log.action) && (log.draft || log.draft_text || log.message_text)) {
-       existingDraft = log.draft || log.draft_text || log.message_text;
-       break;
+    if (softDuplicateActions.includes(log.action)) {
+       const meta = typeof log.metadata === 'string' ? JSON.parse(log.metadata) : (log.metadata || {});
+       const draftVal = meta.draft_text || meta.draftText || meta.message_text || meta.messageText || meta.draft;
+       if (draftVal) {
+         existingDraft = draftVal;
+         break;
+       }
     }
   }
 
@@ -1764,13 +1770,24 @@ export async function prepareSmartGreetingDraftCore(
     }
     await db.executeSafe({
       text: `INSERT INTO outreach_logs (tenant_id, lead_id, action, actor_id, metadata) VALUES ($1, $2, 'smart_greeting_draft_prepared', $3, $4)`,
-      values: [tenantId, leadId, userId, JSON.stringify({ draft: draftText })]
+      values: [
+        tenantId,
+        leadId,
+        userId,
+        JSON.stringify({
+          draft_text: draftText,
+          source: 'smart_draft',
+          patient_visible: false,
+          zero_api_outbound: true
+        })
+      ]
     });
   }
 
   return {
     draftText,
-    source: 'smart_form_draft' as const,
+    restoredFromLog: !!existingDraft,
+    source: existingDraft ? 'restored' as const : 'generated' as const,
     recommendedPhone: resolution.recommendedPhone?.phone,
     phones: resolution.phones
   };
@@ -1779,8 +1796,7 @@ export async function prepareSmartGreetingDraftCore(
 export async function prepareSmartGreetingDraftAction(leadId: string) {
   try {
     return await withActionGuard({ actionName: 'prepareSmartGreetingDraftAction' }, async (ctx) => {
-      const data = await prepareSmartGreetingDraftCore(ctx.db, ctx.tenantId, ctx.userId, leadId);
-      return { success: true, data };
+      return await prepareSmartGreetingDraftCore(ctx.db, ctx.tenantId, ctx.userId, leadId);
     }).then(res => {
       if (!res.success) return { success: false, error: res.error || "Taslak hazırlanamadı." };
       return {

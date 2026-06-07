@@ -182,25 +182,19 @@ async function runVerification() {
                          OR bl.any_api_sent = true 
                          OR (bl.message_stats->>'has_outbound_after_first_inbound')::boolean = true THEN
                       CASE
-                        -- If patient replied after our last response (max of first_greeting_at and last_outbound_at)
-                        WHEN (bl.message_stats->>'last_inbound_at') IS NOT NULL AND 
-                             (bl.message_stats->>'last_inbound_at')::timestamp > (
-                               CASE 
-                                 WHEN bl.first_greeting_at IS NULL THEN (bl.message_stats->>'last_outbound_at')::timestamp
-                                 WHEN (bl.message_stats->>'last_outbound_at') IS NULL THEN bl.first_greeting_at
-                                 WHEN bl.first_greeting_at > (bl.message_stats->>'last_outbound_at')::timestamp THEN bl.first_greeting_at
-                                 ELSE (bl.message_stats->>'last_outbound_at')::timestamp
-                               END
-                             ) THEN 'patient_replied'
-                        -- We responded but patient has not replied since:
-                        -- Check if we have formal greeting logs (any_confirmed, any_inbox_sent, any_api_sent, first_greeting_at)
-                        WHEN bl.any_confirmed = true OR bl.any_inbox_sent = true OR bl.any_api_sent = true OR bl.first_greeting_at IS NOT NULL THEN
-                          CASE
-                            WHEN bl.any_confirmed = true THEN 'manual_greeting_confirmed'
-                            ELSE 'inbox_greeting_sent'
-                          END
-                        ELSE 'out_of_scope'
-                      END
+                         -- If patient replied after our last response (max of first_greeting_at and last_outbound_at)
+                         WHEN (bl.message_stats->>'last_inbound_at') IS NOT NULL AND 
+                              (bl.message_stats->>'last_inbound_at')::timestamp > (
+                                CASE 
+                                  WHEN bl.first_greeting_at IS NULL THEN (bl.message_stats->>'last_outbound_at')::timestamp
+                                  WHEN (bl.message_stats->>'last_outbound_at') IS NULL THEN bl.first_greeting_at
+                                  WHEN bl.first_greeting_at > (bl.message_stats->>'last_outbound_at')::timestamp THEN bl.first_greeting_at
+                                  ELSE (bl.message_stats->>'last_outbound_at')::timestamp
+                                END
+                              ) THEN 'patient_replied'
+                         WHEN bl.any_confirmed = true THEN 'manual_greeting_confirmed'
+                         ELSE 'inbox_greeting_sent'
+                       END
                     ELSE 'waiting_inbox_reply'
                   END
                 -- 2. no inbound message
