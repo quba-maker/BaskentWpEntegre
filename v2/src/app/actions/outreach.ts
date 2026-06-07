@@ -415,25 +415,23 @@ export async function checkGreetingReadiness(leadId: string) {
                                !hasUnsupportedVariables;
 
       return {
-        success: true,
-        data: {
-          draftTemplateAvailable: true,
-          approvedWhatsappTemplateAvailable: hasRealTemplate && !isNonCompliant && !hasUnsupportedVariables,
-          templateConfigExists: hasRealTemplate,
-          templateSendable,
-          templateNonCompliant: isNonCompliant,
-          complianceWarning: resolved.compliance_warning || null,
-          source: resolved.source === 'system_hardcoded' ? 'system_hardcoded' : (hasRealTemplate ? 'message_templates' : 'none'),
-          isWithin24hWindow: elig.windowOpen,
-          hardBlockedBecausePatientAlreadyInbound,
-          hasHardDuplicate,
-          hasSoftDuplicate,
-          hasUnsupportedVariables,
-          draftText: resolved.rendered,
-          templateName: resolved.templateName,
-          templateLanguage: resolved.language,
-          greetingSent
-        }
+        draftTemplateAvailable: true,
+        approvedWhatsappTemplateAvailable: hasRealTemplate && !isNonCompliant && !hasUnsupportedVariables,
+        templateConfigExists: hasRealTemplate,
+        templateSendable,
+        templateNonCompliant: isNonCompliant,
+        complianceWarning: resolved.compliance_warning || null,
+        source: resolved.source === 'system_hardcoded' ? 'system_hardcoded' : (hasRealTemplate ? 'message_templates' : 'none'),
+        isWithin24hWindow: elig.windowOpen,
+        hardBlockedBecausePatientAlreadyInbound,
+        hasHardDuplicate,
+        hasSoftDuplicate,
+        hasUnsupportedVariables,
+        draftText: resolved.rendered,
+        templateName: resolved.templateName,
+        templateLanguage: resolved.language,
+        greetingSent,
+        _diagnostics: dbDiagnostics
       };
     }
   ).then(res => {
