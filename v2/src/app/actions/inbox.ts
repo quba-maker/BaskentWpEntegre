@@ -16,7 +16,14 @@ import { normalizePhoneForIdentity, parseAllPhones } from "@/lib/utils/phone-ide
 // QUBA AI — Inbox Actions (Zero-Trust Migrated)
 // ==========================================
 
-export async function getConversations(page: number = 1, search: string = "", stage: string = "all") {
+export async function getConversations(
+  page: number = 1,
+  search: string = "",
+  stage: string = "all",
+  primaryFilter: string = "all",
+  replyFilter: string = "all_reply",
+  channelFilter: string = "all"
+) {
   noStore();
   return withActionGuard(
     { actionName: 'getConversations' },
@@ -25,23 +32,27 @@ export async function getConversations(page: number = 1, search: string = "", st
       const offset = (page - 1) * limit;
       const searchFilter = search.trim() ? `%${search.trim()}%` : null;
       
-      const isNoReplyFilter = stage && stage.startsWith('noReply');
-      const isUnreadFilter = stage === 'unread';
-      const isFavoritesFilter = stage === 'favorites';
+      const isNoReplyFilter = primaryFilter === 'needs_response';
+      const isUnreadFilter = primaryFilter === 'unread';
+      const isFavoritesFilter = primaryFilter === 'favorites';
+      const isBotActiveFilter = primaryFilter === 'bot_active';
       const isArchivedFilter = stage === 'archived';
-      const isBotActiveFilter = stage === 'botActive';
 
       let noReplyHours: number | null = null;
-      if (isNoReplyFilter) {
-        const match = stage.match(/noReply_(\d+)h/);
+      if (isNoReplyFilter && replyFilter.startsWith('no_reply')) {
+        const match = replyFilter.match(/no_reply_(\d+)h/);
         if (match) {
           noReplyHours = parseInt(match[1], 10);
         }
       }
 
-      const stageFilter = (isNoReplyFilter || isUnreadFilter || isFavoritesFilter || isArchivedFilter || isBotActiveFilter) 
-        ? null 
-        : (stage !== "all" ? stage : null);
+      const channelFilterVal = (channelFilter && channelFilter !== 'all') 
+        ? (channelFilter === 'facebook' || channelFilter === 'messenger' ? 'messenger' : channelFilter)
+        : null;
+
+      const stageFilterVal = (stage && stage !== 'all' && stage !== 'archived') 
+        ? stage 
+        : null;
 
       const optOutPhones = new Set<string>();
       // Query active opt-out opportunities
@@ -94,7 +105,7 @@ export async function getConversations(page: number = 1, search: string = "", st
       }
 
       // ── FORENSIC TRACE: Log the tenant context being used ──
-      console.log(`[INBOX_FORENSIC] getConversations called | tenantId=${ctx.tenantId} | page=${page} | search="${search}" | stage="${stage}" | noReplyHours=${noReplyHours}`);
+      console.log(`[INBOX_FORENSIC] getConversations called | tenantId=${ctx.tenantId} | page=${page} | search="${search}" | stage="${stage}" | primary=${primaryFilter} | reply=${replyFilter} | channel=${channelFilter} | noReplyHours=${noReplyHours}`);
 
       let queryText = `
         SELECT 
@@ -153,10 +164,16 @@ export async function getConversations(page: number = 1, search: string = "", st
               AND m_unread.direction = 'in'
               AND (m_unread.media_metadata IS NULL OR COALESCE(m_unread.media_metadata->'native'->>'message_type', '') != 'reaction')
               AND m_unread.created_at > COALESCE(
-                (SELECT last_read_at FROM conversation_read_states rs WHERE rs.tenant_id = c.tenant_id AND rs.user_id = $6 AND rs.conversation_id = c.id),
+                (SELECT last_read_at FROM conversation_read_states rs WHERE rs.tenant_id = c.tenant_id AND rs.user_id = $7 AND rs.conversation_id = c.id),
                 '1970-01-01'::timestamptz
               )
           ) as unread,
+          EXISTS (
+            SELECT 1 FROM messages m_out
+            WHERE m_out.conversation_id = c.id
+              AND m_out.tenant_id = c.tenant_id
+              AND m_out.direction = 'out'
+          ) as has_outbound,
           (cp.id IS NOT NULL) as is_pinned,
           (cf.id IS NOT NULL) as is_favorite,
           (ca.id IS NOT NULL) as is_archived,
@@ -234,21 +251,22 @@ export async function getConversations(page: number = 1, search: string = "", st
         -- Pinned Join
         LEFT JOIN conversation_pins cp
           ON c.id = cp.conversation_id
-          AND cp.user_id = $6
+          AND cp.user_id = $7
           AND cp.tenant_id = c.tenant_id
         -- Favorites Join
         LEFT JOIN conversation_favorites cf
           ON c.id = cf.conversation_id
-          AND cf.user_id = $6
+          AND cf.user_id = $7
           AND cf.tenant_id = c.tenant_id
         -- Archives Join
         LEFT JOIN conversation_archives ca
           ON c.id = ca.conversation_id
-          AND ca.user_id = $6
+          AND ca.user_id = $7
           AND ca.tenant_id = c.tenant_id
         WHERE c.tenant_id = $1
           AND ($2::text IS NULL OR c.patient_name ILIKE $2 OR c.phone_number ILIKE $2)
-          AND ($3::text IS NULL OR c.lead_stage = $3)
+          AND ($3::text IS NULL OR c.channel = $3)
+          AND ($4::text IS NULL OR c.lead_stage = $4)
           ${isFavoritesFilter ? 'AND cf.id IS NOT NULL AND ca.id IS NULL' : ''}
           ${isBotActiveFilter ? 'AND c.autopilot_enabled = true' : ''}
           ${isArchivedFilter ? 'AND ca.id IS NOT NULL' : (isFavoritesFilter ? '' : `
@@ -262,7 +280,7 @@ export async function getConversations(page: number = 1, search: string = "", st
                   AND m_unread.direction = 'in'
                   AND (m_unread.media_metadata IS NULL OR COALESCE(m_unread.media_metadata->'native'->>'message_type', '') != 'reaction')
                   AND m_unread.created_at > COALESCE(
-                    (SELECT last_read_at FROM conversation_read_states rs WHERE rs.tenant_id = c.tenant_id AND rs.user_id = $6 AND rs.conversation_id = c.id),
+                    (SELECT last_read_at FROM conversation_read_states rs WHERE rs.tenant_id = c.tenant_id AND rs.user_id = $7 AND rs.conversation_id = c.id),
                     '1970-01-01'::timestamptz
                   )
               )
@@ -270,25 +288,47 @@ export async function getConversations(page: number = 1, search: string = "", st
           `)}
       `;
 
-      const values: any[] = [ctx.tenantId, searchFilter, stageFilter, limit, offset, ctx.userId];
+      const values: any[] = [
+        ctx.tenantId, 
+        searchFilter, 
+        channelFilterVal, 
+        stageFilterVal, 
+        limit, 
+        offset, 
+        ctx.userId,
+        noReplyHours
+      ];
 
       if (isNoReplyFilter) {
-        values.push(noReplyHours);
-        queryText += `
-          AND c.id IN (
-            SELECT sub.conversation_id
-            FROM (
-              SELECT DISTINCT ON (m.conversation_id) m.conversation_id, m.direction, m.created_at
-              FROM messages m
-              WHERE m.tenant_id = $1
-                AND m.direction != 'system'
-                AND (m.media_metadata IS NULL OR COALESCE(m.media_metadata->'native'->>'message_type', '') != 'reaction')
-              ORDER BY m.conversation_id, m.created_at DESC
-            ) sub
-            WHERE sub.direction = 'out'
-              AND ($7::integer IS NULL OR sub.created_at <= NOW() - ($7::integer || ' hour')::interval)
-          )
-        `;
+        if (replyFilter === 'waiting_inbox_reply') {
+          queryText += `
+            AND c.last_message_direction = 'in' AND NOT EXISTS (
+              SELECT 1 FROM messages m_out
+              WHERE m_out.conversation_id = c.id
+                AND m_out.tenant_id = c.tenant_id
+                AND m_out.direction = 'out'
+            )
+          `;
+        } else if (replyFilter.startsWith('no_reply')) {
+          queryText += `
+            AND c.last_message_direction = 'out'
+            AND ($8::integer IS NULL OR c.last_message_at <= NOW() - ($8::integer || ' hour')::interval)
+          `;
+        } else {
+          // 'all_reply'
+          queryText += `
+            AND (
+              (c.last_message_direction = 'in' AND NOT EXISTS (
+                SELECT 1 FROM messages m_out
+                WHERE m_out.conversation_id = c.id
+                  AND m_out.tenant_id = c.tenant_id
+                  AND m_out.direction = 'out'
+              ))
+              OR
+              (c.last_message_direction = 'out')
+            )
+          `;
+        }
       }
 
       if (isUnreadFilter) {
@@ -301,7 +341,7 @@ export async function getConversations(page: number = 1, search: string = "", st
               AND m_unread.direction = 'in'
               AND (m_unread.media_metadata IS NULL OR COALESCE(m_unread.media_metadata->'native'->>'message_type', '') != 'reaction')
               AND m_unread.created_at > COALESCE(
-                (SELECT last_read_at FROM conversation_read_states rs WHERE rs.tenant_id = c.tenant_id AND rs.user_id = $6 AND rs.conversation_id = c.id),
+                (SELECT last_read_at FROM conversation_read_states rs WHERE rs.tenant_id = c.tenant_id AND rs.user_id = $7 AND rs.conversation_id = c.id),
                 '1970-01-01'::timestamptz
               )
           )
@@ -311,7 +351,7 @@ export async function getConversations(page: number = 1, search: string = "", st
       queryText += ` ORDER BY (cp.id IS NOT NULL) DESC, c.last_message_at DESC NULLS LAST `;
 
       if (!isNoReplyFilter) {
-        queryText += ` LIMIT $4 OFFSET $5 `;
+        queryText += ` LIMIT $5 OFFSET $6 `;
       }
 
       const rows = await ctx.db.executeSafe({
@@ -497,18 +537,27 @@ export async function getConversations(page: number = 1, search: string = "", st
           } : null,
           noReplyFollowup,
           is_no_reply_eligible: isNoReplyEligible,
-          no_reply_hours: noReplyHoursVal
+          no_reply_hours: noReplyHoursVal,
+          has_outbound: !!r.has_outbound
         };
       });
 
       if (isNoReplyFilter) {
         // 1. Filter candidates using pre-computed eligibility flag
         const eligibleCandidates = processedRows.filter((r: any) => {
-          if (!r.noReplyFollowup.is_no_reply_eligible) return false;
-          if (noReplyHours !== null && r.noReplyFollowup.no_reply_hours < noReplyHours) {
-            return false;
+          const isWaitingInboxReply = r.lastMessageDirection === 'in' && !r.has_outbound;
+          if (replyFilter === 'waiting_inbox_reply') {
+            return isWaitingInboxReply;
           }
-          return true;
+          if (replyFilter.startsWith('no_reply')) {
+            if (!r.noReplyFollowup.is_no_reply_eligible) return false;
+            if (noReplyHours !== null && r.noReplyFollowup.no_reply_hours < noReplyHours) {
+              return false;
+            }
+            return true;
+          }
+          // 'all_reply'
+          return isWaitingInboxReply || r.noReplyFollowup.is_no_reply_eligible;
         });
 
         // 2. Patient-level Deduplication

@@ -62,15 +62,14 @@ interface InitialsAvatarProps {
   name: string;
   channel: string;
   unread: number;
-  lastMessageDirection?: string | null;
-  lastMessageModel?: string | null;
+  isBotActive: boolean;
 }
 
-function InitialsAvatar({ name, channel, unread, lastMessageDirection, lastMessageModel }: InitialsAvatarProps) {
+function InitialsAvatar({ name, channel, unread, isBotActive }: InitialsAvatarProps) {
   const bgColor = getInitialsColor(name);
 
   // Check if bot is active (only bot overlay, no "sen/user" overlay)
-  const isBotActiveMessage = lastMessageDirection === 'out' && !!lastMessageModel;
+  const isBotActiveMessage = isBotActive;
 
   // Real WhatsApp, Instagram, Messenger SVG overlays
   const renderChannelBadge = () => {
@@ -92,7 +91,7 @@ function InitialsAvatar({ name, channel, unread, lastMessageDirection, lastMessa
           className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full border border-white shadow-sm flex items-center justify-center bg-gradient-to-tr from-[#f9ce34] via-[#ee2a7b] to-[#6228d7]"
           title="Instagram"
         >
-          <svg className="w-3 h-3 text-white fill-current" viewBox="0 0 24 24">
+          <svg className="w-3.5 h-3.5 text-white fill-current" viewBox="0 0 24 24">
             <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.051.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 1 0 0 12.324 6.162 6.162 0 0 0 0-12.324zM12 16a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm6.406-11.845a1.44 1.44 0 1 0 0 2.881 1.44 1.44 0 0 0 0-2.881z"/>
           </svg>
         </span>
@@ -123,7 +122,7 @@ function InitialsAvatar({ name, channel, unread, lastMessageDirection, lastMessa
           <path d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10zm-7 9a7 7 0 0 1 14 0c0 .55-.45 1-1 1H6c-.55 0-1-.45-1-1z" />
         </svg>
         
-        {/* Bot overlay icon - only if last message was by bot */}
+        {/* Bot overlay icon - only if bot is active */}
         {isBotActiveMessage && (
           <span className="absolute -top-1 -left-1 w-5 h-5 rounded-full bg-gradient-to-tr from-violet-600 to-indigo-600 border border-white flex items-center justify-center text-[10px] shadow-sm animate-pulse" title="Bot Aktif">
             🤖
@@ -249,6 +248,28 @@ function stageLabel(stage: string | undefined): string {
   return map[stage || "new"] || stage || "Yeni Lead";
 }
 
+type InboxPrimaryFilter =
+  | 'all'
+  | 'unread'
+  | 'bot_active'
+  | 'needs_response'
+  | 'favorites';
+
+type InboxReplyFilter =
+  | 'all_reply'
+  | 'waiting_inbox_reply'
+  | 'no_reply_3h'
+  | 'no_reply_6h'
+  | 'no_reply_24h';
+
+type InboxChannelFilter =
+  | 'all'
+  | 'whatsapp'
+  | 'instagram'
+  | 'messenger';
+
+type InboxStageFilter = string | 'all';
+
 export function ContactRail() {
   const { 
     activePhone, 
@@ -268,14 +289,59 @@ export function ContactRail() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const deepLinkContact = searchParams.get('contact');
-  const [filter, setFilter] = useState("all");
-  const [stageFilter, setStageFilter] = useState("all");
+
+  // Initialize state from URL search params or defaults
+  const initialPrimary = (searchParams.get('primary') as InboxPrimaryFilter) || "all";
+  const initialReply = (searchParams.get('reply') as InboxReplyFilter) || "all_reply";
+  const initialChannel = (searchParams.get('channel') as InboxChannelFilter) || "all";
+  const initialStage = searchParams.get('stage') || "all";
+
+  const [primaryFilter, setPrimaryFilter] = useState<InboxPrimaryFilter>(initialPrimary);
+  const [replyFilter, setReplyFilter] = useState<InboxReplyFilter>(initialReply);
+  const [channelFilter, setChannelFilter] = useState<InboxChannelFilter>(initialChannel);
+  const [stageFilter, setStageFilter] = useState<InboxStageFilter>(initialStage);
   const [searchInput, setSearchInput] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const isRealtimeDown = useDiagnosticsStore((state) => state.isRealtimeDown);
   const [errorToast, setErrorToast] = useState<string | null>(null);
   const [isAutomationOpen, setIsAutomationOpen] = useState(false);
   const [isNoReplyDropdownOpen, setIsNoReplyDropdownOpen] = useState(false);
+
+  // Sync state when URL params change (e.g. back/forward navigation)
+  useEffect(() => {
+    const currentPrimary = (searchParams.get('primary') as InboxPrimaryFilter) || "all";
+    const currentReply = (searchParams.get('reply') as InboxReplyFilter) || "all_reply";
+    const currentChannel = (searchParams.get('channel') as InboxChannelFilter) || "all";
+    const currentStage = searchParams.get('stage') || "all";
+
+    setPrimaryFilter(currentPrimary);
+    setReplyFilter(currentReply);
+    setChannelFilter(currentChannel);
+    setStageFilter(currentStage);
+  }, [searchParams]);
+
+  const updateUrl = (
+    primary: InboxPrimaryFilter,
+    reply: InboxReplyFilter,
+    channel: InboxChannelFilter,
+    stage: InboxStageFilter
+  ) => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    if (primary !== 'all') params.set('primary', primary); else params.delete('primary');
+    if (reply !== 'all_reply') params.set('reply', reply); else params.delete('reply');
+    if (channel !== 'all') params.set('channel', channel); else params.delete('channel');
+    if (stage !== 'all') params.set('stage', stage); else params.delete('stage');
+    
+    // Keep the active contact link parameter if present
+    const contactParam = searchParams.get('contact');
+    if (contactParam) {
+      params.set('contact', contactParam);
+    }
+    
+    const newSearch = params.toString();
+    router.replace(`${window.location.pathname}${newSearch ? '?' + newSearch : ''}`, { scroll: false });
+  };
 
   // Bulk UI local states
   const [contextMenu, setContextMenu] = useState<{
@@ -319,8 +385,15 @@ export function ContactRail() {
   }, [searchInput]);
 
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading } = useInfiniteQuery({
-    queryKey: ["conversations", debouncedSearch, stageFilter],
-    queryFn: ({ pageParam = 1 }) => getConversations(pageParam, debouncedSearch, stageFilter),
+    queryKey: ["conversations", debouncedSearch, primaryFilter, replyFilter, channelFilter, stageFilter],
+    queryFn: ({ pageParam = 1 }) => getConversations(
+      pageParam as number, 
+      debouncedSearch, 
+      stageFilter, 
+      primaryFilter, 
+      replyFilter, 
+      channelFilter
+    ),
     initialPageParam: 1,
     getNextPageParam: (lastPage, allPages) => {
       if (!Array.isArray(lastPage) || !Array.isArray(allPages)) return undefined;
@@ -338,7 +411,7 @@ export function ContactRail() {
   const isReachingEnd = !hasNextPage;
 
   // Selection & Bulk Action Helpers
-  const visibleContacts = (contacts || []).filter((c: any) => filter === "all" || c.channel === filter);
+  const visibleContacts = contacts || [];
   const visibleContactIds = visibleContacts.map((c: any) => c.conversation_id).filter(Boolean);
   const isAllVisibleSelected = visibleContactIds.length > 0 && visibleContactIds.every(id => selectedIds.includes(id));
 
@@ -633,7 +706,11 @@ const handleBulkArchive = async (archive: boolean) => {
           <div className="flex items-center gap-1.5">
             <select
               value={stageFilter}
-              onChange={(e) => setStageFilter(e.target.value)}
+              onChange={(e) => {
+                const val = e.target.value;
+                setStageFilter(val);
+                updateUrl(primaryFilter, replyFilter, channelFilter, val);
+              }}
               className="bg-transparent text-xs font-semibold outline-none cursor-pointer appearance-none text-right pr-2"
               style={{ color: "var(--q-blue)" }}
             >
@@ -696,18 +773,21 @@ const handleBulkArchive = async (archive: boolean) => {
           {[
             { id: "all", label: "Tümü" },
             { id: "unread", label: "Okunmamış" },
-            { id: "botActive", label: "🤖 Botta" }
+            { id: "bot_active", label: "🤖 Botta" }
           ].map((tab) => (
             <button
               key={tab.id}
               onClick={() => {
-                setStageFilter(tab.id);
+                const nextPrimary = tab.id as InboxPrimaryFilter;
+                setPrimaryFilter(nextPrimary);
+                setReplyFilter("all_reply");
+                updateUrl(nextPrimary, "all_reply", channelFilter, stageFilter);
               }}
               className="flex-1 py-1 text-[11px] font-bold rounded-lg transition-all text-center whitespace-nowrap cursor-pointer select-none px-1"
               style={{
-                background: stageFilter === tab.id ? "white" : "transparent",
-                color: stageFilter === tab.id ? "var(--q-blue)" : "var(--q-text-secondary)",
-                boxShadow: stageFilter === tab.id ? "0 1px 3px rgba(0,0,0,0.08)" : "none"
+                background: primaryFilter === tab.id ? "white" : "transparent",
+                color: primaryFilter === tab.id ? "var(--q-blue)" : "var(--q-text-secondary)",
+                boxShadow: primaryFilter === tab.id ? "0 1px 3px rgba(0,0,0,0.08)" : "none"
               }}
             >
               {tab.label}
@@ -716,12 +796,12 @@ const handleBulkArchive = async (archive: boolean) => {
 
           {/* Cevap Bekleyenler Dropdown Tab */}
           {(() => {
-            const isNoReplyActive = stageFilter.startsWith("noReply");
+            const isNoReplyActive = primaryFilter === "needs_response";
             const getNoReplyLabel = () => {
-              if (stageFilter === "noReply_3h") return "⏳ 3s+";
-              if (stageFilter === "noReply_6h") return "⏳ 6s+";
-              if (stageFilter === "noReply_9h") return "⏳ 9s+";
-              if (stageFilter === "noReply_24h") return "⏳ 24s+";
+              if (replyFilter === "no_reply_3h") return "⏳ 3s+";
+              if (replyFilter === "no_reply_6h") return "⏳ 6s+";
+              if (replyFilter === "no_reply_24h") return "⏳ 24s+";
+              if (replyFilter === "waiting_inbox_reply") return "⏳ Karşılama";
               return "⏳ Cevap";
             };
 
@@ -730,7 +810,9 @@ const handleBulkArchive = async (archive: boolean) => {
                 <button
                   onClick={() => {
                     if (!isNoReplyActive) {
-                      setStageFilter("noReply");
+                      setPrimaryFilter("needs_response");
+                      setReplyFilter("all_reply");
+                      updateUrl("needs_response", "all_reply", channelFilter, stageFilter);
                     }
                     setIsNoReplyDropdownOpen((prev) => !prev);
                   }}
@@ -753,22 +835,24 @@ const handleBulkArchive = async (archive: boolean) => {
                       style={{ borderColor: "var(--q-border-default)" }}
                     >
                       {[
-                        { id: "noReply", label: "⏳ Tümü (Cevap Yok)" },
-                        { id: "noReply_3h", label: "⏳ 3 Saat Üzeri" },
-                        { id: "noReply_6h", label: "⏳ 6 Saat Üzeri" },
-                        { id: "noReply_9h", label: "⏳ 9 Saat Üzeri" },
-                        { id: "noReply_24h", label: "⏳ 24 Saat Üzeri" },
+                        { id: "all_reply", label: "⏳ Cevap Bekleyenler" },
+                        { id: "no_reply_3h", label: "⏳ 3s+" },
+                        { id: "no_reply_6h", label: "⏳ 6s+" },
+                        { id: "no_reply_24h", label: "⏳ 24s+" },
+                        { id: "waiting_inbox_reply", label: "⏳ Karşılama Cevabı Bekleyenler" },
                       ].map((opt) => (
                         <button
                           key={opt.id}
                           onClick={() => {
-                            setStageFilter(opt.id);
+                            setPrimaryFilter("needs_response");
+                            setReplyFilter(opt.id as InboxReplyFilter);
                             setIsNoReplyDropdownOpen(false);
+                            updateUrl("needs_response", opt.id as InboxReplyFilter, channelFilter, stageFilter);
                           }}
                           className="w-full text-left px-3 py-1.5 text-xs font-semibold hover:bg-black/5 transition-all text-gray-700 flex items-center justify-between cursor-pointer"
                         >
                           <span>{opt.label}</span>
-                          {stageFilter === opt.id && <Check className="w-3.5 h-3.5 text-[#007AFF]" />}
+                          {replyFilter === opt.id && <Check className="w-3.5 h-3.5 text-[#007AFF]" />}
                         </button>
                       ))}
                     </div>
@@ -785,13 +869,15 @@ const handleBulkArchive = async (archive: boolean) => {
             <button
               key={tab.id}
               onClick={() => {
-                setStageFilter(tab.id);
+                setPrimaryFilter("favorites");
+                setReplyFilter("all_reply");
+                updateUrl("favorites", "all_reply", channelFilter, stageFilter);
               }}
               className="flex-1 py-1 text-[11px] font-bold rounded-lg transition-all text-center whitespace-nowrap cursor-pointer select-none px-1"
               style={{
-                background: stageFilter === tab.id ? "white" : "transparent",
-                color: stageFilter === tab.id ? "var(--q-blue)" : "var(--q-text-secondary)",
-                boxShadow: stageFilter === tab.id ? "0 1px 3px rgba(0,0,0,0.08)" : "none"
+                background: primaryFilter === tab.id ? "white" : "transparent",
+                color: primaryFilter === tab.id ? "var(--q-blue)" : "var(--q-text-secondary)",
+                boxShadow: primaryFilter === tab.id ? "0 1px 3px rgba(0,0,0,0.08)" : "none"
               }}
             >
               {tab.label}
@@ -805,10 +891,13 @@ const handleBulkArchive = async (archive: boolean) => {
         {CHANNEL_FILTERS.map((ch) => (
           <button
             key={ch.id}
-            onClick={() => setFilter(ch.id)}
+            onClick={() => {
+              setChannelFilter(ch.id as InboxChannelFilter);
+              updateUrl(primaryFilter, replyFilter, ch.id as InboxChannelFilter, stageFilter);
+            }}
             className="px-3.5 py-1.5 text-xs font-semibold rounded-full whitespace-nowrap transition-all duration-200 q-press"
             style={
-              filter === ch.id
+              channelFilter === ch.id
                 ? { background: ch.color, color: "white", boxShadow: `0 2px 8px ${ch.shadow}` }
                 : { background: "rgba(255,255,255,0.5)", color: "var(--q-text-secondary)", border: "1px solid var(--q-border-default)" }
             }
@@ -827,7 +916,6 @@ const handleBulkArchive = async (archive: boolean) => {
         ) : (
           <div className="q-stagger">
             {(contacts || [])
-              .filter((c: any) => filter === "all" || c.channel === filter)
               .map((c: any) => {
                 let senderPrefixNode = null;
                 if (c.lastMessageDirection === 'out') {
@@ -917,8 +1005,7 @@ const handleBulkArchive = async (archive: boolean) => {
                       name={c.name || c.id} 
                       channel={c.channel} 
                       unread={0} 
-                      lastMessageDirection={c.lastMessageDirection}
-                      lastMessageModel={c.lastMessageModel}
+                      isBotActive={c.isBotActive}
                     />
 
                     {/* Middle Column: Content */}
