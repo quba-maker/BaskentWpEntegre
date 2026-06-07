@@ -51,21 +51,21 @@ export function resolveDepartmentWithConflict({
     confidence: DepartmentResolutionResult['confidence'];
   }[] = [];
 
-  // Priority 1: Latest explicit patient statement, high confidence
-  if (patientMsgDept && patientMsgConfidence === 'high') {
+  // Priority 1: Form raw_data complaint field keyword, high confidence
+  if (formComplaintDept && formComplaintConfidence >= 0.8) {
     candidateList.push({
-      dept: patientMsgDept,
-      source: 'patient_message',
+      dept: formComplaintDept,
+      source: 'form_complaint',
       priority: 1,
       confidence: 'high'
     });
   }
 
-  // Priority 2: Form raw_data complaint field keyword, high confidence
-  if (formComplaintDept && formComplaintConfidence >= 0.8) {
+  // Priority 2: Latest explicit patient statement, high confidence
+  if (patientMsgDept && patientMsgConfidence === 'high') {
     candidateList.push({
-      dept: formComplaintDept,
-      source: 'form_complaint',
+      dept: patientMsgDept,
+      source: 'patient_message',
       priority: 2,
       confidence: 'high'
     });

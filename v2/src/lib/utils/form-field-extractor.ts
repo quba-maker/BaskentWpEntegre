@@ -44,7 +44,12 @@ const DEPARTMENT_MAP: Record<string, string> = {
   'ORGAN NAKLİ': 'Organ Nakli',
   'PSİKİYATRİ': 'Psikiyatri',
   'FİZİK TEDAVİ': 'Fizik Tedavi',
-  'GASTRO': 'Gastroenteroloji'
+  'GASTRO': 'Gastroenteroloji',
+  'KBB': 'KBB',
+  'KULAK BURUN BOĞAZ': 'KBB',
+  'KULAK': 'KBB',
+  'BURUN': 'KBB',
+  'BOĞAZ': 'KBB'
 };
 
 // Deterministic Turkish keyword mapping for complaint texts in the form
@@ -55,7 +60,8 @@ const COMPLAINT_KEYWORD_MAP: { keywords: string[]; department: string; confidenc
   { keywords: ['diş', 'implant', 'dolgu', 'kanal tedavisi', 'zirkonyum'], department: 'Diş', confidence: 1.0 },
   { keywords: ['göz', 'görme', 'katarakt', 'lazer göz', 'retina'], department: 'Göz', confidence: 1.0 },
   { keywords: ['saç ekimi', 'saç dökülmesi', 'sacekim'], department: 'Saç Ekimi', confidence: 1.0 },
-  { keywords: ['check-up', 'check up', 'genel kontrol', 'checkup'], department: 'Check-Up', confidence: 1.0 }
+  { keywords: ['check-up', 'check up', 'genel kontrol', 'checkup'], department: 'Check-Up', confidence: 1.0 },
+  { keywords: ['kulak çınlaması', 'çınlama', 'tinnitus', 'kulak', 'işitme', 'boğaz', 'burun', 'geniz', 'bademcik', 'burun tıkanıklığı', 'sinüzit'], department: 'KBB', confidence: 1.0 }
 ];
 
 export function extractFormFields(rawData: any): FormExtraction {

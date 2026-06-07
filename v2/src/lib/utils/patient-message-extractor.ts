@@ -17,7 +17,8 @@ const HIGH_CONFIDENCE_KEYWORDS: { keywords: string[]; department: string }[] = [
   { keywords: ['diş', 'implant', 'dolgu', 'kanal tedavisi', 'zirkonyum'], department: 'Diş' },
   { keywords: ['göz', 'görme', 'katarakt', 'retina'], department: 'Göz' },
   { keywords: ['saç ekimi', 'sac ekimi', 'saç ekim'], department: 'Saç Ekimi' },
-  { keywords: ['check-up', 'genel kontrol', 'check up'], department: 'Check-Up' }
+  { keywords: ['check-up', 'genel kontrol', 'check up'], department: 'Check-Up' },
+  { keywords: ['kulak çınlaması', 'çınlama', 'tinnitus', 'kulak', 'işitme', 'boğaz', 'burun', 'geniz', 'bademcik', 'burun tıkanıklığı', 'sinüzit'], department: 'KBB' }
 ];
 
 const MEDIUM_CONFIDENCE_KEYWORDS: { keywords: string[]; department: string }[] = [

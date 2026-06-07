@@ -424,6 +424,10 @@ export default function FormsPage() {
             if (res.resolution.recommendedPhone?.phone) {
               setSelectedPhone(res.resolution.recommendedPhone.phone);
             }
+
+            if (res.resolution.patientLevelStatus === 'needs_greeting') {
+              handlePrepareDraft(selectedForm);
+            }
           } else {
             setReadiness(null);
           }
@@ -1459,8 +1463,79 @@ export default function FormsPage() {
                           </div>
                         )}
 
-                        {/* Active Greeting Draft Textarea if Open */}
-                        {isDraftOpen && draftMessage !== null && (
+                        {/* 1. Custom Flow for needs_greeting Status */}
+                        {currentStatus === 'needs_greeting' && (
+                          <div className="space-y-3 pt-2">
+                            {outreachLoading === 'draft' ? (
+                              <div className="flex flex-col items-center justify-center py-6 gap-2 bg-[#F5F5F7] rounded-xl border border-black/5">
+                                <RefreshCw className="w-5 h-5 text-[#86868B] animate-spin" />
+                                <span className="text-[12px] font-semibold text-[#86868B]">Taslak hazırlanıyor...</span>
+                              </div>
+                            ) : draftMessage !== null ? (
+                              <>
+                                {templates.length > 1 && (
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-[11px] font-semibold text-[#86868B] shrink-0">Şablon:</span>
+                                    <select
+                                      value={selectedTemplateId || ''}
+                                      onChange={(e) => handleTemplateSelect(e.target.value)}
+                                      className="flex-1 text-[12px] font-medium bg-[#F5F5F7] border border-black/10 rounded-lg px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-[#007AFF]/30 transition-all cursor-pointer appearance-none"
+                                    >
+                                      <option value="" disabled>Şablon seçin…</option>
+                                      {templates.map((tpl: any) => (
+                                        <option key={tpl.id} value={tpl.id}>{tpl.name}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                )}
+                                <textarea
+                                  value={draftMessage}
+                                  onChange={(e) => setDraftMessage(e.target.value)}
+                                  rows={5}
+                                  className="w-full border border-black/10 rounded-xl p-3 text-[13px] text-[#1D1D1F] font-medium resize-none outline-none transition-all leading-relaxed bg-white focus:ring-2 focus:ring-[#25D366]/40 focus:border-[#25D366]/30"
+                                  placeholder="Karşılama mesajınızı buraya yazın..."
+                                />
+
+                                <div className="space-y-1 text-left">
+                                  <label className="block text-[10.5px] font-bold text-[#86868B] uppercase tracking-wider">
+                                    🤖 Bota kısa not/direktif ekle (opsiyonel)
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={botNote}
+                                    onChange={(e) => setBotNote(e.target.value)}
+                                    placeholder="Örn: Geliş tarihini netleştir..."
+                                    className="w-full bg-[#F5F5F7] border border-black/10 rounded-xl px-3 py-2 text-[12px] text-[#1D1D1F] font-medium outline-none focus:ring-2 focus:ring-[#007AFF]/30 transition-all"
+                                  />
+                                </div>
+
+                                <div className="space-y-2 pt-3 border-t border-black/5">
+                                  <button 
+                                    onClick={() => handleOpenWhatsAppApp(selectedForm)}
+                                    disabled={outreachLoading === 'sending' || !draftMessage?.trim()}
+                                    className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-[13px] font-bold bg-[#25D366] hover:bg-[#1DA851] text-white shadow-[0_4px_14px_rgba(37,211,102,0.39)] transition-all cursor-pointer disabled:opacity-50"
+                                  >
+                                    <Send className="w-4 h-4" /> WhatsApp’ta Karşıla
+                                  </button>
+                                  <button 
+                                    onClick={() => handleSaveInternal(selectedForm)}
+                                    disabled={outreachLoading === 'sending' || !draftMessage?.trim()}
+                                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl font-bold bg-[#007AFF]/10 text-[#007AFF] hover:bg-[#007AFF]/20 cursor-pointer transition-all disabled:opacity-50"
+                                  >
+                                    {outreachLoading === 'sending' ? (
+                                      <><RefreshCw className="w-4 h-4 animate-spin" /> Kaydediliyor...</>
+                                    ) : (
+                                      <><Save className="w-4 h-4" /> Not Olarak Kaydet</>
+                                    )}
+                                  </button>
+                                </div>
+                              </>
+                            ) : null}
+                          </div>
+                        )}
+
+                        {/* 2. Active Greeting Draft Textarea if Open (for non-needs_greeting statuses) */}
+                        {isDraftOpen && currentStatus !== 'needs_greeting' && draftMessage !== null && (
                           <div className="space-y-3 pt-2">
                             {templates.length > 1 && (
                               <div className="flex items-center gap-2">
@@ -1528,8 +1603,8 @@ export default function FormsPage() {
                           </div>
                         )}
 
-                        {/* Standard Action Button if Draft is NOT Open */}
-                        {!isDraftOpen && ['needs_greeting', 'waiting_inbox_reply', 'whatsapp_opened', 'manual_greeting_confirmed', 'inbox_greeting_sent', 'patient_replied'].includes(currentStatus) && (
+                        {/* 3. Standard Action Button if Draft is NOT Open (exclude needs_greeting) */}
+                        {!isDraftOpen && currentStatus !== 'needs_greeting' && ['waiting_inbox_reply', 'whatsapp_opened', 'manual_greeting_confirmed', 'inbox_greeting_sent', 'patient_replied'].includes(currentStatus) && (
                           <div className="flex gap-3 pt-2">
                             <button
                               onClick={() => {
@@ -1548,7 +1623,6 @@ export default function FormsPage() {
                                 <><RefreshCw className="w-4 h-4 animate-spin" /> Hazırlanıyor...</>
                               ) : (
                                 <>
-                                  {currentStatus === 'needs_greeting' && 'WhatsApp’ta Karşıla'}
                                   {currentStatus === 'whatsapp_opened' && 'Tekrar Aç'}
                                   {currentStatus === 'waiting_inbox_reply' && 'Inbox’ta Karşıla'}
                                   {['manual_greeting_confirmed', 'inbox_greeting_sent'].includes(currentStatus) && 'Mesaja Git'}

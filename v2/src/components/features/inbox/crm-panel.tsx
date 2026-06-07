@@ -1295,18 +1295,18 @@ export function ContextPanel() {
           {suggestedDept && (
             <div className="mt-2 p-2 flex flex-col gap-1.5 rounded-xl border transition-all duration-200"
                  style={{ 
-                   backgroundColor: hasConflict ? "rgba(255, 149, 0, 0.04)" : suggestedConfidence === 'medium' ? "rgba(255, 149, 0, 0.04)" : "rgba(175, 82, 222, 0.04)", 
-                   borderColor: hasConflict ? "rgba(255, 149, 0, 0.25)" : suggestedConfidence === 'medium' ? "rgba(255, 149, 0, 0.15)" : "rgba(175, 82, 222, 0.15)" 
+                   backgroundColor: hasConflict ? "rgba(255, 149, 0, 0.04)" : suggestedConfidence !== 'high' ? "rgba(255, 149, 0, 0.04)" : "rgba(175, 82, 222, 0.04)", 
+                   borderColor: hasConflict ? "rgba(255, 149, 0, 0.25)" : suggestedConfidence !== 'high' ? "rgba(255, 149, 0, 0.15)" : "rgba(175, 82, 222, 0.15)" 
                  }}>
               <div className="flex items-center justify-between w-full">
                 <div className="flex items-center gap-1.5">
-                  <Sparkles className="w-3 h-3 shrink-0 animate-pulse" style={{ color: hasConflict || suggestedConfidence === 'medium' ? "#FF9500" : "#AF52DE" }} />
+                  <Sparkles className="w-3 h-3 shrink-0 animate-pulse" style={{ color: hasConflict || suggestedConfidence !== 'high' ? "#FF9500" : "#AF52DE" }} />
                   <div className="flex flex-col text-left">
-                    <span className="text-[8px] font-bold uppercase tracking-wider" style={{ color: hasConflict || suggestedConfidence === 'medium' ? "#FF9500" : "#AF52DE" }}>
+                    <span className="text-[8px] font-bold uppercase tracking-wider" style={{ color: hasConflict || suggestedConfidence !== 'high' ? "#FF9500" : "#AF52DE" }}>
                       Önerilen Bölüm
                     </span>
                     <span className="text-[11px] font-semibold text-[#1D1D1F]">
-                      {suggestedDept} {hasConflict ? "— Çakışma Var" : suggestedConfidence === 'medium' ? "— Teyit Edin" : ""}
+                      {suggestedDept} {hasConflict ? "— Çakışma Var" : suggestedConfidence !== 'high' ? "— Teyit Edin" : ""}
                     </span>
                   </div>
                 </div>
@@ -1335,8 +1335,8 @@ export function ContextPanel() {
                   }}
                   className="px-2 py-0.5 text-[9px] font-bold rounded-lg cursor-pointer bg-white border transition-all hover:scale-[1.02]"
                   style={{ 
-                    color: hasConflict || suggestedConfidence === 'medium' ? "#FF9500" : "#AF52DE",
-                    borderColor: hasConflict || suggestedConfidence === 'medium' ? "rgba(255, 149, 0, 0.2)" : "rgba(175, 82, 222, 0.2)"
+                    color: hasConflict || suggestedConfidence !== 'high' ? "#FF9500" : "#AF52DE",
+                    borderColor: hasConflict || suggestedConfidence !== 'high' ? "rgba(255, 149, 0, 0.2)" : "rgba(175, 82, 222, 0.2)"
                   }}
                 >
                   Onayla
@@ -1450,7 +1450,7 @@ export function ContextPanel() {
             >
               <div className="flex items-center justify-between">
                 <span className="text-[11px] font-extrabold text-[#1D1D1F] line-clamp-1">
-                  {activeContact.formData.name || "Estetik ve Tedavi Formu"}
+                  {activeContact.formData?.name || "Başvuru Formu"}
                 </span>
                 <span className="text-[9px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 rounded-full px-1.5 py-0.2 shrink-0">
                   Detay
@@ -1460,7 +1460,7 @@ export function ContextPanel() {
               <div className="flex items-center gap-2 text-[9px] text-[#86868B] font-semibold">
                 <div className="flex items-center gap-0.5">
                   <Calendar className="w-2.5 h-2.5 text-indigo-400" />
-                  <span>{activeContact.formData.date || "Belirtilmemiş"}</span>
+                  <span>{activeContact.formData?.date || "Belirtilmemiş"}</span>
                 </div>
                 {campaignName && (
                   <div className="flex items-center gap-0.5 max-w-[120px]">

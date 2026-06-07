@@ -1558,16 +1558,20 @@ export async function saveGreetingDraftInternal(leadId: string, approvedText: st
       const conversationId = convRes[0]?.id || null;
 
       // 3. Write outreach log (Zero-Outbound, stage unchanged)
+      const actorId = ctx.userId;
+      if (!actorId) {
+        return { success: false, error: "Kullanıcı kimliği bulunamadı (actor_id null olamaz)." };
+      }
       await ctx.db.executeSafe({
         text: `/* saveGreetingDraftInternal:insertOutreachLog */
                INSERT INTO outreach_logs (tenant_id, lead_id, conversation_id, opportunity_id, action, channel, actor_id, metadata)
-               VALUES ($1, $2::uuid, $3, $4, 'smart_greeting_draft_edited', 'system', $5, $6)`,
+               VALUES ($1, $2::uuid, $3, $4, 'smart_greeting_draft_edited', 'whatsapp', $5, $6)`,
         values: [
           ctx.tenantId,
           safeLeadId,
           conversationId,
           lead.linked_opportunity_id || null,
-          ctx.userId,
+          actorId,
           JSON.stringify({
             zero_outbound: true,
             patient_visible: false,
@@ -1645,14 +1649,18 @@ export async function logWhatsappAppOpenedForGreetingAction(
         return p.slice(0, 3) + "****" + p.slice(-3);
       };
 
+      const actorId = ctx.userId;
+      if (!actorId) {
+        return { success: false, error: "Kullanıcı kimliği bulunamadı (actor_id null olamaz)." };
+      }
       await ctx.db.executeSafe({
         text: `INSERT INTO outreach_logs (tenant_id, lead_id, opportunity_id, action, channel, actor_id, metadata)
-               VALUES ($1, $2::uuid, $3, 'whatsapp_app_opened_for_greeting', 'system', $4, $5)`,
+               VALUES ($1, $2::uuid, $3, 'whatsapp_app_opened_for_greeting', 'whatsapp', $4, $5)`,
         values: [
           ctx.tenantId,
           safeLeadId,
           lead.linked_opportunity_id || null,
-          ctx.userId,
+          actorId,
           JSON.stringify({
             zero_api_outbound: true,
             patient_visible: false,
@@ -1751,9 +1759,12 @@ export async function prepareSmartGreetingDraftCore(
     }
     
     // Log the newly prepared draft
+    if (!userId) {
+      throw new Error("Kullanıcı kimliği bulunamadı (actor_id null olamaz).");
+    }
     await db.executeSafe({
-      text: `INSERT INTO outreach_logs (tenant_id, lead_id, action, metadata) VALUES ($1, $2, 'smart_greeting_draft_prepared', $3)`,
-      values: [tenantId, leadId, JSON.stringify({ draft: draftText })]
+      text: `INSERT INTO outreach_logs (tenant_id, lead_id, action, actor_id, metadata) VALUES ($1, $2, 'smart_greeting_draft_prepared', $3, $4)`,
+      values: [tenantId, leadId, userId, JSON.stringify({ draft: draftText })]
     });
   }
 

@@ -424,8 +424,8 @@ export async function getConversations(page: number = 1, search: string = "", st
           ai_crm_summary: r.opp_summary || r.legacy_ai_summary || '',
           notes: r.notes || '',
           patientRelation: r.opp_patient_relation || null,
-          formData: r.form_name ? {
-            name: r.form_name,
+          formData: (r.form_name || r.lead_id) ? {
+            name: r.form_name || "Başvuru Formu",
             date: r.form_date_ms ? new Date(parseFloat(r.form_date_ms)).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' }) : '',
             raw: r.form_raw_data
           } : null,
@@ -2920,17 +2920,22 @@ export async function saveFormGreetingDraftInternalAction(conversationId: string
       const conv = convRows[0];
       const oppId = conv.active_opportunity_id;
 
+      const actorId = ctx.userId;
+      if (!actorId) {
+        return { success: false, error: "Kullanıcı kimliği bulunamadı (actor_id null olamaz)." };
+      }
+
       await ctx.db.executeSafe({
         text: `
           INSERT INTO outreach_logs (tenant_id, lead_id, conversation_id, opportunity_id, action, channel, actor_id, metadata)
-          VALUES ($1, $2, $3, $4, 'smart_greeting_draft_edited', 'system', $5, $6)
+          VALUES ($1, $2, $3, $4, 'smart_greeting_draft_edited', 'whatsapp', $5, $6)
         `,
         values: [
           ctx.tenantId,
           conv.lead_id || null,
           conversationId,
           oppId || null,
-          ctx.userId,
+          actorId,
           JSON.stringify({
             zero_outbound: true,
             patient_visible: false,
@@ -3029,6 +3034,10 @@ export async function sendFormGreetingFromInboxAction(conversationId: string, me
 
       // 5. Write outreach log with action = 'inbox_form_greeting_sent'
       // Note: Stage and conversation status remain unchanged (delta 0)
+      const actorId = ctx.userId;
+      if (!actorId) {
+        return { success: false, error: "Kullanıcı kimliği bulunamadı (actor_id null olamaz)." };
+      }
       await ctx.db.executeSafe({
         text: `INSERT INTO outreach_logs (tenant_id, lead_id, conversation_id, opportunity_id, action, channel, actor_id, metadata)
                VALUES ($1, $2, $3, $4, 'inbox_form_greeting_sent', 'whatsapp', $5, $6)`,
@@ -3037,7 +3046,7 @@ export async function sendFormGreetingFromInboxAction(conversationId: string, me
           conv.lead_id || null,
           conversationId,
           conv.active_opportunity_id || null,
-          ctx.userId,
+          actorId,
           JSON.stringify({
             message_text: cleanMessage,
             provider_message_id: providerMessageId,

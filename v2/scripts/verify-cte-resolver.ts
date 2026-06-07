@@ -33,7 +33,7 @@ async function runVerification() {
                FROM outreach_logs 
                WHERE lead_id = l.id AND tenant_id = l.tenant_id::text 
                  AND action IN (${hardDuplicateActionsSql})
-               ORDER BY created_at ASC LIMIT 1
+               ORDER BY created_at DESC LIMIT 1
              ) as first_greeting_at,
              EXISTS (
                SELECT 1 FROM outreach_logs 
@@ -60,98 +60,168 @@ async function runVerification() {
                WHEN c_phone.id IS NOT NULL THEN 'phone_unique'
                ELSE 'none'
              END as summary_link_method,
-             (
-               SELECT json_build_object(
-                 'has_inbound', count(m_all.id) > 0,
-                 'first_inbound_at', min(m_all.created_at),
-                 'last_inbound_at', max(m_all.created_at)
-               )
-               FROM conversations c_all
-               JOIN messages m_all ON m_all.conversation_id = c_all.id AND m_all.tenant_id = c_all.tenant_id
-               WHERE c_all.tenant_id = l.tenant_id
-                 AND m_all.direction = 'in'
-                 AND (m_all.media_metadata IS NULL OR COALESCE(m_all.media_metadata->'native'->>'message_type', '') != 'reaction')
-                 AND (
-                   (l.customer_id IS NOT NULL AND c_all.customer_id = l.customer_id)
-                   OR
-                   RIGHT(c_all.phone_number, 10) = RIGHT(l.phone_number, 10)
-                   OR
-                   (
-                     l.raw_data IS NOT NULL 
-                     AND l.raw_data != ''
-                     AND l.raw_data LIKE '%_all_phones%'
-                     AND (
-                       CASE
-                         WHEN jsonb_typeof(l.raw_data::jsonb->'_all_phones') = 'array' 
-                           THEN (l.raw_data::jsonb->'_all_phones') @> jsonb_build_array(c_all.phone_number)
-                         WHEN jsonb_typeof(l.raw_data::jsonb->'_all_phones') = 'string' 
-                           THEN (l.raw_data::jsonb->>'_all_phones')::jsonb @> jsonb_build_array(c_all.phone_number)
-                         ELSE false
-                       END
-                     )
-                   )
-                 )
-             ) as inbound_stats
-      FROM leads l
-      -- Layer 1: Safe link via customer_id (identity-based, no ambiguity)
-      LEFT JOIN conversations c_identity ON c_identity.tenant_id = l.tenant_id 
-        AND l.customer_id IS NOT NULL 
-        AND c_identity.customer_id = l.customer_id
-      LEFT JOIN conversation_memory mem_identity ON mem_identity.conversation_id = c_identity.id
-      -- Layer 2: Phone match only if EXACTLY ONE conversation matches (prevents cross-leak)
-      LEFT JOIN LATERAL (
-        SELECT c2.id, c2.status, c2.lead_stage, c2.country as conv_country, c2.department as conv_department
-        FROM conversations c2 
-        WHERE c2.tenant_id = l.tenant_id 
-          AND RIGHT(c2.phone_number, 10) = RIGHT(l.phone_number, 10)
-          AND l.customer_id IS NULL  -- Only use phone fallback when customer_id link unavailable
-          AND (SELECT COUNT(*) FROM conversations cx 
-               WHERE cx.tenant_id = l.tenant_id 
-               AND RIGHT(cx.phone_number, 10) = RIGHT(l.phone_number, 10)) = 1
-        LIMIT 1
-      ) c_phone ON c_identity.id IS NULL
-      LEFT JOIN conversation_memory mem_phone ON mem_phone.conversation_id = c_phone.id AND c_identity.id IS NULL
-      WHERE l.tenant_id = $1
-      ORDER BY l.created_at DESC
-      LIMIT 100
-    ),
-    calculated_leads AS (
-      SELECT bl.*,
-             CASE
-               -- 1. anyInbound is true
-               WHEN (bl.inbound_stats->>'has_inbound')::boolean = true THEN
-                 CASE
-                   -- We greeted them
-                   WHEN bl.first_greeting_at IS NOT NULL THEN
-                     CASE
-                       -- If patient replied after we greeted them
-                       WHEN (bl.inbound_stats->>'last_inbound_at') IS NOT NULL AND bl.first_greeting_at < (bl.inbound_stats->>'last_inbound_at')::timestamp THEN 'patient_replied'
-                       WHEN bl.any_inbox_sent = true THEN 'inbox_greeting_sent'
-                       WHEN bl.any_confirmed = true THEN 'manual_greeting_confirmed'
-                       WHEN bl.any_api_sent = true THEN 'inbox_greeting_sent'
-                       ELSE 'inbox_greeting_sent'
-                     END
-                   ELSE 'waiting_inbox_reply'
-                 END
-               -- 2. no inbound message
-               ELSE
-                 CASE
-                   WHEN bl.any_confirmed = true THEN 'manual_greeting_confirmed'
-                   WHEN bl.any_inbox_sent = true THEN 'inbox_greeting_sent'
-                   WHEN bl.any_api_sent = true THEN 'inbox_greeting_sent'
-                   WHEN bl.any_opened = true THEN 'whatsapp_opened'
-                   ELSE
-                     CASE
-                       WHEN bl.phone_number IS NULL OR bl.phone_number = '' THEN 'blocked_or_invalid'
-                       WHEN bl.stage NOT IN ('new', 'contacted') THEN 'out_of_scope'
-                       ELSE 'needs_greeting'
-                     END
-                 END
-             END as first_contact_status
-      FROM base_leads bl
-    )
-    SELECT id, patient_name, phone_number, stage, first_contact_status, raw_data
-    FROM calculated_leads
+              (
+                SELECT json_build_object(
+                  'has_inbound', count(CASE WHEN m_all.direction = 'in' THEN 1 END) > 0,
+                  'first_inbound_at', min(CASE WHEN m_all.direction = 'in' THEN m_all.created_at END),
+                  'last_inbound_at', max(CASE WHEN m_all.direction = 'in' THEN m_all.created_at END),
+                  'last_outbound_at', max(CASE WHEN m_all.direction = 'out' THEN m_all.created_at END),
+                  'has_outbound_after_first_inbound', EXISTS (
+                    SELECT 1 FROM conversations c_out
+                    JOIN messages m_out ON m_out.conversation_id = c_out.id AND m_out.tenant_id = c_out.tenant_id
+                    WHERE c_out.tenant_id = l.tenant_id
+                      AND m_out.direction = 'out'
+                      AND (
+                        (l.customer_id IS NOT NULL AND c_out.customer_id = l.customer_id)
+                        OR
+                        RIGHT(c_out.phone_number, 10) = RIGHT(l.phone_number, 10)
+                        OR
+                        (
+                          l.raw_data IS NOT NULL 
+                          AND l.raw_data != ''
+                          AND l.raw_data LIKE '%_all_phones%'
+                          AND (
+                            CASE
+                              WHEN jsonb_typeof(l.raw_data::jsonb->'_all_phones') = 'array' 
+                                THEN (l.raw_data::jsonb->'_all_phones') @> jsonb_build_array(c_out.phone_number)
+                              WHEN jsonb_typeof(l.raw_data::jsonb->'_all_phones') = 'string' 
+                                THEN (l.raw_data::jsonb->>'_all_phones')::jsonb @> jsonb_build_array(c_out.phone_number)
+                              ELSE false
+                            END
+                          )
+                        )
+                      )
+                      -- and created after the first inbound
+                      AND m_out.created_at > (
+                        SELECT min(m_in.created_at) FROM conversations c_in
+                        JOIN messages m_in ON m_in.conversation_id = c_in.id AND m_in.tenant_id = c_in.tenant_id
+                        WHERE c_in.tenant_id = l.tenant_id
+                          AND m_in.direction = 'in'
+                          AND (m_in.media_metadata IS NULL OR COALESCE(m_in.media_metadata->'native'->>'message_type', '') != 'reaction')
+                          AND (
+                            (l.customer_id IS NOT NULL AND c_in.customer_id = l.customer_id)
+                            OR
+                            RIGHT(c_in.phone_number, 10) = RIGHT(l.phone_number, 10)
+                            OR
+                            (
+                              l.raw_data IS NOT NULL 
+                              AND l.raw_data != ''
+                              AND l.raw_data LIKE '%_all_phones%'
+                              AND (
+                                CASE
+                                  WHEN jsonb_typeof(l.raw_data::jsonb->'_all_phones') = 'array' 
+                                    THEN (l.raw_data::jsonb->'_all_phones') @> jsonb_build_array(c_in.phone_number)
+                                  WHEN jsonb_typeof(l.raw_data::jsonb->'_all_phones') = 'string' 
+                                    THEN (l.raw_data::jsonb->>'_all_phones')::jsonb @> jsonb_build_array(c_in.phone_number)
+                                  ELSE false
+                                END
+                              )
+                            )
+                          )
+                      )
+                  )
+                )
+                FROM conversations c_all
+                JOIN messages m_all ON m_all.conversation_id = c_all.id AND m_all.tenant_id = c_all.tenant_id
+                WHERE c_all.tenant_id = l.tenant_id
+                  AND (m_all.media_metadata IS NULL OR COALESCE(m_all.media_metadata->'native'->>'message_type', '') != 'reaction')
+                  AND (
+                    (l.customer_id IS NOT NULL AND c_all.customer_id = l.customer_id)
+                    OR
+                    RIGHT(c_all.phone_number, 10) = RIGHT(l.phone_number, 10)
+                    OR
+                    (
+                      l.raw_data IS NOT NULL 
+                      AND l.raw_data != ''
+                      AND l.raw_data LIKE '%_all_phones%'
+                      AND (
+                        CASE
+                          WHEN jsonb_typeof(l.raw_data::jsonb->'_all_phones') = 'array' 
+                            THEN (l.raw_data::jsonb->'_all_phones') @> jsonb_build_array(c_all.phone_number)
+                          WHEN jsonb_typeof(l.raw_data::jsonb->'_all_phones') = 'string' 
+                            THEN (l.raw_data::jsonb->>'_all_phones')::jsonb @> jsonb_build_array(c_all.phone_number)
+                          ELSE false
+                        END
+                      )
+                    )
+                  )
+              ) as message_stats
+       FROM leads l
+       -- Layer 1: Safe link via customer_id (identity-based, no ambiguity)
+       LEFT JOIN conversations c_identity ON c_identity.tenant_id = l.tenant_id 
+         AND l.customer_id IS NOT NULL 
+         AND c_identity.customer_id = l.customer_id
+       LEFT JOIN conversation_memory mem_identity ON mem_identity.conversation_id = c_identity.id
+       -- Layer 2: Phone match only if EXACTLY ONE conversation matches (prevents cross-leak)
+       LEFT JOIN LATERAL (
+         SELECT c2.id, c2.status, c2.lead_stage, c2.country as conv_country, c2.department as conv_department
+         FROM conversations c2 
+         WHERE c2.tenant_id = l.tenant_id 
+           AND RIGHT(c2.phone_number, 10) = RIGHT(l.phone_number, 10)
+           AND l.customer_id IS NULL  -- Only use phone fallback when customer_id link unavailable
+           AND (SELECT COUNT(*) FROM conversations cx 
+                WHERE cx.tenant_id = l.tenant_id 
+                AND RIGHT(cx.phone_number, 10) = RIGHT(l.phone_number, 10)) = 1
+         LIMIT 1
+       ) c_phone ON c_identity.id IS NULL
+       LEFT JOIN conversation_memory mem_phone ON mem_phone.conversation_id = c_phone.id AND c_identity.id IS NULL
+       WHERE l.tenant_id = $1
+       ORDER BY l.created_at DESC
+       LIMIT 100
+     ),
+     calculated_leads AS (
+       SELECT bl.*,
+              CASE
+                -- 1. anyInbound is true
+                WHEN (bl.message_stats->>'has_inbound')::boolean = true THEN
+                  CASE
+                    -- We responded (either greeting log exists or outbound message exists after first inbound)
+                    WHEN bl.first_greeting_at IS NOT NULL 
+                         OR bl.any_confirmed = true 
+                         OR bl.any_inbox_sent = true 
+                         OR bl.any_api_sent = true 
+                         OR (bl.message_stats->>'has_outbound_after_first_inbound')::boolean = true THEN
+                      CASE
+                        -- If patient replied after our last response (max of first_greeting_at and last_outbound_at)
+                        WHEN (bl.message_stats->>'last_inbound_at') IS NOT NULL AND 
+                             (bl.message_stats->>'last_inbound_at')::timestamp > (
+                               CASE 
+                                 WHEN bl.first_greeting_at IS NULL THEN (bl.message_stats->>'last_outbound_at')::timestamp
+                                 WHEN (bl.message_stats->>'last_outbound_at') IS NULL THEN bl.first_greeting_at
+                                 WHEN bl.first_greeting_at > (bl.message_stats->>'last_outbound_at')::timestamp THEN bl.first_greeting_at
+                                 ELSE (bl.message_stats->>'last_outbound_at')::timestamp
+                               END
+                             ) THEN 'patient_replied'
+                        -- We responded but patient has not replied since:
+                        -- Check if we have formal greeting logs (any_confirmed, any_inbox_sent, any_api_sent, first_greeting_at)
+                        WHEN bl.any_confirmed = true OR bl.any_inbox_sent = true OR bl.any_api_sent = true OR bl.first_greeting_at IS NOT NULL THEN
+                          CASE
+                            WHEN bl.any_confirmed = true THEN 'manual_greeting_confirmed'
+                            ELSE 'inbox_greeting_sent'
+                          END
+                        ELSE 'out_of_scope'
+                      END
+                    ELSE 'waiting_inbox_reply'
+                  END
+                -- 2. no inbound message
+                ELSE
+                  CASE
+                    WHEN bl.any_confirmed = true THEN 'manual_greeting_confirmed'
+                    WHEN bl.any_inbox_sent = true THEN 'inbox_greeting_sent'
+                    WHEN bl.any_api_sent = true THEN 'inbox_greeting_sent'
+                    WHEN bl.any_opened = true THEN 'whatsapp_opened'
+                    ELSE
+                      CASE
+                        WHEN bl.phone_number IS NULL OR bl.phone_number = '' THEN 'blocked_or_invalid'
+                        WHEN bl.stage NOT IN ('new', 'contacted') THEN 'out_of_scope'
+                        ELSE 'needs_greeting'
+                      END
+                  END
+              END as first_contact_status
+       FROM base_leads bl
+     )
+     SELECT id, patient_name, phone_number, stage, first_contact_status, raw_data
+     FROM calculated_leads
   `;
 
   const leads = await db.executeSafe({

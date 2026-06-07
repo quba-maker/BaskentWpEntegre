@@ -73,9 +73,18 @@ export function resolveFirstContactStatus(
   leadPhones: { phone: string; label: ContactPhoneStatus['label']; isPrimary: boolean }[],
   outreachLogs: OutreachLogMinimal[],
   inboundMessages: InboundMessageMinimal[],
+  outboundMessagesOrOptions?: { created_at: string; phone?: string }[] | { stage?: string },
   options?: { stage?: string }
 ): FirstContactResolution {
   
+  let outboundMessages: { created_at: string; phone?: string }[] = [];
+  let opt = options;
+  if (Array.isArray(outboundMessagesOrOptions)) {
+    outboundMessages = outboundMessagesOrOptions;
+  } else if (outboundMessagesOrOptions) {
+    opt = outboundMessagesOrOptions as { stage?: string };
+  }
+
   const phones: ContactPhoneStatus[] = leadPhones.map(lp => ({
     phone: lp.phone,
     normalizedPhone: normalizePhone(lp.phone),
@@ -159,20 +168,36 @@ export function resolveFirstContactStatus(
   const anyApiSent = phones.some(p => p.hasApiGreetingSent);
   const anyOpened = phones.some(p => p.hasWhatsappOpened);
 
+  const hasGreetingConfirmed = anyConfirmed || anyInboxSent || anyApiSent;
+
+  let hasAnyOutboundAfterFirstInbound = false;
+  if (anyInbound && inboundMessages.length > 0 && outboundMessages.length > 0) {
+    const firstInboundTime = new Date(inboundMessages[0].created_at).getTime();
+    hasAnyOutboundAfterFirstInbound = outboundMessages.some(m => new Date(m.created_at).getTime() > firstInboundTime);
+  }
+
   if (anyInbound) {
-    if (greetingLogs.length > 0 && firstGreetingLog) {
-      // We greeted them
-      if (lastInbound && new Date(firstGreetingLog.created_at) < lastInbound) {
+    if (hasGreetingConfirmed || hasAnyOutboundAfterFirstInbound) {
+      // We responded (either formal greeting log exists or we have sent an outbound message since first inbound)
+      const lastOutbound = outboundMessages.length > 0 ? outboundMessages[outboundMessages.length - 1] : null;
+      const lastOutboundTime = lastOutbound ? new Date(lastOutbound.created_at).getTime() : 0;
+      const lastGreetingTime = firstGreetingLog ? new Date(firstGreetingLog.created_at).getTime() : 0;
+      const lastResponseTime = Math.max(lastOutboundTime, lastGreetingTime);
+
+      if (lastInbound && lastInbound.getTime() > lastResponseTime) {
         patientLevelStatus = 'patient_replied';
-      } else if (anyInboxSent) {
-        patientLevelStatus = 'inbox_greeting_sent';
-      } else if (anyConfirmed) {
-        patientLevelStatus = 'manual_greeting_confirmed';
-      } else if (anyApiSent) {
-        patientLevelStatus = 'inbox_greeting_sent';
+      } else if (hasGreetingConfirmed) {
+        if (anyConfirmed) {
+          patientLevelStatus = 'manual_greeting_confirmed';
+        } else {
+          patientLevelStatus = 'inbox_greeting_sent';
+        }
+      } else {
+        // No greeting log but we have sent an outbound, and patient hasn't replied since
+        patientLevelStatus = 'out_of_scope';
       }
     } else {
-      // Patient wrote, we haven't greeted
+      // Patient wrote, and we have NOT responded (no greeting logs, and no outbound after first inbound)
       patientLevelStatus = 'waiting_inbox_reply';
     }
   } else {
@@ -188,7 +213,7 @@ export function resolveFirstContactStatus(
     } else {
       if (phones.length === 0 || phones.every(p => !p.phone || !p.phone.trim())) {
         patientLevelStatus = 'blocked_or_invalid';
-      } else if (options?.stage && !['new', 'contacted'].includes(options.stage)) {
+      } else if (opt?.stage && !['new', 'contacted'].includes(opt.stage)) {
         patientLevelStatus = 'out_of_scope';
       } else {
         patientLevelStatus = 'needs_greeting';
@@ -308,17 +333,17 @@ export async function resolveFirstContactCore(
     values: [tenantId, leadId]
   }) as any[];
 
-  // 4. Fetch Inbound Messages
+  // 4. Fetch Inbound & Outbound Messages
   const normalizedPhones = phoneList.map(pl => normalizePhone(pl.phone)).filter(Boolean);
   const suffixes = normalizedPhones.map(np => np.slice(-10)).filter(Boolean);
 
-  let inboundMessages: InboundMessageMinimal[] = [];
+  let allMessages: { created_at: string; phone?: string; direction: 'in' | 'out' }[] = [];
   if (normalizedPhones.length > 0) {
-    inboundMessages = await db.executeSafe({
-      text: `SELECT m.created_at, m.phone_number as phone
+    allMessages = await db.executeSafe({
+      text: `SELECT m.created_at, m.phone_number as phone, m.direction
              FROM messages m
              JOIN conversations c ON c.id = m.conversation_id
-             WHERE m.tenant_id = $1::uuid AND m.direction = 'in'
+             WHERE m.tenant_id = $1::uuid
                AND (m.media_metadata IS NULL OR COALESCE(m.media_metadata->'native'->>'message_type', '') != 'reaction')
                AND (
                  m.phone_number = ANY($2::text[])
@@ -329,6 +354,9 @@ export async function resolveFirstContactCore(
     }) as any[];
   }
 
-  return resolveFirstContactStatus(phoneList, logsRes, inboundMessages, { stage: lead.stage });
+  const inboundMessages = allMessages.filter(m => m.direction === 'in');
+  const outboundMessages = allMessages.filter(m => m.direction === 'out');
+
+  return resolveFirstContactStatus(phoneList, logsRes, inboundMessages, outboundMessages, { stage: lead.stage });
 }
 
