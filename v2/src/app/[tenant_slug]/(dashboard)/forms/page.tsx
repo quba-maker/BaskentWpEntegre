@@ -5,7 +5,7 @@ import useSWRInfinite from "swr/infinite";
 import { Search, MessageCircle, X, FileText, ChevronRight, CheckCircle2, Bot, Save, StickyNote, Sparkles, RefreshCw, ChevronDown, Filter, Zap, Send, Clock, CheckCheck, Edit3, Phone, PhoneOff, PhoneForwarded, XCircle } from "lucide-react";
 import { getForms, getCampaignNames, updateLeadNotes, updateLeadStage, syncGoogleSheets } from "@/app/actions/forms";
 import { toggleBotStatus } from "@/app/actions/inbox";
-import { prepareGreetingDraft, sendGreetingMessage, sendFormGreetingTemplateAction, activateBot, getOutreachHistory, logCallReached, logCallMissed, logCallbackScheduled, logNotInterested, getGreetingTemplates, checkGreetingReadiness, saveGreetingDraftInternal, prepareManualGreetingQueueAction, type OutreachLogEntry } from "@/app/actions/outreach";
+import { prepareGreetingDraft, sendGreetingMessage, sendFormGreetingTemplateAction, activateBot, getOutreachHistory, logCallReached, logCallMissed, logCallbackScheduled, logNotInterested, getGreetingTemplates, checkGreetingReadiness, saveGreetingDraftInternal, prepareBulkSmartGreetingDraftsAction, prepareSmartGreetingDraftAction, type OutreachLogEntry } from "@/app/actions/outreach";
 import { useInboxStore } from "@/store/inbox-store";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { MapPin, Building2, Calendar, Flame, TrendingUp, User } from "lucide-react";
@@ -424,15 +424,15 @@ export default function FormsPage() {
     }
   }, [selectedForm?.id, loadOutreachTimeline]);
 
-  // PHASE 2L-P0v2: Step 1 — Prepare greeting draft (NO WhatsApp API call)
+  // PHASE 2L-P0v2: Step 1 — Prepare SMART greeting draft (NO WhatsApp API call)
   const handlePrepareDraft = async (form: any) => {
     setOutreachLoading('draft');
     setOutreachError(null);
     setOutreachSuccess(null);
     try {
-      const result = await prepareGreetingDraft(form.id);
-      if (result.success && result.draft) {
-        setDraftMessage(result.draft);
+      const result: any = await prepareSmartGreetingDraftAction(form.id);
+      if (result.success && result.data?.draftText) {
+        setDraftMessage(result.data.draftText);
         setIsDraftOpen(true);
       } else {
         setOutreachError(result.error || 'Taslak hazırlanamadı.');
@@ -671,23 +671,26 @@ export default function FormsPage() {
     setIsPreparingQueue(true);
     setIsQueueModalOpen(true);
     try {
-      const result = await prepareManualGreetingQueueAction(selectedLeadIds);
+      const result: any = await prepareBulkSmartGreetingDraftsAction(selectedLeadIds);
       if (result.success && result.queueItems) {
         const items = result.queueItems.map((qItem: any) => {
           const lead = forms.find((f: any) => f.id === qItem.id);
-          let status = 'Hazır';
+          let status = qItem.status || 'Hazır';
+          let reason = qItem.reason || '';
+
+          // Client side missing phone fallback, just in case
           if (!normalizePhoneForWaMe(lead?.phone_number)) {
             status = 'Eksik Telefon';
-          } else if (qItem.hardBlockedBecausePatientAlreadyInbound) {
-            status = 'Hasta zaten mesaj attı';
-          } else if (qItem.hasHardDuplicate || qItem.greetingSent) {
-            status = 'Daha önce karşılama gönderilmiş';
+            qItem.isEligible = false;
+            reason = 'Geçersiz veya eksik telefon numarası';
           }
+
           return {
             ...qItem,
             patient_name: lead?.patient_name || 'Bilinmiyor',
             phone: lead?.phone_number || '',
-            status
+            status,
+            reason
           };
         });
         setQueueItems(items);
@@ -1388,10 +1391,10 @@ export default function FormsPage() {
                         <div className="flex flex-col mb-1 text-left">
                           <div className="flex items-center gap-2">
                             <Edit3 className="w-3.5 h-3.5 text-[#007AFF]" />
-                            <span className="text-[11px] font-bold text-[#007AFF] uppercase tracking-wider">Şablon Önizlemesi</span>
+                            <span className="text-[11px] font-bold text-[#007AFF] uppercase tracking-wider">Forma Göre Hazırlanan Karşılama Taslağı</span>
                           </div>
                           <span className="text-[10px] text-[#86868B] mt-0.5 leading-relaxed">
-                            Bu alan seçili WhatsApp şablonunun önizlemesidir. Gerçek gönderimde onaylı template adı kullanılır.
+                            Bu taslak form cevaplarına göre otomatik hazırlanır. Göndermeden önce operatör tarafından kontrol edilmelidir.
                           </span>
                         </div>
                         {/* C12: Template selector dropdown */}
@@ -1413,13 +1416,9 @@ export default function FormsPage() {
                         <textarea
                           value={draftMessage}
                           onChange={(e) => setDraftMessage(e.target.value)}
-                          readOnly={isVariableless}
-                          rows={5}
-                          className={`w-full border border-black/10 rounded-xl p-3 text-[13px] text-[#1D1D1F] font-medium resize-none outline-none transition-all leading-relaxed ${
-                            isVariableless
-                              ? 'bg-[#F5F5F7] text-[#86868B] cursor-not-allowed'
-                              : 'bg-white focus:ring-2 focus:ring-[#25D366]/40 focus:border-[#25D366]/30'
-                          }`}
+                          readOnly={false}
+                          rows={6}
+                          className={`w-full border border-black/10 rounded-xl p-3 text-[13px] text-[#1D1D1F] font-medium resize-none outline-none transition-all leading-relaxed bg-white focus:ring-2 focus:ring-[#25D366]/40 focus:border-[#25D366]/30`}
                           placeholder="Karşılama mesajınızı buraya yazın..."
                         />
 
@@ -1545,19 +1544,19 @@ export default function FormsPage() {
                         } disabled:opacity-70`}
                       >
                         {selectedForm.has_inbound_messages || (readiness && readiness.hardBlockedBecausePatientAlreadyInbound) ? (
-                          <><XCircle className="w-5 h-5" /> Zaten Bize Yazdı</>
+                          <><XCircle className="w-5 h-5" /> Karşılama Engellendi</>
                         ) : greetingSent ? (
-                          <><CheckCheck className="w-5 h-5" /> Selamlama Gönderildi</>
-                        ) : outreachLoading === 'draft' ? (
-                          <><RefreshCw className="w-4 h-4 animate-spin" /> Hazırlanıyor...</>
+                          <><CheckCheck className="w-5 h-5" /> Karşılama Gönderildi / Açıldı</>
                         ) : readinessLoading ? (
                           <><RefreshCw className="w-4 h-4 animate-spin" /> Yükleniyor...</>
+                        ) : outreachLoading === 'draft' ? (
+                          <><RefreshCw className="w-4 h-4 animate-spin" /> Hazırlanıyor...</>
                         ) : selectedForm.stage !== 'new' ? (
                           <><CheckCircle2 className="w-5 h-5" /> Zaten İletişime Geçildi</>
                         ) : (readiness && !hasUsableTemplate) ? (
                           <><Clock className="w-5 h-5" /> Şablon Eklenmeli</>
                         ) : (
-                          <><Edit3 className="w-5 h-5" /> Karşılama Hazırla</>
+                          <><Sparkles className="w-5 h-5" /> Forma Göre Akıllı Taslak Oluştur</>
                         )}
                       </button>
                       <button 

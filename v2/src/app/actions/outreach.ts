@@ -1670,26 +1670,106 @@ export async function logWhatsappAppOpenedForGreetingAction(
 // ═══════════════════════════════════════════════════════════
 // 13. PREPARE MANUAL GREETING QUEUE — Bulk WhatsApp Açılışı İçin
 // ═══════════════════════════════════════════════════════════
-export async function prepareManualGreetingQueueAction(leadIds: string[]) {
+import { generateSmartDraft } from '@/lib/utils/smart-draft-generator';
+
+export async function prepareSmartGreetingDraftAction(leadId: string) {
   try {
-    const results = [];
-    // Max 10 ids
-    const safeIds = leadIds.slice(0, 10);
-    
-    for (const id of safeIds) {
-      const res = await checkGreetingReadiness(id);
-      if (res.success && res.data) {
+    return await withActionGuard({ actionName: 'prepareSmartGreetingDraftAction' }, async (ctx) => {
+      const res = await checkGreetingReadiness(leadId);
+      if (!res.success) return res;
+
+      const leads = await ctx.db.executeSafe({
+        text: `SELECT form_name, raw_data FROM leads WHERE id = $1::uuid AND tenant_id = $2::uuid LIMIT 1`,
+        values: [leadId, ctx.tenantId]
+      });
+
+      let draftText = res.data?.draftText || '';
+      if (leads.length > 0) {
+        draftText = generateSmartDraft(leads[0].raw_data, leads[0].form_name);
+      }
+
+      return {
+        success: true,
+        data: {
+          ...res.data,
+          draftText,
+          source: 'smart_form_draft'
+        }
+      };
+    });
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// 13. PREPARE SMART GREETING QUEUE — Bulk WhatsApp Açılışı İçin
+// ═══════════════════════════════════════════════════════════
+export async function prepareBulkSmartGreetingDraftsAction(leadIds: string[]) {
+  try {
+    // Only wrap the DB query in ActionGuard to get DB context securely.
+    // checkGreetingReadiness already handles its own Guard internally.
+    return await withActionGuard({ actionName: 'prepareBulkSmartGreetingDraftsAction' }, async (ctx) => {
+      const results = [];
+      const safeIds = leadIds.slice(0, 10);
+      
+      const leadsRes = await ctx.db.executeSafe({
+        text: `SELECT id, form_name, raw_data FROM leads WHERE id = ANY($1::uuid[]) AND tenant_id = $2::uuid`,
+        values: [safeIds, ctx.tenantId]
+      });
+
+      const leadsMap = new Map(leadsRes.map((l: any) => [l.id, l]));
+
+      for (const id of safeIds) {
+        const res = await checkGreetingReadiness(id);
+        if (!res.success) {
+          results.push({
+            id,
+            draftText: "",
+            isEligible: false,
+            status: 'Hata',
+            reason: res.error || "Bilinmeyen hata"
+          });
+          continue;
+        }
+        
+        const data = res.data!;
+        let isEligible = true;
+        let status = 'Hazır';
+        let reason = '';
+
+        if (data.hardBlockedBecausePatientAlreadyInbound) {
+          isEligible = false;
+          status = 'Atlandı';
+          reason = 'Hasta zaten inbound mesaj attı';
+        } else if (data.hasHardDuplicate || data.greetingSent) {
+          isEligible = false;
+          status = 'Atlandı';
+          reason = 'Daha önce karşılama mesajı/şablon gönderilmiş';
+        }
+
+        const leadRow = leadsMap.get(id);
+        let draftText = data.draftText;
+        if (leadRow) {
+          draftText = generateSmartDraft(leadRow.raw_data, leadRow.form_name);
+        }
+
         results.push({
           id,
-          draftText: res.data.draftText,
-          hardBlockedBecausePatientAlreadyInbound: res.data.hardBlockedBecausePatientAlreadyInbound,
-          hasHardDuplicate: res.data.hasHardDuplicate,
-          hasSoftDuplicate: res.data.hasSoftDuplicate,
-          greetingSent: res.data.greetingSent
+          draftText,
+          isEligible,
+          status,
+          reason,
+          source: 'smart_form_draft',
+          // Legacy fields
+          hardBlockedBecausePatientAlreadyInbound: data.hardBlockedBecausePatientAlreadyInbound,
+          hasHardDuplicate: data.hasHardDuplicate,
+          hasSoftDuplicate: data.hasSoftDuplicate,
+          greetingSent: data.greetingSent
         });
       }
-    }
-    return { success: true, queueItems: results };
+      return { success: true, queueItems: results };
+    });
   } catch (err: any) {
     return { success: false, error: err.message };
   }
