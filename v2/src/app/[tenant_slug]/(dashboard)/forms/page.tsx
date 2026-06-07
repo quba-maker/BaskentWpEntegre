@@ -275,7 +275,7 @@ export default function FormsPage() {
 
   // DIAGNOSTIC LOG FOR RENDER STATE
   useEffect(() => {
-    if (selectedForm?.id) {
+    if (selectedForm?.id && process.env.NODE_ENV !== 'production') {
       console.log('[FORM_OUTREACH_CARD_RENDER_STATE]', {
         selectedFormId: selectedForm?.id,
         readiness,
@@ -697,37 +697,55 @@ export default function FormsPage() {
   // PHASE 3: Bulk Manual Queue Functions
   const handleBulkQueueStart = async () => {
     if (selectedLeadIds.length === 0) return;
+    
+    console.info('[BULK_QUEUE_CLIENT_START]', {
+      selectedLeadIds,
+      selectedCount: selectedLeadIds.length,
+      currentFilter: firstContactFilter
+    });
+
     setIsPreparingQueue(true);
     setIsQueueModalOpen(true);
     try {
       const result: any = await prepareBulkSmartGreetingDraftsAction(selectedLeadIds);
-      if (result.success && result.queueItems) {
-        const items = result.queueItems.map((qItem: any) => {
-          const lead = forms.find((f: any) => f.id === qItem.id);
-          let status = qItem.status || 'Hazır';
-          let reason = qItem.reason || '';
+      const queueItemsRaw = result?.data?.queueItems ?? result?.queueItems ?? [];
 
-          // Client side missing phone fallback, just in case
-          if (!normalizePhoneForWaMe(lead?.phone_number)) {
-            status = 'Eksik Telefon';
-            qItem.isEligible = false;
-            reason = 'Geçersiz veya eksik telefon numarası';
-          }
-
-          return {
-            ...qItem,
-            patient_name: lead?.patient_name || 'Bilinmiyor',
-            phone: lead?.phone_number || '',
-            status,
-            reason
-          };
-        });
-        setQueueItems(items);
-        setCurrentQueueIndex(0);
-      } else {
-        alert("Kuyruk hazırlanamadı: " + result.error);
+      if (!result.success || queueItemsRaw.length === 0) {
+        alert("Seçilen kayıtlar toplu karşılama kuyruğuna uygun değil.\nSadece “Karşılama Bekliyor” durumundaki kişiler kuyruğa alınabilir.");
         setIsQueueModalOpen(false);
+        return;
       }
+
+      const hasEligible = queueItemsRaw.some((qItem: any) => qItem.isEligible === true);
+      if (!hasEligible) {
+        alert("Seçilen kayıtlar toplu karşılama kuyruğuna uygun değil.\nSadece “Karşılama Bekliyor” durumundaki kişiler kuyruğa alınabilir.");
+        setIsQueueModalOpen(false);
+        return;
+      }
+
+      const items = queueItemsRaw.map((qItem: any) => {
+        const lead = forms.find((f: any) => f.id === qItem.id || f.id === qItem.leadId);
+        let status = qItem.status || 'Hazır';
+        let reason = qItem.reason || '';
+
+        // Client side missing phone fallback, just in case
+        if (!normalizePhoneForWaMe(lead?.phone_number || qItem.phone)) {
+          status = 'Eksik Telefon';
+          qItem.isEligible = false;
+          reason = 'Geçersiz veya eksik telefon numarası';
+        }
+
+        return {
+          ...qItem,
+          patient_name: lead?.patient_name || qItem.name || 'Bilinmiyor',
+          phone: lead?.phone_number || qItem.phone || '',
+          status,
+          reason
+        };
+      });
+
+      setQueueItems(items);
+      setCurrentQueueIndex(0);
     } catch (err) {
       console.error(err);
       setIsQueueModalOpen(false);
@@ -1303,16 +1321,18 @@ export default function FormsPage() {
       </div>
 
       {selectedForm && (() => {
-        console.log('[FORM_OUTREACH_CARD_RENDER_STATE]', {
-          selectedFormId: selectedForm?.id,
-          readiness,
-          templateConfigExists: readiness?.templateConfigExists,
-          templateName: readiness?.templateName,
-          templateLanguage: readiness?.templateLanguage,
-          templateNonCompliant: readiness?.templateNonCompliant,
-          templateSendable: readiness?.templateSendable,
-          hasUsableTemplate,
-        });
+        if (process.env.NODE_ENV !== 'production') {
+          console.log('[FORM_OUTREACH_CARD_RENDER_STATE]', {
+            selectedFormId: selectedForm?.id,
+            readiness,
+            templateConfigExists: readiness?.templateConfigExists,
+            templateName: readiness?.templateName,
+            templateLanguage: readiness?.templateLanguage,
+            templateNonCompliant: readiness?.templateNonCompliant,
+            templateSendable: readiness?.templateSendable,
+            hasUsableTemplate,
+          });
+        }
         return null;
       })()}
 

@@ -1818,6 +1818,12 @@ export async function prepareBulkSmartGreetingDraftsAction(leadIds: string[]) {
 
       const draftPromises = safeIds.map(async (id) => {
         try {
+          const leadRow = await ctx.db.executeSafe({
+            text: `SELECT patient_name, phone_number FROM leads WHERE id = $1 LIMIT 1`,
+            values: [id]
+          });
+          const lead = leadRow[0] || {};
+
           const draftRes = await prepareSmartGreetingDraftCore(ctx.db, ctx.tenantId, ctx.userId, id);
           
           // Check eligibility
@@ -1844,6 +1850,9 @@ export async function prepareBulkSmartGreetingDraftsAction(leadIds: string[]) {
 
           return {
             id,
+            leadId: id,
+            name: lead.patient_name || 'Bilinmiyor',
+            phone: lead.phone_number || '',
             draftText: isEligible ? draftRes.draftText : "",
             isEligible,
             status,
@@ -1852,15 +1861,21 @@ export async function prepareBulkSmartGreetingDraftsAction(leadIds: string[]) {
             recommendedPhone: draftRes.recommendedPhone,
           };
         } catch (e: any) {
-          return { id, draftText: "", isEligible: false, status: 'Hata', reason: e.message || "Bilinmeyen hata" };
+          return { id, leadId: id, name: 'Bilinmiyor', phone: '', draftText: "", isEligible: false, status: 'Hata', reason: e.message || "Bilinmeyen hata" };
         }
       });
 
       const results = await Promise.all(draftPromises);
-      return { success: true, data: { queueItems: results } };
-    }).then(res => {
-      if (!res.success) return { success: false, error: res.error || "Kuyruk hazırlanamadı." };
-      return { success: true, queueItems: (res.data as any)?.queueItems || [] };
+
+      console.info('[BULK_QUEUE_SERVER_RESULT]', {
+        requestedCount: leadIds.length,
+        returnedCount: results.length,
+        eligibleCount: results.filter(r => r.isEligible).length,
+        skippedCount: results.filter(r => !r.isEligible).length,
+        skippedReasons: results.filter(r => !r.isEligible).map(r => r.reason)
+      });
+
+      return { queueItems: results };
     });
   } catch (err: any) {
     return { success: false, error: err.message };
