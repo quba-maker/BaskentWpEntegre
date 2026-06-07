@@ -1190,6 +1190,21 @@ export class QueueWorkerEngine {
         }
       }
 
+      // ── MATCH MANUAL GREETING ECHO ──
+      try {
+        const { ManualGreetingEchoMatcher } = await import('@/lib/services/manual-greeting-echo-matcher');
+        await ManualGreetingEchoMatcher.matchAndConfirmEcho(
+          db,
+          tenantId,
+          phoneNumber,
+          content,
+          providerMessageId,
+          messageId ? String(messageId) : null
+        );
+      } catch (matchErr) {
+        this.log.error(`[ECHO_MATCHER_FAILED]`, matchErr instanceof Error ? matchErr : new Error(String(matchErr)), { traceId });
+      }
+
       // Bypass any AI response or pipeline summary since human answered
       return;
     }

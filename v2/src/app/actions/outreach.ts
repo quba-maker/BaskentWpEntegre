@@ -304,7 +304,7 @@ export async function checkGreetingReadiness(leadId: string) {
           FROM outreach_logs ol
           LEFT JOIN leads l ON l.id = ol.lead_id AND l.tenant_id::text = ol.tenant_id
           WHERE ol.tenant_id = $1::text
-            AND ol.action IN ('greeting_sent', 'template_sent', 'form_greeting_template_sent')
+            AND ol.action IN ('greeting_sent', 'template_sent', 'form_greeting_template_sent', 'manual_whatsapp_greeting_echo_confirmed')
             AND (
               ol.lead_id = $2::uuid
               OR (ol.opportunity_id = $3::text AND $3 IS NOT NULL)

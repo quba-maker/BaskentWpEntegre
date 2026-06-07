@@ -16,6 +16,8 @@ import { resolveCountry, deduplicatePhones, getCountryInfoByName } from "@/lib/u
 const OUTREACH_BADGE_CONFIG: Record<string, { label: string; color: string; icon: string }> = {
   'greeting_sent': { label: 'Mesaj Gönderildi', color: '#25D366', icon: '💬' },
   'form_greeting_template_sent': { label: 'Şablon Gönderildi', color: '#25D366', icon: '💬' },
+  'manual_whatsapp_greeting_echo_confirmed': { label: 'Manuel Karşılama Gönderildi', color: '#0F9D58', icon: '✅' },
+  'whatsapp_app_opened_for_greeting': { label: 'WhatsApp’ta Açıldı', color: '#007AFF', icon: '📲' },
   'bot_activated': { label: 'Bot Aktif', color: '#007AFF', icon: '🤖' },
   'called_reached': { label: 'Arandı / Ulaşıldı', color: '#0F9D58', icon: '📞' },
   'called_missed': { label: 'Arandı / Ulaşılamadı', color: '#FF9500', icon: '📵' },
