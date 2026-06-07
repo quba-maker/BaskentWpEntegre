@@ -1819,8 +1819,8 @@ export async function prepareBulkSmartGreetingDraftsAction(leadIds: string[]) {
       const draftPromises = safeIds.map(async (id) => {
         try {
           const leadRow = await ctx.db.executeSafe({
-            text: `SELECT patient_name, phone_number FROM leads WHERE id = $1 LIMIT 1`,
-            values: [id]
+            text: `SELECT patient_name, phone_number FROM leads WHERE id = $1::uuid AND tenant_id = $2::uuid LIMIT 1`,
+            values: [id, ctx.tenantId]
           });
           const lead = leadRow[0] || {};
 
