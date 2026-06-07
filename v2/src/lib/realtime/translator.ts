@@ -62,17 +62,23 @@ export class RealtimeTranslator {
       type: "chat.message.created",
       payload: {
         id: String(internalMessage.id),
-        // Frontend uses phone_number as activePhone for ["messages", activePhone] query key!
-        conversationId: String(internalMessage.phone_number || internalMessage.conversation_id || ""),
+        // Favor conversation UUID over phone number fallback
+        conversationId: String(internalMessage.conversation_id || internalMessage.phone_number || ""),
         content: internalMessage.content,
         sender: senderType,
         status: (internalMessage.status as "sent" | "delivered" | "read" | "failed") || undefined,
         createdAt: new Date(internalMessage.created_at).toISOString(),
         // Media fields
-        mediaType: internalMessage.media_type,
-        mediaUrl: internalMessage.media_url,
-        mediaMetadata: internalMessage.media_metadata,
-        providerMessageId: internalMessage.provider_message_id,
+        mediaType: internalMessage.media_type || null,
+        mediaUrl: internalMessage.media_url || null,
+        mediaMetadata: internalMessage.media_metadata || null,
+        providerMessageId: internalMessage.provider_message_id || null,
+        // Additional P0 fields for rendering
+        direction: internalMessage.direction === "system" ? "system" : (internalMessage.direction === "in" ? "in" : "out"),
+        text: internalMessage.content,
+        modelUsed: internalMessage.model_used || null,
+        createdAtMs: new Date(internalMessage.created_at).getTime(),
+        phoneNumber: internalMessage.phone_number || undefined,
       }
     };
   }

@@ -45,10 +45,17 @@ export const ChatMessageProjectionSchema = z.object({
   status: z.enum(["sent", "delivered", "read", "failed"]).optional(),
   createdAt: z.string(), // ISO Date string
   // Media fields
-  mediaType: z.string().optional(),
-  mediaUrl: z.string().optional(),
-  mediaMetadata: z.record(z.string(), z.any()).optional(),
-  providerMessageId: z.string().optional(),
+  mediaType: z.string().optional().nullable(),
+  mediaUrl: z.string().optional().nullable(),
+  mediaMetadata: z.record(z.string(), z.any()).optional().nullable(),
+  providerMessageId: z.string().optional().nullable(),
+  // Additional P0 fields for rendering
+  direction: z.enum(["in", "out", "system"]).optional(),
+  text: z.string().optional().nullable(),
+  modelUsed: z.string().optional().nullable(),
+  createdAtMs: z.number().optional(),
+  source: z.string().optional(),
+  phoneNumber: z.string().optional(),
 });
 
 export const ChatMessageStatusProjectionSchema = z.object({

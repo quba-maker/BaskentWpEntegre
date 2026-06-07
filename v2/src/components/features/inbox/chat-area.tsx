@@ -581,6 +581,10 @@ export function ConversationViewport() {
   const [replyingToMessage, setReplyingToMessage] = useState<any | null>(null);
   const [activeReactionPickerMsgId, setActiveReactionPickerMsgId] = useState<string | null>(null);
   const queryClient = useQueryClient();
+  const messagesQueryKey = useMemo(() => [
+    "messages",
+    activeContact?.conversation_id || activeContact?.conversationId || activePhone
+  ], [activeContact, activePhone]);
 
   useEffect(() => {
     const handleOutsideClick = (e: MouseEvent) => {
@@ -687,28 +691,76 @@ export function ConversationViewport() {
     setShowScrollDown(false);
   };
 
+  const clickTraceStartRef = useRef<number | null>(null);
+  const firstRenderDoneRef = useRef<Record<string, boolean>>({});
+
+  // Trace contact click loading time
+  useEffect(() => {
+    if (activePhone) {
+      clickTraceStartRef.current = performance.now();
+      if (typeof window !== "undefined") {
+        console.log(`[INBOX_CLICK_TRACE] Clicked on contact row: phone=${activePhone}`);
+      }
+    }
+  }, [activePhone]);
+
+  // Trace skeleton render vs actual message render
+  const messagesKeyString = messagesQueryKey[1];
+  useEffect(() => {
+    if (messagesKeyString && clickTraceStartRef.current) {
+      const duration = performance.now() - clickTraceStartRef.current;
+      console.log(`[CHAT_AREA_LOAD_TRACE] Chat area viewport mounted/rendered skeleton: duration=${duration.toFixed(2)}ms`);
+    }
+  }, [messagesKeyString]);
+
   const { 
     data: messagesData, 
     isLoading,
     fetchNextPage,
     hasNextPage,
-    isFetchingNextPage
+    isFetchingNextPage,
+    refetch: refetchMessages
   } = useInfiniteQuery({
-    queryKey: ["messages", activeContact?.conversation_id || activeContact?.conversationId || activePhone],
-    queryFn: ({ pageParam = 1 }) => getMessages((activeContact?.conversation_id || activeContact?.conversationId || activePhone)!, pageParam as number, 50),
+    queryKey: messagesQueryKey,
+    queryFn: ({ pageParam = 1 }) => {
+      const fetchStart = performance.now();
+      const targetId = messagesQueryKey[1]!;
+      return getMessages(targetId, pageParam as number, 50).then((res) => {
+        const fetchDuration = performance.now() - fetchStart;
+        console.log(`[MESSAGE_QUERY_TRACE] getMessages server action completed: key=${targetId} duration=${fetchDuration.toFixed(2)}ms rows=${res.length}`);
+        return res;
+      });
+    },
     getNextPageParam: (lastPage: any[], allPages: any[][]) => {
       if (!Array.isArray(lastPage) || !Array.isArray(allPages)) return undefined;
       if (lastPage.length < 50) return undefined;
       return allPages.length + 1;
     },
     initialPageParam: 1,
-    enabled: !!(activeContact?.conversation_id || activeContact?.conversationId || activePhone),
-    // Realtime operates now, fallback polling if disconnected
-    refetchInterval: isRealtimeDown ? 5000 : false,
-    staleTime: Infinity,
-    // GC: evict cache for conversations not visited in 5 minutes
+    enabled: !!messagesQueryKey[1],
+    // Fallback polling only: 25s polling safety net if realtime fails
+    refetchInterval: isRealtimeDown ? 25000 : false,
+    staleTime: 30000,
     gcTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: true,
   });
+
+  // Track first message render timing
+  useEffect(() => {
+    if (messagesData && messagesKeyString && clickTraceStartRef.current && !firstRenderDoneRef.current[messagesKeyString]) {
+      const duration = performance.now() - clickTraceStartRef.current;
+      console.log(`[CHAT_AREA_LOAD_TRACE] First message render completed: key=${messagesKeyString} duration=${duration.toFixed(2)}ms`);
+      firstRenderDoneRef.current[messagesKeyString] = true;
+    }
+  }, [messagesData, messagesKeyString]);
+
+  // Refetch when Ably reconnects
+  useEffect(() => {
+    if (!isRealtimeDown && messagesKeyString) {
+      console.log(`[ABLY_REATTACHED] Real-time reconnected. Refetching active conversation: ${messagesKeyString}`);
+      refetchMessages();
+    }
+  }, [isRealtimeDown, messagesKeyString, refetchMessages]);
 
   const messages = useMemo(() => {
     if (!messagesData?.pages) return [];
@@ -872,10 +924,10 @@ export function ConversationViewport() {
   const handleSendReaction = async (targetProviderMessageId: string, emoji: string) => {
     if (!activePhone || !targetProviderMessageId) return;
 
-    const previousMessages = queryClient.getQueryData(["messages", activePhone]);
+    const previousMessages = queryClient.getQueryData(messagesQueryKey);
 
     // Optimistically update the local message reactions
-    queryClient.setQueryData(["messages", activePhone], (oldData: any) => {
+    queryClient.setQueryData(messagesQueryKey, (oldData: any) => {
       if (!oldData?.pages) return oldData;
 
       return {
@@ -923,7 +975,7 @@ export function ConversationViewport() {
       }
     } catch (err: any) {
       // Rollback on failure
-      queryClient.setQueryData(["messages", activePhone], previousMessages);
+      queryClient.setQueryData(messagesQueryKey, previousMessages);
       setSendError("Tepki gönderilemedi: " + err.message);
       setTimeout(() => setSendError(""), 4000);
     }
@@ -1026,10 +1078,10 @@ export function ConversationViewport() {
     };
 
     // Snapshot the previous value
-    const previousMessages = queryClient.getQueryData(["messages", activePhone]);
+    const previousMessages = queryClient.getQueryData(messagesQueryKey);
 
     // Optimistically update to the new value (preserves InfiniteData shape)
-    queryClient.setQueryData(["messages", activePhone], (oldData: unknown) => {
+    queryClient.setQueryData(messagesQueryKey, (oldData: unknown) => {
       return appendToInfiniteData(oldData, optimisticMsg);
     });
 
@@ -1057,7 +1109,7 @@ export function ConversationViewport() {
       }
     } catch (err: any) {
       // Rollback on failure
-      queryClient.setQueryData(["messages", activePhone], previousMessages);
+      queryClient.setQueryData(messagesQueryKey, previousMessages);
       setSendError("Mesaj gönderilemedi: " + err.message);
       setTimeout(() => setSendError(""), 4000);
     } finally {
@@ -1214,7 +1266,7 @@ export function ConversationViewport() {
             : `📎 Belge — ${filename}`;
         }
         
-        queryClient.setQueryData(["messages", activePhone], (oldData: unknown) => {
+        queryClient.setQueryData(messagesQueryKey, (oldData: unknown) => {
           return appendToInfiniteData(oldData, {
             id: optimisticId,
             sender: "agent",

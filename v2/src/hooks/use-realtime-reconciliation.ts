@@ -51,6 +51,18 @@ const mapRealtimeMessageToUIProjection = (payload: any) => {
     formattedTime = date.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Europe/Istanbul' });
   }
 
+  let dateLabel = '';
+  if (diffDays === 0) {
+    dateLabel = 'Bugün';
+  } else if (diffDays === 1) {
+    dateLabel = 'Dün';
+  } else if (diffDays > 1 && diffDays < 7) {
+    dateLabel = date.toLocaleDateString('tr-TR', { weekday: 'long', timeZone: 'Europe/Istanbul' });
+    dateLabel = dateLabel.charAt(0).toUpperCase() + dateLabel.slice(1);
+  } else {
+    dateLabel = date.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/Istanbul' });
+  }
+
   const status = payload.status || 'delivered';
 
   return {
@@ -60,11 +72,13 @@ const mapRealtimeMessageToUIProjection = (payload: any) => {
       text: payload.content,
       timeMs: date.getTime(),
       status: status,
+      dateLabel,
       // Media fields
       mediaType: payload.mediaType || null,
       mediaUrl: payload.mediaUrl || null,
       mediaMetadata: payload.mediaMetadata || null,
       providerMessageId: payload.providerMessageId || null,
+      modelUsed: payload.modelUsed || null,
     },
     conversationData: {
       last_message: payload.content,
@@ -118,9 +132,11 @@ export function useRealtimeReconciliation(tenantId: string) {
 
   // Internal handler for newly created messages
   const handleMessageCreated = (event: ChatMessageCreatedEvent) => {
-    const { payload, eventId, entityVersion } = event;
+    const { payload, eventId } = event;
     const queryKey = ["messages", payload.conversationId];
     const projection = mapRealtimeMessageToUIProjection(payload);
+
+    const startTime = performance.now();
 
     queryClient.setQueryData(queryKey, (oldData: unknown) => {
       const allMessages = flattenInfiniteData<any>(oldData);
@@ -131,8 +147,12 @@ export function useRealtimeReconciliation(tenantId: string) {
         return appendToInfiniteData(oldData, projection.messageData);
       }
 
-      // 1. Deduplication (Optimistic ID or ProviderMessageID)
-      let existingMsgIndex = allMessages.findIndex((m: any) => m.id === payload.id);
+      // 1. Deduplication (Optimistic ID, Canonical ID, or ProviderMessageID)
+      let existingMsgIndex = allMessages.findIndex((m: any) => {
+        const matchId = m.id === payload.id;
+        const matchProviderId = payload.providerMessageId && m.providerMessageId === payload.providerMessageId;
+        return matchId || matchProviderId;
+      });
 
       // Fallback for optimistic UI matching: match 'temp-' / 'temp-media-' ids by mediaUrl or text/sender within 60s window
       if (existingMsgIndex === -1 && payload.sender === 'agent') {
@@ -179,9 +199,20 @@ export function useRealtimeReconciliation(tenantId: string) {
       return replaceInfiniteDataItems(oldData, stableSortMessages([...allMessages, projection.messageData]));
     });
 
+    const appendDuration = performance.now() - startTime;
+    if (IS_DEV) {
+      console.log(`[REALTIME_APPEND_TRACE] Message append to query client completed in ${appendDuration.toFixed(2)}ms`);
+    }
+
     // Read the active phone directly from the store to prevent unread count bumps on focused conversation
-    const activePhone = useInboxStore.getState().activePhone;
-    const isFocused = activePhone === payload.conversationId;
+    const store = useInboxStore.getState();
+    const activePhone = store.activePhone;
+    const activeContact = store.activeContact;
+    const isFocused = 
+      activeContact?.conversation_id === payload.conversationId ||
+      activeContact?.conversationId === payload.conversationId ||
+      activePhone === payload.conversationId ||
+      activePhone === payload.phoneNumber;
 
     const isReaction = payload.sender === 'system' ||
       payload.mediaMetadata?.native?.message_type === 'reaction' ||
@@ -289,7 +320,11 @@ export function useRealtimeReconciliation(tenantId: string) {
 
     // If this is the active contact, also update store state to sync UI
     const store = useInboxStore.getState();
-    if (store.activePhone === payload.phone || store.activePhone === payload.conversationId) {
+    const isThisContact = store.activePhone === payload.phone || 
+                         store.activeContact?.conversation_id === payload.conversationId ||
+                         store.activeContact?.conversationId === payload.conversationId ||
+                         store.activePhone === payload.conversationId;
+    if (isThisContact) {
       if (store.activeContact) {
         store.setActiveContact(store.activePhone!, {
           ...store.activeContact,

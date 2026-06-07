@@ -21,7 +21,7 @@ import { PatientFormModal } from "./patient-form-modal";
 import { PhoneCallModal } from "./phone-call-modal";
 import { AppointmentModal } from "./appointment-modal";
 import { FollowUpReminderModal } from "./follow-up-reminder-modal";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { Phone } from "lucide-react";
 
 const tagTranslationMap: Record<string, string> = {
@@ -251,55 +251,67 @@ export function ContextPanel() {
     }
   }, [contactId, contactDept, contactCountry, contactNotes, contactStage, activeContact?.opp_requester_name, activeContact?.opp_patient_name, activeContact?.patient_name]);
 
-  useEffect(() => {
-    if (activeContact) {
-      // 1. Fetch active bot directive
-      getActiveBotDirectiveAction(activeContact.conversation_id || activeContact.id)
-        .then((res) => {
-          if (res.success && res.directive) {
-            setActiveBotDirective(res.directive);
-          } else {
-            setActiveBotDirective(null);
-          }
-        })
-        .catch(() => setActiveBotDirective(null));
+  const conversationId = activeContact?.conversation_id || activeContact?.conversationId || activeContact?.id;
 
-      // 1.5. Fetch active tasks for steering
-      setIsLoadingSteeringTasks(true);
-      getActiveTasksForSteeringAction(activeContact.conversation_id || activeContact.id)
-        .then((res) => {
-          if (res.success && res.tasks) {
-            setSteeringTasks(res.tasks);
-          } else {
-            setSteeringTasks([]);
-          }
-        })
-        .catch(() => setSteeringTasks([]))
-        .finally(() => setIsLoadingSteeringTasks(false));
-
-      // 2. Fetch Form Greeting eligibility if form connection exists
+  const { data: crmData, isLoading: isCrmLoading } = useQuery({
+    queryKey: ['crm-panel', conversationId],
+    queryFn: async () => {
+      if (!conversationId) return null;
+      
+      const loadStart = performance.now();
+      
       const hasFormConnection = !!(activeContact.formData || activeContact.form_raw_data);
-      if (hasFormConnection) {
-        setIsCheckingFormGreeting(true);
-        checkFormGreetingEligibility(activeContact.conversation_id || activeContact.id)
-          .then((res) => {
-            setFormGreetingEligibility(res);
-            setFormGreetingChecked(true);
-          })
-          .catch((err) => {
-            console.error("Error checking form greeting eligibility:", err);
-            setFormGreetingEligibility(null);
-            setFormGreetingChecked(true);
-          })
-          .finally(() => {
-            setIsCheckingFormGreeting(false);
-          });
-      } else {
-        setFormGreetingEligibility(null);
-        setFormGreetingChecked(true);
+      
+      const [botDirectiveRes, steeringTasksRes, formGreetingRes] = await Promise.all([
+        getActiveBotDirectiveAction(conversationId).catch(() => ({ success: false, directive: null })),
+        getActiveTasksForSteeringAction(conversationId).catch(() => ({ success: false, tasks: [] })),
+        hasFormConnection 
+          ? checkFormGreetingEligibility(conversationId).catch(() => null)
+          : Promise.resolve(null)
+      ]);
+
+      const loadDuration = performance.now() - loadStart;
+      if (typeof window !== "undefined") {
+        console.log(`[CRM_PANEL_LOAD_TRACE] crm-panel async queries completed: conversationId=${conversationId} duration=${loadDuration.toFixed(2)}ms`);
       }
+
+      return {
+        botDirective: botDirectiveRes?.success ? botDirectiveRes.directive : null,
+        steeringTasks: steeringTasksRes?.success ? steeringTasksRes.tasks : [],
+        formGreetingEligibility: formGreetingRes
+      };
+    },
+    enabled: !!activeContact,
+    staleTime: 30000,
+    gcTime: 5 * 60 * 1000,
+  });
+
+  // Track isCrmLoading to set local loading indicators
+  useEffect(() => {
+    if (isCrmLoading) {
+      setIsCheckingFormGreeting(true);
+      setIsLoadingSteeringTasks(true);
     }
-  }, [contactId, activeContact?.last_message_at, activeContact?.message_count]);
+  }, [isCrmLoading]);
+
+  // Bridge query data into existing state variables for downstream UI compatibility
+  useEffect(() => {
+    if (crmData) {
+      setActiveBotDirective(crmData.botDirective);
+      setSteeringTasks(crmData.steeringTasks);
+      setFormGreetingEligibility(crmData.formGreetingEligibility);
+      setFormGreetingChecked(true);
+      setIsCheckingFormGreeting(false);
+      setIsLoadingSteeringTasks(false);
+    } else {
+      setActiveBotDirective(null);
+      setSteeringTasks([]);
+      setFormGreetingEligibility(null);
+      setFormGreetingChecked(true);
+      setIsCheckingFormGreeting(isCrmLoading);
+      setIsLoadingSteeringTasks(isCrmLoading);
+    }
+  }, [crmData, isCrmLoading]);
 
   useEffect(() => {
     if (!country) {
@@ -355,6 +367,19 @@ export function ContextPanel() {
         }`}
         style={{ borderLeft: "1px solid var(--q-border-default)" }}
       />
+    );
+  }
+
+  if (isCrmLoading) {
+    return (
+      <div
+        className={`h-full z-10 hidden lg:block q-glass transition-all duration-300 ease-in-out ${
+          isSidebarCollapsed ? "w-[616px]" : "w-[360px]"
+        }`}
+        style={{ borderLeft: "1px solid var(--q-border-default)" }}
+      >
+        <CrmSkeleton />
+      </div>
     );
   }
 
@@ -1389,15 +1414,9 @@ export function ContextPanel() {
                           setBotSteeringStatus("saved");
                           setTimeout(() => setBotSteeringStatus("idle"), 2000);
                           mutate((key) => Array.isArray(key) && key[0] === "conversations");
-
-                          // Re-fetch steering tasks to update recommendations
-                          getActiveTasksForSteeringAction(activeContact.conversation_id || activeContact.id)
-                            .then((tRes) => {
-                              if (tRes.success && tRes.tasks) {
-                                setSteeringTasks(tRes.tasks);
-                              }
-                            })
-                            .catch(() => {});
+                          
+                          // Invalidate query to refresh recommendations and directives automatically
+                          queryClient.invalidateQueries({ queryKey: ['crm-panel', activeContact.conversation_id || activeContact.id] });
                         } else {
                           setBotSteeringStatus("error");
                         }

@@ -18,7 +18,8 @@ import {
   unarchiveConversation,
   bulkToggleFavorite,
   bulkArchiveConversations,
-  bulkUnarchiveConversations
+  bulkUnarchiveConversations,
+  getMessages
 } from "@/app/actions/inbox";
 import { useInboxStore } from "@/store/inbox-store";
 import { useDiagnosticsStore } from "@/lib/realtime/diagnostics-store";
@@ -407,6 +408,39 @@ export function ContactRail() {
   });
 
   const contacts = data?.pages ? data.pages.flat() : [];
+
+  // Low priority prefetch for the first 10 contacts to improve load speed
+  useEffect(() => {
+    if (!contacts || contacts.length === 0) return;
+
+    // Prefetch first 10 contacts with a 1-second delay to prioritize active UI mount
+    const firstTen = contacts.slice(0, 10);
+    const delayPrefetch = setTimeout(() => {
+      firstTen.forEach((c: any) => {
+        const conversationId = c.conversation_id || c.conversationId;
+        if (!conversationId) return;
+
+        const cacheKey = ["messages", conversationId];
+        const existingData = queryClient.getQueryData(cacheKey);
+
+        if (!existingData) {
+          if (typeof window !== "undefined") {
+            console.log(`[PREFETCH_LIST_TRACE] Prefetching conversation: conversationId=${conversationId}`);
+          }
+          queryClient.prefetchInfiniteQuery({
+            queryKey: cacheKey,
+            queryFn: ({ pageParam = 1 }) => getMessages(conversationId, pageParam as number, 50),
+            initialPageParam: 1,
+            staleTime: 30000,
+          }).catch(err => {
+            console.error("[PREFETCH_LIST_ERROR]", err);
+          });
+        }
+      });
+    }, 1000);
+
+    return () => clearTimeout(delayPrefetch);
+  }, [contacts, queryClient]);
   const isLoadingMore = isFetchingNextPage || isLoading;
   const isReachingEnd = !hasNextPage;
 
@@ -951,6 +985,25 @@ const handleBulkArchive = async (archive: boolean) => {
                         toggleSelected(c.conversation_id);
                       } else {
                         setActiveContact(c.id, { ...c, unread: 0 });
+                      }
+                    }}
+                    onMouseEnter={() => {
+                      const conversationId = c.conversation_id || c.conversationId;
+                      if (!conversationId) return;
+                      const cacheKey = ["messages", conversationId];
+                      const existingData = queryClient.getQueryData(cacheKey);
+                      if (!existingData) {
+                        if (typeof window !== "undefined") {
+                          console.log(`[PREFETCH_HOVER_TRACE] Hovered contact row: conversationId=${conversationId}`);
+                        }
+                        queryClient.prefetchInfiniteQuery({
+                          queryKey: cacheKey,
+                          queryFn: ({ pageParam = 1 }) => getMessages(conversationId, pageParam as number, 50),
+                          initialPageParam: 1,
+                          staleTime: 30000,
+                        }).catch(err => {
+                          console.error("[PREFETCH_HOVER_ERROR]", err);
+                        });
                       }
                     }}
                     onKeyDown={(e) => {
