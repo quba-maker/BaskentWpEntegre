@@ -1686,16 +1686,20 @@ export async function prepareSmartGreetingDraftAction(leadId: string) {
       let draftText = res.data?.draftText || '';
       if (leads.length > 0) {
         draftText = generateSmartDraft(leads[0].raw_data, leads[0].form_name);
+      } else {
+        draftText = "Merhaba, Başkent Üniversitesi Konya Hastanesi’nden, doldurduğunuz form doğrultusunda sizinle iletişime geçiyoruz.";
       }
 
       return {
-        success: true,
-        data: {
-          ...res.data,
-          draftText,
-          source: 'smart_form_draft'
-        }
+        ...res.data,
+        draftText,
+        source: 'smart_form_draft'
       };
+    }).then(res => {
+      if (!res.success || (res.data as any)?.success === false) {
+        return { success: false, error: res.error || (res.data as any)?.error || "Taslak hazırlanamadı." };
+      }
+      return { success: true, data: res.data };
     });
   } catch (err: any) {
     return { success: false, error: err.message };
@@ -1768,7 +1772,10 @@ export async function prepareBulkSmartGreetingDraftsAction(leadIds: string[]) {
           greetingSent: data.greetingSent
         });
       }
-      return { success: true, queueItems: results };
+      return { queueItems: results };
+    }).then(res => {
+      if (!res.success) return { success: false, error: res.error || "Kuyruk hazırlanamadı." };
+      return { success: true, queueItems: (res.data as any)?.queueItems || [] };
     });
   } catch (err: any) {
     return { success: false, error: err.message };
