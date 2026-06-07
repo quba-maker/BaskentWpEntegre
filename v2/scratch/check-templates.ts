@@ -1,18 +1,10 @@
-import 'dotenv/config';
 import { neon } from '@neondatabase/serverless';
-
-const sql = neon(process.env.DATABASE_URL!);
-
-async function main() {
-  const tenantRes = await sql`SELECT id FROM tenants WHERE slug = 'baskent' LIMIT 1`;
-  const tenantId = tenantRes[0].id;
-
-  const rows = await sql`
-    SELECT id, name, language, body, form_name, department, is_active, is_default, template_type 
-    FROM message_templates
-    WHERE tenant_id = ${tenantId}::uuid
-  `;
-  console.log("TEMPLATES:", rows);
+import * as dotenv from 'dotenv';
+dotenv.config({ path: '.env.local' });
+async function check() {
+  const sql = neon(process.env.DATABASE_URL!);
+  const tenantId = 'caab9ea1-9591-45e4-bbc5-9c9b498982c8';
+  const res = await sql`SELECT name, body FROM message_templates WHERE tenant_id = ${tenantId}::uuid AND name = 'tr_karsilama'`;
+  console.log("Body:", res[0].body);
 }
-
-main().catch(console.error);
+check();

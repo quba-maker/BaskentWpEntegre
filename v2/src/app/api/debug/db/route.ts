@@ -13,14 +13,7 @@ export async function GET(req: NextRequest) {
     for (const lead of resLeads.rows) {
       const resLogs = await sql.query(`SELECT * FROM outreach_logs WHERE lead_id = $1 ORDER BY created_at DESC`, [lead.id]);
       allLogs.push({ leadId: lead.id, logs: resLogs.rows });
-      
-      const convs = await sql.query(`SELECT id FROM conversations WHERE lead_id = $1`, [lead.id]);
-      for (const conv of convs.rows) {
-        const msgs = await sql.query(`SELECT * FROM messages WHERE conversation_id = $1 ORDER BY created_at DESC`, [conv.id]);
-        allMsgs.push({ convId: conv.id, messages: msgs.rows });
-      }
     }
-    
     const recentSent = await sql.query(`SELECT * FROM outreach_logs WHERE action = 'form_greeting_template_sent' ORDER BY created_at DESC LIMIT 5`);
 
     return NextResponse.json({
