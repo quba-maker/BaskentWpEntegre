@@ -296,7 +296,7 @@ export function ContextPanel() {
         setFormGreetingChecked(true);
       }
     }
-  }, [contactId]);
+  }, [contactId, activeContact?.last_message_at, activeContact?.message_count]);
 
   useEffect(() => {
     if (!country) {
