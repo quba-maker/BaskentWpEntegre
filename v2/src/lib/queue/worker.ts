@@ -14,6 +14,22 @@ import { AIEventEmitter } from "@/lib/services/ai/core/event-emitter";
 import { FeatureFlagService } from "@/lib/services/feature-flag.service";
 import { CredentialsService } from "@/lib/services/credentials.service";
 
+function safeAfter(cb: () => void | Promise<void>) {
+  try {
+    after(cb);
+  } catch (err) {
+    // If called outside request scope (e.g. standalone test scripts or CLI tools),
+    // execute the callback asynchronously using setImmediate/setTimeout.
+    setImmediate(async () => {
+      try {
+        await cb();
+      } catch (cbErr) {
+        logger.error("Error in safeAfter callback (outside request scope):", cbErr instanceof Error ? cbErr : new Error(String(cbErr)));
+      }
+    });
+  }
+}
+
 // --- Worker Payload Types ---
 
 /** Meta webhook payload envelope (WhatsApp/Messenger/Instagram) */
@@ -2258,7 +2274,7 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
     } // end skipBotReply else
 
     // 10. CRM Intelligence Extraction (Async & Non-blocking — Feature Flag gated via next/server after)
-    after(async () => {
+    safeAfter(async () => {
       try {
         const isReactionMessage = msgType === 'reaction' || direction === 'system';
         if (isReactionMessage) {
