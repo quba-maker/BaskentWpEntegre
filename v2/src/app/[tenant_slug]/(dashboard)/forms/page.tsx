@@ -23,6 +23,7 @@ const OUTREACH_BADGE_CONFIG: Record<string, { label: string; color: string; icon
   'patient_replied': { label: 'Cevap Geldi', color: '#10B981', icon: '↩️' },
   'blocked_or_invalid': { label: 'Sorunlu', color: '#FF3B30', icon: '⚠️' },
   'out_of_scope': { label: 'Kapsam Dışı', color: '#8E8E93', icon: '⛔' },
+  'no_reply_waiting': { label: 'Cevap Bekleniyor', color: '#FF3B30', icon: '⏳' },
 
   // outreach timeline action fallbacks
   'greeting_sent': { label: 'Mesaj Gönderildi', color: '#25D366', icon: '💬' },
@@ -924,6 +925,7 @@ export default function FormsPage() {
           { value: 'needs_greeting', label: 'Karşılama Bekliyor', icon: '👋' },
           { value: 'waiting_inbox_reply', label: 'Panelden Cevap Bekliyor', icon: '💬' },
           { value: 'whatsapp_opened', label: 'WhatsApp’ta Açıldı', icon: '📲' },
+          { value: 'no_reply_waiting', label: 'Cevap Bekleniyor', icon: '⏳' },
           { value: 'sent', label: 'Gönderildi', icon: '✅' },
           { value: 'patient_replied', label: 'Cevap Geldi', icon: '↩️' },
           { value: 'blocked_or_invalid', label: 'Sorunlu', icon: '⚠️' }
@@ -956,11 +958,11 @@ export default function FormsPage() {
                   <input 
                     type="checkbox"
                     className="w-4 h-4 rounded border-gray-300 text-[#007AFF] focus:ring-[#007AFF]"
-                    checked={forms.length > 0 && selectedLeadIds.length > 0 && selectedLeadIds.length === Math.min(10, forms.filter((f:any) => f.firstContactStatus === 'needs_greeting').length)}
+                    checked={forms.length > 0 && selectedLeadIds.length > 0 && selectedLeadIds.length === Math.min(10, forms.filter((f:any) => f.firstContactStatus === 'needs_greeting' && !f.noReplyFollowup?.is_no_reply_eligible).length)}
                     onChange={(e) => {
                       if (e.target.checked) {
                         const selectableIds = forms
-                          .filter((f:any) => f.firstContactStatus === 'needs_greeting')
+                          .filter((f:any) => f.firstContactStatus === 'needs_greeting' && !f.noReplyFollowup?.is_no_reply_eligible)
                           .map((f:any) => f.id)
                           .slice(0, 10);
                         setSelectedLeadIds(selectableIds);
@@ -1086,8 +1088,8 @@ export default function FormsPage() {
                     <input 
                       type="checkbox"
                       className="w-4 h-4 rounded border-gray-300 text-[#007AFF] focus:ring-[#007AFF] disabled:opacity-50 cursor-pointer"
-                      disabled={form.firstContactStatus !== 'needs_greeting'}
-                      title={getCheckboxTooltip(form.firstContactStatus)}
+                      disabled={form.firstContactStatus !== 'needs_greeting' || form.noReplyFollowup?.is_no_reply_eligible}
+                      title={form.noReplyFollowup?.is_no_reply_eligible ? "Bu kişi cevap bekleyen görüşmede. Inbox’tan takip edin." : getCheckboxTooltip(form.firstContactStatus)}
                       checked={selectedLeadIds.includes(form.id)}
                       onChange={(e) => {
                         if (e.target.checked) {
@@ -1178,7 +1180,8 @@ export default function FormsPage() {
                   </td>
                   <td className="py-4 px-4 whitespace-nowrap">
                     {(() => {
-                      const badge = OUTREACH_BADGE_CONFIG[form.firstContactStatus];
+                      const badgeKey = form.noReplyFollowup?.is_no_reply_eligible ? 'no_reply_waiting' : form.firstContactStatus;
+                      const badge = OUTREACH_BADGE_CONFIG[badgeKey];
                       if (!badge) return <span className="text-[11px] text-[#86868B] italic">—</span>;
                       return (
                         <span 
@@ -1200,40 +1203,48 @@ export default function FormsPage() {
                       let icon = <ChevronRight className="w-3.5 h-3.5" />;
                       let btnClass = "bg-white border border-black/5 hover:bg-black/5 text-[#1D1D1F]";
                       
-                      switch (form.firstContactStatus) {
-                        case 'needs_greeting':
-                          label = 'WhatsApp’ta Karşıla';
-                          icon = <MessageCircle className="w-3.5 h-3.5" />;
-                          btnClass = "bg-[#25D366]/10 border border-[#25D366]/20 text-[#25D366] hover:bg-[#25D366]/20";
-                          break;
-                        case 'waiting_inbox_reply':
-                          label = 'Inbox’ta Karşıla';
-                          icon = <MessageCircle className="w-3.5 h-3.5" />;
-                          btnClass = "bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100";
-                          break;
-                        case 'whatsapp_opened':
-                          label = 'Tekrar Aç';
-                          icon = <MessageCircle className="w-3.5 h-3.5" />;
-                          btnClass = "bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100";
-                          break;
-                        case 'manual_greeting_confirmed':
-                        case 'inbox_greeting_sent':
-                          label = 'Mesaja Git';
-                          icon = <MessageCircle className="w-3.5 h-3.5" />;
-                          btnClass = "bg-emerald-50 border border-emerald-250 text-emerald-700 hover:bg-emerald-100";
-                          break;
-                        case 'patient_replied':
-                          label = 'Inbox’a Git';
-                          icon = <MessageCircle className="w-3.5 h-3.5" />;
-                          btnClass = "bg-emerald-50 border border-emerald-250 text-emerald-700 hover:bg-emerald-100";
-                          break;
-                        case 'blocked_or_invalid':
-                        case 'out_of_scope':
-                        default:
-                          label = 'Detay';
-                          icon = <ChevronRight className="w-3.5 h-3.5" />;
-                          btnClass = "bg-white border border-black/5 hover:bg-black/5 text-[#1D1D1F]";
-                          break;
+                      const isNoReply = form.noReplyFollowup?.is_no_reply_eligible;
+                      
+                      if (isNoReply) {
+                        label = 'Inbox’a Git';
+                        icon = <MessageCircle className="w-3.5 h-3.5" />;
+                        btnClass = "bg-emerald-50 border border-emerald-250 text-emerald-700 hover:bg-emerald-100";
+                      } else {
+                        switch (form.firstContactStatus) {
+                          case 'needs_greeting':
+                            label = 'WhatsApp’ta Karşıla';
+                            icon = <MessageCircle className="w-3.5 h-3.5" />;
+                            btnClass = "bg-[#25D366]/10 border border-[#25D366]/20 text-[#25D366] hover:bg-[#25D366]/20";
+                            break;
+                          case 'waiting_inbox_reply':
+                            label = 'Inbox’ta Karşıla';
+                            icon = <MessageCircle className="w-3.5 h-3.5" />;
+                            btnClass = "bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100";
+                            break;
+                          case 'whatsapp_opened':
+                            label = 'Tekrar Aç';
+                            icon = <MessageCircle className="w-3.5 h-3.5" />;
+                            btnClass = "bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100";
+                            break;
+                          case 'manual_greeting_confirmed':
+                          case 'inbox_greeting_sent':
+                            label = 'Mesaja Git';
+                            icon = <MessageCircle className="w-3.5 h-3.5" />;
+                            btnClass = "bg-emerald-50 border border-emerald-250 text-emerald-700 hover:bg-emerald-100";
+                            break;
+                          case 'patient_replied':
+                            label = 'Inbox’a Git';
+                            icon = <MessageCircle className="w-3.5 h-3.5" />;
+                            btnClass = "bg-emerald-50 border border-emerald-250 text-emerald-700 hover:bg-emerald-100";
+                            break;
+                          case 'blocked_or_invalid':
+                          case 'out_of_scope':
+                          default:
+                            label = 'Detay';
+                            icon = <ChevronRight className="w-3.5 h-3.5" />;
+                            btnClass = "bg-white border border-black/5 hover:bg-black/5 text-[#1D1D1F]";
+                            break;
+                        }
                       }
 
                       return (

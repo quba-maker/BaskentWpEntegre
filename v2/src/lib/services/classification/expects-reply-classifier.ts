@@ -25,7 +25,7 @@ export class ExpectsReplyClassifier {
   }
 
   private static performClassification(text: string): ClassificationResult {
-    const clean = text.toLowerCase().trim();
+    const clean = text.toLocaleLowerCase('tr-TR').trim();
     if (!clean) {
       return {
         expectsReply: false,
@@ -42,7 +42,9 @@ export class ExpectsReplyClassifier {
       "görüşmeniz tamamlandı", "yine bekleriz", "talebiniz alınmıştır",
       "iyi akşamlar", "geçmiş olsun", "iyi bayramlar", "mutlu günler",
       "başarılar dileriz", "yardımcı olabildiysek ne mutlu", "hoşçakalın", "kendinize iyi bakın",
-      "thank you", "thanks", "have a nice day", "good day", "stay safe"
+      "thank you", "thanks", "have a nice day", "good day", "stay safe",
+      "iyi günler dileriz", "görüşmek üzere", "sağlıklı günler", 
+      "randevunuz oluşturuldu", "hayirli pazarlar", "hayırlı günler"
     ];
     for (const kw of closingKeywords) {
       if (clean.includes(kw)) {
@@ -54,6 +56,26 @@ export class ExpectsReplyClassifier {
           isClosingMessage: true
         };
       }
+    }
+
+    // P0 Whitelisted override keywords
+    const p0WhitelistKeywords = [
+      'ne zaman',
+      'uygun olduğunuz',
+      'paylaşabilir misiniz',
+      'ister misiniz',
+      'gelmeyi düşünüyor musunuz',
+      'telefon görüşmesi',
+      'randevu planlam'
+    ];
+    if (p0WhitelistKeywords.some(kw => clean.includes(kw))) {
+      return {
+        expectsReply: true,
+        confidence: 'high',
+        reason: 'Matched P0 whitelisted expects-reply keyword',
+        category: 'unknown',
+        isClosingMessage: false
+      };
     }
 
     // 2. Whitelist Call Time keywords

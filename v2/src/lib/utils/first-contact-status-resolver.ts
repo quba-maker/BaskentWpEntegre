@@ -1,4 +1,5 @@
 import { normalizePhone } from './normalize-phone';
+import { ExpectsReplyClassifier } from '../services/classification/expects-reply-classifier';
 
 export type FirstContactStatus =
   | 'needs_greeting'               // Form geldi, inbound mesaj yok, karşılama yapılmadı -> Aksiyon: WhatsApp'ta Karşıla
@@ -24,11 +25,21 @@ export type ContactPhoneStatus = {
   recommendedAction: 'open_whatsapp_app' | 'open_inbox' | 'none';
 };
 
+export type NoReplyFollowupState = {
+  is_no_reply_eligible: boolean;
+  no_reply_hours: number | null;
+  no_reply_reason?: string;
+  last_outbound_id?: string;
+  last_outbound_at?: string;
+  last_outbound_expects_reply?: boolean;
+};
+
 export type FirstContactResolution = {
   patientLevelStatus: FirstContactStatus;
   recommendedPhone?: ContactPhoneStatus;
   phones: ContactPhoneStatus[];
   primaryAction: string;
+  noReplyFollowup: NoReplyFollowupState;
 };
 
 export interface OutreachLogMinimal {
@@ -252,11 +263,63 @@ export function resolveFirstContactStatus(
     case 'out_of_scope': primaryAction = 'Detay'; break;
   }
 
+  // Calculate noReplyFollowup overlay state
+  const lastOutbound = outboundMessages.length > 0 ? outboundMessages[outboundMessages.length - 1] : null;
+  const lastInboundMsg = inboundMessages.length > 0 ? inboundMessages[inboundMessages.length - 1] : null;
+
+  let lastMessage: { created_at: string; direction: 'in' | 'out'; content?: string } | null = null;
+  if (lastOutbound && lastInboundMsg) {
+    if (new Date(lastOutbound.created_at) > new Date(lastInboundMsg.created_at)) {
+      lastMessage = { created_at: lastOutbound.created_at, direction: 'out', content: (lastOutbound as any).content };
+    } else {
+      lastMessage = { created_at: lastInboundMsg.created_at, direction: 'in' };
+    }
+  } else if (lastOutbound) {
+    lastMessage = { created_at: lastOutbound.created_at, direction: 'out', content: (lastOutbound as any).content };
+  } else if (lastInboundMsg) {
+    lastMessage = { created_at: lastInboundMsg.created_at, direction: 'in' };
+  }
+
+  let isNoReplyEligible = false;
+  let noReplyHoursVal: number | null = null;
+  let noReplyReason = '';
+  let lastOutboundExpectsReply = false;
+
+  if (lastMessage && lastMessage.direction === 'out' && lastMessage.content) {
+    const classification = ExpectsReplyClassifier.classify(lastMessage.content);
+    lastOutboundExpectsReply = classification.expectsReply;
+
+    const currentStage = opt?.stage;
+    const isExcludedStage = currentStage && ['lost', 'not_qualified', 'arrived'].includes(currentStage);
+    const isBookedClosingMsg = currentStage === 'booked' && classification.isClosingMessage;
+
+    if (classification.expectsReply && !isExcludedStage && !isBookedClosingMsg) {
+      const elapsedMs = Date.now() - new Date(lastMessage.created_at).getTime();
+      const hoursElapsed = elapsedMs / (1000 * 60 * 60);
+      
+      // Default P0 threshold is 6 hours
+      if (hoursElapsed >= 6.0) {
+        isNoReplyEligible = true;
+        noReplyHoursVal = Math.round(hoursElapsed * 10) / 10;
+        noReplyReason = classification.reason;
+      }
+    }
+  }
+
+  const noReplyFollowup: NoReplyFollowupState = {
+    is_no_reply_eligible: isNoReplyEligible,
+    no_reply_hours: noReplyHoursVal,
+    no_reply_reason: noReplyReason,
+    last_outbound_at: lastOutbound ? lastOutbound.created_at : undefined,
+    last_outbound_expects_reply: lastOutboundExpectsReply
+  };
+
   return {
     patientLevelStatus,
     phones,
     recommendedPhone,
-    primaryAction
+    primaryAction,
+    noReplyFollowup
   };
 }
 
@@ -332,10 +395,10 @@ export async function resolveFirstContactCore(
   const normalizedPhones = phoneList.map(pl => normalizePhone(pl.phone)).filter(Boolean);
   const suffixes = normalizedPhones.map(np => np.slice(-10)).filter(Boolean);
 
-  let allMessages: { created_at: string; phone?: string; direction: 'in' | 'out' }[] = [];
+  let allMessages: { created_at: string; phone?: string; direction: 'in' | 'out'; content?: string }[] = [];
   if (normalizedPhones.length > 0) {
     allMessages = await db.executeSafe({
-      text: `SELECT m.created_at, m.phone_number as phone, m.direction
+      text: `SELECT m.created_at, m.phone_number as phone, m.direction, m.content
              FROM messages m
              JOIN conversations c ON c.id = m.conversation_id
              WHERE m.tenant_id = $1::uuid

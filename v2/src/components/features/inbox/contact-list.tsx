@@ -970,7 +970,7 @@ const handleBulkArchive = async (archive: boolean) => {
                         {/* No Reply / Follow up alerts */}
                         {c.is_no_reply_eligible && (
                           <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-red-50 text-[#FF3B30] border border-red-100 shadow-sm flex-shrink-0">
-                            ⏳ {c.no_reply_hours}s cevap yok
+                            Cevap Bekliyor · {c.no_reply_hours !== null && c.no_reply_hours !== undefined ? (c.no_reply_hours < 24 ? `${Math.round(c.no_reply_hours)}s` : `${Math.round(c.no_reply_hours / 24)}g`) : "Süre"}
                           </span>
                         )}
                         {c.active_task_type && (() => {

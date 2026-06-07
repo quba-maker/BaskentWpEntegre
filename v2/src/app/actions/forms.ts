@@ -198,7 +198,41 @@ export async function getForms(page: number = 1, search: string = "", source: st
                                   )
                                 )
                               )
-                          ) as message_stats
+                          ) as message_stats,
+                          (
+                             SELECT json_build_object(
+                               'direction', m_last.direction,
+                               'content', m_last.content,
+                               'created_at', m_last.created_at
+                             )
+                             FROM conversations c_last
+                             JOIN messages m_last ON m_last.conversation_id = c_last.id AND m_last.tenant_id = c_last.tenant_id
+                             WHERE c_last.tenant_id = l.tenant_id
+                               AND m_last.direction != 'system'
+                               AND (m_last.media_metadata IS NULL OR COALESCE(m_last.media_metadata->'native'->>'message_type', '') != 'reaction')
+                               AND (
+                                 (l.customer_id IS NOT NULL AND c_last.customer_id = l.customer_id)
+                                 OR
+                                 RIGHT(c_last.phone_number, 10) = RIGHT(l.phone_number, 10)
+                                 OR
+                                 (
+                                   l.raw_data IS NOT NULL 
+                                   AND l.raw_data != ''
+                                   AND l.raw_data LIKE '%_all_phones%'
+                                   AND (
+                                     CASE
+                                       WHEN jsonb_typeof(l.raw_data::jsonb->'_all_phones') = 'array' 
+                                         THEN (l.raw_data::jsonb->'_all_phones') @> jsonb_build_array(c_last.phone_number)
+                                       WHEN jsonb_typeof(l.raw_data::jsonb->'_all_phones') = 'string' 
+                                         THEN (l.raw_data::jsonb->>'_all_phones')::jsonb @> jsonb_build_array(c_last.phone_number)
+                                       ELSE false
+                                     END
+                                   )
+                                 )
+                               )
+                             ORDER BY m_last.created_at DESC
+                             LIMIT 1
+                           ) as last_message_info
                   FROM leads l
                   -- Layer 1: Safe link via customer_id (identity-based, no ambiguity)
                   LEFT JOIN conversations c_identity ON c_identity.tenant_id = l.tenant_id 
@@ -280,8 +314,102 @@ export async function getForms(page: number = 1, search: string = "", source: st
                                     ELSE 'needs_greeting'
                                   END
                               END
-                          END as first_contact_status
-                   FROM base_leads bl
+                          END as first_contact_status,
+                          COALESCE(
+                            (bl.last_message_info->>'direction') = 'out'
+                            AND bl.stage NOT IN ('lost', 'not_qualified', 'arrived')
+                            AND (
+                              -- 1. Blacklist check (closing keywords)
+                              NOT (
+                                LOWER(bl.last_message_info->>'content') LIKE '%teşekkür ederiz%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%teşekkürler%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%iyi günler%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%randevunuz onaylandı%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%görüşmeniz tamamlandı%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%yine bekleriz%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%talebiniz alınmıştır%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%iyi akşamlar%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%geçmiş olsun%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%iyi bayramlar%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%mutlu günler%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%başarılar dileriz%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%yardımcı olabildiysek ne mutlu%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%hoşçakalın%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%kendinize iyi bakın%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%thank you%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%thanks%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%have a nice day%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%good day%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%stay safe%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%iyi günler dileriz%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%görüşmek üzere%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%sağlıklı günler%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%randevunuz oluşturuldu%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%hayirli pazarlar%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%hayırlı günler%'
+                              )
+                              -- 2. Whitelist / Expects Reply keywords check
+                              AND (
+                                bl.last_message_info->>'content' LIKE '%?%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%ne zaman%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%uygun olduğunuz%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%paylaşabilir misiniz%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%ister misiniz%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%gelmeyi düşünüyor musunuz%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%telefon görüşmesi%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%randevu planlam%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%uygun saat%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%ne zaman arayalım%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%ne zaman görüşelim%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%arama saati%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%ne zaman müsait%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%görüşme saati%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%müsait olduğunuz%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%nereden%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%nerede yaşıyorsunuz%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%hangi ülkede%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%nerede ikamet%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%yaşadığınız yer%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%teyit%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%randevu saati%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%randevu tarihi%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%geliyor musunuz%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%gelecek misiniz%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%katılım durumunuz%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%şikayetiniz nedir%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%rahatsızlığınız nedir%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%ağrınız ne%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%ağrınız var mı%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%tedavi için ne zaman%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%ameliyat için ne zaman%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%hastalık geçmişiniz nedir%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%hastalık geçmişinizi paylaşır%'
+                                OR (
+                                  (
+                                    LOWER(bl.last_message_info->>'content') LIKE '%paylaşır mısınız%'
+                                    OR LOWER(bl.last_message_info->>'content') LIKE '%gönderebilir misiniz%'
+                                    OR LOWER(bl.last_message_info->>'content') LIKE '%iletebilir misiniz%'
+                                    OR LOWER(bl.last_message_info->>'content') LIKE '%var mı%'
+                                    OR LOWER(bl.last_message_info->>'content') LIKE '%yollar mısınız%'
+                                    OR LOWER(bl.last_message_info->>'content') LIKE '%gönderir misiniz%'
+                                  )
+                                  AND (
+                                    LOWER(bl.last_message_info->>'content') LIKE '%rapor%'
+                                    OR LOWER(bl.last_message_info->>'content') LIKE '%röntgen%'
+                                    OR LOWER(bl.last_message_info->>'content') LIKE '%mr%'
+                                    OR LOWER(bl.last_message_info->>'content') LIKE '%film%'
+                                    OR LOWER(bl.last_message_info->>'content') LIKE '%tetkik%'
+                                    OR LOWER(bl.last_message_info->>'content') LIKE '%sonuç%'
+                                    OR LOWER(bl.last_message_info->>'content') LIKE '%belge%'
+                                    OR LOWER(bl.last_message_info->>'content') LIKE '%fotoğraf%'
+                                  )
+                                )
+                              )
+                            )
+                          , false) as is_no_reply_eligible,
+                          ROUND(EXTRACT(EPOCH FROM (NOW() - (bl.last_message_info->>'created_at')::timestamp)) / 3600.0, 1) as no_reply_hours,
+                          (bl.last_message_info->>'created_at')::timestamp as last_outbound_at
+                    FROM base_leads bl
                  )
                 SELECT cl.* 
                 FROM calculated_leads cl
@@ -324,6 +452,11 @@ export async function getForms(page: number = 1, search: string = "", source: st
           first_greeting_at: r.first_greeting_at || null,
           inbound_stats: r.inbound_stats || { has_inbound: false },
           firstContactStatus: r.first_contact_status,
+          noReplyFollowup: {
+            is_no_reply_eligible: !!r.is_no_reply_eligible,
+            no_reply_hours: r.is_no_reply_eligible && r.no_reply_hours ? parseFloat(r.no_reply_hours) : null,
+            last_outbound_at: r.last_outbound_at || null
+          }
         };
       });
     }

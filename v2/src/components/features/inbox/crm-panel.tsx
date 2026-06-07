@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { useSWRConfig } from "swr";
 import { User, MapPin, Building, Activity, Tag, ChevronDown, ChevronRight, Save, X, Plus, ChevronLeft, Check, Loader2, Sparkles, FileText, Brain, Link, Clock, Moon, Calendar, CalendarClock, PhoneForwarded, MailPlus, Share2, Eye, EyeOff, Send } from "lucide-react";
 import { useInboxStore } from "@/store/inbox-store";
-import { updateCrmData, addTag, removeTag, prepareFollowUpDraft, sendApprovedFollowUp, checkSecondaryFallback, prepareSecondaryDraft, checkFormGreetingEligibility, prepareFormGreetingDraft, saveBotSteeringDirectiveAction, saveFormGreetingDraftInternalAction, getActiveBotDirectiveAction, getActiveTasksForSteeringAction, sendFormGreetingFromInboxAction } from "@/app/actions/inbox";
+import { updateCrmData, addTag, removeTag, prepareFollowUpDraft, sendApprovedFollowUp, checkSecondaryFallback, prepareSecondaryDraft, checkFormGreetingEligibility, prepareFormGreetingDraft, saveBotSteeringDirectiveAction, saveFormGreetingDraftInternalAction, getActiveBotDirectiveAction, getActiveTasksForSteeringAction, sendFormGreetingFromInboxAction, prepareNoReplyReminderDraftAction, sendNoReplyReminderAction } from "@/app/actions/inbox";
 import { CustomerAiBrainPanel } from "@/components/features/ai-observability/CustomerAiBrain";
 import { AiTimelinePanel } from "@/components/features/ai-observability/AiTimeline";
 import { resolvePatientDisplayName, formatPhoneReadable } from "@/lib/utils/patient-name-resolver";
@@ -191,6 +191,13 @@ export function ContextPanel() {
   const [isLoadingSteeringTasks, setIsLoadingSteeringTasks] = useState<boolean>(false);
   const directiveTextareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // No-reply follow up states
+  const [noReplyDraftText, setNoReplyDraftText] = useState<string>("");
+  const [isPreparingNoReplyDraft, setIsPreparingNoReplyDraft] = useState<boolean>(false);
+  const [noReplyDraftError, setNoReplyDraftError] = useState<string | null>(null);
+  const [noReplySentSuccess, setNoReplySentSuccess] = useState<boolean>(false);
+  const [isSendingNoReply, setIsSendingNoReply] = useState<boolean>(false);
+
   // Reset local state when contact changes or active opp fields update
   // P1B: Granular deps ensure refresh on opp switch (same contact, different opp fields)
   const contactId = activeContact?.id;
@@ -232,6 +239,12 @@ export function ContextPanel() {
       setActiveBotDirective(null);
       setBotSteeringStatus("idle");
       setSteeringTasks([]);
+      // Reset no-reply follow up states
+      setNoReplyDraftText("");
+      setIsPreparingNoReplyDraft(false);
+      setNoReplyDraftError(null);
+      setNoReplySentSuccess(false);
+      setIsSendingNoReply(false);
     }
   }, [contactId, contactDept, contactCountry, contactNotes, contactStage, activeContact?.opp_requester_name, activeContact?.opp_patient_name, activeContact?.patient_name]);
 
@@ -1009,6 +1022,134 @@ export function ContextPanel() {
                           Vazgeç
                         </button>
                       </div>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Cevap Bekleniyor Section */}
+        {activeContact && activeContact.noReplyFollowup?.is_no_reply_eligible && (
+          <div className="w-full mt-2.5 p-3 rounded-2xl border bg-white/40 space-y-3 shadow-sm text-left transition-all duration-300" style={{ borderColor: "var(--q-border-default)" }}>
+            <div className="flex flex-col gap-1 pb-1.5 border-b border-black/[0.03]">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <Clock className="w-4 h-4 text-red-500" />
+                  <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#86868B]">⏳ Cevap Bekleniyor</span>
+                </div>
+                {noReplySentSuccess ? (
+                  <span className="text-[8px] font-bold text-green-600 bg-green-50 border border-green-100 px-1.5 py-0.5 rounded-full">Gönderildi</span>
+                ) : (
+                  <span className="text-[8px] font-bold text-red-600 bg-red-50 border border-red-100 px-1.5 py-0.5 rounded-full">
+                    {activeContact.noReplyFollowup?.no_reply_hours ? `${activeContact.noReplyFollowup.no_reply_hours}s geçti` : 'Süre Aşımı'}
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-[#86868B] mt-1">Son mesajımıza henüz dönüş yapılmadı.</p>
+            </div>
+
+            {noReplyDraftError && (
+              <div className="text-[10px] font-semibold text-red-600 bg-red-50 border border-red-100 rounded-lg p-2 leading-snug">
+                ⚠️ {noReplyDraftError}
+              </div>
+            )}
+
+            {noReplySentSuccess ? (
+              <div className="text-[11px] font-semibold text-green-700 bg-green-50/80 border border-green-150 rounded-xl p-2.5 leading-snug flex items-center gap-1.5">
+                <Check className="w-4 h-4 text-green-600 shrink-0" />
+                <span>Hatırlatma mesajı başarıyla gönderildi.</span>
+              </div>
+            ) : (
+              <>
+                {!noReplyDraftText ? (
+                  <button
+                    onClick={async () => {
+                      setIsPreparingNoReplyDraft(true);
+                      setNoReplyDraftError(null);
+                      try {
+                        const res = await prepareNoReplyReminderDraftAction(activeContact.conversation_id || activeContact.id) as any;
+                        if (res?.success && res?.draft) {
+                          setNoReplyDraftText(res.draft);
+                        } else {
+                          setNoReplyDraftError(res?.error || "Taslak hazırlanırken hata oluştu.");
+                        }
+                      } catch (err: any) {
+                        setNoReplyDraftError(err?.message || "Taslak hazırlama hatası.");
+                      } finally {
+                        setIsPreparingNoReplyDraft(false);
+                      }
+                    }}
+                    disabled={isPreparingNoReplyDraft}
+                    className="w-full py-2 px-3 bg-red-50 border border-red-200 hover:bg-red-100/80 text-red-700 text-[10px] font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all disabled:opacity-50"
+                  >
+                    {isPreparingNoReplyDraft ? (
+                      <><Loader2 className="w-3.5 h-3.5 animate-spin" /><span>Taslak Hazırlanıyor...</span></>
+                    ) : (
+                      <><Sparkles className="w-3.5 h-3.5" /><span>Hatırlatma Taslağı Hazırla</span></>
+                    )}
+                  </button>
+                ) : (
+                  <div className="space-y-2.5">
+                    <textarea
+                      value={noReplyDraftText}
+                      onChange={(e) => setNoReplyDraftText(e.target.value)}
+                      disabled={isSendingNoReply}
+                      rows={4}
+                      className="w-full bg-white/70 border rounded-xl p-2.5 text-[11.5px] text-[#1D1D1F] leading-relaxed resize-none outline-none focus:ring-2 focus:ring-red-500/25 transition-all shadow-sm"
+                      style={{ borderColor: "var(--q-border-default)" }}
+                    />
+
+                    {activeContact.noReplyFollowup?.no_reply_hours !== null && activeContact.noReplyFollowup?.no_reply_hours !== undefined && activeContact.noReplyFollowup.no_reply_hours >= 24 && (
+                      <p className="text-[10px] text-amber-600 bg-amber-50/50 border border-amber-100 p-2 rounded-lg font-medium leading-normal">
+                        ⚠️ 24 saatlik WhatsApp oturumu kapanmış olabilir. Gönderim başarısız olursa WhatsApp uygulaması veya onaylı şablon gerekebilir.
+                      </p>
+                    )}
+
+                    <div className="flex gap-2">
+                      <button
+                        onClick={async () => {
+                          if (!noReplyDraftText.trim()) return;
+                          setIsSendingNoReply(true);
+                          setNoReplyDraftError(null);
+                          try {
+                            const res = await sendNoReplyReminderAction(
+                              activeContact.conversation_id || activeContact.id,
+                              noReplyDraftText
+                            ) as any;
+                            if (res?.success) {
+                              setNoReplySentSuccess(true);
+                              mutate((key) => Array.isArray(key) && key[0] === "conversations");
+                            } else {
+                              setNoReplyDraftError(res?.error || "Gönderim sırasında hata oluştu.");
+                            }
+                          } catch (err: any) {
+                            setNoReplyDraftError(err?.message || "Gönderim hatası.");
+                          } finally {
+                            setIsSendingNoReply(false);
+                          }
+                        }}
+                        disabled={isSendingNoReply || !noReplyDraftText.trim()}
+                        className="flex-1 py-2 bg-green-600 hover:bg-green-700 text-white text-[10px] font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all disabled:opacity-50 shadow-sm"
+                      >
+                        {isSendingNoReply ? (
+                          <><Loader2 className="w-3.5 h-3.5 animate-spin" /><span>Gönderiliyor...</span></>
+                        ) : (
+                          <><Send className="w-3.5 h-3.5" /><span>Panelden Gönder</span></>
+                        )}
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setNoReplyDraftText("");
+                          setNoReplyDraftError(null);
+                        }}
+                        disabled={isSendingNoReply}
+                        className="px-3 py-1.5 border border-gray-200 hover:bg-gray-50 text-gray-600 text-[10px] font-bold rounded-lg cursor-pointer transition-all disabled:opacity-50"
+                      >
+                        Vazgeç
+                      </button>
                     </div>
                   </div>
                 )}

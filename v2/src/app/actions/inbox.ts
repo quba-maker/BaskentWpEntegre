@@ -44,55 +44,53 @@ export async function getConversations(page: number = 1, search: string = "", st
         : (stage !== "all" ? stage : null);
 
       const optOutPhones = new Set<string>();
-      if (isNoReplyFilter) {
-        // Query active opt-out opportunities
-        try {
-          const optOutOpps = await ctx.db.executeSafe({
-            text: `
-              SELECT phone_number, metadata 
-              FROM opportunities 
-              WHERE tenant_id = $1 
-                AND (COALESCE(metadata->>'opt_out_requested', 'false') = 'true')
-            `,
-            values: [ctx.tenantId]
-          });
-          const optOutOppRows = Array.isArray(optOutOpps) ? optOutOpps : ((optOutOpps as any)?.rows || []);
-          for (const o of optOutOppRows) {
-            const norm = normalizePhoneForIdentity(o.phone_number);
+      // Query active opt-out opportunities
+      try {
+        const optOutOpps = await ctx.db.executeSafe({
+          text: `
+            SELECT phone_number, metadata 
+            FROM opportunities 
+            WHERE tenant_id = $1 
+              AND (COALESCE(metadata->>'opt_out_requested', 'false') = 'true')
+          `,
+          values: [ctx.tenantId]
+        });
+        const optOutOppRows = Array.isArray(optOutOpps) ? optOutOpps : ((optOutOpps as any)?.rows || []);
+        for (const o of optOutOppRows) {
+          const norm = normalizePhoneForIdentity(o.phone_number);
+          if (norm.e164) optOutPhones.add(norm.e164);
+        }
+
+        // Query last inbound messages containing opt-out keywords
+        const lastInbounds = await ctx.db.executeSafe({
+          text: `
+            SELECT DISTINCT ON (phone_number) phone_number, content 
+            FROM messages 
+            WHERE tenant_id = $1 AND direction = 'in'
+              AND (media_metadata IS NULL OR COALESCE(media_metadata->'native'->>'message_type', '') != 'reaction')
+            ORDER BY phone_number, created_at DESC
+          `,
+          values: [ctx.tenantId]
+        });
+        const lastInboundRows = Array.isArray(lastInbounds) ? lastInbounds : ((lastInbounds as any)?.rows || []);
+        
+        const hasOptOutKeywords = (text: string): boolean => {
+          const clean = (text || '').toLowerCase().trim();
+          const optOuts = [
+            "dur", "stop", "istemiyorum", "rahatsız etmeyin", "mesaj atmayın", 
+            "bırakın", "silin", "arama", "yazma", "unsubscribe", "don't write"
+          ];
+          return optOuts.some(kw => clean.includes(kw));
+        };
+
+        for (const m of lastInboundRows) {
+          if (hasOptOutKeywords(m.content)) {
+            const norm = normalizePhoneForIdentity(m.phone_number);
             if (norm.e164) optOutPhones.add(norm.e164);
           }
-
-          // Query last inbound messages containing opt-out keywords
-          const lastInbounds = await ctx.db.executeSafe({
-            text: `
-              SELECT DISTINCT ON (phone_number) phone_number, content 
-              FROM messages 
-              WHERE tenant_id = $1 AND direction = 'in'
-                AND (media_metadata IS NULL OR COALESCE(media_metadata->'native'->>'message_type', '') != 'reaction')
-              ORDER BY phone_number, created_at DESC
-            `,
-            values: [ctx.tenantId]
-          });
-          const lastInboundRows = Array.isArray(lastInbounds) ? lastInbounds : ((lastInbounds as any)?.rows || []);
-          
-          const hasOptOutKeywords = (text: string): boolean => {
-            const clean = (text || '').toLowerCase().trim();
-            const optOuts = [
-              "dur", "stop", "istemiyorum", "rahatsız etmeyin", "mesaj atmayın", 
-              "bırakın", "silin", "arama", "yazma", "unsubscribe", "don't write"
-            ];
-            return optOuts.some(kw => clean.includes(kw));
-          };
-
-          for (const m of lastInboundRows) {
-            if (hasOptOutKeywords(m.content)) {
-              const norm = normalizePhoneForIdentity(m.phone_number);
-              if (norm.e164) optOutPhones.add(norm.e164);
-            }
-          }
-        } catch (e) {
-          console.error("[INBOX_FORENSIC] Failed to fetch optOutPhones:", e);
         }
+      } catch (e) {
+        console.error("[INBOX_FORENSIC] Failed to fetch optOutPhones:", e);
       }
 
       // ── FORENSIC TRACE: Log the tenant context being used ──
@@ -385,6 +383,69 @@ export async function getConversations(page: number = 1, search: string = "", st
 
         const resolvedDepartment = r.opp_department || r.department || null;
 
+        const lastMsg = r.last_message || '';
+        const lastMsgDir = r.last_message_direction || 'in';
+
+        let isNoReplyEligible = false;
+        let noReplyHoursVal: number | null = null;
+        let noReplyReason = '';
+        let lastOutboundExpectsReply = false;
+
+        if (lastMsgDir === 'out') {
+          const classification = ExpectsReplyClassifier.classify(lastMsg);
+          lastOutboundExpectsReply = classification.expectsReply;
+
+          const normPhone = normalizePhoneForIdentity(r.id || r.phone_number);
+          const isPrimaryOptedOut = (r.opp_metadata?.opt_out_requested === true) || 
+                                    (r.opp_metadata?.opt_out_requested === 'true') ||
+                                    (normPhone.e164 && optOutPhones.has(normPhone.e164));
+          
+          let hasOptOutKeywordInFamily = false;
+          let parsedRaw = r.form_raw_data;
+          if (typeof parsedRaw === 'string') {
+            try { parsedRaw = JSON.parse(parsedRaw); } catch(_) {}
+          }
+          if (parsedRaw && parsedRaw._all_phones) {
+            const parsed = parseAllPhones(parsedRaw._all_phones);
+            for (const p of parsed) {
+              const pNorm = normalizePhoneForIdentity(p).e164;
+              if (pNorm && optOutPhones.has(pNorm)) {
+                hasOptOutKeywordInFamily = true;
+                break;
+              }
+            }
+          }
+
+          const currentStage = r.opp_stage || r.stage;
+          const isExcludedStage = ['lost', 'not_qualified', 'arrived'].includes(currentStage);
+          const isBookedClosingMsg = currentStage === 'booked' && classification.isClosingMessage;
+          const isAutomationStopped = r.opp_automation_status === 'stopped' || r.opp_automation_status === 'paused';
+          const isArchived = !!r.is_pinned_as_archived || !!r.is_archived; // Check archived flags
+
+          if (classification.expectsReply && 
+              !isPrimaryOptedOut && 
+              !hasOptOutKeywordInFamily && 
+              !isExcludedStage && 
+              !isBookedClosingMsg && 
+              !isAutomationStopped &&
+              !isArchived) {
+            
+            const lastOutboundTime = r.last_message_time_ms ? parseFloat(r.last_message_time_ms) : 0;
+            const hoursElapsed = lastOutboundTime > 0 ? (Date.now() - lastOutboundTime) / (1000 * 60 * 60) : 0;
+            isNoReplyEligible = true;
+            noReplyHoursVal = Math.round(hoursElapsed * 10) / 10;
+            noReplyReason = classification.reason;
+          }
+        }
+
+        const noReplyFollowup = {
+          is_no_reply_eligible: isNoReplyEligible,
+          no_reply_hours: noReplyHoursVal,
+          no_reply_reason: noReplyReason,
+          last_outbound_at: lastMsgDir === 'out' ? r.last_message_at : null,
+          last_outbound_expects_reply: lastOutboundExpectsReply
+        };
+
         return {
           ...r,
           name: detailedName.displayName,
@@ -433,62 +494,20 @@ export async function getConversations(page: number = 1, search: string = "", st
             text: r.opp_summary || r.legacy_ai_summary || '',
             buying_intent: r.ai_buying_intent,
             sentiment: r.ai_sentiment
-          } : null
+          } : null,
+          noReplyFollowup,
+          is_no_reply_eligible: isNoReplyEligible,
+          no_reply_hours: noReplyHoursVal
         };
       });
 
       if (isNoReplyFilter) {
-        // 1. Filter candidates based on expectsReply, opt-out, stages
+        // 1. Filter candidates using pre-computed eligibility flag
         const eligibleCandidates = processedRows.filter((r: any) => {
-          const lastMsg = r.last_message || '';
-          const lastMsgDir = r.lastMessageDirection || 'in';
-          
-          if (lastMsgDir !== 'out') return false;
-
-          const classification = ExpectsReplyClassifier.classify(lastMsg);
-          
-          if (!classification.expectsReply) return false;
-
-          const normPhone = normalizePhoneForIdentity(r.id || r.phone_number);
-          const isPrimaryOptedOut = (r.opp_metadata?.opt_out_requested === true) || 
-                                    (r.opp_metadata?.opt_out_requested === 'true') ||
-                                    (normPhone.e164 && optOutPhones.has(normPhone.e164));
-          
-          let hasOptOutKeywordInFamily = false;
-          let parsedRaw = r.form_raw_data;
-          if (typeof parsedRaw === 'string') {
-            try { parsedRaw = JSON.parse(parsedRaw); } catch(_) {}
+          if (!r.noReplyFollowup.is_no_reply_eligible) return false;
+          if (noReplyHours !== null && r.noReplyFollowup.no_reply_hours < noReplyHours) {
+            return false;
           }
-          if (parsedRaw && parsedRaw._all_phones) {
-            const parsed = parseAllPhones(parsedRaw._all_phones);
-            for (const p of parsed) {
-              const pNorm = normalizePhoneForIdentity(p).e164;
-              if (pNorm && optOutPhones.has(pNorm)) {
-                hasOptOutKeywordInFamily = true;
-                break;
-              }
-            }
-          }
-
-          if (isPrimaryOptedOut || hasOptOutKeywordInFamily) return false;
-
-          const currentStage = r.opp_stage || r.stage;
-          if (['lost', 'not_qualified', 'arrived'].includes(currentStage)) return false;
-
-          if (currentStage === 'booked' && classification.isClosingMessage) return false;
-
-          if (r.opp_automation_status === 'stopped' || r.opp_automation_status === 'paused') return false;
-
-          const lastOutboundTime = r.last_message_time_ms ? parseFloat(r.last_message_time_ms) : 0;
-          const hoursElapsed = lastOutboundTime > 0 ? (Date.now() - lastOutboundTime) / (1000 * 60 * 60) : 0;
-
-          r.no_reply_classification = {
-            ...classification,
-            no_reply_hours: Math.round(hoursElapsed * 10) / 10
-          };
-          r.is_no_reply_eligible = true;
-          r.no_reply_hours = Math.round(hoursElapsed * 10) / 10;
-
           return true;
         });
 
@@ -3977,6 +3996,195 @@ export async function bulkUnarchiveConversations(conversationIds: string[]) {
       });
 
       return { success: true, count: validIds.length };
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error };
+    return res.data;
+  });
+}
+
+export async function prepareNoReplyReminderDraftAction(conversationId: string) {
+  if (!conversationId) return { success: false, error: "Konuşma ID gerekli." };
+  
+  return withActionGuard(
+    { actionName: 'prepareNoReplyReminderDraftAction' },
+    async (ctx) => {
+      const convRows = await ctx.db.executeSafe({
+        text: `SELECT c.id, c.phone_number, c.patient_name, c.active_opportunity_id,
+                      l.id as lead_id
+               FROM conversations c
+               LEFT JOIN leads l ON l.tenant_id = c.tenant_id AND (
+                 (c.customer_id IS NOT NULL AND l.customer_id = c.customer_id)
+                 OR l.phone_number = c.phone_number
+               )
+               WHERE c.id = $1 AND c.tenant_id = $2
+               ORDER BY l.created_at DESC
+               LIMIT 1`,
+        values: [conversationId, ctx.tenantId]
+      }) as any[];
+
+      if (convRows.length === 0) {
+        return { success: false, error: "Konuşma bulunamadı." };
+      }
+      const conv = convRows[0];
+
+      // Fetch last outbound message
+      const lastMsgRows = await ctx.db.executeSafe({
+        text: `SELECT content, created_at
+               FROM messages
+               WHERE conversation_id = $1 AND tenant_id = $2 AND direction = 'out'
+                 AND (media_metadata IS NULL OR COALESCE(media_metadata->'native'->>'message_type', '') != 'reaction')
+               ORDER BY created_at DESC
+               LIMIT 1`,
+        values: [conversationId, ctx.tenantId]
+      }) as any[];
+      
+      const lastMsgText = lastMsgRows[0]?.content || '';
+      const isPhoneCallContext = lastMsgText.toLowerCase().includes('telefon') || 
+                                 lastMsgText.toLowerCase().includes('görüşme') ||
+                                 lastMsgText.toLowerCase().includes('arama') ||
+                                 lastMsgText.toLowerCase().includes('arayalım');
+
+      let draft = "";
+      if (isPhoneCallContext) {
+        draft = `Merhaba,\n\nTelefon görüşmesi için uygun olduğunuz zamanı öğrenmek istemiştik.\n\nMüsait olduğunuz saat aralığını paylaşırsanız sizi buna göre arama planına alabiliriz.\n\nİyi günler dileriz.`;
+      } else {
+        draft = `Merhaba,\n\nDaha önce gönderdiğimiz mesajla ilgili dönüşünüzü bekliyoruz.\n\nTürkiye’ye geliş planınız netleştiyse paylaşabilirsiniz. Size uygun şekilde randevu planlamanız için yardımcı olabiliriz.\n\nİyi günler dileriz.`;
+      }
+
+      // Log draft preparation with actor_id (operator)
+      const actorId = ctx.userId;
+      if (!actorId) {
+        return { success: false, error: "Kullanıcı kimliği bulunamadı (actor_id null olamaz)." };
+      }
+
+      await ctx.db.executeSafe({
+        text: `INSERT INTO outreach_logs (tenant_id, lead_id, conversation_id, opportunity_id, action, channel, actor_id, metadata)
+               VALUES ($1, $2, $3, $4, 'no_reply_reminder_draft_prepared', 'whatsapp', $5, $6)`,
+        values: [
+          ctx.tenantId,
+          conv.lead_id || null,
+          conversationId,
+          conv.active_opportunity_id || null,
+          actorId,
+          JSON.stringify({
+            draft_text: draft,
+            last_outbound_text: lastMsgText
+          })
+        ]
+      });
+
+      return { success: true, draft };
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error };
+    return res.data;
+  });
+}
+
+export async function sendNoReplyReminderAction(conversationId: string, messageText: string) {
+  if (!conversationId) return { success: false, error: "Konuşma ID gerekli." };
+  if (!messageText || messageText.trim().length === 0) return { success: false, error: "Mesaj metni boş olamaz." };
+
+  return withActionGuard(
+    { actionName: 'sendNoReplyReminderAction' },
+    async (ctx) => {
+      // 1. Fetch conversation details
+      const convRows = await ctx.db.executeSafe({
+        text: `SELECT c.id, c.phone_number, c.patient_name, c.active_opportunity_id,
+                      l.id as lead_id
+               FROM conversations c
+               LEFT JOIN leads l ON l.tenant_id = c.tenant_id AND (
+                 (c.customer_id IS NOT NULL AND l.customer_id = c.customer_id)
+                 OR l.phone_number = c.phone_number
+               )
+               WHERE c.id = $1 AND c.tenant_id = $2
+               ORDER BY l.created_at DESC
+               LIMIT 1`,
+        values: [conversationId, ctx.tenantId]
+      }) as any[];
+
+      if (convRows.length === 0) {
+        return { success: false, error: "Konuşma bulunamadı." };
+      }
+
+      const conv = convRows[0];
+      const phone = conv.phone_number;
+      const cleanMessage = messageText.trim();
+
+      // 2. Resolve WhatsApp credentials
+      const creds = await CredentialsService.resolveCredentials(ctx.tenantId, 'whatsapp');
+      const META_ACCESS_TOKEN = creds.accessToken;
+      const PHONE_NUMBER_ID = creds.whatsappPhoneNumberId;
+
+      if (!META_ACCESS_TOKEN || !PHONE_NUMBER_ID) {
+        return { success: false, error: "WhatsApp kimlik bilgileri eksik. Entegrasyon ayarlarını kontrol edin." };
+      }
+
+      // 3. Send via WhatsApp API
+      const { MessageService } = await import("@/lib/services/message.service");
+      const { TenantDB } = await import("@/lib/core/tenant-db");
+      const tenantDb = new TenantDB(ctx.tenantId);
+      const messageService = new MessageService(tenantDb);
+
+      let providerMessageId: string | null = null;
+      try {
+        const sendRes = await messageService.sendWhatsAppMessage(
+          PHONE_NUMBER_ID,
+          META_ACCESS_TOKEN,
+          phone,
+          cleanMessage,
+          creds.provider
+        );
+        providerMessageId = sendRes.providerMessageId || null;
+      } catch (err: any) {
+        return { success: false, error: `WhatsApp gönderim hatası: ${err.message || err}` };
+      }
+
+      // 4. Save message record with direction = 'out'
+      await ctx.db.executeSafe({
+        text: `INSERT INTO messages (tenant_id, conversation_id, phone_number, direction, content, channel, status, provider_message_id)
+               VALUES ($1, $2, $3, 'out', $4, 'whatsapp', 'sent', $5)`,
+        values: [ctx.tenantId, conversationId, phone, cleanMessage, providerMessageId]
+      });
+
+      // Update conversation last_message
+      await ctx.db.executeSafe({
+        text: `UPDATE conversations 
+               SET last_message_at = NOW(), 
+                   last_message_content = $1,
+                   last_channel = 'whatsapp',
+                   last_message_status = 'sent',
+                   last_message_direction = 'out',
+                   message_count = COALESCE(message_count, 0) + 1
+               WHERE id = $2 AND tenant_id = $3`,
+        values: [cleanMessage, conversationId, ctx.tenantId]
+      });
+
+      // 5. Write outreach log with action = 'no_reply_reminder_sent'
+      const actorId = ctx.userId;
+      if (!actorId) {
+        return { success: false, error: "Kullanıcı kimliği bulunamadı (actor_id null olamaz)." };
+      }
+      await ctx.db.executeSafe({
+        text: `INSERT INTO outreach_logs (tenant_id, lead_id, conversation_id, opportunity_id, action, channel, actor_id, metadata)
+               VALUES ($1, $2, $3, $4, 'no_reply_reminder_sent', 'whatsapp', $5, $6)`,
+        values: [
+          ctx.tenantId,
+          conv.lead_id || null,
+          conversationId,
+          conv.active_opportunity_id || null,
+          actorId,
+          JSON.stringify({
+            message_text: cleanMessage,
+            provider_message_id: providerMessageId,
+            patient_name: conv.patient_name || '',
+            phone,
+          })
+        ]
+      });
+
+      return { success: true };
     }
   ).then(res => {
     if (!res.success) return { success: false, error: res.error };
