@@ -481,6 +481,56 @@ export default function FormsPage() {
     }
   };
 
+  // PHASE 2L-P0v2: Manual WhatsApp App Sending (Zero-Outbound, Free)
+  const handleOpenWhatsAppApp = async (form: any) => {
+    if (!draftMessage || draftMessage.trim().length === 0) {
+      setOutreachError('Mesaj metni boş olamaz.');
+      return;
+    }
+
+    if (!form.phone_number) {
+      setOutreachError('Telefon numarası eksik.');
+      return;
+    }
+
+    // 1. Phone Normalization
+    let cleanPhone = form.phone_number.replace(/[\s+\-()]/g, '');
+    if (cleanPhone.startsWith('05')) {
+      cleanPhone = '90' + cleanPhone.substring(1);
+    } else if (cleanPhone.startsWith('5') && cleanPhone.length === 10) {
+      cleanPhone = '90' + cleanPhone;
+    }
+    
+    if (cleanPhone.length < 10) {
+      setOutreachError('Geçerli bir telefon numarası bulunamadı.');
+      return;
+    }
+
+    // 2. Open WhatsApp immediately to avoid popup blocker
+    const waUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(draftMessage)}`;
+    window.open(waUrl, '_blank', 'noopener,noreferrer');
+
+    // 3. Log the action asynchronously
+    setOutreachLoading('sending');
+    setOutreachError(null);
+    setOutreachSuccess(null);
+    try {
+      const { logWhatsappAppOpenedForGreetingAction } = await import('@/app/actions/outreach');
+      const result = await logWhatsappAppOpenedForGreetingAction(form.id, draftMessage);
+      
+      if (!result.success) {
+        setOutreachSuccess('WhatsApp açıldı, ancak sistem logu kaydedilemedi.');
+      } else {
+        setOutreachSuccess('WhatsApp başarıyla açıldı ve kaydedildi.');
+        await loadOutreachTimeline(form.id);
+      }
+    } catch (err: any) {
+      setOutreachSuccess('WhatsApp açıldı, ancak sistem logu kaydedilemedi.');
+    } finally {
+      setOutreachLoading(null);
+    }
+  };
+
   // PHASE 2L-P0v2: Safe Alternative — Save Draft as Internal Note (Zero-Outbound)
   const handleSaveInternal = async (form: any) => {
     if (!draftMessage || draftMessage.trim().length === 0) {
@@ -1271,27 +1321,45 @@ export default function FormsPage() {
                             </div>
                           )}
 
-                          {/* WhatsApp Outbound Warning */}
-                          <div className="text-[10px] font-bold text-[#FF3B30] text-center bg-red-50 border border-red-100 rounded-lg py-1 px-2.5">
-                            ⚠️ Bu buton hastaya gerçek WhatsApp template mesajı gönderir.
-                          </div>
+                          <div className="flex flex-col gap-4">
+                            {/* Option 1: Manual App Open */}
+                            <div className="p-3 border border-[#E5E5EA] rounded-xl bg-white/50 space-y-2">
+                              <h4 className="text-xs font-semibold text-[#1D1D1F]">Ücretsiz manuel gönderim</h4>
+                              <p className="text-[10px] text-[#86868B] leading-snug">
+                                Mesaj WhatsApp uygulamasında hazır açılır. Gönderimi personel manuel yapar. API/template ücreti oluşmaz.
+                              </p>
+                              <button 
+                                onClick={() => handleOpenWhatsAppApp(selectedForm)}
+                                disabled={outreachLoading === 'sending' || !draftMessage?.trim()}
+                                className="w-full flex items-center justify-center gap-2 py-2 rounded-lg text-[12px] font-bold bg-[#25D366] hover:bg-[#1DA851] text-white transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                <Send className="w-3.5 h-3.5" /> WhatsApp Uygulamasında Aç
+                              </button>
+                            </div>
 
-                          <div className="flex gap-2">
-                            <button 
-                              onClick={() => handleConfirmSend(selectedForm)}
-                              disabled={
-                                outreachLoading === 'sending' || 
-                                !draftMessage?.trim() || 
-                                !hasUsableTemplate
-                              }
-                              className="flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-[12px] font-bold bg-[#F5F5F7] hover:bg-rose-50 hover:text-rose-600 text-[#1D1D1F] border border-[#D2D2D7] hover:border-rose-200 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                              <Send className="w-3.5 h-3.5" /> WhatsApp Şablonu ile Gönder
-                            </button>
+                            {/* Option 2: API Template Send */}
+                            <div className="p-3 border border-[#E5E5EA] rounded-xl bg-white/50 space-y-2">
+                              <h4 className="text-xs font-semibold text-[#1D1D1F]">API ile şablon gönderimi</h4>
+                              <p className="text-[10px] text-[#86868B] leading-snug">
+                                Bu işlem hastaya gerçek WhatsApp template mesajı gönderir. 360dialog/Meta ücretlendirmesi uygulanabilir.
+                              </p>
+                              <button 
+                                onClick={() => handleConfirmSend(selectedForm)}
+                                disabled={
+                                  outreachLoading === 'sending' || 
+                                  !draftMessage?.trim() || 
+                                  !hasUsableTemplate
+                                }
+                                className="w-full flex items-center justify-center gap-2 py-2 rounded-lg text-[12px] font-bold bg-[#F5F5F7] hover:bg-rose-50 hover:text-rose-600 text-[#1D1D1F] border border-[#D2D2D7] hover:border-rose-200 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                <Send className="w-3.5 h-3.5" /> WhatsApp Şablonu ile Gönder
+                              </button>
+                            </div>
+                            
                             <button 
                               onClick={handleCancelDraft}
                               disabled={outreachLoading === 'sending'}
-                              className="px-4 py-2 rounded-xl text-[12px] font-bold bg-black/[0.04] hover:bg-black/[0.08] text-[#1D1D1F] transition-colors cursor-pointer disabled:opacity-50"
+                              className="w-full py-2 rounded-xl text-[12px] font-bold bg-black/[0.04] hover:bg-black/[0.08] text-[#1D1D1F] transition-colors cursor-pointer disabled:opacity-50"
                             >
                               İptal
                             </button>

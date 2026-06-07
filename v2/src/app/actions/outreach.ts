@@ -1233,6 +1233,11 @@ export async function sendFormGreetingTemplateAction(
         // Safe scrubbing of credentials in the returned error message
         const safeErrorMsg = (err instanceof Error ? err.message : String(err))
           .replace(new RegExp(creds.accessToken || 'NON_EXISTENT_KEY', 'g'), '[SCRUBBED_API_KEY]');
+          
+        if (safeErrorMsg.includes('lack of payment on client side')) {
+          return { success: false, error: '360dialog API gönderimi ödeme/billing nedeniyle reddetti. Dilerseniz ücretsiz manuel seçenekle WhatsApp uygulamasında açabilirsiniz.' };
+        }
+        
         return { success: false, error: `WhatsApp gönderimi başarısız oldu: ${safeErrorMsg}` };
       }
 
@@ -1599,3 +1604,59 @@ export async function saveGreetingDraftInternal(leadId: string, approvedText: st
   });
 }
 
+
+// ═══════════════════════════════════════════════════════════
+// 12. WHATSAPP APP OPEN LOG — Ücretsiz Manuel Seçenek Logu
+// ═══════════════════════════════════════════════════════════
+export async function logWhatsappAppOpenedForGreetingAction(leadId: string, messageText: string) {
+  const safeLeadId = leadId?.replace(/['";\\]/g, "");
+  if (!safeLeadId || !UUID_RE.test(safeLeadId)) return { success: false, error: "Geçersiz Lead ID." };
+
+  return withActionGuard(
+    { actionName: 'logWhatsappAppOpenedForGreetingAction' },
+    async (ctx) => {
+      // 1. Fetch Lead for phone and form_name
+      const leads = await ctx.db.executeSafe({
+        text: `SELECT phone_number, form_name, patient_name, linked_opportunity_id
+               FROM leads
+               WHERE id = $1::uuid AND tenant_id = $2::uuid LIMIT 1`,
+        values: [safeLeadId, ctx.tenantId]
+      }) as any[];
+
+      if (leads.length === 0) return { success: false, error: "Lead bulunamadı." };
+      const lead = leads[0];
+      const phone = lead.phone_number;
+
+      // Mask phone for metadata
+      const maskPhone = (p: string) => {
+        if (!p) return "";
+        if (p.length < 6) return p;
+        return p.slice(0, 3) + "****" + p.slice(-3);
+      };
+
+      await ctx.db.executeSafe({
+        text: `INSERT INTO outreach_logs (tenant_id, lead_id, opportunity_id, action, channel, actor_id, metadata)
+               VALUES ($1, $2::uuid, $3, 'whatsapp_app_opened_for_greeting', 'system', $4, $5)`,
+        values: [
+          ctx.tenantId,
+          safeLeadId,
+          lead.linked_opportunity_id || null,
+          ctx.userId,
+          JSON.stringify({
+            zero_api_outbound: true,
+            patient_visible: false,
+            opened_via: 'wa_me_link',
+            message_text: messageText,
+            phone_masked: maskPhone(phone),
+            source: 'forms_page'
+          })
+        ]
+      });
+
+      return { success: true };
+    }
+  ).then(res => {
+    if (!res.success || res.data?.success === false) return { success: false, error: res.error || res.data?.error };
+    return { success: true };
+  });
+}
