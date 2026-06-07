@@ -153,7 +153,7 @@ export function extractFormSlots(rawData: any, defaultFormName?: string): FormSl
   
   if (deptLower.includes("ortopedi") || bodyPart === "diz" || bodyPart === "omuz" || bodyPart === "kalça" || bodyPart === "eklem" || bodyPart === "kemik" || conditionTerms.some(c => ["kıkırdak", "kikirdak", "kireçlenme", "kirecleme", "ezilme", "menisküs", "meniskus"].includes(c))) {
     // Make sure spine/backpain is not routed to orthopedics
-    if (complaintText.toLowerCase().includes("bel ağrısı") || complaintText.toLowerCase().includes("bel agrisi") || complaintText.toLowerCase().includes("omurga") || complaintText.toLowerCase().includes("bel fıtığı")) {
+    if (complaintText.toLowerCase().includes("bel ağrısı") || complaintText.toLowerCase().includes("bel agrisi") || complaintText.toLowerCase().includes("omurga") || complaintText.toLowerCase().includes("bel fıtığı") || complaintText.toLowerCase().includes("boyun fıtığı") || complaintText.toLowerCase().includes("boyun")) {
       departmentHint = "Beyin Cerrahi";
     } else {
       departmentHint = "Ortopedi";
@@ -185,39 +185,59 @@ export function extractFormSlots(rawData: any, defaultFormName?: string): FormSl
 // 2. Deterministik Slot-Based Fallback Composer
 export function generateDeterministikDraft(slots: FormSlots, draftPurpose: DraftPurpose = 'first_contact_intent_check'): string {
   let summarySentence = "";
+  let conditionExplanation = "";
   let contextualDetails = "";
 
-  const durationText = slots.durationText ? `, bu durumun yaklaşık ${slots.durationText.toLowerCase()} devam ettiğini` : '';
+  const durationText = slots.durationText ? ` ve bu durumun yaklaşık ${slots.durationText.toLowerCase()} devam ettiğini` : '';
+  const complaintLower = slots.complaintText ? slots.complaintText.toLowerCase() : "";
 
   if (slots.departmentHint === "Ortopedi") {
-    const sikayetOzet = slots.complaintText ? slots.complaintText.toLowerCase() : "ortopedik şikayetleriniz";
-    summarySentence = `Formunuzda ${sikayetOzet} şikayeti olduğunu${durationText} belirttiğinizi görüyoruz. Öncelikle geçmiş olsun.\n\nDiz eklemiyle ilgili kireçlenme, kıkırdak hasarı veya benzer ortopedik rahatsızlıklar; ağrı, yürüme güçlüğü, merdiven çıkarken zorlanma ve hareket kısıtlılığı gibi şikayetlere neden olabilir. Kesin değerlendirme hastanemizde ortopedi hekimi muayenesi sonrası yapılır.`;
+    const sikayetOzet = slots.complaintText ? `${slots.complaintText} şikayetiniz olduğunu` : "ortopedik şikayetleriniz olduğunu";
+    summarySentence = `${sikayetOzet}${durationText} belirtmişsiniz. Öncelikle geçmiş olsun.`;
+    conditionExplanation = `Ortopedik rahatsızlıklar; eklemlerde ağrı, şişlik, hareket kısıtlılığı ve günlük yaşamda zorlanma gibi şikayetlere neden olabilmektedir. Bu nedenle mevcut durumunuzun uzman doktor tarafından detaylı şekilde değerlendirilmesi önem taşımaktadır.`;
   } 
   else if (slots.departmentHint === "Kardiyoloji") {
-    let sikayetOzet = "";
-    if (slots.complaintText.toLowerCase().includes("stent")) {
-      sikayetOzet = "kalp damar sağlığınızla ilgili işlem geçmişiniz olduğunu ve";
+    if (complaintLower.includes("stent") || complaintLower.includes("bypass") || complaintLower.includes("anjiyo")) {
+      summarySentence = `Daha önce anjiyo, stent veya bypass işlemi geçirdiğinizi ve kontrol amaçlı değerlendirilmek istediğinizi belirtmişsiniz. Öncelikle geçmiş olsun.`;
     } else if (slots.complaintText) {
-      sikayetOzet = `${slots.complaintText.toLowerCase()} şikayetiniz olduğunu ve`;
+      summarySentence = `${slots.complaintText} şikayetiniz olduğunu${durationText} belirtmişsiniz. Öncelikle geçmiş olsun.`;
     } else {
-      sikayetOzet = "kalp damar sağlığınızla ilgili şikayetleriniz olduğunu ve";
+      summarySentence = `Kalp damar sağlığınızla ilgili şikayetleriniz olduğunu belirtmişsiniz. Öncelikle geçmiş olsun.`;
     }
-    summarySentence = `Formunuzda ${sikayetOzet} değerlendirilmek istediğinizi belirttiğinizi görüyoruz. Öncelikle geçmiş olsun.\n\nKalp ve damar sağlığıyla ilgili takiplerde düzenli kontrol önemlidir. Hastanemize geldiğinizde kardiyoloji hekimimiz tarafından gerekli muayene ve değerlendirmeler yapılır, uygun takip süreci hakkında bilgilendirme sağlanır.`;
+    conditionExplanation = `Kalp ve damar hastalıklarında düzenli kontroller büyük önem taşımaktadır. Hastanemize geldiğinizde kardiyoloji doktorumuz tarafından gerekli muayene ve değerlendirmeler yapılarak mevcut durumunuz ayrıntılı şekilde incelenir ve size uygun takip süreci hakkında detaylı bilgi verilir.`;
   }
   else if (slots.departmentHint === "Beyin Cerrahi") {
-    let sikayetOzet = slots.complaintText ? slots.complaintText.toLowerCase() : "beyin ve sinir cerrahisi alanındaki şikayetleriniz";
-    summarySentence = `Formunuzda ${sikayetOzet} olduğunu${durationText} belirttiğinizi görüyoruz. Öncelikle geçmiş olsun.\n\nOmurga ve sinir sistemi sağlığında (bel/boyun fıtığı, sinir sıkışması vb.) detaylı klinik inceleme çok önemlidir. Hastanemize geldiğinizde ilgili hekimimiz tarafından gerekli muayene ve değerlendirmeler yapılarak mevcut durumunuz ayrıntılı şekilde incelenir.`;
+    if (complaintLower.includes("boyun fıtığı") || complaintLower.includes("boyun fitigi")) {
+      summarySentence = `Boyun fıtığı şikayetiniz olduğunu${durationText} belirtmişsiniz. Öncelikle geçmiş olsun.`;
+      conditionExplanation = `Boyun fıtığı; boyun ağrısı, omuz ve kollara yayılan ağrı, uyuşma, karıncalanma ve hareket kısıtlılığı gibi şikayetlere neden olabilmektedir. Bu nedenle mevcut durumunuzun uzman doktor tarafından detaylı şekilde değerlendirilmesi önem taşımaktadır.`;
+    } else if (complaintLower.includes("bel ağrısı") || complaintLower.includes("bel agrisi") || complaintLower.includes("bel fıtığı") || complaintLower.includes("bel fitigi")) {
+      summarySentence = `${slots.complaintText} şikayetiniz olduğunu${durationText} belirtmişsiniz. Öncelikle geçmiş olsun.`;
+      conditionExplanation = `Bel ağrısı, bel fıtığı, omurga problemleri veya sinir sıkışması gibi durumlar; hareket kısıtlılığı, bacağa yayılan ağrı, uyuşma veya günlük yaşamda zorlanma gibi şikayetlere neden olabilmektedir. Bu nedenle mevcut durumunuzun uzman doktor tarafından detaylı şekilde değerlendirilmesi önem taşımaktadır.`;
+    } else {
+      const sikayetOzet = slots.complaintText ? `${slots.complaintText} şikayetiniz olduğunu` : "beyin ve sinir cerrahisi alanındaki şikayetleriniz olduğunu";
+      summarySentence = `${sikayetOzet}${durationText} belirtmişsiniz. Öncelikle geçmiş olsun.`;
+      conditionExplanation = `Omurga ve sinir sistemi rahatsızlıkları; hareket kısıtlılığı, ağrı veya uyuşma gibi şikayetlere neden olabilmektedir. Bu nedenle mevcut durumunuzun uzman doktor tarafından detaylı şekilde değerlendirilmesi önem taşımaktadır.`;
+    }
   }
   else if (slots.departmentHint === "Check-up") {
-    summarySentence = `Formunuzda Check-up programlarımızla ilgilendiğinizi belirttiğinizi görüyoruz. Sağlığınıza gösterdiğiniz özen için tebrik ederiz.\n\nCheck-up programlarımız yaşınıza, cinsiyetinize ve tıbbi geçmişinize özel olarak planlanmaktadır. Hastanemize geldiğinizde ilgili hekimlerimiz tarafından gerekli değerlendirmeler yapılır.`;
+    summarySentence = `Check-up programlarımızla ilgilendiğinizi belirtmişsiniz. Sağlığınıza gösterdiğiniz özen için tebrik ederiz.`;
+    conditionExplanation = `Check-up programlarımız yaşınıza, cinsiyetinize ve tıbbi geçmişinize özel olarak planlanmaktadır. Hastanemize geldiğinizde ilgili doktorlarımız tarafından gerekli değerlendirmeler yapılır.`;
   }
   else {
     // Genel / Bilinmeyen / Akromegali vb.
     if (slots.complaintText) {
-      summarySentence = `Formunuzda ${slots.complaintText.toLowerCase()} ile ilgili değerlendirilmek istediğinizi belirttiğinizi görüyoruz. Öncelikle geçmiş olsun.\n\nBu tür durumlarda kesin değerlendirme, hastanemizde ilgili hekim muayenesi ve gerekli klinik incelemeler sonrası yapılır.`;
+      summarySentence = `${slots.complaintText} ile ilgili değerlendirilmek istediğinizi${durationText} belirtmişsiniz. Öncelikle geçmiş olsun.`;
+      conditionExplanation = `Bu tür rahatsızlıklarda mevcut durumunuzun uzman doktor tarafından detaylı şekilde değerlendirilmesi önem taşımaktadır.`;
     } else {
-      summarySentence = `Formunuzda sağlık durumunuzla ilgili bilgi almak istediğinizi görüyoruz.\n\nKesin değerlendirme hastanemizde ilgili hekim muayenesi sonrası yapılır.`;
+      summarySentence = `Sağlık durumunuzla ilgili bilgi almak istediğinizi görüyoruz.`;
+      conditionExplanation = `Mevcut durumunuzun uzman doktor tarafından detaylı şekilde değerlendirilmesi önem taşımaktadır.`;
     }
+  }
+
+  // Common hospital evaluation sentence unless already included in conditionExplanation (e.g. Checkup and Cardiology have their own)
+  let evaluationSentence = "";
+  if (slots.departmentHint !== "Check-up" && slots.departmentHint !== "Kardiyoloji") {
+    evaluationSentence = `Hastanemize geldiğinizde ilgili doktorumuz tarafından gerekli muayene ve değerlendirmeler yapılarak mevcut durumunuz ayrıntılı şekilde incelenir ve size uygun takip süreci hakkında detaylı bilgi verilir.`;
   }
 
   if (slots.livingCity) {
@@ -228,18 +248,20 @@ export function generateDeterministikDraft(slots: FormSlots, draftPurpose: Draft
   if (slots.requestedAppointmentText) {
     const isOnlyNumber = /^\d+$/.test(slots.requestedAppointmentText);
     if (isOnlyNumber && slots.requestedAppointmentText.length <= 2) {
-      bookingQuestion = `Randevu tarihi alanına “${slots.requestedAppointmentText}” yazmışsınız; bunu ayın ${slots.requestedAppointmentText}’i mi yoksa ${getMonthNameFromNumber(slots.requestedAppointmentText)} ayı olarak mı düşündüğünüzü netleştirebilir misiniz? Türkiye’ye / Konya’ya gelmeyi düşünüyor musunuz? Yaklaşık geliş tarihinizi paylaşırsanız randevu planlamanız için yardımcı olabiliriz.`;
+      bookingQuestion = `Randevu tarihi alanına “${slots.requestedAppointmentText}” yazmışsınız; bunu ayın ${slots.requestedAppointmentText}’i mi yoksa ${getMonthNameFromNumber(slots.requestedAppointmentText)} ayı olarak mı düşündüğünüzü netleştirebilir misiniz? Türkiye’ye (Konya’ya) ne zaman gelmeyi düşünüyorsunuz? Yaklaşık tarihinizi paylaşırsanız size uygun şekilde randevu planlamanızı organize edebiliriz.`;
     } else {
-      bookingQuestion = `Randevu tarihi olarak “${slots.requestedAppointmentText}” belirtmişsiniz. Türkiye’ye / Konya’ya gelmeyi düşünüyor musunuz? Yaklaşık geliş tarihinizi netleştirdiğinizde randevu planlamanız için yardımcı olabiliriz.`;
+      bookingQuestion = `Randevu tarihi olarak “${slots.requestedAppointmentText}” belirtmişsiniz. Türkiye’ye (Konya’ya) ne zaman gelmeyi düşünüyorsunuz? Yaklaşık tarihinizi netleştirdiğinizde randevu planlamanızı organize edebiliriz.`;
     }
   } else {
-    bookingQuestion = `Türkiye’ye / Konya’ya gelmeyi düşünüyor musunuz? Yaklaşık geliş tarihinizi paylaşırsanız randevu planlamanız için yardımcı olabiliriz.`;
+    bookingQuestion = `Türkiye’ye (Konya’ya) ne zaman gelmeyi düşünüyorsunuz? Yaklaşık tarihinizi paylaşırsanız size uygun şekilde randevu planlamanızı organize edebiliriz.`;
   }
 
   const greeting = `Merhaba,\n\nBaşkent Üniversitesi Konya Hastanesi’nden, doldurduğunuz form doğrultusunda sizinle iletişime geçiyoruz.`;
   const closing = `İyi günler dileriz.`;
 
   const blocks = [greeting, summarySentence];
+  if (conditionExplanation) blocks.push(conditionExplanation);
+  if (evaluationSentence) blocks.push(evaluationSentence);
   if (contextualDetails || bookingQuestion) blocks.push((contextualDetails + bookingQuestion).trim());
   blocks.push(closing);
 
@@ -285,7 +307,7 @@ export function validateDraft(draftText: string, slots: FormSlots, detectedDepar
       /kök hücre/i,
       /diz içi iğne/i,
       /fizik tedavi/i,
-      /anjiyo/i
+      /anjiyo yapıldı mı/i
     ];
     blacklist.push(...medicalBlacklist);
   }
@@ -350,7 +372,9 @@ Yanıtını sadece belirtilen JSON formatında üretmelisin. JSON haricinde hiç
 6. Kampanya kodlarını (örn. 2026_AVRUPA_TR_ORTOPEDI_BF_FUNNEL), internal ID'leri, adset, leadgen gibi teknik kelimeleri KESİNLİKLE hastaya yazma. Bunları sadece departmanı anlamak için kullan.
 7. Şehir ve ülke isimlerine ek getirirken hata yapmamak için şu güvenli kalıbı kullan: "Yaşadığınız yer olarak [Şehir/Ülke] bilgisini paylaşmışsınız."
 8. Eğer randevu tarihi alanında sadece "8" gibi tekil belirsiz bir sayı varsa: "Randevu tarihi alanına “8” yazmışsınız; bunu ayın 8’i mi yoksa Ağustos ayı olarak mı düşündüğünüzü netleştirebilir misiniz?" şeklinde sor.
-9. Tıbbi değerlendirme uyarısı olarak her zaman şu cümleyi ekle: "Kesin değerlendirme hastanemizde ilgili hekim muayenesi sonrası yapılır."
+9. "ilgili hekim" yerine "ilgili doktorumuz" kullan. "Bölümümüz tanı ve tedavi hizmeti vermektedir" gibi broşür dili KULLANMA.
+10. "Türkiye'ye / Konya'ya" YAZMA. KESİNLİKLE "Türkiye’ye (Konya’ya)" formatında parantez ile yaz.
+11. Randevu yardımı kısmında "yardımcı olabiliriz" YERİNE "randevu planlamanızı organize edebiliriz" ifadesini kullan.
 
 === FIRST CONTACT INTENT CHECK RULES (KRİTİK) ===
 Bu taslak hastaya atılacak ilk mesajdır ve asıl amaç hastanın randevu veya gelme NİYETİNİ öğrenmektir, TIBBİ DANIŞMANLIK vermek değildir.
@@ -361,23 +385,21 @@ AŞAĞIDAKİ SORULAR VE KONULAR KESİNLİKLE YASAKTIR:
 - "İlaç kullanıyor musunuz?"
 - "Ameliyat önerildi mi?", "PRP", "Kök hücre", "İğne denendi mi?", "Anjiyo yapıldı mı?", "Fizik tedavi gördünüz mü?"
 
-Bunun yerine sadece geliş niyetini ve randevu hedefini sor:
-- "Türkiye’ye / Konya’ya gelmeyi düşünüyor musunuz? Yaklaşık geliş tarihinizi paylaşırsanız randevu planlamanız için yardımcı olabiliriz."
-veya
-- "Gelme planınız net değilse, uygun olduğunuzda telefonla süreç ve randevu planlaması hakkında bilgi paylaşabiliriz."
+Bunun yerine GELİŞ NİYETİNİ VE TARİHİNİ şöyle sor:
+- "Türkiye’ye (Konya’ya) ne zaman gelmeyi düşünüyorsunuz? Yaklaşık tarihinizi paylaşırsanız size uygun şekilde randevu planlamanızı organize edebiliriz."
 
-=== TASLAK METNİ BÖLÜM VE SIRALAMA KURALLARI ===
-1. Nötr selamlama: "Merhaba,"
+=== TASLAK METNİ BÖLÜM VE SIRALAMA KURALLARI (HER PARAGRAF ARASI BİR BOŞ SATIR OLMALI) ===
+1. Açılış: "Merhaba,"
 2. Kurumsal giriş: "Başkent Üniversitesi Konya Hastanesi’nden, doldurduğunuz form doğrultusunda sizinle iletişime geçiyoruz."
-3. Form özeti: Hastanın formda belirttiği şikayeti/şikayetleri doğal ve düzgün bir Türkçe ile özetle. Eğer formda şikayet süresi de varsa (örn. "2 senedir", "3 aydır") mutlaka şu formatta ekle: "Formunuzda X ile ilgili değerlendirilmek istediğinizi ve bu durumun yaklaşık Y devam ettiğini belirttiğinizi görüyoruz." (Süre verisi yoksa sadece şikayeti özetle). "Öncelikle geçmiş olsun." ekle.
-4. Genel Bilgilendirme: Branşla alakalı genel, risksiz, teşhis içermeyen 1-2 cümlelik bilgi ver.
-5. Hekim Değerlendirmesi: "Kesin değerlendirme hastanemizde ilgili hekim muayenesi sonrası yapılır."
-6. Şehir ve Randevu Detayı: Yaşadığı şehir belirtilmişse nazikçe ekle. Randevu tarihi veya geliş niyeti belirsizse bunu netleştirecek soruyu ekle (Yukarıdaki First Contact kurallarına göre).
+3. Form Şikayetini Anlama: Hastanın şikayetini ve varsa süresini doğal bir Türkçe ile belirterek geçmiş olsun de. Örn: "Bel ağrısı şikayetiniz olduğunu belirtmişsiniz. Öncelikle geçmiş olsun." Veya "Daha önce anjiyo, stent veya bypass işlemi geçirdiğinizi ve kontrol amaçlı değerlendirilmek istediğinizi belirtmişsiniz. Öncelikle geçmiş olsun."
+4. Hastalık Hakkında Kısa/Doğal Açıklama: Hastalıkla ilgili kısa, risksiz ve hastayı korkutmayan bir bilgilendirme yapıp sonunu "Bu nedenle mevcut durumunuzun uzman doktor tarafından detaylı şekilde değerlendirilmesi önem taşımaktadır." ile bağla. Örn: "Boyun fıtığı; boyun ağrısı, omuz ve kollara yayılan ağrı, uyuşma, karıncalanma ve hareket kısıtlılığı gibi şikayetlere neden olabilmektedir. Bu nedenle mevcut durumunuzun uzman doktor tarafından detaylı şekilde değerlendirilmesi önem taşımaktadır."
+5. Hastane Değerlendirme Cümlesi (Aynen şunu kullan): "Hastanemize geldiğinizde ilgili doktorumuz tarafından gerekli muayene ve değerlendirmeler yapılarak mevcut durumunuz ayrıntılı şekilde incelenir ve size uygun takip süreci hakkında detaylı bilgi verilir."
+6. Geliş Niyeti/Tarih Sorusu: Yaşadığı şehir belirtilmişse önce "Yaşadığınız yer olarak Stuttgart bilgisini paylaşmışsınız." de, sonra "Türkiye’ye (Konya’ya) ne zaman gelmeyi düşünüyorsunuz? Yaklaşık tarihinizi paylaşırsanız size uygun şekilde randevu planlamanızı organize edebiliriz." cümlesini ekle.
 7. Kapanış: "İyi günler dileriz."
 
 === RETURN JSON FORMAT ===
 {
-  "draftText": "Oluşturduğun WhatsApp mesaj taslağı (satır boşlukları için \\n kullan)",
+  "draftText": "Oluşturduğun WhatsApp mesaj taslağı (satır boşlukları için \\n\\n kullan)",
   "detectedDepartment": "Ortopedi" | "Kardiyoloji" | "Beyin Cerrahi" | "Check-up" | "Genel",
   "complaintSummary": "Hastanın şikayetinin çok kısa özeti",
   "confidence": "high" | "medium" | "low",
