@@ -19,7 +19,8 @@ import {
   bulkToggleFavorite,
   bulkArchiveConversations,
   bulkUnarchiveConversations,
-  getMessages
+  getMessages,
+  toggleBotStatus
 } from "@/app/actions/inbox";
 import { useInboxStore } from "@/store/inbox-store";
 import { useDiagnosticsStore } from "@/lib/realtime/diagnostics-store";
@@ -283,6 +284,7 @@ export function ContactRail() {
   const clearSelection = useInboxStore((state) => state.clearSelection);
   const isSidebarCollapsed = useInboxStore((state) => state.isSidebarCollapsed);
   const toggleSidebar = useInboxStore((state) => state.toggleSidebar);
+  const setActiveModal = useInboxStore((state) => state.setActiveModal);
   const queryClient = useQueryClient();
   const hoverTimeoutRef = useRef<any>(null);
 
@@ -589,7 +591,8 @@ const handleBulkArchive = async (archive: boolean) => {
           aiSummary: activeContact?.aiSummary,
           name: activeContact?.name,
           opp_requester_name: activeContact?.opp_requester_name,
-          opp_patient_name: activeContact?.opp_patient_name
+          opp_patient_name: activeContact?.opp_patient_name,
+          isBotActive: activeContact?.isBotActive,
         });
         
         const updatedDataStr = JSON.stringify({
@@ -604,7 +607,8 @@ const handleBulkArchive = async (archive: boolean) => {
           aiSummary: updatedContact.aiSummary,
           name: updatedContact.name,
           opp_requester_name: updatedContact.opp_requester_name,
-          opp_patient_name: updatedContact.opp_patient_name
+          opp_patient_name: updatedContact.opp_patient_name,
+          isBotActive: updatedContact.isBotActive,
         });
 
         if (currentDataStr !== updatedDataStr) {
@@ -651,6 +655,11 @@ const handleBulkArchive = async (archive: boolean) => {
       }
     }
   }, [activePhone, contacts]);
+
+  // Reset modal state on switching active patient
+  useEffect(() => {
+    setActiveModal(null);
+  }, [activePhone, setActiveModal]);
 
   const handleTogglePin = async (phone: string) => {
     try {
@@ -1481,8 +1490,79 @@ const handleBulkArchive = async (archive: boolean) => {
 
           <button
             onClick={async () => {
-              setContextMenu(null);
-              await handleBulkAction(contextMenu.isBotActive ? 'manual' : 'bot', [contextMenu.conversationId]);
+              if (contextMenu.isBotActive) {
+                // Manuele al
+                const convId = contextMenu.conversationId;
+                setContextMenu(null);
+                const activeContact = useInboxStore.getState().activeContact;
+                const isActive = activePhone === convId;
+                if (isActive && activeContact) {
+                  useInboxStore.getState().setActiveContact(convId, {
+                    ...activeContact,
+                    isBotActive: false,
+                  });
+                }
+                
+                queryClient.setQueriesData({ queryKey: ["conversations"] }, (oldData: any) => {
+                  if (!oldData || !oldData.pages) return oldData;
+                  return {
+                    ...oldData,
+                    pages: oldData.pages.map((page: any[]) =>
+                      page.map(conv => {
+                        const isMatch = conv.conversation_id === convId || conv.conversationId === convId || conv.id === convId;
+                        if (isMatch) {
+                          return { ...conv, isBotActive: false, autopilot_enabled: false, status: 'human' };
+                        }
+                        return conv;
+                      })
+                    )
+                  };
+                });
+
+                try {
+                  const res = await toggleBotStatus(convId, false);
+                  if (res.success) {
+                    queryClient.invalidateQueries({ queryKey: ["conversations"] });
+                    if (typeof window !== "undefined") {
+                      window.dispatchEvent(new CustomEvent('inbox-unread-refresh'));
+                    }
+                  } else {
+                    if (isActive && activeContact) {
+                      useInboxStore.getState().setActiveContact(convId, {
+                        ...activeContact,
+                        isBotActive: true,
+                      });
+                    }
+                    queryClient.setQueriesData({ queryKey: ["conversations"] }, (oldData: any) => {
+                      if (!oldData || !oldData.pages) return oldData;
+                      return {
+                        ...oldData,
+                        pages: oldData.pages.map((page: any[]) =>
+                          page.map(conv => {
+                            const isMatch = conv.conversation_id === convId || conv.conversationId === convId || conv.id === convId;
+                            if (isMatch) {
+                              return { ...conv, isBotActive: true, autopilot_enabled: true, status: 'bot' };
+                            }
+                            return conv;
+                          })
+                        )
+                      };
+                    });
+                    setErrorToast(res.error || "İşlem başarısız.");
+                  }
+                } catch (e) {
+                  setErrorToast("Bir hata oluştu.");
+                }
+              } else {
+                // Bota devret
+                const convId = contextMenu.conversationId;
+                setContextMenu(null);
+                setActiveModal({
+                  modalType: 'bot_handoff',
+                  conversationId: convId,
+                  patientName: contacts.find((x: any) => x.conversation_id === convId || x.id === convId)?.name || ""
+                });
+              }
             }}
             className="w-full px-3.5 py-2 text-xs font-semibold hover:bg-black/5 flex items-center gap-2 cursor-pointer transition-colors text-left"
             style={{ color: "var(--q-text-primary)" }}
@@ -1501,21 +1581,14 @@ const handleBulkArchive = async (archive: boolean) => {
           </button>
 
           <button
-            onClick={async () => {
+            onClick={() => {
+              const convId = contextMenu.conversationId;
               setContextMenu(null);
-              setIsLoadingBulkDrafts(true);
-              setBulkActionError(null);
-              try {
-                const res = await prepareBulkFollowUpDrafts([contextMenu.conversationId]);
-                if (res.success && 'results' in res) {
-                  setBulkDraftsModal({ isOpen: true, results: res.results });
-                } else {
-                  setErrorToast((res as any).error || "Taslak hazırlanamadı.");
-                }
-              } catch (e) {
-                setErrorToast("Bir sistem hatası oluştu.");
-              }
-              setIsLoadingBulkDrafts(false);
+              setActiveModal({
+                modalType: 'draft_preview',
+                conversationId: convId,
+                patientName: contacts.find((x: any) => x.conversation_id === convId || x.id === convId)?.name || ""
+              });
             }}
             className="w-full px-3.5 py-2 text-xs font-semibold hover:bg-black/5 flex items-center gap-2 cursor-pointer transition-colors text-left"
             style={{ color: "var(--q-text-primary)" }}

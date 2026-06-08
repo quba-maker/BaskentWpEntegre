@@ -1,5 +1,14 @@
 import { create } from 'zustand';
 
+export type InboxModalType = 'call_plan' | 'appointment_plan' | 'reminder_plan' | 'form_detail' | 'draft_preview' | 'bot_handoff';
+
+export interface ActiveModalState {
+  modalType: InboxModalType;
+  conversationId: string;
+  patientName?: string;
+  payload?: any;
+}
+
 interface InboxState {
   activePhone: string | null;
   activeContact: any | null;
@@ -7,6 +16,10 @@ interface InboxState {
   setActiveContact: (phone: string, contactData: any) => void;
   updateActiveContact: (contactData: any) => void;
   setMobileView: (view: 'list' | 'chat' | 'crm') => void;
+  
+  // Scoped modal states
+  activeModal: ActiveModalState | null;
+  setActiveModal: (modal: ActiveModalState | null) => void;
   
   // Bulk selection states
   isSelectionMode: boolean;
@@ -29,6 +42,10 @@ export const useInboxStore = create<InboxState>((set) => ({
   setActiveContact: (phone, contactData) => set({ activePhone: phone, activeContact: contactData, mobileView: 'chat' }),
   updateActiveContact: (contactData) => set({ activeContact: contactData }),
   setMobileView: (view) => set({ mobileView: view }),
+  
+  // Scoped modal state initial value and setter
+  activeModal: null,
+  setActiveModal: (modal) => set({ activeModal: modal }),
   
   // Bulk selection initial values and actions
   isSelectionMode: false,

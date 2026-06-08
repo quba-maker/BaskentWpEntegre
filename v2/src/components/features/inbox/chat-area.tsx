@@ -901,6 +901,7 @@ export function ConversationViewport() {
   const activePhone = useInboxStore((state) => state.activePhone);
   const mobileView = useInboxStore((state) => state.mobileView);
   const setMobileView = useInboxStore((state) => state.setMobileView);
+  const setActiveModal = useInboxStore((state) => state.setActiveModal);
 
   // Selected primitives from activeContact to isolate re-renders on note/tag/stage modifications
   const activeContactId = useInboxStore((state) => state.activeContact?.id);
@@ -914,7 +915,6 @@ export function ConversationViewport() {
   const [inputText, setInputText] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [isTogglingBot, setIsTogglingBot] = useState(false);
-  const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [sendError, setSendError] = useState("");
   const [gallery, setGallery] = useState<{
     images: Array<{ src: string; caption?: string; timeMs?: number }>;
@@ -1774,24 +1774,65 @@ export function ConversationViewport() {
     
     // If turning autopilot ON, show confirmation modal first
     if (newBotState === true && forceState === undefined) {
-      setShowConfirmModal(true);
+      setActiveModal({
+        modalType: 'bot_handoff',
+        conversationId: activeContactConversationId || activePhone,
+        patientName: activeContactName || "Hasta",
+        payload: { targetState: true }
+      });
       return;
     }
 
     setIsTogglingBot(true);
 
+    // Instantly reconcile Zustand activeContact store state
     useInboxStore.getState().setActiveContact(activePhone, {
       ...currentContact,
       isBotActive: newBotState,
     });
 
+    // Instantly reconcile conversations list row
+    queryClient.setQueriesData({ queryKey: ["conversations"] }, (oldData: any) => {
+      if (!oldData || !oldData.pages) return oldData;
+      return {
+        ...oldData,
+        pages: oldData.pages.map((page: any[]) =>
+          page.map(conv => {
+            const isMatch = conv.conversation_id === activePhone || conv.conversationId === activePhone || conv.id === activePhone;
+            if (isMatch) {
+              return { ...conv, isBotActive: newBotState, autopilot_enabled: newBotState, status: newBotState ? 'bot' : 'human' };
+            }
+            return conv;
+          })
+        )
+      };
+    });
+
     const res = await toggleBotStatus(activePhone, newBotState);
     if (res.success) {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent('inbox-unread-refresh'));
+      }
     } else {
       useInboxStore.getState().setActiveContact(activePhone, {
         ...currentContact,
         isBotActive: !newBotState,
+      });
+      queryClient.setQueriesData({ queryKey: ["conversations"] }, (oldData: any) => {
+        if (!oldData || !oldData.pages) return oldData;
+        return {
+          ...oldData,
+          pages: oldData.pages.map((page: any[]) =>
+            page.map(conv => {
+              const isMatch = conv.conversation_id === activePhone || conv.conversationId === activePhone || conv.id === activePhone;
+              if (isMatch) {
+                return { ...conv, isBotActive: !newBotState, autopilot_enabled: !newBotState, status: !newBotState ? 'bot' : 'human' };
+              }
+              return conv;
+            })
+          )
+        };
       });
       setSendError(res.error || "Bot durumu değiştirilirken hata oluştu.");
       setTimeout(() => setSendError(""), 4000);
@@ -2056,54 +2097,7 @@ export function ConversationViewport() {
         document.body
       )}
 
-      {/* ── Autopilot Confirmation Modal ── */}
-      {showConfirmModal && createPortal(
-        <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4">
-          {/* Backdrop */}
-          <div 
-            className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity" 
-            onClick={() => setShowConfirmModal(false)}
-          />
-          {/* Modal Container */}
-          <div 
-            className="relative bg-white dark:bg-zinc-900 rounded-3xl p-6 max-w-sm w-full shadow-2xl border"
-            style={{ 
-              borderColor: "var(--q-border-default)",
-              boxShadow: "0 20px 40px rgba(0,0,0,0.15)"
-            }}
-          >
-            <div className="flex flex-col items-center text-center">
-              <div className="w-12 h-12 rounded-2xl bg-red-50 dark:bg-red-950/30 flex items-center justify-center mb-4">
-                <Sparkles className="w-6 h-6 text-red-500 animate-pulse" />
-              </div>
-              <h3 className="text-base font-bold text-zinc-950 dark:text-zinc-50 mb-2">
-                Autopilot'u Aktif Et
-              </h3>
-              <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-6 leading-relaxed">
-                Autopilot'u aktif hale getirmek istediğinize emin misiniz? Yapay zeka bu konuşmada gelen mesajlara otomatik yanıt verecektir.
-              </p>
-              <div className="flex gap-3 w-full">
-                <button
-                  onClick={() => setShowConfirmModal(false)}
-                  className="flex-1 px-4 py-2.5 rounded-xl text-xs font-semibold text-zinc-700 dark:text-zinc-300 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors cursor-pointer"
-                >
-                  Vazgeç
-                </button>
-                <button
-                  onClick={() => {
-                    setShowConfirmModal(false);
-                    handleToggleBot(true);
-                  }}
-                  className="flex-1 px-4 py-2.5 rounded-xl text-xs font-semibold text-white bg-red-500 hover:bg-red-600 transition-colors shadow-sm cursor-pointer"
-                >
-                  Aktif Et
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
+
       {/* ── Header ── */}
       <div
         className="h-[72px] px-4 md:px-8 flex items-center justify-between q-glass-strong sticky top-0 z-10"

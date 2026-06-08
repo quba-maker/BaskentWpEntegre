@@ -3622,6 +3622,8 @@ export async function getCrmPanelBundleAction(conversationId: string) {
       console.log(`[CRM_PANEL_BUNDLE_TRACE] conversationId=${conversationId} durationMs=${duration.toFixed(2)} tasksCount=${suggestions.length} formGreetingEligible=${formGreeting.eligible}`);
 
       return {
+        phoneNumber: conv.phone_number,
+        patientName: conv.patient_name || null,
         botDirective: directive,
         steeringTasks: suggestions,
         formGreetingEligibility: formGreeting,
@@ -3802,6 +3804,312 @@ export async function bulkSetBotMode(conversationIds: string[], mode: 'bot' | 'h
       return { success: true };
     }
   ).then(res => res.success ? (res.data || { success: true }) : { success: false, error: res.error });
+}
+
+export async function resolveInboxDraftAction(conversationId: string) {
+  if (!conversationId) return { success: false, error: "Konuşma ID gerekli." };
+
+  return withActionGuard(
+    { actionName: 'resolveInboxDraftAction' },
+    async (ctx) => {
+      // 1. Fetch conversation data, active opportunity and latest lead
+      const convRows = await ctx.db.executeSafe({
+        text: `
+          SELECT c.id as conversation_id, c.phone_number, c.customer_id, c.active_opportunity_id, c.patient_name,
+                 active_opp.stage as opp_stage, active_opp.metadata as opp_metadata, active_opp.automation_status as opp_automation_status,
+                 l.id as lead_id, l.raw_data as form_raw_data
+          FROM conversations c
+          LEFT JOIN opportunities active_opp 
+            ON active_opp.id = c.active_opportunity_id 
+            AND active_opp.tenant_id = c.tenant_id
+          LEFT JOIN LATERAL (
+            SELECT id, raw_data 
+            FROM leads 
+            WHERE leads.tenant_id = c.tenant_id
+              AND (
+                (c.customer_id IS NOT NULL AND leads.customer_id = c.customer_id)
+                OR
+                (leads.phone_number LIKE '%' || RIGHT(c.phone_number, 10))
+              )
+            ORDER BY created_at DESC 
+            LIMIT 1
+          ) l ON true
+          WHERE c.id = $1 AND c.tenant_id = $2
+          LIMIT 1
+        `,
+        values: [conversationId, ctx.tenantId]
+      });
+
+      const convs = Array.isArray(convRows) ? convRows : ((convRows as any)?.rows || []);
+      if (convs.length === 0) {
+        return { success: false, error: "Konuşma bulunamadı." };
+      }
+
+      const conv = convs[0];
+      const phone = conv.phone_number;
+      const patientName = conv.patient_name || "Hasta";
+
+      // 2. StopRule Evaluation & Exclusions
+      const currentStage = conv.opp_stage || '';
+      if (['lost', 'not_qualified', 'arrived'].includes(currentStage)) {
+        return {
+          success: false,
+          draftType: 'none' as const,
+          reason: `Fırsat terminal aşamada: ${currentStage}`,
+          sendAction: 'none' as const,
+          canSend: false
+        };
+      }
+
+      // 3. Opt-out check
+      const primaryNorm = normalizePhoneForIdentity(phone).e164;
+      const optOutPhones = new Set<string>();
+
+      try {
+        const optOutOpps = await ctx.db.executeSafe({
+          text: `
+            SELECT phone_number 
+            FROM opportunities 
+            WHERE tenant_id = $1 
+              AND (COALESCE(metadata->>'opt_out_requested', 'false') = 'true')
+          `,
+          values: [ctx.tenantId]
+        });
+        const optOutOppRows = Array.isArray(optOutOpps) ? optOutOpps : ((optOutOpps as any)?.rows || []);
+        for (const o of optOutOppRows) {
+          const norm = normalizePhoneForIdentity(o.phone_number).e164;
+          if (norm) optOutPhones.add(norm);
+        }
+
+        const lastInbounds = await ctx.db.executeSafe({
+          text: `
+            SELECT phone_number, content 
+            FROM messages 
+            WHERE tenant_id = $1 AND direction = 'in'
+              AND phone_number LIKE '%' || RIGHT($2, 10)
+              AND (media_metadata IS NULL OR COALESCE(media_metadata->'native'->>'message_type', '') != 'reaction')
+            ORDER BY created_at DESC
+            LIMIT 1
+          `,
+          values: [ctx.tenantId, phone]
+        });
+        const lastInboundRows = Array.isArray(lastInbounds) ? lastInbounds : ((lastInbounds as any)?.rows || []);
+        
+        const hasOptOutKeywords = (text: string): boolean => {
+          const clean = (text || '').toLowerCase().trim();
+          const optOuts = [
+            "dur", "stop", "istemiyorum", "rahatsız etmeyin", "mesaj atmayın", 
+            "bırakın", "silin", "arama", "yazma", "unsubscribe", "don't write"
+          ];
+          return optOuts.some(kw => clean.includes(kw));
+        };
+
+        if (lastInboundRows.length > 0 && hasOptOutKeywords(lastInboundRows[0].content)) {
+          if (primaryNorm) optOutPhones.add(primaryNorm);
+        }
+      } catch (e) {
+        console.error("[INBOX_FORENSIC] Failed during opt-out check in resolveInboxDraftAction:", e);
+      }
+
+      const isPrimaryOptedOut = (conv.opp_metadata?.opt_out_requested === true) || 
+                                (conv.opp_metadata?.opt_out_requested === 'true') ||
+                                (primaryNorm && optOutPhones.has(primaryNorm));
+
+      let hasOptOutKeywordInFamily = false;
+      let parsedRaw = conv.form_raw_data;
+      if (typeof parsedRaw === 'string') {
+        try { parsedRaw = JSON.parse(parsedRaw); } catch(_) {}
+      }
+      if (parsedRaw && parsedRaw._all_phones) {
+        const parsed = parseAllPhones(parsedRaw._all_phones);
+        for (const p of parsed) {
+          const pNorm = normalizePhoneForIdentity(p).e164;
+          if (pNorm && optOutPhones.has(pNorm)) {
+            hasOptOutKeywordInFamily = true;
+            break;
+          }
+        }
+      }
+
+      if (isPrimaryOptedOut || hasOptOutKeywordInFamily) {
+        return {
+          success: false,
+          draftType: 'none' as const,
+          reason: "Hasta opt-out (istemiyorum) talep etmiştir.",
+          sendAction: 'none' as const,
+          canSend: false
+        };
+      }
+
+      if (conv.opp_automation_status === 'stopped' || conv.opp_automation_status === 'paused') {
+        return {
+          success: false,
+          draftType: 'none' as const,
+          reason: "Fırsat otomasyonu durdurulmuş.",
+          sendAction: 'none' as const,
+          canSend: false
+        };
+      }
+
+      // Check 4: Secondary Fallback check
+      const { SecondaryPhoneFallbackService } = await import("@/lib/services/secondary-phone-fallback.service");
+      const secondaryService = new SecondaryPhoneFallbackService(ctx.db, ctx.tenantId);
+      const secondaryEligibility = await secondaryService.checkEligibility(conversationId);
+      if (secondaryEligibility.eligible) {
+        const draftRes = await secondaryService.prepareDraft(conversationId, ctx.userId);
+        if (draftRes.success) {
+          return {
+            success: true,
+            draftType: 'secondary_fallback' as const,
+            draftText: draftRes.draft || '',
+            sendAction: 'none' as const,
+            canSend: false,
+            secondaryPhone: draftRes.secondaryPhone,
+            reason: secondaryEligibility.reason || "İkincil numara fallback uygun."
+          };
+        }
+      }
+
+      // Check 5: Form greeting check
+      if (conv.lead_id) {
+        const { resolveFirstContactCore } = await import("@/lib/utils/first-contact-status-resolver");
+        const statusObj = await resolveFirstContactCore(ctx.db, ctx.tenantId, conv.lead_id);
+        if (statusObj.patientLevelStatus === 'waiting_inbox_reply') {
+          const { prepareSmartGreetingDraftCore } = await import("@/app/actions/outreach");
+          const draftRes = await prepareSmartGreetingDraftCore(ctx.db, ctx.tenantId, ctx.userId, conv.lead_id);
+          return {
+            success: true,
+            draftType: 'form_greeting_reply' as const,
+            draftText: draftRes.draftText || '',
+            sendAction: 'greeting' as const,
+            canSend: true
+          };
+        }
+      }
+
+      // Check 6: Standard Follow-up draft
+      const lastMsgRows = await ctx.db.executeSafe({
+        text: `
+          SELECT id, content, direction, created_at
+          FROM messages
+          WHERE conversation_id = $1 AND tenant_id = $2
+            AND direction != 'system'
+            AND (media_metadata IS NULL OR COALESCE(media_metadata->'native'->>'message_type', '') != 'reaction')
+          ORDER BY created_at DESC
+          LIMIT 1
+        `,
+        values: [conversationId, ctx.tenantId]
+      });
+      const lastMsgs = Array.isArray(lastMsgRows) ? lastMsgRows : ((lastMsgRows as any)?.rows || []);
+      if (lastMsgs.length === 0) {
+        return {
+          success: false,
+          draftType: 'none' as const,
+          reason: "Konuşmada mesaj bulunamadı.",
+          sendAction: 'none' as const,
+          canSend: false
+        };
+      }
+
+      const lastMsg = lastMsgs[0];
+      if (lastMsg.direction !== 'out') {
+        return {
+          success: false,
+          draftType: 'none' as const,
+          reason: "Son mesaj hastadan gelmiş, otopilot/operatör manuel cevabı bekleniyor.",
+          sendAction: 'none' as const,
+          canSend: false
+        };
+      }
+
+      const classification = ExpectsReplyClassifier.classify(lastMsg.content);
+      if (classification.expectsReply) {
+        if (currentStage === 'booked' && classification.isClosingMessage) {
+          return {
+            success: false,
+            draftType: 'none' as const,
+            reason: "Booked aşamasında kapanış mesajı atılmış, taslak hazırlanamaz.",
+            sendAction: 'none' as const,
+            canSend: false
+          };
+        }
+
+        // Check window open
+        const lastInboundMsgRows = await ctx.db.executeSafe({
+          text: `
+            SELECT created_at
+            FROM messages
+            WHERE conversation_id = $1 AND tenant_id = $2 AND direction = 'in'
+              AND (media_metadata IS NULL OR COALESCE(media_metadata->'native'->>'message_type', '') != 'reaction')
+            ORDER BY created_at DESC
+            LIMIT 1
+          `,
+          values: [conversationId, ctx.tenantId]
+        });
+        const lastInboundMsgs = Array.isArray(lastInboundMsgRows) ? lastInboundMsgRows : ((lastInboundMsgRows as any)?.rows || []);
+        
+        let windowOpen = false;
+        if (lastInboundMsgs.length > 0) {
+          const lastInboundTimeMs = new Date(lastInboundMsgs[0].created_at).getTime();
+          windowOpen = (Date.now() - lastInboundTimeMs) <= 24 * 60 * 60 * 1000;
+        }
+
+        if (windowOpen) {
+          const { sanitizePatientFacingMessage } = await import("@/lib/utils/patient-message-sanitizer");
+          const draftText = sanitizePatientFacingMessage("Merhaba, müsait olduğunuzda geri dönüş yapabilirseniz size yardımcı olmaktan memnuniyet duyarız. İyi günler dileriz.");
+          return {
+            success: true,
+            draftType: 'follow_up' as const,
+            draftText,
+            sendAction: 'follow_up' as const,
+            canSend: true
+          };
+        } else {
+          return {
+            success: true,
+            draftType: 'follow_up' as const,
+            draftText: "24 saatlik WhatsApp penceresi kapandığı için serbest mesaj gönderilemez. Şablon gönderimi devre dışıdır.",
+            sendAction: 'none' as const,
+            canSend: false
+          };
+        }
+      }
+
+      // Check 7: No-Reply Reminder Draft
+      // If standard follow-up is skipped because outbound does not expect reply, try no-reply reminder
+      const { prepareNoReplyReminderDraftAction } = await import("@/app/actions/inbox");
+      const noReplyRes: any = await prepareNoReplyReminderDraftAction(conversationId);
+      if (noReplyRes?.success && noReplyRes?.draft) {
+        return {
+          success: true,
+          draftType: 'no_reply_reminder' as const,
+          draftText: noReplyRes.draft,
+          sendAction: 'no_reply' as const,
+          canSend: true
+        };
+      }
+
+      return {
+        success: false,
+        draftType: 'none' as const,
+        reason: "Son asistan mesajı cevap bekleyen bir mesaj değil ve hatırlatma taslağı hazırlanamadı.",
+        sendAction: 'none' as const,
+        canSend: false
+      };
+    }
+  ).then(res => {
+    if (!res.success) {
+      return {
+        success: false,
+        draftType: 'none' as const,
+        draftText: '',
+        reason: res.error || 'Bilinmeyen hata.',
+        sendAction: 'none' as const,
+        canSend: false
+      };
+    }
+    return res.data;
+  });
 }
 
 export async function prepareBulkFollowUpDrafts(conversationIds: string[]) {

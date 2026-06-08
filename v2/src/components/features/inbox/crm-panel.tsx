@@ -98,10 +98,7 @@ export function ContextPanel() {
   const entityType = getTenantEntityType(tenantSlug, tenant?.profile?.industry);
   const [formOpen, setFormOpen] = useState(false);
   const [aiSummaryOpen, setAiSummaryOpen] = useState(true);
-  const [isFormModalOpen, setIsFormModalOpen] = useState(false);
-  const [isPhoneCallModalOpen, setIsPhoneCallModalOpen] = useState(false);
-  const [isAppointmentModalOpen, setIsAppointmentModalOpen] = useState(false);
-  const [isReminderModalOpen, setIsReminderModalOpen] = useState(false);
+  const setActiveModal = useInboxStore((state) => state.setActiveModal);
   const queryClient = useQueryClient();
 
   const handleModalSuccess = () => {
@@ -772,7 +769,7 @@ export function ContextPanel() {
 
                 <button
                   type="button"
-                  onClick={() => setIsReminderModalOpen(true)}
+                  onClick={() => setActiveModal({ modalType: 'reminder_plan', conversationId: activeContact.conversation_id || activeContact.id, patientName })}
                   className="w-full py-1 px-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all shadow-sm"
                 >
                   <CalendarClock className="w-3 h-3" />
@@ -780,7 +777,7 @@ export function ContextPanel() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setIsFormModalOpen(true)}
+                  onClick={() => setActiveModal({ modalType: 'form_detail', conversationId: activeContact.conversation_id || activeContact.id, patientName })}
                   className="w-full py-1 px-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all shadow-sm border border-black/5"
                 >
                   <FileText className="w-3 h-3" />
@@ -809,7 +806,7 @@ export function ContextPanel() {
 
                 <button
                   type="button"
-                  onClick={() => setIsPhoneCallModalOpen(true)}
+                  onClick={() => setActiveModal({ modalType: 'call_plan', conversationId: activeContact.conversation_id || activeContact.id, patientName })}
                   className="w-full py-1 px-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all shadow-sm"
                 >
                   <PhoneForwarded className="w-3 h-3" />
@@ -838,7 +835,7 @@ export function ContextPanel() {
 
                 <button
                   type="button"
-                  onClick={() => setIsAppointmentModalOpen(true)}
+                  onClick={() => setActiveModal({ modalType: 'appointment_plan', conversationId: activeContact.conversation_id || activeContact.id, patientName })}
                   className="w-full py-1 px-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all shadow-sm"
                 >
                   <Calendar className="w-3 h-3" />
@@ -1459,7 +1456,7 @@ export function ContextPanel() {
         <div className="grid grid-cols-2 gap-2 mt-2.5 w-full pt-2 border-t border-black/5">
           <button
             type="button"
-            onClick={() => setIsPhoneCallModalOpen(true)}
+            onClick={() => setActiveModal({ modalType: 'call_plan', conversationId: activeContact.conversation_id || activeContact.id, patientName })}
             className="flex flex-col items-center justify-center p-1.5 rounded-xl border text-center transition-all duration-200 group hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
             style={{
               backgroundColor: "rgba(88, 86, 214, 0.04)",
@@ -1476,7 +1473,7 @@ export function ContextPanel() {
 
           <button
             type="button"
-            onClick={() => setIsAppointmentModalOpen(true)}
+            onClick={() => setActiveModal({ modalType: 'appointment_plan', conversationId: activeContact.conversation_id || activeContact.id, patientName })}
             className="flex flex-col items-center justify-center p-1.5 rounded-xl border text-center transition-all duration-200 group hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
             style={{
               backgroundColor: "rgba(52, 199, 89, 0.04)",
@@ -1493,7 +1490,7 @@ export function ContextPanel() {
 
           <button
             type="button"
-            onClick={() => setIsReminderModalOpen(true)}
+            onClick={() => setActiveModal({ modalType: 'reminder_plan', conversationId: activeContact.conversation_id || activeContact.id, patientName })}
             className="flex flex-col items-center justify-center p-1.5 rounded-xl border text-center transition-all duration-200 group hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
             style={{
               backgroundColor: "rgba(0, 122, 255, 0.04)",
@@ -1510,7 +1507,7 @@ export function ContextPanel() {
 
           <button
             type="button"
-            onClick={() => setIsFormModalOpen(true)}
+            onClick={() => setActiveModal({ modalType: 'form_detail', conversationId: activeContact.conversation_id || activeContact.id, patientName })}
             className="flex flex-col items-center justify-center p-1.5 rounded-xl border text-center transition-all duration-200 group hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
             style={{
               backgroundColor: "rgba(255, 149, 0, 0.04)",
@@ -1753,7 +1750,7 @@ export function ContextPanel() {
             </div>
             
             <div 
-              onClick={() => setIsFormModalOpen(true)}
+              onClick={() => setActiveModal({ modalType: 'form_detail', conversationId: activeContact.conversation_id || activeContact.id, patientName })}
               className="p-2 rounded-xl text-left transition-all duration-200 hover:scale-[1.01] active:scale-[0.99] cursor-pointer hover:bg-white bg-white/50 border border-black/5 shadow-sm space-y-1.5"
             >
               <div className="flex items-center justify-between">
@@ -1818,63 +1815,7 @@ export function ContextPanel() {
         </div>
       )}
 
-      {/* Form Details Popup Modal */}
-      {crmData?.formData && (
-        <PatientFormModal 
-          isOpen={isFormModalOpen}
-          onClose={() => setIsFormModalOpen(false)}
-          formData={{
-            name: crmData.formData?.name || "İsimsiz Form",
-            date: crmData.formData?.date || "Belirtilmemiş",
-            raw: crmData.formData?.raw,
-            formComplaint: crmData.formFields?.formComplaint,
-            formReportStatus: crmData.formFields?.formReportStatus,
-            formAppointmentPref: crmData.formFields?.formAppointmentPref,
-            formAge: crmData.formFields?.formAge
-          }}
-          patientName={patientName}
-        />
-      )}
-
-      {/* Phone Call Planning Modal */}
-      {oppId && (
-        <PhoneCallModal
-          isOpen={isPhoneCallModalOpen}
-          onClose={() => setIsPhoneCallModalOpen(false)}
-          opportunityId={oppId}
-          tenantSlug={tenantSlug}
-          patientName={patientName}
-          phoneNumber={activeContact.id}
-          onSuccess={handleModalSuccess}
-        />
-      )}
-
-      {/* Appointment Planning Modal */}
-      {oppId && (
-        <AppointmentModal
-          isOpen={isAppointmentModalOpen}
-          onClose={() => setIsAppointmentModalOpen(false)}
-          opportunityId={oppId}
-          tenantSlug={tenantSlug}
-          patientName={patientName}
-          phoneNumber={activeContact.id}
-          onSuccess={handleModalSuccess}
-        />
-      )}
-
-      {/* Follow Up Reminder Modal */}
-      {oppId && (
-        <FollowUpReminderModal
-          isOpen={isReminderModalOpen}
-          onClose={() => setIsReminderModalOpen(false)}
-          opportunityId={oppId}
-          tenantSlug={tenantSlug}
-          patientName={patientName}
-          phoneNumber={activeContact.id}
-          activeContact={activeContact}
-          onSuccess={handleModalSuccess}
-        />
-      )}
+      {/* Modals removed and integrated to global InboxModalContainer */}
     </div>
   );
 }

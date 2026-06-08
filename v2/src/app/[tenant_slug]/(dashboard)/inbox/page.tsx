@@ -1,6 +1,7 @@
 import { ContactRail } from "@/components/features/inbox/contact-list";
 import { ConversationViewport } from "@/components/features/inbox/chat-area";
 import { ContextPanel } from "@/components/features/inbox/crm-panel";
+import { InboxModalContainer } from "@/components/features/inbox/inbox-modal-container";
 
 // ==========================================
 // INBOX PAGE — InboxShell
@@ -8,6 +9,7 @@ import { ContextPanel } from "@/components/features/inbox/crm-panel";
 //   ContactRail → Navigation system (left)
 //   ConversationViewport → Communication surface (center)
 //   ContextPanel → Contextual CRM engine (right)
+//   InboxModalContainer → Global modal orchestrator (body overlay)
 //
 // Each panel has:
 //   ✅ Independent loading (skeleton-first)
@@ -23,6 +25,7 @@ export default function InboxPage() {
       <ContactRail />
       <ConversationViewport />
       <ContextPanel />
+      <InboxModalContainer />
     </div>
   );
 }
