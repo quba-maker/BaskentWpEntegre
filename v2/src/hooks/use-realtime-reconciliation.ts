@@ -291,14 +291,31 @@ export function useRealtimeReconciliation(tenantId: string, userId?: string) {
       }
 
       if (isFocused && payload.sender === "user" && currentActiveContactId) {
+        // Clear manual unread lock on new inbound message
+        useInboxStore.getState().clearManualUnreadLock(currentActiveContactId);
+
         if (debounceTimeoutRef.current) {
           clearTimeout(debounceTimeoutRef.current);
         }
         debounceTimeoutRef.current = setTimeout(() => {
+          const lock = useInboxStore.getState().manualUnreadLocks[currentActiveContactId];
+          if (lock && lock > Date.now()) {
+            console.log(`[READ_STATE_AUTO_SKIP] conversationId=${currentActiveContactId} reason=manual_unread_lock`);
+            return;
+          }
+
+          console.log(`[READ_STATE_AUTO_MARK] conversationId=${currentActiveContactId} reason=active_conversation_visible`);
           markConversationRead(currentActiveContactId).then((res) => {
             if (res?.success) {
               if (typeof window !== 'undefined') {
-                window.dispatchEvent(new CustomEvent('inbox-unread-refresh'));
+                window.dispatchEvent(new CustomEvent('inbox-unread-refresh', {
+                  detail: {
+                    delta: -1,
+                    conversationId: currentActiveContactId,
+                    unreadCount: 0,
+                    source: 'auto_read_state'
+                  }
+                }));
               }
             }
           });
@@ -395,8 +412,20 @@ export function useRealtimeReconciliation(tenantId: string, userId?: string) {
 
     logReconciliation("cache_updated", { eventId, id: conversationId, type: "metadata_update" });
 
+    const incomingUpdatedAt = payload.updatedAt ? new Date(payload.updatedAt).getTime() : 0;
+
     updateConversationPreview(conversationId, (conv: any) => {
+      const convUpdatedAt = conv.updatedAt || conv.updated_at ? new Date(conv.updatedAt || conv.updated_at).getTime() : 0;
+      if (incomingUpdatedAt > 0 && convUpdatedAt > 0 && incomingUpdatedAt < convUpdatedAt) {
+        console.log(`[READ_STATE_RECONCILE_SKIP_STALE] conversationId=${conversationId}`);
+        return conv;
+      }
+      
       const updates: any = {};
+      if (payload.updatedAt) {
+        updates.updatedAt = payload.updatedAt;
+        updates.updated_at = payload.updatedAt;
+      }
       
       const isBotActive = payload.isBotActive !== undefined ? payload.isBotActive : payload.autopilotEnabled;
       if (isBotActive !== undefined) {
@@ -437,7 +466,17 @@ export function useRealtimeReconciliation(tenantId: string, userId?: string) {
                          store.activeContact?.conversationId === conversationId ||
                          store.activePhone === conversationId;
     if (isThisContact && store.activeContact) {
+      const activeUpdatedAt = store.activeContact.updatedAt || store.activeContact.updated_at ? new Date(store.activeContact.updatedAt || store.activeContact.updated_at).getTime() : 0;
+      if (incomingUpdatedAt > 0 && activeUpdatedAt > 0 && incomingUpdatedAt < activeUpdatedAt) {
+        console.log(`[READ_STATE_RECONCILE_SKIP_STALE] conversationId=${conversationId} (activeContact)`);
+        return;
+      }
+
       const updates: any = {};
+      if (payload.updatedAt) {
+        updates.updatedAt = payload.updatedAt;
+        updates.updated_at = payload.updatedAt;
+      }
       const isBotActive = payload.isBotActive !== undefined ? payload.isBotActive : payload.autopilotEnabled;
       if (isBotActive !== undefined) updates.isBotActive = isBotActive;
       if (payload.status !== undefined) updates.status = payload.status;

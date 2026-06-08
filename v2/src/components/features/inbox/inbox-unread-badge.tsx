@@ -16,8 +16,19 @@ export default function InboxUnreadBadge() {
   );
 
   useEffect(() => {
-    const handleRefresh = () => {
-      mutate();
+    const handleRefresh = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      if (customEvent.detail && typeof customEvent.detail.delta === 'number') {
+        const delta = customEvent.detail.delta;
+        mutate((currentCount?: number) => {
+          const before = typeof currentCount === 'number' ? currentCount : 0;
+          const after = Math.max(0, before + delta);
+          console.log(`[UNREAD_BADGE_PATCH] before=${before} after=${after} delta=${delta}`);
+          return after;
+        }, { revalidate: true });
+      } else {
+        mutate();
+      }
     };
 
     if (typeof window !== 'undefined') {

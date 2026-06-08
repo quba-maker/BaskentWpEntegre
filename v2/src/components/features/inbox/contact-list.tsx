@@ -547,9 +547,39 @@ export function ContactRail() {
       });
     }
 
-    // Trigger sidebar global unread count SWR revalidation
-    if (typeof window !== "undefined") {
-      window.dispatchEvent(new CustomEvent('inbox-unread-refresh'));
+    // Calculate total unread count delta and dispatch detailed refresh event
+    if (typeof fieldUpdates.unread === 'number') {
+      const firstQuery = queries.find(([_, oldData]) => oldData && (oldData as any).pages);
+      if (firstQuery) {
+        const oldData = firstQuery[1] as any;
+        for (const id of ids) {
+          let currentUnread = 0;
+          for (const page of oldData.pages) {
+            const match = page.find((conv: any) => conv.id === id || conv.conversation_id === id || conv.conversationId === id);
+            if (match) {
+              currentUnread = match.unread || 0;
+              break;
+            }
+          }
+          const newUnread = fieldUpdates.unread;
+          const delta = newUnread - currentUnread;
+
+          if (typeof window !== "undefined" && delta !== 0) {
+            window.dispatchEvent(new CustomEvent('inbox-unread-refresh', {
+              detail: {
+                delta,
+                conversationId: id,
+                unreadCount: newUnread,
+                source: 'manual_read_state'
+              }
+            }));
+          }
+        }
+      }
+    } else {
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent('inbox-unread-refresh'));
+      }
     }
 
     // Return rollback function
@@ -571,6 +601,10 @@ export function ContactRail() {
   const handleBulkAction = async (action: 'read' | 'unread' | 'bot' | 'manual', ids: string[]) => {
     setBulkActionLoading(true);
     setBulkActionError(null);
+
+    // Cancel outgoing queries to avoid race conditions
+    await queryClient.cancelQueries({ queryKey: ["conversations"] });
+
     let fieldUpdates: any = {};
     if (action === 'read') {
       fieldUpdates = { unread: 0 };
@@ -580,6 +614,12 @@ export function ContactRail() {
       fieldUpdates = { isBotActive: true, autopilot_enabled: true, status: 'bot' };
     } else if (action === 'manual') {
       fieldUpdates = { isBotActive: false, autopilot_enabled: false, status: 'human' };
+    }
+
+    if (action === 'unread') {
+      ids.forEach(id => useInboxStore.getState().addManualUnreadLock(id));
+    } else if (action === 'read') {
+      ids.forEach(id => useInboxStore.getState().clearManualUnreadLock(id));
     }
 
     const rollback = applyOptimisticConversationUpdate(ids, fieldUpdates);
@@ -597,14 +637,38 @@ export function ContactRail() {
       }
 
       if (res.success) {
+        if (res.results && Array.isArray(res.results)) {
+          queryClient.setQueriesData({ queryKey: ["conversations"] }, (oldData: any) => {
+            if (!oldData || !oldData.pages) return oldData;
+            const newPages = oldData.pages.map((page: any[]) =>
+              page.map(conv => {
+                const match = res.results.find((r: any) => r.conversationId === conv.id);
+                if (match) {
+                  return {
+                    ...conv,
+                    unread: match.unreadCount,
+                  };
+                }
+                return conv;
+              })
+            );
+            return { ...oldData, pages: newPages };
+          });
+        }
         queryClient.invalidateQueries({ queryKey: ["conversations"] });
         clearSelection();
       } else {
+        if (action === 'unread') {
+          ids.forEach(id => useInboxStore.getState().clearManualUnreadLock(id));
+        }
         rollback();
         setBulkActionError(res.error || "İşlem başarısız.");
         setTimeout(() => setBulkActionError(null), 4000);
       }
     } catch (err: any) {
+      if (action === 'unread') {
+        ids.forEach(id => useInboxStore.getState().clearManualUnreadLock(id));
+      }
       rollback();
       setBulkActionError("Sistem hatası. Lütfen tekrar deneyin.");
       setTimeout(() => setBulkActionError(null), 4000);
@@ -763,11 +827,26 @@ export function ContactRail() {
     if (activePhone) {
       const activeConv = contacts.find((c: any) => c.id === activePhone);
       if (activeConv && (activeConv.unread || 0) > 0) {
+        // Check manual unread lock
+        const lock = useInboxStore.getState().manualUnreadLocks[activePhone];
+        if (lock && lock > Date.now()) {
+          console.log(`[READ_STATE_AUTO_SKIP] conversationId=${activePhone} reason=manual_unread_lock`);
+          return;
+        }
+
+        console.log(`[READ_STATE_AUTO_MARK] conversationId=${activePhone} reason=active_conversation_visible`);
         markConversationRead(activePhone).then((res) => {
           if (res?.success) {
             // Trigger local refresh event for the sidebar global count
             if (typeof window !== 'undefined') {
-              window.dispatchEvent(new CustomEvent('inbox-unread-refresh'));
+              window.dispatchEvent(new CustomEvent('inbox-unread-refresh', {
+                detail: {
+                  delta: -activeConv.unread,
+                  conversationId: activePhone,
+                  unreadCount: 0,
+                  source: 'auto_read_state'
+                }
+              }));
             }
           }
         });

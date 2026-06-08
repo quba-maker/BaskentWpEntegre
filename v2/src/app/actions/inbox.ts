@@ -1976,14 +1976,31 @@ export async function markConversationRead(conversationIdOrPhone: string) {
         traceCtx.conversationId = convId;
       }
 
+      // Get unread count before marking read
+      const beforeUnreadRow = await ctx.db.executeSafe({
+        text: `
+          SELECT COUNT(*)::int as cnt FROM messages
+          WHERE conversation_id = $1 AND tenant_id = $2 AND direction = 'in'
+            AND (media_metadata IS NULL OR COALESCE(media_metadata->'native'->>'message_type', '') != 'reaction')
+            AND created_at > COALESCE(
+              (SELECT last_read_at FROM conversation_read_states rs WHERE rs.tenant_id = $2 AND rs.user_id = $3 AND rs.conversation_id = $1),
+              '1970-01-01'::timestamptz
+            )
+        `,
+        values: [convId, ctx.tenantId, ctx.userId]
+      }) as any[];
+      const beforeUnread = beforeUnreadRow[0]?.cnt || 0;
+
       // 2. Get last inbound message ID to track last read message
       const lastMsg = await ctx.db.executeSafe({
-        text: `SELECT id FROM messages 
+        text: `SELECT id, created_at FROM messages 
                WHERE conversation_id = $1 AND tenant_id = $2 AND direction = 'in' 
+                 AND (media_metadata IS NULL OR COALESCE(media_metadata->'native'->>'message_type', '') != 'reaction')
                ORDER BY created_at DESC LIMIT 1`,
         values: [convId, ctx.tenantId]
       }) as any[];
       const lastMsgId = lastMsg[0]?.id || null;
+      const lastInboundAt = lastMsg[0]?.created_at ? new Date(lastMsg[0].created_at).toISOString() : null;
 
       // 3. Upsert read state
       await ctx.db.executeSafe({
@@ -1999,7 +2016,9 @@ export async function markConversationRead(conversationIdOrPhone: string) {
         values: [ctx.tenantId, ctx.userId, convId, lastMsgId]
       });
 
-      console.log(`[READ_STATE_TRACE] markConversationRead | tenantId=${ctx.tenantId} | userId=${ctx.userId} | convId=${convId} | lastMsgId=${lastMsgId}`);
+      const nowStr = new Date().toISOString();
+
+      console.log(`[READ_STATE_ACTION] conversationId=${convId} action=mark_read beforeUnread=${beforeUnread} afterUnread=0 lastReadAt=${nowStr} lastInboundAt=${lastInboundAt}`);
 
       // Publish metadata update to realtime bus
       await RealtimePublisher.publishMetadataUpdated(ctx.tenantId, {
@@ -2008,7 +2027,15 @@ export async function markConversationRead(conversationIdOrPhone: string) {
         unreadCount: 0
       });
 
-      return { success: true };
+      return {
+        success: true,
+        conversationId: convId,
+        unreadCount: 0,
+        isRead: true,
+        lastReadAt: nowStr,
+        lastInboundAt: lastInboundAt,
+        updatedAt: nowStr
+      };
     }
   ).then(res => res.success ? (res.data || { success: true }) : { success: false, error: res.error });
 }
@@ -2038,6 +2065,21 @@ export async function markConversationUnread(conversationIdOrPhone: string) {
       if (!convId) {
         return { success: false, error: "Conversation not found" };
       }
+
+      // Get unread count before marking unread
+      const beforeUnreadRow = await ctx.db.executeSafe({
+        text: `
+          SELECT COUNT(*)::int as cnt FROM messages
+          WHERE conversation_id = $1 AND tenant_id = $2 AND direction = 'in'
+            AND (media_metadata IS NULL OR COALESCE(media_metadata->'native'->>'message_type', '') != 'reaction')
+            AND created_at > COALESCE(
+              (SELECT last_read_at FROM conversation_read_states rs WHERE rs.tenant_id = $2 AND rs.user_id = $3 AND rs.conversation_id = $1),
+              '1970-01-01'::timestamptz
+            )
+        `,
+        values: [convId, ctx.tenantId, ctx.userId]
+      }) as any[];
+      const beforeUnread = beforeUnreadRow[0]?.cnt || 0;
 
       // 2. Get last inbound message to set read state before it
       const lastInbound = await ctx.db.executeSafe({
@@ -2092,6 +2134,8 @@ export async function markConversationUnread(conversationIdOrPhone: string) {
 
       const finalUnreadCount = unreadCountRow[0]?.cnt || 1;
 
+      console.log(`[READ_STATE_ACTION] conversationId=${convId} action=mark_unread beforeUnread=${beforeUnread} afterUnread=${finalUnreadCount} lastReadAt=${targetTime.toISOString()} lastInboundAt=${new Date(lastInboundMsg.created_at).toISOString()}`);
+
       // Publish metadata update to realtime bus
       await RealtimePublisher.publishMetadataUpdated(ctx.tenantId, {
         conversationId: convId,
@@ -2099,7 +2143,17 @@ export async function markConversationUnread(conversationIdOrPhone: string) {
         unreadCount: finalUnreadCount
       });
 
-      return { success: true };
+      const nowStr = new Date().toISOString();
+
+      return {
+        success: true,
+        conversationId: convId,
+        unreadCount: finalUnreadCount,
+        isRead: false,
+        lastReadAt: targetTime.toISOString(),
+        lastInboundAt: new Date(lastInboundMsg.created_at).toISOString(),
+        updatedAt: nowStr
+      };
     }
   ).then(res => res.success ? (res.data || { success: true }) : { success: false, error: res.error });
 }
@@ -3770,7 +3824,7 @@ export async function markConversationsRead(conversationIds: string[]) {
             $2 as user_id, 
             c_id as conversation_id, 
             NOW() as last_read_at, 
-            (SELECT id FROM messages m WHERE m.conversation_id = c_id AND m.tenant_id = $1 AND m.direction = 'in' ORDER BY created_at DESC LIMIT 1) as last_read_message_id, 
+            (SELECT id FROM messages m WHERE m.conversation_id = c_id AND m.tenant_id = $1 AND m.direction = 'in' AND (m.media_metadata IS NULL OR COALESCE(m.media_metadata->'native'->>'message_type', '') != 'reaction') ORDER BY created_at DESC LIMIT 1) as last_read_message_id, 
             NOW() as updated_at
           FROM unnest($3::uuid[]) as c_id
           ON CONFLICT (tenant_id, user_id, conversation_id)
@@ -3794,9 +3848,31 @@ export async function markConversationsRead(conversationIds: string[]) {
 
       await broadcastBulkMetadataUpdate(ctx.tenantId, ctx.userId, conversationIds, { unreadCount: 0 });
 
-      return { success: true };
+      const nowStr = new Date().toISOString();
+      const results = [];
+      for (const convId of conversationIds) {
+        const lastMsg = await ctx.db.executeSafe({
+          text: `SELECT id, created_at FROM messages 
+                 WHERE conversation_id = $1 AND tenant_id = $2 AND direction = 'in' 
+                   AND (media_metadata IS NULL OR COALESCE(media_metadata->'native'->>'message_type', '') != 'reaction')
+                 ORDER BY created_at DESC LIMIT 1`,
+          values: [convId, ctx.tenantId]
+        }) as any[];
+        const lastInboundAt = lastMsg[0]?.created_at ? new Date(lastMsg[0].created_at).toISOString() : null;
+
+        results.push({
+          conversationId: convId,
+          unreadCount: 0,
+          isRead: true,
+          lastReadAt: nowStr,
+          lastInboundAt,
+          updatedAt: nowStr
+        });
+      }
+
+      return { success: true, results };
     }
-  ).then(res => res.success ? (res.data || { success: true }) : { success: false, error: res.error });
+  ).then(res => res.success ? (res.data || { success: true, results: [] }) : { success: false, error: res.error });
 }
 
 export async function markConversationsUnread(conversationIds: string[]) {
@@ -3816,12 +3892,13 @@ export async function markConversationsUnread(conversationIds: string[]) {
             $1 as tenant_id, 
             $2 as user_id, 
             c_id as conversation_id, 
-            (SELECT created_at - INTERVAL '1 millisecond' FROM messages m WHERE m.conversation_id = c_id AND m.tenant_id = $1 AND m.direction = 'in' ORDER BY created_at DESC LIMIT 1) as last_read_at, 
-            (SELECT id FROM messages m WHERE m.conversation_id = c_id AND m.tenant_id = $1 AND m.direction = 'in' ORDER BY created_at DESC LIMIT 2 OFFSET 1) as last_read_message_id,
+            (SELECT created_at - INTERVAL '1 millisecond' FROM messages m WHERE m.conversation_id = c_id AND m.tenant_id = $1 AND m.direction = 'in' AND (m.media_metadata IS NULL OR COALESCE(m.media_metadata->'native'->>'message_type', '') != 'reaction') ORDER BY created_at DESC LIMIT 1) as last_read_at, 
+            (SELECT id FROM messages m WHERE m.conversation_id = c_id AND m.tenant_id = $1 AND m.direction = 'in' AND (m.media_metadata IS NULL OR COALESCE(m.media_metadata->'native'->>'message_type', '') != 'reaction') ORDER BY created_at DESC LIMIT 2 OFFSET 1) as last_read_message_id,
             NOW() as updated_at
           FROM unnest($3::uuid[]) as c_id
           WHERE EXISTS (
             SELECT 1 FROM messages m WHERE m.conversation_id = c_id AND m.tenant_id = $1 AND m.direction = 'in'
+              AND (m.media_metadata IS NULL OR COALESCE(m.media_metadata->'native'->>'message_type', '') != 'reaction')
           )
           ON CONFLICT (tenant_id, user_id, conversation_id)
           DO UPDATE SET 
@@ -3847,9 +3924,35 @@ export async function markConversationsUnread(conversationIds: string[]) {
 
       await broadcastBulkMetadataUpdate(ctx.tenantId, ctx.userId, updatedIds, { unreadCount: 1 });
 
-      return { success: true };
+      const results = [];
+      const nowStr = new Date().toISOString();
+      for (const convId of updatedIds) {
+        const lastInbound = await ctx.db.executeSafe({
+          text: `SELECT id, created_at FROM messages 
+                 WHERE conversation_id = $1 AND tenant_id = $2 AND direction = 'in' 
+                   AND (media_metadata IS NULL OR COALESCE(media_metadata->'native'->>'message_type', '') != 'reaction')
+                 ORDER BY created_at DESC LIMIT 1`,
+          values: [convId, ctx.tenantId]
+        }) as any[];
+        if (lastInbound.length > 0) {
+          const lastInboundMsg = lastInbound[0];
+          const targetTime = new Date(lastInboundMsg.created_at);
+          targetTime.setMilliseconds(targetTime.getMilliseconds() - 1);
+          
+          results.push({
+            conversationId: convId,
+            unreadCount: 1,
+            isRead: false,
+            lastReadAt: targetTime.toISOString(),
+            lastInboundAt: new Date(lastInboundMsg.created_at).toISOString(),
+            updatedAt: nowStr
+          });
+        }
+      }
+
+      return { success: true, results };
     }
-  ).then(res => res.success ? (res.data || { success: true }) : { success: false, error: res.error });
+  ).then(res => res.success ? (res.data || { success: true, results: [] }) : { success: false, error: res.error });
 }
 
 export async function bulkSetBotMode(conversationIds: string[], mode: 'bot' | 'human') {

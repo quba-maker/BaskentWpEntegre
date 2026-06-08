@@ -33,13 +33,30 @@ interface InboxState {
   isSidebarCollapsed: boolean;
   toggleSidebar: () => void;
   setSidebarCollapsed: (val: boolean) => void;
+
+  // Manual unread lock states
+  manualUnreadLocks: Record<string, number>;
+  addManualUnreadLock: (conversationId: string, durationMs?: number) => void;
+  clearManualUnreadLock: (conversationId: string) => void;
 }
 
 export const useInboxStore = create<InboxState>((set) => ({
   activePhone: null,
   activeContact: null,
   mobileView: 'list',
-  setActiveContact: (phone, contactData) => set({ activePhone: phone, activeContact: contactData, mobileView: 'chat', activeModal: null }),
+  setActiveContact: (phone, contactData) => set((state) => {
+    const nextLocks = { ...state.manualUnreadLocks };
+    if (state.activePhone !== phone) {
+      delete nextLocks[phone];
+    }
+    return {
+      activePhone: phone,
+      activeContact: contactData,
+      mobileView: 'chat',
+      activeModal: null,
+      manualUnreadLocks: nextLocks
+    };
+  }),
   updateActiveContact: (contactData) => set({ activeContact: contactData }),
   setMobileView: (view) => set({ mobileView: view }),
   
@@ -70,4 +87,18 @@ export const useInboxStore = create<InboxState>((set) => ({
     return { isSidebarCollapsed: nextVal };
   }),
   setSidebarCollapsed: (val) => set({ isSidebarCollapsed: val }),
+
+  // Manual unread lock actions
+  manualUnreadLocks: {},
+  addManualUnreadLock: (conversationId, durationMs = 10000) => set((state) => ({
+    manualUnreadLocks: {
+      ...state.manualUnreadLocks,
+      [conversationId]: Date.now() + durationMs
+    }
+  })),
+  clearManualUnreadLock: (conversationId) => set((state) => {
+    const next = { ...state.manualUnreadLocks };
+    delete next[conversationId];
+    return { manualUnreadLocks: next };
+  }),
 }));
