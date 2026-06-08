@@ -2068,32 +2068,32 @@ async function markConversationsUnreadCore(
         WHERE c.tenant_id = $1
           AND c.id = ANY($2::uuid[])
       ),
-      ranked_messages AS (
-        SELECT 
+      last_inbound AS (
+        SELECT DISTINCT ON (m.conversation_id)
           m.conversation_id,
-          m.id AS message_id,
-          m.created_at,
-          ROW_NUMBER() OVER (
-            PARTITION BY m.conversation_id 
-            ORDER BY COALESCE(m.provider_timestamp, m.created_at) DESC, m.id DESC
-          ) as rnk
+          m.id AS last_inbound_message_id,
+          m.created_at AS last_inbound_at
         FROM messages m
         JOIN target_conversations tc ON tc.id = m.conversation_id
         WHERE m.tenant_id = $1
           AND m.direction = 'in'
           AND (m.media_metadata IS NULL OR COALESCE(m.media_metadata->'native'->>'message_type', '') != 'reaction')
-      ),
-      last_inbound AS (
-        SELECT conversation_id, created_at AS last_inbound_at
-        FROM ranked_messages
-        WHERE rnk = 1
+        ORDER BY m.conversation_id, COALESCE(m.provider_timestamp, m.created_at) DESC, m.id DESC
       ),
       second_last_inbound AS (
-        SELECT conversation_id, message_id AS last_read_message_id
-        FROM ranked_messages
-        WHERE rnk = 2
+        SELECT DISTINCT ON (m.conversation_id)
+          m.conversation_id,
+          m.id AS last_read_message_id
+        FROM messages m
+        JOIN target_conversations tc ON tc.id = m.conversation_id
+        JOIN last_inbound li ON li.conversation_id = m.conversation_id
+        WHERE m.tenant_id = $1
+          AND m.direction = 'in'
+          AND (m.media_metadata IS NULL OR COALESCE(m.media_metadata->'native'->>'message_type', '') != 'reaction')
+          AND m.id != li.last_inbound_message_id
+        ORDER BY m.conversation_id, COALESCE(m.provider_timestamp, m.created_at) DESC, m.id DESC
       ),
-      upsert_states AS (
+      upserted_read_states AS (
         INSERT INTO conversation_read_states (tenant_id, user_id, conversation_id, last_read_at, last_read_message_id, updated_at)
         SELECT 
           $1 as tenant_id,
@@ -2116,21 +2116,21 @@ async function markConversationsUnreadCore(
           m.conversation_id,
           COUNT(*)::int AS cnt
         FROM messages m
-        JOIN upsert_states us ON us.conversation_id = m.conversation_id
+        JOIN upserted_read_states urs ON urs.conversation_id = m.conversation_id
         WHERE m.tenant_id = $1
           AND m.direction = 'in'
           AND (m.media_metadata IS NULL OR COALESCE(m.media_metadata->'native'->>'message_type', '') != 'reaction')
-          AND m.created_at > us.last_read_at
+          AND m.created_at > urs.last_read_at
         GROUP BY m.conversation_id
       )
       SELECT 
-        us.conversation_id, 
-        us.last_read_at,
+        urs.conversation_id, 
+        urs.last_read_at,
         li.last_inbound_at,
         COALESCE(uc.cnt, 1)::int AS unread_count
-      FROM upsert_states us
-      JOIN last_inbound li ON li.conversation_id = us.conversation_id
-      LEFT JOIN unread_counts uc ON uc.conversation_id = us.conversation_id;
+      FROM upserted_read_states urs
+      JOIN last_inbound li ON li.conversation_id = urs.conversation_id
+      LEFT JOIN unread_counts uc ON uc.conversation_id = urs.conversation_id;
     `,
     values: [ctx.tenantId, conversationIds, ctx.userId]
   }) as any[];
@@ -2339,21 +2339,20 @@ export async function getGlobalUnreadCount() {
         text: `
           SELECT COALESCE(SUM(unread_sub.unread), 0)::int as total_unread
           FROM (
-            SELECT 
-              (
-                SELECT COUNT(*)::int 
-                FROM messages m_unread
-                WHERE m_unread.conversation_id = c.id
-                  AND m_unread.tenant_id = c.tenant_id
-                  AND m_unread.direction = 'in'
-                  AND (m_unread.media_metadata IS NULL OR COALESCE(m_unread.media_metadata->'native'->>'message_type', '') != 'reaction')
-                  AND m_unread.created_at > COALESCE(
-                    (SELECT last_read_at FROM conversation_read_states rs WHERE rs.tenant_id = c.tenant_id AND rs.user_id = $2 AND rs.conversation_id = c.id),
-                    '1970-01-01'::timestamptz
-                  )
-              ) as unread
+            SELECT COUNT(m_unread.id)::int as unread
             FROM conversations c
+            LEFT JOIN conversation_read_states rs 
+              ON rs.tenant_id = c.tenant_id 
+              AND rs.user_id = $2 
+              AND rs.conversation_id = c.id
+            LEFT JOIN messages m_unread 
+              ON m_unread.conversation_id = c.id
+              AND m_unread.tenant_id = c.tenant_id
+              AND m_unread.direction = 'in'
+              AND (m_unread.media_metadata IS NULL OR COALESCE(m_unread.media_metadata->'native'->>'message_type', '') != 'reaction')
+              AND m_unread.created_at > COALESCE(rs.last_read_at, '1970-01-01'::timestamptz)
             WHERE c.tenant_id = $1
+            GROUP BY c.id
           ) unread_sub
         `,
         values: [ctx.tenantId, ctx.userId]

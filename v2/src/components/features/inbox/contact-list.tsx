@@ -884,6 +884,14 @@ export function ContactRail() {
     if (activePhone && contacts.length > 0) {
       const activeConv = contacts.find((c: any) => c.id === activePhone);
       if (activeConv && activeConv.unread > 0) {
+        // Check manual unread lock to avoid resetting manual unread actions
+        const activeConvId = activeConv.conversation_id || activeConv.conversationId || activePhone;
+        const lock = useInboxStore.getState().manualUnreadLocks[activePhone] || useInboxStore.getState().manualUnreadLocks[activeConvId];
+        if (lock && lock > Date.now()) {
+          console.log(`[READ_STATE_AUTO_SKIP_CACHE] conversationId=${activeConvId} reason=manual_unread_lock`);
+          return;
+        }
+
         queryClient.setQueriesData({ queryKey: ["conversations"] }, (oldData: any) => {
           if (!oldData || !oldData.pages) return oldData;
           const newPages = oldData.pages.map((page: any[]) =>
