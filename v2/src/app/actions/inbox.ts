@@ -2021,11 +2021,15 @@ export async function markConversationRead(conversationIdOrPhone: string) {
       console.log(`[READ_STATE_ACTION] conversationId=${convId} action=mark_read beforeUnread=${beforeUnread} afterUnread=0 lastReadAt=${nowStr} lastInboundAt=${lastInboundAt}`);
 
       // Publish metadata update to realtime bus
-      await RealtimePublisher.publishMetadataUpdated(ctx.tenantId, {
-        conversationId: convId,
-        userId: ctx.userId,
-        unreadCount: 0
-      });
+      try {
+        await RealtimePublisher.publishMetadataUpdated(ctx.tenantId, {
+          conversationId: convId,
+          userId: ctx.userId,
+          unreadCount: 0
+        });
+      } catch (pubErr) {
+        console.error("[REALTIME_PUBLISH_ERROR] Failed to publish read metadata update:", pubErr);
+      }
 
       return {
         success: true,
@@ -2173,17 +2177,21 @@ async function markConversationsUnreadCore(
   }
 
   // Publish metadata updates to Ably
-  if (updated.length > 0) {
-    const updatedIdsArr = updated.map(u => u.conversationId);
-    if (updatedIdsArr.length === 1) {
-      await RealtimePublisher.publishMetadataUpdated(ctx.tenantId, {
-        conversationId: updatedIdsArr[0],
-        userId: ctx.userId,
-        unreadCount: updated[0].unreadCount
-      });
-    } else {
-      await broadcastBulkMetadataUpdate(ctx.tenantId, ctx.userId, updatedIdsArr, { unreadCount: 1 });
+  try {
+    if (updated.length > 0) {
+      const updatedIdsArr = updated.map(u => u.conversationId);
+      if (updatedIdsArr.length === 1) {
+        await RealtimePublisher.publishMetadataUpdated(ctx.tenantId, {
+          conversationId: updatedIdsArr[0],
+          userId: ctx.userId,
+          unreadCount: updated[0].unreadCount
+        });
+      } else {
+        await broadcastBulkMetadataUpdate(ctx.tenantId, ctx.userId, updatedIdsArr, { unreadCount: 1 });
+      }
     }
+  } catch (pubErr) {
+    console.error("[REALTIME_PUBLISH_ERROR] Failed to publish unread metadata update:", pubErr);
   }
 
   return {
@@ -2294,11 +2302,15 @@ export async function togglePin(conversationIdOrPhone: string) {
         });
 
         // Publish metadata update to realtime bus
-        await RealtimePublisher.publishMetadataUpdated(ctx.tenantId, {
-          conversationId: convId,
-          userId: ctx.userId,
-          isPinned: false
-        });
+        try {
+          await RealtimePublisher.publishMetadataUpdated(ctx.tenantId, {
+            conversationId: convId,
+            userId: ctx.userId,
+            isPinned: false
+          });
+        } catch (pubErr) {
+          console.error("[REALTIME_PUBLISH_ERROR] Failed to publish unpin metadata update:", pubErr);
+        }
 
         return { success: true, isPinned: false };
       } else {
@@ -2319,11 +2331,15 @@ export async function togglePin(conversationIdOrPhone: string) {
         });
 
         // Publish metadata update to realtime bus
-        await RealtimePublisher.publishMetadataUpdated(ctx.tenantId, {
-          conversationId: convId,
-          userId: ctx.userId,
-          isPinned: true
-        });
+        try {
+          await RealtimePublisher.publishMetadataUpdated(ctx.tenantId, {
+            conversationId: convId,
+            userId: ctx.userId,
+            isPinned: true
+          });
+        } catch (pubErr) {
+          console.error("[REALTIME_PUBLISH_ERROR] Failed to publish pin metadata update:", pubErr);
+        }
 
         return { success: true, isPinned: true };
       }

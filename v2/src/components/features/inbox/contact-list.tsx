@@ -23,7 +23,7 @@ import {
   getMessages,
   toggleBotStatus
 } from "@/app/actions/inbox";
-import { useInboxStore } from "@/store/inbox-store";
+import { useInboxStore, lastMutationTimes, registerUnreadMutation, clearUnreadMutation } from "@/store/inbox-store";
 import { useDiagnosticsStore } from "@/lib/realtime/diagnostics-store";
 import { getCountryFromPhone, normalizeCountryName, getCountryFlag } from "@/lib/utils/country";
 import NoReplyAutomationModal from "./no-reply-automation-modal";
@@ -395,14 +395,36 @@ export function ContactRail() {
 
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading } = useInfiniteQuery({
     queryKey: ["conversations", debouncedSearch, primaryFilter, replyFilter, channelFilter, stageFilter],
-    queryFn: ({ pageParam = 1 }) => getConversations(
-      pageParam as number, 
-      debouncedSearch, 
-      stageFilter, 
-      primaryFilter, 
-      replyFilter, 
-      channelFilter
-    ),
+    queryFn: async ({ pageParam = 1 }) => {
+      const res = await getConversations(
+        pageParam as number, 
+        debouncedSearch, 
+        stageFilter, 
+        primaryFilter, 
+        replyFilter, 
+        channelFilter
+      );
+      if (Array.isArray(res)) {
+        return res.map(conv => {
+          const conversationId = conv.id || conv.conversation_id || conv.conversationId;
+          const lastMutation = lastMutationTimes[conversationId];
+          if (lastMutation && Date.now() - lastMutation < 4000) {
+            const activeLocks = useInboxStore.getState().manualUnreadLocks;
+            const isUnreadLocked = !!(activeLocks[conversationId] || (conv.phone && activeLocks[conv.phone]));
+            const targetUnread = isUnreadLocked ? Math.max(conv.unread || 0, 1) : 0;
+            if (conv.unread !== targetUnread) {
+              console.log(`[READ_STATE_RECONCILE_SKIP_STALE] Skipping unread count overwrite for conversationId=${conversationId} from ${conv.unread} to target=${targetUnread}`);
+              return {
+                ...conv,
+                unread: targetUnread
+              };
+            }
+          }
+          return conv;
+        });
+      }
+      return res;
+    },
     initialPageParam: 1,
     getNextPageParam: (lastPage, allPages) => {
       if (!Array.isArray(lastPage) || !Array.isArray(allPages)) return undefined;
@@ -410,6 +432,7 @@ export function ContactRail() {
     },
     // Realtime operates now, fallback polling if disconnected
     refetchInterval: isRealtimeDown ? 10000 : false,
+    refetchIntervalInBackground: true,
     staleTime: Infinity,
     // GC: evict stale conversation pages after 10 minutes
     gcTime: 10 * 60 * 1000,
@@ -619,17 +642,21 @@ export function ContactRail() {
     if (action === 'unread') {
       ids.forEach(id => {
         useInboxStore.getState().addManualUnreadLock(id);
+        registerUnreadMutation(id);
         const match = contacts.find((c: any) => c.conversation_id === id || c.conversationId === id || c.id === id);
         if (match) {
           useInboxStore.getState().addManualUnreadLock(match.id);
+          registerUnreadMutation(match.id);
         }
       });
     } else if (action === 'read') {
       ids.forEach(id => {
         useInboxStore.getState().clearManualUnreadLock(id);
+        registerUnreadMutation(id);
         const match = contacts.find((c: any) => c.conversation_id === id || c.conversationId === id || c.id === id);
         if (match) {
           useInboxStore.getState().clearManualUnreadLock(match.id);
+          registerUnreadMutation(match.id);
         }
       });
     }
@@ -731,12 +758,22 @@ export function ContactRail() {
         // Refresh global unread counter in sidebar instantly!
         window.dispatchEvent(new CustomEvent('inbox-unread-refresh'));
 
+        ids.forEach(id => {
+          clearUnreadMutation(id);
+          const match = contacts.find((c: any) => c.conversation_id === id || c.conversationId === id || c.id === id);
+          if (match) clearUnreadMutation(match.id);
+        });
         queryClient.invalidateQueries({ queryKey: ["conversations"] });
         clearSelection();
       } else {
         if (action === 'unread') {
           ids.forEach(id => useInboxStore.getState().clearManualUnreadLock(id));
         }
+        ids.forEach(id => {
+          clearUnreadMutation(id);
+          const match = contacts.find((c: any) => c.conversation_id === id || c.conversationId === id || c.id === id);
+          if (match) clearUnreadMutation(match.id);
+        });
         rollback();
         setBulkActionError(res.error || "Okunmadı yapılamadı. Lütfen tekrar deneyin.");
         setTimeout(() => setBulkActionError(null), 4000);
@@ -746,6 +783,11 @@ export function ContactRail() {
       if (action === 'unread') {
         ids.forEach(id => useInboxStore.getState().clearManualUnreadLock(id));
       }
+      ids.forEach(id => {
+        clearUnreadMutation(id);
+        const match = contacts.find((c: any) => c.conversation_id === id || c.conversationId === id || c.id === id);
+        if (match) clearUnreadMutation(match.id);
+      });
       rollback();
       setBulkActionError("Okunmadı yapılamadı. Lütfen tekrar deneyin.");
       setTimeout(() => setBulkActionError(null), 4000);
@@ -1264,6 +1306,7 @@ export function ContactRail() {
                   <div
                     key={c.id}
                     role="button"
+                    data-conversation-id={c.conversation_id || c.conversationId || c.id}
                     tabIndex={0}
                     aria-selected={activePhone === c.id}
                     onClick={() => {

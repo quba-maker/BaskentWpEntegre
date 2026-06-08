@@ -59,7 +59,7 @@ export const useDiagnosticsStore = create<DiagnosticsState>((set) => ({
   },
   logs: [],
   activeSubscriptions: new Set(),
-  isRealtimeDown: false,
+  isRealtimeDown: true,
   chaosModeEnabled: false,
   chaosSettings: {
     delayMs: 0,

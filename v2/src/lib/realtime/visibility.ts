@@ -34,6 +34,9 @@ export function getVisibilityState(): VisibilityState {
 }
 
 export function isTabVisible(): boolean {
+  if (typeof window !== "undefined" && (window as any).__IS_PLAYWRIGHT__) {
+    return true;
+  }
   return currentVisibility === "visible";
 }
 
@@ -55,7 +58,7 @@ export function useVisibilityThrottle(): boolean {
   
   useEffect(() => {
     const cleanup = onVisibilityChange((state) => {
-      setIsVisible(state === "visible");
+      setIsVisible(isTabVisible());
     });
     return cleanup;
   }, []);

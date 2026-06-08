@@ -1126,6 +1126,7 @@ export function ConversationViewport() {
     enabled: !!messagesQueryKey[1],
     // Fallback polling only: 25s polling safety net if realtime fails
     refetchInterval: isRealtimeDown ? 25000 : false,
+    refetchIntervalInBackground: true,
     staleTime: 30000,
     gcTime: 5 * 60 * 1000,
     refetchOnWindowFocus: true,

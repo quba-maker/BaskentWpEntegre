@@ -33,6 +33,13 @@ if (typeof window !== "undefined") {
 }
 
 export const getSharedAblyClient = (tenantId: string) => {
+  if (typeof window !== "undefined") {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("disableAbly") === "true" || (window as any).__DISABLE_ABLY__ === true) {
+      return null;
+    }
+  }
+
   if (sharedAblyClient && currentTenantId === tenantId) {
     return sharedAblyClient;
   }
@@ -117,9 +124,9 @@ export function useRealtimeSubscription(
 
   useEffect(() => {
     const cleanup = onVisibilityChange((state) => {
-      isVisibleRef.current = state === "visible";
+      isVisibleRef.current = isTabVisible();
       // Flush pending events when tab becomes visible
-      if (state === "visible" && pendingEventsRef.current.length > 0) {
+      if (isTabVisible() && pendingEventsRef.current.length > 0) {
         console.log(`[ABLY_VISIBILITY_FLUSH] Flushing ${pendingEventsRef.current.length} queued events`);
         for (const evt of pendingEventsRef.current) {
           onEventRef.current(evt);
@@ -246,7 +253,9 @@ export function useRealtimeSubscription(
       
       if (IS_DEV) console.log(`[ABLY_CHANNEL_DISPOSED] Unsubscribing and detaching channel: ${channelName}`);
       channel.unsubscribe(ablyHandler);
-      channel.detach();
+      channel.detach()?.catch((err: any) => {
+        if (IS_DEV) console.warn("[ABLY_CHANNEL_DETACH_ERROR] Gracefully handled detach failure:", err?.message || err);
+      });
       crossTabCleanup();
       pendingEventsRef.current = [];
       

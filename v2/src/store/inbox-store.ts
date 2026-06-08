@@ -102,3 +102,19 @@ export const useInboxStore = create<InboxState>((set) => ({
     return { manualUnreadLocks: next };
   }),
 }));
+
+// Mutation tracking for stale overwrite guard
+export const lastMutationTimes: Record<string, number> = {};
+
+export function registerUnreadMutation(conversationId: string) {
+  lastMutationTimes[conversationId] = Date.now();
+}
+
+export function clearUnreadMutation(conversationId: string) {
+  delete lastMutationTimes[conversationId];
+}
+
+export let lastLocalUnreadBadgeCount = 0;
+export function setLastLocalUnreadBadgeCount(val: number) {
+  lastLocalUnreadBadgeCount = val;
+}
