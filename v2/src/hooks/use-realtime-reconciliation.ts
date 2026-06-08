@@ -376,9 +376,10 @@ export function useRealtimeReconciliation(tenantId: string, userId?: string) {
     updateConversationPreview(conversationId, (conv: any) => {
       const updates: any = {};
       
-      if (payload.isBotActive !== undefined) {
-        updates.autopilot_enabled = payload.isBotActive;
-        updates.isBotActive = payload.isBotActive;
+      const isBotActive = payload.isBotActive !== undefined ? payload.isBotActive : payload.autopilotEnabled;
+      if (isBotActive !== undefined) {
+        updates.autopilot_enabled = isBotActive;
+        updates.isBotActive = isBotActive;
       }
       if (payload.status !== undefined) updates.status = payload.status;
       if (payload.lastMessageContent !== undefined) {
@@ -415,7 +416,8 @@ export function useRealtimeReconciliation(tenantId: string, userId?: string) {
                          store.activePhone === conversationId;
     if (isThisContact && store.activeContact) {
       const updates: any = {};
-      if (payload.isBotActive !== undefined) updates.isBotActive = payload.isBotActive;
+      const isBotActive = payload.isBotActive !== undefined ? payload.isBotActive : payload.autopilotEnabled;
+      if (isBotActive !== undefined) updates.isBotActive = isBotActive;
       if (payload.status !== undefined) updates.status = payload.status;
       
       if (isCurrentUserEvent) {
@@ -453,9 +455,6 @@ export function useRealtimeReconciliation(tenantId: string, userId?: string) {
         break;
       case "conversation.memory_updated":
         handleMemoryUpdated(event as ConversationMemoryUpdatedEvent);
-        break;
-      case "conversation.autopilot_updated":
-        handleAutopilotUpdated(event);
         break;
       case "conversation.metadata_updated":
         handleMetadataUpdated(event);

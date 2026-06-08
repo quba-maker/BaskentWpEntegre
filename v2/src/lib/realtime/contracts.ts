@@ -89,6 +89,8 @@ export const ConversationMetadataProjectionSchema = z.object({
   isFavorite: z.boolean().optional(),
   isArchived: z.boolean().optional(),
   isBotActive: z.boolean().optional(),
+  autopilotEnabled: z.boolean().optional(),
+  updatedBy: z.string().optional(),
   status: z.enum(["bot", "human", "open"]).optional(),
   lastMessageContent: z.string().optional(),
   lastMessageDirection: z.enum(["in", "out", "system"]).optional(),

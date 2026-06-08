@@ -1170,26 +1170,15 @@ export class QueueWorkerEngine {
         ]
       });
 
-      // Broadcast autopilot updated realtime update
+      // Broadcast autopilot updated realtime update via unified metadata event
       try {
-        const { RealtimeBus } = await import("@/lib/realtime/bus");
-        await RealtimeBus.publish(tenantId, {
-          eventId: require("uuid").v4(),
-          traceId: "app-echo-trace-" + Date.now(),
-          spanId: require("uuid").v4(),
-          timestamp: Date.now() * 1000,
-          entityVersion: 1,
-          eventVersion: "1.0",
-          schemaVersion: "1.0",
-          tenantId: tenantId,
-          type: "conversation.autopilot_updated" as any,
-          payload: {
-            conversationId: resolvedConvId,
-            phone: phoneNumber,
-            channelId: resolvedChannelId,
-            enabled: false,
-            status: 'human'
-          }
+        const { RealtimePublisher } = await import("@/lib/realtime/publisher");
+        await RealtimePublisher.publishMetadataUpdated(tenantId, {
+          conversationId: resolvedConvId,
+          userId: "system_webhook",
+          isBotActive: false,
+          autopilotEnabled: false,
+          status: "human"
         });
       } catch (realtimeErr) {
         this.log.error("Failed to publish autopilot echo realtime update:", realtimeErr instanceof Error ? realtimeErr : new Error(String(realtimeErr)));
@@ -1375,26 +1364,15 @@ export class QueueWorkerEngine {
         ]
       });
 
-      // Broadcast realtime update
+      // Broadcast realtime update via unified metadata event
       try {
-        const { RealtimeBus } = await import("@/lib/realtime/bus");
-        await RealtimeBus.publish(tenantId, {
-          eventId: require("uuid").v4(),
-          traceId: "worker-auto-disable-" + Date.now(),
-          spanId: require("uuid").v4(),
-          timestamp: Date.now() * 1000,
-          entityVersion: 1,
-          eventVersion: "1.0",
-          schemaVersion: "1.0",
-          tenantId: tenantId,
-          type: "conversation.autopilot_updated" as any,
-          payload: {
-            conversationId: conversationIdVal,
-            phone: phoneNumber,
-            channelId: resolvedChannelId,
-            enabled: false,
-            status: 'human'
-          }
+        const { RealtimePublisher } = await import("@/lib/realtime/publisher");
+        await RealtimePublisher.publishMetadataUpdated(tenantId, {
+          conversationId: conversationIdVal,
+          userId: "system_worker",
+          isBotActive: false,
+          autopilotEnabled: false,
+          status: "human"
         });
       } catch (realtimeErr) {
         this.log.error("Failed to publish autopilot auto-disable realtime update:", realtimeErr instanceof Error ? realtimeErr : new Error(String(realtimeErr)));

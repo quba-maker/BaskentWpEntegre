@@ -997,26 +997,15 @@ export async function sendMessage(phone: string, text: string, replyToProviderMe
         ]
       });
 
-      // Broadcast autopilot updated realtime update
+      // Broadcast autopilot updated realtime update via unified metadata event
       try {
-        const { RealtimeBus } = await import("@/lib/realtime/bus");
-        await RealtimeBus.publish(ctx.tenantId, {
-          eventId: require("uuid").v4(),
-          traceId: "manual-message-trace-" + Date.now(),
-          spanId: require("uuid").v4(),
-          timestamp: Date.now() * 1000,
-          entityVersion: 1,
-          eventVersion: "1.0",
-          schemaVersion: "1.0",
-          tenantId: ctx.tenantId,
-          type: "conversation.autopilot_updated" as any,
-          payload: {
-            conversationId: conversationId,
-            phone: phone,
-            channelId: channelId,
-            enabled: false,
-            status: "human"
-          }
+        const { RealtimePublisher } = await import("@/lib/realtime/publisher");
+        await RealtimePublisher.publishMetadataUpdated(ctx.tenantId, {
+          conversationId: conversationId,
+          userId: ctx.userId || "operator",
+          isBotActive: false,
+          autopilotEnabled: false,
+          status: "human"
         });
       } catch (realtimeErr) {
         console.error("Failed to publish autopilot toggle realtime update on manual send:", realtimeErr);
@@ -1289,26 +1278,15 @@ export async function sendMediaMessage(phone: string, mediaUrl: string, mediaTyp
         ]
       });
 
-      // Broadcast autopilot updated realtime update
+      // Broadcast autopilot updated realtime update via unified metadata event
       try {
-        const { RealtimeBus } = await import("@/lib/realtime/bus");
-        await RealtimeBus.publish(ctx.tenantId, {
-          eventId: require("uuid").v4(),
-          traceId: "manual-media-trace-" + Date.now(),
-          spanId: require("uuid").v4(),
-          timestamp: Date.now() * 1000,
-          entityVersion: 1,
-          eventVersion: "1.0",
-          schemaVersion: "1.0",
-          tenantId: ctx.tenantId,
-          type: "conversation.autopilot_updated" as any,
-          payload: {
-            conversationId: conversationId,
-            phone: phone,
-            channelId: channelId,
-            enabled: false,
-            status: "human"
-          }
+        const { RealtimePublisher } = await import("@/lib/realtime/publisher");
+        await RealtimePublisher.publishMetadataUpdated(ctx.tenantId, {
+          conversationId: conversationId,
+          userId: ctx.userId || "operator",
+          isBotActive: false,
+          autopilotEnabled: false,
+          status: "human"
         });
       } catch (realtimeErr) {
         console.error("Failed to publish autopilot toggle realtime update on manual media send:", realtimeErr);
@@ -1693,33 +1671,13 @@ export async function toggleBotStatus(conversationIdOrPhone: string, isBotActive
         ]
       });
 
-      // Ably Realtime Sync (publish event)
+      // Ably Realtime Sync (publish metadata update)
       try {
-        const { RealtimeBus } = await import("@/lib/realtime/bus");
-        await RealtimeBus.publish(ctx.tenantId, {
-          eventId: require("uuid").v4(),
-          traceId: "toggle-status-trace-" + Date.now(),
-          spanId: require("uuid").v4(),
-          timestamp: Date.now() * 1000,
-          entityVersion: 1,
-          eventVersion: "1.0",
-          schemaVersion: "1.0",
-          tenantId: ctx.tenantId,
-          type: "conversation.autopilot_updated" as any,
-          payload: {
-            conversationId: conversationId,
-            phone: phone,
-            channelId: channelId,
-            enabled: isBotActive,
-            status: newStatus
-          }
-        });
-
-        // Publish metadata update to realtime bus
         await RealtimePublisher.publishMetadataUpdated(ctx.tenantId, {
           conversationId: conversationId,
           userId: ctx.userId,
           isBotActive: isBotActive,
+          autopilotEnabled: isBotActive,
           status: newStatus
         });
       } catch (realtimeErr) {
@@ -3974,12 +3932,12 @@ export async function resolveInboxDraftAction(conversationId: string) {
       if (conv.lead_id) {
         const { resolveFirstContactCore } = await import("@/lib/utils/first-contact-status-resolver");
         const statusObj = await resolveFirstContactCore(ctx.db, ctx.tenantId, conv.lead_id);
-        if (statusObj.patientLevelStatus === 'waiting_inbox_reply') {
+        if (statusObj.patientLevelStatus === 'waiting_inbox_reply' || statusObj.patientLevelStatus === 'needs_greeting') {
           const { prepareSmartGreetingDraftCore } = await import("@/app/actions/outreach");
           const draftRes = await prepareSmartGreetingDraftCore(ctx.db, ctx.tenantId, ctx.userId, conv.lead_id);
           return {
             success: true,
-            draftType: 'form_greeting_reply' as const,
+            draftType: statusObj.patientLevelStatus === 'needs_greeting' ? ('first_greeting' as const) : ('form_greeting_reply' as const),
             draftText: draftRes.draftText || '',
             sendAction: 'greeting' as const,
             canSend: true
@@ -4077,9 +4035,8 @@ export async function resolveInboxDraftAction(conversationId: string) {
 
       // Check 7: No-Reply Reminder Draft
       // If standard follow-up is skipped because outbound does not expect reply, try no-reply reminder
-      const { prepareNoReplyReminderDraftAction } = await import("@/app/actions/inbox");
-      const noReplyRes: any = await prepareNoReplyReminderDraftAction(conversationId);
-      if (noReplyRes?.success && noReplyRes?.draft) {
+      const noReplyRes = await prepareNoReplyReminderDraftCore(ctx.db, ctx.tenantId, ctx.userId, conversationId);
+      if (noReplyRes.success && noReplyRes.draft) {
         return {
           success: true,
           draftType: 'no_reply_reminder' as const,
@@ -4732,78 +4689,86 @@ export async function bulkUnarchiveConversations(conversationIds: string[]) {
   });
 }
 
+export async function prepareNoReplyReminderDraftCore(
+  db: any,
+  tenantId: string,
+  userId: string | null,
+  conversationId: string
+) {
+  const convRows = await db.executeSafe({
+    text: `SELECT c.id, c.phone_number, c.patient_name, c.active_opportunity_id,
+                  l.id as lead_id
+           FROM conversations c
+           LEFT JOIN leads l ON l.tenant_id = c.tenant_id AND (
+             (c.customer_id IS NOT NULL AND l.customer_id = c.customer_id)
+             OR l.phone_number = c.phone_number
+           )
+           WHERE c.id = $1 AND c.tenant_id = $2
+           ORDER BY l.created_at DESC
+           LIMIT 1`,
+    values: [conversationId, tenantId]
+  }) as any[];
+
+  if (convRows.length === 0) {
+    return { success: false, error: "Konuşma bulunamadı." };
+  }
+  const conv = convRows[0];
+
+  // Fetch last outbound message
+  const lastMsgRows = await db.executeSafe({
+    text: `SELECT content, created_at
+           FROM messages
+           WHERE conversation_id = $1 AND tenant_id = $2 AND direction = 'out'
+             AND (media_metadata IS NULL OR COALESCE(media_metadata->'native'->>'message_type', '') != 'reaction')
+           ORDER BY created_at DESC
+           LIMIT 1`,
+    values: [conversationId, tenantId]
+  }) as any[];
+  
+  const lastMsgText = lastMsgRows[0]?.content || '';
+  const isPhoneCallContext = lastMsgText.toLowerCase().includes('telefon') || 
+                             lastMsgText.toLowerCase().includes('görüşme') ||
+                             lastMsgText.toLowerCase().includes('arama') ||
+                             lastMsgText.toLowerCase().includes('arayalım');
+
+  let draft = "";
+  if (isPhoneCallContext) {
+    draft = `Merhaba,\n\nTelefon görüşmesi için uygun olduğunuz zamanı öğrenmek istemiştik.\n\nMüsait olduğunuz saat aralığını paylaşırsanız sizi buna göre arama planına alabiliriz.\n\nİyi günler dileriz.`;
+  } else {
+    draft = `Merhaba,\n\nDaha önce gönderdiğimiz mesajla ilgili dönüşünüzü bekliyoruz.\n\nTürkiye’ye geliş planınız netleştiyse paylaşabilirsiniz. Size uygun şekilde randevu planlamanız için yardımcı olabiliriz.\n\nİyi günler dileriz.`;
+  }
+
+  const actorId = userId;
+  if (!actorId) {
+    return { success: false, error: "Kullanıcı kimliği bulunamadı (actor_id null olamaz)." };
+  }
+
+  await db.executeSafe({
+    text: `INSERT INTO outreach_logs (tenant_id, lead_id, conversation_id, opportunity_id, action, channel, actor_id, metadata)
+           VALUES ($1, $2, $3, $4, 'no_reply_reminder_draft_prepared', 'whatsapp', $5, $6)`,
+    values: [
+      tenantId,
+      conv.lead_id || null,
+      conversationId,
+      conv.active_opportunity_id || null,
+      actorId,
+      JSON.stringify({
+        draft_text: draft,
+        last_outbound_text: lastMsgText
+      })
+    ]
+  });
+
+  return { success: true, draft };
+}
+
 export async function prepareNoReplyReminderDraftAction(conversationId: string) {
   if (!conversationId) return { success: false, error: "Konuşma ID gerekli." };
   
   return withActionGuard(
     { actionName: 'prepareNoReplyReminderDraftAction' },
     async (ctx) => {
-      const convRows = await ctx.db.executeSafe({
-        text: `SELECT c.id, c.phone_number, c.patient_name, c.active_opportunity_id,
-                      l.id as lead_id
-               FROM conversations c
-               LEFT JOIN leads l ON l.tenant_id = c.tenant_id AND (
-                 (c.customer_id IS NOT NULL AND l.customer_id = c.customer_id)
-                 OR l.phone_number = c.phone_number
-               )
-               WHERE c.id = $1 AND c.tenant_id = $2
-               ORDER BY l.created_at DESC
-               LIMIT 1`,
-        values: [conversationId, ctx.tenantId]
-      }) as any[];
-
-      if (convRows.length === 0) {
-        return { success: false, error: "Konuşma bulunamadı." };
-      }
-      const conv = convRows[0];
-
-      // Fetch last outbound message
-      const lastMsgRows = await ctx.db.executeSafe({
-        text: `SELECT content, created_at
-               FROM messages
-               WHERE conversation_id = $1 AND tenant_id = $2 AND direction = 'out'
-                 AND (media_metadata IS NULL OR COALESCE(media_metadata->'native'->>'message_type', '') != 'reaction')
-               ORDER BY created_at DESC
-               LIMIT 1`,
-        values: [conversationId, ctx.tenantId]
-      }) as any[];
-      
-      const lastMsgText = lastMsgRows[0]?.content || '';
-      const isPhoneCallContext = lastMsgText.toLowerCase().includes('telefon') || 
-                                 lastMsgText.toLowerCase().includes('görüşme') ||
-                                 lastMsgText.toLowerCase().includes('arama') ||
-                                 lastMsgText.toLowerCase().includes('arayalım');
-
-      let draft = "";
-      if (isPhoneCallContext) {
-        draft = `Merhaba,\n\nTelefon görüşmesi için uygun olduğunuz zamanı öğrenmek istemiştik.\n\nMüsait olduğunuz saat aralığını paylaşırsanız sizi buna göre arama planına alabiliriz.\n\nİyi günler dileriz.`;
-      } else {
-        draft = `Merhaba,\n\nDaha önce gönderdiğimiz mesajla ilgili dönüşünüzü bekliyoruz.\n\nTürkiye’ye geliş planınız netleştiyse paylaşabilirsiniz. Size uygun şekilde randevu planlamanız için yardımcı olabiliriz.\n\nİyi günler dileriz.`;
-      }
-
-      // Log draft preparation with actor_id (operator)
-      const actorId = ctx.userId;
-      if (!actorId) {
-        return { success: false, error: "Kullanıcı kimliği bulunamadı (actor_id null olamaz)." };
-      }
-
-      await ctx.db.executeSafe({
-        text: `INSERT INTO outreach_logs (tenant_id, lead_id, conversation_id, opportunity_id, action, channel, actor_id, metadata)
-               VALUES ($1, $2, $3, $4, 'no_reply_reminder_draft_prepared', 'whatsapp', $5, $6)`,
-        values: [
-          ctx.tenantId,
-          conv.lead_id || null,
-          conversationId,
-          conv.active_opportunity_id || null,
-          actorId,
-          JSON.stringify({
-            draft_text: draft,
-            last_outbound_text: lastMsgText
-          })
-        ]
-      });
-
-      return { success: true, draft };
+      return await prepareNoReplyReminderDraftCore(ctx.db, ctx.tenantId, ctx.userId, conversationId);
     }
   ).then(res => {
     if (!res.success) return { success: false, error: res.error };

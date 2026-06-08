@@ -39,7 +39,7 @@ export const useInboxStore = create<InboxState>((set) => ({
   activePhone: null,
   activeContact: null,
   mobileView: 'list',
-  setActiveContact: (phone, contactData) => set({ activePhone: phone, activeContact: contactData, mobileView: 'chat' }),
+  setActiveContact: (phone, contactData) => set({ activePhone: phone, activeContact: contactData, mobileView: 'chat', activeModal: null }),
   updateActiveContact: (contactData) => set({ activeContact: contactData }),
   setMobileView: (view) => set({ mobileView: view }),
   

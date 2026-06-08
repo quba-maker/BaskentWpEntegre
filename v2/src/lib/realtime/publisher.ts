@@ -102,6 +102,8 @@ export class RealtimePublisher {
       isFavorite?: boolean;
       isArchived?: boolean;
       isBotActive?: boolean;
+      autopilotEnabled?: boolean;
+      updatedBy?: string;
       status?: "bot" | "human" | "open";
       lastMessageContent?: string;
       lastMessageDirection?: "in" | "out" | "system";

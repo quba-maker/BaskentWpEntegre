@@ -66,13 +66,13 @@ export function DraftPreviewModal({ isOpen, onClose, conversationId, patientName
       setShowConfirmSend(false);
 
       try {
+        const modalConversationId = conversationId;
         const res: any = await resolveInboxDraftAction(conversationId);
 
-        // Stale Guard: Check if the user has switched active patient during the async network request
-        const currentActive = useInboxStore.getState().activeContact;
-        const currentActiveId = currentActive?.conversation_id || currentActive?.conversationId || useInboxStore.getState().activePhone;
-        if (currentActiveId !== conversationId) {
-          console.log("[STALE_GUARD] Dropping resolveInboxDraftAction async results because patient switched.");
+        // Stale Guard: Check if the modal context or activeModal switched during the async network request
+        const currentModal = useInboxStore.getState().activeModal;
+        if (!currentModal || currentModal.conversationId !== modalConversationId) {
+          console.log("[STALE_GUARD] Dropping resolveInboxDraftAction async results because activeModal changed.");
           return;
         }
 
