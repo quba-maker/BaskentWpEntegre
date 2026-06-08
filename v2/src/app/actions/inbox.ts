@@ -3726,32 +3726,28 @@ async function broadcastBulkMetadataUpdate(
   conversationIds: string[],
   fields: any
 ) {
-  const count = conversationIds.length;
-  if (count <= 10) {
-    for (const convId of conversationIds) {
-      try {
-        await RealtimePublisher.publishMetadataUpdated(tenantId, {
-          conversationId: convId,
-          userId,
-          ...fields
-        });
-      } catch (err) {
-        console.error(`Failed to publish bulk metadata update for ${convId}:`, err);
-      }
-    }
-  } else {
-    // Publish individual events only for the first 10 to limit spam while still syncing most active
-    const first10 = conversationIds.slice(0, 10);
-    for (const convId of first10) {
-      try {
-        await RealtimePublisher.publishMetadataUpdated(tenantId, {
-          conversationId: convId,
-          userId,
-          ...fields
-        });
-      } catch (err) {
-        console.error(`Failed to publish bulk metadata update for ${convId}:`, err);
-      }
+  const chunkSize = 10;
+  const delayMs = 150;
+
+  for (let i = 0; i < conversationIds.length; i += chunkSize) {
+    const chunk = conversationIds.slice(i, i + chunkSize);
+
+    await Promise.all(
+      chunk.map(async (convId) => {
+        try {
+          await RealtimePublisher.publishMetadataUpdated(tenantId, {
+            conversationId: convId,
+            userId,
+            ...fields
+          });
+        } catch (err) {
+          console.error(`Failed to publish bulk metadata update for ${convId}:`, err);
+        }
+      })
+    );
+
+    if (i + chunkSize < conversationIds.length) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
   }
 }
