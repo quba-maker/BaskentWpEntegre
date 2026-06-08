@@ -701,7 +701,7 @@ export function ContactRail() {
             if (!oldData || !oldData.pages) return oldData;
             const newPages = oldData.pages.map((page: any[]) =>
               page.map(conv => {
-                const match = res.updated.find((r: any) => r.conversationId === conv.id);
+                const match = res.updated.find((r: any) => r.conversationId === conv.id || r.conversationId === conv.conversation_id || r.conversationId === conv.conversationId);
                 if (match) {
                   return {
                     ...conv,
