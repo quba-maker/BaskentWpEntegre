@@ -617,9 +617,21 @@ export function ContactRail() {
     }
 
     if (action === 'unread') {
-      ids.forEach(id => useInboxStore.getState().addManualUnreadLock(id));
+      ids.forEach(id => {
+        useInboxStore.getState().addManualUnreadLock(id);
+        const match = contacts.find((c: any) => c.conversation_id === id || c.conversationId === id || c.id === id);
+        if (match) {
+          useInboxStore.getState().addManualUnreadLock(match.id);
+        }
+      });
     } else if (action === 'read') {
-      ids.forEach(id => useInboxStore.getState().clearManualUnreadLock(id));
+      ids.forEach(id => {
+        useInboxStore.getState().clearManualUnreadLock(id);
+        const match = contacts.find((c: any) => c.conversation_id === id || c.conversationId === id || c.id === id);
+        if (match) {
+          useInboxStore.getState().clearManualUnreadLock(match.id);
+        }
+      });
     }
 
     const rollback = applyOptimisticConversationUpdate(ids, fieldUpdates);
@@ -853,9 +865,10 @@ export function ContactRail() {
       const activeConv = contacts.find((c: any) => c.id === activePhone);
       if (activeConv && (activeConv.unread || 0) > 0) {
         // Check manual unread lock
-        const lock = useInboxStore.getState().manualUnreadLocks[activePhone];
+        const activeConvId = activeConv.conversation_id || activeConv.conversationId || activePhone;
+        const lock = useInboxStore.getState().manualUnreadLocks[activePhone] || useInboxStore.getState().manualUnreadLocks[activeConvId];
         if (lock && lock > Date.now()) {
-          console.log(`[READ_STATE_AUTO_SKIP] conversationId=${activePhone} reason=manual_unread_lock`);
+          console.log(`[READ_STATE_AUTO_SKIP] conversationId=${activeConvId} reason=manual_unread_lock`);
           return;
         }
 

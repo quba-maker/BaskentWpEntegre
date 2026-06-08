@@ -293,12 +293,16 @@ export function useRealtimeReconciliation(tenantId: string, userId?: string) {
       if (isFocused && payload.sender === "user" && currentActiveContactId) {
         // Clear manual unread lock on new inbound message
         useInboxStore.getState().clearManualUnreadLock(currentActiveContactId);
+        if (currentActivePhone) {
+          useInboxStore.getState().clearManualUnreadLock(currentActivePhone);
+        }
 
         if (debounceTimeoutRef.current) {
           clearTimeout(debounceTimeoutRef.current);
         }
         debounceTimeoutRef.current = setTimeout(() => {
-          const lock = useInboxStore.getState().manualUnreadLocks[currentActiveContactId];
+          const lock = useInboxStore.getState().manualUnreadLocks[currentActiveContactId] ||
+                       (currentActivePhone ? useInboxStore.getState().manualUnreadLocks[currentActivePhone] : undefined);
           if (lock && lock > Date.now()) {
             console.log(`[READ_STATE_AUTO_SKIP] conversationId=${currentActiveContactId} reason=manual_unread_lock`);
             return;
