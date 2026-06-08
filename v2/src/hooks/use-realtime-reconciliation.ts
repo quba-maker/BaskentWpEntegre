@@ -1,7 +1,14 @@
 import { useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef } from "react";
 import { useRealtimeSubscription } from "./use-realtime-subscription";
-import { ProjectionEvent, ChatMessageCreatedEvent, ChatMessageStatusUpdatedEvent, ConversationMemoryUpdatedEvent } from "@/lib/realtime/contracts";
+import { 
+  ProjectionEvent, 
+  ChatMessageCreatedEvent, 
+  ChatMessageStatusUpdatedEvent, 
+  ConversationMemoryUpdatedEvent 
+} from "@/lib/realtime/contracts";
 import { useInboxStore } from "@/store/inbox-store";
+import { markConversationRead } from "@/app/actions/inbox";
 import {
   normalizeInfiniteData,
   appendToInfiniteData,
@@ -89,49 +96,73 @@ const mapRealtimeMessageToUIProjection = (payload: any) => {
   };
 };
 
-export function useRealtimeReconciliation(tenantId: string) {
+export function useRealtimeReconciliation(tenantId: string, userId?: string) {
   const queryClient = useQueryClient();
+
+  const activeConvIdRef = useRef<string | null>(null);
+  const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Read active fields from Zustand hook
+  const activeContact = useInboxStore((state) => state.activeContact);
+  const activePhone = useInboxStore((state) => state.activePhone);
+  const activeContactId = activeContact?.conversation_id || activeContact?.conversationId || activePhone || null;
+
+  useEffect(() => {
+    // If active conversation changes, immediately clear any pending debounce timeout
+    if (activeContactId !== activeConvIdRef.current) {
+      if (debounceTimeoutRef.current) {
+        clearTimeout(debounceTimeoutRef.current);
+        debounceTimeoutRef.current = null;
+      }
+      activeConvIdRef.current = activeContactId;
+    }
+  }, [activeContactId]);
+
+  useEffect(() => {
+    return () => {
+      if (debounceTimeoutRef.current) {
+        clearTimeout(debounceTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Helper to update the conversation list preview
   const updateConversationPreview = (conversationId: string, updates: any | ((conv: any) => any), reorderToTop: boolean = false) => {
     let matched = false;
     queryClient.setQueriesData({ queryKey: ["conversations"] }, (oldData: any) => {
-      if (!oldData || !oldData.pages) return oldData; // React Query infinite query structure
+      if (!oldData || !oldData.pages) return oldData;
 
-      if (reorderToTop) {
-        let targetConv: any = null;
-        const newPages = oldData.pages.map((page: any[]) => {
-          return page.filter(conv => {
-            const isMatch = conv.conversation_id === conversationId || conv.conversationId === conversationId;
-            if (isMatch) {
-              matched = true;
-              const newFields = typeof updates === "function" ? updates(conv) : updates;
-              targetConv = { ...conv, ...newFields };
-              return false; // Remove from current position
-            }
-            return true;
-          });
-        });
+      const newPages = oldData.pages.map((page: any[]) => 
+        page.map(conv => {
+          const isMatch = conv.conversation_id === conversationId || conv.conversationId === conversationId || conv.id === conversationId;
+          if (isMatch) {
+            matched = true;
+            const newFields = typeof updates === "function" ? updates(conv) : updates;
+            return { ...conv, ...newFields };
+          }
+          return conv;
+        })
+      );
 
-        if (targetConv && newPages.length > 0) {
-          newPages[0].unshift(targetConv); // Prepend to top of first page
-        }
-        return { ...oldData, pages: newPages };
-      } else {
-        // Just update in place without reordering
-        const newPages = oldData.pages.map((page: any[]) => 
-          page.map(conv => {
-            const isMatch = conv.conversation_id === conversationId || conv.conversationId === conversationId;
-            if (isMatch) {
-              matched = true;
-              const newFields = typeof updates === "function" ? updates(conv) : updates;
-              return { ...conv, ...newFields };
-            }
-            return conv;
-          })
-        );
-        return { ...oldData, pages: newPages };
+      // Re-sort the cache pages in-place instantly
+      const flattened = newPages.flat();
+      flattened.sort((a: any, b: any) => {
+        const aPinned = !!a.isPinned;
+        const bPinned = !!b.isPinned;
+        if (aPinned && !bPinned) return -1;
+        if (!aPinned && bPinned) return 1;
+        
+        const aTime = new Date(a.last_message_at || a.lastMessageAt || 0).getTime();
+        const bTime = new Date(b.last_message_at || b.lastMessageAt || 0).getTime();
+        return bTime - aTime;
+      });
+
+      const pageSize = 50;
+      const sortedPages = [];
+      for (let i = 0; i < flattened.length; i += pageSize) {
+        sortedPages.push(flattened.slice(i, i + pageSize));
       }
+      return { ...oldData, pages: sortedPages };
     });
 
     if (!matched) {
@@ -156,32 +187,23 @@ export function useRealtimeReconciliation(tenantId: string) {
       const allMessages = flattenInfiniteData<any>(oldData);
 
       if (allMessages.length === 0) {
-        // Cache miss — create new InfiniteData with single message
         logReconciliation("cache_miss", { eventId, id: payload.id });
         isAppend = true;
         return appendToInfiniteData(oldData, projection.messageData);
       }
 
-      // 1. Deduplication (Optimistic ID, Canonical ID, or ProviderMessageID)
       let existingMsgIndex = allMessages.findIndex((m: any) => {
         const matchId = m.id === payload.id;
         const matchProviderId = payload.providerMessageId && m.providerMessageId === payload.providerMessageId;
         return matchId || matchProviderId;
       });
 
-      // Fallback for optimistic UI matching: match 'temp-' / 'temp-media-' ids by mediaUrl or text/sender within 60s window
       if (existingMsgIndex === -1 && payload.sender === 'agent') {
         const payloadTimeMs = new Date(payload.createdAt || Date.now()).getTime();
         existingMsgIndex = allMessages.findIndex((m: any) => {
           const isTemp = String(m.id).startsWith("temp-") || String(m.id).startsWith("temp-media-");
           if (!isTemp || m.sender !== payload.sender) return false;
-
-          // If both have mediaUrl, match them directly (unique blob urls never collide)
-          if (payload.mediaUrl && m.mediaUrl && payload.mediaUrl === m.mediaUrl) {
-            return true;
-          }
-
-          // Text-based fallback
+          if (payload.mediaUrl && m.mediaUrl && payload.mediaUrl === m.mediaUrl) return true;
           return m.text === payload.content && Math.abs((m.timeMs || 0) - payloadTimeMs) < 60000;
         });
       }
@@ -189,44 +211,35 @@ export function useRealtimeReconciliation(tenantId: string) {
       if (existingMsgIndex !== -1) {
         isDuplicate = true;
         const existing = allMessages[existingMsgIndex];
-        
-        // Protect against status downgrade or stale update
         const currentRank = STATUS_RANK[existing.status as keyof typeof STATUS_RANK] ?? 0;
         const newRank = STATUS_RANK[payload.status as keyof typeof STATUS_RANK] ?? 0;
 
         if (newRank < currentRank && payload.status !== "failed") {
           logReconciliation("stale_event_dropped", { eventId, reason: "Status downgrade attempted", current: existing.status, incoming: payload.status });
-          return normalizeInfiniteData(oldData); // Return normalized shape without changes
+          return normalizeInfiniteData(oldData);
         }
 
         logReconciliation("optimistic_reconciled", { eventId, id: payload.id });
-        
-        // Deterministic merge: canonical (server) data wins over optimistic
         allMessages[existingMsgIndex] = { ...existing, ...projection.messageData };
-        
-        // Stable sort and rebuild InfiniteData (collapses to single page)
         return replaceInfiniteDataItems(oldData, stableSortMessages(allMessages));
       }
 
-      // 2. Append new message (from another client or external source)
       logReconciliation("cache_updated", { eventId, id: payload.id, type: "append" });
       isAppend = true;
-      
-      // Insert with stable sort — collapses to single page; pagination re-established on next fetch
       return replaceInfiniteDataItems(oldData, stableSortMessages([...allMessages, projection.messageData]));
     });
 
     const appendDuration = performance.now() - startTime;
 
-    // Read the active phone directly from the store to prevent unread count bumps on focused conversation
     const store = useInboxStore.getState();
-    const activePhone = store.activePhone;
-    const activeContact = store.activeContact;
+    const currentActivePhone = store.activePhone;
+    const currentActiveContact = store.activeContact;
+    const currentActiveContactId = currentActiveContact?.conversation_id || currentActiveContact?.conversationId || currentActivePhone || null;
     const isFocused = 
-      activeContact?.conversation_id === payload.conversationId ||
-      activeContact?.conversationId === payload.conversationId ||
-      activePhone === payload.conversationId ||
-      activePhone === payload.phoneNumber;
+      currentActiveContact?.conversation_id === payload.conversationId ||
+      currentActiveContact?.conversationId === payload.conversationId ||
+      currentActivePhone === payload.conversationId ||
+      currentActivePhone === payload.phoneNumber;
 
     const conversationIdPrefix = payload.conversationId ? payload.conversationId.substring(0, 8) : "none";
     if (typeof window !== "undefined") {
@@ -238,7 +251,6 @@ export function useRealtimeReconciliation(tenantId: string) {
       !!payload.mediaMetadata?.native?.reaction_payload;
 
     if (!isReaction) {
-      // Update conversation list preview AND REORDER TO TOP
       updateConversationPreview(payload.conversationId, (conv: any) => {
         let nextUnread = conv.unread || 0;
         if (isFocused) {
@@ -252,9 +264,23 @@ export function useRealtimeReconciliation(tenantId: string) {
         };
       }, true);
 
-      // Dispatch unread refresh event for global sidebar badge
       if (payload.sender === "user" && !isFocused && typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('inbox-unread-refresh'));
+      }
+
+      if (isFocused && payload.sender === "user" && currentActiveContactId) {
+        if (debounceTimeoutRef.current) {
+          clearTimeout(debounceTimeoutRef.current);
+        }
+        debounceTimeoutRef.current = setTimeout(() => {
+          markConversationRead(currentActiveContactId).then((res) => {
+            if (res?.success) {
+              if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('inbox-unread-refresh'));
+              }
+            }
+          });
+        }, 1000);
       }
     }
   };
@@ -264,21 +290,17 @@ export function useRealtimeReconciliation(tenantId: string) {
     const { payload, eventId } = event;
     const queryKey = ["messages", payload.conversationId];
     
-    // 1. Deduplication check via providerMessageId or id
     queryClient.setQueryData(queryKey, (oldData: unknown) => {
       const allMessages = flattenInfiniteData<any>(oldData);
       if (allMessages.length === 0) return normalizeInfiniteData(oldData);
 
       const existingMsgIndex = allMessages.findIndex((m: any) => m.id === payload.id);
-
       if (existingMsgIndex === -1) {
         logReconciliation("cache_miss", { eventId, id: payload.id, type: "status_update" });
         return normalizeInfiniteData(oldData);
       }
 
       const existing = allMessages[existingMsgIndex];
-
-      // 2. Status ranking protection (don't downgrade read -> delivered)
       const currentRank = STATUS_RANK[existing.status as keyof typeof STATUS_RANK] ?? 0;
       const newRank = STATUS_RANK[payload.status as keyof typeof STATUS_RANK] ?? 0;
 
@@ -288,8 +310,6 @@ export function useRealtimeReconciliation(tenantId: string) {
       }
 
       logReconciliation("cache_updated", { eventId, id: payload.id, type: "status_update", status: payload.status });
-
-      // Update in-place using the helper to preserve InfiniteData shape
       return updateInfiniteDataItem(
         oldData,
         (m: any) => m.id === payload.id,
@@ -297,7 +317,6 @@ export function useRealtimeReconciliation(tenantId: string) {
       );
     });
 
-    // Update conversation list preview (WITHOUT reordering to top, status update doesn't bump the thread)
     updateConversationPreview(payload.conversationId, {
       lastMessageStatus: payload.status
     }, false);
@@ -308,10 +327,6 @@ export function useRealtimeReconciliation(tenantId: string) {
     const { payload, eventId } = event;
     logReconciliation("cache_updated", { eventId, id: payload.conversationId, type: "memory_update" });
 
-    // Update conversation list preview with new AI summary fields (both snake_case and camelCase objects for strict UI compatibility)
-    // CRITICAL: DO NOT set `notes` here — notes is the coordinator's manual notes field.
-    // AI summary must only update ai_summary / aiSummary / legacy_ai_summary fields.
-    // Setting notes here would overwrite coordinator's manual notes with AI-generated text (P1.4-HF1).
     updateConversationPreview(payload.conversationId, {
       ai_summary: payload.aiSummary,
       ai_buying_intent: payload.aiBuyingIntent,
@@ -330,26 +345,96 @@ export function useRealtimeReconciliation(tenantId: string) {
     const { payload, eventId } = event;
     logReconciliation("cache_updated", { eventId, id: payload.conversationId, type: "autopilot_update" });
 
-    // Update conversation in query cache
     updateConversationPreview(payload.conversationId, {
       autopilot_enabled: payload.enabled,
       status: payload.status,
       isBotActive: payload.enabled
     }, false);
 
-    // If this is the active contact, also update store state to sync UI
     const store = useInboxStore.getState();
     const isThisContact = store.activePhone === payload.phone || 
                          store.activeContact?.conversation_id === payload.conversationId ||
                          store.activeContact?.conversationId === payload.conversationId ||
                          store.activePhone === payload.conversationId;
-    if (isThisContact) {
-      if (store.activeContact) {
+    if (isThisContact && store.activeContact) {
+      store.setActiveContact(store.activePhone!, {
+        ...store.activeContact,
+        isBotActive: payload.enabled
+      });
+    }
+  };
+
+  // Internal handler for metadata updates
+  const handleMetadataUpdated = (event: any) => {
+    const { payload, eventId } = event;
+    const { conversationId, userId: eventUserId } = payload;
+    
+    const isCurrentUserEvent = !eventUserId || eventUserId === userId;
+
+    logReconciliation("cache_updated", { eventId, id: conversationId, type: "metadata_update" });
+
+    updateConversationPreview(conversationId, (conv: any) => {
+      const updates: any = {};
+      
+      if (payload.isBotActive !== undefined) {
+        updates.autopilot_enabled = payload.isBotActive;
+        updates.isBotActive = payload.isBotActive;
+      }
+      if (payload.status !== undefined) updates.status = payload.status;
+      if (payload.lastMessageContent !== undefined) {
+        updates.last_message = payload.lastMessageContent;
+        updates.lastMessageContent = payload.lastMessageContent;
+      }
+      if (payload.lastMessageDirection !== undefined) {
+        updates.lastMessageDirection = payload.lastMessageDirection;
+      }
+      if (payload.lastMessageStatus !== undefined) {
+        updates.lastMessageStatus = payload.lastMessageStatus;
+      }
+      if (payload.lastMessageAt !== undefined) {
+        updates.last_message_at = payload.lastMessageAt;
+        updates.lastMessageAt = payload.lastMessageAt;
+      }
+
+      if (isCurrentUserEvent) {
+        if (payload.unreadCount !== undefined) {
+          updates.unread = payload.unreadCount;
+          updates.unreadCount = payload.unreadCount;
+        }
+        if (payload.isPinned !== undefined) updates.isPinned = payload.isPinned;
+        if (payload.isFavorite !== undefined) updates.isFavorite = payload.isFavorite;
+        if (payload.isArchived !== undefined) updates.isArchived = payload.isArchived;
+      }
+
+      return { ...conv, ...updates };
+    }, true);
+
+    const store = useInboxStore.getState();
+    const isThisContact = store.activeContact?.conversation_id === conversationId ||
+                         store.activeContact?.conversationId === conversationId ||
+                         store.activePhone === conversationId;
+    if (isThisContact && store.activeContact) {
+      const updates: any = {};
+      if (payload.isBotActive !== undefined) updates.isBotActive = payload.isBotActive;
+      if (payload.status !== undefined) updates.status = payload.status;
+      
+      if (isCurrentUserEvent) {
+        if (payload.unreadCount !== undefined) updates.unread = payload.unreadCount;
+        if (payload.isPinned !== undefined) updates.isPinned = payload.isPinned;
+        if (payload.isFavorite !== undefined) updates.isFavorite = payload.isFavorite;
+        if (payload.isArchived !== undefined) updates.isArchived = payload.isArchived;
+      }
+
+      if (Object.keys(updates).length > 0) {
         store.setActiveContact(store.activePhone!, {
           ...store.activeContact,
-          isBotActive: payload.enabled
+          ...updates
         });
       }
+    }
+
+    if (isCurrentUserEvent && payload.unreadCount !== undefined && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('inbox-unread-refresh'));
     }
   };
 
@@ -372,8 +457,10 @@ export function useRealtimeReconciliation(tenantId: string) {
       case "conversation.autopilot_updated":
         handleAutopilotUpdated(event);
         break;
+      case "conversation.metadata_updated":
+        handleMetadataUpdated(event);
+        break;
       default:
-        // Future extensions (ai.stream.delta, etc.)
         break;
     }
   });

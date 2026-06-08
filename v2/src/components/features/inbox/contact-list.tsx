@@ -440,8 +440,8 @@ export function ContactRail() {
           }
           queryClient.prefetchInfiniteQuery({
             queryKey: cacheKey,
-            queryFn: ({ pageParam = 1 }) => getMessages(conversationId, pageParam as number, 50),
-            initialPageParam: 1,
+            queryFn: ({ pageParam = null }) => getMessages(conversationId, pageParam as { timestampMs: number; id: string } | null, 30),
+            initialPageParam: null,
             staleTime: 30000,
           }).catch(err => {
             console.error("[PREFETCH_LIST_ERROR]", err);
@@ -642,16 +642,19 @@ const handleBulkArchive = async (archive: boolean) => {
   // Mark conversation read in database when active conversation is selected
   useEffect(() => {
     if (activePhone) {
-      markConversationRead(activePhone).then((res) => {
-        if (res?.success) {
-          // Trigger local refresh event for the sidebar global count
-          if (typeof window !== 'undefined') {
-            window.dispatchEvent(new CustomEvent('inbox-unread-refresh'));
+      const activeConv = contacts.find((c: any) => c.id === activePhone);
+      if (activeConv && (activeConv.unread || 0) > 0) {
+        markConversationRead(activePhone).then((res) => {
+          if (res?.success) {
+            // Trigger local refresh event for the sidebar global count
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('inbox-unread-refresh'));
+            }
           }
-        }
-      });
+        });
+      }
     }
-  }, [activePhone]);
+  }, [activePhone, contacts]);
 
   const handleTogglePin = async (phone: string) => {
     try {
@@ -993,9 +996,10 @@ const handleBulkArchive = async (archive: boolean) => {
                     aria-selected={activePhone === c.id}
                     onClick={() => {
                       const conversationId = c.conversation_id || c.conversationId;
-                      if (!conversationId) {
+                      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(conversationId);
+                      if (!conversationId || !isUuid) {
                         if (typeof window !== "undefined") {
-                          console.error(`[CONTACT_SELECT_TRACE] Blocked selection: missing conversationId for phone=${c.id}`);
+                          console.error(`[CONTACT_SELECT_TRACE] Blocked selection: invalid or missing conversation UUID for phone=${c.id}`);
                         }
                         return;
                       }
@@ -1007,7 +1011,8 @@ const handleBulkArchive = async (archive: boolean) => {
                     }}
                     onMouseEnter={() => {
                       const conversationId = c.conversation_id || c.conversationId;
-                      if (!conversationId) return;
+                      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(conversationId);
+                      if (!conversationId || !isUuid) return;
                       
                       if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
                       
@@ -1020,22 +1025,23 @@ const handleBulkArchive = async (archive: boolean) => {
                           }
                           queryClient.prefetchInfiniteQuery({
                             queryKey: cacheKey,
-                            queryFn: ({ pageParam = 1 }) => getMessages(conversationId, pageParam as number, 50),
-                            initialPageParam: 1,
+                            queryFn: ({ pageParam = null }) => getMessages(conversationId, pageParam as { timestampMs: number; id: string } | null, 30),
+                            initialPageParam: null,
                             staleTime: 30000,
                           }).catch(err => {
                             console.error("[PREFETCH_HOVER_ERROR]", err);
                           });
                         }
-                      }, 300);
+                      }, 500);
                     }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') {
                         e.preventDefault();
                         const conversationId = c.conversation_id || c.conversationId;
-                        if (!conversationId) {
+                        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(conversationId);
+                        if (!conversationId || !isUuid) {
                           if (typeof window !== "undefined") {
-                            console.error(`[CONTACT_SELECT_TRACE] Blocked selection on keydown: missing conversationId for phone=${c.id}`);
+                            console.error(`[CONTACT_SELECT_TRACE] Blocked selection on keydown: invalid or missing conversation UUID for phone=${c.id}`);
                           }
                           return;
                         }

@@ -1,6 +1,7 @@
 import { getSession } from "@/lib/auth/session";
 import { logger } from "./logger";
 import { withTenantDB, TenantDB } from "./tenant-db";
+import { getTraceContext, runWithTrace, generateTraceId } from "@/lib/core/trace-context";
 
 // ==========================================
 // QUBA AI — Zero-Trust Server Action Guard
@@ -42,7 +43,6 @@ export async function withActionGuard<T>(
   options: GuardOptions,
   handler: (ctx: ActionContext) => Promise<T>
 ): Promise<ActionResponse<T>> {
-  const log = logger.withContext({ action: options.actionName });
   const startTime = Date.now();
 
   try {
@@ -59,52 +59,63 @@ export async function withActionGuard<T>(
     } else {
       session = await getSession();
     }
-    // ── FORENSIC TRACE ──
-    console.log(`[GUARD_FORENSIC] ${options.actionName} | session=${session ? 'OK' : 'NULL'} | userId=${session?.userId || 'NONE'} | tenantId=${session?.tenantId || 'NONE'} | role=${session?.role || 'NONE'} | impersonated=${session?.impersonatedTenantId || 'NONE'}`);
-    if (!session || !session.userId) {
-      log.warn("Unauthorized action attempt (No session)");
-      console.log(`[GUARD_FORENSIC] ${options.actionName} BLOCKED: No session`);
-      return { success: false, error: "Oturum süresi dolmuş veya yetkisiz.", statusCode: 401 };
-    }
 
-    // 2. Tenant Check
-    if (options.requireTenant !== false && !session.tenantId) {
-      log.warn("Cross-tenant violation attempt (No tenantId in session)", { userId: session.userId });
-      return { success: false, error: "Geçersiz firma yetkisi.", statusCode: 403 };
-    }
-
-    // 3. RBAC Check
-    if (options.roles && !options.roles.includes(session.role as AllowedRoles)) {
-      if (session.role !== 'platform_admin') { // Platform admin her şeyi ezer
-        log.warn("Permission denied", { userId: session.userId, required: options.roles, actual: session.role });
-        return { success: false, error: "Bu işlem için yetkiniz yok.", statusCode: 403 };
-      }
-    }
-
-    // Context oluştur
-    const ctx: ActionContext = {
-      userId: session.userId,
-      tenantId: session.tenantId!, // Zaten yukarıda guard ettik
-      role: session.role,
-      email: session.email,
-      db: options.requireTenant !== false ? withTenantDB(session.tenantId!, session.role === 'platform_admin') : null as any,
+    const traceCtx = getTraceContext() || {
+      traceId: generateTraceId(),
+      tenantId: session?.tenantId
     };
 
-    log.debug(`Action started`, { userId: ctx.userId, tenantId: ctx.tenantId });
+    return await runWithTrace(traceCtx, async () => {
+      const log = logger.withContext({ action: options.actionName });
+      
+      // ── FORENSIC TRACE ──
+      console.log(`[GUARD_FORENSIC] ${options.actionName} | session=${session ? 'OK' : 'NULL'} | userId=${session?.userId || 'NONE'} | tenantId=${session?.tenantId || 'NONE'} | role=${session?.role || 'NONE'} | impersonated=${session?.impersonatedTenantId || 'NONE'}`);
+      if (!session || !session.userId) {
+        log.warn("Unauthorized action attempt (No session)");
+        console.log(`[GUARD_FORENSIC] ${options.actionName} BLOCKED: No session`);
+        return { success: false, error: "Oturum süresi dolmuş veya yetkisiz.", statusCode: 401 };
+      }
 
-    // 4. İş mantığını çalıştır
-    const data = await handler(ctx);
+      // 2. Tenant Check
+      if (options.requireTenant !== false && !session.tenantId) {
+        log.warn("Cross-tenant violation attempt (No tenantId in session)", { userId: session.userId });
+        return { success: false, error: "Geçersiz firma yetkisi.", statusCode: 403 };
+      }
 
-    // 5. Başarı Logu
-    log.info(`Action completed successfully`, { 
-      userId: ctx.userId, 
-      tenantId: ctx.tenantId, 
-      durationMs: Date.now() - startTime 
+      // 3. RBAC Check
+      if (options.roles && !options.roles.includes(session.role as AllowedRoles)) {
+        if (session.role !== 'platform_admin') { // Platform admin her şeyi ezer
+          log.warn("Permission denied", { userId: session.userId, required: options.roles, actual: session.role });
+          return { success: false, error: "Bu işlem için yetkiniz yok.", statusCode: 403 };
+        }
+      }
+
+      // Context oluştur
+      const ctx: ActionContext = {
+        userId: session.userId,
+        tenantId: session.tenantId!, // Zaten yukarıda guard ettik
+        role: session.role,
+        email: session.email,
+        db: options.requireTenant !== false ? withTenantDB(session.tenantId!, session.role === 'platform_admin') : null as any,
+      };
+
+      log.debug(`Action started`, { userId: ctx.userId, tenantId: ctx.tenantId });
+
+      // 4. İş mantığını çalıştır
+      const data = await handler(ctx);
+
+      // 5. Başarı Logu
+      log.info(`Action completed successfully`, { 
+        userId: ctx.userId, 
+        tenantId: ctx.tenantId, 
+        durationMs: Date.now() - startTime 
+      });
+
+      return { success: true, data };
     });
 
-    return { success: true, data };
-
   } catch (error: any) {
+    const log = logger.withContext({ action: options.actionName });
     // 6. Global Error Handling
     log.error(`Action crashed with unhandled exception`, error, {
       durationMs: Date.now() - startTime

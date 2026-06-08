@@ -26,10 +26,10 @@ export const BaseRealtimeEventSchema = z.object({
     "chat.message.status_updated",
     "conversation.memory_updated",
     "conversation.autopilot_updated",
+    "conversation.metadata_updated",
     "ai.stream.delta",
     "ai.stream.completed"
   ]),
-  
   // Payload envelope — base accepts any record, specific schemas refine it
   payload: z.record(z.string(), z.any()),
 });
@@ -81,6 +81,22 @@ export const ConversationAutopilotProjectionSchema = z.object({
   status: z.enum(["bot", "human", "open"])
 });
 
+export const ConversationMetadataProjectionSchema = z.object({
+  conversationId: z.string(),
+  userId: z.string().optional(),
+  unreadCount: z.number().optional(),
+  isPinned: z.boolean().optional(),
+  isFavorite: z.boolean().optional(),
+  isArchived: z.boolean().optional(),
+  isBotActive: z.boolean().optional(),
+  status: z.enum(["bot", "human", "open"]).optional(),
+  lastMessageContent: z.string().optional(),
+  lastMessageDirection: z.enum(["in", "out", "system"]).optional(),
+  lastMessageStatus: z.enum(["sent", "delivered", "read", "failed"]).optional(),
+  lastMessageAt: z.string().optional(),
+  updatedAt: z.string()
+});
+
 // --- Final Event Types ---
 
 export const ChatMessageCreatedEventSchema = BaseRealtimeEventSchema.extend({
@@ -103,15 +119,22 @@ export const ConversationAutopilotUpdatedEventSchema = BaseRealtimeEventSchema.e
   payload: ConversationAutopilotProjectionSchema
 });
 
+export const ConversationMetadataUpdatedEventSchema = BaseRealtimeEventSchema.extend({
+  type: z.literal("conversation.metadata_updated"),
+  payload: ConversationMetadataProjectionSchema
+});
+
 export type RealtimeEventBase = z.infer<typeof BaseRealtimeEventSchema>;
 export type ChatMessageCreatedEvent = z.infer<typeof ChatMessageCreatedEventSchema>;
 export type ChatMessageStatusUpdatedEvent = z.infer<typeof ChatMessageStatusUpdatedEventSchema>;
 export type ConversationMemoryUpdatedEvent = z.infer<typeof ConversationMemoryUpdatedEventSchema>;
 export type ConversationAutopilotUpdatedEvent = z.infer<typeof ConversationAutopilotUpdatedEventSchema>;
+export type ConversationMetadataUpdatedEvent = z.infer<typeof ConversationMetadataUpdatedEventSchema>;
 
 // Union of all supported projection events
 export type ProjectionEvent = 
   | ChatMessageCreatedEvent 
   | ChatMessageStatusUpdatedEvent
   | ConversationMemoryUpdatedEvent
-  | ConversationAutopilotUpdatedEvent;
+  | ConversationAutopilotUpdatedEvent
+  | ConversationMetadataUpdatedEvent;

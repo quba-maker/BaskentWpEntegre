@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { useSWRConfig } from "swr";
 import { User, MapPin, Building, Activity, Tag, ChevronDown, ChevronRight, Save, X, Plus, ChevronLeft, Check, Loader2, Sparkles, FileText, Brain, Link, Clock, Moon, Calendar, CalendarClock, PhoneForwarded, MailPlus, Share2, Eye, EyeOff, Send } from "lucide-react";
 import { useInboxStore } from "@/store/inbox-store";
-import { updateCrmData, addTag, removeTag, prepareFollowUpDraft, sendApprovedFollowUp, checkSecondaryFallback, prepareSecondaryDraft, checkFormGreetingEligibility, prepareFormGreetingDraft, saveBotSteeringDirectiveAction, saveFormGreetingDraftInternalAction, getActiveBotDirectiveAction, getActiveTasksForSteeringAction, sendFormGreetingFromInboxAction, prepareNoReplyReminderDraftAction, sendNoReplyReminderAction, scheduleReminderTaskAction } from "@/app/actions/inbox";
+import { updateCrmData, addTag, removeTag, prepareFollowUpDraft, sendApprovedFollowUp, checkSecondaryFallback, prepareSecondaryDraft, getCrmPanelBundleAction, prepareFormGreetingDraft, saveBotSteeringDirectiveAction, saveFormGreetingDraftInternalAction, sendFormGreetingFromInboxAction, prepareNoReplyReminderDraftAction, sendNoReplyReminderAction, scheduleReminderTaskAction } from "@/app/actions/inbox";
 import { CustomerAiBrainPanel } from "@/components/features/ai-observability/CustomerAiBrain";
 import { AiTimelinePanel } from "@/components/features/ai-observability/AiTimeline";
 import { resolvePatientDisplayName, formatPhoneReadable } from "@/lib/utils/patient-name-resolver";
@@ -253,85 +253,38 @@ export function ContextPanel() {
 
   const conversationId = activeContact?.conversation_id || activeContact?.conversationId || activeContact?.id;
 
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(conversationId || "");
+
   const { data: crmData, isLoading: isCrmLoading } = useQuery({
     queryKey: ['crm-panel', conversationId],
     queryFn: async () => {
-      if (!conversationId) return null;
+      if (!conversationId || !isUuid) return null;
       
       const loadStart = performance.now();
-      const hasFormConnection = !!(activeContact?.formData || activeContact?.form_raw_data);
+      const res = await getCrmPanelBundleAction(conversationId) as any;
       
-      // Helper function for timeout
-      const timeoutMs = 4000;
-      async function withTimeout<T>(p: Promise<T>, fallback: T): Promise<T> {
-        let timeoutId: any;
-        const timeoutPromise = new Promise<T>((resolve) => {
-          timeoutId = setTimeout(() => {
-            if (typeof window !== "undefined") {
-              console.warn(`[CRM_PANEL_TIMEOUT] Promise timed out after ${timeoutMs}ms`);
-            }
-            resolve(fallback);
-          }, timeoutMs);
-        });
-        return Promise.race([
-          p.then((val) => {
-            clearTimeout(timeoutId);
-            return val;
-          }),
-          timeoutPromise
-        ]);
-      }
-
-      const results = await Promise.allSettled([
-        withTimeout(getActiveBotDirectiveAction(conversationId), { success: false, directive: null }),
-        withTimeout(getActiveTasksForSteeringAction(conversationId), { success: false, tasks: [] }),
-        hasFormConnection 
-          ? withTimeout(checkFormGreetingEligibility(conversationId), null)
-          : Promise.resolve(null)
-      ]);
-
-      let botDirectiveRes = { success: false, directive: null };
-      let steeringTasksRes = { success: false, tasks: [] };
-      let formGreetingRes = null;
-
-      let fulfilledCount = 0;
-      let rejectedCount = 0;
-
-      if (results[0].status === 'fulfilled') {
-        botDirectiveRes = results[0].value as any;
-        fulfilledCount++;
-      } else {
-        rejectedCount++;
-      }
-
-      if (results[1].status === 'fulfilled') {
-        steeringTasksRes = results[1].value as any;
-        fulfilledCount++;
-      } else {
-        rejectedCount++;
-      }
-
-      if (results[2].status === 'fulfilled') {
-        formGreetingRes = results[2].value as any;
-        fulfilledCount++;
-      } else {
-        rejectedCount++;
-      }
-
       const loadDuration = performance.now() - loadStart;
       const conversationIdPrefix = conversationId.substring(0, 8);
       
       if (typeof window !== "undefined") {
-        console.log(`[CRM_PANEL_LOAD_TRACE] conversationIdPrefix=${conversationIdPrefix} durationMs=${loadDuration.toFixed(2)} fulfilledCount=${fulfilledCount} rejectedCount=${rejectedCount}`);
+        console.log(`[CRM_PANEL_LOAD_TRACE] conversationIdPrefix=${conversationIdPrefix} durationMs=${loadDuration.toFixed(2)} success=${res.success}`);
+      }
+
+      if (!res.success) {
+        return {
+          botDirective: null,
+          steeringTasks: [],
+          formGreetingEligibility: null
+        };
       }
 
       return {
-        botDirective: botDirectiveRes?.success ? botDirectiveRes.directive : null,
-        steeringTasks: steeringTasksRes?.success ? steeringTasksRes.tasks : [],
-        formGreetingEligibility: formGreetingRes
+        botDirective: res.botDirective,
+        steeringTasks: res.steeringTasks,
+        formGreetingEligibility: res.formGreetingEligibility
       };
     },
-    enabled: !!conversationId,
+    enabled: !!conversationId && isUuid,
     staleTime: 30000,
     gcTime: 5 * 60 * 1000,
   });

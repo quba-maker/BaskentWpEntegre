@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useRef, useEffect, useMemo, useCallback, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from "@tanstack/react-query";
 import { Send, Paperclip, User, MessageCircle, ChevronLeft, ChevronRight, ChevronDown, ArrowDown, Info, ShieldAlert, Sparkles, Zap, Check, CheckCheck, Clock, FileText, Play, Mic, MapPin, X, Download, Smile, CornerUpLeft } from "lucide-react";
@@ -738,14 +738,14 @@ export function ConversationViewport() {
     refetch: refetchMessages
   } = useInfiniteQuery({
     queryKey: messagesQueryKey,
-    queryFn: ({ pageParam = 1 }) => {
+    queryFn: ({ pageParam = null }) => {
       const fetchStart = performance.now();
       const targetId = messagesQueryKey[1]!;
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetId);
       const usedFallback = !isUuid;
       const conversationIdPrefix = isUuid ? targetId.substring(0, 8) : "fallback";
       
-      return getMessages(targetId, pageParam as number, 50).then((res) => {
+      return getMessages(targetId, pageParam as { timestampMs: number; id: string } | null, 30).then((res) => {
         const fetchDuration = performance.now() - fetchStart;
         if (typeof window !== "undefined") {
           console.log(`[MESSAGE_QUERY_TRACE] conversationIdPrefix=${conversationIdPrefix} usedFallback=${usedFallback} rowCount=${res.length} durationMs=${fetchDuration.toFixed(2)}`);
@@ -753,12 +753,16 @@ export function ConversationViewport() {
         return res;
       });
     },
-    getNextPageParam: (lastPage: any[], allPages: any[][]) => {
-      if (!Array.isArray(lastPage) || !Array.isArray(allPages)) return undefined;
-      if (lastPage.length < 50) return undefined;
-      return allPages.length + 1;
+    getNextPageParam: (lastPage: any[]) => {
+      if (!Array.isArray(lastPage) || lastPage.length < 30) return undefined;
+      const oldestMsg = lastPage[0];
+      if (!oldestMsg) return undefined;
+      return {
+        timestampMs: oldestMsg.cursorTimestampMs,
+        id: oldestMsg.id
+      };
     },
-    initialPageParam: 1,
+    initialPageParam: null,
     enabled: !!messagesQueryKey[1],
     // Fallback polling only: 25s polling safety net if realtime fails
     refetchInterval: isRealtimeDown ? 25000 : false,
@@ -786,7 +790,7 @@ export function ConversationViewport() {
 
   const messages = useMemo(() => {
     if (!messagesData?.pages) return [];
-    const rawMsgs = [...messagesData.pages].reverse().flat();
+    const rawMsgs = messagesData.pages.flat();
 
     const messageIdMap = new Map<string, any>();
     // Pre-populate target messages
@@ -818,6 +822,7 @@ export function ConversationViewport() {
         }
       }
 
+      messageIdMap.set(m.id, m);
       if (m.providerMessageId) {
         messageIdMap.set(m.providerMessageId, m);
       }
@@ -939,9 +944,59 @@ export function ConversationViewport() {
       }
     });
 
-    const merged = [...nonReactionMsgs, ...missingTargetReactions].sort((a, b) => a.timeMs - b.timeMs);
-    return merged;
+    const merged = [...nonReactionMsgs, ...missingTargetReactions];
+    
+    // Deduplicate merged by id to prevent duplicates across pages or realtime events
+    const finalMap = new Map<string, any>();
+    merged.forEach(m => {
+      if (m && m.id) {
+        finalMap.set(m.id, m);
+      }
+    });
+    
+    const deduplicated = Array.from(finalMap.values());
+    
+    // Stable sort ASC by timeMs, using id as a tiebreaker
+    deduplicated.sort((a, b) => {
+      const diff = (a.timeMs || 0) - (b.timeMs || 0);
+      if (diff !== 0) return diff;
+      return (a.id || "").localeCompare(b.id || "");
+    });
+    
+    return deduplicated;
   }, [messagesData]);
+
+  const lastScrollHeightRef = useRef<number>(0);
+  const lastScrollTopRef = useRef<number>(0);
+  const isFetchingNextPageRef = useRef(false);
+
+  useLayoutEffect(() => {
+    const container = chatContainerRef.current;
+    if (!container) return;
+
+    if (isFetchingNextPage && !isFetchingNextPageRef.current) {
+      lastScrollHeightRef.current = container.scrollHeight;
+      lastScrollTopRef.current = container.scrollTop;
+    }
+    isFetchingNextPageRef.current = isFetchingNextPage;
+  }, [isFetchingNextPage]);
+
+  useLayoutEffect(() => {
+    const container = chatContainerRef.current;
+    if (!container) return;
+
+    if (lastScrollHeightRef.current > 0 && !isFetchingNextPage) {
+      const newScrollHeight = container.scrollHeight;
+      const scrollHeightDiff = newScrollHeight - lastScrollHeightRef.current;
+      
+      if (scrollHeightDiff > 0) {
+        container.scrollTop = lastScrollTopRef.current + scrollHeightDiff;
+      }
+      
+      lastScrollHeightRef.current = 0;
+      lastScrollTopRef.current = 0;
+    }
+  }, [messages.length, isFetchingNextPage]);
 
   const handleSendReaction = async (targetProviderMessageId: string, emoji: string) => {
     if (!activePhone || !targetProviderMessageId) return;

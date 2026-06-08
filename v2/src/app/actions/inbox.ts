@@ -661,24 +661,29 @@ export async function getConversations(
 
 
 import { unstable_noStore as noStore } from "next/cache";
+import { RealtimePublisher } from "@/lib/realtime/publisher";
+import { getTraceContext } from "@/lib/core/trace-context";
 
-export async function getMessages(phone: string, page: number = 1, limit: number = 50) {
+export async function getMessages(
+  conversationIdOrPhone: string, 
+  cursor?: { timestampMs: number; id: string } | null, 
+  limit: number = 30
+) {
   noStore();
-  if (!phone) return [];
+  if (!conversationIdOrPhone) return [];
   
   return withActionGuard(
     { actionName: 'getMessages' },
     async (ctx) => {
+      const startTime = performance.now();
       try {
-        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(phone);
-        const offset = (page - 1) * limit;
-
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(conversationIdOrPhone);
         let resolvedConvId: string | null = null;
 
         if (isUuid) {
-          resolvedConvId = phone;
+          resolvedConvId = conversationIdOrPhone;
         } else {
-          const cleanPhone = phone.replace(/\D/g, '');
+          const cleanPhone = conversationIdOrPhone.replace(/\D/g, '');
           const convRow = await ctx.db.executeSafe({
             text: `
               SELECT id 
@@ -697,6 +702,7 @@ export async function getMessages(phone: string, page: number = 1, limit: number
 
           if (convRow.length > 0) {
             resolvedConvId = convRow[0].id;
+            console.warn(`[MESSAGE_QUERY_TRACE] [EMERGENCY_FALLBACK] Resolved UUID from phone number fallback for: "${conversationIdOrPhone}". Resolved UUID: "${resolvedConvId}"`);
           }
         }
 
@@ -704,67 +710,86 @@ export async function getMessages(phone: string, page: number = 1, limit: number
           return [];
         }
 
+        // Bind conversationId to active trace context
+        const traceCtx = getTraceContext();
+        if (traceCtx) {
+          traceCtx.conversationId = resolvedConvId;
+        }
+
+        let cursorDate: Date | null = null;
+        let cursorId: string | null = null;
+        if (cursor && typeof cursor === 'object' && cursor.timestampMs && cursor.id) {
+          cursorDate = new Date(cursor.timestampMs);
+          cursorId = cursor.id;
+        }
+
         const rows = await ctx.db.executeSafe({
           text: `
             SELECT * FROM (
               SELECT id, content as text, direction, status, model_used,
                      media_type, media_url, media_metadata, provider_message_id,
-                     EXTRACT(EPOCH FROM created_at) * 1000 as created_at_ms
+                     EXTRACT(EPOCH FROM COALESCE(provider_timestamp, created_at)) * 1000 as created_at_ms
               FROM messages
               WHERE conversation_id = $1::uuid 
                 AND (tenant_id = $2)
-              ORDER BY created_at DESC
-              LIMIT $3 OFFSET $4
+                AND (
+                  $3::timestamptz IS NULL
+                  OR COALESCE(provider_timestamp, created_at) < $3::timestamptz
+                  OR (
+                    COALESCE(provider_timestamp, created_at) = $3::timestamptz
+                    AND id < $4::uuid
+                  )
+                )
+              ORDER BY COALESCE(provider_timestamp, created_at) DESC, id DESC
+              LIMIT $5
             ) sub
             ORDER BY created_at_ms ASC
           `,
-          values: [resolvedConvId, ctx.tenantId, limit, offset]
+          values: [resolvedConvId, ctx.tenantId, cursorDate, cursorId, limit]
         });
 
-      const validRows = Array.isArray(rows) ? rows : ((rows as any)?.rows || []);
+        const validRows = Array.isArray(rows) ? rows : ((rows as any)?.rows || []);
+        const fetchDuration = performance.now() - startTime;
+        console.log(`[MESSAGE_QUERY_TRACE] conversationId=${resolvedConvId} cursor=${cursor ? JSON.stringify(cursor) : 'null'} limit=${limit} rowCount=${validRows.length} durationMs=${fetchDuration.toFixed(2)}`);
 
-      return validRows.map((r: any) => {
-        const date = new Date(parseFloat(r.created_at_ms));
-        
-        const fmtDate = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: 'Europe/Istanbul', year: 'numeric', month: '2-digit', day: '2-digit' });
-        
-        const now = new Date();
-        const msgDateStr = fmtDate(date);
-        const nowDateStr = fmtDate(now);
-        
-        const parseDateString = (ds: string) => new Date(ds + "T00:00:00Z");
-        
-        const diffMs = parseDateString(nowDateStr).getTime() - parseDateString(msgDateStr).getTime();
-        const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-        
-        let dateLabel = '';
-        if (diffDays === 0) {
-          dateLabel = 'Bugün';
-        } else if (diffDays === 1) {
-          dateLabel = 'Dün';
-        } else if (diffDays > 1 && diffDays < 7) {
-          dateLabel = date.toLocaleDateString('tr-TR', { weekday: 'long', timeZone: 'Europe/Istanbul' });
-          dateLabel = dateLabel.charAt(0).toUpperCase() + dateLabel.slice(1);
-        } else {
-          dateLabel = date.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/Istanbul' });
-        }
+        return validRows.map((r: any) => {
+          const date = new Date(parseFloat(r.created_at_ms));
+          const fmtDate = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: 'Europe/Istanbul', year: 'numeric', month: '2-digit', day: '2-digit' });
+          const now = new Date();
+          const msgDateStr = fmtDate(date);
+          const nowDateStr = fmtDate(now);
+          const parseDateString = (ds: string) => new Date(ds + "T00:00:00Z");
+          const diffMs = parseDateString(nowDateStr).getTime() - parseDateString(msgDateStr).getTime();
+          const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+          
+          let dateLabel = '';
+          if (diffDays === 0) {
+            dateLabel = 'Bugün';
+          } else if (diffDays === 1) {
+            dateLabel = 'Dün';
+          } else if (diffDays > 1 && diffDays < 7) {
+            dateLabel = date.toLocaleDateString('tr-TR', { weekday: 'long', timeZone: 'Europe/Istanbul' });
+            dateLabel = dateLabel.charAt(0).toUpperCase() + dateLabel.slice(1);
+          } else {
+            dateLabel = date.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/Istanbul' });
+          }
 
-        return {
-          id: r.id,
-          sender: r.direction === 'in' ? 'user' : (r.direction === 'system' ? 'system' : (r.model_used ? 'bot' : 'agent')),
-          text: r.text,
-          timeMs: parseFloat(r.created_at_ms),
-          dateLabel,
-          status: r.status || 'sent',
-          // Media fields
-          mediaType: r.media_type || null,
-          mediaUrl: r.media_url || null,
-          mediaMetadata: r.media_metadata || null,
-          providerMessageId: r.provider_message_id || null,
-        };
-      });
+          return {
+            id: r.id,
+            sender: r.direction === 'in' ? 'user' : (r.direction === 'system' ? 'system' : (r.model_used ? 'bot' : 'agent')),
+            text: r.text,
+            timeMs: parseFloat(r.created_at_ms),
+            cursorTimestampMs: parseFloat(r.created_at_ms),
+            dateLabel,
+            status: r.status || 'sent',
+            mediaType: r.media_type || null,
+            mediaUrl: r.media_url || null,
+            mediaMetadata: r.media_metadata || null,
+            providerMessageId: r.provider_message_id || null,
+          };
+        });
       } catch(err: any) {
-        console.error("getMessages Error:", err, "Phone:", phone, "Tenant:", ctx.tenantId);
+        console.error("getMessages Error:", err, "Identifier:", conversationIdOrPhone, "Tenant:", ctx.tenantId);
         return [];
       }
     }
@@ -1689,6 +1714,12 @@ export async function toggleBotStatus(conversationIdOrPhone: string, isBotActive
       const channelId = convRows[0].channel_id;
       const newStatus = isBotActive ? 'bot' : 'human';
 
+      // Bind conversationId to active trace context
+      const traceCtx = getTraceContext();
+      if (traceCtx) {
+        traceCtx.conversationId = conversationId;
+      }
+
       // Security Kill-switch Gate
       if (isBotActive && process.env.ENABLE_SELECTED_AUTOPILOT !== 'true') {
         return { success: false, error: "Otopilot sistemi şu anda genel olarak kapalıdır. Lütfen sistem yöneticiniz ile iletişime geçin." };
@@ -1759,6 +1790,14 @@ export async function toggleBotStatus(conversationIdOrPhone: string, isBotActive
             enabled: isBotActive,
             status: newStatus
           }
+        });
+
+        // Publish metadata update to realtime bus
+        await RealtimePublisher.publishMetadataUpdated(ctx.tenantId, {
+          conversationId: conversationId,
+          userId: ctx.userId,
+          isBotActive: isBotActive,
+          status: newStatus
         });
       } catch (realtimeErr) {
         console.error("Failed to publish autopilot toggle realtime update:", realtimeErr);
@@ -2024,24 +2063,37 @@ export async function sendReaction(phone: string, targetProviderMessageId: strin
   ).then(res => res.success ? (res.data || { success: true }) : { success: false, error: res.error });
 }
 
-export async function markConversationRead(phone: string) {
-  if (!phone) return { success: false, error: "Phone number is required." };
+export async function markConversationRead(conversationIdOrPhone: string) {
+  if (!conversationIdOrPhone) return { success: false, error: "Identifier is required." };
   return withActionGuard(
     { actionName: 'markConversationRead' },
     async (ctx) => {
-      const cleanPhone = phone.replace(/\D/g, '').slice(-10);
-      const phoneLike = `%${cleanPhone}%`;
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(conversationIdOrPhone);
+      let convId = null;
 
-      // 1. Get conversation ID
-      const conv = await ctx.db.executeSafe({
-        text: `SELECT id FROM conversations WHERE phone_number LIKE $1 AND tenant_id = $2 LIMIT 1`,
-        values: [phoneLike, ctx.tenantId]
-      }) as any[];
+      if (isUuid) {
+        convId = conversationIdOrPhone;
+      } else {
+        const cleanPhone = conversationIdOrPhone.replace(/\D/g, '').slice(-10);
+        const phoneLike = `%${cleanPhone}%`;
+        const conv = await ctx.db.executeSafe({
+          text: `SELECT id FROM conversations WHERE phone_number LIKE $1 AND tenant_id = $2 LIMIT 1`,
+          values: [phoneLike, ctx.tenantId]
+        }) as any[];
+        if (conv.length > 0) {
+          convId = conv[0].id;
+        }
+      }
 
-      if (conv.length === 0) {
+      if (!convId) {
         return { success: false, error: "Conversation not found" };
       }
-      const convId = conv[0].id;
+
+      // Bind conversationId to active trace context
+      const traceCtx = getTraceContext();
+      if (traceCtx) {
+        traceCtx.conversationId = convId;
+      }
 
       // 2. Get last inbound message ID to track last read message
       const lastMsg = await ctx.db.executeSafe({
@@ -2066,29 +2118,51 @@ export async function markConversationRead(phone: string) {
         values: [ctx.tenantId, ctx.userId, convId, lastMsgId]
       });
 
+      console.log(`[READ_STATE_TRACE] markConversationRead | tenantId=${ctx.tenantId} | userId=${ctx.userId} | convId=${convId} | lastMsgId=${lastMsgId}`);
+
+      // Publish metadata update to realtime bus
+      await RealtimePublisher.publishMetadataUpdated(ctx.tenantId, {
+        conversationId: convId,
+        userId: ctx.userId,
+        unreadCount: 0
+      });
+
       return { success: true };
     }
   ).then(res => res.success ? (res.data || { success: true }) : { success: false, error: res.error });
 }
 
-export async function togglePin(phone: string) {
-  if (!phone) return { success: false, error: "Phone number is required." };
+export async function togglePin(conversationIdOrPhone: string) {
+  if (!conversationIdOrPhone) return { success: false, error: "Identifier is required." };
   return withActionGuard(
     { actionName: 'togglePin' },
     async (ctx) => {
-      const cleanPhone = phone.replace(/\D/g, '').slice(-10);
-      const phoneLike = `%${cleanPhone}%`;
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(conversationIdOrPhone);
+      let convId = null;
 
-      // 1. Get conversation ID
-      const conv = await ctx.db.executeSafe({
-        text: `SELECT id FROM conversations WHERE phone_number LIKE $1 AND tenant_id = $2 LIMIT 1`,
-        values: [phoneLike, ctx.tenantId]
-      }) as any[];
+      if (isUuid) {
+        convId = conversationIdOrPhone;
+      } else {
+        const cleanPhone = conversationIdOrPhone.replace(/\D/g, '').slice(-10);
+        const phoneLike = `%${cleanPhone}%`;
+        const conv = await ctx.db.executeSafe({
+          text: `SELECT id FROM conversations WHERE phone_number LIKE $1 AND tenant_id = $2 LIMIT 1`,
+          values: [phoneLike, ctx.tenantId]
+        }) as any[];
+        if (conv.length > 0) {
+          convId = conv[0].id;
+        }
+      }
 
-      if (conv.length === 0) {
+      if (!convId) {
         return { success: false, error: "Conversation not found" };
       }
-      const convId = conv[0].id;
+
+      // Bind conversationId to active trace context
+      const traceCtx = getTraceContext();
+      if (traceCtx) {
+        traceCtx.conversationId = convId;
+      }
 
       // 2. Check if already pinned
       const existing = await ctx.db.executeSafe({
@@ -2102,6 +2176,14 @@ export async function togglePin(phone: string) {
           text: `DELETE FROM conversation_pins WHERE tenant_id = $1 AND user_id = $2 AND conversation_id = $3`,
           values: [ctx.tenantId, ctx.userId, convId]
         });
+
+        // Publish metadata update to realtime bus
+        await RealtimePublisher.publishMetadataUpdated(ctx.tenantId, {
+          conversationId: convId,
+          userId: ctx.userId,
+          isPinned: false
+        });
+
         return { success: true, isPinned: false };
       } else {
         // Enforce limit: MAX_PINNED_CONVERSATIONS = 5
@@ -2119,6 +2201,14 @@ export async function togglePin(phone: string) {
           text: `INSERT INTO conversation_pins (tenant_id, user_id, conversation_id) VALUES ($1, $2, $3)`,
           values: [ctx.tenantId, ctx.userId, convId]
         });
+
+        // Publish metadata update to realtime bus
+        await RealtimePublisher.publishMetadataUpdated(ctx.tenantId, {
+          conversationId: convId,
+          userId: ctx.userId,
+          isPinned: true
+        });
+
         return { success: true, isPinned: true };
       }
     }
@@ -3369,6 +3459,227 @@ export async function getActiveTasksForSteeringAction(conversationId: string) {
   });
 }
 
+export async function getCrmPanelBundleAction(conversationId: string) {
+  if (!conversationId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(conversationId)) {
+    return { success: false, error: "Invalid or missing conversation UUID." };
+  }
+
+  return withActionGuard(
+    { actionName: 'getCrmPanelBundleAction' },
+    async (ctx) => {
+      const startTime = performance.now();
+      
+      // Bind conversationId to active trace context
+      const traceCtx = getTraceContext();
+      if (traceCtx) {
+        traceCtx.conversationId = conversationId;
+      }
+
+      // Query 1: Fetch conversation details (customer_id, active_opportunity_id, phone_number)
+      // and lateral join leads to check lead connection
+      const convRows = await ctx.db.executeSafe({
+        text: `
+          SELECT c.id, c.phone_number, c.patient_name, c.customer_id, c.active_opportunity_id,
+                 l.id as lead_id, l.form_name, l.raw_data as form_raw_data,
+                 EXTRACT(EPOCH FROM l.created_at) * 1000 as form_date_ms
+          FROM conversations c
+          LEFT JOIN LATERAL (
+            SELECT id, form_name, raw_data, created_at 
+            FROM leads 
+            WHERE leads.tenant_id = c.tenant_id
+              AND (
+                (c.customer_id IS NOT NULL AND leads.customer_id = c.customer_id)
+                OR
+                (leads.phone_number LIKE '%' || RIGHT(c.phone_number, 10))
+              )
+            ORDER BY created_at DESC 
+            LIMIT 1
+          ) l ON true
+          WHERE c.id = $1 AND c.tenant_id = $2
+          LIMIT 1
+        `,
+        values: [conversationId, ctx.tenantId]
+      }) as any[];
+
+      if (convRows.length === 0) {
+        return { success: false, error: "Conversation not found" };
+      }
+
+      const conv = convRows[0];
+      const activeOpportunityId = conv.active_opportunity_id;
+      const leadId = conv.lead_id;
+
+      // Query 2: Fetch latest follow up task metadata (for bot directive)
+      const directiveRows = await ctx.db.executeSafe({
+        text: `SELECT metadata FROM follow_up_tasks 
+               WHERE conversation_id = $1 AND tenant_id = $2 AND status IN ('pending', 'in_progress')
+               ORDER BY created_at DESC LIMIT 1`,
+        values: [conversationId, ctx.tenantId]
+      }) as any[];
+
+      let directive: string | null = null;
+      if (directiveRows.length > 0) {
+        const metadata = directiveRows[0].metadata || {};
+        const directiveState = metadata.bot_directive_state;
+        directive = directiveState?.active_bot_directive || metadata.active_bot_directive || null;
+      }
+
+      // Query 3: Fetch active follow up tasks for steering
+      const taskRows = await ctx.db.executeSafe({
+        text: `SELECT id, task_type, due_at, metadata
+               FROM follow_up_tasks 
+               WHERE tenant_id = $1 
+                 AND status IN ('pending', 'in_progress')
+                 AND task_type != 'bot_handoff_followup'
+                 AND (
+                   conversation_id = $2 
+                   OR (opportunity_id = $3 AND opportunity_id IS NOT NULL)
+                 )
+               ORDER BY due_at ASC, created_at DESC`,
+        values: [ctx.tenantId, conversationId, activeOpportunityId || null]
+      }) as any[];
+
+      // Map phone and appointment tasks
+      const phoneTasks = taskRows.filter((task) => {
+        const isAppt = (task.task_type === 'callback_scheduled' && task.metadata?.appointment_type === 'clinic_visit') ||
+                       task.task_type === 'appointment_reminder' ||
+                       task.metadata?.appointment_type === 'clinic_visit';
+        return !isAppt && (
+          task.task_type === 'callback_scheduled' ||
+          task.task_type === 'call_patient' ||
+          task.metadata?.appointment_type === 'phone_call'
+        );
+      });
+
+      const apptTasks = taskRows.filter((task) => {
+        return (task.task_type === 'callback_scheduled' && task.metadata?.appointment_type === 'clinic_visit') ||
+               task.task_type === 'appointment_reminder' ||
+               task.metadata?.appointment_type === 'clinic_visit';
+      });
+
+      const getTaskUrgency = (task: any): number => {
+        const isOverdue = new Date(task.due_at).getTime() < Date.now();
+        const confirmationStatus = task.metadata?.confirmation_status;
+        if (isOverdue) return 4;
+        if (confirmationStatus === 'no_response') return 3;
+        if (confirmationStatus === 'pending') return 2;
+        return 1;
+      };
+
+      const sortedPhoneTasks = [...phoneTasks].sort((a, b) => getTaskUrgency(b) - getTaskUrgency(a));
+      const sortedApptTasks = [...apptTasks].sort((a, b) => getTaskUrgency(b) - getTaskUrgency(a));
+
+      const activePhoneTask = sortedPhoneTasks[0] || null;
+      const activeApptTask = sortedApptTasks[0] || null;
+
+      const suggestions: any[] = [];
+
+      if (activePhoneTask) {
+        const isOverdue = new Date(activePhoneTask.due_at).getTime() < Date.now();
+        const confirmationStatus = activePhoneTask.metadata?.confirmation_status;
+        
+        let title: string | null = null;
+        let text: string | null = null;
+        let passiveText: string | null = null;
+        let isPassive = false;
+
+        if (isOverdue) {
+          title = "🔄 Bota alternatif zaman sordur";
+          text = "Hastaya daha uygun bir telefon görüşmesi zamanı olup olmadığını sor. Kısa, yumuşak ve bilgilendirici yaz.";
+        } else if (confirmationStatus === 'no_response') {
+          title = "🔔 Bota kısa hatırlatma yaptır";
+          text = "Hastaya kısa ve nazik bir hatırlatma yap. Telefon görüşmesi için uygun olduğu zamanı paylaşabileceğini belirt. Baskı yapma.";
+        } else if (confirmationStatus === 'pending') {
+          title = "⏰ Bota telefon görüşmesini teyit ettir";
+          text = "Hastadan telefon görüşmesi için uygun gün ve saat aralığını kibarca teyit etmesini iste. Kısa ve net yaz. Rapor isteme, fiyat verme, doktor görüşmesi sözü verme.";
+        } else if (confirmationStatus === 'confirmed') {
+          title = "Telefon görüşmesi teyitli";
+          passiveText = "Telefon görüşmesi teyitli";
+          isPassive = true;
+        }
+
+        if (title) {
+          suggestions.push({
+            id: activePhoneTask.id,
+            task_type: activePhoneTask.task_type,
+            due_at: activePhoneTask.due_at,
+            appointment_type: activePhoneTask.metadata?.appointment_type || 'phone_call',
+            confirmation_status: confirmationStatus || null,
+            suggestionTitle: title,
+            suggestionText: text,
+            passiveText,
+            isPassive
+          });
+        }
+      }
+
+      if (activeApptTask) {
+        const isReschedule = activeApptTask.metadata?.reschedule_requested === true || 
+                            activeApptTask.metadata?.reschedule === true;
+        const confirmationStatus = activeApptTask.metadata?.confirmation_status;
+
+        let title: string | null = null;
+        let text: string | null = null;
+        let passiveText: string | null = null;
+        let isPassive = false;
+
+        if (isReschedule) {
+          title = "📍 Bota yeni tarih/saat netleştirt";
+          text = "Hastaya randevu planlaması için uygun tarih ve saat aralığını sor. Kısa ve anlaşılır yaz. Baskı yapma.";
+        } else if (confirmationStatus === 'no_response') {
+          title = "🔔 Bota randevu hatırlatması yaptır";
+          text = "Hastaya randevu planlaması için kısa ve nazik bir hatırlatma yap. Uygunluğunu paylaşabileceğini belirt.";
+        } else if (confirmationStatus === 'pending') {
+          title = "🗓️ Bota randevu teyidi aldır";
+          text = "Hastadan randevu tarih ve saatini teyit etmesini kibarca iste. Kısa ve net yaz. Rapor isteme, fiyat verme, doktor görüşmesi sözü verme.";
+        } else if (confirmationStatus === 'confirmed') {
+          title = "Randevu teyitli";
+          passiveText = "Randevu teyitli";
+          isPassive = true;
+        }
+
+        if (title) {
+          suggestions.push({
+            id: activeApptTask.id,
+            task_type: activeApptTask.task_type,
+            due_at: activeApptTask.due_at,
+            appointment_type: activeApptTask.metadata?.appointment_type || 'clinic_visit',
+            confirmation_status: confirmationStatus || null,
+            suggestionTitle: title,
+            suggestionText: text,
+            passiveText,
+            isPassive
+          });
+        }
+      }
+
+      // Query 4: Resolve form greeting eligibility
+      let formGreeting = { eligible: false, reason: "Form bulunamadı veya uygun değil." };
+      if (leadId) {
+        const { resolveFirstContactCore } = await import("@/lib/utils/first-contact-status-resolver");
+        const statusObj = await resolveFirstContactCore(ctx.db, ctx.tenantId, leadId);
+        const isEligible = statusObj.patientLevelStatus === 'waiting_inbox_reply';
+        formGreeting = {
+          eligible: isEligible,
+          reason: isEligible ? "" : "Sadece 'waiting_inbox_reply' durumundaki hasta için form karşılama aktif edilir."
+        };
+      }
+
+      const duration = performance.now() - startTime;
+      console.log(`[CRM_PANEL_BUNDLE_TRACE] conversationId=${conversationId} durationMs=${duration.toFixed(2)} tasksCount=${suggestions.length} formGreetingEligible=${formGreeting.eligible}`);
+
+      return {
+        botDirective: directive,
+        steeringTasks: suggestions,
+        formGreetingEligibility: formGreeting
+      };
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error };
+    return { success: true, ...res.data };
+  });
+}
+
 // ==========================================
 // A1.7d — Bulk operations server actions
 // ==========================================
@@ -3814,10 +4125,18 @@ export async function prepareBulkFollowUpDrafts(conversationIds: string[]) {
 }
 
 export async function toggleConversationFavorite(conversationId: string) {
-  if (!conversationId) return { success: false, error: "Missing conversationId" };
+  if (!conversationId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(conversationId)) {
+    return { success: false, error: "Missing or invalid conversation UUID" };
+  }
   return withActionGuard(
     { actionName: 'toggleConversationFavorite' },
     async (ctx) => {
+      // Bind conversationId to active trace context
+      const traceCtx = getTraceContext();
+      if (traceCtx) {
+        traceCtx.conversationId = conversationId;
+      }
+
       // 1. Verify conversation belongs to tenant
       const convRows = await ctx.db.executeSafe({
         text: `SELECT id FROM conversations WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
@@ -3857,6 +4176,13 @@ export async function toggleConversationFavorite(conversationId: string) {
         details: { conversationId }
       });
 
+      // Publish metadata update to realtime bus
+      await RealtimePublisher.publishMetadataUpdated(ctx.tenantId, {
+        conversationId,
+        userId: ctx.userId,
+        isFavorite: !isFavorite
+      });
+
       return { success: true, isFavorite: !isFavorite };
     }
   ).then(res => {
@@ -3866,10 +4192,18 @@ export async function toggleConversationFavorite(conversationId: string) {
 }
 
 export async function archiveConversation(conversationId: string) {
-  if (!conversationId) return { success: false, error: "Missing conversationId" };
+  if (!conversationId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(conversationId)) {
+    return { success: false, error: "Missing or invalid conversation UUID" };
+  }
   return withActionGuard(
     { actionName: 'archiveConversation' },
     async (ctx) => {
+      // Bind conversationId to active trace context
+      const traceCtx = getTraceContext();
+      if (traceCtx) {
+        traceCtx.conversationId = conversationId;
+      }
+
       // 1. Verify conversation belongs to tenant
       const convRows = await ctx.db.executeSafe({
         text: `SELECT id FROM conversations WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
@@ -3894,6 +4228,13 @@ export async function archiveConversation(conversationId: string) {
         details: { conversationId }
       });
 
+      // Publish metadata update to realtime bus
+      await RealtimePublisher.publishMetadataUpdated(ctx.tenantId, {
+        conversationId,
+        userId: ctx.userId,
+        isArchived: true
+      });
+
       return { success: true };
     }
   ).then(res => {
@@ -3903,10 +4244,18 @@ export async function archiveConversation(conversationId: string) {
 }
 
 export async function unarchiveConversation(conversationId: string) {
-  if (!conversationId) return { success: false, error: "Missing conversationId" };
+  if (!conversationId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(conversationId)) {
+    return { success: false, error: "Missing or invalid conversation UUID" };
+  }
   return withActionGuard(
     { actionName: 'unarchiveConversation' },
     async (ctx) => {
+      // Bind conversationId to active trace context
+      const traceCtx = getTraceContext();
+      if (traceCtx) {
+        traceCtx.conversationId = conversationId;
+      }
+
       // 1. Verify conversation belongs to tenant
       const convRows = await ctx.db.executeSafe({
         text: `SELECT id FROM conversations WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
@@ -3929,6 +4278,13 @@ export async function unarchiveConversation(conversationId: string) {
         entityType: "conversation",
         entityId: conversationId,
         details: { conversationId }
+      });
+
+      // Publish metadata update to realtime bus
+      await RealtimePublisher.publishMetadataUpdated(ctx.tenantId, {
+        conversationId,
+        userId: ctx.userId,
+        isArchived: false
       });
 
       return { success: true };

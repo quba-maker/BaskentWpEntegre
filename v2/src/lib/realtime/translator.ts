@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from "uuid";
-import { ChatMessageCreatedEvent, ChatMessageStatusUpdatedEvent, ConversationMemoryUpdatedEvent, ConversationAutopilotUpdatedEvent } from "./contracts";
+import { ChatMessageCreatedEvent, ChatMessageStatusUpdatedEvent, ConversationMemoryUpdatedEvent, ConversationAutopilotUpdatedEvent, ConversationMetadataUpdatedEvent } from "./contracts";
 
 /**
  * Internal message payload from DB/worker.
@@ -170,6 +170,42 @@ export class RealtimeTranslator {
         channelId,
         enabled,
         status
+      }
+    };
+  }
+
+  static toMetadataUpdated(
+    tenantId: string,
+    payload: {
+      conversationId: string;
+      userId?: string;
+      unreadCount?: number;
+      isPinned?: boolean;
+      isFavorite?: boolean;
+      isArchived?: boolean;
+      isBotActive?: boolean;
+      status?: "bot" | "human" | "open";
+      lastMessageContent?: string;
+      lastMessageDirection?: "in" | "out" | "system";
+      lastMessageStatus?: "sent" | "delivered" | "read" | "failed";
+      lastMessageAt?: string;
+    },
+    traceContext: TraceContext
+  ): ConversationMetadataUpdatedEvent {
+    return {
+      eventId: uuidv4(),
+      traceId: traceContext.traceId,
+      spanId: traceContext.spanId,
+      parentSpanId: traceContext.parentSpanId,
+      timestamp: Date.now() * 1000,
+      entityVersion: 1,
+      eventVersion: "1.0",
+      schemaVersion: "1.0",
+      tenantId,
+      type: "conversation.metadata_updated",
+      payload: {
+        ...payload,
+        updatedAt: new Date().toISOString()
       }
     };
   }

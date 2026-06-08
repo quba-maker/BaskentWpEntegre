@@ -65,7 +65,7 @@ class SystemLogger {
       
       const resolvedTenantId = traceCtx?.tenantId || this.baseContext.tenantId || context?.tenantId;
       const resolvedTraceId = traceCtx?.traceId || this.baseContext.traceId || context?.traceId;
-      const resolvedConversationId = this.baseContext.conversationId || context?.conversationId;
+      const resolvedConversationId = this.baseContext.conversationId || context?.conversationId || traceCtx?.conversationId;
 
       // LAYER 2: TENANT CONTEXT TRACE ZORUNLU OLMALI
       // Enforce presence of critical traceability fields

@@ -88,4 +88,41 @@ export class RealtimePublisher {
 
     await RealtimeBus.publish(tenantId, event);
   }
+
+  /**
+   * Translates and publishes conversation metadata updates.
+   */
+  static async publishMetadataUpdated(
+    tenantId: string,
+    payload: {
+      conversationId: string;
+      userId?: string;
+      unreadCount?: number;
+      isPinned?: boolean;
+      isFavorite?: boolean;
+      isArchived?: boolean;
+      isBotActive?: boolean;
+      status?: "bot" | "human" | "open";
+      lastMessageContent?: string;
+      lastMessageDirection?: "in" | "out" | "system";
+      lastMessageStatus?: "sent" | "delivered" | "read" | "failed";
+      lastMessageAt?: string;
+    },
+    traceContext?: { traceId: string; spanId: string; parentSpanId?: string }
+  ) {
+    const context = traceContext || {
+      traceId: uuidv4(),
+      spanId: uuidv4()
+    };
+
+    console.log(`[REALTIME_PUBLISH_TRACE] publishMetadataUpdated | tenantId=${tenantId} | payload=${JSON.stringify(payload)}`);
+
+    const event = RealtimeTranslator.toMetadataUpdated(
+      tenantId,
+      payload,
+      context
+    );
+
+    await RealtimeBus.publish(tenantId, event);
+  }
 }

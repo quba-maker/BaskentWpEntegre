@@ -86,7 +86,7 @@ export default async function DashboardLayout({
         {session?.impersonatedTenantId && tenantData && (
           <ImpersonationBanner tenantName={tenantData.profile.name} />
         )}
-        <DashboardProviders tenantId={session?.tenantId} tenantData={tenantData} role={role}>
+        <DashboardProviders tenantId={session?.tenantId} tenantData={tenantData} role={role} userId={session?.userId}>
           {children}
         </DashboardProviders>
       </main>

@@ -17,17 +17,19 @@ export function DashboardProviders({
   children, 
   tenantId,
   tenantData,
-  role
+  role,
+  userId
 }: { 
   children: React.ReactNode; 
   tenantId?: string;
   tenantData: TenantBootstrapData | null;
   role?: string;
+  userId?: string;
 }) {
   return (
     <TenantProvider initialData={tenantData} role={role}>
       <ConfirmProvider>
-        <RealtimeProvider tenantId={tenantId}>
+        <RealtimeProvider tenantId={tenantId} userId={userId}>
           {children}
           {IS_DEV && <RealtimeDiagnosticsOverlay />}
         </RealtimeProvider>
