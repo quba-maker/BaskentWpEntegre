@@ -94,6 +94,7 @@ export function useRealtimeReconciliation(tenantId: string) {
 
   // Helper to update the conversation list preview
   const updateConversationPreview = (conversationId: string, updates: any | ((conv: any) => any), reorderToTop: boolean = false) => {
+    let matched = false;
     queryClient.setQueriesData({ queryKey: ["conversations"] }, (oldData: any) => {
       if (!oldData || !oldData.pages) return oldData; // React Query infinite query structure
 
@@ -101,7 +102,9 @@ export function useRealtimeReconciliation(tenantId: string) {
         let targetConv: any = null;
         const newPages = oldData.pages.map((page: any[]) => {
           return page.filter(conv => {
-            if (conv.id === conversationId) {
+            const isMatch = conv.conversation_id === conversationId || conv.conversationId === conversationId;
+            if (isMatch) {
+              matched = true;
               const newFields = typeof updates === "function" ? updates(conv) : updates;
               targetConv = { ...conv, ...newFields };
               return false; // Remove from current position
@@ -118,7 +121,9 @@ export function useRealtimeReconciliation(tenantId: string) {
         // Just update in place without reordering
         const newPages = oldData.pages.map((page: any[]) => 
           page.map(conv => {
-            if (conv.id === conversationId) {
+            const isMatch = conv.conversation_id === conversationId || conv.conversationId === conversationId;
+            if (isMatch) {
+              matched = true;
               const newFields = typeof updates === "function" ? updates(conv) : updates;
               return { ...conv, ...newFields };
             }
@@ -128,6 +133,13 @@ export function useRealtimeReconciliation(tenantId: string) {
         return { ...oldData, pages: newPages };
       }
     });
+
+    if (!matched) {
+      if (typeof window !== "undefined") {
+        console.log(`[REALTIME_RECONCILIATION_MISS] conversationId=${conversationId} not found in conversation cache, invalidating conversations.`);
+      }
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    }
   };
 
   // Internal handler for newly created messages
@@ -137,6 +149,8 @@ export function useRealtimeReconciliation(tenantId: string) {
     const projection = mapRealtimeMessageToUIProjection(payload);
 
     const startTime = performance.now();
+    let isAppend = false;
+    let isDuplicate = false;
 
     queryClient.setQueryData(queryKey, (oldData: unknown) => {
       const allMessages = flattenInfiniteData<any>(oldData);
@@ -144,6 +158,7 @@ export function useRealtimeReconciliation(tenantId: string) {
       if (allMessages.length === 0) {
         // Cache miss — create new InfiniteData with single message
         logReconciliation("cache_miss", { eventId, id: payload.id });
+        isAppend = true;
         return appendToInfiniteData(oldData, projection.messageData);
       }
 
@@ -172,6 +187,7 @@ export function useRealtimeReconciliation(tenantId: string) {
       }
 
       if (existingMsgIndex !== -1) {
+        isDuplicate = true;
         const existing = allMessages[existingMsgIndex];
         
         // Protect against status downgrade or stale update
@@ -194,15 +210,13 @@ export function useRealtimeReconciliation(tenantId: string) {
 
       // 2. Append new message (from another client or external source)
       logReconciliation("cache_updated", { eventId, id: payload.id, type: "append" });
+      isAppend = true;
       
       // Insert with stable sort — collapses to single page; pagination re-established on next fetch
       return replaceInfiniteDataItems(oldData, stableSortMessages([...allMessages, projection.messageData]));
     });
 
     const appendDuration = performance.now() - startTime;
-    if (IS_DEV) {
-      console.log(`[REALTIME_APPEND_TRACE] Message append to query client completed in ${appendDuration.toFixed(2)}ms`);
-    }
 
     // Read the active phone directly from the store to prevent unread count bumps on focused conversation
     const store = useInboxStore.getState();
@@ -213,6 +227,11 @@ export function useRealtimeReconciliation(tenantId: string) {
       activeContact?.conversationId === payload.conversationId ||
       activePhone === payload.conversationId ||
       activePhone === payload.phoneNumber;
+
+    const conversationIdPrefix = payload.conversationId ? payload.conversationId.substring(0, 8) : "none";
+    if (typeof window !== "undefined") {
+      console.log(`[REALTIME_APPEND_TRACE] conversationIdPrefix=${conversationIdPrefix} isFocused=${isFocused} appended=${isAppend} duplicate=${isDuplicate} updatedList=true durationMs=${appendDuration.toFixed(2)}`);
+    }
 
     const isReaction = payload.sender === 'system' ||
       payload.mediaMetadata?.native?.message_type === 'reaction' ||

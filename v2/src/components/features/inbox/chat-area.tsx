@@ -581,10 +581,26 @@ export function ConversationViewport() {
   const [replyingToMessage, setReplyingToMessage] = useState<any | null>(null);
   const [activeReactionPickerMsgId, setActiveReactionPickerMsgId] = useState<string | null>(null);
   const queryClient = useQueryClient();
-  const messagesQueryKey = useMemo(() => [
-    "messages",
-    activeContact?.conversation_id || activeContact?.conversationId || activePhone
-  ], [activeContact, activePhone]);
+  const messagesQueryKey = useMemo(() => {
+    const conversationId = activeContact?.conversation_id || activeContact?.conversationId;
+    const activePhoneClean = activePhone || "";
+    
+    // Hash/Mask for PII-safe logging
+    const phoneHash = activePhoneClean ? activePhoneClean.slice(0, 4) + "****" + activePhoneClean.slice(-4) : "none";
+    
+    if (!conversationId) {
+      if (typeof window !== "undefined") {
+        console.warn(`[CONTACT_SELECT_TRACE] conversationIdPrefix=missing hasConversationId=false phoneHash=${phoneHash}`);
+      }
+      return ["messages", activePhoneClean];
+    } else {
+      const prefix = conversationId.substring(0, 8);
+      if (typeof window !== "undefined") {
+        console.log(`[CONTACT_SELECT_TRACE] conversationIdPrefix=${prefix} hasConversationId=true phoneHash=${phoneHash}`);
+      }
+      return ["messages", conversationId];
+    }
+  }, [activeContact, activePhone]);
 
   useEffect(() => {
     const handleOutsideClick = (e: MouseEvent) => {
@@ -725,9 +741,15 @@ export function ConversationViewport() {
     queryFn: ({ pageParam = 1 }) => {
       const fetchStart = performance.now();
       const targetId = messagesQueryKey[1]!;
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetId);
+      const usedFallback = !isUuid;
+      const conversationIdPrefix = isUuid ? targetId.substring(0, 8) : "fallback";
+      
       return getMessages(targetId, pageParam as number, 50).then((res) => {
         const fetchDuration = performance.now() - fetchStart;
-        console.log(`[MESSAGE_QUERY_TRACE] getMessages server action completed: key=${targetId} duration=${fetchDuration.toFixed(2)}ms rows=${res.length}`);
+        if (typeof window !== "undefined") {
+          console.log(`[MESSAGE_QUERY_TRACE] conversationIdPrefix=${conversationIdPrefix} usedFallback=${usedFallback} rowCount=${res.length} durationMs=${fetchDuration.toFixed(2)}`);
+        }
         return res;
       });
     },
@@ -1802,6 +1824,30 @@ export function ConversationViewport() {
                 )}
               </div>
             )}
+
+            {flatItems.length === 0 && (() => {
+              const expectedCount = (activeContact as any).messageCount || (activeContact as any).message_count || 0;
+              if (expectedCount > 0) {
+                return (
+                  <div className="flex flex-col items-center justify-center min-h-[300px] text-center p-6 bg-amber-50/50 dark:bg-amber-950/10 rounded-2xl border border-dashed border-amber-200 dark:border-amber-900/30 my-8">
+                    <ShieldAlert className="w-8 h-8 text-amber-500 mb-3 animate-pulse" />
+                    <h4 className="text-sm font-bold text-zinc-800 dark:text-zinc-200">DB Integrity / Sync Mismatch</h4>
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400 max-w-sm mt-1.5 leading-relaxed">
+                      Veritabanında bu konuşma için {expectedCount} mesaj tanımlı, ancak gerçek mesaj satırı bulunamadı (0/{expectedCount}). UI kilitlenmesi engellendi.
+                    </p>
+                  </div>
+                );
+              }
+              return (
+                <div className="flex flex-col items-center justify-center min-h-[300px] text-center p-6">
+                  <MessageCircle className="w-8 h-8 text-zinc-400 mb-3 opacity-60" />
+                  <h4 className="text-sm font-bold text-zinc-500 dark:text-zinc-400">Henüz Mesaj Yok</h4>
+                  <p className="text-xs text-zinc-400 dark:text-zinc-500 max-w-sm mt-1.5">
+                    Bu konuşmada henüz gönderilmiş veya alınmış bir mesaj bulunmamaktadır.
+                  </p>
+                </div>
+              );
+            })()}
 
             {/* Top Virtual Spacer */}
             {topSpacerHeight > 0 && (

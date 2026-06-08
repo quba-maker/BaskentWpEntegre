@@ -259,20 +259,70 @@ export function ContextPanel() {
       if (!conversationId) return null;
       
       const loadStart = performance.now();
+      const hasFormConnection = !!(activeContact?.formData || activeContact?.form_raw_data);
       
-      const hasFormConnection = !!(activeContact.formData || activeContact.form_raw_data);
-      
-      const [botDirectiveRes, steeringTasksRes, formGreetingRes] = await Promise.all([
-        getActiveBotDirectiveAction(conversationId).catch(() => ({ success: false, directive: null })),
-        getActiveTasksForSteeringAction(conversationId).catch(() => ({ success: false, tasks: [] })),
+      // Helper function for timeout
+      const timeoutMs = 4000;
+      async function withTimeout<T>(p: Promise<T>, fallback: T): Promise<T> {
+        let timeoutId: any;
+        const timeoutPromise = new Promise<T>((resolve) => {
+          timeoutId = setTimeout(() => {
+            if (typeof window !== "undefined") {
+              console.warn(`[CRM_PANEL_TIMEOUT] Promise timed out after ${timeoutMs}ms`);
+            }
+            resolve(fallback);
+          }, timeoutMs);
+        });
+        return Promise.race([
+          p.then((val) => {
+            clearTimeout(timeoutId);
+            return val;
+          }),
+          timeoutPromise
+        ]);
+      }
+
+      const results = await Promise.allSettled([
+        withTimeout(getActiveBotDirectiveAction(conversationId), { success: false, directive: null }),
+        withTimeout(getActiveTasksForSteeringAction(conversationId), { success: false, tasks: [] }),
         hasFormConnection 
-          ? checkFormGreetingEligibility(conversationId).catch(() => null)
+          ? withTimeout(checkFormGreetingEligibility(conversationId), null)
           : Promise.resolve(null)
       ]);
 
+      let botDirectiveRes = { success: false, directive: null };
+      let steeringTasksRes = { success: false, tasks: [] };
+      let formGreetingRes = null;
+
+      let fulfilledCount = 0;
+      let rejectedCount = 0;
+
+      if (results[0].status === 'fulfilled') {
+        botDirectiveRes = results[0].value as any;
+        fulfilledCount++;
+      } else {
+        rejectedCount++;
+      }
+
+      if (results[1].status === 'fulfilled') {
+        steeringTasksRes = results[1].value as any;
+        fulfilledCount++;
+      } else {
+        rejectedCount++;
+      }
+
+      if (results[2].status === 'fulfilled') {
+        formGreetingRes = results[2].value as any;
+        fulfilledCount++;
+      } else {
+        rejectedCount++;
+      }
+
       const loadDuration = performance.now() - loadStart;
+      const conversationIdPrefix = conversationId.substring(0, 8);
+      
       if (typeof window !== "undefined") {
-        console.log(`[CRM_PANEL_LOAD_TRACE] crm-panel async queries completed: conversationId=${conversationId} duration=${loadDuration.toFixed(2)}ms`);
+        console.log(`[CRM_PANEL_LOAD_TRACE] conversationIdPrefix=${conversationIdPrefix} durationMs=${loadDuration.toFixed(2)} fulfilledCount=${fulfilledCount} rejectedCount=${rejectedCount}`);
       }
 
       return {
@@ -281,7 +331,7 @@ export function ContextPanel() {
         formGreetingEligibility: formGreetingRes
       };
     },
-    enabled: !!activeContact,
+    enabled: !!conversationId,
     staleTime: 30000,
     gcTime: 5 * 60 * 1000,
   });

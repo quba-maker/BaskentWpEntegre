@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { Search, Check, CheckCheck, Clock, WifiOff, MessageCircle, MoreVertical, Loader2, Sparkles, AlertCircle, X, ChevronLeft, ChevronRight, UserCheck, UserX, Trash2, Sliders, ChevronDown, Bot, User, Pin, PanelLeftClose, PanelLeftOpen } from "lucide-react";
@@ -287,6 +287,14 @@ export function ContactRail() {
     toggleSidebar
   } = useInboxStore();
   const queryClient = useQueryClient();
+  const hoverTimeoutRef = useRef<any>(null);
+
+  useEffect(() => {
+    return () => {
+      if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+    };
+  }, []);
+
   const searchParams = useSearchParams();
   const router = useRouter();
   const deepLinkContact = searchParams.get('contact');
@@ -409,8 +417,11 @@ export function ContactRail() {
 
   const contacts = data?.pages ? data.pages.flat() : [];
 
-  // Low priority prefetch for the first 10 contacts to improve load speed
+  // Low priority prefetch for the first 10 contacts to improve load speed (Production auto-prefetch disabled)
   useEffect(() => {
+    const enableTop10Prefetch = false; // Disabled to optimize Vercel backend load
+    if (!enableTop10Prefetch) return;
+    
     if (!contacts || contacts.length === 0) return;
 
     // Prefetch first 10 contacts with a 1-second delay to prioritize active UI mount
@@ -981,6 +992,13 @@ const handleBulkArchive = async (archive: boolean) => {
                     tabIndex={0}
                     aria-selected={activePhone === c.id}
                     onClick={() => {
+                      const conversationId = c.conversation_id || c.conversationId;
+                      if (!conversationId) {
+                        if (typeof window !== "undefined") {
+                          console.error(`[CONTACT_SELECT_TRACE] Blocked selection: missing conversationId for phone=${c.id}`);
+                        }
+                        return;
+                      }
                       if (isSelectionMode) {
                         toggleSelected(c.conversation_id);
                       } else {
@@ -990,25 +1008,37 @@ const handleBulkArchive = async (archive: boolean) => {
                     onMouseEnter={() => {
                       const conversationId = c.conversation_id || c.conversationId;
                       if (!conversationId) return;
-                      const cacheKey = ["messages", conversationId];
-                      const existingData = queryClient.getQueryData(cacheKey);
-                      if (!existingData) {
-                        if (typeof window !== "undefined") {
-                          console.log(`[PREFETCH_HOVER_TRACE] Hovered contact row: conversationId=${conversationId}`);
+                      
+                      if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+                      
+                      hoverTimeoutRef.current = setTimeout(() => {
+                        const cacheKey = ["messages", conversationId];
+                        const existingData = queryClient.getQueryData(cacheKey);
+                        if (!existingData) {
+                          if (typeof window !== "undefined") {
+                            console.log(`[PREFETCH_HOVER_TRACE] Hovered contact row: conversationId=${conversationId}`);
+                          }
+                          queryClient.prefetchInfiniteQuery({
+                            queryKey: cacheKey,
+                            queryFn: ({ pageParam = 1 }) => getMessages(conversationId, pageParam as number, 50),
+                            initialPageParam: 1,
+                            staleTime: 30000,
+                          }).catch(err => {
+                            console.error("[PREFETCH_HOVER_ERROR]", err);
+                          });
                         }
-                        queryClient.prefetchInfiniteQuery({
-                          queryKey: cacheKey,
-                          queryFn: ({ pageParam = 1 }) => getMessages(conversationId, pageParam as number, 50),
-                          initialPageParam: 1,
-                          staleTime: 30000,
-                        }).catch(err => {
-                          console.error("[PREFETCH_HOVER_ERROR]", err);
-                        });
-                      }
+                      }, 300);
                     }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') {
                         e.preventDefault();
+                        const conversationId = c.conversation_id || c.conversationId;
+                        if (!conversationId) {
+                          if (typeof window !== "undefined") {
+                            console.error(`[CONTACT_SELECT_TRACE] Blocked selection on keydown: missing conversationId for phone=${c.id}`);
+                          }
+                          return;
+                        }
                         if (isSelectionMode) {
                           toggleSelected(c.conversation_id);
                         } else {
