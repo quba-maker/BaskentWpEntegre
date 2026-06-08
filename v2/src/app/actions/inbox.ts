@@ -2078,8 +2078,8 @@ async function markConversationsUnreadCore(
             ORDER BY COALESCE(m.provider_timestamp, m.created_at) DESC, m.id DESC
           ) as rnk
         FROM messages m
+        JOIN target_conversations tc ON tc.id = m.conversation_id
         WHERE m.tenant_id = $1
-          AND m.conversation_id = ANY($2::uuid[])
           AND m.direction = 'in'
           AND (m.media_metadata IS NULL OR COALESCE(m.media_metadata->'native'->>'message_type', '') != 'reaction')
       ),
@@ -2110,22 +2110,27 @@ async function markConversationsUnreadCore(
           last_read_message_id = EXCLUDED.last_read_message_id,
           updated_at = NOW()
         RETURNING conversation_id, last_read_at
+      ),
+      unread_counts AS (
+        SELECT 
+          m.conversation_id,
+          COUNT(*)::int AS cnt
+        FROM messages m
+        JOIN upsert_states us ON us.conversation_id = m.conversation_id
+        WHERE m.tenant_id = $1
+          AND m.direction = 'in'
+          AND (m.media_metadata IS NULL OR COALESCE(m.media_metadata->'native'->>'message_type', '') != 'reaction')
+          AND m.created_at > us.last_read_at
+        GROUP BY m.conversation_id
       )
       SELECT 
         us.conversation_id, 
         us.last_read_at,
         li.last_inbound_at,
-        (
-          SELECT COUNT(*)::int 
-          FROM messages m 
-          WHERE m.conversation_id = us.conversation_id 
-            AND m.tenant_id = $1 
-            AND m.direction = 'in'
-            AND (m.media_metadata IS NULL OR COALESCE(m.media_metadata->'native'->>'message_type', '') != 'reaction')
-            AND m.created_at > us.last_read_at
-        ) AS unread_count
+        COALESCE(uc.cnt, 1)::int AS unread_count
       FROM upsert_states us
-      JOIN last_inbound li ON li.conversation_id = us.conversation_id;
+      JOIN last_inbound li ON li.conversation_id = us.conversation_id
+      LEFT JOIN unread_counts uc ON uc.conversation_id = us.conversation_id;
     `,
     values: [ctx.tenantId, conversationIds, ctx.userId]
   }) as any[];
@@ -2202,11 +2207,15 @@ export async function markConversationUnread(conversationIdOrPhone: string) {
         const cleanPhone = conversationIdOrPhone.replace(/\D/g, '').slice(-10);
         const phoneLike = `%${cleanPhone}%`;
         const conv = await ctx.db.executeSafe({
-          text: `SELECT id FROM conversations WHERE phone_number LIKE $1 AND tenant_id = $2 LIMIT 1`,
+          text: `SELECT id FROM conversations WHERE phone_number LIKE $1 AND tenant_id = $2`,
           values: [phoneLike, ctx.tenantId]
         }) as any[];
-        if (conv.length > 0) {
+        if (conv.length === 1) {
           convId = conv[0].id;
+        } else if (conv.length > 1) {
+          return { success: false, error: "Birden fazla sohbet eşleşti. Lütfen doğrudan seçim yapın." };
+        } else {
+          return { success: false, error: "Sohbet bulunamadı." };
         }
       }
 
@@ -2214,28 +2223,29 @@ export async function markConversationUnread(conversationIdOrPhone: string) {
         return { success: false, error: "Conversation not found" };
       }
 
-      const coreRes = await markConversationsUnreadCore(ctx, [convId]);
-      if (!coreRes.success) {
-        return { success: false, error: "Okunmadı işaretleme işlemi başarısız." };
-      }
+      try {
+        const coreRes = await markConversationsUnreadCore(ctx, [convId]);
+        if (!coreRes.success) {
+          return { success: false, error: "Okunmadı işaretleme işlemi başarısız." };
+        }
 
-      const updated = coreRes.updated?.[0];
-      const skipped = coreRes.skipped?.[0];
-      if (skipped) {
-        return { success: false, error: "Gelen mesaj bulunmayan bir sohbet okunmadı olarak işaretlenemez." };
-      }
+        const skipped = coreRes.skipped?.[0];
+        if (skipped) {
+          return { success: false, error: "Bu görüşme için okunmadı yapılamadı: hasta mesajı bulunamadı." };
+        }
 
-      return {
-        success: true,
-        conversationId: convId,
-        unreadCount: updated?.unreadCount ?? 1,
-        isRead: false,
-        lastReadAt: updated?.lastReadAt,
-        lastInboundAt: updated?.lastInboundAt,
-        updatedAt: new Date().toISOString()
-      };
+        return {
+          success: true,
+          updated: coreRes.updated,
+          skipped: coreRes.skipped,
+          results: coreRes.updated
+        };
+      } catch (err: any) {
+        console.error("[MARK_UNREAD_CRASH]", err);
+        return { success: false, error: "Okunmadı yapılamadı. Lütfen tekrar deneyin." };
+      }
     }
-  ).then(res => res.success ? (res.data || { success: true }) : { success: false, error: res.error });
+  ).then(res => res.success ? (res.data || { success: true, updated: [], skipped: [], results: [] }) : { success: false, error: res.error });
 }
 
 export async function togglePin(conversationIdOrPhone: string) {
@@ -3965,13 +3975,18 @@ export async function markConversationsUnread(conversationIds: string[]) {
   return withActionGuard(
     { actionName: 'markConversationsUnread' },
     async (ctx) => {
-      const coreRes = await markConversationsUnreadCore(ctx, conversationIds);
-      return {
-        success: coreRes.success,
-        updated: coreRes.updated,
-        skipped: coreRes.skipped,
-        results: coreRes.updated
-      };
+      try {
+        const coreRes = await markConversationsUnreadCore(ctx, conversationIds);
+        return {
+          success: coreRes.success,
+          updated: coreRes.updated,
+          skipped: coreRes.skipped,
+          results: coreRes.updated
+        };
+      } catch (err: any) {
+        console.error("[MARK_UNREAD_BULK_CRASH]", err);
+        return { success: false, error: "Okunmadı yapılamadı. Lütfen tekrar deneyin." };
+      }
     }
   ).then(res => res.success ? (res.data || { success: true, updated: [], skipped: [], results: [] }) : { success: false, error: res.error });
 }

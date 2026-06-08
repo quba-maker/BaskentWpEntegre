@@ -642,26 +642,7 @@ export function ContactRail() {
         res = await markConversationsRead(ids);
       } else if (action === 'unread') {
         if (ids.length === 1) {
-          const singleRes = (await markConversationUnread(ids[0])) as any;
-          res = {
-            success: singleRes.success,
-            error: singleRes.error,
-            results: singleRes.success ? [{
-              conversationId: singleRes.conversationId,
-              unreadCount: singleRes.unreadCount,
-              isRead: false,
-              lastReadAt: singleRes.lastReadAt,
-              lastInboundAt: singleRes.lastInboundAt
-            }] : [],
-            updated: singleRes.success ? [{
-              conversationId: singleRes.conversationId,
-              unreadCount: singleRes.unreadCount,
-              isRead: false,
-              lastReadAt: singleRes.lastReadAt,
-              lastInboundAt: singleRes.lastInboundAt
-            }] : [],
-            skipped: []
-          };
+          res = await markConversationUnread(ids[0]);
         } else {
           res = await markConversationsUnread(ids);
         }
@@ -672,12 +653,55 @@ export function ContactRail() {
       }
 
       if (res.success) {
-        if (res.results && Array.isArray(res.results)) {
+        // If there are skipped conversations, we rollback those specific ones and show a warning toast
+        if (res.skipped && res.skipped.length > 0) {
+          const skippedIds = res.skipped.map((s: any) => s.conversationId);
+          skippedIds.forEach((id: string) => {
+            useInboxStore.getState().clearManualUnreadLock(id);
+          });
+
+          // Revert optimistic update for skipped ones by setting unread back to 0
           queryClient.setQueriesData({ queryKey: ["conversations"] }, (oldData: any) => {
             if (!oldData || !oldData.pages) return oldData;
             const newPages = oldData.pages.map((page: any[]) =>
               page.map(conv => {
-                const match = res.results.find((r: any) => r.conversationId === conv.id);
+                if (skippedIds.includes(conv.id)) {
+                  return {
+                    ...conv,
+                    unread: 0,
+                  };
+                }
+                return conv;
+              })
+            );
+            return { ...oldData, pages: newPages };
+          });
+
+          // Also check if active contact is one of the skipped ones
+          const activeContact = useInboxStore.getState().activeContact;
+          const activeId = activeContact?.conversation_id || activeContact?.conversationId || activeContact?.id;
+          if (activeId && skippedIds.includes(activeId)) {
+            useInboxStore.getState().updateActiveContact({
+              ...activeContact,
+              unread: 0
+            });
+          }
+
+          // Show specific skipped warning toast
+          if (skippedIds.length === 1) {
+            setErrorToast("Bu görüşme için okunmadı yapılamadı: hasta mesajı bulunamadı.");
+          } else {
+            setErrorToast("Okunmadı yapılamadı: hasta mesajı bulunamadı.");
+          }
+        }
+
+        // Apply updated counts to conversations cache from canonical response
+        if (res.updated && Array.isArray(res.updated) && res.updated.length > 0) {
+          queryClient.setQueriesData({ queryKey: ["conversations"] }, (oldData: any) => {
+            if (!oldData || !oldData.pages) return oldData;
+            const newPages = oldData.pages.map((page: any[]) =>
+              page.map(conv => {
+                const match = res.updated.find((r: any) => r.conversationId === conv.id);
                 if (match) {
                   return {
                     ...conv,
@@ -689,7 +713,24 @@ export function ContactRail() {
             );
             return { ...oldData, pages: newPages };
           });
+
+          // Apply updated counts to activeContact Zustand state if it matches
+          const activeContact = useInboxStore.getState().activeContact;
+          const activeId = activeContact?.conversation_id || activeContact?.conversationId || activeContact?.id;
+          if (activeId) {
+            const activeMatch = res.updated.find((r: any) => r.conversationId === activeId);
+            if (activeMatch) {
+              useInboxStore.getState().updateActiveContact({
+                ...activeContact,
+                unread: activeMatch.unreadCount
+              });
+            }
+          }
         }
+
+        // Refresh global unread counter in sidebar instantly!
+        window.dispatchEvent(new CustomEvent('inbox-unread-refresh'));
+
         queryClient.invalidateQueries({ queryKey: ["conversations"] });
         clearSelection();
       } else {
@@ -697,18 +738,18 @@ export function ContactRail() {
           ids.forEach(id => useInboxStore.getState().clearManualUnreadLock(id));
         }
         rollback();
-        setBulkActionError(res.error || "İşlem başarısız.");
+        setBulkActionError(res.error || "Okunmadı yapılamadı. Lütfen tekrar deneyin.");
         setTimeout(() => setBulkActionError(null), 4000);
-        setErrorToast(res.error || "İşlem başarısız.");
+        setErrorToast(res.error || "Okunmadı yapılamadı. Lütfen tekrar deneyin.");
       }
     } catch (err: any) {
       if (action === 'unread') {
         ids.forEach(id => useInboxStore.getState().clearManualUnreadLock(id));
       }
       rollback();
-      setBulkActionError("Sistem hatası. Lütfen tekrar deneyin.");
+      setBulkActionError("Okunmadı yapılamadı. Lütfen tekrar deneyin.");
       setTimeout(() => setBulkActionError(null), 4000);
-      setErrorToast("Sistem hatası. Lütfen tekrar deneyin.");
+      setErrorToast("Okunmadı yapılamadı. Lütfen tekrar deneyin.");
     }
     setBulkActionLoading(false);
   };
