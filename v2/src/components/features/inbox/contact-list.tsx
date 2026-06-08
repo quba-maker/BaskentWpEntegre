@@ -629,7 +629,30 @@ export function ContactRail() {
       if (action === 'read') {
         res = await markConversationsRead(ids);
       } else if (action === 'unread') {
-        res = await markConversationsUnread(ids);
+        if (ids.length === 1) {
+          const singleRes = (await markConversationUnread(ids[0])) as any;
+          res = {
+            success: singleRes.success,
+            error: singleRes.error,
+            results: singleRes.success ? [{
+              conversationId: singleRes.conversationId,
+              unreadCount: singleRes.unreadCount,
+              isRead: false,
+              lastReadAt: singleRes.lastReadAt,
+              lastInboundAt: singleRes.lastInboundAt
+            }] : [],
+            updated: singleRes.success ? [{
+              conversationId: singleRes.conversationId,
+              unreadCount: singleRes.unreadCount,
+              isRead: false,
+              lastReadAt: singleRes.lastReadAt,
+              lastInboundAt: singleRes.lastInboundAt
+            }] : [],
+            skipped: []
+          };
+        } else {
+          res = await markConversationsUnread(ids);
+        }
       } else if (action === 'bot') {
         res = await bulkSetBotMode(ids, 'bot');
       } else if (action === 'manual') {
@@ -664,6 +687,7 @@ export function ContactRail() {
         rollback();
         setBulkActionError(res.error || "İşlem başarısız.");
         setTimeout(() => setBulkActionError(null), 4000);
+        setErrorToast(res.error || "İşlem başarısız.");
       }
     } catch (err: any) {
       if (action === 'unread') {
@@ -672,6 +696,7 @@ export function ContactRail() {
       rollback();
       setBulkActionError("Sistem hatası. Lütfen tekrar deneyin.");
       setTimeout(() => setBulkActionError(null), 4000);
+      setErrorToast("Sistem hatası. Lütfen tekrar deneyin.");
     }
     setBulkActionLoading(false);
   };
