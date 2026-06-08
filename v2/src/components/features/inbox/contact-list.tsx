@@ -8,6 +8,7 @@ import {
   getConversations, 
   togglePin, 
   markConversationRead, 
+  markConversationUnread, 
   markConversationsRead, 
   markConversationsUnread, 
   bulkSetBotMode, 
@@ -469,9 +470,120 @@ export function ContactRail() {
     }
   };
 
+  const applyOptimisticConversationUpdate = (
+    ids: string[], 
+    fieldUpdates: any
+  ) => {
+    const queries = queryClient.getQueriesData({ queryKey: ["conversations"] });
+    const rollbacks: { queryKey: any; oldData: any }[] = [];
+
+    // Save previous active contact state
+    const store = useInboxStore.getState();
+    const prevActiveContact = store.activeContact ? { ...store.activeContact } : null;
+    const prevSelectedIds = [...store.selectedIds];
+
+    for (const [queryKey, oldData] of queries) {
+      if (!oldData || !(oldData as any).pages) continue;
+      
+      // Save oldData for rollback
+      rollbacks.push({ queryKey, oldData });
+
+      const [_, search, primaryFilter, replyFilter, channelFilter, stageFilter] = queryKey as any;
+
+      const newPages = (oldData as any).pages.map((page: any[]) => {
+        const updatedPage = page.map(conv => {
+          const isMatch = ids.includes(conv.id) || ids.includes(conv.conversation_id) || ids.includes(conv.conversationId);
+          if (isMatch) {
+            return { ...conv, ...fieldUpdates };
+          }
+          return conv;
+        });
+
+        // Filter out items that no longer match the active query parameters
+        return updatedPage.filter(c => {
+          // Check Primary Filter
+          if (primaryFilter === "unread" && c.unread <= 0) return false;
+          if (primaryFilter === "bot_active" && !(c.isBotActive || c.status === "bot")) return false;
+          if (primaryFilter === "favorites" && !c.isFavorite) return false;
+
+          // Check Stage / Archive Filter
+          const isArchivedFilter = stageFilter === "archived";
+          if (isArchivedFilter && !c.isArchived) return false;
+          if (!isArchivedFilter && c.isArchived) return false;
+
+          return true;
+        });
+      });
+
+      // Flatten and sort pages based on pinning and time
+      const flattened = newPages.flat();
+      flattened.sort((a: any, b: any) => {
+        const aPinned = !!a.isPinned;
+        const bPinned = !!b.isPinned;
+        if (aPinned && !bPinned) return -1;
+        if (!aPinned && bPinned) return 1;
+        
+        const aTime = new Date(a.last_message_at || a.lastMessageAt || 0).getTime();
+        const bTime = new Date(b.last_message_at || b.lastMessageAt || 0).getTime();
+        return bTime - aTime;
+      });
+
+      const pageSize = 30; // Matches pagination limit of 30 in getConversations
+      const sortedPages = [];
+      for (let i = 0; i < flattened.length; i += pageSize) {
+        sortedPages.push(flattened.slice(i, i + pageSize));
+      }
+
+      queryClient.setQueryData(queryKey, { ...oldData as any, pages: sortedPages });
+    }
+
+    // Update Zustand activeContact if active contact is modified
+    const activeContact = store.activeContact;
+    const activeId = activeContact?.conversation_id || activeContact?.conversationId || activePhone;
+    if (activeId && ids.includes(activeId)) {
+      store.updateActiveContact({
+        ...activeContact,
+        ...fieldUpdates
+      });
+    }
+
+    // Trigger sidebar global unread count SWR revalidation
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent('inbox-unread-refresh'));
+    }
+
+    // Return rollback function
+    return () => {
+      console.log("[OPTIMISTIC_ROLLBACK] Restoring previous states due to failure.");
+      for (const r of rollbacks) {
+        queryClient.setQueryData(r.queryKey, r.oldData);
+      }
+      if (prevActiveContact) {
+        store.updateActiveContact(prevActiveContact);
+      }
+      store.setSelectedIds(prevSelectedIds);
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent('inbox-unread-refresh'));
+      }
+    };
+  };
+
   const handleBulkAction = async (action: 'read' | 'unread' | 'bot' | 'manual', ids: string[]) => {
     setBulkActionLoading(true);
     setBulkActionError(null);
+    let fieldUpdates: any = {};
+    if (action === 'read') {
+      fieldUpdates = { unread: 0 };
+    } else if (action === 'unread') {
+      fieldUpdates = { unread: 1 };
+    } else if (action === 'bot') {
+      fieldUpdates = { isBotActive: true, autopilot_enabled: true, status: 'bot' };
+    } else if (action === 'manual') {
+      fieldUpdates = { isBotActive: false, autopilot_enabled: false, status: 'human' };
+    }
+
+    const rollback = applyOptimisticConversationUpdate(ids, fieldUpdates);
+
     try {
       let res: any;
       if (action === 'read') {
@@ -486,55 +598,62 @@ export function ContactRail() {
 
       if (res.success) {
         queryClient.invalidateQueries({ queryKey: ["conversations"] });
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent('inbox-unread-refresh'));
-        }
         clearSelection();
       } else {
+        rollback();
         setBulkActionError(res.error || "İşlem başarısız.");
         setTimeout(() => setBulkActionError(null), 4000);
       }
     } catch (err: any) {
+      rollback();
       setBulkActionError("Sistem hatası. Lütfen tekrar deneyin.");
       setTimeout(() => setBulkActionError(null), 4000);
     }
     setBulkActionLoading(false);
   };
 
-const handleBulkFavorite = async (favorite: boolean) => {
+  const handleBulkFavorite = async (favorite: boolean) => {
     setBulkActionLoading(true);
     setBulkActionError(null);
+    const ids = [...selectedIds];
+    const rollback = applyOptimisticConversationUpdate(ids, { isFavorite: favorite });
     try {
-      const res = await bulkToggleFavorite(selectedIds, favorite);
+      const res = await bulkToggleFavorite(ids, favorite);
       if (res && res.success) {
         queryClient.invalidateQueries({ queryKey: ["conversations"] });
         clearSelection();
       } else {
+        rollback();
         setBulkActionError((res && res.error) || "İşlem başarısız.");
         setTimeout(() => setBulkActionError(null), 4000);
       }
     } catch (err: any) {
+      rollback();
       setBulkActionError("Sistem hatası. Lütfen tekrar deneyin.");
       setTimeout(() => setBulkActionError(null), 4000);
     }
     setBulkActionLoading(false);
   };
 
-const handleBulkArchive = async (archive: boolean) => {
+  const handleBulkArchive = async (archive: boolean) => {
     setBulkActionLoading(true);
     setBulkActionError(null);
+    const ids = [...selectedIds];
+    const rollback = applyOptimisticConversationUpdate(ids, { isArchived: archive });
     try {
       const res = archive
-        ? await bulkArchiveConversations(selectedIds)
-        : await bulkUnarchiveConversations(selectedIds);
+        ? await bulkArchiveConversations(ids)
+        : await bulkUnarchiveConversations(ids);
       if (res && res.success) {
         queryClient.invalidateQueries({ queryKey: ["conversations"] });
         clearSelection();
       } else {
+        rollback();
         setBulkActionError((res && res.error) || "İşlem başarısız.");
         setTimeout(() => setBulkActionError(null), 4000);
       }
     } catch (err: any) {
+      rollback();
       setBulkActionError("Sistem hatası. Lütfen tekrar deneyin.");
       setTimeout(() => setBulkActionError(null), 4000);
     }
@@ -662,44 +781,26 @@ const handleBulkArchive = async (archive: boolean) => {
   }, [activePhone, setActiveModal]);
 
   const handleTogglePin = async (phone: string) => {
+    let currentIsPinned = false;
+    const match = contacts.find((c: any) => c.id === phone || c.conversation_id === phone || c.conversationId === phone);
+    if (match) {
+      currentIsPinned = !!match.isPinned;
+    }
+    const nextIsPinned = !currentIsPinned;
+    const rollback = applyOptimisticConversationUpdate([phone], { isPinned: nextIsPinned });
+
     try {
       const res = await togglePin(phone) as any;
       if (res.success) {
-        // Mutate the query cache instantly
-        queryClient.setQueriesData({ queryKey: ["conversations"] }, (oldData: any) => {
-          if (!oldData || !oldData.pages) return oldData;
-          
-          const newPages = oldData.pages.map((page: any[]) =>
-            page.map(conv => {
-              if (conv.id === phone) {
-                return { ...conv, isPinned: res.isPinned };
-              }
-              return conv;
-            })
-          );
-
-          // Re-sort the cache pages in-place instantly
-          const flattened = newPages.flat();
-          flattened.sort((a: any, b: any) => {
-            const aPinned = !!a.isPinned;
-            const bPinned = !!b.isPinned;
-            if (aPinned && !bPinned) return -1;
-            if (!aPinned && bPinned) return 1;
-            return new Date(b.last_message_at || 0).getTime() - new Date(a.last_message_at || 0).getTime();
-          });
-
-          const pageSize = 50;
-          const sortedPages = [];
-          for (let i = 0; i < flattened.length; i += pageSize) {
-            sortedPages.push(flattened.slice(i, i + pageSize));
-          }
-          return { ...oldData, pages: sortedPages };
-        });
+        queryClient.invalidateQueries({ queryKey: ["conversations"] });
       } else {
+        rollback();
         setErrorToast(res.error || "Sabitleme işlemi başarısız.");
       }
     } catch (err) {
       console.error("Pin toggle error:", err);
+      rollback();
+      setErrorToast("Sistem hatası. Lütfen tekrar deneyin.");
     }
   };
 
@@ -1494,63 +1595,18 @@ const handleBulkArchive = async (archive: boolean) => {
                 // Manuele al
                 const convId = contextMenu.conversationId;
                 setContextMenu(null);
-                const activeContact = useInboxStore.getState().activeContact;
-                const isActive = activePhone === convId;
-                if (isActive && activeContact) {
-                  useInboxStore.getState().setActiveContact(convId, {
-                    ...activeContact,
-                    isBotActive: false,
-                  });
-                }
-                
-                queryClient.setQueriesData({ queryKey: ["conversations"] }, (oldData: any) => {
-                  if (!oldData || !oldData.pages) return oldData;
-                  return {
-                    ...oldData,
-                    pages: oldData.pages.map((page: any[]) =>
-                      page.map(conv => {
-                        const isMatch = conv.conversation_id === convId || conv.conversationId === convId || conv.id === convId;
-                        if (isMatch) {
-                          return { ...conv, isBotActive: false, autopilot_enabled: false, status: 'human' };
-                        }
-                        return conv;
-                      })
-                    )
-                  };
-                });
+                const rollback = applyOptimisticConversationUpdate([convId], { isBotActive: false, autopilot_enabled: false, status: 'human' });
 
                 try {
                   const res = await toggleBotStatus(convId, false);
                   if (res.success) {
                     queryClient.invalidateQueries({ queryKey: ["conversations"] });
-                    if (typeof window !== "undefined") {
-                      window.dispatchEvent(new CustomEvent('inbox-unread-refresh'));
-                    }
                   } else {
-                    if (isActive && activeContact) {
-                      useInboxStore.getState().setActiveContact(convId, {
-                        ...activeContact,
-                        isBotActive: true,
-                      });
-                    }
-                    queryClient.setQueriesData({ queryKey: ["conversations"] }, (oldData: any) => {
-                      if (!oldData || !oldData.pages) return oldData;
-                      return {
-                        ...oldData,
-                        pages: oldData.pages.map((page: any[]) =>
-                          page.map(conv => {
-                            const isMatch = conv.conversation_id === convId || conv.conversationId === convId || conv.id === convId;
-                            if (isMatch) {
-                              return { ...conv, isBotActive: true, autopilot_enabled: true, status: 'bot' };
-                            }
-                            return conv;
-                          })
-                        )
-                      };
-                    });
+                    rollback();
                     setErrorToast(res.error || "İşlem başarısız.");
                   }
                 } catch (e) {
+                  rollback();
                   setErrorToast("Bir hata oluştu.");
                 }
               } else {
@@ -1603,14 +1659,19 @@ const handleBulkArchive = async (archive: boolean) => {
             onClick={async () => {
               const convId = contextMenu.conversationId;
               setContextMenu(null);
+              const currentFavorite = !!contacts.find((x: any) => x.conversation_id === convId || x.conversationId === convId || x.id === convId)?.isFavorite;
+              const nextFavorite = !currentFavorite;
+              const rollback = applyOptimisticConversationUpdate([convId], { isFavorite: nextFavorite });
               try {
                 const res = await toggleConversationFavorite(convId);
                 if (res && res.success) {
                    queryClient.invalidateQueries({ queryKey: ["conversations"] });
                 } else {
+                  rollback();
                   setErrorToast((res && res.error) || "İşlem başarısız.");
                 }
               } catch (e) {
+                rollback();
                 setErrorToast("Bir hata oluştu.");
               }
             }}
@@ -1625,17 +1686,21 @@ const handleBulkArchive = async (archive: boolean) => {
             onClick={async () => {
               const convId = contextMenu.conversationId;
               setContextMenu(null);
+              const currentArchived = !!contacts.find((x: any) => x.conversation_id === convId || x.conversationId === convId || x.id === convId)?.isArchived;
+              const nextArchived = !currentArchived;
+              const rollback = applyOptimisticConversationUpdate([convId], { isArchived: nextArchived });
               try {
-                const isArch = !!contacts.find((x: any) => x.conversation_id === contextMenu.conversationId)?.isArchived;
-                const res = isArch 
-                  ? await unarchiveConversation(convId)
-                  : await archiveConversation(convId);
+                const res = nextArchived 
+                  ? await archiveConversation(convId)
+                  : await unarchiveConversation(convId);
                 if (res && res.success) {
                    queryClient.invalidateQueries({ queryKey: ["conversations"] });
                 } else {
+                  rollback();
                   setErrorToast((res && res.error) || "İşlem başarısız.");
                 }
               } catch (e) {
+                rollback();
                 setErrorToast("Bir hata oluştu.");
               }
             }}

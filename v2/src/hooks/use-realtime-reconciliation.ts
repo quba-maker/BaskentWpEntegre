@@ -129,41 +129,63 @@ export function useRealtimeReconciliation(tenantId: string, userId?: string) {
   // Helper to update the conversation list preview
   const updateConversationPreview = (conversationId: string, updates: any | ((conv: any) => any), reorderToTop: boolean = false) => {
     let matched = false;
-    queryClient.setQueriesData({ queryKey: ["conversations"] }, (oldData: any) => {
-      if (!oldData || !oldData.pages) return oldData;
+    const queries = queryClient.getQueriesData({ queryKey: ["conversations"] });
 
-      const newPages = oldData.pages.map((page: any[]) => 
-        page.map(conv => {
+    for (const [queryKey, oldData] of queries) {
+      if (!oldData || !(oldData as any).pages) continue;
+
+      const [_, search, primaryFilter, replyFilter, channelFilter, stageFilter] = queryKey as any;
+
+      let queryMatched = false;
+      const newPages = (oldData as any).pages.map((page: any[]) => {
+        const updatedPage = page.map(conv => {
           const isMatch = conv.conversation_id === conversationId || conv.conversationId === conversationId || conv.id === conversationId;
           if (isMatch) {
             matched = true;
+            queryMatched = true;
             const newFields = typeof updates === "function" ? updates(conv) : updates;
             return { ...conv, ...newFields };
           }
           return conv;
-        })
-      );
+        });
 
-      // Re-sort the cache pages in-place instantly
-      const flattened = newPages.flat();
-      flattened.sort((a: any, b: any) => {
-        const aPinned = !!a.isPinned;
-        const bPinned = !!b.isPinned;
-        if (aPinned && !bPinned) return -1;
-        if (!aPinned && bPinned) return 1;
-        
-        const aTime = new Date(a.last_message_at || a.lastMessageAt || 0).getTime();
-        const bTime = new Date(b.last_message_at || b.lastMessageAt || 0).getTime();
-        return bTime - aTime;
+        // Filter out items that no longer match the active query parameters
+        return updatedPage.filter(c => {
+          if (primaryFilter === "unread" && c.unread <= 0) return false;
+          if (primaryFilter === "bot_active" && !(c.isBotActive || c.status === "bot")) return false;
+          if (primaryFilter === "favorites" && !c.isFavorite) return false;
+
+          const isArchivedFilter = stageFilter === "archived";
+          if (isArchivedFilter && !c.isArchived) return false;
+          if (!isArchivedFilter && c.isArchived) return false;
+
+          return true;
+        });
       });
 
-      const pageSize = 50;
-      const sortedPages = [];
-      for (let i = 0; i < flattened.length; i += pageSize) {
-        sortedPages.push(flattened.slice(i, i + pageSize));
+      if (queryMatched) {
+        // Flatten and sort pages based on pinning and time
+        const flattened = newPages.flat();
+        flattened.sort((a: any, b: any) => {
+          const aPinned = !!a.isPinned;
+          const bPinned = !!b.isPinned;
+          if (aPinned && !bPinned) return -1;
+          if (!aPinned && bPinned) return 1;
+          
+          const aTime = new Date(a.last_message_at || a.lastMessageAt || 0).getTime();
+          const bTime = new Date(b.last_message_at || b.lastMessageAt || 0).getTime();
+          return bTime - aTime;
+        });
+
+        const pageSize = 30; // Matches pagination limit of 30 in getConversations
+        const sortedPages = [];
+        for (let i = 0; i < flattened.length; i += pageSize) {
+          sortedPages.push(flattened.slice(i, i + pageSize));
+        }
+
+        queryClient.setQueryData(queryKey, { ...oldData as any, pages: sortedPages });
       }
-      return { ...oldData, pages: sortedPages };
-    });
+    }
 
     if (!matched) {
       if (typeof window !== "undefined") {

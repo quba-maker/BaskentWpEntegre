@@ -2013,6 +2013,97 @@ export async function markConversationRead(conversationIdOrPhone: string) {
   ).then(res => res.success ? (res.data || { success: true }) : { success: false, error: res.error });
 }
 
+export async function markConversationUnread(conversationIdOrPhone: string) {
+  if (!conversationIdOrPhone) return { success: false, error: "Identifier is required." };
+  return withActionGuard(
+    { actionName: 'markConversationUnread' },
+    async (ctx) => {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(conversationIdOrPhone);
+      let convId = null;
+
+      if (isUuid) {
+        convId = conversationIdOrPhone;
+      } else {
+        const cleanPhone = conversationIdOrPhone.replace(/\D/g, '').slice(-10);
+        const phoneLike = `%${cleanPhone}%`;
+        const conv = await ctx.db.executeSafe({
+          text: `SELECT id FROM conversations WHERE phone_number LIKE $1 AND tenant_id = $2 LIMIT 1`,
+          values: [phoneLike, ctx.tenantId]
+        }) as any[];
+        if (conv.length > 0) {
+          convId = conv[0].id;
+        }
+      }
+
+      if (!convId) {
+        return { success: false, error: "Conversation not found" };
+      }
+
+      // 2. Get last inbound message to set read state before it
+      const lastInbound = await ctx.db.executeSafe({
+        text: `SELECT id, created_at FROM messages 
+               WHERE conversation_id = $1 AND tenant_id = $2 AND direction = 'in' 
+                 AND (media_metadata IS NULL OR COALESCE(media_metadata->'native'->>'message_type', '') != 'reaction')
+               ORDER BY created_at DESC LIMIT 1`,
+        values: [convId, ctx.tenantId]
+      }) as any[];
+
+      if (lastInbound.length === 0) {
+        return { success: false, error: "Gelen mesaj bulunmayan bir sohbet okunmadı olarak işaretlenemez." };
+      }
+
+      const lastInboundMsg = lastInbound[0];
+      const targetTime = new Date(lastInboundMsg.created_at);
+      targetTime.setMilliseconds(targetTime.getMilliseconds() - 1);
+
+      const secondLastInbound = await ctx.db.executeSafe({
+        text: `SELECT id FROM messages 
+               WHERE conversation_id = $1 AND tenant_id = $2 AND direction = 'in'
+                 AND (media_metadata IS NULL OR COALESCE(media_metadata->'native'->>'message_type', '') != 'reaction')
+               ORDER BY created_at DESC LIMIT 1 OFFSET 1`,
+        values: [convId, ctx.tenantId]
+      }) as any[];
+      const lastReadMessageId = secondLastInbound[0]?.id || null;
+
+      // Update read state
+      await ctx.db.executeSafe({
+        text: `
+          INSERT INTO conversation_read_states (tenant_id, user_id, conversation_id, last_read_at, last_read_message_id, updated_at)
+          VALUES ($1, $2, $3, $4, $5, NOW())
+          ON CONFLICT (tenant_id, user_id, conversation_id)
+          DO UPDATE SET 
+            last_read_at = EXCLUDED.last_read_at,
+            last_read_message_id = COALESCE(EXCLUDED.last_read_message_id, conversation_read_states.last_read_message_id),
+            updated_at = NOW()
+        `,
+        values: [ctx.tenantId, ctx.userId, convId, targetTime.toISOString(), lastReadMessageId]
+      });
+
+      // Calculate real unread count
+      const unreadCountRow = await ctx.db.executeSafe({
+        text: `
+          SELECT COUNT(*)::int as cnt FROM messages
+          WHERE conversation_id = $1 AND tenant_id = $2 AND direction = 'in'
+            AND (media_metadata IS NULL OR COALESCE(media_metadata->'native'->>'message_type', '') != 'reaction')
+            AND created_at > $3
+        `,
+        values: [convId, ctx.tenantId, targetTime.toISOString()]
+      }) as any[];
+
+      const finalUnreadCount = unreadCountRow[0]?.cnt || 1;
+
+      // Publish metadata update to realtime bus
+      await RealtimePublisher.publishMetadataUpdated(ctx.tenantId, {
+        conversationId: convId,
+        userId: ctx.userId,
+        unreadCount: finalUnreadCount
+      });
+
+      return { success: true };
+    }
+  ).then(res => res.success ? (res.data || { success: true }) : { success: false, error: res.error });
+}
+
 export async function togglePin(conversationIdOrPhone: string) {
   if (!conversationIdOrPhone) return { success: false, error: "Identifier is required." };
   return withActionGuard(
@@ -3629,6 +3720,42 @@ export async function getCrmPanelBundleAction(conversationId: string) {
 // A1.7d — Bulk operations server actions
 // ==========================================
 
+async function broadcastBulkMetadataUpdate(
+  tenantId: string,
+  userId: string,
+  conversationIds: string[],
+  fields: any
+) {
+  const count = conversationIds.length;
+  if (count <= 10) {
+    for (const convId of conversationIds) {
+      try {
+        await RealtimePublisher.publishMetadataUpdated(tenantId, {
+          conversationId: convId,
+          userId,
+          ...fields
+        });
+      } catch (err) {
+        console.error(`Failed to publish bulk metadata update for ${convId}:`, err);
+      }
+    }
+  } else {
+    // Publish individual events only for the first 10 to limit spam while still syncing most active
+    const first10 = conversationIds.slice(0, 10);
+    for (const convId of first10) {
+      try {
+        await RealtimePublisher.publishMetadataUpdated(tenantId, {
+          conversationId: convId,
+          userId,
+          ...fields
+        });
+      } catch (err) {
+        console.error(`Failed to publish bulk metadata update for ${convId}:`, err);
+      }
+    }
+  }
+}
+
 export async function markConversationsRead(conversationIds: string[]) {
   if (!Array.isArray(conversationIds) || conversationIds.length === 0) {
     return { success: false, error: "Konuşma ID listesi boş olamaz." };
@@ -3668,6 +3795,8 @@ export async function markConversationsRead(conversationIds: string[]) {
           values: [ctx.tenantId, convId, ctx.userId, JSON.stringify({ source: "bulk_inbox_action" })]
         });
       }
+
+      await broadcastBulkMetadataUpdate(ctx.tenantId, ctx.userId, conversationIds, { unreadCount: 0 });
 
       return { success: true };
     }
@@ -3720,6 +3849,8 @@ export async function markConversationsUnread(conversationIds: string[]) {
         });
       }
 
+      await broadcastBulkMetadataUpdate(ctx.tenantId, ctx.userId, updatedIds, { unreadCount: 1 });
+
       return { success: true };
     }
   ).then(res => res.success ? (res.data || { success: true }) : { success: false, error: res.error });
@@ -3758,6 +3889,12 @@ export async function bulkSetBotMode(conversationIds: string[], mode: 'bot' | 'h
           values: [ctx.tenantId, convId, ctx.userId, JSON.stringify({ source: "bulk_inbox_action", mode })]
         });
       }
+
+      await broadcastBulkMetadataUpdate(ctx.tenantId, ctx.userId, conversationIds, {
+        isBotActive: autopilotEnabled,
+        autopilotEnabled: autopilotEnabled,
+        status: mode
+      });
 
       return { success: true };
     }
@@ -4592,6 +4729,8 @@ export async function bulkToggleFavorite(conversationIds: string[], favorite: bo
         details: { count: validIds.length }
       });
 
+      await broadcastBulkMetadataUpdate(ctx.tenantId, ctx.userId, validIds, { isFavorite: favorite });
+
       return { success: true, count: validIds.length };
     }
   ).then(res => {
@@ -4637,6 +4776,8 @@ export async function bulkArchiveConversations(conversationIds: string[]) {
         details: { count: validIds.length }
       });
 
+      await broadcastBulkMetadataUpdate(ctx.tenantId, ctx.userId, validIds, { isArchived: true });
+
       return { success: true, count: validIds.length };
     }
   ).then(res => {
@@ -4680,6 +4821,8 @@ export async function bulkUnarchiveConversations(conversationIds: string[]) {
         entityId: validIds[0],
         details: { count: validIds.length }
       });
+
+      await broadcastBulkMetadataUpdate(ctx.tenantId, ctx.userId, validIds, { isArchived: false });
 
       return { success: true, count: validIds.length };
     }
