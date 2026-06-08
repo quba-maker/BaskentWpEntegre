@@ -41,6 +41,11 @@ function MessageSkeleton({ align }: { align: "left" | "right" }) {
 }
 
 function ChatSkeleton() {
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      console.log(`[CHAT_SKELETON_RENDERED] time=${window.performance.now().toFixed(2)}`);
+    }
+  }, []);
   return (
     <div className="flex-1 flex flex-col-reverse p-6 space-y-6">
       <MessageSkeleton align="right" />
@@ -562,8 +567,350 @@ interface FlatItem {
   messages?: any[]; // For media_group: array of consecutive image messages
 }
 
+interface MessageBubbleRowProps {
+  item: FlatItem;
+  activePhone: string;
+  replyingToMessage: any;
+  setReplyingToMessage: (msg: any) => void;
+  activeReactionPickerMsgId: string | null;
+  setActiveReactionPickerMsgId: (id: string | null) => void;
+  handleSendReaction: (targetProviderMessageId: string, emoji: string) => void;
+  allConversationImages: any[];
+  setGallery: (gallery: any) => void;
+}
+
+const MessageBubbleRow = React.memo(function MessageBubbleRow({
+  item,
+  activePhone,
+  replyingToMessage,
+  setReplyingToMessage,
+  activeReactionPickerMsgId,
+  setActiveReactionPickerMsgId,
+  handleSendReaction,
+  allConversationImages,
+  setGallery,
+}: MessageBubbleRowProps) {
+  if (item.type === "header") {
+    return (
+      <div className="sticky top-2 z-10 flex justify-center w-full my-4 pointer-events-none">
+        <span
+          className="text-[11px] font-bold px-3 py-1 rounded-md shadow-sm pointer-events-auto"
+          style={{ 
+            background: "var(--q-bg-primary)", 
+            color: "var(--q-text-secondary)", 
+            border: "1px solid var(--q-border-default)" 
+          }}
+        >
+          {item.dateLabel}
+        </span>
+      </div>
+    );
+  }
+
+  if (item.type === "media_group") {
+    /* ── WhatsApp-style Image Grid with +N overlay ── */
+    const allGroupImages = item.messages || [];
+    const totalCount = allGroupImages.length;
+    const displayImages = allGroupImages.slice(0, Math.min(4, totalCount));
+    const overflow = totalCount - 4;
+    const cols = displayImages.length === 1 ? 1 : 2;
+    const isThreeLayout = displayImages.length === 3;
+
+    return (
+      <div className={`flex w-full ${item.message.sender === "user" ? "justify-start" : "justify-end"} pb-4`}>
+        <div 
+          className={`relative max-w-[85%] md:max-w-[65%] overflow-hidden shadow-sm transition-all duration-200 hover:shadow-md ${
+            item.message.sender === "user" 
+              ? "rounded-2xl rounded-tl-sm" 
+              : "rounded-2xl rounded-tr-sm"
+          }`}
+          style={
+            item.message.sender === "user"
+              ? { background: "var(--q-chat-in)" }
+              : { background: "var(--q-chat-out)" }
+          }
+        >
+          <div 
+            className="grid gap-[2px]"
+            style={{ 
+              gridTemplateColumns: cols === 1 ? '1fr' : 'repeat(2, 1fr)',
+            }}
+          >
+            {displayImages.map((imgMsg: any, idx: number) => {
+              const isLastWithOverflow = idx === 3 && overflow > 0;
+              const spanTwo = isThreeLayout && idx === 0;
+              
+              return (
+                <div 
+                  key={imgMsg.id} 
+                  className="relative cursor-pointer overflow-hidden"
+                  style={{ 
+                    gridColumn: spanTwo ? 'span 2' : undefined,
+                    aspectRatio: spanTwo ? '2/1' : (displayImages.length <= 2 ? '4/3' : '1/1'),
+                    minHeight: '80px',
+                    maxHeight: spanTwo ? '200px' : '180px',
+                  }}
+                  onClick={() => {
+                    const globalIdx = allConversationImages.findIndex(
+                      (ci: any) => ci.src === imgMsg.mediaUrl
+                    );
+                    setGallery({
+                      images: allConversationImages,
+                      currentIndex: globalIdx >= 0 ? globalIdx : 0,
+                    });
+                  }}
+                >
+                  <img
+                    src={imgMsg.mediaUrl}
+                    alt={imgMsg.mediaMetadata?.caption || `Görsel ${idx + 1}`}
+                    className="w-full h-full object-cover hover:opacity-90 transition-opacity"
+                    loading="lazy"
+                    draggable={false}
+                  />
+                  {isLastWithOverflow && (
+                    <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                      <span className="text-white text-2xl font-bold">+{overflow}</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <div className="absolute bottom-1 right-2 flex items-center gap-1 text-[10px] font-semibold tracking-wide" style={{ color: "rgba(255,255,255,0.85)", textShadow: "0 1px 3px rgba(0,0,0,0.5)" }}>
+            <span>
+              {allGroupImages[allGroupImages.length - 1]?.timeMs 
+                ? new Date(allGroupImages[allGroupImages.length - 1].timeMs).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) 
+                : ''}
+            </span>
+            <span className="ml-0.5">
+              {item.message.sender !== "user" && <CheckCheck className="w-3.5 h-3.5" />}
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col q-bubble-in w-full pb-4">
+      {item.message.sender === "system" ? (
+        <div className="flex w-full justify-center">
+          <div
+            className="rounded-full px-4 py-1.5 flex items-center gap-2 shadow-sm max-w-[90%] md:max-w-[70%] text-center q-glass-strong"
+            style={{ border: "1px solid var(--q-orange-bg)", color: "var(--q-orange)" }}
+          >
+            <ShieldAlert className="w-4 h-4 flex-shrink-0" style={{ color: "var(--q-orange)" }} />
+            <p className="text-[13px] font-semibold tracking-tight leading-tight">{item.message.text}</p>
+            <span className="text-[10px] font-bold opacity-60 ml-2 whitespace-nowrap flex items-center gap-1">
+              <span>{item.message.timeMs ? new Date(item.message.timeMs).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) : item.message.time}</span>
+              <span className="ml-0.5">
+                {item.message.status === 'pending' && <Clock className="w-3 h-3" />}
+                {(item.message.status === 'sent' || !item.message.status) && <Check className="w-3.5 h-3.5" />}
+                {item.message.status === 'delivered' && <CheckCheck className="w-3.5 h-3.5" />}
+                {item.message.status === 'read' && <CheckCheck className="w-3.5 h-3.5" style={{ color: "#53bdeb", opacity: 1 }} />}
+              </span>
+            </span>
+          </div>
+        </div>
+      ) : (
+        <div className={`flex w-full ${item.message.sender === "user" ? "justify-start" : "justify-end"} group relative ${item.message.reactions && item.message.reactions.length > 0 ? "mb-3" : ""}`}>
+          {/* ── QUICK ACTIONS TOOLBAR ── */}
+          {item.message.providerMessageId && (
+            <div className={`absolute top-1/2 -translate-y-1/2 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-20 ${
+              item.message.sender === "user" 
+                ? "left-[calc(85%+8px)] md:left-[calc(65%+8px)] flex-row" 
+                : "right-[calc(85%+8px)] md:right-[calc(65%+8px)] flex-row-reverse"
+            }`}>
+              {/* Quoted Reply Action */}
+              <button
+                onClick={() => setReplyingToMessage(item.message)}
+                className="p-1.5 rounded-full hover:bg-[var(--q-bg-hover)] text-[var(--q-text-secondary)] transition-colors border border-[var(--q-border-default)] bg-[var(--q-bg-primary)] shadow-sm cursor-pointer"
+                title="Yanıtla"
+              >
+                <CornerUpLeft className="w-3.5 h-3.5" />
+              </button>
+
+              {/* Reaction Picker Button */}
+              {item.message.sender === "user" && (
+                <div className="relative reaction-picker-container">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setActiveReactionPickerMsgId(activeReactionPickerMsgId === item.message.id ? null : item.message.id);
+                    }}
+                    className="p-1.5 rounded-full hover:bg-[var(--q-bg-hover)] text-[var(--q-text-secondary)] transition-colors border border-[var(--q-border-default)] bg-[var(--q-bg-primary)] shadow-sm cursor-pointer"
+                    title="Tepki Ekle"
+                  >
+                    <Smile className="w-3.5 h-3.5" />
+                  </button>
+                  
+                  {activeReactionPickerMsgId === item.message.id && (
+                    <div className={`absolute bottom-full mb-1.5 z-30 flex items-center gap-1 p-1 rounded-full shadow-lg border border-[var(--q-border-default)] bg-[var(--q-bg-primary)] ${
+                      item.message.sender === 'user' ? 'left-0' : 'right-0'
+                    }`}>
+                      {["👍", "❤️", "✅", "🙏", "👌", "👎"].map((emoji) => {
+                        const isSelected = item.message.reactions?.some((r: any) => r.actorLabel === 'Sen' && r.emoji === emoji);
+                        return (
+                          <button
+                            key={emoji}
+                            onClick={() => {
+                              handleSendReaction(item.message.providerMessageId, isSelected ? "" : emoji);
+                              setActiveReactionPickerMsgId(null);
+                            }}
+                            className={`w-7 h-7 flex items-center justify-center text-sm rounded-full hover:bg-[var(--q-bg-hover)] transition-colors cursor-pointer ${
+                              isSelected ? 'bg-[var(--q-purple-bg)] text-[var(--q-purple)]' : ''
+                            }`}
+                          >
+                            {emoji}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div
+            className={`relative max-w-[85%] md:max-w-[65%] px-3 py-2 md:px-4 md:py-2.5 shadow-sm transition-all duration-200 hover:shadow-md ${
+              item.message.sender === "user" 
+                ? "rounded-2xl rounded-tl-sm" 
+                : "rounded-2xl rounded-tr-sm"
+            }`}
+            style={
+              item.message.sender === "user"
+                ? { background: "var(--q-chat-in)", color: "var(--q-text-primary)" }
+                : { background: "var(--q-chat-out)", color: "var(--q-text-primary)" }
+            }
+          >
+            {item.message.sender !== "user" && (
+              <div className="flex items-center gap-1 mb-1 opacity-70">
+                {item.message.sender === "bot" ? (
+                  <Sparkles className="w-3 h-3" style={{ color: "var(--q-purple)" }} />
+                ) : (
+                  <User className="w-3 h-3" style={{ color: "var(--q-text-secondary)" }} />
+                )}
+                <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: item.message.sender === "bot" ? "var(--q-purple)" : "var(--q-text-secondary)" }}>
+                  {item.message.sender === "bot" ? "AI" : "SEN"}
+                </span>
+              </div>
+            )}
+            {item.message.mediaMetadata?.native && (item.message.mediaMetadata.native.reply_to_provider_message_id || item.message.mediaMetadata.native.reply_to_message_id) && (
+              <QuotedMessagePreview 
+                native={item.message.mediaMetadata.native} 
+                isOwnMessage={item.message.sender !== "user"} 
+              />
+            )}
+
+            {/* ── MEDIA CONTENT ── */}
+            {item.message.mediaType && item.message.mediaUrl && (
+              <MediaBubbleContent
+                message={item.message}
+                onGalleryOpen={(src) => {
+                  const idx = allConversationImages.findIndex((ci: any) => ci.src === src);
+                  setGallery({
+                    images: allConversationImages,
+                    currentIndex: idx >= 0 ? idx : 0,
+                  });
+                }}
+              />
+            )}
+
+            {/* ── TEXT CONTENT (caption only, no emoji prefix) ── */}
+            {(() => {
+              const text = item.message.text;
+              const mt = item.message.mediaType;
+              if (!text) return <div className="pb-4" />;
+              
+              if (mt && item.message.mediaUrl) {
+                const placeholders = ['📷 Fotoğraf', '📎 Belge', '🎵 Ses kaydı', '🎬 Video', '📍 Konum', '🏷️ Sticker'];
+                const emojiPrefixes = ['📷', '📎', '🎵', '🎬', '📍', '🏷️', '📦'];
+                
+                if (placeholders.includes(text) || emojiPrefixes.includes(text)) {
+                  return <div className="pb-4" />;
+                }
+                
+                const colonIdx = text.indexOf(': ');
+                if (colonIdx !== -1) {
+                  const before = text.substring(0, colonIdx);
+                  if (emojiPrefixes.some(p => before.startsWith(p))) {
+                    const caption = text.substring(colonIdx + 2).trim();
+                    if (caption) {
+                      return (
+                        <p className="text-[15px] leading-[1.4] font-medium whitespace-pre-wrap pb-4">
+                          {caption}
+                        </p>
+                      );
+                    }
+                    return <div className="pb-4" />;
+                  }
+                }
+              }
+              
+              return (
+                <p className="text-[15px] leading-[1.4] font-medium whitespace-pre-wrap pb-4">
+                  {text}
+                </p>
+              );
+            })()}
+            
+            <div className="absolute bottom-1 right-2 flex items-center gap-1 text-[10px] font-semibold tracking-wide" style={{ color: "var(--q-text-secondary)" }}>
+              <span className="opacity-50">{item.message.timeMs ? new Date(item.message.timeMs).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) : item.message.time}</span>
+              {item.message.sender !== "user" && (
+                <span className="ml-0.5 opacity-80">
+                  {item.message.status === 'pending' && <Clock className="w-3 h-3 opacity-50" />}
+                  {(item.message.status === 'sent' || (!item.message.status && item.message.sender === 'agent')) && <Check className="w-3.5 h-3.5 opacity-70" />}
+                  {item.message.status === 'delivered' && <CheckCheck className="w-3.5 h-3.5 opacity-70" />}
+                  {item.message.status === 'read' && <CheckCheck className="w-3.5 h-3.5" style={{ color: "#53bdeb", opacity: 1 }} />}
+                </span>
+              )}
+            </div>
+
+            {/* ── REACTIONS DISPLAY ── */}
+            {item.message.reactions && item.message.reactions.length > 0 && (
+              <div 
+                className={`absolute bottom-[-11px] ${item.message.sender === 'user' ? 'right-2' : 'left-2'} z-10 flex items-center gap-0.5 px-1 py-[1.5px] rounded-full text-[10px] shadow-sm bg-[var(--q-bg-primary)] border border-[var(--q-border-default)] cursor-pointer select-none`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (item.message.sender === 'user') {
+                    setActiveReactionPickerMsgId(activeReactionPickerMsgId === item.message.id ? null : item.message.id);
+                  }
+                }}
+              >
+                {item.message.reactions.map((r: any, idx: number) => (
+                  <span key={idx} title={`${r.actorLabel}: ${r.emoji}`}>
+                    {r.emoji}
+                  </span>
+                ))}
+                {item.message.reactions.length > 1 && (
+                  <span className="text-[9px] font-bold text-[var(--q-text-secondary)]">
+                    {item.message.reactions.length}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+});
+
 export function ConversationViewport() {
-  const { activePhone, activeContact, mobileView, setMobileView } = useInboxStore();
+  const activePhone = useInboxStore((state) => state.activePhone);
+  const mobileView = useInboxStore((state) => state.mobileView);
+  const setMobileView = useInboxStore((state) => state.setMobileView);
+
+  // Selected primitives from activeContact to isolate re-renders on note/tag/stage modifications
+  const activeContactId = useInboxStore((state) => state.activeContact?.id);
+  const activeContactName = useInboxStore((state) => state.activeContact?.name);
+  const activeContactCountry = useInboxStore((state) => state.activeContact?.country);
+  const activeContactCountrySource = useInboxStore((state) => state.activeContact?.country_source);
+  const activeContactIsBotActive = useInboxStore((state) => state.activeContact?.isBotActive);
+  const activeContactConversationId = useInboxStore((state) => state.activeContact?.conversation_id || state.activeContact?.conversationId);
+  const activeContactMessageCount = useInboxStore((state) => state.activeContact?.messageCount || state.activeContact?.message_count || 0);
+
   const [inputText, setInputText] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [isTogglingBot, setIsTogglingBot] = useState(false);
@@ -582,25 +929,22 @@ export function ConversationViewport() {
   const [activeReactionPickerMsgId, setActiveReactionPickerMsgId] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const messagesQueryKey = useMemo(() => {
-    const conversationId = activeContact?.conversation_id || activeContact?.conversationId;
     const activePhoneClean = activePhone || "";
-    
-    // Hash/Mask for PII-safe logging
     const phoneHash = activePhoneClean ? activePhoneClean.slice(0, 4) + "****" + activePhoneClean.slice(-4) : "none";
     
-    if (!conversationId) {
+    if (!activeContactConversationId) {
       if (typeof window !== "undefined") {
         console.warn(`[CONTACT_SELECT_TRACE] conversationIdPrefix=missing hasConversationId=false phoneHash=${phoneHash}`);
       }
       return ["messages", activePhoneClean];
     } else {
-      const prefix = conversationId.substring(0, 8);
+      const prefix = activeContactConversationId.substring(0, 8);
       if (typeof window !== "undefined") {
         console.log(`[CONTACT_SELECT_TRACE] conversationIdPrefix=${prefix} hasConversationId=true phoneHash=${phoneHash}`);
       }
-      return ["messages", conversationId];
+      return ["messages", activeContactConversationId];
     }
-  }, [activeContact, activePhone]);
+  }, [activeContactConversationId, activePhone]);
 
   useEffect(() => {
     const handleOutsideClick = (e: MouseEvent) => {
@@ -699,6 +1043,7 @@ export function ConversationViewport() {
             top: chatContainerRef.current.scrollHeight,
             behavior,
           });
+          initialScrollCompletedRef.current = true;
         }
       });
     }
@@ -709,13 +1054,22 @@ export function ConversationViewport() {
 
   const clickTraceStartRef = useRef<number | null>(null);
   const firstRenderDoneRef = useRef<Record<string, boolean>>({});
+  const prevRealtimeDownRef = useRef(isRealtimeDown);
+  const initialScrollCompletedRef = useRef(false);
+  const lastActivePhoneRef = useRef<string | null>(null);
+
+  if (activePhone !== lastActivePhoneRef.current) {
+    lastActivePhoneRef.current = activePhone;
+    firstRenderDoneRef.current = {};
+    initialScrollCompletedRef.current = false;
+  }
 
   // Trace contact click loading time
   useEffect(() => {
     if (activePhone) {
       clickTraceStartRef.current = performance.now();
       if (typeof window !== "undefined") {
-        console.log(`[INBOX_CLICK_TRACE] Clicked on contact row: phone=${activePhone}`);
+        console.log(`[INBOX_CLICK_TRACE] Clicked on contact row: phone=${activePhone} time=${clickTraceStartRef.current.toFixed(2)}`);
       }
     }
   }, [activePhone]);
@@ -745,9 +1099,15 @@ export function ConversationViewport() {
       const usedFallback = !isUuid;
       const conversationIdPrefix = isUuid ? targetId.substring(0, 8) : "fallback";
       
+      if (typeof window !== "undefined") {
+        console.log(`[MESSAGE_QUERY_START] conversationId=${targetId} time=${fetchStart.toFixed(2)}`);
+      }
+      
       return getMessages(targetId, pageParam as { timestampMs: number; id: string } | null, 30).then((res) => {
         const fetchDuration = performance.now() - fetchStart;
+        const fetchEnd = performance.now();
         if (typeof window !== "undefined") {
+          console.log(`[MESSAGE_QUERY_END] conversationId=${targetId} time=${fetchEnd.toFixed(2)}`);
           console.log(`[MESSAGE_QUERY_TRACE] conversationIdPrefix=${conversationIdPrefix} usedFallback=${usedFallback} rowCount=${res.length} durationMs=${fetchDuration.toFixed(2)}`);
         }
         return res;
@@ -773,19 +1133,28 @@ export function ConversationViewport() {
 
   // Track first message render timing
   useEffect(() => {
-    if (messagesData && messagesKeyString && clickTraceStartRef.current && !firstRenderDoneRef.current[messagesKeyString]) {
-      const duration = performance.now() - clickTraceStartRef.current;
-      console.log(`[CHAT_AREA_LOAD_TRACE] First message render completed: key=${messagesKeyString} duration=${duration.toFixed(2)}ms`);
-      firstRenderDoneRef.current[messagesKeyString] = true;
+    if (messagesData && messagesKeyString && !firstRenderDoneRef.current[messagesKeyString]) {
+      const totalMessages = messagesData.pages.flat().length;
+      if (totalMessages > 0) {
+        if (typeof window !== "undefined") {
+          console.log(`[MESSAGES_DOM_RENDERED] key=${messagesKeyString} count=${totalMessages} time=${window.performance.now().toFixed(2)}`);
+        }
+        if (clickTraceStartRef.current) {
+          const duration = performance.now() - clickTraceStartRef.current;
+          console.log(`[CHAT_AREA_LOAD_TRACE] First message render completed: key=${messagesKeyString} duration=${duration.toFixed(2)}ms`);
+        }
+        firstRenderDoneRef.current[messagesKeyString] = true;
+      }
     }
   }, [messagesData, messagesKeyString]);
 
   // Refetch when Ably reconnects
   useEffect(() => {
-    if (!isRealtimeDown && messagesKeyString) {
+    if (prevRealtimeDownRef.current && !isRealtimeDown && messagesKeyString) {
       console.log(`[ABLY_REATTACHED] Real-time reconnected. Refetching active conversation: ${messagesKeyString}`);
       refetchMessages();
     }
+    prevRealtimeDownRef.current = isRealtimeDown;
   }, [isRealtimeDown, messagesKeyString, refetchMessages]);
 
   const messages = useMemo(() => {
@@ -1064,7 +1433,7 @@ export function ConversationViewport() {
 
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting) {
+        if (entries[0].isIntersecting && initialScrollCompletedRef.current) {
           fetchNextPage();
         }
       },
@@ -1163,9 +1532,10 @@ export function ConversationViewport() {
     });
 
     // Eğer bot aktifse, manuel mesaj atıldığı için botu otomatik kapat (Optimistic UI Update)
-    if (activeContact.isBotActive) {
+    const currentContact = useInboxStore.getState().activeContact;
+    if (currentContact?.isBotActive) {
       useInboxStore.getState().setActiveContact(activePhone, {
-        ...activeContact,
+        ...currentContact,
         isBotActive: false,
       });
       // Arka planda veritabanını güncelle
@@ -1399,7 +1769,8 @@ export function ConversationViewport() {
   const handleToggleBot = async (forceState?: boolean) => {
     if (!activePhone || isTogglingBot) return;
     
-    const newBotState = forceState !== undefined ? forceState : !activeContact.isBotActive;
+    const currentContact = useInboxStore.getState().activeContact;
+    const newBotState = forceState !== undefined ? forceState : !currentContact?.isBotActive;
     
     // If turning autopilot ON, show confirmation modal first
     if (newBotState === true && forceState === undefined) {
@@ -1410,7 +1781,7 @@ export function ConversationViewport() {
     setIsTogglingBot(true);
 
     useInboxStore.getState().setActiveContact(activePhone, {
-      ...activeContact,
+      ...currentContact,
       isBotActive: newBotState,
     });
 
@@ -1419,7 +1790,7 @@ export function ConversationViewport() {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
     } else {
       useInboxStore.getState().setActiveContact(activePhone, {
-        ...activeContact,
+        ...currentContact,
         isBotActive: !newBotState,
       });
       setSendError(res.error || "Bot durumu değiştirilirken hata oluştu.");
@@ -1658,7 +2029,7 @@ export function ConversationViewport() {
   }, []);
 
   // -- Empty state --
-  if (!activePhone || !activeContact) {
+  if (!activePhone || !activeContactId) {
     return (
       <div className={`w-full md:flex-1 md:flex flex-col items-center justify-center h-full relative z-0 ${mobileView === "chat" ? "flex" : "hidden md:flex"}`}>
         <div className="w-16 h-16 rounded-full flex items-center justify-center shadow-sm mb-4" style={{ background: "rgba(255,255,255,0.6)" }}>
@@ -1749,13 +2120,13 @@ export function ConversationViewport() {
           <div>
             <div className="flex items-center">
               <h3 className="font-bold text-lg tracking-tight truncate max-w-[130px] md:max-w-[300px]" style={{ color: "var(--q-text-primary)" }}>
-                {activeContact.name || activeContact.id}
+                {activeContactName || activePhone}
               </h3>
               {(() => {
-                const normalizedName = activeContact.country ? normalizeCountryName(activeContact.country) : '';
-                const country = (activeContact.country ? { flag: getCountryFlag(normalizedName), name: normalizedName, code: '' } : null) || getCountryFromPhone(activeContact.id);
+                const normalizedName = activeContactCountry ? normalizeCountryName(activeContactCountry) : '';
+                const country = (activeContactCountry ? { flag: getCountryFlag(normalizedName), name: normalizedName, code: '' } : null) || getCountryFromPhone(activePhone);
                 if (!country) return null;
-                const isEstimated = !activeContact.country || activeContact.country_source === 'phone_prefix';
+                const isEstimated = !activeContactCountry || activeContactCountrySource === 'phone_prefix';
                 return (
                   <span 
                     className="ml-1.5 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] font-semibold flex-shrink-0" 
@@ -1773,7 +2144,7 @@ export function ConversationViewport() {
             </div>
             <div className="flex items-center gap-2 mt-0.5">
               <p className="text-xs font-medium" style={{ color: "var(--q-text-secondary)" }}>
-                {activeContact.id}
+                {activePhone}
               </p>
               {typingClients.length > 0 && (
                 <span className="text-[11px] font-semibold text-emerald-500 animate-pulse flex items-center gap-1">
@@ -1791,20 +2162,20 @@ export function ConversationViewport() {
           <AiStatusBadge phoneNumber={activePhone} />
           {/* Bot toggle chip */}
           <div className="flex items-center gap-2 px-2.5 md:px-3.5 py-1.5 rounded-full q-glass-strong" style={{ border: "1px solid var(--q-border-default)", boxShadow: "var(--q-shadow-sm)" }}>
-            {activeContact.isBotActive ? (
+            {activeContactIsBotActive ? (
               <Sparkles className="w-3.5 h-3.5 animate-pulse" style={{ color: "var(--q-blue)" }} />
             ) : (
               <User className="w-3.5 h-3.5" style={{ color: "var(--q-text-secondary)" }} />
             )}
             <span
               className="hidden md:inline text-[11px] font-bold uppercase tracking-wider"
-              style={{ color: activeContact.isBotActive ? "var(--q-blue)" : "var(--q-text-secondary)" }}
+              style={{ color: activeContactIsBotActive ? "var(--q-blue)" : "var(--q-text-secondary)" }}
             >
               AI Otopilot
             </span>
             <span
               className="md:hidden text-[10px] font-bold uppercase tracking-wider px-0.5"
-              style={{ color: activeContact.isBotActive ? "var(--q-blue)" : "var(--q-text-secondary)" }}
+              style={{ color: activeContactIsBotActive ? "var(--q-blue)" : "var(--q-text-secondary)" }}
             >
               AI
             </span>
@@ -1813,9 +2184,9 @@ export function ConversationViewport() {
               onClick={() => handleToggleBot()}
               disabled={isTogglingBot}
               className="w-9 h-5 rounded-full relative transition-all duration-300 flex items-center shadow-inner hover:opacity-90 cursor-pointer"
-              style={{ background: activeContact.isBotActive ? "var(--q-blue)" : "var(--q-bg-tertiary)", opacity: isTogglingBot ? 0.5 : 1 }}
+              style={{ background: activeContactIsBotActive ? "var(--q-blue)" : "var(--q-bg-tertiary)", opacity: isTogglingBot ? 0.5 : 1 }}
             >
-              <span className={`absolute w-4 h-4 bg-white rounded-full shadow-md transition-transform duration-300 ${activeContact.isBotActive ? "left-[2px] translate-x-4" : "left-[2px]"}`} />
+              <span className={`absolute w-4 h-4 bg-white rounded-full shadow-md transition-transform duration-300 ${activeContactIsBotActive ? "left-[2px] translate-x-4" : "left-[2px]"}`} />
             </button>
           </div>
           {/* Mobile CRM button */}
@@ -1831,7 +2202,7 @@ export function ConversationViewport() {
 
       {/* ── Messages Area ── */}
       <div className="flex-1 relative flex flex-col min-h-0">
-        {activeContact.isBotActive && (
+        {activeContactIsBotActive && (
           <div 
             className="flex items-center justify-between px-4 py-3 bg-red-50/95 dark:bg-red-950/20 backdrop-blur-md border-b"
             style={{ 
@@ -1865,7 +2236,7 @@ export function ConversationViewport() {
           className="flex-1 overflow-y-auto p-4 md:p-6 block"
           style={{ background: "var(--q-bg-secondary)" }}
         >
-        {isLoading ? (
+        {isLoading && !queryClient.getQueryData(messagesQueryKey) ? (
           <ChatSkeleton />
         ) : (
           <>
@@ -1881,7 +2252,7 @@ export function ConversationViewport() {
             )}
 
             {flatItems.length === 0 && (() => {
-              const expectedCount = (activeContact as any).messageCount || (activeContact as any).message_count || 0;
+              const expectedCount = activeContactMessageCount;
               if (expectedCount > 0) {
                 return (
                   <div className="flex flex-col items-center justify-center min-h-[300px] text-center p-6 bg-amber-50/50 dark:bg-amber-950/10 rounded-2xl border border-dashed border-amber-200 dark:border-amber-900/30 my-8">
@@ -1899,344 +2270,48 @@ export function ConversationViewport() {
                   <h4 className="text-sm font-bold text-zinc-500 dark:text-zinc-400">Henüz Mesaj Yok</h4>
                   <p className="text-xs text-zinc-400 dark:text-zinc-500 max-w-sm mt-1.5">
                     Bu konuşmada henüz gönderilmiş veya alınmış bir mesaj bulunmamaktadır.
-                  </p>
-                </div>
-              );
-            })()}
+                </p>
+              </div>
+            );
+          })()}
 
-            {/* Top Virtual Spacer */}
-            {topSpacerHeight > 0 && (
-              <div 
-                style={{ 
-                  height: `${topSpacerHeight}px`, 
-                  width: "100%",
-                  pointerEvents: "none"
-                }} 
-              />
-            )}
+          {/* Top Virtual Spacer */}
+          {topSpacerHeight > 0 && (
+            <div 
+              style={{ 
+                height: `${topSpacerHeight}px`, 
+                width: "100%",
+                pointerEvents: "none"
+              }} 
+            />
+          )}
 
-            {/* Sliced Visible Items */}
-            {flatItems.slice(startIndex, endIndex + 1).map((item) => {
-              const cachedHeight = itemHeights.current[item.id] || (item.type === 'header' ? 48 : 85);
-              
-              return (
-                <VirtualItemWrapper
-                  key={item.id}
-                  id={item.id}
-                  cachedHeight={cachedHeight}
-                  shouldRender={true}
-                  onMeasure={handleItemMeasure}
-                >
-                  {item.type === "header" ? (
-                    <div className="sticky top-2 z-10 flex justify-center w-full my-4 pointer-events-none">
-                      <span
-                        className="text-[11px] font-bold px-3 py-1 rounded-md shadow-sm pointer-events-auto"
-                        style={{ 
-                          background: "var(--q-bg-primary)", 
-                          color: "var(--q-text-secondary)", 
-                          border: "1px solid var(--q-border-default)" 
-                        }}
-                      >
-                        {item.dateLabel}
-                      </span>
-                    </div>
-                  ) : item.type === "media_group" ? (() => {
-                    /* ── WhatsApp-style Image Grid with +N overlay ── */
-                    const allGroupImages = item.messages || [];
-                    const totalCount = allGroupImages.length;
-                    const displayImages = allGroupImages.slice(0, Math.min(4, totalCount));
-                    const overflow = totalCount - 4;
-                    const cols = displayImages.length === 1 ? 1 : 2;
-                    // For 3 images: first image spans full width
-                    const isThreeLayout = displayImages.length === 3;
-
-                    return (
-                    <div className={`flex w-full ${item.message.sender === "user" ? "justify-start" : "justify-end"} pb-4`}>
-                      <div 
-                        className={`relative max-w-[85%] md:max-w-[65%] overflow-hidden shadow-sm transition-all duration-200 hover:shadow-md ${
-                          item.message.sender === "user" 
-                            ? "rounded-2xl rounded-tl-sm" 
-                            : "rounded-2xl rounded-tr-sm"
-                        }`}
-                        style={
-                          item.message.sender === "user"
-                            ? { background: "var(--q-chat-in)" }
-                            : { background: "var(--q-chat-out)" }
-                        }
-                      >
-                        <div 
-                          className="grid gap-[2px]"
-                          style={{ 
-                            gridTemplateColumns: cols === 1 ? '1fr' : 'repeat(2, 1fr)',
-                          }}
-                        >
-                          {displayImages.map((imgMsg: any, idx: number) => {
-                            const isLastWithOverflow = idx === 3 && overflow > 0;
-                            // 3-image layout: first image spans 2 columns
-                            const spanTwo = isThreeLayout && idx === 0;
-                            
-                            return (
-                              <div 
-                                key={imgMsg.id} 
-                                className="relative cursor-pointer overflow-hidden"
-                                style={{ 
-                                  gridColumn: spanTwo ? 'span 2' : undefined,
-                                  aspectRatio: spanTwo ? '2/1' : (displayImages.length <= 2 ? '4/3' : '1/1'),
-                                  minHeight: '80px',
-                                  maxHeight: spanTwo ? '200px' : '180px',
-                                }}
-                                onClick={() => {
-                                  // Find this image's index in allConversationImages
-                                  const globalIdx = allConversationImages.findIndex(
-                                    (ci: any) => ci.src === imgMsg.mediaUrl
-                                  );
-                                  setGallery({
-                                    images: allConversationImages,
-                                    currentIndex: globalIdx >= 0 ? globalIdx : 0,
-                                  });
-                                }}
-                              >
-                                <img
-                                  src={imgMsg.mediaUrl}
-                                  alt={imgMsg.mediaMetadata?.caption || `Görsel ${idx + 1}`}
-                                  className="w-full h-full object-cover hover:opacity-90 transition-opacity"
-                                  loading="lazy"
-                                  draggable={false}
-                                />
-                                {isLastWithOverflow && (
-                                  <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-                                    <span className="text-white text-2xl font-bold">+{overflow}</span>
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                        {/* Timestamp on last image */}
-                        <div className="absolute bottom-1 right-2 flex items-center gap-1 text-[10px] font-semibold tracking-wide" style={{ color: "rgba(255,255,255,0.85)", textShadow: "0 1px 3px rgba(0,0,0,0.5)" }}>
-                          <span>
-                            {allGroupImages[allGroupImages.length - 1]?.timeMs 
-                              ? new Date(allGroupImages[allGroupImages.length - 1].timeMs).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) 
-                              : ''}
-                          </span>
-                          <span className="ml-0.5">
-                            {item.message.sender !== "user" && <CheckCheck className="w-3.5 h-3.5" />}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                    );
-                  })() : (
-                    <div className="flex flex-col q-bubble-in w-full pb-4">
-                      {item.message.sender === "system" ? (
-                        <div className="flex w-full justify-center">
-                          <div
-                            className="rounded-full px-4 py-1.5 flex items-center gap-2 shadow-sm max-w-[90%] md:max-w-[70%] text-center q-glass-strong"
-                            style={{ border: "1px solid var(--q-orange-bg)", color: "var(--q-orange)" }}
-                          >
-                            <ShieldAlert className="w-4 h-4 flex-shrink-0" style={{ color: "var(--q-orange)" }} />
-                            <p className="text-[13px] font-semibold tracking-tight leading-tight">{item.message.text}</p>
-                            <span className="text-[10px] font-bold opacity-60 ml-2 whitespace-nowrap flex items-center gap-1">
-                              <span>{item.message.timeMs ? new Date(item.message.timeMs).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) : item.message.time}</span>
-                              <span className="ml-0.5">
-                                {item.message.status === 'pending' && <Clock className="w-3 h-3" />}
-                                {(item.message.status === 'sent' || !item.message.status) && <Check className="w-3.5 h-3.5" />}
-                                {item.message.status === 'delivered' && <CheckCheck className="w-3.5 h-3.5" />}
-                                {item.message.status === 'read' && <CheckCheck className="w-3.5 h-3.5" style={{ color: "#53bdeb", opacity: 1 }} />}
-                              </span>
-                            </span>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className={`flex w-full ${item.message.sender === "user" ? "justify-start" : "justify-end"} group relative ${item.message.reactions && item.message.reactions.length > 0 ? "mb-3" : ""}`}>
-                          {/* ── QUICK ACTIONS TOOLBAR ── */}
-                          {item.message.providerMessageId && (
-                            <div className={`absolute top-1/2 -translate-y-1/2 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-20 ${
-                              item.message.sender === "user" 
-                                ? "left-[calc(85%+8px)] md:left-[calc(65%+8px)] flex-row" 
-                                : "right-[calc(85%+8px)] md:right-[calc(65%+8px)] flex-row-reverse"
-                            }`}>
-                              {/* Quoted Reply Action */}
-                              <button
-                                onClick={() => setReplyingToMessage(item.message)}
-                                className="p-1.5 rounded-full hover:bg-[var(--q-bg-hover)] text-[var(--q-text-secondary)] transition-colors border border-[var(--q-border-default)] bg-[var(--q-bg-primary)] shadow-sm cursor-pointer"
-                                title="Yanıtla"
-                              >
-                                <CornerUpLeft className="w-3.5 h-3.5" />
-                              </button>
-
-                              {/* Reaction Picker Button */}
-                              {item.message.sender === "user" && (
-                                <div className="relative reaction-picker-container">
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setActiveReactionPickerMsgId(activeReactionPickerMsgId === item.message.id ? null : item.message.id);
-                                    }}
-                                    className="p-1.5 rounded-full hover:bg-[var(--q-bg-hover)] text-[var(--q-text-secondary)] transition-colors border border-[var(--q-border-default)] bg-[var(--q-bg-primary)] shadow-sm cursor-pointer"
-                                    title="Tepki Ekle"
-                                  >
-                                    <Smile className="w-3.5 h-3.5" />
-                                  </button>
-                                  
-                                  {activeReactionPickerMsgId === item.message.id && (
-                                    <div className={`absolute bottom-full mb-1.5 z-30 flex items-center gap-1 p-1 rounded-full shadow-lg border border-[var(--q-border-default)] bg-[var(--q-bg-primary)] ${
-                                      item.message.sender === 'user' ? 'left-0' : 'right-0'
-                                    }`}>
-                                      {["👍", "❤️", "✅", "🙏", "👌", "👎"].map((emoji) => {
-                                        const isSelected = item.message.reactions?.some((r: any) => r.actorLabel === 'Sen' && r.emoji === emoji);
-                                        return (
-                                          <button
-                                            key={emoji}
-                                            onClick={() => {
-                                              handleSendReaction(item.message.providerMessageId, isSelected ? "" : emoji);
-                                              setActiveReactionPickerMsgId(null);
-                                            }}
-                                            className={`w-7 h-7 flex items-center justify-center text-sm rounded-full hover:bg-[var(--q-bg-hover)] transition-colors cursor-pointer ${
-                                              isSelected ? 'bg-[var(--q-purple-bg)] text-[var(--q-purple)]' : ''
-                                            }`}
-                                          >
-                                            {emoji}
-                                          </button>
-                                        );
-                                      })}
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          )}
-
-                          <div
-                            className={`relative max-w-[85%] md:max-w-[65%] px-3 py-2 md:px-4 md:py-2.5 shadow-sm transition-all duration-200 hover:shadow-md ${
-                              item.message.sender === "user" 
-                                ? "rounded-2xl rounded-tl-sm" 
-                                : "rounded-2xl rounded-tr-sm"
-                            }`}
-                            style={
-                              item.message.sender === "user"
-                                ? { background: "var(--q-chat-in)", color: "var(--q-text-primary)" }
-                                : { background: "var(--q-chat-out)", color: "var(--q-text-primary)" }
-                            }
-                          >
-                            {item.message.sender !== "user" && (
-                              <div className="flex items-center gap-1 mb-1 opacity-70">
-                                {item.message.sender === "bot" ? (
-                                  <Sparkles className="w-3 h-3" style={{ color: "var(--q-purple)" }} />
-                                ) : (
-                                  <User className="w-3 h-3" style={{ color: "var(--q-text-secondary)" }} />
-                                )}
-                                <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: item.message.sender === "bot" ? "var(--q-purple)" : "var(--q-text-secondary)" }}>
-                                  {item.message.sender === "bot" ? "AI" : "SEN"}
-                                </span>
-                              </div>
-                            )}
-                            {item.message.mediaMetadata?.native && (item.message.mediaMetadata.native.reply_to_provider_message_id || item.message.mediaMetadata.native.reply_to_message_id) && (
-                              <QuotedMessagePreview 
-                                native={item.message.mediaMetadata.native} 
-                                isOwnMessage={item.message.sender !== "user"} 
-                              />
-                            )}
-
-                            {/* ── MEDIA CONTENT ── */}
-                            {item.message.mediaType && item.message.mediaUrl && (
-                              <MediaBubbleContent
-                                message={item.message}
-                                onGalleryOpen={(src) => {
-                                  const idx = allConversationImages.findIndex((ci: any) => ci.src === src);
-                                  setGallery({
-                                    images: allConversationImages,
-                                    currentIndex: idx >= 0 ? idx : 0,
-                                  });
-                                }}
-                              />
-                            )}
-
-                            {/* ── TEXT CONTENT (caption only, no emoji prefix) ── */}
-                            {(() => {
-                              const text = item.message.text;
-                              const mt = item.message.mediaType;
-                              if (!text) return <div className="pb-4" />;
-                              
-                              // If media is rendered, extract clean caption (strip "📷 Fotoğraf: " prefix)
-                              if (mt && item.message.mediaUrl) {
-                                const placeholders = ['📷 Fotoğraf', '📎 Belge', '🎵 Ses kaydı', '🎬 Video', '📍 Konum', '🏷️ Sticker'];
-                                const emojiPrefixes = ['📷', '📎', '🎵', '🎬', '📍', '🏷️', '📦'];
-                                
-                                // Pure placeholder — hide text entirely
-                                if (placeholders.includes(text) || emojiPrefixes.includes(text)) {
-                                  return <div className="pb-4" />;
-                                }
-                                
-                                // "📷 Fotoğraf: caption" → show only caption
-                                const colonIdx = text.indexOf(': ');
-                                if (colonIdx !== -1) {
-                                  const before = text.substring(0, colonIdx);
-                                  if (emojiPrefixes.some(p => before.startsWith(p))) {
-                                    const caption = text.substring(colonIdx + 2).trim();
-                                    if (caption) {
-                                      return (
-                                        <p className="text-[15px] leading-[1.4] font-medium whitespace-pre-wrap pb-4">
-                                          {caption}
-                                        </p>
-                                      );
-                                    }
-                                    return <div className="pb-4" />;
-                                  }
-                                }
-                              }
-                              
-                              // Non-media message or no prefix — show full text
-                              return (
-                                <p className="text-[15px] leading-[1.4] font-medium whitespace-pre-wrap pb-4">
-                                  {text}
-                                </p>
-                              );
-                            })()}
-                            
-                            <div className="absolute bottom-1 right-2 flex items-center gap-1 text-[10px] font-semibold tracking-wide" style={{ color: "var(--q-text-secondary)" }}>
-                              <span className="opacity-50">{item.message.timeMs ? new Date(item.message.timeMs).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) : item.message.time}</span>
-                              {item.message.sender !== "user" && (
-                                <span className="ml-0.5 opacity-80">
-                                  {item.message.status === 'pending' && <Clock className="w-3 h-3 opacity-50" />}
-                                  {(item.message.status === 'sent' || (!item.message.status && item.message.sender === 'agent')) && <Check className="w-3.5 h-3.5 opacity-70" />}
-                                  {item.message.status === 'delivered' && <CheckCheck className="w-3.5 h-3.5 opacity-70" />}
-                                  {item.message.status === 'read' && <CheckCheck className="w-3.5 h-3.5" style={{ color: "#53bdeb", opacity: 1 }} />}
-                                </span>
-                              )}
-                            </div>
-
-                            {/* ── REACTIONS DISPLAY ── */}
-                            {item.message.reactions && item.message.reactions.length > 0 && (
-                              <div 
-                                className={`absolute bottom-[-11px] ${item.message.sender === 'user' ? 'right-2' : 'left-2'} z-10 flex items-center gap-0.5 px-1 py-[1.5px] rounded-full text-[10px] shadow-sm bg-[var(--q-bg-primary)] border border-[var(--q-border-default)] cursor-pointer select-none`}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  if (item.message.sender === 'user') {
-                                    setActiveReactionPickerMsgId(activeReactionPickerMsgId === item.message.id ? null : item.message.id);
-                                  }
-                                }}
-                              >
-                                {item.message.reactions.map((r: any, idx: number) => (
-                                  <span key={idx} title={`${r.actorLabel}: ${r.emoji}`}>
-                                    {r.emoji}
-                                  </span>
-                                ))}
-                                {item.message.reactions.length > 1 && (
-                                  <span className="text-[9px] font-bold text-[var(--q-text-secondary)]">
-                                    {item.message.reactions.length}
-                                  </span>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </VirtualItemWrapper>
-              );
-            })}
+          {/* Sliced Visible Items */}
+          {flatItems.slice(startIndex, endIndex + 1).map((item) => {
+            const cachedHeight = itemHeights.current[item.id] || (item.type === 'header' ? 48 : 85);
+            
+            return (
+              <VirtualItemWrapper
+                key={item.id}
+                id={item.id}
+                cachedHeight={cachedHeight}
+                shouldRender={true}
+                onMeasure={handleItemMeasure}
+              >
+                <MessageBubbleRow
+                  item={item}
+                  activePhone={activePhone}
+                  replyingToMessage={replyingToMessage}
+                  setReplyingToMessage={setReplyingToMessage}
+                  activeReactionPickerMsgId={activeReactionPickerMsgId}
+                  setActiveReactionPickerMsgId={setActiveReactionPickerMsgId}
+                  handleSendReaction={handleSendReaction}
+                  allConversationImages={allConversationImages}
+                  setGallery={setGallery}
+                />
+              </VirtualItemWrapper>
+            );
+          })}
 
             {/* Bottom Virtual Spacer */}
             {bottomSpacerHeight > 0 && (
@@ -2261,7 +2336,7 @@ export function ConversationViewport() {
           />
           
           {/* AI Observability Timeline */}
-          {activeContact.isBotActive && <AiRuntimeTimeline conversationId={activePhone!} />}
+          {activeContactIsBotActive && <AiRuntimeTimeline conversationId={activePhone!} />}
           
           {/* Zero-Layout-Shift Typing Indicator at the bottom */}
           <TypingIndicator 

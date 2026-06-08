@@ -88,7 +88,10 @@ function CrmSkeleton() {
 }
 
 export function ContextPanel() {
-  const { activeContact, mobileView, setMobileView, isSidebarCollapsed } = useInboxStore();
+  const activeContact = useInboxStore((state) => state.activeContact);
+  const mobileView = useInboxStore((state) => state.mobileView);
+  const setMobileView = useInboxStore((state) => state.setMobileView);
+  const isSidebarCollapsed = useInboxStore((state) => state.isSidebarCollapsed);
   const params = useParams();
   const tenantSlug = typeof params?.tenant_slug === 'string' ? params.tenant_slug : 'baskent';
   const { tenant } = useTenant();
@@ -100,8 +103,6 @@ export function ContextPanel() {
   const [isAppointmentModalOpen, setIsAppointmentModalOpen] = useState(false);
   const [isReminderModalOpen, setIsReminderModalOpen] = useState(false);
   const queryClient = useQueryClient();
-
-  const oppId = activeContact?.active_opp_id || activeContact?.active_opportunity_id || activeContact?.opportunity_id || "";
 
   const handleModalSuccess = () => {
     queryClient.invalidateQueries({ queryKey: ["conversations"] });
@@ -274,20 +275,21 @@ export function ContextPanel() {
         return {
           botDirective: null,
           steeringTasks: [],
-          formGreetingEligibility: null
+          formGreetingEligibility: null,
+          formData: null,
+          opportunity: null,
+          formFields: null
         };
       }
 
-      return {
-        botDirective: res.botDirective,
-        steeringTasks: res.steeringTasks,
-        formGreetingEligibility: res.formGreetingEligibility
-      };
+      return res;
     },
     enabled: !!conversationId && isUuid,
     staleTime: 30000,
     gcTime: 5 * 60 * 1000,
   });
+
+  const oppId = crmData?.opportunity?.id || activeContact?.active_opp_id || activeContact?.active_opportunity_id || activeContact?.opportunity_id || "";
 
   // Track isCrmLoading to set local loading indicators
   useEffect(() => {
@@ -463,9 +465,10 @@ export function ContextPanel() {
   let formDataEntries: { key: string; value: string }[] = [];
   let campaignName: string | null = null;
   let rawObj: any = null;
-  if (activeContact?.formData?.raw) {
+  const contactFormData = crmData?.formData || activeContact?.formData;
+  if (contactFormData?.raw) {
     try {
-      rawObj = typeof activeContact.formData.raw === "string" ? JSON.parse(activeContact.formData.raw) : activeContact.formData.raw;
+      rawObj = typeof contactFormData.raw === "string" ? JSON.parse(contactFormData.raw) : contactFormData.raw;
       campaignName = rawObj.campaign_name || rawObj.campaignName || rawObj.utm_campaign || rawObj.utmCampaign || null;
       const skipKeys = ["id", "leadgen_id", "form_id", "ad_id", "adset_id", "campaign_id", "platform", "is_organic", "created_time", "phone_number_id", "full_name", "phone_number", "_all_phones"];
       formDataEntries = Object.entries(rawObj)
@@ -477,23 +480,28 @@ export function ContextPanel() {
     } catch (e) {
       console.error("Error parsing form data", e);
     }
-  } else if (activeContact?.form_raw_data) {
+  } else if (crmData?.form_raw_data || activeContact?.form_raw_data) {
     try {
-      rawObj = typeof activeContact.form_raw_data === "string" ? JSON.parse(activeContact.form_raw_data) : activeContact.form_raw_data;
+      const rawSource = crmData?.form_raw_data || activeContact?.form_raw_data;
+      rawObj = typeof rawSource === "string" ? JSON.parse(rawSource) : rawSource;
       campaignName = rawObj.campaign_name || rawObj.campaignName || rawObj.utm_campaign || rawObj.utmCampaign || null;
     } catch (_) {}
   }
 
   // Compute recommendations
   const msgExt = activeContact?.last_message ? extractFromPatientMessageDeterministic(activeContact.last_message) : null;
-  const isDeptLocked = activeContact?.opp_metadata?.department_locked === true;
+  const activeOppMetadata = crmData?.opportunity?.opp_metadata || activeContact?.opp_metadata;
+  const formFields = crmData?.formFields || {};
+  const formDepartment = formFields.formDepartment || activeContact?.formDepartment;
+  const formDepartmentSource = formFields.formDepartmentSource || activeContact?.formDepartmentSource;
+  const isDeptLocked = activeOppMetadata?.department_locked === true;
   
   const resolvedDeptObj = resolveDepartmentWithConflict({
     existingDept: department || null,
-    formCampaignDept: activeContact?.formDepartmentSource === 'campaign_name' || activeContact?.formDepartmentSource === 'form_name' ? activeContact.formDepartment : null,
-    formCampaignConfidence: activeContact?.formDepartmentSource === 'campaign_name' || activeContact?.formDepartmentSource === 'form_name' ? 1.0 : 0.0,
-    formComplaintDept: activeContact?.formDepartmentSource === 'complaint_keyword' ? activeContact.formDepartment : null,
-    formComplaintConfidence: activeContact?.formDepartmentSource === 'complaint_keyword' ? 1.0 : 0.0,
+    formCampaignDept: formDepartmentSource === 'campaign_name' || formDepartmentSource === 'form_name' ? formDepartment : null,
+    formCampaignConfidence: formDepartmentSource === 'campaign_name' || formDepartmentSource === 'form_name' ? 1.0 : 0.0,
+    formComplaintDept: formDepartmentSource === 'complaint_keyword' ? formDepartment : null,
+    formComplaintConfidence: formDepartmentSource === 'complaint_keyword' ? 1.0 : 0.0,
     patientMsgDept: msgExt?.departmentCandidate || null,
     patientMsgConfidence: msgExt?.departmentConfidence || 'low',
     isLocked: isDeptLocked
@@ -507,7 +515,7 @@ export function ContextPanel() {
 
   // Parse all phones
   let allPhones: string[] = [];
-  const contactRawObj = activeContact.formData?.raw || activeContact.form_raw_data;
+  const contactRawObj = contactFormData?.raw || crmData?.form_raw_data || activeContact?.form_raw_data;
   if (contactRawObj) {
     try {
       const parsedRaw = typeof contactRawObj === "string" ? JSON.parse(contactRawObj) : contactRawObj;
@@ -1658,10 +1666,10 @@ export function ContextPanel() {
           {/* AI Summary Card */}
           {(() => {
             const summaryInput = {
-              oppSummary: activeContact?.opp_summary,
-              oppAiReason: activeContact?.opp_ai_reason,
-              legacyAiSummary: activeContact?.legacy_ai_summary,
-              priority: activeContact?.opp_priority || activeContact?.priority,
+              oppSummary: crmData?.opportunity?.opp_summary || activeContact?.opp_summary,
+              oppAiReason: crmData?.opportunity?.opp_ai_reason || activeContact?.opp_ai_reason,
+              legacyAiSummary: crmData?.opportunity?.legacy_ai_summary || activeContact?.legacy_ai_summary,
+              priority: crmData?.opportunity?.opp_priority || activeContact?.opp_priority || activeContact?.priority,
               updatedAt: activeContact?.last_message_at
             };
             const resolvedSummary = resolveUniversalAISummary(
@@ -1737,11 +1745,11 @@ export function ContextPanel() {
         </div>
 
         {/* Form Geçmişi */}
-        {activeContact.formData && (
+        {crmData?.formData && (
           <div className="p-2.5 rounded-2xl border bg-white/40 space-y-2 shadow-sm text-left" style={{ borderColor: "var(--q-border-default)" }}>
             <div className="flex items-center justify-between pb-1 border-b border-black/[0.03]">
               <span className="text-[9px] font-extrabold uppercase tracking-widest text-[#86868B]">Form Geçmişi</span>
-              <span className="text-[8px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 rounded-full px-1.5 py-0.2">1 Form</span>
+              <span className="text-[8px] font-bold text-[#86868B] bg-indigo-50 border border-indigo-100 rounded-full px-1.5 py-0.2">1 Form</span>
             </div>
             
             <div 
@@ -1750,7 +1758,7 @@ export function ContextPanel() {
             >
               <div className="flex items-center justify-between">
                 <span className="text-[11px] font-extrabold text-[#1D1D1F] line-clamp-1">
-                  {activeContact.formData?.name || "Başvuru Formu"}
+                  {crmData.formData?.name || "Başvuru Formu"}
                 </span>
                 <span className="text-[9px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 rounded-full px-1.5 py-0.2 shrink-0">
                   Detay
@@ -1760,7 +1768,7 @@ export function ContextPanel() {
               <div className="flex items-center gap-2 text-[9px] text-[#86868B] font-semibold">
                 <div className="flex items-center gap-0.5">
                   <Calendar className="w-2.5 h-2.5 text-indigo-400" />
-                  <span>{activeContact.formData?.date || "Belirtilmemiş"}</span>
+                  <span>{crmData.formData?.date || "Belirtilmemiş"}</span>
                 </div>
                 {campaignName && (
                   <div className="flex items-center gap-0.5 max-w-[120px]">
@@ -1770,11 +1778,11 @@ export function ContextPanel() {
                 )}
               </div>
 
-              {(activeContact.formComplaint || rawObj?.complaint || rawObj?.sikayet) && (
+              {(crmData.formFields?.formComplaint || rawObj?.complaint || rawObj?.sikayet) && (
                 <div className="pt-1 border-t border-black/[0.03]">
                   <span className="block text-[8px] font-bold text-[#86868B] uppercase tracking-wider mb-0.5">Şikayet Özeti</span>
                   <p className="text-[10px] font-semibold text-[#1D1D1F] line-clamp-1 leading-snug">
-                    {activeContact.formComplaint || rawObj?.complaint || rawObj?.sikayet}
+                    {crmData.formFields?.formComplaint || rawObj?.complaint || rawObj?.sikayet}
                   </p>
                 </div>
               )}
@@ -1811,18 +1819,18 @@ export function ContextPanel() {
       )}
 
       {/* Form Details Popup Modal */}
-      {activeContact.formData && (
+      {crmData?.formData && (
         <PatientFormModal 
           isOpen={isFormModalOpen}
           onClose={() => setIsFormModalOpen(false)}
           formData={{
-            name: activeContact.formData?.name || activeContact.formData?.form_name || "İsimsiz Form",
-            date: activeContact.formData?.date || activeContact.formData?.created_time,
-            raw: activeContact.formData?.raw || activeContact.form_raw_data,
-            formComplaint: activeContact.formComplaint || activeContact.formData?.formComplaint,
-            formReportStatus: activeContact.formReportStatus || activeContact.formData?.formReportStatus,
-            formAppointmentPref: activeContact.formAppointmentPref || activeContact.formData?.formAppointmentPref,
-            formAge: activeContact.formAge || activeContact.formData?.formAge
+            name: crmData.formData?.name || "İsimsiz Form",
+            date: crmData.formData?.date || "Belirtilmemiş",
+            raw: crmData.formData?.raw,
+            formComplaint: crmData.formFields?.formComplaint,
+            formReportStatus: crmData.formFields?.formReportStatus,
+            formAppointmentPref: crmData.formFields?.formAppointmentPref,
+            formAge: crmData.formFields?.formAge
           }}
           patientName={patientName}
         />

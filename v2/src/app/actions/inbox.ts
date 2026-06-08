@@ -28,7 +28,7 @@ export async function getConversations(
   return withActionGuard(
     { actionName: 'getConversations' },
     async (ctx) => {
-      const limit = 50;
+      const limit = 30;
       const offset = (page - 1) * limit;
       const searchFilter = search.trim() ? `%${search.trim()}%` : null;
       
@@ -120,8 +120,7 @@ export async function getConversations(
           c.autopilot_enabled,
           c.phase,
           c.lead_stage as stage,
-          -- P1B: Tags from active opportunity (scoped), fallback to conversation tags
-          COALESCE(active_opp.tags::text, c.tags) as tags,
+          c.tags as tags,
           c.tags as conv_tags_raw,
           c.channel,
           c.notes as notes,
@@ -133,29 +132,28 @@ export async function getConversations(
           m.model_used as last_message_model,
           m.media_type as last_message_media_type,
           m.media_url as last_message_media_url,
-          l.id as lead_id,
-          l.form_name,
-          l.patient_name as form_patient_name,
-          l.raw_data as form_raw_data,
-          EXTRACT(EPOCH FROM l.created_at) * 1000 as form_date_ms,
-          -- P1B: Active opportunity fields (source of truth)
-          active_opp.id as active_opp_id,
-          active_opp.requester_name as opp_requester_name,
-          active_opp.patient_name as opp_patient_name,
-          active_opp.country as opp_country,
-          active_opp.department as opp_department,
-          active_opp.summary as opp_summary,
-          active_opp.ai_reason as opp_ai_reason,
-          active_opp.stage as opp_stage,
-          active_opp.priority as opp_priority,
-          active_opp.patient_relation as opp_patient_relation,
-          active_opp.metadata as opp_metadata,
-          active_opp.automation_status as opp_automation_status,
-          -- P1B FIX: No global fallback — prevents Mehmet/Irak leaking into Almanya/Kardiyoloji
-          active_opp.summary as ai_summary,
-          mem.summary_text as legacy_ai_summary,
-          mem.buying_intent as ai_buying_intent,
-          mem.sentiment as ai_sentiment,
+          -- Fallbacks for CRM fields removed from sidebar query
+          NULL::uuid as lead_id,
+          NULL::text as form_name,
+          NULL::text as form_patient_name,
+          NULL::text as form_raw_data,
+          NULL::double precision as form_date_ms,
+          NULL::uuid as active_opp_id,
+          NULL::text as opp_requester_name,
+          NULL::text as opp_patient_name,
+          NULL::text as opp_country,
+          NULL::text as opp_department,
+          NULL::text as opp_summary,
+          NULL::text as opp_ai_reason,
+          NULL::text as opp_stage,
+          NULL::text as opp_priority,
+          NULL::text as opp_patient_relation,
+          NULL::jsonb as opp_metadata,
+          NULL::text as opp_automation_status,
+          NULL::text as ai_summary,
+          NULL::text as legacy_ai_summary,
+          NULL::text as ai_buying_intent,
+          NULL::text as ai_sentiment,
           (
             SELECT COUNT(*)::int 
             FROM messages m_unread
@@ -206,43 +204,12 @@ export async function getConversations(
           LIMIT 1
         ) m ON true
         LEFT JOIN LATERAL (
-          SELECT id, form_name, patient_name, raw_data, created_at 
-          FROM leads 
-          WHERE leads.tenant_id = $1
-            AND (
-              (c.customer_id IS NOT NULL AND leads.customer_id = c.customer_id)
-              OR
-              (
-                leads.phone_number LIKE '%' || RIGHT(COALESCE(c.real_phone, c.phone_number), 10) || '%'
-                OR (
-                  leads.raw_data IS NOT NULL 
-                  AND leads.raw_data != ''
-                  AND leads.raw_data LIKE '%_all_phones%'
-                  AND (
-                    CASE
-                      WHEN jsonb_typeof(leads.raw_data::jsonb->'_all_phones') = 'array' 
-                        THEN (leads.raw_data::jsonb->'_all_phones') @> jsonb_build_array(COALESCE(c.real_phone, c.phone_number))
-                      WHEN jsonb_typeof(leads.raw_data::jsonb->'_all_phones') = 'string' 
-                        THEN (leads.raw_data::jsonb->>'_all_phones')::jsonb @> jsonb_build_array(COALESCE(c.real_phone, c.phone_number))
-                      ELSE false
-                    END
-                  )
-                )
-              )
-            )
-          ORDER BY created_at DESC 
-          LIMIT 1
-        ) l ON true
-        LEFT JOIN conversation_memory mem ON c.id = mem.conversation_id
-        -- P1B: Active opportunity JOIN (tenant safety enforced)
-        LEFT JOIN opportunities active_opp 
-          ON active_opp.id = c.active_opportunity_id 
-          AND active_opp.tenant_id = c.tenant_id
-          AND active_opp.conversation_id = c.id
-        LEFT JOIN LATERAL (
           SELECT id as active_task_id, task_type as active_task_type, status as active_task_status
           FROM follow_up_tasks
-          WHERE opportunity_id = active_opp.id
+          WHERE (
+            conversation_id = c.id::text 
+            OR (opportunity_id = c.active_opportunity_id AND c.active_opportunity_id IS NOT NULL)
+          )
             AND tenant_id = c.tenant_id
             AND status = 'pending'
           ORDER BY due_at ASC, created_at DESC
@@ -353,9 +320,7 @@ export async function getConversations(
 
       queryText += ` ORDER BY (cp.id IS NOT NULL) DESC, c.last_message_at DESC NULLS LAST `;
 
-      if (!isNoReplyFilter) {
-        queryText += ` LIMIT $5 OFFSET $6 `;
-      }
+      queryText += ` LIMIT $5 OFFSET $6 `;
 
       const rows = await ctx.db.executeSafe({
         text: queryText,
@@ -393,38 +358,24 @@ export async function getConversations(
         const detailedName = resolvePatientNameDetailed({
           oppRequesterName: r.opp_requester_name,
           oppPatientName: r.opp_patient_name,
-          formRawDataName: typeof r.form_raw_data === 'string' ? (() => {
-            try { 
-              const parsed = JSON.parse(r.form_raw_data);
-              return parsed.full_name || parsed['full name'] || parsed['Full Name'];
-            } catch { return null; }
-          })() : (r.form_raw_data?.full_name || r.form_raw_data?.['full name'] || r.form_raw_data?.['Full Name']),
+          formRawDataName: null,
           formPatientName: r.form_patient_name,
           convPatientName: r.name,
           customerDisplayName: r.customer_display_name,
           whatsappProfileName: r.wa_profile_name,
           phoneFallback: r.id,
-          metadata: typeof r.opp_metadata === 'string' ? (() => {
-            try { return JSON.parse(r.opp_metadata); } catch { return {}; }
-          })() : (r.opp_metadata || {})
+          metadata: {}
         });
-
-        // Parse fields via new deterministic Form Field Extractor
-        const formExtraction = r.form_raw_data ? extractFormFields(
-          typeof r.form_raw_data === 'string' ? JSON.parse(r.form_raw_data) : r.form_raw_data
-        ) : null;
 
         // Resolve country and source via unified country resolver
         const detailedCountry = resolvePatientCountryDetailed({
-          manualCountry: r.opp_country || r.country,
-          formCountry: formExtraction?.country,
+          manualCountry: r.country,
+          formCountry: null,
           phoneFallback: r.id || r.phone_number,
-          metadata: typeof r.opp_metadata === 'string' ? (() => {
-            try { return JSON.parse(r.opp_metadata); } catch { return {}; }
-          })() : (r.opp_metadata || {})
+          metadata: {}
         });
 
-        const resolvedDepartment = r.opp_department || r.department || null;
+        const resolvedDepartment = r.department || null;
 
         const lastMsg = r.last_message || '';
         const lastMsgDir = r.last_message_direction || 'in';
@@ -439,38 +390,17 @@ export async function getConversations(
           lastOutboundExpectsReply = classification.expectsReply;
 
           const normPhone = normalizePhoneForIdentity(r.id || r.phone_number);
-          const isPrimaryOptedOut = (r.opp_metadata?.opt_out_requested === true) || 
-                                    (r.opp_metadata?.opt_out_requested === 'true') ||
-                                    (normPhone.e164 && optOutPhones.has(normPhone.e164));
+          const isPrimaryOptedOut = (normPhone.e164 && optOutPhones.has(normPhone.e164));
           
-          let hasOptOutKeywordInFamily = false;
-          let parsedRaw = r.form_raw_data;
-          if (typeof parsedRaw === 'string') {
-            try { parsedRaw = JSON.parse(parsedRaw); } catch(_) {}
-          }
-          if (parsedRaw && parsedRaw._all_phones) {
-            const parsed = parseAllPhones(parsedRaw._all_phones);
-            for (const p of parsed) {
-              const pNorm = normalizePhoneForIdentity(p).e164;
-              if (pNorm && optOutPhones.has(pNorm)) {
-                hasOptOutKeywordInFamily = true;
-                break;
-              }
-            }
-          }
-
-          const currentStage = r.opp_stage || r.stage;
+          const currentStage = r.stage;
           const isExcludedStage = ['lost', 'not_qualified', 'arrived'].includes(currentStage);
           const isBookedClosingMsg = currentStage === 'booked' && classification.isClosingMessage;
-          const isAutomationStopped = r.opp_automation_status === 'stopped' || r.opp_automation_status === 'paused';
-          const isArchived = !!r.is_pinned_as_archived || !!r.is_archived; // Check archived flags
+          const isArchived = !!r.is_archived; // Check archived flags
 
           if (classification.expectsReply && 
               !isPrimaryOptedOut && 
-              !hasOptOutKeywordInFamily && 
               !isExcludedStage && 
               !isBookedClosingMsg && 
-              !isAutomationStopped &&
               !isArchived) {
             
             const lastOutboundTime = r.last_message_time_ms ? parseFloat(r.last_message_time_ms) : 0;
@@ -491,6 +421,8 @@ export async function getConversations(
 
         return {
           ...r,
+          conversationId: r.conversation_id,
+          conversation_id: r.conversation_id,
           name: detailedName.displayName,
           name_source: detailedName.nameSource,
           name_confidence: detailedName.nameConfidence,
@@ -500,12 +432,12 @@ export async function getConversations(
           country_confirmation_needed: detailedCountry.countryConfirmationNeeded,
           country_conflict: detailedCountry.conflict || null,
           department: resolvedDepartment,
-          formDepartment: formExtraction?.department || null,
-          formComplaint: formExtraction?.complaint || null,
-          formReportStatus: formExtraction?.reportStatus || null,
-          formAppointmentPref: formExtraction?.appointmentPref || null,
-          formAge: formExtraction?.age || null,
-          formDepartmentSource: formExtraction?.departmentSource || null,
+          formDepartment: null,
+          formComplaint: null,
+          formReportStatus: null,
+          formAppointmentPref: null,
+          formAge: null,
+          formDepartmentSource: null,
           score: r.stage === 'appointed' ? 100 : r.stage === 'contacted' ? 60 : 30,
           isBotActive: r.autopilot_enabled,
           formattedTime,
@@ -522,22 +454,14 @@ export async function getConversations(
           active_task_id: r.active_task_id || null,
           active_task_type: r.active_task_type || null,
           active_task_status: r.active_task_status || null,
-          opp_summary: r.opp_summary || null,
-          opp_ai_reason: r.opp_ai_reason || null,
-          legacy_ai_summary: r.legacy_ai_summary || null,
-          ai_crm_summary: r.opp_summary || r.legacy_ai_summary || '',
+          opp_summary: null,
+          opp_ai_reason: null,
+          legacy_ai_summary: null,
+          ai_crm_summary: '',
           notes: r.notes || '',
-          patientRelation: r.opp_patient_relation || null,
-          formData: (r.form_name || r.lead_id) ? {
-            name: r.form_name || "Başvuru Formu",
-            date: r.form_date_ms ? new Date(parseFloat(r.form_date_ms)).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' }) : '',
-            raw: r.form_raw_data
-          } : null,
-          aiSummary: (r.opp_summary || r.legacy_ai_summary) ? {
-            text: r.opp_summary || r.legacy_ai_summary || '',
-            buying_intent: r.ai_buying_intent,
-            sentiment: r.ai_sentiment
-          } : null,
+          patientRelation: null,
+          formData: null,
+          aiSummary: null,
           noReplyFollowup,
           is_no_reply_eligible: isNoReplyEligible,
           no_reply_hours: noReplyHoursVal,
@@ -650,8 +574,7 @@ export async function getConversations(
           finalEligibleList.push(primaryConv);
         }
 
-        const offsetVal = (page - 1) * limit;
-        return finalEligibleList.slice(offsetVal, offsetVal + limit);
+        return finalEligibleList;
       }
 
       return processedRows;
@@ -3476,13 +3399,33 @@ export async function getCrmPanelBundleAction(conversationId: string) {
       }
 
       // Query 1: Fetch conversation details (customer_id, active_opportunity_id, phone_number)
-      // and lateral join leads to check lead connection
+      // and lateral join leads to check lead connection, plus opportunities and memory
       const convRows = await ctx.db.executeSafe({
         text: `
           SELECT c.id, c.phone_number, c.patient_name, c.customer_id, c.active_opportunity_id,
+                 c.department, c.country, c.notes, c.lead_stage as stage, c.tags, c.autopilot_enabled,
                  l.id as lead_id, l.form_name, l.raw_data as form_raw_data,
-                 EXTRACT(EPOCH FROM l.created_at) * 1000 as form_date_ms
+                 EXTRACT(EPOCH FROM l.created_at) * 1000 as form_date_ms,
+                 active_opp.id as active_opp_id,
+                 active_opp.requester_name as opp_requester_name,
+                 active_opp.patient_name as opp_patient_name,
+                 active_opp.country as opp_country,
+                 active_opp.department as opp_department,
+                 active_opp.summary as opp_summary,
+                 active_opp.ai_reason as opp_ai_reason,
+                 active_opp.stage as opp_stage,
+                 active_opp.priority as opp_priority,
+                 active_opp.patient_relation as opp_patient_relation,
+                 active_opp.metadata as opp_metadata,
+                 active_opp.automation_status as opp_automation_status,
+                 mem.summary_text as legacy_ai_summary,
+                 mem.buying_intent as ai_buying_intent,
+                 mem.sentiment as ai_sentiment,
+                 NULLIF(TRIM(CONCAT(cprof.first_name, ' ', cprof.last_name)), '') as customer_display_name
           FROM conversations c
+          LEFT JOIN customer_profiles cprof
+            ON cprof.id = c.customer_id
+            AND cprof.tenant_id = c.tenant_id
           LEFT JOIN LATERAL (
             SELECT id, form_name, raw_data, created_at 
             FROM leads 
@@ -3495,6 +3438,11 @@ export async function getCrmPanelBundleAction(conversationId: string) {
             ORDER BY created_at DESC 
             LIMIT 1
           ) l ON true
+          LEFT JOIN opportunities active_opp 
+            ON active_opp.id = c.active_opportunity_id 
+            AND active_opp.tenant_id = c.tenant_id
+            AND active_opp.conversation_id = c.id
+          LEFT JOIN conversation_memory mem ON c.id = mem.conversation_id
           WHERE c.id = $1 AND c.tenant_id = $2
           LIMIT 1
         `,
@@ -3665,13 +3613,50 @@ export async function getCrmPanelBundleAction(conversationId: string) {
         };
       }
 
+      // Parse form fields via new deterministic Form Field Extractor
+      const formExtraction = conv.form_raw_data ? extractFormFields(
+        typeof conv.form_raw_data === 'string' ? JSON.parse(conv.form_raw_data) : conv.form_raw_data
+      ) : null;
+
       const duration = performance.now() - startTime;
       console.log(`[CRM_PANEL_BUNDLE_TRACE] conversationId=${conversationId} durationMs=${duration.toFixed(2)} tasksCount=${suggestions.length} formGreetingEligible=${formGreeting.eligible}`);
 
       return {
         botDirective: directive,
         steeringTasks: suggestions,
-        formGreetingEligibility: formGreeting
+        formGreetingEligibility: formGreeting,
+        formData: (conv.form_name || conv.lead_id) ? {
+          name: conv.form_name || "Başvuru Formu",
+          date: conv.form_date_ms ? new Date(parseFloat(conv.form_date_ms)).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' }) : '',
+          raw: conv.form_raw_data
+        } : null,
+        opportunity: {
+          id: conv.active_opportunity_id || conv.active_opp_id || null,
+          opp_requester_name: conv.opp_requester_name || null,
+          opp_patient_name: conv.opp_patient_name || null,
+          opp_country: conv.opp_country || null,
+          opp_department: conv.opp_department || null,
+          opp_summary: conv.opp_summary || null,
+          opp_ai_reason: conv.opp_ai_reason || null,
+          opp_stage: conv.opp_stage || null,
+          opp_priority: conv.opp_priority || null,
+          opp_patient_relation: conv.opp_patient_relation || null,
+          opp_metadata: typeof conv.opp_metadata === 'string' ? (() => {
+            try { return JSON.parse(conv.opp_metadata); } catch { return {}; }
+          })() : (conv.opp_metadata || {}),
+          opp_automation_status: conv.opp_automation_status || null,
+          legacy_ai_summary: conv.legacy_ai_summary || null,
+          ai_buying_intent: conv.ai_buying_intent || null,
+          ai_sentiment: conv.ai_sentiment || null,
+        },
+        formFields: {
+          formDepartment: formExtraction?.department || null,
+          formComplaint: formExtraction?.complaint || null,
+          formReportStatus: formExtraction?.reportStatus || null,
+          formAppointmentPref: formExtraction?.appointmentPref || null,
+          formAge: formExtraction?.age || null,
+          formDepartmentSource: formExtraction?.departmentSource || null
+        }
       };
     }
   ).then(res => {

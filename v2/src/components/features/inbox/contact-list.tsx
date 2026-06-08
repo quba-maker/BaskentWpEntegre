@@ -272,20 +272,17 @@ type InboxChannelFilter =
 type InboxStageFilter = string | 'all';
 
 export function ContactRail() {
-  const { 
-    activePhone, 
-    activeContact, 
-    setActiveContact, 
-    mobileView,
-    isSelectionMode,
-    selectedIds,
-    setSelectionMode,
-    toggleSelected,
-    setSelectedIds,
-    clearSelection,
-    isSidebarCollapsed,
-    toggleSidebar
-  } = useInboxStore();
+  const activePhone = useInboxStore((state) => state.activePhone);
+  const setActiveContact = useInboxStore((state) => state.setActiveContact);
+  const mobileView = useInboxStore((state) => state.mobileView);
+  const isSelectionMode = useInboxStore((state) => state.isSelectionMode);
+  const selectedIds = useInboxStore((state) => state.selectedIds);
+  const setSelectionMode = useInboxStore((state) => state.setSelectionMode);
+  const toggleSelected = useInboxStore((state) => state.toggleSelected);
+  const setSelectedIds = useInboxStore((state) => state.setSelectedIds);
+  const clearSelection = useInboxStore((state) => state.clearSelection);
+  const isSidebarCollapsed = useInboxStore((state) => state.isSidebarCollapsed);
+  const toggleSidebar = useInboxStore((state) => state.toggleSidebar);
   const queryClient = useQueryClient();
   const hoverTimeoutRef = useRef<any>(null);
 
@@ -406,7 +403,7 @@ export function ContactRail() {
     initialPageParam: 1,
     getNextPageParam: (lastPage, allPages) => {
       if (!Array.isArray(lastPage) || !Array.isArray(allPages)) return undefined;
-      return lastPage.length === 50 ? allPages.length + 1 : undefined;
+      return lastPage.length === 30 ? allPages.length + 1 : undefined;
     },
     // Realtime operates now, fallback polling if disconnected
     refetchInterval: isRealtimeDown ? 10000 : false,
@@ -574,13 +571,12 @@ const handleBulkArchive = async (archive: boolean) => {
     }
   }, [deepLinkContact, contacts, activePhone, setActiveContact, router]);
 
-  // Reactively sync updated CRM data/messages to the active contact
+  // Sync updated CRM data/messages to the active contact non-reactively to prevent left-rail re-renders
   useEffect(() => {
     if (activePhone && contacts.length > 0) {
       const updatedContact = contacts.find((c: any) => c.id === activePhone);
       if (updatedContact) {
-        // Compare important fields or just deep compare to avoid infinite loops
-        // Easiest is to stringify, though we only care if tags, stage, department, country or messages changed.
+        const activeContact = useInboxStore.getState().activeContact;
         const currentDataStr = JSON.stringify({
           stage: activeContact?.stage,
           department: activeContact?.department,
@@ -616,7 +612,7 @@ const handleBulkArchive = async (archive: boolean) => {
         }
       }
     }
-  }, [contacts, activePhone, activeContact]);
+  }, [contacts, activePhone]);
 
   // Reset unread count for the active conversation in the cache
   useEffect(() => {
@@ -995,6 +991,9 @@ const handleBulkArchive = async (archive: boolean) => {
                     tabIndex={0}
                     aria-selected={activePhone === c.id}
                     onClick={() => {
+                      if (typeof window !== "undefined") {
+                        console.log(`[DOM_CONTACT_CLICK] phone=${c.id} time=${window.performance.now().toFixed(2)}`);
+                      }
                       const conversationId = c.conversation_id || c.conversationId;
                       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(conversationId);
                       if (!conversationId || !isUuid) {
