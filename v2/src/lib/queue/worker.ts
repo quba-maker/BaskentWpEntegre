@@ -3678,9 +3678,40 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
     // Quality gate validation & retry logic
     const { TurkishReplyQualityGate } = await import('@/lib/services/ai/turkish-quality-gate');
 
+    // Compute Quality Gate Options
+    let ctaOfferedRecently = false;
+    let angryPatientMode = false;
+
+    if (Array.isArray(history)) {
+      const assistantHistory = history.filter((m: any) => m.role === 'assistant');
+      const last3Assistant = assistantHistory.slice(-3);
+      ctaOfferedRecently = last3Assistant.some((m: any) => {
+        const text = (m.content || '').toLowerCase();
+        return [
+          'randevu', 'görüşme', 'gorusme', 'arayalım', 'arayalim', 'arayabiliriz', 'arama',
+          'telefon', 'appointment', 'call', 'contact you', 'telefonla'
+        ].some(kw => text.includes(kw));
+      });
+    }
+
+    if (latestInboundContent) {
+      const currentMessageTextLower = latestInboundContent.toLowerCase().trim();
+      const angerKeywords = [
+        'şikayet', 'sikayet', 'rezalet', 'berbat', 'kötü', 'kotu', 'memnun değil', 'memnun degil',
+        'memnun kalmadım', 'memnun kalmadim', 'ilgisiz', 'zaman kaybı', 'zaman kaybi', 'robot',
+        'otomatik', 'dalga mı', 'dalga mi', 'düzgün', 'duzgun', 'yalan', 'yanlış', 'yanlis',
+        'sinir', 'bıktım', 'biktim', 'yeter', 'insanla', 'temsilci', 'canlı destek', 'canli destek',
+        'şikayetçiyim', 'sikayetciyim', 'şikayetçi', 'sikayetci', 'muhatap', 'kızgın', 'kizgin',
+        'söylemiyorsunuz', 'soylemiyorsunuz', 'vermiyorsunuz', 'diyorum', 'cevap ver', 'cevap vermiyorsunuz'
+      ];
+      angryPatientMode = angerKeywords.some(kw => currentMessageTextLower.includes(kw));
+    }
+
+    const qgOptions = { ctaOfferedRecently, angryPatientMode };
+
     try {
       aiResponse = await executeLLM(aiMessages);
-      let qualityGate = TurkishReplyQualityGate.validate(aiResponse.text);
+      let qualityGate = TurkishReplyQualityGate.validate(aiResponse.text, qgOptions);
 
       if (!qualityGate.valid) {
         this.log.warn(`[DEBOUNCE_WORKER] Quality gate failed on first attempt: ${qualityGate.reason}. Retrying...`, { traceId });
@@ -3695,7 +3726,7 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
         ];
 
         aiResponse = await executeLLM(retryMessages);
-        qualityGate = TurkishReplyQualityGate.validate(aiResponse.text);
+        qualityGate = TurkishReplyQualityGate.validate(aiResponse.text, qgOptions);
       }
 
       if (!qualityGate.valid) {

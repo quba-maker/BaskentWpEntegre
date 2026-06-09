@@ -218,6 +218,55 @@ export class PromptBuilder {
       crmContext += `============================================\n`;
     }
 
+    let ctaOfferedRecently = false;
+    let angryPatientMode = false;
+    let isFirstAssistantTurn = true;
+
+    if (unifiedContext) {
+      if (Array.isArray(unifiedContext.history)) {
+        const assistantHistory = unifiedContext.history.filter((m: any) => m.role === 'assistant');
+        if (assistantHistory.length > 0) {
+          isFirstAssistantTurn = false;
+        }
+        
+        const last3Assistant = assistantHistory.slice(-3);
+        ctaOfferedRecently = last3Assistant.some((m: any) => {
+          const text = (m.content || '').toLowerCase();
+          return [
+            'randevu', 'görüşme', 'gorusme', 'arayalım', 'arayalim', 'arayabiliriz', 'arama',
+            'telefon', 'appointment', 'call', 'contact you', 'telefonla'
+          ].some(kw => text.includes(kw));
+        });
+      }
+
+      if (currentMessageTextLower) {
+        const angerKeywords = [
+          'şikayet', 'sikayet', 'rezalet', 'berbat', 'kötü', 'kotu', 'memnun değil', 'memnun degil',
+          'memnun kalmadım', 'memnun kalmadim', 'ilgisiz', 'zaman kaybı', 'zaman kaybi', 'robot',
+          'otomatik', 'dalga mı', 'dalga mi', 'düzgün', 'duzgun', 'yalan', 'yanlış', 'yanlis',
+          'sinir', 'bıktım', 'biktim', 'yeter', 'insanla', 'temsilci', 'canlı destek', 'canli destek',
+          'şikayetçiyim', 'sikayetciyim', 'şikayetçi', 'sikayetci', 'muhatap', 'kızgın', 'kizgin',
+          'söylemiyorsunuz', 'soylemiyorsunuz', 'vermiyorsunuz', 'diyorum', 'cevap ver', 'cevap vermiyorsunuz'
+        ];
+        angryPatientMode = angerKeywords.some(kw => currentMessageTextLower.includes(kw));
+      }
+    }
+
+    let dynamicBrakesContext = '';
+    if (ctaOfferedRecently || angryPatientMode || isFirstAssistantTurn) {
+      dynamicBrakesContext += `\n\n=== 🚨 DİNAMİK KALİTE VE FREN KURALLARI (DYNAMIC QUALITY BRAKES) ===\n`;
+      if (isFirstAssistantTurn) {
+        dynamicBrakesContext += `>> UYARI (İLK CEVAP ONAYI AKTİF): Bu hastaya vereceğin ilk cevaptır. Kesinlikle randevu planlama, arama, telefon görüşmesi, koordinatör araması teklif etme, uygun zaman aralığı sorma! Sadece hastanın sorusuna net, kısa ve güven verici cevap ver, randevu/arama teklifini kesinlikle sonraki mesajlara bırak.\n`;
+      }
+      if (angryPatientMode) {
+        dynamicBrakesContext += `>> KIZGIN HASTA / KRİZ MODU DİREKTİFİ: Hasta memnuniyetsiz/kızgın görünmektedir. Kesinlikle yeni bir randevu, telefon araması teklif etme, uygun zaman sorma. Cevabına mutlaka 'Kusura bakmayın' veya 'Özür dilerim' ifadesiyle başla! Kısa ve net konuş. Sadece son sorduğu soruya odaklan, konuyu randevuya bağlama.\n`;
+      }
+      if (ctaOfferedRecently) {
+        dynamicBrakesContext += `>> UYARI (FREKANS FRENİ AKTİF): Son 3 asistan mesajı içinde zaten randevu/telefon araması teklif edildi. Bu mesajda kesinlikle yeni bir randevu veya arama teklif etme, uygun zaman sorma.\n`;
+      }
+      dynamicBrakesContext += `=================================================================\n`;
+    }
+
     // 🩺 HEALTHCARE OVERLAY (Only injected if tenant/industry is healthcare)
     let healthcareOverlay = '';
     if (isHealthcare) {
@@ -548,6 +597,22 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/koordinatör arasında planlanan
       // Non-fatal, prevent crashing during prompt build
     }
 
-    return `${base}\n${crmContext}\n${healthcareOverlay}\n${knowledgeInjection}\n${timeContext}\n${confirmationContext}\n${phaseContext}\n${langContextText}\n${directiveContext}\n${confirmationDirective}\n${safetyGuardrails}`;
+    let finalPrompt = `${base}\n${crmContext}\n${healthcareOverlay}\n${dynamicBrakesContext}\n${knowledgeInjection}\n${timeContext}\n${confirmationContext}\n${phaseContext}\n${langContextText}\n${directiveContext}\n${confirmationDirective}\n${safetyGuardrails}`;
+
+    if (ctaOfferedRecently || angryPatientMode || isFirstAssistantTurn) {
+      finalPrompt += `\n\n=== 🚨 DİNAMİK ENGELLEME VE FREN TALİMATLARI (OVERRIDING NEGATIVE CONSTRAINTS) ===\n`;
+      if (isFirstAssistantTurn) {
+        finalPrompt += `- KESİN YASAK: Bu hastaya verdiğin İLK CEVAP olduğu için kesinlikle randevu planlama, arama, telefon görüşmesi teklif etme, uygun zaman aralığı sorma! Sadece hastanın sorusuna net ve kısa cevap ver.\n`;
+      }
+      if (angryPatientMode) {
+        finalPrompt += `- KESİN YASAK: Hasta kızgın/memnuniyetsiz olduğu için kesinlikle yeni bir randevu, telefon araması, arama, görüşme teklif etme, uygun zaman sorma! Sadece hastadan özür dile ('Kusura bakmayın' veya 'Özür dilerim' diyerek başla) ve sorusuna cevap ver.\n`;
+      }
+      if (ctaOfferedRecently) {
+        finalPrompt += `- KESİN YASAK: Son asistan mesajlarında randevu/telefon araması teklif edildiği için kesinlikle yeni bir randevu veya arama teyit etme, teklif etme, uygun zaman sorma!\n`;
+      }
+      finalPrompt += `===============================================================================\n`;
+    }
+
+    return finalPrompt;
   }
 }
