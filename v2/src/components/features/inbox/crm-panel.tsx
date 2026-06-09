@@ -1690,7 +1690,12 @@ export function ContextPanel() {
                                 setAssistedDraftText("");
                                 setAssistedDraftSuccess(false);
                                 mutate((key) => Array.isArray(key) && key[0] === "conversations");
-                                queryClient.invalidateQueries({ queryKey: ['crm-panel', activeContact.conversation_id || activeContact.id] });
+                                const targetConvId = activeContact.conversation_id || activeContact.id;
+                                queryClient.invalidateQueries({ queryKey: ['crm-panel', targetConvId] });
+                                queryClient.invalidateQueries({ queryKey: ["messages", targetConvId] });
+                                if (activeContact.phone_number) {
+                                  queryClient.invalidateQueries({ queryKey: ["messages", activeContact.phone_number] });
+                                }
                               } else {
                                 setAssistedDraftError(res.error || "Mesaj gönderilemedi.");
                               }
@@ -1830,7 +1835,12 @@ export function ContextPanel() {
                                         setAssistedDraftSuccess(false);
                                         setSelectedTemplate(null);
                                         mutate((key) => Array.isArray(key) && key[0] === "conversations");
-                                        queryClient.invalidateQueries({ queryKey: ['crm-panel', activeContact.conversation_id || activeContact.id] });
+                                        const targetConvId = activeContact.conversation_id || activeContact.id;
+                                        queryClient.invalidateQueries({ queryKey: ['crm-panel', targetConvId] });
+                                        queryClient.invalidateQueries({ queryKey: ["messages", targetConvId] });
+                                        if (activeContact.phone_number) {
+                                          queryClient.invalidateQueries({ queryKey: ["messages", activeContact.phone_number] });
+                                        }
                                       } else {
                                         setAssistedDraftError(res.error || "Şablon mesajı gönderilemedi.");
                                       }

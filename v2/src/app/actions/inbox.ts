@@ -5743,9 +5743,9 @@ export async function sendApprovedInboxBotDraftAction(
       // 1. Resolve 24h window status
       const windowStatus = await resolveWhatsApp24hWindow(conversationId, ctx.tenantId, ctx.db);
 
-      // 2. Fetch conversation details
+      // 2. Fetch conversation details (including channel and channel_id)
       const convRows = await ctx.db.executeSafe({
-        text: `SELECT phone_number, active_opportunity_id FROM conversations WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+        text: `SELECT phone_number, active_opportunity_id, channel, channel_id FROM conversations WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
         values: [conversationId, ctx.tenantId]
       }) as any[];
 
@@ -5815,14 +5815,23 @@ export async function sendApprovedInboxBotDraftAction(
       }
 
       if (sendSuccess) {
+        const mediaMetadata = {
+          initiated_from: "inbox_panel",
+          source: "panel_operator",
+          is_bot_draft_approved: true,
+          template_name: templateName || null
+        };
+
         // Use idempotent MessageService to insert the sent message
         const saveRes = await messageService.saveMessageIdempotent({
           phoneNumber: phone,
           direction: 'out',
           content: draftText.trim(),
-          channel: 'whatsapp',
+          channel: conv.channel || 'whatsapp',
+          channelId: conv.channel_id || null,
           status: 'sent',
-          providerMessageId: providerMessageId
+          providerMessageId: providerMessageId,
+          mediaMetadata
         });
 
         if (!saveRes.success) {
@@ -5830,6 +5839,73 @@ export async function sendApprovedInboxBotDraftAction(
         }
 
         const insertedMessageId = saveRes.messageId;
+
+        // Retrieve actual message row from the database (Safety Rule #2)
+        const msgRows = await ctx.db.executeSafe({
+          text: `SELECT id, conversation_id, phone_number, direction, content, channel, status, provider_message_id, media_metadata, created_at 
+                 FROM messages 
+                 WHERE id = $1 AND tenant_id = $2 
+                 LIMIT 1`,
+          values: [insertedMessageId, ctx.tenantId]
+        }) as any[];
+
+        if (msgRows.length === 0) {
+          return { success: false, error: "Kaydedilen mesaj veritabanından okunamadı." };
+        }
+        const savedMsg = msgRows[0];
+
+        // Update conversation to human status and disable autopilot (Safety Rule #6: preserved read/unread/pin fields)
+        await ctx.db.executeSafe({
+          text: `UPDATE conversations 
+                 SET status = 'human',
+                     autopilot_enabled = false
+                 WHERE id = $1 AND tenant_id = $2`,
+          values: [conversationId, ctx.tenantId]
+        });
+
+        // Cancel/Takeover active bot directive tasks only (Safety Rule #1)
+        try {
+          const activeTasks = await ctx.db.executeSafe({
+            text: `SELECT id, metadata FROM follow_up_tasks 
+                   WHERE conversation_id = $1 AND tenant_id = $2 
+                     AND status IN ('pending', 'in_progress')
+                     AND task_type = 'bot_handoff_followup'
+                   ORDER BY created_at DESC`,
+            values: [conversationId, ctx.tenantId]
+          }) as any[];
+          if (activeTasks.length > 0) {
+            const taskMeta = activeTasks[0].metadata || {};
+            const directiveState = taskMeta.bot_directive_state;
+            if (directiveState && ['pending', 'waiting_patient'].includes(directiveState.directive_status)) {
+              const { PatientOperationsLifecycleService } = await import('@/lib/services/patient-operations-lifecycle');
+              const lifecycleService = new PatientOperationsLifecycleService(ctx.db);
+              await lifecycleService.completeBotDirective(activeTasks[0].id, ctx.tenantId, 'operator_takeover');
+            }
+          }
+        } catch (takeoverErr) {
+          console.warn('[INBOX_DIRECTIVE_TAKEOVER_FAILED] Non-fatal directive cancellation', takeoverErr);
+        }
+
+        // Write structural autopilot disabled audit log
+        await ctx.db.executeSafe({
+          text: `INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
+                 VALUES ($1, $2, $3, $4)`,
+          values: [
+            ctx.tenantId,
+            'autopilot_disabled',
+            'Autopilot disabled by operator bot draft approval',
+            JSON.stringify({
+              conversation_id: conversationId,
+              phone: phone,
+              channel_id: conv.channel_id || null,
+              tenant_id: ctx.tenantId,
+              enabled: false,
+              user_id: ctx.userId,
+              timestamp: new Date().toISOString(),
+              reason: "operator_approved_bot_draft"
+            })
+          ]
+        });
 
         // Write to outreach_logs
         await ctx.db.executeSafe({
@@ -5850,7 +5926,72 @@ export async function sendApprovedInboxBotDraftAction(
           ]
         });
 
-        return { success: true, messageId: insertedMessageId, providerMessageId };
+        // Broadcast autopilot updated realtime update (Safety Rule #3: non-blocking, non-fatal)
+        try {
+          const { RealtimePublisher } = await import("@/lib/realtime/publisher");
+          await RealtimePublisher.publishMetadataUpdated(ctx.tenantId, {
+            conversationId: conversationId,
+            userId: ctx.userId || "operator",
+            isBotActive: false,
+            autopilotEnabled: false,
+            status: "human"
+          });
+        } catch (realtimeErr) {
+          console.error("[REALTIME_PUBLISH_ERROR] Failed to publish autopilot toggle realtime update on approved draft send:", realtimeErr);
+        }
+
+        // Publish Message Created realtime event (Safety Rule #3: non-blocking, non-fatal)
+        try {
+          const { RealtimePublisher } = await import("@/lib/realtime/publisher");
+          await RealtimePublisher.publishMessageCreated(
+            ctx.tenantId,
+            {
+              id: savedMsg.id,
+              conversation_id: savedMsg.conversation_id,
+              phone_number: savedMsg.phone_number,
+              content: savedMsg.content,
+              direction: savedMsg.direction,
+              status: savedMsg.status,
+              media_metadata: savedMsg.media_metadata,
+              created_at: savedMsg.created_at ? new Date(savedMsg.created_at).toISOString() : new Date().toISOString()
+            }
+          );
+        } catch (realtimeErr) {
+          console.error("[REALTIME_PUBLISH_ERROR] Failed to publish message created realtime update on approved draft send:", realtimeErr);
+        }
+
+        // Fire-and-forget memory summarization in background (Safety Rule #4: non-blocking)
+        try {
+          const { FeatureFlagService } = await import('@/lib/services/feature-flag.service');
+          FeatureFlagService.isEnabled(ctx.tenantId, 'memory_engine', true).then((isMemoryEnabled) => {
+            if (isMemoryEnabled) {
+              import('@/lib/services/ai/engines/memory').then(({ MemoryEngine }) => {
+                MemoryEngine.summarizeConversation(ctx.tenantId, conversationId).catch(err => {
+                  console.error("[MEMORY_ENGINE_ERROR] Failed to summarize conversation in background:", err);
+                });
+              });
+            }
+          }).catch(err => {
+            console.error("[FEATURE_FLAG_ERROR] Failed to check memory engine feature flag in background:", err);
+          });
+        } catch (memErr) {
+          console.error("[MEMORY_ENGINE_SCHEDULING_ERROR] Failed to schedule conversation summarization asynchronously:", memErr);
+        }
+
+        return {
+          success: true,
+          messageId: insertedMessageId,
+          providerMessageId,
+          message: {
+            id: savedMsg.id,
+            conversation_id: savedMsg.conversation_id,
+            direction: savedMsg.direction,
+            content: savedMsg.content,
+            created_at: savedMsg.created_at ? new Date(savedMsg.created_at).toISOString() : new Date().toISOString(),
+            provider_message_id: savedMsg.provider_message_id,
+            status: savedMsg.status
+          }
+        };
       }
 
       return { success: false, error: "Gönderim başarısız oldu." };
