@@ -3108,12 +3108,8 @@ export async function saveBotSteeringDirectiveAction(conversationId: string, dir
           return { success: false, error: "Konuşma bulunamadı." };
         }
 
-        oppId = convRows[0].active_opportunity_id;
+        oppId = convRows[0].active_opportunity_id || null;
         phone = convRows[0].phone_number;
-
-        if (!oppId) {
-          return { success: false, error: "Aktif fırsat/lead kaydı bulunamadı. Lütfen önce fırsat oluşturun." };
-        }
 
         const metadata = {
           zero_outbound_p0: true,
@@ -3590,6 +3586,69 @@ export async function getActiveTasksForSteeringAction(conversationId: string) {
   });
 }
 
+export async function resolveWhatsApp24hWindow(
+  conversationId: string,
+  tenantId: string,
+  db: any
+) {
+  const rows = await db.executeSafe({
+    text: `
+      SELECT id, COALESCE(provider_timestamp, created_at) as last_inbound_at, provider_message_id
+      FROM messages
+      WHERE conversation_id = $1
+        AND tenant_id = $2
+        AND direction = 'in'
+        AND (media_metadata IS NULL OR media_metadata->>'reaction' IS NULL)
+      ORDER BY COALESCE(provider_timestamp, created_at) DESC, id DESC
+      LIMIT 1
+    `,
+    values: [conversationId, tenantId]
+  }) as any[];
+
+  if (rows.length === 0) {
+    return {
+      status: 'UNKNOWN' as const,
+      reason: 'No inbound message found',
+      lastCustomerInteractionAt: undefined,
+      expiresAt: undefined,
+      remainingSeconds: 0,
+      sourceMessageId: undefined
+    };
+  }
+
+  const row = rows[0];
+  const lastInboundAt = row.last_inbound_at;
+  const lastCustomerInteractionAt = new Date(lastInboundAt);
+  const expiresAt = new Date(lastCustomerInteractionAt.getTime() + 24 * 60 * 60 * 1000);
+  const now = new Date();
+  
+  const remainingMs = expiresAt.getTime() - now.getTime();
+  const remainingSeconds = Math.max(0, Math.floor(remainingMs / 1000));
+  const remainingHours = remainingSeconds / 3600;
+
+  let status: 'OPEN' | 'CLOSING_SOON' | 'CLOSED' = 'CLOSED';
+  let reason = 'Window closed (more than 24 hours since last interaction)';
+  
+  if (remainingSeconds > 0) {
+    if (remainingHours < 4) {
+      status = 'CLOSING_SOON';
+      reason = `Window closing soon (less than 4 hours remaining: \${Math.floor(remainingHours)}h \${Math.floor((remainingSeconds % 3600) / 60)}m)`;
+    } else {
+      status = 'OPEN';
+      reason = `Window open (\${Math.floor(remainingHours)}h remaining)`;
+    }
+  }
+
+  return {
+    status,
+    reason,
+    lastCustomerInteractionAt: lastCustomerInteractionAt.toISOString(),
+    expiresAt: expiresAt.toISOString(),
+    remainingSeconds,
+    sourceMessageId: row.id
+  };
+}
+
 export async function getCrmPanelBundleAction(conversationId: string) {
   if (!conversationId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(conversationId)) {
     return { success: false, error: "Invalid or missing conversation UUID." };
@@ -3826,6 +3885,8 @@ export async function getCrmPanelBundleAction(conversationId: string) {
         typeof conv.form_raw_data === 'string' ? JSON.parse(conv.form_raw_data) : conv.form_raw_data
       ) : null;
 
+      const whatsapp24hWindow = await resolveWhatsApp24hWindow(conversationId, ctx.tenantId, ctx.db);
+
       const duration = performance.now() - startTime;
       console.log(`[CRM_PANEL_BUNDLE_TRACE] conversationId=${conversationId} durationMs=${duration.toFixed(2)} tasksCount=${suggestions.length} formGreetingEligible=${formGreeting.eligible}`);
 
@@ -3835,6 +3896,7 @@ export async function getCrmPanelBundleAction(conversationId: string) {
         botDirective: directive,
         steeringTasks: suggestions,
         formGreetingEligibility: formGreeting,
+        whatsapp24hWindow,
         formData: (conv.form_name || conv.lead_id) ? {
           name: conv.form_name || "Başvuru Formu",
           date: conv.form_date_ms ? new Date(parseFloat(conv.form_date_ms)).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' }) : '',
@@ -5297,5 +5359,540 @@ export async function scheduleReminderTaskAction(
     return res.data;
   });
 }
+
+function cleanJsonResponse(rawText: string): string {
+  let cleaned = rawText.trim();
+  if (cleaned.startsWith("```")) {
+    cleaned = cleaned.replace(/^```[a-zA-Z]*\n/, "");
+    cleaned = cleaned.replace(/\n```$/, "");
+    cleaned = cleaned.trim();
+  }
+  return cleaned;
+}
+
+function extractTemplateParameters(canonicalBody: string, filledBody: string): string[] {
+  const placeholderRegex = /\{\{[^}]+\}\}/g;
+  const placeholders: string[] = [];
+  let match;
+  while ((match = placeholderRegex.exec(canonicalBody)) !== null) {
+    placeholders.push(match[0]);
+  }
+  
+  if (placeholders.length === 0) return [];
+  
+  const parts = canonicalBody.split(placeholderRegex);
+  const escapedParts = parts.map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  
+  const regexPattern = "^" + escapedParts.join("([\\s\\S]*?)") + "$";
+  try {
+    const regex = new RegExp(regexPattern);
+    const matches = filledBody.match(regex);
+    if (matches && matches.length > placeholders.length) {
+      return matches.slice(1, placeholders.length + 1).map(m => m.trim());
+    }
+  } catch (e) {
+    console.error("[TEMPLATE_PARAM_EXTRACTION_ERROR] Failed to extract parameters", e);
+  }
+  return [];
+}
+
+export async function prepareInboxBotAssistedDraftAction(
+  conversationId: string,
+  intentHint?: string,
+  targetLanguage?: string,
+  customDirective?: string
+) {
+  if (!conversationId) return { success: false, error: "Konuşma ID gerekli." };
+
+  return withActionGuard(
+    { actionName: 'prepareInboxBotAssistedDraftAction' },
+    async (ctx) => {
+      // 1. Fetch conversation
+      const convRows = await ctx.db.executeSafe({
+        text: `SELECT id, patient_name, phone_number, customer_id, active_opportunity_id FROM conversations WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+        values: [conversationId, ctx.tenantId]
+      }) as any[];
+
+      if (convRows.length === 0) {
+        return { success: false, error: "Konuşma bulunamadı." };
+      }
+      const conv = convRows[0];
+
+      // 2. Fetch last 15 messages
+      const messageRows = await ctx.db.executeSafe({
+        text: `SELECT direction, content, created_at 
+               FROM messages 
+               WHERE conversation_id = $1 AND tenant_id = $2
+               ORDER BY created_at DESC, id DESC
+               LIMIT 15`,
+        values: [conversationId, ctx.tenantId]
+      }) as any[];
+      const messages = [...messageRows].reverse();
+
+      // 3. Fetch active opportunity
+      let opp: any = null;
+      if (conv.active_opportunity_id) {
+        const oppRows = await ctx.db.executeSafe({
+          text: `SELECT id, summary, ai_reason, department, country FROM opportunities WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+          values: [conv.active_opportunity_id, ctx.tenantId]
+        }) as any[];
+        opp = oppRows[0] || null;
+      }
+
+      // 4. Fetch lead form
+      const leadRows = await ctx.db.executeSafe({
+        text: `
+          SELECT id, form_name, raw_data, created_at
+          FROM leads
+          WHERE tenant_id = $1
+            AND (
+              (customer_id IS NOT NULL AND customer_id = $2)
+              OR (phone_number LIKE '%' || RIGHT($3, 10))
+            )
+          ORDER BY created_at DESC
+          LIMIT 1
+        `,
+        values: [ctx.tenantId, conv.customer_id || null, conv.phone_number]
+      }) as any[];
+      const lead = leadRows[0] || null;
+
+      // 5. Resolve 24h window status
+      const windowStatus = await resolveWhatsApp24hWindow(conversationId, ctx.tenantId, ctx.db);
+
+      // Determine prompt directive description based on intentHint
+      let intentText = "";
+      if (intentHint === "Karşılama") {
+        intentText = "Hastayı sıcak ve kurumsal bir dille karşıla ve Konya Hastanemize başvuru amacını/şikayetini kibarca netleştir.";
+      } else if (intentHint === "Randevuya Yönlendir") {
+        intentText = "Hastayı Konya Başkent Hastanemizde muayene veya randevu planlamaya kibarca davet et.";
+      } else if (intentHint === "Uygun Gün/Saat Sor") {
+        intentText = "Hastaya randevu planlaması veya görüşme için hangi günlerin ve saatlerin kendisine uygun olduğunu sor.";
+      } else if (intentHint === "Fiyat Vermeden Koordinatöre Yönlendir") {
+        intentText = "Hastalara fiyat bilgisi vermeden, Konya hastanemizin hasta koordinatörlerinin kendilerine ulaşıp detaylı bilgi vereceğini ilet.";
+      } else if (intentHint === "Kararsız Hastayı Nazikçe İkna Et") {
+        intentText = "Kararsız veya endişeli hastayı Konya Başkent Hastanemizin uzman ekibine güvenebileceği yönünde nazikçe ikna et.";
+      } else if (intentHint === "Rapor/MR İstemeden Geliş Amacını Teyit Et") {
+        intentText = "Hastadan herhangi bir MR, tetkik veya rapor istemeden, doğrudan geliş amacını ve şikayetini teyit et.";
+      } else if (intentHint === "Cevap Bekleyen Hastaya Takip Mesajı Hazırla") {
+        intentText = "Bir süredir cevap vermeyen hastaya, yardımcı olabileceğimiz bir durum olup olmadığını soran nazik bir takip mesajı hazırla.";
+      } else if (intentHint === "Serbest Talimatla Mesaj Hazırla") {
+        intentText = customDirective || "Hastaya yardımcı ol.";
+      } else {
+        intentText = "Hastaya profesyonel ve yardımcı bir dille cevap yaz.";
+      }
+
+      // Check Gemini API key
+      const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+      if (!GEMINI_API_KEY) {
+        return { success: false, error: "GEMINI_API_KEY ortam değişkeni tanımlı değil." };
+      }
+
+      // Resolve model
+      const profileData = await ctx.db.executeSafe({
+        text: `SELECT cap.ai_model FROM channel_ai_profiles cap
+               JOIN channel_groups cg ON cap.group_id = cg.id
+               WHERE cg.tenant_id = $1 AND cg.status = 'active' LIMIT 1`,
+        values: [ctx.tenantId]
+      }) as any[];
+      const model = profileData[0]?.ai_model || 'gemini-2.5-flash';
+
+      // 6. IF 24H WINDOW IS OPEN OR CLOSING_SOON -> Freeform AI draft
+      if (windowStatus.status === 'OPEN' || windowStatus.status === 'CLOSING_SOON') {
+        // Special case: Form exists and intent is greeting -> reuse Form Management greeting logic
+        if (lead && intentHint === "Karşılama") {
+          try {
+            const { generateSmartDraft } = await import('@/lib/utils/smart-draft-generator');
+            const draft = await generateSmartDraft(lead.raw_data, lead.form_name);
+            return {
+              success: true,
+              isTemplate: false,
+              draft,
+              windowStatus: windowStatus.status,
+              detectedLanguage: "Türkçe",
+              isLanguageUnclear: false
+            };
+          } catch (e: any) {
+            console.error("[SMART_DRAFT_REUSE_ERROR] Failed to reuse smart greeting resolver", e);
+          }
+        }
+
+        // Standard Gemini freeform draft generation
+        const systemPrompt = `Sen bir Başkent Hastanesi Hasta İlişkileri Asistanı AI modelisin. Görevin, hastanın mesaj geçmişine, varsa form bilgilerine ve hedeflenen amaca uygun olarak profesyonel, sıcak, kurallara uygun bir WhatsApp cevap taslağı hazırlamaktır.
+Yanıtını mutlaka belirtilen JSON formatında üretmelisin. JSON haricinde hiçbir açıklayıcı metin ekleme.
+
+=== ÖNEMLİ KURALLAR ===
+1. KESİNLİKLE İSİMLE HİTAP ETME. "Merhaba Ahmet Bey" gibi ifadeler yasaktır. Hitap sadece "Merhaba," olmalıdır.
+2. Fiyat bilgisi veya aralığı KESİNLİKLE verme.
+3. Teşhis koyma, tedavi garantisi verme.
+4. "Ön görüşme", "ön değerlendirme" ifadelerini kullanma.
+5. Kampanya kodlarını hastaya yazma.
+6. Kurumsal ve profesyonel bir dil kullan.
+
+Hedeflenen Amaç/Talimat: ${intentText}
+Hedef Dil: ${targetLanguage || 'Auto'} (Eğer Auto ise, hastanın yazdığı dili algılayıp o dilde cevap üretmelisin.)
+
+=== YANIT FORMATI (JSON) ===
+{
+  "draftText": "Oluşturduğun WhatsApp cevap taslağı (satır boşlukları için \\n\\n kullan)",
+  "detectedLanguage": "Algıladığın hasta dili (Örn: Türkçe, Arapça, İngilizce, Almanca)",
+  "languageCode": "Algıladığın hasta dili kodu (Örn: tr, ar, en, de)",
+  "isLanguageUnclear": false
+}`;
+
+        const promptText = `
+[Mevcut Hasta Bilgileri]
+İsim: ${conv.patient_name || 'Bilinmiyor'}
+Telefon: ${conv.phone_number}
+
+[Aktif Fırsat Bilgileri]
+${opp ? `Departman: ${opp.department || ''}\nÖzet: ${opp.summary || ''}\nAI Yorumu: ${opp.ai_reason || ''}` : 'Fırsat yok.'}
+
+[Lead Form Bilgileri]
+${lead ? `Form Adı: ${lead.form_name}\nVeri: ${JSON.stringify(lead.raw_data)}` : 'Form verisi yok.'}
+
+[Son Mesaj Geçmişi (Kronolojik)]
+${messages.map(m => `${m.direction === 'in' ? 'Hasta' : 'Operatör'}: ${m.content}`).join('\n')}
+
+Lütfen bu bilgilere göre yukarıdaki kurallara ve talimatlara uygun cevap taslağı üret.`;
+
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              systemInstruction: { parts: [{ text: systemPrompt }] },
+              contents: [{ role: 'user', parts: [{ text: promptText }] }],
+              generationConfig: { temperature: 0.2 }
+            })
+          }
+        );
+
+        if (!response.ok) {
+          const errText = await response.text();
+          return { success: false, error: `Gemini API Hatası: ${errText}` };
+        }
+
+        const data = await response.json();
+        const jsonText = cleanJsonResponse(data?.candidates?.[0]?.content?.parts?.[0]?.text || "{}");
+        
+        try {
+          const parsed = JSON.parse(jsonText);
+          return {
+            success: true,
+            isTemplate: false,
+            draft: parsed.draftText,
+            windowStatus: windowStatus.status,
+            detectedLanguage: parsed.detectedLanguage,
+            isLanguageUnclear: parsed.isLanguageUnclear || false
+          };
+        } catch (e) {
+          return {
+            success: true,
+            isTemplate: false,
+            draft: jsonText || "Cevap taslağı oluşturulamadı.",
+            windowStatus: windowStatus.status,
+            detectedLanguage: "Bilinmiyor",
+            isLanguageUnclear: true
+          };
+        }
+      }
+
+      // 7. IF 24H WINDOW IS CLOSED OR UNKNOWN -> Template selection and filling
+      const templateRows = await ctx.db.executeSafe({
+        text: `SELECT id, name, language, body, variables FROM message_templates WHERE tenant_id = $1 AND is_active = true`,
+        values: [ctx.tenantId]
+      }) as any[];
+
+      if (templateRows.length === 0) {
+        return {
+          success: true,
+          isTemplate: true,
+          suggestedTemplates: [],
+          windowStatus: windowStatus.status,
+          detectedLanguage: "Bilinmiyor",
+          isLanguageUnclear: true,
+          notice: "Aktif onaylı şablon bulunamadı. Lütfen Ayarlar > Şablonlar sayfasından şablon ekleyin."
+        };
+      }
+
+      // Format templates list for Gemini
+      const templatesList = templateRows.map(t => ({
+        id: t.id,
+        name: t.name,
+        language: t.language,
+        body: t.body,
+        variables: t.variables
+      }));
+
+      const systemPromptTemplate = `Sen bir Başkent Hastanesi Hasta İlişkileri Asistanı AI modelisin. WhatsApp 24 saatlik müşteri penceresi kapandığı için serbest metin mesajı gönderilemez.
+Görevin, hastanın doldurduğu bilgilere, mesaj geçmişine ve hedeflenen amaca göre en uygun 2-3 onaylı şablonu (template) seçmek ve bu şablonların içindeki {{1}}, {{2}} gibi değişken yer tutucularını hasta bilgileriyle doldurarak önermektir.
+
+=== ÖNEMLİ ŞABLON KURALLARI ===
+1. Şablonların orijinal gövdelerindeki (body) kelimeleri, cümleleri KESİNLİKLE değiştirme veya düzenleme. Sadece {{1}}, {{patient_name}}, {{tenant_name}} gibi değişken yer tutucularını hasta bağlamıyla doldur.
+2. Değişken doldururken isim hitabı yasak kuralına dikkat et: Eğer şablonda {{patient_name}} varsa ve hastane Başkent ise, ismi boş bırak veya nezaket kurallarına göre düzenle.
+3. Yanıtını mutlaka belirtilen JSON formatında üretmelisin. JSON haricinde hiçbir metin ekleme.
+
+Hedeflenen Amaç/Talimat: ${intentText}
+Hedef Dil: ${targetLanguage || 'Auto'} (Eğer Auto ise, hastanın diline uygun şablonları seç ve doldur.)
+
+=== YANIT FORMATI (JSON) ===
+{
+  "suggestedTemplates": [
+    {
+      "templateId": "şablonun ID değeri",
+      "templateName": "şablonun name değeri",
+      "language": "şablonun language değeri",
+      "body": "şablonun orijinal body değeri (kesinlikle değiştirilmemiş hali)",
+      "filledBody": "değişkenleri doldurulmuş nihai metin hali",
+      "explanation": "Neden bu şablonu önerdiğinin kısa açıklaması"
+    }
+  ],
+  "detectedLanguage": "Algıladığın hasta dili",
+  "languageCode": "Algıladığın hasta dili kodu",
+  "isLanguageUnclear": false
+}`;
+
+      const promptTextTemplate = `
+[Mevcut Hasta Bilgileri]
+İsim: ${conv.patient_name || 'Bilinmiyor'}
+Telefon: ${conv.phone_number}
+
+[Lead Form Bilgileri]
+${lead ? `Form Adı: ${lead.form_name}\nVeri: ${JSON.stringify(lead.raw_data)}` : 'Form verisi yok.'}
+
+[Son Mesaj Geçmişi (Kronolojik)]
+${messages.map(m => `${m.direction === 'in' ? 'Hasta' : 'Operatör'}: ${m.content}`).join('\n')}
+
+[Kullanılabilir Onaylı Şablonlar]
+${JSON.stringify(templatesList)}
+
+Lütfen bu bilgilere göre yukarıdaki kurallara uygun en iyi 2-3 şablonu seç, doldur ve öner.`;
+
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: systemPromptTemplate }] },
+            contents: [{ role: 'user', parts: [{ text: promptTextTemplate }] }],
+            generationConfig: { temperature: 0.1 }
+          })
+        }
+      );
+
+      if (!response.ok) {
+        const errText = await response.text();
+        return { success: false, error: `Gemini API Hatası: ${errText}` };
+      }
+
+      const data = await response.json();
+      const jsonText = cleanJsonResponse(data?.candidates?.[0]?.content?.parts?.[0]?.text || "{}");
+
+      try {
+        const parsed = JSON.parse(jsonText);
+        return {
+          success: true,
+          isTemplate: true,
+          suggestedTemplates: parsed.suggestedTemplates || [],
+          windowStatus: windowStatus.status,
+          detectedLanguage: parsed.detectedLanguage,
+          isLanguageUnclear: parsed.isLanguageUnclear || false
+        };
+      } catch (e) {
+        return {
+          success: false,
+          error: "Gemini yanıtı işlenemedi veya geçersiz JSON formatı döndü."
+        };
+      }
+    }
+  );
+}
+
+export async function sendApprovedInboxBotDraftAction(
+  conversationId: string,
+  draftText: string,
+  templateName?: string,
+  templateLanguage?: string,
+  canonicalBody?: string
+) {
+  if (!conversationId) return { success: false, error: "Konuşma ID gerekli." };
+  if (!draftText || draftText.trim().length === 0) return { success: false, error: "Gönderilecek mesaj boş olamaz." };
+
+  return withActionGuard(
+    { actionName: 'sendApprovedInboxBotDraftAction' },
+    async (ctx) => {
+      // 1. Resolve 24h window status
+      const windowStatus = await resolveWhatsApp24hWindow(conversationId, ctx.tenantId, ctx.db);
+
+      // 2. Fetch conversation details
+      const convRows = await ctx.db.executeSafe({
+        text: `SELECT phone_number, active_opportunity_id FROM conversations WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+        values: [conversationId, ctx.tenantId]
+      }) as any[];
+
+      if (convRows.length === 0) {
+        return { success: false, error: "Konuşma bulunamadı." };
+      }
+      const conv = convRows[0];
+      const phone = conv.phone_number;
+
+      // 3. Resolve WhatsApp credentials
+      const creds = await CredentialsService.resolveCredentials(ctx.tenantId, 'whatsapp');
+      const META_ACCESS_TOKEN = creds.accessToken;
+      const PHONE_NUMBER_ID = creds.whatsappPhoneNumberId;
+
+      if (!META_ACCESS_TOKEN || !PHONE_NUMBER_ID) {
+        return { success: false, error: "WhatsApp kimlik bilgileri eksik. Entegrasyon ayarlarını kontrol edin." };
+      }
+
+      const { MessageService } = await import("@/lib/services/message.service");
+      const { TenantDB } = await import("@/lib/core/tenant-db");
+      const tenantDb = new TenantDB(ctx.tenantId);
+      const messageService = new MessageService(tenantDb);
+
+      let providerMessageId: string | null = null;
+      let sendSuccess = false;
+
+      if (!templateName) {
+        // Freeform message
+        // Verify window is OPEN or CLOSING_SOON
+        if (windowStatus.status === 'CLOSED' || windowStatus.status === 'UNKNOWN') {
+          return {
+            success: false,
+            error: "24 saatlik WhatsApp mesajlaşma penceresi kapalı olduğu için serbest mesaj gönderilemez. Lütfen bir şablon seçin."
+          };
+        }
+
+        try {
+          const sendRes = await messageService.sendWhatsAppMessage(
+            PHONE_NUMBER_ID,
+            META_ACCESS_TOKEN,
+            phone,
+            draftText.trim(),
+            creds.provider
+          );
+          providerMessageId = sendRes.providerMessageId || null;
+          sendSuccess = sendRes.success;
+        } catch (err: any) {
+          return { success: false, error: `WhatsApp gönderim hatası: ${err.message || err}` };
+        }
+      } else {
+        // Template message
+        const lang = templateLanguage || 'tr';
+        // Extract parameters from draftText using canonicalBody if available
+        let components: any[] = [];
+        if (canonicalBody) {
+          const params = extractTemplateParameters(canonicalBody, draftText);
+          if (params.length > 0) {
+            components = [
+              {
+                type: "body",
+                parameters: params.map(p => ({ type: "text", text: p }))
+              }
+            ];
+          }
+        }
+
+        try {
+          if (creds.provider === '360dialog' || creds.provider === '360dialog_whatsapp') {
+            const { ThreeSixtyDialogService } = await import('@/lib/services/providers/three-sixty-dialog.service');
+            const res = await ThreeSixtyDialogService.sendTemplate(
+              META_ACCESS_TOKEN,
+              phone,
+              templateName,
+              lang,
+              components
+            );
+            sendSuccess = res.success;
+            providerMessageId = res.providerMessageId || null;
+          } else {
+            // Default Meta API
+            const bodyData: any = {
+              messaging_product: 'whatsapp',
+              to: phone,
+              recipient_type: 'individual',
+              type: 'template',
+              template: {
+                name: templateName,
+                language: {
+                  code: lang
+                },
+                ...(components.length > 0 ? { components } : {})
+              }
+            };
+
+            const response = await fetch(`https://graph.facebook.com/v25.0/${PHONE_NUMBER_ID}/messages`, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${META_ACCESS_TOKEN}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(bodyData),
+            });
+
+            if (!response.ok) {
+              const errData = await response.json().catch(() => ({}));
+              throw new Error(errData?.error?.message || response.statusText);
+            }
+            const data = await response.json();
+            providerMessageId = data.messages?.[0]?.id || null;
+            sendSuccess = true;
+          }
+        } catch (err: any) {
+          return { success: false, error: `WhatsApp Şablon gönderim hatası: ${err.message || err}` };
+        }
+      }
+
+      if (sendSuccess) {
+        // Save the message into messages table
+        const insertRes = await ctx.db.executeSafe({
+          text: `INSERT INTO messages (tenant_id, conversation_id, phone_number, direction, content, channel, status, provider_message_id)
+                 VALUES ($1, $2, $3, 'out', $4, 'whatsapp', 'sent', $5)
+                 RETURNING id`,
+          values: [ctx.tenantId, conversationId, phone, draftText.trim(), providerMessageId]
+        }) as any[];
+
+        const insertedMessageId = insertRes[0]?.id;
+
+        // Write to outreach_logs
+        await ctx.db.executeSafe({
+          text: `INSERT INTO outreach_logs (tenant_id, conversation_id, opportunity_id, action, channel, actor_id, metadata)
+                 VALUES ($1, $2, $3, 'operator_draft_approved', 'whatsapp', $4, $5::jsonb)`,
+          values: [
+            ctx.tenantId,
+            conversationId,
+            conv.active_opportunity_id || null,
+            ctx.userId,
+            JSON.stringify({
+              message_id: insertedMessageId,
+              provider_message_id: providerMessageId,
+              is_template: !!templateName,
+              template_name: templateName || null,
+              draft_text: draftText
+            })
+          ]
+        });
+
+        // Resolve conversation status
+        await ctx.db.executeSafe({
+          text: `UPDATE conversations 
+                 SET last_message_at = NOW(),
+                     last_message_content = $1,
+                     last_message_direction = 'out',
+                     last_message_status = 'sent'
+                 WHERE id = $2 AND tenant_id = $3`,
+          values: [draftText.trim(), conversationId, ctx.tenantId]
+        });
+
+        return { success: true, messageId: insertedMessageId, providerMessageId };
+      }
+
+      return { success: false, error: "Gönderim başarısız oldu." };
+    }
+  );
+}
+
 
 

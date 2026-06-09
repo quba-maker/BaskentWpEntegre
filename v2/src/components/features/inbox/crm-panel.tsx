@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { useSWRConfig } from "swr";
 import { User, MapPin, Building, Activity, Tag, ChevronDown, ChevronRight, Save, X, Plus, ChevronLeft, Check, Loader2, Sparkles, FileText, Brain, Link, Clock, Moon, Calendar, CalendarClock, PhoneForwarded, MailPlus, Share2, Eye, EyeOff, Send } from "lucide-react";
 import { useInboxStore } from "@/store/inbox-store";
-import { updateCrmData, addTag, removeTag, prepareFollowUpDraft, sendApprovedFollowUp, checkSecondaryFallback, prepareSecondaryDraft, getCrmPanelBundleAction, prepareFormGreetingDraft, saveBotSteeringDirectiveAction, saveFormGreetingDraftInternalAction, sendFormGreetingFromInboxAction, prepareNoReplyReminderDraftAction, sendNoReplyReminderAction, scheduleReminderTaskAction } from "@/app/actions/inbox";
+import { updateCrmData, addTag, removeTag, prepareFollowUpDraft, sendApprovedFollowUp, checkSecondaryFallback, prepareSecondaryDraft, getCrmPanelBundleAction, prepareFormGreetingDraft, saveBotSteeringDirectiveAction, saveFormGreetingDraftInternalAction, sendFormGreetingFromInboxAction, prepareNoReplyReminderDraftAction, sendNoReplyReminderAction, scheduleReminderTaskAction, prepareInboxBotAssistedDraftAction, sendApprovedInboxBotDraftAction } from "@/app/actions/inbox";
 import { CustomerAiBrainPanel } from "@/components/features/ai-observability/CustomerAiBrain";
 import { AiTimelinePanel } from "@/components/features/ai-observability/AiTimeline";
 import { resolvePatientDisplayName, formatPhoneReadable } from "@/lib/utils/patient-name-resolver";
@@ -192,6 +192,20 @@ export function ContextPanel() {
   const [isLoadingSteeringTasks, setIsLoadingSteeringTasks] = useState<boolean>(false);
   const directiveTextareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // Bota Mesaj Hazırlat states
+  const [selectedIntent, setSelectedIntent] = useState<string>("Karşılama");
+  const [selectedLanguage, setSelectedLanguage] = useState<string>("Auto");
+  const [customDirective, setCustomDirective] = useState<string>("");
+  const [assistedDraftText, setAssistedDraftText] = useState<string>("");
+  const [isGeneratingAssistedDraft, setIsGeneratingAssistedDraft] = useState<boolean>(false);
+  const [assistedDraftError, setAssistedDraftError] = useState<string | null>(null);
+  const [assistedDraftSuccess, setAssistedDraftSuccess] = useState<boolean>(false);
+  const [suggestedTemplates, setSuggestedTemplates] = useState<any[]>([]);
+  const [selectedTemplate, setSelectedTemplate] = useState<any | null>(null);
+  const [isSendingAssistedDraft, setIsSendingAssistedDraft] = useState<boolean>(false);
+  const [detectedLanguage, setDetectedLanguage] = useState<string | null>(null);
+  const [isLanguageUnclear, setIsLanguageUnclear] = useState<boolean>(false);
+
   // No-reply follow up states
   const [noReplyDraftText, setNoReplyDraftText] = useState<string>("");
   const [isPreparingNoReplyDraft, setIsPreparingNoReplyDraft] = useState<boolean>(false);
@@ -246,6 +260,19 @@ export function ContextPanel() {
       setNoReplyDraftError(null);
       setNoReplySentSuccess(false);
       setIsSendingNoReply(false);
+      // Reset assisted drafting states
+      setSelectedIntent("Karşılama");
+      setSelectedLanguage("Auto");
+      setCustomDirective("");
+      setAssistedDraftText("");
+      setIsGeneratingAssistedDraft(false);
+      setAssistedDraftError(null);
+      setAssistedDraftSuccess(false);
+      setSuggestedTemplates([]);
+      setSelectedTemplate(null);
+      setIsSendingAssistedDraft(false);
+      setDetectedLanguage(null);
+      setIsLanguageUnclear(false);
     }
   }, [contactId, contactDept, contactCountry, contactNotes, contactStage, activeContact?.opp_requester_name, activeContact?.opp_patient_name, activeContact?.patient_name]);
 
@@ -1311,22 +1338,67 @@ export function ContextPanel() {
           </div>
         )}
 
-        {/* Botu Yönlendir Accordion (Visible when oppId exists) */}
-        {oppId && (
-          <div className="w-full mt-2.5 p-3 rounded-2xl border bg-white/40 space-y-2.5 shadow-sm text-left transition-all duration-300" style={{ borderColor: "var(--q-border-default)" }}>
-            <button
-              onClick={() => setIsBotSteeringOpen(!isBotSteeringOpen)}
-              className="flex items-center justify-between w-full font-extrabold text-[#86868B] transition-colors hover:text-indigo-600 cursor-pointer"
-            >
-              <div className="flex items-center gap-1.5">
-                <Brain className="w-4 h-4 text-indigo-500" />
-                <span className="text-[10px] uppercase tracking-widest font-extrabold">🤖 Botu Yönlendir</span>
-              </div>
-              <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isBotSteeringOpen ? 'rotate-180' : ''}`} />
-            </button>
+        {/* 🤖 Bot İşlemleri Accordion (Visible unconditionally) */}
+        <div className="w-full mt-2.5 p-3 rounded-2xl border bg-white/40 space-y-2.5 shadow-sm text-left transition-all duration-300" style={{ borderColor: "var(--q-border-default)" }}>
+          <button
+            onClick={() => setIsBotSteeringOpen(!isBotSteeringOpen)}
+            className="flex items-center justify-between w-full font-extrabold text-[#86868B] transition-colors hover:text-indigo-600 cursor-pointer"
+          >
+            <div className="flex items-center gap-1.5">
+              <Brain className="w-4 h-4 text-indigo-500" />
+              <span className="text-[10px] uppercase tracking-widest font-extrabold">🤖 Bot İşlemleri</span>
+            </div>
+            <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isBotSteeringOpen ? 'rotate-180' : ''}`} />
+          </button>
 
-            {isBotSteeringOpen && (
-              <div className="pt-2 space-y-2.5 border-t border-black/[0.03] animate-fade-in">
+          {isBotSteeringOpen && (
+            <div className="pt-2 space-y-4 border-t border-black/[0.03] animate-fade-in text-[11px] text-[#1D1D1F]">
+              
+              {/* 1. Status Info Card */}
+              <div className="p-2.5 rounded-xl bg-[#F5F5F7]/75 border border-black/[0.03] space-y-1.5 shadow-sm">
+                <span className="block text-[8px] font-bold text-[#86868B] uppercase tracking-widest mb-1.5">Durum Kartı</span>
+                <div className="grid grid-cols-2 gap-y-1.5 gap-x-3 font-medium text-[10.5px]">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[#86868B]">Dil:</span>
+                    <span className="font-bold text-[#1D1D1F]">{detectedLanguage || crmData?.whatsapp24hWindow?.detectedLanguage || "Otomatik"}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[#86868B]">Form:</span>
+                    <span className="font-bold text-[#1D1D1F]">{crmData?.formData ? "Var" : "Yok"}</span>
+                  </div>
+                  <div className="flex items-center justify-between col-span-2 border-t border-black/[0.03] pt-1.5">
+                    <span className="text-[#86868B]">24s WhatsApp Penceresi:</span>
+                    <span className={`px-1.5 py-0.5 rounded-md text-[9px] font-extrabold text-white ${
+                      crmData?.whatsapp24hWindow?.status === 'OPEN' ? 'bg-green-600' :
+                      crmData?.whatsapp24hWindow?.status === 'CLOSING_SOON' ? 'bg-amber-500' :
+                      crmData?.whatsapp24hWindow?.status === 'CLOSED' ? 'bg-red-600' : 'bg-gray-500'
+                    }`}>
+                      {crmData?.whatsapp24hWindow?.status === 'OPEN' ? 'Açık' :
+                       crmData?.whatsapp24hWindow?.status === 'CLOSING_SOON' ? 'Kapanmak Üzere' :
+                       crmData?.whatsapp24hWindow?.status === 'CLOSED' ? 'Kapalı' : 'Belirsiz'}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between col-span-2">
+                    <span className="text-[#86868B]">Gönderim Yolu:</span>
+                    <span className="font-bold text-[#1D1D1F]">
+                      {crmData?.whatsapp24hWindow?.status === 'OPEN' || crmData?.whatsapp24hWindow?.status === 'CLOSING_SOON' ? "Serbest Mesaj (API)" : "Onaylı Şablon (API)"}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between col-span-2 border-t border-black/[0.03] pt-1.5">
+                    <span className="text-[#86868B]">Bot Durumu:</span>
+                    <span className={`px-1.5 py-0.5 rounded-md text-[9px] font-extrabold text-white ${
+                      (activeContact?.autopilot_enabled || activeContact?.isBotActive || activeContact?.status === 'bot') ? 'bg-indigo-600' : 'bg-gray-500'
+                    }`}>
+                      {(activeContact?.autopilot_enabled || activeContact?.isBotActive || activeContact?.status === 'bot') ? 'Botta' : 'Manuel'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* 2. Botu Yönlendir (Mevcut İç Talimat Akışı) */}
+              <div className="space-y-2 border-t border-black/[0.03] pt-3">
+                <span className="block text-[9px] font-bold text-[#86868B] uppercase tracking-widest">1. Botu Yönlendir (İç Talimat)</span>
+                
                 {activeBotDirective ? (
                   <div className="p-2.5 rounded-xl bg-indigo-50/70 border border-indigo-100 text-indigo-905 text-[11px] font-medium leading-relaxed">
                     <span className="block text-[8px] font-bold text-indigo-500 uppercase tracking-widest mb-0.5">Aktif Bot Yönlendirmesi</span>
@@ -1339,7 +1411,7 @@ export function ContextPanel() {
                 )}
 
                 {/* Suggestions Section */}
-                {(phoneSuggestion || apptSuggestion) && (
+                {(steeringTasks && steeringTasks.length > 0) && (
                   <div className="space-y-2 p-2 rounded-xl bg-[#F5F5F7]/30 border border-black/[0.03]">
                     <div className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-widest text-[#86868B]">
                       <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
@@ -1347,7 +1419,7 @@ export function ContextPanel() {
                     </div>
                     
                     <div className="space-y-1.5">
-                      {[phoneSuggestion, apptSuggestion].map((suggestion, idx) => {
+                      {steeringTasks.map((suggestion: any, idx: number) => {
                         if (!suggestion) return null;
                         
                         if (suggestion.isPassive) {
@@ -1422,8 +1494,6 @@ export function ContextPanel() {
                           setBotSteeringStatus("saved");
                           setTimeout(() => setBotSteeringStatus("idle"), 2000);
                           mutate((key) => Array.isArray(key) && key[0] === "conversations");
-                          
-                          // Invalidate query to refresh recommendations and directives automatically
                           queryClient.invalidateQueries({ queryKey: ['crm-panel', activeContact.conversation_id || activeContact.id] });
                         } else {
                           setBotSteeringStatus("error");
@@ -1448,9 +1518,306 @@ export function ContextPanel() {
                   </button>
                 </div>
               </div>
-            )}
-          </div>
-        )}
+
+              {/* 3. Bota Mesaj Hazırlat (Yeni Akış) */}
+              <div className="space-y-3.5 border-t border-black/[0.03] pt-4">
+                <span className="block text-[9px] font-bold text-[#86868B] uppercase tracking-widest">2. Bota Mesaj Hazırlat</span>
+
+                {/* Predefined Intents */}
+                <div className="space-y-1">
+                  <span className="block text-[10px] text-[#86868B] font-bold">Hazırlama Amacı:</span>
+                  <div className="flex flex-wrap gap-1">
+                    {[
+                      "Karşılama",
+                      "Randevuya Yönlendir",
+                      "Uygun Gün/Saat Sor",
+                      "Fiyat Vermeden Koordinatöre Yönlendir",
+                      "Kararsız Hastayı Nazikçe İkna Et",
+                      "Rapor/MR İstemeden Geliş Amacını Teyit Et",
+                      "Cevap Bekleyen Hastaya Takip Mesajı Hazırla",
+                      "Serbest Talimatla Mesaj Hazırla"
+                    ].map((intent) => (
+                      <button
+                        key={intent}
+                        type="button"
+                        onClick={() => setSelectedIntent(intent)}
+                        className={`px-2 py-1 text-[9.5px] font-bold rounded-lg transition-all border ${
+                          selectedIntent === intent
+                            ? "bg-indigo-600 border-indigo-600 text-white shadow-sm"
+                            : "bg-white border-[#E5E5EA] text-[#1D1D1F] hover:bg-[#F5F5F7]"
+                        }`}
+                      >
+                        {intent}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Custom instruction input for Serbest Talimat */}
+                {selectedIntent === "Serbest Talimatla Mesaj Hazırla" && (
+                  <div className="space-y-1 animate-fade-in">
+                    <span className="block text-[10px] text-[#86868B] font-bold">Özel Talimat:</span>
+                    <input
+                      type="text"
+                      value={customDirective}
+                      onChange={(e) => setCustomDirective(e.target.value)}
+                      placeholder="Örn: Hastaya randevu seçeneklerimizi Konya hastanemizin yoğunluğunu belirterek sun."
+                      className="w-full bg-white border border-[#D2D2D7] rounded-lg px-2 py-1 text-[11px] outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </div>
+                )}
+
+                {/* Target Language Dropdown */}
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-[#86868B] font-bold">Hedef Dil:</span>
+                  <select
+                    value={selectedLanguage}
+                    onChange={(e) => setSelectedLanguage(e.target.value)}
+                    className="bg-white border border-[#D2D2D7] rounded-lg px-2 py-1 text-[10.5px] outline-none text-[#1D1D1F] font-semibold"
+                  >
+                    {["Auto", "Türkçe", "İngilizce", "Almanca", "Arapça", "Fransızca"].map((lang) => (
+                      <option key={lang} value={lang}>{lang}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Action Trigger */}
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setIsGeneratingAssistedDraft(true);
+                    setAssistedDraftError(null);
+                    setAssistedDraftSuccess(false);
+                    setSuggestedTemplates([]);
+                    setSelectedTemplate(null);
+                    try {
+                      const res = await prepareInboxBotAssistedDraftAction(
+                        activeContact.conversation_id || activeContact.id,
+                        selectedIntent,
+                        selectedLanguage,
+                        selectedIntent === "Serbest Talimatla Mesaj Hazırla" ? customDirective : undefined
+                      ) as any;
+
+                      if (res.success) {
+                        setAssistedDraftSuccess(true);
+                        setDetectedLanguage(res.detectedLanguage || null);
+                        setIsLanguageUnclear(res.isLanguageUnclear || false);
+                        
+                        if (res.isTemplate) {
+                          setSuggestedTemplates(res.suggestedTemplates || []);
+                          setAssistedDraftText("");
+                        } else {
+                          setAssistedDraftText(res.draft || "");
+                        }
+                      } else {
+                        setAssistedDraftError(res.error || "Taslak hazırlanamadı.");
+                      }
+                    } catch (err: any) {
+                      setAssistedDraftError(err.message || "Taslak hazırlama sırasında hata oluştu.");
+                    } finally {
+                      setIsGeneratingAssistedDraft(false);
+                    }
+                  }}
+                  disabled={isGeneratingAssistedDraft || (selectedIntent === "Serbest Talimatla Mesaj Hazırla" && !customDirective.trim())}
+                  className="w-full py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all disabled:opacity-50 shadow-sm"
+                >
+                  {isGeneratingAssistedDraft ? (
+                    <><Loader2 className="w-3.5 h-3.5 animate-spin" /><span>Taslak Hazırlanıyor...</span></>
+                  ) : (
+                    <><Sparkles className="w-3.5 h-3.5" /><span>Bota Cevap Hazırlat</span></>
+                  )}
+                </button>
+
+                {/* Error message */}
+                {assistedDraftError && (
+                  <div className="text-[10px] font-semibold text-red-600 bg-red-50 p-2 rounded-lg leading-normal">
+                    ⚠️ {assistedDraftError}
+                  </div>
+                )}
+
+                {/* Generated freeform draft / template selections container */}
+                {assistedDraftSuccess && (
+                  <div className="space-y-3.5 border-t border-black/[0.03] pt-3 animate-fade-in">
+                    
+                    {/* Detected Language Indicator */}
+                    {detectedLanguage && (
+                      <div className="flex items-center justify-between text-[9.5px] text-[#86868B] font-semibold">
+                        <span>Algılanan Dil: <strong className="text-[#1D1D1F]">{detectedLanguage}</strong></span>
+                        {isLanguageUnclear && (
+                          <span className="text-amber-600 font-bold bg-amber-50 px-1.5 py-0.5 rounded">⚠️ Net Değil</span>
+                        )}
+                      </div>
+                    )}
+
+                    {/* FREEFORM DRAFT RENDER */}
+                    {!(suggestedTemplates && suggestedTemplates.length > 0) && (
+                      <div className="space-y-2">
+                        <span className="block text-[10px] text-[#86868B] font-bold">Hazırlanan Taslak Metin (Düzenlenebilir):</span>
+                        <textarea
+                          value={assistedDraftText}
+                          onChange={(e) => setAssistedDraftText(e.target.value)}
+                          rows={6}
+                          className="w-full bg-white border border-[#D2D2D7] rounded-xl p-2.5 text-[11.5px] text-[#1D1D1F] leading-normal outline-none focus:ring-1 focus:ring-indigo-500 shadow-inner"
+                        />
+                        
+                        {/* Send Action */}
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!assistedDraftText.trim()) return;
+                            setIsSendingAssistedDraft(true);
+                            try {
+                              const res = await sendApprovedInboxBotDraftAction(
+                                activeContact.conversation_id || activeContact.id,
+                                assistedDraftText
+                              ) as any;
+                              if (res.success) {
+                                setAssistedDraftText("");
+                                setAssistedDraftSuccess(false);
+                                mutate((key) => Array.isArray(key) && key[0] === "conversations");
+                                queryClient.invalidateQueries({ queryKey: ['crm-panel', activeContact.conversation_id || activeContact.id] });
+                              } else {
+                                setAssistedDraftError(res.error || "Mesaj gönderilemedi.");
+                              }
+                            } catch (err: any) {
+                              setAssistedDraftError(err.message || "Gönderim hatası.");
+                            } finally {
+                              setIsSendingAssistedDraft(false);
+                            }
+                          }}
+                          disabled={isSendingAssistedDraft || !assistedDraftText.trim()}
+                          className="w-full py-2 bg-green-600 hover:bg-green-700 text-white text-[10.5px] font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all disabled:opacity-50 shadow-sm"
+                        >
+                          {isSendingAssistedDraft ? (
+                            <><Loader2 className="w-3.5 h-3.5 animate-spin" /><span>Gönderiliyor...</span></>
+                          ) : (
+                            <><Send className="w-3.5 h-3.5" /><span>Taslağı Gönder (API)</span></>
+                          )}
+                        </button>
+                      </div>
+                    )}
+
+                    {/* TEMPLATE RECOMMENDATIONS RENDER */}
+                    {suggestedTemplates && suggestedTemplates.length > 0 && (
+                      <div className="space-y-3">
+                        <div className="p-2 bg-amber-50 border border-amber-100 rounded-xl text-[10px] text-amber-700 font-medium leading-relaxed">
+                          ⚠️ 24 saatlik WhatsApp serbest mesajlaşma penceresi kapalı. Sadece Meta onaylı şablonlar gönderilebilir. Lütfen aşağıdan bir şablon seçin.
+                        </div>
+
+                        <div className="space-y-2">
+                          <span className="block text-[10px] text-[#86868B] font-bold">Önerilen Şablonlar:</span>
+                          <div className="space-y-2">
+                            {suggestedTemplates.map((tpl: any, idx: number) => {
+                              const isSelected = selectedTemplate?.templateId === tpl.templateId;
+                              return (
+                                <div
+                                  key={idx}
+                                  onClick={() => {
+                                    setSelectedTemplate(tpl);
+                                    setAssistedDraftText(tpl.filledBody || "");
+                                  }}
+                                  className={`p-2.5 rounded-xl border text-left cursor-pointer transition-all ${
+                                    isSelected 
+                                      ? "bg-indigo-50/50 border-indigo-300 shadow-sm" 
+                                      : "bg-white border-[#E5E5EA] hover:bg-[#F5F5F7]"
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between mb-1">
+                                    <span className="text-[10px] font-bold text-[#1D1D1F]">{tpl.templateName}</span>
+                                    <span className="text-[8.5px] px-1 bg-gray-100 border rounded text-gray-500 font-mono uppercase">{tpl.language}</span>
+                                  </div>
+                                  <p className="text-[9.5px] text-indigo-700 italic leading-snug mb-2">"{tpl.explanation}"</p>
+                                  <div className="p-2 bg-gray-50 border rounded-lg text-[9.5px] text-[#86868B] whitespace-pre-wrap font-mono">
+                                    {tpl.filledBody}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {selectedTemplate && (
+                          <div className="space-y-2 animate-fade-in">
+                            <span className="block text-[10px] text-[#86868B] font-bold">Şablon Değişken Değerleri (Düzenlenebilir):</span>
+                            <textarea
+                              value={assistedDraftText}
+                              onChange={(e) => setAssistedDraftText(e.target.value)}
+                              rows={5}
+                              className="w-full bg-white border border-[#D2D2D7] rounded-xl p-2.5 text-[11.5px] text-[#1D1D1F] leading-normal outline-none focus:ring-1 focus:ring-indigo-500 shadow-inner"
+                            />
+                            
+                            {/* Send Approved Template */}
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                if (!assistedDraftText.trim() || !selectedTemplate) return;
+                                setIsSendingAssistedDraft(true);
+                                try {
+                                  const res = await sendApprovedInboxBotDraftAction(
+                                    activeContact.conversation_id || activeContact.id,
+                                    assistedDraftText,
+                                    selectedTemplate.templateName,
+                                    selectedTemplate.language,
+                                    selectedTemplate.body
+                                  ) as any;
+                                  if (res.success) {
+                                    setAssistedDraftText("");
+                                    setAssistedDraftSuccess(false);
+                                    setSelectedTemplate(null);
+                                    mutate((key) => Array.isArray(key) && key[0] === "conversations");
+                                    queryClient.invalidateQueries({ queryKey: ['crm-panel', activeContact.conversation_id || activeContact.id] });
+                                  } else {
+                                    setAssistedDraftError(res.error || "Şablon mesajı gönderilemedi.");
+                                  }
+                                } catch (err: any) {
+                                  setAssistedDraftError(err.message || "Şablon gönderim hatası.");
+                                } finally {
+                                  setIsSendingAssistedDraft(false);
+                                }
+                              }}
+                              disabled={isSendingAssistedDraft || !assistedDraftText.trim()}
+                              className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[10.5px] font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all disabled:opacity-50 shadow-sm"
+                            >
+                              {isSendingAssistedDraft ? (
+                                <><Loader2 className="w-3.5 h-3.5 animate-spin" /><span>Şablon Gönderiliyor...</span></>
+                              ) : (
+                                <><Send className="w-3.5 h-3.5" /><span>Onaylı Şablonu Gönder (API)</span></>
+                              )}
+                            </button>
+                          </div>
+                        )}
+
+                        {/* WhatsApp'ta Manuel Aç Alternative */}
+                        <div className="border-t border-black/[0.03] pt-3 space-y-2">
+                          <p className="text-[10px] text-[#86868B] font-medium leading-relaxed">
+                            Serbest API mesajı gönderilemez. WhatsApp Business App’te sohbeti açarak manuel yazabilirsiniz. Hasta cevap verirse 24 saatlik pencere yeniden açılır.
+                          </p>
+                          <a
+                            href={
+                              typeof window !== 'undefined' && /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+                                ? `https://wa.me/${crmData?.phoneNumber || activeContact.phone_number || activeContact.id}?text=${encodeURIComponent(assistedDraftText || selectedTemplate?.filledBody || "")}`
+                                : `https://web.whatsapp.com/send?phone=${crmData?.phoneNumber || activeContact.phone_number || activeContact.id}&text=${encodeURIComponent(assistedDraftText || selectedTemplate?.filledBody || "")}`
+                            }
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="w-full py-1.5 border border-[#D2D2D7] hover:bg-[#F5F5F7] text-[#1D1D1F] text-[10px] font-bold rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+                          >
+                            <Share2 className="w-3.5 h-3.5" />
+                            <span>WhatsApp'ta Manuel Aç</span>
+                          </a>
+                        </div>
+
+                      </div>
+                    )}
+
+                  </div>
+                )}
+
+              </div>
+
+            </div>
+          )}
+        </div>
 
         {/* Quick Action Grid Cards */}
         <div className="grid grid-cols-2 gap-2 mt-2.5 w-full pt-2 border-t border-black/5">
