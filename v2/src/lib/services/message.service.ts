@@ -200,6 +200,83 @@ export class MessageService {
   }
 
   /**
+   * Resolves credentials internally and sends a template message via the active provider (360dialog vs Meta).
+   */
+  async sendWhatsAppTemplate(
+    to: string,
+    templateName: string,
+    languageCode: string = "tr",
+    components: any[] = []
+  ): Promise<{ success: boolean; providerMessageId?: string }> {
+    const { CredentialsService } = await import("./credentials.service");
+    const creds = await CredentialsService.resolveCredentials(this.db.tenantId, 'whatsapp');
+    if (!creds.accessToken) {
+      throw new Error("WhatsApp credentials not resolved.");
+    }
+
+    if (creds.provider === '360dialog' || creds.provider === '360dialog_whatsapp') {
+      const { ThreeSixtyDialogService } = await import("./providers/three-sixty-dialog.service");
+      return ThreeSixtyDialogService.sendTemplate(creds.accessToken, to, templateName, languageCode, components);
+    }
+
+    const phoneId = creds.whatsappPhoneNumberId;
+    if (!phoneId) {
+      throw new Error("WhatsApp Phone Number ID not resolved.");
+    }
+
+    const url = `https://graph.facebook.com/v25.0/${phoneId}/messages`;
+    try {
+      const bodyData = {
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to: to,
+        type: "template",
+        template: {
+          name: templateName,
+          language: {
+            code: languageCode
+          },
+          ...(components.length > 0 ? { components } : {})
+        }
+      };
+
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${creds.accessToken}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(bodyData)
+      });
+      if (!response.ok) {
+        const err = await response.text();
+        throw new Error(`WhatsApp API Template Error: ${err}`);
+      }
+      const data = await response.json();
+      const providerMessageId = data.messages?.[0]?.id || data.message_id || null;
+      return { success: true, providerMessageId };
+    } catch (e: any) {
+      this.log.error("WhatsApp API template request failed", e instanceof Error ? e : new Error(String(e)));
+      throw e;
+    }
+  }
+
+  /**
+   * Resolves credentials internally and sends a freeform message via the active provider.
+   */
+  async sendWhatsAppFreeform(
+    to: string,
+    content: string
+  ): Promise<{ success: boolean; providerMessageId?: string }> {
+    const { CredentialsService } = await import("./credentials.service");
+    const creds = await CredentialsService.resolveCredentials(this.db.tenantId, 'whatsapp');
+    if (!creds.accessToken || !creds.whatsappPhoneNumberId) {
+      throw new Error("WhatsApp credentials not resolved.");
+    }
+    return this.sendWhatsAppMessage(creds.whatsappPhoneNumberId, creds.accessToken, to, content, creds.provider);
+  }
+
+  /**
    * Send outgoing Messenger/Instagram message via Meta Graph API
    */
   async sendSocialMessage(accessToken: string, to: string, content: string, channel: 'messenger' | 'instagram'): Promise<{ success: boolean; providerMessageId?: string }> {

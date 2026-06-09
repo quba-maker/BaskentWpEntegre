@@ -3591,62 +3591,8 @@ export async function resolveWhatsApp24hWindow(
   tenantId: string,
   db: any
 ) {
-  const rows = await db.executeSafe({
-    text: `
-      SELECT id, COALESCE(provider_timestamp, created_at) as last_inbound_at, provider_message_id
-      FROM messages
-      WHERE conversation_id = $1
-        AND tenant_id = $2
-        AND direction = 'in'
-        AND (media_metadata IS NULL OR media_metadata->>'reaction' IS NULL)
-      ORDER BY COALESCE(provider_timestamp, created_at) DESC, id DESC
-      LIMIT 1
-    `,
-    values: [conversationId, tenantId]
-  }) as any[];
-
-  if (rows.length === 0) {
-    return {
-      status: 'UNKNOWN' as const,
-      reason: 'No inbound message found',
-      lastCustomerInteractionAt: undefined,
-      expiresAt: undefined,
-      remainingSeconds: 0,
-      sourceMessageId: undefined
-    };
-  }
-
-  const row = rows[0];
-  const lastInboundAt = row.last_inbound_at;
-  const lastCustomerInteractionAt = new Date(lastInboundAt);
-  const expiresAt = new Date(lastCustomerInteractionAt.getTime() + 24 * 60 * 60 * 1000);
-  const now = new Date();
-  
-  const remainingMs = expiresAt.getTime() - now.getTime();
-  const remainingSeconds = Math.max(0, Math.floor(remainingMs / 1000));
-  const remainingHours = remainingSeconds / 3600;
-
-  let status: 'OPEN' | 'CLOSING_SOON' | 'CLOSED' = 'CLOSED';
-  let reason = 'Window closed (more than 24 hours since last interaction)';
-  
-  if (remainingSeconds > 0) {
-    if (remainingHours < 4) {
-      status = 'CLOSING_SOON';
-      reason = `Window closing soon (less than 4 hours remaining: \${Math.floor(remainingHours)}h \${Math.floor((remainingSeconds % 3600) / 60)}m)`;
-    } else {
-      status = 'OPEN';
-      reason = `Window open (\${Math.floor(remainingHours)}h remaining)`;
-    }
-  }
-
-  return {
-    status,
-    reason,
-    lastCustomerInteractionAt: lastCustomerInteractionAt.toISOString(),
-    expiresAt: expiresAt.toISOString(),
-    remainingSeconds,
-    sourceMessageId: row.id
-  };
+  const { resolveWhatsApp24hWindow: centralResolve } = await import("@/lib/services/whatsapp-window-resolver");
+  return centralResolve(conversationId, tenantId, db);
 }
 
 export async function getCrmPanelBundleAction(conversationId: string) {
@@ -5599,8 +5545,20 @@ Lütfen bu bilgilere göre yukarıdaki kurallara ve talimatlara uygun cevap tasl
       }
 
       // 7. IF 24H WINDOW IS CLOSED OR UNKNOWN -> Template selection and filling
+      // Generate Form smart draft if form exists and intent is greeting (for manual copy-paste fallback)
+      let closedFormDraft: string | undefined = undefined;
+      if (lead && intentHint === "Karşılama") {
+        try {
+          const { generateSmartDraft } = await import('@/lib/utils/smart-draft-generator');
+          closedFormDraft = await generateSmartDraft(lead.raw_data, lead.form_name);
+        } catch (e) {
+          console.error("[CLOSED_FORM_DRAFT_GEN_ERROR] Failed to generate form greeting for copy", e);
+        }
+      }
+
+      // Fetch active templates
       const templateRows = await ctx.db.executeSafe({
-        text: `SELECT id, name, language, body, variables FROM message_templates WHERE tenant_id = $1 AND is_active = true`,
+        text: `SELECT id, name, language, body, variables, template_type, form_name FROM message_templates WHERE tenant_id = $1 AND is_active = true`,
         values: [ctx.tenantId]
       }) as any[];
 
@@ -5608,6 +5566,7 @@ Lütfen bu bilgilere göre yukarıdaki kurallara ve talimatlara uygun cevap tasl
         return {
           success: true,
           isTemplate: true,
+          draft: closedFormDraft,
           suggestedTemplates: [],
           windowStatus: windowStatus.status,
           detectedLanguage: "Bilinmiyor",
@@ -5616,8 +5575,52 @@ Lütfen bu bilgilere göre yukarıdaki kurallara ve talimatlara uygun cevap tasl
         };
       }
 
+      // --- DETERMINISTIC FILTERING ---
+      let filteredTemplates = templateRows;
+
+      // 1. Language Match
+      const langMap: Record<string, string> = {
+        "Türkçe": "tr",
+        "İngilizce": "en",
+        "Almanca": "de",
+        "Arapça": "ar",
+        "Fransızca": "fr"
+      };
+      const targetCode = langMap[targetLanguage || ""] || null;
+      if (targetCode) {
+        const langMatch = templateRows.filter(t => t.language === targetCode);
+        if (langMatch.length > 0) {
+          filteredTemplates = langMatch;
+        }
+      }
+
+      // 2. Category / Purpose Match
+      if (intentHint === "Karşılama") {
+        // Prioritize greeting templates
+        const greetingTemplates = filteredTemplates.filter(t => t.template_type === 'greeting');
+        if (greetingTemplates.length > 0) {
+          // If form exists, prioritize form_name matching templates
+          if (lead && lead.form_name) {
+            const formMatch = greetingTemplates.filter(t => t.form_name && t.form_name.toLowerCase() === lead.form_name.toLowerCase());
+            if (formMatch.length > 0) {
+              filteredTemplates = formMatch;
+            } else {
+              filteredTemplates = greetingTemplates;
+            }
+          } else {
+            filteredTemplates = greetingTemplates;
+          }
+        }
+      } else if (intentHint && intentHint !== "Serbest Talimatla Mesaj Hazırla") {
+        // Prioritize non-greeting templates for follow-ups
+        const nonGreeting = filteredTemplates.filter(t => t.template_type !== 'greeting');
+        if (nonGreeting.length > 0) {
+          filteredTemplates = nonGreeting;
+        }
+      }
+
       // Format templates list for Gemini
-      const templatesList = templateRows.map(t => ({
+      const templatesList = filteredTemplates.map(t => ({
         id: t.id,
         name: t.name,
         language: t.language,
@@ -5695,6 +5698,7 @@ Lütfen bu bilgilere göre yukarıdaki kurallara uygun en iyi 2-3 şablonu seç,
         return {
           success: true,
           isTemplate: true,
+          draft: closedFormDraft,
           suggestedTemplates: parsed.suggestedTemplates || [],
           windowStatus: windowStatus.status,
           detectedLanguage: parsed.detectedLanguage,
@@ -5738,15 +5742,6 @@ export async function sendApprovedInboxBotDraftAction(
       const conv = convRows[0];
       const phone = conv.phone_number;
 
-      // 3. Resolve WhatsApp credentials
-      const creds = await CredentialsService.resolveCredentials(ctx.tenantId, 'whatsapp');
-      const META_ACCESS_TOKEN = creds.accessToken;
-      const PHONE_NUMBER_ID = creds.whatsappPhoneNumberId;
-
-      if (!META_ACCESS_TOKEN || !PHONE_NUMBER_ID) {
-        return { success: false, error: "WhatsApp kimlik bilgileri eksik. Entegrasyon ayarlarını kontrol edin." };
-      }
-
       const { MessageService } = await import("@/lib/services/message.service");
       const { TenantDB } = await import("@/lib/core/tenant-db");
       const tenantDb = new TenantDB(ctx.tenantId);
@@ -5766,12 +5761,9 @@ export async function sendApprovedInboxBotDraftAction(
         }
 
         try {
-          const sendRes = await messageService.sendWhatsAppMessage(
-            PHONE_NUMBER_ID,
-            META_ACCESS_TOKEN,
+          const sendRes = await messageService.sendWhatsAppFreeform(
             phone,
-            draftText.trim(),
-            creds.provider
+            draftText.trim()
           );
           providerMessageId = sendRes.providerMessageId || null;
           sendSuccess = sendRes.success;
@@ -5796,65 +5788,35 @@ export async function sendApprovedInboxBotDraftAction(
         }
 
         try {
-          if (creds.provider === '360dialog' || creds.provider === '360dialog_whatsapp') {
-            const { ThreeSixtyDialogService } = await import('@/lib/services/providers/three-sixty-dialog.service');
-            const res = await ThreeSixtyDialogService.sendTemplate(
-              META_ACCESS_TOKEN,
-              phone,
-              templateName,
-              lang,
-              components
-            );
-            sendSuccess = res.success;
-            providerMessageId = res.providerMessageId || null;
-          } else {
-            // Default Meta API
-            const bodyData: any = {
-              messaging_product: 'whatsapp',
-              to: phone,
-              recipient_type: 'individual',
-              type: 'template',
-              template: {
-                name: templateName,
-                language: {
-                  code: lang
-                },
-                ...(components.length > 0 ? { components } : {})
-              }
-            };
-
-            const response = await fetch(`https://graph.facebook.com/v25.0/${PHONE_NUMBER_ID}/messages`, {
-              method: 'POST',
-              headers: {
-                'Authorization': `Bearer ${META_ACCESS_TOKEN}`,
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify(bodyData),
-            });
-
-            if (!response.ok) {
-              const errData = await response.json().catch(() => ({}));
-              throw new Error(errData?.error?.message || response.statusText);
-            }
-            const data = await response.json();
-            providerMessageId = data.messages?.[0]?.id || null;
-            sendSuccess = true;
-          }
+          const sendRes = await messageService.sendWhatsAppTemplate(
+            phone,
+            templateName,
+            lang,
+            components
+          );
+          sendSuccess = sendRes.success;
+          providerMessageId = sendRes.providerMessageId || null;
         } catch (err: any) {
           return { success: false, error: `WhatsApp Şablon gönderim hatası: ${err.message || err}` };
         }
       }
 
       if (sendSuccess) {
-        // Save the message into messages table
-        const insertRes = await ctx.db.executeSafe({
-          text: `INSERT INTO messages (tenant_id, conversation_id, phone_number, direction, content, channel, status, provider_message_id)
-                 VALUES ($1, $2, $3, 'out', $4, 'whatsapp', 'sent', $5)
-                 RETURNING id`,
-          values: [ctx.tenantId, conversationId, phone, draftText.trim(), providerMessageId]
-        }) as any[];
+        // Use idempotent MessageService to insert the sent message
+        const saveRes = await messageService.saveMessageIdempotent({
+          phoneNumber: phone,
+          direction: 'out',
+          content: draftText.trim(),
+          channel: 'whatsapp',
+          status: 'sent',
+          providerMessageId: providerMessageId
+        });
 
-        const insertedMessageId = insertRes[0]?.id;
+        if (!saveRes.success) {
+          return { success: false, error: "Mesaj veritabanına kaydedilemedi." };
+        }
+
+        const insertedMessageId = saveRes.messageId;
 
         // Write to outreach_logs
         await ctx.db.executeSafe({
@@ -5873,17 +5835,6 @@ export async function sendApprovedInboxBotDraftAction(
               draft_text: draftText
             })
           ]
-        });
-
-        // Resolve conversation status
-        await ctx.db.executeSafe({
-          text: `UPDATE conversations 
-                 SET last_message_at = NOW(),
-                     last_message_content = $1,
-                     last_message_direction = 'out',
-                     last_message_status = 'sent'
-                 WHERE id = $2 AND tenant_id = $3`,
-          values: [draftText.trim(), conversationId, ctx.tenantId]
         });
 
         return { success: true, messageId: insertedMessageId, providerMessageId };

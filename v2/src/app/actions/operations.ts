@@ -172,6 +172,7 @@ export async function getOperationItems(filters?: OperationFilters): Promise<{ i
 
           -- Conversation details
           c.status as conv_status,
+          c.patient_name as conv_patient_name,
           c.last_message_content as conv_last_message,
           c.last_message_at as conv_last_message_at,
 
@@ -286,7 +287,7 @@ export async function getOperationItems(filters?: OperationFilters): Promise<{ i
           opportunity_id: row.opportunity_id || undefined,
           conversation_id: row.conversation_id || undefined,
           lead_id: row.lead_id || undefined,
-          patient_name: row.opp_patient_name || row.lead_raw_data?.patient_name || row.lead_raw_data?.Name || 'İsimsiz Form',
+          patient_name: row.opp_patient_name || row.lead_raw_data?.patient_name || row.lead_raw_data?.Name || row.conv_patient_name || 'İsimsiz Hasta',
           phone_number: row.phone_number,
           country: resolvedCountry || undefined,
           department: row.opp_department || row.lead_raw_data?.department || row.lead_raw_data?.Bölüm || 'Genel',
