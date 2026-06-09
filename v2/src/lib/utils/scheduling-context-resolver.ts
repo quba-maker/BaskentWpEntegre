@@ -26,7 +26,7 @@ function normalizeTurkish(str: string): string {
 }
 
 // Format YYYY-MM-DD for Turkish display (e.g. "1 Ağustos")
-function formatDisplayDate(dateStr: string): string {
+export function formatDisplayDate(dateStr: string): string {
   const [yyyy, mm, dd] = dateStr.split("-");
   const monthNames = [
     "Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran",

@@ -2,10 +2,10 @@
 
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { X, Calendar, Clock, FileText, Check, Loader2, CalendarClock } from "lucide-react";
+import { X, Calendar, Clock, FileText, Check, Loader2, CalendarClock, Sparkles } from "lucide-react";
 import { parseTurkeyLocalToUtc, resolvePatientTimeDisplay } from "@/lib/utils/timezone";
 import { createAppointmentTask } from "@/app/actions/patient-tracking";
-import { getTzOffsetDiff } from "@/lib/utils/scheduling-context-resolver";
+import { getTzOffsetDiff, formatDisplayDate } from "@/lib/utils/scheduling-context-resolver";
 
 interface AppointmentModalProps {
   isOpen: boolean;
@@ -37,13 +37,14 @@ export function AppointmentModal({
   const [mounted, setMounted] = useState(false);
   const [date, setDate] = useState("");
   const [time, setTime] = useState("10:00");
-  const [note, setNote] = useState(defaultNote || "");
+  const [note, setNote] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"idle" | "success" | "error">("idle");
   const [errorMessage, setErrorMessage] = useState("");
   const [showDuplicateWarning, setShowDuplicateWarning] = useState(false);
   const [existingTaskId, setExistingTaskId] = useState<string | null>(null);
   const [durationHours, setDurationHours] = useState<number | null>(null);
+  const [hasAppliedPrefill, setHasAppliedPrefill] = useState(false);
 
   // Reminder states
   const [reminders, setReminders] = useState({
@@ -53,39 +54,43 @@ export function AppointmentModal({
     seven_days_before: false,
   });
 
-  // Set default date to tomorrow or prefill values
+  // Set default date to tomorrow
   useEffect(() => {
     setMounted(true);
     
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const yyyy = tomorrow.getFullYear();
+    const mm = String(tomorrow.getMonth() + 1).padStart(2, "0");
+    const dd = String(tomorrow.getDate()).padStart(2, "0");
+    setDate(`${yyyy}-${mm}-${dd}`);
+    setDurationHours(null);
+    if (defaultNote) {
+      setNote(defaultNote);
+    }
+  }, [defaultNote]);
+
+  const handleApplyPrefill = () => {
     if (prefill?.detected && prefill.date) {
       setDate(prefill.date);
       if (prefill.time) {
         setTime(prefill.time);
-      }
-      if (prefill.noteHeader) {
-        setNote(defaultNote || prefill.noteHeader);
       }
       if (prefill.durationMinutes) {
         setDurationHours(prefill.durationMinutes / 60);
       } else {
         setDurationHours(null);
       }
-    } else {
-      const tomorrow = new Date();
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      const yyyy = tomorrow.getFullYear();
-      const mm = String(tomorrow.getMonth() + 1).padStart(2, "0");
-      const dd = String(tomorrow.getDate()).padStart(2, "0");
-      setDate(`${yyyy}-${mm}-${dd}`);
-      setDurationHours(null);
+      if (prefill.noteHeader) {
+        setNote(prev => {
+          const base = prev || "";
+          if (base.includes(prefill.noteHeader)) return base;
+          return base ? `${prefill.noteHeader}\n\n${base}` : prefill.noteHeader;
+        });
+      }
+      setHasAppliedPrefill(true);
     }
-  }, [prefill, defaultNote]);
-
-  useEffect(() => {
-    if (defaultNote && (note === "" || note === defaultNote)) {
-      setNote(defaultNote);
-    }
-  }, [defaultNote]);
+  };
 
   const tzInfo = resolvePatientTimeDisplay({
     country: activeContact?.country || activeContact?.opp_country,
@@ -340,16 +345,43 @@ export function AppointmentModal({
               )}
 
               {prefill?.detected && (
-                <div className="p-3 bg-indigo-50/70 border border-indigo-100 rounded-xl text-[11px] font-bold text-indigo-700 flex flex-col gap-1 animate-in fade-in duration-200">
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-indigo-600 animate-pulse" />
-                    <span>✨ Mesajdan algılandı</span>
-                  </div>
-                  {prefill.warningMessage && (
-                    <div className="text-[10px] text-amber-700 font-semibold border-t border-indigo-100/50 pt-1">
-                      {prefill.warningMessage}
+                <div className="p-4 bg-indigo-50/60 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/30 rounded-2xl flex flex-col gap-3 animate-in fade-in duration-200">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-700 dark:text-indigo-400">
+                      <Sparkles className="w-4 h-4 text-indigo-600 animate-pulse" />
+                      <span>Mesajdan Zaman Önerisi</span>
                     </div>
-                  )}
+                    {!hasAppliedPrefill ? (
+                      <button
+                        type="button"
+                        onClick={handleApplyPrefill}
+                        className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold rounded-lg cursor-pointer transition-all shadow-sm"
+                      >
+                        Öneriyi Uygula
+                      </button>
+                    ) : (
+                      <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 text-[10px] font-bold rounded-md flex items-center gap-1">
+                        <Check className="w-3 h-3" /> Uygulandı
+                      </span>
+                    )}
+                  </div>
+                  
+                  <div className="text-[11.5px] font-semibold text-gray-700 dark:text-gray-300 space-y-1">
+                    <div>Planlanan Tarih: <span className="text-gray-900 dark:text-white font-bold">{formatDisplayDate(prefill.date)}</span></div>
+                    {prefill.patientTimeText && (
+                      <div className="space-y-0.5">
+                        <div>Hasta Yerel Saati: <span className="text-emerald-600 font-bold">{prefill.patientTimeText} {tzInfo.patientTimezone?.split("/")[1]?.replace(/_/g, " ") || tzInfo.residenceCountryLabel}</span></div>
+                        {prefill.turkeyTimeText && tzInfo.patientTimezone !== "Europe/Istanbul" && (
+                          <div>Türkiye Saati: <span className="text-indigo-600 font-bold">{prefill.turkeyTimeText}</span></div>
+                        )}
+                      </div>
+                    )}
+                    {prefill.warningMessage && (
+                      <div className="text-[10px] text-amber-700 dark:text-amber-500 font-semibold pt-1 border-t border-indigo-100/50 mt-1">
+                        {prefill.warningMessage}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 

@@ -174,7 +174,7 @@ function getFormContextString(crm: any, prefillHeader?: string): string {
           phoneNumber={phoneNumber}
           activeContact={crm?.opportunity}
           fallback={{ conversationId, phoneNumber }}
-          defaultNote={getFormContextString(crm, prefill?.detected ? prefill.noteHeader : undefined)}
+          defaultNote={getFormContextString(crm, undefined)}
           prefill={prefill}
         />
       );
@@ -190,7 +190,7 @@ function getFormContextString(crm: any, prefillHeader?: string): string {
           phoneNumber={phoneNumber}
           activeContact={crm?.opportunity}
           fallback={{ conversationId, phoneNumber }}
-          defaultNote={getFormContextString(crm, prefill?.detected ? prefill.noteHeader : undefined)}
+          defaultNote={getFormContextString(crm, undefined)}
           prefill={prefill}
         />
       );
@@ -206,7 +206,7 @@ function getFormContextString(crm: any, prefillHeader?: string): string {
           phoneNumber={phoneNumber}
           activeContact={crm?.opportunity}
           fallback={{ conversationId, phoneNumber }}
-          defaultNote={getFormContextString(crm, prefill?.detected ? prefill.noteHeader : undefined)}
+          defaultNote={getFormContextString(crm, undefined)}
           prefill={prefill}
         />
       );

@@ -2,10 +2,10 @@
 
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { X, Calendar, Clock, FileText, Check, Loader2, Bell } from "lucide-react";
+import { X, Calendar, Clock, FileText, Check, Loader2, Bell, Sparkles } from "lucide-react";
 import { parseTurkeyLocalToUtc, resolvePatientTimeDisplay } from "@/lib/utils/timezone";
 import { scheduleReminderTaskAction } from "@/app/actions/inbox";
-import { getTzOffsetDiff } from "@/lib/utils/scheduling-context-resolver";
+import { getTzOffsetDiff, formatDisplayDate } from "@/lib/utils/scheduling-context-resolver";
 
 interface FollowUpReminderModalProps {
   isOpen: boolean;
@@ -37,15 +37,16 @@ export function FollowUpReminderModal({
   const [mounted, setMounted] = useState(false);
   const [date, setDate] = useState("");
   const [time, setTime] = useState("10:00");
-  const [note, setNote] = useState(defaultNote || "Hasta tarih netleşince geri döneceğini belirtti.");
+  const [note, setNote] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"idle" | "success" | "error">("idle");
   const [errorMessage, setErrorMessage] = useState("");
   const [showDuplicateWarning, setShowDuplicateWarning] = useState(false);
   const [existingTaskId, setExistingTaskId] = useState<string | null>(null);
   const [durationHours, setDurationHours] = useState<number | null>(null);
+  const [hasAppliedPrefill, setHasAppliedPrefill] = useState(false);
 
-  // Calculate dynamic quick dates
+  // Calculate dynamic quick dates (simplified to 3 options)
   const getQuickDates = () => {
     const now = new Date();
     
@@ -60,11 +61,6 @@ export function FollowUpReminderModal({
     // 1 Month Later
     const oneMonth = new Date();
     oneMonth.setMonth(now.getMonth() + 1);
-    
-    // Start of Next Month
-    const startOfNextMonth = new Date();
-    startOfNextMonth.setMonth(now.getMonth() + 1);
-    startOfNextMonth.setDate(1);
 
     const format = (d: Date) => {
       const yyyy = d.getFullYear();
@@ -80,8 +76,7 @@ export function FollowUpReminderModal({
     return [
       { label: "1 Hafta Sonra", date: format(oneWeek), display: formatDisplay(oneWeek) },
       { label: "2 Hafta Sonra", date: format(twoWeeks), display: formatDisplay(twoWeeks) },
-      { label: "1 Ay Sonra", date: format(oneMonth), display: formatDisplay(oneMonth) },
-      { label: "Gelecek Ay Başı", date: format(startOfNextMonth), display: formatDisplay(startOfNextMonth) }
+      { label: "1 Ay Sonra", date: format(oneMonth), display: formatDisplay(oneMonth) }
     ];
   };
 
@@ -89,31 +84,36 @@ export function FollowUpReminderModal({
 
   useEffect(() => {
     setMounted(true);
-    
+    setDate(quickDates[0].date);
+    setDurationHours(null);
+    if (defaultNote) {
+      setNote(defaultNote);
+    } else {
+      setNote("Hasta tarih netleşince geri döneceğini belirtti.");
+    }
+  }, [defaultNote]);
+
+  const handleApplyPrefill = () => {
     if (prefill?.detected && prefill.date) {
       setDate(prefill.date);
       if (prefill.time) {
         setTime(prefill.time);
-      }
-      if (prefill.noteHeader) {
-        setNote(defaultNote || prefill.noteHeader);
       }
       if (prefill.durationMinutes) {
         setDurationHours(prefill.durationMinutes / 60);
       } else {
         setDurationHours(null);
       }
-    } else {
-      setDate(quickDates[0].date);
-      setDurationHours(null);
+      if (prefill.noteHeader) {
+        setNote(prev => {
+          const base = prev || "";
+          if (base.includes(prefill.noteHeader)) return base;
+          return base ? `${prefill.noteHeader}\n\n${base}` : prefill.noteHeader;
+        });
+      }
+      setHasAppliedPrefill(true);
     }
-  }, [prefill, defaultNote]);
-
-  useEffect(() => {
-    if (defaultNote && (note === "Hasta tarih netleşince geri döneceğini belirtti." || note === "")) {
-      setNote(defaultNote);
-    }
-  }, [defaultNote]);
+  };
 
   if (!isOpen || !mounted) return null;
 
@@ -350,16 +350,43 @@ export function FollowUpReminderModal({
               )}
 
               {prefill?.detected && (
-                <div className="p-3 bg-indigo-50/70 border border-indigo-100 rounded-xl text-[11px] font-bold text-indigo-700 flex flex-col gap-1 animate-in fade-in duration-200">
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-indigo-600 animate-pulse" />
-                    <span>✨ Mesajdan algılandı</span>
-                  </div>
-                  {prefill.warningMessage && (
-                    <div className="text-[10px] text-amber-700 font-semibold border-t border-indigo-100/50 pt-1">
-                      {prefill.warningMessage}
+                <div className="p-4 bg-indigo-50/60 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/30 rounded-2xl flex flex-col gap-3 animate-in fade-in duration-200">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-700 dark:text-indigo-400">
+                      <Sparkles className="w-4 h-4 text-indigo-600 animate-pulse" />
+                      <span>Mesajdan Zaman Önerisi</span>
                     </div>
-                  )}
+                    {!hasAppliedPrefill ? (
+                      <button
+                        type="button"
+                        onClick={handleApplyPrefill}
+                        className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold rounded-lg cursor-pointer transition-all shadow-sm"
+                      >
+                        Öneriyi Uygula
+                      </button>
+                    ) : (
+                      <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 text-[10px] font-bold rounded-md flex items-center gap-1">
+                        <Check className="w-3 h-3" /> Uygulandı
+                      </span>
+                    )}
+                  </div>
+                  
+                  <div className="text-[11.5px] font-semibold text-gray-700 dark:text-gray-300 space-y-1">
+                    <div>Planlanan Tarih: <span className="text-gray-900 dark:text-white font-bold">{formatDisplayDate(prefill.date)}</span></div>
+                    {prefill.patientTimeText && (
+                      <div className="space-y-0.5">
+                        <div>Hasta Yerel Saati: <span className="text-emerald-600 font-bold">{prefill.patientTimeText} {tzInfo.patientTimezone?.split("/")[1]?.replace(/_/g, " ") || tzInfo.residenceCountryLabel}</span></div>
+                        {prefill.turkeyTimeText && tzInfo.patientTimezone !== "Europe/Istanbul" && (
+                          <div>Türkiye Saati: <span className="text-indigo-600 font-bold">{prefill.turkeyTimeText}</span></div>
+                        )}
+                      </div>
+                    )}
+                    {prefill.warningMessage && (
+                      <div className="text-[10px] text-amber-700 dark:text-amber-500 font-semibold pt-1 border-t border-indigo-100/50 mt-1">
+                        {prefill.warningMessage}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -378,7 +405,7 @@ export function FollowUpReminderModal({
                         setDurationHours(null);
                       }}
                       className={`px-3 py-2 text-left rounded-xl border transition-all cursor-pointer text-xs flex flex-col ${
-                        !prefill?.detected && date === qd.date
+                        date === qd.date
                           ? "bg-indigo-50 border-indigo-500 text-indigo-700 font-bold"
                           : "border-black/5 hover:bg-black/[0.02] text-gray-700 font-semibold"
                       }`}
