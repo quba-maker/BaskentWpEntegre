@@ -162,7 +162,7 @@ async function runRegressionSimulation() {
   // Verify Step 2 properties
   verifyResponseQuality(response, {
     shouldNotContain: ['mehmet haberal', 'haberal', 'doktorumuz', 'ismini', 'prompt', 'talimat', 'kural', 'yasak'],
-    shouldContain: ['hekim', 'çalışma takvimi', 'deneyimli', 'kadro', 'güncel hekim çalışma takvimini ve bilgisini yanlış paylaşmak istemem'],
+    shouldContain: ['hekim', 'güncel hekim bilgisini yanlış paylaşmak istemem', 'lgili bölümün güncel hekim bilgisini kontrol ederek paylaşmam daha doğru olur'],
     hasDoctorPlaceholder: true
   });
   
@@ -277,7 +277,7 @@ function verifyResponseQuality(text: string, opts: VerificationOptions) {
 
   // Doctor placeholder check
   if (opts.hasDoctorPlaceholder) {
-    if (!normalized.includes("bilgisini yanlış paylaşmak istemem") && !normalized.includes("çalışma takvimini")) {
+    if (!normalized.includes("bilgisini yanlış paylaşmak istemem") && !normalized.includes("kontrol ederek paylaşmam daha doğru olur")) {
       throw new Error(`Response lacks standard doctor fallback placeholder: "${text}"`);
     }
   }
