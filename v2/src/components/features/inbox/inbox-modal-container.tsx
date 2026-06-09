@@ -106,12 +106,23 @@ function getFormContextString(crm: any): string {
   if (!crm?.formFields) return "";
   const parts: string[] = [];
   const fields = crm.formFields;
-  if (fields.formComplaint) parts.push(`Şikayet: ${fields.formComplaint}`);
-  if (fields.formAge) parts.push(`Yaş: ${fields.formAge}`);
-  if (fields.formDepartment) parts.push(`Bölüm: ${fields.formDepartment}`);
-  if (fields.formAppointmentPref) parts.push(`Tercih: ${fields.formAppointmentPref}`);
-  if (fields.formReportStatus) parts.push(`Rapor: ${fields.formReportStatus}`);
-  return parts.join(" | ");
+
+  const isValidValue = (val: any) => {
+    if (val === null || val === undefined) return false;
+    const str = String(val).trim();
+    if (str === "" || str.toLowerCase() === "none" || str.toLowerCase() === "null" || str.toLowerCase() === "undefined") {
+      return false;
+    }
+    return true;
+  };
+
+  if (isValidValue(fields.formComplaint)) parts.push(`Şikayet: ${fields.formComplaint}`);
+  if (isValidValue(fields.formAge)) parts.push(`Yaş: ${fields.formAge}`);
+  if (isValidValue(fields.formCountry)) parts.push(`Konum: ${fields.formCountry}`);
+  if (isValidValue(fields.formDepartment)) parts.push(`Bölüm: ${fields.formDepartment}`);
+  if (isValidValue(fields.formAppointmentPref)) parts.push(`Randevu isteği: ${fields.formAppointmentPref}`);
+
+  return parts.join("\n");
 }
 
   switch (modalType) {

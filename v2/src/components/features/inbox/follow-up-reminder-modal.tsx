@@ -381,9 +381,13 @@ export function FollowUpReminderModal({
                   )}
                 </p>
                 {patientLocalDisplay && (
-                  <p className="text-[10px] font-bold text-indigo-600 mt-1">
-                    Planlanan TR saati hastanın lokal saatine göre: {patientLocalDisplay}
-                  </p>
+                  <div className="text-[10.5px] text-indigo-600 font-bold mt-1 space-y-0.5">
+                    <div>Planlanan saat:</div>
+                    <div>Türkiye saati: {time}</div>
+                    <div>
+                      Hasta yerel saati: {patientLocalDisplay.split(" ")[1]} {tzInfo.patientTimezone?.split("/")[1]?.replace(/_/g, " ") || tzInfo.residenceCountryLabel}
+                    </div>
+                  </div>
                 )}
               </div>
 

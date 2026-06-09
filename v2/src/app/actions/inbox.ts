@@ -3946,6 +3946,7 @@ export async function getCrmPanelBundleAction(conversationId: string) {
           formReportStatus: formExtraction?.reportStatus || null,
           formAppointmentPref: formExtraction?.appointmentPref || null,
           formAge: formExtraction?.age || null,
+          formCountry: formExtraction?.country || null,
           formDepartmentSource: formExtraction?.departmentSource || null
         }
       };

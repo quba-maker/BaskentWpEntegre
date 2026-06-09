@@ -152,17 +152,10 @@ export function extractFormFields(rawData: any): FormExtraction {
       k.includes('nezamanarayalim') || 
       k.includes('randevutercih') || 
       k.includes('iletisimzamani') || 
-      k.includes('randevutarih')
+      k.includes('randevutarih') ||
+      k.includes('randevu')
     ) {
       rawAppointmentPref = valStr;
-    }
-    // Match age keys
-    else if (
-      k.includes('yasiniz') || 
-      k.includes('yas') || 
-      k.includes('dogumtarihi')
-    ) {
-      rawAge = valStr;
     }
     // Match country keys
     else if (
@@ -172,6 +165,17 @@ export function extractFormFields(rawData: any): FormExtraction {
       k.includes('ulkeniz')
     ) {
       rawCountry = valStr;
+    }
+    // Match age keys
+    else if (
+      k === 'yas' ||
+      k === 'yasiniz' ||
+      k.includes('yasiniz') ||
+      k === 'age' ||
+      k.includes('dogumtarihi') ||
+      k.includes('birth')
+    ) {
+      rawAge = valStr;
     }
   }
 
