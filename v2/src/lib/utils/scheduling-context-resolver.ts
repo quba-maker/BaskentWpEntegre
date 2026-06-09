@@ -6,7 +6,7 @@ export interface PrefillResult {
   time: string; // HH:MM
   durationMinutes: number | null;
   noteHeader: string;
-  source: "message" | "form" | "default";
+  source: "message" | "metadata" | "form" | "default";
   patientTimeText?: string;
   turkeyTimeText?: string;
   warningMessage?: string;
@@ -47,7 +47,7 @@ function getNextDayOfWeek(date: Date, dayOfWeek: number): Date {
   return resultDate;
 }
 
-// Calculate Turkey Time minus Patient Local Time in hours on a specific date
+// Calculate Turkey Time minus Patient Local Time in hours on a specific date (DST-Aware)
 export function getTzOffsetDiff(dateStr: string, patientTz: string): number {
   if (!patientTz || patientTz === "Europe/Istanbul") return 0;
   try {
@@ -100,6 +100,7 @@ export function parseTextForDateTime(
   hasDate: boolean;
   hasTime: boolean;
   isTurkeyTime: boolean;
+  warningMessage?: string;
 } | null {
   const clean = normalizeTurkish(text);
   
@@ -114,6 +115,7 @@ export function parseTextForDateTime(
   
   let hasDate = false;
   let hasTime = false;
+  let warningMessage: string | undefined = undefined;
 
   // Detect Turkey Time indicator
   const isTurkeyTime = clean.includes("tr saati") || clean.includes("turkiye saati");
@@ -126,19 +128,41 @@ export function parseTextForDateTime(
   // 1. Explicit Month + Day (e.g., "1 agustos", "15 eylul")
   for (let i = 0; i < months.length; i++) {
     const mName = months[i];
-    const regex = new RegExp(`(\\d{1,2})\\s+${mName}`, "i");
+    const regex = new RegExp(`(\\d{1,2})\\s+${mName}(?:\\s+(\\d{4}))?`, "i");
     const match = clean.match(regex);
     if (match) {
       targetDay = parseInt(match[1], 10);
       targetMonth = i;
       hasDate = true;
 
-      // Ensure closest future date (bump year if date is past in current year)
-      const temp = new Date(targetYear, targetMonth, targetDay, 23, 59, 59);
-      if (temp.getTime() < refDate.getTime()) {
-        targetYear += 1;
+      if (match[2]) {
+        targetYear = parseInt(match[2], 10);
+      } else {
+        // Ensure closest future date (bump year if date is past in current year)
+        const temp = new Date(targetYear, targetMonth, targetDay, 23, 59, 59);
+        if (temp.getTime() < refDate.getTime()) {
+          targetYear += 1;
+        }
       }
       break;
+    }
+  }
+
+  // 1b. Numerical Date (e.g., "01.08.2026", "1.08", "01/08/2026", "1/8")
+  if (!hasDate) {
+    const numDateMatch = clean.match(/(?:^|\s)(\d{1,2})[\.\/](\d{1,2})(?:[\.\/](\d{4}))?(?:$|\s)/);
+    if (numDateMatch) {
+      targetDay = parseInt(numDateMatch[1], 10);
+      targetMonth = parseInt(numDateMatch[2], 10) - 1; // 0-indexed
+      hasDate = true;
+      if (numDateMatch[3]) {
+        targetYear = parseInt(numDateMatch[3], 10);
+      } else {
+        const temp = new Date(targetYear, targetMonth, targetDay, 23, 59, 59);
+        if (temp.getTime() < refDate.getTime()) {
+          targetYear += 1;
+        }
+      }
     }
   }
 
@@ -215,10 +239,18 @@ export function parseTextForDateTime(
 
   if (rangeMatch) {
     targetHour = parseInt(rangeMatch[1], 10);
+    if (rangeMatch[2]) {
+      targetMin = parseInt(rangeMatch[2], 10);
+    }
+    
     // If it's a range, the second hour is capture group 3 or group 2 depending on matched format
-    const secondVal = parseInt(rangeMatch[3] || rangeMatch[2], 10);
-    if (!isNaN(secondVal)) {
-      endHour = secondVal;
+    if (rangeMatch[3]) {
+      endHour = parseInt(rangeMatch[3], 10);
+      if (rangeMatch[4]) {
+        endMin = parseInt(rangeMatch[4], 10);
+      }
+    } else if (rangeMatch[2]) {
+      endHour = parseInt(rangeMatch[2], 10);
     }
     hasTime = true;
   }
@@ -227,7 +259,7 @@ export function parseTextForDateTime(
   if (!hasTime) {
     const timeMatch =
       clean.match(/saat\s*(\d{1,2})[\s:]+(\d{2})/i) ||
-      constMatchTime(clean) ||
+      clean.match(/(\d{1,2}):(\d{2})/i) ||
       clean.match(/saat\s*(\d{1,2})\s*gibi/i) ||
       clean.match(/(\d{1,2})\s*gibi/i);
     if (timeMatch) {
@@ -260,6 +292,24 @@ export function parseTextForDateTime(
     return null;
   }
 
+  // Time wrapping: if time specified is in the past for today, default to tomorrow
+  if (!hasDate && hasTime && targetHour !== null) {
+    const temp = new Date(targetYear, targetMonth, targetDay, targetHour, targetMin, 0);
+    if (temp.getTime() < refDate.getTime()) {
+      const tomorrow = new Date(refDate);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      targetDay = tomorrow.getDate();
+      targetMonth = tomorrow.getMonth();
+      targetYear = tomorrow.getFullYear();
+      hasDate = true; // resolved to tomorrow
+    }
+  }
+
+  const resolvedDate = new Date(targetYear, targetMonth, targetDay, 23, 59, 59);
+  if (resolvedDate.getTime() < refDate.getTime()) {
+    warningMessage = "⚠️ Belirtilen tarih geçmişte görünüyor.";
+  }
+
   const yyyy = targetYear;
   const mm = String(targetMonth + 1).padStart(2, "0");
   const dd = String(targetDay).padStart(2, "0");
@@ -269,12 +319,14 @@ export function parseTextForDateTime(
   const timeStr = `${String(h).padStart(2, "0")}:${String(targetMin).padStart(2, "0")}`;
 
   let patientTimeText = `${String(h).padStart(2, "0")}:${String(targetMin).padStart(2, "0")}`;
-  let durationMinutes: number | null = null;
+  let durationMinutes = null;
   if (endHour !== null) {
     patientTimeText = `${String(h).padStart(2, "0")}:${String(targetMin).padStart(2, "0")}-${String(endHour).padStart(2, "0")}:${String(endMin).padStart(2, "0")}`;
-    const diffHours = endHour - h;
-    if (diffHours > 0) {
-      durationMinutes = diffHours * 60;
+    const startTotal = h * 60 + targetMin;
+    const endTotal = endHour * 60 + endMin;
+    const diff = endTotal - startTotal;
+    if (diff > 0) {
+      durationMinutes = diff;
     }
   }
 
@@ -285,14 +337,9 @@ export function parseTextForDateTime(
     patientTimeText,
     hasDate,
     hasTime,
-    isTurkeyTime
+    isTurkeyTime,
+    warningMessage
   };
-}
-
-// Helper regex match for HH:MM
-function constMatchTime(clean: string) {
-  const match = clean.match(/(\d{1,2}):(\d{2})/i);
-  return match;
 }
 
 // Primary scheduling resolver function
@@ -315,12 +362,13 @@ export function resolveSchedulingPrefill(params: {
   });
 
   const patientTz = tzInfo.patientTimezone || "Europe/Istanbul";
-  const locationLabel = tzInfo.residenceCountryLabel || "yerel";
+  const locationLabel = tzInfo.residenceCountryLabel && tzInfo.residenceCountryLabel !== "Bilinmeyen Ülke" && tzInfo.residenceCountryLabel !== "Türkiye"
+    ? tzInfo.residenceCountryLabel
+    : "yerel";
 
-  // 1. Scan patient incoming messages for Date/Time (newest to oldest)
+  // 1. Son gerçek hasta inbound mesajları
   const patientInboundMessages = messages
-    .filter((m: any) => m.direction === "in" && m.content)
-    .slice(0, 5); // scan last 5 inbound messages
+    .filter((m: any) => m.direction === "in" && m.content);
 
   for (const msg of patientInboundMessages) {
     const parsed = parseTextForDateTime(msg.content, refDate);
@@ -333,13 +381,12 @@ export function resolveSchedulingPrefill(params: {
       // Handle timezone offset conversion
       let targetTime = parsedTime;
       let turkeyTimeText = parsed.patientTimeText;
-      let warningMessage: string | undefined = undefined;
+      let warningMessage = parsed.warningMessage;
 
       if (isTurkeyTime) {
-        // Explicitly mentioned as Turkey Time, so no timezone conversion needed
         targetTime = parsedTime;
         turkeyTimeText = parsed.patientTimeText;
-        warningMessage = "⚠️ Tarih/saat ifadesinde Türkiye saati belirtildiği için dönüşüm uygulanmadı.";
+        warningMessage = warningMessage || "⚠️ Saat ifadesinde Türkiye saati geçiyor olabilir, lütfen kontrol edin.";
       } else if (patientTz && patientTz !== "Europe/Istanbul") {
         // Convert Patient Local Time to Turkey Local Time
         const offset = getTzOffsetDiff(dateStr, patientTz);
@@ -377,7 +424,96 @@ export function resolveSchedulingPrefill(params: {
     }
   }
 
-  // 2. Scan form appointment preference as fallback
+  // 2. Hasta inbound mesajlarından çıkarılmış metadata varsa
+  const metadata = crm.opportunity?.opp_metadata || {};
+  const metadataDate = metadata.date || metadata.parsed_date || metadata.schedule_date || metadata.planned_date;
+  const metadataTime = metadata.time || metadata.parsed_time || metadata.turkeyStart || metadata.patientLocalStart;
+
+  if (metadataDate && metadataTime) {
+    const duration = metadata.durationMinutes || (metadata.duration ? parseInt(metadata.duration, 10) : null);
+    
+    let targetTime = metadataTime;
+    let turkeyTimeText = targetTime;
+    let patientTimeText = metadata.patientLocalStart || targetTime;
+    
+    if (metadata.turkeyStart) {
+      targetTime = metadata.turkeyStart;
+      turkeyTimeText = metadata.turkeyEnd ? `${metadata.turkeyStart}-${metadata.turkeyEnd}` : metadata.turkeyStart;
+      patientTimeText = metadata.patientLocalEnd ? `${metadata.patientLocalStart}-${metadata.patientLocalEnd}` : (metadata.patientLocalStart || targetTime);
+    }
+    
+    const noteHeader = `Hasta ${formatDisplayDate(metadataDate)} ${patientTimeText} ${locationLabel} saatinde aranabileceğini belirtti.`;
+    
+    return {
+      detected: true,
+      date: metadataDate,
+      time: targetTime,
+      durationMinutes: duration,
+      noteHeader,
+      source: "metadata",
+      patientTimeText,
+      turkeyTimeText
+    };
+  }
+
+  const metadataText = metadata.patient_schedule_pref || 
+                       metadata.appointment_preference || 
+                       metadata.schedule_preference || 
+                       metadata.patient_schedule ||
+                       metadata.schedule_pref;
+  if (metadataText && typeof metadataText === 'string') {
+    const parsedMeta = parseTextForDateTime(metadataText, refDate);
+    if (parsedMeta) {
+      const dateStr = parsedMeta.date;
+      const parsedTime = parsedMeta.time;
+      const isTurkeyTime = parsedMeta.isTurkeyTime;
+      const duration = parsedMeta.durationMinutes;
+
+      let targetTime = parsedTime;
+      let turkeyTimeText = parsedMeta.patientTimeText;
+      let warningMessage = parsedMeta.warningMessage;
+
+      if (isTurkeyTime) {
+        targetTime = parsedTime;
+        turkeyTimeText = parsedMeta.patientTimeText;
+        warningMessage = warningMessage || "⚠️ Saat ifadesinde Türkiye saati geçiyor olabilir, lütfen kontrol edin.";
+      } else if (patientTz && patientTz !== "Europe/Istanbul") {
+        const offset = getTzOffsetDiff(dateStr, patientTz);
+        if (offset !== 0) {
+          const shiftTime = (time: string): string => {
+            const [h, m] = time.split(":").map(Number);
+            let newH = (h + offset) % 24;
+            if (newH < 0) newH += 24;
+            return `${String(newH).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+          };
+
+          targetTime = shiftTime(parsedTime);
+          if (parsedMeta.patientTimeText.includes("-")) {
+            const [start, end] = parsedMeta.patientTimeText.split("-");
+            turkeyTimeText = `${shiftTime(start)}-${shiftTime(end)}`;
+          } else {
+            turkeyTimeText = shiftTime(parsedMeta.patientTimeText);
+          }
+        }
+      }
+
+      const noteHeader = `Hasta ${formatDisplayDate(dateStr)} ${parsedMeta.patientTimeText} ${locationLabel} saatinde aranabileceğini belirtti.`;
+
+      return {
+        detected: true,
+        date: dateStr,
+        time: targetTime,
+        durationMinutes: duration,
+        noteHeader,
+        source: "metadata",
+        patientTimeText: parsedMeta.patientTimeText,
+        turkeyTimeText,
+        warningMessage
+      };
+    }
+  }
+
+  // 3. Form randevu isteği
   const formPref = crm.formFields?.formAppointmentPref;
   if (formPref) {
     const parsedForm = parseTextForDateTime(formPref, refDate);
@@ -389,12 +525,12 @@ export function resolveSchedulingPrefill(params: {
 
       let targetTime = parsedTime;
       let turkeyTimeText = parsedForm.patientTimeText;
-      let warningMessage: string | undefined = undefined;
+      let warningMessage = parsedForm.warningMessage;
 
       if (isTurkeyTime) {
         targetTime = parsedTime;
         turkeyTimeText = parsedForm.patientTimeText;
-        warningMessage = "⚠️ Başvuru formunda Türkiye saati belirtildiği için dönüşüm uygulanmadı.";
+        warningMessage = warningMessage || "⚠️ Saat ifadesinde Türkiye saati geçiyor olabilir, lütfen kontrol edin.";
       } else if (patientTz && patientTz !== "Europe/Istanbul") {
         const offset = getTzOffsetDiff(dateStr, patientTz);
         if (offset !== 0) {
@@ -430,7 +566,7 @@ export function resolveSchedulingPrefill(params: {
     }
   }
 
-  // Default fallback (no direct date/time resolved)
+  // 4. Hiçbiri yoksa quick default
   return {
     detected: false,
     date: "",

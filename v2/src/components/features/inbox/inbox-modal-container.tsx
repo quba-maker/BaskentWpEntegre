@@ -32,17 +32,25 @@ export function InboxModalContainer() {
   const modalType = activeModal?.modalType;
   const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(conversationId || "");
 
-  // Messages query - utilize query client cache first to prevent request storms
+  // Retrieve from infinite query cache first
+  const cachedData = queryClient.getQueryData<any>(["messages", conversationId]);
+  let cachedMessages: any[] = [];
+  if (cachedData && "pages" in cachedData) {
+    cachedMessages = cachedData.pages.flat();
+  } else if (Array.isArray(cachedData)) {
+    cachedMessages = cachedData;
+  }
+
+  // Messages query - utilize distinct key to avoid cache structure collisions
   const { data: messages = [] } = useQuery({
-    queryKey: ["messages", conversationId],
+    queryKey: ["messages", conversationId, "prefill"],
     queryFn: async () => {
+      if (cachedMessages.length > 0) return cachedMessages;
       if (!conversationId || !isUuid) return [];
       const res = await getMessages(conversationId, null, 20);
       return res;
     },
-    initialData: () => {
-      return queryClient.getQueryData<any[]>(["messages", conversationId]);
-    },
+    initialData: cachedMessages.length > 0 ? cachedMessages : undefined,
     enabled: !!conversationId && isUuid && !!modalType,
     staleTime: 1000 * 60 * 5,
   });

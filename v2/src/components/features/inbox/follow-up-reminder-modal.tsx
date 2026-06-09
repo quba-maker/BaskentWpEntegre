@@ -353,7 +353,7 @@ export function FollowUpReminderModal({
                 <div className="p-3 bg-indigo-50/70 border border-indigo-100 rounded-xl text-[11px] font-bold text-indigo-700 flex flex-col gap-1 animate-in fade-in duration-200">
                   <div className="flex items-center gap-1.5">
                     <span className="w-2 h-2 rounded-full bg-indigo-600 animate-pulse" />
-                    <span>✨ Mesajdan algılanan tarih/saat dolduruldu ({prefill.source === 'message' ? 'Konuşma Geçmişi' : 'Başvuru Formu'})</span>
+                    <span>✨ Mesajdan algılandı</span>
                   </div>
                   {prefill.warningMessage && (
                     <div className="text-[10px] text-amber-700 font-semibold border-t border-indigo-100/50 pt-1">
