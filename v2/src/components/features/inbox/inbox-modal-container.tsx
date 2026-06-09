@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useInboxStore } from "@/store/inbox-store";
-import { getCrmPanelBundleAction } from "@/app/actions/inbox";
+import { getCrmPanelBundleAction, getMessages } from "@/app/actions/inbox";
 import { PhoneCallModal } from "./phone-call-modal";
 import { AppointmentModal } from "./appointment-modal";
 import { FollowUpReminderModal } from "./follow-up-reminder-modal";
@@ -13,6 +13,7 @@ import { DraftPreviewModal } from "./draft-preview-modal";
 import { useParams } from "next/navigation";
 import { Loader2, AlertCircle, X } from "lucide-react";
 import { createPortal } from "react-dom";
+import { resolveSchedulingPrefill } from "@/lib/utils/scheduling-context-resolver";
 
 export function InboxModalContainer() {
   const activeModal = useInboxStore((state) => state.activeModal);
@@ -20,6 +21,7 @@ export function InboxModalContainer() {
   const activePhone = useInboxStore((state) => state.activePhone);
   const params = useParams();
   const tenantSlug = typeof params?.tenant_slug === "string" ? params.tenant_slug : "baskent";
+  const queryClient = useQueryClient();
 
   // Automatically close modal when active patient changes
   useEffect(() => {
@@ -29,6 +31,21 @@ export function InboxModalContainer() {
   const conversationId = activeModal?.conversationId;
   const modalType = activeModal?.modalType;
   const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(conversationId || "");
+
+  // Messages query - utilize query client cache first to prevent request storms
+  const { data: messages = [] } = useQuery({
+    queryKey: ["messages", conversationId],
+    queryFn: async () => {
+      if (!conversationId || !isUuid) return [];
+      const res = await getMessages(conversationId, null, 20);
+      return res;
+    },
+    initialData: () => {
+      return queryClient.getQueryData<any[]>(["messages", conversationId]);
+    },
+    enabled: !!conversationId && isUuid && !!modalType,
+    staleTime: 1000 * 60 * 5,
+  });
 
   // CRM panel data query (cached)
   const { data: crmData, isLoading } = useQuery({
@@ -40,6 +57,7 @@ export function InboxModalContainer() {
     },
     enabled: !!conversationId && isUuid && modalType !== "bot_handoff",
   });
+
 
   if (!activeModal || !conversationId) return null;
 
@@ -102,11 +120,16 @@ export function InboxModalContainer() {
     );
   };
 
-function getFormContextString(crm: any): string {
-  if (!crm?.formFields) return "";
+function getFormContextString(crm: any, prefillHeader?: string): string {
+  if (!crm?.formFields) return prefillHeader || "";
   const parts: string[] = [];
-  const fields = crm.formFields;
+  
+  if (prefillHeader) {
+    parts.push(prefillHeader);
+    parts.push(""); // spacer line
+  }
 
+  const fields = crm.formFields;
   const isValidValue = (val: any) => {
     if (val === null || val === undefined) return false;
     const str = String(val).trim();
@@ -125,6 +148,12 @@ function getFormContextString(crm: any): string {
   return parts.join("\n");
 }
 
+  const prefill = resolveSchedulingPrefill({
+    messages,
+    crmData: crm,
+    referenceDate: new Date()
+  });
+
   switch (modalType) {
     case "call_plan":
       return (
@@ -135,8 +164,10 @@ function getFormContextString(crm: any): string {
           tenantSlug={tenantSlug}
           patientName={patientName}
           phoneNumber={phoneNumber}
+          activeContact={crm?.opportunity}
           fallback={{ conversationId, phoneNumber }}
-          defaultNote={getFormContextString(crm)}
+          defaultNote={getFormContextString(crm, prefill?.detected ? prefill.noteHeader : undefined)}
+          prefill={prefill}
         />
       );
 
@@ -149,8 +180,10 @@ function getFormContextString(crm: any): string {
           tenantSlug={tenantSlug}
           patientName={patientName}
           phoneNumber={phoneNumber}
+          activeContact={crm?.opportunity}
           fallback={{ conversationId, phoneNumber }}
-          defaultNote={getFormContextString(crm)}
+          defaultNote={getFormContextString(crm, prefill?.detected ? prefill.noteHeader : undefined)}
+          prefill={prefill}
         />
       );
 
@@ -165,7 +198,8 @@ function getFormContextString(crm: any): string {
           phoneNumber={phoneNumber}
           activeContact={crm?.opportunity}
           fallback={{ conversationId, phoneNumber }}
-          defaultNote={getFormContextString(crm)}
+          defaultNote={getFormContextString(crm, prefill?.detected ? prefill.noteHeader : undefined)}
+          prefill={prefill}
         />
       );
 

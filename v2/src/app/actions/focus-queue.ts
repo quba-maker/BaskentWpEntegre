@@ -496,7 +496,8 @@ export async function schedulePhoneCallTask(
   dueAtUtc: string,
   note?: string,
   fallback?: { conversationId: string; phoneNumber: string },
-  force?: boolean
+  force?: boolean,
+  customMetadata?: Record<string, any>
 ): Promise<{ success: boolean; error?: string; message?: string; taskId?: string }> {
   return withActionGuard(
     { actionName: 'schedulePhoneCallTask' },
@@ -579,6 +580,7 @@ export async function schedulePhoneCallTask(
       const metadata = {
         appointment_type: 'phone_call',
         note: note || '',
+        ...(customMetadata || {})
       };
 
       const insertRes = await ctx.db.executeSafe({

@@ -5266,7 +5266,8 @@ export async function scheduleReminderTaskAction(
   dueAtUtc: string,
   note?: string,
   fallback?: { conversationId: string; phoneNumber: string },
-  force?: boolean
+  force?: boolean,
+  customMetadata?: Record<string, any>
 ): Promise<{ success: boolean; error?: string; message?: string; taskId?: string; isUpdate?: boolean }> {
   return withActionGuard(
     { actionName: 'scheduleReminderTaskAction' },
@@ -5340,7 +5341,8 @@ export async function scheduleReminderTaskAction(
         zero_outbound: true,
         source: "inbox_action_intent",
         intent: "date_pending_followup",
-        actor_id: ctx.userId
+        actor_id: ctx.userId,
+        ...(customMetadata || {})
       };
 
       let taskId: string;

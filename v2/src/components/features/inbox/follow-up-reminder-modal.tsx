@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { X, Calendar, Clock, FileText, Check, Loader2, Bell } from "lucide-react";
 import { parseTurkeyLocalToUtc, resolvePatientTimeDisplay } from "@/lib/utils/timezone";
 import { scheduleReminderTaskAction } from "@/app/actions/inbox";
+import { getTzOffsetDiff } from "@/lib/utils/scheduling-context-resolver";
 
 interface FollowUpReminderModalProps {
   isOpen: boolean;
@@ -17,6 +18,7 @@ interface FollowUpReminderModalProps {
   fallback?: { conversationId: string; phoneNumber: string };
   defaultNote?: string;
   onSuccess?: () => void;
+  prefill?: any;
 }
 
 export function FollowUpReminderModal({
@@ -29,7 +31,8 @@ export function FollowUpReminderModal({
   activeContact,
   fallback,
   defaultNote,
-  onSuccess
+  onSuccess,
+  prefill
 }: FollowUpReminderModalProps) {
   const [mounted, setMounted] = useState(false);
   const [date, setDate] = useState("");
@@ -40,6 +43,7 @@ export function FollowUpReminderModal({
   const [errorMessage, setErrorMessage] = useState("");
   const [showDuplicateWarning, setShowDuplicateWarning] = useState(false);
   const [existingTaskId, setExistingTaskId] = useState<string | null>(null);
+  const [durationHours, setDurationHours] = useState<number | null>(null);
 
   // Calculate dynamic quick dates
   const getQuickDates = () => {
@@ -85,13 +89,28 @@ export function FollowUpReminderModal({
 
   useEffect(() => {
     setMounted(true);
-    // Default to 1 week later
-    setDate(quickDates[0].date);
-    return () => setMounted(false);
-  }, []);
+    
+    if (prefill?.detected && prefill.date) {
+      setDate(prefill.date);
+      if (prefill.time) {
+        setTime(prefill.time);
+      }
+      if (prefill.noteHeader) {
+        setNote(defaultNote || prefill.noteHeader);
+      }
+      if (prefill.durationMinutes) {
+        setDurationHours(prefill.durationMinutes / 60);
+      } else {
+        setDurationHours(null);
+      }
+    } else {
+      setDate(quickDates[0].date);
+      setDurationHours(null);
+    }
+  }, [prefill, defaultNote]);
 
   useEffect(() => {
-    if (defaultNote && note === "Hasta tarih netleşince geri döneceğini belirtti.") {
+    if (defaultNote && (note === "Hasta tarih netleşince geri döneceğini belirtti." || note === "")) {
       setNote(defaultNote);
     }
   }, [defaultNote]);
@@ -109,27 +128,35 @@ export function FollowUpReminderModal({
   });
 
   // Calculate patient local time/date for the selected Turkey local time
-  let patientLocalDisplay = "";
-  if (date && time && tzInfo.patientTimezone && tzInfo.patientTimezone !== "Europe/Istanbul") {
+  let patientLocalTime = "";
+  if (date && time && tzInfo.patientTimezone) {
     try {
       const utcString = parseTurkeyLocalToUtc(date, time);
       const plannedDate = new Date(utcString);
-      const patTime = plannedDate.toLocaleTimeString("tr-TR", {
+      patientLocalTime = plannedDate.toLocaleTimeString("tr-TR", {
         timeZone: tzInfo.patientTimezone,
         hour: "2-digit",
         minute: "2-digit",
         hour12: false
       });
-      const patDate = plannedDate.toLocaleDateString("tr-TR", {
-        timeZone: tzInfo.patientTimezone,
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric"
-      });
-      patientLocalDisplay = `${patDate} ${patTime}`;
     } catch (err) {
       console.error("Error calculating patient local time for modal:", err);
     }
+  }
+
+  // Format ranges if duration is present
+  let turkeyDisplay = time;
+  let patientDisplay = patientLocalTime;
+
+  if (durationHours !== null) {
+    const formatWithDuration = (timeStr: string, dur: number) => {
+      if (!timeStr) return "";
+      const [h, m] = timeStr.split(":").map(Number);
+      const endH = (h + dur) % 24;
+      return `${timeStr}-${String(endH).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+    };
+    turkeyDisplay = formatWithDuration(time, durationHours);
+    patientDisplay = formatWithDuration(patientLocalTime, durationHours);
   }
 
   const handleSave = async (e: React.FormEvent, forceCreate?: boolean) => {
@@ -140,9 +167,27 @@ export function FollowUpReminderModal({
     setSaveStatus("idle");
     setErrorMessage("");
 
+    const customMetadata: Record<string, any> = {};
+    if (durationHours !== null) {
+      const offset = getTzOffsetDiff(date, tzInfo.patientTimezone || "Europe/Istanbul");
+      const [h, m] = time.split(":").map(Number);
+      const turkeyStart = time;
+      const turkeyEnd = `${String((h + durationHours) % 24).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+      
+      const patStartH = (h - offset + 24) % 24;
+      const patientLocalStart = `${String(patStartH).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+      const patientLocalEnd = `${String((patStartH + durationHours) % 24).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+      
+      customMetadata.patientLocalStart = patientLocalStart;
+      customMetadata.patientLocalEnd = patientLocalEnd;
+      customMetadata.turkeyStart = turkeyStart;
+      customMetadata.turkeyEnd = turkeyEnd;
+      customMetadata.durationMinutes = durationHours * 60;
+    }
+
     try {
       const dueAtUtc = parseTurkeyLocalToUtc(date, time);
-      const res = await scheduleReminderTaskAction(opportunityId, dueAtUtc, note.trim(), fallback, forceCreate);
+      const res = await scheduleReminderTaskAction(opportunityId, dueAtUtc, note.trim(), fallback, forceCreate, customMetadata);
 
       if (res && res.success) {
         setSaveStatus("success");
@@ -207,12 +252,12 @@ export function FollowUpReminderModal({
                   setShowDuplicateWarning(false);
                 } else {
                   setSaveStatus("error");
-                  setErrorMessage(res.error || "Mevcut hatırlatmayı kapatma başarısız.");
+                  setErrorMessage(res.error || "Mevcut takibi kapatma başarısız.");
                 }
               }}
               className="w-full py-2.5 border border-black/5 hover:bg-black/[0.02] text-[#1D1D1F] text-xs font-bold rounded-xl text-center cursor-pointer transition-all"
             >
-              Mevcut Hatırlatmayı Kapat ve Yenisini Aç
+              Mevcut Takibi Kapat ve Yenisini Aç
             </button>
             <button
               type="button"
@@ -220,19 +265,16 @@ export function FollowUpReminderModal({
                 handleSave(null as any, true);
                 setShowDuplicateWarning(false);
               }}
-              className="w-full py-2.5 text-red-600 hover:text-red-700 hover:bg-red-50 text-xs font-bold rounded-xl text-center cursor-pointer transition-all"
+              className="w-full py-2 text-zinc-500 hover:text-zinc-800 text-[11px] font-semibold text-center cursor-pointer pt-1"
             >
-              Yine de Yeni Hatırlatma Oluştur (Mükerrer)
+              Mükerrer Kayıt Oluştur (Çift Takip)
             </button>
             <button
               type="button"
-              onClick={() => {
-                setShowDuplicateWarning(false);
-                onClose();
-              }}
-              className="w-full py-2 text-[#86868B] text-xs font-bold text-center cursor-pointer hover:text-black transition-all"
+              onClick={() => setShowDuplicateWarning(false)}
+              className="w-full py-2 bg-[#F5F5F7] hover:bg-[#E8E8ED] text-[#1D1D1F] text-xs font-bold rounded-xl text-center cursor-pointer transition-all"
             >
-              İptal
+              Vazgeç
             </button>
           </div>
         </div>
@@ -307,6 +349,20 @@ export function FollowUpReminderModal({
                 </div>
               )}
 
+              {prefill?.detected && (
+                <div className="p-3 bg-indigo-50/70 border border-indigo-100 rounded-xl text-[11px] font-bold text-indigo-700 flex flex-col gap-1 animate-in fade-in duration-200">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-indigo-600 animate-pulse" />
+                    <span>✨ Mesajdan algılanan tarih/saat dolduruldu ({prefill.source === 'message' ? 'Konuşma Geçmişi' : 'Başvuru Formu'})</span>
+                  </div>
+                  {prefill.warningMessage && (
+                    <div className="text-[10px] text-amber-700 font-semibold border-t border-indigo-100/50 pt-1">
+                      {prefill.warningMessage}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Quick Dates Grid */}
               <div className="space-y-1.5">
                 <label className="text-[10px] font-bold uppercase tracking-widest text-[#86868B] ml-1">
@@ -317,9 +373,12 @@ export function FollowUpReminderModal({
                     <button
                       key={qd.label}
                       type="button"
-                      onClick={() => setDate(qd.date)}
+                      onClick={() => {
+                        setDate(qd.date);
+                        setDurationHours(null);
+                      }}
                       className={`px-3 py-2 text-left rounded-xl border transition-all cursor-pointer text-xs flex flex-col ${
-                        date === qd.date
+                        !prefill?.detected && date === qd.date
                           ? "bg-indigo-50 border-indigo-500 text-indigo-700 font-bold"
                           : "border-black/5 hover:bg-black/[0.02] text-gray-700 font-semibold"
                       }`}
@@ -380,12 +439,12 @@ export function FollowUpReminderModal({
                     </span>
                   )}
                 </p>
-                {patientLocalDisplay && (
-                  <div className="text-[10.5px] text-indigo-600 font-bold mt-1 space-y-0.5">
-                    <div>Planlanan saat:</div>
-                    <div>Türkiye saati: {time}</div>
-                    <div>
-                      Hasta yerel saati: {patientLocalDisplay.split(" ")[1]} {tzInfo.patientTimezone?.split("/")[1]?.replace(/_/g, " ") || tzInfo.residenceCountryLabel}
+                {patientLocalTime && tzInfo.patientTimezone !== "Europe/Istanbul" && (
+                  <div className="text-[10.5px] text-[#1D1D1F] font-bold mt-1.5 space-y-0.5 border-t border-black/[0.03] pt-1.5">
+                    <div className="text-[#86868B] text-[9px] font-bold uppercase tracking-widest mb-0.5">Planlanan Saat</div>
+                    <div className="text-indigo-600">Türkiye saati: {turkeyDisplay}</div>
+                    <div className="text-emerald-600">
+                      Hasta yerel saati: {patientDisplay} {tzInfo.patientTimezone?.split("/")[1]?.replace(/_/g, " ") || tzInfo.residenceCountryLabel}
                     </div>
                   </div>
                 )}

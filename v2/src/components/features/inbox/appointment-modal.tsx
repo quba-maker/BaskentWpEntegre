@@ -3,8 +3,9 @@
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { X, Calendar, Clock, FileText, Check, Loader2, CalendarClock } from "lucide-react";
-import { parseTurkeyLocalToUtc } from "@/lib/utils/timezone";
+import { parseTurkeyLocalToUtc, resolvePatientTimeDisplay } from "@/lib/utils/timezone";
 import { createAppointmentTask } from "@/app/actions/patient-tracking";
+import { getTzOffsetDiff } from "@/lib/utils/scheduling-context-resolver";
 
 interface AppointmentModalProps {
   isOpen: boolean;
@@ -16,6 +17,8 @@ interface AppointmentModalProps {
   fallback?: { conversationId: string; phoneNumber: string };
   defaultNote?: string;
   onSuccess?: () => void;
+  activeContact?: any;
+  prefill?: any;
 }
 
 export function AppointmentModal({
@@ -27,7 +30,9 @@ export function AppointmentModal({
   phoneNumber,
   fallback,
   defaultNote,
-  onSuccess
+  onSuccess,
+  activeContact,
+  prefill
 }: AppointmentModalProps) {
   const [mounted, setMounted] = useState(false);
   const [date, setDate] = useState("");
@@ -38,6 +43,7 @@ export function AppointmentModal({
   const [errorMessage, setErrorMessage] = useState("");
   const [showDuplicateWarning, setShowDuplicateWarning] = useState(false);
   const [existingTaskId, setExistingTaskId] = useState<string | null>(null);
+  const [durationHours, setDurationHours] = useState<number | null>(null);
 
   // Reminder states
   const [reminders, setReminders] = useState({
@@ -47,25 +53,80 @@ export function AppointmentModal({
     seven_days_before: false,
   });
 
-  // Set default date to tomorrow
+  // Set default date to tomorrow or prefill values
   useEffect(() => {
     setMounted(true);
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const yyyy = tomorrow.getFullYear();
-    const mm = String(tomorrow.getMonth() + 1).padStart(2, "0");
-    const dd = String(tomorrow.getDate()).padStart(2, "0");
-    setDate(`${yyyy}-${mm}-${dd}`);
-    return () => setMounted(false);
-  }, []);
+    
+    if (prefill?.detected && prefill.date) {
+      setDate(prefill.date);
+      if (prefill.time) {
+        setTime(prefill.time);
+      }
+      if (prefill.noteHeader) {
+        setNote(defaultNote || prefill.noteHeader);
+      }
+      if (prefill.durationMinutes) {
+        setDurationHours(prefill.durationMinutes / 60);
+      } else {
+        setDurationHours(null);
+      }
+    } else {
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const yyyy = tomorrow.getFullYear();
+      const mm = String(tomorrow.getMonth() + 1).padStart(2, "0");
+      const dd = String(tomorrow.getDate()).padStart(2, "0");
+      setDate(`${yyyy}-${mm}-${dd}`);
+      setDurationHours(null);
+    }
+  }, [prefill, defaultNote]);
 
   useEffect(() => {
-    if (defaultNote && !note) {
+    if (defaultNote && (note === "" || note === defaultNote)) {
       setNote(defaultNote);
     }
   }, [defaultNote]);
 
-  if (!isOpen || !mounted) return null;
+  const tzInfo = resolvePatientTimeDisplay({
+    country: activeContact?.country || activeContact?.opp_country,
+    city: activeContact?.city || activeContact?.patient_city || activeContact?.opp_metadata?.patient_city || activeContact?.formData?.patient_city || activeContact?.formData?.city,
+    timezone: activeContact?.timezone || activeContact?.patient_timezone || activeContact?.opp_metadata?.patient_timezone || activeContact?.metadata?.patient_timezone,
+    metadata: activeContact?.metadata,
+    oppMetadata: activeContact?.opp_metadata || activeContact?.formData,
+    referenceDate: new Date()
+  });
+
+  // Calculate patient local time/date for the selected Turkey local time
+  let patientLocalTime = "";
+  if (date && time && tzInfo.patientTimezone) {
+    try {
+      const utcString = parseTurkeyLocalToUtc(date, time);
+      const plannedDate = new Date(utcString);
+      patientLocalTime = plannedDate.toLocaleTimeString("tr-TR", {
+        timeZone: tzInfo.patientTimezone,
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false
+      });
+    } catch (err) {
+      console.error("Error calculating patient local time for modal:", err);
+    }
+  }
+
+  // Format ranges if duration is present
+  let turkeyDisplay = time;
+  let patientDisplay = patientLocalTime;
+
+  if (durationHours !== null) {
+    const formatWithDuration = (timeStr: string, dur: number) => {
+      if (!timeStr) return "";
+      const [h, m] = timeStr.split(":").map(Number);
+      const endH = (h + dur) % 24;
+      return `${timeStr}-${String(endH).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+    };
+    turkeyDisplay = formatWithDuration(time, durationHours);
+    patientDisplay = formatWithDuration(patientLocalTime, durationHours);
+  }
 
   const handleSave = async (e: React.FormEvent, forceCreate?: boolean) => {
     if (e) e.preventDefault();
@@ -74,6 +135,28 @@ export function AppointmentModal({
     setIsSaving(true);
     setSaveStatus("idle");
     setErrorMessage("");
+
+    const customMetadata: Record<string, any> = {
+      zero_outbound_p0: true,
+      initiated_from: "crm_panel_inbox"
+    };
+
+    if (durationHours !== null) {
+      const offset = getTzOffsetDiff(date, tzInfo.patientTimezone || "Europe/Istanbul");
+      const [h, m] = time.split(":").map(Number);
+      const turkeyStart = time;
+      const turkeyEnd = `${String((h + durationHours) % 24).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+      
+      const patStartH = (h - offset + 24) % 24;
+      const patientLocalStart = `${String(patStartH).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+      const patientLocalEnd = `${String((patStartH + durationHours) % 24).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+      
+      customMetadata.patientLocalStart = patientLocalStart;
+      customMetadata.patientLocalEnd = patientLocalEnd;
+      customMetadata.turkeyStart = turkeyStart;
+      customMetadata.turkeyEnd = turkeyEnd;
+      customMetadata.durationMinutes = durationHours * 60;
+    }
 
     try {
       // 1. Convert local Turkey time to UTC
@@ -91,10 +174,7 @@ export function AppointmentModal({
         note: note.trim(),
         requireConfirmation: true, // Always true for clinic visits to enforce task confirmation logic
         reminders: remindersList,
-        customMetadata: {
-          zero_outbound_p0: true,
-          initiated_from: "crm_panel_inbox"
-        },
+        customMetadata,
         fallback,
         force: forceCreate
       });
@@ -175,19 +255,16 @@ export function AppointmentModal({
                 handleSave(null as any, true);
                 setShowDuplicateWarning(false);
               }}
-              className="w-full py-2.5 text-red-600 hover:text-red-700 hover:bg-red-50 text-xs font-bold rounded-xl text-center cursor-pointer transition-all"
+              className="w-full py-2 text-zinc-500 hover:text-zinc-800 text-[11px] font-semibold text-center cursor-pointer pt-1"
             >
-              Yine de Yeni Randevu Oluştur (Mükerrer)
+              Mükerrer Kayıt Oluştur (Çift Takip)
             </button>
             <button
               type="button"
-              onClick={() => {
-                setShowDuplicateWarning(false);
-                onClose();
-              }}
-              className="w-full py-2 text-[#86868B] text-xs font-bold text-center cursor-pointer hover:text-black transition-all"
+              onClick={() => setShowDuplicateWarning(false)}
+              className="w-full py-2 bg-[#F5F5F7] hover:bg-[#E8E8ED] text-[#1D1D1F] text-xs font-bold rounded-xl text-center cursor-pointer transition-all"
             >
-              İptal
+              Vazgeç
             </button>
           </div>
         </div>
@@ -262,6 +339,20 @@ export function AppointmentModal({
                 </div>
               )}
 
+              {prefill?.detected && (
+                <div className="p-3 bg-indigo-50/70 border border-indigo-100 rounded-xl text-[11px] font-bold text-indigo-700 flex flex-col gap-1 animate-in fade-in duration-200">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-indigo-600 animate-pulse" />
+                    <span>✨ Mesajdan algılanan tarih/saat dolduruldu ({prefill.source === 'message' ? 'Konuşma Geçmişi' : 'Başvuru Formu'})</span>
+                  </div>
+                  {prefill.warningMessage && (
+                    <div className="text-[10px] text-amber-700 font-semibold border-t border-indigo-100/50 pt-1">
+                      {prefill.warningMessage}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Date */}
               <div className="space-y-1.5">
                 <label className="text-[10px] font-bold uppercase tracking-widest text-[#86868B] ml-1 flex items-center gap-1">
@@ -290,6 +381,33 @@ export function AppointmentModal({
                   className="w-full px-4 py-2.5 rounded-xl text-[13px] font-semibold outline-none transition-all bg-white border border-[#E8E8ED] focus:border-emerald-500/50"
                   style={{ color: "var(--q-text-primary)", boxShadow: "var(--q-shadow-sm)" }}
                 />
+              </div>
+
+              {/* Timezone Information Box */}
+              <div className="p-3 rounded-2xl border border-slate-100 bg-slate-50/50 space-y-1">
+                <span className="block text-[9px] font-bold uppercase tracking-widest text-[#86868B]">
+                  Saat Dilimi Bilgisi
+                </span>
+                <p className="text-[11px] font-semibold text-gray-700">
+                  {tzInfo.needsTimezoneClarification ? (
+                    <span className="text-amber-600">⚠️ Hastanın konum/saat bilgisi net değil (Şehir gerekli).</span>
+                  ) : tzInfo.isFallback ? (
+                    <span className="text-amber-600">⚠️ Hastanın saat dilimi belirsiz. Türkiye saati kullanılacak.</span>
+                  ) : (
+                    <span>
+                      Hasta Konumu: {tzInfo.displayLabel}
+                    </span>
+                  )}
+                </p>
+                {patientLocalTime && tzInfo.patientTimezone !== "Europe/Istanbul" && (
+                  <div className="text-[10.5px] text-[#1D1D1F] font-bold mt-1.5 space-y-0.5 border-t border-black/[0.03] pt-1.5">
+                    <div className="text-[#86868B] text-[9px] font-bold uppercase tracking-widest mb-0.5">Planlanan Saat</div>
+                    <div className="text-indigo-600">Türkiye saati: {turkeyDisplay}</div>
+                    <div className="text-emerald-600">
+                      Hasta yerel saati: {patientDisplay} {tzInfo.patientTimezone?.split("/")[1]?.replace(/_/g, " ") || tzInfo.residenceCountryLabel}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Note */}
