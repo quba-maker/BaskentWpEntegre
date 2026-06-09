@@ -72,10 +72,10 @@ async function runValidation() {
     });
 
     console.log("createRes:", createRes);
-    if (!createRes || !createRes.success || !createRes.data?.success) {
-      throw new Error(`Failed to create appointment task: ${createRes?.error || createRes?.data?.error || "unknown"}`);
+    if (!createRes || !createRes.success) {
+      throw new Error(`Failed to create appointment task: ${createRes?.error || "unknown"}`);
     }
-    const parentTaskId = createRes.data?.taskId;
+    const parentTaskId = createRes.taskId;
     if (!parentTaskId) {
       throw new Error("No parent task ID returned.");
     }
@@ -215,7 +215,7 @@ async function runValidation() {
       ]
     });
 
-    const activeParentId = createReschedRes.data?.taskId!;
+    const activeParentId = createReschedRes.taskId!;
     createdTaskIds.push(activeParentId);
 
     // Fetch the newly created 1 day before reminder
@@ -275,7 +275,7 @@ async function runValidation() {
       reminders: [{ type: "1_day_before" }]
     });
 
-    const dueParentId = createDueRes.data?.taskId!;
+    const dueParentId = createDueRes.taskId!;
     createdTaskIds.push(dueParentId);
 
     const dueReminders = await db.executeSafe({

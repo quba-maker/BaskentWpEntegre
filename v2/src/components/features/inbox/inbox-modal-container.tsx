@@ -102,9 +102,20 @@ export function InboxModalContainer() {
     );
   };
 
+function getFormContextString(crm: any): string {
+  if (!crm?.formFields) return "";
+  const parts: string[] = [];
+  const fields = crm.formFields;
+  if (fields.formComplaint) parts.push(`Şikayet: ${fields.formComplaint}`);
+  if (fields.formAge) parts.push(`Yaş: ${fields.formAge}`);
+  if (fields.formDepartment) parts.push(`Bölüm: ${fields.formDepartment}`);
+  if (fields.formAppointmentPref) parts.push(`Tercih: ${fields.formAppointmentPref}`);
+  if (fields.formReportStatus) parts.push(`Rapor: ${fields.formReportStatus}`);
+  return parts.join(" | ");
+}
+
   switch (modalType) {
     case "call_plan":
-      if (!oppId) return renderOpportunityWarning("Arama Planla");
       return (
         <PhoneCallModal
           isOpen={true}
@@ -113,11 +124,12 @@ export function InboxModalContainer() {
           tenantSlug={tenantSlug}
           patientName={patientName}
           phoneNumber={phoneNumber}
+          fallback={{ conversationId, phoneNumber }}
+          defaultNote={getFormContextString(crm)}
         />
       );
 
     case "appointment_plan":
-      if (!oppId) return renderOpportunityWarning("Randevu Planla");
       return (
         <AppointmentModal
           isOpen={true}
@@ -126,11 +138,12 @@ export function InboxModalContainer() {
           tenantSlug={tenantSlug}
           patientName={patientName}
           phoneNumber={phoneNumber}
+          fallback={{ conversationId, phoneNumber }}
+          defaultNote={getFormContextString(crm)}
         />
       );
 
     case "reminder_plan":
-      if (!oppId) return renderOpportunityWarning("Hatırlatma Planla");
       return (
         <FollowUpReminderModal
           isOpen={true}
@@ -140,6 +153,8 @@ export function InboxModalContainer() {
           patientName={patientName}
           phoneNumber={phoneNumber}
           activeContact={crm?.opportunity}
+          fallback={{ conversationId, phoneNumber }}
+          defaultNote={getFormContextString(crm)}
         />
       );
 

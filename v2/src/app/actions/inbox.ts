@@ -3814,6 +3814,78 @@ export async function getCrmPanelBundleAction(conversationId: string) {
         }
       }
 
+      // Query 3b: Fetch active follow up tasks for "Aktif Takipler" list in Sidebar
+      const activeTasksQueryRows = await ctx.db.executeSafe({
+        text: `SELECT id, task_type, title, description, due_at, status, metadata, created_at
+               FROM follow_up_tasks 
+               WHERE tenant_id = $1 
+                 AND status IN ('pending', 'in_progress')
+                 AND task_type NOT IN ('bot_handoff_followup', 'internal_bot_directive', 'bot_steering_only')
+                 AND (
+                   conversation_id = $2 
+                   OR (opportunity_id = $3 AND opportunity_id IS NOT NULL)
+                 )
+               ORDER BY due_at ASC, created_at DESC`,
+        values: [ctx.tenantId, conversationId, activeOpportunityId || null]
+      }) as any[];
+
+      const mapTaskCategory = (t: any): string => {
+        const type = t.task_type;
+        const apptType = t.metadata?.appointment_type;
+        if (type === 'call_patient' || apptType === 'phone_call' || (type === 'callback_scheduled' && apptType === 'phone_call')) {
+          return 'Arama Takibi';
+        }
+        if (type === 'clinic_visit' || apptType === 'clinic_visit' || (type === 'callback_scheduled' && apptType === 'clinic_visit')) {
+          return 'Randevu Takibi';
+        }
+        if (type === 'date_pending_followup' || type === 'appointment_reminder') {
+          return 'Hatırlatma / Geri Dönüş';
+        }
+        if (type?.includes('form') || type?.includes('missing') || type?.includes('info')) {
+          return 'Form / Eksik Bilgi Takibi';
+        }
+        return 'Hatırlatma / Geri Dönüş';
+      };
+
+      const now = new Date();
+      const istanbulDateStr = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Europe/Istanbul',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      }).format(now);
+      const endOfTodayIstanbul = new Date(`${istanbulDateStr}T23:59:59.999+03:00`);
+
+      const activeTasks = activeTasksQueryRows.map(task => {
+        const due = new Date(task.due_at);
+        let urgency = 1; // upcoming
+        let group: 'overdue' | 'today' | 'upcoming' = 'upcoming';
+
+        if (due.getTime() < now.getTime()) {
+          urgency = 3;
+          group = 'overdue';
+        } else if (due.getTime() <= endOfTodayIstanbul.getTime()) {
+          urgency = 2;
+          group = 'today';
+        }
+
+        return {
+          id: task.id,
+          task_type: task.task_type,
+          title: task.title,
+          description: task.description,
+          due_at: task.due_at,
+          status: task.status,
+          metadata: task.metadata || {},
+          category: mapTaskCategory(task),
+          group,
+          urgency
+        };
+      }).sort((a, b) => {
+        if (b.urgency !== a.urgency) return b.urgency - a.urgency;
+        return new Date(a.due_at).getTime() - new Date(b.due_at).getTime();
+      }).slice(0, 5);
+
       // Query 4: Resolve form greeting eligibility
       let formGreeting = { eligible: false, reason: "Form bulunamadı veya uygun değil." };
       if (leadId) {
@@ -3841,6 +3913,7 @@ export async function getCrmPanelBundleAction(conversationId: string) {
         patientName: conv.patient_name || null,
         botDirective: directive,
         steeringTasks: suggestions,
+        activeTasks,
         formGreetingEligibility: formGreeting,
         whatsapp24hWindow,
         formData: (conv.form_name || conv.lead_id) ? {
@@ -5188,11 +5261,12 @@ export async function sendNoReplyReminderAction(conversationId: string, messageT
 }
 
 export async function scheduleReminderTaskAction(
-  opportunityId: string,
+  opportunityId: string | null | undefined,
   dueAtUtc: string,
-  note?: string
-) {
-  noStore();
+  note?: string,
+  fallback?: { conversationId: string; phoneNumber: string },
+  force?: boolean
+): Promise<{ success: boolean; error?: string; message?: string; taskId?: string; isUpdate?: boolean }> {
   return withActionGuard(
     { actionName: 'scheduleReminderTaskAction' },
     async (ctx) => {
@@ -5200,31 +5274,65 @@ export async function scheduleReminderTaskAction(
         return { success: false, error: "Kullanıcı kimliği bulunamadı (oturum kapalı)." };
       }
 
-      // 1. Fetch opportunity details
-      const oppQuery = await ctx.db.executeSafe({
-        text: `SELECT id, conversation_id, phone_number, lead_id FROM opportunities WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
-        values: [opportunityId, ctx.tenantId]
-      }) as any[];
+      let phoneNumber = fallback?.phoneNumber;
+      let conversationId = fallback?.conversationId || null;
+      let leadId: string | null = null;
+      const oppIdDb = opportunityId || null;
 
-      if (oppQuery.length === 0) {
-        return { success: false, error: "Fırsat bulunamadı." };
+      if (oppIdDb) {
+        const oppQuery = await ctx.db.executeSafe({
+          text: `SELECT id, conversation_id, phone_number, lead_id FROM opportunities WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+          values: [oppIdDb, ctx.tenantId]
+        }) as any[];
+
+        if (oppQuery.length > 0) {
+          const opp = oppQuery[0];
+          phoneNumber = opp.phone_number;
+          conversationId = opp.conversation_id || conversationId;
+          leadId = opp.lead_id;
+        }
       }
 
-      const opp = oppQuery[0];
-      const conversationId = opp.conversation_id;
-      const phone = opp.phone_number;
-      const leadId = opp.lead_id;
+      if (!phoneNumber) {
+        return { success: false, error: "Telefon numarası bulunamadı." };
+      }
 
-      // 2. Check for active duplicate task
+      if (!conversationId) {
+        try {
+          const convRes = await ctx.db.executeSafe({
+            text: `SELECT c.id as conv_id, l.id as lead_id 
+                   FROM conversations c
+                   LEFT JOIN leads l ON l.phone_number = c.phone_number AND l.tenant_id = c.tenant_id
+                   WHERE c.tenant_id = $1 AND RIGHT(c.phone_number, 10) = RIGHT($2, 10) 
+                   LIMIT 1`,
+            values: [ctx.tenantId, phoneNumber]
+          }) as any[];
+          if (convRes.length > 0) {
+            conversationId = convRes[0].conv_id || null;
+            leadId = convRes[0].lead_id || leadId || null;
+          }
+        } catch (_) {}
+      }
+
+      // Check for active duplicate task
       const activeTasks = await ctx.db.executeSafe({
         text: `
           SELECT id, metadata FROM follow_up_tasks 
           WHERE tenant_id = $1 AND task_type = 'date_pending_followup' AND status IN ('pending', 'in_progress')
-            AND (opportunity_id = $2 OR conversation_id = $3)
+            AND (opportunity_id = $2 OR conversation_id = $3 OR phone_number = $4)
           ORDER BY created_at DESC LIMIT 1
         `,
-        values: [ctx.tenantId, opportunityId, conversationId]
+        values: [ctx.tenantId, oppIdDb, conversationId, phoneNumber]
       }) as any[];
+
+      if (!force && activeTasks.length > 0) {
+        return {
+          success: false,
+          error: 'ACTIVE_TASK_EXISTS',
+          message: 'Bu hasta için halihazırda açık bir takip hatırlatması bulunmaktadır. Mevcut hatırlatmayı güncelleyebilir veya erteleyebilirsiniz.',
+          taskId: activeTasks[0].id
+        };
+      }
 
       const metadata = {
         zero_outbound_p0: true,
@@ -5266,9 +5374,9 @@ export async function scheduleReminderTaskAction(
           `,
           values: [
             ctx.tenantId,
-            opportunityId,
+            oppIdDb,
             conversationId,
-            phone,
+            phoneNumber,
             note || 'Hasta tarih netleşince geri döneceğini belirtti.',
             dueAtUtc,
             JSON.stringify(metadata)
@@ -5301,8 +5409,8 @@ export async function scheduleReminderTaskAction(
       return { success: true, taskId, isUpdate };
     }
   ).then(res => {
-    if (!res.success) return { success: false, error: res.error };
-    return res.data;
+    if (!res.success) return { success: false, error: res.error, message: undefined, taskId: undefined, isUpdate: undefined };
+    return res.data || { success: false, error: "Bilinmeyen hata", message: undefined, taskId: undefined, isUpdate: undefined };
   });
 }
 

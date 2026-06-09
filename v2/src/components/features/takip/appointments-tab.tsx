@@ -286,7 +286,7 @@ export default function AppointmentsTab({ onOpenDrawer, onGoToInbox, viewType, o
   const [searchInput, setSearchInput] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [dueRange, setDueRange] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("pending");
+  const [statusFilter, setStatusFilter] = useState("today");
   const [confirmFilter, setConfirmFilter] = useState("all");
   const filterDropdown = useDropdown();
 
@@ -327,44 +327,6 @@ export default function AppointmentsTab({ onOpenDrawer, onGoToInbox, viewType, o
   const items = data?.items || [];
   const total = data?.total || 0;
 
-  const openCount = stats ? (
-    viewType === 'phone' ? Number(stats.phone_open || 0) :
-    viewType === 'clinic' ? Number(stats.clinic_open || 0) :
-    (Number(stats.phone_open || 0) + Number(stats.clinic_open || 0))
-  ) : 0;
-
-  const confirmedCount = stats ? (
-    viewType === 'phone' ? Number(stats.phone_confirmed || 0) :
-    viewType === 'clinic' ? Number(stats.clinic_confirmed || 0) :
-    (Number(stats.phone_confirmed || 0) + Number(stats.clinic_confirmed || 0))
-  ) : 0;
-
-  const completedCount = stats ? (
-    viewType === 'phone' ? Number(stats.phone_completed || 0) :
-    viewType === 'clinic' ? Number(stats.clinic_arrived || 0) :
-    (Number(stats.phone_completed || 0) + Number(stats.clinic_arrived || 0))
-  ) : 0;
-
-  const noShowCount = stats ? (
-    viewType === 'phone' ? Number(stats.phone_no_show || 0) :
-    viewType === 'clinic' ? Number(stats.clinic_no_show || 0) :
-    (Number(stats.phone_no_show || 0) + Number(stats.clinic_no_show || 0))
-  ) : 0;
-
-  const cancelledCount = stats ? (
-    viewType === 'phone' ? Number(stats.phone_cancelled || 0) :
-    viewType === 'clinic' ? Number(stats.clinic_cancelled || 0) :
-    (Number(stats.phone_cancelled || 0) + Number(stats.clinic_cancelled || 0))
-  ) : 0;
-
-  const overdueCount = stats ? (
-    viewType === 'phone' ? Number(stats.overdue_phone || 0) :
-    viewType === 'clinic' ? Number(stats.overdue_clinic || 0) :
-    (Number(stats.overdue_phone || 0) + Number(stats.overdue_clinic || 0))
-  ) : 0;
-
-  const clinicNoResponseCount = stats ? Number(stats.clinic_no_response || 0) : 0;
-
   return (
     <div className="flex flex-col h-full bg-[#F5F5F7]">
       {/* Unified Premium Filter Bar */}
@@ -373,181 +335,68 @@ export default function AppointmentsTab({ onOpenDrawer, onGoToInbox, viewType, o
         {/* Left: Tab Switcher & Dynamic Counter Badges */}
         <div className="flex items-center gap-3 flex-wrap">
           <div className="flex items-center gap-1 bg-[#F5F5F7] rounded-xl p-0.5 border border-black/5 shadow-inner flex-wrap md:flex-nowrap">
-            {viewType === 'phone' ? (
-              <>
-                <button
-                  onClick={() => setStatusFilter("pending")}
-                  className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
-                    statusFilter === 'pending'
-                      ? 'bg-white text-[#1D1D1F] shadow-sm'
-                      : 'text-[#86868B] hover:text-[#1D1D1F]'
-                  }`}
-                >
-                  Açık ({openCount})
-                </button>
-                <button
-                  onClick={() => setStatusFilter("bot_suggestion")}
-                  className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
-                    statusFilter === 'bot_suggestion'
-                      ? 'bg-white text-indigo-700 shadow-sm border border-indigo-100/50'
-                      : 'text-[#86868B] hover:text-[#1D1D1F]'
-                  }`}
-                >
-                  Bot Önerisi ({stats ? Number((stats as any).phone_bot_suggestion || 0) : 0})
-                </button>
-                <button
-                  onClick={() => setStatusFilter("confirmed")}
-                  className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
-                    statusFilter === 'confirmed'
-                      ? 'bg-white text-green-700 shadow-sm border border-green-100/50'
-                      : 'text-[#86868B] hover:text-[#1D1D1F]'
-                  }`}
-                >
-                  Planlandı ve Onaylandı ({confirmedCount})
-                </button>
-                <button
-                  onClick={() => setStatusFilter("completed")}
-                  className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
-                    statusFilter === 'completed'
-                      ? 'bg-white text-emerald-700 shadow-sm border border-emerald-100/50'
-                      : 'text-[#86868B] hover:text-[#1D1D1F]'
-                  }`}
-                >
-                  Arandı ve Ulaşıldı ({completedCount})
-                </button>
-                <button
-                  onClick={() => setStatusFilter("no_show")}
-                  className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
-                    statusFilter === 'no_show'
-                      ? 'bg-white text-amber-700 shadow-sm border border-amber-100/50'
-                      : 'text-[#86868B] hover:text-[#1D1D1F]'
-                  }`}
-                >
-                  Ulaşılamadı ({noShowCount})
-                </button>
-                <button
-                  onClick={() => setStatusFilter("overdue")}
-                  className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
-                    statusFilter === 'overdue'
-                      ? 'bg-white text-red-700 shadow-sm border border-red-100/50'
-                      : 'text-[#86868B] hover:text-[#1D1D1F]'
-                  }`}
-                >
-                  Gecikti ({overdueCount})
-                </button>
-                <button
-                  onClick={() => setStatusFilter("cancelled")}
-                  className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
-                    statusFilter === 'cancelled'
-                      ? 'bg-white text-gray-500 shadow-sm border border-gray-100/50'
-                      : 'text-[#86868B] hover:text-[#1D1D1F]'
-                  }`}
-                >
-                  İptal Edildi ({cancelledCount})
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  onClick={() => setStatusFilter("pending")}
-                  className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
-                    statusFilter === 'pending'
-                      ? 'bg-white text-[#1D1D1F] shadow-sm'
-                      : 'text-[#86868B] hover:text-[#1D1D1F]'
-                  }`}
-                >
-                  Açık ({openCount})
-                </button>
-                <button
-                  onClick={() => setStatusFilter("bot_suggestion")}
-                  className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
-                    statusFilter === 'bot_suggestion'
-                      ? 'bg-white text-indigo-700 shadow-sm border border-indigo-100/50'
-                      : 'text-[#86868B] hover:text-[#1D1D1F]'
-                  }`}
-                >
-                  Bot Önerisi ({stats ? Number((stats as any).clinic_bot_suggestion || 0) : 0})
-                </button>
-                <button
-                  onClick={() => setStatusFilter("confirmed")}
-                  className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
-                    statusFilter === 'confirmed'
-                      ? 'bg-white text-green-700 shadow-sm border border-green-100/50'
-                      : 'text-[#86868B] hover:text-[#1D1D1F]'
-                  }`}
-                >
-                  Planlandı ve Teyit Alındı ({confirmedCount})
-                </button>
-                <button
-                  onClick={() => setStatusFilter("arrived")}
-                  className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
-                    statusFilter === 'arrived'
-                      ? 'bg-white text-emerald-700 shadow-sm border border-emerald-100/50'
-                      : 'text-[#86868B] hover:text-[#1D1D1F]'
-                  }`}
-                >
-                  Geldi ({completedCount})
-                </button>
-                <button
-                  onClick={() => setStatusFilter("no_show")}
-                  className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
-                    statusFilter === 'no_show'
-                      ? 'bg-white text-red-700 shadow-sm border border-red-100/50'
-                      : 'text-[#86868B] hover:text-[#1D1D1F]'
-                  }`}
-                >
-                  Gelmedi ({noShowCount})
-                </button>
-                <button
-                  onClick={() => setStatusFilter("no_response")}
-                  className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
-                    statusFilter === 'no_response'
-                      ? 'bg-white text-amber-700 shadow-sm border border-amber-100/50'
-                      : 'text-[#86868B] hover:text-[#1D1D1F]'
-                  }`}
-                >
-                  Ulaşılamadı ({clinicNoResponseCount})
-                </button>
-                <button
-                  onClick={() => setStatusFilter("cancelled")}
-                  className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
-                    statusFilter === 'cancelled'
-                      ? 'bg-white text-gray-500 shadow-sm border border-gray-100/50'
-                      : 'text-[#86868B] hover:text-[#1D1D1F]'
-                  }`}
-                >
-                  İptal Edildi ({cancelledCount})
-                </button>
-              </>
-            )}
+            <button
+              onClick={() => setStatusFilter("today")}
+              className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                statusFilter === 'today'
+                  ? 'bg-white text-[#1D1D1F] shadow-sm'
+                  : 'text-[#86868B] hover:text-[#1D1D1F]'
+              }`}
+            >
+              Bugün ({stats ? Number(viewType === 'phone' ? stats.phone_today : viewType === 'clinic' ? stats.clinic_today : stats.today) : 0})
+            </button>
+            <button
+              onClick={() => setStatusFilter("overdue")}
+              className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                statusFilter === 'overdue'
+                  ? 'bg-white text-red-700 shadow-sm border border-red-100/50'
+                  : 'text-[#86868B] hover:text-[#1D1D1F]'
+              }`}
+            >
+              Gecikenler ({stats ? Number(viewType === 'phone' ? stats.phone_overdue : viewType === 'clinic' ? stats.clinic_overdue : stats.overdue) : 0})
+            </button>
+            <button
+              onClick={() => setStatusFilter("upcoming")}
+              className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                statusFilter === 'upcoming'
+                  ? 'bg-white text-[#1D1D1F] shadow-sm'
+                  : 'text-[#86868B] hover:text-[#1D1D1F]'
+              }`}
+            >
+              Yaklaşanlar ({stats ? Number(viewType === 'phone' ? stats.phone_upcoming : viewType === 'clinic' ? stats.clinic_upcoming : stats.upcoming) : 0})
+            </button>
+            <button
+              onClick={() => setStatusFilter("waiting_reply")}
+              className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                statusFilter === 'waiting_reply'
+                  ? 'bg-white text-indigo-700 shadow-sm border border-indigo-100/50'
+                  : 'text-[#86868B] hover:text-[#1D1D1F]'
+              }`}
+            >
+              Cevap Bekleyenler ({stats ? Number(viewType === 'phone' ? stats.phone_waiting_reply : viewType === 'clinic' ? stats.clinic_waiting_reply : stats.waiting_reply) : 0})
+            </button>
+            <button
+              onClick={() => setStatusFilter("completed")}
+              className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                statusFilter === 'completed'
+                  ? 'bg-white text-emerald-700 shadow-sm border border-emerald-100/50'
+                  : 'text-[#86868B] hover:text-[#1D1D1F]'
+              }`}
+            >
+              Tamamlananlar ({stats ? Number(viewType === 'phone' ? stats.phone_completed : viewType === 'clinic' ? stats.clinic_completed : stats.completed) : 0})
+            </button>
           </div>
-
-          {stats && (
-            viewType === 'phone' ? Number(stats.overdue_phone || 0) :
-            viewType === 'clinic' ? Number(stats.overdue_clinic || 0) :
-            Number(stats.overdue || 0)
-          ) > 0 && statusFilter === 'pending' && (
-            <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-red-50 text-red-700 border border-red-200/50 rounded-xl text-[11px] font-extrabold tracking-wide shadow-sm animate-pulse">
-              <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
-              {Number(
-                viewType === 'phone' ? stats.overdue_phone :
-                viewType === 'clinic' ? stats.overdue_clinic :
-                stats.overdue
-              )} GECİKMİŞ
-            </span>
-          )}
-          
-          {stats && (
-            viewType === 'phone' ? Number(stats.confirmation_pending_phone || 0) :
-            viewType === 'clinic' ? Number(stats.confirmation_pending_clinic || 0) :
-            Number(stats.confirmation_pending || 0)
-          ) > 0 && statusFilter === 'pending' && (
-            <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-50 text-amber-700 border border-amber-200/50 rounded-xl text-[11px] font-extrabold tracking-wide shadow-sm">
+          {stats && Number(
+            viewType === 'phone' ? stats.phone_waiting_reply :
+            viewType === 'clinic' ? stats.clinic_waiting_reply :
+            stats.waiting_reply
+          ) > 0 && (
+            <span className="flex items-center gap-1.5 px-3 py-1 bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-bold rounded-lg tracking-wide shadow-sm">
               <Clock className="w-3.5 h-3.5 text-amber-600" />
               {Number(
-                viewType === 'phone' ? stats.confirmation_pending_phone :
-                viewType === 'clinic' ? stats.confirmation_pending_clinic :
-                stats.confirmation_pending
+                viewType === 'phone' ? stats.phone_waiting_reply :
+                viewType === 'clinic' ? stats.clinic_waiting_reply :
+                stats.waiting_reply
               )} TEYİT BEKLEYEN
             </span>
           )}
@@ -605,8 +454,8 @@ export default function AppointmentsTab({ onOpenDrawer, onGoToInbox, viewType, o
                   </div>
                 )}
 
-                {/* Tarih Dilimi (sadece Açık tabında) */}
-                {statusFilter === 'pending' && (
+                {/* Tarih Dilimi (sadece aktif tablarda) */}
+                {statusFilter !== 'completed' && (
                   <div className="space-y-1.5">
                     <label className="text-[10px] font-bold text-[#86868B] uppercase tracking-wider">Tarih Dilimi</label>
                     <div className="grid grid-cols-2 gap-1">
@@ -627,8 +476,8 @@ export default function AppointmentsTab({ onOpenDrawer, onGoToInbox, viewType, o
                   </div>
                 )}
 
-                {/* Teyit Durumu (sadece Açık tabında) */}
-                {statusFilter === 'pending' && (
+                {/* Teyit Durumu (sadece aktif tablarda) */}
+                {statusFilter !== 'completed' && (
                   <div className="space-y-1.5">
                     <label className="text-[10px] font-bold text-[#86868B] uppercase tracking-wider">Teyit Süzgeci</label>
                     <div className="grid grid-cols-2 gap-1">
@@ -687,13 +536,13 @@ export default function AppointmentsTab({ onOpenDrawer, onGoToInbox, viewType, o
                 <>
                   <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase">Randevu Durumu</th>
                   <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase">
-                    {(statusFilter === 'arrived' || statusFilter === 'no_show') ? 'Randevu Notu' : 'Randevuya Kalan'}
+                    {(statusFilter === 'completed') ? 'Randevu Notu' : 'Randevuya Kalan'}
                   </th>
                 </>
               ) : (
                 <>
                   <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase">Arama Durumu</th>
-                  {(statusFilter === 'pending' || statusFilter === 'confirmed' || statusFilter === 'overdue') && (
+                  {(statusFilter !== 'completed') && (
                     <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase">Aramaya Kalan</th>
                   )}
                 </>
@@ -722,7 +571,7 @@ export default function AppointmentsTab({ onOpenDrawer, onGoToInbox, viewType, o
                     !viewType 
                       ? 6 
                       : viewType === 'phone'
-                        ? (statusFilter === 'pending' || statusFilter === 'confirmed' || statusFilter === 'overdue' ? 5 : 4)
+                        ? (statusFilter !== 'completed' ? 5 : 4)
                         : 5
                   } 
                   className="py-16 text-center"
@@ -1628,7 +1477,7 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
             </div>
           </td>
           <td className="py-3.5 px-4">
-            {(statusFilter === 'arrived' || statusFilter === 'no_show') ? (
+            {(statusFilter === 'completed') ? (
               apt.appointmentNote ? (
                 <NoteCell note={apt.appointmentNote} />
               ) : (
@@ -1661,7 +1510,7 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
               )}
             </div>
           </td>
-          {(statusFilter === 'pending' || statusFilter === 'confirmed' || statusFilter === 'overdue') && (
+          {(statusFilter !== 'completed') && (
             <td className="py-3.5 px-4">
               <span className={`text-[12px] font-bold flex items-center gap-1.5 ${
                 isOverdueTask ? 'text-[#FF3B30]' : 'text-[#1D1D1F]'
@@ -2401,7 +2250,7 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
               !viewType 
                 ? 6 
                 : viewType === 'phone'
-                  ? (statusFilter === 'pending' || statusFilter === 'confirmed' ? 5 : 4)
+                  ? (statusFilter !== 'completed' ? 5 : 4)
                   : 5
             } 
             className="px-4 py-2.5 border-b border-black/5" 

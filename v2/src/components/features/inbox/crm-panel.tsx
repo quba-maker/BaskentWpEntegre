@@ -87,6 +87,69 @@ function CrmSkeleton() {
   );
 }
 
+function PostponeDropdown({ task, onPostpone }: { task: any; onPostpone: (option: '1h' | 'tomorrow' | '3d' | '1w') => void }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [isOpen]);
+
+  return (
+    <div className="relative" ref={dropdownRef}>
+      <button
+        type="button"
+        onClick={() => setIsOpen(!isOpen)}
+        className="flex items-center justify-center gap-1 py-1 px-2 bg-amber-50/20 hover:bg-amber-50 text-amber-600 hover:text-amber-700 border border-amber-100/50 text-[10px] font-bold rounded-lg cursor-pointer transition-all"
+      >
+        <Clock className="w-3.5 h-3.5" />
+        <span>Ertele</span>
+        <ChevronDown className="w-3 h-3 ml-0.5" />
+      </button>
+
+      {isOpen && (
+        <div className="absolute right-0 bottom-full mb-1 z-50 w-28 bg-white border border-black/5 rounded-xl shadow-lg p-1 animate-in zoom-in-95 duration-100">
+          <button
+            type="button"
+            onClick={() => { onPostpone('1h'); setIsOpen(false); }}
+            className="w-full text-left px-2 py-1.5 hover:bg-[#F5F5F7] text-gray-700 hover:text-black rounded-lg text-[10px] font-bold cursor-pointer transition-all"
+          >
+            +1 Saat
+          </button>
+          <button
+            type="button"
+            onClick={() => { onPostpone('tomorrow'); setIsOpen(false); }}
+            className="w-full text-left px-2 py-1.5 hover:bg-[#F5F5F7] text-gray-700 hover:text-black rounded-lg text-[10px] font-bold cursor-pointer transition-all"
+          >
+            Yarın (10:00)
+          </button>
+          <button
+            type="button"
+            onClick={() => { onPostpone('3d'); setIsOpen(false); }}
+            className="w-full text-left px-2 py-1.5 hover:bg-[#F5F5F7] text-gray-700 hover:text-black rounded-lg text-[10px] font-bold cursor-pointer transition-all"
+          >
+            3 Gün Sonra
+          </button>
+          <button
+            type="button"
+            onClick={() => { onPostpone('1w'); setIsOpen(false); }}
+            className="w-full text-left px-2 py-1.5 hover:bg-[#F5F5F7] text-gray-700 hover:text-black rounded-lg text-[10px] font-bold cursor-pointer transition-all"
+          >
+            1 Hafta Sonra
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ContextPanel() {
   const activeContact = useInboxStore((state) => state.activeContact);
   const mobileView = useInboxStore((state) => state.mobileView);
@@ -152,6 +215,73 @@ export function ContextPanel() {
   const [isAddingTag, setIsAddingTag] = useState(false);
   const [newTagVal, setNewTagVal] = useState("");
   const { mutate } = useSWRConfig();
+
+  const [isTasksOpen, setIsTasksOpen] = useState(true);
+
+  const handlePostpone = async (taskId: string, option: '1h' | 'tomorrow' | '3d' | '1w') => {
+    setIsSaving(true);
+    try {
+      let newDue: Date;
+      if (option === '1h') {
+        newDue = new Date(Date.now() + 60 * 60 * 1000);
+      } else if (option === 'tomorrow') {
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const yyyy = tomorrow.getFullYear();
+        const mm = String(tomorrow.getMonth() + 1).padStart(2, '0');
+        const dd = String(tomorrow.getDate()).padStart(2, '0');
+        const { parseTurkeyLocalToUtc } = await import("@/lib/utils/timezone");
+        newDue = new Date(parseTurkeyLocalToUtc(`${yyyy}-${mm}-${dd}`, "10:00"));
+      } else if (option === '3d') {
+        const threeDays = new Date();
+        threeDays.setDate(threeDays.getDate() + 3);
+        const yyyy = threeDays.getFullYear();
+        const mm = String(threeDays.getMonth() + 1).padStart(2, '0');
+        const dd = String(threeDays.getDate()).padStart(2, '0');
+        const { parseTurkeyLocalToUtc } = await import("@/lib/utils/timezone");
+        newDue = new Date(parseTurkeyLocalToUtc(`${yyyy}-${mm}-${dd}`, "10:00"));
+      } else {
+        const oneWeek = new Date();
+        oneWeek.setDate(oneWeek.getDate() + 7);
+        const yyyy = oneWeek.getFullYear();
+        const mm = String(oneWeek.getMonth() + 1).padStart(2, '0');
+        const dd = String(oneWeek.getDate()).padStart(2, '0');
+        const { parseTurkeyLocalToUtc } = await import("@/lib/utils/timezone");
+        newDue = new Date(parseTurkeyLocalToUtc(`${yyyy}-${mm}-${dd}`, "10:00"));
+      }
+
+      const { rescheduleFollowUpTaskAction } = await import("@/app/actions/patient-tracking");
+      const res = await rescheduleFollowUpTaskAction(taskId, newDue.toISOString());
+      if (res.success) {
+        queryClient.invalidateQueries({ queryKey: ['crm-panel', conversationId] });
+        handleModalSuccess();
+      } else {
+        alert("Erteleme hatası: " + res.error);
+      }
+    } catch (err: any) {
+      console.error("Postpone error:", err);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleComplete = async (taskId: string) => {
+    setIsSaving(true);
+    try {
+      const { completeFollowUpTaskAction } = await import("@/app/actions/patient-tracking");
+      const res = await completeFollowUpTaskAction(taskId, 'completed');
+      if (res.success) {
+        queryClient.invalidateQueries({ queryKey: ['crm-panel', conversationId] });
+        handleModalSuccess();
+      } else {
+        alert("Kapatma hatası: " + res.error);
+      }
+    } catch (err: any) {
+      console.error("Complete error:", err);
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   // Follow-up draft states
   const [draftData, setDraftData] = useState<{ draft: string; draftType: string; windowOpen: boolean; noReplyHours: number } | null>(null);
@@ -1339,6 +1469,103 @@ export function ContextPanel() {
             )}
           </div>
         )}
+
+        {/* 📋 Aktif Takipler Accordion */}
+        <div className="w-full mt-2.5 p-3 rounded-2xl border bg-white/40 space-y-2.5 shadow-sm text-left transition-all duration-300" style={{ borderColor: "var(--q-border-default)" }}>
+          <button
+            type="button"
+            onClick={() => setIsTasksOpen(!isTasksOpen)}
+            className="flex items-center justify-between w-full font-extrabold text-[#86868B] transition-colors hover:text-indigo-600 cursor-pointer"
+          >
+            <div className="flex items-center gap-1.5">
+              <CalendarClock className="w-4 h-4 text-indigo-500" />
+              <span className="text-[10px] uppercase tracking-widest font-extrabold">📋 Aktif Takipler</span>
+              {crmData?.activeTasks && crmData.activeTasks.length > 0 && (
+                <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-indigo-50 text-indigo-600 border border-indigo-150">
+                  {crmData.activeTasks.length}
+                </span>
+              )}
+            </div>
+            <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isTasksOpen ? 'rotate-180' : ''}`} />
+          </button>
+
+          {isTasksOpen && (
+            <div className="pt-2 space-y-2 border-t border-black/[0.03] animate-fade-in text-[11px] text-[#1D1D1F]">
+              {!crmData?.activeTasks || crmData.activeTasks.length === 0 ? (
+                <div className="text-center py-4 text-xs text-gray-400 font-semibold bg-gray-50/50 rounded-xl border border-dashed border-gray-200">
+                  Açık takip görevi bulunmuyor.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {crmData.activeTasks.map((task: any) => {
+                    const isOverdue = task.group === 'overdue';
+                    const isToday = task.group === 'today';
+                    const formattedDate = new Date(task.due_at).toLocaleString('tr-TR', {
+                      day: '2-digit',
+                      month: '2-digit',
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    });
+
+                    return (
+                      <div 
+                        key={task.id} 
+                        className="p-2.5 rounded-xl border border-black/[0.03] bg-white/70 hover:bg-white transition-all shadow-sm space-y-2 relative"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className={`px-2 py-0.5 rounded-md text-[9px] font-extrabold ${
+                            task.category === 'Arama Takibi' ? 'bg-blue-50 text-blue-700 border border-blue-100' :
+                            task.category === 'Randevu Takibi' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' :
+                            task.category === 'Hatırlatma / Geri Dönüş' ? 'bg-amber-50 text-amber-700 border border-amber-100' :
+                            'bg-purple-50 text-purple-700 border border-purple-100'
+                          }`}>
+                            {task.category}
+                          </span>
+
+                          <span className={`text-[9px] font-extrabold flex items-center gap-1 ${
+                            isOverdue ? 'text-red-600 font-bold' : isToday ? 'text-indigo-600' : 'text-gray-500'
+                          }`}>
+                            {isOverdue && <AlertTriangle className="w-3 h-3 text-red-500 inline" />}
+                            {formattedDate}
+                          </span>
+                        </div>
+
+                        <p className="text-[10.5px] font-semibold text-gray-700 leading-snug">
+                          {task.description || task.title}
+                        </p>
+
+                        <div className="flex items-center justify-between gap-1.5 pt-1.5 border-t border-black/[0.02]">
+                          <button
+                            type="button"
+                            onClick={() => handleComplete(task.id)}
+                            className="flex items-center justify-center gap-1 py-1 px-2 hover:bg-emerald-50 text-emerald-600 hover:text-emerald-700 text-[10px] font-bold rounded-lg cursor-pointer transition-all border border-emerald-100/50 bg-emerald-50/20"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                            <span>Tamamlandı</span>
+                          </button>
+
+                          <PostponeDropdown task={task} onPostpone={(option) => handlePostpone(task.id, option)} />
+
+                          <a
+                            href={`/${tenantSlug}/takip?tab=${
+                              task.category === 'Arama Takibi' ? 'telefon' :
+                              task.category === 'Randevu Takibi' ? 'randevu' : 'hatirlatma'
+                            }&opp=${oppId}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center justify-center gap-1 py-1 px-2 bg-slate-50 border border-slate-200/60 hover:bg-slate-100 text-slate-600 hover:text-slate-800 text-[10px] font-bold rounded-lg cursor-pointer transition-all"
+                          >
+                            <Link className="w-3 h-3" />
+                          </a>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
 
         {/* 🤖 Bot İşlemleri Accordion (Visible unconditionally) */}
         <div className="w-full mt-2.5 p-3 rounded-2xl border bg-white/40 space-y-2.5 shadow-sm text-left transition-all duration-300" style={{ borderColor: "var(--q-border-default)" }}>

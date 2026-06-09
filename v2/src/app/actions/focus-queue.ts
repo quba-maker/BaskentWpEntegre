@@ -491,22 +491,79 @@ export async function createBotDelegationTask(opportunityId: string, options: Bo
   );
 }
 
-export async function schedulePhoneCallTask(opportunityId: string, dueAtUtc: string, note?: string) {
+export async function schedulePhoneCallTask(
+  opportunityId: string | null | undefined,
+  dueAtUtc: string,
+  note?: string,
+  fallback?: { conversationId: string; phoneNumber: string },
+  force?: boolean
+): Promise<{ success: boolean; error?: string; message?: string; taskId?: string }> {
   return withActionGuard(
     { actionName: 'schedulePhoneCallTask' },
     async (ctx) => {
-      // Fetch opportunity to get the phone_number
-      const oppRes = await ctx.db.executeSafe({
-        text: `SELECT phone_number FROM opportunities WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
-        values: [opportunityId, ctx.tenantId]
-      }) as any[];
-      if (oppRes.length === 0) return { success: false, error: 'Fırsat bulunamadı.' };
-      const opp = oppRes[0];
+      let phoneNumber = fallback?.phoneNumber;
+      let conversationId = fallback?.conversationId || null;
+      const oppIdDb = opportunityId || null;
+
+      if (oppIdDb) {
+        // Fetch opportunity to get the phone_number
+        const oppRes = await ctx.db.executeSafe({
+          text: `SELECT phone_number, conversation_id FROM opportunities WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+          values: [oppIdDb, ctx.tenantId]
+        }) as any[];
+        if (oppRes.length > 0) {
+          const opp = oppRes[0];
+          phoneNumber = opp.phone_number;
+          if (opp.conversation_id) {
+            conversationId = opp.conversation_id;
+          }
+        }
+      }
+
+      if (!phoneNumber) {
+        return { success: false, error: 'Telefon numarası bulunamadı.' };
+      }
+
+      // If conversationId is still missing, lookup from conversations table
+      if (!conversationId) {
+        try {
+          const convRes = await ctx.db.executeSafe({
+            text: `SELECT id FROM conversations WHERE tenant_id = $1 AND RIGHT(phone_number, 10) = RIGHT($2, 10) LIMIT 1`,
+            values: [ctx.tenantId, phoneNumber]
+          }) as any[];
+          if (convRes.length > 0) {
+            conversationId = convRes[0].id || null;
+          }
+        } catch (_) {}
+      }
+
+      // Duplicate Guard
+      if (!force) {
+        const existingCallTask = await ctx.db.executeSafe({
+          text: `SELECT id FROM follow_up_tasks 
+                 WHERE tenant_id = $1 
+                   AND status IN ('pending', 'in_progress')
+                   AND (task_type = 'call_patient' OR (task_type = 'callback_scheduled' AND metadata->>'appointment_type' = 'phone_call'))
+                   AND (conversation_id = $2 OR phone_number = $3 OR (opportunity_id = $4 AND opportunity_id IS NOT NULL))
+                 LIMIT 1`,
+          values: [ctx.tenantId, conversationId || null, phoneNumber, oppIdDb]
+        }) as any[];
+
+        if (existingCallTask.length > 0) {
+          return {
+            success: false,
+            error: 'ACTIVE_TASK_EXISTS',
+            message: 'Bu hasta için halihazırda açık bir arama takibi bulunmaktadır. Mevcut takibi güncelleyebilir veya erteleyebilirsiniz.',
+            taskId: existingCallTask[0].id
+          };
+        }
+      }
 
       const query = `
         INSERT INTO follow_up_tasks (
           tenant_id, 
           opportunity_id, 
+          conversation_id,
           phone_number,
           task_type, 
           title, 
@@ -515,7 +572,7 @@ export async function schedulePhoneCallTask(opportunityId: string, dueAtUtc: str
           due_at, 
           metadata
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         RETURNING id
       `;
 
@@ -524,12 +581,13 @@ export async function schedulePhoneCallTask(opportunityId: string, dueAtUtc: str
         note: note || '',
       };
 
-      await ctx.db.executeSafe({
+      const insertRes = await ctx.db.executeSafe({
         text: query,
         values: [
           ctx.tenantId,
-          opportunityId,
-          opp.phone_number,
+          oppIdDb,
+          conversationId,
+          phoneNumber,
           'callback_scheduled',
           'Telefon Randevusu',
           note || 'Hastayla telefon görüşmesi planlandı.',
@@ -537,10 +595,27 @@ export async function schedulePhoneCallTask(opportunityId: string, dueAtUtc: str
           dueAtUtc,
           JSON.stringify(metadata)
         ]
-      });
-      return { success: true };
+      }) as any[];
+      const taskId = insertRes[0]?.id;
+
+      // Broadcast Ably event
+      if (conversationId) {
+        try {
+          const { RealtimePublisher } = await import('@/lib/realtime/publisher');
+          await RealtimePublisher.publishMetadataUpdated(ctx.tenantId, {
+            conversationId: conversationId
+          });
+        } catch (err) {
+          console.error("Realtime publish error in schedulePhoneCallTask:", err);
+        }
+      }
+
+      return { success: true, taskId };
     }
-  );
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error, message: undefined, taskId: undefined };
+    return res.data || { success: false, error: "Bilinmeyen hata", message: undefined, taskId: undefined };
+  });
 }
 
 // ═══════════════════════════════════════════════════════════

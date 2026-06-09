@@ -9,10 +9,12 @@ import { schedulePhoneCallTask } from "@/app/actions/focus-queue";
 interface PhoneCallModalProps {
   isOpen: boolean;
   onClose: () => void;
-  opportunityId: string;
+  opportunityId: string | null;
   tenantSlug: string;
   patientName: string;
   phoneNumber: string;
+  fallback?: { conversationId: string; phoneNumber: string };
+  defaultNote?: string;
   onSuccess?: () => void;
 }
 
@@ -23,15 +25,19 @@ export function PhoneCallModal({
   tenantSlug,
   patientName,
   phoneNumber,
+  fallback,
+  defaultNote,
   onSuccess
 }: PhoneCallModalProps) {
   const [mounted, setMounted] = useState(false);
   const [date, setDate] = useState("");
   const [time, setTime] = useState("10:00");
-  const [note, setNote] = useState("");
+  const [note, setNote] = useState(defaultNote || "");
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"idle" | "success" | "error">("idle");
   const [errorMessage, setErrorMessage] = useState("");
+  const [showDuplicateWarning, setShowDuplicateWarning] = useState(false);
+  const [existingTaskId, setExistingTaskId] = useState<string | null>(null);
 
   // Set default date to tomorrow
   useEffect(() => {
@@ -45,10 +51,16 @@ export function PhoneCallModal({
     return () => setMounted(false);
   }, []);
 
+  useEffect(() => {
+    if (defaultNote && !note) {
+      setNote(defaultNote);
+    }
+  }, [defaultNote]);
+
   if (!isOpen || !mounted) return null;
 
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSave = async (e: React.FormEvent, forceCreate?: boolean) => {
+    if (e) e.preventDefault();
     if (!date || !time) return;
 
     setIsSaving(true);
@@ -60,13 +72,17 @@ export function PhoneCallModal({
       const dueAtUtc = parseTurkeyLocalToUtc(date, time);
 
       // 2. Call the server action schedulePhoneCallTask
-      const res = await schedulePhoneCallTask(opportunityId, dueAtUtc, note.trim());
+      const res = await schedulePhoneCallTask(opportunityId, dueAtUtc, note.trim(), fallback, forceCreate);
 
       if (res.success) {
         setSaveStatus("success");
         if (onSuccess) {
           onSuccess();
         }
+      } else if (res.error === 'ACTIVE_TASK_EXISTS') {
+        setSaveStatus("idle");
+        setShowDuplicateWarning(true);
+        setExistingTaskId(res.taskId || null);
       } else {
         setSaveStatus("error");
         setErrorMessage(res.error || "Arama planlanırken bir hata oluştu.");
@@ -79,6 +95,81 @@ export function PhoneCallModal({
       setIsSaving(false);
     }
   };
+
+  if (showDuplicateWarning && existingTaskId) {
+    return createPortal(
+      <div className="fixed inset-0 bg-black/45 backdrop-blur-[4px] flex items-center justify-center z-[9999]">
+        <div className="bg-white rounded-3xl shadow-xl border border-black/5 w-full max-w-md overflow-hidden flex flex-col mx-4 p-6 text-left space-y-4 animate-in zoom-in-95 duration-200">
+          <h3 className="text-sm font-extrabold text-[#1D1D1F]">Aktif Takip Mevcut</h3>
+          <p className="text-xs text-[#86868B] leading-relaxed">
+            Bu hasta için halihazırda açık bir arama takibi bulunmaktadır. Ne yapmak istersiniz?
+          </p>
+          <div className="flex flex-col gap-2 pt-2">
+            <button
+              type="button"
+              onClick={async () => {
+                setIsSaving(true);
+                const { rescheduleFollowUpTaskAction } = await import("@/app/actions/patient-tracking");
+                const dueAtUtc = parseTurkeyLocalToUtc(date, time);
+                const res = await rescheduleFollowUpTaskAction(existingTaskId, dueAtUtc, note.trim());
+                setIsSaving(false);
+                if (res.success) {
+                  setSaveStatus("success");
+                  setShowDuplicateWarning(false);
+                } else {
+                  setSaveStatus("error");
+                  setErrorMessage(res.error || "Erteleme başarısız.");
+                }
+              }}
+              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl text-center cursor-pointer transition-all"
+            >
+              Mevcut Takibi Güncelle / Ertele
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                setIsSaving(true);
+                const { completeFollowUpTaskAction } = await import("@/app/actions/patient-tracking");
+                const res = await completeFollowUpTaskAction(existingTaskId, 'completed', note.trim());
+                setIsSaving(false);
+                if (res.success) {
+                  handleSave(null as any, true);
+                  setShowDuplicateWarning(false);
+                } else {
+                  setSaveStatus("error");
+                  setErrorMessage(res.error || "Mevcut takibi kapatma başarısız.");
+                }
+              }}
+              className="w-full py-2.5 border border-black/5 hover:bg-black/[0.02] text-[#1D1D1F] text-xs font-bold rounded-xl text-center cursor-pointer transition-all"
+            >
+              Mevcut Takibi Kapat ve Yenisini Aç
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                handleSave(null as any, true);
+                setShowDuplicateWarning(false);
+              }}
+              className="w-full py-2.5 text-red-600 hover:text-red-700 hover:bg-red-50 text-xs font-bold rounded-xl text-center cursor-pointer transition-all"
+            >
+              Yine de Yeni Takip Oluştur (Mükerrer)
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setShowDuplicateWarning(false);
+                onClose();
+              }}
+              className="w-full py-2 text-[#86868B] text-xs font-bold text-center cursor-pointer hover:text-black transition-all"
+            >
+              İptal
+            </button>
+          </div>
+        </div>
+      </div>,
+      document.body
+    );
+  }
 
   return createPortal(
     <div className="fixed inset-0 bg-black/45 backdrop-blur-[4px] flex items-center justify-center z-[9999] animate-in fade-in duration-200" onClick={onClose}>

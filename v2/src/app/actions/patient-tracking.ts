@@ -162,6 +162,7 @@ export interface TimelineEntry {
 
 export interface AppointmentRow {
   taskId: string;
+  taskType?: string;
   opportunityId?: string;
   patientName: string;
   phoneNumber: string;
@@ -1221,23 +1222,14 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
 
       // Map status tab filter to database status query to narrow down the dataset
       if (filters?.status && filters.status !== 'all') {
-        if (filters.status === 'completed' || filters.status === 'arrived') {
-          conditions.push(`t.status = 'completed'`);
-        } else if (filters.status === 'cancelled') {
-          conditions.push(`(t.status = 'cancelled' OR t.metadata->>'appointment_result' = 'cancelled')`);
-        } else if (filters.status === 'no_show') {
-          conditions.push(`(t.status = 'completed' OR t.status = 'no_show')`);
-        } else if (filters.status === 'no_response') {
-          conditions.push(`(t.status IN ('pending', 'in_progress') OR t.metadata->>'confirmation_status' = 'no_response')`);
-        } else if (filters.status === 'overdue') {
-          conditions.push(`t.status IN ('pending', 'in_progress') AND t.due_at < NOW()`);
+        if (filters.status === 'completed') {
+          conditions.push(`t.status IN ('completed', 'cancelled')`);
         } else {
-          // pending, bot_suggestion, confirmed
           conditions.push(`t.status IN ('pending', 'in_progress')`);
         }
       } else {
         if (filters?.completed) {
-          conditions.push(`t.status = 'completed'`);
+          conditions.push(`t.status IN ('completed', 'cancelled')`);
         } else {
           conditions.push(`t.status IN ('pending', 'in_progress')`);
         }
@@ -1271,12 +1263,7 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
       }
 
       // Exclude terminal opportunities unless looking at completed/cancelled tasks
-      const isTerminalFilter = filters?.status === 'completed' || 
-                               filters?.status === 'cancelled' || 
-                               filters?.status === 'arrived' || 
-                               filters?.status === 'no_show' || 
-                               filters?.status === 'no_response' || 
-                               !!filters?.completed;
+      const isTerminalFilter = filters?.status === 'completed' || !!filters?.completed;
       if (!isTerminalFilter) {
         conditions.push(`(o.stage IS NULL OR o.stage NOT IN ('not_qualified', 'arrived'))`);
       }
@@ -1294,6 +1281,7 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
           t.metadata as task_metadata,
           t.created_at as task_created_at,
           c.patient_name as conv_patient_name,
+          c.status as conv_status,
           o.patient_name as opp_patient_name,
           o.country as opp_country,
           o.department as opp_department,
@@ -1385,6 +1373,7 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
 
         return {
           taskId: row.task_id,
+          taskType: row.task_type,
           opportunityId: row.opportunity_id || undefined,
           patientName: resolvedName,
           phoneNumber: row.phone_number || '',
@@ -1422,36 +1411,48 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
       // Filter items to ensure strict mutual-exclusion based on projected uiBucket
       let filtered = items;
       if (filters?.status && filters.status !== 'all') {
+        const now = new Date();
+        const nowTime = now.getTime();
+        const istanbulDateStr = new Intl.DateTimeFormat('en-CA', {
+          timeZone: 'Europe/Istanbul',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit'
+        }).format(now);
+        const endOfTodayIstanbul = new Date(`${istanbulDateStr}T23:59:59.999+03:00`).getTime();
+
         filtered = items.filter(item => {
-          const bucket = item.metadata?.uiBucket;
-          
-          if (filters.status === 'pending') {
-            return bucket === 'open' || bucket === 'scheduled';
+          const rawStatus = item.metadata?.rawStatus || item.status;
+          const isTerminal = rawStatus === 'completed' || rawStatus === 'cancelled' || item.metadata?.appointment_result === 'cancelled';
+          const dueTime = item.dueAtUtc ? new Date(item.dueAtUtc).getTime() : 0;
+
+          if (filters.status === 'completed') {
+            return isTerminal;
           }
-          if (filters.status === 'bot_suggestion') {
-            return bucket === 'bot_suggestion_pending';
+
+          if (isTerminal) return false;
+
+          const isWaitingReply = 
+            item.confirmationStatus === 'pending' || 
+            item.metadata?.bot_suggestion?.status === 'pending' || 
+            item.taskType === 'bot_handoff_followup' ||
+            item.metadata?.conv_status === 'bot' || 
+            item.metadata?.conv_status === 'handoff';
+
+          if (filters.status === 'waiting_reply') {
+            return isWaitingReply;
           }
-          if (filters.status === 'confirmed') {
-            return bucket === 'confirmed';
-          }
-          if (filters.status === 'completed' || filters.status === 'arrived') {
-            return bucket === 'completed';
-          }
-          if (filters.status === 'no_show') {
-            if (item.appointmentType === 'clinic_visit') {
-              return bucket === 'unreachable' && (item.appointmentResult === 'no_show' || item.metadata?.rawStatus === 'no_show');
-            } else {
-              return bucket === 'unreachable';
-            }
-          }
-          if (filters.status === 'no_response') {
-            return (bucket === 'unreachable' && item.confirmationStatus === 'no_response' && item.appointmentResult !== 'no_show' && item.metadata?.rawStatus !== 'no_show') || bucket === 'overdue';
-          }
+
+          if (isWaitingReply) return false; // mutually exclusive
+
           if (filters.status === 'overdue') {
-            return bucket === 'overdue';
+            return dueTime < nowTime;
           }
-          if (filters.status === 'cancelled') {
-            return bucket === 'cancelled';
+          if (filters.status === 'today') {
+            return dueTime >= nowTime && dueTime <= endOfTodayIstanbul;
+          }
+          if (filters.status === 'upcoming') {
+            return dueTime > endOfTodayIstanbul;
           }
           return true;
         });
@@ -1494,7 +1495,7 @@ function calculateReminderTime(
       baseDate.setUTCDate(baseDate.getUTCDate() - 30);
       // Set to 10:00 local time = 07:00 UTC
       return new Date(baseDate.getTime() + (7 * 3600 * 1000)).toISOString();
-    } else if (type === '14_days_before') {
+        } else if (type === '14_days_before') {
       baseDate.setUTCDate(baseDate.getUTCDate() - 14);
       // Set to 10:00 local time = 07:00 UTC
       return new Date(baseDate.getTime() + (7 * 3600 * 1000)).toISOString();
@@ -1530,18 +1531,31 @@ async function scheduleReminderTasks(
   db: any,
   tenantId: string,
   userId: string,
-  opportunityId: string,
+  opportunityId: string | null | undefined,
   phoneNumber: string,
   parentTaskId: string,
   appointmentType: string,
   scheduledForAppointmentAt: string,
-  reminders: { type: '30_days_before' | '14_days_before' | '7_days_before' | '5_days_before' | '3_days_before' | '1_day_before' | 'same_day' | 'custom'; customTime?: string }[]
+  reminders: { type: '30_days_before' | '14_days_before' | '7_days_before' | '5_days_before' | '3_days_before' | '1_day_before' | 'same_day' | 'custom'; customTime?: string }[],
+  conversationId?: string | null
 ) {
-  const oppRes = await db.executeSafe({
-    text: `SELECT country FROM opportunities WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
-    values: [opportunityId, tenantId]
-  }) as any[];
-  const country = oppRes[0]?.country || null;
+  let country: string | null = null;
+  const oppIdDb = opportunityId || null;
+
+  if (oppIdDb) {
+    const oppRes = await db.executeSafe({
+      text: `SELECT country FROM opportunities WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+      values: [oppIdDb, tenantId]
+    }) as any[];
+    country = oppRes[0]?.country || null;
+  }
+  if (!country && conversationId) {
+    const convRes = await db.executeSafe({
+      text: `SELECT country FROM conversations WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+      values: [conversationId, tenantId]
+    }) as any[];
+    country = convRes[0]?.country || null;
+  }
   const tzRes = resolvePatientTimezone(country);
 
   for (const r of reminders) {
@@ -1558,13 +1572,13 @@ async function scheduleReminderTasks(
     // Idempotency / Duplication Guard
     const existing = await db.executeSafe({
       text: `SELECT id FROM follow_up_tasks 
-             WHERE opportunity_id = $1 AND tenant_id = $2 
+             WHERE (opportunity_id = $1 OR conversation_id = $2 OR phone_number = $3) AND tenant_id = $4 
              AND status = 'pending'
-             AND metadata->>'parent_task_id' = $3
-             AND metadata->>'reminder_type' = $4
-             AND metadata->>'scheduled_for_appointment_at' = $5
+             AND metadata->>'parent_task_id' = $5
+             AND metadata->>'reminder_type' = $6
+             AND metadata->>'scheduled_for_appointment_at' = $7
              LIMIT 1`,
-      values: [opportunityId, tenantId, parentTaskId, r.type, scheduledForAppointmentAt]
+      values: [oppIdDb, conversationId || null, phoneNumber, tenantId, parentTaskId, r.type, scheduledForAppointmentAt]
     }) as any[];
 
     if (existing.length > 0) continue;
@@ -1623,13 +1637,14 @@ async function scheduleReminderTasks(
 
     const res = await db.executeSafe({
       text: `
-        INSERT INTO follow_up_tasks (tenant_id, opportunity_id, phone_number, task_type, title, description, status, due_at, metadata)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        INSERT INTO follow_up_tasks (tenant_id, opportunity_id, conversation_id, phone_number, task_type, title, description, status, due_at, metadata)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         RETURNING id
       `,
       values: [
         tenantId,
-        opportunityId,
+        oppIdDb,
+        conversationId || null,
         phoneNumber,
         'appointment_reminder',
         titleMap[r.type] || 'Randevu Hatırlatma',
@@ -1642,11 +1657,12 @@ async function scheduleReminderTasks(
 
     // outreach_logs
     await db.executeSafe({
-      text: `INSERT INTO outreach_logs (tenant_id, opportunity_id, action, channel, actor_id, metadata)
-             VALUES ($1, $2, 'appointment_reminder_scheduled', 'system', $3, $4)`,
+      text: `INSERT INTO outreach_logs (tenant_id, opportunity_id, conversation_id, action, channel, actor_id, metadata)
+             VALUES ($1, $2, $3, 'appointment_reminder_scheduled', 'system', $4, $5)`,
       values: [
         tenantId,
-        opportunityId,
+        oppIdDb,
+        conversationId || null,
         userId,
         JSON.stringify({
           parent_task_id: parentTaskId,
@@ -1665,7 +1681,7 @@ async function scheduleReminderTasks(
 // ══════════════════════════════════════════
 
 export async function createAppointmentTask(
-  opportunityId: string, 
+  opportunityId: string | null | undefined, 
   dueAtUtc: string, 
   appointmentType: 'phone_call' | 'clinic_visit' | 'pre_consultation' | 'doctor_review' | 'report_followup',
   options?: { 
@@ -1673,50 +1689,97 @@ export async function createAppointmentTask(
     requireConfirmation?: boolean;
     reminders?: { type: '30_days_before' | '14_days_before' | '7_days_before' | '5_days_before' | '3_days_before' | '1_day_before' | 'same_day' | 'custom'; customTime?: string }[];
     customMetadata?: Record<string, any>;
+    fallback?: { conversationId: string; phoneNumber: string };
+    force?: boolean;
   }
-) {
+): Promise<{ success: boolean; error?: string; message?: string; taskId?: string }> {
   return withActionGuard(
     { actionName: 'createAppointmentTask' },
     async (ctx) => {
+      let phoneNumber = options?.fallback?.phoneNumber;
+      let conversationId = options?.fallback?.conversationId || null;
+      let leadId: string | null = null;
+      const oppIdDb = opportunityId || null;
+      let oppPatientName = 'Hasta';
+
+      if (oppIdDb) {
+        // Fetch Lead/Conversation Info for logs
+        const oppRes = await ctx.db.executeSafe({
+          text: `SELECT phone_number, id, patient_name, conversation_id FROM opportunities WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+          values: [oppIdDb, ctx.tenantId]
+        }) as any[];
+        if (oppRes.length > 0) {
+          const opp = oppRes[0];
+          phoneNumber = opp.phone_number;
+          oppPatientName = opp.patient_name || 'Hasta';
+          if (opp.conversation_id) {
+            conversationId = opp.conversation_id;
+          }
+        }
+      }
+
+      if (!phoneNumber) {
+        return { success: false, error: 'Telefon numarası bulunamadı.' };
+      }
+
+      // If conversationId is still missing, lookup from conversations table
+      if (!conversationId || !leadId) {
+        try {
+          const convRes = await ctx.db.executeSafe({
+            text: `SELECT c.id as conv_id, l.id as lead_id 
+                   FROM conversations c
+                   LEFT JOIN leads l ON l.phone_number = c.phone_number AND l.tenant_id = c.tenant_id
+                   WHERE c.tenant_id = $1 AND RIGHT(c.phone_number, 10) = RIGHT($2, 10) 
+                   LIMIT 1`,
+            values: [ctx.tenantId, phoneNumber]
+          }) as any[];
+          if (convRes.length > 0) {
+            conversationId = convRes[0].conv_id || conversationId || null;
+            leadId = convRes[0].lead_id || null;
+          }
+        } catch (_) {}
+      }
+
+      // Duplicate Guard
+      if (!options?.force) {
+        const existingApptTask = await ctx.db.executeSafe({
+          text: `SELECT id FROM follow_up_tasks 
+                 WHERE tenant_id = $1 
+                   AND status IN ('pending', 'in_progress')
+                   AND (
+                     (task_type = 'callback_scheduled' AND metadata->>'appointment_type' = $2)
+                     OR (task_type = $2)
+                   )
+                   AND (conversation_id = $3 OR phone_number = $4 OR (opportunity_id = $5 AND opportunity_id IS NOT NULL))
+                 LIMIT 1`,
+          values: [ctx.tenantId, appointmentType, conversationId || null, phoneNumber, oppIdDb]
+        }) as any[];
+
+        if (existingApptTask.length > 0) {
+          const typeLabel = appointmentType === 'clinic_visit' ? 'klinik randevusu' : 'takibi';
+          return {
+            success: false,
+            error: 'ACTIVE_TASK_EXISTS',
+            message: `Bu hasta için halihazırda açık bir ${typeLabel} bulunmaktadır. Mevcut randevuyu güncelleyebilir veya erteleyebilirsiniz.`,
+            taskId: existingApptTask[0].id
+          };
+        }
+      }
+
       // 1. Duplication Guard (Only block exact duplicate times for this type)
       const existing = await ctx.db.executeSafe({
         text: `SELECT id FROM follow_up_tasks 
-               WHERE opportunity_id = $1 AND tenant_id = $2 
+               WHERE (opportunity_id = $1 OR conversation_id = $2 OR phone_number = $3) AND tenant_id = $4 
                AND status IN ('pending', 'in_progress')
-               AND metadata->>'appointment_type' = $3
-               AND due_at = $4
+               AND metadata->>'appointment_type' = $5
+               AND due_at = $6
                LIMIT 1`,
-        values: [opportunityId, ctx.tenantId, appointmentType, dueAtUtc]
+        values: [oppIdDb, conversationId, phoneNumber, ctx.tenantId, appointmentType, dueAtUtc]
       }) as any[];
 
       if (existing.length > 0) {
         return { success: false, error: 'Bu tarih ve saatte zaten planlanmış bir randevunuz bulunuyor.' };
       }
-
-      // 2. Fetch Lead/Conversation Info for logs
-      const oppRes = await ctx.db.executeSafe({
-        text: `SELECT phone_number, id, patient_name FROM opportunities WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
-        values: [opportunityId, ctx.tenantId]
-      }) as any[];
-      if (oppRes.length === 0) return { success: false, error: 'Fırsat bulunamadı.' };
-      const opp = oppRes[0];
-
-      let conversationId: string | null = null;
-      let leadId: string | null = null;
-      try {
-        const convRes = await ctx.db.executeSafe({
-          text: `SELECT c.id as conv_id, l.id as lead_id 
-                 FROM conversations c
-                 LEFT JOIN leads l ON l.phone_number = c.phone_number AND l.tenant_id = c.tenant_id
-                 WHERE c.tenant_id = $1 AND RIGHT(c.phone_number, 10) = RIGHT($2, 10) 
-                 LIMIT 1`,
-          values: [ctx.tenantId, opp.phone_number]
-        }) as any[];
-        if (convRes.length > 0) {
-          conversationId = convRes[0].conv_id || null;
-          leadId = convRes[0].lead_id || null;
-        }
-      } catch (_) {}
 
       const approvedReminders: Record<string, boolean> = {};
       if (options?.reminders) {
@@ -1746,14 +1809,15 @@ export async function createAppointmentTask(
 
       const res = await ctx.db.executeSafe({
         text: `
-          INSERT INTO follow_up_tasks (tenant_id, opportunity_id, phone_number, task_type, title, description, status, due_at, metadata)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          INSERT INTO follow_up_tasks (tenant_id, opportunity_id, conversation_id, phone_number, task_type, title, description, status, due_at, metadata)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
           RETURNING id
         `,
         values: [
           ctx.tenantId,
-          opportunityId,
-          opp.phone_number,
+          oppIdDb,
+          conversationId,
+          phoneNumber,
           'callback_scheduled', // Reuse for compatibility
           titleMap[appointmentType] || 'Randevu',
           options?.note || `${titleMap[appointmentType]} planlandı.`,
@@ -1770,7 +1834,7 @@ export async function createAppointmentTask(
         text: `INSERT INTO outreach_logs (tenant_id, lead_id, conversation_id, opportunity_id, action, channel, actor_id, metadata)
                VALUES ($1, $2, $3, $4, 'appointment_scheduled', 'system', $5, $6)`,
         values: [
-          ctx.tenantId, leadId, conversationId, opportunityId, ctx.userId,
+          ctx.tenantId, leadId, conversationId, oppIdDb, ctx.userId,
           JSON.stringify({
             appointment_type: appointmentType,
             task_id: taskId,
@@ -1787,18 +1851,34 @@ export async function createAppointmentTask(
           ctx.db,
           ctx.tenantId,
           ctx.userId,
-          opportunityId,
-          opp.phone_number,
+          oppIdDb,
+          phoneNumber,
           taskId,
           appointmentType,
           dueAtUtc,
-          options.reminders
+          options.reminders,
+          conversationId
         );
+      }
+
+      // Broadcast Ably event
+      if (conversationId) {
+        try {
+          const { RealtimePublisher } = await import('@/lib/realtime/publisher');
+          await RealtimePublisher.publishMetadataUpdated(ctx.tenantId, {
+            conversationId: conversationId
+          });
+        } catch (err) {
+          console.error("Realtime publish error in createAppointmentTask:", err);
+        }
       }
 
       return { success: true, taskId };
     }
-  );
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error, message: undefined, taskId: undefined };
+    return res.data || { success: false, error: "Bilinmeyen hata", message: undefined, taskId: undefined };
+  });
 }
 
 export async function rescheduleAppointmentTask(taskId: string, newDueAtUtc: string, note?: string) {
@@ -1806,7 +1886,7 @@ export async function rescheduleAppointmentTask(taskId: string, newDueAtUtc: str
     { actionName: 'rescheduleAppointmentTask' },
     async (ctx) => {
       const tasks = await ctx.db.executeSafe({
-        text: `SELECT due_at, metadata, opportunity_id, phone_number FROM follow_up_tasks WHERE id = $1 AND tenant_id = $2`,
+        text: `SELECT due_at, metadata, opportunity_id, conversation_id, phone_number FROM follow_up_tasks WHERE id = $1 AND tenant_id = $2`,
         values: [taskId, ctx.tenantId]
       }) as any[];
       if (tasks.length === 0) return { success: false, error: 'Görev bulunamadı.' };
@@ -1827,10 +1907,10 @@ export async function rescheduleAppointmentTask(taskId: string, newDueAtUtc: str
 
       // Outreach log for parent reschedule
       await ctx.db.executeSafe({
-        text: `INSERT INTO outreach_logs (tenant_id, opportunity_id, action, channel, actor_id, metadata)
-               VALUES ($1, $2, 'appointment_rescheduled', 'system', $3, $4)`,
+        text: `INSERT INTO outreach_logs (tenant_id, opportunity_id, conversation_id, action, channel, actor_id, metadata)
+               VALUES ($1, $2, $3, 'appointment_rescheduled', 'system', $4, $5)`,
         values: [
-          ctx.tenantId, task.opportunity_id, ctx.userId,
+          ctx.tenantId, task.opportunity_id || null, task.conversation_id || null, ctx.userId,
           JSON.stringify({
             appointment_type: metadata.appointment_type,
             task_id: taskId,
@@ -1845,11 +1925,11 @@ export async function rescheduleAppointmentTask(taskId: string, newDueAtUtc: str
       // Ertelenen randevunun henüz çalışmamış (pending/in_progress) reminder'larını temizle ve yeniden oluştur
       await ctx.db.executeSafe({
         text: `DELETE FROM follow_up_tasks 
-               WHERE tenant_id = $1 AND opportunity_id = $2 
+               WHERE tenant_id = $1 
                  AND status IN ('pending', 'in_progress')
                  AND task_type = 'appointment_reminder'
-                 AND metadata->>'parent_task_id' = $3`,
-        values: [ctx.tenantId, task.opportunity_id, taskId]
+                 AND metadata->>'parent_task_id' = $2`,
+        values: [ctx.tenantId, taskId]
       });
 
       if (metadata.appointment_type === 'clinic_visit') {
@@ -1870,7 +1950,8 @@ export async function rescheduleAppointmentTask(taskId: string, newDueAtUtc: str
             taskId,
             metadata.appointment_type,
             newDueAtUtc,
-            remindersToSchedule
+            remindersToSchedule,
+            task.conversation_id
           );
         }
       }
@@ -1885,7 +1966,7 @@ export async function updateAppointmentConfirmation(taskId: string, status: 'con
     { actionName: 'updateAppointmentConfirmation' },
     async (ctx) => {
       const tasks = await ctx.db.executeSafe({
-        text: `SELECT metadata, opportunity_id, due_at FROM follow_up_tasks WHERE id = $1 AND tenant_id = $2`,
+        text: `SELECT metadata, opportunity_id, conversation_id, due_at FROM follow_up_tasks WHERE id = $1 AND tenant_id = $2`,
         values: [taskId, ctx.tenantId]
       }) as any[];
       if (tasks.length === 0) return { success: false, error: 'Görev bulunamadı.' };
@@ -1915,10 +1996,10 @@ export async function updateAppointmentConfirmation(taskId: string, status: 'con
       else if (status === 'declined') actionName = 'appointment_cancelled';
 
       await ctx.db.executeSafe({
-        text: `INSERT INTO outreach_logs (tenant_id, opportunity_id, action, channel, actor_id, metadata)
-               VALUES ($1, $2, $3, 'system', $4, $5)`,
+        text: `INSERT INTO outreach_logs (tenant_id, opportunity_id, conversation_id, action, channel, actor_id, metadata)
+               VALUES ($1, $2, $3, $4, 'system', $5, $6)`,
         values: [
-          ctx.tenantId, task.opportunity_id, actionName, ctx.userId,
+          ctx.tenantId, task.opportunity_id || null, task.conversation_id || null, actionName, ctx.userId,
           JSON.stringify({
             appointment_type: metadata.appointment_type,
             task_id: taskId,
@@ -1940,7 +2021,7 @@ export async function completeAppointmentTask(taskId: string, result: 'completed
     { actionName: 'completeAppointmentTask' },
     async (ctx) => {
       const tasks = await ctx.db.executeSafe({
-        text: `SELECT metadata, opportunity_id, phone_number, due_at FROM follow_up_tasks WHERE id = $1 AND tenant_id = $2`,
+        text: `SELECT metadata, opportunity_id, conversation_id, phone_number, due_at FROM follow_up_tasks WHERE id = $1 AND tenant_id = $2`,
         values: [taskId, ctx.tenantId]
       }) as any[];
       if (tasks.length === 0) return { success: false, error: 'Görev bulunamadı.' };
@@ -1966,10 +2047,10 @@ export async function completeAppointmentTask(taskId: string, result: 'completed
       else if (result === 'cancelled') actionName = 'appointment_cancelled';
 
       await ctx.db.executeSafe({
-        text: `INSERT INTO outreach_logs (tenant_id, opportunity_id, action, channel, actor_id, metadata)
-               VALUES ($1, $2, $3, 'system', $4, $5)`,
+        text: `INSERT INTO outreach_logs (tenant_id, opportunity_id, conversation_id, action, channel, actor_id, metadata)
+               VALUES ($1, $2, $3, $4, 'system', $5, $6)`,
         values: [
-          ctx.tenantId, task.opportunity_id, actionName, ctx.userId,
+          ctx.tenantId, task.opportunity_id || null, task.conversation_id || null, actionName, ctx.userId,
           JSON.stringify({
             appointment_type: metadata.appointment_type,
             task_id: taskId,
@@ -1985,11 +2066,11 @@ export async function completeAppointmentTask(taskId: string, result: 'completed
       if (taskStatus === 'completed' || taskStatus === 'cancelled') {
         const activeReminders = await ctx.db.executeSafe({
           text: `SELECT id, metadata FROM follow_up_tasks 
-                 WHERE tenant_id = $1 AND opportunity_id = $2 
+                 WHERE tenant_id = $1 
                    AND status IN ('pending', 'in_progress')
                    AND task_type = 'appointment_reminder'
-                   AND metadata->>'parent_task_id' = $3`,
-          values: [ctx.tenantId, task.opportunity_id, taskId]
+                   AND metadata->>'parent_task_id' = $2`,
+          values: [ctx.tenantId, taskId]
         }) as any[];
 
         if (activeReminders.length > 0) {
@@ -2011,11 +2092,12 @@ export async function completeAppointmentTask(taskId: string, result: 'completed
           for (const rem of activeReminders) {
             const remMeta = typeof rem.metadata === 'string' ? JSON.parse(rem.metadata) : rem.metadata;
             await ctx.db.executeSafe({
-              text: `INSERT INTO outreach_logs (tenant_id, opportunity_id, action, channel, actor_id, metadata)
-                     VALUES ($1, $2, 'appointment_reminder_cancelled', 'system', $3, $4)`,
+              text: `INSERT INTO outreach_logs (tenant_id, opportunity_id, conversation_id, action, channel, actor_id, metadata)
+                     VALUES ($1, $2, $3, 'appointment_reminder_cancelled', 'system', $4, $5)`,
               values: [
                 ctx.tenantId,
-                task.opportunity_id,
+                task.opportunity_id || null,
+                task.conversation_id || null,
                 ctx.userId,
                 JSON.stringify({
                   parent_task_id: taskId,
@@ -2051,6 +2133,76 @@ export async function completeAppointmentTask(taskId: string, result: 'completed
   );
 }
 
+export async function completeFollowUpTaskAction(taskId: string, result: 'completed' | 'cancelled' | 'reached' | 'unreachable', note?: string) {
+  return withActionGuard(
+    { actionName: 'completeFollowUpTaskAction' },
+    async (ctx) => {
+      const tasks = await ctx.db.executeSafe({
+        text: `SELECT id, task_type, metadata, conversation_id FROM follow_up_tasks WHERE id = $1 AND tenant_id = $2`,
+        values: [taskId, ctx.tenantId]
+      }) as any[];
+      if (tasks.length === 0) return { success: false, error: 'Görev bulunamadı.' };
+      
+      const task = tasks[0];
+      const metadata = typeof task.metadata === 'string' ? JSON.parse(task.metadata) : (task.metadata || {});
+
+      let mappedResult: 'completed' | 'arrived' | 'no_show' | 'cancelled' = 'completed';
+      if (result === 'cancelled') {
+        mappedResult = 'cancelled';
+      } else if (result === 'unreachable') {
+        mappedResult = 'no_show';
+      }
+
+      metadata.completion_outcome = result;
+      if (note) metadata.note = note;
+
+      await ctx.db.executeSafe({
+        text: `UPDATE follow_up_tasks SET metadata = $1 WHERE id = $2 AND tenant_id = $3`,
+        values: [JSON.stringify(metadata), taskId, ctx.tenantId]
+      });
+
+      const res = await completeAppointmentTask(taskId, mappedResult, note);
+
+      if (task.conversation_id) {
+        try {
+          const { RealtimePublisher } = await import('@/lib/realtime/publisher');
+          await RealtimePublisher.publishMetadataUpdated(ctx.tenantId, {
+            conversationId: task.conversation_id
+          });
+        } catch (err) {
+          console.error("Realtime publish error in completeFollowUpTaskAction:", err);
+        }
+      }
+
+      return res;
+    }
+  );
+}
+
+export async function rescheduleFollowUpTaskAction(taskId: string, newDueAtUtc: string, note?: string) {
+  return withActionGuard(
+    { actionName: 'rescheduleFollowUpTaskAction' },
+    async (ctx) => {
+      const res = await rescheduleAppointmentTask(taskId, newDueAtUtc, note);
+
+      const tasks = await ctx.db.executeSafe({
+        text: `SELECT conversation_id FROM follow_up_tasks WHERE id = $1 AND tenant_id = $2`,
+        values: [taskId, ctx.tenantId]
+      }) as any[];
+      if (tasks.length > 0 && tasks[0].conversation_id) {
+        try {
+          const { RealtimePublisher } = await import('@/lib/realtime/publisher');
+          await RealtimePublisher.publishMetadataUpdated(ctx.tenantId, {
+            conversationId: tasks[0].conversation_id
+          });
+        } catch (_) {}
+      }
+
+      return res;
+    }
+  );
+}
+
 export async function getAppointmentStats() {
   return withActionGuard(
     { actionName: 'getAppointmentStats' },
@@ -2064,23 +2216,51 @@ export async function getAppointmentStats() {
           t.title as task_title,
           t.description as task_description,
           t.metadata as task_metadata,
-          o.stage as opp_stage
+          o.stage as opp_stage,
+          o.country as opp_country,
+          c.status as conv_status
         FROM follow_up_tasks t
         LEFT JOIN opportunities o ON o.id = t.opportunity_id AND o.tenant_id = t.tenant_id
+        LEFT JOIN conversations c ON c.phone_number = COALESCE(o.phone_number, t.phone_number) AND c.tenant_id = t.tenant_id
         WHERE t.tenant_id = $1
           AND t.task_type != 'appointment_reminder'
           AND t.metadata->>'parent_task_id' IS NULL
           AND (t.metadata->>'is_primary' IS NULL OR t.metadata->>'is_primary' != 'false')
-          AND (t.status IN ('pending', 'in_progress') OR t.updated_at >= NOW() - INTERVAL '30 days')
       `;
 
       const rows = await ctx.db.executeSafe({ text: statsQuery, values: [ctx.tenantId] }) as any[];
       
+      const now = new Date();
+      const istanbulDateStr = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Europe/Istanbul',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      }).format(now);
+      const endOfTodayIstanbul = new Date(`${istanbulDateStr}T23:59:59.999+03:00`).getTime();
+      const nowTime = now.getTime();
+
       const stats = {
-        overdue_phone: 0, overdue_clinic: 0, overdue: 0,
-        confirmation_pending_phone: 0, confirmation_pending_clinic: 0, confirmation_pending: 0,
-        phone_open: 0, phone_bot_suggestion: 0, phone_confirmed: 0, phone_completed: 0, phone_no_show: 0, phone_cancelled: 0,
-        clinic_open: 0, clinic_bot_suggestion: 0, clinic_confirmed: 0, clinic_arrived: 0, clinic_no_show: 0, clinic_no_response: 0, clinic_cancelled: 0
+        // Phone counts
+        phone_today: 0,
+        phone_overdue: 0,
+        phone_upcoming: 0,
+        phone_waiting_reply: 0,
+        phone_completed: 0,
+
+        // Clinic counts
+        clinic_today: 0,
+        clinic_overdue: 0,
+        clinic_upcoming: 0,
+        clinic_waiting_reply: 0,
+        clinic_completed: 0,
+
+        // Combined / Total counts
+        today: 0,
+        overdue: 0,
+        upcoming: 0,
+        waiting_reply: 0,
+        completed: 0,
       };
 
       rows.forEach((row: any) => {
@@ -2098,57 +2278,45 @@ export async function getAppointmentStats() {
 
         const proj = buildOperationsTaskProjection(taskObj, row);
         const isClinic = proj.appointmentType === 'clinic_visit';
+        const dueTime = proj.dueAtUtc ? new Date(proj.dueAtUtc).getTime() : 0;
 
-        const isTerminal = proj.uiBucket === 'completed' || proj.uiBucket === 'cancelled' || proj.uiBucket === 'unreachable';
-        if (!isTerminal && proj.confirmationStatus === 'pending') {
-          if (isClinic) {
-            stats.confirmation_pending_clinic++;
-          } else {
-            stats.confirmation_pending_phone++;
-          }
-        }
+        const rawStatus = row.task_status;
+        const isTerminal = rawStatus === 'completed' || rawStatus === 'cancelled' || taskObj.metadata?.appointment_result === 'cancelled';
 
-        if (isClinic) {
-          if (proj.uiBucket === 'cancelled') stats.clinic_cancelled++;
-          else if (proj.uiBucket === 'completed') stats.clinic_arrived++;
-          else if (proj.uiBucket === 'unreachable') {
-            if (taskObj.metadata.appointment_result === 'no_show' || taskObj.status === 'no_show') {
-              stats.clinic_no_show++;
-            } else {
-              stats.clinic_no_response++;
-            }
-          }
-          else if (proj.uiBucket === 'overdue') {
-            stats.overdue_clinic++;
-            stats.clinic_no_response++; // clinic overdue is counted under ulaşılamadı tab
-          }
-          else if (proj.uiBucket === 'bot_suggestion_pending') stats.clinic_bot_suggestion++;
-          else if (proj.uiBucket === 'confirmed') stats.clinic_confirmed++;
-          else if (proj.uiBucket === 'scheduled' || proj.uiBucket === 'open') stats.clinic_open++;
+        if (isTerminal) {
+          if (isClinic) stats.clinic_completed++; else stats.phone_completed++;
+          stats.completed++;
         } else {
-          // Phone
-          if (proj.uiBucket === 'cancelled') stats.phone_cancelled++;
-          else if (proj.uiBucket === 'completed') stats.phone_completed++;
-          else if (proj.uiBucket === 'unreachable') stats.phone_no_show++;
-          else if (proj.uiBucket === 'overdue') {
-            stats.overdue_phone++;
+          // Check Cevap Bekleyenler
+          const isWaitingReply = 
+            proj.confirmationStatus === 'pending' || 
+            taskObj.metadata?.bot_suggestion?.status === 'pending' || 
+            taskObj.task_type === 'bot_handoff_followup' ||
+            row.conv_status === 'bot' || 
+            row.conv_status === 'handoff';
+
+          if (isWaitingReply) {
+            if (isClinic) stats.clinic_waiting_reply++; else stats.phone_waiting_reply++;
+            stats.waiting_reply++;
+          } else if (dueTime < nowTime) {
+            if (isClinic) stats.clinic_overdue++; else stats.phone_overdue++;
+            stats.overdue++;
+          } else if (dueTime <= endOfTodayIstanbul) {
+            if (isClinic) stats.clinic_today++; else stats.phone_today++;
+            stats.today++;
+          } else {
+            if (isClinic) stats.clinic_upcoming++; else stats.phone_upcoming++;
+            stats.upcoming++;
           }
-          else if (proj.uiBucket === 'bot_suggestion_pending') stats.phone_bot_suggestion++;
-          else if (proj.uiBucket === 'confirmed') stats.phone_confirmed++;
-          else if (proj.uiBucket === 'scheduled' || proj.uiBucket === 'open') stats.phone_open++;
         }
       });
-
-      stats.overdue = stats.overdue_phone + stats.overdue_clinic;
-      stats.confirmation_pending = stats.confirmation_pending_phone + stats.confirmation_pending_clinic;
 
       return stats;
     }
   ).then(res => res.data || { 
-    overdue_phone: 0, overdue_clinic: 0, overdue: 0,
-    confirmation_pending_phone: 0, confirmation_pending_clinic: 0, confirmation_pending: 0,
-    phone_open: 0, phone_confirmed: 0, phone_completed: 0, phone_no_show: 0, phone_cancelled: 0,
-    clinic_open: 0, clinic_confirmed: 0, clinic_arrived: 0, clinic_no_show: 0, clinic_no_response: 0, clinic_cancelled: 0
+    phone_today: 0, phone_overdue: 0, phone_upcoming: 0, phone_waiting_reply: 0, phone_completed: 0,
+    clinic_today: 0, clinic_overdue: 0, clinic_upcoming: 0, clinic_waiting_reply: 0, clinic_completed: 0,
+    today: 0, overdue: 0, upcoming: 0, waiting_reply: 0, completed: 0
   });
 }
 
