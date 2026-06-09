@@ -1602,19 +1602,30 @@ export function ContextPanel() {
                       ) as any;
 
                       if (res.success) {
+                        console.log("[BOT_ASSISTED_DRAFT_SUCCESS] Action response:", res);
+
+                        if (!res.isTemplate && (!res.draftText || !res.draftText.trim())) {
+                          console.error("[BOT_ASSISTED_DRAFT_EMPTY] Response has empty draftText");
+                          setAssistedDraftError("Taslak metin üretilemedi veya boş döndü. Lütfen tekrar deneyin.");
+                          setAssistedDraftSuccess(false);
+                          return;
+                        }
+
                         setAssistedDraftSuccess(true);
                         setDetectedLanguage(res.detectedLanguage || null);
                         setIsLanguageUnclear(res.isLanguageUnclear || false);
-                        setFormDraftForCopy(res.draft || "");
+                        setFormDraftForCopy(res.draftText || "");
                         
                         if (res.isTemplate) {
                           setSuggestedTemplates(res.suggestedTemplates || []);
                           setAssistedDraftText("");
                         } else {
-                          setAssistedDraftText(res.draft || "");
+                          setAssistedDraftText(res.draftText || "");
                         }
                       } else {
+                        console.error("[BOT_ASSISTED_DRAFT_ERROR] Action failed:", res.error);
                         setAssistedDraftError(res.error || "Taslak hazırlanamadı.");
+                        setAssistedDraftSuccess(false);
                       }
                     } catch (err: any) {
                       setAssistedDraftError(err.message || "Taslak hazırlama sırasında hata oluştu.");

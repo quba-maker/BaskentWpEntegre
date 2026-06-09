@@ -5448,11 +5448,13 @@ export async function prepareInboxBotAssistedDraftAction(
         if (lead && intentHint === "Karşılama") {
           try {
             const { generateSmartDraft } = await import('@/lib/utils/smart-draft-generator');
-            const draft = await generateSmartDraft(lead.raw_data, lead.form_name);
+            const draftText = await generateSmartDraft(lead.raw_data, lead.form_name);
+            if (!draftText || !draftText.trim()) {
+              return { success: false, error: "Taslak üretilemedi. Lütfen tekrar deneyin veya manuel talimat girin." };
+            }
             return {
-              success: true,
               isTemplate: false,
-              draft,
+              draftText,
               windowStatus: windowStatus.status,
               detectedLanguage: "Türkçe",
               isLanguageUnclear: false
@@ -5524,19 +5526,25 @@ Lütfen bu bilgilere göre yukarıdaki kurallara ve talimatlara uygun cevap tasl
         
         try {
           const parsed = JSON.parse(jsonText);
+          const draftText = parsed.draftText;
+          if (!draftText || !draftText.trim()) {
+            return { success: false, error: "Taslak üretilemedi. Lütfen tekrar deneyin veya manuel talimat girin." };
+          }
           return {
-            success: true,
             isTemplate: false,
-            draft: parsed.draftText,
+            draftText,
             windowStatus: windowStatus.status,
             detectedLanguage: parsed.detectedLanguage,
             isLanguageUnclear: parsed.isLanguageUnclear || false
           };
         } catch (e) {
+          const cleanedText = jsonText ? jsonText.trim() : "";
+          if (!cleanedText) {
+            return { success: false, error: "Taslak üretilemedi. Lütfen tekrar deneyin veya manuel talimat girin." };
+          }
           return {
-            success: true,
             isTemplate: false,
-            draft: jsonText || "Cevap taslağı oluşturulamadı.",
+            draftText: cleanedText,
             windowStatus: windowStatus.status,
             detectedLanguage: "Bilinmiyor",
             isLanguageUnclear: true
@@ -5564,9 +5572,8 @@ Lütfen bu bilgilere göre yukarıdaki kurallara ve talimatlara uygun cevap tasl
 
       if (templateRows.length === 0) {
         return {
-          success: true,
           isTemplate: true,
-          draft: closedFormDraft,
+          draftText: closedFormDraft || "",
           suggestedTemplates: [],
           windowStatus: windowStatus.status,
           detectedLanguage: "Bilinmiyor",
@@ -5696,9 +5703,8 @@ Lütfen bu bilgilere göre yukarıdaki kurallara uygun en iyi 2-3 şablonu seç,
       try {
         const parsed = JSON.parse(jsonText);
         return {
-          success: true,
           isTemplate: true,
-          draft: closedFormDraft,
+          draftText: closedFormDraft || "",
           suggestedTemplates: parsed.suggestedTemplates || [],
           windowStatus: windowStatus.status,
           detectedLanguage: parsed.detectedLanguage,
@@ -5711,7 +5717,14 @@ Lütfen bu bilgilere göre yukarıdaki kurallara uygun en iyi 2-3 şablonu seç,
         };
       }
     }
-  );
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error };
+    const innerData = res.data as any;
+    if (innerData && 'success' in innerData && !innerData.success) {
+      return { success: false, error: innerData.error || "İşlem başarısız." };
+    }
+    return { success: true, ...innerData };
+  });
 }
 
 export async function sendApprovedInboxBotDraftAction(
@@ -5842,7 +5855,14 @@ export async function sendApprovedInboxBotDraftAction(
 
       return { success: false, error: "Gönderim başarısız oldu." };
     }
-  );
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error };
+    const innerData = res.data as any;
+    if (innerData && 'success' in innerData && !innerData.success) {
+      return { success: false, error: innerData.error || "İşlem başarısız." };
+    }
+    return { success: true, ...innerData };
+  });
 }
 
 
