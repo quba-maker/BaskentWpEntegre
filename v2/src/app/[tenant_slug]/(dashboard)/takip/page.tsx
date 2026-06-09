@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import useSWR from "swr";
-import { Radar, Users, CalendarClock, Phone } from "lucide-react";
+import { Radar, Users, CalendarClock, Phone, CheckSquare } from "lucide-react";
 import { getOpportunityStats } from "@/app/actions/pipeline";
 import { useInboxStore } from "@/store/inbox-store";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
@@ -20,7 +20,10 @@ export default function TakipPage() {
   const { setActiveContact } = useInboxStore();
   
   const deepLinkOppId = searchParams.get('opp');
-  const [activeTab, setActiveTab] = useState<'hasta_takibi' | 'telefon' | 'randevu'>('telefon');
+  
+  // Navigation states
+  const [activeMainTab, setActiveMainTab] = useState<'is_listesi' | 'advanced'>('is_listesi');
+  const [activeAdvancedTab, setActiveAdvancedTab] = useState<'telefon' | 'randevu' | 'hasta_takibi'>('telefon');
   
   // Detail drawer states
   const [drawerOppId, setDrawerOppId] = useState<string | null>(null);
@@ -44,7 +47,10 @@ export default function TakipPage() {
     const drawerTabParam = searchParams.get('drawerTab');
 
     if (tabParam === 'telefon' || tabParam === 'randevu' || tabParam === 'hasta_takibi') {
-      setActiveTab(tabParam as any);
+      setActiveMainTab('advanced');
+      setActiveAdvancedTab(tabParam as any);
+    } else if (tabParam === 'is_listesi') {
+      setActiveMainTab('is_listesi');
     }
 
     if (deepLinkOppId) {
@@ -60,13 +66,23 @@ export default function TakipPage() {
   }, [deepLinkOppId, searchParams, router, tenantSlug]);
 
   const handleGoToInbox = (opp: any) => {
-    setActiveContact(opp.phone_number, {
-      id: opp.phone_number,
+    const contactId = opp.phone_number;
+    setActiveContact(contactId, {
+      id: contactId,
       name: opp.display_name || opp.requester_name || opp.patient_name || opp.phone_number,
       channel: opp.source || 'whatsapp',
       unread: 0
     });
-    router.push(`/${tenantSlug}/inbox`);
+    
+    // Deep-link: prioritize conversation_id, fallback to contact
+    const queryParams = new URLSearchParams();
+    if (opp.conversation_id || opp.conversationId) {
+      queryParams.set('conversation_id', opp.conversation_id || opp.conversationId);
+    } else if (opp.phone_number) {
+      queryParams.set('contact', opp.phone_number);
+    }
+    
+    router.push(`/${tenantSlug}/inbox?${queryParams.toString()}`);
   };
 
   return (
@@ -83,41 +99,70 @@ export default function TakipPage() {
             Takip Merkezi
           </h1>
           
-          {/* Tab Switcher */}
-          <div className="flex items-center gap-2 mt-2 w-fit">
-            <button
-              onClick={() => setActiveTab('telefon')}
-              className={`px-4 py-1.5 rounded-lg text-[13px] font-semibold transition-all flex items-center gap-2 cursor-pointer ${
-                activeTab === 'telefon' 
-                  ? 'bg-indigo-600 text-white shadow-md' 
-                  : 'bg-black/[0.04] text-[#86868B] hover:text-[#1D1D1F]'
-              }`}
-            >
-              <Phone className="w-4 h-4" />
-              Telefon Takibi
-            </button>
-            <button
-              onClick={() => setActiveTab('randevu')}
-              className={`px-4 py-1.5 rounded-lg text-[13px] font-semibold transition-all flex items-center gap-2 cursor-pointer ${
-                activeTab === 'randevu' 
-                  ? 'bg-indigo-600 text-white shadow-md' 
-                  : 'bg-black/[0.04] text-[#86868B] hover:text-[#1D1D1F]'
-              }`}
-            >
-              <CalendarClock className="w-4 h-4" />
-              Randevu Yönetimi
-            </button>
-            <button
-              onClick={() => setActiveTab('hasta_takibi')}
-              className={`px-4 py-1.5 rounded-lg text-[13px] font-semibold transition-all flex items-center gap-2 cursor-pointer ${
-                activeTab === 'hasta_takibi' 
-                  ? 'bg-indigo-600 text-white shadow-md' 
-                  : 'bg-black/[0.04] text-[#86868B] hover:text-[#1D1D1F] opacity-75 hover:opacity-100'
-              }`}
-            >
-              <Users className="w-4 h-4" />
-              Hasta Takibi (Gelişmiş)
-            </button>
+          {/* Main Segmented Control */}
+          <div className="flex flex-col gap-2.5 mt-3">
+            <div className="flex items-center gap-1.5 bg-black/[0.04] p-0.5 rounded-xl w-fit border border-black/5 shadow-inner">
+              <button
+                onClick={() => setActiveMainTab('is_listesi')}
+                className={`px-4 py-1.5 rounded-lg text-[13px] font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                  activeMainTab === 'is_listesi'
+                    ? 'bg-white text-[#1D1D1F] shadow-sm border border-black/5'
+                    : 'text-[#86868B] hover:text-[#1D1D1F]'
+                }`}
+              >
+                <CheckSquare className="w-4 h-4 text-[#5856D6]" />
+                İş Listesi
+              </button>
+              <button
+                onClick={() => setActiveMainTab('advanced')}
+                className={`px-4 py-1.5 rounded-lg text-[13px] font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                  activeMainTab === 'advanced'
+                    ? 'bg-white text-[#1D1D1F] shadow-sm border border-black/5'
+                    : 'text-[#86868B] hover:text-[#1D1D1F]'
+                }`}
+              >
+                Gelişmiş Görünüm
+              </button>
+            </div>
+
+            {/* Secondary Advanced Tab bar when Gelişmiş Görünüm is active */}
+            {activeMainTab === 'advanced' && (
+              <div className="flex items-center gap-1.5 bg-black/[0.02] p-0.5 rounded-lg w-fit border border-black/[0.02] ml-1 animate-in slide-in-from-left-2 duration-150">
+                <button
+                  onClick={() => setActiveAdvancedTab('telefon')}
+                  className={`px-3 py-1.5 rounded-md text-[11px] font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                    activeAdvancedTab === 'telefon'
+                      ? 'bg-white text-indigo-700 shadow-sm border border-black/5'
+                      : 'text-[#86868B] hover:text-[#1D1D1F]'
+                  }`}
+                >
+                  <Phone className="w-3.5 h-3.5" />
+                  Telefon Takibi
+                </button>
+                <button
+                  onClick={() => setActiveAdvancedTab('randevu')}
+                  className={`px-3 py-1.5 rounded-md text-[11px] font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                    activeAdvancedTab === 'randevu'
+                      ? 'bg-white text-indigo-700 shadow-sm border border-black/5'
+                      : 'text-[#86868B] hover:text-[#1D1D1F]'
+                  }`}
+                >
+                  <CalendarClock className="w-3.5 h-3.5" />
+                  Randevu Yönetimi
+                </button>
+                <button
+                  onClick={() => setActiveAdvancedTab('hasta_takibi')}
+                  className={`px-3 py-1.5 rounded-md text-[11px] font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                    activeAdvancedTab === 'hasta_takibi'
+                      ? 'bg-white text-indigo-700 shadow-sm border border-black/5'
+                      : 'text-[#86868B] hover:text-[#1D1D1F]'
+                  }`}
+                >
+                  <Users className="w-3.5 h-3.5" />
+                  Hasta Takibi
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -136,54 +181,73 @@ export default function TakipPage() {
         </div>
       </div>
 
-      {/* HASTA TAKİBİ TAB */}
-      {activeTab === 'hasta_takibi' && (
-        <div className="flex-1 bg-white rounded-2xl overflow-hidden shadow-sm border border-gray-200">
-          <PatientTrackingTab 
+      {/* Main Content Render */}
+      <div className="flex-1 bg-white rounded-2xl overflow-hidden shadow-sm border border-gray-200">
+        {activeMainTab === 'is_listesi' ? (
+          <AppointmentsTab 
+            viewType={undefined} // Undefined = All tasks (Unified Todo List)
             onGoToInbox={handleGoToInbox} 
-            onOpenDrawer={(id, tab = 'profile', targetPageTab) => {
+            onOpenDrawer={(id, taskId) => {
               setDrawerOppId(id);
-              setDrawerTaskId(null);
-              setDrawerInitialTab(tab);
-              if (targetPageTab) {
-                setActiveTab(targetPageTab);
-              }
+              setDrawerTaskId(taskId || null);
+              setDrawerInitialTab('appointment');
             }} 
+            onSwitchTab={(tab) => {
+              setActiveMainTab('advanced');
+              setActiveAdvancedTab(tab);
+            }}
           />
-        </div>
-      )}
+        ) : (
+          <>
+            {activeAdvancedTab === 'hasta_takibi' && (
+              <PatientTrackingTab 
+                onGoToInbox={handleGoToInbox} 
+                onOpenDrawer={(id, tab = 'profile', targetPageTab) => {
+                  setDrawerOppId(id);
+                  setDrawerTaskId(null);
+                  setDrawerInitialTab(tab);
+                  if (targetPageTab) {
+                    setActiveMainTab('advanced');
+                    setActiveAdvancedTab(targetPageTab);
+                  }
+                }} 
+              />
+            )}
 
-      {/* TELEFON TAKİBİ TAB */}
-      {activeTab === 'telefon' && (
-        <div className="flex-1 bg-white rounded-2xl overflow-hidden shadow-sm border border-gray-200">
-          <AppointmentsTab 
-            viewType="phone"
-            onGoToInbox={handleGoToInbox} 
-            onOpenDrawer={(id, taskId) => {
-              setDrawerOppId(id);
-              setDrawerTaskId(taskId || null);
-              setDrawerInitialTab('appointment');
-            }} 
-            onSwitchTab={(tab) => setActiveTab(tab)}
-          />
-        </div>
-      )}
- 
-      {/* RANDEVU YÖNETİMİ TAB */}
-      {activeTab === 'randevu' && (
-        <div className="flex-1 bg-white rounded-2xl overflow-hidden shadow-sm border border-gray-200">
-          <AppointmentsTab 
-            viewType="clinic"
-            onGoToInbox={handleGoToInbox} 
-            onOpenDrawer={(id, taskId) => {
-              setDrawerOppId(id);
-              setDrawerTaskId(taskId || null);
-              setDrawerInitialTab('appointment');
-            }} 
-            onSwitchTab={(tab) => setActiveTab(tab)}
-          />
-        </div>
-      )}
+            {activeAdvancedTab === 'telefon' && (
+              <AppointmentsTab 
+                viewType="phone"
+                onGoToInbox={handleGoToInbox} 
+                onOpenDrawer={(id, taskId) => {
+                  setDrawerOppId(id);
+                  setDrawerTaskId(taskId || null);
+                  setDrawerInitialTab('appointment');
+                }} 
+                onSwitchTab={(tab) => {
+                  setActiveMainTab('advanced');
+                  setActiveAdvancedTab(tab);
+                }}
+              />
+            )}
+
+            {activeAdvancedTab === 'randevu' && (
+              <AppointmentsTab 
+                viewType="clinic"
+                onGoToInbox={handleGoToInbox} 
+                onOpenDrawer={(id, taskId) => {
+                  setDrawerOppId(id);
+                  setDrawerTaskId(taskId || null);
+                  setDrawerInitialTab('appointment');
+                }} 
+                onSwitchTab={(tab) => {
+                  setActiveMainTab('advanced');
+                  setActiveAdvancedTab(tab);
+                }}
+              />
+            )}
+          </>
+        )}
+      </div>
 
       {/* Unified Patient & Appointment Details Drawer */}
       {drawerOppId && (

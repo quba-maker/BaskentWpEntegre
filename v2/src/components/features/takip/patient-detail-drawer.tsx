@@ -167,17 +167,13 @@ export default function PatientDetailDrawer({
 
   const hasActiveAppointment = appointmentTasks.length > 0;
 
-  // Tab State: 'overview' (Özet Aksiyon), 'plan' (Planla), 'detail' (Detay), 'appointment' (Randevu & Teyit)
-  const [activeTab, setActiveTab] = useState<'overview' | 'plan' | 'detail' | 'appointment'>(initialTab === 'appointment' ? 'appointment' : 'overview');
+  // Tab State: 'overview' (Özet), 'history' (Takipler & Notlar)
+  const [activeTab, setActiveTab] = useState<'overview' | 'history'>('overview');
 
-  // Synchronize activeTab if initialTab changes and hasActiveAppointment is true
+  // Synchronize activeTab if initialTab changes
   useEffect(() => {
-    if (initialTab === 'appointment' && hasActiveAppointment) {
-      setActiveTab('appointment');
-    } else {
-      setActiveTab('overview');
-    }
-  }, [initialTab, hasActiveAppointment]);
+    setActiveTab('overview');
+  }, [initialTab]);
 
   // Meta 24-Hour Session & Direct Bot States
   const [selectedMetaTemplate, setSelectedMetaTemplate] = useState("report_followup");
@@ -612,7 +608,7 @@ export default function PatientDetailDrawer({
       setActionSuccess('Ulaşıldı olarak işaretlendi. Lütfen randevu planlayın.');
       mutate();
       onRefresh?.();
-      setActiveTab('plan'); // Smart UX: Switch automatically to "Planla" Tab!
+      setActiveTab('history'); // Smart UX: Switch automatically to "Takipler & Notlar" Tab!
     } catch (err) {
       console.error(err);
     } finally {
@@ -995,10 +991,11 @@ export default function PatientDetailDrawer({
 
                 <div className="flex items-center gap-2 shrink-0">
                   <button
-                    onClick={() => onGoToInbox({ phone_number: data.phoneNumber, display_name: data.patientName, source: data.source })}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-xl text-xs font-bold transition-all duration-200 shadow-sm"
+                    onClick={() => onGoToInbox({ phone_number: data.phoneNumber, display_name: data.patientName, source: data.source, conversation_id: data.conversationId })}
+                    className="inline-flex items-center gap-2 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all duration-200 shadow-sm shadow-indigo-600/10 hover:shadow active:scale-95 cursor-pointer"
                   >
-                    <MessageCircle className="w-3.5 h-3.5" /> Mesaja Git
+                    <MessageCircle className="w-4 h-4" /> 
+                    <span>Inbox'ta Aç</span>
                   </button>
                   <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full bg-black/5 hover:bg-black/10 transition-colors">
                     <X className="w-5 h-5 text-[#1D1D1F]" />
@@ -1033,14 +1030,12 @@ export default function PatientDetailDrawer({
           ) : null}
         </div>
 
-        {/* Dynamic Segmented Tab Switcher (Overview, Plan, Detail) */}
+        {/* Dynamic Segmented Tab Switcher (Overview, History) */}
         {data && (
           <div className="bg-[#F5F5F7] px-4 py-2 flex items-center justify-between gap-2 select-none shrink-0 border-b border-black/[0.03]">
             {[
-              { id: 'overview', label: 'Özet Aksiyon', icon: <MessageCircle className="w-3.5 h-3.5" /> },
-              ...(hasActiveAppointment ? [{ id: 'appointment', label: 'Randevu & Teyit', icon: <Zap className="w-3.5 h-3.5" /> }] : []),
-              { id: 'plan', label: 'Plan/Görev', icon: <Calendar className="w-3.5 h-3.5" /> },
-              { id: 'detail', label: 'Detay', icon: <User className="w-3.5 h-3.5" /> },
+              { id: 'overview', label: 'Özet', icon: <MessageCircle className="w-3.5 h-3.5" /> },
+              { id: 'history', label: 'Takipler & Notlar', icon: <Calendar className="w-3.5 h-3.5" /> },
             ].map(tab => (
               <button
                 key={tab.id}
@@ -1062,548 +1057,540 @@ export default function PatientDetailDrawer({
         <div className="flex-1 overflow-y-auto p-4 space-y-4 pb-48">
           {data && (
             <>
-              {/* TAB 1: ÖZET AKSİYON */}
+              {/* TAB 1: ÖZET */}
               {activeTab === 'overview' && (
                 <div className="space-y-4 animate-in fade-in duration-200">
                   
-                  {/* AI Otopilot Durumu */}
-                  {(() => {
-                    const activeBotTasks = data.tasks.filter((t: any) => t.taskType === 'bot_handoff_followup' && (t.status === 'pending' || t.status === 'in_progress'));
-                    const hasBot = data.hasBotDelegation || activeBotTasks.length > 0;
-                    
-                    const modeLabels: Record<string, string> = {
-                      unreachable_followup: 'Ulaşılamadı Takibi',
-                      collect_phone_call_time: 'Uygun Saat İsteme',
-                      confirm_phone_call: 'Telefon Randevu Teyidi',
-                      clinic_appointment_reminder: 'Randevu Teyidi',
-                      no_response_followup: 'Cevapsız Fırsat Takibi',
-                      report_request: 'Rapor/Belge İsteme',
-                      appointment_reschedule_request: 'Randevu Erteleme Takibi'
-                    };
+                  {/* AI Görüşme Özeti & Aşama Seçici */}
+                  <div className="bg-white rounded-2xl border border-black/5 shadow-sm p-4 space-y-4">
+                    <div className="flex items-center justify-between pb-2 border-b border-black/[0.04]">
+                      <span className="text-[11px] font-bold text-[#86868B] uppercase tracking-wider flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-indigo-600 animate-pulse" /> AI Görüşme Özeti
+                      </span>
+                      <StageSelector currentStage={data.stage || 'new_lead'} onStageChange={handleStageChange} />
+                    </div>
 
-                    const lastMsgTime = data.lastIncomingMessageAt ? new Date(data.lastIncomingMessageAt).getTime() : 0;
-                    const timeDiff = Date.now() - lastMsgTime;
-                    const isSessionActive = lastMsgTime > 0 && timeDiff < 24 * 60 * 60 * 1000;
-                    const remainingHours = Math.max(0, Math.floor((24 * 60 * 60 * 1000 - timeDiff) / (1000 * 60 * 60)));
-                    const remainingMinutes = Math.max(0, Math.floor(((24 * 60 * 60 * 1000 - timeDiff) % (1000 * 60 * 60)) / (1000 * 60)));
+                    {/* Özet Detayları */}
+                    {resolvedSummary && (
+                      <UniversalAISummaryCard summary={resolvedSummary} />
+                    )}
+                  </div>
+
+                  {/* Hasta Talebi Intent Card */}
+                  {data.intentType && (
+                    <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4 flex gap-2.5 items-start animate-in fade-in duration-200 shadow-sm">
+                      <span className="text-base mt-0.5">🎯</span>
+                      <div className="space-y-1 text-[11px]">
+                        <p className="font-bold text-amber-800 uppercase tracking-wider text-[9px]">Hasta Talebi & Niyeti</p>
+                        <p className="font-semibold text-amber-900 leading-relaxed">
+                          {data.intentType === 'appointment_request' 
+                            ? 'Hasta ön görüşme veya klinik randevusu talep ediyor, koordinatör onayını bekliyor.' 
+                            : `Hasta niyeti tespit edildi: ${getIntentLabel(data.intentType)}`
+                          }
+                        </p>
+                        {data.actionLabel && (
+                          <p className="text-amber-700 font-medium italic mt-1">
+                            Öneri: {data.actionLabel}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Form Bilgileri */}
+                  {data.leadRawData && Object.keys(data.leadRawData).length > 0 && (
+                    <div className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
+                      <div className="p-4 bg-white border-b border-black/[0.03]">
+                        <span className="text-[11px] font-bold text-[#86868B] uppercase tracking-wider flex items-center gap-1.5">
+                          <FileText className="w-3.5 h-3.5 text-indigo-600" /> Form Bilgileri
+                        </span>
+                      </div>
+                      <div className="p-4 bg-white">
+                        <FormDataDisplay rawData={data.leadRawData} formName={data.leadFormName} />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* AKTİF TAKİP / RANDEVU DURUMU (Özet tabına taşındı) */}
+                  {(() => {
+                    const activeTasksList = data.tasks.filter((t: any) => {
+                      const tMeta = safeJsonParse(t.metadata, {});
+                      return t.taskType !== 'appointment_reminder' && 
+                             !tMeta.parent_task_id && 
+                             tMeta.is_primary !== false && 
+                             (t.status === 'pending' || t.status === 'in_progress');
+                    });
+                    
+                    const activeT = activeTaskId ? data.tasks.find((t: any) => t.id === activeTaskId) : activeTasksList[0];
+                    if (!activeT) return null;
+
+                    const tMeta = safeJsonParse(activeT.metadata, {});
+                    const isAppointment = tMeta.appointment_type === 'callback_scheduled' || 
+                                          ['phone_call', 'clinic_visit', 'pre_consultation', 'consultation'].includes(tMeta?.appointment_type);
+
+                    const appType = tMeta?.appointment_type || (activeT.taskType === 'callback_scheduled' ? 'phone_call' : 'phone_call');
+                    const childRems = data.tasks.filter((t: any) => {
+                      if (t.taskType !== 'appointment_reminder') return false;
+                      const rMeta = safeJsonParse(t.metadata, {});
+                      return rMeta.parent_task_id === activeT.id;
+                    });
 
                     return (
                       <div className="space-y-4">
-                        {/* 1. AI Otopilot Durumu Card */}
-                        <div className="bg-white rounded-2xl border border-black/5 shadow-sm p-4 space-y-4">
+                        {/* Randevu Sonuç Aksiyonları */}
+                        <div className="bg-white rounded-2xl border border-black/5 shadow-sm p-4 space-y-3">
+                          <p className="text-[11px] font-bold text-[#86868B] uppercase tracking-wider flex items-center gap-1.5 border-b border-black/[0.04] pb-2">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-indigo-600 animate-pulse" /> Aktif Takip & Randevu Sonucu
+                          </p>
                           
-                          {/* AI Görüşme Özeti (Başa Alındı & Sabitlendi) */}
-                          <div className="space-y-3">
-                            <div className="flex items-center justify-between pb-2 border-b border-black/[0.04]">
-                              <span className="text-[11px] font-bold text-[#86868B] uppercase tracking-wider flex items-center gap-1.5">
-                                <Sparkles className="w-3.5 h-3.5 text-indigo-600 animate-pulse" /> AI Görüşme Özeti
-                              </span>
-                              <StageSelector currentStage={data.stage || 'new_lead'} onStageChange={handleStageChange} />
-                            </div>
-
-                            {/* Özet Detayları */}
-                            {resolvedSummary && (
-                              <UniversalAISummaryCard summary={resolvedSummary} />
-                            )}
-                            </div>
-
-                          {/* 🎯 Hasta Talebi Intent Card (Görüşme Özeti Altına Alındı) */}
-                          {data.intentType && (
-                            <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 flex gap-2.5 items-start animate-in fade-in duration-200">
-                              <span className="text-base mt-0.5">🎯</span>
-                              <div className="space-y-1 text-[11px]">
-                                <p className="font-bold text-amber-800 uppercase tracking-wider text-[9px]">Hasta Talebi & Niyeti</p>
-                                <p className="font-semibold text-amber-900 leading-relaxed">
-                                  {data.intentType === 'appointment_request' 
-                                    ? 'Hasta ön görüşme veya klinik randevusu talep ediyor, koordinatör onayını bekliyor.' 
-                                    : `Hasta niyeti tespit edildi: ${getIntentLabel(data.intentType)}`
-                                  }
-                                </p>
-                                {data.actionLabel && (
-                                  <p className="text-amber-700 font-medium italic mt-1">
-                                    Öneri: {data.actionLabel}
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* 2. Botu Yönlendir Management Card */}
-                        <div className="bg-white rounded-2xl border border-black/5 shadow-sm p-4 space-y-3.5">
-                          {/* Header Status Row */}
-                          <div className="flex items-center justify-between pb-1 border-b border-black/[0.03]">
-                            <span className="text-[10px] font-bold text-[#86868B] uppercase tracking-wider flex items-center gap-1.5">
-                              <Bot className="w-3.5 h-3.5 text-indigo-600" /> Bota Müdahale & Aksiyon
-                            </span>
-                            {isSessionActive ? (
-                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-full text-[9px] font-bold">
-                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                                <span>Oturum Aktif ({remainingHours}s Kalan)</span>
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-amber-50 text-amber-600 border border-amber-100 rounded-full text-[9px] font-bold">
-                                <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                                <span>Oturum Kapalı</span>
-                              </span>
-                            )}
-                          </div>
-
-                          {/* Action Button Bar */}
-                          <div className="flex gap-3 pt-0.5">
-                             {/* Ulaşıldı (Plan/Görev) - Sol Buton */}
-                             <button
-                               type="button"
-                               onClick={handleReachedAction}
-                               disabled={!!actionLoading}
-                               className="flex-1 flex items-center justify-center gap-2 px-3 py-3 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-xl text-xs font-bold shadow-sm transition-all duration-200 disabled:opacity-50"
-                             >
-                               <CheckCircle2 className="w-4 h-4" />
-                               <span>Ulaşıldı (Plan/Görev)</span>
-                             </button>
-
-                            {/* Botu Yönlendir (Müdahale) - Sağ Buton */}
-                            <button
-                              type="button"
-                              onClick={() => setIsBotInterventionExpanded(!isBotInterventionExpanded)}
-                              className={`flex-1 flex items-center justify-center gap-2 px-3 py-3 rounded-xl text-xs font-bold shadow-sm transition-all duration-200 ${
-                                isBotInterventionExpanded 
-                                  ? 'bg-indigo-700 text-white hover:bg-indigo-800 ring-2 ring-indigo-500/20' 
-                                  : 'bg-indigo-600 text-white hover:bg-indigo-700'
-                              }`}
-                            >
-                              <Zap className={`w-4 h-4 ${isBotInterventionExpanded ? 'animate-bounce' : 'animate-pulse'}`} />
-                              <span>Botu Yönlendir (Müdahale)</span>
-                              <ChevronDown className={`w-4 h-4 ml-0.5 transition-transform duration-200 ${isBotInterventionExpanded ? 'rotate-180' : ''}`} />
-                            </button>
-                          </div>
-
-                          {isBotInterventionExpanded && (
-                            <div className="space-y-3.5 animate-in fade-in slide-in-from-top-1 duration-200">
-                              <div className="relative mb-3">
-                                <span className="block text-[10px] font-bold text-[#86868B] uppercase tracking-wider mb-2">Hazır Taktik Seç</span>
-                                <button
-                                  type="button"
-                                  onClick={() => setIsPresetDropdownOpen(!isPresetDropdownOpen)}
-                                  className="w-full flex items-center justify-between p-3 bg-[#F5F5F7]/60 hover:bg-[#F5F5F7] border border-black/5 rounded-xl text-left transition-all duration-200"
-                                >
-                                  <span className="font-bold text-[11px] text-[#1D1D1F]">
-                                    {botDirectiveText 
-                                      ? DIRECTIVE_PRESETS.find(p => p.text === botDirectiveText)?.label || "Özel Talimat Yazılıyor..." 
-                                      : "Hazır bir taktik/talimat paketi seçin..."}
-                                  </span>
-                                  <ChevronDown className={`w-4 h-4 text-[#86868B] transition-transform duration-200 ${isPresetDropdownOpen ? 'rotate-180' : ''}`} />
-                                </button>
-                                
-                                {isPresetDropdownOpen && (
-                                  <div className="absolute z-10 w-full mt-1 bg-white border border-black/5 shadow-lg rounded-xl overflow-hidden py-1 animate-in fade-in slide-in-from-top-1 duration-200">
-                                    {DIRECTIVE_PRESETS.map((preset) => {
-                                      const isSelected = botDirectiveText === preset.text;
-                                      return (
-                                        <button
-                                          key={preset.id}
-                                          type="button"
-                                          onClick={() => {
-                                            setBotDirectiveText(preset.text);
-                                            setIsPresetDropdownOpen(false);
-                                          }}
-                                          className={`w-full p-3 text-left transition-all duration-200 hover:bg-[#F5F5F7] ${
-                                            isSelected ? 'bg-indigo-50/50 text-indigo-900' : 'text-[#1D1D1F]'
-                                          }`}
-                                        >
-                                          <div className="font-bold text-[11px]">{preset.label}</div>
-                                          <div className="text-[10px] text-[#86868B] font-semibold leading-normal mt-0.5">{preset.text}</div>
-                                        </button>
-                                      );
-                                    })}
-                                  </div>
-                                )}
-                              </div>
-
-                              <div>
-                                <label className="block text-[10px] font-bold text-[#86868B] uppercase tracking-wider mb-1.5 flex items-center justify-between">
-                                  <span>Özel Talimat / Taktik Detayı</span>
-                                  {botDirectiveText && (
-                                    <button 
-                                      type="button"
-                                      onClick={() => setBotDirectiveText("")}
-                                      className="text-indigo-600 hover:text-indigo-700 font-bold lowercase text-[9px]"
-                                    >
-                                      temizle
-                                    </button>
-                                  )}
-                                </label>
-                                <textarea
-                                  value={botDirectiveText}
-                                  onChange={(e) => setBotDirectiveText(e.target.value)}
-                                  className="w-full min-h-[90px] px-3.5 py-3 bg-[#F5F5F7] hover:bg-white focus:bg-white rounded-xl text-xs font-semibold outline-none border border-transparent focus:border-indigo-500/25 ring-2 ring-indigo-500/5 focus:ring-indigo-500/15 transition-all duration-200 resize-none leading-relaxed text-[#1D1D1F]"
-                                  placeholder="Bota verilecek özel takip/ikna talimatı..."
-                                />
-                              </div>
-
-                              {activeBotTask?.metadata?.active_bot_directive && (
-                                <div className="px-3.5 py-2.5 bg-emerald-50/60 border border-emerald-100 rounded-xl flex items-start gap-2 text-[11px] text-emerald-800 font-semibold leading-relaxed animate-in fade-in duration-200">
-                                  <span className="text-emerald-600 font-bold shrink-0">🟢 Aktif Bot Talimatı:</span>
-                                  <span>{activeBotTask.metadata.active_bot_directive}</span>
-                                </div>
-                              )}
-
+                          {isAppointment ? (
+                            <div className="grid grid-cols-2 gap-2 pt-1">
                               <button
-                                type="button"
-                                onClick={handleSaveBotDirective}
-                                disabled={isSavingDirective || !botDirectiveText.trim()}
-                                className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all duration-200 flex items-center justify-center gap-1.5 disabled:opacity-40"
+                                onClick={() => handleAppointmentAction('confirm')}
+                                disabled={!!actionLoading}
+                                className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-[12px] font-bold bg-green-50 text-green-700 border border-green-200/50 hover:bg-green-100 transition-all cursor-pointer disabled:opacity-50"
                               >
-                                {isSavingDirective ? (
-                                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                ) : (
-                                  <CheckCircle2 className="w-3.5 h-3.5" />
-                                )}
-                                <span>Talimatı Bota İlet & Devam Et</span>
+                                <CheckCircle2 className="w-4 h-4" /> Teyit Edildi
+                              </button>
+                              
+                              <button
+                                onClick={() => handleAppointmentAction('call_missed')}
+                                disabled={!!actionLoading}
+                                className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-[12px] font-bold bg-orange-50 text-orange-700 border border-orange-200/50 hover:bg-orange-100 transition-all cursor-pointer disabled:opacity-50"
+                              >
+                                <Phone className="w-4 h-4" /> Ulaşılamadı
+                              </button>
+                              
+                              {appType === 'clinic_visit' && (
+                                <button
+                                  onClick={() => handleAppointmentAction('arrived')}
+                                  disabled={!!actionLoading}
+                                  className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-[12px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/50 hover:bg-emerald-100 transition-all cursor-pointer disabled:opacity-50 col-span-2 shadow-sm"
+                                >
+                                  <Building2 className="w-4 h-4" /> Hasta Geldi / Klinik Girişi
+                                </button>
+                              )}
+                              
+                              <button
+                                onClick={() => handleAppointmentAction('no_show')}
+                                disabled={!!actionLoading}
+                                className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-[12px] font-bold bg-red-50 text-red-700 border border-red-200/50 hover:bg-red-100 transition-all cursor-pointer disabled:opacity-50"
+                              >
+                                <X className="w-4 h-4" /> Gelmedi
+                              </button>
+                              
+                              <button
+                                onClick={() => handleAppointmentAction('cancel')}
+                                disabled={!!actionLoading}
+                                className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-[12px] font-bold bg-gray-50 text-gray-600 border border-gray-200/50 hover:bg-gray-100 transition-all cursor-pointer disabled:opacity-50"
+                              >
+                                <X className="w-4 h-4" /> İptal Et
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-3 gap-2 pt-1">
+                              <button
+                                onClick={() => handleCompleteTask(activeT.id, 'completed')}
+                                disabled={!!actionLoading}
+                                className="flex items-center justify-center gap-1.5 py-2 rounded-xl text-[11px] font-bold bg-green-50 text-green-700 border border-green-200/50 hover:bg-green-100 transition-all cursor-pointer disabled:opacity-50"
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5" /> Tamamla
+                              </button>
+                              <button
+                                onClick={() => handleCompleteTask(activeT.id, 'cancelled')}
+                                disabled={!!actionLoading}
+                                className="flex items-center justify-center gap-1.5 py-2 rounded-xl text-[11px] font-bold bg-orange-50 text-orange-700 border border-orange-200/50 hover:bg-orange-100 transition-all cursor-pointer disabled:opacity-50"
+                              >
+                                <Phone className="w-3.5 h-3.5" /> Ulaşılamadı
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setEditingTaskId(activeT.id);
+                                  const trParts = getTurkeyParts(activeT.dueAt);
+                                  setEditTaskDate(`${trParts.year}-${trParts.month}-${trParts.day}`);
+                                  setEditTaskTime(`${trParts.hour}:${trParts.minute}`);
+                                  setEditTaskNote(tMeta.note || "");
+                                  setEditTaskDescription(activeT.description || "");
+                                  setActiveTab('history');
+                                }}
+                                className="flex items-center justify-center gap-1.5 py-2 rounded-xl text-[11px] font-bold bg-blue-50 text-blue-700 border border-blue-200/50 hover:bg-blue-100 transition-all cursor-pointer"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" /> Ertele
                               </button>
                             </div>
                           )}
                         </div>
+
+                        {/* Manuel Durum ve Teyit Yönetimi */}
+                        {isAppointment && (
+                          <div className="bg-white rounded-2xl border border-black/5 shadow-sm p-4 space-y-3">
+                            <p className="text-[11px] font-bold text-[#86868B] uppercase tracking-wider flex items-center gap-1.5 border-b border-black/[0.04] pb-2">
+                              <Edit3 className="w-3.5 h-3.5 text-indigo-600" /> Manuel Durum ve Teyit Yönetimi
+                            </p>
+                            
+                            <div className="grid grid-cols-2 gap-3 pt-1">
+                              <div>
+                                <label className="block text-[10px] font-bold text-[#86868B] uppercase tracking-wider mb-1">
+                                  Randevu Durumu
+                                </label>
+                                <select
+                                  value={manualStatus}
+                                  onChange={(e) => setManualStatus(e.target.value)}
+                                  className="w-full text-[12px] font-semibold bg-[#F5F5F7] border border-black/5 rounded-xl px-2.5 py-2 text-[#1D1D1F] focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                >
+                                  <option value="pending">⏳ Açık / Planlandı (Süreci Başa Al)</option>
+                                  <option value="completed">✅ Tamamlandı</option>
+                                  <option value="arrived">🏥 Hasta Geldi (Klinik Girişi)</option>
+                                  <option value="no_show">❌ Gelmedi</option>
+                                  <option value="cancelled">🚫 İptal Edildi</option>
+                                </select>
+                              </div>
+
+                              <div>
+                                <label className="block text-[10px] font-bold text-[#86868B] uppercase tracking-wider mb-1">
+                                  Teyit Durumu
+                                </label>
+                                <select
+                                  value={manualConfirmation}
+                                  onChange={(e) => setManualConfirmation(e.target.value)}
+                                  className="w-full text-[12px] font-semibold bg-[#F5F5F7] border border-black/5 rounded-xl px-2.5 py-2 text-[#1D1D1F] focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                >
+                                  <option value="pending">⏳ Teyit Bekliyor</option>
+                                  <option value="confirmed">✅ Teyit Edildi</option>
+                                  <option value="declined">❌ Reddetti</option>
+                                  <option value="no_response">🚫 Cevap Yok</option>
+                                  <option value="none">⚪ Yok / Belirtilmemiş</option>
+                                </select>
+                              </div>
+
+                              <button
+                                onClick={handleManualUpdateStatus}
+                                disabled={isUpdatingManualStatus}
+                                className="col-span-2 mt-2 w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-[12px] font-bold bg-indigo-600 text-white hover:bg-indigo-700 active:scale-[0.98] transition-all cursor-pointer disabled:opacity-50 shadow-sm"
+                              >
+                                {isUpdatingManualStatus ? (
+                                  <>
+                                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                    Güncelleniyor...
+                                  </>
+                                ) : (
+                                  <>
+                                    <Check className="w-4 h-4" /> Manuel Durumları Uygula
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Randevu / Görev Bilgileri Özeti */}
+                        <div className="bg-white rounded-2xl border border-black/5 shadow-sm p-4 space-y-4">
+                          <p className="text-[11px] font-bold text-[#86868B] uppercase tracking-wider flex items-center gap-1.5 border-b border-black/[0.04] pb-2">
+                            <Calendar className="w-3.5 h-3.5 text-indigo-600" /> Takip & Randevu Bilgileri
+                          </p>
+
+                          <div className="grid grid-cols-2 gap-4 text-[11px] font-semibold">
+                            <div>
+                              <p className="text-[10px] text-[#86868B] uppercase tracking-wider mb-0.5 flex items-center gap-1">
+                                <Calendar className="w-3.5 h-3.5" /> Planlanan Tarih
+                              </p>
+                              <p className="text-[13px] font-bold text-[#1D1D1F]">
+                                {tMeta?.is_partial_date 
+                                  ? formatPartialDate(tMeta) 
+                                  : (activeT.dueAt ? new Date(activeT.dueAt).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/Istanbul' }) : '—')}
+                              </p>
+                            </div>
+
+                            <div>
+                              <p className="text-[10px] text-[#86868B] uppercase tracking-wider mb-0.5 flex items-center gap-1">
+                                <Clock className="w-3.5 h-3.5" /> Planlanan Saat (TR)
+                              </p>
+                              <p className="text-[13px] font-bold text-[#1D1D1F]">
+                                {tMeta?.is_partial_date && tMeta?.partial_precision !== 'full'
+                                  ? '—'
+                                  : (activeT.dueAt ? new Date(activeT.dueAt).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul' }) : '—')}
+                              </p>
+                            </div>
+
+                            <div>
+                              <p className="text-[10px] text-[#86868B] uppercase tracking-wider mb-0.5 flex items-center gap-1">
+                                {isAppointment ? (appType === 'clinic_visit' ? <Building2 className="w-3.5 h-3.5" /> : <Phone className="w-3.5 h-3.5" />) : <FileText className="w-3.5 h-3.5" />} Takip Türü
+                              </p>
+                              <p className="text-[13px] font-bold text-[#1D1D1F]">
+                                {isAppointment ? (
+                                  appType === 'clinic_visit' ? '🏥 Klinik Randevusu' :
+                                  appType === 'phone_call' ? '📞 Telefon Görüşmesi' :
+                                  appType === 'pre_consultation' ? '📞 Ön Görüşme' :
+                                  appType === 'doctor_review' ? '🩺 Doktor İncelemesi' :
+                                  appType === 'report_followup' ? '📄 Rapor Takibi' :
+                                  '🗓️ Randevu Takibi'
+                                ) : (
+                                  `📋 ${activeT.title}`
+                                )}
+                              </p>
+                            </div>
+
+                            {isAppointment && (
+                              <div>
+                                <p className="text-[10px] text-[#86868B] uppercase tracking-wider mb-0.5 flex items-center gap-1">
+                                  <Zap className="w-3.5 h-3.5" /> Teyit Durumu
+                                </p>
+                                <p className="text-[13px] font-bold text-[#1D1D1F]">
+                                  {tMeta?.confirmation_status === 'confirmed' ? '✅ Teyitli' :
+                                   tMeta?.confirmation_status === 'declined' ? '❌ Reddetti' :
+                                   tMeta?.confirmation_status === 'no_response' ? '🚫 Cevap Yok' :
+                                   tMeta?.confirmation_status === 'not_required' ? '🟢 Teyit Gerekmiyor' :
+                                   '⏳ Teyit Bekliyor'}
+                                </p>
+                              </div>
+                            )}
+
+                            {activeT.description && (
+                              <div className="col-span-2 pt-2 border-t border-black/[0.04]">
+                                <p className="text-[10px] text-[#86868B] uppercase tracking-wider mb-1">Görüşme / Randevu Notu</p>
+                                <p className="text-[12px] text-[#1D1D1F] leading-relaxed">{activeT.description}</p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Saat & Lokasyon Kartı */}
+                        <div className="bg-white rounded-2xl border border-black/5 shadow-sm p-4 space-y-3">
+                          <p className="text-[11px] font-bold text-[#86868B] uppercase tracking-wider flex items-center gap-1.5 border-b border-black/[0.04] pb-2">
+                            <Globe className="w-3.5 h-3.5 text-indigo-600" /> Yerel Saat & Lokasyon
+                          </p>
+                          
+                          <div className="grid grid-cols-2 gap-3 text-xs font-semibold">
+                            <div>
+                              <p className="text-[10px] text-[#86868B] uppercase tracking-wider mb-0.5">Türkiye Saati (TR)</p>
+                              <p className="text-[13px] font-bold text-[#1D1D1F]">{data.turkeyTimeNow}</p>
+                            </div>
+                            {data.patientLocalTimeNow && (
+                              <div>
+                                <p className="text-[10px] text-[#86868B] uppercase tracking-wider mb-0.5">Hasta Lokal Saati</p>
+                                <p className="text-[13px] font-bold text-indigo-600 flex items-center gap-1">
+                                  {data.patientLocalTimeNow} 
+                                  <span className="text-[10px] text-[#86868B] font-medium">({data.patientTimezone})</span>
+                                  {(() => {
+                                    if (data.patientLocalTimeNow) {
+                                      const timeMatch = data.patientLocalTimeNow.match(/(\d{2}):(\d{2})/);
+                                      if (timeMatch) {
+                                        const hour = parseInt(timeMatch[1], 10);
+                                        if (hour >= 22 || hour < 8) return <span title="Hasta muhtemelen uyuyor"><Moon className="w-3.5 h-3.5 text-indigo-500 fill-indigo-500" /></span>;
+                                      }
+                                    }
+                                    return null;
+                                  })()}
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Teyit Hatırlatıcıları */}
+                        {childRems.length > 0 && (
+                          <div className="space-y-2">
+                            <p className="text-[11px] font-bold text-[#86868B] uppercase tracking-wider flex items-center gap-1.5 px-1 py-1.5">
+                              <Bell className="w-3.5 h-3.5 text-indigo-600" /> Teyit Hatırlatıcıları ({childRems.length})
+                            </p>
+                            
+                            {childRems.map(task => {
+                              const rMeta = safeJsonParse(task.metadata, {});
+                              const typeLabel = rMeta.reminder_type === '30_days_before' ? '30 Gün Önce Teyit' :
+                                                rMeta.reminder_type === '14_days_before' ? '14 Gün Önce Teyit' :
+                                                rMeta.reminder_type === '7_days_before' ? '7 Gün Önce Teyit' :
+                                                rMeta.reminder_type === '1_day_before' ? '1 Gün Önce Teyit' : 'Özel Hatırlatma';
+
+                              return (
+                                <div key={task.id} className="p-3 bg-white rounded-2xl border border-black/5 shadow-sm space-y-2.5">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-[12px] font-bold text-[#1D1D1F] flex items-center gap-1.5">
+                                      ⏰ {typeLabel}
+                                    </span>
+                                    <span className={`text-[9px] font-bold px-2 py-0.5 rounded border ${
+                                      task.status === 'pending'
+                                        ? 'bg-blue-50 text-blue-700 border-blue-200/50 animate-pulse'
+                                        : 'bg-green-50 text-green-700 border-green-200/50'
+                                    }`}>
+                                      {task.status === 'pending' ? 'Bekliyor' : 'Tamamlandı'}
+                                    </span>
+                                  </div>
+                                  
+                                  <div className="grid grid-cols-2 gap-2 text-[11px] text-[#86868B] font-semibold">
+                                    <div>🇹🇷 TR: {rMeta.operation_due_at_tr || '—'}</div>
+                                    <div>🌍 Yerel: {rMeta.patient_local_time || '—'}</div>
+                                  </div>
+
+                                  {rMeta.generated_draft && (
+                                    <div className="mt-2 p-2 bg-[#F5F5F7] rounded-xl border border-black/5 flex flex-col gap-1.5">
+                                      <p className="text-[10px] text-[#1D1D1F] italic font-bold">Hazır Mesaj Taslağı:</p>
+                                      <p className="text-[11px] text-[#1D1D1F] bg-white p-2 rounded-lg border border-black/5 whitespace-pre-wrap leading-relaxed">{rMeta.generated_draft}</p>
+                                      <button
+                                        onClick={() => {
+                                          navigator.clipboard.writeText(rMeta.generated_draft);
+                                          showAlert("Başarılı", "Taslak kopyalandı!");
+                                        }}
+                                        className="self-end flex items-center gap-1 text-[10px] font-bold text-indigo-600 hover:text-indigo-700 transition-colors cursor-pointer"
+                                      >
+                                        <Copy className="w-3 h-3" /> Taslağı Kopyala
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
                     );
                   })()}
 
-
-
-                  {/* Hızlı Not Ekle */}
-                  <div className="bg-white rounded-2xl border border-black/5 shadow-sm p-4 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[11px] font-bold text-[#86868B] uppercase tracking-wider flex items-center gap-1.5">
-                        <StickyNote className="w-3.5 h-3.5 text-indigo-600" /> Hızlı Not Ekle
+                  {/* Botu Yönlendir (Müdahale) Card */}
+                  <div className="bg-white rounded-2xl border border-black/5 shadow-sm p-4 space-y-3.5">
+                    {/* Header Status Row */}
+                    <div className="flex items-center justify-between pb-1 border-b border-black/[0.03]">
+                      <span className="text-[10px] font-bold text-[#86868B] uppercase tracking-wider flex items-center gap-1.5">
+                        <Bot className="w-3.5 h-3.5 text-indigo-600" /> Bota Müdahale & Aksiyon
                       </span>
-                    </div>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={noteText}
-                        onChange={(e) => setNoteText(e.target.value)}
-                        placeholder="Arama sonucu veya hasta hakkında hızlı not..."
-                        className="flex-1 px-3 py-2.5 bg-[#F5F5F7] rounded-xl text-xs font-semibold outline-none border border-transparent focus:border-indigo-500/25 focus:bg-white transition-all duration-200"
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && noteText.trim()) handleAddNote();
-                        }}
-                      />
-                      <button
-                        onClick={handleAddNote}
-                        disabled={!noteText.trim() || isSavingNote}
-                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold disabled:opacity-40 transition-colors"
-                      >
-                        {isSavingNote ? '...' : 'Ekle'}
-                      </button>
-                    </div>
-                    {/* Son 3 Not listesi */}
-                    {data.notes && data.notes.length > 0 && (
-                      <div className="pt-2 border-t border-black/5 space-y-1.5">
-                        {data.notes.slice(0, 3).map((note: any, idx: number) => (
-                          <div key={idx} className="flex gap-2 text-[11px] font-medium items-start">
-                            <span className="text-[#86868B] shrink-0 font-bold bg-black/[0.03] px-1.5 py-0.5 rounded text-[9px]">
-                              {note.created_at ? new Date(note.created_at).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short', timeZone: 'Europe/Istanbul' }) : '—'}
-                            </span>
-                            <span className="text-[#1D1D1F] leading-relaxed break-words">{note.text || note}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* TAB 1.5: RANDEVU & TEYİT */}
-              {activeTab === 'appointment' && activeTask && (
-                <div className="space-y-4 animate-in fade-in duration-200">
-                  
-                  {/* Randevu Sonuç Aksiyonları (Sadece açık veya bekleyen randevular için) */}
-                  {activeTask.status !== 'completed' && activeTask.status !== 'cancelled' && (
-                    <div className="bg-white rounded-2xl border border-black/5 shadow-sm p-4 space-y-3">
-                      <p className="text-[11px] font-bold text-[#86868B] uppercase tracking-wider flex items-center gap-1.5 border-b border-black/[0.04] pb-2">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-indigo-600 animate-pulse" /> Randevu Sonuç Aksiyonları
-                      </p>
-                      
-                      <div className="grid grid-cols-2 gap-2 pt-1">
-                        <button
-                          onClick={() => handleAppointmentAction('confirm')}
-                          disabled={!!actionLoading}
-                          className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-[12px] font-bold bg-green-50 text-green-700 border border-green-200/50 hover:bg-green-100 transition-all cursor-pointer disabled:opacity-50"
-                        >
-                          <CheckCircle2 className="w-4 h-4" /> Teyit Edildi
-                        </button>
-                        
-                        <button
-                          onClick={() => handleAppointmentAction('call_missed')}
-                          disabled={!!actionLoading}
-                          className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-[12px] font-bold bg-orange-50 text-orange-700 border border-orange-200/50 hover:bg-orange-100 transition-all cursor-pointer disabled:opacity-50"
-                        >
-                          <Phone className="w-4 h-4" /> Ulaşılamadı
-                        </button>
-                        
-                        {appointmentType === 'clinic_visit' && (
-                          <button
-                            onClick={() => handleAppointmentAction('arrived')}
-                            disabled={!!actionLoading}
-                            className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-[12px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/50 hover:bg-emerald-100 transition-all cursor-pointer disabled:opacity-50 col-span-2 shadow-sm"
-                          >
-                            <Building2 className="w-4 h-4" /> Hasta Geldi / Klinik Girişi
-                          </button>
-                        )}
-                        
-                        <button
-                          onClick={() => handleAppointmentAction('no_show')}
-                          disabled={!!actionLoading}
-                          className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-[12px] font-bold bg-red-50 text-red-700 border border-red-200/50 hover:bg-red-100 transition-all cursor-pointer disabled:opacity-50"
-                        >
-                          <X className="w-4 h-4" /> Gelmedi
-                        </button>
-                        
-                        <button
-                          onClick={() => handleAppointmentAction('cancel')}
-                          disabled={!!actionLoading}
-                          className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-[12px] font-bold bg-gray-50 text-gray-600 border border-gray-200/50 hover:bg-gray-100 transition-all cursor-pointer disabled:opacity-50"
-                        >
-                          <X className="w-4 h-4" /> İptal Et
-                        </button>
-                      </div>
-
-                      {actionSuccess && (
-                        <div className="flex items-center gap-2 p-2 bg-green-50 border border-green-200 text-green-700 text-[11px] font-bold rounded-lg shadow-sm">
-                          <CheckCircle2 className="w-3.5 h-3.5 text-green-600" /> {actionSuccess}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Manuel Durum ve Teyit Yönetimi (Süreci Başa Al) */}
-                  <div className="bg-white rounded-2xl border border-black/5 shadow-sm p-4 space-y-3">
-                    <p className="text-[11px] font-bold text-[#86868B] uppercase tracking-wider flex items-center gap-1.5 border-b border-black/[0.04] pb-2">
-                      <Edit3 className="w-3.5 h-3.5 text-indigo-600" /> Manuel Durum ve Teyit Yönetimi
-                    </p>
-                    
-                    <div className="grid grid-cols-2 gap-3 pt-1">
-                      <div>
-                        <label className="block text-[10px] font-bold text-[#86868B] uppercase tracking-wider mb-1">
-                          Randevu Durumu
-                        </label>
-                        <select
-                          value={manualStatus}
-                          onChange={(e) => setManualStatus(e.target.value)}
-                          className="w-full text-[12px] font-semibold bg-[#F5F5F7] border border-black/5 rounded-xl px-2.5 py-2 text-[#1D1D1F] focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                        >
-                          <option value="pending">⏳ Açık / Planlandı (Süreci Başa Al)</option>
-                          <option value="completed">✅ Tamamlandı</option>
-                          <option value="arrived">🏥 Hasta Geldi (Klinik Girişi)</option>
-                          <option value="no_show">❌ Gelmedi</option>
-                          <option value="cancelled">🚫 İptal Edildi</option>
-                        </select>
-                      </div>
-
-                      <div>
-                        <label className="block text-[10px] font-bold text-[#86868B] uppercase tracking-wider mb-1">
-                          Teyit Durumu
-                        </label>
-                        <select
-                          value={manualConfirmation}
-                          onChange={(e) => setManualConfirmation(e.target.value)}
-                          className="w-full text-[12px] font-semibold bg-[#F5F5F7] border border-black/5 rounded-xl px-2.5 py-2 text-[#1D1D1F] focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                        >
-                          <option value="pending">⏳ Teyit Bekliyor</option>
-                          <option value="confirmed">✅ Teyit Edildi</option>
-                          <option value="declined">❌ Reddetti</option>
-                          <option value="no_response">🚫 Cevap Yok</option>
-                          <option value="none">⚪ Yok / Belirtilmemiş</option>
-                        </select>
-                      </div>
-
-                      <button
-                        onClick={handleManualUpdateStatus}
-                        disabled={isUpdatingManualStatus}
-                        className="col-span-2 mt-2 w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-[12px] font-bold bg-indigo-600 text-white hover:bg-indigo-700 active:scale-[0.98] transition-all cursor-pointer disabled:opacity-50 shadow-sm"
-                      >
-                        {isUpdatingManualStatus ? (
-                          <>
-                            <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                            Güncelleniyor...
-                          </>
+                      {(() => {
+                        const lastMsgTime = data.lastIncomingMessageAt ? new Date(data.lastIncomingMessageAt).getTime() : 0;
+                        const timeDiff = Date.now() - lastMsgTime;
+                        const isSessionActive = lastMsgTime > 0 && timeDiff < 24 * 60 * 60 * 1000;
+                        const remainingHours = Math.max(0, Math.floor((24 * 60 * 60 * 1000 - timeDiff) / (1000 * 60 * 60)));
+                        return isSessionActive ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-full text-[9px] font-bold">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                            <span>Oturum Aktif ({remainingHours}s Kalan)</span>
+                          </span>
                         ) : (
-                          <>
-                            <Check className="w-4 h-4" /> Manuel Durumları Uygula
-                          </>
-                        )}
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-amber-50 text-amber-600 border border-amber-100 rounded-full text-[9px] font-bold">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                            <span>Oturum Kapalı</span>
+                          </span>
+                        );
+                      })()}
+                    </div>
+
+                    <div className="flex gap-3 pt-0.5">
+                      <button
+                        type="button"
+                        onClick={handleReachedAction}
+                        disabled={!!actionLoading}
+                        className="flex-1 flex items-center justify-center gap-2 px-3 py-3 bg-[#E8F8F0] hover:bg-[#D3F3E3] text-[#0F9D58] rounded-xl text-xs font-bold transition-all duration-200 disabled:opacity-50 border border-[#BDEFD4]"
+                      >
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>Arama Sonucu Ulaşıldı</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setIsBotInterventionExpanded(!isBotInterventionExpanded)}
+                        className={`flex-1 flex items-center justify-center gap-2 px-3 py-3 rounded-xl text-xs font-bold transition-all duration-200 border ${
+                          isBotInterventionExpanded 
+                            ? 'bg-indigo-700 text-white hover:bg-indigo-800 border-indigo-700 shadow-sm' 
+                            : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-600 border-indigo-150'
+                        }`}
+                      >
+                        <Zap className="w-4 h-4" />
+                        <span>Botu Yönlendir</span>
+                        <ChevronDown className={`w-4 h-4 ml-0.5 transition-transform duration-200 ${isBotInterventionExpanded ? 'rotate-180' : ''}`} />
                       </button>
                     </div>
-                  </div>
 
-                  {/* Randevu Bilgileri Özeti */}
-                  <div className="bg-white rounded-2xl border border-black/5 shadow-sm p-4 space-y-4">
-                    <p className="text-[11px] font-bold text-[#86868B] uppercase tracking-wider flex items-center gap-1.5 border-b border-black/[0.04] pb-2">
-                      <Calendar className="w-3.5 h-3.5 text-indigo-600" /> Randevu Bilgileri
-                    </p>
-
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <p className="text-[10px] font-semibold text-[#86868B] uppercase tracking-wider mb-0.5 flex items-center gap-1">
-                          <Calendar className="w-3.5 h-3.5" /> Randevu Tarihi
-                        </p>
-                        <p className="text-[13px] font-bold text-[#1D1D1F]">
-                          {activeTask.metadata?.is_partial_date 
-                            ? formatPartialDate(activeTask.metadata) 
-                            : (activeTask.dueAt ? new Date(activeTask.dueAt).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/Istanbul' }) : '—')}
-                        </p>
-                      </div>
-
-                      <div>
-                        <p className="text-[10px] font-semibold text-[#86868B] uppercase tracking-wider mb-0.5 flex items-center gap-1">
-                          <Clock className="w-3.5 h-3.5" /> Randevu Saati (TR)
-                        </p>
-                        <p className="text-[13px] font-bold text-[#1D1D1F]">
-                          {activeTask.metadata?.is_partial_date && activeTask.metadata?.partial_precision !== 'full'
-                            ? '—'
-                            : (activeTask.dueAt ? new Date(activeTask.dueAt).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul' }) : '—')}
-                        </p>
-                      </div>
-
-                      <div>
-                        <p className="text-[10px] font-semibold text-[#86868B] uppercase tracking-wider mb-0.5 flex items-center gap-1">
-                          {appointmentType === 'clinic_visit' ? <Building2 className="w-3.5 h-3.5" /> : <Phone className="w-3.5 h-3.5" />} Tür / Detay
-                        </p>
-                        <p className="text-[13px] font-bold text-[#1D1D1F]">
-                          {appointmentType === 'clinic_visit' ? '🏥 Klinik Randevusu' :
-                           appointmentType === 'phone_call' ? '📞 Telefon Görüşmesi' :
-                           appointmentType === 'pre_consultation' ? '📞 Ön Görüşme' :
-                           appointmentType === 'doctor_review' ? '🩺 Doktor İncelemesi' :
-                           appointmentType === 'report_followup' ? '📄 Rapor Takibi' :
-                           '🗓️ Randevu Takibi'}
-                        </p>
-                      </div>
-
-                      <div>
-                        <p className="text-[10px] font-semibold text-[#86868B] uppercase tracking-wider mb-0.5 flex items-center gap-1">
-                          <Zap className="w-3.5 h-3.5" /> Teyit Durumu
-                        </p>
-                        <p className="text-[13px] font-bold text-[#1D1D1F]">
-                          {meta?.confirmation_status === 'confirmed' ? '✅ Teyitli' :
-                           meta?.confirmation_status === 'declined' ? '❌ Reddetti' :
-                           meta?.confirmation_status === 'no_response' ? '🚫 Cevap Yok' :
-                           meta?.confirmation_status === 'not_required' ? '🟢 Teyit Gerekmiyor' :
-                           '⏳ Teyit Bekliyor'}
-                        </p>
-                      </div>
-
-                      {activeTask.description && (
-                        <div className="col-span-2 pt-2 border-t border-black/[0.04]">
-                          <p className="text-[10px] font-semibold text-[#86868B] uppercase tracking-wider mb-1">Görüşme / Randevu Notu</p>
-                          <p className="text-[12px] font-medium text-[#1D1D1F] leading-relaxed">{activeTask.description}</p>
+                    {isBotInterventionExpanded && (
+                      <div className="space-y-3.5 animate-in fade-in slide-in-from-top-1 duration-200 pt-2 border-t border-black/[0.03]">
+                        <div className="relative mb-3">
+                          <span className="block text-[10px] font-bold text-[#86868B] uppercase tracking-wider mb-2">Hazır Taktik Seç</span>
+                          <button
+                            type="button"
+                            onClick={() => setIsPresetDropdownOpen(!isPresetDropdownOpen)}
+                            className="w-full flex items-center justify-between p-3 bg-[#F5F5F7]/60 hover:bg-[#F5F5F7] border border-black/5 rounded-xl text-left transition-all duration-200"
+                          >
+                            <span className="font-bold text-[11px] text-[#1D1D1F]">
+                              {botDirectiveText 
+                                ? DIRECTIVE_PRESETS.find(p => p.text === botDirectiveText)?.label || "Özel Talimat Yazılıyor..." 
+                                : "Hazır bir taktik/talimat paketi seçin..."}
+                            </span>
+                            <ChevronDown className={`w-4 h-4 text-[#86868B] transition-transform duration-200 ${isPresetDropdownOpen ? 'rotate-180' : ''}`} />
+                          </button>
+                          
+                          {isPresetDropdownOpen && (
+                            <div className="absolute z-10 w-full mt-1 bg-white border border-black/5 shadow-lg rounded-xl overflow-hidden py-1 animate-in fade-in slide-in-from-top-1 duration-200">
+                              {DIRECTIVE_PRESETS.map((preset) => {
+                                const isSelected = botDirectiveText === preset.text;
+                                return (
+                                  <button
+                                    key={preset.id}
+                                    type="button"
+                                    onClick={() => {
+                                      setBotDirectiveText(preset.text);
+                                      setIsPresetDropdownOpen(false);
+                                    }}
+                                    className={`w-full p-3 text-left transition-all duration-200 hover:bg-[#F5F5F7] ${
+                                      isSelected ? 'bg-indigo-50/50 text-indigo-900' : 'text-[#1D1D1F]'
+                                    }`}
+                                  >
+                                    <div className="font-bold text-[11px]">{preset.label}</div>
+                                    <div className="text-[10px] text-[#86868B] font-semibold leading-normal mt-0.5">{preset.text}</div>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
                         </div>
-                      )}
-                    </div>
-                  </div>
 
-                  {/* Saat & Lokasyon Kartı */}
-                  <div className="bg-white rounded-2xl border border-black/5 shadow-sm p-4 space-y-3">
-                    <p className="text-[11px] font-bold text-[#86868B] uppercase tracking-wider flex items-center gap-1.5 border-b border-black/[0.04] pb-2">
-                      <Globe className="w-3.5 h-3.5 text-indigo-600" /> Saat & Lokasyon
-                    </p>
-                    
-                    <div className="grid grid-cols-2 gap-3 text-xs font-semibold">
-                      <div>
-                        <p className="text-[10px] font-semibold text-[#86868B] uppercase tracking-wider mb-0.5">Türkiye Saati (TR)</p>
-                        <p className="text-[13px] font-bold text-[#1D1D1F]">{data.turkeyTimeNow}</p>
-                      </div>
-                      {data.patientLocalTimeNow && (
                         <div>
-                          <p className="text-[10px] font-semibold text-[#86868B] uppercase tracking-wider mb-0.5">Hasta Lokal Saati</p>
-                          <p className="text-[13px] font-bold text-indigo-600 flex items-center gap-1">
-                            {data.patientLocalTimeNow} 
-                            <span className="text-[10px] text-[#86868B] font-medium">({data.patientTimezone})</span>
-                            {(() => {
-                              if (data.patientLocalTimeNow) {
-                                const timeMatch = data.patientLocalTimeNow.match(/(\d{2}):(\d{2})/);
-                                if (timeMatch) {
-                                  const hour = parseInt(timeMatch[1], 10);
-                                  if (hour >= 22 || hour < 8) return <span title="Hasta muhtemelen uyuyor"><Moon className="w-3.5 h-3.5 text-indigo-500 fill-indigo-500" /></span>;
-                                }
-                              }
-                              return null;
-                            })()}
-                          </p>
+                          <label className="block text-[10px] font-bold text-[#86868B] uppercase tracking-wider mb-1.5 flex items-center justify-between">
+                            <span>Özel Talimat / Taktik Detayı</span>
+                            {botDirectiveText && (
+                              <button 
+                                type="button"
+                                onClick={() => setBotDirectiveText("")}
+                                className="text-indigo-600 hover:text-indigo-700 font-bold lowercase text-[9px]"
+                              >
+                                temizle
+                              </button>
+                            )}
+                          </label>
+                          <textarea
+                            value={botDirectiveText}
+                            onChange={(e) => setBotDirectiveText(e.target.value)}
+                            className="w-full min-h-[90px] px-3.5 py-3 bg-[#F5F5F7] hover:bg-white focus:bg-white rounded-xl text-xs font-semibold outline-none border border-transparent focus:border-indigo-500/25 ring-2 ring-indigo-500/5 focus:ring-indigo-500/15 transition-all duration-200 resize-none leading-relaxed text-[#1D1D1F]"
+                            placeholder="Bota verilecek özel takip/ikna talimatı..."
+                          />
                         </div>
-                      )}
-                    </div>
 
-                    {data.timezoneNeedsConfirmation && (
-                      <div className="flex items-center gap-1.5 p-2 bg-amber-50 border border-amber-200 text-amber-700 text-[10px] font-semibold rounded-xl">
-                        <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                        <span>Hasta yerel saeti teyitsiz. Aramadan önce teyit önerilir.</span>
+                        {activeBotTask?.metadata?.active_bot_directive && (
+                          <div className="px-3.5 py-2.5 bg-emerald-50/60 border border-emerald-100 rounded-xl flex items-start gap-2 text-[11px] text-emerald-800 font-semibold leading-relaxed animate-in fade-in duration-200">
+                            <span className="text-emerald-600 font-bold shrink-0">🟢 Aktif Bot Talimatı:</span>
+                            <span>{activeBotTask.metadata.active_bot_directive}</span>
+                          </div>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={handleSaveBotDirective}
+                          disabled={isSavingDirective || !botDirectiveText.trim()}
+                          className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all duration-200 flex items-center justify-center gap-1.5 disabled:opacity-40"
+                        >
+                          {isSavingDirective ? (
+                            <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          ) : (
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                          )}
+                          <span>Talimatı Bota İlet & Devam Et</span>
+                        </button>
                       </div>
                     )}
                   </div>
-
-                  {/* Teyit Hatırlatıcıları (Sadece Klinik Randevularında varsalar listelenir) */}
-                  {reminders.length > 0 && (
-                    <div className="space-y-2">
-                      <p className="text-[11px] font-bold text-[#86868B] uppercase tracking-wider flex items-center gap-1.5 px-1 py-1.5">
-                        <Bell className="w-3.5 h-3.5 text-indigo-600" /> Teyit Hatırlatıcıları ({reminders.length})
-                      </p>
-                      
-                      {reminders.map(task => {
-                        const rMeta = safeJsonParse(task.metadata, {});
-                        const typeLabel = rMeta.reminder_type === '30_days_before' ? '30 Gün Önce Teyit' :
-                                          rMeta.reminder_type === '14_days_before' ? '14 Gün Önce Teyit' :
-                                          rMeta.reminder_type === '7_days_before' ? '7 Gün Önce Teyit' :
-                                          rMeta.reminder_type === '1_day_before' ? '1 Gün Önce Teyit' : 'Özel Hatırlatma';
-
-                        return (
-                          <div key={task.id} className="p-3 bg-white rounded-2xl border border-black/5 shadow-sm space-y-2.5">
-                            <div className="flex items-center justify-between">
-                              <span className="text-[12px] font-bold text-[#1D1D1F] flex items-center gap-1.5">
-                                ⏰ {typeLabel}
-                              </span>
-                              <span className={`text-[9px] font-bold px-2 py-0.5 rounded border ${
-                                task.status === 'pending'
-                                  ? 'bg-blue-50 text-blue-700 border-blue-200/50 animate-pulse'
-                                  : 'bg-green-50 text-green-700 border-green-200/50'
-                              }`}>
-                                {task.status === 'pending' ? 'Bekliyor' : 'Tamamlandı'}
-                              </span>
-                            </div>
-                            
-                            <div className="grid grid-cols-2 gap-2 text-[11px] text-[#86868B] font-semibold">
-                              <div>🇹🇷 TR: {rMeta.operation_due_at_tr || '—'}</div>
-                              <div>🌍 Yerel: {rMeta.patient_local_time || '—'}</div>
-                            </div>
-
-                            {rMeta.generated_draft && (
-                              <div className="mt-2 p-2 bg-[#F5F5F7] rounded-xl border border-black/5 flex flex-col gap-1.5">
-                                <p className="text-[10px] text-[#1D1D1F] italic font-bold">Hazır Mesaj Taslağı:</p>
-                                <p className="text-[11px] text-[#1D1D1F] bg-white p-2 rounded-lg border border-black/5 whitespace-pre-wrap leading-relaxed">{rMeta.generated_draft}</p>
-                                <button
-                                  onClick={() => {
-                                    navigator.clipboard.writeText(rMeta.generated_draft);
-                                    showAlert("Başarılı", "Taslak kopyalandı!");
-                                  }}
-                                  className="self-end flex items-center gap-1 text-[10px] font-bold text-indigo-600 hover:text-indigo-700 transition-colors cursor-pointer"
-                                >
-                                  <Copy className="w-3 h-3" /> Taslağı Kopyala
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-
                 </div>
               )}
 
-              {/* TAB 2: PLANLA */}
-              {activeTab === 'plan' && (
+              {/* TAB 2: TAKİPLER & NOTLAR */}
+              {activeTab === 'history' && (
                 <div className="space-y-4 animate-in fade-in duration-200">
                   
-                  {/* Randevu ve Görev Planla (FORM AT THE TOP) */}
+                  {/* Randevu ve Görev Planla Formu */}
                   <div className="bg-white rounded-2xl border border-black/5 shadow-sm p-4 space-y-4">
                     <span className="text-[11px] font-bold text-[#86868B] uppercase tracking-wider flex items-center gap-1.5">
                       <Zap className="w-3.5 h-3.5 text-indigo-600" /> Randevu & Görev Planla
@@ -1624,7 +1611,6 @@ export default function PatientDetailDrawer({
                     )}
 
                     <div className="space-y-3">
-                      {/* Tür Segmented Group */}
                       <div>
                         <label className="block text-[10px] font-bold text-[#86868B] uppercase tracking-wider mb-1.5">Görev/Randevu Türü</label>
                         <div className="grid grid-cols-2 gap-1 bg-[#F5F5F7] p-1 rounded-xl">
@@ -1649,180 +1635,8 @@ export default function PatientDetailDrawer({
                         </div>
                       </div>
 
-                      {/* Hızlı Planlama Şablonları (Sadece Telefon Görüşmesi için) */}
                       {planType === 'phone_call' ? (
-                        <div>
-                          <label className="block text-[10px] font-bold text-[#86868B] uppercase tracking-wider mb-1.5">Hızlı Planlama Şablonları</label>
-                          <div className="flex gap-1.5 flex-wrap">
-                            {(() => {
-                              const presets = [
-                                { label: 'Bugün (+2s)', getValue: () => {
-                                  const d = new Date();
-                                  d.setHours(d.getHours() + 2);
-                                  return { date: d.toISOString().split('T')[0], time: String(d.getHours()).padStart(2, '0') + ':00' };
-                                }},
-                                { label: 'Yarın (10:00)', getValue: () => {
-                                  const d = new Date();
-                                  d.setDate(d.getDate() + 1);
-                                  return { date: d.toISOString().split('T')[0], time: '10:00' };
-                                }},
-                                { label: '3 Gün Sonra', getValue: () => {
-                                  const d = new Date();
-                                  d.setDate(d.getDate() + 3);
-                                  return { date: d.toISOString().split('T')[0], time: '14:00' };
-                                }},
-                                { label: '5 Gün Sonra', getValue: () => {
-                                  const d = new Date();
-                                  d.setDate(d.getDate() + 5);
-                                  return { date: d.toISOString().split('T')[0], time: '11:00' };
-                                }}
-                              ];
-
-                              const matchedPreset = presets.find(p => {
-                                const vals = p.getValue();
-                                return planDate === vals.date && planTime === vals.time;
-                              });
-
-                              const isCustomActive = !matchedPreset && planDate && planTime;
-
-                              return (
-                                <>
-                                  {presets.map(p => {
-                                    const vals = p.getValue();
-                                    const isActive = planDate === vals.date && planTime === vals.time;
-                                    return (
-                                      <button
-                                        key={p.label}
-                                        type="button"
-                                        onClick={() => {
-                                          setPlanDate(vals.date);
-                                          setPlanTime(vals.time);
-                                        }}
-                                        className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold border transition-all duration-200 ${
-                                          isActive 
-                                            ? 'bg-indigo-50 border-indigo-200 text-indigo-700 shadow-sm'
-                                            : 'bg-white hover:bg-[#F5F5F7] border-black/5 text-[#86868B] hover:text-[#1D1D1F]'
-                                        }`}
-                                      >
-                                        {p.label}
-                                      </button>
-                                    );
-                                  })}
-
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const now = new Date();
-                                      const year = now.getFullYear();
-                                      const month = String(now.getMonth() + 1).padStart(2, '0');
-                                      const day = String(now.getDate()).padStart(2, '0');
-                                      const hours = String(now.getHours()).padStart(2, '0');
-                                      const mins = String(now.getMinutes()).padStart(2, '0');
-                                      setPlanDate(`${year}-${month}-${day}`);
-                                      setPlanTime(`${hours}:${mins}`);
-                                    }}
-                                    className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold border transition-all duration-200 ${
-                                      isCustomActive 
-                                        ? 'bg-indigo-50 border-indigo-200 text-indigo-700 shadow-sm'
-                                        : 'bg-white hover:bg-[#F5F5F7] border-black/5 text-[#86868B] hover:text-[#1D1D1F]'
-                                    }`}
-                                  >
-                                    ⏱️ Özel Zaman
-                                  </button>
-                                </>
-                              );
-                            })()}
-                          </div>
-                        </div>
-                      ) : (
-                        /* Klinik Randevusu için 4 Aşamalı Teyit Akışı İnteraktif Canlı Ön İzleme */
-                        planYear && planMonth && (
-                          <div className="bg-white rounded-xl border border-black/5 p-3 space-y-2.5 animate-in fade-in duration-200">
-                            <div className="flex items-center justify-between">
-                              <span className="text-[9.5px] font-bold text-[#86868B] uppercase tracking-wider block">
-                                🔔 Teyit & Hatırlatıcı Takvimi (Onaylamak için tıklayın)
-                              </span>
-                              <span className="text-[8px] font-extrabold text-indigo-600 bg-indigo-50 border border-indigo-100 rounded-full px-1.5 py-0.2 uppercase tracking-wide">
-                                Tıkla-Onayla
-                              </span>
-                            </div>
-                            
-                            {(() => {
-                              try {
-                                const day = planDay || '01';
-                                const time = planTimeCv || '10:00';
-                                const baseDate = new Date(`${planYear}-${planMonth}-${day}T${time}:00`);
-                                if (isNaN(baseDate.getTime())) return <p className="text-[10px] text-red-500">Geçersiz tarih</p>;
-
-                                const offsets = [
-                                  { label: '1 Ay Kala', days: 30, key: '30_days_before' },
-                                  { label: '2 Hafta Kala', days: 14, key: '14_days_before' },
-                                  { label: '1 Hafta Kala', days: 7, key: '7_days_before' },
-                                  { label: '1 Gün Önce', days: 1, key: '1_day_before' },
-                                ];
-
-                                return (
-                                  <div className="grid grid-cols-4 gap-2 relative pt-2">
-                                    {/* Horizontal connector line */}
-                                    <div className="absolute left-[12%] right-[12%] top-[20px] h-0.5 bg-indigo-100" />
-                                    
-                                    {offsets.map((o, idx) => {
-                                      const remDate = new Date(baseDate.getTime());
-                                      remDate.setDate(remDate.getDate() - o.days);
-                                      remDate.setHours(10, 0, 0, 0);
-
-                                      const isPast = remDate.getTime() <= Date.now();
-                                      const dateStr = remDate.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' });
-                                      const isApproved = approvedReminders[o.key];
-
-                                      return (
-                                        <div key={o.label} className="flex flex-col items-center text-center relative z-10">
-                                          <button 
-                                            type="button"
-                                            disabled={isPast}
-                                            onClick={() => {
-                                              setApprovedReminders(prev => ({
-                                                ...prev,
-                                                [o.key]: !prev[o.key]
-                                              }));
-                                            }}
-                                            className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-extrabold transition-all duration-300 ${
-                                              isPast 
-                                                ? 'bg-[#F5F5F7] border border-black/10 text-[#86868B] cursor-not-allowed' 
-                                                : isApproved
-                                                  ? 'bg-indigo-600 border-2 border-indigo-600 text-white shadow-md shadow-indigo-600/20 hover:scale-105 active:scale-95'
-                                                  : 'bg-white border-2 border-[#86868B]/30 text-[#86868B] hover:border-indigo-400 hover:text-indigo-500 hover:scale-105 active:scale-95'
-                                            }`} 
-                                            title={isPast ? 'Süreç geçmişte kalmıştır.' : 'Teyit hatırlatıcısını onaylamak veya iptal etmek için tıklayın.'}
-                                          >
-                                            {isPast ? '—' : isApproved ? '✓' : '+'}
-                                          </button>
-                                          <span className={`text-[9px] font-bold mt-1.5 block truncate w-full px-0.5 ${
-                                            isPast ? 'text-[#86868B] opacity-60' : isApproved ? 'text-indigo-600 font-bold' : 'text-[#1D1D1F]'
-                                          }`}>
-                                            {o.label}
-                                          </span>
-                                          <span className={`text-[8.5px] font-bold mt-0.5 ${
-                                            isPast ? 'text-[#86868B] opacity-50' : isApproved ? 'text-indigo-600 font-extrabold' : 'text-[#86868B]'
-                                          }`}>
-                                            {isPast ? 'Kurulmayacak' : isApproved ? `${dateStr} (Onaylı)` : `${dateStr} (Pasif)`}
-                                          </span>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                );
-                              } catch (_) {
-                                return null;
-                              }
-                            })()}
-                          </div>
-                        )
-                      )}
-
-                      {/* Date & Time Input / Dropdowns Grid */}
-                      {planType === 'phone_call' ? (
-                        <div className="animate-in fade-in duration-200">
+                        <div className="grid grid-cols-2 gap-3 animate-in fade-in duration-200">
                           <div>
                             <label className="block text-[10px] font-bold text-[#86868B] uppercase tracking-wider mb-1">Tarih</label>
                             <input 
@@ -1833,10 +1647,22 @@ export default function PatientDetailDrawer({
                               className="w-full px-3 py-2 bg-[#F5F5F7] rounded-xl text-xs font-semibold outline-none border border-transparent focus:border-indigo-500/25 focus:bg-white transition-all duration-200" 
                             />
                           </div>
+                          <div>
+                            <label className="block text-[10px] font-bold text-[#86868B] uppercase tracking-wider mb-1">Saat (TR)</label>
+                            <select
+                              value={planTime}
+                              onChange={e => setPlanTime(e.target.value)}
+                              className="w-full px-3 py-2 bg-[#F5F5F7] rounded-xl text-xs font-semibold outline-none border border-transparent focus:border-indigo-500/25 focus:bg-white transition-all duration-200 appearance-none"
+                            >
+                              {timesOptions.map(t => (
+                                <option key={t} value={t}>{t}</option>
+                              ))}
+                            </select>
+                          </div>
                         </div>
                       ) : (
                         <div className="space-y-3 animate-in fade-in duration-200">
-                          <div className="grid grid-cols-2 gap-3">
+                          <div className="grid grid-cols-3 gap-2">
                             <div>
                               <label className="block text-[10px] font-bold text-[#86868B] uppercase tracking-wider mb-1">Yıl</label>
                               <select
@@ -1861,24 +1687,36 @@ export default function PatientDetailDrawer({
                                 ))}
                               </select>
                             </div>
+                            <div>
+                              <label className="block text-[10px] font-bold text-[#86868B] uppercase tracking-wider mb-1">Gün</label>
+                              <select
+                                value={planDay}
+                                onChange={e => setPlanDay(e.target.value)}
+                                className="w-full px-3 py-2 bg-[#F5F5F7] rounded-xl text-xs font-semibold outline-none border border-transparent focus:border-indigo-500/25 focus:bg-white transition-all duration-200 appearance-none"
+                              >
+                                <option value="">Belirsiz (Ay Geneli)</option>
+                                {daysOptions.map(d => (
+                                  <option key={d} value={d}>{d}</option>
+                                ))}
+                              </select>
+                            </div>
                           </div>
                           <div>
-                            <label className="block text-[10px] font-bold text-[#86868B] uppercase tracking-wider mb-1">Gün (İsteğe Bağlı)</label>
+                            <label className="block text-[10px] font-bold text-[#86868B] uppercase tracking-wider mb-1">Saat (İsteğe Bağlı)</label>
                             <select
-                              value={planDay}
-                              onChange={e => setPlanDay(e.target.value)}
+                              value={planTimeCv}
+                              onChange={e => setPlanTimeCv(e.target.value)}
                               className="w-full px-3 py-2 bg-[#F5F5F7] rounded-xl text-xs font-semibold outline-none border border-transparent focus:border-indigo-500/25 focus:bg-white transition-all duration-200 appearance-none"
                             >
-                              <option value="">Seçilmedi (Ay Geneli)</option>
-                              {daysOptions.map(d => (
-                                <option key={d} value={d}>{d}</option>
+                              <option value="">Saat Belirtilmedi</option>
+                              {timesOptions.map(t => (
+                                <option key={t} value={t}>{t}</option>
                               ))}
                             </select>
                           </div>
                         </div>
                       )}
 
-                      {/* Görev Notu */}
                       <div>
                         <label className="block text-[10px] font-bold text-[#86868B] uppercase tracking-wider mb-1">Görev Notu</label>
                         <input 
@@ -1901,17 +1739,16 @@ export default function PatientDetailDrawer({
                     </div>
                   </div>
 
-                  {/* Planlanmış Görevler & Hatırlatıcılar (LIST AT THE BOTTOM) */}
+                  {/* Planlanmış Görevler Listesi */}
                   {(() => {
-                    const activeTasks = data.tasks.filter(t => {
+                    const activeTasks = data.tasks.filter((t: any) => {
                       const tMeta = safeJsonParse(t.metadata, {});
                       return t.taskType !== 'appointment_reminder' && 
-                        !tMeta.parent_task_id && 
-                        tMeta.is_primary !== false;
+                             !tMeta.parent_task_id && 
+                             tMeta.is_primary !== false;
                     });
-                    const hasTasks = activeTasks.length > 0;
 
-                    if (!hasTasks) return null;
+                    if (activeTasks.length === 0) return null;
 
                     return (
                       <div className="bg-white rounded-2xl border border-black/5 shadow-sm p-4 space-y-3">
@@ -1919,11 +1756,11 @@ export default function PatientDetailDrawer({
                           <Calendar className="w-3.5 h-3.5 text-indigo-600" /> Planlanmış Görevler & Hatırlatıcılar
                         </span>
                         
-                        <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1">
-                          {activeTasks.map(task => {
+                        <div className="space-y-3 max-h-[350px] overflow-y-auto pr-1">
+                          {activeTasks.map((task: any) => {
                             const taskMeta = safeJsonParse(task.metadata, {});
                             const isEditing = editingTaskId === task.id;
-                            const childTasks = data.tasks.filter(r => {
+                            const childTasks = data.tasks.filter((r: any) => {
                               const rMeta = safeJsonParse(r.metadata, {});
                               return rMeta.parent_task_id === task.id;
                             });
@@ -1933,7 +1770,7 @@ export default function PatientDetailDrawer({
                               return (
                                 <div key={task.id} className="p-3.5 bg-indigo-50/50 rounded-xl border border-indigo-150 space-y-3 text-[11px] animate-in fade-in duration-200">
                                   <div className="font-bold text-[#1D1D1F] flex items-center justify-between">
-                                    <span className="flex items-center gap-1">✏️ {isClinicVisit ? 'Randevuyu Düzenle' : 'Görevi Düzenle'}: <strong className="text-indigo-900">{task.title}</strong></span>
+                                    <span className="flex items-center gap-1">✏️ Düzenle: <strong className="text-indigo-900">{task.title}</strong></span>
                                     <button 
                                       type="button" 
                                       onClick={() => setEditingTaskId(null)} 
@@ -1944,7 +1781,7 @@ export default function PatientDetailDrawer({
                                   </div>
                                   
                                   {!isClinicVisit ? (
-                                    <div className="animate-in fade-in duration-200">
+                                    <div className="grid grid-cols-2 gap-2">
                                       <div>
                                         <label className="block text-[9px] font-bold text-[#86868B] uppercase tracking-wider mb-1">Tarih</label>
                                         <input 
@@ -1954,16 +1791,28 @@ export default function PatientDetailDrawer({
                                           className="w-full px-2.5 py-1.5 bg-white rounded-lg text-xs font-semibold outline-none border border-black/10 focus:border-indigo-500 transition-all duration-200" 
                                         />
                                       </div>
+                                      <div>
+                                        <label className="block text-[9px] font-bold text-[#86868B] uppercase tracking-wider mb-1">Saat</label>
+                                        <select
+                                          value={editTaskTime}
+                                          onChange={e => setEditTaskTime(e.target.value)}
+                                          className="w-full px-2.5 py-1.5 bg-white rounded-lg text-xs font-semibold outline-none border border-black/10 focus:border-indigo-500 transition-all duration-200"
+                                        >
+                                          {timesOptions.map(t => (
+                                            <option key={t} value={t}>{t}</option>
+                                          ))}
+                                        </select>
+                                      </div>
                                     </div>
                                   ) : (
                                     <div className="space-y-2">
-                                      <div className="grid grid-cols-2 gap-2">
+                                      <div className="grid grid-cols-3 gap-2">
                                         <div>
                                           <label className="block text-[9px] font-bold text-[#86868B] uppercase tracking-wider mb-1">Yıl</label>
                                           <select
                                             value={editTaskYear}
                                             onChange={e => setEditTaskYear(e.target.value)}
-                                            className="w-full px-2.5 py-1.5 bg-white rounded-lg text-xs font-semibold outline-none border border-black/10 focus:border-indigo-500 transition-all duration-200 appearance-none"
+                                            className="w-full px-2.5 py-1.5 bg-white rounded-lg text-xs font-semibold outline-none border border-black/10 focus:border-indigo-500"
                                           >
                                             {yearsOptions.map(y => (
                                               <option key={y} value={y}>{y}</option>
@@ -1975,103 +1824,26 @@ export default function PatientDetailDrawer({
                                           <select
                                             value={editTaskMonth}
                                             onChange={e => setEditTaskMonth(e.target.value)}
-                                            className="w-full px-2.5 py-1.5 bg-white rounded-lg text-xs font-semibold outline-none border border-black/10 focus:border-indigo-500 transition-all duration-200 appearance-none"
+                                            className="w-full px-2.5 py-1.5 bg-white rounded-lg text-xs font-semibold outline-none border border-black/10 focus:border-indigo-500"
                                           >
                                             {monthsOptions.map((m: any) => (
                                               <option key={m.value} value={m.value}>{m.label}</option>
                                             ))}
                                           </select>
                                         </div>
-                                      </div>
-                                      <div>
-                                        <label className="block text-[9px] font-bold text-[#86868B] uppercase tracking-wider mb-1">Gün (İsteğe Bağlı)</label>
-                                        <select
-                                          value={editTaskDay}
-                                          onChange={e => setEditTaskDay(e.target.value)}
-                                          className="w-full px-2.5 py-1.5 bg-white rounded-lg text-xs font-semibold outline-none border border-black/10 focus:border-indigo-500 transition-all duration-200 appearance-none"
-                                        >
-                                          <option value="">Seçilmedi (Ay Geneli)</option>
-                                          {daysOptions.map(d => (
-                                            <option key={d} value={d}>{d}</option>
-                                          ))}
-                                        </select>
-                                      </div>
-
-                                      {/* Teyit & Hatırlatıcı Akışını Düzenle */}
-                                      <div className="bg-white rounded-xl border border-black/5 p-3 space-y-2.5">
-                                        <div className="flex items-center justify-between">
-                                          <span className="text-[9.5px] font-bold text-[#86868B] uppercase tracking-wider block">
-                                            🔔 Teyit & Hatırlatıcı Akışını Düzenle (Tıklayarak Onaylayın)
-                                          </span>
+                                        <div>
+                                          <label className="block text-[9px] font-bold text-[#86868B] uppercase tracking-wider mb-1">Gün</label>
+                                          <select
+                                            value={editTaskDay}
+                                            onChange={e => setEditTaskDay(e.target.value)}
+                                            className="w-full px-2.5 py-1.5 bg-white rounded-lg text-xs font-semibold outline-none border border-black/10 focus:border-indigo-500"
+                                          >
+                                            <option value="">Seçilmedi</option>
+                                            {daysOptions.map(d => (
+                                              <option key={d} value={d}>{d}</option>
+                                            ))}
+                                          </select>
                                         </div>
-                                        {(() => {
-                                          try {
-                                            if (!editTaskYear || !editTaskMonth) return null;
-                                            const day = editTaskDay || '01';
-                                            const time = editTaskTimeCv || '10:00';
-                                            const baseDate = new Date(`${editTaskYear}-${editTaskMonth}-${day}T${time}:00`);
-                                            if (isNaN(baseDate.getTime())) return null;
-
-                                            const offsets = [
-                                              { label: '1 Ay Kala', days: 30, key: '30_days_before' },
-                                              { label: '2 Hafta Kala', days: 14, key: '14_days_before' },
-                                              { label: '1 Hafta Kala', days: 7, key: '7_days_before' },
-                                              { label: '1 Gün Önce', days: 1, key: '1_day_before' },
-                                            ];
-
-                                            return (
-                                              <div className="grid grid-cols-4 gap-2 relative pt-2">
-                                                <div className="absolute left-[12%] right-[12%] top-[20px] h-0.5 bg-indigo-100" />
-                                                {offsets.map((o, idx) => {
-                                                  const remDate = new Date(baseDate.getTime());
-                                                  remDate.setDate(remDate.getDate() - o.days);
-                                                  remDate.setHours(10, 0, 0, 0);
-
-                                                  const isPast = remDate.getTime() <= Date.now();
-                                                  const dateStr = remDate.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' });
-                                                  const isApproved = editApprovedReminders[o.key];
-
-                                                  return (
-                                                    <div key={o.label} className="flex flex-col items-center text-center relative z-10">
-                                                      <button 
-                                                        type="button"
-                                                        disabled={isPast}
-                                                        onClick={() => {
-                                                          setEditApprovedReminders(prev => ({
-                                                            ...prev,
-                                                            [o.key]: !prev[o.key]
-                                                          }));
-                                                        }}
-                                                        className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-extrabold transition-all duration-300 ${
-                                                          isPast 
-                                                            ? 'bg-[#F5F5F7] border border-black/10 text-[#86868B] cursor-not-allowed' 
-                                                            : isApproved
-                                                              ? 'bg-indigo-600 border-2 border-indigo-600 text-white shadow-md shadow-indigo-600/20 hover:scale-105 active:scale-95'
-                                                              : 'bg-white border-2 border-[#86868B]/30 text-[#86868B] hover:border-indigo-400 hover:text-indigo-500 hover:scale-105 active:scale-95'
-                                                        }`}
-                                                        title={isPast ? 'Süreç geçmişte kalmıştır.' : 'Teyit durumunu onaylamak için tıklayın.'}
-                                                      >
-                                                        {isPast ? '—' : isApproved ? '✓' : '+'}
-                                                      </button>
-                                                      <span className={`text-[9px] font-bold mt-1.5 block truncate w-full px-0.5 ${
-                                                        isPast ? 'text-[#86868B] opacity-60' : isApproved ? 'text-indigo-600 font-bold' : 'text-[#1D1D1F]'
-                                                      }`}>
-                                                        {o.label}
-                                                      </span>
-                                                      <span className={`text-[8.5px] font-bold mt-0.5 ${
-                                                        isPast ? 'text-[#86868B] opacity-50' : isApproved ? 'text-indigo-600 font-extrabold' : 'text-[#86868B]'
-                                                      }`}>
-                                                        {isPast ? 'Kurulmayacak' : isApproved ? `${dateStr} (Onaylı)` : `${dateStr} (Pasif)`}
-                                                      </span>
-                                                    </div>
-                                                  );
-                                                })}
-                                              </div>
-                                            );
-                                          } catch (_) {
-                                            return null;
-                                          }
-                                        })()}
                                       </div>
                                     </div>
                                   )}
@@ -2085,19 +1857,18 @@ export default function PatientDetailDrawer({
                                         setEditTaskNote(e.target.value);
                                         setEditTaskDescription(e.target.value);
                                       }} 
-                                      placeholder="Eklemek istediğiniz özel not veya detay..." 
-                                      className="w-full px-2.5 py-1.5 bg-white rounded-lg text-xs font-semibold outline-none border border-black/10 focus:border-indigo-500 transition-all duration-200" 
+                                      className="w-full px-2.5 py-1.5 bg-white rounded-lg text-xs font-semibold outline-none border border-black/10 focus:border-indigo-500" 
                                     />
                                   </div>
 
                                   <button 
                                     type="button" 
                                     onClick={() => handleUpdateTask(task.id)}
-                                    disabled={isUpdatingTask || (isClinicVisit ? (!editTaskYear || !editTaskMonth) : (!editTaskDate || !editTaskTime))}
+                                    disabled={isUpdatingTask}
                                     className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-all duration-200 flex items-center justify-center gap-1 shadow-sm"
                                   >
                                     <Check className="w-3.5 h-3.5" />
-                                    <span>{isUpdatingTask ? 'Güncelleniyor...' : (isClinicVisit ? 'Randevuyu Güncelle' : 'Görevi Güncelle')}</span>
+                                    <span>{isUpdatingTask ? 'Güncelleniyor...' : 'Görevi Güncelle'}</span>
                                   </button>
                                 </div>
                               );
@@ -2106,41 +1877,40 @@ export default function PatientDetailDrawer({
                             const isClinicVisit = taskMeta.appointment_type === 'clinic_visit';
 
                             return (
-                              <div key={task.id} className="bg-[#F5F5F7] rounded-xl border border-black/5 overflow-hidden flex flex-col text-[11px] hover:shadow-[0_2px_8px_rgba(0,0,0,0.02)] transition-all duration-300">
-                                {/* Parent Task Card Body */}
+                              <div key={task.id} className="bg-[#F5F5F7] rounded-xl border border-black/5 overflow-hidden flex flex-col text-[11px]">
                                 <div className="p-3.5 flex flex-col gap-2.5 bg-gradient-to-br from-white to-[#F5F5F7]">
                                   <div className="flex items-start justify-between gap-3">
-                                    <div className="space-y-1">
+                                    <div>
                                       <div className="font-bold text-[#1D1D1F] flex items-center gap-1.5">
                                         <span>⏰ {task.title}</span>
                                         <span className={`px-1.5 py-0.5 rounded text-[8.5px] font-bold uppercase tracking-wider ${
-                                          isClinicVisit 
-                                            ? 'bg-purple-50 border border-purple-100 text-purple-600' 
-                                            : 'bg-indigo-50 border border-indigo-100 text-indigo-600'
+                                          isClinicVisit ? 'bg-purple-50 text-purple-600 border border-purple-100' : 'bg-indigo-50 text-indigo-600 border border-indigo-100'
                                         }`}>
-                                          {isClinicVisit ? 'Klinik Randevusu' : 'Telefon Görüşmesi'}
+                                          {isClinicVisit ? 'Klinik' : 'Telefon'}
                                         </span>
                                       </div>
-                                      {task.description && <p className="text-[#86868B] leading-relaxed font-semibold">{task.description}</p>}
+                                      {task.description && <p className="text-[#86868B] mt-0.5 font-semibold">{task.description}</p>}
                                       {task.dueAt && (
-                                        <p className="text-[10px] text-[#86868B] font-bold flex items-center gap-1">
-                                          <span>📅</span>
-                                          <span>Tarih: {taskMeta.is_partial_date 
+                                        <p className="text-[10px] text-[#86868B] font-bold mt-1">
+                                          Tarih: {taskMeta.is_partial_date 
                                             ? formatPartialDate(taskMeta) 
-                                            : new Date(task.dueAt).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul' })}</span>
+                                            : new Date(task.dueAt).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul' })}
                                         </p>
                                       )}
                                     </div>
-                                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded shrink-0 ${
-                                      task.status === 'pending' ? 'bg-blue-50 text-blue-700' : 'bg-green-50 text-green-700'
+                                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
+                                      task.status === 'pending' ? 'bg-blue-50 text-blue-700' : 
+                                      task.status === 'completed' || task.status === 'arrived' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
                                     }`}>
-                                      {task.status === 'pending' ? 'Bekliyor' : task.status}
+                                      {task.status === 'pending' ? '⏳ Bekliyor' : 
+                                       task.status === 'completed' ? '✅ Tamamlandı' : 
+                                       task.status === 'arrived' ? '🏥 Geldi' : 
+                                       task.status === 'no_show' ? '❌ Gelmedi' : '🚫 İptal'}
                                     </span>
                                   </div>
 
                                   {task.status === 'pending' && (
                                     <div className="flex items-center gap-2 pt-2 border-t border-black/[0.04]">
-                                      {/* Edit Button */}
                                       <button
                                         type="button"
                                         onClick={() => {
@@ -2148,18 +1918,14 @@ export default function PatientDetailDrawer({
                                           const trParts = getTurkeyParts(task.dueAt);
                                           setEditTaskDate(`${trParts.year}-${trParts.month}-${trParts.day}`);
                                           setEditTaskTime(`${trParts.hour}:${trParts.minute}`);
-                                          
                                           setEditTaskNote(taskMeta.note || "");
                                           setEditTaskDescription(task.description || "");
-
-                                          // Initialize CV editing states
-                                          const isCv = taskMeta.appointment_type === 'clinic_visit';
-                                          if (isCv) {
+                                          
+                                          if (isClinicVisit) {
                                             setEditTaskYear(taskMeta.selected_year || trParts.year);
                                             setEditTaskMonth(taskMeta.selected_month || trParts.month);
                                             setEditTaskDay(taskMeta.selected_day || "");
                                             setEditTaskTimeCv(taskMeta.selected_time || "");
-                                            
                                             const appRems = taskMeta.approved_reminders || {};
                                             setEditApprovedReminders({
                                               '30_days_before': !!appRems['30_days_before'],
@@ -2167,138 +1933,52 @@ export default function PatientDetailDrawer({
                                               '7_days_before': !!appRems['7_days_before'],
                                               '1_day_before': !!appRems['1_day_before'],
                                             });
-                                          } else {
-                                            setEditTaskYear("");
-                                            setEditTaskMonth("");
-                                            setEditTaskDay("");
-                                            setEditTaskTimeCv("");
-                                            setEditApprovedReminders({
-                                              '30_days_before': false,
-                                              '14_days_before': false,
-                                              '7_days_before': false,
-                                              '1_day_before': false,
-                                            });
                                           }
                                         }}
-                                        className="flex-1 py-1.5 px-3 bg-white hover:bg-[#F5F5F7] border border-black/5 text-[#86868B] hover:text-[#1D1D1F] rounded-lg text-[10px] font-bold flex items-center justify-center gap-1.5 transition-all duration-200"
+                                        className="flex-1 py-1 px-2.5 bg-white hover:bg-[#F5F5F7] border border-black/5 text-[#86868B] hover:text-[#1D1D1F] rounded-lg font-bold flex items-center justify-center gap-1"
                                       >
-                                        <Edit3 className="w-3 h-3" />
-                                        <span>Düzenle</span>
+                                        <Edit3 className="w-3 h-3" /> Düzenle
                                       </button>
-
-                                      {/* Delete Button */}
                                       <button
                                         type="button"
                                         onClick={() => handleDeleteTask(task.id)}
-                                        className="flex-1 py-1.5 px-3 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1.5 transition-all duration-200"
+                                        className="flex-1 py-1 px-2.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-100 rounded-lg font-bold flex items-center justify-center gap-1"
                                       >
-                                        <Trash2 className="w-3 h-3" />
-                                        <span>Sil</span>
+                                        <Trash2 className="w-3 h-3" /> Sil
                                       </button>
                                     </div>
                                   )}
                                 </div>
 
-                                {/* Child Tasks Indented Timeline View */}
+                                {/* Alt işlemler ve Hatırlatıcı Akışı */}
                                 {childTasks.length > 0 && (
                                   <div className="px-3.5 pb-3.5 pt-2 bg-[#FAFAFC] border-t border-black/[0.03] space-y-2.5 relative">
-                                    {/* Timeline vertical connector line */}
                                     <div className="absolute left-[21px] top-4 bottom-7 w-0.5 bg-indigo-100/50" />
-
-                                    <div className="text-[8.5px] font-bold text-indigo-950/60 uppercase tracking-wider mb-1 flex items-center gap-1">
-                                      <span>🔔 ALT İŞLEMLER VE HATIRLATICI AKIŞI</span>
+                                    <div className="text-[8.5px] font-bold text-indigo-950/60 uppercase tracking-wider mb-1">
+                                      🔔 ALT İŞLEMLER VE HATIRLATICI AKIŞI
                                     </div>
-
                                     {childTasks.map(rem => {
                                       const remMeta = safeJsonParse(rem.metadata, {});
                                       const isCompleted = rem.status === 'completed';
-
-                                      let trTime = remMeta.operation_due_at_tr;
-                                      if (!trTime && rem.dueAt) {
-                                        try {
-                                          trTime = new Intl.DateTimeFormat('tr-TR', {
-                                            timeZone: 'Europe/Istanbul',
-                                            day: 'numeric',
-                                            month: 'short',
-                                            hour: '2-digit',
-                                            minute: '2-digit'
-                                          }).format(new Date(rem.dueAt));
-                                        } catch (_) {}
-                                      }
-
-                                       let patientLocalTime = remMeta.patient_local_time;
-                                       if (!patientLocalTime && rem.dueAt) {
-                                         try {
-                                           const displayRes = resolvePatientTimeDisplay({
-                                             country: data?.country,
-                                             city: data?.leadRawData?.city || data?.leadRawData?.patient_city,
-                                              timezone: data?.patientTimezone,
-                                              metadata: data?.leadRawData,
-                                             referenceDate: new Date(rem.dueAt)
-                                           });
-                                           
-                                           if (displayRes.needsTimezoneClarification) {
-                                             patientLocalTime = displayRes.shortBadge === "Şehir gerekli" ? "Şehir gerekli" : "Saat net değil";
-                                           } else if (displayRes.isFallback) {
-                                             patientLocalTime = "Saat net değil";
-                                           } else {
-                                             patientLocalTime = displayRes.patientLocalTime;
-                                             if (displayRes.offsetLabel) {
-                                               patientLocalTime = `${patientLocalTime} (${displayRes.offsetLabel})`;
-                                             }
-                                           }
-                                         } catch (_) {}
-                                       }
-
-                                      const remStatusLabel = isCompleted 
-                                        ? (rem.taskType === 'appointment_reminder' ? 'İletildi' : 'Tamamlandı')
-                                        : (rem.taskType === 'appointment_reminder' ? 'Kuyrukta' : 'Bekliyor');
-
+                                      const trTime = remMeta.operation_due_at_tr || (rem.dueAt ? new Date(rem.dueAt).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul' }) : '—');
                                       return (
-                                        <div key={rem.id} className="flex items-start gap-2.5 relative group text-[10.5px]">
-                                          {/* Bullet point status indicator */}
-                                          <div className={`w-[14px] h-[14px] rounded-full flex items-center justify-center shrink-0 z-10 transition-all duration-200 ${
-                                            isCompleted 
-                                              ? 'bg-emerald-500 text-white shadow-sm shadow-emerald-500/10' 
-                                              : 'bg-white border-2 border-indigo-200 text-indigo-500'
+                                        <div key={rem.id} className="flex items-start gap-2.5 relative text-[10.5px]">
+                                          <div className={`w-[14px] h-[14px] rounded-full flex items-center justify-center shrink-0 z-10 ${
+                                            isCompleted ? 'bg-emerald-500 text-white' : 'bg-white border-2 border-indigo-200 text-indigo-500'
                                           }`}>
-                                            {isCompleted ? (
-                                              <Check className="w-2 h-2 stroke-[3.5]" />
-                                            ) : (
-                                              <Clock className="w-2 h-2 stroke-[2.5]" />
-                                            )}
+                                            {isCompleted ? <Check className="w-2 h-2 stroke-[3.5]" /> : <Clock className="w-2 h-2 stroke-[2.5]" />}
                                           </div>
-
-                                          {/* Details container */}
-                                          <div className="flex-1 min-w-0 bg-white/40 group-hover:bg-white/90 p-2 rounded-lg border border-black/[0.02] hover:border-black/[0.04] transition-all duration-200">
-                                            <div className="flex items-start justify-between gap-2">
+                                          <div className="flex-1 bg-white/40 p-2 rounded-lg border border-black/[0.02]">
+                                            <div className="flex items-start justify-between">
                                               <div>
-                                                <span className={`font-bold ${isCompleted ? 'text-[#86868B] line-through' : 'text-[#1D1D1F]'}`}>
-                                                  {rem.title}
-                                                </span>
-                                                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-1 text-[9.5px] text-[#86868B] font-semibold">
-                                                  <span className="flex items-center gap-0.5">🇹🇷 {trTime || '—'}</span>
-                                                  <span className="text-black/5">•</span>
-                                                  <span className="flex items-center gap-0.5">🌍 {patientLocalTime || '—'}</span>
-                                                </div>
+                                                <span className={`font-bold ${isCompleted ? 'text-[#86868B] line-through' : 'text-[#1D1D1F]'}`}>{rem.title}</span>
+                                                <div className="text-[9.5px] text-[#86868B] mt-0.5">🇹🇷 {trTime}</div>
                                               </div>
-                                              <div className="flex items-center gap-1.5 shrink-0">
-                                                <span className={`text-[8.5px] font-bold px-1.2 py-0.4 rounded ${
-                                                  isCompleted ? 'bg-emerald-50 text-emerald-700' : 'bg-indigo-50 text-indigo-700'
-                                                }`}>
-                                                  {remStatusLabel}
-                                                </span>
-                                                {rem.status === 'pending' && (
-                                                  <button
-                                                    type="button"
-                                                    onClick={() => handleDeleteTask(rem.id)}
-                                                    className="p-0.5 text-[#86868B] hover:text-red-600 hover:bg-red-50 rounded transition-colors"
-                                                    title="Hatırlatıcıyı Sil"
-                                                  >
-                                                    <Trash2 className="w-3 h-3" />
-                                                  </button>
-                                                )}
-                                              </div>
+                                              {rem.status === 'pending' && (
+                                                <button type="button" onClick={() => handleDeleteTask(rem.id)} className="text-[#86868B] hover:text-red-600">
+                                                  <Trash2 className="w-3 h-3" />
+                                                </button>
+                                              )}
                                             </div>
                                           </div>
                                         </div>
@@ -2313,63 +1993,59 @@ export default function PatientDetailDrawer({
                       </div>
                     );
                   })()}
-                </div>
-              )}
 
-              {/* TAB 3: DETAY */}
-              {activeTab === 'detail' && (
-                <div className="space-y-4 animate-in fade-in duration-200">
-                  
-                  {/* Form Bilgileri (Eğer varsa bu sekmenin en tepesinde yer alacak) */}
-                  {data.leadRawData && Object.keys(data.leadRawData).length > 0 && (
-                    <div id="section-form" className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden transition-all duration-200">
-                      <button
-                        onClick={() => setIsFormExpanded(!isFormExpanded)}
-                        className="w-full flex items-center justify-between p-4 bg-white hover:bg-[#F5F5F7] transition-colors duration-200 outline-none"
-                      >
-                        <span className="text-[11px] font-bold text-[#86868B] uppercase tracking-wider flex items-center gap-1.5">
-                          <FileText className="w-3.5 h-3.5 text-indigo-600" /> Form Bilgileri
-                        </span>
-                        <ChevronDown 
-                          className={`w-4 h-4 text-[#86868B] transition-transform duration-300 ${
-                            isFormExpanded ? "transform rotate-180" : ""
-                          }`} 
-                        />
-                      </button>
-                      {isFormExpanded && (
-                        <div className="p-4 pt-0 border-t border-black/[0.03] space-y-3 bg-white animate-in fade-in slide-in-from-top-1 duration-200">
-                          <FormDataDisplay rawData={data.leadRawData} formName={data.leadFormName} />
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-
-
-                  {/* Zaman Çizelgesi */}
-                  <div className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden transition-all duration-200">
-                    <button
-                      onClick={() => setIsTimelineExpanded(!isTimelineExpanded)}
-                      className="w-full flex items-center justify-between p-4 bg-white hover:bg-[#F5F5F7] transition-colors duration-200 outline-none"
-                    >
-                      <span className="text-[11px] font-bold text-[#86868B] uppercase tracking-wider flex items-center gap-1.5">
-                        <Clock className="w-3.5 h-3.5 text-indigo-600" /> Zaman Çizelgesi
-                      </span>
-                      <ChevronDown 
-                        className={`w-4 h-4 text-[#86868B] transition-transform duration-300 ${
-                          isTimelineExpanded ? "transform rotate-180" : ""
-                        }`} 
+                  {/* Not Ekle & Tüm Notlar Listesi */}
+                  <div className="bg-white rounded-2xl border border-black/5 shadow-sm p-4 space-y-3">
+                    <span className="text-[11px] font-bold text-[#86868B] uppercase tracking-wider flex items-center gap-1.5">
+                      <StickyNote className="w-3.5 h-3.5 text-indigo-600" /> Notlar
+                    </span>
+                    
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={noteText}
+                        onChange={(e) => setNoteText(e.target.value)}
+                        placeholder="Yeni bir not ekle..."
+                        className="flex-1 px-3 py-2.5 bg-[#F5F5F7] rounded-xl text-xs font-semibold outline-none border border-transparent focus:border-indigo-500/25 focus:bg-white transition-all duration-200"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && noteText.trim()) handleAddNote();
+                        }}
                       />
-                    </button>
-                    {isTimelineExpanded && (
-                      <div className="p-4 pt-0 border-t border-black/[0.03] space-y-3 bg-white animate-in fade-in slide-in-from-top-1 duration-200">
-                        <TimelineDisplay timeline={data.timeline} />
+                      <button
+                        onClick={handleAddNote}
+                        disabled={!noteText.trim() || isSavingNote}
+                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold disabled:opacity-40"
+                      >
+                        {isSavingNote ? '...' : 'Ekle'}
+                      </button>
+                    </div>
+
+                    {data.notes && data.notes.length > 0 ? (
+                      <div className="space-y-2 max-h-[200px] overflow-y-auto pr-1">
+                        {data.notes.map((note: any, idx: number) => (
+                          <div key={idx} className="p-3 bg-[#F5F5F7]/50 border border-black/[0.02] rounded-xl text-[11px] font-semibold text-[#1D1D1F] flex flex-col gap-1">
+                            <span className="text-[#86868B] text-[9px] font-bold">
+                              📅 {note.created_at ? new Date(note.created_at).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul' }) : '—'}
+                            </span>
+                            <span className="leading-relaxed break-words">{note.text || note}</span>
+                          </div>
+                        ))}
                       </div>
+                    ) : (
+                      <p className="text-[11px] text-[#86868B] text-center py-2 font-semibold">Kayıtlı not bulunmuyor.</p>
                     )}
                   </div>
 
-                  {/* Medya / Belgeler */}
-                  <div className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden transition-all duration-200">
+                  {/* Zaman Çizelgesi */}
+                  <div className="bg-white rounded-2xl border border-black/5 shadow-sm p-4 space-y-3">
+                    <span className="text-[11px] font-bold text-[#86868B] uppercase tracking-wider flex items-center gap-1.5">
+                      <Clock className="w-3.5 h-3.5 text-indigo-600" /> Zaman Çizelgesi (Outreach Logları)
+                    </span>
+                    <TimelineDisplay timeline={data.timeline} />
+                  </div>
+
+                  {/* Medya & Belgeler */}
+                  <div className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
                     <button
                       onClick={() => setIsMediaExpanded(!isMediaExpanded)}
                       className="w-full flex items-center justify-between p-4 bg-white hover:bg-[#F5F5F7] transition-colors duration-200 outline-none"
@@ -2384,12 +2060,11 @@ export default function PatientDetailDrawer({
                       />
                     </button>
                     {isMediaExpanded && (
-                      <div className="p-4 pt-0 border-t border-black/[0.03] space-y-3 bg-white animate-in fade-in slide-in-from-top-1 duration-200">
+                      <div className="p-4 pt-0 border-t border-black/[0.03] space-y-3 bg-white">
                         {data.mediaFiles && data.mediaFiles.length > 0 ? (
                           <div className="grid grid-cols-1 gap-2">
                             {data.mediaFiles.map((file: any) => {
                               const isImg = file.mediaType === 'image' || file.mediaType === 'sticker';
-                              const isDoc = file.mediaType === 'document';
                               const isAudio = file.mediaType === 'audio';
                               const isVideo = file.mediaType === 'video';
                               const isLoc = file.mediaType === 'location';
@@ -2458,7 +2133,7 @@ export default function PatientDetailDrawer({
                                       </div>
                                     )}
                                     <div className="min-w-0">
-                                      <p className="text-[12px] font-bold text-[#1D1D1F] truncate group-hover:text-indigo-600 transition-colors max-w-[200px] md:max-w-[250px]" title={filename}>
+                                      <p className="text-[12px] font-bold text-[#1D1D1F] truncate group-hover:text-indigo-600 max-w-[200px]" title={filename}>
                                         {filename}
                                       </p>
                                       <div className="flex items-center gap-2 mt-0.5">
@@ -2469,14 +2144,8 @@ export default function PatientDetailDrawer({
                                       </div>
                                     </div>
                                   </div>
-                                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-                                    <a 
-                                      href={file.mediaUrl} 
-                                      target="_blank" 
-                                      rel="noopener noreferrer"
-                                      className="w-8 h-8 rounded-lg flex items-center justify-center bg-white hover:bg-indigo-50 border border-black/5 hover:border-indigo-150 text-[#86868B] hover:text-indigo-600 shadow-sm transition-all"
-                                      title="Görüntüle / İndir"
-                                    >
+                                  <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <a href={file.mediaUrl} target="_blank" rel="noopener noreferrer" className="p-1 text-[#86868B] hover:text-indigo-600">
                                       <Download className="w-3.5 h-3.5" />
                                     </a>
                                   </div>
@@ -2485,8 +2154,7 @@ export default function PatientDetailDrawer({
                             })}
                           </div>
                         ) : (
-                          <div className="p-6 bg-white rounded-xl border border-black/5 shadow-sm text-center w-full">
-                            <FileText className="w-8 h-8 text-[#C7C7CC] mx-auto mb-2" />
+                          <div className="p-6 bg-white rounded-xl border border-black/5 text-center">
                             <p className="text-[12px] text-[#86868B]">Henüz dosya veya medya yüklenmemiş.</p>
                           </div>
                         )}

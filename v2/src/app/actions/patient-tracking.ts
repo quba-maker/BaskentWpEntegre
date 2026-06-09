@@ -164,6 +164,7 @@ export interface AppointmentRow {
   taskId: string;
   taskType?: string;
   opportunityId?: string;
+  conversationId?: string;
   patientName: string;
   phoneNumber: string;
   country?: string;
@@ -193,7 +194,7 @@ export interface AppointmentRow {
 }
 
 export interface AppointmentFilters {
-  appointmentType?: 'phone_call' | 'clinic_visit' | 'all';
+  appointmentType?: 'all' | 'phone_call' | 'clinic_visit' | 'reminder' | 'missing_info' | 'bot_suggestion';
   status?: string;
   confirmationStatus?: string;
   completed?: boolean;
@@ -1208,9 +1209,6 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
       const conditions = [`t.tenant_id = $1`];
       const values: any[] = [ctx.tenantId];
 
-      // Only patient follow-up and appointment tasks (excluding reminder tasks)
-      conditions.push(`t.task_type != 'appointment_reminder'`);
-
       // Filter by primary tasks only (exclude child tasks from appearing as standalone parent rows)
       conditions.push(`t.metadata->>'parent_task_id' IS NULL AND (t.metadata->>'is_primary' IS NULL OR t.metadata->>'is_primary' != 'false')`);
 
@@ -1257,9 +1255,24 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
       if (filters?.appointmentType && filters.appointmentType !== 'all') {
         if (filters.appointmentType === 'phone_call') {
           conditions.push(`(t.metadata->>'appointment_type' IS NULL OR t.metadata->>'appointment_type' != 'clinic_visit')`);
+          conditions.push(`t.task_type NOT IN ('appointment_reminder', 'date_pending_followup', 'follow_up_reminder', 'callback_reminder', 'send_report_reminder', 'missing_info', 'form_missing', 'report_request')`);
+          conditions.push(`t.metadata->>'missing_fields' IS NULL`);
+          conditions.push(`(t.metadata->'bot_suggestion'->>'status' IS NULL OR t.metadata->'bot_suggestion'->>'status' != 'pending')`);
+          conditions.push(`t.task_type NOT IN ('bot_handoff_followup', 'internal_bot_directive', 'bot_steering_only')`);
         } else if (filters.appointmentType === 'clinic_visit') {
           conditions.push(`t.metadata->>'appointment_type' = 'clinic_visit'`);
+          conditions.push(`t.task_type NOT IN ('bot_handoff_followup', 'internal_bot_directive', 'bot_steering_only')`);
+        } else if (filters.appointmentType === 'reminder') {
+          conditions.push(`t.task_type IN ('appointment_reminder', 'date_pending_followup', 'follow_up_reminder', 'callback_reminder')`);
+        } else if (filters.appointmentType === 'missing_info') {
+          conditions.push(`(t.task_type IN ('send_report_reminder', 'missing_info', 'form_missing', 'report_request') OR t.metadata->>'missing_fields' IS NOT NULL)`);
+          conditions.push(`t.task_type NOT IN ('bot_handoff_followup', 'internal_bot_directive', 'bot_steering_only')`);
+        } else if (filters.appointmentType === 'bot_suggestion') {
+          conditions.push(`(t.metadata->'bot_suggestion'->>'status' = 'pending')`);
+          conditions.push(`t.task_type NOT IN ('bot_handoff_followup', 'internal_bot_directive', 'bot_steering_only')`);
         }
+      } else {
+        conditions.push(`t.task_type NOT IN ('bot_handoff_followup', 'internal_bot_directive', 'bot_steering_only')`);
       }
 
       // Exclude terminal opportunities unless looking at completed/cancelled tasks
@@ -1272,6 +1285,7 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
         SELECT
           t.id as task_id,
           t.opportunity_id,
+          t.conversation_id as conversation_id,
           t.phone_number,
           t.task_type,
           t.title as task_title,
@@ -1375,6 +1389,7 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
           taskId: row.task_id,
           taskType: row.task_type,
           opportunityId: row.opportunity_id || undefined,
+          conversationId: row.conversation_id || undefined,
           patientName: resolvedName,
           phoneNumber: row.phone_number || '',
           country: resolvedCountry || undefined,
@@ -2223,7 +2238,7 @@ export async function getAppointmentStats() {
         LEFT JOIN opportunities o ON o.id = t.opportunity_id AND o.tenant_id = t.tenant_id
         LEFT JOIN conversations c ON c.phone_number = COALESCE(o.phone_number, t.phone_number) AND c.tenant_id = t.tenant_id
         WHERE t.tenant_id = $1
-          AND t.task_type != 'appointment_reminder'
+          AND t.task_type NOT IN ('bot_handoff_followup', 'internal_bot_directive', 'bot_steering_only')
           AND t.metadata->>'parent_task_id' IS NULL
           AND (t.metadata->>'is_primary' IS NULL OR t.metadata->>'is_primary' != 'false')
       `;

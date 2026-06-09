@@ -298,6 +298,7 @@ export function ContactRail() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const deepLinkContact = searchParams.get('contact');
+  const deepLinkConversationId = searchParams.get('conversation_id');
 
   // Initialize state from URL search params or defaults
   const initialPrimary = (searchParams.get('primary') as InboxPrimaryFilter) || "all";
@@ -865,8 +866,11 @@ export function ContactRail() {
 
   // Deep link: auto-select contact from notification click
   useEffect(() => {
-    if (deepLinkContact && contacts.length > 0 && !activePhone) {
-      const target = contacts.find((c: any) => c.id === deepLinkContact);
+    if ((deepLinkContact || deepLinkConversationId) && contacts.length > 0 && !activePhone) {
+      const target = contacts.find((c: any) => 
+        (deepLinkConversationId && (c.conversation_id === deepLinkConversationId || c.conversationId === deepLinkConversationId)) ||
+        (deepLinkContact && c.id === deepLinkContact)
+      );
       if (target) {
         setActiveContact(target.id, { ...target, unread: 0 });
         // Clean up URL
@@ -874,7 +878,7 @@ export function ContactRail() {
         router.replace(currentPath, { scroll: false });
       }
     }
-  }, [deepLinkContact, contacts, activePhone, setActiveContact, router]);
+  }, [deepLinkContact, deepLinkConversationId, contacts, activePhone, setActiveContact, router]);
 
   // Sync updated CRM data/messages to the active contact non-reactively to prevent left-rail re-renders
   useEffect(() => {

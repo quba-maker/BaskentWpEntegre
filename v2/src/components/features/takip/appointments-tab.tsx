@@ -12,12 +12,43 @@ import {
   getAppointmentRows, getAppointmentStats, completeAppointmentTask, updateAppointmentConfirmation, rescheduleAppointmentTask,
   manuallyUpdateAppointmentStatus, recordAppointmentReminder, recordBotDirectiveSent,
   approveBotSuggestion, rejectBotSuggestion, createAppointmentTask,
+  rescheduleFollowUpTaskAction, completeFollowUpTaskAction,
   type AppointmentRow, type AppointmentFilters 
 } from "@/app/actions/patient-tracking";
 import { triggerBotInterventionAction } from "@/app/actions/bot-intervention";
 import { parseTurkeyLocalToUtc } from "@/lib/utils/timezone";
 import { formatPhoneReadable } from "@/lib/utils/patient-name-resolver";
 import { getCountryFromPhone, normalizeCountryName } from "@/lib/utils/country";
+
+const TYPE_PILLS = [
+  { value: 'all', label: 'Tümü' },
+  { value: 'phone_call', label: '📞 Arama' },
+  { value: 'clinic_visit', label: '🏥 Randevu' },
+  { value: 'reminder', label: '🔔 Hatırlatma' },
+  { value: 'missing_info', label: '📄 Form / Eksik Bilgi' },
+  { value: 'bot_suggestion', label: '🤖 Bot Önerisi' }
+];
+
+function getUnifiedTaskTypeInfo(apt: AppointmentRow) {
+  const isReminder = ['appointment_reminder', 'date_pending_followup', 'follow_up_reminder', 'callback_reminder'].includes(apt.taskType || '');
+  const isMissingInfo = ['send_report_reminder', 'missing_info', 'form_missing', 'report_request'].includes(apt.taskType || '') || !!apt.metadata?.missing_fields;
+  const isBotSuggestion = apt.metadata?.bot_suggestion?.status === 'pending';
+  const isClinic = apt.appointmentType === 'clinic_visit';
+
+  if (isBotSuggestion) {
+    return { label: '🤖 Bot Önerisi', bg: 'bg-purple-50 text-purple-700 border-purple-200' };
+  }
+  if (isMissingInfo) {
+    return { label: '📄 Form / Eksik Bilgi', bg: 'bg-amber-50 text-amber-700 border-amber-200' };
+  }
+  if (isReminder) {
+    return { label: '🔔 Hatırlatma', bg: 'bg-indigo-50 text-indigo-700 border-indigo-200' };
+  }
+  if (isClinic) {
+    return { label: '🏥 Randevu', bg: 'bg-green-50 text-green-700 border-green-200' };
+  }
+  return { label: '📞 Arama', bg: 'bg-blue-50 text-blue-700 border-blue-200' };
+}
 
 
 const MONTHS_TR = [
@@ -288,6 +319,7 @@ export default function AppointmentsTab({ onOpenDrawer, onGoToInbox, viewType, o
   const [dueRange, setDueRange] = useState("all");
   const [statusFilter, setStatusFilter] = useState("today");
   const [confirmFilter, setConfirmFilter] = useState("all");
+  const [typeFilter, setTypeFilter] = useState<'all' | 'phone_call' | 'clinic_visit' | 'reminder' | 'missing_info' | 'bot_suggestion'>('all');
   const filterDropdown = useDropdown();
 
   useEffect(() => {
@@ -298,14 +330,14 @@ export default function AppointmentsTab({ onOpenDrawer, onGoToInbox, viewType, o
   const filters: AppointmentFilters = {
     search: debouncedSearch || undefined,
     dueRange: dueRange !== 'all' ? dueRange as any : undefined,
-    appointmentType: viewType === 'phone' ? 'phone_call' : viewType === 'clinic' ? 'clinic_visit' : undefined,
+    appointmentType: viewType === 'phone' ? 'phone_call' : viewType === 'clinic' ? 'clinic_visit' : typeFilter,
     completed: statusFilter === 'completed',
     status: statusFilter,
     confirmationStatus: confirmFilter !== 'all' ? confirmFilter : undefined,
   };
 
   const { data, isLoading, mutate } = useSWR(
-    ['appointments', debouncedSearch, dueRange, viewType, statusFilter, confirmFilter],
+    ['appointments', debouncedSearch, dueRange, viewType, statusFilter, confirmFilter, typeFilter],
     () => getAppointmentRows(filters),
     { 
       refreshInterval: 60000,
@@ -519,36 +551,56 @@ export default function AppointmentsTab({ onOpenDrawer, onGoToInbox, viewType, o
           </div>
         </div>
       </div>
+      {!viewType && (
+        <div className="px-4 py-2.5 border-b border-black/5 bg-white flex items-center gap-1.5 overflow-x-auto scrollbar-none z-10">
+          {TYPE_PILLS.map((pill) => (
+            <button
+              key={pill.value}
+              onClick={() => setTypeFilter(pill.value as any)}
+              className={`px-3 py-1.5 rounded-full text-[11px] font-bold border transition-all cursor-pointer whitespace-nowrap active:scale-95 ${
+                typeFilter === pill.value
+                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                  : 'bg-[#F5F5F7] text-[#86868B] border-transparent hover:bg-black/5 hover:text-[#1D1D1F]'
+              }`}
+            >
+              {pill.label}
+            </button>
+          ))}
+        </div>
+      )}
       <div className="flex-1 overflow-x-auto bg-white">
         <table className="w-full text-left border-collapse min-w-[900px]">
           <thead className="sticky top-0 bg-white/90 backdrop-blur-md z-10 border-b border-black/5 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
             <tr>
               <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase">Hasta</th>
-              <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase">Tarih & Saat</th>
-              
               {!viewType ? (
                 <>
-                  <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase">Randevu Türü</th>
-                  <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase">Randevu Durumu</th>
-                  <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase">Teyit Durumu</th>
-                </>
-              ) : viewType === 'clinic' ? (
-                <>
-                  <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase">Randevu Durumu</th>
-                  <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase">
-                    {(statusFilter === 'completed') ? 'Randevu Notu' : 'Randevuya Kalan'}
-                  </th>
+                  <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase">Takip Türü</th>
+                  <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase">Planlanan Zaman</th>
+                  <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase">Durum</th>
+                  <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase">Son Mesaj / Kısa Not</th>
                 </>
               ) : (
                 <>
-                  <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase">Arama Durumu</th>
-                  {(statusFilter !== 'completed') && (
-                    <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase">Aramaya Kalan</th>
+                  <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase">Tarih & Saat</th>
+                  {viewType === 'clinic' ? (
+                    <>
+                      <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase">Randevu Durumu</th>
+                      <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase">
+                        {(statusFilter === 'completed') ? 'Randevu Notu' : 'Randevuya Kalan'}
+                      </th>
+                    </>
+                  ) : (
+                    <>
+                      <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase">Arama Durumu</th>
+                      {(statusFilter !== 'completed') && (
+                        <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase">Aramaya Kalan</th>
+                      )}
+                    </>
                   )}
                 </>
               )}
-
-              <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase text-right">Aksiyon</th>
+              <th className="py-3 px-4 text-[11px] font-semibold text-[#86868B] tracking-wider uppercase text-right">Aksiyonlar</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-black/5">
@@ -907,11 +959,42 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
   const tomorrowVals = getTomorrowString();
 
   const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
+  const [planModalMode, setPlanModalMode] = useState<'create' | 'reschedule'>('create');
   const [planType, setPlanType] = useState<'phone_call' | 'clinic_visit'>('phone_call');
   const [planDate, setPlanDate] = useState(tomorrowVals.date);
   const [planTime, setPlanTime] = useState("10:00");
   const [planNote, setPlanNote] = useState("");
   const [planLoading, setPlanLoading] = useState(false);
+
+  const typeInfo = getUnifiedTaskTypeInfo(apt);
+  const noteText = apt.appointmentNote || apt.metadata?.note || '';
+  
+  const cleanDescription = (text: string) => {
+    if (!text) return '';
+    if (text.trim().startsWith('{') || text.trim().startsWith('[')) return '';
+    return text.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/ig, '').trim();
+  };
+  const descriptionText = cleanDescription(apt.taskDescription || apt.taskTitle || '');
+
+  const handleReschedulePlan = async () => {
+    setPlanLoading(true);
+    try {
+      const utcIsoString = parseTurkeyLocalToUtc(planDate, planTime);
+      const res = await rescheduleFollowUpTaskAction(apt.taskId, utcIsoString, planNote);
+      if (res && res.success) {
+        setIsPlanModalOpen(false);
+        setPlanNote("");
+        showAlert("Başarılı", "Görev başarıyla ertelendi.", "success");
+        onActionComplete();
+      } else {
+        showAlert("Hata", res?.error || "Hata oluştu");
+      }
+    } catch(err) {
+      showAlert("Hata", "Hata oluştu");
+    } finally {
+      setPlanLoading(false);
+    }
+  };
 
   // Clinic Visit Precision Date & Reminders States
   const [planYear, setPlanYear] = useState<string>(tomorrowVals.year);
@@ -1360,165 +1443,159 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
           )}
         </div>
       </td>
-      <td className="py-3.5 px-4">
-        {apt.dueAtUtc ? (
-          <div>
-            <div className="text-[13px] font-bold text-[#1D1D1F]">
-              {apt.metadata?.is_partial_date 
-                ? formatPartialDate(apt.metadata)
-                : new Date(apt.dueAtUtc).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric', weekday: 'long', timeZone: 'Europe/Istanbul' })}
-            </div>
-            
-            {(!apt.metadata?.is_partial_date || (apt.metadata?.is_partial_date && apt.metadata?.partial_precision === 'full' && apt.metadata?.selected_time)) && (
-              <div className="text-[11px] font-semibold text-[#007AFF] mt-0.5">
-                {apt.metadata?.is_partial_date 
-                  ? apt.metadata.selected_time 
-                  : new Date(apt.dueAtUtc).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul' })}
-              </div>
-            )}
-
-            {apt.metadata?.is_partial_date && apt.metadata?.partial_precision === 'year_month' && (
-              <div className="text-[10px] font-semibold text-[#86868B] mt-0.5">
-                Ay Geneli Plan
-              </div>
-            )}
-            {apt.metadata?.is_partial_date && apt.metadata?.partial_precision === 'year_month_day' && (
-              <div className="text-[10px] font-semibold text-[#86868B] mt-0.5">
-                Gün Geneli Plan
-              </div>
-            )}
-          </div>
-        ) : (
-          <span className="text-[11px] text-[#C7C7CC] font-medium">Tarih yok</span>
-        )}
-      </td>
-
-      {/* Dynamic columns based on viewType */}
       {!viewType ? (
         <>
+          {/* 1. Takip Türü Badge */}
           <td className="py-3.5 px-4">
-            <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold tracking-wide border ${
-              isPhone ? 'bg-blue-50 text-blue-700 border-blue-200' :
-              isClinic ? 'bg-green-50 text-green-700 border-green-200' :
-              'bg-[#F5F5F7] text-[#86868B] border-black/5'
-            }`}>
-              {isPhone && <Phone className="w-3 h-3" />}
-              {isClinic && <Building2 className="w-3 h-3" />}
-              {apt.appointmentTypeLabel}
+            <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[10.5px] font-bold tracking-wide border ${typeInfo.bg}`}>
+              {typeInfo.label}
             </span>
           </td>
+
+          {/* 2. Planlanan Zaman */}
+          <td className="py-3.5 px-4">
+            {apt.dueAtUtc ? (
+              <div>
+                <div className="text-[13px] font-bold text-[#1D1D1F]">
+                  {apt.metadata?.is_partial_date 
+                    ? formatPartialDate(apt.metadata)
+                    : new Date(apt.dueAtUtc).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric', weekday: 'long', timeZone: 'Europe/Istanbul' })}
+                </div>
+                {(!apt.metadata?.is_partial_date || (apt.metadata?.is_partial_date && apt.metadata?.partial_precision === 'full' && apt.metadata?.selected_time)) && (
+                  <div className="text-[11px] font-semibold text-[#007AFF] mt-0.5">
+                    {apt.metadata?.is_partial_date 
+                      ? apt.metadata.selected_time 
+                      : new Date(apt.dueAtUtc).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul' })}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <span className="text-[11px] text-[#C7C7CC] font-medium">Tarih yok</span>
+            )}
+          </td>
+
+          {/* 3. Durum Badge */}
           <td className="py-3.5 px-4">
             <div className="flex items-center gap-1.5 flex-wrap">
-              <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold tracking-wide border ${
-                apt.status === 'completed' ? 'bg-green-50 text-green-700 border-green-200' :
-                apt.status === 'arrived' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
-                apt.status === 'no_show' ? 'bg-red-50 text-red-700 border-red-200' :
-                apt.status === 'cancelled' ? 'bg-[#F5F5F7] text-[#86868B] border-black/5' :
-                apt.status === 'overdue' ? 'bg-red-50 text-red-700 border-red-200' :
-                apt.status === 'approaching' ? 'bg-amber-50 text-amber-700 border-amber-200' :
-                'bg-blue-50 text-blue-700 border-blue-200'
-              }`}>
+              <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold tracking-wide border ${apt.statusColor}`}>
                 {apt.status === 'overdue' && <AlertTriangle className="w-3 h-3" />}
-                {apt.status === 'approaching' && <Clock className="w-3 h-3" />}
                 {apt.status === 'completed' && <CheckCircle2 className="w-3 h-3" />}
                 {apt.statusLabel}
               </span>
-              {(apt.metadata?.bot_teyit_sent || apt.metadata?.bot_hatirlat_sent || apt.metadata?.bot_devret_sent) && (
-                <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold border shrink-0 ${
-                  isSuggestionPending 
-                    ? 'border-emerald-300 bg-emerald-50 text-emerald-800 animate-[pulse_1.2s_infinite] shadow-[0_0_8px_rgba(16,185,129,0.25)]' 
-                    : 'border-cyan-200 bg-cyan-50 text-cyan-700 animate-pulse'
-                }`}>
-                  <Bot className={`w-3 h-3 ${isSuggestionPending ? 'text-emerald-600' : 'text-cyan-600'}`} />
-                  <span>{isSuggestionPending ? 'Öneri Geldi!' : 'Bot Takipte'}</span>
-                </span>
-              )}
             </div>
           </td>
-          <td className="py-3.5 px-4">
-            <div className="space-y-1.5">
-              {apt.confirmationStatus === 'confirmed' ? (
-                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-green-600 bg-green-50 px-1.5 py-0.5 rounded border border-green-200">
-                  <CheckCircle2 className="w-3 h-3" /> Teyitli
-                </span>
-              ) : apt.confirmationStatus === 'declined' ? (
-                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded border border-red-200">
-                  <XCircle className="w-3 h-3" /> Reddetti
-                </span>
-              ) : apt.confirmationStatus === 'no_response' ? (
-                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
-                  <Ban className="w-3 h-3" /> Cevap Yok
-                </span>
-              ) : apt.confirmationStatus === 'pending' ? (
-                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">
-                  <Clock className="w-3 h-3" /> Teyit Bekliyor
-                </span>
-              ) : (
-                <span className="text-[11px] font-semibold text-[#C7C7CC]">—</span>
-              )}
-            </div>
-          </td>
-        </>
-      ) : viewType === 'clinic' ? (
-        <>
-          <td className="py-3.5 px-4">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              {getClinicStatusBadge()}
-              {(apt.metadata?.bot_teyit_sent || apt.metadata?.bot_hatirlat_sent || apt.metadata?.bot_devret_sent) && (
-                <span className={`inline-flex items-center gap-1 px-2 py-0.8 rounded-md text-[10px] font-bold border shrink-0 ${
-                  isSuggestionPending 
-                    ? 'border-emerald-300 bg-emerald-50 text-emerald-800 animate-[pulse_1.2s_infinite] shadow-[0_0_8px_rgba(16,185,129,0.25)]' 
-                    : 'border-cyan-200 bg-cyan-50 text-cyan-700 animate-pulse'
-                }`}>
-                  <Bot className={`w-2.5 h-2.5 ${isSuggestionPending ? 'text-emerald-600' : 'text-cyan-600'}`} />
-                  <span>{isSuggestionPending ? 'Öneri Geldi!' : 'Bot Takipte'}</span>
-                </span>
-              )}
-            </div>
-          </td>
-          <td className="py-3.5 px-4">
-            {(statusFilter === 'completed') ? (
-              apt.appointmentNote ? (
-                <NoteCell note={apt.appointmentNote} />
-              ) : (
-                <span className="text-[11px] text-[#C7C7CC] font-medium italic">Not eklenmemiş</span>
-              )
-            ) : (
-              <span className={`text-[12px] font-bold flex items-center gap-1.5 ${
-                isOverdueTask ? 'text-[#FF3B30]' : 'text-[#1D1D1F]'
-              }`}>
-                <Calendar className="w-3.5 h-3.5 text-[#86868B]" />
-                {kalanStr}
+
+          {/* 4. Son Mesaj / Kısa Not */}
+          <td className="py-3.5 px-4 max-w-[250px]">
+            {noteText ? (
+              <NoteCell note={noteText} />
+            ) : descriptionText ? (
+              <span className="text-[11.5px] font-medium text-[#1D1D1F] line-clamp-2 leading-relaxed bg-[#F5F5F7]/40 px-2 py-1 rounded-lg border border-black/[0.03]">
+                {descriptionText}
               </span>
+            ) : (
+              <span className="text-[11px] text-[#C7C7CC] font-medium italic">—</span>
             )}
           </td>
         </>
       ) : (
         <>
+          {/* Legacy view cells */}
           <td className="py-3.5 px-4">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              {getPhoneStatusBadge()}
-              {(apt.metadata?.bot_teyit_sent || apt.metadata?.bot_hatirlat_sent || apt.metadata?.bot_devret_sent) && (
-                <span className={`inline-flex items-center gap-1 px-2 py-0.8 rounded-md text-[10px] font-bold border shrink-0 ${
-                  isSuggestionPending 
-                    ? 'border-emerald-300 bg-emerald-50 text-emerald-800 animate-[pulse_1.2s_infinite] shadow-[0_0_8px_rgba(16,185,129,0.25)]' 
-                    : 'border-cyan-200 bg-cyan-50 text-cyan-700 animate-pulse'
-                }`}>
-                  <Bot className={`w-2.5 h-2.5 ${isSuggestionPending ? 'text-emerald-600' : 'text-cyan-600'}`} />
-                  <span>{isSuggestionPending ? 'Öneri Geldi!' : 'Bot Takipte'}</span>
-                </span>
-              )}
-            </div>
+            {apt.dueAtUtc ? (
+              <div>
+                <div className="text-[13px] font-bold text-[#1D1D1F]">
+                  {apt.metadata?.is_partial_date 
+                    ? formatPartialDate(apt.metadata)
+                    : new Date(apt.dueAtUtc).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric', weekday: 'long', timeZone: 'Europe/Istanbul' })}
+                </div>
+                
+                {(!apt.metadata?.is_partial_date || (apt.metadata?.is_partial_date && apt.metadata?.partial_precision === 'full' && apt.metadata?.selected_time)) && (
+                  <div className="text-[11px] font-semibold text-[#007AFF] mt-0.5">
+                    {apt.metadata?.is_partial_date 
+                      ? apt.metadata.selected_time 
+                      : new Date(apt.dueAtUtc).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul' })}
+                  </div>
+                )}
+
+                {apt.metadata?.is_partial_date && apt.metadata?.partial_precision === 'year_month' && (
+                  <div className="text-[10px] font-semibold text-[#86868B] mt-0.5">
+                    Ay Geneli Plan
+                  </div>
+                )}
+                {apt.metadata?.is_partial_date && apt.metadata?.partial_precision === 'year_month_day' && (
+                  <div className="text-[10px] font-semibold text-[#86868B] mt-0.5">
+                    Gün Geneli Plan
+                  </div>
+                )}
+              </div>
+            ) : (
+              <span className="text-[11px] text-[#C7C7CC] font-medium">Tarih yok</span>
+            )}
           </td>
-          {(statusFilter !== 'completed') && (
-            <td className="py-3.5 px-4">
-              <span className={`text-[12px] font-bold flex items-center gap-1.5 ${
-                isOverdueTask ? 'text-[#FF3B30]' : 'text-[#1D1D1F]'
-              }`}>
-                <Calendar className="w-3.5 h-3.5 text-[#86868B]" />
-                {kalanStr}
-              </span>
-            </td>
+
+          {viewType === 'clinic' ? (
+            <>
+              <td className="py-3.5 px-4">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {getClinicStatusBadge()}
+                  {(apt.metadata?.bot_teyit_sent || apt.metadata?.bot_hatirlat_sent || apt.metadata?.bot_devret_sent) && (
+                    <span className={`inline-flex items-center gap-1 px-2 py-0.8 rounded-md text-[10px] font-bold border shrink-0 ${
+                      isSuggestionPending 
+                        ? 'border-emerald-300 bg-emerald-50 text-emerald-800 animate-[pulse_1.2s_infinite] shadow-[0_0_8px_rgba(16,185,129,0.25)]' 
+                        : 'border-cyan-200 bg-cyan-50 text-cyan-700 animate-pulse'
+                    }`}>
+                      <Bot className={`w-2.5 h-2.5 ${isSuggestionPending ? 'text-emerald-600' : 'text-cyan-600'}`} />
+                      <span>{isSuggestionPending ? 'Öneri Geldi!' : 'Bot Takipte'}</span>
+                    </span>
+                  )}
+                </div>
+              </td>
+              <td className="py-3.5 px-4">
+                {(statusFilter === 'completed') ? (
+                  apt.appointmentNote ? (
+                    <NoteCell note={apt.appointmentNote} />
+                  ) : (
+                    <span className="text-[11px] text-[#C7C7CC] font-medium italic">Not eklenmemiş</span>
+                  )
+                ) : (
+                  <span className={`text-[12px] font-bold flex items-center gap-1.5 ${
+                    isOverdueTask ? 'text-[#FF3B30]' : 'text-[#1D1D1F]'
+                  }`}>
+                    <Calendar className="w-3.5 h-3.5 text-[#86868B]" />
+                    {kalanStr}
+                  </span>
+                )}
+              </td>
+            </>
+          ) : (
+            <>
+              <td className="py-3.5 px-4">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {getPhoneStatusBadge()}
+                  {(apt.metadata?.bot_teyit_sent || apt.metadata?.bot_hatirlat_sent || apt.metadata?.bot_devret_sent) && (
+                    <span className={`inline-flex items-center gap-1 px-2 py-0.8 rounded-md text-[10px] font-bold border shrink-0 ${
+                      isSuggestionPending 
+                        ? 'border-emerald-300 bg-emerald-50 text-emerald-800 animate-[pulse_1.2s_infinite] shadow-[0_0_8px_rgba(16,185,129,0.25)]' 
+                        : 'border-cyan-200 bg-cyan-50 text-cyan-700 animate-pulse'
+                    }`}>
+                      <Bot className={`w-2.5 h-2.5 ${isSuggestionPending ? 'text-emerald-600' : 'text-cyan-600'}`} />
+                      <span>{isSuggestionPending ? 'Öneri Geldi!' : 'Bot Takipte'}</span>
+                    </span>
+                  )}
+                </div>
+              </td>
+              {(statusFilter !== 'completed') && (
+                <td className="py-3.5 px-4">
+                  <span className={`text-[12px] font-bold flex items-center gap-1.5 ${
+                    isOverdueTask ? 'text-[#FF3B30]' : 'text-[#1D1D1F]'
+                  }`}>
+                    <Calendar className="w-3.5 h-3.5 text-[#86868B]" />
+                    {kalanStr}
+                  </span>
+                </td>
+              )}
+            </>
           )}
         </>
       )}
@@ -1528,521 +1605,638 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
       <td className="py-3.5 px-4 text-right" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-end gap-1.5 relative">
           
-          {/* Quick Primary Actions right in the row (extremely high conversion and micro UX) */}
-          {viewType === 'clinic' && apt.status !== 'completed' && apt.status !== 'cancelled' && apt.status !== 'arrived' && apt.status !== 'no_show' && (
+          {!viewType ? (
             <>
-              {apt.confirmationStatus !== 'confirmed' ? (
-                <>
-                  <button
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      await handleAction('confirm');
-                    }}
-                    className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-white border border-emerald-600/20 text-emerald-700 rounded-lg shadow-sm hover:bg-emerald-50/50 hover:border-emerald-600/40 transition-all text-[11px] font-bold cursor-pointer"
-                    title="Randevuyu Teyit Et"
+              {/* Unified Todo List Actions: Inbox'ta Aç (Primary) */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onGoToInbox({ 
+                    phone_number: apt.phoneNumber, 
+                    display_name: apt.patientName,
+                    conversation_id: apt.conversationId
+                  });
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#007AFF] hover:bg-[#007AFF]/90 text-white rounded-xl shadow-sm hover:shadow active:scale-95 transition-all text-[11px] font-bold cursor-pointer"
+                title="Konuşmayı Inbox'ta Aç"
+              >
+                <Phone className="w-3.5 h-3.5 fill-white text-white" />
+                <span>Inbox'ta Aç</span>
+              </button>
+
+              {/* Quick Complete checkbox */}
+              {!isTerminalState && (
+                <button
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    setActiveNoteResult('completed');
+                    setNoteInputText('');
+                    setNoteModalOpen(true);
+                  }}
+                  className="inline-flex items-center justify-center w-8 h-8 bg-emerald-50 hover:bg-emerald-100 border border-emerald-250 text-emerald-700 rounded-lg shadow-sm transition-all cursor-pointer active:scale-90"
+                  title="Tamamlandı İşaretle"
+                >
+                  <Check className="w-4 h-4 stroke-[3]" />
+                </button>
+              )}
+
+              {/* Three dots dropdown */}
+              <div ref={actionDropdown.ref} className="relative">
+                <button
+                  onClick={(e) => { e.stopPropagation(); actionDropdown.setIsOpen(!actionDropdown.isOpen); }}
+                  className="inline-flex items-center justify-center w-8 h-8 bg-white border border-black/5 rounded-lg shadow-sm hover:bg-black/5 transition-colors text-[#1D1D1F] cursor-pointer"
+                >
+                  <MoreVertical className="w-4 h-4" />
+                </button>
+                
+                {actionDropdown.isOpen && (
+                  <div 
+                    className="absolute top-full right-0 mt-1 w-48 bg-white rounded-xl shadow-[0_8px_30px_rgba(0,0,0,0.12)] border border-black/5 py-1 z-50 overflow-hidden text-left"
+                    onClick={(e) => e.stopPropagation()}
                   >
-                    <Check className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">Randevuyu Teyit Et</span>
-                  </button>
-                  
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleOpenBotPopup('teyit');
-                      }}
-                      className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-indigo-50 border border-indigo-200/50 text-indigo-700 hover:bg-indigo-100 hover:text-indigo-800 rounded-lg shadow-sm transition-all text-[11px] font-bold cursor-pointer shrink-0"
-                      title="Randevuyu Bota Teyit Ettir"
-                    >
-                      <Zap className="w-3.5 h-3.5 text-indigo-500 fill-indigo-500" />
-                      <span className="hidden sm:inline">Randevuyu Bota Teyit Ettir</span>
-                    </button>
-                    {apt.metadata?.bot_teyit_sent && (
-                      <div className="flex items-center gap-1 ml-0.5 shrink-0">
-                        <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center shadow-sm" title="Bota teyit ettirildi">
-                          <Check className="w-3 h-3 text-white stroke-[3.5]" />
-                        </div>
+                    <div className="px-3 py-1.5 text-[10px] font-bold text-[#86868B] uppercase tracking-wider bg-[#F5F5F7]">Aksiyonlar</div>
+                    
+                    {!isTerminalState && (
+                      <>
+                        <DropdownItem 
+                          icon={CalendarClock} 
+                          label="Ertele (Yeniden Planla)" 
+                          onClick={() => {
+                            actionDropdown.setIsOpen(false);
+                            setPlanModalMode('reschedule');
+                            setIsPlanModalOpen(true);
+                          }} 
+                        />
+                        <DropdownItem 
+                          icon={X} 
+                          label="İptal Et (Kapat)" 
+                          color="text-red-600" 
+                          onClick={() => handleAction('cancel')} 
+                        />
+                      </>
+                    )}
+
+                    <div className="px-3 py-1.5 text-[10px] font-bold text-[#86868B] uppercase tracking-wider bg-[#F5F5F7] mt-1">Görünüm</div>
+                    <DropdownItem 
+                      icon={FileText} 
+                      label="Detaylı Kartı Aç" 
+                      onClick={() => {
+                        actionDropdown.setIsOpen(false);
+                        const oppId = apt.opportunityId || (apt as any).opportunity_id;
+                        if (oppId) onOpenDrawer(oppId, apt.taskId);
+                      }} 
+                    />
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              {/* Quick Primary Actions right in the row (extremely high conversion and micro UX) */}
+              {viewType === 'clinic' && apt.status !== 'completed' && apt.status !== 'cancelled' && apt.status !== 'arrived' && apt.status !== 'no_show' && (
+                <>
+                  {apt.confirmationStatus !== 'confirmed' ? (
+                    <>
+                      <button
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          await handleAction('confirm');
+                        }}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-white border border-emerald-600/20 text-emerald-700 rounded-lg shadow-sm hover:bg-emerald-50/50 hover:border-emerald-600/40 transition-all text-[11px] font-bold cursor-pointer"
+                        title="Randevuyu Teyit Et"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">Randevuyu Teyit Et</span>
+                      </button>
+                      
+                      <div className="flex items-center gap-1.5 shrink-0">
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
                             handleOpenBotPopup('teyit');
                           }}
-                          className="w-5 h-5 rounded-full bg-white hover:bg-[#F5F5F7] border border-black/5 flex items-center justify-center shadow-sm transition-all cursor-pointer hover:scale-105 active:scale-95 text-[#86868B] hover:text-[#1D1D1F] shrink-0"
-                          title="Yeniden Bota Teyit Ettir"
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-indigo-50 border border-indigo-200/50 text-indigo-700 hover:bg-indigo-100 hover:text-indigo-800 rounded-lg shadow-sm transition-all text-[11px] font-bold cursor-pointer shrink-0"
+                          title="Randevuyu Bota Teyit Ettir"
                         >
-                          <RotateCcw className="w-3 h-3" />
+                          <Zap className="w-3.5 h-3.5 text-indigo-500 fill-indigo-500" />
+                          <span className="hidden sm:inline">Randevuyu Bota Teyit Ettir</span>
                         </button>
+                        {apt.metadata?.bot_teyit_sent && (
+                          <div className="flex items-center gap-1 ml-0.5 shrink-0">
+                            <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center shadow-sm" title="Bota teyit ettirildi">
+                              <Check className="w-3 h-3 text-white stroke-[3.5]" />
+                            </div>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenBotPopup('teyit');
+                              }}
+                              className="w-5 h-5 rounded-full bg-white hover:bg-[#F5F5F7] border border-black/5 flex items-center justify-center shadow-sm transition-all cursor-pointer hover:scale-105 active:scale-95 text-[#86868B] hover:text-[#1D1D1F] shrink-0"
+                              title="Yeniden Bota Teyit Ettir"
+                            >
+                              <RotateCcw className="w-3 h-3" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      {/* Confirmed stage: Bot Remind, and "Randevu Aksiyonu" dropdown */}
+                      <div className="flex items-center gap-1.5 flex-wrap md:flex-nowrap">
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenBotPopup('hatirlat');
+                            }}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-indigo-50 border border-indigo-200/50 text-indigo-700 hover:bg-indigo-100 hover:text-indigo-800 rounded-lg shadow-sm transition-all text-[11px] font-bold cursor-pointer shrink-0"
+                            title="Randevuyu Bota Hatırlattır"
+                          >
+                            <Zap className="w-3.5 h-3.5 text-indigo-500 fill-indigo-500" />
+                            <span className="hidden sm:inline">Bota Hatırlattır</span>
+                          </button>
+                          {apt.metadata?.bot_hatirlat_sent && (
+                            <div className="flex items-center gap-1 ml-0.5 shrink-0">
+                              <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center shadow-sm" title="Bota hatırlatıldı">
+                                <Check className="w-3 h-3 text-white stroke-[3.5]" />
+                              </div>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenBotPopup('hatirlat');
+                                }}
+                                className="w-5 h-5 rounded-full bg-white hover:bg-[#F5F5F7] border border-black/5 flex items-center justify-center shadow-sm transition-all cursor-pointer hover:scale-105 active:scale-95 text-[#86868B] hover:text-[#1D1D1F] shrink-0"
+                                title="Yeniden Bota Hatırlattır"
+                              >
+                                <RotateCcw className="w-3 h-3" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* "Randevu Aksiyonu" Dropdown */}
+                        <div ref={randevuAksiyonuDropdown.ref} className="relative shrink-0">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              randevuAksiyonuDropdown.setIsOpen(!randevuAksiyonuDropdown.isOpen);
+                            }}
+                            className={`inline-flex items-center gap-1 px-2.5 py-1.5 border border-black/5 rounded-lg shadow-sm transition-all text-[11px] font-bold bg-white text-[#1D1D1F] hover:bg-[#F5F5F7] cursor-pointer ${
+                              randevuAksiyonuDropdown.isOpen ? 'border-[#007AFF] bg-[#007AFF]/5 text-[#007AFF]' : ''
+                            }`}
+                          >
+                            <span>Randevu Aksiyonu</span>
+                            <ChevronDown className="w-3.5 h-3.5 opacity-60" />
+                          </button>
+
+                          {randevuAksiyonuDropdown.isOpen && (
+                            <div 
+                              className="absolute top-full right-0 mt-1 w-48 bg-white rounded-xl shadow-[0_8px_30px_rgba(0,0,0,0.12)] border border-black/5 py-1 z-50 overflow-hidden text-left"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <div className="px-3 py-1.5 text-[9px] font-bold text-[#86868B] uppercase tracking-wider bg-[#F5F5F7] mb-1">Durumu Seç</div>
+                              <DropdownItem 
+                                icon={Check} 
+                                label="Geldi" 
+                                color="text-emerald-600 hover:bg-emerald-50/50" 
+                                onClick={async () => {
+                                  randevuAksiyonuDropdown.setIsOpen(false);
+                                  await handleAction('arrived');
+                                }} 
+                              />
+                              <DropdownItem 
+                                icon={XCircle} 
+                                label="Gelmedi" 
+                                color="text-red-600 hover:bg-red-50/50" 
+                                onClick={async () => {
+                                  randevuAksiyonuDropdown.setIsOpen(false);
+                                  await handleAction('no_show');
+                                }} 
+                              />
+                              <DropdownItem 
+                                icon={Ban} 
+                                label="Ulaşılamadı" 
+                                color="text-amber-600 hover:bg-amber-50/50" 
+                                onClick={async () => {
+                                  randevuAksiyonuDropdown.setIsOpen(false);
+                                  await handleAction('no_response');
+                                }} 
+                              />
+                              <DropdownItem 
+                                icon={X} 
+                                label="İptal Edildi" 
+                                color="text-gray-500 hover:bg-gray-50" 
+                                onClick={async () => {
+                                  randevuAksiyonuDropdown.setIsOpen(false);
+                                  await handleAction('cancel');
+                                }} 
+                              />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </>
+              )}
+
+              {viewType === 'phone' && (
+                <div className="flex items-center gap-1.5 flex-wrap md:flex-nowrap">
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {(() => {
+                      if (apt.status === 'completed' || apt.status === 'arrived') {
+                        if (apt.hasClinicVisit) {
+                          return (
+                            <>
+                              {/* Randevu Planlandı Badge / Butonu */}
+                              <div 
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-[#E8F5E9] border border-green-200 text-green-700 rounded-lg text-[11px] font-bold shadow-sm shrink-0"
+                                title="Müşterinin Klinik Randevusu Planlandı"
+                              >
+                                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
+                                <span>Randevu Planlandı</span>
+                              </div>
+
+                              {/* Randevu Ekranında Görüntüle Butonu */}
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onSwitchTab?.('randevu');
+                                }}
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-indigo-50 border border-indigo-200/50 text-indigo-700 hover:bg-indigo-100 hover:text-indigo-800 rounded-lg shadow-sm transition-all text-[11px] font-bold cursor-pointer shrink-0 active:scale-95"
+                                title="Klinik Randevusunu Randevu Yönetimi Ekranında Görüntüle"
+                              >
+                                <CalendarClock className="w-3.5 h-3.5 text-indigo-500 fill-indigo-500/10" />
+                                <span>Randevu Ekranında Görüntüle</span>
+                              </button>
+                            </>
+                          );
+                        }
+
+                        return (
+                          <>
+                            {/* Randevu Planla Butonu */}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setIsPlanModalOpen(true);
+                              }}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-emerald-50 border border-emerald-250 text-emerald-700 hover:bg-[#34C759]/10 transition-all text-[11px] font-bold cursor-pointer shrink-0 flex items-center gap-1 rounded-lg"
+                              title="Randevu Planla"
+                            >
+                              <Calendar className="w-3.5 h-3.5 text-emerald-500 fill-emerald-500/10" />
+                              <span className="hidden sm:inline">Randevu Planla</span>
+                            </button>
+                            
+                            {/* Bota Randevu İçin İkna Ettir Butonu */}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenBotPopup('devret');
+                              }}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-indigo-50 border border-indigo-200/50 text-indigo-700 hover:bg-indigo-100 hover:text-indigo-800 rounded-lg shadow-sm transition-all text-[11px] font-bold cursor-pointer shrink-0"
+                              title="Bota Randevu İçin İkna Ettir"
+                            >
+                              <Zap className="w-3.5 h-3.5 text-indigo-500 fill-indigo-500" />
+                              <span className="hidden sm:inline">Bota Randevu İçin İkna Ettir</span>
+                            </button>
+                            {apt.metadata?.bot_devret_sent && (
+                              <div className="flex items-center gap-1 ml-0.5 shrink-0">
+                                <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center shadow-sm" title="Bota devredildi">
+                                  <Check className="w-3 h-3 text-white stroke-[3.5]" />
+                                </div>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleOpenBotPopup('devret');
+                                  }}
+                                  className="w-5 h-5 rounded-full bg-white hover:bg-[#F5F5F7] border border-black/5 flex items-center justify-center shadow-sm transition-all cursor-pointer hover:scale-105 active:scale-95 text-[#86868B] hover:text-[#1D1D1F] shrink-0"
+                                  title="Yeniden Bota Devret"
+                                >
+                                  <RotateCcw className="w-3 h-3" />
+                                </button>
+                              </div>
+                            )}
+                          </>
+                        );
+                      }
+
+                      if (apt.status === 'no_show') {
+                        return (
+                          <>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenBotPopup('devret');
+                              }}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-indigo-50 border border-indigo-200/50 text-indigo-700 hover:bg-indigo-100 hover:text-indigo-800 rounded-lg shadow-sm transition-all text-[11px] font-bold cursor-pointer shrink-0"
+                              title="Bota Tekrar Telefon Görüşmesi Aldır"
+                            >
+                              <Zap className="w-3.5 h-3.5 text-indigo-500 fill-indigo-500" />
+                              <span className="hidden sm:inline">Bota Tekrar Telefon Görüşmesi Aldır</span>
+                            </button>
+                            {apt.metadata?.bot_devret_sent && (
+                              <div className="flex items-center gap-1 ml-0.5 shrink-0">
+                                <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center shadow-sm" title="Bota devredildi">
+                                  <Check className="w-3 h-3 text-white stroke-[3.5]" />
+                                </div>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleOpenBotPopup('devret');
+                                  }}
+                                  className="w-5 h-5 rounded-full bg-white hover:bg-[#F5F5F7] border border-black/5 flex items-center justify-center shadow-sm transition-all cursor-pointer hover:scale-105 active:scale-95 text-[#86868B] hover:text-[#1D1D1F] shrink-0"
+                                  title="Yeniden Bota Devret"
+                                >
+                                  <RotateCcw className="w-3 h-3" />
+                                </button>
+                              </div>
+                            )}
+                          </>
+                        );
+                      }
+
+                      if (apt.status === 'cancelled') {
+                        return (
+                          <>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenBotPopup('devret');
+                              }}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-indigo-50 border border-indigo-200/50 text-indigo-700 hover:bg-indigo-100 hover:text-indigo-800 rounded-lg shadow-sm transition-all text-[11px] font-bold cursor-pointer shrink-0"
+                              title="Bota Yeniden Pazarlama Yaptır İletişime Geç"
+                            >
+                              <Zap className="w-3.5 h-3.5 text-indigo-500 fill-indigo-500" />
+                              <span className="hidden sm:inline">Bota Yeniden Pazarlama Yaptır İletişime Geç</span>
+                            </button>
+                            {apt.metadata?.bot_devret_sent && (
+                              <div className="flex items-center gap-1 ml-0.5 shrink-0">
+                                <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center shadow-sm" title="Bota devredildi">
+                                  <Check className="w-3 h-3 text-white stroke-[3.5]" />
+                                </div>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleOpenBotPopup('devret');
+                                  }}
+                                  className="w-5 h-5 rounded-full bg-white hover:bg-[#F5F5F7] border border-black/5 flex items-center justify-center shadow-sm transition-all cursor-pointer hover:scale-105 active:scale-95 text-[#86868B] hover:text-[#1D1D1F] shrink-0"
+                                  title="Yeniden Bota Devret"
+                                >
+                                  <RotateCcw className="w-3 h-3" />
+                                </button>
+                              </div>
+                            )}
+                          </>
+                        );
+                      }
+
+                      if (apt.status === 'overdue') {
+                        return (
+                          <>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenBotPopup('devret');
+                              }}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-indigo-50 border border-indigo-200/50 text-indigo-700 hover:bg-indigo-100 hover:text-indigo-800 rounded-lg shadow-sm transition-all text-[11px] font-bold cursor-pointer shrink-0"
+                              title="Bota Yeniden Randevu Aldırt"
+                            >
+                              <Zap className="w-3.5 h-3.5 text-indigo-500 fill-indigo-500" />
+                              <span className="hidden sm:inline">Bota Yeniden Randevu Aldırt</span>
+                            </button>
+                            {apt.metadata?.bot_devret_sent && (
+                              <div className="flex items-center gap-1 ml-0.5 shrink-0">
+                                <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center shadow-sm" title="Bota devredildi">
+                                  <Check className="w-3 h-3 text-white stroke-[3.5]" />
+                                </div>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleOpenBotPopup('devret');
+                                  }}
+                                  className="w-5 h-5 rounded-full bg-white hover:bg-[#F5F5F7] border border-black/5 flex items-center justify-center shadow-sm transition-all cursor-pointer hover:scale-105 active:scale-95 text-[#86868B] hover:text-[#1D1D1F] shrink-0"
+                                  title="Yeniden Bota Devret"
+                                >
+                                  <RotateCcw className="w-3 h-3" />
+                                </button>
+                              </div>
+                            )}
+                          </>
+                        );
+                      }
+
+                      if (apt.confirmationStatus !== 'confirmed') {
+                        return (
+                          <>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenBotPopup('devret');
+                              }}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-indigo-50 border border-indigo-200/50 text-indigo-700 hover:bg-indigo-100 hover:text-indigo-800 rounded-lg shadow-sm transition-all text-[11px] font-bold cursor-pointer shrink-0"
+                              title="Bota Telefon Randevusunu Teyit Ettir"
+                            >
+                              <Zap className="w-3.5 h-3.5 text-indigo-500 fill-indigo-500" />
+                              <span className="hidden sm:inline">Bota Telefon Randevusunu Teyit Ettir</span>
+                            </button>
+                            {apt.metadata?.bot_devret_sent && (
+                              <div className="flex items-center gap-1 ml-0.5 shrink-0">
+                                <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center shadow-sm" title="Bota devredildi">
+                                  <Check className="w-3 h-3 text-white stroke-[3.5]" />
+                                </div>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleOpenBotPopup('devret');
+                                  }}
+                                  className="w-5 h-5 rounded-full bg-white hover:bg-[#F5F5F7] border border-black/5 flex items-center justify-center shadow-sm transition-all cursor-pointer hover:scale-105 active:scale-95 text-[#86868B] hover:text-[#1D1D1F] shrink-0"
+                                  title="Yeniden Bota Devret"
+                                >
+                                  <RotateCcw className="w-3 h-3" />
+                                </button>
+                              </div>
+                            )}
+                          </>
+                        );
+                      }
+
+                      return (
+                        <>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenBotPopup('hatirlat');
+                            }}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-indigo-50 border border-indigo-200/50 text-indigo-700 hover:bg-indigo-100 hover:text-indigo-800 rounded-lg shadow-sm transition-all text-[11px] font-bold cursor-pointer shrink-0"
+                            title="Aramayı Bota Hatırlattır"
+                          >
+                            <Zap className="w-3.5 h-3.5 text-indigo-500 fill-indigo-500" />
+                            <span className="hidden sm:inline">Bota Hatırlattır</span>
+                          </button>
+                          {apt.metadata?.bot_hatirlat_sent && (
+                            <div className="flex items-center gap-1 ml-0.5 shrink-0">
+                              <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center shadow-sm" title="Bota hatırlatıldı">
+                                <Check className="w-3 h-3 text-white stroke-[3.5]" />
+                              </div>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenBotPopup('hatirlat');
+                                }}
+                                className="w-5 h-5 rounded-full bg-white hover:bg-[#F5F5F7] border border-black/5 flex items-center justify-center shadow-sm transition-all cursor-pointer hover:scale-105 active:scale-95 text-[#86868B] hover:text-[#1D1D1F] shrink-0"
+                                title="Yeniden Bota Hatırlattır"
+                              >
+                                <RotateCcw className="w-3 h-3" />
+                              </button>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </div>
+
+                  {/* "Arama Aksiyonu" Dropdown */}
+                  <div ref={randevuAksiyonuDropdown.ref} className="relative shrink-0">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        randevuAksiyonuDropdown.setIsOpen(!randevuAksiyonuDropdown.isOpen);
+                      }}
+                      className={`inline-flex items-center gap-1 px-2.5 py-1.5 border border-black/5 rounded-lg shadow-sm transition-all text-[11px] font-bold bg-white text-[#1D1D1F] hover:bg-[#F5F5F7] cursor-pointer ${
+                        randevuAksiyonuDropdown.isOpen ? 'border-[#007AFF] bg-[#007AFF]/5 text-[#007AFF]' : ''
+                      }`}
+                    >
+                      <span>Arama Aksiyonu</span>
+                      <ChevronDown className="w-3.5 h-3.5 opacity-60" />
+                    </button>
+
+                    {randevuAksiyonuDropdown.isOpen && (
+                      <div 
+                        className="absolute top-full right-0 mt-1 w-48 bg-white rounded-xl shadow-[0_8px_30px_rgba(0,0,0,0.12)] border border-black/5 py-1 z-50 overflow-hidden text-left"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <div className="px-3 py-1.5 text-[9px] font-bold text-[#86868B] uppercase tracking-wider bg-[#F5F5F7] mb-1">Durumu Seç</div>
+                        <DropdownItem 
+                          icon={Check} 
+                          label="Arandı - Ulaşıldı" 
+                          color="text-emerald-600 hover:bg-emerald-50/50" 
+                          onClick={() => {
+                            randevuAksiyonuDropdown.setIsOpen(false);
+                            setActiveNoteResult('completed');
+                            setNoteInputText('');
+                            setNoteModalOpen(true);
+                          }} 
+                        />
+                        <DropdownItem 
+                          icon={Ban} 
+                          label="Ulaşılamadı" 
+                          color="text-amber-600 hover:bg-amber-50/50" 
+                          onClick={async () => {
+                            randevuAksiyonuDropdown.setIsOpen(false);
+                            await handleAction('call_missed');
+                          }} 
+                        />
+                        <DropdownItem 
+                          icon={X} 
+                          label="İptal Edildi" 
+                          color="text-gray-500 hover:bg-gray-50" 
+                          onClick={async () => {
+                            randevuAksiyonuDropdown.setIsOpen(false);
+                            await handleAction('cancel');
+                          }} 
+                        />
                       </div>
                     )}
                   </div>
-                </>
-              ) : (
-                <>
-                  {/* Confirmed stage: Bot Remind, and "Randevu Aksiyonu" dropdown */}
-                  <div className="flex items-center gap-1.5 flex-wrap md:flex-nowrap">
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleOpenBotPopup('hatirlat');
-                        }}
-                        className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-indigo-50 border border-indigo-200/50 text-indigo-700 hover:bg-indigo-100 hover:text-indigo-800 rounded-lg shadow-sm transition-all text-[11px] font-bold cursor-pointer shrink-0"
-                        title="Randevuyu Bota Hatırlattır"
-                      >
-                        <Zap className="w-3.5 h-3.5 text-indigo-500 fill-indigo-500" />
-                        <span className="hidden sm:inline">Randevuyu Bota Hatırlattır</span>
-                      </button>
-                      {apt.metadata?.bot_hatirlat_sent && (
-                        <div className="flex items-center gap-1 ml-0.5 shrink-0">
-                          <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center shadow-sm" title="Bota hatırlatıldı">
-                            <Check className="w-3 h-3 text-white stroke-[3.5]" />
-                          </div>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleOpenBotPopup('hatirlat');
-                            }}
-                            className="w-5 h-5 rounded-full bg-white hover:bg-[#F5F5F7] border border-black/5 flex items-center justify-center shadow-sm transition-all cursor-pointer hover:scale-105 active:scale-95 text-[#86868B] hover:text-[#1D1D1F] shrink-0"
-                            title="Yeniden Bota Hatırlattır"
-                          >
-                            <RotateCcw className="w-3 h-3" />
-                          </button>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* "Randevu Aksiyonu" Dropdown */}
-                    <div ref={randevuAksiyonuDropdown.ref} className="relative shrink-0">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          randevuAksiyonuDropdown.setIsOpen(!randevuAksiyonuDropdown.isOpen);
-                        }}
-                        className={`inline-flex items-center gap-1 px-2.5 py-1.5 border border-black/5 rounded-lg shadow-sm transition-all text-[11px] font-bold bg-white text-[#1D1D1F] hover:bg-[#F5F5F7] cursor-pointer ${
-                          randevuAksiyonuDropdown.isOpen ? 'border-[#007AFF] bg-[#007AFF]/5 text-[#007AFF]' : ''
-                        }`}
-                      >
-                        <span>Randevu Aksiyonu</span>
-                        <ChevronDown className="w-3.5 h-3.5 opacity-60" />
-                      </button>
-
-                      {randevuAksiyonuDropdown.isOpen && (
-                        <div 
-                          className="absolute top-full right-0 mt-1 w-48 bg-white rounded-xl shadow-[0_8px_30px_rgba(0,0,0,0.12)] border border-black/5 py-1 z-50 overflow-hidden text-left"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <div className="px-3 py-1.5 text-[9px] font-bold text-[#86868B] uppercase tracking-wider bg-[#F5F5F7] mb-1">Durumu Seç</div>
-                          <DropdownItem 
-                            icon={Check} 
-                            label="Geldi" 
-                            color="text-emerald-600 hover:bg-emerald-50/50" 
-                            onClick={async () => {
-                              randevuAksiyonuDropdown.setIsOpen(false);
-                              await handleAction('arrived');
-                            }} 
-                          />
-                          <DropdownItem 
-                            icon={XCircle} 
-                            label="Gelmedi" 
-                            color="text-red-600 hover:bg-red-50/50" 
-                            onClick={async () => {
-                              randevuAksiyonuDropdown.setIsOpen(false);
-                              await handleAction('no_show');
-                            }} 
-                          />
-                          <DropdownItem 
-                            icon={Ban} 
-                            label="Ulaşılamadı" 
-                            color="text-amber-600 hover:bg-amber-50/50" 
-                            onClick={async () => {
-                              randevuAksiyonuDropdown.setIsOpen(false);
-                              await handleAction('no_response');
-                            }} 
-                          />
-                          <DropdownItem 
-                            icon={X} 
-                            label="İptal Edildi" 
-                            color="text-gray-500 hover:bg-gray-50" 
-                            onClick={async () => {
-                              randevuAksiyonuDropdown.setIsOpen(false);
-                              await handleAction('cancel');
-                            }} 
-                          />
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </>
+                </div>
               )}
-            </>
-          )}
 
-          {viewType === 'phone' && (
-            <div className="flex items-center gap-1.5 flex-wrap md:flex-nowrap">
-              <div className="flex items-center gap-1.5 shrink-0">
-                {(() => {
-                  if (apt.status === 'completed' || apt.status === 'arrived') {
-                    if (apt.hasClinicVisit) {
-                      return (
-                        <>
-                          {/* Randevu Planlandı Badge / Butonu */}
-                          <div 
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-[#E8F5E9] border border-green-200 text-green-700 rounded-lg text-[11px] font-bold shadow-sm shrink-0"
-                            title="Müşterinin Klinik Randevusu Planlandı"
-                          >
-                            <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
-                            <span>Randevu Planlandı</span>
-                          </div>
-
-                          {/* Randevu Ekranında Görüntüle Butonu */}
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onSwitchTab?.('randevu');
-                            }}
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-indigo-50 border border-indigo-200/50 text-indigo-700 hover:bg-indigo-100 hover:text-indigo-800 rounded-lg shadow-sm transition-all text-[11px] font-bold cursor-pointer shrink-0 active:scale-95"
-                            title="Klinik Randevusunu Randevu Yönetimi Ekranında Görüntüle"
-                          >
-                            <CalendarClock className="w-3.5 h-3.5 text-indigo-500 fill-indigo-500/10" />
-                            <span>Randevu Ekranında Görüntüle</span>
-                          </button>
-                        </>
-                      );
-                    }
-
-                    return (
-                      <>
-                        {/* Randevu Planla Butonu */}
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setIsPlanModalOpen(true);
-                          }}
-                          className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-emerald-50 border border-emerald-200/50 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800 rounded-lg shadow-sm transition-all text-[11px] font-bold cursor-pointer shrink-0"
-                          title="Randevu Planla"
-                        >
-                          <Calendar className="w-3.5 h-3.5 text-emerald-500 fill-emerald-500/10" />
-                          <span className="hidden sm:inline">Randevu Planla</span>
-                        </button>
-                        
-                        {/* Bota Randevu İçin İkna Ettir Butonu */}
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleOpenBotPopup('devret');
-                          }}
-                          className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-indigo-50 border border-indigo-200/50 text-indigo-700 hover:bg-indigo-100 hover:text-indigo-800 rounded-lg shadow-sm transition-all text-[11px] font-bold cursor-pointer shrink-0"
-                          title="Bota Randevu İçin İkna Ettir"
-                        >
-                          <Zap className="w-3.5 h-3.5 text-indigo-500 fill-indigo-500" />
-                          <span className="hidden sm:inline">Bota Randevu İçin İkna Ettir</span>
-                        </button>
-                        {apt.metadata?.bot_devret_sent && (
-                          <div className="flex items-center gap-1 ml-0.5 shrink-0">
-                            <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center shadow-sm" title="Bota devredildi">
-                              <Check className="w-3 h-3 text-white stroke-[3.5]" />
-                            </div>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleOpenBotPopup('devret');
-                              }}
-                              className="w-5 h-5 rounded-full bg-white hover:bg-[#F5F5F7] border border-black/5 flex items-center justify-center shadow-sm transition-all cursor-pointer hover:scale-105 active:scale-95 text-[#86868B] hover:text-[#1D1D1F] shrink-0"
-                              title="Yeniden Bota Devret"
-                            >
-                              <RotateCcw className="w-3 h-3" />
-                            </button>
-                          </div>
-                        )}
-                      </>
-                    );
-                  }
-
-                  if (apt.status === 'no_show') {
-                    return (
-                      <>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleOpenBotPopup('devret');
-                          }}
-                          className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-indigo-50 border border-indigo-200/50 text-indigo-700 hover:bg-indigo-100 hover:text-indigo-800 rounded-lg shadow-sm transition-all text-[11px] font-bold cursor-pointer shrink-0"
-                          title="Bota Tekrar Telefon Görüşmesi Aldır"
-                        >
-                          <Zap className="w-3.5 h-3.5 text-indigo-500 fill-indigo-500" />
-                          <span className="hidden sm:inline">Bota Tekrar Telefon Görüşmesi Aldır</span>
-                        </button>
-                        {apt.metadata?.bot_devret_sent && (
-                          <div className="flex items-center gap-1 ml-0.5 shrink-0">
-                            <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center shadow-sm" title="Bota devredildi">
-                              <Check className="w-3 h-3 text-white stroke-[3.5]" />
-                            </div>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleOpenBotPopup('devret');
-                              }}
-                              className="w-5 h-5 rounded-full bg-white hover:bg-[#F5F5F7] border border-black/5 flex items-center justify-center shadow-sm transition-all cursor-pointer hover:scale-105 active:scale-95 text-[#86868B] hover:text-[#1D1D1F] shrink-0"
-                              title="Yeniden Bota Devret"
-                            >
-                              <RotateCcw className="w-3 h-3" />
-                            </button>
-                          </div>
-                        )}
-                      </>
-                    );
-                  }
-                  
-                  if (apt.status === 'cancelled') {
-                    return (
-                      <>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleOpenBotPopup('devret');
-                          }}
-                          className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-indigo-50 border border-indigo-200/50 text-indigo-700 hover:bg-indigo-100 hover:text-indigo-800 rounded-lg shadow-sm transition-all text-[11px] font-bold cursor-pointer shrink-0"
-                          title="Bota Yeniden Pazarlama Yaptır İletişime Geç"
-                        >
-                          <Zap className="w-3.5 h-3.5 text-indigo-500 fill-indigo-500" />
-                          <span className="hidden sm:inline">Bota Yeniden Pazarlama Yaptır İletişime Geç</span>
-                        </button>
-                        {apt.metadata?.bot_devret_sent && (
-                          <div className="flex items-center gap-1 ml-0.5 shrink-0">
-                            <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center shadow-sm" title="Bota devredildi">
-                              <Check className="w-3 h-3 text-white stroke-[3.5]" />
-                            </div>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleOpenBotPopup('devret');
-                              }}
-                              className="w-5 h-5 rounded-full bg-white hover:bg-[#F5F5F7] border border-black/5 flex items-center justify-center shadow-sm transition-all cursor-pointer hover:scale-105 active:scale-95 text-[#86868B] hover:text-[#1D1D1F] shrink-0"
-                              title="Yeniden Bota Devret"
-                            >
-                              <RotateCcw className="w-3 h-3" />
-                            </button>
-                          </div>
-                        )}
-                      </>
-                    );
-                  }
-                  
-                  if (apt.status === 'overdue') {
-                    return (
-                      <>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleOpenBotPopup('devret');
-                          }}
-                          className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-indigo-50 border border-indigo-200/50 text-indigo-700 hover:bg-indigo-100 hover:text-indigo-800 rounded-lg shadow-sm transition-all text-[11px] font-bold cursor-pointer shrink-0"
-                          title="Bota Yeniden Randevu Aldırt"
-                        >
-                          <Zap className="w-3.5 h-3.5 text-indigo-500 fill-indigo-500" />
-                          <span className="hidden sm:inline">Bota Yeniden Randevu Aldırt</span>
-                        </button>
-                        {apt.metadata?.bot_devret_sent && (
-                          <div className="flex items-center gap-1 ml-0.5 shrink-0">
-                            <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center shadow-sm" title="Bota devredildi">
-                              <Check className="w-3 h-3 text-white stroke-[3.5]" />
-                            </div>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleOpenBotPopup('devret');
-                              }}
-                              className="w-5 h-5 rounded-full bg-white hover:bg-[#F5F5F7] border border-black/5 flex items-center justify-center shadow-sm transition-all cursor-pointer hover:scale-105 active:scale-95 text-[#86868B] hover:text-[#1D1D1F] shrink-0"
-                              title="Yeniden Bota Devret"
-                            >
-                              <RotateCcw className="w-3 h-3" />
-                            </button>
-                          </div>
-                        )}
-                      </>
-                    );
-                  }
-                  
-                  if (apt.confirmationStatus !== 'confirmed') {
-                    return (
-                      <>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleOpenBotPopup('devret');
-                          }}
-                          className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-indigo-50 border border-indigo-200/50 text-indigo-700 hover:bg-indigo-100 hover:text-indigo-800 rounded-lg shadow-sm transition-all text-[11px] font-bold cursor-pointer shrink-0"
-                          title="Bota Telefon Randevusunu Teyit Ettir"
-                        >
-                          <Zap className="w-3.5 h-3.5 text-indigo-500 fill-indigo-500" />
-                          <span className="hidden sm:inline">Bota Telefon Randevusunu Teyit Ettir</span>
-                        </button>
-                        {apt.metadata?.bot_devret_sent && (
-                          <div className="flex items-center gap-1 ml-0.5 shrink-0">
-                            <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center shadow-sm" title="Bota devredildi">
-                              <Check className="w-3 h-3 text-white stroke-[3.5]" />
-                            </div>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleOpenBotPopup('devret');
-                              }}
-                              className="w-5 h-5 rounded-full bg-white hover:bg-[#F5F5F7] border border-black/5 flex items-center justify-center shadow-sm transition-all cursor-pointer hover:scale-105 active:scale-95 text-[#86868B] hover:text-[#1D1D1F] shrink-0"
-                              title="Yeniden Bota Devret"
-                            >
-                              <RotateCcw className="w-3 h-3" />
-                            </button>
-                          </div>
-                        )}
-                      </>
-                    );
-                  }
-                  
-                  return (
-                    <>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleOpenBotPopup('hatirlat');
-                        }}
-                        className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-indigo-50 border border-indigo-200/50 text-indigo-700 hover:bg-indigo-100 hover:text-indigo-800 rounded-lg shadow-sm transition-all text-[11px] font-bold cursor-pointer shrink-0"
-                        title="Aramayı Bota Hatırlattır"
-                      >
-                        <Zap className="w-3.5 h-3.5 text-indigo-500 fill-indigo-500" />
-                        <span className="hidden sm:inline">Bota Hatırlattır</span>
-                      </button>
-                      {apt.metadata?.bot_hatirlat_sent && (
-                        <div className="flex items-center gap-1 ml-0.5 shrink-0">
-                          <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center shadow-sm" title="Bota hatırlatıldı">
-                            <Check className="w-3 h-3 text-white stroke-[3.5]" />
-                          </div>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleOpenBotPopup('hatirlat');
-                            }}
-                            className="w-5 h-5 rounded-full bg-white hover:bg-[#F5F5F7] border border-black/5 flex items-center justify-center shadow-sm transition-all cursor-pointer hover:scale-105 active:scale-95 text-[#86868B] hover:text-[#1D1D1F] shrink-0"
-                            title="Yeniden Bota Hatırlattır"
-                          >
-                            <RotateCcw className="w-3 h-3" />
-                          </button>
-                        </div>
-                      )}
-                    </>
-                  );
-                })()}
-              </div>
-
-              {/* "Arama Aksiyonu" Dropdown */}
-              <div ref={randevuAksiyonuDropdown.ref} className="relative shrink-0">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onGoToInbox({ phone_number: apt.phoneNumber, display_name: apt.patientName });
+                }}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-white border border-black/5 rounded-lg shadow-sm hover:bg-[#007AFF]/10 hover:border-[#007AFF]/20 hover:text-[#007AFF] transition-all text-[11px] font-semibold text-[#1D1D1F] cursor-pointer"
+                title="Mesaja Git"
+              >
+                <Phone className="w-3.5 h-3.5" />
+              </button>
+              
+              <div ref={actionDropdown.ref} className="relative">
                 <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    randevuAksiyonuDropdown.setIsOpen(!randevuAksiyonuDropdown.isOpen);
-                  }}
-                  className={`inline-flex items-center gap-1 px-2.5 py-1.5 border border-black/5 rounded-lg shadow-sm transition-all text-[11px] font-bold bg-white text-[#1D1D1F] hover:bg-[#F5F5F7] cursor-pointer ${
-                    randevuAksiyonuDropdown.isOpen ? 'border-[#007AFF] bg-[#007AFF]/5 text-[#007AFF]' : ''
-                  }`}
+                  onClick={(e) => { e.stopPropagation(); actionDropdown.setIsOpen(!actionDropdown.isOpen); }}
+                  className="inline-flex items-center justify-center w-8 h-8 bg-white border border-black/5 rounded-lg shadow-sm hover:bg-black/5 transition-colors text-[#1D1D1F] cursor-pointer"
                 >
-                  <span>Arama Aksiyonu</span>
-                  <ChevronDown className="w-3.5 h-3.5 opacity-60" />
+                  <MoreVertical className="w-4 h-4" />
                 </button>
-
-                {randevuAksiyonuDropdown.isOpen && (
+                
+                {actionDropdown.isOpen && (
                   <div 
                     className="absolute top-full right-0 mt-1 w-48 bg-white rounded-xl shadow-[0_8px_30px_rgba(0,0,0,0.12)] border border-black/5 py-1 z-50 overflow-hidden text-left"
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <div className="px-3 py-1.5 text-[9px] font-bold text-[#86868B] uppercase tracking-wider bg-[#F5F5F7] mb-1">Durumu Seç</div>
+                    {apt.status !== 'completed' && apt.status !== 'cancelled' && (
+                      <>
+                        <div className="px-3 py-1.5 text-[10px] font-bold text-[#86868B] uppercase tracking-wider bg-[#F5F5F7]">Aksiyonlar</div>
+                        
+                        {isPhone && (
+                          <>
+                            <DropdownItem icon={Check} label="Görüşüldü" onClick={() => handleAction('call_completed')} />
+                            <DropdownItem icon={Ban} label="Ulaşılamadı" onClick={() => handleAction('call_missed')} />
+                            <DropdownItem 
+                              icon={CalendarClock} 
+                              label="Ertele (Yeniden Planla)" 
+                              onClick={() => {
+                                actionDropdown.setIsOpen(false);
+                                setPlanModalMode('create');
+                                setPlanType('phone_call');
+                                setIsPlanModalOpen(true);
+                              }} 
+                            />
+                            <DropdownItem icon={X} label="İptal Et" color="text-red-600" onClick={() => handleAction('cancel')} />
+                          </>
+                        )}
+                        
+                        {isClinic && (
+                          <>
+                            {apt.confirmationStatus !== 'confirmed' && (
+                              <DropdownItem icon={Check} label="Teyit Edildi Yap" onClick={() => handleAction('confirm')} />
+                            )}
+                            <DropdownItem icon={MapPin} label="Geldi İşaretle" onClick={() => handleAction('arrived')} />
+                            <DropdownItem icon={XCircle} label="Gelmedi İşaretle" onClick={() => handleAction('no_show')} />
+                            <DropdownItem 
+                              icon={CalendarClock} 
+                              label="Ertele (Yeniden Planla)" 
+                              onClick={() => {
+                                actionDropdown.setIsOpen(false);
+                                setPlanModalMode('create');
+                                setPlanType('clinic_visit');
+                                setIsPlanModalOpen(true);
+                              }} 
+                            />
+                            <DropdownItem icon={X} label="İptal Et" color="text-red-600" onClick={() => handleAction('cancel')} />
+                          </>
+                        )}
+                      </>
+                    )}
+                    
+                    <div className="px-3 py-1.5 text-[10px] font-bold text-[#86868B] uppercase tracking-wider bg-[#F5F5F7] mt-1">Görünüm</div>
                     <DropdownItem 
-                      icon={Check} 
-                      label="Arandı - Ulaşıldı" 
-                      color="text-emerald-600 hover:bg-emerald-50/50" 
+                      icon={FileText} 
+                      label="Detaylı Kartı Aç" 
                       onClick={() => {
-                        randevuAksiyonuDropdown.setIsOpen(false);
-                        setActiveNoteResult('completed');
-                        setNoteInputText('');
-                        setNoteModalOpen(true);
-                      }} 
-                    />
-                    <DropdownItem 
-                      icon={Ban} 
-                      label="Ulaşılamadı" 
-                      color="text-amber-600 hover:bg-amber-50/50" 
-                      onClick={async () => {
-                        randevuAksiyonuDropdown.setIsOpen(false);
-                        await handleAction('call_missed');
-                      }} 
-                    />
-                    <DropdownItem 
-                      icon={X} 
-                      label="İptal Edildi" 
-                      color="text-gray-500 hover:bg-gray-50" 
-                      onClick={async () => {
-                        randevuAksiyonuDropdown.setIsOpen(false);
-                        await handleAction('cancel');
+                        actionDropdown.setIsOpen(false);
+                        const oppId = apt.opportunityId || (apt as any).opportunity_id;
+                        if (oppId) onOpenDrawer(oppId, apt.taskId);
                       }} 
                     />
                   </div>
                 )}
               </div>
-            </div>
+            </>
           )}
-
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onGoToInbox({ phone_number: apt.phoneNumber, display_name: apt.patientName });
-            }}
-            className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-white border border-black/5 rounded-lg shadow-sm hover:bg-[#007AFF]/10 hover:border-[#007AFF]/20 hover:text-[#007AFF] transition-all text-[11px] font-semibold text-[#1D1D1F] cursor-pointer"
-            title="Mesaja Git"
-          >
-            <Phone className="w-3.5 h-3.5" />
-          </button>
-          
-          <div ref={actionDropdown.ref} className="relative">
-            <button
-              onClick={(e) => { e.stopPropagation(); actionDropdown.setIsOpen(!actionDropdown.isOpen); }}
-              className="inline-flex items-center justify-center w-8 h-8 bg-white border border-black/5 rounded-lg shadow-sm hover:bg-black/5 transition-colors text-[#1D1D1F] cursor-pointer"
-            >
-              <MoreVertical className="w-4 h-4" />
-            </button>
-            
-            {actionDropdown.isOpen && (
-              <div 
-                className="absolute top-full right-0 mt-1 w-48 bg-white rounded-xl shadow-[0_8px_30px_rgba(0,0,0,0.12)] border border-black/5 py-1 z-50 overflow-hidden text-left"
-                onClick={(e) => e.stopPropagation()}
-              >
-                {apt.status !== 'completed' && apt.status !== 'cancelled' && (
-                  <>
-                    <div className="px-3 py-1.5 text-[10px] font-bold text-[#86868B] uppercase tracking-wider bg-[#F5F5F7]">Aksiyonlar</div>
-                    
-                    {isPhone && (
-                      <>
-                        <DropdownItem icon={Check} label="Görüşüldü" onClick={() => handleAction('call_completed')} />
-                        <DropdownItem icon={Ban} label="Ulaşılamadı" onClick={() => handleAction('call_missed')} />
-                      </>
-                    )}
-                    
-                    {isClinic && (
-                      <>
-                        <DropdownItem icon={CheckCircle2} label="Geldi" color="text-emerald-600" onClick={() => handleAction('arrived')} />
-                        <DropdownItem icon={XCircle} label="Gelmedi" color="text-red-600" onClick={() => handleAction('no_show')} />
-                      </>
-                    )}
-
-                    <div className="px-3 py-1.5 text-[10px] font-bold text-[#86868B] uppercase tracking-wider bg-[#F5F5F7] mt-1">Teyit</div>
-                    <DropdownItem icon={CheckCircle2} label="Teyit Edildi" onClick={() => handleAction('confirm')} />
-                    <DropdownItem icon={Clock} label="Teyit Sürecini Başa Al" onClick={() => handleAction('pending')} />
-                    <DropdownItem icon={Ban} label="Cevap Yok" onClick={() => handleAction('no_response')} />
-                    
-                    <div className="px-3 py-1.5 text-[10px] font-bold text-[#86868B] uppercase tracking-wider bg-[#F5F5F7] mt-1">Diğer</div>
-                    <DropdownItem icon={X} label="İptal Et" color="text-red-600" onClick={() => handleAction('cancel')} />
-                  </>
-                )}
-              </div>
-            )}
-          </div>
 
           {/* Bot Yönlendirme Şablon Modalı (Buzlu Cam Efektli & fixed viewport sayesinde asla kesilmez) */}
           {activeBotPopup && (
@@ -2357,14 +2551,16 @@ function AppointmentRowComponent({ apt, onOpenDrawer, onGoToInbox, onActionCompl
                 onClick={async () => {
                   setNoteModalOpen(false);
                   try {
-                    const res = await completeAppointmentTask(apt.taskId, activeNoteResult, noteInputText);
+                    const res = !viewType
+                      ? await completeFollowUpTaskAction(apt.taskId, 'completed', noteInputText)
+                      : await completeAppointmentTask(apt.taskId, activeNoteResult, noteInputText);
                     if (res && res.success) {
                       onActionComplete();
                     } else {
                       showAlert("Hata", res?.error || "İşlem başarısız oldu.");
                     }
                   } catch (err) {
-                    console.error("completeAppointmentTask error:", err);
+                    console.error("completeTask error:", err);
                     showAlert("Hata", "İşlem başarısız oldu.");
                   }
                 }}
