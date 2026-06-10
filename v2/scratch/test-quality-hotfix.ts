@@ -206,8 +206,53 @@ async function generateResponseWithQualityRetry(
     languageContext
   });
 
+  const identityConfig = mockBrain.prompts.metadata?.identity || {};
+  const assistantHistory = history.filter((m: any) => m.role === 'assistant');
+  const isFirstAssistantTurn = assistantHistory.length === 0;
+
+  const currentMessageTextLower = currentMessageText.toLowerCase().trim();
+  const asksIdentity = ['kimsin', 'kimsiniz'].some(kw => currentMessageTextLower.includes(kw));
+  const asksName = ['ismin ne', 'adın ne', 'isminiz ne', 'adınız ne', 'ismini söyler', 'ismin nedir', 'adın nedir'].some(kw => currentMessageTextLower.includes(kw));
+  const patientClaimsBot = ['botsun', 'bot musun', 'yapay zeka', 'robot musun'].some(kw => currentMessageTextLower.includes(kw));
+
+  let ctaOfferedRecently = false;
+  if (Array.isArray(history)) {
+    const last3Assistant = assistantHistory.slice(-3);
+    ctaOfferedRecently = last3Assistant.some((m: any) => {
+      const text = (m.content || '').toLowerCase();
+      return [
+        'randevu', 'görüşme', 'gorusme', 'arayalım', 'arayalim', 'arayabiliriz', 'arama',
+        'telefon', 'appointment', 'call', 'contact you', 'telefonla'
+      ].some(kw => text.includes(kw));
+    });
+  }
+
+  let angryPatientMode = false;
+  const angerKeywords = [
+    'şikayet', 'sikayet', 'rezalet', 'berbat', 'kötü', 'kotu', 'memnun değil', 'memnun degil',
+    'memnun kalmadım', 'memnun kalmadim', 'ilgisiz', 'zaman kaybı', 'zaman kaybi', 'robot',
+    'otomatik', 'dalga mı', 'dalga mi', 'düzgün', 'duzgun', 'yalan', 'yanlış', 'yanlis',
+    'sinir', 'bıktım', 'biktim', 'yeter', 'insanla', 'temsilci', 'canlı destek', 'canli destek',
+    'şikayetçiyim', 'sikayetciyim', 'şikayetçi', 'sikayetci', 'muhatap', 'kızgın', 'kizgin',
+    'söylemiyorsunuz', 'soylemiyorsunuz', 'vermiyorsunuz', 'diyorum', 'cevap ver', 'cevap vermiyorsunuz'
+  ];
+  angryPatientMode = angerKeywords.some(kw => currentMessageTextLower.includes(kw));
+
+  const qgOptions = {
+    ...options,
+    ctaOfferedRecently: options?.ctaOfferedRecently || ctaOfferedRecently,
+    angryPatientMode: options?.angryPatientMode || angryPatientMode,
+    personaName: identityConfig.personaName,
+    organizationName: identityConfig.organizationName,
+    organizationShortName: identityConfig.organizationShortName,
+    identityAlreadyIntroduced: !isFirstAssistantTurn,
+    asksIdentity,
+    asksName,
+    patientClaimsBot
+  };
+
   let response = await callGeminiDirect(systemPrompt, history);
-  let qgRes = TurkishReplyQualityGate.validate(response, options);
+  let qgRes = TurkishReplyQualityGate.validate(response, qgOptions);
 
   if (!qgRes.valid) {
     console.log(`  [SIMULATED RETRY] First attempt failed quality gate: ${qgRes.reason}. Retrying with feedback...`);
@@ -216,18 +261,41 @@ async function generateResponseWithQualityRetry(
       { role: 'assistant', content: response },
       {
         role: 'user',
-        content: `DİKKAT: Ürettiğin Türkçe metinde ek hatası, yasaklı bot kalıbı veya gereksiz iyelik eki/çift ek tespit edildi (Hata: ${qgRes.reason}). Lütfen bu hatayı düzelterek resmi ama sade Türkçe ile kısa bir cevap üret. Tanı koyma, fiyat verme, gereksiz sahiplik ekleri kullanma.`
+        content: `DİKKAT: Ürettiğin Türkçe metinde ek hatası veya kendini tanıtma tekrarı tespit edildi. Kendini tanıtan kelimeleri/cümleleri (örneğin "Merhaba, ben Rüya...", "Rüya ben...") kesinlikle kullanma, doğrudan konuya girerek kısa ve sade bir cevap üret.`
       }
     ];
 
     response = await callGeminiDirect(systemPrompt, retryHistory);
-    qgRes = TurkishReplyQualityGate.validate(response, options);
+    qgRes = TurkishReplyQualityGate.validate(response, qgOptions);
+    
     if (!qgRes.valid) {
-      console.log(`  [SIMULATED RETRY FAILED] Second attempt also failed: ${qgRes.reason}`);
+      console.log(`  [SIMULATED RETRY FAILED] Second attempt also failed: ${qgRes.reason}. Applying stripPersonaIntroduction cleanup...`);
+      const originalText = response;
+      const cleanedText = TurkishReplyQualityGate.stripPersonaIntroduction(originalText, qgOptions);
+      
+      if (cleanedText && cleanedText.trim().length > 0) {
+        const cleanedQgRes = TurkishReplyQualityGate.validate(cleanedText, qgOptions);
+        if (cleanedQgRes.valid) {
+          console.log(`  [SIMULATED CLEANUP SUCCESS] Cleanup passed validation!`);
+          response = cleanedText;
+          qgRes = { valid: true };
+        } else {
+          console.log(`  [SIMULATED CLEANUP FAILED] Cleaned text also failed validation: ${cleanedQgRes.reason}`);
+          qgRes = cleanedQgRes;
+        }
+      } else {
+        console.log(`  [SIMULATED CLEANUP FAILED] Cleaned text is empty`);
+        qgRes = { valid: false, reason: 'cleaned_text_empty' };
+      }
     } else {
       console.log(`  [SIMULATED RETRY SUCCESS] Second attempt passed quality gate!`);
     }
   }
+
+  if (!qgRes.valid) {
+    throw new Error(`Quality Gate failed: ${qgRes.reason}`);
+  }
+
   return response;
 }
 
@@ -247,7 +315,14 @@ async function runRegressionSimulation() {
       }
     },
     prompts: {
-      systemPrompt: baskentWhatsappPromptV56
+      systemPrompt: baskentWhatsappPromptV56,
+      metadata: {
+        identity: {
+          personaName: 'Rüya',
+          organizationName: 'Başkent Üniversitesi Konya Uygulama ve Araştırma Merkezi',
+          organizationShortName: 'Başkent Konya'
+        }
+      }
     }
   } as unknown as TenantBrain;
 

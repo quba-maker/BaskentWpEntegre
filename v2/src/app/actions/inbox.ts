@@ -5516,18 +5516,49 @@ export async function prepareInboxBotAssistedDraftAction(
       // 5. Resolve 24h window status
       const windowStatus = await resolveWhatsApp24hWindow(conversationId, ctx.tenantId, ctx.db);
 
+      // Fetch dynamic identity configuration
+      let identityConfig = { personaName: '', organizationName: '', organizationShortName: '' };
+      try {
+        const promptRows = await ctx.db.executeSafe({
+          text: `
+            SELECT cp.metadata
+            FROM channel_prompt_bindings cpb
+            JOIN channel_prompts cp ON cpb.prompt_id = cp.id
+            JOIN channels c ON cpb.channel_id = c.id
+            JOIN channel_groups cg ON c.group_id = cg.id
+            WHERE cg.tenant_id = $1
+              AND cpb.is_active = true
+              AND cp.prompt_type = 'system'
+              AND cp.tenant_id = $1
+            ORDER BY cpb.priority ASC
+            LIMIT 1
+          `,
+          values: [ctx.tenantId]
+        }) as any[];
+        
+        if (promptRows && promptRows.length > 0 && promptRows[0].metadata?.identity) {
+          identityConfig = promptRows[0].metadata.identity;
+        }
+      } catch (dbErr) {
+        console.error("[INBOX_DRAFT_IDENTITY_RESOLVE_ERROR] Failed to fetch prompt metadata", dbErr);
+      }
+
+      const pName = identityConfig.personaName || '';
+      const orgName = identityConfig.organizationName || '';
+      const orgShort = identityConfig.organizationShortName || '';
+
       // Determine prompt directive description based on intentHint
       let intentText = "";
       if (intentHint === "Karşılama") {
-        intentText = "Hastayı sıcak ve kurumsal bir dille karşıla ve Konya Hastanemize başvuru amacını/şikayetini kibarca netleştir.";
+        intentText = `Hastayı sıcak ve kurumsal bir dille karşıla ve ${orgShort ? `${orgShort} Hastanemize` : 'hastanemize'} başvuru amacını/şikayetini kibarca netleştir.`;
       } else if (intentHint === "Randevuya Yönlendir") {
-        intentText = "Hastayı Konya Başkent Hastanemizde muayene veya randevu planlamaya kibarca davet et.";
+        intentText = `Hastayı ${orgShort ? `${orgShort} Hastanemizde` : 'hastanemizde'} muayene veya randevu planlamaya kibarca davet et.`;
       } else if (intentHint === "Uygun Gün/Saat Sor") {
         intentText = "Hastaya randevu planlaması veya görüşme için hangi günlerin ve saatlerin kendisine uygun olduğunu sor.";
       } else if (intentHint === "Fiyat Vermeden Koordinatöre Yönlendir") {
-        intentText = "Hastalara fiyat bilgisi vermeden, Konya hastanemizin hasta koordinatörlerinin kendilerine ulaşıp detaylı bilgi vereceğini ilet.";
+        intentText = `Hastalara fiyat bilgisi vermeden, ${orgShort ? `${orgShort} hastanemizin` : 'hastanemizin'} hasta koordinatörlerinin kendilerine ulaşıp detaylı bilgi vereceğini ilet.`;
       } else if (intentHint === "Kararsız Hastayı Nazikçe İkna Et") {
-        intentText = "Kararsız veya endişeli hastayı Konya Başkent Hastanemizin uzman ekibine güvenebileceği yönünde nazikçe ikna et.";
+        intentText = `Kararsız veya endişeli hastayı ${orgShort ? `${orgShort} Hastanemizin` : 'hastanemizin'} uzman ekibine güvenebileceği yönünde nazikçe ikna et.`;
       } else if (intentHint === "Rapor/MR İstemeden Geliş Amacını Teyit Et") {
         intentText = "Hastadan herhangi bir MR, tetkik veya rapor istemeden, doğrudan geliş amacını ve şikayetini teyit et.";
       } else if (intentHint === "Cevap Bekleyen Hastaya Takip Mesajı Hazırla") {
@@ -5576,7 +5607,7 @@ export async function prepareInboxBotAssistedDraftAction(
         }
 
         // Standard Gemini freeform draft generation
-        const systemPrompt = `Sen bir Başkent Hastanesi Hasta İlişkileri Asistanı AI modelisin. Görevin, hastanın mesaj geçmişine, varsa form bilgilerine ve hedeflenen amaca uygun olarak profesyonel, sıcak, kurallara uygun bir WhatsApp cevap taslağı hazırlamaktır.
+        const systemPrompt = `Sen bir ${orgShort ? `${orgShort} Hastanesi` : 'Hastane'} Hasta İlişkileri Asistanı AI modelisin. Görevin, hastanın mesaj geçmişine, varsa form bilgilerine ve hedeflenen amaca uygun olarak profesyonel, sıcak, kurallara uygun bir WhatsApp cevap taslağı hazırlamaktır.
 Yanıtını mutlaka belirtilen JSON formatında üretmelisin. JSON haricinde hiçbir açıklayıcı metin ekleme.
 
 === ÖNEMLİ KURALLAR ===
@@ -5637,10 +5668,64 @@ Lütfen bu bilgilere göre yukarıdaki kurallara ve talimatlara uygun cevap tasl
         
         try {
           const parsed = JSON.parse(jsonText);
-          const draftText = parsed.draftText;
+          let draftText = parsed.draftText;
           if (!draftText || !draftText.trim()) {
             return { success: false, error: "Taslak üretilemedi. Lütfen tekrar deneyin veya manuel talimat girin." };
           }
+
+          // Run Quality Gate on the generated draft
+          const { TurkishReplyQualityGate } = await import('@/lib/services/ai/turkish-quality-gate');
+          const assistantHistory = messages.filter((m: any) => m.direction === 'out');
+          const isFirstAssistantTurn = assistantHistory.length === 0;
+
+          const qgOptions = {
+            ctaOfferedRecently: false,
+            angryPatientMode: false,
+            personaName: identityConfig.personaName,
+            organizationName: identityConfig.organizationName,
+            organizationShortName: identityConfig.organizationShortName,
+            identityAlreadyIntroduced: !isFirstAssistantTurn,
+            asksIdentity: false,
+            asksName: false,
+            patientClaimsBot: false
+          };
+
+          let qualityGate = TurkishReplyQualityGate.validate(draftText, qgOptions);
+          if (!qualityGate.valid) {
+            console.log(`[DRAFT_QUALITY_GATE] Failed: ${qualityGate.reason}. Applying stripPersonaIntroduction...`);
+            const originalText = draftText;
+            const cleanedText = TurkishReplyQualityGate.stripPersonaIntroduction(originalText, qgOptions);
+
+            if (cleanedText && cleanedText.trim().length > 0) {
+              const cleanedQualityGate = TurkishReplyQualityGate.validate(cleanedText, qgOptions);
+              if (cleanedQualityGate.valid) {
+                draftText = cleanedText;
+                parsed.draftText = cleanedText;
+
+                // Log IDENTITY_REPETITION_CLEANUP_APPLIED to ai_audit_logs
+                await ctx.db.executeSafe({
+                  text: `INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
+                         VALUES ($1, $2, $3, $4)`,
+                  values: [
+                    ctx.tenantId,
+                    'IDENTITY_REPETITION_CLEANUP_APPLIED',
+                    `Persona introduction prefix stripped successfully from beginning of the smart draft response.`,
+                    JSON.stringify({
+                      conversation_id: conversationId,
+                      original_response: originalText,
+                      cleaned_response: cleanedText,
+                      timestamp: new Date().toISOString()
+                    })
+                  ]
+                });
+              } else {
+                return { success: false, error: `Taslak Türkçe kalite kontrolünü geçemedi: ${cleanedQualityGate.reason}` };
+              }
+            } else {
+              return { success: false, error: "Taslak Türkçe kalite kontrolünü geçemedi (temizleme sonrası boş metin)." };
+            }
+          }
+
           return {
             isTemplate: false,
             draftText,
@@ -5746,12 +5831,12 @@ Lütfen bu bilgilere göre yukarıdaki kurallara ve talimatlara uygun cevap tasl
         variables: t.variables
       }));
 
-      const systemPromptTemplate = `Sen bir Başkent Hastanesi Hasta İlişkileri Asistanı AI modelisin. WhatsApp 24 saatlik müşteri penceresi kapandığı için serbest metin mesajı gönderilemez.
+      const systemPromptTemplate = `Sen bir ${orgShort ? `${orgShort} Hastanesi` : 'Hastane'} Hasta İlişkileri Asistanı AI modelisin. WhatsApp 24 saatlik müşteri penceresi kapandığı için serbest metin mesajı gönderilemez.
 Görevin, hastanın doldurduğu bilgilere, mesaj geçmişine ve hedeflenen amaca göre en uygun 2-3 onaylı şablonu (template) seçmek ve bu şablonların içindeki {{1}}, {{2}} gibi değişken yer tutucularını hasta bilgileriyle doldurarak önermektir.
 
 === ÖNEMLİ ŞABLON KURALLARI ===
 1. Şablonların orijinal gövdelerindeki (body) kelimeleri, cümleleri KESİNLİKLE değiştirme veya düzenleme. Sadece {{1}}, {{patient_name}}, {{tenant_name}} gibi değişken yer tutucularını hasta bağlamıyla doldur.
-2. Değişken doldururken isim hitabı yasak kuralına dikkat et: Eğer şablonda {{patient_name}} varsa ve hastane Başkent ise, ismi boş bırak veya nezaket kurallarına göre düzenle.
+2. Değişken doldururken isim hitabı yasak kuralına dikkat et: Eğer şablonda {{patient_name}} varsa${orgShort ? ` ve hastane ${orgShort} ise` : ''}, ismi boş bırak veya nezaket kurallarına göre düzenle.
 3. Yanıtını mutlaka belirtilen JSON formatında üretmelisin. JSON haricinde hiçbir metin ekleme.
 
 Hedeflenen Amaç/Talimat: ${intentText}

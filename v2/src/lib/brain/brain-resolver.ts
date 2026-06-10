@@ -39,6 +39,7 @@ interface V2ResolutionResult {
   promptName: string | null;
   channelId: string | null;
   profileId: string | null;
+  metadata?: any;
 }
 
 /**
@@ -90,6 +91,8 @@ export class BrainResolver {
     let knowledgeRules = '';
     let brainSource: 'v1_settings' | 'v2_channel_prompts' = 'v1_settings';
 
+    let promptMetadata: any = null;
+
     let runtimeSettings: TenantBrainSettings = {
       aiModel: 'gemini-2.5-flash',
       maxMessages: 20,
@@ -112,6 +115,7 @@ export class BrainResolver {
           knowledgeRules = v2Result.knowledgeRules;
           runtimeSettings = v2Result.settings;
           brainSource = 'v2_channel_prompts';
+          promptMetadata = v2Result.metadata;
 
           log.info('[BRAIN_SOURCE] v2_channel_prompts', {
             tenantId, channelId, channel,
@@ -225,7 +229,8 @@ export class BrainResolver {
       promptHash,
       { prices: knowledgePrices, rules: knowledgeRules },
       runtimeSettings,
-      brainSource
+      brainSource,
+      promptMetadata
     );
 
     return brain;
@@ -250,7 +255,7 @@ export class BrainResolver {
       text: `
         SELECT cp.id as prompt_id, cp.name as prompt_name, cp.prompt_text, cp.prompt_type,
                cp.tenant_id as prompt_tenant_id, cp.version,
-               cp.knowledge_prices, cp.knowledge_rules,
+               cp.knowledge_prices, cp.knowledge_rules, cp.metadata as prompt_metadata,
                cpb.is_active as binding_active
         FROM channel_prompt_bindings cpb
         JOIN channel_prompts cp ON cpb.prompt_id = cp.id
@@ -282,6 +287,7 @@ export class BrainResolver {
     }
 
     const systemPrompt = binding.prompt_text || null;
+    const promptMetadata = binding.prompt_metadata || null;
 
     log.info('[BRAIN_V2_PROMPT_RESOLVED]', {
       tenantId, channelId,
@@ -371,7 +377,8 @@ export class BrainResolver {
       source: 'v2_channel_prompts',
       promptName: binding.prompt_name,
       channelId,
-      profileId
+      profileId,
+      metadata: promptMetadata
     };
   }
 }

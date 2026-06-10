@@ -1,6 +1,13 @@
 export interface QualityGateOptions {
   ctaOfferedRecently?: boolean;
   angryPatientMode?: boolean;
+  personaName?: string;
+  organizationName?: string;
+  organizationShortName?: string;
+  identityAlreadyIntroduced?: boolean;
+  asksIdentity?: boolean;
+  asksName?: boolean;
+  patientClaimsBot?: boolean;
 }
 
 export class TurkishReplyQualityGate {
@@ -36,6 +43,102 @@ export class TurkishReplyQualityGate {
       .replace(/ö/g, 'o')
       .replace(/ç/g, 'c')
       .toLowerCase();
+  }
+
+  private static escapeRegExp(str: string): string {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  private static hasSelfIntroduction(text: string, options: QualityGateOptions): boolean {
+    const p = options.personaName ? this.cleanTurkishText(options.personaName) : '';
+    const org = options.organizationShortName ? this.cleanTurkishText(options.organizationShortName) : '';
+    const orgFull = options.organizationName ? this.cleanTurkishText(options.organizationName) : '';
+
+    if (!p && !org && !orgFull) return false;
+
+    const cleanText = this.cleanTurkishText(text);
+    const escapedP = p ? this.escapeRegExp(p) : '';
+    const escapedOrg = org ? this.escapeRegExp(org) : '';
+    const escapedOrgFull = orgFull ? this.escapeRegExp(orgFull) : '';
+
+    const patterns: RegExp[] = [];
+    if (escapedP) {
+      patterns.push(new RegExp(`\\b(?:ben\\s+${escapedP}|${escapedP}\\s+ben)\\b`, 'i'));
+      patterns.push(new RegExp(`\\b${escapedP}(?:yim|yım|um|üm)\\b`, 'i'));
+    }
+    if (escapedOrg) {
+      patterns.push(new RegExp(`\\b${escapedOrg}(?:dan|den|\\'dan|\\'den)?\\s+(?:yazıyorum|yaziyorum|yazmaktayım|yazmaktayim)\\b`, 'i'));
+      patterns.push(new RegExp(`\\b${escapedOrg}(?:dan|den|\\'dan|\\'den)?\\s+(?:temsilcisi|asistanı|asistani)\\b`, 'i'));
+    }
+    if (escapedOrgFull) {
+      patterns.push(new RegExp(`\\b${escapedOrgFull}(?:dan|den|\\'dan|\\'den)?\\s+(?:yazıyorum|yaziyorum|yazmaktayım|yazmaktayim)\\b`, 'i'));
+      patterns.push(new RegExp(`\\b${escapedOrgFull}(?:dan|den|\\'dan|\\'den)?\\s+(?:temsilcisi|asistanı|asistani)\\b`, 'i'));
+    }
+    if (escapedP && escapedOrg) {
+      patterns.push(new RegExp(`\\b${escapedOrg}(?:dan|den|\\'dan|\\'den)?\\s+(?:ben\\s+)?${escapedP}\\b`, 'i'));
+      patterns.push(new RegExp(`\\b${escapedOrg}(?:dan|den|\\'dan|\\'den)?\\s+${escapedP}\\s+ben\\b`, 'i'));
+      patterns.push(new RegExp(`\\b${escapedP}\\s+(?:ben\\s+)?${escapedOrg}\\b`, 'i'));
+    }
+
+    for (const pattern of patterns) {
+      if (pattern.test(cleanText)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  public static stripPersonaIntroduction(text: string, options: QualityGateOptions): string {
+    if (!text) return '';
+    const p = options.personaName ? this.cleanTurkishText(options.personaName) : '';
+    const org = options.organizationShortName ? this.cleanTurkishText(options.organizationShortName) : '';
+    const orgFull = options.organizationName ? this.cleanTurkishText(options.organizationName) : '';
+
+    if (!p && !org && !orgFull) return text;
+
+    const cleanText = this.cleanTurkishText(text);
+    const escapedP = p ? this.escapeRegExp(p) : '';
+    const escapedOrg = org ? this.escapeRegExp(org) : '';
+    const escapedOrgFull = orgFull ? this.escapeRegExp(orgFull) : '';
+
+    const greetings = `(?:merhaba|selam|merhabalar|iyi\\s+gunler|iyi\\s+aksamlar|iyi\\s+sabahlar|iyi\\s+gunler\\s+dilerim|iyi\\s+aksamlar\\s+dilerim)`;
+    const separators = `(?:[\\s.,:;!?()\'"\\-—–]*)`;
+
+    const identities: string[] = [];
+    if (escapedP) {
+      identities.push(`(?:ben\\s+)?${escapedP}(?:\\s+ben)?`);
+      identities.push(`${escapedP}(?:yim|yim|um|üm)`);
+    }
+    if (escapedOrg) {
+      identities.push(`${escapedOrg}(?:dan|den|\\'dan|\\'den)?(?:\\s+(?:yazıyorum|yaziyorum|yazmaktayım|yazmaktayim))?`);
+      identities.push(`${escapedOrg}(?:dan|den|\\'dan|\\'den)?\\s+(?:temsilcisi|asistanı|asistani)`);
+    }
+    if (escapedOrgFull) {
+      identities.push(`${escapedOrgFull}(?:dan|den|\\'dan|\\'den)?(?:\\s+(?:yazıyorum|yaziyorum|yazmaktayım|yazmaktayim))?`);
+      identities.push(`${escapedOrgFull}(?:dan|den|\\'dan|\\'den)?\\s+(?:temsilcisi|asistanı|asistani)`);
+    }
+    if (escapedP && escapedOrg) {
+      identities.push(`(?:ben\\s+)?${escapedP}(?:\\s+ben)?(?:\\s*(?:,|ve)\\s*)?${escapedOrg}(?:dan|den|\\'dan|\\'den)?(?:\\s+(?:yazıyorum|yaziyorum|yazmaktayım|yazmaktayim))?`);
+      identities.push(`${escapedOrg}(?:dan|den|\\'dan|\\'den)?(?:\\s*(?:,|ve)\\s*)?(?:ben\\s+)?${escapedP}(?:\\s+ben)?`);
+    }
+
+    identities.sort((a, b) => b.length - a.length);
+
+    const identityOr = `(?:${identities.join('|')})`;
+    const prefixRegex = new RegExp(
+      `^(?:${greetings}${separators})?${identityOr}${separators}`,
+      'i'
+    );
+
+    const match = prefixRegex.exec(cleanText);
+    if (match) {
+      const matchLength = match[0].length;
+      let cleaned = text.substring(matchLength);
+      cleaned = cleaned.replace(/^[\s.,:;!?()\'"\\-—–]+/, '');
+      return cleaned;
+    }
+
+    return text;
   }
 
   public static validate(text: string, options?: QualityGateOptions): { valid: boolean; reason?: string } {
@@ -107,10 +210,14 @@ export class TurkishReplyQualityGate {
       'surecler hakkinda bilgi veriyorum',
       'sorunuza net doneyim',
       'sorunuza net donelim',
-      'fazla kalip gibi olmus',
-      'baskent asistaniyim',
-      'baskent asistani'
+      'fazla kalip gibi olmus'
     ];
+
+    if (options?.organizationShortName) {
+      const orgClean = this.cleanTurkishText(options.organizationShortName);
+      prohibitedClichés.push(`${orgClean} asistaniyim`);
+      prohibitedClichés.push(`${orgClean} asistani`);
+    }
 
     for (const cliché of prohibitedClichés) {
       if (cleanText.includes(cliché)) {
@@ -140,6 +247,16 @@ export class TurkishReplyQualityGate {
             reason: `Kritik Fren Engeli: ${modeStr} aktifken CTA ifadesi kullanılamaz ("${phrase}")`
           };
         }
+      }
+    }
+
+    // 5. Identity repetition guard
+    if (options?.identityAlreadyIntroduced && !options?.asksIdentity && !options?.asksName) {
+      if (this.hasSelfIntroduction(text, options)) {
+        return {
+          valid: false,
+          reason: `Kimlik zaten tanıtılmıştı. Aynı konuşma içinde tekrarlanan kendini tanıtma engellendi.`
+        };
       }
     }
 

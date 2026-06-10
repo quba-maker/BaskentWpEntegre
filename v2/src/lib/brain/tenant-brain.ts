@@ -28,6 +28,7 @@ export interface TenantBrainNamespaces {
 export interface TenantBrainPrompts {
   systemPrompt: string | null;
   promptHash: string | null;
+  metadata?: any;
   getFormattedPrompt: (phase: string, context?: Record<string, any>) => string;
 }
 
@@ -70,7 +71,8 @@ export function createTenantBrain(
   promptHash?: string | null,
   knowledge?: TenantBrainContext['knowledge'],
   settings?: TenantBrainSettings,
-  brainSource?: 'v1_settings' | 'v2_channel_prompts'
+  brainSource?: 'v1_settings' | 'v2_channel_prompts',
+  promptMetadata?: any
 ): TenantBrain {
   
   const instanceId = `brain_${tenantId}_${Date.now()}_${Math.random().toString(36).substring(7)}`;
@@ -84,6 +86,7 @@ export function createTenantBrain(
   const prompts: TenantBrainPrompts = {
     systemPrompt: rawSystemPrompt,
     promptHash: promptHash || null,
+    metadata: promptMetadata || null,
     getFormattedPrompt: (phase: string, context?: Record<string, any>) => {
       const base = rawSystemPrompt || "Sen kibar ve yardımcı bir asistansın.";
       return `${base}\n\n[Sistem Direktifi] Şu anki evre: ${phase.toUpperCase()}`;

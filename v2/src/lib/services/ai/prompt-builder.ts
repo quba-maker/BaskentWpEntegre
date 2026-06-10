@@ -70,6 +70,15 @@ export class PromptBuilder {
     
     const isHealthcare = brain.context.config?.industry === 'healthcare' || brain.context.tenantId === 'caab9ea1-9591-45e4-bbc5-9c9b498982c8';
 
+    const identityConfig = brain.prompts.metadata?.identity || brain.context.config?.identity || {
+      personaName: '',
+      organizationName: '',
+      organizationShortName: ''
+    };
+    const pName = identityConfig.personaName || '';
+    const orgName = identityConfig.organizationName || '';
+    const orgShort = identityConfig.organizationShortName || '';
+
     // IDENTITY & BEHAVIORAL CONTEXT (Dynamic CRM Injection)
     let crmContext = '';
     let currentTurnMentionsReportTopic = false;
@@ -190,7 +199,7 @@ export class PromptBuilder {
         if (isHealthcare) {
           crmContext += `>> KURAL: Bu kişi form lead olduğu için proaktif satış yapma. Hastanın sorularına cevap ver, bilgi iste, ama agresif upsell yapma. Hasta zaten ilgilenerek form doldurmuş — güven inşa et, bilgi ver, yönlendir.\n`;
           crmContext += `>> KURAL (FORM LEAD ÖZEL): Form lead'ler kuruma gelme konusunda zaten ilgi göstermiş kişilerdir. Randevu yönlendirmesi yapılabilir ama baskı yapılmaz. Kararsızlık durumunda danışman/koordinasyon ekibiyle bilgilendirme amaçlı telefon görüşmesi öner.\n`;
-          crmContext += `>> KURAL (OPERATÖR GÖRÜŞME DEVRALMA): Temsilci veya koordinatör zaten bu hastaya karşılama yaptıysa veya ulaştıysa (ya da greetingSent = true ise), kesinlikle yeni/ilk karşılama metnini ('Başkent Üniversitesi'nden yazıyoruz...', 'Merhaba ben asistanınız...' vb.) TEKRAR ETME. Temsilcinin kaldığı yerden, yönlendirmeye göre doğrudan devam et.\n`;
+          crmContext += `>> KURAL (OPERATÖR GÖRÜŞME DEVRALMA): Temsilci veya koordinatör zaten bu hastaya karşılama yaptıysa veya ulaştıysa (ya da greetingSent = true ise), kesinlikle yeni/ilk karşılama metnini (${orgShort ? `'${orgShort}\'dan yazıyoruz...', ` : ''}'Merhaba ben asistanınız...' vb.) TEKRAR ETME. Temsilcinin kaldığı yerden, yönlendirmeye göre doğrudan devam et.\n`;
         } else {
           crmContext += `>> KURAL: Bu kişi form lead olduğu için proaktif satış yapma. Müşterinin sorularına cevap ver, bilgi iste, ama agresif satış yapma. Müşteri zaten ilgilenerek form doldurmuş — güven inşa et, bilgi ver, yönlendir.\n`;
           crmContext += `>> KURAL (OPERATÖR GÖRÜŞME DEVRALMA): Temsilci veya koordinatör zaten bu müşteriye karşılama yaptıysa veya ulaştıysa (ya da greetingSent = true ise), kesinlikle yeni/ilk karşılama metnini TEKRAR ETME. Temsilcinin kaldığı yerden, yönlendirmeye göre doğrudan devam et.\n`;
@@ -221,6 +230,9 @@ export class PromptBuilder {
     let ctaOfferedRecently = false;
     let angryPatientMode = false;
     let isFirstAssistantTurn = true;
+    let asksIdentity = false;
+    let asksName = false;
+    let patientClaimsBot = false;
 
     if (unifiedContext) {
       if (Array.isArray(unifiedContext.history)) {
@@ -249,20 +261,41 @@ export class PromptBuilder {
           'söylemiyorsunuz', 'soylemiyorsunuz', 'vermiyorsunuz', 'diyorum', 'cevap ver', 'cevap vermiyorsunuz'
         ];
         angryPatientMode = angerKeywords.some(kw => currentMessageTextLower.includes(kw));
+        
+        asksIdentity = ['kimsin', 'kimsiniz'].some(kw => currentMessageTextLower.includes(kw));
+        asksName = ['ismin ne', 'adın ne', 'isminiz ne', 'adınız ne', 'ismini söyler', 'ismin nedir', 'adın nedir'].some(kw => currentMessageTextLower.includes(kw));
+        patientClaimsBot = ['botsun', 'bot musun', 'yapay zeka', 'robot musun'].some(kw => currentMessageTextLower.includes(kw));
       }
     }
 
     let dynamicBrakesContext = '';
-    if (ctaOfferedRecently || angryPatientMode || isFirstAssistantTurn) {
+    if (ctaOfferedRecently || angryPatientMode || isFirstAssistantTurn || (!isFirstAssistantTurn && !asksIdentity && !asksName) || asksIdentity || asksName || patientClaimsBot) {
       dynamicBrakesContext += `\n\n=== 🚨 DİNAMİK KALİTE VE FREN KURALLARI (DYNAMIC QUALITY BRAKES) ===\n`;
       if (isFirstAssistantTurn) {
         dynamicBrakesContext += `>> UYARI (İLK CEVAP ONAYI AKTİF): Bu hastaya vereceğin ilk cevaptır. Kesinlikle randevu planlama, arama, telefon görüşmesi, koordinatör araması teklif etme, uygun zaman aralığı sorma! Sadece hastanın sorusuna net, kısa ve güven verici cevap ver, randevu/arama teklifini kesinlikle sonraki mesajlara bırak.\n`;
+      }
+      if (!isFirstAssistantTurn && !asksIdentity && !asksName) {
+        dynamicBrakesContext += `>> UYARI (DEVAM EDEN KONUŞMA): Bu konuşmanın devam mesajıdır ve hasta ismini/kimliğini sormamıştır. Kesinlikle ${pName ? `"${pName} ben", "ben ${pName}", ` : ''}${orgShort ? `"${orgShort}'dan yazıyorum", ` : ''}kendini tanıtan veya ismini söyleyen ifadeleri KULLANMA. Karşılamayı ilk mesajda zaten yaptın. Mesajına isimsiz, doğrudan hastanın sorusuna cevap vererek başla. Doğrudan konuya gir.\n`;
       }
       if (angryPatientMode) {
         dynamicBrakesContext += `>> KIZGIN HASTA / KRİZ MODU DİREKTİFİ: Hasta memnuniyetsiz/kızgın görünmektedir. Kesinlikle yeni bir randevu, telefon araması teklif etme, uygun zaman sorma. Cevabına mutlaka 'Kusura bakmayın' veya 'Özür dilerim' ifadesiyle başla! Kısa ve net konuş. Sadece son sorduğu soruya odaklan, konuyu randevuya bağlama.\n`;
       }
       if (ctaOfferedRecently) {
         dynamicBrakesContext += `>> UYARI (FREKANS FRENİ AKTİF): Son 3 asistan mesajı içinde zaten randevu/telefon araması teklif edildi. Bu mesajda kesinlikle yeni bir randevu veya arama teklif etme, uygun zaman sorma.\n`;
+      }
+      if (asksIdentity) {
+        dynamicBrakesContext += `>> KİMLİK SORUSU DİREKTİFİ: Hasta "Sen kimsin?" diye sordu. Kendini ${pName ? pName : 'hasta danışmanı'}${orgShort ? ` (${orgShort})` : ''} olarak tanıt, ama robotik veya teknik açıklamalar yapmadan doğal ve samimi bir şekilde cevap ver.${pName || orgShort ? ` (Örn: "${pName ? `Ben ${pName}` : 'Merhaba'}${orgShort ? `, ${orgShort} Hastanesi'nden yazıyorum` : ''}. Size tıbbi tedavi süreçleri ve randevular hakkında bilgi sunuyorum. Nasıl yardımcı olabilirim?")` : ''}.\n`;
+      }
+      if (asksName) {
+        dynamicBrakesContext += `>> İSİM SORUSU DİREKTİFİ: Hasta "İsmin ne?" diye sordu. Çok kısa ve doğal bir şekilde isminin ${pName ? pName : 'asistan'} olduğunu belirt. Uzun paragraflar yazma.${pName ? ` (Örn: "Ben ${pName}${orgShort ? `, ${orgShort} hasta danışmanıyım` : ''}.")` : ''}.\n`;
+      }
+      if (patientClaimsBot) {
+        dynamicBrakesContext += `>> HASTA BOT İDDİASI DİREKTİFİ: Hasta senin bir bot/yapay zeka olduğunu söyledi/sordu. Teknik savunmalara (örn: "ben yapay zekayım", "teşhis koyamam", "ben bir dil modeliyim" vb.) kesinlikle girme! Alakasız rapor veya tıbbi yorum yapma. Kısa, doğal ve insansı bir şekilde asistan olduğunu teyit et.`;
+        if (!isFirstAssistantTurn) {
+          dynamicBrakesContext += ` Zaten daha önce kendini tanıttığın için adını/kurumunu tekrar söyleme, doğrudan asistan olduğunu teyit et (Örn: "Sizlere WhatsApp üzerinden süreçlerle ilgili yardımcı oluyorum, nasıl yardımcı olabilirim?").\n`;
+        } else {
+          dynamicBrakesContext += ` (Örn: "${pName ? `Ben ${pName}` : 'Merhaba'}${orgShort ? `, ${orgShort} Hastanesi'nden yazıyorum` : ''}, sizlere WhatsApp üzerinden bilgilendirme konusunda yardımcı oluyorum. Nasıl yardımcı olabilirim?").\n`;
+        }
       }
       dynamicBrakesContext += `=================================================================\n`;
     }
@@ -566,7 +599,7 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/koordinatör arasında planlanan
         });
 
         // Resolve decision flags
-        const isCorrectionTurn = isHealthcare && (currentTurnMentionsReportTopic || ['yasak', 'doğru değil', 'yalan', 'yanlış', 'bot', 'asistan', 'yapma', 'söyleme', 'hata'].some(kw => currentMessageTextLower.includes(kw))) && !currentTurnHasActualAttachmentEvidence && !currentTurnClaimsReportSent;
+        const isCorrectionTurn = isHealthcare && (currentTurnMentionsReportTopic || ['yasak', 'doğru değil', 'yalan', 'yanlış', 'yapma', 'söyleme', 'hata'].some(kw => currentMessageTextLower.includes(kw))) && !currentTurnHasActualAttachmentEvidence && !currentTurnClaimsReportSent;
 
         const shouldAskName = detailedName.nameConfirmationNeeded && !nameLocked && !patientGaveNameInLast3 && !askedNameRecently && !isTerminalStage && !hasOptOutKeyword && !isHumanMode && !isCorrectionTurn;
         const shouldAskCountry = detailedCountry.countryConfirmationNeeded && !countryLocked && !patientGaveCountryInLast3 && !askedCountryRecently && !isTerminalStage && !hasOptOutKeyword && !isHumanMode && !isCorrectionTurn;
@@ -599,7 +632,7 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/koordinatör arasında planlanan
 
     let finalPrompt = `${base}\n${crmContext}\n${healthcareOverlay}\n${dynamicBrakesContext}\n${knowledgeInjection}\n${timeContext}\n${confirmationContext}\n${phaseContext}\n${langContextText}\n${directiveContext}\n${confirmationDirective}\n${safetyGuardrails}`;
 
-    if (ctaOfferedRecently || angryPatientMode || isFirstAssistantTurn) {
+    if (ctaOfferedRecently || angryPatientMode || isFirstAssistantTurn || (!isFirstAssistantTurn && !asksIdentity && !asksName)) {
       finalPrompt += `\n\n=== 🚨 DİNAMİK ENGELLEME VE FREN TALİMATLARI (OVERRIDING NEGATIVE CONSTRAINTS) ===\n`;
       if (isFirstAssistantTurn) {
         finalPrompt += `- KESİN YASAK: Bu hastaya verdiğin İLK CEVAP olduğu için kesinlikle randevu planlama, arama, telefon görüşmesi teklif etme, uygun zaman aralığı sorma! Sadece hastanın sorusuna net ve kısa cevap ver.\n`;
@@ -609,6 +642,9 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/koordinatör arasında planlanan
       }
       if (ctaOfferedRecently) {
         finalPrompt += `- KESİN YASAK: Son asistan mesajlarında randevu/telefon araması teklif edildiği için kesinlikle yeni bir randevu veya arama teyit etme, teklif etme, uygun zaman sorma!\n`;
+      }
+      if (!isFirstAssistantTurn && !asksIdentity && !asksName) {
+        finalPrompt += `- KESİN YASAK (KENDİNİ TANITMA VE SELAMLAMA YASAĞI): Konuşmanın devamındayız (bu ilk mesajın değil) ve hasta ismini/kimliğini sormamıştır. Kesinlikle ${pName ? `"${pName} ben", "ben ${pName}", ` : ''}${orgShort ? `"${orgShort}'dan", ` : ''}kendini tanıtan veya ismini söyleyen ifadeleri KULLANMA. Karşılamayı ilk mesajda zaten yaptın. Mesajına isimsiz, doğrudan hastanın sorusuna cevap vererek başla. Doğrudan konuya gir.\n`;
       }
       finalPrompt += `===============================================================================\n`;
     }

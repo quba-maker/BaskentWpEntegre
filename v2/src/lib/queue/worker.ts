@@ -2065,9 +2065,120 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
           if (!retryCompleteness.valid) {
             throw new Error(`INCOMPLETE_RETRY_FAILED: ${retryCompleteness.reason}`);
           }
-        } else {
-          throw e; // throw timeout or other critical errors
         }
+      }
+      // RUN TURKISH QUALITY GATE
+      const { TurkishReplyQualityGate } = await import('@/lib/services/ai/turkish-quality-gate');
+      const identityConfig = brain.prompts.metadata?.identity || brain.context.config?.identity || {};
+      const assistantHistory = (history || []).filter((m: any) => m.role === 'assistant');
+      const isFirstAssistantTurn = assistantHistory.length === 0;
+
+      let ctaOfferedRecently = false;
+      if (Array.isArray(history)) {
+        const last3Assistant = assistantHistory.slice(-3);
+        ctaOfferedRecently = last3Assistant.some((m: any) => {
+          const text = (m.content || '').toLowerCase();
+          return [
+            'randevu', 'görüşme', 'gorusme', 'arayalım', 'arayalim', 'arayabiliriz', 'arama',
+            'telefon', 'appointment', 'call', 'contact you', 'telefonla'
+          ].some(kw => text.includes(kw));
+        });
+      }
+
+      let angryPatientMode = false;
+      const latestInboundContent = unifiedContext?.currentMessageText || '';
+      let asksIdentity = false;
+      let asksName = false;
+      let patientClaimsBot = false;
+
+      if (latestInboundContent) {
+        const currentMessageTextLower = latestInboundContent.toLowerCase().trim();
+        const angerKeywords = [
+          'şikayet', 'sikayet', 'rezalet', 'berbat', 'kötü', 'kotu', 'memnun değil', 'memnun degil',
+          'memnun kalmadım', 'memnun kalmadim', 'ilgisiz', 'zaman kaybı', 'zaman kaybi', 'robot',
+          'otomatik', 'dalga mı', 'dalga mi', 'düzgün', 'duzgun', 'yalan', 'yanlış', 'yanlis',
+          'sinir', 'bıktım', 'biktim', 'yeter', 'insanla', 'temsilci', 'canlı destek', 'canli destek',
+          'şikayetçiyim', 'sikayetciyim', 'şikayetçi', 'sikayetci', 'muhatap', 'kızgın', 'kizgin',
+          'söylemiyorsunuz', 'soylemiyorsunuz', 'vermiyorsunuz', 'diyorum', 'cevap ver', 'cevap vermiyorsunuz'
+        ];
+        angryPatientMode = angerKeywords.some(kw => currentMessageTextLower.includes(kw));
+        asksIdentity = ['kimsin', 'kimsiniz'].some(kw => currentMessageTextLower.includes(kw));
+        asksName = ['ismin ne', 'adın ne', 'isminiz ne', 'adınız ne', 'ismini söyler', 'ismin nedir', 'adın nedir'].some(kw => currentMessageTextLower.includes(kw));
+        patientClaimsBot = ['botsun', 'bot musun', 'yapay zeka', 'robot musun'].some(kw => currentMessageTextLower.includes(kw));
+      }
+
+      const qgOptions = {
+        ctaOfferedRecently,
+        angryPatientMode,
+        personaName: identityConfig.personaName,
+        organizationName: identityConfig.organizationName,
+        organizationShortName: identityConfig.organizationShortName,
+        identityAlreadyIntroduced: !isFirstAssistantTurn,
+        asksIdentity,
+        asksName,
+        patientClaimsBot
+      };
+
+      let qualityGate = TurkishReplyQualityGate.validate(aiResponse.text, qgOptions);
+
+      if (!qualityGate.valid) {
+        this.log.warn(`[QUALITY_GATE] Failed on first attempt: ${qualityGate.reason}. Retrying...`, { traceId });
+        isRetry = true;
+
+        const retryContextMessages = [...aiMessages];
+        retryContextMessages.push({
+          role: 'assistant' as const,
+          content: aiResponse.text
+        });
+        retryContextMessages.push({
+          role: 'user' as const,
+          content: `DİKKAT: Ürettiğin Türkçe metinde ek hatası veya kendini tanıtma tekrarı tespit edildi. Kendini tanıtan kelimeleri/cümleleri (örneğin "Merhaba, ben Rüya...", "Rüya ben...") kesinlikle kullanma, doğrudan konuya girerek kısa ve sade bir cevap üret.`
+        });
+
+        aiResponse = await executeLLM(retryContextMessages);
+        qualityGate = TurkishReplyQualityGate.validate(aiResponse.text, qgOptions);
+      }
+
+      if (!qualityGate.valid) {
+        this.log.warn(`[QUALITY_GATE] Failed on second attempt: ${qualityGate.reason}. Applying stripPersonaIntroduction cleanup...`, { traceId });
+        const originalText = aiResponse.text;
+        const cleanedText = TurkishReplyQualityGate.stripPersonaIntroduction(originalText, qgOptions);
+
+        if (cleanedText && cleanedText.trim().length > 0) {
+          const cleanedQualityGate = TurkishReplyQualityGate.validate(cleanedText, qgOptions);
+          if (cleanedQualityGate.valid) {
+            this.log.info(`[QUALITY_GATE] Cleanup applied successfully. Validation passed.`, { traceId });
+            aiResponse.text = cleanedText;
+            qualityGate = { valid: true };
+
+            // Log IDENTITY_REPETITION_CLEANUP_APPLIED to ai_audit_logs
+            await db.executeSafe({
+              text: `INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
+                     VALUES ($1, $2, $3, $4)`,
+              values: [
+                tenantId,
+                'IDENTITY_REPETITION_CLEANUP_APPLIED',
+                `Persona introduction prefix stripped successfully from beginning of the response.`,
+                JSON.stringify({
+                  conversation_id: conversationId,
+                  original_response: originalText,
+                  cleaned_response: cleanedText,
+                  timestamp: new Date().toISOString()
+                })
+              ]
+            });
+          } else {
+            this.log.error(`[QUALITY_GATE] Cleanup applied but validation failed: ${cleanedQualityGate.reason}`, undefined, { traceId });
+            qualityGate = cleanedQualityGate;
+          }
+        } else {
+          this.log.error(`[QUALITY_GATE] Cleanup resulted in empty or meaningless text.`, undefined, { traceId });
+          qualityGate = { valid: false, reason: 'cleaned_text_empty' };
+        }
+      }
+
+      if (!qualityGate.valid) {
+        throw new Error(`QUALITY_GATE_FAILED: ${qualityGate.reason}`);
       }
 
       this.log.info(`[LLM_RESPONSE_OK] AI execution completed`, { latencyMs: aiResponse.latencyMs, isRetry, traceId });
@@ -2081,8 +2192,8 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
         AIEventEmitter.logHealth(tenantId, 'timeout', { traceId });
         throw e; // Let QStash retry on timeouts
       }
-      if (e.message?.startsWith('INCOMPLETE_RETRY_FAILED') || e.name === 'IncompleteResponseError' || e.message?.startsWith('INCOMPLETE_HEURISTIC')) {
-        this.log.error(`[LLM_QUALITY_GATE_FAILED] Retry failed, stopping execution`, e, { traceId });
+      if (e.message?.startsWith('INCOMPLETE_RETRY_FAILED') || e.name === 'IncompleteResponseError' || e.message?.startsWith('INCOMPLETE_HEURISTIC') || e.message?.startsWith('QUALITY_GATE_FAILED')) {
+        this.log.error(`[LLM_QUALITY_GATE_FAILED] Retry/quality gate failed, stopping execution`, e, { traceId });
         qualityGateFailed = true;
         qualityGateReason = e.message;
         // DO NOT THROW. We handle this cleanly so QStash doesn't spam retries.
@@ -3780,11 +3891,12 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
     const { TurkishReplyQualityGate } = await import('@/lib/services/ai/turkish-quality-gate');
 
     // Compute Quality Gate Options
-    let ctaOfferedRecently = false;
-    let angryPatientMode = false;
+    const identityConfig = brain.prompts.metadata?.identity || brain.context.config?.identity || {};
+    const assistantHistory = (history || []).filter((m: any) => m.role === 'assistant');
+    const isFirstAssistantTurn = assistantHistory.length === 0;
 
+    let ctaOfferedRecently = false;
     if (Array.isArray(history)) {
-      const assistantHistory = history.filter((m: any) => m.role === 'assistant');
       const last3Assistant = assistantHistory.slice(-3);
       ctaOfferedRecently = last3Assistant.some((m: any) => {
         const text = (m.content || '').toLowerCase();
@@ -3794,6 +3906,11 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
         ].some(kw => text.includes(kw));
       });
     }
+
+    let angryPatientMode = false;
+    let asksIdentity = false;
+    let asksName = false;
+    let patientClaimsBot = false;
 
     if (latestInboundContent) {
       const currentMessageTextLower = latestInboundContent.toLowerCase().trim();
@@ -3806,9 +3923,22 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
         'söylemiyorsunuz', 'soylemiyorsunuz', 'vermiyorsunuz', 'diyorum', 'cevap ver', 'cevap vermiyorsunuz'
       ];
       angryPatientMode = angerKeywords.some(kw => currentMessageTextLower.includes(kw));
+      asksIdentity = ['kimsin', 'kimsiniz'].some(kw => currentMessageTextLower.includes(kw));
+      asksName = ['ismin ne', 'adın ne', 'isminiz ne', 'adınız ne', 'ismini söyler', 'ismin nedir', 'adın nedir'].some(kw => currentMessageTextLower.includes(kw));
+      patientClaimsBot = ['botsun', 'bot musun', 'yapay zeka', 'robot musun'].some(kw => currentMessageTextLower.includes(kw));
     }
 
-    const qgOptions = { ctaOfferedRecently, angryPatientMode };
+    const qgOptions = {
+      ctaOfferedRecently,
+      angryPatientMode,
+      personaName: identityConfig.personaName,
+      organizationName: identityConfig.organizationName,
+      organizationShortName: identityConfig.organizationShortName,
+      identityAlreadyIntroduced: !isFirstAssistantTurn,
+      asksIdentity,
+      asksName,
+      patientClaimsBot
+    };
 
     try {
       aiResponse = await executeLLM(aiMessages);
@@ -3822,7 +3952,7 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
           { role: 'assistant' as const, content: aiResponse.text },
           {
             role: 'user' as const,
-            content: `DİKKAT: Ürettiğin Türkçe metinde ek hatası veya gereksiz iyelik eki/çift ek (örneğin "ağrınızız", "ameliyatınızızı", "planızı", "aklınızızdaki") tespit edildi. Lütfen bu hataları düzelterek resmi ama sade Türkçe ile kısa bir cevap üret. Tanı koyma, fiyat verme, gereksiz sahiplik ekleri kullanma.`
+            content: `DİKKAT: Ürettiğin Türkçe metinde ek hatası veya kendini tanıtma tekrarı tespit edildi. Kendini tanıtan kelimeleri/cümleleri (örneğin "Merhaba, ben Rüya...", "Rüya ben...") kesinlikle kullanma, doğrudan konuya girerek kısa ve sade bir cevap üret.`
           }
         ];
 
@@ -3831,7 +3961,45 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       }
 
       if (!qualityGate.valid) {
-        this.log.error(`[DEBOUNCE_WORKER] Quality gate failed on second attempt: ${qualityGate.reason}. Blocking send, taking over to human.`, undefined, { traceId });
+        this.log.warn(`[DEBOUNCE_WORKER] Quality gate failed on second attempt: ${qualityGate.reason}. Applying stripPersonaIntroduction cleanup...`, { traceId });
+        const originalText = aiResponse.text;
+        const cleanedText = TurkishReplyQualityGate.stripPersonaIntroduction(originalText, qgOptions);
+
+        if (cleanedText && cleanedText.trim().length > 0) {
+          const cleanedQualityGate = TurkishReplyQualityGate.validate(cleanedText, qgOptions);
+          if (cleanedQualityGate.valid) {
+            this.log.info(`[DEBOUNCE_WORKER] Cleanup applied successfully. Validation passed.`, { traceId });
+            aiResponse.text = cleanedText;
+            qualityGate = { valid: true };
+
+            // Log IDENTITY_REPETITION_CLEANUP_APPLIED to ai_audit_logs
+            await db.executeSafe({
+              text: `INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
+                     VALUES ($1, $2, $3, $4)`,
+              values: [
+                tenantId,
+                'IDENTITY_REPETITION_CLEANUP_APPLIED',
+                `Persona introduction prefix stripped successfully from beginning of the response in debounce worker.`,
+                JSON.stringify({
+                  conversation_id: conversationId,
+                  original_response: originalText,
+                  cleaned_response: cleanedText,
+                  timestamp: new Date().toISOString()
+                })
+              ]
+            });
+          } else {
+            this.log.error(`[DEBOUNCE_WORKER] Cleanup applied but validation failed: ${cleanedQualityGate.reason}`, undefined, { traceId });
+            qualityGate = cleanedQualityGate;
+          }
+        } else {
+          this.log.error(`[DEBOUNCE_WORKER] Cleanup resulted in empty or meaningless text.`, undefined, { traceId });
+          qualityGate = { valid: false, reason: 'cleaned_text_empty' };
+        }
+      }
+
+      if (!qualityGate.valid) {
+        this.log.error(`[DEBOUNCE_WORKER] Quality gate failed on final attempt: ${qualityGate.reason}. Blocking send, taking over to human.`, undefined, { traceId });
         
         // Takeover conversation to human
         await db.executeSafe({

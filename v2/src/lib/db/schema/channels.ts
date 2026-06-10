@@ -52,6 +52,7 @@ export const channelPrompts = pgTable('channel_prompts', {
   promptType: text('prompt_type').notNull().default('system'),
   promptText: text('prompt_text').notNull(),
   version: integer('version').default(1),
+  metadata: jsonb('metadata').default({}),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });
