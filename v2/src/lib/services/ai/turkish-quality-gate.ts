@@ -82,7 +82,7 @@ export class TurkishReplyQualityGate {
       if (word.endsWith('larımızınız') || word.endsWith('larimiziniz') || word.endsWith('lerimiziniz')) {
         return { valid: false, reason: `Hatalı Türkçe ek kullanımı ("-larımızınız / -lerimiziniz"): "${word}"` };
       }
-      // -nızınız (e.g. hastanızınız)
+      // -nızınız / -niziniz
       if (word.endsWith('nızınız') || word.endsWith('niziniz')) {
         if (word !== 'deniziniz') {
           return { valid: false, reason: `Hatalı Türkçe ek kullanımı ("-nızınız / -niziniz"): "${word}"` };
@@ -94,9 +94,35 @@ export class TurkishReplyQualityGate {
       }
     }
 
-    // 3. CTA blocking logic under options
+    // 3. Prohibited Clichés & Brand Identity Check
+    const cleanText = this.cleanTurkishText(normalized);
+    const prohibitedClichés = [
+      'sorunuzu anladim',
+      'sorularinizi anladim',
+      'sikayetinizi anladim',
+      'talebinizi anladim',
+      'nasil yardimci olabilirim',
+      'yardimci olmak icin buradayim',
+      'surecler hakkinda yardimci oluyorum',
+      'surecler hakkinda bilgi veriyorum',
+      'sorunuza net doneyim',
+      'sorunuza net donelim',
+      'fazla kalip gibi olmus',
+      'baskent asistaniyim',
+      'baskent asistani'
+    ];
+
+    for (const cliché of prohibitedClichés) {
+      if (cleanText.includes(cliché)) {
+        return {
+          valid: false,
+          reason: `Yasaklı otomatik bot kalıbı/cliché tespit edildi: "${cliché}"`
+        };
+      }
+    }
+
+    // 4. CTA blocking logic under options
     if (options?.ctaOfferedRecently || options?.angryPatientMode) {
-      const cleanText = this.cleanTurkishText(normalized);
       const forbiddenCtaPhrases = [
         'randevu planlayalim',
         'gorusme ayarlayalim',
