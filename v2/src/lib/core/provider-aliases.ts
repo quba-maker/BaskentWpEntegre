@@ -43,3 +43,17 @@ export function canonicalProvider(provider: string): string {
 export function isValidMessengerIdentifier(identifier: string): boolean {
   return /^\d{5,}$/.test(identifier);
 }
+
+export function normalizeProvider(provider?: string | null): string {
+  return String(provider || '').trim().toLowerCase();
+}
+
+export function isThreeSixtyProvider(provider?: string | null): boolean {
+  const p = normalizeProvider(provider);
+  return p === '360dialog' || p === '360dialog_whatsapp' || p === 'threesixty' || p === 'three_sixty_dialog';
+}
+
+export function requiresWhatsAppPhoneNumberId(provider?: string | null): boolean {
+  return !isThreeSixtyProvider(provider);
+}
+

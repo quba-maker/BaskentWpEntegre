@@ -19,6 +19,7 @@
 import { withActionGuard } from "@/lib/core/action-guard";
 import { CredentialsService } from "@/lib/services/credentials.service";
 import { logAudit } from "@/lib/audit";
+import { isThreeSixtyProvider } from "@/lib/core/provider-aliases";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -152,9 +153,10 @@ export async function prepareGreetingDraft(leadId: string) {
       let channelError: string | undefined;
       try {
         const creds = await CredentialsService.resolveCredentials(ctx.tenantId, 'whatsapp');
+        const isThreeSixty = isThreeSixtyProvider(creds.provider);
         if (!creds.accessToken) {
           channelError = 'WhatsApp Access Token bulunamadı.';
-        } else if (!creds.whatsappPhoneNumberId) {
+        } else if (!isThreeSixty && !creds.whatsappPhoneNumberId) {
           channelError = 'WhatsApp Phone Number ID eksik.';
         } else {
           channelReady = true;
@@ -545,36 +547,29 @@ export async function sendGreetingMessage(leadId: string, message: string) {
       const creds = await CredentialsService.resolveCredentials(ctx.tenantId, 'whatsapp');
       const META_ACCESS_TOKEN = creds.accessToken;
       const PHONE_NUMBER_ID = creds.whatsappPhoneNumberId;
+      const isThreeSixty = isThreeSixtyProvider(creds.provider);
 
-      if (!META_ACCESS_TOKEN || !PHONE_NUMBER_ID) {
+      if (!META_ACCESS_TOKEN || (!isThreeSixty && !PHONE_NUMBER_ID)) {
         return { success: false, error: "WhatsApp kimlik bilgileri eksik. Lütfen entegrasyon ayarlarını kontrol edin." };
       }
 
-      // ── 4. Send via WhatsApp API ──
-      const response = await fetch(`https://graph.facebook.com/v25.0/${PHONE_NUMBER_ID}/messages`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${META_ACCESS_TOKEN}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          messaging_product: 'whatsapp',
-          to: phone,
-          type: 'text',
-          text: { body: cleanMessage },
-        }),
-      });
-
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        return { success: false, error: `WhatsApp gönderim hatası: ${errData?.error?.message || response.statusText}` };
-      }
+      // ── 4. Send via WhatsApp API using unified MessageService ──
+      const { MessageService } = await import("@/lib/services/message.service");
+      const msgService = new MessageService(ctx.db);
 
       let providerMessageId: string | null = null;
       try {
-        const resData = await response.json();
-        providerMessageId = resData.messages?.[0]?.id || null;
-      } catch (_) {}
+        const outRes = await msgService.sendWhatsAppMessage(
+          PHONE_NUMBER_ID || "",
+          META_ACCESS_TOKEN,
+          phone,
+          cleanMessage,
+          creds.provider
+        );
+        providerMessageId = outRes.providerMessageId || null;
+      } catch (err: any) {
+        return { success: false, error: `WhatsApp gönderim hatası: ${err?.message || err}` };
+      }
 
       // ── 5. Resolve conversation_id ──
       let conversationId: string | null = null;
@@ -1407,45 +1402,30 @@ export async function sendMetaTemplateMessage(opportunityId: string, templateNam
         return { success: false, error: "Telefon numarası bulunamadı." };
       }
 
-      // 2. Resolve WhatsApp credentials
+      // 2. Resolve WhatsApp credentials & Send Meta Template Message via MessageService
       const creds = await CredentialsService.resolveCredentials(ctx.tenantId, 'whatsapp');
       const META_ACCESS_TOKEN = creds.accessToken;
       const PHONE_NUMBER_ID = creds.whatsappPhoneNumberId;
+      const isThreeSixty = isThreeSixtyProvider(creds.provider);
 
-      if (!META_ACCESS_TOKEN || !PHONE_NUMBER_ID) {
+      if (!META_ACCESS_TOKEN || (!isThreeSixty && !PHONE_NUMBER_ID)) {
         return { success: false, error: "WhatsApp entegrasyon kimlik bilgileri eksik." };
       }
 
-      // 3. Send Meta Template Message via Graph API
-      const response = await fetch(`https://graph.facebook.com/v25.0/${PHONE_NUMBER_ID}/messages`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${META_ACCESS_TOKEN}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          messaging_product: 'whatsapp',
-          to: phone,
-          type: 'template',
-          template: {
-            name: templateName,
-            language: {
-              code: languageCode
-            }
-          }
-        }),
-      });
-
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        return { success: false, error: `Meta API Şablon hatası: ${errData?.error?.message || response.statusText}` };
-      }
+      const { MessageService } = await import("@/lib/services/message.service");
+      const msgService = new MessageService(ctx.db);
 
       let providerMessageId: string | null = null;
       try {
-        const resData = await response.json();
-        providerMessageId = resData.messages?.[0]?.id || null;
-      } catch (_) {}
+        const outRes = await msgService.sendWhatsAppTemplate(
+          phone,
+          templateName,
+          languageCode
+        );
+        providerMessageId = outRes.providerMessageId || null;
+      } catch (err: any) {
+        return { success: false, error: `WhatsApp gönderim hatası: ${err?.message || err}` };
+      }
 
       // 4. Resolve conversation_id
       let conversationId: string | null = null;

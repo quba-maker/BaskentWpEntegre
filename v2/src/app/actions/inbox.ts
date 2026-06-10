@@ -4,6 +4,7 @@ import { withActionGuard } from "@/lib/core/action-guard";
 import { logAudit } from "@/lib/audit";
 import { enqueueRetry } from "@/lib/retry";
 import { CredentialsService } from "@/lib/services/credentials.service";
+import { isThreeSixtyProvider } from "@/lib/core/provider-aliases";
 import { PatientNameSyncService } from "@/lib/services/patient-name-sync";
 import { resolvePatientDisplayName, checkNameValidity, resolvePatientNameDetailed } from "@/lib/utils/patient-name-resolver";
 import { getCountryFromPhone } from "@/lib/utils/country";
@@ -784,7 +785,7 @@ export async function sendMessage(phone: string, text: string, replyToProviderMe
       let providerMessageId: string | null = null;
       let messageStatus = 'pending';
 
-      const isThreeSixty = channel === 'whatsapp' && (credentials.provider === '360dialog' || credentials.provider === '360dialog_whatsapp');
+      const isThreeSixty = channel === 'whatsapp' && isThreeSixtyProvider(credentials.provider);
 
       if (isThreeSixty && credentials.accessToken) {
         const { ThreeSixtyDialogService } = await import("@/lib/services/providers/three-sixty-dialog.service");
@@ -1156,7 +1157,7 @@ export async function sendMediaMessage(phone: string, mediaUrl: string, mediaTyp
       let providerMessageId: string | null = null;
       let messageStatus = 'pending';
 
-      const isThreeSixty = channel === 'whatsapp' && (credentials.provider === '360dialog' || credentials.provider === '360dialog_whatsapp');
+      const isThreeSixty = channel === 'whatsapp' && isThreeSixtyProvider(credentials.provider);
 
       if (isThreeSixty && credentials.accessToken) {
         const { ThreeSixtyDialogService } = await import("@/lib/services/providers/three-sixty-dialog.service");
@@ -1769,7 +1770,7 @@ export async function sendReaction(phone: string, targetProviderMessageId: strin
 
       // 3. Resolve credentials
       const credentials = await CredentialsService.resolveCredentials(ctx.tenantId, 'whatsapp');
-      const isThreeSixty = channel === 'whatsapp' && (credentials.provider === '360dialog' || credentials.provider === '360dialog_whatsapp');
+      const isThreeSixty = channel === 'whatsapp' && isThreeSixtyProvider(credentials.provider);
       const META_ACCESS_TOKEN = credentials.accessToken;
       const PHONE_NUMBER_ID = credentials.whatsappPhoneNumberId;
 
@@ -2868,40 +2869,16 @@ export async function sendApprovedFollowUp(conversationId: string, editedMessage
         return { success: false, error: "Son 24 saat içinde bu hastaya zaten bir hatırlatma mesajı gönderilmiştir." };
       }
 
-      // 3. Resolve WhatsApp credentials
-      const creds = await CredentialsService.resolveCredentials(ctx.tenantId, 'whatsapp');
-      const META_ACCESS_TOKEN = creds.accessToken;
-      const PHONE_NUMBER_ID = creds.whatsappPhoneNumberId;
-
-      if (!META_ACCESS_TOKEN || !PHONE_NUMBER_ID) {
-        return { success: false, error: "WhatsApp kimlik bilgileri eksik. Entegrasyon ayarlarını kontrol edin." };
-      }
-
-      // 4. Send via WhatsApp API
-      const response = await fetch(`https://graph.facebook.com/v25.0/${PHONE_NUMBER_ID}/messages`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${META_ACCESS_TOKEN}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          messaging_product: 'whatsapp',
-          to: phone,
-          type: 'text',
-          text: { body: cleanMessage },
-        }),
-      });
-
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        return { success: false, error: `WhatsApp gönderim hatası: ${errData?.error?.message || response.statusText}` };
-      }
-
+      // 3. Send via WhatsApp API using unified MessageService
       let providerMessageId: string | null = null;
       try {
-        const resData = await response.json();
-        providerMessageId = resData.messages?.[0]?.id || null;
-      } catch (_) {}
+        const { MessageService } = await import("@/lib/services/message.service");
+        const msgService = new MessageService(ctx.db);
+        const outRes = await msgService.sendWhatsAppFreeform(phone, cleanMessage);
+        providerMessageId = outRes.providerMessageId || null;
+      } catch (err: any) {
+        return { success: false, error: `WhatsApp gönderim hatası: ${err?.message || err}` };
+      }
 
       // 5. Save message record
       await ctx.db.executeSafe({
@@ -3415,16 +3392,7 @@ export async function sendFormGreetingFromInboxAction(conversationId: string, me
       const phone = conv.phone_number;
       const cleanMessage = messageText.trim();
 
-      // 2. Resolve WhatsApp credentials
-      const creds = await CredentialsService.resolveCredentials(ctx.tenantId, 'whatsapp');
-      const META_ACCESS_TOKEN = creds.accessToken;
-      const PHONE_NUMBER_ID = creds.whatsappPhoneNumberId;
-
-      if (!META_ACCESS_TOKEN || !PHONE_NUMBER_ID) {
-        return { success: false, error: "WhatsApp kimlik bilgileri eksik. Entegrasyon ayarlarını kontrol edin." };
-      }
-
-      // 3. Send via WhatsApp API using unified MessageService
+      // 2. Send via WhatsApp API using unified MessageService
       const { MessageService } = await import("@/lib/services/message.service");
       const { TenantDB } = await import("@/lib/core/tenant-db");
       const tenantDb = new TenantDB(ctx.tenantId);
@@ -3432,13 +3400,7 @@ export async function sendFormGreetingFromInboxAction(conversationId: string, me
 
       let providerMessageId: string | null = null;
       try {
-        const sendRes = await messageService.sendWhatsAppMessage(
-          PHONE_NUMBER_ID,
-          META_ACCESS_TOKEN,
-          phone,
-          cleanMessage,
-          creds.provider
-        );
+        const sendRes = await messageService.sendWhatsAppFreeform(phone, cleanMessage);
         providerMessageId = sendRes.providerMessageId || null;
       } catch (err: any) {
         return { success: false, error: `WhatsApp gönderim hatası: ${err.message || err}` };
@@ -5343,16 +5305,7 @@ export async function sendNoReplyReminderAction(conversationId: string, messageT
       const phone = conv.phone_number;
       const cleanMessage = messageText.trim();
 
-      // 2. Resolve WhatsApp credentials
-      const creds = await CredentialsService.resolveCredentials(ctx.tenantId, 'whatsapp');
-      const META_ACCESS_TOKEN = creds.accessToken;
-      const PHONE_NUMBER_ID = creds.whatsappPhoneNumberId;
-
-      if (!META_ACCESS_TOKEN || !PHONE_NUMBER_ID) {
-        return { success: false, error: "WhatsApp kimlik bilgileri eksik. Entegrasyon ayarlarını kontrol edin." };
-      }
-
-      // 3. Send via WhatsApp API
+      // 2. Send via WhatsApp API
       const { MessageService } = await import("@/lib/services/message.service");
       const { TenantDB } = await import("@/lib/core/tenant-db");
       const tenantDb = new TenantDB(ctx.tenantId);
@@ -5360,13 +5313,7 @@ export async function sendNoReplyReminderAction(conversationId: string, messageT
 
       let providerMessageId: string | null = null;
       try {
-        const sendRes = await messageService.sendWhatsAppMessage(
-          PHONE_NUMBER_ID,
-          META_ACCESS_TOKEN,
-          phone,
-          cleanMessage,
-          creds.provider
-        );
+        const sendRes = await messageService.sendWhatsAppFreeform(phone, cleanMessage);
         providerMessageId = sendRes.providerMessageId || null;
       } catch (err: any) {
         return { success: false, error: `WhatsApp gönderim hatası: ${err.message || err}` };

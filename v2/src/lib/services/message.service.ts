@@ -1,5 +1,6 @@
 import { TenantDB } from "@/lib/core/tenant-db";
 import { logger } from "@/lib/core/logger";
+import { requiresWhatsAppPhoneNumberId, isThreeSixtyProvider } from "@/lib/core/provider-aliases";
 
 export interface MessagePayload {
   phoneNumber: string;
@@ -165,7 +166,7 @@ export class MessageService {
     content: string,
     provider?: string | null
   ): Promise<{ success: boolean; providerMessageId?: string }> {
-    if (provider === '360dialog' || provider === '360dialog_whatsapp') {
+    if (isThreeSixtyProvider(provider)) {
       const { ThreeSixtyDialogService } = await import("./providers/three-sixty-dialog.service");
       return ThreeSixtyDialogService.sendMessage(accessToken, to, content);
     }
@@ -214,7 +215,7 @@ export class MessageService {
       throw new Error("WhatsApp credentials not resolved.");
     }
 
-    if (creds.provider === '360dialog' || creds.provider === '360dialog_whatsapp') {
+    if (isThreeSixtyProvider(creds.provider)) {
       const { ThreeSixtyDialogService } = await import("./providers/three-sixty-dialog.service");
       return ThreeSixtyDialogService.sendTemplate(creds.accessToken, to, templateName, languageCode, components);
     }
@@ -270,10 +271,11 @@ export class MessageService {
   ): Promise<{ success: boolean; providerMessageId?: string }> {
     const { CredentialsService } = await import("./credentials.service");
     const creds = await CredentialsService.resolveCredentials(this.db.tenantId, 'whatsapp');
-    if (!creds.accessToken || !creds.whatsappPhoneNumberId) {
+    const needsPhoneId = requiresWhatsAppPhoneNumberId(creds.provider);
+    if (!creds.accessToken || (needsPhoneId && !creds.whatsappPhoneNumberId)) {
       throw new Error("WhatsApp credentials not resolved.");
     }
-    return this.sendWhatsAppMessage(creds.whatsappPhoneNumberId, creds.accessToken, to, content, creds.provider);
+    return this.sendWhatsAppMessage(creds.whatsappPhoneNumberId || "", creds.accessToken, to, content, creds.provider);
   }
 
   /**

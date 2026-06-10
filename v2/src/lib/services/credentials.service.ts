@@ -164,7 +164,7 @@ export class CredentialsService {
         });
         return {
           accessToken: fallbackApiKey,
-          whatsappPhoneNumberId: "+905527641397", // 360dialog live phone fallback number
+          whatsappPhoneNumberId: null, // REMOVED: hardcoded phone — resolved via channel provider-awareness
           whatsappBusinessAccountId: null,
           metaPageId: null,
           instagramId: null,

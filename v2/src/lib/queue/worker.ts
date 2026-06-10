@@ -13,6 +13,7 @@ import { assertTenant } from "@/lib/security/assertions";
 import { AIEventEmitter } from "@/lib/services/ai/core/event-emitter";
 import { FeatureFlagService } from "@/lib/services/feature-flag.service";
 import { CredentialsService } from "@/lib/services/credentials.service";
+import { isThreeSixtyProvider } from "@/lib/core/provider-aliases";
 import { getTraceContext } from "@/lib/core/trace-context";
 
 function safeAfter(cb: () => void | Promise<void>) {
@@ -1633,7 +1634,8 @@ export class QueueWorkerEngine {
         this.log.info(`[CREDENTIAL_SOURCE] Working hours off-message`, { tenantId, source: whCreds.source, traceId });
         const accessToken = whCreds.accessToken || '';
         const phoneId = whCreds.whatsappPhoneNumberId || '';
-        if (phoneId && accessToken) {
+        const isThreeSixty = isThreeSixtyProvider(whCreds.provider);
+        if (accessToken && (isThreeSixty || phoneId)) {
           const outRes = await msgService.sendWhatsAppMessage(phoneId, accessToken, phoneNumber, offMsg, whCreds.provider);
           const offMsgResult = await msgService.saveMessageIdempotent({ 
             phoneNumber, 
@@ -1838,8 +1840,9 @@ export class QueueWorkerEngine {
           const privCreds = await CredentialsService.resolveCredentials(tenantId, channel);
           const privAccessToken = privCreds.accessToken || '';
           const privPhoneId = privCreds.whatsappPhoneNumberId || '';
+          const isThreeSixty = isThreeSixtyProvider(privCreds.provider);
 
-          if (privAccessToken && (channel !== 'whatsapp' || privPhoneId)) {
+          if (privAccessToken && (channel !== 'whatsapp' || isThreeSixty || privPhoneId)) {
             try {
               let privOutResult;
               if (channel === 'whatsapp') {
@@ -2417,8 +2420,9 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
 
     const accessToken = outboundCreds.accessToken || '';
     const phoneId = outboundCreds.whatsappPhoneNumberId || '';
+    const isThreeSixty = isThreeSixtyProvider(outboundCreds.provider);
 
-    if (!accessToken || (channel === 'whatsapp' && !phoneId)) {
+    if (!accessToken || (channel === 'whatsapp' && !isThreeSixty && !phoneId)) {
        this.log.error(`[CREDENTIAL_MISSING] Cannot send — no credentials resolved for tenant`, undefined, {
          tenantId, traceId, channel, source: outboundCreds.source,
          hasToken: !!accessToken, hasPhoneId: !!phoneId
@@ -3902,8 +3906,9 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       const outboundCreds = await CredentialsService.resolveCredentials(tenantId, channel);
       const accessToken = outboundCreds.accessToken || '';
       const phoneId = outboundCreds.whatsappPhoneNumberId || '';
+      const isThreeSixty = isThreeSixtyProvider(outboundCreds.provider);
 
-      if (!accessToken || (channel === 'whatsapp' && !phoneId)) {
+      if (!accessToken || (channel === 'whatsapp' && !isThreeSixty && !phoneId)) {
         this.log.error(`[DEBOUNCE_WORKER] Missing credentials for deterministic response`, undefined, { traceId });
         return;
       }
@@ -4265,8 +4270,9 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       const outboundCreds = await CredentialsService.resolveCredentials(tenantId, channel);
       const accessToken = outboundCreds.accessToken || '';
       const phoneId = outboundCreds.whatsappPhoneNumberId || '';
+      const isThreeSixty = isThreeSixtyProvider(outboundCreds.provider);
 
-      if (!accessToken || (channel === 'whatsapp' && !phoneId)) {
+      if (!accessToken || (channel === 'whatsapp' && !isThreeSixty && !phoneId)) {
         this.log.error(`[DEBOUNCE_WORKER] Missing credentials for send`, undefined, { traceId });
         return;
       }

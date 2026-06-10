@@ -3,6 +3,7 @@
 import { withActionGuard } from "@/lib/core/action-guard";
 import { TemplateResolverService, type TemplateListItem } from "@/lib/services/template-resolver.service";
 import { CredentialsService } from "@/lib/services/credentials.service";
+import { isThreeSixtyProvider } from "@/lib/core/provider-aliases";
 import { logAudit } from "@/lib/audit";
 
 const UUID_REGEX = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
@@ -146,7 +147,8 @@ export async function prepareRemarketingDraft(opportunityId: string): Promise<Re
 
       try {
         const creds = await CredentialsService.resolveCredentials(ctx.tenantId, 'whatsapp');
-        if (creds && creds.accessToken && creds.whatsappPhoneNumberId) {
+        const isThreeSixty = isThreeSixtyProvider(creds?.provider);
+        if (creds && creds.accessToken && (isThreeSixty || creds.whatsappPhoneNumberId)) {
           channelReady = true;
         } else {
           channelError = "WhatsApp API erişim bilgileri (accessToken / whatsappPhoneNumberId) eksik.";

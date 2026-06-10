@@ -8,10 +8,18 @@ import { validateEnv } from "../lib/env";
 
 const results: { name: string; passed: boolean; error?: string }[] = [];
 
-function test(name: string, fn: () => void) {
+function test(name: string, fn: () => void | Promise<void>) {
   try {
-    fn();
-    results.push({ name, passed: true });
+    const res = fn();
+    if (res instanceof Promise) {
+      res.then(() => {
+        results.push({ name, passed: true });
+      }).catch((e) => {
+        results.push({ name, passed: false, error: e.message });
+      });
+    } else {
+      results.push({ name, passed: true });
+    }
   } catch (e: any) {
     results.push({ name, passed: false, error: e.message });
   }
@@ -70,19 +78,19 @@ test("IMPORT: env.ts yüklenebilmeli", async () => {
 // 3. RATE LIMITER TESTS
 // ==========================================
 
-test("RATE LIMIT: İlk 5 deneme izin verilmeli", () => {
+test("RATE LIMIT: İlk 5 deneme izin verilmeli", async () => {
   const { checkRateLimit } = require("../lib/rate-limit");
   for (let i = 0; i < 5; i++) {
-    const result = checkRateLimit(`test-${Date.now()}-${Math.random()}`, 5, 60000);
+    const result = await checkRateLimit(`test-${Date.now()}-${Math.random()}`, 5, 60000);
     assert(result.allowed === true, `Deneme ${i + 1} reddedildi`);
   }
 });
 
-test("RATE LIMIT: 6. deneme reddedilmeli", () => {
+test("RATE LIMIT: 6. deneme reddedilmeli", async () => {
   const { checkRateLimit } = require("../lib/rate-limit");
   const key = `rate-test-${Date.now()}`;
-  for (let i = 0; i < 5; i++) checkRateLimit(key, 5, 60000);
-  const result = checkRateLimit(key, 5, 60000);
+  for (let i = 0; i < 5; i++) await checkRateLimit(key, 5, 60000);
+  const result = await checkRateLimit(key, 5, 60000);
   assert(result.allowed === false, "6. deneme izin verilmemeli");
 });
 
@@ -116,7 +124,6 @@ test("SECURITY: Null tenant bypass olmamalı", async () => {
 test("SECURITY: fakeReq/fakeRes olmamalı", async () => {
   const fs = await import("fs");
   const path = await import("path");
-  const glob = await import("fs");
   
   const checkDir = (dir: string) => {
     if (!fs.existsSync(dir)) return;
@@ -131,6 +138,31 @@ test("SECURITY: fakeReq/fakeRes olmamalı", async () => {
   };
 
   checkDir(path.resolve(__dirname, "../app/api"));
+});
+
+// ==========================================
+// 5. PROVIDER VALIDATION TESTS (Faz 0B-2B)
+// ==========================================
+
+test("PROVIDER: isThreeSixtyProvider doğru çalışmalı", () => {
+  const { isThreeSixtyProvider } = require("../lib/core/provider-aliases");
+  assert(isThreeSixtyProvider("360dialog") === true, "360dialog true olmalı");
+  assert(isThreeSixtyProvider("360dialog_whatsapp") === true, "360dialog_whatsapp true olmalı");
+  assert(isThreeSixtyProvider("threesixty") === true, "threesixty true olmalı");
+  assert(isThreeSixtyProvider("three_sixty_dialog") === true, "three_sixty_dialog true olmalı");
+  assert(isThreeSixtyProvider("whatsapp") === false, "whatsapp false olmalı");
+  assert(isThreeSixtyProvider("messenger") === false, "messenger false olmalı");
+  assert(isThreeSixtyProvider(null) === false, "null false olmalı");
+  assert(isThreeSixtyProvider(undefined) === false, "undefined false olmalı");
+});
+
+test("PROVIDER: requiresWhatsAppPhoneNumberId doğru çalışmalı", () => {
+  const { requiresWhatsAppPhoneNumberId } = require("../lib/core/provider-aliases");
+  assert(requiresWhatsAppPhoneNumberId("whatsapp") === true, "whatsapp Phone ID gerektirmeli");
+  assert(requiresWhatsAppPhoneNumberId("messenger") === true, "messenger Phone ID gerektirmeli");
+  assert(requiresWhatsAppPhoneNumberId("360dialog") === false, "360dialog Phone ID gerektirmemeli");
+  assert(requiresWhatsAppPhoneNumberId("360dialog_whatsapp") === false, "360dialog_whatsapp Phone ID gerektirmemeli");
+  assert(requiresWhatsAppPhoneNumberId(null) === true, "null Phone ID gerektirmeli");
 });
 
 // ==========================================
