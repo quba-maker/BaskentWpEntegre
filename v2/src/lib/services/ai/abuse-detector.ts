@@ -1,11 +1,14 @@
 /**
- * 🛡️ P0 Abuse & Profanity Detector (Hotfix)
+ * 🛡️ P0 Abuse & Profanity Detector (Hotfix - Refined)
  * 
  * Scans incoming patient messages for explicit curses, profanity,
  * slurs, and derogatory attacks against Rüya (the bot), the hospital,
  * doctors, or personnel.
  * 
  * Separates core insults/abuse from general patient frustration.
+ * General slang like "lan" or complaint structures like "ne biçim"
+ * are treated as frustration (proceed with no-CTA reply) rather than
+ * database level abuse block.
  * 
  * Pure function — no DB, no env dependencies.
  */
@@ -34,9 +37,7 @@ function normalizeTurkishChars(text: string): string {
 }
 
 // Collapses repeated consecutive characters (e.g., "saalaak" -> "salak", "aptalll" -> "aptal")
-// Special precaution: Do not collapse to less than a single character
 function collapseRepeatedChars(text: string): string {
-  // Replace consecutive identical characters (length >= 2) with a single instance of that character
   return text.replace(/(.)\1+/gi, '$1');
 }
 
@@ -69,29 +70,30 @@ export function detectAbuse(messageText: string): AbuseDetection {
   const matched: string[] = [];
 
   // ==========================================
-  // ABUSE & PROFANITY PATTERNS
+  // REAL SWHEAR WORDS & VULGARITY PATTERNS
   // ==========================================
-
-  // 1. Vulgar slurs & swear words (Turkish + English)
   const VULGAR_PATTERNS = [
     /\b(siktir|orospu|pi[cç]|g[oö]t|amk|aq|kahpe|yav[sş]ak|ibne|pu[sş]t)\b/i,
     /\b(sikeyim|sikerler|sikis|sik[ei]r|sik[it]er|sik\s+git)\b/i,
     /\b(fuck|shit|asshole|bitch|bastard)\b/i
   ];
 
-  // 2. Core insults (e.g., salak, aptal, gerizekalı, mal mısın)
-  // Must support collapsed repeats (e.g. "saalaak") via checked collapsed versions
+  // ==========================================
+  // REAL INSULT PATTERNS (salak, aptal, köpek, gerizekalı)
+  // ==========================================
   const INSULT_KEYWORDS = [
     'salak',
     'aptal',
     'gerizekali',
-    'gerizekali',
-    'gerizekaval'
+    'gerizekaval',
+    'kopek',
+    'kopoglu',
+    'kopekoglu'
   ];
 
-  // 3. Dynamic "mal" checks
-  // Note: "mal" can mean goods in other contexts, but is treated as insult here
-  // Checks "mal mısın", "malmisiniz", "malmısınız", "mal", "mal misiniz", etc.
+  // ==========================================
+  // MAL PATTERNS (mal mısın)
+  // ==========================================
   const MAL_PATTERNS = [
     /\bmal\s+m[iı]s[iı]n\b/i,
     /\bmal\s+m[iı]s[iı]n[iı]z\b/i,
@@ -101,82 +103,21 @@ export function detectAbuse(messageText: string): AbuseDetection {
     /\bmal\s+m[iı]\b/i
   ];
 
-  // 4. Slang/offensive exclamations
-  // Precaution: Must use strict boundaries to not match "plan", "falan", "alan"
-  const SLANG_PATTERNS = [
-    /\b(ulan)\b/i,
-    /\b(lan)\b/i
+  // ==========================================
+  // DIRECT TARGET ATTACK INSULTS (e.g. ruya salak, bot köpek)
+  // ==========================================
+  const TARGET_ATTACK_PATTERNS = [
+    /\b(ruya|rüya|asistan|bot|sistem)\s+(salak|aptal|mal|gerizekali|gerizekalı|kopek|köpek|siktir|orospu|ibne|pust)\b/i
   ];
 
-  // 5. Attacks directed at doctors, staff, hospital, or system
-  const ATTACK_PATTERNS = [
-    // "doktorlarınız da sizin gibi mi", "hekimleriniz de sizin gibi"
-    /\b(doktor|hekim|personel|hastane|asistan|dan[iı][sş]man|sistem|hizmet|tedavi)(ler)?(iniz)?\s+(da|de)?\s*(sizin|senin)\s+gibi\b/i,
-    // "ne biçim danışmansın", "ne biçim hastane"
-    /\bne\s+bi[cç]im\s+(dan[iı][sş]man|hastane|doktor|hekim|asistan|personel|hizmet|tedavi)/i,
-    // Direct insult targeting the bot name or role
-    /\b(ruya|rüya|asistan|bot|sistem)\s+(salak|aptal|mal|gerizekali|gerizekalı|kopek|köpek)\b/i
-  ];
-
-  // ==========================================
-  // EXCLUSIONS (FRUSTRATION NOT ABUSE)
-  // ==========================================
-  // Frustrated but valid patient messages: kriz/anger mode
-  const FRUSTRATION_PHRASES = [
-    'bot gibi konusuyorsun',
-    'bot gibi konuşuyorsun',
-    'bu cevap olmadi',
-    'bu cevap olmadı',
-    'cevap vermiyorsunuz',
-    'yeter artik randevu deme',
-    'yeter artık randevu deme',
-    'anlamadiniz',
-    'anlamadınız'
-  ];
-
-  // If the input matches a frustration phrase EXACTLY (after cleanup), it's not abuse
-  const isFrustratedOnly = FRUSTRATION_PHRASES.some(phrase => {
-    const normPhrase = normalizeTurkishChars(phrase);
-    return collapsedCleaned === phrase || 
-           collapsedNormalized === normPhrase || 
-           rawTrimmed === phrase || 
-           normalizedTrimmed === normPhrase;
-  });
-
-  if (isFrustratedOnly) {
-    return {
-      abuse_detected: false,
-      matched_phrases: [],
-      decisionCode: 'PROCEED'
-    };
-  }
-
-  // ==========================================
-  // SCANS & ASSERTS
-  // ==========================================
-
-  // A. Vulgar slurs (checked on original, normalized, collapsed)
+  // A. Swear words check
   for (const pattern of VULGAR_PATTERNS) {
     if (pattern.test(rawTrimmed) || pattern.test(normalizedTrimmed) || pattern.test(collapsedCleaned) || pattern.test(collapsedNormalized)) {
       matched.push(`vulgar_slur:${pattern.source}`);
     }
   }
 
-  // B. Attack patterns (checked on original, normalized, collapsed)
-  for (const pattern of ATTACK_PATTERNS) {
-    if (pattern.test(rawTrimmed) || pattern.test(normalizedTrimmed) || pattern.test(collapsedCleaned) || pattern.test(collapsedNormalized)) {
-      matched.push(`attack_pattern:${pattern.source}`);
-    }
-  }
-
-  // C. Mal patterns (checked on original, normalized, collapsed)
-  for (const pattern of MAL_PATTERNS) {
-    if (pattern.test(rawTrimmed) || pattern.test(normalizedTrimmed) || pattern.test(collapsedCleaned) || pattern.test(collapsedNormalized)) {
-      matched.push(`mal_insult:${pattern.source}`);
-    }
-  }
-
-  // D. Core insult keywords (checked on collapsed versions to handle repeated characters)
+  // B. Insult keywords check
   for (const keyword of INSULT_KEYWORDS) {
     const normKeyword = normalizeTurkishChars(keyword);
     const regex = new RegExp(`\\b${keyword}\\b`, 'i');
@@ -187,14 +128,21 @@ export function detectAbuse(messageText: string): AbuseDetection {
     }
   }
 
-  // E. Slang exclamations (ulan, lan)
-  for (const pattern of SLANG_PATTERNS) {
+  // C. Mal patterns check
+  for (const pattern of MAL_PATTERNS) {
     if (pattern.test(rawTrimmed) || pattern.test(normalizedTrimmed) || pattern.test(collapsedCleaned) || pattern.test(collapsedNormalized)) {
-      matched.push(`slang_exclamation:${pattern.source}`);
+      matched.push(`mal_insult:${pattern.source}`);
     }
   }
 
-  // Special exact checks for short word insults (e.g. exactly "mal" or "aptal")
+  // D. Target attack patterns check
+  for (const pattern of TARGET_ATTACK_PATTERNS) {
+    if (pattern.test(rawTrimmed) || pattern.test(normalizedTrimmed) || pattern.test(collapsedCleaned) || pattern.test(collapsedNormalized)) {
+      matched.push(`target_attack:${pattern.source}`);
+    }
+  }
+
+  // E. Exact short insult words
   if (collapsedCleaned === 'mal' || collapsedNormalized === 'mal') {
     matched.push('exact_mal');
   }

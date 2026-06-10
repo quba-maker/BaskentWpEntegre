@@ -5,6 +5,7 @@ dotenv.config({ path: path.resolve(__dirname, '../.env.local') });
 import { TurkishReplyQualityGate } from '../src/lib/services/ai/turkish-quality-gate';
 import { PromptBuilder } from '../src/lib/services/ai/prompt-builder';
 import { TenantBrain } from '../src/lib/brain/tenant-brain';
+import { detectAbuse } from '../src/lib/services/ai/abuse-detector';
 
 // Simple direct Gemini caller for testing to avoid running full worker pipeline/outbounds
 async function callGeminiDirect(promptText: string, history: any[]): Promise<string> {
@@ -94,6 +95,30 @@ async function runUnitTests() {
     }
   }
 
+  console.log("\n=== RUNNING ABUSE DETECTOR UNIT TESTS ===");
+  const abuseTestCases = [
+    { text: "Bot gibi konuşuyorsun", expected: false, desc: "bot eleştirisi (sitem)" },
+    { text: "Cevap vermiyorsunuz", expected: false, desc: "cevap vermiyorsunuz (sitem)" },
+    { text: "Bu cevap olmadı", expected: false, desc: "bu cevap olmadı (sitem)" },
+    { text: "Yeter artık randevu deme", expected: false, desc: "randevu baskısı eleştirisi (sitem)" },
+    { text: "cevap vermiyorsunuz lan", expected: false, desc: "slang (lan) containing sitem" },
+    { text: "ne biçim danışmansın sen", expected: false, desc: "complaint (ne biçim) sitem" },
+    { text: "doktorlarınız da sizin gibi mi", expected: false, desc: "complaint (da sizin gibi) sitem" },
+    { text: "mal mısın", expected: true, desc: "mal mısın (abuse)" },
+    { text: "salak mısın", expected: true, desc: "salak mısın (abuse)" },
+    { text: "siktir git burdan", expected: true, desc: "vulgar swearing (abuse)" },
+    { text: "rüya tam bir aptal", expected: true, desc: "direct target insult (abuse)" }
+  ];
+
+  for (const tc of abuseTestCases) {
+    const res = detectAbuse(tc.text);
+    const passed = res.abuse_detected === tc.expected;
+    console.log(`- [${passed ? 'PASS' : 'FAIL'}] "${tc.text}" - ${tc.desc} (abuse_detected: ${res.abuse_detected}, expected: ${tc.expected})`);
+    if (!passed) {
+      failed++;
+    }
+  }
+
   if (failed > 0) {
     throw new Error(`Unit tests failed: ${failed} failures`);
   }
@@ -161,8 +186,8 @@ async function runRegressionSimulation() {
   
   // Verify Step 2 properties
   verifyResponseQuality(response, {
-    shouldNotContain: ['mehmet haberal', 'haberal', 'doktorumuz', 'ismini', 'prompt', 'talimat', 'kural', 'yasak'],
-    shouldContain: ['hekim', 'güncel hekim bilgisini yanlış paylaşmak istemem', 'lgili bölümün güncel hekim bilgisini kontrol ederek paylaşmam daha doğru olur'],
+    shouldNotContain: ['mehmet haberal', 'haberal', 'doktorumuz', 'ismini', 'prompt', 'talimat', 'kural', 'yasak', 'güncel hekim bilgisini yanlış paylaşmak istemem', 'kontrol ederek paylaşmam daha doğru olur'],
+    shouldContain: ['hekim'],
     hasDoctorPlaceholder: true
   });
   
@@ -277,8 +302,12 @@ function verifyResponseQuality(text: string, opts: VerificationOptions) {
 
   // Doctor placeholder check
   if (opts.hasDoctorPlaceholder) {
-    if (!normalized.includes("bilgisini yanlış paylaşmak istemem") && !normalized.includes("kontrol ederek paylaşmam daha doğru olur")) {
-      throw new Error(`Response lacks standard doctor fallback placeholder: "${text}"`);
+    if (normalized.includes("bilgisini yanlış paylaşmak istemem") || normalized.includes("kontrol ederek paylaşmam daha doğru olur")) {
+      throw new Error(`Response uses prohibited boilerplate doctor fallback: "${text}"`);
+    }
+    // Verify it mentions verifying or guiding instead
+    if (!normalized.includes("netleştir") && !normalized.includes("doğrulama") && !normalized.includes("kontrol ed") && !normalized.includes("yönlendir") && !normalized.includes("bilgi")) {
+      throw new Error(`Response lacks natural doctor fallback expression: "${text}"`);
     }
   }
 
