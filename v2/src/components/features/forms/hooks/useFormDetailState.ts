@@ -32,6 +32,8 @@ export function useFormDetailState(selectedForm: any, onFormUpdate: () => void) 
   const [readinessLoading, setReadinessLoading] = useState(false);
   const [techOpen, setTechOpen] = useState(false);
 
+  const [draftSuccessTemp, setDraftSuccessTemp] = useState(false);
+
   const getAllPhones = (form: any): string[] => {
     const rd = form?.raw_data || {};
     let phones: string[] = [];
@@ -120,6 +122,7 @@ export function useFormDetailState(selectedForm: any, onFormUpdate: () => void) 
       setSelectedTemplateId(null);
       setTechOpen(false);
       setReadiness(null);
+      setDraftSuccessTemp(false);
 
       const phones = getAllPhones(selectedForm);
       setSelectedPhone(phones[0] || selectedForm.phone_number || "");
@@ -137,11 +140,16 @@ export function useFormDetailState(selectedForm: any, onFormUpdate: () => void) 
     setOutreachLoading('draft');
     setOutreachError(null);
     setOutreachSuccess(null);
+    setDraftSuccessTemp(false);
     try {
       const result: any = await prepareSmartGreetingDraftAction(form.id);
       if (result.success && result.data?.draftText) {
         setDraftMessage(result.data.draftText);
-        setIsDraftOpen(true);
+        setDraftSuccessTemp(true);
+        setTimeout(() => {
+          setDraftSuccessTemp(false);
+          setIsDraftOpen(true);
+        }, 1500);
       } else {
         setOutreachError(result.error || 'Taslak hazırlanamadı.');
       }
@@ -205,6 +213,7 @@ export function useFormDetailState(selectedForm: any, onFormUpdate: () => void) 
     readinessLoading,
     techOpen,
     setTechOpen,
+    draftSuccessTemp,
     getAllPhones,
     loadOutreachTimeline,
     handlePrepareDraft,

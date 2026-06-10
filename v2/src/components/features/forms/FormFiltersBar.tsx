@@ -16,6 +16,7 @@ interface FormFiltersBarProps {
   isSyncing: boolean;
   syncProgress: { status: string; progress: number; message: string };
   handleSync: () => void;
+  syncMetadata?: { lastManualSync: string | null; lastAutoSync: string | null } | null;
 }
 
 export function FormFiltersBar({
@@ -29,7 +30,8 @@ export function FormFiltersBar({
   setLeadStageFilter,
   isSyncing,
   syncProgress,
-  handleSync
+  handleSync,
+  syncMetadata
 }: FormFiltersBarProps) {
   const [campaigns, setCampaigns] = useState<string[]>([]);
   
@@ -37,7 +39,20 @@ export function FormFiltersBar({
     getCampaignNames().then(setCampaigns);
   }, []);
 
+  const formatSyncDate = (dateStr: string | null | undefined) => {
+    if (!dateStr) return null;
+    try {
+      const d = new Date(dateStr);
+      return d.toLocaleString('tr-TR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+    } catch (_) {
+      return null;
+    }
+  };
+
   const hasActiveFilters = sourceFilter !== 'all' || firstContactFilter !== 'all' || leadStageFilter !== 'all';
+
+  const mFormatted = formatSyncDate(syncMetadata?.lastManualSync);
+  const aFormatted = formatSyncDate(syncMetadata?.lastAutoSync);
 
   return (
     <div className="space-y-4 mb-4">
@@ -49,21 +64,38 @@ export function FormFiltersBar({
         
         <div className="flex flex-col md:flex-row items-center gap-3">
           {/* Sync Button & Progress */}
-          <div className="relative flex items-center">
-            {isSyncing ? (
-              <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-sm font-medium bg-blue-50 text-blue-600 border-blue-100`}>
-                <RefreshCw className="w-4 h-4 animate-spin" />
-                <span className="min-w-[120px]">{syncProgress.message || 'Senkronize ediliyor...'}</span>
-              </div>
-            ) : (
-              <button
-                onClick={handleSync}
-                className="flex items-center gap-2 px-4 py-2.5 bg-white/60 backdrop-blur-md border border-white/60 hover:bg-white text-sm font-semibold text-[#1D1D1F] rounded-xl shadow-[0_2px_10px_rgba(0,0,0,0.02)] transition-all cursor-pointer"
-              >
-                <RefreshCw className="w-4 h-4" />
-                Senkronize Et
-              </button>
-            )}
+          <div className="flex items-center gap-3 bg-white/40 p-1.5 rounded-2xl border border-white/40">
+            <div className="relative flex items-center">
+              {isSyncing ? (
+                <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-sm font-medium bg-blue-50 text-blue-600 border-blue-100`}>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span className="min-w-[120px]">{syncProgress.message || 'Senkronize ediliyor...'}</span>
+                </div>
+              ) : (
+                <button
+                  onClick={handleSync}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-white/80 hover:bg-white text-sm font-semibold text-[#1D1D1F] rounded-xl shadow-[0_2px_10px_rgba(0,0,0,0.02)] transition-all cursor-pointer border border-black/5"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  Senkronize Et
+                </button>
+              )}
+            </div>
+
+            <div className="text-[10px] text-[#86868B] flex flex-col justify-center pr-3 min-w-[140px] select-none leading-tight">
+              {!syncMetadata || (!syncMetadata.lastManualSync && !syncMetadata.lastAutoSync) ? (
+                <span className="italic font-medium text-slate-400">Henüz senkronizasyon bilgisi yok</span>
+              ) : (
+                <>
+                  {mFormatted && (
+                    <span className="font-semibold text-slate-600">Manuel: <span className="font-normal text-slate-500">{mFormatted}</span></span>
+                  )}
+                  {aFormatted && (
+                    <span className="font-semibold text-slate-600 mt-0.5">Otomatik: <span className="font-normal text-slate-500">{aFormatted}</span></span>
+                  )}
+                </>
+              )}
+            </div>
           </div>
 
           <div className="relative w-full md:w-64">

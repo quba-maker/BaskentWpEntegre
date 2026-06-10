@@ -45,6 +45,8 @@ export async function getForms(page: number = 1, search: string = "", source: st
           conditions.push(`cl.first_contact_status IN ('manual_greeting_confirmed', 'inbox_greeting_sent')`);
         } else if (firstContactParam === 'blocked_or_invalid') {
           conditions.push(`cl.first_contact_status IN ('blocked_or_invalid', 'out_of_scope')`);
+        } else if (firstContactParam === 'no_reply_waiting') {
+          conditions.push(`cl.is_no_reply_eligible = true`);
         } else {
           conditions.push(`cl.first_contact_status = $${paramIdx}`);
           params.push(firstContactParam);
@@ -692,6 +694,215 @@ export async function syncGoogleSheets() {
     console.log('[SYNC_ACTION_RETURN]', JSON.stringify(res).slice(0, 300));
     if (!res.success) return { success: false, error: res.error || res.data?.error };
     return { success: true, message: res.data?.message, stats: res.data?.stats };
+  });
+}
+
+export async function getFormStatusCounts() {
+  return withActionGuard(
+    { actionName: 'getFormStatusCounts' },
+    async (ctx) => {
+      // Build lightweight query for counts
+      const countsSql = `
+        WITH base_leads AS (
+          SELECT l.id, l.phone_number, l.stage,
+                 COALESCE(ol.any_confirmed, false) as any_confirmed,
+                 COALESCE(ol.any_inbox_sent, false) as any_inbox_sent,
+                 COALESCE(ol.any_api_sent, false) as any_api_sent,
+                 COALESCE(ol.any_opened, false) as any_opened,
+                 ol.first_greeting_at,
+                 COALESCE(c.id, c_phone.id) as linked_conv_id
+          FROM leads l
+          LEFT JOIN conversations c ON c.tenant_id = l.tenant_id AND l.customer_id IS NOT NULL AND c.customer_id = l.customer_id
+          LEFT JOIN LATERAL (
+            SELECT c2.id
+            FROM conversations c2 
+            WHERE c2.tenant_id = l.tenant_id 
+              AND RIGHT(c2.phone_number, 10) = RIGHT(l.phone_number, 10)
+              AND l.customer_id IS NULL
+              AND (SELECT COUNT(*) FROM conversations cx 
+                   WHERE cx.tenant_id = l.tenant_id 
+                   AND RIGHT(cx.phone_number, 10) = RIGHT(l.phone_number, 10)) = 1
+            LIMIT 1
+          ) c_phone ON c.id IS NULL
+          LEFT JOIN LATERAL (
+            SELECT 
+              MAX(created_at) as last_outreach_at,
+              MAX(CASE WHEN action IN ('greeting_sent', 'template_sent', 'form_greeting_template_sent', 'manual_whatsapp_greeting_echo_confirmed', 'inbox_form_greeting_sent', 'whatsapp_app_opened_for_greeting') THEN created_at END) as first_greeting_at,
+              BOOL_OR(action = 'manual_whatsapp_greeting_echo_confirmed') as any_confirmed,
+              BOOL_OR(action = 'inbox_form_greeting_sent') as any_inbox_sent,
+              BOOL_OR(action IN ('greeting_sent', 'template_sent', 'form_greeting_template_sent')) as any_api_sent,
+              BOOL_OR(action = 'whatsapp_app_opened_for_greeting') as any_opened
+            FROM outreach_logs
+            WHERE lead_id = l.id AND tenant_id = l.tenant_id::text
+          ) ol ON true
+          WHERE l.tenant_id = $1
+        ),
+        base_messages AS (
+          SELECT bl.id,
+                 EXISTS(SELECT 1 FROM messages m WHERE m.conversation_id = bl.linked_conv_id AND m.direction = 'in') as has_inbound,
+                 (SELECT MAX(created_at) FROM messages m WHERE m.conversation_id = bl.linked_conv_id AND m.direction = 'in') as last_inbound_at,
+                 (SELECT MAX(created_at) FROM messages m WHERE m.conversation_id = bl.linked_conv_id AND m.direction = 'out') as last_outbound_at,
+                 (SELECT direction FROM messages m WHERE m.conversation_id = bl.linked_conv_id ORDER BY created_at DESC LIMIT 1) as last_message_direction,
+                 (SELECT content FROM messages m WHERE m.conversation_id = bl.linked_conv_id ORDER BY created_at DESC LIMIT 1) as last_message_content
+          FROM base_leads bl
+          WHERE bl.linked_conv_id IS NOT NULL
+        ),
+        calculated_leads AS (
+          SELECT bl.*,
+                 COALESCE(bm.has_inbound, false) as has_inbound,
+                 bm.last_inbound_at,
+                 bm.last_outbound_at,
+                 CASE
+                   WHEN bm.has_inbound = true THEN
+                     CASE
+                       WHEN bl.first_greeting_at IS NOT NULL 
+                            OR bl.any_confirmed = true 
+                            OR bl.any_inbox_sent = true 
+                            OR bl.any_api_sent = true 
+                            OR bm.last_outbound_at IS NOT NULL THEN
+                         CASE
+                           WHEN bm.last_inbound_at IS NOT NULL AND 
+                                (bm.last_inbound_at > COALESCE(bm.last_outbound_at, '1970-01-01'::timestamp) AND bm.last_inbound_at > COALESCE(bl.first_greeting_at, '1970-01-01'::timestamp)) THEN 'patient_replied'
+                           WHEN bl.any_confirmed = true THEN 'manual_greeting_confirmed'
+                           ELSE 'inbox_greeting_sent'
+                         END
+                       ELSE 'waiting_inbox_reply'
+                     END
+                   ELSE
+                     CASE
+                       WHEN bl.any_confirmed = true THEN 'manual_greeting_confirmed'
+                       WHEN bl.any_inbox_sent = true THEN 'inbox_greeting_sent'
+                       WHEN bl.any_api_sent = true THEN 'inbox_greeting_sent'
+                       WHEN bl.any_opened = true THEN 'whatsapp_opened'
+                       ELSE
+                         CASE
+                           WHEN bl.phone_number IS NULL OR bl.phone_number = '' THEN 'blocked_or_invalid'
+                           WHEN bl.stage NOT IN ('new', 'contacted') THEN 'out_of_scope'
+                           ELSE 'needs_greeting'
+                         END
+                     END
+                 END as first_contact_status,
+                 COALESCE(
+                   bm.last_message_direction = 'out'
+                   AND bl.stage NOT IN ('lost', 'not_qualified', 'arrived')
+                   AND (
+                     bm.last_message_content LIKE '%?%'
+                     OR LOWER(bm.last_message_content) LIKE '%ne zaman%'
+                     OR LOWER(bm.last_message_content) LIKE '%uygun olduğunuz%'
+                     OR LOWER(bm.last_message_content) LIKE '%paylaşabilir misiniz%'
+                     OR LOWER(bm.last_message_content) LIKE '%ister misiniz%'
+                     OR LOWER(bm.last_message_content) LIKE '%gelmeyi düşünüyor musunuz%'
+                     OR LOWER(bm.last_message_content) LIKE '%telefon görüşmesi%'
+                     OR LOWER(bm.last_message_content) LIKE '%randevu planlam%'
+                     OR LOWER(bm.last_message_content) LIKE '%uygun saat%'
+                   )
+                 , false) as is_no_reply_eligible
+          FROM base_leads bl
+          LEFT JOIN base_messages bm ON bm.id = bl.id
+        )
+        SELECT 
+          COUNT(*) as total,
+          COUNT(CASE WHEN first_contact_status = 'needs_greeting' AND is_no_reply_eligible = false THEN 1 END) as needs_greeting,
+          COUNT(CASE WHEN first_contact_status = 'waiting_inbox_reply' AND is_no_reply_eligible = false THEN 1 END) as waiting_inbox_reply,
+          COUNT(CASE WHEN first_contact_status = 'whatsapp_opened' AND is_no_reply_eligible = false THEN 1 END) as whatsapp_opened,
+          COUNT(CASE WHEN is_no_reply_eligible = true THEN 1 END) as no_reply_waiting,
+          COUNT(CASE WHEN first_contact_status IN ('manual_greeting_confirmed', 'inbox_greeting_sent') AND is_no_reply_eligible = false THEN 1 END) as sent,
+          COUNT(CASE WHEN first_contact_status = 'patient_replied' AND is_no_reply_eligible = false THEN 1 END) as patient_replied,
+          COUNT(CASE WHEN first_contact_status IN ('blocked_or_invalid', 'out_of_scope') THEN 1 END) as blocked_or_invalid
+        FROM calculated_leads
+      `;
+
+      const rows = await ctx.db.executeSafe({
+        text: countsSql,
+        values: [ctx.tenantId]
+      });
+
+      const r = rows[0] || {};
+      return {
+        all: parseInt(r.total || '0', 10),
+        needs_greeting: parseInt(r.needs_greeting || '0', 10),
+        waiting_inbox_reply: parseInt(r.waiting_inbox_reply || '0', 10),
+        whatsapp_opened: parseInt(r.whatsapp_opened || '0', 10),
+        no_reply_waiting: parseInt(r.no_reply_waiting || '0', 10),
+        sent: parseInt(r.sent || '0', 10),
+        patient_replied: parseInt(r.patient_replied || '0', 10),
+        blocked_or_invalid: parseInt(r.blocked_or_invalid || '0', 10),
+      };
+    }
+  ).then(res => {
+    if (!res.success) return { all: 0, needs_greeting: 0, waiting_inbox_reply: 0, whatsapp_opened: 0, no_reply_waiting: 0, sent: 0, patient_replied: 0, blocked_or_invalid: 0 };
+    return res.data;
+  });
+}
+
+export async function getFormsSyncMetadata() {
+  return withActionGuard(
+    { actionName: 'getFormsSyncMetadata' },
+    async (ctx) => {
+      let lastManual = null;
+      let lastAuto = null;
+
+      try {
+        const manualLog = await ctx.db.executeSafe({
+          text: `SELECT created_at FROM audit_logs 
+                 WHERE tenant_id = $1 AND action = 'google_sheets_sync_completed' AND user_id IS NOT NULL
+                 ORDER BY created_at DESC LIMIT 1`,
+          values: [ctx.tenantId]
+        });
+        if (manualLog && manualLog.length > 0) {
+          lastManual = manualLog[0].created_at;
+        }
+      } catch (e) {
+        console.warn("Failed to get manual sync log:", e);
+      }
+
+      let last_sync_at = null;
+      let cron_last_run_at = null;
+      let webhook_last_received_at = null;
+
+      try {
+        const res = await ctx.db.executeSafe({
+          text: `SELECT last_sync_at FROM tenant_integrations WHERE tenant_id = $1 AND provider = 'google_sheets' LIMIT 1`,
+          values: [ctx.tenantId]
+        });
+        if (res && res.length > 0) last_sync_at = res[0].last_sync_at;
+      } catch (_) {}
+
+      try {
+        const res = await ctx.db.executeSafe({
+          text: `SELECT cron_last_run_at FROM tenant_integrations WHERE tenant_id = $1 AND provider = 'google_sheets' LIMIT 1`,
+          values: [ctx.tenantId]
+        });
+        if (res && res.length > 0) cron_last_run_at = res[0].cron_last_run_at;
+      } catch (_) {}
+
+      try {
+        const res = await ctx.db.executeSafe({
+          text: `SELECT webhook_last_received_at FROM tenant_integrations WHERE tenant_id = $1 AND provider = 'google_sheets' LIMIT 1`,
+          values: [ctx.tenantId]
+        });
+        if (res && res.length > 0) webhook_last_received_at = res[0].webhook_last_received_at;
+      } catch (_) {}
+
+      const autoCandidates = [cron_last_run_at, webhook_last_received_at].filter(Boolean);
+      if (autoCandidates.length > 0) {
+        try {
+          lastAuto = new Date(Math.max(...autoCandidates.map((d: any) => new Date(d).getTime()))).toISOString();
+        } catch (_) {
+          lastAuto = last_sync_at;
+        }
+      } else {
+        lastAuto = last_sync_at;
+      }
+
+      return {
+        lastManualSync: lastManual,
+        lastAutoSync: lastAuto
+      };
+    }
+  ).then(res => {
+    if (!res.success) return { lastManualSync: null, lastAutoSync: null };
+    return res.data;
   });
 }
 

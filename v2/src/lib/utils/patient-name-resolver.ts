@@ -63,10 +63,22 @@ export function checkNameValidity(name?: string | null): {
   }
 
   // 6. Gibberish check: if a single word has length >= 4 and has no vowels at all
+  // Only apply to Latin-based words, or check Cyrillic vowels if it is Cyrillic.
   const vowels = /[aeiouyâêîôûıöü]/i;
+  const cyrillicVowels = /[аеёиоуыэюя]/i;
   for (const w of words) {
-    if (w.length >= 4 && !vowels.test(w)) {
-      return { isValid: false, reason: "Sesli harf barındırmayan kelime (rastgele)", confidence: 'low' };
+    if (w.length >= 4) {
+      const isCyrillic = /[\u0400-\u04FF]/.test(w);
+      if (isCyrillic) {
+        if (!cyrillicVowels.test(w)) {
+          return { isValid: false, reason: "Sesli harf barındırmayan kelime (rastgele)", confidence: 'low' };
+        }
+      } else {
+        const hasLatin = /[a-z]/i.test(w);
+        if (hasLatin && !vowels.test(w)) {
+          return { isValid: false, reason: "Sesli harf barındırmayan kelime (rastgele)", confidence: 'low' };
+        }
+      }
     }
   }
 

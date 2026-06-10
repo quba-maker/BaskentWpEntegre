@@ -42,6 +42,9 @@ interface FormDetailModalProps {
   readinessLoading: boolean;
   techOpen: boolean;
   setTechOpen: (val: boolean) => void;
+  draftSuccessTemp: boolean;
+  tenantSlug: string;
+  returnParams: string;
   // Callback Handlers
   onPrepareDraft: (form: any) => void;
   onConfirmSend: (form: any) => void;
@@ -88,6 +91,9 @@ export function FormDetailModal({
   readinessLoading,
   techOpen,
   setTechOpen,
+  draftSuccessTemp,
+  tenantSlug,
+  returnParams,
   onPrepareDraft,
   onConfirmSend,
   onOpenWhatsAppApp,
@@ -101,6 +107,7 @@ export function FormDetailModal({
 }: FormDetailModalProps) {
   const [modalNotes, setModalNotes] = useState(form.notes || "");
   const [isSavingNotes, setIsSavingNotes] = useState(false);
+  const [activeOutreachTab, setActiveOutreachTab] = useState<'ai_draft' | 'template'>('ai_draft');
 
   const formExtraction = extractFormFields(form.raw_data);
   const displayName = getDisplayName(form);
@@ -116,7 +123,9 @@ export function FormDetailModal({
       k === 'id' || k === 'leadgen_id' || k === 'form_id' || k === 'ad_id' || k === 'adset_id' || k === 'campaign_id' ||
       k === 'platform' || k === 'is_organic' || k === 'created_time' || k === 'phone_number_id' ||
       k === 'ad_name' || k === 'adset_name' || k === 'campaign_name' || k.startsWith('_') ||
-      k.includes('campaign') || k.includes('adset') || k.includes('ad_')
+      k.includes('campaign') || k.includes('adset') || k.includes('ad_') ||
+      k.includes('phone') || k.includes('tel') || k.includes('whatsapp') || k === 'numara' || k.includes('cep') ||
+      k.includes('email') || k.includes('e-posta') || k.includes('eposta') || k.includes('mail')
     );
   };
   const operationalEntries = entries.filter(([k]) => !isTechnicalKey(k));
@@ -190,7 +199,7 @@ export function FormDetailModal({
         onClick={onClose}
       />
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 pointer-events-none">
-        <div className="w-full max-w-[500px] bg-[#F5F5F7] rounded-[28px] shadow-[0_20px_40px_rgba(0,0,0,0.2)] flex flex-col max-h-[90vh] overflow-hidden animate-in zoom-in-95 duration-200 pointer-events-auto border border-white/20">
+        <div className="w-full max-w-[650px] bg-[#F5F5F7] rounded-[28px] shadow-[0_20px_40px_rgba(0,0,0,0.2)] flex flex-col max-h-[90vh] overflow-hidden animate-in zoom-in-95 duration-200 pointer-events-auto border border-white/20">
           
           {/* Header */}
           <div className="px-6 py-5 bg-white border-b border-black/5 flex items-center justify-between shrink-0 rounded-t-[28px]">
@@ -230,6 +239,19 @@ export function FormDetailModal({
                 {allPhones.map((phone, idx) => {
                   const isRecommended = readiness?.recommendedPhone?.phone === phone || (idx === 0 && !readiness?.recommendedPhone);
                   const isSelected = selectedPhone === phone;
+                  const pInfo = readiness?.phones?.find((p: any) => p.phone === phone);
+                  
+                  let statusBadge = null;
+                  if (pInfo) {
+                    if (pInfo.hasInbound) {
+                      statusBadge = <span className="text-[9px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100 uppercase tracking-wide">↩️ Cevap</span>;
+                    } else if (pInfo.hasManualGreetingConfirmed || pInfo.hasInboxGreetingSent || pInfo.hasApiGreetingSent) {
+                      statusBadge = <span className="text-[9px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100 uppercase tracking-wide">✅ İletişim</span>;
+                    } else if (pInfo.hasWhatsappAppOpened) {
+                      statusBadge = <span className="text-[9px] font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100 uppercase tracking-wide">📲 Açıldı</span>;
+                    }
+                  }
+
                   return (
                     <label 
                       key={phone} 
@@ -253,6 +275,7 @@ export function FormDetailModal({
                         </span>
                       </div>
                       <div className="flex items-center gap-1.5 font-semibold">
+                        {statusBadge}
                         {isRecommended && (
                           <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 uppercase tracking-wider">
                             Önerilen
@@ -276,6 +299,36 @@ export function FormDetailModal({
                   İlk İletişim (Outreach)
                 </h3>
               </div>
+
+              <div className="flex border-b border-black/5 bg-black/[0.02] p-1 gap-1">
+                <button
+                  onClick={() => {
+                    setActiveOutreachTab('ai_draft');
+                    onCancelDraft();
+                  }}
+                  className={`flex-1 py-2 rounded-lg text-xs font-bold text-center transition-all cursor-pointer ${
+                    activeOutreachTab === 'ai_draft'
+                      ? 'bg-white text-[#007AFF] shadow-sm'
+                      : 'text-[#86868B] hover:text-[#1D1D1F]'
+                  }`}
+                >
+                  🤖 Yapay Zeka Taslağı
+                </button>
+                <button
+                  onClick={() => {
+                    setActiveOutreachTab('template');
+                    onCancelDraft();
+                  }}
+                  className={`flex-1 py-2 rounded-lg text-xs font-bold text-center transition-all cursor-pointer ${
+                    activeOutreachTab === 'template'
+                      ? 'bg-white text-[#007AFF] shadow-sm'
+                      : 'text-[#86868B] hover:text-[#1D1D1F]'
+                  }`}
+                >
+                  📄 Hazır Şablon Seç
+                </button>
+              </div>
+
               <div className="p-4 space-y-3">
                 {(() => {
                   const currentStatus = readiness?.patientLevelStatus || form.firstContactStatus;
@@ -311,78 +364,129 @@ export function FormDetailModal({
                         </div>
                       )}
 
-                      {/* Manual Draft Input area */}
-                      {isDraftOpen && draftMessage !== null && (
-                        <div className="space-y-3 pt-2">
-                          {templates.length > 1 && (
-                            <div className="flex items-center gap-2">
-                              <span className="text-[11px] font-semibold text-[#86868B] shrink-0">Şablon:</span>
-                              <select
-                                value={selectedTemplateId || ''}
-                                onChange={(e) => onTemplateSelect(e.target.value)}
-                                className="flex-1 text-[12px] font-medium bg-[#F5F5F7] border border-black/10 rounded-lg px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-[#007AFF]/30 transition-all cursor-pointer appearance-none"
+                      {activeOutreachTab === 'ai_draft' ? (
+                        <div className="space-y-3">
+                          {isDraftOpen && draftMessage !== null ? (
+                            <div className="space-y-3">
+                              <textarea
+                                value={draftMessage}
+                                onChange={(e) => setDraftMessage(e.target.value)}
+                                rows={5}
+                                className="w-full border border-black/10 rounded-xl p-3 text-[13px] text-[#1D1D1F] font-medium resize-none outline-none transition-all leading-relaxed bg-white focus:ring-2 focus:ring-[#25D366]/40 focus:border-[#25D366]/30"
+                              />
+                              <div className="space-y-1 text-left">
+                                <label className="block text-[10.5px] font-bold text-[#86868B] uppercase tracking-wider">
+                                  🤖 Bota kısa not/direktif ekle (opsiyonel)
+                                </label>
+                                <input
+                                  type="text"
+                                  value={botNote}
+                                  onChange={(e) => setBotNote(e.target.value)}
+                                  placeholder="Örn: Geliş tarihini netleştir..."
+                                  className="w-full bg-[#F5F5F7] border border-black/10 rounded-xl px-3 py-2 text-[12px] text-[#1D1D1F] font-medium outline-none focus:ring-2 focus:ring-[#007AFF]/30 transition-all"
+                                />
+                              </div>
+                              <div className="space-y-2 pt-3 border-t border-black/5">
+                                <button 
+                                  onClick={() => onOpenWhatsAppApp(form)}
+                                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-[13px] font-bold bg-[#25D366] hover:bg-[#1DA851] text-white shadow-[0_4px_14px_rgba(37,211,102,0.39)] transition-all cursor-pointer"
+                                >
+                                  <Send className="w-4 h-4" /> WhatsApp Uygulamasında Aç
+                                </button>
+                                <button 
+                                  onClick={() => onSaveInternal(form)}
+                                  className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl font-bold bg-[#007AFF]/10 text-[#007AFF] hover:bg-[#007AFF]/20 cursor-pointer transition-all"
+                                >
+                                  {outreachLoading === 'sending' ? (
+                                    <><RefreshCw className="w-4 h-4 animate-spin" /> Kaydediliyor...</>
+                                  ) : (
+                                    <><Save className="w-4 h-4" /> Taslağı Kaydet</>
+                                  )}
+                                </button>
+                                <button 
+                                  onClick={onCancelDraft}
+                                  className="w-full py-2.5 rounded-xl text-[13px] font-bold bg-black/[0.04] hover:bg-black/[0.08] text-[#1D1D1F] transition-colors cursor-pointer"
+                                >
+                                  İptal
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="pt-2">
+                              <button
+                                onClick={() => onPrepareDraft(form)}
+                                disabled={outreachLoading === 'draft' || draftSuccessTemp}
+                                className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl text-[13px] font-bold text-white transition-all cursor-pointer ${
+                                  draftSuccessTemp 
+                                    ? 'bg-[#0F9D58] shadow-[0_4px_14px_rgba(15,157,88,0.39)] hover:bg-[#0F9D58]' 
+                                    : 'bg-[#25D366] hover:bg-[#1DA851] shadow-[0_4px_14px_rgba(37,211,102,0.39)]'
+                                }`}
                               >
-                                <option value="" disabled>Şablon seçin…</option>
-                                {templates.map((tpl: any) => (
-                                  <option key={tpl.id} value={tpl.id}>{tpl.name}</option>
-                                ))}
-                              </select>
+                                {outreachLoading === 'draft' ? (
+                                  <>
+                                    <RefreshCw className="w-4 h-4 animate-spin" />
+                                    Taslak hazırlanıyor...
+                                  </>
+                                ) : draftSuccessTemp ? (
+                                  <>
+                                    <CheckCheck className="w-4 h-4" />
+                                    Taslak hazırlandı
+                                  </>
+                                ) : (
+                                  <>
+                                    <Sparkles className="w-4 h-4" />
+                                    Karşılama Taslağı Hazırla
+                                  </>
+                                )}
+                              </button>
                             </div>
                           )}
-                          <textarea
-                            value={draftMessage}
-                            onChange={(e) => setDraftMessage(e.target.value)}
-                            rows={5}
-                            className="w-full border border-black/10 rounded-xl p-3 text-[13px] text-[#1D1D1F] font-medium resize-none outline-none transition-all leading-relaxed bg-white focus:ring-2 focus:ring-[#25D366]/40 focus:border-[#25D366]/30"
-                          />
-                          <div className="space-y-1 text-left">
-                            <label className="block text-[10.5px] font-bold text-[#86868B] uppercase tracking-wider">
-                              🤖 Bota kısa not/direktif ekle (opsiyonel)
-                            </label>
-                            <input
-                              type="text"
-                              value={botNote}
-                              onChange={(e) => setBotNote(e.target.value)}
-                              placeholder="Örn: Geliş tarihini netleştir..."
-                              className="w-full bg-[#F5F5F7] border border-black/10 rounded-xl px-3 py-2 text-[12px] text-[#1D1D1F] font-medium outline-none focus:ring-2 focus:ring-[#007AFF]/30 transition-all"
-                            />
-                          </div>
-                          <div className="space-y-2 pt-3 border-t border-black/5">
-                            <button 
-                              onClick={() => onOpenWhatsAppApp(form)}
-                              className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-[13px] font-bold bg-[#25D366] hover:bg-[#1DA851] text-white shadow-[0_4px_14px_rgba(37,211,102,0.39)] transition-all cursor-pointer"
-                            >
-                              <Send className="w-4 h-4" /> WhatsApp Uygulamasında Aç
-                            </button>
-                            <button 
-                              onClick={() => onSaveInternal(form)}
-                              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl font-bold bg-[#007AFF]/10 text-[#007AFF] hover:bg-[#007AFF]/20 cursor-pointer transition-all"
-                            >
-                              {outreachLoading === 'sending' ? (
-                                <><RefreshCw className="w-4 h-4 animate-spin" /> Kaydediliyor...</>
-                              ) : (
-                                <><Save className="w-4 h-4" /> Taslağı Kaydet</>
-                              )}
-                            </button>
-                            <button 
-                              onClick={onCancelDraft}
-                              className="w-full py-2.5 rounded-xl text-[13px] font-bold bg-black/[0.04] hover:bg-black/[0.08] text-[#1D1D1F] transition-colors cursor-pointer"
-                            >
-                              İptal
-                            </button>
-                          </div>
                         </div>
-                      )}
+                      ) : (
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[11px] font-semibold text-[#86868B] shrink-0">Şablon Seç:</span>
+                            <select
+                              value={selectedTemplateId || ''}
+                              onChange={(e) => onTemplateSelect(e.target.value)}
+                              className="flex-1 text-[12px] font-medium bg-[#F5F5F7] border border-black/10 rounded-lg px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-[#007AFF]/30 transition-all cursor-pointer appearance-none"
+                            >
+                              <option value="" disabled>Şablon seçin…</option>
+                              {templates.map((tpl: any) => (
+                                <option key={tpl.id} value={tpl.id}>{tpl.name}</option>
+                              ))}
+                            </select>
+                          </div>
 
-                      {/* Default action trigger when draft is closed */}
-                      {!isDraftOpen && (
-                        <div className="pt-2">
-                          <button
-                            onClick={() => onPrepareDraft(form)}
-                            className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-[13px] font-bold bg-[#25D366] hover:bg-[#1DA851] text-white shadow-[0_4px_14px_rgba(37,211,102,0.39)] transition-all cursor-pointer"
-                          >
-                            <Sparkles className="w-4 h-4" /> Karşılama Taslağı Hazırla
-                          </button>
+                          {draftMessage !== null && (
+                            <div className="space-y-3">
+                              <textarea
+                                value={draftMessage}
+                                readOnly
+                                rows={5}
+                                className="w-full border border-black/10 rounded-xl p-3 text-[13px] text-[#1D1D1F] font-medium resize-none outline-none leading-relaxed bg-[#F5F5F7] opacity-80"
+                              />
+                              
+                              <div className="space-y-2 pt-3 border-t border-black/5">
+                                <button 
+                                  onClick={() => onOpenWhatsAppApp(form)}
+                                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-[13px] font-bold bg-[#25D366] hover:bg-[#1DA851] text-white shadow-[0_4px_14px_rgba(37,211,102,0.39)] transition-all cursor-pointer"
+                                >
+                                  <Send className="w-4 h-4" /> WhatsApp Uygulamasında Aç
+                                </button>
+                                
+                                <button
+                                  disabled
+                                  className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl font-bold bg-gray-100 text-gray-400 cursor-not-allowed opacity-60"
+                                >
+                                  <Send className="w-4 h-4" /> Panelden Gönder (Devre Dışı)
+                                </button>
+                                <p className="text-[10.5px] text-[#86868B] font-medium text-center italic">
+                                  Panelden şablon gönderimi bu sürümde aktif değildir. Lütfen WhatsApp ile manuel gönderin.
+                                </p>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -452,7 +556,7 @@ export function FormDetailModal({
                     <div className="grid grid-cols-3 gap-2">
                       {form.linked_conversation_id ? (
                         <a
-                          href={`./inbox?phone=${selectedPhone || form.phone_number}`}
+                          href={`/${tenantSlug}/inbox?phone=${selectedPhone || form.phone_number}&${returnParams}`}
                           className="flex flex-col items-center justify-center p-2.5 rounded-xl border border-blue-200 bg-blue-50/30 text-blue-600 text-center transition-all duration-200 hover:bg-blue-50 active:scale-[0.98] cursor-pointer"
                         >
                           <MessageCircle className="w-4 h-4 mb-1 text-[#25D366]" />
@@ -461,28 +565,51 @@ export function FormDetailModal({
                       ) : (
                         <button
                           disabled
-                          className="flex flex-col items-center justify-center p-2.5 rounded-xl border border-gray-200 bg-gray-50 text-gray-400 text-center cursor-not-allowed opacity-60"
+                          title="Sohbet bulunamadı."
+                          className="flex flex-col items-center justify-center p-2.5 rounded-xl border border-gray-200 bg-gray-50 text-gray-400 text-center cursor-not-allowed opacity-60 animate-none"
                         >
                           <MessageCircle className="w-4 h-4 mb-1" />
                           <span className="text-[9px] font-bold leading-tight">Sohbet Yok</span>
                         </button>
                       )}
 
-                      <a
-                        href={`./takip?tab=telefon&opp=${form.linked_opportunity_id || ''}`}
-                        className="flex flex-col items-center justify-center p-2.5 rounded-xl border border-indigo-200 bg-indigo-50/30 text-indigo-600 text-center transition-all duration-200 hover:bg-indigo-50 active:scale-[0.98]"
-                      >
-                        <PhoneForwarded className="w-4 h-4 mb-1" />
-                        <span className="text-[9px] font-bold leading-tight">Telefon Takibi</span>
-                      </a>
+                      {form.linked_opportunity_id ? (
+                        <a
+                          href={`/${tenantSlug}/takip?tab=telefon&opp=${form.linked_opportunity_id}&${returnParams}`}
+                          className="flex flex-col items-center justify-center p-2.5 rounded-xl border border-indigo-200 bg-indigo-50/30 text-indigo-600 text-center transition-all duration-200 hover:bg-indigo-50 active:scale-[0.98]"
+                        >
+                          <PhoneForwarded className="w-4 h-4 mb-1" />
+                          <span className="text-[9px] font-bold leading-tight">Telefon Takibi</span>
+                        </a>
+                      ) : (
+                        <button
+                          disabled
+                          title="Fırsat (opportunity) kaydı bulunmamaktadır."
+                          className="flex flex-col items-center justify-center p-2.5 rounded-xl border border-gray-200 bg-gray-50 text-gray-400 text-center cursor-not-allowed opacity-60"
+                        >
+                          <PhoneForwarded className="w-4 h-4 mb-1" />
+                          <span className="text-[9px] font-bold leading-tight">Fırsat Yok</span>
+                        </button>
+                      )}
 
-                      <a
-                        href={`./takip?tab=randevu&opp=${form.linked_opportunity_id || ''}`}
-                        className="flex flex-col items-center justify-center p-2.5 rounded-xl border border-emerald-200 bg-emerald-50/30 text-emerald-600 text-center transition-all duration-200 hover:bg-emerald-50 active:scale-[0.98]"
-                      >
-                        <Calendar className="w-4 h-4 mb-1" />
-                        <span className="text-[9px] font-bold leading-tight">Randevu Planla</span>
-                      </a>
+                      {form.linked_opportunity_id ? (
+                        <a
+                          href={`/${tenantSlug}/takip?tab=randevu&opp=${form.linked_opportunity_id}&${returnParams}`}
+                          className="flex flex-col items-center justify-center p-2.5 rounded-xl border border-emerald-200 bg-emerald-50/30 text-emerald-600 text-center transition-all duration-200 hover:bg-emerald-50 active:scale-[0.98]"
+                        >
+                          <Calendar className="w-4 h-4 mb-1" />
+                          <span className="text-[9px] font-bold leading-tight">Randevu Planla</span>
+                        </a>
+                      ) : (
+                        <button
+                          disabled
+                          title="Fırsat (opportunity) kaydı bulunmamaktadır."
+                          className="flex flex-col items-center justify-center p-2.5 rounded-xl border border-gray-200 bg-gray-50 text-gray-400 text-center cursor-not-allowed opacity-60"
+                        >
+                          <Calendar className="w-4 h-4 mb-1" />
+                          <span className="text-[9px] font-bold leading-tight">Fırsat Yok</span>
+                        </button>
+                      )}
                     </div>
                   </div>
                 )}

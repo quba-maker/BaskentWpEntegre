@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CheckCircle2 } from "lucide-react";
+import { CheckCircle2, X } from "lucide-react";
 import { useRouter, useParams } from "next/navigation";
 import { useInboxStore } from "@/store/inbox-store";
 import { useFormsList } from "@/components/features/forms/hooks/useFormsList";
@@ -47,6 +47,9 @@ export default function FormsPage() {
     isSyncing,
     syncProgress,
     handleSync,
+    statusCounts,
+    syncMetadata,
+    clearSyncProgress,
     forms,
     size,
     setSize,
@@ -59,6 +62,15 @@ export default function FormsPage() {
   const [selectedForm, setSelectedForm] = useState<any>(null);
 
   const detailState = useFormDetailState(selectedForm, mutate);
+
+  const returnParams = new URLSearchParams({
+    returnTo: 'forms',
+    selectedLeadId: selectedForm?.id || '',
+    search: searchInput,
+    source: sourceFilter,
+    firstContact: firstContactFilter,
+    leadStage: leadStageFilter
+  }).toString();
 
   // Bulk manual queue states
   const [isQueueModalOpen, setIsQueueModalOpen] = useState(false);
@@ -279,6 +291,15 @@ export default function FormsPage() {
     }
   };
 
+  const handleUpdateQueueItemDraftText = (index: number, newText: string, newSource?: string) => {
+    const updated = [...queueItems];
+    if (updated[index]) {
+      updated[index].draftText = newText;
+      updated[index].source = newSource || "Manuel düzenlenmiş taslak";
+      setQueueItems(updated);
+    }
+  };
+
   const handleBulkQueueStart = async () => {
     if (selectedLeadIds.length === 0) return;
     setIsPreparingQueue(true);
@@ -316,7 +337,8 @@ export default function FormsPage() {
           patient_name: lead?.patient_name || qItem.name || 'Bilinmiyor',
           phone: lead?.phone_number || qItem.phone || '',
           status,
-          reason
+          reason,
+          source: qItem.source || 'AI taslak'
         };
       });
 
@@ -364,7 +386,7 @@ export default function FormsPage() {
   const hasFiltersActive = sourceFilter !== 'all' || firstContactFilter !== 'all' || leadStageFilter !== 'all' || searchInput.trim() !== "";
 
   return (
-    <div className="p-4 md:p-8 h-full flex flex-col relative overflow-hidden text-left">
+    <div className="w-full max-w-[1700px] mx-auto p-4 md:p-8 h-full flex flex-col relative overflow-hidden text-left animate-in fade-in duration-200">
       <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-[#007AFF]/5 rounded-full blur-[100px] pointer-events-none -z-10" />
       <div className="absolute bottom-0 left-0 w-[400px] h-[400px] bg-[#5856D6]/5 rounded-full blur-[100px] pointer-events-none -z-10" />
 
@@ -381,6 +403,7 @@ export default function FormsPage() {
         isSyncing={isSyncing}
         syncProgress={syncProgress}
         handleSync={handleSync}
+        syncMetadata={syncMetadata}
       />
 
       {/* Bulk actions queue bar */}
@@ -403,6 +426,7 @@ export default function FormsPage() {
       <FormStatsTabs
         firstContactFilter={firstContactFilter}
         setFirstContactFilter={setFirstContactFilter}
+        statusCounts={statusCounts}
       />
 
       {/* Forms Table list */}
@@ -464,6 +488,9 @@ export default function FormsPage() {
           readinessLoading={detailState.readinessLoading}
           techOpen={detailState.techOpen}
           setTechOpen={detailState.setTechOpen}
+          draftSuccessTemp={detailState.draftSuccessTemp}
+          tenantSlug={tenantId}
+          returnParams={returnParams}
           onPrepareDraft={detailState.handlePrepareDraft}
           onConfirmSend={handleConfirmSend}
           onOpenWhatsAppApp={handleOpenWhatsAppApp}
@@ -493,7 +520,48 @@ export default function FormsPage() {
           setSelectedLeadIds([]);
           mutate();
         }}
+        templates={detailState.templates}
+        onUpdateDraftText={handleUpdateQueueItemDraftText}
       />
+
+      {/* Sync progress toast notifications */}
+      {(syncProgress.status === 'completed' || syncProgress.status === 'error') && (
+        <div className="fixed bottom-5 right-5 z-50 animate-in slide-in-from-bottom-5 duration-200">
+          <div className={`p-4 rounded-2xl shadow-lg border w-80 text-left flex flex-col gap-2 transition-all ${
+            syncProgress.status === 'completed' 
+              ? 'bg-white border-emerald-100 text-slate-800' 
+              : 'bg-rose-50 border-rose-100 text-rose-800'
+          }`}>
+            <div className="flex items-center justify-between">
+              <span className={`text-xs font-bold uppercase tracking-wider ${
+                syncProgress.status === 'completed' ? 'text-emerald-600' : 'text-rose-600'
+              }`}>
+                {syncProgress.status === 'completed' ? '✓ Senkronizasyon Başarılı' : '✕ Senkronizasyon Başarısız'}
+              </span>
+              <button 
+                onClick={clearSyncProgress}
+                className="text-slate-400 hover:text-slate-600 transition-colors w-5 h-5 flex items-center justify-center rounded-full hover:bg-slate-100 shrink-0 cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            
+            <p className="text-xs font-medium leading-relaxed">
+              {syncProgress.message}
+            </p>
+
+            {syncProgress.status === 'completed' && syncProgress.stats && (
+              <div className="grid grid-cols-2 gap-1.5 pt-2 border-t border-slate-100 text-[10.5px] font-semibold text-slate-500">
+                <div>Eklenen: <span className="text-slate-800">{syncProgress.stats.created}</span></div>
+                <div>Güncellenen: <span className="text-slate-800">{syncProgress.stats.updated}</span></div>
+                <div>Çift Kayıt: <span className="text-slate-800">{syncProgress.stats.duplicates}</span></div>
+                <div>Hatalı: <span className="text-slate-800 text-rose-600">{syncProgress.stats.errors}</span></div>
+                <div className="col-span-2 pt-1 text-[9.5px] text-slate-400 font-medium">Süre: {syncProgress.stats.duration} saniye</div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

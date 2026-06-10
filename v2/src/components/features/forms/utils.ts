@@ -15,13 +15,20 @@ export const getStageInfo = (stage: string) => STAGES.find(s => s.value === stag
 
 export const getDisplayName = (form: any): string => {
   if (!form) return "";
-  return resolvePatientDisplayName({
-    oppPatientName: form.current_display_name || form.patient_name,
-    convPatientName: form.patient_name,
-    whatsappProfileName: form.patient_name,
-    formPatientName: form.patient_name,
+  const resolved = resolvePatientDisplayName({
+    oppPatientName: form.current_display_name || (form.patient_name !== "İsimsiz Form" ? form.patient_name : undefined),
+    convPatientName: form.patient_name !== "İsimsiz Form" ? form.patient_name : undefined,
+    whatsappProfileName: form.patient_name !== "İsimsiz Form" ? form.patient_name : undefined,
+    formPatientName: form.patient_name !== "İsimsiz Form" ? form.patient_name : undefined,
     formRawDataName: form.raw_data?.full_name || form.raw_data?.['full name'] || form.raw_data?.['Full Name'] || form.raw_data?.['full_name']
   });
+  if (resolved === "İsimsiz") {
+    const rawFullName = form.raw_data?.full_name || form.raw_data?.['full name'] || form.raw_data?.['Full Name'] || form.raw_data?.['full_name'];
+    if (rawFullName && rawFullName.trim()) {
+      return rawFullName.trim();
+    }
+  }
+  return resolved;
 };
 
 export const getBestDate = (form: any): string => {
