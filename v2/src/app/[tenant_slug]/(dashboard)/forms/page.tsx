@@ -679,9 +679,20 @@ export default function FormsPage() {
                   <p className="text-[11px] text-[#86868B] font-medium leading-relaxed italic bg-blue-50/50 border border-blue-100/50 rounded-xl p-2.5 mt-1">
                     💡 Yeni kayıtlar başarıyla alındı. Mevcut filtre veya arama kriterleriniz nedeniyle bazı yeni kayıtlar listede görünmeyebilir.
                   </p>
-                  <p className="text-xs text-emerald-600 font-bold text-center mt-1">
-                    Form listesi güncellendi.
-                  </p>
+                  {syncProgress.refreshStatus === 'refreshing' ? (
+                    <p className="text-xs text-blue-600 font-bold text-center mt-1 flex items-center justify-center gap-1.5">
+                      <RefreshCw className="w-3 h-3 animate-spin" />
+                      Form listesi güncelleniyor...
+                    </p>
+                  ) : syncProgress.refreshStatus === 'done' ? (
+                    <p className="text-xs text-emerald-600 font-bold text-center mt-1">
+                      Form listesi güncellendi.
+                    </p>
+                  ) : syncProgress.refreshStatus === 'error' ? (
+                    <p className="text-xs text-[#FF9500] font-bold text-center mt-1">
+                      Senkronizasyon tamamlandı, ancak liste yenileme sırasında sorun oluştu. Sayfayı yenileyebilirsiniz.
+                    </p>
+                  ) : null}
                 </>
               ) : (
                 <p className="text-xs font-medium text-rose-900 bg-rose-50 border border-rose-100 rounded-xl p-3 my-2 leading-relaxed text-left max-h-32 overflow-y-auto">

@@ -18,6 +18,7 @@ export function useFormsList() {
     status: string;
     progress: number;
     message: string;
+    refreshStatus?: 'idle' | 'refreshing' | 'done' | 'error';
     stats?: {
       created: number;
       updated: number;
@@ -121,24 +122,11 @@ export function useFormsList() {
       setIsSyncing(false);
 
       if (res.success) {
-        // Measure SWR revalidation times sequentially to prevent race conditions
-        const formsListStart = Date.now();
-        await setSize(1);
-        await mutate();
-        const formsListRevalidateMs = Date.now() - formsListStart;
-
-        const countsStart = Date.now();
-        await mutateCounts();
-        const statusCountsRevalidateMs = Date.now() - countsStart;
-
-        const metaStart = Date.now();
-        await mutateMetadata();
-        const syncMetadataRevalidateMs = Date.now() - metaStart;
-
         setSyncProgress({
           status: 'completed',
           progress: 100,
           message: res.message || 'Senkronizasyon tamamlandı.',
+          refreshStatus: 'refreshing',
           stats: res.stats ? {
             created: res.stats.created || 0,
             updated: res.stats.updated || 0,
@@ -151,11 +139,49 @@ export function useFormsList() {
           } : undefined,
           telemetry: res.telemetry ? {
             ...res.telemetry,
-            formsListRevalidateMs,
-            statusCountsRevalidateMs,
-            syncMetadataRevalidateMs
           } : undefined
         });
+
+        // Launch background revalidation
+        (async () => {
+          try {
+            const formsListStart = Date.now();
+            await setSize(1);
+            await mutate();
+            const formsListRevalidateMs = Date.now() - formsListStart;
+
+            const countsStart = Date.now();
+            await mutateCounts();
+            const statusCountsRevalidateMs = Date.now() - countsStart;
+
+            const metaStart = Date.now();
+            await mutateMetadata();
+            const syncMetadataRevalidateMs = Date.now() - metaStart;
+
+            setSyncProgress(prev => {
+              if (prev.status !== 'completed') return prev;
+              return {
+                ...prev,
+                refreshStatus: 'done',
+                telemetry: prev.telemetry ? {
+                  ...prev.telemetry,
+                  formsListRevalidateMs,
+                  statusCountsRevalidateMs,
+                  syncMetadataRevalidateMs
+                } : undefined
+              };
+            });
+          } catch (refreshErr) {
+            console.error('[SYNC_REFRESH_ERROR]', refreshErr);
+            setSyncProgress(prev => {
+              if (prev.status !== 'completed') return prev;
+              return {
+                ...prev,
+                refreshStatus: 'error'
+              };
+            });
+          }
+        })();
       } else {
         const errMsg = res.error || "Senkronizasyon başarısız.";
         setSyncProgress({ status: 'error', progress: 0, message: errMsg });
