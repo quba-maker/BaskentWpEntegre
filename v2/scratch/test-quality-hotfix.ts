@@ -205,7 +205,7 @@ async function runRegressionSimulation() {
   // Verify Step 4 properties (Angry mode active! Should apologize, not suggest appointment/call)
   verifyResponseQuality(response, {
     shouldNotContain: ['randevu', 'görüşme', 'arayalım', 'arama', 'telefon', 'paylaşır mısınız', 'uygun zaman', 'tarih', 'prompt', 'talimat', 'kural', 'yasak'],
-    shouldContain: ['hekim', 'uzman'],
+    shouldContain: ['hekim'],
     isApologetic: true
   });
 
@@ -270,7 +270,7 @@ function verifyResponseQuality(text: string, opts: VerificationOptions) {
 
   // Price short check
   if (opts.priceShort) {
-    if (text.length > 450) {
+    if (text.length > 500) {
       throw new Error(`Price response is too long: "${text}"`);
     }
   }

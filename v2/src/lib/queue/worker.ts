@@ -572,14 +572,17 @@ export class QueueWorkerEngine {
         responseText += ' Ses mesajı içeriği ayrıca değerlendirmeye alınacaktır.';
       }
 
-      // Check conversation status — don't reply if human-handled
+      // Check conversation status — don't reply if human-handled or abusive
       const convStatus = await db.executeSafe({
-        text: `SELECT status FROM conversations WHERE phone_number = $1 AND tenant_id = $2 LIMIT 1`,
+        text: `SELECT status, metadata FROM conversations WHERE phone_number = $1 AND tenant_id = $2 LIMIT 1`,
         values: [phoneNumber, tenantId]
       }) as any[];
 
-      if (convStatus[0]?.status === 'human') {
-        this.log.info(`[MEDIA_BATCH_HUMAN] Conversation is human-handled, skipping batch response`, { traceId, phoneNumber });
+      const isHuman = convStatus[0]?.status === 'human';
+      const isAbusive = convStatus[0]?.metadata?.abuse_detected === true || convStatus[0]?.metadata?.abuse_detected === 'true';
+
+      if (isHuman || isAbusive) {
+        this.log.info(`[MEDIA_BATCH_SKIPPED] Conversation is human-handled or marked as abusive, skipping batch response`, { traceId, phoneNumber });
         return;
       }
 
@@ -1232,6 +1235,97 @@ export class QueueWorkerEngine {
     }
 
     this.log.info(`[DB_COMMITTED] [INCOMING MESSAGE] Saved to DB. MsgId: ${messageId}`, { traceId, providerMessageId });
+
+    // ── P0 ABUSE / PROFANITY DETECTOR GUARD ──
+    if (content && !isAppEcho && !isHistory) {
+      try {
+        const { detectAbuse } = await import('../services/ai/abuse-detector');
+        const abuseResult = detectAbuse(content);
+        if (abuseResult.abuse_detected) {
+          this.log.warn(`[ABUSE_DETECTED] Inbound message contains profanity/abuse: "${content}"`, {
+            traceId, phoneNumber, matched: abuseResult.matched_phrases
+          });
+
+          // Fetch current conversation metadata and status for idempotency
+          const convCheck = await db.executeSafe({
+            text: `SELECT metadata, status, id FROM conversations WHERE phone_number = $1 AND tenant_id = $2 LIMIT 1`,
+            values: [phoneNumber, tenantId]
+          }) as any[];
+          
+          const resolvedConvId = convCheck[0]?.id || conversationId;
+          const existingMetadata = convCheck[0]?.metadata || {};
+
+          if (!existingMetadata.abuse_detected) {
+            // Merge metadata cleanly
+            const mergedMetadata = {
+              ...existingMetadata,
+              abuse_detected: true,
+              abuse_decision_code: 'NO_REPLY_ABUSE_DETECTED',
+              abuse_matched_phrases: abuseResult.matched_phrases,
+              abuse_detected_at: new Date().toISOString()
+            };
+
+            // Transition status to human and save metadata
+            await db.executeSafe({
+              text: `UPDATE conversations 
+                     SET status = 'human', metadata = $1 
+                     WHERE phone_number = $2 AND tenant_id = $3`,
+              values: [JSON.stringify(mergedMetadata), phoneNumber, tenantId]
+            });
+
+            // Write structural audit log
+            await db.executeSafe({
+              text: `INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
+                     VALUES ($1, $2, $3, $4)`,
+              values: [
+                tenantId,
+                'autopilot_disabled',
+                `Autopilot disabled due to detected abuse/profanity. Matched: ${abuseResult.matched_phrases.join(', ')}`,
+                JSON.stringify({
+                  conversation_id: resolvedConvId,
+                  phone: phoneNumber,
+                  channel_id: metadata.channelId,
+                  tenant_id: tenantId,
+                  enabled: false,
+                  user_id: 'system_worker_abuse_guard',
+                  timestamp: new Date().toISOString(),
+                  reason: 'abuse_detected',
+                  decision_code: 'NO_REPLY_ABUSE_DETECTED'
+                })
+              ]
+            });
+
+            // Save internal system alert note (direction = 'system' so it doesn't go to WhatsApp)
+            await db.executeSafe({
+              text: `INSERT INTO messages (tenant_id, phone_number, direction, content, channel, provider_message_id)
+                     VALUES ($1, $2, 'system', $3, $4, 'system_alert')`,
+              values: [tenantId, phoneNumber, 'Küfür/hakaret algılandı, bot otomatik yanıtı durduruldu. (NO_REPLY_ABUSE_DETECTED)', channel]
+            });
+
+            // Broadcast realtime metadata update
+            try {
+              const { RealtimePublisher } = await import("@/lib/realtime/publisher");
+              await RealtimePublisher.publishMetadataUpdated(tenantId, {
+                conversationId: resolvedConvId,
+                userId: "system_worker_abuse_guard",
+                isBotActive: false,
+                autopilotEnabled: false,
+                status: "human"
+              });
+            } catch (realtimeErr) {
+              this.log.error("Failed to publish autopilot abuse-disable realtime update:", realtimeErr instanceof Error ? realtimeErr : new Error(String(realtimeErr)));
+            }
+          }
+
+          // Force skip bot reply and return early
+          skipBotReply = true;
+          this.log.info(`[ABUSE_GUARD] Bypassing AI response generation for conversation ${resolvedConvId}`, { traceId });
+          return;
+        }
+      } catch (abuseErr) {
+        this.log.error(`[ABUSE_GUARD_ERROR] Non-fatal`, abuseErr instanceof Error ? abuseErr : new Error(String(abuseErr)), { traceId });
+      }
+    }
 
     // [NEW] Update integration health telemetry immediately upon successful event ingestion
     const telemetryChannelId = brain.context.config?.channelId && brain.context.config?.channelId !== 'legacy_unmapped'
@@ -3429,7 +3523,7 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
 
     // Load conversation details
     const convQuery = await db.executeSafe({
-      text: `SELECT id, status, autopilot_enabled, channel_id, lead_stage, customer_id FROM conversations WHERE phone_number = $1 AND tenant_id = $2 LIMIT 1`,
+      text: `SELECT id, status, autopilot_enabled, channel_id, lead_stage, customer_id, metadata FROM conversations WHERE phone_number = $1 AND tenant_id = $2 LIMIT 1`,
       values: [phoneNumber, tenantId]
     }) as any[];
     
@@ -3455,6 +3549,13 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
     // Check 2: Status is not human takeover
     if (currentStatus === 'human') {
       this.log.info(`[DEBOUNCE_WORKER] Conversation status is human, exit`, { traceId });
+      return;
+    }
+
+    // Check 2.5: Abuse check
+    const isAbusive = convRecord.metadata?.abuse_detected === true || convRecord.metadata?.abuse_detected === 'true';
+    if (isAbusive) {
+      this.log.info(`[DEBOUNCE_WORKER] Conversation is marked as abusive, exit`, { traceId });
       return;
     }
 

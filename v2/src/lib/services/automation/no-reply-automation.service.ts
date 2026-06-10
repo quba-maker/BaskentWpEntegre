@@ -805,6 +805,7 @@ export class NoReplyAutomationService {
             WHERE c.tenant_id = $1
               AND m.direction = 'out'
               AND (active_opp.id IS NULL OR active_opp.stage NOT IN ('lost', 'not_qualified', 'arrived'))
+              AND (c.metadata IS NULL OR COALESCE(c.metadata->>'abuse_detected', 'false') != 'true')
             ORDER BY m.created_at ASC
             LIMIT 100`,
       values: [tenantId]
