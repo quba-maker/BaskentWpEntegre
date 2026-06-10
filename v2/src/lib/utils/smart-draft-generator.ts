@@ -183,7 +183,12 @@ export function extractFormSlots(rawData: any, defaultFormName?: string): FormSl
 }
 
 // 2. Deterministik Slot-Based Fallback Composer
-export function generateDeterministikDraft(slots: FormSlots, draftPurpose: DraftPurpose = 'first_contact_intent_check'): string {
+export function generateDeterministikDraft(
+  slots: FormSlots, 
+  draftPurpose: DraftPurpose = 'first_contact_intent_check',
+  tenantDisplayName: string = 'Kurumumuz',
+  locationName: string = ''
+): string {
   let summarySentence = "";
   let conditionExplanation = "";
   let contextualDetails = "";
@@ -244,19 +249,21 @@ export function generateDeterministikDraft(slots: FormSlots, draftPurpose: Draft
     contextualDetails += `Yaşadığınız yer olarak ${slots.livingCity} bilgisini paylaşmışsınız. `;
   }
 
+  const travelDestination = locationName ? `Türkiye’ye, ${locationName} lokasyonumuza` : 'Türkiye’ye';
+
   let bookingQuestion = '';
   if (slots.requestedAppointmentText) {
     const isOnlyNumber = /^\d+$/.test(slots.requestedAppointmentText);
     if (isOnlyNumber && slots.requestedAppointmentText.length <= 2) {
-      bookingQuestion = `Randevu tarihi alanına “${slots.requestedAppointmentText}” yazmışsınız; bunu ayın ${slots.requestedAppointmentText}’i mi yoksa ${getMonthNameFromNumber(slots.requestedAppointmentText)} ayı olarak mı düşündüğünüzü netleştirebilir misiniz? Türkiye’ye (Konya’ya) ne zaman gelmeyi düşünüyorsunuz? Yaklaşık tarihinizi paylaşırsanız size uygun şekilde randevu planlamanızı organize edebiliriz.`;
+      bookingQuestion = `Randevu tarihi alanına “${slots.requestedAppointmentText}” yazmışsınız; bunu ayın ${slots.requestedAppointmentText}’i mi yoksa ${getMonthNameFromNumber(slots.requestedAppointmentText)} ayı olarak mı düşündüğünüzü netleştirebilir misiniz? ${travelDestination} ne zaman gelmeyi düşünüyorsunuz? Yaklaşık tarihinizi paylaşırsanız size uygun şekilde randevu planlamanızı organize edebiliriz.`;
     } else {
-      bookingQuestion = `Randevu tarihi olarak “${slots.requestedAppointmentText}” belirtmişsiniz. Türkiye’ye (Konya’ya) ne zaman gelmeyi düşünüyorsunuz? Yaklaşık tarihinizi netleştirdiğinizde randevu planlamanızı organize edebiliriz.`;
+      bookingQuestion = `Randevu tarihi olarak “${slots.requestedAppointmentText}” belirtmişsiniz. ${travelDestination} ne zaman gelmeyi düşünüyorsunuz? Yaklaşık tarihinizi netleştirdiğinizde randevu planlamanızı organize edebiliriz.`;
     }
   } else {
-    bookingQuestion = `Türkiye’ye (Konya’ya) ne zaman gelmeyi düşünüyorsunuz? Yaklaşık tarihinizi paylaşırsanız size uygun şekilde randevu planlamanızı organize edebiliriz.`;
+    bookingQuestion = `${travelDestination} ne zaman gelmeyi düşünüyorsunuz? Yaklaşık tarihinizi paylaşırsanız size uygun şekilde randevu planlamanızı organize edebiliriz.`;
   }
 
-  const greeting = `Merhaba,\n\nBaşkent Üniversitesi Konya Hastanesi’nden, doldurduğunuz form doğrultusunda sizinle iletişime geçiyoruz.`;
+  const greeting = `Merhaba,\n\n${tenantDisplayName} adına, doldurduğunuz form doğrultusunda sizinle iletişime geçiyoruz.`;
   const closing = `İyi günler dileriz.`;
 
   const blocks = [greeting, summarySentence];
@@ -350,16 +357,38 @@ function cleanJsonResponse(raw: string): string {
 }
 
 // 4. Main Entry Point (Hybrid Async Flow)
-export async function generateSmartDraft(rawData: any, defaultFormName?: string, draftPurpose: DraftPurpose = 'first_contact_intent_check'): Promise<string> {
+export async function generateSmartDraft(
+  rawData: any, 
+  defaultFormName?: string, 
+  draftPurpose: DraftPurpose = 'first_contact_intent_check',
+  tenantId?: string,
+  db?: any
+): Promise<string> {
   const slots = extractFormSlots(rawData, defaultFormName);
   const apiKey = process.env.GEMINI_API_KEY;
 
+  // Resolve dynamic values
+  let tenantDisplayName = 'Kurumumuz';
+  let locationName = '';
+
+  if (tenantId && db) {
+    try {
+      const { resolveTenantDisplayName, resolveTenantLocationName } = await import('@/lib/services/meta/tenant-display-name-resolver');
+      const resolvedName = await resolveTenantDisplayName(db, tenantId);
+      if (resolvedName) tenantDisplayName = resolvedName;
+
+      const resolvedLoc = await resolveTenantLocationName(db, tenantId);
+      if (resolvedLoc) locationName = resolvedLoc;
+    } catch (_) {}
+  }
+
   if (!apiKey) {
     // No API key, directly use deterministik fallback
-    return generateDeterministikDraft(slots, draftPurpose);
+    return generateDeterministikDraft(slots, draftPurpose, tenantDisplayName, locationName);
   }
 
   try {
+    const travelDestination = locationName ? `Türkiye’ye, ${locationName} lokasyonumuza` : 'Türkiye’ye';
     const systemInstruction = `Sen bir Hastane Karşılama Asistanı AI modelisin. Görevin, hastanın doldurduğu form verilerini (slotları) inceleyerek, ona son derece profesyonel, sıcak, kurallara uygun ve güvenli bir WhatsApp karşılama mesaj taslağı hazırlamaktır.
 Yanıtını sadece belirtilen JSON formatında üretmelisin. JSON haricinde hiçbir metin, tırnak veya markdown bloğu (örn. \`\`\`json) KESİNLİKLE ekleme.
 
@@ -373,7 +402,7 @@ Yanıtını sadece belirtilen JSON formatında üretmelisin. JSON haricinde hiç
 7. Şehir ve ülke isimlerine ek getirirken hata yapmamak için şu güvenli kalıbı kullan: "Yaşadığınız yer olarak [Şehir/Ülke] bilgisini paylaşmışsınız."
 8. Eğer randevu tarihi alanında sadece "8" gibi tekil belirsiz bir sayı varsa: "Randevu tarihi alanına “8” yazmışsınız; bunu ayın 8’i mi yoksa Ağustos ayı olarak mı düşündüğünüzü netleştirebilir misiniz?" şeklinde sor.
 9. "ilgili hekim" yerine "ilgili doktorumuz" kullan. "Bölümümüz tanı ve tedavi hizmeti vermektedir" gibi broşür dili KULLANMA.
-10. "Türkiye'ye / Konya'ya" YAZMA. KESİNLİKLE "Türkiye’ye (Konya’ya)" formatında parantez ile yaz.
+10. Hastaya ${travelDestination} ne zaman gelmeyi düşündüğünü sor.
 11. Randevu yardımı kısmında "yardımcı olabiliriz" YERİNE "randevu planlamanızı organize edebiliriz" ifadesini kullan.
 
 === FIRST CONTACT INTENT CHECK RULES (KRİTİK) ===
@@ -386,15 +415,15 @@ AŞAĞIDAKİ SORULAR VE KONULAR KESİNLİKLE YASAKTIR:
 - "Ameliyat önerildi mi?", "PRP", "Kök hücre", "İğne denendi mi?", "Anjiyo yapıldı mı?", "Fizik tedavi gördünüz mü?"
 
 Bunun yerine GELİŞ NİYETİNİ VE TARİHİNİ şöyle sor:
-- "Türkiye’ye (Konya’ya) ne zaman gelmeyi düşünüyorsunuz? Yaklaşık tarihinizi paylaşırsanız size uygun şekilde randevu planlamanızı organize edebiliriz."
+- "${travelDestination} ne zaman gelmeyi düşünüyorsunuz? Yaklaşık tarihinizi paylaşırsanız size uygun şekilde randevu planlamanızı organize edebiliriz."
 
 === TASLAK METNİ BÖLÜM VE SIRALAMA KURALLARI (HER PARAGRAF ARASI BİR BOŞ SATIR OLMALI) ===
 1. Açılış: "Merhaba,"
-2. Kurumsal giriş: "Başkent Üniversitesi Konya Hastanesi’nden, doldurduğunuz form doğrultusunda sizinle iletişime geçiyoruz."
+2. Kurumsal giriş: "${tenantDisplayName} adına, doldurduğunuz form doğrultusunda sizinle iletişime geçiyoruz."
 3. Form Şikayetini Anlama: Hastanın şikayetini ve varsa süresini doğal bir Türkçe ile belirterek geçmiş olsun de. Örn: "Bel ağrısı şikayetiniz olduğunu belirtmişsiniz. Öncelikle geçmiş olsun." Veya "Daha önce anjiyo, stent veya bypass işlemi geçirdiğinizi ve kontrol amaçlı değerlendirilmek istediğinizi belirtmişsiniz. Öncelikle geçmiş olsun."
 4. Hastalık Hakkında Kısa/Doğal Açıklama: Hastalıkla ilgili kısa, risksiz ve hastayı korkutmayan bir bilgilendirme yapıp sonunu "Bu nedenle mevcut durumunuzun uzman doktor tarafından detaylı şekilde değerlendirilmesi önem taşımaktadır." ile bağla. Örn: "Boyun fıtığı; boyun ağrısı, omuz ve kollara yayılan ağrı, uyuşma, karıncalanma ve hareket kısıtlılığı gibi şikayetlere neden olabilmektedir. Bu nedenle mevcut durumunuzun uzman doktor tarafından detaylı şekilde değerlendirilmesi önem taşımaktadır."
 5. Hastane Değerlendirme Cümlesi (Aynen şunu kullan): "Hastanemize geldiğinizde ilgili doktorumuz tarafından gerekli muayene ve değerlendirmeler yapılarak mevcut durumunuz ayrıntılı şekilde incelenir ve size uygun takip süreci hakkında detaylı bilgi verilir."
-6. Geliş Niyeti/Tarih Sorusu: Yaşadığı şehir belirtilmişse önce "Yaşadığınız yer olarak Stuttgart bilgisini paylaşmışsınız." de, sonra "Türkiye’ye (Konya’ya) ne zaman gelmeyi düşünüyorsunuz? Yaklaşık tarihinizi paylaşırsanız size uygun şekilde randevu planlamanızı organize edebiliriz." cümlesini ekle.
+6. Geliş Niyeti/Tarih Sorusu: Yaşadığı şehir belirtilmişse önce "Yaşadığınız yer olarak Stuttgart bilgisini paylaşmışsınız." de, sonra "${travelDestination} ne zaman gelmeyi düşünüyorsunuz? Yaklaşık tarihinizi paylaşırsanız size uygun şekilde randevu planlamanızı organize edebiliriz." cümlesini ekle.
 7. Kapanış: "İyi günler dileriz."
 
 === RETURN JSON FORMAT ===
@@ -450,7 +479,7 @@ Form Slotları:
           return parsed.draftText;
         } else {
           // Fallback due to safety gate rejection
-          return generateDeterministikDraft(slots, draftPurpose);
+          return generateDeterministikDraft(slots, draftPurpose, tenantDisplayName, locationName);
         }
       }
     }
@@ -458,5 +487,5 @@ Form Slotları:
     // Fetch or parse error -> fallback
   }
 
-  return generateDeterministikDraft(slots, draftPurpose);
+  return generateDeterministikDraft(slots, draftPurpose, tenantDisplayName, locationName);
 }

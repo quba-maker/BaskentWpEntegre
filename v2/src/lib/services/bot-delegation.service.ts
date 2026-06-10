@@ -339,10 +339,10 @@ export class BotDelegationService {
       if (apiKey) {
         try {
           const tenantRows = await this.db.executeSafe({
-            text: `SELECT name FROM tenants WHERE id = $1 /* tenant_id */ LIMIT 1`,
+            text: `SELECT name FROM tenants WHERE id = $1 LIMIT 1`,
             values: [this.db.tenantId]
           }) as any[];
-          const tenantName = tenantRows[0]?.name || 'Başkent Sağlık';
+          const tenantName = tenantRows[0]?.name || 'Ekibimiz';
 
           // 1. Fetch active WhatsApp prompt template for the tenant
           const { defaultPrompts } = await import('@/lib/domain/conversation/prompts');

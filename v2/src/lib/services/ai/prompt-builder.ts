@@ -68,7 +68,10 @@ export class PromptBuilder {
       }
     }
     
-    const isHealthcare = brain.context.config?.industry === 'healthcare' || brain.context.tenantId === 'caab9ea1-9591-45e4-bbc5-9c9b498982c8';
+    const configIndustry = brain.context.config?.industry;
+    const metadataIndustry = (brain.prompts.metadata as any)?.industry;
+    const resolvedIndustry = configIndustry || metadataIndustry;
+    const isHealthcare = resolvedIndustry === 'healthcare' || resolvedIndustry === 'health';
 
     const identityConfig = brain.prompts.metadata?.identity || brain.context.config?.identity || {
       personaName: '',

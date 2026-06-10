@@ -29,6 +29,7 @@ export interface TemplateResolveContext {
   coordinatorName?: string;
   language?: string;  // pre-resolved language hint
   phoneNumber?: string;  // for phone-prefix language detection
+  omitPatientName?: boolean; // dynamic configuration to hide patient name in templates
 }
 
 export interface ResolvedTemplate {
@@ -97,9 +98,9 @@ function detectLanguage(ctx: TemplateResolveContext, greetingLang?: string): str
 const MAX_RENDERED_LENGTH = 4096;
 
 function renderTemplate(body: string, ctx: TemplateResolveContext): string {
-  const isBaskent = ctx.tenantId === 'caab9ea1-9591-45e4-bbc5-9c9b498982c8';
+  const omitPatientName = ctx.omitPatientName ?? false;
   const variables: Record<string, string> = {
-    patient_name: isBaskent ? '' : (ctx.patientName?.trim() || ''),
+    patient_name: omitPatientName ? '' : (ctx.patientName?.trim() || ''),
     tenant_name: ctx.tenantName || 'Ekibimiz',
     form_name: ctx.formName || '',
     department: ctx.department || '',
@@ -147,6 +148,19 @@ export class TemplateResolverService {
     const lang = detectLanguage(ctx, greetingLang);
     let resolved: ResolvedTemplate | null = null;
     let firstNonCompliantFallback: ResolvedTemplate | null = null;
+
+    // Resolve omitPatientName configuration dynamically from settings
+    let omitPatientName = false;
+    try {
+      const settingsRows = await db.executeSafe({
+        text: `SELECT value FROM settings WHERE tenant_id = $1::uuid AND key = 'omit_patient_name' LIMIT 1`,
+        values: [ctx.tenantId]
+      }) as any[];
+      if (settingsRows.length > 0) {
+        omitPatientName = settingsRows[0].value === 'true' || settingsRows[0].value === true;
+      }
+    } catch (_) {}
+    ctx.omitPatientName = omitPatientName;
     
     // Dynamic import to avoid circular dependencies
     const { isNonCompliant, sanitizePatientFacingMessage } = await import('@/lib/utils/patient-message-sanitizer');

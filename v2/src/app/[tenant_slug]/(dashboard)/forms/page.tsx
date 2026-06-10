@@ -768,7 +768,7 @@ export default function FormsPage() {
     }
 
     const cleanPhone = normalizePhoneForWaMe(currentItem.phone);
-    const draftText = currentItem.draftText || "Merhaba, Başkent Üniversitesi Konya Hastanesi’nden, doldurduğunuz form doğrultusunda sizinle iletişime geçiyoruz.";
+    const draftText = currentItem.draftText || "Merhaba, doldurduğunuz form doğrultusunda başvurunuzla ilgili sizinle iletişime geçiyoruz.";
     const waUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(draftText)}`;
     
     // 1. Synchronous window.open to bypass popup blockers

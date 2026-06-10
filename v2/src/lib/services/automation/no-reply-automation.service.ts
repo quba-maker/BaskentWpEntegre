@@ -6,6 +6,7 @@ import { resolvePatientTimeDisplay } from '@/lib/utils/timezone';
 import { TemplateResolverService } from '@/lib/services/template-resolver.service';
 import { NotificationService } from '@/lib/services/notification.service';
 import { SecondaryPhoneFallbackService } from '@/lib/services/secondary-phone-fallback.service';
+import { resolveTenantDisplayName } from '@/lib/services/meta/tenant-display-name-resolver';
 
 const log = logger.withContext({ module: 'NoReplyAutomationService' });
 
@@ -255,9 +256,10 @@ export class NoReplyAutomationService {
         // Template/Window check
         if (!attemptRes.windowOpen) {
           if (settings.templateFallbackEnabled) {
+            const tenantDisplayName = (await resolveTenantDisplayName(db, tenantId)) || 'Kurumumuz';
             const templateCtx = {
               tenantId,
-              tenantName: 'Başkent Hastanesi',
+              tenantName: tenantDisplayName,
               patientName: c.patient_name || undefined,
               phoneNumber: c.phone_number,
               country: c.opp_country || undefined
@@ -546,9 +548,10 @@ export class NoReplyAutomationService {
         } else {
           templateRequired = true;
           if (settings.templateFallbackEnabled) {
+            const tenantDisplayName = (await resolveTenantDisplayName(db, tenantId)) || 'Kurumumuz';
             const templateCtx = {
               tenantId,
-              tenantName: 'Başkent Hastanesi',
+              tenantName: tenantDisplayName,
               patientName: c.patient_name || undefined,
               phoneNumber: c.phone_number,
               country: c.opp_country || undefined

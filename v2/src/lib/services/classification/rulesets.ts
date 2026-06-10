@@ -45,3 +45,18 @@ export const BaskentRuleset_V1: TenantRuleset = {
     { id: 'type_expat', pattern: /almanya|deutschland|germany|hollanda|fransa|belçika|avusturya|ingiltere|isviçre|gurbetçi|abroad|yurtdışı/i, category: 'patient_type', tag: 'Gurbetçi', scoreContribution: 30, confidence: 0.9 }
   ]
 };
+
+export const GenericRuleset_V1: TenantRuleset = {
+  version: "v1.0",
+  tenantSlug: "generic",
+  industry: "general",
+  rules: [
+    // --- Intent Signals ---
+    { id: 'intent_price', pattern: /fiyat|ücret|ne kadar|maliyet|price|cost|كم|سعر|цена/i, category: 'intent', tag: 'Fiyat Sordu', scoreContribution: 10, confidence: 0.85 },
+    { id: 'intent_appointment_confirm', pattern: /geleceğim|geliyorum|gelirim|hemen gel|ayarlayın|ayarlayalım|planlayalım|onaylıyorum|kabul/i, category: 'intent', tag: 'Onay', scoreContribution: 25, confidence: 0.95, isTerminal: true },
+    { id: 'intent_appointment_interest', pattern: /randevu|appointment|موعد|запись|termin|rendez|müsait|ne zaman|gelebilir|gelmek istiyorum|görüşelim|görşelim|uygun|saat\s*\d+|tarih|sabah|öğle|akşam|yarın|bugün/i, category: 'intent', tag: 'İlgi', scoreContribution: 15, confidence: 0.8 },
+    { id: 'intent_short_approval', pattern: /^(olur|tamam|evet|uygun)$/i, category: 'intent', tag: 'Kısa Onay', scoreContribution: 10, confidence: 0.7 },
+    { id: 'intent_lost_patient', pattern: /istemiyorum|gerek yok|başka yere|vazgeçtim|iptal|cancel|no thanks|لا شكra|не нужно|kein interesse|pas intéressé|almıyorum/i, category: 'intent', tag: 'Vazgeçti', scoreContribution: -50, confidence: 0.95, isTerminal: true },
+  ]
+};
+

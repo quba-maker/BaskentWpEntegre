@@ -421,7 +421,7 @@ KURAL: ${subjectCapital} bir saat söylediğinde bunu ${subjectCapital.toUpperCa
 
   const hostOrCompanyTimeLabel = isHealthcare ? 'TÜRKİYE / HASTANE SAATİ' : 'TÜRKİYE / FİRMA SAATİ';
   const hostOrCompanyTimePhrases = isHealthcare 
-    ? '"sizin saate göre", "Türkiye saatiyle", "hastane saatine göre", "Konya saatine göre", "sizin oranın saatine göre"'
+    ? '"sizin saate göre", "Türkiye saatiyle", "hastane saatine göre", "merkez saatine göre", "sizin oranın saatine göre"'
     : '"sizin saate göre", "Türkiye saatiyle", "firma saatine göre", "sizin oranın saatine göre"';
 
   const interpretationRules = `

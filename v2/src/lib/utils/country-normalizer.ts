@@ -193,14 +193,14 @@ export function resolvePatientCountryDetailed(ctx?: PatientCountryContext | null
   
   // If manualCountry is set even without explicit metadata lock, trust it
   if (ctx.manualCountry) {
-    const norm = normalizeCountry(ctx.manualCountry, ctx.phoneFallback).country;
-    if (norm) {
+    const norm = normalizeCountry(ctx.manualCountry, ctx.phoneFallback);
+    if (norm.country) {
       return {
-        country: norm,
-        displayCountry: norm,
+        country: norm.country,
+        displayCountry: norm.countryConfirmationNeeded ? `${norm.country} (Teyit Gerekli)` : norm.country,
         countrySource: 'manual',
-        countryConfidence: 'high',
-        countryConfirmationNeeded: false
+        countryConfidence: norm.countryConfidence,
+        countryConfirmationNeeded: norm.countryConfirmationNeeded
       };
     }
   }

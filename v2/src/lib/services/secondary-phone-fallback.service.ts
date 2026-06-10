@@ -20,6 +20,7 @@
 import type { TenantDB } from '@/lib/core/tenant-db';
 import { normalizePhoneForIdentity, parseAllPhones } from '@/lib/utils/phone-identity';
 import { ExpectsReplyClassifier } from '@/lib/services/classification/expects-reply-classifier';
+import { resolveTenantDisplayName } from '@/lib/services/meta/tenant-display-name-resolver';
 
 // ═══════════════════════════════════════════════════════════
 // TYPES
@@ -307,7 +308,14 @@ export class SecondaryPhoneFallbackService {
     let draftText: string;
     if (eligibility.windowOpenSecondary) {
       const { sanitizePatientFacingMessage } = await import('@/lib/utils/patient-message-sanitizer');
-      draftText = sanitizePatientFacingMessage(`Merhaba, Başkent Hastanesi'nden ulaşıyoruz. Diğer numaranızdan yanıt alamadık. Müsait olduğunuzda bize dönüş yapabilirseniz çok seviniriz. İyi günler dileriz.`);
+      const tenantDisplayName = await resolveTenantDisplayName(this.db, this.tenantId);
+      let greetingText = '';
+      if (tenantDisplayName) {
+        greetingText = `${tenantDisplayName} tarafından sizinle iletişime geçiyoruz.`;
+      } else {
+        greetingText = `Başvurunuzla ilgili sizinle iletişime geçiyoruz.`;
+      }
+      draftText = sanitizePatientFacingMessage(`Merhaba, ${greetingText} Diğer numaranızdan yanıt alamadık. Müsait olduğunuzda bize dönüş yapabilirseniz çok seviniriz. İyi günler dileriz.`);
     } else {
       draftText = '24 saatlik WhatsApp penceresi kapalı. Onaylı şablon (template) gereklidir. Şablon konfigürasyonu yapılmadan gönderim devre dışıdır.';
     }

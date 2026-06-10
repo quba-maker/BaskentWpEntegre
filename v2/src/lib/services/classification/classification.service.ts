@@ -1,4 +1,4 @@
-import { TenantRuleset, BaskentRuleset_V1, ClassificationRule } from "./rulesets";
+import { TenantRuleset, BaskentRuleset_V1, GenericRuleset_V1, ClassificationRule } from "./rulesets";
 import { logger } from "@/lib/core/logger";
 
 export interface ClassificationResult {
@@ -22,8 +22,19 @@ export class ClassificationService {
   private log = logger.withContext({ module: 'ClassificationService' });
   private ruleset: TenantRuleset;
 
-  constructor(ruleset: TenantRuleset = BaskentRuleset_V1) {
+  constructor(ruleset: TenantRuleset = GenericRuleset_V1) {
     this.ruleset = ruleset;
+  }
+
+  /**
+   * Factory method to resolve the correct ruleset for a tenant based on slug/id, industry and config.
+   */
+  public static getRulesetForTenant(tenantSlugOrId: string, industry?: string, rulesetConfig?: string): TenantRuleset {
+    const isBaskent = tenantSlugOrId === 'baskent' || tenantSlugOrId === 'caab9ea1-9591-45e4-bbc5-9c9b498982c8';
+    if (isBaskent || rulesetConfig === 'baskent') {
+      return BaskentRuleset_V1;
+    }
+    return GenericRuleset_V1;
   }
 
   /**

@@ -369,15 +369,13 @@ export class FormGreetingHandoffService {
     } catch (_) {}
 
     // Resolve tenant name
-    let tenantName = 'Başkent Üniversitesi Hastanesi';
+    let tenantName = 'Kurumumuz';
     try {
-      const { withTenantDB } = await import('@/lib/core/tenant-db');
-      const sysDb = withTenantDB('admin-system', true);
-      const tenantRes = await sysDb.executeSafe({
-        text: `SELECT name FROM tenants WHERE id = $1 LIMIT 1`,
+      const tenantRes = await this.db.executeSafe({
+        text: `SELECT name FROM tenants WHERE id = $1::uuid LIMIT 1`,
         values: [this.tenantId]
       }) as any[];
-      if (tenantRes.length > 0) tenantName = tenantRes[0].name;
+      if (tenantRes.length > 0 && tenantRes[0].name) tenantName = tenantRes[0].name;
     } catch (_) {}
 
     // Resolve template using TemplateResolverService

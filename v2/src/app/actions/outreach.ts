@@ -358,15 +358,11 @@ export async function checkGreetingReadinessCore(
   }
 
   // Resolve tenant name
-  let tenantName = 'Başkent Üniversitesi Hastanesi';
+  let tenantName = 'Kurumumuz';
   try {
-    const { withTenantDB } = await import('@/lib/core/tenant-db');
-    const sysDb = withTenantDB('admin-system', true);
-    const tenantRes = await sysDb.executeSafe({
-      text: `SELECT name FROM tenants WHERE id = $1 LIMIT 1`,
-      values: [tenantId]
-    }) as any[];
-    if (tenantRes.length > 0) tenantName = tenantRes[0].name;
+    const { resolveTenantDisplayName } = await import('@/lib/services/meta/tenant-display-name-resolver');
+    const resolvedName = await resolveTenantDisplayName(db, tenantId);
+    if (resolvedName) tenantName = resolvedName;
   } catch (_) {}
 
   const { TemplateResolverService } = await import('@/lib/services/template-resolver.service');
@@ -1758,9 +1754,15 @@ export async function prepareSmartGreetingDraftCore(
     
     if (leads.length > 0) {
       const { generateSmartDraft } = await import('@/lib/utils/smart-draft-generator');
-      draftText = await generateSmartDraft(leads[0].raw_data, leads[0].form_name);
+      draftText = await generateSmartDraft(leads[0].raw_data, leads[0].form_name, 'first_contact_intent_check', tenantId, db);
     } else {
-      draftText = "Merhaba, Başkent Üniversitesi Konya Hastanesi’nden, doldurduğunuz form doğrultusunda sizinle iletişime geçiyoruz.";
+      const { resolveTenantDisplayName } = await import('@/lib/services/meta/tenant-display-name-resolver');
+      const tenantDisplayName = await resolveTenantDisplayName(db, tenantId);
+      if (tenantDisplayName) {
+        draftText = `Merhaba, ${tenantDisplayName} adına, doldurduğunuz form doğrultusunda sizinle iletişime geçiyoruz.`;
+      } else {
+        draftText = "Merhaba, doldurduğunuz form doğrultusunda başvurunuzla ilgili sizinle iletişime geçiyoruz.";
+      }
     }
     
     // Log the newly prepared draft

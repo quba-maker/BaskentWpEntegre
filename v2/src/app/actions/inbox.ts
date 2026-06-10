@@ -5752,7 +5752,7 @@ export async function prepareInboxBotAssistedDraftAction(
         if (lead && intentHint === "Karşılama") {
           try {
             const { generateSmartDraft } = await import('@/lib/utils/smart-draft-generator');
-            const draftText = await generateSmartDraft(lead.raw_data, lead.form_name);
+            const draftText = await generateSmartDraft(lead.raw_data, lead.form_name, 'first_contact_intent_check', ctx.tenantId, ctx.db);
             if (!draftText || !draftText.trim()) {
               return { success: false, error: "Taslak üretilemedi. Lütfen tekrar deneyin veya manuel talimat girin." };
             }
@@ -5958,7 +5958,7 @@ Lütfen bu bilgilere göre yukarıdaki kurallara ve talimatlara uygun cevap tasl
       if (lead && intentHint === "Karşılama") {
         try {
           const { generateSmartDraft } = await import('@/lib/utils/smart-draft-generator');
-          closedFormDraft = await generateSmartDraft(lead.raw_data, lead.form_name);
+          closedFormDraft = await generateSmartDraft(lead.raw_data, lead.form_name, 'first_contact_intent_check', ctx.tenantId, ctx.db);
         } catch (e) {
           console.error("[CLOSED_FORM_DRAFT_GEN_ERROR] Failed to generate form greeting for copy", e);
         }
