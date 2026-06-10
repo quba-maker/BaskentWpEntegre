@@ -16,7 +16,8 @@ import {
   ShieldAlert,
   Zap,
   CheckSquare,
-  Activity
+  Activity,
+  GraduationCap
 } from "lucide-react";
 import { getSession, logout, stopImpersonation } from "@/lib/auth/session";
 import { redirect } from "next/navigation";
@@ -99,7 +100,10 @@ export async function Sidebar({ tenantData }: { tenantData?: TenantBootstrapData
         
         {/* AI MODULES */}
         {(session?.role === "platform_admin" || session?.role === "admin" || session?.role === "owner") && (
-          <NavLink href={`/${session?.tenantSlug || ''}/bot`} icon={<Bot className="w-[18px] h-[18px]" />} label="AI Asistan" />
+          <>
+            <NavLink href={`/${session?.tenantSlug || ''}/bot`} icon={<Bot className="w-[18px] h-[18px]" />} label="AI Asistan" />
+            <NavLink href={`/${session?.tenantSlug || ''}/ogrenme`} icon={<GraduationCap className="w-[18px] h-[18px]" />} label="AI Öğrenme" />
+          </>
         )}
         
         {/* ANALYTICS */}

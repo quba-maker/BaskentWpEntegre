@@ -1,7 +1,7 @@
 import { Sidebar } from "@/components/layout/sidebar";
 import { SidebarLayoutWrapper } from "@/components/layout/sidebar-layout-wrapper";
 import { DashboardProviders } from "@/components/layout/dashboard-providers";
-import { LayoutDashboard, MessageSquare, ClipboardList, Settings, Bot, BarChart3 } from "lucide-react";
+import { LayoutDashboard, MessageSquare, ClipboardList, Settings, Bot, BarChart3, GraduationCap } from "lucide-react";
 import Link from "next/link";
 import { getSession } from "@/lib/auth/session";
 import { getTenantBootstrapData } from "@/lib/domain/tenant/bootstrap";
@@ -99,6 +99,7 @@ export default async function DashboardLayout({
         {canManageBot && (
           <>
             <MobileNavLink href={`/${slug}/bot`} icon={<Bot className="w-6 h-6" />} label="Bot" />
+            <MobileNavLink href={`/${slug}/ogrenme`} icon={<GraduationCap className="w-6 h-6" />} label="Öğrenme" />
             <MobileNavLink href={`/${slug}/analytics`} icon={<BarChart3 className="w-6 h-6" />} label="Analiz" />
           </>
         )}

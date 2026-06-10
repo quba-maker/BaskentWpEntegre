@@ -52,7 +52,7 @@ export async function withActionGuard<T>(
       session = {
         userId: process.env.TEST_USER_ID || "test-user-id",
         tenantId: process.env.TEST_TENANT_ID,
-        role: "platform_admin",
+        role: process.env.TEST_USER_ROLE || "platform_admin",
         email: "test@quba.ai",
         tenantSlug: "baskent"
       };
