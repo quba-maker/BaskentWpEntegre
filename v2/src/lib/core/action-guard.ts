@@ -48,7 +48,7 @@ export async function withActionGuard<T>(
   try {
     // 1. Auth Check
     let session: any = null;
-    if (process.env.TEST_TENANT_ID) {
+    if (process.env.NODE_ENV !== 'production' && process.env.TEST_TENANT_ID) {
       session = {
         userId: process.env.TEST_USER_ID || "test-user-id",
         tenantId: process.env.TEST_TENANT_ID,
