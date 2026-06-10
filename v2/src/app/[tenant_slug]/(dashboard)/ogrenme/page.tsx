@@ -10,9 +10,12 @@ import {
   updateCandidateContent, 
   getLearningStats, 
   getTenantChannels,
+  getLearningRuntimeReadinessAction,
   type CandidateRow,
-  type CandidateFilters
+  type CandidateFilters,
+  type RuntimeReadinessReport
 } from "@/app/actions/learning-approval";
+import LearningRuntimeStatusCard from "@/components/features/learning/LearningRuntimeStatusCard";
 import { 
   GraduationCap, 
   Search, 
@@ -48,6 +51,10 @@ export default function LearningApprovalPage() {
   const [channels, setChannels] = useState<Array<{ id: string; name: string; provider: string }>>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Runtime Readiness Status Card State
+  const [readiness, setReadiness] = useState<RuntimeReadinessReport | null>(null);
+  const [readinessLoading, setReadinessLoading] = useState(false);
 
   // Filters State
   const [statusTab, setStatusTab] = useState<'pending' | 'approved' | 'rejected' | 'ignored' | 'all'>('pending');
@@ -141,6 +148,31 @@ export default function LearningApprovalPage() {
     loadChannels();
   }, []);
 
+  // Fetch Runtime Learning Readiness whenever channel filter changes
+  useEffect(() => {
+    async function fetchReadiness() {
+      if (channelFilter === 'all' || !channelFilter) {
+        setReadiness(null);
+        return;
+      }
+      setReadinessLoading(true);
+      try {
+        const res = await getLearningRuntimeReadinessAction(channelFilter);
+        if (res.success && res.data) {
+          setReadiness(res.data);
+        } else {
+          setReadiness(null);
+        }
+      } catch (err) {
+        console.error("Readiness check failed:", err);
+        setReadiness(null);
+      } finally {
+        setReadinessLoading(false);
+      }
+    }
+    fetchReadiness();
+  }, [channelFilter]);
+
   // Fetch stats & candidates list
   const loadData = async (page = 1) => {
     setLoading(true);
@@ -150,6 +182,14 @@ export default function LearningApprovalPage() {
       const statsRes = await getLearningStats();
       if (statsRes.success && statsRes.data) {
         setStats(statsRes.data);
+      }
+
+      // Fetch readiness if channel filter is selected
+      if (channelFilter !== 'all' && channelFilter) {
+        const readinessRes = await getLearningRuntimeReadinessAction(channelFilter);
+        if (readinessRes.success && readinessRes.data) {
+          setReadiness(readinessRes.data);
+        }
       }
 
       // Fetch list
@@ -408,6 +448,15 @@ export default function LearningApprovalPage() {
             BrainResolver mekanizmalarına etki etmez. KVKK uyumluluğu nedeniyle ham hasta konuşmaları veya özel kişisel veriler UI'a taşınmaz.
           </div>
         </div>
+      </div>
+
+      {/* Runtime Unlock status card */}
+      <div className="flex-none px-6 pt-4">
+        <LearningRuntimeStatusCard
+          readiness={readiness}
+          loading={readinessLoading}
+          tenantSlug={tenantSlug}
+        />
       </div>
 
       {/* 2. Stats Grid */}
