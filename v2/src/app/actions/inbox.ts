@@ -940,6 +940,23 @@ export async function sendMessage(phone: string, text: string, replyToProviderMe
 
       const messageId = Array.isArray(msgInsert) ? msgInsert[0]?.id : (msgInsert as any)?.rows?.[0]?.id;
 
+      // Passive Learning Capture: log operator send (manual or edited draft)
+      try {
+        const { TenantLearningCaptureService } = await import('@/lib/services/ai/tenant-learning-capture.service');
+        await TenantLearningCaptureService.logOperatorSend(ctx.db, {
+          tenantId: ctx.tenantId,
+          channelId: channelId || null,
+          conversationId,
+          messageId: messageId,
+          humanFinalText: text,
+          metadata: {
+            approved_from: 'send_message_action'
+          }
+        });
+      } catch (captureErr) {
+        console.error('TenantLearningCaptureService.logOperatorSend error bypassed in sendMessage', captureErr);
+      }
+
       await ctx.db.executeSafe({
         text: `UPDATE conversations 
                SET last_message_at = NOW(), 
@@ -1670,6 +1687,22 @@ export async function toggleBotStatus(conversationIdOrPhone: string, isBotActive
           })
         ]
       });
+
+      // Passive Learning Capture: log human takeover if bot is turned off
+      if (!isBotActive) {
+        try {
+          const { TenantLearningCaptureService } = await import('@/lib/services/ai/tenant-learning-capture.service');
+          await TenantLearningCaptureService.logHumanTakeover(ctx.db, {
+            tenantId: ctx.tenantId,
+            channelId: channelId || null,
+            conversationId,
+            reason: 'manual_disable',
+            metadata: { user_id: ctx.userId }
+          });
+        } catch (captureErr) {
+          console.error('TenantLearningCaptureService.logHumanTakeover error bypassed in toggleBotStatus', captureErr);
+        }
+      }
 
       // Ably Realtime Sync (publish metadata update)
       try {
@@ -5594,6 +5627,20 @@ export async function prepareInboxBotAssistedDraftAction(
             if (!draftText || !draftText.trim()) {
               return { success: false, error: "Taslak üretilemedi. Lütfen tekrar deneyin veya manuel talimat girin." };
             }
+            // Passive Learning Capture: log smart draft
+            try {
+              const { TenantLearningCaptureService } = await import('@/lib/services/ai/tenant-learning-capture.service');
+              await TenantLearningCaptureService.logSmartDraft(ctx.db, {
+                tenantId: ctx.tenantId,
+                channelId: conv.channel_id || null,
+                conversationId,
+                aiGeneratedText: draftText,
+                metadata: { intentHint, customDirective, reused_form_greeting: true }
+              });
+            } catch (captureErr) {
+              console.error('TenantLearningCaptureService.logSmartDraft error bypassed', captureErr);
+            }
+
             return {
               isTemplate: false,
               draftText,
@@ -5726,6 +5773,20 @@ Lütfen bu bilgilere göre yukarıdaki kurallara ve talimatlara uygun cevap tasl
             }
           }
 
+          // Passive Learning Capture: log smart draft
+          try {
+            const { TenantLearningCaptureService } = await import('@/lib/services/ai/tenant-learning-capture.service');
+            await TenantLearningCaptureService.logSmartDraft(ctx.db, {
+              tenantId: ctx.tenantId,
+              channelId: conv.channel_id || null,
+              conversationId,
+              aiGeneratedText: draftText,
+              metadata: { intentHint, customDirective }
+            });
+          } catch (captureErr) {
+            console.error('TenantLearningCaptureService.logSmartDraft error bypassed', captureErr);
+          }
+
           return {
             isTemplate: false,
             draftText,
@@ -5738,6 +5799,20 @@ Lütfen bu bilgilere göre yukarıdaki kurallara ve talimatlara uygun cevap tasl
           if (!cleanedText) {
             return { success: false, error: "Taslak üretilemedi. Lütfen tekrar deneyin veya manuel talimat girin." };
           }
+          // Passive Learning Capture: log smart draft
+          try {
+            const { TenantLearningCaptureService } = await import('@/lib/services/ai/tenant-learning-capture.service');
+            await TenantLearningCaptureService.logSmartDraft(ctx.db, {
+              tenantId: ctx.tenantId,
+              channelId: conv.channel_id || null,
+              conversationId,
+              aiGeneratedText: cleanedText,
+              metadata: { intentHint, customDirective, parse_fallback: true }
+            });
+          } catch (captureErr) {
+            console.error('TenantLearningCaptureService.logSmartDraft error bypassed', captureErr);
+          }
+
           return {
             isTemplate: false,
             draftText: cleanedText,
@@ -6035,6 +6110,24 @@ export async function sendApprovedInboxBotDraftAction(
         }
 
         const insertedMessageId = saveRes.messageId;
+
+        // Passive Learning Capture: log operator send (human edited or smart draft)
+        try {
+          const { TenantLearningCaptureService } = await import('@/lib/services/ai/tenant-learning-capture.service');
+          await TenantLearningCaptureService.logOperatorSend(ctx.db, {
+            tenantId: ctx.tenantId,
+            channelId: conv.channel_id || null,
+            conversationId,
+            messageId: insertedMessageId,
+            humanFinalText: draftText.trim(),
+            metadata: {
+              approved_from: 'smart_draft_action',
+              template_name: templateName || null
+            }
+          });
+        } catch (captureErr) {
+          console.error('TenantLearningCaptureService.logOperatorSend error bypassed', captureErr);
+        }
 
         // Retrieve actual message row from the database (Safety Rule #2)
         const msgRows = await ctx.db.executeSafe({

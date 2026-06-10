@@ -1111,6 +1111,22 @@ export class QueueWorkerEngine {
       return;
     }
 
+    // Passive Learning Capture: log incoming patient message as reaction/frustration signal
+    if (direction === 'in') {
+      try {
+        const { TenantLearningCaptureService } = await import('../services/ai/tenant-learning-capture.service');
+        await TenantLearningCaptureService.logPatientReaction(db, {
+          tenantId,
+          channelId: metadata.channelId,
+          conversationId: conversationId!,
+          messageId: messageId!,
+          patientMessageText: content
+        });
+      } catch (captureErr) {
+        this.log.error('TenantLearningCaptureService.logPatientReaction error bypassed', captureErr as Error);
+      }
+    }
+
     if (isAppEcho) {
       this.log.info(`[APP_ECHO_DETECTED] Outbound echo from mobile WhatsApp App. Auto-handover to human and disabling autopilot.`, { phoneNumber, traceId });
       
@@ -1302,6 +1318,19 @@ export class QueueWorkerEngine {
                      VALUES ($1, $2, 'system', $3, $4, 'system_alert')`,
               values: [tenantId, phoneNumber, 'Küfür/hakaret algılandı, bot otomatik yanıtı durduruldu. (NO_REPLY_ABUSE_DETECTED)', channel]
             });
+
+            // Passive Learning Capture: log human takeover on abuse detection
+            try {
+              const { TenantLearningCaptureService } = await import('../services/ai/tenant-learning-capture.service');
+              await TenantLearningCaptureService.logHumanTakeover(db, {
+                tenantId,
+                channelId: metadata.channelId,
+                conversationId: resolvedConvId!,
+                reason: `abuse_detected: ${abuseResult.matched_phrases.join(', ')}`
+              });
+            } catch (captureErr) {
+              this.log.error('TenantLearningCaptureService.logHumanTakeover error bypassed in abuse detector', captureErr as Error);
+            }
 
             // Broadcast realtime metadata update
             try {
@@ -2418,6 +2447,23 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
     });
 
     this.log.info(`[DB_COMMITTED] [OUTGOING MESSAGE] Saved to DB. MsgId: ${outMsgResult.messageId}`, { traceId, outProviderMessageId });
+
+    // Passive Learning Capture: log autopilot reply
+    try {
+      const finalConvId = outMsgResult.conversationId || conversationId || conversationIdVal;
+      if (finalConvId) {
+        const { TenantLearningCaptureService } = await import('../services/ai/tenant-learning-capture.service');
+        await TenantLearningCaptureService.logAutopilotReply(db, {
+          tenantId,
+          channelId: metadata.channelId,
+          conversationId: finalConvId,
+          messageId: outMsgResult.messageId,
+          aiGeneratedText: finalResponseText
+        });
+      }
+    } catch (captureErr) {
+      this.log.error('TenantLearningCaptureService.logAutopilotReply error bypassed', captureErr as Error);
+    }
 
     // Consume Bot Directive on successful outbound response
     if (unifiedContext?.active_task?.id && unifiedContext?.active_task?.active_bot_directive) {
@@ -4030,6 +4076,19 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
           values: [tenantId, conversationId, phoneNumber, 'AI yanıtı Türkçe kalite kontrolünü geçemedi, manuel kontrol gerekli. (Quality Gate Blocked)', channel]
         });
 
+        // Passive Learning Capture: log human takeover
+        try {
+          const { TenantLearningCaptureService } = await import('../services/ai/tenant-learning-capture.service');
+          await TenantLearningCaptureService.logHumanTakeover(db, {
+            tenantId,
+            channelId: metadata.channelId,
+            conversationId,
+            reason: `quality_gate_failed: ${qualityGate.reason}`
+          });
+        } catch (captureErr) {
+          this.log.error('TenantLearningCaptureService.logHumanTakeover error bypassed', captureErr as Error);
+        }
+
         return;
       }
 
@@ -4089,6 +4148,20 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
         providerMessageId: outProviderMessageId,
         status: 'sent'
       });
+
+      // Passive Learning Capture: log autopilot reply
+      try {
+        const { TenantLearningCaptureService } = await import('../services/ai/tenant-learning-capture.service');
+        await TenantLearningCaptureService.logAutopilotReply(db, {
+          tenantId,
+          channelId: resolvedChannelId,
+          conversationId,
+          messageId: outMsgResult.messageId,
+          aiGeneratedText: finalResponseText
+        });
+      } catch (captureErr) {
+        this.log.error('TenantLearningCaptureService.logAutopilotReply error bypassed in debounced worker', captureErr as Error);
+      }
 
       // Realtime publish
       if (outMsgResult.messageId) {

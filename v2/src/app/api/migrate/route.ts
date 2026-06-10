@@ -1,7 +1,16 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const authHeader = req.headers.get('authorization');
+  const setupKey = process.env.ADMIN_SETUP_KEY || process.env.CRON_SECRET;
+  const isDev = process.env.NODE_ENV !== 'production';
+  const allowedToken = setupKey || (isDev ? 'dev' : null);
+
+  if (!allowedToken || authHeader !== `Bearer ${allowedToken}`) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const results: string[] = [];
 
   try {
@@ -389,9 +398,51 @@ export async function GET() {
 
     results.push('conversation_favorites and conversation_archives: OK');
 
+    // Phase P1: tenant_learning_events
+    await sql`
+      CREATE TABLE IF NOT EXISTS tenant_learning_events (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        organization_id UUID,
+        channel_id UUID REFERENCES channels(id) ON DELETE SET NULL,
+        conversation_id UUID REFERENCES conversations(id) ON DELETE CASCADE,
+        message_id UUID REFERENCES messages(id) ON DELETE SET NULL,
+        source_type TEXT NOT NULL,
+        patient_message_text TEXT,
+        ai_generated_text TEXT,
+        human_final_text TEXT,
+        diff_summary JSONB,
+        changed_ratio NUMERIC(5, 4),
+        removed_phrases JSONB,
+        added_phrases JSONB,
+        risk_tags JSONB,
+        outcome_signal TEXT DEFAULT 'unknown',
+        status TEXT DEFAULT 'captured',
+        idempotency_key TEXT UNIQUE,
+        metadata JSONB DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `;
+    await sql`ALTER TABLE tenant_learning_events ENABLE ROW LEVEL SECURITY`;
+    await sql`ALTER TABLE tenant_learning_events FORCE ROW LEVEL SECURITY`;
+    await sql`DROP POLICY IF EXISTS tenant_isolation_policy ON tenant_learning_events`;
+    await sql`
+      CREATE POLICY tenant_isolation_policy ON tenant_learning_events
+      FOR ALL
+      USING (
+        (current_setting('app.bypass_rls', true) = 'true')
+        OR (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)
+      )
+    `;
+    await sql`CREATE INDEX IF NOT EXISTS idx_tenant_learning_events_tenant ON tenant_learning_events(tenant_id, created_at DESC)`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_tenant_learning_events_conversation ON tenant_learning_events(tenant_id, conversation_id)`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_tenant_learning_events_source ON tenant_learning_events(tenant_id, source_type)`;
+
+    results.push('tenant_learning_events table, RLS and indexes: OK');
+
     return NextResponse.json({ 
       success: true, 
-      message: 'Migration completed successfully (Phase 6, 1.3 and Favorites/Archives included)!',
+      message: 'Migration completed successfully (Phase 6, 1.3, Favorites/Archives and tenant_learning_events included)!',
       details: results 
     });
   } catch (error: any) {
@@ -409,8 +460,18 @@ export async function GET() {
  * Validates all tables, indexes, constraints exist and tenant isolation works.
  * Safe to call multiple times (idempotent check).
  */
-export async function POST() {
+export async function POST(req: NextRequest) {
+  const authHeader = req.headers.get('authorization');
+  const setupKey = process.env.ADMIN_SETUP_KEY || process.env.CRON_SECRET;
+  const isDev = process.env.NODE_ENV !== 'production';
+  const allowedToken = setupKey || (isDev ? 'dev' : null);
+
+  if (!allowedToken || authHeader !== `Bearer ${allowedToken}`) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const checks: { check: string; status: 'pass' | 'fail'; detail?: string }[] = [];
+
 
   try {
     // 1. Validate all required tables exist
@@ -421,7 +482,7 @@ export async function POST() {
       'ai_runtime_logs', 'tool_permissions', 'feature_flags',
       'ai_audit_logs', 'ai_runtime_metrics', 'conversation_pins',
       'conversation_read_states', 'conversation_favorites',
-      'conversation_archives'
+      'conversation_archives', 'tenant_learning_events'
     ];
 
     const existingTables = await sql`
@@ -441,7 +502,7 @@ export async function POST() {
     // Verify RLS enablement status on new tables
     const rlsChecked = await sql`
       SELECT tablename, rowsecurity FROM pg_tables
-      WHERE schemaname = 'public' AND tablename IN ('conversation_favorites', 'conversation_archives')
+      WHERE schemaname = 'public' AND tablename IN ('conversation_favorites', 'conversation_archives', 'tenant_learning_events')
     `;
     for (const row of rlsChecked) {
       checks.push({
@@ -454,7 +515,8 @@ export async function POST() {
     // 2. Validate critical indexes
     const requiredIndexes = [
       'idx_ai_events_tenant', 'idx_ai_events_conversation', 'idx_ai_events_customer',
-      'idx_brain_versions_tenant', 'idx_ai_runtime_logs_tenant', 'idx_ai_runtime_logs_type'
+      'idx_brain_versions_tenant', 'idx_ai_runtime_logs_tenant', 'idx_ai_runtime_logs_type',
+      'idx_tenant_learning_events_tenant'
     ];
 
     const existingIndexes = await sql`
