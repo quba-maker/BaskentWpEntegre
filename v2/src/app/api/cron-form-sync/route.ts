@@ -43,11 +43,19 @@ function verifyHmac(secret: string, timestamp: string, rawBody: string, signatur
 }
 
 export async function POST(request: NextRequest) {
+  // Safe-mode lock for control mode
+  log.warn('[CRON_SYNC_LOCKED] Google Sheets cron sync is disabled during control mode.');
+  return NextResponse.json({
+    success: false,
+    reason: 'control_mode_locked',
+    message: 'Google Sheets cron sync is disabled during control mode.'
+  }, { status: 403 });
+
   // ── 0. Overlap Guard: prevent concurrent sync runs ──
   let lockAcquired = false;
   if (redis) {
     try {
-      const lock = await redis.set(SYNC_LOCK_KEY, Date.now().toString(), { ex: SYNC_LOCK_TTL, nx: true });
+      const lock = await redis!.set(SYNC_LOCK_KEY, Date.now().toString(), { ex: SYNC_LOCK_TTL, nx: true });
       if (!lock) {
         log.warn('[CRON_SYNC_OVERLAP] Previous sync still running, skipping this run');
         return NextResponse.json({ skipped: true, reason: 'previous_sync_still_running' });
@@ -55,7 +63,7 @@ export async function POST(request: NextRequest) {
       lockAcquired = true;
     } catch (lockErr) {
       // Redis failure is non-blocking — proceed without lock
-      log.warn('[CRON_SYNC_LOCK_ERROR] Redis lock failed, proceeding without guard', { error: lockErr instanceof Error ? lockErr.message : String(lockErr) });
+      log.warn('[CRON_SYNC_LOCK_ERROR] Redis lock failed, proceeding without guard', { error: (lockErr as any)?.message || String(lockErr) });
     }
   }
 
@@ -74,9 +82,9 @@ export async function POST(request: NextRequest) {
 
     if (webhookSecret && sheetsSignature && sheetsTimestamp) {
       const now = Math.floor(Date.now() / 1000);
-      const ts = parseInt(sheetsTimestamp);
+      const ts = parseInt(sheetsTimestamp!);
       if (!isNaN(ts) && Math.abs(now - ts) <= 300) {
-        isHmacAuth = verifyHmac(webhookSecret, sheetsTimestamp, rawBody, sheetsSignature);
+        isHmacAuth = verifyHmac(webhookSecret!, sheetsTimestamp!, rawBody, sheetsSignature!);
       }
     }
 
@@ -223,10 +231,10 @@ export async function POST(request: NextRequest) {
     // ── Release overlap lock ──
     if (lockAcquired && redis) {
       try {
-        await redis.del(SYNC_LOCK_KEY);
+        await redis!.del(SYNC_LOCK_KEY);
       } catch (unlockErr) {
         // Non-blocking — TTL will auto-expire the lock
-        log.warn('[CRON_SYNC_UNLOCK_ERROR] Failed to release lock, TTL will auto-expire', { error: unlockErr instanceof Error ? unlockErr.message : String(unlockErr) });
+        log.warn('[CRON_SYNC_UNLOCK_ERROR] Failed to release lock, TTL will auto-expire', { error: (unlockErr as any)?.message || String(unlockErr) });
       }
     }
   }

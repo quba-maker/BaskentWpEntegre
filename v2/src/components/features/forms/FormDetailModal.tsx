@@ -293,12 +293,34 @@ export function FormDetailModal({
 
             {/* Outreach Action Controls */}
             <div className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
-              <div className="px-5 py-3 border-b border-black/5 bg-gradient-to-r from-[#25D366]/5 to-[#007AFF]/5">
-                <h3 className="text-sm font-bold text-[#1D1D1F] flex items-center gap-2">
-                  <Send className="w-4 h-4 text-[#25D366]" />
-                  İlk İletişim (Outreach)
-                </h3>
-              </div>
+              {form.stage === 'quarantine' || form.firstContactStatus === 'control_required' ? (
+                <>
+                  <div className="px-5 py-3 border-b border-black/5 bg-gradient-to-r from-[#FF9500]/5 to-[#FF9500]/10">
+                    <h3 className="text-sm font-bold text-[#1D1D1F] flex items-center gap-2">
+                      <Send className="w-4 h-4 text-[#FF9500]" />
+                      İlk İletişim Engellendi (Kontrol Gerekli)
+                    </h3>
+                  </div>
+                  <div className="p-5 space-y-3">
+                    <div className="p-4 bg-[#FF9500]/10 border border-[#FF9500]/20 rounded-2xl flex items-start gap-3 text-left">
+                      <span className="text-xl">⚠️</span>
+                      <div>
+                        <h4 className="text-xs font-bold text-[#FF9500] uppercase tracking-wider">Karantina Modu</h4>
+                        <p className="text-[11px] text-slate-600 mt-1 font-semibold leading-relaxed">
+                          Bu kayıt senkronizasyon dışı bir sekmeden veya bilinmeyen bir kampanya kaynağından geldiği için karantinaya alınmıştır. Manuel veya otomatik WhatsApp karşılama aksiyonları engellenmiştir.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="px-5 py-3 border-b border-black/5 bg-gradient-to-r from-[#25D366]/5 to-[#007AFF]/5">
+                    <h3 className="text-sm font-bold text-[#1D1D1F] flex items-center gap-2">
+                      <Send className="w-4 h-4 text-[#25D366]" />
+                      İlk İletişim (Outreach)
+                    </h3>
+                  </div>
 
               <div className="flex border-b border-black/5 bg-black/[0.02] p-1 gap-1">
                 <button
@@ -614,6 +636,8 @@ export function FormDetailModal({
                   </div>
                 )}
               </div>
+              </>
+              )}
             </div>
 
             {/* AI Summary / Notes */}

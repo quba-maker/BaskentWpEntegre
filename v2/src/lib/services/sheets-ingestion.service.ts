@@ -102,6 +102,8 @@ export interface IngestBatchResult {
   duplicates: number;
   unchanged?: number;
   errors: number;
+  skippedUnknownTab?: number;
+  controlRequired?: number;
   /** true if processing stopped early due to time/row limit */
   partial: boolean;
   /** Human-readable message */
@@ -139,6 +141,7 @@ interface ParsedRow {
   createdTime: string | null;
   rawData: string;
   tabName: string;
+  stage: string;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -257,6 +260,42 @@ export function getCanonicalKey(phone: string, formName: string, createdTime: st
   const normForm = normalizeString(formName);
   const normTime = normalizeTimeForHash(createdTime);
   return `${normPhone}_${normForm}_${normTime}`;
+}
+
+export function isUnknownCampaign(name: string | null | undefined): boolean {
+  if (!name) return true;
+  const lower = name.trim().toLowerCase();
+  return (
+    lower === 'bilinmeyen kampanya' ||
+    lower === 'unknown' ||
+    lower === 'unknown campaign' ||
+    lower === 'empty/null formname' ||
+    lower === 'unknownformrows' ||
+    lower === 'controlrequired' ||
+    lower === 'reviewrequired' ||
+    lower === 'tüm leadler' ||
+    lower === '_webhook_errors' ||
+    lower === ''
+  );
+}
+
+export function extractSheetDateFromRaw(rawDataVal: any): string {
+  if (!rawDataVal) return '';
+  try {
+    const obj = typeof rawDataVal === 'string' ? JSON.parse(rawDataVal) : rawDataVal;
+    if (!obj) return '';
+    const keys = Object.keys(obj);
+    const dateKey = keys.find(k => {
+      const l = k.toLowerCase().trim();
+      return l === 'created_time' || l === 'timestamp' || l === 'tarih' || l === 'date' || l === 'created_at' || l === 'zaman' || l === 'time' || l === 'kayıt tarihi';
+    });
+    if (dateKey && obj[dateKey]) {
+      const val = obj[dateKey];
+      const d = new Date(val);
+      if (!isNaN(d.getTime())) return d.toISOString();
+    }
+  } catch (_) {}
+  return '';
 }
 
 function getExistingFingerprint(rawDataVal: any): string | null {
@@ -800,6 +839,8 @@ export async function ingestSheetBatch(params: IngestBatchParams): Promise<Inges
   let unchanged = 0;
   let duplicates = 0;
   let errors = 0;
+  let skippedUnknownTab = 0;
+  let controlRequired = 0;
   let partial = false;
 
   let authDurationMs = 0;
@@ -835,17 +876,20 @@ export async function ingestSheetBatch(params: IngestBatchParams): Promise<Inges
     if (activeSheets.length > 0) {
       tabs = allTabs.filter((t: string) => activeSheets.includes(t));
       if (tabs.length === 0) {
-        log.warn('[BATCH_TAB_MISMATCH]', { config: activeSheets, real: allTabs });
-        tabs = allTabs; // Fallback: sync all visible tabs
+        log.warn('[BATCH_TAB_MISMATCH] No matching activeSheets found', { config: activeSheets, real: allTabs });
+        return {
+          success: true, totalRows: 0, created: 0, updated: 0, unchanged: 0, duplicates: 0, errors: 0,
+          skippedUnknownTab: 0, controlRequired: 0,
+          partial: false, message: 'controlRequired',
+          telemetry: { authDurationMs, readDurationMs: 0, parseDurationMs: 0, dupDetectionDurationMs: 0, dbDurationMs: 0, totalDurationMs: Date.now() - startTime }
+        };
       }
     } else {
-      tabs = allTabs;
-    }
-
-    if (tabs.length === 0) {
+      log.warn('[BATCH_NO_ACTIVE_SHEETS] activeSheets config is empty, skipping sync');
       return {
         success: true, totalRows: 0, created: 0, updated: 0, unchanged: 0, duplicates: 0, errors: 0,
-        partial: false, message: 'Spreadsheet\'te görünür sekme bulunamadı.',
+        skippedUnknownTab: 0, controlRequired: 0,
+        partial: false, message: 'skippedMissingActiveSheets',
         telemetry: { authDurationMs, readDurationMs: 0, parseDurationMs: 0, dupDetectionDurationMs: 0, dbDurationMs: 0, totalDurationMs: Date.now() - startTime }
       };
     }
@@ -879,6 +923,14 @@ export async function ingestSheetBatch(params: IngestBatchParams): Promise<Inges
       const vr = batchData.valueRanges[i];
       const tabName = tabs[i];
       const values = vr.values || [];
+      
+      // Strict tab enforcer: skip if tabName is not in activeSheets
+      if (!activeSheets.includes(tabName)) {
+        skippedUnknownTab += Math.max(0, values.length - 1);
+        log.warn('[BATCH_SKIP_DISALLOWED_TAB] Tab ignored', { tabName });
+        continue;
+      }
+
       if (values.length <= 1) continue; // header only or empty
 
       const headers = values[0].map((h: string) => String(h).toLowerCase().trim());
@@ -1016,6 +1068,8 @@ export async function ingestSheetBatch(params: IngestBatchParams): Promise<Inges
         rawData['_source'] = source;
         rawData['_all_phones'] = JSON.stringify(allPhones);
 
+        const isQuarantined = isUnknownCampaign(campaignName) || isUnknownCampaign(tabName) || !createdTime;
+
         allRows.push({
           phone: primaryPhone,
           allPhones,
@@ -1025,7 +1079,8 @@ export async function ingestSheetBatch(params: IngestBatchParams): Promise<Inges
           notes: noteVal,
           createdTime,
           rawData: JSON.stringify(rawData),
-          tabName
+          tabName,
+          stage: isQuarantined ? 'quarantine' : 'new'
         });
       }
     }
@@ -1052,7 +1107,7 @@ export async function ingestSheetBatch(params: IngestBatchParams): Promise<Inges
     // Map existing leads by composite canonical key: normalized_phone + formName + createdTime
     const existingLeadsMap = new Map<string, any>();
     for (const lead of existingLeads) {
-      const dbTime = lead.created_at ? new Date(lead.created_at).toISOString() : '';
+      const dbTime = extractSheetDateFromRaw(lead.raw_data);
       const key = getCanonicalKey(lead.phone_number, lead.form_name, dbTime);
       existingLeadsMap.set(key, lead);
     }
@@ -1061,13 +1116,13 @@ export async function ingestSheetBatch(params: IngestBatchParams): Promise<Inges
     const newRows: ParsedRow[] = [];
     const changedRows: { row: ParsedRow; leadId: string; existingRawData: any }[] = [];
 
-    const parseCreatedTime = (raw: string | null): string => {
-      if (!raw) return new Date().toISOString();
+    const parseCreatedTime = (raw: string | null | undefined): string => {
+      if (!raw) return '';
       try {
         const d = new Date(raw);
         if (!isNaN(d.getTime())) return d.toISOString();
       } catch (_) {}
-      return new Date().toISOString();
+      return '';
     };
 
     for (const row of allRows) {
@@ -1101,8 +1156,12 @@ export async function ingestSheetBatch(params: IngestBatchParams): Promise<Inges
       });
 
       const matchedLead = existingLeadsMap.get(rowKey);
+      const isRowQuarantined = row.stage === 'quarantine';
 
       if (!matchedLead) {
+        if (isRowQuarantined) {
+          controlRequired++;
+        }
         // Prepare rawData with fingerprint for insertion
         const parsed = JSON.parse(row.rawData);
         parsed['_google_sheets_fingerprint'] = fingerprint;
@@ -1115,6 +1174,9 @@ export async function ingestSheetBatch(params: IngestBatchParams): Promise<Inges
         if (existingFingerprint === fingerprint) {
           unchanged++;
         } else {
+          if (isRowQuarantined) {
+            controlRequired++;
+          }
           changedRows.push({
             row,
             leadId: matchedLead.id,
@@ -1145,13 +1207,14 @@ export async function ingestSheetBatch(params: IngestBatchParams): Promise<Inges
       let paramIdx = 1;
 
       for (const row of chunk) {
-        valueParts.push(`($${paramIdx}, $${paramIdx+1}, $${paramIdx+2}, $${paramIdx+3}, $${paramIdx+4}, $${paramIdx+5}, 'new', $${paramIdx+6}, $${paramIdx+7})`);
+        valueParts.push(`($${paramIdx}, $${paramIdx+1}, $${paramIdx+2}, $${paramIdx+3}, $${paramIdx+4}, $${paramIdx+5}, $${paramIdx+6}, $${paramIdx+7}, $${paramIdx+8})`);
         insertParams.push(
           tenantId, row.phone, row.name, row.email, row.formName, row.rawData,
-          parseCreatedTime(row.createdTime),
+          row.stage || 'new',
+          parseCreatedTime(row.createdTime) || null,
           row.notes || null
         );
-        paramIdx += 8;
+        paramIdx += 9;
       }
 
       try {
@@ -1159,7 +1222,7 @@ export async function ingestSheetBatch(params: IngestBatchParams): Promise<Inges
           text: `INSERT INTO leads (tenant_id, phone_number, patient_name, email, form_name, raw_data, stage, created_at, notes)
                  VALUES ${valueParts.join(', ')}
                  ON CONFLICT DO NOTHING
-                 RETURNING id, phone_number, patient_name, email, raw_data`,
+                 RETURNING id, phone_number, patient_name, email, raw_data, stage`,
           values: insertParams
         }) as any[];
 
@@ -1171,6 +1234,10 @@ export async function ingestSheetBatch(params: IngestBatchParams): Promise<Inges
             if (Date.now() - startTime > timeBudgetMs) {
               log.warn('[BATCH_INSERT_IDENTITY_BUDGET] Skipping identity resolution due to time budget limits');
               break;
+            }
+            if (lead.stage === 'quarantine') {
+              log.info('[BATCH_INSERT_SKIP_QUARANTINE] Skip identity resolution for quarantined lead', { leadId: lead.id });
+              continue;
             }
             try {
               let allPhones: string[] = [];
@@ -1258,6 +1325,12 @@ export async function ingestSheetBatch(params: IngestBatchParams): Promise<Inges
             pIdx++;
           }
 
+          if (row.stage === 'quarantine') {
+            setClauses.push(`stage = $${pIdx}`);
+            updateParams.push('quarantine');
+            pIdx++;
+          }
+
           updateParams.push(tenantId, leadId);
 
           await db.executeSafe({
@@ -1284,7 +1357,10 @@ export async function ingestSheetBatch(params: IngestBatchParams): Promise<Inges
       : `${created} yeni kayıt eklendi. ${updated} güncellendi. ${unchanged} değişmeyen. ${duplicates} tekrar eden. Toplam ${totalRows} satır.`;
 
     return {
-      success: true, totalRows, created, updated, unchanged, duplicates, errors, partial, message,
+      success: true, totalRows, created, updated, unchanged, duplicates, errors,
+      skippedUnknownTab,
+      controlRequired,
+      partial, message,
       telemetry: { authDurationMs, readDurationMs, parseDurationMs, dupDetectionDurationMs, dbDurationMs, totalDurationMs }
     };
 

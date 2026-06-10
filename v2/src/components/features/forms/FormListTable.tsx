@@ -98,6 +98,7 @@ export function FormListTable({
     'blocked_or_invalid': { label: 'Sorunlu', color: '#FF3B30', icon: '⚠️' },
     'out_of_scope': { label: 'Kapsam Dışı', color: '#8E8E93', icon: '⛔' },
     'no_reply_waiting': { label: 'Cevap Bekleniyor', color: '#FF3B30', icon: '⏳' },
+    'control_required': { label: 'Sync Dışı Sekme / Kontrol Gerekli', color: '#FF9500', icon: '🔍' },
   };
 
   return (
@@ -203,7 +204,7 @@ export function FormListTable({
                     <input 
                       type="checkbox"
                       className="w-4 h-4 rounded border-gray-300 text-[#007AFF] focus:ring-[#007AFF] disabled:opacity-50 cursor-pointer"
-                      disabled={form.firstContactStatus !== 'needs_greeting' || form.noReplyFollowup?.is_no_reply_eligible}
+                      disabled={form.stage === 'quarantine' || form.firstContactStatus === 'control_required' || form.firstContactStatus !== 'needs_greeting' || form.noReplyFollowup?.is_no_reply_eligible}
                       checked={selectedLeadIds.includes(form.id)}
                       onChange={(e) => {
                         if (e.target.checked) {
@@ -281,7 +282,9 @@ export function FormListTable({
                   </td>
                   <td className="py-4 px-4 whitespace-nowrap">
                     {(() => {
-                      const badgeKey = form.noReplyFollowup?.is_no_reply_eligible ? 'no_reply_waiting' : form.firstContactStatus;
+                      const badgeKey = form.stage === 'quarantine' || form.firstContactStatus === 'control_required'
+                        ? 'control_required'
+                        : (form.noReplyFollowup?.is_no_reply_eligible ? 'no_reply_waiting' : form.firstContactStatus);
                       const badge = OUTREACH_BADGE_CONFIG[badgeKey];
                       if (!badge) return <span className="text-[11px] text-[#86868B] italic">—</span>;
                       return (
@@ -305,7 +308,10 @@ export function FormListTable({
                       
                       const isNoReply = form.noReplyFollowup?.is_no_reply_eligible;
                       
-                      if (isNoReply) {
+                      if (form.stage === 'quarantine' || form.firstContactStatus === 'control_required') {
+                        label = 'Kontrol Gerekli';
+                        btnClass = "bg-slate-100 border border-slate-200 text-slate-400 cursor-not-allowed opacity-60";
+                      } else if (isNoReply) {
                         label = 'Inbox’a Git';
                         btnClass = "bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100";
                       } else {
@@ -336,6 +342,7 @@ export function FormListTable({
 
                       return (
                         <button 
+                          disabled={form.stage === 'quarantine' || form.firstContactStatus === 'control_required'}
                           onClick={(e) => {
                             if (['Inbox’ta Karşıla', 'Mesaja Git', 'Inbox’a Git'].includes(label)) {
                               onMessageClick(form, e);

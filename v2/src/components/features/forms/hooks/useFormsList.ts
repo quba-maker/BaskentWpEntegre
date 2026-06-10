@@ -25,6 +25,8 @@ export function useFormsList() {
       duplicates: number;
       errors: number;
       duration: string;
+      controlRequired?: number;
+      skippedUnknownTab?: number;
     };
     telemetry?: {
       authDurationMs: number;
@@ -143,6 +145,8 @@ export function useFormsList() {
             unchanged: res.stats.unchanged || 0,
             duplicates: res.stats.duplicates || 0,
             errors: res.stats.errors || 0,
+            controlRequired: res.stats.controlRequired || 0,
+            skippedUnknownTab: res.stats.skippedUnknownTab || 0,
             duration: durationSeconds
           } : undefined,
           telemetry: res.telemetry ? {

@@ -41,17 +41,22 @@ export async function getForms(page: number = 1, search: string = "", source: st
         paramIdx++;
       }
       if (firstContactParam) {
-        if (firstContactParam === 'sent') {
-          conditions.push(`cl.first_contact_status IN ('manual_greeting_confirmed', 'inbox_greeting_sent')`);
+        if (firstContactParam === 'control_required') {
+          conditions.push(`cl.first_contact_status = 'control_required'`);
+        } else if (firstContactParam === 'sent') {
+          conditions.push(`cl.first_contact_status IN ('manual_greeting_confirmed', 'inbox_greeting_sent') AND COALESCE(cl.stage, '') != 'quarantine'`);
         } else if (firstContactParam === 'blocked_or_invalid') {
-          conditions.push(`cl.first_contact_status IN ('blocked_or_invalid', 'out_of_scope')`);
+          conditions.push(`cl.first_contact_status IN ('blocked_or_invalid', 'out_of_scope') AND COALESCE(cl.stage, '') != 'quarantine'`);
         } else if (firstContactParam === 'no_reply_waiting') {
-          conditions.push(`cl.is_no_reply_eligible = true`);
-        } else {
+          conditions.push(`cl.is_no_reply_eligible = true AND COALESCE(cl.stage, '') != 'quarantine'`);
+        } else if (firstContactParam !== 'all') {
           conditions.push(`cl.first_contact_status = $${paramIdx}`);
           params.push(firstContactParam);
           paramIdx++;
         }
+      }
+      if (!firstContactParam || firstContactParam === 'all') {
+        conditions.push(`COALESCE(cl.stage, '') != 'quarantine'`);
       }
 
       params.push(limit, offset);
@@ -176,6 +181,7 @@ export async function getForms(page: number = 1, search: string = "", source: st
                 calculated_leads AS (
                    SELECT bl.*,
                           CASE
+                            WHEN bl.stage = 'quarantine' THEN 'control_required'
                             -- 1. anyInbound is true
                             WHEN (bl.message_stats->>'has_inbound')::boolean = true THEN
                               CASE
@@ -585,6 +591,11 @@ export async function syncGoogleSheets() {
     async (ctx) => {
       console.log('[SYNC_START] tenantId:', ctx.tenantId);
 
+      return {
+        success: false,
+        error: "Google Sheets senkronizasyonu geçici olarak kontrol modunda kilitlenmiştir. Canlı veri akışı ve manuel tetikleme geçici olarak askıya alınmıştır."
+      };
+
       // ── 1. Load Google Sheets credentials ──
       const integrations = await ctx.db.executeSafe({
         text: `SELECT credentials FROM tenant_integrations WHERE tenant_id = $1 AND provider = 'google_sheets' LIMIT 1`,
@@ -671,6 +682,8 @@ export async function syncGoogleSheets() {
         unchanged: result.unchanged || 0,
         duplicates: result.duplicates,
         errors: result.errors,
+        controlRequired: result.controlRequired || 0,
+        skippedUnknownTab: result.skippedUnknownTab || 0,
         partial: result.partial
       };
       const telemetry = result.telemetry || {
@@ -768,6 +781,7 @@ export async function getFormStatusCounts() {
                  bm.last_inbound_at,
                  bm.last_outbound_at,
                  CASE
+                   WHEN bl.stage = 'quarantine' THEN 'control_required'
                    WHEN bm.has_inbound = true THEN
                      CASE
                        WHEN bl.first_greeting_at IS NOT NULL 
@@ -816,14 +830,15 @@ export async function getFormStatusCounts() {
           LEFT JOIN base_messages bm ON bm.id = bl.id
         )
         SELECT 
-          COUNT(*) as total,
-          COUNT(CASE WHEN first_contact_status = 'needs_greeting' AND is_no_reply_eligible = false THEN 1 END) as needs_greeting,
-          COUNT(CASE WHEN first_contact_status = 'waiting_inbox_reply' AND is_no_reply_eligible = false THEN 1 END) as waiting_inbox_reply,
-          COUNT(CASE WHEN first_contact_status = 'whatsapp_opened' AND is_no_reply_eligible = false THEN 1 END) as whatsapp_opened,
-          COUNT(CASE WHEN is_no_reply_eligible = true THEN 1 END) as no_reply_waiting,
-          COUNT(CASE WHEN first_contact_status IN ('manual_greeting_confirmed', 'inbox_greeting_sent') AND is_no_reply_eligible = false THEN 1 END) as sent,
-          COUNT(CASE WHEN first_contact_status = 'patient_replied' AND is_no_reply_eligible = false THEN 1 END) as patient_replied,
-          COUNT(CASE WHEN first_contact_status IN ('blocked_or_invalid', 'out_of_scope') THEN 1 END) as blocked_or_invalid
+          COUNT(CASE WHEN stage != 'quarantine' THEN 1 END) as total,
+          COUNT(CASE WHEN first_contact_status = 'needs_greeting' AND is_no_reply_eligible = false AND stage != 'quarantine' THEN 1 END) as needs_greeting,
+          COUNT(CASE WHEN first_contact_status = 'waiting_inbox_reply' AND is_no_reply_eligible = false AND stage != 'quarantine' THEN 1 END) as waiting_inbox_reply,
+          COUNT(CASE WHEN first_contact_status = 'whatsapp_opened' AND is_no_reply_eligible = false AND stage != 'quarantine' THEN 1 END) as whatsapp_opened,
+          COUNT(CASE WHEN is_no_reply_eligible = true AND stage != 'quarantine' THEN 1 END) as no_reply_waiting,
+          COUNT(CASE WHEN first_contact_status IN ('manual_greeting_confirmed', 'inbox_greeting_sent') AND is_no_reply_eligible = false AND stage != 'quarantine' THEN 1 END) as sent,
+          COUNT(CASE WHEN first_contact_status = 'patient_replied' AND is_no_reply_eligible = false AND stage != 'quarantine' THEN 1 END) as patient_replied,
+          COUNT(CASE WHEN first_contact_status IN ('blocked_or_invalid', 'out_of_scope') AND stage != 'quarantine' THEN 1 END) as blocked_or_invalid,
+          COUNT(CASE WHEN stage = 'quarantine' THEN 1 END) as control_required
         FROM calculated_leads
       `;
 
@@ -842,10 +857,11 @@ export async function getFormStatusCounts() {
         sent: parseInt(r.sent || '0', 10),
         patient_replied: parseInt(r.patient_replied || '0', 10),
         blocked_or_invalid: parseInt(r.blocked_or_invalid || '0', 10),
+        control_required: parseInt(r.control_required || '0', 10),
       };
     }
   ).then(res => {
-    if (!res.success) return { all: 0, needs_greeting: 0, waiting_inbox_reply: 0, whatsapp_opened: 0, no_reply_waiting: 0, sent: 0, patient_replied: 0, blocked_or_invalid: 0 };
+    if (!res.success) return { all: 0, needs_greeting: 0, waiting_inbox_reply: 0, whatsapp_opened: 0, no_reply_waiting: 0, sent: 0, patient_replied: 0, blocked_or_invalid: 0, control_required: 0 };
     return res.data;
   });
 }

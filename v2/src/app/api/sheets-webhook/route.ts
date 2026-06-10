@@ -132,7 +132,8 @@ export async function POST(request: NextRequest) {
     } catch (e) {}
 
     // ── 5. Sheet Filter ──
-    if (activeSheets.length > 0 && effectiveSheetName && !activeSheets.includes(effectiveSheetName)) {
+    if (!effectiveSheetName || !activeSheets.includes(effectiveSheetName)) {
+      log.warn('[WEBHOOK_SKIP_DISALLOWED_TAB] Sheet tab is not in activeSheets config', { effectiveSheetName, activeSheets });
       return NextResponse.json({ success: true, message: `Sheet '${effectiveSheetName}' is ignored by configuration.` });
     }
 

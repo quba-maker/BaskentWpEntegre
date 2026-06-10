@@ -80,8 +80,9 @@ export function FormFiltersBar({
                 </div>
               ) : (
                 <button
-                  onClick={handleSync}
-                  className="flex items-center gap-2 px-4 py-2.5 bg-white/80 hover:bg-white text-sm font-semibold text-[#1D1D1F] rounded-xl shadow-[0_2px_10px_rgba(0,0,0,0.02)] transition-all cursor-pointer border border-black/5"
+                  disabled={true}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-slate-100 opacity-50 text-slate-400 rounded-xl transition-all cursor-not-allowed border border-black/5 select-none"
+                  title="Google Sheets sync kontrol modunda geçici olarak devre dışı bırakılmıştır"
                 >
                   <RefreshCw className="w-4 h-4" />
                   Senkronize Et
