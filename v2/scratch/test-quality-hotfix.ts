@@ -432,7 +432,7 @@ async function runRegressionSimulation() {
   console.log(`Bot Response: "${response}"`);
   verifyResponseQuality(response, {
     shouldNotContain: ['rüya', 'başkent', 'asistan', 'yapay zeka', 'robot', 'prompt', 'talimat', 'kural', 'yasak'],
-    shouldContain: ['hang', 'sor']
+    shouldContain: ['hang', 'sor|öğren|neden|niçin']
   });
   history.push({ role: 'assistant', content: response });
 

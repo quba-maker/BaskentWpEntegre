@@ -30,8 +30,7 @@ export class ClassificationService {
    * Factory method to resolve the correct ruleset for a tenant based on slug/id, industry and config.
    */
   public static getRulesetForTenant(tenantSlugOrId: string, industry?: string, rulesetConfig?: string): TenantRuleset {
-    const isBaskent = tenantSlugOrId === 'baskent' || tenantSlugOrId === 'caab9ea1-9591-45e4-bbc5-9c9b498982c8';
-    if (isBaskent || rulesetConfig === 'baskent') {
+    if (rulesetConfig === 'baskent') {
       return BaskentRuleset_V1;
     }
     return GenericRuleset_V1;
