@@ -1745,6 +1745,32 @@ export async function prepareSmartGreetingDraftCore(
     }
   }
 
+  // Validate existing draft if found. If it contains any forbidden keywords or fails quality gate, discard it.
+  if (existingDraft) {
+    try {
+      const leads = await db.executeSafe({
+        text: `SELECT form_name, raw_data FROM leads WHERE id = $1::uuid AND tenant_id = $2::uuid LIMIT 1`,
+        values: [leadId, tenantId]
+      }) as any[];
+      
+      const { validateDraft, extractFormSlots } = await import('@/lib/utils/smart-draft-generator');
+      const slots = leads.length > 0
+        ? extractFormSlots(leads[0].raw_data, leads[0].form_name)
+        : { complaintText: "", durationText: "", bodyPart: "", conditionTerms: [], departmentHint: "Genel", livingCity: "", requestedAppointmentText: "", age: "", formName: "", campaignName: "" };
+      
+      const safetyErrors = validateDraft(existingDraft, slots, slots.departmentHint || 'Genel', 'first_contact_intent_check');
+      
+      const paras = existingDraft.split("\n").filter(p => p.trim().length > 0);
+      const contentParas = paras.filter(p => !p.startsWith("Merhaba") && !p.includes("İyi günler"));
+
+      if (safetyErrors.length > 0 || contentParas.length > 3) {
+        existingDraft = '';
+      }
+    } catch (_) {
+      existingDraft = '';
+    }
+  }
+
   let draftText = existingDraft;
   if (!draftText) {
     const leads = await db.executeSafe({
@@ -1783,6 +1809,28 @@ export async function prepareSmartGreetingDraftCore(
         })
       ]
     });
+  }
+
+  // Final Hard Safety Gate Check on the outgoing draft text
+  try {
+    const leads = await db.executeSafe({
+      text: `SELECT form_name, raw_data FROM leads WHERE id = $1::uuid AND tenant_id = $2::uuid LIMIT 1`,
+      values: [leadId, tenantId]
+    }) as any[];
+
+    const { enforceGreetingDraftSafety, extractFormSlots } = await import('@/lib/utils/smart-draft-generator');
+    const slots = leads.length > 0
+      ? extractFormSlots(leads[0].raw_data, leads[0].form_name)
+      : { complaintText: "", durationText: "", bodyPart: "", conditionTerms: [], departmentHint: "Genel", livingCity: "", requestedAppointmentText: "", age: "", formName: "", campaignName: "" };
+
+    const { resolveTenantDisplayName, resolveTenantLocationName } = await import('@/lib/services/meta/tenant-display-name-resolver');
+    const tenantDisplayName = (await resolveTenantDisplayName(db, tenantId)) || 'Kurumumuz';
+    const locationName = (await resolveTenantLocationName(db, tenantId)) || '';
+
+    draftText = enforceGreetingDraftSafety(draftText, slots, { tenantDisplayName, locationName });
+  } catch (_) {
+    // If anything fails in validation, fallback to a safe message to avoid crash
+    draftText = "Merhaba, doldurduğunuz form doğrultusunda başvurunuzla ilgili sizinle iletişime geçiyoruz. Randevu planlaması için Türkiye’ye gelmeyi düşündüğünüz yaklaşık tarihi bizimle paylaşabilir misiniz?\n\nİyi günler dileriz.";
   }
 
   return {

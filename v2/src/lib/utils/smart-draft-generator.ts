@@ -100,7 +100,7 @@ function extractField(data: any, keys: string[]): string | undefined {
 
   for (const [key, value] of Object.entries(data)) {
     const normKey = normalize(key);
-    if (normalizedKeys.some(k => normKey.includes(k) || k.includes(normKey))) {
+    if (normalizedKeys.some(k => normKey.includes(k))) {
       if (value) return String(value).trim();
     }
   }
@@ -278,15 +278,17 @@ export function generateDeterministikDraft(
   const travelDestination = locationName ? `Türkiye’ye, ${locationName} lokasyonumuza` : 'Türkiye’ye';
 
   let bookingQuestion = '';
+  const cityInfo = slots.livingCity ? `Yaşadığınız yer olarak ${slots.livingCity} bilgisini paylaşmışsınız. ` : '';
+
   if (slots.requestedAppointmentText) {
     const isOnlyNumber = /^\d+$/.test(slots.requestedAppointmentText);
     if (isOnlyNumber && slots.requestedAppointmentText.length <= 2) {
-      bookingQuestion = `Randevu tarihi alanına “${slots.requestedAppointmentText}” yazmışsınız; bunu ayın ${slots.requestedAppointmentText}’i mi yoksa ${getMonthNameFromNumber(slots.requestedAppointmentText)} ayı olarak mı düşündüğünüzü netleştirebilir misiniz? Randevu planlaması ve uygun yönlendirme için ${travelDestination} gelmeyi düşündüğünüz yaklaşık tarihi bizimle paylaşabilir misiniz?`;
+      bookingQuestion = `${cityInfo}Randevu tarihi alanına “${slots.requestedAppointmentText}” yazmışsınız; bunu ayın ${slots.requestedAppointmentText}’i mi yoksa ${getMonthNameFromNumber(slots.requestedAppointmentText)} ayı olarak mı düşündüğünüzü netleştirebilir misiniz? Randevu planlaması ve uygun yönlendirme için ${travelDestination} gelmeyi düşündüğünüz yaklaşık tarihi bizimle paylaşabilir misiniz?`;
     } else {
-      bookingQuestion = `Randevu tarihi olarak “${slots.requestedAppointmentText}” belirtmişsiniz. Randevu planlaması ve uygun yönlendirme için ${travelDestination} gelmeyi düşündüğünüz yaklaşık tarihi bizimle paylaşabilir misiniz?`;
+      bookingQuestion = `${cityInfo}Randevu tarihi olarak “${slots.requestedAppointmentText}” belirtmişsiniz. Randevu planlaması ve uygun yönlendirme için ${travelDestination} gelmeyi düşündüğünüz yaklaşık tarihi bizimle paylaşabilir misiniz?`;
     }
   } else {
-    bookingQuestion = `Randevu planlaması ve uygun yönlendirme için ${travelDestination} gelmeyi düşündüğünüz yaklaşık tarihi bizimle paylaşabilir misiniz?`;
+    bookingQuestion = `${cityInfo}Randevu planlaması ve uygun yönlendirme için ${travelDestination} gelmeyi düşündüğünüz yaklaşık tarihi bizimle paylaşabilir misiniz?`;
   }
 
   let introPara = 'Merhaba,\n\n';
@@ -331,7 +333,12 @@ export function validateDraft(draftText: string, slots: FormSlots, detectedDepar
     /klinik/i,
     /tedavi/i,
     /ameliyat/i,
-    /kesin/i
+    /kesin/i,
+    /hareket kısıtlılığı/i,
+    /sinir sıkışması/i,
+    /omurga problemleri/i,
+    /detaylı şekilde değerlendirilmesi/i,
+    /mevcut durumunuz ayrıntılı şekilde incelenir/i
   ];
 
   if (draftPurpose === 'first_contact_intent_check') {
@@ -528,4 +535,19 @@ Form Slotları:
   }
 
   return generateDeterministikDraft(slots, draftPurpose, tenantDisplayName, locationName);
+}
+
+export function enforceGreetingDraftSafety(
+  draftText: string,
+  slots: FormSlots,
+  tenantContext: { tenantDisplayName: string; locationName: string }
+): string {
+  const safetyErrors = validateDraft(draftText, slots, slots.departmentHint || 'Genel', 'first_contact_intent_check');
+  const paras = draftText.split("\n").filter(p => p.trim().length > 0);
+  const contentParas = paras.filter(p => !p.startsWith("Merhaba") && !p.includes("İyi günler"));
+
+  if (safetyErrors.length > 0 || contentParas.length > 3) {
+    return generateDeterministikDraft(slots, 'first_contact_intent_check', tenantContext.tenantDisplayName, tenantContext.locationName);
+  }
+  return draftText;
 }
