@@ -591,11 +591,6 @@ export async function syncGoogleSheets() {
     async (ctx) => {
       console.log('[SYNC_START] tenantId:', ctx.tenantId);
 
-      return {
-        success: false,
-        error: "Google Sheets senkronizasyonu geçici olarak kontrol modunda kilitlenmiştir. Canlı veri akışı ve manuel tetikleme geçici olarak askıya alınmıştır."
-      };
-
       // ── 1. Load Google Sheets credentials ──
       const integrations = await ctx.db.executeSafe({
         text: `SELECT credentials FROM tenant_integrations WHERE tenant_id = $1 AND provider = 'google_sheets' LIMIT 1`,

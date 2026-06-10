@@ -43,14 +43,6 @@ function verifyHmac(secret: string, timestamp: string, rawBody: string, signatur
 }
 
 export async function POST(request: NextRequest) {
-  // Safe-mode lock for control mode
-  log.warn('[CRON_SYNC_LOCKED] Google Sheets cron sync is disabled during control mode.');
-  return NextResponse.json({
-    success: false,
-    reason: 'control_mode_locked',
-    message: 'Google Sheets cron sync is disabled during control mode.'
-  }, { status: 403 });
-
   // ── 0. Overlap Guard: prevent concurrent sync runs ──
   let lockAcquired = false;
   if (redis) {

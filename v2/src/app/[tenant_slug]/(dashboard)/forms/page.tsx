@@ -396,13 +396,13 @@ export default function FormsPage() {
       <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-[#007AFF]/5 rounded-full blur-[100px] pointer-events-none -z-10" />
       <div className="absolute bottom-0 left-0 w-[400px] h-[400px] bg-[#5856D6]/5 rounded-full blur-[100px] pointer-events-none -z-10" />
 
-      {/* Warning Banner: Google Sheets Sync is in Control Mode */}
-      <div className="mb-6 p-4 bg-[#FF9500]/10 border border-[#FF9500]/20 rounded-2xl flex items-start gap-3 shadow-sm text-left">
-        <span className="text-xl">⚠️</span>
+      {/* Info Banner: Google Sheets Sync is Protected */}
+      <div className="mb-6 p-4 bg-blue-50 border border-blue-100 rounded-2xl flex items-start gap-3 shadow-sm text-left">
+        <span className="text-xl">ℹ️</span>
         <div className="flex-1">
-          <h4 className="text-sm font-bold text-[#FF9500]">Google Sheets Senkronizasyonu Kontrol Modunda</h4>
+          <h4 className="text-sm font-bold text-blue-600">Korumalı Veri Senkronizasyonu Aktif</h4>
           <p className="text-xs text-slate-600 mt-1 font-semibold leading-relaxed">
-            Google Sheets otomatik ve manuel veri akışları geçici güvenlik tedbiri (safe-mode) olarak kilitlenmiştir. Canlı sistemler etkilenmez.
+            Google Sheets senkronizasyonu seçili sekmeler (activeSheets) koruması ile çalışmaktadır. Karantina ve veri kalitesi kuralları etkindir.
           </p>
         </div>
       </div>
