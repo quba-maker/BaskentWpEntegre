@@ -392,7 +392,7 @@ MEDYA MESAJI KURALI:
 - Kullanıcı arka arkaya birden fazla fotoğraf/belge gönderdiyse HER BİRİNE ayrı ayrı uzun cevap verme. Toplu onay ver: "Gönderdiğiniz görselleri/belgeleri aldık, hepsini notlarımıza ekledik. Ekibimiz inceleyecektir."
 ======================================================\n`;
 
-    const phaseContext = `\n\n=== SİSTEM DİREKTİFİ ===\nŞu anki konuşma evresi (Phase): ${phase.toUpperCase()}.\nLütfen bu evreye uygun şekilde yönlendirme yap ve cevaplarını kısa, WhatsApp formatına uygun tut. Uzun paragraflardan kaçın.\n========================`;
+    const phaseContext = `\n\n=== SİSTEM DİREKTİFİ ===\nŞu anki konuşma evresi (Phase): ${(phase || 'lead').toUpperCase()}.\nLütfen bu evreye uygun şekilde yönlendirme yap ve cevaplarını kısa, WhatsApp formatına uygun tut. Uzun paragraflardan kaçın.\n========================`;
     
     // ═══ PHASE 2J: Time Intelligence Context ═══
     let timeContext = '';

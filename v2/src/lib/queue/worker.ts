@@ -2020,13 +2020,14 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
           values: [tenantId, conversationIdVal]
         }) as any[];
 
+        const debounceMs = parseInt(process.env.WHATSAPP_AUTOPILOT_DEBOUNCE_MS || '5000', 10);
         const firstInboundAt = oldestUnrepliedQuery.length > 0 ? new Date(oldestUnrepliedQuery[0].created_at) : new Date();
         const now = new Date();
         const scheduledTime = new Date(Math.min(
-          now.getTime() + 25000,
-          firstInboundAt.getTime() + 35000
+          now.getTime() + debounceMs,
+          firstInboundAt.getTime() + (debounceMs * 3)
         ));
-        const delayMs = Math.max(15000, scheduledTime.getTime() - now.getTime());
+        const delayMs = Math.max(debounceMs, scheduledTime.getTime() - now.getTime());
 
         const { QueueService } = await import('./queue.service');
         const queue = new QueueService();
@@ -3799,7 +3800,10 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
     const latestInboundContent = latestInboundQuery[0].content || '';
 
     if (latestInboundProviderId !== targetMessageId) {
-      this.log.info(`[DEBOUNCE_WORKER] Debounced: message ${targetMessageId} is superseded by ${latestInboundProviderId}. Exit silently.`, { traceId });
+      this.log.info(
+        `[DEBOUNCE_WORKER] Skipping stale delayed job; newer inbound message exists (targetMessageId: ${targetMessageId}, latestMessageId: ${latestInboundProviderId})`,
+        { tenantId, channel, conversationId, targetMessageId, latestInboundProviderId, traceId }
+      );
       return;
     }
 

@@ -260,12 +260,25 @@ async function generateResponseWithQualityRetry(
 
   if (!qgRes.valid) {
     console.log(`  [SIMULATED RETRY] First attempt failed quality gate: ${qgRes.reason}. Retrying with feedback...`);
+    
+    const isCtaBlockFirst = !!qgRes.reason?.includes('Kritik Fren Engeli');
+    const nameExample = identityConfig.personaName || 'Rüya';
+    let retryContent = `DİKKAT: Ürettiğin Türkçe metinde ek hatası veya kendini tanıtma tekrarı tespit edildi. Kendini tanıtan kelimeleri/cümleleri (örneğin "Merhaba, ben ${nameExample}...", "${nameExample} ben...") kesinlikle kullanma, doğrudan konuya girerek kısa ve sade bir cevap üret.`;
+
+    if (isCtaBlockFirst) {
+      if (qgOptions.patientProvidedAvailability) {
+        retryContent = `DİKKAT: Hasta uygun zaman bildirdi. Kesinlikle yeni bir randevu/arama CTA'sı isteme, "uygun zaman paylaşır mısınız?" veya "sizi ne zaman arayalım" deme, "Türkiye saatiyle" kelimesini kullanma. Sadece uygun olduğu zamanı not aldığını ve koordinatörlerin/hasta danışmanlarının planlamayı kontrol edeceğini belirten kısa bir onay cevabı yaz.`;
+      } else {
+        retryContent = `DİKKAT: Son mesajlarda zaten randevu/telefon araması teklif edildiği veya kalite freni aktif olduğu için kesinlikle randevu/arama teklif etme, "uygun zaman paylaşır mısınız" veya "arama planlayalım" deme, "Türkiye saatiyle" veya "telefon görüşmesi" gibi yasaklı CTA kelimelerini kullanma. Doğrudan konuya girerek kısa ve sade bir cevap üret.`;
+      }
+    }
+
     const retryHistory = [
       ...history,
       { role: 'assistant', content: response },
       {
         role: 'user',
-        content: `DİKKAT: Ürettiğin Türkçe metinde ek hatası veya kendini tanıtma tekrarı tespit edildi. Kendini tanıtan kelimeleri/cümleleri (örneğin "Merhaba, ben Rüya...", "Rüya ben...") kesinlikle kullanma, doğrudan konuya girerek kısa ve sade bir cevap üret.`
+        content: retryContent
       }
     ];
 
