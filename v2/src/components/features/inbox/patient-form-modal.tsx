@@ -17,6 +17,7 @@ interface PatientFormModalProps {
     formReportStatus?: string;
     formAppointmentPref?: string;
     formAge?: string;
+    formDepartment?: string;
   } | null;
   patientName: string;
 }
@@ -78,6 +79,30 @@ export function PatientFormModal({ isOpen, onClose, formData, patientName }: Pat
   const country = rawObj.country ? normalizeCountryName(rawObj.country) : "Belirtilmemiş";
   const age = formData.formAge || rawObj.age || rawObj.yas || "Belirtilmemiş";
 
+  const { FormDetailViewer } = require("@/components/shared/form-detail-viewer/FormDetailViewer");
+  const detailDataMapped = {
+    id: "inbox-form",
+    identity: {
+      name: patientName,
+      phoneNumbers: phone ? [phone] : [],
+      primaryPhone: phone,
+      country: country !== "Belirtilmemiş" ? { name: country } : null
+    },
+    source: {
+      platform: platform,
+      formName: formData.name || "Başvuru Formu",
+      submittedAt: formDate
+    },
+    content: {
+      complaint: formData.formComplaint || rawObj.complaint || rawObj.sikayet || null,
+      appointmentPreference: formData.formAppointmentPref || rawObj.appointment_pref || rawObj.randevu_tercihi || null,
+      reportStatus: formData.formReportStatus || null,
+      department: formData.formDepartment || rawObj.department || null,
+      userAnswers: userEntries.map(e => ({ key: e.key.toLowerCase(), label: e.key, value: String(e.value) })),
+      techMetadata: techEntries.map(e => ({ key: e.key.toLowerCase(), label: e.key, value: String(e.value) }))
+    }
+  };
+
   return createPortal(
     <div className="fixed inset-0 bg-black/45 backdrop-blur-[4px] flex items-center justify-center z-[9999] animate-in fade-in duration-200" onClick={onClose}>
       <div 
@@ -86,7 +111,7 @@ export function PatientFormModal({ isOpen, onClose, formData, patientName }: Pat
       >
         {/* Header */}
         <div className="px-6 py-4 border-b border-black/[0.05] flex items-center justify-between bg-slate-50/50">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 text-left">
             <div className="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center">
               <ClipboardList className="w-5 h-5 text-indigo-600" />
             </div>
@@ -109,133 +134,7 @@ export function PatientFormModal({ isOpen, onClose, formData, patientName }: Pat
 
         {/* Content (Scrollable) */}
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
-          
-          {/* Quick Metrics Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <div className="bg-slate-50 p-3 rounded-2xl border border-black/[0.02] text-left">
-              <span className="block text-[9px] font-bold text-[#86868B] uppercase tracking-wider mb-1">Tarih</span>
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-[#1D1D1F]">
-                <Calendar className="w-3.5 h-3.5 text-indigo-500" />
-                <span className="truncate">{new Date(formDate).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
-              </div>
-            </div>
-            
-            <div className="bg-slate-50 p-3 rounded-2xl border border-black/[0.02] text-left">
-              <span className="block text-[9px] font-bold text-[#86868B] uppercase tracking-wider mb-1">Kaynak</span>
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-[#1D1D1F]">
-                <Share2 className="w-3.5 h-3.5 text-indigo-500" />
-                <span className="truncate">{platform}</span>
-              </div>
-            </div>
-
-            <div className="bg-slate-50 p-3 rounded-2xl border border-black/[0.02] text-left">
-              <span className="block text-[9px] font-bold text-[#86868B] uppercase tracking-wider mb-1">Telefon</span>
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-[#1D1D1F]">
-                <Phone className="w-3.5 h-3.5 text-indigo-500" />
-                <span className="truncate">{formatPhoneReadable(phone)}</span>
-              </div>
-            </div>
-
-            <div className="bg-slate-50 p-3 rounded-2xl border border-black/[0.02] text-left">
-              <span className="block text-[9px] font-bold text-[#86868B] uppercase tracking-wider mb-1">Ülke / Yaş</span>
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-[#1D1D1F]">
-                <Globe className="w-3.5 h-3.5 text-indigo-500" />
-                <span className="truncate">{country} {age !== "Belirtilmemiş" && `(${age} Yaş)`}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Primary Operations/Complaints Summary Card */}
-          <div className="bg-indigo-50/20 rounded-2xl border border-indigo-500/10 p-4 space-y-3 text-left">
-            <h4 className="text-[10px] font-bold text-indigo-700 uppercase tracking-widest flex items-center gap-1.5">
-              <FileText className="w-3.5 h-3.5" /> Şikayet & Tedavi Beklentisi
-            </h4>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
-              <div>
-                <span className="block text-[10px] font-bold text-[#86868B] mb-1">Şikayet / Talep</span>
-                <p className="text-xs font-semibold text-[#1D1D1F] leading-relaxed bg-white p-3 rounded-xl border border-black/[0.04]">
-                  {formData.formComplaint || rawObj.complaint || rawObj.sikayet || "Belirtilmemiş"}
-                </p>
-              </div>
-              <div>
-                <span className="block text-[10px] font-bold text-[#86868B] mb-1">Randevu Tercihi</span>
-                <p className="text-xs font-semibold text-[#1D1D1F] leading-relaxed bg-white p-3 rounded-xl border border-black/[0.04]">
-                  {formData.formAppointmentPref || rawObj.appointment_pref || rawObj.randevu_tercihi || "Belirtilmemiş"}
-                </p>
-              </div>
-            </div>
-            {formData.formReportStatus && formData.formReportStatus !== "none" && (
-              <div className="pt-2 flex items-center gap-2">
-                <span className="text-[10px] font-bold text-[#86868B]">Tıbbi Rapor / MR:</span>
-                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
-                  formData.formReportStatus === "sent" 
-                    ? "bg-emerald-50 text-emerald-700 border-emerald-100" 
-                    : "bg-amber-50 text-amber-700 border-amber-100"
-                }`}>
-                  {formData.formReportStatus === "sent" ? "Gönderildi" : "Bekleniyor"}
-                </span>
-              </div>
-            )}
-          </div>
-
-          {/* User Form Answers */}
-          <div className="space-y-3 text-left">
-            <h4 className="text-[11px] font-bold text-[#86868B] uppercase tracking-wider border-b border-black/[0.04] pb-1.5">
-              📋 Form Yanıtları
-            </h4>
-            {userEntries.length > 0 ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {userEntries.map((entry, idx) => (
-                  <div key={idx} className="p-3 bg-slate-50/50 rounded-xl border border-black/[0.02]">
-                    <span className="block text-[10px] font-bold text-[#86868B] uppercase tracking-wider mb-1">
-                      {entry.key}
-                    </span>
-                    <span className="text-xs font-semibold text-[#1D1D1F] leading-relaxed whitespace-pre-wrap">
-                      {entry.value}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-xs italic text-[#86868B] py-2">Detaylı form yanıtı bulunamadı.</p>
-            )}
-          </div>
-
-          {/* Technical Metadata Accordion */}
-          {techEntries.length > 0 && (
-            <div className="border border-black/[0.06] rounded-2xl overflow-hidden transition-all duration-300">
-              <button
-                type="button"
-                onClick={() => setIsTechOpen(!isTechOpen)}
-                className="w-full px-4 py-3 bg-slate-50 hover:bg-slate-100/80 flex items-center justify-between text-left transition-colors cursor-pointer"
-              >
-                <span className="text-xs font-bold text-[#86868B] flex items-center gap-1.5">
-                  <Info className="w-4 h-4 text-slate-400" /> Teknik Entegrasyon & UTM Detayları
-                </span>
-                {isTechOpen ? (
-                  <ChevronDown className="w-4 h-4 text-[#86868B]" />
-                ) : (
-                  <ChevronRight className="w-4 h-4 text-[#86868B]" />
-                )}
-              </button>
-              
-              {isTechOpen && (
-                <div className="p-4 bg-slate-50/30 border-t border-black/[0.05] grid grid-cols-1 md:grid-cols-2 gap-3 text-left max-h-[220px] overflow-y-auto">
-                  {techEntries.map((entry, idx) => (
-                    <div key={idx} className="bg-white p-2.5 rounded-lg border border-black/[0.03] shadow-sm">
-                      <span className="block text-[9px] font-bold text-[#86868B] mb-0.5 break-all">
-                        {entry.key}
-                      </span>
-                      <span className="text-[11px] font-medium text-[#1D1D1F] break-all select-all">
-                        {entry.value}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
+          <FormDetailViewer data={detailDataMapped} />
         </div>
       </div>
     </div>,

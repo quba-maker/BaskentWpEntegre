@@ -253,6 +253,7 @@ function getFormContextString(crm: any, prefillHeader?: string): string {
             formReportStatus: crm.formFields?.formReportStatus,
             formAppointmentPref: crm.formFields?.formAppointmentPref,
             formAge: crm.formFields?.formAge,
+            formDepartment: crm.formFields?.formDepartment,
           }}
           patientName={patientName}
         />

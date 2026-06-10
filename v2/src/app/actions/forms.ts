@@ -63,7 +63,6 @@ export async function getForms(page: number = 1, search: string = "", source: st
                   SELECT l.*, 
                          COALESCE(c_identity.status, c_phone.status) as conversation_status, 
                          COALESCE(c_identity.lead_stage, c_phone.lead_stage) as conv_lead_stage, 
-                         COALESCE(mem_identity.summary_text, mem_phone.summary_text) as ai_summary,
                          COALESCE(c_identity.id, c_phone.id) as linked_conv_id,
                          COALESCE(c_identity.country, c_phone.conv_country) as conv_country,
                          COALESCE(c_identity.department, c_phone.conv_department) as conv_department,
@@ -71,43 +70,16 @@ export async function getForms(page: number = 1, search: string = "", source: st
                          opp.opp_country,
                          opp.opp_department,
                          opp.opp_stage,
-                         opp.opp_priority,
-                         opp.opp_intent_type,
-                         opp.opp_travel_date,
-                         opp.opp_next_follow_up_at,
-                         opp.opp_summary,
                          opp.opp_requester_name,
                          opp.opp_patient_name,
                          opp.opp_patient_relation,
-                         (SELECT action FROM outreach_logs WHERE lead_id = l.id AND tenant_id = l.tenant_id::text ORDER BY created_at DESC LIMIT 1) as last_outreach_action,
-                         (SELECT created_at FROM outreach_logs WHERE lead_id = l.id AND tenant_id = l.tenant_id::text ORDER BY created_at DESC LIMIT 1) as last_outreach_at,
-                         (
-                           SELECT created_at 
-                           FROM outreach_logs 
-                           WHERE lead_id = l.id AND tenant_id = l.tenant_id::text 
-                             AND action IN (${hardDuplicateActionsSql})
-                           ORDER BY created_at DESC LIMIT 1
-                         ) as first_greeting_at,
-                         EXISTS (
-                           SELECT 1 FROM outreach_logs 
-                           WHERE lead_id = l.id AND tenant_id = l.tenant_id::text 
-                             AND action = 'manual_whatsapp_greeting_echo_confirmed'
-                         ) as any_confirmed,
-                         EXISTS (
-                           SELECT 1 FROM outreach_logs 
-                           WHERE lead_id = l.id AND tenant_id = l.tenant_id::text 
-                             AND action = 'inbox_form_greeting_sent'
-                         ) as any_inbox_sent,
-                         EXISTS (
-                           SELECT 1 FROM outreach_logs 
-                           WHERE lead_id = l.id AND tenant_id = l.tenant_id::text 
-                             AND action IN ('greeting_sent', 'template_sent', 'form_greeting_template_sent')
-                         ) as any_api_sent,
-                         EXISTS (
-                           SELECT 1 FROM outreach_logs 
-                           WHERE lead_id = l.id AND tenant_id = l.tenant_id::text 
-                             AND action = 'whatsapp_app_opened_for_greeting'
-                         ) as any_opened,
+                         ol.last_outreach_action,
+                         ol.last_outreach_at,
+                         ol.first_greeting_at,
+                         COALESCE(ol.any_confirmed, false) as any_confirmed,
+                         COALESCE(ol.any_inbox_sent, false) as any_inbox_sent,
+                         COALESCE(ol.any_api_sent, false) as any_api_sent,
+                         COALESCE(ol.any_opened, false) as any_opened,
                          CASE 
                            WHEN c_identity.id IS NOT NULL THEN 'customer_id'
                            WHEN c_phone.id IS NOT NULL THEN 'phone_unique'
@@ -120,125 +92,43 @@ export async function getForms(page: number = 1, search: string = "", source: st
                               'last_inbound_at', max(CASE WHEN m_all.direction = 'in' THEN m_all.created_at END),
                               'last_outbound_at', max(CASE WHEN m_all.direction = 'out' THEN m_all.created_at END),
                               'has_outbound_after_first_inbound', EXISTS (
-                                SELECT 1 FROM conversations c_out
-                                JOIN messages m_out ON m_out.conversation_id = c_out.id AND m_out.tenant_id = c_out.tenant_id
-                                WHERE c_out.tenant_id = l.tenant_id
+                                SELECT 1 FROM messages m_out
+                                WHERE m_out.conversation_id = COALESCE(c_identity.id, c_phone.id)
+                                  AND m_out.tenant_id = l.tenant_id
                                   AND m_out.direction = 'out'
-                                  AND (
-                                    (l.customer_id IS NOT NULL AND c_out.customer_id = l.customer_id)
-                                    OR
-                                    RIGHT(c_out.phone_number, 10) = RIGHT(l.phone_number, 10)
-                                    OR
-                                    (
-                                      l.raw_data IS NOT NULL 
-                                      AND l.raw_data != ''
-                                      AND l.raw_data LIKE '%_all_phones%'
-                                      AND (
-                                        CASE
-                                          WHEN jsonb_typeof(l.raw_data::jsonb->'_all_phones') = 'array' 
-                                            THEN (l.raw_data::jsonb->'_all_phones') @> jsonb_build_array(c_out.phone_number)
-                                          WHEN jsonb_typeof(l.raw_data::jsonb->'_all_phones') = 'string' 
-                                            THEN (l.raw_data::jsonb->>'_all_phones')::jsonb @> jsonb_build_array(c_out.phone_number)
-                                          ELSE false
-                                        END
-                                      )
-                                    )
-                                  )
-                                  -- and created after the first inbound
                                   AND m_out.created_at > (
-                                    SELECT min(m_in.created_at) FROM conversations c_in
-                                    JOIN messages m_in ON m_in.conversation_id = c_in.id AND m_in.tenant_id = c_in.tenant_id
-                                    WHERE c_in.tenant_id = l.tenant_id
+                                    SELECT min(m_in.created_at) FROM messages m_in
+                                    WHERE m_in.conversation_id = COALESCE(c_identity.id, c_phone.id)
+                                      AND m_in.tenant_id = l.tenant_id
                                       AND m_in.direction = 'in'
                                       AND (m_in.media_metadata IS NULL OR COALESCE(m_in.media_metadata->'native'->>'message_type', '') != 'reaction')
-                                      AND (
-                                        (l.customer_id IS NOT NULL AND c_in.customer_id = l.customer_id)
-                                        OR
-                                        RIGHT(c_in.phone_number, 10) = RIGHT(l.phone_number, 10)
-                                        OR
-                                        (
-                                          l.raw_data IS NOT NULL 
-                                          AND l.raw_data != ''
-                                          AND l.raw_data LIKE '%_all_phones%'
-                                          AND (
-                                            CASE
-                                              WHEN jsonb_typeof(l.raw_data::jsonb->'_all_phones') = 'array' 
-                                                THEN (l.raw_data::jsonb->'_all_phones') @> jsonb_build_array(c_in.phone_number)
-                                              WHEN jsonb_typeof(l.raw_data::jsonb->'_all_phones') = 'string' 
-                                                THEN (l.raw_data::jsonb->>'_all_phones')::jsonb @> jsonb_build_array(c_in.phone_number)
-                                              ELSE false
-                                            END
-                                          )
-                                        )
-                                      )
                                   )
                               )
                             )
-                            FROM conversations c_all
-                            JOIN messages m_all ON m_all.conversation_id = c_all.id AND m_all.tenant_id = c_all.tenant_id
-                            WHERE c_all.tenant_id = l.tenant_id
+                            FROM messages m_all
+                            WHERE m_all.conversation_id = COALESCE(c_identity.id, c_phone.id)
+                              AND m_all.tenant_id = l.tenant_id
                               AND (m_all.media_metadata IS NULL OR COALESCE(m_all.media_metadata->'native'->>'message_type', '') != 'reaction')
-                              AND (
-                                (l.customer_id IS NOT NULL AND c_all.customer_id = l.customer_id)
-                                OR
-                                RIGHT(c_all.phone_number, 10) = RIGHT(l.phone_number, 10)
-                                OR
-                                (
-                                  l.raw_data IS NOT NULL 
-                                  AND l.raw_data != ''
-                                  AND l.raw_data LIKE '%_all_phones%'
-                                  AND (
-                                    CASE
-                                      WHEN jsonb_typeof(l.raw_data::jsonb->'_all_phones') = 'array' 
-                                        THEN (l.raw_data::jsonb->'_all_phones') @> jsonb_build_array(c_all.phone_number)
-                                      WHEN jsonb_typeof(l.raw_data::jsonb->'_all_phones') = 'string' 
-                                        THEN (l.raw_data::jsonb->>'_all_phones')::jsonb @> jsonb_build_array(c_all.phone_number)
-                                      ELSE false
-                                    END
-                                  )
-                                )
-                              )
-                          ) as message_stats,
-                          (
-                             SELECT json_build_object(
-                               'direction', m_last.direction,
-                               'content', m_last.content,
-                               'created_at', m_last.created_at
-                             )
-                             FROM conversations c_last
-                             JOIN messages m_last ON m_last.conversation_id = c_last.id AND m_last.tenant_id = c_last.tenant_id
-                             WHERE c_last.tenant_id = l.tenant_id
-                               AND m_last.direction != 'system'
-                               AND (m_last.media_metadata IS NULL OR COALESCE(m_last.media_metadata->'native'->>'message_type', '') != 'reaction')
-                               AND (
-                                 (l.customer_id IS NOT NULL AND c_last.customer_id = l.customer_id)
-                                 OR
-                                 RIGHT(c_last.phone_number, 10) = RIGHT(l.phone_number, 10)
-                                 OR
-                                 (
-                                   l.raw_data IS NOT NULL 
-                                   AND l.raw_data != ''
-                                   AND l.raw_data LIKE '%_all_phones%'
-                                   AND (
-                                     CASE
-                                       WHEN jsonb_typeof(l.raw_data::jsonb->'_all_phones') = 'array' 
-                                         THEN (l.raw_data::jsonb->'_all_phones') @> jsonb_build_array(c_last.phone_number)
-                                       WHEN jsonb_typeof(l.raw_data::jsonb->'_all_phones') = 'string' 
-                                         THEN (l.raw_data::jsonb->>'_all_phones')::jsonb @> jsonb_build_array(c_last.phone_number)
-                                       ELSE false
-                                     END
-                                   )
-                                 )
-                               )
-                             ORDER BY m_last.created_at DESC
-                             LIMIT 1
-                           ) as last_message_info
+                         ) as message_stats,
+                         (
+                            SELECT json_build_object(
+                              'direction', m_last.direction,
+                              'content', m_last.content,
+                              'created_at', m_last.created_at
+                            )
+                            FROM messages m_last
+                            WHERE m_last.conversation_id = COALESCE(c_identity.id, c_phone.id)
+                              AND m_last.tenant_id = l.tenant_id
+                              AND m_last.direction != 'system'
+                              AND (m_last.media_metadata IS NULL OR COALESCE(m_last.media_metadata->'native'->>'message_type', '') != 'reaction')
+                            ORDER BY m_last.created_at DESC
+                            LIMIT 1
+                          ) as last_message_info
                   FROM leads l
                   -- Layer 1: Safe link via customer_id (identity-based, no ambiguity)
                   LEFT JOIN conversations c_identity ON c_identity.tenant_id = l.tenant_id 
                     AND l.customer_id IS NOT NULL 
                     AND c_identity.customer_id = l.customer_id
-                  LEFT JOIN conversation_memory mem_identity ON mem_identity.conversation_id = c_identity.id
                   -- Layer 2: Phone match only if EXACTLY ONE conversation matches (prevents cross-leak)
                   LEFT JOIN LATERAL (
                     SELECT c2.id, c2.status, c2.lead_stage, c2.country as conv_country, c2.department as conv_department
@@ -251,15 +141,11 @@ export async function getForms(page: number = 1, search: string = "", source: st
                            AND RIGHT(cx.phone_number, 10) = RIGHT(l.phone_number, 10)) = 1
                     LIMIT 1
                   ) c_phone ON c_identity.id IS NULL
-                  LEFT JOIN conversation_memory mem_phone ON mem_phone.conversation_id = c_phone.id AND c_identity.id IS NULL
                   -- Layer 4: Active opportunity preferred
                   LEFT JOIN LATERAL (
                     SELECT o.id as opp_id, 
                            o.country as opp_country, o.department as opp_department,
-                           o.stage as opp_stage, o.priority as opp_priority,
-                           o.intent_type as opp_intent_type, o.travel_date as opp_travel_date,
-                           o.next_follow_up_at as opp_next_follow_up_at,
-                           o.summary as opp_summary,
+                           o.stage as opp_stage,
                            o.requester_name as opp_requester_name,
                            o.patient_name as opp_patient_name,
                            o.patient_relation as opp_patient_relation
@@ -271,6 +157,19 @@ export async function getForms(page: number = 1, search: string = "", source: st
                       o.updated_at DESC
                     LIMIT 1
                   ) opp ON COALESCE(c_identity.id, c_phone.id) IS NOT NULL
+                  -- Layer 5: Grouped outreach logs aggregation
+                  LEFT JOIN LATERAL (
+                    SELECT 
+                      MAX(created_at) as last_outreach_at,
+                      (ARRAY_AGG(action ORDER BY created_at DESC))[1] as last_outreach_action,
+                      MAX(CASE WHEN action IN (${hardDuplicateActionsSql}) THEN created_at END) as first_greeting_at,
+                      BOOL_OR(action = 'manual_whatsapp_greeting_echo_confirmed') as any_confirmed,
+                      BOOL_OR(action = 'inbox_form_greeting_sent') as any_inbox_sent,
+                      BOOL_OR(action IN ('greeting_sent', 'template_sent', 'form_greeting_template_sent')) as any_api_sent,
+                      BOOL_OR(action = 'whatsapp_app_opened_for_greeting') as any_opened
+                    FROM outreach_logs
+                    WHERE lead_id = l.id AND tenant_id = l.tenant_id::text
+                  ) ol ON true
                 ),
                 calculated_leads AS (
                    SELECT bl.*,
@@ -330,6 +229,7 @@ export async function getForms(page: number = 1, search: string = "", source: st
                                 OR LOWER(bl.last_message_info->>'content') LIKE '%talebiniz alınmıştır%'
                                 OR LOWER(bl.last_message_info->>'content') LIKE '%iyi akşamlar%'
                                 OR LOWER(bl.last_message_info->>'content') LIKE '%geçmiş olsun%'
+                                OR LOWER(bl.last_message_info->>'content') LIKE '%iyi akşamlar%'
                                 OR LOWER(bl.last_message_info->>'content') LIKE '%iyi bayramlar%'
                                 OR LOWER(bl.last_message_info->>'content') LIKE '%mutlu günler%'
                                 OR LOWER(bl.last_message_info->>'content') LIKE '%başarılar dileriz%'
@@ -432,7 +332,7 @@ export async function getForms(page: number = 1, search: string = "", source: st
           raw_data: r.raw_data ? JSON.parse(r.raw_data) : {},
           country: r.country,
           notes: r.notes || "",
-          ai_summary: r.ai_summary || "",
+          ai_summary: "", // Lazy loaded on detail modal
           isBotActive: r.conversation_status === 'bot',
           summaryLinkMethod: r.summary_link_method || 'none',
           linked_conversation_id: r.linked_conv_id || null,
@@ -440,11 +340,11 @@ export async function getForms(page: number = 1, search: string = "", source: st
           current_country: r.opp_country || r.conv_country || r.country || null,
           current_department: r.opp_department || r.conv_department || null,
           current_stage: r.opp_stage || null,
-          current_priority: r.opp_priority || null,
-          current_intent_type: r.opp_intent_type || null,
-          current_travel_date: r.opp_travel_date || null,
-          current_next_follow_up_at: r.opp_next_follow_up_at || null,
-          current_ai_summary: r.opp_summary || "",
+          current_priority: null, // Lazy loaded on detail modal
+          current_intent_type: null, // Lazy loaded on detail modal
+          current_travel_date: null, // Lazy loaded on detail modal
+          current_next_follow_up_at: null, // Lazy loaded on detail modal
+          current_ai_summary: "", // Lazy loaded on detail modal
           patient_relation: r.opp_patient_relation || null,
           link_confidence: r.summary_link_method || 'none',
           last_outreach_action: r.last_outreach_action || null,
@@ -461,6 +361,82 @@ export async function getForms(page: number = 1, search: string = "", source: st
       });
     }
   ).then(res => res.data || []);
+}
+
+export async function getFormDetailData(leadId: number) {
+  return withActionGuard(
+    { actionName: 'getFormDetailData' },
+    async (ctx) => {
+      const rows = await ctx.db.executeSafe({
+        text: `SELECT 
+                 COALESCE(mem_identity.summary_text, mem_phone.summary_text) as ai_summary,
+                 opp.opp_id,
+                 opp.opp_priority,
+                 opp.opp_intent_type,
+                 opp.opp_travel_date,
+                 opp.opp_next_follow_up_at,
+                 opp.opp_summary,
+                 opp.opp_patient_relation
+               FROM leads l
+               -- Layer 1: Safe link via customer_id
+               LEFT JOIN conversations c_identity ON c_identity.tenant_id = l.tenant_id 
+                 AND l.customer_id IS NOT NULL 
+                 AND c_identity.customer_id = l.customer_id
+               LEFT JOIN conversation_memory mem_identity ON mem_identity.conversation_id = c_identity.id
+               -- Layer 2: Phone match fallback
+               LEFT JOIN LATERAL (
+                 SELECT c2.id
+                 FROM conversations c2 
+                 WHERE c2.tenant_id = l.tenant_id 
+                   AND RIGHT(c2.phone_number, 10) = RIGHT(l.phone_number, 10)
+                   AND l.customer_id IS NULL
+                   AND (SELECT COUNT(*) FROM conversations cx 
+                        WHERE cx.tenant_id = l.tenant_id 
+                        AND RIGHT(cx.phone_number, 10) = RIGHT(l.phone_number, 10)) = 1
+                 LIMIT 1
+               ) c_phone ON c_identity.id IS NULL
+               LEFT JOIN conversation_memory mem_phone ON mem_phone.conversation_id = c_phone.id AND c_identity.id IS NULL
+               -- Layer 4: Active opportunity preferred
+               LEFT JOIN LATERAL (
+                 SELECT o.id as opp_id, 
+                        o.priority as opp_priority,
+                        o.intent_type as opp_intent_type,
+                        o.travel_date as opp_travel_date,
+                        o.next_follow_up_at as opp_next_follow_up_at,
+                        o.summary as opp_summary,
+                        o.patient_relation as opp_patient_relation
+                 FROM opportunities o
+                 WHERE o.tenant_id = l.tenant_id
+                   AND o.conversation_id = COALESCE(c_identity.id, c_phone.id)
+                 ORDER BY 
+                   CASE WHEN o.id = COALESCE(c_identity.active_opportunity_id, (SELECT active_opportunity_id FROM conversations WHERE id = c_phone.id AND tenant_id = l.tenant_id)) THEN 0 ELSE 1 END,
+                   o.updated_at DESC
+                 LIMIT 1
+               ) opp ON opp_id IS NOT NULL OR COALESCE(c_identity.id, c_phone.id) IS NOT NULL
+               WHERE l.id = $1 AND l.tenant_id = $2`,
+        values: [leadId, ctx.tenantId]
+      });
+
+      if (rows.length === 0) {
+        throw new Error("Kayıt bulunamadı.");
+      }
+
+      const r = rows[0];
+      return {
+        ai_summary: r.ai_summary || "",
+        current_priority: r.opp_priority || null,
+        current_intent_type: r.opp_intent_type || null,
+        current_travel_date: r.opp_travel_date || null,
+        current_next_follow_up_at: r.opp_next_follow_up_at || null,
+        current_ai_summary: r.opp_summary || "",
+        patient_relation: r.opp_patient_relation || null,
+        linked_opportunity_id: r.opp_id || null
+      };
+    }
+  ).then(res => {
+    if (!res.success) throw new Error(res.error || "Detay yüklenemedi.");
+    return res.data;
+  });
 }
 
 export async function updateLeadNotes(id: number, notes: string) {
