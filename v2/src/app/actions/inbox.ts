@@ -3239,6 +3239,86 @@ export async function saveBotSteeringDirectiveAction(conversationId: string, dir
   );
 }
 
+export async function deactivateBotDirectiveAction(conversationId: string, taskId: string) {
+  if (!conversationId) return { success: false, error: "Konuşma ID gerekli." };
+  if (!taskId) return { success: false, error: "Task ID gerekli." };
+
+  return withActionGuard(
+    { actionName: 'deactivateBotDirectiveAction' },
+    async (ctx) => {
+      // Fetch task to verify it belongs to this tenant and conversation
+      const taskRows = await ctx.db.executeSafe({
+        text: `SELECT id, task_type, status, metadata FROM follow_up_tasks 
+               WHERE id = $1 AND conversation_id = $2 AND tenant_id = $3 LIMIT 1`,
+        values: [taskId, conversationId, ctx.tenantId]
+      }) as any[];
+
+      if (taskRows.length === 0) {
+        return { success: false, error: "Yönlendirme bulunamadı veya yetkisiz erişim." };
+      }
+
+      const task = taskRows[0];
+      const currentMeta = task.metadata || {};
+      const state = currentMeta.bot_directive_state || {};
+
+      // Prepare updated metadata
+      const updatedMeta = {
+        ...currentMeta,
+        bot_directive_state: {
+          ...state,
+          directive_status: 'cancelled',
+          cancelled_at: new Date().toISOString(),
+          cancelled_by: ctx.userId || 'system'
+        }
+      };
+
+      // Clean up backward compatible properties to make sure it's fully cancelled/deleted
+      delete updatedMeta.active_bot_directive;
+      delete updatedMeta.bot_teyit_sent;
+      delete updatedMeta.bot_hatirlat_sent;
+      delete updatedMeta.bot_devret_sent;
+
+      // If it is a pure handoff follow-up task, cancel/complete the task itself as well
+      let statusUpdate = "";
+      if (task.task_type === 'bot_handoff_followup' && ['pending', 'in_progress'].includes(task.status)) {
+        statusUpdate = `, status = 'cancelled', completed_at = NOW(), completed_by = '${ctx.userId || '00000000-0000-0000-0000-000000000000'}', completion_note = 'İç talimat operatör tarafından iptal edildi'`;
+      }
+
+      await ctx.db.executeSafe({
+        text: `UPDATE follow_up_tasks 
+               SET metadata = $1::jsonb, updated_at = NOW() ${statusUpdate} 
+               WHERE id = $2 AND tenant_id = $3`,
+        values: [JSON.stringify(updatedMeta), taskId, ctx.tenantId]
+      });
+
+      // Write outreach log for auditing (non-outbound)
+      await ctx.db.executeSafe({
+        text: `INSERT INTO outreach_logs (tenant_id, conversation_id, action, channel, actor_id, metadata)
+               VALUES ($1, $2, 'bot_steering_cancelled', 'system', $3, $4)`,
+        values: [
+          ctx.tenantId,
+          conversationId,
+          ctx.userId,
+          JSON.stringify({
+            task_id: taskId,
+            directive_text: state.active_bot_directive || currentMeta.active_bot_directive || '',
+            cancelled_by: ctx.userId,
+            patient_visible: false,
+            internal_only: true
+          })
+        ]
+      });
+
+      return { success: true };
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error };
+    if (res.data && !res.data.success) return { success: false, error: res.data.error };
+    return { success: true };
+  });
+}
+
+
 export async function saveFormGreetingDraftInternalAction(conversationId: string, approvedText: string) {
   if (!conversationId) return { success: false, error: "Konuşma ID gerekli." };
   if (!approvedText || approvedText.trim().length === 0) return { success: false, error: "Taslak metni boş olamaz." };
@@ -3431,7 +3511,7 @@ export async function getActiveBotDirectiveAction(conversationId: string) {
     { actionName: 'getActiveBotDirectiveAction' },
     async (ctx) => {
       const taskRows = await ctx.db.executeSafe({
-        text: `SELECT metadata FROM follow_up_tasks 
+        text: `SELECT metadata, status FROM follow_up_tasks 
                WHERE conversation_id = $1 AND tenant_id = $2 AND status IN ('pending', 'in_progress')
                ORDER BY created_at DESC LIMIT 1`,
         values: [conversationId, ctx.tenantId]
@@ -3441,7 +3521,19 @@ export async function getActiveBotDirectiveAction(conversationId: string) {
 
       const metadata = taskRows[0].metadata || {};
       const directiveState = metadata.bot_directive_state;
-      const directive = directiveState?.active_bot_directive || metadata.active_bot_directive || null;
+      
+      let directive: string | null = null;
+      let isActive = false;
+      if (directiveState) {
+        isActive = directiveState.directive_status === 'pending';
+      } else if (metadata.active_bot_directive) {
+        const isPending = metadata.bot_teyit_sent || metadata.bot_hatirlat_sent || metadata.bot_devret_sent;
+        isActive = !!isPending;
+      }
+
+      if (isActive) {
+        directive = directiveState?.active_bot_directive || metadata.active_bot_directive || null;
+      }
 
       return { success: true, directive };
     }
@@ -3703,20 +3795,55 @@ export async function getCrmPanelBundleAction(conversationId: string) {
       const activeOpportunityId = conv.active_opportunity_id;
       const leadId = conv.lead_id;
 
-      // Query 2: Fetch latest follow up task metadata (for bot directive)
-      const directiveRows = await ctx.db.executeSafe({
-        text: `SELECT metadata FROM follow_up_tasks 
-               WHERE conversation_id = $1 AND tenant_id = $2 AND status IN ('pending', 'in_progress')
-               ORDER BY created_at DESC LIMIT 1`,
+      // Query 2: Fetch all follow up tasks containing bot directives for this conversation (strict tenant isolation)
+      const directiveTasks = await ctx.db.executeSafe({
+        text: `SELECT id, task_type, title, status, metadata, created_at, updated_at
+               FROM follow_up_tasks 
+               WHERE conversation_id = $1 AND tenant_id = $2
+                 AND (metadata->>'bot_directive_state' IS NOT NULL OR metadata->>'active_bot_directive' IS NOT NULL)
+               ORDER BY created_at DESC`,
         values: [conversationId, ctx.tenantId]
       }) as any[];
 
-      let directive: string | null = null;
-      if (directiveRows.length > 0) {
-        const metadata = directiveRows[0].metadata || {};
-        const directiveState = metadata.bot_directive_state;
-        directive = directiveState?.active_bot_directive || metadata.active_bot_directive || null;
+      let activeBotDirective: any = null;
+      const pastBotDirectives: any[] = [];
+
+      for (const t of directiveTasks) {
+        const metadata = t.metadata || {};
+        const state = metadata.bot_directive_state;
+        const directiveText = state?.active_bot_directive || metadata.active_bot_directive || null;
+
+        if (!directiveText) continue;
+
+        let isActive = false;
+        if (['pending', 'in_progress'].includes(t.status)) {
+          if (state) {
+            isActive = state.directive_status === 'pending';
+          } else {
+            const isPending = metadata.bot_teyit_sent || metadata.bot_hatirlat_sent || metadata.bot_devret_sent;
+            isActive = !!isPending;
+          }
+        }
+
+        const details = {
+          taskId: t.id,
+          text: directiveText.trim(),
+          taskType: t.task_type,
+          taskStatus: t.status,
+          directiveStatus: state?.directive_status || (isActive ? 'pending' : 'completed'),
+          createdBy: state?.created_by || 'system',
+          createdAt: state?.created_at || t.created_at,
+          completedAt: state?.completed_at || state?.consumed_at || null,
+          result: state?.result || null
+        };
+
+        if (isActive && !activeBotDirective) {
+          activeBotDirective = details;
+        } else {
+          pastBotDirectives.push(details);
+        }
       }
+
 
       // Query 3: Fetch active follow up tasks for steering
       const taskRows = await ctx.db.executeSafe({
@@ -3944,7 +4071,9 @@ export async function getCrmPanelBundleAction(conversationId: string) {
       return {
         phoneNumber: conv.phone_number,
         patientName: conv.patient_name || null,
-        botDirective: directive,
+        botDirective: activeBotDirective ? activeBotDirective.text : null,
+        activeBotDirective,
+        pastBotDirectives,
         steeringTasks: suggestions,
         activeTasks,
         formGreetingEligibility: formGreeting,

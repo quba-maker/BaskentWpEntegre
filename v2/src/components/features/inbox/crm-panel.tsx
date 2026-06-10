@@ -2,9 +2,9 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useSWRConfig } from "swr";
-import { User, MapPin, Building, Activity, Tag, ChevronDown, ChevronRight, Save, X, Plus, ChevronLeft, Check, Loader2, Sparkles, FileText, Brain, Link, Clock, Moon, Calendar, CalendarClock, PhoneForwarded, MailPlus, Share2, Eye, EyeOff, Send, Copy, AlertTriangle } from "lucide-react";
+import { User, MapPin, Building, Activity, Tag, ChevronDown, ChevronRight, Save, X, Plus, ChevronLeft, Check, Loader2, Sparkles, FileText, Brain, Link, Clock, Moon, Calendar, CalendarClock, PhoneForwarded, MailPlus, Share2, Eye, EyeOff, Send, Copy, AlertTriangle, Trash2 } from "lucide-react";
 import { useInboxStore } from "@/store/inbox-store";
-import { updateCrmData, addTag, removeTag, prepareFollowUpDraft, sendApprovedFollowUp, checkSecondaryFallback, prepareSecondaryDraft, getCrmPanelBundleAction, prepareFormGreetingDraft, saveBotSteeringDirectiveAction, saveFormGreetingDraftInternalAction, sendFormGreetingFromInboxAction, prepareNoReplyReminderDraftAction, sendNoReplyReminderAction, scheduleReminderTaskAction, prepareInboxBotAssistedDraftAction, sendApprovedInboxBotDraftAction } from "@/app/actions/inbox";
+import { updateCrmData, addTag, removeTag, prepareFollowUpDraft, sendApprovedFollowUp, checkSecondaryFallback, prepareSecondaryDraft, getCrmPanelBundleAction, prepareFormGreetingDraft, saveBotSteeringDirectiveAction, saveFormGreetingDraftInternalAction, sendFormGreetingFromInboxAction, prepareNoReplyReminderDraftAction, sendNoReplyReminderAction, scheduleReminderTaskAction, prepareInboxBotAssistedDraftAction, sendApprovedInboxBotDraftAction, deactivateBotDirectiveAction } from "@/app/actions/inbox";
 import { CustomerAiBrainPanel } from "@/components/features/ai-observability/CustomerAiBrain";
 import { AiTimelinePanel } from "@/components/features/ai-observability/AiTimeline";
 import { resolvePatientDisplayName, formatPhoneReadable } from "@/lib/utils/patient-name-resolver";
@@ -315,6 +315,10 @@ export function ContextPanel() {
   // Bot steering states
   const [botDirectiveText, setBotDirectiveText] = useState<string>("");
   const [activeBotDirective, setActiveBotDirective] = useState<string | null>(null);
+  const [activeDirectiveDetail, setActiveDirectiveDetail] = useState<any | null>(null);
+  const [pastBotDirectives, setPastBotDirectives] = useState<any[]>([]);
+  const [isPastDirectivesOpen, setIsPastDirectivesOpen] = useState<boolean>(false);
+  const [isDeactivatingDirective, setIsDeactivatingDirective] = useState<boolean>(false);
   const [isBotSteeringOpen, setIsBotSteeringOpen] = useState<boolean>(false);
   const [isSavingBotSteering, setIsSavingBotSteering] = useState<boolean>(false);
   const [botSteeringStatus, setBotSteeringStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -383,6 +387,10 @@ export function ContextPanel() {
       setFormGreetingSentSuccess(false);
       setBotDirectiveText("");
       setActiveBotDirective(null);
+      setActiveDirectiveDetail(null);
+      setPastBotDirectives([]);
+      setIsPastDirectivesOpen(false);
+      setIsDeactivatingDirective(false);
       setBotSteeringStatus("idle");
       setSteeringTasks([]);
       // Reset no-reply follow up states
@@ -459,6 +467,8 @@ export function ContextPanel() {
   useEffect(() => {
     if (crmData) {
       setActiveBotDirective(crmData.botDirective);
+      setActiveDirectiveDetail(crmData.activeBotDirective || null);
+      setPastBotDirectives(crmData.pastBotDirectives || []);
       setSteeringTasks(crmData.steeringTasks);
       setFormGreetingEligibility(crmData.formGreetingEligibility);
       setFormGreetingChecked(true);
@@ -466,6 +476,8 @@ export function ContextPanel() {
       setIsLoadingSteeringTasks(false);
     } else {
       setActiveBotDirective(null);
+      setActiveDirectiveDetail(null);
+      setPastBotDirectives([]);
       setSteeringTasks([]);
       setFormGreetingEligibility(null);
       setFormGreetingChecked(true);
@@ -1628,14 +1640,110 @@ export function ContextPanel() {
               <div className="space-y-2 border-t border-black/[0.03] pt-3">
                 <span className="block text-[9px] font-bold text-[#86868B] uppercase tracking-widest">1. Botu Yönlendir (İç Talimat)</span>
                 
-                {activeBotDirective ? (
-                  <div className="p-2.5 rounded-xl bg-indigo-50/70 border border-indigo-100 text-indigo-905 text-[11px] font-medium leading-relaxed">
-                    <span className="block text-[8px] font-bold text-indigo-500 uppercase tracking-widest mb-0.5">Aktif Bot Yönlendirmesi</span>
-                    "{activeBotDirective}"
+                {activeDirectiveDetail ? (
+                  <div className="p-3 rounded-xl bg-indigo-50/65 border border-indigo-100/70 text-indigo-950 text-[11.5px] font-medium leading-relaxed space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="flex items-center gap-1 text-[8.5px] font-extrabold text-indigo-600 bg-indigo-100/60 px-1.5 py-0.5 rounded-md uppercase tracking-wider">
+                        ● Aktif Talimat
+                      </span>
+                      <span className="text-[9.5px] text-indigo-500/80 font-semibold">
+                        {activeDirectiveDetail.createdAt ? new Date(activeDirectiveDetail.createdAt).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}
+                      </span>
+                    </div>
+                    <div className="italic text-[#1C1C1E] bg-white/50 p-2 rounded-lg border border-indigo-50 leading-relaxed font-medium">
+                      "{activeDirectiveDetail.text}"
+                    </div>
+                    <div className="flex items-center justify-between text-[9px] text-indigo-700/80 font-bold border-t border-indigo-100/50 pt-1.5">
+                      <span>Ekleyen: {activeDirectiveDetail.createdBy === 'system' ? 'Sistem' : (activeDirectiveDetail.createdBy || 'Bilinmiyor')}</span>
+                      <button
+                        type="button"
+                        disabled={isDeactivatingDirective}
+                        onClick={async () => {
+                          if (!activeDirectiveDetail.taskId) return;
+                          setIsDeactivatingDirective(true);
+                          try {
+                            const res = await deactivateBotDirectiveAction(conversationId, activeDirectiveDetail.taskId);
+                            if (res.success) {
+                              mutate((key) => Array.isArray(key) && key[0] === "conversations");
+                              queryClient.invalidateQueries({ queryKey: ['crm-panel', conversationId] });
+                            } else {
+                              alert(res.error || "Yönlendirme pasifleştirilemedi.");
+                            }
+                          } catch (err) {
+                            console.error("Deactivate error:", err);
+                            alert("Bir hata oluştu.");
+                          } finally {
+                            setIsDeactivatingDirective(false);
+                          }
+                        }}
+                        className="flex items-center gap-1 text-red-600 hover:text-red-700 font-extrabold uppercase hover:underline cursor-pointer disabled:opacity-50 transition-all active:scale-95"
+                      >
+                        {isDeactivatingDirective ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <Trash2 className="w-3 h-3" />
+                        )}
+                        Pasifleştir / Sil
+                      </button>
+                    </div>
                   </div>
                 ) : (
-                  <div className="text-[10px] text-[#86868B] font-medium leading-snug">
-                    Botun bir sonraki adımda hastaya vereceği yanıta müdahale edin. Direktif vererek bota yol gösterin.
+                  <div className="text-[10px] text-[#86868B] font-medium leading-snug p-2.5 rounded-xl border border-dashed border-black/[0.06] bg-[#F5F5F7]/20">
+                    📭 Bu konuşma için aktif bot yönlendirmesi yok.
+                  </div>
+                )}
+
+                {/* Geçmiş Talimatlar Bölümü */}
+                {pastBotDirectives && pastBotDirectives.length > 0 && (
+                  <div className="space-y-1.5 border-t border-black/[0.03] pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsPastDirectivesOpen(!isPastDirectivesOpen)}
+                      className="flex items-center justify-between w-full text-[9px] font-bold text-[#86868B] uppercase tracking-wider hover:text-[#1D1D1F] transition-all cursor-pointer"
+                    >
+                      <span>📜 Geçmiş Talimatlar ({pastBotDirectives.length})</span>
+                      {isPastDirectivesOpen ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                    </button>
+
+                    {isPastDirectivesOpen && (
+                      <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1 scrollbar-thin">
+                        {pastBotDirectives.map((past: any, idx: number) => {
+                          const statusColors: Record<string, string> = {
+                            completed: 'bg-green-100 text-green-700 border-green-200/50',
+                            cancelled: 'bg-gray-100 text-gray-600 border-gray-200/50',
+                            waiting_patient: 'bg-amber-100 text-amber-700 border-amber-200/50',
+                          };
+                          const statusLabels: Record<string, string> = {
+                            completed: 'Uygulandı',
+                            cancelled: 'İptal Edildi',
+                            waiting_patient: 'Cevap Bekliyor',
+                          };
+
+                          return (
+                            <div
+                              key={idx}
+                              className="p-2 rounded-lg bg-gray-50/70 border border-black/[0.02] text-[10px] leading-relaxed space-y-1"
+                            >
+                              <div className="flex items-center justify-between text-[8px] font-bold text-[#86868B]">
+                                <span className={`px-1 py-0.2 rounded text-[7.5px] font-extrabold border ${statusColors[past.directiveStatus] || 'bg-gray-100 text-gray-600 border-gray-200/50'}`}>
+                                  {statusLabels[past.directiveStatus] || past.directiveStatus}
+                                </span>
+                                <span>
+                                  {past.createdAt ? new Date(past.createdAt).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}
+                                </span>
+                              </div>
+                              <div className="text-[#1D1D1F] font-medium italic">
+                                "{past.text}"
+                              </div>
+                              <div className="flex items-center justify-between text-[8px] text-[#86868B] font-bold pt-1 border-t border-black/[0.01]">
+                                <span>Ekleyen: {past.createdBy === 'system' ? 'Sistem' : (past.createdBy || 'Bilinmiyor')}</span>
+                                <span className="uppercase text-[7.5px] font-extrabold">{past.taskType} ({past.taskStatus})</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 )}
 

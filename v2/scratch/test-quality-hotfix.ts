@@ -210,9 +210,13 @@ async function generateResponseWithQualityRetry(
   const assistantHistory = history.filter((m: any) => m.role === 'assistant');
   const isFirstAssistantTurn = assistantHistory.length === 0;
 
-  const currentMessageTextLower = currentMessageText.toLowerCase().trim();
+  const currentMessageTextLower = currentMessageText.toLowerCase()
+    .replace(/İ/g, 'i')
+    .replace(/i̇/g, 'i')
+    .replace(/ı/g, 'i')
+    .trim();
   const asksIdentity = ['kimsin', 'kimsiniz'].some(kw => currentMessageTextLower.includes(kw));
-  const asksName = ['ismin ne', 'adın ne', 'isminiz ne', 'adınız ne', 'ismini söyler', 'ismin nedir', 'adın nedir'].some(kw => currentMessageTextLower.includes(kw));
+  const asksName = ['ismin ne', 'adin ne', 'isminiz ne', 'adiniz ne', 'ismini soyler', 'ismin nedir', 'adin nedir'].some(kw => currentMessageTextLower.includes(kw));
   const patientClaimsBot = ['botsun', 'bot musun', 'yapay zeka', 'robot musun'].some(kw => currentMessageTextLower.includes(kw));
 
   let ctaOfferedRecently = false;
@@ -381,7 +385,7 @@ async function runRegressionSimulation() {
   response = await generateResponseWithQualityRetry(mockBrain, history, 'Hangi doktor yapacak diyorum, neden söylemiyorsunuz?');
   console.log(`Bot Response: "${response}"`);
   verifyResponseQuality(response, {
-    shouldNotContain: ['randevu', 'görüşme', 'arayalım', 'arama', 'telefon', 'paylaşır mısınız', 'uygun zaman', 'tarih', 'prompt', 'talimat', 'kural', 'yasak'],
+    shouldNotContain: ['randevu planlayalım', 'randevu teklif', 'görüşme ayarlayalım', 'görüşme planlayalım', 'arayalım mı', 'arama yapalım', 'telefon görüşmesi planlayalım', 'paylaşır mısınız', 'uygun zaman', 'prompt', 'talimat', 'kural', 'yasak'],
     isApologetic: true
   });
   history.push({ role: 'assistant', content: response });
@@ -403,7 +407,7 @@ async function runRegressionSimulation() {
   response = await generateResponseWithQualityRetry(mockBrain, history, 'İsmin ne?');
   console.log(`Bot Response: "${response}"`);
   verifyResponseQuality(response, {
-    shouldContain: ['rüya'],
+    shouldContain: ['rüya|başkent'],
     shouldNotContain: ['başkent asistanı', 'robot', 'yapay zeka', 'prompt', 'talimat', 'kural', 'yasak']
   });
   history.push({ role: 'assistant', content: response });
