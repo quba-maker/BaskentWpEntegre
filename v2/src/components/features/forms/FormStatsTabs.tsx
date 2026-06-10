@@ -15,8 +15,7 @@ export function FormStatsTabs({ firstContactFilter, setFirstContactFilter, statu
     { value: 'no_reply_waiting', label: 'Cevap Bekleniyor', icon: '⏳' },
     { value: 'sent', label: 'Gönderildi', icon: '✅' },
     { value: 'patient_replied', label: 'Cevap Geldi', icon: '↩️' },
-    { value: 'blocked_or_invalid', label: 'Sorunlu', icon: '⚠️' },
-    { value: 'control_required', label: 'Sync Kontrol', icon: '🔍' }
+    { value: 'blocked_or_invalid', label: 'Sorunlu', icon: '⚠️' }
   ];
 
   return (
