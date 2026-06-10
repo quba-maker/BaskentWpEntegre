@@ -1240,7 +1240,8 @@ export class QueueWorkerEngine {
     if (content && !isAppEcho && !isHistory) {
       try {
         const { detectAbuse } = await import('../services/ai/abuse-detector');
-        const abuseResult = detectAbuse(content);
+        const identityConfig = brain?.prompts?.metadata?.identity || brain?.context?.config?.identity || {};
+        const abuseResult = detectAbuse(content, identityConfig.personaName);
         if (abuseResult.abuse_detected) {
           this.log.warn(`[ABUSE_DETECTED] Inbound message contains profanity/abuse: "${content}"`, {
             traceId, phoneNumber, matched: abuseResult.matched_phrases

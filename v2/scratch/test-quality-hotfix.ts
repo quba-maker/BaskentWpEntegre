@@ -154,7 +154,7 @@ async function runUnitTests() {
   ];
 
   for (const tc of abuseTestCases) {
-    const res = detectAbuse(tc.text);
+    const res = detectAbuse(tc.text, "Rüya");
     const passed = res.abuse_detected === tc.expected;
     console.log(`- [${passed ? 'PASS' : 'FAIL'}] "${tc.text}" - ${tc.desc} (abuse_detected: ${res.abuse_detected}, expected: ${tc.expected})`);
     if (!passed) failed++;
@@ -431,7 +431,7 @@ async function runRegressionSimulation() {
 
   // Step 10: Abuse check
   console.log("\n[Step 10] Patient swears: 'mal mısın ismin ne'");
-  const abuseRes = detectAbuse('mal mısın ismin ne');
+  const abuseRes = detectAbuse('mal mısın ismin ne', 'Rüya');
   if (!abuseRes.abuse_detected) {
     throw new Error("Swearing message was not detected as abuse!");
   }

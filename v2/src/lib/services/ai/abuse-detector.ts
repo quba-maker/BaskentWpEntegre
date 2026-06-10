@@ -41,7 +41,7 @@ function collapseRepeatedChars(text: string): string {
   return text.replace(/(.)\1+/gi, '$1');
 }
 
-export function detectAbuse(messageText: string): AbuseDetection {
+export function detectAbuse(messageText: string, personaName?: string): AbuseDetection {
   if (!messageText || messageText.length < 2) {
     return {
       abuse_detected: false,
@@ -104,11 +104,20 @@ export function detectAbuse(messageText: string): AbuseDetection {
   ];
 
   // ==========================================
-  // DIRECT TARGET ATTACK INSULTS (e.g. ruya salak, bot köpek)
+  // DIRECT TARGET ATTACK INSULTS (e.g. bot köpek, asistan salak)
   // ==========================================
   const TARGET_ATTACK_PATTERNS = [
-    /\b(ruya|rüya|asistan|bot|sistem)\s+(salak|aptal|mal|gerizekali|gerizekalı|kopek|köpek|siktir|orospu|ibne|pust)\b/i
+    /\b(asistan|bot|sistem)\s+(salak|aptal|mal|gerizekali|gerizekalı|kopek|köpek|siktir|orospu|ibne|pust)\b/i
   ];
+
+  if (personaName) {
+    const cleanPersona = collapseRepeatedChars(normalizeTurkishChars(personaName.toLowerCase().trim()));
+    if (cleanPersona) {
+      TARGET_ATTACK_PATTERNS.push(
+        new RegExp(`\\b(${cleanPersona})\\s+(salak|aptal|mal|gerizekali|gerizekalı|kopek|köpek|siktir|orospu|ibne|pust)\\b`, 'i')
+      );
+    }
+  }
 
   // A. Swear words check
   for (const pattern of VULGAR_PATTERNS) {
