@@ -141,10 +141,10 @@ export class TenantLearningCandidateService {
       if (changedRatio > 0.35) {
         drafts.push({
           candidateType: 'tone_rule',
-          title: 'Draft Styling and Concision Rule',
-          summary: 'Operators significantly changed or shortened the formatting and style of the AI draft.',
-          suggestedRuleText: 'Deliver bot responses using a concise, direct, and more natural human tone.',
-          evidenceSummary: `Draft changed ratio was ${changedRatio} (AI length: ${aiLength}, human length: ${humanLength}).`,
+          title: 'Operatör Tarzı Kısaltma ve Sadeleştirme',
+          summary: 'Operatörler yapay zeka taslağını kısalttı veya mesajın dilini sadeleştirdi.',
+          suggestedRuleText: 'Gereksiz karşılama ifadeleri kullanmadan, kısa ve net cevaplar tercih edin.',
+          evidenceSummary: `Taslak yanıt uzunluğu operatör tarafından azaltıldı. (Yapay zeka uzunluğu: ${aiLength}, insan uzunluğu: ${humanLength}).`,
           riskLevel: resolveRiskLevel('low'),
           riskTags: ['tone', 'style'],
           fingerprint: 'tone_rule:style_shortening'
@@ -155,10 +155,10 @@ export class TenantLearningCandidateService {
       if (diffSummary.ctaRemoved === true) {
         drafts.push({
           candidateType: 'cta_rule',
-          title: 'CTA Scheduling Prompt Optimization',
-          summary: 'Operators removed booking invitation or call-back request CTA from drafts.',
-          suggestedRuleText: 'Avoid repeating call/appointment proposals to users unless explicitly requested.',
-          evidenceSummary: 'Call/appointment booking prompt was removed by operators.',
+          title: 'Randevu CTA Optimizasyonu',
+          summary: 'Operatörler randevu davetini veya geri arama isteğini taslaklardan kaldırdı.',
+          suggestedRuleText: 'Kullanıcı açıkça talep etmedikçe randevu veya arama tekliflerini tekrarlamaktan kaçının.',
+          evidenceSummary: "Arama/randevu planlama CTA'i operatör tarafından kaldırıldı.",
           riskLevel: resolveRiskLevel('low'),
           riskTags: ['cta', 'scheduling'],
           fingerprint: 'cta_rule:cta_removed'
@@ -169,10 +169,10 @@ export class TenantLearningCandidateService {
       if (diffSummary.priceRemoved === true) {
         drafts.push({
           candidateType: 'policy_rule',
-          title: 'Pricing Disclosure Restriction',
-          summary: 'Operators removed or modified pricing details from the draft response.',
-          suggestedRuleText: 'Do not state absolute package pricing before physician consultation.',
-          evidenceSummary: 'Pricing information was altered by operators.',
+          title: 'Fiyat Bilgisi Kısıtlaması',
+          summary: 'Operatörler taslak yanıttan fiyat ayrıntılarını kaldırdı veya değiştirdi.',
+          suggestedRuleText: 'Hekim muayenesinden önce net/kesin paket fiyat bilgisi vermeyin.',
+          evidenceSummary: 'Fiyat bilgisi operatör tarafından değiştirildi.',
           riskLevel: resolveRiskLevel('high'),
           riskTags: ['policy', 'pricing'],
           fingerprint: 'policy_rule:price_removed'
@@ -181,10 +181,10 @@ export class TenantLearningCandidateService {
       if (diffSummary.doctorRemoved === true) {
         drafts.push({
           candidateType: 'policy_rule',
-          title: 'Physician Assignment Disclosure Restriction',
-          summary: 'Operators removed specific doctor names from the draft response.',
-          suggestedRuleText: 'Do not declare specific physician assignments before clinical triage.',
-          evidenceSummary: 'Physician name reference was altered by operators.',
+          title: 'Hekim Atama Bilgisi Kısıtlaması',
+          summary: 'Operatörler taslak yanıttan hekim isimlerini kaldırdı veya değiştirdi.',
+          suggestedRuleText: 'Klinik triyaj tamamlanmadan önce kesin hekim ataması beyan etmeyin.',
+          evidenceSummary: 'Hekim ismi referansı operatör tarafından değiştirildi.',
           riskLevel: resolveRiskLevel('high'),
           riskTags: ['policy', 'doctor'],
           fingerprint: 'policy_rule:doctor_removed'
@@ -195,10 +195,10 @@ export class TenantLearningCandidateService {
       if (riskTags.includes('identity') && changedRatio > 0.20) {
         drafts.push({
           candidateType: 'identity_rule',
-          title: 'Persona Signature Minimization',
-          summary: 'Operators removed or simplified bot persona introductions or company greetings.',
-          suggestedRuleText: 'Minimize bot self-identification and greeting signatures per conversation sequence.',
-          evidenceSummary: 'Self-identification persona details were modified in draft.',
+          title: 'Persona ve İmza Sadeleştirmesi',
+          summary: 'Operatörler bot tanıtımlarını veya firma karşılama imzalarını kaldırdı/sadeleştirdi.',
+          suggestedRuleText: 'Görüşme akışlarında botun kendini tanıtma sıklığını ve imza kullanımlarını asgariye indirin.',
+          evidenceSummary: 'Kendini tanıtma persona detayları taslakta değiştirildi.',
           riskLevel: resolveRiskLevel('low'),
           riskTags: ['identity', 'greeting'],
           fingerprint: 'identity_rule:persona_modified'
@@ -209,10 +209,10 @@ export class TenantLearningCandidateService {
       if (riskTags.includes('medical_claim') && changedRatio > 0.15) {
         drafts.push({
           candidateType: 'knowledge_hint',
-          title: 'Medical Guideline Association',
-          summary: 'AI draft and human final response diverged on clinical descriptions.',
-          suggestedRuleText: 'Verify clinical department mappings and guidelines before confirming procedures.',
-          evidenceSummary: 'Medical claim parameters were modified by operators.',
+          title: 'Tıbbi Yönlendirme ve Kılavuz Uyumu',
+          summary: 'AI taslağı ve insan yanıtı tıbbi açıklamalarda farklılık gösterdi.',
+          suggestedRuleText: 'İşlemleri onaylamadan önce klinik bölüm eşlemelerini ve yönergelerini doğrulayın.',
+          evidenceSummary: 'Tıbbi iddia parametreleri operatör tarafından değiştirildi.',
           riskLevel: resolveRiskLevel('high'),
           riskTags: ['knowledge', 'medical'],
           fingerprint: 'knowledge_hint:medical_claim'
@@ -228,10 +228,10 @@ export class TenantLearningCandidateService {
       if (containsPrice) {
         drafts.push({
           candidateType: 'answer_pattern',
-          title: 'Operator Pricing Reply Framework',
-          summary: 'Operators address pricing inquiries with a standard evaluation-first frame.',
-          suggestedRuleText: 'When asked about costs, explain that final rates are established after clinical checks.',
-          evidenceSummary: 'Operator pricing inquiry response pattern detected.',
+          title: 'Operatör Standart Fiyat Yanıt Şablonu',
+          summary: 'Operatörler fiyat sorularını muayene öncelikli standart bir çerçevede yanıtlıyor.',
+          suggestedRuleText: 'Fiyat sorulduğunda, nihai ücretlerin klinik kontrollerden sonra belirleneceğini açıklayın.',
+          evidenceSummary: 'Operatör fiyat sorgusu yanıt kalıbı tespit edildi.',
           riskLevel: resolveRiskLevel('medium'),
           riskTags: ['pattern', 'pricing'],
           fingerprint: 'answer_pattern:price_inquiry'
@@ -240,10 +240,10 @@ export class TenantLearningCandidateService {
       if (containsDoctor) {
         drafts.push({
           candidateType: 'answer_pattern',
-          title: 'Operator Doctor Scheduling Framework',
-          summary: 'Operators offer department calendars instead of specific physician commitments.',
-          suggestedRuleText: 'Focus response on clinical division availability instead of pledging specific doctors.',
-          evidenceSummary: 'Operator doctor assignment inquiry pattern detected.',
+          title: 'Operatör Standart Hekim Planlama Şablonu',
+          summary: 'Operatörler doğrudan hekim taahhüdü yerine ilgili bölümün genel takvimini sunuyor.',
+          suggestedRuleText: 'Yanıtı tekil hekim taahhütleri yerine klinik birimlerin uygunluğuna odaklayın.',
+          evidenceSummary: 'Operatör hekim atama sorgusu kalıbı tespit edildi.',
           riskLevel: resolveRiskLevel('medium'),
           riskTags: ['pattern', 'doctor'],
           fingerprint: 'answer_pattern:doctor_inquiry'
@@ -255,10 +255,10 @@ export class TenantLearningCandidateService {
     if (outcomeSignal === 'patient_angry' || sourceType === 'human_takeover') {
       drafts.push({
         candidateType: 'risk_warning',
-        title: 'Customer Frustration Signal Avoidance',
-        summary: 'Conversation resulted in user anger or required immediate operator takeover.',
-        suggestedRuleText: 'Adjust response tone to be less robotic or escalate to humans immediately.',
-        evidenceSummary: 'Negative customer sentiment or takeover signal was recorded.',
+        title: 'Kullanıcı Memnuniyetsizliği Önleme Uyarısı',
+        summary: 'Görüşme kullanıcının tepkisine yol açtı veya operatörün anında devralmasını gerektirdi.',
+        suggestedRuleText: 'Yanıt tonunu daha az robotik olacak şekilde ayarlayın veya doğrudan insan operatöre yönlendirin.',
+        evidenceSummary: 'Olumsuz müşteri psikolojisi veya devralma sinyali kaydedildi.',
         riskLevel: resolveRiskLevel('medium'),
         riskTags: ['risk', 'takeover'],
         fingerprint: 'risk_warning:frustration_detected'
@@ -271,10 +271,10 @@ export class TenantLearningCandidateService {
     if (hasMedicalClaim && containsSensitive) {
       drafts.push({
         candidateType: 'knowledge_hint',
-        title: 'Blocked Personal Clinical Instruction',
-        summary: 'Sensitive patient health information or specific single-patient details detected.',
-        suggestedRuleText: 'Clinical treatment or surgery plans must be evaluated manually.',
-        evidenceSummary: 'Sensitive single-patient clinical claim detected.',
+        title: 'Kişisel Klinik Bilgi İçeren Riskli Aday',
+        summary: 'Tekil hastaya ait hassas klinik bilgi veya kişisel sağlık detayı tespit edildi.',
+        suggestedRuleText: 'Tedavi veya ameliyat planları otomatik öğrenmeye uygun değildir, manuel değerlendirilir.',
+        evidenceSummary: 'Hassas tekil hasta klinik iddiası tespit edildi.',
         riskLevel: 'blocked',
         riskTags: ['knowledge', 'blocked', 'phi'],
         fingerprint: 'knowledge_hint:blocked_clinical_details',

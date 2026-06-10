@@ -36,6 +36,7 @@ import {
   Brain
 } from "lucide-react";
 import Link from "next/link";
+import { translateContent } from "@/lib/utils/learning-translate";
 
 export default function LearningApprovalPage() {
   const params = useParams();
@@ -201,9 +202,9 @@ export default function LearningApprovalPage() {
     setIsFingerprintOpen(false);
     
     // Set edit fields
-    setEditedTitle(candidate.title);
-    setEditedSummary(candidate.summary);
-    setEditedRuleText(candidate.suggestedRuleText);
+    setEditedTitle(translateContent(candidate.title));
+    setEditedSummary(translateContent(candidate.summary));
+    setEditedRuleText(translateContent(candidate.suggestedRuleText));
     setEditedReviewNote(candidate.metadata.review_note || "");
 
     try {
@@ -363,7 +364,7 @@ export default function LearningApprovalPage() {
       'low': '🟢 Düşük Risk',
       'medium': '🟡 Orta Risk',
       'high': '🔴 Yüksek Risk',
-      'blocked': '⛔ ENGELLENMİŞ'
+      'blocked': '⛔ Engellenmiş / Kullanılamaz'
     };
     return map[level] || level;
   };
@@ -612,23 +613,32 @@ export default function LearningApprovalPage() {
                     </span>
                     
                     <span className="text-[10px] font-extrabold text-[#86868B] bg-slate-100 px-1.5 py-0.5 rounded">
-                      Güven: %{Math.round(parseFloat(candidate.confidenceScore) * 100)}
+                      Güven Skoru: {parseFloat(candidate.confidenceScore).toFixed(1)}
+                    </span>
+                    <span className="text-[10px] font-extrabold text-[#86868B] bg-slate-100 px-1.5 py-0.5 rounded">
+                      Kanıt: {Array.isArray(candidate.sourceEventIds) ? candidate.sourceEventIds.length : 0} olay
                     </span>
                   </div>
                   
                   <h3 className="text-[13px] font-extrabold text-[#1D1D1F] tracking-tight line-clamp-1">
-                    {candidate.title}
+                    {translateContent(candidate.title)}
                   </h3>
                   
                   <p className="text-[11px] text-[#86868B] font-semibold line-clamp-1">
-                    {candidate.summary}
+                    {translateContent(candidate.summary)}
                   </p>
+                  
+                  {candidate.riskLevel === 'blocked' && (
+                    <div className="text-[10px] font-bold text-red-500 mt-1.5">
+                      ⛔ Engellenmiş adaylar onaylanamaz.
+                    </div>
+                  )}
                 </div>
 
                 {/* Middle Section: Rule Text Preview */}
                 <div className="flex-1 max-w-md md:max-w-xl">
                   <p className="text-[11px] text-[#1D1D1F] bg-[#F5F5F7] p-2.5 rounded-xl border border-black/5 whitespace-nowrap overflow-hidden text-ellipsis font-mono leading-relaxed font-semibold">
-                    {candidate.suggestedRuleText}
+                    {translateContent(candidate.suggestedRuleText)}
                   </p>
                 </div>
 
@@ -665,7 +675,7 @@ export default function LearningApprovalPage() {
                               ? 'bg-slate-200 text-slate-400 cursor-not-allowed border-none'
                               : 'bg-indigo-600 hover:bg-indigo-700'
                           }`}
-                          title={candidate.riskLevel === 'blocked' ? 'Engellenmiş (Onaylanamaz)' : 'Onayla'}
+                          title={candidate.riskLevel === 'blocked' ? 'Engellenmiş adaylar onaylanamaz.' : 'Onayla'}
                         >
                           <Check className="w-3.5 h-3.5" />
                         </button>
@@ -769,8 +779,8 @@ export default function LearningApprovalPage() {
                 <div className="bg-red-50 border border-red-200 rounded-2xl p-3 flex items-start gap-2.5">
                   <ShieldAlert className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
                   <div className="text-[10px] font-semibold text-red-900 leading-normal">
-                    <span className="font-bold">KRİTİK ENGEL:</span> Bu aday tıbbi veya hukuki açıdan sakıncalı içerik barındırdığı için 
-                    sistem tarafından engellenmiştir. Onaylanamaz. Sadece reddedilebilir veya yok sayılabilir.
+                    <span className="font-bold">KRİTİK ENGEL:</span> Bu aday engellenmiştir. Hassas/kişisel sağlık bilgisi veya 
+                    tekil hasta detayı içerdiği için onaylanamaz ve bot yanıtlarında kullanılamaz.
                   </div>
                 </div>
               )}
@@ -792,15 +802,18 @@ export default function LearningApprovalPage() {
                     {getCandidateTypeLabel(selectedCandidate.candidateType)}
                   </span>
                 </div>
-                <div>Güven Puanı: 
+                <div>Güven Skoru: 
                   <span className="text-[#1D1D1F] block mt-0.5 font-extrabold text-indigo-600">
-                    %{Math.round(parseFloat(selectedCandidate.confidenceScore) * 100)}
+                    {parseFloat(selectedCandidate.confidenceScore).toFixed(1)}
                   </span>
                 </div>
                 <div>Risk Düzeyi: 
                   <span className="text-[#1D1D1F] block mt-0.5">
                     {getRiskLevelIndicator(selectedCandidate.riskLevel)}
                   </span>
+                  {selectedCandidate.riskLevel === 'blocked' && (
+                    <span className="text-red-500 text-[9px] font-bold block mt-0.5">Runtime kullanıma uygun değil</span>
+                  )}
                 </div>
                 <div>Kaynak Sayısı: 
                   <span className="text-[#1D1D1F] block mt-0.5">
@@ -826,7 +839,7 @@ export default function LearningApprovalPage() {
                   <span>Soyut Kanıt Gerekçesi</span>
                 </div>
                 <p className="text-[11px] text-[#1D1D1F] font-semibold leading-relaxed bg-[#F5F5F7] p-2.5 rounded-xl border border-black/5 leading-relaxed">
-                  {selectedCandidate.evidenceSummary}
+                  {translateContent(selectedCandidate.evidenceSummary)}
                 </p>
                 <div className="flex flex-wrap gap-1 pt-1">
                   {selectedCandidate.riskTags.map(tag => (
@@ -907,9 +920,9 @@ export default function LearningApprovalPage() {
                     <button
                       onClick={handleSaveContent}
                       disabled={savingContent || (
-                        editedTitle === selectedCandidate.title &&
-                        editedSummary === selectedCandidate.summary &&
-                        editedRuleText === selectedCandidate.suggestedRuleText &&
+                        editedTitle === translateContent(selectedCandidate.title) &&
+                        editedSummary === translateContent(selectedCandidate.summary) &&
+                        editedRuleText === translateContent(selectedCandidate.suggestedRuleText) &&
                         editedReviewNote === (selectedCandidate.metadata.review_note || "")
                       )}
                       className="px-4 py-2 bg-indigo-600 disabled:opacity-40 hover:bg-indigo-700 text-white text-[11px] font-extrabold rounded-xl shadow-sm transition-all cursor-pointer"
@@ -939,46 +952,55 @@ export default function LearningApprovalPage() {
             </div>
 
             {/* Drawer Footer Actions */}
-            <div className="bg-white border-t border-black/5 p-4 flex items-center gap-2">
-              {selectedCandidate.status === 'pending' ? (
-                <>
+            <div className="bg-white border-t border-black/5 p-4 flex flex-col gap-2">
+              <div className="flex items-center gap-2 w-full">
+                {selectedCandidate.status === 'pending' ? (
+                  <>
+                    <button
+                      onClick={() => handleStatusChange(selectedCandidate, 'ignored')}
+                      disabled={actionLoading !== null}
+                      className="flex-1 py-2.5 border border-slate-200 hover:bg-slate-50 text-slate-600 text-[12px] font-extrabold rounded-xl transition-all"
+                    >
+                      Yok Say
+                    </button>
+                    <button
+                      onClick={() => handleStatusChange(selectedCandidate, 'rejected')}
+                      disabled={actionLoading !== null}
+                      className="flex-1 py-2.5 border border-red-200 hover:bg-red-50 text-red-600 text-[12px] font-extrabold rounded-xl transition-all"
+                    >
+                      Reddet
+                    </button>
+                    <button
+                      onClick={() => handleStatusChange(selectedCandidate, 'approved')}
+                      disabled={actionLoading !== null || selectedCandidate.riskLevel === 'blocked'}
+                      className={`flex-1 py-2.5 text-white text-[12px] font-extrabold rounded-xl shadow-sm transition-all ${
+                        selectedCandidate.riskLevel === 'blocked'
+                          ? 'bg-slate-200 text-slate-400 cursor-not-allowed border-none'
+                          : 'bg-indigo-600 hover:bg-indigo-700'
+                      }`}
+                      title={selectedCandidate.riskLevel === 'blocked' ? 'Engellenmiş adaylar onaylanamaz.' : 'Onayla'}
+                    >
+                      {actionLoading === "approved" ? "..." : "Onayla"}
+                    </button>
+                  </>
+                ) : selectedCandidate.status === 'ignored' ? (
                   <button
-                    onClick={() => handleStatusChange(selectedCandidate, 'ignored')}
+                    onClick={() => handleStatusChange(selectedCandidate, 'pending')}
                     disabled={actionLoading !== null}
-                    className="flex-1 py-2.5 border border-slate-200 hover:bg-slate-50 text-slate-600 text-[12px] font-extrabold rounded-xl transition-all"
+                    className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[12px] font-extrabold rounded-xl shadow-sm transition-all"
                   >
-                    Yok Say
+                    {actionLoading === "pending" ? "..." : "Sıraya Geri Al"}
                   </button>
-                  <button
-                    onClick={() => handleStatusChange(selectedCandidate, 'rejected')}
-                    disabled={actionLoading !== null}
-                    className="flex-1 py-2.5 border border-red-200 hover:bg-red-50 text-red-600 text-[12px] font-extrabold rounded-xl transition-all"
-                  >
-                    Reddet
-                  </button>
-                  <button
-                    onClick={() => handleStatusChange(selectedCandidate, 'approved')}
-                    disabled={actionLoading !== null || selectedCandidate.riskLevel === 'blocked'}
-                    className={`flex-1 py-2.5 text-white text-[12px] font-extrabold rounded-xl shadow-sm transition-all ${
-                      selectedCandidate.riskLevel === 'blocked'
-                        ? 'bg-slate-200 text-slate-400 cursor-not-allowed border-none'
-                        : 'bg-indigo-600 hover:bg-indigo-700'
-                    }`}
-                  >
-                    {actionLoading === "approved" ? "..." : "Onayla"}
-                  </button>
-                </>
-              ) : selectedCandidate.status === 'ignored' ? (
-                <button
-                  onClick={() => handleStatusChange(selectedCandidate, 'pending')}
-                  disabled={actionLoading !== null}
-                  className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[12px] font-extrabold rounded-xl shadow-sm transition-all"
-                >
-                  {actionLoading === "pending" ? "..." : "Sıraya Geri Al"}
-                </button>
-              ) : (
-                <div className="w-full text-center py-2.5 text-[11px] font-extrabold text-[#86868B]">
-                  Bu aday {selectedCandidate.status === 'approved' ? 'ONAYLANDI' : 'REDDEDİLDİ'} durumundadır ve içeriği düzenlenemez.
+                ) : (
+                  <div className="w-full text-center py-2.5 text-[11px] font-extrabold text-[#86868B]">
+                    Bu aday {selectedCandidate.status === 'approved' ? 'ONAYLANDI' : 'REDDEDİLDİ'} durumundadır ve içeriği düzenlenemez.
+                  </div>
+                )}
+              </div>
+              
+              {selectedCandidate.status === 'pending' && selectedCandidate.riskLevel === 'blocked' && (
+                <div className="w-full text-center text-[10px] font-bold text-red-500 mt-1">
+                  ⚠️ Engellenmiş adaylar onaylanamaz.
                 </div>
               )}
             </div>
