@@ -121,6 +121,7 @@ export async function GET(req: NextRequest) {
     // 6. Ensure conversations has required columns for the worker pipeline
     await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`;
     await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_channel TEXT`;
+    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb`;
     results.push('conversations columns: OK');
 
     // 7. Ensure leads has customer_id for Unified Identity linking
@@ -580,12 +581,12 @@ export async function POST(req: NextRequest) {
     // 7. Validate required columns on conversations
     const convColumns = await sql`
       SELECT column_name FROM information_schema.columns
-      WHERE table_name = 'conversations' AND column_name IN ('customer_id', 'updated_at', 'last_channel')
+      WHERE table_name = 'conversations' AND column_name IN ('customer_id', 'updated_at', 'last_channel', 'metadata')
     `;
     checks.push({
       check: 'conversations_columns',
-      status: convColumns.length >= 3 ? 'pass' : 'fail',
-      detail: `${convColumns.length}/3 required columns present`
+      status: convColumns.length >= 4 ? 'pass' : 'fail',
+      detail: `${convColumns.length}/4 required columns present`
     });
 
     const failed = checks.filter(c => c.status === 'fail');
