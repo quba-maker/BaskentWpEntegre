@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CheckCircle2, X, XCircle } from "lucide-react";
+import { CheckCircle2, X, XCircle, RefreshCw } from "lucide-react";
 import { useRouter, useParams } from "next/navigation";
 import { useInboxStore } from "@/store/inbox-store";
 import { useFormsList } from "@/components/features/forms/hooks/useFormsList";
@@ -525,39 +525,58 @@ export default function FormsPage() {
       />
 
       {/* Sync progress centered modal notification */}
-      {(syncProgress.status === 'completed' || syncProgress.status === 'error') && (
+      {(isSyncing || syncProgress.status === 'completed' || syncProgress.status === 'error') && (
         <>
           {/* Overlay Background */}
           <div 
             className="fixed inset-0 bg-black/45 backdrop-blur-sm z-[100] transition-opacity animate-in fade-in duration-200"
-            onClick={clearSyncProgress}
+            onClick={isSyncing ? undefined : clearSyncProgress}
           />
           {/* Centered Modal Card */}
           <div className="fixed inset-0 z-[101] flex items-center justify-center p-4 pointer-events-none">
             <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-black/5 p-6 text-center relative overflow-hidden animate-in zoom-in-95 duration-200 pointer-events-auto text-left flex flex-col gap-3">
               
-              <button 
-                onClick={clearSyncProgress}
-                className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 transition-colors w-6 h-6 flex items-center justify-center rounded-full hover:bg-slate-100 cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
+              {!isSyncing && (
+                <button 
+                  onClick={clearSyncProgress}
+                  className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 transition-colors w-6 h-6 flex items-center justify-center rounded-full hover:bg-slate-100 cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
 
               <div className="text-center">
-                {syncProgress.status === 'completed' ? (
+                {isSyncing ? (
+                  <RefreshCw className="w-12 h-12 text-blue-500 mx-auto mb-2.5 animate-spin" />
+                ) : syncProgress.status === 'completed' ? (
                   <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto mb-2.5" />
                 ) : (
                   <XCircle className="w-12 h-12 text-rose-500 mx-auto mb-2.5" />
                 )}
                 
                 <h3 className={`text-base font-bold uppercase tracking-wider ${
-                  syncProgress.status === 'completed' ? 'text-emerald-600' : 'text-rose-600'
+                  isSyncing ? 'text-blue-600' : syncProgress.status === 'completed' ? 'text-emerald-600' : 'text-rose-600'
                 }`}>
-                  {syncProgress.status === 'completed' ? 'Senkronizasyon Tamamlandı' : 'Senkronizasyon Başarısız'}
+                  {isSyncing ? 'Senkronize Ediliyor' : syncProgress.status === 'completed' ? 'Senkronizasyon Tamamlandı' : 'Senkronizasyon Başarısız'}
                 </h3>
               </div>
 
-              {syncProgress.status === 'completed' ? (
+              {isSyncing ? (
+                <div className="space-y-3 my-2 text-center">
+                  <p className="text-xs font-semibold text-slate-600">
+                    {syncProgress.message || 'Lütfen bekleyin...'}
+                  </p>
+                  <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden border border-slate-100 shadow-inner">
+                    <div 
+                      className="bg-blue-600 h-full rounded-full transition-all duration-300"
+                      style={{ width: `${syncProgress.progress}%` }}
+                    />
+                  </div>
+                  <span className="text-[10px] font-bold text-slate-400">
+                    %{syncProgress.progress} tamamlandı
+                  </span>
+                </div>
+              ) : syncProgress.status === 'completed' ? (
                 <>
                   <div className="space-y-2 my-2 p-4 bg-slate-50 border border-slate-100 rounded-xl text-xs font-semibold text-slate-600">
                     <div className="flex justify-between">
@@ -594,6 +613,15 @@ export default function FormsPage() {
                 <p className="text-xs font-medium text-rose-900 bg-rose-50 border border-rose-100 rounded-xl p-3 my-2 leading-relaxed text-left max-h-32 overflow-y-auto">
                   {syncProgress.message}
                 </p>
+              )}
+
+              {!isSyncing && (
+                <button
+                  onClick={clearSyncProgress}
+                  className="mt-2 w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-all cursor-pointer border border-black/5 text-center"
+                >
+                  Kapat
+                </button>
               )}
 
             </div>

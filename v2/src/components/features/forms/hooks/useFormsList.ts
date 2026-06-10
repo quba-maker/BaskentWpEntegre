@@ -78,12 +78,12 @@ export function useFormsList() {
   const handleSync = async () => {
     try {
       setIsSyncing(true);
-      setSyncProgress({ status: 'starting', progress: 10, message: 'Google Sheets bağlantısı kontrol ediliyor...' });
+      setSyncProgress({ status: 'starting', progress: 10, message: 'Bağlantı kontrol ediliyor...' });
       
       const steps = [
         { progress: 30, message: 'Veriler okunuyor...' },
-        { progress: 50, message: 'Yeni / güncel kayıtlar tespit ediliyor...' },
-        { progress: 80, message: 'Lead kayıtları güncelleniyor...' },
+        { progress: 55, message: 'Kayıtlar karşılaştırılıyor...' },
+        { progress: 80, message: 'Form listesi güncelleniyor...' },
         { progress: 95, message: 'Sonuç hazırlanıyor...' }
       ];
 
@@ -119,29 +119,20 @@ export function useFormsList() {
             duration: durationSeconds
           } : undefined
         });
-        setSize(1);
+        
+        // Use Promise chain to prevent revalidation race conditions
+        await setSize(1);
         mutate();
         mutateCounts();
         mutateMetadata();
-
-        // 5 seconds auto-close
-        setTimeout(() => {
-          setSyncProgress(prev => prev.status === 'completed' ? { status: '', progress: 0, message: '' } : prev);
-        }, 5000);
       } else {
         const errMsg = res.error || "Senkronizasyon başarısız.";
         setSyncProgress({ status: 'error', progress: 0, message: errMsg });
-        setTimeout(() => {
-          setSyncProgress(prev => prev.status === 'error' ? { status: '', progress: 0, message: '' } : prev);
-        }, 5000);
       }
     } catch (e: any) {
       setIsSyncing(false);
       const errMsg = e?.message || 'Senkronizasyon başlatılamadı.';
       setSyncProgress({ status: 'error', progress: 0, message: errMsg });
-      setTimeout(() => {
-        setSyncProgress(prev => prev.status === 'error' ? { status: '', progress: 0, message: '' } : prev);
-      }, 5000);
     }
   };
 

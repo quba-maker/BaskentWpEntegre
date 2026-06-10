@@ -34,7 +34,9 @@ export function normalizeFormValue(val: string | null | undefined): string {
     'rusya': 'Rusya',
     'ukrayna': 'Ukrayna',
     'türkiye': 'Türkiye',
-    'turkiye': 'Türkiye'
+    'turkiye': 'Türkiye',
+    'turkmenistan': 'Türkmenistan',
+    'türkmenistan': 'Türkmenistan'
   };
 
   const lowerTrimmed = clean.toLowerCase().trim();

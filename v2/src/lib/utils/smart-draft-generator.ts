@@ -40,6 +40,34 @@ export function normalizeTurkishTypos(text: string): string {
   return res;
 }
 
+// Helper to clean and normalize complaint texts (remove greetings/typos)
+export function cleanComplaintGreeting(text: string): string {
+  if (!text) return "";
+  let clean = text.trim();
+  
+  // Remove greetings and personal pronouns at start
+  const greetingPattern = /^(merhaba|selam|selamlar|iyi günler|iyi gunler|iyi akşamlar|iyi aksamlar|mrb|slm|benim|ben|adım|ismim|adım soyadım|ad soyad|şikayetim|sikayetim|rahatsızlığım|rahatsizligim|şikayetimiz|sikayetimiz)\s+/i;
+  let prev = "";
+  while (clean !== prev) {
+    prev = clean;
+    clean = clean.replace(greetingPattern, "").trim();
+  }
+
+  // Remove leading punctuation if any (like commas, dashes, colons)
+  clean = clean.replace(/^[\s.,:;\-—–]+/, '').trim();
+  
+  // Normalize typical patient grammar typos
+  clean = clean
+    .replace(/\bayagime\b/gi, "ayağıma")
+    .replace(/\bayagıma\b/gi, "ayağıma")
+    .replace(/\bbacagime\b/gi, "bacağıma")
+    .replace(/\bbacagıma\b/gi, "bacağıma")
+    .replace(/\bagriyor\b/gi, "ağrıyor")
+    .replace(/\bcok\b/gi, "çok");
+
+  return clean;
+}
+
 // Clean internal technical patterns
 export function sanitizeCampaignString(text: string): string {
   if (!text) return "";
@@ -100,8 +128,8 @@ export function extractFormSlots(rawData: any, defaultFormName?: string): FormSl
   const formNameRaw = data.form_name || defaultFormName || "";
   const campaignRaw = extractField(data, ['campaign', 'campaign_name', 'kampanya', 'ad_name']);
 
-  // Typo normalization
-  let complaintText = complaintRaw ? normalizeFormValue(normalizeTurkishTypos(complaintRaw.trim())) : "";
+  // Typo normalization and greeting cleanup
+  let complaintText = complaintRaw ? cleanComplaintGreeting(normalizeFormValue(normalizeTurkishTypos(complaintRaw.trim()))) : "";
   
   // Whitelist / filter internal campaign details or phone checks
   const ignoredKeywords = ["gurbet", "gurbetci", "form", "randevu", "funnel", "campaign", "adset", "leadgen", "dogru", "telefon", "dorgu"];
@@ -188,28 +216,51 @@ export function generateDeterministikDraft(
 ): string {
   let summarySentence = "";
   const durationText = slots.durationText ? ` ve bu durumun yaklaşık ${slots.durationText.toLowerCase()} devam ettiğini` : '';
-  const complaintLower = slots.complaintText ? slots.complaintText.toLowerCase() : "";
+  let resolvedComplaint = slots.complaintText ? slots.complaintText.trim() : "";
+  const complaintLower = resolvedComplaint.toLowerCase();
+
+  if (complaintLower.includes("fıtı") || complaintLower.includes("fitig") || complaintLower.includes("fıtıg") || complaintLower.includes("fıtık") || complaintLower.includes("fitik")) {
+    if (complaintLower.includes("boyun")) {
+      resolvedComplaint = "boyun fıtığına bağlı ağrı";
+    } else {
+      resolvedComplaint = "bel fıtığına bağlı ağrı";
+    }
+  } else if (complaintLower.includes("diz ağrısı") || complaintLower.includes("diz agrisi")) {
+    resolvedComplaint = "diz ağrısı";
+  } else if (complaintLower.includes("diz kapağı ağrısı") || complaintLower.includes("diz kapagi agrisi")) {
+    resolvedComplaint = "diz kapağı ağrısı";
+  } else if (resolvedComplaint.length > 50) {
+    resolvedComplaint = slots.departmentHint === "Ortopedi" ? "ortopedik şikayetleriniz" : 
+                        slots.departmentHint === "Kardiyoloji" ? "kalp damar sağlığıyla ilgili şikayetleriniz" :
+                        slots.departmentHint === "Beyin Cerrahi" ? "beyin ve sinir cerrahisi alanındaki şikayetleriniz" :
+                        "sağlık durumunuzla ilgili şikayetleriniz";
+  }
+
+  // Capitalize first letter of resolvedComplaint
+  if (resolvedComplaint) {
+    resolvedComplaint = resolvedComplaint.charAt(0).toUpperCase() + resolvedComplaint.slice(1);
+  }
 
   if (slots.departmentHint === "Ortopedi") {
-    const sikayetOzet = slots.complaintText ? `${slots.complaintText} şikayetiniz olduğunu` : "ortopedik şikayetleriniz olduğunu";
+    const sikayetOzet = resolvedComplaint ? `${resolvedComplaint} şikayetiniz olduğunu` : "ortopedik şikayetleriniz olduğunu";
     summarySentence = `${sikayetOzet}${durationText} belirtmişsiniz. Öncelikle geçmiş olsun.`;
   } 
   else if (slots.departmentHint === "Kardiyoloji") {
     if (complaintLower.includes("stent") || complaintLower.includes("bypass") || complaintLower.includes("anjiyo")) {
       summarySentence = `Daha önce anjiyo, stent veya bypass işlemi geçirdiğinizi ve kontrol amaçlı değerlendirilmek istediğinizi belirtmişsiniz. Öncelikle geçmiş olsun.`;
-    } else if (slots.complaintText) {
-      summarySentence = `${slots.complaintText} şikayetiniz olduğunu${durationText} belirtmişsiniz. Öncelikle geçmiş olsun.`;
+    } else if (resolvedComplaint) {
+      summarySentence = `${resolvedComplaint} şikayetiniz olduğunu${durationText} belirtmişsiniz. Öncelikle geçmiş olsun.`;
     } else {
       summarySentence = `Kalp damar sağlığınızla ilgili şikayetleriniz olduğunu belirtmişsiniz. Öncelikle geçmiş olsun.`;
     }
   }
   else if (slots.departmentHint === "Beyin Cerrahi") {
-    if (complaintLower.includes("boyun fıtığı") || complaintLower.includes("boyun fitigi")) {
+    if (complaintLower.includes("boyun fıtığı") || complaintLower.includes("boyun fitigi") || complaintLower.includes("boyun fıtıgı")) {
       summarySentence = `Boyun fıtığı şikayetiniz olduğunu${durationText} belirtmişsiniz. Öncelikle geçmiş olsun.`;
-    } else if (complaintLower.includes("bel ağrısı") || complaintLower.includes("bel agrisi") || complaintLower.includes("bel fıtığı") || complaintLower.includes("bel fitigi")) {
-      summarySentence = `${slots.complaintText} şikayetiniz olduğunu${durationText} belirtmişsiniz. Öncelikle geçmiş olsun.`;
+    } else if (complaintLower.includes("bel ağrısı") || complaintLower.includes("bel agrisi") || complaintLower.includes("bel fıtığı") || complaintLower.includes("bel fitigi") || complaintLower.includes("bel fıtıgı") || complaintLower.includes("fıtık") || complaintLower.includes("fitik")) {
+      summarySentence = `${resolvedComplaint} şikayetiniz olduğunu${durationText} belirtmişsiniz. Öncelikle geçmiş olsun.`;
     } else {
-      const sikayetOzet = slots.complaintText ? `${slots.complaintText} şikayetiniz olduğunu` : "beyin ve sinir cerrahisi alanındaki şikayetleriniz olduğunu";
+      const sikayetOzet = resolvedComplaint ? `${resolvedComplaint} şikayetiniz olduğunu` : "beyin ve sinir cerrahisi alanındaki şikayetleriniz olduğunu";
       summarySentence = `${sikayetOzet}${durationText} belirtmişsiniz. Öncelikle geçmiş olsun.`;
     }
   }
@@ -230,18 +281,22 @@ export function generateDeterministikDraft(
   if (slots.requestedAppointmentText) {
     const isOnlyNumber = /^\d+$/.test(slots.requestedAppointmentText);
     if (isOnlyNumber && slots.requestedAppointmentText.length <= 2) {
-      bookingQuestion = `Randevu tarihi alanına “${slots.requestedAppointmentText}” yazmışsınız; bunu ayın ${slots.requestedAppointmentText}’i mi yoksa ${getMonthNameFromNumber(slots.requestedAppointmentText)} ayı olarak mı düşündüğünüzü netleştirebilir misiniz? Uygun değerlendirme ve randevu planlaması için ${travelDestination} ne zaman gelmeyi düşündüğünüzü bizimle paylaşabilir misiniz?`;
+      bookingQuestion = `Randevu tarihi alanına “${slots.requestedAppointmentText}” yazmışsınız; bunu ayın ${slots.requestedAppointmentText}’i mi yoksa ${getMonthNameFromNumber(slots.requestedAppointmentText)} ayı olarak mı düşündüğünüzü netleştirebilir misiniz? Randevu planlaması ve uygun yönlendirme için ${travelDestination} gelmeyi düşündüğünüz yaklaşık tarihi bizimle paylaşabilir misiniz?`;
     } else {
-      bookingQuestion = `Randevu tarihi olarak “${slots.requestedAppointmentText}” belirtmişsiniz. Uygun değerlendirme ve randevu planlaması için ${travelDestination} ne zaman gelmeyi düşündüğünüzü bizimle paylaşabilir misiniz?`;
+      bookingQuestion = `Randevu tarihi olarak “${slots.requestedAppointmentText}” belirtmişsiniz. Randevu planlaması ve uygun yönlendirme için ${travelDestination} gelmeyi düşündüğünüz yaklaşık tarihi bizimle paylaşabilir misiniz?`;
     }
   } else {
-    bookingQuestion = `Uygun değerlendirme ve randevu planlaması için ${travelDestination} gelmeyi düşündüğünüz yaklaşık tarihi bizimle paylaşabilir misiniz?`;
+    bookingQuestion = `Randevu planlaması ve uygun yönlendirme için ${travelDestination} gelmeyi düşündüğünüz yaklaşık tarihi bizimle paylaşabilir misiniz?`;
   }
 
-  const greeting = `Merhaba,\n\n${tenantDisplayName} adına, doldurduğunuz form doğrultusunda sizinle iletişime geçiyoruz.`;
-  const closing = `İyi günler dileriz.`;
+  let introPara = 'Merhaba,\n\n';
+  if (!tenantDisplayName || tenantDisplayName === 'Kurumumuz' || tenantDisplayName === 'Ekibimiz') {
+    introPara += `Doldurduğunuz form doğrultusunda sizinle iletişime geçiyoruz. ${summarySentence}`;
+  } else {
+    introPara += `${tenantDisplayName} olarak doldurduğunuz form doğrultusunda sizinle iletişime geçiyoruz. ${summarySentence}`;
+  }
 
-  const blocks = [greeting, summarySentence, bookingQuestion, closing];
+  const blocks = [introPara, bookingQuestion, "İyi günler dileriz."];
   return blocks.filter(Boolean).join('\n\n');
 }
 
@@ -266,7 +321,17 @@ export function validateDraft(draftText: string, slots: FormSlots, detectedDepar
     /campaign/i,
     /adset/i,
     /leadgen/i,
-    /funnel/gi
+    /funnel/gi,
+    /muayene/i,
+    /tetkik/i,
+    /takip süreci/i,
+    /hastanemize geldiğinizde/i,
+    /doktorumuz tarafından/i,
+    /uzman doktor/i,
+    /klinik/i,
+    /tedavi/i,
+    /ameliyat/i,
+    /kesin/i
   ];
 
   if (draftPurpose === 'first_contact_intent_check') {
@@ -275,7 +340,6 @@ export function validateDraft(draftText: string, slots: FormSlots, detectedDepar
       /tedavi aldınız mı/i,
       /\bmr\b/i,
       /röntgen/i,
-      /tetkik/i,
       /görüntüleme/i,
       /rapor/i,
       /ilaç/i,
@@ -359,6 +423,14 @@ export async function generateSmartDraft(
 
   try {
     const travelDestination = locationName ? `Türkiye’ye, ${locationName} lokasyonumuza` : 'Türkiye’ye';
+    
+    let introGreetingRule = '';
+    if (!tenantDisplayName || tenantDisplayName === 'Kurumumuz' || tenantDisplayName === 'Ekibimiz') {
+      introGreetingRule = `Doldurduğunuz form doğrultusunda sizinle iletişime geçiyoruz.`;
+    } else {
+      introGreetingRule = `${tenantDisplayName} olarak doldurduğunuz form doğrultusunda sizinle iletişime geçiyoruz.`;
+    }
+
     const systemInstruction = `Sen bir Hastane Karşılama Asistanı AI modelisin. Görevin, hastanın doldurduğu form verilerini (slotları) inceleyerek, ona son derece profesyonel, sıcak, kurallara uygun ve güvenli bir WhatsApp karşılama mesaj taslağı hazırlamaktır.
 Yanıtını sadece belirtilen JSON formatında üretmelisin. JSON haricinde hiçbir metin, tırnak veya markdown bloğu (örn. \`\`\`json) KESİNLİKLE ekleme.
 
@@ -366,15 +438,17 @@ Yanıtını sadece belirtilen JSON formatında üretmelisin. JSON haricinde hiç
 1. KESİNLİKLE İSİMLE HİTAP ETME. "Merhaba Ahmet Bey", "Güley Hanım" gibi ifadeler KESİNLİKLE YASAKTIR. Selamlama her zaman sadece "Merhaba," olmalıdır.
 2. "Bey", "Hanım", "Bay", "Bayan" kelimelerini KESİNLİKLE kullanma.
 3. KESİNLİKLE fiyat bilgisi veya aralığı verme.
-4. KESİNLİKLE kesin tanı, teşhis, tedavi garantisi, ameliyat yönlendirmesi veya hekim adı verme. Tıbbi olarak kesin veya bağlayıcı diller kullanmaktan kaçın. "Doktorumuz kesin değerlendirir" veya "tedavi edilir" yerine "durumunuz incelenir" gibi yumuşak, genel dilleri tercih et.
-5. "Ön görüşme", "ön değerlendirme" ifadelerini kullanma.
-6. Kampanya kodlarını (örn. 2026_AVRUPA_TR_ORTOPEDI_BF_FUNNEL), internal ID'leri, adset, leadgen gibi teknik kelimeleri KESİNLİKLE hastaya yazma. Bunları sadece departmanı anlamak için kullan.
-7. Şehir ve ülke isimlerine ek getirirken hata yapmamak için şu güvenli kalıbı kullan: "Yaşadığınız yer olarak [Şehir/Ülke] bilgisini paylaşmışsınız."
-8. Eğer randevu tarihi alanında sadece "8" gibi tekil belirsiz bir sayı varsa: "Randevu tarihi alanına “8” yazmışsınız; bunu ayın 8’i mi yoksa Ağustos ayı olarak mı düşündüğünüzü netleştirebilir misiniz?" şeklinde sor.
-9. Hekim adı veya hekim yönlendirme dili kullanma. "Bölümümüz tanı ve tedavi hizmeti vermektedir" gibi broşür dili KULLANMA.
-10. Hastaya ${travelDestination} ne zaman gelmeyi düşündüğünü sor.
-11. KESİNLİKLE Başkent, Konya, Rüya veya başka bir kurum adını kendin uydurma veya ekleme. Sadece sana verilen ${tenantDisplayName} değerini kullan.
-12. Mesajı kısa, doğal, hasta-facing ve son derece profesyonel tut.
+4. KESİNLİKLE kesin tanı, teşhis, tedavi garantisi, ameliyat yönlendirmesi veya hekim adı verme.
+5. KESİNLİKLE hastaya tıbbi açıklamalarda bulunma. Hastanın hastalığı, belirtileri, sinir sıkışması veya anatomik durumlarıyla ilgili tıbbi açıklamalar yapmak (örn. "bel fıtığı bacağa yayılan ağrılara neden olabilir") KESİNLİKLE YASAKTIR.
+6. KESİNLİKLE hastaneye gelindiğinde yapılacak klinik işlemleri, muayeneleri, tetkikleri veya takip süreçlerini detaylandırma (örn. "hastanemize geldiğinizde doktorumuz muayene eder, takip süreci planlanır" vb.) KESİNLİKLE YASAKTIR.
+7. "Ön görüşme", "ön değerlendirme" ifadelerini kullanma.
+8. Kampanya kodlarını (örn. 2026_AVRUPA_TR_ORTOPEDI_BF_FUNNEL), internal ID'leri, adset, leadgen gibi teknik kelimeleri KESİNLİKLE hastaya yazma. Bunları sadece departmanı anlamak için kullan.
+9. Şehir ve ülke isimlerine ek getirirken hata yapmamak için şu güvenli kalıbı kullan: "Yaşadığınız yer olarak [Şehir/Ülke] bilgisini paylaşmışsınız."
+10. Eğer randevu tarihi alanında sadece "8" gibi tekil belirsiz bir sayı varsa: "Randevu tarihi alanına “8” yazmışsınız; bunu ayın 8’i mi yoksa Ağustos ayı olarak mı düşündüğünüzü netleştirebilir misiniz?" şeklinde sor.
+11. Hekim adı veya hekim yönlendirme dili kullanma. "Bölümümüz tanı ve tedavi hizmeti vermektedir" gibi broşür dili KULLANMA.
+12. Hastaya ${travelDestination} ne zaman gelmeyi düşündüğünü sor.
+13. KESİNLİKLE Başkent, Konya, Rüya veya başka bir kurum adını kendin uydurma veya ekleme. Sadece sana verilen ${tenantDisplayName} değerini kullan.
+14. Mesajı son derece kısa, doğal, sıcak, hasta-facing tut. KESİNLİKLE tıbbi jargona veya hastane broşür stiline girme.
 
 === FIRST CONTACT INTENT CHECK RULES (KRİTİK) ===
 Bu taslak hastaya atılacak ilk mesajdır ve asıl amaç hastanın randevu veya gelme NİYETİNİ öğrenmektir, TIBBİ DANIŞMANLIK veya yönlendirme vermek değildir.
@@ -385,16 +459,16 @@ AŞAĞIDAKİ SORULAR VE KONULAR KESİNLİKLE YASAKTIR:
 - "İlaç kullanıyor musunuz?"
 - "Ameliyat önerildi mi?", "PRP", "Kök hücre", "İğne denendi mi?", "Anjiyo yapıldı mı?", "Fizik tedavi gördünüz mü?"
 
-=== TASLAK METNİ BÖLÜM VE SIRALAMA KURALLARI (HER PARAGRAF ARASI BİR BOŞ SATIR OLMALI) ===
-1. Açılış: "Merhaba,"
-2. Kurumsal giriş: "${tenantDisplayName} adına, doldurduğunuz form doğrultusunda sizinle iletişime geçiyoruz."
-3. Form Şikayetini Anlama: Hastanın şikayetini ve varsa süresini doğal bir Türkçe ile belirterek geçmiş olsun de. Örn: "Diz kapağı ağrısı şikayetiniz olduğunu belirtmişsiniz. Öncelikle geçmiş olsun." Veya "Daha önce anjiyo, stent veya bypass işlemi geçirdiğinizi ve kontrol amaçlı değerlendirilmek istediğinizi belirtmişsiniz. Öncelikle geçmiş olsun."
-4. Geliş Niyeti/Tarih Sorusu: Yaşadığı yer belirtilmişse önce "Yaşadığınız yer olarak Stuttgart bilgisini paylaşmışsınız." de, sonra "Uygun değerlendirme ve randevu planlaması için ${travelDestination} ne zaman gelmeyi düşündüğünüzü bizimle paylaşabilir misiniz?" cümlesini ekle. Eğer belirtilmemişse direkt soru cümlesini sor.
-5. Kapanış: "İyi günler dileriz."
+=== TASLAK METNİ BÖLÜM VE SIRALAMA KURALLARI (TASLAK MAKSİMUM 3 KISA PARAGRAF OLMALIDIR) ===
+1. Paragraf 1 (Selamlama + Giriş + Şikayet Teyidi): "Merhaba," kelimesinden sonra çift satır boşluk bırak ve ardından "${introGreetingRule}" cümlesini ekle. Hemen ardına hastanın şikayetini ve varsa süresini doğal bir Türkçe ile belirterek geçmiş olsun de.
+   - Örn: "Merhaba,\n\n${tenantDisplayName} olarak doldurduğunuz form doğrultusunda sizinle iletişime geçiyoruz. Diz kapağı ağrısı şikayetiniz olduğunu belirtmişsiniz. Öncelikle geçmiş olsun."
+   - Hastanın şikayet verisindeki "merhaba", "selam", "benim", "adım" gibi gereksiz giriş kelimelerini tamamen ayıkla.
+2. Paragraf 2 (Geliş Niyeti/Tarih Sorusu): Yaşadığı yer belirtilmişse "Yaşadığınız yer olarak Stuttgart bilgisini paylaşmışsınız." ifadesini ekleyerek, "Randevu planlaması ve uygun yönlendirme için ${travelDestination} ne zaman gelmeyi düşündüğünüzü bizimle paylaşabilir misiniz?" veya "Randevu planlaması için ${travelDestination} ne zaman gelmeyi düşündüğünüzü bizimle paylaşabilir misiniz?" sorusunu sor.
+3. Paragraf 3 (Kapanış): "İyi günler dileriz." cümlesi ile kapat.
 
 === RETURN JSON FORMAT ===
 {
-  "draftText": "Oluşturduğun WhatsApp mesaj taslağı (satır boşlukları için \\n\\n kullan)",
+  "draftText": "Oluşturduğun WhatsApp mesaj taslağı (satır boşlukları için \\n\\n kullan. Maksimum 3 kısa paragraf olmalıdır.)",
   "detectedDepartment": "Ortopedi" | "Kardiyoloji" | "Beyin Cerrahi" | "Check-up" | "Genel",
   "complaintSummary": "Hastanın şikayetinin çok kısa özeti",
   "confidence": "high" | "medium" | "low",
