@@ -60,6 +60,12 @@ export default function FormsPage() {
   } = useFormsList();
 
   const [selectedForm, setSelectedForm] = useState<any>(null);
+  const [showPerformanceDetails, setShowPerformanceDetails] = useState(false);
+
+  const clearSyncProgressAndDetails = () => {
+    setShowPerformanceDetails(false);
+    clearSyncProgress();
+  };
 
   const detailState = useFormDetailState(selectedForm, mutate);
 
@@ -530,7 +536,7 @@ export default function FormsPage() {
           {/* Overlay Background */}
           <div 
             className="fixed inset-0 bg-black/45 backdrop-blur-sm z-[100] transition-opacity animate-in fade-in duration-200"
-            onClick={isSyncing ? undefined : clearSyncProgress}
+            onClick={isSyncing ? undefined : clearSyncProgressAndDetails}
           />
           {/* Centered Modal Card */}
           <div className="fixed inset-0 z-[101] flex items-center justify-center p-4 pointer-events-none">
@@ -538,7 +544,7 @@ export default function FormsPage() {
               
               {!isSyncing && (
                 <button 
-                  onClick={clearSyncProgress}
+                  onClick={clearSyncProgressAndDetails}
                   className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 transition-colors w-6 h-6 flex items-center justify-center rounded-full hover:bg-slate-100 cursor-pointer"
                 >
                   <X className="w-4 h-4" />
@@ -588,7 +594,11 @@ export default function FormsPage() {
                       <span className="text-slate-900 font-bold">{syncProgress.stats?.updated ?? 0}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span>Atlanan kayıt:</span>
+                      <span>Değişmeyen kayıt:</span>
+                      <span className="text-slate-900 font-bold">{syncProgress.stats?.unchanged ?? 0}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Çakışan/Tekrar eden:</span>
                       <span className="text-slate-900 font-bold">{syncProgress.stats?.duplicates ?? 0}</span>
                     </div>
                     <div className="flex justify-between">
@@ -598,11 +608,56 @@ export default function FormsPage() {
                       </span>
                     </div>
                     <div className="border-t border-slate-200/60 pt-2 flex justify-between text-[10px] text-slate-400 font-medium">
-                      <span>Süre:</span>
+                      <span>Toplam Süre:</span>
                       <span>{syncProgress.stats?.duration ?? '0'} sn</span>
                     </div>
                   </div>
-                  <p className="text-[11px] text-[#86868B] font-medium leading-relaxed italic bg-blue-50/50 border border-blue-100/50 rounded-xl p-2.5">
+
+                  {/* Collapsible Performance Details */}
+                  <div className="border-t border-slate-100 pt-3 mt-1 text-left">
+                    <button
+                      onClick={() => setShowPerformanceDetails(!showPerformanceDetails)}
+                      className="flex items-center justify-between w-full text-slate-500 hover:text-slate-750 transition-colors text-xs font-bold select-none cursor-pointer"
+                    >
+                      <span>Performans Detayları</span>
+                      <span className="text-[9px] text-slate-400">{showPerformanceDetails ? '▲ Gösterimi Kapat' : '▼ Ayrıntıları Göster'}</span>
+                    </button>
+                    {showPerformanceDetails && (
+                      <div className="mt-2.5 space-y-2.5 p-3.5 bg-slate-50 border border-slate-100 rounded-xl text-[11px] font-semibold text-slate-500 animate-in fade-in duration-150">
+                        <div className="font-bold text-slate-700 uppercase tracking-wider text-[9px] mb-1.5">Sunucu işlemi</div>
+                        <div className="flex justify-between pl-2 border-l border-slate-200">
+                          <span>Google Sheets Okuma:</span>
+                          <span className="text-slate-800 font-medium">
+                            {((syncProgress.telemetry?.authDurationMs || 0) + (syncProgress.telemetry?.readDurationMs || 0)).toFixed(0)} ms
+                          </span>
+                        </div>
+                        <div className="flex justify-between pl-2 border-l border-slate-200">
+                          <span>Satır Analizi:</span>
+                          <span className="text-slate-800 font-medium">
+                            {((syncProgress.telemetry?.parseDurationMs || 0) + (syncProgress.telemetry?.dupDetectionDurationMs || 0)).toFixed(0)} ms
+                          </span>
+                        </div>
+                        <div className="flex justify-between pl-2 border-l border-slate-200">
+                          <span>Veritabanı Güncelleme:</span>
+                          <span className="text-slate-800 font-medium">
+                            {(syncProgress.telemetry?.dbDurationMs || 0).toFixed(0)} ms
+                          </span>
+                        </div>
+                        
+                        <div className="font-bold text-slate-700 uppercase tracking-wider text-[9px] mt-2 mb-1.5">Arayüz yenileme</div>
+                        <div className="flex justify-between pl-2 border-l border-slate-200">
+                          <span>Liste Yenileme:</span>
+                          <span className="text-slate-800 font-medium">
+                            {((syncProgress.telemetry?.formsListRevalidateMs || 0) + 
+                              (syncProgress.telemetry?.statusCountsRevalidateMs || 0) + 
+                              (syncProgress.telemetry?.syncMetadataRevalidateMs || 0)).toFixed(0)} ms
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <p className="text-[11px] text-[#86868B] font-medium leading-relaxed italic bg-blue-50/50 border border-blue-100/50 rounded-xl p-2.5 mt-1">
                     💡 Yeni kayıtlar başarıyla alındı. Mevcut filtre veya arama kriterleriniz nedeniyle bazı yeni kayıtlar listede görünmeyebilir.
                   </p>
                   <p className="text-xs text-emerald-600 font-bold text-center mt-1">
@@ -617,7 +672,7 @@ export default function FormsPage() {
 
               {!isSyncing && (
                 <button
-                  onClick={clearSyncProgress}
+                  onClick={clearSyncProgressAndDetails}
                   className="mt-2 w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-all cursor-pointer border border-black/5 text-center"
                 >
                   Kapat

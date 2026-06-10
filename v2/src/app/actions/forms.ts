@@ -668,11 +668,20 @@ export async function syncGoogleSheets() {
         totalRows: result.totalRows,
         created: result.created,
         updated: result.updated,
+        unchanged: result.unchanged || 0,
         duplicates: result.duplicates,
         errors: result.errors,
         partial: result.partial
       };
-      console.log('[SYNC_COMPLETED]', stats);
+      const telemetry = result.telemetry || {
+        authDurationMs: 0,
+        readDurationMs: 0,
+        parseDurationMs: 0,
+        dupDetectionDurationMs: 0,
+        dbDurationMs: 0,
+        totalDurationMs: 0
+      };
+      console.log('[SYNC_COMPLETED]', stats, telemetry);
 
       logAudit({
         tenantId: ctx.tenantId,
@@ -681,19 +690,25 @@ export async function syncGoogleSheets() {
         action: 'google_sheets_sync_completed',
         entityType: 'integration',
         entityId: 'google_sheets',
-        details: stats
+        details: { stats, telemetry }
       });
 
       return {
         success: true,
         message: result.message,
-        stats
+        stats,
+        telemetry
       };
     }
   ).then(res => {
     console.log('[SYNC_ACTION_RETURN]', JSON.stringify(res).slice(0, 300));
     if (!res.success) return { success: false, error: res.error || res.data?.error };
-    return { success: true, message: res.data?.message, stats: res.data?.stats };
+    return { 
+      success: true, 
+      message: res.data?.message, 
+      stats: res.data?.stats,
+      telemetry: res.data?.telemetry
+    };
   });
 }
 

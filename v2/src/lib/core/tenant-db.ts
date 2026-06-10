@@ -147,5 +147,8 @@ export class TenantDB {
 
 // Global olarak çağrılacak factory
 export function withTenantDB(tenantId: string, isAdmin: boolean = false) {
+  if ((global as any).mockDb) {
+    return (global as any).mockDb;
+  }
   return new TenantDB(tenantId, isAdmin);
 }

@@ -21,9 +21,21 @@ export function useFormsList() {
     stats?: {
       created: number;
       updated: number;
+      unchanged: number;
       duplicates: number;
       errors: number;
       duration: string;
+    };
+    telemetry?: {
+      authDurationMs: number;
+      readDurationMs: number;
+      parseDurationMs: number;
+      dupDetectionDurationMs: number;
+      dbDurationMs: number;
+      totalDurationMs: number;
+      formsListRevalidateMs?: number;
+      statusCountsRevalidateMs?: number;
+      syncMetadataRevalidateMs?: number;
     };
   }>({ status: '', progress: 0, message: '' });
 
@@ -107,6 +119,20 @@ export function useFormsList() {
       setIsSyncing(false);
 
       if (res.success) {
+        // Measure SWR revalidation times sequentially to prevent race conditions
+        const formsListStart = Date.now();
+        await setSize(1);
+        await mutate();
+        const formsListRevalidateMs = Date.now() - formsListStart;
+
+        const countsStart = Date.now();
+        await mutateCounts();
+        const statusCountsRevalidateMs = Date.now() - countsStart;
+
+        const metaStart = Date.now();
+        await mutateMetadata();
+        const syncMetadataRevalidateMs = Date.now() - metaStart;
+
         setSyncProgress({
           status: 'completed',
           progress: 100,
@@ -114,17 +140,18 @@ export function useFormsList() {
           stats: res.stats ? {
             created: res.stats.created || 0,
             updated: res.stats.updated || 0,
+            unchanged: res.stats.unchanged || 0,
             duplicates: res.stats.duplicates || 0,
             errors: res.stats.errors || 0,
             duration: durationSeconds
+          } : undefined,
+          telemetry: res.telemetry ? {
+            ...res.telemetry,
+            formsListRevalidateMs,
+            statusCountsRevalidateMs,
+            syncMetadataRevalidateMs
           } : undefined
         });
-        
-        // Use Promise chain to prevent revalidation race conditions
-        await setSize(1);
-        mutate();
-        mutateCounts();
-        mutateMetadata();
       } else {
         const errMsg = res.error || "Senkronizasyon başarısız.";
         setSyncProgress({ status: 'error', progress: 0, message: errMsg });

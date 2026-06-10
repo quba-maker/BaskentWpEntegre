@@ -3,6 +3,7 @@ import { logger } from '@/lib/core/logger';
 import { CredentialsService } from '@/lib/services/credentials.service';
 import { logAudit } from '@/lib/audit';
 import { normalizePhoneForIdentity } from '@/lib/utils/phone-identity';
+import * as crypto from 'crypto';
 
 const log = logger.withContext({ module: 'SheetsIngestion' });
 
@@ -99,12 +100,21 @@ export interface IngestBatchResult {
   created: number;
   updated: number;
   duplicates: number;
+  unchanged?: number;
   errors: number;
   /** true if processing stopped early due to time/row limit */
   partial: boolean;
   /** Human-readable message */
   message: string;
   errorDetails?: string;
+  telemetry?: {
+    authDurationMs: number;
+    readDurationMs: number;
+    parseDurationMs: number;
+    dupDetectionDurationMs: number;
+    dbDurationMs: number;
+    totalDurationMs: number;
+  };
 }
 
 export interface PhoneColumn {
@@ -179,6 +189,111 @@ function parseDate(dateStr: string | null | undefined): Date {
   const standard = new Date(dateStr);
   if (!isNaN(standard.getTime())) return standard;
   return new Date();
+}
+
+// ═══════════════════════════════════════════════════════════
+// INCREMENTAL SYNC & FINGERPRINTING HELPERS
+// ═══════════════════════════════════════════════════════════
+
+function normalizeString(val: string | null | undefined): string {
+  if (!val) return '';
+  return String(val).trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function normalizePhoneForHash(phone: string): string {
+  let digits = String(phone || '').replace(/[^0-9]/g, '');
+  if (digits.startsWith('0')) {
+    const inferred = inferCountryFromLocal(digits);
+    if (inferred) {
+      digits = inferred + digits.substring(1);
+    } else {
+      digits = '90' + digits.substring(1);
+    }
+  }
+  return digits;
+}
+
+function normalizeTimeForHash(time: string | null | undefined): string {
+  if (!time) return '';
+  try {
+    const d = new Date(time);
+    if (!isNaN(d.getTime())) {
+      return d.toISOString();
+    }
+  } catch (_) {}
+  return String(time).trim().toLowerCase();
+}
+
+export function computeRowFingerprint(tenantId: string, fields: {
+  phone: string;
+  name: string | null;
+  email: string | null;
+  formName: string;
+  notes: string | null;
+  createdTime: string | null;
+}): string {
+  const normPhone = normalizePhoneForHash(fields.phone);
+  const normName = normalizeString(fields.name);
+  const normEmail = normalizeString(fields.email);
+  const normForm = normalizeString(fields.formName);
+  const normNotes = normalizeString(fields.notes);
+  const normTime = normalizeTimeForHash(fields.createdTime);
+
+  const payload = [
+    tenantId,
+    normPhone,
+    normName,
+    normEmail,
+    normForm,
+    normNotes,
+    normTime
+  ].join('|');
+
+  return crypto.createHash('sha256').update(payload).digest('hex');
+}
+
+export function getCanonicalKey(phone: string, formName: string, createdTime: string | null): string {
+  const normPhone = normalizePhoneForHash(phone);
+  const normForm = normalizeString(formName);
+  const normTime = normalizeTimeForHash(createdTime);
+  return `${normPhone}_${normForm}_${normTime}`;
+}
+
+function getExistingFingerprint(rawDataVal: any): string | null {
+  if (!rawDataVal) return null;
+  try {
+    const obj = typeof rawDataVal === 'string' ? JSON.parse(rawDataVal) : rawDataVal;
+    return obj?._google_sheets_fingerprint || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function mergeRawData(existingRaw: any, incomingRawString: string, fingerprint: string): string {
+  let existingObj: Record<string, any> = {};
+  if (existingRaw) {
+    try {
+      existingObj = typeof existingRaw === 'string' ? JSON.parse(existingRaw) : existingRaw;
+    } catch (_) {
+      existingObj = { _corrupted_raw_data_fallback: String(existingRaw) };
+    }
+  }
+
+  let incomingObj: Record<string, any> = {};
+  if (incomingRawString) {
+    try {
+      incomingObj = JSON.parse(incomingRawString);
+    } catch (_) {}
+  }
+
+  const merged = {
+    ...existingObj,
+    ...incomingObj,
+    _google_sheets_fingerprint: fingerprint,
+    _updated_at: new Date().toISOString()
+  };
+
+  return JSON.stringify(merged);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -682,20 +797,31 @@ export async function ingestSheetBatch(params: IngestBatchParams): Promise<Inges
   let totalRows = 0;
   let created = 0;
   let updated = 0;
+  let unchanged = 0;
   let duplicates = 0;
   let errors = 0;
   let partial = false;
 
+  let authDurationMs = 0;
+  let readDurationMs = 0;
+  let parseDurationMs = 0;
+  let dupDetectionDurationMs = 0;
+  let dbDurationMs = 0;
+
   try {
     // ── 1. Fetch spreadsheet metadata ──
+    const authStart = Date.now();
     const BASE_URL = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`;
     const metaResp = await fetch(`${BASE_URL}?key=${apiKey}&fields=sheets.properties`);
+    authDurationMs = Date.now() - authStart;
+
     if (!metaResp.ok) {
       const errorText = await metaResp.text();
       log.error('[BATCH_META_ERROR]', new Error(errorText.slice(0, 300)));
       return {
-        success: false, totalRows: 0, created: 0, updated: 0, duplicates: 0, errors: 1,
-        partial: false, message: `Google Sheets API hatası (${metaResp.status})`, errorDetails: errorText.slice(0, 500)
+        success: false, totalRows: 0, created: 0, updated: 0, unchanged: 0, duplicates: 0, errors: 1,
+        partial: false, message: `Google Sheets API hatası (${metaResp.status})`, errorDetails: errorText.slice(0, 500),
+        telemetry: { authDurationMs, readDurationMs: 0, parseDurationMs: 0, dupDetectionDurationMs: 0, dbDurationMs: 0, totalDurationMs: Date.now() - startTime }
       };
     }
 
@@ -718,29 +844,35 @@ export async function ingestSheetBatch(params: IngestBatchParams): Promise<Inges
 
     if (tabs.length === 0) {
       return {
-        success: true, totalRows: 0, created: 0, updated: 0, duplicates: 0, errors: 0,
-        partial: false, message: 'Spreadsheet\'te görünür sekme bulunamadı.'
+        success: true, totalRows: 0, created: 0, updated: 0, unchanged: 0, duplicates: 0, errors: 0,
+        partial: false, message: 'Spreadsheet\'te görünür sekme bulunamadı.',
+        telemetry: { authDurationMs, readDurationMs: 0, parseDurationMs: 0, dupDetectionDurationMs: 0, dbDurationMs: 0, totalDurationMs: Date.now() - startTime }
       };
     }
 
     log.info('[BATCH_TABS]', { tabs, source });
 
     // ── 3. Fetch all rows (batch API) ──
+    const readStart = Date.now();
     const rangeParams = tabs.map((t: string) => `ranges=${encodeURIComponent(t)}`).join('&');
     const batchUrl = `${BASE_URL}/values:batchGet?key=${apiKey}&${rangeParams}&valueRenderOption=FORMATTED_VALUE`;
     const batchResp = await fetch(batchUrl);
+    readDurationMs = Date.now() - readStart;
+
     if (!batchResp.ok) {
       const errorText = await batchResp.text();
       log.error('[BATCH_FETCH_ERROR]', new Error(errorText.slice(0, 300)));
       return {
-        success: false, totalRows: 0, created: 0, updated: 0, duplicates: 0, errors: 1,
-        partial: false, message: `Satır verileri alınamadı (${batchResp.status})`, errorDetails: errorText.slice(0, 500)
+        success: false, totalRows: 0, created: 0, updated: 0, unchanged: 0, duplicates: 0, errors: 1,
+        partial: false, message: `Satır verileri alınamadı (${batchResp.status})`, errorDetails: errorText.slice(0, 500),
+        telemetry: { authDurationMs, readDurationMs, parseDurationMs: 0, dupDetectionDurationMs: 0, dbDurationMs: 0, totalDurationMs: Date.now() - startTime }
       };
     }
 
     const batchData = await batchResp.json();
 
     // ── 4. Parse all rows from all tabs ──
+    const parseStart = Date.now();
     const allRows: ParsedRow[] = [];
 
     for (let i = 0; i < batchData.valueRanges.length; i++) {
@@ -758,7 +890,7 @@ export async function ingestSheetBatch(params: IngestBatchParams): Promise<Inges
         continue;
       }
 
-      // Name detection: exact match first, then fallback — EXCLUDE ad_name, adset_name
+      // Name detection
       let nameIdx = findCol(headers, BATCH_NAME_EXACT, ['ad_', 'adset_']);
       if (nameIdx === -1) nameIdx = findCol(headers, BATCH_NAME_FALLBACK, ['ad_', 'adset_']);
 
@@ -773,14 +905,8 @@ export async function ingestSheetBatch(params: IngestBatchParams): Promise<Inges
         phoneCols: phoneCols.length
       });
 
-      // ── Process rows NEWEST-FIRST (reverse order) ──
-      // New form submissions are appended to the bottom of the sheet.
-      // By iterating from the last row upward, we ensure the most recent
-      // entries are processed first within the maxRowsPerRun budget.
       for (let r = values.length - 1; r >= 1; r--) {
         const row = values[r];
-
-        // ── COLUMN SHIFT DETECTION ──
         const colShift = headers.length - row.length;
         const getCell = (headerIdx: number): string | undefined => {
           if (headerIdx < 0) return undefined;
@@ -792,7 +918,6 @@ export async function ingestSheetBatch(params: IngestBatchParams): Promise<Inges
           return val;
         };
 
-        // STEP 1: Extract reference country code from Meta's phone_number
         let referenceCountryCode: string | null = null;
         for (const pc of phoneCols) {
           if (!pc.isWhatsapp) {
@@ -807,7 +932,6 @@ export async function ingestSheetBatch(params: IngestBatchParams): Promise<Inges
           }
         }
 
-        // STEP 2: Normalize all phones with country code inference
         const rawPhones: string[] = [];
         let whatsappPhone = '';
         let metaPhone = '';
@@ -823,20 +947,17 @@ export async function ingestSheetBatch(params: IngestBatchParams): Promise<Inges
           }
         }
 
-        // STEP 3: Smart dedup (suffix + containment)
         const allPhones = dedupPhones(rawPhones);
 
-        // STEP 4: Smart primary selection
         let primaryPhone = '';
         if (whatsappPhone && allPhones.some(p => p === whatsappPhone || p.endsWith(whatsappPhone) || whatsappPhone.endsWith(p))) {
           primaryPhone = allPhones.find(p => p.endsWith(whatsappPhone.slice(-9))) || whatsappPhone;
         }
         if (!primaryPhone && allPhones.length > 0) {
-          primaryPhone = allPhones[0]; // Longest (sorted by dedup)
+          primaryPhone = allPhones[0];
         }
         if (!primaryPhone) continue;
 
-        // ── CONTENT-AWARE FIELD EXTRACTION ──
         let name = nameIdx !== -1 && getCell(nameIdx) ? String(getCell(nameIdx)).substring(0, 100) : null;
         const looksLikePhone = (s: string) => /^[p:+\s]*[\d\s+\-()]{8,}$/.test(s.trim());
         const looksLikeName = (s: string) => /^[a-zA-ZÀ-ÿçÇğĞıİöÖşŞüÜ\s.''-]{2,}$/u.test(s.trim()) && s.trim().length <= 60;
@@ -856,7 +977,6 @@ export async function ingestSheetBatch(params: IngestBatchParams): Promise<Inges
           name = foundName;
         }
 
-        // Campaign/Form name — validate content
         let campaignName = campaignIdx !== -1 && getCell(campaignIdx) ? String(getCell(campaignIdx)).substring(0, 200) : '';
         if (!campaignName || /^[cf]:\d+$/.test(campaignName) || /^\d{10,}$/.test(campaignName)) {
           const formNameVal = getCell(findCol(headers, ['form_name'], ['form_id']));
@@ -889,7 +1009,6 @@ export async function ingestSheetBatch(params: IngestBatchParams): Promise<Inges
         let noteVal = noteIdx !== -1 && getCell(noteIdx) ? String(getCell(noteIdx)).substring(0, 5000) : null;
         noteVal = filterJunkNote(noteVal);
 
-        // Build raw_data preserving original header names
         const rawData: Record<string, string> = {};
         const origHeaders = values[0];
         origHeaders.forEach((h: string, idx: number) => { rawData[String(h).trim()] = row[idx] || ''; });
@@ -912,59 +1031,35 @@ export async function ingestSheetBatch(params: IngestBatchParams): Promise<Inges
     }
 
     totalRows = allRows.length;
-    log.info('[BATCH_PARSED]', { totalRows, tabs: tabs.length, source });
+    parseDurationMs = Date.now() - parseStart;
+    log.info('[BATCH_PARSED]', { totalRows, tabs: tabs.length, source, parseDurationMs });
 
     if (totalRows === 0) {
       return {
-        success: true, totalRows: 0, created: 0, updated: 0, duplicates: 0, errors: 0,
-        partial: false, message: 'Geçerli telefon numarası olan satır bulunamadı.'
+        success: true, totalRows: 0, created: 0, updated: 0, unchanged: 0, duplicates: 0, errors: 0,
+        partial: false, message: 'Geçerli telefon numarası olan satır bulunamadı.',
+        telemetry: { authDurationMs, readDurationMs, parseDurationMs, dupDetectionDurationMs: 0, dbDurationMs: 0, totalDurationMs: Date.now() - startTime }
       };
     }
 
-    // ── 5. Batch duplicate detection (single query + Set) ──
-    const existingPhones = await db.executeSafe({
-      text: `SELECT DISTINCT RIGHT(phone_number, 10) as phone_suffix FROM leads WHERE tenant_id = $1`,
+    // ── 5. Batch duplicate detection & fingerprinted comparisons ──
+    const dupStart = Date.now();
+    const existingLeads = await db.executeSafe({
+      text: `SELECT id, phone_number, form_name, created_at, raw_data FROM leads WHERE tenant_id = $1`,
       values: [tenantId]
     }) as any[];
 
-    const existingSet = new Set(existingPhones.map((r: any) => r.phone_suffix));
-    log.info('[BATCH_EXISTING]', { existingCount: existingSet.size });
-
-    // ── 6. Separate new vs existing, enforce limits ──
-    const seenPhones = new Set<string>();
-    const newRows: ParsedRow[] = [];
-    const updateRows: ParsedRow[] = [];
-
-    for (const row of allRows) {
-      // ── TIME BUDGET CHECK ──
-      if (Date.now() - startTime > timeBudgetMs) {
-        log.warn('[BATCH_TIME_BUDGET] Stopping early', { elapsed: Date.now() - startTime, processed: newRows.length + updateRows.length });
-        partial = true;
-        break;
-      }
-      // ── ROW LIMIT CHECK ──
-      if (newRows.length + updateRows.length >= maxRowsPerRun) {
-        log.warn('[BATCH_ROW_LIMIT] Max rows reached', { maxRowsPerRun });
-        partial = true;
-        break;
-      }
-
-      const suffix = row.phone.slice(-10);
-      if (seenPhones.has(suffix)) continue; // in-batch duplicate
-      seenPhones.add(suffix);
-
-      if (existingSet.has(suffix)) {
-        updateRows.push(row);
-      } else {
-        newRows.push(row);
-      }
+    // Map existing leads by composite canonical key: normalized_phone + formName + createdTime
+    const existingLeadsMap = new Map<string, any>();
+    for (const lead of existingLeads) {
+      const dbTime = lead.created_at ? new Date(lead.created_at).toISOString() : '';
+      const key = getCanonicalKey(lead.phone_number, lead.form_name, dbTime);
+      existingLeadsMap.set(key, lead);
     }
 
-    duplicates = updateRows.length;
-    log.info('[BATCH_DEDUP]', { new: newRows.length, update: updateRows.length, partial });
-
-    // ── 7. Batch INSERT in chunks of 50 ──
-    const CHUNK_SIZE = 50;
+    const seenKeys = new Set<string>();
+    const newRows: ParsedRow[] = [];
+    const changedRows: { row: ParsedRow; leadId: string; existingRawData: any }[] = [];
 
     const parseCreatedTime = (raw: string | null): string => {
       if (!raw) return new Date().toISOString();
@@ -975,8 +1070,69 @@ export async function ingestSheetBatch(params: IngestBatchParams): Promise<Inges
       return new Date().toISOString();
     };
 
+    for (const row of allRows) {
+      if (Date.now() - startTime > timeBudgetMs) {
+        log.warn('[BATCH_TIME_BUDGET] Stopping early during partitioning', { elapsed: Date.now() - startTime });
+        partial = true;
+        break;
+      }
+      if (newRows.length + changedRows.length >= maxRowsPerRun) {
+        log.warn('[BATCH_ROW_LIMIT] Max rows reached during partitioning', { maxRowsPerRun });
+        partial = true;
+        break;
+      }
+
+      const sheetTime = parseCreatedTime(row.createdTime);
+      const rowKey = getCanonicalKey(row.phone, row.formName, sheetTime);
+
+      if (seenKeys.has(rowKey)) {
+        duplicates++;
+        continue;
+      }
+      seenKeys.add(rowKey);
+
+      const fingerprint = computeRowFingerprint(tenantId, {
+        phone: row.phone,
+        name: row.name,
+        email: row.email,
+        formName: row.formName,
+        notes: row.notes,
+        createdTime: row.createdTime
+      });
+
+      const matchedLead = existingLeadsMap.get(rowKey);
+
+      if (!matchedLead) {
+        // Prepare rawData with fingerprint for insertion
+        const parsed = JSON.parse(row.rawData);
+        parsed['_google_sheets_fingerprint'] = fingerprint;
+        newRows.push({
+          ...row,
+          rawData: JSON.stringify(parsed)
+        });
+      } else {
+        const existingFingerprint = getExistingFingerprint(matchedLead.raw_data);
+        if (existingFingerprint === fingerprint) {
+          unchanged++;
+        } else {
+          changedRows.push({
+            row,
+            leadId: matchedLead.id,
+            existingRawData: matchedLead.raw_data
+          });
+        }
+      }
+    }
+
+    dupDetectionDurationMs = Date.now() - dupStart;
+    log.info('[BATCH_DEDUP]', { new: newRows.length, changed: changedRows.length, unchanged, duplicates, partial, dupDetectionDurationMs });
+
+    // ── 6. DB operations: inserts and chunked updates ──
+    const dbStart = Date.now();
+    const CHUNK_SIZE = 50;
+
+    // Batch INSERT in chunks of 50
     for (let c = 0; c < newRows.length; c += CHUNK_SIZE) {
-      // Time budget re-check during inserts
       if (Date.now() - startTime > timeBudgetMs) {
         log.warn('[BATCH_INSERT_TIME_BUDGET] Stopping inserts early');
         partial = true;
@@ -1009,14 +1165,11 @@ export async function ingestSheetBatch(params: IngestBatchParams): Promise<Inges
 
         created += (insertedLeads || []).length;
 
-        // BATCH INGESTION IDENTITY ENGINE RESOLUTION
-        // Performance-guarded, time budget protected, non-fatal
         if (insertedLeads && insertedLeads.length > 0) {
           const { IdentityEngine } = await import('@/lib/services/ai/engines/identity');
           for (const lead of insertedLeads) {
-            // Guard: Check time budget to prevent Lambda timeout
             if (Date.now() - startTime > timeBudgetMs) {
-              log.warn('[BATCH_INSERT_IDENTITY_BUDGET] Skipping identity resolution for remaining new leads in this batch due to time budget limits');
+              log.warn('[BATCH_INSERT_IDENTITY_BUDGET] Skipping identity resolution due to time budget limits');
               break;
             }
             try {
@@ -1054,77 +1207,95 @@ export async function ingestSheetBatch(params: IngestBatchParams): Promise<Inges
       }
     }
 
-    // ── 8. Batch UPDATE existing leads (notes only if empty, raw_data always) ──
-    // P1B GUARD: Only updates leads table. NEVER touches conversations or opportunities.
-    for (const row of updateRows) {
-      // Time budget re-check during updates
+    // Parallel UPDATE chunks of 10
+    const UPDATE_CHUNK_SIZE = 10;
+    for (let u = 0; u < changedRows.length; u += UPDATE_CHUNK_SIZE) {
       if (Date.now() - startTime > timeBudgetMs) {
         log.warn('[BATCH_UPDATE_TIME_BUDGET] Stopping updates early');
         partial = true;
         break;
       }
 
-      try {
-        const suffix = row.phone.slice(-10);
-        const setClauses: string[] = [];
-        const updateParams: any[] = [];
-        let pIdx = 1;
+      const chunk = changedRows.slice(u, u + UPDATE_CHUNK_SIZE);
 
-        // Always update raw_data (latest sheet snapshot)
-        setClauses.push(`raw_data = $${pIdx}`);
-        updateParams.push(row.rawData);
-        pIdx++;
+      await Promise.all(chunk.map(async ({ row, leadId, existingRawData }) => {
+        try {
+          const fingerprint = computeRowFingerprint(tenantId, {
+            phone: row.phone,
+            name: row.name,
+            email: row.email,
+            formName: row.formName,
+            notes: row.notes,
+            createdTime: row.createdTime
+          });
 
-        // Update notes ONLY if current DB value is empty (P1B: never overwrite manual notes)
-        if (row.notes && row.notes.trim()) {
-          setClauses.push(`notes = COALESCE(NULLIF(notes, ''), $${pIdx})`);
-          updateParams.push(row.notes);
+          // Merge raw_data safely preserving existing properties
+          const mergedRaw = mergeRawData(existingRawData, row.rawData, fingerprint);
+
+          const setClauses: string[] = [];
+          const updateParams: any[] = [];
+          let pIdx = 1;
+
+          setClauses.push(`raw_data = $${pIdx}`);
+          updateParams.push(mergedRaw);
           pIdx++;
+
+          if (row.notes && row.notes.trim()) {
+            setClauses.push(`notes = COALESCE(NULLIF(notes, ''), $${pIdx})`);
+            updateParams.push(row.notes);
+            pIdx++;
+          }
+
+          if (row.name && row.name.trim()) {
+            setClauses.push(`patient_name = COALESCE(NULLIF(patient_name, ''), $${pIdx})`);
+            updateParams.push(row.name);
+            pIdx++;
+          }
+
+          if (row.formName) {
+            setClauses.push(`form_name = $${pIdx}`);
+            updateParams.push(row.formName);
+            pIdx++;
+          }
+
+          updateParams.push(tenantId, leadId);
+
+          await db.executeSafe({
+            text: `UPDATE leads SET ${setClauses.join(', ')}
+                   WHERE tenant_id = $${pIdx} AND id = $${pIdx + 1}`,
+            values: updateParams
+          });
+
+          updated++;
+        } catch (updateErr: any) {
+          log.error('[BATCH_UPDATE_ERROR] Chunk update failure', updateErr instanceof Error ? updateErr : new Error(String(updateErr)));
+          errors++;
         }
-
-        // Update patient_name if DB is empty
-        if (row.name && row.name.trim()) {
-          setClauses.push(`patient_name = COALESCE(NULLIF(patient_name, ''), $${pIdx})`);
-          updateParams.push(row.name);
-          pIdx++;
-        }
-
-        // Update form_name
-        if (row.formName) {
-          setClauses.push(`form_name = $${pIdx}`);
-          updateParams.push(row.formName);
-          pIdx++;
-        }
-
-        updateParams.push(tenantId, suffix);
-
-        await db.executeSafe({
-          text: `UPDATE leads SET ${setClauses.join(', ')}
-                 WHERE tenant_id = $${pIdx} AND RIGHT(phone_number, 10) = $${pIdx + 1}`,
-          values: updateParams
-        });
-        updated++;
-      } catch (updateErr: any) {
-        log.error('[BATCH_UPDATE_ERROR]', updateErr instanceof Error ? updateErr : new Error(String(updateErr)));
-        errors++;
-      }
+      }));
     }
 
-    const durationMs = Date.now() - startTime;
-    log.info('[BATCH_COMPLETED]', { created, updated, duplicates, errors, partial, durationMs, source });
+    dbDurationMs = Date.now() - dbStart;
+
+    const totalDurationMs = Date.now() - startTime;
+    log.info('[BATCH_COMPLETED]', { created, updated, unchanged, duplicates, errors, partial, totalDurationMs, source });
 
     const message = partial
-      ? `Kısmi sync: ${created} yeni, ${updated} güncellendi, ${duplicates} tekrar (zaman/satır limiti)`
-      : `${created} yeni kayıt eklendi. ${updated} güncellendi. ${duplicates} tekrar eden. Toplam ${totalRows} satır.`;
+      ? `Kısmi sync: ${created} yeni, ${updated} güncellendi, ${unchanged} değişmeyen, ${duplicates} kopya (zaman/satır limiti)`
+      : `${created} yeni kayıt eklendi. ${updated} güncellendi. ${unchanged} değişmeyen. ${duplicates} tekrar eden. Toplam ${totalRows} satır.`;
 
-    return { success: true, totalRows, created, updated, duplicates, errors, partial, message };
+    return {
+      success: true, totalRows, created, updated, unchanged, duplicates, errors, partial, message,
+      telemetry: { authDurationMs, readDurationMs, parseDurationMs, dupDetectionDurationMs, dbDurationMs, totalDurationMs }
+    };
 
   } catch (err: any) {
     log.error('[BATCH_FATAL_ERROR]', err instanceof Error ? err : new Error(String(err)));
+    const totalDurationMs = Date.now() - startTime;
     return {
-      success: false, totalRows, created, updated, duplicates, errors: errors + 1,
+      success: false, totalRows, created, updated, unchanged, duplicates, errors: errors + 1,
       partial: false, message: 'Sync hatası: ' + (err?.message || 'Unknown'),
-      errorDetails: err?.message
+      errorDetails: err?.message,
+      telemetry: { authDurationMs, readDurationMs, parseDurationMs, dupDetectionDurationMs, dbDurationMs, totalDurationMs }
     };
   }
 }
