@@ -2131,9 +2131,10 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
           role: 'assistant' as const,
           content: aiResponse.text
         });
+        const nameExample = identityConfig.personaName || 'Asistan';
         retryContextMessages.push({
           role: 'user' as const,
-          content: `DİKKAT: Ürettiğin Türkçe metinde ek hatası veya kendini tanıtma tekrarı tespit edildi. Kendini tanıtan kelimeleri/cümleleri (örneğin "Merhaba, ben Rüya...", "Rüya ben...") kesinlikle kullanma, doğrudan konuya girerek kısa ve sade bir cevap üret.`
+          content: `DİKKAT: Ürettiğin Türkçe metinde ek hatası veya kendini tanıtma tekrarı tespit edildi. Kendini tanıtan kelimeleri/cümleleri (örneğin "Merhaba, ben ${nameExample}...", "${nameExample} ben...") kesinlikle kullanma, doğrudan konuya girerek kısa ve sade bir cevap üret.`
         });
 
         aiResponse = await executeLLM(retryContextMessages);
@@ -3948,12 +3949,13 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       if (!qualityGate.valid) {
         this.log.warn(`[DEBOUNCE_WORKER] Quality gate failed on first attempt: ${qualityGate.reason}. Retrying...`, { traceId });
         
+        const nameExample = identityConfig.personaName || 'Asistan';
         const retryMessages = [
           ...aiMessages,
           { role: 'assistant' as const, content: aiResponse.text },
           {
             role: 'user' as const,
-            content: `DİKKAT: Ürettiğin Türkçe metinde ek hatası veya kendini tanıtma tekrarı tespit edildi. Kendini tanıtan kelimeleri/cümleleri (örneğin "Merhaba, ben Rüya...", "Rüya ben...") kesinlikle kullanma, doğrudan konuya girerek kısa ve sade bir cevap üret.`
+            content: `DİKKAT: Ürettiğin Türkçe metinde ek hatası veya kendini tanıtma tekrarı tespit edildi. Kendini tanıtan kelimeleri/cümleleri (örneğin "Merhaba, ben ${nameExample}...", "${nameExample} ben...") kesinlikle kullanma, doğrudan konuya girerek kısa ve sade bir cevap üret.`
           }
         ];
 

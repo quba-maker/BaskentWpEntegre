@@ -2,7 +2,7 @@
  * 🛡️ P0 Abuse & Profanity Detector (Hotfix - Refined)
  * 
  * Scans incoming patient messages for explicit curses, profanity,
- * slurs, and derogatory attacks against Rüya (the bot), the hospital,
+ * slurs, and derogatory attacks against the bot persona, the hospital,
  * doctors, or personnel.
  * 
  * Separates core insults/abuse from general patient frustration.
