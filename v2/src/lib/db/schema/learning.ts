@@ -25,3 +25,26 @@ export const tenantLearningEvents = pgTable('tenant_learning_events', {
   metadata: jsonb('metadata').default({}),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
+
+export const tenantLearningCandidates = pgTable('tenant_learning_candidates', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').references(() => tenants.id, { onDelete: 'cascade' }).notNull(),
+  organizationId: uuid('organization_id'),
+  channelId: uuid('channel_id').references(() => channels.id, { onDelete: 'set null' }),
+  conversationId: uuid('conversation_id').references(() => conversations.id, { onDelete: 'set null' }),
+  sourceEventIds: jsonb('source_event_ids').default([]).notNull(), // Array of UUIDs
+  candidateType: text('candidate_type').notNull(), // 'tone_rule', 'forbidden_phrase', 'cta_rule', 'policy_rule', 'answer_pattern', 'knowledge_hint', 'identity_rule', 'risk_warning'
+  title: text('title').notNull(),
+  summary: text('summary').notNull(),
+  suggestedRuleText: text('suggested_rule_text').notNull(),
+  evidenceSummary: text('evidence_summary').notNull(),
+  confidenceScore: numeric('confidence_score', { precision: 5, scale: 2 }).default('1.00').notNull(),
+  riskLevel: text('risk_level').notNull(), // 'low', 'medium', 'high', 'blocked'
+  riskTags: jsonb('risk_tags').default([]).notNull(), // Array of string tags
+  status: text('status').default('pending').notNull(), // 'pending', 'approved', 'rejected', 'ignored'
+  fingerprint: text('fingerprint').notNull(),
+  metadata: jsonb('metadata').default({}).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+

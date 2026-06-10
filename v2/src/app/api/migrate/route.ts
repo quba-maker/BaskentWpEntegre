@@ -441,9 +441,51 @@ export async function GET(req: NextRequest) {
 
     results.push('tenant_learning_events table, RLS and indexes: OK');
 
+    // Phase P1.1: tenant_learning_candidates
+    await sql`
+      CREATE TABLE IF NOT EXISTS tenant_learning_candidates (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        organization_id UUID,
+        channel_id UUID REFERENCES channels(id) ON DELETE SET NULL,
+        conversation_id UUID REFERENCES conversations(id) ON DELETE SET NULL,
+        source_event_ids JSONB DEFAULT '[]'::jsonb NOT NULL,
+        candidate_type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        suggested_rule_text TEXT NOT NULL,
+        evidence_summary TEXT NOT NULL,
+        confidence_score NUMERIC(5, 2) DEFAULT 1.00 NOT NULL,
+        risk_level TEXT NOT NULL,
+        risk_tags JSONB DEFAULT '[]'::jsonb NOT NULL,
+        status TEXT DEFAULT 'pending' NOT NULL,
+        fingerprint TEXT NOT NULL,
+        metadata JSONB DEFAULT '{}'::jsonb NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+        updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+      );
+    `;
+    await sql`ALTER TABLE tenant_learning_candidates ENABLE ROW LEVEL SECURITY`;
+    await sql`ALTER TABLE tenant_learning_candidates FORCE ROW LEVEL SECURITY`;
+    await sql`DROP POLICY IF EXISTS tenant_isolation_policy ON tenant_learning_candidates`;
+    await sql`
+      CREATE POLICY tenant_isolation_policy ON tenant_learning_candidates
+      FOR ALL
+      USING (
+        (current_setting('app.bypass_rls', true) = 'true')
+        OR (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)
+      )
+    `;
+    await sql`CREATE INDEX IF NOT EXISTS idx_tenant_learning_candidates_tenant ON tenant_learning_candidates(tenant_id)`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_tenant_learning_candidates_created ON tenant_learning_candidates(tenant_id, created_at DESC)`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_tenant_learning_candidates_type ON tenant_learning_candidates(tenant_id, candidate_type)`;
+    await sql`CREATE UNIQUE INDEX IF NOT EXISTS uniq_tenant_candidate_fingerprint ON tenant_learning_candidates(tenant_id, candidate_type, fingerprint)`;
+
+    results.push('tenant_learning_candidates table, RLS, indexes and unique fingerprint: OK');
+
     return NextResponse.json({ 
       success: true, 
-      message: 'Migration completed successfully (Phase 6, 1.3, Favorites/Archives and tenant_learning_events included)!',
+      message: 'Migration completed successfully (Phase 6, 1.3, Favorites/Archives, tenant_learning_events and tenant_learning_candidates included)!',
       details: results 
     });
   } catch (error: any) {
@@ -483,7 +525,7 @@ export async function POST(req: NextRequest) {
       'ai_runtime_logs', 'tool_permissions', 'feature_flags',
       'ai_audit_logs', 'ai_runtime_metrics', 'conversation_pins',
       'conversation_read_states', 'conversation_favorites',
-      'conversation_archives', 'tenant_learning_events'
+      'conversation_archives', 'tenant_learning_events', 'tenant_learning_candidates'
     ];
 
     const existingTables = await sql`
@@ -503,7 +545,7 @@ export async function POST(req: NextRequest) {
     // Verify RLS enablement status on new tables
     const rlsChecked = await sql`
       SELECT tablename, rowsecurity FROM pg_tables
-      WHERE schemaname = 'public' AND tablename IN ('conversation_favorites', 'conversation_archives', 'tenant_learning_events')
+      WHERE schemaname = 'public' AND tablename IN ('conversation_favorites', 'conversation_archives', 'tenant_learning_events', 'tenant_learning_candidates')
     `;
     for (const row of rlsChecked) {
       checks.push({
@@ -517,7 +559,7 @@ export async function POST(req: NextRequest) {
     const requiredIndexes = [
       'idx_ai_events_tenant', 'idx_ai_events_conversation', 'idx_ai_events_customer',
       'idx_brain_versions_tenant', 'idx_ai_runtime_logs_tenant', 'idx_ai_runtime_logs_type',
-      'idx_tenant_learning_events_tenant'
+      'idx_tenant_learning_events_tenant', 'idx_tenant_learning_candidates_tenant', 'uniq_tenant_candidate_fingerprint'
     ];
 
     const existingIndexes = await sql`
