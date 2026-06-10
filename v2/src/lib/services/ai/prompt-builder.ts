@@ -269,7 +269,7 @@ export class PromptBuilder {
     }
 
     let dynamicBrakesContext = '';
-    if (ctaOfferedRecently || angryPatientMode || isFirstAssistantTurn || (!isFirstAssistantTurn && !asksIdentity && !asksName) || asksIdentity || asksName || patientClaimsBot) {
+    if (ctaOfferedRecently || angryPatientMode || isFirstAssistantTurn || (!isFirstAssistantTurn && !asksIdentity && !asksName) || asksIdentity || asksName || patientClaimsBot || unifiedContext?.patientProvidedAvailability) {
       dynamicBrakesContext += `\n\n=== 🚨 DİNAMİK KALİTE VE FREN KURALLARI (DYNAMIC QUALITY BRAKES) ===\n`;
       if (isFirstAssistantTurn) {
         dynamicBrakesContext += `>> UYARI (İLK CEVAP ONAYI AKTİF): Bu hastaya vereceğin ilk cevaptır. Kesinlikle randevu planlama, arama, telefon görüşmesi, koordinatör araması teklif etme, uygun zaman aralığı sorma! Sadece hastanın sorusuna net, kısa ve güven verici cevap ver, randevu/arama teklifini kesinlikle sonraki mesajlara bırak.\n`;
@@ -282,6 +282,13 @@ export class PromptBuilder {
       }
       if (ctaOfferedRecently) {
         dynamicBrakesContext += `>> UYARI (FREKANS FRENİ AKTİF): Son 3 asistan mesajı içinde zaten randevu/telefon araması teklif edildi. Bu mesajda kesinlikle yeni bir randevu veya arama teklif etme, uygun zaman sorma.\n`;
+      }
+      if (unifiedContext?.patientProvidedAvailability) {
+        dynamicBrakesContext += `>> HASTA UYGUN ZAMAN BİLDİRDİ (PATIENT PROVIDED AVAILABILITY): Hasta telefon görüşmesi veya arama için uygun olduğu gün/saat bilgisini paylaştı.
+- Yeni bir randevu/arama CTA'sı isteme, kesinlikle "uygun zaman paylaşır mısınız?" veya "sizi ne zaman arayalım?" deme.
+- Kısa bir onay/teyit cevabı ver: "Uygun olduğunuz zamanı not aldım, hasta danışmanlarımız planlamayı kontrol edecek." çerçevesinde kal.
+- Kesinlikle "Türkiye saatiyle" ifadesini kullanma! Saat dilimi kelimesini kullanmadan sadece saati belirt ya da saati tekrarlamaktan kaçın.
+- Mesajını kısa tut.\n`;
       }
       if (asksIdentity) {
         dynamicBrakesContext += `>> KİMLİK SORUSU DİREKTİFİ: Hasta "Sen kimsin?" diye sordu. Kendini ${pName ? pName : 'hasta danışmanı'}${orgShort ? ` (${orgShort})` : ''} olarak tanıt, ama robotik veya teknik açıklamalar yapmadan doğal ve samimi bir şekilde cevap ver.${pName || orgShort ? ` (Örn: "${pName ? `Ben ${pName}` : 'Merhaba'}${orgShort ? `, ${orgShort} Hastanesi'nden yazıyorum` : ''}. Size tıbbi tedavi süreçleri ve randevular hakkında bilgi sunuyorum. Nasıl yardımcı olabilirim?")` : ''}.\n`;
@@ -632,7 +639,7 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/koordinatör arasında planlanan
 
     let finalPrompt = `${base}\n${crmContext}\n${healthcareOverlay}\n${dynamicBrakesContext}\n${knowledgeInjection}\n${timeContext}\n${confirmationContext}\n${phaseContext}\n${langContextText}\n${directiveContext}\n${confirmationDirective}\n${safetyGuardrails}`;
 
-    if (ctaOfferedRecently || angryPatientMode || isFirstAssistantTurn || (!isFirstAssistantTurn && !asksIdentity && !asksName)) {
+    if (ctaOfferedRecently || angryPatientMode || isFirstAssistantTurn || (!isFirstAssistantTurn && !asksIdentity && !asksName) || unifiedContext?.patientProvidedAvailability) {
       finalPrompt += `\n\n=== 🚨 DİNAMİK ENGELLEME VE FREN TALİMATLARI (OVERRIDING NEGATIVE CONSTRAINTS) ===\n`;
       if (isFirstAssistantTurn) {
         finalPrompt += `- KESİN YASAK: Bu hastaya verdiğin İLK CEVAP olduğu için kesinlikle randevu planlama, arama, telefon görüşmesi teklif etme, uygun zaman aralığı sorma! Sadece hastanın sorusuna net ve kısa cevap ver.\n`;
@@ -642,6 +649,9 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/koordinatör arasında planlanan
       }
       if (ctaOfferedRecently) {
         finalPrompt += `- KESİN YASAK: Son asistan mesajlarında randevu/telefon araması teklif edildiği için kesinlikle yeni bir randevu veya arama teyit etme, teklif etme, uygun zaman sorma!\n`;
+      }
+      if (unifiedContext?.patientProvidedAvailability) {
+        finalPrompt += `- HASTA UYGUN ZAMAN BİLDİRDİ KURALI: Hasta uygun gün/saat verdi. Kesinlikle yeni bir randevu/arama CTA'sı isteme, "uygun zaman paylaşır mısınız?" deme, "Türkiye saatiyle" kelimesini kullanma. Sadece uygun olduğu zamanı not aldığını ve koordinatörlerin/hasta danışmanlarının planlamayı kontrol edeceğini belirten kısa bir onay cevabı yaz.\n`;
       }
       if (!isFirstAssistantTurn && !asksIdentity && !asksName) {
         finalPrompt += `- KESİN YASAK (KENDİNİ TANITMA VE SELAMLAMA YASAĞI): Konuşmanın devamındayız (bu ilk mesajın değil) ve hasta ismini/kimliğini sormamıştır. Kesinlikle ${pName ? `"${pName} ben", "ben ${pName}", ` : ''}${orgShort ? `"${orgShort}'dan", ` : ''}kendini tanıtan veya ismini söyleyen ifadeleri KULLANMA. Karşılamayı ilk mesajda zaten yaptın. Mesajına isimsiz, doğrudan hastanın sorusuna cevap vererek başla. Doğrudan konuya gir.\n`;

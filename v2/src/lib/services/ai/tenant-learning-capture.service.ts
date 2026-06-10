@@ -256,6 +256,7 @@ export class TenantLearningCaptureService {
                 metadata = $9,
                 status = 'captured'
             WHERE id = $10
+              AND tenant_id = $11
           `,
           values: [
             sourceType,
@@ -267,7 +268,8 @@ export class TenantLearningCaptureService {
             JSON.stringify(diff.addedPhrases),
             JSON.stringify(riskTags),
             JSON.stringify(updatedMetadata),
-            draftEvent.id
+            draftEvent.id,
+            params.tenantId
           ]
         });
       } else {
@@ -432,8 +434,10 @@ export class TenantLearningCaptureService {
             UPDATE tenant_learning_events 
             SET outcome_signal = $1 
             WHERE id = $2
+              AND tenant_id = $3
+              AND conversation_id = $4
           `,
-          values: [outcomeSignal, lastBotEvents[0].id]
+          values: [outcomeSignal, lastBotEvents[0].id, params.tenantId, params.conversationId]
         });
       }
     } catch (err) {

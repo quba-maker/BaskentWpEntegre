@@ -13,6 +13,7 @@ import { assertTenant } from "@/lib/security/assertions";
 import { AIEventEmitter } from "@/lib/services/ai/core/event-emitter";
 import { FeatureFlagService } from "@/lib/services/feature-flag.service";
 import { CredentialsService } from "@/lib/services/credentials.service";
+import { getTraceContext } from "@/lib/core/trace-context";
 
 function safeAfter(cb: () => void | Promise<void>) {
   try {
@@ -634,6 +635,11 @@ export class QueueWorkerEngine {
         values: [phoneNumber, tenantId]
       }) as any[])[0]?.id;
 
+      const traceCtx = getTraceContext();
+      if (traceCtx && conversationId) {
+        traceCtx.conversationId = conversationId;
+      }
+
       const outMsg = await msgService.saveMessageIdempotent({
         phoneNumber,
         direction: 'out',
@@ -1104,6 +1110,11 @@ export class QueueWorkerEngine {
       providerTimestamp: incomingTimestamp,
       isHistoryImport: isHistory
     });
+
+    const traceCtx = getTraceContext();
+    if (traceCtx && conversationId) {
+      traceCtx.conversationId = conversationId;
+    }
 
     if (isDuplicate) {
       this.log.warn(`[DUPLICATE_DROPPED] Message already processed`, { providerMessageId, traceId });
@@ -1924,11 +1935,15 @@ export class QueueWorkerEngine {
       }
     }
 
+    const { TurkishReplyQualityGate } = await import('@/lib/services/ai/turkish-quality-gate');
+    const patientProvidedAvailability = TurkishReplyQualityGate.detectPatientProvidedAvailability(content || '');
+
     if (!unifiedContext) unifiedContext = {};
     unifiedContext.quotedContext = mediaMetadata?.native?.quoted_message_snapshot || null;
     unifiedContext.history = history;
     unifiedContext.currentMessageText = content || '';
     unifiedContext.currentMessageMediaType = mediaType || null;
+    unifiedContext.patientProvidedAvailability = patientProvidedAvailability;
 
     // 6. Build System Prompt & History strictly via TenantBrain
     let systemPromptText = PromptBuilder.buildSystemPrompt(brain, targetPhase, false, unifiedContext);
@@ -2098,7 +2113,6 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
         }
       }
       // RUN TURKISH QUALITY GATE
-      const { TurkishReplyQualityGate } = await import('@/lib/services/ai/turkish-quality-gate');
       const identityConfig = brain.prompts.metadata?.identity || brain.context.config?.identity || {};
       const assistantHistory = (history || []).filter((m: any) => m.role === 'assistant');
       const isFirstAssistantTurn = assistantHistory.length === 0;
@@ -2146,7 +2160,8 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
         identityAlreadyIntroduced: !isFirstAssistantTurn,
         asksIdentity,
         asksName,
-        patientClaimsBot
+        patientClaimsBot,
+        patientProvidedAvailability
       };
 
       let qualityGate = TurkishReplyQualityGate.validate(aiResponse.text, qgOptions);
@@ -2155,15 +2170,26 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
         this.log.warn(`[QUALITY_GATE] Failed on first attempt: ${qualityGate.reason}. Retrying...`, { traceId });
         isRetry = true;
 
+        const isCtaBlockFirst = !!qualityGate.reason?.includes('Kritik Fren Engeli');
+        const nameExample = identityConfig.personaName || 'Asistan';
+        let retryContent = `DİKKAT: Ürettiğin Türkçe metinde ek hatası veya kendini tanıtma tekrarı tespit edildi. Kendini tanıtan kelimeleri/cümleleri (örneğin "Merhaba, ben ${nameExample}...", "${nameExample} ben...") kesinlikle kullanma, doğrudan konuya girerek kısa ve sade bir cevap üret.`;
+
+        if (isCtaBlockFirst) {
+          if (qgOptions.patientProvidedAvailability) {
+            retryContent = `DİKKAT: Hasta uygun zaman bildirdi. Kesinlikle yeni bir randevu/arama CTA'sı isteme, "uygun zaman paylaşır mısınız?" veya "sizi ne zaman arayalım" deme, "Türkiye saatiyle" kelimesini kullanma. Sadece uygun olduğu zamanı not aldığını ve koordinatörlerin/hasta danışmanlarının planlamayı kontrol edeceğini belirten kısa bir onay cevabı yaz.`;
+          } else {
+            retryContent = `DİKKAT: Son mesajlarda zaten randevu/telefon araması teklif edildiği veya kalite freni aktif olduğu için kesinlikle randevu/arama teklif etme, "uygun zaman paylaşır mısınız" veya "arama planlayalım" deme, "Türkiye saatiyle" veya "telefon görüşmesi" gibi yasaklı CTA kelimelerini kullanma. Doğrudan konuya girerek kısa ve sade bir cevap üret.`;
+          }
+        }
+
         const retryContextMessages = [...aiMessages];
         retryContextMessages.push({
           role: 'assistant' as const,
           content: aiResponse.text
         });
-        const nameExample = identityConfig.personaName || 'Asistan';
         retryContextMessages.push({
           role: 'user' as const,
-          content: `DİKKAT: Ürettiğin Türkçe metinde ek hatası veya kendini tanıtma tekrarı tespit edildi. Kendini tanıtan kelimeleri/cümleleri (örneğin "Merhaba, ben ${nameExample}...", "${nameExample} ben...") kesinlikle kullanma, doğrudan konuya girerek kısa ve sade bir cevap üret.`
+          content: retryContent
         });
 
         aiResponse = await executeLLM(retryContextMessages);
@@ -2171,40 +2197,76 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       }
 
       if (!qualityGate.valid) {
-        this.log.warn(`[QUALITY_GATE] Failed on second attempt: ${qualityGate.reason}. Applying stripPersonaIntroduction cleanup...`, { traceId });
-        const originalText = aiResponse.text;
-        const cleanedText = TurkishReplyQualityGate.stripPersonaIntroduction(originalText, qgOptions);
+        const isCtaBlockSecond = !!qualityGate.reason?.includes('Kritik Fren Engeli');
+        const isIdentityRepetitionSecond = !!qualityGate.reason?.includes('Kimlik zaten tanıtılmıştı');
 
-        if (cleanedText && cleanedText.trim().length > 0) {
-          const cleanedQualityGate = TurkishReplyQualityGate.validate(cleanedText, qgOptions);
-          if (cleanedQualityGate.valid) {
-            this.log.info(`[QUALITY_GATE] Cleanup applied successfully. Validation passed.`, { traceId });
-            aiResponse.text = cleanedText;
+        if (isIdentityRepetitionSecond) {
+          this.log.warn(`[QUALITY_GATE] Failed on second attempt due to identity repetition: ${qualityGate.reason}. Applying stripPersonaIntroduction cleanup...`, { traceId });
+          const originalText = aiResponse.text;
+          const cleanedText = TurkishReplyQualityGate.stripPersonaIntroduction(originalText, qgOptions);
+
+          if (cleanedText && cleanedText.trim().length > 0) {
+            const cleanedQualityGate = TurkishReplyQualityGate.validate(cleanedText, qgOptions);
+            if (cleanedQualityGate.valid) {
+              this.log.info(`[QUALITY_GATE] Cleanup applied successfully. Validation passed.`, { traceId });
+              aiResponse.text = cleanedText;
+              qualityGate = { valid: true };
+
+              // Log IDENTITY_REPETITION_CLEANUP_APPLIED to ai_audit_logs
+              await db.executeSafe({
+                text: `INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
+                       VALUES ($1, $2, $3, $4)`,
+                values: [
+                  tenantId,
+                  'IDENTITY_REPETITION_CLEANUP_APPLIED',
+                  `Persona introduction prefix stripped successfully from beginning of the response.`,
+                  JSON.stringify({
+                    conversation_id: conversationId,
+                    original_response: originalText,
+                    cleaned_response: cleanedText,
+                    timestamp: new Date().toISOString()
+                  })
+                ]
+              });
+            } else {
+              this.log.error(`[QUALITY_GATE] Cleanup applied but validation failed: ${cleanedQualityGate.reason}`, undefined, { traceId });
+              qualityGate = cleanedQualityGate;
+            }
+          } else {
+            this.log.error(`[QUALITY_GATE] Cleanup resulted in empty or meaningless text.`, undefined, { traceId });
+            qualityGate = { valid: false, reason: 'cleaned_text_empty' };
+          }
+        } else if (isCtaBlockSecond && qgOptions.patientProvidedAvailability) {
+          const safeFallbackText = "Uygun olduğunuz zamanı not aldım, hasta danışmanlarımız planlamayı kontrol edecek.";
+          this.log.warn(`[QUALITY_GATE] Failed on second attempt due to CTA block and patient provided availability. Applying safe confirmation fallback: "${safeFallbackText}"`, { traceId });
+
+          const fallbackQg = TurkishReplyQualityGate.validate(safeFallbackText, qgOptions);
+          if (fallbackQg.valid) {
+            aiResponse.text = safeFallbackText;
             qualityGate = { valid: true };
 
-            // Log IDENTITY_REPETITION_CLEANUP_APPLIED to ai_audit_logs
+            // Log SAFE_CONFIRMATION_FALLBACK_APPLIED to ai_audit_logs
             await db.executeSafe({
               text: `INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
                      VALUES ($1, $2, $3, $4)`,
               values: [
                 tenantId,
-                'IDENTITY_REPETITION_CLEANUP_APPLIED',
-                `Persona introduction prefix stripped successfully from beginning of the response.`,
+                'SAFE_CONFIRMATION_FALLBACK_APPLIED',
+                `Safe confirmation fallback applied in handleIncomingMessage due to CTA block on patient availability.`,
                 JSON.stringify({
                   conversation_id: conversationId,
-                  original_response: originalText,
-                  cleaned_response: cleanedText,
+                  original_response: aiResponse.text,
+                  fallback_response: safeFallbackText,
                   timestamp: new Date().toISOString()
                 })
               ]
             });
           } else {
-            this.log.error(`[QUALITY_GATE] Cleanup applied but validation failed: ${cleanedQualityGate.reason}`, undefined, { traceId });
-            qualityGate = cleanedQualityGate;
+            this.log.error(`[QUALITY_GATE] Safe fallback failed Quality Gate validation: ${fallbackQg.reason}`, undefined, { traceId });
+            qualityGate = fallbackQg;
           }
         } else {
-          this.log.error(`[QUALITY_GATE] Cleanup resulted in empty or meaningless text.`, undefined, { traceId });
-          qualityGate = { valid: false, reason: 'cleaned_text_empty' };
+          this.log.warn(`[QUALITY_GATE] Failed on second attempt: ${qualityGate.reason}. No cleanup or fallback applicable.`, { traceId });
         }
       }
 
@@ -3693,6 +3755,10 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
     }
 
     const conversationId = convRecord.id;
+    const traceCtx = getTraceContext();
+    if (traceCtx && conversationId) {
+      traceCtx.conversationId = conversationId;
+    }
     const autopilotEnabled = convRecord.autopilot_enabled;
     const currentStatus = convRecord.status;
     const resolvedChannelId = convRecord.channel_id || metadata.channelId;
@@ -3901,9 +3967,13 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       this.log.error('[DEBOUNCE_WORKER] Error fetching identity context', e as Error, { traceId });
     }
 
+    const { TurkishReplyQualityGate } = await import('@/lib/services/ai/turkish-quality-gate');
+    const patientProvidedAvailability = TurkishReplyQualityGate.detectPatientProvidedAvailability(latestInboundContent);
+
     if (!unifiedContext) unifiedContext = {};
     unifiedContext.history = history;
     unifiedContext.currentMessageText = latestInboundContent;
+    unifiedContext.patientProvidedAvailability = patientProvidedAvailability;
 
     const { PromptBuilder } = await import('../services/ai/prompt-builder');
     const systemPromptText = PromptBuilder.buildSystemPrompt(brain, convRecord.lead_stage, false, unifiedContext);
@@ -3936,8 +4006,6 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
     };
 
     // Quality gate validation & retry logic
-    const { TurkishReplyQualityGate } = await import('@/lib/services/ai/turkish-quality-gate');
-
     // Compute Quality Gate Options
     const identityConfig = brain.prompts.metadata?.identity || brain.context.config?.identity || {};
     const assistantHistory = (history || []).filter((m: any) => m.role === 'assistant');
@@ -3985,7 +4053,8 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       identityAlreadyIntroduced: !isFirstAssistantTurn,
       asksIdentity,
       asksName,
-      patientClaimsBot
+      patientClaimsBot,
+      patientProvidedAvailability
     };
 
     try {
@@ -3995,13 +4064,24 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       if (!qualityGate.valid) {
         this.log.warn(`[DEBOUNCE_WORKER] Quality gate failed on first attempt: ${qualityGate.reason}. Retrying...`, { traceId });
         
+        const isCtaBlockFirst = !!qualityGate.reason?.includes('Kritik Fren Engeli');
         const nameExample = identityConfig.personaName || 'Asistan';
+        let retryContent = `DİKKAT: Ürettiğin Türkçe metinde ek hatası veya kendini tanıtma tekrarı tespit edildi. Kendini tanıtan kelimeleri/cümleleri (örneğin "Merhaba, ben ${nameExample}...", "${nameExample} ben...") kesinlikle kullanma, doğrudan konuya girerek kısa ve sade bir cevap üret.`;
+
+        if (isCtaBlockFirst) {
+          if (qgOptions.patientProvidedAvailability) {
+            retryContent = `DİKKAT: Hasta uygun zaman bildirdi. Kesinlikle yeni bir randevu/arama CTA'sı isteme, "uygun zaman paylaşır mısınız?" veya "sizi ne zaman arayalım" deme, "Türkiye saatiyle" kelimesini kullanma. Sadece uygun olduğu zamanı not aldığını ve koordinatörlerin/hasta danışmanlarının planlamayı kontrol edeceğini belirten kısa bir onay cevabı yaz.`;
+          } else {
+            retryContent = `DİKKAT: Son mesajlarda zaten randevu/telefon araması teklif edildiği veya kalite freni aktif olduğu için kesinlikle randevu/arama teklif etme, "uygun zaman paylaşır mısınız" veya "arama planlayalım" deme, "Türkiye saatiyle" veya "telefon görüşmesi" gibi yasaklı CTA kelimelerini kullanma. Doğrudan konuya girerek kısa ve sade bir cevap üret.`;
+          }
+        }
+
         const retryMessages = [
           ...aiMessages,
           { role: 'assistant' as const, content: aiResponse.text },
           {
             role: 'user' as const,
-            content: `DİKKAT: Ürettiğin Türkçe metinde ek hatası veya kendini tanıtma tekrarı tespit edildi. Kendini tanıtan kelimeleri/cümleleri (örneğin "Merhaba, ben ${nameExample}...", "${nameExample} ben...") kesinlikle kullanma, doğrudan konuya girerek kısa ve sade bir cevap üret.`
+            content: retryContent
           }
         ];
 
@@ -4010,40 +4090,76 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       }
 
       if (!qualityGate.valid) {
-        this.log.warn(`[DEBOUNCE_WORKER] Quality gate failed on second attempt: ${qualityGate.reason}. Applying stripPersonaIntroduction cleanup...`, { traceId });
-        const originalText = aiResponse.text;
-        const cleanedText = TurkishReplyQualityGate.stripPersonaIntroduction(originalText, qgOptions);
+        const isCtaBlockSecond = !!qualityGate.reason?.includes('Kritik Fren Engeli');
+        const isIdentityRepetitionSecond = !!qualityGate.reason?.includes('Kimlik zaten tanıtılmıştı');
 
-        if (cleanedText && cleanedText.trim().length > 0) {
-          const cleanedQualityGate = TurkishReplyQualityGate.validate(cleanedText, qgOptions);
-          if (cleanedQualityGate.valid) {
-            this.log.info(`[DEBOUNCE_WORKER] Cleanup applied successfully. Validation passed.`, { traceId });
-            aiResponse.text = cleanedText;
+        if (isIdentityRepetitionSecond) {
+          this.log.warn(`[DEBOUNCE_WORKER] Quality gate failed on second attempt due to identity repetition: ${qualityGate.reason}. Applying stripPersonaIntroduction cleanup...`, { traceId });
+          const originalText = aiResponse.text;
+          const cleanedText = TurkishReplyQualityGate.stripPersonaIntroduction(originalText, qgOptions);
+
+          if (cleanedText && cleanedText.trim().length > 0) {
+            const cleanedQualityGate = TurkishReplyQualityGate.validate(cleanedText, qgOptions);
+            if (cleanedQualityGate.valid) {
+              this.log.info(`[DEBOUNCE_WORKER] Cleanup applied successfully. Validation passed.`, { traceId });
+              aiResponse.text = cleanedText;
+              qualityGate = { valid: true };
+
+              // Log IDENTITY_REPETITION_CLEANUP_APPLIED to ai_audit_logs
+              await db.executeSafe({
+                text: `INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
+                       VALUES ($1, $2, $3, $4)`,
+                values: [
+                  tenantId,
+                  'IDENTITY_REPETITION_CLEANUP_APPLIED',
+                  `Persona introduction prefix stripped successfully from beginning of the response in debounce worker.`,
+                  JSON.stringify({
+                    conversation_id: conversationId,
+                    original_response: originalText,
+                    cleaned_response: cleanedText,
+                    timestamp: new Date().toISOString()
+                  })
+                ]
+              });
+            } else {
+              this.log.error(`[DEBOUNCE_WORKER] Cleanup applied but validation failed: ${cleanedQualityGate.reason}`, undefined, { traceId });
+              qualityGate = cleanedQualityGate;
+            }
+          } else {
+            this.log.error(`[DEBOUNCE_WORKER] Cleanup resulted in empty or meaningless text.`, undefined, { traceId });
+            qualityGate = { valid: false, reason: 'cleaned_text_empty' };
+          }
+        } else if (isCtaBlockSecond && qgOptions.patientProvidedAvailability) {
+          const safeFallbackText = "Uygun olduğunuz zamanı not aldım, hasta danışmanlarımız planlamayı kontrol edecek.";
+          this.log.warn(`[DEBOUNCE_WORKER] Quality gate failed on second attempt due to CTA block and patient provided availability. Applying safe confirmation fallback: "${safeFallbackText}"`, { traceId });
+
+          const fallbackQg = TurkishReplyQualityGate.validate(safeFallbackText, qgOptions);
+          if (fallbackQg.valid) {
+            aiResponse.text = safeFallbackText;
             qualityGate = { valid: true };
 
-            // Log IDENTITY_REPETITION_CLEANUP_APPLIED to ai_audit_logs
+            // Log SAFE_CONFIRMATION_FALLBACK_APPLIED to ai_audit_logs
             await db.executeSafe({
               text: `INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
                      VALUES ($1, $2, $3, $4)`,
               values: [
                 tenantId,
-                'IDENTITY_REPETITION_CLEANUP_APPLIED',
-                `Persona introduction prefix stripped successfully from beginning of the response in debounce worker.`,
+                'SAFE_CONFIRMATION_FALLBACK_APPLIED',
+                `Safe confirmation fallback applied in debounce worker due to CTA block on patient availability.`,
                 JSON.stringify({
                   conversation_id: conversationId,
-                  original_response: originalText,
-                  cleaned_response: cleanedText,
+                  original_response: aiResponse.text,
+                  fallback_response: safeFallbackText,
                   timestamp: new Date().toISOString()
                 })
               ]
             });
           } else {
-            this.log.error(`[DEBOUNCE_WORKER] Cleanup applied but validation failed: ${cleanedQualityGate.reason}`, undefined, { traceId });
-            qualityGate = cleanedQualityGate;
+            this.log.error(`[DEBOUNCE_WORKER] Safe fallback failed Quality Gate validation: ${fallbackQg.reason}`, undefined, { traceId });
+            qualityGate = fallbackQg;
           }
         } else {
-          this.log.error(`[DEBOUNCE_WORKER] Cleanup resulted in empty or meaningless text.`, undefined, { traceId });
-          qualityGate = { valid: false, reason: 'cleaned_text_empty' };
+          this.log.warn(`[DEBOUNCE_WORKER] Quality gate failed on second attempt: ${qualityGate.reason}. No cleanup or fallback applicable.`, { traceId });
         }
       }
 

@@ -8,6 +8,7 @@ export interface QualityGateOptions {
   asksIdentity?: boolean;
   asksName?: boolean;
   patientClaimsBot?: boolean;
+  patientProvidedAvailability?: boolean;
 }
 
 export class TurkishReplyQualityGate {
@@ -43,6 +44,76 @@ export class TurkishReplyQualityGate {
       .replace(/ö/g, 'o')
       .replace(/ç/g, 'c')
       .toLowerCase();
+  }
+
+  /**
+   * Detects if the patient message provides their date/time availability
+   */
+  public static detectPatientProvidedAvailability(text: string): boolean {
+    if (!text) return false;
+    const clean = this.cleanTurkishText(text);
+
+    // Explicit availability phrases
+    const explicitPhrases = [
+      'telefon gorusmesi icin uygunum',
+      'gorusme icin uygunum',
+      'arama icin uygunum',
+      'su saatte arayin',
+      'su saatte arayabilirsiniz',
+      'saatte arayabilirsiniz',
+      'saatte arayin',
+      'saatte arayabilirsin',
+      'uygun oldugum saat',
+      'uygun oldugum zaman',
+      'musait oldugum saat',
+      'musait oldugum zaman',
+      'telefonla arayabilirsiniz',
+      'telefonla arayabilirsin',
+      'telefonla arayin',
+      'telefonla ulasabilirsiniz',
+      'telefonla ulasin'
+    ];
+    if (explicitPhrases.some(p => clean.includes(p))) {
+      return true;
+    }
+
+    // Days or relative day markers
+    const days = [
+      'pazartesi', 'sali', 'carsamba', 'persembe', 'cuma', 'cumartesi', 'pazar',
+      'yarin', 'bugun', 'haftaici', 'haftasonu', 'hafta ici', 'hafta sonu', 'gunu', 'gunleri'
+    ];
+    
+    // Suitability or actions markers
+    const suitability = [
+      'uygun', 'musait', 'olabilir', 'arayabilirsiniz', 'arayin', 'araya bilirsiniz',
+      'arayabilirsin', 'goruselim', 'gorusuruz', 'ulasabilirsiniz', 'ulasin',
+      'uygunum', 'musaitim', 'ulasirsaniz', 'ulasabilirseniz', 'seviniriz', 'sevinirim',
+      'olur', 'iyi olur', 'gorusmek'
+    ];
+
+    const hasDay = days.some(d => clean.includes(d));
+    const hasSuitability = suitability.some(s => clean.includes(s));
+
+    // Time indicators: "saat" or digital time formats (e.g. 20:00, 14.30)
+    // or digits like 20, 14 with locative suffixes
+    const hasTime = clean.includes('saat') || 
+                    /(?:\b\d{1,2}[:.]\d{2}\b|\b\d{1,2}\s*(?:de|da|te|ta|e|a|ye|ya|sularında|sularinda|gibi|civari|civarinda|civarı|civarında)\b)/.test(clean);
+
+    if (hasDay && hasSuitability) {
+      return true;
+    }
+
+    if (hasTime && hasSuitability) {
+      return true;
+    }
+
+    // Pure time patterns with suitability, like "18:00 olabilir", "18.00 uygun", "20:00 de olur"
+    const pureTimeSuitability = /(?:\d{1,2}[:.]\d{2}|\b\d{1,2}\b)\s*(?:uygun|musait|olabilir|de olur|da olur|te olur|ta olur|gibi|civari|civarinda|civarı|civarında)/;
+    if (pureTimeSuitability.test(clean)) {
+      return true;
+    }
+
+    return false;
   }
 
   private static escapeRegExp(str: string): string {
@@ -230,7 +301,7 @@ export class TurkishReplyQualityGate {
 
     // 4. CTA blocking logic under options
     if (options?.ctaOfferedRecently || options?.angryPatientMode) {
-      const forbiddenCtaPhrases = [
+      let forbiddenCtaPhrases = [
         'randevu planlayalim',
         'gorusme ayarlayalim',
         'sizi arayalim',
@@ -238,6 +309,17 @@ export class TurkishReplyQualityGate {
         'turkiye saatiyle',
         'telefon gorusmesi'
       ];
+
+      if (options?.patientProvidedAvailability) {
+        forbiddenCtaPhrases = [
+          'uygun zaman paylas',
+          'randevu planlayalim',
+          'arama planlayalim',
+          'sizi arayalim mi',
+          'gorusme ayarlayalim mi',
+          'turkiye saatiyle'
+        ];
+      }
 
       for (const phrase of forbiddenCtaPhrases) {
         if (cleanText.includes(phrase)) {
