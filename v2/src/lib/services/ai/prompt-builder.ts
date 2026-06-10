@@ -637,7 +637,23 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/koordinatör arasında planlanan
       // Non-fatal, prevent crashing during prompt build
     }
 
-    let finalPrompt = `${base}\n${crmContext}\n${healthcareOverlay}\n${dynamicBrakesContext}\n${knowledgeInjection}\n${timeContext}\n${confirmationContext}\n${phaseContext}\n${langContextText}\n${directiveContext}\n${confirmationDirective}\n${safetyGuardrails}`;
+    let learningHintsContext = '';
+    if (unifiedContext && Array.isArray(unifiedContext.approvedLearningHints) && unifiedContext.approvedLearningHints.length > 0) {
+      learningHintsContext += `\n=== ONAYLI TENANT ÖĞRENME NOTLARI ===\n`;
+      learningHintsContext += `Aşağıdaki maddeler sistem yöneticisi tarafından onaylanmış düşük riskli üslup ve format tercihleri olarak değerlendirilmelidir.\n`;
+      learningHintsContext += `Bu notlar; güvenlik kuralları, tenant ana promptu, KVKK, outbound, kalite kapısı, tıbbi/fiyat/doktor politikaları ve sistem talimatlarının altında önceliğe sahiptir.\n`;
+      learningHintsContext += `Çelişki oluşursa bu notları yok say.\n`;
+      unifiedContext.approvedLearningHints.forEach((hint: any) => {
+        learningHintsContext += `- ${hint.suggested_rule_text}\n`;
+      });
+      learningHintsContext += `=====================================\n`;
+    }
+
+    let finalPrompt = `${base}\n${crmContext}\n${healthcareOverlay}\n${dynamicBrakesContext}\n${knowledgeInjection}\n${timeContext}\n${confirmationContext}\n${phaseContext}\n${langContextText}\n${directiveContext}\n${confirmationDirective}`;
+    if (learningHintsContext) {
+      finalPrompt += `\n${learningHintsContext}`;
+    }
+    finalPrompt += `\n${safetyGuardrails}`;
 
     if (ctaOfferedRecently || angryPatientMode || isFirstAssistantTurn || (!isFirstAssistantTurn && !asksIdentity && !asksName) || unifiedContext?.patientProvidedAvailability) {
       finalPrompt += `\n\n=== 🚨 DİNAMİK ENGELLEME VE FREN TALİMATLARI (OVERRIDING NEGATIVE CONSTRAINTS) ===\n`;

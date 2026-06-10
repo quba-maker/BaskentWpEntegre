@@ -1945,6 +1945,19 @@ export class QueueWorkerEngine {
     unifiedContext.currentMessageMediaType = mediaType || null;
     unifiedContext.patientProvidedAvailability = patientProvidedAvailability;
 
+    // 🧠 Approved learning context injection (P1.3 - Autopilot Path)
+    try {
+      const { TenantLearningRuntimeResolver } = await import('@/lib/services/ai/tenant-learning-runtime-resolver');
+      if (resolvedChannelId) {
+        unifiedContext.approvedLearningHints = await TenantLearningRuntimeResolver.resolveHints(brain, resolvedChannelId);
+      } else {
+        unifiedContext.approvedLearningHints = [];
+      }
+    } catch (hintsErr) {
+      this.log.error(`[LEARNING_RUNTIME_HINTS_ERROR] Failed to fetch learning hints`, hintsErr as Error, { traceId });
+      unifiedContext.approvedLearningHints = [];
+    }
+
     // 6. Build System Prompt & History strictly via TenantBrain
     let systemPromptText = PromptBuilder.buildSystemPrompt(brain, targetPhase, false, unifiedContext);
     
@@ -3978,6 +3991,19 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
     unifiedContext.history = history;
     unifiedContext.currentMessageText = latestInboundContent;
     unifiedContext.patientProvidedAvailability = patientProvidedAvailability;
+
+    // 🧠 Approved learning context injection (P1.3 - Debounce Autopilot Path)
+    try {
+      const { TenantLearningRuntimeResolver } = await import('@/lib/services/ai/tenant-learning-runtime-resolver');
+      if (resolvedChannelId) {
+        unifiedContext.approvedLearningHints = await TenantLearningRuntimeResolver.resolveHints(brain, resolvedChannelId);
+      } else {
+        unifiedContext.approvedLearningHints = [];
+      }
+    } catch (hintsErr) {
+      this.log.error(`[LEARNING_RUNTIME_HINTS_ERROR] Failed to fetch learning hints`, hintsErr as Error, { traceId });
+      unifiedContext.approvedLearningHints = [];
+    }
 
     const { PromptBuilder } = await import('../services/ai/prompt-builder');
     const systemPromptText = PromptBuilder.buildSystemPrompt(brain, convRecord.lead_stage, false, unifiedContext);
