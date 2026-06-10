@@ -119,6 +119,7 @@ export function useFormsList() {
             duration: durationSeconds
           } : undefined
         });
+        setSize(1);
         mutate();
         mutateCounts();
         mutateMetadata();

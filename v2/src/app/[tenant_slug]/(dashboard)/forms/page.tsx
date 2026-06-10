@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CheckCircle2, X } from "lucide-react";
+import { CheckCircle2, X, XCircle } from "lucide-react";
 import { useRouter, useParams } from "next/navigation";
 import { useInboxStore } from "@/store/inbox-store";
 import { useFormsList } from "@/components/features/forms/hooks/useFormsList";
@@ -524,43 +524,81 @@ export default function FormsPage() {
         onUpdateDraftText={handleUpdateQueueItemDraftText}
       />
 
-      {/* Sync progress toast notifications */}
+      {/* Sync progress centered modal notification */}
       {(syncProgress.status === 'completed' || syncProgress.status === 'error') && (
-        <div className="fixed bottom-5 right-5 z-50 animate-in slide-in-from-bottom-5 duration-200">
-          <div className={`p-4 rounded-2xl shadow-lg border w-80 text-left flex flex-col gap-2 transition-all ${
-            syncProgress.status === 'completed' 
-              ? 'bg-white border-emerald-100 text-slate-800' 
-              : 'bg-rose-50 border-rose-100 text-rose-800'
-          }`}>
-            <div className="flex items-center justify-between">
-              <span className={`text-xs font-bold uppercase tracking-wider ${
-                syncProgress.status === 'completed' ? 'text-emerald-600' : 'text-rose-600'
-              }`}>
-                {syncProgress.status === 'completed' ? '✓ Senkronizasyon Başarılı' : '✕ Senkronizasyon Başarısız'}
-              </span>
+        <>
+          {/* Overlay Background */}
+          <div 
+            className="fixed inset-0 bg-black/45 backdrop-blur-sm z-[100] transition-opacity animate-in fade-in duration-200"
+            onClick={clearSyncProgress}
+          />
+          {/* Centered Modal Card */}
+          <div className="fixed inset-0 z-[101] flex items-center justify-center p-4 pointer-events-none">
+            <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-black/5 p-6 text-center relative overflow-hidden animate-in zoom-in-95 duration-200 pointer-events-auto text-left flex flex-col gap-3">
+              
               <button 
                 onClick={clearSyncProgress}
-                className="text-slate-400 hover:text-slate-600 transition-colors w-5 h-5 flex items-center justify-center rounded-full hover:bg-slate-100 shrink-0 cursor-pointer"
+                className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 transition-colors w-6 h-6 flex items-center justify-center rounded-full hover:bg-slate-100 cursor-pointer"
               >
-                <X className="w-3.5 h-3.5" />
+                <X className="w-4 h-4" />
               </button>
-            </div>
-            
-            <p className="text-xs font-medium leading-relaxed">
-              {syncProgress.message}
-            </p>
 
-            {syncProgress.status === 'completed' && syncProgress.stats && (
-              <div className="grid grid-cols-2 gap-1.5 pt-2 border-t border-slate-100 text-[10.5px] font-semibold text-slate-500">
-                <div>Eklenen: <span className="text-slate-800">{syncProgress.stats.created}</span></div>
-                <div>Güncellenen: <span className="text-slate-800">{syncProgress.stats.updated}</span></div>
-                <div>Çift Kayıt: <span className="text-slate-800">{syncProgress.stats.duplicates}</span></div>
-                <div>Hatalı: <span className="text-slate-800 text-rose-600">{syncProgress.stats.errors}</span></div>
-                <div className="col-span-2 pt-1 text-[9.5px] text-slate-400 font-medium">Süre: {syncProgress.stats.duration} saniye</div>
+              <div className="text-center">
+                {syncProgress.status === 'completed' ? (
+                  <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto mb-2.5" />
+                ) : (
+                  <XCircle className="w-12 h-12 text-rose-500 mx-auto mb-2.5" />
+                )}
+                
+                <h3 className={`text-base font-bold uppercase tracking-wider ${
+                  syncProgress.status === 'completed' ? 'text-emerald-600' : 'text-rose-600'
+                }`}>
+                  {syncProgress.status === 'completed' ? 'Senkronizasyon Tamamlandı' : 'Senkronizasyon Başarısız'}
+                </h3>
               </div>
-            )}
+
+              {syncProgress.status === 'completed' ? (
+                <>
+                  <div className="space-y-2 my-2 p-4 bg-slate-50 border border-slate-100 rounded-xl text-xs font-semibold text-slate-600">
+                    <div className="flex justify-between">
+                      <span>Yeni kayıt:</span>
+                      <span className="text-slate-900 font-bold">{syncProgress.stats?.created ?? 0}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Güncellenen kayıt:</span>
+                      <span className="text-slate-900 font-bold">{syncProgress.stats?.updated ?? 0}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Atlanan kayıt:</span>
+                      <span className="text-slate-900 font-bold">{syncProgress.stats?.duplicates ?? 0}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Hatalı kayıt:</span>
+                      <span className={`${syncProgress.stats?.errors ? 'text-rose-600 font-bold' : 'text-slate-900 font-bold'}`}>
+                        {syncProgress.stats?.errors ?? 0}
+                      </span>
+                    </div>
+                    <div className="border-t border-slate-200/60 pt-2 flex justify-between text-[10px] text-slate-400 font-medium">
+                      <span>Süre:</span>
+                      <span>{syncProgress.stats?.duration ?? '0'} sn</span>
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-[#86868B] font-medium leading-relaxed italic bg-blue-50/50 border border-blue-100/50 rounded-xl p-2.5">
+                    💡 Yeni kayıtlar başarıyla alındı. Mevcut filtre veya arama kriterleriniz nedeniyle bazı yeni kayıtlar listede görünmeyebilir.
+                  </p>
+                  <p className="text-xs text-emerald-600 font-bold text-center mt-1">
+                    Form listesi güncellendi.
+                  </p>
+                </>
+              ) : (
+                <p className="text-xs font-medium text-rose-900 bg-rose-50 border border-rose-100 rounded-xl p-3 my-2 leading-relaxed text-left max-h-32 overflow-y-auto">
+                  {syncProgress.message}
+                </p>
+              )}
+
+            </div>
           </div>
-        </div>
+        </>
       )}
     </div>
   );

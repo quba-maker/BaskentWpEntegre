@@ -896,8 +896,8 @@ export async function getFormsSyncMetadata() {
       }
 
       return {
-        lastManualSync: lastManual,
-        lastAutoSync: lastAuto
+        lastManualSync: lastManual ? new Date(lastManual).toISOString() : null,
+        lastAutoSync: lastAuto ? new Date(lastAuto).toISOString() : null
       };
     }
   ).then(res => {

@@ -43,7 +43,14 @@ export function FormFiltersBar({
     if (!dateStr) return null;
     try {
       const d = new Date(dateStr);
-      return d.toLocaleString('tr-TR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+      return d.toLocaleString('tr-TR', { 
+        timeZone: 'Europe/Istanbul',
+        day: 'numeric', 
+        month: 'short', 
+        year: 'numeric',
+        hour: '2-digit', 
+        minute: '2-digit' 
+      });
     } catch (_) {
       return null;
     }
@@ -93,6 +100,7 @@ export function FormFiltersBar({
                   {aFormatted && (
                     <span className="font-semibold text-slate-600 mt-0.5">Otomatik: <span className="font-normal text-slate-500">{aFormatted}</span></span>
                   )}
+                  <span className="text-[9px] text-[#86868B] mt-0.5 italic">Türkiye saatiyle</span>
                 </>
               )}
             </div>
