@@ -710,7 +710,9 @@ export async function syncGoogleSheets() {
     }
   ).then(res => {
     console.log('[SYNC_ACTION_RETURN]', JSON.stringify(res).slice(0, 300));
-    if (!res.success) return { success: false, error: res.error || res.data?.error };
+    if (!res.success || res.data?.success === false) {
+      return { success: false, error: res.error || res.data?.error || "Google Sheets senkronizasyonu başarısız." };
+    }
     return { 
       success: true, 
       message: res.data?.message, 

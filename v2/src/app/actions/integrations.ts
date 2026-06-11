@@ -121,6 +121,9 @@ export async function saveGoogleSheetsConfig(config: any) {
         });
 
         let decrypted: any = {};
+        let decryptionFailed = false;
+        let decryptErrorMsg = '';
+
         if (existingIntegration.length > 0 && existingIntegration[0].credentials) {
           try {
             const creds = typeof existingIntegration[0].credentials === 'string'
@@ -132,16 +135,27 @@ export async function saveGoogleSheetsConfig(config: any) {
               decrypted = creds;
             }
           } catch (e: any) {
-            console.warn('[V2_INTEGRATIONS] Failed to decrypt existing credentials:', e.message);
+            decryptionFailed = true;
+            decryptErrorMsg = e.message || 'Unknown decryption error';
+            console.warn('[V2_INTEGRATIONS] Failed to decrypt existing credentials:', decryptErrorMsg);
           }
         }
 
-        const apiKeyToUse = config.apiKey || decrypted.apiKey;
+        const newApiKey = config.apiKey;
+        if (decryptionFailed && !newApiKey) {
+          throw new Error('credentials_required_or_invalid: Mevcut entegrasyon şifreli verisi çözülemedi. Lütfen Entegrasyonlar > Google Sheets bölümünden API anahtarını tekrar kaydedin.');
+        }
+
+        const apiKeyToUse = newApiKey || decrypted.apiKey;
         if (!apiKeyToUse) {
           throw new Error('credentials_required: Google Sheets API Key gereklidir.');
         }
 
-        const nextCredentials = {
+        const nextCredentials: Record<string, any> = decryptionFailed ? {
+          spreadsheetId: config.spreadsheetId,
+          activeSheets: config.activeSheets,
+          apiKey: apiKeyToUse
+        } : {
           ...decrypted,
           spreadsheetId: config.spreadsheetId !== undefined ? config.spreadsheetId : decrypted.spreadsheetId,
           activeSheets: config.activeSheets !== undefined ? config.activeSheets : decrypted.activeSheets,
@@ -206,7 +220,13 @@ export async function saveGoogleSheetsConfig(config: any) {
         // 3. Execute Transaction
         await ctx.db.executeTransaction(txQueries);
 
-        return { success: true };
+        const responseData: Record<string, any> = { success: true };
+        if (decryptionFailed && newApiKey) {
+          responseData.warning = 'webhook_secret_lost';
+          responseData.webhookSecretLost = true;
+        }
+
+        return responseData;
       }
 
       // V1 FALLBACK: Write to settings table
@@ -222,7 +242,11 @@ export async function saveGoogleSheetsConfig(config: any) {
     }
   ).then(res => {
     if (!res.success) return { success: false, error: res.error };
-    return { success: true };
+    return { 
+      success: true, 
+      warning: res.data?.warning, 
+      webhookSecretLost: res.data?.webhookSecretLost 
+    };
   });
 }
 
