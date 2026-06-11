@@ -121,8 +121,39 @@ function testWebhook() {
   };
 
   return (
-    <div className="space-y-2 mt-4 border-t pt-4 border-gray-100">
-      <div className="flex items-center justify-between">
+    <div className="space-y-4 mt-4 border-t pt-4 border-gray-100">
+      {/* Kurulum Adımları */}
+      <div className="bg-slate-50 border border-slate-200/60 p-4 rounded-xl space-y-3">
+        <h5 className="text-[12px] font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+          <Settings2 className="w-3.5 h-3.5 text-slate-500" /> Apps Script Kurulum Adımları
+        </h5>
+        <ol className="text-[12px] text-slate-600 space-y-2.5 list-decimal list-inside leading-relaxed font-medium">
+          <li>
+            <strong>Gizli Anahtarı Üretin:</strong> Yukarıdaki <code>"Gizli Anahtarı Yenile"</code> butonuna basın ve üretilen gerçek gizli anahtarı <strong>hemen kopyalayın</strong> (güvenlik sebebiyle bu değer sadece bir kez gösterilir).
+          </li>
+          <li>
+            <strong>Şablon Kodunu Kopyalayın:</strong> Aşağıdaki <code>"Kodu Kopyala"</code> butonuyla Apps Script şablon kodunu kopyalayın.
+          </li>
+          <li>
+            <strong>Editörü Açın:</strong> Google Sheet tablonuzda üst menüden <code>Uzantılar (Extensions) &rarr; Apps Script</code> yolunu izleyin ve kopyaladığınız kodu buraya yapıştırın.
+          </li>
+          <li>
+            <strong>Gizli Anahtarı Tanımlayın:</strong> Kodun en üstünde yer alan <code>WEBHOOK_SECRET = "..."</code> kısmına kopyaladığınız gerçek gizli anahtarı yapıştırın.
+          </li>
+          <li>
+            <strong>Tetikleyicileri (Triggers) Ekleyin:</strong> Sol menüdeki saat simgesine (Tetikleyiciler) tıklayıp iki yeni tetikleyici ekleyin:
+            <ul className="list-disc list-inside pl-4 mt-1.5 space-y-1 text-slate-500 text-[11px]">
+              <li><code>onFormSubmit</code> → Etkinlik kaynağı: <strong>E-tablodan</strong> → Etkinlik türü: <strong>Form gönderildiğinde</strong></li>
+              <li><code>catchUpSync</code> → Etkinlik kaynağı: <strong>Zamana dayalı</strong> → Dakika zamanlayıcı: <strong>15 dakikada bir</strong></li>
+            </ul>
+          </li>
+          <li>
+            <strong>Kaydet ve Yetkilendir:</strong> Kod düzenleyiciyi kaydedin. Tetikleyicileri kaydederken ve ilk çalıştırmada sizden istenecek Google hesap yetkilerini/izinlerini onaylayın. Apps Script ekranından son çalışma durumunu izleyebilirsiniz.
+          </li>
+        </ol>
+      </div>
+
+      <div className="flex items-center justify-between mt-2">
         <span className="text-[12px] font-bold text-gray-500 uppercase tracking-wider">
           Apps Script Şablonu
         </span>

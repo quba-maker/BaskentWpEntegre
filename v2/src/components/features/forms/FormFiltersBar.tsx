@@ -97,9 +97,9 @@ export function FormFiltersBar({
                   {mFormatted && (
                     <span className="font-semibold text-slate-600">Manuel: <span className="font-normal text-slate-500">{mFormatted}</span></span>
                   )}
-                  {aFormatted && (
-                    <span className="font-semibold text-slate-600 mt-0.5">Otomatik: <span className="font-normal text-slate-500">{aFormatted}</span></span>
-                  )}
+                  <span className="font-semibold text-slate-600 mt-0.5">
+                    Otomatik: <span className="font-normal text-slate-500">{aFormatted || 'Henüz çalışmadı'}</span>
+                  </span>
                   <span className="text-[9px] text-[#86868B] mt-0.5 italic">Türkiye saatiyle</span>
                 </>
               )}

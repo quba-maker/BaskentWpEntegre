@@ -884,17 +884,8 @@ export async function getFormsSyncMetadata() {
         console.warn("Failed to get manual sync log:", e);
       }
 
-      let last_sync_at = null;
       let cron_last_run_at = null;
       let webhook_last_received_at = null;
-
-      try {
-        const res = await ctx.db.executeSafe({
-          text: `SELECT last_sync_at FROM tenant_integrations WHERE tenant_id = $1 AND provider = 'google_sheets' LIMIT 1`,
-          values: [ctx.tenantId]
-        });
-        if (res && res.length > 0) last_sync_at = res[0].last_sync_at;
-      } catch (_) {}
 
       try {
         const res = await ctx.db.executeSafe({
@@ -917,10 +908,10 @@ export async function getFormsSyncMetadata() {
         try {
           lastAuto = new Date(Math.max(...autoCandidates.map((d: any) => new Date(d).getTime()))).toISOString();
         } catch (_) {
-          lastAuto = last_sync_at;
+          lastAuto = null;
         }
       } else {
-        lastAuto = last_sync_at;
+        lastAuto = null;
       }
 
       return {
