@@ -3,7 +3,7 @@
 import { withActionGuard } from "@/lib/core/action-guard";
 import { canonicalProvider, isValidMessengerIdentifier } from "@/lib/core/provider-aliases";
 import { withTenantDB } from "@/lib/core/tenant-db";
-import { encryptPayload, decryptPayload, type EncryptedPayload } from "@/lib/core/encryption";
+import { encryptPayload, decryptPayload, EncryptedPayload } from "@/lib/core/encryption";
 import crypto from "crypto";
 
 // ==========================================
@@ -109,24 +109,62 @@ export async function saveGoogleSheetsConfig(config: any) {
     },
     async (ctx) => {
       if (isV2IntegrationsEnabled()) {
-        // V2: Write to ingestion_pipelines (config) + tenant_integrations (credentials)
-        const pipelineConfig = {
-          spreadsheetId: config.spreadsheetId || '',
-          activeSheets: config.activeSheets || []
-        };
-
-        // Upsert ingestion_pipelines (no unique constraint, use conditional)
-        const existing = await ctx.db.executeSafe({
+        // 1. Read existing configuration and credentials
+        const existingPipeline = await ctx.db.executeSafe({
           text: `SELECT id FROM ingestion_pipelines WHERE tenant_id = $1 AND provider = 'google_sheets' LIMIT 1`,
           values: [ctx.tenantId]
         });
 
-        if (existing.length > 0) {
-          await ctx.db.executeSafe({
+        const existingIntegration = await ctx.db.executeSafe({
+          text: `SELECT credentials FROM tenant_integrations WHERE tenant_id = $1 AND provider = 'google_sheets' LIMIT 1`,
+          values: [ctx.tenantId]
+        });
+
+        let decrypted: any = {};
+        if (existingIntegration.length > 0 && existingIntegration[0].credentials) {
+          try {
+            const creds = typeof existingIntegration[0].credentials === 'string'
+              ? JSON.parse(existingIntegration[0].credentials)
+              : existingIntegration[0].credentials;
+            if (creds.encrypted_payload && creds.version) {
+              decrypted = decryptPayload(creds as EncryptedPayload);
+            } else {
+              decrypted = creds;
+            }
+          } catch (e: any) {
+            console.warn('[V2_INTEGRATIONS] Failed to decrypt existing credentials:', e.message);
+          }
+        }
+
+        const apiKeyToUse = config.apiKey || decrypted.apiKey;
+        if (!apiKeyToUse) {
+          throw new Error('credentials_required: Google Sheets API Key gereklidir.');
+        }
+
+        const nextCredentials = {
+          ...decrypted,
+          spreadsheetId: config.spreadsheetId !== undefined ? config.spreadsheetId : decrypted.spreadsheetId,
+          activeSheets: config.activeSheets !== undefined ? config.activeSheets : decrypted.activeSheets,
+          apiKey: apiKeyToUse
+        };
+
+        const encryptedCreds = encryptPayload('google_sheets', nextCredentials);
+
+        const pipelineConfig = {
+          spreadsheetId: config.spreadsheetId || decrypted.spreadsheetId || '',
+          activeSheets: config.activeSheets || decrypted.activeSheets || []
+        };
+
+        // 2. Build transaction queries
+        const txQueries: any[] = [];
+
+        // Ingestion pipeline query
+        if (existingPipeline.length > 0) {
+          txQueries.push({
             text: `UPDATE ingestion_pipelines SET config = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3`,
-            values: [JSON.stringify(pipelineConfig), existing[0].id, ctx.tenantId]
+            values: [JSON.stringify(pipelineConfig), existingPipeline[0].id, ctx.tenantId]
           });
-          // Update routing if provided
+          
           if (config.outbound_channel_id !== undefined || config.greeting_group_id !== undefined) {
             const updates: string[] = ['updated_at = NOW()'];
             const vals: any[] = [];
@@ -142,59 +180,31 @@ export async function saveGoogleSheetsConfig(config: any) {
               idx++;
             }
             vals.push(ctx.tenantId);
-            vals.push(existing[0].id);
-            await ctx.db.executeSafe({
+            vals.push(existingPipeline[0].id);
+            txQueries.push({
               text: `UPDATE ingestion_pipelines SET ${updates.join(', ')} WHERE id = $${idx + 1} AND tenant_id = $${idx}`,
               values: vals
             });
           }
         } else {
-          await ctx.db.executeSafe({
+          txQueries.push({
             text: `INSERT INTO ingestion_pipelines (tenant_id, name, provider, config, outbound_channel_id, greeting_group_id) 
                    VALUES ($1, 'Google Sheets Lead Ingestion', 'google_sheets', $2, $3, $4)`,
             values: [ctx.tenantId, JSON.stringify(pipelineConfig), config.outbound_channel_id || null, config.greeting_group_id || null]
           });
         }
 
-        // Upsert tenant_integrations (encrypt credentials)
-        if (config.apiKey) {
-          // Read existing credentials to preserve webhookSecret
-          const existingIntegration = await ctx.db.executeSafe({
-            text: `SELECT credentials FROM tenant_integrations WHERE tenant_id = $1 AND provider = 'google_sheets' LIMIT 1`,
-            values: [ctx.tenantId]
-          });
+        // Tenant integration query
+        txQueries.push({
+          text: `INSERT INTO tenant_integrations (tenant_id, provider, credentials, health_status)
+                 VALUES ($1, 'google_sheets', $2, 'healthy')
+                 ON CONFLICT (tenant_id, provider)
+                 DO UPDATE SET credentials = EXCLUDED.credentials, updated_at = NOW()`,
+          values: [ctx.tenantId, JSON.stringify(encryptedCreds)]
+        });
 
-          let webhookSecret = '';
-          if (existingIntegration.length > 0 && existingIntegration[0].credentials) {
-            try {
-              const creds = typeof existingIntegration[0].credentials === 'string'
-                ? JSON.parse(existingIntegration[0].credentials)
-                : existingIntegration[0].credentials;
-              let decrypted: any = {};
-              if (creds.encrypted_payload && creds.version) {
-                decrypted = decryptPayload(creds as EncryptedPayload);
-              } else {
-                decrypted = creds;
-              }
-              webhookSecret = decrypted.webhookSecret || '';
-            } catch (_) {}
-          }
-
-          const encryptedCreds = encryptPayload('google_sheets', {
-            apiKey: config.apiKey,
-            spreadsheetId: config.spreadsheetId || '',
-            activeSheets: config.activeSheets || [],
-            ...(webhookSecret ? { webhookSecret } : {})
-          });
-
-          await ctx.db.executeSafe({
-            text: `INSERT INTO tenant_integrations (tenant_id, provider, credentials, health_status)
-                   VALUES ($1, 'google_sheets', $2, 'healthy')
-                   ON CONFLICT (tenant_id, provider)
-                   DO UPDATE SET credentials = EXCLUDED.credentials, updated_at = NOW()`,
-            values: [ctx.tenantId, JSON.stringify(encryptedCreds)]
-          });
-        }
+        // 3. Execute Transaction
+        await ctx.db.executeTransaction(txQueries);
 
         return { success: true };
       }
@@ -890,7 +900,7 @@ export async function updateChannelCredentials(
             : channel.credentials_encrypted;
           
           if (creds.encrypted_payload && creds.version) {
-            existingCreds = decryptPayload(creds as EncryptedPayload);
+             existingCreds = decryptPayload(creds as EncryptedPayload);
           } else {
             existingCreds = creds;
           }
