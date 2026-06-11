@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { getTenantSettings, updateTenantSettings, getUsageStats } from "@/app/actions/settings";
 import { changeMyPassword, getUsers, createUser, updateUserRole, toggleUserActive, deleteUser, resetUserPassword, generateInviteLink } from "@/app/actions/users";
-import { Building2, Gauge, Shield, KeyRound, CreditCard, Users, Plus, Link2, Copy, Check, Trash2, Power } from "lucide-react";
+import { Building2, Gauge, Shield, KeyRound, CreditCard, Users, Plus, Link2, Copy, Check, Trash2, Power, AlertCircle } from "lucide-react";
 import { PageLoader } from "@/components/ui/shared-states";
 import { SectionCard, SectionHeader, SaveButton, ActionButton } from "@/components/governance";
 import { useConfirm } from "@/components/ui/confirm-dialog";
@@ -29,6 +29,8 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const confirm = useConfirm();
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Password State
   const [pwCurrent, setPwCurrent] = useState("");
@@ -57,22 +59,49 @@ export default function SettingsPage() {
   useEffect(() => { loadData(); }, []);
 
   async function loadData() {
-    const [tenantRes, usageRes, usersRes] = await Promise.all([
-      getTenantSettings(),
-      getUsageStats(),
-      getUsers(),
-    ]);
-    if (tenantRes.success && tenantRes.tenant) {
-      setTenant(tenantRes.tenant);
-      setUser(tenantRes.user);
-      setForm({
-        name: tenantRes.tenant.name || "",
-        industry: tenantRes.tenant.industry || "",
-        timezone: tenantRes.tenant.timezone || "Europe/Istanbul",
-      });
+    setIsLoading(true);
+    setLoadError(null);
+
+    // 1. Critical tenant settings
+    try {
+      const tenantRes = await getTenantSettings();
+      if (tenantRes.success && tenantRes.tenant) {
+        setTenant(tenantRes.tenant);
+        setUser(tenantRes.user);
+        setForm({
+          name: tenantRes.tenant.name || "",
+          industry: tenantRes.tenant.industry || "",
+          timezone: tenantRes.tenant.timezone || "Europe/Istanbul",
+        });
+      } else {
+        setLoadError(tenantRes.error || "Çalışma alanı ayarları yüklenemedi.");
+      }
+    } catch (err: any) {
+      console.error("[SETTINGS_LOAD] Tenant settings failed:", err);
+      setLoadError("Çalışma alanı ayarları yüklenirken sistemsel bir hata oluştu.");
     }
-    if (usageRes.success && usageRes.stats) setUsage(usageRes.stats);
-    if (usersRes.success && usersRes.data) setUsers(usersRes.data as any[]);
+
+    // 2. Non-critical usage statistics
+    try {
+      const usageRes = await getUsageStats();
+      if (usageRes.success && usageRes.stats) {
+        setUsage(usageRes.stats);
+      }
+    } catch (err) {
+      console.error("[SETTINGS_LOAD] Usage stats failed:", err);
+    }
+
+    // 3. Non-critical user list
+    try {
+      const usersRes = await getUsers();
+      if (usersRes.success && usersRes.data) {
+        setUsers(usersRes.data as any[]);
+      }
+    } catch (err) {
+      console.error("[SETTINGS_LOAD] Users list failed:", err);
+    }
+
+    setIsLoading(false);
   }
 
   async function reloadUsers() {
@@ -172,7 +201,31 @@ export default function SettingsPage() {
     setTimeout(() => setCopied(false), 2000);
   }
 
-  if (!tenant) return <PageLoader />;
+  if (loadError) {
+    return (
+      <div className="min-h-[400px] w-full flex items-center justify-center p-6 bg-[#FAFAFA] dark:bg-black">
+        <div className="bg-white dark:bg-[#111] rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.04)] border border-black/5 p-8 w-full max-w-sm text-center space-y-5">
+          <div className="w-12 h-12 rounded-full bg-rose-50 dark:bg-rose-950/30 border border-rose-100 dark:border-rose-900/50 flex items-center justify-center mx-auto">
+            <AlertCircle className="w-6 h-6 text-rose-500" />
+          </div>
+          <div className="space-y-2">
+            <h3 className="text-base font-extrabold text-[#1D1D1F] dark:text-zinc-200">Yükleme Başarısız</h3>
+            <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed font-medium">
+              {loadError}
+            </p>
+          </div>
+          <button
+            onClick={() => loadData()}
+            className="w-full py-2.5 bg-zinc-950 hover:bg-zinc-800 text-white text-[12px] font-bold rounded-xl transition-all cursor-pointer dark:bg-white dark:text-black dark:hover:bg-zinc-200"
+          >
+            Tekrar Dene
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (isLoading || !tenant) return <PageLoader />;
 
   return (
     <div className="h-full flex flex-col md:flex-row bg-[#FAFAFA] dark:bg-black">
@@ -441,7 +494,9 @@ export default function SettingsPage() {
                   </div>
                 </SectionCard>
               ) : (
-                <div className="p-6 text-center text-[13px] text-black/50">Kullanım verisi yükleniyor...</div>
+                <div className="p-6 text-center text-[13px] text-black/50">
+                  {isLoading ? "Kullanım verisi yükleniyor..." : "Kullanım verisi yüklenemedi."}
+                </div>
               )}
             </div>
           )}

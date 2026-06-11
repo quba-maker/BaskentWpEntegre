@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useSWRConfig } from "swr";
-import { User, MapPin, Building, Activity, Tag, ChevronDown, ChevronRight, Save, X, Plus, ChevronLeft, Check, Loader2, Sparkles, FileText, Brain, Link, Clock, Moon, Calendar, CalendarClock, PhoneForwarded, MailPlus, Share2, Eye, EyeOff, Send, Copy, AlertTriangle, Trash2 } from "lucide-react";
+import { User, MapPin, Building, Activity, Tag, ChevronDown, ChevronRight, Save, X, Plus, ChevronLeft, Check, Loader2, Sparkles, FileText, Brain, Link, Clock, Moon, Calendar, CalendarClock, PhoneForwarded, MailPlus, Share2, Eye, EyeOff, Send, Copy, AlertTriangle, Trash2, AlertCircle } from "lucide-react";
 import { useInboxStore } from "@/store/inbox-store";
 import { updateCrmData, addTag, removeTag, prepareFollowUpDraft, sendApprovedFollowUp, checkSecondaryFallback, prepareSecondaryDraft, getCrmPanelBundleAction, prepareFormGreetingDraft, saveBotSteeringDirectiveAction, saveFormGreetingDraftInternalAction, sendFormGreetingFromInboxAction, prepareNoReplyReminderDraftAction, sendNoReplyReminderAction, scheduleReminderTaskAction, prepareInboxBotAssistedDraftAction, sendApprovedInboxBotDraftAction, deactivateBotDirectiveAction } from "@/app/actions/inbox";
 import { CustomerAiBrainPanel } from "@/components/features/ai-observability/CustomerAiBrain";
@@ -156,7 +156,7 @@ export function ContextPanel() {
   const setMobileView = useInboxStore((state) => state.setMobileView);
   const isSidebarCollapsed = useInboxStore((state) => state.isSidebarCollapsed);
   const params = useParams();
-  const tenantSlug = typeof params?.tenant_slug === 'string' ? params.tenant_slug : 'baskent';
+  const tenantSlug = typeof params?.tenant_slug === 'string' ? params.tenant_slug : '';
   const { tenant } = useTenant();
   const entityType = getTenantEntityType(tenantSlug, tenant?.profile?.industry);
   const [formOpen, setFormOpen] = useState(false);
@@ -531,6 +531,23 @@ export function ContextPanel() {
     const interval = setInterval(updateClock, 10000); // update every 10 seconds
     return () => clearInterval(interval);
   }, [country, activeContact]);
+
+  if (!tenantSlug) {
+    return (
+      <div
+        className={`h-full z-10 flex flex-col items-center justify-center p-6 text-center space-y-3 q-glass transition-all duration-300 ease-in-out ${
+          isSidebarCollapsed ? "w-[616px]" : "w-[360px]"
+        }`}
+        style={{ borderLeft: "1px solid var(--q-border-default)" }}
+      >
+        <AlertCircle className="w-8 h-8 text-rose-500" />
+        <h3 className="text-sm font-bold text-[#1D1D1F] dark:text-zinc-250">Tenant Bulunamadı</h3>
+        <p className="text-xs text-zinc-650 dark:text-zinc-400 max-w-[240px]">
+          İşlem yapabilmek için geçerli bir tenant oturumu gereklidir.
+        </p>
+      </div>
+    );
+  }
 
   if (!activeContact) {
     return (

@@ -20,7 +20,7 @@ export function InboxModalContainer() {
   const setActiveModal = useInboxStore((state) => state.setActiveModal);
   const activePhone = useInboxStore((state) => state.activePhone);
   const params = useParams();
-  const tenantSlug = typeof params?.tenant_slug === "string" ? params.tenant_slug : "baskent";
+  const tenantSlug = typeof params?.tenant_slug === "string" ? params.tenant_slug : "";
   const queryClient = useQueryClient();
 
   // Automatically close modal when active patient changes
@@ -72,6 +72,36 @@ export function InboxModalContainer() {
   const handleClose = () => {
     setActiveModal(null);
   };
+
+  if (!tenantSlug) {
+    return createPortal(
+      <div className="fixed inset-0 bg-black/45 backdrop-blur-[4px] flex items-center justify-center z-[9999]" onClick={handleClose}>
+        <div 
+          className="bg-white rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.18)] border border-black/5 w-full max-w-sm overflow-hidden flex flex-col mx-4"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="p-5 flex justify-between items-center bg-slate-50/50 border-b border-black/[0.05]">
+            <div className="flex items-center gap-2 text-rose-600">
+              <AlertCircle className="w-5 h-5" />
+              <h3 className="text-sm font-extrabold text-[#1D1D1F]">Tenant Bulunamadı</h3>
+            </div>
+            <button onClick={handleClose} className="w-8 h-8 rounded-full bg-[#F5F5F7] hover:bg-[#E8E8ED] flex items-center justify-center text-gray-500 hover:text-black transition-all cursor-pointer">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="p-6 space-y-4 text-center">
+            <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed font-medium">
+              Geçerli bir tenant oturumu bulunamadı. Lütfen sayfayı yenileyin veya tekrar giriş yapın.
+            </p>
+            <button onClick={handleClose} className="w-full py-2.5 bg-zinc-950 hover:bg-zinc-800 text-white text-[12px] font-bold rounded-xl transition-all cursor-pointer">
+              Kapat
+            </button>
+          </div>
+        </div>
+      </div>,
+      document.body
+    );
+  }
 
   const crm = crmData as any;
   const patientName = activeModal.patientName || crm?.patientName || "Hasta";

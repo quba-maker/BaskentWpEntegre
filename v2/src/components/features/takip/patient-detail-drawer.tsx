@@ -117,7 +117,7 @@ export default function PatientDetailDrawer({
   onRefresh
 }: PatientDetailDrawerProps) {
   const params = useParams();
-  const tenantSlug = typeof params?.tenant_slug === 'string' ? params.tenant_slug : 'baskent';
+  const tenantSlug = typeof params?.tenant_slug === 'string' ? params.tenant_slug : '';
   const { tenant } = useTenant();
   const entityType = getTenantEntityType(tenantSlug, tenant?.profile?.industry);
 
@@ -427,6 +427,32 @@ export default function PatientDetailDrawer({
       setManualConfirmation("");
     }
   }, [activeTask]);
+
+  if (!tenantSlug) {
+    return (
+      <>
+        {/* Overlay */}
+        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm z-40 md:bg-black/20" onClick={onClose} />
+        
+        {/* Drawer */}
+        <div className="fixed inset-y-0 right-0 z-50 w-full md:w-[680px] lg:w-[720px] max-w-full bg-[#F5F5F7] shadow-[0_0_60px_rgba(0,0,0,0.15)] flex flex-col items-center justify-center p-6 text-center space-y-4 animate-in slide-in-from-right duration-200">
+          <div className="p-4 bg-rose-50 rounded-full border border-rose-200">
+            <AlertCircle className="w-8 h-8 text-rose-500" />
+          </div>
+          <h3 className="text-lg font-bold text-[#1D1D1F]">Tenant Bulunamadı</h3>
+          <p className="text-sm text-zinc-500 max-w-sm leading-relaxed">
+            Bu hasta detaylarını görüntülemek ve işlem yapabilmek için geçerli bir tenant oturumu gereklidir.
+          </p>
+          <button 
+            onClick={onClose}
+            className="px-6 py-2 bg-zinc-900 hover:bg-zinc-800 text-white text-xs font-bold rounded-xl transition-all cursor-pointer"
+          >
+            Kapat
+          </button>
+        </div>
+      </>
+    );
+  }
 
   const handleManualUpdateStatus = async () => {
     if (!activeTask?.id) return;

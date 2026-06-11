@@ -62,39 +62,11 @@ export async function POST(request: NextRequest) {
   try {
     const rawBody = await request.text();
 
-    // ── 1. Authentication: Bearer OR HMAC ──
-    const authHeader = request.headers.get('authorization');
-    const sheetsSignature = request.headers.get('x-sheets-signature');
-    const sheetsTimestamp = request.headers.get('x-sheets-timestamp');
-    const cronSecret = process.env.CRON_SECRET;
-    const webhookSecret = process.env.SHEETS_WEBHOOK_SECRET;
-
-    const isCronAuth = cronSecret && authHeader === `Bearer ${cronSecret}`;
-    let isHmacAuth = false;
-
-    if (webhookSecret && sheetsSignature && sheetsTimestamp) {
-      const now = Math.floor(Date.now() / 1000);
-      const ts = parseInt(sheetsTimestamp!);
-      if (!isNaN(ts) && Math.abs(now - ts) <= 300) {
-        isHmacAuth = verifyHmac(webhookSecret!, sheetsTimestamp!, rawBody, sheetsSignature!);
-      }
-    }
-
-    if (!isCronAuth && !isHmacAuth) {
-      if (cronSecret || webhookSecret) {
-        log.warn('[CRON_SYNC_AUTH_FAIL] Unauthorized request');
-        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-      }
-      // No secrets configured — development fallback
-      log.warn('[CRON_SYNC_NO_AUTH] No auth secrets configured');
-    }
-
-    // ── 2. Tenant resolution ──
+    // ── 1. Tenant resolution (moved up for provider-aware HMAC validation) ──
     const tenantSlug = request.nextUrl.searchParams.get('tenant');
     const systemDb = withTenantDB('admin-system', true);
 
-    // If tenant slug provided, sync that one tenant
-    // Otherwise, sync all active tenants with google_sheets integration
+    // If tenant slug provided, resolve that one tenant first to get webhook secret
     let tenants: { id: string; name: string }[] = [];
 
     if (tenantSlug) {
@@ -103,7 +75,77 @@ export async function POST(request: NextRequest) {
         values: [tenantSlug]
       }) as any[];
       tenants = res || [];
-    } else {
+    }
+
+    // ── 2. Load Tenant-Specific Webhook Secret ──
+    let tenantSecret: string | null = null;
+    if (tenants.length > 0) {
+      const tenantId = tenants[0].id;
+      const db = withTenantDB(tenantId);
+      try {
+        const integration = await db.executeSafe({
+          text: `SELECT credentials FROM tenant_integrations WHERE tenant_id = $1 AND provider = 'google_sheets' LIMIT 1`,
+          values: [tenantId]
+        }) as any[];
+        if (integration.length > 0 && integration[0].credentials) {
+          const { decryptPayload } = await import('@/lib/core/encryption');
+          const creds = typeof integration[0].credentials === 'string'
+            ? JSON.parse(integration[0].credentials)
+            : integration[0].credentials;
+          let decrypted: any = {};
+          if (creds.encrypted_payload && creds.version) {
+            decrypted = decryptPayload(creds);
+          } else {
+            decrypted = creds;
+          }
+          tenantSecret = decrypted.webhookSecret || null;
+        }
+      } catch (e) {
+        log.warn('[CRON_SECRET_RESOLVE_FAIL] Failed to resolve tenant secret', { tenantId });
+      }
+    }
+
+    // ── 3. Authentication: Bearer OR HMAC ──
+    const authHeader = request.headers.get('authorization');
+    const sheetsSignature = request.headers.get('x-sheets-signature');
+    const sheetsTimestamp = request.headers.get('x-sheets-timestamp');
+    const cronSecret = process.env.CRON_SECRET;
+    const globalWebhookSecret = process.env.SHEETS_WEBHOOK_SECRET;
+
+    const isCronAuth = cronSecret && authHeader === `Bearer ${cronSecret}`;
+    let isHmacAuth = false;
+
+    if (sheetsSignature && sheetsTimestamp && (tenantSecret || globalWebhookSecret)) {
+      const now = Math.floor(Date.now() / 1000);
+      const ts = parseInt(sheetsTimestamp!);
+      if (!isNaN(ts) && Math.abs(now - ts) <= 300) {
+        if (tenantSecret) {
+          // Strict mode: verify ONLY with tenant secret. No fallback to global.
+          isHmacAuth = verifyHmac(tenantSecret, sheetsTimestamp!, rawBody, sheetsSignature!);
+        } else if (globalWebhookSecret) {
+          // Fallback mode: try global secrets
+          const secretList = globalWebhookSecret.split(',').map(s => s.trim()).filter(s => s.length > 0);
+          for (const currentSecret of secretList) {
+            if (verifyHmac(currentSecret, sheetsTimestamp!, rawBody, sheetsSignature!)) {
+              isHmacAuth = true;
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    if (!isCronAuth && !isHmacAuth) {
+      if (cronSecret || globalWebhookSecret || tenantSecret) {
+        log.warn('[CRON_SYNC_AUTH_FAIL] Unauthorized request');
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      }
+      // No secrets configured — development fallback
+      log.warn('[CRON_SYNC_NO_AUTH] No auth secrets configured');
+    }
+
+    // If no tenant slug was provided, fetch all active tenants
+    if (!tenantSlug) {
       // Sync all tenants with active Google Sheets integration
       const res = await systemDb.executeSafe({
         text: `SELECT t.id, t.name FROM tenants t

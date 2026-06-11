@@ -1,6 +1,7 @@
 "use server";
 
 import { withActionGuard } from "@/lib/core/action-guard";
+import { getPublicBaseUrl } from "@/lib/core/url";
 
 // ==========================================
 // QUBA AI — Kullanıcı Yönetimi
@@ -168,7 +169,7 @@ export async function generateInviteLink(userId: string) {
       [token, expiresAt.toISOString(), userId, ctx.tenantId]
     );
 
-    const inviteUrl = `https://ai.qubamedya.com/login?invite=${token}`;
+    const inviteUrl = `${getPublicBaseUrl()}/login?invite=${token}`;
 
     return {
       inviteUrl,

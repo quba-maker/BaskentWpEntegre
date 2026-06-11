@@ -54,7 +54,7 @@ export async function withActionGuard<T>(
         tenantId: process.env.TEST_TENANT_ID,
         role: process.env.TEST_USER_ROLE || "platform_admin",
         email: "test@quba.ai",
-        tenantSlug: "baskent"
+        tenantSlug: "test-tenant"
       };
     } else {
       session = await getSession();

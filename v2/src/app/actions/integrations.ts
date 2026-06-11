@@ -1,8 +1,10 @@
 "use server";
 
 import { withActionGuard } from "@/lib/core/action-guard";
-import { decryptPayload, encryptPayload, EncryptedPayload } from "@/lib/core/encryption";
 import { canonicalProvider, isValidMessengerIdentifier } from "@/lib/core/provider-aliases";
+import { withTenantDB } from "@/lib/core/tenant-db";
+import { encryptPayload, decryptPayload, type EncryptedPayload } from "@/lib/core/encryption";
+import crypto from "crypto";
 
 // ==========================================
 // QUBA AI — Integrations Actions (Zero-Trust, V2-Native)
@@ -43,17 +45,26 @@ export async function getGoogleSheetsConfig() {
           : {};
         
         let apiKey = '';
+        let webhookSecretMasked = '';
         if (integration.length > 0 && integration[0].credentials) {
           try {
             const creds = typeof integration[0].credentials === 'string' 
               ? JSON.parse(integration[0].credentials) 
               : integration[0].credentials;
             // If encrypted, decrypt (EncryptedPayload format: {version, provider, encrypted_payload})
+            let decrypted: any = {};
             if (creds.encrypted_payload && creds.version) {
-              const decrypted = decryptPayload(creds as EncryptedPayload);
+              decrypted = decryptPayload(creds as EncryptedPayload);
               apiKey = decrypted.apiKey || '';
             } else {
+              decrypted = creds;
               apiKey = creds.apiKey || '';
+            }
+            if (decrypted.webhookSecret) {
+              const sec = decrypted.webhookSecret;
+              webhookSecretMasked = sec.length > 8
+                ? `wh_sec_${sec.substring(0, 4)}...${sec.substring(sec.length - 4)}`
+                : 'wh_sec_***';
             }
           } catch (e) {
             console.warn('[V2_INTEGRATIONS] Failed to decrypt credentials, continuing without apiKey');
@@ -66,6 +77,7 @@ export async function getGoogleSheetsConfig() {
             activeSheets: pipelineConfig.activeSheets || [],
             outbound_channel_id: pipeline.length > 0 ? pipeline[0].outbound_channel_id || '' : '',
             greeting_group_id: pipeline.length > 0 ? pipeline[0].greeting_group_id || '' : '',
+            webhookSecretMasked,
             ...(apiKey ? { apiKey } : {})
           }
         };
@@ -146,17 +158,41 @@ export async function saveGoogleSheetsConfig(config: any) {
 
         // Upsert tenant_integrations (encrypt credentials)
         if (config.apiKey) {
+          // Read existing credentials to preserve webhookSecret
+          const existingIntegration = await ctx.db.executeSafe({
+            text: `SELECT credentials FROM tenant_integrations WHERE tenant_id = $1 AND provider = 'google_sheets' LIMIT 1`,
+            values: [ctx.tenantId]
+          });
+
+          let webhookSecret = '';
+          if (existingIntegration.length > 0 && existingIntegration[0].credentials) {
+            try {
+              const creds = typeof existingIntegration[0].credentials === 'string'
+                ? JSON.parse(existingIntegration[0].credentials)
+                : existingIntegration[0].credentials;
+              let decrypted: any = {};
+              if (creds.encrypted_payload && creds.version) {
+                decrypted = decryptPayload(creds as EncryptedPayload);
+              } else {
+                decrypted = creds;
+              }
+              webhookSecret = decrypted.webhookSecret || '';
+            } catch (_) {}
+          }
+
           const encryptedCreds = encryptPayload('google_sheets', {
             apiKey: config.apiKey,
             spreadsheetId: config.spreadsheetId || '',
-            activeSheets: config.activeSheets || []
+            activeSheets: config.activeSheets || [],
+            ...(webhookSecret ? { webhookSecret } : {})
           });
 
           await ctx.db.executeSafe({
-            text: `UPDATE tenant_integrations 
-                   SET credentials = $1, updated_at = NOW()
-                   WHERE tenant_id = $2 AND provider = 'google_sheets'`,
-            values: [JSON.stringify(encryptedCreds), ctx.tenantId]
+            text: `INSERT INTO tenant_integrations (tenant_id, provider, credentials, health_status)
+                   VALUES ($1, 'google_sheets', $2, 'healthy')
+                   ON CONFLICT (tenant_id, provider)
+                   DO UPDATE SET credentials = EXCLUDED.credentials, updated_at = NOW()`,
+            values: [ctx.tenantId, JSON.stringify(encryptedCreds)]
           });
         }
 
@@ -312,7 +348,8 @@ export async function getIntegrationHealth() {
         });
         const hasBinding = bindingCheck.length > 0;
         if (!hasBinding && status !== 'disconnected') {
-          detail += ' • Prompt bağlı değil';
+          status = 'warning';
+          detail = detail.includes('•') ? detail : `${detail} • Prompt bağlı değil`;
         }
 
         const lastMsg = await ctx.db.executeSafe({
@@ -442,13 +479,20 @@ export async function connectWhatsAppChannel(input: {
       });
       if (bot.length === 0) throw new Error('Bot not found');
 
-      // Check duplicate
-      const existing = await ctx.db.executeSafe({
-        text: `SELECT c.id FROM channels c JOIN channel_groups cg ON c.group_id = cg.id 
-               WHERE cg.tenant_id = $1 AND c.provider = 'whatsapp' AND c.identifier = $2`,
-        values: [ctx.tenantId, phoneNumberId]
+      const normalizedId = String(phoneNumberId || '').trim().toLowerCase();
+      if (!normalizedId) throw new Error('Geçersiz kanal kimliği');
+
+      // Check duplicate (global uniqueness check)
+      const systemDb = withTenantDB('admin-system', true);
+      const existing = await systemDb.executeSafe({
+        text: `SELECT id FROM channels 
+               WHERE provider = 'whatsapp' AND TRIM(identifier) = $1 
+               AND COALESCE(status, 'active') != 'archived'`,
+        values: [normalizedId]
       });
-      if (existing.length > 0) throw new Error('Bu WhatsApp numarası zaten ekli');
+      if (existing.length > 0) {
+        throw new Error('Bu kanal kimliği başka bir hesapta kayıtlı görünüyor. Lütfen entegrasyon bilgilerini kontrol edin.');
+      }
 
       // Insert channel (tenant_id validated via group_id ownership)
       const ch = await ctx.db.executeSafe({
@@ -456,13 +500,13 @@ export async function connectWhatsAppChannel(input: {
                SELECT $1, 'whatsapp', $2, $3, 'active' 
                FROM channel_groups WHERE id = $1 AND tenant_id = $4
                RETURNING id`,
-        values: [botGroupId, phoneNumberId, name, ctx.tenantId]
+        values: [botGroupId, normalizedId, name, ctx.tenantId]
       });
       if (ch.length === 0) throw new Error('Channel insert failed — tenant_id mismatch');
       const channelId = ch[0].id;
 
       // Insert credentials (tenant_id bound via channel → group)
-      const encrypted = encryptPayload('whatsapp', { accessToken, wabaId: wabaId || '', phoneNumberId });
+      const encrypted = encryptPayload('whatsapp', { accessToken, wabaId: wabaId || '', phoneNumberId: normalizedId });
       await ctx.db.executeSafe({
         text: `INSERT INTO channel_integrations (channel_id, provider, credentials_encrypted, health_status)
                SELECT $1, 'whatsapp', $2, 'pending'
@@ -514,18 +558,32 @@ export async function connectInstagramChannel(input: {
       });
       if (bot.length === 0) throw new Error('Bot not found');
 
+      const normalizedId = String(instagramBusinessAccountId || '').trim().toLowerCase();
+      if (!normalizedId) throw new Error('Geçersiz Instagram Business Account ID');
+
+      const systemDb = withTenantDB('admin-system', true);
+      const existing = await systemDb.executeSafe({
+        text: `SELECT id FROM channels 
+               WHERE provider = 'meta_instagram' AND TRIM(identifier) = $1 
+               AND COALESCE(status, 'active') != 'archived'`,
+        values: [normalizedId]
+      });
+      if (existing.length > 0) {
+        throw new Error('Bu kanal kimliği başka bir hesapta kayıtlı görünüyor. Lütfen entegrasyon bilgilerini kontrol edin.');
+      }
+
       // Use meta_instagram as DB provider (alias system handles runtime)
       const ch = await ctx.db.executeSafe({
         text: `INSERT INTO channels (group_id, provider, identifier, name, status)
                SELECT $1, 'meta_instagram', $2, $3, 'active'
                FROM channel_groups WHERE id = $1 AND tenant_id = $4
                RETURNING id`,
-        values: [botGroupId, instagramBusinessAccountId, name, ctx.tenantId]
+        values: [botGroupId, normalizedId, name, ctx.tenantId]
       });
       if (ch.length === 0) throw new Error('Channel insert failed — tenant_id mismatch');
       const channelId = ch[0].id;
 
-      const encrypted = encryptPayload('instagram', { accessToken, instagramBusinessAccountId });
+      const encrypted = encryptPayload('instagram', { accessToken, instagramBusinessAccountId: normalizedId });
       await ctx.db.executeSafe({
         text: `INSERT INTO channel_integrations (channel_id, provider, credentials_encrypted, health_status)
                SELECT $1, 'meta_instagram', $2, 'pending'
@@ -580,17 +638,31 @@ export async function connectMessengerPage(input: {
       });
       if (bot.length === 0) throw new Error('Bot not found');
 
+      const normalizedId = String(pageId || '').trim().toLowerCase();
+      if (!normalizedId) throw new Error('Geçersiz Facebook Page ID');
+
+      const systemDb = withTenantDB('admin-system', true);
+      const existing = await systemDb.executeSafe({
+        text: `SELECT id FROM channels 
+               WHERE provider = 'messenger' AND TRIM(identifier) = $1 
+               AND COALESCE(status, 'active') != 'archived'`,
+        values: [normalizedId]
+      });
+      if (existing.length > 0) {
+        throw new Error('Bu kanal kimliği başka bir hesapta kayıtlı görünüyor. Lütfen entegrasyon bilgilerini kontrol edin.');
+      }
+
       const ch = await ctx.db.executeSafe({
         text: `INSERT INTO channels (group_id, provider, identifier, name, status)
                SELECT $1, 'messenger', $2, $3, 'active'
                FROM channel_groups WHERE id = $1 AND tenant_id = $4
                RETURNING id`,
-        values: [botGroupId, pageId, name, ctx.tenantId]
+        values: [botGroupId, normalizedId, name, ctx.tenantId]
       });
       if (ch.length === 0) throw new Error('Channel insert failed — tenant_id mismatch');
       const channelId = ch[0].id;
 
-      const encrypted = encryptPayload('messenger', { pageAccessToken, pageId });
+      const encrypted = encryptPayload('messenger', { pageAccessToken, pageId: normalizedId });
       await ctx.db.executeSafe({
         text: `INSERT INTO channel_integrations (channel_id, provider, credentials_encrypted, health_status)
                SELECT $1, 'messenger', $2, 'pending'
@@ -718,6 +790,67 @@ export async function setupIntegrationChannel(provider: string, identifier: stri
   ).then(res => {
     if (!res.success) return { success: false, error: res.error };
     return { success: true };
+  });
+}
+
+/**
+ * Explicit user action to rotate/generate Google Sheets Webhook Secret
+ */
+export async function rotateGoogleSheetsWebhookSecret(): Promise<{ success: boolean; webhookSecretRaw?: string; error?: string }> {
+  return withActionGuard(
+    { actionName: 'rotateGoogleSheetsWebhookSecret', roles: ['owner', 'admin'] },
+    async (ctx) => {
+      // 1. Get existing credentials for Google Sheets
+      const integration = await ctx.db.executeSafe({
+        text: `SELECT credentials FROM tenant_integrations WHERE tenant_id = $1 AND provider = 'google_sheets' LIMIT 1`,
+        values: [ctx.tenantId]
+      });
+
+      let apiKey = '';
+      let spreadsheetId = '';
+      let activeSheets: string[] = [];
+
+      if (integration.length > 0 && integration[0].credentials) {
+        try {
+          const creds = typeof integration[0].credentials === 'string'
+            ? JSON.parse(integration[0].credentials)
+            : integration[0].credentials;
+          let decrypted: any = {};
+          if (creds.encrypted_payload && creds.version) {
+            decrypted = decryptPayload(creds as EncryptedPayload);
+          } else {
+            decrypted = creds;
+          }
+          apiKey = decrypted.apiKey || '';
+          spreadsheetId = decrypted.spreadsheetId || '';
+          activeSheets = decrypted.activeSheets || [];
+        } catch (_) {}
+      }
+
+      // 2. Generate new random 32-byte hex secret
+      const newSecret = crypto.randomBytes(32).toString('hex');
+
+      // 3. Encrypt and save back
+      const encrypted = encryptPayload('google_sheets', {
+        apiKey,
+        spreadsheetId,
+        activeSheets,
+        webhookSecret: newSecret
+      });
+
+      await ctx.db.executeSafe({
+        text: `INSERT INTO tenant_integrations (tenant_id, provider, credentials, health_status)
+               VALUES ($1, 'google_sheets', $2, 'healthy')
+               ON CONFLICT (tenant_id, provider)
+               DO UPDATE SET credentials = EXCLUDED.credentials, updated_at = NOW()`,
+        values: [ctx.tenantId, JSON.stringify(encrypted)]
+      });
+
+      return { webhookSecretRaw: newSecret };
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error };
+    return { success: true, webhookSecretRaw: res.data?.webhookSecretRaw };
   });
 }
 

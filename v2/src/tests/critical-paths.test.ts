@@ -164,6 +164,208 @@ test("PROVIDER: requiresWhatsAppPhoneNumberId doğru çalışmalı", () => {
   assert(requiresWhatsAppPhoneNumberId("360dialog_whatsapp") === false, "360dialog_whatsapp Phone ID gerektirmemeli");
   assert(requiresWhatsAppPhoneNumberId(null) === true, "null Phone ID gerektirmeli");
 });
+// ==========================================
+// 6. SAAS SECURITY & WEBHOOK ROTATION TESTS (Faz 1B)
+// ==========================================
+
+// Mock global database for the tests
+const mockDbCalls: any[] = [];
+(global as any).mockDb = {
+  executeSafe: async (query: any, params?: any[]) => {
+    const text = typeof query === 'string' ? query : query?.text || '';
+    const vals = typeof query === 'string' ? params : query?.values || [];
+    const normalizedText = text.replace(/\s+/g, ' ');
+    mockDbCalls.push({ text, vals });
+
+    // Tenant Resolution
+    if (normalizedText.includes("SELECT id, name FROM tenants WHERE slug =")) {
+      const slug = vals[0];
+      if (slug === 'nonexistent') return [];
+      return [{ id: `id-${slug}`, name: `Name-${slug}` }];
+    }
+    // Integration Credentials
+    if (normalizedText.includes("SELECT credentials FROM tenant_integrations WHERE tenant_id =")) {
+      const tenantId = vals[0];
+      if (tenantId === 'id-test-tenant-with-secret') {
+        const { encryptPayload } = require("../lib/core/encryption");
+        const encrypted = encryptPayload('google_sheets', {
+          webhookSecret: 'tenant-secret-key'
+        });
+        return [{ credentials: JSON.stringify(encrypted) }];
+      }
+      return [];
+    }
+    // Duplicate ID checks
+    if (normalizedText.includes("SELECT id FROM channels WHERE")) {
+      const identifier = vals[0];
+      if (identifier === 'wa-dup-id' || identifier === 'ig-dup-id' || identifier === '987654321') {
+        return [{ id: 'duplicate-channel-id' }];
+      }
+      return [];
+    }
+    // Bot lists and other defaults
+    if (normalizedText.includes("SELECT id FROM channel_groups")) {
+      return [{ id: 'bot-group-id' }];
+    }
+    return [];
+  }
+};
+
+test("SAAS ACTION: connectWhatsAppChannel duplicate identifier check", async () => {
+  process.env.TEST_TENANT_ID = 'test-tenant-id';
+  const { connectWhatsAppChannel } = require("../app/actions/integrations");
+  const res = await connectWhatsAppChannel({
+    name: 'WA Channel',
+    phoneNumberId: 'wa-dup-id',
+    accessToken: 'token',
+    botGroupId: 'bot-group-id'
+  });
+  assert(res.success === false, "WhatsApp duplicate identifier should fail");
+  assert(res.error && res.error.includes("başka bir hesapta kayıtlı görünüyor"), "Error message should match");
+  assert(!res.error.includes("tenant"), "Error message must not leak tenant details");
+});
+
+test("SAAS ACTION: connectInstagramChannel duplicate identifier check", async () => {
+  process.env.TEST_TENANT_ID = 'test-tenant-id';
+  const { connectInstagramChannel } = require("../app/actions/integrations");
+  const res = await connectInstagramChannel({
+    name: 'IG Channel',
+    instagramBusinessAccountId: 'ig-dup-id',
+    accessToken: 'token',
+    botGroupId: 'bot-group-id'
+  });
+  assert(res.success === false, "Instagram duplicate identifier should fail");
+  assert(res.error && res.error.includes("başka bir hesapta kayıtlı görünüyor"), "Error message should match");
+  assert(!res.error.includes("tenant"), "Error message must not leak tenant details");
+});
+
+test("SAAS ACTION: connectMessengerPage duplicate identifier check", async () => {
+  process.env.TEST_TENANT_ID = 'test-tenant-id';
+  const { connectMessengerPage } = require("../app/actions/integrations");
+  const res = await connectMessengerPage({
+    name: 'Messenger Page',
+    pageId: '987654321',
+    pageAccessToken: 'token',
+    botGroupId: 'bot-group-id'
+  });
+  assert(res.success === false, "Messenger duplicate identifier should fail");
+  assert(res.error && res.error.includes("başka bir hesapta kayıtlı görünüyor"), "Error message should match");
+  assert(!res.error.includes("tenant"), "Error message must not leak tenant details");
+});
+
+// Helper for Mock Request
+function createMockRequest(url: string, headers: Record<string, string>, bodyStr: string): any {
+  return {
+    nextUrl: new URL(url),
+    text: async () => bodyStr,
+    headers: {
+      get: (name: string) => headers[name.toLowerCase()] || null
+    }
+  };
+}
+
+function signPayload(secret: string, timestamp: string, body: string): string {
+  const crypto = require("crypto");
+  return 'sha256=' + crypto
+    .createHmac('sha256', secret)
+    .update(timestamp + '.' + body)
+    .digest('hex');
+}
+
+test("WEBHOOK: Tenant-specific secret yoksa global fallback pass", async () => {
+  process.env.SHEETS_WEBHOOK_SECRET = 'global-secret-key';
+
+  const timestamp = Math.floor(Date.now() / 1000).toString();
+  const body = JSON.stringify({ tenant_slug: "test-tenant-no-secret", data: { test: true } });
+  const signature = signPayload('global-secret-key', timestamp, body);
+
+  const req = createMockRequest(
+    "http://localhost/api/sheets-webhook?tenant=test-tenant-no-secret",
+    { "x-sheets-signature": signature, "x-sheets-timestamp": timestamp },
+    body
+  );
+
+  const { POST } = require("../app/api/sheets-webhook/route");
+  const res = await POST(req);
+  assert(res.status !== 401, "Webhook signature verification should NOT fail with 401 when using global fallback");
+});
+
+test("WEBHOOK: Tenant-specific secret varsa doğru secret pass", async () => {
+  process.env.SHEETS_WEBHOOK_SECRET = 'global-secret-key';
+
+  const timestamp = Math.floor(Date.now() / 1000).toString();
+  const body = JSON.stringify({ tenant_slug: "test-tenant-with-secret", data: { test: true } });
+  const signature = signPayload('tenant-secret-key', timestamp, body);
+
+  const req = createMockRequest(
+    "http://localhost/api/sheets-webhook?tenant=test-tenant-with-secret",
+    { "x-sheets-signature": signature, "x-sheets-timestamp": timestamp },
+    body
+  );
+
+  const { POST } = require("../app/api/sheets-webhook/route");
+  const res = await POST(req);
+  assert(res.status !== 401, "Webhook signature verification should pass with correct tenant secret");
+});
+
+test("WEBHOOK: Tenant-specific secret varsa yanlış secret fail", async () => {
+  process.env.SHEETS_WEBHOOK_SECRET = 'global-secret-key';
+
+  const timestamp = Math.floor(Date.now() / 1000).toString();
+  const body = JSON.stringify({ tenant_slug: "test-tenant-with-secret", data: { test: true } });
+  const signature = signPayload('wrong-secret-key', timestamp, body);
+
+  const req = createMockRequest(
+    "http://localhost/api/sheets-webhook?tenant=test-tenant-with-secret",
+    { "x-sheets-signature": signature, "x-sheets-timestamp": timestamp },
+    body
+  );
+
+  const { POST } = require("../app/api/sheets-webhook/route");
+  const res = await POST(req);
+  assert(res.status === 401, "Webhook signature verification should fail with 401 with wrong tenant secret");
+});
+
+test("WEBHOOK: Tenant-specific secret varsa global secret fallback çalışmıyor", async () => {
+  process.env.SHEETS_WEBHOOK_SECRET = 'global-secret-key';
+
+  const timestamp = Math.floor(Date.now() / 1000).toString();
+  const body = JSON.stringify({ tenant_slug: "test-tenant-with-secret", data: { test: true } });
+  const signature = signPayload('global-secret-key', timestamp, body);
+
+  const req = createMockRequest(
+    "http://localhost/api/sheets-webhook?tenant=test-tenant-with-secret",
+    { "x-sheets-signature": signature, "x-sheets-timestamp": timestamp },
+    body
+  );
+
+  const { POST } = require("../app/api/sheets-webhook/route");
+  const res = await POST(req);
+  assert(res.status === 401, "Webhook signature verification should fail with 401 when using global secret while tenant secret exists");
+});
+
+test("WEBHOOK: Tenant yoksa fail-closed", async () => {
+  const timestamp = Math.floor(Date.now() / 1000).toString();
+  const body = JSON.stringify({ tenant_slug: "nonexistent", data: { test: true } });
+  const signature = signPayload('global-secret-key', timestamp, body);
+
+  const req = createMockRequest(
+    "http://localhost/api/sheets-webhook?tenant=nonexistent",
+    { "x-sheets-signature": signature, "x-sheets-timestamp": timestamp },
+    body
+  );
+
+  const { POST } = require("../app/api/sheets-webhook/route");
+  const res = await POST(req);
+  assert(res.status === 400, "Webhook should fail with 400 if tenant is missing or nonexistent");
+});
+
+test("WEBHOOK: Secret console logs'da loglanmıyor", async () => {
+  const fs = require("fs");
+  const path = require("path");
+  const routeContent = fs.readFileSync(path.resolve(__dirname, "../app/api/sheets-webhook/route.ts"), "utf-8");
+  assert(!routeContent.includes("console.log(tenantSecret)") && !routeContent.includes("console.log(globalSecret)"), "Console log of secret detected in route!");
+});
 
 // ==========================================
 // SONUÇLAR

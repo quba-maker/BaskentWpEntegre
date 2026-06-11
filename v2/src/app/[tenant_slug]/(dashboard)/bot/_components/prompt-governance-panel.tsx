@@ -2,6 +2,7 @@ import { RotateCcw, Save, Check, Shield, UserCircle, ListChecks, Layers } from "
 import { type BotChannel } from "./shared";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useState, useEffect } from "react";
+import { useTenant } from "@/components/providers/tenant-provider";
 
 // ==========================================
 // PROMPT GOVERNANCE PANEL (Modular / Parçalı Yapı)
@@ -86,6 +87,8 @@ export function PromptGovernancePanel({
 }: PromptGovernancePanelProps) {
   const confirm = useConfirm();
   const activeChannel = channels.find(c => c.id === activeTab)!;
+  const { tenant } = useTenant();
+  const tenantName = tenant?.profile?.name || "şirketimiz";
 
   // Local state for modular inputs
   const [identity, setIdentity] = useState("");
@@ -252,7 +255,7 @@ export function PromptGovernancePanel({
               value={identity}
               onChange={(e) => handleModularChange('identity', e.target.value)}
               className="w-full flex-1 min-h-[300px] p-4 text-[13px] leading-relaxed font-mono text-[--q-text-primary] bg-white border border-[--q-border-default] rounded-xl outline-none resize-none focus:ring-2 ring-[--q-blue] transition-shadow shadow-sm"
-              placeholder="Sen Başkent Üniversitesi adına çalışan profesyonel bir asistansın..."
+              placeholder={`Sen ${tenantName} adına çalışan profesyonel bir asistansın...`}
               spellCheck={false}
             />
           )}

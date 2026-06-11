@@ -19,5 +19,5 @@ export function getPublicBaseUrl(): string {
     return `https://${process.env.VERCEL_URL}`;
   }
   // Absolute last resort — should never reach here in production
-  return 'https://baskent-wp-entegre.vercel.app';
+  return 'https://ai.qubamedya.com';
 }

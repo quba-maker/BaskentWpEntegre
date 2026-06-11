@@ -34,51 +34,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'Invalid JSON' }, { status: 400 });
     }
 
-    // ── 1. HMAC Authentication ──
-    const secret = process.env.SHEETS_WEBHOOK_SECRET;
-
-    if (secret) {
-      const signature = request.headers.get('x-sheets-signature');
-      const timestamp = request.headers.get('x-sheets-timestamp');
-
-      if (!signature || !timestamp) {
-        log.warn('[WEBHOOK_AUTH_MISSING] Missing auth headers');
-        return NextResponse.json({ error: 'Missing auth headers' }, { status: 401 });
-      }
-
-      // Replay protection: ±5 minutes
-      const now = Math.floor(Date.now() / 1000);
-      const ts = parseInt(timestamp);
-      if (isNaN(ts) || Math.abs(now - ts) > 300) {
-        log.warn('[WEBHOOK_REPLAY] Timestamp expired', { now, ts, diff: Math.abs(now - ts) });
-        return NextResponse.json({ error: 'Timestamp expired' }, { status: 401 });
-      }
-
-      // HMAC verification with timing-safe comparison
-      if (!verifyHmac(secret, timestamp, rawBody, signature)) {
-        log.warn('[WEBHOOK_AUTH_FAIL] Invalid signature');
-        return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
-      }
-    } else {
-      // Auth-less fallback — migration period only
-      log.warn('[WEBHOOK_NO_SECRET] SHEETS_WEBHOOK_SECRET not set — accepting unverified request');
-    }
-
-    // ── 2. Parse payload: support both old {data:{}} and new {headers:[], values:[]} ──
-    const { sheetName, sheet_name } = body;
-    const effectiveSheetName = sheetName || sheet_name || 'Google Sheets';
-
-    let rowData = body.data;
-
-    // New App Script format: headers[] + values[] → key-value map
-    if (!rowData && body.headers && body.values) {
-      rowData = {};
-      (body.headers as string[]).forEach((h: string, i: number) => {
-        rowData[h] = (body.values as string[])[i] || '';
-      });
-    }
-
-    // ── 3. Tenant Resolution ──
+    // ── 1. Tenant Resolution ──
     const tenantSlug = request.nextUrl.searchParams.get('tenant') || body.tenant_slug;
     const systemDb = withTenantDB('admin-system', true);
     
@@ -95,23 +51,104 @@ export async function POST(request: NextRequest) {
         tenantName = tenants[0].name;
       }
     }
-    // Fallback: baskent (backward compatibility)
     if (!tenantId) {
-      const fallback = await systemDb.executeSafe({
-        text: `SELECT id, name FROM tenants WHERE slug = 'baskent' LIMIT 1`,
-        values: []
-      }) as any[];
-      if (fallback && fallback.length > 0) {
-        tenantId = fallback[0].id;
-        tenantName = fallback[0].name;
-      }
-    }
-
-    if (!tenantId) {
-      return NextResponse.json({ success: false, error: 'No active tenant found' }, { status: 404 });
+      log.warn('[WEBHOOK_NO_TENANT] Explicit tenant resolution failed', { tenantSlug });
+      return NextResponse.json(
+        { success: false, error: 'Tenant information missing or inactive, webhook rejected. No fallback applied.' },
+        { status: 400 }
+      );
     }
 
     const db = withTenantDB(tenantId);
+
+    // ── 2. Load Tenant-Specific Webhook Secret ──
+    let tenantSecret: string | null = null;
+    try {
+      const integration = await db.executeSafe({
+        text: `SELECT credentials FROM tenant_integrations WHERE tenant_id = $1 AND provider = 'google_sheets' LIMIT 1`,
+        values: [tenantId]
+      }) as any[];
+      if (integration.length > 0 && integration[0].credentials) {
+        const { decryptPayload } = await import('@/lib/core/encryption');
+        const creds = typeof integration[0].credentials === 'string'
+          ? JSON.parse(integration[0].credentials)
+          : integration[0].credentials;
+        let decrypted: any = {};
+        if (creds.encrypted_payload && creds.version) {
+          decrypted = decryptPayload(creds);
+        } else {
+          decrypted = creds;
+        }
+        tenantSecret = decrypted.webhookSecret || null;
+      }
+    } catch (e) {
+      log.warn('[WEBHOOK_SECRET_RESOLVE_FAIL] Failed to resolve tenant secret', { tenantId });
+    }
+
+    // ── 3. HMAC Authentication ──
+    const globalSecret = process.env.SHEETS_WEBHOOK_SECRET;
+    const signature = request.headers.get('x-sheets-signature');
+    const timestamp = request.headers.get('x-sheets-timestamp');
+
+    if (tenantSecret || globalSecret) {
+      if (!signature || !timestamp) {
+        log.warn('[WEBHOOK_AUTH_MISSING] Missing auth headers');
+        return NextResponse.json({ error: 'Missing auth headers' }, { status: 401 });
+      }
+
+      // Replay protection: ±5 minutes
+      const now = Math.floor(Date.now() / 1000);
+      const ts = parseInt(timestamp);
+      if (isNaN(ts) || Math.abs(now - ts) > 300) {
+        log.warn('[WEBHOOK_REPLAY] Timestamp expired', { now, ts, diff: Math.abs(now - ts) });
+        return NextResponse.json({ error: 'Timestamp expired' }, { status: 401 });
+      }
+
+      let isVerified = false;
+
+      if (tenantSecret) {
+        // Strict mode: If tenant secret exists, verify ONLY with it. No global fallback allowed.
+        isVerified = verifyHmac(tenantSecret, timestamp, rawBody, signature);
+        if (!isVerified) {
+          log.warn('[WEBHOOK_AUTH_FAIL] Invalid signature against strict tenant secret');
+          return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
+        }
+      } else if (globalSecret) {
+        // Fallback mode: If no tenant secret, try global secret(s)
+        const secretList = globalSecret.split(',').map(s => s.trim()).filter(s => s.length > 0);
+        if (secretList.length === 0) {
+          log.warn('[WEBHOOK_EMPTY_SECRETS] SHEETS_WEBHOOK_SECRET contains no valid keys');
+          return NextResponse.json({ error: 'Invalid webhook configuration' }, { status: 500 });
+        }
+        for (const currentSecret of secretList) {
+          if (verifyHmac(currentSecret, timestamp, rawBody, signature)) {
+            isVerified = true;
+            break;
+          }
+        }
+        if (!isVerified) {
+          log.warn('[WEBHOOK_AUTH_FAIL] Invalid signature against global fallback secrets');
+          return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
+        }
+      }
+    } else {
+      // Auth-less fallback — migration period only
+      log.warn('[WEBHOOK_NO_SECRET] Neither tenant nor global webhook secret set — accepting unverified request');
+    }
+
+    // ── 4. Parse payload: support both old {data:{}} and new {headers:[], values:[]} ──
+    const { sheetName, sheet_name } = body;
+    const effectiveSheetName = sheetName || sheet_name || 'Google Sheets';
+
+    let rowData = body.data;
+
+    // New App Script format: headers[] + values[] → key-value map
+    if (!rowData && body.headers && body.values) {
+      rowData = {};
+      (body.headers as string[]).forEach((h: string, i: number) => {
+        rowData[h] = (body.values as string[])[i] || '';
+      });
+    }
 
     // ── 4. Pipeline Config Resolution ──
     let activeSheets: string[] = [];
@@ -171,7 +208,7 @@ export async function POST(request: NextRequest) {
     );
 
     // Auth-less health warning
-    if (!secret) {
+    if (!tenantSecret && !globalSecret) {
       await updateSheetsHealthStatus(tenantId, 'warning', 'webhook', {
         created: 0, duplicates: 0, errors: 0,
         errorMessage: 'SHEETS_WEBHOOK_SECRET not configured — webhook is unprotected'
