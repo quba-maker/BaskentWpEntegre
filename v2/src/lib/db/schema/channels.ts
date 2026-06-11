@@ -40,6 +40,13 @@ export const channelAiProfiles = pgTable('channel_ai_profiles', {
   aggressionLevel: text('aggression_level').default('medium'),
   languageProfile: text('language_profile').default('tr-TR'),
   businessHoursJson: jsonb('business_hours_json').default({}),
+  maxMessages: integer('max_messages').default(8),
+  maxResponseTokens: integer('max_response_tokens').default(1000),
+  autoGreeting: boolean('auto_greeting').default(true),
+  greetingLanguage: text('greeting_language').default('auto'),
+  followUpEnabled: boolean('follow_up_enabled').default(true),
+  responseDelaySeconds: integer('response_delay_seconds').default(5),
+  responseStyle: text('response_style').default('balanced'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });

@@ -39,6 +39,7 @@ export async function getBotSettings() {
         text: `SELECT cap.ai_model, cap.max_messages, cap.max_response_tokens, 
                       cap.aggression_level, cap.business_hours_json,
                       cap.auto_greeting, cap.greeting_language,
+                      cap.response_delay_seconds, cap.response_style,
                       cap.updated_at
                FROM channel_ai_profiles cap
                JOIN channel_groups cg ON cap.group_id = cg.id
@@ -90,6 +91,8 @@ export async function getBotSettings() {
         result['working_hours'] = { value: JSON.stringify(workingHoursValue), updated_at: profile.updated_at };
         result['bot_auto_greeting'] = { value: profile.auto_greeting ? 'true' : 'false', updated_at: profile.updated_at };
         result['bot_greeting_language'] = { value: profile.greeting_language || 'auto', updated_at: profile.updated_at };
+        result['response_delay_seconds'] = { value: String(profile.response_delay_seconds !== null && profile.response_delay_seconds !== undefined ? profile.response_delay_seconds : 5), updated_at: profile.updated_at };
+        result['response_style'] = { value: profile.response_style || 'balanced', updated_at: profile.updated_at };
       }
 
       // Map channel states
@@ -144,17 +147,19 @@ export async function saveBotSetting(key: string, value: string) {
                  WHERE tenant_id = $2 AND is_active = true`,
           values: [value, ctx.tenantId]
         });
-      } else if (['ai_model', 'bot_max_messages', 'bot_max_response_tokens', 'bot_aggression_level'].includes(key)) {
+      } else if (['ai_model', 'bot_max_messages', 'bot_max_response_tokens', 'bot_aggression_level', 'response_delay_seconds', 'response_style'].includes(key)) {
         // Write to channel_ai_profiles
         const colMap: Record<string, string> = {
           'ai_model': 'ai_model',
           'bot_max_messages': 'max_messages',
           'bot_max_response_tokens': 'max_response_tokens',
           'bot_aggression_level': 'aggression_level',
+          'response_delay_seconds': 'response_delay_seconds',
+          'response_style': 'response_style',
         };
         const col = colMap[key];
-        const isNumeric = ['max_messages', 'max_response_tokens'].includes(col);
-        const dbVal = isNumeric ? parseInt(value) || (col === 'max_messages' ? 8 : 1000) : value;
+        const isNumeric = ['max_messages', 'max_response_tokens', 'response_delay_seconds'].includes(col);
+        const dbVal = isNumeric ? parseInt(value) || (col === 'max_messages' ? 8 : col === 'response_delay_seconds' ? 5 : 1000) : value;
         
         await ctx.db.executeSafe({
           text: `UPDATE channel_ai_profiles SET ${col} = $1, updated_at = NOW()
@@ -473,7 +478,7 @@ export async function testBotPrompt(
 
       // 4. Fetch AI Profile for this group
       const profileResult = await ctx.db.executeSafe({
-        text: `SELECT ai_model, max_response_tokens, business_hours_json, aggression_level
+        text: `SELECT ai_model, max_response_tokens, business_hours_json, aggression_level, response_delay_seconds, response_style
                FROM channel_ai_profiles
                WHERE group_id = $1 LIMIT 1`,
         values: [botGroupId]
@@ -513,7 +518,9 @@ export async function testBotPrompt(
             maxMessages: 20,
             maxResponseTokens: maxTokens,
             workingHours: profile?.business_hours_json || { enabled: false },
-            aggressionLevel: profile?.aggression_level || 'medium'
+            aggressionLevel: profile?.aggression_level || 'medium',
+            responseDelaySeconds: profile?.response_delay_seconds !== null && profile?.response_delay_seconds !== undefined ? profile.response_delay_seconds : 5,
+            responseStyle: profile?.response_style || 'balanced'
           }
         }
       };
@@ -564,7 +571,10 @@ export async function testBotPrompt(
           channelId: channelId || null,
           latencyMs,
           sandboxMode: true,
-          toolExecution: 'sandbox'
+          toolExecution: 'sandbox',
+          responseDelaySeconds: profile?.response_delay_seconds !== null && profile?.response_delay_seconds !== undefined ? profile.response_delay_seconds : 5,
+          responseStyle: profile?.response_style || 'balanced',
+          maxResponseTokens: maxTokens
         }
       };
     }
@@ -735,6 +745,8 @@ export interface BotData {
     greetingLanguage: string;
     followUpEnabled: boolean;
     workingHours: any;
+    responseDelaySeconds?: number;
+    responseStyle?: string;
   } | null;
   channels: {
     id: string;
@@ -786,7 +798,8 @@ export async function getBots(): Promise<{ success: boolean; bots?: BotData[]; e
         // 3. Fetch AI profile for this group
         const profiles = await ctx.db.executeSafe({
           text: `SELECT cap.ai_model, cap.max_messages, cap.max_response_tokens, cap.aggression_level,
-                        cap.auto_greeting, cap.greeting_language, cap.follow_up_enabled, cap.business_hours_json
+                        cap.auto_greeting, cap.greeting_language, cap.follow_up_enabled, cap.business_hours_json,
+                        cap.response_delay_seconds, cap.response_style
                  FROM channel_ai_profiles cap
                  JOIN channel_groups cg ON cap.group_id = cg.id
                  WHERE cap.group_id = $1 AND cg.tenant_id = $2 LIMIT 1`,
@@ -801,6 +814,8 @@ export async function getBots(): Promise<{ success: boolean; bots?: BotData[]; e
           greetingLanguage: profiles[0].greeting_language || 'auto',
           followUpEnabled: profiles[0].follow_up_enabled !== false,
           workingHours: profiles[0].business_hours_json || { enabled: false },
+          responseDelaySeconds: profiles[0].response_delay_seconds !== null && profiles[0].response_delay_seconds !== undefined ? profiles[0].response_delay_seconds : 5,
+          responseStyle: profiles[0].response_style || 'balanced',
         } : null;
 
         // 4. Fetch channels in this group
@@ -931,6 +946,8 @@ export async function updateBot(
     greetingLanguage?: string;
     followUpEnabled?: boolean;
     workingHours?: any;
+    responseStyle?: string;
+    responseDelaySeconds?: number;
   }
 ): Promise<{ success: boolean; error?: string }> {
   return withActionGuard(
@@ -981,6 +998,30 @@ export async function updateBot(
       const profileFields: string[] = [];
       const profileVals: any[] = [];
       let pIdx = 1;
+
+      // Handle responseStyle and map to maxResponseTokens
+      if (updates.responseStyle !== undefined) {
+        const style = updates.responseStyle;
+        const validStyle = ['short', 'balanced', 'detailed'].includes(style) ? style : 'balanced';
+        profileFields.push(`response_style = $${pIdx}`);
+        profileVals.push(validStyle);
+        pIdx++;
+
+        const tokenMap: Record<string, number> = {
+          short: 500,
+          balanced: 1000,
+          detailed: 2000
+        };
+        updates.maxResponseTokens = tokenMap[validStyle];
+      }
+
+      if (updates.responseDelaySeconds !== undefined) {
+        const clampDelay = Math.max(2, Math.min(30, Number(updates.responseDelaySeconds)));
+        profileFields.push(`response_delay_seconds = $${pIdx}`);
+        profileVals.push(clampDelay);
+        pIdx++;
+      }
+
       if (updates.aiModel) { profileFields.push(`ai_model = $${pIdx}`); profileVals.push(updates.aiModel); pIdx++; }
       if (updates.maxMessages !== undefined) { profileFields.push(`max_messages = $${pIdx}`); profileVals.push(updates.maxMessages); pIdx++; }
       if (updates.maxResponseTokens !== undefined) { profileFields.push(`max_response_tokens = $${pIdx}`); profileVals.push(updates.maxResponseTokens); pIdx++; }

@@ -196,7 +196,7 @@ const mockDbCalls: any[] = [];
       return [];
     }
     // Channel and Integration Select for Credential Update
-    if (normalizedText.includes("FROM channels c") && normalizedText.includes("channel_integrations ci")) {
+    if (normalizedText.includes("FROM channels c") && normalizedText.includes("channel_integrations ci") && !normalizedText.includes("JOIN tenants t")) {
       const channelId = vals[0];
       const tenantId = vals[1];
       if (tenantId === 'test-tenant-id' && channelId === 'wa-channel-id') {
@@ -238,6 +238,21 @@ const mockDbCalls: any[] = [];
     if (normalizedText.includes("SELECT id FROM channel_groups")) {
       return [{ id: 'bot-group-id' }];
     }
+    // Prompt Bindings Mock
+    if (normalizedText.includes("FROM channel_prompt_bindings")) {
+      return [{
+        prompt_id: 'prompt-id',
+        prompt_name: 'Test System Prompt',
+        prompt_text: 'You are a helpful assistant. We are testing the anti-gravity and tenant-isolation constraints. This is a sufficiently long mock prompt.',
+        prompt_type: 'system',
+        prompt_tenant_id: 'test-tenant-id',
+        version: 2,
+        knowledge_prices: 'Price 10',
+        knowledge_rules: 'Rules 20',
+        prompt_metadata: null,
+        binding_active: true
+      }];
+    }
     // Prompts Mock
     if (normalizedText.includes("FROM channel_prompts") && normalizedText.includes("group_id = $1")) {
       const botId = vals[0];
@@ -250,13 +265,49 @@ const mockDbCalls: any[] = [];
     if (normalizedText.includes("FROM channel_ai_profiles") && normalizedText.includes("group_id = $1")) {
       const botId = vals[0];
       if (botId === 'valid-bot-id' || botId === 'bot-group-id') {
-        return [{ ai_model: 'gemini-2.5-flash', max_response_tokens: 1500, business_hours_json: { enabled: false }, aggression_level: 'medium' }];
+        return [{ ai_model: 'gemini-2.5-flash', max_response_tokens: 1500, business_hours_json: { enabled: false }, aggression_level: 'medium', response_delay_seconds: 7, response_style: 'detailed' }];
+      }
+      return [];
+    }
+    if (normalizedText.includes("FROM channel_ai_profiles cap") && normalizedText.includes("cg.tenant_id = $1")) {
+      const tenantId = vals[0];
+      if (tenantId === 'test-tenant-id') {
+        return [{ 
+          ai_model: 'gemini-2.5-flash', 
+          max_messages: 8,
+          max_response_tokens: 1000, 
+          aggression_level: 'medium',
+          business_hours_json: { enabled: false }, 
+          auto_greeting: true,
+          greeting_language: 'auto',
+          response_delay_seconds: 7, 
+          response_style: 'detailed',
+          updated_at: new Date().toISOString()
+        }];
       }
       return [];
     }
     // Channels verify Mock
     if (normalizedText.includes("FROM channels c JOIN channel_groups cg")) {
       const channelId = vals[0];
+      if (normalizedText.includes("JOIN tenants t")) {
+        if (channelId === 'valid-channel-id') {
+          return [{
+            channel_id: 'valid-channel-id',
+            provider: 'whatsapp',
+            identifier: 'wa-identifier',
+            group_id: 'bot-group-id',
+            tenant_id: 'test-tenant-id',
+            tenant_slug: 'test-tenant-id',
+            tenant_name: 'Test Tenant',
+            plan: 'starter',
+            status: 'active',
+            industry: 'healthcare',
+            credentials_encrypted: null
+          }];
+        }
+        return [];
+      }
       const tenantId = vals[1];
       if (channelId === 'valid-channel-id' && tenantId === 'test-tenant-id') {
         return [{ id: 'valid-channel-id', name: 'Valid Channel', group_id: 'bot-group-id', provider: 'instagram' }];
@@ -591,6 +642,118 @@ test("RBAC: Agent or viewer cannot assign channel to bot", async () => {
   assert(res.error && res.error.includes("Bu işlem için yetkiniz yok"), "Role restriction error mismatch");
 });
 
+
+// ==========================================
+// 10. PHASE 2D: BOT RESPONSE DELAY & CEVAP STİLİ TESTS
+// ==========================================
+
+test("PHASE 2D: BrainResolver settings fallback ve clamp test", async () => {
+  const oldV2Flag = process.env.USE_V2_BRAIN_RESOLUTION;
+  process.env.USE_V2_BRAIN_RESOLUTION = "true";
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  
+  // 1. Fallback values
+  const brain1 = createTenantBrain("t1", "whatsapp", "payload1", null);
+  assert(brain1.context.settings.responseDelaySeconds === 5, "Delay fallback 5 olmalı");
+  assert(brain1.context.settings.responseStyle === 'balanced', "Style fallback balanced olmalı");
+
+  const { BrainResolver } = require("../lib/brain/brain-resolver");
+  
+  // Override mockDb temporarily to return delay=1 and style=invalid
+  const originalExecuteSafe = (global as any).mockDb.executeSafe;
+  (global as any).mockDb.executeSafe = async (query: any, params?: any[]) => {
+    const text = typeof query === 'string' ? query : query?.text || '';
+    const normalizedText = text.replace(/\s+/g, ' ');
+    if (normalizedText.toLowerCase().includes("from channel_ai_profiles")) {
+      console.log("OVERRIDE_MATCHED_AI_PROFILES");
+      return [{ 
+        ai_model: 'gemini-2.5-flash', 
+        max_response_tokens: 1500, 
+        business_hours_json: { enabled: false }, 
+        aggression_level: 'medium',
+        response_delay_seconds: 1, // Will clamp to 2
+        response_style: 'invalid-style' // Will fallback to balanced
+      }];
+    }
+    return originalExecuteSafe(query, params);
+  };
+
+  try {
+    const resolvedBrain = await BrainResolver.resolveTenantBrain({
+      tenant_slug: 'test-tenant-id',
+      entry: [{ changes: [{ value: { messages: [{ from: '123456', id: 'msg-id' }] } }] }]
+    }, 'whatsapp', 'trace-id', 'valid-channel-id');
+
+    assert(resolvedBrain.context.settings.responseDelaySeconds === 2, "Delay 1 saniye olduğunda 2 saniyeye clamp edilmeli");
+    assert(resolvedBrain.context.settings.responseStyle === 'balanced', "Geçersiz style balanced'a fallback yapılmalı");
+  } finally {
+    (global as any).mockDb.executeSafe = originalExecuteSafe;
+    if (oldV2Flag !== undefined) {
+      process.env.USE_V2_BRAIN_RESOLUTION = oldV2Flag;
+    } else {
+      delete process.env.USE_V2_BRAIN_RESOLUTION;
+    }
+  }
+});
+
+test("PHASE 2D: PromptBuilder style directives test", async () => {
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const { PromptBuilder } = require("../lib/services/ai/prompt-builder");
+
+  const buildBrainForStyle = (style: string) => {
+    const rawSystemPrompt = "Sen bir test asistanısın.";
+    const crypto = require('crypto');
+    const hash = crypto.createHash('sha256').update(rawSystemPrompt).digest('hex');
+    return createTenantBrain("t1", "whatsapp", "payload1", rawSystemPrompt, {}, hash, {}, {
+      aiModel: 'gemini-2.5-flash',
+      maxMessages: 10,
+      maxResponseTokens: 1000,
+      workingHours: { enabled: false },
+      aggressionLevel: 'medium',
+      responseDelaySeconds: 5,
+      responseStyle: style
+    });
+  };
+
+  // 1. Short style prompt check
+  const shortBrain = buildBrainForStyle('short');
+  const shortPrompt = PromptBuilder.buildSystemPrompt(shortBrain, 'lead', false);
+  assert(shortPrompt.includes("KISA YAZ"), "Kısa yaz stili direktifi prompta eklenmeli");
+  assert(shortPrompt.includes("GÜVENLİK SINIRI"), "Güvenlik sınırları promptta korunmalı");
+
+  // 2. Detailed style prompt check
+  const detailedBrain = buildBrainForStyle('detailed');
+  const detailedPrompt = PromptBuilder.buildSystemPrompt(detailedBrain, 'lead', false);
+  assert(detailedPrompt.includes("DETAYLI YAZ"), "Detaylı yaz stili direktifi prompta eklenmeli");
+
+  // 3. Balanced style prompt check
+  const balancedBrain = buildBrainForStyle('balanced');
+  const balancedPrompt = PromptBuilder.buildSystemPrompt(balancedBrain, 'lead', false);
+  assert(balancedPrompt.includes("DENGELİ YAZ"), "Dengeli yaz stili direktifi prompta eklenmeli");
+});
+
+test("PHASE 2D: updateBot style-token sync test", async () => {
+  process.env.TEST_TENANT_ID = 'test-tenant-id';
+  process.env.TEST_USER_ROLE = 'owner';
+  const { updateBot } = require("../app/actions/bot");
+
+  // Reset calls log
+  mockDbCalls.length = 0;
+
+  // Update style to short
+  const res = await updateBot('valid-bot-id', { responseStyle: 'short', responseDelaySeconds: 12 });
+  assert(res.success === true, "updateBot owner ile başarılı olmalı");
+
+  // Find update call
+  const updateCall = mockDbCalls.find(c => c.text.replace(/\s+/g, ' ').includes("UPDATE channel_ai_profiles SET"));
+  assert(!!updateCall, "Update SQL statement should be executed");
+  
+  // Verify max_response_tokens, response_style, response_delay_seconds in values
+  const setClause = updateCall.text.toLowerCase();
+  assert(setClause.includes("response_style"), "response_style güncellenmeli");
+  assert(setClause.includes("max_response_tokens"), "max_response_tokens otomatik güncellenmeli");
+  assert(setClause.includes("response_delay_seconds"), "response_delay_seconds güncellenmeli");
+});
 
 // ==========================================
 // SONUÇLAR

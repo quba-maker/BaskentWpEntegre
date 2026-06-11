@@ -4,6 +4,8 @@ export interface TenantBrainSettings {
   maxResponseTokens: number;
   workingHours: { enabled: boolean; start?: string; end?: string; offMessage?: string };
   aggressionLevel: string;
+  responseDelaySeconds?: number;
+  responseStyle?: string;
 }
 
 export interface TenantBrainContext {
@@ -99,7 +101,9 @@ export function createTenantBrain(
     maxMessages: 20,
     maxResponseTokens: 2000,
     workingHours: { enabled: false },
-    aggressionLevel: 'medium'
+    aggressionLevel: 'medium',
+    responseDelaySeconds: 5,
+    responseStyle: 'balanced'
   };
 
   const brain = {

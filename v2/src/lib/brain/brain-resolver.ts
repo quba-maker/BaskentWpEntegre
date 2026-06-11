@@ -98,7 +98,9 @@ export class BrainResolver {
       maxMessages: 20,
       maxResponseTokens: 2000,
       workingHours: { enabled: false },
-      aggressionLevel: 'medium'
+      aggressionLevel: 'medium',
+      responseDelaySeconds: 5,
+      responseStyle: 'balanced'
     };
 
     // ═══════════════════════════════════════════════════════════
@@ -173,7 +175,8 @@ export class BrainResolver {
         const keysToFetch = [
           promptKey, 
           'bot_knowledge_prices', 'bot_knowledge_rules',
-          'ai_model', 'bot_max_messages', 'bot_max_response_tokens', 'working_hours', 'bot_aggression_level'
+          'ai_model', 'bot_max_messages', 'bot_max_response_tokens', 'working_hours', 'bot_aggression_level',
+          'response_delay_seconds', 'response_style'
         ];
         const db = withTenantDB(tenantId, false);
         const settingsResult = await db.executeSafe(sql`
@@ -200,6 +203,13 @@ export class BrainResolver {
           if (row.key === 'bot_max_response_tokens') {
             const parsed = parseInt(row.value);
             runtimeSettings.maxResponseTokens = isNaN(parsed) ? 2000 : Math.min(parsed, 8000);
+          }
+          if (row.key === 'response_delay_seconds') {
+            const parsed = parseInt(row.value);
+            runtimeSettings.responseDelaySeconds = isNaN(parsed) ? 5 : Math.max(2, Math.min(30, parsed));
+          }
+          if (row.key === 'response_style') {
+            runtimeSettings.responseStyle = ['short', 'balanced', 'detailed'].includes(row.value) ? row.value : 'balanced';
           }
         }
 
@@ -316,7 +326,9 @@ export class BrainResolver {
       maxMessages: 20,
       maxResponseTokens: 2000,
       workingHours: { enabled: false },
-      aggressionLevel: 'medium'
+      aggressionLevel: 'medium',
+      responseDelaySeconds: 5,
+      responseStyle: 'balanced'
     };
 
     let profileId: string | null = null;
@@ -325,7 +337,7 @@ export class BrainResolver {
       const profileRows = await db.executeSafe({
         text: `
           SELECT cap.id, cap.ai_model, cap.temperature, cap.aggression_level, cap.business_hours_json,
-                 cap.max_messages, cap.max_response_tokens
+                 cap.max_messages, cap.max_response_tokens, cap.response_delay_seconds, cap.response_style
           FROM channel_ai_profiles cap
           JOIN channel_groups cg ON cap.group_id = cg.id
           WHERE cap.group_id = $1
@@ -351,6 +363,18 @@ export class BrainResolver {
         }
         if (p.business_hours_json && typeof p.business_hours_json === 'object') {
           runtimeSettings.workingHours = p.business_hours_json;
+        }
+        if (p.response_delay_seconds !== null && p.response_delay_seconds !== undefined) {
+          const parsed = parseInt(String(p.response_delay_seconds));
+          runtimeSettings.responseDelaySeconds = isNaN(parsed) ? 5 : Math.max(2, Math.min(30, parsed));
+        } else {
+          runtimeSettings.responseDelaySeconds = 5;
+        }
+        if (p.response_style) {
+          const style = String(p.response_style);
+          runtimeSettings.responseStyle = ['short', 'balanced', 'detailed'].includes(style) ? style : 'balanced';
+        } else {
+          runtimeSettings.responseStyle = 'balanced';
         }
 
         log.info('[BRAIN_V2_PROFILE_RESOLVED]', {

@@ -2061,7 +2061,23 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
           values: [tenantId, conversationIdVal]
         }) as any[];
 
-        const debounceMs = parseInt(process.env.WHATSAPP_AUTOPILOT_DEBOUNCE_MS || '5000', 10);
+        // Delay priority:
+        // 1. brain.context.settings.responseDelaySeconds
+        // 2. WHATSAPP_AUTOPILOT_DEBOUNCE_MS env (converted from ms to seconds)
+        // 3. 5 seconds fallback
+        let delaySeconds = 5;
+        if (brain.context.settings?.responseDelaySeconds !== undefined && brain.context.settings?.responseDelaySeconds !== null) {
+          delaySeconds = brain.context.settings.responseDelaySeconds;
+        } else if (process.env.WHATSAPP_AUTOPILOT_DEBOUNCE_MS) {
+          const envMs = parseInt(process.env.WHATSAPP_AUTOPILOT_DEBOUNCE_MS, 10);
+          if (!isNaN(envMs)) {
+            delaySeconds = envMs / 1000;
+          }
+        }
+        
+        // Clamp delay between 2 and 30 seconds
+        const clampedDelaySeconds = Math.max(2, Math.min(30, delaySeconds));
+        const debounceMs = clampedDelaySeconds * 1000;
         const firstInboundAt = oldestUnrepliedQuery.length > 0 ? new Date(oldestUnrepliedQuery[0].created_at) : new Date();
         const now = new Date();
         const scheduledTime = new Date(Math.min(

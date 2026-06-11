@@ -93,7 +93,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt }: B
       <div className="px-5 py-2.5 bg-blue-50/50 border-b flex items-start gap-2 text-[11px]" style={{ borderColor: "var(--q-border-default)", color: "var(--q-blue, #007aff)" }}>
         <ShieldCheck className="w-4 h-4 flex-shrink-0 mt-0.5" />
         <p className="leading-relaxed">
-          <strong>Sandbox Modu:</strong> Mesajlar DB&apos;ye yazılmaz, gerçek kullanıcılara gönderilmez ve asistan araçları dry-run çalıştırılır.
+          <strong>Sandbox Modu:</strong> Mesajlar DB&apos;ye yazılmaz, gerçek kullanıcılara gönderilmez ve asistan araçları dry-run çalıştırılır. <span className="opacity-75">Sandbox testte gerçek gecikme bekletilmez; canlı inbound akışında uygulanır.</span>
         </p>
       </div>
 
@@ -173,10 +173,13 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt }: B
 
       {/* Debug Info Footer */}
       {debugMeta && (
-        <div className="px-5 py-2.5 bg-gray-50 border-t flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-gray-400 font-mono font-medium" style={{ borderColor: "var(--q-border-default)" }}>
+        <div className="px-5 py-2.5 bg-gray-50 border-t flex flex-wrap gap-x-4 gap-y-1.5 text-[10px] text-gray-400 font-mono font-medium" style={{ borderColor: "var(--q-border-default)" }}>
           <span>MODEL: {debugMeta.model}</span>
           <span>PROMPT SÜRÜMÜ: v{debugMeta.promptVersion}</span>
           <span>SÜRE: {debugMeta.latencyMs}ms</span>
+          <span>STİL: {debugMeta.responseStyle}</span>
+          <span>MAX TOKEN: {debugMeta.maxResponseTokens}</span>
+          <span>GECİKME: {debugMeta.responseDelaySeconds}sn</span>
         </div>
       )}
     </div>

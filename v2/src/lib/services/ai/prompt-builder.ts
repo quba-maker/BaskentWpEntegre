@@ -652,10 +652,33 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/koordinatör arasında planlanan
       learningHintsContext += `=====================================\n`;
     }
 
+    // 🎨 RESPONSE STYLE DIRECTIVES
+    let styleDirective = '';
+    const style = brain.context.settings?.responseStyle || 'balanced';
+    if (style === 'short') {
+      styleDirective = `\n\n=== 💬 YANIT BİÇİMİ TALİMATI: KISA YAZ (SHORT STYLE) ===
+- Mesajlarını olabildiğince kısa, net ve öz tut. Sadece sorulan sorunun doğrudan cevabını ver.
+- Jenerik dolgu cümleleri, gereksiz nezaket ifadeleri ve tekrarlar kullanma.
+- En fazla 1-2 cümleyle cevap ver.
+⚠️ GÜVENLİK SINIRI: Bu kısa biçim talimatı, tıbbi teşhis koymama, ilaç önermeme, kesin tedavi sözü vermeme kurallarını ve acil belirtilerde en yakın sağlık kuruluşuna yönlendirme yapma zorunluluğunu zayıflatamaz. Tıbbi güvenlik ve CTA kuralları her zaman önceliklidir.`;
+    } else if (style === 'detailed') {
+      styleDirective = `\n\n=== 💬 YANIT BİÇİMİ TALİMATI: DETAYLI YAZ (DETAILED STYLE) ===
+- Konuyu açıklayıcı, bilgilendirici ve detaylı bir şekilde ele al.
+- Hastanın/kullanıcının sorma potansiyeli olan ilgili alt başlıkları veya süreç adımlarını da nazikçe açıkla.
+- Daha kapsamlı ve aydınlatıcı bilgi sun.
+⚠️ GÜVENLİK SINIRI: Detaylı modda olsan dahi KESİNLİKLE tıbbi teşhis koyma, reçete/ilaç önerme ve kesin tedavi sözü verme. Acil belirtiler varsa hastayı derhal en yakın sağlık kuruluşuna yönlendir. Kendini tanıtma/selamlama yasağı (identity repetition guard) ve frekans freni (CTA kuralları) gibi diğer kalite kuralları bu detaylı biçimden etkilenmez, aynen uygulanır.`;
+    } else { // balanced
+      styleDirective = `\n\n=== 💬 YANIT BİÇİMİ TALİMATI: DENGELİ YAZ (BALANCED STYLE) ===
+- Ne çok kısa ne çok uzun yaz; dengeli, akıcı ve kurumsal bir üslup kullan.
+- Hastanın/kullanıcının sorusuna yeterli açıklamayı yapıp bir sonraki doğal adım için yol göster.
+⚠️ GÜVENLİK SINIRI: Tıbbi teşhis koyma, reçete/ilaç önerme, kesin tedavi sözü verme. Acil belirtilerde sağlık kuruluşuna yönlendir. Tüm güvenlik ve kalite kuralları aynen geçerlidir.`;
+    }
+
     let finalPrompt = `${base}\n${crmContext}\n${healthcareOverlay}\n${dynamicBrakesContext}\n${knowledgeInjection}\n${timeContext}\n${confirmationContext}\n${phaseContext}\n${langContextText}\n${directiveContext}\n${confirmationDirective}`;
     if (learningHintsContext) {
       finalPrompt += `\n${learningHintsContext}`;
     }
+    finalPrompt += styleDirective;
     finalPrompt += `\n${safetyGuardrails}`;
 
     if (ctaOfferedRecently || angryPatientMode || isFirstAssistantTurn || (!isFirstAssistantTurn && !asksIdentity && !asksName) || unifiedContext?.patientProvidedAvailability) {
