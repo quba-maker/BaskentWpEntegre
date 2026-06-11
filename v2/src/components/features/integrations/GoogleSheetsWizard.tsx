@@ -473,8 +473,8 @@ export function GoogleSheetsWizard({ isOpen, onClose, onComplete }: { isOpen: bo
               style={rawSecret ? {} : { borderColor: 'var(--q-border-default)' }}
             />
             <button
-              disabled={!rawSecret && !webhookSecretMasked}
-              onClick={() => handleCopy(rawSecret || webhookSecretMasked, 'secret')}
+              disabled={!rawSecret}
+              onClick={() => handleCopy(rawSecret, 'secret')}
               className="px-4 py-2.5 rounded-lg text-[12px] font-bold border border-gray-200 hover:bg-gray-50 flex items-center gap-1 text-gray-700 transition-colors disabled:opacity-50"
             >
               {copiedField === 'secret' ? <CheckCircle2 className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
@@ -484,6 +484,11 @@ export function GoogleSheetsWizard({ isOpen, onClose, onComplete }: { isOpen: bo
           {rawSecret && (
             <p className="text-[11px] text-emerald-600 font-bold mt-1">
               ✓ Yeni gizli anahtar başarıyla üretildi. Lütfen bunu şimdi kopyalayın! Bu değer sadece bir kez gösterilecektir.
+            </p>
+          )}
+          {!rawSecret && webhookSecretMasked && (
+            <p className="text-[11px] text-amber-600 font-medium mt-1.5 leading-relaxed">
+              ⚠️ Güvenlik nedeniyle kayıtlı gizli anahtar tekrar görüntülenemez. Kopyalamak için aşağıdaki "Gizli Anahtarı Yenile" butonunu kullanın.
             </p>
           )}
 
