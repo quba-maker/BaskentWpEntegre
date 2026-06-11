@@ -2,6 +2,7 @@
 
 import { withActionGuard } from "@/lib/core/action-guard";
 import { logAudit } from "@/lib/audit";
+import type { ChatMessage } from "@/lib/services/ai/orchestrator";
 
 // ==========================================
 // QUBA AI — Bot Actions (V2-Native)
@@ -14,20 +15,7 @@ function isV1DualWriteEnabled(): boolean {
   return process.env.USE_V1_DUAL_WRITE === 'true';
 }
 
-// ─── V2 CHANNEL MAPPING ───
-// Maps panel channel IDs to V2 prompt names for lookup
-const CHANNEL_PROMPT_MAP: Record<string, string> = {
-  whatsapp: 'WhatsApp System Prompt',
-  instagram: 'Social TR Prompt',
-  foreign: 'Social Foreign Prompt',
-};
 
-// Maps panel channel IDs to V2 channel providers for lookup
-const CHANNEL_PROVIDER_MAP: Record<string, string> = {
-  whatsapp: 'whatsapp',
-  instagram: 'meta_instagram',
-  foreign: 'meta_instagram',  // foreign uses instagram channel with different group
-};
 
 // ==========================================
 // READ: getBotSettings (V2 Primary)
@@ -425,84 +413,163 @@ export async function getRecentBotConversations(limit: number = 8) {
 }
 
 // ==========================================
-// TEST BOT PROMPT (V2 Primary)
+// TEST BOT PROMPT
 // ==========================================
-export async function testBotPrompt(prompt: string, testMessage: string, channel: string = 'whatsapp') {
+export async function testBotPrompt(
+  botGroupId: string,
+  messages: { role: 'user' | 'assistant'; content: string }[],
+  channelId?: string
+) {
   return withActionGuard(
     { actionName: 'testBotPrompt' },
     async (ctx) => {
       const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
       if (!GEMINI_API_KEY) {
-        return { success: false, reply: '⚠️ GEMINI_API_KEY tanımlı değil.', model: '' };
+        return { success: false, reply: '⚠️ GEMINI_API_KEY tanımlı değil.', metadata: null };
       }
-      if (!testMessage.trim()) {
-        return { success: false, reply: '⚠️ Test mesajı boş olamaz.', model: '' };
+      if (!botGroupId) {
+        return { success: false, reply: '⚠️ Bot Group ID gerekli.', metadata: null };
+      }
+      if (!messages || messages.length === 0) {
+        return { success: false, reply: '⚠️ Test mesajı geçmişi boş olamaz.', metadata: null };
       }
 
-      let finalPrompt = prompt;
-      if (!finalPrompt || finalPrompt.trim().length < 10) {
-        // V2: Read from channel_prompts
-        const promptName = CHANNEL_PROMPT_MAP[channel] || CHANNEL_PROMPT_MAP['whatsapp'];
-        const dbPrompt = await ctx.db.executeSafe({
-          text: `SELECT prompt_text FROM channel_prompts 
-                 WHERE tenant_id = $1 AND name = $2 AND is_active = true LIMIT 1`,
-          values: [ctx.tenantId, promptName]
+      // 1. Verify Bot Group ownership
+      const botGroupResult = await ctx.db.executeSafe({
+        text: `SELECT id, name, display_name, bot_type, icon, color 
+               FROM channel_groups 
+               WHERE id = $1 AND tenant_id = $2 AND status = 'active'`,
+        values: [botGroupId, ctx.tenantId]
+      });
+      if (botGroupResult.length === 0) {
+        throw new Error('Bot grubu bulunamadı veya yetkiniz yok');
+      }
+
+      // 2. Verify Channel ownership (if provided)
+      if (channelId) {
+        const channelResult = await ctx.db.executeSafe({
+          text: `SELECT c.id, c.name FROM channels c
+                 JOIN channel_groups cg ON c.group_id = cg.id
+                 WHERE c.id = $1 AND cg.tenant_id = $2`,
+          values: [channelId, ctx.tenantId]
         });
-        finalPrompt = dbPrompt[0]?.prompt_text || 'Sen bir dijital asistansın. Kısa, sıcak ve profesyonel cevaplar ver.';
-      }
-
-      // V2: Read knowledge from channel_prompts
-      const kbData = await ctx.db.executeSafe({
-        text: `SELECT knowledge_prices, knowledge_rules FROM channel_prompts 
-               WHERE tenant_id = $1 AND is_active = true LIMIT 1`,
-        values: [ctx.tenantId]
-      });
-      const prices = kbData[0]?.knowledge_prices || '';
-      const rules = kbData[0]?.knowledge_rules || '';
-
-      let knowledgeInjection = '';
-      if (prices) {
-        knowledgeInjection += `\n\n[FİYAT LİSTESİ VE HİZMETLER]\nAşağıdaki fiyat ve hizmet bilgilerini baz al:\n${prices}`;
-      }
-      if (rules) {
-        knowledgeInjection += `\n\n[ÖZEL KURALLAR VE TALİMATLAR]\nLütfen şu kurallara kesinlikle uy:\n${rules}`;
-      }
-
-      finalPrompt += knowledgeInjection;
-
-      // V2: Read AI model from channel_ai_profiles
-      const profileData = await ctx.db.executeSafe({
-        text: `SELECT cap.ai_model FROM channel_ai_profiles cap
-               JOIN channel_groups cg ON cap.group_id = cg.id
-               WHERE cg.tenant_id = $1 AND cg.status = 'active' LIMIT 1`,
-        values: [ctx.tenantId]
-      });
-      const model = profileData[0]?.ai_model || 'gemini-2.5-flash';
-
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            systemInstruction: { parts: [{ text: finalPrompt }] },
-            contents: [{ role: 'user', parts: [{ text: testMessage }] }],
-            generationConfig: { temperature: 0.7, maxOutputTokens: 8192 }
-          })
+        if (channelResult.length === 0) {
+          throw new Error('Kanal bulunamadı veya yetkiniz yok');
         }
+      }
+
+      // 3. Fetch active system prompt for this group
+      const promptResult = await ctx.db.executeSafe({
+        text: `SELECT id, name, prompt_text, version, knowledge_prices, knowledge_rules
+               FROM channel_prompts
+               WHERE group_id = $1 AND tenant_id = $2 AND is_active = true AND prompt_type = 'system'
+               ORDER BY version DESC LIMIT 1`,
+        values: [botGroupId, ctx.tenantId]
+      });
+      if (promptResult.length === 0) {
+        return { success: false, reply: '⚠️ Bu bot grubuna bağlı aktif sistem promptu bulunamadı.', metadata: null };
+      }
+      const activePrompt = promptResult[0];
+
+      // 4. Fetch AI Profile for this group
+      const profileResult = await ctx.db.executeSafe({
+        text: `SELECT ai_model, max_response_tokens, business_hours_json, aggression_level
+               FROM channel_ai_profiles
+               WHERE group_id = $1 LIMIT 1`,
+        values: [botGroupId]
+      });
+      const profile = profileResult[0] || null;
+      const aiModel = profile?.ai_model || 'gemini-2.5-flash';
+      const maxTokens = profile?.max_response_tokens || 1000;
+
+      // 5. Build dynamic system prompt using PromptBuilder
+      const { PromptBuilder } = await import("@/lib/services/ai/prompt-builder");
+      const crypto = require('crypto');
+      const rawSystemPrompt = activePrompt.prompt_text || '';
+      const promptHash = crypto.createHash('sha256').update(rawSystemPrompt).digest('hex');
+
+      const mockBrain = {
+        id: `test-brain-${botGroupId}`,
+        prompts: {
+          systemPrompt: rawSystemPrompt,
+          promptHash,
+          metadata: {
+            industry: 'healthcare' // Default mock industry context
+          }
+        },
+        context: {
+          tenantId: ctx.tenantId,
+          channel: 'whatsapp',
+          config: {
+            industry: 'healthcare',
+            timezone: 'Europe/Istanbul'
+          },
+          knowledge: {
+            prices: activePrompt.knowledge_prices || '',
+            rules: activePrompt.knowledge_rules || ''
+          },
+          settings: {
+            aiModel,
+            maxMessages: 20,
+            maxResponseTokens: maxTokens,
+            workingHours: profile?.business_hours_json || { enabled: false },
+            aggressionLevel: profile?.aggression_level || 'medium'
+          }
+        }
+      };
+
+      const systemPromptContent = PromptBuilder.buildSystemPrompt(mockBrain as any, 'lead', false, {
+        history: messages,
+        currentMessageText: messages[messages.length - 1]?.content || ''
+      });
+
+      // 6. Build Message History for LLM
+      const { AIOrchestrator } = await import("@/lib/services/ai/orchestrator");
+      const formattedMessages: ChatMessage[] = [
+        { role: 'system', content: systemPromptContent },
+        ...messages.map(m => ({
+          role: m.role as 'user' | 'assistant',
+          content: m.content
+        }))
+      ];
+
+      // 7. Execute simulation in AIOrchestrator
+      const orchestrator = new AIOrchestrator();
+      const config = {
+        provider: 'gemini' as const,
+        modelId: aiModel,
+        apiKey: GEMINI_API_KEY,
+        temperature: 0.7,
+        maxTokens: maxTokens
+      };
+
+      const startTime = Date.now();
+      const response = await orchestrator.generateResponse(
+        formattedMessages,
+        config,
+        ctx.tenantId,
+        'sandbox_test_conversation',
+        { sandbox: true }
       );
 
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        return { success: false, reply: `⚠️ Gemini API Hatası (${response.status}): ${errData?.error?.message || 'Bilinmeyen hata'}`, model };
-      }
+      const latencyMs = Date.now() - startTime;
 
-      const data = await response.json();
-      const botReply = data?.candidates?.[0]?.content?.parts?.[0]?.text || '⚠️ Model yanıt üretmedi.';
-      return { success: true, reply: botReply, model };
+      return {
+        success: true,
+        reply: response.text || '⚠️ Model yanıt üretmedi.',
+        metadata: {
+          model: response.modelUsed || aiModel,
+          promptVersion: activePrompt.version,
+          botGroupId,
+          channelId: channelId || null,
+          latencyMs,
+          sandboxMode: true,
+          toolExecution: 'sandbox'
+        }
+      };
     }
   ).then(res => {
-    if (!res.success) return { success: false, reply: '❌ Bağlantı hatası: ' + res.error, model: '' };
+    if (!res.success) return { success: false, reply: '❌ Hata: ' + res.error, metadata: null };
     return res.data!;
   });
 }

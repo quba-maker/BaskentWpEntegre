@@ -27,9 +27,9 @@ function resolveIcon(iconName: string) {
 // BOT CARD
 // ==========================================
 function BotCard({ bot, isSelected, onClick }: { bot: BotData; isSelected: boolean; onClick: () => void }) {
-  const Icon = resolveIcon(bot.icon);
   const channelCount = bot.channels.length;
   const hasWarnings = bot.channels.some(c => !c.hasPromptBinding || !c.hasCredentials);
+  const iconName = bot.icon;
 
   return (
     <div
@@ -47,7 +47,10 @@ function BotCard({ bot, isSelected, onClick }: { bot: BotData; isSelected: boole
             className="w-10 h-10 rounded-xl flex items-center justify-center"
             style={{ backgroundColor: `${bot.color || '#6366f1'}15` }}
           >
-            <Icon className="w-5 h-5" style={{ color: bot.color || '#6366f1' }} />
+            {iconName === 'message-square' && <MessageSquare className="w-5 h-5" style={{ color: bot.color || '#6366f1' }} />}
+            {iconName === 'hash' && <Hash className="w-5 h-5" style={{ color: bot.color || '#6366f1' }} />}
+            {iconName === 'globe' && <Globe className="w-5 h-5" style={{ color: bot.color || '#6366f1' }} />}
+            {iconName !== 'message-square' && iconName !== 'hash' && iconName !== 'globe' && <Bot className="w-5 h-5" style={{ color: bot.color || '#6366f1' }} />}
           </div>
           <div>
             <p className="text-sm font-bold" style={{ color: "var(--q-text-primary)" }}>{bot.displayName}</p>
@@ -181,7 +184,7 @@ function CreateBotModal({ onClose, onCreated }: { onClose: () => void; onCreated
             <label className="text-xs font-semibold mb-2 block" style={{ color: "var(--q-text-secondary)" }}>Template</label>
             <div className="grid grid-cols-2 gap-2">
               {templates.map(t => {
-                const TIcon = resolveIcon(t.icon);
+                const iconName = t.icon;
                 return (
                   <button
                     key={t.value}
@@ -192,7 +195,10 @@ function CreateBotModal({ onClose, onCreated }: { onClose: () => void; onCreated
                       backgroundColor: botType === t.value ? `${t.color}08` : "transparent",
                     }}
                   >
-                    <TIcon className="w-4 h-4" style={{ color: t.color }} />
+                    {iconName === 'message-square' && <MessageSquare className="w-4 h-4" style={{ color: t.color }} />}
+                    {iconName === 'hash' && <Hash className="w-4 h-4" style={{ color: t.color }} />}
+                    {iconName === 'globe' && <Globe className="w-4 h-4" style={{ color: t.color }} />}
+                    {iconName !== 'message-square' && iconName !== 'hash' && iconName !== 'globe' && <Bot className="w-4 h-4" style={{ color: t.color }} />}
                     <span className="text-xs font-medium" style={{ color: "var(--q-text-primary)" }}>{t.label}</span>
                   </button>
                 );
@@ -474,8 +480,7 @@ export default function BotManagementPage() {
           <div className="xl:col-span-1 sticky top-6">
             <BotTestPlayground
               activeChannel={{ id: selectedBot.id, label: selectedBot.displayName, icon: resolveIcon(selectedBot.icon), promptKey: '', activeKey: '', color: selectedBot.color || '#6366f1', description: '' }}
-              currentPrompt={selectedBot.prompt?.text || ""}
-              activeTab={selectedBot.id}
+              botGroupId={selectedBot.id}
               onTestPrompt={testBotPrompt}
             />
           </div>

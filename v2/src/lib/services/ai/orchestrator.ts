@@ -64,7 +64,8 @@ export class AIOrchestrator {
     initialMessages: ChatMessage[],
     config: AIProviderConfig,
     tenantId: string = 'unknown',
-    conversationId: string = 'unknown'
+    conversationId: string = 'unknown',
+    options?: { sandbox?: boolean }
   ): Promise<{ text?: string, providerUsed?: string, modelUsed?: string, inputTokens?: number, outputTokens?: number, latencyMs?: number, providerMessageId?: string, finishReason?: string }> {
     const startTime = Date.now();
     const traceCtx = getTraceContext();
@@ -73,7 +74,7 @@ export class AIOrchestrator {
     const phoneNumber = traceCtx?.metadata?.phone || 'unknown';
     
     // Sandbox mode layer (Prevents real execution if true)
-    const isSandbox = process.env.AI_TOOL_EXECUTION_MODE === 'sandbox';
+    const isSandbox = options?.sandbox === true || process.env.AI_TOOL_EXECUTION_MODE === 'sandbox';
 
     try {
       if (tenantId !== 'unknown') {

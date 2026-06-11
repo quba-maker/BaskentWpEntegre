@@ -1459,13 +1459,51 @@ export class QueueWorkerEngine {
     
     const convRecord = convQuery[0] || null;
     const conversationIdVal = convRecord?.id || conversationId;
-    const autopilotEnabled = convRecord?.autopilot_enabled || false;
+    const autopilotEnabled = convRecord ? convRecord.autopilot_enabled : null;
     const currentStatus = convRecord?.status || 'human';
     const resolvedChannelId = convRecord?.channel_id || metadata.channelId;
     const leadStage = convRecord?.lead_stage || null;
 
+    // ─── CHANNEL-LEVEL & BOT-GROUP-LEVEL DISABLE CHECK ───
+    let channelOrGroupDisabled = false;
+    if (resolvedChannelId && resolvedChannelId !== 'legacy_unmapped') {
+      const channelQuery = await db.executeSafe({
+        text: `SELECT cg.status as group_status
+               FROM channels c
+               JOIN channel_groups cg ON c.group_id = cg.id
+               WHERE c.id = $1 AND cg.tenant_id = $2`,
+        values: [resolvedChannelId, tenantId]
+      }) as any[];
+      
+      if (channelQuery.length === 0 || channelQuery[0].group_status !== 'active') {
+        channelOrGroupDisabled = true;
+      }
+    }
+
     const isGlobalAutopilotEnabled = process.env.ENABLE_SELECTED_AUTOPILOT === 'true';
-    let isAutopilotResponding = isGlobalAutopilotEnabled && autopilotEnabled;
+    let isAutopilotResponding = false;
+    let shouldProceedWithBot = false;
+
+    if (channelOrGroupDisabled) {
+      isAutopilotResponding = false;
+      shouldProceedWithBot = false;
+      this.log.info(`[SKIP] Bot response skipped because Channel or Bot Group is disabled/inactive`, { resolvedChannelId, tenantId });
+    } else if (autopilotEnabled === false) {
+      isAutopilotResponding = false;
+      shouldProceedWithBot = false;
+      this.log.info(`[SKIP] Bot response skipped because conversation-level autopilot is explicitly disabled`, { phoneNumber, tenantId });
+    } else if (autopilotEnabled === true) {
+      isAutopilotResponding = isGlobalAutopilotEnabled;
+      shouldProceedWithBot = isAutopilotResponding;
+    } else {
+      // autopilotEnabled is null/undefined (e.g. new conversation) -> check fallback
+      if (currentStatus !== 'human') {
+        const isAutoReplyEnabled = await FeatureFlagService.isEnabled(tenantId, 'whatsapp_auto_reply', false);
+        if (isAutoReplyEnabled) {
+          shouldProceedWithBot = true;
+        }
+      }
+    }
 
     const disableAutopilot = async (reason: string, details?: string) => {
       this.log.info(`[AUTOPILOT_AUTO_DISABLE] Disabling autopilot. Reason: ${reason} | Details: ${details || 'none'}`);
@@ -1514,19 +1552,6 @@ export class QueueWorkerEngine {
         this.log.error("Failed to publish autopilot auto-disable realtime update:", realtimeErr instanceof Error ? realtimeErr : new Error(String(realtimeErr)));
       }
     };
-
-    // Check if we should proceed with bot response generation
-    let shouldProceedWithBot = false;
-    
-    if (isAutopilotResponding) {
-      shouldProceedWithBot = true;
-    } else if (currentStatus !== 'human') {
-      // Fallback: If not selected autopilot, check old global auto-reply setting
-      const isAutoReplyEnabled = await FeatureFlagService.isEnabled(tenantId, 'whatsapp_auto_reply', false);
-      if (isAutoReplyEnabled) {
-        shouldProceedWithBot = true;
-      }
-    }
 
     if (!shouldProceedWithBot) {
       this.log.info(`[SKIP] Conversation is handled by human or autopilot/auto-reply is disabled`, { phoneNumber, traceId });

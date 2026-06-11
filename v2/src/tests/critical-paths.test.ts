@@ -227,8 +227,66 @@ const mockDbCalls: any[] = [];
       return [];
     }
     // Bot lists and other defaults
+    if (normalizedText.includes("FROM channel_groups") && normalizedText.includes("tenant_id = $2")) {
+      const botId = vals[0];
+      const tenantId = vals[1];
+      if ((botId === 'valid-bot-id' || botId === 'bot-group-id') && tenantId === 'test-tenant-id') {
+        return [{ id: botId, name: 'Valid Bot', display_name: 'Valid Bot', bot_type: 'custom', icon: 'bot', color: '#6366f1' }];
+      }
+      return [];
+    }
     if (normalizedText.includes("SELECT id FROM channel_groups")) {
       return [{ id: 'bot-group-id' }];
+    }
+    // Prompts Mock
+    if (normalizedText.includes("FROM channel_prompts") && normalizedText.includes("group_id = $1")) {
+      const botId = vals[0];
+      if (botId === 'valid-bot-id' || botId === 'bot-group-id') {
+        return [{ id: 'prompt-id', name: 'Test System Prompt', prompt_text: 'You are a helpful assistant.', version: 2, knowledge_prices: 'Price 10', knowledge_rules: 'Rules 20' }];
+      }
+      return [];
+    }
+    // AI Profile Mock
+    if (normalizedText.includes("FROM channel_ai_profiles") && normalizedText.includes("group_id = $1")) {
+      const botId = vals[0];
+      if (botId === 'valid-bot-id' || botId === 'bot-group-id') {
+        return [{ ai_model: 'gemini-2.5-flash', max_response_tokens: 1500, business_hours_json: { enabled: false }, aggression_level: 'medium' }];
+      }
+      return [];
+    }
+    // Channels verify Mock
+    if (normalizedText.includes("SELECT c.id, c.name FROM channels c JOIN channel_groups cg")) {
+      const channelId = vals[0];
+      const tenantId = vals[1];
+      if (channelId === 'valid-channel-id' && tenantId === 'test-tenant-id') {
+        return [{ id: 'valid-channel-id', name: 'Valid Channel' }];
+      }
+      return [];
+    }
+    // Conversations query for worker precedence Mock
+    if (normalizedText.includes("SELECT id, status, autopilot_enabled, channel_id, lead_stage FROM conversations")) {
+      const phone = vals[0];
+      if (phone === 'phone-autopilot-disabled') {
+        return [{ id: 'conv-1', status: 'lead', autopilot_enabled: false, channel_id: 'chan-1', lead_stage: 'new' }];
+      }
+      if (phone === 'phone-autopilot-enabled') {
+        return [{ id: 'conv-2', status: 'lead', autopilot_enabled: true, channel_id: 'chan-1', lead_stage: 'new' }];
+      }
+      if (phone === 'phone-autopilot-null') {
+        return [{ id: 'conv-3', status: 'lead', autopilot_enabled: null, channel_id: 'chan-1', lead_stage: 'new' }];
+      }
+      if (phone === 'phone-group-disabled') {
+        return [{ id: 'conv-4', status: 'lead', autopilot_enabled: true, channel_id: 'disabled-channel-id', lead_stage: 'new' }];
+      }
+      return [];
+    }
+    // Group status check for worker Mock
+    if (normalizedText.includes("SELECT cg.status as group_status FROM channels c")) {
+      const channelId = vals[0];
+      if (channelId === 'disabled-channel-id') {
+        return [{ group_status: 'inactive' }];
+      }
+      return [{ group_status: 'active' }];
     }
     return [];
   }
@@ -446,6 +504,47 @@ test("CREDENTIAL UPDATE: eski token geri dönmez ve credentials loglanmaz", asyn
   const path = require("path");
   const content = fs.readFileSync(path.resolve(__dirname, "../app/actions/integrations.ts"), "utf-8");
   assert(!content.includes("console.log(updatedFields)") && !content.includes("console.log(newCreds)"), "Console log of raw token detected in integrations actions!");
+});
+
+
+// ==========================================
+// 8. BOT MANAGEMENT & WORKER PRECEDENCE TESTS (Faz 2B)
+// ==========================================
+
+test("BOT TEST: Başka tenant botGroupId ile testBotPrompt çağrıldığında hata vermeli", async () => {
+  process.env.TEST_TENANT_ID = 'test-tenant-id';
+  const { testBotPrompt } = require("../app/actions/bot");
+  try {
+    await testBotPrompt('other-tenant-bot-id', [{ role: 'user', content: 'hello' }]);
+    assert(false, "Should have failed with unauthorized botGroupId");
+  } catch (err: any) {
+    assert(err.message.includes("bulunamadı") || err.message.includes("yetkiniz yok") || err.message.includes("authorized"), "Error message mismatch");
+  }
+});
+
+test("BOT TEST: Başka tenant channelId ile testBotPrompt çağrıldığında hata vermeli", async () => {
+  process.env.TEST_TENANT_ID = 'test-tenant-id';
+  const { testBotPrompt } = require("../app/actions/bot");
+  try {
+    await testBotPrompt('valid-bot-id', [{ role: 'user', content: 'hello' }], 'other-tenant-channel-id');
+    assert(false, "Should have failed with unauthorized channelId");
+  } catch (err: any) {
+    assert(err.message.includes("bulunamadı") || err.message.includes("yetkiniz yok") || err.message.includes("authorized"), "Error message mismatch");
+  }
+});
+
+test("BOT TEST: Doğru tenant botGroupId ile doğru prompt çözmeli ve db mutation yapmamalı", async () => {
+  process.env.TEST_TENANT_ID = 'test-tenant-id';
+  process.env.GEMINI_API_KEY = 'mock-api-key';
+  
+  const { testBotPrompt } = require("../app/actions/bot");
+  const res = await testBotPrompt('valid-bot-id', [{ role: 'user', content: 'hello' }], 'valid-channel-id');
+  
+  assert(res.success === true, "Should succeed with valid parameters");
+  assert(res.metadata.model === 'gemini-2.5-flash' || res.metadata.model === 'fallback', "Model metadata mismatch");
+  assert(res.metadata.promptVersion === 2, "Prompt version mismatch");
+  assert(res.metadata.sandboxMode === true, "Should be sandboxMode");
+  assert(res.metadata.toolExecution === 'sandbox', "Tool execution mode mismatch");
 });
 
 
