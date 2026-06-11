@@ -173,25 +173,60 @@ function normalizePhone(raw: string): string {
   return phone.substring(0, 20);
 }
 
-function parseDate(dateStr: string | null | undefined): Date {
-  if (!dateStr) return new Date();
-  const parts = dateStr.match(/(\d+)/g);
-  if (parts && parts.length >= 3) {
-    const p0 = parseInt(parts[0]);
-    const p1 = parseInt(parts[1]) - 1;
-    const p2 = parseInt(parts[2]);
-    let y = p2, m = p1, d = p0;
-    if (p0 > 31) { y = p0; d = p2; }
-    if (y < 100) y += 2000;
-    const hr = parts.length > 3 ? parseInt(parts[3]) : 0;
-    const min = parts.length > 4 ? parseInt(parts[4]) : 0;
-    const sec = parts.length > 5 ? parseInt(parts[5]) : 0;
-    const parsed = new Date(y, m, d, hr, min, sec);
-    if (!isNaN(parsed.getTime())) return parsed;
+export function parseDateSafe(dateStr: string | null | undefined): Date | null {
+  if (!dateStr) return null;
+  const str = String(dateStr).trim();
+  
+  // 1. Match Turkish/European format: DD.MM.YYYY HH:mm:ss or DD/MM/YYYY HH:mm:ss (or with spaces/hyphens)
+  const matchDMY = str.match(/^(\d{1,2})[\.\/-](\d{1,2})[\.\/-](\d{4})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?$/);
+  if (matchDMY) {
+    const day = parseInt(matchDMY[1], 10);
+    const month = parseInt(matchDMY[2], 10) - 1; // 0-indexed month
+    const year = parseInt(matchDMY[3], 10);
+    const hour = matchDMY[4] ? parseInt(matchDMY[4], 10) : 0;
+    const minute = matchDMY[5] ? parseInt(matchDMY[5], 10) : 0;
+    const second = matchDMY[6] ? parseInt(matchDMY[6], 10) : 0;
+    
+    // Europe/Istanbul (UTC+3) -> UTC
+    const utcMs = Date.UTC(year, month, day, hour, minute, second) - (3 * 60 * 60 * 1000);
+    const parsed = new Date(utcMs);
+    if (!isNaN(parsed.getTime())) {
+      return parsed;
+    }
   }
-  const standard = new Date(dateStr);
-  if (!isNaN(standard.getTime())) return standard;
-  return new Date();
+
+  // 2. Match standard ISO date format without offset (e.g. YYYY-MM-DD HH:mm:ss or YYYY/MM/DD HH:mm:ss)
+  const hasOffset = /([Z+-]\d{2}(?::?\d{2})?)$/.test(str);
+  if (!hasOffset) {
+    const matchYMD = str.match(/^(\d{4})[\.\/-](\d{1,2})[\.\/-](\d{1,2})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?$/);
+    if (matchYMD) {
+      const year = parseInt(matchYMD[1], 10);
+      const month = parseInt(matchYMD[2], 10) - 1;
+      const day = parseInt(matchYMD[3], 10);
+      const hour = matchYMD[4] ? parseInt(matchYMD[4], 10) : 0;
+      const minute = matchYMD[5] ? parseInt(matchYMD[5], 10) : 0;
+      const second = matchYMD[6] ? parseInt(matchYMD[6], 10) : 0;
+      
+      // Treat as Europe/Istanbul (UTC+3)
+      const utcMs = Date.UTC(year, month, day, hour, minute, second) - (3 * 60 * 60 * 1000);
+      const parsed = new Date(utcMs);
+      if (!isNaN(parsed.getTime())) {
+        return parsed;
+      }
+    }
+  }
+
+  // 3. Fallback to standard Date parsing (handles ISO with offset, etc.)
+  const standard = new Date(str);
+  if (!isNaN(standard.getTime())) {
+    return standard;
+  }
+  
+  return null;
+}
+
+function parseDate(dateStr: string | null | undefined): Date {
+  return parseDateSafe(dateStr) || new Date();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -218,12 +253,8 @@ function normalizePhoneForHash(phone: string): string {
 
 function normalizeTimeForHash(time: string | null | undefined): string {
   if (!time) return '';
-  try {
-    const d = new Date(time);
-    if (!isNaN(d.getTime())) {
-      return d.toISOString();
-    }
-  } catch (_) {}
+  const d = parseDateSafe(time);
+  if (d) return d.toISOString();
   return String(time).trim().toLowerCase();
 }
 
@@ -255,10 +286,34 @@ export function computeRowFingerprint(tenantId: string, fields: {
   return crypto.createHash('sha256').update(payload).digest('hex');
 }
 
-export function getCanonicalKey(phone: string, formName: string, createdTime: string | null): string {
+export function getCanonicalKey(phone: string, formName: string, createdTime: string | null, rawDataVal?: any): string {
   const normPhone = normalizePhoneForHash(phone);
   const normForm = normalizeString(formName);
-  const normTime = normalizeTimeForHash(createdTime);
+  let normTime = normalizeTimeForHash(createdTime);
+  
+  if (!normTime) {
+    if (rawDataVal) {
+      try {
+        const obj = typeof rawDataVal === 'string' ? JSON.parse(rawDataVal) : rawDataVal;
+        if (obj) {
+          const cleaned = { ...obj };
+          delete cleaned._google_sheets_fingerprint;
+          delete cleaned._imported_at;
+          delete cleaned._updated_at;
+          delete cleaned._all_phones;
+          delete cleaned._sheet_name;
+          delete cleaned._source;
+          const str = JSON.stringify(cleaned);
+          normTime = 'fp_' + crypto.createHash('sha256').update(str).digest('hex').substring(0, 16);
+        }
+      } catch (_) {}
+    }
+  }
+
+  if (!normTime) {
+    normTime = 'fp_empty';
+  }
+
   return `${normPhone}_${normForm}_${normTime}`;
 }
 
@@ -291,8 +346,8 @@ export function extractSheetDateFromRaw(rawDataVal: any): string {
     });
     if (dateKey && obj[dateKey]) {
       const val = obj[dateKey];
-      const d = new Date(val);
-      if (!isNaN(d.getTime())) return d.toISOString();
+      const d = parseDateSafe(val);
+      if (d) return d.toISOString();
     }
   } catch (_) {}
   return '';
@@ -1108,7 +1163,7 @@ export async function ingestSheetBatch(params: IngestBatchParams): Promise<Inges
     const existingLeadsMap = new Map<string, any>();
     for (const lead of existingLeads) {
       const dbTime = extractSheetDateFromRaw(lead.raw_data);
-      const key = getCanonicalKey(lead.phone_number, lead.form_name, dbTime);
+      const key = getCanonicalKey(lead.phone_number, lead.form_name, dbTime, lead.raw_data);
       existingLeadsMap.set(key, lead);
     }
 
@@ -1118,10 +1173,8 @@ export async function ingestSheetBatch(params: IngestBatchParams): Promise<Inges
 
     const parseCreatedTime = (raw: string | null | undefined): string => {
       if (!raw) return '';
-      try {
-        const d = new Date(raw);
-        if (!isNaN(d.getTime())) return d.toISOString();
-      } catch (_) {}
+      const d = parseDateSafe(raw);
+      if (d) return d.toISOString();
       return '';
     };
 
@@ -1138,7 +1191,7 @@ export async function ingestSheetBatch(params: IngestBatchParams): Promise<Inges
       }
 
       const sheetTime = parseCreatedTime(row.createdTime);
-      const rowKey = getCanonicalKey(row.phone, row.formName, sheetTime);
+      const rowKey = getCanonicalKey(row.phone, row.formName, sheetTime, row.rawData);
 
       if (seenKeys.has(rowKey)) {
         duplicates++;
