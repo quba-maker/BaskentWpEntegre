@@ -1,0 +1,299 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import { Cpu, Check, MessageSquare, Clock, Settings2, Info } from "lucide-react";
+import { updateBot, type BotData } from "@/app/actions/bot";
+
+// ==========================================
+// BOT AI SETTINGS TAB
+// Authority: AI model, response length, max messages, working hours
+// ONLY shows settings that are ACTUALLY consumed by worker/runtime.
+//
+// Phantom settings NOT shown here:
+//   - aggression_level (stored but never read by worker/prompt-builder)
+//   - auto_greeting (only used by sheets-ingestion, not general bot)
+//   - greeting_language (only used by sheets-ingestion)
+// ==========================================
+
+// ── Model Definitions ──
+const AI_MODELS = [
+  { id: "gemini-2.5-flash-lite", name: "Flash Lite", desc: "Hızlı & Ekonomik", speed: 95, cost: 20, iq: 60, color: "var(--q-green)" },
+  { id: "gemini-2.5-flash", name: "Flash", desc: "Dengeli (Önerilen)", speed: 85, cost: 40, iq: 85, color: "var(--q-blue)" },
+  { id: "gemini-2.5-pro", name: "Pro", desc: "Güçlü & Pahalı", speed: 50, cost: 90, iq: 98, color: "var(--q-purple)" },
+];
+
+// ── Response Length Presets ──
+const RESPONSE_PRESETS = [
+  { value: 500, label: "Kısa", desc: "Hızlı ve öz yanıtlar" },
+  { value: 1000, label: "Dengeli", desc: "Detaylı ama odaklı" },
+  { value: 2000, label: "Detaylı", desc: "Kapsamlı açıklamalar" },
+];
+
+// ── Max Messages Options ──
+const MAX_MSG_OPTIONS = [
+  { value: 5, label: "5 mesaj" },
+  { value: 8, label: "8 mesaj" },
+  { value: 12, label: "12 mesaj" },
+  { value: 20, label: "20 mesaj" },
+];
+
+interface BotAISettingsTabProps {
+  bot: BotData;
+  onRefresh: () => Promise<void>;
+}
+
+export function BotAISettingsTab({ bot, onRefresh }: BotAISettingsTabProps) {
+  const profile = bot.profile;
+
+  const [aiModel, setAiModel] = useState(profile?.aiModel || "gemini-2.5-flash");
+  const [maxTokens, setMaxTokens] = useState(profile?.maxResponseTokens || 1000);
+  const [maxMessages, setMaxMessages] = useState(profile?.maxMessages || 8);
+  const [workingHours, setWorkingHours] = useState<{
+    enabled: boolean;
+    start?: string;
+    end?: string;
+    offMessage?: string;
+  }>(profile?.workingHours || { enabled: false });
+
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  // Sync when bot changes
+  useEffect(() => {
+    setAiModel(profile?.aiModel || "gemini-2.5-flash");
+    setMaxTokens(profile?.maxResponseTokens || 1000);
+    setMaxMessages(profile?.maxMessages || 8);
+    setWorkingHours(profile?.workingHours || { enabled: false });
+    setSaved(false);
+  }, [bot.id, profile?.aiModel, profile?.maxResponseTokens, profile?.maxMessages, profile?.workingHours]);
+
+  const isDirty =
+    aiModel !== (profile?.aiModel || "gemini-2.5-flash") ||
+    maxTokens !== (profile?.maxResponseTokens || 1000) ||
+    maxMessages !== (profile?.maxMessages || 8) ||
+    JSON.stringify(workingHours) !== JSON.stringify(profile?.workingHours || { enabled: false });
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      await updateBot(bot.id, {
+        aiModel,
+        maxResponseTokens: maxTokens,
+        maxMessages,
+        workingHours,
+      });
+      await onRefresh();
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* AI Model Selection */}
+      <div className="rounded-2xl border p-5" style={{ borderColor: "var(--q-border-default)", backgroundColor: "#fff" }}>
+        <div className="flex items-center gap-2 mb-4">
+          <Cpu className="w-4 h-4" style={{ color: "var(--q-text-secondary)" }} />
+          <h3 className="text-sm font-bold" style={{ color: "var(--q-text-primary)" }}>Yapay Zeka Modeli</h3>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {AI_MODELS.map((m) => {
+            const isActive = aiModel === m.id;
+            return (
+              <button
+                key={m.id}
+                onClick={() => setAiModel(m.id)}
+                className="relative p-4 rounded-xl border-2 transition-all text-left"
+                style={{
+                  borderColor: isActive ? m.color : "var(--q-border-default)",
+                  backgroundColor: isActive ? `color-mix(in srgb, ${m.color} 5%, white)` : "#fff",
+                }}
+              >
+                {isActive && (
+                  <div
+                    className="absolute top-3 right-3 w-5 h-5 rounded-full flex items-center justify-center"
+                    style={{ backgroundColor: m.color }}
+                  >
+                    <Check className="w-3 h-3 text-white" />
+                  </div>
+                )}
+                <p className="text-sm font-bold" style={{ color: "var(--q-text-primary)" }}>{m.name}</p>
+                <p className="text-[11px] mb-3" style={{ color: "var(--q-text-secondary)" }}>{m.desc}</p>
+                <div className="space-y-1.5">
+                  {[
+                    { label: "Hız", val: m.speed },
+                    { label: "Zeka", val: m.iq },
+                    { label: "Maliyet", val: m.cost },
+                  ].map((bar) => (
+                    <div key={bar.label} className="flex items-center gap-2">
+                      <span className="text-[10px] w-10" style={{ color: "var(--q-text-secondary)" }}>{bar.label}</span>
+                      <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: "rgba(0,0,0,0.05)" }}>
+                        <div className="h-full rounded-full transition-all" style={{ width: `${bar.val}%`, backgroundColor: m.color }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Response Length + Max Messages */}
+      <div className="rounded-2xl border p-5" style={{ borderColor: "var(--q-border-default)", backgroundColor: "#fff" }}>
+        <div className="flex items-center gap-2 mb-4">
+          <MessageSquare className="w-4 h-4" style={{ color: "var(--q-text-secondary)" }} />
+          <h3 className="text-sm font-bold" style={{ color: "var(--q-text-primary)" }}>Yanıt Kontrolü</h3>
+        </div>
+
+        {/* Response Length Presets */}
+        <div className="mb-5">
+          <label className="text-xs font-semibold mb-2 block" style={{ color: "var(--q-text-secondary)" }}>
+            Yanıt Uzunluğu
+          </label>
+          <div className="flex items-center gap-2">
+            {RESPONSE_PRESETS.map((p) => {
+              const isActive = maxTokens === p.value;
+              return (
+                <button
+                  key={p.value}
+                  onClick={() => setMaxTokens(p.value)}
+                  className="flex-1 px-3 py-3 rounded-xl border-2 transition-all text-center"
+                  style={{
+                    borderColor: isActive ? "var(--q-primary, #6366f1)" : "var(--q-border-default)",
+                    backgroundColor: isActive ? "color-mix(in srgb, var(--q-primary, #6366f1) 5%, white)" : "#fff",
+                  }}
+                >
+                  <p className="text-xs font-bold" style={{ color: "var(--q-text-primary)" }}>{p.label}</p>
+                  <p className="text-[10px] mt-0.5" style={{ color: "var(--q-text-secondary)" }}>{p.desc}</p>
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-[10px] mt-1.5" style={{ color: "var(--q-text-placeholder)" }}>
+            Aktif: {maxTokens} token (~{Math.round(maxTokens * 0.7)} kelime)
+          </p>
+        </div>
+
+        {/* Max Messages */}
+        <div>
+          <label className="text-xs font-semibold mb-2 block" style={{ color: "var(--q-text-secondary)" }}>
+            Maksimum Bot Mesajı
+          </label>
+          <p className="text-[10px] mb-2" style={{ color: "var(--q-text-placeholder)" }}>
+            Bot bu sayıda mesaj sonra otomatik olarak insana devredilir
+          </p>
+          <div className="flex items-center gap-1.5 p-1 rounded-xl" style={{ backgroundColor: "rgba(0,0,0,0.03)" }}>
+            {MAX_MSG_OPTIONS.map((opt) => {
+              const isActive = maxMessages === opt.value;
+              return (
+                <button
+                  key={opt.value}
+                  onClick={() => setMaxMessages(opt.value)}
+                  className="flex-1 px-3 py-2 text-xs font-bold rounded-lg transition-all"
+                  style={{
+                    backgroundColor: isActive ? "white" : "transparent",
+                    color: isActive ? "var(--q-text-primary)" : "var(--q-text-secondary)",
+                    boxShadow: isActive ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+                  }}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* Working Hours */}
+      <div className="rounded-2xl border p-5" style={{ borderColor: "var(--q-border-default)", backgroundColor: "#fff" }}>
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Clock className="w-4 h-4" style={{ color: "var(--q-text-secondary)" }} />
+            <h3 className="text-sm font-bold" style={{ color: "var(--q-text-primary)" }}>Çalışma Saatleri</h3>
+          </div>
+          <button
+            onClick={() => setWorkingHours((prev) => ({ ...prev, enabled: !prev.enabled }))}
+            className="relative w-11 h-6 rounded-full transition-all"
+            style={{ backgroundColor: workingHours.enabled ? "var(--q-green)" : "rgba(0,0,0,0.15)" }}
+          >
+            <div
+              className="absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all"
+              style={{ left: workingHours.enabled ? "calc(100% - 22px)" : "2px" }}
+            />
+          </button>
+        </div>
+
+        {workingHours.enabled && (
+          <div className="space-y-3 pt-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[11px] font-semibold mb-1 block" style={{ color: "var(--q-text-secondary)" }}>
+                  Başlangıç
+                </label>
+                <input
+                  type="time"
+                  value={workingHours.start || "09:00"}
+                  onChange={(e) => setWorkingHours((prev) => ({ ...prev, start: e.target.value }))}
+                  className="w-full px-3 py-2 rounded-lg border text-sm"
+                  style={{ borderColor: "var(--q-border-default)" }}
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold mb-1 block" style={{ color: "var(--q-text-secondary)" }}>
+                  Bitiş
+                </label>
+                <input
+                  type="time"
+                  value={workingHours.end || "18:00"}
+                  onChange={(e) => setWorkingHours((prev) => ({ ...prev, end: e.target.value }))}
+                  className="w-full px-3 py-2 rounded-lg border text-sm"
+                  style={{ borderColor: "var(--q-border-default)" }}
+                />
+              </div>
+            </div>
+            <div>
+              <label className="text-[11px] font-semibold mb-1 block" style={{ color: "var(--q-text-secondary)" }}>
+                Mesai Dışı Mesajı
+              </label>
+              <input
+                type="text"
+                value={workingHours.offMessage || ""}
+                onChange={(e) => setWorkingHours((prev) => ({ ...prev, offMessage: e.target.value }))}
+                placeholder="Mesai saatlerimiz dışındasınız. En kısa sürede dönüş yapılacaktır."
+                className="w-full px-3 py-2 rounded-lg border text-sm"
+                style={{ borderColor: "var(--q-border-default)" }}
+              />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Info Banner — Delay */}
+      <div
+        className="flex items-start gap-2 px-4 py-3 rounded-xl text-[11px]"
+        style={{ backgroundColor: "rgba(0,0,0,0.02)", color: "var(--q-text-secondary)" }}
+      >
+        <Info className="w-4 h-4 flex-shrink-0 mt-0.5" />
+        <p>
+          Yanıt gecikmesi şu an sistem genelinde yönetiliyor. Bot bazlı gecikme ayarı sonraki fazda eklenecek.
+        </p>
+      </div>
+
+      {/* Save Button */}
+      <div className="flex justify-end">
+        <button
+          onClick={handleSave}
+          disabled={saving || !isDirty}
+          className="flex items-center gap-1.5 px-5 py-2.5 text-sm font-bold rounded-xl text-white transition-all disabled:opacity-50"
+          style={{ backgroundColor: saved ? "var(--q-green)" : "var(--q-primary, #6366f1)" }}
+        >
+          <Settings2 className="w-4 h-4" />
+          {saving ? "Kaydediliyor..." : saved ? "Kaydedildi ✓" : "Ayarları Kaydet"}
+        </button>
+      </div>
+    </div>
+  );
+}

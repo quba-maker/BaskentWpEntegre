@@ -1,14 +1,14 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Bot, MessageSquare, Globe, Hash, Plus, Archive, Link2, AlertTriangle, ChevronDown, Save, RotateCcw, X } from "lucide-react";
+import { Bot, MessageSquare, Globe, Hash, Plus, Link2, AlertTriangle, X, FileText, Settings2, Cpu, RotateCcw } from "lucide-react";
 import {
-  getBots, createBot, updateBot, archiveBot, assignChannelToBot,
+  getBots, createBot, updateBot,
   testBotPrompt, type BotData
 } from "@/app/actions/bot";
 import { PageLoader } from "@/components/ui/shared-states";
 import { PageShell, PageHeader } from "@/components/governance";
-import { BotTestPlayground } from "./_components";
+import { BotTestPlayground, BotPromptTab, BotAISettingsTab, BotChannelsTab } from "./_components";
 
 // ==========================================
 // ICON RESOLVER
@@ -59,14 +59,28 @@ function BotCard({ bot, isSelected, onClick }: { bot: BotData; isSelected: boole
             )}
           </div>
         </div>
-        <div className="flex items-center gap-1.5">
-          <div
-            className="w-2 h-2 rounded-full"
-            style={{ backgroundColor: "var(--q-green)", animation: "pulse 2s infinite" }}
-          />
-          <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--q-green)" }}>
-            Aktif
-          </span>
+        <div className="flex items-center gap-2">
+          {bot.profile?.aiModel && (
+            <span
+              className="text-[10px] font-bold px-1.5 py-0.5 rounded-md"
+              style={{
+                backgroundColor: bot.profile.aiModel.includes('pro') ? 'var(--q-purple-bg, rgba(99,102,241,0.1))' : bot.profile.aiModel.includes('lite') ? 'var(--q-green-bg, rgba(34,197,94,0.1))' : 'var(--q-blue-bg, rgba(59,130,246,0.1))',
+                color: bot.profile.aiModel.includes('pro') ? 'var(--q-purple, #6366f1)' : bot.profile.aiModel.includes('lite') ? 'var(--q-green, #22c55e)' : 'var(--q-blue, #3b82f6)',
+              }}
+            >
+              <Cpu className="w-2.5 h-2.5 inline -mt-0.5 mr-0.5" />
+              {bot.profile.aiModel.includes('pro') ? 'Pro' : bot.profile.aiModel.includes('lite') ? 'Lite' : 'Flash'}
+            </span>
+          )}
+          <div className="flex items-center gap-1">
+            <div
+              className="w-2 h-2 rounded-full"
+              style={{ backgroundColor: "var(--q-green)", animation: "pulse 2s infinite" }}
+            />
+            <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--q-green)" }}>
+              Aktif
+            </span>
+          </div>
         </div>
       </div>
 
@@ -226,115 +240,15 @@ function CreateBotModal({ onClose, onCreated }: { onClose: () => void; onCreated
 }
 
 // ==========================================
-// BOT DETAIL PANEL
+// BOT DETAIL TABS — Tab Container
+// Provides 3-tab navigation: Prompt, AI Settings, Channels
 // ==========================================
-function BotDetailPanel({
-  bot,
-  onSavePrompt,
-  onSaveSettings,
-}: {
-  bot: BotData;
-  onSavePrompt: (promptText: string, prices: string, rules: string) => Promise<void>;
-  onSaveSettings: (settings: any) => Promise<void>;
-}) {
-  const [prompt, setPrompt] = useState(bot.prompt?.text || "");
-  const [prices, setPrices] = useState(bot.prompt?.knowledgePrices || "");
-  const [rules, setRules] = useState(bot.prompt?.knowledgeRules || "");
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-
-  // Reset when bot changes
-  useEffect(() => {
-    setPrompt(bot.prompt?.text || "");
-    setPrices(bot.prompt?.knowledgePrices || "");
-    setRules(bot.prompt?.knowledgeRules || "");
-    setSaved(false);
-  }, [bot.id, bot.prompt?.text, bot.prompt?.knowledgePrices, bot.prompt?.knowledgeRules]);
-
-  const isDirty = prompt !== (bot.prompt?.text || "") ||
-    prices !== (bot.prompt?.knowledgePrices || "") ||
-    rules !== (bot.prompt?.knowledgeRules || "");
-
-  async function handleSave() {
-    setSaving(true);
-    await onSavePrompt(prompt, prices, rules);
-    setSaving(false);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
-  }
-
-  return (
-    <div className="space-y-6">
-      {/* Prompt Editor */}
-      <div className="rounded-2xl border p-5" style={{ borderColor: "var(--q-border-default)", backgroundColor: "#fff" }}>
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-bold" style={{ color: "var(--q-text-primary)" }}>
-            Sistem Prompt
-            {bot.prompt && (
-              <span className="ml-2 text-[10px] font-normal px-1.5 py-0.5 rounded-md" style={{ backgroundColor: "rgba(0,0,0,0.04)", color: "var(--q-text-secondary)" }}>
-                v{bot.prompt.version}
-              </span>
-            )}
-          </h3>
-          <div className="flex items-center gap-2">
-            {isDirty && (
-              <span className="text-[10px] font-medium" style={{ color: "var(--q-yellow, #f59e0b)" }}>Kaydedilmemiş değişiklik</span>
-            )}
-            <button
-              onClick={handleSave}
-              disabled={saving || !isDirty}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl text-white transition-all disabled:opacity-50"
-              style={{ backgroundColor: saved ? "var(--q-green)" : "var(--q-primary, #6366f1)" }}
-            >
-              <Save className="w-3.5 h-3.5" />
-              {saving ? "Kaydediliyor..." : saved ? "Kaydedildi ✓" : "Kaydet"}
-            </button>
-          </div>
-        </div>
-        <textarea
-          value={prompt}
-          onChange={e => setPrompt(e.target.value)}
-          rows={12}
-          className="w-full px-3 py-2 rounded-xl border text-sm font-mono resize-y"
-          style={{ borderColor: "var(--q-border-default)", color: "var(--q-text-primary)" }}
-          placeholder="Bu botun sistem promptunu yazın..."
-        />
-        <p className="text-[10px] mt-1" style={{ color: "var(--q-text-secondary)" }}>
-          {prompt.length.toLocaleString()} karakter
-        </p>
-      </div>
-
-      {/* Knowledge Base */}
-      <div className="rounded-2xl border p-5" style={{ borderColor: "var(--q-border-default)", backgroundColor: "#fff" }}>
-        <h3 className="text-sm font-bold mb-3" style={{ color: "var(--q-text-primary)" }}>Bilgi Bankası</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="text-xs font-semibold mb-1 block" style={{ color: "var(--q-text-secondary)" }}>Fiyatlar</label>
-            <textarea
-              value={prices}
-              onChange={e => setPrices(e.target.value)}
-              rows={4}
-              className="w-full px-3 py-2 rounded-xl border text-xs resize-y"
-              style={{ borderColor: "var(--q-border-default)" }}
-              placeholder="Fiyat bilgileri..."
-            />
-          </div>
-          <div>
-            <label className="text-xs font-semibold mb-1 block" style={{ color: "var(--q-text-secondary)" }}>Kurallar</label>
-            <textarea
-              value={rules}
-              onChange={e => setRules(e.target.value)}
-              rows={4}
-              className="w-full px-3 py-2 rounded-xl border text-xs resize-y"
-              style={{ borderColor: "var(--q-border-default)" }}
-              placeholder="Bot kuralları..."
-            />
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
+const DETAIL_TABS = [
+  { id: 'prompt' as const, label: 'Prompt & Bilgi', icon: FileText },
+  { id: 'settings' as const, label: 'AI Ayarları', icon: Settings2 },
+  { id: 'channels' as const, label: 'Kanallar', icon: Link2 },
+];
+type DetailTab = typeof DETAIL_TABS[number]['id'];
 
 // ==========================================
 // PAGE ORCHESTRATOR — DYNAMIC BOT MANAGEMENT
@@ -345,6 +259,7 @@ export default function BotManagementPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [activeTab, setActiveTab] = useState<DetailTab>('prompt');
 
   const selectedBot = bots.find(b => b.id === selectedBotId) || bots[0] || null;
 
@@ -379,6 +294,11 @@ export default function BotManagementPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Reset tab when switching bots
+  useEffect(() => {
+    setActiveTab('prompt');
+  }, [selectedBotId]);
+
   // ---- Handlers ----
   async function handleSavePrompt(promptText: string, prices: string, rules: string) {
     if (!selectedBot) return;
@@ -390,10 +310,9 @@ export default function BotManagementPage() {
     await loadBots();
   }
 
-  async function handleSaveSettings(settings: any) {
-    if (!selectedBot) return;
-    await updateBot(selectedBot.id, settings);
-    await loadBots();
+  function handleBotArchived() {
+    setSelectedBotId(null);
+    loadBots();
   }
 
   if (isLoading) return <PageLoader />;
@@ -467,15 +386,48 @@ export default function BotManagementPage() {
         </div>
       </div>
 
-      {/* SELECTED BOT DETAIL */}
+      {/* SELECTED BOT DETAIL — 3 Tab System */}
       {selectedBot && (
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start">
           <div className="xl:col-span-2">
-            <BotDetailPanel
-              bot={selectedBot}
-              onSavePrompt={handleSavePrompt}
-              onSaveSettings={handleSaveSettings}
-            />
+            {/* Tab Navigation */}
+            <div className="flex items-center gap-1 p-1 rounded-xl mb-5 w-fit" style={{ backgroundColor: 'rgba(0,0,0,0.04)' }}>
+              {DETAIL_TABS.map(tab => {
+                const TabIcon = tab.icon;
+                const isActive = activeTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all duration-200"
+                    style={{
+                      backgroundColor: isActive ? 'white' : 'transparent',
+                      color: isActive ? 'var(--q-text-primary)' : 'var(--q-text-secondary)',
+                      boxShadow: isActive ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+                    }}
+                  >
+                    <TabIcon className="w-4 h-4" />
+                    <span className="hidden md:inline">{tab.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Tab Content */}
+            {activeTab === 'prompt' && (
+              <BotPromptTab bot={selectedBot} onSavePrompt={handleSavePrompt} />
+            )}
+            {activeTab === 'settings' && (
+              <BotAISettingsTab bot={selectedBot} onRefresh={loadBots} />
+            )}
+            {activeTab === 'channels' && (
+              <BotChannelsTab
+                bot={selectedBot}
+                allBots={bots}
+                onRefresh={loadBots}
+                onBotArchived={handleBotArchived}
+              />
+            )}
           </div>
           <div className="xl:col-span-1 sticky top-6">
             <BotTestPlayground

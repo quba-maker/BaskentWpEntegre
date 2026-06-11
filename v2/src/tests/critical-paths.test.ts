@@ -255,11 +255,11 @@ const mockDbCalls: any[] = [];
       return [];
     }
     // Channels verify Mock
-    if (normalizedText.includes("SELECT c.id, c.name FROM channels c JOIN channel_groups cg")) {
+    if (normalizedText.includes("FROM channels c JOIN channel_groups cg")) {
       const channelId = vals[0];
       const tenantId = vals[1];
       if (channelId === 'valid-channel-id' && tenantId === 'test-tenant-id') {
-        return [{ id: 'valid-channel-id', name: 'Valid Channel' }];
+        return [{ id: 'valid-channel-id', name: 'Valid Channel', group_id: 'bot-group-id', provider: 'instagram' }];
       }
       return [];
     }
@@ -549,6 +549,50 @@ test("BOT TEST: Doğru tenant botGroupId ile doğru prompt çözmeli ve db mutat
 
 
 // ==========================================
+// 9. PHASE 2C: BOT RBAC & SETTINGS TESTS
+// ==========================================
+
+test("RBAC: Agent or viewer cannot update bot settings", async () => {
+  process.env.TEST_TENANT_ID = 'test-tenant-id';
+  process.env.TEST_USER_ROLE = 'agent';
+  const { updateBot } = require("../app/actions/bot");
+  
+  const res = await updateBot('valid-bot-id', { displayName: 'New Name' });
+  assert(res.success === false, "Agent should not be allowed to update bot");
+  assert(res.error && res.error.includes("Bu işlem için yetkiniz yok"), "Role restriction error mismatch");
+});
+
+test("RBAC: Owner or admin can update bot settings", async () => {
+  process.env.TEST_TENANT_ID = 'test-tenant-id';
+  process.env.TEST_USER_ROLE = 'owner';
+  const { updateBot } = require("../app/actions/bot");
+  
+  const res = await updateBot('valid-bot-id', { displayName: 'New Name' });
+  assert(res.success === true, "Owner should be allowed to update bot");
+});
+
+test("RBAC: Agent or viewer cannot archive bot", async () => {
+  process.env.TEST_TENANT_ID = 'test-tenant-id';
+  process.env.TEST_USER_ROLE = 'agent';
+  const { archiveBot } = require("../app/actions/bot");
+  
+  const res = await archiveBot('valid-bot-id');
+  assert(res.success === false, "Agent should not be allowed to archive bot");
+  assert(res.error && res.error.includes("Bu işlem için yetkiniz yok"), "Role restriction error mismatch");
+});
+
+test("RBAC: Agent or viewer cannot assign channel to bot", async () => {
+  process.env.TEST_TENANT_ID = 'test-tenant-id';
+  process.env.TEST_USER_ROLE = 'agent';
+  const { assignChannelToBot } = require("../app/actions/bot");
+  
+  const res = await assignChannelToBot('valid-channel-id', 'valid-bot-id');
+  assert(res.success === false, "Agent should not be allowed to assign channel");
+  assert(res.error && res.error.includes("Bu işlem için yetkiniz yok"), "Role restriction error mismatch");
+});
+
+
+// ==========================================
 // SONUÇLAR
 // ==========================================
 
@@ -574,5 +618,9 @@ setTimeout(() => {
   console.log(`\n  Toplam: ${results.length} | ✅ ${passed} | ❌ ${failed}`);
   console.log("==========================================\n");
 
-  if (failed > 0) process.exit(1);
+  if (failed > 0) {
+    process.exit(1);
+  } else {
+    process.exit(0);
+  }
 }, 1000);

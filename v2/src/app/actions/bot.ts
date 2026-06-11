@@ -862,7 +862,7 @@ export async function createBot(input: {
   promptName?: string;
 }): Promise<{ success: boolean; botId?: string; error?: string }> {
   return withActionGuard(
-    { actionName: 'createBot' },
+    { actionName: 'createBot', roles: ['owner', 'admin'] },
     async (ctx) => {
       const { displayName, description, botType, icon, color, promptText, promptName } = input;
 
@@ -934,7 +934,7 @@ export async function updateBot(
   }
 ): Promise<{ success: boolean; error?: string }> {
   return withActionGuard(
-    { actionName: 'updateBot' },
+    { actionName: 'updateBot', roles: ['owner', 'admin'] },
     async (ctx) => {
       // Verify ownership
       const ownership = await ctx.db.executeSafe({
@@ -1019,7 +1019,7 @@ export async function updateBot(
  */
 export async function archiveBot(botId: string): Promise<{ success: boolean; error?: string }> {
   return withActionGuard(
-    { actionName: 'archiveBot' },
+    { actionName: 'archiveBot', roles: ['owner', 'admin'] },
     async (ctx) => {
       // Verify ownership
       const ownership = await ctx.db.executeSafe({
@@ -1074,7 +1074,7 @@ export async function assignChannelToBot(
   targetBotId: string
 ): Promise<{ success: boolean; error?: string }> {
   return withActionGuard(
-    { actionName: 'assignChannelToBot' },
+    { actionName: 'assignChannelToBot', roles: ['owner', 'admin'] },
     async (ctx) => {
       // 1. Verify target bot ownership
       const targetBot = await ctx.db.executeSafe({
