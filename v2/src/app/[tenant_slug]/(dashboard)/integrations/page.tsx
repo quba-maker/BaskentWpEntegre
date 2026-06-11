@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, Component, type ReactNode, type ErrorInfo } from "react";
-import { Link2, MessageCircle, FileSpreadsheet, Instagram, Facebook, Webhook, Activity, AlertTriangle, Plus, X, Bot, ChevronRight, RotateCcw, Archive, Trash2, Bell, Send, Check, Loader2 } from "lucide-react";
+import Link from "next/link";
+import { Link2, MessageCircle, FileSpreadsheet, Instagram, Facebook, Webhook, Activity, AlertTriangle, Plus, X, Bot, ChevronRight, RotateCcw, Archive, Trash2, Bell, Send, Check, Loader2, Key, Settings2, Save } from "lucide-react";
 import {
   getTelegramChannelConfig,
   saveTelegramChannel,
@@ -9,6 +10,7 @@ import {
 } from "@/app/actions/notification-channels";
 import { PageShell, PageHeader } from "@/components/governance";
 import { GoogleSheetsWizard } from "@/components/features/integrations/GoogleSheetsWizard";
+import { useParams } from "next/navigation";
 import {
   getIntegrationHealth,
   connectWhatsAppChannel,
@@ -16,6 +18,7 @@ import {
   connectMessengerPage,
   archiveChannel,
   getBotListForDropdown,
+  updateChannelCredentials,
 } from "@/app/actions/integrations";
 import { assignChannelToBot } from "@/app/actions/bot";
 import { PageLoader } from "@/components/ui/shared-states";
@@ -60,14 +63,18 @@ function StatusBadge({ status, detail }: { status: string; detail: string }) {
 function ChannelRow({
   channel,
   bots,
+  tenantSlug,
   onAssignBot,
   onArchive,
+  onUpdateCredentials,
   onRefresh,
 }: {
   channel: any;
   bots: { id: string; displayName: string; color: string }[];
+  tenantSlug: string;
   onAssignBot: (channelId: string, botId: string) => Promise<void>;
   onArchive: (channelId: string) => Promise<void>;
+  onUpdateCredentials: (channel: any) => void;
   onRefresh: () => void;
 }) {
   const meta = getProviderMeta(channel.provider);
@@ -95,82 +102,113 @@ function ChannelRow({
   const isSynthetic = channel.id?.startsWith('google-sheets');
 
   return (
-    <div className="flex items-center justify-between px-4 py-3 hover:bg-gray-50/50 transition-colors border-b last:border-b-0" style={{ borderColor: "var(--q-border-default)" }}>
-      {/* Left: icon + name + identifier */}
-      <div className="flex items-center gap-3 min-w-0 flex-1">
-        <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: `${meta.color}10` }}>
-          <Icon className="w-4 h-4" style={{ color: meta.color }} />
+    <div className="border-b last:border-b-0" style={{ borderColor: "var(--q-border-default)" }}>
+      <div className="flex items-center justify-between px-4 py-3 hover:bg-gray-50/50 transition-colors">
+        {/* Left: icon + name + identifier */}
+        <div className="flex items-center gap-3 min-w-0 flex-1">
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: `${meta.color}10` }}>
+            <Icon className="w-4 h-4" style={{ color: meta.color }} />
+          </div>
+          <div className="min-w-0">
+            <p className="text-[13px] font-semibold truncate" style={{ color: "var(--q-text-primary)" }}>{channel.name}</p>
+            <p className="text-[10px] font-mono truncate" style={{ color: "var(--q-text-secondary)" }}>{channel.id.slice(0, 8)} • {channel.provider}</p>
+          </div>
         </div>
-        <div className="min-w-0">
-          <p className="text-[13px] font-semibold truncate" style={{ color: "var(--q-text-primary)" }}>{channel.name}</p>
-          <p className="text-[10px] font-mono truncate" style={{ color: "var(--q-text-secondary)" }}>{channel.id.slice(0, 8)} • {channel.provider}</p>
+
+        {/* Bot assignment */}
+        <div className="flex items-center gap-2 flex-shrink-0 mx-3">
+          <Bot className="w-3 h-3" style={{ color: "var(--q-text-secondary)" }} />
+          <select
+            className="text-[11px] font-medium rounded-lg border px-2 py-1 bg-white appearance-none cursor-pointer"
+            style={{ borderColor: "var(--q-border-default)", color: "var(--q-text-primary)", minWidth: 130 }}
+            value={channel.botId || ""}
+            onChange={e => handleBotChange(e.target.value)}
+            disabled={assigning}
+          >
+            {bots.map(b => (
+              <option key={b.id} value={b.id}>{b.displayName}</option>
+            ))}
+          </select>
         </div>
-      </div>
 
-      {/* Bot assignment */}
-      <div className="flex items-center gap-2 flex-shrink-0 mx-3">
-        <Bot className="w-3 h-3" style={{ color: "var(--q-text-secondary)" }} />
-        <select
-          className="text-[11px] font-medium rounded-lg border px-2 py-1 bg-white appearance-none cursor-pointer"
-          style={{ borderColor: "var(--q-border-default)", color: "var(--q-text-primary)", minWidth: 130 }}
-          value={channel.botId || ""}
-          onChange={e => handleBotChange(e.target.value)}
-          disabled={assigning}
-        >
-          {bots.map(b => (
-            <option key={b.id} value={b.id}>{b.displayName}</option>
-          ))}
-        </select>
-      </div>
+        {/* Status */}
+        <div className="flex-shrink-0 mx-2">
+          <StatusBadge status={channel.status} detail={channel.detail} />
+        </div>
 
-      {/* Status */}
-      <div className="flex-shrink-0 mx-2">
-        <StatusBadge status={channel.status} detail={channel.detail} />
-      </div>
+        {/* Credential update button (only for non-synthetic channels) */}
+        {!isSynthetic && channel.status !== "disconnected" && (
+          <button
+            onClick={() => onUpdateCredentials(channel)}
+            className="flex-shrink-0 p-1.5 rounded-lg border border-gray-200 hover:border-gray-300 hover:bg-gray-50 text-gray-500 hover:text-gray-700 transition-colors ml-1"
+            title="Anahtarı Güncelle"
+          >
+            <Key className="w-3.5 h-3.5" />
+          </button>
+        )}
 
-      {/* Timestamps */}
-      <div className="hidden lg:flex flex-col items-end flex-shrink-0 ml-2 min-w-[120px]">
-        <span className="text-[10px]" style={{ color: "var(--q-text-secondary)" }}>
-          {channel.lastSyncAt
-            ? `Son: ${new Date(channel.lastSyncAt).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}`
-            : "Webhook yok"}
-        </span>
-        {channel.lastMessage && (
+        {/* Timestamps */}
+        <div className="hidden lg:flex flex-col items-end flex-shrink-0 ml-2 min-w-[120px]">
           <span className="text-[10px]" style={{ color: "var(--q-text-secondary)" }}>
-            Msg: {new Date(channel.lastMessage).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+            {channel.lastSyncAt
+              ? `Son: ${new Date(channel.lastSyncAt).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}`
+              : "Webhook yok"}
           </span>
+          {channel.lastMessage && (
+            <span className="text-[10px]" style={{ color: "var(--q-text-secondary)" }}>
+              Msg: {new Date(channel.lastMessage).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+            </span>
+          )}
+        </div>
+
+        {/* Archive button */}
+        {!isSynthetic && (
+          <div className="flex-shrink-0 ml-2">
+            {confirmArchive ? (
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={handleArchive}
+                  disabled={archiving}
+                  className="px-2 py-1 text-[10px] font-bold rounded-lg text-white bg-rose-500 hover:bg-rose-600 disabled:opacity-50"
+                >
+                  {archiving ? '...' : 'Evet'}
+                </button>
+                <button
+                  onClick={() => setConfirmArchive(false)}
+                  className="px-2 py-1 text-[10px] font-bold rounded-lg hover:bg-gray-100"
+                  style={{ color: "var(--q-text-secondary)" }}
+                >
+                  İptal
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setConfirmArchive(true)}
+                className="p-1.5 rounded-lg hover:bg-rose-50 transition-colors group"
+                title="Arşivle"
+              >
+                <Archive className="w-3.5 h-3.5 text-gray-400 group-hover:text-rose-500" />
+              </button>
+            )}
+          </div>
         )}
       </div>
 
-      {/* Archive button */}
-      {!isSynthetic && (
-        <div className="flex-shrink-0 ml-2">
-          {confirmArchive ? (
-            <div className="flex items-center gap-1">
-              <button
-                onClick={handleArchive}
-                disabled={archiving}
-                className="px-2 py-1 text-[10px] font-bold rounded-lg text-white bg-rose-500 hover:bg-rose-600 disabled:opacity-50"
-              >
-                {archiving ? '...' : 'Evet'}
-              </button>
-              <button
-                onClick={() => setConfirmArchive(false)}
-                className="px-2 py-1 text-[10px] font-bold rounded-lg hover:bg-gray-100"
-                style={{ color: "var(--q-text-secondary)" }}
-              >
-                İptal
-              </button>
+      {/* Prompt / Bot Binding Warning */}
+      {!channel.hasBinding && channel.status !== "disconnected" && !isSynthetic && (
+        <div className="px-4 pb-3">
+          <div className="p-2.5 bg-amber-50/70 border border-amber-100 text-amber-800 text-[11px] font-medium flex items-center justify-between rounded-xl">
+            <div className="flex items-center gap-1.5">
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
+              <span>Bu kanal bağlı ancak aktif bot/prompt ataması eksik.</span>
             </div>
-          ) : (
-            <button
-              onClick={() => setConfirmArchive(true)}
-              className="p-1.5 rounded-lg hover:bg-rose-50 transition-colors group"
-              title="Arşivle"
+            <Link
+              href={`/${tenantSlug}/bot`}
+              className="text-indigo-600 hover:text-indigo-800 font-bold hover:underline flex items-center gap-0.5 ml-2"
             >
-              <Archive className="w-3.5 h-3.5 text-gray-400 group-hover:text-rose-500" />
-            </button>
-          )}
+              Bot Yönetimi'nden atama yapın <ChevronRight className="w-3 h-3" />
+            </Link>
+          </div>
         </div>
       )}
     </div>
@@ -184,22 +222,27 @@ function ProviderSection({
   provider,
   channels,
   bots,
+  tenantSlug,
   onAddChannel,
   onAssignBot,
   onArchive,
+  onUpdateCredentials,
   onRefresh,
 }: {
   provider: string;
   channels: any[];
   bots: any[];
+  tenantSlug: string;
   onAddChannel: (provider: string) => void;
   onAssignBot: (channelId: string, botId: string) => Promise<void>;
   onArchive: (channelId: string) => Promise<void>;
+  onUpdateCredentials: (channel: any) => void;
   onRefresh: () => void;
 }) {
   const meta = getProviderMeta(provider);
   const Icon = meta.icon;
   const activeCount = channels.filter(c => c.status === "connected").length;
+  const [showGuide, setShowGuide] = useState(false);
 
   return (
     <div className="rounded-2xl border overflow-hidden" style={{ borderColor: "var(--q-border-default)", backgroundColor: "#fff" }}>
@@ -216,20 +259,35 @@ function ProviderSection({
             </p>
           </div>
         </div>
-        <button
-          onClick={() => onAddChannel(provider)}
-          className="flex items-center gap-1 px-3 py-1.5 text-[11px] font-bold rounded-lg transition-all hover:opacity-80 text-white"
-          style={{ backgroundColor: meta.color }}
-        >
-          <Plus className="w-3 h-3" />
-          Ekle
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowGuide(!showGuide)}
+            className="px-2.5 py-1.5 text-[10px] font-bold rounded-lg border border-gray-200 hover:bg-gray-50 text-gray-500 hover:text-gray-700 transition-colors"
+          >
+            {showGuide ? "Kılavuzu Gizle" : "Kurulum Kılavuzu"}
+          </button>
+          <button
+            onClick={() => onAddChannel(provider)}
+            className="flex items-center gap-1 px-3 py-1.5 text-[11px] font-bold rounded-lg transition-all hover:opacity-80 text-white"
+            style={{ backgroundColor: meta.color }}
+          >
+            <Plus className="w-3 h-3" />
+            Ekle
+          </button>
+        </div>
       </div>
+
+      {/* Guide Content */}
+      {showGuide && (
+        <div className="px-4 pt-3">
+          <SetupChecklist provider={provider} />
+        </div>
+      )}
 
       {/* Channel Rows */}
       {channels.length > 0 ? (
         channels.map(ch => (
-          <ChannelRow key={ch.id} channel={ch} bots={bots} onAssignBot={onAssignBot} onArchive={onArchive} onRefresh={onRefresh} />
+          <ChannelRow key={ch.id} channel={ch} bots={bots} tenantSlug={tenantSlug} onAssignBot={onAssignBot} onArchive={onArchive} onUpdateCredentials={onUpdateCredentials} onRefresh={onRefresh} />
         ))
       ) : (
         <div className="px-4 py-6 text-center">
@@ -362,6 +420,211 @@ const NOTIFICATION_CATEGORIES = [
   { value: 'human_escalation', label: 'İnsan Müdahalesi', emoji: '🚨' },
   { value: 'system_alert', label: 'Sistem Uyarısı', emoji: '⚙️' },
 ];
+
+// ==========================================
+// CREDENTIAL UPDATE MODAL
+// ==========================================
+interface CredentialUpdateModalProps {
+  channel: any;
+  onClose: () => void;
+  onSuccess: () => void;
+}
+
+function CredentialUpdateModal({ channel, onClose, onSuccess }: CredentialUpdateModalProps) {
+  const [token, setToken] = useState("");
+  const [wabaId, setWabaId] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const displayProvider = channel.provider === "meta_instagram" ? "instagram" : channel.provider;
+
+  async function handleSave() {
+    setError("");
+    if (!token.trim()) {
+      setError("Yeni token/key alanı boş olamaz.");
+      return;
+    }
+    setSaving(true);
+    
+    const fields: Record<string, any> = {};
+    if (displayProvider === "whatsapp") {
+      fields.accessToken = token.trim();
+      if (wabaId.trim()) fields.wabaId = wabaId.trim();
+    } else if (displayProvider === "instagram") {
+      fields.accessToken = token.trim();
+    } else if (displayProvider === "messenger") {
+      fields.pageAccessToken = token.trim();
+    } else {
+      setError("Bu kanal tipi için güncelleme desteklenmiyor.");
+      setSaving(false);
+      return;
+    }
+
+    try {
+      const res = await updateChannelCredentials(channel.id, fields);
+      if (res.success) {
+        onSuccess();
+        onClose();
+      } else {
+        setError(res.error || "Güncelleme başarısız oldu.");
+      }
+    } catch (e: any) {
+      setError(e?.message || "Bir hata oluştu.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 border border-gray-100" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-5">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-indigo-50 flex items-center justify-center">
+              <Key className="w-4 h-4 text-indigo-600" />
+            </div>
+            <h3 className="text-base font-bold text-gray-900">Kimlik Bilgilerini Güncelle</h3>
+          </div>
+          <button onClick={onClose} className="p-1 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="p-4 bg-amber-50/50 border border-amber-100 rounded-xl mb-4 text-[11px] text-amber-800 leading-relaxed">
+          ℹ️ Mevcut kanal kimlikleri (ID'ler) değiştirilemez. Sadece Meta erişim token değerlerini güvenli bir şekilde güncelleyebilirsiniz. Güncelleme sonrası bağlantı durumu kontrol edilecektir.
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider block mb-1">
+              Kanal
+            </label>
+            <div className="px-3 py-2 bg-gray-50 border rounded-xl text-sm font-semibold text-gray-700">
+              {channel.name} ({displayProvider})
+            </div>
+          </div>
+
+          <div>
+            <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider block mb-1">
+              {displayProvider === "messenger" ? "Yeni Page Access Token" : "Yeni Meta Access Token"}
+            </label>
+            <input
+              type="password"
+              value={token}
+              onChange={e => setToken(e.target.value)}
+              placeholder="Yeni erişim anahtarını yapıştırın"
+              autoComplete="new-password"
+              className="w-full px-3 py-2 rounded-xl border text-sm font-mono focus:ring-2 focus:ring-indigo-100 outline-none"
+              style={{ borderColor: "var(--q-border-default)" }}
+            />
+          </div>
+
+          {displayProvider === "whatsapp" && (
+            <div>
+              <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider block mb-1">
+                Yeni WABA ID (Opsiyonel)
+              </label>
+              <input
+                type="text"
+                value={wabaId}
+                onChange={e => setWabaId(e.target.value)}
+                placeholder="WhatsApp Business Account ID"
+                autoComplete="off"
+                className="w-full px-3 py-2 rounded-xl border text-sm font-mono focus:ring-2 focus:ring-indigo-100 outline-none"
+                style={{ borderColor: "var(--q-border-default)" }}
+              />
+            </div>
+          )}
+        </div>
+
+        {error && <p className="text-[11px] text-rose-600 mt-3 font-medium">{error}</p>}
+
+        <div className="flex justify-end gap-2 mt-6">
+          <button onClick={onClose} className="px-4 py-2 text-sm font-medium rounded-xl text-gray-500 hover:bg-gray-50 transition-colors">
+            İptal
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving || !token.trim()}
+            className="px-5 py-2 text-sm font-bold rounded-xl text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 transition-colors flex items-center gap-1.5"
+          >
+            {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+            {saving ? "Güncelleniyor..." : "Güncelle"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ==========================================
+// PROVIDER SETUP CHECKLIST
+// ==========================================
+function SetupChecklist({ provider }: { provider: string }) {
+  const checklists: Record<string, { title: string; items: string[] }> = {
+    whatsapp: {
+      title: "WhatsApp Kurulum Adımları",
+      items: [
+        "Meta Developer paneline (developers.facebook.com) gidin ve uygulamanızı seçin.",
+        "Sol menüden WhatsApp → Setup sekmesine gidin.",
+        "Geçici veya kalıcı bir 'Access Token' (Sistem Kullanıcısı Token'ı önerilir) oluşturun.",
+        "WhatsApp Business Account ID (WABA ID) ve Phone Number ID değerlerini kopyalayın.",
+        "Kanal Ekle butonuna basarak kopyaladığınız değerleri kaydedin.",
+        "Meta panelinde Webhook aboneliği kurun (messages olayına abone olun)."
+      ]
+    },
+    instagram: {
+      title: "Instagram Kurulum Adımları",
+      items: [
+        "Instagram hesabınızın Profesyonel/İşletme hesabı olduğundan emin olun.",
+        "Instagram hesabınızı bir Facebook Sayfasına bağlayın.",
+        "Meta Developer panelinden Instagram Graph API ekli bir uygulama oluşturun.",
+        "Instagram Business Account ID değerini Facebook Sayfa ayarlarından veya Meta paneline bakarak alın.",
+        "Instagram mesaj izinleri içeren Meta Page Access Token üretin.",
+        "Kanal Ekle butonuna basarak entegrasyonu tamamlayın."
+      ]
+    },
+    messenger: {
+      title: "Messenger Kurulum Adımları",
+      items: [
+        "Meta paneline gidin ve entegre etmek istediğiniz Facebook Sayfasını seçin.",
+        "Facebook Page ID değerini Sayfa Ayarları → Hakkında kısmından kopyalayın (yalnızca numerik olmalıdır).",
+        "Sayfa yönetici yetkisiyle bir 'Page Access Token' üretin.",
+        "Kanal Ekle butonuna basarak Page ID ve Token değerlerini kaydedin.",
+        "Facebook uygulamanızda Webhooks kısmından 'messages' olayını tanımlayın."
+      ]
+    },
+    google_sheets: {
+      title: "Google Sheets Kurulum Adımları",
+      items: [
+        "Bağlamak istediğiniz Google E-tablo dosyasının paylaşım ayarlarını 'Bağlantıya sahip olan herkes görüntüleyebilir' yapın.",
+        "Sihirbazdaki 1. adımda Sheet linkini yapıştırıp 'Bağlan' butonuna basın.",
+        "Lead akışını tetiklemek istediğiniz sekmeleri ve yönlendirilecek WhatsApp kanalı / Bot grubunu seçin.",
+        "Aşağıdaki Apps Script kodunu kopyalayın ve Google E-tablonuzda Uzantılar → Apps Script alanına yapıştırın.",
+        "Apps Script içinde 'onFormSubmit' fonksiyonu için 'Form gönderildiğinde' (On Form Submit) tetikleyicisi (trigger) oluşturun."
+      ]
+    }
+  };
+
+  const checklist = checklists[provider === "meta_instagram" ? "instagram" : provider];
+  if (!checklist) return null;
+
+  return (
+    <div className="mt-3 p-3.5 bg-gray-50/50 border border-gray-100 rounded-xl space-y-2">
+      <h4 className="text-[11px] font-bold text-gray-500 uppercase tracking-wider flex items-center gap-1.5">
+        <Settings2 className="w-3.5 h-3.5 text-indigo-500" /> {checklist.title}
+      </h4>
+      <ul className="space-y-1.5 text-[11px] text-gray-600 leading-relaxed list-inside">
+        {checklist.items.map((item, idx) => (
+          <li key={idx} className="flex items-start gap-1.5">
+            <span className="text-indigo-500 font-bold flex-shrink-0 mt-0.5">•</span>
+            <span>{item}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
 
 // ==========================================
 // TELEGRAM ERROR BOUNDARY + WRAPPER
@@ -682,11 +945,14 @@ function TelegramChannelSection() {
 // PAGE ORCHESTRATOR
 // ==========================================
 export default function IntegrationsPage() {
+  const params = useParams();
+  const tenantSlug = (params?.tenant_slug as string) || '';
   const [channels, setChannels] = useState<any[]>([]);
   const [bots, setBots] = useState<{ id: string; displayName: string; color: string }[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [addModal, setAddModal] = useState<string | null>(null);
+  const [updateModalChannel, setUpdateModalChannel] = useState<any | null>(null);
   const [sheetsWizard, setSheetsWizard] = useState(false);
   const [summary, setSummary] = useState("");
 
@@ -788,9 +1054,11 @@ export default function IntegrationsPage() {
             provider={provider}
             channels={grouped[provider] || []}
             bots={bots}
+            tenantSlug={tenantSlug}
             onAddChannel={handleAddChannel}
             onAssignBot={handleAssignBot}
             onArchive={handleArchive}
+            onUpdateCredentials={(channel) => setUpdateModalChannel(channel)}
             onRefresh={loadData}
           />
         ))}
@@ -858,6 +1126,15 @@ export default function IntegrationsPage() {
           isOpen={sheetsWizard}
           onClose={() => setSheetsWizard(false)}
           onComplete={() => { loadData(); setSheetsWizard(false); }}
+        />
+      )}
+
+      {/* Credential Update Modal */}
+      {updateModalChannel && (
+        <CredentialUpdateModal
+          channel={updateModalChannel}
+          onClose={() => setUpdateModalChannel(null)}
+          onSuccess={loadData}
         />
       )}
     </PageShell>

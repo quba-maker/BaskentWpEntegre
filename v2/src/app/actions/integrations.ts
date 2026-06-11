@@ -854,3 +854,89 @@ export async function rotateGoogleSheetsWebhookSecret(): Promise<{ success: bool
   });
 }
 
+/**
+ * Update existing channel credentials (restricted to owner/admin)
+ */
+export async function updateChannelCredentials(
+  channelId: string,
+  updatedFields: Record<string, any>
+): Promise<{ success: boolean; error?: string }> {
+  return withActionGuard(
+    { actionName: 'updateChannelCredentials', roles: ['owner', 'admin'] },
+    async (ctx) => {
+      // 1. Fetch existing channel & integration to verify ownership & existing identifier
+      const dbChannel = await ctx.db.executeSafe({
+        text: `SELECT c.id, c.provider, c.identifier, ci.credentials_encrypted 
+               FROM channels c
+               JOIN channel_groups cg ON c.group_id = cg.id
+               LEFT JOIN channel_integrations ci ON ci.channel_id = c.id
+               WHERE c.id = $1 AND cg.tenant_id = $2`,
+        values: [channelId, ctx.tenantId]
+      });
+
+      if (dbChannel.length === 0) {
+        throw new Error('Kanal bulunamadı veya bu işlem için yetkiniz yok.');
+      }
+
+      const channel = dbChannel[0];
+      const provider = channel.provider;
+
+      // Decrypt existing credentials if any
+      let existingCreds: Record<string, any> = {};
+      if (channel.credentials_encrypted) {
+        try {
+          const creds = typeof channel.credentials_encrypted === 'string'
+            ? JSON.parse(channel.credentials_encrypted)
+            : channel.credentials_encrypted;
+          
+          if (creds.encrypted_payload && creds.version) {
+            existingCreds = decryptPayload(creds as EncryptedPayload);
+          } else {
+            existingCreds = creds;
+          }
+        } catch (e) {
+          console.warn('[updateChannelCredentials] Failed to decrypt existing credentials, starting fresh');
+        }
+      }
+
+      // 2. Map and update allowed fields only (never change identifiers)
+      const providerKey = canonicalProvider(provider);
+      const newCreds: Record<string, any> = { ...existingCreds };
+
+      if (providerKey === 'whatsapp') {
+        // Allowed: accessToken, wabaId
+        if (updatedFields.accessToken !== undefined) newCreds.accessToken = updatedFields.accessToken;
+        if (updatedFields.wabaId !== undefined) newCreds.wabaId = updatedFields.wabaId;
+        // Keep phone number ID from existing or channel identifier
+        newCreds.phoneNumberId = existingCreds.phoneNumberId || channel.identifier;
+      } else if (providerKey === 'instagram') {
+        // Allowed: accessToken
+        if (updatedFields.accessToken !== undefined) newCreds.accessToken = updatedFields.accessToken;
+        newCreds.instagramBusinessAccountId = existingCreds.instagramBusinessAccountId || channel.identifier;
+      } else if (providerKey === 'messenger') {
+        // Allowed: pageAccessToken
+        if (updatedFields.pageAccessToken !== undefined) newCreds.pageAccessToken = updatedFields.pageAccessToken;
+        newCreds.pageId = existingCreds.pageId || channel.identifier;
+      } else {
+        throw new Error(`Bilinmeyen veya güncellenemeyen sağlayıcı türü: ${provider}`);
+      }
+
+      // Encrypt and save back
+      const encrypted = encryptPayload(providerKey, newCreds);
+
+      await ctx.db.executeSafe({
+        text: `UPDATE channel_integrations 
+               SET credentials_encrypted = $1, health_status = 'needs_check', updated_at = NOW()
+               WHERE channel_id = $2`,
+        values: [JSON.stringify(encrypted), channelId]
+      });
+
+      return true;
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error };
+    return { success: true };
+  });
+}
+
+

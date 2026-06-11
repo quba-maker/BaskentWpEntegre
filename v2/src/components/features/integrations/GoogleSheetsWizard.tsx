@@ -25,6 +25,127 @@ function parseSpreadsheetId(input: string): string {
   return input.trim();
 }
 
+interface AppsScriptSnippetProps {
+  webhookUrl: string;
+  tenantSlug: string;
+  secret: string;
+  sheetName: string;
+}
+
+function AppsScriptSnippet({ webhookUrl, tenantSlug, secret, sheetName }: AppsScriptSnippetProps) {
+  const [copied, setCopied] = useState(false);
+
+  const code = `// Google Sheets Webhook Entegrasyonu
+const WEBHOOK_URL = "${webhookUrl}";
+const TENANT_SLUG = "${tenantSlug}";
+const WEBHOOK_SECRET = "${secret || 'PASTE_SECRET_HERE'}";
+const FORM_SHEET_NAME = "${sheetName}";
+
+function onFormSubmit(e) {
+  try {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(FORM_SHEET_NAME);
+    if (!sheet) {
+      Logger.log("Hata: " + FORM_SHEET_NAME + " isimli sekme bulunamadı.");
+      return;
+    }
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    const rowValues = e.range.getValues()[0];
+    
+    const rowData = {};
+    for (let i = 0; i < headers.length; i++) {
+      if (headers[i]) {
+        rowData[headers[i]] = rowValues[i];
+      }
+    }
+    
+    sendWebhook(rowData);
+  } catch (err) {
+    Logger.log("Hata: " + err.toString());
+  }
+}
+
+function sendWebhook(data) {
+  const timestamp = Math.floor(Date.now() / 1000).toString();
+  const payload = JSON.stringify({
+    tenant_slug: TENANT_SLUG,
+    data: data
+  });
+  
+  // HMAC SHA256 İmzası Üret
+  const signatureBytes = Utilities.computeHmacSignature(
+    Utilities.MacAlgorithm.HMAC_SHA_256,
+    timestamp + "." + payload,
+    WEBHOOK_SECRET
+  );
+  
+  // Hex formatına çevir
+  let signature = "";
+  for (let i = 0; i < signatureBytes.length; i++) {
+    let byteVal = signatureBytes[i];
+    if (byteVal < 0) byteVal += 256;
+    let byteString = byteVal.toString(16);
+    if (byteString.length == 1) byteString = "0" + byteString;
+    signature += byteString;
+  }
+  
+  const options = {
+    method: "post",
+    contentType: "application/json",
+    headers: {
+      "x-sheets-signature": "sha256=" + signature,
+      "x-sheets-timestamp": timestamp
+    },
+    payload: payload,
+    muteHttpExceptions: true
+  };
+  
+  const response = UrlFetchApp.fetch(WEBHOOK_URL, options);
+  Logger.log("Response: " + response.getContentText());
+}
+
+// Manuel test fonksiyonu (Otomatik tetiklenmez, manuel çalıştırılabilir)
+function testWebhook() {
+  const testData = {
+    "Ad Soyad": "Test Kullanıcısı",
+    "Telefon": "+905000000000",
+    "E-posta": "test@quba.ai",
+    "Not": "Bu bir manuel test gönderimidir."
+  };
+  sendWebhook(testData);
+}`;
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="space-y-2 mt-4 border-t pt-4 border-gray-100">
+      <div className="flex items-center justify-between">
+        <span className="text-[12px] font-bold text-gray-500 uppercase tracking-wider">
+          Apps Script Şablonu
+        </span>
+        <button
+          onClick={handleCopy}
+          className="px-3 py-1 rounded-lg text-[11px] font-bold border border-gray-200 hover:bg-gray-50 flex items-center gap-1 text-gray-700 transition-colors"
+        >
+          {copied ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+          {copied ? 'Kopyalandı' : 'Kodu Kopyala'}
+        </button>
+      </div>
+      <div className="relative">
+        <pre className="text-[11px] font-mono p-4 bg-gray-950 text-gray-100 rounded-xl overflow-x-auto max-h-[200px] border border-gray-800 leading-relaxed">
+          {code}
+        </pre>
+      </div>
+      <p className="text-[10px] text-amber-600 font-medium bg-amber-50 border border-amber-100 p-2.5 rounded-lg leading-relaxed">
+        ⚠️ <strong>Önemli:</strong> Google Sheet sekme adını değiştirirseniz Apps Script içindeki <code>FORM_SHEET_NAME</code> değerini de güncellemeyi unutmayın.
+      </p>
+    </div>
+  );
+}
+
 export function GoogleSheetsWizard({ isOpen, onClose, onComplete }: { isOpen: boolean, onClose: () => void, onComplete: () => void }) {
   
   // ── Core State ──
@@ -297,8 +418,22 @@ export function GoogleSheetsWizard({ isOpen, onClose, onComplete }: { isOpen: bo
           <BrainCircuit className="w-4 h-4 text-indigo-500" /> Webhook Entegrasyonu (Gelişmiş)
         </h4>
         <p className="text-[12px] text-gray-500 leading-relaxed">
-          Google Sheets App Script üzerinden anlık veri akışı kurmak için aşağıdaki webhook URL'sini ve gizli anahtarı kullanın.
+          Google Sheets App Script üzerinden anlık veri akışı kurmak için aşağıdaki webhook URL'sini, tenant slug ve gizli anahtarı kullanın.
         </p>
+
+        {/* Tenant Slug Field */}
+        <div>
+          <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1 block">
+            Tenant Slug
+          </label>
+          <input
+            readOnly
+            value={tenantSlug}
+            onClick={(e) => (e.target as HTMLInputElement).select()}
+            className="w-full px-3 py-2.5 rounded-lg border text-[13px] font-mono bg-gray-50 text-gray-600 outline-none"
+            style={{ borderColor: 'var(--q-border-default)' }}
+          />
+        </div>
 
         {/* Webhook URL Field */}
         <div>
@@ -326,7 +461,7 @@ export function GoogleSheetsWizard({ isOpen, onClose, onComplete }: { isOpen: bo
         {/* Webhook Secret Field */}
         <div>
           <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1 block">
-            Webhook Secret
+            Webhook Secret (Gizli Anahtar)
           </label>
           <div className="flex gap-2">
             <input
@@ -350,6 +485,28 @@ export function GoogleSheetsWizard({ isOpen, onClose, onComplete }: { isOpen: bo
             <p className="text-[11px] text-emerald-600 font-bold mt-1">
               ✓ Yeni gizli anahtar başarıyla üretildi. Lütfen bunu şimdi kopyalayın! Bu değer sadece bir kez gösterilecektir.
             </p>
+          )}
+
+          {/* Secret Status Badge */}
+          {webhookSecretMasked ? (
+            <div className="flex items-center gap-2 mt-2">
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                Özel Gizli Anahtar Aktif
+              </span>
+            </div>
+          ) : (
+            <div className="space-y-2 mt-2">
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                  Genel Fallback Aktif (Güvensiz)
+                </span>
+              </div>
+              <p className="text-[11px] text-amber-600 font-medium leading-relaxed">
+                ℹ️ Güvenli ve izole bir veri akışı için lütfen "Gizli Anahtarı Yenile" butonunu kullanarak tenant-specific özel bir anahtar oluşturun.
+              </p>
+            </div>
           )}
         </div>
 
@@ -401,6 +558,14 @@ export function GoogleSheetsWizard({ isOpen, onClose, onComplete }: { isOpen: bo
             </div>
           )}
         </div>
+
+        {/* Apps Script Copyable Code Block */}
+        <AppsScriptSnippet
+          webhookUrl={webhookUrl}
+          tenantSlug={tenantSlug}
+          secret={rawSecret}
+          sheetName={selectedTabs[0] || 'Sayfa1'}
+        />
       </div>
     </div>
   );

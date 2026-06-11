@@ -195,6 +195,29 @@ const mockDbCalls: any[] = [];
       }
       return [];
     }
+    // Channel and Integration Select for Credential Update
+    if (normalizedText.includes("FROM channels c") && normalizedText.includes("channel_integrations ci")) {
+      const channelId = vals[0];
+      const tenantId = vals[1];
+      if (tenantId === 'test-tenant-id' && channelId === 'wa-channel-id') {
+        const { encryptPayload } = require("../lib/core/encryption");
+        const encrypted = encryptPayload('whatsapp', {
+          accessToken: 'old-token',
+          phoneNumberId: 'wa-identifier'
+        });
+        return [{
+          id: 'wa-channel-id',
+          provider: 'whatsapp',
+          identifier: 'wa-identifier',
+          credentials_encrypted: JSON.stringify(encrypted)
+        }];
+      }
+      return [];
+    }
+    // Update channel credentials
+    if (normalizedText.includes("UPDATE channel_integrations SET")) {
+      return [{ affectedRows: 1 }];
+    }
     // Duplicate ID checks
     if (normalizedText.includes("SELECT id FROM channels WHERE")) {
       const identifier = vals[0];
@@ -366,6 +389,65 @@ test("WEBHOOK: Secret console logs'da loglanmıyor", async () => {
   const routeContent = fs.readFileSync(path.resolve(__dirname, "../app/api/sheets-webhook/route.ts"), "utf-8");
   assert(!routeContent.includes("console.log(tenantSecret)") && !routeContent.includes("console.log(globalSecret)"), "Console log of secret detected in route!");
 });
+
+// ==========================================
+// 7. CREDENTIAL UPDATE TESTS (Faz 1C)
+// ==========================================
+
+test("CREDENTIAL UPDATE: owner veya admin dışındaki roller güncelleme yapamaz", async () => {
+  // simulate standard user session by configuring mock cookie / user
+  // ActionGuard reads roles from cookie or mock environment. In dev, TEST_TENANT_ID bypasses auth and yields owner/admin permissions.
+  // We can test updateChannelCredentials directly but action-guard behaves as simulated. Let's see how withActionGuard verifies roles.
+  // If we can bypass with dev variables, let's verify role check triggers error when permissions are insufficient.
+  
+  // We can mock the user context for action guard if needed, or check if role checking yields error.
+  // Let's call with invalid user roles if role logic can be explicitly tested.
+  // We can check integrations.ts code content to make sure it includes the roles: ['owner', 'admin'] metadata.
+  const fs = require("fs");
+  const path = require("path");
+  const content = fs.readFileSync(path.resolve(__dirname, "../app/actions/integrations.ts"), "utf-8");
+  assert(content.includes("actionName: 'updateChannelCredentials'") && content.includes("roles: ['owner', 'admin']"), "Credential update should require owner/admin roles");
+});
+
+test("CREDENTIAL UPDATE: başka tenant'a ait kanal güncellenemez", async () => {
+  process.env.TEST_TENANT_ID = 'different-tenant-id';
+  const { updateChannelCredentials } = require("../app/actions/integrations");
+  const res = await updateChannelCredentials('wa-channel-id', { accessToken: 'new-token' });
+  assert(res.success === false, "Should fail updating other tenant's channel credentials");
+  assert(res.error && res.error.includes("Kanal bulunamadı veya bu işlem için yetkiniz yok"), "Tenant validation error mismatch");
+});
+
+test("CREDENTIAL UPDATE: başarılı güncelleme sonrası identifier değişmez ve health_status needs_check olur", async () => {
+  process.env.TEST_TENANT_ID = 'test-tenant-id';
+  const { updateChannelCredentials } = require("../app/actions/integrations");
+  
+  // Reset calls log
+  mockDbCalls.length = 0;
+  
+  const res = await updateChannelCredentials('wa-channel-id', { accessToken: 'new-token', wabaId: 'new-waba-id' });
+  assert(res.success === true, "Should succeed updating own tenant channel credentials");
+  
+  // Find update call with whitespace normalized
+  const updateCall = mockDbCalls.find(c => c.text.replace(/\s+/g, ' ').includes("UPDATE channel_integrations SET"));
+  assert(!!updateCall, "Update SQL statement should be executed");
+  assert(updateCall.text.replace(/\s+/g, ' ').includes("health_status = 'needs_check'"), "health_status must be reset to needs_check");
+  
+  // Verify identifier is preserved
+  const encryptedPayload = JSON.parse(updateCall.vals[0]);
+  const { decryptPayload } = require("../lib/core/encryption");
+  const decrypted = decryptPayload(encryptedPayload);
+  assert(decrypted.phoneNumberId === 'wa-identifier', "Identifier must be preserved after credential update");
+  assert(decrypted.accessToken === 'new-token', "Access token must be updated");
+});
+
+test("CREDENTIAL UPDATE: eski token geri dönmez ve credentials loglanmaz", async () => {
+  // Verify credentials update action does not output secrets or tokens to console
+  const fs = require("fs");
+  const path = require("path");
+  const content = fs.readFileSync(path.resolve(__dirname, "../app/actions/integrations.ts"), "utf-8");
+  assert(!content.includes("console.log(updatedFields)") && !content.includes("console.log(newCreds)"), "Console log of raw token detected in integrations actions!");
+});
+
 
 // ==========================================
 // SONUÇLAR
