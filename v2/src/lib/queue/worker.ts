@@ -1662,14 +1662,18 @@ export class QueueWorkerEngine {
 
       // 3. Stop Rules Gate (Opt-Out and Terminal Opportunity Stages)
       if (isAutopilotResponding && !skipBotReply) {
-        const optOutKeywords = ["opt-out", "istemiyorum", "rahatsız etmeyin", "listeden çıkar", "iptal", "stop", "mesaj atmayın", "üye olmak istemiyorum"];
-        const hasOptOutKeyword = content && optOutKeywords.some(kw => content.toLowerCase().includes(kw));
+        const { classifyStopRuleIntent } = await import('@/lib/services/stop-rule-intent');
+        const stopIntent = classifyStopRuleIntent(content || '');
         const isTerminalStage = leadStage && ['lost', 'not_interested', 'arrived', 'terminal'].includes(leadStage);
 
-        if (hasOptOutKeyword) {
-          await disableAutopilot('stop_rule', `Opt-out keyword detected: "${content}"`);
+        if (stopIntent.isCommunicationOptOut) {
+          await disableAutopilot('stop_rule', `Communication opt-out detected: "${stopIntent.matchedPattern}"`);
           skipBotReply = true;
           isAutopilotResponding = false;
+        } else if (stopIntent.isCancellationIntent) {
+          // Appointment/plan cancellation — NOT a communication opt-out.
+          // Let the bot handle the conversation naturally.
+          this.log.info(`[STOP_RULE_SOFT] Cancellation intent detected, bot continues. Pattern: "${stopIntent.matchedPattern}"`, { phoneNumber, tenantId, traceId });
         } else if (isTerminalStage) {
           await disableAutopilot('coordinator_takeover', `Terminal stage detected: "${leadStage}"`);
           skipBotReply = true;
