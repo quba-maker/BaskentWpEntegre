@@ -5,7 +5,7 @@ import { LayoutDashboard, MessageSquare, ClipboardList, Settings, Bot, BarChart3
 import Link from "next/link";
 import { getSession } from "@/lib/auth/session";
 import { getTenantBootstrapData } from "@/lib/domain/tenant/bootstrap";
-import { Metadata } from "next";
+import { Metadata, Viewport } from "next";
 import { ImpersonationBanner } from "@/components/layout/impersonation-banner";
 import InboxUnreadBadge from "@/components/features/inbox/inbox-unread-badge";
 
@@ -24,8 +24,16 @@ export async function generateMetadata({ params }: { params: Promise<{ tenant_sl
       template: `%s | ${brandingName}`,
       default: `${brandingName} Workspace`,
     },
-    themeColor: tenantData?.profile.primary_color || "#007AFF",
     icons: tenantData?.profile.logo_url ? [{ rel: "icon", url: tenantData.profile.logo_url }] : undefined,
+  };
+}
+
+export async function generateViewport({ params }: { params: Promise<{ tenant_slug: string }> }): Promise<Viewport> {
+  const session = await getSession();
+  const tenantData = session?.tenantId ? await getTenantBootstrapData(session.tenantId) : null;
+  
+  return {
+    themeColor: tenantData?.profile.primary_color || "#007AFF",
   };
 }
 

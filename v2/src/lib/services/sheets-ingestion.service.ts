@@ -401,6 +401,12 @@ export async function ingestSheetRow(params: IngestRowParams): Promise<IngestRow
     skipAutoMessage = false, source = 'manual_sync'
   } = params;
 
+  const log = logger.withContext({
+    module: 'SheetsIngestion',
+    tenantId,
+    conversationId: source === 'webhook' ? 'webhook_no_conversation' : source === 'manual_sync' ? 'manual_sync_no_conversation' : 'cron_sync_no_conversation'
+  });
+
   const db = withTenantDB(tenantId);
 
   try {
@@ -884,6 +890,12 @@ export async function ingestSheetBatch(params: IngestBatchParams): Promise<Inges
     maxRowsPerRun = 2000,
     timeBudgetMs = 45_000,
   } = params;
+
+  const log = logger.withContext({
+    module: 'SheetsIngestion',
+    tenantId,
+    conversationId: source === 'manual_sync' ? 'manual_sync_no_conversation' : 'cron_sync_no_conversation'
+  });
 
   const startTime = Date.now();
   const db = withTenantDB(tenantId);
@@ -1445,6 +1457,12 @@ export async function updateSheetsHealthStatus(
   source: 'webhook' | 'cron_sync' | 'manual_sync',
   stats?: HealthStats
 ): Promise<void> {
+  const log = logger.withContext({
+    module: 'SheetsIngestion',
+    tenantId,
+    conversationId: source === 'webhook' ? 'webhook_no_conversation' : source === 'manual_sync' ? 'manual_sync_no_conversation' : 'cron_sync_no_conversation'
+  });
+
   try {
     const db = withTenantDB(tenantId);
 

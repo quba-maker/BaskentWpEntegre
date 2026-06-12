@@ -10,7 +10,7 @@ import { NotificationService } from "@/lib/services/notification.service";
 
 export async function getUnreadNotifications(limit: number = 10) {
   return withActionGuard(
-    { actionName: 'getUnreadNotifications' },
+    { actionName: 'getUnreadNotifications', conversationId: 'notification_action_no_conversation' },
     async (ctx) => {
       const service = new NotificationService(ctx.db);
       return service.getUnread(ctx.tenantId, limit);
@@ -20,7 +20,7 @@ export async function getUnreadNotifications(limit: number = 10) {
 
 export async function getNotificationCount() {
   return withActionGuard(
-    { actionName: 'getNotificationCount' },
+    { actionName: 'getNotificationCount', conversationId: 'notification_action_no_conversation' },
     async (ctx) => {
       const service = new NotificationService(ctx.db);
       const count = await service.getUnreadCount(ctx.tenantId);
@@ -31,7 +31,7 @@ export async function getNotificationCount() {
 
 export async function markNotificationRead(notificationId: string) {
   return withActionGuard(
-    { actionName: 'markNotificationRead' },
+    { actionName: 'markNotificationRead', conversationId: 'notification_action_no_conversation' },
     async (ctx) => {
       const service = new NotificationService(ctx.db);
       await service.markRead(notificationId, ctx.tenantId);
@@ -45,7 +45,7 @@ export async function markNotificationRead(notificationId: string) {
 
 export async function markAllNotificationsRead() {
   return withActionGuard(
-    { actionName: 'markAllNotificationsRead' },
+    { actionName: 'markAllNotificationsRead', conversationId: 'notification_action_no_conversation' },
     async (ctx) => {
       const service = new NotificationService(ctx.db);
       await service.markAllRead(ctx.tenantId);

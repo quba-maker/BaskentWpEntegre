@@ -91,7 +91,7 @@ export class ConversationService {
   async getHistory(phoneNumber: string, limit: number = 20) {
     const prev = await this.db.executeSafe(sql`
       SELECT direction, content, media_type, media_metadata FROM messages 
-      WHERE phone_number = ${phoneNumber} AND tenant_id = ${this.db.tenantId} 
+      WHERE phone_number = ${phoneNumber} AND tenant_id = ${this.db.tenantId} AND direction IN ('in', 'out')
       ORDER BY created_at DESC LIMIT ${limit}
     `);
     

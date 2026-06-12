@@ -2,6 +2,7 @@
 
 // sql import removed — all queries use parameterized {text, values} format for proper RLS enforcement
 import { withActionGuard } from "@/lib/core/action-guard";
+import { getTraceContext } from "@/lib/core/trace-context";
 
 // ==========================================
 // QUBA AI — AI Observability Actions (Phase 6A)
@@ -11,7 +12,7 @@ export async function getConversationTraces(conversationId: string) {
   if (!conversationId) return [];
   
   return withActionGuard(
-    { actionName: 'getConversationTraces' },
+    { actionName: 'getConversationTraces', conversationId: conversationId || 'traces_action_no_conversation' },
     async (ctx) => {
       // Find the conversation's UUID if conversationId is a phone number
       const convRows = await ctx.db.executeSafe({
@@ -22,6 +23,12 @@ export async function getConversationTraces(conversationId: string) {
       if (convRows.length === 0) return [];
       const convUuid = convRows[0].id;
 
+      // Update trace context safely
+      const traceCtx = getTraceContext();
+      if (traceCtx && convUuid) {
+        traceCtx.conversationId = convUuid;
+      }
+ 
       const rows = await ctx.db.executeSafe({
         text: `SELECT 
                  id, tool_name, tool_arguments, validation_passed,
@@ -50,8 +57,20 @@ export async function getAiStatusForConversation(phoneNumber: string) {
   if (!phoneNumber) return null;
 
   return withActionGuard(
-    { actionName: 'getAiStatusForConversation' },
+    { actionName: 'getAiStatusForConversation', conversationId: 'ai_status_no_conversation' },
     async (ctx) => {
+      // Resolve conversation UUID to verify tenant ownership and update trace context
+      const convRows = await ctx.db.executeSafe({
+        text: `SELECT id FROM conversations WHERE phone_number = $1 AND tenant_id = $2 LIMIT 1`,
+        values: [phoneNumber, ctx.tenantId]
+      });
+      const conversationId = convRows[0]?.id;
+      
+      const traceCtx = getTraceContext();
+      if (traceCtx && conversationId) {
+        traceCtx.conversationId = conversationId;
+      }
+
       const rows = await ctx.db.executeSafe({
         text: `SELECT ae.event_type, ae.event_category, ae.severity, ae.created_at
                FROM ai_events ae
@@ -79,7 +98,7 @@ export async function getCustomerAiBrain(phone: string) {
   if (!phone) return null;
   
   return withActionGuard(
-    { actionName: 'getCustomerAiBrain' },
+    { actionName: 'getCustomerAiBrain', conversationId: 'brain_action_no_conversation' },
     async (ctx) => {
       const convRows = await ctx.db.executeSafe({
         text: `SELECT 
@@ -94,6 +113,13 @@ export async function getCustomerAiBrain(phone: string) {
       });
       
       if (convRows.length === 0) return null;
+      const conversationId = convRows[0].id;
+
+      const traceCtx = getTraceContext();
+      if (traceCtx && conversationId) {
+        traceCtx.conversationId = conversationId;
+      }
+
       return convRows[0];
     }
   ).then(res => res.data || null);

@@ -3,25 +3,35 @@
 import { withActionGuard } from "@/lib/core/action-guard";
 import { AIEventEmitter } from "@/lib/services/ai/core/event-emitter";
 import { BrainVersionService } from "@/lib/services/brain-version.service";
+import { getTraceContext } from "@/lib/core/trace-context";
 
 // =============================================
 // AI OS — Server Actions (Phase 6)
 // =============================================
 
 export async function getAiTimeline(phoneNumber: string, limit = 30) {
-  return withActionGuard({ actionName: 'getAiTimeline' }, async (ctx) => {
-    try {
-      const convs = await ctx.db.executeSafe(
-        `SELECT id::text as id FROM conversations WHERE phone_number = $1 AND tenant_id = $2 LIMIT 1`,
-        [phoneNumber, ctx.tenantId]
-      );
-      const conversationId = convs[0]?.id;
-      if (!conversationId) return [];
-      return await AIEventEmitter.getTimelineForConversation(ctx.tenantId, conversationId, limit);
-    } catch {
-      return [];
+  return withActionGuard(
+    { actionName: 'getAiTimeline', conversationId: 'ai_timeline_no_conversation' },
+    async (ctx) => {
+      try {
+        const convs = await ctx.db.executeSafe(
+          `SELECT id::text as id FROM conversations WHERE phone_number = $1 AND tenant_id = $2 LIMIT 1`,
+          [phoneNumber, ctx.tenantId]
+        );
+        const conversationId = convs[0]?.id;
+        if (!conversationId) return [];
+
+        const traceCtx = getTraceContext();
+        if (traceCtx && conversationId) {
+          traceCtx.conversationId = conversationId;
+        }
+
+        return await AIEventEmitter.getTimelineForConversation(ctx.tenantId, conversationId, limit);
+      } catch {
+        return [];
+      }
     }
-  });
+  );
 }
 
 export async function getAiSummary(phoneNumber: string) {

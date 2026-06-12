@@ -3,7 +3,9 @@
 import { withActionGuard } from "@/lib/core/action-guard";
 
 export async function getDashboardStats() {
-  return withActionGuard({ actionName: 'getDashboardStats' }, async (ctx) => {
+  return withActionGuard(
+    { actionName: 'getDashboardStats', conversationId: 'dashboard_action_no_conversation' },
+    async (ctx) => {
     const { db, tenantId } = ctx;
 
     const [convs, msgs, leads, botMsgs, activeConvs] = await Promise.all([
