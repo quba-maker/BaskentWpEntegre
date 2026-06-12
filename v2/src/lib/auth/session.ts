@@ -55,16 +55,20 @@ export async function getSession(): Promise<Session | null> {
   const cookieStore = await cookies();
   const token = cookieStore.get(COOKIE_NAME)?.value;
   if (!token) {
-    console.log(`[SESSION_FORENSIC] No cookie found (${COOKIE_NAME})`);
+    if (process.env.NODE_ENV !== 'production' || process.env.DEBUG_AUTH_FORENSIC === 'true') {
+      console.log(`[SESSION_FORENSIC] No cookie found (${COOKIE_NAME})`);
+    }
     return null;
   }
   
   const session = await verifyToken(token);
   if (!session) {
-    console.log(`[SESSION_FORENSIC] JWT verification failed`);
+    console.warn(`[SESSION_FORENSIC] JWT verification failed`);
     return null;
   }
-  console.log(`[SESSION_FORENSIC] JWT decoded | userId=${session.userId} | tenantId=${session.tenantId} | role=${session.role} | impersonated=${session.impersonatedTenantId || 'NONE'}`);
+  if (process.env.NODE_ENV !== 'production' || process.env.DEBUG_AUTH_FORENSIC === 'true') {
+    console.log(`[SESSION_FORENSIC] JWT decoded | userId=${session.userId} | tenantId=${session.tenantId} | role=${session.role} | impersonated=${session.impersonatedTenantId || 'NONE'}`);
+  }
 
   // DB'den kullanıcı durumunu doğrula (silinen/deaktif/rol değişen kullanıcılar)
   try {
@@ -81,7 +85,7 @@ export async function getSession(): Promise<Session | null> {
     
     // Kullanıcı silinmiş veya deaktif
     if (user.length === 0 || !user[0].is_active) {
-      console.log(`[SESSION_FORENSIC] User not found or inactive | userCount=${user.length} | isActive=${user[0]?.is_active}`);
+      console.warn(`[SESSION_FORENSIC] User not found or inactive | userCount=${user.length} | isActive=${user[0]?.is_active}`);
       try {
         cookieStore.delete(COOKIE_NAME);
       } catch {
@@ -123,7 +127,7 @@ export async function getSession(): Promise<Session | null> {
     return session;
   } catch (error) {
     // Fail closed: log database/auth failures and deny access
-    console.log(`[SESSION_FORENSIC] DB verification CRASHED: ${error instanceof Error ? error.message : String(error)}`);
+    console.error(`[SESSION_FORENSIC] DB verification CRASHED: ${error instanceof Error ? error.message : String(error)}`);
     logger.withContext({ module: 'Auth' }).error("Database verification check failed - failing closed", error instanceof Error ? error : new Error(String(error)));
     try {
       cookieStore.delete(COOKIE_NAME);

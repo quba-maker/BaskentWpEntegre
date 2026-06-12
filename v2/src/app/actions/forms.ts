@@ -11,7 +11,7 @@ import { FIRST_CONTACT_HARD_DUPLICATE_ACTIONS } from "@/lib/utils/first-contact-
 
 export async function getForms(page: number = 1, search: string = "", source: string = "all", firstContactFilter: string = "all", stageFilter: string = "all") {
   return withActionGuard(
-    { actionName: 'getForms' },
+    { actionName: 'getForms', conversationId: 'forms_action_no_conversation' },
     async (ctx) => {
       const limit = 50;
       const offset = (page - 1) * limit;
@@ -373,7 +373,7 @@ export async function getForms(page: number = 1, search: string = "", source: st
 
 export async function getFormDetailData(leadId: number) {
   return withActionGuard(
-    { actionName: 'getFormDetailData' },
+    { actionName: 'getFormDetailData', conversationId: 'forms_action_no_conversation' },
     async (ctx) => {
       const rows = await ctx.db.executeSafe({
         text: `SELECT 
@@ -449,7 +449,7 @@ export async function getFormDetailData(leadId: number) {
 
 export async function updateLeadNotes(id: number, notes: string) {
   return withActionGuard(
-    { actionName: 'updateLeadNotes' },
+    { actionName: 'updateLeadNotes', conversationId: 'forms_action_no_conversation' },
     async (ctx) => {
       const lead = await ctx.db.executeSafe({
         text: `SELECT phone_number FROM leads WHERE id = $1 AND tenant_id = $2`,
@@ -492,7 +492,8 @@ export async function deleteAllLeads() {
   return withActionGuard(
     { 
       actionName: 'deleteAllLeads',
-      roles: ['owner', 'admin', 'platform_admin']
+      roles: ['owner', 'admin', 'platform_admin'],
+      conversationId: 'forms_action_no_conversation'
     },
     async (ctx) => {
       await ctx.db.executeSafe({ text: `DELETE FROM leads WHERE tenant_id = $1`, values: [ctx.tenantId] });
@@ -516,7 +517,7 @@ export async function deleteAllLeads() {
 
 export async function getCampaignNames() {
   return withActionGuard(
-    { actionName: 'getCampaignNames' },
+    { actionName: 'getCampaignNames', conversationId: 'forms_action_no_conversation' },
     async (ctx) => {
       const campaigns = await ctx.db.executeSafe({
         text: `SELECT DISTINCT form_name FROM leads WHERE tenant_id = $1 AND form_name IS NOT NULL AND form_name != '' ORDER BY form_name ASC`,
@@ -529,7 +530,7 @@ export async function getCampaignNames() {
 
 export async function updateLeadStage(id: number, stage: string) {
   return withActionGuard(
-    { actionName: 'updateLeadStage' },
+    { actionName: 'updateLeadStage', conversationId: 'forms_action_no_conversation' },
     async (ctx) => {
       const lead = await ctx.db.executeSafe({
         text: `SELECT phone_number, raw_data FROM leads WHERE id = $1 AND tenant_id = $2`,
@@ -587,7 +588,7 @@ export async function syncGoogleSheets() {
   console.log('[SYNC_ACTION_ENTRY] syncGoogleSheets called');
   
   return withActionGuard(
-    { actionName: 'syncGoogleSheets', roles: ['owner', 'admin'] },
+    { actionName: 'syncGoogleSheets', roles: ['owner', 'admin'], conversationId: 'manual_sync_no_conversation' },
     async (ctx) => {
       console.log('[SYNC_START] tenantId:', ctx.tenantId);
 
@@ -719,7 +720,7 @@ export async function syncGoogleSheets() {
 
 export async function getFormStatusCounts() {
   return withActionGuard(
-    { actionName: 'getFormStatusCounts' },
+    { actionName: 'getFormStatusCounts', conversationId: 'forms_action_no_conversation' },
     async (ctx) => {
       // Build lightweight query for counts
       const countsSql = `
@@ -860,7 +861,7 @@ export async function getFormStatusCounts() {
 
 export async function getFormsSyncMetadata() {
   return withActionGuard(
-    { actionName: 'getFormsSyncMetadata' },
+    { actionName: 'getFormsSyncMetadata', conversationId: 'forms_action_no_conversation' },
     async (ctx) => {
       let lastManual = null;
       let lastAuto = null;

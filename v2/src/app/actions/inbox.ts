@@ -30,7 +30,7 @@ export async function getConversations(
 ) {
   noStore();
   return withActionGuard(
-    { actionName: 'getConversations' },
+    { actionName: 'getConversations', conversationId: 'inbox_action_no_conversation' },
     async (ctx) => {
       const limit = 30;
       const offset = (page - 1) * limit;
@@ -166,10 +166,7 @@ export async function getConversations(
               AND m_unread.tenant_id = c.tenant_id
               AND m_unread.direction = 'in'
               AND (m_unread.media_metadata IS NULL OR COALESCE(m_unread.media_metadata->'native'->>'message_type', '') != 'reaction')
-              AND m_unread.created_at > COALESCE(
-                (SELECT last_read_at FROM conversation_read_states rs WHERE rs.tenant_id = c.tenant_id AND rs.user_id = $7 AND rs.conversation_id = c.id),
-                '1970-01-01'::timestamptz
-              )
+              AND m_unread.created_at > COALESCE(rs.last_read_at, '1970-01-01'::timestamptz)
           ) as unread,
           EXISTS (
             SELECT 1 FROM messages m_out
@@ -235,6 +232,11 @@ export async function getConversations(
           ON c.id = ca.conversation_id
           AND ca.user_id = $7
           AND ca.tenant_id = c.tenant_id
+        -- Read States Join
+        LEFT JOIN conversation_read_states rs
+          ON rs.tenant_id = c.tenant_id
+          AND rs.user_id = $7
+          AND rs.conversation_id = c.id
         WHERE c.tenant_id = $1
           AND ($2::text IS NULL OR c.patient_name ILIKE $2 OR c.phone_number ILIKE $2)
           AND ($3::text IS NULL OR c.channel = $3)
@@ -254,10 +256,7 @@ export async function getConversations(
                   AND m_unread.tenant_id = c.tenant_id
                   AND m_unread.direction = 'in'
                   AND (m_unread.media_metadata IS NULL OR COALESCE(m_unread.media_metadata->'native'->>'message_type', '') != 'reaction')
-                  AND m_unread.created_at > COALESCE(
-                    (SELECT last_read_at FROM conversation_read_states rs WHERE rs.tenant_id = c.tenant_id AND rs.user_id = $7 AND rs.conversation_id = c.id),
-                    '1970-01-01'::timestamptz
-                  )
+                  AND m_unread.created_at > COALESCE(rs.last_read_at, '1970-01-01'::timestamptz)
               )
             )
           `)}
@@ -315,10 +314,7 @@ export async function getConversations(
               AND m_unread.tenant_id = c.tenant_id
               AND m_unread.direction = 'in'
               AND (m_unread.media_metadata IS NULL OR COALESCE(m_unread.media_metadata->'native'->>'message_type', '') != 'reaction')
-              AND m_unread.created_at > COALESCE(
-                (SELECT last_read_at FROM conversation_read_states rs WHERE rs.tenant_id = c.tenant_id AND rs.user_id = $7 AND rs.conversation_id = c.id),
-                '1970-01-01'::timestamptz
-              )
+              AND m_unread.created_at > COALESCE(rs.last_read_at, '1970-01-01'::timestamptz)
           )
         `;
       }
@@ -2388,27 +2384,20 @@ export async function togglePin(conversationIdOrPhone: string) {
 
 export async function getGlobalUnreadCount() {
   return withActionGuard(
-    { actionName: 'getGlobalUnreadCount' },
+    { actionName: 'getGlobalUnreadCount', conversationId: 'inbox_action_no_conversation' },
     async (ctx) => {
       const rows = await ctx.db.executeSafe({
         text: `
-          SELECT COALESCE(SUM(unread_sub.unread), 0)::int as total_unread
-          FROM (
-            SELECT COUNT(m_unread.id)::int as unread
-            FROM conversations c
-            LEFT JOIN conversation_read_states rs 
-              ON rs.tenant_id = c.tenant_id 
-              AND rs.user_id = $2 
-              AND rs.conversation_id = c.id
-            LEFT JOIN messages m_unread 
-              ON m_unread.conversation_id = c.id
-              AND m_unread.tenant_id = c.tenant_id
-              AND m_unread.direction = 'in'
-              AND (m_unread.media_metadata IS NULL OR COALESCE(m_unread.media_metadata->'native'->>'message_type', '') != 'reaction')
-              AND m_unread.created_at > COALESCE(rs.last_read_at, '1970-01-01'::timestamptz)
-            WHERE c.tenant_id = $1
-            GROUP BY c.id
-          ) unread_sub
+          SELECT COUNT(*)::int as total_unread
+          FROM messages m
+          LEFT JOIN conversation_read_states rs 
+            ON rs.tenant_id = m.tenant_id 
+            AND rs.user_id = $2 
+            AND rs.conversation_id = m.conversation_id
+          WHERE m.tenant_id = $1
+            AND m.direction = 'in'
+            AND (m.media_metadata IS NULL OR COALESCE(m.media_metadata->'native'->>'message_type', '') != 'reaction')
+            AND m.created_at > COALESCE(rs.last_read_at, '1970-01-01'::timestamptz)
         `,
         values: [ctx.tenantId, ctx.userId]
       }) as any[];
@@ -3693,7 +3682,7 @@ export async function getCrmPanelBundleAction(conversationId: string) {
   }
 
   return withActionGuard(
-    { actionName: 'getCrmPanelBundleAction' },
+    { actionName: 'getCrmPanelBundleAction', conversationId },
     async (ctx) => {
       const startTime = performance.now();
       
@@ -3732,15 +3721,21 @@ export async function getCrmPanelBundleAction(conversationId: string) {
             ON cprof.id = c.customer_id
             AND cprof.tenant_id = c.tenant_id
           LEFT JOIN LATERAL (
-            SELECT id, form_name, raw_data, created_at 
-            FROM leads 
-            WHERE leads.tenant_id = c.tenant_id
-              AND (
-                (c.customer_id IS NOT NULL AND leads.customer_id = c.customer_id)
-                OR
-                (leads.phone_number LIKE '%' || RIGHT(c.phone_number, 10))
-              )
-            ORDER BY created_at DESC 
+            SELECT id, form_name, raw_data, created_at
+            FROM (
+              SELECT id, form_name, raw_data, created_at, 1 as priority
+              FROM leads 
+              WHERE leads.tenant_id = c.tenant_id AND c.customer_id IS NOT NULL AND leads.customer_id = c.customer_id
+              UNION ALL
+              SELECT id, form_name, raw_data, created_at, 2 as priority
+              FROM leads 
+              WHERE leads.tenant_id = c.tenant_id AND leads.phone_number = c.phone_number
+              UNION ALL
+              SELECT id, form_name, raw_data, created_at, 3 as priority
+              FROM leads 
+              WHERE leads.tenant_id = c.tenant_id AND (leads.phone_number LIKE '%' || RIGHT(c.phone_number, 10))
+            ) sub
+            ORDER BY priority ASC, created_at DESC
             LIMIT 1
           ) l ON true
           LEFT JOIN opportunities active_opp 

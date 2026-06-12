@@ -949,7 +949,11 @@ export async function ingestSheetBatch(params: IngestBatchParams): Promise<Inges
       };
     }
 
-    log.info('[BATCH_TABS]', { tabs, source });
+    log.info('[BATCH_TABS]', { 
+      tabs, 
+      source,
+      conversationId: source === 'manual_sync' ? 'manual_sync_no_conversation' : 'cron_sync_no_conversation'
+    });
 
     // ── 3. Fetch all rows (batch API) ──
     const readStart = Date.now();

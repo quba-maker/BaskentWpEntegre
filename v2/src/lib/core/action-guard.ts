@@ -1,7 +1,7 @@
 import { getSession } from "@/lib/auth/session";
 import { logger } from "./logger";
 import { withTenantDB, TenantDB } from "./tenant-db";
-import { getTraceContext, runWithTrace, generateTraceId } from "@/lib/core/trace-context";
+import { getTraceContext, runWithTrace, generateTraceId, TraceContext } from "@/lib/core/trace-context";
 
 // ==========================================
 // QUBA AI — Zero-Trust Server Action Guard
@@ -21,6 +21,7 @@ export interface GuardOptions {
   roles?: AllowedRoles[];
   requireTenant?: boolean; // Platform admin actionları için false olabilir
   actionName: string;
+  conversationId?: string;
 }
 
 export type ActionResponse<T> = {
@@ -60,25 +61,29 @@ export async function withActionGuard<T>(
       session = await getSession();
     }
 
-    const traceCtx = getTraceContext() || {
+    const traceCtx: TraceContext = getTraceContext() || {
       traceId: generateTraceId(),
       tenantId: session?.tenantId
     };
+
+    if (options.conversationId && !traceCtx.conversationId) {
+      traceCtx.conversationId = options.conversationId;
+    }
 
     return await runWithTrace(traceCtx, async () => {
       const log = logger.withContext({ action: options.actionName });
       
       // ── FORENSIC TRACE ──
-      console.log(`[GUARD_FORENSIC] ${options.actionName} | session=${session ? 'OK' : 'NULL'} | userId=${session?.userId || 'NONE'} | tenantId=${session?.tenantId || 'NONE'} | role=${session?.role || 'NONE'} | impersonated=${session?.impersonatedTenantId || 'NONE'}`);
       if (!session || !session.userId) {
         log.warn("Unauthorized action attempt (No session)");
-        console.log(`[GUARD_FORENSIC] ${options.actionName} BLOCKED: No session`);
+        console.warn(`[GUARD_FORENSIC] ${options.actionName} BLOCKED: No session`);
         return { success: false, error: "Oturum süresi dolmuş veya yetkisiz.", statusCode: 401 };
       }
 
       // 2. Tenant Check
       if (options.requireTenant !== false && !session.tenantId) {
         log.warn("Cross-tenant violation attempt (No tenantId in session)", { userId: session.userId });
+        console.warn(`[GUARD_FORENSIC] ${options.actionName} BLOCKED: Cross-tenant violation (No tenantId)`);
         return { success: false, error: "Geçersiz firma yetkisi.", statusCode: 403 };
       }
 
@@ -86,8 +91,14 @@ export async function withActionGuard<T>(
       if (options.roles && !options.roles.includes(session.role as AllowedRoles)) {
         if (session.role !== 'platform_admin') { // Platform admin her şeyi ezer
           log.warn("Permission denied", { userId: session.userId, required: options.roles, actual: session.role });
+          console.warn(`[GUARD_FORENSIC] ${options.actionName} BLOCKED: Permission denied. Required: ${options.roles.join(',')}, Actual: ${session.role}`);
           return { success: false, error: "Bu işlem için yetkiniz yok.", statusCode: 403 };
         }
+      }
+
+      // If we got here, auth checks passed successfully
+      if (process.env.NODE_ENV !== 'production' || process.env.DEBUG_AUTH_FORENSIC === 'true') {
+        console.log(`[GUARD_FORENSIC] ${options.actionName} | session=OK | userId=${session.userId} | tenantId=${session.tenantId || 'NONE'} | role=${session.role || 'NONE'} | impersonated=${session.impersonatedTenantId || 'NONE'}`);
       }
 
       // Context oluştur
