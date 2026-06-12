@@ -35,6 +35,7 @@ const MAX_MSG_OPTIONS = [
   { value: 8, label: "8 mesaj" },
   { value: 12, label: "12 mesaj" },
   { value: 20, label: "20 mesaj" },
+  { value: 0, label: "Sınırsız" },
 ];
 
 interface BotAISettingsTabProps {
@@ -47,7 +48,7 @@ export function BotAISettingsTab({ bot, onRefresh }: BotAISettingsTabProps) {
 
   const [aiModel, setAiModel] = useState(profile?.aiModel || "gemini-2.5-flash");
   const [maxTokens, setMaxTokens] = useState(profile?.maxResponseTokens || 1000);
-  const [maxMessages, setMaxMessages] = useState(profile?.maxMessages || 8);
+  const [maxMessages, setMaxMessages] = useState(profile?.maxMessages ?? 8);
   const [workingHours, setWorkingHours] = useState<{
     enabled: boolean;
     start?: string;
@@ -64,7 +65,7 @@ export function BotAISettingsTab({ bot, onRefresh }: BotAISettingsTabProps) {
   useEffect(() => {
     setAiModel(profile?.aiModel || "gemini-2.5-flash");
     setMaxTokens(profile?.maxResponseTokens || 1000);
-    setMaxMessages(profile?.maxMessages || 8);
+    setMaxMessages(profile?.maxMessages ?? 8);
     setWorkingHours(profile?.workingHours || { enabled: false });
     setResponseStyle(profile?.responseStyle || "balanced");
     setResponseDelay(profile?.responseDelaySeconds || 5);
@@ -82,7 +83,7 @@ export function BotAISettingsTab({ bot, onRefresh }: BotAISettingsTabProps) {
   const isDirty =
     aiModel !== (profile?.aiModel || "gemini-2.5-flash") ||
     maxTokens !== (profile?.maxResponseTokens || 1000) ||
-    maxMessages !== (profile?.maxMessages || 8) ||
+    maxMessages !== (profile?.maxMessages ?? 8) ||
     responseStyle !== (profile?.responseStyle || "balanced") ||
     responseDelay !== (profile?.responseDelaySeconds || 5) ||
     JSON.stringify(workingHours) !== JSON.stringify(profile?.workingHours || { enabled: false });
@@ -293,7 +294,7 @@ export function BotAISettingsTab({ bot, onRefresh }: BotAISettingsTabProps) {
             Maksimum Bot Mesajı
           </label>
           <p className="text-[10px] mb-2" style={{ color: "var(--q-text-placeholder)" }}>
-            Bot bu sayıda mesaj sonra otomatik olarak insana devredilir
+            Bot bu sayıda mesaj sonra otomatik olarak insana devredilir. Sınırsız modda devir yapılmaz.
           </p>
           <div className="flex items-center gap-1.5 p-1 rounded-xl" style={{ backgroundColor: "rgba(0,0,0,0.03)" }}>
             {MAX_MSG_OPTIONS.map((opt) => {

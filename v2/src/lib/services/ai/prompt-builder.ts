@@ -144,6 +144,15 @@ export class PromptBuilder {
         crmContext += `9. Ham Form Verileri (Raw Form Data): Sadece en son fallback yedek.\n\n`;
       }
 
+      // ── KONU DEĞİŞİKLİĞİ KURALI (TOPIC SHIFT DIRECTIVE) ──
+      crmContext += `\n--- ⚠️ KONU DEĞİŞİKLİĞİ KURALI (TOPIC SHIFT DIRECTIVE) ---\n`;
+      crmContext += `${isHealthcare
+        ? 'Hasta yeni bir şikayet, bölüm veya uzmanlık alanı hakkında soru soruyorsa (örn. önceki konuşma Kardiyoloji iken şimdi "Dahiliye mide yanması" yazıyorsa), eski CRM özetini, eski randevu/bölüm bilgisini, takip bağlamını veya memory özetini yeni konunun önüne geçirme.'
+        : 'Müşteri yeni bir konu, ürün veya hizmet hakkında soru soruyorsa eski CRM özetini veya takip bağlamını yeni konunun önüne geçirme.'}\n`;
+      crmContext += `Öncelik her zaman hastanın/müşterinin SON mesajındaki güncel niyettir. Eski bağlamı (eski bölüm, eski randevu, eski şikayet) sadece hasta/müşteri açıkça o konuya geri dönerse kullan.\n`;
+      crmContext += `⚠️ KRİTİK: "Geçmiş görüşme özeti" veya "CRM fırsatı" eski bir uzmanlık/şikayet içeriyorsa ve son mesaj farklı bir konu soruyorsa, cevabını eski konuya değil YENİ konuya göre oluştur.\n`;
+      crmContext += `----------------------------------------------\n`;
+
       if (unifiedContext.profile) {
         const fullName = [unifiedContext.profile.first_name, unifiedContext.profile.last_name].filter(Boolean).join(' ').trim();
         if (fullName) {

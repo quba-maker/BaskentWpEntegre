@@ -81,7 +81,7 @@ export async function getBotSettings() {
       const profile = Array.isArray(profiles) && profiles.length > 0 ? profiles[0] : null;
       if (profile) {
         result['ai_model'] = { value: profile.ai_model || 'gemini-2.5-flash', updated_at: profile.updated_at };
-        result['bot_max_messages'] = { value: String(profile.max_messages || 8), updated_at: profile.updated_at };
+        result['bot_max_messages'] = { value: String(profile.max_messages ?? 8), updated_at: profile.updated_at };
         result['bot_max_response_tokens'] = { value: String(profile.max_response_tokens || 1000), updated_at: profile.updated_at };
         result['bot_aggression_level'] = { value: profile.aggression_level || 'medium', updated_at: profile.updated_at };
         const bhJson = profile.business_hours_json;
@@ -159,7 +159,15 @@ export async function saveBotSetting(key: string, value: string) {
         };
         const col = colMap[key];
         const isNumeric = ['max_messages', 'max_response_tokens', 'response_delay_seconds'].includes(col);
-        const dbVal = isNumeric ? parseInt(value) || (col === 'max_messages' ? 8 : col === 'response_delay_seconds' ? 5 : 1000) : value;
+        let dbVal: any = value;
+        if (isNumeric) {
+          const parsed = parseInt(value);
+          if (isNaN(parsed)) {
+            dbVal = col === 'max_messages' ? 8 : col === 'response_delay_seconds' ? 5 : 1000;
+          } else {
+            dbVal = parsed;
+          }
+        }
         
         await ctx.db.executeSafe({
           text: `UPDATE channel_ai_profiles SET ${col} = $1, updated_at = NOW()
@@ -807,7 +815,7 @@ export async function getBots(): Promise<{ success: boolean; bots?: BotData[]; e
         });
         const profile = profiles.length > 0 ? {
           aiModel: profiles[0].ai_model || 'gemini-2.5-flash',
-          maxMessages: profiles[0].max_messages || 8,
+          maxMessages: profiles[0].max_messages ?? 8,
           maxResponseTokens: profiles[0].max_response_tokens || 1000,
           aggressionLevel: profiles[0].aggression_level || 'medium',
           autoGreeting: profiles[0].auto_greeting !== false,

@@ -243,11 +243,11 @@ export class AIOrchestrator {
 
       this.log.error(`[LLM_EXECUTION_FAILED] provider=${config.provider} model=${config.modelId} error=${e.message}`, e, { errorName: e.name, errorStack: e.stack?.substring(0, 500) });
       
-      let fallbackText = "Şu an size en iyi şekilde yardımcı olabilmemiz için kısa bir bekleme süresi oluştu. Lütfen birkaç dakika sonra tekrar yazınız. 🙏";
+      let fallbackText = "Mesajınızı aldım. Sizi doğru yönlendirebilmem için şikâyetinizi biraz daha açık yazar mısınız? 🙏";
       if (e.message?.startsWith('COST_LIMIT_EXCEEDED')) {
-        fallbackText = "Şu an yoğun bir talep yaşıyoruz. Kısa süre içinde size dönüş yapacağız. Lütfen birkaç dakika bekleyiniz. 🙏";
+        fallbackText = "Mesajınız alındı. Şu an yoğunluk nedeniyle kısa bir gecikme yaşanıyor. Lütfen biraz sonra tekrar yazınız. 🙏";
       } else if (e.message?.startsWith('CIRCUIT_OPEN')) {
-        fallbackText = "Sistemimizde kısa süreli bir bakım yapılıyor. En kısa sürede tekrar hizmetinizdeyiz. 🙏";
+        fallbackText = "Mesajınız alındı. Kısa süreli bir teknik bakım yapılıyor, en kısa sürede tekrar hizmetinizdeyiz. 🙏";
       }
 
       return {
