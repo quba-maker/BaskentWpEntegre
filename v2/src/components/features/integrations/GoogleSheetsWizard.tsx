@@ -35,8 +35,10 @@ interface AppsScriptSnippetProps {
 function AppsScriptSnippet({ webhookUrl, tenantSlug, secret, sheetName }: AppsScriptSnippetProps) {
   const [copied, setCopied] = useState(false);
 
+  const cleanWebhookUrl = webhookUrl.split('?')[0];
+
   const code = `// Google Sheets Webhook & Auto-Sync Entegrasyonu
-const WEBHOOK_URL = "${webhookUrl}";
+const WEBHOOK_URL = "${cleanWebhookUrl}";
 const TENANT_SLUG = "${tenantSlug}";
 const WEBHOOK_SECRET = "${secret || 'PASTE_SECRET_HERE'}";
 const FORM_SHEET_NAME = "${sheetName}";
@@ -155,13 +157,24 @@ function testQubaConnection() {
 // HTTP & SECURITY HELPERS
 // ═══════════════════════════════════════════════════════
 
+function buildQubaUrl(endpoint, params) {
+  var baseUrl = WEBHOOK_URL.split('?')[0].replace(/\/$/, '');
+  var url = baseUrl.replace(/\/sheets-webhook$/, endpoint);
+  var query = Object.keys(params)
+    .map(function (key) {
+      return encodeURIComponent(key) + '=' + encodeURIComponent(params[key]);
+    })
+    .join('&');
+
+  return url + '?' + query;
+}
+
 function sendToQuba(endpoint, payload, isDryRun) {
-  var targetUrl = WEBHOOK_URL.replace('/sheets-webhook', endpoint) 
-    + '?tenant=' + TENANT_SLUG;
-    
+  var params = { tenant: TENANT_SLUG };
   if (isDryRun) {
-    targetUrl += '&dryRun=true';
+    params.dryRun = 'true';
   }
+  var targetUrl = buildQubaUrl(endpoint, params);
 
   var bodyStr = JSON.stringify(payload);
   var timestamp = Math.floor(Date.now() / 1000).toString();
@@ -721,12 +734,29 @@ export function GoogleSheetsWizard({ isOpen, onClose, onComplete }: { isOpen: bo
         </div>
 
         {/* Apps Script Copyable Code Block */}
-        <AppsScriptSnippet
-          webhookUrl={webhookUrl}
-          tenantSlug={tenantSlug}
-          secret={rawSecret}
-          sheetName={selectedTabs[0] || 'Sayfa1'}
-        />
+        {rawSecret ? (
+          <AppsScriptSnippet
+            webhookUrl={webhookUrl}
+            tenantSlug={tenantSlug}
+            secret={rawSecret}
+            sheetName={selectedTabs[0] || 'Sayfa1'}
+          />
+        ) : (
+          <div className="mt-4 border-t pt-4 border-gray-100">
+            <div className="p-4 bg-amber-50 border border-amber-200/60 rounded-xl flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
+              <div>
+                <h5 className="text-[13px] font-bold text-amber-900">Kurulum Kodunu Almak İçin Anahtar Üretin</h5>
+                <p className="text-[12px] text-amber-700 leading-relaxed mt-1 font-medium">
+                  Güvenlik gereği, kayıtlı gizli anahtarlar maskeli olarak saklanır ve kopyalanamaz. 
+                  Apps Script entegrasyon kodunu kopyalamak için lütfen yukarıdaki 
+                  <strong> "Gizli Anahtarı Yenile"</strong> butonunu kullanarak yeni bir anahtar oluşturun. 
+                  Yeni anahtar üretildiğinde kurulum kodu otomatik olarak burada belirecektir.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
