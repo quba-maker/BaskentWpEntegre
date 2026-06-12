@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
     const isQueryMatch = querySecret && querySecret.trim() === expectedSecret.trim();
 
     if (!isHeaderMatch && !isQueryMatch) {
-      log.warn("[SECURITY_DENIED] Webhook secret mismatch or missing. Access denied.");
+      log.warn("[SECURITY_DENIED] Webhook secret mismatch or missing. Access denied.", { traceId });
       return new NextResponse("FORBIDDEN", { status: 403 });
     }
   }
@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
     }
     body = JSON.parse(rawBody);
   } catch (e: any) {
-    log.error("Malformed JSON payload in 360dialog webhook", e);
+    log.error("Malformed JSON payload in 360dialog webhook", e, { traceId });
     return new NextResponse("BAD_REQUEST", { status: 400 });
   }
 
@@ -59,7 +59,7 @@ export async function POST(req: NextRequest) {
   // Retrieve channelId from query parameters
   const channelId = req.nextUrl.searchParams.get("channel_id");
   if (!channelId) {
-    log.warn("[ROUTING_FAILED] Webhook missing channel_id query parameter.");
+    log.warn("[ROUTING_FAILED] Webhook missing channel_id query parameter.", { traceId });
     return new NextResponse("EVENT_RECEIVED_UNROUTABLE", { status: 200 });
   }
 
@@ -88,7 +88,7 @@ export async function POST(req: NextRequest) {
     }) as any[];
 
     if (channelResults.length === 0) {
-      log.warn("[ROUTING_FAILED] Active channel or tenant not found for channelId.", { channelId });
+      log.warn("[ROUTING_FAILED] Active channel or tenant not found for channelId.", { channelId, traceId });
       return new NextResponse("EVENT_RECEIVED_UNROUTABLE", { status: 200 });
     }
 
@@ -176,6 +176,7 @@ export async function POST(req: NextRequest) {
             : (contactsList?.[0]?.wa_id || msg.from);
 
           log.info(`[360DIALOG] [${isEcho ? 'OUTBOUND_ECHO' : 'INBOUND'}] Processing message: ${msg.id} from ${senderPhone} [${processedCount + duplicateCount + errorCount + 1}/${messagesList.length}]`, {
+            tenantId,
             tenantSlug,
             traceId
           });
@@ -189,7 +190,11 @@ export async function POST(req: NextRequest) {
           });
 
           if (isDuplicate) {
-            log.warn(`[360DIALOG] [DUPLICATE] Suppressing duplicate message: ${msg.id} [${duplicateCount + 1} dupes so far]`);
+            log.warn(`[360DIALOG] [DUPLICATE] Suppressing duplicate message: ${msg.id} [${duplicateCount + 1} dupes so far]`, {
+              tenantId,
+              tenantSlug,
+              traceId
+            });
             duplicateCount++;
             continue; // Skip this message, process the rest
           }
@@ -283,8 +288,10 @@ export async function POST(req: NextRequest) {
       const statusId = statusObj.id;
 
       log.info(`[360DIALOG] [STATUS] Ingesting status receipt: ${statusObj.status} for msg_id: ${statusId}`, {
+        tenantId,
         tenantSlug,
-        traceId
+        traceId,
+        conversationId: 'status_receipt_no_conversation'
       });
 
       // Idempotency check with locking
@@ -296,7 +303,12 @@ export async function POST(req: NextRequest) {
       });
 
       if (isDuplicate) {
-        log.warn(`[360DIALOG] [DUPLICATE] Suppressing duplicate status: ${statusObj.status} for msg_id: ${statusId}`);
+        log.warn(`[360DIALOG] [DUPLICATE] Suppressing duplicate status: ${statusObj.status} for msg_id: ${statusId}`, {
+          tenantId,
+          tenantSlug,
+          traceId,
+          conversationId: 'status_receipt_no_conversation'
+        });
         return new NextResponse("EVENT_RECEIVED_DUPLICATE", { status: 200 });
       }
 

@@ -60,9 +60,18 @@ export class WebhookDedupeService {
       }) as any[];
 
       const isDuplicate = result && result.length > 0 ? result[0].is_duplicate : false;
+      const isStatusReceipt = payload.providerMessageId.includes('_delivered') || 
+                              payload.providerMessageId.includes('_read') || 
+                              payload.providerMessageId.includes('_sent') || 
+                              payload.providerMessageId.includes('_failed');
+      const conversationId = isStatusReceipt ? 'status_receipt_no_conversation' : undefined;
 
       if (isDuplicate) {
-        this.log.warn(`🛑 Duplicate Webhook Suppressed!`, { payload });
+        this.log.warn(`🛑 Duplicate Webhook Suppressed!`, { 
+          tenantId: this.db.tenantId,
+          conversationId,
+          payload 
+        });
         return { isDuplicate: true, lockHash: hash };
       }
 
@@ -81,14 +90,25 @@ export class WebhookDedupeService {
 
         if (lastEvent && lastEvent.length > 0 && lastEvent[0].event_timestamp > payload.timestamp) {
           this.log.warn(`⚠️ Out-of-order webhook detected!`, { 
-            last: lastEvent[0].event_timestamp, incoming: payload.timestamp 
+            tenantId: this.db.tenantId,
+            conversationId,
+            last: lastEvent[0].event_timestamp, 
+            incoming: payload.timestamp 
           });
         }
       }
 
       return { isDuplicate: false, lockHash: hash };
     } catch (e: any) {
-      this.log.error('Dedupe Check Error', e);
+      const isStatusReceipt = payload.providerMessageId.includes('_delivered') || 
+                              payload.providerMessageId.includes('_read') || 
+                              payload.providerMessageId.includes('_sent') || 
+                              payload.providerMessageId.includes('_failed');
+      const conversationId = isStatusReceipt ? 'status_receipt_no_conversation' : undefined;
+      this.log.error('Dedupe Check Error', e, { 
+        tenantId: this.db.tenantId,
+        conversationId
+      });
       // Hata durumunda fail-open davran (eski sisteme pasla)
       return { isDuplicate: false, lockHash: hash };
     }

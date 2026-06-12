@@ -129,7 +129,13 @@ export class QueueWorkerEngine {
     // SECURITY: Fail-closed tenant assertion at pipeline boundary
     assertTenant(tenantId, `worker:${topic}`);
     
-    this.log.info(`[WORKER] Initiating execution for topic: ${topic}`, metadata);
+    const isStatus = topic.includes('status');
+    this.log.info(`[WORKER] Initiating execution for topic: ${topic}`, {
+      tenantId,
+      traceId: metadata.messageId,
+      conversationId: isStatus ? 'status_receipt_no_conversation' : undefined,
+      ...metadata
+    });
 
     switch (topic) {
       case "whatsapp.message.received":
@@ -188,11 +194,19 @@ export class QueueWorkerEngine {
    */
   private async handleWhatsAppStatus(tenantId: string, payload: MetaWebhookPayload, metadata: WorkerMetadata) {
     const traceId = metadata.messageId;
-    this.log.info(`[WORKER_PROCESSING] [WA STATUS] Processing WhatsApp status receipt`, { tenantId, traceId });
+    this.log.info(`[WORKER_PROCESSING] [WA STATUS] Processing WhatsApp status receipt`, { 
+      tenantId, 
+      traceId,
+      conversationId: 'status_receipt_no_conversation'
+    });
 
     const statusObj = payload.entry?.[0]?.changes?.[0]?.value?.statuses?.[0];
     if (!statusObj || !statusObj.id || !statusObj.status) {
-      this.log.info(`[SKIP] No valid status object in payload`, { traceId });
+      this.log.info(`[SKIP] No valid status object in payload`, { 
+        tenantId,
+        traceId,
+        conversationId: 'status_receipt_no_conversation'
+      });
       return;
     }
 
@@ -231,7 +245,12 @@ export class QueueWorkerEngine {
         conversationId = convResult[0]?.id;
       }
       
-      this.log.info(`[DB_COMMITTED] [WA STATUS] Message ${providerMessageId} marked as ${deliveryStatus} in DB`, { traceId, internalMessageId });
+      this.log.info(`[DB_COMMITTED] [WA STATUS] Message ${providerMessageId} marked as ${deliveryStatus} in DB`, { 
+        tenantId,
+        traceId, 
+        internalMessageId,
+        conversationId: conversationId || 'status_receipt_no_conversation'
+      });
       
       // Emit event for real-time socket/UI updates
       AIEventEmitter.emit({ 
@@ -256,9 +275,18 @@ export class QueueWorkerEngine {
             1, // entityVersion placeholder
             { traceId, spanId: providerMessageId }
           );
-          this.log.info(`[REALTIME_PUBLISH] chat.message.status_updated emitted`, { traceId, messageId: internalMessageId });
+          this.log.info(`[REALTIME_PUBLISH] chat.message.status_updated emitted`, { 
+            tenantId,
+            traceId, 
+            messageId: internalMessageId,
+            conversationId: conversationId || 'status_receipt_no_conversation'
+          });
         } catch (realtimeErr) {
-          this.log.error(`[REALTIME_PUBLISH_FAILED]`, realtimeErr instanceof Error ? realtimeErr : new Error(String(realtimeErr)), { traceId });
+          this.log.error(`[REALTIME_PUBLISH_FAILED]`, realtimeErr instanceof Error ? realtimeErr : new Error(String(realtimeErr)), { 
+            tenantId,
+            traceId,
+            conversationId: conversationId || 'status_receipt_no_conversation'
+          });
         }
       }
 
@@ -325,7 +353,11 @@ export class QueueWorkerEngine {
     const { provider, deliveryStatus, watermark, mids, recipientId } = payload;
     
     this.log.info(`[WORKER_PROCESSING] [SOCIAL STATUS] ${provider} ${deliveryStatus}`, { 
-      tenantId, traceId, watermark, midsCount: mids.length 
+      tenantId, 
+      traceId, 
+      watermark, 
+      midsCount: mids.length,
+      conversationId: 'status_receipt_no_conversation'
     });
 
     const db = withTenantDB(tenantId);
@@ -425,7 +457,11 @@ export class QueueWorkerEngine {
         }
       }
 
-      this.log.info(`[DB_COMMITTED] [SOCIAL STATUS] ${provider} ${deliveryStatus}: ${updatedCount} messages updated`, { traceId });
+      this.log.info(`[DB_COMMITTED] [SOCIAL STATUS] ${provider} ${deliveryStatus}: ${updatedCount} messages updated`, { 
+        tenantId,
+        traceId,
+        conversationId: 'status_receipt_no_conversation'
+      });
 
     } catch (e: any) {
       this.log.error(`[SOCIAL_STATUS_FAILED] Failed to process ${provider} delivery receipt`, e, { traceId });

@@ -12,6 +12,9 @@ import { extractFormFields } from "@/lib/utils/form-field-extractor";
 import { normalizeCountry, getCountryDisplayLabel, resolvePatientCountryDetailed } from "@/lib/utils/country-normalizer";
 import { ExpectsReplyClassifier } from "@/lib/services/classification/expects-reply-classifier";
 import { normalizePhoneForIdentity, parseAllPhones } from "@/lib/utils/phone-identity";
+import { logger } from "@/lib/core/logger";
+
+const log = logger.withContext({ module: 'InboxActions' });
 
 // ==========================================
 // QUBA AI — Inbox Actions (Zero-Trust Migrated)
@@ -105,8 +108,9 @@ export async function getConversations(
         console.error("[INBOX_FORENSIC] Failed to fetch optOutPhones:", e);
       }
 
-      // ── FORENSIC TRACE: Log the tenant context being used ──
-      console.log(`[INBOX_FORENSIC] getConversations called | tenantId=${ctx.tenantId} | page=${page} | search="${search}" | stage="${stage}" | primary=${primaryFilter} | reply=${replyFilter} | channel=${channelFilter} | noReplyHours=${noReplyHours}`);
+      log.debug(`[INBOX_FORENSIC] getConversations called | tenantId=${ctx.tenantId} | page=${page} | search="${search}" | stage="${stage}" | primary=${primaryFilter} | reply=${replyFilter} | channel=${channelFilter} | noReplyHours=${noReplyHours}`, {
+        tenantId: ctx.tenantId
+      });
 
       let queryText = `
         SELECT 
@@ -330,8 +334,9 @@ export async function getConversations(
 
       const validRows = Array.isArray(rows) ? rows : ((rows as any)?.rows || []);
 
-      // ── FORENSIC TRACE: Log row count ──
-      console.log(`[INBOX_FORENSIC] Query returned ${validRows.length} rows for tenant ${ctx.tenantId}`);
+      log.debug(`[INBOX_FORENSIC] Query returned ${validRows.length} rows for tenant ${ctx.tenantId}`, {
+        tenantId: ctx.tenantId
+      });
 
       const processedRows = validRows.map((r: any) => {
         let formattedTime = '';
