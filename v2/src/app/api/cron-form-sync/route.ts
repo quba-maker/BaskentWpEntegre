@@ -122,7 +122,7 @@ async function handleSyncRequest(request: NextRequest, method: 'GET' | 'POST') {
         tenantSecret = decrypted.webhookSecret || null;
       }
     } catch (e) {
-      log.warn('[CRON_SECRET_RESOLVE_FAIL] Failed to resolve tenant secret', { tenantId });
+      log.warn('[CRON_SECRET_RESOLVE_FAIL] Failed to resolve tenant secret', { tenantId, conversationId: 'cron_sync_no_conversation' });
     }
   }
 
@@ -134,7 +134,7 @@ async function handleSyncRequest(request: NextRequest, method: 'GET' | 'POST') {
   if (method === 'GET') {
     // GET: Only Bearer Token Auth allowed
     if (!isCronAuth) {
-      log.warn('[CRON_SYNC_AUTH_FAIL] Unauthorized GET request');
+      log.warn('[CRON_SYNC_AUTH_FAIL] Unauthorized GET request', { tenantId: 'system_scheduler', conversationId: 'cron_sync_no_conversation' });
       return NextResponse.json({ error: 'Unauthorized: GET requires Bearer Token' }, { status: 401 });
     }
   } else {
@@ -166,13 +166,14 @@ async function handleSyncRequest(request: NextRequest, method: 'GET' | 'POST') {
     if (tenantSlug) {
       // Tenant-specific POST: Bearer OR HMAC allowed
       if (!isCronAuth && !isHmacAuth) {
-        log.warn('[CRON_SYNC_AUTH_FAIL] Unauthorized tenant POST request', { tenantSlug });
+        const resolvedTenantId = tenants.length > 0 ? tenants[0].id : 'system_scheduler';
+        log.warn('[CRON_SYNC_AUTH_FAIL] Unauthorized tenant POST request', { tenantId: resolvedTenantId, conversationId: 'cron_sync_no_conversation', tenantSlug });
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
       }
     } else {
       // Global POST: ONLY Bearer allowed
       if (!isCronAuth) {
-        log.warn('[CRON_SYNC_AUTH_FAIL] Unauthorized global POST request');
+        log.warn('[CRON_SYNC_AUTH_FAIL] Unauthorized global POST request', { tenantId: 'system_scheduler', conversationId: 'cron_sync_no_conversation' });
         return NextResponse.json({ error: 'Unauthorized: Global POST requires Bearer Token' }, { status: 401 });
       }
     }
@@ -216,11 +217,11 @@ async function handleSyncRequest(request: NextRequest, method: 'GET' | 'POST') {
         }
       }
     } catch (err: any) {
-      log.error('[DRY_RUN_CHECK_FAIL] Dry-run validation error', err);
+      log.error('[DRY_RUN_CHECK_FAIL] Dry-run validation error', err, { tenantId, conversationId: 'cron_sync_no_conversation' });
       return NextResponse.json({ success: false, error: `Validation error: ${err.message}` }, { status: 400 });
     }
 
-    log.info('[DRY_RUN_SUCCESS] Connection test successful', { tenantSlug });
+    log.info('[DRY_RUN_SUCCESS] Connection test successful', { tenantId, conversationId: 'cron_sync_no_conversation', tenantSlug });
     return NextResponse.json({
       success: true,
       dryRun: true,
@@ -275,7 +276,7 @@ async function handleSyncRequest(request: NextRequest, method: 'GET' | 'POST') {
   for (const tenant of tenants) {
     // Concurrency limit per execution run
     if (processedCount >= maxTenantsPerRun) {
-      log.warn('[CRON_SYNC_BATCH_LIMIT] Reached max processed tenants limit per run', { maxTenantsPerRun });
+      log.warn('[CRON_SYNC_BATCH_LIMIT] Reached max processed tenants limit per run', { tenantId: 'system_scheduler', conversationId: 'cron_sync_no_conversation', maxTenantsPerRun });
       skippedCount += (tenants.length - processedCount - failedCount - skippedCount);
       break;
     }
@@ -283,7 +284,7 @@ async function handleSyncRequest(request: NextRequest, method: 'GET' | 'POST') {
     // Time budget check
     const elapsed = Date.now() - startTime;
     if (elapsed > maxDurationMs) {
-      log.warn('[CRON_SYNC_TIMEOUT_GUARD] Timeout limit reached, stopping execution loop early', { elapsed });
+      log.warn('[CRON_SYNC_TIMEOUT_GUARD] Timeout limit reached, stopping execution loop early', { tenantId: 'system_scheduler', conversationId: 'cron_sync_no_conversation', elapsed });
       timedOutEarly = true;
       skippedCount += (tenants.length - processedCount - failedCount - skippedCount);
       break;
@@ -292,7 +293,7 @@ async function handleSyncRequest(request: NextRequest, method: 'GET' | 'POST') {
     // Acquire lock for this tenant slug
     const lockToken = await acquireTenantLock(tenant.slug);
     if (!lockToken) {
-      log.warn('[CRON_SYNC_TENANT_LOCKED] Skip tenant because sync is already running', { tenantSlug: tenant.slug });
+      log.warn('[CRON_SYNC_TENANT_LOCKED] Skip tenant because sync is already running', { tenantId: tenant.id, conversationId: 'cron_sync_no_conversation', tenantSlug: tenant.slug });
       results[tenant.name] = { skipped: true, reason: 'concurrency_lock_held' };
       skippedCount++;
       continue;
@@ -317,7 +318,7 @@ async function handleSyncRequest(request: NextRequest, method: 'GET' | 'POST') {
         const { decryptPayload } = await import('@/lib/core/encryption');
         payload = decryptPayload(integrations[0].credentials);
       } catch (e: any) {
-        log.error('[CRON_DECRYPT_ERROR]', new Error(e?.message || 'Unknown'));
+        log.error('[CRON_DECRYPT_ERROR]', new Error(e?.message || 'Unknown'), { tenantId: tenant.id, conversationId: 'cron_sync_no_conversation' });
         results[tenant.name] = { error: 'Decrypt failed' };
         failedCount++;
         continue;
@@ -378,7 +379,7 @@ async function handleSyncRequest(request: NextRequest, method: 'GET' | 'POST') {
       processedCount++;
 
     } catch (tenantErr: any) {
-      log.error('[CRON_TENANT_ERROR]', tenantErr instanceof Error ? tenantErr : new Error(String(tenantErr)));
+      log.error('[CRON_TENANT_ERROR]', tenantErr instanceof Error ? tenantErr : new Error(String(tenantErr)), { tenantId: tenant.id, conversationId: 'cron_sync_no_conversation' });
       results[tenant.name] = { error: tenantErr?.message || 'Unknown error' };
       failedCount++;
 
@@ -393,7 +394,10 @@ async function handleSyncRequest(request: NextRequest, method: 'GET' | 'POST') {
   }
 
   const durationMs = Date.now() - startTime;
+  const resolvedTenantId = tenants.length === 1 ? tenants[0].id : 'system_scheduler';
   log.info('[CRON_SYNC_DONE]', { 
+    tenantId: resolvedTenantId,
+    conversationId: 'cron_sync_no_conversation',
     results, 
     processedCount, 
     failedCount, 

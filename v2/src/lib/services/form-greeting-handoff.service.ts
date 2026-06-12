@@ -20,6 +20,7 @@
 
 import type { TenantDB } from '@/lib/core/tenant-db';
 import { normalizePhoneForIdentity, parseAllPhones } from '@/lib/utils/phone-identity';
+import { resolveTenantDisplayName } from '@/lib/services/meta/tenant-display-name-resolver';
 
 // ═══════════════════════════════════════════════════════════
 // TYPES
@@ -368,14 +369,10 @@ export class FormGreetingHandoffService {
       }
     } catch (_) {}
 
-    // Resolve tenant name
     let tenantName = 'Kurumumuz';
     try {
-      const tenantRes = await this.db.executeSafe({
-        text: `SELECT name FROM tenants WHERE id = $1::uuid LIMIT 1`,
-        values: [this.tenantId]
-      }) as any[];
-      if (tenantRes.length > 0 && tenantRes[0].name) tenantName = tenantRes[0].name;
+      const resolvedName = await resolveTenantDisplayName(this.db, this.tenantId);
+      if (resolvedName) tenantName = resolvedName;
     } catch (_) {}
 
     // Resolve template using TemplateResolverService

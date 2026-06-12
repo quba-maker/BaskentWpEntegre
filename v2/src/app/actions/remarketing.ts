@@ -5,6 +5,7 @@ import { TemplateResolverService, type TemplateListItem } from "@/lib/services/t
 import { CredentialsService } from "@/lib/services/credentials.service";
 import { isThreeSixtyProvider } from "@/lib/core/provider-aliases";
 import { logAudit } from "@/lib/audit";
+import { resolveTenantDisplayName } from "@/lib/services/meta/tenant-display-name-resolver";
 
 const UUID_REGEX = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
@@ -158,15 +159,11 @@ export async function prepareRemarketingDraft(opportunityId: string): Promise<Re
       }
 
       // 7. Resolve Template Resolver using TemplateResolverService.resolve with templateType: 'remarketing'
-      // Fetch tenant name fallback
       let tenantName = "Ekibimiz";
       try {
-        const tenantInfo = await ctx.db.executeSafe({
-          text: `SELECT name FROM tenants WHERE id = $1 LIMIT 1`,
-          values: [ctx.tenantId]
-        }) as any[];
-        if (tenantInfo.length > 0) {
-          tenantName = tenantInfo[0].name;
+        const resolvedName = await resolveTenantDisplayName(ctx.db, ctx.tenantId);
+        if (resolvedName) {
+          tenantName = resolvedName;
         }
       } catch (_) {}
 

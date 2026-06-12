@@ -635,13 +635,8 @@ export async function syncGoogleSheets() {
       } catch (_) {}
 
       try {
-        const { withTenantDB } = await import('@/lib/core/tenant-db');
-        const sysDb = withTenantDB('admin-system', true);
-        const tenantRes = await sysDb.executeSafe({
-          text: `SELECT name FROM tenants WHERE id = $1 LIMIT 1`,
-          values: [ctx.tenantId]
-        });
-        if (tenantRes.length > 0) tenantName = tenantRes[0].name;
+        const { resolveTenantDisplayName } = await import('@/lib/services/meta/tenant-display-name-resolver');
+        tenantName = await resolveTenantDisplayName(ctx.db, ctx.tenantId);
       } catch (_) {}
 
       // ── 3. Delegate to shared ingestion service ──

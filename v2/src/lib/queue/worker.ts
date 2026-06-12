@@ -320,14 +320,14 @@ export class QueueWorkerEngine {
             `,
             values: [resolvedChannelId, tenantId]
           });
-          this.log.info(`[TELEMETRY_UPDATED] Channel ${resolvedChannelId} marked healthy and last_sync_at updated via status receipt`);
+          this.log.info(`[TELEMETRY_UPDATED] Channel ${resolvedChannelId} marked healthy and last_sync_at updated via status receipt`, { tenantId, conversationId: 'status_receipt_no_conversation', traceId });
         } catch (telErr) {
-          this.log.error(`[TELEMETRY_UPDATE_FAILED] Non-fatal integration telemetry update failure`, telErr instanceof Error ? telErr : new Error(String(telErr)), { traceId });
+          this.log.error(`[TELEMETRY_UPDATE_FAILED] Non-fatal integration telemetry update failure`, telErr instanceof Error ? telErr : new Error(String(telErr)), { tenantId, conversationId: 'status_receipt_no_conversation', traceId });
         }
       }
       
     } catch (e: any) {
-      this.log.error(`[STATUS_UPDATE_FAILED] Failed to update delivery receipt`, e, { traceId });
+      this.log.error(`[STATUS_UPDATE_FAILED] Failed to update delivery receipt`, e, { tenantId, conversationId: 'status_receipt_no_conversation', traceId });
     }
   }
 

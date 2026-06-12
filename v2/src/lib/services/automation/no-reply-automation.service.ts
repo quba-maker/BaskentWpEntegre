@@ -72,7 +72,7 @@ function isTimeInQuietHours(date: Date, timezone: string, startStr: string, endS
       return currentMinutes >= startMinutes || currentMinutes < endMinutes;
     }
   } catch (err) {
-    log.error('Quiet hours check failed, defaulting to false', err as Error);
+    log.error('Quiet hours check failed, defaulting to false', err as Error, { tenantId: 'system_scheduler', conversationId: 'cron_sync_no_conversation' });
     return false;
   }
 }
@@ -352,22 +352,22 @@ export class NoReplyAutomationService {
     
     // Safety check env
     if (process.env.ENABLE_NO_REPLY_AUTOMATION !== 'true' && !isDryRun) {
-      log.info('[TICK_SKIP] ENABLE_NO_REPLY_AUTOMATION environment variable is not true. Skipping real run.');
+      log.info('[TICK_SKIP] ENABLE_NO_REPLY_AUTOMATION environment variable is not true. Skipping real run.', { tenantId: 'system_scheduler', conversationId: 'cron_sync_no_conversation' });
       return { success: false, reason: 'env_disabled' };
     }
 
     const settings = await this.getNoReplyAutomationSettings(db, tenantId);
     if (!settings.enabled && !isDryRun) {
-      log.info('[TICK_SKIP] No-reply automation settings is disabled for tenant', { tenantId });
+      log.info('[TICK_SKIP] No-reply automation settings is disabled for tenant', { tenantId, conversationId: 'cron_sync_no_conversation' });
       return { success: false, reason: 'settings_disabled' };
     }
 
     if (settings.mode !== 'draft_only' && !isDryRun) {
-      log.info('[TICK_SKIP] No-reply automation mode is not draft_only. Skipping real run.');
+      log.info('[TICK_SKIP] No-reply automation mode is not draft_only. Skipping real run.', { tenantId, conversationId: 'cron_sync_no_conversation' });
       return { success: false, reason: 'mode_not_draft_only' };
     }
 
-    log.info('[TICK_START] Running no-reply automation tick', { tenantId, isDryRun });
+    log.info('[TICK_START] Running no-reply automation tick', { tenantId, conversationId: 'cron_sync_no_conversation', isDryRun });
 
     if (!isDryRun) {
       // Cancel any pending no_reply_followup / template_required_task tasks if the patient has replied (last message is inbound)
@@ -394,10 +394,10 @@ export class NoReplyAutomationService {
           values: [tenantId]
         }) as any;
         if (cancelledResult && cancelledResult.rowCount > 0) {
-          log.info(`[TICK_CLEANUP] Automatically skipped ${cancelledResult.rowCount} pending tasks because patients replied.`);
+          log.info(`[TICK_CLEANUP] Automatically skipped ${cancelledResult.rowCount} pending tasks because patients replied.`, { tenantId, conversationId: 'cron_sync_no_conversation' });
         }
       } catch (cleanErr) {
-        log.error('[TICK_CLEANUP_ERROR] Failed to auto-skip pending tasks', cleanErr as Error);
+        log.error('[TICK_CLEANUP_ERROR] Failed to auto-skip pending tasks', cleanErr as Error, { tenantId, conversationId: 'cron_sync_no_conversation' });
       }
     }
 
@@ -422,7 +422,7 @@ export class NoReplyAutomationService {
 
     for (const c of slicedCandidates) {
       if (tasksCreatedCount >= maxTasksCreated) {
-        log.info('[TICK_LIMIT] Reached maxTasksCreated limit (10) for this run. Stopping.');
+        log.info('[TICK_LIMIT] Reached maxTasksCreated limit (10) for this run. Stopping.', { tenantId, conversationId: 'cron_sync_no_conversation' });
         break;
       }
 
@@ -533,6 +533,8 @@ export class NoReplyAutomationService {
           dueAt = getNextOperationalTime(dueAt, tz, settings.quietHoursStart, settings.quietHoursEnd);
           quietHoursPostponed = true;
           log.info('[QUIET_HOURS_POSTPONE] Postponing task due_at due to quiet hours', {
+            tenantId,
+            conversationId: c.conversation_id,
             phone: c.phone_number,
             timezone: tz,
             adjustedDueAt: dueAt.toISOString()
@@ -860,7 +862,7 @@ export class NoReplyAutomationService {
         if (primaryNorm) optOutPhones.add(primaryNorm);
       }
     } catch (e) {
-      log.error('Failed to run opt-out query', e as Error);
+      log.error('Failed to run opt-out query', e as Error, { tenantId, conversationId: conv.conversation_id });
     }
 
     const isPrimaryOptedOut = (conv.opp_metadata?.opt_out_requested === true) || 

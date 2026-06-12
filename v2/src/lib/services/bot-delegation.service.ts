@@ -1,5 +1,6 @@
 import type { TenantDB } from '@/lib/core/tenant-db';
 import { resolvePatientTimezone, formatDualClock } from '@/lib/utils/timezone';
+import { resolveTenantDisplayName } from '@/lib/services/meta/tenant-display-name-resolver';
 import { StopRuleEngine } from './stop-rules.service';
 import { NotificationService } from './notification.service';
 import { logger } from '@/lib/core/logger';
@@ -338,11 +339,7 @@ export class BotDelegationService {
     if (activeDirective) {
       if (apiKey) {
         try {
-          const tenantRows = await this.db.executeSafe({
-            text: `SELECT name FROM tenants WHERE id = $1 LIMIT 1`,
-            values: [this.db.tenantId]
-          }) as any[];
-          const tenantName = tenantRows[0]?.name || 'Ekibimiz';
+          const tenantName = (await resolveTenantDisplayName(this.db, this.db.tenantId)) || 'Ekibimiz';
 
           // 1. Fetch active WhatsApp prompt template for the tenant
           const { defaultPrompts } = await import('@/lib/domain/conversation/prompts');

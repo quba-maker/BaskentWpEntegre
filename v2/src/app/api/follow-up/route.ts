@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
   const isCronAuth = (cronSecret && authHeader === `Bearer ${cronSecret}`) || (cronSecret && urlSecret === cronSecret);
   
   if (cronSecret && !isCronAuth) {
-    log.warn('[FOLLOW_UP_AUTH_FAIL] Unauthorized request');
+    log.warn('[FOLLOW_UP_AUTH_FAIL] Unauthorized request', { tenantId: 'system_scheduler', conversationId: 'cron_sync_no_conversation' });
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -69,7 +69,7 @@ async function handleV2TaskEngine(request: NextRequest) {
       const elapsed = Date.now() - startTime;
       if (elapsed >= 7500) {
         timeBudgetExceeded = true;
-        log.warn(`[V2_TASK_TIMEOUT] Time budget exceeded (elapsed ${elapsed}ms), pausing execution`);
+        log.warn(`[V2_TASK_TIMEOUT] Time budget exceeded (elapsed ${elapsed}ms), pausing execution`, { tenantId: 'system_scheduler', conversationId: 'cron_sync_no_conversation' });
         break;
       }
 
@@ -418,9 +418,9 @@ async function handleV2TaskEngine(request: NextRequest) {
         try {
           const { NoReplyAutomationService } = await import('@/lib/services/automation/no-reply-automation.service');
           const noReplyResult = await NoReplyAutomationService.runNoReplyAutomationTick(db, tenant.id, { dryRun: false });
-          log.info(`[NO_REPLY_TICK] Completed tick for tenant: ${tenant.slug}`, noReplyResult);
+          log.info(`[NO_REPLY_TICK] Completed tick for tenant: ${tenant.slug}`, { tenantId: tenant.id, conversationId: 'cron_sync_no_conversation', ...noReplyResult });
         } catch (noReplyErr: any) {
-          log.error(`[NO_REPLY_TICK_ERROR] Failed to run no-reply automation tick for tenant ${tenant.slug}`, noReplyErr);
+          log.error(`[NO_REPLY_TICK_ERROR] Failed to run no-reply automation tick for tenant ${tenant.slug}`, noReplyErr, { tenantId: tenant.id, conversationId: 'cron_sync_no_conversation' });
         }
 
         results.push({
@@ -454,7 +454,7 @@ async function handleV2TaskEngine(request: NextRequest) {
       results 
     });
   } catch (e: any) {
-    log.error("V2 Task Engine cron error", e instanceof Error ? e : new Error(String(e)));
+    log.error("V2 Task Engine cron error", e instanceof Error ? e : new Error(String(e)), { tenantId: 'system_scheduler', conversationId: 'cron_sync_no_conversation' });
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }
@@ -465,7 +465,7 @@ async function handleV2TaskEngine(request: NextRequest) {
 // ═══════════════════════════════════════════════════════════
 
 async function handleV1Legacy() {
-  log.warn('[FOLLOW_UP_V1_DISABLED] Legacy follow-up cron engine was called but is disabled under zero-outbound policy.');
+  log.warn('[FOLLOW_UP_V1_DISABLED] Legacy follow-up cron engine was called but is disabled under zero-outbound policy.', { tenantId: 'system_scheduler', conversationId: 'cron_sync_no_conversation' });
   return NextResponse.json({
     ok: false,
     disabled: true,

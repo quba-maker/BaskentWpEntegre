@@ -5,6 +5,7 @@ import { resolvePatientTimezone, formatDualClock } from "@/lib/utils/timezone";
 import { TemplateResolverService } from "@/lib/services/template-resolver.service";
 import { CredentialsService } from "@/lib/services/credentials.service";
 import { logger } from "@/lib/core/logger";
+import { resolveTenantDisplayName } from "@/lib/services/meta/tenant-display-name-resolver";
 
 const log = logger.withContext({ module: 'DraftApprovalActions' });
 
@@ -445,8 +446,8 @@ export async function getPendingDrafts(filters?: {
 
           try {
             let tenantName = 'Ekibimiz';
-            const tenantInfo = await db.executeSafe(`SELECT name FROM tenants WHERE id = $1 LIMIT 1`, [ctx.tenantId]);
-            if (tenantInfo.length > 0) tenantName = tenantInfo[0].name;
+             const resolvedName = await resolveTenantDisplayName(db, ctx.tenantId);
+             if (resolvedName) tenantName = resolvedName;
 
             const resolved = await TemplateResolverService.resolve(db, {
               tenantId: ctx.tenantId,

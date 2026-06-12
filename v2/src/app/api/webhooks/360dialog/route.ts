@@ -24,6 +24,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const startTime = Date.now();
   const traceId = crypto.randomUUID();
+  let resolvedTenantId: string | undefined = undefined;
 
   // 1. Webhook Secret Validation (Header-first, Query fallback)
   const headerSecret = req.headers.get("x-360dialog-secret");
@@ -51,7 +52,7 @@ export async function POST(req: NextRequest) {
     }
     body = JSON.parse(rawBody);
   } catch (e: any) {
-    log.error("Malformed JSON payload in 360dialog webhook", e, { traceId });
+    log.error("Malformed JSON payload in 360dialog webhook", e, { tenantId: 'system_scheduler', conversationId: 'conversation_pending_resolution', traceId });
     return new NextResponse("BAD_REQUEST", { status: 400 });
   }
 
@@ -59,7 +60,7 @@ export async function POST(req: NextRequest) {
   // Retrieve channelId from query parameters
   const channelId = req.nextUrl.searchParams.get("channel_id");
   if (!channelId) {
-    log.warn("[ROUTING_FAILED] Webhook missing channel_id query parameter.", { traceId });
+    log.warn("[ROUTING_FAILED] Webhook missing channel_id query parameter.", { tenantId: 'system_scheduler', conversationId: 'conversation_pending_resolution', traceId });
     return new NextResponse("EVENT_RECEIVED_UNROUTABLE", { status: 200 });
   }
 
@@ -88,12 +89,13 @@ export async function POST(req: NextRequest) {
     }) as any[];
 
     if (channelResults.length === 0) {
-      log.warn("[ROUTING_FAILED] Active channel or tenant not found for channelId.", { channelId, traceId });
+      log.warn("[ROUTING_FAILED] Active channel or tenant not found for channelId.", { tenantId: 'system_scheduler', conversationId: 'conversation_pending_resolution', channelId, traceId });
       return new NextResponse("EVENT_RECEIVED_UNROUTABLE", { status: 200 });
     }
 
     const channelRow = channelResults[0];
     const tenantId = channelRow.tenant_id;
+    resolvedTenantId = tenantId;
     const tenantSlug = channelRow.tenant_slug;
 
     // 4. Provider raw payload logging (to channel_events with zero-secret exposure)
@@ -178,7 +180,8 @@ export async function POST(req: NextRequest) {
           log.info(`[360DIALOG] [${isEcho ? 'OUTBOUND_ECHO' : 'INBOUND'}] Processing message: ${msg.id} from ${senderPhone} [${processedCount + duplicateCount + errorCount + 1}/${messagesList.length}]`, {
             tenantId,
             tenantSlug,
-            traceId
+            traceId,
+            conversationId: isEcho ? 'echo_pending_match' : 'conversation_pending_resolution'
           });
 
           // Per-message idempotency check with locking
@@ -193,7 +196,8 @@ export async function POST(req: NextRequest) {
             log.warn(`[360DIALOG] [DUPLICATE] Suppressing duplicate message: ${msg.id} [${duplicateCount + 1} dupes so far]`, {
               tenantId,
               tenantSlug,
-              traceId
+              traceId,
+              conversationId: 'conversation_pending_resolution'
             });
             duplicateCount++;
             continue; // Skip this message, process the rest
@@ -265,8 +269,10 @@ export async function POST(req: NextRequest) {
           // Error isolation: log and continue with remaining messages
           errorCount++;
           log.error(`[360DIALOG] [MSG_LOOP_ERROR] Failed to process message ${msg?.id || 'unknown'}, continuing with remaining messages`, msgError, {
+            tenantId,
             tenantSlug,
             traceId,
+            conversationId: 'conversation_pending_resolution',
             messageIndex: processedCount + duplicateCount + errorCount,
             totalMessages: messagesList.length
           });
@@ -274,8 +280,10 @@ export async function POST(req: NextRequest) {
       }
 
       log.info(`[360DIALOG] [BATCH_COMPLETE] Processed ${processedCount} messages, ${duplicateCount} duplicates skipped, ${errorCount} errors`, {
+        tenantId,
         tenantSlug,
         traceId,
+        conversationId: 'conversation_pending_resolution',
         totalInPayload: messagesList.length
       });
 
@@ -360,6 +368,8 @@ export async function POST(req: NextRequest) {
 
   } catch (error: any) {
     log.error("360dialog Webhook Crash", error, {
+      tenantId: resolvedTenantId || 'system_scheduler',
+      conversationId: 'conversation_pending_resolution',
       durationMs: Date.now() - startTime
     });
     return new NextResponse("SERVER_ERROR", { status: 500 });
