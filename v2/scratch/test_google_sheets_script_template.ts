@@ -201,14 +201,26 @@ async function runTests() {
   // Simulated buildQubaUrl
   const WEBHOOK_URL = mockWebhookUrlInput.split('?')[0];
   const buildQubaUrlMock = (endpoint: string, params: Record<string, string>) => {
-    var baseUrl = WEBHOOK_URL.split('?')[0].replace(/\/$/, '');
-    var url = baseUrl.replace(/\/sheets-webhook$/, endpoint);
-    var query = Object.keys(params)
-      .map(function (key) {
-        return encodeURIComponent(key) + '=' + encodeURIComponent(params[key]);
-      })
-      .join('&');
-    return url + '?' + query;
+    var baseUrl = WEBHOOK_URL.split('?')[0];
+
+    if (baseUrl.charAt(baseUrl.length - 1) === '/') {
+      baseUrl = baseUrl.substring(0, baseUrl.length - 1);
+    }
+
+    if (baseUrl.indexOf('/sheets-webhook') !== -1) {
+      baseUrl = baseUrl.replace('/sheets-webhook', endpoint);
+    } else {
+      baseUrl = baseUrl + endpoint;
+    }
+
+    var queryParts = [];
+    for (var key in params) {
+      if (Object.prototype.hasOwnProperty.call(params, key)) {
+        queryParts.push(encodeURIComponent(key) + '=' + encodeURIComponent(params[key]));
+      }
+    }
+
+    return baseUrl + '?' + queryParts.join('&');
   };
 
   const testDryRunUrl = buildQubaUrlMock('/cron-form-sync', { tenant: mockTenantSlug, dryRun: 'true' });

@@ -158,15 +158,26 @@ function testQubaConnection() {
 // ═══════════════════════════════════════════════════════
 
 function buildQubaUrl(endpoint, params) {
-  var baseUrl = WEBHOOK_URL.split('?')[0].replace(/\/$/, '');
-  var url = baseUrl.replace(/\/sheets-webhook$/, endpoint);
-  var query = Object.keys(params)
-    .map(function (key) {
-      return encodeURIComponent(key) + '=' + encodeURIComponent(params[key]);
-    })
-    .join('&');
+  var baseUrl = WEBHOOK_URL.split('?')[0];
 
-  return url + '?' + query;
+  if (baseUrl.charAt(baseUrl.length - 1) === '/') {
+    baseUrl = baseUrl.substring(0, baseUrl.length - 1);
+  }
+
+  if (baseUrl.indexOf('/sheets-webhook') !== -1) {
+    baseUrl = baseUrl.replace('/sheets-webhook', endpoint);
+  } else {
+    baseUrl = baseUrl + endpoint;
+  }
+
+  var queryParts = [];
+  for (var key in params) {
+    if (Object.prototype.hasOwnProperty.call(params, key)) {
+      queryParts.push(encodeURIComponent(key) + '=' + encodeURIComponent(params[key]));
+    }
+  }
+
+  return baseUrl + '?' + queryParts.join('&');
 }
 
 function sendToQuba(endpoint, payload, isDryRun) {
