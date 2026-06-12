@@ -1,6 +1,7 @@
 import { withTenantDB } from '@/lib/core/tenant-db';
 import { logger } from '@/lib/core/logger';
-import { AIOrchestrator, ChatMessage } from '../orchestrator';
+import { AIOrchestrator, ChatMessage, AIBillingExhaustedError, AIQuotaExhaustedError, AICircuitOpenError, AIUnavailableError } from '../orchestrator';
+import { CircuitBreaker } from '../circuit-breaker';
 import { buildMediaContext } from '../media-context';
 
 const log = logger.withContext({ module: 'MemoryEngine' });
@@ -11,8 +12,20 @@ export class MemoryEngine {
    * P1B: Produces CRM-quality summary scoped to active opportunity.
    * This is the SOLE owner of opportunity.summary.
    */
-  static async summarizeConversation(tenantId: string, conversationId: string): Promise<void> {
+  static async summarizeConversation(tenantId: string, conversationId: string): Promise<any> {
     try {
+      const tenantCircuit = new CircuitBreaker(`gemini:${tenantId}`, { failureThreshold: 5, resetTimeoutMs: 180000 });
+      try {
+        await tenantCircuit.assertClosed();
+      } catch (cbErr: any) {
+        log.warn(`[MEMORY_SUMMARY_SKIPPED_AI_UNAVAILABLE] Circuit breaker is open for tenant ${tenantId}. Skipping summary.`);
+        return {
+          success: false,
+          skipped: true,
+          reason: "AI_UNAVAILABLE"
+        };
+      }
+
       const db = withTenantDB(tenantId);
 
       // 1. Fetch conversation to get phone number + active opportunity
@@ -189,13 +202,26 @@ Hastanın bulunduğu ülke için saat dilimi doğrulanmamıştır (şehir/eyalet
         { role: 'user', content: prompt }
       ];
 
-      const aiResult = await orchestrator.generateResponse(aiMessages, {
-        provider: 'gemini',
-        modelId: 'gemini-2.5-flash',
-        apiKey: apiKey,
-        temperature: 0.2,
-        maxTokens: 8000
-      });
+      let aiResult;
+      try {
+        aiResult = await orchestrator.generateResponse(aiMessages, {
+          provider: 'gemini',
+          modelId: 'gemini-2.5-flash',
+          apiKey: apiKey,
+          temperature: 0.2,
+          maxTokens: 8000
+        }, tenantId, conversationId);
+      } catch (e: any) {
+        if (e instanceof AIBillingExhaustedError || e instanceof AIQuotaExhaustedError || e instanceof AICircuitOpenError || e instanceof AIUnavailableError || e.message?.includes('CIRCUIT_OPEN')) {
+          log.warn(`[MEMORY_SUMMARY_SKIPPED_AI_UNAVAILABLE] LLM call failed with AI unavailability. Skipping summary. Reason: ${e.message}`);
+          return {
+            success: false,
+            skipped: true,
+            reason: "AI_UNAVAILABLE"
+          };
+        }
+        throw e;
+      }
 
       const rawText = aiResult.text || "".trim();
       
@@ -323,7 +349,15 @@ Hastanın bulunduğu ülke için saat dilimi doğrulanmamıştır (şehir/eyalet
       } catch (syncErr) {
         log.error('[MEMORY_SYNC_ERROR] Failed during CRM/Sheets sync', syncErr instanceof Error ? syncErr : new Error(String(syncErr)));
       }
-    } catch (e) {
+    } catch (e: any) {
+      if (e instanceof AIBillingExhaustedError || e instanceof AIQuotaExhaustedError || e instanceof AICircuitOpenError || e instanceof AIUnavailableError || e.message?.includes('CIRCUIT_OPEN')) {
+        log.warn(`[MEMORY_SUMMARY_SKIPPED_AI_UNAVAILABLE] Summarization failed with AI unavailability. Reason: ${e.message}`);
+        return {
+          success: false,
+          skipped: true,
+          reason: "AI_UNAVAILABLE"
+        };
+      }
       log.error('[MEMORY_ENGINE] Error generating summary', e instanceof Error ? e : new Error(String(e)));
       throw e;
     }

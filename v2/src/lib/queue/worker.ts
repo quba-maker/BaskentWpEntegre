@@ -4,7 +4,7 @@ import { ConversationService } from "@/lib/services/conversation.service";
 import { MessageService } from "@/lib/services/message.service";
 import { WorkflowService, ConversationPhase } from "@/lib/services/workflow.service";
 import { after } from "next/server";
-import { AIOrchestrator, ChatMessage } from "@/lib/services/ai/orchestrator";
+import { AIOrchestrator, ChatMessage, AIBillingExhaustedError, AIQuotaExhaustedError, AICircuitOpenError, AIUnavailableError } from "@/lib/services/ai/orchestrator";
 import { ResponsePolicy } from "@/lib/services/ai/response-policy";
 import { PromptBuilder } from "@/lib/services/ai/prompt-builder";
 import { detectLanguage } from "@/lib/utils/language-detector";
@@ -688,7 +688,10 @@ export class QueueWorkerEngine {
             const isMemoryEnabled = await FeatureFlagService.isEnabled(tenantId, 'memory_engine', true);
             if (isMemoryEnabled) {
               const { MemoryEngine } = await import('@/lib/services/ai/engines/memory');
-              await MemoryEngine.summarizeConversation(tenantId, conversationId);
+              const summaryResult = await MemoryEngine.summarizeConversation(tenantId, conversationId);
+              if (summaryResult && summaryResult.skipped) {
+                this.log.warn(`[MEMORY_SUMMARY_SKIPPED_AI_UNAVAILABLE] Media batch memory summarization skipped. Reason: ${summaryResult.reason}`, { traceId });
+              }
             }
           } catch (memErr) {
             this.log.error(`[MEDIA_BATCH_MEMORY]`, memErr instanceof Error ? memErr : new Error(String(memErr)), { traceId });
@@ -1562,7 +1565,10 @@ export class QueueWorkerEngine {
             const isMemoryEnabled = await FeatureFlagService.isEnabled(tenantId, 'memory_engine', true);
             if (isMemoryEnabled) {
               const { MemoryEngine } = await import('@/lib/services/ai/engines/memory');
-              await MemoryEngine.summarizeConversation(tenantId, conversationIdVal);
+              const summaryResult = await MemoryEngine.summarizeConversation(tenantId, conversationIdVal);
+              if (summaryResult && summaryResult.skipped) {
+                this.log.warn(`[MEMORY_SUMMARY_SKIPPED_AI_UNAVAILABLE] Human mode memory summarization skipped. Reason: ${summaryResult.reason}`, { traceId });
+              }
             }
           } catch (memErr) {
             this.log.error(`[WORKER_HUMAN_MEMORY_FAILED] Human mode memory summarization error`, memErr instanceof Error ? memErr : new Error(String(memErr)), { traceId });
@@ -2348,6 +2354,71 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
         qualityGateFailed = true;
         qualityGateReason = e.message;
         // DO NOT THROW. We handle this cleanly so QStash doesn't spam retries.
+      } else if (
+        e instanceof AIBillingExhaustedError ||
+        e instanceof AIQuotaExhaustedError ||
+        e instanceof AICircuitOpenError ||
+        e instanceof AIUnavailableError ||
+        e.message?.includes('CIRCUIT_OPEN')
+      ) {
+        const targetConvId = conversationIdVal || conversationId;
+        if (!targetConvId) {
+          this.log.warn(`[WORKER_AI_UNAVAILABLE_SKIP] AI unavailable but conversation ID is missing. Skipped DB update.`, { tenantId, traceId });
+          return;
+        }
+
+        this.log.warn(`[WORKER_AI_UNAVAILABLE] AI pipeline is unavailable, triggering human handoff. Reason: ${e.message}`, { traceId, tenantId });
+        
+        const nowIso = new Date().toISOString();
+        const reason = e instanceof AIBillingExhaustedError ? 'billing_exhausted' 
+                     : e instanceof AIQuotaExhaustedError ? 'quota_exhausted'
+                     : e instanceof AICircuitOpenError ? 'circuit_open'
+                     : 'ai_unavailable';
+        
+        await db.executeSafe({
+          text: `
+            UPDATE conversations 
+            SET status = 'human',
+                autopilot_enabled = false,
+                metadata = jsonb_set(
+                             jsonb_set(
+                               jsonb_set(
+                                 jsonb_set(
+                                   jsonb_set(COALESCE(metadata, '{}'::jsonb), '{ai_unavailable}', 'true'),
+                                   '{ai_unavailable_reason}', $1
+                                 ),
+                                 '{ai_unavailable_provider}', '"gemini"'
+                               ),
+                               '{ai_unavailable_model}', $2
+                             ),
+                             '{ai_unavailable_at}', $3
+                           )
+            WHERE id = $4 AND tenant_id = $5
+          `,
+          values: [JSON.stringify(reason), JSON.stringify(llmModel), JSON.stringify(nowIso), targetConvId, tenantId]
+        });
+
+        // Insert non-patient-visible system message/alert
+        await db.executeSafe({
+          text: `
+            INSERT INTO messages (tenant_id, conversation_id, phone_number, direction, content, channel, provider_message_id, status)
+            VALUES ($1, $2, $3, 'system', $4, $5, 'system_alert', 'delivered')
+          `,
+          values: [tenantId, targetConvId, phoneNumber, `Yapay zeka servis dışı kaldığı için görüşme müşteri temsilcisine devredildi. (AI Unavailable: ${reason})`, channel]
+        });
+
+        // Emit AI response failed event
+        AIEventEmitter.emit({
+          tenantId,
+          conversationId: targetConvId,
+          customerId,
+          type: 'ai_response_failed',
+          category: 'pipeline',
+          severity: 'warning',
+          payload: { reason }
+        });
+
+        return; // exit cleanly
       } else {
         this.log.error(`[LLM_FAILED] Orchestrator exception`, e, { traceId });
         throw e;
@@ -3747,9 +3818,13 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       try {
         const { MemoryEngine } = await import('@/lib/services/ai/engines/memory');
         this.log.info(`[WORKER_MEMORY] Starting memory summarization`, { traceId, conversationId });
-        await MemoryEngine.summarizeConversation(tenantId, conversationId);
-        AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'memory_updated', category: 'memory', payload: { conversationId } });
-        this.log.info(`[WORKER_MEMORY_OK] Memory summarization completed successfully`, { traceId, conversationId });
+        const summaryResult = await MemoryEngine.summarizeConversation(tenantId, conversationId);
+        if (summaryResult && summaryResult.skipped) {
+          this.log.warn(`[MEMORY_SUMMARY_SKIPPED_AI_UNAVAILABLE] Memory summarization skipped. Reason: ${summaryResult.reason}`, { traceId, conversationId });
+        } else {
+          AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'memory_updated', category: 'memory', payload: { conversationId } });
+          this.log.info(`[WORKER_MEMORY_OK] Memory summarization completed successfully`, { traceId, conversationId });
+        }
       } catch (err) {
         this.log.error(`[WORKER_MEMORY_FAILED] Non-fatal summary error`, err instanceof Error ? err : new Error(String(err)), { traceId });
         AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'memory_failed', category: 'memory', severity: 'warning', payload: { error: err instanceof Error ? err.message : String(err) } });
@@ -4376,7 +4451,72 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
         }
       }
 
-    } catch (llmErr) {
+    } catch (llmErr: any) {
+      if (
+        llmErr instanceof AIBillingExhaustedError ||
+        llmErr instanceof AIQuotaExhaustedError ||
+        llmErr instanceof AICircuitOpenError ||
+        llmErr instanceof AIUnavailableError ||
+        llmErr.message?.includes('CIRCUIT_OPEN')
+      ) {
+        if (!conversationId) {
+          this.log.warn(`[DEBOUNCE_WORKER_AI_UNAVAILABLE_SKIP] AI unavailable but conversation ID is missing. Skipped DB update.`, { tenantId, traceId });
+          return;
+        }
+
+        this.log.warn(`[DEBOUNCE_WORKER_AI_UNAVAILABLE] AI pipeline is unavailable, taking over to human. Reason: ${llmErr.message}`, { traceId, tenantId });
+        
+        const nowIso = new Date().toISOString();
+        const reason = llmErr instanceof AIBillingExhaustedError ? 'billing_exhausted' 
+                     : llmErr instanceof AIQuotaExhaustedError ? 'quota_exhausted'
+                     : llmErr instanceof AICircuitOpenError ? 'circuit_open'
+                     : 'ai_unavailable';
+        
+        await db.executeSafe({
+          text: `
+            UPDATE conversations 
+            SET status = 'human',
+                autopilot_enabled = false,
+                metadata = jsonb_set(
+                             jsonb_set(
+                               jsonb_set(
+                                 jsonb_set(
+                                   jsonb_set(COALESCE(metadata, '{}'::jsonb), '{ai_unavailable}', 'true'),
+                                   '{ai_unavailable_reason}', $1
+                                 ),
+                                 '{ai_unavailable_provider}', '"gemini"'
+                               ),
+                               '{ai_unavailable_model}', $2
+                             ),
+                             '{ai_unavailable_at}', $3
+                           )
+            WHERE id = $4 AND tenant_id = $5
+          `,
+          values: [JSON.stringify(reason), JSON.stringify(llmModel), JSON.stringify(nowIso), conversationId, tenantId]
+        });
+
+        // Insert non-patient-visible system message/alert
+        await db.executeSafe({
+          text: `
+            INSERT INTO messages (tenant_id, conversation_id, phone_number, direction, content, channel, provider_message_id, status)
+            VALUES ($1, $2, $3, 'system', $4, $5, 'system_alert', 'delivered')
+          `,
+          values: [tenantId, conversationId, phoneNumber, `Yapay zeka servis dışı kaldığı için görüşme müşteri temsilcisine devredildi. (AI Unavailable: ${reason})`, channel]
+        });
+
+        // Emit AI response failed event
+        AIEventEmitter.emit({
+          tenantId,
+          conversationId,
+          customerId,
+          type: 'ai_response_failed',
+          category: 'pipeline',
+          severity: 'warning',
+          payload: { reason }
+        });
+
+        return; // exit cleanly
+      }
       this.log.error(`[DEBOUNCE_WORKER] LLM or send failed`, llmErr as Error, { traceId });
       throw llmErr;
     }

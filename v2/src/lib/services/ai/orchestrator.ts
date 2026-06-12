@@ -41,6 +41,34 @@ export class IncompleteResponseError extends Error {
   }
 }
 
+export class AIBillingExhaustedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AIBillingExhaustedError';
+  }
+}
+
+export class AIQuotaExhaustedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AIQuotaExhaustedError';
+  }
+}
+
+export class AICircuitOpenError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AICircuitOpenError';
+  }
+}
+
+export class AIUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AIUnavailableError';
+  }
+}
+
 export interface AIResponse {
   text: string;
   providerUsed: string;
@@ -93,7 +121,8 @@ export class AIOrchestrator {
         // Call LLM
         let rawResponse: any;
         if (config.provider === 'gemini') {
-          rawResponse = await this.geminiCircuit.execute(() => this.callGemini(currentMessages, config));
+          const tenantCircuit = new CircuitBreaker(`gemini:${_tenantId}`, { failureThreshold: 5, resetTimeoutMs: 180000 });
+          rawResponse = await tenantCircuit.execute(() => this.callGemini(currentMessages, config));
         } else {
           throw new Error(`Unsupported provider: ${config.provider}`);
         }
@@ -200,6 +229,18 @@ export class AIOrchestrator {
       throw new Error("Max tool execution loops reached without a final text response.");
 
     } catch (e: any) {
+      if (
+        e instanceof AIBillingExhaustedError ||
+        e instanceof AIQuotaExhaustedError ||
+        e instanceof AICircuitOpenError ||
+        e instanceof AIUnavailableError
+      ) {
+        throw e;
+      }
+      if (e.message?.startsWith('CIRCUIT_OPEN')) {
+        throw new AICircuitOpenError(e.message);
+      }
+
       this.log.error(`[LLM_EXECUTION_FAILED] provider=${config.provider} model=${config.modelId} error=${e.message}`, e, { errorName: e.name, errorStack: e.stack?.substring(0, 500) });
       
       let fallbackText = "Şu an size en iyi şekilde yardımcı olabilmemiz için kısa bir bekleme süresi oluştu. Lütfen birkaç dakika sonra tekrar yazınız. 🙏";
@@ -284,7 +325,22 @@ export class AIOrchestrator {
 
     if (!response.ok) {
       const err = await response.text();
-      throw new Error(`Gemini API Error: ${err}`);
+      let errMsg = err;
+      try {
+        const parsed = JSON.parse(err);
+        errMsg = parsed.error?.message || err;
+      } catch (_) {}
+
+      const isBilling = errMsg.includes('monthly spending cap') || errMsg.includes('spending cap') || errMsg.includes('billing exhausted') || errMsg.includes('billing limit');
+      const isQuota = errMsg.includes('quota exceeded') || errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.includes('limit exceeded') || response.status === 429;
+
+      if (isBilling) {
+        throw new AIBillingExhaustedError(`Gemini billing exhausted: ${errMsg}`);
+      }
+      if (isQuota) {
+        throw new AIQuotaExhaustedError(`Gemini quota exceeded: ${errMsg}`);
+      }
+      throw new Error(`Gemini API Error: ${errMsg}`);
     }
 
     const data = await response.json();
