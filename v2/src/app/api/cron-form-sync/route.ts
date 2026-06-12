@@ -2,31 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { withTenantDB } from '@/lib/core/tenant-db';
 import { logger } from '@/lib/core/logger';
 import { ingestSheetBatch, updateSheetsHealthStatus } from '@/lib/services/sheets-ingestion.service';
-import { CredentialsService } from '@/lib/services/credentials.service';
 import { redis } from '@/lib/redis';
 import crypto from 'crypto';
 
 const log = logger.withContext({ module: 'CronFormSync' });
 
-/**
- * ═══════════════════════════════════════════════════════
- * Catch-up Form Sync Endpoint
- * ═══════════════════════════════════════════════════════
- * 
- * Tetikleyiciler:
- *   P0:   Admin manual trigger (curl/fetch)
- *   P0.5: App Script time-driven trigger (POST)
- *   P1:   QStash scheduler veya Vercel Pro Cron
- * 
- * NOT: vercel.json'a cron olarak EKLENMEYecek (Hobby plan sınırı).
- * Bu route sadece external tetikleyiciler tarafından çağrılır.
- */
-
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60; // Hobby plan max
-
-const SYNC_LOCK_KEY = 'cron:form-sync:lock';
-const SYNC_LOCK_TTL = 120; // seconds — auto-expire if process crashes/times out
+export const maxDuration = 60; // Max allowed duration on Vercel Pro/Hobby
 
 // ── HMAC Verification (shared with webhook) ──
 function verifyHmac(secret: string, timestamp: string, rawBody: string, signature: string): boolean {
@@ -42,88 +24,134 @@ function verifyHmac(secret: string, timestamp: string, rawBody: string, signatur
   return crypto.timingSafeEqual(sigBuf, expBuf);
 }
 
-export async function POST(request: NextRequest) {
-  // ── 0. Overlap Guard: prevent concurrent sync runs ──
-  let lockAcquired = false;
-  if (redis) {
+// ── Token-Based Tenant Lock Helper ──
+async function acquireTenantLock(tenantSlug: string, ttl: number = 600): Promise<string | null> {
+  if (!redis) return 'dummy-token'; // Local fallback if Redis not active
+  try {
+    const token = crypto.randomUUID();
+    const sanitizedSlug = tenantSlug.replace(/[^a-zA-Z0-9_-]/g, '').toLowerCase();
+    const key = `cron:form-sync:lock:${sanitizedSlug}`;
+    
+    // SET with NX (not exists) and EX (expire in seconds)
+    const setSuccess = await redis.set(key, token, { nx: true, ex: ttl });
+    if (setSuccess) {
+      return token;
+    }
+    return null;
+  } catch (err) {
+    log.warn('[LOCK_ACQUIRE_ERROR] Redis lock failed, assuming acquired for safety in dev', { error: String(err) });
+    return 'fallback-token'; // Non-blocking fallback
+  }
+}
+
+async function releaseTenantLock(tenantSlug: string, token: string): Promise<boolean> {
+  if (!redis || token === 'dummy-token' || token === 'fallback-token') return true;
+  try {
+    const sanitizedSlug = tenantSlug.replace(/[^a-zA-Z0-9_-]/g, '').toLowerCase();
+    const key = `cron:form-sync:lock:${sanitizedSlug}`;
+    
+    // Lua script to atomically compare and delete lock key
+    const releaseScript = `
+      if redis.call("get", KEYS[1]) == ARGV[1] then
+        return redis.call("del", KEYS[1])
+      else
+        return 0
+      end
+    `;
+    const result = await redis.eval(releaseScript, [key], [token]);
+    return result === 1;
+  } catch (err) {
+    log.warn('[LOCK_RELEASE_ERROR] Redis unlock failed', { error: String(err) });
+    return false;
+  }
+}
+
+// ── Unified Request Handler ──
+async function handleSyncRequest(request: NextRequest, method: 'GET' | 'POST') {
+  const startTime = Date.now();
+  
+  let rawBody = "";
+  let body: any = null;
+
+  if (method === 'POST') {
     try {
-      const lock = await redis!.set(SYNC_LOCK_KEY, Date.now().toString(), { ex: SYNC_LOCK_TTL, nx: true });
-      if (!lock) {
-        log.warn('[CRON_SYNC_OVERLAP] Previous sync still running, skipping this run');
-        return NextResponse.json({ skipped: true, reason: 'previous_sync_still_running' });
+      rawBody = await request.text();
+      if (rawBody) {
+        body = JSON.parse(rawBody);
       }
-      lockAcquired = true;
-    } catch (lockErr) {
-      // Redis failure is non-blocking — proceed without lock
-      log.warn('[CRON_SYNC_LOCK_ERROR] Redis lock failed, proceeding without guard', { error: (lockErr as any)?.message || String(lockErr) });
+    } catch (_) {}
+  }
+
+  // Get tenant slug from searchParams or POST body
+  const tenantSlug = request.nextUrl.searchParams.get('tenant') || body?.tenant_slug;
+  const isDryRun = request.nextUrl.searchParams.get('dryRun') === 'true' || body?.dryRun === true || body?.trigger === 'health_ping';
+
+  const systemDb = withTenantDB('admin-system', true);
+  let tenants: { id: string; name: string; slug: string }[] = [];
+
+  // 1. Resolve Tenant(s)
+  if (tenantSlug) {
+    const res = await systemDb.executeSafe({
+      text: `SELECT id, name, slug FROM tenants WHERE slug = $1 AND status = 'active'`,
+      values: [tenantSlug]
+    }) as any[];
+    tenants = res || [];
+  }
+
+  // 2. Load Tenant-Specific Webhook Secret
+  let tenantSecret: string | null = null;
+  if (tenants.length > 0) {
+    const tenantId = tenants[0].id;
+    const db = withTenantDB(tenantId);
+    try {
+      const integration = await db.executeSafe({
+        text: `SELECT credentials FROM tenant_integrations WHERE tenant_id = $1 AND provider = 'google_sheets' LIMIT 1`,
+        values: [tenantId]
+      }) as any[];
+      if (integration.length > 0 && integration[0].credentials) {
+        const { decryptPayload } = await import('@/lib/core/encryption');
+        const creds = typeof integration[0].credentials === 'string'
+          ? JSON.parse(integration[0].credentials)
+          : integration[0].credentials;
+        let decrypted: any = {};
+        if (creds.encrypted_payload && creds.version) {
+          decrypted = decryptPayload(creds);
+        } else {
+          decrypted = creds;
+        }
+        tenantSecret = decrypted.webhookSecret || null;
+      }
+    } catch (e) {
+      log.warn('[CRON_SECRET_RESOLVE_FAIL] Failed to resolve tenant secret', { tenantId });
     }
   }
 
-  try {
-    const rawBody = await request.text();
+  // 3. Authentication & Authorization checks
+  const authHeader = request.headers.get('authorization');
+  const cronSecret = process.env.CRON_SECRET;
+  const isCronAuth = cronSecret && authHeader === `Bearer ${cronSecret}`;
 
-    // ── 1. Tenant resolution (moved up for provider-aware HMAC validation) ──
-    const tenantSlug = request.nextUrl.searchParams.get('tenant');
-    const systemDb = withTenantDB('admin-system', true);
-
-    // If tenant slug provided, resolve that one tenant first to get webhook secret
-    let tenants: { id: string; name: string }[] = [];
-
-    if (tenantSlug) {
-      const res = await systemDb.executeSafe({
-        text: `SELECT id, name FROM tenants WHERE slug = $1 AND status = 'active'`,
-        values: [tenantSlug]
-      }) as any[];
-      tenants = res || [];
+  if (method === 'GET') {
+    // GET: Only Bearer Token Auth allowed
+    if (!isCronAuth) {
+      log.warn('[CRON_SYNC_AUTH_FAIL] Unauthorized GET request');
+      return NextResponse.json({ error: 'Unauthorized: GET requires Bearer Token' }, { status: 401 });
     }
-
-    // ── 2. Load Tenant-Specific Webhook Secret ──
-    let tenantSecret: string | null = null;
-    if (tenants.length > 0) {
-      const tenantId = tenants[0].id;
-      const db = withTenantDB(tenantId);
-      try {
-        const integration = await db.executeSafe({
-          text: `SELECT credentials FROM tenant_integrations WHERE tenant_id = $1 AND provider = 'google_sheets' LIMIT 1`,
-          values: [tenantId]
-        }) as any[];
-        if (integration.length > 0 && integration[0].credentials) {
-          const { decryptPayload } = await import('@/lib/core/encryption');
-          const creds = typeof integration[0].credentials === 'string'
-            ? JSON.parse(integration[0].credentials)
-            : integration[0].credentials;
-          let decrypted: any = {};
-          if (creds.encrypted_payload && creds.version) {
-            decrypted = decryptPayload(creds);
-          } else {
-            decrypted = creds;
-          }
-          tenantSecret = decrypted.webhookSecret || null;
-        }
-      } catch (e) {
-        log.warn('[CRON_SECRET_RESOLVE_FAIL] Failed to resolve tenant secret', { tenantId });
-      }
-    }
-
-    // ── 3. Authentication: Bearer OR HMAC ──
-    const authHeader = request.headers.get('authorization');
+  } else {
+    // POST:
     const sheetsSignature = request.headers.get('x-sheets-signature');
     const sheetsTimestamp = request.headers.get('x-sheets-timestamp');
-    const cronSecret = process.env.CRON_SECRET;
     const globalWebhookSecret = process.env.SHEETS_WEBHOOK_SECRET;
-
-    const isCronAuth = cronSecret && authHeader === `Bearer ${cronSecret}`;
     let isHmacAuth = false;
 
     if (sheetsSignature && sheetsTimestamp && (tenantSecret || globalWebhookSecret)) {
       const now = Math.floor(Date.now() / 1000);
       const ts = parseInt(sheetsTimestamp!);
+      // Replay protection: ±5 minutes (300s)
       if (!isNaN(ts) && Math.abs(now - ts) <= 300) {
         if (tenantSecret) {
-          // Strict mode: verify ONLY with tenant secret. No fallback to global.
           isHmacAuth = verifyHmac(tenantSecret, sheetsTimestamp!, rawBody, sheetsSignature!);
         } else if (globalWebhookSecret) {
-          // Fallback mode: try global secrets
           const secretList = globalWebhookSecret.split(',').map(s => s.trim()).filter(s => s.length > 0);
           for (const currentSecret of secretList) {
             if (verifyHmac(currentSecret, sheetsTimestamp!, rawBody, sheetsSignature!)) {
@@ -135,141 +163,260 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (!isCronAuth && !isHmacAuth) {
-      if (cronSecret || globalWebhookSecret || tenantSecret) {
-        log.warn('[CRON_SYNC_AUTH_FAIL] Unauthorized request');
+    if (tenantSlug) {
+      // Tenant-specific POST: Bearer OR HMAC allowed
+      if (!isCronAuth && !isHmacAuth) {
+        log.warn('[CRON_SYNC_AUTH_FAIL] Unauthorized tenant POST request', { tenantSlug });
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
       }
-      // No secrets configured — development fallback
-      log.warn('[CRON_SYNC_NO_AUTH] No auth secrets configured');
-    }
-
-    // If no tenant slug was provided, fetch all active tenants
-    if (!tenantSlug) {
-      // Sync all tenants with active Google Sheets integration
-      const res = await systemDb.executeSafe({
-        text: `SELECT t.id, t.name FROM tenants t
-               JOIN tenant_integrations ti ON t.id = ti.tenant_id
-               WHERE ti.provider = 'google_sheets' AND ti.is_active = true AND t.status = 'active'`,
-        values: []
-      }) as any[];
-      tenants = res || [];
-    }
-
-    if (tenants.length === 0) {
-      return NextResponse.json({ success: true, message: 'No active tenants with Google Sheets integration found' });
-    }
-
-    log.info('[CRON_SYNC_START]', { tenantCount: tenants.length, source: 'cron_sync' });
-
-    // ── 3. Process each tenant ──
-    const results: Record<string, any> = {};
-
-    for (const tenant of tenants) {
-      try {
-        const db = withTenantDB(tenant.id);
-
-        // Load credentials
-        const integrations = await db.executeSafe({
-          text: `SELECT credentials FROM tenant_integrations WHERE tenant_id = $1 AND provider = 'google_sheets' LIMIT 1`,
-          values: [tenant.id]
-        }) as any[];
-
-        if (!integrations || integrations.length === 0) {
-          results[tenant.name] = { skipped: true, reason: 'No credentials' };
-          continue;
-        }
-
-        let payload;
-        try {
-          const { decryptPayload } = await import('@/lib/core/encryption');
-          payload = decryptPayload(integrations[0].credentials);
-        } catch (e: any) {
-          log.error('[CRON_DECRYPT_ERROR]', new Error(e?.message || 'Unknown'));
-          results[tenant.name] = { error: 'Decrypt failed' };
-          continue;
-        }
-
-        const { apiKey, spreadsheetId, activeSheets = [] } = payload;
-        if (!apiKey || !spreadsheetId) {
-          results[tenant.name] = { skipped: true, reason: 'Missing apiKey or spreadsheetId' };
-          continue;
-        }
-
-        // Load pipeline routing
-        let outboundChannelId: string | null = null;
-        let greetingGroupId: string | null = null;
-
-        try {
-          const pipeRes = await db.executeSafe({
-            text: `SELECT greeting_group_id, outbound_channel_id FROM ingestion_pipelines WHERE tenant_id = $1 AND provider = 'google_sheets' LIMIT 1`,
-            values: [tenant.id]
-          }) as any[];
-          if (pipeRes && pipeRes.length > 0) {
-            greetingGroupId = pipeRes[0].greeting_group_id || null;
-            outboundChannelId = pipeRes[0].outbound_channel_id || null;
-          }
-        } catch (_) {}
-
-        // Run batch ingestion
-        const result = await ingestSheetBatch({
-          tenantId: tenant.id,
-          tenantName: tenant.name,
-          apiKey,
-          spreadsheetId,
-          activeSheets,
-          outboundChannelId,
-          greetingGroupId,
-          skipAutoMessage: true, // Cron sync: never send auto-messages
-          source: 'cron_sync',
-          maxRowsPerRun: 2000,
-          timeBudgetMs: 45_000,
-        });
-
-        // Update health status (cron_last_run_at)
-        await updateSheetsHealthStatus(
-          tenant.id,
-          result.errors > 0 ? 'warning' : 'healthy',
-          'cron_sync',
-          { created: result.created, duplicates: result.duplicates, errors: result.errors }
-        );
-
-        results[tenant.name] = {
-          created: result.created,
-          updated: result.updated,
-          duplicates: result.duplicates,
-          errors: result.errors,
-          partial: result.partial,
-        };
-
-      } catch (tenantErr: any) {
-        log.error('[CRON_TENANT_ERROR]', tenantErr instanceof Error ? tenantErr : new Error(String(tenantErr)));
-        results[tenant.name] = { error: tenantErr?.message || 'Unknown error' };
-
-        // Record error in health
-        await updateSheetsHealthStatus(tenant.id, 'error', 'cron_sync', {
-          created: 0, duplicates: 0, errors: 1,
-          errorMessage: tenantErr?.message
-        });
-      }
-    }
-
-    log.info('[CRON_SYNC_DONE]', { results });
-
-    return NextResponse.json({ success: true, results });
-
-  } catch (error: any) {
-    log.error('[CRON_SYNC_FATAL]', error instanceof Error ? error : new Error(String(error)));
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
-  } finally {
-    // ── Release overlap lock ──
-    if (lockAcquired && redis) {
-      try {
-        await redis!.del(SYNC_LOCK_KEY);
-      } catch (unlockErr) {
-        // Non-blocking — TTL will auto-expire the lock
-        log.warn('[CRON_SYNC_UNLOCK_ERROR] Failed to release lock, TTL will auto-expire', { error: (unlockErr as any)?.message || String(unlockErr) });
+    } else {
+      // Global POST: ONLY Bearer allowed
+      if (!isCronAuth) {
+        log.warn('[CRON_SYNC_AUTH_FAIL] Unauthorized global POST request');
+        return NextResponse.json({ error: 'Unauthorized: Global POST requires Bearer Token' }, { status: 401 });
       }
     }
   }
+
+  // 4. Dry-Run Connection Test Bypasses DB writes entirely
+  if (isDryRun) {
+    if (!tenantSlug) {
+      return NextResponse.json({ error: 'Tenant parameter is required for dry-run connection test' }, { status: 400 });
+    }
+    if (tenants.length === 0) {
+      return NextResponse.json({ error: 'Tenant not found or inactive' }, { status: 404 });
+    }
+
+    const tenantId = tenants[0].id;
+    const db = withTenantDB(tenantId);
+    let credentialsValid = false;
+    let spreadsheetConfigured = false;
+
+    try {
+      const integration = await db.executeSafe({
+        text: `SELECT credentials FROM tenant_integrations WHERE tenant_id = $1 AND provider = 'google_sheets' LIMIT 1`,
+        values: [tenantId]
+      }) as any[];
+      if (integration.length > 0 && integration[0].credentials) {
+        const { decryptPayload } = await import('@/lib/core/encryption');
+        const decrypted = decryptPayload(integration[0].credentials);
+        if (decrypted && decrypted.apiKey && decrypted.spreadsheetId) {
+          credentialsValid = true;
+        }
+      }
+
+      const pipeline = await db.executeSafe({
+        text: `SELECT config FROM ingestion_pipelines WHERE tenant_id = $1 AND provider = 'google_sheets' LIMIT 1`,
+        values: [tenantId]
+      }) as any[];
+      if (pipeline.length > 0 && pipeline[0].config) {
+        const cfg = typeof pipeline[0].config === 'string' ? JSON.parse(pipeline[0].config) : pipeline[0].config;
+        if (cfg && cfg.spreadsheetId) {
+          spreadsheetConfigured = true;
+        }
+      }
+    } catch (err: any) {
+      log.error('[DRY_RUN_CHECK_FAIL] Dry-run validation error', err);
+      return NextResponse.json({ success: false, error: `Validation error: ${err.message}` }, { status: 400 });
+    }
+
+    log.info('[DRY_RUN_SUCCESS] Connection test successful', { tenantSlug });
+    return NextResponse.json({
+      success: true,
+      dryRun: true,
+      message: 'Connection test successful',
+      tenant: tenantSlug,
+      checks: {
+        credentialsValid,
+        spreadsheetConfigured
+      }
+    });
+  }
+
+  // 5. Tenant Resolution for Sync
+  if (!tenantSlug) {
+    // Global sync path: fetch all active tenants
+    const res = await systemDb.executeSafe({
+      text: `SELECT t.id, t.name, t.slug FROM tenants t
+             JOIN tenant_integrations ti ON t.id = ti.tenant_id
+             WHERE ti.provider = 'google_sheets' AND ti.is_active = true AND t.status = 'active'`,
+      values: []
+    }) as any[];
+    tenants = res || [];
+  } else {
+    if (tenants.length === 0) {
+      return NextResponse.json({ success: false, error: 'Tenant not found or inactive' }, { status: 404 });
+    }
+  }
+
+  // Apply Allowlist Filtering if configured
+  const allowlistEnv = process.env.GOOGLE_SHEETS_SERVER_SYNC_TENANT_ALLOWLIST;
+  if (allowlistEnv) {
+    const allowlist = allowlistEnv.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+    if (allowlist.length > 0) {
+      tenants = tenants.filter(t => allowlist.includes(t.slug.toLowerCase()));
+    }
+  }
+
+  if (tenants.length === 0) {
+    return NextResponse.json({ success: true, message: 'No matching active tenants found for sync' });
+  }
+
+  // 6. Loop Sync Execution with Concurrency Lock, Batching, Timeout Guard, and Error Isolation
+  const results: Record<string, any> = {};
+  let processedCount = 0;
+  let failedCount = 0;
+  let skippedCount = 0;
+  let timedOutEarly = false;
+
+  const maxTenantsPerRun = 20;
+  const maxDurationMs = 50000; // 50 seconds timeout guard
+
+  for (const tenant of tenants) {
+    // Concurrency limit per execution run
+    if (processedCount >= maxTenantsPerRun) {
+      log.warn('[CRON_SYNC_BATCH_LIMIT] Reached max processed tenants limit per run', { maxTenantsPerRun });
+      skippedCount += (tenants.length - processedCount - failedCount - skippedCount);
+      break;
+    }
+
+    // Time budget check
+    const elapsed = Date.now() - startTime;
+    if (elapsed > maxDurationMs) {
+      log.warn('[CRON_SYNC_TIMEOUT_GUARD] Timeout limit reached, stopping execution loop early', { elapsed });
+      timedOutEarly = true;
+      skippedCount += (tenants.length - processedCount - failedCount - skippedCount);
+      break;
+    }
+
+    // Acquire lock for this tenant slug
+    const lockToken = await acquireTenantLock(tenant.slug);
+    if (!lockToken) {
+      log.warn('[CRON_SYNC_TENANT_LOCKED] Skip tenant because sync is already running', { tenantSlug: tenant.slug });
+      results[tenant.name] = { skipped: true, reason: 'concurrency_lock_held' };
+      skippedCount++;
+      continue;
+    }
+
+    try {
+      const db = withTenantDB(tenant.id);
+
+      const integrations = await db.executeSafe({
+        text: `SELECT credentials FROM tenant_integrations WHERE tenant_id = $1 AND provider = 'google_sheets' LIMIT 1`,
+        values: [tenant.id]
+      }) as any[];
+
+      if (!integrations || integrations.length === 0) {
+        results[tenant.name] = { skipped: true, reason: 'No credentials' };
+        skippedCount++;
+        continue;
+      }
+
+      let payload;
+      try {
+        const { decryptPayload } = await import('@/lib/core/encryption');
+        payload = decryptPayload(integrations[0].credentials);
+      } catch (e: any) {
+        log.error('[CRON_DECRYPT_ERROR]', new Error(e?.message || 'Unknown'));
+        results[tenant.name] = { error: 'Decrypt failed' };
+        failedCount++;
+        continue;
+      }
+
+      const { apiKey, spreadsheetId, activeSheets = [] } = payload;
+      if (!apiKey || !spreadsheetId) {
+        results[tenant.name] = { skipped: true, reason: 'Missing apiKey or spreadsheetId' };
+        skippedCount++;
+        continue;
+      }
+
+      let outboundChannelId: string | null = null;
+      let greetingGroupId: string | null = null;
+
+      try {
+        const pipeRes = await db.executeSafe({
+          text: `SELECT greeting_group_id, outbound_channel_id FROM ingestion_pipelines WHERE tenant_id = $1 AND provider = 'google_sheets' LIMIT 1`,
+          values: [tenant.id]
+        }) as any[];
+        if (pipeRes && pipeRes.length > 0) {
+          greetingGroupId = pipeRes[0].greeting_group_id || null;
+          outboundChannelId = pipeRes[0].outbound_channel_id || null;
+        }
+      } catch (_) {}
+
+      // Run Ingestion
+      const result = await ingestSheetBatch({
+        tenantId: tenant.id,
+        tenantName: tenant.name,
+        apiKey,
+        spreadsheetId,
+        activeSheets,
+        outboundChannelId,
+        greetingGroupId,
+        skipAutoMessage: true, // Cron sync: never send auto-messages
+        source: 'cron_sync',
+        maxRowsPerRun: 2000,
+        timeBudgetMs: 45_000,
+      });
+
+      // Update Health Status
+      await updateSheetsHealthStatus(
+        tenant.id,
+        result.errors > 0 ? 'warning' : 'healthy',
+        'cron_sync',
+        { created: result.created, duplicates: result.duplicates, errors: result.errors }
+      );
+
+      results[tenant.name] = {
+        created: result.created,
+        updated: result.updated,
+        duplicates: result.duplicates,
+        errors: result.errors,
+        partial: result.partial,
+      };
+
+      processedCount++;
+
+    } catch (tenantErr: any) {
+      log.error('[CRON_TENANT_ERROR]', tenantErr instanceof Error ? tenantErr : new Error(String(tenantErr)));
+      results[tenant.name] = { error: tenantErr?.message || 'Unknown error' };
+      failedCount++;
+
+      await updateSheetsHealthStatus(tenant.id, 'error', 'cron_sync', {
+        created: 0, duplicates: 0, errors: 1,
+        errorMessage: tenantErr?.message
+      });
+    } finally {
+      // Always release the tenant lock
+      await releaseTenantLock(tenant.slug, lockToken);
+    }
+  }
+
+  const durationMs = Date.now() - startTime;
+  log.info('[CRON_SYNC_DONE]', { 
+    results, 
+    processedCount, 
+    failedCount, 
+    skippedCount, 
+    durationMs, 
+    timedOutEarly 
+  });
+
+  return NextResponse.json({
+    success: true,
+    processedTenantsCount: processedCount,
+    failedTenantsCount: failedCount,
+    skippedTenantsCount: skippedCount,
+    durationMs,
+    timedOutEarly,
+    results
+  });
+}
+
+export async function GET(request: NextRequest) {
+  return handleSyncRequest(request, 'GET');
+}
+
+export async function POST(request: NextRequest) {
+  return handleSyncRequest(request, 'POST');
 }

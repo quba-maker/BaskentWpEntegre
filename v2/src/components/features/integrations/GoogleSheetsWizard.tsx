@@ -35,83 +35,187 @@ interface AppsScriptSnippetProps {
 function AppsScriptSnippet({ webhookUrl, tenantSlug, secret, sheetName }: AppsScriptSnippetProps) {
   const [copied, setCopied] = useState(false);
 
-  const code = `// Google Sheets Webhook Entegrasyonu
+  const code = `// Google Sheets Webhook & Auto-Sync Entegrasyonu
 const WEBHOOK_URL = "${webhookUrl}";
 const TENANT_SLUG = "${tenantSlug}";
 const WEBHOOK_SECRET = "${secret || 'PASTE_SECRET_HERE'}";
 const FORM_SHEET_NAME = "${sheetName}";
 
+// ═══════════════════════════════════════════════════════
+// AUTOMATIC TRIGGER SETUP (RUN THIS ONCE)
+// ═══════════════════════════════════════════════════════
+
+// Bu fonksiyonu editörde seçip "Çalıştır" (Run) butonuna basmanız yeterlidir.
+function setupQubaTriggers() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  
+  // 1. Temizlik yap
+  removeQubaTriggers();
+  
+  // 2. onFormSubmit tetikleyicisi (Form Gönderildiğinde çalışır - anlık)
+  ScriptApp.newTrigger("onFormSubmit")
+    .forSpreadsheet(ss)
+    .onFormSubmit()
+    .create();
+    
+  // 3. catchUpSync tetikleyicisi (Periyodik kontrol - 15 dakikada bir)
+  ScriptApp.newTrigger("catchUpSync")
+    .timeBased()
+    .everyMinutes(15)
+    .create();
+    
+  Logger.log("✓ Quba tetikleyicileri kuruldu:");
+  Logger.log("- onFormSubmit (Anlık Form Gönderimi)");
+  Logger.log("- catchUpSync (Zamanlayıcı: 15 dakikada bir)");
+  
+  // 4. Bağlantı Testini Çalıştır
+  testQubaConnection();
+}
+
+// Quba tetikleyicilerini temizleme
+function removeQubaTriggers() {
+  var triggers = ScriptApp.getProjectTriggers();
+  var count = 0;
+  for (var i = 0; i < triggers.length; i++) {
+    var fnName = triggers[i].getHandlerFunction();
+    if (fnName === "onFormSubmit" || fnName === "catchUpSync") {
+      ScriptApp.deleteTrigger(triggers[i]);
+      count++;
+    }
+  }
+  Logger.log("✓ Eski Quba tetikleyicileri temizlendi (Sayı: " + count + ").");
+}
+
+// ═══════════════════════════════════════════════════════
+// WEBHOOK & CRON HANDLERS
+// ═══════════════════════════════════════════════════════
+
+// Anlık form gönderimlerini yakalar
 function onFormSubmit(e) {
   try {
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(FORM_SHEET_NAME);
-    if (!sheet) {
-      Logger.log("Hata: " + FORM_SHEET_NAME + " isimli sekme bulunamadı.");
+    var sheet = e.range.getSheet();
+    var sheetName = sheet.getName();
+    
+    // Sadece seçili sekmeyi işle
+    if (sheetName !== FORM_SHEET_NAME) {
+      Logger.log("Farklı sekme (" + sheetName + "), işlem atlandı.");
       return;
     }
-    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-    const rowValues = e.range.getValues()[0];
     
-    const rowData = {};
-    for (let i = 0; i < headers.length; i++) {
-      if (headers[i]) {
-        rowData[headers[i]] = rowValues[i];
-      }
-    }
+    var rowNumber = e.range.getRow();
+    var lastCol = sheet.getLastColumn();
     
-    sendWebhook(rowData);
+    var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0]
+      .map(function(h) { return String(h).trim(); });
+    var values = sheet.getRange(rowNumber, 1, 1, lastCol).getValues()[0]
+      .map(function(v) { return String(v || ''); });
+    
+    var payload = {
+      event_type: 'form_submit',
+      sheet_name: sheetName,
+      row_number: rowNumber,
+      headers: headers,
+      values: values,
+      timestamp: new Date().toISOString(),
+      tenant_slug: TENANT_SLUG
+    };
+    
+    sendToQuba('/sheets-webhook', payload, false);
   } catch (err) {
-    Logger.log("Hata: " + err.toString());
+    Logger.log("onFormSubmit Hatası: " + err.toString());
   }
 }
 
-function sendWebhook(data) {
-  const timestamp = Math.floor(Date.now() / 1000).toString();
-  const payload = JSON.stringify({
+// 15 dakikada bir yedek tarama tetikler
+function catchUpSync() {
+  try {
+    var payload = {
+      trigger: 'time_driven_catchup',
+      tenant_slug: TENANT_SLUG,
+      timestamp: new Date().toISOString()
+    };
+    sendToQuba('/cron-form-sync', payload, false);
+  } catch (err) {
+    Logger.log("catchUpSync Hatası: " + err.toString());
+  }
+}
+
+// Bağlantı Doğrulama Testi (Dry-Run)
+function testQubaConnection() {
+  Logger.log("Quba bağlantısı test ediliyor...");
+  var payload = {
+    trigger: 'health_ping',
     tenant_slug: TENANT_SLUG,
-    data: data
-  });
+    timestamp: new Date().toISOString()
+  };
+  sendToQuba('/cron-form-sync', payload, true);
+}
+
+// ═══════════════════════════════════════════════════════
+// HTTP & SECURITY HELPERS
+// ═══════════════════════════════════════════════════════
+
+function sendToQuba(endpoint, payload, isDryRun) {
+  var targetUrl = WEBHOOK_URL.replace('/sheets-webhook', endpoint) 
+    + '?tenant=' + TENANT_SLUG;
+    
+  if (isDryRun) {
+    targetUrl += '&dryRun=true';
+  }
+
+  var bodyStr = JSON.stringify(payload);
+  var timestamp = Math.floor(Date.now() / 1000).toString();
   
   // HMAC SHA256 İmzası Üret
-  const signatureBytes = Utilities.computeHmacSignature(
-    Utilities.MacAlgorithm.HMAC_SHA_256,
-    timestamp + "." + payload,
-    WEBHOOK_SECRET
-  );
-  
-  // Hex formatına çevir
-  let signature = "";
-  for (let i = 0; i < signatureBytes.length; i++) {
-    let byteVal = signatureBytes[i];
-    if (byteVal < 0) byteVal += 256;
-    let byteString = byteVal.toString(16);
-    if (byteString.length == 1) byteString = "0" + byteString;
-    signature += byteString;
-  }
-  
-  const options = {
-    method: "post",
-    contentType: "application/json",
+  var signatureData = timestamp + '.' + bodyStr;
+  var signature = 'sha256=' + computeHmacSha256(WEBHOOK_SECRET, signatureData);
+
+  var options = {
+    method: 'post',
+    contentType: 'application/json',
     headers: {
-      "x-sheets-signature": "sha256=" + signature,
-      "x-sheets-timestamp": timestamp
+      'x-sheets-signature': signature,
+      'x-sheets-timestamp': timestamp
     },
-    payload: payload,
+    payload: bodyStr,
     muteHttpExceptions: true
   };
-  
-  const response = UrlFetchApp.fetch(WEBHOOK_URL, options);
-  Logger.log("Response: " + response.getContentText());
+
+  try {
+    var response = UrlFetchApp.fetch(targetUrl, options);
+    var code = response.getResponseCode();
+    var text = response.getContentText();
+    
+    if (code >= 200 && code < 300) {
+      if (isDryRun) {
+        Logger.log("✓ Quba bağlantı testi başarılı! Sunucu yanıtı: " + text);
+      } else {
+        Logger.log("✓ İstek başarıyla gönderildi (HTTP " + code + ")");
+      }
+    } else {
+      Logger.log("❌ İstek başarısız oldu (HTTP " + code + "): " + text);
+    }
+  } catch (err) {
+    Logger.log("❌ Gönderim hatası: " + err.toString());
+  }
 }
 
-// Manuel test fonksiyonu (Otomatik tetiklenmez, manuel çalıştırılabilir)
-function testWebhook() {
-  const testData = {
-    "Ad Soyad": "Test Kullanıcısı",
-    "Telefon": "+905000000000",
-    "E-posta": "test@quba.ai",
-    "Not": "Bu bir manuel test gönderimidir."
-  };
-  sendWebhook(testData);
+function computeHmacSha256(secret, data) {
+  var signatureBytes = Utilities.computeHmacSignature(
+    Utilities.MacAlgorithm.HMAC_SHA_256,
+    data,
+    secret
+  );
+  
+  var signature = '';
+  for (var i = 0; i < signatureBytes.length; i++) {
+    var byteVal = signatureBytes[i];
+    if (byteVal < 0) byteVal += 256;
+    var byteString = byteVal.toString(16);
+    if (byteString.length === 1) byteString = '0' + byteString;
+    signature += byteString;
+  }
+  return signature;
 }`;
 
   const handleCopy = () => {
@@ -125,30 +229,33 @@ function testWebhook() {
       {/* Kurulum Adımları */}
       <div className="bg-slate-50 border border-slate-200/60 p-4 rounded-xl space-y-3">
         <h5 className="text-[12px] font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
-          <Settings2 className="w-3.5 h-3.5 text-slate-500" /> Apps Script Kurulum Adımları
+          <Settings2 className="w-3.5 h-3.5 text-slate-500" /> Apps Script Otomatik Kurulum Adımları
         </h5>
+        <p className="text-[12px] text-slate-500 leading-relaxed font-medium">
+          Otomatik senkronizasyon için sunucu tarafında periyodik Vercel cron tanımları gerekmez. Quba, verileri Google Sheets tetikleyicileriyle (event-driven) çeker. Kurulum adımları son derece basittir:
+        </p>
         <ol className="text-[12px] text-slate-600 space-y-2.5 list-decimal list-inside leading-relaxed font-medium">
           <li>
             <strong>Gizli Anahtarı Üretin:</strong> Yukarıdaki <code>"Gizli Anahtarı Yenile"</code> butonuna basın ve üretilen gerçek gizli anahtarı <strong>hemen kopyalayın</strong> (güvenlik sebebiyle bu değer sadece bir kez gösterilir).
           </li>
           <li>
-            <strong>Şablon Kodunu Kopyalayın:</strong> Aşağıdaki <code>"Kodu Kopyala"</code> butonuyla Apps Script şablon kodunu kopyalayın.
+            <strong>Şablon Kodunu Kopyalayın:</strong> Aşağıdaki <code>"Kodu Kopyala"</code> butonuyla otomatik hazırlanan şablon kodunu kopyalayın.
           </li>
           <li>
-            <strong>Editörü Açın:</strong> Google Sheet tablonuzda üst menüden <code>Uzantılar (Extensions) &rarr; Apps Script</code> yolunu izleyin ve kopyaladığınız kodu buraya yapıştırın.
+            <strong>Editörü Açın:</strong> Google Sheet tablonuzda üst menüden <code>Uzantılar (Extensions) &rarr; Apps Script</code> yolunu izleyin, editördeki tüm mevcut kodları temizleyin ve kopyaladığınız yeni kodu buraya yapıştırın.
           </li>
           <li>
-            <strong>Gizli Anahtarı Tanımlayın:</strong> Kodun en üstünde yer alan <code>WEBHOOK_SECRET = "..."</code> kısmına kopyaladığınız gerçek gizli anahtarı yapıştırın.
+            <strong>Gizli Anahtarı Tanımlayın:</strong> Yapıştırdığınız kodun en üstünde yer alan <code>WEBHOOK_SECRET = "..."</code> kısmına kopyaladığınız gerçek gizli anahtarı yapıştırın.
           </li>
           <li>
-            <strong>Tetikleyicileri (Triggers) Ekleyin:</strong> Sol menüdeki saat simgesine (Tetikleyiciler) tıklayıp iki yeni tetikleyici ekleyin:
+            <strong>Otomatik Tetikleyicileri Kurun:</strong> Kod editörünün üstündeki fonksiyon listesinden <code>setupQubaTriggers</code> fonksiyonunu seçin ve <strong>"Çalıştır" (Run)</strong> butonuna basın. Tetikleyiciler arka planda kurulacaktır:
             <ul className="list-disc list-inside pl-4 mt-1.5 space-y-1 text-slate-500 text-[11px]">
-              <li><code>onFormSubmit</code> → Etkinlik kaynağı: <strong>E-tablodan</strong> → Etkinlik türü: <strong>Form gönderildiğinde</strong></li>
-              <li><code>catchUpSync</code> → Etkinlik kaynağı: <strong>Zamana dayalı</strong> → Dakika zamanlayıcı: <strong>15 dakikada bir</strong></li>
+              <li><strong>Anlık Aktarım (onFormSubmit):</strong> Form e-tabloya düştüğü anda anlık olarak panele aktarılır.</li>
+              <li><strong>Yedek Kontrol (catchUpSync):</strong> Yaklaşık 15 dakikada bir otomatik yedek tarama yapılır.</li>
             </ul>
           </li>
           <li>
-            <strong>Kaydet ve Yetkilendir:</strong> Kod düzenleyiciyi kaydedin. Tetikleyicileri kaydederken ve ilk çalıştırmada sizden istenecek Google hesap yetkilerini/izinlerini onaylayın. Apps Script ekranından son çalışma durumunu izleyebilirsiniz.
+            <strong>Yetkilendirmeyi Onaylayın:</strong> İlk çalıştırmada sizden istenecek standart Google hesap izinlerini onaylayın. Apps Script ekranının altındaki günlüklerden bağlantı testinin başarılı olduğunu izleyebilirsiniz.
           </li>
         </ol>
       </div>
@@ -321,9 +428,17 @@ export function GoogleSheetsWizard({ isOpen, onClose, onComplete }: { isOpen: bo
     
     if (res.success && res.tabs) {
       setTabs(res.tabs);
-      // Auto-select first tab if none selected
+      // Auto-select recommended tab if none selected
       if (res.tabs.length > 0 && selectedTabs.length === 0) {
-        setSelectedTabs([res.tabs[0].title]);
+        const recommendedKeywords = ['form yanıtları', 'form responses', 'form yanitlari', 'responses', 'yanıtlar', 'yanitlar'];
+        const matchedTab = res.tabs.find((t: any) => 
+          recommendedKeywords.some(keyword => t.title.toLowerCase().includes(keyword))
+        );
+        if (matchedTab) {
+          setSelectedTabs([matchedTab.title]);
+        } else {
+          setSelectedTabs([res.tabs[0].title]);
+        }
       }
     } else {
       setTabsError(res.error || 'Sheet okunamadı — paylaşım ayarlarını kontrol edin');
@@ -446,11 +561,21 @@ export function GoogleSheetsWizard({ isOpen, onClose, onComplete }: { isOpen: bo
       {/* Webhook & Secret Rotation Section */}
       <div className="border-t pt-5 mt-6 border-gray-100 space-y-4">
         <h4 className="text-[14px] font-bold flex items-center gap-1.5" style={{ color: 'var(--q-text-primary)' }}>
-          <BrainCircuit className="w-4 h-4 text-indigo-500" /> Webhook Entegrasyonu (Gelişmiş)
+          <BrainCircuit className="w-4 h-4 text-indigo-500" /> Otomatik Tetikleyici Kurulumu
         </h4>
-        <p className="text-[12px] text-gray-500 leading-relaxed">
-          Google Sheets App Script üzerinden anlık veri akışı kurmak için aşağıdaki webhook URL'sini, tenant slug ve gizli anahtarı kullanın.
-        </p>
+        <div className="bg-indigo-50/50 border border-indigo-100 p-4 rounded-xl space-y-2">
+          <p className="text-[12px] text-indigo-950 font-semibold leading-relaxed">
+            ⚡ Otomatik senkronizasyon için sunucu tarafında periyodik Vercel cron tanımları veya QStash gerekmez. Quba, verileri Google Sheets tetikleyicileriyle (event-driven) çeker.
+          </p>
+          <p className="text-[12px] text-indigo-800 leading-relaxed font-medium">
+            Aşağıdaki hazır Apps Script şablon kodunu kopyalayıp e-tablonuza yapıştırın ve <strong>setupQubaTriggers()</strong> fonksiyonunu bir kez çalıştırın. Sistem tetikleyicileri otomatik kuracaktır:
+          </p>
+          <ul className="text-[11px] text-indigo-700 space-y-1 font-semibold list-disc list-inside">
+            <li>Anlık Aktarım: Yeni form e-tabloya düştüğü anda anlık olarak panele aktarılır.</li>
+            <li>Yedek Kontrol: Yaklaşık 15 dakikada bir otomatik yedek senkronizasyon yapılır.</li>
+            <li>Kullanıcının herhangi bir manuel tetikleyici / zaman seçimi yapması gerekmez.</li>
+          </ul>
+        </div>
 
         {/* Tenant Slug Field */}
         <div>
