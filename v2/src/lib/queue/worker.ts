@@ -3996,9 +3996,11 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       return;
     }
 
-    // Check 5: No bot outbound has already been sent for this inbound sequence (latest outbound is before the latest inbound)
-    const latestOutboundQuery = await db.executeSafe({
-      text: `SELECT created_at FROM messages WHERE tenant_id = $1 AND conversation_id = $2 AND direction = 'out' ORDER BY created_at DESC LIMIT 1`,
+    // Check 5: No bot outbound has already been sent for this inbound sequence
+    // P0.5: Strengthened — only checks bot-generated messages (model_used IS NOT NULL) to avoid
+    // counting operator messages as bot responses. Prevents duplicate LLM generation on QStash retries.
+    const latestBotOutboundQuery = await db.executeSafe({
+      text: `SELECT created_at FROM messages WHERE tenant_id = $1 AND conversation_id = $2 AND direction = 'out' AND model_used IS NOT NULL ORDER BY created_at DESC LIMIT 1`,
       values: [tenantId, conversationId]
     }) as any[];
 
@@ -4007,11 +4009,15 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       values: [targetMessageId, tenantId]
     }) as any[];
 
-    if (latestOutboundQuery.length > 0 && latestInboundTime.length > 0) {
-      const outTime = new Date(latestOutboundQuery[0].created_at).getTime();
+    if (latestBotOutboundQuery.length > 0 && latestInboundTime.length > 0) {
+      const outTime = new Date(latestBotOutboundQuery[0].created_at).getTime();
       const inTime = new Date(latestInboundTime[0].created_at).getTime();
       if (outTime > inTime) {
-        this.log.info(`[DEBOUNCE_WORKER] Bot response already sent for this inbound sequence, exit`, { traceId });
+        this.log.info(`[DEBOUNCE_WORKER] Bot response already sent for this inbound sequence (duplicate guard), exit`, { 
+          traceId, 
+          conversationId,
+          timeDiffMs: outTime - inTime 
+        });
         return;
       }
     }

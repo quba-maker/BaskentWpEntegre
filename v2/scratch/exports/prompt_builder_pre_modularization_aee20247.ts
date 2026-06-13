@@ -5,10 +5,6 @@ import { telemetry } from '../../observability/telemetry';
 import { buildTimeContext } from '@/lib/utils/timezone';
 import { resolvePatientNameDetailed } from '@/lib/utils/patient-name-resolver';
 import { resolvePatientCountryDetailed } from '@/lib/utils/country-normalizer';
-import { buildObjectionPolicy } from './policies/objection-policy';
-import { buildFewShotPolicy } from './policies/few-shot-policy';
-import { buildProgressFunnelPolicy } from './policies/progress-funnel-policy';
-
 
 export class PromptBuilder {
   /**
@@ -83,6 +79,7 @@ export class PromptBuilder {
       organizationShortName: ''
     };
     const pName = identityConfig.personaName || '';
+    const orgName = identityConfig.organizationName || '';
     const orgShort = identityConfig.organizationShortName || '';
 
     // IDENTITY & BEHAVIORAL CONTEXT (Dynamic CRM Injection)
@@ -501,7 +498,7 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/koordinatör arasında planlanan
 ==================================================\n`;
         }
       }
-    } catch {
+    } catch (e) {
       // Non-fatal
     }
 
@@ -648,7 +645,7 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/koordinatör arasında planlanan
           confirmationDirective += `=======================================================\n`;
         }
       }
-    } catch {
+    } catch (err) {
       // Non-fatal, prevent crashing during prompt build
     }
 
@@ -686,60 +683,32 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/koordinatör arasında planlanan
 ⚠️ GÜVENLİK SINIRI: Tıbbi teşhis koyma, reçete/ilaç önerme, kesin tedavi sözü verme. Acil belirtilerde sağlık kuruluşuna yönlendir. Tüm güvenlik ve kalite kuralları aynen geçerlidir.`;
     }
 
-    // P0.5: Modular policy helpers gated behind feature flag (default OFF)
-    // Policies ADD content without removing existing behavior, but over-constraint paradox
-    // causes LLM to produce generic fallback responses. Disabled until SaaS Policy Engine phase.
-    const enableModularPolicies = process.env.ENABLE_MODULAR_PROMPT_POLICIES === 'true';
-
-    let objectionPolicyText = '';
-    let fewShotPolicyText = '';
-    let progressFunnelPolicyText = '';
-    if (enableModularPolicies) {
-      objectionPolicyText = buildObjectionPolicy({ channelType: brain.context.channel, isHealthcare });
-      fewShotPolicyText = buildFewShotPolicy({ channelType: brain.context.channel, responseStyle: style, isHealthcare });
-      progressFunnelPolicyText = buildProgressFunnelPolicy({ isHealthcare });
-    }
-
-    let finalPrompt = `${base}`;
-    finalPrompt += `\n${crmContext}`;
-    if (healthcareOverlay) {
-      finalPrompt += `\n${healthcareOverlay}`;
-    }
-    if (objectionPolicyText) {
-      finalPrompt += `\n${objectionPolicyText}`;
-    }
-    if (progressFunnelPolicyText) {
-      finalPrompt += `\n${progressFunnelPolicyText}`;
-    }
-    if (fewShotPolicyText) {
-      finalPrompt += `\n${fewShotPolicyText}`;
-    }
-    finalPrompt += `\n${dynamicBrakesContext}`;
-    finalPrompt += `\n${knowledgeInjection}`;
-    finalPrompt += `\n${timeContext}`;
-    finalPrompt += `\n${confirmationContext}`;
-    finalPrompt += `\n${phaseContext}`;
-    finalPrompt += `\n${langContextText}`;
-    finalPrompt += `\n${directiveContext}`;
-    finalPrompt += `\n${confirmationDirective}`;
-
+    let finalPrompt = `${base}\n${crmContext}\n${healthcareOverlay}\n${dynamicBrakesContext}\n${knowledgeInjection}\n${timeContext}\n${confirmationContext}\n${phaseContext}\n${langContextText}\n${directiveContext}\n${confirmationDirective}`;
     if (learningHintsContext) {
       finalPrompt += `\n${learningHintsContext}`;
     }
     finalPrompt += styleDirective;
     finalPrompt += `\n${safetyGuardrails}`;
 
-    // P0.5: Positive Guidance — steer model toward contextual responses instead of generic fallbacks.
-    // This replaces the duplicate overridingNegativeConstraints block (which repeated the same rules
-    // already present in dynamicBrakesContext, causing over-constraint paradox).
-    finalPrompt += `\n\n=== ✅ CEVAP ÜRETME REHBERİ (POSITIVE GUIDANCE) ===
-- Hastanın/müşterinin son mesajındaki konuya doğrudan ve bağlama özel cevap ver.
-- Hasta şikayet, ad, süre veya uygun zaman verdiyse bunu tekrar sorma; kabul et ve akışı ilerlet.
-- Soru net değilse mevcut konuşma geçmişinden çıkarım yap ve yardımcı ol.
-- Genel kaçış cümleleri yerine hastanın yazdığı konuya özel, kısa ve doğal bir cevap üret.
-- "Mesajınızı aldım, şikâyetinizi daha açık yazabilir misiniz?" gibi bağlamsız kalıpları KULLANMA.
-- Hasta şikayet bildirdiyse "Geçmiş olsun" diyerek empati kur ve ilgili tıbbi branşa/hizmete yönlendir.
-===================================================\n`;
+    if (ctaOfferedRecently || angryPatientMode || isFirstAssistantTurn || (!isFirstAssistantTurn && !asksIdentity && !asksName) || unifiedContext?.patientProvidedAvailability) {
+      finalPrompt += `\n\n=== 🚨 DİNAMİK ENGELLEME VE FREN TALİMATLARI (OVERRIDING NEGATIVE CONSTRAINTS) ===\n`;
+      if (isFirstAssistantTurn) {
+        finalPrompt += `- KESİN YASAK: Bu hastaya verdiğin İLK CEVAP olduğu için kesinlikle randevu planlama, arama, telefon görüşmesi teklif etme, uygun zaman aralığı sorma! Sadece hastanın sorusuna net ve kısa cevap ver.\n`;
+      }
+      if (angryPatientMode) {
+        finalPrompt += `- KESİN YASAK: Hasta kızgın/memnuniyetsiz olduğu için kesinlikle yeni bir randevu, telefon araması, arama, görüşme teklif etme, uygun zaman sorma! Sadece hastadan özür dile ('Kusura bakmayın' veya 'Özür dilerim' diyerek başla) ve sorusuna cevap ver.\n`;
+      }
+      if (ctaOfferedRecently) {
+        finalPrompt += `- KESİN YASAK: Son asistan mesajlarında randevu/telefon araması teklif edildiği için kesinlikle yeni bir randevu veya arama teyit etme, teklif etme, uygun zaman sorma!\n`;
+      }
+      if (unifiedContext?.patientProvidedAvailability) {
+        finalPrompt += `- HASTA UYGUN ZAMAN BİLDİRDİ KURALI: Hasta uygun gün/saat verdi. Kesinlikle yeni bir randevu/arama CTA'sı isteme, "uygun zaman paylaşır mısınız?" deme, "Türkiye saatiyle" kelimesini kullanma. Sadece uygun olduğu zamanı not aldığını ve koordinatörlerin/hasta danışmanlarının planlamayı kontrol edeceğini belirten kısa bir onay cevabı yaz.\n`;
+      }
+      if (!isFirstAssistantTurn && !asksIdentity && !asksName) {
+        finalPrompt += `- KESİN YASAK (KENDİNİ TANITMA VE SELAMLAMA YASAĞI): Konuşmanın devamındayız (bu ilk mesajın değil) ve hasta ismini/kimliğini sormamıştır. Kesinlikle ${pName ? `"${pName} ben", "ben ${pName}", ` : ''}${orgShort ? `"${orgShort}'dan", ` : ''}kendini tanıtan veya ismini söyleyen ifadeleri KULLANMA. Karşılamayı ilk mesajda zaten yaptın. Mesajına isimsiz, doğrudan hastanın sorusuna cevap vererek başla. Doğrudan konuya gir.\n`;
+      }
+      finalPrompt += `===============================================================================\n`;
+    }
 
     return finalPrompt;
   }

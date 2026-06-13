@@ -299,6 +299,27 @@ export class TurkishReplyQualityGate {
       }
     }
 
+    // P0.5: Generic fallback pattern detection
+    // Catches context-free combination phrases that indicate the LLM produced a
+    // generic non-contextual response. Full phrase match required to avoid false positives.
+    const genericFallbackPatterns = [
+      'mesajinizi aldim' + '.*' + 'sikayetinizi.*acik',
+      'dogru yonlendirebilmem icin.*acik yaz',
+      'sikayetinizi acik yazabilir misiniz',
+      'sikayetinizi acik yazar misiniz',
+      'sikayetinizi biraz daha acik'
+    ];
+    for (const pattern of genericFallbackPatterns) {
+      const regex = new RegExp(pattern, 'i');
+      if (regex.test(cleanText)) {
+        return {
+          valid: false,
+          reason: `generic_fallback_pattern: Bağlamsız genel yanıt kalıbı tespit edildi ("${pattern.substring(0, 40)}")`
+        };
+      }
+    }
+
+
     // 4. CTA blocking logic under options
     if (options?.ctaOfferedRecently || options?.angryPatientMode) {
       let forbiddenCtaPhrases = [
