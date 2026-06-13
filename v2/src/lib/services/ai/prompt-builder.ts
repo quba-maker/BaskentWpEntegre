@@ -5,6 +5,10 @@ import { telemetry } from '../../observability/telemetry';
 import { buildTimeContext } from '@/lib/utils/timezone';
 import { resolvePatientNameDetailed } from '@/lib/utils/patient-name-resolver';
 import { resolvePatientCountryDetailed } from '@/lib/utils/country-normalizer';
+import { buildObjectionPolicy } from './policies/objection-policy';
+import { buildFewShotPolicy } from './policies/few-shot-policy';
+import { buildProgressFunnelPolicy } from './policies/progress-funnel-policy';
+
 
 export class PromptBuilder {
   /**
@@ -79,7 +83,6 @@ export class PromptBuilder {
       organizationShortName: ''
     };
     const pName = identityConfig.personaName || '';
-    const orgName = identityConfig.organizationName || '';
     const orgShort = identityConfig.organizationShortName || '';
 
     // IDENTITY & BEHAVIORAL CONTEXT (Dynamic CRM Injection)
@@ -498,7 +501,7 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/koordinatör arasında planlanan
 ==================================================\n`;
         }
       }
-    } catch (e) {
+    } catch {
       // Non-fatal
     }
 
@@ -645,7 +648,7 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/koordinatör arasında planlanan
           confirmationDirective += `=======================================================\n`;
         }
       }
-    } catch (err) {
+    } catch {
       // Non-fatal, prevent crashing during prompt build
     }
 
@@ -683,12 +686,39 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/koordinatör arasında planlanan
 ⚠️ GÜVENLİK SINIRI: Tıbbi teşhis koyma, reçete/ilaç önerme, kesin tedavi sözü verme. Acil belirtilerde sağlık kuruluşuna yönlendir. Tüm güvenlik ve kalite kuralları aynen geçerlidir.`;
     }
 
-    let finalPrompt = `${base}\n${crmContext}\n${healthcareOverlay}\n${dynamicBrakesContext}\n${knowledgeInjection}\n${timeContext}\n${confirmationContext}\n${phaseContext}\n${langContextText}\n${directiveContext}\n${confirmationDirective}`;
+    const objectionPolicy = buildObjectionPolicy({ channelType: brain.context.channel, isHealthcare });
+    const fewShotPolicy = buildFewShotPolicy({ channelType: brain.context.channel, responseStyle: style, isHealthcare });
+    const progressFunnelPolicy = buildProgressFunnelPolicy({ isHealthcare });
+
+    let finalPrompt = `${base}`;
+    finalPrompt += `\n${crmContext}`;
+    if (healthcareOverlay) {
+      finalPrompt += `\n${healthcareOverlay}`;
+    }
+    if (objectionPolicy) {
+      finalPrompt += `\n${objectionPolicy}`;
+    }
+    if (progressFunnelPolicy) {
+      finalPrompt += `\n${progressFunnelPolicy}`;
+    }
+    if (fewShotPolicy) {
+      finalPrompt += `\n${fewShotPolicy}`;
+    }
+    finalPrompt += `\n${dynamicBrakesContext}`;
+    finalPrompt += `\n${knowledgeInjection}`;
+    finalPrompt += `\n${timeContext}`;
+    finalPrompt += `\n${confirmationContext}`;
+    finalPrompt += `\n${phaseContext}`;
+    finalPrompt += `\n${langContextText}`;
+    finalPrompt += `\n${directiveContext}`;
+    finalPrompt += `\n${confirmationDirective}`;
+
     if (learningHintsContext) {
       finalPrompt += `\n${learningHintsContext}`;
     }
     finalPrompt += styleDirective;
     finalPrompt += `\n${safetyGuardrails}`;
+
 
     if (ctaOfferedRecently || angryPatientMode || isFirstAssistantTurn || (!isFirstAssistantTurn && !asksIdentity && !asksName) || unifiedContext?.patientProvidedAvailability) {
       finalPrompt += `\n\n=== 🚨 DİNAMİK ENGELLEME VE FREN TALİMATLARI (OVERRIDING NEGATIVE CONSTRAINTS) ===\n`;
