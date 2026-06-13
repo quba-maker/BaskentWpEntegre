@@ -2275,6 +2275,7 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
         isRetry = true;
 
         const isCtaBlockFirst = !!qualityGate.reason?.includes('Kritik Fren Engeli');
+        const isGenericFallbackFirst = !!qualityGate.reason?.includes('generic_fallback_pattern');
         const nameExample = identityConfig.personaName || 'Asistan';
         let retryContent = `DİKKAT: Ürettiğin Türkçe metinde ek hatası veya kendini tanıtma tekrarı tespit edildi. Kendini tanıtan kelimeleri/cümleleri (örneğin "Merhaba, ben ${nameExample}...", "${nameExample} ben...") kesinlikle kullanma, doğrudan konuya girerek kısa ve sade bir cevap üret.`;
 
@@ -2284,6 +2285,13 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
           } else {
             retryContent = `DİKKAT: Son mesajlarda zaten randevu/telefon araması teklif edildiği veya kalite freni aktif olduğu için kesinlikle randevu/arama teklif etme, "uygun zaman paylaşır mısınız" veya "arama planlayalım" deme, "Türkiye saatiyle" veya "telefon görüşmesi" gibi yasaklı CTA kelimelerini kullanma. Doğrudan konuya girerek kısa ve sade bir cevap üret.`;
           }
+        } else if (isGenericFallbackFirst) {
+          retryContent = `Önceki cevabın fazla genel kaldı ve kalite kontrolünden geçmedi.
+Hastanın/müşterinin son mesajına özel, kısa ve doğal cevap ver.
+“Doğru yönlendirebilmem için açık yazın”, “şikâyetinizi daha açık yazın”, “mesajınızı aldım” gibi genel kaçış kalıplarını kullanma.
+Son mesaj selamlama ise doğal selamlama yap.
+Konuşma bağlamında isim, konu, şikayet, ürün, form, tarih veya saat varsa bunu tekrar sorma; kabul et ve akışı ilerlet.
+Tek veya iki kısa cümle yaz.`;
         }
 
         const retryContextMessages = [...aiMessages];
@@ -2303,6 +2311,7 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       if (!qualityGate.valid) {
         const isCtaBlockSecond = !!qualityGate.reason?.includes('Kritik Fren Engeli');
         const isIdentityRepetitionSecond = !!qualityGate.reason?.includes('Kimlik zaten tanıtılmıştı');
+        const isGenericFallbackSecond = !!qualityGate.reason?.includes('generic_fallback_pattern');
 
         if (isIdentityRepetitionSecond) {
           this.log.warn(`[QUALITY_GATE] Failed on second attempt due to identity repetition: ${qualityGate.reason}. Applying stripPersonaIntroduction cleanup...`, { traceId });
@@ -2369,6 +2378,48 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
             this.log.error(`[QUALITY_GATE] Safe fallback failed Quality Gate validation: ${fallbackQg.reason}`, undefined, { traceId });
             qualityGate = fallbackQg;
           }
+        } else if (isGenericFallbackSecond) {
+          const { ContextAwareSafeFallbackResolver } = await import('@/lib/services/ai/context-aware-safe-fallback');
+          const fallbackRes = ContextAwareSafeFallbackResolver.resolve({
+            inboundText: content || '',
+            brain,
+            identityConfig,
+            unifiedContext
+          });
+
+          this.log.warn(`[QUALITY_GATE_RECOVERY] Applied deterministic safe fallback. recoveryReason: generic_fallback_pattern, finalPath: ${fallbackRes.finalPath}, textLength: ${fallbackRes.text.length}`, { traceId });
+
+          const recoveryReason = 'generic_fallback_pattern';
+          const finalPath = fallbackRes.finalPath;
+          const originalReason = qualityGate.reason;
+
+          aiResponse.text = fallbackRes.text;
+          qualityGate = { valid: true };
+
+          // Log GENERIC_FALLBACK_DETERMINISTIC_APPLIED to ai_audit_logs
+          await db.executeSafe({
+            text: `INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
+                   VALUES ($1, $2, $3, $4)`,
+            values: [
+              tenantId,
+              'GENERIC_FALLBACK_DETERMINISTIC_APPLIED',
+              `Deterministic context-aware fallback applied due to generic_fallback_pattern failure on retry.`,
+              JSON.stringify({
+                tenantId,
+                conversationId,
+                traceId,
+                reason: originalReason,
+                sector: fallbackRes.sector,
+                hasFormContext: fallbackRes.hasFormContext,
+                hasComplaint: fallbackRes.hasComplaint,
+                finalPath: fallbackRes.finalPath,
+                textLength: fallbackRes.text.length,
+                qualityGateRecoveryApplied: true,
+                recoveryReason,
+                timestamp: new Date().toISOString()
+              })
+            ]
+          });
         } else {
           this.log.warn(`[QUALITY_GATE] Failed on second attempt: ${qualityGate.reason}. No cleanup or fallback applicable.`, { traceId });
         }
@@ -4262,6 +4313,7 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
         this.log.warn(`[DEBOUNCE_WORKER] Quality gate failed on first attempt: ${qualityGate.reason}. Retrying...`, { traceId });
         
         const isCtaBlockFirst = !!qualityGate.reason?.includes('Kritik Fren Engeli');
+        const isGenericFallbackFirst = !!qualityGate.reason?.includes('generic_fallback_pattern');
         const nameExample = identityConfig.personaName || 'Asistan';
         let retryContent = `DİKKAT: Ürettiğin Türkçe metinde ek hatası veya kendini tanıtma tekrarı tespit edildi. Kendini tanıtan kelimeleri/cümleleri (örneğin "Merhaba, ben ${nameExample}...", "${nameExample} ben...") kesinlikle kullanma, doğrudan konuya girerek kısa ve sade bir cevap üret.`;
 
@@ -4271,6 +4323,13 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
           } else {
             retryContent = `DİKKAT: Son mesajlarda zaten randevu/telefon araması teklif edildiği veya kalite freni aktif olduğu için kesinlikle randevu/arama teklif etme, "uygun zaman paylaşır mısınız" veya "arama planlayalım" deme, "Türkiye saatiyle" veya "telefon görüşmesi" gibi yasaklı CTA kelimelerini kullanma. Doğrudan konuya girerek kısa ve sade bir cevap üret.`;
           }
+        } else if (isGenericFallbackFirst) {
+          retryContent = `Önceki cevabın fazla genel kaldı ve kalite kontrolünden geçmedi.
+Hastanın/müşterinin son mesajına özel, kısa ve doğal cevap ver.
+“Doğru yönlendirebilmem için açık yazın”, “şikâyetinizi daha açık yazın”, “mesajınızı aldım” gibi genel kaçış kalıplarını kullanma.
+Son mesaj selamlama ise doğal selamlama yap.
+Konuşma bağlamında isim, konu, şikayet, ürün, form, tarih veya saat varsa bunu tekrar sorma; kabul et ve akışı ilerlet.
+Tek veya iki kısa cümle yaz.`;
         }
 
         const retryMessages = [
@@ -4289,6 +4348,7 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       if (!qualityGate.valid) {
         const isCtaBlockSecond = !!qualityGate.reason?.includes('Kritik Fren Engeli');
         const isIdentityRepetitionSecond = !!qualityGate.reason?.includes('Kimlik zaten tanıtılmıştı');
+        const isGenericFallbackSecond = !!qualityGate.reason?.includes('generic_fallback_pattern');
 
         if (isIdentityRepetitionSecond) {
           this.log.warn(`[DEBOUNCE_WORKER] Quality gate failed on second attempt due to identity repetition: ${qualityGate.reason}. Applying stripPersonaIntroduction cleanup...`, { traceId });
@@ -4355,6 +4415,48 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
             this.log.error(`[DEBOUNCE_WORKER] Safe fallback failed Quality Gate validation: ${fallbackQg.reason}`, undefined, { traceId });
             qualityGate = fallbackQg;
           }
+        } else if (isGenericFallbackSecond) {
+          const { ContextAwareSafeFallbackResolver } = await import('@/lib/services/ai/context-aware-safe-fallback');
+          const fallbackRes = ContextAwareSafeFallbackResolver.resolve({
+            inboundText: latestInboundContent || '',
+            brain,
+            identityConfig,
+            unifiedContext
+          });
+
+          this.log.warn(`[QUALITY_GATE_RECOVERY] Applied deterministic safe fallback in debounce worker. recoveryReason: generic_fallback_pattern, finalPath: ${fallbackRes.finalPath}, textLength: ${fallbackRes.text.length}`, { traceId });
+
+          const recoveryReason = 'generic_fallback_pattern';
+          const finalPath = fallbackRes.finalPath;
+          const originalReason = qualityGate.reason;
+
+          aiResponse.text = fallbackRes.text;
+          qualityGate = { valid: true };
+
+          // Log GENERIC_FALLBACK_DETERMINISTIC_APPLIED to ai_audit_logs
+          await db.executeSafe({
+            text: `INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
+                   VALUES ($1, $2, $3, $4)`,
+            values: [
+              tenantId,
+              'GENERIC_FALLBACK_DETERMINISTIC_APPLIED',
+              `Deterministic context-aware fallback applied due to generic_fallback_pattern failure on retry.`,
+              JSON.stringify({
+                tenantId,
+                conversationId,
+                traceId,
+                reason: originalReason,
+                sector: fallbackRes.sector,
+                hasFormContext: fallbackRes.hasFormContext,
+                hasComplaint: fallbackRes.hasComplaint,
+                finalPath: fallbackRes.finalPath,
+                textLength: fallbackRes.text.length,
+                qualityGateRecoveryApplied: true,
+                recoveryReason,
+                timestamp: new Date().toISOString()
+              })
+            ]
+          });
         } else {
           this.log.warn(`[DEBOUNCE_WORKER] Quality gate failed on second attempt: ${qualityGate.reason}. No cleanup or fallback applicable.`, { traceId });
         }
