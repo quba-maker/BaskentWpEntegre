@@ -275,7 +275,8 @@ export class TurkishReplyQualityGate {
       'sorularinizi anladim',
       'sikayetinizi anladim',
       'talebinizi anladim',
-      'nasil yardimci olabilirim',
+      // P0.6: 'nasil yardimci olabilirim' removed — natural greeting response, was causing
+      // false positives on "merhaba" → human handoff. The institutional form "olabiliriz" was never blocked.
       'yardimci olmak icin buradayim',
       'surecler hakkinda yardimci oluyorum',
       'surecler hakkinda bilgi veriyorum',
