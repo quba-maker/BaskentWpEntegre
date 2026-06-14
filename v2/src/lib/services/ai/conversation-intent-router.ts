@@ -1,5 +1,8 @@
 export type ConversationIntent =
   | 'greeting'
+  | 'identity_question'
+  | 'clarification_question'
+  | 'language_switch'
   | 'transfer_request'
   | 'call_scheduling_request'
   | 'time_availability'
@@ -28,18 +31,55 @@ export class ConversationIntentRouter {
   /**
    * Routes the incoming message text to the most appropriate intent.
    * LLM-independent, lightweight regex and keyword-based.
+   * 
+   * P0.11 Priority Order:
+   *   language_switch > identity_question > name_intent > transfer_request >
+   *   call_scheduling > time_availability > price > distance > topic_switch >
+   *   complaint > clarification_question > greeting > generic_other
    */
   public static route(text: string): ConversationIntent {
     if (!text) return 'generic_other';
     const clean = this.cleanText(text);
+    const originalLower = text.toLowerCase().trim();
 
-    // 1. Name Intent
+    // P0.11: 0. Language Switch (highest priority — trumps all pending slots)
+    const languageSwitchPhrases = [
+      // Turkish
+      'ingilizce konusabilir misin', 'ingilizce devam edelim', 'ingilizce yaz',
+      'turkce devam edelim', 'turkce yaz', 'turkce konusalim',
+      'almanca konusabilir misin', 'almanca yaz', 'arapca yaz', 'rusca yaz',
+      // English
+      'can you speak english', 'speak english', 'in english please', 'switch to english',
+      'can you write in english', 'continue in english', 'let\'s speak english',
+      'switch to turkish', 'continue in turkish',
+      // German
+      'auf deutsch bitte', 'kannst du deutsch', 'sprechen sie deutsch', 'auf deutsch schreiben',
+      // Arabic
+      'هل تتحدث العربية', 'بالعربي', 'اكتب بالعربي',
+      // Russian
+      'на русском', 'по русски', 'говорите по русски'
+    ];
+    if (languageSwitchPhrases.some(kw => clean.includes(kw) || originalLower.includes(kw))) {
+      return 'language_switch';
+    }
+
+    // P0.11: 1. Identity Question (trumps pending slots)
+    const identityKeywords = [
+      'kimsin', 'kimsiniz', 'kim bu', 'bu kim', 'sen kimsin', 'siz kimsiniz',
+      'kim yaziyor', 'kimle konusuyorum', 'kimle gorusuyorum',
+      'who are you', 'who is this', 'who am i talking to', 'what is your name'
+    ];
+    if (identityKeywords.some(kw => clean.includes(kw) || originalLower.includes(kw))) {
+      return 'identity_question';
+    }
+
+    // 2. Name Intent
     const nameKeywords = ['adım', 'ismim', 'benim adım', 'benim ismim', 'adım ', 'ismim '];
     if (nameKeywords.some(kw => clean.includes(kw)) || /^(?:ben|adım|ismim)\s+[a-z]+/i.test(clean)) {
       return 'name_intent';
     }
 
-    // 2. Transfer Request
+    // 3. Transfer Request
     const transferKeywords = [
       'aktar', 'bagla', 'temsilci', 'musteri hizmetleri', 'canli destek',
       'arayabilirsiniz', 'arayabilirsin', 'operator', 'insanla', 'gercek kisi',
@@ -49,7 +89,7 @@ export class ConversationIntentRouter {
       return 'transfer_request';
     }
 
-    // 3. Call Scheduling Request (Asking for a call)
+    // 4. Call Scheduling Request (Asking for a call)
     const callSchedulingKeywords = [
       'telefon gorusmesi', 'telefonla gorus', 'telefonla arayin',
       'telefonla ulasin', 'arama planlayalim', 'arama yapin',
@@ -59,8 +99,7 @@ export class ConversationIntentRouter {
       return 'call_scheduling_request';
     }
 
-    // 4. Time Availability (Stating a time suitability)
-    // Matches expressions like "saat 17 olur", "saat 5 gibi", "yarın öğleden sonra", "bize göre olsun", timezone basis
+    // 5. Time Availability (Stating a time suitability)
     const timeIndicators = [
       'saat', 'uygun', 'musait', 'olabilir', 'gibi', 'civari', 'yarin', 'bugun',
       'pazartesi', 'sali', 'carsamba', 'persembe', 'cuma', 'cumartesi', 'pazar',
@@ -79,7 +118,7 @@ export class ConversationIntentRouter {
       return 'time_availability';
     }
 
-    // 5. Price Question
+    // 6. Price Question
     const priceKeywords = [
       'fiyat', 'ucret', 'tutar', 'kac para', 'ne kadar', 'fiyatı ne', 'fiyatı kac', 'fiyatiniz'
     ];
@@ -87,7 +126,7 @@ export class ConversationIntentRouter {
       return 'price_question';
     }
 
-    // 6. Distance Objection
+    // 7. Distance Objection
     const distanceKeywords = [
       'uzak', 'mesafe', 'gelemiyorum', 'gelmem zor', 'konya cok uzak', 'konya uzak', 'amerika uzak', 'amerika cok uzak'
     ];
@@ -95,8 +134,7 @@ export class ConversationIntentRouter {
       return 'distance_objection';
     }
 
-    // 7. Topic Switch
-    // Checks if patient mentions a new medical department or wants to switch topics
+    // 8. Topic Switch
     const departments = [
       'dahiliye', 'kardiyoloji', 'göz', 'goz', 'cildiye', 'ortopedi', 'fizik tedavi',
       'noroloji', 'nöroloji', 'üroloji', 'uroloji', 'kbb', 'kulak burun bogaz', 'plastik cerrahi',
@@ -107,8 +145,7 @@ export class ConversationIntentRouter {
       return 'topic_switch';
     }
 
-    // 8. Complaint Detail
-    // Medical symptoms or reports
+    // 9. Complaint Detail
     const complaintKeywords = [
       'agri', 'sanci', 'fitik', 'rapor', 'tahlil', 'mr', 'rontgen', 'sonuc', 'belge',
       'ameliyat', 'tedavi', 'sikayet', 'hastalik', 'mide', 'basim', 'belim', 'dizim',
@@ -118,11 +155,27 @@ export class ConversationIntentRouter {
       return 'complaint_detail';
     }
 
-    // 9. Greeting
+    // P0.11: 10. Clarification Question (lower priority than complaint/topic but above greeting)
+    const clarificationKeywords = [
+      'hangi saat', 'ne demek', 'nasil yani', 'anlamadim', 'ne diyorsun',
+      'aciklar misin', 'aciklayabilir misin', 'ne kastediyorsun', 'neden',
+      'what do you mean', 'can you explain', 'i don\'t understand', 'pardon'
+    ];
+    if (clarificationKeywords.some(kw => clean.includes(kw) || originalLower.includes(kw))) {
+      return 'clarification_question';
+    }
+
+    // 11. Greeting (expanded with Turkish attention/acknowledgment words)
     const greetingKeywords = [
       'merhaba', 'selam', 'merhabalar', 'iyi gunler', 'iyi aksamlar', 'iyi sabahlar',
-      'gunaydin', 'kolay gelsin', 'iyi calismalar', 'hi', 'hello', 'hey'
+      'gunaydin', 'kolay gelsin', 'iyi calismalar', 'hi', 'hello', 'hey',
+      'efendim', 'buyrun', 'buyurun', 'alo'
     ];
+    // Short standalone greetings (exact or near-exact match for very short messages)
+    const shortGreetings = ['hi', 'hı', 'alo', 'hey', 'efendim', 'buyrun', 'buyurun', 'selam', 'merhaba', 'merhabalar', 'hello'];
+    if (shortGreetings.includes(clean)) {
+      return 'greeting';
+    }
     if (greetingKeywords.some(kw => clean.includes(kw))) {
       return 'greeting';
     }

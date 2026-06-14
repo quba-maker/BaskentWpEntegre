@@ -3,12 +3,16 @@ import { defaultPrompts } from '../../domain/conversation/prompts';
 import { SecurityIsolationError } from '../../security/tenant-firewall';
 import { telemetry } from '../../observability/telemetry';
 import { buildTimeContext } from '@/lib/utils/timezone';
+import { ConversationIntentRouter } from './conversation-intent-router';
+import { ConversationStateArbitrator } from './conversation-state-arbitrator';
+import { RepeatGuard } from './repeat-guard';
+import { LanguageResponsePolicy } from './language-response-policy';
+import { HumanTonePolicy } from './human-tone-policy';
 import { resolvePatientNameDetailed } from '@/lib/utils/patient-name-resolver';
 import { resolvePatientCountryDetailed } from '@/lib/utils/country-normalizer';
 import { buildObjectionPolicy } from './policies/objection-policy';
 import { buildFewShotPolicy } from './policies/few-shot-policy';
 import { buildProgressFunnelPolicy } from './policies/progress-funnel-policy';
-import { ConversationIntentRouter } from './conversation-intent-router';
 
 
 export class PromptBuilder {
@@ -97,10 +101,49 @@ export class PromptBuilder {
     const { PendingQuestionResolver } = require('./pending-question-resolver');
     const { ShortAnswerInterpreter } = require('./short-answer-interpreter');
     
-    const pendingSlot = PendingQuestionResolver.resolve(history);
+    const rawPendingSlot = PendingQuestionResolver.resolve(history);
     const lastUserMessage = unifiedContext?.currentMessageText || '';
-    const interpretedIntent = ShortAnswerInterpreter.interpret(lastUserMessage, pendingSlot);
+    const rawInterpretedIntent = ShortAnswerInterpreter.interpret(lastUserMessage, rawPendingSlot);
     const lastUserIntentFromRouter = ConversationIntentRouter.route(lastUserMessage);
+
+    // P0.11: State Arbitration — suppress stale pending slots
+    const arbitration = ConversationStateArbitrator.arbitrate({
+      lastUserMessage,
+      rawPendingSlot: rawPendingSlot || 'generic_none',
+      rawInterpretedIntent: rawInterpretedIntent || 'none',
+      routerIntent: lastUserIntentFromRouter,
+      history
+    });
+    const pendingSlot = arbitration.effectivePendingSlot;
+    const interpretedIntent = arbitration.staleSlotSuppressed ? 'none' : rawInterpretedIntent;
+
+    // P0.11: RepeatGuard
+    const repeatGuard = RepeatGuard.check(history);
+
+    // P0.11: Language Response Policy
+    const tenantDefaultLang = brain.context.config?.defaultLanguage || undefined;
+    const channelFixedLang = brain.context.config?.fixedLanguage || undefined;
+    const languagePolicy = LanguageResponsePolicy.resolve(
+      lastUserMessage, history, tenantDefaultLang, channelFixedLang
+    );
+
+    // P0.11: Audit logging (no PHI, metadata only)
+    try {
+      console.log(JSON.stringify({
+        tag: 'P011_PROMPT_BUILD_DECISION',
+        tenantId: brain.context.config?.tenantId || 'unknown',
+        replyLanguage: languagePolicy.replyLanguage,
+        qualityGateLocale: languagePolicy.qualityGateLocale,
+        languageSwitchDetected: languagePolicy.languageSwitchDetected,
+        intent: arbitration.effectiveIntent,
+        rawPendingSlot: rawPendingSlot || 'generic_none',
+        pendingSlotValid: !arbitration.staleSlotSuppressed && (pendingSlot !== 'generic_none'),
+        staleSlotSuppressed: arbitration.staleSlotSuppressed,
+        suppressionReason: arbitration.suppressionReason || null,
+        repeatDetected: repeatGuard.isRepeating,
+        repeatCount: repeatGuard.repeatCount
+      }));
+    } catch { /* non-fatal */ }
 
     const pendingActive = pendingSlot && pendingSlot !== 'generic_none';
     const isShortAnswer = interpretedIntent && interpretedIntent !== 'none' && interpretedIntent !== 'generic_short';
@@ -269,7 +312,6 @@ export class PromptBuilder {
 
     let ctaOfferedRecently = false;
     let angryPatientMode = false;
-    let isFirstAssistantTurn = true;
     let asksIdentity = false;
     let asksName = false;
     let patientClaimsBot = false;
@@ -277,9 +319,6 @@ export class PromptBuilder {
     if (unifiedContext) {
       if (Array.isArray(unifiedContext.history)) {
         const assistantHistory = unifiedContext.history.filter((m: any) => m.role === 'assistant');
-        if (assistantHistory.length > 0) {
-          isFirstAssistantTurn = false;
-        }
         
         const last3Assistant = assistantHistory.slice(-3);
         ctaOfferedRecently = last3Assistant.some((m: any) => {
@@ -309,12 +348,9 @@ export class PromptBuilder {
     }
 
     let dynamicBrakesContext = '';
-    if (ctaOfferedRecently || angryPatientMode || isFirstAssistantTurn || (!isFirstAssistantTurn && !asksIdentity && !asksName) || asksIdentity || asksName || patientClaimsBot || unifiedContext?.patientProvidedAvailability) {
+    if (ctaOfferedRecently || angryPatientMode || (!isHumanHandover && !asksIdentity && !asksName) || asksIdentity || asksName || patientClaimsBot || unifiedContext?.patientProvidedAvailability) {
       dynamicBrakesContext += `\n\n=== 🚨 DİNAMİK KALİTE VE FREN KURALLARI (DYNAMIC QUALITY BRAKES) ===\n`;
-      if (isFirstAssistantTurn) {
-        dynamicBrakesContext += `>> UYARI (İLK CEVAP ONAYI AKTİF): Bu hastaya vereceğin ilk cevaptır. Kesinlikle randevu planlama, arama, telefon görüşmesi, koordinatör araması teklif etme, uygun zaman aralığı sorma! Sadece hastanın sorusuna net, kısa ve güven verici cevap ver, randevu/arama teklifini kesinlikle sonraki mesajlara bırak.\n`;
-      }
-      if (!isFirstAssistantTurn && !asksIdentity && !asksName) {
+      if (!isHumanHandover && !asksIdentity && !asksName) {
         dynamicBrakesContext += `>> UYARI (DEVAM EDEN KONUŞMA): Bu konuşmanın devam mesajıdır ve hasta ismini/kimliğini sormamıştır. Kesinlikle ${pName ? `"${pName} ben", "ben ${pName}", ` : ''}${orgShort ? `"${orgShort}'dan yazıyorum", ` : ''}kendini tanıtan veya ismini söyleyen ifadeleri KULLANMA. Karşılamayı ilk mesajda zaten yaptın. Mesajına isimsiz, doğrudan hastanın sorusuna cevap vererek başla. Doğrudan konuya gir.\n`;
       }
       if (angryPatientMode) {
@@ -338,11 +374,7 @@ export class PromptBuilder {
       }
       if (patientClaimsBot) {
         dynamicBrakesContext += `>> HASTA BOT İDDİASI DİREKTİFİ: Hasta senin bir bot/yapay zeka olduğunu söyledi/sordu. Teknik savunmalara (örn: "ben yapay zekayım", "teşhis koyamam", "ben bir dil modeliyim" vb.) kesinlikle girme! Alakasız rapor veya tıbbi yorum yapma. Kısa, doğal ve insansı bir şekilde asistan olduğunu teyit et.`;
-        if (!isFirstAssistantTurn) {
-          dynamicBrakesContext += ` Zaten daha önce kendini tanıttığın için adını/kurumunu tekrar söyleme, doğrudan asistan olduğunu teyit et (Örn: "Sizlere WhatsApp üzerinden süreçlerle ilgili yardımcı oluyorum, nasıl yardımcı olabilirim?").\n`;
-        } else {
-          dynamicBrakesContext += ` (Örn: "${pName ? `Ben ${pName}` : 'Merhaba'}${orgShort ? `, ${orgShort} Hastanesi'nden yazıyorum` : ''}, sizlere WhatsApp üzerinden bilgilendirme konusunda yardımcı oluyorum. Nasıl yardımcı olabilirim?").\n`;
-        }
+        dynamicBrakesContext += ` Zaten daha önce kendini tanıttığın için adını/kurumunu tekrar söyleme, doğrudan asistan olduğunu teyit et (Örn: "Sizlere WhatsApp üzerinden süreçlerle ilgili yardımcı oluyorum, nasıl yardımcı olabilirim?").\n`;
       }
       dynamicBrakesContext += `=================================================================\n`;
     }
@@ -552,18 +584,20 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/koordinatör arasında planlanan
       // Non-fatal
     }
 
-    // YANIT DİLİ ENJEKSİYONU
+    // P0.11: YANIT DİLİ ENJEKSİYONU (LanguageResponsePolicy driven)
     let langContextText = '';
-    if (unifiedContext && unifiedContext.languageContext) {
-      const lc = unifiedContext.languageContext;
+    {
+      const lp = languagePolicy;
       langContextText = `\n\n=== 🌐 YANIT DİLİ TALİMATI ===\n`;
-      langContextText += `- Yanıt dili: ${lc.reply_language}. Bu cevapta ${lc.reply_language} kullan.\n`;
-      langContextText += `- Form alan adları veya sistem verileri Türkçe olsa bile hastanın mesaj dili ${lc.detected_patient_language} olduğu için ${lc.reply_language} cevap ver.\n`;
-      const isTurkish = lc.reply_language.toLowerCase().includes('türk') || lc.reply_language.toLowerCase().includes('tr');
-      if (!isTurkish) {
-        langContextText += `- UYARI: Hastaya ismiyle hitap etme, cinsiyetli veya resmi hitap sözcükleri (Bey, Hanım, Bay, Bayan, Sayın, M.r., M.s., M.r.s., D.e.a.r. vb.) KULLANMA. Mesajlarına isimsiz ve nötr bir selamlama ile başla (Örn: "Hello,", "Hallo,").\n`;
+      langContextText += `- Yanıt dili: ${lp.replyLanguageName}. Bu cevapta ${lp.replyLanguageName} kullan.\n`;
+      if (lp.languageSwitchDetected) {
+        langContextText += `- ⚡ Dil değişikliği algılandı. Kullanıcı ${lp.replyLanguageName} dilinde cevap istiyor.\n`;
       }
-      langContextText += `- UYARI: Bu dil talimatı sadece yanıt dilini belirler. Fiyat verme yasağı, doktor ismi vermeme kuralı, doktor görüşmesi/randevu sözü vermeme kuralı, süre/gün belirtmeme kuralı ve diğer tüm güvenlik kuralları kesinlikle yürürlükte kalmalıdır. Güvenlik kurallarını dil talimatı için ihlal etme.\n`;
+      langContextText += `- Form alan adları veya sistem verileri Türkçe olsa bile cevabını ${lp.replyLanguageName} dilinde ver.\n`;
+      if (lp.replyLanguage !== 'tr') {
+        langContextText += `- UYARI: Hastaya ismiyle hitap etme, cinsiyetli veya resmi hitap sözcükleri (Bey, Hanım, Bay, Bayan, Sayın, Mr., Ms., Mrs., Dear vb.) KULLANMA. Mesajlarına isimsiz ve nötr bir selamlama ile başla.\n`;
+      }
+      langContextText += `- UYARI: Bu dil talimatı sadece yanıt dilini belirler. Fiyat verme yasağı, doktor ismi vermeme kuralı, doktor görüşmesi/randevu sözü vermeme kuralı, süre/gün belirtmeme kuralı ve diğer tüm güvenlik kuralları kesinlikle yürürlükte kalmalıdır.\n`;
       langContextText += `==============================\n`;
     }
 
@@ -734,8 +768,6 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/koordinatör arasında planlanan
     }
 
     // P0.5: Modular policy helpers gated behind feature flag (default OFF)
-    // Policies ADD content without removing existing behavior, but over-constraint paradox
-    // causes LLM to produce generic fallback responses. Disabled until SaaS Policy Engine phase.
     const enableModularPolicies = process.env.ENABLE_MODULAR_PROMPT_POLICIES === 'true';
 
     let objectionPolicyText = '';
@@ -776,71 +808,88 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/koordinatör arasında planlanan
     finalPrompt += styleDirective;
     finalPrompt += `\n${safetyGuardrails}`;
 
-    // P0.5: Positive Guidance — steer model toward contextual responses instead of generic fallbacks.
-    // This replaces the duplicate overridingNegativeConstraints block (which repeated the same rules
-    // already present in dynamicBrakesContext, causing over-constraint paradox).
-    finalPrompt += `\n\n=== ✅ CEVAP ÜRETME REHBERİ (POSITIVE GUIDANCE) ===
-- Hastanın/müşterinin son mesajındaki konuya doğrudan ve bağlama özel cevap ver.
-- Hasta şikayet, ad, süre veya uygun zaman verdiyse bunu tekrar sorma; kabul et ve akışı ilerlet.
-- Soru net değilse mevcut konuşma geçmişinden çıkarım yap ve yardımcı ol.
-- Genel kaçış cümleleri yerine hastanın yazdığı konuya özel, kısa ve doğal bir cevap üret.
-- "Mesajınızı aldım, şikâyetinizi daha açık yazabilir misiniz?" gibi bağlamsız kalıpları KULLANMA.
-- Hasta şikayet bildirdiyse "Geçmiş olsun" diyerek empati kur ve ilgili tıbbi branşa/hizmete yönlendir.
-===================================================\n`;
+    // P0.11: Human Tone Directive
+    const assistantHistory = history.filter((m: any) => m.role === 'assistant');
+    const isFirstAssistantTurn = assistantHistory.length === 0;
+    const humanToneDirective = HumanTonePolicy.buildDirective({
+      isHealthcare,
+      isFirstAssistantTurn,
+      angryPatientMode,
+      replyLanguage: languagePolicy.replyLanguage,
+      isRepeatDetected: repeatGuard.isRepeating
+    });
+    finalPrompt += `\n\n=== 🗣️ DOĞAL TON DİREKTİFİ ===\n${humanToneDirective}\n==============================\n`;
 
-    // P0.8: Dynamic Intent Guidance based on ConversationIntentRouter and PendingSlot
+    // P0.11: Dynamic Intent Guidance (State Arbitrated)
     let intentGuide = '';
+    const effectiveIntent = arbitration.effectiveIntent;
     
     if (interpretedIntent === 'user_correction') {
-      intentGuide = `Frustration/Correction: user_correction\nSon kullanıcı cevabı: “${lastUserMessage}”\nHasta/müşteri botu veya asistanı düzeltiyor ya da soruya cevap verdiğini söylüyor. Cevabını aldığını kibarca teyit et. Haklı olduğunu belirt, jenerik kaçış cümleleri kullanma, son cevabı/durumu teyit ederek süreci ilerlet.`;
-    } else if (pendingSlot && pendingSlot !== 'generic_none') {
+      intentGuide = `Frustration/Correction: user_correction\nSon kullanıcı cevabı: "${lastUserMessage}"\nHasta/müşteri botu veya asistanı düzeltiyor ya da soruya cevap verdiğini söylüyor. Cevabını aldığını kibarca teyit et. Haklı olduğunu belirt, jenerik kaçış cümleleri kullanma, son cevabı/durumu teyit ederek süreci ilerlet.`;
+    } else if (!arbitration.staleSlotSuppressed && pendingSlot && pendingSlot !== 'generic_none') {
+      // Pending slot is valid (not suppressed by arbitrator)
       if (pendingSlot === 'complaint_duration') {
-        intentGuide = `Pending slot: complaint_duration\nSon kullanıcı cevabı: “${lastUserMessage}”\nBu cevapta süre bilgisini kabul et. Eski telefon görüşmesi veya tarih context’ine dönme. Uygun yönlendirmeyi kısa ve doğal yap.`;
+        intentGuide = `Pending slot: complaint_duration\nSon kullanıcı cevabı: "${lastUserMessage}"\nBu cevapta süre bilgisini kabul et. Eski telefon görüşmesi veya tarih context'ine dönme. Uygun yönlendirmeyi kısa ve doğal yap.`;
       } else if (pendingSlot === 'call_time') {
-        intentGuide = `Pending slot: call_time\nSon kullanıcı cevabı: “${lastUserMessage}”\nBu cevapta kullanıcının belirttiği saat bilgisini kabul et, saat dilimini/onay durumunu kontrol et.`;
+        intentGuide = `Pending slot: call_time\nSon kullanıcı cevabı: "${lastUserMessage}"\nBu cevapta kullanıcının belirttiği saat bilgisini kabul et, saat dilimini/onay durumunu kontrol et.`;
       } else if (pendingSlot === 'timezone_clarification') {
-        intentGuide = `Pending slot: timezone_clarification\nSon kullanıcı cevabı: “${lastUserMessage}”\nBu cevapta kullanıcının timezone netleştirmesini kabul et, kesin onay/saat formatını Türkiye saatiyle göstererek onayla.`;
+        intentGuide = `Pending slot: timezone_clarification\nSon kullanıcı cevabı: "${lastUserMessage}"\nBu cevapta kullanıcının timezone netleştirmesini kabul et, kesin onay/saat formatını Türkiye saatiyle göstererek onayla.`;
       } else if (pendingSlot === 'confirmation_yes_no') {
-        intentGuide = `Pending slot: confirmation_yes_no\nSon kullanıcı cevabı: “${lastUserMessage}”\nBu cevapta kullanıcının onay verdiğini (olur/tamam/evet) kabul et. Konuşmayı başa sarma. Eksik olan saat/tarih bilgisini iste.`;
+        intentGuide = `Pending slot: confirmation_yes_no\nSon kullanıcı cevabı: "${lastUserMessage}"\nBu cevapta kullanıcının onay verdiğini (olur/tamam/evet) kabul et. Konuşmayı başa sarma. Eksik olan saat/tarih bilgisini iste.`;
       } else if (pendingSlot === 'transfer_confirmation') {
-        intentGuide = `Pending slot: transfer_confirmation\nSon kullanıcı cevabı: “${lastUserMessage}”\nBu cevapta kullanıcının temsilciye aktarılma onayını al, onayladıysa temsilciye aktaracağını söyle.`;
+        intentGuide = `Pending slot: transfer_confirmation\nSon kullanıcı cevabı: "${lastUserMessage}"\nBu cevapta kullanıcının temsilciye aktarılma onayını al, onayladıysa temsilciye aktaracağını söyle.`;
       } else if (pendingSlot === 'price_followup') {
-        intentGuide = `Pending slot: price_followup\nSon kullanıcı cevabı: “${lastUserMessage}”\nBu cevapta kullanıcının fiyat takibine dair sorusunu veya onayını işle.`;
+        intentGuide = `Pending slot: price_followup\nSon kullanıcı cevabı: "${lastUserMessage}"\nBu cevapta kullanıcının fiyat takibine dair sorusunu veya onayını işle.`;
       } else if (pendingSlot === 'complaint_detail') {
-        intentGuide = `Pending slot: complaint_detail\nSon kullanıcı cevabı: “${lastUserMessage}”\nBu cevapta şikayetin detayını kabul et, tıbbi teşhis koymadan geçmiş olsun dile.`;
+        intentGuide = `Pending slot: complaint_detail\nSon kullanıcı cevabı: "${lastUserMessage}"\nBu cevapta şikayetin detayını kabul et, tıbbi teşhis koymadan geçmiş olsun dile.`;
       } else if (pendingSlot === 'call_date') {
-        intentGuide = `Pending slot: call_date\nSon kullanıcı cevabı: “${lastUserMessage}”\nBu cevapta kullanıcının belirttiği gün bilgisini kabul et, telefon araması için uygun saat aralığını sor.`;
+        intentGuide = `Pending slot: call_date\nSon kullanıcı cevabı: "${lastUserMessage}"\nBu cevapta kullanıcının belirttiği gün bilgisini kabul et, telefon araması için uygun saat aralığını sor.`;
       }
     }
 
+    // If no pending slot guide (either suppressed or no slot), use router intent
     if (!intentGuide) {
-      const intent = ConversationIntentRouter.route(lastUserMessage);
-      if (intent === 'greeting') {
+      if (effectiveIntent === 'greeting') {
         intentGuide = `Intent: greeting\nBu cevapta sadece hastanın/müşterinin selamına doğal ve kısa bir karşılık ver.\nEski CRM/şikayet özetini veya randevu konusunu bu aşamada açma.`;
-      } else if (intent === 'transfer_request') {
+      } else if (effectiveIntent === 'identity_question') {
+        intentGuide = `Intent: identity_question\nBu cevapta kimliğini kısa ve doğal tanıt. Eski scheduling/timezone bağlamına dönme.`;
+      } else if (effectiveIntent === 'language_switch') {
+        intentGuide = `Intent: language_switch\nKullanıcı dil değişikliği istedi. ${languagePolicy.replyLanguageName} dilinde doğal bir karşılık ver.\nEski bağlama (scheduling/timezone) dönme, yeni dilde devam et.`;
+      } else if (effectiveIntent === 'clarification_question') {
+        intentGuide = `Intent: clarification_question\nKullanıcı bir soru soruyor veya açıklama istiyor. Mevcut konuşma bağlamından açıklama yap.\nEski pending slot'a dönme.`;
+      } else if (effectiveIntent === 'transfer_request') {
         intentGuide = `Intent: transfer_request\nBu cevapta müşteriyi yetkili ekibe/temsilciye aktaracağını kibarca onayla.\nKesinlikle randevu veya telefon görüşmesi CTA'sı teklif etme.`;
-      } else if (intent === 'call_scheduling_request') {
+      } else if (effectiveIntent === 'call_scheduling_request') {
         intentGuide = `Intent: call_scheduling_request\nBu cevapta tarih/saat bilgisini not al, eksikse saat sor, kesin randevu oluşturma.\nEski CRM/şikayet özetine dönme.`;
-      } else if (intent === 'time_availability') {
+      } else if (effectiveIntent === 'time_availability') {
         intentGuide = `Intent: time_availability\nBu cevapta hastanın/müşterinin uygun zamanını not et ve onay al.\nKesin bir randevu saati taahhüt etme, ekibin arayacağını belirt.`;
-      } else if (intent === 'price_question') {
+      } else if (effectiveIntent === 'price_question') {
         intentGuide = `Intent: price_question\nBu cevapta fiyatın kişiye özel değerlendirme sonrasında belirlendiğini açıkla.\nKesinlikle rakamsal fiyat verme, telefon görüşmesi teklif et.`;
-      } else if (intent === 'distance_objection') {
+      } else if (effectiveIntent === 'distance_objection') {
         intentGuide = `Intent: distance_objection\nBu cevapta mesafenin sorun olmadığını, transfer/konaklama desteği olduğunu vurgula.\nAkademik uzman ekibe değineceğini hissettir ve telefon görüşmesi öner.`;
-      } else if (intent === 'complaint_detail') {
+      } else if (effectiveIntent === 'complaint_detail') {
         intentGuide = `Intent: complaint_detail\nBu cevapta hastanın şikayetini/durumunu anladığını belirt ve geçmiş olsun de.\nTıbbi yorum/teşhis yapma, durumun doktor kuruluna iletileceğini söyle.`;
-      } else if (intent === 'name_intent') {
+      } else if (effectiveIntent === 'name_intent') {
         intentGuide = `Intent: name_intent\nBu cevapta hastanın/müşterinin ismini not al ve teşekkür et.\nİsimli hitap (Bey/Hanım) kullanmadan süreci ilerlet.`;
-      } else if (intent === 'topic_switch') {
+      } else if (effectiveIntent === 'topic_switch') {
         intentGuide = `Intent: topic_switch\nBu cevapta hastanın yöneldiği yeni bölüme/konuya odaklan.\nEski CRM branşını (örn. Kardiyoloji) yeni konunun önüne geçirme.`;
       } else {
         intentGuide = `Intent: generic_other\nBu cevapta son kullanıcının sorusuna/mesajına doğrudan odaklan.\nGereksiz jenerik kaçış cümleleri kullanmadan doğal yanıt üret.`;
       }
     }
+    // P0.11: Compact Behavioral Summary (max 8 lines)
+    const behavioralSummary = [
+      `- Son mesaj dili: ${languagePolicy.lastUserMessageLanguage}`,
+      `- Cevap dili: ${languagePolicy.replyLanguageName}`,
+      `- Intent: ${effectiveIntent}`,
+      `- Pending slot geçerli: ${!arbitration.staleSlotSuppressed && pendingActive ? 'evet' : 'hayır'}${arbitration.staleSlotSuppressed ? ` (suppress: ${arbitration.suppressionReason})` : ''}`,
+      `- Eski scheduling context: ${arbitration.staleSlotSuppressed ? 'kullanılmayacak' : (pendingActive ? 'aktif' : 'yok')}`,
+      `- Ton: sıcak, doğal, kısa${repeatGuard.isRepeating ? ' ⚠️ TEKRAR TESPİT' : ''}`,
+      `- Quality gate locale: ${languagePolicy.qualityGateLocale}`
+    ].join('\n');
 
-    finalPrompt += `\n\n=== 🎯 SON MESAJ INTENT KILAVUZU ===\n${intentGuide}\n====================================\n`;
+    finalPrompt += `\n\n=== 🎯 SON MESAJ DAVRANIŞ KILAVUZU ===\n${intentGuide}\n${behavioralSummary}\n====================================\n`;
 
     return finalPrompt;
   }
 }
-

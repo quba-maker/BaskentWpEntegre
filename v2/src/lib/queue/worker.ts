@@ -4173,6 +4173,15 @@ Tek veya iki kısa cümle yaz.`;
     unifiedContext.currentMessageText = latestInboundContent;
     unifiedContext.patientProvidedAvailability = patientProvidedAvailability;
 
+    // P0.11: Language detection for debounce path (was missing — caused all replies to default to Turkish)
+    try {
+      const { detectLanguage } = await import('@/lib/utils/language-detector');
+      const languageContext = detectLanguage(latestInboundContent, history);
+      unifiedContext.languageContext = languageContext;
+    } catch (langErr) {
+      this.log.error('[DEBOUNCE_WORKER] Language detection failed', langErr as Error, { traceId });
+    }
+
     // 🧠 Approved learning context injection (P1.3 - Debounce Autopilot Path)
     try {
       const { TenantLearningRuntimeResolver } = await import('@/lib/services/ai/tenant-learning-runtime-resolver');
