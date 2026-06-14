@@ -169,11 +169,11 @@ export class ContextAwareSafeFallbackResolver {
           const subject = capitalizedPossessive ? `${capitalizedPossessive}${complaint}` : (complaint ? complaint.charAt(0).toUpperCase() + complaint.slice(1) : '');
 
           if (mappedDept) {
-            text = `Bu ekrandan güncel hekim listesini doğrulayamıyorum. ${subject} için ${mappedDept} bölümü değerlendirme yapabilir. İsterseniz koordinatör ekibimize yönlendirilmesi için not alabilirim.`;
+            text = `Bu ekrandan güncel hekim listesini doğrulayamıyorum. ${subject} için ${mappedDept} bölümü değerlendirme yapabilir. İsterseniz hasta danışmanımızla telefon görüşmesi planlanması için not alabiliriz.`;
           } else if (hasComplaint) {
-            text = `Bu ekrandan güncel hekim listesini doğrulayamıyorum. Şikayetinize uygun bölüm değerlendirme yapabilir. İsterseniz koordinatör ekibimize yönlendirilmesi için not alabilirim.`;
+            text = `Bu ekrandan güncel hekim listesini doğrulayamıyorum. Şikayetinize uygun bölüm değerlendirme yapabilir. İsterseniz hasta danışmanımızla telefon görüşmesi planlanması için not alabiliriz.`;
           } else {
-            text = `Bu ekrandan güncel hekim listesini doğrulayamıyorum. İlgili bölüm değerlendirme yapabilir. İsterseniz koordinatör ekibimize yönlendirilmesi için not alabilirim.`;
+            text = `Bu ekrandan güncel hekim listesini doğrulayamıyorum. İlgili bölüm değerlendirme yapabilir. İsterseniz hasta danışmanımızla telefon görüşmesi planlanması için not alabiliriz.`;
           }
         }
       } else {
@@ -197,8 +197,11 @@ export class ContextAwareSafeFallbackResolver {
     // Human Transfer Resolver
     const isHumanTransfer = detectedIntent === 'human_transfer_request' || interpretedIntent === 'human_transfer_request';
     if (isHumanTransfer) {
+      const text = isHealthcare
+        ? `Haklısınız, bu konuda bir hasta danışmanımızın ilgilenmesi daha doğru olur. Talebinizi hasta danışmanımıza iletilmesi için not alıyorum.`
+        : `Haklısınız, bu konuda bir temsilcimizin ilgilenmesi daha doğru olur. Talebinizi temsilcimize iletilmesi için not alıyorum.`;
       return {
-        text: `Haklısınız, bu konuda bir temsilcimizin ilgilenmesi daha doğru olur. Talebinizi temsilcimize iletilmesi için not alıyorum.`,
+        text,
         sector: resolvedIndustry,
         hasFormContext,
         hasComplaint,
@@ -288,23 +291,37 @@ export class ContextAwareSafeFallbackResolver {
               }
             }
           }
+          const isBaskent = brain.context.tenantId === 'caab9ea1-9591-45e4-bbc5-9c9b498982c8';
+          const isRuyaOrBaskent = identityConfig.personaName === 'Rüya' || isBaskent;
           const relPhrase = relationPossessive 
             ? `${relationPossessive.charAt(0).toUpperCase() + relationPossessive.slice(1)}${complaint}${suffix}`
             : `${complaint.charAt(0).toUpperCase() + complaint.slice(1)}${suffix}`;
           
-          text = `${relPhrase} ilgili sorularınızı yanıtlayıp doğru ekibe yönlendirmeye yardımcı olabilirim.`;
+          text = isRuyaOrBaskent
+            ? `Pardon, nereden çıkardınız bunu? Ben Rüya, Konya Başkent Hastanesi’nden sizinle ilgileniyorum. ${relPhrase} ilgili sorularınızı yazarsanız net cevaplayayım.`
+            : `${relPhrase} ilgili sorularınızı yanıtlayıp doğru ekibe yönlendirmeye yardımcı olabilirim.`;
         } else {
-          text = 'Burada sağlık başvurunuzla ilgili yönlendirme yapmak için varım.';
+          const isBaskent = brain.context.tenantId === 'caab9ea1-9591-45e4-bbc5-9c9b498982c8';
+          const isRuyaOrBaskent = identityConfig.personaName === 'Rüya' || isBaskent;
+          text = isRuyaOrBaskent
+            ? 'Pardon, nereden çıkardınız bunu? Ben Rüya, Konya Başkent Hastanesi’nden sizinle ilgileniyorum. Sorunuzu yazarsanız net cevaplayayım.'
+            : 'Burada sağlık başvurunuzla ilgili yönlendirme yapmak için varım.';
         }
       } else {
         // Prompt challenge
+        const isBaskent = brain.context.tenantId === 'caab9ea1-9591-45e4-bbc5-9c9b498982c8';
+        const isRuyaOrBaskent = identityConfig.personaName === 'Rüya' || isBaskent;
         if (hasComplaint) {
           const capitalizedPossessive = relationPossessive 
             ? relationPossessive.charAt(0).toUpperCase() + relationPossessive.slice(1) 
             : '';
-          text = `Kusura bakmayın, cevaplarım yeterince net olmadı. ${capitalizedPossessive}${complaint} süreciyle ilgili sorularınızı daha açık yanıtlayayım.`;
+          text = isRuyaOrBaskent
+            ? `Pardon, nereden çıkardınız bunu? Ben Rüya, Konya Başkent Hastanesi’nden sizinle ilgileniyorum. ${capitalizedPossessive}${complaint} süreciyle ilgili sorularınızı yazarsanız net cevaplayayım.`
+            : `Kusura bakmayın, cevaplarım yeterince net olmadı. ${capitalizedPossessive}${complaint} süreciyle ilgili sorularınızı daha açık yanıtlayayım.`;
         } else {
-          text = 'Bu teknik konuya girmeden, sağlık talebinizle ilgili yardımcı olayım.';
+          text = isRuyaOrBaskent
+            ? 'Pardon, nereden çıkardınız bunu? Ben Rüya, Konya Başkent Hastanesi’nden sizinle ilgileniyorum. Sorunuzu yazarsanız net cevaplayayım.'
+            : 'Bu teknik konuya girmeden, sağlık talebinizle ilgili yardımcı olayım.';
         }
       }
 
@@ -321,12 +338,35 @@ export class ContextAwareSafeFallbackResolver {
     if (isAngryOrChallenge) {
       // Identity query, bot questions, abuse or general anger
       let text = '';
-      if (hasComplaint) {
-        text = `Kusura bakmayın, cevaplarım yeterince net olmadı. ${hasMother ? 'Annenizin ' : ''}${complaint} süreciyle ilgili sorularınızı daha düzgün yanıtlayayım.`;
+      const isBaskent = brain.context.tenantId === 'caab9ea1-9591-45e4-bbc5-9c9b498982c8';
+      const isRuyaOrBaskent = identityConfig.personaName === 'Rüya' || isBaskent;
+
+      const isAiOrBotOrPromptQuestion = 
+        lowerInbound.includes('bot') || 
+        lowerInbound.includes('yapay zeka') || 
+        lowerInbound.includes('robot') || 
+        lowerInbound.includes('prompt') || 
+        lowerInbound.includes('promt') || 
+        lowerInbound.includes('sistem') || 
+        (detectedIntent as string) === 'prompt_challenge' || 
+        interpretedIntent === 'prompt_challenge' || 
+        (detectedIntent as string) === 'identity_question' || 
+        interpretedIntent === 'identity_question';
+
+      if (isRuyaOrBaskent && isAiOrBotOrPromptQuestion) {
+        if (hasComplaint) {
+          text = `Pardon, nereden çıkardınız bunu? Ben Rüya, Konya Başkent Hastanesi’nden sizinle ilgileniyorum. ${hasMother ? 'Annenizin ' : ''}${complaint} süreciyle ilgili sorularınızı yazarsanız net cevaplayayım.`;
+        } else {
+          text = 'Pardon, nereden çıkardınız bunu? Ben Rüya, Konya Başkent Hastanesi’nden sizinle ilgileniyorum. Sorunuzu yazarsanız net cevaplayayım.';
+        }
       } else {
-        text = isHealthcare
-          ? 'Kusura bakmayın, cevaplarım yeterince net olmadı. Size sağlık talebinizle ilgili yardımcı olayım.'
-          : 'Kusura bakmayın, cevaplarım yeterince net olmadı. Size yardımcı olmaya devam edebilirim.';
+        if (hasComplaint) {
+          text = `Kusura bakmayın, cevaplarım yeterince net olmadı. ${hasMother ? 'Annenizin ' : ''}${complaint} süreciyle ilgili sorularınızı daha düzgün yanıtlayayım.`;
+        } else {
+          text = isHealthcare
+            ? 'Kusura bakmayın, cevaplarım yeterince net olmadı. Size sağlık talebinizle ilgili yardımcı olayım.'
+            : 'Kusura bakmayın, cevaplarım yeterince net olmadı. Size yardımcı olmaya devam edebilirim.';
+        }
       }
       return {
         text,
@@ -346,13 +386,13 @@ export class ContextAwareSafeFallbackResolver {
       let replyText = '';
       if (lastUserMsgText) {
         if (isHealthcare) {
-          replyText = `Haklısınız, cevabınızı aldım. ${lastUserMsgText} bilgisini not ettim; isterseniz bu bilgiyi koordinatör ekibimize iletilmesi için not alabilirim.`;
+          replyText = `Haklısınız, cevabınızı aldım. ${lastUserMsgText} bilgisini not ettim; isterseniz hasta danışmanımızla telefon görüşmesi planlanması için not alabiliriz.`;
         } else {
           replyText = `Haklısınız, cevabınızı aldım. ${lastUserMsgText} bilgisini not ettim; isterseniz bu bilgiyi temsilci ekibimize iletilmesi için not alabilirim.`;
         }
       } else {
         if (isHealthcare) {
-          replyText = `Haklısınız, cevabınızı aldım ve not ettim; isterseniz bu bilgiyi koordinatör ekibimize iletilmesi için not alabilirim.`;
+          replyText = `Haklısınız, cevabınızı aldım ve not ettim; isterseniz hasta danışmanımızla telefon görüşmesi planlanması için not alabiliriz.`;
         } else {
           replyText = `Haklısınız, cevabınızı aldım ve not ettim; isterseniz bu bilgiyi temsilci ekibimize iletilmesi için not alabilirim.`;
         }
@@ -394,9 +434,13 @@ export class ContextAwareSafeFallbackResolver {
       } else if (pendingSlot === 'confirmation_yes_no') {
         slotText = `Belirttiğimiz görüşme planlamasını onaylıyor musunuz?`;
       } else if (pendingSlot === 'transfer_confirmation') {
-        slotText = `Sizi ilgili uzman temsilcimize aktarmamı onaylıyor musunuz?`;
+        slotText = isHealthcare
+          ? `Sizi ilgili hasta danışmanımıza aktarmamı onaylıyor musunuz?`
+          : `Sizi ilgili uzman temsilcimize aktarmamı onaylıyor musunuz?`;
       } else if (pendingSlot === 'price_followup') {
-        slotText = `Tedavi ve ücret detayları hakkında temsilcimizle görüşmek ister misiniz?`;
+        slotText = isHealthcare
+          ? `Tedavi ve ücret detayları hakkında hasta danışmanımızla görüşmek ister misiniz?`
+          : `Tedavi ve ücret detayları hakkında temsilcimizle görüşmek ister misiniz?`;
       } else if (pendingSlot === 'complaint_detail') {
         slotText = `Durumunuzu daha iyi anlayabilmemiz için şikayetinizi biraz daha detaylandırabilir misiniz?`;
       }
@@ -415,8 +459,11 @@ export class ContextAwareSafeFallbackResolver {
 
     // Priority 4: General Intent Fallbacks
     if (detectedIntent === 'call_scheduling_request') {
+      const text = isHealthcare
+        ? `Telefon görüşmesi talebinizi not aldım. Müsait olabileceğiniz gün ve saat aralığını paylaşabilirseniz, hasta danışmanımız planlama için sizinle iletişime geçecektir.`
+        : `Telefon görüşmesi talebinizi not aldım. Müsait olabileceğiniz gün ve saat aralığını paylaşabilirseniz, temsilci arkadaşımız planlama için sizinle iletişime geçecektir.`;
       return {
-        text: `Telefon görüşmesi talebinizi not aldım. Müsait olabileceğiniz gün ve saat aralığını paylaşabilirseniz, temsilci arkadaşımız planlama için sizinle iletişime geçecektir.`,
+        text,
         sector: resolvedIndustry,
         hasFormContext,
         hasComplaint,
@@ -426,8 +473,11 @@ export class ContextAwareSafeFallbackResolver {
     }
 
     if (detectedIntent === 'time_availability') {
+      const text = isHealthcare
+        ? `Paylaştığınız zaman bilgisini not aldım. Hasta danışmanımız saat planlamasını teyit etmek üzere sizinle iletişime geçecektir.`
+        : `Paylaştığınız zaman bilgisini not aldım. Temsilci arkadaşımız saat planlamasını teyit etmek üzere sizinle iletişime geçecektir.`;
       return {
-        text: `Paylaştığınız zaman bilgisini not aldım. Temsilci arkadaşımız saat planlamasını teyit etmek üzere sizinle iletişime geçecektir.`,
+        text,
         sector: resolvedIndustry,
         hasFormContext,
         hasComplaint,
@@ -438,7 +488,7 @@ export class ContextAwareSafeFallbackResolver {
 
     if (detectedIntent === 'price_question') {
       const text = isHealthcare
-        ? `Hizmet ve tedavi ücretlerimiz, hastanemizde yapılacak kişiye özel muayene ve değerlendirmeler sonrasında netleşmektedir. Detaylı bilgi sunabilmemiz için koordinatör ekibimizle kısa bir telefon görüşmesi planlayabiliriz.`
+        ? `Hizmet ve tedavi ücretlerimiz, hastanemizde yapılacak kişiye özel muayene ve değerlendirmeler sonrasında netleşmektedir. Detaylı bilgi sunabilmemiz için hasta danışmanımızla kısa bir telefon görüşmesi planlayabiliriz.`
         : `Ücretlerimiz ve hizmet seçeneklerimiz kişiye özel yapılacak planlama sonrasında belirlenmektedir. Detaylı bilgi için temsilci ekibimizle kısa bir görüşme planlayabiliriz.`;
       return {
         text,

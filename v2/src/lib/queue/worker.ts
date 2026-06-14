@@ -2200,7 +2200,16 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
     const isFormFollowup = detectedIntent === 'form_followup' || (interpretedIntent as any) === 'form_followup';
     const isUserCorrection = detectedIntent === 'user_correction' || (interpretedIntent as any) === 'user_correction';
 
-    const isLlmBypassChallenge = isPromptChallenge || isBotAccusation || isAiAccusation || isAngryPromptChallenge || isDoctorLookup || isHumanTransfer || isFormFollowup || isUserCorrection;
+    const isBaskentTenant = tenantId === 'caab9ea1-9591-45e4-bbc5-9c9b498982c8';
+    const isBaskentWhatsappTrChannel = (resolvedChannelId || metadata.channelId) === '2e7352c1-5db7-4414-baf7-de571a66bfa6';
+    const promptVersion = brain.prompts.metadata?.version;
+    const hasBaskentV58Prompt =
+      promptVersion === 58 ||
+      systemPromptText.includes('Mustafa Kemal İLİK');
+
+    const shouldBypassDoctorLookup = isDoctorLookup && !(isBaskentTenant && isBaskentWhatsappTrChannel && hasBaskentV58Prompt);
+
+    const isLlmBypassChallenge = isPromptChallenge || isBotAccusation || isAiAccusation || isAngryPromptChallenge || shouldBypassDoctorLookup || isHumanTransfer || isFormFollowup || isUserCorrection;
 
     let bypassed = false;
     let bypassedText = '';
@@ -4501,7 +4510,16 @@ Tek veya iki kısa cümle yaz.`;
     const isFormFollowup = detectedIntent === 'form_followup' || (interpretedIntent as any) === 'form_followup';
     const isUserCorrection = detectedIntent === 'user_correction' || (interpretedIntent as any) === 'user_correction';
 
-    const isLlmBypassChallenge = isPromptChallenge || isBotAccusation || isAiAccusation || isAngryPromptChallenge || isDoctorLookup || isHumanTransfer || isFormFollowup || isUserCorrection;
+    const isBaskentTenant = tenantId === 'caab9ea1-9591-45e4-bbc5-9c9b498982c8';
+    const isBaskentWhatsappTrChannel = (resolvedChannelId || metadata.channelId) === '2e7352c1-5db7-4414-baf7-de571a66bfa6';
+    const promptVersion = brain.prompts.metadata?.version;
+    const hasBaskentV58Prompt =
+      promptVersion === 58 ||
+      systemPromptText.includes('Mustafa Kemal İLİK');
+
+    const shouldBypassDoctorLookup = isDoctorLookup && !(isBaskentTenant && isBaskentWhatsappTrChannel && hasBaskentV58Prompt);
+
+    const isLlmBypassChallenge = isPromptChallenge || isBotAccusation || isAiAccusation || isAngryPromptChallenge || shouldBypassDoctorLookup || isHumanTransfer || isFormFollowup || isUserCorrection;
 
     let bypassed = false;
     let bypassedText = '';

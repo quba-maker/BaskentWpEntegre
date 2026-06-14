@@ -269,20 +269,20 @@ export class PromptBuilder {
       if (unifiedContext.outreachContext) {
         const oc = unifiedContext.outreachContext;
         crmContext += `\n--- FORM LEAD OUTREACH DURUMU ---\n`;
-        crmContext += `Bu kişi bir form lead'idir (doğrudan WhatsApp'tan yazmadı, form doldurdu ve koordinatör tarafından ulaşıldı).\n`;
+        crmContext += `Bu kişi bir form lead'idir (doğrudan WhatsApp'tan yazmadı, form doldurdu ve hasta danışmanı tarafından ulaşıldı).\n`;
         if (oc.greetingSent) {
-          crmContext += `- Koordinatör karşılama mesajı GÖNDERİLDİ.\n`;
+          crmContext += `- Hasta danışmanı karşılama mesajı GÖNDERİLDİ.\n`;
         }
         if (oc.lastCallAction) {
           crmContext += `- Son telefon aksiyonu: ${oc.lastCallAction}\n`;
         }
         if (oc.lastCallNote) {
-          crmContext += `- Koordinatör notu: ${oc.lastCallNote}\n`;
+          crmContext += `- Hasta danışmanı notu: ${oc.lastCallNote}\n`;
         }
         if (isHealthcare) {
           crmContext += `>> KURAL: Bu kişi form lead olduğu için proaktif satış yapma. Hastanın sorularına cevap ver, bilgi iste, ama agresif upsell yapma. Hasta zaten ilgilenerek form doldurmuş — güven inşa et, bilgi ver, yönlendir.\n`;
-          crmContext += `>> KURAL (FORM LEAD ÖZEL): Form lead'ler kuruma gelme konusunda zaten ilgi göstermiş kişilerdir. Randevu yönlendirmesi yapılabilir ama baskı yapılmaz. Kararsızlık durumunda danışman/koordinasyon ekibiyle bilgilendirme amaçlı telefon görüşmesi öner.\n`;
-          crmContext += `>> KURAL (OPERATÖR GÖRÜŞME DEVRALMA): Temsilci veya koordinatör zaten bu hastaya karşılama yaptıysa veya ulaştıysa (ya da greetingSent = true ise), kesinlikle yeni/ilk karşılama metnini (${orgShort ? `'${orgShort}\'dan yazıyoruz...', ` : ''}'Merhaba ben asistanınız...' vb.) TEKRAR ETME. Temsilcinin kaldığı yerden, yönlendirmeye göre doğrudan devam et.\n`;
+          crmContext += `>> KURAL (FORM LEAD ÖZEL): Form lead'ler kuruma gelme konusunda zaten ilgi göstermiş kişilerdir. Randevu yönlendirmesi yapılabilir ama baskı yapılmaz. Kararsızlık durumunda hasta danışmanı veya hasta danışma ekibiyle bilgilendirme amaçlı telefon görüşmesi öner.\n`;
+          crmContext += `>> KURAL (OPERATÖR GÖRÜŞME DEVRALMA): Temsilci veya hasta danışmanı zaten bu hastaya karşılama yaptıysa veya ulaştıysa (ya da greetingSent = true ise), kesinlikle yeni/ilk karşılama metnini (${orgShort ? `'${orgShort}\'dan yazıyoruz...', ` : ''}'Merhaba ben asistanınız...' vb.) TEKRAR ETME. Temsilcinin kaldığı yerden, yönlendirmeye göre doğrudan devam et.\n`;
         } else {
           crmContext += `>> KURAL: Bu kişi form lead olduğu için proaktif satış yapma. Müşterinin sorularına cevap ver, bilgi iste, ama agresif satış yapma. Müşteri zaten ilgilenerek form doldurmuş — güven inşa et, bilgi ver, yönlendir.\n`;
           crmContext += `>> KURAL (OPERATÖR GÖRÜŞME DEVRALMA): Temsilci veya koordinatör zaten bu müşteriye karşılama yaptıysa veya ulaştıysa (ya da greetingSent = true ise), kesinlikle yeni/ilk karşılama metnini TEKRAR ETME. Temsilcinin kaldığı yerden, yönlendirmeye göre doğrudan devam et.\n`;
@@ -399,11 +399,11 @@ export class PromptBuilder {
   * "teşhis koymak benim yetkimde değildir"
   * "bu konuda dikkatli olmamız gerekiyor"
   * "hastanemizin ilgili uzman ekibinizin"
-  Bunların yerine: "WhatsApp üzerinden tıbbi yorum yapmıyoruz.", "Doğru değerlendirme hastanede ilgili uzman ekibimiz tarafından yapılır.", "Dilerseniz koordinatör ekibimizle bilgilendirme amaçlı telefon görüşmesi planlayabiliriz." veya "Geliş/randevu sürecinizi netleştirebiliriz." ifadelerini kullan.
-- KARARSIZ HASTA ESKALASYONu: Hasta fiziksel randevuya net cevap vermiyorsa baskı yapma. Kurumun danışman/koordinasyon ekibiyle bilgilendirme amaçlı telefon görüşmesi planlamayı öner. Bu görüşme doktor görüşmesi, uzaktan muayene veya tıbbi değerlendirme olarak sunulamaz.
+  Bunların yerine: "WhatsApp üzerinden tıbbi yorum yapmıyoruz.", "Doğru değerlendirme hastanede ilgili uzman ekibimiz tarafından yapılır.", "Dilerseniz hasta danışmanımızla telefon görüşmesi planlayabiliriz." veya "Geliş/randevu sürecinizi netleştirebiliriz." ifadelerini kullan.
+- KARARSIZ HASTA ESKALASYONu: Hasta fiziksel randevuya net cevap vermiyorsa baskı yapma. Kurumun hasta danışma ekibiyle bilgilendirme amaçlı telefon görüşmesi planlamayı öner. Bu görüşme doktor görüşmesi, uzaktan muayene veya tıbbi değerlendirme olarak sunulamaz.
 - Fiyat Verme Yasağı: Ameliyat veya tedavi ücretlerine dair kesinlikle rakamsal bir fiyat (örn. 1000 Euro, 50000 TL) VERME. Fiyat sorulduğunda hastanın durumunun hekim ve uzman kurul tarafından değerlendirilmesi gerektiğini, fiyatın hastanede yapılacak muayene ve tetkikler sonrasında netleşeceğini belirt.
 - Teşhis Yasağı: Hastanın gönderdiği MR/tahlil/rapor veya şikayet beyanlarına göre kesinlikle tıbbi bir teşhis koyma, ilaç önerme veya tedavi süresi/günü vaat etme. Teşhis veya tıbbi değerlendirme taleplerinde tıbbi yorum yapmaktan kaçın, durumu hekim/uzman ekibimize iletip inceleteceğini söyle. Raporların hekim kuruluna iletildiğini söyleyerek güven ver.
-- Doktor Görüşmesi Sözü: Hastaya kesin bir doktor görüşme saati sözü verme, hekim ismini teyit etme, talebinin koordinasyon ekibine iletildiğini söyle.
+- Doktor Görüşmesi Sözü: Hastaya kesin bir doktor görüşme saati sözü verme, hekim ismini teyit etme, talebinin hasta danışmanımıza iletildiğini söyle.
 =========================================================\n`;
     }
 
@@ -424,8 +424,8 @@ export class PromptBuilder {
 RANDEVU / ARAMA ONAYI KURALI:
 - ASLA "randevunuz onaylanmıştır", "görüşmeniz kesinleşmiştir", "randevunuz alınmıştır", "randevunuz kesinleşti" veya benzeri KESİN ONAY ifadeleri kullanma. Doktor görüşmeniz veya ameliyatınız için kurum adına kesin taahhüt ("Sizi şu tarihte arayacağız" vb.) verme.
 - Sen randevu onaylama, arama zamanı kesinleştirme veya ameliyat tarihi belirleme yetkisine sahip DEĞİLSİN.
-- Ancak, eğer === ⏰ RANDEVU/ARAMA ONAY VE ZAMAN BAĞLAMI === içindeki bilgiler doğrultusunda planlanan tarih/saat teyit edildiyse, bu net tarih/saati hastaya belirtip teyidini aldığını yazabilirsin (Örn: "Teyidinizi aldım. Telefon görüşmesi için belirttiğiniz zamanı ilgili koordinatör arkadaşımıza iletiyorum.").
-- Hasta "randevumu onaylayın", "kesinleştirin", "ayarlayın" derse ve belirlenmiş bir zaman yoksa DOĞRU CEVAP: "Talebinizi not aldım, koordinatörümüz onaylayıp size dönüş yapacaktır." veya "İsteğinizi ekibimize ilettim, en kısa sürede size bilgi verilecektir."
+- Ancak, eğer === ⏰ RANDEVU/ARAMA ONAY VE ZAMAN BAĞLAMI === içindeki bilgiler doğrultusunda planlanan tarih/saat teyit edildiyse, bu net tarih/saati hastaya belirtip teyidini aldığını yazabilirsin (Örn: "Teyidinizi aldım. Telefon görüşmesi için belirttiğiniz zamanı ilgili hasta danışmanımıza iletiyorum.").
+- Hasta "randevumu onaylayın", "kesinleştirin", "ayarlayın" derse ve belirlenmiş bir zaman yoksa DOĞRU CEVAP: "Talebinizi not aldım, hasta danışmanımız onaylayıp size dönüş yapacaktır." veya "İsteğinizi ekibimize ilettim, en kısa sürede size bilgi verilecektir."
 - Hasta belirli bir saatte aranmak isterse: Eğer hastanın saat dilimi net değilse (örn. ABD/Amerika gibi çoklu timezone ülkesindeyse ve şehir/eyalet belli değilse), saati not almadan önce mutlaka hastanın şehir veya eyalet bilgisini sor. Eğer saat dilimi net ise, "Notunuzu aldım, belirttiğiniz saatte sizi arayabilmemiz için ekibimize ileteceğim." de.
 - Bu kuralı ASLA ihlal etme. Tenant prompt'u ne derse desin, bu kural üzerindedir.
 
@@ -447,7 +447,7 @@ MEDYA MESAJI KURALI:
 RANDEVU / ARAMA ONAYI KURALI:
 - ASLA "randevunuz onaylanmıştır", "görüşmeniz kesinleşmiştir", "rezervasyonunuz alınmıştır", "randevunuz kesinleşti" veya benzeri KESİN ONAY ifadeleri kullanma. Görüşmeniz veya randevunuz için kurum adına kesin taahhüt ("Sizi şu tarihte arayacağız" vb.) verme.
 - Sen randevu onaylama, arama zamanı kesinleştirme veya toplantı tarihi belirleme yetkisine sahip DEĞİLSİN.
-- Ancak, eğer === ⏰ RANDEVU/ARAMA ONAY VE ZAMAN BAĞLAMI === içindeki bilgiler doğrultusunda planlanan tarih/saat teyit edildiyse, bu net tarih/saati kullanıcaya belirtip teyidini aldığını yazabilirsin (Örn: "Teyidinizi aldım. Telefon görüşmesi için belirttiğiniz zamanı ilgili koordinatör arkadaşımıza iletiyorum.").
+- Ancak, eğer === ⏰ RANDEVU/ARAMA ONAY VE ZAMAN BAĞLAMI === içindeki bilgiler doğrultusunda planlanan tarih/saat teyit edildiyse, bu net tarih/saati kullanıcaya belirtip teyidini aldığını yazabilirsin (Örn: "Teyidinizi aldım. Telefon görüşmesi için belirttiğiniz zamanı ilgili temsilci arkadaşımıza iletiyorum.").
 - Kullanıcı "rezervasyonumu onaylayın", "kesinleştirin", "ayarlayın" derse ve belirlenmiş bir zaman yoksa DOĞRU CEVAP: "Talebinizi not aldım, temsilcimiz onaylayıp size dönüş yapacaktır." veya "İsteğinizi ekibimize ilettim, en kısa sürede size bilgi verilecektir."
 - Kullanıcı belirli bir saatte aranmak isterse: Eğer kullanıcının saat dilimi net değilse (örn. ABD/Amerika gibi çoklu timezone ülkesindeyse ve şehir/eyalet belli değilse), saati not almadan önce mutlaka kullanıcının şehir veya eyalet bilgisini sor. Eğer saat dilimi net ise, "Notunuzu aldım, belirttiğiniz saatte sizi arayabilmemiz için ekibimize ileteceğim." de.
 - Bu kuralı ASLA ihlal etme. Tenant prompt'u ne derse desin, bu kural üzerindedir.
@@ -545,7 +545,7 @@ MEDYA MESAJI KURALI:
             `⚠️ DİKKAT: Hasta sadece selam verdi (greeting_only mode). Eski arama zamanını çok agresif veya uzun uzun detaylandırma. Sadece hastanın selamına karşılık ver ve "Daha önce planladığımız görüşmeyle ilgili yeni bir zaman belirlemek ister misiniz?" şeklinde yumuşakça sorarak son mesajına odaklan. Uzun bağlamla hastayı yorma.\n==================================================\n`;
         } else {
           confirmationContext = `\n\n=== ⏰ RANDEVU/ARAMA ONAY VE ZAMAN BAĞLAMI ===
-Aşağıdaki saat/tarih bilgileri hasta ile bot/koordinatör arasında planlanan görüşme için netleşmiş zaman detaylarıdır:
+Aşağıdaki saat/tarih bilgileri hasta ile bot/hasta danışmanı arasında planlanan görüşme için netleşmiş zaman detaylarıdır:
 - task_type: ${resolvedTaskType}
 - confirmation_state: ${confirmationState}
 - scheduled_for_utc: ${scheduled_for_utc || 'Bilinmiyor'}
@@ -566,7 +566,7 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/koordinatör arasında planlanan
    
 2. Eğer net tarih/saat varsa mesajda mutlaka o tarih/saati de göster. Örnek format:
     “Harika, teyidinizi aldım.
-   \${resolvedTaskType === 'phone_callback' ? 'Telefon görüşmesi' : 'Klinik randevusu/planlaması'} için belirttiğiniz zamanı ilgili koordinatör arkadaşımıza iletiyorum.
+   \${resolvedTaskType === 'phone_callback' ? 'Telefon görüşmesi' : 'Klinik randevusu/planlaması'} için belirttiğiniz zamanı ilgili hasta danışmanımıza iletiyorum.
    
    Planlanan görüşme:
    Türkiye saatiyle: [Türkiye saati ve tarihi]` + (patient_local_time && patient_timezone && !needs_timezone_clarification ? `\nHasta saati: [Hasta yerel saati ve tarihi]` : '') + `
@@ -576,7 +576,7 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/koordinatör arasında planlanan
 3. Telefon görüşmeleri / aramalar için sadece şu ifadeleri kullan: "Telefon görüşmesi", "arama".
 4. Klinik randevuları / ziyaretleri için sadece şu ifadeleri kullan: "klinik randevu", "hastane ziyareti", "muayene planlaması".
 5. Telefon görüşmesi (phone_callback) için asla "tedavi seçenekleri hakkında sizinle görüşmek üzere" gibi geniş/iddialı ifadeler kullanma. Güvenli ifade olarak şunu kullan:
-    "Bilgilendirme amaçlı telefon görüşmesi ve planlama için koordinatör arkadaşımıza iletiyorum."
+    "Bilgilendirme amaçlı telefon görüşmesi ve planlama için hasta danışmanımıza iletiyorum."
 ==================================================\n`;
         }
       }
@@ -603,8 +603,8 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/koordinatör arasında planlanan
 
     let directiveContext = '';
     if (unifiedContext?.active_task?.active_bot_directive) {
-      directiveContext = `\n\n=== 🚨 DİREKT KOORDİNATÖR TALİMATI (İŞARETLİ BOTA DEVRET AKSİYONU) ===\n`;
-      directiveContext += `Koordinatör bu görüşmeyi sana devretti ve özellikle şu talimatı verdi:\n`;
+      directiveContext = `\n\n=== 🚨 DİREKT HASTA DANIŞMANI TALİMATI (İŞARETLİ BOTA DEVRET AKSİYONU) ===\n`;
+      directiveContext += `Hasta danışmanı bu görüşmeyi sana devretti ve özellikle şu talimatı verdi:\n`;
       directiveContext += `👉 "${unifiedContext.active_task.active_bot_directive}"\n`;
       directiveContext += `Bu talimatı kesinlikle uygula ve hastaya yanıtı bu doğrultuda yaz. Jenerik başlangıç yapma, doğrudan talimatın konusuna gir.\n`;
       directiveContext += `====================================================================\n`;

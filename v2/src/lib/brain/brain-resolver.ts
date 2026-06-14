@@ -297,7 +297,10 @@ export class BrainResolver {
     }
 
     const systemPrompt = binding.prompt_text || null;
-    const promptMetadata = binding.prompt_metadata || null;
+    const rawMetadata = binding.prompt_metadata || {};
+    const promptMetadata = typeof rawMetadata === 'object'
+      ? { ...rawMetadata, version: binding.version }
+      : { version: binding.version };
 
     log.info('[BRAIN_V2_PROMPT_RESOLVED]', {
       tenantId, channelId,
