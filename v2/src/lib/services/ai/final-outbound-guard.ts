@@ -167,7 +167,16 @@ export class FinalOutboundGuard {
       /aklınızızdaki/i,
       /sistem detay/i,
       /sistem prompt/i,
-      /promptunda/i
+      /promptunda/i,
+      /ai unavailable/i,
+      /circuit_open/i,
+      /quota_exhausted/i,
+      /quota/i,
+      /gemini/i,
+      /provider/i,
+      /model/i,
+      /yapay zeka servis dışı/i,
+      /müşteri temsilcisine devredildi/i
     ];
 
     const lowerText = corrected.toLowerCase();
@@ -224,7 +233,9 @@ export class FinalOutboundGuard {
     // Trigger fallback if blocked pattern exists, or if sentence is incomplete / extremely short
     if (hasBlockedPattern || isSentenceIncomplete || isExtremelyShort || isShortGreetingOnly) {
       let fallbackText = '';
-      if (isHealthcare) {
+      if (tenantId === 'caab9ea1-9591-45e4-bbc5-9c9b498982c8') {
+        fallbackText = `Ben *Rüya*, Konya Başkent Hastanesi’nden sizinle ilgileniyorum\n\nSorunuzu yazarsanız size yardımcı olayım 🌿`;
+      } else if (isHealthcare) {
         fallbackText = 'Kusura bakmayın, cevabımı daha net ifade edeyim. Sağlık talebinizle ilgili sizi doğru ekibe yönlendirebilirim.';
       } else {
         fallbackText = 'Kusura bakmayın, cevabımı daha net ifade edeyim. Talebinizle ilgili sizi doğru ekibe yönlendirebilirim.';

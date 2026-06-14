@@ -848,6 +848,28 @@ test("P0.12 MICRO: Call Request / Confirmation Loop Fix", () => {
   assert(resArbitratedNormal.effectivePendingSlot === "confirmation_yes_no", "Normal confirmation should not be suppressed if last msg was not call offer");
 });
 
+test("P0.12 MICRO: Technical error leakage prevention in FinalOutboundGuard", () => {
+  const { FinalOutboundGuard } = require("../lib/services/ai/final-outbound-guard");
+
+  // 1. Should block technical words and return customized fallback for target tenant
+  const tenantId = "caab9ea1-9591-45e4-bbc5-9c9b498982c8";
+  const texts = [
+    "AI Unavailable: circuit_open",
+    "Gemini quota exceeded",
+    "Yapay zeka servis dışı kaldığı için müşteri temsilcisine devredildi."
+  ];
+
+  for (const text of texts) {
+    const res = FinalOutboundGuard.process(text, { tenantId });
+    assert(res === "Ben *Rüya*, Konya Başkent Hastanesi’nden sizinle ilgileniyorum\n\nSorunuzu yazarsanız size yardımcı olayım 🌿", `Should return Rüya fallback for: ${text}`);
+  }
+
+  // 2. Should block technical words and return general fallback for other tenants
+  const otherTenantId = "other-tenant-id";
+  const resOther = FinalOutboundGuard.process("AI Unavailable: circuit_open", { tenantId: otherTenantId, isHealthcare: true });
+  assert(resOther === "Kusura bakmayın, cevabımı daha net ifade edeyim. Sağlık talebinizle ilgili sizi doğru ekibe yönlendirebilirim.", "Should return general healthcare fallback");
+});
+
 test("PHASE 2D: updateBot style-token sync test", async () => {
   process.env.TEST_TENANT_ID = 'test-tenant-id';
   process.env.TEST_USER_ROLE = 'owner';
