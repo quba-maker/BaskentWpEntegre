@@ -42,10 +42,6 @@ export class ContextAwareSafeFallbackResolver {
 
     const isHealthcareOrForm = isHealthcare || hasFormContext;
 
-    const intro = identityConfig.personaName 
-      ? `Merhaba, ${identityConfig.personaName} ben.` 
-      : `Merhaba, ben ${isHealthcare ? 'hastane ' : ''}iletişim asistanıyım.`;
-
     // Route message to find exact intent
     const detectedIntent = ConversationIntentRouter.route(inboundText);
 
@@ -56,6 +52,32 @@ export class ContextAwareSafeFallbackResolver {
     
     const pendingSlot = PendingQuestionResolver.resolve(history);
     const interpretedIntent = ShortAnswerInterpreter.interpret(inboundText, pendingSlot);
+
+    const isPromptChallenge = detectedIntent === 'prompt_challenge' || interpretedIntent === 'prompt_challenge';
+    const isAbuseOrInsult = detectedIntent === 'abuse_or_insult' || interpretedIntent === 'abuse_or_insult';
+    const isIdentityQuestion = detectedIntent === 'identity_question' || interpretedIntent === 'identity_question';
+    
+    const isAngryPatientText = [
+      'şikayet', 'sikayet', 'rezalet', 'berbat', 'kötü', 'kotu', 'memnun değil', 'memnun degil',
+      'memnun kalmadım', 'memnun kalmadim', 'ilgisiz', 'zaman kaybı', 'zaman kaybi', 'robot',
+      'otomatik', 'dalga mı', 'dalga mi', 'düzgün', 'duzgun', 'sinir', 'bıktım', 'biktim',
+      'yeter', 'insanla', 'temsilci', 'canlı destek', 'canli destek', 'muhatap', 'kızgın', 'kizgin'
+    ].some(kw => lowerInbound.includes(kw));
+
+    const isAngryOrChallenge = 
+      isPromptChallenge || 
+      isAbuseOrInsult || 
+      isIdentityQuestion ||
+      isAngryPatientText ||
+      interpretedIntent === 'user_correction' ||
+      (unifiedContext?.settings?.angryPatientMode === true) ||
+      (lowerInbound.includes('bot') || lowerInbound.includes('yapay zeka') || lowerInbound.includes('robot'));
+
+    const intro = isAngryOrChallenge
+      ? '' // No hello/intro for angry/challenge path
+      : (identityConfig.personaName 
+          ? `Merhaba, ${identityConfig.personaName} ben.` 
+          : `Merhaba, ben ${isHealthcare ? 'hastane ' : ''}iletişim asistanıyım.`);
 
     // CRITICAL: Prevent opportunity.summary leakage.
     // Sourced strictly from patient_known_facts, NEVER from opportunity.summary directly.
@@ -77,6 +99,57 @@ export class ContextAwareSafeFallbackResolver {
       if (complaint.length > 50) {
         complaint = complaint.substring(0, 50) + '...';
       }
+    }
+
+    // P0.11: Pre-process mother & complaint info for challenge/angry path
+    const factsText = Array.isArray(unifiedContext?.patient_known_facts) ? unifiedContext.patient_known_facts.join(' ').toLowerCase() : '';
+    const historyText = (history || []).map((m: any) => m.content).join(' ').toLowerCase();
+    const hasMother = lowerInbound.includes('anne') || factsText.includes('anne') || historyText.includes('anne') || lowerInbound.includes('valide') || factsText.includes('valide') || historyText.includes('valide');
+
+    if (!complaint) {
+      if (lowerInbound.includes('bel fıt') || lowerInbound.includes('bel fit') || historyText.includes('bel fıt') || historyText.includes('bel fit')) {
+        complaint = 'bel fıtığı';
+        hasComplaint = true;
+      }
+    }
+
+    if (isAngryOrChallenge) {
+      if (isPromptChallenge) {
+        let text = '';
+        if (hasComplaint) {
+          text = `Bu teknik kısma girmeden, ${hasMother ? 'annenizin ' : ''}${complaint} süreciyle ilgili size yardımcı olmaya devam edebilirim.`;
+        } else {
+          text = isHealthcare
+            ? 'Bu teknik konuya girmeyeyim. Size sağlık talebinizle ilgili yardımcı olayım.'
+            : 'Bu teknik konuya girmeyeyim. Size yardımcı olmaya devam edebilirim.';
+        }
+        return {
+          text,
+          sector: resolvedIndustry,
+          hasFormContext,
+          hasComplaint,
+          finalPath: 'prompt_challenge_fallback',
+          detectedIntent
+        };
+      }
+
+      // Identity query, bot questions, abuse or general anger
+      let text = '';
+      if (hasComplaint) {
+        text = `Kusura bakmayın, cevaplarım yeterince net olmadı. ${hasMother ? 'Annenizin ' : ''}${complaint} süreciyle ilgili sorularınızı daha düzgün yanıtlayayım.`;
+      } else {
+        text = isHealthcare
+          ? 'Kusura bakmayın, cevaplarım yeterince net olmadı. Size sağlık talebinizle ilgili yardımcı olayım.'
+          : 'Kusura bakmayın, cevaplarım yeterince net olmadı. Size yardımcı olmaya devam edebilirim.';
+      }
+      return {
+        text,
+        sector: resolvedIndustry,
+        hasFormContext,
+        hasComplaint,
+        finalPath: 'angry_challenge_fallback',
+        detectedIntent
+      };
     }
 
     // Priority 1: User Correction / Frustration

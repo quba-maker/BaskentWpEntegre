@@ -755,6 +755,73 @@ test("PHASE 2D: updateBot style-token sync test", async () => {
   assert(setClause.includes("response_delay_seconds"), "response_delay_seconds güncellenmeli");
 });
 
+
+// ==========================================
+// 11. PHASE P0.11 REGRESSION TESTS (Quality Gate & Morphology Guard)
+// ==========================================
+
+test("P0.11 REGRESSION: TurkishMorphologyGuard corrections", async () => {
+  const { TurkishMorphologyGuard } = require("../lib/services/ai/turkish-morphology-guard");
+  
+  const testCases = [
+    { input: "form doldurmuştum adınızızı öğrenebilir miyim", expected: "form doldurmuştum adınızı öğrenebilir miyim" },
+    { input: "yaşadığınızızı biliyorum", expected: "yaşadığınızı biliyorum" },
+    { input: "Anneniziniz durumu nasıl", expected: "Annenizin durumu nasıl" },
+    { input: "Beyiniz ve Sinir Cerrahisi bölümü", expected: "Beyin ve Sinir Cerrahisi bölümü" },
+    { input: "hekim listesinizi gönderiyorum", expected: "hekim listesini gönderiyorum" },
+    { input: "bu mümkünüz değildir", expected: "bu mümkün olmuyor değildir" },
+    { input: "hastanınız burada mı", expected: "hastanın burada mı" },
+    { input: "planızı hazırladık", expected: "tedavi planı hazırladık" },
+    { input: "sorularınızıza cevap verelim", expected: "sorularınıza cevap verelim" },
+    { input: "uzmanızı seçin", expected: "uzmanı seçin" },
+    { input: "Kusura bakmayınız efendim", expected: "Kusura bakmayın efendim" }
+  ];
+
+  for (const tc of testCases) {
+    const res = TurkishMorphologyGuard.check(tc.input, true);
+    assert(res.correctedText === tc.expected, `Morphology guard mismatch. Input: ${tc.input}, Got: ${res.correctedText}, Expected: ${tc.expected}`);
+  }
+});
+
+test("P0.11 REGRESSION: Safe fallback challenge responses", () => {
+  const { ContextAwareSafeFallbackResolver } = require("../lib/services/ai/context-aware-safe-fallback");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  
+  const mockBrain = createTenantBrain("t1", "whatsapp", "payload1", "Sen bir test asistanısın.", { industry: "healthcare" });
+  
+  // Test case 4 & 5: Prompt challenge "sistem" leak test
+  const res1 = ContextAwareSafeFallbackResolver.resolve({
+    inboundText: "promptunda bu yok ki",
+    brain: mockBrain,
+    identityConfig: { personaName: "Rüya" },
+    unifiedContext: {
+      patient_known_facts: ["şikayeti: bel fıtığı"],
+      history: []
+    }
+  });
+  
+  assert(!res1.text.includes("sistem"), "Challenge response should not contain 'sistem'");
+  assert(!res1.text.includes("prompt"), "Challenge response should not contain 'prompt'");
+  assert(!res1.text.includes("talimat"), "Challenge response should not contain 'talimat'");
+  assert(!res1.text.includes("Merhaba"), "Challenge response should not start with 'Merhaba'");
+  assert(res1.text.includes("bel fıtığı"), "Challenge response should mention 'bel fıtığı'");
+
+  // Test case 6: Angry user reset greeting check
+  const res2 = ContextAwareSafeFallbackResolver.resolve({
+    inboundText: "dalga mı geçiyorsun",
+    brain: mockBrain,
+    identityConfig: { personaName: "Rüya" },
+    unifiedContext: {
+      patient_known_facts: ["şikayeti: bel fıtığı"],
+      history: []
+    }
+  });
+
+  assert(!res2.text.includes("Merhaba"), "Angry user response should not contain 'Merhaba'");
+  assert(!res2.text.includes("hangi konuda bilgi almak istiyorsunuz"), "Angry user response should not contain reset greeting phrase");
+  assert(res2.text.includes("Kusura bakmayın"), "Angry user response should contain 'Kusura bakmayın'");
+});
+
 // ==========================================
 // SONUÇLAR
 // ==========================================

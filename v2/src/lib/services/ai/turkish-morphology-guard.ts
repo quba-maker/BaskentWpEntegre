@@ -28,19 +28,26 @@ export interface MorphologyError {
 // Known Turkish suffix deduplication patterns with safe corrections
 const KNOWN_DEDUP_PATTERNS: { regex: RegExp; description: string; fix?: (match: string) => string }[] = [
   // Specific live failures
-  { regex: /adınızızı/gi, description: 'adınızızı', fix: () => 'adınızı' },
-  { regex: /cevabınızızı/gi, description: 'cevabınızızı', fix: () => 'cevabınızı' },
-  { regex: /şikayetiniziniz/gi, description: 'şikayetiniziniz', fix: () => 'şikayetiniz' },
-  { regex: /saatiniziniz/gi, description: 'saatiniziniz', fix: () => 'saatiniz' },
-  { regex: /planızı/gi, description: 'planızı', fix: () => 'planınızı' },
-  { regex: /mümkünüz/gi, description: 'mümkünüz', fix: () => 'mümkün' },
-  { regex: /Haklısınızız/gi, description: 'Haklısınızız', fix: () => 'Haklısınız' },
+  { regex: /adınızızı/gi, description: 'adınızızı', fix: (m) => m[0] === 'A' ? 'Adınızı' : 'adınızı' },
+  { regex: /cevabınızızı/gi, description: 'cevabınızızı', fix: (m) => m[0] === 'C' ? 'Cevabınızı' : 'cevabınızı' },
+  { regex: /şikayetiniziniz/gi, description: 'şikayetiniziniz', fix: (m) => m[0] === 'Ş' || m[0] === 'S' ? (m[0] === 'Ş' ? 'Şikayetiniz' : 'Sikayetiniz') : 'şikayetiniz' },
+  { regex: /saatiniziniz/gi, description: 'saatiniziniz', fix: (m) => m[0] === 'S' ? 'Saatiniz' : 'saatiniz' },
+  { regex: /planızı/gi, description: 'planızı', fix: (m) => m[0] === 'P' ? 'Tedavi planı' : 'tedavi planı' },
+  { regex: /mümkünüz/gi, description: 'mümkünüz', fix: (m) => m[0] === 'M' ? 'Mümkün olmuyor' : 'mümkün olmuyor' },
+  { regex: /Haklısınızız/gi, description: 'Haklısınızız', fix: (m) => m[0] === 'H' ? 'Haklısınız' : 'haklısınız' },
   { regex: /yetkiniz\s+hekim/gi, description: 'yetkiniz_hekim', fix: () => 'yetkili hekim' },
-  { regex: /Beyiniz\s+ve\s+Sinir/gi, description: 'Beyiniz_ve_Sinir', fix: () => 'Beyin ve Sinir' },
-  { regex: /ülkeniziniz/gi, description: 'ulkeniziniz', fix: () => 'ülkeniz' },
-  { regex: /şehriniziniz/gi, description: 'sehriniziniz', fix: () => 'şehriniz' },
-  { regex: /saatlerimiziniz/gi, description: 'saatlerimiziniz', fix: () => 'saatlerimiz' },
+  { regex: /Beyiniz\s+ve\s+Sinir/gi, description: 'Beyiniz_ve_Sinir', fix: (m) => m[0] === 'B' ? 'Beyin ve Sinir' : 'beyin ve sinir' },
+  { regex: /ülkeniziniz/gi, description: 'ulkeniziniz', fix: (m) => m[0] === 'Ü' || m[0] === 'U' ? (m[0] === 'Ü' ? 'Ülkeniz' : 'Ulkeniz') : 'ülkeniz' },
+  { regex: /şehriniziniz/gi, description: 'sehriniziniz', fix: (m) => m[0] === 'Ş' || m[0] === 'S' ? (m[0] === 'Ş' ? 'Şehriniz' : 'Sehriniz') : 'şehriniz' },
+  { regex: /saatlerimiziniz/gi, description: 'saatlerimiziniz', fix: (m) => m[0] === 'S' ? 'Saatlerimiz' : 'saatlerimiz' },
   { regex: /çalışma\s+saatlerimiziniz/gi, description: 'calisma_saatlerimiziniz', fix: () => 'çalışma saatlerimiz' },
+  { regex: /yaşadığınızızı/gi, description: 'yaşadığınızızı', fix: (m) => m[0] === 'Y' ? 'Yaşadığınızı' : 'yaşadığınızı' },
+  { regex: /anneniziniz/gi, description: 'anneniziniz', fix: (m) => m[0] === 'A' ? 'Annenizin' : 'annenizin' },
+  { regex: /hekim listesinizi/gi, description: 'hekim listesinizi', fix: (m) => m[0] === 'H' ? 'Hekim listesini' : 'hekim listesini' },
+  { regex: /hastanınız/gi, description: 'hastanınız', fix: (m) => m[0] === 'H' ? 'Hastanın' : 'hastanın' },
+  { regex: /sorularınızıza/gi, description: 'sorularınızıza', fix: (m) => m[0] === 'S' ? 'Sorularınıza' : 'sorularınıza' },
+  { regex: /uzmanızı/gi, description: 'uzmanızı', fix: (m) => m[0] === 'U' ? 'Uzmanı' : 'uzmanı' },
+  { regex: /Kusura bakmayınız/gi, description: 'kusura_bakmayiniz', fix: (m) => m[0] === 'K' ? 'Kusura bakmayın' : 'kusura bakmayın' },
 
   // Doubled possessive general patterns
   // nızınız → nız

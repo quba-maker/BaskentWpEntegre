@@ -110,6 +110,12 @@ export class MultilingualQualityGate {
       }
     }
 
+    // P0.11: Standalone prompt challenge / forbidden words check
+    const challengeLeakPattern = /\b(?:prompt|promt|sistem|talimat|kural|direktif)/i;
+    if (challengeLeakPattern.test(text)) {
+      return { valid: false, reason: 'prompt_challenge_leak' };
+    }
+
     // KVKK / privacy patterns
     const privacyPatterns = [
       /T\.?C\.?\s*(?:kimlik)?\s*(?:no|numar)/i,

@@ -28,7 +28,8 @@ const LOW_RISK_ALLOWLIST = new Set([
   'too_generic',
   'greeting_reset',
   'unhelpful_response',
-  'style_quality'
+  'style_quality',
+  'prompt_challenge_leak'
 ]);
 
 const HIGH_RISK_LIST = new Set([
@@ -49,6 +50,7 @@ export function normalizeQualityGateReason(reason: string): string {
   const r = reason.toLowerCase().trim();
   
   if (r.includes('generic_fallback_pattern')) return 'generic_fallback_pattern';
+  if (r.includes('prompt_challenge_leak')) return 'prompt_challenge_leak';
   if (r.includes('kritik fren engeli') || r.includes('cta_frequency_brake')) return 'cta_frequency_brake';
   if (r.includes('yasaklı otomatik bot kalıbı') || r.includes('yasakli otomatik bot kalibi') || r.includes('forbidden_boilerplate')) return 'forbidden_boilerplate';
   if (r.includes('too_generic')) return 'too_generic';

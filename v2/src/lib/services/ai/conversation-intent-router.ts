@@ -87,7 +87,8 @@ export class ConversationIntentRouter {
     // P0.11: 2. Prompt Challenge
     const challengeKeywords = [
       'sistem prompt', 'sen bot musun', 'uydurma', 'yapay zeka', 'talimatların ne',
-      'sistem talimati', 'hangi model', 'system prompt', 'are you a bot', 'your instructions'
+      'sistem talimati', 'hangi model', 'system prompt', 'are you a bot', 'your instructions',
+      'prompt', 'promt'
     ];
     if (challengeKeywords.some(kw => clean.includes(kw) || originalLower.includes(kw))) {
       return 'prompt_challenge';
