@@ -5,6 +5,9 @@ import { CostLimiter } from "./cost-limiter";
 import { toolRegistry } from "./core/tool-registry";
 import { toolExecutor } from "./core/tool-executor";
 import { auditEngine } from "./core/audit-engine";
+import { ConversationIntentRouter } from "./conversation-intent-router";
+import { PendingQuestionResolver } from "./pending-question-resolver";
+
 
 export interface AIProviderConfig {
   provider: 'gemini' | 'openai' | 'anthropic';
@@ -18,6 +21,7 @@ export interface AIProviderConfig {
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'function';
   content?: string;
+  direction?: string;
   
   // When assistant wants to call a function
   functionCall?: {
@@ -104,12 +108,118 @@ export class AIOrchestrator {
     // Sandbox mode layer (Prevents real execution if true)
     const isSandbox = options?.sandbox === true || process.env.AI_TOOL_EXECUTION_MODE === 'sandbox';
 
+    let currentMessages = [...initialMessages];
+    let contextCompactionApplied = false;
+
+    // 1. Calculate initial prompt stats
+    const initialCharCount = currentMessages.reduce((acc, m) => acc + (m.content || '').length, 0);
+    const initialTokenCount = Math.ceil(initialCharCount / 4);
+
+    // 2. Perform system note isolation: filter out leaked system notes and direction='system' messages from history
+    const systemMsg = currentMessages.find(m => m.role === 'system');
+    const userMsg = currentMessages[currentMessages.length - 1];
+    
+    let midMessages = currentMessages.filter(m => m.role !== 'system' && m !== userMsg);
+    const originalMidCount = midMessages.length;
+    midMessages = midMessages.filter(m => {
+      if (m.direction === 'system') {
+        return false;
+      }
+      const contentLower = (m.content || '').toLowerCase();
+      if (
+        contentLower.includes('quality gate blocked') || 
+        contentLower.includes('yapay zeka yanıtı tamamlanmadı') ||
+        contentLower.includes('kalite kontrolünü geçemedi')
+      ) {
+        return false;
+      }
+      return true;
+    });
+    if (midMessages.length < originalMidCount) {
+      contextCompactionApplied = true;
+    }
+
+    // 3. Check if there's an active pending slot or specific intent to minimize/suppress CRM context
+    const lastUserMsg = userMsg?.content || '';
+    const historyForSlot = midMessages.map(m => ({
+      role: m.role as 'user' | 'assistant',
+      content: m.content || ''
+    }));
+    
+    const pendingSlot = PendingQuestionResolver.resolve(historyForSlot);
+    const lastUserIntent = ConversationIntentRouter.route(lastUserMsg);
+    const isSpecificIntent = ['transfer_request', 'call_scheduling_request', 'time_availability', 'timezone_clarification', 'confirmation_yes_no'].includes(lastUserIntent);
+    const pendingActive = pendingSlot && pendingSlot !== 'generic_none';
+    const hasActiveFlow = pendingActive || isSpecificIntent;
+
+    let systemPromptText = systemMsg?.content || '';
+    if (systemPromptText && (hasActiveFlow || initialCharCount > 8000)) {
+      const oppRegex = /--- AKTİF FIRSAT BİLGİLERİ \(CRM OPPORTUNITY\) ---[\s\S]*?(?=(?:---|\n\n|$))/i;
+      const memRegex = /--- ÖNCEKİ GÖRÜŞME ÖZETİ[\s\S]*?(?=(?:---|\n\n|$))/i;
+      const rawFormRegex = /Ham Form Verileri[\s\S]*?(?=(?:---|\n\n|$))/i;
+
+      let newSystemPromptText = systemPromptText;
+      if (oppRegex.test(newSystemPromptText)) {
+        newSystemPromptText = newSystemPromptText.replace(oppRegex, '--- AKTİF FIRSAT BİLGİLERİ (CRM OPPORTUNITY) ---\n- Özet: Kayıtlı fırsat bilgileri (aktif akış/bütçe koruması nedeniyle kısaltılmıştır).\n');
+        contextCompactionApplied = true;
+      }
+      if (memRegex.test(newSystemPromptText)) {
+        newSystemPromptText = newSystemPromptText.replace(memRegex, '--- ÖNCEKİ GÖRÜŞME ÖZETİ ---\n- Özet: Geçmiş konuşma özeti (aktif akış/bütçe koruması nedeniyle kısaltılmıştır).\n');
+        contextCompactionApplied = true;
+      }
+      if (rawFormRegex.test(newSystemPromptText)) {
+        newSystemPromptText = newSystemPromptText.replace(rawFormRegex, 'Ham Form Verileri: Form verisi mevcut.\n');
+        contextCompactionApplied = true;
+      }
+      systemPromptText = newSystemPromptText;
+    }
+
+    // 4. Compact history if there is an active pending slot or scheduling/transfer intent
+    if (hasActiveFlow && midMessages.length > 3) {
+      midMessages = midMessages.slice(-3);
+      contextCompactionApplied = true;
+    } else {
+      // Gentle history trimming only if prompt is still extremely large to avoid losing context aggressively
+      const currentEstimate = systemPromptText.length + midMessages.reduce((acc, m) => acc + (m.content || '').length, 0) + (userMsg?.content || '').length;
+      if (currentEstimate > 14000 && midMessages.length > 8) {
+        midMessages = midMessages.slice(-6);
+        contextCompactionApplied = true;
+      } else if (currentEstimate > 11000 && midMessages.length > 5) {
+        midMessages = midMessages.slice(-4);
+        contextCompactionApplied = true;
+      }
+    }
+
+    // Reconstruct currentMessages with compacted content
+    currentMessages = [];
+    if (systemMsg) {
+      currentMessages.push({
+        ...systemMsg,
+        content: systemPromptText
+      });
+    }
+    currentMessages.push(...midMessages);
+    if (userMsg) {
+      currentMessages.push(userMsg);
+    }
+
+    const finalPromptCharCount = currentMessages.reduce((acc, m) => acc + (m.content || '').length, 0);
+    const estimatedTokenCount = Math.ceil(finalPromptCharCount / 4);
+
+    this.log.info(`[PROMPT_BUDGET_GUARD] Prompt Metrics`, {
+      initialCharCount,
+      initialTokenCount,
+      finalPromptCharCount,
+      estimatedTokenCount,
+      contextCompactionApplied,
+      modelMaxOutputTokens: config.maxTokens
+    });
+
     try {
       if (tenantId !== 'unknown') {
         await this.costLimiter.consume(tenantId);
       }
 
-      let currentMessages = [...initialMessages];
       let loopCount = 0;
       const MAX_LOOPS = 5; // Guard against infinite tool loops
       let totalInputTokens = 0;
@@ -135,7 +245,15 @@ export class AIOrchestrator {
         // 1. Did LLM return standard text? (Respond Intent)
         if (rawResponse.text) {
           const latencyMs = Date.now() - startTime;
-          this.log.info(`LLM Execution Completed [${config.provider}/${config.modelId}]`, { latencyMs, loopCount });
+          this.log.info(`LLM Execution Completed [${config.provider}/${config.modelId}]`, {
+            latencyMs,
+            loopCount,
+            finishReason: rawResponse.finishReason,
+            finalPromptCharCount,
+            estimatedTokenCount,
+            contextCompactionApplied,
+            modelMaxOutputTokens: config.maxTokens
+          });
           
           if (tenantId !== 'unknown') {
             await auditEngine.logRuntimeMetrics({
@@ -164,7 +282,16 @@ export class AIOrchestrator {
         // 2. Did LLM return a function call? (Tool Intent)
         if (rawResponse.functionCall) {
           const { name, args } = rawResponse.functionCall;
-          this.log.info(`LLM Decision: Tool Call Requested`, { tool: name, args, tenantId, isSandbox });
+          this.log.info(`LLM Decision: Tool Call Requested`, { 
+            tool: name, 
+            args, 
+            tenantId, 
+            isSandbox,
+            finalPromptCharCount,
+            estimatedTokenCount,
+            contextCompactionApplied,
+            modelMaxOutputTokens: config.maxTokens
+          });
 
           // Add the assistant's function call intent to the history
           currentMessages.push({
@@ -241,7 +368,16 @@ export class AIOrchestrator {
         throw new AICircuitOpenError(e.message);
       }
 
-      this.log.error(`[LLM_EXECUTION_FAILED] provider=${config.provider} model=${config.modelId} error=${e.message}`, e, { errorName: e.name, errorStack: e.stack?.substring(0, 500) });
+      const finishReason = e instanceof IncompleteResponseError ? e.finishReason : 'error';
+      this.log.error(`[LLM_EXECUTION_FAILED] provider=${config.provider} model=${config.modelId} error=${e.message}`, e, {
+        errorName: e.name,
+        errorStack: e.stack?.substring(0, 500),
+        finishReason,
+        finalPromptCharCount,
+        estimatedTokenCount,
+        contextCompactionApplied,
+        modelMaxOutputTokens: config.maxTokens
+      });
       
       let fallbackText = "Mesajınızı aldım. Sizi doğru yönlendirebilmem için şikâyetinizi biraz daha açık yazar mısınız? 🙏";
       if (e.message?.startsWith('COST_LIMIT_EXCEEDED')) {
@@ -255,7 +391,7 @@ export class AIOrchestrator {
         providerUsed: 'fallback',
         modelUsed: 'fallback',
         latencyMs: Date.now() - startTime,
-        finishReason: 'error'
+        finishReason
       };
     }
   }

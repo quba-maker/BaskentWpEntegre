@@ -120,7 +120,7 @@ Hastanın bulunduğu ülke için saat dilimi doğrulanmamıştır (şehir/eyalet
         }
       }
 
-      // 2. Fetch raw messages to summarize (linked by phone_number)
+      // 2. Fetch raw messages to summarize (linked by phone_number, excluding system notes to prevent leakage)
       const messages = await db.executeSafe({
         text: `
           SELECT * FROM (
@@ -128,6 +128,7 @@ Hastanın bulunduğu ülke için saat dilimi doğrulanmamıştır (şehir/eyalet
             FROM messages
             WHERE tenant_id = $1 
               AND phone_number = $2
+              AND direction IN ('in', 'out')
             ORDER BY created_at DESC
             LIMIT 50
           ) sub

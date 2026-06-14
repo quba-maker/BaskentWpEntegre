@@ -268,7 +268,7 @@ export class IdentityEngine {
       values: [customerId, leadId, tenantId]
     });
   }
-  private static sanitizeFormFacts(rawData: any): string[] {
+  public static sanitizeFormFacts(rawData: any): string[] {
     if (!rawData) return [];
     let formObj: any = rawData;
     if (typeof rawData === 'string') {

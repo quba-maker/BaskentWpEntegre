@@ -2309,9 +2309,7 @@ Tek veya iki kısa cümle yaz.`;
       }
 
       if (!qualityGate.valid) {
-        const isCtaBlockSecond = !!qualityGate.reason?.includes('Kritik Fren Engeli');
         const isIdentityRepetitionSecond = !!qualityGate.reason?.includes('Kimlik zaten tanıtılmıştı');
-        const isGenericFallbackSecond = !!qualityGate.reason?.includes('generic_fallback_pattern');
 
         if (isIdentityRepetitionSecond) {
           this.log.warn(`[QUALITY_GATE] Failed on second attempt due to identity repetition: ${qualityGate.reason}. Applying stripPersonaIntroduction cleanup...`, { traceId });
@@ -2349,79 +2347,31 @@ Tek veya iki kısa cümle yaz.`;
             this.log.error(`[QUALITY_GATE] Cleanup resulted in empty or meaningless text.`, undefined, { traceId });
             qualityGate = { valid: false, reason: 'cleaned_text_empty' };
           }
-        } else if (isCtaBlockSecond && qgOptions.patientProvidedAvailability) {
-          const safeFallbackText = "Uygun olduğunuz zamanı not aldım, hasta danışmanlarımız planlamayı kontrol edecek.";
-          this.log.warn(`[QUALITY_GATE] Failed on second attempt due to CTA block and patient provided availability. Applying safe confirmation fallback: "${safeFallbackText}"`, { traceId });
+        }
 
-          const fallbackQg = TurkishReplyQualityGate.validate(safeFallbackText, qgOptions);
-          if (fallbackQg.valid) {
-            aiResponse.text = safeFallbackText;
-            qualityGate = { valid: true };
-
-            // Log SAFE_CONFIRMATION_FALLBACK_APPLIED to ai_audit_logs
-            await db.executeSafe({
-              text: `INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
-                     VALUES ($1, $2, $3, $4)`,
-              values: [
-                tenantId,
-                'SAFE_CONFIRMATION_FALLBACK_APPLIED',
-                `Safe confirmation fallback applied in handleIncomingMessage due to CTA block on patient availability.`,
-                JSON.stringify({
-                  conversation_id: conversationId,
-                  original_response: aiResponse.text,
-                  fallback_response: safeFallbackText,
-                  timestamp: new Date().toISOString()
-                })
-              ]
-            });
-          } else {
-            this.log.error(`[QUALITY_GATE] Safe fallback failed Quality Gate validation: ${fallbackQg.reason}`, undefined, { traceId });
-            qualityGate = fallbackQg;
-          }
-        } else if (isGenericFallbackSecond) {
-          const { ContextAwareSafeFallbackResolver } = await import('@/lib/services/ai/context-aware-safe-fallback');
-          const fallbackRes = ContextAwareSafeFallbackResolver.resolve({
+        // If it's still invalid, delegate to the centralized QualityGateRecoveryHelper
+        if (!qualityGate.valid) {
+          const { QualityGateRecoveryHelper } = await import('@/lib/services/ai/quality-gate-recovery');
+          const recoveryResult = await QualityGateRecoveryHelper.handleFailure({
+            tenantId,
+            conversationId: conversationId || 'unknown',
+            phoneNumber,
             inboundText: content || '',
             brain,
             identityConfig,
-            unifiedContext
+            unifiedContext,
+            reason: qualityGate.reason || '',
+            channel,
+            path: 'queue_immediate'
           });
 
-          this.log.warn(`[QUALITY_GATE_RECOVERY] Applied deterministic safe fallback. recoveryReason: generic_fallback_pattern, finalPath: ${fallbackRes.finalPath}, textLength: ${fallbackRes.text.length}`, { traceId });
-
-          const recoveryReason = 'generic_fallback_pattern';
-          const finalPath = fallbackRes.finalPath;
-          const originalReason = qualityGate.reason;
-
-          aiResponse.text = fallbackRes.text;
-          qualityGate = { valid: true };
-
-          // Log GENERIC_FALLBACK_DETERMINISTIC_APPLIED to ai_audit_logs
-          await db.executeSafe({
-            text: `INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
-                   VALUES ($1, $2, $3, $4)`,
-            values: [
-              tenantId,
-              'GENERIC_FALLBACK_DETERMINISTIC_APPLIED',
-              `Deterministic context-aware fallback applied due to generic_fallback_pattern failure on retry.`,
-              JSON.stringify({
-                tenantId,
-                conversationId,
-                traceId,
-                reason: originalReason,
-                sector: fallbackRes.sector,
-                hasFormContext: fallbackRes.hasFormContext,
-                hasComplaint: fallbackRes.hasComplaint,
-                finalPath: fallbackRes.finalPath,
-                textLength: fallbackRes.text.length,
-                qualityGateRecoveryApplied: true,
-                recoveryReason,
-                timestamp: new Date().toISOString()
-              })
-            ]
-          });
-        } else {
-          this.log.warn(`[QUALITY_GATE] Failed on second attempt: ${qualityGate.reason}. No cleanup or fallback applicable.`, { traceId });
+          if (recoveryResult.recovered && recoveryResult.text) {
+            aiResponse.text = recoveryResult.text;
+            qualityGate = { valid: true };
+          } else {
+            this.log.warn(`[QUALITY_GATE] Centralized recovery helper failed or was not applicable: ${qualityGate.reason}`, { traceId });
+            return; // Exit cleanly as handoff has been processed by the helper
+          }
         }
       }
 
@@ -4359,9 +4309,7 @@ Tek veya iki kısa cümle yaz.`;
       }
 
       if (!qualityGate.valid) {
-        const isCtaBlockSecond = !!qualityGate.reason?.includes('Kritik Fren Engeli');
         const isIdentityRepetitionSecond = !!qualityGate.reason?.includes('Kimlik zaten tanıtılmıştı');
-        const isGenericFallbackSecond = !!qualityGate.reason?.includes('generic_fallback_pattern');
 
         if (isIdentityRepetitionSecond) {
           this.log.warn(`[DEBOUNCE_WORKER] Quality gate failed on second attempt due to identity repetition: ${qualityGate.reason}. Applying stripPersonaIntroduction cleanup...`, { traceId });
@@ -4399,125 +4347,32 @@ Tek veya iki kısa cümle yaz.`;
             this.log.error(`[DEBOUNCE_WORKER] Cleanup resulted in empty or meaningless text.`, undefined, { traceId });
             qualityGate = { valid: false, reason: 'cleaned_text_empty' };
           }
-        } else if (isCtaBlockSecond && qgOptions.patientProvidedAvailability) {
-          const safeFallbackText = "Uygun olduğunuz zamanı not aldım, hasta danışmanlarımız planlamayı kontrol edecek.";
-          this.log.warn(`[DEBOUNCE_WORKER] Quality gate failed on second attempt due to CTA block and patient provided availability. Applying safe confirmation fallback: "${safeFallbackText}"`, { traceId });
+        }
 
-          const fallbackQg = TurkishReplyQualityGate.validate(safeFallbackText, qgOptions);
-          if (fallbackQg.valid) {
-            aiResponse.text = safeFallbackText;
-            qualityGate = { valid: true };
-
-            // Log SAFE_CONFIRMATION_FALLBACK_APPLIED to ai_audit_logs
-            await db.executeSafe({
-              text: `INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
-                     VALUES ($1, $2, $3, $4)`,
-              values: [
-                tenantId,
-                'SAFE_CONFIRMATION_FALLBACK_APPLIED',
-                `Safe confirmation fallback applied in debounce worker due to CTA block on patient availability.`,
-                JSON.stringify({
-                  conversation_id: conversationId,
-                  original_response: aiResponse.text,
-                  fallback_response: safeFallbackText,
-                  timestamp: new Date().toISOString()
-                })
-              ]
-            });
-          } else {
-            this.log.error(`[DEBOUNCE_WORKER] Safe fallback failed Quality Gate validation: ${fallbackQg.reason}`, undefined, { traceId });
-            qualityGate = fallbackQg;
-          }
-        } else if (isGenericFallbackSecond) {
-          const { ContextAwareSafeFallbackResolver } = await import('@/lib/services/ai/context-aware-safe-fallback');
-          const fallbackRes = ContextAwareSafeFallbackResolver.resolve({
+        // If it's still invalid, delegate to the centralized QualityGateRecoveryHelper
+        if (!qualityGate.valid) {
+          const { QualityGateRecoveryHelper } = await import('@/lib/services/ai/quality-gate-recovery');
+          const recoveryResult = await QualityGateRecoveryHelper.handleFailure({
+            tenantId,
+            conversationId: conversationId || 'unknown',
+            phoneNumber,
             inboundText: latestInboundContent || '',
             brain,
             identityConfig,
-            unifiedContext
+            unifiedContext,
+            reason: qualityGate.reason || '',
+            channel,
+            path: 'queue_delayed'
           });
 
-          this.log.warn(`[QUALITY_GATE_RECOVERY] Applied deterministic safe fallback in debounce worker. recoveryReason: generic_fallback_pattern, finalPath: ${fallbackRes.finalPath}, textLength: ${fallbackRes.text.length}`, { traceId });
-
-          const recoveryReason = 'generic_fallback_pattern';
-          const finalPath = fallbackRes.finalPath;
-          const originalReason = qualityGate.reason;
-
-          aiResponse.text = fallbackRes.text;
-          qualityGate = { valid: true };
-
-          // Log GENERIC_FALLBACK_DETERMINISTIC_APPLIED to ai_audit_logs
-          await db.executeSafe({
-            text: `INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
-                   VALUES ($1, $2, $3, $4)`,
-            values: [
-              tenantId,
-              'GENERIC_FALLBACK_DETERMINISTIC_APPLIED',
-              `Deterministic context-aware fallback applied due to generic_fallback_pattern failure on retry.`,
-              JSON.stringify({
-                tenantId,
-                conversationId,
-                traceId,
-                reason: originalReason,
-                sector: fallbackRes.sector,
-                hasFormContext: fallbackRes.hasFormContext,
-                hasComplaint: fallbackRes.hasComplaint,
-                finalPath: fallbackRes.finalPath,
-                textLength: fallbackRes.text.length,
-                qualityGateRecoveryApplied: true,
-                recoveryReason,
-                timestamp: new Date().toISOString()
-              })
-            ]
-          });
-        } else {
-          this.log.warn(`[DEBOUNCE_WORKER] Quality gate failed on second attempt: ${qualityGate.reason}. No cleanup or fallback applicable.`, { traceId });
+          if (recoveryResult.recovered && recoveryResult.text) {
+            aiResponse.text = recoveryResult.text;
+            qualityGate = { valid: true };
+          } else {
+            this.log.warn(`[DEBOUNCE_WORKER] Centralized recovery helper failed or was not applicable: ${qualityGate.reason}`, { traceId });
+            return; // Exit cleanly as handoff has been processed by the helper
+          }
         }
-      }
-
-      if (!qualityGate.valid) {
-        this.log.error(`[DEBOUNCE_WORKER] Quality gate failed on final attempt: ${qualityGate.reason}. Blocking send, taking over to human.`, undefined, { traceId });
-        
-        // Takeover conversation to human
-        await db.executeSafe({
-          text: `UPDATE conversations SET status = 'human' WHERE id = $1 AND tenant_id = $2`,
-          values: [conversationId, tenantId]
-        });
-
-        // Log ai_response_failed warning event
-        AIEventEmitter.emit({
-          tenantId,
-          conversationId,
-          customerId,
-          type: 'ai_response_failed',
-          category: 'pipeline',
-          severity: 'warning',
-          payload: { reason: qualityGate.reason }
-        });
-
-        // Insert non-patient-visible system message
-        await db.executeSafe({
-          text: `
-            INSERT INTO messages (tenant_id, conversation_id, phone_number, direction, content, channel, provider_message_id, status)
-            VALUES ($1, $2, $3, 'system', $4, $5, 'system_alert', 'delivered')
-          `,
-          values: [tenantId, conversationId, phoneNumber, 'AI yanıtı Türkçe kalite kontrolünü geçemedi, manuel kontrol gerekli. (Quality Gate Blocked)', channel]
-        });
-
-        // Passive Learning Capture: log human takeover
-        try {
-          const { TenantLearningCaptureService } = await import('../services/ai/tenant-learning-capture.service');
-          await TenantLearningCaptureService.logHumanTakeover(db, {
-            tenantId,
-            channelId: metadata.channelId,
-            conversationId,
-            reason: `quality_gate_failed: ${qualityGate.reason}`
-          });
-        } catch (captureErr) {
-          this.log.error('TenantLearningCaptureService.logHumanTakeover error bypassed', captureErr as Error);
-        }
-
-        return;
       }
 
       // Format & sanitize response

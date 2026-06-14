@@ -5584,11 +5584,11 @@ export async function prepareInboxBotAssistedDraftAction(
       }
       const conv = convRows[0];
 
-      // 2. Fetch last 15 messages
+      // 2. Fetch last 15 messages (excluding system notes to prevent leakage)
       const messageRows = await ctx.db.executeSafe({
         text: `SELECT direction, content, created_at 
                FROM messages 
-               WHERE conversation_id = $1 AND tenant_id = $2
+               WHERE conversation_id = $1 AND tenant_id = $2 AND direction IN ('in', 'out')
                ORDER BY created_at DESC, id DESC
                LIMIT 15`,
         values: [conversationId, ctx.tenantId]
@@ -5842,10 +5842,80 @@ Lütfen bu bilgilere göre yukarıdaki kurallara ve talimatlara uygun cevap tasl
                   ]
                 });
               } else {
-                return { success: false, error: `Taslak Türkçe kalite kontrolünü geçemedi: ${cleanedQualityGate.reason}` };
+                const { IdentityEngine } = await import('@/lib/services/ai/engines/identity');
+                const { QualityGateRecoveryHelper } = await import('@/lib/services/ai/quality-gate-recovery');
+                const recoveryResult = await QualityGateRecoveryHelper.handleFailure({
+                  tenantId: ctx.tenantId,
+                  conversationId,
+                  phoneNumber: conv.phone_number,
+                  inboundText: messages[messages.length - 1]?.content || '',
+                  brain: {
+                    context: { tenantId: ctx.tenantId, channel: 'whatsapp', config: { industry: opp?.department ? 'healthcare' : 'general' } },
+                    prompts: { systemPrompt: systemPrompt, metadata: { industry: opp?.department ? 'healthcare' : 'general' } }
+                  },
+                  identityConfig: {
+                    personaName: identityConfig.personaName,
+                    organizationName: identityConfig.organizationName,
+                    organizationShortName: identityConfig.organizationShortName
+                  },
+                  unifiedContext: {
+                    history: messages.map((m: any) => ({
+                      role: m.direction === 'in' ? 'user' : 'assistant',
+                      content: m.content || ''
+                    })),
+                    patient_known_facts: lead ? IdentityEngine.sanitizeFormFacts(lead.raw_data) : [],
+                    latestForm: lead ? { name: lead.form_name, data: lead.raw_data } : null,
+                    memory: null,
+                    opportunity: opp
+                  },
+                  reason: cleanedQualityGate.reason || 'style_quality',
+                  channel: 'whatsapp',
+                  path: 'panel_draft'
+                });
+
+                if (recoveryResult.recovered && recoveryResult.text) {
+                  draftText = recoveryResult.text;
+                } else {
+                  return { success: false, error: `Taslak Türkçe kalite kontrolünü geçemedi: ${cleanedQualityGate.reason}` };
+                }
               }
             } else {
-              return { success: false, error: "Taslak Türkçe kalite kontrolünü geçemedi (temizleme sonrası boş metin)." };
+              const { IdentityEngine } = await import('@/lib/services/ai/engines/identity');
+              const { QualityGateRecoveryHelper } = await import('@/lib/services/ai/quality-gate-recovery');
+              const recoveryResult = await QualityGateRecoveryHelper.handleFailure({
+                tenantId: ctx.tenantId,
+                conversationId,
+                phoneNumber: conv.phone_number,
+                inboundText: messages[messages.length - 1]?.content || '',
+                brain: {
+                  context: { tenantId: ctx.tenantId, channel: 'whatsapp', config: { industry: opp?.department ? 'healthcare' : 'general' } },
+                  prompts: { systemPrompt: systemPrompt, metadata: { industry: opp?.department ? 'healthcare' : 'general' } }
+                },
+                identityConfig: {
+                  personaName: identityConfig.personaName,
+                  organizationName: identityConfig.organizationName,
+                  organizationShortName: identityConfig.organizationShortName
+                },
+                unifiedContext: {
+                  history: messages.map((m: any) => ({
+                    role: m.direction === 'in' ? 'user' : 'assistant',
+                    content: m.content || ''
+                  })),
+                  patient_known_facts: lead ? IdentityEngine.sanitizeFormFacts(lead.raw_data) : [],
+                  latestForm: lead ? { name: lead.form_name, data: lead.raw_data } : null,
+                  memory: null,
+                  opportunity: opp
+                },
+                reason: qualityGate.reason || 'style_quality',
+                channel: 'whatsapp',
+                path: 'panel_draft'
+              });
+
+              if (recoveryResult.recovered && recoveryResult.text) {
+                draftText = recoveryResult.text;
+              } else {
+                return { success: false, error: `Taslak Türkçe kalite kontrolünü geçemedi: ${qualityGate.reason}` };
+              }
             }
           }
 
