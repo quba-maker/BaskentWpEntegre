@@ -27,20 +27,30 @@ export interface MorphologyError {
 
 // Known Turkish suffix deduplication patterns with safe corrections
 const KNOWN_DEDUP_PATTERNS: { regex: RegExp; description: string; fix?: (match: string) => string }[] = [
-  // nızınız → nız (doubled possessive)
+  // Specific live failures
+  { regex: /adınızızı/gi, description: 'adınızızı', fix: () => 'adınızı' },
+  { regex: /cevabınızızı/gi, description: 'cevabınızızı', fix: () => 'cevabınızı' },
+  { regex: /şikayetiniziniz/gi, description: 'şikayetiniziniz', fix: () => 'şikayetiniz' },
+  { regex: /saatiniziniz/gi, description: 'saatiniziniz', fix: () => 'saatiniz' },
+  { regex: /planızı/gi, description: 'planızı', fix: () => 'planınızı' },
+  { regex: /mümkünüz/gi, description: 'mümkünüz', fix: () => 'mümkün' },
+  { regex: /Haklısınızız/gi, description: 'Haklısınızız', fix: () => 'Haklısınız' },
+  { regex: /yetkiniz\s+hekim/gi, description: 'yetkiniz_hekim', fix: () => 'yetkili hekim' },
+  { regex: /Beyiniz\s+ve\s+Sinir/gi, description: 'Beyiniz_ve_Sinir', fix: () => 'Beyin ve Sinir' },
+  { regex: /ülkeniziniz/gi, description: 'ulkeniziniz', fix: () => 'ülkeniz' },
+  { regex: /şehriniziniz/gi, description: 'sehriniziniz', fix: () => 'şehriniz' },
+  { regex: /saatlerimiziniz/gi, description: 'saatlerimiziniz', fix: () => 'saatlerimiz' },
+  { regex: /çalışma\s+saatlerimiziniz/gi, description: 'calisma_saatlerimiziniz', fix: () => 'çalışma saatlerimiz' },
+
+  // Doubled possessive general patterns
+  // nızınız → nız
   { regex: /(\w+)(nızınız|niziniz|nüzünüz|nuzunuz)/gi, description: 'doubled_possessive_niz', fix: (m) => m.replace(/(nızınız|niziniz|nüzünüz|nuzunuz)/gi, (sub) => sub.startsWith('nız') ? 'nız' : sub.startsWith('niz') ? 'niz' : sub.startsWith('nüz') ? 'nüz' : 'nuz') },
   // ınızınız → ınız
   { regex: /(\w+)(ınızınız|inızınız)/gi, description: 'doubled_possessive_iniz', fix: (m) => m.replace(/(ınızınız|inızınız)/gi, 'ınız') },
+  // nıznız -> nız
+  { regex: /(\w+)(nıznız|nizniz|nüznüz|nuznuz)/gi, description: 'doubled_possessive_nznz', fix: (m) => m.replace(/(nıznız|nizniz|nüznüz|nuznuz)/gi, (sub) => sub.startsWith('nız') ? 'nız' : sub.startsWith('niz') ? 'niz' : sub.startsWith('nüz') ? 'nüz' : 'nuz') },
   // imizimiz → imiz
   { regex: /(\w+)(imizimiz|ımızımız)/gi, description: 'doubled_possessive_imiz', fix: (m) => m.replace(/(imizimiz)/gi, 'imiz').replace(/(ımızımız)/gi, 'ımız') },
-  // ülkeniziniz → ülkeniz
-  { regex: /ülkeniziniz/gi, description: 'ulkeniziniz', fix: (m) => 'ülkeniz' },
-  // şehriniziniz → şehriniz
-  { regex: /şehriniziniz/gi, description: 'sehriniziniz', fix: (m) => 'şehriniz' },
-  // saatlerimiziniz → saatlerimiz
-  { regex: /saatlerimiziniz/gi, description: 'saatlerimiziniz', fix: (m) => 'saatlerimiz' },
-  // çalışma saatlerimiziniz → çalışma saatlerimiz
-  { regex: /çalışma\s+saatlerimiziniz/gi, description: 'calisma_saatlerimiziniz', fix: (m) => 'çalışma saatlerimiz' },
 ];
 
 // Known bad phrase patterns (no auto-fix, Quality Gate fail)

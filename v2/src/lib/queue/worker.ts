@@ -2179,6 +2179,9 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
     let isRetry = false;
     let qualityGateFailed = false;
     let qualityGateReason = '';
+    let languagePolicy: any;
+    let qgOptions: any;
+    let identityConfig: any;
 
     const executeLLM = async (messages: any[]) => {
       const aiPromise = this.aiOrchestrator.generateResponse(messages, aiConfig, tenantId, conversationId);
@@ -2217,7 +2220,7 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
         }
       }
       // RUN TURKISH QUALITY GATE
-      const identityConfig = brain.prompts.metadata?.identity || brain.context.config?.identity || {};
+      identityConfig = brain.prompts.metadata?.identity || brain.context.config?.identity || {};
       const assistantHistory = (history || []).filter((m: any) => m.role === 'assistant');
       const isFirstAssistantTurn = assistantHistory.length === 0;
 
@@ -2255,7 +2258,7 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
         patientClaimsBot = ['botsun', 'bot musun', 'yapay zeka', 'robot musun'].some(kw => currentMessageTextLower.includes(kw));
       }
 
-      const qgOptions = {
+      qgOptions = {
         ctaOfferedRecently,
         angryPatientMode,
         personaName: identityConfig.personaName,
@@ -2268,7 +2271,27 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
         patientProvidedAvailability
       };
 
-      let qualityGate = TurkishReplyQualityGate.validate(aiResponse.text, qgOptions);
+      const { LanguageResponsePolicy } = await import('@/lib/services/ai/language-response-policy');
+      const tenantDefaultLang = brain.context.config?.defaultLanguage || undefined;
+      const channelFixedLang = brain.context.config?.fixedLanguage || undefined;
+      languagePolicy = LanguageResponsePolicy.resolve(
+        content || '',
+        history,
+        tenantDefaultLang,
+        channelFixedLang
+      );
+
+      const { MultilingualQualityGate } = await import('@/lib/services/ai/multilingual-quality-gate');
+      let qualityGate: any = MultilingualQualityGate.validate({
+        responseText: aiResponse.text,
+        replyLanguage: languagePolicy.replyLanguage,
+        qualityGateLocale: languagePolicy.qualityGateLocale,
+        qgOptions
+      });
+
+      if (qualityGate.valid && qualityGate.morphologyCorrectedText) {
+        aiResponse.text = qualityGate.morphologyCorrectedText;
+      }
 
       if (!qualityGate.valid) {
         this.log.warn(`[QUALITY_GATE] Failed on first attempt: ${qualityGate.reason}. Retrying...`, { traceId });
@@ -2305,7 +2328,15 @@ Tek veya iki kısa cümle yaz.`;
         });
 
         aiResponse = await executeLLM(retryContextMessages);
-        qualityGate = TurkishReplyQualityGate.validate(aiResponse.text, qgOptions);
+        qualityGate = MultilingualQualityGate.validate({
+          responseText: aiResponse.text,
+          replyLanguage: languagePolicy.replyLanguage,
+          qualityGateLocale: languagePolicy.qualityGateLocale,
+          qgOptions
+        });
+        if (qualityGate.valid && qualityGate.morphologyCorrectedText) {
+          aiResponse.text = qualityGate.morphologyCorrectedText;
+        }
       }
 
       if (!qualityGate.valid) {
@@ -2317,10 +2348,15 @@ Tek veya iki kısa cümle yaz.`;
           const cleanedText = TurkishReplyQualityGate.stripPersonaIntroduction(originalText, qgOptions);
 
           if (cleanedText && cleanedText.trim().length > 0) {
-            const cleanedQualityGate = TurkishReplyQualityGate.validate(cleanedText, qgOptions);
+            const cleanedQualityGate = MultilingualQualityGate.validate({
+              responseText: cleanedText,
+              replyLanguage: languagePolicy.replyLanguage,
+              qualityGateLocale: languagePolicy.qualityGateLocale,
+              qgOptions
+            });
             if (cleanedQualityGate.valid) {
               this.log.info(`[QUALITY_GATE] Cleanup applied successfully. Validation passed.`, { traceId });
-              aiResponse.text = cleanedText;
+              aiResponse.text = cleanedQualityGate.morphologyCorrectedText || cleanedText;
               qualityGate = { valid: true };
 
               // Log IDENTITY_REPETITION_CLEANUP_APPLIED to ai_audit_logs
@@ -2366,7 +2402,13 @@ Tek veya iki kısa cümle yaz.`;
           });
 
           if (recoveryResult.recovered && recoveryResult.text) {
-            aiResponse.text = recoveryResult.text;
+            const recoveryQG = MultilingualQualityGate.validate({
+              responseText: recoveryResult.text,
+              replyLanguage: languagePolicy.replyLanguage,
+              qualityGateLocale: languagePolicy.qualityGateLocale,
+              qgOptions
+            });
+            aiResponse.text = recoveryQG.morphologyCorrectedText || recoveryResult.text;
             qualityGate = { valid: true };
           } else {
             this.log.warn(`[QUALITY_GATE] Centralized recovery helper failed or was not applicable: ${qualityGate.reason}`, { traceId });
@@ -2496,6 +2538,50 @@ Tek veya iki kısa cümle yaz.`;
       });
 
       return; // Exit worker successfully without sending any outbound message
+    }
+
+    // P0.11: Final Locale-Aware Quality Gate check on the actual outgoing text
+    const { MultilingualQualityGate } = await import('@/lib/services/ai/multilingual-quality-gate');
+    const finalQG = MultilingualQualityGate.validate({
+      responseText: aiResponse.text,
+      replyLanguage: languagePolicy?.replyLanguage || 'Türkçe',
+      qualityGateLocale: languagePolicy?.qualityGateLocale || 'tr',
+      qgOptions
+    });
+    if (finalQG.valid) {
+      aiResponse.text = finalQG.morphologyCorrectedText || aiResponse.text;
+    } else {
+      const { ContextAwareSafeFallbackResolver } = await import('@/lib/services/ai/context-aware-safe-fallback');
+      const fallbackRes = ContextAwareSafeFallbackResolver.resolve({
+        inboundText: content || '',
+        brain,
+        identityConfig: identityConfig || {},
+        unifiedContext: unifiedContext || {}
+      });
+      const fallbackQG = MultilingualQualityGate.validate({
+        responseText: fallbackRes.text,
+        replyLanguage: languagePolicy?.replyLanguage || 'Türkçe',
+        qualityGateLocale: languagePolicy?.qualityGateLocale || 'tr',
+        qgOptions
+      });
+      aiResponse.text = fallbackQG.morphologyCorrectedText || fallbackRes.text;
+
+      await db.executeSafe({
+        text: `INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
+               VALUES ($1, $2, $3, $4)`,
+        values: [
+          tenantId,
+          'FINAL_MORPHOLOGY_FAIL_FALLBACK_APPLIED',
+          `Final morphology check failed. Applying safe fallback. Path: queue_immediate. Original: "${finalQG.reason}", Fallback: "${aiResponse.text}"`,
+          JSON.stringify({
+            conversationId,
+            phoneNumber,
+            originalText: finalQG.reason,
+            fallbackText: aiResponse.text,
+            timestamp: new Date().toISOString()
+          })
+        ]
+      });
     }
 
     // 7. Response Policy Check (Egress DLP)
@@ -4277,9 +4363,30 @@ Tek veya iki kısa cümle yaz.`;
       patientProvidedAvailability
     };
 
+    const { LanguageResponsePolicy } = await import('@/lib/services/ai/language-response-policy');
+    const tenantDefaultLang = brain.context.config?.defaultLanguage || undefined;
+    const channelFixedLang = brain.context.config?.fixedLanguage || undefined;
+    const languagePolicy = LanguageResponsePolicy.resolve(
+      latestInboundContent || '',
+      history,
+      tenantDefaultLang,
+      channelFixedLang
+    );
+
+    const { MultilingualQualityGate } = await import('@/lib/services/ai/multilingual-quality-gate');
+
     try {
       aiResponse = await executeLLM(aiMessages);
-      let qualityGate = TurkishReplyQualityGate.validate(aiResponse.text, qgOptions);
+      let qualityGate: any = MultilingualQualityGate.validate({
+        responseText: aiResponse.text,
+        replyLanguage: languagePolicy.replyLanguage,
+        qualityGateLocale: languagePolicy.qualityGateLocale,
+        qgOptions
+      });
+
+      if (qualityGate.valid && qualityGate.morphologyCorrectedText) {
+        aiResponse.text = qualityGate.morphologyCorrectedText;
+      }
 
       if (!qualityGate.valid) {
         this.log.warn(`[DEBOUNCE_WORKER] Quality gate failed on first attempt: ${qualityGate.reason}. Retrying...`, { traceId });
@@ -4314,7 +4421,15 @@ Tek veya iki kısa cümle yaz.`;
         ];
 
         aiResponse = await executeLLM(retryMessages);
-        qualityGate = TurkishReplyQualityGate.validate(aiResponse.text, qgOptions);
+        qualityGate = MultilingualQualityGate.validate({
+          responseText: aiResponse.text,
+          replyLanguage: languagePolicy.replyLanguage,
+          qualityGateLocale: languagePolicy.qualityGateLocale,
+          qgOptions
+        });
+        if (qualityGate.valid && qualityGate.morphologyCorrectedText) {
+          aiResponse.text = qualityGate.morphologyCorrectedText;
+        }
       }
 
       if (!qualityGate.valid) {
@@ -4326,10 +4441,15 @@ Tek veya iki kısa cümle yaz.`;
           const cleanedText = TurkishReplyQualityGate.stripPersonaIntroduction(originalText, qgOptions);
 
           if (cleanedText && cleanedText.trim().length > 0) {
-            const cleanedQualityGate = TurkishReplyQualityGate.validate(cleanedText, qgOptions);
+            const cleanedQualityGate = MultilingualQualityGate.validate({
+              responseText: cleanedText,
+              replyLanguage: languagePolicy.replyLanguage,
+              qualityGateLocale: languagePolicy.qualityGateLocale,
+              qgOptions
+            });
             if (cleanedQualityGate.valid) {
               this.log.info(`[DEBOUNCE_WORKER] Cleanup applied successfully. Validation passed.`, { traceId });
-              aiResponse.text = cleanedText;
+              aiResponse.text = cleanedQualityGate.morphologyCorrectedText || cleanedText;
               qualityGate = { valid: true };
 
               // Log IDENTITY_REPETITION_CLEANUP_APPLIED to ai_audit_logs
@@ -4375,13 +4495,62 @@ Tek veya iki kısa cümle yaz.`;
           });
 
           if (recoveryResult.recovered && recoveryResult.text) {
-            aiResponse.text = recoveryResult.text;
+            const recoveryQG = MultilingualQualityGate.validate({
+              responseText: recoveryResult.text,
+              replyLanguage: languagePolicy.replyLanguage,
+              qualityGateLocale: languagePolicy.qualityGateLocale,
+              qgOptions
+            });
+            aiResponse.text = recoveryQG.morphologyCorrectedText || recoveryResult.text;
             qualityGate = { valid: true };
           } else {
             this.log.warn(`[DEBOUNCE_WORKER] Centralized recovery helper failed or was not applicable: ${qualityGate.reason}`, { traceId });
             return; // Exit cleanly as handoff has been processed by the helper
           }
         }
+      }
+
+      // P0.11: Final Locale-Aware Quality Gate check on the actual outgoing text (delayed path)
+      const finalQG = MultilingualQualityGate.validate({
+        responseText: aiResponse.text,
+        replyLanguage: languagePolicy?.replyLanguage || 'Türkçe',
+        qualityGateLocale: languagePolicy?.qualityGateLocale || 'tr',
+        qgOptions
+      });
+      if (finalQG.valid) {
+        aiResponse.text = finalQG.morphologyCorrectedText || aiResponse.text;
+      } else {
+        const { ContextAwareSafeFallbackResolver } = await import('@/lib/services/ai/context-aware-safe-fallback');
+        const fallbackRes = ContextAwareSafeFallbackResolver.resolve({
+          inboundText: latestInboundContent || '',
+          brain,
+          identityConfig: identityConfig || {},
+          unifiedContext: unifiedContext || {}
+        });
+        const fallbackQG = MultilingualQualityGate.validate({
+          responseText: fallbackRes.text,
+          replyLanguage: languagePolicy?.replyLanguage || 'Türkçe',
+          qualityGateLocale: languagePolicy?.qualityGateLocale || 'tr',
+          qgOptions
+        });
+        aiResponse.text = fallbackQG.morphologyCorrectedText || fallbackRes.text;
+
+        await db.executeSafe({
+          text: `INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
+                 VALUES ($1, $2, $3, $4)`,
+          values: [
+            tenantId,
+            'FINAL_MORPHOLOGY_FAIL_FALLBACK_APPLIED',
+            `Final morphology check failed in delayed path. Applying safe fallback. Original: "${finalQG.reason}", Fallback: "${aiResponse.text}"`,
+            JSON.stringify({
+              conversationId,
+              phoneNumber,
+              originalText: finalQG.reason,
+              fallbackText: aiResponse.text,
+              timestamp: new Date().toISOString()
+            })
+          ]
+        });
       }
 
       // Format & sanitize response

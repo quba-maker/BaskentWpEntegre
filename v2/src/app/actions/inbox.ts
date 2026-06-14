@@ -5798,6 +5798,7 @@ Lütfen bu bilgilere göre yukarıdaki kurallara ve talimatlara uygun cevap tasl
 
           // Run Quality Gate on the generated draft
           const { TurkishReplyQualityGate } = await import('@/lib/services/ai/turkish-quality-gate');
+          const { MultilingualQualityGate } = await import('@/lib/services/ai/multilingual-quality-gate');
           const assistantHistory = messages.filter((m: any) => m.direction === 'out');
           const isFirstAssistantTurn = assistantHistory.length === 0;
 
@@ -5813,17 +5814,35 @@ Lütfen bu bilgilere göre yukarıdaki kurallara ve talimatlara uygun cevap tasl
             patientClaimsBot: false
           };
 
-          let qualityGate = TurkishReplyQualityGate.validate(draftText, qgOptions);
+          const replyLanguage = parsed.detectedLanguage || 'Türkçe';
+          const qualityGateLocale = (parsed.languageCode || 'tr') === 'tr' ? 'tr' : 'generic';
+
+          let qualityGate = MultilingualQualityGate.validate({
+            responseText: draftText,
+            replyLanguage,
+            qualityGateLocale,
+            qgOptions
+          });
+          if (qualityGate.valid && qualityGate.morphologyCorrectedText) {
+            draftText = qualityGate.morphologyCorrectedText;
+            parsed.draftText = qualityGate.morphologyCorrectedText;
+          }
+
           if (!qualityGate.valid) {
             console.log(`[DRAFT_QUALITY_GATE] Failed: ${qualityGate.reason}. Applying stripPersonaIntroduction...`);
             const originalText = draftText;
             const cleanedText = TurkishReplyQualityGate.stripPersonaIntroduction(originalText, qgOptions);
 
             if (cleanedText && cleanedText.trim().length > 0) {
-              const cleanedQualityGate = TurkishReplyQualityGate.validate(cleanedText, qgOptions);
+              const cleanedQualityGate = MultilingualQualityGate.validate({
+                responseText: cleanedText,
+                replyLanguage,
+                qualityGateLocale,
+                qgOptions
+              });
               if (cleanedQualityGate.valid) {
-                draftText = cleanedText;
-                parsed.draftText = cleanedText;
+                draftText = cleanedQualityGate.morphologyCorrectedText || cleanedText;
+                parsed.draftText = cleanedQualityGate.morphologyCorrectedText || cleanedText;
 
                 // Log IDENTITY_REPETITION_CLEANUP_APPLIED to ai_audit_logs
                 await ctx.db.executeSafe({
@@ -5874,7 +5893,13 @@ Lütfen bu bilgilere göre yukarıdaki kurallara ve talimatlara uygun cevap tasl
                 });
 
                 if (recoveryResult.recovered && recoveryResult.text) {
-                  draftText = recoveryResult.text;
+                  const recoveryQG = MultilingualQualityGate.validate({
+                    responseText: recoveryResult.text,
+                    replyLanguage,
+                    qualityGateLocale,
+                    qgOptions
+                  });
+                  draftText = recoveryQG.morphologyCorrectedText || recoveryResult.text;
                 } else {
                   return { success: false, error: `Taslak Türkçe kalite kontrolünü geçemedi: ${cleanedQualityGate.reason}` };
                 }
@@ -5912,7 +5937,13 @@ Lütfen bu bilgilere göre yukarıdaki kurallara ve talimatlara uygun cevap tasl
               });
 
               if (recoveryResult.recovered && recoveryResult.text) {
-                draftText = recoveryResult.text;
+                const recoveryQG = MultilingualQualityGate.validate({
+                  responseText: recoveryResult.text,
+                  replyLanguage,
+                  qualityGateLocale,
+                  qgOptions
+                });
+                draftText = recoveryQG.morphologyCorrectedText || recoveryResult.text;
               } else {
                 return { success: false, error: `Taslak Türkçe kalite kontrolünü geçemedi: ${qualityGate.reason}` };
               }

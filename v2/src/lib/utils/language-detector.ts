@@ -72,8 +72,8 @@ export function detectLanguage(
     scores.tr += trCharCount * 3;
     
     const trWords = [
-      'merhaba', 'selam', 'formu', 'doldurdum', 'fıtık', 'boyun', 'ağrı', 'bel',
-      'hastalık', 'randevu', 'doktor', 'muayene', 'bilgi', 'ücret', 'fiyat',
+      'merhaba', 'selam', 'formu', 'formumu', 'doldurdum', 'doldurmuştum', 'fıtık', 'boyun', 'ağrı', 'bel',
+      'hastalık', 'randevu', 'muayene', 'bilgi', 'ücret', 'fiyat',
       'tedavi', 'ameliyat', 'türkçe', 'evet', 'hayır', 'lütfen', 'teşekkür',
       'yazabilir', 'misiniz', 'günler'
     ];
@@ -95,12 +95,15 @@ export function detectLanguage(
     
     // ENGLISH
     const enWords = [
-      'hello', 'hi', 'filled', 'form', 'pain', 'knee', 'back', 'doctor',
+      'hello', 'hi', 'filled', 'pain', 'knee', 'back',
       'appointment', 'please', 'thank', 'thanks', 'yes', 'no', 'help', 'english',
       'would', 'could', 'should', 'spine', 'hip', 'treatment', 'and', 'the',
       'is', 'it', 'to', 'for', 'with', 'of', 'in', 'on', 'at', 'by', 'from',
       'about', 'have', 'has', 'had', 'continue', 'write'
     ];
+
+    // BILINGUAL / MULTILINGUAL WORDS (ignore or skip to prevent false language signaling)
+    const bilingualWords = ['form', 'doktor', 'doctor', 'online', 'covid', 'check'];
 
     const countWordMatches = (words: string[], weight: number) => {
       let score = 0;
@@ -116,6 +119,16 @@ export function detectLanguage(
     scores.tr += countWordMatches(trWords, 5) + countWordMatches(trParticles, 2);
     scores.de += countWordMatches(deWords, 5);
     scores.en += countWordMatches(enWords, 5);
+
+    // Score bilingual words equally to prevent biasing
+    for (const bw of bilingualWords) {
+      const regex = new RegExp(`\\b${bw}\\b`, 'i');
+      if (regex.test(txt)) {
+        scores.tr += 5;
+        scores.en += 5;
+        scores.de += 5;
+      }
+    }
 
     return scores;
   };

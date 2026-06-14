@@ -29,7 +29,6 @@ export class ContextAwareSafeFallbackResolver {
    */
   public static resolve(params: DeterministicFallbackParams): DeterministicFallbackResult {
     const { inboundText, brain, identityConfig, unifiedContext } = params;
-    const personaName = identityConfig.personaName || 'Asistan';
     const lowerInbound = (inboundText || '').toLowerCase().trim();
 
     // 1. Sector & Context Resolution
@@ -42,6 +41,10 @@ export class ContextAwareSafeFallbackResolver {
       (Array.isArray(unifiedContext?.patient_known_facts) && unifiedContext.patient_known_facts.length > 0);
 
     const isHealthcareOrForm = isHealthcare || hasFormContext;
+
+    const intro = identityConfig.personaName 
+      ? `Merhaba, ${identityConfig.personaName} ben.` 
+      : `Merhaba, ben ${isHealthcare ? 'hastane ' : ''}iletişim asistanıyım.`;
 
     // Route message to find exact intent
     const detectedIntent = ConversationIntentRouter.route(inboundText);
@@ -263,7 +266,7 @@ export class ContextAwareSafeFallbackResolver {
     if (isGreeting) {
       if (isHealthcare && hasComplaint) {
         return {
-          text: `Merhaba, ${personaName} ben. ${complaint} konusuyla ilgili yardımcı olayım. Bu durum ne zamandır devam ediyor?`,
+          text: `${intro} ${complaint} konusuyla ilgili yardımcı olayım. Bu durum ne zamandır devam ediyor?`,
           sector: resolvedIndustry,
           hasFormContext,
           hasComplaint,
@@ -272,7 +275,7 @@ export class ContextAwareSafeFallbackResolver {
         };
       } else if (hasFormContext) {
         return {
-          text: `Merhaba, ${personaName} ben. Formunuzla ilgili yardımcı olayım; hangi konuda bilgi almak istiyorsunuz?`,
+          text: `${intro} Formunuzla ilgili yardımcı olayım; hangi konuda bilgi almak istiyorsunuz?`,
           sector: resolvedIndustry,
           hasFormContext,
           hasComplaint,
@@ -281,7 +284,7 @@ export class ContextAwareSafeFallbackResolver {
         };
       } else if (isHealthcare) {
         return {
-          text: `Merhaba, ${personaName} ben. Sağlık talebinizle ilgili yardımcı olayım; hangi konuda bilgi almak istiyorsunuz?`,
+          text: `${intro} Sağlık talebinizle ilgili yardımcı olayım; hangi konuda bilgi almak istiyorsunuz?`,
           sector: resolvedIndustry,
           hasFormContext,
           hasComplaint,
@@ -291,7 +294,7 @@ export class ContextAwareSafeFallbackResolver {
       } else {
         // Parametric SaaS/tenant fallback (never use "nasıl yardımcı olabilirim")
         return {
-          text: `Merhaba, ${personaName} ben. Hangi konuda bilgi almak istediğinizi yazabilirsiniz.`,
+          text: `${intro} Hangi konuda bilgi almak istediğinizi yazabilirsiniz.`,
           sector: resolvedIndustry,
           hasFormContext,
           hasComplaint,
@@ -304,7 +307,7 @@ export class ContextAwareSafeFallbackResolver {
     // 4. Default Fallback Routing (General)
     if (isHealthcareOrForm && hasComplaint) {
       return {
-        text: `Merhaba, ${personaName} ben. ${complaint} konusuyla ilgili yardımcı olayım. Bu durum ne zamandır devam ediyor?`,
+        text: `${intro} ${complaint} konusuyla ilgili yardımcı olayım. Bu durum ne zamandır devam ediyor?`,
         sector: resolvedIndustry,
         hasFormContext,
         hasComplaint,
@@ -313,7 +316,7 @@ export class ContextAwareSafeFallbackResolver {
       };
     } else if (isHealthcare) {
       return {
-        text: `Merhaba, ${personaName} ben. Sağlık talebinizle ilgili yardımcı olayım; hangi konuda bilgi almak istiyorsunuz?`,
+        text: `${intro} Sağlık talebinizle ilgili yardımcı olayım; hangi konuda bilgi almak istiyorsunuz?`,
         sector: resolvedIndustry,
         hasFormContext,
         hasComplaint,
@@ -322,7 +325,7 @@ export class ContextAwareSafeFallbackResolver {
       };
     } else {
       return {
-        text: `Merhaba, ${personaName} ben. Hangi konuda bilgi almak istediğinizi yazabilirsiniz.`,
+        text: `${intro} Hangi konuda bilgi almak istediğinizi yazabilirsiniz.`,
         sector: resolvedIndustry,
         hasFormContext,
         hasComplaint,
