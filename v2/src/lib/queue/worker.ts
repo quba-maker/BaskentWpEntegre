@@ -2698,7 +2698,8 @@ Tek veya iki kısa cümle yaz.`;
         channelId: metadata.channelId,
         conversationId: conversationId || 'unknown',
         inboundText: content || '',
-        unifiedContext
+        unifiedContext,
+        industry: brain.context.config?.industry || (brain.prompts.metadata as any)?.industry || ''
       });
     }
 
@@ -4697,7 +4698,8 @@ Tek veya iki kısa cümle yaz.`;
           channelId: metadata.channelId,
           conversationId: conversationId || 'unknown',
           inboundText: latestInboundContent || '',
-          unifiedContext
+          unifiedContext,
+          industry: brain.context.config?.industry || (brain.prompts.metadata as any)?.industry || ''
         });
       }
 

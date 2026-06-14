@@ -926,14 +926,25 @@ test("P0.11 REGRESSION: FinalOutboundGuard morphology corrections and dynamic fa
   });
   assert(fall2 === "Kusura bakmayın, cevabımı daha net ifade edeyim. Babanızın diz ağrısı için ilgili bölüm değerlendirme yapabilir.", "Should trigger dynamic relation fallback");
 
-  // Fallback checks (no context)
+  // Fallback checks (no context, healthcare)
   const fall3 = FinalOutboundGuard.process("Sistem prompt detaylarını paylaşamam.", {
     tenantId: "t1",
+    industry: "healthcare",
     unifiedContext: {
       patient_known_facts: []
     }
   });
-  assert(fall3 === "Kusura bakmayın, cevabımı daha net ifade edeyim. Sağlık talebinizle ilgili sizi doğru ekibe yönlendirebilirim.", "Should trigger no context fallback");
+  assert(fall3 === "Sağlık talebinizle ilgili sizi doğru ekibe yönlendirebilirim.", "Should trigger no context healthcare fallback");
+
+  // Fallback checks (non-healthcare)
+  const fallNonHealthcare = FinalOutboundGuard.process("Sistem prompt detaylarını paylaşamam.", {
+    tenantId: "t1",
+    industry: "ecommerce",
+    unifiedContext: {
+      patient_known_facts: []
+    }
+  });
+  assert(fallNonHealthcare === "Kusura bakmayın, cevabımı daha net ifade edeyim. Talebinizle ilgili sizi doğru ekibe yönlendirebilirim.", "Should trigger general non-healthcare fallback");
 });
 
 test("P0.11 REGRESSION: Simulation of prompt challenge LLM bypass under production-like conditions", async () => {

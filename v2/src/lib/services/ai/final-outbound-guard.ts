@@ -7,6 +7,7 @@ export interface OutboundGuardContext {
   inboundText?: string;
   intent?: string;
   unifiedContext?: any;
+  industry?: string;
 }
 
 export class FinalOutboundGuard {
@@ -126,6 +127,10 @@ export class FinalOutboundGuard {
       let fallbackText = '';
       const normalizedComplaint = complaintContext.toLowerCase().trim();
       
+      const resolvedIndustry = (context.industry || '').toLowerCase().trim();
+      // If industry is empty (e.g. in tests where it wasn't passed), default to healthcare for backward compatibility
+      const isHealthcare = resolvedIndustry === 'healthcare' || resolvedIndustry === 'health' || resolvedIndustry === '';
+
       let relationPossessive = '';
       if (patientRelation) {
         const rel = patientRelation.toLowerCase().trim();
@@ -140,7 +145,9 @@ export class FinalOutboundGuard {
         }
       }
 
-      if (normalizedComplaint === 'bel fıtığı' || normalizedComplaint === 'bel fitigi') {
+      if (!isHealthcare) {
+        fallbackText = 'Kusura bakmayın, cevabımı daha net ifade edeyim. Talebinizle ilgili sizi doğru ekibe yönlendirebilirim.';
+      } else if (normalizedComplaint === 'bel fıtığı' || normalizedComplaint === 'bel fitigi') {
         if (!relationPossessive) {
           fallbackText = 'Bel fıtığı için Beyin ve Sinir Cerrahisi veya Fizik Tedavi bölümü değerlendirme yapabilir.';
         } else {
@@ -154,7 +161,7 @@ export class FinalOutboundGuard {
           fallbackText = `Kusura bakmayın, cevabımı daha net ifade edeyim. ${relationPossessive}${complaintContext} için ilgili bölüm değerlendirme yapabilir.`;
         }
       } else {
-        fallbackText = 'Kusura bakmayın, cevabımı daha net ifade edeyim. Sağlık talebinizle ilgili sizi doğru ekibe yönlendirebilirim.';
+        fallbackText = 'Sağlık talebinizle ilgili sizi doğru ekibe yönlendirebilirim.';
       }
 
       // Log fallback application to db
