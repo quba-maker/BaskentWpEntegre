@@ -50,7 +50,8 @@ const SLOT_OVERRIDE_INTENTS: ConversationIntent[] = [
   'location_direction',
   'prompt_challenge',
   'abuse_or_insult',
-  'form_followup'
+  'form_followup',
+  'price_question'
 ];
 
 export class ConversationStateArbitrator {

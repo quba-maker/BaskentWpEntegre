@@ -718,6 +718,61 @@ test("PHASE 2D: PromptBuilder style directives test", async () => {
   assert(balancedPrompt.includes("DENGELİ YAZ"), "Dengeli yaz stili direktifi prompta eklenmeli");
 });
 
+test("P0.12 MICRO: PromptBuilder SON CEVAP STİLİ guide inject test", async () => {
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const { PromptBuilder } = require("../lib/services/ai/prompt-builder");
+
+  const buildBrainForTest = (tenantId: string, channelId: string, version: any, systemPrompt: string = "Sen bir test asistanısın.") => {
+    const crypto = require('crypto');
+    const hash = crypto.createHash('sha256').update(systemPrompt).digest('hex');
+    return createTenantBrain(tenantId, "whatsapp", "payload1", systemPrompt, { channelId }, hash, {}, {
+      aiModel: 'gemini-2.5-flash',
+      maxMessages: 10,
+      maxResponseTokens: 1000,
+      workingHours: { enabled: false },
+      aggressionLevel: 'medium',
+      responseDelaySeconds: 5,
+      responseStyle: 'balanced'
+    }, 'v2_channel_prompts', { version });
+  };
+
+  // 1. Target Başkent tenant + WhatsApp TR channel + version 58 -> style guide exists
+  const targetBrain = buildBrainForTest(
+    'caab9ea1-9591-45e4-bbc5-9c9b498982c8',
+    '2e7352c1-5db7-4414-baf7-de571a66bfa6',
+    58
+  );
+  
+  // Test simple intent (e.g. price_question)
+  const prompt1 = PromptBuilder.buildSystemPrompt(targetBrain, 'lead', false, {
+    currentMessageText: 'fiyat nedir',
+    history: []
+  });
+  assert(prompt1.includes("=== SON CEVAP STİLİ ==="), "Style guide should be injected");
+  assert(prompt1.includes("Bu mesaj basit intent. Cevabı 450-650 karakteri geçmeyecek"), "Should include simple intent cap");
+  assert(prompt1.includes("*tek yıldız*"), "Should include tek yildiz formatting instruction");
+
+  // Test non-simple intent (e.g. generic_other)
+  const prompt2 = PromptBuilder.buildSystemPrompt(targetBrain, 'lead', false, {
+    currentMessageText: 'bu durum hakkında detaylı bir soru sormak istiyorum ve bilgi almak istiyorum',
+    history: []
+  });
+  assert(prompt2.includes("=== SON CEVAP STİLİ ==="), "Style guide should be injected");
+  assert(!prompt2.includes("Bu mesaj basit intent. Cevabı 450-650 karakteri geçmeyecek"), "Should NOT include simple intent cap");
+
+  // 2. Non-target tenant -> no style guide
+  const nonTargetBrain = buildBrainForTest(
+    'other-tenant-id',
+    '2e7352c1-5db7-4414-baf7-de571a66bfa6',
+    58
+  );
+  const prompt3 = PromptBuilder.buildSystemPrompt(nonTargetBrain, 'lead', false, {
+    currentMessageText: 'fiyat nedir',
+    history: []
+  });
+  assert(!prompt3.includes("=== SON CEVAP STİLİ ==="), "Style guide should NOT be injected for non-target tenant");
+});
+
 test("PHASE 2D: updateBot style-token sync test", async () => {
   process.env.TEST_TENANT_ID = 'test-tenant-id';
   process.env.TEST_USER_ROLE = 'owner';

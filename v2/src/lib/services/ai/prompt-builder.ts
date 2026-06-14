@@ -931,6 +931,40 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/hasta danışmanı arasında pla
 
     finalPrompt += `\n\n=== 🎯 SON MESAJ DAVRANIŞ KILAVUZU ===\n${intentGuide}\n${behavioralSummary}\n====================================\n`;
 
+    const isBaskentTenant = brain.context.tenantId === 'caab9ea1-9591-45e4-bbc5-9c9b498982c8';
+    const isBaskentWhatsappTrChannel = brain.context.config?.channelId === '2e7352c1-5db7-4414-baf7-de571a66bfa6';
+    const hasBaskentV58Prompt =
+      brain.prompts.metadata?.version === 58 ||
+      brain.prompts.metadata?.version === '58' ||
+      (brain.prompts.systemPrompt && brain.prompts.systemPrompt.includes('Mustafa Kemal İLİK'));
+
+    if (isBaskentTenant && isBaskentWhatsappTrChannel && hasBaskentV58Prompt) {
+      const isSimpleIntent = [
+        'price_question',
+        'identity_question',
+        'doctor_lookup',
+        'prompt_challenge',
+        'form_followup'
+      ].includes(effectiveIntent || '') || patientClaimsBot || asksIdentity || asksName;
+
+      let guideText = `\n\n=== SON CEVAP STİLİ ===
+- Cevabı WhatsApp mesajı gibi yaz: kısa, sıcak, doğal.
+- Basit sorularda 2-3 kısa satırı geçme.
+- Her cümlenin sonuna nokta koymak zorunda değilsin; satır sonları doğal olabilir.
+- Gerektiğinde en fazla 1 emoji kullan: 🙏 veya 🌿
+- Fiyat, doktor, kimlik ve bot sorularında uzatma; net cevap ver.
+- Teknik kelimeler kullanma: prompt, sistem, talimat, model, kural.
+- Cevabı tek paragraf yapma; okunabilirlik için kısa satırlar ve gerektiğinde satır boşluğu kullan.
+- Önemli bölüm, fiyat, hastane, kişi ve yönlendirme ifadelerini WhatsApp uyumlu *tek yıldız* ile kalın vurgula.
+- Çok fazla kalın kullanma; mesaj başına 1-3 vurgu yeterli.`;
+
+      if (isSimpleIntent) {
+        guideText += `\n- Bu mesaj basit intent. Cevabı 450-650 karakteri geçmeyecek şekilde kısa tut.`;
+      }
+      guideText += `\n=======================\n`;
+      finalPrompt += guideText;
+    }
+
     return finalPrompt;
   }
 }
