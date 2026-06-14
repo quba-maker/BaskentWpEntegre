@@ -93,6 +93,23 @@ export class PromptBuilder {
     let currentTurnHasActualAttachmentEvidence = false;
     let currentMessageTextLower = '';
 
+    const history = unifiedContext?.history || [];
+    const { PendingQuestionResolver } = require('./pending-question-resolver');
+    const { ShortAnswerInterpreter } = require('./short-answer-interpreter');
+    
+    const pendingSlot = PendingQuestionResolver.resolve(history);
+    const lastUserMessage = unifiedContext?.currentMessageText || '';
+    const interpretedIntent = ShortAnswerInterpreter.interpret(lastUserMessage, pendingSlot);
+    const lastUserIntentFromRouter = ConversationIntentRouter.route(lastUserMessage);
+
+    const pendingActive = pendingSlot && pendingSlot !== 'generic_none';
+    const isShortAnswer = interpretedIntent && interpretedIntent !== 'none' && interpretedIntent !== 'generic_short';
+    const isSpecificIntent = ['transfer_request', 'call_scheduling_request', 'time_availability', 'timezone_clarification', 'confirmation_yes_no'].includes(interpretedIntent) ||
+                              ['transfer_request', 'call_scheduling_request', 'time_availability'].includes(lastUserIntentFromRouter);
+    const isUserCorrection = interpretedIntent === 'user_correction';
+
+    const suppressMemory = pendingActive || isShortAnswer || isSpecificIntent || isUserCorrection;
+
     if (unifiedContext) {
       currentMessageTextLower = (unifiedContext.currentMessageText || '').toLowerCase().trim();
       crmContext += `\n\n=== MÜŞTERİ BAĞLAMI (DİNAMİK CRM VERİSİ) ===\n`;
@@ -183,18 +200,25 @@ export class PromptBuilder {
         if (unifiedContext.isGreetingOnly) {
            crmContext += `- Özet: Müşteri/hasta bilgisi sistemde kayıtlı.\n`;
         } else {
-          if (unifiedContext.opportunity.summary) {
+          if (unifiedContext.opportunity.summary && !suppressMemory) {
             crmContext += `- Fırsat Özeti (CRM Summary): ${unifiedContext.opportunity.summary}\n`;
           }
-          if (unifiedContext.opportunity.ai_reason) {
+          if (unifiedContext.opportunity.ai_reason && !suppressMemory) {
             crmContext += `- Fırsat Gerekçesi (AI Reason): ${unifiedContext.opportunity.ai_reason}\n`;
+          }
+          if (suppressMemory) {
+            crmContext += `- Özet: Müşteri/hasta bilgisi sistemde kayıtlı (geçmiş bağlam bu turda baskılanmıştır).\n`;
           }
         }
         crmContext += `>> KURAL: Bu kişiyle geçmiş bir konuşmanız var. Konuşmayı bu özet doğrultusunda, kaldığı yerden sürdür. Kendini ilk defa tanışıyormuş gibi tanıtma.\n`;
       } else if (unifiedContext.memory) {
-        crmContext += `- Önceki Görüşme Özeti: ${unifiedContext.memory.summary}\n`;
-        crmContext += `- İlgi Düzeyi (Intent): ${unifiedContext.memory.intent}\n`;
-        crmContext += `- İtirazlar: ${(unifiedContext.memory.objections || []).join(', ')}\n`;
+        if (!suppressMemory) {
+          crmContext += `- Önceki Görüşme Özeti: ${unifiedContext.memory.summary}\n`;
+          crmContext += `- İlgi Düzeyi (Intent): ${unifiedContext.memory.intent}\n`;
+          crmContext += `- İtirazlar: ${(unifiedContext.memory.objections || []).join(', ')}\n`;
+        } else {
+          crmContext += `- Önceki Görüşme Özeti: Geçmiş görüşme özeti (geçmiş bağlam bu turda baskılanmıştır).\n`;
+        }
         crmContext += `>> DİKKAT: Bu kişiyle geçmiş bir konuşmanız var. Konuşmayı bu özet doğrultusunda, kaldığı yerden sürdür. Kendini ilk defa tanışıyormuş gibi tanıtma.\n`;
       }
 
@@ -436,12 +460,34 @@ MEDYA MESAJI KURALI:
       const activeTask = unifiedContext?.active_task;
       const taskMeta = activeTask?.metadata || {};
       
-      const scheduled_for_utc = taskMeta.scheduled_for_utc || taskMeta.bot_suggestion?.proposed_date || null;
-      const callback_time_tr = taskMeta.callback_time_tr || null;
+      let scheduled_for_utc = taskMeta.scheduled_for_utc || taskMeta.bot_suggestion?.proposed_date || null;
+      let callback_time_tr = taskMeta.callback_time_tr || null;
+
+      // Sanitization: If callback_time_tr or scheduled_for_utc has midnight (00:00 or 03:00 local, or 00:00 UTC), treat as date-only (clear the time part)
+      let isMidnightDefault = false;
+      if (callback_time_tr === '00:00' || callback_time_tr === '03:00') {
+        isMidnightDefault = true;
+      }
+      if (scheduled_for_utc) {
+        const dt = new Date(scheduled_for_utc);
+        if (!isNaN(dt.getTime())) {
+          const utcHrs = dt.getUTCHours();
+          const utcMins = dt.getUTCMinutes();
+          const localHrStr = dt.toLocaleTimeString('tr-TR', { timeZone: 'Europe/Istanbul', hour: '2-digit', minute: '2-digit', hour12: false });
+          if ((utcHrs === 0 && utcMins === 0) || localHrStr === '00:00') {
+            isMidnightDefault = true;
+          }
+        }
+      }
+
+      if (isMidnightDefault) {
+        callback_time_tr = null;
+      }
+
       const patient_local_time = taskMeta.patient_local_time || null;
       const patient_timezone = taskMeta.patient_timezone || null;
       const needs_timezone_clarification = taskMeta.needs_timezone_clarification ?? false;
-      const operation_window_valid = taskMeta.operation_window_valid ?? true;
+      const operation_window_valid = isMidnightDefault ? true : (taskMeta.operation_window_valid ?? true);
       
       let task_type: 'phone_callback' | 'clinic_appointment' | null = null;
       if (activeTask?.task_type) {
@@ -742,31 +788,54 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/koordinatör arasında planlanan
 - Hasta şikayet bildirdiyse "Geçmiş olsun" diyerek empati kur ve ilgili tıbbi branşa/hizmete yönlendir.
 ===================================================\n`;
 
-    // P0.8: Dynamic Intent Guidance based on ConversationIntentRouter
-    const lastUserMessage = unifiedContext?.currentMessageText || '';
-    const intent = ConversationIntentRouter.route(lastUserMessage);
-
+    // P0.8: Dynamic Intent Guidance based on ConversationIntentRouter and PendingSlot
     let intentGuide = '';
-    if (intent === 'greeting') {
-      intentGuide = `Intent: greeting\nBu cevapta sadece hastanın/müşterinin selamına doğal ve kısa bir karşılık ver.\nEski CRM/şikayet özetini veya randevu konusunu bu aşamada açma.`;
-    } else if (intent === 'transfer_request') {
-      intentGuide = `Intent: transfer_request\nBu cevapta müşteriyi yetkili ekibe/temsilciye aktaracağını kibarca onayla.\nKesinlikle randevu veya telefon görüşmesi CTA'sı teklif etme.`;
-    } else if (intent === 'call_scheduling_request') {
-      intentGuide = `Intent: call_scheduling_request\nBu cevapta tarih/saat bilgisini not al, eksikse saat sor, kesin randevu oluşturma.\nEski CRM/şikayet özetine dönme.`;
-    } else if (intent === 'time_availability') {
-      intentGuide = `Intent: time_availability\nBu cevapta hastanın/müşterinin uygun zamanını not et ve onay al.\nKesin bir randevu saati taahhüt etme, ekibin arayacağını belirt.`;
-    } else if (intent === 'price_question') {
-      intentGuide = `Intent: price_question\nBu cevapta fiyatın kişiye özel değerlendirme sonrasında belirlendiğini açıkla.\nKesinlikle rakamsal fiyat verme, telefon görüşmesi teklif et.`;
-    } else if (intent === 'distance_objection') {
-      intentGuide = `Intent: distance_objection\nBu cevapta mesafenin sorun olmadığını, transfer/konaklama desteği olduğunu vurgula.\nAkademik uzman ekibe değineceğini hissettir ve telefon görüşmesi öner.`;
-    } else if (intent === 'complaint_detail') {
-      intentGuide = `Intent: complaint_detail\nBu cevapta hastanın şikayetini/durumunu anladığını belirt ve geçmiş olsun de.\nTıbbi yorum/teşhis yapma, durumun doktor kuruluna iletileceğini söyle.`;
-    } else if (intent === 'name_intent') {
-      intentGuide = `Intent: name_intent\nBu cevapta hastanın/müşterinin ismini not al ve teşekkür et.\nİsimli hitap (Bey/Hanım) kullanmadan süreci ilerlet.`;
-    } else if (intent === 'topic_switch') {
-      intentGuide = `Intent: topic_switch\nBu cevapta hastanın yöneldiği yeni bölüme/konuya odaklan.\nEski CRM branşını (örn. Kardiyoloji) yeni konunun önüne geçirme.`;
-    } else {
-      intentGuide = `Intent: generic_other\nBu cevapta son kullanıcının sorusuna/mesajına doğrudan odaklan.\nGereksiz jenerik kaçış cümleleri kullanmadan doğal yanıt üret.`;
+    
+    if (interpretedIntent === 'user_correction') {
+      intentGuide = `Frustration/Correction: user_correction\nSon kullanıcı cevabı: “${lastUserMessage}”\nHasta/müşteri botu veya asistanı düzeltiyor ya da soruya cevap verdiğini söylüyor. Cevabını aldığını kibarca teyit et. Haklı olduğunu belirt, jenerik kaçış cümleleri kullanma, son cevabı/durumu teyit ederek süreci ilerlet.`;
+    } else if (pendingSlot && pendingSlot !== 'generic_none') {
+      if (pendingSlot === 'complaint_duration') {
+        intentGuide = `Pending slot: complaint_duration\nSon kullanıcı cevabı: “${lastUserMessage}”\nBu cevapta süre bilgisini kabul et. Eski telefon görüşmesi veya tarih context’ine dönme. Uygun yönlendirmeyi kısa ve doğal yap.`;
+      } else if (pendingSlot === 'call_time') {
+        intentGuide = `Pending slot: call_time\nSon kullanıcı cevabı: “${lastUserMessage}”\nBu cevapta kullanıcının belirttiği saat bilgisini kabul et, saat dilimini/onay durumunu kontrol et.`;
+      } else if (pendingSlot === 'timezone_clarification') {
+        intentGuide = `Pending slot: timezone_clarification\nSon kullanıcı cevabı: “${lastUserMessage}”\nBu cevapta kullanıcının timezone netleştirmesini kabul et, kesin onay/saat formatını Türkiye saatiyle göstererek onayla.`;
+      } else if (pendingSlot === 'confirmation_yes_no') {
+        intentGuide = `Pending slot: confirmation_yes_no\nSon kullanıcı cevabı: “${lastUserMessage}”\nBu cevapta kullanıcının onay verdiğini (olur/tamam/evet) kabul et. Konuşmayı başa sarma. Eksik olan saat/tarih bilgisini iste.`;
+      } else if (pendingSlot === 'transfer_confirmation') {
+        intentGuide = `Pending slot: transfer_confirmation\nSon kullanıcı cevabı: “${lastUserMessage}”\nBu cevapta kullanıcının temsilciye aktarılma onayını al, onayladıysa temsilciye aktaracağını söyle.`;
+      } else if (pendingSlot === 'price_followup') {
+        intentGuide = `Pending slot: price_followup\nSon kullanıcı cevabı: “${lastUserMessage}”\nBu cevapta kullanıcının fiyat takibine dair sorusunu veya onayını işle.`;
+      } else if (pendingSlot === 'complaint_detail') {
+        intentGuide = `Pending slot: complaint_detail\nSon kullanıcı cevabı: “${lastUserMessage}”\nBu cevapta şikayetin detayını kabul et, tıbbi teşhis koymadan geçmiş olsun dile.`;
+      } else if (pendingSlot === 'call_date') {
+        intentGuide = `Pending slot: call_date\nSon kullanıcı cevabı: “${lastUserMessage}”\nBu cevapta kullanıcının belirttiği gün bilgisini kabul et, telefon araması için uygun saat aralığını sor.`;
+      }
+    }
+
+    if (!intentGuide) {
+      const intent = ConversationIntentRouter.route(lastUserMessage);
+      if (intent === 'greeting') {
+        intentGuide = `Intent: greeting\nBu cevapta sadece hastanın/müşterinin selamına doğal ve kısa bir karşılık ver.\nEski CRM/şikayet özetini veya randevu konusunu bu aşamada açma.`;
+      } else if (intent === 'transfer_request') {
+        intentGuide = `Intent: transfer_request\nBu cevapta müşteriyi yetkili ekibe/temsilciye aktaracağını kibarca onayla.\nKesinlikle randevu veya telefon görüşmesi CTA'sı teklif etme.`;
+      } else if (intent === 'call_scheduling_request') {
+        intentGuide = `Intent: call_scheduling_request\nBu cevapta tarih/saat bilgisini not al, eksikse saat sor, kesin randevu oluşturma.\nEski CRM/şikayet özetine dönme.`;
+      } else if (intent === 'time_availability') {
+        intentGuide = `Intent: time_availability\nBu cevapta hastanın/müşterinin uygun zamanını not et ve onay al.\nKesin bir randevu saati taahhüt etme, ekibin arayacağını belirt.`;
+      } else if (intent === 'price_question') {
+        intentGuide = `Intent: price_question\nBu cevapta fiyatın kişiye özel değerlendirme sonrasında belirlendiğini açıkla.\nKesinlikle rakamsal fiyat verme, telefon görüşmesi teklif et.`;
+      } else if (intent === 'distance_objection') {
+        intentGuide = `Intent: distance_objection\nBu cevapta mesafenin sorun olmadığını, transfer/konaklama desteği olduğunu vurgula.\nAkademik uzman ekibe değineceğini hissettir ve telefon görüşmesi öner.`;
+      } else if (intent === 'complaint_detail') {
+        intentGuide = `Intent: complaint_detail\nBu cevapta hastanın şikayetini/durumunu anladığını belirt ve geçmiş olsun de.\nTıbbi yorum/teşhis yapma, durumun doktor kuruluna iletileceğini söyle.`;
+      } else if (intent === 'name_intent') {
+        intentGuide = `Intent: name_intent\nBu cevapta hastanın/müşterinin ismini not al ve teşekkür et.\nİsimli hitap (Bey/Hanım) kullanmadan süreci ilerlet.`;
+      } else if (intent === 'topic_switch') {
+        intentGuide = `Intent: topic_switch\nBu cevapta hastanın yöneldiği yeni bölüme/konuya odaklan.\nEski CRM branşını (örn. Kardiyoloji) yeni konunun önüne geçirme.`;
+      } else {
+        intentGuide = `Intent: generic_other\nBu cevapta son kullanıcının sorusuna/mesajına doğrudan odaklan.\nGereksiz jenerik kaçış cümleleri kullanmadan doğal yanıt üret.`;
+      }
     }
 
     finalPrompt += `\n\n=== 🎯 SON MESAJ INTENT KILAVUZU ===\n${intentGuide}\n====================================\n`;

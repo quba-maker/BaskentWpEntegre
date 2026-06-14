@@ -46,6 +46,14 @@ export class ContextAwareSafeFallbackResolver {
     // Route message to find exact intent
     const detectedIntent = ConversationIntentRouter.route(inboundText);
 
+    // Resolve pending slot and interpreted intent
+    const history = unifiedContext?.history || [];
+    const { PendingQuestionResolver } = require('./pending-question-resolver');
+    const { ShortAnswerInterpreter } = require('./short-answer-interpreter');
+    
+    const pendingSlot = PendingQuestionResolver.resolve(history);
+    const interpretedIntent = ShortAnswerInterpreter.interpret(inboundText, pendingSlot);
+
     // CRITICAL: Prevent opportunity.summary leakage.
     // Sourced strictly from patient_known_facts, NEVER from opportunity.summary directly.
     let complaint = '';
@@ -68,18 +76,82 @@ export class ContextAwareSafeFallbackResolver {
       }
     }
 
-    // 2. Deterministic Fallback Daraltma (Intent-Aware Safe Response Priority)
-    if (detectedIntent === 'transfer_request') {
+    // Priority 1: User Correction / Frustration
+    if (interpretedIntent === 'user_correction') {
+      const userMsgs = history.filter((m: any) => m.role === 'user');
+      const lastUserMsgText = userMsgs.length > 0 ? userMsgs[userMsgs.length - 1].content : '';
+      
+      let replyText = '';
+      if (lastUserMsgText) {
+        if (isHealthcare) {
+          replyText = `Haklısınız, cevabınızı aldım. ${lastUserMsgText} bilgisini not ettim; ${complaint ? complaint + ' için ' : ''}ilgili birimle görüşme talebinizi iletebiliriz.`;
+        } else {
+          replyText = `Haklısınız, cevabınızı aldım. ${lastUserMsgText} bilgisini not ettim; sürecinizle ilgili görüşme talebinizi iletebiliriz.`;
+        }
+      } else {
+        if (isHealthcare) {
+          replyText = `Haklısınız, cevabınızı aldım ve not ettim; ilgili birimle görüşme talebinizi iletebiliriz.`;
+        } else {
+          replyText = `Haklısınız, cevabınızı aldım ve not ettim; sürecinizle ilgili görüşme talebinizi iletebiliriz.`;
+        }
+      }
+      
+      return {
+        text: replyText,
+        sector: resolvedIndustry,
+        hasFormContext,
+        hasComplaint,
+        finalPath: 'user_correction_fallback',
+        detectedIntent
+      };
+    }
+
+    // Priority 2: Transfer Request (User explicitly wants to connect to a human)
+    if (detectedIntent === 'transfer_request' || interpretedIntent === 'transfer_request') {
       return {
         text: `Talebinizi ilgili ekibe aktarıyorum, en kısa sürede sizinle iletişime geçeceklerdir.`,
         sector: resolvedIndustry,
         hasFormContext,
         hasComplaint,
         finalPath: 'intent_transfer_fallback',
-        detectedIntent
+        detectedIntent: 'transfer_request'
       };
     }
 
+    // Priority 3: Pending Slot-Aware Fallback (guided recovery)
+    if (pendingSlot && pendingSlot !== 'generic_none') {
+      let slotText = '';
+      if (pendingSlot === 'complaint_duration') {
+        slotText = `Şikayetinizin ne kadardır devam ettiğini (örneğin kaç gündür veya kaç aydır olduğunu) paylaşabilir misiniz?`;
+      } else if (pendingSlot === 'call_date') {
+        slotText = `Telefon görüşmesi için size uygun günü paylaşabilir misiniz?`;
+      } else if (pendingSlot === 'call_time') {
+        slotText = `Telefon görüşmesi için size uygun saat aralığını paylaşabilir misiniz?`;
+      } else if (pendingSlot === 'timezone_clarification') {
+        slotText = `Belirttiğiniz saat hangi ülke veya şehir saatine göre olsun?`;
+      } else if (pendingSlot === 'confirmation_yes_no') {
+        slotText = `Belirttiğimiz görüşme planlamasını onaylıyor musunuz?`;
+      } else if (pendingSlot === 'transfer_confirmation') {
+        slotText = `Sizi ilgili uzman temsilcimize aktarmamı onaylıyor musunuz?`;
+      } else if (pendingSlot === 'price_followup') {
+        slotText = `Tedavi ve ücret detayları hakkında temsilcimizle görüşmek ister misiniz?`;
+      } else if (pendingSlot === 'complaint_detail') {
+        slotText = `Durumunuzu daha iyi anlayabilmemiz için şikayetinizi biraz daha detaylandırabilir misiniz?`;
+      }
+
+      if (slotText) {
+        return {
+          text: slotText,
+          sector: resolvedIndustry,
+          hasFormContext,
+          hasComplaint,
+          finalPath: `pending_slot_${pendingSlot}_fallback`,
+          detectedIntent
+        };
+      }
+    }
+
+    // Priority 4: General Intent Fallbacks
     if (detectedIntent === 'call_scheduling_request') {
       return {
         text: `Telefon görüşmesi talebinizi not aldım. Müsait olabileceğiniz gün ve saat aralığını paylaşabilirseniz, temsilci arkadaşımız planlama için sizinle iletişime geçecektir.`,

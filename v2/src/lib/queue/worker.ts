@@ -3779,20 +3779,33 @@ Tek veya iki kısa cümle yaz.`;
                   if (!parsedSugg.suggested_time && crmData?.requested_callback_datetime) {
                     const dt = new Date(crmData.requested_callback_datetime);
                     if (!isNaN(dt.getTime())) {
+                      const utcHours = dt.getUTCHours();
+                      const utcMinutes = dt.getUTCMinutes();
                       const trHourStr = dt.toLocaleTimeString('tr-TR', { timeZone: 'Europe/Istanbul', hour: '2-digit', minute: '2-digit', hour12: false });
-                      if (trHourStr !== '00:00' || /00:00|gece\s*(yarı|0)/i.test(content || '')) {
+                      
+                      const isMidnightUtc = utcHours === 0 && utcMinutes === 0;
+                      const isMidnightLocal = trHourStr === '00:00';
+                      const isExplicitMidnight = /00:00|gece\s*(yarı|0|12)|12\s*gece/i.test(content || '');
+                      
+                      if ((!isMidnightUtc && !isMidnightLocal) || isExplicitMidnight) {
                         parsedSugg.suggested_time = trHourStr;
                         parsedSugg.suggested_date = crmData.requested_callback_datetime.split('T')[0];
                         parsedSugg.proposed_date = crmData.requested_callback_datetime;
                         
                         const [hh, mm] = trHourStr.split(':').map(Number);
                         parsedSugg.operation_window_valid = (hh * 60 + mm >= 9 * 60 && hh * 60 + mm <= 21 * 60);
+                      } else {
+                        // Date-only from crmData, set date but keep time null
+                        parsedSugg.suggested_date = crmData.requested_callback_datetime.split('T')[0];
+                        parsedSugg.suggested_time = null;
+                        parsedSugg.proposed_date = null;
+                        parsedSugg.operation_window_valid = true;
                       }
                     }
                   }
 
-                  // If we found a suggestion (time is extracted), save it
-                  if (parsedSugg.suggested_time) {
+                  // If we found a suggestion (date or time is extracted), save it
+                  if (parsedSugg.suggested_date || parsedSugg.suggested_time) {
                     // Strict validation: if suggested_date is null, proposed_date is null
                     if (!parsedSugg.suggested_date) {
                       parsedSugg.proposed_date = null;

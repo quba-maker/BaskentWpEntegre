@@ -137,7 +137,11 @@ export function parseDeterministicSuggestion(
       
       if (hh >= 1 && hh <= 12) {
         if (isPm) {
-          if (hh !== 12) hh += 12;
+          if (/\bgece\b/i.test(normalized) && hh === 12) {
+            hh = 0;
+          } else if (hh !== 12) {
+            hh += 12;
+          }
         } else if (isAm) {
           if (hh === 12) hh = 0;
         } else {
