@@ -37,8 +37,7 @@ const testPatterns: TestPattern[] = [
     industry: 'healthcare',
     identityConfig: { personaName: 'Rüya' },
     unifiedContext: {
-      latestForm: { name: 'test_form', data: {} },
-      patient_known_facts: ['Hastanın şikayeti: mide yanması']
+      latestForm: { name: 'test_form', data: {} }
     },
     expectedContent: 'Merhaba, Rüya ben. Formunuzla ilgili yardımcı olayım; hangi konuda bilgi almak istiyorsunuz?',
     expectedFinalPath: 'greeting_form_fallback'
@@ -50,7 +49,7 @@ const testPatterns: TestPattern[] = [
     industry: 'healthcare',
     identityConfig: { personaName: 'Rüya' },
     unifiedContext: {
-      opportunity: { summary: 'Mide ağrısı' }
+      patient_known_facts: ['Şikayeti: Mide ağrısı']
     },
     expectedContent: 'Merhaba, Rüya ben. Mide ağrısı konusuyla ilgili yardımcı olayım. Bu durum ne zamandır devam ediyor?',
     expectedFinalPath: 'greeting_healthcare_complaint_fallback'
@@ -62,8 +61,8 @@ const testPatterns: TestPattern[] = [
     industry: 'healthcare',
     identityConfig: { personaName: 'Rüya' },
     unifiedContext: {},
-    expectedContent: 'perşembe günü saat 17:00 bilgisini not aldım. Uygunluk için ilgili ekibe aktarabiliriz.',
-    expectedFinalPath: 'time_intent_fallback'
+    expectedContent: 'Paylaştığınız zaman bilgisini not aldım. Temsilci arkadaşımız saat planlamasını teyit etmek üzere sizinle iletişime geçecektir.',
+    expectedFinalPath: 'intent_time_availability_fallback'
   },
   // 4. Name intent without gender guessing
   {
@@ -112,7 +111,7 @@ const testPatterns: TestPattern[] = [
     industry: 'healthcare',
     identityConfig: { personaName: 'Rüya' },
     unifiedContext: {
-      opportunity: { summary: 'Mide yanması' }
+      patient_known_facts: ['Şikayeti: Mide yanması']
     },
     expectedContent: 'Teşekkür ederim Mehmet. Mide yanması konusuyla ilgili uygun zamanı netleştirebiliriz.',
     expectedFinalPath: 'name_healthcare_complaint_fallback'

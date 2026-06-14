@@ -8,6 +8,7 @@ import { resolvePatientCountryDetailed } from '@/lib/utils/country-normalizer';
 import { buildObjectionPolicy } from './policies/objection-policy';
 import { buildFewShotPolicy } from './policies/few-shot-policy';
 import { buildProgressFunnelPolicy } from './policies/progress-funnel-policy';
+import { ConversationIntentRouter } from './conversation-intent-router';
 
 
 export class PromptBuilder {
@@ -741,6 +742,36 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/koordinatör arasında planlanan
 - Hasta şikayet bildirdiyse "Geçmiş olsun" diyerek empati kur ve ilgili tıbbi branşa/hizmete yönlendir.
 ===================================================\n`;
 
+    // P0.8: Dynamic Intent Guidance based on ConversationIntentRouter
+    const lastUserMessage = unifiedContext?.currentMessageText || '';
+    const intent = ConversationIntentRouter.route(lastUserMessage);
+
+    let intentGuide = '';
+    if (intent === 'greeting') {
+      intentGuide = `Intent: greeting\nBu cevapta sadece hastanın/müşterinin selamına doğal ve kısa bir karşılık ver.\nEski CRM/şikayet özetini veya randevu konusunu bu aşamada açma.`;
+    } else if (intent === 'transfer_request') {
+      intentGuide = `Intent: transfer_request\nBu cevapta müşteriyi yetkili ekibe/temsilciye aktaracağını kibarca onayla.\nKesinlikle randevu veya telefon görüşmesi CTA'sı teklif etme.`;
+    } else if (intent === 'call_scheduling_request') {
+      intentGuide = `Intent: call_scheduling_request\nBu cevapta tarih/saat bilgisini not al, eksikse saat sor, kesin randevu oluşturma.\nEski CRM/şikayet özetine dönme.`;
+    } else if (intent === 'time_availability') {
+      intentGuide = `Intent: time_availability\nBu cevapta hastanın/müşterinin uygun zamanını not et ve onay al.\nKesin bir randevu saati taahhüt etme, ekibin arayacağını belirt.`;
+    } else if (intent === 'price_question') {
+      intentGuide = `Intent: price_question\nBu cevapta fiyatın kişiye özel değerlendirme sonrasında belirlendiğini açıkla.\nKesinlikle rakamsal fiyat verme, telefon görüşmesi teklif et.`;
+    } else if (intent === 'distance_objection') {
+      intentGuide = `Intent: distance_objection\nBu cevapta mesafenin sorun olmadığını, transfer/konaklama desteği olduğunu vurgula.\nAkademik uzman ekibe değineceğini hissettir ve telefon görüşmesi öner.`;
+    } else if (intent === 'complaint_detail') {
+      intentGuide = `Intent: complaint_detail\nBu cevapta hastanın şikayetini/durumunu anladığını belirt ve geçmiş olsun de.\nTıbbi yorum/teşhis yapma, durumun doktor kuruluna iletileceğini söyle.`;
+    } else if (intent === 'name_intent') {
+      intentGuide = `Intent: name_intent\nBu cevapta hastanın/müşterinin ismini not al ve teşekkür et.\nİsimli hitap (Bey/Hanım) kullanmadan süreci ilerlet.`;
+    } else if (intent === 'topic_switch') {
+      intentGuide = `Intent: topic_switch\nBu cevapta hastanın yöneldiği yeni bölüme/konuya odaklan.\nEski CRM branşını (örn. Kardiyoloji) yeni konunun önüne geçirme.`;
+    } else {
+      intentGuide = `Intent: generic_other\nBu cevapta son kullanıcının sorusuna/mesajına doğrudan odaklan.\nGereksiz jenerik kaçış cümleleri kullanmadan doğal yanıt üret.`;
+    }
+
+    finalPrompt += `\n\n=== 🎯 SON MESAJ INTENT KILAVUZU ===\n${intentGuide}\n====================================\n`;
+
     return finalPrompt;
   }
 }
+

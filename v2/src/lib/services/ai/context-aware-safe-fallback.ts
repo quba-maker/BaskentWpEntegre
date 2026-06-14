@@ -1,4 +1,5 @@
 import { TenantBrain } from '../../brain/tenant-brain';
+import { ConversationIntentRouter, ConversationIntent } from './conversation-intent-router';
 
 export interface DeterministicFallbackParams {
   inboundText: string;
@@ -17,6 +18,7 @@ export interface DeterministicFallbackResult {
   hasFormContext: boolean;
   hasComplaint: boolean;
   finalPath: string;
+  detectedIntent?: ConversationIntent;
 }
 
 export class ContextAwareSafeFallbackResolver {
@@ -41,41 +43,94 @@ export class ContextAwareSafeFallbackResolver {
 
     const isHealthcareOrForm = isHealthcare || hasFormContext;
 
-    // Detect complaint context (only for healthcare/form)
+    // Route message to find exact intent
+    const detectedIntent = ConversationIntentRouter.route(inboundText);
+
+    // CRITICAL: Prevent opportunity.summary leakage.
+    // Sourced strictly from patient_known_facts, NEVER from opportunity.summary directly.
     let complaint = '';
     let hasComplaint = false;
     if (isHealthcareOrForm) {
-      const optSummary = unifiedContext?.opportunity?.summary || '';
       const facts = unifiedContext?.patient_known_facts || [];
       const rawFactsComplaint = facts.find((f: string) => f.toLowerCase().includes('şikayet') || f.toLowerCase().includes('sikayet'));
       
-      if (optSummary && optSummary.trim().length > 0) {
-        complaint = optSummary.trim();
-        hasComplaint = true;
-      } else if (rawFactsComplaint) {
+      if (rawFactsComplaint) {
         const match = rawFactsComplaint.match(/(?:şikayeti|sikayeti|şikayet|sikayet):\s*(.+)/i);
         if (match && match[1]) {
           complaint = match[1].replace(/[.]+$/, '').trim();
           hasComplaint = true;
         }
       }
+      
       // Truncate complaint for clean message formatting
       if (complaint.length > 50) {
         complaint = complaint.substring(0, 50) + '...';
       }
     }
 
-    // 2. Intent Detection
-    
-    // Time/Date Intent detection (Turkish days, time indicators)
-    const daysRegex = /\b(pazartesi|salı|sali|çarşamba|carsamba|perşembe|persembe|cuma|cumartesi|pazar|yarın|yarin|bugün|bugun)\b/i;
-    const timeKeywordsRegex = /\b(saat|gün|gun|ocak|şubat|subat|mart|nisan|mayıs|mayis|haziran|temmuz|ağustos|agustos|eylül|eylul|ekim|kasım|kasim|aralık|aralik)\b/i;
-    const numericTimeRegex = /\b\d{1,2}[:.]\d{2}\b/;
-    const numericDayTimeRegex = /\b\d{1,2}\s*(günü|gunu|saat|:)/i;
-    const hasTimeIntent = daysRegex.test(lowerInbound) || 
-                           timeKeywordsRegex.test(lowerInbound) || 
-                           numericTimeRegex.test(lowerInbound) || 
-                           numericDayTimeRegex.test(lowerInbound);
+    // 2. Deterministic Fallback Daraltma (Intent-Aware Safe Response Priority)
+    if (detectedIntent === 'transfer_request') {
+      return {
+        text: `Talebinizi ilgili ekibe aktarıyorum, en kısa sürede sizinle iletişime geçeceklerdir.`,
+        sector: resolvedIndustry,
+        hasFormContext,
+        hasComplaint,
+        finalPath: 'intent_transfer_fallback',
+        detectedIntent
+      };
+    }
+
+    if (detectedIntent === 'call_scheduling_request') {
+      return {
+        text: `Telefon görüşmesi talebinizi not aldım. Müsait olabileceğiniz gün ve saat aralığını paylaşabilirseniz, temsilci arkadaşımız planlama için sizinle iletişime geçecektir.`,
+        sector: resolvedIndustry,
+        hasFormContext,
+        hasComplaint,
+        finalPath: 'intent_call_scheduling_fallback',
+        detectedIntent
+      };
+    }
+
+    if (detectedIntent === 'time_availability') {
+      return {
+        text: `Paylaştığınız zaman bilgisini not aldım. Temsilci arkadaşımız saat planlamasını teyit etmek üzere sizinle iletişime geçecektir.`,
+        sector: resolvedIndustry,
+        hasFormContext,
+        hasComplaint,
+        finalPath: 'intent_time_availability_fallback',
+        detectedIntent
+      };
+    }
+
+    if (detectedIntent === 'price_question') {
+      const text = isHealthcare
+        ? `Hizmet ve tedavi ücretlerimiz, hastanemizde yapılacak kişiye özel muayene ve değerlendirmeler sonrasında netleşmektedir. Detaylı bilgi sunabilmemiz için koordinatör ekibimizle kısa bir telefon görüşmesi planlayabiliriz.`
+        : `Ücretlerimiz ve hizmet seçeneklerimiz kişiye özel yapılacak planlama sonrasında belirlenmektedir. Detaylı bilgi için temsilci ekibimizle kısa bir görüşme planlayabiliriz.`;
+      return {
+        text,
+        sector: resolvedIndustry,
+        hasFormContext,
+        hasComplaint,
+        finalPath: 'intent_price_question_fallback',
+        detectedIntent
+      };
+    }
+
+    if (detectedIntent === 'distance_objection') {
+      const text = isHealthcare
+        ? `Uzaklık endişenizi çok iyi anlıyorum. Şehir dışından ve yurt dışından gelen hastalarımız için transfer, konaklama ve süreç planlama koordinasyonunu ekibimiz organize etmektedir. Detayları telefonda görüşebiliriz.`
+        : `Mesafe konusundaki endişenizi anlıyorum. Uzaktan katılım ve koordinasyon konusunda ekibimiz her türlü desteği sağlamaktadır. Detayları görüşmek için kısa bir telefon görüşmesi planlayabiliriz.`;
+      return {
+        text,
+        sector: resolvedIndustry,
+        hasFormContext,
+        hasComplaint,
+        finalPath: 'intent_distance_objection_fallback',
+        detectedIntent
+      };
+    }
+
+    // 3. Fallback Generation Routing for non-intent or default intents
 
     // Name Intent detection ("ismim/adım [X]", "ben [X]" or profile name match)
     const nameIntroductions = [
@@ -108,24 +163,6 @@ export class ContextAwareSafeFallbackResolver {
       detectedName = upperFirst + detectedName.slice(1);
     }
 
-    const isGreeting = /^(merhaba|selam|iyi günler|iyi gunler|iyi akşamlar|iyi aksamlar|günaydın|gunaydin|hey|hi|hello)\b/i.test(lowerInbound);
-
-    // 3. Fallback Generation Routing
-
-    // Intent: Time/Date
-    if (hasTimeIntent) {
-      // Use clean neutral time intent text (do not assume appointment is booked)
-      const timeText = inboundText.trim();
-      return {
-        text: `${timeText} bilgisini not aldım. Uygunluk için ilgili ekibe aktarabiliriz.`,
-        sector: resolvedIndustry,
-        hasFormContext,
-        hasComplaint,
-        finalPath: 'time_intent_fallback'
-      };
-    }
-
-    // Intent: Name
     if (detectedName) {
       if (isHealthcareOrForm && hasComplaint) {
         return {
@@ -133,7 +170,8 @@ export class ContextAwareSafeFallbackResolver {
           sector: resolvedIndustry,
           hasFormContext,
           hasComplaint,
-          finalPath: 'name_healthcare_complaint_fallback'
+          finalPath: 'name_healthcare_complaint_fallback',
+          detectedIntent
         };
       } else {
         return {
@@ -141,28 +179,33 @@ export class ContextAwareSafeFallbackResolver {
           sector: resolvedIndustry,
           hasFormContext,
           hasComplaint,
-          finalPath: 'name_generic_fallback'
+          finalPath: 'name_generic_fallback',
+          detectedIntent
         };
       }
     }
 
+    const isGreeting = detectedIntent === 'greeting';
+
     // Intent: Greeting
     if (isGreeting) {
-      if (hasFormContext) {
-        return {
-          text: `Merhaba, ${personaName} ben. Formunuzla ilgili yardımcı olayım; hangi konuda bilgi almak istiyorsunuz?`,
-          sector: resolvedIndustry,
-          hasFormContext,
-          hasComplaint,
-          finalPath: 'greeting_form_fallback'
-        };
-      } else if (isHealthcare && hasComplaint) {
+      if (isHealthcare && hasComplaint) {
         return {
           text: `Merhaba, ${personaName} ben. ${complaint} konusuyla ilgili yardımcı olayım. Bu durum ne zamandır devam ediyor?`,
           sector: resolvedIndustry,
           hasFormContext,
           hasComplaint,
-          finalPath: 'greeting_healthcare_complaint_fallback'
+          finalPath: 'greeting_healthcare_complaint_fallback',
+          detectedIntent
+        };
+      } else if (hasFormContext) {
+        return {
+          text: `Merhaba, ${personaName} ben. Formunuzla ilgili yardımcı olayım; hangi konuda bilgi almak istiyorsunuz?`,
+          sector: resolvedIndustry,
+          hasFormContext,
+          hasComplaint,
+          finalPath: 'greeting_form_fallback',
+          detectedIntent
         };
       } else if (isHealthcare) {
         return {
@@ -170,7 +213,8 @@ export class ContextAwareSafeFallbackResolver {
           sector: resolvedIndustry,
           hasFormContext,
           hasComplaint,
-          finalPath: 'greeting_healthcare_generic_fallback'
+          finalPath: 'greeting_healthcare_generic_fallback',
+          detectedIntent
         };
       } else {
         // Parametric SaaS/tenant fallback (never use "nasıl yardımcı olabilirim")
@@ -179,7 +223,8 @@ export class ContextAwareSafeFallbackResolver {
           sector: resolvedIndustry,
           hasFormContext,
           hasComplaint,
-          finalPath: 'greeting_neutral_fallback'
+          finalPath: 'greeting_neutral_fallback',
+          detectedIntent
         };
       }
     }
@@ -191,7 +236,8 @@ export class ContextAwareSafeFallbackResolver {
         sector: resolvedIndustry,
         hasFormContext,
         hasComplaint,
-        finalPath: 'default_healthcare_complaint_fallback'
+        finalPath: 'default_healthcare_complaint_fallback',
+        detectedIntent
       };
     } else if (isHealthcare) {
       return {
@@ -199,7 +245,8 @@ export class ContextAwareSafeFallbackResolver {
         sector: resolvedIndustry,
         hasFormContext,
         hasComplaint,
-        finalPath: 'default_healthcare_generic_fallback'
+        finalPath: 'default_healthcare_generic_fallback',
+        detectedIntent
       };
     } else {
       return {
@@ -207,7 +254,8 @@ export class ContextAwareSafeFallbackResolver {
         sector: resolvedIndustry,
         hasFormContext,
         hasComplaint,
-        finalPath: 'default_neutral_fallback'
+        finalPath: 'default_neutral_fallback',
+        detectedIntent
       };
     }
   }
