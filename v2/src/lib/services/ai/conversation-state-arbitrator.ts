@@ -52,7 +52,9 @@ const SLOT_OVERRIDE_INTENTS: ConversationIntent[] = [
   'abuse_or_insult',
   'form_followup',
   'price_question',
-  'call_scheduling_request'
+  'call_scheduling_request',
+  'name_intent',
+  'continuation_short_reply'
 ];
 
 export class ConversationStateArbitrator {
@@ -90,6 +92,56 @@ export class ConversationStateArbitrator {
         staleSlotSuppressed: true,
         suppressionReason: 'callback_confirmed'
       };
+    }
+
+    const isContinuationShortReply = routerIntent === 'continuation_short_reply';
+    if (isContinuationShortReply) {
+      const callSchedulingKeywords = [
+        'telefon gorusmesi', 'telefonla gorus', 'telefonla arayin',
+        'telefonla ulasin', 'arama planlayalim', 'arama yapin',
+        'beni arayin', 'sizi arayayim', 'arar misiniz', 'ararmisiniz',
+        'beni arayabilir misiniz', 'arama yapar misiniz', 'telefonla gorusebilir miyiz',
+        'beni ararlar mi', 'hasta danismani arasin', 'sizinle gorusmek istiyorum',
+        'telefonla bilgi almak istiyorum', 'arar mi', 'ararlar mi', 'arama planı', 'randevu almak'
+      ];
+      
+      const botAskedForDetails = (text: string) => {
+        const lowerText = text.toLowerCase();
+        const hasAd = ['adınız', 'isminiz', 'adınızı', 'isminizi', 'adiniz', 'isminiz', 'adinizi', 'isminizi'].some(kw => lowerText.includes(kw));
+        const hasSaat = ['saat', 'zaman', 'uygun', 'saati', 'saatleri', 'zamanı', 'zamani'].some(kw => lowerText.includes(kw));
+        const hasTelefon = ['telefon', 'numara', 'numaranız', 'numaraniz', 'görüşme', 'gorusme', 'ulas'.replace(/ı/g, 'i')].some(kw => lowerText.includes(kw));
+        return (hasAd || hasSaat || hasTelefon) && [
+          'görüşmek', 'gorusmek', 'arayalım', 'arayalim', 'arayabiliriz',
+          'arama planlama', 'telefon görüşmesi', 'telefon gorusmesi',
+          'danışmanımızla', 'danismanimizla', 'arama teklif', 'telefonla gorusalim', 'telefonla görüşelim',
+          'ulaşabiliriz', 'ulasabiliriz', 'ulaşalım', 'ulasalim', 'belirtebilir'
+        ].some(kw => lowerText.includes(kw));
+      };
+
+      const hasActivePendingSlot = rawPendingSlot && rawPendingSlot !== 'generic_none';
+      const last4Messages = history.slice(-4);
+      const hasCallSchedulingInHistory = last4Messages.some(m => {
+        const lowerContent = m.content.toLowerCase();
+        return callSchedulingKeywords.some(kw => lowerContent.includes(kw)) || isCallOffer(m.content);
+      });
+      const lastBotMessageAskedDetails = botAskedForDetails(lastAssistantMsg);
+
+      const isContinuationValid = hasActivePendingSlot || hasCallSchedulingInHistory || lastBotMessageAskedDetails;
+
+      if (isContinuationValid) {
+        return {
+          effectivePendingSlot: (rawPendingSlot && rawPendingSlot !== 'generic_none') ? rawPendingSlot : 'call_time',
+          effectiveIntent: 'continuation_short_reply',
+          staleSlotSuppressed: false
+        };
+      } else {
+        return {
+          effectivePendingSlot: 'generic_none',
+          effectiveIntent: 'continuation_short_reply',
+          staleSlotSuppressed: true,
+          suppressionReason: 'continuation_invalid_no_context'
+        };
+      }
     }
 
     // If no pending slot is active, pass through

@@ -22,6 +22,7 @@ export type ConversationIntent =
   | 'abuse_or_insult'
   | 'prompt_challenge'
   | 'complaint_repeat_correction'
+  | 'continuation_short_reply'
   | 'generic_other';
 
 export class ConversationIntentRouter {
@@ -88,7 +89,7 @@ export class ConversationIntentRouter {
     // 4. Identity Question
     const identityKeywords = [
       'kimsin', 'kimsiniz', 'kim bu', 'bu kim', 'sen kimsin', 'siz kimsiniz',
-      'kim yaziyor', 'kimle konusuyorum', 'kimle gorusuyorum',
+      'kim yaziyor', 'kimle konusuyorum', 'kimle gorusuyorum', 'kiminle konusuyorum', 'kiminle gorusuyorum',
       'who are you', 'who is this', 'who am i talking to', 'what is your name'
     ];
     if (identityKeywords.some(kw => clean.includes(kw) || originalLower.includes(kw))) {
@@ -126,11 +127,27 @@ export class ConversationIntentRouter {
 
     // 8. Name Intent
     const nameKeywords = ['adım', 'ismim', 'benim adım', 'benim ismim', 'adım ', 'ismim '];
-    if (nameKeywords.some(kw => clean.includes(kw)) || /^(?:ben|adım|ismim)\s+[a-z]+/i.test(clean)) {
-      return 'name_intent';
+    const blocklistedWords = ['kiminle', 'kimle', 'kim', 'ne', 'neden', 'niye', 'nasil', 'hangi', 'kac', 'nerede', 'suan', 'simdi'];
+    const blocklistedNamePhrases = [
+      'ben kiminle gorusuyorum',
+      'ben kiminle konusuyorum',
+      'kiminle gorusuyorum',
+      'kiminle konusuyorum',
+      'adin ne',
+      'isminiz ne',
+      'sen kimsin',
+      'siz kimsiniz'
+    ];
+    const words = clean.split(/\s+/);
+    const hasBlocklistedWord = words.some(w => blocklistedWords.includes(w));
+    const hasBlocklistedPhrase = blocklistedNamePhrases.some(phrase => clean.includes(phrase));
+
+    if (!hasBlocklistedWord && !hasBlocklistedPhrase) {
+      if (nameKeywords.some(kw => clean.includes(kw)) || /^(?:ben|adım|ismim)\s+[a-z]+/i.test(clean)) {
+        return 'name_intent';
+      }
     }
 
-    // 9. Call Scheduling Request
     const callSchedulingKeywords = [
       'telefon gorusmesi', 'telefonla gorus', 'telefonla arayin',
       'telefonla ulasin', 'arama planlayalim', 'arama yapin',
@@ -139,7 +156,10 @@ export class ConversationIntentRouter {
       'beni ararlar mi', 'hasta danismani arasin', 'sizinle gorusmek istiyorum',
       'telefonla bilgi almak istiyorum', 'arar mi', 'ararlar mi'
     ];
-    if (callSchedulingKeywords.some(kw => clean.includes(kw)) || /\barayın\b/i.test(clean) || /\barayin\b/i.test(clean)) {
+    const hasCallRequestCombined = (clean.includes('telefon') || clean.includes('tel')) && (
+      clean.includes('randevu') || clean.includes('gorus') || clean.includes('ulas') || clean.includes('ara') || clean.includes('arar')
+    );
+    if (callSchedulingKeywords.some(kw => clean.includes(kw)) || /\barayın\b/i.test(clean) || /\barayin\b/i.test(clean) || hasCallRequestCombined) {
       return 'call_scheduling_request';
     }
 
@@ -247,6 +267,12 @@ export class ConversationIntentRouter {
     ];
     if (clarificationKeywords.some(kw => clean.includes(kw) || originalLower.includes(kw))) {
       return 'clarification_question';
+    }
+
+    // 20.5. Continuation Short Reply
+    const continuationShortReplies = ['eee', 'ee', 'e', 'devam', 'sonra', 'tamam sonra', '?'];
+    if (continuationShortReplies.includes(clean)) {
+      return 'continuation_short_reply';
     }
 
     // 21. Greeting

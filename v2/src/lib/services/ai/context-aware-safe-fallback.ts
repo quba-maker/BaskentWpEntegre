@@ -11,6 +11,8 @@ export interface DeterministicFallbackParams {
     organizationShortName?: string;
   };
   unifiedContext: any;
+  channelId?: string;
+  systemPromptText?: string;
 }
 
 export interface DeterministicFallbackResult {
@@ -122,6 +124,178 @@ export class ContextAwareSafeFallbackResolver {
       if (lowerInbound.includes('bel fıt') || lowerInbound.includes('bel fit') || historyText.includes('bel fıt') || historyText.includes('bel fit')) {
         complaint = 'bel fıtığı';
         hasComplaint = true;
+      }
+    }
+
+    // Name Intent detection ("ismim/adım [X]", "ben [X]" or profile name match)
+    const nameIntroductions = [
+      /\bismim\s+([a-zA-ZçıüşöğİÇIÜŞÖĞ\s]+)/i,
+      /\badım\s+([a-zA-ZçıüşöğİÇIÜŞÖĞ\s]+)/i,
+      /\badim\s+([a-zA-ZçıüşöğİÇIÜŞÖĞ\s]+)/i,
+      /\bben\s+([a-zA-ZçıüşöğİÇIÜŞÖĞ\s]+)/i
+    ];
+    let detectedName = '';
+    for (const regex of nameIntroductions) {
+      const match = inboundText.match(regex);
+      if (match && match[1]) {
+        detectedName = match[1].split(/[.,!?\s]+/)[0].trim();
+        break;
+      }
+    }
+
+    const profileName = unifiedContext?.profile?.first_name || unifiedContext?.conversation?.patient_name || '';
+    if (!detectedName && profileName && profileName.trim().length > 1) {
+      const cleanProfile = profileName.toLowerCase().trim();
+      if (lowerInbound.includes(cleanProfile)) {
+        detectedName = profileName.trim();
+      }
+    }
+
+    if (detectedName) {
+      const { isValidPatientName } = require('../../utils/patient-name-resolver');
+      if (!isValidPatientName(detectedName)) {
+        detectedName = '';
+      } else {
+        // Capitalize first letter, support Turkish lowercase 'i' to uppercase 'İ'
+        const firstChar = detectedName.charAt(0);
+        const upperFirst = firstChar === 'i' ? 'İ' : (firstChar === 'ı' ? 'I' : firstChar.toUpperCase());
+        detectedName = upperFirst + detectedName.slice(1);
+      }
+    }
+
+    const isBaskentTenant = brain.context.tenantId === 'caab9ea1-9591-45e4-bbc5-9c9b498982c8';
+    const resolvedChannelId = params.channelId || 
+                              brain.context.config?.channelId || 
+                              brain.context.config?.channel_id || 
+                              brain.context.config?.raw?.channelId || 
+                              brain.context.config?.raw?.channel_id;
+    const isBaskentWhatsappTrChannel = resolvedChannelId === '2e7352c1-5db7-4414-baf7-de571a66bfa6';
+    const promptVersion = brain.prompts.metadata?.version;
+    const systemPromptContent = params.systemPromptText || brain.prompts?.systemPrompt || '';
+    const hasBaskentV58Prompt =
+      promptVersion === 58 ||
+      promptVersion === '58' ||
+      promptVersion === 'v58' ||
+      systemPromptContent.includes('Mustafa Kemal İLİK') ||
+      (brain.context.config?.systemPromptText && brain.context.config.systemPromptText.includes('Mustafa Kemal İLİK'));
+    
+    const isBaskentV58 = isBaskentTenant && isBaskentWhatsappTrChannel && hasBaskentV58Prompt;
+    const isBaskent = isBaskentV58;
+    if (isBaskent) {
+      const { resolvePatientDisplayName } = require('../../utils/patient-name-resolver');
+      
+      if (detectedIntent === 'identity_question') {
+        return {
+          text: "Ben *Rüya*, Konya Başkent Hastanesi’nden sizinle ilgileniyorum. Size nasıl yardımcı olabilirim? 🌿",
+          sector: resolvedIndustry,
+          hasFormContext,
+          hasComplaint,
+          finalPath: 'identity_baskent_bypass',
+          detectedIntent
+        };
+      }
+
+      if (detectedIntent === 'call_scheduling_request') {
+        const { isValidPatientName } = require('../../utils/patient-name-resolver');
+        const pName = unifiedContext?.conversation?.patient_name || unifiedContext?.opportunity?.patient_name || '';
+        const hasValidName = pName && isValidPatientName(pName) && !pName.includes('İsimsiz') && !pName.match(/^\+?\d+/);
+
+        if (!hasValidName) {
+          return {
+            text: "Telefon görüşmesi planlaması için hasta danışmanımız size yardımcı olabilir. Size uygun olduğunuz bir zaman aralığını belirtebilir misiniz? Ayrıca, size daha doğru yardımcı olabilmem için adınızı öğrenebilir miyim? 🙏",
+            sector: resolvedIndustry,
+            hasFormContext,
+            hasComplaint,
+            finalPath: 'call_scheduling_baskent_unknown_name_bypass',
+            detectedIntent
+          };
+        } else {
+          return {
+            text: "Telefon görüşmesi planlaması için hasta danışmanımız size yardımcı olabilir. Size uygun olduğunuz bir zaman aralığını belirtebilir misiniz? 🙏",
+            sector: resolvedIndustry,
+            hasFormContext,
+            hasComplaint,
+            finalPath: 'call_scheduling_baskent_known_name_bypass',
+            detectedIntent
+          };
+        }
+      }
+
+      if (detectedIntent === 'continuation_short_reply') {
+        if (pendingSlot === 'call_time' || pendingSlot === 'call_date' || pendingSlot === 'timezone_clarification') {
+          return {
+            text: "Arama planlaması için size hangi saat aralığında ulaşılması uygun olur? 🙏",
+            sector: resolvedIndustry,
+            hasFormContext,
+            hasComplaint,
+            finalPath: 'continuation_call_time_baskent_bypass',
+            detectedIntent
+          };
+        } else if (pendingSlot === 'confirmation_yes_no') {
+          return {
+            text: "Belirttiğimiz görüşme planlamasını onaylıyor musunuz?",
+            sector: resolvedIndustry,
+            hasFormContext,
+            hasComplaint,
+            finalPath: 'continuation_confirmation_baskent_bypass',
+            detectedIntent
+          };
+        } else {
+          return {
+            text: "Talebinizi tam anlayamadım. Size nasıl yardımcı olabilirim? 🌿",
+            sector: resolvedIndustry,
+            hasFormContext,
+            hasComplaint,
+            finalPath: 'continuation_short_unrelated_baskent_bypass',
+            detectedIntent
+          };
+        }
+      }
+
+      if (detectedIntent === 'name_intent' || (detectedIntent === 'generic_other' && detectedName)) {
+        const callSchedulingKeywords = [
+          'telefon gorusmesi', 'telefonla gorus', 'telefonla arayin',
+          'telefonla ulasin', 'arama planlayalim', 'arama yapin',
+          'beni arayin', 'sizi arayayim', 'arar misiniz', 'ararmisiniz',
+          'beni arayabilir misiniz', 'arama yapar misiniz', 'telefonla gorusebilir miyiz',
+          'beni ararlar mi', 'hasta danismani arasin', 'sizinle gorusmek istiyorum',
+          'telefonla bilgi almak istiyorum', 'arar mi', 'ararlar mi', 'arama planı', 'randevu almak'
+        ];
+        const last4Messages = history.slice(-4);
+        const isCallOffer = (txt: string) => {
+          const lowerText = txt.toLowerCase();
+          return [
+            'görüşmek', 'gorusmek', 'arayalım', 'arayalim', 'arayabiliriz',
+            'arama planlama', 'telefon görüşmesi', 'telefon gorusmesi',
+            'danışmanımızla', 'danismanimizla', 'arama teklif', 'telefonla gorusalim', 'telefonla görüşelim'
+          ].some(kw => lowerText.includes(kw));
+        };
+        const isCallFlowActive = last4Messages.some((m: any) => {
+          const lowerContent = m.content.toLowerCase();
+          return callSchedulingKeywords.some(kw => lowerContent.includes(kw)) || isCallOffer(m.content);
+        });
+
+        const nameToUse = detectedName || resolvePatientDisplayName(unifiedContext) || 'Mehmet';
+
+        if (isCallFlowActive) {
+          return {
+            text: `Teşekkür ederim ${nameToUse}. Bilgilerinizi not aldım. Görüşme için size hangi saat aralığında ulaşılması uygun olur? 🙏`,
+            sector: resolvedIndustry,
+            hasFormContext,
+            hasComplaint,
+            finalPath: 'name_intent_call_flow_baskent_bypass',
+            detectedIntent
+          };
+        } else {
+          return {
+            text: `Teşekkür ederim ${nameToUse}. Bilgilerinizi not aldım. Size nasıl yardımcı olabilirim? 🌿`,
+            sector: resolvedIndustry,
+            hasFormContext,
+            hasComplaint,
+            finalPath: 'name_intent_generic_baskent_bypass',
+            detectedIntent
+          };
+        }
       }
     }
 
@@ -302,7 +476,7 @@ export class ContextAwareSafeFallbackResolver {
               }
             }
           }
-          const isBaskent = brain.context.tenantId === 'caab9ea1-9591-45e4-bbc5-9c9b498982c8';
+          const isBaskent = isBaskentV58;
           const isRuyaOrBaskent = identityConfig.personaName === 'Rüya' || isBaskent;
           const relPhrase = relationPossessive 
             ? `${relationPossessive.charAt(0).toUpperCase() + relationPossessive.slice(1)}${complaint}${suffix}`
@@ -312,7 +486,7 @@ export class ContextAwareSafeFallbackResolver {
             ? `Pardon, nereden çıkardınız bunu? Ben Rüya, Konya Başkent Hastanesi’nden sizinle ilgileniyorum. ${relPhrase} ilgili sorularınızı yazarsanız net cevaplayayım.`
             : `${relPhrase} ilgili sorularınızı yanıtlayıp doğru ekibe yönlendirmeye yardımcı olabilirim.`;
         } else {
-          const isBaskent = brain.context.tenantId === 'caab9ea1-9591-45e4-bbc5-9c9b498982c8';
+          const isBaskent = isBaskentV58;
           const isRuyaOrBaskent = identityConfig.personaName === 'Rüya' || isBaskent;
           text = isRuyaOrBaskent
             ? 'Pardon, nereden çıkardınız bunu? Ben Rüya, Konya Başkent Hastanesi’nden sizinle ilgileniyorum. Sorunuzu yazarsanız net cevaplayayım.'
@@ -320,7 +494,7 @@ export class ContextAwareSafeFallbackResolver {
         }
       } else {
         // Prompt challenge
-        const isBaskent = brain.context.tenantId === 'caab9ea1-9591-45e4-bbc5-9c9b498982c8';
+        const isBaskent = isBaskentV58;
         const isRuyaOrBaskent = identityConfig.personaName === 'Rüya' || isBaskent;
         if (hasComplaint) {
           const capitalizedPossessive = relationPossessive 
@@ -349,7 +523,7 @@ export class ContextAwareSafeFallbackResolver {
     if (isAngryOrChallenge) {
       // Identity query, bot questions, abuse or general anger
       let text = '';
-      const isBaskent = brain.context.tenantId === 'caab9ea1-9591-45e4-bbc5-9c9b498982c8';
+      const isBaskent = isBaskentV58;
       const isRuyaOrBaskent = identityConfig.personaName === 'Rüya' || isBaskent;
 
       const isAiOrBotOrPromptQuestion = 
@@ -542,36 +716,7 @@ export class ContextAwareSafeFallbackResolver {
 
     // 3. Fallback Generation Routing for non-intent or default intents
 
-    // Name Intent detection ("ismim/adım [X]", "ben [X]" or profile name match)
-    const nameIntroductions = [
-      /\bismim\s+([a-zA-ZçıüşöğİÇIÜŞÖĞ\s]+)/i,
-      /\badım\s+([a-zA-ZçıüşöğİÇIÜŞÖĞ\s]+)/i,
-      /\badim\s+([a-zA-ZçıüşöğİÇIÜŞÖĞ\s]+)/i,
-      /\bben\s+([a-zA-ZçıüşöğİÇIÜŞÖĞ\s]+)/i
-    ];
-    let detectedName = '';
-    for (const regex of nameIntroductions) {
-      const match = inboundText.match(regex);
-      if (match && match[1]) {
-        detectedName = match[1].split(/[.,!?\s]+/)[0].trim();
-        break;
-      }
-    }
-
-    const profileName = unifiedContext?.profile?.first_name || unifiedContext?.conversation?.patient_name || '';
-    if (!detectedName && profileName && profileName.trim().length > 1) {
-      const cleanProfile = profileName.toLowerCase().trim();
-      if (lowerInbound.includes(cleanProfile)) {
-        detectedName = profileName.trim();
-      }
-    }
-
-    if (detectedName) {
-      // Capitalize first letter, support Turkish lowercase 'i' to uppercase 'İ'
-      const firstChar = detectedName.charAt(0);
-      const upperFirst = firstChar === 'i' ? 'İ' : (firstChar === 'ı' ? 'I' : firstChar.toUpperCase());
-      detectedName = upperFirst + detectedName.slice(1);
-    }
+    // Name Intent detection already performed at initialization
 
     if (detectedName) {
       if (isHealthcareOrForm && hasComplaint) {

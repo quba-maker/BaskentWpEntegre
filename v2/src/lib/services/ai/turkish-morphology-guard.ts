@@ -49,6 +49,10 @@ const KNOWN_DEDUP_PATTERNS: { regex: RegExp; description: string; fix?: (match: 
   { regex: /uzmanızı/gi, description: 'uzmanızı', fix: (m) => m[0] === 'U' ? 'Uzmanı' : 'uzmanı' },
   { regex: /aklınızızdaki/gi, description: 'aklınızızdaki', fix: (m) => m[0] === 'A' ? 'Aklınızdaki' : 'aklınızdaki' },
   { regex: /Kusura bakmayınız/gi, description: 'kusura_bakmayiniz', fix: (m) => m[0] === 'K' ? 'Kusura bakmayın' : 'kusura bakmayın' },
+  { regex: /size uygun olduğunuz bir zamanızı/gi, description: 'size_uygun_oldugunuz_bir_zamanizi', fix: () => 'size uygun bir zaman aralığını' },
+  { regex: /uygun olduğunuz bir zamanızı/gi, description: 'uygun_oldugunuz_bir_zamanizi', fix: () => 'size uygun bir zaman aralığını' },
+  { regex: /bir zamanızı/gi, description: 'bir_zamanizi', fix: () => 'uygun bir zaman aralığını' },
+  { regex: /zamanızı/gi, description: 'zamanizi_missing_n', fix: (m) => m[0] === 'Z' ? 'Zaman aralığını' : 'zaman aralığını' },
 
   // Doubled possessive general patterns
   // nızınız → nız

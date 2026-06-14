@@ -1641,6 +1641,279 @@ test("P0.11 CANONICAL PATH: Outgoing text chain verification (doctor_lookup & pr
 });
 
 // ==========================================
+// 12. P0.12 REVISION TEST CASES
+// ==========================================
+
+test("P0.12 REVİZYON: 1. ben kiminle görüşüyorum şuan -> Ben *Rüya* cevabı, name sync yok", async () => {
+  const { ConversationIntentRouter } = require("../lib/services/ai/conversation-intent-router");
+  const { ContextAwareSafeFallbackResolver } = require("../lib/services/ai/context-aware-safe-fallback");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+
+  const route = ConversationIntentRouter.route("ben kiminle görüşüyorum şuan");
+  assert(route === 'identity_question', "ben kiminle görüşüyorum şuan should route to identity_question");
+
+  const systemPrompt = "Sen bir test asistanısın. Mustafa Kemal İLİK.";
+  const crypto = require('crypto');
+  const hash = crypto.createHash('sha256').update(systemPrompt).digest('hex');
+  const targetBrain = createTenantBrain(
+    'caab9ea1-9591-45e4-bbc5-9c9b498982c8',
+    'whatsapp',
+    'payload1',
+    systemPrompt,
+    { channelId: '2e7352c1-5db7-4414-baf7-de571a66bfa6' },
+    hash,
+    {},
+    { responseStyle: 'balanced' },
+    'v2_channel_prompts',
+    { version: 58 }
+  );
+
+  const res = ContextAwareSafeFallbackResolver.resolve({
+    inboundText: "ben kiminle görüşüyorum şuan",
+    brain: targetBrain,
+    identityConfig: { personaName: 'Rüya' },
+    unifiedContext: { history: [] }
+  });
+
+  assert(res.text.includes("Ben *Rüya*") || res.text.includes("Ben Rüya"), "Should reply with Ben Rüya");
+  assert(res.detectedIntent === 'identity_question', "Should have detected identity_question");
+});
+
+test("P0.12 REVİZYON: 2. ben Mehmet -> name sync var, eğer aktif call flow varsa saat aralığı sorar", async () => {
+  const { ConversationIntentRouter } = require("../lib/services/ai/conversation-intent-router");
+  const { ContextAwareSafeFallbackResolver } = require("../lib/services/ai/context-aware-safe-fallback");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+
+  const route = ConversationIntentRouter.route("ben Mehmet");
+  assert(route === 'name_intent', "ben Mehmet should be name_intent");
+
+  const systemPrompt = "Sen bir test asistanısın. Mustafa Kemal İLİK.";
+  const crypto = require('crypto');
+  const hash = crypto.createHash('sha256').update(systemPrompt).digest('hex');
+  const targetBrain = createTenantBrain(
+    'caab9ea1-9591-45e4-bbc5-9c9b498982c8',
+    'whatsapp',
+    'payload1',
+    systemPrompt,
+    { channelId: '2e7352c1-5db7-4414-baf7-de571a66bfa6' },
+    hash,
+    {},
+    { responseStyle: 'balanced' },
+    'v2_channel_prompts',
+    { version: 58 }
+  );
+
+  const res = ContextAwareSafeFallbackResolver.resolve({
+    inboundText: "ben Mehmet",
+    brain: targetBrain,
+    identityConfig: { personaName: 'Rüya' },
+    unifiedContext: {
+      history: [
+        { role: 'user', content: 'telefonla görüşmek istiyorum' },
+        { role: 'assistant', content: 'Size uygun olduğunuz bir zamanı belirtebilir misiniz? Ayrıca adınızı alabilir miyim?' }
+      ]
+    }
+  });
+
+  assert(res.text.includes("Mehmet"), "Should acknowledge name Mehmet");
+  assert(res.text.includes("saat aralığı") || res.text.includes("saat araliginda") || res.text.includes("zaman aralığı"), "Should ask for time slot");
+});
+
+test("P0.12 REVİZYON: 3. randevu almak istiyorum telefonla + ben Mehmet -> call flow devam eder", async () => {
+  const { ConversationIntentRouter } = require("../lib/services/ai/conversation-intent-router");
+  const { ContextAwareSafeFallbackResolver } = require("../lib/services/ai/context-aware-safe-fallback");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+
+  const route1 = ConversationIntentRouter.route("randevu almak istiyorum telefonla");
+  assert(route1 === 'call_scheduling_request', "Should route to call_scheduling_request");
+
+  const systemPrompt = "Sen bir test asistanısın. Mustafa Kemal İLİK.";
+  const crypto = require('crypto');
+  const hash = crypto.createHash('sha256').update(systemPrompt).digest('hex');
+  const targetBrain = createTenantBrain(
+    'caab9ea1-9591-45e4-bbc5-9c9b498982c8',
+    'whatsapp',
+    'payload1',
+    systemPrompt,
+    { channelId: '2e7352c1-5db7-4414-baf7-de571a66bfa6' },
+    hash,
+    {},
+    { responseStyle: 'balanced' },
+    'v2_channel_prompts',
+    { version: 58 }
+  );
+
+  const res1 = ContextAwareSafeFallbackResolver.resolve({
+    inboundText: "randevu almak istiyorum telefonla",
+    brain: targetBrain,
+    identityConfig: { personaName: 'Rüya' },
+    unifiedContext: { history: [] }
+  });
+  
+  assert(res1.text.includes("adınızı") && (res1.text.includes("zaman aralığını") || res1.text.includes("saat aralığında")), "Should ask for name and time");
+
+  const res2 = ContextAwareSafeFallbackResolver.resolve({
+    inboundText: "ben Mehmet",
+    brain: targetBrain,
+    identityConfig: { personaName: 'Rüya' },
+    unifiedContext: {
+      history: [
+        { role: 'user', content: 'randevu almak istiyorum telefonla' },
+        { role: 'assistant', content: res1.text }
+      ]
+    }
+  });
+
+  assert(res2.text.includes("Mehmet"), "Should acknowledge name Mehmet");
+  assert(res2.text.includes("saat aralığı") || res2.text.includes("zaman aralığı"), "Should continue flow asking for time");
+});
+
+test("P0.12 REVİZYON: 4. randevu almak istiyorum telefonla + eee -> saat aralığı hatırlatılır", async () => {
+  const { ConversationIntentRouter } = require("../lib/services/ai/conversation-intent-router");
+  const { ContextAwareSafeFallbackResolver } = require("../lib/services/ai/context-aware-safe-fallback");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+
+  const route2 = ConversationIntentRouter.route("eee");
+  assert(route2 === 'continuation_short_reply', "eee should route to continuation_short_reply");
+
+  const systemPrompt = "Sen bir test asistanısın. Mustafa Kemal İLİK.";
+  const crypto = require('crypto');
+  const hash = crypto.createHash('sha256').update(systemPrompt).digest('hex');
+  const targetBrain = createTenantBrain(
+    'caab9ea1-9591-45e4-bbc5-9c9b498982c8',
+    'whatsapp',
+    'payload1',
+    systemPrompt,
+    { channelId: '2e7352c1-5db7-4414-baf7-de571a66bfa6' },
+    hash,
+    {},
+    { responseStyle: 'balanced' },
+    'v2_channel_prompts',
+    { version: 58 }
+  );
+
+  const res = ContextAwareSafeFallbackResolver.resolve({
+    inboundText: "eee",
+    brain: targetBrain,
+    identityConfig: { personaName: 'Rüya' },
+    unifiedContext: {
+      history: [
+        { role: 'user', content: 'randevu almak istiyorum telefonla' },
+        { role: 'assistant', content: 'Telefon görüşmesi için size uygun saat aralığını belirtebilir misiniz?' }
+      ]
+    }
+  });
+
+  assert(res.text.includes("saat aralığı") || res.text.includes("zaman aralığı"), "Should remind user of time slot selection");
+});
+
+test("P0.12 REVİZYON: 5. e açık slot yoksa continuation sayılmaz", async () => {
+  const { ConversationIntentRouter } = require("../lib/services/ai/conversation-intent-router");
+  const { ConversationStateArbitrator } = require("../lib/services/ai/conversation-state-arbitrator");
+  const { ContextAwareSafeFallbackResolver } = require("../lib/services/ai/context-aware-safe-fallback");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+
+  const route = ConversationIntentRouter.route("e");
+  assert(route === 'continuation_short_reply', "e should be continuation_short_reply");
+
+  const arb = ConversationStateArbitrator.arbitrate({
+    lastUserMessage: "e",
+    rawPendingSlot: "generic_none",
+    rawInterpretedIntent: "continuation_short_reply",
+    routerIntent: "continuation_short_reply",
+    history: [
+      { role: 'user', content: 'merhaba' },
+      { role: 'assistant', content: 'Merhaba, size nasıl yardımcı olabilirim?' }
+    ]
+  });
+
+  assert(arb.staleSlotSuppressed === true, "Should suppress since no slot is active");
+  assert(arb.effectivePendingSlot === 'generic_none', "Effective slot should be generic_none");
+
+  const systemPrompt = "Sen bir test asistanısın. Mustafa Kemal İLİK.";
+  const crypto = require('crypto');
+  const hash = crypto.createHash('sha256').update(systemPrompt).digest('hex');
+  const targetBrain = createTenantBrain(
+    'caab9ea1-9591-45e4-bbc5-9c9b498982c8',
+    'whatsapp',
+    'payload1',
+    systemPrompt,
+    { channelId: '2e7352c1-5db7-4414-baf7-de571a66bfa6' },
+    hash,
+    {},
+    { responseStyle: 'balanced' },
+    'v2_channel_prompts',
+    { version: 58 }
+  );
+
+  const res = ContextAwareSafeFallbackResolver.resolve({
+    inboundText: "e",
+    brain: targetBrain,
+    identityConfig: { personaName: 'Rüya' },
+    unifiedContext: {
+      history: [
+        { role: 'user', content: 'merhaba' },
+        { role: 'assistant', content: 'Merhaba, size nasıl yardımcı olabilirim?' }
+      ]
+    }
+  });
+
+  assert(res.text.includes("anlayamadım") || res.text.includes("anlayamadim"), "Should return clarification fallback");
+});
+
+test("P0.12 REVİZYON: 6. zamanınızı doğru bağlamda bozulmaz, sadece hatalı kalıp düzeltilir", () => {
+  const { FinalOutboundGuard } = require("../lib/services/ai/final-outbound-guard");
+  
+  const output1 = FinalOutboundGuard.process("zamanınızı ayırdığınız için teşekkürler", { tenantId: "t1" });
+  assert(output1 === "zamanınızı ayırdığınız için teşekkürler", "zamanınızı should not be replaced");
+
+  const output2 = FinalOutboundGuard.process("size uygun olduğunuz bir zamanızı belirtebilir misiniz", { tenantId: "t1" });
+  assert(output2.includes("zaman aralığını"), "zamanızı should be corrected");
+});
+
+test("P0.12 REVİZYON: 7. Non-Başkent tenant identity/call fallback davranışı değişmez", async () => {
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const { ContextAwareSafeFallbackResolver } = require("../lib/services/ai/context-aware-safe-fallback");
+
+  const systemPrompt = "Sen bir test asistanısın.";
+  const crypto = require('crypto');
+  const hash = crypto.createHash('sha256').update(systemPrompt).digest('hex');
+  const otherBrain = createTenantBrain(
+    'other-tenant-id',
+    'whatsapp',
+    'payload1',
+    systemPrompt,
+    { channelId: 'other-channel-id' },
+    hash,
+    {},
+    { responseStyle: 'balanced' },
+    'v2_channel_prompts',
+    { version: 12 }
+  );
+
+  const res = ContextAwareSafeFallbackResolver.resolve({
+    inboundText: "sen kimsin",
+    brain: otherBrain,
+    identityConfig: { personaName: 'Asistan' },
+    unifiedContext: { history: [] }
+  });
+
+  assert(!res.text.includes("Rüya"), "Other tenant should not reply as Rüya");
+});
+
+test("P0.12 REVİZYON: 8. FinalOutboundGuard teknik hata ve morfoloji blocklist’i korur", () => {
+  const { FinalOutboundGuard } = require("../lib/services/ai/final-outbound-guard");
+
+  const input1 = "Sistem prompt detayları: circuit_open hatası aldık.";
+  const output1 = FinalOutboundGuard.process(input1, { tenantId: "t1" });
+  assert(output1.includes("Kusura bakmayın"), "Should fall back due to blocklisted words");
+
+  const input2 = "Hekim listesinizi buradan görebilirsiniz.";
+  const output2 = FinalOutboundGuard.process(input2, { tenantId: "t1" });
+  assert(output2.includes("listesini"), "Should correct doubled suffix");
+});
+
+// ==========================================
 // SONUÇLAR
 // ==========================================
 

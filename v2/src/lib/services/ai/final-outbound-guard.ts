@@ -88,7 +88,11 @@ export class FinalOutboundGuard {
       { regex: /ulaştığınızız/gi, repl: (m: string) => m.charAt(0) === 'U' ? 'Ulaştığınız' : 'ulaştığınız' },
       { regex: /sorularınızızı/gi, repl: (m: string) => m.charAt(0) === 'S' ? 'Sorularınızı' : 'sorularınızı' },
       { regex: /aklınızızdaki/gi, repl: (m: string) => m.charAt(0) === 'A' ? 'Aklınızdaki' : 'aklınızdaki' },
-      { regex: /görüyorum\.,/gi, repl: (m: string) => m.charAt(0) === 'G' ? 'Görüyorum.' : 'görüyorum.' }
+      { regex: /görüyorum\.,/gi, repl: (m: string) => m.charAt(0) === 'G' ? 'Görüyorum.' : 'görüyorum.' },
+      { regex: /size uygun olduğunuz bir zamanızı/gi, repl: () => 'size uygun bir zaman aralığını' },
+      { regex: /uygun olduğunuz bir zamanızı/gi, repl: () => 'size uygun bir zaman aralığını' },
+      { regex: /bir zamanızı/gi, repl: () => 'uygun bir zaman aralığını' },
+      { regex: /zamanızı/gi, repl: (m: string) => m.charAt(0) === 'Z' ? 'Zaman aralığını' : 'zaman aralığını' }
     ];
 
     for (const item of corrections) {

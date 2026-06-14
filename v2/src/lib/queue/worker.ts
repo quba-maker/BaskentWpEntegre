@@ -2239,11 +2239,20 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
     const promptVersion = brain.prompts.metadata?.version;
     const hasBaskentV58Prompt =
       promptVersion === 58 ||
+      promptVersion === '58' ||
+      promptVersion === 'v58' ||
       systemPromptText.includes('Mustafa Kemal İLİK');
 
     const shouldBypassDoctorLookup = isDoctorLookup && !(isBaskentTenant && isBaskentWhatsappTrChannel && hasBaskentV58Prompt);
 
-    const isLlmBypassChallenge = isPromptChallenge || isBotAccusation || isAiAccusation || isAngryPromptChallenge || shouldBypassDoctorLookup || isHumanTransfer || isFormFollowup || isUserCorrection;
+    const isBaskentV58 = isBaskentTenant && isBaskentWhatsappTrChannel && hasBaskentV58Prompt;
+    const isBaskentV58BypassIntent = isBaskentV58 && (
+      detectedIntent === 'identity_question' ||
+      detectedIntent === 'call_scheduling_request' ||
+      detectedIntent === 'continuation_short_reply'
+    );
+
+    const isLlmBypassChallenge = isPromptChallenge || isBotAccusation || isAiAccusation || isAngryPromptChallenge || shouldBypassDoctorLookup || isHumanTransfer || isFormFollowup || isUserCorrection || isBaskentV58BypassIntent;
 
     let bypassed = false;
     let bypassedText = '';
@@ -2275,7 +2284,9 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
         inboundText: inboundTextForBypass,
         brain,
         identityConfig: brain.prompts.metadata?.identity || brain.context.config?.identity || {},
-        unifiedContext: unifiedContext || {}
+        unifiedContext: unifiedContext || {},
+        channelId: resolvedChannelId || metadata.channelId || undefined,
+        systemPromptText: systemPromptText || undefined
       });
       bypassed = true;
       bypassedText = fallbackResult.text;
@@ -2684,7 +2695,9 @@ Tek veya iki kısa cümle yaz.`;
         inboundText: content || '',
         brain,
         identityConfig: identityConfig || {},
-        unifiedContext: unifiedContext || {}
+        unifiedContext: unifiedContext || {},
+        channelId: resolvedChannelId || metadata.channelId || undefined,
+        systemPromptText: systemPromptText || undefined
       });
       const fallbackQG = MultilingualQualityGate.validate({
         responseText: fallbackRes.text,
@@ -4583,11 +4596,20 @@ Tek veya iki kısa cümle yaz.`;
     const promptVersion = brain.prompts.metadata?.version;
     const hasBaskentV58Prompt =
       promptVersion === 58 ||
+      promptVersion === '58' ||
+      promptVersion === 'v58' ||
       systemPromptText.includes('Mustafa Kemal İLİK');
 
     const shouldBypassDoctorLookup = isDoctorLookup && !(isBaskentTenant && isBaskentWhatsappTrChannel && hasBaskentV58Prompt);
 
-    const isLlmBypassChallenge = isPromptChallenge || isBotAccusation || isAiAccusation || isAngryPromptChallenge || shouldBypassDoctorLookup || isHumanTransfer || isFormFollowup || isUserCorrection;
+    const isBaskentV58 = isBaskentTenant && isBaskentWhatsappTrChannel && hasBaskentV58Prompt;
+    const isBaskentV58BypassIntent = isBaskentV58 && (
+      detectedIntent === 'identity_question' ||
+      detectedIntent === 'call_scheduling_request' ||
+      detectedIntent === 'continuation_short_reply'
+    );
+
+    const isLlmBypassChallenge = isPromptChallenge || isBotAccusation || isAiAccusation || isAngryPromptChallenge || shouldBypassDoctorLookup || isHumanTransfer || isFormFollowup || isUserCorrection || isBaskentV58BypassIntent;
 
     let bypassed = false;
     let bypassedText = '';
@@ -4619,7 +4641,9 @@ Tek veya iki kısa cümle yaz.`;
         inboundText: inboundTextForBypass,
         brain,
         identityConfig: brain.prompts.metadata?.identity || brain.context.config?.identity || {},
-        unifiedContext: unifiedContext || {}
+        unifiedContext: unifiedContext || {},
+        channelId: resolvedChannelId || metadata.channelId || undefined,
+        systemPromptText: systemPromptText || undefined
       });
       bypassed = true;
       bypassedText = fallbackResult.text;
@@ -4796,7 +4820,9 @@ Tek veya iki kısa cümle yaz.`;
           inboundText: latestInboundContent || '',
           brain,
           identityConfig: identityConfig || {},
-          unifiedContext: unifiedContext || {}
+          unifiedContext: unifiedContext || {},
+          channelId: resolvedChannelId || metadata.channelId || undefined,
+          systemPromptText: systemPromptText || undefined
         });
         const fallbackQG = MultilingualQualityGate.validate({
           responseText: fallbackRes.text,

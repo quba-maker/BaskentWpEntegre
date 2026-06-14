@@ -42,7 +42,8 @@ export function checkNameValidity(name?: string | null): {
     "kardesim", "esim", "kendisi", "turkiye", "türkiye", "almanya", "ingiltere", 
     "fransa", "belçika", "hollanda", "isimsiz",
     "user", "test", "admin", "deneme", "guest", "unknown", "undefined", "null", "bot", "sistem",
-    "ülke", "sehir", "şehir", "departman", "country", "city", "department", "telefon numarası"
+    "ülke", "sehir", "şehir", "departman", "country", "city", "department", "telefon numarası",
+    "kiminle", "kimle", "kim", "ne", "neden", "niye", "nasil", "nasıl", "hangi", "kac", "kaç", "nerede", "nerde", "suan", "şuan", "simdi", "şimdi"
   ];
 
   if (blacklist.includes(lower)) {
