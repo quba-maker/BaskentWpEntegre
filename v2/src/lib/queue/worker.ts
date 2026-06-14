@@ -2172,8 +2172,41 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       this.log.info(`[SKIP_BOT_REPLY] Max messages reached, skipping AI response generation. CRM extraction will still run.`, { traceId });
     } else {
 
-    this.log.info(`[LLM_STARTED] Requesting AI response`, { provider: aiConfig.provider, traceId });
-    
+    // P0.11: Check for Prompt Challenge / Bot Accusation / AI Accusation / Angry Challenge -> LLM Bypass
+    const { ConversationIntentRouter } = await import('@/lib/services/ai/conversation-intent-router');
+    const { PendingQuestionResolver } = await import('@/lib/services/ai/pending-question-resolver');
+    const { ShortAnswerInterpreter } = await import('@/lib/services/ai/short-answer-interpreter');
+
+    const inboundTextForBypass = content || '';
+    const cleanInbound = inboundTextForBypass.toLowerCase().trim();
+
+    const detectedIntent = ConversationIntentRouter.route(inboundTextForBypass);
+    const pendingSlot = PendingQuestionResolver.resolve(history);
+    const interpretedIntent = ShortAnswerInterpreter.interpret(inboundTextForBypass, pendingSlot);
+
+    const isBotAccusation = ['bot musun', 'sen bot musun', 'are you a bot', 'botsun', 'robot musun', 'yapay zeka mısın', 'yapay zeka misin', 'insan mısın', 'insan misin'].some(kw => cleanInbound.includes(kw));
+    const isAiAccusation = ['yapay zeka', 'yapayzeka', 'gpt', 'gemini', 'openai', 'claude', 'dil modeli', 'hangi model'].some(kw => cleanInbound.includes(kw));
+    const isPromptChallenge = detectedIntent === 'prompt_challenge' || (interpretedIntent as any) === 'prompt_challenge' || ['prompt', 'promt', 'sistem prompt', 'system prompt', 'talimatların', 'sistem talimati', 'kuralın ne', 'direktifin ne', 'uydurma'].some(kw => cleanInbound.includes(kw));
+    const isAngryPromptChallenge = isPromptChallenge && ['şikayet', 'sikayet', 'rezalet', 'berbat', 'kötü', 'sinir', 'bıktım', 'yeter', 'dalga'].some(kw => cleanInbound.includes(kw));
+
+    const isLlmBypassChallenge = isPromptChallenge || isBotAccusation || isAiAccusation || isAngryPromptChallenge;
+
+    let bypassed = false;
+    let bypassedText = '';
+
+    if (isLlmBypassChallenge) {
+      const { ContextAwareSafeFallbackResolver } = await import('@/lib/services/ai/context-aware-safe-fallback');
+      const fallbackResult = ContextAwareSafeFallbackResolver.resolve({
+        inboundText: inboundTextForBypass,
+        brain,
+        identityConfig: brain.prompts.metadata?.identity || brain.context.config?.identity || {},
+        unifiedContext: unifiedContext || {}
+      });
+      bypassed = true;
+      bypassedText = fallbackResult.text;
+      this.log.info(`[PROMPT_CHALLENGE_BYPASS] LLM call bypassed. Text: "${bypassedText}"`, { traceId });
+    }
+
     const timeoutMs = 25000; // 25s timeout
     let aiResponse: any;
     let isRetry = false;
@@ -2193,12 +2226,22 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
 
     try {
       try {
-        aiResponse = await executeLLM(aiMessages);
-        
-        // Final heuristic validation (Layer 2)
-        const completeness = this.responsePolicy.validateCompleteness(aiResponse.text, aiResponse.finishReason);
-        if (!completeness.valid) {
-          throw new Error(`INCOMPLETE_HEURISTIC: ${completeness.reason}`);
+        if (bypassed) {
+          aiResponse = {
+            text: bypassedText,
+            finishReason: 'STOP',
+            latencyMs: 0,
+            modelUsed: 'bypass'
+          };
+        } else {
+          this.log.info(`[LLM_STARTED] Requesting AI response`, { provider: aiConfig.provider, traceId });
+          aiResponse = await executeLLM(aiMessages);
+          
+          // Final heuristic validation (Layer 2)
+          const completeness = this.responsePolicy.validateCompleteness(aiResponse.text, aiResponse.finishReason);
+          if (!completeness.valid) {
+            throw new Error(`INCOMPLETE_HEURISTIC: ${completeness.reason}`);
+          }
         }
       } catch (e: any) {
         if (e.name === 'IncompleteResponseError' || e.message?.startsWith('INCOMPLETE_HEURISTIC')) {
@@ -2282,12 +2325,17 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       );
 
       const { MultilingualQualityGate } = await import('@/lib/services/ai/multilingual-quality-gate');
-      let qualityGate: any = MultilingualQualityGate.validate({
-        responseText: aiResponse.text,
-        replyLanguage: languagePolicy.replyLanguage,
-        qualityGateLocale: languagePolicy.qualityGateLocale,
-        qgOptions
-      });
+      let qualityGate: any;
+      if (bypassed) {
+        qualityGate = { valid: true };
+      } else {
+        qualityGate = MultilingualQualityGate.validate({
+          responseText: aiResponse.text,
+          replyLanguage: languagePolicy.replyLanguage,
+          qualityGateLocale: languagePolicy.qualityGateLocale,
+          qgOptions
+        });
+      }
 
       if (qualityGate.valid && qualityGate.morphologyCorrectedText) {
         aiResponse.text = qualityGate.morphologyCorrectedText;
@@ -2542,12 +2590,17 @@ Tek veya iki kısa cümle yaz.`;
 
     // P0.11: Final Locale-Aware Quality Gate check on the actual outgoing text
     const { MultilingualQualityGate } = await import('@/lib/services/ai/multilingual-quality-gate');
-    const finalQG = MultilingualQualityGate.validate({
-      responseText: aiResponse.text,
-      replyLanguage: languagePolicy?.replyLanguage || 'Türkçe',
-      qualityGateLocale: languagePolicy?.qualityGateLocale || 'tr',
-      qgOptions
-    });
+    let finalQG: any;
+    if (bypassed) {
+      finalQG = { valid: true };
+    } else {
+      finalQG = MultilingualQualityGate.validate({
+        responseText: aiResponse.text,
+        replyLanguage: languagePolicy?.replyLanguage || 'Türkçe',
+        qualityGateLocale: languagePolicy?.qualityGateLocale || 'tr',
+        qgOptions
+      });
+    }
     if (finalQG.valid) {
       aiResponse.text = finalQG.morphologyCorrectedText || aiResponse.text;
     } else {
@@ -2634,6 +2687,18 @@ Tek veya iki kısa cümle yaz.`;
       await db.executeSafe({
         text: `UPDATE conversations SET status = 'human' WHERE phone_number = $1 AND tenant_id = $2`,
         values: [phoneNumber, tenantId]
+      });
+    }
+
+    // Run final outbound guard (AI generated + LLM bypass responses both run through this guard)
+    if (finalResponseText) {
+      const { FinalOutboundGuard } = await import('@/lib/services/ai/final-outbound-guard');
+      finalResponseText = FinalOutboundGuard.process(finalResponseText, {
+        tenantId,
+        channelId: metadata.channelId,
+        conversationId: conversationId || 'unknown',
+        inboundText: content || '',
+        unifiedContext
       });
     }
 
@@ -4375,14 +4440,64 @@ Tek veya iki kısa cümle yaz.`;
 
     const { MultilingualQualityGate } = await import('@/lib/services/ai/multilingual-quality-gate');
 
-    try {
-      aiResponse = await executeLLM(aiMessages);
-      let qualityGate: any = MultilingualQualityGate.validate({
-        responseText: aiResponse.text,
-        replyLanguage: languagePolicy.replyLanguage,
-        qualityGateLocale: languagePolicy.qualityGateLocale,
-        qgOptions
+    // P0.11: Check for Prompt Challenge / Bot Accusation / AI Accusation / Angry Challenge -> LLM Bypass
+    const { ConversationIntentRouter } = await import('@/lib/services/ai/conversation-intent-router');
+    const { PendingQuestionResolver } = await import('@/lib/services/ai/pending-question-resolver');
+    const { ShortAnswerInterpreter } = await import('@/lib/services/ai/short-answer-interpreter');
+
+    const inboundTextForBypass = latestInboundContent || '';
+    const cleanInbound = inboundTextForBypass.toLowerCase().trim();
+
+    const detectedIntent = ConversationIntentRouter.route(inboundTextForBypass);
+    const pendingSlot = PendingQuestionResolver.resolve(history);
+    const interpretedIntent = ShortAnswerInterpreter.interpret(inboundTextForBypass, pendingSlot);
+
+    const isBotAccusation = ['bot musun', 'sen bot musun', 'are you a bot', 'botsun', 'robot musun', 'yapay zeka mısın', 'yapay zeka misin', 'insan mısın', 'insan misin'].some(kw => cleanInbound.includes(kw));
+    const isAiAccusation = ['yapay zeka', 'yapayzeka', 'gpt', 'gemini', 'openai', 'claude', 'dil modeli', 'hangi model'].some(kw => cleanInbound.includes(kw));
+    const isPromptChallenge = detectedIntent === 'prompt_challenge' || (interpretedIntent as any) === 'prompt_challenge' || ['prompt', 'promt', 'sistem prompt', 'system prompt', 'talimatların', 'sistem talimati', 'kuralın ne', 'direktifin ne', 'uydurma'].some(kw => cleanInbound.includes(kw));
+    const isAngryPromptChallenge = isPromptChallenge && ['şikayet', 'sikayet', 'rezalet', 'berbat', 'kötü', 'sinir', 'bıktım', 'yeter', 'dalga'].some(kw => cleanInbound.includes(kw));
+
+    const isLlmBypassChallenge = isPromptChallenge || isBotAccusation || isAiAccusation || isAngryPromptChallenge;
+
+    let bypassed = false;
+    let bypassedText = '';
+
+    if (isLlmBypassChallenge) {
+      const { ContextAwareSafeFallbackResolver } = await import('@/lib/services/ai/context-aware-safe-fallback');
+      const fallbackResult = ContextAwareSafeFallbackResolver.resolve({
+        inboundText: inboundTextForBypass,
+        brain,
+        identityConfig: brain.prompts.metadata?.identity || brain.context.config?.identity || {},
+        unifiedContext: unifiedContext || {}
       });
+      bypassed = true;
+      bypassedText = fallbackResult.text;
+      this.log.info(`[PROMPT_CHALLENGE_BYPASS] LLM call bypassed in delayed path. Text: "${bypassedText}"`, { traceId });
+    }
+
+    try {
+      if (bypassed) {
+        aiResponse = {
+          text: bypassedText,
+          finishReason: 'STOP',
+          latencyMs: 0,
+          modelUsed: 'bypass'
+        };
+      } else {
+        aiResponse = await executeLLM(aiMessages);
+      }
+      
+      let qualityGate: any;
+      if (bypassed) {
+        qualityGate = { valid: true };
+      } else {
+        qualityGate = MultilingualQualityGate.validate({
+          responseText: aiResponse.text,
+          replyLanguage: languagePolicy.replyLanguage,
+          qualityGateLocale: languagePolicy.qualityGateLocale,
+          qgOptions
+        });
+      }
 
       if (qualityGate.valid && qualityGate.morphologyCorrectedText) {
         aiResponse.text = qualityGate.morphologyCorrectedText;
@@ -4511,12 +4626,17 @@ Tek veya iki kısa cümle yaz.`;
       }
 
       // P0.11: Final Locale-Aware Quality Gate check on the actual outgoing text (delayed path)
-      const finalQG = MultilingualQualityGate.validate({
-        responseText: aiResponse.text,
-        replyLanguage: languagePolicy?.replyLanguage || 'Türkçe',
-        qualityGateLocale: languagePolicy?.qualityGateLocale || 'tr',
-        qgOptions
-      });
+      let finalQG: any;
+      if (bypassed) {
+        finalQG = { valid: true };
+      } else {
+        finalQG = MultilingualQualityGate.validate({
+          responseText: aiResponse.text,
+          replyLanguage: languagePolicy?.replyLanguage || 'Türkçe',
+          qualityGateLocale: languagePolicy?.qualityGateLocale || 'tr',
+          qgOptions
+        });
+      }
       if (finalQG.valid) {
         aiResponse.text = finalQG.morphologyCorrectedText || aiResponse.text;
       } else {
@@ -4567,6 +4687,18 @@ Tek veya iki kısa cümle yaz.`;
           values: [conversationId, tenantId]
         });
         return;
+      }
+
+      // Run final outbound guard (AI generated + LLM bypass responses both run through this guard)
+      if (finalResponseText) {
+        const { FinalOutboundGuard } = await import('@/lib/services/ai/final-outbound-guard');
+        finalResponseText = FinalOutboundGuard.process(finalResponseText, {
+          tenantId,
+          channelId: metadata.channelId,
+          conversationId: conversationId || 'unknown',
+          inboundText: latestInboundContent || '',
+          unifiedContext
+        });
       }
 
       const { sanitizePatientFacingMessage } = await import('@/lib/utils/patient-message-sanitizer');

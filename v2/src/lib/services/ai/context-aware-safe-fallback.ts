@@ -113,26 +113,97 @@ export class ContextAwareSafeFallbackResolver {
       }
     }
 
-    if (isAngryOrChallenge) {
-      if (isPromptChallenge) {
-        let text = '';
-        if (hasComplaint) {
-          text = `Bu teknik kısma girmeden, ${hasMother ? 'annenizin ' : ''}${complaint} süreciyle ilgili size yardımcı olmaya devam edebilirim.`;
-        } else {
-          text = isHealthcare
-            ? 'Bu teknik konuya girmeyeyim. Size sağlık talebinizle ilgili yardımcı olayım.'
-            : 'Bu teknik konuya girmeyeyim. Size yardımcı olmaya devam edebilirim.';
+    const isBotAccusation = ['bot musun', 'sen bot musun', 'are you a bot', 'botsun', 'robot musun', 'yapay zeka mısın', 'yapay zeka misin', 'insan mısın', 'insan misin'].some(kw => lowerInbound.includes(kw));
+    const isAiAccusation = ['yapay zeka', 'yapayzeka', 'gpt', 'gemini', 'openai', 'claude', 'dil modeli', 'hangi model'].some(kw => lowerInbound.includes(kw));
+    const isPromptChallengeOnly = detectedIntent === 'prompt_challenge' || interpretedIntent === 'prompt_challenge' || ['prompt', 'promt', 'sistem prompt', 'system prompt', 'talimatların', 'sistem talimati', 'kuralın ne', 'direktifin ne', 'uydurma'].some(kw => lowerInbound.includes(kw));
+    const isAngryPromptChallenge = isPromptChallengeOnly && ['şikayet', 'sikayet', 'rezalet', 'berbat', 'kötü', 'sinir', 'bıktım', 'yeter', 'dalga'].some(kw => lowerInbound.includes(kw));
+
+    const isLlmBypassChallenge = isPromptChallengeOnly || isBotAccusation || isAiAccusation || isAngryPromptChallenge;
+
+    if (isLlmBypassChallenge) {
+      let text = '';
+      
+      // Determine patientRelation
+      let patientRelation = '';
+      const facts = unifiedContext?.patient_known_facts || [];
+      const factsText = Array.isArray(facts) ? facts.join(' ').toLowerCase() : '';
+      const historyText = (history || []).map((m: any) => m.content).join(' ').toLowerCase();
+
+      const hasMother = lowerInbound.includes('anne') || factsText.includes('anne') || historyText.includes('anne') || lowerInbound.includes('valide') || factsText.includes('valide') || historyText.includes('valide');
+      if (hasMother) {
+        patientRelation = 'anne';
+      } else {
+        const relations = ['baba', 'eş', 'es', 'kardeş', 'kardes', 'oğul', 'ogul', 'kız', 'kiz'];
+        for (const rel of relations) {
+          if (lowerInbound.includes(rel) || factsText.includes(rel) || historyText.includes(rel)) {
+            patientRelation = rel;
+            break;
+          }
         }
-        return {
-          text,
-          sector: resolvedIndustry,
-          hasFormContext,
-          hasComplaint,
-          finalPath: 'prompt_challenge_fallback',
-          detectedIntent
-        };
       }
 
+      let relationPossessive = '';
+      if (patientRelation) {
+        const rel = patientRelation.toLowerCase().trim();
+        if (rel === 'anne') relationPossessive = 'annenizin ';
+        else if (rel === 'baba') relationPossessive = 'babanızın ';
+        else if (rel === 'eş' || rel === 'es') relationPossessive = 'eşinizin ';
+        else if (rel === 'kardeş' || rel === 'kardes') relationPossessive = 'kardeşinizin ';
+        else if (rel === 'oğul' || rel === 'ogul') relationPossessive = 'oğlunuzun ';
+        else if (rel === 'kız' || rel === 'kiz') relationPossessive = 'kızınızın ';
+        else relationPossessive = `${rel}inizin `;
+      }
+
+      if (isBotAccusation || isAiAccusation) {
+        if (hasComplaint) {
+          let suffix = 'la';
+          const normalized = complaint.toLowerCase().trim();
+          if (normalized.endsWith('ı') || normalized.endsWith('a') || normalized.endsWith('o') || normalized.endsWith('u')) {
+            suffix = 'yla';
+          } else if (normalized.endsWith('i') || normalized.endsWith('e') || normalized.endsWith('ö') || normalized.endsWith('ü')) {
+            suffix = 'yle';
+          } else {
+            // Ends in consonant: check last vowel
+            const lastVowel = normalized.match(/[aeıioöuü][^aeıioöuü]*$/i)?.[0]?.[0];
+            if (lastVowel) {
+              if (['a', 'ı', 'o', 'u'].includes(lastVowel.toLowerCase())) {
+                suffix = 'la';
+              } else {
+                suffix = 'le';
+              }
+            }
+          }
+          const relPhrase = relationPossessive 
+            ? `${relationPossessive.charAt(0).toUpperCase() + relationPossessive.slice(1)}${complaint}${suffix}`
+            : `${complaint.charAt(0).toUpperCase() + complaint.slice(1)}${suffix}`;
+          
+          text = `${relPhrase} ilgili sorularınızı yanıtlayıp doğru ekibe yönlendirmeye yardımcı olabilirim.`;
+        } else {
+          text = 'Burada sağlık başvurunuzla ilgili yönlendirme yapmak için varım.';
+        }
+      } else {
+        // Prompt challenge
+        if (hasComplaint) {
+          const capitalizedPossessive = relationPossessive 
+            ? relationPossessive.charAt(0).toUpperCase() + relationPossessive.slice(1) 
+            : '';
+          text = `Kusura bakmayın, cevaplarım yeterince net olmadı. ${capitalizedPossessive}${complaint} süreciyle ilgili sorularınızı daha açık yanıtlayayım.`;
+        } else {
+          text = 'Bu teknik konuya girmeden, sağlık talebinizle ilgili yardımcı olayım.';
+        }
+      }
+
+      return {
+        text,
+        sector: resolvedIndustry,
+        hasFormContext,
+        hasComplaint,
+        finalPath: 'prompt_challenge_bypass',
+        detectedIntent
+      };
+    }
+
+    if (isAngryOrChallenge) {
       // Identity query, bot questions, abuse or general anger
       let text = '';
       if (hasComplaint) {
@@ -160,15 +231,15 @@ export class ContextAwareSafeFallbackResolver {
       let replyText = '';
       if (lastUserMsgText) {
         if (isHealthcare) {
-          replyText = `Haklısınız, cevabınızı aldım. ${lastUserMsgText} bilgisini not ettim; ${complaint ? complaint + ' için ' : ''}ilgili birimle görüşme talebinizi iletebiliriz.`;
+          replyText = `Haklısınız, cevabınızı aldım. ${lastUserMsgText} bilgisini not ettim; isterseniz bu bilgiyi koordinatör ekibimize iletilmesi için not alabilirim.`;
         } else {
-          replyText = `Haklısınız, cevabınızı aldım. ${lastUserMsgText} bilgisini not ettim; sürecinizle ilgili görüşme talebinizi iletebiliriz.`;
+          replyText = `Haklısınız, cevabınızı aldım. ${lastUserMsgText} bilgisini not ettim; isterseniz bu bilgiyi temsilci ekibimize iletilmesi için not alabilirim.`;
         }
       } else {
         if (isHealthcare) {
-          replyText = `Haklısınız, cevabınızı aldım ve not ettim; ilgili birimle görüşme talebinizi iletebiliriz.`;
+          replyText = `Haklısınız, cevabınızı aldım ve not ettim; isterseniz bu bilgiyi koordinatör ekibimize iletilmesi için not alabilirim.`;
         } else {
-          replyText = `Haklısınız, cevabınızı aldım ve not ettim; sürecinizle ilgili görüşme talebinizi iletebiliriz.`;
+          replyText = `Haklısınız, cevabınızı aldım ve not ettim; isterseniz bu bilgiyi temsilci ekibimize iletilmesi için not alabilirim.`;
         }
       }
       
