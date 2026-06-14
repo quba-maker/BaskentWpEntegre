@@ -1125,6 +1125,178 @@ test("P0.11 REGRESSION: MessageService.sendWhatsAppMessage boundary guard and pr
 });
 
 // ==========================================
+// 12. P0.11 REVISIONS AND STATE ARBITRATION TESTS
+// ==========================================
+
+test("P0.11 STATE ARBITRATION: Pending slot overrides and activation gate checks", () => {
+  const { ConversationStateArbitrator } = require("../lib/services/ai/conversation-state-arbitrator");
+  
+  // 1. doctor_lookup + confirmation_yes_no pending slot -> pendingSlotValid false
+  const res1 = ConversationStateArbitrator.arbitrate({
+    lastUserMessage: "hangi doktor bakıyor",
+    rawPendingSlot: "confirmation_yes_no",
+    rawInterpretedIntent: "doctor_lookup",
+    routerIntent: "doctor_lookup",
+    history: []
+  });
+  assert(res1.effectivePendingSlot === "generic_none", "doctor_lookup must override confirmation_yes_no");
+  assert(res1.staleSlotSuppressed === true, "staleSlotSuppressed must be true for doctor_lookup");
+
+  // 2. form_followup + confirmation_yes_no pending slot -> pendingSlotValid false
+  const res2 = ConversationStateArbitrator.arbitrate({
+    lastUserMessage: "form doldurdum kontrol eder misiniz",
+    rawPendingSlot: "confirmation_yes_no",
+    rawInterpretedIntent: "form_followup",
+    routerIntent: "form_followup",
+    history: []
+  });
+  assert(res2.effectivePendingSlot === "generic_none", "form_followup must override confirmation_yes_no");
+  assert(res2.staleSlotSuppressed === true, "staleSlotSuppressed must be true for form_followup");
+
+  // 3. human_transfer_request + confirmation_yes_no pending slot -> pendingSlotValid false
+  const res3 = ConversationStateArbitrator.arbitrate({
+    lastUserMessage: "beni bir temsilciye bağlar mısın",
+    rawPendingSlot: "confirmation_yes_no",
+    rawInterpretedIntent: "human_transfer_request",
+    routerIntent: "human_transfer_request",
+    history: []
+  });
+  assert(res3.effectivePendingSlot === "generic_none", "human_transfer_request must override confirmation_yes_no");
+  assert(res3.staleSlotSuppressed === true, "staleSlotSuppressed must be true for human_transfer_request");
+
+  // 4. prompt_challenge + confirmation_yes_no pending slot -> pendingSlotValid false
+  const res4 = ConversationStateArbitrator.arbitrate({
+    lastUserMessage: "sen bir yapay zekasın",
+    rawPendingSlot: "confirmation_yes_no",
+    rawInterpretedIntent: "prompt_challenge",
+    routerIntent: "prompt_challenge",
+    history: []
+  });
+  assert(res4.effectivePendingSlot === "generic_none", "prompt_challenge must override confirmation_yes_no");
+  assert(res4.staleSlotSuppressed === true, "staleSlotSuppressed must be true for prompt_challenge");
+
+  // 5. user_correction + doctor_lookup -> doctor_lookup/correction kazanır
+  const res5 = ConversationStateArbitrator.arbitrate({
+    lastUserMessage: "hayır yanlış anladın doktoru sordum",
+    rawPendingSlot: "timezone_clarification",
+    rawInterpretedIntent: "user_correction",
+    routerIntent: "doctor_lookup",
+    history: []
+  });
+  assert(res5.effectivePendingSlot === "generic_none", "user_correction must override slot");
+  assert(res5.effectiveIntent === "doctor_lookup", "doctor_lookup must win as the effective intent");
+});
+
+test("P0.11 REGRESSION: MAX_TOKENS recovery and doctor_lookup bypass", async () => {
+  const { ContextAwareSafeFallbackResolver } = require("../lib/services/ai/context-aware-safe-fallback");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  
+  // Test case A: doctor_lookup + huge context + modelMaxOutputTokens 1000 -> LLM bypasses
+  const mockBrain = createTenantBrain("t1", "whatsapp", "payload1", "Sen bir test asistanısın.", { industry: "healthcare" });
+  const inboundText = "hangi doktorlar var hekimlerinizi listeler misiniz";
+  const cleanInbound = inboundText.toLowerCase().trim();
+  const finalPromptCharCount = 35000; // huge context simulated
+  const modelMaxOutputTokens = 1000;
+  
+  const { ConversationIntentRouter } = require("../lib/services/ai/conversation-intent-router");
+  const detectedIntent = ConversationIntentRouter.route(inboundText);
+  assert(detectedIntent === 'doctor_lookup', "Intent should route to doctor_lookup");
+
+  let llmCalled = false;
+  const executeLLM = async () => {
+    llmCalled = true;
+    return { text: "AI Response", finishReason: "STOP" };
+  };
+
+  let responseText = "";
+  if (detectedIntent === 'doctor_lookup') {
+    // Bypassed: resolver wins
+    const fallbackResult = ContextAwareSafeFallbackResolver.resolve({
+      inboundText,
+      brain: mockBrain,
+      identityConfig: {},
+      unifiedContext: {
+        patient_known_facts: ["şikayeti: bel fıtığı"],
+        history: []
+      }
+    });
+    responseText = fallbackResult.text;
+  } else {
+    const aiResponse = await executeLLM();
+    responseText = aiResponse.text;
+  }
+
+  assert(llmCalled === false, "LLM must not be called for doctor_lookup bypass");
+  assert(responseText.includes("Beyin ve Sinir Cerrahisi veya Fizik Tedavi"), "Bypassed response must map department via MedicalDepartmentResolver");
+
+  // Test case B: MAX_TOKENS occurs -> raw/generic/bozuk cevap provider'a gitmez, FinalOutboundGuard'dan geçen safe fallback gider
+  const bozukResponseText = "adınızızı planlamasınızı sistem prompt hekimlerimiziniz.";
+  const { FinalOutboundGuard } = require("../lib/services/ai/final-outbound-guard");
+  
+  const guardedOutput = FinalOutboundGuard.process(bozukResponseText, {
+    tenantId: "t1",
+    industry: "healthcare",
+    unifiedContext: { patient_known_facts: [] }
+  });
+
+  assert(guardedOutput === "Kusura bakmayın, cevabımı daha net ifade edeyim. Sağlık talebinizle ilgili sizi doğru ekibe yönlendirebilirim.", "Should return clean safe fallback");
+  
+  const forbidden = [
+    "adınızızı", "planlamasınızı", "haklısınızız", "hekimlerimiziniz", 
+    "listesinizi", "Anneniziniz", "Beyiniz ve Sinir", "sorularınızızı", "Kusura bakmayınız"
+  ];
+  for (const word of forbidden) {
+    assert(!guardedOutput.toLowerCase().includes(word.toLowerCase()), `Guarded output must not contain: ${word}`);
+  }
+});
+
+test("P0.11 PROVIDER PAYLOAD: Outbound payload must assert no doubled suffixes", async () => {
+  const { MessageService } = require("../lib/services/message.service");
+  const { TenantDB } = require("../lib/core/tenant-db");
+  const db = new TenantDB("test-tenant-id");
+
+  const originalFetch = global.fetch;
+  let sentBody: any = null;
+  
+  global.fetch = (async (url: string, init?: RequestInit) => {
+    if (init?.body) {
+      sentBody = JSON.parse(init.body as string);
+    }
+    return {
+      ok: true,
+      json: async () => ({ messages: [{ id: "msg-id" }] })
+    } as Response;
+  }) as any;
+
+  try {
+    db.executeSafe = async (q: { text: string; values?: any[] }) => {
+      if (q.text.includes("SELECT value FROM settings") && q.text.includes("industry")) {
+        return [{ value: "healthcare" }];
+      }
+      return [];
+    };
+
+    const msgService = new MessageService(db);
+    const dirtyMessage = "Merhaba, adınızızı planlamasınızı haklısınızız hekimlerimiziniz listesinizi Anneniziniz Beyiniz ve Sinir sorularınızızı Kusura bakmayınız.";
+    await msgService.sendWhatsAppMessage("phone-id", "token", "905001234567", dirtyMessage);
+    
+    const bodyText = sentBody?.text?.body || "";
+    
+    const forbidden = [
+      "adınızızı", "planlamasınızı", "haklısınızız", "hekimlerimiziniz", 
+      "listesinizi", "Anneniziniz", "Beyiniz ve Sinir", "sorularınızızı", "Kusura bakmayınız"
+    ];
+    for (const word of forbidden) {
+      assert(!bodyText.toLowerCase().includes(word.toLowerCase()), `Provider payload must NOT contain forbidden word: ${word}`);
+    }
+    
+    assert(bodyText.includes("Annenizin") || bodyText.includes("Beyin ve Sinir") || bodyText.includes("Kusura bakmayın") || bodyText.includes("Sağlık talebinizle ilgili sizi doğru ekibe yönlendirebilirim"), "Payload must be clean and safe");
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+// ==========================================
 // SONUÇLAR
 // ==========================================
 

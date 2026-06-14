@@ -42,7 +42,15 @@ const SLOT_OVERRIDE_INTENTS: ConversationIntent[] = [
   'greeting',
   'clarification_question',
   'topic_switch',
-  'transfer_request'
+  'transfer_request',
+  'human_transfer_request',
+  'user_correction',
+  'doctor_lookup',
+  'department_lookup',
+  'location_direction',
+  'prompt_challenge',
+  'abuse_or_insult',
+  'form_followup'
 ];
 
 export class ConversationStateArbitrator {
@@ -76,7 +84,7 @@ export class ConversationStateArbitrator {
     }
 
     // Check if user_correction was detected by ShortAnswerInterpreter
-    if (rawInterpretedIntent === 'user_correction') {
+    if (rawInterpretedIntent === 'user_correction' || routerIntent === 'user_correction') {
       return {
         effectivePendingSlot: 'generic_none',
         effectiveIntent: routerIntent !== 'generic_other' ? routerIntent : 'generic_other',
@@ -87,7 +95,7 @@ export class ConversationStateArbitrator {
 
     // Slot-specific activation gate: only keep slot if user's message
     // is actually answering/relevant to the slot
-    const isSlotAnswer = this.isMessageRelevantToSlot(lastUserMessage, rawPendingSlot, rawInterpretedIntent);
+    const isSlotAnswer = this.isMessageRelevantToSlot(lastUserMessage, rawPendingSlot, rawInterpretedIntent || routerIntent);
 
     if (!isSlotAnswer) {
       return {
@@ -139,7 +147,7 @@ export class ConversationStateArbitrator {
       }
 
       case 'call_date': {
-        // Keep if user provides a date or day-related phrase
+        // Keep if user provides a day or date
         const dateKeywords = [
           'pazartesi', 'sali', 'çarşamba', 'carsamba', 'persembe', 'cuma',
           'cumartesi', 'pazar', 'yarin', 'bugun', 'hafta', 'gün', 'gun',
@@ -151,10 +159,22 @@ export class ConversationStateArbitrator {
       }
 
       case 'confirmation_yes_no': {
-        // Keep if user gives affirmative/negative response
-        const affirmatives = ['evet', 'olur', 'tamam', 'ok', 'okay', 'yes', 'uygun', 'kabul', 'tamamdir', 'hay hay', 'tabii'];
+        const affirmatives = ['evet', 'olur', 'tamam', 'ok', 'okay', 'yes', 'uygun', 'kabul', 'tamamdir', 'hay hay', 'tabii', 'onaylıyorum', 'arayabilirsiniz', 'simdi degil', 'şimdi değil'];
         const negatives = ['hayır', 'hayir', 'yok', 'olmaz', 'istemem', 'istemiyorum', 'no', 'iptal'];
-        return affirmatives.some(kw => lower.includes(kw)) || negatives.some(kw => lower.includes(kw));
+        const isAffirmative = affirmatives.some(kw => lower === kw || lower.startsWith(kw + ' ') || lower.endsWith(' ' + kw) || lower.includes(' ' + kw + ' '));
+        const isNegative = negatives.some(kw => lower === kw || lower.startsWith(kw + ' ') || lower.endsWith(' ' + kw) || lower.includes(' ' + kw + ' '));
+
+        const openIntentKeywords = [
+          'doktor', 'hekim', 'hoca', 'kim', 'hang', 'nerede', 'nerde', 'adres', 'konum', 'telefon',
+          'insan', 'temsilci', 'gerçek', 'gercek', 'operatör', 'operator', 'bağla', 'bagla',
+          'yapay zeka', 'yapayzeka', 'bot', 'robot', 'ai', 'prompt', 'form', 'bilgi', 'fıtık', 'fitik',
+          'soru', 'cevap'
+        ];
+        if (openIntentKeywords.some(kw => lower.includes(kw))) {
+          return false;
+        }
+
+        return isAffirmative || isNegative;
       }
 
       case 'transfer_confirmation': {

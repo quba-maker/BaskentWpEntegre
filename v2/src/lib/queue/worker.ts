@@ -2189,12 +2189,38 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
     const isPromptChallenge = detectedIntent === 'prompt_challenge' || (interpretedIntent as any) === 'prompt_challenge' || ['prompt', 'promt', 'sistem prompt', 'system prompt', 'talimatların', 'sistem talimati', 'kuralın ne', 'direktifin ne', 'uydurma'].some(kw => cleanInbound.includes(kw));
     const isAngryPromptChallenge = isPromptChallenge && ['şikayet', 'sikayet', 'rezalet', 'berbat', 'kötü', 'sinir', 'bıktım', 'yeter', 'dalga'].some(kw => cleanInbound.includes(kw));
 
-    const isLlmBypassChallenge = isPromptChallenge || isBotAccusation || isAiAccusation || isAngryPromptChallenge;
+    const isDoctorLookup = detectedIntent === 'doctor_lookup' || (interpretedIntent as any) === 'doctor_lookup';
+    const isHumanTransfer = detectedIntent === 'human_transfer_request' || (interpretedIntent as any) === 'human_transfer_request';
+    const isFormFollowup = detectedIntent === 'form_followup' || (interpretedIntent as any) === 'form_followup';
+    const isUserCorrection = detectedIntent === 'user_correction' || (interpretedIntent as any) === 'user_correction';
+
+    const isLlmBypassChallenge = isPromptChallenge || isBotAccusation || isAiAccusation || isAngryPromptChallenge || isDoctorLookup || isHumanTransfer || isFormFollowup || isUserCorrection;
 
     let bypassed = false;
     let bypassedText = '';
 
     if (isLlmBypassChallenge) {
+      if (isHumanTransfer) {
+        try {
+          await db.executeSafe({
+            text: `INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
+                   VALUES ($1, $2, $3, $4)`,
+            values: [
+              tenantId,
+              'PASSIVE_HANDOFF_REQUESTED',
+              `User requested operator (passive audit log): "${inboundTextForBypass}"`,
+              JSON.stringify({
+                conversationId: conversationIdVal || conversationId,
+                phone: phoneNumber,
+                timestamp: new Date().toISOString()
+              })
+            ]
+          });
+        } catch (logErr) {
+          this.log.error('Failed to log PASSIVE_HANDOFF_REQUESTED to ai_audit_logs', logErr as Error);
+        }
+      }
+
       const { ContextAwareSafeFallbackResolver } = await import('@/lib/services/ai/context-aware-safe-fallback');
       const fallbackResult = ContextAwareSafeFallbackResolver.resolve({
         inboundText: inboundTextForBypass,
@@ -4458,12 +4484,38 @@ Tek veya iki kısa cümle yaz.`;
     const isPromptChallenge = detectedIntent === 'prompt_challenge' || (interpretedIntent as any) === 'prompt_challenge' || ['prompt', 'promt', 'sistem prompt', 'system prompt', 'talimatların', 'sistem talimati', 'kuralın ne', 'direktifin ne', 'uydurma'].some(kw => cleanInbound.includes(kw));
     const isAngryPromptChallenge = isPromptChallenge && ['şikayet', 'sikayet', 'rezalet', 'berbat', 'kötü', 'sinir', 'bıktım', 'yeter', 'dalga'].some(kw => cleanInbound.includes(kw));
 
-    const isLlmBypassChallenge = isPromptChallenge || isBotAccusation || isAiAccusation || isAngryPromptChallenge;
+    const isDoctorLookup = detectedIntent === 'doctor_lookup' || (interpretedIntent as any) === 'doctor_lookup';
+    const isHumanTransfer = detectedIntent === 'human_transfer_request' || (interpretedIntent as any) === 'human_transfer_request';
+    const isFormFollowup = detectedIntent === 'form_followup' || (interpretedIntent as any) === 'form_followup';
+    const isUserCorrection = detectedIntent === 'user_correction' || (interpretedIntent as any) === 'user_correction';
+
+    const isLlmBypassChallenge = isPromptChallenge || isBotAccusation || isAiAccusation || isAngryPromptChallenge || isDoctorLookup || isHumanTransfer || isFormFollowup || isUserCorrection;
 
     let bypassed = false;
     let bypassedText = '';
 
     if (isLlmBypassChallenge) {
+      if (isHumanTransfer) {
+        try {
+          await db.executeSafe({
+            text: `INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
+                   VALUES ($1, $2, $3, $4)`,
+            values: [
+              tenantId,
+              'PASSIVE_HANDOFF_REQUESTED',
+              `User requested operator (passive audit log in delayed path): "${inboundTextForBypass}"`,
+              JSON.stringify({
+                conversationId: conversationId,
+                phone: phoneNumber,
+                timestamp: new Date().toISOString()
+              })
+            ]
+          });
+        } catch (logErr) {
+          this.log.error('Failed to log PASSIVE_HANDOFF_REQUESTED to ai_audit_logs', logErr as Error);
+        }
+      }
+
       const { ContextAwareSafeFallbackResolver } = await import('@/lib/services/ai/context-aware-safe-fallback');
       const fallbackResult = ContextAwareSafeFallbackResolver.resolve({
         inboundText: inboundTextForBypass,

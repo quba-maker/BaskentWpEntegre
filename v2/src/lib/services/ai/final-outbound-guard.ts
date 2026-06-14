@@ -8,6 +8,11 @@ export interface OutboundGuardContext {
   intent?: string;
   unifiedContext?: any;
   industry?: string;
+  source?: 'ai' | 'fallback' | 'bypass' | 'recovery' | 'human_intervention' | 'template' | string;
+  replyLanguage?: string;
+  isHealthcare?: boolean;
+  lastUserIntent?: string;
+  messageSource?: string;
 }
 
 export class FinalOutboundGuard {
@@ -18,12 +23,23 @@ export class FinalOutboundGuard {
   public static process(text: string, context: OutboundGuardContext): string {
     const { tenantId, conversationId, unifiedContext } = context;
 
+    const resolvedIndustry = (context.industry || '').toLowerCase().trim();
+    const isHealthcare = context.isHealthcare ?? (resolvedIndustry === 'healthcare' || resolvedIndustry === 'health');
+    const industryKnown = !!context.industry;
+
     // 0. Log that the guard is applied
     console.log(JSON.stringify({
       tag: "FINAL_OUTBOUND_GUARD_APPLIED",
       tenantId,
+      channelId: context.channelId || 'unknown',
       conversationId: conversationId || 'unknown',
+      source: context.source || 'unknown',
       intent: context.intent || 'unknown',
+      replyLanguage: context.replyLanguage || 'unknown',
+      industryKnown,
+      isHealthcare,
+      lastUserIntent: context.lastUserIntent || 'unknown',
+      messageSource: context.messageSource || 'unknown',
       rawTextLogged: false
     }));
 
@@ -35,6 +51,13 @@ export class FinalOutboundGuard {
         tag: 'FINAL_OUTBOUND_GUARD_APPLIED',
         tenantId,
         conversationId,
+        source: context.source || 'unknown',
+        intent: context.intent || 'unknown',
+        replyLanguage: context.replyLanguage || 'unknown',
+        industryKnown,
+        isHealthcare,
+        lastUserIntent: context.lastUserIntent || 'unknown',
+        messageSource: context.messageSource || 'unknown',
         rawTextLogged: false
       },
       conversationId
@@ -49,11 +72,17 @@ export class FinalOutboundGuard {
     // 1. Safe morphological corrections (case-preserving replacements)
     const corrections = [
       { regex: /adınızızı/gi, repl: (m: string) => m.charAt(0) === 'A' ? 'Adınızı' : 'adınızı' },
+      { regex: /planlamasınızı/gi, repl: (m: string) => m.charAt(0) === 'P' ? 'Planlamasını' : 'planlamasını' },
+      { regex: /haklısınızız/gi, repl: (m: string) => m.charAt(0) === 'H' ? 'Haklısınız' : 'haklısınız' },
+      { regex: /hekimlerimiziniz/gi, repl: (m: string) => m.charAt(0) === 'H' ? 'Hekimlerimizin' : 'hekimlerimizin' },
+      { regex: /listesinizi/gi, repl: (m: string) => m.charAt(0) === 'L' ? 'Listesini' : 'listesini' },
+      { regex: /hekim listesinizi/gi, repl: (m: string) => m.charAt(0) === 'H' ? 'Hekim listesini' : 'hekim listesini' },
+      { regex: /uzmanızı/gi, repl: (m: string) => m.charAt(0) === 'U' ? 'Uzmanı' : 'uzmanı' },
+      { regex: /ulaştığınızızı/gi, repl: (m: string) => m.charAt(0) === 'U' ? 'Ulaştığınızı' : 'ulaştığınızı' },
       { regex: /yaşadığınızızı/gi, repl: (m: string) => m.charAt(0) === 'Y' ? 'Yaşadığınızı' : 'yaşadığınızı' },
       { regex: /anneniziniz/gi, repl: (m: string) => m.charAt(0) === 'A' ? 'Annenizin' : 'annenizin' },
       { regex: /anneniziziniz/gi, repl: (m: string) => m.charAt(0) === 'A' ? 'Annenizin' : 'annenizin' },
       { regex: /Beyiniz\s+ve\s+Sinir/gi, repl: (m: string) => m.charAt(0) === 'B' ? 'Beyin ve Sinir' : 'beyin ve sinir' },
-      { regex: /hekim listesinizi/gi, repl: (m: string) => m.charAt(0) === 'H' ? 'Hekim listesini' : 'hekim listesini' },
       { regex: /Kusura bakmayınız/gi, repl: (m: string) => m.charAt(0) === 'K' ? 'Kusura bakmayın' : 'kusura bakmayın' },
       { regex: /ulaşmıştınızız/gi, repl: (m: string) => m.charAt(0) === 'U' ? 'Ulaşmıştınız' : 'ulaşmıştınız' },
       { regex: /ulaştığınızız/gi, repl: (m: string) => m.charAt(0) === 'U' ? 'Ulaştığınız' : 'ulaştığınız' },
@@ -66,6 +95,17 @@ export class FinalOutboundGuard {
     }
 
     // 2. Suffix corrections for possessive/suffix doubling (case-preserving)
+    corrected = corrected.replace(/tınızız/gi, (m) => m.charAt(0) === 'T' ? 'Tınız' : 'tınız');
+    corrected = corrected.replace(/dığınızız/gi, (m) => m.charAt(0) === 'D' ? 'Dığınız' : 'dığınız');
+    corrected = corrected.replace(/sınızız/gi, (m) => m.charAt(0) === 'S' ? 'Sınız' : 'sınız');
+    corrected = corrected.replace(/siniziz/gi, (m) => m.charAt(0) === 'S' ? 'Siniz' : 'siniz');
+    corrected = corrected.replace(/inizini/gi, (m) => m.charAt(0) === 'İ' || m.charAt(0) === 'I' ? 'İnizi' : 'inizi');
+    corrected = corrected.replace(/unuzunu/gi, (m) => m.charAt(0) === 'U' || m.charAt(0) === 'u' ? 'Unuzu' : 'unuzu');
+    corrected = corrected.replace(/ünüzünü/gi, (m) => m.charAt(0) === 'Ü' || m.charAt(0) === 'u' ? 'Ünüzü' : 'ünüzü');
+    corrected = corrected.replace(/nıznız/gi, (m) => m.charAt(0) === 'N' ? 'Nız' : 'nız');
+    corrected = corrected.replace(/nizniz/gi, (m) => m.charAt(0) === 'N' ? 'Niz' : 'niz');
+    corrected = corrected.replace(/sizizi/gi, (m) => m.charAt(0) === 'S' ? 'Sizi' : 'sizi');
+
     corrected = corrected.replace(/inizniz/gi, (m) => m.charAt(0) === 'İ' || m.charAt(0) === 'I' ? 'İniz' : 'iniz');
     corrected = corrected.replace(/ınıznız/gi, (m) => m.charAt(0) === 'I' || m.charAt(0) === 'ı' ? 'Inız' : 'ınız');
     corrected = corrected.replace(/nuznuz/gi, (m) => m.charAt(0) === 'N' ? 'Nuz' : 'nuz');
@@ -79,7 +119,6 @@ export class FinalOutboundGuard {
     corrected = corrected.replace(/ınızızı/gi, (m) => m.charAt(0) === 'I' || m.charAt(0) === 'ı' ? 'Inızı' : 'ınızı');
     corrected = corrected.replace(/unuzuzu/gi, (m) => m.charAt(0) === 'U' || m.charAt(0) === 'u' ? 'Unuzu' : 'unuzu');
     corrected = corrected.replace(/ünüzüzü/gi, (m) => m.charAt(0) === 'Ü' || m.charAt(0) === 'u' ? 'Ünüzü' : 'ünüzü');
-    corrected = corrected.replace(/sizizi/gi, (m) => m.charAt(0) === 'S' ? 'Sizi' : 'sizi');
 
     const trimmed = corrected.trim();
 
@@ -92,10 +131,15 @@ export class FinalOutboundGuard {
     const blockedPatterns = [
       /ulaşmıştınızız/i,
       /ulaştığınızız/i,
+      /ulaştığınızızı/i,
       /anneniziniz/i,
       /anneniziziniz/i,
       /beyiniz\s+ve\s+sinir/i,
       /hekim\s+listesinizi/i,
+      /hekimlerimiziniz/i,
+      /planlamasınızı/i,
+      /haklısınızız/i,
+      /listesinizi/i,
       /sorularınızızı/i,
       /adınızızı/i,
       /yaşadığınızızı/i,
@@ -112,6 +156,7 @@ export class FinalOutboundGuard {
       /nıznız/i,
       /nizniz/i,
       /sizizi/i,
+      /isimlerinizi veya detaylı listesinizi/i,
       /isimlerinizi paylaşamıyorum/i,
       /mümkünüz/i,
       /hastanınız/i,
@@ -137,9 +182,6 @@ export class FinalOutboundGuard {
       /iniziniz/i.test(lowerText);
 
     const hasBlockedPattern = blockedPatterns.some(regex => regex.test(lowerText)) || hasSuffixDoublingPattern;
-
-    const resolvedIndustry = (context.industry || '').toLowerCase().trim();
-    const isHealthcare = resolvedIndustry === 'healthcare' || resolvedIndustry === 'health';
 
     // Handle Greeting Only scenario
     if (isShortGreetingOnly) {

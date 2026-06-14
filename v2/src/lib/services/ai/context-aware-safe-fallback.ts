@@ -1,5 +1,6 @@
 import { TenantBrain } from '../../brain/tenant-brain';
 import { ConversationIntentRouter, ConversationIntent } from './conversation-intent-router';
+import { MedicalDepartmentResolver } from './medical-department-resolver';
 
 export interface DeterministicFallbackParams {
   inboundText: string;
@@ -111,6 +112,120 @@ export class ContextAwareSafeFallbackResolver {
         complaint = 'bel fıtığı';
         hasComplaint = true;
       }
+    }
+
+    // Doctor Lookup Resolver
+    const isDoctorLookup = detectedIntent === 'doctor_lookup' || interpretedIntent === 'doctor_lookup';
+    if (isDoctorLookup) {
+      let text = '';
+      const doctorDirectory = brain.context.config?.doctors || brain.context.config?.doctorDirectory || brain.context.config?.doctor_directory;
+      let verifiedDoctorsText = '';
+      if (Array.isArray(doctorDirectory) && doctorDirectory.length > 0) {
+        verifiedDoctorsText = doctorDirectory.join('\n');
+      } else if (typeof doctorDirectory === 'string' && doctorDirectory.trim().length > 0) {
+        verifiedDoctorsText = doctorDirectory.trim();
+      }
+
+      if (isHealthcare) {
+        if (verifiedDoctorsText) {
+          text = `Hastalarımıza hizmet veren doğrulanmış hekimlerimizin listesini aşağıda paylaşıyorum:\n${verifiedDoctorsText}`;
+        } else {
+          const mappedDept = MedicalDepartmentResolver.resolve(complaint, brain);
+
+          let patientRelation = '';
+          const facts = unifiedContext?.patient_known_facts || [];
+          const factsText = Array.isArray(facts) ? facts.join(' ').toLowerCase() : '';
+          const historyText = (history || []).map((m: any) => m.content).join(' ').toLowerCase();
+
+          const hasMother = lowerInbound.includes('anne') || factsText.includes('anne') || historyText.includes('anne') || lowerInbound.includes('valide') || factsText.includes('valide') || historyText.includes('valide');
+          if (hasMother) {
+            patientRelation = 'anne';
+          } else {
+            const relations = ['baba', 'eş', 'es', 'kardeş', 'kardes', 'oğul', 'ogul', 'kız', 'kiz'];
+            for (const rel of relations) {
+              if (lowerInbound.includes(rel) || factsText.includes(rel) || historyText.includes(rel)) {
+                patientRelation = rel;
+                break;
+              }
+            }
+          }
+
+          let relationPossessive = '';
+          if (patientRelation) {
+            const rel = patientRelation.toLowerCase().trim();
+            if (rel === 'anne') relationPossessive = 'annenizin ';
+            else if (rel === 'baba') relationPossessive = 'babanızın ';
+            else if (rel === 'eş' || rel === 'es') relationPossessive = 'eşinizin ';
+            else if (rel === 'kardeş' || rel === 'kardes') relationPossessive = 'kardeşinizin ';
+            else if (rel === 'oğul' || rel === 'ogul') relationPossessive = 'oğlunuzun ';
+            else if (rel === 'kız' || rel === 'kiz') relationPossessive = 'kızınızın ';
+            else relationPossessive = `${rel}inizin `;
+          }
+
+          const capitalizedPossessive = relationPossessive 
+            ? relationPossessive.charAt(0).toUpperCase() + relationPossessive.slice(1) 
+            : '';
+
+          const subject = capitalizedPossessive ? `${capitalizedPossessive}${complaint}` : (complaint ? complaint.charAt(0).toUpperCase() + complaint.slice(1) : '');
+
+          if (mappedDept) {
+            text = `Bu ekrandan güncel hekim listesini doğrulayamıyorum. ${subject} için ${mappedDept} bölümü değerlendirme yapabilir. İsterseniz koordinatör ekibimize yönlendirilmesi için not alabilirim.`;
+          } else if (hasComplaint) {
+            text = `Bu ekrandan güncel hekim listesini doğrulayamıyorum. Şikayetinize uygun bölüm değerlendirme yapabilir. İsterseniz koordinatör ekibimize yönlendirilmesi için not alabilirim.`;
+          } else {
+            text = `Bu ekrandan güncel hekim listesini doğrulayamıyorum. İlgili bölüm değerlendirme yapabilir. İsterseniz koordinatör ekibimize yönlendirilmesi için not alabilirim.`;
+          }
+        }
+      } else {
+        if (verifiedDoctorsText) {
+          text = `Doğrulanmış uzman kadromuz:\n${verifiedDoctorsText}`;
+        } else {
+          text = `Bu ekrandan güncel uzman listesini doğrulayamıyorum. Talebinizle ilgili uzman ekibimiz değerlendirme yapabilir. İsterseniz temsilci ekibimize yönlendirilmesi için not alabilirim.`;
+        }
+      }
+
+      return {
+        text,
+        sector: resolvedIndustry,
+        hasFormContext,
+        hasComplaint,
+        finalPath: 'doctor_lookup_bypass',
+        detectedIntent
+      };
+    }
+
+    // Human Transfer Resolver
+    const isHumanTransfer = detectedIntent === 'human_transfer_request' || interpretedIntent === 'human_transfer_request';
+    if (isHumanTransfer) {
+      return {
+        text: `Haklısınız, bu konuda bir temsilcimizin ilgilenmesi daha doğru olur. Talebinizi temsilcimize iletilmesi için not alıyorum.`,
+        sector: resolvedIndustry,
+        hasFormContext,
+        hasComplaint,
+        finalPath: 'human_transfer_bypass',
+        detectedIntent
+      };
+    }
+
+    // Form Followup Resolver
+    const isFormFollowup = detectedIntent === 'form_followup' || interpretedIntent === 'form_followup';
+    if (isFormFollowup) {
+      const formFacts = unifiedContext?.patient_known_facts || [];
+      const hasRealFormContext = !!unifiedContext?.latestForm || (Array.isArray(formFacts) && formFacts.length > 0);
+      let text = '';
+      if (hasRealFormContext) {
+        text = `Form başvurunuzla ilgili yardımcı olabilirim. Hangi konuda bilgi almak istersiniz?`;
+      } else {
+        text = `Form kaydınızı burada net göremiyorum. Size yardımcı olabilmem için başvuru yaptığınız konu veya şikayeti yazabilir misiniz?`;
+      }
+      return {
+        text,
+        sector: resolvedIndustry,
+        hasFormContext: hasRealFormContext,
+        hasComplaint,
+        finalPath: 'form_followup_bypass',
+        detectedIntent
+      };
     }
 
     const isBotAccusation = ['bot musun', 'sen bot musun', 'are you a bot', 'botsun', 'robot musun', 'yapay zeka mısın', 'yapay zeka misin', 'insan mısın', 'insan misin'].some(kw => lowerInbound.includes(kw));
