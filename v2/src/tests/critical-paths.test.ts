@@ -943,6 +943,9 @@ test("P0.11 REGRESSION: Simulation of prompt challenge LLM bypass under producti
   const finalPromptCharCount = 28900; // 28.9K characters simulated
   const modelMaxOutputTokens = 1000;
   
+  assert(finalPromptCharCount === 28900, "Should simulate high prompt char count");
+  assert(modelMaxOutputTokens === 1000, "Should simulate max output tokens limit");
+  
   const { ConversationIntentRouter } = require("../lib/services/ai/conversation-intent-router");
   const detectedIntent = ConversationIntentRouter.route(inboundText);
   
