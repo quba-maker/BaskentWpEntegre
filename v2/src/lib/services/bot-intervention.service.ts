@@ -311,7 +311,7 @@ export class BotInterventionService {
 
         const historyRows = await this.db.executeSafe({
           text: `SELECT direction, content FROM messages 
-                 WHERE phone_number = $1 AND tenant_id = $2 
+                 WHERE phone_number = $1 AND tenant_id = $2 AND direction IN ('in', 'out')
                  ORDER BY created_at DESC LIMIT 15`,
           values: [phone, this.db.tenantId]
         }) as any[];
