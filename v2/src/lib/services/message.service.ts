@@ -166,9 +166,83 @@ export class MessageService {
     content: string,
     provider?: string | null
   ): Promise<{ success: boolean; providerMessageId?: string }> {
+    // Enforce final outbound guard at the very boundary
+    let guardedContent = content;
+    try {
+      let industry = 'general';
+      try {
+        const tenantRes = await this.db.executeSafe({
+          text: `SELECT industry FROM tenants WHERE id = $1::uuid LIMIT 1`,
+          values: [this.db.tenantId]
+        });
+        if (tenantRes && tenantRes.length > 0 && tenantRes[0].industry) {
+          industry = tenantRes[0].industry;
+        }
+      } catch (e) {
+        this.log.error("Failed to query tenant industry for guard", e instanceof Error ? e : new Error(String(e)));
+      }
+
+      let conversationId = 'unknown';
+      let customerId: string | null = null;
+      let lastInboundText = '';
+
+      try {
+        const convRes = await this.db.executeSafe({
+          text: `SELECT id, customer_id, last_message_content FROM conversations WHERE phone_number = $1 AND tenant_id = $2 LIMIT 1`,
+          values: [to, this.db.tenantId]
+        });
+        if (convRes && convRes.length > 0) {
+          conversationId = convRes[0].id;
+          customerId = convRes[0].customer_id;
+          lastInboundText = convRes[0].last_message_content || '';
+        }
+      } catch (e) {
+        this.log.error("Failed to query conversation for guard", e instanceof Error ? e : new Error(String(e)));
+      }
+
+      let unifiedContext: any = {};
+      if (customerId && conversationId !== 'unknown') {
+        try {
+          const { IdentityEngine } = await import('@/lib/services/ai/engines/identity');
+          const contextObj = await IdentityEngine.getContext(this.db.tenantId, customerId, conversationId);
+          if (contextObj) {
+            unifiedContext = contextObj;
+          }
+        } catch (e) {
+          this.log.error("Failed to fetch IdentityEngine context for guard", e instanceof Error ? e : new Error(String(e)));
+        }
+      }
+
+      if (conversationId !== 'unknown') {
+        try {
+          const messageRows = await this.db.executeSafe({
+            text: `SELECT direction, content FROM messages WHERE conversation_id = $1 AND tenant_id = $2 ORDER BY created_at DESC LIMIT 10`,
+            values: [conversationId, this.db.tenantId]
+          }) as any[];
+          unifiedContext.history = messageRows.map(m => ({
+            role: m.direction === 'in' ? 'user' : 'assistant',
+            content: m.content
+          })).reverse();
+        } catch (histErr) {
+          this.log.error("Failed to query messages for history in guard", histErr instanceof Error ? histErr : new Error(String(histErr)));
+        }
+      }
+
+      const { FinalOutboundGuard } = await import('@/lib/services/ai/final-outbound-guard');
+      guardedContent = FinalOutboundGuard.process(content, {
+        tenantId: this.db.tenantId,
+        conversationId,
+        inboundText: lastInboundText,
+        unifiedContext,
+        industry
+      });
+    } catch (guardErr) {
+      this.log.error("Failed to run FinalOutboundGuard inside sendWhatsAppMessage boundary", guardErr as Error);
+    }
+
     if (isThreeSixtyProvider(provider)) {
       const { ThreeSixtyDialogService } = await import("./providers/three-sixty-dialog.service");
-      return ThreeSixtyDialogService.sendMessage(accessToken, to, content);
+      return ThreeSixtyDialogService.sendMessage(accessToken, to, guardedContent);
     }
 
     const url = `https://graph.facebook.com/v25.0/${phoneId}/messages`;
@@ -184,7 +258,7 @@ export class MessageService {
           recipient_type: "individual",
           to: to,
           type: "text",
-          text: { body: content }
+          text: { body: guardedContent }
         })
       });
       if (!response.ok) {

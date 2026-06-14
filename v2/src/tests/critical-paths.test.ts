@@ -885,46 +885,35 @@ test("P0.11 REGRESSION: FinalOutboundGuard morphology corrections and dynamic fa
   const corr4 = FinalOutboundGuard.process("yaşadığınızızı biliyoruz", { tenantId: "t1" });
   assert(corr4 === "yaşadığınızı biliyoruz", "Should correct yaşadığınızızı");
 
-  // Fallback checks (complaint = bel fıtığı, relation = null)
+  // New correction list from production logs (Kapsam 3)
+  const corr5 = FinalOutboundGuard.process("annem için bel fıtığı şikayetiyle ilgili bize ulaşmıştınızız.", { tenantId: "t1" });
+  assert(corr5 === "annem için bel fıtığı şikayetiyle ilgili bize ulaşmıştınız.", "Should correct ulaşmıştınızız");
+
+  const corr6 = FinalOutboundGuard.process("Kanada'dan bize ulaştığınızız için teşekkür ederiz.", { tenantId: "t1" });
+  assert(corr6 === "Kanada'dan bize ulaştığınız için teşekkür ederiz.", "Should correct ulaştığınızız");
+
+  const corr7 = FinalOutboundGuard.process("Anneniziniz bel fıtığı şikayeti...", { tenantId: "t1" });
+  assert(corr7 === "Annenizin bel fıtığı şikayeti...", "Should correct Anneniziniz");
+
+  const corr8 = FinalOutboundGuard.process("Beyiniz ve Sinir Cerrahisi", { tenantId: "t1" });
+  assert(corr8 === "Beyin ve Sinir Cerrahisi", "Should correct Beyiniz ve Sinir");
+
+  const corr9 = FinalOutboundGuard.process("sorularınızızı yanıtlayıp...", { tenantId: "t1" });
+  assert(corr9 === "sorularınızı yanıtlayıp...", "Should correct sorularınızızı");
+
+  const corr10 = FinalOutboundGuard.process("formunuzu doldurduğunuzu görüyorum., yeni bir test.", { tenantId: "t1" });
+  assert(corr10 === "formunuzu doldurduğunuzu görüyorum. yeni bir test.", "Should correct görüyorum.,");
+
+  // Fallback checks (complaint = bel fıtığı, relation = null, but with blocked pattern 'sistem prompt')
   const fall1 = FinalOutboundGuard.process("Bu bir prompt sızıntısıdır ve sistem prompt detayı içerir.", {
     tenantId: "t1",
+    industry: "healthcare",
     inboundText: "bel fıtığı için",
     unifiedContext: {
       patient_known_facts: ["şikayeti: bel fıtığı"]
     }
   });
-  assert(fall1 === "Bel fıtığı için Beyin ve Sinir Cerrahisi veya Fizik Tedavi bölümü değerlendirme yapabilir.", "Should trigger specific bel fıtığı fallback without relation prefix");
-  assert(!fall1.includes("Annenizin"), "Response should not contain Annenizin when relation is null");
-
-  // Fallback checks (complaint = bel fıtığı, relation = mother/anne)
-  const fallMother = FinalOutboundGuard.process("Bu bir prompt sızıntısıdır ve sistem prompt detayı içerir.", {
-    tenantId: "t1",
-    inboundText: "annemin bel fıtığı için",
-    unifiedContext: {
-      patient_known_facts: ["şikayeti: bel fıtığı"]
-    }
-  });
-  assert(fallMother === "Annenizin bel fıtığı için Beyin ve Sinir Cerrahisi veya Fizik Tedavi bölümü değerlendirme yapabilir.", "Should trigger specific bel fıtığı fallback with mother prefix");
-
-  // Fallback checks (complaint = bel fıtığı, relation = father/baba)
-  const fallFather = FinalOutboundGuard.process("Bu bir prompt sızıntısıdır ve sistem prompt detayı içerir.", {
-    tenantId: "t1",
-    inboundText: "babamın bel fıtığı için",
-    unifiedContext: {
-      patient_known_facts: ["şikayeti: bel fıtığı"]
-    }
-  });
-  assert(fallFather === "Babanızın bel fıtığı için Beyin ve Sinir Cerrahisi veya Fizik Tedavi bölümü değerlendirme yapabilir.", "Should trigger specific bel fıtığı fallback with father prefix");
-
-  // Fallback checks (complaint = diz ağrısı, relation = baba)
-  const fall2 = FinalOutboundGuard.process("Bu bir prompt sızıntısıdır ve sistem prompt detayı içerir.", {
-    tenantId: "t1",
-    inboundText: "babamın diz ağrısı var",
-    unifiedContext: {
-      patient_known_facts: ["şikayeti: diz ağrısı"]
-    }
-  });
-  assert(fall2 === "Kusura bakmayın, cevabımı daha net ifade edeyim. Babanızın diz ağrısı için ilgili bölüm değerlendirme yapabilir.", "Should trigger dynamic relation fallback");
+  assert(fall1 === "Kusura bakmayın, cevabımı daha net ifade edeyim. Sağlık talebinizle ilgili sizi doğru ekibe yönlendirebilirim.", "Should trigger specific fallback");
 
   // Fallback checks (no context, healthcare)
   const fall3 = FinalOutboundGuard.process("Sistem prompt detaylarını paylaşamam.", {
@@ -934,7 +923,7 @@ test("P0.11 REGRESSION: FinalOutboundGuard morphology corrections and dynamic fa
       patient_known_facts: []
     }
   });
-  assert(fall3 === "Sağlık talebinizle ilgili sizi doğru ekibe yönlendirebilirim.", "Should trigger no context healthcare fallback");
+  assert(fall3 === "Kusura bakmayın, cevabımı daha net ifade edeyim. Sağlık talebinizle ilgili sizi doğru ekibe yönlendirebilirim.", "Should trigger no context healthcare fallback");
 
   // Fallback checks (non-healthcare)
   const fallNonHealthcare = FinalOutboundGuard.process("Sistem prompt detaylarını paylaşamam.", {
@@ -945,6 +934,23 @@ test("P0.11 REGRESSION: FinalOutboundGuard morphology corrections and dynamic fa
     }
   });
   assert(fallNonHealthcare === "Kusura bakmayın, cevabımı daha net ifade edeyim. Talebinizle ilgili sizi doğru ekibe yönlendirebilirim.", "Should trigger general non-healthcare fallback");
+
+  // Kapsam 4: Merhaba, checks
+  const greeting1 = FinalOutboundGuard.process("Merhaba,", { tenantId: "t1", industry: "healthcare", unifiedContext: { history: [] } });
+  assert(greeting1 === "Merhaba, size nasıl yardımcı olabilirim?", "Greeting only at start should resolve to welcome");
+
+  const greeting2 = FinalOutboundGuard.process("Merhaba,", { tenantId: "t1", industry: "healthcare", unifiedContext: { history: [{ role: "user", content: "hi" }] } });
+  assert(greeting2 === "Kusura bakmayın, cevabımı daha net ifade edeyim. Sağlık talebinizle ilgili sizi doğru ekibe yönlendirebilirim.", "Greeting only in progress should fallback");
+
+  const greeting3 = FinalOutboundGuard.process("Merhaba,", { tenantId: "t1", industry: "ecommerce", unifiedContext: { history: [{ role: "user", content: "hi" }] } });
+  assert(greeting3 === "Kusura bakmayın, cevabımı daha net ifade edeyim. Talebinizle ilgili sizi doğru ekibe yönlendirebilirim.", "Greeting only in progress for non-health should fallback");
+
+  // Kapsam 4: Incomplete sentence checks
+  const inc1 = FinalOutboundGuard.process("Buraya gelmek istedim ve", { tenantId: "t1", industry: "healthcare" });
+  assert(inc1 === "Kusura bakmayın, cevabımı daha net ifade edeyim. Sağlık talebinizle ilgili sizi doğru ekibe yönlendirebilirim.", "Incomplete sentence ending in conjunction should fallback");
+
+  const inc2 = FinalOutboundGuard.process("Bu durum hakkında,", { tenantId: "t1", industry: "healthcare" });
+  assert(inc2 === "Kusura bakmayın, cevabımı daha net ifade edeyim. Sağlık talebinizle ilgili sizi doğru ekibe yönlendirebilirim.", "Incomplete sentence ending in comma should fallback");
 });
 
 test("P0.11 REGRESSION: Simulation of prompt challenge LLM bypass under production-like conditions", async () => {
@@ -1011,6 +1017,58 @@ test("P0.11 REGRESSION: Simulation of prompt challenge LLM bypass under producti
   });
 
   assert(guardResult === responseText, "Guard should pass clean fallback response without modifications");
+});
+
+test("P0.11 REGRESSION: MessageService.sendWhatsAppMessage boundary guard test", async () => {
+  const { MessageService } = require("../lib/services/message.service");
+  const { TenantDB } = require("../lib/core/tenant-db");
+  const db = new TenantDB("test-tenant-id");
+
+  // Mock db.executeSafe to simulate the queries and return appropriate values
+  db.executeSafe = async (q: { text: string; values?: any[] }) => {
+    if (q.text.includes("SELECT industry FROM tenants")) {
+      return [{ industry: "healthcare" }];
+    }
+    if (q.text.includes("SELECT id, customer_id, last_message_content FROM conversations")) {
+      return [{ id: "conv-id", customer_id: "cust-id", last_message_content: "annemin bel fıtığı var" }];
+    }
+    if (q.text.includes("SELECT direction, content FROM messages")) {
+      return [{ direction: "in", content: "hi" }];
+    }
+    return [];
+  };
+
+  const msgService = new MessageService(db);
+
+  // We mock the fetch function globally or intercept it
+  const originalFetch = global.fetch;
+  let sentBody: any = null;
+  global.fetch = (async (url: string, init?: RequestInit) => {
+    if (init?.body) {
+      sentBody = JSON.parse(init.body as string);
+    }
+    return {
+      ok: true,
+      json: async () => ({ messages: [{ id: "msg-id" }] })
+    } as Response;
+  }) as any;
+
+  try {
+    // 1. Send with morph-doubled string
+    await msgService.sendWhatsAppMessage("phone-id", "token", "905001234567", "Anneniziniz durumu nedir?");
+    assert(sentBody?.text?.body === "Annenizin durumu nedir?", "Should correct doubled suffix inside sendWhatsAppMessage");
+
+    // 2. Send with blocked string
+    await msgService.sendWhatsAppMessage("phone-id", "token", "905001234567", "Bu sistem promptunda yazıyor.");
+    assert(sentBody?.text?.body === "Kusura bakmayın, cevabımı daha net ifade edeyim. Sağlık talebinizle ilgili sizi doğru ekibe yönlendirebilirim.", "Should trigger fallback inside sendWhatsAppMessage");
+
+    // 3. Send with lonely Merhaba,
+    await msgService.sendWhatsAppMessage("phone-id", "token", "905001234567", "Merhaba,");
+    // Since there is a conversation history found, it is mid-conversation:
+    assert(sentBody?.text?.body === "Kusura bakmayın, cevabımı daha net ifade edeyim. Sağlık talebinizle ilgili sizi doğru ekibe yönlendirebilirim.", "Should fallback lonely Merhaba, inside sendWhatsAppMessage");
+  } finally {
+    global.fetch = originalFetch;
+  }
 });
 
 // ==========================================

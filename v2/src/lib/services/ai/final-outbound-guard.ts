@@ -16,11 +16,16 @@ export class FinalOutboundGuard {
    * If a blocked phrase remains after correction, returns a context-driven safe fallback.
    */
   public static process(text: string, context: OutboundGuardContext): string {
+    const { tenantId, conversationId, unifiedContext } = context;
+
+    // 0. Log that the guard is applied
+    console.log(`[FINAL_OUTBOUND_GUARD_APPLIED] Running guard for tenant: ${tenantId}, conversation: ${conversationId || 'unknown'}`);
+    FinalOutboundGuard.logToAudit(tenantId, 'FINAL_OUTBOUND_GUARD_APPLIED', `Outbound guard triggered. Input length: ${text ? text.length : 0}`, text || '', conversationId);
+
     if (!text || text.trim().length === 0) {
       return text;
     }
 
-    const { tenantId, conversationId, inboundText, unifiedContext } = context;
     let corrected = text;
 
     // 1. Safe morphological corrections (case-preserving replacements)
@@ -31,7 +36,11 @@ export class FinalOutboundGuard {
       { regex: /anneniziziniz/gi, repl: (m: string) => m.charAt(0) === 'A' ? 'Annenizin' : 'annenizin' },
       { regex: /Beyiniz\s+ve\s+Sinir/gi, repl: (m: string) => m.charAt(0) === 'B' ? 'Beyin ve Sinir' : 'beyin ve sinir' },
       { regex: /hekim listesinizi/gi, repl: (m: string) => m.charAt(0) === 'H' ? 'Hekim listesini' : 'hekim listesini' },
-      { regex: /Kusura bakmayınız/gi, repl: (m: string) => m.charAt(0) === 'K' ? 'Kusura bakmayın' : 'kusura bakmayın' }
+      { regex: /Kusura bakmayınız/gi, repl: (m: string) => m.charAt(0) === 'K' ? 'Kusura bakmayın' : 'kusura bakmayın' },
+      { regex: /ulaşmıştınızız/gi, repl: (m: string) => m.charAt(0) === 'U' ? 'Ulaşmıştınız' : 'ulaşmıştınız' },
+      { regex: /ulaştığınızız/gi, repl: (m: string) => m.charAt(0) === 'U' ? 'Ulaştığınız' : 'ulaştığınız' },
+      { regex: /sorularınızızı/gi, repl: (m: string) => m.charAt(0) === 'S' ? 'Sorularınızı' : 'sorularınızı' },
+      { regex: /görüyorum\.,/gi, repl: (m: string) => m.charAt(0) === 'G' ? 'Görüyorum.' : 'görüyorum.' }
     ];
 
     for (const item of corrections) {
@@ -54,141 +63,122 @@ export class FinalOutboundGuard {
     corrected = corrected.replace(/ünüzüzü/gi, (m) => m.charAt(0) === 'Ü' || m.charAt(0) === 'u' ? 'Ünüzü' : 'ünüzü');
     corrected = corrected.replace(/sizizi/gi, (m) => m.charAt(0) === 'S' ? 'Sizi' : 'sizi');
 
-    // 3. Blocklist check
-    const blocklist = [
-      'adınızızı', 'yaşadığınızızı', 'anneniziniz', 'anneniziziniz',
-      'beyiniz ve sinir', 'hekim listesinizi', 'isimlerinizi paylaşamıyorum',
-      'mümkünüz', 'hastanınız', 'planızı', 'sorularınızıza', 'uzmanızı',
-      'kusura bakmayınız', 'sistem detay', 'sistem prompt', 'promptunda'
+    const trimmed = corrected.trim();
+
+    // 3. Greeting & incomplete sentence validation checks
+    const isShortGreetingOnly = /^(merhaba|selam|günaydın|gunaydin|iyi günler|iyi gunler|tünaydın|tunaydin|merhabalar)[,\s.]*$/i.test(trimmed);
+    const isSentenceIncomplete = /[,\s](ve|veya|ama|çünkü|cunku|ise|ile|fakat|ki|de|da)[,\s.]*$/i.test(trimmed) || trimmed.endsWith(',');
+    const isExtremelyShort = trimmed.length > 0 && trimmed.length < 3;
+
+    // 4. Blocklist check
+    const blockedPatterns = [
+      /ulaşmıştınızız/i,
+      /ulaştığınızız/i,
+      /anneniziniz/i,
+      /anneniziziniz/i,
+      /beyiniz\s+ve\s+sinir/i,
+      /hekim\s+listesinizi/i,
+      /sorularınızızı/i,
+      /adınızızı/i,
+      /yaşadığınızızı/i,
+      /kusura\s+bakmayınız/i,
+      /görüyorum\.,/i,
+      /ınızızı/i,
+      /inizini/i,
+      /unuzunu/i,
+      /ünüzünü/i,
+      /tınızız/i,
+      /dığınızız/i,
+      /sınızız/i,
+      /siniziz/i,
+      /nıznız/i,
+      /nizniz/i,
+      /sizizi/i,
+      /isimlerinizi paylaşamıyorum/i,
+      /mümkünüz/i,
+      /hastanınız/i,
+      /planızı/i,
+      /sorularınızıza/i,
+      /uzmanızı/i,
+      /sistem detay/i,
+      /sistem prompt/i,
+      /promptunda/i
     ];
 
     const lowerText = corrected.toLowerCase();
-    const hasBlocked = blocklist.some(phrase => lowerText.includes(phrase)) ||
-                      /(nız|niz|unuz|ünüz){2,}/i.test(lowerText) ||
-                      /(ınız|iniz|unuz|ünüz)(ı|i|u|ü)(z|n|s)(ı|i|u|ü)/i.test(lowerText) ||
-                      /iziniz/i.test(lowerText) ||
-                      /ınızızı/i.test(lowerText) ||
-                      /niziniz/i.test(lowerText) ||
-                      /sizizi/i.test(lowerText) ||
-                      /nıznız/i.test(lowerText) ||
-                      /iniziniz/i.test(lowerText);
+    
+    // Check general reduplication pattern
+    const hasSuffixDoublingPattern = 
+      /(nız|niz|unuz|ünüz){2,}/i.test(lowerText) ||
+      /(ınız|iniz|unuz|ünüz)(ı|i|u|ü)(z|n|s)(ı|i|u|ü)/i.test(lowerText) ||
+      /iziniz/i.test(lowerText) ||
+      /ınızızı/i.test(lowerText) ||
+      /niziniz/i.test(lowerText) ||
+      /sizizi/i.test(lowerText) ||
+      /nıznız/i.test(lowerText) ||
+      /iniziniz/i.test(lowerText);
 
-    if (hasBlocked) {
-      // Resolve complaintContext and patientRelation dynamically from context
-      let complaintContext = '';
-      let patientRelation = '';
+    const hasBlockedPattern = blockedPatterns.some(regex => regex.test(lowerText)) || hasSuffixDoublingPattern;
 
-      const facts = unifiedContext?.patient_known_facts || [];
-      const rawFactsComplaint = facts.find((f: string) => f.toLowerCase().includes('şikayet') || f.toLowerCase().includes('sikayet'));
-      if (rawFactsComplaint) {
-        const match = rawFactsComplaint.match(/(?:şikayeti|sikayeti|şikayet|sikayet):\s*(.+)/i);
-        if (match && match[1]) {
-          complaintContext = match[1].replace(/[.]+$/, '').trim();
-        }
+    const resolvedIndustry = (context.industry || '').toLowerCase().trim();
+    const isHealthcare = resolvedIndustry === 'healthcare' || resolvedIndustry === 'health' || resolvedIndustry === '';
+
+    // Handle Greeting Only scenario
+    if (isShortGreetingOnly) {
+      const history = unifiedContext?.history || [];
+      const hasHistory = Array.isArray(history) && history.length > 0;
+      if (!hasHistory) {
+        // Safe to send greeting fallback
+        const greetingFallback = "Merhaba, size nasıl yardımcı olabilirim?";
+        console.log(`[FINAL_OUTBOUND_GUARD_BLOCKED] Short greeting resolved at start. Fallback: "${greetingFallback}"`);
+        FinalOutboundGuard.logToAudit(tenantId, 'FINAL_OUTBOUND_GUARD_BLOCKED', `Greeting only at start. Original: "${text}"`, greetingFallback, conversationId);
+        return greetingFallback;
       }
+      // If we have history, treat it as blocked and do not reset greeting (fall through to deterministic fallback)
+    }
 
-      const lowerInbound = (inboundText || '').toLowerCase().trim();
-      const historyText = Array.isArray(unifiedContext?.history)
-        ? unifiedContext.history.map((m: any) => m.content).join(' ').toLowerCase()
-        : '';
-      const factsText = Array.isArray(unifiedContext?.patient_known_facts)
-        ? unifiedContext.patient_known_facts.join(' ').toLowerCase()
-        : '';
-
-      if (!complaintContext) {
-        if (lowerInbound.includes('bel fıt') || lowerInbound.includes('bel fit') || historyText.includes('bel fıt') || historyText.includes('bel fit')) {
-          complaintContext = 'bel fıtığı';
-        }
-      }
-
-      if (lowerInbound.includes('anne') || lowerInbound.includes('mother') || lowerInbound.includes('valide') ||
-          factsText.includes('anne') || factsText.includes('mother') || factsText.includes('valide') ||
-          historyText.includes('anne') || historyText.includes('mother') || historyText.includes('valide')) {
-        patientRelation = 'anne';
-      } else if (lowerInbound.includes('baba') || lowerInbound.includes('father') ||
-                 factsText.includes('baba') || factsText.includes('father') ||
-                 historyText.includes('baba') || historyText.includes('father')) {
-        patientRelation = 'baba';
-      } else {
-        const relations = ['eş', 'es', 'spouse', 'kardeş', 'kardes', 'sibling', 'oğul', 'ogul', 'son', 'kız', 'kiz', 'daughter'];
-        for (const rel of relations) {
-          if (lowerInbound.includes(rel) || factsText.includes(rel) || historyText.includes(rel)) {
-            patientRelation = rel;
-            break;
-          }
-        }
-      }
-
-      if (complaintContext.length > 50) {
-        complaintContext = complaintContext.substring(0, 50) + '...';
-      }
-
-      // Dynamic fallback resolution
+    // Trigger fallback if blocked pattern exists, or if sentence is incomplete / extremely short
+    if (hasBlockedPattern || isSentenceIncomplete || isExtremelyShort || isShortGreetingOnly) {
       let fallbackText = '';
-      const normalizedComplaint = complaintContext.toLowerCase().trim();
-      
-      const resolvedIndustry = (context.industry || '').toLowerCase().trim();
-      // If industry is empty (e.g. in tests where it wasn't passed), default to healthcare for backward compatibility
-      const isHealthcare = resolvedIndustry === 'healthcare' || resolvedIndustry === 'health' || resolvedIndustry === '';
-
-      let relationPossessive = '';
-      if (patientRelation) {
-        const rel = patientRelation.toLowerCase().trim();
-        if (rel === 'anne' || rel === 'mother') relationPossessive = 'Annenizin ';
-        else if (rel === 'baba' || rel === 'father') relationPossessive = 'Babanızın ';
-        else if (rel === 'eş' || rel === 'es' || rel === 'spouse') relationPossessive = 'Eşinizin ';
-        else if (rel === 'kardeş' || rel === 'kardes' || rel === 'sibling') relationPossessive = 'Kardeşinizin ';
-        else if (rel === 'oğul' || rel === 'ogul' || rel === 'son') relationPossessive = 'Oğlunuzun ';
-        else if (rel === 'kız' || rel === 'kiz' || rel === 'daughter') relationPossessive = 'Kızınızın ';
-        else {
-          relationPossessive = `${rel.charAt(0).toUpperCase() + rel.slice(1)}inizin `;
-        }
-      }
-
-      if (!isHealthcare) {
-        fallbackText = 'Kusura bakmayın, cevabımı daha net ifade edeyim. Talebinizle ilgili sizi doğru ekibe yönlendirebilirim.';
-      } else if (normalizedComplaint === 'bel fıtığı' || normalizedComplaint === 'bel fitigi') {
-        if (!relationPossessive) {
-          fallbackText = 'Bel fıtığı için Beyin ve Sinir Cerrahisi veya Fizik Tedavi bölümü değerlendirme yapabilir.';
-        } else {
-          fallbackText = `${relationPossessive}bel fıtığı için Beyin ve Sinir Cerrahisi veya Fizik Tedavi bölümü değerlendirme yapabilir.`;
-        }
-      } else if (complaintContext) {
-        if (!relationPossessive) {
-          const capComplaint = complaintContext.charAt(0).toUpperCase() + complaintContext.slice(1);
-          fallbackText = `Kusura bakmayın, cevabımı daha net ifade edeyim. ${capComplaint} için ilgili bölüm değerlendirme yapabilir.`;
-        } else {
-          fallbackText = `Kusura bakmayın, cevabımı daha net ifade edeyim. ${relationPossessive}${complaintContext} için ilgili bölüm değerlendirme yapabilir.`;
-        }
+      if (isHealthcare) {
+        fallbackText = 'Kusura bakmayın, cevabımı daha net ifade edeyim. Sağlık talebinizle ilgili sizi doğru ekibe yönlendirebilirim.';
       } else {
-        fallbackText = 'Sağlık talebinizle ilgili sizi doğru ekibe yönlendirebilirim.';
+        fallbackText = 'Kusura bakmayın, cevabımı daha net ifade edeyim. Talebinizle ilgili sizi doğru ekibe yönlendirebilirim.';
       }
 
-      // Log fallback application to db
-      try {
-        const db = withTenantDB(tenantId);
-        db.executeSafe({
-          text: `INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
-                 VALUES ($1, $2, $3, $4)`,
-          values: [
-            tenantId,
-            'FINAL_OUTBOUND_GUARD_FALLBACK_APPLIED',
-            `Outbound guard blocked text due to leak/morphology error. Original: "${text.substring(0, 100)}..."`,
-            JSON.stringify({
-              conversationId,
-              originalText: text,
-              fallbackText,
-              timestamp: new Date().toISOString()
-            })
-          ]
-        }).catch((err: any) => console.error('Failed to log final outbound guard fallback', err));
-      } catch (logErr) {
-        console.error('Failed to instantiate db for final outbound guard log', logErr);
-      }
-
+      console.log(`[FINAL_OUTBOUND_GUARD_BLOCKED] Blocked. Reason: hasBlocked=${hasBlockedPattern}, incomplete=${isSentenceIncomplete}, short=${isExtremelyShort}, greeting=${isShortGreetingOnly}. Fallback: "${fallbackText}"`);
+      FinalOutboundGuard.logToAudit(tenantId, 'FINAL_OUTBOUND_GUARD_BLOCKED', `Blocked. Original: "${text}"`, fallbackText, conversationId);
       return fallbackText;
     }
 
+    // If corrections were applied, log it
+    if (corrected !== text) {
+      console.log(`[FINAL_OUTBOUND_GUARD_CORRECTED] Corrected text from "${text}" to "${corrected}"`);
+      FinalOutboundGuard.logToAudit(tenantId, 'FINAL_OUTBOUND_GUARD_CORRECTED', `Original: "${text}"`, corrected, conversationId);
+    }
+
     return corrected;
+  }
+
+  private static logToAudit(tenantId: string, action: string, reasoning: string, result: string, conversationId?: string) {
+    try {
+      const db = withTenantDB(tenantId);
+      db.executeSafe({
+        text: `INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
+               VALUES ($1, $2, $3, $4)`,
+        values: [
+          tenantId,
+          action,
+          reasoning.substring(0, 500),
+          JSON.stringify({
+            conversationId: conversationId || 'unknown',
+            result: result.substring(0, 500),
+            timestamp: new Date().toISOString()
+          })
+        ]
+      }).catch((err: any) => console.error(`Failed to log ${action} to ai_audit_logs`, err));
+    } catch (logErr) {
+      console.error(`Failed to instantiate db for final outbound guard log (${action})`, logErr);
+    }
   }
 }
