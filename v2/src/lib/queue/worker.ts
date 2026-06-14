@@ -2204,7 +2204,7 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       });
       bypassed = true;
       bypassedText = fallbackResult.text;
-      this.log.info(`[P011_LLM_BYPASS_APPLIED] [PROMPT_CHALLENGE_BYPASS] LLM call bypassed. Text: "${bypassedText}"`, { traceId });
+      this.log.info(`[P011_LLM_BYPASS_APPLIED] [PROMPT_CHALLENGE_BYPASS] LLM call bypassed. Length: ${bypassedText?.length || 0}`, { traceId });
     }
 
     const timeoutMs = 25000; // 25s timeout
@@ -4473,7 +4473,7 @@ Tek veya iki kısa cümle yaz.`;
       });
       bypassed = true;
       bypassedText = fallbackResult.text;
-      this.log.info(`[P011_LLM_BYPASS_APPLIED] [PROMPT_CHALLENGE_BYPASS] LLM call bypassed in delayed path. Text: "${bypassedText}"`, { traceId });
+      this.log.info(`[P011_LLM_BYPASS_APPLIED] [PROMPT_CHALLENGE_BYPASS] LLM call bypassed in delayed path. Length: ${bypassedText?.length || 0}`, { traceId });
     }
 
     try {

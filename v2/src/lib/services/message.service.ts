@@ -165,21 +165,21 @@ export class MessageService {
     to: string,
     content: string,
     provider?: string | null
-  ): Promise<{ success: boolean; providerMessageId?: string }> {
+  ): Promise<{ success: boolean; providerMessageId?: string; guardedContent?: string }> {
     // Enforce final outbound guard at the very boundary
     let guardedContent = content;
     try {
       let industry = 'general';
       try {
-        const tenantRes = await this.db.executeSafe({
-          text: `SELECT industry FROM tenants WHERE id = $1::uuid LIMIT 1`,
+        const settingsRes = await this.db.executeSafe({
+          text: `SELECT value FROM settings WHERE tenant_id = $1::uuid AND key = 'industry' LIMIT 1`,
           values: [this.db.tenantId]
         });
-        if (tenantRes && tenantRes.length > 0 && tenantRes[0].industry) {
-          industry = tenantRes[0].industry;
+        if (settingsRes && settingsRes.length > 0 && settingsRes[0].value) {
+          industry = String(settingsRes[0].value).toLowerCase().trim();
         }
       } catch (e) {
-        this.log.error("Failed to query tenant industry for guard", e instanceof Error ? e : new Error(String(e)));
+        this.log.error("Failed to query settings industry for guard", e instanceof Error ? e : new Error(String(e)));
       }
 
       let conversationId = 'unknown';
@@ -240,38 +240,42 @@ export class MessageService {
       this.log.error("Failed to run FinalOutboundGuard inside sendWhatsAppMessage boundary", guardErr as Error);
     }
 
+    let result: { success: boolean; providerMessageId?: string };
+
     if (isThreeSixtyProvider(provider)) {
       const { ThreeSixtyDialogService } = await import("./providers/three-sixty-dialog.service");
-      return ThreeSixtyDialogService.sendMessage(accessToken, to, guardedContent);
+      result = await ThreeSixtyDialogService.sendMessage(accessToken, to, guardedContent);
+    } else {
+      const url = `https://graph.facebook.com/v25.0/${phoneId}/messages`;
+      try {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${accessToken}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            messaging_product: "whatsapp",
+            recipient_type: "individual",
+            to: to,
+            type: "text",
+            text: { body: guardedContent }
+          })
+        });
+        if (!response.ok) {
+          const err = await response.text();
+          throw new Error(`WhatsApp API Error: ${err}`);
+        }
+        const data = await response.json();
+        const providerMessageId = data.messages?.[0]?.id || data.message_id || null;
+        result = { success: true, providerMessageId };
+      } catch (e: any) {
+        this.log.error("WhatsApp API request failed", e instanceof Error ? e : new Error(String(e)));
+        throw e;
+      }
     }
 
-    const url = `https://graph.facebook.com/v25.0/${phoneId}/messages`;
-    try {
-      const response = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${accessToken}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          messaging_product: "whatsapp",
-          recipient_type: "individual",
-          to: to,
-          type: "text",
-          text: { body: guardedContent }
-        })
-      });
-      if (!response.ok) {
-        const err = await response.text();
-        throw new Error(`WhatsApp API Error: ${err}`);
-      }
-      const data = await response.json();
-      const providerMessageId = data.messages?.[0]?.id || data.message_id || null;
-      return { success: true, providerMessageId };
-    } catch (e: any) {
-      this.log.error("WhatsApp API request failed", e instanceof Error ? e : new Error(String(e)));
-      throw e;
-    }
+    return { ...result, guardedContent };
   }
 
   /**

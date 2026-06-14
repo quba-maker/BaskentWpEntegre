@@ -144,58 +144,36 @@ export class BotInterventionService {
     const isThreeSixty = channel === 'whatsapp' && (credentials.provider === '360dialog' || credentials.provider === '360dialog_whatsapp');
     let usedProviderName = isThreeSixty ? '360dialog' : 'meta_graph';
 
-    // 6. Dispatch Message (Provider Aware)
-    if (isThreeSixty && credentials.accessToken) {
-      try {
-        const res = await ThreeSixtyDialogService.sendMessage(
-          credentials.accessToken,
-          phone,
-          draftMsg
-        );
-        providerMessageId = res.providerMessageId || null;
-        messageStatus = res.success ? 'sent' : 'failed';
-        if (!res.success) {
-          throw new BotInterventionError('SEND_FAILED', '360dialog üzerinden mesaj gönderilemedi.');
-        }
-      } catch (e: any) {
-        throw new BotInterventionError('INVALID_360DIALOG_CREDENTIAL', e.message || '360dialog yetkilendirme veya gönderim hatası.');
-      }
-    } else {
-      // Fallback to Meta Graph if it's not 360dialog (e.g. native cloud API)
-      const META_ACCESS_TOKEN = credentials.accessToken;
-      const PHONE_NUMBER_ID = credentials.whatsappPhoneNumberId;
+    let guardedMsg = draftMsg;
+
+    // 6. Dispatch Message (Provider Aware & Guarded)
+    try {
+      const { MessageService } = await import('@/lib/services/message.service');
+      const msgService = new MessageService(this.db);
       
-      if (!META_ACCESS_TOKEN || !PHONE_NUMBER_ID) {
-        throw new BotInterventionError('PROVIDER_RESOLUTION_FAILED', 'Meta kimlik bilgileri bulunamadı.');
+      const phoneId = credentials.whatsappPhoneNumberId || '';
+      const accessToken = credentials.accessToken || '';
+      
+      const res = await msgService.sendWhatsAppMessage(
+        phoneId,
+        accessToken,
+        phone,
+        draftMsg,
+        credentials.provider
+      );
+      
+      providerMessageId = res.providerMessageId || null;
+      messageStatus = res.success ? 'sent' : 'failed';
+      if (res.guardedContent) {
+        guardedMsg = res.guardedContent;
       }
-
-      try {
-        const response = await fetch(`https://graph.facebook.com/v25.0/${PHONE_NUMBER_ID}/messages`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${META_ACCESS_TOKEN}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            messaging_product: 'whatsapp',
-            to: phone,
-            type: 'text',
-            text: { body: draftMsg },
-          }),
-        });
-
-        if (!response.ok) {
-          const errData = await response.json().catch(() => ({}));
-          throw new BotInterventionError('SEND_FAILED', `WhatsApp gönderim hatası: ${errData?.error?.message || response.statusText}`);
-        }
-
-        const resData = await response.json();
-        providerMessageId = resData.messages?.[0]?.id || null;
-        messageStatus = 'sent';
-      } catch (e: any) {
-        if (e instanceof BotInterventionError) throw e;
-        throw new BotInterventionError('SEND_FAILED', 'WhatsApp API isteği başarısız oldu.');
+      
+      if (!res.success) {
+        throw new BotInterventionError('SEND_FAILED', 'WhatsApp üzerinden mesaj gönderilemedi.');
       }
+    } catch (e: any) {
+      if (e instanceof BotInterventionError) throw e;
+      throw new BotInterventionError('SEND_FAILED', e.message || 'WhatsApp gönderme hatası.');
     }
 
     // 7. Save DB Metadata
@@ -226,7 +204,7 @@ export class BotInterventionService {
         this.db.tenantId, 
         conversationId, 
         phone, 
-        draftMsg, 
+        guardedMsg, 
         channel, 
         messageStatus, 
         providerMessageId,
@@ -247,7 +225,7 @@ export class BotInterventionService {
                  message_count = COALESCE(message_count, 0) + 1
                  -- Not changing status to 'bot' or 'autopilot_enabled' here for one-shot.
              WHERE id = $4 AND tenant_id = $5`,
-      values: [draftMsg, channel, messageStatus, conversationId, this.db.tenantId]
+      values: [guardedMsg, channel, messageStatus, conversationId, this.db.tenantId]
     });
 
     // 9. Write Outreach Log
@@ -271,7 +249,7 @@ export class BotInterventionService {
           id: messageId,
           conversation_id: conversationId,
           phone_number: phone,
-          content: draftMsg,
+          content: guardedMsg,
           direction: 'out',
           status: messageStatus,
           created_at: new Date().toISOString()

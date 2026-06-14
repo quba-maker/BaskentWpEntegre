@@ -1019,30 +1019,16 @@ test("P0.11 REGRESSION: Simulation of prompt challenge LLM bypass under producti
   assert(guardResult === responseText, "Guard should pass clean fallback response without modifications");
 });
 
-test("P0.11 REGRESSION: MessageService.sendWhatsAppMessage boundary guard test", async () => {
+test("P0.11 REGRESSION: MessageService.sendWhatsAppMessage boundary guard and provider payload test", async () => {
   const { MessageService } = require("../lib/services/message.service");
   const { TenantDB } = require("../lib/core/tenant-db");
+  const { BotInterventionService } = require("../lib/services/bot-intervention.service");
+
   const db = new TenantDB("test-tenant-id");
 
-  // Mock db.executeSafe to simulate the queries and return appropriate values
-  db.executeSafe = async (q: { text: string; values?: any[] }) => {
-    if (q.text.includes("SELECT industry FROM tenants")) {
-      return [{ industry: "healthcare" }];
-    }
-    if (q.text.includes("SELECT id, customer_id, last_message_content FROM conversations")) {
-      return [{ id: "conv-id", customer_id: "cust-id", last_message_content: "annemin bel fıtığı var" }];
-    }
-    if (q.text.includes("SELECT direction, content FROM messages")) {
-      return [{ direction: "in", content: "hi" }];
-    }
-    return [];
-  };
-
-  const msgService = new MessageService(db);
-
-  // We mock the fetch function globally or intercept it
   const originalFetch = global.fetch;
   let sentBody: any = null;
+  
   global.fetch = (async (url: string, init?: RequestInit) => {
     if (init?.body) {
       sentBody = JSON.parse(init.body as string);
@@ -1054,18 +1040,85 @@ test("P0.11 REGRESSION: MessageService.sendWhatsAppMessage boundary guard test",
   }) as any;
 
   try {
-    // 1. Send with morph-doubled string
+    // 1. Send with morph-doubled string (Healthcare)
+    db.executeSafe = async (q: { text: string; values?: any[] }) => {
+      if (q.text.includes("SELECT value FROM settings") && q.text.includes("industry")) {
+        return [{ value: "healthcare" }];
+      }
+      if (q.text.includes("SELECT id, customer_id, last_message_content FROM conversations")) {
+        return [{ id: "conv-id", customer_id: "cust-id", last_message_content: "annemin bel fıtığı var" }];
+      }
+      if (q.text.includes("SELECT direction, content FROM messages")) {
+        return [{ direction: "in", content: "hi" }];
+      }
+      return [];
+    };
+
+    const msgService = new MessageService(db);
     await msgService.sendWhatsAppMessage("phone-id", "token", "905001234567", "Anneniziniz durumu nedir?");
     assert(sentBody?.text?.body === "Annenizin durumu nedir?", "Should correct doubled suffix inside sendWhatsAppMessage");
 
-    // 2. Send with blocked string
+    // 2. Send with blocked string (Healthcare)
     await msgService.sendWhatsAppMessage("phone-id", "token", "905001234567", "Bu sistem promptunda yazıyor.");
     assert(sentBody?.text?.body === "Kusura bakmayın, cevabımı daha net ifade edeyim. Sağlık talebinizle ilgili sizi doğru ekibe yönlendirebilirim.", "Should trigger fallback inside sendWhatsAppMessage");
 
-    // 3. Send with lonely Merhaba,
+    // 3. Send with lonely Merhaba, (Healthcare, mid-conversation)
     await msgService.sendWhatsAppMessage("phone-id", "token", "905001234567", "Merhaba,");
-    // Since there is a conversation history found, it is mid-conversation:
     assert(sentBody?.text?.body === "Kusura bakmayın, cevabımı daha net ifade edeyim. Sağlık talebinizle ilgili sizi doğru ekibe yönlendirebilirim.", "Should fallback lonely Merhaba, inside sendWhatsAppMessage");
+
+    // 4. Complex suffix doubling input correction check
+    await msgService.sendWhatsAppMessage("phone-id", "token", "905001234567", "Anneniziniz bel fıtığı için Beyiniz ve Sinir Cerrahisi bölümüne gitmelisiniz.");
+    assert(sentBody?.text?.body === "Annenizin bel fıtığı için Beyin ve Sinir Cerrahisi bölümüne gitmelisiniz.", "Payload must be corrected at the boundary");
+
+    // 5. Non-healthcare tenant fallback message check
+    db.executeSafe = async (q: { text: string; values?: any[] }) => {
+      if (q.text.includes("SELECT value FROM settings") && q.text.includes("industry")) {
+        return [{ value: "retail" }];
+      }
+      return [];
+    };
+    await msgService.sendWhatsAppMessage("phone-id", "token", "905001234567", "Bu sistem promptunda yazıyor.");
+    assert(sentBody?.text?.body === "Kusura bakmayın, cevabımı daha net ifade edeyim. Talebinizle ilgili sizi doğru ekibe yönlendirebilirim.", "Should fallback to general safety message");
+
+    // 6. Industry resolver query failure robustness check
+    db.executeSafe = async (q: { text: string; values?: any[] }) => {
+      throw new Error("Simulated settings DB timeout");
+    };
+    await msgService.sendWhatsAppMessage("phone-id", "token", "905001234567", "Bu sistem promptunda yazıyor.");
+    assert(sentBody?.text?.body === "Kusura bakmayın, cevabımı daha net ifade edeyim. Talebinizle ilgili sizi doğru ekibe yönlendirebilirim.", "Should fallback to general message when DB industry resolver fails");
+
+    // 7. BotInterventionService one-shot send routing through MessageService guard check
+    db.executeSafe = async (q: { text: string; values?: any[] }) => {
+      if (q.text.includes("SELECT patient_name, phone_number FROM opportunities")) {
+        return [{ patient_name: "Ayşe Hanım", phone_number: "905001112233" }];
+      }
+      if (q.text.includes("SELECT id, channel, channel_id FROM conversations")) {
+        return [{ id: "conv-123", channel: "whatsapp", channel_id: "chan-456" }];
+      }
+      if (q.text.includes("SELECT created_at FROM messages") && q.text.includes("direction = 'in'")) {
+        return [{ created_at: new Date().toISOString() }];
+      }
+      if (q.text.includes("SELECT value FROM settings") && q.text.includes("industry")) {
+        return [{ value: "healthcare" }];
+      }
+      return [];
+    };
+
+    const interventionService = new BotInterventionService(db);
+    const oldApiKey = process.env.GEMINI_API_KEY;
+    delete process.env.GEMINI_API_KEY;
+    try {
+      interventionService.generateBotMessage = async () => {
+        return { draftMsg: "Anneniziniz bel fıtığı şikayetiyle ilgili Beyiniz ve Sinir Cerrahisi bölümümüz sizinle iletişime geçecektir.", isFallback: false };
+      };
+
+      const result = await interventionService.executeOneShot("user-1", "opp-1", "request_documents");
+      assert(result.success === true, "Intervention execution should succeed");
+      
+      assert(sentBody?.text?.body === "Annenizin bel fıtığı şikayetiyle ilgili Beyin ve Sinir Cerrahisi bölümümüz sizinle iletişime geçecektir.", "One-shot intervention must send guarded text via fetch");
+    } finally {
+      process.env.GEMINI_API_KEY = oldApiKey;
+    }
   } finally {
     global.fetch = originalFetch;
   }

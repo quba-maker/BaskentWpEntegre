@@ -19,8 +19,26 @@ export class FinalOutboundGuard {
     const { tenantId, conversationId, unifiedContext } = context;
 
     // 0. Log that the guard is applied
-    console.log(`[FINAL_OUTBOUND_GUARD_APPLIED] Running guard for tenant: ${tenantId}, conversation: ${conversationId || 'unknown'}`);
-    FinalOutboundGuard.logToAudit(tenantId, 'FINAL_OUTBOUND_GUARD_APPLIED', `Outbound guard triggered. Input length: ${text ? text.length : 0}`, text || '', conversationId);
+    console.log(JSON.stringify({
+      tag: "FINAL_OUTBOUND_GUARD_APPLIED",
+      tenantId,
+      conversationId: conversationId || 'unknown',
+      intent: context.intent || 'unknown',
+      rawTextLogged: false
+    }));
+
+    FinalOutboundGuard.logToAudit(
+      tenantId,
+      'FINAL_OUTBOUND_GUARD_APPLIED',
+      `Outbound guard triggered. Input length: ${text ? text.length : 0}`,
+      {
+        tag: 'FINAL_OUTBOUND_GUARD_APPLIED',
+        tenantId,
+        conversationId,
+        rawTextLogged: false
+      },
+      conversationId
+    );
 
     if (!text || text.trim().length === 0) {
       return text;
@@ -121,7 +139,7 @@ export class FinalOutboundGuard {
     const hasBlockedPattern = blockedPatterns.some(regex => regex.test(lowerText)) || hasSuffixDoublingPattern;
 
     const resolvedIndustry = (context.industry || '').toLowerCase().trim();
-    const isHealthcare = resolvedIndustry === 'healthcare' || resolvedIndustry === 'health' || resolvedIndustry === '';
+    const isHealthcare = resolvedIndustry === 'healthcare' || resolvedIndustry === 'health';
 
     // Handle Greeting Only scenario
     if (isShortGreetingOnly) {
@@ -130,8 +148,30 @@ export class FinalOutboundGuard {
       if (!hasHistory) {
         // Safe to send greeting fallback
         const greetingFallback = "Merhaba, size nasıl yardımcı olabilirim?";
-        console.log(`[FINAL_OUTBOUND_GUARD_BLOCKED] Short greeting resolved at start. Fallback: "${greetingFallback}"`);
-        FinalOutboundGuard.logToAudit(tenantId, 'FINAL_OUTBOUND_GUARD_BLOCKED', `Greeting only at start. Original: "${text}"`, greetingFallback, conversationId);
+        console.log(JSON.stringify({
+          tag: "FINAL_OUTBOUND_GUARD_BLOCKED",
+          tenantId,
+          conversationId: conversationId || 'unknown',
+          intent: context.intent || 'unknown',
+          reasons: ['greeting_only_start'],
+          rawTextLogged: false,
+          fallbackLength: greetingFallback.length
+        }));
+
+        FinalOutboundGuard.logToAudit(
+          tenantId,
+          'FINAL_OUTBOUND_GUARD_BLOCKED',
+          `Greeting only at start.`,
+          {
+            tag: 'FINAL_OUTBOUND_GUARD_BLOCKED',
+            tenantId,
+            conversationId,
+            reason: 'greeting_only_start',
+            rawTextLogged: false,
+            fallbackLength: greetingFallback.length
+          },
+          conversationId
+        );
         return greetingFallback;
       }
       // If we have history, treat it as blocked and do not reset greeting (fall through to deterministic fallback)
@@ -146,21 +186,106 @@ export class FinalOutboundGuard {
         fallbackText = 'Kusura bakmayın, cevabımı daha net ifade edeyim. Talebinizle ilgili sizi doğru ekibe yönlendirebilirim.';
       }
 
-      console.log(`[FINAL_OUTBOUND_GUARD_BLOCKED] Blocked. Reason: hasBlocked=${hasBlockedPattern}, incomplete=${isSentenceIncomplete}, short=${isExtremelyShort}, greeting=${isShortGreetingOnly}. Fallback: "${fallbackText}"`);
-      FinalOutboundGuard.logToAudit(tenantId, 'FINAL_OUTBOUND_GUARD_BLOCKED', `Blocked. Original: "${text}"`, fallbackText, conversationId);
+      const blockReasons: string[] = [];
+      if (hasBlockedPattern) blockReasons.push('blocked_pattern');
+      if (isSentenceIncomplete) blockReasons.push('sentence_incomplete');
+      if (isExtremelyShort) blockReasons.push('extremely_short');
+      if (isShortGreetingOnly) blockReasons.push('greeting_only');
+
+      console.log(JSON.stringify({
+        tag: "FINAL_OUTBOUND_GUARD_BLOCKED",
+        tenantId,
+        conversationId: conversationId || 'unknown',
+        intent: context.intent || 'unknown',
+        reasons: blockReasons,
+        rawTextLogged: false,
+        fallbackLength: fallbackText.length
+      }));
+
+      FinalOutboundGuard.logToAudit(
+        tenantId,
+        'FINAL_OUTBOUND_GUARD_BLOCKED',
+        `Blocked outbound text. Reasons: ${blockReasons.join(', ')}`,
+        {
+          tag: 'FINAL_OUTBOUND_GUARD_BLOCKED',
+          tenantId,
+          conversationId,
+          intent: context.intent || 'unknown',
+          reasons: blockReasons,
+          rawTextLogged: false,
+          fallbackLength: fallbackText.length
+        },
+        conversationId
+      );
       return fallbackText;
     }
 
     // If corrections were applied, log it
     if (corrected !== text) {
-      console.log(`[FINAL_OUTBOUND_GUARD_CORRECTED] Corrected text from "${text}" to "${corrected}"`);
-      FinalOutboundGuard.logToAudit(tenantId, 'FINAL_OUTBOUND_GUARD_CORRECTED', `Original: "${text}"`, corrected, conversationId);
+      const matchedPatterns: string[] = [];
+      if (/adınızızı/i.test(text)) matchedPatterns.push('adınızızı');
+      if (/yaşadığınızızı/i.test(text)) matchedPatterns.push('yaşadığınızızı');
+      if (/anneniziniz/i.test(text)) matchedPatterns.push('anneniziniz');
+      if (/anneniziziniz/i.test(text)) matchedPatterns.push('anneniziziniz');
+      if (/Beyiniz\s+ve\s+Sinir/i.test(text)) matchedPatterns.push('Beyiniz ve Sinir');
+      if (/hekim listesinizi/i.test(text)) matchedPatterns.push('hekim listesinizi');
+      if (/Kusura bakmayınız/i.test(text)) matchedPatterns.push('Kusura bakmayınız');
+      if (/ulaşmıştınızız/i.test(text)) matchedPatterns.push('ulaşmıştınızız');
+      if (/ulaştığınızız/i.test(text)) matchedPatterns.push('ulaştığınızız');
+      if (/sorularınızızı/i.test(text)) matchedPatterns.push('sorularınızızı');
+      if (/görüyorum\.,/i.test(text)) matchedPatterns.push('görüyorum.,');
+      if (/inizniz/i.test(text)) matchedPatterns.push('inizniz');
+      if (/ınıznız/i.test(text)) matchedPatterns.push('ınıznız');
+      if (/nuznuz/i.test(text)) matchedPatterns.push('nuznuz');
+      if (/nüznüz/i.test(text)) matchedPatterns.push('nüznüz');
+      if (/iniziniz/i.test(text)) matchedPatterns.push('iniziniz');
+      if (/niziniz/i.test(text)) matchedPatterns.push('niziniz');
+      if (/nızınız/i.test(text)) matchedPatterns.push('nızınız');
+      if (/nuzunuz/i.test(text)) matchedPatterns.push('nuzunuz');
+      if (/nüzünüz/i.test(text)) matchedPatterns.push('nüzünüz');
+      if (/inizizi/i.test(text)) matchedPatterns.push('inizizi');
+      if (/ınızızı/i.test(text)) matchedPatterns.push('ınızızı');
+      if (/unuzuzu/i.test(text)) matchedPatterns.push('unuzuzu');
+      if (/ünüzüzü/i.test(text)) matchedPatterns.push('ünüzüzü');
+      if (/sizizi/i.test(text)) matchedPatterns.push('sizizi');
+
+      console.log(JSON.stringify({
+        tag: "FINAL_OUTBOUND_GUARD_CORRECTED",
+        tenantId,
+        conversationId: conversationId || 'unknown',
+        intent: context.intent || 'unknown',
+        patternCount: matchedPatterns.length,
+        patterns: matchedPatterns,
+        rawTextLogged: false
+      }));
+
+      FinalOutboundGuard.logToAudit(
+        tenantId,
+        'FINAL_OUTBOUND_GUARD_CORRECTED',
+        `Corrected morphological patterns. Count: ${matchedPatterns.length}`,
+        {
+          tag: 'FINAL_OUTBOUND_GUARD_CORRECTED',
+          tenantId,
+          conversationId,
+          intent: context.intent || 'unknown',
+          patternCount: matchedPatterns.length,
+          patterns: matchedPatterns,
+          rawTextLogged: false
+        },
+        conversationId
+      );
     }
 
     return corrected;
   }
 
-  private static logToAudit(tenantId: string, action: string, reasoning: string, result: string, conversationId?: string) {
+  private static logToAudit(
+    tenantId: string,
+    action: string,
+    reasoning: string,
+    resultSummary: Record<string, any>,
+    conversationId?: string
+  ) {
     try {
       const db = withTenantDB(tenantId);
       db.executeSafe({
@@ -172,7 +297,7 @@ export class FinalOutboundGuard {
           reasoning.substring(0, 500),
           JSON.stringify({
             conversationId: conversationId || 'unknown',
-            result: result.substring(0, 500),
+            ...resultSummary,
             timestamp: new Date().toISOString()
           })
         ]
