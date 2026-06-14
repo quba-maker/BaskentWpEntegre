@@ -486,10 +486,11 @@ export async function testBotPrompt(
 
       // 4. Fetch AI Profile for this group
       const profileResult = await ctx.db.executeSafe({
-        text: `SELECT ai_model, max_response_tokens, business_hours_json, aggression_level, response_delay_seconds, response_style
-               FROM channel_ai_profiles
-               WHERE group_id = $1 LIMIT 1`,
-        values: [botGroupId]
+        text: `SELECT cap.ai_model, cap.max_response_tokens, cap.business_hours_json, cap.aggression_level, cap.response_delay_seconds, cap.response_style
+               FROM channel_ai_profiles cap
+               JOIN channel_groups cg ON cap.group_id = cg.id
+               WHERE group_id = $1 AND cg.tenant_id = $2 LIMIT 1`,
+        values: [botGroupId, ctx.tenantId]
       });
       const profile = profileResult[0] || null;
       const aiModel = profile?.ai_model || 'gemini-2.5-flash';
