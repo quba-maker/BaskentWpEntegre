@@ -47,6 +47,7 @@ const KNOWN_DEDUP_PATTERNS: { regex: RegExp; description: string; fix?: (match: 
   { regex: /hastanınız/gi, description: 'hastanınız', fix: (m) => m[0] === 'H' ? 'Hastanın' : 'hastanın' },
   { regex: /sorularınızıza/gi, description: 'sorularınızıza', fix: (m) => m[0] === 'S' ? 'Sorularınıza' : 'sorularınıza' },
   { regex: /uzmanızı/gi, description: 'uzmanızı', fix: (m) => m[0] === 'U' ? 'Uzmanı' : 'uzmanı' },
+  { regex: /aklınızızdaki/gi, description: 'aklınızızdaki', fix: (m) => m[0] === 'A' ? 'Aklınızdaki' : 'aklınızdaki' },
   { regex: /Kusura bakmayınız/gi, description: 'kusura_bakmayiniz', fix: (m) => m[0] === 'K' ? 'Kusura bakmayın' : 'kusura bakmayın' },
 
   // Doubled possessive general patterns

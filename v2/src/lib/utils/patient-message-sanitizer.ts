@@ -8,8 +8,8 @@
  */
 
 // Custom boundary assertions for Turkish characters
-const LEFT_B = '(?<=^|[^a-zA-Z0-9_ğüşöçİĞÜŞÖÇ])';
-const RIGHT_B = '(?=$|[^a-zA-Z0-9_ğüşöçİĞÜŞÖÇ])';
+const LEFT_B = '(?<=^|[^a-zA-Z0-9_ğüşöçıİĞÜŞÖÇ])';
+const RIGHT_B = '(?=$|[^a-zA-Z0-9_ğüşöçıİĞÜŞÖÇ])';
 
 // Pre-approved safe phrase-based replacements in Turkish
 const TurkishPhrases = [
@@ -70,31 +70,31 @@ const TurkishPronouns = [
 const TurkishNounSuffixes = [
   {
     // -nı -> -nızı (e.g. dosyanı -> dosyanızı, planını -> planınızı)
-    regex: new RegExp(`${LEFT_B}([a-zA-ZğüşöçİĞÜŞÖÇ]+)n[ıI]${RIGHT_B}`, 'gu'),
+    regex: new RegExp(`${LEFT_B}([a-zA-ZğüşöçıİĞÜŞÖÇ]+)n[ıI]${RIGHT_B}`, 'gu'),
     replacement: '$1nızı',
     blacklist: ['aynı', 'ayni', 'tanı', 'tani', 'anı', 'ani', 'kanı', 'kani', 'yanı', 'yani', 'bazı', 'bazi', 'kazı', 'kazi']
   },
   {
     // -ni -> -nizi (e.g. biletini -> biletinizi, bilgilerini -> bilgilerinizi)
-    regex: new RegExp(`${LEFT_B}([a-zA-ZğüşöçİĞÜŞÖÇ]+)n[iİ]${RIGHT_B}`, 'gu'),
+    regex: new RegExp(`${LEFT_B}([a-zA-ZğüşöçıİĞÜŞÖÇ]+)n[iİ]${RIGHT_B}`, 'gu'),
     replacement: '$1nizi',
     blacklist: ['yeni', 'beni', 'seni', 'huni', 'çini', 'cini', 'kini', 'sini', 'tini', 'mini', 'yani', 'sizin', 'bizim', 'için', 'icin', 'kendi']
   },
   {
     // -nu -> -nuzu (e.g. raporunu -> raporunuzu, telefonunu -> telefonunuzu)
-    regex: new RegExp(`${LEFT_B}([a-zA-ZğüşöçİĞÜŞÖÇ]+)nu${RIGHT_B}`, 'gu'),
+    regex: new RegExp(`${LEFT_B}([a-zA-ZğüşöçıİĞÜŞÖÇ]+)nu${RIGHT_B}`, 'gu'),
     replacement: '$1nuzu',
     blacklist: ['konu', 'bunu', 'şunu', 'sunu', 'onu', 'sonu', 'doğru', 'dogru', 'uygun']
   },
   {
     // -nü -> -nüzü (e.g. gününü -> gününüzü)
-    regex: new RegExp(`${LEFT_B}([a-zA-ZğüşöçİĞÜŞÖÇ]+)nü${RIGHT_B}`, 'gu'),
+    regex: new RegExp(`${LEFT_B}([a-zA-ZğüşöçıİĞÜŞÖÇ]+)nü${RIGHT_B}`, 'gu'),
     replacement: '$1nüzü',
     blacklist: ['menü', 'menu', 'günü', 'gunu', 'bugünü', 'bugunu', 'dünü', 'dunu', 'önü', 'onu', 'yönü', 'yonu', 'tümü', 'tumu', 'görü', 'goru']
   },
   {
     // -ın -> -ınız (e.g. planın -> planınız, raporun -> raporunuz)
-    regex: new RegExp(`${LEFT_B}([a-zA-ZğüşöçİĞÜŞÖÇ]+)[ıI]n${RIGHT_B}`, 'gu'),
+    regex: new RegExp(`${LEFT_B}([a-zA-ZğüşöçıİĞÜŞÖÇ]+)[ıI]n${RIGHT_B}`, 'gu'),
     replacement: '$1ınız',
     blacklist: [
       'senin', 'onun', 'bunun', 'şunun', 'plan', 'alan', 'yan', 'kan', 'şan', 'han', 'yalan', 'yılan', 
@@ -104,23 +104,23 @@ const TurkishNounSuffixes = [
   },
   {
     // -in -> -iniz (e.g. biletin -> biletiniz, bilgin -> bilginiz)
-    regex: new RegExp(`${LEFT_B}([a-zA-ZğüşöçİĞÜŞÖÇ]+)[iİ]n${RIGHT_B}`, 'gu'),
+    regex: new RegExp(`${LEFT_B}([a-zA-ZğüşöçıİĞÜŞÖÇ]+)[iİ]n${RIGHT_B}`, 'gu'),
     replacement: '$1iniz',
     blacklist: [
       'senin', 'sizin', 'benin', 'lütfen', 'tayin', 'emin', 'zemin', 'serin', 'derin', 'terin', 'darin', 
       'gelin', 'eksin', 'bilsin', 'versin', 'gitsin', 'için', 'lakin', 'belki', 'tekin', 'sakin', 'kesin',
-      'seçkin', 'zengin', 'belgin', 'ilkin', 'etkin'
+      'seçkin', 'zengin', 'belgin', 'ilkin', 'etkin', 'beyin'
     ]
   },
   {
     // -un -> -unuz (e.g. durumun -> durumunuz)
-    regex: new RegExp(`${LEFT_B}([a-zA-ZğüşöçİĞÜŞÖÇ]+)un${RIGHT_B}`, 'gu'),
+    regex: new RegExp(`${LEFT_B}([a-zA-ZğüşöçıİĞÜŞÖÇ]+)un${RIGHT_B}`, 'gu'),
     replacement: '$1unuz',
     blacklist: ['onun', 'bunun', 'şunun', 'torun', 'sorun', 'sütun', 'kanun', 'yosun', 'olsun', 'dursun', 'bulsun', 'uygun', 'yoğun', 'dolgun', 'olgun', 'solgun']
   },
   {
     // -ün -> -ünüz (e.g. günün -> gününüz)
-    regex: new RegExp(`${LEFT_B}([a-zA-ZğüşöçİĞÜŞÖÇ]+)ün${RIGHT_B}`, 'gu'),
+    regex: new RegExp(`${LEFT_B}([a-zA-ZğüşöçıİĞÜŞÖÇ]+)ün${RIGHT_B}`, 'gu'),
     replacement: '$1ünüz',
     blacklist: ['gün', 'yön', 'dün', 'ürün', 'bütün', 'düğün', 'görsün', 'ölsün', 'dönsün', 'düzgün', 'üzgün', 'sürgün']
   }
@@ -326,7 +326,7 @@ export function sanitizePatientFacingMessage(text: string, options?: { locale?: 
 
   // 2. Remove mid-sentence honorifics (e.g. ", Mustafa Bey" or " Mustafa Bey")
   // Turkish mid-sentence: [Name] Bey/Hanım/Bayan/Bay
-  const trMidHonorific = new RegExp(`,?\\s*\\b[a-zA-Z0-9_ğüşöçİĞÜŞÖÇ]{2,30}\\s+(Bey|Hanım|Bay|Bayan)\\b`, 'giu');
+  const trMidHonorific = new RegExp(`,?\\s*\\b[a-zA-Z0-9_ğüşöçıİĞÜŞÖÇ]{2,30}\\s+(Bey|Hanım|Bay|Bayan)\\b`, 'giu');
   sanitized = sanitized.replace(trMidHonorific, '');
 
   // English mid-sentence: Mr/Ms/Mrs/Dear [Name]
@@ -347,7 +347,7 @@ export function sanitizePatientFacingMessage(text: string, options?: { locale?: 
   // 4. Dynamic verb replacements:
   // E.g. paylaşır mısın -> paylaşabilir misiniz
   // Matches: [Word](ar/er/ır/ir/ur/ür/r) mısın(ız)?
-  const verbPattern = new RegExp(`${LEFT_B}([a-zA-ZğüşöçİĞÜŞÖÇ]+?)(ar|er|[ıI]r|[iİ]r|ur|ür|r)\\s+m([ıI]|[iİ]|u|ü)s[ıI]n([ıI]z)?${RIGHT_B}`, 'giu');
+  const verbPattern = new RegExp(`${LEFT_B}([a-zA-ZğüşöçıİĞÜŞÖÇ]+?)(ar|er|[ıI]r|[iİ]r|ur|ür|r)\\s+m([ıI]|[iİ]|u|ü)s[ıI]n([ıI]z)?${RIGHT_B}`, 'giu');
   sanitized = sanitized.replace(verbPattern, (match, root, aorist) => {
     const lowerRoot = root.toLowerCase();
     // Do not replace if it is already possibility form to prevent "paylaşabilebilir" recursion
@@ -358,19 +358,19 @@ export function sanitizePatientFacingMessage(text: string, options?: { locale?: 
   });
 
   // E.g. paylaşabilir misin -> paylaşabilir misiniz
-  const possibilityVerbPattern = new RegExp(`${LEFT_B}([a-zA-ZğüşöçİĞÜŞÖÇ]+?)(ab[iİ]l[iİ]r|eb[iİ]l[iİ]r)\\s+m[iİ]s[iİ]n${RIGHT_B}`, 'giu');
+  const possibilityVerbPattern = new RegExp(`${LEFT_B}([a-zA-ZğüşöçıİĞÜŞÖÇ]+?)(ab[iİ]l[iİ]r|eb[iİ]l[iİ]r)\\s+m[iİ]s[iİ]n${RIGHT_B}`, 'giu');
   sanitized = sanitized.replace(possibilityVerbPattern, (match, root, possibility) => {
     return preserveCase(match, `${root}${possibility} misiniz`);
   });
 
   // E.g. arayalım mı -> arayabilir miyiz, edelim mi -> edebilir miyiz
-  const letUsVerbPattern = new RegExp(`${LEFT_B}([a-zA-ZğüşöçİĞÜŞÖÇ]+?)(?:y)?(al[ıI]m\\s+m[ıI]|el[iİ]m\\s+m[iİ])${RIGHT_B}`, 'giu');
+  const letUsVerbPattern = new RegExp(`${LEFT_B}([a-zA-ZğüşöçıİĞÜŞÖÇ]+?)(?:y)?(al[ıI]m\\s+m[ıI]|el[iİ]m\\s+m[iİ])${RIGHT_B}`, 'giu');
   sanitized = sanitized.replace(letUsVerbPattern, (match, root) => {
     return preserveCase(match, convertLetUsToFormal(root));
   });
 
   // E.g. uygun musun -> uygun musunuz, hazır mısın -> hazır mısınız
-  const adjQuestionPattern = new RegExp(`${LEFT_B}([a-zA-ZğüşöçİĞÜŞÖÇ]+)\\s+(m[ıI]s[ıI]n|m[iİ]s[iİ]n|musun|müsün)${RIGHT_B}`, 'giu');
+  const adjQuestionPattern = new RegExp(`${LEFT_B}([a-zA-ZğüşöçıİĞÜŞÖÇ]+)\\s+(m[ıI]s[ıI]n|m[iİ]s[iİ]n|musun|müsün)${RIGHT_B}`, 'giu');
   sanitized = sanitized.replace(adjQuestionPattern, (match, root, question) => {
     const qLower = question.toLowerCase();
     let replacement = '';
@@ -383,12 +383,29 @@ export function sanitizePatientFacingMessage(text: string, options?: { locale?: 
   });
 
   // 5. Noun suffixes
-  for (const suffix of TurkishNounSuffixes) {
+  for (let i = 0; i < TurkishNounSuffixes.length; i++) {
+    const suffix = TurkishNounSuffixes[i];
     sanitized = sanitized.replace(suffix.regex, (match, root) => {
       const lowerMatch = match.toLowerCase();
       if (suffix.blacklist.includes(lowerMatch)) {
         return match; // do not replace blacklisted words
       }
+
+      const lowerRoot = root.toLowerCase();
+      // Skip n-vowel rules (index 0, 1, 2, 3) if root ends with third-person possessive (sı, si, su, sü, şı, şi, şu, şü)
+      if (i >= 0 && i <= 3) {
+        if (/[sş][ıieuüoö]$/i.test(lowerRoot)) {
+          return match;
+        }
+      }
+      
+      // Skip vowel-n rules (index 4, 5, 6, 7) if root ends with formal plural/possessive (ız, iz, uz, üz)
+      if (i >= 4 && i <= 7) {
+        if (/[ıieuüoö]z$/i.test(lowerRoot)) {
+          return match;
+        }
+      }
+
       // Apply replacement and preserve case
       const replacementText = suffix.replacement.replace('$1', root);
       return preserveCase(match, replacementText);

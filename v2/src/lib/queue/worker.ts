@@ -652,6 +652,9 @@ export class QueueWorkerEngine {
             credentials.provider
           );
           outProviderMessageId = res.providerMessageId || null;
+          if (res.guardedContent) {
+            responseText = res.guardedContent;
+          }
         } else {
           const res = await msgService.sendSocialMessage(
             credentials.accessToken,
@@ -1708,10 +1711,11 @@ export class QueueWorkerEngine {
         const isThreeSixty = isThreeSixtyProvider(whCreds.provider);
         if (accessToken && (isThreeSixty || phoneId)) {
           const outRes = await msgService.sendWhatsAppMessage(phoneId, accessToken, phoneNumber, offMsg, whCreds.provider);
+          const finalOffMsg = outRes.guardedContent || offMsg;
           const offMsgResult = await msgService.saveMessageIdempotent({ 
             phoneNumber, 
             direction: 'out', 
-            content: offMsg, 
+            content: finalOffMsg, 
             channel: 'whatsapp',
             channelId: metadata.channelId,
             groupId: metadata.groupId,
@@ -1728,7 +1732,7 @@ export class QueueWorkerEngine {
                   id: offMsgResult.messageId,
                   conversation_id: offMsgResult.conversationId || conversationId,
                   phone_number: phoneNumber,
-                  content: offMsg,
+                  content: finalOffMsg,
                   direction: 'out',
                   status: 'sent', 
                   created_at: new Date().toISOString(),
@@ -1929,9 +1933,11 @@ export class QueueWorkerEngine {
                 privOutResult = outRes;
               }
 
+              const finalSafeResponse = (privOutResult as any)?.guardedContent || safeResponse;
+
               // Save message to DB
               const saveMsgResult = await msgService.saveMessageIdempotent({
-                phoneNumber, direction: 'out', content: safeResponse, channel,
+                phoneNumber, direction: 'out', content: finalSafeResponse, channel,
                 channelId: metadata.channelId, groupId: metadata.groupId,
                 providerMessageId: privOutResult?.providerMessageId,
                 status: 'sent', modelUsed: 'privacy_pre_detector',
@@ -1945,7 +1951,7 @@ export class QueueWorkerEngine {
                     id: saveMsgResult.messageId,
                     conversation_id: conversationId,
                     phone_number: phoneNumber,
-                    content: safeResponse,
+                    content: finalSafeResponse,
                     direction: 'out',
                     status: 'sent',
                     created_at: new Date().toISOString(),
@@ -2781,6 +2787,9 @@ Tek veya iki kısa cümle yaz.`;
           throw new Error("WhatsApp message sending returned success=false");
         }
         outProviderMessageId = outRes.providerMessageId || null;
+        if (outRes.guardedContent) {
+          finalResponseText = outRes.guardedContent;
+        }
       } else {
         const outRes = await msgService.sendSocialMessage(
           accessToken,
@@ -4272,6 +4281,9 @@ Tek veya iki kısa cümle yaz.`;
         if (channel === 'whatsapp') {
           const outRes = await msgService.sendWhatsAppMessage(phoneId, accessToken, phoneNumber, deterministicReply, outboundCreds.provider);
           outProviderMessageId = outRes.providerMessageId || null;
+          if (outRes.guardedContent) {
+            deterministicReply = outRes.guardedContent;
+          }
         } else {
           const outRes = await msgService.sendSocialMessage(accessToken, phoneNumber, deterministicReply, channel);
           outProviderMessageId = outRes.providerMessageId || null;
@@ -4777,6 +4789,9 @@ Tek veya iki kısa cümle yaz.`;
       if (channel === 'whatsapp') {
         const outRes = await msgService.sendWhatsAppMessage(phoneId, accessToken, phoneNumber, finalResponseText, outboundCreds.provider);
         outProviderMessageId = outRes.providerMessageId || null;
+        if (outRes.guardedContent) {
+          finalResponseText = outRes.guardedContent;
+        }
       } else {
         const outRes = await msgService.sendSocialMessage(accessToken, phoneNumber, finalResponseText, channel);
         outProviderMessageId = outRes.providerMessageId || null;

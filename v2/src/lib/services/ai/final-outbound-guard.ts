@@ -87,6 +87,7 @@ export class FinalOutboundGuard {
       { regex: /ulaşmıştınızız/gi, repl: (m: string) => m.charAt(0) === 'U' ? 'Ulaşmıştınız' : 'ulaşmıştınız' },
       { regex: /ulaştığınızız/gi, repl: (m: string) => m.charAt(0) === 'U' ? 'Ulaştığınız' : 'ulaştığınız' },
       { regex: /sorularınızızı/gi, repl: (m: string) => m.charAt(0) === 'S' ? 'Sorularınızı' : 'sorularınızı' },
+      { regex: /aklınızızdaki/gi, repl: (m: string) => m.charAt(0) === 'A' ? 'Aklınızdaki' : 'aklınızdaki' },
       { regex: /görüyorum\.,/gi, repl: (m: string) => m.charAt(0) === 'G' ? 'Görüyorum.' : 'görüyorum.' }
     ];
 
@@ -163,6 +164,7 @@ export class FinalOutboundGuard {
       /planızı/i,
       /sorularınızıza/i,
       /uzmanızı/i,
+      /aklınızızdaki/i,
       /sistem detay/i,
       /sistem prompt/i,
       /promptunda/i
@@ -275,6 +277,7 @@ export class FinalOutboundGuard {
       if (/ulaşmıştınızız/i.test(text)) matchedPatterns.push('ulaşmıştınızız');
       if (/ulaştığınızız/i.test(text)) matchedPatterns.push('ulaştığınızız');
       if (/sorularınızızı/i.test(text)) matchedPatterns.push('sorularınızızı');
+      if (/aklınızızdaki/i.test(text)) matchedPatterns.push('aklınızızdaki');
       if (/görüyorum\.,/i.test(text)) matchedPatterns.push('görüyorum.,');
       if (/inizniz/i.test(text)) matchedPatterns.push('inizniz');
       if (/ınıznız/i.test(text)) matchedPatterns.push('ınıznız');
