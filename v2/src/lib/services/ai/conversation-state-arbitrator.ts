@@ -51,7 +51,8 @@ const SLOT_OVERRIDE_INTENTS: ConversationIntent[] = [
   'prompt_challenge',
   'abuse_or_insult',
   'form_followup',
-  'price_question'
+  'price_question',
+  'call_scheduling_request'
 ];
 
 export class ConversationStateArbitrator {
@@ -64,6 +65,32 @@ export class ConversationStateArbitrator {
    */
   public static arbitrate(input: ArbitrationInput): ArbitrationResult {
     const { lastUserMessage, rawPendingSlot, rawInterpretedIntent, routerIntent, history } = input;
+
+    // Check if the last bot message was a call offer and user confirmed it
+    const assistantHistory = history.filter((m: any) => m.role === 'assistant');
+    const lastAssistantMsg = assistantHistory.length > 0 ? assistantHistory[assistantHistory.length - 1].content : '';
+    
+    const isCallOffer = (text: string) => {
+      const lowerText = text.toLowerCase();
+      return [
+        'görüşmek', 'gorusmek', 'arayalım', 'arayalim', 'arayabiliriz',
+        'arama planlama', 'telefon görüşmesi', 'telefon gorusmesi',
+        'danışmanımızla', 'danismanimizla', 'arama teklif', 'telefonla gorusalim', 'telefonla görüşelim'
+      ].some(kw => lowerText.includes(kw));
+    };
+
+    const lowerUser = (lastUserMessage || '').toLowerCase().trim();
+    const affirmatives = ['evet', 'olur', 'tamam', 'ok', 'okay', 'yes', 'uygun', 'kabul', 'tamamdir', 'hay hay', 'tabii', 'onaylıyorum', 'arayabilirsiniz', 'arayın', 'arayin', 'ararlar'];
+    const isAffirmative = affirmatives.some(kw => lowerUser === kw || lowerUser.startsWith(kw + ' ') || lowerUser.endsWith(' ' + kw) || lowerUser.includes(' ' + kw + ' '));
+
+    if (isCallOffer(lastAssistantMsg) && isAffirmative) {
+      return {
+        effectivePendingSlot: 'generic_none',
+        effectiveIntent: 'call_scheduling_request',
+        staleSlotSuppressed: true,
+        suppressionReason: 'callback_confirmed'
+      };
+    }
 
     // If no pending slot is active, pass through
     if (!rawPendingSlot || rawPendingSlot === 'generic_none') {

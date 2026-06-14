@@ -773,6 +773,81 @@ test("P0.12 MICRO: PromptBuilder SON CEVAP STİLİ guide inject test", async () 
   assert(!prompt3.includes("=== SON CEVAP STİLİ ==="), "Style guide should NOT be injected for non-target tenant");
 });
 
+test("P0.12 MICRO: Call Request / Confirmation Loop Fix", () => {
+  const { ConversationIntentRouter } = require("../lib/services/ai/conversation-intent-router");
+  const { ConversationStateArbitrator } = require("../lib/services/ai/conversation-state-arbitrator");
+  const { ContextAwareSafeFallbackResolver } = require("../lib/services/ai/context-aware-safe-fallback");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+
+  // 1. explicit call requests resolve to call_scheduling_request
+  const route1 = ConversationIntentRouter.route("beni arayabilir misiniz");
+  const route2 = ConversationIntentRouter.route("hasta danışmanı arasın");
+  assert(route1 === 'call_scheduling_request', "beni arayabilir misiniz should be call_scheduling_request");
+  assert(route2 === 'call_scheduling_request', "hasta danışmanı arasın should be call_scheduling_request");
+
+  // 2. evet + previous call offer -> call_scheduling_request with pending slot suppressed
+  const resArbitrated = ConversationStateArbitrator.arbitrate({
+    lastUserMessage: "evet",
+    rawPendingSlot: "price_followup",
+    rawInterpretedIntent: "confirmation_yes_no",
+    routerIntent: "generic_other",
+    history: [
+      { role: "user", content: "fiyat ne" },
+      { role: "assistant", content: "Dilerseniz hasta danışmanımızla telefon görüşmesi planlanması için not alabiliriz." }
+    ]
+  });
+
+  assert(resArbitrated.effectiveIntent === "call_scheduling_request", "Intent should override to call_scheduling_request");
+  assert(resArbitrated.effectivePendingSlot === "generic_none", "Pending slot should be suppressed");
+
+  // 3. Fallback resolver returns natural call request fallback
+  const mockBrain = createTenantBrain("t1", "whatsapp", "payload1", "Sen bir test asistanısın.", { industry: "healthcare" });
+  const fallbackRes1 = ContextAwareSafeFallbackResolver.resolve({
+    inboundText: "evet",
+    brain: mockBrain,
+    identityConfig: { personaName: "Rüya" },
+    unifiedContext: {
+      patient_known_facts: [],
+      history: [
+        { role: "user", content: "fiyat ne" },
+        { role: "assistant", content: "Dilerseniz hasta danışmanımızla telefon görüşmesi planlanması için not alabiliriz." }
+      ]
+    }
+  });
+
+  assert(fallbackRes1.text === "Size hangi saat aralığında ulaşılması uygun olur? 🙏", "Should ask for time range");
+
+  // 4. Fallback resolver returns confirmed callback if time/date is already known
+  const fallbackRes2 = ContextAwareSafeFallbackResolver.resolve({
+    inboundText: "evet",
+    brain: mockBrain,
+    identityConfig: { personaName: "Rüya" },
+    unifiedContext: {
+      patient_known_facts: [],
+      history: [
+        { role: "user", content: "fiyat ne" },
+        { role: "assistant", content: "Dilerseniz hasta danışmanımızla telefon görüşmesi planlanması için not alabiliriz." },
+        { role: "user", content: "saat 14:00 uygun" }
+      ]
+    }
+  });
+
+  assert(fallbackRes2.text === "Not aldım. Hasta danışmanımızla görüşme planlanması için iletebiliriz 🙏", "Should confirm call with time");
+
+  // 5. evet with no call offer should preserve general confirmation logic
+  const resArbitratedNormal = ConversationStateArbitrator.arbitrate({
+    lastUserMessage: "evet",
+    rawPendingSlot: "confirmation_yes_no",
+    rawInterpretedIntent: "confirmation_yes_no",
+    routerIntent: "generic_other",
+    history: [
+      { role: "user", content: "hello" },
+      { role: "assistant", content: "Merhaba, size nasıl yardımcı olabilirim?" }
+    ]
+  });
+  assert(resArbitratedNormal.effectivePendingSlot === "confirmation_yes_no", "Normal confirmation should not be suppressed if last msg was not call offer");
+});
+
 test("PHASE 2D: updateBot style-token sync test", async () => {
   process.env.TEST_TENANT_ID = 'test-tenant-id';
   process.env.TEST_USER_ROLE = 'owner';

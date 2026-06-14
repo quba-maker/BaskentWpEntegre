@@ -134,7 +134,10 @@ export class ConversationIntentRouter {
     const callSchedulingKeywords = [
       'telefon gorusmesi', 'telefonla gorus', 'telefonla arayin',
       'telefonla ulasin', 'arama planlayalim', 'arama yapin',
-      'beni arayin', 'sizi arayayim', 'arar misiniz', 'ararmisiniz'
+      'beni arayin', 'sizi arayayim', 'arar misiniz', 'ararmisiniz',
+      'beni arayabilir misiniz', 'arama yapar misiniz', 'telefonla gorusebilir miyiz',
+      'beni ararlar mi', 'hasta danismani arasin', 'sizinle gorusmek istiyorum',
+      'telefonla bilgi almak istiyorum', 'arar mi', 'ararlar mi'
     ];
     if (callSchedulingKeywords.some(kw => clean.includes(kw)) || /\barayın\b/i.test(clean) || /\barayin\b/i.test(clean)) {
       return 'call_scheduling_request';

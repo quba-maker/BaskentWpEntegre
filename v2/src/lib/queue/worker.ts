@@ -2186,9 +2186,43 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
     const inboundTextForBypass = content || '';
     const cleanInbound = inboundTextForBypass.toLowerCase().trim();
 
-    const detectedIntent = ConversationIntentRouter.route(inboundTextForBypass);
-    const pendingSlot = PendingQuestionResolver.resolve(history);
-    const interpretedIntent = ShortAnswerInterpreter.interpret(inboundTextForBypass, pendingSlot);
+    const { ConversationStateArbitrator } = await import('@/lib/services/ai/conversation-state-arbitrator');
+    const rawIntent = ConversationIntentRouter.route(inboundTextForBypass);
+    const rawPendingSlot = PendingQuestionResolver.resolve(history);
+    const interpretedIntent = ShortAnswerInterpreter.interpret(inboundTextForBypass, rawPendingSlot);
+
+    const arbitration = ConversationStateArbitrator.arbitrate({
+      lastUserMessage: inboundTextForBypass,
+      rawPendingSlot,
+      rawInterpretedIntent: interpretedIntent || '',
+      routerIntent: rawIntent,
+      history
+    });
+
+    const detectedIntent = arbitration.effectiveIntent;
+    const pendingSlot = arbitration.effectivePendingSlot;
+
+    const isCallbackConfirmed = arbitration.suppressionReason === 'callback_confirmed' || detectedIntent === 'call_scheduling_request';
+    if (isCallbackConfirmed) {
+      try {
+        await db.executeSafe({
+          text: `INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
+                 VALUES ($1, $2, $3, $4)`,
+          values: [
+            tenantId,
+            'CALLBACK_REQUEST_CONFIRMED',
+            `User confirmed or requested phone callback: "${inboundTextForBypass}"`,
+            JSON.stringify({
+              conversationId: conversationIdVal || conversationId,
+              phone: phoneNumber,
+              timestamp: new Date().toISOString()
+            })
+          ]
+        });
+      } catch (logErr) {
+        // Suppress log errors
+      }
+    }
 
     const isBotAccusation = ['bot musun', 'sen bot musun', 'are you a bot', 'botsun', 'robot musun', 'yapay zeka mısın', 'yapay zeka misin', 'insan mısın', 'insan misin'].some(kw => cleanInbound.includes(kw));
     const isAiAccusation = ['yapay zeka', 'yapayzeka', 'gpt', 'gemini', 'openai', 'claude', 'dil modeli', 'hangi model'].some(kw => cleanInbound.includes(kw));
@@ -4496,9 +4530,43 @@ Tek veya iki kısa cümle yaz.`;
     const inboundTextForBypass = latestInboundContent || '';
     const cleanInbound = inboundTextForBypass.toLowerCase().trim();
 
-    const detectedIntent = ConversationIntentRouter.route(inboundTextForBypass);
-    const pendingSlot = PendingQuestionResolver.resolve(history);
-    const interpretedIntent = ShortAnswerInterpreter.interpret(inboundTextForBypass, pendingSlot);
+    const { ConversationStateArbitrator } = await import('@/lib/services/ai/conversation-state-arbitrator');
+    const rawIntent = ConversationIntentRouter.route(inboundTextForBypass);
+    const rawPendingSlot = PendingQuestionResolver.resolve(history);
+    const interpretedIntent = ShortAnswerInterpreter.interpret(inboundTextForBypass, rawPendingSlot);
+
+    const arbitration = ConversationStateArbitrator.arbitrate({
+      lastUserMessage: inboundTextForBypass,
+      rawPendingSlot,
+      rawInterpretedIntent: interpretedIntent || '',
+      routerIntent: rawIntent,
+      history
+    });
+
+    const detectedIntent = arbitration.effectiveIntent;
+    const pendingSlot = arbitration.effectivePendingSlot;
+
+    const isCallbackConfirmed = arbitration.suppressionReason === 'callback_confirmed' || detectedIntent === 'call_scheduling_request';
+    if (isCallbackConfirmed) {
+      try {
+        await db.executeSafe({
+          text: `INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
+                 VALUES ($1, $2, $3, $4)`,
+          values: [
+            tenantId,
+            'CALLBACK_REQUEST_CONFIRMED',
+            `User confirmed or requested phone callback (delayed path): "${inboundTextForBypass}"`,
+            JSON.stringify({
+              conversationId: conversationId,
+              phone: phoneNumber,
+              timestamp: new Date().toISOString()
+            })
+          ]
+        });
+      } catch (logErr) {
+        // Suppress
+      }
+    }
 
     const isBotAccusation = ['bot musun', 'sen bot musun', 'are you a bot', 'botsun', 'robot musun', 'yapay zeka mısın', 'yapay zeka misin', 'insan mısın', 'insan misin'].some(kw => cleanInbound.includes(kw));
     const isAiAccusation = ['yapay zeka', 'yapayzeka', 'gpt', 'gemini', 'openai', 'claude', 'dil modeli', 'hangi model'].some(kw => cleanInbound.includes(kw));

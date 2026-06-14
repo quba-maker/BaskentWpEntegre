@@ -43,20 +43,31 @@ export class ContextAwareSafeFallbackResolver {
 
     const isHealthcareOrForm = isHealthcare || hasFormContext;
 
-    // Route message to find exact intent
-    const detectedIntent = ConversationIntentRouter.route(inboundText);
-
     // Resolve pending slot and interpreted intent
     const history = unifiedContext?.history || [];
     const { PendingQuestionResolver } = require('./pending-question-resolver');
     const { ShortAnswerInterpreter } = require('./short-answer-interpreter');
+    const { ConversationStateArbitrator } = require('./conversation-state-arbitrator');
     
-    const pendingSlot = PendingQuestionResolver.resolve(history);
-    const interpretedIntent = ShortAnswerInterpreter.interpret(inboundText, pendingSlot);
+    // Route message to find raw intent
+    const rawIntent = ConversationIntentRouter.route(inboundText);
+    const rawPendingSlot = PendingQuestionResolver.resolve(history);
+    const interpretedIntent = ShortAnswerInterpreter.interpret(inboundText, rawPendingSlot);
 
-    const isPromptChallenge = detectedIntent === 'prompt_challenge' || interpretedIntent === 'prompt_challenge';
-    const isAbuseOrInsult = detectedIntent === 'abuse_or_insult' || interpretedIntent === 'abuse_or_insult';
-    const isIdentityQuestion = detectedIntent === 'identity_question' || interpretedIntent === 'identity_question';
+    const arbitration = ConversationStateArbitrator.arbitrate({
+      lastUserMessage: inboundText,
+      rawPendingSlot,
+      rawInterpretedIntent: interpretedIntent || '',
+      routerIntent: rawIntent,
+      history
+    });
+
+    const detectedIntent = arbitration.effectiveIntent;
+    const pendingSlot = arbitration.effectivePendingSlot;
+
+    const isPromptChallenge = (detectedIntent as string) === 'prompt_challenge' || interpretedIntent === 'prompt_challenge';
+    const isAbuseOrInsult = (detectedIntent as string) === 'abuse_or_insult' || interpretedIntent === 'abuse_or_insult';
+    const isIdentityQuestion = (detectedIntent as string) === 'identity_question' || interpretedIntent === 'identity_question';
     
     const isAngryPatientText = [
       'şikayet', 'sikayet', 'rezalet', 'berbat', 'kötü', 'kotu', 'memnun değil', 'memnun degil',
@@ -439,8 +450,8 @@ export class ContextAwareSafeFallbackResolver {
           : `Sizi ilgili uzman temsilcimize aktarmamı onaylıyor musunuz?`;
       } else if (pendingSlot === 'price_followup') {
         slotText = isHealthcare
-          ? `Tedavi ve ücret detayları hakkında hasta danışmanımızla görüşmek ister misiniz?`
-          : `Tedavi ve ücret detayları hakkında temsilcimizle görüşmek ister misiniz?`;
+          ? `Dilerseniz hasta danışmanımızla telefon görüşmesi planlanması için not alabiliriz.`
+          : `Dilerseniz temsilcimizle telefon görüşmesi planlanması için not alabiliriz.`;
       } else if (pendingSlot === 'complaint_detail') {
         slotText = `Durumunuzu daha iyi anlayabilmemiz için şikayetinizi biraz daha detaylandırabilir misiniz?`;
       }
@@ -459,9 +470,24 @@ export class ContextAwareSafeFallbackResolver {
 
     // Priority 4: General Intent Fallbacks
     if (detectedIntent === 'call_scheduling_request') {
-      const text = isHealthcare
-        ? `Telefon görüşmesi talebinizi not aldım. Müsait olabileceğiniz gün ve saat aralığını paylaşabilirseniz, hasta danışmanımız planlama için sizinle iletişime geçecektir.`
-        : `Telefon görüşmesi talebinizi not aldım. Müsait olabileceğiniz gün ve saat aralığını paylaşabilirseniz, temsilci arkadaşımız planlama için sizinle iletişime geçecektir.`;
+      const factsText = Array.isArray(unifiedContext?.patient_known_facts) ? unifiedContext.patient_known_facts.join(' ').toLowerCase() : '';
+      const historyText = (history || []).map((m: any) => m.content).join(' ').toLowerCase();
+      const hasTime = factsText.includes('saat') || historyText.includes('saat') || /\d{1,2}[:.]\d{2}/.test(lowerInbound) || /\b\d{1,2}\s*(de|da|te|ta|e|a|gibi|sularında)\b/.test(lowerInbound);
+      
+      let text = '';
+      if (isHealthcare) {
+        if (hasTime) {
+          text = `Not aldım. Hasta danışmanımızla görüşme planlanması için iletebiliriz 🙏`;
+        } else {
+          text = `Size hangi saat aralığında ulaşılması uygun olur? 🙏`;
+        }
+      } else {
+        if (hasTime) {
+          text = `Not aldım. Temsilcimizle görüşme planlanması için iletebiliriz 🙏`;
+        } else {
+          text = `Size hangi saat aralığında ulaşılması uygun olur? 🙏`;
+        }
+      }
       return {
         text,
         sector: resolvedIndustry,
