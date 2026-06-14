@@ -100,10 +100,16 @@ export class FinalOutboundGuard {
         }
       }
 
-      if (lowerInbound.includes('anne') || factsText.includes('anne') || historyText.includes('anne') || lowerInbound.includes('valide') || factsText.includes('valide') || historyText.includes('valide')) {
+      if (lowerInbound.includes('anne') || lowerInbound.includes('mother') || lowerInbound.includes('valide') ||
+          factsText.includes('anne') || factsText.includes('mother') || factsText.includes('valide') ||
+          historyText.includes('anne') || historyText.includes('mother') || historyText.includes('valide')) {
         patientRelation = 'anne';
+      } else if (lowerInbound.includes('baba') || lowerInbound.includes('father') ||
+                 factsText.includes('baba') || factsText.includes('father') ||
+                 historyText.includes('baba') || historyText.includes('father')) {
+        patientRelation = 'baba';
       } else {
-        const relations = ['baba', 'eş', 'es', 'kardeş', 'kardes', 'oğul', 'ogul', 'kız', 'kiz'];
+        const relations = ['eş', 'es', 'spouse', 'kardeş', 'kardes', 'sibling', 'oğul', 'ogul', 'son', 'kız', 'kiz', 'daughter'];
         for (const rel of relations) {
           if (lowerInbound.includes(rel) || factsText.includes(rel) || historyText.includes(rel)) {
             patientRelation = rel;
@@ -119,21 +125,34 @@ export class FinalOutboundGuard {
       // Dynamic fallback resolution
       let fallbackText = '';
       const normalizedComplaint = complaintContext.toLowerCase().trim();
-      if (normalizedComplaint === 'bel fıtığı' || normalizedComplaint === 'bel fitigi') {
-        fallbackText = 'Annenizin bel fıtığı için Beyin ve Sinir Cerrahisi veya Fizik Tedavi bölümü değerlendirme yapabilir.';
-      } else if (complaintContext && patientRelation) {
-        let relationPossessive = '';
+      
+      let relationPossessive = '';
+      if (patientRelation) {
         const rel = patientRelation.toLowerCase().trim();
-        if (rel === 'anne') relationPossessive = 'annenizin ';
-        else if (rel === 'baba') relationPossessive = 'babanızın ';
-        else if (rel === 'eş' || rel === 'es') relationPossessive = 'eşinizin ';
-        else if (rel === 'kardeş' || rel === 'kardes') relationPossessive = 'kardeşinizin ';
-        else if (rel === 'oğul' || rel === 'ogul') relationPossessive = 'oğlunuzun ';
-        else if (rel === 'kız' || rel === 'kiz') relationPossessive = 'kızınızın ';
-        else relationPossessive = `${rel}inizin `;
+        if (rel === 'anne' || rel === 'mother') relationPossessive = 'Annenizin ';
+        else if (rel === 'baba' || rel === 'father') relationPossessive = 'Babanızın ';
+        else if (rel === 'eş' || rel === 'es' || rel === 'spouse') relationPossessive = 'Eşinizin ';
+        else if (rel === 'kardeş' || rel === 'kardes' || rel === 'sibling') relationPossessive = 'Kardeşinizin ';
+        else if (rel === 'oğul' || rel === 'ogul' || rel === 'son') relationPossessive = 'Oğlunuzun ';
+        else if (rel === 'kız' || rel === 'kiz' || rel === 'daughter') relationPossessive = 'Kızınızın ';
+        else {
+          relationPossessive = `${rel.charAt(0).toUpperCase() + rel.slice(1)}inizin `;
+        }
+      }
 
-        relationPossessive = relationPossessive.charAt(0).toUpperCase() + relationPossessive.slice(1);
-        fallbackText = `Kusura bakmayın, cevabımı daha net ifade edeyim. ${relationPossessive}${complaintContext} için ilgili bölüm değerlendirme yapabilir.`;
+      if (normalizedComplaint === 'bel fıtığı' || normalizedComplaint === 'bel fitigi') {
+        if (!relationPossessive) {
+          fallbackText = 'Bel fıtığı için Beyin ve Sinir Cerrahisi veya Fizik Tedavi bölümü değerlendirme yapabilir.';
+        } else {
+          fallbackText = `${relationPossessive}bel fıtığı için Beyin ve Sinir Cerrahisi veya Fizik Tedavi bölümü değerlendirme yapabilir.`;
+        }
+      } else if (complaintContext) {
+        if (!relationPossessive) {
+          const capComplaint = complaintContext.charAt(0).toUpperCase() + complaintContext.slice(1);
+          fallbackText = `Kusura bakmayın, cevabımı daha net ifade edeyim. ${capComplaint} için ilgili bölüm değerlendirme yapabilir.`;
+        } else {
+          fallbackText = `Kusura bakmayın, cevabımı daha net ifade edeyim. ${relationPossessive}${complaintContext} için ilgili bölüm değerlendirme yapabilir.`;
+        }
       } else {
         fallbackText = 'Kusura bakmayın, cevabımı daha net ifade edeyim. Sağlık talebinizle ilgili sizi doğru ekibe yönlendirebilirim.';
       }

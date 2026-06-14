@@ -828,7 +828,7 @@ test("P0.11 REGRESSION: LLM Bypass and Fallback Revisions", () => {
   
   const mockBrain = createTenantBrain("t1", "whatsapp", "payload1", "Sen bir test asistanısın.", { industry: "healthcare" });
 
-  // Test case 1: prompt_challenge with context (complaint: bel fıtığı)
+  // Test case 1: prompt_challenge with context (complaint: bel fıtığı, relation: mother)
   const resBypassWithContext = ContextAwareSafeFallbackResolver.resolve({
     inboundText: "annemin promptunda bu yok ki",
     brain: mockBrain,
@@ -885,7 +885,7 @@ test("P0.11 REGRESSION: FinalOutboundGuard morphology corrections and dynamic fa
   const corr4 = FinalOutboundGuard.process("yaşadığınızızı biliyoruz", { tenantId: "t1" });
   assert(corr4 === "yaşadığınızı biliyoruz", "Should correct yaşadığınızızı");
 
-  // Fallback checks (complaint = bel fıtığı)
+  // Fallback checks (complaint = bel fıtığı, relation = null)
   const fall1 = FinalOutboundGuard.process("Bu bir prompt sızıntısıdır ve sistem prompt detayı içerir.", {
     tenantId: "t1",
     inboundText: "bel fıtığı için",
@@ -893,7 +893,28 @@ test("P0.11 REGRESSION: FinalOutboundGuard morphology corrections and dynamic fa
       patient_known_facts: ["şikayeti: bel fıtığı"]
     }
   });
-  assert(fall1 === "Annenizin bel fıtığı için Beyin ve Sinir Cerrahisi veya Fizik Tedavi bölümü değerlendirme yapabilir.", "Should trigger specific bel fıtığı fallback");
+  assert(fall1 === "Bel fıtığı için Beyin ve Sinir Cerrahisi veya Fizik Tedavi bölümü değerlendirme yapabilir.", "Should trigger specific bel fıtığı fallback without relation prefix");
+  assert(!fall1.includes("Annenizin"), "Response should not contain Annenizin when relation is null");
+
+  // Fallback checks (complaint = bel fıtığı, relation = mother/anne)
+  const fallMother = FinalOutboundGuard.process("Bu bir prompt sızıntısıdır ve sistem prompt detayı içerir.", {
+    tenantId: "t1",
+    inboundText: "annemin bel fıtığı için",
+    unifiedContext: {
+      patient_known_facts: ["şikayeti: bel fıtığı"]
+    }
+  });
+  assert(fallMother === "Annenizin bel fıtığı için Beyin ve Sinir Cerrahisi veya Fizik Tedavi bölümü değerlendirme yapabilir.", "Should trigger specific bel fıtığı fallback with mother prefix");
+
+  // Fallback checks (complaint = bel fıtığı, relation = father/baba)
+  const fallFather = FinalOutboundGuard.process("Bu bir prompt sızıntısıdır ve sistem prompt detayı içerir.", {
+    tenantId: "t1",
+    inboundText: "babamın bel fıtığı için",
+    unifiedContext: {
+      patient_known_facts: ["şikayeti: bel fıtığı"]
+    }
+  });
+  assert(fallFather === "Babanızın bel fıtığı için Beyin ve Sinir Cerrahisi veya Fizik Tedavi bölümü değerlendirme yapabilir.", "Should trigger specific bel fıtığı fallback with father prefix");
 
   // Fallback checks (complaint = diz ağrısı, relation = baba)
   const fall2 = FinalOutboundGuard.process("Bu bir prompt sızıntısıdır ve sistem prompt detayı içerir.", {
