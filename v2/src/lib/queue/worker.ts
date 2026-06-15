@@ -16,6 +16,8 @@ import { CredentialsService } from "@/lib/services/credentials.service";
 import { isThreeSixtyProvider } from "@/lib/core/provider-aliases";
 import { getTraceContext } from "@/lib/core/trace-context";
 
+import { isBaskentV58NameBypassAllowed } from "@/lib/services/ai/baskent-v58-context";
+
 function safeAfter(cb: () => void | Promise<void>) {
   try {
     after(cb);
@@ -2246,10 +2248,17 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
     const shouldBypassDoctorLookup = isDoctorLookup && !(isBaskentTenant && isBaskentWhatsappTrChannel && hasBaskentV58Prompt);
 
     const isBaskentV58 = isBaskentTenant && isBaskentWhatsappTrChannel && hasBaskentV58Prompt;
+    const isBaskentV58NameBypass = isBaskentV58 && isBaskentV58NameBypassAllowed({
+      inboundText: inboundTextForBypass,
+      history,
+      detectedIntent: (detectedIntent as string) || undefined,
+      interpretedIntent: (interpretedIntent as string) || undefined
+    });
     const isBaskentV58BypassIntent = isBaskentV58 && (
       detectedIntent === 'identity_question' ||
       detectedIntent === 'call_scheduling_request' ||
-      detectedIntent === 'continuation_short_reply'
+      detectedIntent === 'continuation_short_reply' ||
+      isBaskentV58NameBypass
     );
 
     const isLlmBypassChallenge = isPromptChallenge || isBotAccusation || isAiAccusation || isAngryPromptChallenge || shouldBypassDoctorLookup || isHumanTransfer || isFormFollowup || isUserCorrection || isBaskentV58BypassIntent;
@@ -2532,7 +2541,10 @@ Tek veya iki kısa cümle yaz.`;
             unifiedContext,
             reason: qualityGate.reason || '',
             channel,
-            path: 'queue_immediate'
+            path: 'queue_immediate',
+            channelId: resolvedChannelId || metadata.channelId || undefined,
+            systemPromptText: systemPromptText || undefined,
+            promptVersion: brain.prompts.metadata?.version || undefined
           });
 
           if (recoveryResult.recovered && recoveryResult.text) {
@@ -2783,11 +2795,13 @@ Tek veya iki kısa cümle yaz.`;
       const { FinalOutboundGuard } = await import('@/lib/services/ai/final-outbound-guard');
       finalResponseText = FinalOutboundGuard.process(finalResponseText, {
         tenantId,
-        channelId: metadata.channelId,
+        channelId: resolvedChannelId || metadata.channelId || undefined,
         conversationId: conversationId || 'unknown',
         inboundText: content || '',
         unifiedContext,
-        industry: brain.context.config?.industry || (brain.prompts.metadata as any)?.industry || ''
+        industry: brain.context.config?.industry || (brain.prompts.metadata as any)?.industry || '',
+        systemPromptText: systemPromptText || undefined,
+        promptVersion: brain.prompts.metadata?.version || undefined
       });
     }
 
@@ -4603,10 +4617,17 @@ Tek veya iki kısa cümle yaz.`;
     const shouldBypassDoctorLookup = isDoctorLookup && !(isBaskentTenant && isBaskentWhatsappTrChannel && hasBaskentV58Prompt);
 
     const isBaskentV58 = isBaskentTenant && isBaskentWhatsappTrChannel && hasBaskentV58Prompt;
+    const isBaskentV58NameBypass = isBaskentV58 && isBaskentV58NameBypassAllowed({
+      inboundText: inboundTextForBypass,
+      history,
+      detectedIntent: (detectedIntent as string) || undefined,
+      interpretedIntent: (interpretedIntent as string) || undefined
+    });
     const isBaskentV58BypassIntent = isBaskentV58 && (
       detectedIntent === 'identity_question' ||
       detectedIntent === 'call_scheduling_request' ||
-      detectedIntent === 'continuation_short_reply'
+      detectedIntent === 'continuation_short_reply' ||
+      isBaskentV58NameBypass
     );
 
     const isLlmBypassChallenge = isPromptChallenge || isBotAccusation || isAiAccusation || isAngryPromptChallenge || shouldBypassDoctorLookup || isHumanTransfer || isFormFollowup || isUserCorrection || isBaskentV58BypassIntent;
@@ -4781,7 +4802,10 @@ Tek veya iki kısa cümle yaz.`;
             unifiedContext,
             reason: qualityGate.reason || '',
             channel,
-            path: 'queue_delayed'
+            path: 'queue_delayed',
+            channelId: resolvedChannelId || metadata.channelId || undefined,
+            systemPromptText: systemPromptText || undefined,
+            promptVersion: brain.prompts.metadata?.version || undefined
           });
 
           if (recoveryResult.recovered && recoveryResult.text) {
@@ -4871,11 +4895,13 @@ Tek veya iki kısa cümle yaz.`;
         const { FinalOutboundGuard } = await import('@/lib/services/ai/final-outbound-guard');
         finalResponseText = FinalOutboundGuard.process(finalResponseText, {
           tenantId,
-          channelId: metadata.channelId,
+          channelId: resolvedChannelId || metadata.channelId || undefined,
           conversationId: conversationId || 'unknown',
           inboundText: latestInboundContent || '',
           unifiedContext,
-          industry: brain.context.config?.industry || (brain.prompts.metadata as any)?.industry || ''
+          industry: brain.context.config?.industry || (brain.prompts.metadata as any)?.industry || '',
+          systemPromptText: systemPromptText || undefined,
+          promptVersion: brain.prompts.metadata?.version || undefined
         });
       }
 

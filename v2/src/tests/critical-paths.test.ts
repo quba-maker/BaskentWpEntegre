@@ -860,7 +860,11 @@ test("P0.12 MICRO: Technical error leakage prevention in FinalOutboundGuard", ()
   ];
 
   for (const text of texts) {
-    const res = FinalOutboundGuard.process(text, { tenantId });
+    const res = FinalOutboundGuard.process(text, {
+      tenantId,
+      channelId: '2e7352c1-5db7-4414-baf7-de571a66bfa6',
+      promptVersion: 58
+    });
     assert(res === "Ben *Rüya*, Konya Başkent Hastanesi’nden sizinle ilgileniyorum\n\nSorunuzu yazarsanız size yardımcı olayım 🌿", `Should return Rüya fallback for: ${text}`);
   }
 

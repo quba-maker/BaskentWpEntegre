@@ -5627,10 +5627,11 @@ export async function prepareInboxBotAssistedDraftAction(
 
       // Fetch dynamic identity configuration
       let identityConfig = { personaName: '', organizationName: '', organizationShortName: '' };
+      let promptVersion: any = undefined;
       try {
         const promptRows = await ctx.db.executeSafe({
           text: `
-            SELECT cp.metadata
+            SELECT cp.metadata, cp.version
             FROM channel_prompt_bindings cpb
             JOIN channel_prompts cp ON cpb.prompt_id = cp.id
             JOIN channels c ON cpb.channel_id = c.id
@@ -5645,8 +5646,11 @@ export async function prepareInboxBotAssistedDraftAction(
           values: [ctx.tenantId]
         }) as any[];
         
-        if (promptRows && promptRows.length > 0 && promptRows[0].metadata?.identity) {
-          identityConfig = promptRows[0].metadata.identity;
+        if (promptRows && promptRows.length > 0) {
+          if (promptRows[0].metadata?.identity) {
+            identityConfig = promptRows[0].metadata.identity;
+          }
+          promptVersion = promptRows[0].version;
         }
       } catch (dbErr) {
         console.error("[INBOX_DRAFT_IDENTITY_RESOLVE_ERROR] Failed to fetch prompt metadata", dbErr);
@@ -5889,7 +5893,10 @@ Lütfen bu bilgilere göre yukarıdaki kurallara ve talimatlara uygun cevap tasl
                   },
                   reason: cleanedQualityGate.reason || 'style_quality',
                   channel: 'whatsapp',
-                  path: 'panel_draft'
+                  path: 'panel_draft',
+                  channelId: conv.channel_id || undefined,
+                  systemPromptText: systemPrompt || undefined,
+                  promptVersion: promptVersion || undefined
                 });
 
                 if (recoveryResult.recovered && recoveryResult.text) {
@@ -5933,7 +5940,10 @@ Lütfen bu bilgilere göre yukarıdaki kurallara ve talimatlara uygun cevap tasl
                 },
                 reason: qualityGate.reason || 'style_quality',
                 channel: 'whatsapp',
-                path: 'panel_draft'
+                path: 'panel_draft',
+                channelId: conv.channel_id || undefined,
+                systemPromptText: systemPrompt || undefined,
+                promptVersion: promptVersion || undefined
               });
 
               if (recoveryResult.recovered && recoveryResult.text) {

@@ -12,6 +12,9 @@ export interface QualityGateRecoveryParams {
   reason: string;
   channel: string;
   path: 'queue_immediate' | 'queue_delayed' | 'panel_draft' | 'smart_draft';
+  channelId?: string;
+  systemPromptText?: string;
+  promptVersion?: string | number;
 }
 
 export interface QualityGateRecoveryResult {
@@ -112,7 +115,10 @@ export class QualityGateRecoveryHelper {
         inboundText: inboundText || '',
         brain,
         identityConfig: identityConfig || {},
-        unifiedContext: unifiedContext || {}
+        unifiedContext: unifiedContext || {},
+        channelId: params.channelId,
+        systemPromptText: params.systemPromptText,
+        promptVersion: params.promptVersion
       });
 
       // Log recovery action to ai_audit_logs

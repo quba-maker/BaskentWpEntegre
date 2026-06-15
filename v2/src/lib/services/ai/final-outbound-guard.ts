@@ -1,4 +1,5 @@
 import { withTenantDB } from '@/lib/core/tenant-db';
+import { isBaskentV58Context } from './baskent-v58-context';
 
 export interface OutboundGuardContext {
   tenantId: string;
@@ -13,6 +14,8 @@ export interface OutboundGuardContext {
   isHealthcare?: boolean;
   lastUserIntent?: string;
   messageSource?: string;
+  promptVersion?: string | number;
+  systemPromptText?: string;
 }
 
 export class FinalOutboundGuard {
@@ -236,9 +239,23 @@ export class FinalOutboundGuard {
 
     // Trigger fallback if blocked pattern exists, or if sentence is incomplete / extremely short
     if (hasBlockedPattern || isSentenceIncomplete || isExtremelyShort || isShortGreetingOnly) {
+      const isBaskent = isBaskentV58Context({
+        tenantId,
+        channelId: context.channelId,
+        promptVersion: context.promptVersion,
+        systemPromptText: context.systemPromptText
+      });
+
+      const history = unifiedContext?.history || [];
+      const hasHistory = Array.isArray(history) && history.length > 0;
+
       let fallbackText = '';
-      if (tenantId === 'caab9ea1-9591-45e4-bbc5-9c9b498982c8') {
-        fallbackText = `Ben *Rüya*, Konya Başkent Hastanesi’nden sizinle ilgileniyorum\n\nSorunuzu yazarsanız size yardımcı olayım 🌿`;
+      if (isBaskent) {
+        if (hasHistory) {
+          fallbackText = "Kusura bakmayın, sorunuzu tam anlayamadım. Talebinizle ilgili yardımcı olabilmem için detayları iletebilir misiniz? 🌿";
+        } else {
+          fallbackText = `Ben *Rüya*, Konya Başkent Hastanesi’nden sizinle ilgileniyorum\n\nSorunuzu yazarsanız size yardımcı olayım 🌿`;
+        }
       } else if (isHealthcare) {
         fallbackText = 'Kusura bakmayın, cevabımı daha net ifade edeyim. Sağlık talebinizle ilgili sizi doğru ekibe yönlendirebilirim.';
       } else {
