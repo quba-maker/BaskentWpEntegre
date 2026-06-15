@@ -1,5 +1,5 @@
 import { withTenantDB } from '@/lib/core/tenant-db';
-import { isBaskentV58Context } from './baskent-v58-context';
+import { resolveActivePromptIdentityContext } from './active-prompt-context';
 
 export interface OutboundGuardContext {
   tenantId: string;
@@ -239,22 +239,36 @@ export class FinalOutboundGuard {
 
     // Trigger fallback if blocked pattern exists, or if sentence is incomplete / extremely short
     if (hasBlockedPattern || isSentenceIncomplete || isExtremelyShort || isShortGreetingOnly) {
-      const isBaskent = isBaskentV58Context({
-        tenantId,
-        channelId: context.channelId,
-        promptVersion: context.promptVersion,
-        systemPromptText: context.systemPromptText
+      const mockBrainForIdentity = {
+        prompts: {
+          systemPrompt: context.systemPromptText,
+          metadata: {
+            version: context.promptVersion
+          }
+        },
+        context: {
+          config: {
+            channelId: context.channelId,
+            industry: context.isHealthcare ? 'healthcare' : undefined
+          }
+        }
+      };
+
+      const identityCtx = resolveActivePromptIdentityContext({
+        brain: mockBrainForIdentity,
+        identityConfig: context.unifiedContext?.identityConfig || context.unifiedContext?.identity || {}
       });
 
       const history = unifiedContext?.history || [];
       const hasHistory = Array.isArray(history) && history.length > 0;
+      const hasPersona = !!identityCtx.personaName && identityCtx.personaName !== 'Asistan';
 
       let fallbackText = '';
-      if (isBaskent) {
+      if (hasPersona) {
         if (hasHistory) {
-          fallbackText = "Kusura bakmayın, sorunuzu tam anlayamadım. Talebinizle ilgili yardımcı olabilmem için detayları iletebilir misiniz? 🌿";
+          fallbackText = "Kusura bakmayın, sorunuzu tam anlayamadım. Talebinizle ilgili yardımcı olabilmem için detayları iletebilir misiniz?";
         } else {
-          fallbackText = `Ben *Rüya*, Konya Başkent Hastanesi’nden sizinle ilgileniyorum\n\nSorunuzu yazarsanız size yardımcı olayım 🌿`;
+          fallbackText = `Ben *${identityCtx.personaName}*, ${identityCtx.organizationName}’nden sizinle ilgileniyorum\n\nSorunuzu yazarsanız size yardımcı olayım`;
         }
       } else if (isHealthcare) {
         fallbackText = 'Kusura bakmayın, cevabımı daha net ifade edeyim. Sağlık talebinizle ilgili sizi doğru ekibe yönlendirebilirim.';

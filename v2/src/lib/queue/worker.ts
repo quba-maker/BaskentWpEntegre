@@ -16,7 +16,7 @@ import { CredentialsService } from "@/lib/services/credentials.service";
 import { isThreeSixtyProvider } from "@/lib/core/provider-aliases";
 import { getTraceContext } from "@/lib/core/trace-context";
 
-import { isBaskentV58NameBypassAllowed } from "@/lib/services/ai/baskent-v58-context";
+import { isNameBypassAllowed } from "@/lib/services/ai/active-prompt-context";
 
 function safeAfter(cb: () => void | Promise<void>) {
   try {
@@ -2236,32 +2236,11 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
     const isFormFollowup = detectedIntent === 'form_followup' || (interpretedIntent as any) === 'form_followup';
     const isUserCorrection = detectedIntent === 'user_correction' || (interpretedIntent as any) === 'user_correction';
 
-    const isBaskentTenant = tenantId === 'caab9ea1-9591-45e4-bbc5-9c9b498982c8';
-    const isBaskentWhatsappTrChannel = (resolvedChannelId || metadata.channelId) === '2e7352c1-5db7-4414-baf7-de571a66bfa6';
-    const promptVersion = brain.prompts.metadata?.version;
-    const hasBaskentV58Prompt =
-      promptVersion === 58 ||
-      promptVersion === '58' ||
-      promptVersion === 'v58' ||
-      systemPromptText.includes('Mustafa Kemal İLİK');
+    const doctorDirectory = brain.context.config?.doctors || brain.context.config?.doctorDirectory || brain.context.config?.doctor_directory;
+    const hasDoctorDirectory = (Array.isArray(doctorDirectory) && doctorDirectory.length > 0) || (typeof doctorDirectory === 'string' && doctorDirectory.trim().length > 0);
+    const shouldBypassDoctorLookup = isDoctorLookup && !hasDoctorDirectory;
 
-    const shouldBypassDoctorLookup = isDoctorLookup && !(isBaskentTenant && isBaskentWhatsappTrChannel && hasBaskentV58Prompt);
-
-    const isBaskentV58 = isBaskentTenant && isBaskentWhatsappTrChannel && hasBaskentV58Prompt;
-    const isBaskentV58NameBypass = isBaskentV58 && isBaskentV58NameBypassAllowed({
-      inboundText: inboundTextForBypass,
-      history,
-      detectedIntent: (detectedIntent as string) || undefined,
-      interpretedIntent: (interpretedIntent as string) || undefined
-    });
-    const isBaskentV58BypassIntent = isBaskentV58 && (
-      detectedIntent === 'identity_question' ||
-      detectedIntent === 'call_scheduling_request' ||
-      detectedIntent === 'continuation_short_reply' ||
-      isBaskentV58NameBypass
-    );
-
-    const isLlmBypassChallenge = isPromptChallenge || isBotAccusation || isAiAccusation || isAngryPromptChallenge || shouldBypassDoctorLookup || isHumanTransfer || isFormFollowup || isUserCorrection || isBaskentV58BypassIntent;
+    const isLlmBypassChallenge = isPromptChallenge || isBotAccusation || isAiAccusation || isAngryPromptChallenge || shouldBypassDoctorLookup || isHumanTransfer;
 
     let bypassed = false;
     let bypassedText = '';
@@ -4605,32 +4584,11 @@ Tek veya iki kısa cümle yaz.`;
     const isFormFollowup = detectedIntent === 'form_followup' || (interpretedIntent as any) === 'form_followup';
     const isUserCorrection = detectedIntent === 'user_correction' || (interpretedIntent as any) === 'user_correction';
 
-    const isBaskentTenant = tenantId === 'caab9ea1-9591-45e4-bbc5-9c9b498982c8';
-    const isBaskentWhatsappTrChannel = (resolvedChannelId || metadata.channelId) === '2e7352c1-5db7-4414-baf7-de571a66bfa6';
-    const promptVersion = brain.prompts.metadata?.version;
-    const hasBaskentV58Prompt =
-      promptVersion === 58 ||
-      promptVersion === '58' ||
-      promptVersion === 'v58' ||
-      systemPromptText.includes('Mustafa Kemal İLİK');
+    const doctorDirectory = brain.context.config?.doctors || brain.context.config?.doctorDirectory || brain.context.config?.doctor_directory;
+    const hasDoctorDirectory = (Array.isArray(doctorDirectory) && doctorDirectory.length > 0) || (typeof doctorDirectory === 'string' && doctorDirectory.trim().length > 0);
+    const shouldBypassDoctorLookup = isDoctorLookup && !hasDoctorDirectory;
 
-    const shouldBypassDoctorLookup = isDoctorLookup && !(isBaskentTenant && isBaskentWhatsappTrChannel && hasBaskentV58Prompt);
-
-    const isBaskentV58 = isBaskentTenant && isBaskentWhatsappTrChannel && hasBaskentV58Prompt;
-    const isBaskentV58NameBypass = isBaskentV58 && isBaskentV58NameBypassAllowed({
-      inboundText: inboundTextForBypass,
-      history,
-      detectedIntent: (detectedIntent as string) || undefined,
-      interpretedIntent: (interpretedIntent as string) || undefined
-    });
-    const isBaskentV58BypassIntent = isBaskentV58 && (
-      detectedIntent === 'identity_question' ||
-      detectedIntent === 'call_scheduling_request' ||
-      detectedIntent === 'continuation_short_reply' ||
-      isBaskentV58NameBypass
-    );
-
-    const isLlmBypassChallenge = isPromptChallenge || isBotAccusation || isAiAccusation || isAngryPromptChallenge || shouldBypassDoctorLookup || isHumanTransfer || isFormFollowup || isUserCorrection || isBaskentV58BypassIntent;
+    const isLlmBypassChallenge = isPromptChallenge || isBotAccusation || isAiAccusation || isAngryPromptChallenge || shouldBypassDoctorLookup || isHumanTransfer;
 
     let bypassed = false;
     let bypassedText = '';

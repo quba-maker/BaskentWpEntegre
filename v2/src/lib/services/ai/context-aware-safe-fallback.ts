@@ -1,7 +1,6 @@
 import { TenantBrain } from '../../brain/tenant-brain';
 import { ConversationIntentRouter, ConversationIntent } from './conversation-intent-router';
-import { MedicalDepartmentResolver } from './medical-department-resolver';
-import { isBaskentV58Context, isBaskentV58NameBypassAllowed } from './baskent-v58-context';
+import { resolveActivePromptIdentityContext, isNameBypassAllowed } from './active-prompt-context';
 
 export interface DeterministicFallbackParams {
   inboundText: string;
@@ -165,106 +164,110 @@ export class ContextAwareSafeFallbackResolver {
       }
     }
 
-    const resolvedChannelId = params.channelId || 
-                              brain.context.config?.channelId || 
-                              brain.context.config?.channel_id || 
-                              brain.context.config?.raw?.channelId || 
-                              brain.context.config?.raw?.channel_id;
-    const promptVersionVal = params.promptVersion ||
-                             brain.prompts.metadata?.version ||
-                             brain.context.config?.promptVersion;
     const systemPromptContent = params.systemPromptText || brain.prompts?.systemPrompt || '';
 
-    const isBaskent = isBaskentV58Context({
-      tenantId: brain.context.tenantId,
-      channelId: resolvedChannelId || undefined,
-      promptVersion: promptVersionVal || undefined,
-      systemPromptText: systemPromptContent || undefined
+    const identityCtx = resolveActivePromptIdentityContext({
+      brain,
+      identityConfig,
+      systemPromptText: systemPromptContent
+    });
+
+    const hasPersona = !!identityCtx.personaName && identityCtx.personaName !== 'Asistan';
+    const pName = identityCtx.personaName || 'Asistan';
+    const orgName = identityCtx.organizationName || (isHealthcare ? 'Sağlık Merkezi' : 'Hizmet Merkezi');
+    const agentName = isHealthcare ? 'hasta danışmanımız' : 'temsilcimiz';
+
+    // 1. identity_question
+    if (detectedIntent === 'identity_question') {
+      if (hasPersona) {
+        return {
+          text: `Ben *${pName}*, ${orgName}’nden sizinle ilgileniyorum. Size nasıl yardımcı olabilirim? 🌿`,
+          sector: resolvedIndustry,
+          hasFormContext,
+          hasComplaint,
+          finalPath: 'identity_tenant_bypass',
+          detectedIntent
+        };
+      } else {
+        return {
+          text: `Merhaba, size yardımcı olmak üzere buradayım. Hangi konuda bilgi almak istersiniz?`,
+          sector: resolvedIndustry,
+          hasFormContext,
+          hasComplaint,
+          finalPath: 'identity_generic_bypass',
+          detectedIntent
+        };
+      }
+    }
+
+    // 2. call_scheduling_request (only if tenant has custom active prompt/config)
+    if (detectedIntent === 'call_scheduling_request' && identityCtx.hasTenantPrompt) {
+      const { isValidPatientName } = require('../../utils/patient-name-resolver');
+      const patientNameVal = unifiedContext?.conversation?.patient_name || unifiedContext?.opportunity?.patient_name || '';
+      const hasValidName = patientNameVal && isValidPatientName(patientNameVal) && !patientNameVal.includes('İsimsiz') && !patientNameVal.match(/^\+?\d+/);
+
+      if (!hasValidName) {
+        return {
+          text: `Telefon görüşmesi planlaması için ${agentName} size yardımcı olabilir. Size uygun olduğunuz bir zaman aralığını belirtebilir misiniz? Ayrıca, size daha doğru yardımcı olabilmem için adınızı öğrenebilir miyim? 🙏`,
+          sector: resolvedIndustry,
+          hasFormContext,
+          hasComplaint,
+          finalPath: 'call_scheduling_tenant_unknown_name_bypass',
+          detectedIntent
+        };
+      } else {
+        return {
+          text: `Telefon görüşmesi planlaması için ${agentName} size yardımcı olabilir. Size uygun olduğunuz bir zaman aralığını belirtebilir misiniz? 🙏`,
+          sector: resolvedIndustry,
+          hasFormContext,
+          hasComplaint,
+          finalPath: 'call_scheduling_tenant_known_name_bypass',
+          detectedIntent
+        };
+      }
+    }
+
+    // 3. name_intent + aktif call flow (only if tenant has custom active prompt/config)
+    const isNameAllowed = isNameBypassAllowed({
+      inboundText,
+      history,
+      detectedIntent: (detectedIntent as string) || undefined,
+      interpretedIntent: interpretedIntent || undefined
     });
     
-    if (isBaskent) {
-      // 1. identity_question
-      if (detectedIntent === 'identity_question') {
+    if (isNameAllowed && identityCtx.hasTenantPrompt) {
+      const nameToUse = detectedName;
+      return {
+        text: `Teşekkür ederim ${nameToUse}. Bilgilerinizi not aldım. Görüşme için size hangi saat aralığında ulaşılması uygun olur? 🙏`,
+        sector: resolvedIndustry,
+        hasFormContext,
+        hasComplaint,
+        finalPath: 'name_intent_call_flow_tenant_bypass',
+        detectedIntent
+      };
+    }
+
+    // 4. continuation_short_reply + aktif pending slot (only if tenant has custom active prompt/config)
+    if (detectedIntent === 'continuation_short_reply' && identityCtx.hasTenantPrompt) {
+      if (pendingSlot === 'call_time' || pendingSlot === 'call_date' || pendingSlot === 'timezone_clarification') {
         return {
-          text: "Ben *Rüya*, Konya Başkent Hastanesi’nden sizinle ilgileniyorum. Size nasıl yardımcı olabilirim? 🌿",
+          text: "Arama planlaması için size hangi saat aralığında ulaşılması uygun olur? 🙏",
           sector: resolvedIndustry,
           hasFormContext,
           hasComplaint,
-          finalPath: 'identity_baskent_bypass',
+          finalPath: 'continuation_call_time_tenant_bypass',
           detectedIntent
         };
-      }
-
-      // 2. call_scheduling_request
-      if (detectedIntent === 'call_scheduling_request') {
-        const { isValidPatientName } = require('../../utils/patient-name-resolver');
-        const pName = unifiedContext?.conversation?.patient_name || unifiedContext?.opportunity?.patient_name || '';
-        const hasValidName = pName && isValidPatientName(pName) && !pName.includes('İsimsiz') && !pName.match(/^\+?\d+/);
-
-        if (!hasValidName) {
-          return {
-            text: "Telefon görüşmesi planlaması için hasta danışmanımız size yardımcı olabilir. Size uygun olduğunuz bir zaman aralığını belirtebilir misiniz? Ayrıca, size daha doğru yardımcı olabilmem için adınızı öğrenebilir miyim? 🙏",
-            sector: resolvedIndustry,
-            hasFormContext,
-            hasComplaint,
-            finalPath: 'call_scheduling_baskent_unknown_name_bypass',
-            detectedIntent
-          };
-        } else {
-          return {
-            text: "Telefon görüşmesi planlaması için hasta danışmanımız size yardımcı olabilir. Size uygun olduğunuz bir zaman aralığını belirtebilir misiniz? 🙏",
-            sector: resolvedIndustry,
-            hasFormContext,
-            hasComplaint,
-            finalPath: 'call_scheduling_baskent_known_name_bypass',
-            detectedIntent
-          };
-        }
-      }
-
-      // 3. name_intent + aktif call flow
-      const isNameBypassAllowed = isBaskentV58NameBypassAllowed({
-        inboundText,
-        history,
-        detectedIntent: (detectedIntent as string) || undefined,
-        interpretedIntent: interpretedIntent || undefined
-      });
-      
-      if (isNameBypassAllowed) {
-        const nameToUse = detectedName;
+      } else if (pendingSlot === 'confirmation_yes_no') {
         return {
-          text: `Teşekkür ederim ${nameToUse}. Bilgilerinizi not aldım. Görüşme için size hangi saat aralığında ulaşılması uygun olur? 🙏`,
+          text: "Belirttiğimiz görüşme planlamasını onaylıyor musunuz?",
           sector: resolvedIndustry,
           hasFormContext,
           hasComplaint,
-          finalPath: 'name_intent_call_flow_baskent_bypass',
+          finalPath: 'continuation_confirmation_tenant_bypass',
           detectedIntent
         };
       }
-
-      // 4. continuation_short_reply + aktif pending slot
-      if (detectedIntent === 'continuation_short_reply') {
-        if (pendingSlot === 'call_time' || pendingSlot === 'call_date' || pendingSlot === 'timezone_clarification') {
-          return {
-            text: "Arama planlaması için size hangi saat aralığında ulaşılması uygun olur? 🙏",
-            sector: resolvedIndustry,
-            hasFormContext,
-            hasComplaint,
-            finalPath: 'continuation_call_time_baskent_bypass',
-            detectedIntent
-          };
-        } else if (pendingSlot === 'confirmation_yes_no') {
-          return {
-            text: "Belirttiğimiz görüşme planlamasını onaylıyor musunuz?",
-            sector: resolvedIndustry,
-            hasFormContext,
-            hasComplaint,
-            finalPath: 'continuation_confirmation_baskent_bypass',
-            detectedIntent
-          };
-        }
-      }
-
     }
 
     // Doctor Lookup Resolver
@@ -283,51 +286,7 @@ export class ContextAwareSafeFallbackResolver {
         if (verifiedDoctorsText) {
           text = `Hastalarımıza hizmet veren doğrulanmış hekimlerimizin listesini aşağıda paylaşıyorum:\n${verifiedDoctorsText}`;
         } else {
-          const mappedDept = MedicalDepartmentResolver.resolve(complaint, brain);
-
-          let patientRelation = '';
-          const facts = unifiedContext?.patient_known_facts || [];
-          const factsText = Array.isArray(facts) ? facts.join(' ').toLowerCase() : '';
-          const historyText = (history || []).map((m: any) => m.content).join(' ').toLowerCase();
-
-          const hasMother = lowerInbound.includes('anne') || factsText.includes('anne') || historyText.includes('anne') || lowerInbound.includes('valide') || factsText.includes('valide') || historyText.includes('valide');
-          if (hasMother) {
-            patientRelation = 'anne';
-          } else {
-            const relations = ['baba', 'eş', 'es', 'kardeş', 'kardes', 'oğul', 'ogul', 'kız', 'kiz'];
-            for (const rel of relations) {
-              if (lowerInbound.includes(rel) || factsText.includes(rel) || historyText.includes(rel)) {
-                patientRelation = rel;
-                break;
-              }
-            }
-          }
-
-          let relationPossessive = '';
-          if (patientRelation) {
-            const rel = patientRelation.toLowerCase().trim();
-            if (rel === 'anne') relationPossessive = 'annenizin ';
-            else if (rel === 'baba') relationPossessive = 'babanızın ';
-            else if (rel === 'eş' || rel === 'es') relationPossessive = 'eşinizin ';
-            else if (rel === 'kardeş' || rel === 'kardes') relationPossessive = 'kardeşinizin ';
-            else if (rel === 'oğul' || rel === 'ogul') relationPossessive = 'oğlunuzun ';
-            else if (rel === 'kız' || rel === 'kiz') relationPossessive = 'kızınızın ';
-            else relationPossessive = `${rel}inizin `;
-          }
-
-          const capitalizedPossessive = relationPossessive 
-            ? relationPossessive.charAt(0).toUpperCase() + relationPossessive.slice(1) 
-            : '';
-
-          const subject = capitalizedPossessive ? `${capitalizedPossessive}${complaint}` : (complaint ? complaint.charAt(0).toUpperCase() + complaint.slice(1) : '');
-
-          if (mappedDept) {
-            text = `Bu ekrandan güncel hekim listesini doğrulayamıyorum. ${subject} için ${mappedDept} bölümü değerlendirme yapabilir. İsterseniz hasta danışmanımızla telefon görüşmesi planlanması için not alabiliriz.`;
-          } else if (hasComplaint) {
-            text = `Bu ekrandan güncel hekim listesini doğrulayamıyorum. Şikayetinize uygun bölüm değerlendirme yapabilir. İsterseniz hasta danışmanımızla telefon görüşmesi planlanması için not alabiliriz.`;
-          } else {
-            text = `Bu ekrandan güncel hekim listesini doğrulayamıyorum. İlgili bölüm değerlendirme yapabilir. İsterseniz hasta danışmanımızla telefon görüşmesi planlanması için not alabiliriz.`;
-          }
+          text = "Doktor bilgisini şu an net göremiyorum. İlgili bölüm veya şikayetinizi yazarsanız size doğru yönlendirme yapabilirim.";
         }
       } else {
         if (verifiedDoctorsText) {
@@ -444,34 +403,31 @@ export class ContextAwareSafeFallbackResolver {
               }
             }
           }
-          const isRuyaOrBaskent = identityConfig.personaName === 'Rüya' || isBaskent;
           const relPhrase = relationPossessive 
             ? `${relationPossessive.charAt(0).toUpperCase() + relationPossessive.slice(1)}${complaint}${suffix}`
             : `${complaint.charAt(0).toUpperCase() + complaint.slice(1)}${suffix}`;
           
-          text = isRuyaOrBaskent
-            ? `Pardon, nereden çıkardınız bunu? Ben Rüya, Konya Başkent Hastanesi’nden sizinle ilgileniyorum. ${relPhrase} ilgili sorularınızı yazarsanız net cevaplayayım.`
+          text = hasPersona
+            ? `Pardon, nereden çıkardınız bunu? Ben ${pName}, ${orgName}’nden sizinle ilgileniyorum. ${relPhrase} ilgili sorularınızı yazarsanız net cevaplayayım.`
             : `${relPhrase} ilgili sorularınızı yanıtlayıp doğru ekibe yönlendirmeye yardımcı olabilirim.`;
         } else {
-          const isRuyaOrBaskent = identityConfig.personaName === 'Rüya' || isBaskent;
-          text = isRuyaOrBaskent
-            ? 'Pardon, nereden çıkardınız bunu? Ben Rüya, Konya Başkent Hastanesi’nden sizinle ilgileniyorum. Sorunuzu yazarsanız net cevaplayayım.'
-            : 'Burada sağlık başvurunuzla ilgili yönlendirme yapmak için varım.';
+          text = hasPersona
+            ? `Pardon, nereden çıkardınız bunu? Ben ${pName}, ${orgName}’nden sizinle ilgileniyorum. Sorunuzu yazarsanız net cevaplayayım.`
+            : 'Talebinizle ilgili yönlendirme yapmak ve yardımcı olmak için buradayım.';
         }
       } else {
         // Prompt challenge
-        const isRuyaOrBaskent = identityConfig.personaName === 'Rüya' || isBaskent;
         if (hasComplaint) {
           const capitalizedPossessive = relationPossessive 
             ? relationPossessive.charAt(0).toUpperCase() + relationPossessive.slice(1) 
             : '';
-          text = isRuyaOrBaskent
-            ? `Pardon, nereden çıkardınız bunu? Ben Rüya, Konya Başkent Hastanesi’nden sizinle ilgileniyorum. ${capitalizedPossessive}${complaint} süreciyle ilgili sorularınızı yazarsanız net cevaplayayım.`
+          text = hasPersona
+            ? `Pardon, nereden çıkardınız bunu? Ben ${pName}, ${orgName}’nden sizinle ilgileniyorum. ${capitalizedPossessive}${complaint} süreciyle ilgili sorularınızı yazarsanız net cevaplayayım.`
             : `Kusura bakmayın, cevaplarım yeterince net olmadı. ${capitalizedPossessive}${complaint} süreciyle ilgili sorularınızı daha açık yanıtlayayım.`;
         } else {
-          text = isRuyaOrBaskent
-            ? 'Pardon, nereden çıkardınız bunu? Ben Rüya, Konya Başkent Hastanesi’nden sizinle ilgileniyorum. Sorunuzu yazarsanız net cevaplayayım.'
-            : 'Bu teknik konuya girmeden, sağlık talebinizle ilgili yardımcı olayım.';
+          text = hasPersona
+            ? `Pardon, nereden çıkardınız bunu? Ben ${pName}, ${orgName}’nden sizinle ilgileniyorum. Sorunuzu yazarsanız net cevaplayayım.`
+            : 'Bu teknik konuya girmeden, talebinizle ilgili yardımcı olayım.';
         }
       }
 
@@ -488,7 +444,6 @@ export class ContextAwareSafeFallbackResolver {
     if (isAngryOrChallenge) {
       // Identity query, bot questions, abuse or general anger
       let text = '';
-      const isRuyaOrBaskent = identityConfig.personaName === 'Rüya' || isBaskent;
 
       const isAiOrBotOrPromptQuestion = 
         lowerInbound.includes('bot') || 
@@ -502,11 +457,11 @@ export class ContextAwareSafeFallbackResolver {
         (detectedIntent as string) === 'identity_question' || 
         interpretedIntent === 'identity_question';
 
-      if (isRuyaOrBaskent && isAiOrBotOrPromptQuestion) {
+      if (hasPersona && isAiOrBotOrPromptQuestion) {
         if (hasComplaint) {
-          text = `Pardon, nereden çıkardınız bunu? Ben Rüya, Konya Başkent Hastanesi’nden sizinle ilgileniyorum. ${hasMother ? 'Annenizin ' : ''}${complaint} süreciyle ilgili sorularınızı yazarsanız net cevaplayayım.`;
+          text = `Pardon, nereden çıkardınız bunu? Ben ${pName}, ${orgName}’nden sizinle ilgileniyorum. ${hasMother ? 'Annenizin ' : ''}${complaint} süreciyle ilgili sorularınızı yazarsanız net cevaplayayım.`;
         } else {
-          text = 'Pardon, nereden çıkardınız bunu? Ben Rüya, Konya Başkent Hastanesi’nden sizinle ilgileniyorum. Sorunuzu yazarsanız net cevaplayayım.';
+          text = `Pardon, nereden çıkardınız bunu? Ben ${pName}, ${orgName}’nden sizinle ilgileniyorum. Sorunuzu yazarsanız net cevaplayayım.`;
         }
       } else {
         if (hasComplaint) {
@@ -748,14 +703,14 @@ export class ContextAwareSafeFallbackResolver {
       }
     }
 
-    // 3.5. Başkent Default History Fallback (only if no specific intent/bypass returned early)
-    if (isBaskent && history.length > 0) {
+    // 3.5. Tenant Default History Fallback (only if no specific intent/bypass returned early)
+    if (identityCtx.hasTenantPrompt && history.length > 0) {
       return {
-        text: "Kusura bakmayın, sorunuzu tam anlayamadım. Talebinizle ilgili yardımcı olabilmem için detayları iletebilir misiniz? 🌿",
+        text: "Kusura bakmayın, sorunuzu tam anlayamadım. Talebinizle ilgili yardımcı olabilmem için detayları iletebilir misiniz?",
         sector: resolvedIndustry,
         hasFormContext,
         hasComplaint,
-        finalPath: 'baskent_neutral_history_fallback',
+        finalPath: 'tenant_neutral_history_fallback',
         detectedIntent
       };
     }
