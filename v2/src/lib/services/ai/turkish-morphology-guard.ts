@@ -28,7 +28,8 @@ export interface MorphologyError {
 // Known Turkish suffix deduplication patterns with safe corrections
 const KNOWN_DEDUP_PATTERNS: { regex: RegExp; description: string; fix?: (match: string) => string }[] = [
   // Specific live failures / P0.15 additions
-  { regex: /şikayetinizin\s+olduğunuzu/gi, description: 'sikayetinizin_oldugunuzu', fix: (m) => m[0] === 'Ş' ? 'Şikayetinizin olduğunu' : 'şikayetinizin olduğunu' },
+  { regex: /şikayetinizin\s+olduğunuzu/gi, description: 'sikayetinizin_oldugunuzu', fix: (m) => m[0] === 'Ş' ? 'Şikayetiniz olduğunu' : 'şikayetiniz olduğunu' },
+  { regex: /hangi\s+ülkeniz\s+veya\s+şehriniz\s+saatine\s+göre\s+olsun\??/gi, description: 'ulkeniz_sehriniz_saatine_gore_olsun', fix: (m) => m[0] === 'H' ? 'Hangi ülke veya şehir saatine göre planlayalım?' : 'hangi ülke veya şehir saatine göre planlayalım?' },
   { regex: /planınınız/gi, description: 'planininiz', fix: (m) => m[0] === 'P' ? 'Planınız' : 'planınız' },
   { regex: /hangisininiz/gi, description: 'hangisininiz', fix: (m) => m[0] === 'H' ? 'Hangisinin' : 'hangisinin' },
   { regex: /yaşandığınızı/gi, description: 'yasandiginizi', fix: (m) => m[0] === 'Y' ? 'Yaşandığını' : 'yaşandığını' },
@@ -114,7 +115,7 @@ export class TurkishMorphologyGuard {
 
     // 2. Check bad phrase patterns (no auto-fix, triggers QG fail)
     for (const pattern of BAD_PHRASE_PATTERNS) {
-      const matches = text.matchAll(new RegExp(pattern.regex.source, 'gi'));
+      const matches = workingText.matchAll(new RegExp(pattern.regex.source, 'gi'));
       for (const match of matches) {
         errors.push({
           pattern: pattern.description,
@@ -128,7 +129,7 @@ export class TurkishMorphologyGuard {
     // 3. Generic suffix dedup detector: catch unknown doubled suffixes
     // Pattern: word ending in repeated possessive-like suffixes
     const genericDedup = /(\w{3,})(nız|niz|nüz|nuz|mız|miz|müz|müz)\2/gi;
-    const genericMatches = text.matchAll(genericDedup);
+    const genericMatches = workingText.matchAll(genericDedup);
     for (const match of genericMatches) {
       // Check it wasn't already caught by known patterns
       const alreadyCaught = errors.some(e => e.position === (match.index || 0));
