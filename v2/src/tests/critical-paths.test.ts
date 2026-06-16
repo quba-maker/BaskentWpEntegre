@@ -3924,15 +3924,16 @@ test("P0.14 HOTFIX 4: settings/page yüklenirken raw SQL hata kullanıcıya gös
   };
 
   const oldNodeEnv = process.env.NODE_ENV;
-  process.env.NODE_ENV = "production"; // simulate production
+  (process.env as any).NODE_ENV = "production"; // simulate production
   
   try {
     const res = await action();
     assert(res.success === false, "Should return failure");
-    assert(!res.error.includes("SELECT"), "Error should not expose raw SQL query context");
-    assert(res.error.includes("Sistemsel bir hata oluştu"), "Error should display generic user-friendly message");
+    assert(!!res.error, "Error should be present");
+    assert(!res.error!.includes("SELECT"), "Error should not expose raw SQL query context");
+    assert(res.error!.includes("Sistemsel bir hata oluştu"), "Error should display generic user-friendly message");
   } finally {
-    process.env.NODE_ENV = oldNodeEnv;
+    (process.env as any).NODE_ENV = oldNodeEnv;
   }
 });
 
