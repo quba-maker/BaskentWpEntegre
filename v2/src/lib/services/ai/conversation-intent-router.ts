@@ -70,7 +70,8 @@ export class ConversationIntentRouter {
       'once soruma cevap ver', 'soruma cevap ver', 'yanlis anladin', 'yanlış anladın',
       'bunu sormadim', 'bunu sormadım', 'hata var', 'yanlis', 'yanlış',
       'dedim ya', 'soyledim ya', 'tekrar ediyorsun', 'ayni seyi soyluyorsun',
-      'i already told you', 'already said', 'you keep repeating'
+      'i already told you', 'already said', 'you keep repeating',
+      'soyledin ya', 'söyledin ya', 'sen dedin ya'
     ];
     if (userCorrectionKeywords.some(kw => clean.includes(kw) || originalLower.includes(kw))) {
       return 'user_correction';
@@ -119,7 +120,8 @@ export class ConversationIntentRouter {
     // 7. Form Followup
     const formKeywords = [
       'form doldurdum', 'basvuru yaptim', 'form gonderdim', 'formu doldurdum',
-      'form gondermistim', 'basvuru yapmistim', 'form doldurmustum', 'basvuru yapmıstım'
+      'form gondermistim', 'basvuru yapmistim', 'form doldurmustum', 'basvuru yapmıstım',
+      'kontrol et', 'formumu kontrol et', 'basvurum vardi', 'basvurumu kontrol'
     ];
     if (formKeywords.some(kw => clean.includes(kw) || originalLower.includes(kw))) {
       return 'form_followup';

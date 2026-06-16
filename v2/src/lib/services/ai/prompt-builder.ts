@@ -492,7 +492,7 @@ MEDYA MESAJI KURALI:
       const activeTask = unifiedContext?.active_task;
       const taskMeta = activeTask?.metadata || {};
       
-      let scheduled_for_utc = taskMeta.scheduled_for_utc || taskMeta.bot_suggestion?.proposed_date || null;
+      const scheduled_for_utc = taskMeta.scheduled_for_utc || taskMeta.bot_suggestion?.proposed_date || null;
       let callback_time_tr = taskMeta.callback_time_tr || null;
 
       // Sanitization: If callback_time_tr or scheduled_for_utc has midnight (00:00 or 03:00 local, or 00:00 UTC), treat as date-only (clear the time part)
@@ -848,8 +848,34 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/hasta danışmanı arasında pla
     // P0.11: Dynamic Intent Guidance (State Arbitrated)
     let intentGuide = '';
     const effectiveIntent = arbitration.effectiveIntent;
-    
-    if (interpretedIntent === 'user_correction') {
+
+    const { HealthcareProcessAnswerPolicy } = require('./healthcare-process-answer-policy');
+    const { ConversationKnownFactsResolver } = require('./conversation-known-facts-resolver');
+    const isMultiIntent = HealthcareProcessAnswerPolicy.isMultiIntentRequest(lastUserMessage || '');
+
+    const resolvedFactsForGuide = ConversationKnownFactsResolver.resolve({
+      history: unifiedContext?.history || [],
+      opportunity: unifiedContext?.opportunity,
+      profile: unifiedContext?.profile,
+      latestForm: unifiedContext?.latestForm,
+      conversation: unifiedContext?.conversation
+    });
+
+    if (isMultiIntent && isHealthcare) {
+      const doctorDirectory = brain.context.config?.doctors || brain.context.config?.doctorDirectory || brain.context.config?.doctor_directory;
+      let verifiedDoctorsText = '';
+      if (Array.isArray(doctorDirectory) && doctorDirectory.length > 0) {
+        verifiedDoctorsText = doctorDirectory.join('\n');
+      } else if (typeof doctorDirectory === 'string' && doctorDirectory.trim().length > 0) {
+        verifiedDoctorsText = doctorDirectory.trim();
+      }
+      const structuredGuide = HealthcareProcessAnswerPolicy.getMultiIntentFallbackResponse(
+        resolvedFactsForGuide,
+        !!doctorDirectory,
+        verifiedDoctorsText
+      );
+      intentGuide = `Multi-Intent: Hekim, Süreç ve Fiyat sorularını tek turda aldın. Bu soruları yanıtlamak için tam olarak şu şablon ve başlıkları kullanmalısın. Şablon dışına çıkma, kesinlikle fiyat uydurma ve hekim isimlerini doğrulanmış liste dışından uydurma:\n${structuredGuide}`;
+    } else if (interpretedIntent === 'user_correction') {
       intentGuide = `Frustration/Correction: user_correction\nSon kullanıcı cevabı: "${lastUserMessage}"\nHasta/müşteri botu veya asistanı düzeltiyor ya da soruya cevap verdiğini söylüyor. Cevabını aldığını kibarca teyit et. Haklı olduğunu belirt, jenerik kaçış cümleleri kullanma, son cevabı/durumu teyit ederek süreci ilerlet.`;
     } else if (!arbitration.staleSlotSuppressed && pendingSlot && pendingSlot !== 'generic_none') {
       // Pending slot is valid (not suppressed by arbitrator)
@@ -874,7 +900,10 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/hasta danışmanı arasında pla
 
     // If no pending slot guide (either suppressed or no slot), use router intent
     if (!intentGuide) {
-      if (effectiveIntent === 'greeting') {
+      if (effectiveIntent === 'form_followup') {
+        const compPhrase = resolvedFactsForGuide.complaint ? ` (${resolvedFactsForGuide.complaint} ile ilgili)` : '';
+        intentGuide = `Intent: form_followup\nHasta form doldurduğunu veya başvurusunu kontrol etmeni söylüyor. Sistemde form/başvuru kaydının bulunduğunu belirt ve formu onayladığını söyle${compPhrase}. Hastaya formda belirttiği detayları tekrar sorma. Bilgilendirme amaçlı arama planlamak için uygun gün/saat bilgisini iste.`;
+      } else if (effectiveIntent === 'greeting') {
         intentGuide = `Intent: greeting\nBu cevapta sadece hastanın/müşterinin selamına doğal ve kısa bir karşılık ver.\nEski CRM/şikayet özetini veya randevu konusunu bu aşamada açma.`;
       } else if (effectiveIntent === 'identity_question') {
         intentGuide = `Intent: identity_question\nBu cevapta kimliğini kısa ve doğal tanıt. Eski scheduling/timezone bağlamına dönme.`;

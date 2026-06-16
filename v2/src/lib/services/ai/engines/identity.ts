@@ -1,5 +1,4 @@
 import { withTenantDB } from '@/lib/core/tenant-db';
-import { normalizePhone } from '@/lib/utils/normalize-phone';
 
 export class IdentityEngine {
 
@@ -327,7 +326,7 @@ export class IdentityEngine {
 
       const leads = await db.executeSafe({
         text: `
-          SELECT id, form_name, raw_data 
+          SELECT id, form_name, raw_data, channel_id, tenant_id
           FROM leads 
           WHERE tenant_id = $1 AND customer_id = $2
           ORDER BY created_at DESC 
@@ -453,6 +452,93 @@ export class IdentityEngine {
         }
       }
 
+      // ═══ Form Context binding with verified tenant & channel checks ═══
+      let isFormBound = false;
+      if (lead && lead.tenant_id === tenantId) {
+        if (conversationRow) {
+          const conversationChannelId = conversationRow.channel_id;
+          const leadChannelId = lead.channel_id;
+          // Must match channel_id if both are present
+          if (!leadChannelId || !conversationChannelId || leadChannelId === conversationChannelId) {
+            isFormBound = true;
+          }
+        } else {
+          isFormBound = true;
+        }
+      }
+
+      // ═══ Load last 10 messages for conversation history ═══
+      let history: { role: string; content: string }[] = [];
+      if (conversationId) {
+        const msgRows = await db.executeSafe({
+          text: `
+            SELECT direction, content 
+            FROM messages 
+            WHERE conversation_id = $1 AND tenant_id = $2 AND direction IN ('in', 'out')
+            ORDER BY created_at DESC 
+            LIMIT 10
+          `,
+          values: [conversationId, tenantId]
+        }) as any[];
+        history = msgRows.reverse().map((m: any) => ({
+          role: m.direction === 'in' ? 'user' : 'assistant',
+          content: m.content || ''
+        }));
+      }
+
+      // ═══ Safe latestForm containing ONLY permitted safe fields (NO RAW DATA LEAKED) ═══
+      const safeLatestForm = (isFormBound && lead) ? (() => {
+        let parsed: any = {};
+        if (typeof lead.raw_data === 'string') {
+          try { parsed = JSON.parse(lead.raw_data); } catch {}
+        } else if (lead.raw_data && typeof lead.raw_data === 'object') {
+          parsed = lead.raw_data;
+        }
+        
+        const safeData: any = {};
+        const nameVal = parsed.full_name || parsed.ad_soyad || parsed.name || parsed['full name'] || parsed['Full Name'] || null;
+        if (nameVal) safeData.full_name = String(nameVal).trim();
+        
+        const complaintVal = parsed.sikayet || parsed.şikayet || parsed.şikayetiniz_nedir || parsed.sikayetiniz_nedir || null;
+        if (complaintVal) safeData.sikayet = String(complaintVal).trim();
+        
+        const countryVal = parsed.ulke || parsed.ülke || parsed.country || parsed.nerede_yaşıyorsunuz || null;
+        if (countryVal) safeData.country = String(countryVal).trim();
+        
+        const timeVal = parsed.randevu_ayi || parsed.randevu_tarihi || parsed.ne_zaman_gelmek_istiyorsunuz || null;
+        if (timeVal) safeData.randevu_ayi = String(timeVal).trim();
+
+        return {
+          name: lead.form_name,
+          data: safeData
+        };
+      })() : null;
+
+      // ═══ Resolve facts securely via ConversationKnownFactsResolver ═══
+      const { ConversationKnownFactsResolver } = await import('@/lib/services/ai/conversation-known-facts-resolver');
+      const resolvedFacts = ConversationKnownFactsResolver.resolve({
+        history,
+        opportunity: opportunity ? {
+          patient_name: opportunity.patient_name,
+          country: opportunity.country,
+          department: opportunity.department,
+          travel_date: opportunity.travel_date,
+          metadata: typeof opportunity.metadata === 'string'
+            ? (() => { try { return JSON.parse(opportunity.metadata); } catch { return {}; } })()
+            : (opportunity.metadata || {})
+        } : undefined,
+        profile,
+        latestForm: safeLatestForm,
+        conversation: conversationRow ? {
+          patient_name: conversationRow.patient_name,
+          name: conversationRow.name,
+          country: conversationRow.country,
+          department: conversationRow.department
+        } : undefined
+      });
+
+      const patient_known_facts = ConversationKnownFactsResolver.formatFacts(resolvedFacts);
+
       // ═══ B2 FIX: Outreach context for form lead bot handoff ═══
       let outreachContext = null;
       if (lead) {
@@ -521,7 +607,6 @@ export class IdentityEngine {
           if (state && state.directive_status === 'pending') {
             activeBotDirective = state.active_bot_directive;
           } else if (taskMeta.active_bot_directive) {
-            // Backward compatibility check
             const isPending = taskMeta.bot_teyit_sent || taskMeta.bot_hatirlat_sent || taskMeta.bot_devret_sent;
             if (isPending) {
               activeBotDirective = taskMeta.active_bot_directive;
@@ -534,8 +619,8 @@ export class IdentityEngine {
 
       return {
         profile,
-        latestForm: lead ? { name: lead.form_name, data: lead.raw_data } : null,
-        patient_known_facts: lead ? IdentityEngine.sanitizeFormFacts(lead.raw_data) : [],
+        latestForm: safeLatestForm,
+        patient_known_facts,
         memory: memory ? {
            summary: memory.summary_text,
            intent: memory.buying_intent,

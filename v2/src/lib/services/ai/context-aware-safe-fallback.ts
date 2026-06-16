@@ -282,11 +282,30 @@ export class ContextAwareSafeFallbackResolver {
         verifiedDoctorsText = doctorDirectory.trim();
       }
 
+      const { ConversationKnownFactsResolver } = require('./conversation-known-facts-resolver');
+      const facts = ConversationKnownFactsResolver.resolve({
+        history,
+        opportunity: unifiedContext?.opportunity,
+        profile: unifiedContext?.profile,
+        latestForm: unifiedContext?.latestForm,
+        conversation: unifiedContext?.conversation,
+        patient_known_facts: unifiedContext?.patient_known_facts
+      });
+
       if (isHealthcare) {
+        let deptPhrase = '';
+        if (facts.previousDepartments && facts.previousDepartments.length > 0) {
+          deptPhrase = `${facts.previousDepartments[0]} bölümü`;
+        } else if (facts.complaint) {
+          deptPhrase = `${facts.complaint} şikayetinizle ilgili bölüm`;
+        }
+
         if (verifiedDoctorsText) {
-          text = `Hastalarımıza hizmet veren doğrulanmış hekimlerimizin listesini aşağıda paylaşıyorum:\n${verifiedDoctorsText}`;
+          const targetPhrase = deptPhrase ? `${deptPhrase} için doğrulanmış hekimlerimizin` : 'doğrulanmış hekimlerimizin';
+          text = `Hastalarımıza hizmet veren ${targetPhrase} listesini aşağıda paylaşıyorum:\n${verifiedDoctorsText}`;
         } else {
-          text = "Doktor bilgisini şu an net göremiyorum. İlgili bölüm veya şikayetinizi yazarsanız size doğru yönlendirme yapabilirim.";
+          const targetPhrase = deptPhrase ? `${deptPhrase} için hekim` : 'Hekim';
+          text = `${targetPhrase} listesini şu an bu ekrandan net doğrulayamıyorum ve hatalı bilgi vermemek adına isim uydurmam doğru olmaz. Ancak danışman ekibimiz size uygun uzman hekim alternatiflerini sunacaktır.`;
         }
       } else {
         if (verifiedDoctorsText) {
@@ -351,85 +370,24 @@ export class ContextAwareSafeFallbackResolver {
     const isLlmBypassChallenge = isPromptChallengeOnly || isBotAccusation || isAiAccusation || isAngryPromptChallenge;
 
     if (isLlmBypassChallenge) {
-      let text = '';
+      const { PromptChallengeSafetyPolicy } = require('./prompt-challenge-safety-policy');
+      const { ConversationKnownFactsResolver } = require('./conversation-known-facts-resolver');
       
-      // Determine patientRelation
-      let patientRelation = '';
-      const facts = unifiedContext?.patient_known_facts || [];
-      const factsText = Array.isArray(facts) ? facts.join(' ').toLowerCase() : '';
-      const historyText = (history || []).map((m: any) => m.content).join(' ').toLowerCase();
+      const facts = ConversationKnownFactsResolver.resolve({
+        history,
+        opportunity: unifiedContext?.opportunity,
+        profile: unifiedContext?.profile,
+        latestForm: unifiedContext?.latestForm,
+        conversation: unifiedContext?.conversation,
+        patient_known_facts: unifiedContext?.patient_known_facts
+      });
 
-      const hasMother = lowerInbound.includes('anne') || factsText.includes('anne') || historyText.includes('anne') || lowerInbound.includes('valide') || factsText.includes('valide') || historyText.includes('valide');
-      if (hasMother) {
-        patientRelation = 'anne';
-      } else {
-        const relations = ['baba', 'eş', 'es', 'kardeş', 'kardes', 'oğul', 'ogul', 'kız', 'kiz'];
-        for (const rel of relations) {
-          if (lowerInbound.includes(rel) || factsText.includes(rel) || historyText.includes(rel)) {
-            patientRelation = rel;
-            break;
-          }
-        }
-      }
-
-      let relationPossessive = '';
-      if (patientRelation) {
-        const rel = patientRelation.toLowerCase().trim();
-        if (rel === 'anne') relationPossessive = 'annenizin ';
-        else if (rel === 'baba') relationPossessive = 'babanızın ';
-        else if (rel === 'eş' || rel === 'es') relationPossessive = 'eşinizin ';
-        else if (rel === 'kardeş' || rel === 'kardes') relationPossessive = 'kardeşinizin ';
-        else if (rel === 'oğul' || rel === 'ogul') relationPossessive = 'oğlunuzun ';
-        else if (rel === 'kız' || rel === 'kiz') relationPossessive = 'kızınızın ';
-        else relationPossessive = `${rel}inizin `;
-      }
-
-      if (isBotAccusation || isAiAccusation) {
-        if (hasComplaint) {
-          let suffix = 'la';
-          const normalized = complaint.toLowerCase().trim();
-          if (normalized.endsWith('ı') || normalized.endsWith('a') || normalized.endsWith('o') || normalized.endsWith('u')) {
-            suffix = 'yla';
-          } else if (normalized.endsWith('i') || normalized.endsWith('e') || normalized.endsWith('ö') || normalized.endsWith('ü')) {
-            suffix = 'yle';
-          } else {
-            // Ends in consonant: check last vowel
-            const lastVowel = normalized.match(/[aeıioöuü][^aeıioöuü]*$/i)?.[0]?.[0];
-            if (lastVowel) {
-              if (['a', 'ı', 'o', 'u'].includes(lastVowel.toLowerCase())) {
-                suffix = 'la';
-              } else {
-                suffix = 'le';
-              }
-            }
-          }
-          const relPhrase = relationPossessive 
-            ? `${relationPossessive.charAt(0).toUpperCase() + relationPossessive.slice(1)}${complaint}${suffix}`
-            : `${complaint.charAt(0).toUpperCase() + complaint.slice(1)}${suffix}`;
-          
-          text = hasPersona
-            ? `Pardon, nereden çıkardınız bunu? Ben ${pName}, ${orgName}’nden sizinle ilgileniyorum. ${relPhrase} ilgili sorularınızı yazarsanız net cevaplayayım.`
-            : `${relPhrase} ilgili sorularınızı yanıtlayıp doğru ekibe yönlendirmeye yardımcı olabilirim.`;
-        } else {
-          text = hasPersona
-            ? `Pardon, nereden çıkardınız bunu? Ben ${pName}, ${orgName}’nden sizinle ilgileniyorum. Sorunuzu yazarsanız net cevaplayayım.`
-            : 'Talebinizle ilgili yönlendirme yapmak ve yardımcı olmak için buradayım.';
-        }
-      } else {
-        // Prompt challenge
-        if (hasComplaint) {
-          const capitalizedPossessive = relationPossessive 
-            ? relationPossessive.charAt(0).toUpperCase() + relationPossessive.slice(1) 
-            : '';
-          text = hasPersona
-            ? `Pardon, nereden çıkardınız bunu? Ben ${pName}, ${orgName}’nden sizinle ilgileniyorum. ${capitalizedPossessive}${complaint} süreciyle ilgili sorularınızı yazarsanız net cevaplayayım.`
-            : `Kusura bakmayın, cevaplarım yeterince net olmadı. ${capitalizedPossessive}${complaint} süreciyle ilgili sorularınızı daha açık yanıtlayayım.`;
-        } else {
-          text = hasPersona
-            ? `Pardon, nereden çıkardınız bunu? Ben ${pName}, ${orgName}’nden sizinle ilgileniyorum. Sorunuzu yazarsanız net cevaplayayım.`
-            : 'Bu teknik konuya girmeden, talebinizle ilgili yardımcı olayım.';
-        }
-      }
+      const text = PromptChallengeSafetyPolicy.getChallengeFallbackResponse(
+        inboundText,
+        facts,
+        hasPersona ? pName : undefined,
+        identityCtx.organizationName
+      );
 
       return {
         text,
@@ -483,25 +441,46 @@ export class ContextAwareSafeFallbackResolver {
     }
 
     // Priority 1: User Correction / Frustration
-    if (interpretedIntent === 'user_correction') {
-      const userMsgs = history.filter((m: any) => m.role === 'user');
-      const lastUserMsgText = userMsgs.length > 0 ? userMsgs[userMsgs.length - 1].content : '';
-      
+    if (detectedIntent === 'user_correction' || interpretedIntent === 'user_correction') {
+      const { ConversationKnownFactsResolver } = require('./conversation-known-facts-resolver');
+      const facts = ConversationKnownFactsResolver.resolve({
+        history,
+        opportunity: unifiedContext?.opportunity,
+        profile: unifiedContext?.profile,
+        latestForm: unifiedContext?.latestForm,
+        conversation: unifiedContext?.conversation
+      });
+
+      let deptPhrase = '';
+      if (facts.previousDepartments && facts.previousDepartments.length > 0) {
+        deptPhrase = facts.previousDepartments[0];
+      } else if (facts.complaint) {
+        deptPhrase = `${facts.complaint} ile ilgili bölüm`;
+      }
+
       let replyText = '';
-      if (lastUserMsgText) {
-        if (isHealthcare) {
-          replyText = `Haklısınız, cevabınızı aldım. ${lastUserMsgText} bilgisini not ettim; isterseniz hasta danışmanımızla telefon görüşmesi planlanması için not alabiliriz.`;
-        } else {
-          replyText = `Haklısınız, cevabınızı aldım. ${lastUserMsgText} bilgisini not ettim; isterseniz bu bilgiyi temsilci ekibimize iletilmesi için not alabilirim.`;
-        }
+      const isContinuityMention = ['söyledin', 'soyledin', 'dedin', 'söylemiştin', 'soylemistin', 'belirttin'].some(kw => lowerInbound.includes(kw));
+
+      if (isContinuityMention && deptPhrase && isHealthcare) {
+        replyText = `Haklısınız, kusura bakmayın. Önceki mesajlarımızda ${deptPhrase} ile ilgili görüşmüştük. Bu süreç doğrultusunda randevu planlamak veya detayları görüşmek üzere telefon araması organize edebilirim.`;
       } else {
-        if (isHealthcare) {
-          replyText = `Haklısınız, cevabınızı aldım ve not ettim; isterseniz hasta danışmanımızla telefon görüşmesi planlanması için not alabiliriz.`;
+        const userMsgs = history.filter((m: any) => m.role === 'user');
+        const lastUserMsgText = userMsgs.length > 0 ? userMsgs[userMsgs.length - 1].content : '';
+        if (lastUserMsgText) {
+          if (isHealthcare) {
+            replyText = `Haklısınız, cevabınızı aldım. ${lastUserMsgText} bilgisini not ettim; isterseniz hasta danışmanımızla telefon görüşmesi planlanması için not alabiliriz.`;
+          } else {
+            replyText = `Haklısınız, cevabınızı aldım. ${lastUserMsgText} bilgisini not ettim; isterseniz bu bilgiyi temsilci ekibimize iletilmesi için not alabilirim.`;
+          }
         } else {
-          replyText = `Haklısınız, cevabınızı aldım ve not ettim; isterseniz bu bilgiyi temsilci ekibimize iletilmesi için not alabilirim.`;
+          if (isHealthcare) {
+            replyText = `Haklısınız, cevabınızı aldım ve not ettim; isterseniz hasta danışmanımızla telefon görüşmesi planlanması için not alabiliriz.`;
+          } else {
+            replyText = `Haklısınız, cevabınızı aldım ve not ettim; isterseniz bu bilgiyi temsilci ekibimize iletilmesi için not alabilirim.`;
+          }
         }
       }
-      
+
       return {
         text: replyText,
         sector: resolvedIndustry,

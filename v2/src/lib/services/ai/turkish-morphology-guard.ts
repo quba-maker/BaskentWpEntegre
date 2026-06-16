@@ -27,7 +27,11 @@ export interface MorphologyError {
 
 // Known Turkish suffix deduplication patterns with safe corrections
 const KNOWN_DEDUP_PATTERNS: { regex: RegExp; description: string; fix?: (match: string) => string }[] = [
-  // Specific live failures
+  // Specific live failures / P0.15 additions
+  { regex: /şikayetinizin\s+olduğunuzu/gi, description: 'sikayetinizin_oldugunuzu', fix: (m) => m[0] === 'Ş' ? 'Şikayetinizin olduğunu' : 'şikayetinizin olduğunu' },
+  { regex: /planınınız/gi, description: 'planininiz', fix: (m) => m[0] === 'P' ? 'Planınız' : 'planınız' },
+  { regex: /hangisininiz/gi, description: 'hangisininiz', fix: (m) => m[0] === 'H' ? 'Hangisinin' : 'hangisinin' },
+  { regex: /yaşandığınızı/gi, description: 'yasandiginizi', fix: (m) => m[0] === 'Y' ? 'Yaşandığını' : 'yaşandığını' },
   { regex: /adınızızı/gi, description: 'adınızızı', fix: (m) => m[0] === 'A' ? 'Adınızı' : 'adınızı' },
   { regex: /cevabınızızı/gi, description: 'cevabınızızı', fix: (m) => m[0] === 'C' ? 'Cevabınızı' : 'cevabınızı' },
   { regex: /şikayetiniziniz/gi, description: 'şikayetiniziniz', fix: (m) => m[0] === 'Ş' || m[0] === 'S' ? (m[0] === 'Ş' ? 'Şikayetiniz' : 'Sikayetiniz') : 'şikayetiniz' },
