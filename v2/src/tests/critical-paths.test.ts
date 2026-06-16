@@ -4077,7 +4077,7 @@ test("P0.14 HOTFIX 10: Production modda raw SQL client’a sızmaz", async () =>
     assert(res.success === false, "Should return failure");
     assert(!!res.error, "Error should be present");
     assert(!res.error!.includes("SELECT"), "Error should not expose raw SQL query context");
-    assert(res.error!.includes("Sistemsel bir hata oluştu"), "Error should display generic user-friendly message");
+    assert(res.error!.includes("İşlem tamamlanamadı. Lütfen tekrar deneyin."), "Error should display generic user-friendly message");
   } finally {
     (process.env as any).NODE_ENV = oldNodeEnv;
   }

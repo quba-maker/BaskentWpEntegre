@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Search, Filter, X, RefreshCw, CheckCircle2 } from "lucide-react";
+import { Search, Filter, X, RefreshCw, CheckCircle2, Bot } from "lucide-react";
 import { getCampaignNames } from "@/app/actions/forms";
 
 interface FormFiltersBarProps {
@@ -17,6 +17,7 @@ interface FormFiltersBarProps {
   syncProgress: { status: string; progress: number; message: string };
   handleSync: () => void;
   syncMetadata?: { lastManualSync: string | null; lastAutoSync: string | null } | null;
+  onOpenSettings?: () => void;
 }
 
 export function FormFiltersBar({
@@ -31,7 +32,8 @@ export function FormFiltersBar({
   isSyncing,
   syncProgress,
   handleSync,
-  syncMetadata
+  syncMetadata,
+  onOpenSettings
 }: FormFiltersBarProps) {
   const [campaigns, setCampaigns] = useState<string[]>([]);
   
@@ -105,6 +107,17 @@ export function FormFiltersBar({
               )}
             </div>
           </div>
+
+          {onOpenSettings && (
+            <button
+              onClick={onOpenSettings}
+              className="flex items-center gap-2 px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-700 hover:text-slate-900 border border-black/10 hover:border-black/20 hover:scale-[1.01] active:scale-[0.99] transition-all cursor-pointer rounded-xl font-semibold text-xs shadow-sm"
+              title="Otomatik Karşılama Otopilot Ayarlarını Düzenle"
+            >
+              <Bot className="w-4 h-4 text-blue-500" />
+              Otomatik Karşılama Ayarları
+            </button>
+          )}
 
           <div className="relative w-full md:w-64">
             <Search className="absolute left-3 top-2.5 h-4 w-4 text-[#86868B]" />

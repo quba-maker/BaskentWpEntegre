@@ -1613,43 +1613,75 @@ export function ContextPanel() {
             <div className="pt-2 space-y-4 border-t border-black/[0.03] animate-fade-in text-[11px] text-[#1D1D1F]">
               
               {/* 1. Status Info Card */}
-              <div className="p-2.5 rounded-xl bg-[#F5F5F7]/75 border border-black/[0.03] space-y-1.5 shadow-sm">
-                <span className="block text-[8px] font-bold text-[#86868B] uppercase tracking-widest mb-1.5">Durum Kartı</span>
-                <div className="grid grid-cols-2 gap-y-1.5 gap-x-3 font-medium text-[10.5px]">
+              <div className="p-3 rounded-2xl bg-[#F5F5F7]/80 border border-black/5 space-y-2.5 shadow-sm">
+                <span className="block text-[9px] font-bold text-[#86868B] uppercase tracking-widest border-b border-black/[0.03] pb-1.5">🤖 Bot & Otopilot Durumu</span>
+                <div className="space-y-2 font-semibold text-[11px]">
+                  
+                  {/* Bot Durumu */}
                   <div className="flex items-center justify-between">
-                    <span className="text-[#86868B]">Dil:</span>
-                    <span className="font-bold text-[#1D1D1F]">{detectedLanguage || crmData?.whatsapp24hWindow?.detectedLanguage || "Otomatik"}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-[#86868B]">Form:</span>
-                    <span className="font-bold text-[#1D1D1F]">{crmData?.formData ? "Var" : "Yok"}</span>
-                  </div>
-                  <div className="flex items-center justify-between col-span-2 border-t border-black/[0.03] pt-1.5">
-                    <span className="text-[#86868B]">24s WhatsApp Penceresi:</span>
-                    <span className={`px-1.5 py-0.5 rounded-md text-[9px] font-extrabold text-white ${
-                      crmData?.whatsapp24hWindow?.status === 'OPEN' ? 'bg-green-600' :
-                      crmData?.whatsapp24hWindow?.status === 'CLOSING_SOON' ? 'bg-amber-500' :
-                      crmData?.whatsapp24hWindow?.status === 'CLOSED' ? 'bg-red-600' : 'bg-gray-500'
-                    }`}>
-                      {crmData?.whatsapp24hWindow?.status === 'OPEN' ? 'Açık' :
-                       crmData?.whatsapp24hWindow?.status === 'CLOSING_SOON' ? 'Kapanmak Üzere' :
-                       crmData?.whatsapp24hWindow?.status === 'CLOSED' ? 'Kapalı' : 'Belirsiz'}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between col-span-2">
-                    <span className="text-[#86868B]">Gönderim Yolu:</span>
-                    <span className="font-bold text-[#1D1D1F]">
-                      {crmData?.whatsapp24hWindow?.status === 'OPEN' || crmData?.whatsapp24hWindow?.status === 'CLOSING_SOON' ? "Serbest Mesaj (API)" : "Onaylı Şablon (API)"}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between col-span-2 border-t border-black/[0.03] pt-1.5">
                     <span className="text-[#86868B]">Bot Durumu:</span>
-                    <span className={`px-1.5 py-0.5 rounded-md text-[9px] font-extrabold text-white ${
-                      (activeContact?.autopilot_enabled || activeContact?.isBotActive || activeContact?.status === 'bot') ? 'bg-indigo-600' : 'bg-gray-500'
-                    }`}>
-                      {(activeContact?.autopilot_enabled || activeContact?.isBotActive || activeContact?.status === 'bot') ? 'Botta' : 'Manuel'}
+                    {(() => {
+                      const isBot = activeContact?.isBotActive || activeContact?.autopilot_enabled || activeContact?.status === 'bot';
+                      const isHuman = activeContact?.status === 'human';
+                      if (isHuman) {
+                        return <span className="px-2 py-0.5 rounded-md text-[9px] bg-amber-500/10 text-amber-600 border border-amber-500/25 uppercase font-extrabold">İnsan Devraldı</span>;
+                      } else if (isBot) {
+                        return <span className="px-2 py-0.5 rounded-md text-[9px] bg-indigo-600/10 text-indigo-600 border border-indigo-600/25 uppercase font-extrabold">Botta</span>;
+                      } else {
+                        return <span className="px-2 py-0.5 rounded-md text-[9px] bg-slate-500/10 text-slate-600 border border-slate-500/25 uppercase font-extrabold">Manuel</span>;
+                      }
+                    })()}
+                  </div>
+
+                  {/* Meta Penceresi */}
+                  <div className="flex items-center justify-between">
+                    <span className="text-[#86868B]">Meta Penceresi (24h):</span>
+                    {(() => {
+                      const isOpen = crmData?.whatsapp24hWindow?.status === 'OPEN' || crmData?.whatsapp24hWindow?.status === 'CLOSING_SOON';
+                      if (isOpen) {
+                        return <span className="text-emerald-600 font-extrabold flex items-center gap-1">🟢 Açık</span>;
+                      } else {
+                        return <span className="text-red-500 font-extrabold flex items-center gap-1">🔴 Kapalı</span>;
+                      }
+                    })()}
+                  </div>
+
+                  {/* Sonraki inbound’da cevap verebilir */}
+                  <div className="flex items-center justify-between">
+                    <span className="text-[#86868B]">Sonraki Inbound Cevap:</span>
+                    {(() => {
+                      const isBot = activeContact?.isBotActive || activeContact?.autopilot_enabled || activeContact?.status === 'bot';
+                      const isHuman = activeContact?.status === 'human';
+                      const canReply = isBot && !isHuman;
+                      return <span className={canReply ? "text-emerald-600 font-extrabold" : "text-amber-500 font-extrabold"}>{canReply ? "Evet (Cevaplar)" : "Hayır (Cevaplamaz)"}</span>;
+                    })()}
+                  </div>
+
+                  {/* Engel Sebebi */}
+                  <div className="flex items-start justify-between border-t border-black/[0.03] pt-2">
+                    <span className="text-[#86868B]">Engel Sebebi:</span>
+                    <span className="text-[#1D1D1F] font-bold text-right max-w-[130px] leading-snug">
+                      {(() => {
+                        const isBot = activeContact?.isBotActive || activeContact?.autopilot_enabled || activeContact?.status === 'bot';
+                        const isHuman = activeContact?.status === 'human';
+                        const isMetaClosed = !(crmData?.whatsapp24hWindow?.status === 'OPEN' || crmData?.whatsapp24hWindow?.status === 'CLOSING_SOON');
+                        
+                        if (isHuman) return "İnsan temsilci devraldı";
+                        if (!isBot) return "Bot kapalı";
+                        if (isMetaClosed) return "24h meta penceresi kapalı";
+                        return "Engel yok";
+                      })()}
                     </span>
                   </div>
+
+                  {/* Additional info like detected language */}
+                  <div className="flex items-center justify-between border-t border-black/[0.03] pt-2 text-[10px]">
+                    <span className="text-[#86868B]">Ters Dil Tahmini:</span>
+                    <span className="text-[#515154] font-bold">
+                      {detectedLanguage || crmData?.whatsapp24hWindow?.detectedLanguage || "Otomatik"}
+                    </span>
+                  </div>
+
                 </div>
               </div>
 

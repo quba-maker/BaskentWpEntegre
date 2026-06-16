@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { CheckCircle2, X, XCircle, RefreshCw } from "lucide-react";
 import { useRouter, useParams } from "next/navigation";
 import { useInboxStore } from "@/store/inbox-store";
@@ -13,6 +13,8 @@ import { FormDetailModal } from "@/components/features/forms/FormDetailModal";
 import { BulkQueueModal } from "@/components/features/forms/BulkQueueModal";
 import { getDisplayName, getAllPhones } from "@/components/features/forms/utils";
 import { BulkAutopilotDecisionBar } from "@/components/features/forms/BulkAutopilotDecisionBar";
+import { AutoGreetingSettingsPanel } from "@/components/features/settings/AutoGreetingSettingsPanel";
+import { GreetingAutomationDecision } from "@/lib/services/automation/first-contact-decision-resolver";
 
 // Action Imports
 import { updateLeadStage, updateLeadNotes } from "@/app/actions/forms";
@@ -70,32 +72,59 @@ export default function FormsPage() {
 
   const detailState = useFormDetailState(selectedForm, mutate);
 
-  const [selectedDecisions, setSelectedDecisions] = useState<any[]>([]);
-  const [decisionsLoading, setDecisionsLoading] = useState(false);
+  const [decisionFilter, setDecisionFilter] = useState<'all' | 'template_required' | 'inbox_open'>('all');
+  
+  // Settings Modal State
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [autoGreetingConfig, setAutoGreetingConfig] = useState<any>(null);
+  const [envLocks, setEnvLocks] = useState<any>(null);
+  const [settingsLoading, setSettingsLoading] = useState(false);
 
-  useEffect(() => {
-    if (!selectedLeadIds || selectedLeadIds.length === 0) {
-      setSelectedDecisions([]);
-      return;
-    }
-
-    const fetchDecisions = async () => {
-      setDecisionsLoading(true);
-      try {
-        const { resolveLeadAutopilotDecisionsAction } = await import("@/app/actions/outreach");
-        const res = await resolveLeadAutopilotDecisionsAction(selectedLeadIds);
-        if (res.success && res.decisions) {
-          setSelectedDecisions(res.decisions);
-        }
-      } catch (e) {
-        console.error("Failed to fetch bulk decisions:", e);
-      } finally {
-        setDecisionsLoading(false);
+  const loadSettings = async () => {
+    setSettingsLoading(true);
+    try {
+      const { getAutoGreetingSettingsAction } = await import("@/app/actions/settings");
+      const autoGreetingRes = await getAutoGreetingSettingsAction();
+      if (autoGreetingRes.success) {
+        setAutoGreetingConfig(autoGreetingRes.channelsConfig);
+        setEnvLocks(autoGreetingRes.envLocks);
       }
-    };
+    } catch (err) {
+      console.error("Failed to load settings:", err);
+    } finally {
+      setSettingsLoading(false);
+    }
+  };
 
-    fetchDecisions();
-  }, [selectedLeadIds]);
+  const handleSaveChannelConfig = async (channelId: string, settings: any) => {
+    const { saveAutoGreetingChannelSettingsAction, getAutoGreetingSettingsAction } = await import("@/app/actions/settings");
+    const res = await saveAutoGreetingChannelSettingsAction(channelId, settings);
+    if (res.success) {
+      const autoGreetingRes = await getAutoGreetingSettingsAction();
+      if (autoGreetingRes.success) {
+        setAutoGreetingConfig(autoGreetingRes.channelsConfig);
+        setEnvLocks(autoGreetingRes.envLocks);
+      }
+      return { success: true };
+    } else {
+      return { success: false, error: res.error || "Hata oluştu." };
+    }
+  };
+
+  const selectedDecisions = selectedLeadIds
+    .map(id => forms.find((f: any) => f.id === id)?.autopilotDecision)
+    .filter((d): d is GreetingAutomationDecision => !!d);
+
+  const filteredForms = forms.filter((form: any) => {
+    if (decisionFilter === 'all') return true;
+    if (decisionFilter === 'template_required') {
+      return form.autopilotDecision?.category === 'manual_template_required';
+    }
+    if (decisionFilter === 'inbox_open') {
+      return form.autopilotDecision?.category === 'already_open_inbox' || form.autopilotDecision?.category === 'already_processed';
+    }
+    return true;
+  });
 
   const returnParams = new URLSearchParams({
     returnTo: 'forms',
@@ -168,6 +197,7 @@ export default function FormsPage() {
       return;
     }
 
+    // eslint-disable-next-line quba/no-native-dialog
     if (!window.confirm("Bu mesaj hastaya WhatsApp üzerinden gönderilecek. Emin misiniz?")) {
       return;
     }
@@ -343,6 +373,7 @@ export default function FormsPage() {
       const queueItemsRaw = result?.data?.queueItems ?? result?.queueItems ?? [];
 
       if (!result.success || queueItemsRaw.length === 0) {
+        // eslint-disable-next-line quba/no-native-dialog
         alert("Seçilen kayıtlar toplu karşılama kuyruğuna uygun değil.");
         setIsQueueModalOpen(false);
         return;
@@ -350,6 +381,7 @@ export default function FormsPage() {
 
       const hasEligible = queueItemsRaw.some((qItem: any) => qItem.isEligible === true);
       if (!hasEligible) {
+        // eslint-disable-next-line quba/no-native-dialog
         alert("Seçilen kayıtlar toplu karşılama kuyruğuna uygun değil.");
         setIsQueueModalOpen(false);
         return;
@@ -440,20 +472,26 @@ export default function FormsPage() {
         syncProgress={syncProgress}
         handleSync={handleSync}
         syncMetadata={syncMetadata}
+        onOpenSettings={() => {
+          setIsSettingsModalOpen(true);
+          loadSettings();
+        }}
       />
 
-      {/* Bulk actions queue bar */}
-      {selectedLeadIds.length > 0 && (
-        <div className="mb-4 bg-[#007AFF]/10 border border-[#007AFF]/20 rounded-xl p-3 flex items-center justify-between shadow-sm animate-in fade-in slide-in-from-top-4">
-          <div className="flex items-center gap-3 text-[#007AFF]">
-            <CheckCircle2 className="w-5 h-5" />
-            <span className="font-semibold text-sm">{selectedLeadIds.length} kişi seçildi</span>
+      {/* Decision Filter Indicator */}
+      {decisionFilter !== 'all' && (
+        <div className="mb-4 bg-[#007AFF]/5 border border-[#007AFF]/10 rounded-xl p-3 flex items-center justify-between shadow-sm animate-in fade-in slide-in-from-top-4 text-xs font-semibold">
+          <div className="flex items-center gap-2 text-[#007AFF]">
+            <span className="w-2 h-2 rounded-full bg-[#007AFF] animate-pulse" />
+            <span>
+              Filtre Uygulandı: {decisionFilter === 'template_required' ? 'Şablon Gereken Formlar' : 'Inbox\'ta Açılan Formlar'}
+            </span>
           </div>
           <button
-            onClick={handleBulkQueueStart}
-            className="px-4 py-1.5 bg-[#007AFF] text-white text-sm font-semibold rounded-lg hover:bg-[#0056b3] transition-colors shadow-sm cursor-pointer"
+            onClick={() => setDecisionFilter('all')}
+            className="flex items-center gap-1 px-2.5 py-1 bg-white hover:bg-slate-50 border border-black/10 text-slate-700 rounded-lg hover:border-black/20 transition-all cursor-pointer"
           >
-            Seçilenleri Manuel Karşılama Kuyruğuna Al
+            Filtreyi Temizle <X className="w-3.5 h-3.5" />
           </button>
         </div>
       )}
@@ -467,7 +505,7 @@ export default function FormsPage() {
 
       {/* Forms Table list */}
       <FormListTable
-        forms={forms}
+        forms={filteredForms}
         isLoading={!!isLoading}
         isLoadingMore={!!isLoadingMore}
         isReachingEnd={!!isReachingEnd}
@@ -732,10 +770,53 @@ export default function FormsPage() {
           </div>
         </>
       )}
+      {/* Settings Modal */}
+      {isSettingsModalOpen && (
+        <>
+          <div 
+            className="fixed inset-0 bg-black/45 backdrop-blur-sm z-[100] transition-opacity animate-in fade-in duration-200"
+            onClick={() => setIsSettingsModalOpen(false)}
+          />
+          <div className="fixed inset-0 z-[101] flex items-center justify-center p-4 pointer-events-none">
+            <div className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl border border-black/5 p-6 relative overflow-hidden animate-in zoom-in-95 duration-200 pointer-events-auto flex flex-col max-h-[85vh]">
+              <button 
+                onClick={() => setIsSettingsModalOpen(false)}
+                className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 transition-colors w-6 h-6 flex items-center justify-center rounded-full hover:bg-slate-100 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+              
+              <div className="overflow-y-auto pr-1">
+                {settingsLoading ? (
+                  <div className="py-12 flex flex-col items-center justify-center gap-3">
+                    <RefreshCw className="w-8 h-8 text-blue-500 animate-spin" />
+                    <span className="text-xs font-semibold text-slate-500">Ayarlar yükleniyor...</span>
+                  </div>
+                ) : (
+                  <AutoGreetingSettingsPanel
+                    channelsConfig={autoGreetingConfig || {}}
+                    envLocks={envLocks || {
+                      phaseLockBlocked: true,
+                      globalDisabled: true,
+                      isTenantAllowed: false,
+                      dryRun: true,
+                      allowedTenants: ""
+                    }}
+                    onSaveChannelConfig={handleSaveChannelConfig}
+                  />
+                )}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
       <BulkAutopilotDecisionBar
         decisions={selectedDecisions}
         onClearSelection={() => setSelectedLeadIds([])}
-        onNavigateToInbox={() => router.push(`/${tenantId}/inbox`)}
+        onPrepareDrafts={handleBulkQueueStart}
+        onFilterTemplateRequired={() => setDecisionFilter('template_required')}
+        onFilterInboxOpen={() => setDecisionFilter('inbox_open')}
       />
     </div>
   );

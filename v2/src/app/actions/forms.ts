@@ -73,6 +73,8 @@ export async function getForms(page: number = 1, search: string = "", source: st
                          COALESCE(c_identity.id, c_phone.id) as linked_conv_id,
                          COALESCE(c_identity.country, c_phone.conv_country) as conv_country,
                          COALESCE(c_identity.department, c_phone.conv_department) as conv_department,
+                         COALESCE(c_identity.autopilot_enabled, c_phone.conv_autopilot_enabled) as conv_autopilot_enabled,
+                         COALESCE(c_identity.channel, c_phone.conv_channel) as conv_channel,
                          opp.opp_id,
                          opp.opp_country,
                          opp.opp_department,
@@ -138,7 +140,7 @@ export async function getForms(page: number = 1, search: string = "", source: st
                     AND c_identity.customer_id = l.customer_id
                   -- Layer 2: Phone match only if EXACTLY ONE conversation matches (prevents cross-leak)
                   LEFT JOIN LATERAL (
-                    SELECT c2.id, c2.status, c2.lead_stage, c2.country as conv_country, c2.department as conv_department
+                    SELECT c2.id, c2.status, c2.lead_stage, c2.country as conv_country, c2.department as conv_department, c2.autopilot_enabled as conv_autopilot_enabled, c2.channel as conv_channel
                     FROM conversations c2 
                     WHERE c2.tenant_id = l.tenant_id 
                       AND RIGHT(c2.phone_number, 10) = RIGHT(l.phone_number, 10)
@@ -326,6 +328,9 @@ export async function getForms(page: number = 1, search: string = "", source: st
         values: params
       });
 
+      const { FirstContactDecisionResolver } = await import("@/lib/services/automation/first-contact-decision-resolver");
+      const decisions = await FirstContactDecisionResolver.resolveBulkFormLeadDecisions(ctx.tenantId, rows, ctx.db);
+
       return rows.map((r: any) => {
         return {
           id: r.id,
@@ -360,6 +365,16 @@ export async function getForms(page: number = 1, search: string = "", source: st
           first_greeting_at: r.first_greeting_at || null,
           inbound_stats: r.inbound_stats || { has_inbound: false },
           firstContactStatus: r.first_contact_status,
+          autopilotDecision: decisions[String(r.id)] || {
+            source: 'form',
+            category: 'not_eligible',
+            metaWindow: 'unknown',
+            technicalEligible: false,
+            finalActionAllowed: false,
+            recommendedAction: 'no_action',
+            reason: 'internal_error',
+            userFriendlyReason: 'Durum hesaplanamadı.'
+          },
           noReplyFollowup: {
             is_no_reply_eligible: !!r.is_no_reply_eligible,
             no_reply_hours: r.is_no_reply_eligible && r.no_reply_hours ? parseFloat(r.no_reply_hours) : null,

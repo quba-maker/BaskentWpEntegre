@@ -1668,128 +1668,7 @@ export function ContactRail() {
           </button>
         )}
       </div>
-      {/* ── Floating Bulk Actions Bar ── */}
-      {isSelectionMode && selectedIds.length > 0 && (() => {
-        const isAnyFavorite = selectedIds.some(id => {
-          const c = contacts.find((x: any) => x.conversation_id === id);
-          return !!c?.isFavorite;
-        });
-        const isAnyArchived = selectedIds.some(id => {
-          const c = contacts.find((x: any) => x.conversation_id === id);
-          return !!c?.isArchived;
-        });
 
-        return (
-          <div 
-            className="absolute bottom-4 left-4 right-4 z-20 p-3 rounded-2xl border flex flex-col gap-2 shadow-xl animate-fade-in"
-            style={{ 
-              borderColor: "rgba(0,122,255,0.15)",
-              background: "rgba(255, 255, 255, 0.9)",
-              backdropFilter: "blur(12px)"
-            }}
-          >
-            <div className="flex justify-between items-center px-1">
-              <span className="text-[11px] font-bold text-indigo-600">{selectedIds.length} sohbet seçildi</span>
-              <button 
-                onClick={() => clearSelection()}
-                className="text-[10px] font-semibold text-gray-500 hover:text-black transition-colors cursor-pointer"
-              >
-                Vazgeç
-              </button>
-            </div>
-
-            <div className="grid grid-cols-3 gap-1.5">
-              <button
-                onClick={() => handleBulkAction('read', selectedIds)}
-                disabled={bulkActionLoading}
-                className="py-1.5 px-2 bg-gray-50 hover:bg-gray-100 border rounded-xl text-[10px] font-bold text-gray-800 transition-all flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50"
-              >
-                Okundu Yap
-              </button>
-              <button
-                onClick={() => handleBulkAction('unread', selectedIds)}
-                disabled={bulkActionLoading}
-                className="py-1.5 px-2 bg-gray-50 hover:bg-gray-100 border rounded-xl text-[10px] font-bold text-gray-800 transition-all flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50"
-              >
-                Okunmadı Yap
-              </button>
-              <button
-                onClick={() => handleBulkFavorite(!isAnyFavorite)}
-                disabled={bulkActionLoading}
-                className="py-1.5 px-2 bg-gray-50 hover:bg-gray-100 border rounded-xl text-[10px] font-bold text-gray-800 transition-all flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50"
-              >
-                {isAnyFavorite ? "⭐ Yıldız Kaldır" : "⭐ Yıldızla"}
-              </button>
-              <button
-                onClick={() => handleBulkAction('bot', selectedIds)}
-                disabled={bulkActionLoading}
-                className="py-1.5 px-2 bg-gray-50 hover:bg-gray-100 border rounded-xl text-[10px] font-bold text-indigo-700 transition-all flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50"
-              >
-                Bota Devret
-              </button>
-              <button
-                onClick={() => handleBulkAction('manual', selectedIds)}
-                disabled={bulkActionLoading}
-                className="py-1.5 px-2 bg-gray-50 hover:bg-gray-100 border rounded-xl text-[10px] font-bold text-amber-700 transition-all flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50"
-              >
-                Manuele Al
-              </button>
-              <button
-                onClick={() => handleBulkArchive(!isAnyArchived)}
-                disabled={bulkActionLoading}
-                className="py-1.5 px-2 bg-gray-50 hover:bg-gray-100 border rounded-xl text-[10px] font-bold text-gray-800 transition-all flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50"
-              >
-                {isAnyArchived ? "📁 Arşiv Kaldır" : "📁 Arşivle"}
-              </button>
-            </div>
-
-            <button
-              onClick={async () => {
-                if (selectedIds.length > 10) {
-                  setBulkActionError("En fazla 10 sohbet için aynı anda taslak hazırlanabilir.");
-                  setTimeout(() => setBulkActionError(null), 4000);
-                  return;
-                }
-                setIsLoadingBulkDrafts(true);
-                setBulkActionError(null);
-                try {
-                  const res = await prepareBulkFollowUpDrafts(selectedIds);
-                  if (res.success && 'results' in res) {
-                    setBulkDraftsModal({ isOpen: true, results: res.results });
-                  } else {
-                    setBulkActionError((res as any).error || "Taslaklar hazırlanamadı.");
-                    setTimeout(() => setBulkActionError(null), 4000);
-                  }
-                } catch (e) {
-                  setBulkActionError("Bir sistem hatası oluştu.");
-                  setTimeout(() => setBulkActionError(null), 4000);
-                }
-                setIsLoadingBulkDrafts(false);
-              }}
-              disabled={bulkActionLoading || isLoadingBulkDrafts}
-              className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-[10px] font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
-            >
-              {isLoadingBulkDrafts ? (
-                <>
-                  <Loader2 className="w-3 h-3 animate-spin" />
-                  <span>Hazırlanıyor...</span>
-                </>
-              ) : (
-                <>
-                  <Sparkles className="w-3 h-3" />
-                  <span>Taslakları Önizle</span>
-                </>
-              )}
-            </button>
-
-            {bulkActionError && (
-              <div className="text-[10px] font-bold text-red-600 bg-red-50 border border-red-100 rounded-lg p-1.5 text-center mt-1 leading-snug">
-                ⚠️ {bulkActionError}
-              </div>
-            )}
-          </div>
-        );
-      })()}
 
       {/* ── Context Menu (Sağ Tık) ── */}
       {contextMenu && (
@@ -2128,6 +2007,7 @@ export function ContactRail() {
       {isSelectionMode && selectedIds.length > 0 && (
         <InboxBotControlBar
           selectedCount={selectedIds.length}
+          selectedConversations={selectedIds.map(id => contacts.find((c: any) => c.conversation_id === id || c.id === id)).filter(Boolean)}
           onSetBotMode={handleSetBotModeBulk}
           onClearSelection={() => clearSelection()}
         />

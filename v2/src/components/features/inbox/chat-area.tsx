@@ -2156,7 +2156,11 @@ export function ConversationViewport() {
           {/* AI Status Badge */}
           <AiStatusBadge phoneNumber={activePhone} />
           {/* Bot toggle chip */}
-          <div className="flex items-center gap-2 px-2.5 md:px-3.5 py-1.5 rounded-full q-glass-strong" style={{ border: "1px solid var(--q-border-default)", boxShadow: "var(--q-shadow-sm)" }}>
+          <div 
+            className="flex items-center gap-2 px-2.5 md:px-3.5 py-1.5 rounded-full q-glass-strong relative group" 
+            style={{ border: "1px solid var(--q-border-default)", boxShadow: "var(--q-shadow-sm)" }}
+            title="Bot açık olduğunda sonraki uygun hasta mesajlarında cevap verebilir. Bu işlem hemen mesaj göndermez."
+          >
             {activeContactIsBotActive ? (
               <Sparkles className="w-3.5 h-3.5 animate-pulse" style={{ color: "var(--q-blue)" }} />
             ) : (
@@ -2183,6 +2187,13 @@ export function ConversationViewport() {
             >
               <span className={`absolute w-4 h-4 bg-white rounded-full shadow-md transition-transform duration-300 ${activeContactIsBotActive ? "left-[2px] translate-x-4" : "left-[2px]"}`} />
             </button>
+
+            {/* Premium CSS Tooltip */}
+            <div className="absolute right-0 top-full mt-2 hidden group-hover:block w-64 p-2.5 bg-slate-900 text-white text-[11px] font-semibold rounded-lg shadow-xl z-50 text-center leading-normal break-words whitespace-normal border border-white/10">
+              🤖 Bot açık olduğunda sonraki uygun hasta mesajlarında otomatik cevap verebilir. <b>Bu işlem hemen mesaj göndermez.</b>
+              {/* Tooltip Arrow */}
+              <div className="absolute bottom-full right-6 border-4 border-transparent border-b-slate-900" />
+            </div>
           </div>
           {/* Mobile CRM button */}
           <button

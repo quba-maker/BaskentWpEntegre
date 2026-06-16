@@ -1,10 +1,11 @@
 "use client";
 
 import React, { useState } from "react";
-import { Bot, User, Check, RefreshCw, X, ShieldAlert } from "lucide-react";
+import { Bot, User, Check, RefreshCw, X, ShieldAlert, Sparkles, AlertTriangle, FileText, CheckCircle } from "lucide-react";
 
 interface InboxBotControlBarProps {
   selectedCount: number;
+  selectedConversations: any[];
   onSetBotMode: (enabled: boolean) => Promise<{
     success: boolean;
     summary?: {
@@ -19,6 +20,7 @@ interface InboxBotControlBarProps {
 
 export function InboxBotControlBar({
   selectedCount,
+  selectedConversations = [],
   onSetBotMode,
   onClearSelection
 }: InboxBotControlBarProps) {
@@ -32,6 +34,19 @@ export function InboxBotControlBar({
   const [error, setError] = useState<string | null>(null);
 
   if (selectedCount === 0) return null;
+
+  // Calculate stats in-memory
+  const now = Date.now();
+  const botEnabled = selectedConversations.filter(c => c.status === 'bot' || c.autopilot_enabled === true || c.isBotActive === true).length;
+  const botDisabled = selectedCount - botEnabled;
+  const humanTakedOver = selectedConversations.filter(c => c.status === 'human').length;
+  
+  const metaOpen = selectedConversations.filter(c => {
+    const timeMs = c.last_message_time_ms || (c.last_message_at ? new Date(c.last_message_at).getTime() : 0);
+    const direction = c.last_message_direction || c.lastMessageDirection;
+    return direction === 'in' && (now - timeMs) < 24 * 60 * 60 * 1000;
+  }).length;
+  const metaClosed = selectedCount - metaOpen;
 
   const handleAction = async (enabled: boolean) => {
     setLoading(true);
@@ -57,15 +72,15 @@ export function InboxBotControlBar({
   };
 
   return (
-    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 w-full max-w-[620px] px-4 animate-in slide-in-from-bottom-4 duration-300">
-      <div className="bg-[#1D1D1F] text-white rounded-2xl shadow-[0_12px_30px_rgba(0,0,0,0.3)] border border-white/10 p-4 space-y-3">
+    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 w-full max-w-[720px] px-4 animate-in slide-in-from-bottom-4 duration-300">
+      <div className="bg-[#1D1D1F] text-white rounded-2xl shadow-[0_12px_40px_rgba(0,0,0,0.35)] border border-white/10 p-4 flex flex-col gap-3.5">
         
         {/* Header & Close */}
         <div className="flex items-center justify-between border-b border-white/10 pb-2">
           <div className="flex items-center gap-2">
             <Bot className="w-4 h-4 text-blue-400" />
             <span className="font-bold text-xs uppercase tracking-wider text-gray-400">
-              Toplu Sohbet Yönetimi ({selectedCount} Konuşma Seçildi)
+              Toplu Bot Yönetimi ({selectedCount} Konuşma Seçildi)
             </span>
           </div>
           <button 
@@ -74,25 +89,52 @@ export function InboxBotControlBar({
               setError(null);
               onClearSelection();
             }}
-            className="w-5 h-5 flex items-center justify-center rounded-full hover:bg-white/10 transition-colors"
+            className="p-1 hover:bg-white/10 rounded-full transition-colors text-gray-400 hover:text-white"
+            title="Seçimi Kapat"
           >
-            <X className="w-3.5 h-3.5 text-gray-400" />
+            <X className="w-3.5 h-3.5" />
           </button>
         </div>
 
+        {/* Breakdown Row */}
+        {!summary && !error && (
+          <div className="flex flex-wrap gap-2 text-xs">
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+              <CheckCircle className="w-3.5 h-3.5" /> Bot Açık: {botEnabled}
+            </span>
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-semibold bg-stone-500/10 text-stone-400 border border-stone-500/20">
+              <User className="w-3.5 h-3.5" /> Bot Kapalı: {botDisabled}
+            </span>
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">
+              <AlertTriangle className="w-3.5 h-3.5" /> İnsan Devralmış: {humanTakedOver}
+            </span>
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20">
+              <Sparkles className="w-3.5 h-3.5" /> Meta Açık: {metaOpen}
+            </span>
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/20">
+              <FileText className="w-3.5 h-3.5" /> Meta Kapalı: {metaClosed}
+            </span>
+          </div>
+        )}
+
         {/* Action Panel */}
         {!summary && !error && (
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-            <div className="text-[11px] text-gray-400 text-left font-medium leading-relaxed max-w-[320px]">
-              <span className="block font-bold text-white mb-0.5">⚠️ Önemli Kural:</span>
-              İnsan temsilcilerin devraldığı (status='human') konuşmalar atlanacak, bot otomatik olarak açılmayacaktır. Botu açmak hemen bir mesaj göndermez.
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-white/10 pt-3">
+            <div className="text-[11px] text-gray-400 text-left font-medium leading-relaxed max-w-[380px]">
+              <span className="font-bold text-amber-400">💡 Önemli Bilgi:</span> Botu açmak hemen mesaj göndermez. Sadece sonraki uygun hasta mesajlarında botun cevap verebilmesini sağlar.
             </div>
             
-            <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+            <div className="flex items-center gap-2 w-full sm:w-auto justify-end shrink-0">
+              <button
+                onClick={onClearSelection}
+                className="px-3 py-2 bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
+              >
+                Seçimi Kaldır
+              </button>
               <button
                 disabled={loading}
                 onClick={() => handleAction(true)}
-                className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all duration-200 disabled:opacity-50 cursor-pointer"
+                className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all duration-200 disabled:opacity-50 cursor-pointer active:scale-[0.98]"
               >
                 {loading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Bot className="w-3.5 h-3.5" />}
                 Botu Aç
@@ -100,7 +142,7 @@ export function InboxBotControlBar({
               <button
                 disabled={loading}
                 onClick={() => handleAction(false)}
-                className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-2 bg-stone-700 hover:bg-stone-600 text-white rounded-xl text-xs font-bold transition-all duration-200 disabled:opacity-50 cursor-pointer"
+                className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-4 py-2 bg-stone-700 hover:bg-stone-600 text-white rounded-xl text-xs font-bold transition-all duration-200 disabled:opacity-50 cursor-pointer active:scale-[0.98]"
               >
                 {loading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <User className="w-3.5 h-3.5" />}
                 Botu Kapat

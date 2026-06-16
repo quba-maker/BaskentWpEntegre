@@ -281,25 +281,67 @@ export function FormListTable({
                     />
                   </td>
                   <td className="py-4 px-4 whitespace-nowrap">
-                    {(() => {
-                      const badgeKey = form.stage === 'quarantine' || form.firstContactStatus === 'control_required'
-                        ? 'control_required'
-                        : (form.noReplyFollowup?.is_no_reply_eligible ? 'no_reply_waiting' : form.firstContactStatus);
-                      const badge = OUTREACH_BADGE_CONFIG[badgeKey];
-                      if (!badge) return <span className="text-[11px] text-[#86868B] italic">—</span>;
-                      return (
-                        <span 
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-bold border uppercase tracking-wide shadow-sm"
-                          style={{ 
-                            backgroundColor: `${badge.color}15`,
-                            color: badge.color,
-                            borderColor: `${badge.color}25`
-                          }}
-                        >
-                          <span className="text-[11px]">{badge.icon}</span> {badge.label}
-                        </span>
-                      );
-                    })()}
+                    <div className="flex flex-col items-start gap-1">
+                      {(() => {
+                        const badgeKey = form.stage === 'quarantine' || form.firstContactStatus === 'control_required'
+                          ? 'control_required'
+                          : (form.noReplyFollowup?.is_no_reply_eligible ? 'no_reply_waiting' : form.firstContactStatus);
+                        const badge = OUTREACH_BADGE_CONFIG[badgeKey];
+                        if (!badge) return <span className="text-[11px] text-[#86868B] italic">—</span>;
+                        return (
+                          <span 
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-bold border uppercase tracking-wide shadow-sm"
+                            style={{ 
+                              backgroundColor: `${badge.color}15`,
+                              color: badge.color,
+                              borderColor: `${badge.color}25`
+                            }}
+                          >
+                            <span className="text-[11px]">{badge.icon}</span> {badge.label}
+                          </span>
+                        );
+                      })()}
+
+                      {form.autopilotDecision && (() => {
+                        const getAutopilotBadge = (category: string) => {
+                          switch (category) {
+                            case 'bot_auto_eligible':
+                              return { label: 'Bot Uygun', color: '#34C759', icon: '🤖' };
+                            case 'manual_draft_required':
+                              return { label: 'Taslak Gerekli', color: '#FF9500', icon: '✍️' };
+                            case 'manual_template_required':
+                              return { label: 'Şablon Gerekli', color: '#FFCC00', icon: '📄' };
+                            case 'already_open_inbox':
+                            case 'already_processed':
+                              return { label: "Inbox'tan Devam", color: '#007AFF', icon: '💬' };
+                            default:
+                              return { label: 'Uygun Değil', color: '#FF3B30', icon: '🚫' };
+                          }
+                        };
+                        const apBadge = getAutopilotBadge(form.autopilotDecision.category);
+                        return (
+                          <div className="relative group inline-block">
+                            <span 
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-extrabold border uppercase tracking-wider shadow-sm cursor-help transition-all hover:scale-[1.02]"
+                              style={{ 
+                                backgroundColor: `${apBadge.color}15`,
+                                color: apBadge.color,
+                                borderColor: `${apBadge.color}25`
+                              }}
+                            >
+                              <span className="text-[10px]">{apBadge.icon}</span> {apBadge.label}
+                            </span>
+                            
+                            {/* CSS Hover Tooltip */}
+                            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block w-48 p-2 bg-slate-900 text-white text-[10px] font-medium rounded-lg shadow-lg z-50 text-center leading-normal break-words whitespace-normal">
+                              {form.autopilotDecision.userFriendlyReason || 'Uyum durumu hesaplanamadı.'}
+                              {/* Tooltip Arrow */}
+                              <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-900" />
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
                   </td>
                   <td className="py-4 px-4 text-right" onClick={(e) => e.stopPropagation()}>
                     {(() => {

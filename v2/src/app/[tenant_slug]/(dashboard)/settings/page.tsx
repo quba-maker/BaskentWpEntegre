@@ -327,15 +327,19 @@ export default function SettingsPage() {
 
               <SaveButton saving={saving} saved={saved} onClick={handleSave} />
 
-              {autoGreetingConfig && envLocks && (
-                <div className="pt-6 border-t border-black/5">
-                  <AutoGreetingSettingsPanel
-                    channelsConfig={autoGreetingConfig}
-                    envLocks={envLocks}
-                    onSaveChannelConfig={handleSaveChannelConfig}
-                  />
-                </div>
-              )}
+              <div className="pt-6 border-t border-black/5">
+                <AutoGreetingSettingsPanel
+                  channelsConfig={autoGreetingConfig || {}}
+                  envLocks={envLocks || {
+                    phaseLockBlocked: true,
+                    globalDisabled: true,
+                    isTenantAllowed: false,
+                    dryRun: true,
+                    allowedTenants: ""
+                  }}
+                  onSaveChannelConfig={handleSaveChannelConfig}
+                />
+              </div>
             </div>
           )}
 
