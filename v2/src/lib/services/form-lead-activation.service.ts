@@ -342,6 +342,20 @@ export class FormLeadActivationService {
       log.error('[ACTIVATION_AUTOMATION_ERROR] Rule evaluator failed non-fatally', autoErr instanceof Error ? autoErr : new Error(String(autoErr)));
     }
 
+    // ── STEP 8: Trigger Form Autopilot Orchestrator (Safe After Activation) ──
+    if (conversationId && leadId) {
+      try {
+        const { FormAutopilotOrchestrator } = await import('./forms/form-autopilot-orchestrator');
+        await FormAutopilotOrchestrator.execute(tenantId, leadId, conversationId, db);
+      } catch (autopilotErr) {
+        log.error(
+          '[ACTIVATION_AUTOPILOT_ERROR] Non-fatal error during safeAfter execution',
+          autopilotErr instanceof Error ? autopilotErr : new Error(String(autopilotErr)),
+          { tenantId, leadId, conversationId }
+        );
+      }
+    }
+
     log.info('[ACTIVATION_COMPLETE]', {
       leadId,
       conversationId,

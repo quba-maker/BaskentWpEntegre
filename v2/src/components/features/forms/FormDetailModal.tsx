@@ -373,6 +373,68 @@ export function FormDetailModal({
                         </div>
                       )}
 
+                      {readiness?.formAutopilotEligibility && (
+                        <div className="text-left space-y-3 p-4 bg-white border border-black/5 rounded-xl shadow-sm">
+                          <div className="flex items-center justify-between border-b border-black/5 pb-2">
+                            <span className="text-xs font-bold text-[#1D1D1F] flex items-center gap-1.5">
+                              🤖 Form Karşılama Otopilotu
+                            </span>
+                            <span 
+                              className={`text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full border ${
+                                readiness.formAutopilotEligibility.eligible
+                                  ? 'bg-emerald-50 text-emerald-600 border-emerald-200'
+                                  : 'bg-stone-50 text-stone-500 border-stone-200'
+                              }`}
+                            >
+                              {readiness.formAutopilotEligibility.eligible ? 'AKTİF (DRY-RUN)' : 'PASİF'}
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-3 text-[11px] font-semibold text-[#86868B]">
+                            <div className="space-y-1">
+                              <span className="block text-[9px] uppercase tracking-wider text-[#86868B]/70">Teknik Uygunluk</span>
+                              <span className={`inline-flex items-center gap-1 ${readiness.formAutopilotEligibility.baseEligible ? 'text-emerald-600' : 'text-rose-500'}`}>
+                                {readiness.formAutopilotEligibility.baseEligible ? 'Evet' : 'Hayır'}
+                              </span>
+                            </div>
+                            <div className="space-y-1">
+                              <span className="block text-[9px] uppercase tracking-wider text-[#86868B]/70">Kilit Durumu</span>
+                              <span className="text-[#1D1D1F]">
+                                {(() => {
+                                  const locks = [];
+                                  if (readiness.formAutopilotEligibility.globalDisabled) locks.push('Global Disabled');
+                                  if (!readiness.formAutopilotEligibility.featureFlagEnabled) locks.push('Feature Flag Kapalı');
+                                  if (readiness.formAutopilotEligibility.dryRun) locks.push('Dry-run Açık');
+                                  return locks.length > 0 ? locks.join(' / ') : 'Kilit Yok';
+                                })()}
+                              </span>
+                            </div>
+                            <div className="space-y-1 col-span-2 pt-1.5 border-t border-black/5">
+                              <span className="block text-[9px] uppercase tracking-wider text-[#86868B]/70">Final Karar</span>
+                              <span className={`font-bold ${readiness.formAutopilotEligibility.eligible ? 'text-blue-600' : 'text-[#86868B]'}`}>
+                                {readiness.formAutopilotEligibility.eligible ? 'Simülasyon (Dry-Run)' : 'Çalışmaz'}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="text-[11px] bg-black/[0.02] p-2.5 rounded-lg border border-black/[0.04] text-[#515154] leading-relaxed">
+                            <span className="font-bold text-[#1D1D1F]">Durum Gerekçesi: </span>
+                            {(() => {
+                              const r = readiness.formAutopilotEligibility.reason;
+                              if (r === 'eligible') return 'Otomatik karşılama için tüm şartlar uygun. Dry-run simülasyonu devrede.';
+                              if (r === 'already_processed') return 'Bu lead için autopilot akışı daha önce zaten çalıştırıldı.';
+                              if (r === 'template_required') return '24 saatlik müşteri hizmetleri penceresi kapalı. Şablon gönderimi gerekli.';
+                              if (r === 'form_only_outbound') return 'Müşteriden gelen herhangi bir mesaj bulunmuyor (Meta penceresi açılmadı).';
+                              if (r === 'not_whatsapp_channel') return 'Kanal WhatsApp olmadığı için autopilot devre dışı.';
+                              if (r === 'feature_flag_disabled') return 'Teknik olarak uygun ancak Form Autopilot özelliği kapalı.';
+                              if (r === 'global_disabled') return 'Autopilot global olarak devre dışı bırakılmış.';
+                              if (r === 'tenant_not_allowlisted') return 'Bu kurum için autopilot yetkilendirmesi bulunmuyor.';
+                              return r;
+                            })()}
+                          </div>
+                        </div>
+                      )}
+
                       {outreachError && (
                         <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-[12px] font-medium flex items-center gap-2">
                           <XCircle className="w-3.5 h-3.5 shrink-0" />

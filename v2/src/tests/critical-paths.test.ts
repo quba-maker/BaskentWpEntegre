@@ -2121,21 +2121,833 @@ test("P0.12 EK 10: v58 / Başkent UUID / channel hardcode import ve kullanım ka
 });
 
 // ==========================================
+// P0.13 FORM KARŞILAMA OTOMASYONU & GÜVENLİK KİLİTLERİ (UNLOCK)
+// ==========================================
+
+import { MessageService } from "@/lib/services/message.service";
+
+let sendWhatsAppMessageCalls: any[] = [];
+const originalSendWhatsAppMessage = MessageService.prototype.sendWhatsAppMessage;
+
+// Spy on MessageService.sendWhatsAppMessage to track live outbound attempts (dynamically applied in runAllTests)
+
+function resetWhatsAppSpy() {
+  sendWhatsAppMessageCalls = [];
+}
+
+test("P0.13 UNLOCK 1: phase lock true → sendWhatsAppMessage çağrılmaz", async () => {
+  const { FormAutopilotOrchestrator } = await import("../lib/services/forms/form-autopilot-orchestrator");
+  resetWhatsAppSpy();
+
+  const originalMockDb = (global as any).mockDb;
+  const db = {
+    executeSafe: async (q: { text: string; values?: any[] }) => {
+      const sql = q.text.replace(/\s+/g, ' ');
+      if (sql.includes("tenants")) return [{ slug: "baskent" }];
+      if (sql.includes("conversations")) return [{ channel: "whatsapp", phone_number: "905001234567", tenant_id: "tenant-123" }];
+      if (sql.includes("leads")) return [{ tenant_id: "tenant-123", phone_number: "905001234567" }];
+      if (sql.includes("messages") && sql.includes("COALESCE")) {
+        return [{ id: "msg-1", last_inbound_at: new Date().toISOString() }];
+      }
+      return [];
+    }
+  };
+  (global as any).mockDb = db;
+
+  const oldLock = process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED;
+  const oldDryRun = process.env.FORM_AUTOPILOT_DRY_RUN;
+  const oldFlag = process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED;
+  const oldGlobal = process.env.FORM_AUTOPILOT_GLOBAL_DISABLED;
+  const oldAllowed = process.env.FORM_AUTOPILOT_ALLOWED_TENANTS;
+
+  process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED = "true"; // Locked
+  process.env.FORM_AUTOPILOT_DRY_RUN = "false";
+  process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED = "true";
+  process.env.FORM_AUTOPILOT_GLOBAL_DISABLED = "false";
+  process.env.FORM_AUTOPILOT_ALLOWED_TENANTS = "baskent";
+
+  try {
+    const res = await FormAutopilotOrchestrator.execute("tenant-123", "lead-123", "conv-123", db as any);
+    assert(res.processed === true, "Should process simulation");
+    assert(res.reason === "dry_run_simulation", "Should be dry_run_simulation");
+    assert(sendWhatsAppMessageCalls.length === 0, "sendWhatsAppMessage must not be called when phase lock is true");
+  } finally {
+    (global as any).mockDb = originalMockDb;
+    process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED = oldLock;
+    process.env.FORM_AUTOPILOT_DRY_RUN = oldDryRun;
+    process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED = oldFlag;
+    process.env.FORM_AUTOPILOT_GLOBAL_DISABLED = oldGlobal;
+    process.env.FORM_AUTOPILOT_ALLOWED_TENANTS = oldAllowed;
+  }
+});
+
+test("P0.13 UNLOCK 2: phase lock false ama dry-run true → sendWhatsAppMessage çağrılmaz", async () => {
+  const { FormAutopilotOrchestrator } = await import("../lib/services/forms/form-autopilot-orchestrator");
+  resetWhatsAppSpy();
+
+  const originalMockDb = (global as any).mockDb;
+  const db = {
+    executeSafe: async (q: { text: string; values?: any[] }) => {
+      const sql = q.text.replace(/\s+/g, ' ');
+      if (sql.includes("tenants")) return [{ slug: "baskent" }];
+      if (sql.includes("conversations")) return [{ channel: "whatsapp", phone_number: "905001234567", tenant_id: "tenant-123" }];
+      if (sql.includes("leads")) return [{ tenant_id: "tenant-123", phone_number: "905001234567" }];
+      if (sql.includes("messages") && sql.includes("COALESCE")) {
+        return [{ id: "msg-1", last_inbound_at: new Date().toISOString() }];
+      }
+      return [];
+    }
+  };
+  (global as any).mockDb = db;
+
+  const oldLock = process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED;
+  const oldDryRun = process.env.FORM_AUTOPILOT_DRY_RUN;
+  const oldFlag = process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED;
+  const oldGlobal = process.env.FORM_AUTOPILOT_GLOBAL_DISABLED;
+  const oldAllowed = process.env.FORM_AUTOPILOT_ALLOWED_TENANTS;
+
+  process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED = "false";
+  process.env.FORM_AUTOPILOT_DRY_RUN = "true"; // Dry Run
+  process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED = "true";
+  process.env.FORM_AUTOPILOT_GLOBAL_DISABLED = "false";
+  process.env.FORM_AUTOPILOT_ALLOWED_TENANTS = "baskent";
+
+  try {
+    const res = await FormAutopilotOrchestrator.execute("tenant-123", "lead-123", "conv-123", db as any);
+    assert(res.processed === true, "Should process simulation");
+    assert(res.reason === "dry_run_simulation", "Should be dry_run_simulation");
+    assert(sendWhatsAppMessageCalls.length === 0, "sendWhatsAppMessage must not be called when dryRun is true");
+  } finally {
+    (global as any).mockDb = originalMockDb;
+    process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED = oldLock;
+    process.env.FORM_AUTOPILOT_DRY_RUN = oldDryRun;
+    process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED = oldFlag;
+    process.env.FORM_AUTOPILOT_GLOBAL_DISABLED = oldGlobal;
+    process.env.FORM_AUTOPILOT_ALLOWED_TENANTS = oldAllowed;
+  }
+});
+
+test("P0.13 UNLOCK 3: phase lock false, dry-run false ama feature flag false → sendWhatsAppMessage çağrılmaz", async () => {
+  const { FormAutopilotOrchestrator } = await import("../lib/services/forms/form-autopilot-orchestrator");
+  resetWhatsAppSpy();
+
+  const originalMockDb = (global as any).mockDb;
+  const db = {
+    executeSafe: async (q: { text: string; values?: any[] }) => {
+      const sql = q.text.replace(/\s+/g, ' ');
+      if (sql.includes("tenants")) return [{ slug: "baskent" }];
+      if (sql.includes("conversations")) return [{ channel: "whatsapp", phone_number: "905001234567", tenant_id: "tenant-123" }];
+      if (sql.includes("leads")) return [{ tenant_id: "tenant-123", phone_number: "905001234567" }];
+      if (sql.includes("messages") && sql.includes("COALESCE")) {
+        return [{ id: "msg-1", last_inbound_at: new Date().toISOString() }];
+      }
+      return [];
+    }
+  };
+  (global as any).mockDb = db;
+
+  const oldLock = process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED;
+  const oldDryRun = process.env.FORM_AUTOPILOT_DRY_RUN;
+  const oldFlag = process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED;
+  const oldGlobal = process.env.FORM_AUTOPILOT_GLOBAL_DISABLED;
+  const oldAllowed = process.env.FORM_AUTOPILOT_ALLOWED_TENANTS;
+
+  process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED = "false";
+  process.env.FORM_AUTOPILOT_DRY_RUN = "false";
+  process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED = "false"; // Feature flag disabled
+  process.env.FORM_AUTOPILOT_GLOBAL_DISABLED = "false";
+  process.env.FORM_AUTOPILOT_ALLOWED_TENANTS = "baskent";
+
+  try {
+    const res = await FormAutopilotOrchestrator.execute("tenant-123", "lead-123", "conv-123", db as any);
+    assert(res.eligible === false, "Should not be eligible");
+    assert(res.reason === "feature_flag_disabled", "Reason should be feature_flag_disabled");
+    assert(sendWhatsAppMessageCalls.length === 0, "sendWhatsAppMessage must not be called when feature flag is false");
+  } finally {
+    (global as any).mockDb = originalMockDb;
+    process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED = oldLock;
+    process.env.FORM_AUTOPILOT_DRY_RUN = oldDryRun;
+    process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED = oldFlag;
+    process.env.FORM_AUTOPILOT_GLOBAL_DISABLED = oldGlobal;
+    process.env.FORM_AUTOPILOT_ALLOWED_TENANTS = oldAllowed;
+  }
+});
+
+test("P0.13 UNLOCK 4: phase lock false, dry-run false, feature flag true ama tenant allowlist yok → sendWhatsAppMessage çağrılmaz", async () => {
+  const { FormAutopilotOrchestrator } = await import("../lib/services/forms/form-autopilot-orchestrator");
+  resetWhatsAppSpy();
+
+  const originalMockDb = (global as any).mockDb;
+  const db = {
+    executeSafe: async (q: { text: string; values?: any[] }) => {
+      const sql = q.text.replace(/\s+/g, ' ');
+      if (sql.includes("tenants")) return [{ slug: "other-tenant" }]; // Not allowlisted
+      if (sql.includes("conversations")) return [{ channel: "whatsapp", phone_number: "905001234567", tenant_id: "tenant-123" }];
+      if (sql.includes("leads")) return [{ tenant_id: "tenant-123", phone_number: "905001234567" }];
+      if (sql.includes("messages") && sql.includes("COALESCE")) {
+        return [{ id: "msg-1", last_inbound_at: new Date().toISOString() }];
+      }
+      return [];
+    }
+  };
+  (global as any).mockDb = db;
+
+  const oldLock = process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED;
+  const oldDryRun = process.env.FORM_AUTOPILOT_DRY_RUN;
+  const oldFlag = process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED;
+  const oldGlobal = process.env.FORM_AUTOPILOT_GLOBAL_DISABLED;
+  const oldAllowed = process.env.FORM_AUTOPILOT_ALLOWED_TENANTS;
+
+  process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED = "false";
+  process.env.FORM_AUTOPILOT_DRY_RUN = "false";
+  process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED = "true";
+  process.env.FORM_AUTOPILOT_GLOBAL_DISABLED = "false";
+  process.env.FORM_AUTOPILOT_ALLOWED_TENANTS = "baskent"; // slug other-tenant is not allowlisted
+
+  try {
+    const res = await FormAutopilotOrchestrator.execute("tenant-123", "lead-123", "conv-123", db as any);
+    assert(res.eligible === false, "Should not be eligible");
+    assert(res.reason === "tenant_not_allowlisted", "Reason should be tenant_not_allowlisted");
+    assert(sendWhatsAppMessageCalls.length === 0, "sendWhatsAppMessage must not be called when tenant is not allowlisted");
+  } finally {
+    (global as any).mockDb = originalMockDb;
+    process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED = oldLock;
+    process.env.FORM_AUTOPILOT_DRY_RUN = oldDryRun;
+    process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED = oldFlag;
+    process.env.FORM_AUTOPILOT_GLOBAL_DISABLED = oldGlobal;
+    process.env.FORM_AUTOPILOT_ALLOWED_TENANTS = oldAllowed;
+  }
+});
+
+test("P0.13 UNLOCK 5: tüm kapılar açık ama Meta 24h kapalı → sendWhatsAppMessage çağrılmaz", async () => {
+  const { FormAutopilotOrchestrator } = await import("../lib/services/forms/form-autopilot-orchestrator");
+  resetWhatsAppSpy();
+
+  const originalMockDb = (global as any).mockDb;
+  const db = {
+    executeSafe: async (q: { text: string; values?: any[] }) => {
+      const sql = q.text.replace(/\s+/g, ' ');
+      if (sql.includes("tenants")) return [{ slug: "baskent" }];
+      if (sql.includes("conversations")) return [{ channel: "whatsapp", phone_number: "905001234567", tenant_id: "tenant-123" }];
+      if (sql.includes("leads")) return [{ tenant_id: "tenant-123", phone_number: "905001234567" }];
+      if (sql.includes("messages") && sql.includes("COALESCE")) {
+        // Last message 3 days ago (window closed)
+        const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+        return [{ id: "msg-old", last_inbound_at: threeDaysAgo }];
+      }
+      return [];
+    }
+  };
+  (global as any).mockDb = db;
+
+  const oldLock = process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED;
+  const oldDryRun = process.env.FORM_AUTOPILOT_DRY_RUN;
+  const oldFlag = process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED;
+  const oldGlobal = process.env.FORM_AUTOPILOT_GLOBAL_DISABLED;
+  const oldAllowed = process.env.FORM_AUTOPILOT_ALLOWED_TENANTS;
+
+  process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED = "false";
+  process.env.FORM_AUTOPILOT_DRY_RUN = "false";
+  process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED = "true";
+  process.env.FORM_AUTOPILOT_GLOBAL_DISABLED = "false";
+  process.env.FORM_AUTOPILOT_ALLOWED_TENANTS = "baskent";
+
+  try {
+    const res = await FormAutopilotOrchestrator.execute("tenant-123", "lead-123", "conv-123", db as any);
+    assert(res.eligible === false, "Should not be eligible");
+    assert(res.reason === "template_required", "Should be template_required");
+    assert(sendWhatsAppMessageCalls.length === 0, "sendWhatsAppMessage must not be called when window is closed");
+  } finally {
+    (global as any).mockDb = originalMockDb;
+    process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED = oldLock;
+    process.env.FORM_AUTOPILOT_DRY_RUN = oldDryRun;
+    process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED = oldFlag;
+    process.env.FORM_AUTOPILOT_GLOBAL_DISABLED = oldGlobal;
+    process.env.FORM_AUTOPILOT_ALLOWED_TENANTS = oldAllowed;
+  }
+});
+
+test("P0.13 UNLOCK 6: tüm kapılar açık ama form-only no inbound → sendWhatsAppMessage çağrılmaz", async () => {
+  const { FormAutopilotOrchestrator } = await import("../lib/services/forms/form-autopilot-orchestrator");
+  resetWhatsAppSpy();
+
+  const originalMockDb = (global as any).mockDb;
+  const db = {
+    executeSafe: async (q: { text: string; values?: any[] }) => {
+      const sql = q.text.replace(/\s+/g, ' ');
+      if (sql.includes("tenants")) return [{ slug: "baskent" }];
+      if (sql.includes("conversations")) return [{ channel: "whatsapp", phone_number: "905001234567", tenant_id: "tenant-123" }];
+      if (sql.includes("leads")) return [{ tenant_id: "tenant-123", phone_number: "905001234567" }];
+      if (sql.includes("messages") && sql.includes("COALESCE")) {
+        return []; // No messages at all
+      }
+      return [];
+    }
+  };
+  (global as any).mockDb = db;
+
+  const oldLock = process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED;
+  const oldDryRun = process.env.FORM_AUTOPILOT_DRY_RUN;
+  const oldFlag = process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED;
+  const oldGlobal = process.env.FORM_AUTOPILOT_GLOBAL_DISABLED;
+  const oldAllowed = process.env.FORM_AUTOPILOT_ALLOWED_TENANTS;
+
+  process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED = "false";
+  process.env.FORM_AUTOPILOT_DRY_RUN = "false";
+  process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED = "true";
+  process.env.FORM_AUTOPILOT_GLOBAL_DISABLED = "false";
+  process.env.FORM_AUTOPILOT_ALLOWED_TENANTS = "baskent";
+
+  try {
+    const res = await FormAutopilotOrchestrator.execute("tenant-123", "lead-123", "conv-123", db as any);
+    assert(res.eligible === false, "Should not be eligible");
+    assert(res.reason === "form_only_outbound", "Should be form_only_outbound");
+    assert(sendWhatsAppMessageCalls.length === 0, "sendWhatsAppMessage must not be called when there is no inbound");
+  } finally {
+    (global as any).mockDb = originalMockDb;
+    process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED = oldLock;
+    process.env.FORM_AUTOPILOT_DRY_RUN = oldDryRun;
+    process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED = oldFlag;
+    process.env.FORM_AUTOPILOT_GLOBAL_DISABLED = oldGlobal;
+    process.env.FORM_AUTOPILOT_ALLOWED_TENANTS = oldAllowed;
+  }
+});
+
+test("P0.13 UNLOCK 7: tüm kapılar açık ama template_required → sendWhatsAppMessage çağrılmaz", async () => {
+  const { FormAutopilotOrchestrator } = await import("../lib/services/forms/form-autopilot-orchestrator");
+  resetWhatsAppSpy();
+
+  const originalMockDb = (global as any).mockDb;
+  const db = {
+    executeSafe: async (q: { text: string; values?: any[] }) => {
+      const sql = q.text.replace(/\s+/g, ' ');
+      if (sql.includes("tenants")) return [{ slug: "baskent" }];
+      if (sql.includes("conversations")) return [{ channel: "whatsapp", phone_number: "905001234567", tenant_id: "tenant-123" }];
+      if (sql.includes("leads")) return [{ tenant_id: "tenant-123", phone_number: "905001234567" }];
+      if (sql.includes("messages") && sql.includes("COALESCE")) {
+        const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+        return [{ id: "msg-old", last_inbound_at: threeDaysAgo }];
+      }
+      return [];
+    }
+  };
+  (global as any).mockDb = db;
+
+  const oldLock = process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED;
+  const oldDryRun = process.env.FORM_AUTOPILOT_DRY_RUN;
+  const oldFlag = process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED;
+  const oldGlobal = process.env.FORM_AUTOPILOT_GLOBAL_DISABLED;
+  const oldAllowed = process.env.FORM_AUTOPILOT_ALLOWED_TENANTS;
+
+  process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED = "false";
+  process.env.FORM_AUTOPILOT_DRY_RUN = "false";
+  process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED = "true";
+  process.env.FORM_AUTOPILOT_GLOBAL_DISABLED = "false";
+  process.env.FORM_AUTOPILOT_ALLOWED_TENANTS = "baskent";
+
+  try {
+    const res = await FormAutopilotOrchestrator.execute("tenant-123", "lead-123", "conv-123", db as any);
+    assert(res.eligible === false, "Should not be eligible");
+    assert(res.reason === "template_required", "Should be template_required");
+    assert(sendWhatsAppMessageCalls.length === 0, "sendWhatsAppMessage must not be called when template_required is true");
+  } finally {
+    (global as any).mockDb = originalMockDb;
+    process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED = oldLock;
+    process.env.FORM_AUTOPILOT_DRY_RUN = oldDryRun;
+    process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED = oldFlag;
+    process.env.FORM_AUTOPILOT_GLOBAL_DISABLED = oldGlobal;
+    process.env.FORM_AUTOPILOT_ALLOWED_TENANTS = oldAllowed;
+  }
+});
+
+test("P0.13 UNLOCK 8: tüm kapılar açık ama already_processed → sendWhatsAppMessage çağrılmaz", async () => {
+  const { FormAutopilotOrchestrator } = await import("../lib/services/forms/form-autopilot-orchestrator");
+  resetWhatsAppSpy();
+
+  const originalMockDb = (global as any).mockDb;
+  const db = {
+    executeSafe: async (q: { text: string; values?: any[] }) => {
+      const sql = q.text.replace(/\s+/g, ' ');
+      if (sql.includes("tenants")) return [{ slug: "baskent" }];
+      if (sql.includes("conversations")) return [{ channel: "whatsapp", phone_number: "905001234567", tenant_id: "tenant-123" }];
+      if (sql.includes("leads")) return [{ tenant_id: "tenant-123", phone_number: "905001234567" }];
+      if (sql.includes("messages") && sql.includes("COALESCE")) {
+        return [{ id: "msg-1", last_inbound_at: new Date().toISOString() }];
+      }
+      if (sql.includes("ai_audit_logs")) {
+        return [{ id: "log-123" }]; // Already processed
+      }
+      return [];
+    }
+  };
+  (global as any).mockDb = db;
+
+  const oldLock = process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED;
+  const oldDryRun = process.env.FORM_AUTOPILOT_DRY_RUN;
+  const oldFlag = process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED;
+  const oldGlobal = process.env.FORM_AUTOPILOT_GLOBAL_DISABLED;
+  const oldAllowed = process.env.FORM_AUTOPILOT_ALLOWED_TENANTS;
+
+  process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED = "false";
+  process.env.FORM_AUTOPILOT_DRY_RUN = "false";
+  process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED = "true";
+  process.env.FORM_AUTOPILOT_GLOBAL_DISABLED = "false";
+  process.env.FORM_AUTOPILOT_ALLOWED_TENANTS = "baskent";
+
+  try {
+    const res = await FormAutopilotOrchestrator.execute("tenant-123", "lead-123", "conv-123", db as any);
+    assert(res.eligible === false, "Should not be eligible");
+    assert(res.reason === "already_processed", "Should be already_processed");
+    assert(sendWhatsAppMessageCalls.length === 0, "sendWhatsAppMessage must not be called when already processed");
+  } finally {
+    (global as any).mockDb = originalMockDb;
+    process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED = oldLock;
+    process.env.FORM_AUTOPILOT_DRY_RUN = oldDryRun;
+    process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED = oldFlag;
+    process.env.FORM_AUTOPILOT_GLOBAL_DISABLED = oldGlobal;
+    process.env.FORM_AUTOPILOT_ALLOWED_TENANTS = oldAllowed;
+  }
+});
+
+test("P0.13 UNLOCK 9: tüm kapılar açık ve Meta window open → sadece bu testte mock send çağrısı beklenir", async () => {
+  const { FormAutopilotOrchestrator } = await import("../lib/services/forms/form-autopilot-orchestrator");
+  resetWhatsAppSpy();
+
+  const originalMockDb = (global as any).mockDb;
+  const db = {
+    executeSafe: async (q: { text: string; values?: any[] }) => {
+      const sql = q.text.replace(/\s+/g, ' ');
+      if (sql.includes("tenants")) return [{ slug: "baskent" }];
+      if (sql.includes("conversations")) return [{ channel: "whatsapp", phone_number: "905001234567", tenant_id: "tenant-123" }];
+      if (sql.includes("leads")) return [{ tenant_id: "tenant-123", phone_number: "905001234567" }];
+      if (sql.includes("messages") && sql.includes("COALESCE")) {
+        return [{ id: "msg-1", last_inbound_at: new Date().toISOString() }];
+      }
+      if (sql.includes("ai_audit_logs")) return [];
+      if (sql.includes("channels") || sql.includes("channel_integrations") || sql.includes("meta_app_id")) {
+        return [{ 
+          credentials_encrypted: JSON.stringify({ accessToken: "token-123", phone_number_id: "phone-123" }),
+          identifier: "phone-123", 
+          channel_id: "channel-123",
+          provider: "meta_graph"
+        }];
+      }
+      if (sql.includes("INSERT INTO messages")) return [{ id: "msg-auto-created" }];
+      return [];
+    }
+  };
+  (global as any).mockDb = db;
+
+  const oldLock = process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED;
+  const oldDryRun = process.env.FORM_AUTOPILOT_DRY_RUN;
+  const oldFlag = process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED;
+  const oldGlobal = process.env.FORM_AUTOPILOT_GLOBAL_DISABLED;
+  const oldAllowed = process.env.FORM_AUTOPILOT_ALLOWED_TENANTS;
+
+  process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED = "false"; // UNLOCKED
+  process.env.FORM_AUTOPILOT_DRY_RUN = "false";
+  process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED = "true";
+  process.env.FORM_AUTOPILOT_GLOBAL_DISABLED = "false";
+  process.env.FORM_AUTOPILOT_ALLOWED_TENANTS = "baskent";
+
+  try {
+    const res = await FormAutopilotOrchestrator.execute("tenant-123", "lead-123", "conv-123", db as any);
+    assert(res.eligible === true, `Should be eligible but got: ${JSON.stringify(res)}`);
+    assert(res.processed === true, "Should be processed");
+    assert(res.reason === "sent", "Reason should be sent");
+    assert(sendWhatsAppMessageCalls.length === 1, "sendWhatsAppMessage must be called exactly once when all gates are open");
+  } finally {
+    (global as any).mockDb = originalMockDb;
+    process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED = oldLock;
+    process.env.FORM_AUTOPILOT_DRY_RUN = oldDryRun;
+    process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED = oldFlag;
+    process.env.FORM_AUTOPILOT_GLOBAL_DISABLED = oldGlobal;
+    process.env.FORM_AUTOPILOT_ALLOWED_TENANTS = oldAllowed;
+  }
+});
+
+test("P0.13 UNLOCK 10: FinalOutboundGuard fail → sendWhatsAppMessage çağrılmaz", async () => {
+  const { FormAutopilotOrchestrator } = await import("../lib/services/forms/form-autopilot-orchestrator");
+  resetWhatsAppSpy();
+
+  const originalMockDb = (global as any).mockDb;
+  const db = {
+    executeSafe: async (q: { text: string; values?: any[] }) => {
+      const sql = q.text.replace(/\s+/g, ' ');
+      if (sql.includes("tenants")) return [{ slug: "baskent" }];
+      if (sql.includes("conversations")) return [{ channel: "whatsapp", phone_number: "905001234567", tenant_id: "tenant-123" }];
+      if (sql.includes("leads")) return [{ tenant_id: "tenant-123", phone_number: "905001234567" }];
+      if (sql.includes("messages") && sql.includes("COALESCE")) {
+        return [{ id: "msg-1", last_inbound_at: new Date().toISOString() }];
+      }
+      if (sql.includes("ai_audit_logs")) return [];
+      if (sql.includes("channels") || sql.includes("channel_integrations") || sql.includes("meta_app_id")) {
+        return [{ 
+          credentials_encrypted: JSON.stringify({ accessToken: "token-123", phone_number_id: "phone-123" }),
+          identifier: "phone-123", 
+          channel_id: "channel-123",
+          provider: "meta_graph"
+        }];
+      }
+      return [];
+    }
+  };
+  (global as any).mockDb = db;
+
+  const oldLock = process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED;
+  const oldDryRun = process.env.FORM_AUTOPILOT_DRY_RUN;
+  const oldFlag = process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED;
+  const oldGlobal = process.env.FORM_AUTOPILOT_GLOBAL_DISABLED;
+  const oldAllowed = process.env.FORM_AUTOPILOT_ALLOWED_TENANTS;
+
+  process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED = "false"; // UNLOCKED
+  process.env.FORM_AUTOPILOT_DRY_RUN = "false";
+  process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED = "true";
+  process.env.FORM_AUTOPILOT_GLOBAL_DISABLED = "false";
+  process.env.FORM_AUTOPILOT_ALLOWED_TENANTS = "baskent";
+
+  // Force FinalOutboundGuard to fail by spying/stubbing its process method
+  const { FinalOutboundGuard } = await import("../lib/services/ai/final-outbound-guard");
+  const originalProcess = FinalOutboundGuard.process;
+  FinalOutboundGuard.process = () => "Kusura bakmayın, sorunuzu anlayamadım."; // Failed text
+
+  try {
+    const res = await FormAutopilotOrchestrator.execute("tenant-123", "lead-123", "conv-123", db as any);
+    assert(res.processed === false, "Should not be processed");
+    assert(res.reason === "final_outbound_guard_failed", "Reason should be final_outbound_guard_failed");
+    assert(sendWhatsAppMessageCalls.length === 0, "sendWhatsAppMessage must not be called when guard fails");
+  } finally {
+    FinalOutboundGuard.process = originalProcess;
+    (global as any).mockDb = originalMockDb;
+    process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED = oldLock;
+    process.env.FORM_AUTOPILOT_DRY_RUN = oldDryRun;
+    process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED = oldFlag;
+    process.env.FORM_AUTOPILOT_GLOBAL_DISABLED = oldGlobal;
+    process.env.FORM_AUTOPILOT_ALLOWED_TENANTS = oldAllowed;
+  }
+});
+
+test("P0.13 UNLOCK 11: non-allowed tenant → sendWhatsAppMessage çağrılmaz", async () => {
+  const { FormAutopilotOrchestrator } = await import("../lib/services/forms/form-autopilot-orchestrator");
+  resetWhatsAppSpy();
+
+  const originalMockDb = (global as any).mockDb;
+  const db = {
+    executeSafe: async (q: { text: string; values?: any[] }) => {
+      const sql = q.text.replace(/\s+/g, ' ');
+      if (sql.includes("tenants")) return [{ slug: "other-tenant" }]; // Not allowlisted
+      if (sql.includes("conversations")) return [{ channel: "whatsapp", phone_number: "905001234567", tenant_id: "tenant-123" }];
+      if (sql.includes("leads")) return [{ tenant_id: "tenant-123", phone_number: "905001234567" }];
+      if (sql.includes("messages") && sql.includes("COALESCE")) {
+        return [{ id: "msg-1", last_inbound_at: new Date().toISOString() }];
+      }
+      return [];
+    }
+  };
+  (global as any).mockDb = db;
+
+  const oldLock = process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED;
+  const oldDryRun = process.env.FORM_AUTOPILOT_DRY_RUN;
+  const oldFlag = process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED;
+  const oldGlobal = process.env.FORM_AUTOPILOT_GLOBAL_DISABLED;
+  const oldAllowed = process.env.FORM_AUTOPILOT_ALLOWED_TENANTS;
+
+  process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED = "false";
+  process.env.FORM_AUTOPILOT_DRY_RUN = "false";
+  process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED = "true";
+  process.env.FORM_AUTOPILOT_GLOBAL_DISABLED = "false";
+  process.env.FORM_AUTOPILOT_ALLOWED_TENANTS = "baskent";
+
+  try {
+    const res = await FormAutopilotOrchestrator.execute("tenant-123", "lead-123", "conv-123", db as any);
+    assert(res.eligible === false, "Should not be eligible");
+    assert(res.reason === "tenant_not_allowlisted", "Should be tenant_not_allowlisted");
+    assert(sendWhatsAppMessageCalls.length === 0, "sendWhatsAppMessage must not be called for non-allowed tenant");
+  } finally {
+    (global as any).mockDb = originalMockDb;
+    process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED = oldLock;
+    process.env.FORM_AUTOPILOT_DRY_RUN = oldDryRun;
+    process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED = oldFlag;
+    process.env.FORM_AUTOPILOT_GLOBAL_DISABLED = oldGlobal;
+    process.env.FORM_AUTOPILOT_ALLOWED_TENANTS = oldAllowed;
+  }
+});
+
+test("P0.13 UNLOCK 12: tenant/channel mismatch → sendWhatsAppMessage çağrılmaz", async () => {
+  const { FormAutopilotOrchestrator } = await import("../lib/services/forms/form-autopilot-orchestrator");
+  resetWhatsAppSpy();
+
+  const originalMockDb = (global as any).mockDb;
+  const db = {
+    executeSafe: async (q: { text: string; values?: any[] }) => {
+      const sql = q.text.replace(/\s+/g, ' ');
+      if (sql.includes("tenants")) return [{ slug: "baskent" }];
+      if (sql.includes("conversations")) return [{ channel: "whatsapp", phone_number: "905001234567", tenant_id: "tenant-mismatch-id" }]; // Mismatch tenant ID
+      if (sql.includes("leads")) return [{ tenant_id: "tenant-123", phone_number: "905001234567" }];
+      if (sql.includes("messages") && sql.includes("COALESCE")) {
+        return [{ id: "msg-1", last_inbound_at: new Date().toISOString() }];
+      }
+      return [];
+    }
+  };
+  (global as any).mockDb = db;
+
+  const oldLock = process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED;
+  const oldDryRun = process.env.FORM_AUTOPILOT_DRY_RUN;
+  const oldFlag = process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED;
+  const oldGlobal = process.env.FORM_AUTOPILOT_GLOBAL_DISABLED;
+  const oldAllowed = process.env.FORM_AUTOPILOT_ALLOWED_TENANTS;
+
+  process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED = "false";
+  process.env.FORM_AUTOPILOT_DRY_RUN = "false";
+  process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED = "true";
+  process.env.FORM_AUTOPILOT_GLOBAL_DISABLED = "false";
+  process.env.FORM_AUTOPILOT_ALLOWED_TENANTS = "baskent";
+
+  try {
+    const res = await FormAutopilotOrchestrator.execute("tenant-123", "lead-123", "conv-123", db as any);
+    assert(res.eligible === false, "Should not be eligible");
+    assert(res.reason === "tenant_mismatch", "Should be tenant_mismatch");
+    assert(sendWhatsAppMessageCalls.length === 0, "sendWhatsAppMessage must not be called when tenant matches fail");
+  } finally {
+    (global as any).mockDb = originalMockDb;
+    process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED = oldLock;
+    process.env.FORM_AUTOPILOT_DRY_RUN = oldDryRun;
+    process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED = oldFlag;
+    process.env.FORM_AUTOPILOT_GLOBAL_DISABLED = oldGlobal;
+    process.env.FORM_AUTOPILOT_ALLOWED_TENANTS = oldAllowed;
+  }
+});
+
+test("P0.13 ADDITIONAL: safeAfter entegrasyonu hata alsa bile ana form aktivasyonunu bozmaz", async () => {
+  const { FormLeadActivationService } = await import("../lib/services/form-lead-activation.service");
+  
+  const originalMockDb = (global as any).mockDb;
+  const db = {
+    executeSafe: async (q: { text: string; values?: any[] }) => {
+      const sql = q.text.replace(/\s+/g, ' ');
+      
+      // Stub activation queries
+      if (sql.includes("SELECT linked_opportunity_id FROM leads")) return [];
+      if (sql.includes("SELECT phone_number, raw_data FROM leads")) return [{ phone_number: "905001234567" }];
+      if (sql.includes("SELECT id, active_opportunity_id, phone_number FROM conversations")) return [{ id: "conv-1", active_opportunity_id: null }];
+      if (sql.includes("INSERT INTO opportunities")) return [{ id: "opp-1" }];
+      if (sql.includes("UPDATE conversations SET active_opportunity_id")) return [];
+      if (sql.includes("UPDATE leads SET linked_opportunity_id")) return [];
+      if (sql.includes("INSERT INTO tasks") || sql.includes("INSERT INTO follow_up_tasks")) return [{ id: "task-1" }];
+      if (sql.includes("INSERT INTO notifications")) return [{ id: "notif-1" }];
+      if (sql.includes("SELECT country FROM leads")) return [{ country: "TR" }];
+      if (sql.includes("SELECT rule_id FROM tenant_automation_rules")) return [];
+
+      // Force autopilot query to throw a database crash
+      if (sql.includes("SELECT slug FROM tenants")) {
+        throw new Error("Nasty database crash during autopilot check");
+      }
+      return [];
+    }
+  };
+  (global as any).mockDb = db;
+
+  try {
+    const res = await FormLeadActivationService.activate({
+      tenantId: "tenant-123",
+      tenantName: "Baskent",
+      leadId: "00000000-0000-0000-0000-000000000001",
+      phoneNumber: "905001234567",
+      formName: "Test Form",
+      source: "webhook"
+    });
+    
+    assert(res.activated === true, "Activation must succeed even when autopilot safeAfter throws an error");
+    assert(res.opportunityId === "opp-1", "Should have created opportunity");
+  } finally {
+    (global as any).mockDb = originalMockDb;
+  }
+});
+
+test("P0.13 ADDITIONAL: UI FormDetailModal modülü başarıyla yüklenebilmeli", async () => {
+  const mod = await import("../components/features/forms/FormDetailModal");
+  assert(typeof mod.FormDetailModal === "function", "FormDetailModal bir React component fonksiyonu olmalı");
+});
+
+test("P0.13 SAFETY 1: FORM_AUTOPILOT_ALLOWED_TENANTS env yoksa allowedTenants=[] ve hiçbir tenant allowlisted sayılmaz", async () => {
+  const { resolveFormAutopilotEligibility } = await import("../lib/services/forms/form-autopilot-eligibility-resolver");
+  const oldAllowed = process.env.FORM_AUTOPILOT_ALLOWED_TENANTS;
+  const oldFlag = process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED;
+  const oldGlobal = process.env.FORM_AUTOPILOT_GLOBAL_DISABLED;
+
+  delete process.env.FORM_AUTOPILOT_ALLOWED_TENANTS;
+  process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED = "true";
+  process.env.FORM_AUTOPILOT_GLOBAL_DISABLED = "false";
+
+  const db = {
+    executeSafe: async (q: { text: string; values?: any[] }) => {
+      const sql = q.text.replace(/\s+/g, ' ');
+      if (sql.includes("tenants")) return [{ slug: "baskent" }];
+      if (sql.includes("conversations")) return [{ channel: "whatsapp", phone_number: "905001234567", tenant_id: "tenant-123" }];
+      if (sql.includes("leads")) return [{ tenant_id: "tenant-123", phone_number: "905001234567" }];
+      if (sql.includes("messages") && sql.includes("COALESCE")) {
+        return [{ id: "msg-1", last_inbound_at: new Date().toISOString() }];
+      }
+      return [];
+    }
+  };
+
+  try {
+    const el = await resolveFormAutopilotEligibility("tenant-123", "lead-123", "conv-123", db as any);
+    assert(el.gateOpen === false, "Gate must be closed when env is empty");
+    assert(el.reason === "tenant_not_allowlisted", "Reason should be tenant_not_allowlisted");
+  } finally {
+    process.env.FORM_AUTOPILOT_ALLOWED_TENANTS = oldAllowed;
+    process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED = oldFlag;
+    process.env.FORM_AUTOPILOT_GLOBAL_DISABLED = oldGlobal;
+  }
+});
+
+test("P0.13 SAFETY 2: Env='baskent' ise sadece baskent slug/id allowlisted olur", async () => {
+  const { resolveFormAutopilotEligibility } = await import("../lib/services/forms/form-autopilot-eligibility-resolver");
+  const oldAllowed = process.env.FORM_AUTOPILOT_ALLOWED_TENANTS;
+  const oldFlag = process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED;
+  const oldGlobal = process.env.FORM_AUTOPILOT_GLOBAL_DISABLED;
+
+  process.env.FORM_AUTOPILOT_ALLOWED_TENANTS = "baskent";
+  process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED = "true";
+  process.env.FORM_AUTOPILOT_GLOBAL_DISABLED = "false";
+
+  const db = (slug: string) => ({
+    executeSafe: async (q: { text: string; values?: any[] }) => {
+      const sql = q.text.replace(/\s+/g, ' ');
+      if (sql.includes("tenants")) return [{ slug }];
+      if (sql.includes("conversations")) return [{ channel: "whatsapp", phone_number: "905001234567", tenant_id: "tenant-123" }];
+      if (sql.includes("leads")) return [{ tenant_id: "tenant-123", phone_number: "905001234567" }];
+      if (sql.includes("messages") && sql.includes("COALESCE")) {
+        return [{ id: "msg-1", last_inbound_at: new Date().toISOString() }];
+      }
+      return [];
+    }
+  });
+
+  try {
+    const el1 = await resolveFormAutopilotEligibility("tenant-123", "lead-123", "conv-123", db("baskent") as any);
+    assert(el1.gateOpen === true, "Baskent slug should be allowlisted");
+
+    const el2 = await resolveFormAutopilotEligibility("tenant-123", "lead-123", "conv-123", db("other") as any);
+    assert(el2.gateOpen === false, "Other slug should not be allowlisted");
+  } finally {
+    process.env.FORM_AUTOPILOT_ALLOWED_TENANTS = oldAllowed;
+    process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED = oldFlag;
+    process.env.FORM_AUTOPILOT_GLOBAL_DISABLED = oldGlobal;
+  }
+});
+
+test("P0.13 SAFETY 3: Env='tenantA,tenantB' ise sadece listedekiler allowlisted olur", async () => {
+  const { resolveFormAutopilotEligibility } = await import("../lib/services/forms/form-autopilot-eligibility-resolver");
+  const oldAllowed = process.env.FORM_AUTOPILOT_ALLOWED_TENANTS;
+  const oldFlag = process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED;
+  const oldGlobal = process.env.FORM_AUTOPILOT_GLOBAL_DISABLED;
+
+  process.env.FORM_AUTOPILOT_ALLOWED_TENANTS = "tenantA,tenantB";
+  process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED = "true";
+  process.env.FORM_AUTOPILOT_GLOBAL_DISABLED = "false";
+
+  const db = (slug: string) => ({
+    executeSafe: async (q: { text: string; values?: any[] }) => {
+      const sql = q.text.replace(/\s+/g, ' ');
+      if (sql.includes("tenants")) return [{ slug }];
+      if (sql.includes("conversations")) return [{ channel: "whatsapp", phone_number: "905001234567", tenant_id: "tenant-123" }];
+      if (sql.includes("leads")) return [{ tenant_id: "tenant-123", phone_number: "905001234567" }];
+      if (sql.includes("messages") && sql.includes("COALESCE")) {
+        return [{ id: "msg-1", last_inbound_at: new Date().toISOString() }];
+      }
+      return [];
+    }
+  });
+
+  try {
+    const el1 = await resolveFormAutopilotEligibility("tenant-123", "lead-123", "conv-123", db("tenantA") as any);
+    assert(el1.gateOpen === true, "tenantA should be allowlisted");
+
+    const el2 = await resolveFormAutopilotEligibility("tenant-123", "lead-123", "conv-123", db("tenantB") as any);
+    assert(el2.gateOpen === true, "tenantB should be allowlisted");
+
+    const el3 = await resolveFormAutopilotEligibility("tenant-123", "lead-123", "conv-123", db("baskent") as any);
+    assert(el3.gateOpen === false, "baskent should not be allowlisted");
+  } finally {
+    process.env.FORM_AUTOPILOT_ALLOWED_TENANTS = oldAllowed;
+    process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED = oldFlag;
+    process.env.FORM_AUTOPILOT_GLOBAL_DISABLED = oldGlobal;
+  }
+});
+
+test("P0.13 SAFETY 4: PHASE_LOCK env yoksa outbound blocked true", async () => {
+  const { FormAutopilotOrchestrator } = await import("../lib/services/forms/form-autopilot-orchestrator");
+  const oldLock = process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED;
+  const oldAllowed = process.env.FORM_AUTOPILOT_ALLOWED_TENANTS;
+  const oldDryRun = process.env.FORM_AUTOPILOT_DRY_RUN;
+  const oldFlag = process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED;
+  const oldGlobal = process.env.FORM_AUTOPILOT_GLOBAL_DISABLED;
+
+  delete process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED;
+  process.env.FORM_AUTOPILOT_ALLOWED_TENANTS = "baskent";
+  process.env.FORM_AUTOPILOT_DRY_RUN = "false";
+  process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED = "true";
+  process.env.FORM_AUTOPILOT_GLOBAL_DISABLED = "false";
+
+  const db = {
+    executeSafe: async (q: { text: string; values?: any[] }) => {
+      const sql = q.text.replace(/\s+/g, ' ');
+      if (sql.includes("tenants")) return [{ slug: "baskent" }];
+      if (sql.includes("conversations")) return [{ channel: "whatsapp", phone_number: "905001234567", tenant_id: "tenant-123" }];
+      if (sql.includes("leads")) return [{ tenant_id: "tenant-123", phone_number: "905001234567" }];
+      if (sql.includes("messages") && sql.includes("COALESCE")) {
+        return [{ id: "msg-1", last_inbound_at: new Date().toISOString() }];
+      }
+      return [];
+    }
+  };
+
+  try {
+    const res = await FormAutopilotOrchestrator.execute("tenant-123", "lead-123", "conv-123", db as any);
+    assert(res.processed === true, "Should process simulation");
+    assert(res.reason === "dry_run_simulation", "Should fallback to dry-run when lock env is missing");
+  } finally {
+    process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED = oldLock;
+    process.env.FORM_AUTOPILOT_ALLOWED_TENANTS = oldAllowed;
+    process.env.FORM_AUTOPILOT_DRY_RUN = oldDryRun;
+    process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED = oldFlag;
+    process.env.FORM_AUTOPILOT_GLOBAL_DISABLED = oldGlobal;
+  }
+});
+
+// ==========================================
 // SONUÇLAR
 // ==========================================
 
 async function runAllTests() {
-  for (const t of queue) {
-    try {
-      const res = t.fn();
-      if (res instanceof Promise) {
-        await res;
+  try {
+    for (const t of queue) {
+      const isP013 = t.name.startsWith("P0.13");
+      if (isP013) {
+        MessageService.prototype.sendWhatsAppMessage = async function (...args: any[]) {
+          sendWhatsAppMessageCalls.push(args);
+          return { success: true, providerMessageId: "provider-msg-123" };
+        };
+      } else {
+        MessageService.prototype.sendWhatsAppMessage = originalSendWhatsAppMessage;
       }
-      results.push({ name: t.name, passed: true });
-    } catch (e: any) {
-      console.error(`❌ Test failed: ${t.name}`, e);
-      results.push({ name: t.name, passed: false, error: e.message, stack: e.stack });
+      try {
+        const res = t.fn();
+        if (res instanceof Promise) {
+          await res;
+        }
+        results.push({ name: t.name, passed: true });
+      } catch (e: any) {
+        console.error(`❌ Test failed: ${t.name}`, e);
+        results.push({ name: t.name, passed: false, error: e.message, stack: e.stack });
+      }
     }
+  } finally {
+    MessageService.prototype.sendWhatsAppMessage = originalSendWhatsAppMessage;
   }
 
   console.log("\n==========================================");

@@ -1924,9 +1924,37 @@ export async function resolveFirstContactAction(leadId: string): Promise<{ succe
         console.error("resolveFirstContactAction: failed to fetch greeting readiness:", e);
       }
 
+      // Resolve conversationId from leads / conversations
+      let conversationId: string | undefined;
+      try {
+        const leadCheck = await ctx.db.executeSafe({
+          text: `
+            SELECT c.id FROM conversations c
+            JOIN leads l ON l.phone_normalized = c.phone_number OR RIGHT(l.phone_number, 10) = RIGHT(c.phone_number, 10)
+            WHERE l.id = $1 AND l.tenant_id = $2 AND c.tenant_id = $2
+            LIMIT 1
+          `,
+          values: [leadId, ctx.tenantId]
+        }) as any[];
+        if (leadCheck.length > 0) {
+          conversationId = leadCheck[0].id;
+        }
+      } catch (dbErr) {
+        console.error("resolveFirstContactAction: failed to lookup conversation:", dbErr);
+      }
+
+      let formAutopilotEligibility: any = null;
+      try {
+        const { resolveFormAutopilotEligibility } = await import('@/lib/services/forms/form-autopilot-eligibility-resolver');
+        formAutopilotEligibility = await resolveFormAutopilotEligibility(ctx.tenantId, leadId, conversationId || '', ctx.db);
+      } catch (ae) {
+        console.error("resolveFirstContactAction: failed to resolve autopilot eligibility:", ae);
+      }
+
       const combined = {
         ...resolution,
-        ...readinessData
+        ...readinessData,
+        formAutopilotEligibility
       };
 
       return { success: true, resolution: combined };
