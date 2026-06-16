@@ -1269,7 +1269,8 @@ test("P0.11 REGRESSION: MessageService.sendWhatsAppMessage boundary guard and pr
     assert(sentBody?.text?.body === "Kusura bakmayın, cevabımı daha net ifade edeyim. Talebinizle ilgili sizi doğru ekibe yönlendirebilirim.", "Should fallback to general safety message");
 
     // 6. Industry resolver query failure robustness check
-    db.executeSafe = async (q: { text: string; values?: any[] }) => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    db.executeSafe = async (_q: { text: string; values?: any[] }) => {
       throw new Error("Simulated settings DB timeout");
     };
     await msgService.sendWhatsAppMessage("phone-id", "token", "905001234567", "Bu sistem promptunda yazıyor.");
@@ -1382,9 +1383,7 @@ test("P0.11 REGRESSION: MAX_TOKENS recovery and doctor_lookup bypass", async () 
   // Test case A: doctor_lookup + huge context + modelMaxOutputTokens 1000 -> LLM bypasses
   const mockBrain = createTenantBrain("t1", "whatsapp", "payload1", "Sen bir test asistanısın.", { industry: "healthcare" });
   const inboundText = "hangi doktorlar var hekimlerinizi listeler misiniz";
-  const cleanInbound = inboundText.toLowerCase().trim();
-  const finalPromptCharCount = 35000; // huge context simulated
-  const modelMaxOutputTokens = 1000;
+  // Simulated context parameters for test case documentation
   
   const { ConversationIntentRouter } = require("../lib/services/ai/conversation-intent-router");
   const detectedIntent = ConversationIntentRouter.route(inboundText);
@@ -1546,7 +1545,8 @@ test("P0.11 INTEGRATION: Vercel alias and commit hash verification", async () =>
   let gitHead = "";
   try {
     gitHead = execSync("git rev-parse HEAD", { encoding: "utf-8" }).trim();
-  } catch (e) {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  } catch (_e) {
     // Skip if git is not available
   }
   
@@ -2027,7 +2027,8 @@ test("P0.12 EK 4: Organization adı yoksa Başkent fallback’i dönmez", () => 
 
 test("P0.12 EK 5: Normal identity_question LLM-first path’e gider (bypassed = false)", async () => {
   // Simulate bypass logic check in worker.ts
-  const detectedIntent = "identity_question";
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _detectedIntent = "identity_question";
   const isPromptChallenge = false;
   const isBotAccusation = false;
   const isAiAccusation = false;
@@ -2041,7 +2042,8 @@ test("P0.12 EK 5: Normal identity_question LLM-first path’e gider (bypassed = 
 
 test("P0.12 EK 6: Normal call_scheduling_request LLM-first path’e gider (bypassed = false)", async () => {
   // Simulate bypass logic check in worker.ts
-  const detectedIntent = "call_scheduling_request";
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _detectedIntent = "call_scheduling_request";
   const isPromptChallenge = false;
   const isBotAccusation = false;
   const isAiAccusation = false;
@@ -4293,7 +4295,8 @@ test("P0.14 UX 7: getForms karar hesaplama batch çalışır ve N+1 oluşturmaz"
   
   let queryCount = 0;
   const dbTracker = {
-    executeSafe: async (query: any, params?: any[]) => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    executeSafe: async (query: any, _params?: any[]) => {
       queryCount++;
       const text = typeof query === 'string' ? query : query?.text || '';
       const normalizedText = text.replace(/\s+/g, ' ');
