@@ -3193,7 +3193,11 @@ test("P0.14 T9: Inbox bulk bot enable'ın sadece seçili conversation'larda çal
     assert(!!updateQuery, "Update query should be executed");
     assert(updateQuery.values[2].length === 2, "Should update exactly 2 conversations");
   } finally {
+    if (oldTestTenant === undefined) {
+    delete process.env.TEST_TENANT_ID;
+    } else {
     process.env.TEST_TENANT_ID = oldTestTenant;
+    }
     (global as any).mockDb = originalDb;
   }
 });
@@ -3230,7 +3234,11 @@ test("P0.14 T10: Inbox bulk bot disable'ın sadece seçili conversation'larda ç
     assert(!!updateQuery, "Update query should be executed");
     assert(updateQuery.values[0] === false, "autopilot_enabled should be false");
   } finally {
+    if (oldTestTenant === undefined) {
+    delete process.env.TEST_TENANT_ID;
+    } else {
     process.env.TEST_TENANT_ID = oldTestTenant;
+    }
     (global as any).mockDb = originalDb;
   }
 });
@@ -3270,7 +3278,11 @@ test("P0.14 T11: status === 'human' olan conversation'ların bulk işlemden hari
     assert(!!updateQuery, "Update query should run");
     assert(updateQuery.values[2][0] === "conv-2", "Only conv-2 should be updated");
   } finally {
+    if (oldTestTenant === undefined) {
+    delete process.env.TEST_TENANT_ID;
+    } else {
     process.env.TEST_TENANT_ID = oldTestTenant;
+    }
     (global as any).mockDb = originalDb;
   }
 });
@@ -3305,7 +3317,11 @@ test("P0.14 T12: Inbox bot açma/kapatma işleminin outbound tetiklememesi", asy
     const messageInsert = mockDbCalls.find(c => c.text.toLowerCase().includes("insert into messages"));
     assert(!messageInsert, "Should not write message into DB");
   } finally {
+    if (oldTestTenant === undefined) {
+    delete process.env.TEST_TENANT_ID;
+    } else {
     process.env.TEST_TENANT_ID = oldTestTenant;
+    }
     (global as any).mockDb = originalDb;
   }
 });
@@ -3336,7 +3352,11 @@ test("P0.14 T13: non-target tenant verilerinin etkilenmemesi (Tenant isolation)"
     assert(res.summary.processed === 0, "No rows should be updated because of tenant mismatch");
     assert(res.summary.skippedOther === 1, "Should skip 1 non-matching tenant row");
   } finally {
+    if (oldTestTenant === undefined) {
+    delete process.env.TEST_TENANT_ID;
+    } else {
     process.env.TEST_TENANT_ID = oldTestTenant;
+    }
     (global as any).mockDb = originalDb;
   }
 });
@@ -3374,7 +3394,11 @@ test("P0.14 T14: sendWhatsAppMessage metodunun kesinlikle çağrılmaması", asy
     assert(sendCalled === false, "sendWhatsAppMessage should not be called");
   } finally {
     MessageService.prototype.sendWhatsAppMessage = originalSend;
+    if (oldTestTenant === undefined) {
+    delete process.env.TEST_TENANT_ID;
+    } else {
     process.env.TEST_TENANT_ID = oldTestTenant;
+    }
     (global as any).mockDb = originalDb;
   }
 });
@@ -3406,7 +3430,11 @@ test("P0.14 T15: DB messages tablosuna yazım olmaması", async () => {
     const msgInserts = mockDbCalls.filter(c => c.text.toLowerCase().includes("insert into messages"));
     assert(msgInserts.length === 0, "No messages should be written to DB");
   } finally {
+    if (oldTestTenant === undefined) {
+    delete process.env.TEST_TENANT_ID;
+    } else {
     process.env.TEST_TENANT_ID = oldTestTenant;
+    }
     (global as any).mockDb = originalDb;
   }
 });
@@ -3443,7 +3471,11 @@ test("P0.14 T16: Ably realtime yayını yapılmaması", async () => {
     assert(publishMessageCalled === false, "Should not publish realtime messages");
   } finally {
     RealtimePublisher.publishMessageCreated = oldPublish;
+    if (oldTestTenant === undefined) {
+    delete process.env.TEST_TENANT_ID;
+    } else {
     process.env.TEST_TENANT_ID = oldTestTenant;
+    }
     (global as any).mockDb = originalDb;
   }
 });
@@ -3480,7 +3512,11 @@ test("P0.14 T17: Herhangi bir WhatsApp şablonunun tetiklenmemesi", async () => 
     assert(templateCalled === false, "WhatsApp template send should not be triggered");
   } finally {
     MessageService.prototype.sendWhatsAppTemplate = originalSend;
+    if (oldTestTenant === undefined) {
+    delete process.env.TEST_TENANT_ID;
+    } else {
     process.env.TEST_TENANT_ID = oldTestTenant;
+    }
     (global as any).mockDb = originalDb;
   }
 });
@@ -3513,7 +3549,11 @@ test("P0.14 T18: Env phase lock açıkken UI canlı gönderimi kilitli gösterir
     assert(res.envLocks.phaseLockBlocked === true, "phaseLockBlocked should be true");
   } finally {
     process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED = oldLock;
+    if (oldTestTenant === undefined) {
+    delete process.env.TEST_TENANT_ID;
+    } else {
     process.env.TEST_TENANT_ID = oldTestTenant;
+    }
     (global as any).mockDb = originalDb;
   }
 });
@@ -3590,7 +3630,11 @@ test("P0.14 T20: Settings panel sadece ilgili channel config'ini patch eder, di�
     assert(savedConfig.channels.whatsapp.auto_greeting_enabled === true, "whatsapp config should remain untouched");
     assert(savedConfig.channels.instagram.auto_greeting_enabled === true, "instagram config should be updated");
   } finally {
+    if (oldTestTenant === undefined) {
+    delete process.env.TEST_TENANT_ID;
+    } else {
     process.env.TEST_TENANT_ID = oldTestTenant;
+    }
     process.env.TEST_USER_ROLE = oldRole;
     (global as any).mockDb = originalDb;
   }
@@ -3609,7 +3653,11 @@ test("P0.14 T21: Yetkisiz kullanıcı settings değiştiremez", async () => {
     assert(res.success === false, "Should fail settings change");
     assert(res.error.includes("yetkiniz yok"), "Error should say unauthorized");
   } finally {
+    if (oldTestTenant === undefined) {
+    delete process.env.TEST_TENANT_ID;
+    } else {
     process.env.TEST_TENANT_ID = oldTestTenant;
+    }
     process.env.TEST_USER_ROLE = oldRole;
   }
 });
@@ -3627,7 +3675,11 @@ test("P0.14 T22: Yetkisiz kullanıcı inbox bulk bot aç/kapat yapamaz", async (
     assert(res.success === false, "Should fail bulk action");
     assert(res.error.includes("yetkiniz yok"), "Error should say unauthorized");
   } finally {
+    if (oldTestTenant === undefined) {
+    delete process.env.TEST_TENANT_ID;
+    } else {
     process.env.TEST_TENANT_ID = oldTestTenant;
+    }
     process.env.TEST_USER_ROLE = oldRole;
   }
 });
@@ -3658,7 +3710,11 @@ test("P0.14 T23: status === 'human' conversation bulk enable işleminden atlanı
     assert(res.summary.processed === 0, "No conversations should be processed");
     assert(res.summary.skippedHuman === 1, "Should skip human conversation");
   } finally {
+    if (oldTestTenant === undefined) {
+    delete process.env.TEST_TENANT_ID;
+    } else {
     process.env.TEST_TENANT_ID = oldTestTenant;
+    }
     (global as any).mockDb = originalDb;
   }
 });
@@ -3695,7 +3751,11 @@ test("P0.14 T24: Bot enable outbound tetiklemez", async () => {
     assert(sendCalled === false, "Enabling bot should not send message");
   } finally {
     MessageService.prototype.sendWhatsAppMessage = originalSend;
+    if (oldTestTenant === undefined) {
+    delete process.env.TEST_TENANT_ID;
+    } else {
     process.env.TEST_TENANT_ID = oldTestTenant;
+    }
     (global as any).mockDb = originalDb;
   }
 });
@@ -3732,7 +3792,11 @@ test("P0.14 T25: Bot disable outbound tetiklemez", async () => {
     assert(sendCalled === false, "Disabling bot should not send message");
   } finally {
     MessageService.prototype.sendWhatsAppMessage = originalSend;
+    if (oldTestTenant === undefined) {
+    delete process.env.TEST_TENANT_ID;
+    } else {
     process.env.TEST_TENANT_ID = oldTestTenant;
+    }
     (global as any).mockDb = originalDb;
   }
 });
@@ -3763,7 +3827,11 @@ test("P0.14 T26: Form-only lead hiçbir inbox bot action'a karışmaz", async ()
     assert(res.summary.processed === 0, "Processed count should be 0");
     assert(res.summary.skippedOther === 1, "Should skip 1 missing conversation");
   } finally {
+    if (oldTestTenant === undefined) {
+    delete process.env.TEST_TENANT_ID;
+    } else {
     process.env.TEST_TENANT_ID = oldTestTenant;
+    }
     (global as any).mockDb = originalDb;
   }
 });
@@ -3830,7 +3898,11 @@ test("P0.14 T28: Raw hasta mesajı audit log'a yazılmaz", async () => {
       assert(!metadata.raw_message, "Raw message should not be logged in outreach logs");
     }
   } finally {
+    if (oldTestTenant === undefined) {
+    delete process.env.TEST_TENANT_ID;
+    } else {
     process.env.TEST_TENANT_ID = oldTestTenant;
+    }
     (global as any).mockDb = originalDb;
   }
 });
@@ -3860,7 +3932,11 @@ test("P0.14 T29: non-target tenant etkilenmez (Settings config)", async () => {
       assert(mutation.values.includes("tenant-123"), "Mutation should strictly include the active tenant_id");
     }
   } finally {
+    if (oldTestTenant === undefined) {
+    delete process.env.TEST_TENANT_ID;
+    } else {
     process.env.TEST_TENANT_ID = oldTestTenant;
+    }
     process.env.TEST_USER_ROLE = oldRole;
     (global as any).mockDb = originalDb;
   }
@@ -3887,7 +3963,11 @@ test("P0.14 HOTFIX 1: getTenantSettings current tenant id ile PASS", async () =>
     assert(res.success === true, "Should load current tenant settings");
     assert(res.tenant.id === "tenant-123", "Tenant ID must match");
   } finally {
+    if (oldTestTenant === undefined) {
+    delete process.env.TEST_TENANT_ID;
+    } else {
     process.env.TEST_TENANT_ID = oldTestTenant;
+    }
     (global as any).mockDb = originalDb;
   }
 });
