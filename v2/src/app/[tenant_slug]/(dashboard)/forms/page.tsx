@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { CheckCircle2, X, XCircle, RefreshCw } from "lucide-react";
 import { useRouter, useParams } from "next/navigation";
 import { useInboxStore } from "@/store/inbox-store";
@@ -12,6 +12,7 @@ import { FormListTable } from "@/components/features/forms/FormListTable";
 import { FormDetailModal } from "@/components/features/forms/FormDetailModal";
 import { BulkQueueModal } from "@/components/features/forms/BulkQueueModal";
 import { getDisplayName, getAllPhones } from "@/components/features/forms/utils";
+import { BulkAutopilotDecisionBar } from "@/components/features/forms/BulkAutopilotDecisionBar";
 
 // Action Imports
 import { updateLeadStage, updateLeadNotes } from "@/app/actions/forms";
@@ -68,6 +69,33 @@ export default function FormsPage() {
   };
 
   const detailState = useFormDetailState(selectedForm, mutate);
+
+  const [selectedDecisions, setSelectedDecisions] = useState<any[]>([]);
+  const [decisionsLoading, setDecisionsLoading] = useState(false);
+
+  useEffect(() => {
+    if (!selectedLeadIds || selectedLeadIds.length === 0) {
+      setSelectedDecisions([]);
+      return;
+    }
+
+    const fetchDecisions = async () => {
+      setDecisionsLoading(true);
+      try {
+        const { resolveLeadAutopilotDecisionsAction } = await import("@/app/actions/outreach");
+        const res = await resolveLeadAutopilotDecisionsAction(selectedLeadIds);
+        if (res.success && res.decisions) {
+          setSelectedDecisions(res.decisions);
+        }
+      } catch (e) {
+        console.error("Failed to fetch bulk decisions:", e);
+      } finally {
+        setDecisionsLoading(false);
+      }
+    };
+
+    fetchDecisions();
+  }, [selectedLeadIds]);
 
   const returnParams = new URLSearchParams({
     returnTo: 'forms',
@@ -704,6 +732,11 @@ export default function FormsPage() {
           </div>
         </>
       )}
+      <BulkAutopilotDecisionBar
+        decisions={selectedDecisions}
+        onClearSelection={() => setSelectedLeadIds([])}
+        onNavigateToInbox={() => router.push(`/${tenantId}/inbox`)}
+      />
     </div>
   );
 }

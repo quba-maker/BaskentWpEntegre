@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getTenantSettings, updateTenantSettings, getUsageStats } from "@/app/actions/settings";
+import { getTenantSettings, updateTenantSettings, getUsageStats, getAutoGreetingSettingsAction, saveAutoGreetingChannelSettingsAction } from "@/app/actions/settings";
 import { changeMyPassword, getUsers, createUser, updateUserRole, toggleUserActive, deleteUser, resetUserPassword, generateInviteLink } from "@/app/actions/users";
 import { Building2, Gauge, Shield, KeyRound, CreditCard, Users, Plus, Link2, Copy, Check, Trash2, Power, AlertCircle } from "lucide-react";
 import { PageLoader } from "@/components/ui/shared-states";
 import { SectionCard, SectionHeader, SaveButton, ActionButton } from "@/components/governance";
 import { useConfirm } from "@/components/ui/confirm-dialog";
+import { AutoGreetingSettingsPanel } from "@/components/features/settings/AutoGreetingSettingsPanel";
 
 // ==========================================
 // QUBA AI — Modular Settings Page
@@ -56,6 +57,24 @@ export default function SettingsPage() {
   const [copied, setCopied] = useState(false);
   const [userError, setUserError] = useState<string | null>(null);
 
+  const [autoGreetingConfig, setAutoGreetingConfig] = useState<any>(null);
+  const [envLocks, setEnvLocks] = useState<any>(null);
+
+  async function handleSaveChannelConfig(channelId: string, settings: any) {
+    const res = await saveAutoGreetingChannelSettingsAction(channelId, settings);
+    if (res.success) {
+      // Reload config
+      const autoGreetingRes = await getAutoGreetingSettingsAction();
+      if (autoGreetingRes.success) {
+        setAutoGreetingConfig(autoGreetingRes.channelsConfig);
+        setEnvLocks(autoGreetingRes.envLocks);
+      }
+      return { success: true };
+    } else {
+      return { success: false, error: res.error || "Hata oluştu." };
+    }
+  }
+
   useEffect(() => { loadData(); }, []);
 
   async function loadData() {
@@ -99,6 +118,17 @@ export default function SettingsPage() {
       }
     } catch (err) {
       console.error("[SETTINGS_LOAD] Users list failed:", err);
+    }
+
+    // 4. Auto greeting settings
+    try {
+      const autoGreetingRes = await getAutoGreetingSettingsAction();
+      if (autoGreetingRes.success) {
+        setAutoGreetingConfig(autoGreetingRes.channelsConfig);
+        setEnvLocks(autoGreetingRes.envLocks);
+      }
+    } catch (err) {
+      console.error("[SETTINGS_LOAD] Auto greeting settings failed:", err);
     }
 
     setIsLoading(false);
@@ -296,6 +326,16 @@ export default function SettingsPage() {
               </SectionCard>
 
               <SaveButton saving={saving} saved={saved} onClick={handleSave} />
+
+              {autoGreetingConfig && envLocks && (
+                <div className="pt-6 border-t border-black/5">
+                  <AutoGreetingSettingsPanel
+                    channelsConfig={autoGreetingConfig}
+                    envLocks={envLocks}
+                    onSaveChannelConfig={handleSaveChannelConfig}
+                  />
+                </div>
+              )}
             </div>
           )}
 

@@ -107,3 +107,129 @@ export async function getUsageStats() {
     return { success: true, stats: res.data };
   });
 }
+
+export async function getAutoGreetingSettingsAction() {
+  return withActionGuard(
+    { actionName: 'getAutoGreetingSettingsAction' },
+    async (ctx) => {
+      // 1. Resolve tenant slug for allowlist check
+      const tenantRows = await ctx.db.executeSafe({
+        text: `SELECT slug FROM tenants WHERE id = $1 LIMIT 1`,
+        values: [ctx.tenantId]
+      }) as any[];
+
+      const tenantSlug = tenantRows[0]?.slug || '';
+
+      const allowedTenantsList = (process.env.FORM_AUTOPILOT_ALLOWED_TENANTS || '')
+        .split(',')
+        .map(t => t.trim().toLowerCase())
+        .filter(Boolean);
+      const isTenantAllowed = allowedTenantsList.includes(tenantSlug.toLowerCase());
+
+      const envLocks = {
+        phaseLockBlocked: process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED !== 'false',
+        globalDisabled: process.env.FORM_AUTOPILOT_GLOBAL_DISABLED === 'true',
+        isTenantAllowed,
+        dryRun: process.env.FORM_AUTOPILOT_DRY_RUN !== 'false',
+        allowedTenants: process.env.FORM_AUTOPILOT_ALLOWED_TENANTS || ''
+      };
+
+      // 2. Fetch DB Settings
+      const rows = await ctx.db.executeSafe({
+        text: `SELECT config_json FROM ai_module_settings WHERE tenant_id = $1 AND module_name = 'form_autopilot_for_open_meta_window' LIMIT 1`,
+        values: [ctx.tenantId]
+      }) as any[];
+
+      let channelsConfig = {
+        whatsapp: {
+          auto_greeting_enabled: false,
+          dry_run: true
+        }
+      };
+
+      if (rows.length > 0 && rows[0].config_json && typeof rows[0].config_json === 'object') {
+        const config = rows[0].config_json;
+        if (config.channels && typeof config.channels === 'object') {
+          channelsConfig = {
+            ...channelsConfig,
+            ...config.channels
+          };
+        }
+      }
+
+      return {
+        success: true,
+        envLocks,
+        channelsConfig
+      };
+    }
+  ).then(res => {
+    if (!res.success || !res.data) return { success: false, error: res.error || "Ayarlar alınamadı." };
+    return { success: true, envLocks: res.data.envLocks, channelsConfig: res.data.channelsConfig };
+  });
+}
+
+export async function saveAutoGreetingChannelSettingsAction(channelId: string, settingsPatch: any) {
+  return withActionGuard(
+    { 
+      actionName: 'saveAutoGreetingChannelSettingsAction',
+      roles: ['owner', 'admin']
+    },
+    async (ctx) => {
+      // 1. Fetch current row
+      const rows = await ctx.db.executeSafe({
+        text: `SELECT id, config_json FROM ai_module_settings WHERE tenant_id = $1 AND module_name = 'form_autopilot_for_open_meta_window' LIMIT 1`,
+        values: [ctx.tenantId]
+      }) as any[];
+
+      let currentConfig: any = {
+        dry_run: true,
+        channels: {}
+      };
+      let rowId: string | null = null;
+
+      if (rows.length > 0) {
+        rowId = rows[0].id;
+        if (rows[0].config_json && typeof rows[0].config_json === 'object') {
+          currentConfig = {
+            ...currentConfig,
+            ...rows[0].config_json
+          };
+        }
+      }
+
+      // Ensure channels object exists
+      if (!currentConfig.channels || typeof currentConfig.channels !== 'object') {
+        currentConfig.channels = {};
+      }
+
+      // Patch only the specified channel, leave others untouched
+      currentConfig.channels[channelId] = {
+        ...(currentConfig.channels[channelId] || {}),
+        ...settingsPatch
+      };
+
+      // Also mirror root dry_run if patching whatsapp
+      if (channelId === 'whatsapp' && settingsPatch.dry_run !== undefined) {
+        currentConfig.dry_run = settingsPatch.dry_run;
+      }
+
+      if (rowId) {
+        await ctx.db.executeSafe({
+          text: `UPDATE ai_module_settings SET config_json = $1, updated_at = NOW() WHERE id = $2`,
+          values: [JSON.stringify(currentConfig), rowId]
+        });
+      } else {
+        await ctx.db.executeSafe({
+          text: `INSERT INTO ai_module_settings (tenant_id, module_name, is_active, config_json) VALUES ($1, 'form_autopilot_for_open_meta_window', true, $2)`,
+          values: [ctx.tenantId, JSON.stringify(currentConfig)]
+        });
+      }
+
+      return { success: true };
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error };
+    return { success: true };
+  });
+}

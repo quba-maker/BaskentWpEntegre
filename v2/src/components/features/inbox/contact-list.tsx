@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { Search, Check, CheckCheck, Clock, WifiOff, MessageCircle, MoreVertical, Loader2, Sparkles, AlertCircle, X, ChevronLeft, ChevronRight, UserCheck, UserX, Trash2, Sliders, ChevronDown, Bot, User, Pin, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { InboxBotControlBar } from "./InboxBotControlBar";
 import { 
   getConversations, 
   togglePin, 
@@ -288,6 +289,31 @@ export function ContactRail() {
   const setActiveModal = useInboxStore((state) => state.setActiveModal);
   const queryClient = useQueryClient();
   const hoverTimeoutRef = useRef<any>(null);
+
+  const handleSetBotModeBulk = async (enabled: boolean) => {
+    try {
+      const mode = enabled ? 'bot' : 'human';
+      const res = await bulkSetBotMode(selectedIds, mode) as any;
+      if (res && res.success) {
+        queryClient.invalidateQueries({ queryKey: ["conversations"] });
+        queryClient.refetchQueries({ queryKey: ["conversations"] });
+        return {
+          success: true,
+          summary: res.summary
+        };
+      } else {
+        return {
+          success: false,
+          error: res.error || "Güncelleme başarısız."
+        };
+      }
+    } catch (err) {
+      return {
+        success: false,
+        error: "Toplu işlem başarısız."
+      };
+    }
+  };
 
   useEffect(() => {
     return () => {
@@ -2097,6 +2123,14 @@ export function ContactRail() {
              style={{ background: "var(--q-red)", color: "white", borderColor: "rgba(255,255,255,0.1)" }}>
           {errorToast}
         </div>
+      )}
+
+      {isSelectionMode && selectedIds.length > 0 && (
+        <InboxBotControlBar
+          selectedCount={selectedIds.length}
+          onSetBotMode={handleSetBotModeBulk}
+          onClearSelection={() => clearSelection()}
+        />
       )}
 
       <NoReplyAutomationModal isOpen={isAutomationOpen} onClose={() => setIsAutomationOpen(false)} />

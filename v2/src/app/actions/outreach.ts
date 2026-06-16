@@ -1966,3 +1966,37 @@ export async function resolveFirstContactAction(leadId: string): Promise<{ succe
     return { success: false, error: res.error };
   });
 }
+
+export async function resolveLeadAutopilotDecisionAction(leadId: string) {
+  return withActionGuard(
+    { actionName: 'resolveLeadAutopilotDecision' },
+    async (ctx) => {
+      const { FirstContactDecisionResolver } = await import("@/lib/services/automation/first-contact-decision-resolver");
+      const decision = await FirstContactDecisionResolver.resolveForFormLead(ctx.tenantId, leadId, ctx.db);
+      return { success: true, decision };
+    }
+  ).then(res => {
+    if (!res.success || !res.data) return { success: false as const, error: res.error || "Hata oluştu." };
+    return { success: true as const, decision: res.data.decision };
+  });
+}
+
+export async function resolveLeadAutopilotDecisionsAction(leadIds: string[]) {
+  return withActionGuard(
+    { actionName: 'resolveLeadAutopilotDecisions' },
+    async (ctx) => {
+      const { FirstContactDecisionResolver } = await import("@/lib/services/automation/first-contact-decision-resolver");
+      const decisions = [];
+      for (const leadId of leadIds) {
+        if (leadId && UUID_RE.test(leadId)) {
+          const dec = await FirstContactDecisionResolver.resolveForFormLead(ctx.tenantId, leadId, ctx.db);
+          decisions.push(dec);
+        }
+      }
+      return { success: true, decisions };
+    }
+  ).then(res => {
+    if (!res.success || !res.data) return { success: false as const, error: res.error || "Hata oluştu." };
+    return { success: true as const, decisions: res.data.decisions };
+  });
+}

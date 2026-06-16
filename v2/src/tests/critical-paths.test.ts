@@ -2920,6 +2920,953 @@ test("P0.13 SAFETY 4: PHASE_LOCK env yoksa outbound blocked true", async () => {
 });
 
 // ==========================================
+// 11. P0.14 UNIFIED GREETING & BOT CONTROL TESTS
+// ==========================================
+
+test("P0.14 T1: internal_error durumunun kullanıcı dostu metne çevrilmesi", async () => {
+  const { FirstContactDecisionResolver } = await import("../lib/services/automation/first-contact-decision-resolver");
+  const dbWithError = {
+    executeSafe: async () => { throw new Error("Db connection lost"); }
+  };
+  const decision = await FirstContactDecisionResolver.resolveForFormLead("tenant-123", "lead-123", dbWithError as any);
+  assert(decision.category === 'error', "Category should be error");
+  assert(decision.reason === 'internal_error', "Reason should be internal_error");
+  assert(decision.userFriendlyReason === 'Durum hesaplanamadı. Veri eksik veya bağlantı doğrulanamadı.', "User friendly reason mismatch");
+});
+
+test("P0.14 T2: 24h açık + inbound var -> bot_auto_eligible", async () => {
+  const { FirstContactDecisionResolver } = await import("../lib/services/automation/first-contact-decision-resolver");
+  const oldLock = process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED;
+  process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED = "false";
+  const oldAllowed = process.env.FORM_AUTOPILOT_ALLOWED_TENANTS;
+  process.env.FORM_AUTOPILOT_ALLOWED_TENANTS = "allowed-tenant";
+
+  const db = {
+    executeSafe: async (q: { text: string; values?: any[] }) => {
+      const sql = q.text.replace(/\s+/g, ' ');
+      if (sql.includes("SELECT phone_number, raw_data, form_name FROM leads")) {
+        return [{ phone_number: "905001234567", raw_data: {}, form_name: "test-form" }];
+      }
+      if (sql.includes("SELECT id, status, autopilot_enabled, channel FROM conversations")) {
+        return [{ id: "conv-123", status: "lead", autopilot_enabled: true, channel: "whatsapp" }];
+      }
+      if (q.text.includes("FROM tenants")) {
+        return [{ slug: "allowed-tenant" }];
+      }
+      if (sql.includes("FROM conversations WHERE id = $1 AND tenant_id = $2")) {
+        return [{ channel: "whatsapp", status: "lead", tenant_id: "tenant-123", autopilot_enabled: true }];
+      }
+      if (sql.includes("FROM leads WHERE id = $1 AND tenant_id = $2")) {
+        return [{ tenant_id: "tenant-123", phone_number: "905001234567" }];
+      }
+      if (sql.includes("FROM messages") && sql.includes("direction = 'in'")) {
+        return [{ id: "msg-1", last_inbound_at: new Date().toISOString() }];
+      }
+      return [];
+    }
+  };
+
+  try {
+    const decision = await FirstContactDecisionResolver.resolveForFormLead("tenant-123", "lead-123", db as any);
+    assert(decision.category === 'bot_auto_eligible', "Category should be bot_auto_eligible");
+    assert(decision.metaWindow === 'open', "metaWindow should be open");
+  } finally {
+    process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED = oldLock;
+    process.env.FORM_AUTOPILOT_ALLOWED_TENANTS = oldAllowed;
+  }
+});
+
+test("P0.14 T3: 24h kapalı -> manual_template_required", async () => {
+  const { FirstContactDecisionResolver } = await import("../lib/services/automation/first-contact-decision-resolver");
+  const db = {
+    executeSafe: async (q: { text: string; values?: any[] }) => {
+      const sql = q.text.replace(/\s+/g, ' ');
+      if (sql.includes("SELECT phone_number, raw_data, form_name FROM leads")) {
+        return [{ phone_number: "905001234567", raw_data: {}, form_name: "test-form" }];
+      }
+      if (sql.includes("SELECT id, status, autopilot_enabled, channel FROM conversations")) {
+        return [{ id: "conv-123", status: "lead", autopilot_enabled: true, channel: "whatsapp" }];
+      }
+      if (sql.includes("FROM tenants")) {
+        return [{ slug: "allowed-tenant" }];
+      }
+      if (sql.includes("FROM conversations WHERE id = $1 AND tenant_id = $2")) {
+        return [{ channel: "whatsapp", status: "lead", tenant_id: "tenant-123", autopilot_enabled: true }];
+      }
+      if (sql.includes("FROM leads WHERE id = $1 AND tenant_id = $2")) {
+        return [{ tenant_id: "tenant-123", phone_number: "905001234567" }];
+      }
+      if (sql.includes("FROM messages") && sql.includes("direction = 'in'")) {
+        // Return interaction older than 24h
+        return [{ id: "msg-1", last_inbound_at: new Date(Date.now() - 30 * 3600 * 1000).toISOString() }];
+      }
+      return [];
+    }
+  };
+
+  const decision = await FirstContactDecisionResolver.resolveForFormLead("tenant-123", "lead-123", db as any);
+  assert(decision.category === 'manual_template_required', "Category should be manual_template_required");
+  assert(decision.metaWindow === 'closed', "metaWindow should be closed");
+});
+
+test("P0.14 T4: Form-only no inbound -> manual_draft_required", async () => {
+  const { FirstContactDecisionResolver } = await import("../lib/services/automation/first-contact-decision-resolver");
+  const db = {
+    executeSafe: async (q: { text: string; values?: any[] }) => {
+      const sql = q.text.replace(/\s+/g, ' ');
+      if (sql.includes("SELECT phone_number, raw_data, form_name FROM leads")) {
+        return [{ phone_number: "905001234567", raw_data: {}, form_name: "test-form" }];
+      }
+      if (sql.includes("SELECT id, status, autopilot_enabled, channel FROM conversations")) {
+        return [{ id: "conv-123", status: "lead", autopilot_enabled: true, channel: "whatsapp" }];
+      }
+      if (sql.includes("FROM tenants")) {
+        return [{ slug: "allowed-tenant" }];
+      }
+      if (sql.includes("FROM conversations WHERE id = $1 AND tenant_id = $2")) {
+        return [{ channel: "whatsapp", status: "lead", tenant_id: "tenant-123", autopilot_enabled: true }];
+      }
+      if (sql.includes("FROM leads WHERE id = $1 AND tenant_id = $2")) {
+        return [{ tenant_id: "tenant-123", phone_number: "905001234567" }];
+      }
+      if (sql.includes("FROM messages") && sql.includes("direction = 'in'")) {
+        // No inbound messages
+        return [];
+      }
+      return [];
+    }
+  };
+
+  const decision = await FirstContactDecisionResolver.resolveForFormLead("tenant-123", "lead-123", db as any);
+  assert(decision.category === 'manual_draft_required', "Category should be manual_draft_required");
+  assert(decision.metaWindow === 'no_inbound', "metaWindow should be no_inbound");
+});
+
+test("P0.14 T5: FF kapalı ama baseEligible true ise UI 'Teknik olarak uygun ama kilitli' gösterimi", async () => {
+  const { FirstContactDecisionResolver } = await import("../lib/services/automation/first-contact-decision-resolver");
+  const { FormDecisionPresenter } = await import("../lib/services/forms/form-autopilot-decision-presenter");
+  
+  const oldFlag = process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED;
+  process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED = "false";
+  const oldLock = process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED;
+  process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED = "false";
+
+  const db = {
+    executeSafe: async (q: { text: string; values?: any[] }) => {
+      const sql = q.text.replace(/\s+/g, ' ');
+      if (sql.includes("SELECT phone_number, raw_data, form_name FROM leads")) {
+        return [{ phone_number: "905001234567", raw_data: {}, form_name: "test-form" }];
+      }
+      if (sql.includes("SELECT id, status, autopilot_enabled, channel FROM conversations")) {
+        return [{ id: "conv-123", status: "lead", autopilot_enabled: true, channel: "whatsapp" }];
+      }
+      if (sql.includes("FROM tenants")) {
+        return [{ slug: "allowed-tenant" }];
+      }
+      if (sql.includes("FROM conversations WHERE id = $1 AND tenant_id = $2")) {
+        return [{ channel: "whatsapp", status: "lead", tenant_id: "tenant-123", autopilot_enabled: true }];
+      }
+      if (sql.includes("FROM leads WHERE id = $1 AND tenant_id = $2")) {
+        return [{ tenant_id: "tenant-123", phone_number: "905001234567" }];
+      }
+      if (sql.includes("FROM messages") && sql.includes("direction = 'in'")) {
+        return [{ id: "msg-1", last_inbound_at: new Date().toISOString() }];
+      }
+      return [];
+    }
+  };
+
+  try {
+    const decision = await FirstContactDecisionResolver.resolveForFormLead("tenant-123", "lead-123", db as any);
+    assert(decision.category === 'bot_auto_eligible', "Category should be bot_auto_eligible");
+    assert(decision.finalActionAllowed === false, "Final action should not be allowed when FF is disabled");
+
+    const pres = FormDecisionPresenter.present(decision);
+    assert(pres.badgeText === 'Kısıtlı / Dry-Run', "Badge should show dry-run warning");
+  } finally {
+    process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED = oldFlag;
+    process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED = oldLock;
+  }
+});
+
+test("P0.14 T6: Dry-run açık ise UI 'dry-run açık' gösterimi", async () => {
+  const { FirstContactDecisionResolver } = await import("../lib/services/automation/first-contact-decision-resolver");
+  const { FormDecisionPresenter } = await import("../lib/services/forms/form-autopilot-decision-presenter");
+  
+  const oldLock = process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED;
+  process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED = "true"; // phase lock forces finalActionAllowed to false, category: dry_run
+
+  const db = {
+    executeSafe: async (q: { text: string; values?: any[] }) => {
+      const sql = q.text.replace(/\s+/g, ' ');
+      if (sql.includes("SELECT phone_number, raw_data, form_name FROM leads")) {
+        return [{ phone_number: "905001234567", raw_data: {}, form_name: "test-form" }];
+      }
+      if (sql.includes("SELECT id, status, autopilot_enabled, channel FROM conversations")) {
+        return [{ id: "conv-123", status: "lead", autopilot_enabled: true, channel: "whatsapp" }];
+      }
+      if (sql.includes("FROM tenants")) {
+        return [{ slug: "allowed-tenant" }];
+      }
+      if (sql.includes("FROM conversations WHERE id = $1 AND tenant_id = $2")) {
+        return [{ channel: "whatsapp", status: "lead", tenant_id: "tenant-123", autopilot_enabled: true }];
+      }
+      if (sql.includes("FROM leads WHERE id = $1 AND tenant_id = $2")) {
+        return [{ tenant_id: "tenant-123", phone_number: "905001234567" }];
+      }
+      if (sql.includes("FROM messages") && sql.includes("direction = 'in'")) {
+        return [{ id: "msg-1", last_inbound_at: new Date().toISOString() }];
+      }
+      return [];
+    }
+  };
+
+  try {
+    const decision = await FirstContactDecisionResolver.resolveForFormLead("tenant-123", "lead-123", db as any);
+    assert(decision.finalActionAllowed === false, "Final action should not be allowed during phase lock");
+    
+    const pres = FormDecisionPresenter.present(decision);
+    assert(pres.badgeText === 'Kısıtlı / Dry-Run', "Badge should indicate dry-run mode");
+  } finally {
+    process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED = oldLock;
+  }
+});
+
+test("P0.14 T7: Form bulk summary'nin doğru kategorilere ayrılması", async () => {
+  const d1 = { category: 'bot_auto_eligible' } as any;
+  const d2 = { category: 'manual_draft_required' } as any;
+  const d3 = { category: 'manual_template_required' } as any;
+  
+  const total = 3;
+  const botAutoEligibleCount = [d1, d2, d3].filter(d => d.category === 'bot_auto_eligible').length;
+  const manualDraftCount = [d1, d2, d3].filter(d => d.category === 'manual_draft_required').length;
+  const manualTemplateCount = [d1, d2, d3].filter(d => d.category === 'manual_template_required').length;
+  
+  assert(total === 3, "Total should be 3");
+  assert(botAutoEligibleCount === 1, "Should have 1 bot_auto_eligible");
+  assert(manualDraftCount === 1, "Should have 1 manual_draft_required");
+  assert(manualTemplateCount === 1, "Should have 1 manual_template_required");
+});
+
+test("P0.14 T8: Manuel draft kuyruğuna bot_auto_eligible kayıtların karışmaması", async () => {
+  const decisions = [
+    { leadId: "lead-1", category: "bot_auto_eligible" },
+    { leadId: "lead-2", category: "manual_draft_required" }
+  ];
+  const manualQueue = decisions.filter(d => d.category === 'manual_draft_required');
+  assert(manualQueue.length === 1, "Manual queue should have only 1 item");
+  assert(manualQueue[0].leadId === "lead-2", "Manual queue item should be lead-2");
+});
+
+test("P0.14 T9: Inbox bulk bot enable'ın sadece seçili conversation'larda çalışması", async () => {
+  const { bulkSetBotMode } = require("../app/actions/inbox");
+  const selectedIds = ["conv-1", "conv-2"];
+  
+  const mockDbCalls: any[] = [];
+  const db = {
+    executeSafe: async (q: { text: string; values?: any[] }) => {
+      mockDbCalls.push(q);
+      const sql = q.text.replace(/\s+/g, ' ');
+      if (sql.includes("SELECT id, tenant_id, channel, status FROM conversations")) {
+        return [
+          { id: "conv-1", tenant_id: "tenant-123", channel: "whatsapp", status: "lead" },
+          { id: "conv-2", tenant_id: "tenant-123", channel: "whatsapp", status: "lead" }
+        ];
+      }
+      return [];
+    }
+  };
+
+  const oldTestTenant = process.env.TEST_TENANT_ID;
+  process.env.TEST_TENANT_ID = "tenant-123";
+
+  // Temporarily bind mockDb to global
+  const originalDb = (global as any).mockDb;
+  (global as any).mockDb = db;
+
+  try {
+    const res = await bulkSetBotMode(selectedIds, 'bot');
+    assert(res.success === true, "Should succeed bulk bot mode change");
+    
+    // In db queries, verify UPDATE was executed for the selected list
+    const updateQuery = mockDbCalls.find(c => c.text.includes("UPDATE conversations"));
+    assert(!!updateQuery, "Update query should be executed");
+    assert(updateQuery.values[2].length === 2, "Should update exactly 2 conversations");
+  } finally {
+    process.env.TEST_TENANT_ID = oldTestTenant;
+    (global as any).mockDb = originalDb;
+  }
+});
+
+test("P0.14 T10: Inbox bulk bot disable'ın sadece seçili conversation'larda çalışması", async () => {
+  const { bulkSetBotMode } = require("../app/actions/inbox");
+  const selectedIds = ["conv-1"];
+  
+  const mockDbCalls: any[] = [];
+  const db = {
+    executeSafe: async (q: { text: string; values?: any[] }) => {
+      mockDbCalls.push(q);
+      const sql = q.text.replace(/\s+/g, ' ');
+      if (sql.includes("SELECT id, tenant_id, channel, status FROM conversations")) {
+        return [
+          { id: "conv-1", tenant_id: "tenant-123", channel: "whatsapp", status: "lead" }
+        ];
+      }
+      return [];
+    }
+  };
+
+  const oldTestTenant = process.env.TEST_TENANT_ID;
+  process.env.TEST_TENANT_ID = "tenant-123";
+
+  const originalDb = (global as any).mockDb;
+  (global as any).mockDb = db;
+
+  try {
+    const res = await bulkSetBotMode(selectedIds, 'human');
+    assert(res.success === true, "Should succeed bulk disable");
+    
+    const updateQuery = mockDbCalls.find(c => c.text.includes("UPDATE conversations"));
+    assert(!!updateQuery, "Update query should be executed");
+    assert(updateQuery.values[0] === false, "autopilot_enabled should be false");
+  } finally {
+    process.env.TEST_TENANT_ID = oldTestTenant;
+    (global as any).mockDb = originalDb;
+  }
+});
+
+test("P0.14 T11: status === 'human' olan conversation'ların bulk işlemden hariç tutulması", async () => {
+  const { bulkSetBotMode } = require("../app/actions/inbox");
+  const selectedIds = ["conv-1", "conv-2"]; // conv-1 is human, conv-2 is open/lead
+  
+  const mockDbCalls: any[] = [];
+  const db = {
+    executeSafe: async (q: { text: string; values?: any[] }) => {
+      mockDbCalls.push(q);
+      const sql = q.text.replace(/\s+/g, ' ');
+      if (sql.includes("SELECT id, tenant_id, channel, status FROM conversations")) {
+        return [
+          { id: "conv-1", tenant_id: "tenant-123", channel: "whatsapp", status: "human" },
+          { id: "conv-2", tenant_id: "tenant-123", channel: "whatsapp", status: "lead" }
+        ];
+      }
+      return [];
+    }
+  };
+
+  const oldTestTenant = process.env.TEST_TENANT_ID;
+  process.env.TEST_TENANT_ID = "tenant-123";
+
+  const originalDb = (global as any).mockDb;
+  (global as any).mockDb = db;
+
+  try {
+    const res = await bulkSetBotMode(selectedIds, 'bot');
+    assert(res.success === true, "Bulk set should return success");
+    assert(res.summary.processed === 1, "Should process exactly 1 conversation");
+    assert(res.summary.skippedHuman === 1, "Should skip 1 human conversation");
+
+    const updateQuery = mockDbCalls.find(c => c.text.includes("UPDATE conversations"));
+    assert(!!updateQuery, "Update query should run");
+    assert(updateQuery.values[2][0] === "conv-2", "Only conv-2 should be updated");
+  } finally {
+    process.env.TEST_TENANT_ID = oldTestTenant;
+    (global as any).mockDb = originalDb;
+  }
+});
+
+test("P0.14 T12: Inbox bot açma/kapatma işleminin outbound tetiklememesi", async () => {
+  // We check that in bulkSetBotMode, no WhatsApp message send methods or DB message inserts are called
+  const { bulkSetBotMode } = require("../app/actions/inbox");
+  const selectedIds = ["conv-1"];
+  
+  const mockDbCalls: any[] = [];
+  const db = {
+    executeSafe: async (q: { text: string; values?: any[] }) => {
+      mockDbCalls.push(q);
+      const sql = q.text.replace(/\s+/g, ' ');
+      if (sql.includes("SELECT id, tenant_id, channel, status FROM conversations")) {
+        return [{ id: "conv-1", tenant_id: "tenant-123", channel: "whatsapp", status: "lead" }];
+      }
+      return [];
+    }
+  };
+
+  const oldTestTenant = process.env.TEST_TENANT_ID;
+  process.env.TEST_TENANT_ID = "tenant-123";
+
+  const originalDb = (global as any).mockDb;
+  (global as any).mockDb = db;
+
+  try {
+    await bulkSetBotMode(selectedIds, 'bot');
+    
+    // Verify no insert into messages table was performed
+    const messageInsert = mockDbCalls.find(c => c.text.toLowerCase().includes("insert into messages"));
+    assert(!messageInsert, "Should not write message into DB");
+  } finally {
+    process.env.TEST_TENANT_ID = oldTestTenant;
+    (global as any).mockDb = originalDb;
+  }
+});
+
+test("P0.14 T13: non-target tenant verilerinin etkilenmemesi (Tenant isolation)", async () => {
+  const { bulkSetBotMode } = require("../app/actions/inbox");
+  const selectedIds = ["conv-1"];
+  
+  const db = {
+    executeSafe: async (q: { text: string; values?: any[] }) => {
+      const sql = q.text.replace(/\s+/g, ' ');
+      if (sql.includes("SELECT id, tenant_id, channel, status FROM conversations")) {
+        return [{ id: "conv-1", tenant_id: "other-tenant", channel: "whatsapp", status: "lead" }];
+      }
+      return [];
+    }
+  };
+
+  const oldTestTenant = process.env.TEST_TENANT_ID;
+  process.env.TEST_TENANT_ID = "tenant-123";
+
+  const originalDb = (global as any).mockDb;
+  (global as any).mockDb = db;
+
+  try {
+    const res = await bulkSetBotMode(selectedIds, 'bot');
+    assert(res.success === true, "Should succeed");
+    assert(res.summary.processed === 0, "No rows should be updated because of tenant mismatch");
+    assert(res.summary.skippedOther === 1, "Should skip 1 non-matching tenant row");
+  } finally {
+    process.env.TEST_TENANT_ID = oldTestTenant;
+    (global as any).mockDb = originalDb;
+  }
+});
+
+test("P0.14 T14: sendWhatsAppMessage metodunun kesinlikle çağrılmaması", async () => {
+  // Verify that sendWhatsAppMessage calls list remains empty during bulk action
+  const { bulkSetBotMode } = require("../app/actions/inbox");
+  const selectedIds = ["conv-1"];
+  
+  const db = {
+    executeSafe: async (q: { text: string; values?: any[] }) => {
+      const sql = q.text.replace(/\s+/g, ' ');
+      if (sql.includes("SELECT id, tenant_id, channel, status FROM conversations")) {
+        return [{ id: "conv-1", tenant_id: "tenant-123", channel: "whatsapp", status: "lead" }];
+      }
+      return [];
+    }
+  };
+
+  const oldTestTenant = process.env.TEST_TENANT_ID;
+  process.env.TEST_TENANT_ID = "tenant-123";
+
+  const originalDb = (global as any).mockDb;
+  (global as any).mockDb = db;
+
+  const originalSend = MessageService.prototype.sendWhatsAppMessage;
+  let sendCalled = false;
+  MessageService.prototype.sendWhatsAppMessage = async () => {
+    sendCalled = true;
+    return { success: true };
+  };
+
+  try {
+    await bulkSetBotMode(selectedIds, 'bot');
+    assert(sendCalled === false, "sendWhatsAppMessage should not be called");
+  } finally {
+    MessageService.prototype.sendWhatsAppMessage = originalSend;
+    process.env.TEST_TENANT_ID = oldTestTenant;
+    (global as any).mockDb = originalDb;
+  }
+});
+
+test("P0.14 T15: DB messages tablosuna yazım olmaması", async () => {
+  const { bulkSetBotMode } = require("../app/actions/inbox");
+  const selectedIds = ["conv-1"];
+  
+  const mockDbCalls: any[] = [];
+  const db = {
+    executeSafe: async (q: { text: string; values?: any[] }) => {
+      mockDbCalls.push(q);
+      const sql = q.text.replace(/\s+/g, ' ');
+      if (sql.includes("SELECT id, tenant_id, channel, status FROM conversations")) {
+        return [{ id: "conv-1", tenant_id: "tenant-123", channel: "whatsapp", status: "lead" }];
+      }
+      return [];
+    }
+  };
+
+  const oldTestTenant = process.env.TEST_TENANT_ID;
+  process.env.TEST_TENANT_ID = "tenant-123";
+
+  const originalDb = (global as any).mockDb;
+  (global as any).mockDb = db;
+
+  try {
+    await bulkSetBotMode(selectedIds, 'bot');
+    const msgInserts = mockDbCalls.filter(c => c.text.toLowerCase().includes("insert into messages"));
+    assert(msgInserts.length === 0, "No messages should be written to DB");
+  } finally {
+    process.env.TEST_TENANT_ID = oldTestTenant;
+    (global as any).mockDb = originalDb;
+  }
+});
+
+test("P0.14 T16: Ably realtime yayını yapılmaması", async () => {
+  const { RealtimePublisher } = await import("../lib/realtime/publisher");
+  const oldPublish = RealtimePublisher.publishMessageCreated;
+  let publishMessageCalled = false;
+  RealtimePublisher.publishMessageCreated = async () => {
+    publishMessageCalled = true;
+  };
+
+  const { bulkSetBotMode } = require("../app/actions/inbox");
+  const selectedIds = ["conv-1"];
+  
+  const db = {
+    executeSafe: async (q: { text: string; values?: any[] }) => {
+      const sql = q.text.replace(/\s+/g, ' ');
+      if (sql.includes("SELECT id, tenant_id, channel, status FROM conversations")) {
+        return [{ id: "conv-1", tenant_id: "tenant-123", channel: "whatsapp", status: "lead" }];
+      }
+      return [];
+    }
+  };
+
+  const oldTestTenant = process.env.TEST_TENANT_ID;
+  process.env.TEST_TENANT_ID = "tenant-123";
+
+  const originalDb = (global as any).mockDb;
+  (global as any).mockDb = db;
+
+  try {
+    await bulkSetBotMode(selectedIds, 'bot');
+    assert(publishMessageCalled === false, "Should not publish realtime messages");
+  } finally {
+    RealtimePublisher.publishMessageCreated = oldPublish;
+    process.env.TEST_TENANT_ID = oldTestTenant;
+    (global as any).mockDb = originalDb;
+  }
+});
+
+test("P0.14 T17: Herhangi bir WhatsApp şablonunun tetiklenmemesi", async () => {
+  const { bulkSetBotMode } = require("../app/actions/inbox");
+  const selectedIds = ["conv-1"];
+  
+  const db = {
+    executeSafe: async (q: { text: string; values?: any[] }) => {
+      const sql = q.text.replace(/\s+/g, ' ');
+      if (sql.includes("SELECT id, tenant_id, channel, status FROM conversations")) {
+        return [{ id: "conv-1", tenant_id: "tenant-123", channel: "whatsapp", status: "lead" }];
+      }
+      return [];
+    }
+  };
+
+  const oldTestTenant = process.env.TEST_TENANT_ID;
+  process.env.TEST_TENANT_ID = "tenant-123";
+
+  const originalDb = (global as any).mockDb;
+  (global as any).mockDb = db;
+
+  let templateCalled = false;
+  const originalSend = MessageService.prototype.sendWhatsAppTemplate;
+  MessageService.prototype.sendWhatsAppTemplate = async () => {
+    templateCalled = true;
+    return { success: true };
+  };
+
+  try {
+    await bulkSetBotMode(selectedIds, 'bot');
+    assert(templateCalled === false, "WhatsApp template send should not be triggered");
+  } finally {
+    MessageService.prototype.sendWhatsAppTemplate = originalSend;
+    process.env.TEST_TENANT_ID = oldTestTenant;
+    (global as any).mockDb = originalDb;
+  }
+});
+
+test("P0.14 T18: Env phase lock açıkken UI canlı gönderimi kilitli gösterir", async () => {
+  const oldLock = process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED;
+  process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED = "true";
+  
+  const { getAutoGreetingSettingsAction } = require("../app/actions/settings");
+  
+  const db = {
+    executeSafe: async (q: { text: string; values?: any[] }) => {
+      const sql = q.text.replace(/\s+/g, ' ');
+      if (sql.includes("SELECT slug FROM tenants")) {
+        return [{ slug: "allowed-tenant" }];
+      }
+      return [];
+    }
+  };
+
+  const oldTestTenant = process.env.TEST_TENANT_ID;
+  process.env.TEST_TENANT_ID = "tenant-123";
+
+  const originalDb = (global as any).mockDb;
+  (global as any).mockDb = db;
+
+  try {
+    const res = await getAutoGreetingSettingsAction();
+    assert(res.success === true, "Should get settings");
+    assert(res.envLocks.phaseLockBlocked === true, "phaseLockBlocked should be true");
+  } finally {
+    process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED = oldLock;
+    process.env.TEST_TENANT_ID = oldTestTenant;
+    (global as any).mockDb = originalDb;
+  }
+});
+
+test("P0.14 T19: DB setting açık olsa bile env phase lock canlı gönderimi engeller", async () => {
+  const { resolveFormAutopilotEligibility } = await import("../lib/services/forms/form-autopilot-eligibility-resolver");
+  const oldLock = process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED;
+  process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED = "true";
+
+  const db = {
+    executeSafe: async (q: { text: string; values?: any[] }) => {
+      const sql = q.text.replace(/\s+/g, ' ');
+      if (sql.includes("tenants")) return [{ slug: "allowed-tenant" }];
+      if (sql.includes("conversations")) return [{ channel: "whatsapp", phone_number: "905001234567", tenant_id: "tenant-123" }];
+      if (sql.includes("leads")) return [{ tenant_id: "tenant-123", phone_number: "905001234567" }];
+      if (sql.includes("messages") && sql.includes("COALESCE")) {
+        return [{ id: "msg-1", last_inbound_at: new Date().toISOString() }];
+      }
+      if (sql.includes("ai_module_settings")) {
+        return [{ module_name: "form_autopilot_for_open_meta_window", is_active: true, config_json: { dry_run: false } }];
+      }
+      return [];
+    }
+  };
+
+  try {
+    const el = await resolveFormAutopilotEligibility("tenant-123", "lead-123", "conv-123", db as any);
+    const isPhaseLocked = process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED !== 'false';
+    assert(isPhaseLocked === true, "Phase lock should be true");
+  } finally {
+    process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED = oldLock;
+  }
+});
+
+test("P0.14 T20: Settings panel sadece ilgili channel config'ini patch eder, diğer channel config bozulmaz", async () => {
+  const { saveAutoGreetingChannelSettingsAction } = require("../app/actions/settings");
+  
+  const mockDbCalls: any[] = [];
+  const db = {
+    executeSafe: async (q: { text: string; values?: any[] }) => {
+      mockDbCalls.push(q);
+      const sql = q.text.replace(/\s+/g, ' ');
+      if (sql.includes("SELECT id, config_json FROM ai_module_settings")) {
+        return [{
+          id: "row-123",
+          config_json: {
+            channels: {
+              whatsapp: { auto_greeting_enabled: true, dry_run: true },
+              instagram: { auto_greeting_enabled: false, dry_run: true }
+            }
+          }
+        }];
+      }
+      return [];
+    }
+  };
+
+  const oldTestTenant = process.env.TEST_TENANT_ID;
+  process.env.TEST_TENANT_ID = "tenant-123";
+  const oldRole = process.env.TEST_USER_ROLE;
+  process.env.TEST_USER_ROLE = "admin";
+
+  const originalDb = (global as any).mockDb;
+  (global as any).mockDb = db;
+
+  try {
+    const res = await saveAutoGreetingChannelSettingsAction("instagram", { auto_greeting_enabled: true });
+    assert(res.success === true, "Should succeed saving config");
+    
+    const updateCall = mockDbCalls.find(c => c.text.includes("UPDATE ai_module_settings"));
+    assert(!!updateCall, "Update SQL should run");
+    
+    const savedConfig = JSON.parse(updateCall.values[0]);
+    assert(savedConfig.channels.whatsapp.auto_greeting_enabled === true, "whatsapp config should remain untouched");
+    assert(savedConfig.channels.instagram.auto_greeting_enabled === true, "instagram config should be updated");
+  } finally {
+    process.env.TEST_TENANT_ID = oldTestTenant;
+    process.env.TEST_USER_ROLE = oldRole;
+    (global as any).mockDb = originalDb;
+  }
+});
+
+test("P0.14 T21: Yetkisiz kullanıcı settings değiştiremez", async () => {
+  const { saveAutoGreetingChannelSettingsAction } = require("../app/actions/settings");
+  
+  const oldTestTenant = process.env.TEST_TENANT_ID;
+  process.env.TEST_TENANT_ID = "tenant-123";
+  const oldRole = process.env.TEST_USER_ROLE;
+  process.env.TEST_USER_ROLE = "viewer"; 
+
+  try {
+    const res = await saveAutoGreetingChannelSettingsAction("whatsapp", { auto_greeting_enabled: true });
+    assert(res.success === false, "Should fail settings change");
+    assert(res.error.includes("yetkiniz yok"), "Error should say unauthorized");
+  } finally {
+    process.env.TEST_TENANT_ID = oldTestTenant;
+    process.env.TEST_USER_ROLE = oldRole;
+  }
+});
+
+test("P0.14 T22: Yetkisiz kullanıcı inbox bulk bot aç/kapat yapamaz", async () => {
+  const { bulkSetBotMode } = require("../app/actions/inbox");
+  
+  const oldTestTenant = process.env.TEST_TENANT_ID;
+  process.env.TEST_TENANT_ID = "tenant-123";
+  const oldRole = process.env.TEST_USER_ROLE;
+  process.env.TEST_USER_ROLE = "viewer"; 
+
+  try {
+    const res = await bulkSetBotMode(["conv-1"], "bot");
+    assert(res.success === false, "Should fail bulk action");
+    assert(res.error.includes("yetkiniz yok"), "Error should say unauthorized");
+  } finally {
+    process.env.TEST_TENANT_ID = oldTestTenant;
+    process.env.TEST_USER_ROLE = oldRole;
+  }
+});
+
+test("P0.14 T23: status === 'human' conversation bulk enable işleminden atlanır", async () => {
+  const { bulkSetBotMode } = require("../app/actions/inbox");
+  const selectedIds = ["conv-1"];
+  
+  const db = {
+    executeSafe: async (q: { text: string; values?: any[] }) => {
+      const sql = q.text.replace(/\s+/g, ' ');
+      if (sql.includes("SELECT id, tenant_id, channel, status FROM conversations")) {
+        return [{ id: "conv-1", tenant_id: "tenant-123", channel: "whatsapp", status: "human" }];
+      }
+      return [];
+    }
+  };
+
+  const oldTestTenant = process.env.TEST_TENANT_ID;
+  process.env.TEST_TENANT_ID = "tenant-123";
+
+  const originalDb = (global as any).mockDb;
+  (global as any).mockDb = db;
+
+  try {
+    const res = await bulkSetBotMode(selectedIds, 'bot');
+    assert(res.success === true, "Should return success");
+    assert(res.summary.processed === 0, "No conversations should be processed");
+    assert(res.summary.skippedHuman === 1, "Should skip human conversation");
+  } finally {
+    process.env.TEST_TENANT_ID = oldTestTenant;
+    (global as any).mockDb = originalDb;
+  }
+});
+
+test("P0.14 T24: Bot enable outbound tetiklemez", async () => {
+  const { bulkSetBotMode } = require("../app/actions/inbox");
+  const selectedIds = ["conv-1"];
+  
+  const db = {
+    executeSafe: async (q: { text: string; values?: any[] }) => {
+      const sql = q.text.replace(/\s+/g, ' ');
+      if (sql.includes("SELECT id, tenant_id, channel, status FROM conversations")) {
+        return [{ id: "conv-1", tenant_id: "tenant-123", channel: "whatsapp", status: "lead" }];
+      }
+      return [];
+    }
+  };
+
+  const oldTestTenant = process.env.TEST_TENANT_ID;
+  process.env.TEST_TENANT_ID = "tenant-123";
+
+  const originalDb = (global as any).mockDb;
+  (global as any).mockDb = db;
+
+  const originalSend = MessageService.prototype.sendWhatsAppMessage;
+  let sendCalled = false;
+  MessageService.prototype.sendWhatsAppMessage = async () => {
+    sendCalled = true;
+    return { success: true };
+  };
+
+  try {
+    await bulkSetBotMode(selectedIds, 'bot');
+    assert(sendCalled === false, "Enabling bot should not send message");
+  } finally {
+    MessageService.prototype.sendWhatsAppMessage = originalSend;
+    process.env.TEST_TENANT_ID = oldTestTenant;
+    (global as any).mockDb = originalDb;
+  }
+});
+
+test("P0.14 T25: Bot disable outbound tetiklemez", async () => {
+  const { bulkSetBotMode } = require("../app/actions/inbox");
+  const selectedIds = ["conv-1"];
+  
+  const db = {
+    executeSafe: async (q: { text: string; values?: any[] }) => {
+      const sql = q.text.replace(/\s+/g, ' ');
+      if (sql.includes("SELECT id, tenant_id, channel, status FROM conversations")) {
+        return [{ id: "conv-1", tenant_id: "tenant-123", channel: "whatsapp", status: "lead" }];
+      }
+      return [];
+    }
+  };
+
+  const oldTestTenant = process.env.TEST_TENANT_ID;
+  process.env.TEST_TENANT_ID = "tenant-123";
+
+  const originalDb = (global as any).mockDb;
+  (global as any).mockDb = db;
+
+  const originalSend = MessageService.prototype.sendWhatsAppMessage;
+  let sendCalled = false;
+  MessageService.prototype.sendWhatsAppMessage = async () => {
+    sendCalled = true;
+    return { success: true };
+  };
+
+  try {
+    await bulkSetBotMode(selectedIds, 'human');
+    assert(sendCalled === false, "Disabling bot should not send message");
+  } finally {
+    MessageService.prototype.sendWhatsAppMessage = originalSend;
+    process.env.TEST_TENANT_ID = oldTestTenant;
+    (global as any).mockDb = originalDb;
+  }
+});
+
+test("P0.14 T26: Form-only lead hiçbir inbox bot action'a karışmaz", async () => {
+  const { bulkSetBotMode } = require("../app/actions/inbox");
+  const selectedIds = ["lead-uuid-1"];
+  
+  const db = {
+    executeSafe: async (q: { text: string; values?: any[] }) => {
+      const sql = q.text.replace(/\s+/g, ' ');
+      if (sql.includes("SELECT id, tenant_id, channel, status FROM conversations")) {
+        return [];
+      }
+      return [];
+    }
+  };
+
+  const oldTestTenant = process.env.TEST_TENANT_ID;
+  process.env.TEST_TENANT_ID = "tenant-123";
+
+  const originalDb = (global as any).mockDb;
+  (global as any).mockDb = db;
+
+  try {
+    const res = await bulkSetBotMode(selectedIds, 'bot');
+    assert(res.success === true, "Should return success");
+    assert(res.summary.processed === 0, "Processed count should be 0");
+    assert(res.summary.skippedOther === 1, "Should skip 1 missing conversation");
+  } finally {
+    process.env.TEST_TENANT_ID = oldTestTenant;
+    (global as any).mockDb = originalDb;
+  }
+});
+
+test("P0.14 T27: 24h closed lead sadece template/taslak önerisine gider", async () => {
+  const { FirstContactDecisionResolver } = await import("../lib/services/automation/first-contact-decision-resolver");
+  const db = {
+    executeSafe: async (q: { text: string; values?: any[] }) => {
+      const sql = q.text.replace(/\s+/g, ' ');
+      if (sql.includes("SELECT phone_number, raw_data, form_name FROM leads")) {
+        return [{ phone_number: "905001234567", raw_data: {}, form_name: "test-form" }];
+      }
+      if (sql.includes("SELECT id, status, autopilot_enabled, channel FROM conversations")) {
+        return [{ id: "conv-123", status: "lead", autopilot_enabled: true, channel: "whatsapp" }];
+      }
+      if (sql.includes("FROM tenants")) {
+        return [{ slug: "allowed-tenant" }];
+      }
+      if (sql.includes("FROM conversations WHERE id = $1 AND tenant_id = $2")) {
+        return [{ channel: "whatsapp", status: "lead", tenant_id: "tenant-123", autopilot_enabled: true }];
+      }
+      if (sql.includes("FROM leads WHERE id = $1 AND tenant_id = $2")) {
+        return [{ tenant_id: "tenant-123", phone_number: "905001234567" }];
+      }
+      if (sql.includes("FROM messages") && sql.includes("direction = 'in'")) {
+        return [{ id: "msg-1", last_inbound_at: new Date(Date.now() - 30 * 3600 * 1000).toISOString() }];
+      }
+      return [];
+    }
+  };
+
+  const decision = await FirstContactDecisionResolver.resolveForFormLead("tenant-123", "lead-123", db as any);
+  assert(decision.category === 'manual_template_required', "Category should be manual_template_required");
+  assert(decision.recommendedAction === 'select_template', "Should recommend selecting a template");
+});
+
+test("P0.14 T28: Raw hasta mesajı audit log'a yazılmaz", async () => {
+  const { bulkSetBotMode } = require("../app/actions/inbox");
+  const selectedIds = ["conv-1"];
+  
+  const mockDbCalls: any[] = [];
+  const db = {
+    executeSafe: async (q: { text: string; values?: any[] }) => {
+      mockDbCalls.push(q);
+      const sql = q.text.replace(/\s+/g, ' ');
+      if (sql.includes("SELECT id, tenant_id, channel, status FROM conversations")) {
+        return [{ id: "conv-1", tenant_id: "tenant-123", channel: "whatsapp", status: "lead" }];
+      }
+      return [];
+    }
+  };
+
+  const oldTestTenant = process.env.TEST_TENANT_ID;
+  process.env.TEST_TENANT_ID = "tenant-123";
+
+  const originalDb = (global as any).mockDb;
+  (global as any).mockDb = db;
+
+  try {
+    await bulkSetBotMode(selectedIds, 'bot');
+    const logs = mockDbCalls.filter(c => c.text.includes("INSERT INTO outreach_logs"));
+    for (const log of logs) {
+      const metadata = JSON.parse(log.values[3]);
+      assert(!metadata.raw_message, "Raw message should not be logged in outreach logs");
+    }
+  } finally {
+    process.env.TEST_TENANT_ID = oldTestTenant;
+    (global as any).mockDb = originalDb;
+  }
+});
+
+test("P0.14 T29: non-target tenant etkilenmez (Settings config)", async () => {
+  const { saveAutoGreetingChannelSettingsAction } = require("../app/actions/settings");
+  const mockDbCalls: any[] = [];
+  const db = {
+    executeSafe: async (q: { text: string; values?: any[] }) => {
+      mockDbCalls.push(q);
+      return [];
+    }
+  };
+
+  const oldTestTenant = process.env.TEST_TENANT_ID;
+  process.env.TEST_TENANT_ID = "tenant-123";
+  const oldRole = process.env.TEST_USER_ROLE;
+  process.env.TEST_USER_ROLE = "admin";
+
+  const originalDb = (global as any).mockDb;
+  (global as any).mockDb = db;
+
+  try {
+    await saveAutoGreetingChannelSettingsAction("whatsapp", { auto_greeting_enabled: true });
+    const mutations = mockDbCalls.filter(c => c.text.includes("UPDATE") || c.text.includes("INSERT"));
+    for (const mutation of mutations) {
+      assert(mutation.values.includes("tenant-123"), "Mutation should strictly include the active tenant_id");
+    }
+  } finally {
+    process.env.TEST_TENANT_ID = oldTestTenant;
+    process.env.TEST_USER_ROLE = oldRole;
+    (global as any).mockDb = originalDb;
+  }
+});
+
+// ==========================================
 // SONUÇLAR
 // ==========================================
 

@@ -4223,38 +4223,131 @@ export async function bulkSetBotMode(conversationIds: string[], mode: 'bot' | 'h
     return { success: false, error: "Mod 'bot' veya 'human' olmalıdır." };
   }
   return withActionGuard(
-    { actionName: 'bulkSetBotMode' },
+    { 
+      actionName: 'bulkSetBotMode',
+      roles: ['owner', 'admin']
+    },
     async (ctx) => {
       const autopilotEnabled = mode === 'bot';
 
-      await ctx.db.executeSafe({
-        text: `
-          UPDATE conversations
-          SET autopilot_enabled = $1, updated_at = NOW()
-          WHERE tenant_id = $2 AND id = ANY($3::uuid[])
-        `,
-        values: [autopilotEnabled, ctx.tenantId, conversationIds]
-      });
+      // 1. Fetch conversations details for validation
+      const convs = await ctx.db.executeSafe({
+        text: `SELECT id, tenant_id, channel, status FROM conversations WHERE id = ANY($1::uuid[])`,
+        values: [conversationIds]
+      }) as any[];
 
-      for (const convId of conversationIds) {
+      const eligibleIds: string[] = [];
+      let skippedHuman = 0;
+      let skippedOther = 0;
+
+      for (const id of conversationIds) {
+        const conv = convs.find(c => c.id === id);
+        if (!conv) {
+          skippedOther++;
+          logAudit({
+            tenantId: ctx.tenantId,
+            userId: ctx.userId,
+            userEmail: ctx.email,
+            action: 'INBOX_BOT_BULK_SKIPPED_NO_CONVERSATION',
+            entityType: 'conversation',
+            entityId: id,
+            details: { reason: 'conversation_not_found' }
+          });
+          continue;
+        }
+
+        if (conv.tenant_id !== ctx.tenantId) {
+          skippedOther++;
+          logAudit({
+            tenantId: ctx.tenantId,
+            userId: ctx.userId,
+            userEmail: ctx.email,
+            action: 'INBOX_BOT_BULK_SKIPPED_TENANT_MISMATCH',
+            entityType: 'conversation',
+            entityId: id,
+            details: { reason: 'tenant_mismatch', convTenantId: conv.tenant_id }
+          });
+          continue;
+        }
+
+        if (conv.channel !== 'whatsapp') {
+          skippedOther++;
+          logAudit({
+            tenantId: ctx.tenantId,
+            userId: ctx.userId,
+            userEmail: ctx.email,
+            action: 'INBOX_BOT_BULK_SKIPPED_NO_CONVERSATION',
+            entityType: 'conversation',
+            entityId: id,
+            details: { reason: 'not_whatsapp_channel', channel: conv.channel }
+          });
+          continue;
+        }
+
+        if (conv.status === 'human') {
+          skippedHuman++;
+          logAudit({
+            tenantId: ctx.tenantId,
+            userId: ctx.userId,
+            userEmail: ctx.email,
+            action: 'INBOX_BOT_BULK_SKIPPED_HUMAN',
+            entityType: 'conversation',
+            entityId: id,
+            details: { reason: 'status_human' }
+          });
+          continue;
+        }
+
+        eligibleIds.push(id);
+      }
+
+      // 2. Perform safe update on eligible ones
+      if (eligibleIds.length > 0) {
         await ctx.db.executeSafe({
           text: `
-            INSERT INTO outreach_logs (tenant_id, conversation_id, action, actor_id, metadata)
-            VALUES ($1, $2, 'bulk_bot_mode_change', $3, $4)
+            UPDATE conversations
+            SET autopilot_enabled = $1, updated_at = NOW()
+            WHERE tenant_id = $2 AND id = ANY($3::uuid[])
           `,
-          values: [ctx.tenantId, convId, ctx.userId, JSON.stringify({ source: "bulk_inbox_action", mode })]
+          values: [autopilotEnabled, ctx.tenantId, eligibleIds]
+        });
+
+        for (const convId of eligibleIds) {
+          await ctx.db.executeSafe({
+            text: `
+              INSERT INTO outreach_logs (tenant_id, conversation_id, action, actor_id, metadata)
+              VALUES ($1, $2, 'bulk_bot_mode_change', $3, $4)
+            `,
+            values: [ctx.tenantId, convId, ctx.userId, JSON.stringify({ source: "bulk_inbox_action", mode })]
+          });
+
+          logAudit({
+            tenantId: ctx.tenantId,
+            userId: ctx.userId,
+            userEmail: ctx.email,
+            action: autopilotEnabled ? 'INBOX_BOT_BULK_ENABLED' : 'INBOX_BOT_BULK_DISABLED',
+            entityType: 'conversation',
+            entityId: convId,
+            details: { autopilotEnabled }
+          });
+        }
+
+        await broadcastBulkMetadataUpdate(ctx.tenantId, ctx.userId, eligibleIds, {
+          isBotActive: autopilotEnabled,
+          autopilotEnabled: autopilotEnabled
         });
       }
 
-      await broadcastBulkMetadataUpdate(ctx.tenantId, ctx.userId, conversationIds, {
-        isBotActive: autopilotEnabled,
-        autopilotEnabled: autopilotEnabled,
-        status: mode
-      });
-
-      return { success: true };
+      return {
+        success: true,
+        summary: {
+          processed: eligibleIds.length,
+          skippedHuman,
+          skippedOther
+        }
+      };
     }
-  ).then(res => res.success ? (res.data || { success: true }) : { success: false, error: res.error });
+  ).then(res => res.success ? (res.data || { success: true, summary: { processed: 0, skippedHuman: 0, skippedOther: 0 } }) : { success: false, error: res.error });
 }
 
 export async function resolveInboxDraftAction(conversationId: string) {
