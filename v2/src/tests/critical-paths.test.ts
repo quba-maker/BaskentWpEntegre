@@ -3540,7 +3540,7 @@ test("P0.14 T19: DB setting açık olsa bile env phase lock canlı gönderimi en
   };
 
   try {
-    const el = await resolveFormAutopilotEligibility("tenant-123", "lead-123", "conv-123", db as any);
+    await resolveFormAutopilotEligibility("tenant-123", "lead-123", "conv-123", db as any);
     const isPhaseLocked = process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED !== 'false';
     assert(isPhaseLocked === true, "Phase lock should be true");
   } finally {
