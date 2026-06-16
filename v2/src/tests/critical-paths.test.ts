@@ -3866,6 +3866,124 @@ test("P0.14 T29: non-target tenant etkilenmez (Settings config)", async () => {
   }
 });
 
+test("P0.14 HOTFIX 1: getTenantSettings current tenant için PASS", async () => {
+  const { getTenantSettings } = require("../app/actions/settings");
+  const db = {
+    executeSafe: async (q: { text: string; values?: any[] }) => {
+      if (q.text.includes("FROM tenants")) {
+        return [{ id: "tenant-123", name: "Tenant 123", slug: "tenant-123" }];
+      }
+      return [];
+    }
+  };
+
+  const oldTestTenant = process.env.TEST_TENANT_ID;
+  process.env.TEST_TENANT_ID = "tenant-123";
+  const originalDb = (global as any).mockDb;
+  (global as any).mockDb = db;
+
+  try {
+    const res = await getTenantSettings();
+    assert(res.success === true, "Should load current tenant settings");
+    assert(res.tenant.id === "tenant-123", "Tenant ID must match");
+  } finally {
+    process.env.TEST_TENANT_ID = oldTestTenant;
+    (global as any).mockDb = originalDb;
+  }
+});
+
+test("P0.14 HOTFIX 2: getTenantSettings başka tenant id ile çalışmaz ve parameter mismatch engellenir", async () => {
+  const { TenantQueryGuard } = await import("../lib/security/tenant-query-guard");
+  let guardThrown = false;
+  try {
+    // If querying tenants table with another tenant ID (e.g. "tenant-456") when executing context tenant is "tenant-123"
+    TenantQueryGuard.assertTenantBoundQuery("tenant-123", "SELECT * FROM tenants WHERE id = $1", ["tenant-456"]);
+  } catch (e: any) {
+    guardThrown = true;
+    assert(e.message.includes("Query execution rejected"), "Error should report query execution rejection");
+  }
+  assert(guardThrown === true, "Should reject cross-tenant parameters in tenants table queries");
+});
+
+test("P0.14 HOTFIX 3: tenants self-lookup tenant isolation guard’ı güvenli şekilde geçer", async () => {
+  const { TenantQueryGuard } = await import("../lib/security/tenant-query-guard");
+  // Current tenant id lookup should pass without throwing
+  TenantQueryGuard.assertTenantBoundQuery("tenant-123", "SELECT id, name FROM tenants WHERE id = $1", ["tenant-123"]);
+  // Current tenant update should pass without throwing
+  TenantQueryGuard.assertTenantBoundQuery("tenant-123", "UPDATE tenants SET name = $1 WHERE id = $2", ["New Name", "tenant-123"]);
+});
+
+test("P0.14 HOTFIX 4: settings/page yüklenirken raw SQL hata kullanıcıya gösterilmez", async () => {
+  const { withActionGuard } = await import("../lib/core/action-guard");
+  
+  // Create an action that throws a raw SQL or security error
+  const action = async () => {
+    return withActionGuard({ actionName: "testAction" }, async () => {
+      throw new Error("Raw SQL Error: SELECT * FROM tenants");
+    });
+  };
+
+  const oldNodeEnv = process.env.NODE_ENV;
+  process.env.NODE_ENV = "production"; // simulate production
+  
+  try {
+    const res = await action();
+    assert(res.success === false, "Should return failure");
+    assert(!res.error.includes("SELECT"), "Error should not expose raw SQL query context");
+    assert(res.error.includes("Sistemsel bir hata oluştu"), "Error should display generic user-friendly message");
+  } finally {
+    process.env.NODE_ENV = oldNodeEnv;
+  }
+});
+
+test("P0.14 HOTFIX 5: AutoGreetingSettingsPanel hatası settings sayfasını komple çökertmez", async () => {
+  // We check that settings page handles auto greeting error gracefully.
+  // When getAutoGreetingSettingsAction throws/fails, it returns success: false with an error,
+  // which is caught in settings loadData, logging to console instead of throwing global page error.
+  const { getAutoGreetingSettingsAction } = require("../app/actions/settings");
+  const dbWithError = {
+    executeSafe: async () => { throw new Error("Connection failed"); }
+  };
+  const originalDb = (global as any).mockDb;
+  (global as any).mockDb = dbWithError;
+
+  try {
+    const res = await getAutoGreetingSettingsAction();
+    assert(res.success === false, "Should fail gracefully");
+    assert(!!res.error, "Should provide an error description");
+  } finally {
+    (global as any).mockDb = originalDb;
+  }
+});
+
+test("P0.14 HOTFIX 6: Hardcoded Başkent/Rüya/tenant/channel yok", async () => {
+  const { saveAutoGreetingChannelSettingsAction } = require("../app/actions/settings");
+  // It uses dynamic channelId and tenantId parameters without hardcoding
+  const db = {
+    executeSafe: async (q: { text: string; values?: any[] }) => []
+  };
+  const originalDb = (global as any).mockDb;
+  (global as any).mockDb = db;
+  const oldTestTenant = process.env.TEST_TENANT_ID;
+  process.env.TEST_TENANT_ID = "custom-tenant-id-abc";
+  const oldRole = process.env.TEST_USER_ROLE;
+  process.env.TEST_USER_ROLE = "admin";
+
+  try {
+    const res = await saveAutoGreetingChannelSettingsAction("custom-channel-xyz", { auto_greeting_enabled: true });
+    assert(res.success === true, "Should succeed with dynamic IDs");
+  } finally {
+    process.env.TEST_TENANT_ID = oldTestTenant;
+    process.env.TEST_USER_ROLE = oldRole;
+    (global as any).mockDb = originalDb;
+  }
+});
+
+test("P0.14 HOTFIX 7: P0.14 zero-outbound kilitleri değişmez", () => {
+  assert(process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED !== "false", "Outbound blocked phase lock must be active");
+  assert(process.env.FORM_AUTOPILOT_DRY_RUN !== "false", "Dry run must be active");
+});
+
 // ==========================================
 // SONUÇLAR
 // ==========================================

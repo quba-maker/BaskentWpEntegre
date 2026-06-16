@@ -16,6 +16,13 @@ export const TenantQueryGuard = {
       return;
     }
 
+    // Exception: Allow self tenant lookup/update on tenants table where the id parameter matches tenantId
+    const isTenantsSelfQuery = normalizedQuery.includes("from tenants") || normalizedQuery.includes("update tenants");
+    const isBoundById = normalizedQuery.includes("where id =") || normalizedQuery.includes("id = $");
+    if (isTenantsSelfQuery && isBoundById && params && params.includes(tenantId)) {
+      return;
+    }
+
     // A simplistic check to ensure the query string mentions tenant_id
     // Real enforcement happens via the ORM/QueryBuilder, but this blocks raw strings
     if (!normalizedQuery.includes("tenant_id")) {
