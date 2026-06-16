@@ -14,6 +14,27 @@ export type GreetingAutomationDecision = {
     | 'already_processed'
     | 'not_eligible'
     | 'error';
+  baseCategory:
+    | 'bot_auto_eligible'
+    | 'manual_draft_required'
+    | 'manual_template_required'
+    | 'already_open_inbox'
+    | 'not_eligible'
+    | 'error';
+  gateState:
+    | 'open'
+    | 'live_locked'
+    | 'dry_run'
+    | 'feature_disabled'
+    | 'allowlist_missing'
+    | 'global_disabled';
+  gateReasons: Array<
+    | 'phase_lock_enabled'
+    | 'dry_run_enabled'
+    | 'feature_flag_disabled'
+    | 'allowlist_missing'
+    | 'global_disabled'
+  >;
   metaWindow:
     | 'open'
     | 'closed'
@@ -33,6 +54,7 @@ export type GreetingAutomationDecision = {
     | 'no_action';
   reason: string;
   userFriendlyReason: string;
+  userFriendlyTitle: string;
   language?: 'tr' | 'en' | 'ru' | 'ar' | 'de' | 'fr' | 'nl' | 'unknown';
   languageConfidence?: 'high' | 'medium' | 'low';
   tenantId?: string;
@@ -71,6 +93,37 @@ export function mapUserFriendlyReason(reason: string): string {
   return REASON_MAPPING[reason] || reason || 'Durum hesaplanamadı.';
 }
 
+export function calculateGateStateAndReasons(params: {
+  isTenantAllowed: boolean;
+  globalDisabled: boolean;
+  featureFlagEnabled: boolean;
+  phaseLockBlocked: boolean;
+  dryRun: boolean;
+}) {
+  const gateReasons: Array<
+    | 'phase_lock_enabled'
+    | 'dry_run_enabled'
+    | 'feature_flag_disabled'
+    | 'allowlist_missing'
+    | 'global_disabled'
+  > = [];
+
+  if (params.globalDisabled) gateReasons.push('global_disabled');
+  if (!params.isTenantAllowed) gateReasons.push('allowlist_missing');
+  if (!params.featureFlagEnabled) gateReasons.push('feature_flag_disabled');
+  if (params.phaseLockBlocked) gateReasons.push('phase_lock_enabled');
+  if (params.dryRun) gateReasons.push('dry_run_enabled');
+
+  let gateState: 'open' | 'live_locked' | 'dry_run' | 'feature_disabled' | 'allowlist_missing' | 'global_disabled' = 'open';
+  if (params.globalDisabled) gateState = 'global_disabled';
+  else if (!params.isTenantAllowed) gateState = 'allowlist_missing';
+  else if (!params.featureFlagEnabled) gateState = 'feature_disabled';
+  else if (params.phaseLockBlocked) gateState = 'live_locked';
+  else if (params.dryRun) gateState = 'dry_run';
+
+  return { gateState, gateReasons };
+}
+
 export class FirstContactDecisionResolver {
   public static async resolveForFormLead(
     tenantId: string,
@@ -78,7 +131,31 @@ export class FirstContactDecisionResolver {
     db: TenantDB
   ): Promise<GreetingAutomationDecision> {
     try {
-      // 1. Find conversation associated with lead phone number
+      // 1. Fetch Tenant Slug and autopilot settings first to determine gates
+      const tenantRows = await db.executeSafe({
+        text: `SELECT slug FROM tenants WHERE id = $1 LIMIT 1`,
+        values: [tenantId]
+      }) as any[];
+      const tenantSlug = tenantRows[0]?.slug || '';
+      const allowedTenantsList = (process.env.FORM_AUTOPILOT_ALLOWED_TENANTS || '')
+        .split(',')
+        .map(t => t.trim().toLowerCase())
+        .filter(Boolean);
+      const isTenantAllowed = allowedTenantsList.includes(tenantSlug.toLowerCase());
+
+      const { getAutopilotSettings } = await import("../forms/form-autopilot-eligibility-resolver");
+      const settings = await getAutopilotSettings(tenantId, db);
+      const isPhaseLocked = process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED !== 'false';
+
+      const gates = calculateGateStateAndReasons({
+        isTenantAllowed,
+        globalDisabled: settings.globalDisabled,
+        featureFlagEnabled: settings.featureFlagEnabled,
+        phaseLockBlocked: isPhaseLocked,
+        dryRun: settings.dryRun
+      });
+
+      // 2. Find conversation associated with lead phone number
       const leadRow = await db.executeSafe({
         text: `SELECT phone_number, raw_data, form_name FROM leads WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
         values: [leadId, tenantId]
@@ -88,12 +165,16 @@ export class FirstContactDecisionResolver {
         return {
           source: 'form',
           category: 'error',
+          baseCategory: 'error',
+          gateState: gates.gateState,
+          gateReasons: gates.gateReasons,
           metaWindow: 'unknown',
           technicalEligible: false,
           finalActionAllowed: false,
           recommendedAction: 'no_action',
           reason: 'lead_not_found',
           userFriendlyReason: mapUserFriendlyReason('lead_not_found'),
+          userFriendlyTitle: 'Hata',
           tenantId,
           leadId
         };
@@ -101,25 +182,28 @@ export class FirstContactDecisionResolver {
 
       const lead = leadRow[0];
       const phone = lead.phone_number;
-
       const suffix = phone.slice(-10);
+
       const convRow = await db.executeSafe({
         text: `SELECT id, status, autopilot_enabled, channel FROM conversations WHERE tenant_id = $1 AND RIGHT(phone_number, 10) = $2 LIMIT 1`,
         values: [tenantId, suffix]
       }) as any[];
 
       if (convRow.length === 0) {
-        // Form-only, no conversation at all
         const langDec = resolveLeadLanguage(lead.raw_data, lead.form_name, phone, 'tr');
         return {
           source: 'form',
           category: 'manual_draft_required',
+          baseCategory: 'manual_draft_required',
+          gateState: gates.gateState,
+          gateReasons: gates.gateReasons,
           metaWindow: 'no_conversation',
           technicalEligible: false,
           finalActionAllowed: false,
           recommendedAction: 'prepare_manual_draft',
           reason: 'no_conversation',
           userFriendlyReason: mapUserFriendlyReason('no_conversation'),
+          userFriendlyTitle: 'Taslak Gerekli',
           language: langDec.language,
           languageConfidence: langDec.confidence,
           tenantId,
@@ -130,7 +214,7 @@ export class FirstContactDecisionResolver {
       const conv = convRow[0];
       const conversationId = conv.id;
 
-      // 2. Call resolveFormAutopilotEligibility
+      // 3. Call resolveFormAutopilotEligibility
       const eligibility = await resolveFormAutopilotEligibility(tenantId, leadId, conversationId, db);
       const langDec = resolveLeadLanguage(lead.raw_data, lead.form_name, phone, 'tr');
 
@@ -141,20 +225,29 @@ export class FirstContactDecisionResolver {
         leadId,
         language: langDec.language,
         languageConfidence: langDec.confidence,
-        channelId: eligibility.channelId || 'whatsapp'
+        channelId: eligibility.channelId || 'whatsapp',
+        gateState: gates.gateState,
+        gateReasons: gates.gateReasons
       };
 
-      // 3. Map to category based on eligibility reasons
+      // Check Meta 24h window
+      const windowCheck = await resolveWhatsApp24hWindow(conversationId, tenantId, db);
+      const metaWindow = windowCheck.status === 'OPEN' || windowCheck.status === 'CLOSING_SOON' ? 'open' as const : 
+                         (windowCheck.status === 'UNKNOWN' ? 'no_inbound' as const : 'closed' as const);
+
+      // Map to category based on eligibility reasons
       if (eligibility.reason === 'already_processed') {
         return {
           ...decisionBase,
           category: 'already_processed',
+          baseCategory: 'already_open_inbox',
           metaWindow: 'open',
           technicalEligible: false,
           finalActionAllowed: false,
           recommendedAction: 'go_to_inbox',
           reason: 'already_processed',
-          userFriendlyReason: mapUserFriendlyReason('already_processed')
+          userFriendlyReason: mapUserFriendlyReason('already_processed'),
+          userFriendlyTitle: "Inbox'tan Devam"
         };
       }
 
@@ -162,30 +255,29 @@ export class FirstContactDecisionResolver {
         return {
           ...decisionBase,
           category: 'already_open_inbox',
+          baseCategory: 'already_open_inbox',
           metaWindow: 'open',
           technicalEligible: false,
           finalActionAllowed: false,
           recommendedAction: 'go_to_inbox',
           reason: 'status_human',
-          userFriendlyReason: mapUserFriendlyReason('status_human')
+          userFriendlyReason: mapUserFriendlyReason('status_human'),
+          userFriendlyTitle: "Inbox'tan Devam"
         };
       }
-
-      // Check Meta 24h window
-      const windowCheck = await resolveWhatsApp24hWindow(conversationId, tenantId, db);
-      const metaWindow = windowCheck.status === 'OPEN' || windowCheck.status === 'CLOSING_SOON' ? 'open' as const : 
-                         (windowCheck.status === 'UNKNOWN' ? 'no_inbound' as const : 'closed' as const);
 
       if (metaWindow === 'closed') {
         return {
           ...decisionBase,
           category: 'manual_template_required',
+          baseCategory: 'manual_template_required',
           metaWindow: 'closed',
           technicalEligible: false,
           finalActionAllowed: false,
           recommendedAction: 'select_template',
           reason: 'meta_window_closed',
-          userFriendlyReason: mapUserFriendlyReason('meta_window_closed')
+          userFriendlyReason: mapUserFriendlyReason('meta_window_closed'),
+          userFriendlyTitle: 'Şablon Gerekli'
         };
       }
 
@@ -193,59 +285,81 @@ export class FirstContactDecisionResolver {
         return {
           ...decisionBase,
           category: 'manual_draft_required',
+          baseCategory: 'manual_draft_required',
           metaWindow: 'no_inbound',
           technicalEligible: false,
           finalActionAllowed: false,
           recommendedAction: 'prepare_manual_draft',
           reason: 'form_only_no_inbound',
-          userFriendlyReason: mapUserFriendlyReason('form_only_no_inbound')
+          userFriendlyReason: mapUserFriendlyReason('form_only_no_inbound'),
+          userFriendlyTitle: 'Taslak Gerekli'
         };
       }
 
-      // 4. If window is open, is it fully eligible or blocked by gates?
-      if (eligibility.eligible) {
-        return {
-          ...decisionBase,
-          category: 'bot_auto_eligible',
-          metaWindow: 'open',
-          technicalEligible: true,
-          finalActionAllowed: true,
-          recommendedAction: 'bot_can_reply',
-          reason: 'eligible',
-          userFriendlyReason: 'Bot otomatik karşılamaya uygun. Meta 24 saat penceresi açık. Hasta WhatsApp üzerinden yazmış.'
-        };
-      } else {
-        // Technically baseEligible is true (window open, status not human, etc.) but gate is closed
-        const isFFDisabled = !eligibility.featureFlagEnabled;
-        const isGlobalDisabled = eligibility.globalDisabled;
-        const isPhaseLocked = process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED !== 'false';
-        
-        let reasonStr = eligibility.reason;
-        if (isPhaseLocked) reasonStr = 'phase_lock_enabled';
-        else if (isGlobalDisabled) reasonStr = 'global_disabled';
-        else if (isFFDisabled) reasonStr = 'feature_flag_disabled';
+      // Check other non-eligible reasons
+      const isNotEligibleReason = [
+        'tenant_mismatch',
+        'channel_mismatch',
+        'missing_phone',
+        'invalid_conversation',
+        'internal_error',
+        'security_blocked',
+        'not_whatsapp_channel',
+        'autopilot_disabled'
+      ].includes(eligibility.baseReason || '');
 
+      if (isNotEligibleReason) {
         return {
           ...decisionBase,
-          category: 'bot_auto_eligible', // BaseEligible is true
+          category: 'not_eligible',
+          baseCategory: 'not_eligible',
           metaWindow: 'open',
-          technicalEligible: eligibility.baseEligible,
-          finalActionAllowed: false, // blocked by gates
-          recommendedAction: 'bot_can_reply',
-          reason: reasonStr,
-          userFriendlyReason: mapUserFriendlyReason(reasonStr)
+          technicalEligible: false,
+          finalActionAllowed: false,
+          recommendedAction: 'no_action',
+          reason: eligibility.baseReason || 'not_eligible',
+          userFriendlyReason: mapUserFriendlyReason(eligibility.baseReason || 'not_eligible'),
+          userFriendlyTitle: 'Uygun Değil'
         };
       }
+
+      // Base category is eligible
+      const baseCategory = 'bot_auto_eligible';
+      const eligible = eligibility.baseEligible && eligibility.gateOpen;
+
+      let finalReason = eligibility.reason;
+      if (!eligible) {
+        if (isPhaseLocked) finalReason = 'phase_lock_enabled';
+        else if (settings.globalDisabled) finalReason = 'global_disabled';
+        else if (!settings.featureFlagEnabled) finalReason = 'feature_flag_disabled';
+      }
+
+      return {
+        ...decisionBase,
+        category: 'bot_auto_eligible',
+        baseCategory,
+        metaWindow: 'open',
+        technicalEligible: eligibility.baseEligible,
+        finalActionAllowed: eligible,
+        recommendedAction: 'bot_can_reply',
+        reason: finalReason,
+        userFriendlyReason: mapUserFriendlyReason(finalReason),
+        userFriendlyTitle: 'Bot Uygun'
+      };
     } catch (err) {
       return {
         source: 'form',
         category: 'error',
+        baseCategory: 'error',
+        gateState: 'global_disabled',
+        gateReasons: ['global_disabled'],
         metaWindow: 'unknown',
         technicalEligible: false,
         finalActionAllowed: false,
         recommendedAction: 'no_action',
         reason: 'internal_error',
         userFriendlyReason: mapUserFriendlyReason('internal_error'),
+        userFriendlyTitle: 'Hata',
         tenantId,
         leadId
       };
@@ -277,6 +391,15 @@ export class FirstContactDecisionResolver {
       // 2. Fetch Autopilot settings
       const { getAutopilotSettings } = await import("../forms/form-autopilot-eligibility-resolver");
       const settings = await getAutopilotSettings(tenantId, db);
+      const isPhaseLocked = process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED !== 'false';
+
+      const gates = calculateGateStateAndReasons({
+        isTenantAllowed,
+        globalDisabled: settings.globalDisabled,
+        featureFlagEnabled: settings.featureFlagEnabled,
+        phaseLockBlocked: isPhaseLocked,
+        dryRun: settings.dryRun
+      });
 
       // 3. Collect conversation IDs for bulk query
       const conversationIds = leads
@@ -325,19 +448,23 @@ export class FirstContactDecisionResolver {
           leadId,
           language: langDec.language,
           languageConfidence: langDec.confidence,
-          channelId: channelId
+          channelId: channelId,
+          gateState: gates.gateState,
+          gateReasons: gates.gateReasons
         };
 
         if (!convId) {
           decisions[leadId] = {
             ...decisionBase,
             category: 'manual_draft_required',
+            baseCategory: 'manual_draft_required',
             metaWindow: 'no_conversation',
             technicalEligible: false,
             finalActionAllowed: false,
             recommendedAction: 'prepare_manual_draft',
             reason: 'no_conversation',
-            userFriendlyReason: mapUserFriendlyReason('no_conversation')
+            userFriendlyReason: mapUserFriendlyReason('no_conversation'),
+            userFriendlyTitle: 'Taslak Gerekli'
           };
           continue;
         }
@@ -364,12 +491,14 @@ export class FirstContactDecisionResolver {
           decisions[leadId] = {
             ...decisionBase,
             category: 'manual_template_required',
+            baseCategory: 'manual_template_required',
             metaWindow: 'closed',
             technicalEligible: false,
             finalActionAllowed: false,
             recommendedAction: 'select_template',
             reason: 'meta_window_closed',
-            userFriendlyReason: mapUserFriendlyReason('meta_window_closed')
+            userFriendlyReason: mapUserFriendlyReason('meta_window_closed'),
+            userFriendlyTitle: 'Şablon Gerekli'
           };
           continue;
         }
@@ -378,82 +507,86 @@ export class FirstContactDecisionResolver {
           decisions[leadId] = {
             ...decisionBase,
             category: 'manual_draft_required',
+            baseCategory: 'manual_draft_required',
             metaWindow: 'no_inbound',
             technicalEligible: false,
             finalActionAllowed: false,
             recommendedAction: 'prepare_manual_draft',
             reason: 'form_only_no_inbound',
-            userFriendlyReason: mapUserFriendlyReason('form_only_no_inbound')
+            userFriendlyReason: mapUserFriendlyReason('form_only_no_inbound'),
+            userFriendlyTitle: 'Taslak Gerekli'
           };
           continue;
         }
-
-        // Window is open, check details
-        let baseEligible = true;
-        let baseReason = 'eligible';
 
         if (convStatus === 'human') {
           decisions[leadId] = {
             ...decisionBase,
             category: 'already_open_inbox',
+            baseCategory: 'already_open_inbox',
             metaWindow: 'open',
             technicalEligible: false,
             finalActionAllowed: false,
             recommendedAction: 'go_to_inbox',
             reason: 'status_human',
-            userFriendlyReason: mapUserFriendlyReason('status_human')
+            userFriendlyReason: mapUserFriendlyReason('status_human'),
+            userFriendlyTitle: "Inbox'tan Devam"
           };
           continue;
         }
+
+        // Check non-eligible criteria
+        let isNotEligible = false;
+        let notEligibleReason = '';
 
         if (convAutopilotEnabled === false) {
-          baseEligible = false;
-          baseReason = 'autopilot_disabled';
+          isNotEligible = true;
+          notEligibleReason = 'autopilot_disabled';
         } else if (channelId !== 'whatsapp') {
-          baseEligible = false;
-          baseReason = 'not_whatsapp_channel';
+          isNotEligible = true;
+          notEligibleReason = 'not_whatsapp_channel';
         } else if (dupLogsMap.has(`${convId}_${leadId}`)) {
-          baseEligible = false;
-          baseReason = 'already_processed';
+          isNotEligible = true;
+          notEligibleReason = 'already_processed';
         }
 
-        if (baseReason === 'already_processed') {
-          decisions[leadId] = {
-            ...decisionBase,
-            category: 'already_processed',
-            metaWindow: 'open',
-            technicalEligible: false,
-            finalActionAllowed: false,
-            recommendedAction: 'go_to_inbox',
-            reason: 'already_processed',
-            userFriendlyReason: mapUserFriendlyReason('already_processed')
-          };
+        if (isNotEligible) {
+          if (notEligibleReason === 'already_processed') {
+            decisions[leadId] = {
+              ...decisionBase,
+              category: 'already_processed',
+              baseCategory: 'already_open_inbox',
+              metaWindow: 'open',
+              technicalEligible: false,
+              finalActionAllowed: false,
+              recommendedAction: 'go_to_inbox',
+              reason: 'already_processed',
+              userFriendlyReason: mapUserFriendlyReason('already_processed'),
+              userFriendlyTitle: "Inbox'tan Devam"
+            };
+          } else {
+            decisions[leadId] = {
+              ...decisionBase,
+              category: 'not_eligible',
+              baseCategory: 'not_eligible',
+              metaWindow: 'open',
+              technicalEligible: false,
+              finalActionAllowed: false,
+              recommendedAction: 'no_action',
+              reason: notEligibleReason,
+              userFriendlyReason: mapUserFriendlyReason(notEligibleReason),
+              userFriendlyTitle: 'Uygun Değil'
+            };
+          }
           continue;
         }
 
-        // Evaluate Gates
-        let gateOpen = true;
-        let gateReason = 'gate_open';
+        // Base category is eligible
+        const baseCategory = 'bot_auto_eligible';
+        const eligible = gates.gateState === 'open';
 
-        if (!isTenantAllowed) {
-          gateOpen = false;
-          gateReason = 'tenant_not_allowlisted';
-        } else if (settings.globalDisabled) {
-          gateOpen = false;
-          gateReason = 'global_disabled';
-        } else if (!settings.featureFlagEnabled) {
-          gateOpen = false;
-          gateReason = 'feature_flag_disabled';
-        }
-
-        const eligible = baseEligible && gateOpen;
-        const finalReason = eligible 
-          ? 'eligible'
-          : (!baseEligible ? baseReason : gateReason);
-
-        const isPhaseLocked = process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED !== 'false';
-        let reasonStr = finalReason;
-        if (eligible === false && baseEligible && gateOpen === false) {
+        let reasonStr = 'eligible';
+        if (!eligible) {
           if (isPhaseLocked) reasonStr = 'phase_lock_enabled';
           else if (settings.globalDisabled) reasonStr = 'global_disabled';
           else if (!settings.featureFlagEnabled) reasonStr = 'feature_flag_disabled';
@@ -461,13 +594,15 @@ export class FirstContactDecisionResolver {
 
         decisions[leadId] = {
           ...decisionBase,
-          category: eligible ? 'bot_auto_eligible' : (baseEligible ? 'bot_auto_eligible' : 'not_eligible'),
+          category: 'bot_auto_eligible',
+          baseCategory,
           metaWindow: 'open',
-          technicalEligible: baseEligible,
+          technicalEligible: true,
           finalActionAllowed: eligible,
           recommendedAction: 'bot_can_reply',
           reason: reasonStr,
-          userFriendlyReason: mapUserFriendlyReason(reasonStr)
+          userFriendlyReason: mapUserFriendlyReason(reasonStr),
+          userFriendlyTitle: 'Bot Uygun'
         };
       }
     } catch (err) {
@@ -477,4 +612,3 @@ export class FirstContactDecisionResolver {
     return decisions;
   }
 }
-

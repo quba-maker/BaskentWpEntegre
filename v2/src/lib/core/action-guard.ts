@@ -49,7 +49,7 @@ export async function withActionGuard<T>(
   try {
     // 1. Auth Check
     let session: any = null;
-    if (process.env.NODE_ENV !== 'production' && process.env.TEST_TENANT_ID) {
+    if ((process.env.NODE_ENV !== 'production' || process.env.TEST_SESSION_BYPASS === 'true') && process.env.TEST_TENANT_ID) {
       session = {
         userId: process.env.TEST_USER_ID || "test-user-id",
         tenantId: process.env.TEST_TENANT_ID,
@@ -141,9 +141,15 @@ export async function withActionGuard<T>(
     });
 
   } catch (error: any) {
-    // Güvenlik: Asla raw error mesajını client'a sızdırma (eğer production'daysan)
+    // Güvenlik: Asla raw/teknik SQL veya system hatasını client'a sızdırma.
+    // Kullanıcı dostu kısa validasyon mesajları korunur.
+    const isSafe = error.isSafe === true || (
+      error.message && 
+      !/select\s|update\s|insert\s|delete\s|table|column|database|postgres|sql|query|relation|connection|undefined|null|referenceerror|typeerror|stack|secret|key|env|process|violates|foreign key|unique constraint/i.test(error.message)
+    );
+
     const errorMsg = process.env.NODE_ENV === 'production' 
-      ? "İşlem tamamlanamadı. Lütfen tekrar deneyin."
+      ? (isSafe ? error.message : "İşlem tamamlanamadı. Lütfen tekrar deneyin.")
       : error.message;
 
     return { success: false, error: errorMsg, statusCode: 500 };

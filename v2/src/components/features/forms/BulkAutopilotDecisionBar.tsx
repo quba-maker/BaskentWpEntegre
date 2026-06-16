@@ -22,11 +22,13 @@ export function BulkAutopilotDecisionBar({
   if (!decisions || decisions.length === 0) return null;
 
   const total = decisions.length;
-  const botAutoEligible = decisions.filter(d => d.category === 'bot_auto_eligible').length;
-  const manualDraftRequired = decisions.filter(d => d.category === 'manual_draft_required').length;
-  const manualTemplateRequired = decisions.filter(d => d.category === 'manual_template_required').length;
-  const alreadyOpenInbox = decisions.filter(d => d.category === 'already_open_inbox' || d.category === 'already_processed').length;
+  const botAutoEligible = decisions.filter(d => (d.baseCategory || d.category) === 'bot_auto_eligible').length;
+  const manualDraftRequired = decisions.filter(d => (d.baseCategory || d.category) === 'manual_draft_required').length;
+  const manualTemplateRequired = decisions.filter(d => (d.baseCategory || d.category) === 'manual_template_required').length;
+  const alreadyOpenInbox = decisions.filter(d => ((d.baseCategory || d.category) as string) === 'already_open_inbox' || ((d.baseCategory || d.category) as string) === 'already_processed').length;
   const notEligible = total - (botAutoEligible + manualDraftRequired + manualTemplateRequired + alreadyOpenInbox);
+
+  const isLiveLocked = decisions.some(d => d.gateState && d.gateState !== 'open');
 
   const handleDryRunCheck = () => {
     // eslint-disable-next-line quba/no-native-dialog
@@ -79,6 +81,14 @@ export function BulkAutopilotDecisionBar({
             <AlertTriangle className="w-3.5 h-3.5" /> Uygun Değil: {notEligible}
           </span>
         </div>
+
+        {/* Live lock warning */}
+        {isLiveLocked && (
+          <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs font-bold leading-normal">
+            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>Canlı gönderim kilitli. Bu işlemler canlı mesaj göndermez.</span>
+          </div>
+        )}
 
         {/* Five Action Buttons */}
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-white/10 pt-3">

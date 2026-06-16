@@ -318,26 +318,63 @@ export function FormListTable({
                               return { label: 'Uygun Değil', color: '#FF3B30', icon: '🚫' };
                           }
                         };
-                        const apBadge = getAutopilotBadge(form.autopilotDecision.category);
+                        const baseCat = form.autopilotDecision.baseCategory || form.autopilotDecision.category;
+                        const apBadge = getAutopilotBadge(baseCat);
+                        const gate = form.autopilotDecision.gateState;
+
+                        const getGateBadge = (gState: string) => {
+                          switch (gState) {
+                            case 'live_locked':
+                              return { label: 'Kilitli', icon: '🔒' };
+                            case 'dry_run':
+                              return { label: 'Dry-Run', icon: '🧪' };
+                            case 'feature_disabled':
+                              return { label: 'Ayar Kapalı', icon: '🔒' };
+                            case 'allowlist_missing':
+                              return { label: 'İzin Eksik', icon: '🔒' };
+                            case 'global_disabled':
+                              return { label: 'Kilit Kapalı', icon: '🔒' };
+                            default:
+                              return null;
+                          }
+                        };
+                        const gateBadge = getGateBadge(gate);
+
                         return (
-                          <div className="relative group inline-block">
-                            <span 
-                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-extrabold border uppercase tracking-wider shadow-sm cursor-help transition-all hover:scale-[1.02]"
-                              style={{ 
-                                backgroundColor: `${apBadge.color}15`,
-                                color: apBadge.color,
-                                borderColor: `${apBadge.color}25`
-                              }}
-                            >
-                              <span className="text-[10px]">{apBadge.icon}</span> {apBadge.label}
-                            </span>
-                            
-                            {/* CSS Hover Tooltip */}
-                            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block w-48 p-2 bg-slate-900 text-white text-[10px] font-medium rounded-lg shadow-lg z-50 text-center leading-normal break-words whitespace-normal">
-                              {form.autopilotDecision.userFriendlyReason || 'Uyum durumu hesaplanamadı.'}
-                              {/* Tooltip Arrow */}
-                              <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-900" />
+                          <div className="flex flex-col items-start gap-1">
+                            <div className="relative group inline-block">
+                              <span 
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-extrabold border uppercase tracking-wider shadow-sm cursor-help transition-all hover:scale-[1.02]"
+                                style={{ 
+                                  backgroundColor: `${apBadge.color}15`,
+                                  color: apBadge.color,
+                                  borderColor: `${apBadge.color}25`
+                                }}
+                              >
+                                <span className="text-[10px]">{apBadge.icon}</span> {apBadge.label}
+                              </span>
+                              
+                              {/* CSS Hover Tooltip */}
+                              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block w-56 p-2.5 bg-slate-900 text-white text-[10px] font-semibold rounded-lg shadow-lg z-50 text-center leading-normal break-words whitespace-normal border border-white/10">
+                                <div className="font-bold border-b border-white/10 pb-1 mb-1">{apBadge.label} Durumu</div>
+                                <div className="text-gray-300 font-medium">{form.autopilotDecision.userFriendlyReason || 'Uyum durumu hesaplanamadı.'}</div>
+                                {gate && gate !== 'open' && (
+                                  <div className="mt-1.5 pt-1.5 border-t border-white/10 text-[9px] text-orange-400 font-bold uppercase tracking-wider flex items-center justify-center gap-1">
+                                    <span>⚠️</span> Canlı Mesaj Gönderimi Devre Dışı
+                                  </div>
+                                )}
+                                {/* Tooltip Arrow */}
+                                <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-900" />
+                              </div>
                             </div>
+
+                            {gateBadge && (
+                              <span 
+                                className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold border uppercase tracking-wider text-slate-500 bg-slate-100 border-slate-200"
+                              >
+                                <span className="text-[9px]">{gateBadge.icon}</span> {gateBadge.label}
+                              </span>
+                            )}
                           </div>
                         );
                       })()}

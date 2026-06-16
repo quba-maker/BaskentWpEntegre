@@ -11,6 +11,8 @@ export interface FormUiPresentation {
   showLanguageSuggestion: boolean;
   suggestedLanguageText?: string;
   languageConfidenceText?: string;
+  gateStateText?: string;
+  gateReasonsTexts?: string[];
 }
 
 export interface InboxUiPresentation {
@@ -38,6 +40,23 @@ const CONFIDENCE_MAP: Record<string, string> = {
   low: 'Düşük'
 };
 
+const GATE_STATE_MAP: Record<string, string> = {
+  open: 'Canlı Gönderim Açık',
+  live_locked: 'Canlı Gönderim Kilitli',
+  dry_run: 'Dry-Run Modu Aktif',
+  feature_disabled: 'Ayar Kapalı',
+  allowlist_missing: 'Yetkilendirme Eksik',
+  global_disabled: 'Güvenlik Kilidi Aktif'
+};
+
+const GATE_REASON_MAP: Record<string, string> = {
+  phase_lock_enabled: 'Canlı Gönderim Kilitli (Env Lock)',
+  dry_run_enabled: 'Dry-run Aktif (Simülasyon)',
+  feature_flag_disabled: 'Otomatik Karşılama Ayarı Kapalı (FF)',
+  allowlist_missing: 'Kurum İzni Bulunmuyor (Allowlist)',
+  global_disabled: 'Genel Sistem Kilidi Açık (Global)'
+};
+
 export class FormDecisionPresenter {
   public static present(decision: GreetingAutomationDecision): FormUiPresentation {
     const defaultLang = decision.language ? LANG_MAP[decision.language] : 'Türkçe';
@@ -50,27 +69,19 @@ export class FormDecisionPresenter {
       description: decision.userFriendlyReason || 'İlk temas durumu şu anda hesaplanıyor.',
       buttonText: 'Detayları Gör',
       buttonAction: 'none',
-      showLanguageSuggestion: false
+      showLanguageSuggestion: false,
+      gateStateText: GATE_STATE_MAP[decision.gateState] || 'Bilinmiyor',
+      gateReasonsTexts: (decision.gateReasons || []).map(r => GATE_REASON_MAP[r] || r)
     };
 
-    switch (decision.category) {
+    switch (decision.baseCategory) {
       case 'bot_auto_eligible':
-        if (decision.finalActionAllowed) {
-          presentation.badgeText = 'Otopilot Hazır';
-          presentation.badgeColor = 'green';
-          presentation.title = 'Otomatik Karşılama Aktif';
-          presentation.description = 'Hasta WhatsApp üzerinden yazdı ve Meta 24 saat penceresi açık. Sistem otomatik cevap verebilir.';
-          presentation.buttonText = 'İletişimi Gör';
-          presentation.buttonAction = 'go_to_inbox';
-        } else {
-          // Blocked by gates
-          presentation.badgeText = 'Kısıtlı / Dry-Run';
-          presentation.badgeColor = 'yellow';
-          presentation.title = 'Güvenlik Kilidi Aktif';
-          presentation.description = decision.userFriendlyReason || 'Sistem canlı gönderim kilitleri nedeniyle dry-run veya test modundadır.';
-          presentation.buttonText = 'Taslak Oluştur';
-          presentation.buttonAction = 'prepare_draft';
-        }
+        presentation.badgeText = 'Bot Uygun';
+        presentation.badgeColor = 'green';
+        presentation.title = 'Otomatik Karşılama Aktif';
+        presentation.description = 'Hasta WhatsApp üzerinden yazdı ve Meta 24 saat penceresi açık. Sistem otomatik cevap verebilir.';
+        presentation.buttonText = 'İletişimi Gör';
+        presentation.buttonAction = 'go_to_inbox';
         break;
 
       case 'manual_draft_required':
@@ -98,27 +109,18 @@ export class FormDecisionPresenter {
         break;
 
       case 'already_open_inbox':
-        presentation.badgeText = 'Temsilcide';
+        presentation.badgeText = "Inbox'tan Devam";
         presentation.badgeColor = 'blue';
         presentation.title = 'İnsan Temsilci Devraldı';
-        presentation.description = 'Bu konuşma bir insan temsilci tarafından devralınmış durumda. Otomatik bot devre dışıdır.';
+        presentation.description = 'Bu konuşma bir insan temsilci veya otopilot tarafından devralınmış durumda. Otomatik bot devre dışıdır.';
         presentation.buttonText = 'Konuşmaya Git';
-        presentation.buttonAction = 'go_to_inbox';
-        break;
-
-      case 'already_processed':
-        presentation.badgeText = 'İşlenmiş';
-        presentation.badgeColor = 'gray';
-        presentation.title = 'İlk Temas Yapılmış';
-        presentation.description = 'Bu kayıt için ilk temas mesajı veya otopilot karşılama işlemi daha önce gerçekleştirilmiş.';
-        presentation.buttonText = 'Konuşmayı Aç';
         presentation.buttonAction = 'go_to_inbox';
         break;
 
       case 'error':
       case 'not_eligible':
       default:
-        presentation.badgeText = 'Bilinmiyor';
+        presentation.badgeText = 'Uygun Değil';
         presentation.badgeColor = 'red';
         presentation.title = 'Analiz Hatası';
         presentation.description = decision.userFriendlyReason || 'Lead bilgisi veya konuşma parametreleri eksik olduğu için durum belirlenemedi.';

@@ -16,13 +16,15 @@ interface InboxBotControlBarProps {
     error?: string;
   } | null>;
   onClearSelection: () => void;
+  onMarkRead?: () => Promise<void>;
 }
 
 export function InboxBotControlBar({
   selectedCount,
   selectedConversations = [],
   onSetBotMode,
-  onClearSelection
+  onClearSelection,
+  onMarkRead
 }: InboxBotControlBarProps) {
   const [loading, setLoading] = useState(false);
   const [summary, setSummary] = useState<{
@@ -131,6 +133,23 @@ export function InboxBotControlBar({
               >
                 Seçimi Kaldır
               </button>
+              {onMarkRead && (
+                <button
+                  disabled={loading}
+                  onClick={async () => {
+                    setLoading(true);
+                    try {
+                      await onMarkRead();
+                    } finally {
+                      setLoading(false);
+                    }
+                  }}
+                  className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all duration-200 disabled:opacity-50 cursor-pointer active:scale-[0.98]"
+                >
+                  <CheckCircle className="w-3.5 h-3.5" />
+                  Okundu Yap
+                </button>
+              )}
               <button
                 disabled={loading}
                 onClick={() => handleAction(true)}

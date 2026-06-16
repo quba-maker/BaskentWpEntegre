@@ -368,12 +368,16 @@ export async function getForms(page: number = 1, search: string = "", source: st
           autopilotDecision: decisions[String(r.id)] || {
             source: 'form',
             category: 'not_eligible',
+            baseCategory: 'not_eligible',
+            gateState: 'global_disabled',
+            gateReasons: ['global_disabled'],
             metaWindow: 'unknown',
             technicalEligible: false,
             finalActionAllowed: false,
             recommendedAction: 'no_action',
             reason: 'internal_error',
-            userFriendlyReason: 'Durum hesaplanamadı.'
+            userFriendlyReason: 'Durum hesaplanamadı.',
+            userFriendlyTitle: 'Uygun Değil'
           },
           noReplyFollowup: {
             is_no_reply_eligible: !!r.is_no_reply_eligible,

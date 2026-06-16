@@ -14,6 +14,7 @@ export interface FormAutopilotEligibility {
   dryRun: boolean;
   featureFlagEnabled: boolean;
   globalDisabled: boolean;
+  isTenantAllowed?: boolean;
   leadId?: string;
   conversationId?: string;
   tenantId?: string;
@@ -228,6 +229,7 @@ export async function resolveFormAutopilotEligibility(
       dryRun: settings.dryRun,
       featureFlagEnabled: settings.featureFlagEnabled,
       globalDisabled: settings.globalDisabled,
+      isTenantAllowed,
       leadId,
       conversationId,
       tenantId,

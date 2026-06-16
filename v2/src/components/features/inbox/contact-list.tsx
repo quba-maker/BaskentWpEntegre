@@ -1403,6 +1403,10 @@ export function ContactRail() {
                     onContextMenu={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
+                      if (isSelectionMode) {
+                        toggleSelected(c.conversation_id);
+                        return;
+                      }
                       setContextMenu({
                         x: e.clientX,
                         y: e.clientY,
@@ -2010,6 +2014,9 @@ export function ContactRail() {
           selectedConversations={selectedIds.map(id => contacts.find((c: any) => c.conversation_id === id || c.id === id)).filter(Boolean)}
           onSetBotMode={handleSetBotModeBulk}
           onClearSelection={() => clearSelection()}
+          onMarkRead={async () => {
+            await handleBulkAction('read', selectedIds);
+          }}
         />
       )}
 

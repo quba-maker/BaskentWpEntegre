@@ -44,10 +44,10 @@ export function AutoGreetingSettingsPanel({
 
   const getLockReason = () => {
     const reasons = [];
-    if (envLocks.phaseLockBlocked) reasons.push("Phase lock aktif");
-    if (envLocks.globalDisabled) reasons.push("Global disabled aktif");
+    if (envLocks.phaseLockBlocked) reasons.push("Phase lock aktif (Outbound engelli)");
+    if (envLocks.globalDisabled) reasons.push("Global disabled aktif (Bot engelli)");
     if (!envLocks.isTenantAllowed) reasons.push("Tenant allowlist dışı");
-    if (envLocks.dryRun) reasons.push("Dry-run modu aktif");
+    if (envLocks.dryRun) reasons.push("Dry-run modu aktif (Simülasyon)");
     return reasons.length > 0 ? reasons.join(" / ") : "Kilit Yok";
   };
 
@@ -95,11 +95,11 @@ export function AutoGreetingSettingsPanel({
         </div>
       </div>
 
-      {/* Env safety locks (Read Only) */}
+      {/* Section A: Güvenlik Kilitleri (Env - Read Only) */}
       <div className="bg-[#F5F5F7] border border-black/5 rounded-xl p-4 space-y-3">
         <div className="flex items-center justify-between">
           <span className="text-xs font-bold text-[#1D1D1F] flex items-center gap-1.5">
-            <Shield className="w-4 h-4 text-amber-500" /> Güvenlik Kilitleri (Environment)
+            <Shield className="w-4 h-4 text-amber-500" /> A) Güvenlik Kilitleri (Environment - Salt Okunur)
           </span>
           <span className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full border ${isLiveOutboundLocked ? 'bg-red-50 text-red-600 border-red-200' : 'bg-emerald-50 text-emerald-600 border-emerald-200'}`}>
             {isLiveOutboundLocked ? 'GÖNDERİM KİLİTLİ' : 'AÇIK'}
@@ -138,8 +138,11 @@ export function AutoGreetingSettingsPanel({
         )}
       </div>
 
-      {/* Channel configurations */}
+      {/* Section B: Kanal Davranış Ayarları (DB - Scoped to Channel) */}
       <div className="space-y-4">
+        <span className="text-xs font-bold text-[#1D1D1F] flex items-center gap-1.5 px-1 pt-2">
+          <Bot className="w-4 h-4 text-blue-500" /> B) Kanal Davranış Ayarları (Veri Tabanı)
+        </span>
         {Object.keys(configs).map(channelId => {
           const config = configs[channelId] || { auto_greeting_enabled: false, dry_run: true };
           
@@ -150,19 +153,26 @@ export function AutoGreetingSettingsPanel({
                   Kanal: {channelId}
                 </span>
                 <span className="text-[10px] text-[#86868B] font-bold">
-                  {config.auto_greeting_enabled ? 'Otomatik Cevap Açık' : 'Manuel'}
+                  {config.auto_greeting_enabled ? 'Otopilot Açık' : 'Manuel'}
                 </span>
               </div>
 
-              <div className="space-y-3.5">
+              <div className="space-y-4">
+                {isLiveOutboundLocked && config.auto_greeting_enabled && (
+                  <div className="text-[11px] font-bold text-amber-700 bg-amber-50 border border-amber-200/50 rounded-xl px-3 py-2 flex items-center gap-2">
+                    <ShieldAlert className="w-4 h-4 text-amber-500 shrink-0" />
+                    <span>Ayar açık olsa bile canlı gönderim kilitli.</span>
+                  </div>
+                )}
+
                 {/* 1. Auto greeting setting */}
                 <div className="flex items-start justify-between gap-4">
                   <div className="space-y-0.5">
                     <label className="text-xs font-bold text-[#1D1D1F] cursor-pointer">
-                      Yeni gelenleri otomatik cevapla
+                      Form Autopilot Modülü
                     </label>
                     <p className="text-[11px] text-[#86868B] font-medium leading-relaxed">
-                      * Bu ayar sadece hasta zaten WhatsApp'tan yazdığında (inbound) çalışır. Yeni form-only lead'ler için otomatik outbound serbest mesaj gönderilmesini açmaz, sadece panelde manuel taslak/template hazırlama akışını açar.
+                      Kanalda otomatik ilk temas ve karşılama otopilotunu aktif hale getirir.
                     </p>
                   </div>
                   <input
@@ -171,6 +181,32 @@ export function AutoGreetingSettingsPanel({
                     onChange={(e) => handleToggleChange(channelId, 'auto_greeting_enabled', e.target.checked)}
                     className="w-4.5 h-4.5 text-[#007AFF] rounded border-black/10 focus:ring-[#007AFF] cursor-pointer shrink-0 mt-0.5"
                   />
+                </div>
+
+                {/* Behavioral settings description list */}
+                <div className="border-t border-black/5 pt-3 space-y-2.5 text-[11px] font-semibold text-[#515154]">
+                  <span className="block text-[9px] text-[#86868B] uppercase tracking-wider mb-1">Davranış Kuralları</span>
+                  
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-1.5 text-[#515154]">🟢 Yeni inbound mesajlarda bot cevap verebilir</span>
+                    <span className="text-[10px] font-extrabold text-[#34C759]">AÇIK</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-1.5 text-[#515154]">🟢 24h açık leadlerde bot karşılama uygunluğu</span>
+                    <span className="text-[10px] font-extrabold text-[#34C759]">AÇIK</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-1.5 text-[#515154]">🔴 Form-only leadlerde otomatik outbound engelli</span>
+                    <span className="text-[10px] font-extrabold text-rose-500">ENGELLİ</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-1.5 text-[#515154]">🟡 24h kapalı leadlerde manuel taslak/template önerisi</span>
+                    <span className="text-[10px] font-extrabold text-amber-500">AKTİF</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-1.5 text-[#515154]">🔴 İnsan devraldıysa bot devre dışı kalsın</span>
+                    <span className="text-[10px] font-extrabold text-rose-500">AKTİF</span>
+                  </div>
                 </div>
 
                 {/* 2. Dry run option */}
