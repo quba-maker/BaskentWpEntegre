@@ -2162,481 +2162,34 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       }
     }
 
-    // 6. AI Orchestrator Call (with Timeout Safety)
-    const tenantConfig = brain.context.config;
+    // 6. AI Orchestrator Call
     const llmModel = brain.context.settings.aiModel || 'gemini-2.5-flash';
-    const apiKey = tenantConfig?.raw?.gemini_api_key || process.env.GEMINI_API_KEY || '';
 
-    const aiConfig = {
-      provider: 'gemini' as 'gemini' | 'openai',
-      modelId: llmModel,
-      apiKey: apiKey,
-      temperature: 0.7,
-      maxTokens: brain.context.settings.maxResponseTokens || 1000
-    };
+    let aiResponse: any;
 
     // ── Bot Reply Pipeline (skipped when max messages reached) ──
     if (skipBotReply) {
       this.log.info(`[SKIP_BOT_REPLY] Max messages reached, skipping AI response generation. CRM extraction will still run.`, { traceId });
     } else {
-
-    // P0.11: Check for Prompt Challenge / Bot Accusation / AI Accusation / Angry Challenge -> LLM Bypass
-    const { ConversationIntentRouter } = await import('@/lib/services/ai/conversation-intent-router');
-    const { PendingQuestionResolver } = await import('@/lib/services/ai/pending-question-resolver');
-    const { ShortAnswerInterpreter } = await import('@/lib/services/ai/short-answer-interpreter');
-
-    const inboundTextForBypass = content || '';
-    const cleanInbound = inboundTextForBypass.toLowerCase().trim();
-
-    const { ConversationStateArbitrator } = await import('@/lib/services/ai/conversation-state-arbitrator');
-    const rawIntent = ConversationIntentRouter.route(inboundTextForBypass);
-    const rawPendingSlot = PendingQuestionResolver.resolve(history);
-    const interpretedIntent = ShortAnswerInterpreter.interpret(inboundTextForBypass, rawPendingSlot);
-
-    const arbitration = ConversationStateArbitrator.arbitrate({
-      lastUserMessage: inboundTextForBypass,
-      rawPendingSlot,
-      rawInterpretedIntent: interpretedIntent || '',
-      routerIntent: rawIntent,
-      history
+      // Execute the unified AI Response Orchestrator
+      const { AIResponseOrchestrator } = await import('@/lib/services/ai/ai-response-orchestrator');
+      const orchestratorResult = await AIResponseOrchestrator.run({
+      tenantId,
+      phoneNumber,
+      inboundText: content || '',
+      mediaType,
+      mediaMetadata,
+      brain,
+      channel,
+      channelId: resolvedChannelId || metadata.channelId || undefined,
+      conversationId,
+      customerId,
+      sandbox: false
     });
 
-    const detectedIntent = arbitration.effectiveIntent;
-    const pendingSlot = arbitration.effectivePendingSlot;
-
-    const isCallbackConfirmed = arbitration.suppressionReason === 'callback_confirmed' || detectedIntent === 'call_scheduling_request';
-    if (isCallbackConfirmed) {
-      try {
-        await db.executeSafe({
-          text: `INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
-                 VALUES ($1, $2, $3, $4)`,
-          values: [
-            tenantId,
-            'CALLBACK_REQUEST_CONFIRMED',
-            `User confirmed or requested phone callback: "${inboundTextForBypass}"`,
-            JSON.stringify({
-              conversationId: conversationIdVal || conversationId,
-              phone: phoneNumber,
-              timestamp: new Date().toISOString()
-            })
-          ]
-        });
-      } catch (logErr) {
-        // Suppress log errors
-      }
-    }
-
-    const isBotAccusation = ['bot musun', 'sen bot musun', 'are you a bot', 'botsun', 'robot musun', 'yapay zeka mısın', 'yapay zeka misin', 'insan mısın', 'insan misin'].some(kw => cleanInbound.includes(kw));
-    const isAiAccusation = ['yapay zeka', 'yapayzeka', 'gpt', 'gemini', 'openai', 'claude', 'dil modeli', 'hangi model'].some(kw => cleanInbound.includes(kw));
-    const isPromptChallenge = detectedIntent === 'prompt_challenge' || (interpretedIntent as any) === 'prompt_challenge' || ['prompt', 'promt', 'sistem prompt', 'system prompt', 'talimatların', 'sistem talimati', 'kuralın ne', 'direktifin ne', 'uydurma'].some(kw => cleanInbound.includes(kw));
-    const isAngryPromptChallenge = isPromptChallenge && ['şikayet', 'sikayet', 'rezalet', 'berbat', 'kötü', 'sinir', 'bıktım', 'yeter', 'dalga'].some(kw => cleanInbound.includes(kw));
-
-    const isDoctorLookup = detectedIntent === 'doctor_lookup' || (interpretedIntent as any) === 'doctor_lookup';
-    const isHumanTransfer = detectedIntent === 'human_transfer_request' || (interpretedIntent as any) === 'human_transfer_request';
-    const isFormFollowup = detectedIntent === 'form_followup' || (interpretedIntent as any) === 'form_followup';
-    const isUserCorrection = detectedIntent === 'user_correction' || (interpretedIntent as any) === 'user_correction';
-
-    const doctorDirectory = brain.context.config?.doctors || brain.context.config?.doctorDirectory || brain.context.config?.doctor_directory;
-    const hasDoctorDirectory = (Array.isArray(doctorDirectory) && doctorDirectory.length > 0) || (typeof doctorDirectory === 'string' && doctorDirectory.trim().length > 0);
-    const shouldBypassDoctorLookup = isDoctorLookup && !hasDoctorDirectory;
-
-    const isLlmBypassChallenge = isPromptChallenge || isBotAccusation || isAiAccusation || isAngryPromptChallenge || shouldBypassDoctorLookup || isHumanTransfer;
-
-    let bypassed = false;
-    let bypassedText = '';
-
-    if (isLlmBypassChallenge) {
-      if (isHumanTransfer) {
-        try {
-          await db.executeSafe({
-            text: `INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
-                   VALUES ($1, $2, $3, $4)`,
-            values: [
-              tenantId,
-              'PASSIVE_HANDOFF_REQUESTED',
-              `User requested operator (passive audit log): "${inboundTextForBypass}"`,
-              JSON.stringify({
-                conversationId: conversationIdVal || conversationId,
-                phone: phoneNumber,
-                timestamp: new Date().toISOString()
-              })
-            ]
-          });
-        } catch (logErr) {
-          this.log.error('Failed to log PASSIVE_HANDOFF_REQUESTED to ai_audit_logs', logErr as Error);
-        }
-      }
-
-      const { ContextAwareSafeFallbackResolver } = await import('@/lib/services/ai/context-aware-safe-fallback');
-      const fallbackResult = ContextAwareSafeFallbackResolver.resolve({
-        inboundText: inboundTextForBypass,
-        brain,
-        identityConfig: brain.prompts.metadata?.identity || brain.context.config?.identity || {},
-        unifiedContext: unifiedContext || {},
-        channelId: resolvedChannelId || metadata.channelId || undefined,
-        systemPromptText: systemPromptText || undefined
-      });
-      bypassed = true;
-      bypassedText = fallbackResult.text;
-      this.log.info(`[P011_LLM_BYPASS_APPLIED] [PROMPT_CHALLENGE_BYPASS] LLM call bypassed. Length: ${bypassedText?.length || 0}`, { traceId });
-    }
-
-    const timeoutMs = 25000; // 25s timeout
-    let aiResponse: any;
-    let isRetry = false;
-    let qualityGateFailed = false;
-    let qualityGateReason = '';
-    let languagePolicy: any;
-    let qgOptions: any;
-    let identityConfig: any;
-
-    const executeLLM = async (messages: any[]) => {
-      const aiPromise = this.aiOrchestrator.generateResponse(messages, aiConfig, tenantId, conversationId);
-      const timeoutPromise = new Promise<never>((_, reject) => 
-        setTimeout(() => reject(new Error("AI_TIMEOUT")), timeoutMs)
-      );
-      return Promise.race([aiPromise, timeoutPromise]);
-    };
-
-    try {
-      try {
-        if (bypassed) {
-          aiResponse = {
-            text: bypassedText,
-            finishReason: 'STOP',
-            latencyMs: 0,
-            modelUsed: 'bypass'
-          };
-        } else {
-          this.log.info(`[LLM_STARTED] Requesting AI response`, { provider: aiConfig.provider, traceId });
-          aiResponse = await executeLLM(aiMessages);
-          
-          // Final heuristic validation (Layer 2)
-          const completeness = this.responsePolicy.validateCompleteness(aiResponse.text, aiResponse.finishReason);
-          if (!completeness.valid) {
-            throw new Error(`INCOMPLETE_HEURISTIC: ${completeness.reason}`);
-          }
-        }
-      } catch (e: any) {
-        if (e.name === 'IncompleteResponseError' || e.message?.startsWith('INCOMPLETE_HEURISTIC')) {
-          this.log.warn(`[QUALITY_GATE_BLOCKED] AI response incomplete, attempting retry`, { reason: e.message, traceId });
-          isRetry = true;
-          
-          const retryContextMessages = [...aiMessages];
-          retryContextMessages.push({
-            role: 'user',
-            content: `DİKKAT: Önceki yanıt tamamlanmamış olabilir. Tek bir kısa, tamamlanmış WhatsApp mesajı üret. Yarım cümle bırakma. Hastanın son mesajı önceliklidir. Eski randevu/arama bağlamını sadece gerekiyorsa yumuşakça an.`
-          });
-
-          aiResponse = await executeLLM(retryContextMessages);
-          
-          const retryCompleteness = this.responsePolicy.validateCompleteness(aiResponse.text, aiResponse.finishReason);
-          if (!retryCompleteness.valid) {
-            throw new Error(`INCOMPLETE_RETRY_FAILED: ${retryCompleteness.reason}`);
-          }
-        }
-      }
-      // RUN TURKISH QUALITY GATE
-      identityConfig = brain.prompts.metadata?.identity || brain.context.config?.identity || {};
-      const assistantHistory = (history || []).filter((m: any) => m.role === 'assistant');
-      const isFirstAssistantTurn = assistantHistory.length === 0;
-
-      let ctaOfferedRecently = false;
-      if (Array.isArray(history)) {
-        const last3Assistant = assistantHistory.slice(-3);
-        ctaOfferedRecently = last3Assistant.some((m: any) => {
-          const text = (m.content || '').toLowerCase();
-          return [
-            'randevu', 'görüşme', 'gorusme', 'arayalım', 'arayalim', 'arayabiliriz', 'arama',
-            'telefon', 'appointment', 'call', 'contact you', 'telefonla'
-          ].some(kw => text.includes(kw));
-        });
-      }
-
-      let angryPatientMode = false;
-      const latestInboundContent = unifiedContext?.currentMessageText || '';
-      let asksIdentity = false;
-      let asksName = false;
-      let patientClaimsBot = false;
-
-      if (latestInboundContent) {
-        const currentMessageTextLower = latestInboundContent.toLowerCase().trim();
-        const angerKeywords = [
-          'şikayet', 'sikayet', 'rezalet', 'berbat', 'kötü', 'kotu', 'memnun değil', 'memnun degil',
-          'memnun kalmadım', 'memnun kalmadim', 'ilgisiz', 'zaman kaybı', 'zaman kaybi', 'robot',
-          'otomatik', 'dalga mı', 'dalga mi', 'düzgün', 'duzgun', 'yalan', 'yanlış', 'yanlis',
-          'sinir', 'bıktım', 'biktim', 'yeter', 'insanla', 'temsilci', 'canlı destek', 'canli destek',
-          'şikayetçiyim', 'sikayetciyim', 'şikayetçi', 'sikayetci', 'muhatap', 'kızgın', 'kizgin',
-          'söylemiyorsunuz', 'soylemiyorsunuz', 'vermiyorsunuz', 'diyorum', 'cevap ver', 'cevap vermiyorsunuz'
-        ];
-        angryPatientMode = angerKeywords.some(kw => currentMessageTextLower.includes(kw));
-        asksIdentity = ['kimsin', 'kimsiniz'].some(kw => currentMessageTextLower.includes(kw));
-        asksName = ['ismin ne', 'adın ne', 'isminiz ne', 'adınız ne', 'ismini söyler', 'ismin nedir', 'adın nedir'].some(kw => currentMessageTextLower.includes(kw));
-        patientClaimsBot = ['botsun', 'bot musun', 'yapay zeka', 'robot musun'].some(kw => currentMessageTextLower.includes(kw));
-      }
-
-      qgOptions = {
-        ctaOfferedRecently,
-        angryPatientMode,
-        personaName: identityConfig.personaName,
-        organizationName: identityConfig.organizationName,
-        organizationShortName: identityConfig.organizationShortName,
-        identityAlreadyIntroduced: !isFirstAssistantTurn,
-        asksIdentity,
-        asksName,
-        patientClaimsBot,
-        patientProvidedAvailability
-      };
-
-      const { LanguageResponsePolicy } = await import('@/lib/services/ai/language-response-policy');
-      const tenantDefaultLang = brain.context.config?.defaultLanguage || undefined;
-      const channelFixedLang = brain.context.config?.fixedLanguage || undefined;
-      languagePolicy = LanguageResponsePolicy.resolve(
-        content || '',
-        history,
-        tenantDefaultLang,
-        channelFixedLang
-      );
-
-      const { MultilingualQualityGate } = await import('@/lib/services/ai/multilingual-quality-gate');
-      let qualityGate: any;
-      if (bypassed) {
-        qualityGate = { valid: true };
-      } else {
-        qualityGate = MultilingualQualityGate.validate({
-          responseText: aiResponse.text,
-          replyLanguage: languagePolicy.replyLanguage,
-          qualityGateLocale: languagePolicy.qualityGateLocale,
-          qgOptions
-        });
-      }
-
-      if (qualityGate.valid && qualityGate.morphologyCorrectedText) {
-        aiResponse.text = qualityGate.morphologyCorrectedText;
-      }
-
-      if (!qualityGate.valid) {
-        this.log.warn(`[QUALITY_GATE] Failed on first attempt: ${qualityGate.reason}. Retrying...`, { traceId });
-        isRetry = true;
-
-        const isCtaBlockFirst = !!qualityGate.reason?.includes('Kritik Fren Engeli');
-        const isGenericFallbackFirst = !!qualityGate.reason?.includes('generic_fallback_pattern');
-        const nameExample = identityConfig.personaName || 'Asistan';
-        let retryContent = `DİKKAT: Ürettiğin Türkçe metinde ek hatası veya kendini tanıtma tekrarı tespit edildi. Kendini tanıtan kelimeleri/cümleleri (örneğin "Merhaba, ben ${nameExample}...", "${nameExample} ben...") kesinlikle kullanma, doğrudan konuya girerek kısa ve sade bir cevap üret.`;
-
-        if (isCtaBlockFirst) {
-          if (qgOptions.patientProvidedAvailability) {
-            retryContent = `DİKKAT: Hasta uygun zaman bildirdi. Kesinlikle yeni bir randevu/arama CTA'sı isteme, "uygun zaman paylaşır mısınız?" veya "sizi ne zaman arayalım" deme, "Türkiye saatiyle" kelimesini kullanma. Sadece uygun olduğu zamanı not aldığını ve koordinatörlerin/hasta danışmanlarının planlamayı kontrol edeceğini belirten kısa bir onay cevabı yaz.`;
-          } else {
-            retryContent = `DİKKAT: Son mesajlarda zaten randevu/telefon araması teklif edildiği veya kalite freni aktif olduğu için kesinlikle randevu/arama teklif etme, "uygun zaman paylaşır mısınız" veya "arama planlayalım" deme, "Türkiye saatiyle" veya "telefon görüşmesi" gibi yasaklı CTA kelimelerini kullanma. Doğrudan konuya girerek kısa ve sade bir cevap üret.`;
-          }
-        } else if (isGenericFallbackFirst) {
-          retryContent = `Önceki cevabın fazla genel kaldı ve kalite kontrolünden geçmedi.
-Hastanın/müşterinin son mesajına özel, kısa ve doğal cevap ver.
-“Doğru yönlendirebilmem için açık yazın”, “şikâyetinizi daha açık yazın”, “mesajınızı aldım” gibi genel kaçış kalıplarını kullanma.
-Son mesaj selamlama ise doğal selamlama yap.
-Konuşma bağlamında isim, konu, şikayet, ürün, form, tarih veya saat varsa bunu tekrar sorma; kabul et ve akışı ilerlet.
-Tek veya iki kısa cümle yaz.`;
-        }
-
-        const retryContextMessages = [...aiMessages];
-        retryContextMessages.push({
-          role: 'assistant' as const,
-          content: aiResponse.text
-        });
-        retryContextMessages.push({
-          role: 'user' as const,
-          content: retryContent
-        });
-
-        aiResponse = await executeLLM(retryContextMessages);
-        qualityGate = MultilingualQualityGate.validate({
-          responseText: aiResponse.text,
-          replyLanguage: languagePolicy.replyLanguage,
-          qualityGateLocale: languagePolicy.qualityGateLocale,
-          qgOptions
-        });
-        if (qualityGate.valid && qualityGate.morphologyCorrectedText) {
-          aiResponse.text = qualityGate.morphologyCorrectedText;
-        }
-      }
-
-      if (!qualityGate.valid) {
-        const isIdentityRepetitionSecond = !!qualityGate.reason?.includes('Kimlik zaten tanıtılmıştı');
-
-        if (isIdentityRepetitionSecond) {
-          this.log.warn(`[QUALITY_GATE] Failed on second attempt due to identity repetition: ${qualityGate.reason}. Applying stripPersonaIntroduction cleanup...`, { traceId });
-          const originalText = aiResponse.text;
-          const cleanedText = TurkishReplyQualityGate.stripPersonaIntroduction(originalText, qgOptions);
-
-          if (cleanedText && cleanedText.trim().length > 0) {
-            const cleanedQualityGate = MultilingualQualityGate.validate({
-              responseText: cleanedText,
-              replyLanguage: languagePolicy.replyLanguage,
-              qualityGateLocale: languagePolicy.qualityGateLocale,
-              qgOptions
-            });
-            if (cleanedQualityGate.valid) {
-              this.log.info(`[QUALITY_GATE] Cleanup applied successfully. Validation passed.`, { traceId });
-              aiResponse.text = cleanedQualityGate.morphologyCorrectedText || cleanedText;
-              qualityGate = { valid: true };
-
-              // Log IDENTITY_REPETITION_CLEANUP_APPLIED to ai_audit_logs
-              await db.executeSafe({
-                text: `INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
-                       VALUES ($1, $2, $3, $4)`,
-                values: [
-                  tenantId,
-                  'IDENTITY_REPETITION_CLEANUP_APPLIED',
-                  `Persona introduction prefix stripped successfully from beginning of the response.`,
-                  JSON.stringify({
-                    conversation_id: conversationId,
-                    original_response: originalText,
-                    cleaned_response: cleanedText,
-                    timestamp: new Date().toISOString()
-                  })
-                ]
-              });
-            } else {
-              this.log.error(`[QUALITY_GATE] Cleanup applied but validation failed: ${cleanedQualityGate.reason}`, undefined, { traceId });
-              qualityGate = cleanedQualityGate;
-            }
-          } else {
-            this.log.error(`[QUALITY_GATE] Cleanup resulted in empty or meaningless text.`, undefined, { traceId });
-            qualityGate = { valid: false, reason: 'cleaned_text_empty' };
-          }
-        }
-
-        // If it's still invalid, delegate to the centralized QualityGateRecoveryHelper
-        if (!qualityGate.valid) {
-          const { QualityGateRecoveryHelper } = await import('@/lib/services/ai/quality-gate-recovery');
-          const recoveryResult = await QualityGateRecoveryHelper.handleFailure({
-            tenantId,
-            conversationId: conversationId || 'unknown',
-            phoneNumber,
-            inboundText: content || '',
-            brain,
-            identityConfig,
-            unifiedContext,
-            reason: qualityGate.reason || '',
-            channel,
-            path: 'queue_immediate',
-            channelId: resolvedChannelId || metadata.channelId || undefined,
-            systemPromptText: systemPromptText || undefined,
-            promptVersion: brain.prompts.metadata?.version || undefined
-          });
-
-          if (recoveryResult.recovered && recoveryResult.text) {
-            const recoveryQG = MultilingualQualityGate.validate({
-              responseText: recoveryResult.text,
-              replyLanguage: languagePolicy.replyLanguage,
-              qualityGateLocale: languagePolicy.qualityGateLocale,
-              qgOptions
-            });
-            aiResponse.text = recoveryQG.morphologyCorrectedText || recoveryResult.text;
-            qualityGate = { valid: true };
-          } else {
-            this.log.warn(`[QUALITY_GATE] Centralized recovery helper failed or was not applicable: ${qualityGate.reason}`, { traceId });
-            return; // Exit cleanly as handoff has been processed by the helper
-          }
-        }
-      }
-
-      if (!qualityGate.valid) {
-        throw new Error(`QUALITY_GATE_FAILED: ${qualityGate.reason}`);
-      }
-
-      this.log.info(`[LLM_RESPONSE_OK] AI execution completed`, { latencyMs: aiResponse.latencyMs, isRetry, traceId });
-
-      // Phase 6: Emit AI response event
-      AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'ai_response_generated', category: 'pipeline', payload: { latencyMs: aiResponse.latencyMs, model: aiResponse.modelUsed, isRetry } });
-    } catch (e: any) {
-      if (e.message === "AI_TIMEOUT") {
-        this.log.error(`[LLM_TIMEOUT] Execution exceeded 25s limit`, e, { traceId });
-        AIEventEmitter.emit({ tenantId, conversationId, customerId, type: 'ai_timeout', category: 'pipeline', severity: 'error', payload: { timeoutMs } });
-        AIEventEmitter.logHealth(tenantId, 'timeout', { traceId });
-        throw e; // Let QStash retry on timeouts
-      }
-      if (e.message?.startsWith('INCOMPLETE_RETRY_FAILED') || e.name === 'IncompleteResponseError' || e.message?.startsWith('INCOMPLETE_HEURISTIC') || e.message?.startsWith('QUALITY_GATE_FAILED')) {
-        this.log.error(`[LLM_QUALITY_GATE_FAILED] Retry/quality gate failed, stopping execution`, e, { traceId });
-        qualityGateFailed = true;
-        qualityGateReason = e.message;
-        // DO NOT THROW. We handle this cleanly so QStash doesn't spam retries.
-      } else if (
-        e instanceof AIBillingExhaustedError ||
-        e instanceof AIQuotaExhaustedError ||
-        e instanceof AICircuitOpenError ||
-        e instanceof AIUnavailableError ||
-        e.message?.includes('CIRCUIT_OPEN')
-      ) {
-        const targetConvId = conversationIdVal || conversationId;
-        if (!targetConvId) {
-          this.log.warn(`[WORKER_AI_UNAVAILABLE_SKIP] AI unavailable but conversation ID is missing. Skipped DB update.`, { tenantId, traceId });
-          return;
-        }
-
-        this.log.warn(`[WORKER_AI_UNAVAILABLE] AI pipeline is unavailable, triggering human handoff. Reason: ${e.message}`, { traceId, tenantId });
-        
-        const nowIso = new Date().toISOString();
-        const reason = e instanceof AIBillingExhaustedError ? 'billing_exhausted' 
-                     : e instanceof AIQuotaExhaustedError ? 'quota_exhausted'
-                     : e instanceof AICircuitOpenError ? 'circuit_open'
-                     : 'ai_unavailable';
-        
-        await db.executeSafe({
-          text: `
-            UPDATE conversations 
-            SET status = 'human',
-                autopilot_enabled = false,
-                metadata = jsonb_set(
-                             jsonb_set(
-                               jsonb_set(
-                                 jsonb_set(
-                                   jsonb_set(COALESCE(metadata, '{}'::jsonb), '{ai_unavailable}', 'true'),
-                                   '{ai_unavailable_reason}', $1
-                                 ),
-                                 '{ai_unavailable_provider}', '"gemini"'
-                               ),
-                               '{ai_unavailable_model}', $2
-                             ),
-                             '{ai_unavailable_at}', $3
-                           )
-            WHERE id = $4 AND tenant_id = $5
-          `,
-          values: [JSON.stringify(reason), JSON.stringify(llmModel), JSON.stringify(nowIso), targetConvId, tenantId]
-        });
-
-        // Insert non-patient-visible system message/alert
-        await db.executeSafe({
-          text: `
-            INSERT INTO messages (tenant_id, conversation_id, phone_number, direction, content, channel, provider_message_id, status)
-            VALUES ($1, $2, $3, 'system', $4, $5, 'system_alert', 'delivered')
-          `,
-          values: [tenantId, targetConvId, phoneNumber, `Yapay zeka servis dışı kaldığı için görüşme müşteri temsilcisine devredildi. (AI Unavailable: ${reason})`, channel]
-        });
-
-        // Emit AI response failed event
-        AIEventEmitter.emit({
-          tenantId,
-          conversationId: targetConvId,
-          customerId,
-          type: 'ai_response_failed',
-          category: 'pipeline',
-          severity: 'warning',
-          payload: { reason }
-        });
-
-        return; // exit cleanly
-      } else {
-        this.log.error(`[LLM_FAILED] Orchestrator exception`, e, { traceId });
-        throw e;
-      }
-    }
-
-    if (qualityGateFailed) {
-      this.log.warn(`[QUALITY_GATE_BLOCKED_FINAL] Cancelling send pipeline.`, { traceId, tenantId });
+    if (orchestratorResult.qualityGateFailed) {
+      this.log.warn(`[QUALITY_GATE_BLOCKED_FINAL] Cancelling send pipeline. Reason: ${orchestratorResult.qualityGateReason}`, { traceId, tenantId });
       
-      // Update conversation to human and save metadata, don't overwrite opportunity or summary
       await db.executeSafe({
         text: `
           UPDATE conversations 
@@ -2653,7 +2206,6 @@ Tek veya iki kısa cümle yaz.`;
         values: [phoneNumber, tenantId]
       });
 
-      // Insert internal system note (visible_to_patient: false, send_to_whatsapp: false implicit because direction=system)
       await db.executeSafe({
         text: `
           INSERT INTO messages (tenant_id, phone_number, direction, content, channel, provider_message_id)
@@ -2662,59 +2214,17 @@ Tek veya iki kısa cümle yaz.`;
         values: [tenantId, phoneNumber, 'AI yanıtı tamamlanmadı, manuel kontrol gerekli. (Quality Gate Blocked)', channel]
       });
 
-      return; // Exit worker successfully without sending any outbound message
+      return;
     }
 
-    // P0.11: Final Locale-Aware Quality Gate check on the actual outgoing text
-    const { MultilingualQualityGate } = await import('@/lib/services/ai/multilingual-quality-gate');
-    let finalQG: any;
-    if (bypassed) {
-      finalQG = { valid: true };
-    } else {
-      finalQG = MultilingualQualityGate.validate({
-        responseText: aiResponse.text,
-        replyLanguage: languagePolicy?.replyLanguage || 'Türkçe',
-        qualityGateLocale: languagePolicy?.qualityGateLocale || 'tr',
-        qgOptions
-      });
-    }
-    if (finalQG.valid) {
-      aiResponse.text = finalQG.morphologyCorrectedText || aiResponse.text;
-    } else {
-      const { ContextAwareSafeFallbackResolver } = await import('@/lib/services/ai/context-aware-safe-fallback');
-      const fallbackRes = ContextAwareSafeFallbackResolver.resolve({
-        inboundText: content || '',
-        brain,
-        identityConfig: identityConfig || {},
-        unifiedContext: unifiedContext || {},
-        channelId: resolvedChannelId || metadata.channelId || undefined,
-        systemPromptText: systemPromptText || undefined
-      });
-      const fallbackQG = MultilingualQualityGate.validate({
-        responseText: fallbackRes.text,
-        replyLanguage: languagePolicy?.replyLanguage || 'Türkçe',
-        qualityGateLocale: languagePolicy?.qualityGateLocale || 'tr',
-        qgOptions
-      });
-      aiResponse.text = fallbackQG.morphologyCorrectedText || fallbackRes.text;
-
-      await db.executeSafe({
-        text: `INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
-               VALUES ($1, $2, $3, $4)`,
-        values: [
-          tenantId,
-          'FINAL_MORPHOLOGY_FAIL_FALLBACK_APPLIED',
-          `Final morphology check failed. Applying safe fallback. Path: queue_immediate. Original: "${finalQG.reason}", Fallback: "${aiResponse.text}"`,
-          JSON.stringify({
-            conversationId,
-            phoneNumber,
-            originalText: finalQG.reason,
-            fallbackText: aiResponse.text,
-            timestamp: new Date().toISOString()
-          })
-        ]
-      });
-    }
+    aiResponse = {
+      text: orchestratorResult.text,
+      finishReason: 'STOP',
+      latencyMs: orchestratorResult.latencyMs,
+      modelUsed: orchestratorResult.modelUsed,
+      inputTokens: orchestratorResult.inputTokens || 0,
+      outputTokens: orchestratorResult.outputTokens || 0
+    };
 
     // 7. Response Policy Check (Egress DLP)
     const validation = this.responsePolicy.validate(aiResponse.text, brain);
@@ -3113,7 +2623,7 @@ Tek veya iki kısa cümle yaz.`;
             if (shouldRunAI) {
               this.log.info(`[WORKER_CRM] Running AI extraction fallback`, { traceId, phoneNumber });
               try {
-                crmData = await crmExtractorService.extract(aiMessages, tenantConfig, traceId);
+                crmData = await crmExtractorService.extract(aiMessages, brain.context.config, traceId);
                 if (crmData && crmData._extractionError) {
                   extractionError = crmData._extractionError;
                   crmData = null;
@@ -4385,452 +3895,78 @@ Tek veya iki kısa cümle yaz.`;
     let brain;
     try {
       brain = await BrainResolver.resolveTenantBrain(payload, channel, traceId, metadata.channelId);
-    } catch (e) {
+    } catch {
       this.log.error(`[DEBOUNCE_WORKER] Could not resolve brain`, undefined, { tenantId, traceId });
       return;
     }
 
-    const { ConversationService } = await import('../services/conversation.service');
-    const convService = new ConversationService(db);
-    const history = await convService.getHistory(phoneNumber, 10);
-
-    let unifiedContext: any = null;
-    try {
-      const { IdentityEngine } = await import('@/lib/services/ai/engines/identity');
-      if (customerId && conversationId) {
-        unifiedContext = await IdentityEngine.getContext(tenantId, customerId, conversationId);
-      }
-    } catch (e) {
-      this.log.error('[DEBOUNCE_WORKER] Error fetching identity context', e as Error, { traceId });
-    }
-
-    const { TurkishReplyQualityGate } = await import('@/lib/services/ai/turkish-quality-gate');
-    const patientProvidedAvailability = TurkishReplyQualityGate.detectPatientProvidedAvailability(latestInboundContent);
-
-    if (!unifiedContext) unifiedContext = {};
-    unifiedContext.history = history;
-    unifiedContext.currentMessageText = latestInboundContent;
-    unifiedContext.patientProvidedAvailability = patientProvidedAvailability;
-
-    // P0.11: Language detection for debounce path (was missing — caused all replies to default to Turkish)
-    try {
-      const { detectLanguage } = await import('@/lib/utils/language-detector');
-      const languageContext = detectLanguage(latestInboundContent, history);
-      unifiedContext.languageContext = languageContext;
-    } catch (langErr) {
-      this.log.error('[DEBOUNCE_WORKER] Language detection failed', langErr as Error, { traceId });
-    }
-
-    // 🧠 Approved learning context injection (P1.3 - Debounce Autopilot Path)
-    try {
-      const { TenantLearningRuntimeResolver } = await import('@/lib/services/ai/tenant-learning-runtime-resolver');
-      if (resolvedChannelId) {
-        unifiedContext.approvedLearningHints = await TenantLearningRuntimeResolver.resolveHints(brain, resolvedChannelId);
-      } else {
-        unifiedContext.approvedLearningHints = [];
-      }
-    } catch (hintsErr) {
-      this.log.error(`[LEARNING_RUNTIME_HINTS_ERROR] Failed to fetch learning hints`, hintsErr as Error, { traceId });
-      unifiedContext.approvedLearningHints = [];
-    }
-
-    const { PromptBuilder } = await import('../services/ai/prompt-builder');
-    const systemPromptText = PromptBuilder.buildSystemPrompt(brain, convRecord.lead_stage, false, unifiedContext);
-
-    const aiMessages: ChatMessage[] = [
-      { role: 'system' as const, content: String(systemPromptText) },
-      ...history
-    ];
-
     const llmModel = brain.context.settings.aiModel || 'gemini-2.5-flash';
-    const apiKey = brain.context.config?.raw?.gemini_api_key || process.env.GEMINI_API_KEY || '';
-
-    const aiConfig = {
-      provider: 'gemini' as 'gemini' | 'openai',
-      modelId: llmModel,
-      apiKey: apiKey,
-      temperature: 0.7,
-      maxTokens: brain.context.settings.maxResponseTokens || 1000
-    };
-
-    const timeoutMs = 25000;
     let aiResponse: any;
 
-    const executeLLM = async (messages: any[]) => {
-      const aiPromise = this.aiOrchestrator.generateResponse(messages, aiConfig, tenantId, conversationId);
-      const timeoutPromise = new Promise<never>((_, reject) => 
-        setTimeout(() => reject(new Error("AI_TIMEOUT")), timeoutMs)
-      );
-      return Promise.race([aiPromise, timeoutPromise]);
-    };
-
-    // Quality gate validation & retry logic
-    // Compute Quality Gate Options
-    const identityConfig = brain.prompts.metadata?.identity || brain.context.config?.identity || {};
-    const assistantHistory = (history || []).filter((m: any) => m.role === 'assistant');
-    const isFirstAssistantTurn = assistantHistory.length === 0;
-
-    let ctaOfferedRecently = false;
-    if (Array.isArray(history)) {
-      const last3Assistant = assistantHistory.slice(-3);
-      ctaOfferedRecently = last3Assistant.some((m: any) => {
-        const text = (m.content || '').toLowerCase();
-        return [
-          'randevu', 'görüşme', 'gorusme', 'arayalım', 'arayalim', 'arayabiliriz', 'arama',
-          'telefon', 'appointment', 'call', 'contact you', 'telefonla'
-        ].some(kw => text.includes(kw));
-      });
-    }
-
-    let angryPatientMode = false;
-    let asksIdentity = false;
-    let asksName = false;
-    let patientClaimsBot = false;
-
-    if (latestInboundContent) {
-      const currentMessageTextLower = latestInboundContent.toLowerCase().trim();
-      const angerKeywords = [
-        'şikayet', 'sikayet', 'rezalet', 'berbat', 'kötü', 'kotu', 'memnun değil', 'memnun degil',
-        'memnun kalmadım', 'memnun kalmadim', 'ilgisiz', 'zaman kaybı', 'zaman kaybi', 'robot',
-        'otomatik', 'dalga mı', 'dalga mi', 'düzgün', 'duzgun', 'yalan', 'yanlış', 'yanlis',
-        'sinir', 'bıktım', 'biktim', 'yeter', 'insanla', 'temsilci', 'canlı destek', 'canli destek',
-        'şikayetçiyim', 'sikayetciyim', 'şikayetçi', 'sikayetci', 'muhatap', 'kızgın', 'kizgin',
-        'söylemiyorsunuz', 'soylemiyorsunuz', 'vermiyorsunuz', 'diyorum', 'cevap ver', 'cevap vermiyorsunuz'
-      ];
-      angryPatientMode = angerKeywords.some(kw => currentMessageTextLower.includes(kw));
-      asksIdentity = ['kimsin', 'kimsiniz'].some(kw => currentMessageTextLower.includes(kw));
-      asksName = ['ismin ne', 'adın ne', 'isminiz ne', 'adınız ne', 'ismini söyler', 'ismin nedir', 'adın nedir'].some(kw => currentMessageTextLower.includes(kw));
-      patientClaimsBot = ['botsun', 'bot musun', 'yapay zeka', 'robot musun'].some(kw => currentMessageTextLower.includes(kw));
-    }
-
-    const qgOptions = {
-      ctaOfferedRecently,
-      angryPatientMode,
-      personaName: identityConfig.personaName,
-      organizationName: identityConfig.organizationName,
-      organizationShortName: identityConfig.organizationShortName,
-      identityAlreadyIntroduced: !isFirstAssistantTurn,
-      asksIdentity,
-      asksName,
-      patientClaimsBot,
-      patientProvidedAvailability
-    };
-
-    const { LanguageResponsePolicy } = await import('@/lib/services/ai/language-response-policy');
-    const tenantDefaultLang = brain.context.config?.defaultLanguage || undefined;
-    const channelFixedLang = brain.context.config?.fixedLanguage || undefined;
-    const languagePolicy = LanguageResponsePolicy.resolve(
-      latestInboundContent || '',
-      history,
-      tenantDefaultLang,
-      channelFixedLang
-    );
-
-    const { MultilingualQualityGate } = await import('@/lib/services/ai/multilingual-quality-gate');
-
-    // P0.11: Check for Prompt Challenge / Bot Accusation / AI Accusation / Angry Challenge -> LLM Bypass
-    const { ConversationIntentRouter } = await import('@/lib/services/ai/conversation-intent-router');
-    const { PendingQuestionResolver } = await import('@/lib/services/ai/pending-question-resolver');
-    const { ShortAnswerInterpreter } = await import('@/lib/services/ai/short-answer-interpreter');
-
-    const inboundTextForBypass = latestInboundContent || '';
-    const cleanInbound = inboundTextForBypass.toLowerCase().trim();
-
-    const { ConversationStateArbitrator } = await import('@/lib/services/ai/conversation-state-arbitrator');
-    const rawIntent = ConversationIntentRouter.route(inboundTextForBypass);
-    const rawPendingSlot = PendingQuestionResolver.resolve(history);
-    const interpretedIntent = ShortAnswerInterpreter.interpret(inboundTextForBypass, rawPendingSlot);
-
-    const arbitration = ConversationStateArbitrator.arbitrate({
-      lastUserMessage: inboundTextForBypass,
-      rawPendingSlot,
-      rawInterpretedIntent: interpretedIntent || '',
-      routerIntent: rawIntent,
-      history
-    });
-
-    const detectedIntent = arbitration.effectiveIntent;
-    const pendingSlot = arbitration.effectivePendingSlot;
-
-    const isCallbackConfirmed = arbitration.suppressionReason === 'callback_confirmed' || detectedIntent === 'call_scheduling_request';
-    if (isCallbackConfirmed) {
+    // Resolve dynamic identity context in delayed path
+    let unifiedContext: any = {};
+    let rawHistory: any[] = [];
+    if (conversationId && customerId) {
       try {
-        await db.executeSafe({
-          text: `INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
-                 VALUES ($1, $2, $3, $4)`,
-          values: [
-            tenantId,
-            'CALLBACK_REQUEST_CONFIRMED',
-            `User confirmed or requested phone callback (delayed path): "${inboundTextForBypass}"`,
-            JSON.stringify({
-              conversationId: conversationId,
-              phone: phoneNumber,
-              timestamp: new Date().toISOString()
-            })
-          ]
-        });
-      } catch (logErr) {
-        // Suppress
+        const { IdentityEngine } = await import('../services/ai/engines/identity');
+        unifiedContext = await IdentityEngine.getContext(tenantId, customerId, conversationId);
+      } catch (e) {
+        this.log.error(`[DEBOUNCE_WORKER] Error fetching identity context`, e as Error, { traceId });
       }
-    }
-
-    const isBotAccusation = ['bot musun', 'sen bot musun', 'are you a bot', 'botsun', 'robot musun', 'yapay zeka mısın', 'yapay zeka misin', 'insan mısın', 'insan misin'].some(kw => cleanInbound.includes(kw));
-    const isAiAccusation = ['yapay zeka', 'yapayzeka', 'gpt', 'gemini', 'openai', 'claude', 'dil modeli', 'hangi model'].some(kw => cleanInbound.includes(kw));
-    const isPromptChallenge = detectedIntent === 'prompt_challenge' || (interpretedIntent as any) === 'prompt_challenge' || ['prompt', 'promt', 'sistem prompt', 'system prompt', 'talimatların', 'sistem talimati', 'kuralın ne', 'direktifin ne', 'uydurma'].some(kw => cleanInbound.includes(kw));
-    const isAngryPromptChallenge = isPromptChallenge && ['şikayet', 'sikayet', 'rezalet', 'berbat', 'kötü', 'sinir', 'bıktım', 'yeter', 'dalga'].some(kw => cleanInbound.includes(kw));
-
-    const isDoctorLookup = detectedIntent === 'doctor_lookup' || (interpretedIntent as any) === 'doctor_lookup';
-    const isHumanTransfer = detectedIntent === 'human_transfer_request' || (interpretedIntent as any) === 'human_transfer_request';
-    const isFormFollowup = detectedIntent === 'form_followup' || (interpretedIntent as any) === 'form_followup';
-    const isUserCorrection = detectedIntent === 'user_correction' || (interpretedIntent as any) === 'user_correction';
-
-    const doctorDirectory = brain.context.config?.doctors || brain.context.config?.doctorDirectory || brain.context.config?.doctor_directory;
-    const hasDoctorDirectory = (Array.isArray(doctorDirectory) && doctorDirectory.length > 0) || (typeof doctorDirectory === 'string' && doctorDirectory.trim().length > 0);
-    const shouldBypassDoctorLookup = isDoctorLookup && !hasDoctorDirectory;
-
-    const isLlmBypassChallenge = isPromptChallenge || isBotAccusation || isAiAccusation || isAngryPromptChallenge || shouldBypassDoctorLookup || isHumanTransfer;
-
-    let bypassed = false;
-    let bypassedText = '';
-
-    if (isLlmBypassChallenge) {
-      if (isHumanTransfer) {
-        try {
-          await db.executeSafe({
-            text: `INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
-                   VALUES ($1, $2, $3, $4)`,
-            values: [
-              tenantId,
-              'PASSIVE_HANDOFF_REQUESTED',
-              `User requested operator (passive audit log in delayed path): "${inboundTextForBypass}"`,
-              JSON.stringify({
-                conversationId: conversationId,
-                phone: phoneNumber,
-                timestamp: new Date().toISOString()
-              })
-            ]
-          });
-        } catch (logErr) {
-          this.log.error('Failed to log PASSIVE_HANDOFF_REQUESTED to ai_audit_logs', logErr as Error);
-        }
-      }
-
-      const { ContextAwareSafeFallbackResolver } = await import('@/lib/services/ai/context-aware-safe-fallback');
-      const fallbackResult = ContextAwareSafeFallbackResolver.resolve({
-        inboundText: inboundTextForBypass,
-        brain,
-        identityConfig: brain.prompts.metadata?.identity || brain.context.config?.identity || {},
-        unifiedContext: unifiedContext || {},
-        channelId: resolvedChannelId || metadata.channelId || undefined,
-        systemPromptText: systemPromptText || undefined
-      });
-      bypassed = true;
-      bypassedText = fallbackResult.text;
-      this.log.info(`[P011_LLM_BYPASS_APPLIED] [PROMPT_CHALLENGE_BYPASS] LLM call bypassed in delayed path. Length: ${bypassedText?.length || 0}`, { traceId });
     }
 
     try {
-      if (bypassed) {
-        aiResponse = {
-          text: bypassedText,
-          finishReason: 'STOP',
-          latencyMs: 0,
-          modelUsed: 'bypass'
-        };
-      } else {
-        aiResponse = await executeLLM(aiMessages);
-      }
-      
-      let qualityGate: any;
-      if (bypassed) {
-        qualityGate = { valid: true };
-      } else {
-        qualityGate = MultilingualQualityGate.validate({
-          responseText: aiResponse.text,
-          replyLanguage: languagePolicy.replyLanguage,
-          qualityGateLocale: languagePolicy.qualityGateLocale,
-          qgOptions
-        });
-      }
+      const { ConversationService } = await import('../services/conversation.service');
+      const convService = new ConversationService(db);
+      rawHistory = await convService.getHistory(phoneNumber, 10);
 
-      if (qualityGate.valid && qualityGate.morphologyCorrectedText) {
-        aiResponse.text = qualityGate.morphologyCorrectedText;
-      }
+      const { ConversationTurnAggregator } = await import('../services/ai/conversation-turn-aggregator');
+      const history = await ConversationTurnAggregator.aggregate(tenantId, phoneNumber, rawHistory, 10);
+      unifiedContext.history = history;
+      unifiedContext.currentMessageText = latestInboundContent || '';
+    } catch (e) {
+      this.log.error(`[DEBOUNCE_WORKER] Error fetching conversation history`, e as Error, { traceId });
+    }
 
-      if (!qualityGate.valid) {
-        this.log.warn(`[DEBOUNCE_WORKER] Quality gate failed on first attempt: ${qualityGate.reason}. Retrying...`, { traceId });
-        
-        const isCtaBlockFirst = !!qualityGate.reason?.includes('Kritik Fren Engeli');
-        const isGenericFallbackFirst = !!qualityGate.reason?.includes('generic_fallback_pattern');
-        const nameExample = identityConfig.personaName || 'Asistan';
-        let retryContent = `DİKKAT: Ürettiğin Türkçe metinde ek hatası veya kendini tanıtma tekrarı tespit edildi. Kendini tanıtan kelimeleri/cümleleri (örneğin "Merhaba, ben ${nameExample}...", "${nameExample} ben...") kesinlikle kullanma, doğrudan konuya girerek kısa ve sade bir cevap üret.`;
+    const targetPhase = unifiedContext.opportunity?.stage || 'lead';
+    const { PromptBuilder } = await import('../services/ai/prompt-builder');
+    const systemPromptText = PromptBuilder.buildSystemPrompt(brain, targetPhase, false, unifiedContext);
 
-        if (isCtaBlockFirst) {
-          if (qgOptions.patientProvidedAvailability) {
-            retryContent = `DİKKAT: Hasta uygun zaman bildirdi. Kesinlikle yeni bir randevu/arama CTA'sı isteme, "uygun zaman paylaşır mısınız?" veya "sizi ne zaman arayalım" deme, "Türkiye saatiyle" kelimesini kullanma. Sadece uygun olduğu zamanı not aldığını ve koordinatörlerin/hasta danışmanlarının planlamayı kontrol edeceğini belirten kısa bir onay cevabı yaz.`;
-          } else {
-            retryContent = `DİKKAT: Son mesajlarda zaten randevu/telefon araması teklif edildiği veya kalite freni aktif olduğu için kesinlikle randevu/arama teklif etme, "uygun zaman paylaşır mısınız" veya "arama planlayalım" deme, "Türkiye saatiyle" veya "telefon görüşmesi" gibi yasaklı CTA kelimelerini kullanma. Doğrudan konuya girerek kısa ve sade bir cevap üret.`;
-          }
-        } else if (isGenericFallbackFirst) {
-          retryContent = `Önceki cevabın fazla genel kaldı ve kalite kontrolünden geçmedi.
-Hastanın/müşterinin son mesajına özel, kısa ve doğal cevap ver.
-“Doğru yönlendirebilmem için açık yazın”, “şikâyetinizi daha açık yazın”, “mesajınızı aldım” gibi genel kaçış kalıplarını kullanma.
-Son mesaj selamlama ise doğal selamlama yap.
-Konuşma bağlamında isim, konu, şikayet, ürün, form, tarih veya saat varsa bunu tekrar sorma; kabul et ve akışı ilerlet.
-Tek veya iki kısa cümle yaz.`;
-        }
+    try {
+      // Execute the unified AI Response Orchestrator
+      const { AIResponseOrchestrator } = await import('@/lib/services/ai/ai-response-orchestrator');
+      const orchestratorResult = await AIResponseOrchestrator.run({
+        tenantId,
+        phoneNumber,
+        inboundText: latestInboundContent || '',
+        mediaType: null,
+        mediaMetadata: null,
+        brain,
+        channel,
+        channelId: resolvedChannelId || metadata.channelId || undefined,
+        conversationId,
+        customerId,
+        sandbox: false,
+        history: rawHistory
+      });
 
-        const retryMessages = [
-          ...aiMessages,
-          { role: 'assistant' as const, content: aiResponse.text },
-          {
-            role: 'user' as const,
-            content: retryContent
-          }
-        ];
-
-        aiResponse = await executeLLM(retryMessages);
-        qualityGate = MultilingualQualityGate.validate({
-          responseText: aiResponse.text,
-          replyLanguage: languagePolicy.replyLanguage,
-          qualityGateLocale: languagePolicy.qualityGateLocale,
-          qgOptions
-        });
-        if (qualityGate.valid && qualityGate.morphologyCorrectedText) {
-          aiResponse.text = qualityGate.morphologyCorrectedText;
-        }
-      }
-
-      if (!qualityGate.valid) {
-        const isIdentityRepetitionSecond = !!qualityGate.reason?.includes('Kimlik zaten tanıtılmıştı');
-
-        if (isIdentityRepetitionSecond) {
-          this.log.warn(`[DEBOUNCE_WORKER] Quality gate failed on second attempt due to identity repetition: ${qualityGate.reason}. Applying stripPersonaIntroduction cleanup...`, { traceId });
-          const originalText = aiResponse.text;
-          const cleanedText = TurkishReplyQualityGate.stripPersonaIntroduction(originalText, qgOptions);
-
-          if (cleanedText && cleanedText.trim().length > 0) {
-            const cleanedQualityGate = MultilingualQualityGate.validate({
-              responseText: cleanedText,
-              replyLanguage: languagePolicy.replyLanguage,
-              qualityGateLocale: languagePolicy.qualityGateLocale,
-              qgOptions
-            });
-            if (cleanedQualityGate.valid) {
-              this.log.info(`[DEBOUNCE_WORKER] Cleanup applied successfully. Validation passed.`, { traceId });
-              aiResponse.text = cleanedQualityGate.morphologyCorrectedText || cleanedText;
-              qualityGate = { valid: true };
-
-              // Log IDENTITY_REPETITION_CLEANUP_APPLIED to ai_audit_logs
-              await db.executeSafe({
-                text: `INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
-                       VALUES ($1, $2, $3, $4)`,
-                values: [
-                  tenantId,
-                  'IDENTITY_REPETITION_CLEANUP_APPLIED',
-                  `Persona introduction prefix stripped successfully from beginning of the response in debounce worker.`,
-                  JSON.stringify({
-                    conversation_id: conversationId,
-                    original_response: originalText,
-                    cleaned_response: cleanedText,
-                    timestamp: new Date().toISOString()
-                  })
-                ]
-              });
-            } else {
-              this.log.error(`[DEBOUNCE_WORKER] Cleanup applied but validation failed: ${cleanedQualityGate.reason}`, undefined, { traceId });
-              qualityGate = cleanedQualityGate;
-            }
-          } else {
-            this.log.error(`[DEBOUNCE_WORKER] Cleanup resulted in empty or meaningless text.`, undefined, { traceId });
-            qualityGate = { valid: false, reason: 'cleaned_text_empty' };
-          }
-        }
-
-        // If it's still invalid, delegate to the centralized QualityGateRecoveryHelper
-        if (!qualityGate.valid) {
-          const { QualityGateRecoveryHelper } = await import('@/lib/services/ai/quality-gate-recovery');
-          const recoveryResult = await QualityGateRecoveryHelper.handleFailure({
-            tenantId,
-            conversationId: conversationId || 'unknown',
-            phoneNumber,
-            inboundText: latestInboundContent || '',
-            brain,
-            identityConfig,
-            unifiedContext,
-            reason: qualityGate.reason || '',
-            channel,
-            path: 'queue_delayed',
-            channelId: resolvedChannelId || metadata.channelId || undefined,
-            systemPromptText: systemPromptText || undefined,
-            promptVersion: brain.prompts.metadata?.version || undefined
-          });
-
-          if (recoveryResult.recovered && recoveryResult.text) {
-            const recoveryQG = MultilingualQualityGate.validate({
-              responseText: recoveryResult.text,
-              replyLanguage: languagePolicy.replyLanguage,
-              qualityGateLocale: languagePolicy.qualityGateLocale,
-              qgOptions
-            });
-            aiResponse.text = recoveryQG.morphologyCorrectedText || recoveryResult.text;
-            qualityGate = { valid: true };
-          } else {
-            this.log.warn(`[DEBOUNCE_WORKER] Centralized recovery helper failed or was not applicable: ${qualityGate.reason}`, { traceId });
-            return; // Exit cleanly as handoff has been processed by the helper
-          }
-        }
-      }
-
-      // P0.11: Final Locale-Aware Quality Gate check on the actual outgoing text (delayed path)
-      let finalQG: any;
-      if (bypassed) {
-        finalQG = { valid: true };
-      } else {
-        finalQG = MultilingualQualityGate.validate({
-          responseText: aiResponse.text,
-          replyLanguage: languagePolicy?.replyLanguage || 'Türkçe',
-          qualityGateLocale: languagePolicy?.qualityGateLocale || 'tr',
-          qgOptions
-        });
-      }
-      if (finalQG.valid) {
-        aiResponse.text = finalQG.morphologyCorrectedText || aiResponse.text;
-      } else {
-        const { ContextAwareSafeFallbackResolver } = await import('@/lib/services/ai/context-aware-safe-fallback');
-        const fallbackRes = ContextAwareSafeFallbackResolver.resolve({
-          inboundText: latestInboundContent || '',
-          brain,
-          identityConfig: identityConfig || {},
-          unifiedContext: unifiedContext || {},
-          channelId: resolvedChannelId || metadata.channelId || undefined,
-          systemPromptText: systemPromptText || undefined
-        });
-        const fallbackQG = MultilingualQualityGate.validate({
-          responseText: fallbackRes.text,
-          replyLanguage: languagePolicy?.replyLanguage || 'Türkçe',
-          qualityGateLocale: languagePolicy?.qualityGateLocale || 'tr',
-          qgOptions
-        });
-        aiResponse.text = fallbackQG.morphologyCorrectedText || fallbackRes.text;
-
+      if (orchestratorResult.qualityGateFailed) {
+        this.log.warn(`[DEBOUNCE_WORKER] Quality gate blocked final. Cancelling send. Reason: ${orchestratorResult.qualityGateReason}`, { traceId });
         await db.executeSafe({
-          text: `INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
-                 VALUES ($1, $2, $3, $4)`,
-          values: [
-            tenantId,
-            'FINAL_MORPHOLOGY_FAIL_FALLBACK_APPLIED',
-            `Final morphology check failed in delayed path. Applying safe fallback. Original: "${finalQG.reason}", Fallback: "${aiResponse.text}"`,
-            JSON.stringify({
-              conversationId,
-              phoneNumber,
-              originalText: finalQG.reason,
-              fallbackText: aiResponse.text,
-              timestamp: new Date().toISOString()
-            })
-          ]
+          text: `UPDATE conversations SET status = 'human' WHERE id = $1 AND tenant_id = $2`,
+          values: [conversationId, tenantId]
         });
+        return;
       }
+
+      aiResponse = {
+        text: orchestratorResult.text,
+        finishReason: 'STOP',
+        latencyMs: orchestratorResult.latencyMs,
+        modelUsed: orchestratorResult.modelUsed,
+        inputTokens: orchestratorResult.inputTokens || 0,
+        outputTokens: orchestratorResult.outputTokens || 0
+      };
 
       // Format & sanitize response
       let finalResponseText = aiResponse.text;

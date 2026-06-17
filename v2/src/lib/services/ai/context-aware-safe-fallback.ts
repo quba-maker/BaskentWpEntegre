@@ -128,6 +128,36 @@ export class ContextAwareSafeFallbackResolver {
       }
     }
 
+    const isFactsRecallQuery = ['hastalıklar neydi', 'hastaliklar neydi', 'şikayetim neydi', 'sikayetim neydi', 'geçmiş şikayetler', 'gecmis sikayetler', 'ne yazmıştım', 'ne yazmistim', 'hangi hastalık', 'hangi hastalik', 'hastaliklarim neydi', 'hastalıklarım neydi'].some(kw => lowerInbound.includes(kw));
+
+    if (isFactsRecallQuery) {
+      const { ConversationKnownFactsResolver } = require('./conversation-known-facts-resolver');
+      const factsObj = ConversationKnownFactsResolver.resolve({
+        history,
+        opportunity: unifiedContext?.opportunity,
+        profile: unifiedContext?.profile,
+        latestForm: unifiedContext?.latestForm,
+        conversation: unifiedContext?.conversation,
+        patient_known_facts: unifiedContext?.patient_known_facts
+      });
+      const factsList = ConversationKnownFactsResolver.formatFacts(factsObj);
+      
+      let text = '';
+      if (factsList.length > 0) {
+        text = `Kayıtlarımızdaki bilgileriniz şu şekildedir:\n\n` + factsList.map((f: string) => `• ${f}`).join('\n');
+      } else {
+        text = `Kayıtlarımızda henüz kayıtlı bir şikayet veya hastalık bilgisi bulunmamaktadır. Yardımcı olabilmem için şikayetinizi veya gitmek istediğiniz bölümü paylaşabilir misiniz?`;
+      }
+      return {
+        text,
+        sector: resolvedIndustry,
+        hasFormContext,
+        hasComplaint,
+        finalPath: 'facts_recall_bypass',
+        detectedIntent: 'complaint_detail' as any
+      };
+    }
+
     // Name Intent detection ("ismim/adım [X]", "ben [X]" or profile name match)
     const nameIntroductions = [
       /\bismim\s+([a-zA-ZçıüşöğİÇIÜŞÖĞ\s]+)/i,
@@ -417,9 +447,9 @@ export class ContextAwareSafeFallbackResolver {
 
       if (hasPersona && isAiOrBotOrPromptQuestion) {
         if (hasComplaint) {
-          text = `Pardon, nereden çıkardınız bunu? Ben ${pName}, ${orgName}’nden sizinle ilgileniyorum. ${hasMother ? 'Annenizin ' : ''}${complaint} süreciyle ilgili sorularınızı yazarsanız net cevaplayayım.`;
+          text = `Ben size süreç ve başvuru konusunda yardımcı olmak için buradayım. Ben ${pName}, ${orgName}’nden sizinle ilgileniyorum. İç sistem detaylarını paylaşamam; ama şikayetinizi, uygun bölümü ve randevu sürecini netleştirebiliriz.`;
         } else {
-          text = `Pardon, nereden çıkardınız bunu? Ben ${pName}, ${orgName}’nden sizinle ilgileniyorum. Sorunuzu yazarsanız net cevaplayayım.`;
+          text = `Ben size süreç ve başvuru konusunda yardımcı olmak için buradayım. Ben ${pName}, ${orgName}’nden sizinle ilgileniyorum. İç sistem detaylarını paylaşamam; ama şikayetinizi, uygun bölümü ve randevu sürecini netleştirebiliriz.`;
         }
       } else {
         if (hasComplaint) {

@@ -1,8 +1,20 @@
 import { isValidPatientName } from '@/lib/utils/patient-name-resolver';
 
+export type RelatedPersonFact = {
+  relation: 'mother' | 'father' | 'spouse' | 'relative' | 'acquaintance';
+  topic?: string;
+  urgency?: string;
+};
+
 export type PatientKnownFacts = {
   name?: string;
-  complaint?: string;
+  complaint?: string; // Backwards compatibility getter/field
+  self?: {
+    complaint?: string;
+    symptoms?: string[];
+    location?: string;
+  };
+  relatedPersons?: RelatedPersonFact[];
   availableTime?: string;
   askedDoctors?: boolean;
   askedProcess?: boolean;
@@ -11,6 +23,10 @@ export type PatientKnownFacts = {
   hasLinkedForm?: boolean;
   formTopic?: string;
   countryOrLanguageHint?: string;
+  scheduledCall?: {
+    time?: string;
+    note?: string;
+  };
 };
 
 export class ConversationKnownFactsResolver {
@@ -42,10 +58,24 @@ export class ConversationKnownFactsResolver {
       for (const fact of patient_known_facts) {
         if (typeof fact === 'string') {
           const lowerFact = fact.toLowerCase();
-          if (lowerFact.includes('şikayet') || lowerFact.includes('sikayet')) {
+          if (lowerFact.includes('yakın') || lowerFact.includes('yakin') || lowerFact.includes('anne') || lowerFact.includes('baba') || lowerFact.includes('eşi') || lowerFact.includes('esi')) {
+            const match = fact.match(/(?:konusu|şikayeti|şikayet|sikayet):\s*(.+)/i);
+            const topic = match && match[1] ? match[1].replace(/[.]+$/, '').trim() : fact;
+            let relation: 'mother' | 'father' | 'spouse' | 'relative' = 'relative';
+            if (lowerFact.includes('anne')) relation = 'mother';
+            else if (lowerFact.includes('baba')) relation = 'father';
+            else if (lowerFact.includes('eşi') || lowerFact.includes('esi')) relation = 'spouse';
+            
+            if (!facts.relatedPersons) facts.relatedPersons = [];
+            facts.relatedPersons.push({
+              relation,
+              topic
+            });
+          } else if (lowerFact.includes('şikayet') || lowerFact.includes('sikayet')) {
             const match = fact.match(/(?:şikayeti|sikayeti|şikayet|sikayet):\s*(.+)/i);
             if (match && match[1]) {
-              facts.complaint = match[1].replace(/[.]+$/, '').trim();
+              if (!facts.self) facts.self = {};
+              facts.self.complaint = match[1].replace(/[.]+$/, '').trim();
             }
           }
           if (lowerFact.includes('adı') || lowerFact.includes('adi') || lowerFact.includes('hastanın adı') || lowerFact.includes('hastanin adi')) {
@@ -135,51 +165,116 @@ export class ConversationKnownFactsResolver {
       facts.name = upperFirst + resolvedName.slice(1);
     }
 
-    // 3. Resolve Complaint
-    let resolvedComplaint = '';
-    
-    // Check opportunity summary or metadata
-    if (opportunity?.metadata?.complaint) {
-      resolvedComplaint = String(opportunity.metadata.complaint).trim();
+    // 3. Resolve Self & Related Persons facts
+    const self: { complaint?: string; symptoms: string[]; location?: string } = {
+      symptoms: []
+    };
+    const relatedPersons: RelatedPersonFact[] = [];
+
+    if (facts.countryOrLanguageHint) {
+      self.location = facts.countryOrLanguageHint;
     }
 
-    // Check form raw data
-    if (!resolvedComplaint && latestForm?.data) {
-      const data = typeof latestForm.data === 'string' ? (() => {
-        try { return JSON.parse(latestForm.data); } catch { return {}; }
-      })() : latestForm.data;
-      const formComplaint = data?.sikayet || data?.şikayet || data?.şikayetiniz_nedir || data?.sikayetiniz_nedir || '';
-      if (formComplaint) {
-        resolvedComplaint = String(formComplaint).trim();
-      }
-    }
-
-    // Scan history for complaint keywords (last message takes precedence)
-    const complaintKeywords = [
-      { kw: 'bel fıtığı', canonical: 'bel fıtığı' },
-      { kw: 'bel fitigi', canonical: 'bel fıtığı' },
-      { kw: 'boyun fıtığı', canonical: 'boyun fıtığı' },
-      { kw: 'boyun fitigi', canonical: 'boyun fıtığı' },
-      { kw: 'fıtık', canonical: 'fıtık' },
-      { kw: 'fitik', canonical: 'fıtık' }
+    const relationshipMapping = [
+      { keys: ['annem', 'annemin', 'annesi', 'anne'], relation: 'mother' as const, label: 'Annesi' },
+      { keys: ['babam', 'babamın', 'babası', 'baba'], relation: 'father' as const, label: 'Babası' },
+      { keys: ['eşim', 'eşimin', 'eşi', 'karım', 'kocam', 'esim', 'esimin', 'esi'], relation: 'spouse' as const, label: 'Eşi' },
+      { keys: ['kardeşim', 'abim', 'ablam', 'çocuğum', 'oğlum', 'kızım', 'teyzem', 'halam', 'dayım', 'amcam', 'kardesim', 'cocugum', 'oglum', 'kizim'], relation: 'relative' as const, label: 'Yakını' },
+      { keys: ['arkadaşım', 'tanıdığım', 'biri', 'arkadasim', 'tanidigim'], relation: 'acquaintance' as const, label: 'Tanıdığı' }
     ];
 
-    if (!resolvedComplaint && history.length > 0) {
-      for (let i = history.length - 1; i >= 0; i--) {
-        const m = history[i];
-        if (m.role !== 'user' || !m.content) continue;
-        const lowerContent = m.content.toLowerCase();
-        const found = complaintKeywords.find(item => lowerContent.includes(item.kw));
-        if (found) {
-          resolvedComplaint = found.canonical;
-          break;
+    const symptomKeywords = ['ağrı', 'agri', 'uyuşma', 'uyusma', 'fıtık', 'fitik', 'sancı', 'sanci', 'lezyon', 'kist', 'ağrısı', 'agrisi'];
+
+    for (const m of history) {
+      if (m.role !== 'user' || !m.content) continue;
+      const lower = m.content.toLowerCase();
+
+      // Extract symptoms
+      for (const kw of symptomKeywords) {
+        if (lower.includes(kw) && !self.symptoms.includes(kw)) {
+          self.symptoms.push(kw);
+        }
+      }
+
+      // Check if location is mentioned, e.g. "Kaliforniya'dan yazıyorum"
+      const locMatch = m.content.match(/\b([A-ZÇĞİÖŞÜa-zçğışöü]+)'?(?:dan|den|danım|denim|dayım|deyim|ta|te|tan|ten|dan yazıyorum|den yazıyorum)\b/i);
+      if (locMatch && locMatch[1]) {
+        const candidate = locMatch[1].trim();
+        const ignoreList = ['ben', 'sen', 'biz', 'siz', 'onlar', 'bunu', 'şunu', 'orada', 'burada', 'nereden', 'oradan', 'buradan'];
+        if (candidate.length > 3 && !ignoreList.includes(candidate.toLowerCase())) {
+          self.location = candidate;
+        }
+      }
+
+      // Check relationship mentions
+      let foundRelation = false;
+      for (const rel of relationshipMapping) {
+        if (rel.keys.some(key => lower.includes(key))) {
+          foundRelation = true;
+          let topic: string | undefined = undefined;
+          
+          if (lower.includes('nakil') || lower.includes('transplant') || lower.includes('karaciğer') || lower.includes('böbrek') || lower.includes('karaciger') || lower.includes('bobrek')) {
+            if (lower.includes('karaciğer') || lower.includes('karaciger') || lower.includes('liver')) topic = 'Karaciğer nakli';
+            else if (lower.includes('böbrek') || lower.includes('bobrek') || lower.includes('kidney')) topic = 'Böbrek nakli';
+            else topic = 'Organ nakli';
+          } else if (lower.includes('fıtık') || lower.includes('fitik')) {
+            if (lower.includes('bel')) topic = 'Bel fıtığı';
+            else if (lower.includes('boyun')) topic = 'Boyun fıtığı';
+            else topic = 'Fıtık';
+          }
+
+          let urgency = undefined;
+          if (lower.includes('acil') || lower.includes('hemen') || lower.includes('kötü') || lower.includes('kotu')) {
+            urgency = 'high';
+          }
+
+          const existing = relatedPersons.find(rp => rp.relation === rel.relation);
+          if (existing) {
+            if (topic) existing.topic = topic;
+            if (urgency) existing.urgency = urgency;
+          } else {
+            relatedPersons.push({
+              relation: rel.relation,
+              topic,
+              urgency
+            });
+          }
+        }
+      }
+
+      // If no relationship was mentioned, check if self complaint
+      if (!foundRelation) {
+        if (lower.includes('fıtık') || lower.includes('fitik') || lower.includes('belim') || lower.includes('boynum')) {
+          if (lower.includes('bel')) self.complaint = 'Bel fıtığı';
+          else if (lower.includes('boyn')) self.complaint = 'Boyun fıtığı';
+          else self.complaint = 'Fıtık';
+        } else if (lower.includes('kalp') || lower.includes('anjiyo') || lower.includes('bypass') || lower.includes('kardiyo')) {
+          self.complaint = 'Kardiyoloji';
         }
       }
     }
 
-    if (resolvedComplaint) {
-      facts.complaint = resolvedComplaint;
+    // Fallbacks from opportunity/form
+    if (!self.complaint) {
+      if (opportunity?.metadata?.complaint) {
+        self.complaint = opportunity.metadata.complaint;
+      } else if (latestForm?.data) {
+        const data = typeof latestForm.data === 'string' ? (() => { try { return JSON.parse(latestForm.data); } catch { return {}; } })() : latestForm.data;
+        const formComplaint = data?.sikayet || data?.şikayet || data?.şikayetiniz_nedir || data?.sikayetiniz_nedir;
+        if (formComplaint) self.complaint = formComplaint;
+      }
     }
+
+    if (facts.self) {
+      self.complaint = self.complaint || facts.self.complaint;
+      self.location = self.location || facts.self.location;
+      self.symptoms = self.symptoms.length > 0 ? self.symptoms : (facts.self.symptoms || []);
+    }
+    facts.self = self;
+    if (facts.relatedPersons && facts.relatedPersons.length > 0) {
+      relatedPersons.push(...facts.relatedPersons);
+    }
+    facts.relatedPersons = relatedPersons;
 
     // 4. Resolve Available Time / Travel Date
     let resolvedTime = opportunity?.travel_date || opportunity?.metadata?.travel_date || '';
@@ -207,10 +302,8 @@ export class ConversationKnownFactsResolver {
         if (m.role !== 'user' || !m.content) continue;
         const lowerContent = m.content.toLowerCase();
         
-        // Find if user mentions a month
         const foundMonth = months.find(mo => lowerContent.includes(mo));
         if (foundMonth) {
-          // Check for contextual indicators
           if (lowerContent.includes('ayında') || lowerContent.includes('gelebilirim') || lowerContent.includes('iznim var') || lowerContent.includes('planlıyorum') || lowerContent.includes('düşünüyorum')) {
             const canonicalMonth = foundMonth === 'agustos' ? 'ağustos' : (foundMonth === 'subat' ? 'şubat' : (foundMonth === 'mayis' ? 'mayıs' : (foundMonth === 'eylul' ? 'eylül' : (foundMonth === 'kasim' ? 'kasım' : foundMonth))));
             resolvedTime = `${canonicalMonth} ayı`;
@@ -254,14 +347,15 @@ export class ConversationKnownFactsResolver {
       deptSet.add(dept.trim());
     }
 
-    // Scan history for departments
     const departmentsList = [
       'Beyin ve Sinir Cerrahisi',
       'Fizik Tedavi ve Rehabilitasyon',
       'Fizik Tedavi',
       'Kardiyoloji',
       'Dahiliye',
-      'Ortopedi'
+      'Ortopedi',
+      'Organ Nakli Merkezi',
+      'Plastik ve Rekonstrüktif Cerrahi'
     ];
 
     for (const m of history) {
@@ -277,6 +371,20 @@ export class ConversationKnownFactsResolver {
       facts.previousDepartments = Array.from(deptSet);
     }
 
+    // 7. Resolve Scheduled Call
+    const lastCallAction = opportunity?.outreachContext?.lastCallAction || conversation?.outreachContext?.lastCallAction;
+    const lastCallNote = opportunity?.outreachContext?.lastCallNote || conversation?.outreachContext?.lastCallNote;
+    if (lastCallAction) {
+      facts.scheduledCall = {
+        time: lastCallAction,
+        note: lastCallNote || undefined
+      };
+    }
+
+    if (facts.self?.complaint) {
+      facts.complaint = facts.self.complaint;
+    }
+
     return facts;
   }
 
@@ -289,9 +397,32 @@ export class ConversationKnownFactsResolver {
     if (facts.name) {
       list.push(`Hastanın adı: ${facts.name}.`);
     }
-    if (facts.complaint) {
-      list.push(`Şikayeti: ${facts.complaint}.`);
+
+    // Self facts
+    if (facts.self) {
+      if (facts.self.complaint) {
+        list.push(`Kendisinin şikayeti: ${facts.self.complaint}.`);
+      }
+      if (facts.self.symptoms && facts.self.symptoms.length > 0) {
+        list.push(`Kendisinin belirttiği şikayet belirtileri: ${facts.self.symptoms.join(', ')}.`);
+      }
+      if (facts.self.location) {
+        list.push(`Kendisinin bulunduğu konum: ${facts.self.location}.`);
+      }
     }
+
+    // Related person facts
+    if (facts.relatedPersons && facts.relatedPersons.length > 0) {
+      for (const rp of facts.relatedPersons) {
+        const relLabel = rp.relation === 'mother' ? 'Annesi' 
+                       : rp.relation === 'father' ? 'Babası'
+                       : rp.relation === 'spouse' ? 'Eşi'
+                       : rp.relation === 'relative' ? 'Yakını'
+                       : 'Tanıdığı';
+        list.push(`Yakını (${relLabel}) konusu: ${rp.topic || 'Belirtilmedi'}${rp.urgency ? ` (Durum acil)` : ''}.`);
+      }
+    }
+
     if (facts.availableTime) {
       list.push(`Gelmek istediği/uygun olduğu tarih aralığı: ${facts.availableTime}.`);
     }
@@ -310,8 +441,11 @@ export class ConversationKnownFactsResolver {
     if (facts.hasLinkedForm) {
       list.push(`Sistemde bağlı bir form başvurusu bulunmaktadır${facts.formTopic ? ` (Konu: ${facts.formTopic})` : ''}.`);
     }
-    if (facts.countryOrLanguageHint) {
+    if (facts.countryOrLanguageHint && !facts.self?.location) {
       list.push(`Hastanın bulunduğu ülke veya dil ipucu: ${facts.countryOrLanguageHint}.`);
+    }
+    if (facts.scheduledCall) {
+      list.push(`Arama durumu/notu: ${facts.scheduledCall.time}${facts.scheduledCall.note ? ` - Not: ${facts.scheduledCall.note}` : ''}.`);
     }
     return list;
   }

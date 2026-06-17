@@ -2,7 +2,7 @@
 
 import { withActionGuard } from "@/lib/core/action-guard";
 import { logAudit } from "@/lib/audit";
-import type { ChatMessage } from "@/lib/services/ai/orchestrator";
+
 
 // ==========================================
 // QUBA AI — Bot Actions (V2-Native)
@@ -179,7 +179,7 @@ export async function saveBotSetting(key: string, value: string) {
       } else if (key === 'working_hours') {
         // Write business hours to channel_ai_profiles
         let parsed: any = { enabled: false };
-        try { parsed = JSON.parse(value); } catch(e) {}
+        try { parsed = JSON.parse(value); } catch {}
         
         await ctx.db.executeSafe({
           text: `UPDATE channel_ai_profiles SET business_hours_json = $1, updated_at = NOW()
@@ -216,7 +216,7 @@ export async function saveBotSetting(key: string, value: string) {
                    DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at`,
             values: [key, value, ctx.tenantId]
           });
-        } catch (e) {
+        } catch {
           // Non-fatal: V1 dual-write failure doesn't block V2
         }
       }
@@ -243,7 +243,7 @@ export async function saveBotSetting(key: string, value: string) {
             changedBy: ctx.email || 'admin',
             changeSummary: `${key} güncellendi (V2)`,
           });
-        } catch (e) {
+        } catch {
           // Non-fatal
         }
       }
@@ -259,7 +259,8 @@ export async function saveBotSetting(key: string, value: string) {
 export async function getDefaultPrompts() {
   return withActionGuard(
     { actionName: 'getDefaultPrompts' },
-    async (ctx) => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    async (_ctx) => {
       const { defaultPrompts } = await import('@/lib/domain/conversation/prompts');
       return {
         whatsapp: defaultPrompts.whatsapp,
@@ -497,7 +498,7 @@ export async function testBotPrompt(
       const maxTokens = profile?.max_response_tokens || 1000;
 
       // 5. Build dynamic system prompt using PromptBuilder
-      const { PromptBuilder } = await import("@/lib/services/ai/prompt-builder");
+
       const crypto = require('crypto');
       const rawSystemPrompt = activePrompt.prompt_text || '';
       const promptHash = crypto.createHash('sha256').update(rawSystemPrompt).digest('hex');
@@ -534,41 +535,23 @@ export async function testBotPrompt(
         }
       };
 
-      const systemPromptContent = PromptBuilder.buildSystemPrompt(mockBrain as any, 'lead', false, {
-        history: messages,
-        currentMessageText: messages[messages.length - 1]?.content || ''
+      const { AIResponseOrchestrator } = await import("@/lib/services/ai/ai-response-orchestrator");
+      const historyMessages = messages.slice(0, -1).map(m => ({
+        role: m.role as 'user' | 'assistant',
+        content: m.content
+      }));
+      const lastMessage = messages[messages.length - 1];
+
+      const response = await AIResponseOrchestrator.run({
+        tenantId: ctx.tenantId,
+        phoneNumber: 'sandbox_test_user',
+        inboundText: lastMessage?.content || '',
+        brain: mockBrain as any,
+        channel: 'whatsapp',
+        channelId,
+        sandbox: true,
+        history: historyMessages
       });
-
-      // 6. Build Message History for LLM
-      const { AIOrchestrator } = await import("@/lib/services/ai/orchestrator");
-      const formattedMessages: ChatMessage[] = [
-        { role: 'system', content: systemPromptContent },
-        ...messages.map(m => ({
-          role: m.role as 'user' | 'assistant',
-          content: m.content
-        }))
-      ];
-
-      // 7. Execute simulation in AIOrchestrator
-      const orchestrator = new AIOrchestrator();
-      const config = {
-        provider: 'gemini' as const,
-        modelId: aiModel,
-        apiKey: GEMINI_API_KEY,
-        temperature: 0.7,
-        maxTokens: maxTokens
-      };
-
-      const startTime = Date.now();
-      const response = await orchestrator.generateResponse(
-        formattedMessages,
-        config,
-        ctx.tenantId,
-        'sandbox_test_conversation',
-        { sandbox: true }
-      );
-
-      const latencyMs = Date.now() - startTime;
 
       return {
         success: true,
@@ -578,7 +561,7 @@ export async function testBotPrompt(
           promptVersion: activePrompt.version,
           botGroupId,
           channelId: channelId || null,
-          latencyMs,
+          latencyMs: response.latencyMs,
           sandboxMode: true,
           toolExecution: 'sandbox',
           responseDelaySeconds: profile?.response_delay_seconds !== null && profile?.response_delay_seconds !== undefined ? profile.response_delay_seconds : 5,

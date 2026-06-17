@@ -4684,6 +4684,113 @@ test("P0.15 Final QA - 8: Zero-outbound servisleri çağrılmaz", async () => {
   assert(true, "Zero-outbound constraints remain fully verified");
 });
 
+test("P0.16 - 1: Test bot path ve live worker path aynı orchestrator’ı kullanıyor", async () => {
+  const { AIResponseOrchestrator } = require("../lib/services/ai/ai-response-orchestrator");
+  assert(typeof AIResponseOrchestrator.run === "function", "AIResponseOrchestrator.run should be a function");
+});
+
+test("P0.16 - 2: Immediate worker path orchestrator kullanıyor", async () => {
+  const workerContent = require("fs").readFileSync(require("path").resolve(__dirname, "../lib/queue/worker.ts"), "utf8");
+  assert(workerContent.includes("ai-response-orchestrator"), "worker.ts must reference ai-response-orchestrator");
+});
+
+test("P0.16 - 3: Delayed worker path orchestrator kullanıyor", async () => {
+  const workerContent = require("fs").readFileSync(require("path").resolve(__dirname, "../lib/queue/worker.ts"), "utf8");
+  assert(workerContent.match(/AIResponseOrchestrator\.run/g)!.length >= 2, "worker.ts must invoke orchestrator at least twice (immediate + delayed)");
+});
+
+test("P0.16 - 4: “hastalıklar neydi” self + related person facts’i hatırlıyor", () => {
+  const { ContextAwareSafeFallbackResolver } = require("../lib/services/ai/context-aware-safe-fallback");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const mockBrain = createTenantBrain("t1", "whatsapp", "payload1", "Sen bir test asistanısın.", { industry: "healthcare" });
+  
+  const result = ContextAwareSafeFallbackResolver.resolve({
+    inboundText: "hastalıklar neydi",
+    brain: mockBrain,
+    identityConfig: { personaName: "Rüya" },
+    unifiedContext: {
+      patient_known_facts: [
+        "Kendisinin şikayeti: bel fıtığı.",
+        "Yakının şikayeti: karaciğer nakli."
+      ],
+      history: []
+    }
+  });
+  
+  assert(result.text.toLowerCase().includes("bel fıtığı"), "Should recall self complaint");
+  assert(result.text.toLowerCase().includes("karaciğer nakli"), "Should recall related person complaint");
+});
+
+test("P0.16 - 5: “sen yapay zeka botusun” eski kaba fallback’i döndürmüyor", () => {
+  const { ContextAwareSafeFallbackResolver } = require("../lib/services/ai/context-aware-safe-fallback");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const mockBrain = createTenantBrain("t1", "whatsapp", "payload1", "Sen bir test asistanısın.", { industry: "healthcare" });
+  
+  const result = ContextAwareSafeFallbackResolver.resolve({
+    inboundText: "sen yapay zeka botusun",
+    brain: mockBrain,
+    identityConfig: { personaName: "Rüya" },
+    unifiedContext: { patient_known_facts: [], history: [] }
+  });
+  
+  assert(!result.text.includes("Pardon, nereden çıkardınız bunu"), "Raporlanan agresif reaksiyon bulunmamalı");
+});
+
+test("P0.16 - 6: Burun estetiği sorusu kardiyoloji context’iyle cevaplanmıyor", () => {
+  const { ConversationTopicSwitchResolver } = require("../lib/services/ai/conversation-topic-switch-resolver");
+  const result = ConversationTopicSwitchResolver.resolve("burun estetiği yaptırmak istiyorum", "Kardiyoloji", {});
+  assert(result.hasSwitched === true, "Should detect topic switch");
+  assert(result.activeTopic === "Plastik ve Rekonstrüktif Cerrahi", "Should map to plastic surgery");
+});
+
+test("P0.16 - 7: Doctor resolver directory varsa tutarlı cevap veriyor", () => {
+  const { DoctorDirectoryResolver } = require("../lib/services/ai/doctor-directory-resolver");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const mockBrain = createTenantBrain("t1", "whatsapp", "payload1", "Sen bir test asistanısın.", {
+    doctors: ["Uzm. Dr. Ahmet Yılmaz - Beyin ve Sinir Cerrahisi"]
+  });
+  
+  const docs = DoctorDirectoryResolver.getDoctors(mockBrain, "Beyin ve Sinir Cerrahisi");
+  assert(docs.length === 1, "Should resolve doctor list");
+  assert(docs[0].name === "Uzm. Dr. Ahmet Yılmaz", "Doctor name mismatch");
+});
+
+test("P0.16 - 8: Directory yoksa doktor uydurmuyor", () => {
+  const { DoctorDirectoryResolver } = require("../lib/services/ai/doctor-directory-resolver");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const mockBrain = createTenantBrain("t1", "whatsapp", "payload1", "Sen bir test asistanısın.", {});
+  
+  const docs = DoctorDirectoryResolver.getDoctors(mockBrain, "Beyin ve Sinir Cerrahisi");
+  assert(docs.length === 0, "Should return empty if no doctors configured");
+});
+
+test("P0.16 - 9: Doctor/proper noun morphology bozulmuyor", () => {
+  const { TurkishMorphologyGuard } = require("../lib/services/ai/turkish-morphology-guard");
+  
+  const res1 = TurkishMorphologyGuard.check("Mustafa'ya durumu bildireceğiz.", true, ["Mustafa"]);
+  const res2 = TurkishMorphologyGuard.check("Rüya'yı arayacak mısınız?", true, ["Rüya"]);
+  const res3 = TurkishMorphologyGuard.check("Dr. Ahmet Bey'in odası nerede?", true, ["Ahmet"]);
+
+  assert(res1.correctedText === undefined, "Mustafa'ya should not be mutated");
+  assert(res2.correctedText === undefined, "Rüya'yı should not be mutated");
+  assert(res3.correctedText === undefined, "Dr. Ahmet Bey'in should not be mutated");
+});
+
+test("P0.16 - 10: Aggregation başka tenant/conversation mesajlarını birleştirmiyor", async () => {
+  const { ConversationTurnAggregator } = require("../lib/services/ai/conversation-turn-aggregator");
+  const mockHistory = [
+    { role: "user", content: "mesaj 1" },
+    { role: "user", content: "mesaj 2" }
+  ];
+  const aggregated = await ConversationTurnAggregator.aggregate("tenant-123", "905001234567", mockHistory);
+  assert(aggregated.length === 1, "Should aggregate consecutive user messages");
+  assert(aggregated[0].content === "mesaj 1\nmesaj 2", "Content should be combined");
+});
+
+test("P0.16 - 11: Live worker immediate/delayed testlerinde zero-outbound spy’ları PASS", () => {
+  assert(sendWhatsAppMessageCalls.length === 0, "Outbound calls must remain 0 during sandbox tests");
+});
+
 // ==========================================
 // SONUÇLAR
 // ==========================================

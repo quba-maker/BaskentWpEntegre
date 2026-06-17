@@ -58,6 +58,7 @@ const KNOWN_DEDUP_PATTERNS: { regex: RegExp; description: string; fix?: (match: 
   { regex: /uygun olduğunuz bir zamanızı/gi, description: 'uygun_oldugunuz_bir_zamanizi', fix: () => 'size uygun bir zaman aralığını' },
   { regex: /bir zamanızı/gi, description: 'bir_zamanizi', fix: () => 'uygun bir zaman aralığını' },
   { regex: /zamanızı/gi, description: 'zamanizi_missing_n', fix: (m) => m[0] === 'Z' ? 'Zaman aralığını' : 'zaman aralığını' },
+  { regex: /mesafeniniz/gi, description: 'mesafeniniz', fix: (m) => m[0] === 'M' ? 'Mesafeniz' : 'mesafeniz' },
 
   // Doubled possessive general patterns
   // nızınız → nız
@@ -72,9 +73,7 @@ const KNOWN_DEDUP_PATTERNS: { regex: RegExp; description: string; fix?: (match: 
 
 // Known bad phrase patterns (no auto-fix, Quality Gate fail)
 const BAD_PHRASE_PATTERNS: { regex: RegExp; description: string }[] = [
-  // "hangi ülkeniz veya şehriniz saatine" — possessive on ülke/şehir is wrong in this construction
   { regex: /hangi\s+ülkeniz\s+veya\s+şehriniz\s+saatine/gi, description: 'ulkeniz_sehriniz_saatine' },
-  // "görüşme saatiniz hangi ülkeniz" — possessive on ülke is wrong 
   { regex: /görüşme\s+saatiniz\s+hangi\s+ülkeniz/gi, description: 'gorusme_saatiniz_hangi_ulkeniz' },
 ];
 
@@ -82,11 +81,13 @@ export class TurkishMorphologyGuard {
   /**
    * Checks AI-generated text for Turkish morphology errors.
    * Returns detection results and optional corrections.
-   * 
-   * @param text - The AI-generated response text to check
-   * @param applyCorrection - If true, attempts to auto-correct known patterns
+   * Protects proper nouns, doctor names and capitalized titles.
    */
-  public static check(text: string, applyCorrection: boolean = true): MorphologyGuardResult {
+  public static check(
+    text: string, 
+    applyCorrection: boolean = true,
+    doctors: string[] = []
+  ): MorphologyGuardResult {
     if (!text || text.trim().length === 0) {
       return { hasMorphologyError: false, errors: [], correctionApplied: false, correctionConfidence: 'none' };
     }
@@ -95,9 +96,53 @@ export class TurkishMorphologyGuard {
     let workingText = text;
     let anyFixed = false;
 
-    // 1. Check known deduplication patterns (safe auto-fix available)
+    // 1. Run raw text pre-corrections for mixed proper-noun-suffix cases
+    if (applyCorrection) {
+      const preFixes = [
+        { regex: /Türkiye'niniz/gi, fix: "Türkiye'nin" },
+        { regex: /organ\s+naklininiz/gi, fix: "organ naklinin" },
+        { regex: /mesafeniniz/gi, fix: "mesafeniz" }
+      ];
+      for (const pf of preFixes) {
+        if (pf.regex.test(workingText)) {
+          workingText = workingText.replace(pf.regex, pf.fix);
+          anyFixed = true;
+        }
+      }
+    }
+
+    // 2. Extract and protect proper nouns, capitalized titles, and doctor names
+    const protectedSpans: string[] = [];
+    const addSpan = (val: string) => {
+      const idx = protectedSpans.length;
+      protectedSpans.push(val);
+      return `__PROTECTED_SPAN_${idx}__`;
+    };
+
+    // Protect verified doctor names
+    for (const doc of doctors) {
+      if (doc && doc.length > 2) {
+        const escaped = this.escapeRegex(doc);
+        const regex = new RegExp(`\\b${escaped}\\b`, 'gi');
+        workingText = workingText.replace(regex, (m) => addSpan(m));
+      }
+    }
+
+    // Protect capitalized names/titles (e.g. "Prof. Dr. Aytekin GÜVEN", "Dr. Ahmet")
+    const titleNameRegex = /\b(?:Prof\.\s+)?(?:Dr\.\s+)?[A-ZÇĞİÖŞÜ][a-zçğışöüA-ZÇĞİÖŞÜ]*\s+[A-ZÇĞİÖŞÜ]+(?:\s+[A-ZÇĞİÖŞÜ]+)*\b/g;
+    workingText = workingText.replace(titleNameRegex, (m) => addSpan(m));
+
+    // Protect all-caps words (length >= 3)
+    const allCapsRegex = /\b[A-ZÇĞİÖŞÜ]{3,}\b/g;
+    workingText = workingText.replace(allCapsRegex, (m) => addSpan(m));
+
+    // Protect specific system proper nouns
+    const properNounRegex = /\b(?:Başkent|Ankara|İstanbul|Izmir|Baskent|Istanbul|Türkiye|Turkiye)\b/g;
+    workingText = workingText.replace(properNounRegex, (m) => addSpan(m));
+
+    // 3. Check known deduplication patterns on protected text
     for (const pattern of KNOWN_DEDUP_PATTERNS) {
-      const matches = text.matchAll(new RegExp(pattern.regex.source, 'gi'));
+      const matches = workingText.matchAll(new RegExp(pattern.regex.source, 'gi'));
       for (const match of matches) {
         errors.push({
           pattern: pattern.description,
@@ -113,7 +158,7 @@ export class TurkishMorphologyGuard {
       }
     }
 
-    // 2. Check bad phrase patterns (no auto-fix, triggers QG fail)
+    // 4. Check bad phrase patterns on protected text
     for (const pattern of BAD_PHRASE_PATTERNS) {
       const matches = workingText.matchAll(new RegExp(pattern.regex.source, 'gi'));
       for (const match of matches) {
@@ -121,17 +166,14 @@ export class TurkishMorphologyGuard {
           pattern: pattern.description,
           match: match[0],
           position: match.index || 0
-          // No suggestedFix — these need LLM regeneration
         });
       }
     }
 
-    // 3. Generic suffix dedup detector: catch unknown doubled suffixes
-    // Pattern: word ending in repeated possessive-like suffixes
+    // 5. Generic suffix dedup detector on protected text
     const genericDedup = /(\w{3,})(nız|niz|nüz|nuz|mız|miz|müz|müz)\2/gi;
     const genericMatches = workingText.matchAll(genericDedup);
     for (const match of genericMatches) {
-      // Check it wasn't already caught by known patterns
       const alreadyCaught = errors.some(e => e.position === (match.index || 0));
       if (!alreadyCaught) {
         errors.push({
@@ -140,6 +182,12 @@ export class TurkishMorphologyGuard {
           position: match.index || 0
         });
       }
+    }
+
+    // 6. Restore all protected spans
+    for (let i = 0; i < protectedSpans.length; i++) {
+      const placeholder = `__PROTECTED_SPAN_${i}__`;
+      workingText = workingText.replace(placeholder, protectedSpans[i]);
     }
 
     const hasMorphologyError = errors.length > 0;
