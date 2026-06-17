@@ -46,6 +46,82 @@ export class ContextAwareSafeFallbackResolver {
 
     const isHealthcareOrForm = isHealthcare || hasFormContext;
 
+    // CRITICAL: Prevent opportunity.summary leakage.
+    // Sourced strictly from patient_known_facts, NEVER from opportunity.summary directly.
+    let complaint = '';
+    let hasComplaint = false;
+    if (isHealthcareOrForm) {
+      const facts = unifiedContext?.patient_known_facts || [];
+      const rawFactsComplaint = facts.find((f: string) => f.toLowerCase().includes('şikayet') || f.toLowerCase().includes('sikayet'));
+      
+      if (rawFactsComplaint) {
+        const match = rawFactsComplaint.match(/(?:şikayeti|sikayeti|şikayet|sikayet):\s*(.+)/i);
+        if (match && match[1]) {
+          complaint = match[1].replace(/[.]+$/, '').trim();
+          hasComplaint = true;
+        }
+      }
+      
+      // Truncate complaint for clean message formatting
+      if (complaint.length > 50) {
+        complaint = complaint.substring(0, 50) + '...';
+      }
+    }
+
+    // Dynamic multi-intent international/remote patient check
+    const locations = [
+      { key: 'Almanya', keywords: ['almanya', 'almanyada', 'almanyadayım', 'almanyadayim', 'germany'] },
+      { key: 'Kaliforniya', keywords: ['amerika', 'usa', 'us', 'california', 'kaliforniya'] },
+      { key: 'Libya', keywords: ['libya'] },
+      { key: 'Irak', keywords: ['irak', 'iraq'] },
+      { key: 'İngiltere', keywords: ['ingiltere', 'london', 'londra', 'uk', 'england'] },
+      { key: 'Hollanda', keywords: ['hollanda', 'netherlands'] },
+      { key: 'Fransa', keywords: ['fransa', 'france'] },
+      { key: 'Avrupa', keywords: ['avrupa', 'europe'] },
+      { key: 'Yurt dışı', keywords: ['yurt dışı', 'yurt disi', 'yurt dışından', 'yurt disindan', 'yurtdısı', 'yurtdisi', 'international'] },
+      { key: 'Şehir dışı', keywords: ['şehir dışı', 'sehir disi', 'sehir dışı', 'şehir disi', 'sehir dışından', 'sehirlerarasi', 'şehirlerarası'] },
+      { key: 'Uzak', keywords: ['uzak', 'mesafe', 'konya uzak'] }
+    ];
+
+    const departmentsList = [
+      { key: 'Kardiyoloji', keywords: ['kardiyoloji', 'kalp', 'damar', 'cardio', 'heart'] },
+      { key: 'Ortopedi ve Travmatoloji', keywords: ['ortopedi', 'kemik', 'eklem', 'diz', 'kalça', 'kalca'] },
+      { key: 'Tüp Bebek', keywords: ['tüp bebek', 'tup bebek', 'tüpbebek', 'ivf'] },
+      { key: 'Plastik, Rekonstrüktif ve Estetik Cerrahi', keywords: ['estetik', 'burun estetiği', 'burun estetigi', 'rinoplasti', 'plastik cerrahi'] },
+      { key: 'Diş Hekimliği', keywords: ['diş', 'dental', 'implant', 'dis', 'diş hekimliği', 'dis hekimligi'] },
+      { key: 'Organ Nakli', keywords: ['organ nakli', 'organ', 'nakil', 'nakli'] },
+      { key: 'Beyin ve Sinir Cerrahisi (Bel Fıtığı)', keywords: ['bel fıtığı', 'bel fitigi', 'bel fitigi', 'bel fıtıgı'] }
+    ];
+
+    const matchedLocation = locations.find(l => l.keywords.some(kw => lowerInbound.includes(kw)));
+    const matchedDept = departmentsList.find(d => d.keywords.some(kw => lowerInbound.includes(kw)));
+    
+    const hasLogistics = ['ulasım', 'ulasim', 'ulaşım', 'surec', 'süreç', 'transfer', 'konaklama', 'otel', 'yol', 'bilet', 'gelem', 'konaklamak', 'logistics'].some(kw => lowerInbound.includes(kw));
+    const hasPrice = ['fiyat', 'ucret', 'ücret', 'maliyet', 'ne kadar', 'tutar', 'para', 'fiyatlar', 'fiyati', 'ucreti', 'pricing'].some(kw => lowerInbound.includes(kw));
+
+    if (matchedLocation && hasLogistics && hasPrice) {
+      const location = matchedLocation.key;
+      const dept = matchedDept?.key || 
+        unifiedContext?.opportunity?.department || 
+        unifiedContext?.conversation?.department || 
+        'Tedavi';
+
+      const text = `${location}'dan bizimle iletişime geçtiğiniz için teşekkür ederiz. ${dept} süreci, ulaşım ve fiyatlandırma ile ilgili bilgiler aşağıdadır:\n\n` +
+        `• **Ulaşım ve Konaklama**: Şehir dışı ve yurt dışından gelen hastalarımız için havalimanı transferi, konaklama ve süreç planlama koordinasyonu ekibimiz tarafından organize edilmektedir.\n` +
+        `• **${dept} Süreci**: İlgili branşımız bünyesinde tanı ve tedavi süreçleri uzman hekimlerimiz kontrolünde planlanmaktadır.\n` +
+        `• **Fiyatlandırma**: Tedavi fiyatları, hekimimizin yapacağı değerlendirme ve oluşturulacak kişiye özel tedavi planına göre belirlenmektedir.\n` +
+        `• **Sonraki Adım**: Detayları görüşmek ve planlama yapmak üzere hasta danışmanımızla telefon görüşmesi planlayabiliriz. Hangi gün ve saat aralığında görüşmek istersiniz? 🙏`;
+
+      return {
+        text,
+        sector: resolvedIndustry,
+        hasFormContext,
+        hasComplaint,
+        finalPath: 'multi_intent_healthcare_tourism_fallback',
+        detectedIntent: 'price_question'
+      };
+    }
+
     // Resolve pending slot and interpreted intent
     const history = unifiedContext?.history || [];
     const { PendingQuestionResolver } = require('./pending-question-resolver');
@@ -93,28 +169,6 @@ export class ContextAwareSafeFallbackResolver {
       : (identityConfig.personaName 
           ? `Merhaba, ${identityConfig.personaName} ben.` 
           : `Merhaba, ben ${isHealthcare ? 'hastane ' : ''}iletişim asistanıyım.`);
-
-    // CRITICAL: Prevent opportunity.summary leakage.
-    // Sourced strictly from patient_known_facts, NEVER from opportunity.summary directly.
-    let complaint = '';
-    let hasComplaint = false;
-    if (isHealthcareOrForm) {
-      const facts = unifiedContext?.patient_known_facts || [];
-      const rawFactsComplaint = facts.find((f: string) => f.toLowerCase().includes('şikayet') || f.toLowerCase().includes('sikayet'));
-      
-      if (rawFactsComplaint) {
-        const match = rawFactsComplaint.match(/(?:şikayeti|sikayeti|şikayet|sikayet):\s*(.+)/i);
-        if (match && match[1]) {
-          complaint = match[1].replace(/[.]+$/, '').trim();
-          hasComplaint = true;
-        }
-      }
-      
-      // Truncate complaint for clean message formatting
-      if (complaint.length > 50) {
-        complaint = complaint.substring(0, 50) + '...';
-      }
-    }
 
     // P0.11: Pre-process mother & complaint info for challenge/angry path
     const factsText = Array.isArray(unifiedContext?.patient_known_facts) ? unifiedContext.patient_known_facts.join(' ').toLowerCase() : '';

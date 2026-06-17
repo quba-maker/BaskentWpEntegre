@@ -1,5 +1,6 @@
 import { withTenantDB } from '@/lib/core/tenant-db';
 import { resolveActivePromptIdentityContext } from './active-prompt-context';
+import { getTraceContext } from '@/lib/core/trace-context';
 
 export interface OutboundGuardContext {
   tenantId: string;
@@ -16,6 +17,15 @@ export interface OutboundGuardContext {
   messageSource?: string;
   promptVersion?: string | number;
   systemPromptText?: string;
+  // Telemetry fields
+  workerPath?: string;
+  responseDedupeKey?: string;
+  aggregatedMessageCount?: number;
+  fallbackApplied?: boolean;
+  fallbackReason?: string;
+  doctorDirectoryHit?: boolean;
+  topicSwitchApplied?: boolean;
+  sandbox?: boolean;
 }
 
 export class FinalOutboundGuard {
@@ -30,6 +40,9 @@ export class FinalOutboundGuard {
     const isHealthcare = context.isHealthcare ?? (resolvedIndustry === 'healthcare' || resolvedIndustry === 'health');
     const industryKnown = !!context.industry;
 
+    const traceCtx = getTraceContext();
+    const resolvedWorkerPath = context.workerPath || traceCtx?.metadata?.workerPath || "unknown";
+
     // 0. Log that the guard is applied
     console.log(JSON.stringify({
       tag: "FINAL_OUTBOUND_GUARD_APPLIED",
@@ -43,28 +56,38 @@ export class FinalOutboundGuard {
       isHealthcare,
       lastUserIntent: context.lastUserIntent || 'unknown',
       messageSource: context.messageSource || 'unknown',
-      rawTextLogged: false
+      rawTextLogged: false,
+      orchestratorVersion: "P0.16-orchestrator-v1",
+      workerPath: resolvedWorkerPath,
+      responseDedupeKey: context.responseDedupeKey || "unknown",
+      aggregatedMessageCount: context.aggregatedMessageCount || 0,
+      fallbackApplied: context.fallbackApplied || false,
+      fallbackReason: context.fallbackReason || "none",
+      doctorDirectoryHit: context.doctorDirectoryHit || false,
+      topicSwitchApplied: context.topicSwitchApplied || false
     }));
 
-    FinalOutboundGuard.logToAudit(
-      tenantId,
-      'FINAL_OUTBOUND_GUARD_APPLIED',
-      `Outbound guard triggered. Input length: ${text ? text.length : 0}`,
-      {
-        tag: 'FINAL_OUTBOUND_GUARD_APPLIED',
+    if (!context.sandbox) {
+      FinalOutboundGuard.logToAudit(
         tenantId,
-        conversationId,
-        source: context.source || 'unknown',
-        intent: context.intent || 'unknown',
-        replyLanguage: context.replyLanguage || 'unknown',
-        industryKnown,
-        isHealthcare,
-        lastUserIntent: context.lastUserIntent || 'unknown',
-        messageSource: context.messageSource || 'unknown',
-        rawTextLogged: false
-      },
-      conversationId
-    );
+        'FINAL_OUTBOUND_GUARD_APPLIED',
+        `Outbound guard triggered. Input length: ${text ? text.length : 0}`,
+        {
+          tag: 'FINAL_OUTBOUND_GUARD_APPLIED',
+          tenantId,
+          conversationId,
+          source: context.source || 'unknown',
+          intent: context.intent || 'unknown',
+          replyLanguage: context.replyLanguage || 'unknown',
+          industryKnown,
+          isHealthcare,
+          lastUserIntent: context.lastUserIntent || 'unknown',
+          messageSource: context.messageSource || 'unknown',
+          rawTextLogged: false
+        },
+        conversationId
+      );
+    }
 
     if (!text || text.trim().length === 0) {
       return text;
@@ -289,24 +312,36 @@ export class FinalOutboundGuard {
         intent: context.intent || 'unknown',
         reasons: blockReasons,
         rawTextLogged: false,
-        fallbackLength: fallbackText.length
+        fallbackLength: fallbackText.length,
+        orchestratorVersion: "P0.16-orchestrator-v1",
+        workerPath: resolvedWorkerPath,
+        responseDedupeKey: context.responseDedupeKey || "unknown",
+        aggregatedMessageCount: context.aggregatedMessageCount || 0,
+        fallbackApplied: true,
+        fallbackReason: blockReasons.join(','),
+        doctorDirectoryHit: context.doctorDirectoryHit || false,
+        topicSwitchApplied: context.topicSwitchApplied || false
       }));
 
-      FinalOutboundGuard.logToAudit(
-        tenantId,
-        'FINAL_OUTBOUND_GUARD_BLOCKED',
-        `Blocked outbound text. Reasons: ${blockReasons.join(', ')}`,
-        {
-          tag: 'FINAL_OUTBOUND_GUARD_BLOCKED',
+      if (!context.sandbox) {
+        FinalOutboundGuard.logToAudit(
           tenantId,
-          conversationId,
-          intent: context.intent || 'unknown',
-          reasons: blockReasons,
-          rawTextLogged: false,
-          fallbackLength: fallbackText.length
-        },
-        conversationId
-      );
+          'FINAL_OUTBOUND_GUARD_BLOCKED',
+          `Blocked outbound text. Reasons: ${blockReasons.join(', ')}`,
+          {
+            tag: 'FINAL_OUTBOUND_GUARD_BLOCKED',
+            tenantId,
+            conversationId,
+            intent: context.intent || 'unknown',
+            reasons: blockReasons,
+            rawTextLogged: false,
+            fallbackLength: fallbackText.length,
+            orchestratorVersion: "P0.16-orchestrator-v1",
+            workerPath: resolvedWorkerPath
+          },
+          conversationId
+        );
+      }
       return fallbackText;
     }
 
@@ -350,21 +385,23 @@ export class FinalOutboundGuard {
         rawTextLogged: false
       }));
 
-      FinalOutboundGuard.logToAudit(
-        tenantId,
-        'FINAL_OUTBOUND_GUARD_CORRECTED',
-        `Corrected morphological patterns. Count: ${matchedPatterns.length}`,
-        {
-          tag: 'FINAL_OUTBOUND_GUARD_CORRECTED',
+      if (!context.sandbox) {
+        FinalOutboundGuard.logToAudit(
           tenantId,
-          conversationId,
-          intent: context.intent || 'unknown',
-          patternCount: matchedPatterns.length,
-          patterns: matchedPatterns,
-          rawTextLogged: false
-        },
-        conversationId
-      );
+          'FINAL_OUTBOUND_GUARD_CORRECTED',
+          `Corrected morphological patterns. Count: ${matchedPatterns.length}`,
+          {
+            tag: 'FINAL_OUTBOUND_GUARD_CORRECTED',
+            tenantId,
+            conversationId,
+            intent: context.intent || 'unknown',
+            patternCount: matchedPatterns.length,
+            patterns: matchedPatterns,
+            rawTextLogged: false
+          },
+          conversationId
+        );
+      }
     }
 
     return corrected;

@@ -15,8 +15,49 @@ import { FeatureFlagService } from "@/lib/services/feature-flag.service";
 import { CredentialsService } from "@/lib/services/credentials.service";
 import { isThreeSixtyProvider } from "@/lib/core/provider-aliases";
 import { getTraceContext } from "@/lib/core/trace-context";
+import { redis } from "@/lib/redis";
 
-import { isNameBypassAllowed } from "@/lib/services/ai/active-prompt-context";
+export async function commitResponseProcessed(
+  db: any, 
+  tenantId: string, 
+  channelId: string, 
+  conversationId: string, 
+  responseDedupeKey: string,
+  sandbox: boolean = false
+) {
+  if (sandbox) {
+    const { AIResponseOrchestrator } = await import('@/lib/services/ai/ai-response-orchestrator');
+    AIResponseOrchestrator.addSandboxProcessed(responseDedupeKey);
+    return;
+  }
+
+  // 1. Write to DB conversations.metadata.last_processed_dedupe_key
+  const conv = await db.executeSafe({
+    text: `SELECT metadata FROM conversations WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+    values: [conversationId, tenantId]
+  }) as any[];
+  if (conv.length > 0) {
+    const meta = conv[0].metadata || {};
+    meta.last_processed_dedupe_key = responseDedupeKey;
+    delete meta.response_dedupe_key;
+    delete meta.processing_locked_at;
+    
+    await db.executeSafe({
+      text: `UPDATE conversations SET metadata = $1 WHERE id = $2 AND tenant_id = $3`,
+      values: [JSON.stringify(meta), conversationId, tenantId]
+    });
+  }
+  
+  // 2. Write to Redis processed marker
+  try {
+    const { redis } = await import('@/lib/redis');
+    if (redis) {
+      await redis.set(`${responseDedupeKey}:processed`, "1", { ex: 3600 });
+    }
+  } catch (err) {
+    console.error(`[commitResponseProcessed] Failed to set Redis processed marker`, err);
+  }
+}
 
 function safeAfter(cb: () => void | Promise<void>) {
   try {
@@ -33,7 +74,6 @@ function safeAfter(cb: () => void | Promise<void>) {
     });
   }
 }
-
 // --- Worker Payload Types ---
 
 /** Meta webhook payload envelope (WhatsApp/Messenger/Instagram) */
@@ -751,6 +791,13 @@ export class QueueWorkerEngine {
   private async handleIncomingMessage(tenantId: string, payload: MetaWebhookPayload, metadata: WorkerMetadata, channel: 'whatsapp' | 'messenger' | 'instagram') {
     const traceId = metadata.messageId;
     this.log.info(`[WORKER_PROCESSING] [${channel.toUpperCase()}] Processing incoming message`, { tenantId, traceId });
+    
+    const traceCtx = getTraceContext();
+    if (traceCtx) {
+      if (!traceCtx.metadata) traceCtx.metadata = {};
+      traceCtx.metadata.workerPath = 'worker_immediate';
+    }
+
     let skipBotReply = false;
 
     // 1. Resolve Hybrid Isolated Tenant Brain
@@ -1156,7 +1203,6 @@ export class QueueWorkerEngine {
       isHistoryImport: isHistory
     });
 
-    const traceCtx = getTraceContext();
     if (traceCtx && conversationId) {
       traceCtx.conversationId = conversationId;
     }
@@ -2174,18 +2220,24 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       // Execute the unified AI Response Orchestrator
       const { AIResponseOrchestrator } = await import('@/lib/services/ai/ai-response-orchestrator');
       const orchestratorResult = await AIResponseOrchestrator.run({
-      tenantId,
-      phoneNumber,
-      inboundText: content || '',
-      mediaType,
-      mediaMetadata,
-      brain,
-      channel,
-      channelId: resolvedChannelId || metadata.channelId || undefined,
-      conversationId,
-      customerId,
-      sandbox: false
-    });
+        tenantId,
+        phoneNumber,
+        inboundText: content || '',
+        mediaType,
+        mediaMetadata,
+        brain,
+        channel,
+        channelId: resolvedChannelId || metadata.channelId || undefined,
+        conversationId,
+        customerId,
+        sandbox: false,
+        workerPath: 'worker_immediate'
+      });
+
+      if (orchestratorResult.deduplicated) {
+        this.log.info(`[WORKER] Deduplicated immediate execution for conversation ${conversationId}, exit`, { traceId });
+        return;
+      }
 
     if (orchestratorResult.qualityGateFailed) {
       this.log.warn(`[QUALITY_GATE_BLOCKED_FINAL] Cancelling send pipeline. Reason: ${orchestratorResult.qualityGateReason}`, { traceId, tenantId });
@@ -2290,7 +2342,8 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
         unifiedContext,
         industry: brain.context.config?.industry || (brain.prompts.metadata as any)?.industry || '',
         systemPromptText: systemPromptText || undefined,
-        promptVersion: brain.prompts.metadata?.version || undefined
+        promptVersion: brain.prompts.metadata?.version || undefined,
+        workerPath: 'worker_immediate'
       });
     }
 
@@ -2426,6 +2479,16 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
     });
 
     this.log.info(`[DB_COMMITTED] [OUTGOING MESSAGE] Saved to DB. MsgId: ${outMsgResult.messageId}`, { traceId, outProviderMessageId });
+
+    if (orchestratorResult.responseDedupeKey) {
+      await commitResponseProcessed(
+        db,
+        tenantId,
+        resolvedChannelId || metadata.channelId || '',
+        conversationIdVal || conversationId!,
+        orchestratorResult.responseDedupeKey
+      );
+    }
 
     // Passive Learning Capture: log autopilot reply
     try {
@@ -3654,6 +3717,12 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
     const targetMessageId = payload.targetMessageId;
     this.log.info(`[DEBOUNCE_WORKER] Delayed worker execution started`, { tenantId, traceId, targetMessageId });
 
+    const traceCtx = getTraceContext();
+    if (traceCtx) {
+      if (!traceCtx.metadata) traceCtx.metadata = {};
+      traceCtx.metadata.workerPath = 'worker_delayed';
+    }
+
     const db = withTenantDB(tenantId);
     
     // Resolve Identity phone number from payload
@@ -3689,7 +3758,6 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
     }
 
     const conversationId = convRecord.id;
-    const traceCtx = getTraceContext();
     if (traceCtx && conversationId) {
       traceCtx.conversationId = conversationId;
     }
@@ -3739,6 +3807,60 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       );
       return;
     }
+
+    let isRedisLockAcquired = false;
+    let isRedisConfigured = !!redis;
+    let lockToken = "";
+    const redisLockKey = `lock:conversation:processing:${conversationId}`;
+
+    if (redis) {
+      try {
+        lockToken = Math.random().toString(36).substring(2, 15);
+        const setSuccess = await redis.set(redisLockKey, lockToken, { nx: true, ex: 30 });
+        if (setSuccess) {
+          isRedisLockAcquired = true;
+          this.log.info(`[DEBOUNCE_WORKER] Acquired Redis processing lock`, { conversationId, key: redisLockKey });
+        } else {
+          this.log.info(`[DEBOUNCE_WORKER] Redis processing lock already held, exiting`, { conversationId, key: redisLockKey });
+          return;
+        }
+      } catch (redisErr) {
+        isRedisConfigured = false;
+        this.log.warn(`[DEBOUNCE_WORKER] Redis lock check failed, falling back to DB lock`, { error: String(redisErr) });
+      }
+    }
+
+    let dbLockApplied = false;
+    if (!isRedisLockAcquired) {
+      try {
+        const nowIso = new Date().toISOString();
+        const updateResult = await db.executeSafe({
+          text: `
+            UPDATE conversations 
+            SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{processing_locked_at}', to_jsonb($1::text))
+            WHERE id = $2 AND tenant_id = $3
+              AND (
+                metadata->>'processing_locked_at' IS NULL
+                OR (metadata->>'processing_locked_at')::timestamptz < NOW() - INTERVAL '30 seconds'
+              )
+            RETURNING id
+          `,
+          values: [nowIso, conversationId, tenantId]
+        }) as any[];
+        
+        if (updateResult.length === 0) {
+          this.log.info(`[DEBOUNCE_WORKER] DB processing lock already held (atomic check), exiting`, { conversationId });
+          return;
+        }
+        dbLockApplied = true;
+        this.log.info(`[DEBOUNCE_WORKER] Acquired DB processing lock (atomic)`, { conversationId });
+      } catch (dbLockErr) {
+        this.log.error(`[DEBOUNCE_WORKER] Failed to apply DB fallback processing lock, exiting`, dbLockErr as Error, { conversationId });
+        return;
+      }
+    }
+
+    try {
 
     // Check 4: No operator outbound messages exist after this inbound message
     const operatorOutboundQuery = await db.executeSafe({
@@ -3947,8 +4069,14 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
         conversationId,
         customerId,
         sandbox: false,
-        history: rawHistory
+        history: rawHistory,
+        workerPath: 'worker_delayed'
       });
+
+      if (orchestratorResult.deduplicated) {
+        this.log.info(`[DEBOUNCE_WORKER] Deduplicated execution for conversation ${conversationId}, exit`, { traceId });
+        return;
+      }
 
       if (orchestratorResult.qualityGateFailed) {
         this.log.warn(`[DEBOUNCE_WORKER] Quality gate blocked final. Cancelling send. Reason: ${orchestratorResult.qualityGateReason}`, { traceId });
@@ -3995,7 +4123,8 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
           unifiedContext,
           industry: brain.context.config?.industry || (brain.prompts.metadata as any)?.industry || '',
           systemPromptText: systemPromptText || undefined,
-          promptVersion: brain.prompts.metadata?.version || undefined
+          promptVersion: brain.prompts.metadata?.version || undefined,
+          workerPath: 'worker_delayed'
         });
       }
 
@@ -4042,6 +4171,23 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
         completionTokens: aiResponse.outputTokens || 0,
         providerMessageId: outProviderMessageId,
         status: 'sent'
+      });
+
+      if (orchestratorResult.responseDedupeKey) {
+        await commitResponseProcessed(
+          db,
+          tenantId,
+          resolvedChannelId || metadata.channelId || '',
+          conversationId,
+          orchestratorResult.responseDedupeKey
+        );
+      }
+
+      this.log.info(`[DEBOUNCE_WORKER] Autopilot reply processed and sent`, {
+        conversationId,
+        messageId: outMsgResult.messageId,
+        orchestratorVersion: "P0.16-orchestrator-v1",
+        workerPath: "v2/src/lib/queue/worker.ts"
       });
 
       // Passive Learning Capture: log autopilot reply
@@ -4146,6 +4292,38 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       }
       this.log.error(`[DEBOUNCE_WORKER] LLM or send failed`, llmErr as Error, { traceId });
       throw llmErr;
+    }
+    } finally {
+      if (isRedisLockAcquired) {
+        try {
+          const releaseScript = `
+            if redis.call("get", KEYS[1]) == ARGV[1] then
+              return redis.call("del", KEYS[1])
+            else
+              return 0
+            end
+          `;
+          await redis!.eval(releaseScript, [redisLockKey], [lockToken]);
+          this.log.info(`[DEBOUNCE_WORKER] Released Redis processing lock`, { conversationId, key: redisLockKey });
+        } catch (releaseErr) {
+          this.log.warn(`[DEBOUNCE_WORKER] Failed to release Redis processing lock`, { error: String(releaseErr) });
+        }
+      }
+      if (dbLockApplied) {
+        try {
+          await db.executeSafe({
+            text: `
+              UPDATE conversations 
+              SET metadata = COALESCE(metadata, '{}'::jsonb) - 'processing_locked_at'
+              WHERE id = $1 AND tenant_id = $2
+            `,
+            values: [conversationId, tenantId]
+          });
+          this.log.info(`[DEBOUNCE_WORKER] Released DB processing lock`, { conversationId });
+        } catch (dbReleaseErr) {
+          this.log.error(`[DEBOUNCE_WORKER] Failed to release DB processing lock`, dbReleaseErr as Error, { conversationId });
+        }
+      }
     }
   }
 

@@ -9,9 +9,22 @@ const hasRedisConfigs =
  * Enterprise Upstash Redis Client
  * Provides a resilient Redis connection for Edge / Serverless environments.
  */
-export const redis = hasRedisConfigs
+export let redis = hasRedisConfigs
   ? new Redis({
       url: process.env.UPSTASH_REDIS_REST_URL!,
       token: process.env.UPSTASH_REDIS_REST_TOKEN!,
     })
   : null;
+
+export function setMockRedis(mock: any) {
+  redis = mock;
+}
+
+export function restoreRedis() {
+  redis = hasRedisConfigs
+    ? new Redis({
+        url: process.env.UPSTASH_REDIS_REST_URL!,
+        token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+      })
+    : null;
+}

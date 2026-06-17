@@ -379,8 +379,48 @@ export class AIOrchestrator {
         modelMaxOutputTokens: config.maxTokens
       });
       
-      let fallbackText = "Mesajınızı aldım. Sizi doğru yönlendirebilmem için şikâyetinizi biraz daha açık yazar mısınız? 🙏";
-      if (e.message?.startsWith('COST_LIMIT_EXCEEDED')) {
+      let fallbackText = "Mesajınızı aldım. Size daha iyi yardımcı olabilmem için talebinizi biraz daha detaylandırabilir misiniz? 🙏";
+      
+      const cleanLower = (lastUserMsg || '').toLowerCase();
+      const locations = [
+        { key: 'Almanya', keywords: ['almanya', 'almanyada', 'almanyadayım', 'almanyadayim', 'germany'] },
+        { key: 'Kaliforniya', keywords: ['amerika', 'usa', 'us', 'california', 'kaliforniya'] },
+        { key: 'Libya', keywords: ['libya'] },
+        { key: 'Irak', keywords: ['irak', 'iraq'] },
+        { key: 'İngiltere', keywords: ['ingiltere', 'london', 'londra', 'uk', 'england'] },
+        { key: 'Hollanda', keywords: ['hollanda', 'netherlands'] },
+        { key: 'Fransa', keywords: ['fransa', 'france'] },
+        { key: 'Avrupa', keywords: ['avrupa', 'europe'] },
+        { key: 'Yurt dışı', keywords: ['yurt dışı', 'yurt disi', 'yurt dışından', 'yurt disindan', 'yurtdısı', 'yurtdisi', 'international'] },
+        { key: 'Şehir dışı', keywords: ['şehir dışı', 'sehir disi', 'sehir dışı', 'şehir disi', 'sehir dışından', 'sehirlerarasi', 'şehirlerarası'] },
+        { key: 'Uzak', keywords: ['uzak', 'mesafe', 'konya uzak'] }
+      ];
+
+      const departmentsList = [
+        { key: 'Kardiyoloji', keywords: ['kardiyoloji', 'kalp', 'damar', 'cardio', 'heart'] },
+        { key: 'Ortopedi ve Travmatoloji', keywords: ['ortopedi', 'kemik', 'eklem', 'diz', 'kalça', 'kalca'] },
+        { key: 'Tüp Bebek', keywords: ['tüp bebek', 'tup bebek', 'tüpbebek', 'ivf'] },
+        { key: 'Plastik, Rekonstrüktif ve Estetik Cerrahi', keywords: ['estetik', 'burun estetiği', 'burun estetigi', 'rinoplasti', 'plastik cerrahi'] },
+        { key: 'Diş Hekimliği', keywords: ['diş', 'dental', 'implant', 'dis', 'diş hekimliği', 'dis hekimligi'] },
+        { key: 'Organ Nakli', keywords: ['organ nakli', 'organ', 'nakil', 'nakli'] },
+        { key: 'Beyin ve Sinir Cerrahisi (Bel Fıtığı)', keywords: ['bel fıtığı', 'bel fitigi', 'bel fitigi', 'bel fıtıgı'] }
+      ];
+
+      const matchedLocation = locations.find(l => l.keywords.some(kw => cleanLower.includes(kw)));
+      const matchedDept = departmentsList.find(d => d.keywords.some(kw => cleanLower.includes(kw)));
+      
+      const hasLogistics = ['ulasım', 'ulasim', 'ulaşım', 'surec', 'süreç', 'transfer', 'konaklama', 'otel', 'yol', 'bilet', 'gelem', 'konaklamak', 'logistics'].some(kw => cleanLower.includes(kw));
+      const hasPrice = ['fiyat', 'ucret', 'ücret', 'maliyet', 'ne kadar', 'tutar', 'para', 'fiyatlar', 'fiyati', 'ucreti', 'pricing'].some(kw => cleanLower.includes(kw));
+
+      if (matchedLocation && hasLogistics && hasPrice) {
+        const location = matchedLocation.key;
+        const dept = matchedDept?.key || 'Tedavi';
+        fallbackText = `${location}'dan bizimle iletişime geçtiğiniz için teşekkür ederiz. ${dept} süreci, ulaşım ve fiyatlandırma ile ilgili bilgiler aşağıdadır:\n\n` +
+          `• **Ulaşım ve Konaklama**: Şehir dışı ve yurt dışından gelen hastalarımız için havalimanı transferi, konaklama ve süreç planlama koordinasyonu ekibimiz tarafından organize edilmektedir.\n` +
+          `• **${dept} Süreci**: İlgili branşımız bünyesinde tanı ve tedavi süreçleri uzman hekimlerimiz kontrolünde planlanmaktadır.\n` +
+          `• **Fiyatlandırma**: Tedavi fiyatları, hekimimizin yapacağı değerlendirme ve oluşturulacak kişiye özel tedavi planına göre belirlenmektedir.\n` +
+          `• **Sonraki Adım**: Detayları görüşmek ve planlama yapmak üzere hasta danışmanımızla telefon görüşmesi planlayabiliriz. Hangi gün ve saat aralığında görüşmek istersiniz? 🙏`;
+      } else if (e.message?.startsWith('COST_LIMIT_EXCEEDED')) {
         fallbackText = "Mesajınız alındı. Şu an yoğunluk nedeniyle kısa bir gecikme yaşanıyor. Lütfen biraz sonra tekrar yazınız. 🙏";
       } else if (e.message?.startsWith('CIRCUIT_OPEN')) {
         fallbackText = "Mesajınız alındı. Kısa süreli bir teknik bakım yapılıyor, en kısa sürede tekrar hizmetinizdeyiz. 🙏";

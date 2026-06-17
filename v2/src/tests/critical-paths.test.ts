@@ -4791,6 +4791,282 @@ test("P0.16 - 11: Live worker immediate/delayed testlerinde zero-outbound spy’
   assert(sendWhatsAppMessageCalls.length === 0, "Outbound calls must remain 0 during sandbox tests");
 });
 
+test("P0.16 - 12: Doctor resolver DB config boşken system prompt listesinden hekimleri çeker", () => {
+  const { DoctorDirectoryResolver } = require("../lib/services/ai/doctor-directory-resolver");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const systemPrompt = `
+    Sen Rüya isimli asistan hekim asistanısın.
+    Verified Hekim Listesi:
+    * Prof. Dr. Aytekin GÜVEN - Kardiyoloji
+    * Doç. Dr. Caner Hırçın - KBB
+    * Uzm. Dr. Fatma Yılmaz - Plastik Cerrahi
+    Bazı diğer talimatlar.
+  `;
+  const mockBrain = createTenantBrain("t1", "whatsapp", "payload1", systemPrompt, {});
+  
+  const docs = DoctorDirectoryResolver.getDoctors(mockBrain);
+  assert(docs.length === 3, `Should resolve 3 doctors, but resolved: ${docs.length}`);
+  assert(docs[0].name === "Prof. Dr. Aytekin GÜVEN", "Doctor name parsed incorrectly");
+  assert(docs[0].department === "Kardiyoloji", "Doctor department parsed incorrectly");
+  assert(docs[1].name === "Doç. Dr. Caner Hırçın", "Second doctor name parsed incorrectly");
+  assert(docs[1].department === "KBB", "Second doctor department parsed incorrectly");
+  assert(docs[2].name === "Uzm. Dr. Fatma Yılmaz", "Third doctor name parsed incorrectly");
+  assert(docs[2].department === "Plastik Cerrahi", "Third doctor department parsed incorrectly");
+});
+
+test("P0.16 - 13: Doctor resolver system prompt listesinde tire (-) ve yıldız (*) bulletlarını destekler", () => {
+  const { DoctorDirectoryResolver } = require("../lib/services/ai/doctor-directory-resolver");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const systemPrompt = `
+    Sen Rüya isimli asistan hekim asistanısın.
+    Verified Hekim Listesi:
+    - Prof. Dr. Aytekin GÜVEN - Kardiyoloji
+    * Doç. Dr. Caner Hırçın - KBB
+    Bazı diğer talimatlar.
+  `;
+  const mockBrain = createTenantBrain("t1", "whatsapp", "payload1", systemPrompt, {});
+  
+  const docs = DoctorDirectoryResolver.getDoctors(mockBrain);
+  assert(docs.length === 2, `Should resolve 2 doctors, but resolved: ${docs.length}`);
+  assert(docs[0].name === "Prof. Dr. Aytekin GÜVEN", "First doctor parsed incorrectly");
+  assert(docs[1].name === "Doç. Dr. Caner Hırçın", "Second doctor parsed incorrectly");
+});
+
+test("P0.16 - 14: Hybrid lock — Redis aktifken Redis kilidi alınır ve serbest bırakılır", async () => {
+  const { queueWorkerEngine } = require("../lib/queue/worker");
+  const { setMockRedis, restoreRedis } = require("../lib/redis");
+  
+  const originalAutopilotEnv = process.env.ENABLE_SELECTED_AUTOPILOT;
+  process.env.ENABLE_SELECTED_AUTOPILOT = "true";
+
+  let setCalled: boolean = false;
+  let evalCalled: boolean = false;
+  
+  setMockRedis({
+    set: async (key: string, val: string, options: any) => {
+      setCalled = true;
+      assert(key.startsWith("lock:conversation:processing:"), "Redis key should start with correct prefix");
+      assert(options.nx === true, "NX option must be true");
+      assert(options.ex === 30, "EX option must be 30");
+      return "OK";
+    },
+    eval: async (script: string, keys: string[], args: string[]) => {
+      evalCalled = true;
+      assert(keys[0].startsWith("lock:conversation:processing:"), "Redis key should be evaluated");
+      return 1;
+    }
+  } as any);
+
+  const originalExecuteSafe = (global as any).mockDb.executeSafe;
+  let dbQueries: string[] = [];
+
+  (global as any).mockDb.executeSafe = async (q: any, params?: any[]) => {
+    const text = typeof q === 'string' ? q : q?.text || '';
+    dbQueries.push(text.replace(/\s+/g, ' '));
+    
+    if (text.includes("FROM conversations")) {
+      return [{ id: "conv-123", status: "active", autopilot_enabled: true, channel_id: "whatsapp", customer_id: "cust-123", metadata: {} }];
+    }
+    if (text.includes("FROM messages")) {
+      if (text.includes("ORDER BY created_at DESC LIMIT 1")) {
+        return [{ provider_message_id: "target-msg-123", content: "hello" }];
+      }
+      return [];
+    }
+    if (text.includes("FROM tenants")) {
+      return [{ id: "t1", name: "Başkent", slug: "baskent" }];
+    }
+    return [];
+  };
+
+  try {
+    await (queueWorkerEngine as any).handleIncomingMessageDelayed(
+      "t1",
+      { targetMessageId: "target-msg-123", entry: [{ changes: [{ value: { messages: [{ from: "905001234567", provider_message_id: "target-msg-123" }] } }] }] },
+      { messageId: "msg-123", isRetry: false, retriedCount: 0 },
+      "whatsapp"
+    );
+  } catch (err) {
+    // Ignored
+  } finally {
+    process.env.ENABLE_SELECTED_AUTOPILOT = originalAutopilotEnv;
+    restoreRedis();
+    (global as any).mockDb.executeSafe = originalExecuteSafe;
+  }
+
+  assert(setCalled, "Redis set should be called to acquire lock");
+  assert(evalCalled, "Redis eval should be called in finally to release lock");
+});
+
+test("P0.16 - 15: Hybrid lock — Redis kilitliyken delayed worker işlem yapmadan çıkar", async () => {
+  const { queueWorkerEngine } = require("../lib/queue/worker");
+  const { setMockRedis, restoreRedis } = require("../lib/redis");
+  
+  const originalAutopilotEnv = process.env.ENABLE_SELECTED_AUTOPILOT;
+  process.env.ENABLE_SELECTED_AUTOPILOT = "true";
+
+  setMockRedis({
+    set: async () => {
+      return null; // Already locked
+    }
+  } as any);
+
+  const originalExecuteSafe = (global as any).mockDb.executeSafe;
+  let opQueryCalled = false;
+
+  (global as any).mockDb.executeSafe = async (q: any, params?: any[]) => {
+    const text = typeof q === 'string' ? q : q?.text || '';
+    if (text.includes("FROM conversations")) {
+      return [{ id: "conv-123", status: "active", autopilot_enabled: true, channel_id: "whatsapp", customer_id: "cust-123", metadata: {} }];
+    }
+    if (text.includes("FROM messages")) {
+      if (text.includes("ORDER BY created_at DESC LIMIT 1")) {
+        return [{ provider_message_id: "target-msg-123", content: "hello" }];
+      }
+      if (text.includes("model_used IS NULL")) {
+        opQueryCalled = true;
+      }
+      return [];
+    }
+    return [];
+  };
+
+  try {
+    await (queueWorkerEngine as any).handleIncomingMessageDelayed(
+      "t1",
+      { targetMessageId: "target-msg-123", entry: [{ changes: [{ value: { messages: [{ from: "905001234567", provider_message_id: "target-msg-123" }] } }] }] },
+      { messageId: "msg-123", isRetry: false, retriedCount: 0 },
+      "whatsapp"
+    );
+  } finally {
+    process.env.ENABLE_SELECTED_AUTOPILOT = originalAutopilotEnv;
+    restoreRedis();
+    (global as any).mockDb.executeSafe = originalExecuteSafe;
+  }
+
+  assert(opQueryCalled === false, "Worker should exit early without checking for operator messages");
+});
+
+test("P0.16 - 16: Hybrid lock — Redis kapalıyken DB kilidi alınır ve serbest bırakılır", async () => {
+  const { queueWorkerEngine } = require("../lib/queue/worker");
+  const { setMockRedis, restoreRedis } = require("../lib/redis");
+  
+  const originalAutopilotEnv = process.env.ENABLE_SELECTED_AUTOPILOT;
+  process.env.ENABLE_SELECTED_AUTOPILOT = "true";
+
+  setMockRedis(null); // Redis disabled
+
+  const originalExecuteSafe = (global as any).mockDb.executeSafe;
+  let dbLockAcquired: boolean = false;
+  let dbLockReleased: boolean = false;
+
+  (global as any).mockDb.executeSafe = async (q: any, params?: any[]) => {
+    const text = typeof q === 'string' ? q : q?.text || '';
+    const normalizedText = text.replace(/\s+/g, ' ');
+    
+    if (normalizedText.includes("FROM conversations")) {
+      return [{ id: "conv-123", status: "active", autopilot_enabled: true, channel_id: "whatsapp", customer_id: "cust-123", metadata: {} }];
+    }
+    if (normalizedText.includes("FROM messages")) {
+      if (normalizedText.includes("ORDER BY created_at DESC LIMIT 1")) {
+        return [{ provider_message_id: "target-msg-123", content: "hello" }];
+      }
+      return [];
+    }
+    // Atomic lock acquire: UPDATE ... SET metadata = jsonb_set(..., 'processing_locked_at') WHERE ...
+    if (normalizedText.includes("UPDATE conversations") && normalizedText.includes("processing_locked_at") && !normalizedText.includes("- 'processing_locked_at'")) {
+      dbLockAcquired = true;
+      return [{ id: "conv-123" }]; // 1 row = lock acquired
+    }
+    // Atomic lock release: UPDATE ... SET metadata = ... - 'processing_locked_at'
+    if (normalizedText.includes("UPDATE conversations") && normalizedText.includes("- 'processing_locked_at'")) {
+      dbLockReleased = true;
+      return [{ id: "conv-123" }];
+    }
+    if (normalizedText.includes("FROM tenants")) {
+      return [{ id: "t1", name: "Başkent", slug: "baskent" }];
+    }
+    return [];
+  };
+
+  try {
+    await (queueWorkerEngine as any).handleIncomingMessageDelayed(
+      "t1",
+      { targetMessageId: "target-msg-123", entry: [{ changes: [{ value: { messages: [{ from: "905001234567", provider_message_id: "target-msg-123" }] } }] }] },
+      { messageId: "msg-123", isRetry: false, retriedCount: 0 },
+      "whatsapp"
+    );
+  } catch (err) {
+    // Ignored
+  } finally {
+    process.env.ENABLE_SELECTED_AUTOPILOT = originalAutopilotEnv;
+    restoreRedis();
+    (global as any).mockDb.executeSafe = originalExecuteSafe;
+  }
+
+  assert(dbLockAcquired, "Atomic DB lock should be acquired");
+  assert(dbLockReleased, "Atomic DB lock should be released in finally block");
+});
+
+test("P0.16 - 17: Hybrid lock — DB kilidi zaten aktifken delayed worker işlem yapmadan çıkar", async () => {
+  const { queueWorkerEngine } = require("../lib/queue/worker");
+  const { setMockRedis, restoreRedis } = require("../lib/redis");
+  
+  const originalAutopilotEnv = process.env.ENABLE_SELECTED_AUTOPILOT;
+  process.env.ENABLE_SELECTED_AUTOPILOT = "true";
+
+  setMockRedis(null); // Redis disabled
+
+  const originalExecuteSafe = (global as any).mockDb.executeSafe;
+  let opQueryCalled = false;
+
+  (global as any).mockDb.executeSafe = async (q: any, params?: any[]) => {
+    const text = typeof q === 'string' ? q : q?.text || '';
+    const normalizedText = text.replace(/\s+/g, ' ');
+    if (normalizedText.includes("FROM conversations")) {
+      return [{
+        id: "conv-123",
+        status: "active",
+        autopilot_enabled: true,
+        channel_id: "whatsapp",
+        customer_id: "cust-123",
+        metadata: {
+          processing_locked_at: new Date(Date.now() - 5000).toISOString()
+        }
+      }];
+    }
+    if (normalizedText.includes("FROM messages")) {
+      if (normalizedText.includes("ORDER BY created_at DESC LIMIT 1")) {
+        return [{ provider_message_id: "target-msg-123", content: "hello" }];
+      }
+      if (normalizedText.includes("model_used IS NULL")) {
+        opQueryCalled = true;
+      }
+      return [];
+    }
+    // Atomic DB lock: return 0 rows because lock is active (< 30s)
+    if (normalizedText.includes("UPDATE conversations") && normalizedText.includes("processing_locked_at")) {
+      return []; // 0 rows = lock held by another worker
+    }
+    return [];
+  };
+
+  try {
+    await (queueWorkerEngine as any).handleIncomingMessageDelayed(
+      "t1",
+      { targetMessageId: "target-msg-123", entry: [{ changes: [{ value: { messages: [{ from: "905001234567", provider_message_id: "target-msg-123" }] } }] }] },
+      { messageId: "msg-123", isRetry: false, retriedCount: 0 },
+      "whatsapp"
+    );
+  } finally {
+    process.env.ENABLE_SELECTED_AUTOPILOT = originalAutopilotEnv;
+    restoreRedis();
+    (global as any).mockDb.executeSafe = originalExecuteSafe;
+  }
+
+  assert(opQueryCalled === false, "Worker should exit early without checking operator messages when DB lock is active (atomic)");
+});
+
 // ==========================================
 // SONUÇLAR
 // ==========================================

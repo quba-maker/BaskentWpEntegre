@@ -13,15 +13,33 @@ export class DoctorDirectoryResolver {
    */
   public static getDoctors(brain: TenantBrain, department?: string): Doctor[] {
     const doctorDirectory = brain.context.config?.doctors || brain.context.config?.doctorDirectory || brain.context.config?.doctor_directory;
-    if (!doctorDirectory) {
-      return [];
+    
+    let rawList: string[] = [];
+    if (doctorDirectory) {
+      if (Array.isArray(doctorDirectory)) {
+        rawList = doctorDirectory.map(d => String(d));
+      } else if (typeof doctorDirectory === 'string') {
+        rawList = doctorDirectory.split('\n').map(d => d.trim()).filter(Boolean);
+      }
     }
 
-    let rawList: string[] = [];
-    if (Array.isArray(doctorDirectory)) {
-      rawList = doctorDirectory.map(d => String(d));
-    } else if (typeof doctorDirectory === 'string') {
-      rawList = doctorDirectory.split('\n').map(d => d.trim()).filter(Boolean);
+    // Fallback: Parse from system prompt if DB config is empty
+    if (rawList.length === 0 && brain.prompts?.systemPrompt) {
+      const promptText = brain.prompts.systemPrompt;
+      const verifiedListIndex = promptText.indexOf('Verified Hekim Listesi:');
+      if (verifiedListIndex !== -1) {
+        const block = promptText.substring(verifiedListIndex + 'Verified Hekim Listesi:'.length);
+        const lines = block.split('\n');
+        for (const line of lines) {
+          const trimmedLine = line.trim();
+          const isBullet = trimmedLine.startsWith('*') || trimmedLine.startsWith('-');
+          if (isBullet) {
+            rawList.push(trimmedLine.substring(1).trim());
+          } else if (trimmedLine.length > 0 && !isBullet && rawList.length > 0) {
+            break;
+          }
+        }
+      }
     }
 
     const doctors: Doctor[] = [];
