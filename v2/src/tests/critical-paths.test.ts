@@ -5275,6 +5275,136 @@ test("P0.16-F: TurkishMorphologyGuard — ağrısınınız → ağrınız correc
 });
 
 // ==========================================
+// P0.16-F — Morphology False-Positive Guard Tests
+// ==========================================
+
+test("P0.16-F FP: 'hastasınız' bozulmamalı", async () => {
+  const { TurkishMorphologyGuard } = await import("../lib/services/ai/turkish-morphology-guard");
+  const text = "Siz hastasınız ve size yardımcı olacağız.";
+  const result = TurkishMorphologyGuard.check(text, true, []);
+  const output = result.correctedText || text;
+  assert(
+    output.includes("hastasınız"),
+    `'hastasınız' yanlış düzeltildi, çıktı: '${output}'`
+  );
+});
+
+test("P0.16-F FP: 'yakınınız' bozulmamalı", async () => {
+  const { TurkishMorphologyGuard } = await import("../lib/services/ai/turkish-morphology-guard");
+  const text = "Yakınınız için doktorumuza başvurabilirsiniz.";
+  const result = TurkishMorphologyGuard.check(text, true, []);
+  const output = result.correctedText || text;
+  assert(
+    output.includes("Yakınınız"),
+    `'Yakınınız' yanlış düzeltildi, çıktı: '${output}'`
+  );
+});
+
+test("P0.16-F FP: 'ağrınız' bozulmamalı", async () => {
+  const { TurkishMorphologyGuard } = await import("../lib/services/ai/turkish-morphology-guard");
+  const text = "Ağrınız geçmesi için dinlenmeniz önerilir.";
+  const result = TurkishMorphologyGuard.check(text, true, []);
+  const output = result.correctedText || text;
+  assert(
+    output.includes("Ağrınız"),
+    `'Ağrınız' yanlış düzeltildi, çıktı: '${output}'`
+  );
+});
+
+test("P0.16-F FP: 'planınız' bozulmamalı", async () => {
+  const { TurkishMorphologyGuard } = await import("../lib/services/ai/turkish-morphology-guard");
+  const text = "Tedavi planınız uzman tarafından hazırlanacaktır.";
+  const result = TurkishMorphologyGuard.check(text, true, []);
+  const output = result.correctedText || text;
+  // planınız → planınız (should not touch this, only planınınız triggers)
+  assert(
+    !output.includes("planınınız"),
+    `'planınınız' hatalı oluşturuldu, çıktı: '${output}'`
+  );
+});
+
+test("P0.16-F FP: 'tahmininiz' bozulmamalı", async () => {
+  const { TurkishMorphologyGuard } = await import("../lib/services/ai/turkish-morphology-guard");
+  const text = "Tahmininiz doğru çıkmıştır.";
+  const result = TurkishMorphologyGuard.check(text, true, []);
+  const output = result.correctedText || text;
+  assert(
+    output.includes("Tahmininiz"),
+    `'Tahmininiz' yanlış düzeltildi, çıktı: '${output}'`
+  );
+});
+
+test("P0.16-F FP: 'randevunuz' bozulmamalı", async () => {
+  const { TurkishMorphologyGuard } = await import("../lib/services/ai/turkish-morphology-guard");
+  const text = "Randevunuz saat 14:00 olarak planlandı.";
+  const result = TurkishMorphologyGuard.check(text, true, []);
+  const output = result.correctedText || text;
+  assert(
+    output.includes("Randevunuz"),
+    `'Randevunuz' yanlış düzeltildi, çıktı: '${output}'`
+  );
+});
+
+// ==========================================
+// P0.16-F — Stale Context Regression (Point 5 & 6)
+// ==========================================
+
+test("P0.16-F Stale: 'Temmuz' only if in history — DepartmentAliasResolver does not produce July context", async () => {
+  const { DepartmentAliasResolver } = await import("../lib/services/ai/department-alias-resolver");
+  // "Temmuz" alone should not map to any department — it is NOT a medical keyword
+  const result = DepartmentAliasResolver.resolve("Temmuz ayı için gelmeyi düşünüyorum");
+  assert(result === null, `DepartmentAliasResolver should NOT match 'Temmuz', got: ${result?.canonical}`);
+});
+
+test("P0.16-F Stale: P0.16-E history-aware fallback not broken by P0.16-F changes", async () => {
+  const { ContextAwareSafeFallbackResolver, buildRecallFactsSummary } = await import("../lib/services/ai/context-aware-safe-fallback");
+  const { createTenantBrain } = await import("../lib/brain/tenant-brain");
+
+  const history = [
+    { role: "user", content: "bel fıtığım var 5 yıldır devam ediyor" },
+    { role: "assistant", content: "Geçmiş olsun, bel fıtığı çok zorlu olabilir." },
+    { role: "user", content: "bacaklarıma vuruyor, uzun süre ayakta duramıyorum" },
+    { role: "assistant", content: "Anlıyorum, bu tür semptomlar..." },
+    { role: "user", content: "ameliyat korkuyorum" },
+    { role: "assistant", content: "Ameliyat endişenizi anlıyorum." },
+  ];
+
+  const summary = buildRecallFactsSummary(history);
+  assert(summary.length > 0, "buildRecallFactsSummary should return non-empty for bel fıtığı history");
+  assert(summary.includes("bel fıtığı"), `Summary should include 'bel fıtığı', got: '${summary}'`);
+  assert(summary.includes("5 yıldır") || summary.includes("yıldır"), `Summary should include duration, got: '${summary}'`);
+});
+
+test("P0.16-F Stale: stale Kardiyoloji + bel fıtığı message → resolvedActiveDepartment is NOT Kardiyoloji", async () => {
+  const { DepartmentAliasResolver } = await import("../lib/services/ai/department-alias-resolver");
+  const { activeDepartment } = DepartmentAliasResolver.resolveWithStalenessCheck(
+    "hangi doktor ilgilenecek bel fıtığıyla",
+    "Kardiyoloji",
+    null
+  );
+  assert(
+    activeDepartment !== "Kardiyoloji",
+    `activeDepartment should NOT be Kardiyoloji for a bel fıtığı message, got: '${activeDepartment}'`
+  );
+  assert(
+    activeDepartment === "Beyin ve Sinir Cerrahisi",
+    `Expected 'Beyin ve Sinir Cerrahisi', got: '${activeDepartment}'`
+  );
+});
+
+test("P0.16-F Stale: 'kardiyoloji değil ki beyin sinir cerrahı' → user correction accepted", async () => {
+  const { DepartmentAliasResolver } = await import("../lib/services/ai/department-alias-resolver");
+  const msg = "kardiyoloji değil ki beyin sinir cerrahı bakmıyor mu bel fıtığına";
+  const result = DepartmentAliasResolver.resolve(msg, null);
+  // Should pick up bel fıtığı → Beyin ve Sinir Cerrahisi
+  assert(result !== null, "Should resolve department from corrective message");
+  assert(
+    result!.canonical === "Beyin ve Sinir Cerrahisi",
+    `Expected 'Beyin ve Sinir Cerrahisi', got: '${result!.canonical}'`
+  );
+});
+
+// ==========================================
 // SONUÇLAR
 // ==========================================
 
