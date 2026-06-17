@@ -155,7 +155,8 @@ export class FinalOutboundGuard {
 
     // 3. Greeting & incomplete sentence validation checks
     const isShortGreetingOnly = /^(merhaba|selam|günaydın|gunaydin|iyi günler|iyi gunler|tünaydın|tunaydin|merhabalar)[,\s.]*$/i.test(trimmed);
-    const isSentenceIncomplete = /[,\s](ve|veya|ama|çünkü|cunku|ise|ile|fakat|ki|de|da)[,\s.]*$/i.test(trimmed) || trimmed.endsWith(',');
+    // P0.16-C: Only flag truly incomplete connectors. 'de', 'da', 'ile' are valid Turkish sentence endings.
+    const isSentenceIncomplete = /[,\s](ve|veya|ama|çünkü|cunku|ise|fakat|ki)[,\s.]*$/i.test(trimmed) || trimmed.endsWith(',');
     const isExtremelyShort = trimmed.length > 0 && trimmed.length < 3;
 
     // 4. Blocklist check
@@ -200,11 +201,10 @@ export class FinalOutboundGuard {
       /promptunda/i,
       /ai unavailable/i,
       /circuit_open/i,
-      /quota_exhausted/i,
-      /quota/i,
-      /gemini/i,
-      /provider/i,
-      /model/i,
+      /quota[\s_]?(exhausted|limit|exceeded|error)/i,
+      /gemini[\s\-]?(api|model|pro|flash|ultra)/i,
+      /\b(ai|llm|language)\s+model\b/i,
+      /provider[\s_]?(error|unavailable|timeout|failed)/i,
       /yapay zeka servis dışı/i,
       /müşteri temsilcisine devredildi/i
     ];
@@ -212,12 +212,11 @@ export class FinalOutboundGuard {
     const lowerText = corrected.toLowerCase();
     
     // Check general reduplication pattern
+    // P0.16-C: Tightened to avoid false-positives on normal Turkish words.
+    // Only match clear suffix-doubling, not substrings in legitimate words.
     const hasSuffixDoublingPattern = 
       /(nız|niz|unuz|ünüz){2,}/i.test(lowerText) ||
-      /(ınız|iniz|unuz|ünüz)(ı|i|u|ü)(z|n|s)(ı|i|u|ü)/i.test(lowerText) ||
-      /iziniz/i.test(lowerText) ||
       /ınızızı/i.test(lowerText) ||
-      /niziniz/i.test(lowerText) ||
       /sizizi/i.test(lowerText) ||
       /nıznız/i.test(lowerText) ||
       /iniziniz/i.test(lowerText);
@@ -305,13 +304,16 @@ export class FinalOutboundGuard {
       if (isExtremelyShort) blockReasons.push('extremely_short');
       if (isShortGreetingOnly) blockReasons.push('greeting_only');
 
+      // P0.16-C: Log truncated original text for debugging false-positive blocks
+      const truncatedOriginal = corrected.length > 120 ? corrected.substring(0, 120) + '...' : corrected;
       console.log(JSON.stringify({
         tag: "FINAL_OUTBOUND_GUARD_BLOCKED",
         tenantId,
         conversationId: conversationId || 'unknown',
         intent: context.intent || 'unknown',
         reasons: blockReasons,
-        rawTextLogged: false,
+        rawTextTruncated: truncatedOriginal,
+        rawTextLogged: true,
         fallbackLength: fallbackText.length,
         orchestratorVersion: "P0.16-orchestrator-v1",
         workerPath: resolvedWorkerPath,

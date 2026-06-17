@@ -111,8 +111,19 @@ export class MultilingualQualityGate {
     }
 
     // P0.11: Standalone prompt challenge / forbidden words check
-    const challengeLeakPattern = /\b(?:prompt|promt|sistem|talimat|kural|direktif)/i;
-    if (challengeLeakPattern.test(text)) {
+    // P0.16-C: Narrowed to compound patterns to avoid false-positives on normal Turkish
+    // ("kuralımız gereği", "sistemimizde" etc. are NOT leaks)
+    const challengeLeakPatterns = [
+      /\b(?:prompt|promt)\s+(?:injection|sızıntı|leak|hack|challenge|attack)/i,
+      /\bsistem\s+prompt/i,
+      /\bsistem\s+talimat/i,
+      /\bsistem\s+kural/i,
+      /\bsistem\s+direktif/i,
+      /\biç\s+talimat/i,
+      /\biç\s+direktif/i,
+      /\bgizli\s+(?:talimat|kural|prompt|direktif)/i,
+    ];
+    if (challengeLeakPatterns.some(p => p.test(text))) {
       return { valid: false, reason: 'prompt_challenge_leak' };
     }
 

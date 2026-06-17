@@ -2331,21 +2331,8 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       });
     }
 
-    // Run final outbound guard (AI generated + LLM bypass responses both run through this guard)
-    if (finalResponseText) {
-      const { FinalOutboundGuard } = await import('@/lib/services/ai/final-outbound-guard');
-      finalResponseText = FinalOutboundGuard.process(finalResponseText, {
-        tenantId,
-        channelId: resolvedChannelId || metadata.channelId || undefined,
-        conversationId: conversationId || 'unknown',
-        inboundText: content || '',
-        unifiedContext,
-        industry: brain.context.config?.industry || (brain.prompts.metadata as any)?.industry || '',
-        systemPromptText: systemPromptText || undefined,
-        promptVersion: brain.prompts.metadata?.version || undefined,
-        workerPath: 'worker_immediate'
-      });
-    }
+    // P0.16-C: FinalOutboundGuard already runs inside AIResponseOrchestrator.run()
+    // Removed duplicate guard call here to prevent double-processing false-positives.
 
     // Run final sanitizer on the patient-facing message
     if (finalResponseText) {
@@ -4112,21 +4099,8 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
         return;
       }
 
-      // Run final outbound guard (AI generated + LLM bypass responses both run through this guard)
-      if (finalResponseText) {
-        const { FinalOutboundGuard } = await import('@/lib/services/ai/final-outbound-guard');
-        finalResponseText = FinalOutboundGuard.process(finalResponseText, {
-          tenantId,
-          channelId: resolvedChannelId || metadata.channelId || undefined,
-          conversationId: conversationId || 'unknown',
-          inboundText: latestInboundContent || '',
-          unifiedContext,
-          industry: brain.context.config?.industry || (brain.prompts.metadata as any)?.industry || '',
-          systemPromptText: systemPromptText || undefined,
-          promptVersion: brain.prompts.metadata?.version || undefined,
-          workerPath: 'worker_delayed'
-        });
-      }
+      // P0.16-C: FinalOutboundGuard already runs inside AIResponseOrchestrator.run()
+      // Removed duplicate guard call here to prevent double-processing false-positives.
 
       const { sanitizePatientFacingMessage } = await import('@/lib/utils/patient-message-sanitizer');
       finalResponseText = sanitizePatientFacingMessage(finalResponseText);
