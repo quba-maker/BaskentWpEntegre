@@ -532,7 +532,7 @@ export class AIResponseOrchestrator {
           modelId: llmModel,
           apiKey,
           temperature: 0.7,
-          maxTokens: brain.context.settings.maxResponseTokens || 1000
+          maxTokens: brain.context.settings.maxResponseTokens || 1500
         };
 
         const orchestrator = new AIOrchestrator();

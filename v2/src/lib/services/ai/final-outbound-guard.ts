@@ -199,13 +199,6 @@ export class FinalOutboundGuard {
       /sistem detay/i,
       /sistem prompt/i,
       /promptunda/i,
-      /ai unavailable/i,
-      /circuit_open/i,
-      /quota[\s_]?(exhausted|limit|exceeded|error)/i,
-      /gemini[\s\-]?(api|model|pro|flash|ultra)/i,
-      /\b(ai|llm|language)\s+model\b/i,
-      /provider[\s_]?(error|unavailable|timeout|failed)/i,
-      /yapay zeka servis dışı/i,
       /müşteri temsilcisine devredildi/i
     ];
 
