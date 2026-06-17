@@ -4745,7 +4745,10 @@ test("P0.16 - 6: Burun estetiği sorusu kardiyoloji context’iyle cevaplanmıyo
   const { ConversationTopicSwitchResolver } = require("../lib/services/ai/conversation-topic-switch-resolver");
   const result = ConversationTopicSwitchResolver.resolve("burun estetiği yaptırmak istiyorum", "Kardiyoloji", {});
   assert(result.hasSwitched === true, "Should detect topic switch");
-  assert(result.activeTopic === "Plastik ve Rekonstrüktif Cerrahi", "Should map to plastic surgery");
+  assert(
+    result.activeTopic === "Plastik, Rekonstrüktif ve Estetik Cerrahi" || result.activeTopic === "Plastik ve Rekonstrüktif Cerrahi",
+    `Should map to plastic surgery, got: '${result.activeTopic}'`
+  );
 });
 
 test("P0.16 - 7: Doctor resolver directory varsa tutarlı cevap veriyor", () => {
@@ -5180,6 +5183,95 @@ test("P0.16-E: 4. MessageService skipGuard check", async () => {
   } finally {
     global.fetch = originalFetch;
   }
+});
+
+// ==========================================
+// P0.16-F — Active Department Arbitration / Stale Context / Morphology Regression Tests
+// ==========================================
+
+test("P0.16-F: DepartmentAliasResolver — bel fıtığı → Beyin ve Sinir Cerrahisi", async () => {
+  const { DepartmentAliasResolver } = await import("../lib/services/ai/department-alias-resolver");
+  const result = DepartmentAliasResolver.resolve("bel fıtığım var 5 yıldır devam ediyor");
+  assert(result !== null, "bel fıtığı should resolve to a department");
+  assert(result!.canonical === "Beyin ve Sinir Cerrahisi", `Expected 'Beyin ve Sinir Cerrahisi', got: '${result!.canonical}'`);
+});
+
+test("P0.16-F: DepartmentAliasResolver — kardiyoloji resolves correctly", async () => {
+  const { DepartmentAliasResolver } = await import("../lib/services/ai/department-alias-resolver");
+  const result = DepartmentAliasResolver.resolve("kalp çarpıntım var kardiyoloji ile ilgileniyorum");
+  assert(result !== null, "kardiyoloji keywords should resolve");
+  assert(result!.canonical === "Kardiyoloji", `Expected 'Kardiyoloji', got: '${result!.canonical}'`);
+});
+
+test("P0.16-F: DepartmentAliasResolver — unknown complaint returns null", async () => {
+  const { DepartmentAliasResolver } = await import("../lib/services/ai/department-alias-resolver");
+  const result = DepartmentAliasResolver.resolve("merhaba nasılsınız");
+  assert(result === null, "Generic greeting should return null from DepartmentAliasResolver");
+});
+
+test("P0.16-F: Stale context override — bel fıtığı overrides stale Kardiyoloji", async () => {
+  const { DepartmentAliasResolver } = await import("../lib/services/ai/department-alias-resolver");
+  const { activeDepartment, isOverride } = DepartmentAliasResolver.resolveWithStalenessCheck(
+    "bel fıtığım var hangi doktora gideyim",
+    "Kardiyoloji",
+    null
+  );
+  assert(activeDepartment === "Beyin ve Sinir Cerrahisi", `Expected department override, got: '${activeDepartment}'`);
+  assert(isOverride === true, "isOverride should be true when current message references a different department");
+});
+
+test("P0.16-F: First-mention detection — no stale dept, bel fıtığı sets activeDepartment", async () => {
+  const { DepartmentAliasResolver } = await import("../lib/services/ai/department-alias-resolver");
+  const { activeDepartment, isOverride } = DepartmentAliasResolver.resolveWithStalenessCheck(
+    "5 yıldır bel fıtığı çekiyorum bacaklarıma vuruyor",
+    null, // no stale department
+    null
+  );
+  assert(activeDepartment === "Beyin ve Sinir Cerrahisi", `Expected 'Beyin ve Sinir Cerrahisi', got: '${activeDepartment}'`);
+  assert(isOverride === true, "isOverride should be true when current message provides the first department hint");
+});
+
+test("P0.16-F: ConversationTopicSwitchResolver — first mention with null currentDept sets activeTopic", async () => {
+  const { ConversationTopicSwitchResolver } = await import("../lib/services/ai/conversation-topic-switch-resolver");
+  const result = ConversationTopicSwitchResolver.resolve(
+    "bel fıtığım var hangi doktor ilgilenecek",
+    null, // no prior department context
+    undefined,
+    null
+  );
+  assert(result.activeTopic === "Beyin ve Sinir Cerrahisi", `Expected 'Beyin ve Sinir Cerrahisi' on first mention, got: '${result.activeTopic}'`);
+  assert(result.hasSwitched === false, "hasSwitched should be false on first detection (no prior dept)");
+});
+
+test("P0.16-F: ConversationTopicSwitchResolver — bel fıtığı switches away from stale Kardiyoloji", async () => {
+  const { ConversationTopicSwitchResolver } = await import("../lib/services/ai/conversation-topic-switch-resolver");
+  const result = ConversationTopicSwitchResolver.resolve(
+    "kardiyoloji değil ki beyin sinir cerrahı bakmıyor mu bel fıtığına",
+    "Kardiyoloji", // stale CRM department
+    undefined,
+    null
+  );
+  assert(result.activeTopic !== "Kardiyoloji", `activeTopic should NOT be Kardiyoloji, got: '${result.activeTopic}'`);
+  assert(
+    result.activeTopic === "Beyin ve Sinir Cerrahisi",
+    `Expected 'Beyin ve Sinir Cerrahisi', got: '${result.activeTopic}'`
+  );
+  assert(result.hasSwitched === true, "hasSwitched should be true when dept changes");
+});
+
+test("P0.16-F: TurkishMorphologyGuard — ağrısınınız → ağrınız correction", async () => {
+  const { TurkishMorphologyGuard } = await import("../lib/services/ai/turkish-morphology-guard");
+  const testText = "Bel ağrısınınız ne kadar zorlayıcı olabileceğinizi biliyoruz.";
+  const result = TurkishMorphologyGuard.check(testText, true, []);
+  assert(result.hasMorphologyError === true, "Should detect ağrısınınız morphology error");
+  assert(
+    result.correctionApplied === true,
+    "Should apply correction for ağrısınınız"
+  );
+  assert(
+    result.correctedText !== undefined && !result.correctedText.includes("ağrısınınız"),
+    `Corrected text should not contain 'ağrısınınız', got: '${result.correctedText}'`
+  );
 });
 
 // ==========================================

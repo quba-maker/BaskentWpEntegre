@@ -59,6 +59,13 @@ const KNOWN_DEDUP_PATTERNS: { regex: RegExp; description: string; fix?: (match: 
   { regex: /bir zamanızı/gi, description: 'bir_zamanizi', fix: () => 'uygun bir zaman aralığını' },
   { regex: /zamanızı/gi, description: 'zamanizi_missing_n', fix: (m) => m[0] === 'Z' ? 'Zaman aralığını' : 'zaman aralığını' },
   { regex: /mesafeniniz/gi, description: 'mesafeniniz', fix: (m) => m[0] === 'M' ? 'Mesafeniz' : 'mesafeniz' },
+  // P0.16-F: ağrısınınız → ağrınız (possessive suffix doubled on pain nouns)
+  { regex: /ağrısınınız/gi, description: 'agrisininiz', fix: (m) => m[0] === 'A' ? 'Ağrınız' : 'ağrınız' },
+  { regex: /agrisininiz/gi, description: 'agrisininiz_ascii', fix: (m) => m[0] === 'A' ? 'Ağrınız' : 'ağrınız' },
+  // ısınınız → ısınız (heat/warmth suffix doubled)
+  { regex: /ısınınız/gi, description: 'isininiz', fix: (m) => m[0] === 'I' ? 'Isınız' : 'ısınız' },
+  // General: -sınınız → -nız (possessive doubled on nouns ending in vowel)
+  { regex: /(\w+)sınınız/gi, description: 'general_sınınız_doubled', fix: (m) => m.replace(/sınınız$/gi, 'nız') },
 
   // Doubled possessive general patterns
   // nızınız → nız

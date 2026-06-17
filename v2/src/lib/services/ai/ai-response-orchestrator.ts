@@ -9,8 +9,10 @@ import { ResponseFormattingPolicy } from './response-formatting-policy';
 import { ConversationTurnAggregator } from './conversation-turn-aggregator';
 import { ConversationTopicSwitchResolver } from './conversation-topic-switch-resolver';
 import { DoctorDirectoryResolver } from './doctor-directory-resolver';
+import { DepartmentAliasResolver } from './department-alias-resolver';
 import { IdentityEngine } from './engines/identity';
 import { withTenantDB } from '@/lib/core/tenant-db';
+
 
 export interface OrchestratorParams {
   tenantId: string;
@@ -439,21 +441,52 @@ export class AIResponseOrchestrator {
       unifiedContext.currentMessageText = inboundText;
       unifiedContext.currentMessageMediaType = mediaType;
 
-      // 4. Topic / Department Switch Detection
-      const currentDept = unifiedContext.opportunity?.department || unifiedContext.conversation?.department || null;
-      const topicSwitch = ConversationTopicSwitchResolver.resolve(inboundText, currentDept, unifiedContext.conversation?.metadata);
-      if (topicSwitch.hasSwitched && topicSwitch.activeTopic) {
+      // 4. P0.16-F: Active Department Arbitration
+      // Priority: current message keyword match > topic switch > stale CRM/opportunity
+      const tenantAliasConfig = brain.context.config?.departmentAliases || null;
+      const staleDept = unifiedContext.opportunity?.department || unifiedContext.conversation?.department || null;
+
+      // Step 4a: Resolve active department from CURRENT user message (overrides stale context)
+      const aliasArbitration = DepartmentAliasResolver.resolveWithStalenessCheck(
+        inboundText,
+        staleDept,
+        tenantAliasConfig
+      );
+
+      // Step 4b: Run topic switch resolver (now also handles first-mention cases)
+      const topicSwitch = ConversationTopicSwitchResolver.resolve(
+        inboundText,
+        aliasArbitration.activeDepartment, // pass already-arbitrated dept
+        unifiedContext.conversation?.metadata,
+        tenantAliasConfig
+      );
+
+      // Step 4c: Apply the winning department to context
+      const resolvedActiveDepartment = topicSwitch.activeTopic || aliasArbitration.activeDepartment || staleDept;
+      if (resolvedActiveDepartment) {
         if (!unifiedContext.conversation) unifiedContext.conversation = {};
-        unifiedContext.conversation.department = topicSwitch.activeTopic;
+        unifiedContext.conversation.department = resolvedActiveDepartment;
         if (unifiedContext.opportunity) {
-          unifiedContext.opportunity.department = topicSwitch.activeTopic;
+          unifiedContext.opportunity.department = resolvedActiveDepartment;
         }
-        
-        // Inject previous topics as facts/context
-        if (topicSwitch.previousTopics.length > 0) {
-          if (!unifiedContext.patient_known_facts) unifiedContext.patient_known_facts = [];
-          unifiedContext.patient_known_facts.push(`Geçmiş İlgilenilen Branşlar: ${topicSwitch.previousTopics.join(', ')}.`);
+
+        // Log stale context override for telemetry
+        if (aliasArbitration.isOverride && staleDept && staleDept !== resolvedActiveDepartment) {
+          console.log(JSON.stringify({
+            tag: "ACTIVE_DEPARTMENT_OVERRIDE",
+            tenantId,
+            conversationId: conversationId || 'unknown',
+            staleDepartment: staleDept,
+            resolvedDepartment: resolvedActiveDepartment,
+            workerPath
+          }));
         }
+      }
+
+      // Inject previous topics as facts/context
+      if (topicSwitch.previousTopics.length > 0) {
+        if (!unifiedContext.patient_known_facts) unifiedContext.patient_known_facts = [];
+        unifiedContext.patient_known_facts.push(`Geçmiş İlgilenilen Branşlar: ${topicSwitch.previousTopics.join(', ')}.`);
       }
 
       // 5. Approved Learning hints injection
@@ -479,11 +512,11 @@ export class AIResponseOrchestrator {
       const isPromptChallenge = ['prompt', 'promt', 'sistem prompt', 'system prompt', 'talimatların', 'sistem talimati', 'kuralın ne', 'direktifin ne', 'uydurma'].some(kw => cleanInbound.includes(kw));
       const isAngryPromptChallenge = isPromptChallenge && ['şikayet', 'sikayet', 'rezalet', 'berbat', 'kötü', 'sinir', 'bıktım', 'yeter', 'dalga'].some(kw => cleanInbound.includes(kw));
 
-      // Resolve doctor directory matching
-      const doctorsList = DoctorDirectoryResolver.getDoctors(brain, topicSwitch.activeTopic || undefined);
+      // Resolve doctor directory matching — use resolvedActiveDepartment (current-message-derived), NOT stale CRM dept
+      const doctorsList = DoctorDirectoryResolver.getDoctors(brain, resolvedActiveDepartment || undefined);
       const doctorNames = doctorsList.map(d => d.name);
       const hasDoctorDirectory = doctorsList.length > 0;
-      
+
       // Doctor lookup check
       const isDoctorLookup = ['doktor', 'hekim', 'uzman', 'cerrah', 'hoca'].some(kw => cleanInbound.includes(kw));
       const shouldBypassDoctorLookup = isDoctorLookup && !hasDoctorDirectory;
