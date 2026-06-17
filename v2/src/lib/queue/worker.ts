@@ -691,7 +691,11 @@ export class QueueWorkerEngine {
             credentials.accessToken,
             phoneNumber,
             responseText,
-            credentials.provider
+            credentials.provider,
+            {
+              workerPath: 'media_batch_consolidated',
+              source: 'media_batch_consolidated'
+            }
           );
           outProviderMessageId = res.providerMessageId || null;
           if (res.guardedContent) {
@@ -1758,7 +1762,17 @@ export class QueueWorkerEngine {
         const phoneId = whCreds.whatsappPhoneNumberId || '';
         const isThreeSixty = isThreeSixtyProvider(whCreds.provider);
         if (accessToken && (isThreeSixty || phoneId)) {
-          const outRes = await msgService.sendWhatsAppMessage(phoneId, accessToken, phoneNumber, offMsg, whCreds.provider);
+          const outRes = await msgService.sendWhatsAppMessage(
+            phoneId,
+            accessToken,
+            phoneNumber,
+            offMsg,
+            whCreds.provider,
+            {
+              workerPath: 'working_hours_offmessage',
+              source: 'working_hours_offmessage'
+            }
+          );
           const finalOffMsg = outRes.guardedContent || offMsg;
           const offMsgResult = await msgService.saveMessageIdempotent({ 
             phoneNumber, 
@@ -1973,7 +1987,17 @@ export class QueueWorkerEngine {
                 if (!isAutoReplyEnabled) {
                   this.log.info(`[PRIVACY_PRE_AUTO_REPLY_DISABLED] whatsapp_auto_reply is false, skipping privacy pre-detector auto-reply`, { tenantId, traceId });
                 } else {
-                  const outRes = await msgService.sendWhatsAppMessage(privPhoneId, privAccessToken, phoneNumber, safeResponse, privCreds.provider);
+                  const outRes = await msgService.sendWhatsAppMessage(
+                    privPhoneId,
+                    privAccessToken,
+                    phoneNumber,
+                    safeResponse,
+                    privCreds.provider,
+                    {
+                      workerPath: 'privacy_pre_detector',
+                      source: 'privacy_pre_detector'
+                    }
+                  );
                   privOutResult = outRes;
                 }
               } else {
@@ -2380,7 +2404,12 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
           accessToken,
           phoneNumber,
           finalResponseText,
-          outboundCreds.provider
+          outboundCreds.provider,
+          {
+            skipGuard: true,
+            workerPath: 'worker_immediate',
+            responseDedupeKey: orchestratorResult.responseDedupeKey || undefined
+          }
         );
         if (!outRes.success) {
           throw new Error("WhatsApp message sending returned success=false");
@@ -3947,7 +3976,17 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       let outProviderMessageId: string | null = null;
       try {
         if (channel === 'whatsapp') {
-          const outRes = await msgService.sendWhatsAppMessage(phoneId, accessToken, phoneNumber, deterministicReply, outboundCreds.provider);
+          const outRes = await msgService.sendWhatsAppMessage(
+            phoneId,
+            accessToken,
+            phoneNumber,
+            deterministicReply,
+            outboundCreds.provider,
+            {
+              workerPath: 'debounce_deterministic',
+              source: 'debounce_deterministic'
+            }
+          );
           outProviderMessageId = outRes.providerMessageId || null;
           if (outRes.guardedContent) {
             deterministicReply = outRes.guardedContent;
@@ -4122,7 +4161,18 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
 
       let outProviderMessageId: string | null = null;
       if (channel === 'whatsapp') {
-        const outRes = await msgService.sendWhatsAppMessage(phoneId, accessToken, phoneNumber, finalResponseText, outboundCreds.provider);
+        const outRes = await msgService.sendWhatsAppMessage(
+          phoneId,
+          accessToken,
+          phoneNumber,
+          finalResponseText,
+          outboundCreds.provider,
+          {
+            skipGuard: true,
+            workerPath: 'worker_debounce',
+            responseDedupeKey: orchestratorResult.responseDedupeKey || undefined
+          }
+        );
         outProviderMessageId = outRes.providerMessageId || null;
         if (outRes.guardedContent) {
           finalResponseText = outRes.guardedContent;

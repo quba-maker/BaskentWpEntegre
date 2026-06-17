@@ -71,7 +71,12 @@ export class ConversationIntentRouter {
       'bunu sormadim', 'bunu sormadım', 'hata var', 'yanlis', 'yanlış',
       'dedim ya', 'soyledim ya', 'tekrar ediyorsun', 'ayni seyi soyluyorsun',
       'i already told you', 'already said', 'you keep repeating',
-      'soyledin ya', 'söyledin ya', 'sen dedin ya'
+      'soyledin ya', 'söyledin ya', 'sen dedin ya',
+      'daha once soyledim', 'daha önce söyledim',
+      'daha once belirttim', 'daha önce belirttim',
+      'belirtmistim', 'belirtmiştim', 'belirttim',
+      'yazdim ya', 'yazdım ya',
+      'ayni seyi soyleme', 'aynı şeyi söyleme'
     ];
     if (userCorrectionKeywords.some(kw => clean.includes(kw) || originalLower.includes(kw))) {
       return 'user_correction';

@@ -526,41 +526,52 @@ export class ContextAwareSafeFallbackResolver {
 
     // Priority 1: User Correction / Frustration
     if (detectedIntent === 'user_correction' || interpretedIntent === 'user_correction') {
-      const { ConversationKnownFactsResolver } = require('./conversation-known-facts-resolver');
-      const facts = ConversationKnownFactsResolver.resolve({
-        history,
-        opportunity: unifiedContext?.opportunity,
-        profile: unifiedContext?.profile,
-        latestForm: unifiedContext?.latestForm,
-        conversation: unifiedContext?.conversation
-      });
-
-      let deptPhrase = '';
-      if (facts.previousDepartments && facts.previousDepartments.length > 0) {
-        deptPhrase = facts.previousDepartments[0];
-      } else if (facts.complaint) {
-        deptPhrase = `${facts.complaint} ile ilgili bölüm`;
-      }
+      const isRecallFrustration = ['söyledim', 'soyledim', 'belirttim', 'belirtmiştim', 'belirtmistim', 'yazdım ya', 'yazdim ya', 'aynı şeyi söyleme', 'ayni seyi soyleme'].some(kw => lowerInbound.includes(kw));
 
       let replyText = '';
-      const isContinuityMention = ['söyledin', 'soyledin', 'dedin', 'söylemiştin', 'soylemistin', 'belirttin'].some(kw => lowerInbound.includes(kw));
-
-      if (isContinuityMention && deptPhrase && isHealthcare) {
-        replyText = `Haklısınız, kusura bakmayın. Önceki mesajlarımızda ${deptPhrase} ile ilgili görüşmüştük. Bu süreç doğrultusunda randevu planlamak veya detayları görüşmek üzere telefon araması organize edebilirim.`;
-      } else {
-        const userMsgs = history.filter((m: any) => m.role === 'user');
-        const lastUserMsgText = userMsgs.length > 0 ? userMsgs[userMsgs.length - 1].content : '';
-        if (lastUserMsgText) {
-          if (isHealthcare) {
-            replyText = `Haklısınız, cevabınızı aldım. ${lastUserMsgText} bilgisini not ettim; isterseniz hasta danışmanımızla telefon görüşmesi planlanması için not alabiliriz.`;
-          } else {
-            replyText = `Haklısınız, cevabınızı aldım. ${lastUserMsgText} bilgisini not ettim; isterseniz bu bilgiyi temsilci ekibimize iletilmesi için not alabilirim.`;
-          }
+      if (isRecallFrustration) {
+        const recallSummary = buildRecallFactsSummary(history);
+        if (recallSummary) {
+          replyText = `Haklısınız, ${recallSummary} yazmıştınız. Hasta danışmanımız randevu veya süreç planlaması için sizinle iletişime geçebilir.`;
         } else {
-          if (isHealthcare) {
-            replyText = `Haklısınız, cevabınızı aldım ve not ettim; isterseniz hasta danışmanımızla telefon görüşmesi planlanması için not alabiliriz.`;
+          replyText = `Haklısınız, önceki mesajlarınızı kontrol ettim. Size daha iyi yardımcı olabilmem için randevu veya hekim görüşmesi organize edebiliriz.`;
+        }
+      } else {
+        const { ConversationKnownFactsResolver } = require('./conversation-known-facts-resolver');
+        const facts = ConversationKnownFactsResolver.resolve({
+          history,
+          opportunity: unifiedContext?.opportunity,
+          profile: unifiedContext?.profile,
+          latestForm: unifiedContext?.latestForm,
+          conversation: unifiedContext?.conversation
+        });
+
+        let deptPhrase = '';
+        if (facts.previousDepartments && facts.previousDepartments.length > 0) {
+          deptPhrase = facts.previousDepartments[0];
+        } else if (facts.complaint) {
+          deptPhrase = `${facts.complaint} ile ilgili bölüm`;
+        }
+
+        const isContinuityMention = ['söyledin', 'soyledin', 'dedin', 'söylemiştin', 'soylemistin', 'belirttin'].some(kw => lowerInbound.includes(kw));
+
+        if (isContinuityMention && deptPhrase && isHealthcare) {
+          replyText = `Haklısınız, kusura bakmayın. Önceki mesajlarımızda ${deptPhrase} ile ilgili görüşmüştük. Bu süreç doğrultusunda randevu planlamak veya detayları görüşmek üzere telefon araması organize edebilirim.`;
+        } else {
+          const userMsgs = history.filter((m: any) => m.role === 'user');
+          const lastUserMsgText = userMsgs.length > 0 ? userMsgs[userMsgs.length - 1].content : '';
+          if (lastUserMsgText) {
+            if (isHealthcare) {
+              replyText = `Haklısınız, cevabınızı aldım. ${lastUserMsgText} bilgisini not ettim; isterseniz hasta danışmanımızla telefon görüşmesi planlanması için not alabiliriz.`;
+            } else {
+              replyText = `Haklısınız, cevabınızı aldım. ${lastUserMsgText} bilgisini not ettim; isterseniz bu bilgiyi temsilci ekibimize iletilmesi için not alabilirim.`;
+            }
           } else {
-            replyText = `Haklısınız, cevabınızı aldım ve not ettim; isterseniz bu bilgiyi temsilci ekibimize iletilmesi için not alabilirim.`;
+            if (isHealthcare) {
+              replyText = `Haklısınız, cevabınızı aldım ve not ettim; isterseniz hasta danışmanımızla telefon görüşmesi planlanması için not alabiliriz.`;
+            } else {
+              replyText = `Haklısınız, cevabınızı aldım ve not ettim; isterseniz bu bilgiyi temsilci ekibimize iletilmesi için not alabilirim.`;
+            }
           }
         }
       }
@@ -570,7 +581,7 @@ export class ContextAwareSafeFallbackResolver {
         sector: resolvedIndustry,
         hasFormContext,
         hasComplaint,
-        finalPath: 'user_correction_fallback',
+        finalPath: isRecallFrustration ? 'user_correction_recall_fallback' : 'user_correction_fallback',
         detectedIntent
       };
     }
@@ -769,7 +780,7 @@ export class ContextAwareSafeFallbackResolver {
     // 3.5. Tenant Default History Fallback (only if no specific intent/bypass returned early)
     if (identityCtx.hasTenantPrompt && history.length > 0) {
       return {
-        text: "Kusura bakmayın, sorunuzu tam anlayamadım. Talebinizle ilgili yardımcı olabilmem için detayları iletebilir misiniz?",
+        text: buildHistoryAwareRecoveryFallback(history, isHealthcare, resolvedIndustry, identityCtx),
         sector: resolvedIndustry,
         hasFormContext,
         hasComplaint,
@@ -779,6 +790,17 @@ export class ContextAwareSafeFallbackResolver {
     }
 
     // 4. Default Fallback Routing (General)
+    if (history.length > 0) {
+      return {
+        text: buildHistoryAwareRecoveryFallback(history, isHealthcare, resolvedIndustry, identityCtx),
+        sector: resolvedIndustry,
+        hasFormContext,
+        hasComplaint,
+        finalPath: 'default_history_fallback',
+        detectedIntent
+      };
+    }
+
     if (isHealthcareOrForm && hasComplaint) {
       return {
         text: `${intro} ${complaint} konusuyla ilgili yardımcı olayım. Bu durum ne zamandır devam ediyor?`,
@@ -809,3 +831,173 @@ export class ContextAwareSafeFallbackResolver {
     }
   }
 }
+
+export function buildRecallFactsSummary(history: any[]): string {
+  if (!Array.isArray(history) || history.length === 0) {
+    return '';
+  }
+
+  let complaint = '';
+  let duration = '';
+  const symptoms: string[] = [];
+  let fear = '';
+
+  for (const msg of history) {
+    if (msg.role !== 'user' || !msg.content) continue;
+    const text = msg.content.toLowerCase();
+
+    // 1. Complaint detection
+    if (text.includes('bel fıt') || text.includes('bel fit')) {
+      complaint = 'bel fıtığı';
+    } else if (text.includes('boyun fıt') || text.includes('boyun fit')) {
+      complaint = 'boyun fıtığı';
+    }
+
+    // 2. Duration detection
+    const durationMatch = msg.content.match(/\b(\d+|bir|iki|üç|uc|dört|dort|beş|bes|altı|alti|yedi|sekiz|dokuz|on)\s*(?:yıldır|yildir|aydır|aydir|haftadır|haftadir|gündür|gundur)\b/i);
+    if (durationMatch) {
+      duration = durationMatch[0].toLowerCase();
+    }
+
+    // 3. Symptoms detection
+    if (text.includes('bacak')) {
+      symptoms.push('ağrının bacaklarınıza vurmaya başladığını');
+    }
+    if (text.includes('ayakta')) {
+      symptoms.push('uzun süre ayakta duramadığınızı');
+    }
+    if (text.includes('uyuş') || text.includes('uyus')) {
+      symptoms.push('uyuşmalarınız olduğunu');
+    }
+
+    // 4. Fear detection
+    if (text.includes('ameliyat') && (text.includes('kork') || text.includes('endişe') || text.includes('endise') || text.includes('çekin') || text.includes('cekin'))) {
+      fear = 'ameliyat ihtimalinden çekindiğinizi';
+    }
+  }
+
+  const pieces: string[] = [];
+  if (complaint) {
+    if (complaint === 'bel fıtığı') {
+      pieces.push(`bel fıtığınızın ${duration ? `${duration} ` : ''}sürdüğünü`);
+    } else if (complaint === 'boyun fıtığı') {
+      pieces.push(`boyun fıtığınızın ${duration ? `${duration} ` : ''}sürdüğünü`);
+    } else {
+      pieces.push(`şikayetinizin ${duration ? `${duration} ` : ''}sürdüğünü`);
+    }
+  } else if (duration) {
+    pieces.push(`şikayetinizin ${duration} sürdüğünü`);
+  }
+
+  pieces.push(...symptoms);
+
+  if (fear) {
+    pieces.push(fear);
+  }
+
+  if (pieces.length === 0) {
+    return '';
+  }
+
+  if (pieces.length === 1) {
+    return pieces[0];
+  }
+  if (pieces.length === 2) {
+    return `${pieces[0]} ve ${pieces[1]}`;
+  }
+  const last = pieces.pop();
+  return `${pieces.join(', ')} ve ${last}`;
+}
+
+export function buildHistoryAwareRecoveryFallback(
+  history: any[],
+  isHealthcare: boolean,
+  resolvedIndustry: string,
+  identityCtx: any
+): string {
+  const hasHistory = Array.isArray(history) && history.length > 0;
+  const pName = identityCtx?.personaName;
+  const orgName = identityCtx?.organizationName || (isHealthcare ? 'Sağlık Merkezi' : 'Hizmet Merkezi');
+  const hasPersona = !!pName && pName !== 'Asistan';
+
+  if (!hasHistory) {
+    if (hasPersona) {
+      return `Ben *${pName}*, ${orgName}’nden sizinle ilgileniyorum. Size nasıl yardımcı olabilirim? 🌿`;
+    }
+    return isHealthcare
+      ? 'Merhaba, size sağlık talebinizle ilgili yardımcı olayım. Hangi konuda bilgi almak istiyorsunuz?'
+      : 'Merhaba, size yardımcı olmak üzere buradayım. Hangi konuda bilgi almak istersiniz?';
+  }
+
+  // We have history! Let's extract details.
+  let complaint = '';
+  let duration = '';
+  const symptoms: string[] = [];
+  let fear = '';
+
+  for (const msg of history) {
+    if (msg.role !== 'user' || !msg.content) continue;
+    const text = msg.content.toLowerCase();
+
+    // 1. Complaint detection
+    if (text.includes('bel fıt') || text.includes('bel fit')) {
+      complaint = 'bel fıtığı';
+    } else if (text.includes('boyun fıt') || text.includes('boyun fit')) {
+      complaint = 'boyun fıtığı';
+    }
+
+    // 2. Duration detection
+    const durationMatch = msg.content.match(/\b(\d+|bir|iki|üç|uc|dört|dort|beş|bes|altı|alti|yedi|sekiz|dokuz|on)\s*(?:yıldır|yildir|aydır|aydir|haftadır|haftadir|gündür|gundur)\b/i);
+    if (durationMatch) {
+      duration = durationMatch[0].toLowerCase();
+    }
+
+    // 3. Symptoms detection
+    if (text.includes('bacak')) {
+      symptoms.push('bacaklara vuran ağrı');
+    }
+    if (text.includes('ayakta')) {
+      symptoms.push('uzun süre ayakta duramama');
+    }
+    if (text.includes('uyuş') || text.includes('uyus')) {
+      symptoms.push('uyuşma');
+    }
+
+    // 4. Fear/Anxiety detection
+    if (text.includes('ameliyat') && (text.includes('kork') || text.includes('endişe') || text.includes('endise') || text.includes('çekin') || text.includes('cekin'))) {
+      fear = 'ameliyat';
+    }
+  }
+
+  // If specific clinical profile is found (like bel fıtığı + bacak/ayakta/ameliyat)
+  if (complaint === 'bel fıtığı' && (fear === 'ameliyat' || symptoms.length > 0)) {
+    let response = "Ameliyat ihtimali sizi endişelendirmiş olabilir, bu anlaşılır. Bel fıtığında süreç genelde muayene ve mevcut MR/tetkiklerin değerlendirilmesiyle başlar. Her hasta için doğrudan ameliyat kararı verilmez; uygun yaklaşım uzman hekim değerlendirmesiyle netleşir.";
+    
+    if (symptoms.length > 0) {
+      const formattedSymptoms = symptoms.join(' ve ');
+      // Capitalize first letter of symptoms for clean starting
+      const capitalizedSymptoms = formattedSymptoms.charAt(0).toUpperCase() + formattedSymptoms.slice(1);
+      response += ` ${capitalizedSymptoms} şikayetiniz olduğu için sizi ilgili birime yönlendirebiliriz.`;
+    } else {
+      response += " Bel fıtığı şikayetiniz olduğu için sizi ilgili birime yönlendirebiliriz.";
+    }
+    return response;
+  }
+
+  // General healthcare fallback but with summary of complaint
+  if (isHealthcare) {
+    if (complaint) {
+      return `Haklısınız, ${complaint} şikayetinizle ilgili paylaştığınız detayları not ettim. Bu süreçte hekim değerlendirmesi ve tedavi planlaması için sizi ilgili birime/hasta danışmanımıza yönlendirebiliriz.`;
+    }
+    if (hasPersona) {
+      return `Ben *${pName}*, ${orgName}’nden sizinle ilgileniyorum. Size sağlık talebinizle ilgili yardımcı olayım.`;
+    }
+    return 'Merhaba, size sağlık talebinizle ilgili yardımcı olayım. Hangi konuda bilgi almak istiyorsunuz?';
+  }
+
+  if (hasPersona) {
+    return `Ben *${pName}*, ${orgName}’nden sizinle ilgileniyorum. Hangi konuda bilgi almak istediğinizi yazabilirsiniz.`;
+  }
+  return 'Merhaba, size yardımcı olmak üzere buradayım. Hangi konuda bilgi almak istersiniz?';
+}
+

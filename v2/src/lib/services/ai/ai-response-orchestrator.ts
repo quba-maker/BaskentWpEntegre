@@ -488,7 +488,13 @@ export class AIResponseOrchestrator {
       const isDoctorLookup = ['doktor', 'hekim', 'uzman', 'cerrah', 'hoca'].some(kw => cleanInbound.includes(kw));
       const shouldBypassDoctorLookup = isDoctorLookup && !hasDoctorDirectory;
 
-      const isLlmBypassChallenge = isPromptChallenge || isBotAccusation || isAiAccusation || isAngryPromptChallenge || shouldBypassDoctorLookup;
+      // Check for recall frustration with facts
+      const isRecallFrustration = ['söyledim', 'soyledim', 'belirttim', 'belirtmiştim', 'belirtmistim', 'yazdım ya', 'yazdim ya', 'aynı şeyi söyleme', 'ayni seyi soyleme'].some(kw => cleanInbound.includes(kw));
+      const { buildRecallFactsSummary } = require('./context-aware-safe-fallback');
+      const recallSummary = buildRecallFactsSummary(history);
+      const isRecallWithFacts = isRecallFrustration && recallSummary.length > 0;
+
+      const isLlmBypassChallenge = isPromptChallenge || isBotAccusation || isAiAccusation || isAngryPromptChallenge || shouldBypassDoctorLookup || isRecallWithFacts;
 
       let text = '';
       let bypassed = false;

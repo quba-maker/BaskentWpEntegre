@@ -26,6 +26,10 @@ export interface OutboundGuardContext {
   doctorDirectoryHit?: boolean;
   topicSwitchApplied?: boolean;
   sandbox?: boolean;
+  blocked?: boolean;
+  reason?: string;
+  safeRecoveryNeeded?: boolean;
+  guardVersion?: string;
 }
 
 export class FinalOutboundGuard {
@@ -199,7 +203,14 @@ export class FinalOutboundGuard {
       /sistem detay/i,
       /sistem prompt/i,
       /promptunda/i,
-      /müşteri temsilcisine devredildi/i
+      /müşteri temsilcisine devredildi/i,
+      // P0.16-C Narrowed technical leak patterns
+      /ai unavailable/i,
+      /quota exceeded/i,
+      /\bgemini\b/i,
+      /servis dışı/i,
+      /\bllm\b/i,
+      /language model/i
     ];
 
     const lowerText = corrected.toLowerCase();
@@ -264,32 +275,10 @@ export class FinalOutboundGuard {
         context: {
           config: {
             channelId: context.channelId,
-            industry: context.isHealthcare ? 'healthcare' : undefined
+            industry: isHealthcare ? 'healthcare' : undefined
           }
         }
       };
-
-      const identityCtx = resolveActivePromptIdentityContext({
-        brain: mockBrainForIdentity,
-        identityConfig: context.unifiedContext?.identityConfig || context.unifiedContext?.identity || {}
-      });
-
-      const history = unifiedContext?.history || [];
-      const hasHistory = Array.isArray(history) && history.length > 0;
-      const hasPersona = !!identityCtx.personaName && identityCtx.personaName !== 'Asistan';
-
-      let fallbackText = '';
-      if (hasPersona) {
-        if (hasHistory) {
-          fallbackText = "Kusura bakmayın, sorunuzu tam anlayamadım. Talebinizle ilgili yardımcı olabilmem için detayları iletebilir misiniz?";
-        } else {
-          fallbackText = `Ben *${identityCtx.personaName}*, ${identityCtx.organizationName}’nden sizinle ilgileniyorum\n\nSorunuzu yazarsanız size yardımcı olayım`;
-        }
-      } else if (isHealthcare) {
-        fallbackText = 'Kusura bakmayın, cevabımı daha net ifade edeyim. Sağlık talebinizle ilgili sizi doğru ekibe yönlendirebilirim.';
-      } else {
-        fallbackText = 'Kusura bakmayın, cevabımı daha net ifade edeyim. Talebinizle ilgili sizi doğru ekibe yönlendirebilirim.';
-      }
 
       const blockReasons: string[] = [];
       if (hasBlockedPattern) blockReasons.push('blocked_pattern');
@@ -297,7 +286,27 @@ export class FinalOutboundGuard {
       if (isExtremelyShort) blockReasons.push('extremely_short');
       if (isShortGreetingOnly) blockReasons.push('greeting_only');
 
-      // P0.16-C: Log truncated original text for debugging false-positive blocks
+      const blockReasonStr = blockReasons.join(',');
+      context.blocked = true;
+      context.reason = blockReasonStr;
+      context.safeRecoveryNeeded = true;
+      context.guardVersion = 'P0.16-guard-v1';
+
+      // Delegate recovery entirely to ContextAwareSafeFallbackResolver
+      const { ContextAwareSafeFallbackResolver } = require('./context-aware-safe-fallback');
+      const fallbackResult = ContextAwareSafeFallbackResolver.resolve({
+        inboundText: context.inboundText || '',
+        brain: mockBrainForIdentity as any,
+        identityConfig: context.unifiedContext?.identityConfig || context.unifiedContext?.identity || {},
+        unifiedContext: context.unifiedContext || {},
+        channelId: context.channelId,
+        systemPromptText: context.systemPromptText,
+        promptVersion: context.promptVersion
+      });
+      const fallbackText = fallbackResult.text;
+
+      // P0.16-C: Log truncated original text for debugging false-positive blocks, but secure it behind an env flag
+      const shouldLogRawText = process.env.DEBUG_AI_GUARD_RAW_TEXT === 'true';
       const truncatedOriginal = corrected.length > 120 ? corrected.substring(0, 120) + '...' : corrected;
       console.log(JSON.stringify({
         tag: "FINAL_OUTBOUND_GUARD_BLOCKED",
@@ -305,24 +314,28 @@ export class FinalOutboundGuard {
         conversationId: conversationId || 'unknown',
         intent: context.intent || 'unknown',
         reasons: blockReasons,
-        rawTextTruncated: truncatedOriginal,
-        rawTextLogged: true,
+        ...(shouldLogRawText && { rawTextTruncated: truncatedOriginal }),
+        rawTextLogged: shouldLogRawText,
         fallbackLength: fallbackText.length,
         orchestratorVersion: "P0.16-orchestrator-v1",
         workerPath: resolvedWorkerPath,
         responseDedupeKey: context.responseDedupeKey || "unknown",
         aggregatedMessageCount: context.aggregatedMessageCount || 0,
         fallbackApplied: true,
-        fallbackReason: blockReasons.join(','),
+        fallbackReason: blockReasonStr,
         doctorDirectoryHit: context.doctorDirectoryHit || false,
-        topicSwitchApplied: context.topicSwitchApplied || false
+        topicSwitchApplied: context.topicSwitchApplied || false,
+        blocked: true,
+        reason: blockReasonStr,
+        safeRecoveryNeeded: true,
+        guardVersion: 'P0.16-guard-v1'
       }));
 
       if (!context.sandbox) {
         FinalOutboundGuard.logToAudit(
           tenantId,
           'FINAL_OUTBOUND_GUARD_BLOCKED',
-          `Blocked outbound text. Reasons: ${blockReasons.join(', ')}`,
+          `Blocked outbound text. Reasons: ${blockReasonStr}`,
           {
             tag: 'FINAL_OUTBOUND_GUARD_BLOCKED',
             tenantId,
@@ -332,7 +345,11 @@ export class FinalOutboundGuard {
             rawTextLogged: false,
             fallbackLength: fallbackText.length,
             orchestratorVersion: "P0.16-orchestrator-v1",
-            workerPath: resolvedWorkerPath
+            workerPath: resolvedWorkerPath,
+            blocked: true,
+            reason: blockReasonStr,
+            safeRecoveryNeeded: true,
+            guardVersion: 'P0.16-guard-v1'
           },
           conversationId
         );

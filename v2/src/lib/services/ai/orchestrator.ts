@@ -379,7 +379,13 @@ export class AIOrchestrator {
         modelMaxOutputTokens: config.maxTokens
       });
       
-      let fallbackText = "Mesajınızı aldım. Size daha iyi yardımcı olabilmem için talebinizi biraz daha detaylandırabilir misiniz? 🙏";
+      let fallbackText = '';
+      try {
+        const { buildHistoryAwareRecoveryFallback } = require('./context-aware-safe-fallback');
+        fallbackText = buildHistoryAwareRecoveryFallback(currentMessages, true, 'healthcare', { organizationName: 'Sağlık Merkezi' });
+      } catch (err) {
+        fallbackText = "Merhaba, size sağlık talebinizle ilgili yardımcı olayım. Hangi konuda bilgi almak istiyorsunuz?";
+      }
       
       const cleanLower = (lastUserMsg || '').toLowerCase();
       const locations = [

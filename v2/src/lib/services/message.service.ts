@@ -164,7 +164,13 @@ export class MessageService {
     accessToken: string,
     to: string,
     content: string,
-    provider?: string | null
+    provider?: string | null,
+    guardOptions?: {
+      skipGuard?: boolean;
+      workerPath?: string;
+      responseDedupeKey?: string;
+      source?: string;
+    }
   ): Promise<{ success: boolean; providerMessageId?: string; guardedContent?: string }> {
     // Enforce final outbound guard at the very boundary
     let guardedContent = content;
@@ -228,14 +234,21 @@ export class MessageService {
         }
       }
 
-      const { FinalOutboundGuard } = await import('@/lib/services/ai/final-outbound-guard');
-      guardedContent = FinalOutboundGuard.process(content, {
-        tenantId: this.db.tenantId,
-        conversationId,
-        inboundText: lastInboundText,
-        unifiedContext,
-        industry
-      });
+      if (guardOptions?.skipGuard) {
+        guardedContent = content;
+      } else {
+        const { FinalOutboundGuard } = await import('@/lib/services/ai/final-outbound-guard');
+        guardedContent = FinalOutboundGuard.process(content, {
+          tenantId: this.db.tenantId,
+          conversationId,
+          inboundText: lastInboundText,
+          unifiedContext,
+          industry,
+          workerPath: guardOptions?.workerPath,
+          responseDedupeKey: guardOptions?.responseDedupeKey,
+          source: guardOptions?.source || 'outbound_api'
+        });
+      }
     } catch (guardErr) {
       this.log.error("Failed to run FinalOutboundGuard inside sendWhatsAppMessage boundary", guardErr as Error);
     }
