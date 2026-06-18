@@ -2366,11 +2366,23 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       finalResponseText = sanitizePatientFacingMessage(finalResponseText);
     }
 
-    // P0.16-L: WhatsApp formatting now handled inside AIResponseOrchestrator.run()
-    // (WhatsAppFormattingFinalizer applied after morphology guard, before FinalOutboundGuard).
-    // The legacy formatForWhatsApp() below is idempotent (bullet/bold only) but redundant.
-    // Keeping as safety net for any text that bypasses orchestrator (e.g. policy fallback text).
-    if (channel === 'whatsapp' && finalResponseText) {
+    // P0.16-N: FinalOutboundBodyAuditor — mandatory last-mile enforcement
+    // Runs AFTER sanitizePatientFacingMessage and BEFORE send.
+    // Applies TurkishFinalQualityNormalizer + WhatsAppFormattingFinalizer + LegacyBlock kill.
+    // Replaces legacy formatForWhatsApp() call for WhatsApp channel.
+    // Emits FINAL_OUTBOUND_BODY_AUDIT telemetry.
+    if (finalResponseText && channel === 'whatsapp') {
+      const { FinalOutboundBodyAuditor } = await import('@/lib/services/ai/final-outbound-body-auditor');
+      const auditResult = FinalOutboundBodyAuditor.audit(finalResponseText, {
+        tenantId,
+        conversationId: conversationId || undefined,
+        workerPath: 'worker_immediate',
+        responseSource: orchestratorResult.modelUsed || 'unknown',
+        channel: 'whatsapp',
+      });
+      finalResponseText = auditResult.text;
+    } else if (finalResponseText && channel !== 'whatsapp') {
+      // Non-WhatsApp: keep legacy formatter as safety net
       finalResponseText = formatForWhatsApp(finalResponseText);
     }
 
@@ -4143,15 +4155,25 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
         return;
       }
 
-      // P0.16-C: FinalOutboundGuard already runs inside AIResponseOrchestrator.run()
-      // Removed duplicate guard call here to prevent double-processing false-positives.
-
       const { sanitizePatientFacingMessage } = await import('@/lib/utils/patient-message-sanitizer');
       finalResponseText = sanitizePatientFacingMessage(finalResponseText);
 
-      // P0.16-L: WhatsApp formatting handled inside AIResponseOrchestrator.run().
-      // Legacy formatForWhatsApp() is idempotent (bullet/bold) — kept as safety net for policy fallback text.
-      if (channel === 'whatsapp') {
+      // P0.16-N: FinalOutboundBodyAuditor — mandatory last-mile enforcement (delayed path)
+      // Runs AFTER sanitizePatientFacingMessage and BEFORE send.
+      // Applies TurkishFinalQualityNormalizer + WhatsAppFormattingFinalizer + LegacyBlock kill.
+      // Replaces legacy formatForWhatsApp() for WhatsApp channel.
+      if (finalResponseText && channel === 'whatsapp') {
+        const { FinalOutboundBodyAuditor } = await import('@/lib/services/ai/final-outbound-body-auditor');
+        const auditResult = FinalOutboundBodyAuditor.audit(finalResponseText, {
+          tenantId,
+          conversationId: conversationId || undefined,
+          workerPath: 'worker_delayed',
+          responseSource: orchestratorResult.modelUsed || 'unknown',
+          channel: 'whatsapp',
+        });
+        finalResponseText = auditResult.text;
+      } else if (finalResponseText && channel !== 'whatsapp') {
+        // Non-WhatsApp: keep legacy formatter
         finalResponseText = formatForWhatsApp(finalResponseText);
       }
 
