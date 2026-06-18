@@ -205,6 +205,48 @@ const KNOWN_DEDUP_PATTERNS: { regex: RegExp; description: string; fix?: (match: 
     description: 'tedavi_yonteminizi_belirler',
     fix: (m) => m[0] === 'T' ? 'Tedavi yöntemini belirler' : 'tedavi yöntemini belirler'
   },
+
+  // P0.16-K: "tedavinizi" + 3rd-person verb → "tedaviyi"
+  {
+    regex: /tedavinizi\s+(planlar|belirler|uygular|y[\u00fc\u0075]r[\u00fc\u0075]t[\u00fc\u0075]r|d[\u00fc\u0075]zenler)/gi,
+    description: 'tedavinizi_third_person_verb',
+    fix: (m: string) => m.replace(/tedavinizi/i, 'tedaviyi')
+  },
+
+  // P0.16-K: "tahmininizi bir tarih" → "tahmini bir tarih"
+  {
+    regex: /tahmininizi\s+(?:bir\s+)?tarih/gi,
+    description: 'tahmininizi_bir_tarih',
+    fix: (m: string) => m.replace(/tahmininizi/i, 'tahmini')
+  },
+
+  // P0.16-K: "hekim alternatiflerinizi" → "hekim alternatiflerini"
+  {
+    regex: /(?:uzman\s+)?hekim\s+alternatiflerinizi/gi,
+    description: 'hekim_alternatiflerinizi',
+    fix: (m: string) => m.replace(/alternatiflerinizi/i, 'alternatiflerini')
+  },
+
+  // P0.16-K: "annenizin bel fıtığı" — patient confusion guard
+  {
+    regex: /annenizin\s+bel\s+f[\u0131i]t[\u0131i][\u011fg][\u0131i]/gi,
+    description: 'annenizin_bel_fitigi_patient_confusion',
+    fix: () => 'sizin bel fıtığı şikayetıniz'
+  },
+
+  // P0.16-K: "uygun olduğunuz bir zaman aralığınızı" → "size uygun bir zaman aralığı"
+  {
+    regex: /uygun\s+oldu[\u011fg]unuz\s+bir\s+zaman\s+aral[\u0131i][\u011fg][\u0131i]n[\u0131i]z[\u0131i]/gi,
+    description: 'uygun_oldugunuz_zaman_araligini',
+    fix: () => 'size uygun bir zaman aralığı'
+  },
+
+  // P0.16-K: Auto-timezone assumption guard
+  {
+    regex: /T[\u00fc\u0075]rkiye\s+saati\s+olarak\s+not\s+ald[\u0131i]m/gi,
+    description: 'turkiye_saati_not_aldim_auto_assumption',
+    fix: () => 'not aldım (saat diliminizi teyit edelim)'
+  },
 ];
 
 

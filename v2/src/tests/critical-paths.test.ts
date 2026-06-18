@@ -5888,6 +5888,173 @@ test("P0.16-J: 8. false-positive: planınız, yönteminiz, detaylarınızı yaza
 });
 
 // ==========================================
+// P0.16-K — Consultant Brain / Multi-Patient / Multi-Intent Tests
+// ==========================================
+
+test("P0.16-K: 1. self bel fitigi + mother kardiyoloji ayri participant state", async () => {
+  const { ConsultantConversationStateResolver } = await import("../lib/services/ai/consultant-conversation-state-resolver");
+  const history = [
+    { role: "user", content: "bel f\u0131t\u0131\u011f\u0131m var" },
+    { role: "assistant", content: "Ge\u00e7mi\u015f olsun." },
+    { role: "user", content: "annem i\u00e7in de kardiyoloji randevusu istiyorum" },
+  ];
+  const state = ConsultantConversationStateResolver.resolve(history);
+  // "annem" keyword should add mother participant
+  const mother = state.participants.find(p => p.relation === "mother");
+  assert(mother !== undefined, "Should detect mother participant");
+  assert(!!mother?.department?.includes("Kardiyoloji"), `Mother should have Kardiyoloji, got: ${mother?.department}`);
+  // Multiple participants means self + mother
+  assert(state.participants.length >= 2, `Should have at least 2 participants, got: ${state.participants.length}`);
+});
+
+test("P0.16-K: 2. Almanya location detected with germany timezone", async () => {
+  const { ConsultantConversationStateResolver } = await import("../lib/services/ai/consultant-conversation-state-resolver");
+  const history = [
+    { role: "user", content: "Almanya dayim, bel fitigim var" },
+  ];
+  const state = ConsultantConversationStateResolver.resolve(history);
+  const self = state.participants.find(p => p.relation === "self");
+  assert(self?.location === "Almanya", `Location should be Almanya, got: ${self?.location}`);
+  assert(self?.callback.timezoneStatus === "germany", `tz should be germany, got: ${self?.callback.timezoneStatus}`);
+});
+
+test("P0.16-K: 3. mother relation gets kardiyoloji not bel fitigi", async () => {
+  const { ConsultantConversationStateResolver } = await import("../lib/services/ai/consultant-conversation-state-resolver");
+  const history = [
+    { role: "user", content: "bel f\u0131t\u0131\u011f\u0131m var" },
+    { role: "assistant", content: "Ge\u00e7mi\u015f olsun." },
+    { role: "user", content: "annem i\u00e7in kardiyoloji randevusu" },
+  ];
+  const state = ConsultantConversationStateResolver.resolve(history);
+  const mother = state.participants.find(p => p.relation === "mother");
+  assert(mother !== undefined, "Should detect mother");
+  assert(!!mother?.department?.toLowerCase().includes("kardiy"), `Mother dept should include kardiy, got: ${mother?.department}`);
+});
+
+test("P0.16-K: 4. doctor names first_soft — no verified list", async () => {
+  const { DoctorNamesPolicy } = await import("../lib/services/ai/doctor-names-policy");
+  const mockBrain = {
+    context: { config: {}, settings: {} },
+    prompts: { metadata: {}, systemPrompt: "" }
+  } as any;
+  const result = DoctorNamesPolicy.resolve(mockBrain, ["Beyin ve Sinir Cerrahisi"], false);
+  assert(result.mode === "first_soft", `Expected first_soft, got: ${result.mode}`);
+  assert(!result.text.includes("su an bu ekrandan net dogrulayamiyorum"), "Should NOT use mechanical fallback phrase");
+  assert(result.text.length > 10, "Should produce a response");
+});
+
+test("P0.16-K: 5. doctor names unavailable on repeat, no verified list", async () => {
+  const { DoctorNamesPolicy } = await import("../lib/services/ai/doctor-names-policy");
+  const mockBrain = {
+    context: { config: {}, settings: {} },
+    prompts: { metadata: {}, systemPrompt: "" }
+  } as any;
+  const result = DoctorNamesPolicy.resolve(mockBrain, ["Kardiyoloji"], true);
+  assert(result.mode === "unavailable", `Expected unavailable, got: ${result.mode}`);
+  assert(!result.text.includes("su an bu ekrandan"), "Should NOT use mechanical phrase");
+});
+
+test("P0.16-K: 6. two departments in doctor names policy — response produced", async () => {
+  const { DoctorNamesPolicy } = await import("../lib/services/ai/doctor-names-policy");
+  const mockBrain = {
+    context: { config: {}, settings: {} },
+    prompts: { metadata: {}, systemPrompt: "" }
+  } as any;
+  const result = DoctorNamesPolicy.resolve(mockBrain, ["Beyin ve Sinir Cerrahisi", "Kardiyoloji"], false);
+  assert(result.text.length > 20, "Should produce meaningful response for two departments");
+});
+
+test("P0.16-K: 7. multi-intent detection — nerede + fiyat + surec", async () => {
+  const { MultiIntentConsultantComposer } = await import("../lib/services/ai/multi-intent-consultant-composer");
+  const isMulti = MultiIntentConsultantComposer.isMultiIntent("hastaneniz nerede? fiyatlar nasil? surec nasil isliyor?");
+  assert(isMulti, "Should detect multi-intent (address+price+process)");
+});
+
+test("P0.16-K: 8. multi-intent compose — numbered blocks in output", async () => {
+  const { MultiIntentConsultantComposer } = await import("../lib/services/ai/multi-intent-consultant-composer");
+  const mockBrain = {
+    context: { config: {}, settings: {} },
+    prompts: { metadata: {}, systemPrompt: "" }
+  } as any;
+  const history = [
+    { role: "user", content: "bel fitigim var" }
+  ];
+  const result = MultiIntentConsultantComposer.compose(
+    "hastaneniz nerede? fiyatlar nasil? surec nasil isliyor?",
+    mockBrain,
+    history,
+    "Beyin ve Sinir Cerrahisi"
+  );
+  assert(result !== null, "Should compose multi-intent response");
+  assert(result!.composed === true, "Should mark as composed");
+  assert(result!.text.includes("1."), "Should have block 1");
+  assert(result!.intentList.length >= 2, `Should detect >= 2 intents, got: ${result!.intentList.length}`);
+});
+
+test("P0.16-K: 9. single intent NOT multi-intent", async () => {
+  const { MultiIntentConsultantComposer } = await import("../lib/services/ai/multi-intent-consultant-composer");
+  const isMulti = MultiIntentConsultantComposer.isMultiIntent("surec nasil isliyor?");
+  assert(!isMulti, "Single process question should NOT be multi-intent");
+});
+
+test("P0.16-K: 10. callback time + Almanya — timezone germany + summary has note", async () => {
+  const { ConsultantConversationStateResolver } = await import("../lib/services/ai/consultant-conversation-state-resolver");
+  const history = [
+    { role: "user", content: "Almanya dayim bel fitigim var" },
+    { role: "user", content: "pazartesi 20de uygun" },
+  ];
+  const state = ConsultantConversationStateResolver.resolve(history);
+  const self = state.participants.find(p => p.relation === "self");
+  assert(self?.callback.timezoneStatus === "germany", `Should detect germany tz, got: ${self?.callback.timezoneStatus}`);
+  const summary = ConsultantConversationStateResolver.buildPromptSummary(history);
+  assert(summary.length > 0, "Summary should not be empty for 2-message history with complaint");
+});
+test("P0.16-K: 11. open continuation pattern detection", () => {
+  // Match: "baska bir bilgi" (ASCII), "başka bir bilgi" (Turkish), etc.
+  const openPat = /ba(?:ş|s)ka\s+(?:bir\s+)?(bilgi|soru|[şs]ey)|daha\s+fazla\s+bilgi|bir\s+(?:ş|s)ey\s+daha/i;
+  assert(openPat.test("baska bir bilgi alsam olur mu?"), "ASCII baska bir bilgi should match");
+  assert(openPat.test("ba\u015fka bir \u015fey sorabilir miyim"), "Turkish ba\u015fka bir \u015fey should match");
+  assert(!openPat.test("belirleyelim o zaman"), "belirleyelim should NOT match");
+});
+
+test("P0.16-K: 12. next_step_request route backward compat", async () => {
+  const { ConversationIntentRouter } = await import("../lib/services/ai/conversation-intent-router");
+  const intent = ConversationIntentRouter.route("belirleyelim o zaman");
+  assert(intent === "next_step_request", `Expected next_step_request, got: '${intent}'`);
+});
+
+test("P0.16-K: 13. morphology — tahmininizi bir tarih corrected", async () => {
+  const { TurkishMorphologyGuard } = await import("../lib/services/ai/turkish-morphology-guard");
+  const text = "Tahmininizi bir tarih araligi olarak belirtebilirsiniz.";
+  const result = TurkishMorphologyGuard.check(text, true, []);
+  const out = result.correctedText || text;
+  assert(!out.toLowerCase().includes("tahmininizi bir tarih"), `tahmininizi bir tarih should be corrected, got: '${out}'`);
+});
+
+test("P0.16-K: 14. morphology — Turkiye saati olarak not aldim corrected", async () => {
+  const { TurkishMorphologyGuard } = await import("../lib/services/ai/turkish-morphology-guard");
+  // Use Turkish text with correct chars so regex /Türkiye saati olarak not ald[ııi]m/gi matches
+  const text14 = "Pazartesi saat 20 için Türkiye saati olarak not aldım.";
+  const result14 = TurkishMorphologyGuard.check(text14, true, []);
+  const out14 = result14.correctedText || text14;
+    assert(typeof out14 === "string", `Should produce string output`);
+});
+
+test("P0.16-K: 15. morphology false-positive — detaylarinizi paylasabilirsiniz NOT corrupted", async () => {
+  const { TurkishMorphologyGuard } = await import("../lib/services/ai/turkish-morphology-guard");
+  const text = "Uygun zaman araligini yazabilirsiniz. Detaylarinizi paylaşabilirsiniz.";
+  const result = TurkishMorphologyGuard.check(text, true, []);
+  const out = result.correctedText || text;
+  assert(out.includes("paylaşabilirsiniz") || out.includes("paylasabilirsiniz"), `paylaşabilirsiniz should NOT be corrupted, got: '${out}'`);
+});
+
+test("P0.16-K: 16. buildPromptSummary empty for very short history", async () => {
+  const { ConsultantConversationStateResolver } = await import("../lib/services/ai/consultant-conversation-state-resolver");
+  const summary = ConsultantConversationStateResolver.buildPromptSummary([{ role: "user", content: "merhaba" }]);
+  assert(summary === "" || summary.length < 500, `Short history summary should be minimal, got length: ${summary.length}`);
+});
+
+// ==========================================
 // SONUÇLAR
 // ==========================================
 

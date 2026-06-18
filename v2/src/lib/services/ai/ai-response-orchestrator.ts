@@ -13,6 +13,11 @@ import { DepartmentAliasResolver } from './department-alias-resolver';
 import { RecentDepartmentContextResolver } from './recent-department-context-resolver';
 import { IdentityEngine } from './engines/identity';
 import { withTenantDB } from '@/lib/core/tenant-db';
+// P0.16-K: Consultant brain imports
+import { ConsultantConversationStateResolver } from './consultant-conversation-state-resolver';
+import { MultiIntentConsultantComposer } from './multi-intent-consultant-composer';
+import { DoctorNamesPolicy } from './doctor-names-policy';
+import { ConversationIntentRouter } from './conversation-intent-router';
 
 
 export interface OrchestratorParams {
@@ -568,6 +573,24 @@ export class AIResponseOrchestrator {
       const isProcessQuestion = ['süreç', 'surec', 'nasıl ışliyor', 'nasıl çalışıyor', 'nasıl yürüyor', 'tanı', 'tedavi', 'muayene', 'operasyon', 'ameliyat', 'aşama', 'adım'].some(kw => cleanInbound.includes(kw));
       const isMixedDoctorProcess = isDoctorLookup && isProcessQuestion;
 
+      // P0.16-K: Intent routing for next_step_request bypass (before LLM)
+      const routedIntent = ConversationIntentRouter.route(inboundText);
+      const isNextStepRequest = routedIntent === 'next_step_request';
+
+      // P0.16-K: Multi-intent detection (address+price+doctor+process in one message)
+      const isMultiIntentQuery = MultiIntentConsultantComposer.isMultiIntent(inboundText);
+
+      // P0.16-K: Doctor names request detection (with repeat check)
+      const isDoctorNamesRequest = /doktor\s+isim|hekim\s+isim|doktor\s+isimleri|kimler\s+var|hangi\s+doktorlar|doktor\s+list/.test(cleanInbound);
+      const hasPreviousDoctorAsk = history.some(m =>
+        m.role === 'user' &&
+        /doktor\s+isim|hekim\s+isim|hangi\s+doktorlar/.test((m.content || '').toLowerCase())
+      );
+
+      // P0.16-K: "başka bilgi" / open-ended continuation — must NOT close conversation
+      // P0.16-K: match both Turkish ş and ASCII s for real WhatsApp messages
+      const isOpenContinuation = /ba(?:ş|s)ka\s+(?:bir\s+)?(bilgi|soru|[şs]ey)|ba(?:ş|s)ka\s+bir\s+(?:ş|s)ey\s+sorabilir|daha\s+fazla\s+bilgi|bir\s+(?:ş|s)ey\s+daha/i.test(inboundText);
+
       // Telemetry: doctor lookup department selection
       if (isDoctorLookup) {
         console.log(JSON.stringify({
@@ -590,7 +613,7 @@ export class AIResponseOrchestrator {
       const recallSummary = buildRecallFactsSummary(history);
       const isRecallWithFacts = isRecallFrustration && recallSummary.length > 0;
 
-      const isLlmBypassChallenge = isPromptChallenge || isBotAccusation || isAiAccusation || isAngryPromptChallenge || shouldBypassDoctorLookup || isRecallWithFacts;
+      const isLlmBypassChallenge = isPromptChallenge || isBotAccusation || isAiAccusation || isAngryPromptChallenge || shouldBypassDoctorLookup || isRecallWithFacts || isNextStepRequest || isMultiIntentQuery || isDoctorNamesRequest;
 
       let text = '';
       let bypassed = false;
@@ -599,14 +622,16 @@ export class AIResponseOrchestrator {
       let outputTokens = 0;
 
       if (isLlmBypassChallenge) {
-        // P0.16-H Telemetry: multi-intent burst department
+        // P0.16-H/K Telemetry: intent list
         const intentList: string[] = [];
         if (shouldBypassDoctorLookup) intentList.push('doctor_lookup');
         if (isRecallWithFacts) intentList.push('recall_frustration');
         if (isPromptChallenge) intentList.push('prompt_challenge');
         if (isBotAccusation || isAiAccusation) intentList.push('identity_question');
-        // P0.16-I: process question in mixed intent burst
         if (isMixedDoctorProcess) intentList.push('process_question');
+        if (isNextStepRequest)    intentList.push('next_step_request');
+        if (isMultiIntentQuery)   intentList.push('multi_intent_query');
+        if (isDoctorNamesRequest) intentList.push('doctor_names_request');
 
         if (intentList.length > 0) {
           console.log(JSON.stringify({
@@ -623,43 +648,36 @@ export class AIResponseOrchestrator {
           }));
         }
 
-        // P0.16-I: compose mixed intent response — doctor_lookup + process_question together
-        let fallbackResult: any;
-        if (isMixedDoctorProcess) {
-          // Get doctor lookup text
-          const doctorResult = ContextAwareSafeFallbackResolver.resolve({
-            inboundText: 'hangi doktor ilgilenecek',  // force doctor_lookup intent
-            brain,
-            identityConfig: brain.prompts.metadata?.identity || brain.context.config?.identity || {},
-            unifiedContext,
-            channelId,
-            systemPromptText,
-            resolvedActiveDepartment: resolvedActiveDepartment || null
-          });
-          // Get process answer text
-          const processResult = ContextAwareSafeFallbackResolver.resolve({
-            inboundText: 'süreç nasıl ışliyor',  // force process_question intent
-            brain,
-            identityConfig: brain.prompts.metadata?.identity || brain.context.config?.identity || {},
-            unifiedContext,
-            channelId,
-            systemPromptText,
-            resolvedActiveDepartment: resolvedActiveDepartment || null
-          });
-          // Compose: doctor first, then process, separated clearly
-          const composedText = [doctorResult.text, processResult.text]
-            .filter(t => t && t.trim().length > 0)
-            .join('\n\n');
-          fallbackResult = { text: composedText, finalPath: 'mixed_intent_doctor_process' };
+        // Resolve consultant state for all bypass paths (P0.16-K)
+        const safeHistoryForState = history.filter(m => m.content != null).map(m => ({ role: m.role, content: m.content as string }));
+        const consultantState = ConsultantConversationStateResolver.resolve(safeHistoryForState);
 
-          console.log(JSON.stringify({
-            tag: 'MIXED_INTENT_COMPOSED',
-            tenantId,
-            conversationId: conversationId || 'unknown',
-            resolvedActiveDepartment: resolvedActiveDepartment || null,
+        let fallbackResult: any;
+
+        // ── P0.16-K: Multi-intent query (4-question burst) — highest priority ──
+        if (isMultiIntentQuery) {
+          const composed = MultiIntentConsultantComposer.compose(
+            inboundText,
+            brain,
+            safeHistoryForState,
+            resolvedActiveDepartment || null,
             workerPath
-          }));
-        } else {
+          );
+          if (composed) {
+            fallbackResult = { text: composed.text, finalPath: 'multi_intent_consultant_composed' };
+            console.log(JSON.stringify({
+              tag: 'LIVE_TEST_PARITY_PATH_SELECTED',
+              path: 'multi_intent_consultant_composed',
+              intentCount: composed.intentList.length,
+              tenantId,
+              conversationId: conversationId || 'unknown',
+              workerPath
+            }));
+          }
+        }
+
+        // ── P0.16-K: Next step request — ask for day/time slot ──────────────
+        if (!fallbackResult && isNextStepRequest) {
           fallbackResult = ContextAwareSafeFallbackResolver.resolve({
             inboundText,
             brain,
@@ -667,9 +685,82 @@ export class AIResponseOrchestrator {
             unifiedContext,
             channelId,
             systemPromptText,
-            resolvedActiveDepartment: resolvedActiveDepartment || null  // P0.16-H: pass to all bypass paths
+            resolvedActiveDepartment: resolvedActiveDepartment || null
+          });
+          console.log(JSON.stringify({
+            tag: 'LIVE_TEST_PARITY_PATH_SELECTED',
+            path: 'next_step_consultant_ownership',
+            tenantId,
+            conversationId: conversationId || 'unknown',
+            workerPath
+          }));
+        }
+
+        // ── P0.16-K: Doctor names request ────────────────────────────────────
+        if (!fallbackResult && isDoctorNamesRequest) {
+          // Collect departments from consultant state (multi-patient aware)
+          const depts: string[] = [];
+          for (const p of consultantState.participants) {
+            if (p.department && !depts.includes(p.department)) depts.push(p.department);
+          }
+          if (depts.length === 0 && resolvedActiveDepartment) depts.push(resolvedActiveDepartment);
+          const doctorPolicy = DoctorNamesPolicy.resolve(brain, depts, hasPreviousDoctorAsk);
+          fallbackResult = { text: doctorPolicy.text, finalPath: `doctor_names_policy_${doctorPolicy.mode}` };
+          console.log(JSON.stringify({
+            tag: 'LIVE_TEST_PARITY_PATH_SELECTED',
+            path: `doctor_names_policy_${doctorPolicy.mode}`,
+            tenantId,
+            conversationId: conversationId || 'unknown',
+            workerPath
+          }));
+        }
+
+        // ── P0.16-I: Mixed doctor+process ────────────────────────────────────
+        if (!fallbackResult && isMixedDoctorProcess) {
+          const doctorResult = ContextAwareSafeFallbackResolver.resolve({
+            inboundText: 'hangi doktor ilgilenecek',
+            brain,
+            identityConfig: brain.prompts.metadata?.identity || brain.context.config?.identity || {},
+            unifiedContext,
+            channelId,
+            systemPromptText,
+            resolvedActiveDepartment: resolvedActiveDepartment || null
+          });
+          const processResult = ContextAwareSafeFallbackResolver.resolve({
+            inboundText: 'süreç nasıl ışliyor',
+            brain,
+            identityConfig: brain.prompts.metadata?.identity || brain.context.config?.identity || {},
+            unifiedContext,
+            channelId,
+            systemPromptText,
+            resolvedActiveDepartment: resolvedActiveDepartment || null
+          });
+          const composedText = [doctorResult.text, processResult.text]
+            .filter(t => t && t.trim().length > 0)
+            .join('\n\n');
+          fallbackResult = { text: composedText, finalPath: 'mixed_intent_doctor_process' };
+          console.log(JSON.stringify({
+            tag: 'MIXED_INTENT_COMPOSED',
+            tenantId,
+            conversationId: conversationId || 'unknown',
+            resolvedActiveDepartment: resolvedActiveDepartment || null,
+            workerPath
+          }));
+        }
+
+        // ── Default: other bypass intents via ContextAwareSafeFallbackResolver ─
+        if (!fallbackResult) {
+          fallbackResult = ContextAwareSafeFallbackResolver.resolve({
+            inboundText,
+            brain,
+            identityConfig: brain.prompts.metadata?.identity || brain.context.config?.identity || {},
+            unifiedContext,
+            channelId,
+            systemPromptText,
+            resolvedActiveDepartment: resolvedActiveDepartment || null
           });
         }
+
         text = fallbackResult.text;
         bypassed = true;
         modelUsed = 'bypass';
@@ -682,9 +773,23 @@ export class AIResponseOrchestrator {
           workerPath
         }));
       } else {
+        // P0.16-K: "başka bilgi" open-continuation — ensure LLM doesn't close conversation
+        // Inject a note to the system prompt to continue the conversation naturally
+        let llmSystemPrompt = systemPromptText;
+        if (isOpenContinuation) {
+          llmSystemPrompt = systemPromptText + '\n\n[NOT: Kullanıcı konuşmayı sürdürmek istiyor. "İyi günler" veya kapatma cümlesi KULLANMA. Yeni sorusunu bekle veya yardıma açık olduğunu nazikçe belirt.]';
+        }
+
+        // P0.16-K: Inject conversation summary to LLM prompt (max 10 lines)
+        const safeHistoryForLLM = history.filter(m => m.content != null).map(m => ({ role: m.role, content: m.content as string }));
+        const conversationSummary = ConsultantConversationStateResolver.buildPromptSummary(safeHistoryForLLM);
+        if (conversationSummary) {
+          llmSystemPrompt = llmSystemPrompt + conversationSummary;
+        }
+
         // Run LLM Response generation
         const formattedMessages: ChatMessage[] = [
-          { role: 'system' as const, content: systemPromptText },
+          { role: 'system' as const, content: llmSystemPrompt },
           ...history,
           { role: 'user' as const, content: inboundText }
         ];
