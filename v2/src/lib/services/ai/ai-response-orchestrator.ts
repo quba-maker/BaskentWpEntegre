@@ -564,6 +564,10 @@ export class AIResponseOrchestrator {
       const isDoctorLookup = ['doktor', 'hekim', 'uzman', 'cerrah', 'hoca'].some(kw => cleanInbound.includes(kw));
       const shouldBypassDoctorLookup = isDoctorLookup && !hasDoctorDirectory;
 
+      // P0.16-I: Mixed intent detection — doctor_lookup + process_question in same burst
+      const isProcessQuestion = ['süreç', 'surec', 'nasıl ışliyor', 'nasıl çalışıyor', 'nasıl yürüyor', 'tanı', 'tedavi', 'muayene', 'operasyon', 'ameliyat', 'aşama', 'adım'].some(kw => cleanInbound.includes(kw));
+      const isMixedDoctorProcess = isDoctorLookup && isProcessQuestion;
+
       // Telemetry: doctor lookup department selection
       if (isDoctorLookup) {
         console.log(JSON.stringify({
@@ -601,6 +605,8 @@ export class AIResponseOrchestrator {
         if (isRecallWithFacts) intentList.push('recall_frustration');
         if (isPromptChallenge) intentList.push('prompt_challenge');
         if (isBotAccusation || isAiAccusation) intentList.push('identity_question');
+        // P0.16-I: process question in mixed intent burst
+        if (isMixedDoctorProcess) intentList.push('process_question');
 
         if (intentList.length > 0) {
           console.log(JSON.stringify({
@@ -612,19 +618,58 @@ export class AIResponseOrchestrator {
             source: currentMsgDept ? 'current_message' : recentContextDept ? 'recent_conversation' : staleDept ? 'stale_crm' : 'null',
             intentList,
             confidence: currentMsgDept ? 'high' : recentContextConfidence,
+            isMixedDoctorProcess,
             workerPath
           }));
         }
 
-        const fallbackResult = ContextAwareSafeFallbackResolver.resolve({
-          inboundText,
-          brain,
-          identityConfig: brain.prompts.metadata?.identity || brain.context.config?.identity || {},
-          unifiedContext,
-          channelId,
-          systemPromptText,
-          resolvedActiveDepartment: resolvedActiveDepartment || null  // P0.16-H: pass to all bypass paths
-        });
+        // P0.16-I: compose mixed intent response — doctor_lookup + process_question together
+        let fallbackResult: any;
+        if (isMixedDoctorProcess) {
+          // Get doctor lookup text
+          const doctorResult = ContextAwareSafeFallbackResolver.resolve({
+            inboundText: 'hangi doktor ilgilenecek',  // force doctor_lookup intent
+            brain,
+            identityConfig: brain.prompts.metadata?.identity || brain.context.config?.identity || {},
+            unifiedContext,
+            channelId,
+            systemPromptText,
+            resolvedActiveDepartment: resolvedActiveDepartment || null
+          });
+          // Get process answer text
+          const processResult = ContextAwareSafeFallbackResolver.resolve({
+            inboundText: 'süreç nasıl ışliyor',  // force process_question intent
+            brain,
+            identityConfig: brain.prompts.metadata?.identity || brain.context.config?.identity || {},
+            unifiedContext,
+            channelId,
+            systemPromptText,
+            resolvedActiveDepartment: resolvedActiveDepartment || null
+          });
+          // Compose: doctor first, then process, separated clearly
+          const composedText = [doctorResult.text, processResult.text]
+            .filter(t => t && t.trim().length > 0)
+            .join('\n\n');
+          fallbackResult = { text: composedText, finalPath: 'mixed_intent_doctor_process' };
+
+          console.log(JSON.stringify({
+            tag: 'MIXED_INTENT_COMPOSED',
+            tenantId,
+            conversationId: conversationId || 'unknown',
+            resolvedActiveDepartment: resolvedActiveDepartment || null,
+            workerPath
+          }));
+        } else {
+          fallbackResult = ContextAwareSafeFallbackResolver.resolve({
+            inboundText,
+            brain,
+            identityConfig: brain.prompts.metadata?.identity || brain.context.config?.identity || {},
+            unifiedContext,
+            channelId,
+            systemPromptText,
+            resolvedActiveDepartment: resolvedActiveDepartment || null  // P0.16-H: pass to all bypass paths
+          });
+        }
         text = fallbackResult.text;
         bypassed = true;
         modelUsed = 'bypass';
@@ -740,10 +785,22 @@ export class AIResponseOrchestrator {
         }
       }
 
-      // 9. Morphology Guard Checks with proper noun protections
+      // 9. Morphology Guard — applies to ALL response paths (LLM + bypass + mixed)
       const morphology = TurkishMorphologyGuard.check(text, true, doctorNames);
       if (morphology.hasMorphologyError && morphology.correctedText) {
         text = morphology.correctedText;
+      }
+      // P0.16-I: TURKISH_MORPHOLOGY_GUARD_APPLIED telemetry (safe metadata only)
+      if (morphology.hasMorphologyError || morphology.correctionApplied) {
+        console.log(JSON.stringify({
+          tag: 'TURKISH_MORPHOLOGY_GUARD_APPLIED',
+          tenantId,
+          conversationId: conversationId || 'unknown',
+          workerPath,
+          responseSource: bypassed ? 'bypass' : 'llm',
+          detectedPatterns: morphology.errors.map(e => e.pattern),
+          changed: morphology.correctionApplied
+        }));
       }
 
       // 10. Outbound Guard Checks

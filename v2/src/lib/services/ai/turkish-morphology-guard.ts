@@ -124,20 +124,68 @@ const KNOWN_DEDUP_PATTERNS: { regex: RegExp; description: string; fix?: (match: 
   },
 
   // P0.16-H: zamanızı → zamanınız  (missing 'n' in possessive — distinct from zamanızı guard in P0.16-E)
-  // The existing zamanızı rule maps to 'zaman aralığını'; keep that but add a narrow guard for
-  // the bare 'zamanızı' without leading adjective context.
-  // Note: existing rule already handles "bir zamanızı" → "uygun bir zaman aralığını"
-  // This rule catches "zamanınızı" written incorrectly as "zamanızı" in isolation.
   {
     regex: /\bzaman[ıi]z[ıi]\b/gi,
     description: 'zamanizi_bare_missing_n',
     fix: (m) => {
-      // Protect zamanınızı (already correct)
       if (/zamaN[ıi]n[ıi]z/i.test(m)) return m;
       return m[0] === 'Z' ? 'Zamanınız' : 'zamanınız';
     }
   },
+
+  // P0.16-I: Contextual complaint/empathy phrase patterns
+  // These appear when LLM generates empathy text in 3rd-person subject + 2nd-person verb suffix mismatch
+
+  // "şikayetinizin X aydır devam ettiğinizi" → "şikayetinizin X aydır devam ettiğini"
+  // "devam ettiğinizi" in context of "şikayet/ağrı/durum" subject → remove 2nd person from verb
+  {
+    regex: /(?:şikayetinizin|ağrınızın|durumun|hastalığınızın)\s+[\w\s]+?devam\s+ettiğinizi/gi,
+    description: 'sik_devam_ettiginizi',
+    fix: (m) => m.replace(/ettiğinizi$/i, 'ettiğini')
+  },
+  // bare "devam ettiğinizi" in complaint context — safe narrow pattern
+  {
+    regex: /devam\s+ettiğinizi\s+(?:ve|anlıyorum|biliyorum|görüyorum)/gi,
+    description: 'devam_ettiginizi_bare',
+    fix: (m) => m.replace(/ettiğinizi/i, 'ettiğini')
+  },
+
+  // "bacaklarınıza vurduğunuzu" → "bacaklarınıza vurduğunu"
+  // (ağrı/şikayet subject, verb in 2nd person wrong)
+  {
+    regex: /(?:bacaklarınıza|kollarınıza|boynunuza|belinize)\s+[\w\s]*?vurduğunuzu/gi,
+    description: 'vuruduggunuzu_bacak',
+    fix: (m) => m.replace(/vurduğunuzu$/i, 'vurduğunu')
+  },
+
+  // "ne kadar etkilediğinizi tahmin/anlıyoruz" → "ne kadar etkilediğini"
+  {
+    regex: /ne\s+kadar\s+etkilediğinizi/gi,
+    description: 'ne_kadar_etkilediginizi',
+    fix: (m) => m[0] === 'N' ? 'Ne kadar etkilediğini' : 'ne kadar etkilediğini'
+  },
+
+  // "etkilediğinizi tahminiz edebiliyorum" → "etkilediğini tahmin edebiliyorum"
+  {
+    regex: /tahminiz\s+edebiliyorum/gi,
+    description: 'tahminiz_edebiliyorum',
+    fix: (m) => m[0] === 'T' ? 'Tahmin edebiliyorum' : 'tahmin edebiliyorum'
+  },
+  // also catch "tahminiz ediyorum" variant
+  {
+    regex: /tahminiz\s+ediyorum/gi,
+    description: 'tahminiz_ediyorum',
+    fix: (m) => m[0] === 'T' ? 'Tahmin ediyorum' : 'tahmin ediyorum'
+  },
+
+  // "Tedavi Planızı" / "Tedavi planızı" — capital T variant (already handled lowercase above)
+  {
+    regex: /Tedavi\s+Plan[ıi]z[ıi]/g,
+    description: 'tedavi_planizi_capital',
+    fix: () => 'Tedavi planınız'
+  },
 ];
+
 
 // Known bad phrase patterns (no auto-fix, Quality Gate fail)
 const BAD_PHRASE_PATTERNS: { regex: RegExp; description: string }[] = [
