@@ -2366,7 +2366,10 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       finalResponseText = sanitizePatientFacingMessage(finalResponseText);
     }
 
-    // Format for WhatsApp to translate Markdown (* -> bullets, ** -> *)
+    // P0.16-L: WhatsApp formatting now handled inside AIResponseOrchestrator.run()
+    // (WhatsAppFormattingFinalizer applied after morphology guard, before FinalOutboundGuard).
+    // The legacy formatForWhatsApp() below is idempotent (bullet/bold only) but redundant.
+    // Keeping as safety net for any text that bypasses orchestrator (e.g. policy fallback text).
     if (channel === 'whatsapp' && finalResponseText) {
       finalResponseText = formatForWhatsApp(finalResponseText);
     }
@@ -4146,6 +4149,8 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       const { sanitizePatientFacingMessage } = await import('@/lib/utils/patient-message-sanitizer');
       finalResponseText = sanitizePatientFacingMessage(finalResponseText);
 
+      // P0.16-L: WhatsApp formatting handled inside AIResponseOrchestrator.run().
+      // Legacy formatForWhatsApp() is idempotent (bullet/bold) — kept as safety net for policy fallback text.
       if (channel === 'whatsapp') {
         finalResponseText = formatForWhatsApp(finalResponseText);
       }
