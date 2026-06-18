@@ -1233,6 +1233,38 @@ export class QueueWorkerEngine {
       }
     }
 
+    // P0.17: Conversation-level soft mutex (immediate path)
+    // Prevents double-response when user sends rapid consecutive messages.
+    // Pattern: same as debounce worker Redis lock (L3847-3891), but shorter TTL.
+    // Non-fatal: if Redis is unavailable, lock is skipped (degraded mode).
+    let immediateConvLockAcquired = false;
+    const IMMEDIATE_CONV_LOCK_TTL = 8; // seconds
+    const immediateConvLockKey = conversationId
+      ? `lock:conv:immediate:${tenantId}:${conversationId}`
+      : `lock:conv:immediate:${tenantId}:phone:${phoneNumber}`;
+
+    if (redis && conversationId && direction === 'in') {
+      try {
+        const lockAcquired = await redis.set(immediateConvLockKey, '1', { nx: true, ex: IMMEDIATE_CONV_LOCK_TTL });
+        if (!lockAcquired) {
+          this.log.info(`[IMMEDIATE_CONV_LOCK] Conversation already processing in immediate path — skipping to prevent double-response`, {
+            tenantId, conversationId, traceId
+          });
+          console.log(JSON.stringify({
+            tag: 'IMMEDIATE_CONV_LOCK_BLOCKED',
+            conversationId,
+            tenantId,
+            traceId
+          }));
+          return; // Drop — debounce window will aggregate
+        }
+        immediateConvLockAcquired = true;
+        this.log.info(`[IMMEDIATE_CONV_LOCK] Acquired conversation lock`, { conversationId, traceId });
+      } catch (lockErr) {
+        this.log.error(`[IMMEDIATE_CONV_LOCK] Redis error — continuing without lock (degraded)`, lockErr as Error, { conversationId, traceId });
+      }
+    }
+
     if (isAppEcho) {
       this.log.info(`[APP_ECHO_DETECTED] Outbound echo from mobile WhatsApp App. Auto-handover to human and disabling autopilot.`, { phoneNumber, traceId });
       
@@ -3733,6 +3765,16 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
     });
 
     // Telemetry updated immediately upon ingestion above
+
+    // P0.17: Release immediate conversation lock
+    if (immediateConvLockAcquired && redis) {
+      try {
+        await redis.del(immediateConvLockKey);
+        this.log.info(`[IMMEDIATE_CONV_LOCK] Released conversation lock`, { conversationId, traceId });
+      } catch (relErr) {
+        this.log.error(`[IMMEDIATE_CONV_LOCK] Failed to release conversation lock (non-fatal)`, relErr as Error, { conversationId, traceId });
+      }
+    }
 
     this.log.info(`[WORKER_COMPLETED] End-to-end pipeline finished successfully`, { traceId });
   }

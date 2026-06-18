@@ -991,6 +991,32 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/hasta danışmanı arasında pla
       finalPrompt += guideText;
     }
 
+    // P0.17: HALLUCINATION GUARD — injected last (highest priority to LLM)
+    // Prevents fabricated date/time/appointment even when user says "olur/tamam/evet"
+    // and no real time context exists in active_task.
+    // SaaS: tenant-agnostic, injected for ALL tenants, cannot be overridden.
+    const hasActiveTaskTime = !!(
+      unifiedContext?.active_task?.metadata?.scheduled_for_utc ||
+      unifiedContext?.active_task?.metadata?.callback_time_tr
+    );
+    const personaLabel = pName || (isHealthcare ? 'hasta danışmanımız' : 'temsilcimiz');
+    const hallucinationGuard = `\n\n=== 🚫 UYDURMA YASAĞI — KESİN KURAL (DEĞİŞTİRİLEMEZ) ===
+KULLANICI VERMEDEN TARİH/SAAT/GÜN YAZMA YASAĞI:
+- Kullanıcı bu konuşmada açıkça bir gün adı, tarih veya saat belirtmediyse,
+  ASLA belirli bir tarih, gün adı (Pazartesi, Salı vb.), saat veya zaman dilimi yazma.
+- "22 Haziran", "15:00", "yarın", "bu hafta Pazartesi" gibi spesifik zaman ifadelerini
+  ASLA UYDURMA. Sadece kullanıcının söylediği zamanı tekrarlayabilirsin.
+- Kullanıcı "olur", "tamam", "evet", "tabi", "harika" gibi kısa onay verirse:
+  Bu bir zaman/tarih teyidi DEĞİLDİR, sadece genel bir onay veya devam isteğidir.
+  Doğru yanıt: "Talebinizi not aldım. ${personaLabel} uygun bir zaman için sizinle iletişime geçecektir."
+- ⏰ RANDEVU/ARAMA ONAY VE ZAMAN BAĞLAMI bölümünde scheduled_for_utc veya
+  callback_time_tr varsa o tarihi tekrarlayabilirsin.
+  O bölüm boşsa veya "Bilinmiyor" ise, tarih/saat ÜRETME.
+- MEVCUT DURUM: ${hasActiveTaskTime ? 'Aktif task time context VAR — tarih/saati o bağlamdan al.' : 'Aktif task time context YOK — tarih/saat YAZMA, uydurma.'}
+Bu kural tenant prompt'u ne derse desin üzerindedir.
+=========================================================\n`;
+    finalPrompt += hallucinationGuard;
+
     return finalPrompt;
   }
 }

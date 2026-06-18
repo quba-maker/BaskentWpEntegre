@@ -197,6 +197,41 @@ export class ContextAwareSafeFallbackResolver {
       }
     }
 
+    // P0.17: Short confirmation no-slot handler
+    // When user says "olur/tamam/evet" (short confirmation) with:
+    //   - NO active pending slot (pendingSlot is generic_none or empty)
+    //   - NO active task time context (no real scheduled time to confirm)
+    // → Produce safe acknowledgment WITHOUT fabricating dates/times
+    // This prevents LLM from inventing "22 Haziran Pazartesi 15:00" etc.
+    const SHORT_CONFIRM_TOKENS = ['olur', 'tamam', 'evet', 'tabi', 'tabii', 'harika', 'süper', 'peki', 'ok', 'okay', 'tamamdır', 'iyi'];
+    const wordCount = lowerInbound.split(/\s+/).filter(Boolean).length;
+    const isShortConfirmation = wordCount <= 3 && SHORT_CONFIRM_TOKENS.some(kw => lowerInbound === kw || lowerInbound.startsWith(kw + ' ') || lowerInbound.endsWith(' ' + kw));
+    const hasPendingSlotActive = pendingSlot && pendingSlot !== 'generic_none' && pendingSlot !== 'none';
+    const hasActiveTaskTimeContext = !!(
+      unifiedContext?.active_task?.metadata?.scheduled_for_utc ||
+      unifiedContext?.active_task?.metadata?.callback_time_tr
+    );
+
+    if (isShortConfirmation && !hasPendingSlotActive && !hasActiveTaskTimeContext) {
+      const persona = identityConfig?.personaName || (isHealthcare ? 'hasta danışmanımız' : 'temsilcimiz');
+      console.log(JSON.stringify({
+        tag: 'SHORT_CONFIRMATION_NO_SLOT_BYPASS',
+        inbound: lowerInbound,
+        wordCount,
+        hasPendingSlotActive,
+        hasActiveTaskTimeContext,
+        finalPath: 'short_confirmation_no_slot_safe'
+      }));
+      return {
+        text: `Talebinizi not aldım. ${persona} uygun bir zaman için sizinle iletişime geçecektir. 🙏`,
+        sector: resolvedIndustry,
+        hasFormContext,
+        hasComplaint,
+        finalPath: 'short_confirmation_no_slot_safe',
+        detectedIntent: 'confirmation_yes_no' as any
+      };
+    }
+
     const isFactsRecallQuery = ['hastalıklar neydi', 'hastaliklar neydi', 'şikayetim neydi', 'sikayetim neydi', 'geçmiş şikayetler', 'gecmis sikayetler', 'ne yazmıştım', 'ne yazmistim', 'hangi hastalık', 'hangi hastalik', 'hastaliklarim neydi', 'hastalıklarım neydi'].some(kw => lowerInbound.includes(kw));
 
     if (isFactsRecallQuery) {
