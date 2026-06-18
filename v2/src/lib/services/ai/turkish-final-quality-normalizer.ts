@@ -18,6 +18,7 @@ export interface NormalizeResult {
   changesCount: number;
   wasModified: boolean;
   appliedPatterns: string[];
+  rewrites: string[]; // P0.16-M: for FinalPipelineEnforcer telemetry
 }
 
 // ─── Protected phrases (must NOT be rewritten) ────────────────────────────────
@@ -117,6 +118,65 @@ const REWRITE_RULES: RewriteRule[] = [
     pattern: /T[üu]rkiye\s+saati\s+olarak\s+not\s+ald[ıi]m\b/gi,
     replacement: 'not aldım (saat dilimini teyit edelim)',
   },
+
+  // ── P0.16-M: Extended coverage ──────────────────────────────────────────────
+
+  // "burunuz estetiği" → "burun estetiğiniz"
+  {
+    id: 'burunuz_estetigi',
+    pattern: /\bburunuz\s+esteti[gğ]i\b/gi,
+    replacement: 'burun estetiğiniz',
+  },
+  // "burun estetiğinizi" (correct) — protected by protected phrases, but also add rule for broken suffix
+  // "estetik sorunuzuz" → "estetik sorununuz"
+  {
+    id: 'sorunuzuz_fix',
+    pattern: /\bsorunuzuz\b/gi,
+    replacement: 'sorununuz',
+  },
+  // "sürecininiz" → "süreciniz"
+  {
+    id: 'surecininiz_fix',
+    pattern: /\bs[üu]recininiz\b/gi,
+    replacement: 'süreciniz',
+  },
+  // "planızı" (broken possessive 2nd person) → "planınızı"
+  // Use simple character class approach — avoids \b boundary issues with Turkish chars
+  {
+    id: 'tedavi_planizi_full',
+    pattern: /tedavi\s+plan[\u0131i]z[\u0131i](?!n)/gi,
+    replacement: 'tedavi plan\u0131n\u0131z\u0131',
+  },
+  // Standalone planızı not preceded/followed by alphanumeric or ı/n
+  {
+    id: 'planizi_standalone',
+    pattern: /(?:^|\s)plan[\u0131i]z[\u0131i](?=\s|[.,;:!?]|$)/gm,
+    replacement: (m: string) => m.replace(/plan[\u0131i]z[\u0131i]/, 'plan\u0131n\u0131z\u0131'),
+  },
+  // "zamanızı" → "zamanınızı"
+  {
+    id: 'zamanizi_full_fix',
+    pattern: /\bzaman[ıi]z[ıi]\b(?!\s+yazabilirsiniz|\s+belirtin)/gi,
+    replacement: 'zamanınızı',
+  },
+  // "saatınız" → "saatiniz"
+  {
+    id: 'saatiniz_fix',
+    pattern: /\bsaat[ıi]n[ıi]z\b(?!\s+dilimi)/gi,
+    replacement: 'saatiniz',
+  },
+  // "tarihınız" → "tarihiniz"
+  {
+    id: 'tarihiz_fix',
+    pattern: /\btarih[ıi]n[ıi]z\b/gi,
+    replacement: 'tarihiniz',
+  },
+  // "randevızı" → "randevunuzu"
+  {
+    id: 'randevizi_fix',
+    pattern: /\brandev[ıi]z[ıi]\b/gi,
+    replacement: 'randevunuzu',
+  },
 ];
 
 // ─── Normalizer ───────────────────────────────────────────────────────────────
@@ -132,7 +192,7 @@ export class TurkishFinalQualityNormalizer {
     _context?: { complaint?: string; location?: string }
   ): NormalizeResult {
     if (!text || text.trim().length === 0) {
-      return { text, changesCount: 0, wasModified: false, appliedPatterns: [] };
+      return { text, changesCount: 0, wasModified: false, appliedPatterns: [], rewrites: [] };
     }
 
     // Build protected zone map (ranges to skip)
@@ -193,7 +253,7 @@ export class TurkishFinalQualityNormalizer {
       }
     } catch { /* non-fatal */ }
 
-    return { text: result, changesCount, wasModified, appliedPatterns };
+    return { text: result, changesCount, wasModified, appliedPatterns, rewrites: appliedPatterns };
   }
 
   /**

@@ -410,12 +410,22 @@ export class ContextAwareSafeFallbackResolver {
           staleDept: unifiedContext?.opportunity?.department || null,
         }));
 
+        // P0.16-M: DoctorNamesPolicy replaces legacy "şu an bu ekrandan" text
         if (verifiedDoctorsText) {
           const targetPhrase = deptPhrase ? `${deptPhrase} için doğrulanmış hekimlerimizin` : 'doğrulanmış hekimlerimizin';
           text = `Hastalarımıza hizmet veren ${targetPhrase} listesini aşağıda paylaşıyorum:\n${verifiedDoctorsText}`;
         } else {
-          const targetPhrase = deptPhrase ? `${deptPhrase} için hekim` : 'Hekim';
-          text = `${targetPhrase} listesini şu an bu ekrandan net doğrulayamıyorum ve hatalı bilgi vermemek adına isim uydurmam doğru olmaz. Ancak danışman ekibimiz size uygun uzman hekim alternatiflerini sunacaktır.`;
+          // P0.16-M: Never use legacy "bu ekrandan net doğrulayamıyorum" — use DoctorNamesPolicy instead
+          const deptKey = effectiveDept ? [effectiveDept] : [];
+          try {
+            const { DoctorNamesPolicy } = require('./doctor-names-policy');
+            const policy = DoctorNamesPolicy.resolve(brain, deptKey, false);
+            text = policy.text;
+          } catch {
+            // Safe fallback if DoctorNamesPolicy not available
+            const dept = deptPhrase || 'ilgili bölümümüz';
+            text = `${dept} için hasta danışmanımız doktor listesini size iletecektir. Telefon görüşmesi için uygun gün ve saat paylaşır mısınız?`;
+          }
         }
       } else {
         if (verifiedDoctorsText) {

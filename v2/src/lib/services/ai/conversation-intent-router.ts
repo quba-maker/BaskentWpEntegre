@@ -348,11 +348,15 @@ export class ConversationIntentRouter {
     // P0.16-L: Thanks but continue — teşekkür + ama/fakat/bir soru/bir şey
     const thanksContinuePatterns = [
       // "teşekkür ederim ama ..."
-      /te[sş]ekk[uü]r.{0,20}(?:ama|fakat|lakin|bir\s+soru|bir\s+[sş]ey|peki)/i,
+      /te[sşsS]ekk[uüuU]r.{0,20}(?:ama|fakat|lakin|bir\s+soru|bir\s+[sşsS]ey|peki)/i,
       // "sağ olun bir şey daha"
-      /sa[gğ]\s+olun.{0,20}bir/i,
+      /sa[gğgG]\s+olun.{0,20}bir/i,
       // "teşekkürler bir soru daha"
-      /te[sş]ekk[uü]r(?:ler|ederim)?.{0,30}(?:bir\s+soru|bir\s+[sş]ey|sorum|sormak)/i,
+      /te[sşsS]ekk[uüuU]r(?:ler|ederim)?.{0,30}(?:bir\s+soru|bir\s+[sşsS]ey|sorum|sormak)/i,
+      // ASCII variants: "tesekkur bir soru daha"
+      /tesekkur(?:ler|ederim)?.{0,30}(?:bir\s+soru|sorum|sormak|bilgi)/i,
+      // "bir sorum daha var" after teşekkür
+      /te[sşsS]ekk[uüuU]r.{0,40}bir\s+sorum/i,
     ];
     if (thanksContinuePatterns.some(p => p.test(text) || p.test(clean))) {
       intents.push('thanks_but_continue');
@@ -372,9 +376,12 @@ export class ConversationIntentRouter {
     const openContPatterns = [
       /ba[sş]ka\s+(?:bir\s+)?(?:bilgi|soru|[sş]ey)/i,
       /(?:bir|baska|daha)\s+(?:soru|[sş]ey)\s+(?:daha|sormak|sorabilir)/i,
+      // P0.16-M: ASCII-insensitive variants (real WhatsApp may use S for ş, u for ü, i for ı)
+      /ba[sS]ka\s+(?:bir\s+)?(?:bilgi|soru|[sS]ey)/i,
+      /te[sS]ekk[uU]r.{0,30}(?:bir\s+soru|sorum|sormak|bilgi)/i,
     ];
     if (openContKeywords.some(kw => clean.includes(kw) || originalLower.includes(kw)) ||
-        openContPatterns.some(p => p.test(text))) {
+        openContPatterns.some(p => p.test(text) || p.test(clean))) {
       intents.push('open_continuation');
     }
 

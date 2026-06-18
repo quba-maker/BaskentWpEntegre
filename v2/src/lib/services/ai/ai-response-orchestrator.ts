@@ -22,6 +22,8 @@ import { ConversationIntentRouter } from './conversation-intent-router';
 import { ConversationFrameResolver } from './conversation-frame-resolver';
 import { WhatsAppFormattingFinalizer } from './whatsapp-formatting-finalizer';
 import { TurkishFinalQualityNormalizer } from './turkish-final-quality-normalizer';
+// P0.16-M: Final pipeline enforcer — mandatory chain for all response paths
+import { FinalPipelineEnforcer } from './final-pipeline-enforcer';
 
 
 export interface OrchestratorParams {
@@ -840,27 +842,26 @@ export class AIResponseOrchestrator {
           }));
         }
 
-        // ── P0.16-I: Mixed doctor+process ────────────────────────────────────
+        // ── P0.16-M: Mixed doctor+process — DoctorNamesPolicy + inline process (legacy ContextAwareSafeFallbackResolver removed) ─
         if (!fallbackResult && isMixedDoctorProcess) {
-          const doctorResult = ContextAwareSafeFallbackResolver.resolve({
-            inboundText: 'hangi doktor ilgilenecek',
-            brain,
-            identityConfig: brain.prompts.metadata?.identity || brain.context.config?.identity || {},
-            unifiedContext,
-            channelId,
-            systemPromptText,
-            resolvedActiveDepartment: resolvedActiveDepartment || null
-          });
-          const processResult = ContextAwareSafeFallbackResolver.resolve({
-            inboundText: 'süreç nasıl ışliyor',
-            brain,
-            identityConfig: brain.prompts.metadata?.identity || brain.context.config?.identity || {},
-            unifiedContext,
-            channelId,
-            systemPromptText,
-            resolvedActiveDepartment: resolvedActiveDepartment || null
-          });
-          const composedText = [doctorResult.text, processResult.text]
+          // Doctor part — use DoctorNamesPolicy (avoids legacy "bu ekrandan" text)
+          const mixedDepts: string[] = [];
+          for (const p of consultantState.participants) {
+            if (p.department && !mixedDepts.includes(p.department)) mixedDepts.push(p.department);
+          }
+          if (mixedDepts.length === 0 && resolvedActiveDepartment) mixedDepts.push(resolvedActiveDepartment);
+          const mixedDoctorPolicy = DoctorNamesPolicy.resolve(brain, mixedDepts, hasPreviousDoctorAsk);
+
+          // Process part — inline consultant-owned response
+          const dept = resolvedActiveDepartment || (mixedDepts[0] || 'ilgili bölümümüz');
+          const processText = [
+            `${dept} sürecinde ilk adım uzman hekim değerlendirmesidir.`,
+            `Bu değerlendirmede mevcut bulgularınız (varsa MR/tetkikler) incelenerek size özel bir tedavi planı oluşturulur.`,
+            `Sonraki adım için hasta danışmanımızla kısa bir telefon görüşmesi planlayabiliriz.`,
+            `Hangi gün ve saat aralığında uygun olursunuz?`,
+          ].join('\n');
+
+          const composedText = [mixedDoctorPolicy.text, processText]
             .filter(t => t && t.trim().length > 0)
             .join('\n\n');
           fallbackResult = { text: composedText, finalPath: 'mixed_intent_doctor_process' };
@@ -869,6 +870,7 @@ export class AIResponseOrchestrator {
             tenantId,
             conversationId: conversationId || 'unknown',
             resolvedActiveDepartment: resolvedActiveDepartment || null,
+            doctorPolicyMode: mixedDoctorPolicy.mode,
             workerPath
           }));
         }
@@ -899,10 +901,25 @@ export class AIResponseOrchestrator {
         }));
       } else {
         // P0.16-K: "başka bilgi" open-continuation — ensure LLM doesn't close conversation
-        // Inject a note to the system prompt to continue the conversation naturally
         let llmSystemPrompt = systemPromptText;
-        if (isOpenContinuation) {
+        if (isOpenContinuation || isOpenContinuationIntent || isThanksButContinue) {
           llmSystemPrompt = systemPromptText + '\n\n[NOT: Kullanıcı konuşmayı sürdürmek istiyor. "İyi günler" veya kapatma cümlesi KULLANMA. Yeni sorusunu bekle veya yardıma açık olduğunu nazikçe belirt.]';
+        }
+
+        // P0.16-M: Short affirmative ("tamam", "olur", "evet", "peki") — inject conversation-state-first directive
+        // Prevents LLM from regressing to stale CRM context (Kardiyoloji/Ağustos 2026 etc.)
+        const isShortAffirmative = /^(?:tamam|olur|evet|peki|harika|super|süper|anla[ydş]|anlad[ıi]m|anlaşıldı|anlasild[ıi]|tamamdır|tamamdir|tamamsa)[\.!?\s]*$/i.test(inboundText.trim());
+        if (isShortAffirmative && history.length > 2) {
+          llmSystemPrompt = llmSystemPrompt + '\n\n[ÖNEMLİ KURAL: Kullanıcı kısa bir onay/kabul mesajı gönderdi. Son konuşma bağlamına (hastanın şikayeti, branş, konum) göre yanıt ver. CRM kayıtlarındaki eski departman/tarih bilgilerine (Kardiyoloji, Ağustos 2026 vb.) GÖRE HAREKET ETME. Asıl konuşmayı referans al.]';
+        }
+
+        // P0.16-M: Conversation frame priority — inject active state BEFORE CRM context
+        if (conversationFrame.participants.length > 0 && history.length > 1) {
+          const frameSelfParticipant = conversationFrame.participants.find(p => p.relation === 'self');
+          if (frameSelfParticipant?.complaint && frameSelfParticipant.complaint !== '') {
+            const frameNote = `\n\n[AKTIF KONUŞMA DURUMU (yüksek öncelik): Hasta şikayeti: "${frameSelfParticipant.complaint}". Konum: "${frameSelfParticipant.location || 'bilinmiyor'}". CRM/form kayıtlarındaki önceki bilgiler bu konuşma bağlamıyla çelişiyorsa KONUŞMAYI referans al.]`;
+            llmSystemPrompt = llmSystemPrompt + frameNote;
+          }
         }
 
         // P0.16-K: Inject conversation summary to LLM prompt (max 10 lines)
@@ -1033,23 +1050,26 @@ export class AIResponseOrchestrator {
         }));
       }
 
-      // 9b. P0.16-L: Turkish Final Quality Normalizer — deterministic rewrite of sentence-level errors
-      // Applied to both bypass path and LLM path, after MorphologyGuard
-      const normalizeCtx = {
+      // 9b-9c. P0.16-M: FinalPipelineEnforcer — mandatory chain (normalizer + formatter + telemetry)
+      // Replaces separate 9b/9c steps; enforces FINAL_RESPONSE_SOURCE telemetry for all paths
+      // Also runs checkLegacyBlock to catch any "bu ekrandan" text that slipped through
+      const legacyBlock = FinalPipelineEnforcer.checkLegacyBlock(text);
+      if (legacyBlock) {
+        text = legacyBlock;
+        console.log(JSON.stringify({ tag: 'FINAL_PIPELINE_ENFORCED', reason: 'legacy_block', tenantId, conversationId: conversationId || 'unknown', workerPath }));
+      }
+      const finalPipeCtx = {
+        tenantId,
+        conversationId: conversationId || undefined,
+        workerPath,
+        // P0.16-M: responseSource captured from bypass path above (fallbackResult not in scope here)
+        responseSource: bypassed ? (modelUsed === 'bypass' ? 'bypass' : 'bypass_unknown') : 'llm',
         complaint: selfParticipant?.complaint || undefined,
         location: locationLabel || undefined,
+        channel: channelId ? 'whatsapp' : undefined,
       };
-      const normResult = TurkishFinalQualityNormalizer.normalize(text, normalizeCtx);
-      if (normResult.wasModified) {
-        text = normResult.text;
-      }
-
-      // 9c. P0.16-L: WhatsApp formatting finalizer — paragraph breaks, numbered blocks
-      // Applied here so both bypass and LLM paths get proper formatting
-      if (text) {
-        const fmtResult = WhatsAppFormattingFinalizer.format(text);
-        text = fmtResult.text;
-      }
+      const finalPipeResult = FinalPipelineEnforcer.enforce(text, finalPipeCtx);
+      text = finalPipeResult.text;
 
       // 10. Outbound Guard Checks
       text = FinalOutboundGuard.process(text, {
