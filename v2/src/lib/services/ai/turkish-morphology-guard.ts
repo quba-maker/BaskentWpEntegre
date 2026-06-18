@@ -96,6 +96,47 @@ const KNOWN_DEDUP_PATTERNS: { regex: RegExp; description: string; fix?: (match: 
   { regex: /(\w+)(nıznız|nizniz|nüznüz|nuznuz)/gi, description: 'doubled_possessive_nznz', fix: (m) => m.replace(/(nıznız|nizniz|nüznüz|nuznuz)/gi, (sub) => sub.startsWith('nız') ? 'nız' : sub.startsWith('niz') ? 'niz' : sub.startsWith('nüz') ? 'nüz' : 'nuz') },
   // imizimiz → imiz
   { regex: /(\w+)(imizimiz|ımızımız)/gi, description: 'doubled_possessive_imiz', fix: (m) => m.replace(/(imizimiz)/gi, 'imiz').replace(/(ımızımız)/gi, 'ımız') },
+
+  // P0.16-H: Empathy phrase fix
+  // "olabileceğinizi biliyoruz" → "olabileceğini biliyoruz"
+  // (second-person suffix on verb phrase incorrectly agrees with 2nd person)
+  {
+    regex: /olabilece\u011finizi\s+biliyoruz/gi,
+    description: 'olabilecegginizi_biliyoruz',
+    fix: (m) => m[0] === 'O' ? 'Olabileceğini biliyoruz' : 'olabileceğini biliyoruz'
+  },
+  {
+    regex: /olabilece\u011finizi\s+anl[iı]yoruz/gi,
+    description: 'olabilecegginizi_anliyoruz',
+    fix: (m) => m[0] === 'O' ? 'Olabileceğini anlıyoruz' : 'olabileceğini anlıyoruz'
+  },
+
+  // P0.16-H: planızı → planınız  (missing 'n' in possessive suffix)
+  // Guard: must NOT match planınız (already correct)
+  {
+    regex: /\bplan[ıi]z[ıi]\b/gi,
+    description: 'planizi_missing_n',
+    fix: (m) => {
+      // Protect planınız / planınızı (already correct — has double n)
+      if (/plan[ıi]n[ıi]z/i.test(m)) return m;
+      return m[0] === 'P' ? 'Planınız' : 'planınız';
+    }
+  },
+
+  // P0.16-H: zamanızı → zamanınız  (missing 'n' in possessive — distinct from zamanızı guard in P0.16-E)
+  // The existing zamanızı rule maps to 'zaman aralığını'; keep that but add a narrow guard for
+  // the bare 'zamanızı' without leading adjective context.
+  // Note: existing rule already handles "bir zamanızı" → "uygun bir zaman aralığını"
+  // This rule catches "zamanınızı" written incorrectly as "zamanızı" in isolation.
+  {
+    regex: /\bzaman[ıi]z[ıi]\b/gi,
+    description: 'zamanizi_bare_missing_n',
+    fix: (m) => {
+      // Protect zamanınızı (already correct)
+      if (/zamaN[ıi]n[ıi]z/i.test(m)) return m;
+      return m[0] === 'Z' ? 'Zamanınız' : 'zamanınız';
+    }
+  },
 ];
 
 // Known bad phrase patterns (no auto-fix, Quality Gate fail)

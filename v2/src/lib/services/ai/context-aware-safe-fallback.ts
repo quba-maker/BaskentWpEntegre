@@ -14,6 +14,8 @@ export interface DeterministicFallbackParams {
   channelId?: string;
   systemPromptText?: string;
   promptVersion?: string | number;
+  /** P0.16-H: Authoritative resolved department from orchestrator's 4-step priority chain */
+  resolvedActiveDepartment?: string | null;
 }
 
 export interface DeterministicFallbackResult {
@@ -33,6 +35,8 @@ export class ContextAwareSafeFallbackResolver {
    */
   public static resolve(params: DeterministicFallbackParams): DeterministicFallbackResult {
     const { inboundText, brain, identityConfig, unifiedContext } = params;
+    // P0.16-H: Use orchestrator-resolved department (authoritative) over stale CRM
+    const orchestratorDept = params.resolvedActiveDepartment || null;
     const lowerInbound = (inboundText || '').toLowerCase().trim();
 
     // 1. Sector & Context Resolution
@@ -101,10 +105,21 @@ export class ContextAwareSafeFallbackResolver {
 
     if (matchedLocation && hasLogistics && hasPrice) {
       const location = matchedLocation.key;
-      const dept = matchedDept?.key || 
-        unifiedContext?.opportunity?.department || 
-        unifiedContext?.conversation?.department || 
+      const dept = matchedDept?.key ||
+        orchestratorDept ||
+        unifiedContext?.opportunity?.department ||
+        unifiedContext?.conversation?.department ||
         'Tedavi';
+
+      // P0.16-H Telemetry: process answer department selected
+      console.log(JSON.stringify({
+        tag: 'PROCESS_ANSWER_DEPARTMENT_SELECTED',
+        source: orchestratorDept ? 'orchestrator_resolved' : matchedDept ? 'burst_keyword' : 'stale_crm',
+        resolvedActiveDepartment: dept,
+        orchestratorDept,
+        staleDept: unifiedContext?.opportunity?.department || null,
+        finalPath: 'multi_intent_healthcare_tourism_fallback'
+      }));
 
       const text = `${location}'dan bizimle iletişime geçtiğiniz için teşekkür ederiz. ${dept} süreci, ulaşım ve fiyatlandırma ile ilgili bilgiler aşağıdadır:\n\n` +
         `• **Ulaşım ve Konaklama**: Şehir dışı ve yurt dışından gelen hastalarımız için havalimanı transferi, konaklama ve süreç planlama koordinasyonu ekibimiz tarafından organize edilmektedir.\n` +
@@ -377,12 +392,23 @@ export class ContextAwareSafeFallbackResolver {
       });
 
       if (isHealthcare) {
+        // P0.16-H: use orchestratorDept first, then previousDepartments from facts, then complaint
         let deptPhrase = '';
-        if (facts.previousDepartments && facts.previousDepartments.length > 0) {
-          deptPhrase = `${facts.previousDepartments[0]} bölümü`;
+        const effectiveDept = orchestratorDept || (facts.previousDepartments?.[0] || null);
+        if (effectiveDept) {
+          deptPhrase = `${effectiveDept} bölümü`;
         } else if (facts.complaint) {
           deptPhrase = `${facts.complaint} şikayetinizle ilgili bölüm`;
         }
+
+        // P0.16-H Telemetry: doctor lookup department selected
+        console.log(JSON.stringify({
+          tag: 'DOCTOR_LOOKUP_DEPARTMENT_SELECTED',
+          path: 'fallback_bypass',
+          source: orchestratorDept ? 'orchestrator_resolved' : (facts.previousDepartments?.[0] ? 'history_facts' : 'complaint'),
+          resolvedActiveDepartment: effectiveDept || null,
+          staleDept: unifiedContext?.opportunity?.department || null,
+        }));
 
         if (verifiedDoctorsText) {
           const targetPhrase = deptPhrase ? `${deptPhrase} için doğrulanmış hekimlerimizin` : 'doğrulanmış hekimlerimizin';

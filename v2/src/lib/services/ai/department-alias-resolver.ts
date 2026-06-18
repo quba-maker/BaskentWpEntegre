@@ -33,6 +33,8 @@ const DEFAULT_ALIAS_MAP: { keywords: string[]; canonical: string; displayLabel: 
       'fıtık', 'fitik', 'fıtıgı', 'fitigi',
       'bel ağrısı', 'bel agrisi',
       'boyun ağrısı', 'boyun agrisi',
+      // P0.16-H: explicit dept phrase keywords (e.g. "beyin sinir cerrahisi doktorları kim")
+      'beyin sinir cerrahisi', 'beyin ve sinir cerrahisi',
       'sinir cerrahisi', 'beyin cerrahisi', 'nöroşirürji', 'norosiruji',
       'omurilik', 'disk hernisi', 'disk herniation',
       'bacak uyuşması', 'bacak uyusmasi', 'el uyuşması', 'el uyusmasi',

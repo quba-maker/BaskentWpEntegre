@@ -595,13 +595,35 @@ export class AIResponseOrchestrator {
       let outputTokens = 0;
 
       if (isLlmBypassChallenge) {
+        // P0.16-H Telemetry: multi-intent burst department
+        const intentList: string[] = [];
+        if (shouldBypassDoctorLookup) intentList.push('doctor_lookup');
+        if (isRecallWithFacts) intentList.push('recall_frustration');
+        if (isPromptChallenge) intentList.push('prompt_challenge');
+        if (isBotAccusation || isAiAccusation) intentList.push('identity_question');
+
+        if (intentList.length > 0) {
+          console.log(JSON.stringify({
+            tag: 'MULTI_INTENT_DEPARTMENT_SELECTED',
+            tenantId,
+            conversationId: conversationId || 'unknown',
+            resolvedActiveDepartment: resolvedActiveDepartment || null,
+            staleDepartment: staleDept,
+            source: currentMsgDept ? 'current_message' : recentContextDept ? 'recent_conversation' : staleDept ? 'stale_crm' : 'null',
+            intentList,
+            confidence: currentMsgDept ? 'high' : recentContextConfidence,
+            workerPath
+          }));
+        }
+
         const fallbackResult = ContextAwareSafeFallbackResolver.resolve({
           inboundText,
           brain,
           identityConfig: brain.prompts.metadata?.identity || brain.context.config?.identity || {},
           unifiedContext,
           channelId,
-          systemPromptText
+          systemPromptText,
+          resolvedActiveDepartment: resolvedActiveDepartment || null  // P0.16-H: pass to all bypass paths
         });
         text = fallbackResult.text;
         bypassed = true;
