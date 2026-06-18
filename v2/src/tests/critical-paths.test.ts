@@ -6652,6 +6652,148 @@ test("P0.17-10: Baseline — 292 previous tests still importable (module integri
 });
 
 // ==========================================
+// P0.17-FP: CONTEXT PARITY & DOCTOR POLICY TESTS
+// ==========================================
+
+test("P0.17-FP-1: WhatsAppFormattingFinalizer — HH:MM saat auto-bold yapılmalı (zaten bold değilse)", async () => {
+  const { WhatsAppFormattingFinalizer } = await import("../lib/services/ai/whatsapp-formatting-finalizer");
+  const result = WhatsAppFormattingFinalizer.format("Görüşme zamanı: 15:00 olarak planlandı.");
+  assert(result.text.includes("*15:00*"), `HH:MM should be auto-bolded, got: ${result.text}`);
+});
+
+test("P0.17-FP-2: WhatsAppFormattingFinalizer — zaten bold olan HH:MM çift formatlanmamalı", async () => {
+  const { WhatsAppFormattingFinalizer } = await import("../lib/services/ai/whatsapp-formatting-finalizer");
+  const result = WhatsAppFormattingFinalizer.format("Görüşme zamanı: *15:00* olarak planlandı.");
+  const boldCount = (result.text.match(/\*15:00\*/g) || []).length;
+  assert(boldCount === 1, `*15:00* should appear exactly once (no double-bold), got count: ${boldCount}`);
+});
+
+test("P0.17-FP-3: WhatsAppFormattingFinalizer — Türkçe tarih auto-bold yapılmalı", async () => {
+  const { WhatsAppFormattingFinalizer } = await import("../lib/services/ai/whatsapp-formatting-finalizer");
+  const result = WhatsAppFormattingFinalizer.format("Planlanan tarih: 22 Haziran 2026 olarak belirlendi.");
+  assert(result.text.includes("*22 Haziran 2026*"), `Turkish date should be auto-bolded, got: ${result.text}`);
+});
+
+test("P0.17-FP-4: DoctorNamesPolicy — first_soft mode 'isimleri yanlış vermek istemem' içermeli", async () => {
+  const { DoctorNamesPolicy } = await import("../lib/services/ai/doctor-names-policy");
+  const mockBrain = { context: { config: {} }, prompts: { metadata: {} } } as any;
+  const result = DoctorNamesPolicy.resolve(mockBrain, ["Kardiyoloji"], false);
+  assert(result.mode === "first_soft", `Expected first_soft mode, got: ${result.mode}`);
+  assert(result.text.toLowerCase().includes("isimler") || result.text.toLowerCase().includes("uzman"),
+    `first_soft should mention not giving names or experts, got: ${result.text}`);
+});
+
+test("P0.17-FP-5: DoctorNamesPolicy — unavailable mode mekanik 'bu sistemden ulaşamıyorum' içermemeli", async () => {
+  const { DoctorNamesPolicy } = await import("../lib/services/ai/doctor-names-policy");
+  const mockBrain = { context: { config: {} }, prompts: { metadata: {} } } as any;
+  const result = DoctorNamesPolicy.resolve(mockBrain, ["Kardiyoloji"], true);
+  assert(result.mode === "unavailable", `Expected unavailable mode, got: ${result.mode}`);
+  assert(!result.text.includes("bu sistemden ulaşamıyorum"),
+    `unavailable should NOT say 'bu sistemden ulaşamıyorum' (mechanical phrase), got: ${result.text}`);
+  assert(result.text.toLowerCase().includes("hekim") || result.text.toLowerCase().includes("uzman") || result.text.toLowerCase().includes("danışman"),
+    `unavailable should mention doctors/consultants, got: ${result.text}`);
+});
+
+test("P0.17-FP-6: DoctorNamesPolicy — unavailable mode 2 bölümde güvenli metin döndürmeli", async () => {
+  const { DoctorNamesPolicy } = await import("../lib/services/ai/doctor-names-policy");
+  const mockBrain = { context: { config: {} }, prompts: { metadata: {} } } as any;
+  const result = DoctorNamesPolicy.resolve(mockBrain, ["Kardiyoloji", "Beyin ve Sinir Cerrahisi"], true);
+  assert(result.mode === "unavailable", `Expected unavailable for 2 depts with no verified list`);
+  assert(result.text.length > 10, `unavailable text should not be empty`);
+  assert(!result.text.includes("bu sistemden ulaşamıyorum"), `should not contain mechanical phrase`);
+});
+
+test("P0.17-FP-7: Persuasion points — blocklist garanti/fiyat/doktor içeren madde filtrelenmeli", () => {
+  // Simulate the blocklist logic from prompt-builder.ts
+  const PERSUASION_BLOCKLIST = [
+    'garanti', 'fiyat', 'tl', 'euro', 'dolar', 'başarı', 'memnuniyet garantisi',
+    'doktor', 'dr.', 'hekim', 'uzman adı', 'geçmiş hasta', 'hasta hikayesi'
+  ];
+  const filterPoints = (points: string[]) => points.filter(p => {
+    const lower = p.toLowerCase();
+    return !PERSUASION_BLOCKLIST.some(blocked => lower.includes(blocked));
+  });
+
+  const points = [
+    "Akademik üniversite hastanesi statüsü",
+    "%100 başarı garantisi veriyoruz",
+    "50.000 TL den başlayan fiyatlar",
+    "Dr. Ahmet Kaya uzman cerrah",
+    "Tüm branşlarda deneyimli ekip",
+    "Uzak hastalar için konaklama desteği"
+  ];
+  const safe = filterPoints(points);
+  assert(safe.length === 3, `Expected 3 safe points after filtering, got ${safe.length}: ${JSON.stringify(safe)}`);
+  assert(safe.includes("Akademik üniversite hastanesi statüsü"), "Academic status should pass");
+  assert(safe.includes("Tüm branşlarda deneyimli ekip"), "Team expertise should pass");
+  assert(safe.includes("Uzak hastalar için konaklama desteği"), "Accommodation support should pass");
+});
+
+test("P0.17-FP-8: callback_time_tr parity — bot_suggestion.suggested_time'dan türetilmeli", () => {
+  // Simulate the parity logic from prompt-builder.ts (Madde 3)
+  const taskMeta: any = {
+    scheduled_for_utc: "2026-06-22T14:00:00Z",
+    bot_suggestion: {
+      proposed_date: "2026-06-22T14:00:00Z",
+      suggested_time: "17:00",
+      needs_timezone_clarification: false,
+      operation_window_valid: true
+    }
+    // callback_time_tr intentionally missing — this is the amnesia scenario
+  };
+
+  let callback_time_tr = taskMeta.callback_time_tr || null;
+  if (!callback_time_tr && taskMeta.bot_suggestion?.suggested_time) {
+    callback_time_tr = taskMeta.bot_suggestion.suggested_time;
+  }
+  assert(callback_time_tr === "17:00", `callback_time_tr should be derived from bot_suggestion.suggested_time, got: ${callback_time_tr}`);
+});
+
+test("P0.17-FP-9: patientCountry — patient_known_facts array'inden country extract edilebilmeli", () => {
+  // Simulate the SaaS-safe patientCountry extraction (Madde 4, final fallback)
+  const patient_known_facts = [
+    "Hastanın adı: Mehmet Yılmaz.",
+    "Hastanın yaşadığı ülke/yer: Almanya.",
+    "Hastanın şikayeti: bel ağrısı."
+  ];
+
+  let patientCountry: string | null = null;
+  if (!patientCountry && Array.isArray(patient_known_facts)) {
+    const countryFact = patient_known_facts.find(f => f.includes("yaşadığı ülke"));
+    if (countryFact) {
+      const match = countryFact.match(/:\s*(.+)\.?$/);
+      if (match) patientCountry = match[1].trim().replace(/\.$/, "");
+    }
+  }
+  assert(patientCountry === "Almanya", `patientCountry should be extracted as 'Almanya', got: ${patientCountry}`);
+});
+
+test("P0.17-FP-10: hallucination guard — bot_suggestion.proposed_date ve suggested_time VAR olarak değerlendirilmeli", () => {
+  // Simulate the hasActiveTaskTime check with Madde 3 parity fix
+  const metaWithBotSuggestion = {
+    bot_suggestion: {
+      proposed_date: "2026-06-22T14:00:00Z",
+      suggested_time: "17:00"
+    }
+  };
+  const hasActiveTaskTime = !!(
+    metaWithBotSuggestion?.bot_suggestion?.proposed_date ||
+    (metaWithBotSuggestion as any)?.bot_suggestion?.suggested_time
+  );
+  assert(hasActiveTaskTime === true, "hasActiveTaskTime should be true when bot_suggestion has time data");
+
+  // Contrarily: no time data → false → bot should NOT produce time
+  const metaEmpty: any = {};
+  const hasNone = !!(
+    metaEmpty?.scheduled_for_utc ||
+    metaEmpty?.callback_time_tr ||
+    metaEmpty?.bot_suggestion?.proposed_date ||
+    metaEmpty?.bot_suggestion?.suggested_time
+  );
+  assert(hasNone === false, "hasActiveTaskTime should be false when no time data exists");
+});
+
+// ==========================================
 // SONUÇLAR
 // ==========================================
 

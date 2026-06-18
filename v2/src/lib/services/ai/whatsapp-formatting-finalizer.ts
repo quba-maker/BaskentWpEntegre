@@ -77,7 +77,21 @@ export class WhatsAppFormattingFinalizer {
     // 6. Trim trailing whitespace per line
     formatted = formatted.split('\n').map(l => l.trimEnd()).join('\n');
 
-    // 7. Final trim
+    // 7. P0.17-FP Madde 7: Minimal auto-bold for scheduled date/time.
+    // ONLY targets explicit date+time patterns (HH:MM format) that are NOT already bold.
+    // Does NOT touch department names or arbitrary words (over-eager risk).
+    // Safety: checks for pre-existing *...* wrap to avoid double-formatting.
+    formatted = formatted.replace(
+      /(?<!\*)(\b\d{1,2}:\d{2}\b)(?!\*)/g,
+      (match) => `*${match}*`
+    );
+    // Bold "DD Ay YYYY" date strings (e.g. "22 Haziran 2026") that aren't already bold
+    formatted = formatted.replace(
+      /(?<!\*)(\b\d{1,2}\s+(?:Ocak|Şubat|Mart|Nisan|Mayıs|Haziran|Temmuz|Ağustos|Eylül|Ekim|Kasım|Aralık)\s+\d{4}\b)(?!\*)/g,
+      (match) => `*${match}*`
+    );
+
+    // 8. Final trim
     formatted = formatted.trim();
 
     const wasModified = formatted !== original;

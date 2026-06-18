@@ -88,15 +88,15 @@ export class DoctorNamesPolicy {
       }
 
     } else {
-      // unavailable + repeat insistence — honest, natural, no mechanical phrase
+      // unavailable + repeat insistence — honest, natural, warm, no mechanical phrase
       mode = 'unavailable';
 
       if (activeDepts.length >= 2) {
         const deptLines = activeDepts.map((d, i) => `${i + 1}. ${d}`).join('\n');
-        text = `Onaylı hekim listesine şu an bu sistemden ulaşamıyorum.\n\n${deptLines}\n\nDanışman ekibimiz görüşmede her iki bölüm için de en uygun uzmanı size doğrudan iletecektir.`;
+        text = `Bu bölümlerde çalışan uzmanlar hakkında sizi kimin değerlendireceğini şu an doğrudan belirtemiyorum; ancak her iki alanda da deneyimli hekimlerimiz bulunuyor.\n\n${deptLines}\n\nGörüşme ayarlandığında, hasta danışmanımız size en uygun uzmanı doğrudan iletecektir.`;
       } else {
         const dept = activeDepts[0] || 'ilgili bölüm';
-        text = `Onaylı hekim listesine şu an bu sistemden ulaşamıyorum. ${dept} için görüşme sırasında en uygun uzman danışman ekibimiz tarafından size iletilecektir.`;
+        text = `${dept} alanında çalışan hekimlerimiz var, ancak kimin size en uygun olduğunu şu an buradan netleştiremiyorum. Görüşme sırasında hasta danışmanımız bu bilgiyi doğrudan sizinle paylaşacaktır.`;
       }
     }
 

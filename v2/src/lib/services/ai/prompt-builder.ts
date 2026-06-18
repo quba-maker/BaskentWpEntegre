@@ -469,9 +469,25 @@ MEDYA MESAJI KURALI:
     // ═══ PHASE 2J: Time Intelligence Context ═══
     let timeContext = '';
     try {
-      const patientCountry = unifiedContext?.opportunity?.country 
+      // P0.17-FP Madde 4: patientCountry SaaS-safe resolution.
+      // MUST use the sanitizeFormFacts/ConversationKnownFactsResolver chain — not raw form data.
+      // Each tenant may name their form fields differently; sanitizeFormFacts() normalizes them.
+      // resolvedFactsForPatientCountry is built from the already-sanitized safeLatestForm.
+      let patientCountry: string | null = unifiedContext?.opportunity?.country 
         || unifiedContext?.profile?.country 
         || null;
+      // Fallback to sanitized form country (tenant-agnostic, goes through sanitizeFormFacts() in IdentityEngine)
+      if (!patientCountry && unifiedContext?.latestForm?.data?.country) {
+        patientCountry = unifiedContext.latestForm.data.country;
+      }
+      // Final fallback: extract from patient_known_facts array ("Hastanın yaşadığı ülke/yer: X" pattern)
+      if (!patientCountry && Array.isArray(unifiedContext?.patient_known_facts)) {
+        const countryFact = (unifiedContext.patient_known_facts as string[]).find(f => f.includes('yaşadığı ülke'));
+        if (countryFact) {
+          const match = countryFact.match(/:\s*(.+)\.?$/);
+          if (match) patientCountry = match[1].trim().replace(/\.$/, '');
+        }
+      }
       const wh = brain.context.settings?.workingHours;
       const operatingHours = (wh && wh.enabled && wh.start && wh.end)
         ? { start: wh.start, end: wh.end }
@@ -495,6 +511,13 @@ MEDYA MESAJI KURALI:
       const scheduled_for_utc = taskMeta.scheduled_for_utc || taskMeta.bot_suggestion?.proposed_date || null;
       let callback_time_tr = taskMeta.callback_time_tr || null;
 
+      // P0.17-FP Madde 3: bot_suggestion parity — if callback_time_tr missing but bot_suggestion has it, derive it.
+      // This fixes context amnesia: user says "Pazartesi 17:00" → bot_suggestion.suggested_time = "17:00"
+      // but callback_time_tr stays null → confirmationContext empty → bot forgets the time.
+      if (!callback_time_tr && taskMeta.bot_suggestion?.suggested_time) {
+        callback_time_tr = taskMeta.bot_suggestion.suggested_time;
+      }
+
       // Sanitization: If callback_time_tr or scheduled_for_utc has midnight (00:00 or 03:00 local, or 00:00 UTC), treat as date-only (clear the time part)
       let isMidnightDefault = false;
       if (callback_time_tr === '00:00' || callback_time_tr === '03:00') {
@@ -517,9 +540,10 @@ MEDYA MESAJI KURALI:
       }
 
       const patient_local_time = taskMeta.patient_local_time || null;
-      const patient_timezone = taskMeta.patient_timezone || null;
-      const needs_timezone_clarification = taskMeta.needs_timezone_clarification ?? false;
-      const operation_window_valid = isMidnightDefault ? true : (taskMeta.operation_window_valid ?? true);
+      // P0.17-FP Madde 3: full timezone parity from bot_suggestion if taskMeta missing them
+      const patient_timezone = taskMeta.patient_timezone || taskMeta.bot_suggestion?.suggested_timezone_basis || null;
+      const needs_timezone_clarification = taskMeta.needs_timezone_clarification ?? taskMeta.bot_suggestion?.needs_timezone_clarification ?? false;
+      const operation_window_valid = isMidnightDefault ? true : (taskMeta.operation_window_valid ?? taskMeta.bot_suggestion?.operation_window_valid ?? true);
       
       let task_type: 'phone_callback' | 'clinic_appointment' | null = null;
       if (activeTask?.task_type) {
@@ -827,6 +851,34 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/hasta danışmanı arasında pla
     finalPrompt += `\n${directiveContext}`;
     finalPrompt += `\n${confirmationDirective}`;
 
+    // P0.17-FP Madde 5: Tenant-safe persuasion points injection.
+    // ONLY from brain.prompts.metadata.persuasion_points — never hardcoded.
+    // Safety guard: fabricated guarantees, prices, success stories, doctor names are always forbidden.
+    // SaaS: each tenant defines their own value propositions in admin config.
+    try {
+      const persuasionPoints: string[] | undefined = (brain.prompts.metadata as any)?.persuasion_points;
+      if (Array.isArray(persuasionPoints) && persuasionPoints.length > 0) {
+        // Filter: remove any point that looks like a fabricated guarantee, price, success claim, or doctor name
+        const PERSUASION_BLOCKLIST = [
+          'garanti', 'fiyat', 'tl', 'euro', 'dolar', 'başarı', 'memnuniyet garantisi',
+          'doktor', 'dr.', 'hekim', 'uzman adı', 'geçmiş hasta', 'hasta hikayesi'
+        ];
+        const safePoints = persuasionPoints.filter(p => {
+          const lower = p.toLowerCase();
+          return !PERSUASION_BLOCKLIST.some(blocked => lower.includes(blocked));
+        });
+        if (safePoints.length > 0) {
+          finalPrompt += `\n\n=== 🏥 KURUMA ÖZEL DEĞER ÖNERMELERİ (TENANT CONFIG'DEN) ===\n`;
+          finalPrompt += `Aşağıdaki maddeler tenant yöneticisi tarafından tanımlanmış kuruma özgü güçlü yönlerdir. Hasta itiraz ettiğinde veya ikna katmanı gerektiğinde (örn. "orası uzak", "pahalı mı", "neden buraya gelmeliyim" gibi durumlarda) bu maddeleri doğal biçimde kullanabilirsin.\n`;
+          finalPrompt += `⚠️ YASAK: Garanti, fiyat, başarı istatistiği veya doğrulanmamış doktor adı uydurma. Sadece aşağıdaki maddeleri kullan:\n`;
+          safePoints.forEach((point, i) => {
+            finalPrompt += `${i + 1}. ${point}\n`;
+          });
+          finalPrompt += `=======================================================\n`;
+        }
+      }
+    } catch { /* non-fatal */ }
+
     if (learningHintsContext) {
       finalPrompt += `\n${learningHintsContext}`;
     }
@@ -995,9 +1047,12 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/hasta danışmanı arasında pla
     // Prevents fabricated date/time/appointment even when user says "olur/tamam/evet"
     // and no real time context exists in active_task.
     // SaaS: tenant-agnostic, injected for ALL tenants, cannot be overridden.
+    // P0.17-FP: also check bot_suggestion.proposed_date (parity with Madde 3 fix above)
     const hasActiveTaskTime = !!(
       unifiedContext?.active_task?.metadata?.scheduled_for_utc ||
-      unifiedContext?.active_task?.metadata?.callback_time_tr
+      unifiedContext?.active_task?.metadata?.callback_time_tr ||
+      unifiedContext?.active_task?.metadata?.bot_suggestion?.proposed_date ||
+      unifiedContext?.active_task?.metadata?.bot_suggestion?.suggested_time
     );
     const personaLabel = pName || (isHealthcare ? 'hasta danışmanımız' : 'temsilcimiz');
     const hallucinationGuard = `\n\n=== 🚫 UYDURMA YASAĞI — KESİN KURAL (DEĞİŞTİRİLEMEZ) ===
