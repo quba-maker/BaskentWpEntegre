@@ -2,6 +2,7 @@ export type ActivePromptIdentityContext = {
   personaName?: string;
   organizationName?: string;
   organizationShortName?: string;
+  agentName?: string;         // P0.18: 'hasta danışmanımız' | 'temsilcimiz' | custom
   industry?: string;
   promptId?: string;
   promptVersion?: number | string;
@@ -20,6 +21,8 @@ export function resolveActivePromptIdentityContext(params: {
   identityConfig?: any;
   systemPromptText?: string;
 }): ActivePromptIdentityContext {
+  // P0.18: Resolve agentName via TenantConfigResolver (tenant-agnostic)
+  const { TenantConfigResolver } = require('./tenant-config-resolver');
   const { brain, identityConfig } = params;
   
   // Helper to check and return non-empty trimmed string
@@ -40,6 +43,7 @@ export function resolveActivePromptIdentityContext(params: {
       personaName: clean(identityConfig.personaName) || undefined,
       organizationName: clean(identityConfig.organizationName) || undefined,
       organizationShortName: clean(identityConfig.organizationShortName) || undefined,
+      agentName: clean(identityConfig.agentName) || TenantConfigResolver.getAgentName(brain),
       industry: clean(identityConfig.industry) || clean(metadata.industry) || undefined,
       promptId: clean(identityConfig.promptId) || clean(brain?.prompts?.id) || undefined,
       promptVersion: clean(identityConfig.promptVersion) || clean(metadata.version) || clean(brain?.prompts?.version) || undefined,
@@ -57,6 +61,7 @@ export function resolveActivePromptIdentityContext(params: {
       personaName: clean(metadataIdentity.personaName) || undefined,
       organizationName: clean(metadataIdentity.organizationName) || undefined,
       organizationShortName: clean(metadataIdentity.organizationShortName) || undefined,
+      agentName: clean(metadataIdentity.agentName) || TenantConfigResolver.getAgentName(brain),
       industry: clean(metadata.industry) || clean(metadataIdentity.industry) || undefined,
       promptId: clean(brain?.prompts?.id) || undefined,
       promptVersion: clean(metadata.version) || clean(brain?.prompts?.version) || undefined,
@@ -120,6 +125,7 @@ export function resolveActivePromptIdentityContext(params: {
     personaName: undefined,
     organizationName: undefined,
     organizationShortName: undefined,
+    agentName: TenantConfigResolver.getAgentName(brain),
     industry: resolvedIndustry || undefined,
     promptId: clean(brain?.prompts?.id) || undefined,
     promptVersion: clean(metadata.version) || clean(brain?.prompts?.version) || undefined,

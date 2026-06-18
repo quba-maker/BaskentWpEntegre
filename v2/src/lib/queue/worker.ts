@@ -2111,7 +2111,12 @@ export class QueueWorkerEngine {
 
     if (content && !hasQuotedReply) {
       const lowerContent = content.toLowerCase().trim();
-      const greetings = ['merhaba', 'merhabalar', 'selam', 'iyi günler', 'iyi akşamlar', 'iyi sabahlar', 'günaydın', 'kolay gelsin', 'iyi çalışmalar'];
+      // P0.18: Greeting tokens are now configurable per-tenant via brain.context.config.greetingTokens
+      // Falls back to Turkish defaults for backward compatibility
+      const defaultGreetings = ['merhaba', 'merhabalar', 'selam', 'iyi günler', 'iyi akşamlar', 'iyi sabahlar', 'günaydın', 'kolay gelsin', 'iyi çalışmalar'];
+      const greetings: string[] = (brain?.context?.config?.greetingTokens && Array.isArray(brain.context.config.greetingTokens) && brain.context.config.greetingTokens.length > 0)
+        ? brain.context.config.greetingTokens.map((t: string) => t.toLowerCase().trim())
+        : defaultGreetings;
       if (greetings.includes(lowerContent) || (lowerContent.length < 20 && greetings.some(g => lowerContent.includes(g)))) {
         if (!unifiedContext) unifiedContext = {};
         unifiedContext.isGreetingOnly = true;

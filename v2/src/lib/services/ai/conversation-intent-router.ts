@@ -204,8 +204,10 @@ export class ConversationIntentRouter {
     }
 
     // 12. Distance Objection
+    // P0.18: City-specific keywords removed (konya uzak, amerika uzak etc.) — use generic terms only.
+    // Tenants needing city-specific keywords should configure via brain.context.config.locationDistanceKeywords
     const distanceKeywords = [
-      'uzak', 'mesafe', 'gelemiyorum', 'gelmem zor', 'konya cok uzak', 'konya uzak', 'amerika uzak', 'amerika cok uzak'
+      'uzak', 'mesafe', 'gelemiyorum', 'gelmem zor', 'cok uzak', 'uzakta', 'uzakligi'
     ];
     if (distanceKeywords.some(kw => clean.includes(kw))) {
       return 'distance_objection';
@@ -399,8 +401,9 @@ export class ConversationIntentRouter {
     }
 
     // Distance objection
+    // P0.18: City-specific keywords removed — generic only
     const distanceKeywords = [
-      'uzak', 'mesafe', 'konya cok uzak', 'konya uzak', 'cok uzak',
+      'uzak', 'mesafe', 'cok uzak',
       'uzakta', 'uzakligi', 'uzaklığı',
     ];
     if (distanceKeywords.some(kw => clean.includes(kw))) {

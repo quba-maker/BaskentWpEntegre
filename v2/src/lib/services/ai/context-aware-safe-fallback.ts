@@ -84,7 +84,8 @@ export class ContextAwareSafeFallbackResolver {
       { key: 'Avrupa', keywords: ['avrupa', 'europe'] },
       { key: 'Yurt dışı', keywords: ['yurt dışı', 'yurt disi', 'yurt dışından', 'yurt disindan', 'yurtdısı', 'yurtdisi', 'international'] },
       { key: 'Şehir dışı', keywords: ['şehir dışı', 'sehir disi', 'sehir dışı', 'şehir disi', 'sehir dışından', 'sehirlerarasi', 'şehirlerarası'] },
-      { key: 'Uzak', keywords: ['uzak', 'mesafe', 'konya uzak'] }
+      { key: 'Uzak', keywords: ['uzak', 'mesafe', 'cok uzak'] }
+      // P0.18: 'konya uzak' kaldırıldı — generic 'uzak'/'mesafe' zaten yakalar
     ];
 
     const departmentsList = [
@@ -308,8 +309,11 @@ export class ContextAwareSafeFallbackResolver {
 
     const hasPersona = !!identityCtx.personaName && identityCtx.personaName !== 'Asistan';
     const pName = identityCtx.personaName || 'Asistan';
-    const orgName = identityCtx.organizationName || (isHealthcare ? 'Sağlık Merkezi' : 'Hizmet Merkezi');
-    const agentName = isHealthcare ? 'hasta danışmanımız' : 'temsilcimiz';
+    // P0.18: agentName önce identityCtx'den, yoksa TenantConfigResolver'dan okunuyor
+    // Bu sayede farklı tenant'larda 'hasta danışmanımız' yerinde custom label kullanılabilir
+    const { TenantConfigResolver } = require('./tenant-config-resolver');
+    const orgName = identityCtx.organizationName || TenantConfigResolver.getOrgNameFallback(brain);
+    const agentName = (identityCtx as any).agentName || TenantConfigResolver.getAgentName(brain);
 
     // 1. identity_question
     if (detectedIntent === 'identity_question') {
@@ -851,9 +855,10 @@ export class ContextAwareSafeFallbackResolver {
     }
 
     if (detectedIntent === 'price_question') {
+      const institutionLabel = TenantConfigResolver.getInstitutionLabel(brain);
       const text = isHealthcare
-        ? `Hizmet ve tedavi ücretlerimiz, hastanemizde yapılacak kişiye özel muayene ve değerlendirmeler sonrasında netleşmektedir. Detaylı bilgi sunabilmemiz için hasta danışmanımızla kısa bir telefon görüşmesi planlayabiliriz.`
-        : `Ücretlerimiz ve hizmet seçeneklerimiz kişiye özel yapılacak planlama sonrasında belirlenmektedir. Detaylı bilgi için temsilci ekibimizle kısa bir görüşme planlayabiliriz.`;
+        ? `Hizmet ve tedavi ücretlerimiz, ${institutionLabel} yapılacak kişiye özel muayene ve değerlendirmeler sonrasında netleşmektedir. Detaylı bilgi sunabilmemiz için ${agentName}la kısa bir telefon görüşmesi planlanabilir.`
+        : `Ücretlerimiz ve hizmet seçeneklerimiz kişiye özel yapılacak planlama sonrasında belirlenmektedir. Detaylı bilgi için ${agentName}la kısa bir görüşme planlanabilir.`;
       return {
         text,
         sector: resolvedIndustry,
@@ -1088,7 +1093,11 @@ export function buildHistoryAwareRecoveryFallback(
 ): string {
   const hasHistory = Array.isArray(history) && history.length > 0;
   const pName = identityCtx?.personaName;
-  const orgName = identityCtx?.organizationName || (isHealthcare ? 'Sağlık Merkezi' : 'Hizmet Merkezi');
+  // P0.18: orgName resolves via identityCtx.organizationName, then identityCtx.orgNameFallback (from TenantConfigResolver),
+  // then generic sector-based default. No tenant name hardcoded.
+  const orgName = identityCtx?.organizationName
+    || identityCtx?.orgNameFallback
+    || (isHealthcare ? 'Sağlık Merkezi' : 'Hizmet Merkezi');
   const hasPersona = !!pName && pName !== 'Asistan';
 
   if (!hasHistory) {

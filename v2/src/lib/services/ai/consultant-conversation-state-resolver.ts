@@ -79,12 +79,23 @@ export class ConsultantConversationStateResolver {
   /**
    * Resolve participant state from conversation history.
    * Call with history[] — returns full ConsultantConversationState.
+   *
+   * P0.18: extraPatterns allows tenant-specific complaint→department mappings
+   * without modifying the built-in COMPLAINT_PATTERNS array.
+   * Pass TenantConfigResolver.getExtraComplaintPatterns(brain) here.
    */
-  public static resolve(history: { role: string; content: string }[]): ConsultantConversationState {
+  public static resolve(
+    history: { role: string; content: string }[],
+    extraPatterns?: { pattern: RegExp; complaint: string; department: string }[]
+  ): ConsultantConversationState {
     const userMessages = history.filter(m => m.role === 'user' && m.content);
+    // P0.18: Merge built-in patterns with any tenant-specific extraPatterns
+    const effectivePatterns = extraPatterns && extraPatterns.length > 0
+      ? [...COMPLAINT_PATTERNS, ...extraPatterns]
+      : COMPLAINT_PATTERNS;
 
-    // ── SELF participant ──────────────────────────────────────────────────────
-    const selfState = this.resolveParticipant('self', userMessages);
+    // ── SELF participant ────────────────────────────────────────────────
+    const selfState = this.resolveParticipant('self', userMessages, undefined, effectivePatterns);
 
     // ── SECONDARY participants: annem, babam, eşim ───────────────────────────
     const participants: ParticipantState[] = [selfState];
@@ -100,7 +111,7 @@ export class ConsultantConversationStateResolver {
     for (const { keyword, relation } of secondaryRelations) {
       const hasSecondary = userMessages.some(m => m.content.toLowerCase().includes(keyword));
       if (hasSecondary) {
-        const secState = this.resolveParticipant(relation, userMessages, keyword);
+        const secState = this.resolveParticipant(relation, userMessages, keyword, effectivePatterns);
         // Only add if secondary has a distinct complaint or department
         if (secState.complaint || secState.department) {
           participants.push(secState);
@@ -148,7 +159,8 @@ export class ConsultantConversationStateResolver {
   private static resolveParticipant(
     relation: ParticipantRelation,
     userMessages: { role: string; content: string }[],
-    secondaryKeyword?: string
+    secondaryKeyword?: string,
+    patterns?: { pattern: RegExp; complaint: string; department: string }[]  // P0.18
   ): ParticipantState {
     // For secondary: look at messages that mention the keyword
     const relevantMessages = secondaryKeyword
@@ -161,8 +173,10 @@ export class ConsultantConversationStateResolver {
     // Complaint detection
     let complaint: string | null = null;
     let department: string | null = null;
+    // P0.18: Use merged patterns (built-in + tenant extra) if provided
+    const activePatterns = patterns && patterns.length > 0 ? patterns : COMPLAINT_PATTERNS;
 
-    for (const cp of COMPLAINT_PATTERNS) {
+    for (const cp of activePatterns) {
       cp.pattern.lastIndex = 0;
       if (cp.pattern.test(allLower)) {
         // For secondary, skip self-specific complaints (if keyword is secondary)
