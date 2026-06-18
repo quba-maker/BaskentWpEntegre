@@ -50,12 +50,15 @@ export class MultiIntentConsultantComposer {
     const lower = inboundText.toLowerCase();
 
     // ── Detect intents ────────────────────────────────────────────────────────
+    // P0.16-M: Expanded candidates — must match isMultiIntent() below exactly
     const candidates: IntentCandidate[] = [
       { intent: 'address_question',    detected: /nerede|adres|konum|konumu/.test(lower) },
       { intent: 'price_question',      detected: /fiyat|[üu]cret|ne kadar/.test(lower) },
-      { intent: 'doctor_names',        detected: /doktor\s+isim|hekim\s+isim|doktor\s+isimleri|kimler\s+var|hangi\s+doktorlar|doktor\s+list/.test(lower) },
-      { intent: 'process_question',    detected: /s[üu]re[çc]\s+nas[ıi]l|nas[ıi]l\s+i[şs]liyor|nas[ıi]l\s+[çc]al[ıi][şs][ıi]yor|aşama|adım|tedavi\s+s[üu]re/.test(lower) },
-      { intent: 'logistics_question',  detected: /konaklama|ula[şs][ıi]m|otel|transfer|yol/.test(lower) },
+      // P0.16-M: "doktor kim" / "doktor kimler" / "hangi doktor" all count as doctor intent
+      { intent: 'doctor_names',        detected: /doktor\s+isim|hekim\s+isim|doktor\s+isimleri|kimler\s+var|hangi\s+doktorlar|doktor\s+list|doktor\s+kim|kim\s+doktor|hangi\s+doktor|doktor\s+kimler/.test(lower) },
+      // P0.16-M: "süreç" alone, "nasıl olacak", "gelme nasıl" all count as process intent
+      { intent: 'process_question',    detected: /s[üu]re[çc]|nas[ıi]l\s+i[şs]liyor|nas[ıi]l\s+[çc]al[ıi][şs][ıi]yor|a[şs]ama|ad[ıi]m|tedavi\s+s[üu]re|nas[ıi]l\s+olacak|gelme\s+nas[ıi]l|geli[şs]\s+s[üu]re|tedavi\s+s[üu]re/.test(lower) },
+      { intent: 'logistics_question',  detected: /konaklama|ula[şs][ıi]m|otel|transfer|yol|gelme/.test(lower) },
       { intent: 'next_step_request',   detected: /belirleyelim|ne\s+zaman|nas[ıi]l\s+olacak|ee\s+yani|ne\s+yapmam\s+gerekiyor|ilerleyelim/.test(lower) },
     ];
 
@@ -187,9 +190,11 @@ export class MultiIntentConsultantComposer {
     let count = 0;
     if (/nerede|adres|konum/.test(lower)) count++;
     if (/fiyat|[üu]cret|ne kadar/.test(lower)) count++;
-    if (/doktor\s+isim|hekim\s+isim|hangi\s+doktorlar/.test(lower)) count++;
-    if (/s[üu]re[çc]\s+nas[ıi]l|nas[ıi]l\s+i[şs]liyor/.test(lower)) count++;
-    if (/konaklama|ula[şs][ıi]m|otel/.test(lower)) count++;
+    // P0.16-M: expanded — "doktor kim", "hangi doktor" etc.
+    if (/doktor\s+isim|hekim\s+isim|hangi\s+doktorlar|doktor\s+kim|kim\s+doktor|hangi\s+doktor|doktor\s+kimler/.test(lower)) count++;
+    // P0.16-M: expanded — "süreç" alone, "nasıl olacak", "gelme nasıl"
+    if (/s[üu]re[çc]|nas[ıi]l\s+i[şs]liyor|a[şs]ama|ad[ıi]m|nas[ıi]l\s+olacak|gelme\s+nas[ıi]l/.test(lower)) count++;
+    if (/konaklama|ula[şs][ıi]m|otel|gelme/.test(lower)) count++;
     return count >= 2;
   }
 }
