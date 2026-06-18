@@ -242,6 +242,10 @@ export class PromptBuilder {
         crmContext += `\n--- AKTİF FIRSAT BİLGİLERİ (CRM OPPORTUNITY) ---\n`;
         if (unifiedContext.isGreetingOnly) {
            crmContext += `- Özet: Müşteri/hasta bilgisi sistemde kayıtlı.\n`;
+           // P0.17-FP BUGFIX: greeting_only modda "kaldığı yerden sürdür" talimatı VERİLMİYOR.
+           // Aksi hâlde LLM eski opportunity bağlamını (bel fıtığı, önceki şikayet vb.) proaktif açar.
+           // Sadece doğal bir selam + kısa asistan tanıtımı yeterli.
+           crmContext += `>> GREETING ONLY: Hasta yeni mesaj gönderdi ama sadece selam verdi. Doğal karşılık ver. Eski şikayet/konuyu proaktif açma; hasta açarsa devam edersin.\n`;
         } else {
           if (unifiedContext.opportunity.summary && !suppressMemory) {
             crmContext += `- Fırsat Özeti (CRM Summary): ${unifiedContext.opportunity.summary}\n`;
@@ -252,8 +256,9 @@ export class PromptBuilder {
           if (suppressMemory) {
             crmContext += `- Özet: Müşteri/hasta bilgisi sistemde kayıtlı (geçmiş bağlam bu turda baskılanmıştır).\n`;
           }
+          // Only inject "resume context" rule when NOT greeting_only
+          crmContext += `>> KURAL: Bu kişiyle geçmiş bir konuşmanız var. Konuşmayı bu özet doğrultusunda, kaldığı yerden sürdür. Kendini ilk defa tanışıyormuş gibi tanıtma.\n`;
         }
-        crmContext += `>> KURAL: Bu kişiyle geçmiş bir konuşmanız var. Konuşmayı bu özet doğrultusunda, kaldığı yerden sürdür. Kendini ilk defa tanışıyormuş gibi tanıtma.\n`;
       } else if (unifiedContext.memory) {
         if (!suppressMemory) {
           crmContext += `- Önceki Görüşme Özeti: ${unifiedContext.memory.summary}\n`;

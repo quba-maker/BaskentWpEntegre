@@ -1072,6 +1072,15 @@ export class AIResponseOrchestrator {
       text = finalPipeResult.text;
 
       // 10. Outbound Guard Checks
+      // P0.17-FP BUGFIX: Inject identityConfig into unifiedContext before FinalOutboundGuard.process
+      // so that the guard's internal recovery (ContextAwareSafeFallbackResolver) has the persona name.
+      // Without this, recovery falls through to 'Merhaba, ben hastane iletişim asistanıyım.' generic path.
+      if (unifiedContext && !unifiedContext.identityConfig) {
+        const resolvedIdentityForGuard = brain.prompts.metadata?.identity || brain.context.config?.identity || {};
+        if (Object.keys(resolvedIdentityForGuard).length > 0) {
+          unifiedContext.identityConfig = resolvedIdentityForGuard;
+        }
+      }
       text = FinalOutboundGuard.process(text, {
         tenantId,
         channelId,
