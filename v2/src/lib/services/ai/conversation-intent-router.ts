@@ -23,7 +23,9 @@ export type ConversationIntent =
   | 'prompt_challenge'
   | 'complaint_repeat_correction'
   | 'continuation_short_reply'
+  | 'next_step_request'
   | 'generic_other';
+
 
 export class ConversationIntentRouter {
   private static cleanText(str: string): string {
@@ -294,6 +296,22 @@ export class ConversationIntentRouter {
     }
     if (greetingKeywords.some(kw => clean.includes(kw))) {
       return 'greeting';
+    }
+
+    // P0.16-J: Next Step / Consultant Ownership Intent
+    // Catches: "şimdi nasıl olacak", "ne zaman", "ee yani", "belirleyelim",
+    //          "yardımcı olmuyorsunuz", "beni kim arayacak", "ne yapmam gerekiyor"
+    const nextStepKeywords = [
+      'simdi nasil olacak', 'simdi ne olacak', 'nasil olacak', 'ne olacak simdi',
+      'ee yani', 'e yani', 'yani ne', 'ne zaman',
+      'belirleyelim', 'netlestirelim', 'kararlaştiralim', 'kararlaştiralim',
+      'yardimci olmuyorsunuz', 'yardim etmiyorsunuz',
+      'beni kim arayacak', 'kim arayacak', 'siz mi arayacaksiniz',
+      'ne yapmam gerekiyor', 'ne yapmaliyim', 'nasil ilerliyoruz', 'nasil ilerleyecegiz',
+      'tamam nasil', 'peki nasil', 'o zaman nasil'
+    ];
+    if (nextStepKeywords.some(kw => clean.includes(kw))) {
+      return 'next_step_request';
     }
 
     return 'generic_other';

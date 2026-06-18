@@ -5755,6 +5755,139 @@ test("P0.16-I: 9. P0.16-H backward compatibility — 214/214 path maintained", a
 });
 
 // ==========================================
+// P0.16-J — Consultant Flow / WhatsApp Formatting / Next Step Tests
+// ==========================================
+
+test("P0.16-J: 1. 'belirleyelim o zaman' routes to next_step_request intent", async () => {
+  const { ConversationIntentRouter } = await import("../lib/services/ai/conversation-intent-router");
+  const intent = ConversationIntentRouter.route("belirleyelim o zaman");
+  assert(intent === 'next_step_request', `Expected next_step_request, got: '${intent}'`);
+});
+
+test("P0.16-J: 2. 'ee yani' routes to next_step_request intent", async () => {
+  const { ConversationIntentRouter } = await import("../lib/services/ai/conversation-intent-router");
+  const intent = ConversationIntentRouter.route("ee yani");
+  assert(intent === 'next_step_request', `Expected next_step_request, got: '${intent}'`);
+});
+
+test("P0.16-J: 3. next_step_request response asks for date/time, does NOT say only 'danışmanımız iletişime geçecek'", async () => {
+  const { ContextAwareSafeFallbackResolver } = await import("../lib/services/ai/context-aware-safe-fallback");
+
+  const result = ContextAwareSafeFallbackResolver.resolve({
+    inboundText: 'şimdi nasıl olacak',
+    brain: {
+      context: { config: { industry: 'healthcare' }, settings: {} },
+      prompts: { metadata: {}, systemPrompt: '' }
+    } as any,
+    identityConfig: {},
+    unifiedContext: {
+      history: [
+        { role: 'user', content: 'bel fıtığım var Almanya\'dayım' },
+        { role: 'assistant', content: 'Geçmiş olsun.' },
+        { role: 'user', content: 'annem için kardiyoloji randevusu istiyorum' },
+      ]
+    },
+    resolvedActiveDepartment: null,
+    systemPromptText: ""
+  });
+
+  assert(result.finalPath === 'next_step_consultant_ownership', `Expected next_step_consultant_ownership path, got: '${result.finalPath}'`);
+  // Must ask for date/time
+  assert(
+    result.text.includes('hangi gün') || result.text.includes('saat aralığı') || result.text.includes('belirleyelim'),
+    `Response should ask for date/time slot, got: '${result.text}'`
+  );
+  // Must NOT just say "danışmanımız iletişime geçecek" passively
+  assert(
+    !(result.text === 'Talebinizi not aldım, hasta danışmanımız sizinle iletişime geçecektir.'),
+    `Should not be passive 'danışmanımız iletişime geçecek', got: '${result.text}'`
+  );
+});
+
+test("P0.16-J: 4. multi-patient context: both bel fıtığı and annem kardiyoloji appear in response", async () => {
+  const { ContextAwareSafeFallbackResolver } = await import("../lib/services/ai/context-aware-safe-fallback");
+
+  const result = ContextAwareSafeFallbackResolver.resolve({
+    inboundText: 'ne zaman',
+    brain: {
+      context: { config: { industry: 'healthcare' }, settings: {} },
+      prompts: { metadata: {}, systemPrompt: '' }
+    } as any,
+    identityConfig: {},
+    unifiedContext: {
+      history: [
+        { role: 'user', content: 'bel fıtığım var Almanya\'dayım' },
+        { role: 'user', content: 'annem için kardiyoloji randevusu istiyorum' },
+      ]
+    },
+    resolvedActiveDepartment: null,
+    systemPromptText: ""
+  });
+
+  // Should mention both topics
+  assert(
+    result.text.includes('1.') || result.text.includes('iki'),
+    `Response should list multiple topics, got: '${result.text}'`
+  );
+  assert(result.text.toLowerCase().includes('bel') || result.text.toLowerCase().includes('fıtığı'),
+    `Response should mention bel fıtığı context, got: '${result.text}'`);
+  assert(result.text.toLowerCase().includes('annen') || result.text.toLowerCase().includes('kardiy'),
+    `Response should mention annem/kardiyoloji context, got: '${result.text}'`);
+});
+
+test("P0.16-J: 5. Almanya context adds timezone note to next_step response", async () => {
+  const { ContextAwareSafeFallbackResolver } = await import("../lib/services/ai/context-aware-safe-fallback");
+
+  const result = ContextAwareSafeFallbackResolver.resolve({
+    inboundText: 'belirleyelim',
+    brain: {
+      context: { config: { industry: 'healthcare' }, settings: {} },
+      prompts: { metadata: {}, systemPrompt: '' }
+    } as any,
+    identityConfig: {},
+    unifiedContext: {
+      history: [
+        { role: 'user', content: 'Almanya\'dayım bel fıtığım var' },
+      ]
+    },
+    resolvedActiveDepartment: null,
+    systemPromptText: ""
+  });
+
+  assert(result.text.toLowerCase().includes('almanya'), `Response should reference Almanya timezone, got: '${result.text}'`);
+});
+
+test("P0.16-J: 6. morphology — süreçleriniz detaylarınızı corrected", async () => {
+  const { TurkishMorphologyGuard } = await import("../lib/services/ai/turkish-morphology-guard");
+
+  const text = "Tedavi süreçleriniz detaylarınızı danışmanımız aktaracaktır.";
+  const result = TurkishMorphologyGuard.check(text, true, []);
+  const out = result.correctedText || text;
+  assert(!out.includes("süreçleriniz detaylarınızı"), `süreçleriniz detaylarınızı should be corrected, got: '${out}'`);
+});
+
+test("P0.16-J: 7. morphology — tedavi yönteminizi belirler corrected", async () => {
+  const { TurkishMorphologyGuard } = await import("../lib/services/ai/turkish-morphology-guard");
+
+  const text = "Uzman hekimimiz size uygun tedavi yönteminizi belirler.";
+  const result = TurkishMorphologyGuard.check(text, true, []);
+  const out = result.correctedText || text;
+  assert(!out.includes("yönteminizi belirler"), `tedavi yönteminizi belirler should be corrected, got: '${out}'`);
+  assert(out.includes("yöntemini belirler"), `Should contain 'yöntemini belirler', got: '${out}'`);
+});
+
+test("P0.16-J: 8. false-positive: planınız, yönteminiz, detaylarınızı yazabilirsiniz NOT corrupted", async () => {
+  const { TurkishMorphologyGuard } = await import("../lib/services/ai/turkish-morphology-guard");
+
+  const safeText = "Tedavi planınız hazırlanacak. Yönteminiz hakkında bilgi alabilirsiniz. Detaylarınızı yazabilirsiniz.";
+  const result = TurkishMorphologyGuard.check(safeText, true, []);
+  const out = result.correctedText || safeText;
+  assert(out.includes("planınız"), `planınız should NOT be corrupted, got: '${out}'`);
+  assert(out.includes("Yönteminiz"), `Yönteminiz should NOT be corrupted, got: '${out}'`);
+  assert(out.includes("Detaylarınızı yazabilirsiniz"), `Detaylarınızı yazabilirsiniz should NOT be corrupted, got: '${out}'`);
+});
+
+// ==========================================
 // SONUÇLAR
 // ==========================================
 

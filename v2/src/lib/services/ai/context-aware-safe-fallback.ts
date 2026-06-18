@@ -612,7 +612,107 @@ export class ContextAwareSafeFallbackResolver {
       };
     }
 
-    // Priority 2: Transfer Request (User explicitly wants to connect to a human)
+    // P0.16-J: Next Step / Consultant Ownership — fires before transfer/generic
+    const isNextStepRequest = (detectedIntent as string) === 'next_step_request' || interpretedIntent === 'next_step_request';
+    if (isNextStepRequest) {
+      // Scan history for multi-patient context (primary + secondary patient mentions)
+      const histText = (history || []).map((m: any) => (m.content || '').toLowerCase()).join(' ');
+
+      // Primary complaint (the user themselves)
+      const selfComplaint = (() => {
+        if (histText.includes('bel fıt') || histText.includes('bel fit')) return 'bel fıtığı değerlendirme süreci';
+        if (histText.includes('boyun fıt') || histText.includes('boyun fit')) return 'boyun fıtığı değerlendirme süreci';
+        if (histText.includes('diz') && histText.includes('ağrı')) return 'diz ağrısı değerlendirme süreci';
+        if (histText.includes('ameliyat')) return 'ameliyat değerlendirme süreci';
+        if (histText.includes('omurga')) return 'omurga değerlendirme süreci';
+        return null;
+      })();
+
+      // Secondary patient (e.g. annem, babam, eşim, yakınım)
+      const hasMother = histText.includes('annem');
+      const hasFather = histText.includes('babam');
+      const hasSpouse = histText.includes('eşim') || histText.includes('esim');
+      const hasSecondary = hasMother || hasFather || hasSpouse;
+      const secondaryLabel = hasMother ? 'anneniz' : hasFather ? 'babanız' : hasSpouse ? 'eşiniz' : null;
+
+      // Secondary department from history
+      const secondaryDept = (() => {
+        if (histText.includes('kardiyoloji')) return 'kardiyoloji';
+        if (histText.includes('göz') || histText.includes('goz')) return 'göz hastalıkları';
+        if (histText.includes('ortopedi')) return 'ortopedi';
+        return null;
+      })();
+
+      // Location context
+      const isAbroad = histText.includes('almanya') || histText.includes('yurt dışı') || histText.includes('yurt disi')
+        || histText.includes('avusturya') || histText.includes('hollanda') || histText.includes('ingiltere')
+        || histText.includes('fransa') || histText.includes('isviçre');
+      const countryName = histText.includes('almanya') ? 'Almanya'
+        : histText.includes('avusturya') ? 'Avusturya'
+        : histText.includes('hollanda') ? 'Hollanda'
+        : histText.includes('ingiltere') ? 'İngiltere'
+        : histText.includes('fransa') ? 'Fransa'
+        : isAbroad ? 'Yurt dışı' : null;
+
+      // Build topic list
+      const topics: string[] = [];
+      if (selfComplaint) topics.push(`Sizin için: ${selfComplaint}`);
+      if (hasSecondary && secondaryDept) topics.push(`${secondaryLabel ? secondaryLabel.charAt(0).toUpperCase() + secondaryLabel.slice(1) : 'Yakınınız'} için: ${secondaryDept} ön görüşme/randevu talebi`);
+      else if (hasSecondary && !secondaryDept) topics.push(`${secondaryLabel ? secondaryLabel.charAt(0).toUpperCase() + secondaryLabel.slice(1) : 'Yakınınız'} için: görüşme/randevu talebi`);
+
+      // Compose response
+      let text = '';
+      if (isHealthcare) {
+        if (topics.length >= 2) {
+          const topicLines = topics.map((t, i) => `${i + 1}. ${t}`).join('\n');
+          text = `Elbette, hemen netleştirelim.\n\nSizin için şu talepleri not ediyorum:\n${topicLines}\n\nSizi hangi gün ve saat aralığında aramamız uygun olur?`;
+          if (countryName) {
+            text += `\n${countryName}'da olduğunuzu not aldım; saati ${countryName} saati olarak yazabilirsiniz.`;
+          }
+        } else if (selfComplaint) {
+          text = `Elbette, belirleyelim.\n\n${selfComplaint} için sizi hangi gün ve saat aralığında aramamız uygun olur?`;
+          if (countryName) {
+            text += `\n${countryName}'da olduğunuzu not aldım; saati ${countryName} saati olarak yazabilirsiniz.`;
+          }
+        } else {
+          text = `Elbette, belirleyelim. Sizi hangi gün ve saat aralığında aramamız uygun olur?`;
+          if (countryName) {
+            text += `\n${countryName}'da olduğunuzu not aldım; saati ${countryName} saati olarak yazabilirsiniz.`;
+          }
+        }
+      } else {
+        text = `Elbette, belirleyelim. Sizi hangi gün ve saat aralığında aramamız uygun olur?`;
+      }
+
+      // Telemetry
+      console.log(JSON.stringify({
+        tag: 'CONSULTANT_NEXT_STEP_TRIGGERED',
+        resolvedIndustry,
+        hasMultiPatientContext: hasSecondary,
+        hasSelfComplaint: !!selfComplaint,
+        secondaryLabel: secondaryLabel || null,
+        topicCount: topics.length,
+        isAbroad,
+        countryName: countryName || null
+      }));
+      console.log(JSON.stringify({
+        tag: 'CALLBACK_SLOT_REQUESTED',
+        resolvedIndustry,
+        topicCount: topics.length,
+        isAbroad
+      }));
+
+      return {
+        text,
+        sector: resolvedIndustry,
+        hasFormContext,
+        hasComplaint,
+        finalPath: 'next_step_consultant_ownership',
+        detectedIntent
+      };
+    }
+
+
     if (detectedIntent === 'transfer_request' || interpretedIntent === 'transfer_request') {
       return {
         text: `Talebinizi ilgili ekibe aktarıyorum, en kısa sürede sizinle iletişime geçeceklerdir.`,

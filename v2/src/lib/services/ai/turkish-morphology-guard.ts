@@ -184,6 +184,27 @@ const KNOWN_DEDUP_PATTERNS: { regex: RegExp; description: string; fix?: (match: 
     description: 'tedavi_planizi_capital',
     fix: () => 'Tedavi planınız'
   },
+
+  // P0.16-J: “süreçleriniz detaylarınızı” — doubled possessive on both nouns in process context
+  {
+    regex: /süreçleriniz\s+detaylarınızı/gi,
+    description: 'surec_leriniz_detaylarinizi',
+    fix: (m) => m[0] === 'S' ? 'Sürecinize dair detayları' : 'sürecinize dair detayları'
+  },
+  // broader: any "X-leriniz Y-larınızı" combo (doubled possessive pair)
+  {
+    regex: /\b(\w+)leriniz\s+(\w+)larınızı/gi,
+    description: 'doubled_possessive_leriniz_larinizi',
+    fix: (m) => m.replace(/leriniz/i, 'inize dair').replace(/larınızı/i, 'ları')
+  },
+
+  // P0.16-J: “tedavi yönteminizi belirler” → “tedavi yöntemini belirler”
+  // (size-agreement error: hekim 3rd-person determines, not the patient)
+  {
+    regex: /tedavi\s+yönteminizi\s+belirler/gi,
+    description: 'tedavi_yonteminizi_belirler',
+    fix: (m) => m[0] === 'T' ? 'Tedavi yöntemini belirler' : 'tedavi yöntemini belirler'
+  },
 ];
 
 
