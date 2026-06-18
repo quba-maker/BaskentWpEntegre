@@ -5405,6 +5405,108 @@ test("P0.16-F Stale: 'kardiyoloji değil ki beyin sinir cerrahı' → user corre
 });
 
 // ==========================================
+// P0.16-G — Doctor Lookup Recent Context Arbitration Regression Tests
+// ==========================================
+
+test("P0.16-G: 1. recent AI says Beyin ve Sinir Cerrahisi + user asks 'hangi doktor ilgilenecek' → NOT Kardiyoloji", async () => {
+  const { RecentDepartmentContextResolver } = await import("../lib/services/ai/recent-department-context-resolver");
+  const historyForResolver = [
+    { role: "user", content: "bel fıtığım var 5 yıldır devam ediyor" },
+    { role: "assistant", content: "Bel fıtığı şikayetinizle ilgili olarak Beyin ve Sinir Cerrahisi bölümümüz ilgilenebilir." },
+  ];
+  const result = RecentDepartmentContextResolver.resolve(historyForResolver, 10, null);
+  assert(result !== null, "Should resolve from recent AI dept reference");
+  assert(result!.department === "Beyin ve Sinir Cerrahisi", `Expected Beyin ve Sinir Cerrahisi, got: '${result!.department}'`);
+  assert(result!.department !== "Kardiyoloji", "Should NOT return Kardiyoloji");
+});
+
+test("P0.16-G: 2. recent user says bel fıtığı + current asks 'hangi doktor ilgilenecek' → Beyin ve Sinir Cerrahisi", async () => {
+  const { RecentDepartmentContextResolver } = await import("../lib/services/ai/recent-department-context-resolver");
+  const history = [
+    { role: "user", content: "bel fıtığım var, bacaklarıma vuruyor" },
+    { role: "assistant", content: "Bu semptomlar zor olabilir." },
+  ];
+  const result = RecentDepartmentContextResolver.resolve(history, 10, null);
+  assert(result !== null, "Should resolve from user's prior bel fıtığı mention");
+  assert(result!.department === "Beyin ve Sinir Cerrahisi", `Expected Beyin ve Sinir Cerrahisi, got: '${result!.department}'`);
+  assert(result!.matchedBy === "user_complaint_keyword", `Expected user_complaint_keyword, got: '${result!.matchedBy}'`);
+});
+
+test("P0.16-G: 3. stale CRM=Kardiyoloji + recent bel fıtığı → recent context wins over stale CRM", async () => {
+  const { RecentDepartmentContextResolver } = await import("../lib/services/ai/recent-department-context-resolver");
+  const { DepartmentAliasResolver } = await import("../lib/services/ai/department-alias-resolver");
+
+  const history = [{ role: "user", content: "bel fıtığım var" }, { role: "assistant", content: "Anlıyorum." }];
+  const staleDept = "Kardiyoloji";
+  const currentMsg = "hangi doktor ilgilenecek";
+
+  const aliasArbitration = DepartmentAliasResolver.resolveWithStalenessCheck(currentMsg, staleDept, null);
+  const currentMsgDept = aliasArbitration.isOverride ? aliasArbitration.activeDepartment : null;
+  assert(currentMsgDept === null, "Generic doctor lookup should yield null currentMsgDept");
+
+  const recentResult = RecentDepartmentContextResolver.resolve(history, 10, null);
+  assert(recentResult !== null && recentResult!.department === "Beyin ve Sinir Cerrahisi", `Recent context should be Beyin, got: '${recentResult?.department}'`);
+
+  const resolvedActiveDepartment = currentMsgDept || recentResult!.department || staleDept;
+  assert(resolvedActiveDepartment === "Beyin ve Sinir Cerrahisi", `resolvedActiveDepartment should be Beyin, got: '${resolvedActiveDepartment}'`);
+  assert(resolvedActiveDepartment !== "Kardiyoloji", "Kardiyoloji should NOT win when recent context has bel fıtığı");
+});
+
+test("P0.16-G: 4. correction 'kardiyoloji değil ki beyin sinir cerrahı...' → accepts correction", async () => {
+  const { DepartmentAliasResolver } = await import("../lib/services/ai/department-alias-resolver");
+  const correctionMsg = "kardiyoloji değil ki beyin sinir cerrahı bakmıyor mu bel fıtığına";
+  const aliasResult = DepartmentAliasResolver.resolveWithStalenessCheck(correctionMsg, "Kardiyoloji", null);
+  assert(aliasResult.isOverride === true, "Correction should override stale Kardiyoloji");
+  assert(aliasResult.activeDepartment === "Beyin ve Sinir Cerrahisi", `Expected Beyin ve Sinir Cerrahisi, got: '${aliasResult.activeDepartment}'`);
+});
+
+test("P0.16-G: 5. no recent dept + stale CRM=Kardiyoloji + doctor lookup → Kardiyoloji allowed as fallback", async () => {
+  const { RecentDepartmentContextResolver } = await import("../lib/services/ai/recent-department-context-resolver");
+  const { DepartmentAliasResolver } = await import("../lib/services/ai/department-alias-resolver");
+
+  const history = [{ role: "user", content: "merhaba" }, { role: "assistant", content: "Merhaba!" }];
+  const staleDept = "Kardiyoloji";
+  const currentMsg = "hangi doktor ilgilenecek";
+
+  const aliasArbitration = DepartmentAliasResolver.resolveWithStalenessCheck(currentMsg, staleDept, null);
+  const currentMsgDept = aliasArbitration.isOverride ? aliasArbitration.activeDepartment : null;
+  assert(currentMsgDept === null, "No complaint keyword → null");
+
+  const recentResult = RecentDepartmentContextResolver.resolve(history, 10, null);
+  assert(recentResult === null, "Generic history should not resolve dept");
+
+  const resolvedActiveDepartment = currentMsgDept || (recentResult ? recentResult.department : null) || staleDept;
+  assert(resolvedActiveDepartment === "Kardiyoloji", `Stale CRM should be fallback when no recent context, got: '${resolvedActiveDepartment}'`);
+});
+
+test("P0.16-G: 6. greeting phrase 'bölümümüzün ilgilendiğinizi belirtmiştiniz' never appears in output", async () => {
+  const { TurkishMorphologyGuard } = await import("../lib/services/ai/turkish-morphology-guard");
+  const badGreeting = "Merhaba! Bel fıtığı şikayetinizle ilgili Beyin ve Sinir Cerrahisi bölümümüzün ilgilendiğinizi belirtmiştiniz. Nasıl yardımcı olabiliriz?";
+  const result = TurkishMorphologyGuard.check(badGreeting, true, []);
+  assert(result.hasMorphologyError === true, "Should detect greeting phrase morphology error");
+  const output = result.correctedText || badGreeting;
+  assert(!output.includes("bölümümüzün ilgilendiğinizi"), `Should remove greeting phrase, got: '${output}'`);
+  assert(!output.includes("ilgilendiğinizi belirtmiştiniz"), `Should remove belirtmiştiniz clause, got: '${output}'`);
+});
+
+test("P0.16-G: 7. P0.16-F backward compatibility — current message bel fıtığı still overrides stale Kardiyoloji", async () => {
+  const { DepartmentAliasResolver } = await import("../lib/services/ai/department-alias-resolver");
+  const { activeDepartment, isOverride } = DepartmentAliasResolver.resolveWithStalenessCheck("bel fıtığım var hangi doktora gideyim", "Kardiyoloji", null);
+  assert(activeDepartment === "Beyin ve Sinir Cerrahisi", `P0.16-F regression: got '${activeDepartment}'`);
+  assert(isOverride === true, "P0.16-F regression: isOverride should be true");
+});
+
+test("P0.16-G: 8. non-healthcare tenant returns null from both resolvers", async () => {
+  const { DepartmentAliasResolver } = await import("../lib/services/ai/department-alias-resolver");
+  const { RecentDepartmentContextResolver } = await import("../lib/services/ai/recent-department-context-resolver");
+  const result1 = DepartmentAliasResolver.resolve("sepetimi tamamlamak istiyorum", null);
+  assert(result1 === null, "Retail keyword should return null");
+  const history = [{ role: "user", content: "ürünümü iade etmek istiyorum" }, { role: "assistant", content: "İade başlatalım." }];
+  const result2 = RecentDepartmentContextResolver.resolve(history, 10, null);
+  assert(result2 === null, "Non-healthcare history should return null");
+});
+
+// ==========================================
 // SONUÇLAR
 // ==========================================
 

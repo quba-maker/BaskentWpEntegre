@@ -10,6 +10,7 @@ import { ConversationTurnAggregator } from './conversation-turn-aggregator';
 import { ConversationTopicSwitchResolver } from './conversation-topic-switch-resolver';
 import { DoctorDirectoryResolver } from './doctor-directory-resolver';
 import { DepartmentAliasResolver } from './department-alias-resolver';
+import { RecentDepartmentContextResolver } from './recent-department-context-resolver';
 import { IdentityEngine } from './engines/identity';
 import { withTenantDB } from '@/lib/core/tenant-db';
 
@@ -441,28 +442,69 @@ export class AIResponseOrchestrator {
       unifiedContext.currentMessageText = inboundText;
       unifiedContext.currentMessageMediaType = mediaType;
 
-      // 4. P0.16-F: Active Department Arbitration
-      // Priority: current message keyword match > topic switch > stale CRM/opportunity
+      // 4. P0.16-G: Active Department Arbitration (extended priority chain)
+      // Priority order:
+      //   1. Current message alias      (DepartmentAliasResolver)
+      //   2. Recent conversation        (RecentDepartmentContextResolver) ← P0.16-G
+      //   3. Topic switch resolver      (ConversationTopicSwitchResolver)
+      //   4. Stale CRM/opportunity      (staleDept)
       const tenantAliasConfig = brain.context.config?.departmentAliases || null;
       const staleDept = unifiedContext.opportunity?.department || unifiedContext.conversation?.department || null;
 
-      // Step 4a: Resolve active department from CURRENT user message (overrides stale context)
+      // Step 4a: Current message alias resolution
       const aliasArbitration = DepartmentAliasResolver.resolveWithStalenessCheck(
         inboundText,
         staleDept,
         tenantAliasConfig
       );
+      const currentMsgDept = aliasArbitration.isOverride ? aliasArbitration.activeDepartment : null;
 
-      // Step 4b: Run topic switch resolver (now also handles first-mention cases)
+      // Step 4b: P0.16-G — Recent conversation context (runs when current message has no dept keyword)
+      let recentContextDept: string | null = null;
+      let recentContextSource = 'none';
+      let recentContextConfidence = 'none';
+      if (!currentMsgDept && history.length > 0) {
+        const safeHistory = history
+          .filter(m => m.content != null)
+          .map(m => ({ role: m.role, content: m.content as string }));
+        const recentResult = RecentDepartmentContextResolver.resolve(
+          safeHistory,
+          10,
+          tenantAliasConfig
+        );
+        if (recentResult) {
+          recentContextDept = recentResult.department;
+          recentContextSource = recentResult.matchedBy;
+          recentContextConfidence = recentResult.confidence;
+          console.log(JSON.stringify({
+            tag: 'RECENT_DEPARTMENT_CONTEXT_RESOLVED',
+            tenantId,
+            conversationId: conversationId || 'unknown',
+            resolvedDepartment: recentResult.department,
+            confidence: recentResult.confidence,
+            matchedBy: recentResult.matchedBy,
+            staleDepartment: staleDept,
+            workerPath
+          }));
+        }
+      }
+
+      // Step 4c: Topic switch resolver — receives best-known dept so far
+      const step4cInput = currentMsgDept || recentContextDept || staleDept;
       const topicSwitch = ConversationTopicSwitchResolver.resolve(
         inboundText,
-        aliasArbitration.activeDepartment, // pass already-arbitrated dept
+        step4cInput,
         unifiedContext.conversation?.metadata,
         tenantAliasConfig
       );
 
-      // Step 4c: Apply the winning department to context
-      const resolvedActiveDepartment = topicSwitch.activeTopic || aliasArbitration.activeDepartment || staleDept;
+      // Step 4d: Final resolved department — first non-null wins
+      const resolvedActiveDepartment =
+        currentMsgDept ||
+        recentContextDept ||
+        topicSwitch.activeTopic ||
+        staleDept;
+
       if (resolvedActiveDepartment) {
         if (!unifiedContext.conversation) unifiedContext.conversation = {};
         unifiedContext.conversation.department = resolvedActiveDepartment;
@@ -470,14 +512,15 @@ export class AIResponseOrchestrator {
           unifiedContext.opportunity.department = resolvedActiveDepartment;
         }
 
-        // Log stale context override for telemetry
-        if (aliasArbitration.isOverride && staleDept && staleDept !== resolvedActiveDepartment) {
+        // Telemetry: log when stale CRM was overridden
+        if (staleDept && staleDept !== resolvedActiveDepartment) {
           console.log(JSON.stringify({
-            tag: "ACTIVE_DEPARTMENT_OVERRIDE",
+            tag: 'ACTIVE_DEPARTMENT_OVERRIDE',
             tenantId,
             conversationId: conversationId || 'unknown',
             staleDepartment: staleDept,
             resolvedDepartment: resolvedActiveDepartment,
+            source: currentMsgDept ? 'current_message' : recentContextSource || 'topic_switch',
             workerPath
           }));
         }
@@ -512,7 +555,7 @@ export class AIResponseOrchestrator {
       const isPromptChallenge = ['prompt', 'promt', 'sistem prompt', 'system prompt', 'talimatların', 'sistem talimati', 'kuralın ne', 'direktifin ne', 'uydurma'].some(kw => cleanInbound.includes(kw));
       const isAngryPromptChallenge = isPromptChallenge && ['şikayet', 'sikayet', 'rezalet', 'berbat', 'kötü', 'sinir', 'bıktım', 'yeter', 'dalga'].some(kw => cleanInbound.includes(kw));
 
-      // Resolve doctor directory matching — use resolvedActiveDepartment (current-message-derived), NOT stale CRM dept
+      // Resolve doctor directory — use resolvedActiveDepartment from full priority chain
       const doctorsList = DoctorDirectoryResolver.getDoctors(brain, resolvedActiveDepartment || undefined);
       const doctorNames = doctorsList.map(d => d.name);
       const hasDoctorDirectory = doctorsList.length > 0;
@@ -520,6 +563,22 @@ export class AIResponseOrchestrator {
       // Doctor lookup check
       const isDoctorLookup = ['doktor', 'hekim', 'uzman', 'cerrah', 'hoca'].some(kw => cleanInbound.includes(kw));
       const shouldBypassDoctorLookup = isDoctorLookup && !hasDoctorDirectory;
+
+      // Telemetry: doctor lookup department selection
+      if (isDoctorLookup) {
+        console.log(JSON.stringify({
+          tag: 'DOCTOR_LOOKUP_DEPARTMENT_SELECTED',
+          tenantId,
+          conversationId: conversationId || 'unknown',
+          resolvedActiveDepartment: resolvedActiveDepartment || null,
+          staleDepartment: staleDept,
+          source: currentMsgDept ? 'current_message' : recentContextDept ? 'recent_conversation' : staleDept ? 'stale_crm' : 'null',
+          confidence: currentMsgDept ? 'high' : recentContextConfidence,
+          hasDoctorDirectory,
+          shouldBypass: isDoctorLookup && !hasDoctorDirectory,
+          workerPath
+        }));
+      }
 
       // Check for recall frustration with facts
       const isRecallFrustration = ['söyledim', 'soyledim', 'belirttim', 'belirtmiştim', 'belirtmistim', 'yazdım ya', 'yazdim ya', 'aynı şeyi söyleme', 'ayni seyi soyleme'].some(kw => cleanInbound.includes(kw));

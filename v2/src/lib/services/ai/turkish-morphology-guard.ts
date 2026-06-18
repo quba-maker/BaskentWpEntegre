@@ -67,6 +67,26 @@ const KNOWN_DEDUP_PATTERNS: { regex: RegExp; description: string; fix?: (match: 
   // General: -sınınız → -nız (possessive doubled on nouns ending in vowel)
   { regex: /(\w+)sınınız/gi, description: 'general_sınınız_doubled', fix: (m) => m.replace(/sınınız$/gi, 'nız') },
 
+  // P0.16-G: Greeting phrase blockers
+  // "bölümümüzün ilgilendiğinizi belirtmiştiniz" → remove (robotic, assumes past context in greeting)
+  {
+    regex: /bölümümüzün\s+ilgilendiğinizi\s+belirtmiştiniz[\.\,]?/gi,
+    description: 'bolumumuzun_ilgilendginizi',
+    fix: () => ''
+  },
+  // "ilgilendiğinizi belirtmiştiniz" standalone
+  {
+    regex: /ilgilendiğinizi\s+belirtmiştiniz[\.\,]?/gi,
+    description: 'ilgilendginizi_belirtmiştiniz',
+    fix: () => ''
+  },
+  // "bölümümüzün ilgilendiğinizi" without belirtmiştiniz
+  {
+    regex: /bölümümüzün\s+ilgilendiğinizi[\.\,]?/gi,
+    description: 'bolumumuzun_ilgilendginizi_short',
+    fix: () => ''
+  },
+
   // Doubled possessive general patterns
   // nızınız → nız
   { regex: /(\w+)(nızınız|niziniz|nüzünüz|nuzunuz)/gi, description: 'doubled_possessive_niz', fix: (m) => m.replace(/(nızınız|niziniz|nüzünüz|nuzunuz)/gi, (sub) => sub.startsWith('nız') ? 'nız' : sub.startsWith('niz') ? 'niz' : sub.startsWith('nüz') ? 'nüz' : 'nuz') },
