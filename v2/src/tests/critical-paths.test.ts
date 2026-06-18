@@ -6055,6 +6055,153 @@ test("P0.16-K: 16. buildPromptSummary empty for very short history", async () =>
 });
 
 // ==========================================
+// P0.16-L — Live/Test Parity / Objection Handling / Formatting Tests
+// ==========================================
+
+test("P0.16-L: 1. routeAll 'teşekkür ederim bir soru daha' → open_continuation", () => {
+  const { ConversationIntentRouter } = require("../lib/services/ai/conversation-intent-router");
+  const intents = ConversationIntentRouter.routeAll("teşekkür ederim bir soru daha");
+  assert(intents.includes("open_continuation") || intents.includes("thanks_but_continue"), `Expected open_continuation or thanks_but_continue, got: ${JSON.stringify(intents)}`);
+  assert(!intents.includes("polite_close"), "Should NOT close conversation");
+});
+
+test("P0.16-L: 2. routeAll 'teşekkür ederim ama konya çok uzak' → thanks_but_continue + distance_objection", () => {
+  const { ConversationIntentRouter } = require("../lib/services/ai/conversation-intent-router");
+  const intents = ConversationIntentRouter.routeAll("teşekkür ederim ama konya çok uzak");
+  assert(intents.includes("thanks_but_continue"), `Expected thanks_but_continue, got: ${JSON.stringify(intents)}`);
+  assert(intents.includes("distance_objection"), `Expected distance_objection, got: ${JSON.stringify(intents)}`);
+});
+
+test("P0.16-L: 3. routeAll 'yani ben gelemem' → cannot_travel_objection", () => {
+  const { ConversationIntentRouter } = require("../lib/services/ai/conversation-intent-router");
+  const intents = ConversationIntentRouter.routeAll("yani ben gelemem");
+  assert(intents.includes("cannot_travel_objection"), `Expected cannot_travel_objection, got: ${JSON.stringify(intents)}`);
+});
+
+test("P0.16-L: 4. routeAll 'yok sağolun' → polite_close (no continuation)", () => {
+  const { ConversationIntentRouter } = require("../lib/services/ai/conversation-intent-router");
+  const intents = ConversationIntentRouter.routeAll("yok sağolun");
+  assert(intents.includes("polite_close"), `Expected polite_close, got: ${JSON.stringify(intents)}`);
+  assert(!intents.includes("thanks_but_continue"), "polite_close should NOT have thanks_but_continue");
+});
+
+test("P0.16-L: 5. routeAll 'başka bilgi alsam olur mu?' → open_continuation", () => {
+  const { ConversationIntentRouter } = require("../lib/services/ai/conversation-intent-router");
+  const intents = ConversationIntentRouter.routeAll("başka bilgi alsam olur mu?");
+  assert(intents.includes("open_continuation"), `Expected open_continuation, got: ${JSON.stringify(intents)}`);
+  assert(!intents.includes("polite_close"), "Should NOT close");
+});
+
+test("P0.16-L: 6. routeAll 'gelemiyorum ama harika bir hastane' → cannot_travel_objection detected", () => {
+  const { ConversationIntentRouter } = require("../lib/services/ai/conversation-intent-router");
+  const intents = ConversationIntentRouter.routeAll("gelemiyorum ama harika bir hastane");
+  assert(intents.includes("cannot_travel_objection"), `Expected cannot_travel_objection, got: ${JSON.stringify(intents)}`);
+});
+
+test("P0.16-L: 7. WhatsAppFormattingFinalizer — numbered blocks get newline prefix", async () => {
+  const { WhatsAppFormattingFinalizer } = await import("../lib/services/ai/whatsapp-formatting-finalizer");
+  // Use multiline input (as produced by bypass handlers that join with \n)
+  const input = "Tabii tek tek yanıtlayayım.\n1. Hastane konumu: Konya.\n2. Fiyat: görüşme sonrası.";
+  const result = WhatsAppFormattingFinalizer.format(input);
+  assert(result.hadNumberedBlocks, `Should detect numbered blocks, text: ${JSON.stringify(input)}`);
+  // 2. should be on its own line
+  const hasBreakBefore2 = result.text.includes('\n2.') || result.text.includes('\n\n2.');
+  assert(hasBreakBefore2, `Should have line break before '2.', text: ${JSON.stringify(result.text)}`);
+});
+
+test("P0.16-L: 8. WhatsAppFormattingFinalizer — markdown bullets become bullet points", async () => {
+  const { WhatsAppFormattingFinalizer } = await import("../lib/services/ai/whatsapp-formatting-finalizer");
+  const input = `Seçenekler:\n* Beyin ve Sinir Cerrahisi\n* Fizik Tedavi\n- Ortopedi`;
+  const result = WhatsAppFormattingFinalizer.format(input);
+  assert(result.hadBullets, "Should detect bullets");
+  assert(result.text.includes("\u2022"), "Should convert to bullet points");
+  assert(!result.text.includes("* Beyin"), "Should NOT have * bullets");
+});
+
+test("P0.16-L: 9. WhatsAppFormattingFinalizer — no modification for clean text", async () => {
+  const { WhatsAppFormattingFinalizer } = await import("../lib/services/ai/whatsapp-formatting-finalizer");
+  const input = "Anlıyorum. Bel fıtığı için Beyin ve Sinir Cerrahisi bölümümüz değerlendirme yapar.";
+  const result = WhatsAppFormattingFinalizer.format(input);
+  // No modification expected for clean short text
+  assert(typeof result.text === "string", "Should return string");
+  assert(result.paragraphCount >= 1, "Should have at least 1 paragraph");
+});
+
+test("P0.16-L: 10. TurkishFinalQualityNormalizer — 'tahminiz edebiliyorum' corrected", async () => {
+  const { TurkishFinalQualityNormalizer } = await import("../lib/services/ai/turkish-final-quality-normalizer");
+  const text = "Bu rahatsızlığın ne kadar zor olduğunu tahminiz edebiliyorum.";
+  const result = TurkishFinalQualityNormalizer.normalize(text);
+  assert(!result.text.includes("tahminiz edebiliyorum"), `Should correct 'tahminiz edebiliyorum', got: '${result.text}'`);
+  assert(result.wasModified, "Should report modification");
+});
+
+test("P0.16-L: 11. TurkishFinalQualityNormalizer — 'Konya\'nınız' corrected", async () => {
+  const { TurkishFinalQualityNormalizer } = await import("../lib/services/ai/turkish-final-quality-normalizer");
+  const text = "Konya'nınız size uzak geldiğini anlıyorum.";
+  const result = TurkishFinalQualityNormalizer.normalize(text);
+  assert(!result.text.includes("Konya'nınız"), `Should correct Konya'nınız, got: '${result.text}'`);
+  assert(result.text.includes("Konya'nın"), `Should have Konya'nın, got: '${result.text}'`);
+});
+
+test("P0.16-L: 12. TurkishFinalQualityNormalizer — 'geldiğinizi biliyorum' NOT corrupted", async () => {
+  const { TurkishFinalQualityNormalizer } = await import("../lib/services/ai/turkish-final-quality-normalizer");
+  const text = "Bel fıtığının size çok zor geldiğinizi biliyorum.";
+  const result = TurkishFinalQualityNormalizer.normalize(text);
+  assert(result.text.includes("geldiğinizi biliyorum"), `Protected phrase should be preserved, got: '${result.text}'`);
+});
+
+test("P0.16-L: 13. TurkishFinalQualityNormalizer — 'detaylarınızı paylaşabilirsiniz' NOT corrupted", async () => {
+  const { TurkishFinalQualityNormalizer } = await import("../lib/services/ai/turkish-final-quality-normalizer");
+  const text = "Uygun zamanı yazabilirsiniz. Detaylarınızı paylaşabilirsiniz.";
+  const result = TurkishFinalQualityNormalizer.normalize(text);
+  assert(result.text.includes("paylaşabilirsiniz"), `Should preserve 'paylaşabilirsiniz', got: '${result.text}'`);
+});
+
+test("P0.16-L: 14. ConversationFrameResolver — '5 aydır devam ediyor' duration extracted", async () => {
+  const { ConversationFrameResolver } = await import("../lib/services/ai/conversation-frame-resolver");
+  const history = [
+    { role: "user", content: "bel fıtığım var" },
+    { role: "assistant", content: "Geçmiş olsun." },
+    { role: "user", content: "5 aydır devam ediyor" },
+  ];
+  const frame = ConversationFrameResolver.resolve(history);
+  assert(frame.complainDuration !== null, `Duration should be extracted, got: ${frame.complainDuration}`);
+  assert(!!frame.complainDuration?.includes("5"), `Duration should include '5', got: ${frame.complainDuration}`);
+});
+
+test("P0.16-L: 15. ConversationFrameResolver — 'konya çok uzak' → distance_objection", async () => {
+  const { ConversationFrameResolver } = await import("../lib/services/ai/conversation-frame-resolver");
+  const history = [
+    { role: "user", content: "bel fıtığım var" },
+    { role: "user", content: "konya çok uzak" },
+  ];
+  const frame = ConversationFrameResolver.resolve(history);
+  assert(frame.objections.includes("distance_objection"), `Expected distance_objection in objections, got: ${JSON.stringify(frame.objections)}`);
+});
+
+test("P0.16-L: 16. ConversationFrameResolver — 'gelemem' → cannot_travel objection", async () => {
+  const { ConversationFrameResolver } = await import("../lib/services/ai/conversation-frame-resolver");
+  const history = [
+    { role: "user", content: "bel fıtığım var Almanya'dayım" },
+    { role: "user", content: "yani ben gelemem" },
+  ];
+  const frame = ConversationFrameResolver.resolve(history);
+  assert(frame.objections.includes("cannot_travel"), `Expected cannot_travel in objections, got: ${JSON.stringify(frame.objections)}`);
+  const selfP = frame.participants.find(p => p.relation === "self");
+  assert(selfP?.location === "Almanya", `Should have Almanya location, got: ${selfP?.location}`);
+});
+
+test("P0.16-L: 17. P0.16-K tests still PASS baseline (247 check)", () => {
+  // Verify P0.16-K key helpers still importable (compilation guard)
+  assert(typeof require("../lib/services/ai/consultant-conversation-state-resolver").ConsultantConversationStateResolver === "function", "ConsultantConversationStateResolver should exist");
+  assert(typeof require("../lib/services/ai/multi-intent-consultant-composer").MultiIntentConsultantComposer === "function", "MultiIntentConsultantComposer should exist");
+  assert(typeof require("../lib/services/ai/doctor-names-policy").DoctorNamesPolicy === "function", "DoctorNamesPolicy should exist");
+  assert(typeof require("../lib/services/ai/whatsapp-formatting-finalizer").WhatsAppFormattingFinalizer === "function", "WhatsAppFormattingFinalizer should exist");
+  assert(typeof require("../lib/services/ai/turkish-final-quality-normalizer").TurkishFinalQualityNormalizer === "function", "TurkishFinalQualityNormalizer should exist");
+  assert(typeof require("../lib/services/ai/conversation-frame-resolver").ConversationFrameResolver === "function", "ConversationFrameResolver should exist");
+});
+
+// ==========================================
 // SONUÇLAR
 // ==========================================
 

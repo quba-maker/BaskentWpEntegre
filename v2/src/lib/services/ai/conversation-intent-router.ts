@@ -11,6 +11,10 @@ export type ConversationIntent =
   | 'time_availability'
   | 'price_question'
   | 'distance_objection'
+  | 'cannot_travel_objection'
+  | 'thanks_but_continue'
+  | 'open_continuation'
+  | 'polite_close'
   | 'complaint_detail'
   | 'name_intent'
   | 'topic_switch'
@@ -315,5 +319,141 @@ export class ConversationIntentRouter {
     }
 
     return 'generic_other';
+  }
+
+  /**
+   * P0.16-L: Returns ALL matching intents for a message (multi-intent routing).
+   * Used by orchestrator to detect open_continuation, thanks_but_continue, etc.
+   */
+  public static routeAll(text: string): ConversationIntent[] {
+    if (!text) return ['generic_other'];
+    const clean = this.cleanText(text);
+    const originalLower = text.toLowerCase().trim();
+    const intents: ConversationIntent[] = [];
+
+    // P0.16-L: Polite close — genuine conversation end (no more questions)
+    const politeCloseKeywords = [
+      'yok sagolun', 'yok sağolun', 'gerek yok tesekkur', 'gerek yok teşekkür',
+      'ihtiyacim yok', 'ihtiyacım yok', 'gerek kalmadi', 'gerek kalmadı',
+      'anladim tamam', 'anladım tamam', 'tamam oldu', 'tamam olmuş',
+      'kolay gelsin', 'iyi calismalar', 'iyi çalışmalar',
+      'iyi gunler', 'iyi günler', 'gorusmek uzere', 'görüşmek üzere'
+    ];
+    // Polite close only if NO continuation signal follows
+    const hasContinuationAfterThanks = ['ama', 'fakat', 'lakin', 'bir soru', 'bir sey', 'bir şey', 'peki', 'ya fiyat', 'doktor', 'surec', 'süreç'].some(kw => clean.includes(kw));
+    if (!hasContinuationAfterThanks && politeCloseKeywords.some(kw => clean.includes(kw) || originalLower.includes(kw))) {
+      intents.push('polite_close');
+    }
+
+    // P0.16-L: Thanks but continue — teşekkür + ama/fakat/bir soru/bir şey
+    const thanksContinuePatterns = [
+      // "teşekkür ederim ama ..."
+      /te[sş]ekk[uü]r.{0,20}(?:ama|fakat|lakin|bir\s+soru|bir\s+[sş]ey|peki)/i,
+      // "sağ olun bir şey daha"
+      /sa[gğ]\s+olun.{0,20}bir/i,
+      // "teşekkürler bir soru daha"
+      /te[sş]ekk[uü]r(?:ler|ederim)?.{0,30}(?:bir\s+soru|bir\s+[sş]ey|sorum|sormak)/i,
+    ];
+    if (thanksContinuePatterns.some(p => p.test(text) || p.test(clean))) {
+      intents.push('thanks_but_continue');
+    }
+
+    // P0.16-L: Open continuation — "başka bilgi", "bir şey daha", "peki ...", "bir soru daha"
+    const openContKeywords = [
+      'baska bir bilgi', 'başka bir bilgi',
+      'baska bir soru', 'başka bir soru',
+      'baska bir sey', 'başka bir şey',
+      'bir sey daha', 'bir şey daha',
+      'bir soru daha', 'sorum var',
+      'daha fazla bilgi', 'daha detay',
+      'peki ya', 'peki fiyat', 'peki surec', 'peki süreç',
+      'peki doktor', 'peki adres', 'peki nerede',
+    ];
+    const openContPatterns = [
+      /ba[sş]ka\s+(?:bir\s+)?(?:bilgi|soru|[sş]ey)/i,
+      /(?:bir|baska|daha)\s+(?:soru|[sş]ey)\s+(?:daha|sormak|sorabilir)/i,
+    ];
+    if (openContKeywords.some(kw => clean.includes(kw) || originalLower.includes(kw)) ||
+        openContPatterns.some(p => p.test(text))) {
+      intents.push('open_continuation');
+    }
+
+    // P0.16-L: Cannot travel objection — "yani ben gelemem", "gelemiyorum", "gidemem"
+    const cannotTravelKeywords = [
+      'gelemem', 'gidemem', 'gelemiyorum', 'gidemiyorum',
+      'gelmem mumkun degil', 'gelmem mümkün değil',
+      'gelmem zor', 'gitmem zor',
+      'yani ben gelemem', 'ben gelemem',
+      'gelmeyecegim', 'gelmeyeceğim',
+      'gelemeyecegim', 'gelemeyeceğim',
+    ];
+    if (cannotTravelKeywords.some(kw => clean.includes(kw) || originalLower.includes(kw))) {
+      intents.push('cannot_travel_objection');
+    }
+
+    // Distance objection
+    const distanceKeywords = [
+      'uzak', 'mesafe', 'konya cok uzak', 'konya uzak', 'cok uzak',
+      'uzakta', 'uzakligi', 'uzaklığı',
+    ];
+    if (distanceKeywords.some(kw => clean.includes(kw))) {
+      intents.push('distance_objection');
+    }
+
+    // Doctor lookup
+    const doctorKeywords = [
+      'doktor kim', 'doktorlar', 'hekim', 'cerrah', 'uzman', 'hangi doktor', 'doktoru',
+      'doktor isim', 'kimler var', 'doktor listesi',
+    ];
+    if (doctorKeywords.some(kw => clean.includes(kw))) {
+      intents.push('doctor_lookup');
+    }
+
+    // Price
+    const priceKeywords = ['fiyat', 'ucret', 'tutar', 'kac para', 'ne kadar', 'fiyatiniz', 'ucreti'];
+    if (priceKeywords.some(kw => clean.includes(kw))) {
+      intents.push('price_question');
+    }
+
+    // Location
+    const locationKeywords = ['neredesiniz', 'adres', 'nasil gelirim', 'konum', 'yol tarifi', 'nerede', 'harita'];
+    if (locationKeywords.some(kw => clean.includes(kw))) {
+      intents.push('location_direction');
+    }
+
+    // Process question
+    const processKeywords = ['surec', 'süreç', 'nasil isliyor', 'nasıl işliyor', 'nasil calisir', 'nasıl çalışır', 'asamalar', 'aşamalar', 'nasil ilerler'];
+    if (processKeywords.some(kw => clean.includes(kw))) {
+      intents.push('process_question' as any);
+    }
+
+    // Time / callback
+    const timeIndicators = ['saat', 'uygun', 'musait', 'pazartesi', 'sali', 'carsamba', 'persembe', 'cuma', 'pazar', 'yarin', 'bugun'];
+    const numericTimePattern = /\d{1,2}[:. ]\d{2}|\d{1,2}\s*(?:de|da|te|ta|gibi|sular)/;
+    if (timeIndicators.some(kw => clean.includes(kw)) && (numericTimePattern.test(clean) || clean.includes('uygun'))) {
+      intents.push('time_availability');
+    }
+
+    // Next step
+    const nextStepKeywords = [
+      'belirleyelim', 'netlestirelim', 'simdi ne olacak', 'nasil olacak',
+      'ne yapmam gerekiyor', 'nasil ilerleyecegiz', 'peki nasil', 'tamam nasil',
+    ];
+    if (nextStepKeywords.some(kw => clean.includes(kw))) {
+      intents.push('next_step_request');
+    }
+
+    // Multi-patient
+    const multiPatientKeywords = ['annem', 'babam', 'esim', 'eşim', 'yakınim', 'yakinim'];
+    if (multiPatientKeywords.some(kw => clean.includes(kw))) {
+      intents.push('multi_patient_reference' as any);
+    }
+
+    if (intents.length === 0) {
+      // Fall back to single route
+      intents.push(this.route(text));
+    }
+
+    return [...new Set(intents)]; // dedupe
   }
 }

@@ -1,0 +1,205 @@
+/**
+ * P0.16-L: TurkishFinalQualityNormalizer
+ *
+ * Deterministic rewrite of known broken Turkish morphology patterns
+ * in final outbound text. Applied to BOTH bypass path and LLM path output.
+ *
+ * Extends TurkishMorphologyGuard (which operates on individual patterns).
+ * This normalizer operates on complete sentences with context awareness.
+ *
+ * FALSE-POSITIVE GUARD: patterns that look similar to broken ones but are
+ * correct are explicitly listed and protected from rewrite.
+ *
+ * Telemetry: TURKISH_FINAL_QUALITY_REWRITE_APPLIED (no PII)
+ */
+
+export interface NormalizeResult {
+  text: string;
+  changesCount: number;
+  wasModified: boolean;
+  appliedPatterns: string[];
+}
+
+// ─── Protected phrases (must NOT be rewritten) ────────────────────────────────
+const PROTECTED_PHRASES: RegExp[] = [
+  /geldi[gğ]inizi\s+biliyorum/gi,
+  /yazd[ıi][gğ][ıi]n[ıi]z[ıi]\s+g[öo]rd[üu]m/gi,
+  /detaylar[ıi]n[ıi]z[ıi]\s+payla[sş]abilirsiniz/gi,
+  /zaman\s+aral[ıi][gğ][ıi]n[ıi]z[ıi]\s+yazabilirsiniz/gi,
+  /randevunuzu\s+olu[sş]turabilirsiniz/gi,
+  /uygun\s+oldu[gğ]unuzu\s+belirtin/gi,
+  /bilgi\s+verebildi[gğ]iniz\s+i[cç]in/gi,
+  /katıld[ıi][gğ][ıi]n[ıi]z\s+i[cç]in/gi,
+  /ara[sş]t[ıi]rd[ıi][gğ][ıi]n[ıi]z/gi,
+];
+
+// ─── Rewrite rules ────────────────────────────────────────────────────────────
+interface RewriteRule {
+  id: string;
+  pattern: RegExp;
+  replacement: string | ((match: string, ...groups: string[]) => string);
+}
+
+const REWRITE_RULES: RewriteRule[] = [
+  // "tahminiz edebiliyorum" → "tahmin edebiliyorum"
+  {
+    id: 'tahminiz_fix',
+    pattern: /\btahminiz\s+edebiliyorum\b/gi,
+    replacement: 'tahmin edebiliyorum',
+  },
+  // "tahminiz edebilirim" → "tahmin edebilirim"
+  {
+    id: 'tahminiz_edebilirim',
+    pattern: /\btahminiz\s+edebilirim\b/gi,
+    replacement: 'tahmin edebilirim',
+  },
+  // "Konya'nınız size uzak geldiğinizi" → "Konya'nın size uzak geldiğini"
+  {
+    id: 'konya_possessive_fix',
+    pattern: /Konya['']n[ıi]n[ıi]z\s+size\s+uzak\s+geldi[gğ]inizi/gi,
+    replacement: "Konya'nın size uzak geldiğini",
+  },
+  // "Konya'nınız" (standalone possessive corruption)  
+  {
+    id: 'konya_standalone_fix',
+    pattern: /Konya['']n[ıi]n[ıi]z\b/gi,
+    replacement: "Konya'nın",
+  },
+  // "yaşam kalitenizi etkilediğinizi" → "yaşam kalitenizi etkilediğini"
+  {
+    id: 'etkilediginizi_fix',
+    pattern: /(?:ya[sş]am\s+(?:kalite|konfor)|a[gğ]r[ıi]|[sş]ikayeti?)nizi\s+etkile(?:di[gğ]|yen|mekte)inizi\b/gi,
+    replacement: (match) => match.replace(/inizi\b$/, 'ini'),
+  },
+  // "rahatsız edici olabileceğinizi" → "rahatsız edici olduğunu"  
+  {
+    id: 'rahatsiz_olabileceginizi',
+    pattern: /rahats[ıi]z\s+edici\s+olabilece[gğ]inizi\b/gi,
+    replacement: 'rahatsız edici olduğunu',
+  },
+  // "uygun olduğunuz zamanızı yazarsanız" → "uygun olduğunuz zamanı yazarsanız"
+  {
+    id: 'zamaninizi_fix',
+    pattern: /uygun\s+oldu[gğ]unuz\s+zaman[ıi]n[ıi]z[ıi]\s+(?:yazar|bildirir|iletir)seniz\b/gi,
+    replacement: 'uygun olduğunuz zamanı yazarsanız',
+  },
+  // "hekim alternatiflerinizi" → "hekim alternatifleri"
+  {
+    id: 'hekim_alternatif_fix',
+    pattern: /hekim\s+alternatiflerinizi\b/gi,
+    replacement: 'hekim alternatiflerini',
+  },
+  // "doğru tedavi planızı" → "doğru tedavi planınızı"  (possession suffix)
+  {
+    id: 'tedavi_planizi_fix',
+    pattern: /\btedavi\s+plan[ıi]z[ıi]\b/gi,
+    replacement: 'tedavi planınızı',
+  },
+  // "uzmanınızı / uzmanızı" (when used as object of help/reach verb)
+  {
+    id: 'uzmanizi_standalone',
+    pattern: /\buzman[ıi]z[ıi]\b(?!\s+(?:olan|ile|için))/gi,
+    replacement: 'uzmanı',
+  },
+  // "tedavi sürecinizi belirler" → "tedavi sürecinizi belirleyecektir" / keep as-is if correct
+  // Actually this one is grammatically OK, skip.
+  
+  // "olabileceğinizi anlıyorum" — inanimate complaint
+  // Only applies when subject is complaint/situation (not person action)
+  {
+    id: 'olabilecegini_complaint',
+    pattern: /(?:a[gğ]r[ıi]n[ıi]n|[sş]ikayetin|hastal[ıi][gğ][ıi]n|bu\s+durumun)\s+ne\s+kadar\s+(?:zorlay[ıi]c[ıi]|a[gğ]r[ıi]|rahats[ıi]z\s+edici)\s+olabilece[gğ]inizi\b/gi,
+    replacement: (match) => match.replace(/olabilece[gğ]inizi\b$/i, 'olabileceğini'),
+  },
+  // "Türkiye saati olarak not aldım" (auto timezone assumption — remove)
+  {
+    id: 'turkey_saati_assumption',
+    pattern: /T[üu]rkiye\s+saati\s+olarak\s+not\s+ald[ıi]m\b/gi,
+    replacement: 'not aldım (saat dilimini teyit edelim)',
+  },
+];
+
+// ─── Normalizer ───────────────────────────────────────────────────────────────
+
+export class TurkishFinalQualityNormalizer {
+
+  /**
+   * Normalize Turkish morphology errors in final outbound text.
+   * Context-aware: uses complaint/location to guide some rewrites.
+   */
+  public static normalize(
+    text: string,
+    _context?: { complaint?: string; location?: string }
+  ): NormalizeResult {
+    if (!text || text.trim().length === 0) {
+      return { text, changesCount: 0, wasModified: false, appliedPatterns: [] };
+    }
+
+    // Build protected zone map (ranges to skip)
+    const protectedRanges: [number, number][] = [];
+    for (const prot of PROTECTED_PHRASES) {
+      prot.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = prot.exec(text)) !== null) {
+        protectedRanges.push([m.index, m.index + m[0].length]);
+      }
+      prot.lastIndex = 0;
+    }
+
+    let result = text;
+    let changesCount = 0;
+    const appliedPatterns: string[] = [];
+
+    for (const rule of REWRITE_RULES) {
+      rule.pattern.lastIndex = 0;
+
+      // Check if pattern matches
+      if (!rule.pattern.test(result)) {
+        rule.pattern.lastIndex = 0;
+        continue;
+      }
+      rule.pattern.lastIndex = 0;
+
+      // Apply replacement, skipping protected ranges
+      const newResult = result.replace(rule.pattern, (match, ...groups) => {
+        // Find match position in current string
+        const matchIdx = result.indexOf(match);
+        const isProtected = protectedRanges.some(
+          ([start, end]) => matchIdx >= start && matchIdx < end
+        );
+        if (isProtected) return match;
+
+        changesCount++;
+        appliedPatterns.push(rule.id);
+        if (typeof rule.replacement === 'function') {
+          return (rule.replacement as Function)(match, ...groups);
+        }
+        return rule.replacement;
+      });
+      rule.pattern.lastIndex = 0;
+      result = newResult;
+    }
+
+    const wasModified = result !== text;
+
+    try {
+      if (wasModified) {
+        console.log(JSON.stringify({
+          tag: 'TURKISH_FINAL_QUALITY_REWRITE_APPLIED',
+          changesCount,
+          appliedPatterns,
+          wasModified,
+        }));
+      }
+    } catch { /* non-fatal */ }
+
+    return { text: result, changesCount, wasModified, appliedPatterns };
+  }
+
+  /**
+   * Convenience wrapper — returns just the normalized string.
+   */
+  public static normalizeText(text: string, context?: { complaint?: string; location?: string }): string {
+    return this.normalize(text, context).text;
+  }
+}

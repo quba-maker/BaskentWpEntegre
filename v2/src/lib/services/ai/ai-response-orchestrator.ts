@@ -18,6 +18,10 @@ import { ConsultantConversationStateResolver } from './consultant-conversation-s
 import { MultiIntentConsultantComposer } from './multi-intent-consultant-composer';
 import { DoctorNamesPolicy } from './doctor-names-policy';
 import { ConversationIntentRouter } from './conversation-intent-router';
+// P0.16-L: Live/test parity pipeline imports
+import { ConversationFrameResolver } from './conversation-frame-resolver';
+import { WhatsAppFormattingFinalizer } from './whatsapp-formatting-finalizer';
+import { TurkishFinalQualityNormalizer } from './turkish-final-quality-normalizer';
 
 
 export interface OrchestratorParams {
@@ -591,6 +595,20 @@ export class AIResponseOrchestrator {
       // P0.16-K: match both Turkish ş and ASCII s for real WhatsApp messages
       const isOpenContinuation = /ba(?:ş|s)ka\s+(?:bir\s+)?(bilgi|soru|[şs]ey)|ba(?:ş|s)ka\s+bir\s+(?:ş|s)ey\s+sorabilir|daha\s+fazla\s+bilgi|bir\s+(?:ş|s)ey\s+daha/i.test(inboundText);
 
+      // P0.16-L: routeAll — full intent matrix for new bypass paths
+      const allIntents = ConversationIntentRouter.routeAll(inboundText);
+      const isThanksButContinue = allIntents.includes('thanks_but_continue');
+      const isOpenContinuationIntent = allIntents.includes('open_continuation') || isOpenContinuation;
+      const isCannotTravelObjection = allIntents.includes('cannot_travel_objection');
+      const isDistanceObjection = allIntents.includes('distance_objection');
+      const isPoliteClose = allIntents.includes('polite_close') && !isThanksButContinue && !isOpenContinuationIntent;
+
+      // P0.16-L: Conversation frame (extends ConsultantConversationStateResolver with duration/objections)
+      const safeHistoryForFrame = history.filter(m => m.content != null).map(m => ({ role: m.role, content: m.content as string }));
+      const conversationFrame = ConversationFrameResolver.resolve(safeHistoryForFrame);
+      const selfParticipant = conversationFrame.participants.find(p => p.relation === 'self') || null;
+      const locationLabel = selfParticipant?.location || null;
+
       // Telemetry: doctor lookup department selection
       if (isDoctorLookup) {
         console.log(JSON.stringify({
@@ -613,7 +631,8 @@ export class AIResponseOrchestrator {
       const recallSummary = buildRecallFactsSummary(history);
       const isRecallWithFacts = isRecallFrustration && recallSummary.length > 0;
 
-      const isLlmBypassChallenge = isPromptChallenge || isBotAccusation || isAiAccusation || isAngryPromptChallenge || shouldBypassDoctorLookup || isRecallWithFacts || isNextStepRequest || isMultiIntentQuery || isDoctorNamesRequest;
+      const isLlmBypassChallenge = isPromptChallenge || isBotAccusation || isAiAccusation || isAngryPromptChallenge || shouldBypassDoctorLookup || isRecallWithFacts || isNextStepRequest || isMultiIntentQuery || isDoctorNamesRequest
+        || isThanksButContinue || isOpenContinuationIntent || isCannotTravelObjection || isDistanceObjection || isPoliteClose; // P0.16-L
 
       let text = '';
       let bypassed = false;
@@ -632,6 +651,12 @@ export class AIResponseOrchestrator {
         if (isNextStepRequest)    intentList.push('next_step_request');
         if (isMultiIntentQuery)   intentList.push('multi_intent_query');
         if (isDoctorNamesRequest) intentList.push('doctor_names_request');
+        // P0.16-L
+        if (isThanksButContinue)      intentList.push('thanks_but_continue');
+        if (isOpenContinuationIntent) intentList.push('open_continuation');
+        if (isCannotTravelObjection)  intentList.push('cannot_travel_objection');
+        if (isDistanceObjection)      intentList.push('distance_objection');
+        if (isPoliteClose)            intentList.push('polite_close');
 
         if (intentList.length > 0) {
           console.log(JSON.stringify({
@@ -709,6 +734,106 @@ export class AIResponseOrchestrator {
           console.log(JSON.stringify({
             tag: 'LIVE_TEST_PARITY_PATH_SELECTED',
             path: `doctor_names_policy_${doctorPolicy.mode}`,
+            tenantId,
+            conversationId: conversationId || 'unknown',
+            workerPath
+          }));
+        }
+
+        // ── P0.16-L: Thanks but continue (teşekkür ama bir soru daha) ──────────
+        if (!fallbackResult && isThanksButContinue) {
+          const selfComplaint = selfParticipant?.complaint;
+          const openPhrase = selfComplaint
+            ? `Tabii, memnuniyetle. ${selfComplaint} ile ilgili başka ne öğrenmek istersiniz?`
+            : 'Tabii, memnuniyetle. Başka hangi konuda bilgi almak istersiniz?';
+          fallbackResult = { text: openPhrase, finalPath: 'thanks_but_continue' };
+          console.log(JSON.stringify({
+            tag: 'LIVE_TEST_PARITY_PATH_SELECTED',
+            path: 'thanks_but_continue_handled',
+            tenantId,
+            conversationId: conversationId || 'unknown',
+            workerPath
+          }));
+        }
+
+        // ── P0.16-L: Open continuation (başka bilgi, bir soru daha) ─────────────
+        if (!fallbackResult && isOpenContinuationIntent && !isThanksButContinue) {
+          fallbackResult = {
+            text: 'Tabii, hangi konuda bilgi almak istersiniz? Sormak istediğiniz her şeyi paylaşabilirsiniz.',
+            finalPath: 'open_continuation'
+          };
+          console.log(JSON.stringify({
+            tag: 'LIVE_TEST_PARITY_PATH_SELECTED',
+            path: 'open_continuation_handled',
+            tenantId,
+            conversationId: conversationId || 'unknown',
+            workerPath
+          }));
+        }
+
+        // ── P0.16-L: Cannot travel objection (yani ben gelemem) ──────────────────
+        if (!fallbackResult && isCannotTravelObjection) {
+          const locationNote = locationLabel ? `Almanya'dan` : 'Uzaktan';
+          const selfComp = selfParticipant?.complaint || 'şikayetiniz';
+          const cannotTravelText = [
+            `Anlıyorum, şu an gelmek zor olabilir. Bu tamamen doğal.`,
+            ``,
+            `${locationNote} gelen hastalarımız için önce bir telefon görüşmesiyle süreci netleştiriyoruz. Bu görüşmede:`,
+            `• ${selfComp} için hangi branşın değerlendireceğini,`,
+            `• Varsa mevcut MR/tetkiklerinizin nasıl paylaşılabileceğini,`,
+            `• Geliş planı ve tahmini süreci,`,
+            `• Konaklama ve ulaşım seçeneklerini`,
+            ``,
+            `konuşabiliriz. Böylece gelmeden önce tabloyu net görürsünüz.`,
+            ``,
+            `Telefon görüşmesi için uygun olduğunuz gün ve saati paylaşır mısınız?`,
+          ].join('\n');
+          fallbackResult = { text: cannotTravelText, finalPath: 'cannot_travel_objection' };
+          console.log(JSON.stringify({
+            tag: 'LIVE_TEST_PARITY_PATH_SELECTED',
+            path: 'cannot_travel_handled',
+            tenantId,
+            conversationId: conversationId || 'unknown',
+            workerPath
+          }));
+        }
+
+        // ── P0.16-L: Distance objection (Konya uzak, ama devam) ─────────────────
+        if (!fallbackResult && isDistanceObjection && !isCannotTravelObjection) {
+          const selfComp = selfParticipant?.complaint || 'şikayetiniz';
+          const locNote = locationLabel ? `${locationLabel}'dan` : 'Uzaktan';
+          const distText = [
+            `Anlıyorum, Konya'nın uzak gelmesi çok doğal bir endişe.`,
+            ``,
+            `${locNote} gelen hastalarımız için süreci önce telefonla netleştiriyoruz. Bu görüşmede:`,
+            `• ${selfComp} için doğru branş ve uzman bilgisi,`,
+            `• Varsa tetkiklerinizin önceden değerlendirilebileceği,`,
+            `• Geliş, konaklama ve ulaşım planlaması,`,
+            `• Tahmini maliyet aralığı`,
+            ``,
+            `gibi konuları konuşabilirsiniz. Karar vermeden önce her şeyi net görmüş olursunuz.`,
+            ``,
+            `Telefon görüşmesi için uygun bir gün ve saat belirleyelim mi?`,
+          ].join('\n');
+          fallbackResult = { text: distText, finalPath: 'distance_objection' };
+          console.log(JSON.stringify({
+            tag: 'LIVE_TEST_PARITY_PATH_SELECTED',
+            path: 'distance_objection_handled',
+            tenantId,
+            conversationId: conversationId || 'unknown',
+            workerPath
+          }));
+        }
+
+        // ── P0.16-L: Polite close (yok sağolun, gerek kalmadı) ─────────────────
+        if (!fallbackResult && isPoliteClose) {
+          fallbackResult = {
+            text: 'Anladım, başka bir sorunuz olursa buradan yazabilirsiniz. Geçmiş olsun ve iyi günler dileriz 🙏',
+            finalPath: 'polite_close'
+          };
+          console.log(JSON.stringify({
+            tag: 'LIVE_TEST_PARITY_PATH_SELECTED',
+            path: 'polite_close_handled',
             tenantId,
             conversationId: conversationId || 'unknown',
             workerPath
@@ -906,6 +1031,24 @@ export class AIResponseOrchestrator {
           detectedPatterns: morphology.errors.map(e => e.pattern),
           changed: morphology.correctionApplied
         }));
+      }
+
+      // 9b. P0.16-L: Turkish Final Quality Normalizer — deterministic rewrite of sentence-level errors
+      // Applied to both bypass path and LLM path, after MorphologyGuard
+      const normalizeCtx = {
+        complaint: selfParticipant?.complaint || undefined,
+        location: locationLabel || undefined,
+      };
+      const normResult = TurkishFinalQualityNormalizer.normalize(text, normalizeCtx);
+      if (normResult.wasModified) {
+        text = normResult.text;
+      }
+
+      // 9c. P0.16-L: WhatsApp formatting finalizer — paragraph breaks, numbered blocks
+      // Applied here so both bypass and LLM paths get proper formatting
+      if (text) {
+        const fmtResult = WhatsAppFormattingFinalizer.format(text);
+        text = fmtResult.text;
       }
 
       // 10. Outbound Guard Checks

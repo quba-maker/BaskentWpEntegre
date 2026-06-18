@@ -2255,6 +2255,8 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
         conversationId,
         customerId,
         sandbox: false,
+        // P0.16-L: Pass history for live/test parity (consultant state, frame resolver, department arbitration)
+        history: Array.isArray(history) && history.length > 0 ? history as any : undefined,
         workerPath: 'worker_immediate'
       });
 
