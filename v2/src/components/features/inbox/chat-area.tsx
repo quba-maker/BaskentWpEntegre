@@ -714,182 +714,184 @@ const MessageBubbleRow = React.memo(function MessageBubbleRow({
         </div>
       ) : (
         <div className={`flex w-full ${item.message.sender === "user" ? "justify-start" : "justify-end"} group relative ${item.message.reactions && item.message.reactions.length > 0 ? "mb-3" : ""}`}>
-          {/* ── QUICK ACTIONS TOOLBAR ── */}
-          {item.message.providerMessageId && (
-            <div className={`absolute top-1/2 -translate-y-1/2 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-20 ${
-              item.message.sender === "user" 
-                ? "left-[calc(85%+8px)] md:left-[calc(65%+8px)] flex-row" 
-                : "right-[calc(85%+8px)] md:right-[calc(65%+8px)] flex-row-reverse"
-            }`}>
-              {/* Quoted Reply Action */}
-              <button
-                onClick={() => setReplyingToMessage(item.message)}
-                className="p-1.5 rounded-full hover:bg-[var(--q-bg-hover)] text-[var(--q-text-secondary)] transition-colors border border-[var(--q-border-default)] bg-[var(--q-bg-primary)] shadow-sm cursor-pointer"
-                title="Yanıtla"
-              >
-                <CornerUpLeft className="w-3.5 h-3.5" />
-              </button>
+          <div className="relative max-w-[85%] md:max-w-[65%] w-fit">
+            {/* ── QUICK ACTIONS TOOLBAR ── */}
+            {item.message.providerMessageId && (
+              <div className={`absolute top-1/2 -translate-y-1/2 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-20 ${
+                item.message.sender === "user" 
+                  ? "left-[calc(100%+8px)] flex-row" 
+                  : "right-[calc(100%+8px)] flex-row-reverse"
+              }`}>
+                {/* Quoted Reply Action */}
+                <button
+                  onClick={() => setReplyingToMessage(item.message)}
+                  className="p-1.5 rounded-full hover:bg-[var(--q-bg-hover)] text-[var(--q-text-secondary)] transition-colors border border-[var(--q-border-default)] bg-[var(--q-bg-primary)] shadow-sm cursor-pointer"
+                  title="Yanıtla"
+                >
+                  <CornerUpLeft className="w-3.5 h-3.5" />
+                </button>
 
-              {/* Reaction Picker Button */}
-              {item.message.sender === "user" && (
-                <div className="relative reaction-picker-container">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setActiveReactionPickerMsgId(activeReactionPickerMsgId === item.message.id ? null : item.message.id);
-                    }}
-                    className="p-1.5 rounded-full hover:bg-[var(--q-bg-hover)] text-[var(--q-text-secondary)] transition-colors border border-[var(--q-border-default)] bg-[var(--q-bg-primary)] shadow-sm cursor-pointer"
-                    title="Tepki Ekle"
-                  >
-                    <Smile className="w-3.5 h-3.5" />
-                  </button>
+                {/* Reaction Picker Button */}
+                {item.message.sender === "user" && (
+                  <div className="relative reaction-picker-container">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setActiveReactionPickerMsgId(activeReactionPickerMsgId === item.message.id ? null : item.message.id);
+                      }}
+                      className="p-1.5 rounded-full hover:bg-[var(--q-bg-hover)] text-[var(--q-text-secondary)] transition-colors border border-[var(--q-border-default)] bg-[var(--q-bg-primary)] shadow-sm cursor-pointer"
+                      title="Tepki Ekle"
+                    >
+                      <Smile className="w-3.5 h-3.5" />
+                    </button>
+                    
+                    {activeReactionPickerMsgId === item.message.id && (
+                      <div className={`absolute bottom-full mb-1.5 z-30 flex items-center gap-1 p-1 rounded-full shadow-lg border border-[var(--q-border-default)] bg-[var(--q-bg-primary)] ${
+                        item.message.sender === 'user' ? 'left-0' : 'right-0'
+                      }`}>
+                        {["👍", "❤️", "✅", "🙏", "👌", "👎"].map((emoji) => {
+                          const isSelected = item.message.reactions?.some((r: any) => r.actorLabel === 'Sen' && r.emoji === emoji);
+                          return (
+                            <button
+                              key={emoji}
+                              onClick={() => {
+                                handleSendReaction(item.message.providerMessageId, isSelected ? "" : emoji);
+                                setActiveReactionPickerMsgId(null);
+                              }}
+                              className={`w-7 h-7 flex items-center justify-center text-sm rounded-full hover:bg-[var(--q-bg-hover)] transition-colors cursor-pointer ${
+                                isSelected ? 'bg-[var(--q-purple-bg)] text-[var(--q-purple)]' : ''
+                              }`}
+                            >
+                              {emoji}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div
+              className={`relative w-full px-3 py-2 md:px-4 md:py-2.5 shadow-sm transition-all duration-200 hover:shadow-md ${
+                item.message.sender === "user" 
+                  ? "rounded-2xl rounded-tl-sm" 
+                  : "rounded-2xl rounded-tr-sm"
+              }`}
+              style={
+                item.message.sender === "user"
+                  ? { background: "var(--q-chat-in)", color: "var(--q-text-primary)" }
+                  : { background: "var(--q-chat-out)", color: "var(--q-text-primary)" }
+              }
+            >
+              {item.message.sender !== "user" && (
+                <div className="flex items-center gap-1 mb-1 opacity-70">
+                  {item.message.sender === "bot" ? (
+                    <Sparkles className="w-3 h-3" style={{ color: "var(--q-purple)" }} />
+                  ) : (
+                    <User className="w-3 h-3" style={{ color: "var(--q-text-secondary)" }} />
+                  )}
+                  <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: item.message.sender === "bot" ? "var(--q-purple)" : "var(--q-text-secondary)" }}>
+                    {item.message.sender === "bot" ? "AI" : "SEN"}
+                  </span>
+                </div>
+              )}
+              {item.message.mediaMetadata?.native && (item.message.mediaMetadata.native.reply_to_provider_message_id || item.message.mediaMetadata.native.reply_to_message_id) && (
+                <QuotedMessagePreview 
+                  native={item.message.mediaMetadata.native} 
+                  isOwnMessage={item.message.sender !== "user"} 
+                />
+              )}
+
+              {/* ── MEDIA CONTENT ── */}
+              {item.message.mediaType && item.message.mediaUrl && (
+                <MediaBubbleContent
+                  message={item.message}
+                  onGalleryOpen={(src) => {
+                    const idx = allConversationImages.findIndex((ci: any) => ci.src === src);
+                    setGallery({
+                      images: allConversationImages,
+                      currentIndex: idx >= 0 ? idx : 0,
+                    });
+                  }}
+                />
+              )}
+
+              {/* ── TEXT CONTENT (caption only, no emoji prefix) ── */}
+              {(() => {
+                const text = item.message.text;
+                const mt = item.message.mediaType;
+                if (!text) return <div className="pb-4" />;
+                
+                if (mt && item.message.mediaUrl) {
+                  const placeholders = ['📷 Fotoğraf', '📎 Belge', '🎵 Ses kaydı', '🎬 Video', '📍 Konum', '🏷️ Sticker'];
+                  const emojiPrefixes = ['📷', '📎', '🎵', '🎬', '📍', '🏷️', '📦'];
                   
-                  {activeReactionPickerMsgId === item.message.id && (
-                    <div className={`absolute bottom-full mb-1.5 z-30 flex items-center gap-1 p-1 rounded-full shadow-lg border border-[var(--q-border-default)] bg-[var(--q-bg-primary)] ${
-                      item.message.sender === 'user' ? 'left-0' : 'right-0'
-                    }`}>
-                      {["👍", "❤️", "✅", "🙏", "👌", "👎"].map((emoji) => {
-                        const isSelected = item.message.reactions?.some((r: any) => r.actorLabel === 'Sen' && r.emoji === emoji);
+                  if (placeholders.includes(text) || emojiPrefixes.includes(text)) {
+                    return <div className="pb-4" />;
+                  }
+                  
+                  const colonIdx = text.indexOf(': ');
+                  if (colonIdx !== -1) {
+                    const before = text.substring(0, colonIdx);
+                    if (emojiPrefixes.some(p => before.startsWith(p))) {
+                      const caption = text.substring(colonIdx + 2).trim();
+                      if (caption) {
                         return (
-                          <button
-                            key={emoji}
-                            onClick={() => {
-                              handleSendReaction(item.message.providerMessageId, isSelected ? "" : emoji);
-                              setActiveReactionPickerMsgId(null);
-                            }}
-                            className={`w-7 h-7 flex items-center justify-center text-sm rounded-full hover:bg-[var(--q-bg-hover)] transition-colors cursor-pointer ${
-                              isSelected ? 'bg-[var(--q-purple-bg)] text-[var(--q-purple)]' : ''
-                            }`}
-                          >
-                            {emoji}
-                          </button>
+                          <p className="text-[15px] leading-[1.4] font-medium whitespace-pre-wrap pb-4">
+                            {caption}
+                          </p>
                         );
-                      })}
-                    </div>
+                      }
+                      return <div className="pb-4" />;
+                    }
+                  }
+                }
+                
+                return (
+                  <p className="text-[15px] leading-[1.4] font-medium whitespace-pre-wrap pb-4">
+                    {text}
+                  </p>
+                );
+              })()}
+              
+              <div className="absolute bottom-1 right-2 flex items-center gap-1 text-[10px] font-semibold tracking-wide" style={{ color: "var(--q-text-secondary)" }}>
+                <span className="opacity-50">{item.message.timeMs ? new Date(item.message.timeMs).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) : item.message.time}</span>
+                {item.message.sender !== "user" && (
+                  <span className="ml-0.5 opacity-80">
+                    {item.message.status === 'pending' && <Clock className="w-3 h-3 opacity-50" />}
+                    {(item.message.status === 'sent' || (!item.message.status && item.message.sender === 'agent')) && <Check className="w-3.5 h-3.5 opacity-70" />}
+                    {item.message.status === 'delivered' && <CheckCheck className="w-3.5 h-3.5 opacity-70" />}
+                    {item.message.status === 'read' && <CheckCheck className="w-3.5 h-3.5" style={{ color: "#53bdeb", opacity: 1 }} />}
+                  </span>
+                )}
+              </div>
+
+              {/* ── REACTIONS DISPLAY ── */}
+              {item.message.reactions && item.message.reactions.length > 0 && (
+                <div 
+                  className={`absolute bottom-[-11px] ${item.message.sender === 'user' ? 'right-2' : 'left-2'} z-10 flex items-center gap-0.5 px-1 py-[1.5px] rounded-full text-[10px] shadow-sm bg-[var(--q-bg-primary)] border border-[var(--q-border-default)] cursor-pointer select-none`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (item.message.sender === 'user') {
+                      setActiveReactionPickerMsgId(activeReactionPickerMsgId === item.message.id ? null : item.message.id);
+                    }
+                  }}
+                >
+                  {item.message.reactions.map((r: any, idx: number) => (
+                    <span key={idx} title={`${r.actorLabel}: ${r.emoji}`}>
+                      {r.emoji}
+                    </span>
+                  ))}
+                  {item.message.reactions.length > 1 && (
+                    <span className="text-[9px] font-bold text-[var(--q-text-secondary)]">
+                      {item.message.reactions.length}
+                    </span>
                   )}
                 </div>
               )}
             </div>
-          )}
-
-          <div
-            className={`relative max-w-[85%] md:max-w-[65%] px-3 py-2 md:px-4 md:py-2.5 shadow-sm transition-all duration-200 hover:shadow-md ${
-              item.message.sender === "user" 
-                ? "rounded-2xl rounded-tl-sm" 
-                : "rounded-2xl rounded-tr-sm"
-            }`}
-            style={
-              item.message.sender === "user"
-                ? { background: "var(--q-chat-in)", color: "var(--q-text-primary)" }
-                : { background: "var(--q-chat-out)", color: "var(--q-text-primary)" }
-            }
-          >
-            {item.message.sender !== "user" && (
-              <div className="flex items-center gap-1 mb-1 opacity-70">
-                {item.message.sender === "bot" ? (
-                  <Sparkles className="w-3 h-3" style={{ color: "var(--q-purple)" }} />
-                ) : (
-                  <User className="w-3 h-3" style={{ color: "var(--q-text-secondary)" }} />
-                )}
-                <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: item.message.sender === "bot" ? "var(--q-purple)" : "var(--q-text-secondary)" }}>
-                  {item.message.sender === "bot" ? "AI" : "SEN"}
-                </span>
-              </div>
-            )}
-            {item.message.mediaMetadata?.native && (item.message.mediaMetadata.native.reply_to_provider_message_id || item.message.mediaMetadata.native.reply_to_message_id) && (
-              <QuotedMessagePreview 
-                native={item.message.mediaMetadata.native} 
-                isOwnMessage={item.message.sender !== "user"} 
-              />
-            )}
-
-            {/* ── MEDIA CONTENT ── */}
-            {item.message.mediaType && item.message.mediaUrl && (
-              <MediaBubbleContent
-                message={item.message}
-                onGalleryOpen={(src) => {
-                  const idx = allConversationImages.findIndex((ci: any) => ci.src === src);
-                  setGallery({
-                    images: allConversationImages,
-                    currentIndex: idx >= 0 ? idx : 0,
-                  });
-                }}
-              />
-            )}
-
-            {/* ── TEXT CONTENT (caption only, no emoji prefix) ── */}
-            {(() => {
-              const text = item.message.text;
-              const mt = item.message.mediaType;
-              if (!text) return <div className="pb-4" />;
-              
-              if (mt && item.message.mediaUrl) {
-                const placeholders = ['📷 Fotoğraf', '📎 Belge', '🎵 Ses kaydı', '🎬 Video', '📍 Konum', '🏷️ Sticker'];
-                const emojiPrefixes = ['📷', '📎', '🎵', '🎬', '📍', '🏷️', '📦'];
-                
-                if (placeholders.includes(text) || emojiPrefixes.includes(text)) {
-                  return <div className="pb-4" />;
-                }
-                
-                const colonIdx = text.indexOf(': ');
-                if (colonIdx !== -1) {
-                  const before = text.substring(0, colonIdx);
-                  if (emojiPrefixes.some(p => before.startsWith(p))) {
-                    const caption = text.substring(colonIdx + 2).trim();
-                    if (caption) {
-                      return (
-                        <p className="text-[15px] leading-[1.4] font-medium whitespace-pre-wrap pb-4">
-                          {caption}
-                        </p>
-                      );
-                    }
-                    return <div className="pb-4" />;
-                  }
-                }
-              }
-              
-              return (
-                <p className="text-[15px] leading-[1.4] font-medium whitespace-pre-wrap pb-4">
-                  {text}
-                </p>
-              );
-            })()}
-            
-            <div className="absolute bottom-1 right-2 flex items-center gap-1 text-[10px] font-semibold tracking-wide" style={{ color: "var(--q-text-secondary)" }}>
-              <span className="opacity-50">{item.message.timeMs ? new Date(item.message.timeMs).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) : item.message.time}</span>
-              {item.message.sender !== "user" && (
-                <span className="ml-0.5 opacity-80">
-                  {item.message.status === 'pending' && <Clock className="w-3 h-3 opacity-50" />}
-                  {(item.message.status === 'sent' || (!item.message.status && item.message.sender === 'agent')) && <Check className="w-3.5 h-3.5 opacity-70" />}
-                  {item.message.status === 'delivered' && <CheckCheck className="w-3.5 h-3.5 opacity-70" />}
-                  {item.message.status === 'read' && <CheckCheck className="w-3.5 h-3.5" style={{ color: "#53bdeb", opacity: 1 }} />}
-                </span>
-              )}
-            </div>
-
-            {/* ── REACTIONS DISPLAY ── */}
-            {item.message.reactions && item.message.reactions.length > 0 && (
-              <div 
-                className={`absolute bottom-[-11px] ${item.message.sender === 'user' ? 'right-2' : 'left-2'} z-10 flex items-center gap-0.5 px-1 py-[1.5px] rounded-full text-[10px] shadow-sm bg-[var(--q-bg-primary)] border border-[var(--q-border-default)] cursor-pointer select-none`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (item.message.sender === 'user') {
-                    setActiveReactionPickerMsgId(activeReactionPickerMsgId === item.message.id ? null : item.message.id);
-                  }
-                }}
-              >
-                {item.message.reactions.map((r: any, idx: number) => (
-                  <span key={idx} title={`${r.actorLabel}: ${r.emoji}`}>
-                    {r.emoji}
-                  </span>
-                ))}
-                {item.message.reactions.length > 1 && (
-                  <span className="text-[9px] font-bold text-[var(--q-text-secondary)]">
-                    {item.message.reactions.length}
-                  </span>
-                )}
-              </div>
-            )}
           </div>
         </div>
       )}
