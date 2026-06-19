@@ -96,10 +96,12 @@ export class FormLeadActivationService {
     let notificationId: string | undefined;
 
     // Resolve all potential phone numbers from lead raw_data
+    // Also extract department from raw_data (e.g. "\u00d6nerilen B\u00f6l\u00fcm" or "department" field)
     let allPhones: string[] = [];
+    let formDepartment: string = 'Genel'; // default
     try {
       const leadData = await db.executeSafe({
-        text: `SELECT phone_number, raw_data FROM leads WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+        text: `SELECT phone_number, raw_data, patient_name FROM leads WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
         values: [leadId, tenantId]
       }) as any[];
       if (leadData.length > 0) {
@@ -110,6 +112,18 @@ export class FormLeadActivationService {
           parsedRaw = typeof leadRow.raw_data === 'string' ? JSON.parse(leadRow.raw_data) : leadRow.raw_data;
         }
         allPhones = parseAllPhones(parsedRaw?._all_phones);
+
+        // [FIX-A] Extract department from form raw_data
+        // Tries common field names: '\u00f6nerilen_b\u00f6l\u00fcm', 'onerilen_bolum', 'department', 'b\u00f6l\u00fcm', 'bolum'
+        const rawKeys = Object.keys(parsedRaw);
+        const deptKey = rawKeys.find(k => {
+          const l = k.toLowerCase().trim();
+          return l.includes('\u00f6nerilen') || l.includes('onerilen') || l.includes('department') ||
+                 l === 'b\u00f6l\u00fcm' || l === 'bolum' || l.includes('bran\u015f') || l.includes('brans');
+        });
+        if (deptKey && parsedRaw[deptKey] && String(parsedRaw[deptKey]).trim()) {
+          formDepartment = String(parsedRaw[deptKey]).trim();
+        }
       }
     } catch (err) {
       log.warn('[ACTIVATION_GET_PHONES_ERROR] Non-fatal', { leadId, error: String(err) });
@@ -149,14 +163,34 @@ export class FormLeadActivationService {
             }
           }
         }
+
+        // [FIX-B] Sync form ground-truth to existing conversation:
+        // patient_name, department, tags — so stale data (e.g. 'Fransan\u0131m') gets corrected automatically
+        try {
+          const formTags = [formName].filter(Boolean);
+          await db.executeSafe({
+            text: `UPDATE conversations
+                   SET patient_name = COALESCE(NULLIF($1, ''), patient_name),
+                       department   = CASE WHEN $2 != 'Genel' THEN $2 ELSE COALESCE(department, 'Genel') END,
+                       tags         = $3,
+                       updated_at   = NOW()
+                   WHERE id = $4 AND tenant_id = $5`,
+            values: [displayName, formDepartment, JSON.stringify(formTags), conversationId, tenantId]
+          });
+          log.info('[ACTIVATION_CONV_SYNC] Synced form data to existing conversation', {
+            conversationId, displayName, formDepartment, formTags
+          });
+        } catch (syncErr) {
+          log.warn('[ACTIVATION_CONV_SYNC_ERROR] Non-fatal', { error: String(syncErr) });
+        }
       } else {
         // Create new conversation
         const tags = [formName].filter(Boolean);
         const newConv = await db.executeSafe({
           text: `INSERT INTO conversations (tenant_id, phone_number, patient_name, tags, status, department, channel)
-                 VALUES ($1, $2, $3, $4, 'active', 'Genel', 'whatsapp')
+                 VALUES ($1, $2, $3, $4, 'active', $5, 'whatsapp')
                  RETURNING id`,
-          values: [tenantId, phoneNumber, displayName, JSON.stringify(tags)]
+          values: [tenantId, phoneNumber, displayName, JSON.stringify(tags), formDepartment]
         }) as any[];
         conversationId = newConv?.[0]?.id;
       }
@@ -172,6 +206,7 @@ export class FormLeadActivationService {
       log.info('[ACTIVATION_OPP_REUSED] Reusing active opportunity to prevent duplicate opportunities', { leadId, opportunityId });
     } else {
       try {
+        // [FIX-A] Use formDepartment instead of hardcoded 'Genel'
         const oppResult = await db.executeSafe({
           text: `INSERT INTO opportunities (
                    tenant_id, conversation_id, phone_number,
@@ -179,7 +214,7 @@ export class FormLeadActivationService {
                    stage, priority, source,
                    department, automation_status,
                    intent_type, metadata
-                 ) VALUES ($1, $2, $3, $4, $5, 'new_lead', 'warm', 'form', 'Genel', 'manual', 'form_submission', $6)
+                 ) VALUES ($1, $2, $3, $4, $5, 'new_lead', 'warm', 'form', $6, 'manual', 'form_submission', $7)
                  RETURNING id`,
           values: [
             tenantId,
@@ -187,6 +222,7 @@ export class FormLeadActivationService {
             phoneNumber,
             displayName,
             displayName,
+            formDepartment,
             JSON.stringify({
               form_name: formName,
               lead_id: leadId,
@@ -198,7 +234,7 @@ export class FormLeadActivationService {
         }) as any[];
 
         opportunityId = oppResult?.[0]?.id;
-        log.info('[ACTIVATION_OPP_CREATED] Created new opportunity', { leadId, opportunityId });
+        log.info('[ACTIVATION_OPP_CREATED] Created new opportunity', { leadId, opportunityId, formDepartment });
       } catch (err) {
         log.error('[ACTIVATION_OPP_ERROR]', err instanceof Error ? err : new Error(String(err)));
       }

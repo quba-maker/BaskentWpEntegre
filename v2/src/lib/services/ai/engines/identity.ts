@@ -467,7 +467,61 @@ export class IdentityEngine {
         }
       }
 
+      // ═══ [FIX-C] Auto-heal stale patient_name from form ═══
+      // If form has a valid name AND opportunity/conversation has a wrong name,
+      // silently correct it. Guards: isValidPatientName + name_locked check.
+      if (isFormBound && lead && conversationId) {
+        try {
+          const { isValidPatientName } = await import('@/lib/utils/patient-name-resolver');
+          let formName: string | null = null;
+          if (lead.patient_name && isValidPatientName(lead.patient_name)) {
+            formName = lead.patient_name.trim();
+          }
+
+          if (formName) {
+            const oppMeta = opportunity?.metadata
+              ? (typeof opportunity.metadata === 'string'
+                  ? (() => { try { return JSON.parse(opportunity.metadata); } catch { return {}; } })()
+                  : opportunity.metadata)
+              : {};
+            const isLocked = oppMeta?.name_locked === true;
+
+            if (!isLocked) {
+              const currentConvName = conversationRow?.patient_name || '';
+              const currentOppName  = opportunity?.patient_name || '';
+
+              // Only heal if current name looks wrong (not valid patient name)
+              const convNameBad = currentConvName && !isValidPatientName(currentConvName);
+              const oppNameBad  = currentOppName  && !isValidPatientName(currentOppName);
+
+              if (convNameBad || oppNameBad) {
+                // Heal conversation patient_name
+                if (convNameBad) {
+                  await db.executeSafe({
+                    text: `UPDATE conversations SET patient_name = $1, updated_at = NOW()
+                           WHERE id = $2 AND tenant_id = $3`,
+                    values: [formName, conversationId, tenantId]
+                  });
+                  if (conversationRow) conversationRow.patient_name = formName;
+                }
+                // Heal opportunity patient_name
+                if (oppNameBad && opportunity?.id) {
+                  await db.executeSafe({
+                    text: `UPDATE opportunities SET patient_name = $1, updated_at = NOW()
+                           WHERE id = $2 AND tenant_id = $3`,
+                    values: [formName, opportunity.id, tenantId]
+                  });
+                  if (opportunity) opportunity.patient_name = formName;
+                }
+                console.info(`[IdentityEngine][FIX-C] Auto-healed patient_name to "${formName}" from form`);
+              }
+            }
+          }
+        } catch (_) { /* non-fatal — never block context loading */ }
+      }
+
       // ═══ Load last 10 messages for conversation history ═══
+
       let history: { role: string; content: string }[] = [];
       if (conversationId) {
         const msgRows = await db.executeSafe({
