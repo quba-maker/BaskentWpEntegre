@@ -165,7 +165,48 @@ export class MemoryEngine {
       }
 
       const phone = conv[0].phone_number;
-      const activeOppId = conv[0].active_opportunity_id;
+      let activeOppId = conv[0].active_opportunity_id;
+
+      // Self-healing: If there is no active opportunity linked but unlinked leads exist for this phone number, activate them
+      if (!activeOppId && phone) {
+        try {
+          const unlinkedLeads = await db.executeSafe({
+            text: `
+              SELECT id, patient_name, form_name, email, source 
+              FROM leads 
+              WHERE (phone_number = $1 OR RIGHT(phone_number, 10) = RIGHT($1, 10)) 
+                AND tenant_id = $2 
+                AND linked_opportunity_id IS NULL
+              ORDER BY created_at DESC 
+              LIMIT 1
+            `,
+            values: [phone, tenantId]
+          }) as any[];
+
+          if (unlinkedLeads.length > 0) {
+            const unlinkedLead = unlinkedLeads[0];
+            const { FormLeadActivationService } = await import('@/lib/services/form-lead-activation.service');
+            log.info(`[MEMORY_SELF_HEALING] Triggering auto-activation for unlinked lead: ${unlinkedLead.id}`, { phone });
+            const actRes = await FormLeadActivationService.activate({
+              tenantId,
+              leadId: unlinkedLead.id,
+              phoneNumber: phone,
+              patientName: unlinkedLead.patient_name || undefined,
+              formName: unlinkedLead.form_name || 'Bilinmeyen Form',
+              email: unlinkedLead.email || undefined,
+              source: 'self_healing_sync'
+            });
+
+            if (actRes.activated && actRes.opportunityId) {
+              activeOppId = actRes.opportunityId;
+              log.info(`[MEMORY_SELF_HEALING_SUCCESS] Activated lead ${unlinkedLead.id} and linked to opp ${activeOppId}`);
+            }
+          }
+        } catch (healErr) {
+          log.warn(`[MEMORY_SELF_HEALING_FAILED] Self-healing lead activation failed: ${healErr}`);
+        }
+      }
+
       const currentNotes = conv[0].current_notes || '';
       const currentOppSummary = conv[0].current_opp_summary || '';
       let currentFormSummary = conv[0].current_form_summary || '';
