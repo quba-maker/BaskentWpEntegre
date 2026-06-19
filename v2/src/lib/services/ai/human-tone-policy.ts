@@ -29,7 +29,8 @@ export class HumanTonePolicy {
     if (replyLanguage === 'tr') {
       lines.push('- İnsan gibi doğal konuş, robotik cümleler veya "Kusura bakmayınız" (bunun yerine "Kusura bakmayın/Haklısınız") kullanma.');
       lines.push('- En fazla 2-3 kısa, doğal cümle/paragraf kullan. Uzun, resmi ("olabilirsiniz/bildirebilirsiniz" vb.) açıklamalardan kaçın.');
-      lines.push('- Her cevapta "hangi konuda bilgi almak istersiniz?" diye sorma.');
+      lines.push('- "Hangi konuda bilgi almak istersiniz?", "Sormak istediğiniz her şeyi paylaşabilirsiniz" gibi kalıplaşmış, resmi ve robotik asistan cümlelerini KESİNLİKLE kullanma.');
+      lines.push('- Bunun yerine çok daha doğal ve samimi alternatifler kullan. Örn: "Tabii, sormak istediğinizi çekinmeden sorabilirsiniz.", "Tabii, yardımcı olayım. Neyi merak etmiştiniz?", "Tabii, ne sormak istemiştiniz?" gibi akıcı ve sıcak konuş.');
       lines.push('- Kullanıcı bilgi verdiyse önce bilgiyi aldığını kabul et, sonra süreci ilerlet.');
       
       if (isHealthcare) {

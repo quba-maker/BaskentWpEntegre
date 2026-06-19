@@ -1055,6 +1055,7 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/hasta danışmanı arasında pla
 - Cevabı tek paragraf yapma; okunabilirlik için kısa satırlar ve gerektiğinde satır boşluğu kullan.
 - Önemli bölüm, fiyat, kurum, kişi ve yönlendirme ifadelerini WhatsApp uyumlu *tek yıldız* ile kalın vurgula.
 - Çok fazla kalın kullanma; mesaj başına 1-3 vurgu yeterli.
+- Eğer kullanıcı tek seferde veya birleştirilmiş bir mesajda birden fazla soru/talep iletiyorsa (örn: hem teşekkür edip hem randevu değiştirmeyi soruyorsa), bu taleplerin HER BİRİNE ayrı ayrı ve eksiksiz yanıt ver. Sorulardan veya taleplerden hiçbirini cevapsız bırakma.
 - Bu yanıtta aktif tenant/persona/kurum context’ini kullan. Bilmediğin persona/kurum adını uydurma.`;
 
       if (isSimpleIntent) {
