@@ -959,7 +959,7 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/hasta danışmanı arasında pla
     if (!intentGuide) {
       if (effectiveIntent === 'form_followup') {
         const compPhrase = resolvedFactsForGuide.complaint ? ` (${resolvedFactsForGuide.complaint} ile ilgili)` : '';
-        intentGuide = `Intent: form_followup\nHasta form doldurduğunu veya başvurusunu kontrol etmeni söylüyor. Sistemde form/başvuru kaydının bulunduğunu belirt ve formu onayladığını söyle${compPhrase}. Hastaya formda belirttiği detayları tekrar sorma. Bilgilendirme amaçlı arama planlamak için uygun gün/saat bilgisini iste.`;
+        intentGuide = `Intent: form_followup\nHasta form doldurduğunu veya başvurusunu belirtiyor. YAPMA: "Hangi konuda yardımcı olabilirim?" veya "Kaydınızı göremiyorum" gibi generic/olumsuz ifadeler kullanma. YAP: Başvurunun alındığını sıcak bir şekilde onayla${compPhrase}. Sistemde form kaydı görünüyorsa şikayeti/konuyu referans al. Görünmüyorsa yine olumlu bir karşılık ver: "Başvurunuzu aldık, teşekkür ederiz." Ardından bilgilendirme görüşmesi için uygun gün/saat iste.`;
       } else if (effectiveIntent === 'greeting') {
         intentGuide = `Intent: greeting\nBu cevapta sadece hastanın/müşterinin selamına doğal ve kısa bir karşılık ver.\nEski CRM/şikayet özetini veya randevu konusunu bu aşamada açma.`;
       } else if (effectiveIntent === 'identity_question') {

@@ -508,11 +508,19 @@ export class ContextAwareSafeFallbackResolver {
     if (isFormFollowup) {
       const formFacts = unifiedContext?.patient_known_facts || [];
       const hasRealFormContext = !!unifiedContext?.latestForm || (Array.isArray(formFacts) && formFacts.length > 0);
+      // Try to extract known complaint for personalized acknowledgment
+      const _formData = unifiedContext?.latestForm?.data;
+      const _parsedFormData = typeof _formData === 'string' ? (() => { try { return JSON.parse(_formData); } catch { return {}; } })() : (_formData || {});
+      const knownComplaint = _parsedFormData?.complaint || _parsedFormData?.subject || unifiedContext?.opportunity?.complaint || '';
+      const complaintPhrase = knownComplaint && typeof knownComplaint === 'string' && knownComplaint.trim() ? ` (${knownComplaint.trim()})` : '';
       let text = '';
       if (hasRealFormContext) {
-        text = `Form başvurunuzla ilgili yardımcı olabilirim. Hangi konuda bilgi almak istersiniz?`;
+        // Form linked — acknowledge, reference complaint if known, ask for callback time
+        text = `Başvurunuzu sistemde gördüm${complaintPhrase}. Bilgilendirme görüşmesi için uygun olduğunuz gün ve saat aralığını paylaşır mısınız? 🙏`;
       } else {
-        text = `Form kaydınızı burada net göremiyorum. Size yardımcı olabilmem için başvuru yaptığınız konu veya şikayeti yazabilir misiniz?`;
+        // Form not yet linked to this conversation — don't say 'can't find'
+        // Gracefully acknowledge and continue
+        text = `Başvurunuzu aldık, teşekkür ederiz 🙏 Daha iyi yardımcı olabilmem için hangi konuda bilgi almak istediğinizi veya şikayetinizi kısaca yazar mısınız?`;
       }
       return {
         text,
