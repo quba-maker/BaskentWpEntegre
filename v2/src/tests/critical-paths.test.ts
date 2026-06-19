@@ -6840,6 +6840,39 @@ test("P0.17-FP-12: PromptChallengeSafetyPolicy — neutral and complex complaint
   assert(respComplex.includes("Hangi konuda bilgi almak istediğinizi iletebilirsiniz"), "Complex long complaint should resolve to default query phrase");
 });
 
+test("P0.17-FP-13: Country resolution updates even if existingCountry is set (when not locked)", async () => {
+  const { normalizeCountry } = await import("../lib/utils/country-normalizer");
+
+  // Simulating the worker country resolution logic
+  const isCountryLocked = false;
+  const existingCountry = "Türkiye";
+  const crmData = { country: "Hollanda" };
+  const formExt = null;
+  const phoneNumber = "905546833306";
+
+  let resolvedCountryForConv = existingCountry;
+  if (!isCountryLocked) {
+    if (formExt?.country) {
+      const norm = normalizeCountry(formExt.country, phoneNumber);
+      if (norm.countryConfidence === 'high' && !norm.countryConfirmationNeeded) {
+        resolvedCountryForConv = norm.country;
+      }
+    } else if (crmData?.country) {
+      const norm = normalizeCountry(crmData.country, phoneNumber);
+      if (norm.countryConfidence === 'high' && !norm.countryConfirmationNeeded) {
+        resolvedCountryForConv = norm.country;
+      }
+    } else if (!existingCountry) {
+      const norm = normalizeCountry(null, phoneNumber);
+      if (norm.countryConfidence === 'high' && !norm.countryConfirmationNeeded) {
+        resolvedCountryForConv = norm.country;
+      }
+    }
+  }
+
+  assert(resolvedCountryForConv === "Hollanda", `Expected resolved country to update to 'Hollanda', got: ${resolvedCountryForConv}`);
+});
+
 // ==========================================
 // SONUÇLAR
 // ==========================================

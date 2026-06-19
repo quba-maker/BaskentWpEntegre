@@ -2829,7 +2829,7 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
             }
 
             let resolvedCountryForConv = existingCountry;
-            if (!isCountryLocked && !existingCountry) {
+            if (!isCountryLocked) {
               if (formExt?.country) {
                 const norm = normalizeCountry(formExt.country, phoneNumber);
                 if (norm.countryConfidence === 'high' && !norm.countryConfirmationNeeded) {
@@ -2840,7 +2840,7 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
                 if (norm.countryConfidence === 'high' && !norm.countryConfirmationNeeded) {
                   resolvedCountryForConv = norm.country;
                 }
-              } else {
+              } else if (!existingCountry) {
                 const norm = normalizeCountry(null, phoneNumber);
                 if (norm.countryConfidence === 'high' && !norm.countryConfirmationNeeded) {
                   resolvedCountryForConv = norm.country;
@@ -3210,7 +3210,7 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
 
           // ═══ P1A-FIX3: Opp country priority — CRM > existingOpp > conv ═══
           const existingOppCountry = beforeOpp?.country || null;
-          const resolvedCountryForOpp = crmData.country || existingOppCountry || existingCountry || null;
+          const resolvedCountryForOpp = resolvedCountryForConv || existingOppCountry || null;
 
           // ═══ P1B: Non-Aggressive Boundary Detection ═══
           // Country correction = update existing, NOT new opp
