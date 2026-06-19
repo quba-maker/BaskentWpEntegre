@@ -4154,15 +4154,29 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       }
     }
 
+    let combinedInboundText = latestInboundContent || '';
     try {
       const { ConversationService } = await import('../services/conversation.service');
       const convService = new ConversationService(db);
       rawHistory = await convService.getHistory(phoneNumber, 10);
 
+      // Find all consecutive user messages at the end of rawHistory and combine them chronologically
+      const unrepliedUserContents: string[] = [];
+      for (let i = rawHistory.length - 1; i >= 0; i--) {
+        if (rawHistory[i].role === 'user') {
+          unrepliedUserContents.unshift(rawHistory[i].content);
+        } else {
+          break;
+        }
+      }
+      if (unrepliedUserContents.length > 0) {
+        combinedInboundText = unrepliedUserContents.join('\n');
+      }
+
       const { ConversationTurnAggregator } = await import('../services/ai/conversation-turn-aggregator');
       const history = await ConversationTurnAggregator.aggregate(tenantId, phoneNumber, rawHistory, 10);
       unifiedContext.history = history;
-      unifiedContext.currentMessageText = latestInboundContent || '';
+      unifiedContext.currentMessageText = combinedInboundText;
     } catch (e) {
       this.log.error(`[DEBOUNCE_WORKER] Error fetching conversation history`, e as Error, { traceId });
     }
@@ -4177,7 +4191,7 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       const orchestratorResult = await AIResponseOrchestrator.run({
         tenantId,
         phoneNumber,
-        inboundText: latestInboundContent || '',
+        inboundText: combinedInboundText,
         mediaType: null,
         mediaMetadata: null,
         brain,

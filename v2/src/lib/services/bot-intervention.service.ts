@@ -196,9 +196,11 @@ export class BotInterventionService {
       dbMetadata.draft_error_code = "TENANT_ISOLATION_FAULT"; // Re-used generic code indicating generation failed
     }
 
+    const botModelUsed = isFallback ? 'fallback' : 'gemini-2.5-flash';
+
     const msgInsert = await this.db.executeSafe({
-      text: `INSERT INTO messages (tenant_id, conversation_id, phone_number, direction, content, channel, status, provider_message_id, media_metadata)
-             VALUES ($1, $2, $3, 'out', $4, $5, $6, $7, $8)
+      text: `INSERT INTO messages (tenant_id, conversation_id, phone_number, direction, content, channel, status, provider_message_id, model_used, media_metadata)
+             VALUES ($1, $2, $3, 'out', $4, $5, $6, $7, $8, $9)
              RETURNING id`,
       values: [
         this.db.tenantId, 
@@ -208,6 +210,7 @@ export class BotInterventionService {
         channel, 
         messageStatus, 
         providerMessageId,
+        botModelUsed,
         JSON.stringify(dbMetadata)
       ]
     }) as any[];
@@ -222,10 +225,11 @@ export class BotInterventionService {
                  last_channel = $2,
                  last_message_status = $3,
                  last_message_direction = 'out',
+                 last_message_model = $4,
                  message_count = COALESCE(message_count, 0) + 1
                  -- Not changing status to 'bot' or 'autopilot_enabled' here for one-shot.
-             WHERE id = $4 AND tenant_id = $5`,
-      values: [guardedMsg, channel, messageStatus, conversationId, this.db.tenantId]
+             WHERE id = $5 AND tenant_id = $6`,
+      values: [guardedMsg, channel, messageStatus, botModelUsed, conversationId, this.db.tenantId]
     });
 
     // 9. Write Outreach Log

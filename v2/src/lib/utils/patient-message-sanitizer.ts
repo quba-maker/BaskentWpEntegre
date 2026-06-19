@@ -209,11 +209,17 @@ function convertLetUsToFormal(root: string): string {
  * Cleans up double spaces and spaces before punctuation.
  */
 function cleanPunctuationAndSpaces(text: string): string {
+  if (!text) return '';
   return text
-    .replace(/\s+/g, ' ')
-    .replace(/\s+([.,!?])/g, '$1')
-    .replace(/,\s*,/g, ',')
-    .replace(/\s*,\s*\./g, '.')
+    .split('\n')
+    .map(line => line
+      .replace(/[ \t]+/g, ' ')
+      .replace(/[ \t]+([.,!?])/g, '$1')
+      .trim()
+    )
+    .join('\n')
+    .replace(/,[ \t]*,/g, ',')
+    .replace(/[ \t]*,[ \t]*\./g, '.')
     .trim();
 }
 

@@ -936,9 +936,11 @@ export class AIResponseOrchestrator {
         // Run LLM Response generation
         const formattedMessages: ChatMessage[] = [
           { role: 'system' as const, content: llmSystemPrompt },
-          ...history,
-          { role: 'user' as const, content: inboundText }
+          ...history
         ];
+        if (history.length === 0 || history[history.length - 1].role !== 'user') {
+          formattedMessages.push({ role: 'user' as const, content: inboundText });
+        }
 
         const llmModel = brain.context.settings.aiModel || 'gemini-2.5-flash';
         const apiKey = brain.context.config?.raw?.gemini_api_key || process.env.GEMINI_API_KEY || '';
