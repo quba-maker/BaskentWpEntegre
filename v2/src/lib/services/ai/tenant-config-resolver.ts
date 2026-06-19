@@ -172,4 +172,28 @@ export class TenantConfigResolver {
     }
     return result;
   }
+  /**
+   * P0.19: Returns a flat string[] of department keywords for ConversationIntentRouter.route/routeAll.
+   *
+   * Priority:
+   *   1. brain.context.config.intentDepartments (flat string[] — direct override)
+   *   2. brain.context.config.topicDepartments (structured — flattened keywords)
+   *   3. null → caller (ConversationIntentRouter) uses its own DEFAULT_DEPARTMENTS
+   *
+   * Config path: brain.context.config.intentDepartments (string[]) — simplest override
+   *              brain.context.config.topicDepartments ([{name, keywords}]) — structured
+   */
+  static getIntentDepartmentKeywords(brain: any): string[] | null {
+    // 1. Flat override
+    const flatOverride = brain?.context?.config?.intentDepartments;
+    if (Array.isArray(flatOverride) && flatOverride.length > 0) {
+      return flatOverride.map((k: string) => k.toLowerCase().trim()).filter(Boolean);
+    }
+    // 2. Structured topicDepartments → flatten keywords
+    const structured = TenantConfigResolver.getTopicDepartments(brain);
+    if (structured && structured.length > 0) {
+      return structured.flatMap(d => d.keywords.map(k => k.toLowerCase().trim()));
+    }
+    return null; // ConversationIntentRouter will use DEFAULT_DEPARTMENTS
+  }
 }

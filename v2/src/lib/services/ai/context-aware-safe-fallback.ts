@@ -122,11 +122,13 @@ export class ContextAwareSafeFallbackResolver {
         finalPath: 'multi_intent_healthcare_tourism_fallback'
       }));
 
+      const _tcr = require('./tenant-config-resolver').TenantConfigResolver;
+      const _agentLbl = _tcr.getAgentName(brain);
       const text = `${location}'dan bizimle iletişime geçtiğiniz için teşekkür ederiz. ${dept} süreci, ulaşım ve fiyatlandırma ile ilgili bilgiler aşağıdadır:\n\n` +
-        `• **Ulaşım ve Konaklama**: Şehir dışı ve yurt dışından gelen hastalarımız için havalimanı transferi, konaklama ve süreç planlama koordinasyonu ekibimiz tarafından organize edilmektedir.\n` +
-        `• **${dept} Süreci**: İlgili branşımız bünyesinde tanı ve tedavi süreçleri uzman hekimlerimiz kontrolünde planlanmaktadır.\n` +
-        `• **Fiyatlandırma**: Tedavi fiyatları, hekimimizin yapacağı değerlendirme ve oluşturulacak kişiye özel tedavi planına göre belirlenmektedir.\n` +
-        `• **Sonraki Adım**: Detayları görüşmek ve planlama yapmak üzere hasta danışmanımızla telefon görüşmesi planlayabiliriz. Hangi gün ve saat aralığında görüşmek istersiniz? 🙏`;
+        `• **Ulaşım ve Konaklama**: Şehir dışı ve yurt dışından gelen ziyaretçilerimiz için havalimanı transferi, konaklama ve süreç planlama koordinasyonu ekibimiz tarafından organize edilmektedir.\n` +
+        `• **${dept} Süreci**: İlgili branşımız bünyesinde değerlendirme ve hizmet süreçleri uzman ekibimiz kontrolünde planlanmaktadır.\n` +
+        `• **Fiyatlandırma**: Hizmet ücretleri, yapılacak değerlendirme ve oluşturulacak kişiye özel plana göre belirlenmektedir.\n` +
+        `• **Sonraki Adım**: Detayları görüşmek ve planlama yapmak üzere ${_agentLbl}la kısa bir görüşme planlanabilir. Hangi gün ve saat aralığında uygun olursunuz? 🙏`;
 
       return {
         text,
@@ -214,7 +216,8 @@ export class ContextAwareSafeFallbackResolver {
     );
 
     if (isShortConfirmation && !hasPendingSlotActive && !hasActiveTaskTimeContext) {
-      const persona = identityConfig?.personaName || (isHealthcare ? 'hasta danışmanımız' : 'temsilcimiz');
+      const persona = identityConfig?.personaName
+        || (require('./tenant-config-resolver').TenantConfigResolver as typeof import('./tenant-config-resolver').TenantConfigResolver).getAgentName(brain);
       console.log(JSON.stringify({
         tag: 'SHORT_CONFIRMATION_NO_SLOT_BYPASS',
         inbound: lowerInbound,
@@ -451,8 +454,8 @@ export class ContextAwareSafeFallbackResolver {
 
         // P0.16-M: DoctorNamesPolicy replaces legacy "şu an bu ekrandan" text
         if (verifiedDoctorsText) {
-          const targetPhrase = deptPhrase ? `${deptPhrase} için doğrulanmış hekimlerimizin` : 'doğrulanmış hekimlerimizin';
-          text = `Hastalarımıza hizmet veren ${targetPhrase} listesini aşağıda paylaşıyorum:\n${verifiedDoctorsText}`;
+          const targetPhrase = deptPhrase ? `${deptPhrase} için doğrulanmış uzman ekibimizin` : 'doğrulanmış uzman ekibimizin';
+          text = `Sizlere hizmet veren ${targetPhrase} listesini aşağıda paylaşıyorum:\n${verifiedDoctorsText}`;
         } else {
           // P0.16-M: Never use legacy "bu ekrandan net doğrulayamıyorum" — use DoctorNamesPolicy instead
           const deptKey = effectiveDept ? [effectiveDept] : [];
@@ -463,7 +466,7 @@ export class ContextAwareSafeFallbackResolver {
           } catch {
             // Safe fallback if DoctorNamesPolicy not available
             const dept = deptPhrase || 'ilgili bölümümüz';
-            text = `${dept} için hasta danışmanımız doktor listesini size iletecektir. Telefon görüşmesi için uygun gün ve saat paylaşır mısınız?`;
+            text = `${dept} için ${agentName} uzman listesini size iletecektir. Telefon görüşmesi için uygun gün ve saat paylaşır mısınız?`;
           }
         }
       } else {
@@ -488,7 +491,7 @@ export class ContextAwareSafeFallbackResolver {
     const isHumanTransfer = detectedIntent === 'human_transfer_request' || interpretedIntent === 'human_transfer_request';
     if (isHumanTransfer) {
       const text = isHealthcare
-        ? `Haklısınız, bu konuda bir hasta danışmanımızın ilgilenmesi daha doğru olur. Talebinizi hasta danışmanımıza iletilmesi için not alıyorum.`
+        ? `Haklısınız, bu konuda ${agentName}nın ilgilenmesi daha doğru olur. Talebinizin iletilmesi için not alıyorum.`
         : `Haklısınız, bu konuda bir temsilcimizin ilgilenmesi daha doğru olur. Talebinizi temsilcimize iletilmesi için not alıyorum.`;
       return {
         text,
@@ -637,13 +640,13 @@ export class ContextAwareSafeFallbackResolver {
           const lastUserMsgText = userMsgs.length > 0 ? userMsgs[userMsgs.length - 1].content : '';
           if (lastUserMsgText) {
             if (isHealthcare) {
-              replyText = `Haklısınız, cevabınızı aldım. ${lastUserMsgText} bilgisini not ettim; isterseniz hasta danışmanımızla telefon görüşmesi planlanması için not alabiliriz.`;
+              replyText = `Haklısınız, cevabnızı aldım. ${lastUserMsgText} bilgisini not ettim; isterseniz ${agentName}la telefon görüşmesi planlanması için not alabiliriz.`;
             } else {
               replyText = `Haklısınız, cevabınızı aldım. ${lastUserMsgText} bilgisini not ettim; isterseniz bu bilgiyi temsilci ekibimize iletilmesi için not alabilirim.`;
             }
           } else {
             if (isHealthcare) {
-              replyText = `Haklısınız, cevabınızı aldım ve not ettim; isterseniz hasta danışmanımızla telefon görüşmesi planlanması için not alabiliriz.`;
+              replyText = `Haklısınız, cevabnızı aldım ve not ettim; isterseniz ${agentName}la telefon görüşmesi planlanması için not alabiliriz.`;
             } else {
               replyText = `Haklısınız, cevabınızı aldım ve not ettim; isterseniz bu bilgiyi temsilci ekibimize iletilmesi için not alabilirim.`;
             }
@@ -788,11 +791,11 @@ export class ContextAwareSafeFallbackResolver {
         slotText = `Belirttiğimiz görüşme planlamasını onaylıyor musunuz?`;
       } else if (pendingSlot === 'transfer_confirmation') {
         slotText = isHealthcare
-          ? `Sizi ilgili hasta danışmanımıza aktarmamı onaylıyor musunuz?`
+          ? `Sizi ilgili ${agentName}ımıza aktarmamı onayliyor musunuz?`
           : `Sizi ilgili uzman temsilcimize aktarmamı onaylıyor musunuz?`;
       } else if (pendingSlot === 'price_followup') {
         slotText = isHealthcare
-          ? `Dilerseniz hasta danışmanımızla telefon görüşmesi planlanması için not alabiliriz.`
+          ? `Dilerseniz ${agentName}la telefon görüşmesi planlanması için not alabiliriz.`
           : `Dilerseniz temsilcimizle telefon görüşmesi planlanması için not alabiliriz.`;
       } else if (pendingSlot === 'complaint_detail') {
         slotText = `Durumunuzu daha iyi anlayabilmemiz için şikayetinizi biraz daha detaylandırabilir misiniz?`;
@@ -871,7 +874,7 @@ export class ContextAwareSafeFallbackResolver {
 
     if (detectedIntent === 'distance_objection') {
       const text = isHealthcare
-        ? `Uzaklık endişenizi çok iyi anlıyorum. Şehir dışından ve yurt dışından gelen hastalarımız için transfer, konaklama ve süreç planlama koordinasyonunu ekibimiz organize etmektedir. Detayları telefonda görüşebiliriz.`
+        ? `Uzaklık endişenizi çok iyi anlıyorum. Şehir dışından ve yurt dışından gelen ziyaretçilerimiz için transfer, konaklama ve süreç planlama koordinasyonunu ekibimiz organize etmektedir. Detayları telefonda görüşebiliriz.`
         : `Mesafe konusundaki endişenizi anlıyorum. Uzaktan katılım ve koordinasyon konusunda ekibimiz her türlü desteği sağlamaktadır. Detayları görüşmek için kısa bir telefon görüşmesi planlayabiliriz.`;
       return {
         text,
@@ -956,7 +959,7 @@ export class ContextAwareSafeFallbackResolver {
     // 3.5. Tenant Default History Fallback (only if no specific intent/bypass returned early)
     if (identityCtx.hasTenantPrompt && history.length > 0) {
       return {
-        text: buildHistoryAwareRecoveryFallback(history, isHealthcare, resolvedIndustry, identityCtx),
+        text: buildHistoryAwareRecoveryFallback(history, isHealthcare, resolvedIndustry, identityCtx, agentName),
         sector: resolvedIndustry,
         hasFormContext,
         hasComplaint,
@@ -968,7 +971,7 @@ export class ContextAwareSafeFallbackResolver {
     // 4. Default Fallback Routing (General)
     if (history.length > 0) {
       return {
-        text: buildHistoryAwareRecoveryFallback(history, isHealthcare, resolvedIndustry, identityCtx),
+        text: buildHistoryAwareRecoveryFallback(history, isHealthcare, resolvedIndustry, identityCtx, agentName),
         sector: resolvedIndustry,
         hasFormContext,
         hasComplaint,
@@ -1089,7 +1092,8 @@ export function buildHistoryAwareRecoveryFallback(
   history: any[],
   isHealthcare: boolean,
   resolvedIndustry: string,
-  identityCtx: any
+  identityCtx: any,
+  agentName: string
 ): string {
   const hasHistory = Array.isArray(history) && history.length > 0;
   const pName = identityCtx?.personaName;
@@ -1167,7 +1171,7 @@ export function buildHistoryAwareRecoveryFallback(
   // General healthcare fallback but with summary of complaint
   if (isHealthcare) {
     if (complaint) {
-      return `Haklısınız, ${complaint} şikayetinizle ilgili paylaştığınız detayları not ettim. Bu süreçte hekim değerlendirmesi ve tedavi planlaması için sizi ilgili birime/hasta danışmanımıza yönlendirebiliriz.`;
+      return `Haklısınız, ${complaint} şikayetinizle ilgili paylaştığınız detayları not ettim. Bu süreçte değlendirme ve planlama için sizi ilgili birime/${agentName}a yönlendirebiliriz.`;
     }
     if (hasPersona) {
       return `Ben *${pName}*, ${orgName}’nden sizinle ilgileniyorum. Size sağlık talebinizle ilgili yardımcı olayım.`;

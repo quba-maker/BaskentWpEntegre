@@ -24,6 +24,8 @@ import { WhatsAppFormattingFinalizer } from './whatsapp-formatting-finalizer';
 import { TurkishFinalQualityNormalizer } from './turkish-final-quality-normalizer';
 // P0.16-M: Final pipeline enforcer — mandatory chain for all response paths
 import { FinalPipelineEnforcer } from './final-pipeline-enforcer';
+// P0.19: Tenant-agnostic config resolver
+import { TenantConfigResolver } from './tenant-config-resolver';
 
 
 export interface OrchestratorParams {
@@ -580,7 +582,9 @@ export class AIResponseOrchestrator {
       const isMixedDoctorProcess = isDoctorLookup && isProcessQuestion;
 
       // P0.16-K: Intent routing for next_step_request bypass (before LLM)
-      const routedIntent = ConversationIntentRouter.route(inboundText);
+      // P0.19: Pass tenant-specific department override for topic_switch detection
+      const _tenantDeptKw = TenantConfigResolver.getIntentDepartmentKeywords(brain) ?? undefined;
+      const routedIntent = ConversationIntentRouter.route(inboundText, _tenantDeptKw);
       const isNextStepRequest = routedIntent === 'next_step_request';
 
       // P0.16-K: Multi-intent detection (address+price+doctor+process in one message)
@@ -598,7 +602,7 @@ export class AIResponseOrchestrator {
       const isOpenContinuation = /ba(?:ş|s)ka\s+(?:bir\s+)?(bilgi|soru|[şs]ey)|ba(?:ş|s)ka\s+bir\s+(?:ş|s)ey\s+sorabilir|daha\s+fazla\s+bilgi|bir\s+(?:ş|s)ey\s+daha/i.test(inboundText);
 
       // P0.16-L: routeAll — full intent matrix for new bypass paths
-      const allIntents = ConversationIntentRouter.routeAll(inboundText);
+      const allIntents = ConversationIntentRouter.routeAll(inboundText, _tenantDeptKw);
       const isThanksButContinue = allIntents.includes('thanks_but_continue');
       const isOpenContinuationIntent = allIntents.includes('open_continuation') || isOpenContinuation;
       const isCannotTravelObjection = allIntents.includes('cannot_travel_objection');
@@ -780,7 +784,7 @@ export class AIResponseOrchestrator {
           const cannotTravelText = [
             `Anlıyorum, şu an gelmek zor olabilir. Bu tamamen doğal.`,
             ``,
-            `${locationNote} gelen hastalarımız için önce bir telefon görüşmesiyle süreci netleştiriyoruz. Bu görüşmede:`,
+            `${locationNote} gelen ziyaretçilerimiz için önce bir telefon görüşmesiyle süreci netleştiriyoruz. Bu görüşmede:`,
             `• ${selfComp} için hangi branşın değerlendireceğini,`,
             `• Varsa mevcut MR/tetkiklerinizin nasıl paylaşılabileceğini,`,
             `• Geliş planı ve tahmini süreci,`,
@@ -805,9 +809,9 @@ export class AIResponseOrchestrator {
           const selfComp = selfParticipant?.complaint || 'şikayetiniz';
           const locNote = locationLabel ? `${locationLabel}'dan` : 'Uzaktan';
           const distText = [
-            `Anlıyorum, Konya'nın uzak gelmesi çok doğal bir endişe.`,
+            `Anlıyorum, uzaklık doğal bir endişe olabilir.`,
             ``,
-            `${locNote} gelen hastalarımız için süreci önce telefonla netleştiriyoruz. Bu görüşmede:`,
+            `${locNote} gelen ziyaretçilerimiz için süreci önce telefonla netleştiriyoruz. Bu görüşmede:`,
             `• ${selfComp} için doğru branş ve uzman bilgisi,`,
             `• Varsa tetkiklerinizin önceden değerlendirilebileceği,`,
             `• Geliş, konaklama ve ulaşım planlaması,`,
@@ -857,7 +861,7 @@ export class AIResponseOrchestrator {
           const processText = [
             `${dept} sürecinde ilk adım uzman hekim değerlendirmesidir.`,
             `Bu değerlendirmede mevcut bulgularınız (varsa MR/tetkikler) incelenerek size özel bir tedavi planı oluşturulur.`,
-            `Sonraki adım için hasta danışmanımızla kısa bir telefon görüşmesi planlayabiliriz.`,
+            `Sonraki adım için kısa bir telefon görüşmesi planlanabilir.`,
             `Hangi gün ve saat aralığında uygun olursunuz?`,
           ].join('\n');
 

@@ -385,7 +385,7 @@ export class AIOrchestrator {
         // P0.18: Do not hardcode industry='healthcare' or organizationName='Sağlık Merkezi'.
         // Legacy orchestrator has no brain reference here — use generic empty-industry fallback.
         // Real tenants use ai-response-orchestrator.ts which has full brain context.
-        fallbackText = buildHistoryAwareRecoveryFallback(currentMessages, false, '', {});
+        fallbackText = buildHistoryAwareRecoveryFallback(currentMessages, false, '', {}, 'temsilcimiz');
       } catch (err) {
         fallbackText = "Mesajınız alındı. En kısa sürede yardımcı olmak üzere ulaşacağız. 🙏";
       }
@@ -426,9 +426,9 @@ export class AIOrchestrator {
         const location = matchedLocation.key;
         const dept = matchedDept?.key || 'Tedavi';
         fallbackText = `${location}'dan bizimle iletişime geçtiğiniz için teşekkür ederiz. ${dept} süreci, ulaşım ve fiyatlandırma ile ilgili bilgiler aşağıdadır:\n\n` +
-          `• **Ulaşım ve Konaklama**: Şehir dışı ve yurt dışından gelen hastalarımız için havalimanı transferi, konaklama ve süreç planlama koordinasyonu ekibimiz tarafından organize edilmektedir.\n` +
-          `• **${dept} Süreci**: İlgili branşımız bünyesinde tanı ve tedavi süreçleri uzman hekimlerimiz kontrolünde planlanmaktadır.\n` +
-          `• **Fiyatlandırma**: Tedavi fiyatları, hekimimizin yapacağı değerlendirme ve oluşturulacak kişiye özel tedavi planına göre belirlenmektedir.\n` +
+          `• **Ulaşım ve Konaklama**: Şehir dışı ve yurt dışından gelen ziyaretçilerimiz için havalimanı transferi, konaklama ve süreç planlama koordinasyonu ekibimiz tarafından organize edilmektedir.\n` +
+          `• **${dept} Süreci**: İlgili branşımız bünyesinde değerlendirme ve hizmet süreçleri uzman ekibimiz kontrolünde planlanmaktadır.\n` +
+          `• **Fiyatlandırma**: Hizmet ücretleri, yapılacak değerlendirme ve oluşturulacak kişiye özel plana göre belirlenmektedir.\n` +
           `• **Sonraki Adım**: Detayları görüşmek ve planlama yapmak üzere görüşme planlanabilir. Hangi gün ve saat aralığında görüşmek istersiniz? 🙏`;
       } else if (e.message?.startsWith('COST_LIMIT_EXCEEDED')) {
         fallbackText = "Mesajınız alındı. Şu an yoğunluk nedeniyle kısa bir gecikme yaşanıyor. Lütfen biraz sonra tekrar yazınız. 🙏";

@@ -46,11 +46,23 @@ export class ConversationIntentRouter {
       .trim();
   }
 
+  // P0.19: DEFAULT_DEPARTMENTS — can be overridden per-tenant via brain.context.config.intentDepartments
+  // Healthcare-specific defaults, used when no tenant override is provided
+  private static DEFAULT_DEPARTMENTS = [
+    'dahiliye', 'kardiyoloji', 'goz', 'cildiye', 'ortopedi', 'fizik tedavi',
+    'noroloji', 'uroloji', 'kbb', 'kulak burun bogaz', 'plastik cerrahi',
+    'tup bebek', 'pediatri', 'cocuk hastaliklari', 'kadin dogum', 'jinekoloji',
+    'genel cerrahi', 'onkoloji', 'beyin cerrahi', 'gogus hastaliklari'
+  ];
+
   /**
    * Routes the incoming message text to the most appropriate intent.
    * LLM-independent, lightweight regex and keyword-based.
+   *
+   * P0.19: tenantDepartments allows per-tenant topic_switch department override.
+   * Pass TenantConfigResolver.getTopicDepartments(brain)?.flatMap(d=>d.keywords.map(k=>k.toLowerCase()))
    */
-  public static route(text: string): ConversationIntent {
+  public static route(text: string, tenantDepartments?: string[]): ConversationIntent {
     if (!text) return 'generic_other';
     const clean = this.cleanText(text);
     const originalLower = text.toLowerCase().trim();
@@ -254,12 +266,10 @@ export class ConversationIntentRouter {
     }
 
     // 18. Topic Switch (Departments)
-    const departments = [
-      'dahiliye', 'kardiyoloji', 'göz', 'goz', 'cildiye', 'ortopedi', 'fizik tedavi',
-      'noroloji', 'nöroloji', 'üroloji', 'uroloji', 'kbb', 'kulak burun bogaz', 'plastik cerrahi',
-      'tup bebek', 'tüp bebek', 'pediatri', 'cocuk hastaliklari', 'kadin dogum', 'jinekoloji',
-      'genel cerrahi', 'onkoloji', 'beyin cerrahi', 'gogus hastaliklari'
-    ];
+    // P0.19: Use tenant override if provided, otherwise fall back to DEFAULT_DEPARTMENTS
+    const departments = tenantDepartments && tenantDepartments.length > 0
+      ? tenantDepartments.map(d => this.cleanText(d))
+      : this.DEFAULT_DEPARTMENTS;
     if (departments.some(dep => clean.includes(dep))) {
       return 'topic_switch';
     }
@@ -326,8 +336,10 @@ export class ConversationIntentRouter {
   /**
    * P0.16-L: Returns ALL matching intents for a message (multi-intent routing).
    * Used by orchestrator to detect open_continuation, thanks_but_continue, etc.
+   *
+   * P0.19: tenantDepartments allows per-tenant topic_switch department override (same as route())
    */
-  public static routeAll(text: string): ConversationIntent[] {
+  public static routeAll(text: string, tenantDepartments?: string[]): ConversationIntent[] {
     if (!text) return ['generic_other'];
     const clean = this.cleanText(text);
     const originalLower = text.toLowerCase().trim();
@@ -460,8 +472,8 @@ export class ConversationIntentRouter {
     }
 
     if (intents.length === 0) {
-      // Fall back to single route
-      intents.push(this.route(text));
+      // Fall back to single route — pass tenantDepartments for consistency
+      intents.push(this.route(text, tenantDepartments));
     }
 
     return [...new Set(intents)]; // dedupe
