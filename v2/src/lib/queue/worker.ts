@@ -4366,6 +4366,38 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
         }
       }
 
+      // Self-healing: Check if a new user message arrived while we were processing this response (Re-trigger Queue)
+      try {
+        const lastInboundQuery = await db.executeSafe({
+          text: `SELECT provider_message_id, content FROM messages 
+                 WHERE tenant_id = $1 AND conversation_id = $2 AND direction = 'in' 
+                 ORDER BY created_at DESC LIMIT 1`,
+          values: [tenantId, conversationId]
+        }) as any[];
+        
+        if (lastInboundQuery.length > 0 && lastInboundQuery[0].provider_message_id !== targetMessageId) {
+          this.log.info(`[DEBOUNCE_WORKER] Newer inbound message detected post-execution (${lastInboundQuery[0].provider_message_id}). Re-triggering delayed worker.`, { conversationId });
+          
+          let delaySeconds = 5;
+          if (brain.context.settings?.responseDelaySeconds !== undefined && brain.context.settings?.responseDelaySeconds !== null) {
+            delaySeconds = brain.context.settings.responseDelaySeconds;
+          }
+          const clampedDelaySeconds = Math.max(2, Math.min(30, delaySeconds));
+          const delayMs = clampedDelaySeconds * 1000;
+          
+          const { QueueService } = await import('./queue.service');
+          const queue = new QueueService();
+          await queue.publish(tenantId, `${channel}.message.received.delayed`, {
+            ...payload,
+            targetMessageId: lastInboundQuery[0].provider_message_id
+          }, { delayMs });
+          
+          this.log.info(`[DEBOUNCE_WORKER] Successfully re-scheduled delayed worker for new message ${lastInboundQuery[0].provider_message_id} in ${delayMs}ms`, { conversationId });
+        }
+      } catch (reTriggerErr) {
+        this.log.error(`[DEBOUNCE_WORKER_RE_TRIGGER_FAILED] Non-fatal error during post-execution re-trigger check`, reTriggerErr as Error, { conversationId });
+      }
+
     } catch (llmErr: any) {
       if (
         llmErr instanceof AIBillingExhaustedError ||
