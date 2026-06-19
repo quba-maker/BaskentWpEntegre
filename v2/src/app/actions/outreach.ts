@@ -1930,7 +1930,7 @@ export async function resolveFirstContactAction(leadId: string): Promise<{ succe
         const leadCheck = await ctx.db.executeSafe({
           text: `
             SELECT c.id FROM conversations c
-            JOIN leads l ON l.phone_normalized = c.phone_number OR RIGHT(l.phone_number, 10) = RIGHT(c.phone_number, 10)
+            JOIN leads l ON RIGHT(l.phone_number, 10) = RIGHT(c.phone_number, 10)
             WHERE l.id = $1 AND l.tenant_id = $2 AND c.tenant_id = $2
             LIMIT 1
           `,

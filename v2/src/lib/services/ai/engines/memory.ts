@@ -22,7 +22,7 @@ export class MemoryEngine {
         text: `
           SELECT id, form_name, raw_data, patient_name, country, department 
           FROM leads 
-          WHERE (linked_opportunity_id = $1 OR phone_number = $2 OR phone_normalized = $2) 
+          WHERE (linked_opportunity_id = $1 OR phone_number = $2 OR RIGHT(phone_number, 10) = RIGHT($2, 10)) 
             AND tenant_id = $3 
           ORDER BY created_at DESC 
           LIMIT 1;

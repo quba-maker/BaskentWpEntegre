@@ -324,6 +324,7 @@ export class IdentityEngine {
       const profile = profiles[0];
       if (!profile) return null;
 
+      let lead = null;
       const leads = await db.executeSafe({
         text: `
           SELECT id, form_name, raw_data, channel_id, tenant_id
@@ -334,7 +335,31 @@ export class IdentityEngine {
         `,
         values: [tenantId, customerId]
       }) as any[];
-      const lead = leads[0];
+      lead = leads[0];
+
+      if (!lead && profile.primary_phone) {
+        const suffix = profile.primary_phone.slice(-10);
+        const fallbackLeads = await db.executeSafe({
+          text: `
+            SELECT id, form_name, raw_data, channel_id, tenant_id
+            FROM leads 
+            WHERE tenant_id = $1 
+              AND (phone_number = $2 OR RIGHT(phone_number, 10) = $3)
+            ORDER BY created_at DESC 
+            LIMIT 1
+          `,
+          values: [tenantId, profile.primary_phone, suffix]
+        }) as any[];
+        lead = fallbackLeads[0];
+
+        // Retroactively link this lead to the customer_id so future queries match fast
+        if (lead) {
+          await db.executeSafe({
+            text: `UPDATE leads SET customer_id = $1 WHERE id = $2 AND tenant_id = $3`,
+            values: [customerId, lead.id, tenantId]
+          }).catch((err: any) => console.warn('[IdentityEngine] Non-fatal retroactive lead link failed', err));
+        }
+      }
 
       let memory = null;
       if (conversationId) {
