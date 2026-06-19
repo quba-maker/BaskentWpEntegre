@@ -3,12 +3,12 @@ import { resolveCountry, deduplicatePhones, getCountryInfoByName } from "@/lib/u
 
 export const STAGES = [
   { value: 'new', label: 'Yeni Lead', color: '#007AFF', bg: '#007AFF/10' },
-  { value: 'contacted', label: 'İlk İletişim', color: '#FF9500', bg: '#FF9500/10' },
-  { value: 'responded', label: 'Cevap Alındı', color: '#34C759', bg: '#34C759/10' },
-  { value: 'discovery', label: 'Keşif / Analiz', color: '#5856D6', bg: '#5856D6/10' },
+  { value: 'contacted', label: 'İletişime Geçildi', color: '#FF9500', bg: '#FF9500/10' },
+  { value: 'responded', label: 'Yanıt Alındı', color: '#34C759', bg: '#34C759/10' },
+  { value: 'discovery', label: 'Keşif / Bilgi', color: '#5856D6', bg: '#5856D6/10' },
   { value: 'qualified', label: 'Nitelikli', color: '#30B0C7', bg: '#30B0C7/10' },
   { value: 'appointed', label: 'Randevu Aldı', color: '#0F9D58', bg: '#0F9D58/10' },
-  { value: 'lost', label: 'Uygun Değil', color: '#8E8E93', bg: '#8E8E93/10' },
+  { value: 'lost', label: 'Kaybedildi', color: '#8E8E93', bg: '#8E8E93/10' },
 ] as const;
 
 export const getStageInfo = (stage: string) => STAGES.find(s => s.value === stage) || STAGES[0];

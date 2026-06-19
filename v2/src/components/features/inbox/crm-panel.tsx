@@ -9,7 +9,7 @@ import { CustomerAiBrainPanel } from "@/components/features/ai-observability/Cus
 import { AiTimelinePanel } from "@/components/features/ai-observability/AiTimeline";
 import { resolvePatientDisplayName, formatPhoneReadable } from "@/lib/utils/patient-name-resolver";
 import { normalizeCountry } from "@/lib/utils/country-normalizer";
-import { oppStageToLeadStage } from "@/lib/config/stage-mapping";
+import { oppStageToLeadStage, normalizeToLeadStage } from "@/lib/config/stage-mapping";
 import { extractFromPatientMessageDeterministic } from "@/lib/utils/patient-message-extractor";
 import { resolveInboxActionIntent } from "@/lib/utils/intent-resolver";
 import { resolveDepartmentWithConflict } from "@/lib/utils/crm-conflict-resolver";
@@ -201,7 +201,7 @@ export function ContextPanel() {
     return norm.country || rawVal;
   };
 
-  const [stage, setStage] = useState(oppStageToLeadStage(activeContact?.stage || "new"));
+  const [stage, setStage] = useState(normalizeToLeadStage(activeContact?.stage));
   const [department, setDepartment] = useState(activeContact?.department || "");
   const [country, setCountry] = useState(getInitialCountry(activeContact));
   const [notes, setNotes] = useState(getInitialNotes(activeContact));
@@ -359,7 +359,7 @@ export function ContextPanel() {
   
   useEffect(() => {
     if (activeContact) {
-      setStage(oppStageToLeadStage(activeContact.stage || "new"));
+      setStage(normalizeToLeadStage(activeContact.stage));
       setDepartment(activeContact.department || "");
       setCountry(getInitialCountry(activeContact));
       setNotes(getInitialNotes(activeContact));
@@ -475,6 +475,13 @@ export function ContextPanel() {
       setFormGreetingChecked(true);
       setIsCheckingFormGreeting(false);
       setIsLoadingSteeringTasks(false);
+
+      // Sync local CRM field states directly from fresh DB values
+      if (crmData.stage) setStage(normalizeToLeadStage(crmData.stage));
+      if (crmData.department !== undefined) setDepartment(crmData.department || "");
+      if (crmData.country !== undefined) setCountry(crmData.country || "");
+      if (crmData.notes !== undefined) setNotes(crmData.notes || "");
+      if (crmData.patientName !== undefined) setPatientName(crmData.patientName || "");
     } else {
       setActiveBotDirective(null);
       setActiveDirectiveDetail(null);
@@ -2441,7 +2448,7 @@ export function ContextPanel() {
                   <option value="new">Yeni Lead</option>
                   <option value="contacted">İletişime Geçildi</option>
                   <option value="responded">Yanıt Alındı</option>
-                  <option value="discovery">Keşif / Analiz</option>
+                  <option value="discovery">Keşif / Bilgi</option>
                   <option value="qualified">Nitelikli</option>
                   <option value="appointed">Randevu Aldı</option>
                   <option value="lost">Kaybedildi</option>

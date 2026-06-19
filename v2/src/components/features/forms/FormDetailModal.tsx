@@ -250,20 +250,6 @@ export function FormDetailModal({
     'cold': { label: 'SOĞUK', color: '#007AFF', icon: '🔵' },
   };
 
-  const OPP_STAGES: { value: string; label: string; color: string; icon: string }[] = [
-    { value: 'new_lead', label: 'Yeni', color: '#007AFF', icon: '🆕' },
-    { value: 'first_contact', label: 'İlk İletişim', color: '#FF9500', icon: '📞' },
-    { value: 'engaged', label: 'Cevap Alındı', color: '#34C759', icon: '💬' },
-    { value: 'discovery', label: 'Keşif/Analiz', color: '#5856D6', icon: '🔍' },
-    { value: 'qualified', label: 'Nitelikli', color: '#30B0C7', icon: '⭐' },
-    { value: 'phone_call_planning', label: 'Telefon Görüşmesi Planlanıyor', color: '#AF52DE', icon: '📞' },
-    { value: 'appointment_planning', label: 'Randevu Planlanıyor', color: '#FFD60A', icon: '📅' },
-    { value: 'appointment_booked', label: 'Randevu Alındı', color: '#0F9D58', icon: '✅' },
-    { value: 'arrived', label: 'Geldi', color: '#0F9D58', icon: '🏥' },
-    { value: 'not_qualified', label: 'Uygun Değil', color: '#8E8E93', icon: '🚫' },
-  ];
-
-  const getOppStageInfo = (stage: string) => OPP_STAGES.find(s => s.value === stage) || { value: stage, label: stage, color: '#86868B', icon: '❓' };
 
   return (
     <>

@@ -4035,6 +4035,10 @@ export async function getCrmPanelBundleAction(conversationId: string) {
       return {
         phoneNumber: conv.phone_number,
         patientName: conv.patient_name || null,
+        stage: conv.stage || null,
+        department: conv.department || null,
+        country: conv.country || null,
+        notes: conv.notes || null,
         botDirective: activeBotDirective ? activeBotDirective.text : null,
         activeBotDirective,
         pastBotDirectives,

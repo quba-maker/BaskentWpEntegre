@@ -40,12 +40,12 @@ export function getOppStageInfo(stage: string) {
 
 export const LEAD_STAGES = [
   { value: 'new', label: 'Yeni Lead', color: '#007AFF', icon: '🆕' },
-  { value: 'contacted', label: 'İlk İletişim', color: '#FF9500', icon: '📞' },
-  { value: 'responded', label: 'Cevap Alındı', color: '#34C759', icon: '💬' },
-  { value: 'discovery', label: 'Keşif / Analiz', color: '#5856D6', icon: '🔍' },
+  { value: 'contacted', label: 'İletişime Geçildi', color: '#FF9500', icon: '📞' },
+  { value: 'responded', label: 'Yanıt Alındı', color: '#34C759', icon: '💬' },
+  { value: 'discovery', label: 'Keşif / Bilgi', color: '#5856D6', icon: '🔍' },
   { value: 'qualified', label: 'Nitelikli', color: '#30B0C7', icon: '⭐' },
   { value: 'appointed', label: 'Randevu Aldı', color: '#0F9D58', icon: '✅' },
-  { value: 'lost', label: 'Uygun Değil', color: '#8E8E93', icon: '🚫' },
+  { value: 'lost', label: 'Kaybedildi', color: '#8E8E93', icon: '🚫' },
 ] as const;
 
 export const LEAD_STAGE_ORDER: string[] = LEAD_STAGES.map(s => s.value);
@@ -136,3 +136,13 @@ export const OPP_STAGE_LABELS: Record<string, string> = Object.fromEntries(
 export const LEAD_STAGE_LABELS: Record<string, string> = Object.fromEntries(
   LEAD_STAGES.map(s => [s.value, s.label])
 );
+
+/** Normalize any incoming stage to a valid Lead Stage (Mirror System) */
+export function normalizeToLeadStage(val: string | null | undefined): string {
+  if (!val) return "new";
+  const leadStages = ["new", "contacted", "responded", "discovery", "qualified", "appointed", "lost"];
+  if (leadStages.includes(val)) {
+    return val;
+  }
+  return oppStageToLeadStage(val);
+}
