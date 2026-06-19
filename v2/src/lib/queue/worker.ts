@@ -2125,14 +2125,16 @@ export class QueueWorkerEngine {
     }
 
     const { TurkishReplyQualityGate } = await import('@/lib/services/ai/turkish-quality-gate');
-    const patientProvidedAvailability = TurkishReplyQualityGate.detectPatientProvidedAvailability(content || '');
+    const availabilityResult = TurkishReplyQualityGate.detectPatientProvidedAvailability(content || '');
 
     if (!unifiedContext) unifiedContext = {};
     unifiedContext.quotedContext = mediaMetadata?.native?.quoted_message_snapshot || null;
     unifiedContext.history = history;
     unifiedContext.currentMessageText = content || '';
     unifiedContext.currentMessageMediaType = mediaType || null;
-    unifiedContext.patientProvidedAvailability = patientProvidedAvailability;
+    unifiedContext.patientProvidedAvailability = availabilityResult.available;
+    unifiedContext.patientProvidedHasTime = availabilityResult.hasTime;
+
 
     // 🧠 Approved learning context injection (P1.3 - Autopilot Path)
     try {

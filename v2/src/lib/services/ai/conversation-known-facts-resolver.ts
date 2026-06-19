@@ -16,6 +16,7 @@ export type PatientKnownFacts = {
   };
   relatedPersons?: RelatedPersonFact[];
   availableTime?: string;
+  formDepartment?: string; // Recommended department from form (onerilen_bolum)
   askedDoctors?: boolean;
   askedProcess?: boolean;
   askedPrice?: boolean;
@@ -28,6 +29,7 @@ export type PatientKnownFacts = {
     note?: string;
   };
 };
+
 
 export class ConversationKnownFactsResolver {
   /**
@@ -95,10 +97,19 @@ export class ConversationKnownFactsResolver {
     }
 
     // 1. Resolve Country/Language Hint
+    // Priority: opportunity > profile > conversation > form safeData.country
     const country = opportunity?.country || profile?.country || conversation?.country || null;
     if (country && typeof country === 'string' && country.trim().length > 0) {
       facts.countryOrLanguageHint = country.trim();
+    } else if (latestForm?.data) {
+      // Use safeData.country (normalized key lookup already done by safeLatestForm)
+      const formData = typeof latestForm.data === 'string' ? (() => { try { return JSON.parse(latestForm.data); } catch { return {}; } })() : latestForm.data;
+      const formCountry = formData?.country || null;
+      if (formCountry && typeof formCountry === 'string' && formCountry.trim().length > 0) {
+        facts.countryOrLanguageHint = formCountry.trim();
+      }
     }
+
 
     // 2. Resolve Name
     let resolvedName = '';
@@ -260,10 +271,27 @@ export class ConversationKnownFactsResolver {
         self.complaint = opportunity.metadata.complaint;
       } else if (latestForm?.data) {
         const data = typeof latestForm.data === 'string' ? (() => { try { return JSON.parse(latestForm.data); } catch { return {}; } })() : latestForm.data;
-        const formComplaint = data?.sikayet || data?.şikayet || data?.şikayetiniz_nedir || data?.sikayetiniz_nedir;
-        if (formComplaint) self.complaint = formComplaint;
+        // Primary: sikayet field
+        const formComplaint = data?.sikayet || data?.complaint || null;
+        // Fallback: randevu_tercihi (many forms put complaint text there)
+        const formAppointmentPref = data?.randevu_tercihi || null;
+        if (formComplaint) {
+          self.complaint = formComplaint;
+        } else if (formAppointmentPref) {
+          self.complaint = formAppointmentPref;
+        }
       }
     }
+
+    // Resolve recommended department from form (onerilen_bolum)
+    if (latestForm?.data) {
+      const data = typeof latestForm.data === 'string' ? (() => { try { return JSON.parse(latestForm.data); } catch { return {}; } })() : latestForm.data;
+      const formDept = data?.onerilen_bolum || null;
+      if (formDept && typeof formDept === 'string' && formDept.trim().length > 0) {
+        facts.formDepartment = formDept.trim();
+      }
+    }
+
 
     if (facts.self) {
       self.complaint = self.complaint || facts.self.complaint;
@@ -426,6 +454,10 @@ export class ConversationKnownFactsResolver {
     if (facts.availableTime) {
       list.push(`Gelmek istediği/uygun olduğu tarih aralığı: ${facts.availableTime}.`);
     }
+    if (facts.formDepartment) {
+      list.push(`Formdan gelen önerilen bölüm: ${facts.formDepartment}.`);
+    }
+
     if (facts.previousDepartments && facts.previousDepartments.length > 0) {
       list.push(`İlgilendiği veya yönlendirildiği bölümler: ${facts.previousDepartments.join(', ')}.`);
     }

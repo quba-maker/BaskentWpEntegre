@@ -49,8 +49,8 @@ export class TurkishReplyQualityGate {
   /**
    * Detects if the patient message provides their date/time availability
    */
-  public static detectPatientProvidedAvailability(text: string): boolean {
-    if (!text) return false;
+  public static detectPatientProvidedAvailability(text: string): { available: boolean; hasTime: boolean } {
+    if (!text) return { available: false, hasTime: false };
     const clean = this.cleanTurkishText(text);
 
     // Explicit availability phrases
@@ -74,7 +74,8 @@ export class TurkishReplyQualityGate {
       'telefonla ulasin'
     ];
     if (explicitPhrases.some(p => clean.includes(p))) {
-      return true;
+      // Explicit phrases imply time was given (they are specific enough)
+      return { available: true, hasTime: true };
     }
 
     // Days or relative day markers
@@ -100,22 +101,22 @@ export class TurkishReplyQualityGate {
                     /(?:\b\d{1,2}[:.]\d{2}\b|\b\d{1,2}\s*(?:de|da|te|ta|e|a|ye|ya|sularında|sularinda|gibi|civari|civarinda|civarı|civarında)\b)/.test(clean);
 
     if (hasDay && hasSuitability) {
-      return true;
+      // hasTime already computed above — return it so caller knows if hour was given
+      return { available: true, hasTime };
     }
 
     if (hasTime && hasSuitability) {
-      return true;
+      return { available: true, hasTime: true };
     }
 
     // Pure time patterns with suitability, like "18:00 olabilir", "18.00 uygun", "20:00 de olur"
-    const pureTimeSuitability = /(?:\d{1,2}[:.]\d{2}|\b\d{1,2}\b)\s*(?:uygun|musait|olabilir|de olur|da olur|te olur|ta olur|gibi|civari|civarinda|civarı|civarında)/;
+    const pureTimeSuitability = /(?:\d{1,2}[:.]\d{2}|\b\d{1,2}\b)\s*(?:uygun|musait|olabilir|de olur|da olur|te olur|ta olur|gibi|civari|civarinda)/;
     if (pureTimeSuitability.test(clean)) {
-      return true;
+      return { available: true, hasTime: true };
     }
 
-    return false;
+    return { available: false, hasTime: false };
   }
-
   private static escapeRegExp(str: string): string {
     return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }

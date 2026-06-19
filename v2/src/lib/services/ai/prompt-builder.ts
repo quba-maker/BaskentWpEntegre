@@ -365,12 +365,15 @@ export class PromptBuilder {
         dynamicBrakesContext += `>> UYARI (FREKANS FRENİ AKTİF): Son 3 asistan mesajı içinde zaten randevu/telefon araması teklif edildi. Bu mesajda kesinlikle yeni bir randevu veya arama teklif etme, uygun zaman sorma.\n`;
       }
       if (unifiedContext?.patientProvidedAvailability) {
-        dynamicBrakesContext += `>> HASTA UYGUN ZAMAN BİLDİRDİ (PATIENT PROVIDED AVAILABILITY): Hasta telefon görüşmesi veya arama için uygun olduğu gün/saat bilgisini paylaştı.
-- Yeni bir randevu/arama CTA'sı isteme, kesinlikle "uygun zaman paylaşır mısınız?" veya "sizi ne zaman arayalım?" deme.
-- Kısa bir onay/teyit cevabı ver: "Uygun olduğunuz zamanı not aldım, hasta danışmanlarımız planlamayı kontrol edecek." çerçevesinde kal.
-- Kesinlikle "Türkiye saatiyle" ifadesini kullanma! Saat dilimi kelimesini kullanmadan sadece saati belirt ya da saati tekrarlamaktan kaçın.
-- Mesajını kısa tut.\n`;
+        if (unifiedContext?.patientProvidedHasTime) {
+          // Hasta gun VE saat verdi -> sadece onayla, tekrar sorma
+          dynamicBrakesContext += `>> HASTA UYGUN ZAMAN BİLDİRDİ (TAM — GÜN+SAAT): Hasta telefon görüşmesi için uygun olduğu gün VE saat bilgisini paylaştı.\n- Yeni bir CTA isteme, uygun zaman sorma.\n- Kısa bir onay ver: "Uygun olduğunuz zamanı not aldım, hasta danışmanlarımız planlamayı kontrol edecek." çerçevesinde kal.\n- Kesinlikle "Türkiye saatiyle" ifadesini kullanma.\n- Mesajını kısa tut.\n`;
+        } else {
+          // Hasta sadece gun verdi, saat yok -> gunu onayla, saati sor
+          dynamicBrakesContext += `>> HASTA GÜN BİLDİRDİ (SAAT EKSİK): Hasta uygun gün/dönemini söyledi ancak tercih ettiği saat aralığını belirtmedi.\n- Belirttiği günü kabul et ve teyit et.\n- Saat aralığını kısa ve doğal bir şekilde sor: örn. "Öğleden önce mi, öğleden sonra mı daha uygun sizin için?" veya "Hangi saat aralığını tercih edersiniz?" gibi.\n- Kesinlikle "uygun gün paylaşır mısınız?" veya "sizi ne zaman arayalım?" deme — gün zaten alındı.\n- Kesinlikle "Türkiye saatiyle" ifadesini kullanma.\n`;
+        }
       }
+
       if (asksIdentity) {
         dynamicBrakesContext += `>> KİMLİK SORUSU DİREKTİFİ: Hasta "Sen kimsin?" diye sordu. Kendini ${pName ? pName : 'hasta danışmanı'}${orgShort ? ` (${orgShort})` : ''} olarak tanıt, ama robotik veya teknik açıklamalar yapmadan doğal ve samimi bir şekilde cevap ver.${pName || orgShort ? ` (Örn: "${pName ? `Ben ${pName}` : 'Merhaba'}${orgShort ? `, ${orgShort} Hastanesi'nden yazıyorum` : ''}. Size tıbbi tedavi süreçleri ve randevular hakkında bilgi sunuyorum. Nasıl yardımcı olabilirim?")` : ''}.\n`;
       }

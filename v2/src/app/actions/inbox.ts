@@ -6628,3 +6628,98 @@ export async function sendApprovedInboxBotDraftAction(
 
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// clearConversation — Sohbeti Temizle
+// Deletes all messages for a conversation and resets CRM context.
+// Tenant-safe: every query is scoped to ctx.tenantId.
+// ─────────────────────────────────────────────────────────────────────────────
+export async function clearConversation(conversationId: string): Promise<{ success: boolean; error?: string }> {
+  if (!conversationId) return { success: false, error: 'conversationId required' };
+
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(conversationId);
+  if (!isUuid) return { success: false, error: 'Invalid conversationId format' };
+
+  return withActionGuard(
+    { actionName: 'clearConversation', conversationId },
+    async (ctx) => {
+      // 1. Verify conversation belongs to this tenant
+      const convRows = await ctx.db.executeSafe({
+        text: `SELECT id, active_opportunity_id, tags FROM conversations WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+        values: [conversationId, ctx.tenantId]
+      }) as any[];
+
+      if (!convRows || convRows.length === 0) {
+        return { success: false, error: 'Konuşma bulunamadı veya erişim yetkisi yok.' };
+      }
+
+      const conv = convRows[0];
+
+      // 2. Delete all messages for this conversation (tenant-scoped)
+      await ctx.db.executeSafe({
+        text: `DELETE FROM messages WHERE conversation_id = $1 AND tenant_id = $2`,
+        values: [conversationId, ctx.tenantId]
+      });
+
+      // 3. Reset opportunity: clear summary + unlink active_opportunity_id
+      if (conv.active_opportunity_id) {
+        await ctx.db.executeSafe({
+          text: `UPDATE opportunities
+                 SET summary = NULL,
+                     ai_reason = NULL,
+                     updated_at = NOW()
+                 WHERE id = $1 AND tenant_id = $2`,
+          values: [conv.active_opportunity_id, ctx.tenantId]
+        });
+
+        await ctx.db.executeSafe({
+          text: `UPDATE conversations
+                 SET active_opportunity_id = NULL,
+                     updated_at = NOW()
+                 WHERE id = $1 AND tenant_id = $2`,
+          values: [conversationId, ctx.tenantId]
+        });
+      }
+
+      // 4. Re-seed tags from the linked lead's form_name (if available)
+      try {
+        const leadRows = await ctx.db.executeSafe({
+          text: `SELECT l.form_name
+                 FROM leads l
+                 JOIN opportunities o ON o.lead_id = l.id
+                 WHERE o.id = $1 AND l.tenant_id = $2
+                 LIMIT 1`,
+          values: [conv.active_opportunity_id || '00000000-0000-0000-0000-000000000000', ctx.tenantId]
+        }) as any[];
+
+        if (leadRows && leadRows.length > 0 && leadRows[0].form_name) {
+          const freshTags = JSON.stringify([leadRows[0].form_name]);
+          await ctx.db.executeSafe({
+            text: `UPDATE conversations SET tags = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3`,
+            values: [freshTags, conversationId, ctx.tenantId]
+          });
+        }
+      } catch (_) {
+        // Non-fatal: tags reset is best-effort
+      }
+
+      // 5. Audit log
+      await logAudit({
+        tenantId: ctx.tenantId,
+        userId: ctx.userId,
+        action: 'clear_conversation',
+        entityType: 'conversation',
+        entityId: conversationId,
+        details: { clearedBy: ctx.userId }
+      });
+
+      return { success: true };
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error };
+    const inner = res.data as any;
+    if (inner && 'success' in inner && !inner.success) return { success: false, error: inner.error };
+    return { success: true };
+  });
+}
+
+

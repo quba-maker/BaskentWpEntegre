@@ -517,8 +517,70 @@ export class IdentityEngine {
               }
             }
           }
+
+          // ─── [FIX-C-2] Auto-heal department from form onerilen_bolum ───
+          try {
+            let parsedRaw: any = {};
+            if (typeof lead.raw_data === 'string') {
+              try { parsedRaw = JSON.parse(lead.raw_data); } catch {}
+            } else if (lead.raw_data && typeof lead.raw_data === 'object') {
+              parsedRaw = lead.raw_data;
+            }
+            // Use normalized key lookup (same approach as safeLatestForm)
+            const normalizedKeyMap2: Record<string, string> = {};
+            for (const k of Object.keys(parsedRaw)) {
+              const nk = k.toLowerCase().replace(/\s+/g, '_').replace(/[çç]/g, 'c').replace(/[şş]/g, 's').replace(/[ğğ]/g, 'g').replace(/[üü]/g, 'u').replace(/[öö]/g, 'o').replace(/[ıiİI]/g, 'i');
+              normalizedKeyMap2[nk] = k;
+            }
+            const deptNk = Object.keys(normalizedKeyMap2).find(nk =>
+              nk.includes('bolum') || nk.includes('department') || nk.includes('onerilen') || nk.includes('uzmanlik')
+            );
+            const formDept = deptNk ? String(parsedRaw[normalizedKeyMap2[deptNk]]).trim() : null;
+
+            if (formDept) {
+              const currentDept = conversationRow?.department || opportunity?.department || '';
+              const deptIsEmpty = !currentDept || currentDept.toLowerCase() === 'genel';
+              if (deptIsEmpty) {
+                await db.executeSafe({
+                  text: `UPDATE conversations SET department = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3`,
+                  values: [formDept, conversationId, tenantId]
+                });
+                if (opportunity?.id) {
+                  await db.executeSafe({
+                    text: `UPDATE opportunities SET department = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3`,
+                    values: [formDept, opportunity.id, tenantId]
+                  });
+                }
+                console.info(`[IdentityEngine][FIX-C-2] Auto-healed department to "${formDept}" from form`);
+              }
+            }
+          } catch (_) { /* non-fatal */ }
+
+          // ─── [FIX-C-3] Auto-heal tags from lead.form_name if tags are empty ───
+          try {
+            const currentTags = conversationRow?.tags;
+            const parsedTags = (() => {
+              if (!currentTags) return [];
+              if (Array.isArray(currentTags)) return currentTags;
+              if (typeof currentTags === 'string') {
+                try { return JSON.parse(currentTags); } catch { return []; }
+              }
+              return [];
+            })();
+            const tagsEmpty = !parsedTags || parsedTags.length === 0;
+            if (tagsEmpty && lead.form_name) {
+              const freshTags = JSON.stringify([lead.form_name]);
+              await db.executeSafe({
+                text: `UPDATE conversations SET tags = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3`,
+                values: [freshTags, conversationId, tenantId]
+              });
+              console.info(`[IdentityEngine][FIX-C-3] Auto-seeded tags from form_name "${lead.form_name}"`);
+            }
+          } catch (_) { /* non-fatal */ }
+
         } catch (_) { /* non-fatal — never block context loading */ }
       }
+
 
       // ═══ Load last 10 messages for conversation history ═══
 
@@ -552,15 +614,49 @@ export class IdentityEngine {
         const safeData: any = {};
         const nameVal = parsed.full_name || parsed.ad_soyad || parsed.name || parsed['full name'] || parsed['Full Name'] || null;
         if (nameVal) safeData.full_name = String(nameVal).trim();
-        
-        const complaintVal = parsed.sikayet || parsed.şikayet || parsed.şikayetiniz_nedir || parsed.sikayetiniz_nedir || null;
-        if (complaintVal) safeData.sikayet = String(complaintVal).trim();
-        
-        const countryVal = parsed.ulke || parsed.ülke || parsed.country || parsed.nerede_yaşıyorsunuz || null;
+
+        // Normalize all keys once for fuzzy matching (handles mixed-case Turkish form labels)
+        const normalizedKeyMap: Record<string, string> = {};
+        for (const k of Object.keys(parsed)) {
+          const normalized = k.toLowerCase().replace(/\s+/g, '_').replace(/[çç]/g, 'c').replace(/[şş]/g, 's').replace(/[ğğ]/g, 'g').replace(/[üü]/g, 'u').replace(/[öö]/g, 'o').replace(/[ıiİI]/g, 'i');
+          normalizedKeyMap[normalized] = k;
+        }
+
+        // Country: match keys containing 'ulke', 'country', 'where', 'yasiyor', 'live'
+        const countryKey = Object.keys(normalizedKeyMap).find(nk =>
+          nk.includes('ulke') || nk.includes('country') || nk.includes('where') || nk.includes('live') || nk === 'nerede_yasiyorsunuz'
+        );
+        const countryVal = countryKey ? parsed[normalizedKeyMap[countryKey]] : (parsed.ulke || parsed.country || null);
         if (countryVal) safeData.country = String(countryVal).trim();
-        
-        const timeVal = parsed.randevu_ayi || parsed.randevu_tarihi || parsed.ne_zaman_gelmek_istiyorsunuz || null;
+
+        // Complaint: match keys containing 'sikayet', 'complaint', 'problem', 'durum'
+        const complaintKey = Object.keys(normalizedKeyMap).find(nk =>
+          nk.includes('sikayet') || nk.includes('complaint') || nk.includes('saglik') || nk.includes('durum') || nk.includes('ozet')
+        );
+        const complaintVal = complaintKey ? parsed[normalizedKeyMap[complaintKey]] : (parsed.sikayet || null);
+        if (complaintVal) safeData.sikayet = String(complaintVal).trim();
+
+        // Travel date / available time: match keys containing 'randevu', 'zaman', 'tarih', 'gelis', 'when'
+        const timeKey = Object.keys(normalizedKeyMap).find(nk =>
+          nk.includes('randevu') || nk.includes('zaman') || nk.includes('tarih') || nk.includes('gelis') || nk.includes('when')
+        );
+        const timeVal = timeKey ? parsed[normalizedKeyMap[timeKey]] : (parsed.randevu_ayi || parsed.randevu_tarihi || null);
         if (timeVal) safeData.randevu_ayi = String(timeVal).trim();
+
+        // Recommended department (önerilen bölüm) from form
+        const deptKey = Object.keys(normalizedKeyMap).find(nk =>
+          nk.includes('bolum') || nk.includes('department') || nk.includes('onerilen') || nk.includes('uzmanlik')
+        );
+        const deptVal = deptKey ? parsed[normalizedKeyMap[deptKey]] : null;
+        if (deptVal) safeData.onerilen_bolum = String(deptVal).trim();
+
+        // Appointment preference / randevu tercihi (often contains the main complaint text)
+        const appointKey = Object.keys(normalizedKeyMap).find(nk =>
+          nk.includes('randevu_tercihi') || nk.includes('appointment') || nk.includes('tercih') || nk.includes('aciklama') || nk.includes('mesaj')
+        );
+        const appointVal = appointKey ? parsed[normalizedKeyMap[appointKey]] : null;
+        if (appointVal) safeData.randevu_tercihi = String(appointVal).trim();
+
 
         return {
           name: lead.form_name,

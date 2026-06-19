@@ -22,7 +22,8 @@ import {
   bulkArchiveConversations,
   bulkUnarchiveConversations,
   getMessages,
-  toggleBotStatus
+  toggleBotStatus,
+  clearConversation
 } from "@/app/actions/inbox";
 import { useInboxStore, lastMutationTimes, registerUnreadMutation, clearUnreadMutation } from "@/store/inbox-store";
 import { useDiagnosticsStore } from "@/lib/realtime/diagnostics-store";
@@ -1834,12 +1835,35 @@ export function ContactRail() {
           </button>
 
           <button
-            disabled
-            className="w-full px-3.5 py-2 text-xs font-semibold opacity-40 flex items-center gap-2 cursor-not-allowed text-left text-red-600"
-            title="Yönetici onayı gereklidir."
+            onClick={async () => {
+              const convId = contextMenu.conversationId;
+              const patientName = contextMenu.patientName || 'Bu kişi';
+              const confirmed = window.confirm(
+                `"${patientName}" adlı kişiye ait tüm sohbet mesajları silinecek ve CRM bağlamı sıfırlanacak.\n\nBu işlem geri alınamaz. Devam etmek istiyor musunuz?`
+              );
+              if (!confirmed) return;
+              setContextMenu(null);
+              try {
+                const res = await clearConversation(convId);
+                if (res.success) {
+                  queryClient.invalidateQueries({ queryKey: ['conversations'] });
+                  queryClient.invalidateQueries({ queryKey: ['messages', convId] });
+                  queryClient.removeQueries({ queryKey: ['messages', convId] });
+                  if (typeof window !== 'undefined') {
+                    window.dispatchEvent(new CustomEvent('inbox-unread-refresh'));
+                  }
+                } else {
+                  setErrorToast(res.error || 'Sohbet temizlenemedi.');
+                }
+              } catch (e) {
+                setErrorToast('Bir hata oluştu.');
+              }
+            }}
+            className="w-full px-3.5 py-2 text-xs font-semibold hover:bg-red-50 flex items-center gap-2 cursor-pointer transition-colors text-left text-red-600"
+            title="Sohbeti temizle ve CRM bağlamını sıfırla"
           >
             <Trash2 className="w-3.5 h-3.5" />
-            <span>Sohbeti temizle <span className="text-[10px] text-gray-400 font-normal">(Kilitli)</span></span>
+            <span>Sohbeti temizle</span>
           </button>
         </div>
       )}

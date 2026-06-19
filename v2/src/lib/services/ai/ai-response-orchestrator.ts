@@ -1000,8 +1000,9 @@ export class AIResponseOrchestrator {
         asksIdentity: isBotAccusation,
         asksName: isBotAccusation,
         patientClaimsBot: isBotAccusation || isAiAccusation,
-        patientProvidedAvailability: false
+        patientProvidedAvailability: !!unifiedContext?.patientProvidedAvailability
       };
+
 
       let replyLanguage = 'tr';
       if (unifiedContext.languageContext) {
