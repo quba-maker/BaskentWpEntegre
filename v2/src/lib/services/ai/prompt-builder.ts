@@ -733,8 +733,18 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/hasta danışmanı arasında pla
         // Resolve decision flags
         const isCorrectionTurn = isHealthcare && (currentTurnMentionsReportTopic || ['yasak', 'doğru değil', 'yalan', 'yanlış', 'yapma', 'söyleme', 'hata'].some(kw => currentMessageTextLower.includes(kw))) && !currentTurnHasActualAttachmentEvidence && !currentTurnClaimsReportSent;
 
+        // [FIX7] Use country confidence scoring from identity engine when available.
+        // countryConfidence.level HIGH → trust it, never ask
+        // countryConfidence.level LOW  → signals conflict, must ask
+        // countryConfidence.level MEDIUM / UNKNOWN → delegate to existing detailedCountry logic
+        const countryConfidenceResult = (r as any).countryConfidence as import('@/lib/utils/country-confidence').CountryConfidenceResult | null;
+        const countryConfidenceOverride =
+          countryConfidenceResult?.level === 'HIGH'  ? false  // never ask
+          : countryConfidenceResult?.level === 'LOW'  ? true   // always ask
+          : null;                                              // use existing logic
+
         const shouldAskName = detailedName.nameConfirmationNeeded && !nameLocked && !patientGaveNameInLast3 && !askedNameRecently && !isTerminalStage && !hasOptOutKeyword && !isHumanMode && !isCorrectionTurn;
-        const shouldAskCountry = detailedCountry.countryConfirmationNeeded && !countryLocked && !patientGaveCountryInLast3 && !askedCountryRecently && !isTerminalStage && !hasOptOutKeyword && !isHumanMode && !isCorrectionTurn;
+        const shouldAskCountry = (countryConfidenceOverride !== null ? countryConfidenceOverride : detailedCountry.countryConfirmationNeeded) && !countryLocked && !patientGaveCountryInLast3 && !askedCountryRecently && !isTerminalStage && !hasOptOutKeyword && !isHumanMode && !isCorrectionTurn;
 
         if (shouldAskName || shouldAskCountry) {
           confirmationDirective += `\n\n=== ⚠️ HASTA KİMLİK / ÜLKE BİLGİSİ DOĞRULAMA TALİMATI ===\n`;

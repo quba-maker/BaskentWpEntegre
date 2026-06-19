@@ -65,12 +65,14 @@ export class PatientNameSyncService {
         WHERE phone_number = ${phoneNumber} AND tenant_id = ${db.tenantId}
       `);
 
-      // 3. Update ALL lead forms matching this phone number (best-effort matching last 10 digits)
+      // 3. Update leads ONLY if patient_name is empty (form-sourced names are protected)
+      // CRITICAL: Bot must NEVER overwrite a name that came from the original form submission
       if (last10) {
         await db.executeSafe(sql`
           UPDATE leads 
           SET patient_name = ${cleanName} 
           WHERE phone_number LIKE ${"%" + last10} AND tenant_id = ${db.tenantId}
+          AND (patient_name IS NULL OR patient_name = '')
         `);
       }
 

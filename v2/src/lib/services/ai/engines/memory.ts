@@ -120,21 +120,23 @@ Hastanın bulunduğu ülke için saat dilimi doğrulanmamıştır (şehir/eyalet
         }
       }
 
-      // 2. Fetch raw messages to summarize (linked by phone_number, excluding system notes to prevent leakage)
+      // 2. Fetch raw messages to summarize (scoped to conversation_id, NOT phone_number)
+      // CRITICAL: Using conversation_id prevents cross-conversation summary contamination
+      // (e.g. test sessions mixing with real patient conversations on same phone)
       const messages = await db.executeSafe({
         text: `
           SELECT * FROM (
             SELECT content, direction, created_at, media_type, media_metadata
             FROM messages
             WHERE tenant_id = $1 
-              AND phone_number = $2
+              AND conversation_id = $2
               AND direction IN ('in', 'out')
             ORDER BY created_at DESC
             LIMIT 50
           ) sub
           ORDER BY created_at ASC;
         `,
-        values: [tenantId, phone]
+        values: [tenantId, conversationId]
       }) as any[];
 
       if (!messages || messages.length === 0) return;
@@ -299,54 +301,57 @@ Hastanın bulunduğu ülke için saat dilimi doğrulanmamıştır (şehir/eyalet
       // AI summaries are stored in opportunities.summary and should never overwrite or mix with manual notes.
       log.info(`[MEMORY_NOTES_SKIP] conversations.notes sync disabled for Phase A1.8 (strictly coordinator manual notes)`);
 
-      // 7. Sync to matching leads + Google Sheets
+      // 7. Sync to matching leads (ONLY if lead is directly linked to active opportunity)
+      // CRITICAL: Never use loose phone suffix match — it writes wrong person's summary to wrong form
       try {
-        const cleanPhone = phone.replace(/[^0-9]/g, '');
-        if (cleanPhone.length >= 10) {
-          const suffix = cleanPhone.substring(cleanPhone.length - 10);
-          
+        if (activeOppId) {
           const matchingLeads = await db.executeSafe({
             text: `
-              SELECT id, notes FROM leads
-              WHERE phone_number LIKE $1
+              SELECT id FROM leads
+              WHERE linked_opportunity_id = $1
                 AND tenant_id = $2
-              LIMIT 5;
+              LIMIT 1;
             `,
-            values: ['%' + suffix, tenantId]
+            values: [activeOppId, tenantId]
           }) as any[];
-          
+
           for (const lead of matchingLeads) {
-            // Update lead notes with CRM summary
+            // Update lead notes with CRM summary (notes = geri donus field, AI-writable)
             await db.executeSafe({
               text: `UPDATE leads SET notes = $1 WHERE id = $2 AND tenant_id = $3;`,
               values: [crmSummary, lead.id, tenantId]
             });
-            
-            log.info(`[MEMORY_SYNC] Lead ${lead.id} notes updated with CRM summary.`);
-              
-              const SHEET_URL = process.env.GOOGLE_SHEET_UPDATE_URL || process.env.GOOGLE_SHEET_URL;
-              if (SHEET_URL) {
-                try {
-                  const sheetResponse = await fetch(SHEET_URL, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      action: 'updateNoteByPhone',
-                      phone: phone,
-                      note: crmSummary
-                    })
-                  });
-                  if (!sheetResponse.ok) {
-                    log.warn(`[MEMORY_SYNC] Google Sheets note sync returned status ${sheetResponse.status}`);
-                  } else {
-                    log.info(`[MEMORY_SYNC] Lead ${lead.id} CRM summary synced to Google Sheets.`);
-                  }
-                } catch (sheetErr) {
-                  log.warn(`[MEMORY_SYNC] Google Sheets note sync failed for phone: ${phone}`, { error: String(sheetErr) });
+            log.info(`[MEMORY_SYNC] Lead ${lead.id} notes updated with CRM summary (linked opp: ${activeOppId}).`);
+
+            const SHEET_URL = process.env.GOOGLE_SHEET_UPDATE_URL || process.env.GOOGLE_SHEET_URL;
+            if (SHEET_URL) {
+              try {
+                const sheetResponse = await fetch(SHEET_URL, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    action: 'updateNoteByPhone',
+                    phone: phone,
+                    note: crmSummary
+                  })
+                });
+                if (!sheetResponse.ok) {
+                  log.warn(`[MEMORY_SYNC] Google Sheets note sync returned status ${sheetResponse.status}`);
+                } else {
+                  log.info(`[MEMORY_SYNC] Lead ${lead.id} CRM summary synced to Google Sheets.`);
                 }
+              } catch (sheetErr) {
+                log.warn(`[MEMORY_SYNC] Google Sheets note sync failed for phone: ${phone}`, { error: String(sheetErr) });
               }
             }
           }
+
+          if (matchingLeads.length === 0) {
+            log.info(`[MEMORY_SYNC_SKIP] No lead linked to opportunity ${activeOppId} — skipping leads.notes update.`);
+          }
+        } else {
+          log.info(`[MEMORY_SYNC_SKIP] No active opportunity — skipping leads.notes update.`);
+        }
       } catch (syncErr) {
         log.error('[MEMORY_SYNC_ERROR] Failed during CRM/Sheets sync', syncErr instanceof Error ? syncErr : new Error(String(syncErr)));
       }

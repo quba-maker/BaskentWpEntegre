@@ -617,6 +617,38 @@ export class IdentityEngine {
         console.warn('[IdentityEngine] Non-fatal: active task query failed', taskErr);
       }
 
+      // ═══ Country confidence scoring ═══
+      let countryConfidence: import('@/lib/utils/country-confidence').CountryConfidenceResult | null = null;
+      try {
+        const { evaluateCountryConfidence } = await import('@/lib/utils/country-confidence');
+        const oppMeta = opportunity?.metadata
+          ? (typeof opportunity.metadata === 'string'
+              ? (() => { try { return JSON.parse(opportunity.metadata); } catch { return {}; } })()
+              : opportunity.metadata)
+          : {};
+        const formCountry = safeLatestForm?.data?.country || null;
+        const phoneCountry = (() => {
+          const phone = conversationRow?.phone_number || '';
+          if (phone.startsWith('90')) return 'T\u00fcrkiye';
+          if (phone.startsWith('49')) return 'Almanya';
+          if (phone.startsWith('44')) return '\u0130ngiltere';
+          if (phone.startsWith('33')) return 'Fransa';
+          if (phone.startsWith('31')) return 'Hollanda';
+          if (phone.startsWith('32')) return 'Bel\u00e7ika';
+          if (phone.startsWith('998')) return '\u00d6zbekistan';
+          if (phone.startsWith('994')) return 'Azerbaycan';
+          if (phone.startsWith('7')) return 'Rusya';
+          if (phone.startsWith('1')) return 'ABD';
+          return null;
+        })();
+        countryConfidence = evaluateCountryConfidence({
+          formCountry,
+          phoneCountry,
+          crmCountry: opportunity?.country || conversationRow?.country || null,
+          confirmed: oppMeta?.country_confirmed === true
+        });
+      } catch (_) { /* non-fatal */ }
+
       return {
         profile,
         latestForm: safeLatestForm,
@@ -665,6 +697,18 @@ export class IdentityEngine {
             ? JSON.parse(activeTask.metadata)
             : (activeTask.metadata || {})
         } : null,
+        // ── Confirmation flags ──
+        // nameConfirmed: true = patient confirmed their name in a previous interaction
+        // countryConfidence: scoring result from country-confidence util
+        nameConfirmed: (() => {
+          const meta = opportunity?.metadata
+            ? (typeof opportunity.metadata === 'string'
+                ? (() => { try { return JSON.parse(opportunity.metadata); } catch { return {}; } })()
+                : opportunity.metadata)
+            : {};
+          return meta?.name_confirmed === true || meta?.name_locked === true;
+        })(),
+        countryConfidence,
       };
     } catch (e) {
       console.error('[IdentityEngine] Failed to get context', e);
