@@ -227,10 +227,9 @@ export class FinalOutboundGuard {
 
     const hasBlockedPattern = blockedPatterns.some(regex => regex.test(lowerText)) || hasSuffixDoublingPattern;
 
-    // Handle Greeting Only scenario
     if (isShortGreetingOnly) {
       const history = unifiedContext?.history || [];
-      const hasHistory = Array.isArray(history) && history.length > 0;
+      const hasHistory = Array.isArray(history) && history.some((m: any) => m.direction === 'out' || m.role === 'assistant');
       if (!hasHistory) {
         // Safe to send greeting fallback
         const greetingFallback = "Merhaba, size nasıl yardımcı olabilirim?";

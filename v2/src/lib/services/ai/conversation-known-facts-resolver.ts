@@ -1,4 +1,5 @@
 import { isValidPatientName } from '@/lib/utils/patient-name-resolver';
+import { normalizeFormValue } from '@/lib/utils/normalize-form-value';
 
 export type RelatedPersonFact = {
   relation: 'mother' | 'father' | 'spouse' | 'relative' | 'acquaintance';
@@ -286,9 +287,9 @@ export class ConversationKnownFactsResolver {
         // Fallback: randevu_tercihi (many forms put complaint text there)
         const formAppointmentPref = data?.randevu_tercihi || null;
         if (formComplaint) {
-          self.complaint = formComplaint;
+          self.complaint = normalizeFormValue(formComplaint);
         } else if (formAppointmentPref) {
-          self.complaint = formAppointmentPref;
+          self.complaint = normalizeFormValue(formAppointmentPref);
         }
       }
     }

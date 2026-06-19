@@ -81,6 +81,7 @@ export class PromptBuilder {
     const metadataIndustry = (brain.prompts.metadata as any)?.industry;
     const resolvedIndustry = configIndustry || metadataIndustry;
     const isHealthcare = resolvedIndustry === 'healthcare' || resolvedIndustry === 'health';
+    const isBaskent = brain.context.tenantId === 'caab9ea1-9591-45e4-bbc5-9c9b498982c8';
 
     const identityConfig = brain.prompts.metadata?.identity || brain.context.config?.identity || {
       personaName: '',
@@ -225,7 +226,9 @@ export class PromptBuilder {
           crmContext += `- İsim: Bilinmiyor\n`;
         }
       }
-      crmContext += `>> UYARI (KRİTİK): Hastaya/kullanıcıya ismiyle hitap etme, cinsiyetli veya resmi hitap sözcükleri (Bey, Hanım, Bay, Bayan, Sayın, M.r., M.s., M.r.s., D.e.a.r. vb.) KULLANMA. Mesajlarına isimsiz ve nötr bir selamlama ile başla (Örn. Türkçe için sadece "Merhaba,", İngilizce için sadece "Hello,").\n`;
+      if (!isBaskent) {
+        crmContext += `>> UYARI (KRİTİK): Hastaya/kullanıcıya ismiyle hitap etme, cinsiyetli veya resmi hitap sözcükleri (Bey, Hanım, Bay, Bayan, Sayın, M.r., M.s., M.r.s., D.e.a.r. vb.) KULLANMA. Mesajlarına isimsiz ve nötr bir selamlama ile başla (Örn. Türkçe için sadece "Merhaba,", İngilizce için sadece "Hello,").\n`;
+      }
       crmContext += `>> UYARI: Türkçe yanıt verirken kesinlikle samimi/senli dil kullanma. Her zaman kurumsal, nazik ve formal "sizli" tonu kullan (Örn. "yardımcı olabiliriz", "paylaşabilir misiniz", "düşünür müsünüz").\n`;
       
       // Cleaned patient facts
@@ -626,7 +629,7 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/hasta danışmanı arasında pla
         langContextText += `- ⚡ Dil değişikliği algılandı. Kullanıcı ${lp.replyLanguageName} dilinde cevap istiyor.\n`;
       }
       langContextText += `- Form alan adları veya sistem verileri Türkçe olsa bile cevabını ${lp.replyLanguageName} dilinde ver.\n`;
-      if (lp.replyLanguage !== 'tr') {
+      if (lp.replyLanguage !== 'tr' && !isBaskent) {
         langContextText += `- UYARI: Hastaya ismiyle hitap etme, cinsiyetli veya resmi hitap sözcükleri (Bey, Hanım, Bay, Bayan, Sayın, Mr., Ms., Mrs., Dear vb.) KULLANMA. Mesajlarına isimsiz ve nötr bir selamlama ile başla.\n`;
       }
       langContextText += `- UYARI: Bu dil talimatı sadece yanıt dilini belirler. Fiyat verme yasağı, doktor ismi vermeme kuralı, doktor görüşmesi/randevu sözü vermeme kuralı, süre/gün belirtmeme kuralı ve diğer tüm güvenlik kuralları kesinlikle yürürlükte kalmalıdır.\n`;

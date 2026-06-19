@@ -61,7 +61,7 @@ export class ContextAwareSafeFallbackResolver {
       if (rawFactsComplaint) {
         const match = rawFactsComplaint.match(/(?:şikayeti|sikayeti|şikayet|sikayet):\s*(.+)/i);
         if (match && match[1]) {
-          complaint = match[1].replace(/[.]+$/, '').trim();
+          complaint = match[1].replace(/[.]+$/, '').replace(/_/g, ' ').trim();
           hasComplaint = true;
         }
       }
@@ -900,6 +900,20 @@ export class ContextAwareSafeFallbackResolver {
 
     if (detectedName) {
       if (isHealthcareOrForm && hasComplaint) {
+        const isCheckup = complaint.toLowerCase().includes('check-up') || 
+                          complaint.toLowerCase().includes('checkup') || 
+                          complaint.toLowerCase().includes('şikayetim yok') ||
+                          complaint.toLowerCase().includes('sikayetim yok');
+        if (isCheckup) {
+          return {
+            text: `Teşekkür ederim ${detectedName}. Check-up planlamanız için uygun zamanı netleştirebiliriz.`,
+            sector: resolvedIndustry,
+            hasFormContext,
+            hasComplaint,
+            finalPath: 'name_healthcare_checkup_fallback',
+            detectedIntent
+          };
+        }
         return {
           text: `Teşekkür ederim ${detectedName}. ${complaint} konusuyla ilgili uygun zamanı netleştirebiliriz.`,
           sector: resolvedIndustry,
@@ -925,6 +939,20 @@ export class ContextAwareSafeFallbackResolver {
     // Intent: Greeting
     if (isGreeting) {
       if (isHealthcare && hasComplaint) {
+        const isCheckup = complaint.toLowerCase().includes('check-up') || 
+                          complaint.toLowerCase().includes('checkup') || 
+                          complaint.toLowerCase().includes('şikayetim yok') ||
+                          complaint.toLowerCase().includes('sikayetim yok');
+        if (isCheckup) {
+          return {
+            text: `${intro} Check-up talebinizle ilgili yardımcı olayım. Programlarımız hakkında detaylı bilgi almak veya randevu planlamak için size buradan yardımcı olabilirim.`,
+            sector: resolvedIndustry,
+            hasFormContext,
+            hasComplaint,
+            finalPath: 'greeting_healthcare_checkup_fallback',
+            detectedIntent
+          };
+        }
         return {
           text: `${intro} ${complaint} konusuyla ilgili yardımcı olayım. Bu durum ne zamandır devam ediyor?`,
           sector: resolvedIndustry,
@@ -989,6 +1017,20 @@ export class ContextAwareSafeFallbackResolver {
     }
 
     if (isHealthcareOrForm && hasComplaint) {
+      const isCheckup = complaint.toLowerCase().includes('check-up') || 
+                        complaint.toLowerCase().includes('checkup') || 
+                        complaint.toLowerCase().includes('şikayetim yok') ||
+                        complaint.toLowerCase().includes('sikayetim yok');
+      if (isCheckup) {
+        return {
+          text: `${intro} Check-up talebinizle ilgili yardımcı olayım. Programlarımız hakkında detaylı bilgi almak veya randevu planlamak için size buradan yardımcı olabilirim.`,
+          sector: resolvedIndustry,
+          hasFormContext,
+          hasComplaint,
+          finalPath: 'default_healthcare_checkup_fallback',
+          detectedIntent
+        };
+      }
       return {
         text: `${intro} ${complaint} konusuyla ilgili yardımcı olayım. Bu durum ne zamandır devam ediyor?`,
         sector: resolvedIndustry,

@@ -2117,10 +2117,16 @@ export class QueueWorkerEngine {
       const greetings: string[] = (brain?.context?.config?.greetingTokens && Array.isArray(brain.context.config.greetingTokens) && brain.context.config.greetingTokens.length > 0)
         ? brain.context.config.greetingTokens.map((t: string) => t.toLowerCase().trim())
         : defaultGreetings;
+      const hasAssistantMsg = Array.isArray(history) && history.some((m: any) => m.direction === 'out' || m.role === 'assistant');
+      const hasForm = !!(unifiedContext?.latestForm || (Array.isArray(unifiedContext?.patient_known_facts) && unifiedContext.patient_known_facts.length > 0));
+      const isInitialFormWelcome = !hasAssistantMsg && hasForm;
+
       if (greetings.includes(lowerContent) || (lowerContent.length < 20 && greetings.some(g => lowerContent.includes(g)))) {
-        if (!unifiedContext) unifiedContext = {};
-        unifiedContext.isGreetingOnly = true;
-        this.log.info(`[CONTEXT_COMPRESSION] Detected greeting_only mode for content: "${content}"`, { traceId });
+        if (!isInitialFormWelcome) {
+          if (!unifiedContext) unifiedContext = {};
+          unifiedContext.isGreetingOnly = true;
+          this.log.info(`[CONTEXT_COMPRESSION] Detected greeting_only mode for content: "${content}"`, { traceId });
+        }
       }
     }
 
