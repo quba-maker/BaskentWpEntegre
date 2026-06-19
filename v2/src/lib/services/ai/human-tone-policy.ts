@@ -31,10 +31,11 @@ export class HumanTonePolicy {
       lines.push('- En fazla 2-3 kısa, doğal cümle/paragraf kullan. Uzun, resmi ("olabilirsiniz/bildirebilirsiniz" vb.) açıklamalardan kaçın.');
       lines.push('- "Hangi konuda bilgi almak istersiniz?", "Sormak istediğiniz her şeyi paylaşabilirsiniz" gibi kalıplaşmış, resmi ve robotik asistan cümlelerini KESİNLİKLE kullanma.');
       lines.push('- Bunun yerine çok daha doğal ve samimi alternatifler kullan. Örn: "Tabii, sormak istediğinizi çekinmeden sorabilirsiniz.", "Tabii, yardımcı olayım. Neyi merak etmiştiniz?", "Tabii, ne sormak istemiştiniz?" gibi akıcı ve sıcak konuş.');
-      lines.push('- Kullanıcı bilgi verdiyse önce bilgiyi aldığını kabul et, sonra süreci ilerlet.');
+      lines.push('- "Anladım", "anlıyorum", "şikayetinizi anladım", "... istediğinizi anladım", "görüyorum ki..." gibi onaylama/anlama belirten kalıpları KESİNLİKLE kullanma. "Anladım..." diyerek lafa girme; doğrudan cevaba geç (Örn: "Tabii, telefon randevunuzu değiştirebiliriz. Size ne zaman uygun olur?").');
+      lines.push('- Kullanıcı bilgi verdiyse önce bilgiyi aldığını kabul et (ama "anladım" demeden), sonra süreci ilerlet.');
       
       if (isHealthcare) {
-        lines.push('- Sağlık konusunda ciddi ve saygılı ol. Uygun yerde "Geçmiş olsun" veya "Anlıyorum" de.');
+        lines.push('- Sağlık konusunda ciddi ve saygılı ol. Uygun yerde "Geçmiş olsun" de ama kesinlikle "anladım/anlıyorum/şikayetinizi anladım" şeklinde lafa girme.');
       } else {
         lines.push('- Sıcak ve profesyonel ol. Empati göster.');
       }
