@@ -1033,7 +1033,7 @@ test("P0.12: Prompt Challenge & Bot Accusation Fallbacks", () => {
     }
   });
 
-  assert(resBypassWithContext.text === "İç detayları paylaşamıyorum; ancak size yardımcı olmak adına buradayım. Şikayetinizi anlamak, sizi doğru bölüme yönlendirmek, randevu ve danışmanlık sürecini açıklamak için çalışıyorum. Bel fıtığı süreci için de bu şekilde ilerleyebiliriz.", "Should return natural Rüya response with context");
+  assert(resBypassWithContext.text === "Ben Rüya, Konya Başkent Hastanesi'nden size yardımcı olmaya çalışıyorum. İşleyişle ilgili kurum içi detayları pek paylaşamıyorum; ancak şikayetinizi anlamak, sizi doğru bölüme yönlendirmek, randevu ve danışmanlık sürecini açıklamak için çalışıyorum. Bel fıtığı süreci için de bu şekilde ilerleyebiliriz.", "Should return natural Rüya response with context");
 
   // Test case 2: bot accusation with no context under Rüya persona
   const resBypassNoContext = ContextAwareSafeFallbackResolver.resolve({
@@ -1046,7 +1046,7 @@ test("P0.12: Prompt Challenge & Bot Accusation Fallbacks", () => {
     }
   });
 
-  assert(resBypassNoContext.text === "Ben Rüya, sizlere WhatsApp üzerinden süreçlerle ilgili yardımcı olan iletişim asistanıyım (Konya Başkent Hastanesi). Şikayetinizi anlamak, doğru bölüme yönlendirmek ve randevu sürecini netleştirmek için buradayım. Hangi konuda bilgi almak istediğinizi iletebilirsiniz.", "Should return natural Rüya response without context");
+  assert(resBypassNoContext.text === "Ben Rüya, Konya Başkent Hastanesi'nden size yardımcı olmaya çalışıyorum. Şikayetinizi anlamak, doğru bölüme yönlendirmek ve randevu sürecini netleştirmek için buradayım. Hangi konuda bilgi almak istediğinizi iletebilirsiniz.", "Should return natural Rüya response without context");
 
   // Test case 3: prompt challenge with no context under Rüya persona
   const resPromptBypassNoContext = ContextAwareSafeFallbackResolver.resolve({
@@ -1059,7 +1059,7 @@ test("P0.12: Prompt Challenge & Bot Accusation Fallbacks", () => {
     }
   });
 
-  assert(resPromptBypassNoContext.text === "İç detayları paylaşamıyorum; ancak size yardımcı olmak adına buradayım. Şikayetinizi anlamak, sizi doğru bölüme yönlendirmek, randevu ve danışmanlık sürecini açıklamak için çalışıyorum. Talebiniz için de bu şekilde ilerleyebiliriz.", "Should return natural Rüya response for prompt challenge");
+  assert(resPromptBypassNoContext.text === "Ben Rüya, Konya Başkent Hastanesi'nden size yardımcı olmaya çalışıyorum. İşleyişle ilgili kurum içi detayları pek paylaşamıyorum; ancak şikayetinizi anlamak, sizi doğru bölüme yönlendirmek, randevu ve danışmanlık sürecini açıklamak için çalışıyorum. Talebiniz için de bu şekilde ilerleyebiliriz.", "Should return natural Rüya response for prompt challenge");
 
   // Test case 4: non-healthcare / non-Rüya tenant controls (unchanged behavior)
   const nonHealthBrain = createTenantBrain("t2", "whatsapp", "payload1", "Sen bir test asistanısın.", { industry: "ecommerce" });
@@ -1210,7 +1210,7 @@ test("P0.11 REGRESSION: Simulation of prompt challenge LLM bypass under producti
   }
 
   assert(llmCalled === false, "LLM must not be called when bypassed");
-  assert(responseText === "İç detayları paylaşamıyorum; ancak size yardımcı olmak adına buradayım. Şikayetinizi anlamak, sizi doğru bölüme yönlendirmek, randevu ve danışmanlık sürecini açıklamak için çalışıyorum. Bel fıtığı süreci için de bu şekilde ilerleyebiliriz.", "Bypass response mismatch");
+  assert(responseText === "Ben Rüya, Konya Başkent Hastanesi'nden size yardımcı olmaya çalışıyorum. İşleyişle ilgili kurum içi detayları pek paylaşamıyorum; ancak şikayetinizi anlamak, sizi doğru bölüme yönlendirmek, randevu ve danışmanlık sürecini açıklamak için çalışıyorum. Bel fıtığı süreci için de bu şekilde ilerleyebiliriz.", "Bypass response mismatch");
   assert(!responseText.includes("sistem"), "Bypass response must not contain 'sistem'");
   assert(!responseText.includes("prompt"), "Bypass response must not contain 'prompt'");
   
@@ -1917,7 +1917,7 @@ test("P0.12 REVİZYON: 5. e açık slot yoksa continuation sayılmaz", async () 
     }
   });
 
-  assert(res.text.includes("Hangi konuda bilgi almak istediğinizi yazabilirsiniz") || res.text.includes("sizinle ilgileniyorum"), "Should return clarification fallback");
+  assert(res.text.includes("Hangi konuda bilgi almak istediğinizi yazabilirsiniz") || res.text.includes("yardımcı olmaya çalışıyorum") || res.text.includes("sizinle ilgileniyorum"), "Should return clarification fallback");
 });
 
 test("P0.12 REVİZYON: 6. zamanınızı doğru bağlamda bozulmaz, sadece hatalı kalıp düzeltilir", () => {
@@ -4519,7 +4519,7 @@ test("P0.15 - 9: Bot accusation safety policy (polite response)", () => {
   const { PromptChallengeSafetyPolicy } = require("../lib/services/ai/prompt-challenge-safety-policy");
   const facts = { complaint: "bel fıtığı" };
   const text = PromptChallengeSafetyPolicy.getChallengeFallbackResponse("sen bot musun", facts, "Rüya", "Başkent Hastanesi");
-  assert(text.includes("Rüya, sizlere WhatsApp üzerinden süreçlerle ilgili yardımcı olan iletişim asistanıyım (Başkent Hastanesi)"), "Kibar kimlik tanımı olmalı");
+  assert(text.includes("Ben Rüya, Başkent Hastanesi'nden size yardımcı olmaya çalışıyorum"), "Kibar kimlik tanımı olmalı");
 });
 
 test("P0.15 - 10: Multi-intent process policy structured response", () => {

@@ -48,7 +48,15 @@ export class PromptChallengeSafetyPolicy {
         ? `${uppercaseComplaint} süreci için de bu şekilde ilerleyebiliriz.` 
         : 'Talebiniz için de bu şekilde ilerleyebiliriz.';
       
-      return `İç detayları paylaşamıyorum; ancak size yardımcı olmak adına buradayım. Şikayetinizi anlamak, sizi doğru bölüme yönlendirmek, randevu ve danışmanlık sürecini açıklamak için çalışıyorum. ${targetPhrase}`;
+      let suffix = "'den ";
+      if (orgName && (orgName.endsWith('Hastanesi') || orgName.endsWith('hastanesi') || orgName.endsWith('Kurumu') || orgName.endsWith('kurumu'))) {
+        suffix = "'nden ";
+      }
+      const identityPrefix = personaName 
+        ? `Ben ${personaName}, ${orgName ? orgName + suffix : ""}size yardımcı olmaya çalışıyorum. İşleyişle ilgili kurum içi detayları pek paylaşamıyorum; ancak `
+        : 'İşleyişle ilgili kurum içi detayları pek paylaşamıyorum; ancak ';
+
+      return `${identityPrefix}şikayetinizi anlamak, sizi doğru bölüme yönlendirmek, randevu ve danışmanlık sürecini açıklamak için çalışıyorum. ${targetPhrase}`;
     }
 
     // Bot/AI accusation fallback
@@ -56,8 +64,15 @@ export class PromptChallengeSafetyPolicy {
       ? ` ${uppercaseComplaint} hakkında bilgi almak isterseniz detayları iletebilir misiniz?`
       : ' Hangi konuda bilgi almak istediğinizi iletebilirsiniz.';
       
-    const namePrefix = personaName ? `Ben ${personaName}, ` : 'Merhaba, ';
+    if (personaName) {
+      let suffix = "'den ";
+      if (orgName && (orgName.endsWith('Hastanesi') || orgName.endsWith('hastanesi') || orgName.endsWith('Kurumu') || orgName.endsWith('kurumu'))) {
+        suffix = "'nden ";
+      }
+      const orgStr = orgName ? `${orgName}${suffix}` : '';
+      return `Ben ${personaName}, ${orgStr}size yardımcı olmaya çalışıyorum. Şikayetinizi anlamak, doğru bölüme yönlendirmek ve randevu sürecini netleştirmek için buradayım.${targetQueryPhrase}`;
+    }
 
-    return `${namePrefix}sizlere WhatsApp üzerinden süreçlerle ilgili yardımcı olan iletişim asistanıyım${orgPhrase}. Şikayetinizi anlamak, doğru bölüme yönlendirmek ve randevu sürecini netleştirmek için buradayım.${targetQueryPhrase}`;
+    return `Merhaba, sizlere WhatsApp üzerinden süreçlerle ilgili yardımcı olan iletişim sorumlusuyum${orgPhrase}. Şikayetinizi anlamak, doğru bölüme yönlendirmek ve randevu sürecini netleştirmek için buradayım.${targetQueryPhrase}`;
   }
 }

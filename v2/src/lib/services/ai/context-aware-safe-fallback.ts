@@ -586,11 +586,7 @@ export class ContextAwareSafeFallbackResolver {
         interpretedIntent === 'identity_question';
 
       if (hasPersona && isAiOrBotOrPromptQuestion) {
-        if (hasComplaint) {
-          text = `Ben size süreç ve başvuru konusunda yardımcı olmak için buradayım. Ben ${pName}, ${orgName}’nden sizinle ilgileniyorum. İç sistem detaylarını paylaşamam; ama şikayetinizi, uygun bölümü ve randevu sürecini netleştirebiliriz.`;
-        } else {
-          text = `Ben size süreç ve başvuru konusunda yardımcı olmak için buradayım. Ben ${pName}, ${orgName}’nden sizinle ilgileniyorum. İç sistem detaylarını paylaşamam; ama şikayetinizi, uygun bölümü ve randevu sürecini netleştirebiliriz.`;
-        }
+        text = `Ben ${pName}, ${orgName ? orgName + "’nden " : ""}size yardımcı olmaya çalışıyorum. Çalışma sistemimizle ilgili iç detayları pek paylaşamıyorum; ama şikayetinizi anlamak, sizi doğru bölüme yönlendirmek ve randevu sürecinizi netleştirmek için buradayım.`;
       } else {
         if (hasComplaint) {
           text = `Kusura bakmayın, cevaplarım yeterince net olmadı. ${hasMother ? 'Annenizin ' : ''}${complaint} süreciyle ilgili sorularınızı daha düzgün yanıtlayayım.`;
