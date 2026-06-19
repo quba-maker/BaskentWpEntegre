@@ -90,6 +90,27 @@ export class AIResponseOrchestrator {
     } = params;
 
     const startTime = Date.now();
+
+    // P0.20-K: Anomalous Text Check (Skip punctuation-only or empty texts completely)
+    const cleanInboundText = (inboundText || '').trim();
+    const isAnomalousText = cleanInboundText === '' || /^[.!?,\-\s]+$/.test(cleanInboundText);
+    if (isAnomalousText) {
+      console.log(JSON.stringify({
+        tag: "AI_RESPONSE_ORCHESTRATOR_ANOMALOUS_TEXT_BYPASS",
+        tenantId,
+        conversationId,
+        inboundText,
+        reason: "only_punctuation_or_empty"
+      }));
+      return {
+        text: '',
+        modelUsed: 'bypass_anomalous',
+        latencyMs: Date.now() - startTime,
+        bypassed: true,
+        isRetry: false,
+        qualityGateFailed: false
+      };
+    }
     let burstAnchorId = '';
     let responseDedupeKey = '';
     let isDbLockAcquired = false;
@@ -637,8 +658,14 @@ export class AIResponseOrchestrator {
       const recallSummary = buildRecallFactsSummary(history);
       const isRecallWithFacts = isRecallFrustration && recallSummary.length > 0;
 
+      // Safe guard: If it's thanks_but_continue or open_continuation, but contains a question mark '?'
+      // or is a longer text (possibly containing a specific question not caught by router regex),
+      // do NOT bypass LLM. Let Gemini handle the detailed question.
+      const isThanksButContinueBypass = isThanksButContinue && !cleanInbound.includes('?') && cleanInbound.length < 45;
+      const isOpenContinuationBypass = isOpenContinuationIntent && !cleanInbound.includes('?') && cleanInbound.length < 45;
+
       const isLlmBypassChallenge = isPromptChallenge || isBotAccusation || isAiAccusation || isAngryPromptChallenge || shouldBypassDoctorLookup || isRecallWithFacts || isNextStepRequest || isMultiIntentQuery || isDoctorNamesRequest
-        || isThanksButContinue || isOpenContinuationIntent || isCannotTravelObjection || isDistanceObjection || isPoliteClose; // P0.16-L
+        || isThanksButContinueBypass || isOpenContinuationBypass || isCannotTravelObjection || isDistanceObjection || isPoliteClose; // P0.16-L
 
       let text = '';
       let bypassed = false;
@@ -747,7 +774,7 @@ export class AIResponseOrchestrator {
         }
 
         // ── P0.16-L: Thanks but continue (teşekkür ama bir soru daha) ──────────
-        if (!fallbackResult && isThanksButContinue) {
+        if (!fallbackResult && isThanksButContinueBypass) {
           const selfComplaint = selfParticipant?.complaint;
           const openPhrase = selfComplaint
             ? `Tabii, memnuniyetle. ${selfComplaint} ile ilgili başka ne öğrenmek istersiniz?`
@@ -763,7 +790,7 @@ export class AIResponseOrchestrator {
         }
 
         // ── P0.16-L: Open continuation (başka bilgi, bir soru daha) ─────────────
-        if (!fallbackResult && isOpenContinuationIntent && !isThanksButContinue) {
+        if (!fallbackResult && isOpenContinuationBypass && !isThanksButContinueBypass) {
           fallbackResult = {
             text: 'Tabii, hangi konuda bilgi almak istersiniz? Sormak istediğiniz her şeyi paylaşabilirsiniz.',
             finalPath: 'open_continuation'

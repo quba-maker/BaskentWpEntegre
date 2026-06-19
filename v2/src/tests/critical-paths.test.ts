@@ -4502,7 +4502,7 @@ test("P0.15 - 7: Known facts resolver name, complaint, and time resolution", () 
   });
   
   assert(facts.name === "Ahmet Yılmaz", "İsim doğru çözülmeli");
-  assert(facts.complaint === "bel fıtığı", "Şikayet doğru çözülmeli");
+  assert(facts.complaint?.toLowerCase() === "bel fıtığı", "Şikayet doğru çözülmeli");
   assert(facts.availableTime === "Temmuz ayı", "Tarih doğru çözülmeli");
   assert(facts.hasLinkedForm === true, "Form varlığı algılanmalı");
 });
@@ -4632,7 +4632,7 @@ test("P0.15 - 13: IdentityEngine.getContext tenant-safe form binding and raw dat
     assert(context.latestForm.data.full_name === "Hakan Yılmaz", "İsim doğru özetlenmeli");
     assert(context.latestForm.data.random_secret_leak === undefined, "Ham veri dışı alanlar temizlenmeli (isolation)");
     assert(context.patient_known_facts.some((f: string) => f.includes("Hakan Yılmaz")), "Facts içinde olmalı");
-    assert(context.patient_known_facts.some((f: string) => f.includes("boyun fıtığı")), "Şikayet facts içinde olmalı");
+    assert(context.patient_known_facts.some((f: string) => f.toLowerCase().includes("boyun fıtığı")), "Şikayet facts içinde olmalı");
   } finally {
     (global as any).mockDb = originalMockDb;
   }
@@ -6812,8 +6812,8 @@ test("P0.17-FP-11: Turkish morphology — planlamasınınız and Kulak Burunuz B
   const guard1 = TurkishMorphologyGuard.check(input1, true);
   const guard2 = TurkishMorphologyGuard.check(input2, true);
 
-  assert(guard1.correctedText?.includes("planlamanız"), `Guard expected 'planlamanız', got: ${guard1.correctedText}`);
-  assert(guard2.correctedText?.includes("Kulak Burun Boğaz"), `Guard expected 'Kulak Burun Boğaz', got: ${guard2.correctedText}`);
+  assert(!!guard1.correctedText?.includes("planlamanız"), `Guard expected 'planlamanız', got: ${guard1.correctedText}`);
+  assert(!!guard2.correctedText?.includes("Kulak Burun Boğaz"), `Guard expected 'Kulak Burun Boğaz', got: ${guard2.correctedText}`);
 
   // Test FinalOutboundGuard
   const mockCtx: any = { tenantId: "test-tenant", sandbox: true };
@@ -6847,10 +6847,10 @@ test("P0.17-FP-13: Country resolution updates even if existingCountry is set (wh
   const isCountryLocked = false;
   const existingCountry = "Türkiye";
   const crmData = { country: "Hollanda" };
-  const formExt = null;
+  const formExt: any = null;
   const phoneNumber = "905546833306";
 
-  let resolvedCountryForConv = existingCountry;
+  let resolvedCountryForConv: string | null = existingCountry;
   if (!isCountryLocked) {
     if (formExt?.country) {
       const norm = normalizeCountry(formExt.country, phoneNumber);

@@ -170,16 +170,35 @@ export class DepartmentAliasResolver {
 
     // Unicode-aware word token boundary checking helper
     const matchesToken = (text: string, keyword: string): boolean => {
+      const trimmedKw = keyword.trim();
+      const isMultiWord = trimmedKw.includes(' ');
+
+      if (isMultiWord) {
+        const index = text.indexOf(trimmedKw);
+        if (index === -1) return false;
+
+        if (index > 0) {
+          const charBefore = text.charAt(index - 1);
+          if (/[\p{L}\p{N}]/u.test(charBefore)) return false;
+        }
+        const nextIndex = index + trimmedKw.length;
+        if (nextIndex < text.length) {
+          const charAfter = text.charAt(nextIndex);
+          if (/[\p{L}\p{N}]/u.test(charAfter)) return false;
+        }
+        return true;
+      }
+
       const tokens = text.split(/[^\p{L}\p{N}]+/u);
       return tokens.some(t => {
-        if (t === keyword) return true;
-        if (keyword === 'diz') {
+        if (t === trimmedKw) return true;
+        if (trimmedKw === 'diz') {
           if (t.startsWith('dizayn') || t.startsWith('dizel') || t.startsWith('diziler')) return false;
           return t.startsWith('diz');
         }
-        if (keyword.length >= 4 && t.startsWith(keyword)) {
+        if (trimmedKw.length >= 4 && t.startsWith(trimmedKw)) {
           // Prevent false match for 'kist' in 'özbekistan' / 'uzbekistan'
-          if (keyword === 'kist' && (t.startsWith('özbekistan') || t.startsWith('uzbekistan') || t.startsWith('ozbekistan'))) return false;
+          if (trimmedKw === 'kist' && (t.startsWith('özbekistan') || t.startsWith('uzbekistan') || t.startsWith('ozbekistan'))) return false;
           return true;
         }
         return false;
