@@ -37,28 +37,70 @@ export class MemoryEngine {
       const lead = leadRows[0];
       const rawData = typeof lead.raw_data === 'string' ? JSON.parse(lead.raw_data) : (lead.raw_data || {});
       
-      const name = lead.patient_name || rawData.name || rawData.first_name || 'İsimsiz Hasta';
-      const country = lead.country || rawData.country || 'Belirtilmemiş Ülke';
+      const normalizedKeyMap: Record<string, string> = {};
+      for (const k of Object.keys(rawData)) {
+        const normalized = k.toLowerCase().replace(/\s+/g, '_').replace(/[çç]/g, 'c').replace(/[şş]/g, 's').replace(/[ğğ]/g, 'g').replace(/[üü]/g, 'u').replace(/[öö]/g, 'o').replace(/[ıiİI]/g, 'i');
+        normalizedKeyMap[normalized] = k;
+      }
+
+      // 1. Resolve Name
+      let name = lead.patient_name || '';
+      if (!name) {
+        const nameKey = Object.keys(normalizedKeyMap).find(nk =>
+          nk.includes('ad_soyad') || nk.includes('full_name') || nk.includes('name') || nk.includes('first_name')
+        );
+        name = nameKey ? String(rawData[normalizedKeyMap[nameKey]]).trim() : '';
+      }
+      if (!name) name = 'İsimsiz Hasta';
+
+      // 2. Resolve Country
+      let country = lead.country || '';
+      if (!country) {
+        const countryKey = Object.keys(normalizedKeyMap).find(nk =>
+          nk.includes('ulke') || nk.includes('country') || nk.includes('where') || nk.includes('yasiyor') || nk.includes('live') || nk === 'nerede_yasiyorsunuz'
+        );
+        country = countryKey ? String(rawData[normalizedKeyMap[countryKey]]).trim() : '';
+      }
+      if (!country) country = 'Belirtilmemiş Ülke';
       
-      // Resolve department
-      let department = lead.department || rawData.department || rawData.onerilen_bolum || rawData.önerilen_bölüm || '';
+      // 3. Resolve Department
+      let department = lead.department || '';
       if (!department) {
-        const rawKeys = Object.keys(rawData);
-        const deptKey = rawKeys.find(k => {
-          const l = k.toLowerCase().trim();
-          return l.includes('önerilen') || l.includes('onerilen') || l.includes('department') ||
-                 l === 'bölüm' || l === 'bolum' || l.includes('branş') || l.includes('brans');
-        });
-        if (deptKey && rawData[deptKey]) {
-          department = String(rawData[deptKey]).trim();
-        }
+        const deptKey = Object.keys(normalizedKeyMap).find(nk =>
+          nk.includes('bolum') || nk.includes('department') || nk.includes('onerilen') || nk.includes('uzmanlik')
+        );
+        department = deptKey ? String(rawData[normalizedKeyMap[deptKey]]).trim() : '';
       }
       if (!department) department = 'Genel';
 
-      // Extract complaint/question
-      const complaint = rawData.complaint || rawData.message || rawData.note || rawData.question || rawData.sikayet || rawData.hastalik || '';
-      
-      const summaryText = `${name}, ${country}, ${department} için form dolduran hasta. Şikayeti: ${complaint || 'Belirtilmemiş'}.`;
+      // 4. Resolve Complaint / Question
+      let complaint = '';
+      const complaintKey = Object.keys(normalizedKeyMap).find(nk =>
+        nk.includes('sikayet') || nk.includes('sagligidurumu') || nk.includes('durumunuzunasil') || nk.includes('hastaliginiz') || nk.includes('complaint')
+      );
+      if (complaintKey) {
+        complaint = String(rawData[normalizedKeyMap[complaintKey]]).trim();
+      }
+
+      // 5. Resolve Appointment Preference / Randevu Tercihi
+      const appointKey = Object.keys(normalizedKeyMap).find(nk =>
+        nk.includes('randevu_tercihi') || nk.includes('appointment') || nk.includes('tercih') || nk.includes('aciklama') || nk.includes('mesaj')
+      );
+      const appointmentPref = appointKey ? String(rawData[normalizedKeyMap[appointKey]]).trim() : '';
+
+      let complaintText = complaint || '';
+      if (appointmentPref) {
+        if (complaintText && complaintText !== 'Sıcak Lead') {
+          complaintText += ` (Randevu Tercihi/Notu: ${appointmentPref})`;
+        } else {
+          complaintText = appointmentPref;
+        }
+      }
+      if (!complaintText) {
+        complaintText = 'Belirtilmemiş';
+      }
+
+      const summaryText = `${name}, ${country}, ${department} için form dolduran hasta. Şikayeti: ${complaintText}.`;
 
       // Save form_summary to leads
       await db.executeSafe({
@@ -262,7 +304,7 @@ Hastanın bulunduğu ülke için saat dilimi doğrulanmamıştır (şehir/eyalet
         
         Format:
         {
-          "crm_summary": "Koordinator odakli detayli CRM ozeti (500-900 karakter). Sunlari icermeli: Kim basvuruyor? Nereden? Kimin icin? Hangi tedavi/bolum? Su ana kadar hangi bilgiler alindi/verildi? Eksik bilgi/rapor var mi? Sonraki aksiyon nedir? Arama/randevu beklentisi var mi? Form bilgisiyle baslat, konusmayi ekle. Bot mesajlarini birebir kopyalama, durumu ozetle.",
+          "crm_summary": "Form bilgileriyle başlayan, ardından WhatsApp görüşme sürecini özetleyen kısa satış/CRM notu (300-450 karakter). Örnek format: '[Ad/İlişki], [Ülke], [Bölüm] için form doldurmuş (Şikayet: [şikayet]). WhatsApp üzerinden iletişim sağlandı, [yapılan görüşme, alınan kararlar, teyit edilen bilgiler]. Sonraki aksiyon: [beklenen eylem]'. Kesinlikle uzun jenerik cümleler ve 'eksik bilgiler arasında yaş, cinsiyet...' gibi gereksiz listeler yazma.",
           "summary_text": "Kisa 1-2 cumle anlik durum ozeti.",
           "firsat_gerekcesi": "ZORUNLU: Neden firsat? 1-2 cumle. Ornek: Hasta fiyat sormadi ve tarih verdi, sicak lead. Veya: Form dolduran hasta hic mesaj atmadi, iletisim bekliyor.",
           "buying_intent": "HOT | WARM | COLD",
@@ -271,7 +313,7 @@ Hastanın bulunduğu ülke için saat dilimi doğrulanmamıştır (şehir/eyalet
         }
 
         KURALLAR:
-        - crm_summary 500-900 karakter arasında olmalı.
+        - crm_summary 300-500 karakter arasında olmalı, gereksiz dolgu cümlelerinden kaçınarak doğrudan süreci özetlemelidir.
         - Konuşmanın SONUNDAKİ en güncel bilgileri (yeni istenen tarihler, saat değişiklikleri, son kararlar) ÖZELLİKLE yansıt.
         - Müşteri önceki fikrini değiştirdiyse ESKİ planı değil EN GÜNCEL durumu özetle.
         - Asistan cevaplarını birebir kopyalama, sadece önemli verileri çıkar.

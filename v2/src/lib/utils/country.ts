@@ -9,7 +9,7 @@ export interface CountryInfo {
   code: string;
 }
 
-const PHONE_PREFIX_MAP: [string, CountryInfo][] = [
+export const PHONE_PREFIX_MAP: [string, CountryInfo][] = [
   ['994', { flag: '🇦🇿', name: 'Azerbaycan', code: 'AZ' }],
   ['998', { flag: '🇺🇿', name: 'Özbekistan', code: 'UZ' }],
   ['996', { flag: '🇰🇬', name: 'Kırgızistan', code: 'KG' }],
@@ -75,7 +75,7 @@ export function getCountryFromPhone(phone: string | null | undefined): CountryIn
 }
 
 // English → Turkish country name normalization (for AI-detected country fields)
-const COUNTRY_NAME_TR_MAP: Record<string, string> = {
+export const COUNTRY_NAME_TR_MAP: Record<string, string> = {
   'turkey': 'Türkiye',
   'türkei': 'Türkiye',
   'germany': 'Almanya',
@@ -142,6 +142,24 @@ const COUNTRY_NAME_TR_MAP: Record<string, string> = {
   'kuwait': 'Kuveyt',
   'bahrain': 'Bahreyn',
   'oman': 'Umman',
+  // Russian / Cyrillic translations
+  'узбекистан': 'Özbekistan',
+  'азербайджан': 'Azerbaycan',
+  'казахстан': 'Kazakistan',
+  'россия': 'Rusya',
+  'кыргызстан': 'Kırgızistan',
+  'киргизия': 'Kırgızistan',
+  'таджикистан': 'Tacikistan',
+  'грузия': 'Gürcistan',
+  'турция': 'Türkiye',
+  'германия': 'Almanya',
+  'франция': 'Fransa',
+  'италия': 'İtalya',
+  'испания': 'İspanya',
+  'англия': 'İngiltere',
+  'великобритания': 'İngiltere',
+  'украина': 'Ukrayna',
+  'сша': 'ABD',
 };
 
 export function normalizeCountryName(name: string): string {

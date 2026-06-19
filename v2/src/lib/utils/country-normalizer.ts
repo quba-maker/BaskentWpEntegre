@@ -1,4 +1,4 @@
-import { getCountryFromPhone } from './country';
+import { getCountryFromPhone, PHONE_PREFIX_MAP, COUNTRY_NAME_TR_MAP, CountryInfo } from './country';
 
 export interface CountryNormalization {
   country: string | null;
@@ -53,7 +53,40 @@ export function normalizeCountry(
 
   const cleanRaw = String(rawCountry || '').replace(/\?+$/, '').trim().toLowerCase();
 
-  // Try parsing raw string against explicit mappings
+  // 1. Try parsing raw string against dynamic mappings (translating english/russian/etc. first)
+  if (cleanRaw) {
+    let mappedName = COUNTRY_NAME_TR_MAP[cleanRaw] || null;
+    if (!mappedName) {
+      const matchKey = Object.keys(COUNTRY_NAME_TR_MAP).find(k => k.length > 3 && (cleanRaw.includes(k) || k.includes(cleanRaw)));
+      if (matchKey) {
+        mappedName = COUNTRY_NAME_TR_MAP[matchKey];
+      }
+    }
+
+    if (mappedName) {
+      const canonicalInfo = PHONE_PREFIX_MAP.find(([, info]: [string, CountryInfo]) => info.name.toLowerCase() === mappedName!.toLowerCase());
+      if (canonicalInfo) {
+        result.country = canonicalInfo[1].name;
+        result.countryConfidence = 'high';
+        result.countryConfirmationNeeded = false;
+        return result;
+      }
+    }
+
+    // Try matching direct Turkish names in PHONE_PREFIX_MAP
+    const directCanonicalInfo = PHONE_PREFIX_MAP.find(([, info]: [string, CountryInfo]) => {
+      const normName = info.name.toLowerCase();
+      return normName === cleanRaw || (cleanRaw.length > 3 && (normName.includes(cleanRaw) || cleanRaw.includes(normName)));
+    });
+    if (directCanonicalInfo) {
+      result.country = directCanonicalInfo[1].name;
+      result.countryConfidence = 'high';
+      result.countryConfirmationNeeded = false;
+      return result;
+    }
+  }
+
+  // 2. Try parsing raw string against explicit mappings (fallback)
   if (cleanRaw && COUNTRY_MAPPINGS[cleanRaw]) {
     const match = COUNTRY_MAPPINGS[cleanRaw];
     result.country = match.country;
@@ -62,7 +95,7 @@ export function normalizeCountry(
     return result;
   }
 
-  // Look for substring matches
+  // 3. Look for substring matches in explicit mappings (fallback)
   if (cleanRaw) {
     for (const [key, mapping] of Object.entries(COUNTRY_MAPPINGS)) {
       if (cleanRaw.includes(key) && key.length > 2) {
@@ -74,7 +107,7 @@ export function normalizeCountry(
     }
   }
 
-  // Check phone prefix fallback if the country raw is still empty
+  // 4. Check phone prefix fallback if the country raw is still empty
   if (phone) {
     const phoneCountryInfo = getCountryFromPhone(phone);
     if (phoneCountryInfo) {

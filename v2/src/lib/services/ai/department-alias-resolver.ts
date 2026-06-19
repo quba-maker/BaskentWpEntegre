@@ -168,11 +168,29 @@ export class DepartmentAliasResolver {
     const normalizedInbound = normalize(inboundText);
     const rawLower = inboundText.toLowerCase().trim();
 
+    // Unicode-aware word token boundary checking helper
+    const matchesToken = (text: string, keyword: string): boolean => {
+      const tokens = text.split(/[^\p{L}\p{N}]+/u);
+      return tokens.some(t => {
+        if (t === keyword) return true;
+        if (keyword === 'diz') {
+          if (t.startsWith('dizayn') || t.startsWith('dizel') || t.startsWith('diziler')) return false;
+          return t.startsWith('diz');
+        }
+        if (keyword.length >= 4 && t.startsWith(keyword)) {
+          // Prevent false match for 'kist' in 'özbekistan' / 'uzbekistan'
+          if (keyword === 'kist' && (t.startsWith('özbekistan') || t.startsWith('uzbekistan') || t.startsWith('ozbekistan'))) return false;
+          return true;
+        }
+        return false;
+      });
+    };
+
     // 1. Check tenant-specific alias config first (from brain.context.config.departmentAliases)
     if (tenantAliasConfig && typeof tenantAliasConfig === 'object') {
       for (const [keyword, canonical] of Object.entries(tenantAliasConfig)) {
         const normKey = normalize(keyword);
-        if (normalizedInbound.includes(normKey) || rawLower.includes(keyword.toLowerCase())) {
+        if (matchesToken(normalizedInbound, normKey) || matchesToken(rawLower, keyword.toLowerCase())) {
           return {
             canonical: String(canonical),
             displayLabel: String(canonical).toLowerCase(),
@@ -186,7 +204,7 @@ export class DepartmentAliasResolver {
     for (const entry of DEFAULT_ALIAS_MAP) {
       for (const kw of entry.keywords) {
         const normKw = normalize(kw);
-        if (normalizedInbound.includes(normKw) || rawLower.includes(kw.toLowerCase())) {
+        if (matchesToken(normalizedInbound, normKw) || matchesToken(rawLower, kw.toLowerCase())) {
           return {
             canonical: entry.canonical,
             displayLabel: entry.displayLabel,

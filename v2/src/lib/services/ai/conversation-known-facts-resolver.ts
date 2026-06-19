@@ -200,9 +200,19 @@ export class ConversationKnownFactsResolver {
       if (m.role !== 'user' || !m.content) continue;
       const lower = m.content.toLowerCase();
 
-      // Extract symptoms
+      // Extract symptoms safely using Unicode word tokens
+      const tokens = lower.split(/[^\p{L}\p{N}]+/u);
       for (const kw of symptomKeywords) {
-        if (lower.includes(kw) && !self.symptoms.includes(kw)) {
+        const matches = tokens.some(t => {
+          if (t === kw) return true;
+          if (kw.length >= 4 && t.startsWith(kw)) {
+            // Prevent false match for 'kist' in 'özbekistan' / 'uzbekistan'
+            if (kw === 'kist' && (t.startsWith('özbekistan') || t.startsWith('uzbekistan') || t.startsWith('ozbekistan'))) return false;
+            return true;
+          }
+          return false;
+        });
+        if (matches && !self.symptoms.includes(kw)) {
           self.symptoms.push(kw);
         }
       }
