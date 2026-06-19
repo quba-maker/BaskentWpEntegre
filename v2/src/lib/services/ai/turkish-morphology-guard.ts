@@ -62,6 +62,9 @@ const KNOWN_DEDUP_PATTERNS: { regex: RegExp; description: string; fix?: (match: 
   // P0.16-F: ağrısınınız → ağrınız (possessive suffix doubled on pain nouns)
   { regex: /ağrısınınız/gi, description: 'agrisininiz', fix: (m) => m[0] === 'A' ? 'Ağrınız' : 'ağrınız' },
   { regex: /agrisininiz/gi, description: 'agrisininiz_ascii', fix: (m) => m[0] === 'A' ? 'Ağrınız' : 'ağrınız' },
+  { regex: /planlamasınınız/gi, description: 'planlamasininiz', fix: (m) => m[0] === 'P' ? 'Planlamanız' : 'planlamanız' },
+  { regex: /planlamasınızı/gi, description: 'planlamasınızı', fix: (m) => m[0] === 'P' ? 'Planlamanızı' : 'planlamanızı' },
+  { regex: /kulak\s+burunuz\s+boğaz/gi, description: 'kulak_burun_bogaz_corruption', fix: (m) => m[0] === 'K' ? 'Kulak Burun Boğaz' : 'kulak burun boğaz' },
   // ısınınız → ısınız (heat/warmth suffix doubled)
   { regex: /ısınınız/gi, description: 'isininiz', fix: (m) => m[0] === 'I' ? 'Isınız' : 'ısınız' },
   // General: -sınınız → -nız (possessive doubled on nouns ending in vowel)

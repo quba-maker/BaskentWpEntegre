@@ -102,7 +102,9 @@ export class FinalOutboundGuard {
     // 1. Safe morphological corrections (case-preserving replacements)
     const corrections = [
       { regex: /adınızızı/gi, repl: (m: string) => m.charAt(0) === 'A' ? 'Adınızı' : 'adınızı' },
-      { regex: /planlamasınızı/gi, repl: (m: string) => m.charAt(0) === 'P' ? 'Planlamasını' : 'planlamasını' },
+      { regex: /planlamasınınız/gi, repl: (m: string) => m.charAt(0) === 'P' ? 'Planlamanız' : 'planlamanız' },
+      { regex: /planlamasınızı/gi, repl: (m: string) => m.charAt(0) === 'P' ? 'Planlamanızı' : 'planlamanızı' },
+      { regex: /kulak\s+burunuz\s+boğaz/gi, repl: (m: string) => m.charAt(0) === 'K' ? 'Kulak Burun Boğaz' : 'kulak burun boğaz' },
       { regex: /haklısınızız/gi, repl: (m: string) => m.charAt(0) === 'H' ? 'Haklısınız' : 'haklısınız' },
       { regex: /hekimlerimiziniz/gi, repl: (m: string) => m.charAt(0) === 'H' ? 'Hekimlerimizin' : 'hekimlerimizin' },
       { regex: /listesinizi/gi, repl: (m: string) => m.charAt(0) === 'L' ? 'Listesini' : 'listesini' },

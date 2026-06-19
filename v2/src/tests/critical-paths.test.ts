@@ -6793,6 +6793,53 @@ test("P0.17-FP-10: hallucination guard — bot_suggestion.proposed_date ve sugge
   assert(hasNone === false, "hasActiveTaskTime should be false when no time data exists");
 });
 
+test("P0.17-FP-11: Turkish morphology — planlamasınınız and Kulak Burunuz Boğaz normalizations", async () => {
+  const { TurkishFinalQualityNormalizer } = await import("../lib/services/ai/turkish-final-quality-normalizer");
+  const { TurkishMorphologyGuard } = await import("../lib/services/ai/turkish-morphology-guard");
+  const { FinalOutboundGuard } = await import("../lib/services/ai/final-outbound-guard");
+
+  const input1 = "Tedavi planlamasınınız hastanemizde yapılacaktır.";
+  const input2 = "Kulak Burunuz Boğaz Hastalıkları bölümümüzde hekimlerimiz görev almaktadır.";
+
+  // Test Normalizer
+  const norm1 = TurkishFinalQualityNormalizer.normalizeText(input1);
+  const norm2 = TurkishFinalQualityNormalizer.normalizeText(input2);
+
+  assert(norm1.includes("planlamanız"), `Expected 'planlamanız', got: ${norm1}`);
+  assert(norm2.includes("Kulak Burun Boğaz"), `Expected 'Kulak Burun Boğaz', got: ${norm2}`);
+
+  // Test Guard
+  const guard1 = TurkishMorphologyGuard.check(input1, true);
+  const guard2 = TurkishMorphologyGuard.check(input2, true);
+
+  assert(guard1.correctedText?.includes("planlamanız"), `Guard expected 'planlamanız', got: ${guard1.correctedText}`);
+  assert(guard2.correctedText?.includes("Kulak Burun Boğaz"), `Guard expected 'Kulak Burun Boğaz', got: ${guard2.correctedText}`);
+
+  // Test FinalOutboundGuard
+  const mockCtx: any = { tenantId: "test-tenant", sandbox: true };
+  const fob1 = FinalOutboundGuard.process(input1, mockCtx);
+  const fob2 = FinalOutboundGuard.process(input2, mockCtx);
+
+  assert(fob1.includes("planlamanız"), `Outbound expected 'planlamanız', got: ${fob1}`);
+  assert(fob2.includes("Kulak Burun Boğaz"), `Outbound expected 'Kulak Burun Boğaz', got: ${fob2}`);
+});
+
+test("P0.17-FP-12: PromptChallengeSafetyPolicy — neutral and complex complaint templates", () => {
+  const { PromptChallengeSafetyPolicy } = require("../lib/services/ai/prompt-challenge-safety-policy");
+
+  const factsNeutral = { complaint: "Şikayetim yok, kapsamlı check-up yaptırmak istiyorum." };
+  const factsNormal = { complaint: "burun estetiği" };
+  const factsComplex = { complaint: "Kafamın arkasında şiddetli bir ağrı var ve geçmiyor." };
+
+  const respNeutral = PromptChallengeSafetyPolicy.getChallengeFallbackResponse("sen bot musun", factsNeutral, "Rüya", "Başkent Hastanesi");
+  const respNormal = PromptChallengeSafetyPolicy.getChallengeFallbackResponse("sen bot musun", factsNormal, "Rüya", "Başkent Hastanesi");
+  const respComplex = PromptChallengeSafetyPolicy.getChallengeFallbackResponse("sen bot musun", factsComplex, "Rüya", "Başkent Hastanesi");
+
+  assert(respNeutral.includes("Hangi konuda bilgi almak istediğinizi iletebilirsiniz"), "Neutral complaint should resolve to default query phrase");
+  assert(respNormal.includes("Burun estetiği hakkında bilgi almak isterseniz"), "Normal short complaint should be inserted into query phrase");
+  assert(respComplex.includes("Hangi konuda bilgi almak istediğinizi iletebilirsiniz"), "Complex long complaint should resolve to default query phrase");
+});
+
 // ==========================================
 // SONUÇLAR
 // ==========================================

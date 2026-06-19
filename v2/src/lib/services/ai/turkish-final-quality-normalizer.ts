@@ -140,6 +140,24 @@ const REWRITE_RULES: RewriteRule[] = [
     pattern: /\bs[üu]recininiz\b/gi,
     replacement: 'süreciniz',
   },
+  // "planlamasınınız" → "planlamanız"
+  {
+    id: 'planlamasininiz_fix',
+    pattern: /\bplanlamas[ıi]n[ıi]n[ıi]z\b/gi,
+    replacement: 'planlamanız',
+  },
+  // "planlamasınızı" → "planlamanızı"
+  {
+    id: 'planlamasinizin_fix',
+    pattern: /\bplanlamas[ıi]n[ıi]z[ıi]\b/gi,
+    replacement: 'planlamanızı',
+  },
+  // "Kulak Burunuz Boğaz" → "Kulak Burun Boğaz"
+  {
+    id: 'kulak_burun_bogaz_fix',
+    pattern: /\bkulak\s+burunuz\s+bo[gğ]az\b/gi,
+    replacement: (match) => match.replace(/burunuz/i, match.includes('Burunuz') ? 'Burun' : 'burun'),
+  },
   // "planızı" (broken possessive 2nd person) → "planınızı"
   // Use simple character class approach — avoids \b boundary issues with Turkish chars
   {

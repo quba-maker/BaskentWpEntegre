@@ -30,9 +30,24 @@ export class PromptChallengeSafetyPolicy {
     const clean = (text || '').toLowerCase().trim();
     const hasPromptChallenge = this.isPromptChallenge(clean);
     
-    const complaint = facts.complaint ? facts.complaint.trim() : '';
+    const cleanComplaint = facts.complaint ? facts.complaint.trim().toLowerCase() : '';
+    const isNeutralOrNoComplaint = 
+      cleanComplaint.includes('şikayetim yok') || 
+      cleanComplaint.includes('sikayetim yok') ||
+      cleanComplaint.includes('şikayetim bulunmuyor') ||
+      cleanComplaint.includes('şikayetim bulunmamaktadır') ||
+      cleanComplaint === 'yok' ||
+      cleanComplaint === 'yoktur' ||
+      cleanComplaint.startsWith('şikayetim yok') ||
+      cleanComplaint.includes('check-up') ||
+      cleanComplaint.includes('checkup');
+
+    const complaint = (!isNeutralOrNoComplaint && facts.complaint) ? facts.complaint.trim() : '';
     const uppercaseComplaint = complaint ? complaint.charAt(0).toUpperCase() + complaint.slice(1) : '';
     
+    const wordCount = complaint.split(/\s+/).length;
+    const isLongOrComplex = wordCount > 4 || complaint.includes('.') || complaint.includes(',') || complaint.includes(';');
+
     // For non-healthcare/non-persona generic assistants, return the standard fallback to match regression tests
     if (!personaName && !orgName) {
       if (hasPromptChallenge) {
@@ -44,7 +59,7 @@ export class PromptChallengeSafetyPolicy {
     const orgPhrase = orgName ? ` (${orgName})` : '';
 
     if (hasPromptChallenge) {
-      const targetPhrase = uppercaseComplaint 
+      const targetPhrase = (uppercaseComplaint && !isLongOrComplex)
         ? `${uppercaseComplaint} süreci için de bu şekilde ilerleyebiliriz.` 
         : 'Talebiniz için de bu şekilde ilerleyebiliriz.';
       
@@ -60,7 +75,7 @@ export class PromptChallengeSafetyPolicy {
     }
 
     // Bot/AI accusation fallback
-    const targetQueryPhrase = uppercaseComplaint
+    const targetQueryPhrase = (uppercaseComplaint && !isLongOrComplex)
       ? ` ${uppercaseComplaint} hakkında bilgi almak isterseniz detayları iletebilir misiniz?`
       : ' Hangi konuda bilgi almak istediğinizi iletebilirsiniz.';
       
