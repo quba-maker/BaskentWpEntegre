@@ -6680,23 +6680,32 @@ export async function clearConversation(conversationId: string): Promise<{ succe
         });
       }
 
-      // 4. Re-seed tags from the linked lead's form_name (if available)
+      // 4. Always clear tags first, then optionally re-seed from lead's form_name
       try {
-        const leadRows = await ctx.db.executeSafe({
-          text: `SELECT l.form_name
-                 FROM leads l
-                 JOIN opportunities o ON o.lead_id = l.id
-                 WHERE o.id = $1 AND l.tenant_id = $2
-                 LIMIT 1`,
-          values: [conv.active_opportunity_id || '00000000-0000-0000-0000-000000000000', ctx.tenantId]
-        }) as any[];
+        // Step 1: Always clear existing tags
+        await ctx.db.executeSafe({
+          text: `UPDATE conversations SET tags = '[]'::jsonb, updated_at = NOW() WHERE id = $1 AND tenant_id = $2`,
+          values: [conversationId, ctx.tenantId]
+        });
 
-        if (leadRows && leadRows.length > 0 && leadRows[0].form_name) {
-          const freshTags = JSON.stringify([leadRows[0].form_name]);
-          await ctx.db.executeSafe({
-            text: `UPDATE conversations SET tags = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3`,
-            values: [freshTags, conversationId, ctx.tenantId]
-          });
+        // Step 2: If there's a linked lead with form_name, use it as the single seed tag
+        if (conv.active_opportunity_id) {
+          const leadRows = await ctx.db.executeSafe({
+            text: `SELECT l.form_name
+                   FROM leads l
+                   JOIN opportunities o ON o.lead_id = l.id
+                   WHERE o.id = $1 AND l.tenant_id = $2
+                   LIMIT 1`,
+            values: [conv.active_opportunity_id, ctx.tenantId]
+          }) as any[];
+
+          if (leadRows && leadRows.length > 0 && leadRows[0].form_name) {
+            const freshTags = JSON.stringify([leadRows[0].form_name]);
+            await ctx.db.executeSafe({
+              text: `UPDATE conversations SET tags = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3`,
+              values: [freshTags, conversationId, ctx.tenantId]
+            });
+          }
         }
       } catch (_) {
         // Non-fatal: tags reset is best-effort

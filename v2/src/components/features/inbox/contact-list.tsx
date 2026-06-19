@@ -1849,6 +1849,8 @@ export function ContactRail() {
                   queryClient.invalidateQueries({ queryKey: ['conversations'] });
                   queryClient.invalidateQueries({ queryKey: ['messages', convId] });
                   queryClient.removeQueries({ queryKey: ['messages', convId] });
+                  // Sağ panel (özet, etiketler, CRM) yenilenmesi için
+                  queryClient.invalidateQueries({ queryKey: ['crm-panel', convId] });
                   if (typeof window !== 'undefined') {
                     window.dispatchEvent(new CustomEvent('inbox-unread-refresh'));
                   }
