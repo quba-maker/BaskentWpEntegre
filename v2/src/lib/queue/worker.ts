@@ -3001,9 +3001,21 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       }
 
       // Override pipeline_stage to 'lost' if any cancellation layer triggered
-      const effectivePipelineStage = explicitCancellation 
+      // If AI did not extract a stage but we have an inbound message, fallback to 'responded'
+      // to ensure the pipeline progresses out of 'new'/'contacted' states.
+      let effectivePipelineStage = explicitCancellation 
         ? 'lost' 
-        : crmData?.pipeline_stage;
+        : (crmData?.pipeline_stage || null);
+
+      if (!effectivePipelineStage && direction === 'in') {
+        const currentStage = beforeConv?.lead_stage || null;
+        if (!currentStage || ['new', 'new_lead', 'contacted', 'first_contact'].includes(currentStage)) {
+          effectivePipelineStage = 'responded';
+          this.log.info(`[WORKER_CRM_STAGE_FALLBACK] No stage extracted from inbound message, falling back to 'responded'`, {
+            traceId, phoneNumber, beforeStage: currentStage
+          });
+        }
+      }
 
       if (explicitCancellation) {
         this.log.info(`[CANCELLATION_FINAL] Explicit cancellation confirmed`, {

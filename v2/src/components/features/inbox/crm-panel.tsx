@@ -9,6 +9,7 @@ import { CustomerAiBrainPanel } from "@/components/features/ai-observability/Cus
 import { AiTimelinePanel } from "@/components/features/ai-observability/AiTimeline";
 import { resolvePatientDisplayName, formatPhoneReadable } from "@/lib/utils/patient-name-resolver";
 import { normalizeCountry } from "@/lib/utils/country-normalizer";
+import { oppStageToLeadStage } from "@/lib/config/stage-mapping";
 import { extractFromPatientMessageDeterministic } from "@/lib/utils/patient-message-extractor";
 import { resolveInboxActionIntent } from "@/lib/utils/intent-resolver";
 import { resolveDepartmentWithConflict } from "@/lib/utils/crm-conflict-resolver";
@@ -200,7 +201,7 @@ export function ContextPanel() {
     return norm.country || rawVal;
   };
 
-  const [stage, setStage] = useState(activeContact?.stage || "new");
+  const [stage, setStage] = useState(oppStageToLeadStage(activeContact?.stage || "new"));
   const [department, setDepartment] = useState(activeContact?.department || "");
   const [country, setCountry] = useState(getInitialCountry(activeContact));
   const [notes, setNotes] = useState(getInitialNotes(activeContact));
@@ -358,7 +359,7 @@ export function ContextPanel() {
   
   useEffect(() => {
     if (activeContact) {
-      setStage(activeContact.stage || "new");
+      setStage(oppStageToLeadStage(activeContact.stage || "new"));
       setDepartment(activeContact.department || "");
       setCountry(getInitialCountry(activeContact));
       setNotes(getInitialNotes(activeContact));
@@ -597,6 +598,46 @@ export function ContextPanel() {
     setIsSaving(false);
   };
 
+  const handleDirectSave = async (
+    newStage?: string,
+    newDept?: string,
+    newCountry?: string,
+    newNotes?: string,
+    newName?: string
+  ) => {
+    if (isSaving || !activeContact) return;
+    setIsSaving(true);
+    setSaveStatus("saving");
+
+    const activeStage = newStage !== undefined ? newStage : stage;
+    const activeDept = newDept !== undefined ? newDept : department;
+    const activeCountry = newCountry !== undefined ? newCountry : country;
+    const activeNotes = newNotes !== undefined ? newNotes : notes;
+    const activeName = newName !== undefined ? newName : patientName;
+
+    const res = await updateCrmData(activeContact.id, activeStage, activeDept, activeCountry, activeNotes, activeName);
+    if (res.success) {
+      useInboxStore.getState().setActiveContact(activeContact.id, {
+        ...activeContact,
+        stage: activeStage,
+        department: activeDept,
+        country: activeCountry,
+        notes: activeNotes,
+        name: activeName,
+        opp_patient_name: activeName
+      });
+      mutate((key) => Array.isArray(key) && key[0] === "conversations");
+      queryClient.invalidateQueries({ queryKey: ['crm-panel', activeContact.conversation_id || activeContact.id] });
+      setSaveStatus("saved");
+      setTimeout(() => setSaveStatus("idle"), 2000);
+    } else {
+      setSaveStatus("error");
+      setTimeout(() => setSaveStatus("idle"), 3000);
+    }
+
+    setIsSaving(false);
+  };
+
   const handleAddTag = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!newTagVal.trim() || !activeContact) {
@@ -788,7 +829,10 @@ export function ContextPanel() {
               value={patientName}
               onChange={(e) => setPatientName(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter") setIsEditingName(false);
+                if (e.key === "Enter") {
+                  setIsEditingName(false);
+                  handleDirectSave(undefined, undefined, undefined, undefined, patientName);
+                }
                 if (e.key === "Escape") {
                   setPatientName(getInitialPatientName(activeContact));
                   setIsEditingName(false);
@@ -799,7 +843,10 @@ export function ContextPanel() {
               autoFocus
             />
             <button
-              onClick={() => setIsEditingName(false)}
+              onClick={() => {
+                setIsEditingName(false);
+                handleDirectSave(undefined, undefined, undefined, undefined, patientName);
+              }}
               className="p-0.5 rounded-md transition-colors hover:bg-black/5 cursor-pointer flex-shrink-0"
               title="Tamam"
             >
@@ -829,7 +876,11 @@ export function ContextPanel() {
             </div>
             <select
               value={country}
-              onChange={(e) => setCountry(e.target.value)}
+              onChange={(e) => {
+                const val = e.target.value;
+                setCountry(val);
+                handleDirectSave(undefined, undefined, val, undefined, undefined);
+              }}
               className="pl-6 pr-5 py-0.5 rounded-full text-[10px] font-semibold outline-none transition-all appearance-none cursor-pointer"
               style={{ background: "var(--q-bg-hover)", color: "var(--q-text-primary)", border: "1px solid var(--q-border-default)" }}
             >
@@ -2379,7 +2430,11 @@ export function ContextPanel() {
               <div className="relative">
                 <select
                   value={stage}
-                  onChange={(e) => setStage(e.target.value)}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setStage(val);
+                    handleDirectSave(val, undefined, undefined, undefined, undefined);
+                  }}
                   className="w-full pl-2 pr-6 py-1.5 rounded-lg text-[11px] font-bold outline-none transition-all appearance-none cursor-pointer bg-white/60 border hover:border-indigo-500/30"
                   style={{ borderColor: "var(--q-border-default)", color: "var(--q-text-primary)", boxShadow: "var(--q-shadow-sm)" }}
                 >
@@ -2419,7 +2474,11 @@ export function ContextPanel() {
               <div className="relative">
                 <select
                   value={department}
-                  onChange={(e) => setDepartment(e.target.value)}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setDepartment(val);
+                    handleDirectSave(undefined, val, undefined, undefined, undefined);
+                  }}
                   className="w-full pl-2 pr-6 py-1.5 rounded-lg text-[11px] font-bold outline-none transition-all appearance-none cursor-pointer bg-white/60 border hover:border-indigo-500/30"
                   style={{ borderColor: "var(--q-border-default)", color: "var(--q-text-primary)", boxShadow: "var(--q-shadow-sm)" }}
                 >
@@ -2525,6 +2584,9 @@ export function ContextPanel() {
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
+              onBlur={(e) => {
+                handleDirectSave(undefined, undefined, undefined, e.target.value, undefined);
+              }}
               placeholder={entityType === 'patient' ? 'Hastayla ilgili manuel takip notları...' : 'Müşteriyle ilgili manuel notlar...'}
               className="w-full h-16 bg-white/60 border rounded-xl p-2.5 text-[11.5px] text-[#1D1D1F] placeholder:text-[#86868B] focus:ring-2 focus:ring-[#AF52DE]/20 resize-none outline-none transition-all shadow-sm focus:border-indigo-500/40"
               style={{ borderColor: "var(--q-border-default)" }}
