@@ -1814,7 +1814,8 @@ export class QueueWorkerEngine {
             channelId: metadata.channelId,
             groupId: metadata.groupId,
             providerMessageId: outRes.providerMessageId,
-            status: 'sent'
+            status: 'sent',
+            correlationId: providerMessageId
           });
 
           if (offMsgResult.messageId) {
@@ -2045,6 +2046,7 @@ export class QueueWorkerEngine {
                 channelId: metadata.channelId, groupId: metadata.groupId,
                 providerMessageId: privOutResult?.providerMessageId,
                 status: 'sent', modelUsed: 'privacy_pre_detector',
+                correlationId: providerMessageId
               });
 
               // Realtime publish
@@ -2502,18 +2504,19 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
          // Save the failed outgoing message to the DB so the UI shows it failed
          try {
            const outMsgResult = await msgService.saveMessageIdempotent({
-             phoneNumber,
-             direction: 'out',
-             content: finalResponseText,
-             channel: channel,
-             channelId: metadata.channelId,
-             groupId: metadata.groupId,
-             modelUsed: aiResponse.modelUsed || llmModel,
-             promptTokens: aiResponse.inputTokens || 0,
-             completionTokens: aiResponse.outputTokens || 0,
-             providerMessageId: null,
-             status: 'failed'
-           });
+              phoneNumber,
+              direction: 'out',
+              content: finalResponseText,
+              channel: channel,
+              channelId: metadata.channelId,
+              groupId: metadata.groupId,
+              modelUsed: aiResponse.modelUsed || llmModel,
+              promptTokens: aiResponse.inputTokens || 0,
+              completionTokens: aiResponse.outputTokens || 0,
+              providerMessageId: null,
+              status: 'failed',
+              correlationId: providerMessageId
+            });
            
            // Also broadcast to realtime so UI shows the failed message immediately
            if (outMsgResult.messageId) {
@@ -2553,7 +2556,8 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       promptTokens: aiResponse.inputTokens || 0,
       completionTokens: aiResponse.outputTokens || 0,
       providerMessageId: outProviderMessageId,
-      status: messageStatus
+      status: messageStatus,
+      correlationId: providerMessageId
     });
 
     this.log.info(`[DB_COMMITTED] [OUTGOING MESSAGE] Saved to DB. MsgId: ${outMsgResult.messageId}`, { traceId, outProviderMessageId });
@@ -3966,30 +3970,23 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       return;
     }
 
-    // Check 5: No bot outbound has already been sent for this inbound sequence
-    // P0.5: Strengthened — only checks bot-generated messages (model_used IS NOT NULL) to avoid
-    // counting operator messages as bot responses. Prevents duplicate LLM generation on QStash retries.
-    const latestBotOutboundQuery = await db.executeSafe({
-      text: `SELECT created_at FROM messages WHERE tenant_id = $1 AND conversation_id = $2 AND direction = 'out' AND model_used IS NOT NULL ORDER BY created_at DESC LIMIT 1`,
-      values: [tenantId, conversationId]
+    // Check 5: No bot outbound has already been sent for this inbound message
+    // P0.5: Strengthened — only checks bot-generated messages (model_used IS NOT NULL) referencing targetMessageId
+    // to avoid counting operator messages or messages from other sequences as bot responses.
+    // Prevents duplicate LLM generation on QStash retries while avoiding race conditions on rapid messages.
+    const existingBotReply = await db.executeSafe({
+      text: `SELECT id FROM messages 
+             WHERE tenant_id = $1 AND conversation_id = $2 AND direction = 'out' AND model_used IS NOT NULL 
+               AND correlation_id = $3 LIMIT 1`,
+      values: [tenantId, conversationId, targetMessageId]
     }) as any[];
 
-    const latestInboundTime = await db.executeSafe({
-      text: `SELECT created_at FROM messages WHERE provider_message_id = $1 AND tenant_id = $2 LIMIT 1`,
-      values: [targetMessageId, tenantId]
-    }) as any[];
-
-    if (latestBotOutboundQuery.length > 0 && latestInboundTime.length > 0) {
-      const outTime = new Date(latestBotOutboundQuery[0].created_at).getTime();
-      const inTime = new Date(latestInboundTime[0].created_at).getTime();
-      if (outTime > inTime) {
-        this.log.info(`[DEBOUNCE_WORKER] Bot response already sent for this inbound sequence (duplicate guard), exit`, { 
-          traceId, 
-          conversationId,
-          timeDiffMs: outTime - inTime 
-        });
-        return;
-      }
+    if (existingBotReply.length > 0) {
+      this.log.info(`[DEBOUNCE_WORKER] Bot response already sent for this inbound message ${targetMessageId} (duplicate guard), exit`, { 
+        traceId, 
+        conversationId
+      });
+      return;
     }
 
     // All checks pass! Now run Stop Rules / Deterministic responses BEFORE LLM generation.
@@ -4081,7 +4078,8 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
         channelId: resolvedChannelId,
         groupId: metadata.groupId,
         modelUsed: 'stop_rule_auto',
-        status: 'sent'
+        status: 'sent',
+        correlationId: targetMessageId
       });
 
       // Realtime publish
@@ -4278,7 +4276,8 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
         promptTokens: aiResponse.inputTokens || 0,
         completionTokens: aiResponse.outputTokens || 0,
         providerMessageId: outProviderMessageId,
-        status: 'sent'
+        status: 'sent',
+        correlationId: targetMessageId
       });
 
       if (orchestratorResult.responseDedupeKey) {

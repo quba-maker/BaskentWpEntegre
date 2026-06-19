@@ -22,6 +22,7 @@ export interface MessagePayload {
   mediaMetadata?: Record<string, any> | null;  // { filename, mime_type, caption, latitude, longitude, ... }
   providerTimestamp?: number;
   isHistoryImport?: boolean;
+  correlationId?: string | null;
 }
 
 export class MessageService {
@@ -103,10 +104,10 @@ export class MessageService {
               tenant_id, conversation_id, phone_number, direction, content, channel, 
               channel_id, group_id, workflow_run_id, prompt_binding_id,
               provider_message_id, model_used, prompt_tokens, completion_tokens, status,
-              media_type, media_url, media_metadata, provider_timestamp
+              media_type, media_url, media_metadata, provider_timestamp, correlation_id
             )
             SELECT $1, rc.conv_id, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-                   $16, $17, $18::jsonb, CASE WHEN $19::double precision IS NOT NULL THEN TO_TIMESTAMP($19::double precision) ELSE NULL END
+                   $16, $17, $18::jsonb, CASE WHEN $19::double precision IS NOT NULL THEN TO_TIMESTAMP($19::double precision) ELSE NULL END, $21
             FROM resolved_conv rc
             WHERE rc.conv_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM dup_check)
             RETURNING id
@@ -136,7 +137,8 @@ export class MessageService {
           payload.mediaUrl || null,          // $17
           payload.mediaMetadata ? JSON.stringify(payload.mediaMetadata) : null,  // $18
           payload.providerTimestamp != null ? Number(payload.providerTimestamp) : null, // $19 — explicit number or null
-          payload.isHistoryImport === true   // $20 — explicit boolean
+          payload.isHistoryImport === true,  // $20 — explicit boolean
+          payload.correlationId || null      // $21
         ]
       }) as any[];
 
