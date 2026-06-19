@@ -3344,7 +3344,7 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
                            requester_name = COALESCE(NULLIF($1, ''), requester_name),
                            patient_relation = COALESCE(NULLIF($2, ''), patient_relation),
                            metadata = metadata || $3::jsonb,
-                           summary = COALESCE(NULLIF($4, ''), summary)
+                           ai_reason = COALESCE(NULLIF($4, ''), ai_reason)
                          WHERE id = $5 AND tenant_id = $6`,
                   values: [
                     crmData.requester_name || detectedNewName || '',
@@ -3396,7 +3396,7 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
                              requester_name = COALESCE(NULLIF($1, ''), requester_name),
                              patient_relation = COALESCE(NULLIF($2, ''), patient_relation),
                              metadata = metadata || $3::jsonb,
-                             summary = COALESCE(NULLIF($4, ''), summary)
+                             ai_reason = COALESCE(NULLIF($4, ''), ai_reason)
                            WHERE id = $5 AND tenant_id = $6`,
                     values: [
                       crmData.requester_name || crmData.patient_name || '',

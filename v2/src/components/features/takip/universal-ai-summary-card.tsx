@@ -63,6 +63,23 @@ export function UniversalAISummaryCard({
         </div>
       )}
 
+      {/* Static Form Summary (Form Özeti) */}
+      {summary.formSummary && (
+        <div 
+          className="bg-stone-50 rounded-2xl border border-black/5 p-3.5 space-y-1.5 shadow-sm text-left"
+          style={{ border: '1px solid var(--q-border-default)' }}
+        >
+          <div className="flex items-center justify-between pb-1.5 border-b border-black/[0.04]">
+            <span className="text-[9px] font-bold text-[#86868B] uppercase tracking-wider flex items-center gap-1.5">
+              📝 Form Özeti
+            </span>
+          </div>
+          <p className="text-[12px] text-[#1D1D1F] leading-relaxed font-semibold">
+            {summary.formSummary}
+          </p>
+        </div>
+      )}
+
       {/* Main AI Summary (Görüşme Özeti) */}
       {summary.summary && (
         <div 

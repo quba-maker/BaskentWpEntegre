@@ -3723,17 +3723,17 @@ export async function getCrmPanelBundleAction(conversationId: string) {
             ON cprof.id = c.customer_id
             AND cprof.tenant_id = c.tenant_id
           LEFT JOIN LATERAL (
-            SELECT id, form_name, raw_data, created_at
+            SELECT id, form_name, raw_data, created_at, form_summary
             FROM (
-              SELECT id, form_name, raw_data, created_at, 1 as priority
+              SELECT id, form_name, raw_data, created_at, form_summary, 1 as priority
               FROM leads 
               WHERE leads.tenant_id = c.tenant_id AND c.customer_id IS NOT NULL AND leads.customer_id = c.customer_id
               UNION ALL
-              SELECT id, form_name, raw_data, created_at, 2 as priority
+              SELECT id, form_name, raw_data, created_at, form_summary, 2 as priority
               FROM leads 
               WHERE leads.tenant_id = c.tenant_id AND leads.phone_number = c.phone_number
               UNION ALL
-              SELECT id, form_name, raw_data, created_at, 3 as priority
+              SELECT id, form_name, raw_data, created_at, form_summary, 3 as priority
               FROM leads 
               WHERE leads.tenant_id = c.tenant_id AND (leads.phone_number LIKE '%' || RIGHT(c.phone_number, 10))
             ) sub
@@ -6649,46 +6649,53 @@ export async function clearConversation(conversationId: string): Promise<{ succe
       }) as any[];
 
       if (!convRows || convRows.length === 0) {
-        return { success: false, error: 'Konuşma bulunamadı veya erişim yetkisi yok.' };
+        return { success: false, error: 'Konusma bulunamadi veya erisim yetkisi yok.' };
       }
 
       const conv = convRows[0];
 
-      // 2. Delete all messages for this conversation (tenant-scoped)
+      // 2. Delete all messages (tenant-scoped)
       await ctx.db.executeSafe({
         text: `DELETE FROM messages WHERE conversation_id = $1 AND tenant_id = $2`,
         values: [conversationId, ctx.tenantId]
       });
 
-      // 3. Reset opportunity: clear summary + unlink active_opportunity_id
+      // 3. Delete conversation_memory (removes legacy_ai_summary / Arsiv Ozeti from UI)
+      try {
+        await ctx.db.executeSafe({
+          text: `DELETE FROM conversation_memory WHERE conversation_id = $1 AND tenant_id = $2`,
+          values: [conversationId, ctx.tenantId]
+        });
+      } catch (_) { /* Non-fatal */ }
+
+      // 4. Full opportunity reset: summary, ai_reason, stage, priority
       if (conv.active_opportunity_id) {
         await ctx.db.executeSafe({
           text: `UPDATE opportunities
-                 SET summary = NULL,
-                     ai_reason = NULL,
+                 SET summary    = NULL,
+                     ai_reason  = NULL,
+                     stage      = 'new_lead',
+                     priority   = NULL,
                      updated_at = NOW()
                  WHERE id = $1 AND tenant_id = $2`,
           values: [conv.active_opportunity_id, ctx.tenantId]
         });
-
-        await ctx.db.executeSafe({
-          text: `UPDATE conversations
-                 SET active_opportunity_id = NULL,
-                     updated_at = NOW()
-                 WHERE id = $1 AND tenant_id = $2`,
-          values: [conversationId, ctx.tenantId]
-        });
       }
 
-      // 4. Always clear tags first, then optionally re-seed from lead's form_name
-      try {
-        // Step 1: Always clear existing tags
-        await ctx.db.executeSafe({
-          text: `UPDATE conversations SET tags = '[]'::jsonb, updated_at = NOW() WHERE id = $1 AND tenant_id = $2`,
-          values: [conversationId, ctx.tenantId]
-        });
+      // 5. Full conversation reset: unlink opp, reset stage/department/tags in one query
+      await ctx.db.executeSafe({
+        text: `UPDATE conversations
+               SET active_opportunity_id = NULL,
+                   lead_stage            = 'new_lead',
+                   department            = NULL,
+                   tags                  = '[]'::jsonb,
+                   updated_at            = NOW()
+               WHERE id = $1 AND tenant_id = $2`,
+        values: [conversationId, ctx.tenantId]
+      });
 
-        // Step 2: If there's a linked lead with form_name, use it as the single seed tag
+      // 6. Optionally re-seed single tag from lead's form_name
+      try {
         if (conv.active_opportunity_id) {
           const leadRows = await ctx.db.executeSafe({
             text: `SELECT l.form_name
@@ -6707,18 +6714,16 @@ export async function clearConversation(conversationId: string): Promise<{ succe
             });
           }
         }
-      } catch (_) {
-        // Non-fatal: tags reset is best-effort
-      }
+      } catch (_) { /* Non-fatal: tags seed is best-effort */ }
 
-      // 5. Audit log
+      // 7. Audit log
       await logAudit({
         tenantId: ctx.tenantId,
         userId: ctx.userId,
         action: 'clear_conversation',
         entityType: 'conversation',
         entityId: conversationId,
-        details: { clearedBy: ctx.userId }
+        details: { clearedBy: ctx.userId, scope: 'full_crm_reset' }
       });
 
       return { success: true };

@@ -22,6 +22,7 @@ export const leads = pgTable('leads', {
   department: text('department'),
   message: text('message'),
   source: text('source'), // e.g. 'google_sheets'
+  formSummary: text('form_summary'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 

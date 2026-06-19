@@ -2503,6 +2503,7 @@ export function ContextPanel() {
           {(() => {
             const summaryInput = {
               oppSummary: crmData?.opportunity?.opp_summary || activeContact?.opp_summary,
+              oppFormSummary: crmData?.opportunity?.opp_form_summary || activeContact?.opp_form_summary || activeContact?.form_summary,
               oppAiReason: crmData?.opportunity?.opp_ai_reason || activeContact?.opp_ai_reason,
               legacyAiSummary: crmData?.opportunity?.legacy_ai_summary || activeContact?.legacy_ai_summary,
               priority: crmData?.opportunity?.opp_priority || activeContact?.opp_priority || activeContact?.priority,

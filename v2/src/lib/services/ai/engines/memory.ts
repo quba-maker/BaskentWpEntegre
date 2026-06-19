@@ -8,6 +8,80 @@ const log = logger.withContext({ module: 'MemoryEngine' });
 
 export class MemoryEngine {
   /**
+   * Generates a static form seed summary if form_summary is not yet set.
+   * Format: "[İsim], [ülke], [bölüm] için form dolduran hasta. Şikayeti: [şikayet]."
+   */
+  static async generateFormSeedSummary(
+    db: any,
+    tenantId: string,
+    activeOppId: string | null,
+    phone: string
+  ): Promise<string | null> {
+    try {
+      const leadRows = await db.executeSafe({
+        text: `
+          SELECT id, form_name, raw_data, patient_name, country, department 
+          FROM leads 
+          WHERE (linked_opportunity_id = $1 OR phone_number = $2 OR phone_normalized = $2) 
+            AND tenant_id = $3 
+          ORDER BY created_at DESC 
+          LIMIT 1;
+        `,
+        values: [activeOppId || '00000000-0000-0000-0000-000000000000', phone, tenantId]
+      }) as any[];
+
+      if (!leadRows || leadRows.length === 0) {
+        return null;
+      }
+
+      const lead = leadRows[0];
+      const rawData = typeof lead.raw_data === 'string' ? JSON.parse(lead.raw_data) : (lead.raw_data || {});
+      
+      const name = lead.patient_name || rawData.name || rawData.first_name || 'İsimsiz Hasta';
+      const country = lead.country || rawData.country || 'Belirtilmemiş Ülke';
+      
+      // Resolve department
+      let department = lead.department || rawData.department || rawData.onerilen_bolum || rawData.önerilen_bölüm || '';
+      if (!department) {
+        const rawKeys = Object.keys(rawData);
+        const deptKey = rawKeys.find(k => {
+          const l = k.toLowerCase().trim();
+          return l.includes('önerilen') || l.includes('onerilen') || l.includes('department') ||
+                 l === 'bölüm' || l === 'bolum' || l.includes('branş') || l.includes('brans');
+        });
+        if (deptKey && rawData[deptKey]) {
+          department = String(rawData[deptKey]).trim();
+        }
+      }
+      if (!department) department = 'Genel';
+
+      // Extract complaint/question
+      const complaint = rawData.complaint || rawData.message || rawData.note || rawData.question || rawData.sikayet || rawData.hastalik || '';
+      
+      const summaryText = `${name}, ${country}, ${department} için form dolduran hasta. Şikayeti: ${complaint || 'Belirtilmemiş'}.`;
+
+      // Save form_summary to leads
+      await db.executeSafe({
+        text: `UPDATE leads SET form_summary = $1 WHERE id = $2 AND tenant_id = $3`,
+        values: [summaryText, lead.id, tenantId]
+      });
+
+      // Save form_summary to opportunities if opportunity exists
+      if (activeOppId) {
+        await db.executeSafe({
+          text: `UPDATE opportunities SET form_summary = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3`,
+          values: [summaryText, activeOppId, tenantId]
+        });
+      }
+
+      return summaryText;
+    } catch (err) {
+      log.warn(`[GENERATE_FORM_SEED_SUMMARY_FAILED] Non-fatal error generating form seed summary: ${err}`);
+      return null;
+    }
+  }
+
+  /**
    * Generates or updates a rolling summary of the conversation.
    * P1B: Produces CRM-quality summary scoped to active opportunity.
    * This is the SOLE owner of opportunity.summary.
@@ -32,7 +106,7 @@ export class MemoryEngine {
       const conv = await db.executeSafe({
         text: `
           SELECT c.phone_number, c.active_opportunity_id, c.notes as current_notes,
-                 o.summary as current_opp_summary,
+                 o.summary as current_opp_summary, o.form_summary as current_form_summary,
                  o.requester_name, o.patient_name, o.country, o.department,
                  o.patient_relation, o.metadata as opp_metadata
           FROM conversations c
@@ -52,6 +126,13 @@ export class MemoryEngine {
       const activeOppId = conv[0].active_opportunity_id;
       const currentNotes = conv[0].current_notes || '';
       const currentOppSummary = conv[0].current_opp_summary || '';
+      let currentFormSummary = conv[0].current_form_summary || '';
+
+      // If form_summary is not yet set, generate it
+      if (!currentFormSummary) {
+        currentFormSummary = await MemoryEngine.generateFormSeedSummary(db, tenantId, activeOppId, phone) || '';
+      }
+
       const oppContext = {
         name: conv[0].requester_name || conv[0].patient_name || '',
         country: conv[0].country || '',
@@ -170,6 +251,7 @@ Hastanın bulunduğu ülke için saat dilimi doğrulanmamıştır (şehir/eyalet
       const prompt = `
         Sen bir hastane CRM koordinatörüsün. Aşağıdaki WhatsApp görüşmesini analiz et ve koordinatör/satış ekibinin hızlıca okuyacağı profesyonel bir CRM notu oluştur.
         ${contextHint}
+        ${currentFormSummary ? `\nHASTA FORM BİLGİSİ (başlangıç bağlamı):\n${currentFormSummary}\n` : ''}
         ${timezoneDisplayContext}
 
         Zaman Kaynağı Yönergesi:
@@ -180,8 +262,9 @@ Hastanın bulunduğu ülke için saat dilimi doğrulanmamıştır (şehir/eyalet
         
         Format:
         {
-          "crm_summary": "Koordinatör odaklı detaylı CRM özeti (500-900 karakter). Şunları içermeli: Kim başvuruyor? Nereden? Kimin için? Hangi tedavi/bölüm? Şu ana kadar hangi bilgiler alındı/verildi? Eksik bilgi/rapor var mı? Sonraki aksiyon nedir? Arama/randevu beklentisi var mı? Bot mesajlarını birebir kopyalama, durumu özetle.",
-          "summary_text": "Kısa 1-2 cümle anlık durum özeti.",
+          "crm_summary": "Koordinator odakli detayli CRM ozeti (500-900 karakter). Sunlari icermeli: Kim basvuruyor? Nereden? Kimin icin? Hangi tedavi/bolum? Su ana kadar hangi bilgiler alindi/verildi? Eksik bilgi/rapor var mi? Sonraki aksiyon nedir? Arama/randevu beklentisi var mi? Form bilgisiyle baslat, konusmayi ekle. Bot mesajlarini birebir kopyalama, durumu ozetle.",
+          "summary_text": "Kisa 1-2 cumle anlik durum ozeti.",
+          "firsat_gerekcesi": "ZORUNLU: Neden firsat? 1-2 cumle. Ornek: Hasta fiyat sormadi ve tarih verdi, sicak lead. Veya: Form dolduran hasta hic mesaj atmadi, iletisim bekliyor.",
           "buying_intent": "HOT | WARM | COLD",
           "sentiment": "POSITIVE | NEUTRAL | NEGATIVE",
           "objections": ["varsa itirazlar"]
@@ -288,13 +371,14 @@ Hastanın bulunduğu ülke için saat dilimi doğrulanmamıştır (şehir/eyalet
         log.error(`[MEMORY_REALTIME_FAILED] Failed to publish realtime memory update`, realtimeErr instanceof Error ? realtimeErr : new Error(String(realtimeErr)));
       }
 
-      // 5. P1B: Write CRM summary to active opportunity (SOLE OWNER)
+      // 5. P1B: Write CRM summary and AI reason to active opportunity (SOLE OWNER)
       if (activeOppId) {
+        const aiReason = parsed.firsat_gerekcesi || parsed.ai_reason || null;
         await db.executeSafe({
-          text: `UPDATE opportunities SET summary = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3`,
-          values: [crmSummary, activeOppId, tenantId]
+          text: `UPDATE opportunities SET summary = $1, ai_reason = $2, updated_at = NOW() WHERE id = $3 AND tenant_id = $4`,
+          values: [crmSummary, aiReason, activeOppId, tenantId]
         });
-        log.info(`[MEMORY_OPP_SYNC] Active opportunity ${activeOppId} CRM summary updated (${crmSummary.length} chars)`);
+        log.info(`[MEMORY_OPP_SYNC] Active opportunity ${activeOppId} CRM summary & AI reason updated`);
       }
 
       // 6. [DISABLED] conversations.notes is now strictly coordinator-only.

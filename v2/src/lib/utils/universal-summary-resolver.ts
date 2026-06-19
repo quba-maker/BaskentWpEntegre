@@ -1,5 +1,6 @@
 export interface UniversalSummaryInput {
   oppSummary?: string | null;
+  oppFormSummary?: string | null;
   oppAiReason?: string | null;
   legacyAiSummary?: string | null;
   patientName?: string | null;
@@ -15,6 +16,7 @@ export interface UniversalAISummary {
   entityType: EntityType;
   displayName: string;
   summary: string;
+  formSummary?: string;
   aiReason?: string;
   urgency?: 'low' | 'medium' | 'high' | 'hot';
   source: 'active_opportunity' | 'legacy_fallback' | 'none';
@@ -31,14 +33,14 @@ export interface LabelConfig {
 }
 
 export const HEALTH_LABELS: LabelConfig = {
-  summaryTitle: '🏥 Hasta Özeti',
+  summaryTitle: '🏥 Görüşme Özeti',
   reasonTitle: '⚡ Fırsat Gerekçesi',
   nextActionTitle: '🎯 Sonraki Aksiyon',
   missingInfoTitle: '⚠️ Eksik Bilgiler',
 };
 
 const DEFAULT_LABELS: LabelConfig = {
-  summaryTitle: '👤 Müşteri Özeti',
+  summaryTitle: '👤 Görüşme Özeti',
   reasonTitle: '💡 Neden Önemli',
   nextActionTitle: '🎯 Sonraki Aksiyon',
   missingInfoTitle: '⚠️ Eksik Bilgiler',
@@ -56,7 +58,7 @@ export function getAISummaryLabels(entityType: EntityType): LabelConfig {
 
 /**
  * Dynamically resolves vertical/industry entityType from tenant slug.
- * Eliminates hardcoded checks like slug === 'baskent'.
+ * Explicitly eliminates hardcoded checks like slug === 'baskent'.
  */
 export function getTenantEntityType(tenantSlug?: string | null, industry?: string | null): EntityType {
   if (industry) {
@@ -121,6 +123,7 @@ export function resolveUniversalAISummary(
     entityType,
     displayName,
     summary,
+    formSummary: input.oppFormSummary && input.oppFormSummary.trim() ? input.oppFormSummary.trim() : undefined,
     aiReason: input.oppAiReason && input.oppAiReason.trim() ? input.oppAiReason.trim() : undefined,
     urgency,
     source,
