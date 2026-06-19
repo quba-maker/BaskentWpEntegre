@@ -1243,7 +1243,10 @@ export class QueueWorkerEngine {
       ? `lock:conv:immediate:${tenantId}:${conversationId}`
       : `lock:conv:immediate:${tenantId}:phone:${phoneNumber}`;
 
-    if (redis && conversationId && direction === 'in') {
+    const acquireImmediateLock = async (): Promise<boolean> => {
+      if (!redis || !conversationId || direction !== 'in') {
+        return true;
+      }
       try {
         const lockAcquired = await redis.set(immediateConvLockKey, '1', { nx: true, ex: IMMEDIATE_CONV_LOCK_TTL });
         if (!lockAcquired) {
@@ -1256,14 +1259,16 @@ export class QueueWorkerEngine {
             tenantId,
             traceId
           }));
-          return; // Drop — debounce window will aggregate
+          return false;
         }
         immediateConvLockAcquired = true;
         this.log.info(`[IMMEDIATE_CONV_LOCK] Acquired conversation lock`, { conversationId, traceId });
+        return true;
       } catch (lockErr) {
         this.log.error(`[IMMEDIATE_CONV_LOCK] Redis error — continuing without lock (degraded)`, lockErr as Error, { conversationId, traceId });
+        return true;
       }
-    }
+    };
 
     if (isAppEcho) {
       this.log.info(`[APP_ECHO_DETECTED] Outbound echo from mobile WhatsApp App. Auto-handover to human and disabling autopilot.`, { phoneNumber, traceId });
@@ -1794,6 +1799,11 @@ export class QueueWorkerEngine {
         const phoneId = whCreds.whatsappPhoneNumberId || '';
         const isThreeSixty = isThreeSixtyProvider(whCreds.provider);
         if (accessToken && (isThreeSixty || phoneId)) {
+          const lockAcquired = await acquireImmediateLock();
+          if (!lockAcquired) {
+            this.log.info(`[WORKING_HOURS_LOCK_BLOCKED] Lock held, skipping duplicate off-message`, { conversationIdVal, traceId });
+            return;
+          }
           const outRes = await msgService.sendWhatsAppMessage(
             phoneId,
             accessToken,
@@ -2013,6 +2023,11 @@ export class QueueWorkerEngine {
           const isThreeSixty = isThreeSixtyProvider(privCreds.provider);
 
           if (privAccessToken && (channel !== 'whatsapp' || isThreeSixty || privPhoneId)) {
+            const lockAcquired = await acquireImmediateLock();
+            if (!lockAcquired) {
+              this.log.info(`[PRIVACY_LOCK_BLOCKED] Lock held, skipping duplicate privacy response`, { conversationIdVal, traceId });
+              return;
+            }
             try {
               let privOutResult;
               if (channel === 'whatsapp') {
@@ -2288,6 +2303,12 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
     if (skipBotReply) {
       this.log.info(`[SKIP_BOT_REPLY] Max messages reached, skipping AI response generation. CRM extraction will still run.`, { traceId });
     } else {
+      const lockAcquired = await acquireImmediateLock();
+      if (!lockAcquired) {
+        this.log.info(`[AI_RESPONSE_LOCK_BLOCKED] Lock held, skipping duplicate AI response generation`, { conversationIdVal, traceId });
+        return;
+      }
+
       // Execute the unified AI Response Orchestrator
       const { AIResponseOrchestrator } = await import('@/lib/services/ai/ai-response-orchestrator');
       const orchestratorResult = await AIResponseOrchestrator.run({
