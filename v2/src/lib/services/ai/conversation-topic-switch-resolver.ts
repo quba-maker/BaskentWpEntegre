@@ -10,9 +10,9 @@ export class ConversationTopicSwitchResolver {
   // P0.18: Renamed to DEFAULT_DEPARTMENTS — can be overridden per-tenant via brain.context.config.topicDepartments
   private static DEFAULT_DEPARTMENTS = [
     { name: 'Kardiyoloji', keywords: ['kalp', 'kardiyo', 'kardiyoloji', 'heart', 'coronary', 'bypass', 'anjiyo', 'ritim bozukluğu'] },
-    { name: 'Plastik ve Rekonstrüktif Cerrahi', keywords: ['estetik', 'burun', 'rhinoplasty', 'nose job', 'rinoplasti', 'plastik cerrahi', 'liposuction', 'meme estetiği', 'saç ekimi'] },
-    { name: 'Organ Nakli Merkezi', keywords: ['nakil', 'karaciğer', 'böbrek', 'organ nakli', 'transplant', 'liver transplant', 'kidney transplant'] },
-    { name: 'Beyin ve Sinir Cerrahisi', keywords: ['fıtık', 'fitik', 'bel fıtığı', 'boyun fıtığı', 'fıtığı', 'fıtıklar', 'beyin cerrahi', 'omurilik'] }
+    { name: 'Estetik', keywords: ['estetik', 'burun', 'rhinoplasty', 'nose job', 'rinoplasti', 'plastik cerrahi', 'liposuction', 'meme estetiği', 'saç ekimi'] },
+    { name: 'Organ Nakli', keywords: ['nakil', 'karaciğer', 'böbrek', 'organ nakli', 'transplant', 'liver transplant', 'kidney transplant'] },
+    { name: 'Beyin Cerrahi', keywords: ['fıtık', 'fitik', 'bel fıtığı', 'boyun fıtığı', 'fıtığı', 'fıtıklar', 'beyin cerrahi', 'omurilik'] }
   ];
 
   /**

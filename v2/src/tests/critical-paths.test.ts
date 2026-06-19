@@ -1147,10 +1147,10 @@ test("P0.11 REGRESSION: FinalOutboundGuard morphology corrections and dynamic fa
   const greeting1 = FinalOutboundGuard.process("Merhaba,", { tenantId: "t1", industry: "healthcare", unifiedContext: { history: [] } });
   assert(greeting1 === "Merhaba, size nasıl yardımcı olabilirim?", "Greeting only at start should resolve to welcome");
 
-  const greeting2 = FinalOutboundGuard.process("Merhaba,", { tenantId: "t1", industry: "healthcare", unifiedContext: { history: [{ role: "user", content: "hi" }] } });
+  const greeting2 = FinalOutboundGuard.process("Merhaba,", { tenantId: "t1", industry: "healthcare", unifiedContext: { history: [{ role: "user", content: "hi" }, { role: "assistant", content: "Merhaba" }] } });
   assert(greeting2.toLowerCase().includes("sağlık talebinizle ilgili") || greeting2.toLowerCase().includes("hastane iletişim asistanıyım"), "Greeting only in progress should fallback");
 
-  const greeting3 = FinalOutboundGuard.process("Merhaba,", { tenantId: "t1", industry: "ecommerce", unifiedContext: { history: [{ role: "user", content: "hi" }] } });
+  const greeting3 = FinalOutboundGuard.process("Merhaba,", { tenantId: "t1", industry: "ecommerce", unifiedContext: { history: [{ role: "user", content: "hi" }, { role: "assistant", content: "Merhaba" }] } });
   assert(greeting3.toLowerCase().includes("yardımcı olmak üzere buradayım") || greeting3.toLowerCase().includes("bilgi almak istersiniz"), "Greeting only in progress for non-health should fallback");
 
   // Kapsam 4: Incomplete sentence checks
@@ -1260,7 +1260,10 @@ test("P0.11 REGRESSION: MessageService.sendWhatsAppMessage boundary guard and pr
         return [{ id: "conv-id", customer_id: "cust-id", last_message_content: "annemin bel fıtığı var" }];
       }
       if (q.text.includes("SELECT direction, content FROM messages")) {
-        return [{ direction: "in", content: "hi" }];
+        return [
+          { direction: "in", content: "hi" },
+          { direction: "out", content: "Merhaba" }
+        ];
       }
       return [];
     };
@@ -4551,7 +4554,7 @@ test("P0.15 - 11: User correction continuity recovery fallback", () => {
     identityConfig: {},
     unifiedContext: {
       opportunity: {
-        department: "Beyin ve Sinir Cerrahisi"
+        department: "Beyin Cerrahi"
       },
       history: [
         { role: "user", content: "ilgili bölümü sen söyledin ya" }
@@ -4560,7 +4563,7 @@ test("P0.15 - 11: User correction continuity recovery fallback", () => {
   });
 
   assert(result.finalPath === "user_correction_fallback", "Doğru path eşleşmeli");
-  assert(result.text.includes("Beyin ve Sinir Cerrahisi ile ilgili görüşmüştük"), "Bölüm continuity ile cevap verilmeli");
+  assert(result.text.includes("Beyin Cerrahi ile ilgili görüşmüştük"), "Bölüm continuity ile cevap verilmeli");
 });
 
 test("P0.15 - 12: Doctor lookup fallback naming guard continuity", () => {
@@ -4771,7 +4774,7 @@ test("P0.16 - 6: Burun estetiği sorusu kardiyoloji context’iyle cevaplanmıyo
   const result = ConversationTopicSwitchResolver.resolve("burun estetiği yaptırmak istiyorum", "Kardiyoloji", {});
   assert(result.hasSwitched === true, "Should detect topic switch");
   assert(
-    result.activeTopic === "Plastik, Rekonstrüktif ve Estetik Cerrahi" || result.activeTopic === "Plastik ve Rekonstrüktif Cerrahi",
+    result.activeTopic === "Estetik",
     `Should map to plastic surgery, got: '${result.activeTopic}'`
   );
 });
@@ -4780,10 +4783,10 @@ test("P0.16 - 7: Doctor resolver directory varsa tutarlı cevap veriyor", () => 
   const { DoctorDirectoryResolver } = require("../lib/services/ai/doctor-directory-resolver");
   const { createTenantBrain } = require("../lib/brain/tenant-brain");
   const mockBrain = createTenantBrain("t1", "whatsapp", "payload1", "Sen bir test asistanısın.", {
-    doctors: ["Uzm. Dr. Ahmet Yılmaz - Beyin ve Sinir Cerrahisi"]
+    doctors: ["Uzm. Dr. Ahmet Yılmaz - Beyin Cerrahi"]
   });
   
-  const docs = DoctorDirectoryResolver.getDoctors(mockBrain, "Beyin ve Sinir Cerrahisi");
+  const docs = DoctorDirectoryResolver.getDoctors(mockBrain, "Beyin Cerrahi");
   assert(docs.length === 1, "Should resolve doctor list");
   assert(docs[0].name === "Uzm. Dr. Ahmet Yılmaz", "Doctor name mismatch");
 });
@@ -4793,7 +4796,7 @@ test("P0.16 - 8: Directory yoksa doktor uydurmuyor", () => {
   const { createTenantBrain } = require("../lib/brain/tenant-brain");
   const mockBrain = createTenantBrain("t1", "whatsapp", "payload1", "Sen bir test asistanısın.", {});
   
-  const docs = DoctorDirectoryResolver.getDoctors(mockBrain, "Beyin ve Sinir Cerrahisi");
+  const docs = DoctorDirectoryResolver.getDoctors(mockBrain, "Beyin Cerrahi");
   assert(docs.length === 0, "Should return empty if no doctors configured");
 });
 
@@ -5214,11 +5217,11 @@ test("P0.16-E: 4. MessageService skipGuard check", async () => {
 // P0.16-F — Active Department Arbitration / Stale Context / Morphology Regression Tests
 // ==========================================
 
-test("P0.16-F: DepartmentAliasResolver — bel fıtığı → Beyin ve Sinir Cerrahisi", async () => {
+test("P0.16-F: DepartmentAliasResolver — bel fıtığı → Beyin Cerrahi", async () => {
   const { DepartmentAliasResolver } = await import("../lib/services/ai/department-alias-resolver");
   const result = DepartmentAliasResolver.resolve("bel fıtığım var 5 yıldır devam ediyor");
   assert(result !== null, "bel fıtığı should resolve to a department");
-  assert(result!.canonical === "Beyin ve Sinir Cerrahisi", `Expected 'Beyin ve Sinir Cerrahisi', got: '${result!.canonical}'`);
+  assert(result!.canonical === "Beyin Cerrahi", `Expected 'Beyin Cerrahi', got: '${result!.canonical}'`);
 });
 
 test("P0.16-F: DepartmentAliasResolver — kardiyoloji resolves correctly", async () => {
@@ -5241,7 +5244,7 @@ test("P0.16-F: Stale context override — bel fıtığı overrides stale Kardiyo
     "Kardiyoloji",
     null
   );
-  assert(activeDepartment === "Beyin ve Sinir Cerrahisi", `Expected department override, got: '${activeDepartment}'`);
+  assert(activeDepartment === "Beyin Cerrahi", `Expected department override, got: '${activeDepartment}'`);
   assert(isOverride === true, "isOverride should be true when current message references a different department");
 });
 
@@ -5252,7 +5255,7 @@ test("P0.16-F: First-mention detection — no stale dept, bel fıtığı sets ac
     null, // no stale department
     null
   );
-  assert(activeDepartment === "Beyin ve Sinir Cerrahisi", `Expected 'Beyin ve Sinir Cerrahisi', got: '${activeDepartment}'`);
+  assert(activeDepartment === "Beyin Cerrahi", `Expected 'Beyin Cerrahi', got: '${activeDepartment}'`);
   assert(isOverride === true, "isOverride should be true when current message provides the first department hint");
 });
 
@@ -5264,7 +5267,7 @@ test("P0.16-F: ConversationTopicSwitchResolver — first mention with null curre
     undefined,
     null
   );
-  assert(result.activeTopic === "Beyin ve Sinir Cerrahisi", `Expected 'Beyin ve Sinir Cerrahisi' on first mention, got: '${result.activeTopic}'`);
+  assert(result.activeTopic === "Beyin Cerrahi", `Expected 'Beyin Cerrahi' on first mention, got: '${result.activeTopic}'`);
   assert(result.hasSwitched === false, "hasSwitched should be false on first detection (no prior dept)");
 });
 
@@ -5278,8 +5281,8 @@ test("P0.16-F: ConversationTopicSwitchResolver — bel fıtığı switches away 
   );
   assert(result.activeTopic !== "Kardiyoloji", `activeTopic should NOT be Kardiyoloji, got: '${result.activeTopic}'`);
   assert(
-    result.activeTopic === "Beyin ve Sinir Cerrahisi",
-    `Expected 'Beyin ve Sinir Cerrahisi', got: '${result.activeTopic}'`
+    result.activeTopic === "Beyin Cerrahi",
+    `Expected 'Beyin Cerrahi', got: '${result.activeTopic}'`
   );
   assert(result.hasSwitched === true, "hasSwitched should be true when dept changes");
 });
@@ -5412,8 +5415,8 @@ test("P0.16-F Stale: stale Kardiyoloji + bel fıtığı message → resolvedActi
     `activeDepartment should NOT be Kardiyoloji for a bel fıtığı message, got: '${activeDepartment}'`
   );
   assert(
-    activeDepartment === "Beyin ve Sinir Cerrahisi",
-    `Expected 'Beyin ve Sinir Cerrahisi', got: '${activeDepartment}'`
+    activeDepartment === "Beyin Cerrahi",
+    `Expected 'Beyin Cerrahi', got: '${activeDepartment}'`
   );
 });
 
@@ -5424,8 +5427,8 @@ test("P0.16-F Stale: 'kardiyoloji değil ki beyin sinir cerrahı' → user corre
   // Should pick up bel fıtığı → Beyin ve Sinir Cerrahisi
   assert(result !== null, "Should resolve department from corrective message");
   assert(
-    result!.canonical === "Beyin ve Sinir Cerrahisi",
-    `Expected 'Beyin ve Sinir Cerrahisi', got: '${result!.canonical}'`
+    result!.canonical === "Beyin Cerrahi",
+    `Expected 'Beyin Cerrahi', got: '${result!.canonical}'`
   );
 });
 
@@ -5437,11 +5440,11 @@ test("P0.16-G: 1. recent AI says Beyin ve Sinir Cerrahisi + user asks 'hangi dok
   const { RecentDepartmentContextResolver } = await import("../lib/services/ai/recent-department-context-resolver");
   const historyForResolver = [
     { role: "user", content: "bel fıtığım var 5 yıldır devam ediyor" },
-    { role: "assistant", content: "Bel fıtığı şikayetinizle ilgili olarak Beyin ve Sinir Cerrahisi bölümümüz ilgilenebilir." },
+    { role: "assistant", content: "Bel fıtığı şikayetinizle ilgili olarak Beyin Cerrahi bölümümüz ilgilenebilir." },
   ];
   const result = RecentDepartmentContextResolver.resolve(historyForResolver, 10, null);
   assert(result !== null, "Should resolve from recent AI dept reference");
-  assert(result!.department === "Beyin ve Sinir Cerrahisi", `Expected Beyin ve Sinir Cerrahisi, got: '${result!.department}'`);
+  assert(result!.department === "Beyin Cerrahi", `Expected Beyin Cerrahi, got: '${result!.department}'`);
   assert(result!.department !== "Kardiyoloji", "Should NOT return Kardiyoloji");
 });
 
@@ -5453,7 +5456,7 @@ test("P0.16-G: 2. recent user says bel fıtığı + current asks 'hangi doktor i
   ];
   const result = RecentDepartmentContextResolver.resolve(history, 10, null);
   assert(result !== null, "Should resolve from user's prior bel fıtığı mention");
-  assert(result!.department === "Beyin ve Sinir Cerrahisi", `Expected Beyin ve Sinir Cerrahisi, got: '${result!.department}'`);
+  assert(result!.department === "Beyin Cerrahi", `Expected Beyin Cerrahi, got: '${result!.department}'`);
   assert(result!.matchedBy === "user_complaint_keyword", `Expected user_complaint_keyword, got: '${result!.matchedBy}'`);
 });
 
@@ -5470,10 +5473,10 @@ test("P0.16-G: 3. stale CRM=Kardiyoloji + recent bel fıtığı → recent conte
   assert(currentMsgDept === null, "Generic doctor lookup should yield null currentMsgDept");
 
   const recentResult = RecentDepartmentContextResolver.resolve(history, 10, null);
-  assert(recentResult !== null && recentResult!.department === "Beyin ve Sinir Cerrahisi", `Recent context should be Beyin, got: '${recentResult?.department}'`);
+  assert(recentResult !== null && recentResult!.department === "Beyin Cerrahi", `Recent context should be Beyin, got: '${recentResult?.department}'`);
 
   const resolvedActiveDepartment = currentMsgDept || recentResult!.department || staleDept;
-  assert(resolvedActiveDepartment === "Beyin ve Sinir Cerrahisi", `resolvedActiveDepartment should be Beyin, got: '${resolvedActiveDepartment}'`);
+  assert(resolvedActiveDepartment === "Beyin Cerrahi", `resolvedActiveDepartment should be Beyin, got: '${resolvedActiveDepartment}'`);
   assert(resolvedActiveDepartment !== "Kardiyoloji", "Kardiyoloji should NOT win when recent context has bel fıtığı");
 });
 
@@ -5482,7 +5485,7 @@ test("P0.16-G: 4. correction 'kardiyoloji değil ki beyin sinir cerrahı...' →
   const correctionMsg = "kardiyoloji değil ki beyin sinir cerrahı bakmıyor mu bel fıtığına";
   const aliasResult = DepartmentAliasResolver.resolveWithStalenessCheck(correctionMsg, "Kardiyoloji", null);
   assert(aliasResult.isOverride === true, "Correction should override stale Kardiyoloji");
-  assert(aliasResult.activeDepartment === "Beyin ve Sinir Cerrahisi", `Expected Beyin ve Sinir Cerrahisi, got: '${aliasResult.activeDepartment}'`);
+  assert(aliasResult.activeDepartment === "Beyin Cerrahi", `Expected Beyin Cerrahi, got: '${aliasResult.activeDepartment}'`);
 });
 
 test("P0.16-G: 5. no recent dept + stale CRM=Kardiyoloji + doctor lookup → Kardiyoloji allowed as fallback", async () => {
@@ -5517,7 +5520,7 @@ test("P0.16-G: 6. greeting phrase 'bölümümüzün ilgilendiğinizi belirtmişt
 test("P0.16-G: 7. P0.16-F backward compatibility — current message bel fıtığı still overrides stale Kardiyoloji", async () => {
   const { DepartmentAliasResolver } = await import("../lib/services/ai/department-alias-resolver");
   const { activeDepartment, isOverride } = DepartmentAliasResolver.resolveWithStalenessCheck("bel fıtığım var hangi doktora gideyim", "Kardiyoloji", null);
-  assert(activeDepartment === "Beyin ve Sinir Cerrahisi", `P0.16-F regression: got '${activeDepartment}'`);
+  assert(activeDepartment === "Beyin Cerrahi", `P0.16-F regression: got '${activeDepartment}'`);
   assert(isOverride === true, "P0.16-F regression: isOverride should be true");
 });
 
@@ -5535,13 +5538,13 @@ test("P0.16-G: 8. non-healthcare tenant returns null from both resolvers", async
 // P0.16-H — Multi-intent Department & Morphology Final Regression Tests
 // ==========================================
 
-test("P0.16-H: 1. burst 'beyin sinir cerrahisi doktorları kim' → Kardiyoloji cevabı yok, Beyin ve Sinir Cerrahisi seçilir", async () => {
+test("P0.16-H: 1. burst 'beyin sinir cerrahisi doktorları kim' → Kardiyoloji cevabı yok, Beyin Cerrahi seçilir", async () => {
   const { DepartmentAliasResolver } = await import("../lib/services/ai/department-alias-resolver");
   // This is the exact burst phrase from live QA
   const burstMsg = "süreç nasıl işliyor\nbeyin sinir cerrahisi doktorları kim";
   const result = DepartmentAliasResolver.resolve(burstMsg, null);
   assert(result !== null, "Should resolve 'beyin sinir cerrahisi' as department");
-  assert(result!.canonical === "Beyin ve Sinir Cerrahisi", `Expected Beyin ve Sinir Cerrahisi, got: '${result!.canonical}'`);
+  assert(result!.canonical === "Beyin Cerrahi", `Expected Beyin Cerrahi, got: '${result!.canonical}'`);
   assert(result!.canonical !== "Kardiyoloji", "Should NOT return Kardiyoloji");
 });
 
@@ -5578,7 +5581,7 @@ test("P0.16-H: 3. doctor lookup uses explicit dept phrase in current burst", asy
   const burstMsg = "beyin sinir cerrahisi doktorları kim";
   const result = DepartmentAliasResolver.resolveWithStalenessCheck(burstMsg, "Kardiyoloji", null);
   assert(result.isOverride === true, "Burst explicit dept should override stale Kardiyoloji");
-  assert(result.activeDepartment === "Beyin ve Sinir Cerrahisi", `Expected Beyin ve Sinir Cerrahisi, got: '${result.activeDepartment}'`);
+  assert(result.activeDepartment === "Beyin Cerrahi", `Expected Beyin Cerrahi, got: '${result.activeDepartment}'`);
 });
 
 test("P0.16-H: 4. stale CRM=Kardiyoloji + burst explicit Beyin Sinir Cerrahisi → Beyin Sinir wins", async () => {
@@ -5587,9 +5590,9 @@ test("P0.16-H: 4. stale CRM=Kardiyoloji + burst explicit Beyin Sinir Cerrahisi �
   const staleDept = "Kardiyoloji";
   const aliasArbitration = DepartmentAliasResolver.resolveWithStalenessCheck(burstMsg, staleDept, null);
   const currentMsgDept = aliasArbitration.isOverride ? aliasArbitration.activeDepartment : null;
-  assert(currentMsgDept === "Beyin ve Sinir Cerrahisi", `Burst explicit dept should win, got: '${currentMsgDept}'`);
+  assert(currentMsgDept === "Beyin Cerrahi", `Burst explicit dept should win, got: '${currentMsgDept}'`);
   const resolvedActiveDepartment = currentMsgDept || staleDept;
-  assert(resolvedActiveDepartment === "Beyin ve Sinir Cerrahisi", `Final dept should be Beyin, got: '${resolvedActiveDepartment}'`);
+  assert(resolvedActiveDepartment === "Beyin Cerrahi", `Final dept should be Beyin, got: '${resolvedActiveDepartment}'`);
   assert(resolvedActiveDepartment !== "Kardiyoloji", "Kardiyoloji must NOT win");
 });
 
@@ -5609,9 +5612,9 @@ test("P0.16-H: 5. recent context bel fıtığı + current 'süreç nasıl işliy
   assert(currentMsgDept === null, "Process question has no dept keyword");
 
   const recentResult = RecentDepartmentContextResolver.resolve(history, 10, null);
-  assert(recentResult !== null, "Recent history should resolve bel fıtığı → Beyin ve Sinir Cerrahisi");
+  assert(recentResult !== null, "Recent history should resolve bel fıtığı → Beyin Cerrahi");
   const resolvedActiveDepartment = currentMsgDept || recentResult!.department || staleDept;
-  assert(resolvedActiveDepartment === "Beyin ve Sinir Cerrahisi", `Expected Beyin, got: '${resolvedActiveDepartment}'`);
+  assert(resolvedActiveDepartment === "Beyin Cerrahi", `Expected Beyin, got: '${resolvedActiveDepartment}'`);
   assert(resolvedActiveDepartment !== "Kardiyoloji", "Kardiyoloji must NOT win when recent context has bel fıtığı");
 });
 
@@ -5644,15 +5647,15 @@ test("P0.16-H: 7. correct Turkish words not corrupted: planınız, zamanınız, 
   assert(out.includes("yakınınız") || out.includes("Yakınınız"), `yakınınız should NOT be corrupted, got: '${out}'`);
 });
 
-test("P0.16-H: 8. P0.16-G backward compatibility — bel fıtığı in history still resolves to Beyin ve Sinir Cerrahisi", async () => {
+test("P0.16-H: 8. P0.16-G backward compatibility — bel fıtığı in history still resolves to Beyin Cerrahi", async () => {
   const { RecentDepartmentContextResolver } = await import("../lib/services/ai/recent-department-context-resolver");
   const history = [
     { role: "user", content: "bel fıtığım var 5 yıldır devam ediyor" },
     { role: "assistant", content: "Beyin ve Sinir Cerrahisi bölümü ilgilenebilir." }
   ];
   const result = RecentDepartmentContextResolver.resolve(history, 10, null);
-  assert(result !== null && result!.department === "Beyin ve Sinir Cerrahisi",
-    `P0.16-G regression: expected Beyin ve Sinir Cerrahisi, got: '${result?.department}'`);
+  assert(result !== null && result!.department === "Beyin Cerrahi",
+    `P0.16-G regression: expected Beyin Cerrahi, got: '${result?.department}'`);
 });
 
 // ==========================================
@@ -5771,12 +5774,12 @@ test("P0.16-I: 9. P0.16-H backward compatibility — 214/214 path maintained", a
 
   // H-1: burst explicit dept
   const burstResult = DepartmentAliasResolver.resolve("beyin sinir cerrahisi doktorları kim", null);
-  assert(burstResult?.canonical === "Beyin ve Sinir Cerrahisi", "P0.16-H: burst explicit dept still works");
+  assert(burstResult?.canonical === "Beyin Cerrahi", "P0.16-H: burst explicit dept still works");
 
   // H-5: recent context
   const history = [{ role: "user", content: "bel fıtığım var" }, { role: "assistant", content: "Geçmiş olsun." }];
   const recentResult = RecentDepartmentContextResolver.resolve(history, 10, null);
-  assert(recentResult?.department === "Beyin ve Sinir Cerrahisi", "P0.16-H: recent context still works");
+  assert(recentResult?.department === "Beyin Cerrahi", "P0.16-H: recent context still works");
 });
 
 // ==========================================

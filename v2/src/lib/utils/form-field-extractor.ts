@@ -12,7 +12,10 @@ export interface FormExtraction {
 const DEPARTMENT_MAP: Record<string, string> = {
   'ORTOPEDİ': 'Ortopedi',
   'ORTOPEDI': 'Ortopedi',
-  'BEL FITIĞI': 'Ortopedi',
+  'BEL FITIĞI': 'Beyin Cerrahi',
+  'BEL FITIGI': 'Beyin Cerrahi',
+  'BOYUN FITIĞI': 'Beyin Cerrahi',
+  'BOYUN FITIGI': 'Beyin Cerrahi',
   'DİZ': 'Ortopedi',
   'DIZ': 'Ortopedi',
   'KADİYOLOJİ': 'Kardiyoloji',
@@ -55,8 +58,8 @@ const DEPARTMENT_MAP: Record<string, string> = {
 // Deterministic Turkish keyword mapping for complaint texts in the form
 const COMPLAINT_KEYWORD_MAP: { keywords: string[]; department: string; confidence: number }[] = [
   { keywords: ['çarpıntı', 'kalp', 'kalp doktoru', 'ritim', 'kalp krizi', 'bypass', 'kardiyoloji'], department: 'Kardiyoloji', confidence: 1.0 },
-  { keywords: ['diz', 'diz ağrısı', 'menisküs', 'eklem', 'kireçlenme', 'dizim ağrıyor', 'kalça protezi', 'diz protezi'], department: 'Ortopedi', confidence: 1.0 },
-  { keywords: ['bel ağrısı', 'boyun fıtığı', 'fıtık', 'siyatik', 'bel fıtığı', 'bel'], department: 'Ortopedi', confidence: 0.5 }, // Medium confidence
+  { keywords: ['diz', 'diz ağrısı', 'menisküs', 'eklem', 'kireçlenme', 'dizim ağrıyor', 'kalça protezi', 'diz protezi', 'kırık', 'kalça', 'protez', 'omuz', 'bağ yaralanması'], department: 'Ortopedi', confidence: 1.0 },
+  { keywords: ['bel ağrısı', 'boyun fıtığı', 'fıtık', 'siyatik', 'bel fıtığı', 'bel', 'omurga', 'omurilik', 'boyun ağrısı', 'sinir sıkışması', 'nöroşirürji'], department: 'Beyin Cerrahi', confidence: 1.0 },
   { keywords: ['diş', 'implant', 'dolgu', 'kanal tedavisi', 'zirkonyum'], department: 'Diş', confidence: 1.0 },
   { keywords: ['göz', 'görme', 'katarakt', 'lazer göz', 'retina'], department: 'Göz', confidence: 1.0 },
   { keywords: ['saç ekimi', 'saç dökülmesi', 'sacekim'], department: 'Saç Ekimi', confidence: 1.0 },

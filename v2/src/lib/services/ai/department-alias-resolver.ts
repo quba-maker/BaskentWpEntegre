@@ -25,7 +25,7 @@ export interface DepartmentAliasResult {
 // Default alias map: keyword (lowercase, normalised) → canonical name
 const DEFAULT_ALIAS_MAP: { keywords: string[]; canonical: string; displayLabel: string }[] = [
   {
-    canonical: 'Beyin ve Sinir Cerrahisi',
+    canonical: 'Beyin Cerrahi',
     displayLabel: 'beyin ve sinir cerrahisi (nöroşirürji)',
     keywords: [
       'bel fıtığı', 'bel fitigi', 'bel fıtıgı', 'bel fitigi',
@@ -52,7 +52,7 @@ const DEFAULT_ALIAS_MAP: { keywords: string[]; canonical: string; displayLabel: 
     ]
   },
   {
-    canonical: 'Plastik, Rekonstrüktif ve Estetik Cerrahi',
+    canonical: 'Estetik',
     displayLabel: 'plastik ve estetik cerrahi',
     keywords: [
       'estetik', 'plastik cerrahi', 'rinoplasti', 'burun estetiği',
@@ -62,7 +62,7 @@ const DEFAULT_ALIAS_MAP: { keywords: string[]; canonical: string; displayLabel: 
     ]
   },
   {
-    canonical: 'Organ Nakli Merkezi',
+    canonical: 'Organ Nakli',
     displayLabel: 'organ nakli',
     keywords: [
       'organ nakli', 'karaciğer nakli', 'karaciger nakli',
@@ -71,7 +71,7 @@ const DEFAULT_ALIAS_MAP: { keywords: string[]; canonical: string; displayLabel: 
     ]
   },
   {
-    canonical: 'Ortopedi ve Travmatoloji',
+    canonical: 'Ortopedi',
     displayLabel: 'ortopedi ve travmatoloji',
     keywords: [
       'ortopedi', 'kırık', 'kirik', 'eklem', 'diz', 'kalça', 'kalca',
@@ -80,7 +80,7 @@ const DEFAULT_ALIAS_MAP: { keywords: string[]; canonical: string; displayLabel: 
     ]
   },
   {
-    canonical: 'Göz Hastalıkları',
+    canonical: 'Göz',
     displayLabel: 'göz hastalıkları',
     keywords: [
       'göz', 'goz', 'katarakt', 'lasik', 'laser göz', 'laser goz',
@@ -88,7 +88,7 @@ const DEFAULT_ALIAS_MAP: { keywords: string[]; canonical: string; displayLabel: 
     ]
   },
   {
-    canonical: 'Kulak Burun Boğaz',
+    canonical: 'KBB',
     displayLabel: 'kulak burun boğaz (KBB)',
     keywords: [
       'kbb', 'kulak burun bogaz', 'kulak burun boğaz', 'septorinoplasti',
@@ -114,7 +114,7 @@ const DEFAULT_ALIAS_MAP: { keywords: string[]; canonical: string; displayLabel: 
     ]
   },
   {
-    canonical: 'Kadın Hastalıkları ve Doğum',
+    canonical: 'Kadın Doğum',
     displayLabel: 'kadın hastalıkları ve doğum',
     keywords: [
       'jinekoloji', 'kadın doğum', 'kadin dogum', 'rahim', 'yumurtalık',
@@ -123,7 +123,7 @@ const DEFAULT_ALIAS_MAP: { keywords: string[]; canonical: string; displayLabel: 
     ]
   },
   {
-    canonical: 'Tüp Bebek Merkezi',
+    canonical: 'Tüp Bebek',
     displayLabel: 'tüp bebek (IVF)',
     keywords: [
       'tüp bebek', 'tup bebek', 'ivf', 'infertilite', 'kısırlık', 'kisirlik',

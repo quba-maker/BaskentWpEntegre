@@ -13,7 +13,8 @@ export interface MessageExtraction {
 
 const HIGH_CONFIDENCE_KEYWORDS: { keywords: string[]; department: string }[] = [
   { keywords: ['çarpıntı', 'kalp', 'kalp doktoru', 'ritim', 'kalp krizi', 'bypass', 'kardiyoloji'], department: 'Kardiyoloji' },
-  { keywords: ['diz', 'diz ağrısı', 'menisküs', 'eklem', 'kireçlenme', 'dizim ağrıyor', 'diz protezi', 'kalça protezi'], department: 'Ortopedi' },
+  { keywords: ['diz', 'diz ağrısı', 'menisküs', 'eklem', 'kireçlenme', 'dizim ağrıyor', 'diz protezi', 'kalça protezi', 'kırık', 'kalça', 'protez', 'omuz', 'bağ yaralanması'], department: 'Ortopedi' },
+  { keywords: ['bel fıtığı', 'boyun fıtığı', 'fıtık', 'omurga', 'omurilik', 'sinir sıkışması', 'nöroşirürji', 'beyin cerrahisi'], department: 'Beyin Cerrahi' },
   { keywords: ['diş', 'implant', 'dolgu', 'kanal tedavisi', 'zirkonyum'], department: 'Diş' },
   { keywords: ['göz', 'görme', 'katarakt', 'retina'], department: 'Göz' },
   { keywords: ['saç ekimi', 'sac ekimi', 'saç ekim'], department: 'Saç Ekimi' },
@@ -22,7 +23,7 @@ const HIGH_CONFIDENCE_KEYWORDS: { keywords: string[]; department: string }[] = [
 ];
 
 const MEDIUM_CONFIDENCE_KEYWORDS: { keywords: string[]; department: string }[] = [
-  { keywords: ['bel ağrısı', 'boyun fıtığı', 'siyatik', 'fıtık', 'bel fıtığı', 'bel'], department: 'Ortopedi' },
+  { keywords: ['bel ağrısı', 'siyatik', 'bel', 'boyun ağrısı'], department: 'Beyin Cerrahi' },
   { keywords: ['baş ağrısı', 'bas agrisi', 'migren'], department: 'Nöroloji' },
   { keywords: ['genel ağrı', 'her yerim ağrıyor'], department: 'Fizik Tedavi' }
 ];

@@ -37,15 +37,15 @@ export interface ConsultantConversationState {
 // ─── Pattern constants ────────────────────────────────────────────────────────
 
 const COMPLAINT_PATTERNS: { pattern: RegExp; complaint: string; department: string }[] = [
-  { pattern: /bel\s+f[ıi]t[ıi]/gi,       complaint: 'bel fıtığı',    department: 'Beyin ve Sinir Cerrahisi / Fizik Tedavi' },
-  { pattern: /boyun\s+f[ıi]t[ıi]/gi,     complaint: 'boyun fıtığı',  department: 'Beyin ve Sinir Cerrahisi' },
-  { pattern: /omurga/gi,                  complaint: 'omurga sorunu', department: 'Beyin ve Sinir Cerrahisi / Fizik Tedavi' },
+  { pattern: /bel\s+f[ıi]t[ıi]/gi,       complaint: 'bel fıtığı',    department: 'Beyin Cerrahi' },
+  { pattern: /boyun\s+f[ıi]t[ıi]/gi,     complaint: 'boyun fıtığı',  department: 'Beyin Cerrahi' },
+  { pattern: /omurga/gi,                  complaint: 'omurga sorunu', department: 'Beyin Cerrahi' },
   { pattern: /diz\s+a[gğ]r[ıi]/gi,       complaint: 'diz ağrısı',    department: 'Ortopedi' },
   { pattern: /kalça\s+a[gğ]r[ıi]/gi,     complaint: 'kalça ağrısı',  department: 'Ortopedi' },
-  { pattern: /ameliyat/gi,               complaint: 'ameliyat değerlendirmesi', department: 'Beyin ve Sinir Cerrahisi' },
+  { pattern: /ameliyat/gi,               complaint: 'ameliyat değerlendirmesi', department: 'Beyin Cerrahi' },
   { pattern: /kardiyoloji/gi,            complaint: 'kardiyoloji',    department: 'Kardiyoloji' },
   { pattern: /kalp\s+sorunu/gi,          complaint: 'kalp sorunu',    department: 'Kardiyoloji' },
-  { pattern: /g[öo]z\s+sorunu/gi,        complaint: 'göz sorunu',     department: 'Göz Hastalıkları' },
+  { pattern: /g[öo]z\s+sorunu/gi,        complaint: 'göz sorunu',     department: 'Göz' },
   { pattern: /ortopedi/gi,               complaint: 'ortopedi talebi', department: 'Ortopedi' },
 ];
 

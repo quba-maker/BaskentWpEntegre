@@ -90,12 +90,12 @@ export class ContextAwareSafeFallbackResolver {
 
     const departmentsList = [
       { key: 'Kardiyoloji', keywords: ['kardiyoloji', 'kalp', 'damar', 'cardio', 'heart'] },
-      { key: 'Ortopedi ve Travmatoloji', keywords: ['ortopedi', 'kemik', 'eklem', 'diz', 'kalça', 'kalca'] },
+      { key: 'Ortopedi', keywords: ['ortopedi', 'kemik', 'eklem', 'diz', 'kalça', 'kalca', 'menisküs', 'kırık', 'protez', 'omuz', 'bağ yaralanması'] },
       { key: 'Tüp Bebek', keywords: ['tüp bebek', 'tup bebek', 'tüpbebek', 'ivf'] },
-      { key: 'Plastik, Rekonstrüktif ve Estetik Cerrahi', keywords: ['estetik', 'burun estetiği', 'burun estetigi', 'rinoplasti', 'plastik cerrahi'] },
-      { key: 'Diş Hekimliği', keywords: ['diş', 'dental', 'implant', 'dis', 'diş hekimliği', 'dis hekimligi'] },
+      { key: 'Estetik', keywords: ['estetik', 'burun estetiği', 'burun estetigi', 'rinoplasti', 'plastik cerrahi'] },
+      { key: 'Diş', keywords: ['diş', 'dental', 'implant', 'dis', 'diş hekimliği', 'dis hekimligi'] },
       { key: 'Organ Nakli', keywords: ['organ nakli', 'organ', 'nakil', 'nakli'] },
-      { key: 'Beyin ve Sinir Cerrahisi (Bel Fıtığı)', keywords: ['bel fıtığı', 'bel fitigi', 'bel fitigi', 'bel fıtıgı'] }
+      { key: 'Beyin Cerrahi', keywords: ['bel fıtığı', 'bel fitigi', 'bel fıtıgı', 'boyun fıtığı', 'boyun fitigi', 'fıtık', 'fitik', 'omurga', 'omurilik', 'sinir sıkışması', 'beyin cerrahisi', 'nöroşirürji'] }
     ];
 
     const matchedLocation = locations.find(l => l.keywords.some(kw => lowerInbound.includes(kw)));
@@ -693,9 +693,10 @@ export class ContextAwareSafeFallbackResolver {
 
       // Secondary department from history
       const secondaryDept = (() => {
-        if (histText.includes('kardiyoloji')) return 'kardiyoloji';
-        if (histText.includes('göz') || histText.includes('goz')) return 'göz hastalıkları';
-        if (histText.includes('ortopedi')) return 'ortopedi';
+        if (histText.includes('kardiyoloji')) return 'Kardiyoloji';
+        if (histText.includes('göz') || histText.includes('goz')) return 'Göz';
+        if (histText.includes('ortopedi')) return 'Ortopedi';
+        if (histText.includes('beyin') || histText.includes('sinir') || histText.includes('fıtık') || histText.includes('fitik')) return 'Beyin Cerrahi';
         return null;
       })();
 

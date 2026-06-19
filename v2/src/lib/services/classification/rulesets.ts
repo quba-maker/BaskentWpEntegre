@@ -21,7 +21,8 @@ export const BaskentRuleset_V1: TenantRuleset = {
   industry: "healthcare",
   rules: [
     // --- Departments ---
-    { id: 'dept_ortopedi', pattern: /ortopedi|bel fıtığı|omurga|diz|kalça|kırık|eklem/i, category: 'department', tag: 'Ortopedi', scoreContribution: 15, confidence: 0.9 },
+    { id: 'dept_ortopedi', pattern: /ortopedi|diz|kalça|kırık|eklem|menisküs|protez|omuz|bağ yaralanması/i, category: 'department', tag: 'Ortopedi', scoreContribution: 15, confidence: 0.9 },
+    { id: 'dept_beyin_cerrahi', pattern: /beyin ve sinir cerrahisi|beyin cerrahi|nöroşirürji|bel fıtığı|boyun fıtığı|fıtık|omurga|omurilik|sinir sıkışması/i, category: 'department', tag: 'Beyin Cerrahi', scoreContribution: 20, confidence: 0.9 },
     { id: 'dept_kardiyoloji', pattern: /kardiyoloji|kalp|tansiyon|stent|anjio|bypass/i, category: 'department', tag: 'Kardiyoloji', scoreContribution: 20, confidence: 0.9 },
     { id: 'dept_estetik', pattern: /estetik|burun|yüz germe|liposuction|botox|dolgu|meme/i, category: 'department', tag: 'Estetik', scoreContribution: 15, confidence: 0.9 },
     { id: 'dept_dis', pattern: /diş|implant|ortodonti|kanal tedavi|çekim|zirkonyum/i, category: 'department', tag: 'Diş', scoreContribution: 12, confidence: 0.9 },

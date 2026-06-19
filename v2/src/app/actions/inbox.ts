@@ -6679,7 +6679,7 @@ export async function clearConversation(conversationId: string): Promise<{ succe
                  SET summary    = NULL,
                      ai_reason  = NULL,
                      stage      = 'new_lead',
-                     priority   = NULL,
+                     priority   = 'warm',
                      updated_at = NOW()
                  WHERE id = $1 AND tenant_id = $2`,
           values: [conv.active_opportunity_id, ctx.tenantId]

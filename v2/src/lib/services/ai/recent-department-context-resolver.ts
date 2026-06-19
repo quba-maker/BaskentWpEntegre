@@ -39,28 +39,28 @@ export interface RecentDepartmentResult {
 // These are canonical fragments that appear in AI responses like
 // "Beyin ve Sinir Cerrahisi bölümü...", "kardiyoloji uzmanı..."
 const AI_DEPT_REFERENCE_PATTERNS: { regex: RegExp; canonical: string }[] = [
-  { regex: /beyin\s+ve\s+sinir\s+cerrahisi/i, canonical: 'Beyin ve Sinir Cerrahisi' },
-  { regex: /beyin\s+cerrahisi/i, canonical: 'Beyin ve Sinir Cerrahisi' },
-  { regex: /nöroşirürji|norosiruji/i, canonical: 'Beyin ve Sinir Cerrahisi' },
-  { regex: /omurga\s+cerrahisi/i, canonical: 'Beyin ve Sinir Cerrahisi' },
+  { regex: /beyin\s+ve\s+sinir\s+cerrahisi/i, canonical: 'Beyin Cerrahi' },
+  { regex: /beyin\s+cerrahisi/i, canonical: 'Beyin Cerrahi' },
+  { regex: /nöroşirürji|norosiruji/i, canonical: 'Beyin Cerrahi' },
+  { regex: /omurga\s+cerrahisi/i, canonical: 'Beyin Cerrahi' },
   { regex: /kardiyoloji/i, canonical: 'Kardiyoloji' },
   { regex: /kalp\s+damar/i, canonical: 'Kardiyoloji' },
-  { regex: /plastik.*?estetik|estetik.*?cerrahi/i, canonical: 'Plastik, Rekonstrüktif ve Estetik Cerrahi' },
-  { regex: /organ\s+nakli/i, canonical: 'Organ Nakli Merkezi' },
-  { regex: /ortopedi\s+ve\s+travmatoloji|ortopedi\s+uzman/i, canonical: 'Ortopedi ve Travmatoloji' },
-  { regex: /göz\s+hastalık|oftalmoloji/i, canonical: 'Göz Hastalıkları' },
-  { regex: /kulak\s+burun\s+boğaz|kbb\s+uzman/i, canonical: 'Kulak Burun Boğaz' },
+  { regex: /plastik.*?estetik|estetik.*?cerrahi/i, canonical: 'Estetik' },
+  { regex: /organ\s+nakli/i, canonical: 'Organ Nakli' },
+  { regex: /ortopedi\s+ve\s+travmatoloji|ortopedi\s+uzman/i, canonical: 'Ortopedi' },
+  { regex: /göz\s+hastalık|oftalmoloji/i, canonical: 'Göz' },
+  { regex: /kulak\s+burun\s+boğaz|kbb\s+uzman/i, canonical: 'KBB' },
   { regex: /gastroenteroloji/i, canonical: 'Gastroenteroloji' },
   { regex: /onkoloji/i, canonical: 'Onkoloji' },
-  { regex: /kadın\s+hastalık|jinekoloji/i, canonical: 'Kadın Hastalıkları ve Doğum' },
-  { regex: /tüp\s+bebek|ivf\s+merkez/i, canonical: 'Tüp Bebek Merkezi' },
+  { regex: /kadın\s+hastalık|jinekoloji/i, canonical: 'Kadın Doğum' },
+  { regex: /tüp\s+bebek|ivf\s+merkez/i, canonical: 'Tüp Bebek' },
   { regex: /üroloji|uroloji/i, canonical: 'Üroloji' },
 ];
 
 // User correction signals — when user explicitly corrects the department
 const USER_CORRECTION_PATTERNS: { regex: RegExp; canonical: string }[] = [
-  { regex: /kardiyoloji\s+değil.*?(beyin|sinir|omurga|fıtık|fitik)/i, canonical: 'Beyin ve Sinir Cerrahisi' },
-  { regex: /(beyin|sinir)\s+cerrah.*?bak(mıyor|maz|ıyor)/i, canonical: 'Beyin ve Sinir Cerrahisi' },
+  { regex: /kardiyoloji\s+değil.*?(beyin|sinir|omurga|fıtık|fitik)/i, canonical: 'Beyin Cerrahi' },
+  { regex: /(beyin|sinir)\s+cerrah.*?bak(mıyor|maz|ıyor)/i, canonical: 'Beyin Cerrahi' },
 ];
 
 export class RecentDepartmentContextResolver {

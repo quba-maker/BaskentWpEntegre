@@ -105,7 +105,7 @@ Format:
   "language": "string (örn: German, English, Turkish)",
   "country": "string (Hastanın yaşadığı ülke — Türkçe olarak yaz. Örn: Almanya, Türkiye, İngiltere. Emin değilsen boş bırak)",
   "country_confidence": number (0.0 ile 1.0 arası),
-  "department": "string (Örn: Ortopedi, Kardiyoloji, Gastroenteroloji, Estetik, Diş, Göz, Tüp Bebek, Organ Nakli, Onkoloji, Obezite, Nöroloji, Üroloji, Check-Up. Hastanın niyetine göre seç. Emin değilsen boş bırak)",
+  "department": "string (Örn: Ortopedi, Kardiyoloji, Gastroenteroloji, Estetik, Diş, Göz, Tüp Bebek, Organ Nakli, Onkoloji, Obezite, Nöroloji, Üroloji, Check-Up, Beyin Cerrahi, KBB, Kadın Doğum. Ortopedi (diz, kalça, eklem, omuz, menisküs, kırık, protez) ile Beyin Cerrahi (bel fıtığı, boyun fıtığı, fıtık, omurga, omurilik, sinir sıkışması) ayrımına çok dikkat et. Emin değilsen boş bırak)",
   "pipeline_stage": "string (new | contacted | responded | discovery | qualified | appointed | lost)",
   "tags": ["string"] (Örn: yurtdışı_hasta, acil, fiyat_odaklı, ilgili vb. tamamen TÜRKÇE, küçük harflerle ve boşluk yerine alt çizgi kullanarak),
   "needs_country_question": boolean (Eğer hastanın ülkesi belirsizse ve randevu için lazımsa true),

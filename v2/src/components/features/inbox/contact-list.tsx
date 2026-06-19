@@ -1838,6 +1838,7 @@ export function ContactRail() {
             onClick={async () => {
               const convId = contextMenu.conversationId;
               const patientName = contextMenu.patientName || 'Bu kişi';
+              // eslint-disable-next-line quba/no-native-dialog
               const confirmed = window.confirm(
                 `"${patientName}" adlı kişiye ait tüm sohbet mesajları silinecek ve CRM bağlamı sıfırlanacak.\n\nBu işlem geri alınamaz. Devam etmek istiyor musunuz?`
               );
