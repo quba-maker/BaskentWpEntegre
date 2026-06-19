@@ -900,10 +900,7 @@ export class ContextAwareSafeFallbackResolver {
 
     if (detectedName) {
       if (isHealthcareOrForm && hasComplaint) {
-        const isCheckup = complaint.toLowerCase().includes('check-up') || 
-                          complaint.toLowerCase().includes('checkup') || 
-                          complaint.toLowerCase().includes('şikayetim yok') ||
-                          complaint.toLowerCase().includes('sikayetim yok');
+        const isCheckup = ContextAwareSafeFallbackResolver.isCheckupRequest(complaint);
         if (isCheckup) {
           return {
             text: `Teşekkür ederim ${detectedName}. Check-up planlamanız için uygun zamanı netleştirebiliriz.`,
@@ -939,10 +936,7 @@ export class ContextAwareSafeFallbackResolver {
     // Intent: Greeting
     if (isGreeting) {
       if (isHealthcare && hasComplaint) {
-        const isCheckup = complaint.toLowerCase().includes('check-up') || 
-                          complaint.toLowerCase().includes('checkup') || 
-                          complaint.toLowerCase().includes('şikayetim yok') ||
-                          complaint.toLowerCase().includes('sikayetim yok');
+        const isCheckup = ContextAwareSafeFallbackResolver.isCheckupRequest(complaint);
         if (isCheckup) {
           return {
             text: `${intro} Check-up talebinizle ilgili yardımcı olayım. Programlarımız hakkında detaylı bilgi almak veya randevu planlamak için size buradan yardımcı olabilirim.`,
@@ -1017,10 +1011,7 @@ export class ContextAwareSafeFallbackResolver {
     }
 
     if (isHealthcareOrForm && hasComplaint) {
-      const isCheckup = complaint.toLowerCase().includes('check-up') || 
-                        complaint.toLowerCase().includes('checkup') || 
-                        complaint.toLowerCase().includes('şikayetim yok') ||
-                        complaint.toLowerCase().includes('sikayetim yok');
+      const isCheckup = ContextAwareSafeFallbackResolver.isCheckupRequest(complaint);
       if (isCheckup) {
         return {
           text: `${intro} Check-up talebinizle ilgili yardımcı olayım. Programlarımız hakkında detaylı bilgi almak veya randevu planlamak için size buradan yardımcı olabilirim.`,
@@ -1058,6 +1049,26 @@ export class ContextAwareSafeFallbackResolver {
         detectedIntent
       };
     }
+  }
+
+  private static isCheckupRequest(complaint: string): boolean {
+    const lower = complaint.toLowerCase();
+    const keywords = [
+      'check-up',
+      'checkup',
+      'check up',
+      'şikayetim yok',
+      'sikayetim yok',
+      'şkayet yok',
+      'sikayet yok',
+      'no complaint',
+      'no complaints',
+      'жалоб нет',
+      'чекап',
+      'чек-ап',
+      'shikoyat yo'
+    ];
+    return keywords.some(kw => lower.includes(kw));
   }
 }
 
