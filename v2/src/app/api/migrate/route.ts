@@ -43,6 +43,10 @@ export async function GET(req: NextRequest) {
     `;
     results.push('customer_profiles: OK');
 
+    // Add metadata column if not exists
+    await sql`ALTER TABLE customer_profiles ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb`;
+    results.push('customer_profiles.metadata column check: OK');
+
     // Ensure unique constraint exists on customer_profiles(tenant_id, primary_phone)
     try {
       await sql`
@@ -629,6 +633,17 @@ export async function POST(req: NextRequest) {
       check: 'conversations_columns',
       status: convColumns.length >= 4 ? 'pass' : 'fail',
       detail: `${convColumns.length}/4 required columns present`
+    });
+
+    // 8. Validate customer_profiles has metadata column
+    const cprofColumns = await sql`
+      SELECT column_name FROM information_schema.columns
+      WHERE table_name = 'customer_profiles' AND column_name = 'metadata'
+    `;
+    checks.push({
+      check: 'customer_profiles_metadata_column',
+      status: cprofColumns.length > 0 ? 'pass' : 'fail',
+      detail: cprofColumns.length > 0 ? 'metadata column exists' : 'metadata column MISSING'
     });
 
     const failed = checks.filter(c => c.status === 'fail');

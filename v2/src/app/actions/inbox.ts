@@ -3717,7 +3717,10 @@ export async function getCrmPanelBundleAction(conversationId: string) {
                  mem.summary_text as legacy_ai_summary,
                  mem.buying_intent as ai_buying_intent,
                  mem.sentiment as ai_sentiment,
-                 NULLIF(TRIM(CONCAT(cprof.first_name, ' ', cprof.last_name)), '') as customer_display_name
+                 NULLIF(TRIM(CONCAT(cprof.first_name, ' ', cprof.last_name)), '') as customer_display_name,
+                 cprof.metadata as customer_profile_metadata,
+                 cprof.id as customer_profile_id,
+                 c.channel_id as channel_id
           FROM conversations c
           LEFT JOIN customer_profiles cprof
             ON cprof.id = c.customer_id
@@ -4078,7 +4081,11 @@ export async function getCrmPanelBundleAction(conversationId: string) {
           formAge: formExtraction?.age || null,
           formCountry: formExtraction?.country || null,
           formDepartmentSource: formExtraction?.departmentSource || null
-        }
+        },
+        customerProfileMetadata: conv.customer_profile_metadata || {},
+        customerProfileId: conv.customer_profile_id || null,
+        channelId: conv.channel_id || null,
+        userRole: ctx.role
       };
     }
   ).then(res => {
@@ -6728,6 +6735,141 @@ export async function clearConversation(conversationId: string): Promise<{ succe
         entityType: 'conversation',
         entityId: conversationId,
         details: { clearedBy: ctx.userId, scope: 'full_crm_reset' }
+      });
+
+      return { success: true };
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error };
+    const inner = res.data as any;
+    if (inner && 'success' in inner && !inner.success) return { success: false, error: inner.error };
+    return { success: true };
+  });
+}
+
+export async function toggleCustomerInboundAutopilotAction(
+  customerId: string,
+  channelId: string,
+  disabled: boolean
+): Promise<{ success: boolean; error?: string }> {
+  if (!customerId || !channelId) {
+    return { success: false, error: "Missing customerId or channelId." };
+  }
+
+  return withActionGuard(
+    { actionName: 'toggleCustomerInboundAutopilotAction' },
+    async (ctx) => {
+      // 1. Scope & Relationship Verification:
+      // Check if there is at least one conversation for this tenant, channel, and customer.
+      const checkRows = await ctx.db.executeSafe({
+        text: `SELECT id FROM conversations WHERE tenant_id = $1 AND channel_id = $2 AND customer_id = $3 LIMIT 1`,
+        values: [ctx.tenantId, channelId, customerId]
+      }) as any[];
+      if (checkRows.length === 0) {
+        return { success: false, error: "Customer not associated with this channel or tenant." };
+      }
+
+      // 2. Load Customer Profile
+      const cprofRows = await ctx.db.executeSafe({
+        text: `SELECT primary_phone, metadata FROM customer_profiles WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+        values: [customerId, ctx.tenantId]
+      }) as any[];
+      if (cprofRows.length === 0) {
+        return { success: false, error: "Customer profile not found." };
+      }
+
+      const primaryPhone = cprofRows[0].primary_phone || '';
+      const currentMetadata = cprofRows[0].metadata || {};
+
+      // 3. RBAC/Role Check for re-enabling otopilot
+      if (!disabled) {
+        if (!['admin', 'owner', 'platform_admin'].includes(ctx.role)) {
+          return { success: false, error: "Only Admins or owners can re-enable autopilot." };
+        }
+      }
+
+      // 4. Update channel-scoped metadata
+      const overrides = currentMetadata.inbound_autopilot_overrides || {};
+      if (disabled) {
+        overrides[channelId] = {
+          disabled: true,
+          reason: "manual_user_disabled",
+          disabled_by: ctx.userId,
+          disabled_at: new Date().toISOString()
+        };
+      } else {
+        delete overrides[channelId];
+      }
+      currentMetadata.inbound_autopilot_overrides = overrides;
+
+      // Save to customer_profiles
+      await ctx.db.executeSafe({
+        text: `UPDATE customer_profiles SET metadata = $1 WHERE id = $2 AND tenant_id = $3`,
+        values: [JSON.stringify(currentMetadata), customerId, ctx.tenantId]
+      });
+
+      // 5. If disabling, update all open/active conversations for that customer/channel/tenant
+      if (disabled) {
+        await ctx.db.executeSafe({
+          text: `UPDATE conversations 
+                 SET status = 'human', autopilot_enabled = false 
+                 WHERE tenant_id = $1 AND channel_id = $2 AND customer_id = $3 AND status != 'closed'`,
+          values: [ctx.tenantId, channelId, customerId]
+        });
+
+        // Broadcast realtime updates for updated conversations
+        const updatedConvs = await ctx.db.executeSafe({
+          text: `SELECT id FROM conversations WHERE tenant_id = $1 AND channel_id = $2 AND customer_id = $3 AND status = 'human' AND autopilot_enabled = false`,
+          values: [ctx.tenantId, channelId, customerId]
+        }) as any[];
+
+        try {
+          const { RealtimePublisher } = await import("@/lib/realtime/publisher");
+          for (const c of updatedConvs) {
+            await RealtimePublisher.publishMetadataUpdated(ctx.tenantId, {
+              conversationId: c.id,
+              userId: ctx.userId,
+              isBotActive: false,
+              autopilotEnabled: false,
+              status: "human"
+            }).catch(() => {});
+          }
+        } catch (_) {}
+      }
+
+      // 6. Write PII-Free Audit Log with masked phone
+      const maskPhoneNumber = (phone: string): string => {
+        if (!phone) return "";
+        const cleaned = phone.replace(/\D/g, '');
+        if (cleaned.length < 7) {
+          return cleaned.replace(/./g, '*');
+        }
+        const prefix = cleaned.substring(0, 5);
+        const suffix = cleaned.substring(cleaned.length - 2);
+        const middle = '*'.repeat(cleaned.length - 7);
+        return `${prefix}${middle}${suffix}`;
+      };
+
+      const maskedPhone = maskPhoneNumber(primaryPhone);
+      await ctx.db.executeSafe({
+        text: `INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
+               VALUES ($1, $2, $3, $4::jsonb)`,
+        values: [
+          ctx.tenantId,
+          disabled ? 'customer_autopilot_disabled' : 'customer_autopilot_enabled',
+          disabled 
+            ? `Permanent inbound autopilot override enabled for customer profile id: ${customerId}`
+            : `Permanent inbound autopilot override disabled for customer profile id: ${customerId}`,
+          JSON.stringify({
+            customer_profile_id: customerId,
+            channel_id: channelId,
+            tenant_id: ctx.tenantId,
+            masked_phone: maskedPhone,
+            disabled_by_user_id: ctx.userId,
+            disabled_by_role: ctx.role,
+            timestamp: new Date().toISOString()
+          })
+        ]
       });
 
       return { success: true };

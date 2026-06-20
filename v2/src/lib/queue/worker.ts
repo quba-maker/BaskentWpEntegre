@@ -1595,6 +1595,26 @@ export class QueueWorkerEngine {
     const resolvedChannelId = convRecord?.channel_id || metadata.channelId;
     const leadStage = convRecord?.lead_stage || null;
 
+    // P3.01: Customer-level permanent override check (channel-scoped)
+    let isCustomerInboundDisabled = false;
+    if (customerId) {
+      try {
+        const cprofQuery = await db.executeSafe({
+          text: `SELECT metadata FROM customer_profiles WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+          values: [customerId, tenantId]
+        }) as any[];
+        const cprofMeta = cprofQuery[0]?.metadata || {};
+        const overrides = cprofMeta.inbound_autopilot_overrides || {};
+        const channelOverride = overrides[resolvedChannelId || metadata.channelId || ''];
+        if (channelOverride?.disabled === true || channelOverride?.disabled === 'true') {
+          isCustomerInboundDisabled = true;
+          this.log.info(`[AUTOPILOT_GATE] Customer has permanent override disabled for channel ${resolvedChannelId || metadata.channelId || ''}`, { traceId, customerId });
+        }
+      } catch (err) {
+        this.log.error(`[AUTOPILOT_GATE_ERROR] Failed to check customer profile metadata`, err as Error, { traceId });
+      }
+    }
+
     // ─── CHANNEL-LEVEL & BOT-GROUP-LEVEL DISABLE CHECK ───
     let channelOrGroupDisabled = false;
     if (resolvedChannelId && resolvedChannelId !== 'legacy_unmapped') {
@@ -1619,6 +1639,10 @@ export class QueueWorkerEngine {
       isAutopilotResponding = false;
       shouldProceedWithBot = false;
       this.log.info(`[SKIP] Bot response skipped because Channel or Bot Group is disabled/inactive`, { resolvedChannelId, tenantId });
+    } else if (isCustomerInboundDisabled) {
+      isAutopilotResponding = false;
+      shouldProceedWithBot = false;
+      this.log.info(`[SKIP] Bot response skipped because customer has permanent override disabled for this channel`, { phoneNumber, tenantId, customerId });
     } else if (autopilotEnabled === false) {
       isAutopilotResponding = false;
       shouldProceedWithBot = false;
@@ -2333,8 +2357,48 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
         return;
       }
 
-    if (orchestratorResult.qualityGateFailed) {
-      this.log.warn(`[QUALITY_GATE_BLOCKED_FINAL] Cancelling send pipeline. Reason: ${orchestratorResult.qualityGateReason}`, { traceId, tenantId });
+      if (orchestratorResult.modelUsed === 'contact_inbound_autopilot_manually_disabled' || !orchestratorResult.text || orchestratorResult.text.trim() === '') {
+        this.log.info(`[WORKER] Orchestrator returned no_response/skip status. Exiting send pipeline cleanly.`, { traceId });
+        return;
+      }
+
+      if (orchestratorResult.dryRun) {
+        this.log.info(`[DRY_RUN] Inbound autopilot simulation active, skipping sending.`, { traceId });
+        await db.executeSafe({
+          text: `
+            INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
+            VALUES ($1, $2, $3, $4::jsonb)
+          `,
+          values: [
+            tenantId,
+            'INBOUND_AUTOPILOT_DRY_RUN',
+            'Inbound autopilot simulation (dry run) executed. No message sent.',
+            JSON.stringify({
+              conversationId: conversationIdVal || conversationId!,
+              modelUsed: orchestratorResult.modelUsed,
+              latencyMs: orchestratorResult.latencyMs,
+              textLength: orchestratorResult.text?.length || 0
+            })
+          ]
+        }).catch((err: any) => console.error("Failed to write dry-run audit log:", err));
+
+        if (orchestratorResult.responseDedupeKey) {
+          await commitResponseProcessed(
+            db,
+            tenantId,
+            resolvedChannelId || metadata.channelId || '',
+            conversationIdVal || conversationId!,
+            orchestratorResult.responseDedupeKey
+          );
+        }
+        return;
+      }
+
+      if (orchestratorResult.qualityGateFailed) {
+        this.log.warn(`[QUALITY_GATE_BLOCKED_FINAL] Cancelling send pipeline. Reason: ${orchestratorResult.qualityGateReason}`, { traceId, tenantId });
+        
+        const { AutopilotCircuitBreakerService } = await import("@/lib/services/automation/autopilot-circuit-breaker.service");
+        await AutopilotCircuitBreakerService.recordFallback(tenantId, conversationIdVal || conversationId!, db);
       
       await db.executeSafe({
         text: `
@@ -2380,6 +2444,9 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       this.log.error(`[POLICY_FAILED] ${validation.reason}`, undefined, { traceId, tenantId: brain.context.tenantId });
       finalResponseText = validation.fallbackMessage || "Üzgünüm, şu an size yanıt veremiyorum.";
       
+      const { AutopilotCircuitBreakerService } = await import("@/lib/services/automation/autopilot-circuit-breaker.service");
+      await AutopilotCircuitBreakerService.recordFallback(tenantId, conversationIdVal || conversationId!, db);
+
       // Phase 6: Emit policy block + escalation events (SYNC — compliance-critical, must not be lost)
       await AIEventEmitter.emitSync({ tenantId, conversationId, customerId, type: 'policy_blocked', category: 'policy', severity: 'error', payload: { reason: validation.reason } });
       await AIEventEmitter.emitSync({ tenantId, conversationId, customerId, type: 'human_escalation', category: 'escalation', severity: 'warning', payload: { trigger: 'policy_violation', reason: validation.reason } });
@@ -2520,6 +2587,10 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
     } catch (e: any) {
        this.log.error(`[SEND_FAILED] Meta API rejection for ${channel}`, e, { traceId });
        if (isAutopilotResponding) {
+         const { AutopilotCircuitBreakerService } = await import("@/lib/services/automation/autopilot-circuit-breaker.service");
+         await AutopilotCircuitBreakerService.recordFallback(tenantId, conversationIdVal || conversationId!, db).catch(cbErr => {
+           console.error("Failed to update circuit breaker on send error:", cbErr);
+         });
          await disableAutopilot('error', e.message || String(e));
          
          // Save the failed outgoing message to the DB so the UI shows it failed
@@ -2580,6 +2651,15 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       status: messageStatus,
       correlationId: providerMessageId
     });
+
+    if (isAutopilotResponding && (conversationIdVal || conversationId)) {
+      try {
+        const { AutopilotCircuitBreakerService } = await import("@/lib/services/automation/autopilot-circuit-breaker.service");
+        await AutopilotCircuitBreakerService.recordSuccess(tenantId, conversationIdVal || conversationId!, db);
+      } catch (cbErr) {
+        console.error("Failed to update circuit breaker success in immediate worker:", cbErr);
+      }
+    }
 
     this.log.info(`[DB_COMMITTED] [OUTGOING MESSAGE] Saved to DB. MsgId: ${outMsgResult.messageId}`, { traceId, outProviderMessageId });
 
@@ -3872,7 +3952,16 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
 
     // Load conversation details
     const convQuery = await db.executeSafe({
-      text: `SELECT id, status, autopilot_enabled, channel_id, lead_stage, customer_id, metadata FROM conversations WHERE phone_number = $1 AND tenant_id = $2 LIMIT 1`,
+      text: `
+        SELECT c.id, c.status, c.autopilot_enabled, c.channel_id, c.lead_stage, c.customer_id, c.metadata,
+               cprof.metadata as customer_profile_metadata
+        FROM conversations c
+        LEFT JOIN customer_profiles cprof
+          ON cprof.id = c.customer_id
+          AND cprof.tenant_id = c.tenant_id
+        WHERE c.phone_number = $1 AND c.tenant_id = $2
+        LIMIT 1
+      `,
       values: [phoneNumber, tenantId]
     }) as any[];
     
@@ -3890,6 +3979,15 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
     const currentStatus = convRecord.status;
     const resolvedChannelId = convRecord.channel_id || metadata.channelId;
     const customerId = convRecord.customer_id;
+
+    // P3.01: Customer-level permanent override check (channel-scoped) in delayed path
+    const cprofMeta = convRecord.customer_profile_metadata || {};
+    const overrides = cprofMeta.inbound_autopilot_overrides || {};
+    const channelOverride = overrides[resolvedChannelId || metadata.channelId || ''];
+    if (channelOverride?.disabled === true || channelOverride?.disabled === 'true') {
+      this.log.info(`[DEBOUNCE_WORKER] Skipping bot reply because customer has permanent override disabled for this channel`, { traceId, customerId });
+      return;
+    }
 
     // Check 1: Autopilot is still active
     const isGlobalAutopilotEnabled = process.env.ENABLE_SELECTED_AUTOPILOT === 'true';
@@ -4221,8 +4319,48 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
         return;
       }
 
+      if (orchestratorResult.modelUsed === 'contact_inbound_autopilot_manually_disabled' || !orchestratorResult.text || orchestratorResult.text.trim() === '') {
+        this.log.info(`[DEBOUNCE_WORKER] Orchestrator returned no_response/skip status. Exiting send pipeline cleanly.`, { traceId });
+        return;
+      }
+
+      if (orchestratorResult.dryRun) {
+        this.log.info(`[DRY_RUN] Inbound autopilot simulation active, skipping sending.`, { traceId });
+        await db.executeSafe({
+          text: `
+            INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
+            VALUES ($1, $2, $3, $4::jsonb)
+          `,
+          values: [
+            tenantId,
+            'INBOUND_AUTOPILOT_DRY_RUN',
+            'Inbound autopilot simulation (dry run) executed. No message sent.',
+            JSON.stringify({
+              conversationId,
+              modelUsed: orchestratorResult.modelUsed,
+              latencyMs: orchestratorResult.latencyMs,
+              textLength: orchestratorResult.text?.length || 0
+            })
+          ]
+        }).catch((err: any) => console.error("Failed to write dry-run audit log:", err));
+
+        if (orchestratorResult.responseDedupeKey) {
+          await commitResponseProcessed(
+            db,
+            tenantId,
+            resolvedChannelId || metadata.channelId || '',
+            conversationId,
+            orchestratorResult.responseDedupeKey
+          );
+        }
+        return;
+      }
+
       if (orchestratorResult.qualityGateFailed) {
         this.log.warn(`[DEBOUNCE_WORKER] Quality gate blocked final. Cancelling send. Reason: ${orchestratorResult.qualityGateReason}`, { traceId });
+        
+        const { AutopilotCircuitBreakerService } = await import("@/lib/services/automation/autopilot-circuit-breaker.service");
+        await AutopilotCircuitBreakerService.recordFallback(tenantId, conversationId, db);
         await db.executeSafe({
           text: `UPDATE conversations SET status = 'human' WHERE id = $1 AND tenant_id = $2`,
           values: [conversationId, tenantId]
@@ -4247,6 +4385,9 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
 
       if (!validation.valid) {
         this.log.error(`[DEBOUNCE_WORKER] Policy block: ${validation.reason}`, undefined, { traceId });
+        
+        const { AutopilotCircuitBreakerService } = await import("@/lib/services/automation/autopilot-circuit-breaker.service");
+        await AutopilotCircuitBreakerService.recordFallback(tenantId, conversationId, db);
         // Takeover conversation to human
         await db.executeSafe({
           text: `UPDATE conversations SET status = 'human' WHERE id = $1 AND tenant_id = $2`,
@@ -4326,6 +4467,15 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
         status: 'sent',
         correlationId: targetMessageId
       });
+
+      if (conversationId) {
+        try {
+          const { AutopilotCircuitBreakerService } = await import("@/lib/services/automation/autopilot-circuit-breaker.service");
+          await AutopilotCircuitBreakerService.recordSuccess(tenantId, conversationId, db);
+        } catch (cbErr) {
+          console.error("Failed to update circuit breaker success in delayed worker:", cbErr);
+        }
+      }
 
       if (orchestratorResult.responseDedupeKey) {
         await commitResponseProcessed(
@@ -4411,6 +4561,14 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       }
 
     } catch (llmErr: any) {
+      if (conversationId) {
+        try {
+          const { AutopilotCircuitBreakerService } = await import("@/lib/services/automation/autopilot-circuit-breaker.service");
+          await AutopilotCircuitBreakerService.recordFallback(tenantId, conversationId, db);
+        } catch (cbErr) {
+          console.error("Failed to update circuit breaker on delayed worker error:", cbErr);
+        }
+      }
       if (
         llmErr instanceof AIBillingExhaustedError ||
         llmErr instanceof AIQuotaExhaustedError ||

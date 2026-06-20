@@ -11,6 +11,7 @@ export const customerProfiles = pgTable('customer_profiles', {
   lastName: text('last_name'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+  metadata: jsonb('metadata').default({}),
 });
 
 export const leads = pgTable('leads', {

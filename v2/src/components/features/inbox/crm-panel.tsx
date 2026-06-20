@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { useSWRConfig } from "swr";
 import { User, MapPin, Building, Activity, Tag, ChevronDown, ChevronRight, Save, X, Plus, ChevronLeft, Check, Loader2, Sparkles, FileText, Brain, Link, Clock, Moon, Calendar, CalendarClock, PhoneForwarded, MailPlus, Share2, Eye, EyeOff, Send, Copy, AlertTriangle, Trash2, AlertCircle } from "lucide-react";
 import { useInboxStore } from "@/store/inbox-store";
-import { updateCrmData, addTag, removeTag, prepareFollowUpDraft, sendApprovedFollowUp, checkSecondaryFallback, prepareSecondaryDraft, getCrmPanelBundleAction, prepareFormGreetingDraft, saveBotSteeringDirectiveAction, saveFormGreetingDraftInternalAction, sendFormGreetingFromInboxAction, prepareNoReplyReminderDraftAction, sendNoReplyReminderAction, scheduleReminderTaskAction, prepareInboxBotAssistedDraftAction, sendApprovedInboxBotDraftAction, deactivateBotDirectiveAction } from "@/app/actions/inbox";
+import { updateCrmData, addTag, removeTag, prepareFollowUpDraft, sendApprovedFollowUp, checkSecondaryFallback, prepareSecondaryDraft, getCrmPanelBundleAction, prepareFormGreetingDraft, saveBotSteeringDirectiveAction, saveFormGreetingDraftInternalAction, sendFormGreetingFromInboxAction, prepareNoReplyReminderDraftAction, sendNoReplyReminderAction, scheduleReminderTaskAction, prepareInboxBotAssistedDraftAction, sendApprovedInboxBotDraftAction, deactivateBotDirectiveAction, toggleCustomerInboundAutopilotAction } from "@/app/actions/inbox";
 import { CustomerAiBrainPanel } from "@/components/features/ai-observability/CustomerAiBrain";
 import { AiTimelinePanel } from "@/components/features/ai-observability/AiTimeline";
 import { resolvePatientDisplayName, formatPhoneReadable } from "@/lib/utils/patient-name-resolver";
@@ -349,6 +349,10 @@ export function ContextPanel() {
   const [noReplySentSuccess, setNoReplySentSuccess] = useState<boolean>(false);
   const [isSendingNoReply, setIsSendingNoReply] = useState<boolean>(false);
 
+  // Permanent override states
+  const [showConfirmOverride, setShowConfirmOverride] = useState<boolean>(false);
+  const [isTogglingOverride, setIsTogglingOverride] = useState<boolean>(false);
+
   // Reset local state when contact changes or active opp fields update
   // P1B: Granular deps ensure refresh on opp switch (same contact, different opp fields)
   const contactId = activeContact?.id;
@@ -411,9 +415,10 @@ export function ContextPanel() {
       setAssistedDraftSuccess(false);
       setSuggestedTemplates([]);
       setSelectedTemplate(null);
-      setIsSendingAssistedDraft(false);
       setDetectedLanguage(null);
       setIsLanguageUnclear(false);
+      setShowConfirmOverride(false);
+      setIsTogglingOverride(false);
     }
   }, [contactId, contactDept, contactCountry, contactNotes, contactStage, activeContact?.opp_requester_name, activeContact?.opp_patient_name, activeContact?.patient_name]);
 
@@ -455,6 +460,12 @@ export function ContextPanel() {
   });
 
   const oppId = crmData?.opportunity?.id || activeContact?.active_opp_id || activeContact?.active_opportunity_id || activeContact?.opportunity_id || "";
+
+  const overrides = (crmData as any)?.customerProfileMetadata?.inbound_autopilot_overrides || {};
+  const channelId = (crmData as any)?.channelId;
+  const isOverrideActive = channelId ? overrides[channelId]?.disabled === true : false;
+  const overrideDetail = channelId ? overrides[channelId] : null;
+  const userRole = (crmData as any)?.userRole || 'agent';
 
   // Track isCrmLoading to set local loading indicators
   useEffect(() => {
@@ -580,6 +591,29 @@ export function ContextPanel() {
       </div>
     );
   }
+
+  const handleToggleOverride = async (disabled: boolean) => {
+    const customerProfileId = crmData?.customerProfileId;
+    const channelId = crmData?.channelId;
+    if (!customerProfileId || !channelId) {
+      alert("Müşteri profili veya kanal bilgisi bulunamadı.");
+      return;
+    }
+    setIsTogglingOverride(true);
+    try {
+      const res = await toggleCustomerInboundAutopilotAction(customerProfileId, channelId, disabled);
+      if (res.success) {
+        queryClient.invalidateQueries({ queryKey: ['crm-panel', conversationId] });
+        mutate((key) => Array.isArray(key) && key[0] === "conversations");
+      } else {
+        alert(res.error || "İşlem başarısız oldu.");
+      }
+    } catch (err: any) {
+      alert("Hata: " + (err.message || "Bilinmeyen bir hata oluştu"));
+    } finally {
+      setIsTogglingOverride(false);
+    }
+  };
 
   const handleSave = async () => {
     if (isSaving || !activeContact) return;
@@ -1670,6 +1704,25 @@ export function ContextPanel() {
           {isBotSteeringOpen && (
             <div className="pt-2 space-y-4 border-t border-black/[0.03] animate-fade-in text-[11px] text-[#1D1D1F]">
               
+              {/* Permanent Override Active Banner */}
+              {isOverrideActive && (
+                <div className="p-3 rounded-2xl bg-rose-50 border border-rose-100 text-rose-800 space-y-2 shadow-sm animate-fade-in">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                    <div className="space-y-1">
+                      <span className="block text-[11px] font-extrabold leading-normal">
+                        Bu kişi için gelen mesaj otopilotu kalıcı olarak kapatılmıştır.
+                      </span>
+                      {overrideDetail?.disabled_at && (
+                        <span className="block text-[9px] text-rose-500 font-semibold">
+                          Kapatılma: {new Date(overrideDetail.disabled_at).toLocaleString('tr-TR', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* 1. Status Info Card */}
               <div className="p-3 rounded-2xl bg-[#F5F5F7]/80 border border-black/5 space-y-2.5 shadow-sm">
                 <span className="block text-[9px] font-bold text-[#86868B] uppercase tracking-widest border-b border-black/[0.03] pb-1.5">🤖 Bot & Otopilot Durumu</span>
@@ -1741,6 +1794,44 @@ export function ContextPanel() {
                   </div>
 
                 </div>
+              </div>
+
+              {/* Kalıcı Otopilot Kilidi Kontrolleri */}
+              <div className="p-3 rounded-2xl bg-[#F5F5F7]/80 border border-black/5 space-y-2.5 shadow-sm">
+                <span className="block text-[9px] font-bold text-[#86868B] uppercase tracking-widest border-b border-black/[0.03] pb-1.5">🔒 Kalıcı Otopilot Koruması</span>
+                {isOverrideActive ? (
+                  <div className="space-y-2">
+                    {['admin', 'owner', 'platform_admin'].includes(userRole) ? (
+                      <button
+                        type="button"
+                        onClick={() => handleToggleOverride(false)}
+                        disabled={isTogglingOverride}
+                        className="w-full py-1.5 bg-indigo-600 hover:bg-indigo-750 text-white text-[10px] font-bold rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all disabled:opacity-50 shadow-sm"
+                      >
+                        {isTogglingOverride ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Check className="w-3.5 h-3.5" />
+                        )}
+                        <span>Kalıcı Korumayı Kaldır</span>
+                      </button>
+                    ) : (
+                      <div className="p-2 rounded-lg bg-gray-50 border border-black/5 text-gray-500 text-[10px] text-center font-medium leading-normal">
+                        Korumayı kaldırmak için yönetici yetkisi gereklidir.
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmOverride(true)}
+                    disabled={isTogglingOverride}
+                    className="w-full py-1.5 border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 text-[10px] font-bold rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all disabled:opacity-50 shadow-sm"
+                  >
+                    <AlertCircle className="w-3.5 h-3.5 text-rose-600" />
+                    <span>Bu Kişi İçin Otopilotu Kalıcı Kapat</span>
+                  </button>
+                )}
               </div>
 
               {/* 2. Botu Yönlendir (Mevcut İç Talimat Akışı) */}
@@ -2725,6 +2816,47 @@ export function ContextPanel() {
       )}
 
       {/* Modals removed and integrated to global InboxModalContainer */}
+
+      {/* Permanent Override Confirmation Modal */}
+      {showConfirmOverride && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-sm bg-white rounded-3xl p-6 shadow-2xl border border-black/5 animate-in zoom-in-95 duration-200 text-left">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-rose-50 flex items-center justify-center text-rose-600 shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-gray-900">Otopilotu Kalıcı Kapat</h3>
+                <p className="text-[10px] text-gray-500 font-medium">Bu işlem geri alınabilir fakat yetki gerektirir.</p>
+              </div>
+            </div>
+            
+            <p className="text-[11.5px] text-gray-600 leading-relaxed font-semibold mb-6">
+              Bu hasta için gelen mesaj otopilotunu **kalıcı olarak kapatmak** istediğinize emin misiniz? Bu işlemden sonra hasta mesaj gönderdiğinde otopilot otomatik olarak tekrar aktif **olmayacaktır** ve sadece temsilciler manuel yanıt verebilecektir.
+            </p>
+            
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowConfirmOverride(false)}
+                className="flex-1 py-2 bg-gray-155 hover:bg-gray-200 active:scale-95 text-gray-700 text-[11px] font-bold rounded-xl cursor-pointer transition-all border border-black/5"
+              >
+                İptal Et
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowConfirmOverride(false);
+                  handleToggleOverride(true);
+                }}
+                className="flex-1 py-2 bg-rose-600 hover:bg-rose-750 active:scale-95 text-white text-[11px] font-bold rounded-xl cursor-pointer transition-all shadow-sm"
+              >
+                Evet, Kalıcı Kapat
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

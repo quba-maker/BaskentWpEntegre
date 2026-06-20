@@ -58,6 +58,7 @@ export interface OrchestratorResult {
   deduplicated?: boolean; // Concurrency flag
   responseDedupeKey?: string; // Telemetry
   burstAnchorId?: string; // Telemetry
+  dryRun?: boolean;
 }
 
 export class AIResponseOrchestrator {
@@ -111,6 +112,53 @@ export class AIResponseOrchestrator {
         qualityGateFailed: false
       };
     }
+
+    // P3.01: Customer-level permanent override check (channel-scoped) in orchestrator
+    const db = withTenantDB(tenantId);
+    let customerProfileMetadata: any = {};
+    if (customerId) {
+      try {
+        const cprof = await db.executeSafe({
+          text: `SELECT metadata FROM customer_profiles WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+          values: [customerId, tenantId]
+        }) as any[];
+        customerProfileMetadata = cprof[0]?.metadata || {};
+      } catch (err) {
+        console.error("AIResponseOrchestrator: Failed to fetch customer profile metadata by customerId:", err);
+      }
+    } else if (phoneNumber) {
+      try {
+        const cprof = await db.executeSafe({
+          text: `SELECT metadata FROM customer_profiles WHERE primary_phone = $1 AND tenant_id = $2 LIMIT 1`,
+          values: [phoneNumber, tenantId]
+        }) as any[];
+        customerProfileMetadata = cprof[0]?.metadata || {};
+      } catch (err) {
+        console.error("AIResponseOrchestrator: Failed to fetch customer profile metadata by phone:", err);
+      }
+    }
+
+    const overrides = customerProfileMetadata.inbound_autopilot_overrides || {};
+    const channelOverride = overrides[channelId || ''];
+    if (channelOverride?.disabled === true || channelOverride?.disabled === 'true') {
+      console.log(JSON.stringify({
+        tag: "AI_RESPONSE_ORCHESTRATOR_MANUALLY_DISABLED_BYPASS",
+        tenantId,
+        conversationId,
+        customerId,
+        channelId,
+        reason: "contact_inbound_autopilot_manually_disabled"
+      }));
+      return {
+        text: '',
+        modelUsed: 'contact_inbound_autopilot_manually_disabled',
+        latencyMs: Date.now() - startTime,
+        bypassed: true,
+        isRetry: false,
+        qualityGateFailed: false
+      };
+    }
+
     let burstAnchorId = '';
     let responseDedupeKey = '';
     let isDbLockAcquired = false;
@@ -233,6 +281,103 @@ export class AIResponseOrchestrator {
           resolvedChannelId = convRecord?.channel_id || channelId || '';
         } catch (_) {
           resolvedChannelId = channelId || '';
+        }
+      }
+
+      // Inbound Autopilot Settings & Eligibility checks (only when sandbox is false)
+      if (!sandbox) {
+        const { getInboundAutopilotSettings } = await import("../forms/form-autopilot-eligibility-resolver");
+        const inboundSettings = await getInboundAutopilotSettings(tenantId, db);
+
+        if (!inboundSettings.enabled) {
+          console.log(JSON.stringify({
+            tag: "AI_RESPONSE_ORCHESTRATOR_BYPASSED",
+            tenantId,
+            conversationId,
+            reason: "inbound_autopilot_disabled"
+          }));
+          return {
+            text: '',
+            modelUsed: 'inbound_autopilot_disabled',
+            latencyMs: Date.now() - startTime,
+            bypassed: true,
+            isRetry: false,
+            qualityGateFailed: false
+          };
+        }
+
+        // Timezone Check (if timezone settings/details fail or are missing, we fall back to not_eligible / dry-run)
+        let timezone: string | null = null;
+        try {
+          const tenantTzRow = await db.executeSafe({
+            text: `SELECT timezone FROM tenants WHERE id = $1 LIMIT 1`,
+            values: [tenantId]
+          }) as any[];
+          timezone = tenantTzRow[0]?.timezone || null;
+        } catch (e) {
+          timezone = null;
+        }
+
+        if (!timezone) {
+          console.log(JSON.stringify({
+            tag: "AI_RESPONSE_ORCHESTRATOR_BYPASSED",
+            tenantId,
+            conversationId,
+            reason: "timezone_missing_not_eligible"
+          }));
+          return {
+            text: '',
+            modelUsed: 'timezone_missing_not_eligible',
+            latencyMs: Date.now() - startTime,
+            bypassed: true,
+            isRetry: false,
+            qualityGateFailed: false
+          };
+        }
+
+        // Human Takeover Check
+        const { HumanTakeoverGuard } = await import("../automation/human-takeover-guard");
+        const takeoverCheck = await HumanTakeoverGuard.isHumanTakeoverActive(tenantId, conversationId, db);
+        if (takeoverCheck.active) {
+          console.log(JSON.stringify({
+            tag: "AI_RESPONSE_ORCHESTRATOR_BYPASSED",
+            tenantId,
+            conversationId,
+            reason: `human_takeover_active_${takeoverCheck.reason}`
+          }));
+          return {
+            text: '',
+            modelUsed: `human_takeover_active_${takeoverCheck.reason}`,
+            latencyMs: Date.now() - startTime,
+            bypassed: true,
+            isRetry: false,
+            qualityGateFailed: false
+          };
+        }
+
+        // SHA-256 Rollout Percentage Check
+        if (inboundSettings.rolloutPercentage < 100) {
+          const { getRolloutBucket } = await import("@/lib/utils/hash");
+          const bucketKey = `${tenantId}:${resolvedChannelId || 'whatsapp'}:inbound_autopilot_settings:${conversationId}`;
+          const bucket = getRolloutBucket(bucketKey);
+          if (bucket >= inboundSettings.rolloutPercentage) {
+            console.log(JSON.stringify({
+              tag: "AI_RESPONSE_ORCHESTRATOR_BYPASSED",
+              tenantId,
+              conversationId,
+              reason: "rollout_percentage_excluded",
+              bucket,
+              rolloutPercentage: inboundSettings.rolloutPercentage
+            }));
+            return {
+              text: '',
+              modelUsed: 'rollout_percentage_excluded',
+              latencyMs: Date.now() - startTime,
+              bypassed: true,
+              isRetry: false,
+              qualityGateFailed: false
+            };
+          }
         }
       }
 
@@ -538,6 +683,34 @@ export class AIResponseOrchestrator {
         recentContextDept ||
         topicSwitch.activeTopic ||
         staleDept;
+
+      // Gradual branch department check (only when sandbox is false)
+      if (!sandbox) {
+        const { getInboundAutopilotSettings } = await import("../forms/form-autopilot-eligibility-resolver");
+        const db = withTenantDB(tenantId);
+        const inboundSettings = await getInboundAutopilotSettings(tenantId, db);
+
+        if (inboundSettings.departmentMode === 'selected') {
+          if (!resolvedActiveDepartment || !inboundSettings.allowedDepartments.includes(resolvedActiveDepartment)) {
+            console.log(JSON.stringify({
+              tag: "AI_RESPONSE_ORCHESTRATOR_BYPASSED",
+              tenantId,
+              conversationId,
+              reason: "department_not_allowed",
+              resolvedActiveDepartment,
+              allowedDepartments: inboundSettings.allowedDepartments
+            }));
+            return {
+              text: '',
+              modelUsed: 'department_not_allowed',
+              latencyMs: Date.now() - startTime,
+              bypassed: true,
+              isRetry: false,
+              qualityGateFailed: false
+            };
+          }
+        }
+      }
 
       if (resolvedActiveDepartment) {
         if (!unifiedContext.conversation) unifiedContext.conversation = {};

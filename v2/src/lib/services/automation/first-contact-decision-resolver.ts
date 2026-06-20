@@ -86,7 +86,10 @@ export const REASON_MAPPING: Record<string, string> = {
   lead_not_found: 'Hasta form kaydı bulunamadı.',
   tenant_not_found: 'Güvenli tenant eşleşmesi sağlanamadı.',
   not_whatsapp_channel: 'Kanal WhatsApp olmadığı için autopilot devre dışı.',
-  form_only_outbound: 'Hasta henüz WhatsApp’tan yazmadı.'
+  form_only_outbound: 'Hasta henüz WhatsApp’tan yazmadı.',
+  timezone_missing_not_eligible: 'Zaman dilimi eksik, otomasyon durduruldu.',
+  department_not_allowed: 'Bu branş için otopilot izni bulunmuyor.',
+  rollout_percentage_excluded: 'Kademeli rollout havuzu dışında kaldı.'
 };
 
 export function mapUserFriendlyReason(reason: string): string {

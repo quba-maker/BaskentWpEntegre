@@ -65,6 +65,45 @@ export async function getAutopilotSettings(tenantId: string, db: TenantDB) {
 }
 
 /**
+ * Checks Inbound Autopilot module settings from DB.
+ */
+export async function getInboundAutopilotSettings(tenantId: string, db: TenantDB) {
+  let enabled = false;
+  let dryRun = true;
+  let rolloutPercentage = 0;
+  let departmentMode = 'selected';
+  let allowedDepartments: string[] = [];
+
+  try {
+    const rows = await db.executeSafe({
+      text: `SELECT config_json FROM ai_module_settings WHERE tenant_id = $1 AND module_name = 'inbound_autopilot_settings' LIMIT 1`,
+      values: [tenantId]
+    }) as any[];
+
+    if (rows.length > 0 && rows[0].config_json && typeof rows[0].config_json === 'object') {
+      const config = rows[0].config_json;
+      if (config.enabled !== undefined) enabled = config.enabled;
+      if (config.dry_run !== undefined) dryRun = config.dry_run;
+      if (config.rollout_percentage !== undefined) rolloutPercentage = Number(config.rollout_percentage);
+      if (config.department_mode !== undefined) departmentMode = config.department_mode;
+      if (config.allowed_departments !== undefined) {
+        allowedDepartments = Array.isArray(config.allowed_departments) ? config.allowed_departments : [];
+      }
+    }
+  } catch {
+    // Fail-safe defaults
+  }
+
+  return {
+    enabled,
+    dryRun,
+    rolloutPercentage,
+    departmentMode,
+    allowedDepartments
+  };
+}
+
+/**
  * Resolves form lead eligibility for autopilot response.
  * Filters are strictly tenant-bound to prevent global leaks.
  */
@@ -105,7 +144,7 @@ export async function resolveFormAutopilotEligibility(
     // 2. Fetch Conversation details for security checks
     // We select status, tenant_id, and autopilot_enabled (using fallback check if column isn't present)
     const convRows = await db.executeSafe({
-      text: `SELECT channel, status, tenant_id, autopilot_enabled FROM conversations WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+      text: `SELECT channel, channel_id, customer_id, status, tenant_id, autopilot_enabled FROM conversations WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
       values: [conversationId, tenantId]
     }) as any[];
 
@@ -124,6 +163,22 @@ export async function resolveFormAutopilotEligibility(
 
     const conv = convRows[0];
     const channelId = conv.channel;
+
+    let isManuallyDisabledForInbound = false;
+    if (conv.customer_id) {
+      const profileRows = await db.executeSafe({
+        text: `SELECT primary_phone, metadata FROM customer_profiles WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+        values: [conv.customer_id, tenantId]
+      }) as any[];
+      if (profileRows.length > 0) {
+        const metadata = profileRows[0].metadata || {};
+        const overrides = metadata.inbound_autopilot_overrides || {};
+        const chId = conv.channel_id || conv.channel;
+        if (chId && (overrides[chId]?.disabled === true || overrides[chId]?.disabled === 'true')) {
+          isManuallyDisabledForInbound = true;
+        }
+      }
+    }
 
     // Fetch lead details for cross check (tenant/channel mismatch checks)
     const leadRows = await db.executeSafe({
@@ -163,7 +218,7 @@ export async function resolveFormAutopilotEligibility(
     } else if (conv.status === 'human') {
       baseEligible = false;
       baseReason = 'status_human';
-    } else if (conv.autopilot_enabled === false) {
+    } else if (conv.autopilot_enabled === false && !isManuallyDisabledForInbound) {
       baseEligible = false;
       baseReason = 'autopilot_disabled';
     } else if (channelId !== 'whatsapp') {

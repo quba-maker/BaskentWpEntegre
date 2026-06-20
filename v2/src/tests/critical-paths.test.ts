@@ -6876,6 +6876,357 @@ test("P0.17-FP-13: Country resolution updates even if existingCountry is set (wh
   assert(resolvedCountryForConv === "Hollanda", `Expected resolved country to update to 'Hollanda', got: ${resolvedCountryForConv}`);
 });
 
+test("P2.01: saveFormAutopilotSettingsAction/saveInboundAutopilotSettingsAction yetkisiz ve cross-tenant istekleri engellemeli", async () => {
+  const { saveFormAutopilotSettingsAction, saveInboundAutopilotSettingsAction } = await import("../app/actions/settings");
+  
+  // Set bypass and roles to simulate unauthorized user
+  const oldBypass = process.env.TEST_SESSION_BYPASS;
+  const oldTenant = process.env.TEST_TENANT_ID;
+  const oldRole = process.env.TEST_USER_ROLE;
+  
+  process.env.TEST_SESSION_BYPASS = "true";
+  process.env.TEST_TENANT_ID = "tenant-123";
+  process.env.TEST_USER_ROLE = "viewer"; // unauthorized role
+
+  try {
+    // 1. Role permission violation
+    const res1 = await saveFormAutopilotSettingsAction("tenant-123", { enabled: true });
+    assert(res1.success === false, "Viewer role should not be allowed to edit form settings");
+    assert(res1.error?.includes("Bu işlem için yetkiniz yok") || false, "Should throw role error");
+
+    const res2 = await saveInboundAutopilotSettingsAction("tenant-123", { enabled: true });
+    assert(res2.success === false, "Viewer role should not be allowed to edit inbound settings");
+    
+    // 2. Cross-tenant violation (Admin role but editing another tenant's settings)
+    process.env.TEST_USER_ROLE = "admin";
+    const res3 = await saveFormAutopilotSettingsAction("tenant-456", { enabled: true });
+    assert(res3.success === false, "Should block cross-tenant setting modification");
+    assert(res3.error?.includes("Cross-tenant violation") || false, "Should throw cross-tenant error");
+    
+    const res4 = await saveInboundAutopilotSettingsAction("tenant-456", { enabled: true });
+    assert(res4.success === false, "Should block cross-tenant setting modification for inbound");
+  } finally {
+    process.env.TEST_SESSION_BYPASS = oldBypass || "";
+    process.env.TEST_TENANT_ID = oldTenant || "";
+    process.env.TEST_USER_ROLE = oldRole || "";
+  }
+});
+
+test("P2.02: SHA-256 rollout bucket uniform ve deterministik dağılım sağlamalı", () => {
+  const { getRolloutBucket } = require("../lib/utils/hash");
+  
+  // Determinism
+  const key1 = "tenant-1:channel-1:module-x:conv-1";
+  const key2 = "tenant-1:channel-1:module-x:conv-1";
+  const key3 = "tenant-2:channel-1:module-x:conv-1";
+  
+  const bucket1 = getRolloutBucket(key1);
+  const bucket2 = getRolloutBucket(key2);
+  const bucket3 = getRolloutBucket(key3);
+  
+  assert(bucket1 === bucket2, "Identical inputs must yield identical buckets");
+  assert(bucket1 !== bucket3, "Tenant isolated inputs should yield different buckets");
+  assert(bucket1 >= 0 && bucket1 < 100, "Bucket must be in range 0-99");
+  assert(bucket3 >= 0 && bucket3 < 100, "Bucket must be in range 0-99");
+});
+
+test("P2.03: AutopilotCircuitBreakerService ardışık 3 fallback’te devreyi açmalı ve DB başarısızlığında durmalı", async () => {
+  const { AutopilotCircuitBreakerService } = await import("../lib/services/automation/autopilot-circuit-breaker.service");
+  
+  const mockDb = {
+    executeSafeCalls: [] as any[],
+    executeSafe: async (query: any) => {
+      mockDb.executeSafeCalls.push(query);
+      const text = query.text.replace(/\s+/g, ' ');
+      if (text.includes("SELECT autopilot_enabled")) {
+        return [{ autopilot_enabled: true, metadata: { consecutive_fallback_count: 2 } }];
+      }
+      return [{ id: "conv-123" }];
+    }
+  };
+
+  const res = await AutopilotCircuitBreakerService.recordFallback("tenant-123", "conv-123", mockDb as any);
+  assert(res.tripped === true, "Circuit breaker should trip on 3rd fallback");
+  
+  // Verify update query sets autopilot_enabled = false
+  const updateQuery = mockDb.executeSafeCalls.find(q => q.text.replace(/\s+/g, ' ').includes("UPDATE conversations SET autopilot_enabled = false"));
+  assert(!!updateQuery, "Should query DB to disable autopilot");
+
+  // Verify safe fail: database error during update throws error to halt execution
+  const failingDb = {
+    executeSafe: async () => { throw new Error("DB Connection Lost"); }
+  };
+  let hasThrown = false;
+  try {
+    await AutopilotCircuitBreakerService.recordFallback("tenant-123", "conv-123", failingDb as any);
+  } catch (err: any) {
+    hasThrown = true;
+    assert(err.message.includes("Circuit breaker state update failed"), "Should wrap error and halt");
+  }
+  assert(hasThrown === true, "Should fail-closed and throw on DB failure");
+});
+
+test("P2.04: HumanTakeoverGuard son 30 dk giden temsilci mesajında veya son mesaj giden temsilciyse otopilotu kilitlemeli", async () => {
+  const { HumanTakeoverGuard } = await import("../lib/services/automation/human-takeover-guard");
+  
+  // 1. Last message was sent by human
+  const mockDb1 = {
+    executeSafe: async (query: any) => {
+      const text = query.text.replace(/\s+/g, ' ');
+      if (text.includes("SELECT status FROM conversations")) {
+        return [{ status: 'bot' }];
+      }
+      if (text.includes("SELECT created_at, model_used")) {
+        // last outbound is human (model_used is null, source is not bot)
+        return [{ created_at: new Date().toISOString(), model_used: null, media_metadata: {} }];
+      }
+      return [];
+    }
+  };
+  
+  const guard1 = await HumanTakeoverGuard.isHumanTakeoverActive("tenant-123", "conv-123", mockDb1 as any);
+  assert(guard1.active === true, "Should block if last outbound was human");
+  assert(guard1.reason === "last_message_by_human", "Reason should be last_message_by_human");
+
+  // 2. Human agent replied recently (e.g. 15 mins ago)
+  const mockDb2 = {
+    executeSafe: async (query: any) => {
+      const text = query.text.replace(/\s+/g, ' ');
+      if (text.includes("SELECT status FROM conversations")) {
+        return [{ status: 'bot' }];
+      }
+      if (text.includes("SELECT created_at, model_used") && text.includes("ORDER BY created_at DESC, id DESC LIMIT 1")) {
+        // last outbound was a bot message (e.g., greeting template)
+        return [{ created_at: new Date().toISOString(), model_used: 'gemini', media_metadata: { source: 'bot_autopilot' } }];
+      }
+      if (text.includes("created_at >= $3")) {
+        // recent messages in the last 30 minutes contains a human message (model_used null)
+        return [{ created_at: new Date(Date.now() - 15 * 60 * 1000).toISOString(), model_used: null, media_metadata: {} }];
+      }
+      return [];
+    }
+  };
+
+  const guard2 = await HumanTakeoverGuard.isHumanTakeoverActive("tenant-123", "conv-123", mockDb2 as any);
+  assert(guard2.active === true, "Should block if human replied recently within 30 minutes");
+  assert(!!guard2.reason?.includes("human_agent_replied_recently"), "Reason should indicate recent human reply");
+});
+
+// ==========================================
+// 15. PHASE 3: PERMANENT INBOUND AUTOPILOT OVERRIDE
+// ==========================================
+
+test("P3.01: Inbound Autopilot Permanent Override - Bypass & Isolation", async () => {
+  const { AIResponseOrchestrator } = require("../lib/services/ai/ai-response-orchestrator");
+
+  const targetChannelId = "channel-whatsapp-123";
+  const otherChannelId = "channel-whatsapp-456";
+  const customerId = "customer-profile-789";
+  const tenantId = "tenant-abc";
+
+  const originalExecuteSafe = (global as any).mockDb.executeSafe;
+  
+  (global as any).mockDb.executeSafe = async (query: any, params?: any[]) => {
+    const text = typeof query === 'string' ? query : query?.text || '';
+    const vals = typeof query === 'string' ? params : query?.values || [];
+    const normalized = text.replace(/\s+/g, ' ');
+
+    if (normalized.includes("FROM customer_profiles") || normalized.includes("customer_profiles cprof")) {
+      return [{
+        id: customerId,
+        tenant_id: tenantId,
+        metadata: {
+          inbound_autopilot_overrides: {
+            [targetChannelId]: {
+              disabled: true,
+              reason: "manual_user_disabled",
+              disabled_by: "user-agent-1",
+              disabled_at: new Date().toISOString()
+            }
+          }
+        }
+      }];
+    }
+
+    if (normalized.includes("FROM conversations")) {
+      return [{
+        id: "conv-123",
+        tenant_id: tenantId,
+        channel_id: targetChannelId,
+        customer_id: customerId,
+        autopilot_enabled: true,
+        status: "lead"
+      }];
+    }
+
+    return [];
+  };
+
+  try {
+    const orchResultOverride = await AIResponseOrchestrator.run({
+      tenantId,
+      channelId: targetChannelId,
+      customerId,
+      conversationId: "conv-123",
+      inboundText: "Merhaba bilgi almak istiyorum",
+      phoneNumber: "905554443322",
+      brain: {},
+      db: (global as any).mockDb
+    });
+
+    assert(orchResultOverride.bypassed === true, "Orchestrator should bypass when override is active");
+    assert(orchResultOverride.modelUsed === "contact_inbound_autopilot_manually_disabled", "Bypass modelUsed reason should match");
+    assert(orchResultOverride.text === "", "Bypassed response text must be empty");
+
+    const orchResultActive = await AIResponseOrchestrator.run({
+      tenantId,
+      channelId: otherChannelId,
+      customerId,
+      conversationId: "conv-123",
+      inboundText: "Merhaba bilgi almak istiyorum",
+      phoneNumber: "905554443322",
+      brain: {},
+      db: (global as any).mockDb
+    });
+
+    assert(orchResultActive.modelUsed !== "contact_inbound_autopilot_manually_disabled", "Isolation failed: other channel got bypassed");
+
+  } finally {
+    (global as any).mockDb.executeSafe = originalExecuteSafe;
+  }
+});
+
+test("P3.02: Inbound Autopilot Permanent Override - Form Independence, Roles & Audits", async () => {
+  const { resolveFormAutopilotEligibility } = require("../lib/services/forms/form-autopilot-eligibility-resolver");
+  const { toggleCustomerInboundAutopilotAction } = require("../app/actions/inbox");
+
+  const targetChannelId = "channel-whatsapp-123";
+  const customerId = "customer-profile-789";
+  const tenantId = "tenant-abc";
+
+  let lastInsertedAuditLog: any = null;
+  const originalExecuteSafe = (global as any).mockDb.executeSafe;
+
+  const oldAllowed = process.env.FORM_AUTOPILOT_ALLOWED_TENANTS;
+  const oldFlag = process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED;
+  const oldGlobal = process.env.FORM_AUTOPILOT_GLOBAL_DISABLED;
+
+  process.env.FORM_AUTOPILOT_ALLOWED_TENANTS = "tenant-abc";
+  process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED = "true";
+  process.env.FORM_AUTOPILOT_GLOBAL_DISABLED = "false";
+
+  (global as any).mockDb.executeSafe = async (query: any, params?: any[]) => {
+    const text = typeof query === 'string' ? query : query?.text || '';
+    const vals = typeof query === 'string' ? params : query?.values || [];
+    const normalized = text.replace(/\s+/g, ' ');
+
+    if (normalized.includes("SELECT timezone FROM tenants")) {
+      return [{ timezone: "Europe/Istanbul", slug: "tenant-abc" }];
+    }
+
+    if (normalized.includes("SELECT slug FROM tenants")) {
+      return [{ slug: "tenant-abc" }];
+    }
+
+    if (normalized.includes("SELECT module_name, is_active")) {
+      return [
+        { module_name: "form_autopilot_global_disabled", is_active: false },
+        {
+          module_name: "form_autopilot_for_open_meta_window",
+          is_active: true,
+          config_json: { enabled: true, dry_run: false, rollout_percentage: 100, department_mode: "all" }
+        }
+      ];
+    }
+
+    if (normalized.includes("FROM leads")) {
+      return [{ tenant_id: tenantId, phone_number: "905554443322", raw_data: { full_name: "John Doe", department: "dentistry" } }];
+    }
+
+    if (normalized.includes("FROM messages") && normalized.includes("direction = 'in'")) {
+      return [{ id: "msg-123", last_inbound_at: new Date().toISOString() }];
+    }
+
+    if (normalized.includes("FROM conversations")) {
+      return [{
+        id: "conv-123",
+        channel: "whatsapp",
+        channel_id: targetChannelId,
+        status: "lead",
+        tenant_id: tenantId,
+        autopilot_enabled: false,
+        customer_id: customerId
+      }];
+    }
+
+    if (normalized.includes("SELECT primary_phone, metadata FROM customer_profiles WHERE id = $1 AND tenant_id = $2")) {
+      return [{
+        primary_phone: "905554443322",
+        metadata: {
+          inbound_autopilot_overrides: {
+            [targetChannelId]: {
+              disabled: true,
+              reason: "manual_user_disabled",
+              disabled_by: "user-agent-1",
+              disabled_at: new Date().toISOString()
+            }
+          }
+        }
+      }];
+    }
+
+    if (normalized.includes("INSERT INTO ai_audit_logs")) {
+      lastInsertedAuditLog = { text, vals };
+      return [];
+    }
+
+    return [];
+  };
+
+  try {
+    const formEligibility = await resolveFormAutopilotEligibility(
+      tenantId,
+      "lead-123",
+      "conv-123",
+      (global as any).mockDb
+    );
+
+    assert(formEligibility.eligible === true, `Form autopilot should be independent from inbound override. Reason: ${formEligibility.reason}`);
+
+    process.env.TEST_TENANT_ID = tenantId;
+    process.env.TEST_USER_ID = "agent-user-id";
+    process.env.TEST_USER_ROLE = "agent";
+
+    const reEnableResultAgent = await toggleCustomerInboundAutopilotAction(customerId, targetChannelId, false);
+    assert(reEnableResultAgent.success === false, "Agent should not be allowed to re-enable override");
+    assert(reEnableResultAgent.error?.includes("Admins or owners"), "Role verification error mismatch");
+
+    process.env.TEST_USER_ROLE = "admin";
+    const reEnableResultAdmin = await toggleCustomerInboundAutopilotAction(customerId, targetChannelId, false);
+    assert(reEnableResultAdmin.success === true, "Admin should be allowed to re-enable override");
+
+    const disableResult = await toggleCustomerInboundAutopilotAction(customerId, targetChannelId, true);
+    assert(disableResult.success === true, "Should succeed toggling override to true");
+    assert(!!lastInsertedAuditLog, "Audit log should be written");
+    
+    const reasoningSummary = lastInsertedAuditLog.vals[2];
+    const resultSummary = JSON.parse(lastInsertedAuditLog.vals[3]);
+    
+    assert(!reasoningSummary.includes("90555") && !reasoningSummary.includes("443322"), "PII phone number leaked in reasoning");
+    assert(resultSummary.masked_phone === "90555*****22", "Phone number should be masked");
+    assert(!resultSummary.patient_name, "Patient name leaked in audit details");
+
+  } finally {
+    (global as any).mockDb.executeSafe = originalExecuteSafe;
+    process.env.FORM_AUTOPILOT_ALLOWED_TENANTS = oldAllowed;
+    process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED = oldFlag;
+    process.env.FORM_AUTOPILOT_GLOBAL_DISABLED = oldGlobal;
+    delete process.env.TEST_TENANT_ID;
+    delete process.env.TEST_USER_ID;
+    delete process.env.TEST_USER_ROLE;
+  }
+});
+
 // ==========================================
 // SONUÇLAR
 // ==========================================

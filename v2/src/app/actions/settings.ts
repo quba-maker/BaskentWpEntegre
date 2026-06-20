@@ -134,57 +134,112 @@ export async function getAutoGreetingSettingsAction() {
         allowedTenants: process.env.FORM_AUTOPILOT_ALLOWED_TENANTS || ''
       };
 
-      // 2. Fetch DB Settings
-      const rows = await ctx.db.executeSafe({
+      // 2. Fetch Form Outbound Autopilot Settings
+      const formRows = await ctx.db.executeSafe({
         text: `SELECT config_json FROM ai_module_settings WHERE tenant_id = $1 AND module_name = 'form_autopilot_for_open_meta_window' LIMIT 1`,
         values: [ctx.tenantId]
       }) as any[];
 
-      let channelsConfig = {
-        whatsapp: {
-          auto_greeting_enabled: false,
-          dry_run: true
+      const defaultFormConfig = {
+        enabled: false,
+        dry_run: true,
+        rollout_percentage: 0,
+        department_mode: 'selected',
+        allowed_departments: [] as string[],
+        channels: {
+          whatsapp: {
+            auto_greeting_enabled: false,
+            dry_run: true
+          }
         }
       };
 
-      if (rows.length > 0 && rows[0].config_json && typeof rows[0].config_json === 'object') {
-        const config = rows[0].config_json;
-        if (config.channels && typeof config.channels === 'object') {
-          channelsConfig = {
-            ...channelsConfig,
-            ...config.channels
-          };
-        }
+      let formAutopilotConfig = { ...defaultFormConfig };
+      if (formRows.length > 0 && formRows[0].config_json && typeof formRows[0].config_json === 'object') {
+        formAutopilotConfig = {
+          ...defaultFormConfig,
+          ...formRows[0].config_json
+        };
       }
+
+      // 3. Fetch Inbound Autopilot Settings
+      const inboundRows = await ctx.db.executeSafe({
+        text: `SELECT config_json FROM ai_module_settings WHERE tenant_id = $1 AND module_name = 'inbound_autopilot_settings' LIMIT 1`,
+        values: [ctx.tenantId]
+      }) as any[];
+
+      const defaultInboundConfig = {
+        enabled: false,
+        dry_run: true,
+        rollout_percentage: 0,
+        department_mode: 'selected',
+        allowed_departments: [] as string[]
+      };
+
+      let inboundAutopilotConfig = { ...defaultInboundConfig };
+      if (inboundRows.length > 0 && inboundRows[0].config_json && typeof inboundRows[0].config_json === 'object') {
+        inboundAutopilotConfig = {
+          ...defaultInboundConfig,
+          ...inboundRows[0].config_json
+        };
+      }
+
+      // Legacy compatibility: map channelsConfig to form config's whatsapp channel
+      const channelsConfig = {
+        whatsapp: {
+          auto_greeting_enabled: formAutopilotConfig.enabled,
+          dry_run: formAutopilotConfig.dry_run
+        }
+      };
 
       return {
         success: true,
         envLocks,
-        channelsConfig
+        channelsConfig, // Legacy support
+        formAutopilotConfig,
+        inboundAutopilotConfig,
+        userRole: ctx.role,
+        tenantId: ctx.tenantId
       };
     }
   ).then(res => {
     if (!res.success || !res.data) return { success: false, error: res.error || "Ayarlar alınamadı." };
-    return { success: true, envLocks: res.data.envLocks, channelsConfig: res.data.channelsConfig };
+    return { 
+      success: true, 
+      envLocks: res.data.envLocks, 
+      channelsConfig: res.data.channelsConfig,
+      formAutopilotConfig: res.data.formAutopilotConfig,
+      inboundAutopilotConfig: res.data.inboundAutopilotConfig,
+      userRole: res.data.userRole,
+      tenantId: res.data.tenantId
+    };
   });
 }
 
-export async function saveAutoGreetingChannelSettingsAction(channelId: string, settingsPatch: any) {
+export async function saveFormAutopilotSettingsAction(tenantId: string, settingsPatch: any) {
   return withActionGuard(
     { 
-      actionName: 'saveAutoGreetingChannelSettingsAction',
+      actionName: 'saveFormAutopilotSettingsAction',
       roles: ['owner', 'admin']
     },
     async (ctx) => {
-      // 1. Fetch current row
+      // tenant scope check
+      if (tenantId !== ctx.tenantId) {
+        throw new Error("Geçersiz firma yetkisi (Cross-tenant violation)");
+      }
+
+      // Fetch current row
       const rows = await ctx.db.executeSafe({
         text: `SELECT id, config_json FROM ai_module_settings WHERE tenant_id = $1 AND module_name = 'form_autopilot_for_open_meta_window' LIMIT 1`,
         values: [ctx.tenantId]
       }) as any[];
 
       let currentConfig: any = {
+        enabled: false,
         dry_run: true,
-        channels: {}
+        rollout_percentage: 0,
+        department_mode: 'selected',
+        allowed_departments: []
       };
       let rowId: string | null = null;
 
@@ -198,21 +253,24 @@ export async function saveAutoGreetingChannelSettingsAction(channelId: string, s
         }
       }
 
-      // Ensure channels object exists
+      const originalConfig = { ...currentConfig };
+
+      // Apply patches (only valid config keys, no PII allowed)
+      const allowedKeys = ['enabled', 'dry_run', 'rollout_percentage', 'department_mode', 'allowed_departments'];
+      for (const key of allowedKeys) {
+        if (settingsPatch[key] !== undefined) {
+          currentConfig[key] = settingsPatch[key];
+        }
+      }
+
+      // Synchronize channels object for legacy compatibility if enabled or dry_run changed
       if (!currentConfig.channels || typeof currentConfig.channels !== 'object') {
         currentConfig.channels = {};
       }
-
-      // Patch only the specified channel, leave others untouched
-      currentConfig.channels[channelId] = {
-        ...(currentConfig.channels[channelId] || {}),
-        ...settingsPatch
+      currentConfig.channels.whatsapp = {
+        auto_greeting_enabled: currentConfig.enabled,
+        dry_run: currentConfig.dry_run
       };
-
-      // Also mirror root dry_run if patching whatsapp
-      if (channelId === 'whatsapp' && settingsPatch.dry_run !== undefined) {
-        currentConfig.dry_run = settingsPatch.dry_run;
-      }
 
       if (rowId) {
         await ctx.db.executeSafe({
@@ -226,6 +284,28 @@ export async function saveAutoGreetingChannelSettingsAction(channelId: string, s
         });
       }
 
+      // Log config change in a PII-free format
+      const diff: any = {};
+      for (const key of allowedKeys) {
+        if (JSON.stringify(originalConfig[key]) !== JSON.stringify(currentConfig[key])) {
+          diff[key] = { from: originalConfig[key], to: currentConfig[key] };
+        }
+      }
+
+      await ctx.db.executeSafe({
+        text: `INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary) VALUES ($1, $2, $3, $4::jsonb)`,
+        values: [
+          ctx.tenantId,
+          'UPDATE_FORM_AUTOPILOT_SETTINGS',
+          `Form autopilot settings updated by user ${ctx.userId}`,
+          JSON.stringify({
+            userId: ctx.userId,
+            module: 'form_autopilot_for_open_meta_window',
+            diff
+          })
+        ]
+      }).catch(err => console.error("Failed to write form settings change audit log", err));
+
       return { success: true };
     }
   ).then(res => {
@@ -233,3 +313,118 @@ export async function saveAutoGreetingChannelSettingsAction(channelId: string, s
     return { success: true };
   });
 }
+
+export async function saveInboundAutopilotSettingsAction(tenantId: string, settingsPatch: any) {
+  return withActionGuard(
+    { 
+      actionName: 'saveInboundAutopilotSettingsAction',
+      roles: ['owner', 'admin']
+    },
+    async (ctx) => {
+      // tenant scope check
+      if (tenantId !== ctx.tenantId) {
+        throw new Error("Geçersiz firma yetkisi (Cross-tenant violation)");
+      }
+
+      // Fetch current row
+      const rows = await ctx.db.executeSafe({
+        text: `SELECT id, config_json FROM ai_module_settings WHERE tenant_id = $1 AND module_name = 'inbound_autopilot_settings' LIMIT 1`,
+        values: [ctx.tenantId]
+      }) as any[];
+
+      let currentConfig: any = {
+        enabled: false,
+        dry_run: true,
+        rollout_percentage: 0,
+        department_mode: 'selected',
+        allowed_departments: []
+      };
+      let rowId: string | null = null;
+
+      if (rows.length > 0) {
+        rowId = rows[0].id;
+        if (rows[0].config_json && typeof rows[0].config_json === 'object') {
+          currentConfig = {
+            ...currentConfig,
+            ...rows[0].config_json
+          };
+        }
+      }
+
+      const originalConfig = { ...currentConfig };
+
+      // Apply patches (only valid config keys, no PII allowed)
+      const allowedKeys = ['enabled', 'dry_run', 'rollout_percentage', 'department_mode', 'allowed_departments'];
+      for (const key of allowedKeys) {
+        if (settingsPatch[key] !== undefined) {
+          currentConfig[key] = settingsPatch[key];
+        }
+      }
+
+      if (rowId) {
+        await ctx.db.executeSafe({
+          text: `UPDATE ai_module_settings SET config_json = $1, updated_at = NOW() WHERE id = $2`,
+          values: [JSON.stringify(currentConfig), rowId]
+        });
+      } else {
+        await ctx.db.executeSafe({
+          text: `INSERT INTO ai_module_settings (tenant_id, module_name, is_active, config_json) VALUES ($1, 'inbound_autopilot_settings', true, $2)`,
+          values: [ctx.tenantId, JSON.stringify(currentConfig)]
+        });
+      }
+
+      // Log config change in a PII-free format
+      const diff: any = {};
+      for (const key of allowedKeys) {
+        if (JSON.stringify(originalConfig[key]) !== JSON.stringify(currentConfig[key])) {
+          diff[key] = { from: originalConfig[key], to: currentConfig[key] };
+        }
+      }
+
+      await ctx.db.executeSafe({
+        text: `INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary) VALUES ($1, $2, $3, $4::jsonb)`,
+        values: [
+          ctx.tenantId,
+          'UPDATE_INBOUND_AUTOPILOT_SETTINGS',
+          `Inbound autopilot settings updated by user ${ctx.userId}`,
+          JSON.stringify({
+            userId: ctx.userId,
+            module: 'inbound_autopilot_settings',
+            diff
+          })
+        ]
+      }).catch(err => console.error("Failed to write inbound settings change audit log", err));
+
+      return { success: true };
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error };
+    return { success: true };
+  });
+}
+
+// Legacy wrapper to keep other features happy (delegates to saveFormAutopilotSettingsAction)
+export async function saveAutoGreetingChannelSettingsAction(channelId: string, settingsPatch: any) {
+  return withActionGuard(
+    { 
+      actionName: 'saveAutoGreetingChannelSettingsAction',
+      roles: ['owner', 'admin']
+    },
+    async (ctx) => {
+      // Map legacy format to the new structure
+      const newPatch = {
+        enabled: settingsPatch.auto_greeting_enabled,
+        dry_run: settingsPatch.dry_run
+      };
+      const res = await saveFormAutopilotSettingsAction(ctx.tenantId, newPatch);
+      if (!res.success) {
+        throw new Error(res.error || "Form otopilot ayarları kaydedilemedi");
+      }
+      return { success: true };
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error };
+    return { success: true };
+  });
+}
+
