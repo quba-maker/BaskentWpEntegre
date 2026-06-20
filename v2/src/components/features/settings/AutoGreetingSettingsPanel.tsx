@@ -34,16 +34,16 @@ export function AutoGreetingSettingsPanel({
   const [formConfig, setFormConfig] = useState<any>({
     enabled: false,
     dry_run: true,
-    rollout_percentage: 0,
-    department_mode: "selected",
+    rollout_percentage: 100,
+    department_mode: "all",
     allowed_departments: []
   });
 
   const [inboundConfig, setInboundConfig] = useState<any>({
     enabled: false,
     dry_run: true,
-    rollout_percentage: 0,
-    department_mode: "selected",
+    rollout_percentage: 100,
+    department_mode: "all",
     allowed_departments: []
   });
 
@@ -213,9 +213,9 @@ export function AutoGreetingSettingsPanel({
       const res = await saveFormAutopilotSettingsAction(tenantId, {
         enabled: formConfig.enabled,
         dry_run: formConfig.dry_run,
-        rollout_percentage: Number(formConfig.rollout_percentage),
-        department_mode: formConfig.department_mode,
-        allowed_departments: formConfig.allowed_departments
+        rollout_percentage: 100,
+        department_mode: "all",
+        allowed_departments: []
       });
       if (res.success) {
         setSuccessForm(true);
@@ -247,9 +247,9 @@ export function AutoGreetingSettingsPanel({
       const res = await saveInboundAutopilotSettingsAction(tenantId, {
         enabled: inboundConfig.enabled,
         dry_run: inboundConfig.dry_run,
-        rollout_percentage: Number(inboundConfig.rollout_percentage),
-        department_mode: inboundConfig.department_mode,
-        allowed_departments: inboundConfig.allowed_departments
+        rollout_percentage: 100,
+        department_mode: "all",
+        allowed_departments: []
       });
       if (res.success) {
         setSuccessInbound(true);

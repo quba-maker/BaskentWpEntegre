@@ -143,8 +143,8 @@ export async function getAutoGreetingSettingsAction() {
       const defaultFormConfig = {
         enabled: false,
         dry_run: true,
-        rollout_percentage: 0,
-        department_mode: 'selected',
+        rollout_percentage: 100,
+        department_mode: 'all',
         allowed_departments: [] as string[],
         channels: {
           whatsapp: {
@@ -174,8 +174,8 @@ export async function getAutoGreetingSettingsAction() {
       const defaultInboundConfig = {
         enabled: false,
         dry_run: true,
-        rollout_percentage: 0,
-        department_mode: 'selected',
+        rollout_percentage: 100,
+        department_mode: 'all',
         allowed_departments: [] as string[]
       };
 
@@ -243,8 +243,8 @@ export async function saveFormAutopilotSettingsAction(tenantId: string, settings
       let currentConfig: any = {
         enabled: false,
         dry_run: true,
-        rollout_percentage: 0,
-        department_mode: 'selected',
+        rollout_percentage: 100,
+        department_mode: 'all',
         allowed_departments: []
       };
       let rowId: string | null = null;
@@ -344,8 +344,8 @@ export async function saveInboundAutopilotSettingsAction(tenantId: string, setti
       let currentConfig: any = {
         enabled: false,
         dry_run: true,
-        rollout_percentage: 0,
-        department_mode: 'selected',
+        rollout_percentage: 100,
+        department_mode: 'all',
         allowed_departments: []
       };
       let rowId: string | null = null;
