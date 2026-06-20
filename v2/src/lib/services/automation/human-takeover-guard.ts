@@ -15,9 +15,9 @@ export class HumanTakeoverGuard {
     db: TenantDB
   ): Promise<{ active: boolean; reason?: string }> {
     try {
-      // 1. Check conversation status
+      // 1. Check conversation status and activation timestamp
       const convRows = await db.executeSafe({
-        text: `SELECT status FROM conversations WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+        text: `SELECT status, bot_activated_at FROM conversations WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
         values: [conversationId, tenantId]
       }) as any[];
 
@@ -29,29 +29,34 @@ export class HumanTakeoverGuard {
         return { active: true, reason: 'status_human' };
       }
 
-      // 2. Query last outbound message (skip if status is explicitly 'bot' to avoid permanent lockout on manual reactivation)
-      if (convRows[0].status !== 'bot') {
-        const lastOutboundRows = await db.executeSafe({
-          text: `
-            SELECT created_at, model_used, media_metadata
-            FROM messages
-            WHERE tenant_id = $1 AND conversation_id = $2 AND direction = 'out'
-            ORDER BY created_at DESC, id DESC
-            LIMIT 1
-          `,
-          values: [tenantId, conversationId]
-        }) as any[];
+      const botActivatedAt = convRows[0].bot_activated_at ? new Date(convRows[0].bot_activated_at).getTime() : 0;
 
-        if (lastOutboundRows.length > 0) {
-          const lastOut = lastOutboundRows[0];
-          const modelUsed = lastOut.model_used;
-          const meta = lastOut.media_metadata || {};
-          
-          // A message is considered sent by a bot if model_used is set or metadata source matches bot/greeting otopilot keys.
-          const isBot = !!(modelUsed || meta.source === 'form_autopilot' || meta.source === 'bot_autopilot');
+      // 2. Query last outbound message
+      const lastOutboundRows = await db.executeSafe({
+        text: `
+          SELECT created_at, model_used, media_metadata
+          FROM messages
+          WHERE tenant_id = $1 AND conversation_id = $2 AND direction = 'out'
+          ORDER BY created_at DESC, id DESC
+          LIMIT 1
+        `,
+        values: [tenantId, conversationId]
+      }) as any[];
 
-          if (!isBot) {
-            // The last outbound message was sent by a human agent!
+      if (lastOutboundRows.length > 0) {
+        const lastOut = lastOutboundRows[0];
+        const modelUsed = lastOut.model_used;
+        const meta = lastOut.media_metadata || {};
+        
+        // A message is considered sent by a bot if model_used is set or metadata source matches bot/greeting otopilot keys.
+        const isBot = !!(modelUsed || meta.source === 'form_autopilot' || meta.source === 'bot_autopilot');
+
+        if (!isBot) {
+          // The last outbound message was sent by a human agent!
+          const lastOutboundTime = new Date(lastOut.created_at).getTime();
+          if (botActivatedAt > lastOutboundTime) {
+            // Bot was explicitly reactivated after this message, allow!
+          } else {
             return { active: true, reason: 'last_message_by_human' };
           }
         }
@@ -75,7 +80,11 @@ export class HumanTakeoverGuard {
       for (const msg of recentOutboundRows) {
         const isBot = !!(msg.model_used || msg.media_metadata?.source === 'form_autopilot' || msg.media_metadata?.source === 'bot_autopilot');
         if (!isBot) {
-          const elapsedMin = Math.round((Date.now() - new Date(msg.created_at).getTime()) / (60 * 1000));
+          const lastOutboundTime = new Date(msg.created_at).getTime();
+          if (botActivatedAt > lastOutboundTime) {
+            continue;
+          }
+          const elapsedMin = Math.round((Date.now() - lastOutboundTime) / (60 * 1000));
           return { 
             active: true, 
             reason: `human_agent_replied_recently_${elapsedMin}_mins_ago` 

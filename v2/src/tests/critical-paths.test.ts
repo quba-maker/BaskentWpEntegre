@@ -6973,8 +6973,8 @@ test("P2.04: HumanTakeoverGuard son 30 dk giden temsilci mesajında veya son mes
   const mockDb1 = {
     executeSafe: async (query: any) => {
       const text = query.text.replace(/\s+/g, ' ');
-      if (text.includes("SELECT status FROM conversations")) {
-        return [{ status: 'bot' }];
+      if (text.includes("FROM conversations")) {
+        return [{ status: 'bot', bot_activated_at: null }];
       }
       if (text.includes("SELECT created_at, model_used")) {
         // last outbound is human (model_used is null, source is not bot)
@@ -6992,8 +6992,8 @@ test("P2.04: HumanTakeoverGuard son 30 dk giden temsilci mesajında veya son mes
   const mockDb2 = {
     executeSafe: async (query: any) => {
       const text = query.text.replace(/\s+/g, ' ');
-      if (text.includes("SELECT status FROM conversations")) {
-        return [{ status: 'bot' }];
+      if (text.includes("FROM conversations")) {
+        return [{ status: 'bot', bot_activated_at: null }];
       }
       if (text.includes("SELECT created_at, model_used") && text.includes("ORDER BY created_at DESC, id DESC LIMIT 1")) {
         // last outbound was a bot message (e.g., greeting template)
@@ -7010,6 +7010,44 @@ test("P2.04: HumanTakeoverGuard son 30 dk giden temsilci mesajında veya son mes
   const guard2 = await HumanTakeoverGuard.isHumanTakeoverActive("tenant-123", "conv-123", mockDb2 as any);
   assert(guard2.active === true, "Should block if human replied recently within 30 minutes");
   assert(!!guard2.reason?.includes("human_agent_replied_recently"), "Reason should indicate recent human reply");
+
+  // 3. Bot reactivated after the human message (botActivatedAt > lastOutboundTime) -> allows bot
+  const lastHumanMsgTime = Date.now() - 10000;
+  const mockDb3 = {
+    executeSafe: async (query: any) => {
+      const text = query.text.replace(/\s+/g, ' ');
+      if (text.includes("FROM conversations")) {
+        // bot_activated_at is newer than last human message
+        return [{ status: 'bot', bot_activated_at: new Date(lastHumanMsgTime + 5000).toISOString() }];
+      }
+      if (text.includes("SELECT created_at, model_used")) {
+        return [{ created_at: new Date(lastHumanMsgTime).toISOString(), model_used: null, media_metadata: {} }];
+      }
+      return [];
+    }
+  };
+
+  const guard3 = await HumanTakeoverGuard.isHumanTakeoverActive("tenant-123", "conv-123", mockDb3 as any);
+  assert(guard3.active === false, "Should allow bot if bot was reactivated after the human message");
+
+  // 4. Human message sent AFTER bot reactivation -> blocks bot again
+  const mockDb4 = {
+    executeSafe: async (query: any) => {
+      const text = query.text.replace(/\s+/g, ' ');
+      if (text.includes("FROM conversations")) {
+        // bot_activated_at is older than the human message
+        return [{ status: 'bot', bot_activated_at: new Date(lastHumanMsgTime - 5000).toISOString() }];
+      }
+      if (text.includes("SELECT created_at, model_used")) {
+        return [{ created_at: new Date(lastHumanMsgTime).toISOString(), model_used: null, media_metadata: {} }];
+      }
+      return [];
+    }
+  };
+
+  const guard4 = await HumanTakeoverGuard.isHumanTakeoverActive("tenant-123", "conv-123", mockDb4 as any);
+  assert(guard4.active === true, "Should block if human message was sent after bot reactivation");
+  assert(guard4.reason === "last_message_by_human", "Reason should be last_message_by_human");
 });
 
 // ==========================================

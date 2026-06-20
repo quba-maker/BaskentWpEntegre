@@ -1661,14 +1661,26 @@ export async function toggleBotStatus(conversationIdOrPhone: string, isBotActive
         }
       }
       
-      // Update DB: status and autopilot_enabled
+      // Update DB: status, autopilot_enabled, metadata, and bot_activated_at
+      const metaRows = await ctx.db.executeSafe({
+        text: `SELECT metadata FROM conversations WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+        values: [conversationId, ctx.tenantId]
+      }) as any[];
+      const metadata = metaRows[0]?.metadata || {};
+
+      if (isBotActive) {
+        metadata.bot_activated_at = new Date().toISOString();
+        metadata.bot_activated_by = ctx.userId || 'system';
+      }
+
       await ctx.db.executeSafe({
         text: `UPDATE conversations 
                SET status = $1, 
                    autopilot_enabled = $2,
-                   bot_activated_at = CASE WHEN $2 = true THEN NOW() ELSE bot_activated_at END
-               WHERE id = $3 AND tenant_id = $4`,
-        values: [newStatus, isBotActive, conversationId, ctx.tenantId]
+                   bot_activated_at = CASE WHEN $2 = true THEN NOW() ELSE bot_activated_at END,
+                   metadata = $3
+               WHERE id = $4 AND tenant_id = $5`,
+        values: [newStatus, isBotActive, JSON.stringify(metadata), conversationId, ctx.tenantId]
       });
 
       // Write structural audit log
