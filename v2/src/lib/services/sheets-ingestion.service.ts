@@ -560,13 +560,15 @@ export async function ingestSheetRow(params: IngestRowParams): Promise<IngestRow
 
       const greetingQuery = greetingGroupId
         ? {
-            text: `SELECT cap.auto_greeting, cap.greeting_language FROM channel_ai_profiles cap WHERE cap.group_id = $1`,
-            values: [greetingGroupId]
+            text: `SELECT cap.auto_greeting, cap.greeting_language FROM channel_ai_profiles cap
+                   JOIN channel_groups cg ON cap.group_id = cg.id
+                   WHERE cap.group_id = $1 AND cg.tenant_id = $2::uuid`,
+            values: [greetingGroupId, tenantId]
           }
         : {
             text: `SELECT cap.auto_greeting, cap.greeting_language FROM channel_ai_profiles cap
                    JOIN channel_groups cg ON cap.group_id = cg.id
-                   WHERE cg.tenant_id = $1 AND cg.status = 'active'
+                   WHERE cg.tenant_id = $1::uuid AND cg.status = 'active'
                    ORDER BY cg.sort_order ASC LIMIT 1`,
             values: [tenantId]
           };

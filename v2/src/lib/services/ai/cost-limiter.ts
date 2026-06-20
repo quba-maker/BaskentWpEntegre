@@ -19,7 +19,7 @@ export class CostLimiter {
   ) {}
 
   private getRedisKey(tenantId: string) {
-    return `cost_limiter:tenant:${tenantId}:window`;
+    return `tenant:${tenantId}:cost_limiter:ai_requests:${this.options.windowSeconds}:requests`;
   }
 
   /**

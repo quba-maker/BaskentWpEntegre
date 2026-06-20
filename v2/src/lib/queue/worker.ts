@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { logger } from "@/lib/core/logger";
 import { withTenantDB } from "@/lib/core/tenant-db";
 import { ConversationService } from "@/lib/services/conversation.service";
@@ -48,11 +49,20 @@ export async function commitResponseProcessed(
     });
   }
   
-  // 2. Write to Redis processed marker
+  // 2. Write to Redis processed marker (Dual-Write)
   try {
     const { redis } = await import('@/lib/redis');
     if (redis) {
-      await redis.set(`${responseDedupeKey}:processed`, "1", { ex: 3600 });
+      const parts = responseDedupeKey.split(':');
+      const burstAnchorId = parts[parts.length - 1] || 'unknown';
+
+      const oldKey = `dedupe:response:${tenantId}:${channelId || 'unknown'}:${conversationId}:${burstAnchorId}`;
+      const newKey = `tenant:${tenantId}:dedupe:response:${channelId || 'unknown'}:${conversationId}:${burstAnchorId}`;
+
+      await Promise.all([
+        redis.set(`${newKey}:processed`, "1", { ex: 3600 }),
+        redis.set(`${oldKey}:processed`, "1", { ex: 3600 })
+      ]);
     }
   } catch (err) {
     console.error(`[commitResponseProcessed] Failed to set Redis processed marker`, err);
@@ -1238,17 +1248,30 @@ export class QueueWorkerEngine {
     // Pattern: same as debounce worker Redis lock (L3847-3891), but shorter TTL.
     // Non-fatal: if Redis is unavailable, lock is skipped (degraded mode).
     let immediateConvLockAcquired = false;
+    let immediateLockToken = "";
     const IMMEDIATE_CONV_LOCK_TTL = 8; // seconds
+
+    const cleanedDigits = phoneNumber.replace(/\D/g, '');
+    let normalizedPhone = cleanedDigits;
+    if (cleanedDigits.startsWith('0')) {
+      normalizedPhone = cleanedDigits.substring(1);
+    }
+    if (normalizedPhone.length === 10) {
+      normalizedPhone = '90' + normalizedPhone;
+    }
+    const phoneHash = crypto.createHash('sha256').update(`${tenantId}:${normalizedPhone}`).digest('hex').substring(0, 16);
+
     const immediateConvLockKey = conversationId
       ? `lock:conv:immediate:${tenantId}:${conversationId}`
-      : `lock:conv:immediate:${tenantId}:phone:${phoneNumber}`;
+      : `lock:conv:immediate:${tenantId}:phone:${phoneHash}`;
 
     const acquireImmediateLock = async (): Promise<boolean> => {
       if (!redis || !conversationId || direction !== 'in') {
         return true;
       }
       try {
-        const lockAcquired = await redis.set(immediateConvLockKey, '1', { nx: true, ex: IMMEDIATE_CONV_LOCK_TTL });
+        immediateLockToken = crypto.randomUUID();
+        const lockAcquired = await redis.set(immediateConvLockKey, immediateLockToken, { nx: true, ex: IMMEDIATE_CONV_LOCK_TTL });
         if (!lockAcquired) {
           this.log.info(`[IMMEDIATE_CONV_LOCK] Conversation already processing in immediate path — skipping to prevent double-response`, {
             tenantId, conversationId, traceId
@@ -3896,10 +3919,17 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
 
     // Telemetry updated immediately upon ingestion above
 
-    // P0.17: Release immediate conversation lock
+    // P0.17: Release immediate conversation lock (Token-Controlled)
     if (immediateConvLockAcquired && redis) {
       try {
-        await redis.del(immediateConvLockKey);
+        const releaseScript = `
+          if redis.call("get", KEYS[1]) == ARGV[1] then
+            return redis.call("del", KEYS[1])
+          else
+            return 0
+          end
+        `;
+        await redis.eval(releaseScript, [immediateConvLockKey], [immediateLockToken]);
         this.log.info(`[IMMEDIATE_CONV_LOCK] Released conversation lock`, { conversationId, traceId });
       } catch (relErr) {
         this.log.error(`[IMMEDIATE_CONV_LOCK] Failed to release conversation lock (non-fatal)`, relErr as Error, { conversationId, traceId });
@@ -4034,17 +4064,51 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
     let isRedisLockAcquired = false;
     let isRedisConfigured = !!redis;
     let lockToken = "";
-    const redisLockKey = `lock:conversation:processing:${conversationId}`;
+    const oldRedisLockKey = `lock:conversation:processing:${conversationId}`;
+    const redisLockKey = `lock:conversation:processing:${tenantId}:${conversationId}`;
+    const releaseScript = `
+      if redis.call("get", KEYS[1]) == ARGV[1] then
+        return redis.call("del", KEYS[1])
+      else
+        return 0
+      end
+    `;
 
     if (redis) {
       try {
-        lockToken = Math.random().toString(36).substring(2, 15);
-        const setSuccess = await redis.set(redisLockKey, lockToken, { nx: true, ex: 30 });
-        if (setSuccess) {
+        // 1. Dual-Read: Check if either lock is already active
+        const [oldLockExists, newLockExists] = await Promise.all([
+          redis.get(oldRedisLockKey),
+          redis.get(redisLockKey)
+        ]);
+
+        if (oldLockExists || newLockExists) {
+          this.log.info(`[DEBOUNCE_WORKER] Redis processing lock already held (old/new), exiting`, { conversationId });
+          return;
+        }
+
+        // 2. Dual-Write: Acquire both locks with NX
+        lockToken = crypto.randomUUID();
+        const [setOldSuccess, setNewSuccess] = await Promise.all([
+          redis.set(oldRedisLockKey, lockToken, { nx: true, ex: 30 }),
+          redis.set(redisLockKey, lockToken, { nx: true, ex: 30 })
+        ]);
+
+        if (setOldSuccess && setNewSuccess) {
           isRedisLockAcquired = true;
-          this.log.info(`[DEBOUNCE_WORKER] Acquired Redis processing lock`, { conversationId, key: redisLockKey });
+          this.log.info(`[DEBOUNCE_WORKER] Acquired dual Redis processing locks`, { conversationId, oldKey: oldRedisLockKey, newKey: redisLockKey });
         } else {
-          this.log.info(`[DEBOUNCE_WORKER] Redis processing lock already held, exiting`, { conversationId, key: redisLockKey });
+          // 3. Rollback (Token-Controlled): Safe release without overwriting other workers
+          const rollbackPromises: Promise<any>[] = [];
+          if (setOldSuccess) {
+            rollbackPromises.push(redis.eval(releaseScript, [oldRedisLockKey], [lockToken]));
+          }
+          if (setNewSuccess) {
+            rollbackPromises.push(redis.eval(releaseScript, [redisLockKey], [lockToken]));
+          }
+          await Promise.all(rollbackPromises);
+
+          this.log.info(`[DEBOUNCE_WORKER] Dual lock acquisition conflict, rolled back`, { conversationId });
           return;
         }
       } catch (redisErr) {
@@ -4647,8 +4711,11 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
               return 0
             end
           `;
-          await redis!.eval(releaseScript, [redisLockKey], [lockToken]);
-          this.log.info(`[DEBOUNCE_WORKER] Released Redis processing lock`, { conversationId, key: redisLockKey });
+          await Promise.all([
+            redis!.eval(releaseScript, [oldRedisLockKey], [lockToken]),
+            redis!.eval(releaseScript, [redisLockKey], [lockToken])
+          ]);
+          this.log.info(`[DEBOUNCE_WORKER] Released Redis processing locks (old and new)`, { conversationId });
         } catch (releaseErr) {
           this.log.warn(`[DEBOUNCE_WORKER] Failed to release Redis processing lock`, { error: String(releaseErr) });
         }

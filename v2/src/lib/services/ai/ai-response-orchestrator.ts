@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { TenantBrain } from '../../brain/tenant-brain';
 import { ChatMessage, AIOrchestrator } from './orchestrator';
 import { PromptBuilder } from './prompt-builder';
@@ -59,6 +60,14 @@ export interface OrchestratorResult {
   responseDedupeKey?: string; // Telemetry
   burstAnchorId?: string; // Telemetry
   dryRun?: boolean;
+}
+
+export function getOldDedupeKey(tenantId: string, channelId: string, conversationId: string, burstAnchorId: string): string {
+  return `dedupe:response:${tenantId}:${channelId || 'unknown'}:${conversationId}:${burstAnchorId}`;
+}
+
+export function getNewDedupeKey(tenantId: string, channelId: string, conversationId: string, burstAnchorId: string): string {
+  return `tenant:${tenantId}:dedupe:response:${channelId || 'unknown'}:${conversationId}:${burstAnchorId}`;
 }
 
 export class AIResponseOrchestrator {
@@ -161,9 +170,10 @@ export class AIResponseOrchestrator {
 
     let burstAnchorId = '';
     let responseDedupeKey = '';
+    let resolvedChannelId = channelId || '';
     let isDbLockAcquired = false;
     let isRedisLockAcquired = false;
-    const lockToken = Math.random().toString(36).substring(2) + Date.now().toString(36);
+    const lockToken = crypto.randomUUID();
 
     // ────────────────────────────────────────────────────────
     // 1. CONCURRENCY LOCKING & IDEMPOTENCY BOUNDARY
@@ -178,7 +188,7 @@ export class AIResponseOrchestrator {
 
       const db = withTenantDB(tenantId);
       let lastOutboundTime = new Date(0).toISOString();
-      let resolvedChannelId = channelId || '';
+      resolvedChannelId = channelId || '';
       let convMeta: any = {};
 
       if (!sandbox) {
@@ -381,7 +391,7 @@ export class AIResponseOrchestrator {
         }
       }
 
-      responseDedupeKey = `dedupe:response:${tenantId}:${resolvedChannelId || params.channel || 'unknown'}:${conversationId}:${burstAnchorId}`;
+      responseDedupeKey = getNewDedupeKey(tenantId, resolvedChannelId || params.channel || 'unknown', conversationId, burstAnchorId);
 
       // C. Idempotency Check: Check if response has already been processed for this burst
       if (sandbox) {
@@ -411,7 +421,11 @@ export class AIResponseOrchestrator {
         try {
           const { redis } = await import('@/lib/redis');
           if (redis) {
-            const isProcessed = await redis.get(`${responseDedupeKey}:processed`);
+            const oldDedupeKey = getOldDedupeKey(tenantId, resolvedChannelId || params.channel || 'unknown', conversationId, burstAnchorId);
+            let isProcessed = await redis.get(`${responseDedupeKey}:processed`);
+            if (!isProcessed) {
+              isProcessed = await redis.get(`${oldDedupeKey}:processed`);
+            }
             if (isProcessed) {
               console.log(JSON.stringify({
                 tag: "AI_RESPONSE_ORCHESTRATOR_DEDUPED",
@@ -499,16 +513,70 @@ export class AIResponseOrchestrator {
         try {
           const { redis } = await import('@/lib/redis');
           if (redis) {
-            const acquired = await redis.set(`${responseDedupeKey}:processing`, lockToken, { nx: true, ex: 120 });
-            if (acquired) {
-              lockAcquired = true;
-              isRedisLockAcquired = true;
-            } else {
+            const oldChannelId = resolvedChannelId || params.channel || 'unknown';
+            const oldLockKey = `dedupe:response:${tenantId}:${oldChannelId}:${conversationId}:${burstAnchorId}:processing`;
+            const newLockKey = `${responseDedupeKey}:processing`;
+
+            // 1. Dual-Read: Check if either lock is already active
+            const [oldLockExists, newLockExists] = await Promise.all([
+              redis.get(oldLockKey),
+              redis.get(newLockKey)
+            ]);
+
+            if (oldLockExists || newLockExists) {
               console.log(JSON.stringify({
                 tag: "AI_RESPONSE_ORCHESTRATOR_DEDUPED",
                 tenantId,
                 conversationId,
                 reason: "redis_processing_lock_active",
+                workerPath,
+                responseDedupeKey
+              }));
+              return {
+                text: '',
+                modelUsed: 'deduplicated',
+                latencyMs: 0,
+                bypassed: true,
+                isRetry: false,
+                qualityGateFailed: false,
+                deduplicated: true,
+                responseDedupeKey,
+                burstAnchorId
+              };
+            }
+
+            // 2. Dual-Write: Acquire both locks with NX
+            const [setOldSuccess, setNewSuccess] = await Promise.all([
+              redis.set(oldLockKey, lockToken, { nx: true, ex: 120 }),
+              redis.set(newLockKey, lockToken, { nx: true, ex: 120 })
+            ]);
+
+            if (setOldSuccess && setNewSuccess) {
+              lockAcquired = true;
+              isRedisLockAcquired = true;
+            } else {
+              // 3. Rollback (Token-Controlled): Safe release without overwriting other workers
+              const releaseScript = `
+                if redis.call("get", KEYS[1]) == ARGV[1] then
+                  return redis.call("del", KEYS[1])
+                else
+                  return 0
+                end
+              `;
+              const rollbackPromises: Promise<any>[] = [];
+              if (setOldSuccess) {
+                rollbackPromises.push(redis.eval(releaseScript, [oldLockKey], [lockToken]));
+              }
+              if (setNewSuccess) {
+                rollbackPromises.push(redis.eval(releaseScript, [newLockKey], [lockToken]));
+              }
+              await Promise.all(rollbackPromises);
+
+              console.log(JSON.stringify({
+                tag: "AI_RESPONSE_ORCHESTRATOR_DEDUPED",
+                tenantId,
+                conversationId,
+                reason: "redis_processing_lock_conflict",
                 workerPath,
                 responseDedupeKey
               }));
@@ -1353,6 +1421,10 @@ export class AIResponseOrchestrator {
             try {
               const { redis } = await import('@/lib/redis');
               if (redis) {
+                const oldChannelId = resolvedChannelId || params.channel || 'unknown';
+                const oldLockKey = `dedupe:response:${tenantId}:${oldChannelId}:${conversationId}:${burstAnchorId}:processing`;
+                const newLockKey = `${responseDedupeKey}:processing`;
+
                 const releaseScript = `
                   if redis.call("get", KEYS[1]) == ARGV[1] then
                     return redis.call("del", KEYS[1])
@@ -1360,7 +1432,10 @@ export class AIResponseOrchestrator {
                     return 0
                   end
                 `;
-                await redis.eval(releaseScript, [`${responseDedupeKey}:processing`], [lockToken]);
+                await Promise.all([
+                  redis.eval(releaseScript, [oldLockKey], [lockToken]),
+                  redis.eval(releaseScript, [newLockKey], [lockToken])
+                ]);
               }
             } catch (redisErr) {
               console.error('[AIResponseOrchestrator] Redis unlock failed:', redisErr);
