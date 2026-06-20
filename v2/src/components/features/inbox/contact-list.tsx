@@ -23,12 +23,14 @@ import {
   bulkUnarchiveConversations,
   getMessages,
   toggleBotStatus,
-  clearConversation
+  clearConversation,
+  deleteConversationAction
 } from "@/app/actions/inbox";
 import { useInboxStore, lastMutationTimes, registerUnreadMutation, clearUnreadMutation } from "@/store/inbox-store";
 import { useDiagnosticsStore } from "@/lib/realtime/diagnostics-store";
 import { getCountryFromPhone, normalizeCountryName, getCountryFlag } from "@/lib/utils/country";
 import NoReplyAutomationModal from "./no-reply-automation-modal";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 
 function getInitialsColor(name: string) {
   const colors = [
@@ -289,6 +291,7 @@ export function ContactRail() {
   const toggleSidebar = useInboxStore((state) => state.toggleSidebar);
   const setActiveModal = useInboxStore((state) => state.setActiveModal);
   const queryClient = useQueryClient();
+  const confirm = useConfirm();
   const hoverTimeoutRef = useRef<any>(null);
 
   const handleSetBotModeBulk = async (enabled: boolean) => {
@@ -1867,6 +1870,53 @@ export function ContactRail() {
           >
             <Trash2 className="w-3.5 h-3.5" />
             <span>Sohbeti temizle</span>
+          </button>
+
+          <button
+            onClick={async () => {
+              const convId = contextMenu.conversationId;
+              const patientName = contextMenu.patientName || 'Bu kişi';
+              setContextMenu(null);
+
+              const isConfirmed = await confirm({
+                title: "Sohbeti Sil",
+                message: "Bu sohbet inbox listesinden kaldırılacak. Mesaj geçmişi ve kayıtlar güvenlik amacıyla sistemde arşivli kalabilir. Aynı kişi tekrar yazarsa yeni sohbet olarak açılır. Devam edilsin mi?",
+                variant: "danger",
+                confirmLabel: "Sohbeti Sil",
+                cancelLabel: "Vazgeç"
+              });
+
+              if (!isConfirmed) return;
+
+              try {
+                const res = await deleteConversationAction(convId);
+                if (res.success) {
+                  queryClient.invalidateQueries({ queryKey: ['conversations'] });
+                  queryClient.invalidateQueries({ queryKey: ['messages', convId] });
+                  queryClient.removeQueries({ queryKey: ['messages', convId] });
+                  queryClient.invalidateQueries({ queryKey: ['crm-panel', convId] });
+                  
+                  const activeContactId = contacts.find((x: any) => x.conversation_id === convId)?.id;
+                  if (activePhone === convId || activePhone === activeContactId) {
+                    useInboxStore.setState({ activePhone: null, activeContact: null, mobileView: 'list' });
+                  }
+
+                  if (typeof window !== 'undefined') {
+                    window.dispatchEvent(new CustomEvent('inbox-unread-refresh'));
+                  }
+                } else {
+                  setErrorToast(res.error || 'Sohbet silinemedi.');
+                }
+              } catch (e) {
+                setErrorToast('Bir hata oluştu.');
+              }
+            }}
+            className="w-full px-3.5 py-2 text-xs font-semibold hover:bg-red-50 flex items-center gap-2 cursor-pointer transition-colors text-left text-red-600 border-t"
+            style={{ borderColor: "var(--q-border-default)" }}
+            title="Sohbeti tamamen sil"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>Sohbeti sil</span>
           </button>
         </div>
       )}

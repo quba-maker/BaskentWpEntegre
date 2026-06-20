@@ -74,7 +74,7 @@ export class MessageService {
               last_message_direction = CASE WHEN $3 = 'system' THEN last_message_direction ELSE $3 END,
               last_message_status = CASE WHEN $3 = 'system' THEN last_message_status ELSE $14 END,
               last_message_model = CASE WHEN $3 = 'system' THEN last_message_model ELSE $11 END
-            WHERE phone_number = $2 AND tenant_id = $1 AND NOT EXISTS (SELECT 1 FROM dup_check)
+            WHERE phone_number = $2 AND tenant_id = $1 AND NOT EXISTS (SELECT 1 FROM dup_check) AND (metadata IS NULL OR metadata->>'deleted_at' IS NULL)
             RETURNING id
           ), conv_insert AS (
             INSERT INTO conversations (
@@ -97,7 +97,7 @@ export class MessageService {
             SELECT COALESCE(
               (SELECT id FROM conv_update),
               (SELECT id FROM conv_insert),
-              (SELECT id FROM conversations WHERE phone_number = $2 AND tenant_id = $1 LIMIT 1)
+              (SELECT id FROM conversations WHERE phone_number = $2 AND tenant_id = $1 AND (metadata IS NULL OR metadata->>'deleted_at' IS NULL) LIMIT 1)
             ) AS conv_id
           ), msg_insert AS (
             INSERT INTO messages (

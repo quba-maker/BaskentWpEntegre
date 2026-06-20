@@ -240,6 +240,7 @@ export async function getConversations(
           AND rs.user_id = $7
           AND rs.conversation_id = c.id
         WHERE c.tenant_id = $1
+          AND (c.metadata IS NULL OR c.metadata->>'deleted_at' IS NULL)
           AND ($2::text IS NULL OR c.patient_name ILIKE $2 OR c.phone_number ILIKE $2)
           AND ($3::text IS NULL OR c.channel = $3)
           AND ($4::text IS NULL OR c.lead_stage = $4)
@@ -606,14 +607,22 @@ export async function getMessages(
       try {
         const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(conversationIdOrPhone);
         let resolvedConvId: string | null = null;
+        let isSoftDeleted = false;
 
         if (isUuid) {
-          resolvedConvId = conversationIdOrPhone;
+          const convRow = await ctx.db.executeSafe({
+            text: `SELECT id, metadata FROM conversations WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+            values: [conversationIdOrPhone, ctx.tenantId]
+          }) as any[];
+          if (convRow.length > 0) {
+            resolvedConvId = convRow[0].id;
+            isSoftDeleted = !!(convRow[0].metadata && convRow[0].metadata.deleted_at);
+          }
         } else {
           const cleanPhone = conversationIdOrPhone.replace(/\D/g, '');
           const convRow = await ctx.db.executeSafe({
             text: `
-              SELECT id 
+              SELECT id, metadata 
               FROM conversations 
               WHERE tenant_id = $1 
                 AND (
@@ -629,11 +638,12 @@ export async function getMessages(
 
           if (convRow.length > 0) {
             resolvedConvId = convRow[0].id;
+            isSoftDeleted = !!(convRow[0].metadata && convRow[0].metadata.deleted_at);
             console.warn(`[MESSAGE_QUERY_TRACE] [EMERGENCY_FALLBACK] Resolved UUID from phone number fallback for: "${conversationIdOrPhone}". Resolved UUID: "${resolvedConvId}"`);
           }
         }
 
-        if (!resolvedConvId) {
+        if (!resolvedConvId || isSoftDeleted) {
           return [];
         }
 
@@ -2404,12 +2414,16 @@ export async function getGlobalUnreadCount() {
         text: `
           SELECT COUNT(*)::int as total_unread
           FROM messages m
+          INNER JOIN conversations c
+            ON c.id = m.conversation_id
+            AND c.tenant_id = m.tenant_id
           LEFT JOIN conversation_read_states rs 
             ON rs.tenant_id = m.tenant_id 
             AND rs.user_id = $2 
             AND rs.conversation_id = m.conversation_id
           WHERE m.tenant_id = $1
             AND m.direction = 'in'
+            AND (c.metadata IS NULL OR c.metadata->>'deleted_at' IS NULL)
             AND (m.media_metadata IS NULL OR COALESCE(m.media_metadata->'native'->>'message_type', '') != 'reaction')
             AND m.created_at > COALESCE(rs.last_read_at, '1970-01-01'::timestamptz)
         `,
@@ -3711,7 +3725,7 @@ export async function getCrmPanelBundleAction(conversationId: string) {
       const convRows = await ctx.db.executeSafe({
         text: `
           SELECT c.id, c.phone_number, c.patient_name, c.customer_id, c.active_opportunity_id,
-                 c.department, c.country, c.notes, c.lead_stage as stage, c.tags, c.autopilot_enabled,
+                 c.department, c.country, c.notes, c.lead_stage as stage, c.tags, c.autopilot_enabled, c.metadata,
                  l.id as lead_id, l.form_name, l.raw_data as form_raw_data,
                  EXTRACT(EPOCH FROM l.created_at) * 1000 as form_date_ms,
                  active_opp.id as active_opp_id,
@@ -3771,6 +3785,9 @@ export async function getCrmPanelBundleAction(conversationId: string) {
       }
 
       const conv = convRows[0];
+      if (conv.metadata && conv.metadata.deleted_at) {
+        return { success: false, error: "Bu sohbet silinmiştir." };
+      }
       const activeOpportunityId = conv.active_opportunity_id;
       const leadId = conv.lead_id;
 
@@ -6880,6 +6897,113 @@ export async function toggleCustomerInboundAutopilotAction(
             disabled_by_user_id: ctx.userId,
             disabled_by_role: ctx.role,
             timestamp: new Date().toISOString()
+          })
+        ]
+      });
+
+      return { success: true };
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error };
+    const inner = res.data as any;
+    if (inner && 'success' in inner && !inner.success) return { success: false, error: inner.error };
+    return { success: true };
+  });
+}
+
+export async function deleteConversationAction(conversationId: string) {
+  if (!conversationId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(conversationId)) {
+    return { success: false, error: "Geçersiz konuşma ID." };
+  }
+
+  return withActionGuard(
+    {
+      actionName: 'deleteConversation',
+      roles: ['owner', 'admin', 'platform_admin', 'agent'],
+      conversationId
+    },
+    async (ctx) => {
+      // 1. Fetch conversation details to verify existence, tenant ownership, and get phone number for audit log
+      const convRows = await ctx.db.executeSafe({
+        text: `SELECT phone_number, metadata FROM conversations WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+        values: [conversationId, ctx.tenantId]
+      }) as any[];
+
+      if (convRows.length === 0) {
+        return { success: false, error: "Sohbet bulunamadı." };
+      }
+
+      const conv = convRows[0];
+      
+      // If already soft-deleted, prevent double deletion
+      if (conv.metadata && conv.metadata.deleted_at) {
+        return { success: false, error: "Bu sohbet zaten silinmiş." };
+      }
+
+      // 2. Prepare new metadata
+      const currentMetadata = conv.metadata || {};
+      const deletedAt = new Date().toISOString();
+      const updatedMetadata = {
+        ...currentMetadata,
+        deleted_at: deletedAt,
+        deleted_by: ctx.userId,
+        delete_reason: "user_deleted_chat",
+        delete_source: "inbox"
+      };
+
+      // Rename phone_number using a timestamp suffix to satisfy unique constraint while preserving relationship
+      const originalPhone = conv.phone_number;
+      const renamedPhone = `${originalPhone}_deleted_${Math.floor(Date.now() / 1000)}`;
+
+      // 3. Update the conversation in a single transaction (or execution)
+      await ctx.db.executeSafe({
+        text: `UPDATE conversations 
+               SET 
+                 metadata = $1::jsonb,
+                 phone_number = $2
+               WHERE id = $3 AND tenant_id = $4`,
+        values: [JSON.stringify(updatedMetadata), renamedPhone, conversationId, ctx.tenantId]
+      });
+
+      // 4. Broadcast metadata update via realtime publisher so that the conversation is removed from all agent dashboards
+      try {
+        const { RealtimePublisher } = await import("@/lib/realtime/publisher");
+        await RealtimePublisher.publishMetadataUpdated(ctx.tenantId, {
+          conversationId,
+          userId: ctx.userId,
+          updatedBy: ctx.userId
+        }).catch(() => {});
+      } catch (_) {}
+
+      // 5. Write PII-free audit log
+      const maskPhoneNumber = (phone: string): string => {
+        if (!phone) return "";
+        const cleaned = phone.replace(/\D/g, '');
+        if (cleaned.length < 7) {
+          return cleaned.replace(/./g, '*');
+        }
+        const prefix = cleaned.substring(0, 5);
+        const suffix = cleaned.substring(cleaned.length - 2);
+        const middle = '*'.repeat(cleaned.length - 7);
+        return `${prefix}${middle}${suffix}`;
+      };
+
+      const maskedPhone = maskPhoneNumber(originalPhone);
+
+      await ctx.db.executeSafe({
+        text: `INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
+               VALUES ($1, $2, $3, $4::jsonb)`,
+        values: [
+          ctx.tenantId,
+          'conversation_soft_deleted',
+          `Sohbet silindi (Soft delete). Konuşma ID: ${conversationId}`,
+          JSON.stringify({
+            conversation_id: conversationId,
+            tenant_id: ctx.tenantId,
+            masked_phone: maskedPhone,
+            deleted_by_user_id: ctx.userId,
+            deleted_by_role: ctx.role,
+            timestamp: deletedAt
           })
         ]
       });

@@ -7479,6 +7479,157 @@ test("P3.04: Inbound Process Question Intent Routing & Arbitration", async () =>
   assert(systemPrompt.includes("kısa bir ön görüşmeyle başladığını"), "Prompt should contain details about process flow");
 });
 
+test("P0.25: Soft-delete conversation action should flag metadata, rename phone, block access, and log audit", async () => {
+  const { deleteConversationAction, getConversations, getMessages, getCrmPanelBundleAction } = await import("../app/actions/inbox");
+
+  const tenantId = "caab9ea1-9591-45e4-bbc5-9c9b498982c8";
+  
+  const originalExecuteSafe = (global as any).mockDb.executeSafe;
+
+  let dbCalls: any[] = [];
+  let isConversationDeleted = false;
+
+  const testConvId = "550e8400-e29b-41d4-a716-446655440000";
+  const testPhone = "+905559990025";
+  const renamedPhone = `${testPhone}_deleted_1718911234`;
+
+  (global as any).mockDb.executeSafe = async (query: any, params?: any[]) => {
+    const text = typeof query === 'string' ? query : query?.text || '';
+    const vals = typeof query === 'string' ? params : query?.values || [];
+    const normalized = text.replace(/\s+/g, ' ');
+
+    dbCalls.push({ text, vals });
+
+    // Mock conversations query
+    if (normalized.includes("SELECT c.id as conversation_id") && normalized.includes("FROM conversations c")) {
+      if (isConversationDeleted) {
+        // Since getConversations filters out soft-deleted, return empty
+        return [];
+      }
+      return [{
+        conversation_id: testConvId,
+        id: testPhone,
+        name: "Soft Delete Test Patient",
+        channel: "whatsapp",
+        unread: 1,
+        is_archived: false,
+        is_pinned: false,
+        is_favorite: false
+      }];
+    }
+
+    // Mock single conversation lookup by UUID
+    if (normalized.includes("SELECT id, metadata FROM conversations WHERE id = $1 AND tenant_id = $2") || 
+        normalized.includes("SELECT phone_number, metadata FROM conversations WHERE id = $1 AND tenant_id = $2")) {
+      return [{
+        id: testConvId,
+        phone_number: isConversationDeleted ? renamedPhone : testPhone,
+        metadata: isConversationDeleted ? { deleted_at: "2026-06-21T00:00:00Z" } : {}
+      }];
+    }
+
+    // Mock update conversation query
+    if (normalized.includes("UPDATE conversations SET metadata = $1::jsonb, phone_number = $2 WHERE id = $3 AND tenant_id = $4")) {
+      isConversationDeleted = true;
+      return [{ id: testConvId }];
+    }
+
+    // Mock getCrmPanelBundleAction Query 1
+    if (normalized.includes("SELECT c.id, c.phone_number") && normalized.includes("FROM conversations c")) {
+      return [{
+        id: testConvId,
+        phone_number: isConversationDeleted ? renamedPhone : testPhone,
+        patient_name: "Soft Delete Test Patient",
+        customer_id: null,
+        active_opportunity_id: null,
+        metadata: isConversationDeleted ? { deleted_at: "2026-06-21T00:00:00Z" } : {}
+      }];
+    }
+
+    // Mock messages query
+    if (normalized.includes("SELECT id, content as text") && normalized.includes("FROM messages")) {
+      if (isConversationDeleted) {
+        return [];
+      }
+      return [{
+        id: "msg-123",
+        text: "Hello test message",
+        direction: "in",
+        status: "sent",
+        created_at_ms: 1718911234000
+      }];
+    }
+
+    // Fallback to original mockDb for things like credentials, roles, etc.
+    return originalExecuteSafe(query, params);
+  };
+
+  // Setup bypass environment variables
+  const oldBypass = process.env.TEST_SESSION_BYPASS;
+  const oldTenant = process.env.TEST_TENANT_ID;
+  const oldRole = process.env.TEST_USER_ROLE;
+  
+  process.env.TEST_SESSION_BYPASS = "true";
+  process.env.TEST_TENANT_ID = tenantId;
+  process.env.TEST_USER_ROLE = "admin";
+
+  try {
+    // 1. Verify it appears in getConversations before delete
+    const convsBefore = await getConversations(1, "Soft Delete Test Patient");
+    assert(Array.isArray(convsBefore), "getConversations before should return an array");
+    const foundBefore = convsBefore.find((c: any) => c.conversationId === testConvId);
+    assert(!!foundBefore, "Conversation should be found in list before delete");
+
+    // Verify getMessages succeeds
+    const messagesBefore = await getMessages(testConvId);
+    assert(messagesBefore.length > 0, "Should return messages before delete");
+
+    // Verify getCrmPanelBundleAction succeeds
+    const crmBefore = await getCrmPanelBundleAction(testConvId);
+    assert(crmBefore.success === true, "getCrmPanelBundleAction should succeed before delete");
+
+    // 2. Perform deleteConversationAction (soft delete)
+    const deleteRes = await deleteConversationAction(testConvId);
+    assert(deleteRes.success === true, "deleteConversationAction should succeed");
+
+    // 3. Verify it is excluded from getConversations
+    const convsAfter = await getConversations(1, "Soft Delete Test Patient");
+    assert(Array.isArray(convsAfter), "getConversations after should return an array");
+    const foundAfter = convsAfter.find((c: any) => c.conversationId === testConvId);
+    assert(!foundAfter, "Conversation should not be found in list after delete");
+
+    // 4. Verify getMessages returns empty array for soft-deleted UUID
+    const messagesAfter = await getMessages(testConvId);
+    assert(messagesAfter.length === 0, "Should return empty messages after delete");
+
+    // 5. Verify getCrmPanelBundleAction returns error
+    const crmAfter = await getCrmPanelBundleAction(testConvId);
+    assert(crmAfter.success === false, "getCrmPanelBundleAction should fail after delete");
+    assert(crmAfter.error?.includes("silinmiştir"), "Should return deleted message");
+
+    // 6. Verify update query was called with renamed phone & metadata
+    const updateCall = dbCalls.find(c => c.text.replace(/\s+/g, ' ').includes("UPDATE conversations SET metadata = $1::jsonb, phone_number = $2"));
+    assert(!!updateCall, "Update conversations query should be called");
+    assert(updateCall.vals[1].includes("_deleted_"), "renamed phone parameter must be passed");
+    
+    const parsedMeta = JSON.parse(updateCall.vals[0]);
+    assert(parsedMeta.deleted_at !== undefined, "deleted_at must be populated in metadata");
+    assert(parsedMeta.deleted_by !== undefined, "deleted_by must be populated");
+    assert(parsedMeta.delete_reason === "user_deleted_chat", "delete_reason should match");
+
+    // 7. Verify audit log query was called
+    const auditCall = dbCalls.find(c => c.text.replace(/\s+/g, ' ').includes("INSERT INTO ai_audit_logs"));
+    assert(!!auditCall, "Audit log query should be called");
+    assert(auditCall.vals[1] === "conversation_soft_deleted", "Audit action should be conversation_soft_deleted");
+
+  } finally {
+    (global as any).mockDb.executeSafe = originalExecuteSafe;
+    process.env.TEST_SESSION_BYPASS = oldBypass || "";
+    process.env.TEST_TENANT_ID = oldTenant || "";
+    process.env.TEST_USER_ROLE = oldRole || "";
+  }
+});
+
 // ==========================================
 // SONUÇLAR
 // ==========================================

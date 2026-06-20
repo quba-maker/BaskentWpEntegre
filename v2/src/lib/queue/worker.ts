@@ -664,7 +664,7 @@ export class QueueWorkerEngine {
 
       // Check conversation status — don't reply if human-handled or abusive
       const convStatus = await db.executeSafe({
-        text: `SELECT status, metadata FROM conversations WHERE phone_number = $1 AND tenant_id = $2 LIMIT 1`,
+        text: `SELECT status, metadata FROM conversations WHERE phone_number = $1 AND tenant_id = $2 AND (metadata IS NULL OR metadata->>'deleted_at' IS NULL) LIMIT 1`,
         values: [phoneNumber, tenantId]
       }) as any[];
 
@@ -727,7 +727,7 @@ export class QueueWorkerEngine {
 
       // Save to DB
       const conversationId = payload.conversationId || (await db.executeSafe({
-        text: `SELECT id FROM conversations WHERE phone_number = $1 AND tenant_id = $2 LIMIT 1`,
+        text: `SELECT id FROM conversations WHERE phone_number = $1 AND tenant_id = $2 AND (metadata IS NULL OR metadata->>'deleted_at' IS NULL) LIMIT 1`,
         values: [phoneNumber, tenantId]
       }) as any[])[0]?.id;
 
@@ -1329,7 +1329,7 @@ export class QueueWorkerEngine {
 
       // Get conversation details for audit log / realtime
       const convDetails = await db.executeSafe({
-        text: `SELECT id, channel_id FROM conversations WHERE phone_number = $1 AND tenant_id = $2 LIMIT 1`,
+        text: `SELECT id, channel_id FROM conversations WHERE phone_number = $1 AND tenant_id = $2 AND (metadata IS NULL OR metadata->>'deleted_at' IS NULL) LIMIT 1`,
         values: [phoneNumber, tenantId]
       }) as any[];
       const resolvedConvId = convDetails[0]?.id || conversationId;
@@ -1432,7 +1432,7 @@ export class QueueWorkerEngine {
 
           // Fetch current conversation metadata and status for idempotency
           const convCheck = await db.executeSafe({
-            text: `SELECT metadata, status, id FROM conversations WHERE phone_number = $1 AND tenant_id = $2 LIMIT 1`,
+            text: `SELECT metadata, status, id FROM conversations WHERE phone_number = $1 AND tenant_id = $2 AND (metadata IS NULL OR metadata->>'deleted_at' IS NULL) LIMIT 1`,
             values: [phoneNumber, tenantId]
           }) as any[];
           
@@ -1608,7 +1608,7 @@ export class QueueWorkerEngine {
 
     // 3. Conversation Load / State Check & Autopilot Gates
     const convQuery = await db.executeSafe({
-      text: `SELECT id, status, autopilot_enabled, channel_id, lead_stage FROM conversations WHERE phone_number = $1 AND tenant_id = $2 LIMIT 1`,
+      text: `SELECT id, status, autopilot_enabled, channel_id, lead_stage FROM conversations WHERE phone_number = $1 AND tenant_id = $2 AND (metadata IS NULL OR metadata->>'deleted_at' IS NULL) LIMIT 1`,
       values: [phoneNumber, tenantId]
     }) as any[];
     
@@ -1952,7 +1952,7 @@ export class QueueWorkerEngine {
             AND direction = 'out' 
             AND model_used IS NOT NULL
             AND created_at > COALESCE(
-              (SELECT bot_activated_at FROM conversations WHERE phone_number = $1 AND tenant_id = $2),
+              (SELECT bot_activated_at FROM conversations WHERE phone_number = $1 AND tenant_id = $2 AND (metadata IS NULL OR metadata->>'deleted_at' IS NULL)),
               '1970-01-01'::timestamptz
             )
         `,

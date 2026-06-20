@@ -188,7 +188,7 @@ export class FirstContactDecisionResolver {
       const suffix = phone.slice(-10);
 
       const convRow = await db.executeSafe({
-        text: `SELECT id, status, autopilot_enabled, channel FROM conversations WHERE tenant_id = $1 AND RIGHT(phone_number, 10) = $2 LIMIT 1`,
+        text: `SELECT id, status, autopilot_enabled, channel FROM conversations WHERE tenant_id = $1 AND RIGHT(phone_number, 10) = $2 AND (metadata IS NULL OR metadata->>'deleted_at' IS NULL) LIMIT 1`,
         values: [tenantId, suffix]
       }) as any[];
 
