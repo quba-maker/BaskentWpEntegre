@@ -28,6 +28,7 @@ export interface FinalPipelineContext {
   complaint?: string;
   location?: string;
   channel?: string;
+  replyLanguage?: string;
 }
 
 export class FinalPipelineEnforcer {
@@ -36,11 +37,20 @@ export class FinalPipelineEnforcer {
       return { text, normalizerApplied: false, formatterApplied: false, responseSource: ctx.responseSource };
     }
 
-    // 1. Turkish Final Quality Normalizer
-    const normResult = TurkishFinalQualityNormalizer.normalize(text, {
-      complaint: ctx.complaint,
-      location: ctx.location,
-    });
+    let cleanedText = text.trim();
+    const leadingPunctRegex = /^[\s,;.:!\-—–]+/;
+    if (leadingPunctRegex.test(cleanedText)) {
+      cleanedText = cleanedText.replace(leadingPunctRegex, '').trim();
+    }
+
+    // 1. Turkish Final Quality Normalizer (strictly gated to replyLanguage === 'tr')
+    let normResult = { text: cleanedText, wasModified: false, rewrites: [] as any[] };
+    if (ctx.replyLanguage === 'tr') {
+      normResult = TurkishFinalQualityNormalizer.normalize(cleanedText, {
+        complaint: ctx.complaint,
+        location: ctx.location,
+      });
+    }
     const afterNorm = normResult.text;
 
     // 2. WhatsApp Formatting Finalizer (only for whatsapp channel or unknown)

@@ -298,6 +298,7 @@ export class IdentityEngine {
     const complaint = getVal(['sikayet', 'şikayet', 'şikayetiniz_nedir', 'sikayetiniz_nedir']);
     const duration = getVal(['sure', 'süre', 'ne_kadardir_suruyor']);
     const randevu = getVal(['randevu_ayi', 'randevu_tarihi', 'ne_zaman_gelmek_istiyorsunuz']);
+    const aramaSaati = getVal(['ne_zaman_arayalim', 'arama_saati', 'call_time', 'callback_time', 'aranma_zamani', 'aranma_saati', 'preferred_call_time']);
     const phone = getVal(['telefon', 'phone']);
 
     if (name) facts.push(`Hastanın adı: ${name}.`);
@@ -306,6 +307,7 @@ export class IdentityEngine {
     if (complaint) facts.push(`Hastanın şikayeti: ${complaint}.`);
     if (duration) facts.push(`Hastanın şikayet süresi: ${duration}.`);
     if (randevu) facts.push(`Hastanın randevu/gelme planı: ${randevu}.`);
+    if (aramaSaati) facts.push(`Hastanın telefonla aranmak istediği saat/zaman dilimi: ${aramaSaati}.`);
     if (phone) facts.push(`Hastanın iletişim numarası: ${phone}.`);
 
     return facts;
@@ -661,12 +663,20 @@ export class IdentityEngine {
         const complaintVal = complaintKey ? parsed[normalizedKeyMap[complaintKey]] : (parsed.sikayet || null);
         if (complaintVal) safeData.sikayet = String(complaintVal).trim();
 
-        // Travel date / available time: match keys containing 'randevu', 'zaman', 'tarih', 'gelis', 'when'
+        // Travel date / available time: match keys containing 'randevu', 'zaman', 'tarih', 'gelis', 'when' (but exclude callback/call terms)
         const timeKey = Object.keys(normalizedKeyMap).find(nk =>
-          nk.includes('randevu') || nk.includes('zaman') || nk.includes('tarih') || nk.includes('gelis') || nk.includes('when')
+          (nk.includes('randevu') || nk.includes('zaman') || nk.includes('tarih') || nk.includes('gelis') || nk.includes('when')) &&
+          !nk.includes('arayalim') && !nk.includes('arama') && !nk.includes('call') && !nk.includes('callback')
         );
         const timeVal = timeKey ? parsed[normalizedKeyMap[timeKey]] : (parsed.randevu_ayi || parsed.randevu_tarihi || null);
         if (timeVal) safeData.randevu_ayi = String(timeVal).trim();
+
+        // Call time: match keys containing 'arayalim', 'arama', 'call', 'callback'
+        const callTimeKey = Object.keys(normalizedKeyMap).find(nk =>
+          nk.includes('arayalim') || nk.includes('arama') || nk.includes('call') || nk.includes('callback')
+        );
+        const callTimeVal = callTimeKey ? parsed[normalizedKeyMap[callTimeKey]] : null;
+        if (callTimeVal) safeData.arama_saati = String(callTimeVal).trim();
 
         // Recommended department (önerilen bölüm) from form
         const deptKey = Object.keys(normalizedKeyMap).find(nk =>

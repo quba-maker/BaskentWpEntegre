@@ -6249,7 +6249,7 @@ test("P0.16-M: 2. FinalPipelineEnforcer.checkLegacyBlock passes clean text", asy
 test("P0.16-M: 3. FinalPipelineEnforcer.enforce runs normalizer + formatter", async () => {
   const { FinalPipelineEnforcer } = await import("../lib/services/ai/final-pipeline-enforcer");
   const text = "Sürecininiz ve zamanızı belirtirseniz memnun oluruz.";
-  const result = FinalPipelineEnforcer.enforce(text, { responseSource: 'test', channel: 'whatsapp' });
+  const result = FinalPipelineEnforcer.enforce(text, { responseSource: 'test', channel: 'whatsapp', replyLanguage: 'tr' });
   assert(typeof result.text === "string", "Should return text");
   // sürecininiz → süreciniz
   assert(!result.text.includes("sürecininiz"), `Should correct sürecininiz, got: ${result.text}`);
@@ -6260,7 +6260,7 @@ test("P0.16-M: 4. FinalPipelineEnforcer.enforce emits FINAL_RESPONSE_SOURCE (no 
   const { FinalPipelineEnforcer } = await import("../lib/services/ai/final-pipeline-enforcer");
   let threw = false;
   try {
-    FinalPipelineEnforcer.enforce("Test cevabı.", { responseSource: 'llm', tenantId: 't1', conversationId: 'c1' });
+    FinalPipelineEnforcer.enforce("Test cevabı.", { responseSource: 'llm', tenantId: 't1', conversationId: 'c1', replyLanguage: 'tr' });
   } catch (e) {
     threw = true;
   }
@@ -6363,6 +6363,7 @@ test("P0.16-N: 1. FinalOutboundBodyAuditor.audit — numbered blocks get paragra
     conversationId: 'c1',
     workerPath: 'worker_immediate',
     channel: 'whatsapp',
+    replyLanguage: 'tr',
   });
   assert(result.bodyLength > 0, "Should produce non-empty body");
   assert(result.hasNumberedBlocks, "Should detect numbered blocks");
@@ -6376,6 +6377,7 @@ test("P0.16-N: 2. FinalOutboundBodyAuditor.audit — 'planızı' corrected in ou
   const result = FinalOutboundBodyAuditor.audit(raw, {
     tenantId: 't1',
     channel: 'whatsapp',
+    replyLanguage: 'tr',
   });
   assert(!result.text.includes("sürecininiz"), `sürecininiz should be corrected in outbound body, got: '${result.text}'`);
   assert(result.normalizerApplied, "Normalizer should be applied");
@@ -6387,6 +6389,7 @@ test("P0.16-N: 3. FinalOutboundBodyAuditor.audit — legacy close 'Rica ederiz, 
   const result = FinalOutboundBodyAuditor.audit(raw, {
     tenantId: 't1',
     channel: 'whatsapp',
+    replyLanguage: 'tr',
   });
   assert(result.containsLegacyClose, "Should detect legacy close pattern");
 });
@@ -6397,6 +6400,7 @@ test("P0.16-N: 4. FinalOutboundBodyAuditor.audit — 'bu ekrandan' legacy text k
   const result = FinalOutboundBodyAuditor.audit(raw, {
     tenantId: 't1',
     channel: 'whatsapp',
+    replyLanguage: 'tr',
   });
   assert(!result.text.includes("bu ekrandan net doğrulayamıyorum"), `Legacy text should be killed, got: '${result.text}'`);
 });
@@ -6411,6 +6415,7 @@ test("P0.16-N: 5. FinalOutboundBodyAuditor.audit — FINAL_OUTBOUND_BODY_AUDIT t
       workerPath: 'worker_immediate',
       responseSource: 'llm',
       channel: 'whatsapp',
+      replyLanguage: 'tr',
     });
   } catch (e) {
     threw = true;
@@ -6426,6 +6431,7 @@ test("P0.16-N: 6. FinalOutboundBodyAuditor.audit — known bad morphology detect
   const result = FinalOutboundBodyAuditor.audit(raw, {
     tenantId: 't1',
     channel: 'whatsapp',
+    replyLanguage: 'tr',
   });
   // containsKnownBadMorphology should be based on final body (after normalizer)
   // If normalizer fixed it → false. If still present → true.
@@ -6440,6 +6446,7 @@ test("P0.16-N: 7. FinalOutboundBodyAuditor.audit — clean text passes through u
   const result = FinalOutboundBodyAuditor.audit(clean, {
     tenantId: 't1',
     channel: 'whatsapp',
+    replyLanguage: 'tr',
   });
   assert(!result.containsLegacyClose, "Clean text should not be flagged as legacy close");
   assert(!result.containsKnownBadMorphology, "Clean text should not have bad morphology");

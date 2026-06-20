@@ -30,6 +30,7 @@ export interface FinalOutboundAuditCtx {
   workerPath?: string;
   responseSource?: string;
   channel?: string;
+  replyLanguage?: string;
 }
 
 export interface FinalOutboundAuditResult {
@@ -83,18 +84,27 @@ export class FinalOutboundBodyAuditor {
       };
     }
 
-    let result = text;
+    let cleanedText = text.trim();
+    const leadingPunctRegex = /^[\s,;.:!\-—–]+/;
+    let rewrote = false;
+    if (leadingPunctRegex.test(cleanedText)) {
+      cleanedText = cleanedText.replace(leadingPunctRegex, '').trim();
+      rewrote = true;
+    }
+
+    let result = cleanedText;
     let normalizerApplied = false;
     let formatterApplied = false;
-    let rewrote = false;
 
     try {
-      // Step 1: Turkish Final Quality Normalizer
-      const normResult = TurkishFinalQualityNormalizer.normalize(result);
-      if (normResult.wasModified) {
-        result = normResult.text;
-        normalizerApplied = true;
-        rewrote = true;
+      // Step 1: Turkish Final Quality Normalizer (strictly gated to replyLanguage === 'tr')
+      if (ctx.replyLanguage === 'tr') {
+        const normResult = TurkishFinalQualityNormalizer.normalize(result);
+        if (normResult.wasModified) {
+          result = normResult.text;
+          normalizerApplied = true;
+          rewrote = true;
+        }
       }
 
       // Step 2: WhatsApp Formatting Finalizer (paragraph/numbered block)

@@ -60,6 +60,7 @@ export interface OrchestratorResult {
   responseDedupeKey?: string; // Telemetry
   burstAnchorId?: string; // Telemetry
   dryRun: boolean;
+  replyLanguage?: string;
 }
 
 export function getOldDedupeKey(tenantId: string, channelId: string, conversationId: string, burstAnchorId: string): string {
@@ -118,8 +119,11 @@ export class AIResponseOrchestrator {
       }
     }
 
+    let replyLanguage = 'tr';
+
     const buildResult = (data: Omit<OrchestratorResult, 'dryRun'>): OrchestratorResult => {
       return {
+        replyLanguage,
         ...data,
         dryRun
       };
@@ -692,15 +696,6 @@ export class AIResponseOrchestrator {
         unifiedContext = {};
       }
 
-      // 2. Resolve Language Response Policy
-      try {
-        const { detectLanguage } = await import('@/lib/utils/language-detector');
-        const languageContext = detectLanguage(inboundText, (passedHistory || []) as any);
-        unifiedContext.languageContext = languageContext;
-      } catch (langErr) {
-        console.warn('[AIResponseOrchestrator] Language detection failed:', langErr);
-      }
-
       // 3. Debounce & Turn Aggregation
       const history = await ConversationTurnAggregator.aggregate(
         tenantId,
@@ -709,6 +704,30 @@ export class AIResponseOrchestrator {
         10
       );
       unifiedContext.history = history;
+      unifiedContext.currentMessageText = inboundText;
+      unifiedContext.currentMessageMediaType = mediaType;
+
+      // 3b. Resolve Language Response Policy with full history and tenant settings
+      try {
+        const { LanguageResponsePolicy } = await import('./language-response-policy');
+        const tenantDefaultLang = brain.context.config?.defaultLanguage || undefined;
+        const channelFixedLang = brain.context.config?.fixedLanguage || undefined;
+        const languagePolicy = LanguageResponsePolicy.resolve(
+          inboundText,
+          history.map(m => ({ role: m.role, content: m.content || '' })),
+          tenantDefaultLang,
+          channelFixedLang
+        );
+        replyLanguage = languagePolicy.replyLanguage;
+        unifiedContext.languageContext = {
+          detected_patient_language: languagePolicy.replyLanguageName,
+          reply_language: languagePolicy.replyLanguageName,
+          language_confidence: languagePolicy.languageConfidence,
+          language_detection_source: 'latest_patient_message'
+        };
+      } catch (langErr) {
+        console.warn('[AIResponseOrchestrator] Language policy resolution failed:', langErr);
+      }
       unifiedContext.currentMessageText = inboundText;
       unifiedContext.currentMessageMediaType = mediaType;
 
@@ -1295,11 +1314,6 @@ export class AIResponseOrchestrator {
       };
 
 
-      let replyLanguage = 'tr';
-      if (unifiedContext.languageContext) {
-        replyLanguage = unifiedContext.languageContext.reply_language || 'tr';
-      }
-
       // Run Turkish Quality Gate check on LLM response
       let qualityGateValid = true;
       let qualityGateReason = '';
@@ -1308,7 +1322,7 @@ export class AIResponseOrchestrator {
         const qualityGate = MultilingualQualityGate.validate({
           responseText: text,
           replyLanguage: replyLanguage === 'tr' ? 'Türkçe' : 'İngilizce',
-          qualityGateLocale: replyLanguage,
+          qualityGateLocale: replyLanguage === 'tr' ? 'tr' : 'generic',
           qgOptions
         });
         
@@ -1363,6 +1377,7 @@ export class AIResponseOrchestrator {
         complaint: selfParticipant?.complaint || undefined,
         location: locationLabel || undefined,
         channel: channelId ? 'whatsapp' : undefined,
+        replyLanguage,
       };
       const finalPipeResult = FinalPipelineEnforcer.enforce(text, finalPipeCtx);
       text = finalPipeResult.text;
@@ -1422,7 +1437,8 @@ export class AIResponseOrchestrator {
         inputTokens,
         outputTokens,
         responseDedupeKey: responseDedupeKey || undefined,
-        burstAnchorId: burstAnchorId || undefined
+        burstAnchorId: burstAnchorId || undefined,
+        replyLanguage,
       });
 
     } finally {

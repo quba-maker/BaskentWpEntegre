@@ -238,6 +238,12 @@ export class PromptBuilder {
           crmContext += `- ${fact}\n`;
         });
         crmContext += `>> KURAL (MÜKERRER SORU YASAĞI): Yukarıdaki bilgileri (ad, yaş, ülke, şikayet, şikayet süresi, randevu tarihi/dönemi vb.) hastaya kesinlikle TEKRAR SORMA!\n`;
+
+        const hasArrivalFact = unifiedContext.patient_known_facts.some((f: string) => f.includes('Gelmek istediği/uygun olduğu tarih aralığı'));
+        const hasCallFact = unifiedContext.patient_known_facts.some((f: string) => f.includes('Hastanın telefonla aranmak istediği uygun zaman dilimi'));
+        if (hasArrivalFact && hasCallFact) {
+          crmContext += `>> KURAL (GELİŞ VE ARANMA SAATİ AYRIMI): Hastanın Türkiye'ye geleceği tarih aralığı ile telefonla aranmak istediği saat dilimi tamamen farklı konulardır. Kesinlikle bunları birleştirme! Örneğin "sabah saatlerinde gelmeyi düşündüğünüzü" deme (gelmek istediği zaman ile aranmak istediği saati karıştırma).\n`;
+        }
       }
       
       // Opportunity summary and AI reason separation
@@ -916,7 +922,13 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/hasta danışmanı arasında pla
       replyLanguage: languagePolicy.replyLanguage,
       isRepeatDetected: repeatGuard.isRepeating
     });
-    finalPrompt += `\n\n=== 🗣️ DOĞAL TON DİREKTİFİ ===\n${humanToneDirective}\n==============================\n`;
+    let openingGuidelines = '';
+    if (languagePolicy.replyLanguage === 'tr') {
+      openingGuidelines = `\n>> UYARI (DOĞAL BAŞLANGIÇLAR): Cümlelerine sürekli robotik ve mekanik şekilde "Anladım.", "Anlıyorum." veya "... yazdığınızı anladım." gibi başlangıç kalıplarıyla başlama. Bunun yerine doğrudan, samimi ve doğal şekilde konuya gir. "Anladım" kelimesini global olarak yasaklamıyoruz fakat tekrarlı ve mekanik kullanımından kaçınmalısın.`;
+    } else {
+      openingGuidelines = `\n>> UYARI (NATURAL OPENINGS): Avoid beginning sentences with repetitive, robotic, or mechanical opening prefixes (e.g., "Understood.", "I understand." or "I understand that..."). Jump directly and naturally into addressing the user's message.`;
+    }
+    finalPrompt += `\n\n=== 🗣️ DOĞAL TON DİREKTİFİ ===\n${humanToneDirective}${openingGuidelines}\n==============================\n`;
 
     // P0.11: Dynamic Intent Guidance (State Arbitrated)
     let intentGuide = '';

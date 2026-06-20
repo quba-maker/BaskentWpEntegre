@@ -30,6 +30,7 @@ export type PatientKnownFacts = {
     note?: string;
   };
   formNote?: string;
+  preferredCallTime?: string;
 };
 
 
@@ -89,9 +90,17 @@ export class ConversationKnownFactsResolver {
             }
           }
           if (lowerFact.includes('tarih') || lowerFact.includes('zaman')) {
-            const match = fact.match(/(?:tarih aralığı|uygun olduğu tarih aralığı|tarih|zaman):\s*(.+)/i);
+            if (!lowerFact.includes('aranma') && !lowerFact.includes('arama') && !lowerFact.includes('telefon')) {
+              const match = fact.match(/(?:tarih aralığı|uygun olduğu tarih aralığı|tarih|zaman):\s*(.+)/i);
+              if (match && match[1]) {
+                facts.availableTime = match[1].replace(/[.]+$/, '').trim();
+              }
+            }
+          }
+          if (lowerFact.includes('aranma') || lowerFact.includes('arama') || lowerFact.includes('telefon')) {
+            const match = fact.match(/(?:aranma saati|aranma zamanı|arama saati|arama zamanı|aranmak istediği saat|telefonla aranmak istediği uygun zaman dilimi):\s*(.+)/i);
             if (match && match[1]) {
-              facts.availableTime = match[1].replace(/[.]+$/, '').trim();
+              facts.preferredCallTime = match[1].replace(/[.]+$/, '').trim();
             }
           }
         }
@@ -362,6 +371,17 @@ export class ConversationKnownFactsResolver {
       facts.availableTime = resolvedTime;
     }
 
+    // Extract preferred callback time from form data
+    if (!facts.preferredCallTime && latestForm?.data) {
+      const data = typeof latestForm.data === 'string' ? (() => {
+        try { return JSON.parse(latestForm.data); } catch { return {}; }
+      })() : latestForm.data;
+      const formCallTime = data?.ne_zaman_arayalim || data?.arama_saati || data?.call_time || data?.callback_time || data?.aranma_zamani || data?.aranma_saati || data?.preferred_call_time || '';
+      if (formCallTime) {
+        facts.preferredCallTime = String(formCallTime).trim();
+      }
+    }
+
     // 5. Scan History for Asked Flags
     if (history.length > 0) {
       for (const m of history) {
@@ -470,6 +490,9 @@ export class ConversationKnownFactsResolver {
 
     if (facts.availableTime) {
       list.push(`Gelmek istediği/uygun olduğu tarih aralığı: ${facts.availableTime}.`);
+    }
+    if (facts.preferredCallTime) {
+      list.push(`Hastanın telefonla aranmak istediği uygun zaman dilimi: ${facts.preferredCallTime}.`);
     }
     if (facts.formDepartment) {
       list.push(`Formdan gelen önerilen bölüm: ${facts.formDepartment}.`);

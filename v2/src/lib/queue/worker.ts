@@ -2590,6 +2590,7 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
         workerPath: 'worker_immediate',
         responseSource: orchestratorResult.modelUsed || 'unknown',
         channel: 'whatsapp',
+        replyLanguage: orchestratorResult.replyLanguage,
       });
       finalResponseText = auditResult.text;
     } else if (finalResponseText && channel !== 'whatsapp') {
@@ -4574,6 +4575,7 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
           workerPath: 'worker_delayed',
           responseSource: orchestratorResult.modelUsed || 'unknown',
           channel: 'whatsapp',
+          replyLanguage: orchestratorResult.replyLanguage,
         });
         finalResponseText = auditResult.text;
       } else if (finalResponseText && channel !== 'whatsapp') {
