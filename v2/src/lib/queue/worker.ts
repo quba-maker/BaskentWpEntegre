@@ -1733,6 +1733,39 @@ export class QueueWorkerEngine {
 
     if (!shouldProceedWithBot) {
       this.log.info(`[SKIP] Conversation is handled by human or autopilot/auto-reply is disabled`, { phoneNumber, traceId });
+      
+      let skipReason: string | null = null;
+      if (autopilotEnabled === true && !isGlobalAutopilotEnabled) {
+        skipReason = 'global_selected_autopilot_disabled';
+      } else if ((autopilotEnabled === null || autopilotEnabled === undefined) && currentStatus !== 'human') {
+        const isAutoReplyEnabled = await FeatureFlagService.isEnabled(tenantId, 'whatsapp_auto_reply', false);
+        if (!isAutoReplyEnabled) {
+          skipReason = 'whatsapp_auto_reply_feature_flag_disabled';
+        }
+      }
+
+      if (skipReason) {
+        try {
+          await db.executeSafe({
+            text: `
+              INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
+              VALUES ($1, $2, $3, $4::jsonb)
+            `,
+            values: [
+              tenantId,
+              'autopilot_skip',
+              `Autopilot skipped. Reason: ${skipReason}`,
+              JSON.stringify({
+                conversationId: conversationIdVal,
+                reason: skipReason
+              })
+            ]
+          });
+        } catch (auditErr) {
+          console.error("Failed to write skip audit log in immediate path:", auditErr);
+        }
+      }
+
       if (conversationIdVal) {
         // Fire-and-forget memory summarization in human/inactive mode
         (async () => {
@@ -2380,39 +2413,59 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
         return;
       }
 
-      if (orchestratorResult.modelUsed === 'contact_inbound_autopilot_manually_disabled' || !orchestratorResult.text || orchestratorResult.text.trim() === '') {
-        this.log.info(`[WORKER] Orchestrator returned no_response/skip status. Exiting send pipeline cleanly.`, { traceId });
+      const isSkipOrBypass = 
+        !orchestratorResult.text || 
+        orchestratorResult.text.trim() === '' || 
+        orchestratorResult.modelUsed === 'contact_inbound_autopilot_manually_disabled' ||
+        orchestratorResult.modelUsed === 'bypass_anomalous' ||
+        orchestratorResult.modelUsed === 'inbound_autopilot_disabled' ||
+        orchestratorResult.modelUsed === 'timezone_missing_not_eligible' ||
+        orchestratorResult.modelUsed === 'rollout_percentage_excluded' ||
+        orchestratorResult.modelUsed === 'department_not_allowed' ||
+        orchestratorResult.modelUsed === 'deduplicated' ||
+        orchestratorResult.modelUsed.startsWith('human_takeover_active');
+
+      if (isSkipOrBypass) {
+        this.log.info(`[WORKER] Orchestrator returned skip/bypass status (${orchestratorResult.modelUsed}). Exiting send pipeline cleanly.`, { traceId });
         return;
       }
 
       if (orchestratorResult.dryRun) {
         this.log.info(`[DRY_RUN] Inbound autopilot simulation active, skipping sending.`, { traceId });
-        await db.executeSafe({
-          text: `
-            INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
-            VALUES ($1, $2, $3, $4::jsonb)
-          `,
-          values: [
-            tenantId,
-            'INBOUND_AUTOPILOT_DRY_RUN',
-            'Inbound autopilot simulation (dry run) executed. No message sent.',
-            JSON.stringify({
-              conversationId: conversationIdVal || conversationId!,
-              modelUsed: orchestratorResult.modelUsed,
-              latencyMs: orchestratorResult.latencyMs,
-              textLength: orchestratorResult.text?.length || 0
-            })
-          ]
-        }).catch((err: any) => console.error("Failed to write dry-run audit log:", err));
+        try {
+          await db.executeSafe({
+            text: `
+              INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
+              VALUES ($1, $2, $3, $4::jsonb)
+            `,
+            values: [
+              tenantId,
+              'INBOUND_AUTOPILOT_DRY_RUN',
+              'Inbound autopilot simulation (dry run) executed. No message sent.',
+              JSON.stringify({
+                conversationId: conversationIdVal || conversationId!,
+                modelUsed: orchestratorResult.modelUsed,
+                latencyMs: orchestratorResult.latencyMs,
+                textLength: orchestratorResult.text?.length || 0
+              })
+            ]
+          });
+        } catch (auditErr) {
+          console.error("Failed to write dry-run audit log:", auditErr);
+        }
 
-        if (orchestratorResult.responseDedupeKey) {
-          await commitResponseProcessed(
-            db,
-            tenantId,
-            resolvedChannelId || metadata.channelId || '',
-            conversationIdVal || conversationId!,
-            orchestratorResult.responseDedupeKey
-          );
+        try {
+          if (orchestratorResult.responseDedupeKey) {
+            await commitResponseProcessed(
+              db,
+              tenantId,
+              resolvedChannelId || metadata.channelId || '',
+              conversationIdVal || conversationId!,
+              orchestratorResult.responseDedupeKey
+            );
+          }
+        } catch (commitErr) {
+          console.error("Failed to commit response processed in dry-run:", commitErr);
         }
         return;
       }
@@ -4023,6 +4076,32 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
     const isGlobalAutopilotEnabled = process.env.ENABLE_SELECTED_AUTOPILOT === 'true';
     if (!isGlobalAutopilotEnabled || !autopilotEnabled) {
       this.log.info(`[DEBOUNCE_WORKER] Autopilot is disabled, exit`, { traceId, autopilotEnabled });
+      
+      let skipReason = 'autopilot_disabled';
+      if (!isGlobalAutopilotEnabled) {
+        skipReason = 'global_selected_autopilot_disabled';
+      }
+
+      try {
+        await db.executeSafe({
+          text: `
+            INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
+            VALUES ($1, $2, $3, $4::jsonb)
+          `,
+          values: [
+            tenantId,
+            'autopilot_skip',
+            `Autopilot skipped in delayed path. Reason: ${skipReason}`,
+            JSON.stringify({
+              conversationId,
+              reason: skipReason
+            })
+          ]
+        });
+      } catch (auditErr) {
+        console.error("Failed to write skip audit log in delayed path:", auditErr);
+      }
+
       return;
     }
 
@@ -4383,39 +4462,59 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
         return;
       }
 
-      if (orchestratorResult.modelUsed === 'contact_inbound_autopilot_manually_disabled' || !orchestratorResult.text || orchestratorResult.text.trim() === '') {
-        this.log.info(`[DEBOUNCE_WORKER] Orchestrator returned no_response/skip status. Exiting send pipeline cleanly.`, { traceId });
+      const isSkipOrBypass = 
+        !orchestratorResult.text || 
+        orchestratorResult.text.trim() === '' || 
+        orchestratorResult.modelUsed === 'contact_inbound_autopilot_manually_disabled' ||
+        orchestratorResult.modelUsed === 'bypass_anomalous' ||
+        orchestratorResult.modelUsed === 'inbound_autopilot_disabled' ||
+        orchestratorResult.modelUsed === 'timezone_missing_not_eligible' ||
+        orchestratorResult.modelUsed === 'rollout_percentage_excluded' ||
+        orchestratorResult.modelUsed === 'department_not_allowed' ||
+        orchestratorResult.modelUsed === 'deduplicated' ||
+        orchestratorResult.modelUsed.startsWith('human_takeover_active');
+
+      if (isSkipOrBypass) {
+        this.log.info(`[DEBOUNCE_WORKER] Orchestrator returned skip/bypass status (${orchestratorResult.modelUsed}). Exiting send pipeline cleanly.`, { traceId });
         return;
       }
 
       if (orchestratorResult.dryRun) {
         this.log.info(`[DRY_RUN] Inbound autopilot simulation active, skipping sending.`, { traceId });
-        await db.executeSafe({
-          text: `
-            INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
-            VALUES ($1, $2, $3, $4::jsonb)
-          `,
-          values: [
-            tenantId,
-            'INBOUND_AUTOPILOT_DRY_RUN',
-            'Inbound autopilot simulation (dry run) executed. No message sent.',
-            JSON.stringify({
-              conversationId,
-              modelUsed: orchestratorResult.modelUsed,
-              latencyMs: orchestratorResult.latencyMs,
-              textLength: orchestratorResult.text?.length || 0
-            })
-          ]
-        }).catch((err: any) => console.error("Failed to write dry-run audit log:", err));
+        try {
+          await db.executeSafe({
+            text: `
+              INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
+              VALUES ($1, $2, $3, $4::jsonb)
+            `,
+            values: [
+              tenantId,
+              'INBOUND_AUTOPILOT_DRY_RUN',
+              'Inbound autopilot simulation (dry run) executed. No message sent.',
+              JSON.stringify({
+                conversationId,
+                modelUsed: orchestratorResult.modelUsed,
+                latencyMs: orchestratorResult.latencyMs,
+                textLength: orchestratorResult.text?.length || 0
+              })
+            ]
+          });
+        } catch (auditErr) {
+          console.error("Failed to write dry-run audit log:", auditErr);
+        }
 
-        if (orchestratorResult.responseDedupeKey) {
-          await commitResponseProcessed(
-            db,
-            tenantId,
-            resolvedChannelId || metadata.channelId || '',
-            conversationId,
-            orchestratorResult.responseDedupeKey
-          );
+        try {
+          if (orchestratorResult.responseDedupeKey) {
+            await commitResponseProcessed(
+              db,
+              tenantId,
+              resolvedChannelId || metadata.channelId || '',
+              conversationId,
+              orchestratorResult.responseDedupeKey
+            );
+          }
+        } catch (commitErr) {
+          console.error("Failed to commit response processed in dry-run:", commitErr);
         }
         return;
       }

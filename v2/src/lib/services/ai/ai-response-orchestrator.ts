@@ -59,7 +59,7 @@ export interface OrchestratorResult {
   deduplicated?: boolean; // Concurrency flag
   responseDedupeKey?: string; // Telemetry
   burstAnchorId?: string; // Telemetry
-  dryRun?: boolean;
+  dryRun: boolean;
 }
 
 export function getOldDedupeKey(tenantId: string, channelId: string, conversationId: string, burstAnchorId: string): string {
@@ -100,6 +100,30 @@ export class AIResponseOrchestrator {
     } = params;
 
     const startTime = Date.now();
+    const settingsDb = withTenantDB(tenantId);
+
+    let dryRun = true;
+    let cachedInboundSettings: any = null;
+
+    if (!sandbox) {
+      try {
+        const { getInboundAutopilotSettings } = await import("../forms/form-autopilot-eligibility-resolver");
+        cachedInboundSettings = await getInboundAutopilotSettings(tenantId, settingsDb);
+        if (cachedInboundSettings && typeof cachedInboundSettings.dryRun === 'boolean') {
+          dryRun = cachedInboundSettings.dryRun;
+        }
+      } catch (err) {
+        console.error("AIResponseOrchestrator: Failed to fetch inbound settings, defaulting dryRun to true:", err);
+        dryRun = true;
+      }
+    }
+
+    const buildResult = (data: Omit<OrchestratorResult, 'dryRun'>): OrchestratorResult => {
+      return {
+        ...data,
+        dryRun
+      };
+    };
 
     // P0.20-K: Anomalous Text Check (Skip punctuation-only or empty texts completely)
     const cleanInboundText = (inboundText || '').trim();
@@ -112,14 +136,14 @@ export class AIResponseOrchestrator {
         inboundText,
         reason: "only_punctuation_or_empty"
       }));
-      return {
+      return buildResult({
         text: '',
         modelUsed: 'bypass_anomalous',
         latencyMs: Date.now() - startTime,
         bypassed: true,
         isRetry: false,
         qualityGateFailed: false
-      };
+      });
     }
 
     // P3.01: Customer-level permanent override check (channel-scoped) in orchestrator
@@ -158,14 +182,14 @@ export class AIResponseOrchestrator {
         channelId,
         reason: "contact_inbound_autopilot_manually_disabled"
       }));
-      return {
+      return buildResult({
         text: '',
         modelUsed: 'contact_inbound_autopilot_manually_disabled',
         latencyMs: Date.now() - startTime,
         bypassed: true,
         isRetry: false,
         qualityGateFailed: false
-      };
+      });
     }
 
     let burstAnchorId = '';
@@ -227,7 +251,7 @@ export class AIResponseOrchestrator {
                 workerPath,
                 burstAnchorId
               }));
-              return {
+              return buildResult({
                 text: '',
                 modelUsed: 'deduplicated',
                 latencyMs: 0,
@@ -235,7 +259,7 @@ export class AIResponseOrchestrator {
                 isRetry: false,
                 qualityGateFailed: false,
                 deduplicated: true
-              };
+              });
             }
           }
         } else {
@@ -296,8 +320,7 @@ export class AIResponseOrchestrator {
 
       // Inbound Autopilot Settings & Eligibility checks (only when sandbox is false)
       if (!sandbox) {
-        const { getInboundAutopilotSettings } = await import("../forms/form-autopilot-eligibility-resolver");
-        const inboundSettings = await getInboundAutopilotSettings(tenantId, db);
+        const inboundSettings = cachedInboundSettings || { enabled: false, dryRun: true, rolloutPercentage: 0, departmentMode: 'selected', allowedDepartments: [] };
 
         if (!inboundSettings.enabled) {
           console.log(JSON.stringify({
@@ -306,14 +329,14 @@ export class AIResponseOrchestrator {
             conversationId,
             reason: "inbound_autopilot_disabled"
           }));
-          return {
+          return buildResult({
             text: '',
             modelUsed: 'inbound_autopilot_disabled',
             latencyMs: Date.now() - startTime,
             bypassed: true,
             isRetry: false,
             qualityGateFailed: false
-          };
+          });
         }
 
         // Timezone Check (if timezone settings/details fail or are missing, we fall back to not_eligible / dry-run)
@@ -335,14 +358,14 @@ export class AIResponseOrchestrator {
             conversationId,
             reason: "timezone_missing_not_eligible"
           }));
-          return {
+          return buildResult({
             text: '',
             modelUsed: 'timezone_missing_not_eligible',
             latencyMs: Date.now() - startTime,
             bypassed: true,
             isRetry: false,
             qualityGateFailed: false
-          };
+          });
         }
 
         // Human Takeover Check
@@ -355,14 +378,14 @@ export class AIResponseOrchestrator {
             conversationId,
             reason: `human_takeover_active_${takeoverCheck.reason}`
           }));
-          return {
+          return buildResult({
             text: '',
             modelUsed: `human_takeover_active_${takeoverCheck.reason}`,
             latencyMs: Date.now() - startTime,
             bypassed: true,
             isRetry: false,
             qualityGateFailed: false
-          };
+          });
         }
 
         // SHA-256 Rollout Percentage Check
@@ -379,14 +402,14 @@ export class AIResponseOrchestrator {
               bucket,
               rolloutPercentage: inboundSettings.rolloutPercentage
             }));
-            return {
+            return buildResult({
               text: '',
               modelUsed: 'rollout_percentage_excluded',
               latencyMs: Date.now() - startTime,
               bypassed: true,
               isRetry: false,
               qualityGateFailed: false
-            };
+            });
           }
         }
       }
@@ -404,7 +427,7 @@ export class AIResponseOrchestrator {
             workerPath,
             responseDedupeKey
           }));
-          return {
+          return buildResult({
             text: '',
             modelUsed: 'deduplicated',
             latencyMs: 0,
@@ -414,7 +437,7 @@ export class AIResponseOrchestrator {
             deduplicated: true,
             responseDedupeKey,
             burstAnchorId
-          };
+          });
         }
       } else {
         // C1. Check Redis processed marker
@@ -435,7 +458,7 @@ export class AIResponseOrchestrator {
                 workerPath,
                 responseDedupeKey
               }));
-              return {
+              return buildResult({
                 text: '',
                 modelUsed: 'deduplicated',
                 latencyMs: 0,
@@ -445,7 +468,7 @@ export class AIResponseOrchestrator {
                 deduplicated: true,
                 responseDedupeKey,
                 burstAnchorId
-              };
+              });
             }
           }
         } catch (redisErr) {
@@ -462,7 +485,7 @@ export class AIResponseOrchestrator {
             workerPath,
             responseDedupeKey
           }));
-          return {
+          return buildResult({
             text: '',
             modelUsed: 'deduplicated',
             latencyMs: 0,
@@ -472,7 +495,7 @@ export class AIResponseOrchestrator {
             deduplicated: true,
             responseDedupeKey,
             burstAnchorId
-          };
+          });
         }
       }
 
@@ -490,7 +513,7 @@ export class AIResponseOrchestrator {
             workerPath,
             responseDedupeKey
           }));
-          return {
+          return buildResult({
             text: '',
             modelUsed: 'deduplicated',
             latencyMs: 0,
@@ -500,7 +523,7 @@ export class AIResponseOrchestrator {
             deduplicated: true,
             responseDedupeKey,
             burstAnchorId
-          };
+          });
         } else {
           AIResponseOrchestrator.sandboxLockStore.set(responseDedupeKey, {
             token: lockToken,
@@ -532,7 +555,7 @@ export class AIResponseOrchestrator {
                 workerPath,
                 responseDedupeKey
               }));
-              return {
+              return buildResult({
                 text: '',
                 modelUsed: 'deduplicated',
                 latencyMs: 0,
@@ -542,7 +565,7 @@ export class AIResponseOrchestrator {
                 deduplicated: true,
                 responseDedupeKey,
                 burstAnchorId
-              };
+              });
             }
 
             // 2. Dual-Write: Acquire both locks with NX
@@ -580,7 +603,7 @@ export class AIResponseOrchestrator {
                 workerPath,
                 responseDedupeKey
               }));
-              return {
+              return buildResult({
                 text: '',
                 modelUsed: 'deduplicated',
                 latencyMs: 0,
@@ -590,7 +613,7 @@ export class AIResponseOrchestrator {
                 deduplicated: true,
                 responseDedupeKey,
                 burstAnchorId
-              };
+              });
             }
           }
         } catch (redisErr) {
@@ -635,7 +658,7 @@ export class AIResponseOrchestrator {
               workerPath,
               responseDedupeKey
             }));
-            return {
+            return buildResult({
               text: '',
               modelUsed: 'deduplicated',
               latencyMs: 0,
@@ -645,7 +668,7 @@ export class AIResponseOrchestrator {
               deduplicated: true,
               responseDedupeKey,
               burstAnchorId
-            };
+            });
           }
         }
       }
@@ -754,9 +777,7 @@ export class AIResponseOrchestrator {
 
       // Gradual branch department check (only when sandbox is false)
       if (!sandbox) {
-        const { getInboundAutopilotSettings } = await import("../forms/form-autopilot-eligibility-resolver");
-        const db = withTenantDB(tenantId);
-        const inboundSettings = await getInboundAutopilotSettings(tenantId, db);
+        const inboundSettings = cachedInboundSettings || { enabled: false, dryRun: true, rolloutPercentage: 0, departmentMode: 'selected', allowedDepartments: [] };
 
         if (inboundSettings.departmentMode === 'selected') {
           if (!resolvedActiveDepartment || !inboundSettings.allowedDepartments.includes(resolvedActiveDepartment)) {
@@ -768,14 +789,14 @@ export class AIResponseOrchestrator {
               resolvedActiveDepartment,
               allowedDepartments: inboundSettings.allowedDepartments
             }));
-            return {
+            return buildResult({
               text: '',
               modelUsed: 'department_not_allowed',
               latencyMs: Date.now() - startTime,
               bypassed: true,
               isRetry: false,
               qualityGateFailed: false
-            };
+            });
           }
         }
       }
@@ -1389,7 +1410,7 @@ export class AIResponseOrchestrator {
         }));
       }
 
-      return {
+      return buildResult({
         text,
         modelUsed,
         promptVersion: brain.prompts.metadata?.version,
@@ -1402,7 +1423,7 @@ export class AIResponseOrchestrator {
         outputTokens,
         responseDedupeKey: responseDedupeKey || undefined,
         burstAnchorId: burstAnchorId || undefined
-      };
+      });
 
     } finally {
       // ────────────────────────────────────────────────────────
