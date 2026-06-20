@@ -1,3 +1,7 @@
+function trLowerCase(str: string): string {
+  return str.toLocaleLowerCase('tr-TR').replace(/\u0307/g, "").toLowerCase();
+}
+
 /**
  * Validates whether a given string is a plausible patient name.
  * Programmatically filters out AI hallucinations, usernames, and nicknames.
@@ -12,7 +16,7 @@ export function checkNameValidity(name?: string | null): {
   }
   
   const cleaned = name.trim();
-  const lower = cleaned.toLowerCase();
+  const lower = trLowerCase(cleaned);
 
   // 1. Reject username/nickname formats containing underscores
   if (/_/.test(cleaned)) {
@@ -22,6 +26,12 @@ export function checkNameValidity(name?: string | null): {
   // 2. Reject strings containing numbers/digits
   if (/[0-9]/.test(cleaned)) {
     return { isValid: false, reason: "Sayı içeriyor", confidence: 'low' };
+  }
+
+  // Reject phone number formats (only numbers, spaces, +, -, parentheses)
+  const phonePattern = /^[\+\d\s\-\(\)]+$/;
+  if (phonePattern.test(cleaned)) {
+    return { isValid: false, reason: "Telefon numarası biçimi", confidence: 'low' };
   }
 
   // 3. Length checks
@@ -40,7 +50,8 @@ export function checkNameValidity(name?: string | null): {
     "hastane", "doktor", "hemsire", "tedavi", "klinik", "baskent", "evet", "hayır", 
     "tabiki", "tamam", "ok", "yes", "no", "hello", "hi", "annem", "babam", 
     "kardesim", "esim", "kendisi", "turkiye", "türkiye", "almanya", "ingiltere", 
-    "fransa", "belçika", "hollanda", "isimsiz",
+    "fransa", "belçika", "hollanda", "isimsiz", "none", "no name", "noname",
+    "boş", "bos", "yok", "bilinmeyen", "adsız", "adsiz", "ad soyad", "adı soyadı",
     "user", "test", "admin", "deneme", "guest", "unknown", "undefined", "null", "bot", "sistem",
     "ülke", "sehir", "şehir", "departman", "country", "city", "department", "telefon numarası",
     "kiminle", "kimle", "kim", "ne", "neden", "niye", "nasil", "nasıl", "hangi", "kac", "kaç", "nerede", "nerde", "suan", "şuan", "simdi", "şimdi"
@@ -52,7 +63,7 @@ export function checkNameValidity(name?: string | null): {
 
   const words = cleaned.split(/\s+/);
   for (const w of words) {
-    const wLower = w.toLowerCase();
+    const wLower = trLowerCase(w);
     if (blacklist.includes(wLower)) {
       return { isValid: false, reason: `Geçersiz kelime içeriyor: ${w}`, confidence: 'low' };
     }
@@ -136,105 +147,98 @@ export function resolvePatientNameDetailed(ctx?: PatientNameContext | null): Nam
 
   if (!ctx) return fallbackRes;
 
-  // 1. Manual locked name
-  if (ctx.metadata?.name_locked === true && ctx.manualPatientName) {
-    const val = checkNameValidity(ctx.manualPatientName);
+  // 1. Manually locked customer_profile.name / manual name
+  const isLocked = ctx.metadata?.name_locked === true || ctx.metadata?.name_locked === 'true';
+  if (isLocked) {
+    const candidates = [ctx.customerDisplayName, ctx.manualPatientName, ctx.patientConfirmedName];
+    for (const cand of candidates) {
+      if (cand) {
+        const val = checkNameValidity(cand);
+        if (val.isValid) {
+          return {
+            displayName: cand.trim(),
+            nameSource: 'manual',
+            nameConfidence: 'high',
+            nameConfirmationNeeded: false
+          };
+        }
+      }
+    }
+  }
+
+  // 2. customer_profile.name, if not empty/placeholder
+  if (ctx.customerDisplayName) {
+    const val = checkNameValidity(ctx.customerDisplayName);
     if (val.isValid) {
       return {
-        displayName: ctx.manualPatientName.trim(),
+        displayName: ctx.customerDisplayName.trim(),
         nameSource: 'manual',
-        nameConfidence: 'high',
-        nameConfirmationNeeded: false
-      };
-    }
-  }
-  // Even if not locked in metadata, if we have manual name, validate it
-  if (ctx.manualPatientName) {
-    const val = checkNameValidity(ctx.manualPatientName);
-    if (val.isValid) {
-      return {
-        displayName: ctx.manualPatientName.trim(),
-        nameSource: 'manual',
         nameConfidence: val.confidence,
         nameConfirmationNeeded: false
       };
     }
   }
 
-  // 2. Patient confirmed name
-  if (ctx.patientConfirmedName) {
-    const val = checkNameValidity(ctx.patientConfirmedName);
-    if (val.isValid) {
-      return {
-        displayName: ctx.patientConfirmedName.trim(),
-        nameSource: 'patient_confirmed',
-        nameConfidence: 'high',
-        nameConfirmationNeeded: false
-      };
-    }
-  }
-
-  // 3. WhatsApp Profile Name
-  if (ctx.whatsappProfileName) {
-    const val = checkNameValidity(ctx.whatsappProfileName);
-    if (val.isValid) {
-      return {
-        displayName: ctx.whatsappProfileName.trim(),
-        nameSource: 'whatsapp_profile',
-        nameConfidence: val.confidence,
-        nameConfirmationNeeded: val.confidence !== 'high' // need confirmation if medium/low (single word)
-      };
-    }
-  }
-
-  // 4. Form Full Name
-  if (ctx.formPatientName) {
-    const val = checkNameValidity(ctx.formPatientName);
-    if (val.isValid) {
-      return {
-        displayName: ctx.formPatientName.trim(),
-        nameSource: 'form',
-        nameConfidence: val.confidence,
-        nameConfirmationNeeded: val.confidence !== 'high'
-      };
-    }
-  }
-  if (ctx.formRawDataName) {
-    const val = checkNameValidity(ctx.formRawDataName);
-    if (val.isValid) {
-      return {
-        displayName: ctx.formRawDataName.trim(),
-        nameSource: 'form',
-        nameConfidence: val.confidence,
-        nameConfirmationNeeded: val.confidence !== 'high'
-      };
-    }
-  }
-
-  // 5. Patient Statement / AI Extracted / Database Mirror fields
-  const aiCandidates = [
-    { name: ctx.aiExtractedName, source: 'ai_extracted' as const },
-    { name: ctx.oppPatientName, source: 'ai_extracted' as const },
-    { name: ctx.oppRequesterName, source: 'ai_extracted' as const },
-    { name: ctx.convPatientName, source: 'ai_extracted' as const },
-    { name: ctx.customerDisplayName, source: 'ai_extracted' as const }
+  // 3. conversation.display_name / whatsapp_profile_name / metadata profile name
+  const step3Candidates = [
+    ctx.convPatientName,
+    ctx.whatsappProfileName,
+    ctx.metadata?.profile_name,
+    ctx.metadata?.whatsapp_profile_name
   ];
-
-  for (const candidate of aiCandidates) {
-    if (candidate.name) {
-      const val = checkNameValidity(candidate.name);
+  for (const cand of step3Candidates) {
+    if (cand) {
+      const val = checkNameValidity(cand);
       if (val.isValid) {
         return {
-          displayName: candidate.name.trim(),
-          nameSource: candidate.source,
+          displayName: cand.trim(),
+          nameSource: 'whatsapp_profile',
           nameConfidence: val.confidence,
-          nameConfirmationNeeded: true // AI extracted names always deserve confirmation
+          nameConfirmationNeeded: val.confidence !== 'high'
         };
       }
     }
   }
 
-  // 6. Fallback
+  // 4. latest lead/form name
+  const step4Candidates = [
+    ctx.formPatientName,
+    ctx.formRawDataName
+  ];
+  for (const cand of step4Candidates) {
+    if (cand) {
+      const val = checkNameValidity(cand);
+      if (val.isValid) {
+        return {
+          displayName: cand.trim(),
+          nameSource: 'form',
+          nameConfidence: val.confidence,
+          nameConfirmationNeeded: val.confidence !== 'high'
+        };
+      }
+    }
+  }
+
+  // AI extracted / Opportunity fields as fallback candidates
+  const aiCandidates = [
+    ctx.aiExtractedName,
+    ctx.oppPatientName,
+    ctx.oppRequesterName
+  ];
+  for (const cand of aiCandidates) {
+    if (cand) {
+      const val = checkNameValidity(cand);
+      if (val.isValid) {
+        return {
+          displayName: cand.trim(),
+          nameSource: 'ai_extracted',
+          nameConfidence: val.confidence,
+          nameConfirmationNeeded: true
+        };
+      }
+    }
+  }
+
   return fallbackRes;
 }
 

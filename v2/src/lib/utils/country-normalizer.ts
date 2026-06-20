@@ -134,6 +134,7 @@ export function normalizeCountry(
 }
 
 export interface PatientCountryContext {
+  customerProfileCountry?: string | null;
   manualCountry?: string | null;
   oppCountry?: string | null;
   convCountry?: string | null;
@@ -196,8 +197,7 @@ export function resolvePatientCountryDetailed(ctx?: PatientCountryContext | null
   
   // Scoped AI extraction fields
   const rawAiVal = ctx.aiExtractedCountry || ctx.oppCountry || ctx.convCountry;
-  // If manual lock is active, ignore AI/Form conflict detection on manual values
-  const isLocked = ctx.metadata?.country_locked === true;
+  const isLocked = ctx.metadata?.country_locked === true || ctx.metadata?.country_locked === 'true';
 
   if (rawAiVal && !isLocked) {
     const norm = normalizeCountry(rawAiVal, ctx.phoneFallback, 'ai_extracted').country;
@@ -210,23 +210,29 @@ export function resolvePatientCountryDetailed(ctx?: PatientCountryContext | null
   const hasConflict = uniqueCountries.length > 1;
 
   // 2. Priority Resolution
+
   // 2-A. Manual locked country
-  if (isLocked && ctx.manualCountry) {
-    const norm = normalizeCountry(ctx.manualCountry, ctx.phoneFallback).country;
-    if (norm) {
-      return {
-        country: norm,
-        displayCountry: norm,
-        countrySource: 'manual',
-        countryConfidence: 'high',
-        countryConfirmationNeeded: false
-      };
+  if (isLocked) {
+    const candidates = [ctx.customerProfileCountry, ctx.manualCountry, ctx.metadata?.country];
+    for (const cand of candidates) {
+      if (cand) {
+        const norm = normalizeCountry(cand, ctx.phoneFallback).country;
+        if (norm) {
+          return {
+            country: norm,
+            displayCountry: norm,
+            countrySource: 'manual',
+            countryConfidence: 'high',
+            countryConfirmationNeeded: false
+          };
+        }
+      }
     }
   }
-  
-  // If manualCountry is set even without explicit metadata lock, trust it
-  if (ctx.manualCountry) {
-    const norm = normalizeCountry(ctx.manualCountry, ctx.phoneFallback);
+
+  // 2-B. customerProfileCountry
+  if (ctx.customerProfileCountry) {
+    const norm = normalizeCountry(ctx.customerProfileCountry, ctx.phoneFallback);
     if (norm.country) {
       return {
         country: norm.country,
@@ -238,7 +244,28 @@ export function resolvePatientCountryDetailed(ctx?: PatientCountryContext | null
     }
   }
 
-  // 2-B. Form Country
+  // 2-C. manualCountry / metadata country
+  const step3Candidates = [
+    ctx.manualCountry,
+    ctx.metadata?.country,
+    ctx.patientStatementCountry
+  ];
+  for (const cand of step3Candidates) {
+    if (cand) {
+      const norm = normalizeCountry(cand, ctx.phoneFallback);
+      if (norm.country) {
+        return {
+          country: norm.country,
+          displayCountry: norm.countryConfirmationNeeded ? `${norm.country} (Teyit Gerekli)` : norm.country,
+          countrySource: 'manual',
+          countryConfidence: norm.countryConfidence,
+          countryConfirmationNeeded: norm.countryConfirmationNeeded
+        };
+      }
+    }
+  }
+
+  // 2-D. latest lead/form country
   if (ctx.formCountry) {
     const norm = normalizeCountry(ctx.formCountry, ctx.phoneFallback, 'form');
     if (norm.country) {
@@ -253,22 +280,7 @@ export function resolvePatientCountryDetailed(ctx?: PatientCountryContext | null
     }
   }
 
-  // 2-C. Patient Statement
-  if (ctx.patientStatementCountry) {
-    const norm = normalizeCountry(ctx.patientStatementCountry, ctx.phoneFallback, 'patient_statement');
-    if (norm.country) {
-      return {
-        country: norm.country,
-        displayCountry: norm.countryConfirmationNeeded ? `${norm.country} (Teyit Gerekli)` : norm.country,
-        countrySource: 'patient_statement',
-        countryConfidence: hasConflict ? 'low' : norm.countryConfidence,
-        countryConfirmationNeeded: norm.countryConfirmationNeeded || hasConflict,
-        conflict: hasConflict ? { sources: sourcesList } : undefined
-      };
-    }
-  }
-
-  // 2-D. Phone prefix
+  // 2-E. Phone prefix fallback
   if (ctx.phoneFallback) {
     const fromPhone = getCountryFromPhone(ctx.phoneFallback);
     if (fromPhone) {
@@ -283,7 +295,7 @@ export function resolvePatientCountryDetailed(ctx?: PatientCountryContext | null
     }
   }
 
-  // 2-E. AI Extracted (not locked)
+  // 2-F. AI Extracted / Opportunity fields
   if (rawAiVal) {
     const norm = normalizeCountry(rawAiVal, ctx.phoneFallback, 'ai_extracted');
     if (norm.country) {

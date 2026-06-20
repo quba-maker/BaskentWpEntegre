@@ -46,6 +46,70 @@ export class MessageService {
       hash |= 0;
     }
 
+    let defaultStatus = 'open';
+    let defaultAutopilotEnabled = false;
+
+    // Check all autopilot locks prior to inserting conversation
+    const chatbotGlobalDisabled = process.env.CHATBOT_GLOBAL_DISABLED === 'true';
+    if (!chatbotGlobalDisabled) {
+      try {
+        const { FeatureFlagService } = await import('@/lib/services/feature-flag.service');
+        const isAutoReplyEnabled = await FeatureFlagService.isEnabled(this.db.tenantId, 'whatsapp_auto_reply', false);
+        
+        if (isAutoReplyEnabled) {
+          const { getInboundAutopilotSettings } = await import("./forms/form-autopilot-eligibility-resolver");
+          const inboundSettings = await getInboundAutopilotSettings(this.db.tenantId, this.db);
+          
+          if (inboundSettings && inboundSettings.enabled) {
+            // Check permanent customer override
+            let hasCustomerOverride = false;
+            try {
+              const cleanPhone = payload.phoneNumber.replace(/\D/g, "");
+              const cprof = await this.db.executeSafe({
+                text: `SELECT metadata FROM customer_profiles WHERE tenant_id = $1 AND primary_phone = $2 LIMIT 1`,
+                values: [this.db.tenantId, cleanPhone]
+              }) as any[];
+              if (cprof.length > 0) {
+                const meta = typeof cprof[0].metadata === 'string' ? JSON.parse(cprof[0].metadata) : (cprof[0].metadata || {});
+                const overrides = meta.inbound_autopilot_overrides || {};
+                const channelOverride = overrides[payload.channelId || ''];
+                if (channelOverride?.disabled === true || channelOverride?.disabled === 'true') {
+                  hasCustomerOverride = true;
+                }
+              }
+            } catch (cprofErr) {
+              this.log.error("Failed to check customer override in saveMessageIdempotent", cprofErr as Error);
+            }
+
+            // Check circuit breaker (consecutive fallbacks)
+            let isCircuitBreakerTripped = false;
+            try {
+              const cleanPhone = payload.phoneNumber.replace(/\D/g, "");
+              const existingConv = await this.db.executeSafe({
+                text: `SELECT metadata FROM conversations WHERE phone_number = $1 AND tenant_id = $2 LIMIT 1`,
+                values: [cleanPhone, this.db.tenantId]
+              }) as any[];
+              if (existingConv.length > 0) {
+                const meta = typeof existingConv[0].metadata === 'string' ? JSON.parse(existingConv[0].metadata) : (existingConv[0].metadata || {});
+                if (meta.circuit_breaker_tripped_at || meta.human_review_required === true || meta.human_review_required === 'true') {
+                  isCircuitBreakerTripped = true;
+                }
+              }
+            } catch (convErr) {
+              this.log.error("Failed to check existing conversation for circuit breaker in saveMessageIdempotent", convErr as Error);
+            }
+
+            if (!hasCustomerOverride && !isCircuitBreakerTripped) {
+              defaultStatus = 'bot';
+              defaultAutopilotEnabled = true;
+            }
+          }
+        }
+      } catch (lockErr) {
+        this.log.error("Failed to check autopilot default locks in saveMessageIdempotent", lockErr as Error);
+      }
+    }
+
     try {
       // Single transaction boundary CTE for locking, deduplication, message insert, and conversation upsert
       const result = await this.db.executeSafe({
@@ -79,7 +143,8 @@ export class MessageService {
           ), conv_insert AS (
             INSERT INTO conversations (
               tenant_id, phone_number, message_count, channel, channel_id, last_channel,
-              last_message_content, last_message_direction, last_message_status, last_message_model, last_message_at, history_imported_at
+              last_message_content, last_message_direction, last_message_status, last_message_model, last_message_at, history_imported_at,
+              status, autopilot_enabled
             )
             SELECT $1, $2, 
                    CASE WHEN $3 = 'system' THEN 0 ELSE 1 END, 
@@ -90,7 +155,8 @@ export class MessageService {
                    CASE WHEN $3 = 'system' THEN NULL ELSE $14 END, 
                    CASE WHEN $3 = 'system' THEN NULL ELSE $11 END, 
                    COALESCE(TO_TIMESTAMP($19::double precision), NOW()), 
-                   CASE WHEN COALESCE($20::boolean, false) = true THEN NOW() ELSE NULL END
+                   CASE WHEN COALESCE($20::boolean, false) = true THEN NOW() ELSE NULL END,
+                   $22, $23
             WHERE NOT EXISTS (SELECT 1 FROM dup_check) AND NOT EXISTS (SELECT 1 FROM conv_update)
             RETURNING id
           ), resolved_conv AS (
@@ -99,6 +165,21 @@ export class MessageService {
               (SELECT id FROM conv_insert),
               (SELECT id FROM conversations WHERE phone_number = $2 AND tenant_id = $1 AND (metadata IS NULL OR metadata->>'deleted_at' IS NULL) LIMIT 1)
             ) AS conv_id
+          ), audit_insert AS (
+            INSERT INTO ai_audit_logs (tenant_id, conversation_id, action, reasoning_summary, result_summary)
+            SELECT $1, rc.conv_id, 'conversation_autopilot_initialized', 
+                   'Autopilot state initialized on new conversation insertion.',
+                   jsonb_build_object(
+                     'status', $22,
+                     'autopilot_enabled', $23,
+                     'channel', $5,
+                     'channel_id', $6
+                   )
+            FROM resolved_conv rc
+            WHERE rc.conv_id IS NOT NULL 
+              AND NOT EXISTS (SELECT 1 FROM dup_check)
+              AND EXISTS (SELECT 1 FROM conv_insert)
+            RETURNING id
           ), msg_insert AS (
             INSERT INTO messages (
               tenant_id, conversation_id, phone_number, direction, content, channel, 
@@ -138,7 +219,9 @@ export class MessageService {
           payload.mediaMetadata ? JSON.stringify(payload.mediaMetadata) : null,  // $18
           payload.providerTimestamp != null ? Number(payload.providerTimestamp) : null, // $19 — explicit number or null
           payload.isHistoryImport === true,  // $20 — explicit boolean
-          payload.correlationId || null      // $21
+          payload.correlationId || null,     // $21
+          defaultStatus,                     // $22
+          defaultAutopilotEnabled            // $23
         ]
       }) as any[];
 

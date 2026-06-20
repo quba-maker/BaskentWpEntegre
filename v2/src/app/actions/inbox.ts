@@ -127,6 +127,8 @@ export async function getConversations(
           c.lead_stage as stage,
           c.tags as tags,
           c.tags as conv_tags_raw,
+          c.metadata as conv_metadata,
+          cprof.metadata as customer_profile_metadata,
           c.channel,
           c.channel_id as channel_id,
           c.channel_id as "channelId",
@@ -360,6 +362,10 @@ export async function getConversations(
           }
         }
 
+        const convMeta = typeof r.conv_metadata === 'string' ? JSON.parse(r.conv_metadata) : (r.conv_metadata || {});
+        const cprofMeta = typeof r.customer_profile_metadata === 'string' ? JSON.parse(r.customer_profile_metadata) : (r.customer_profile_metadata || {});
+        const mergedMeta = { ...convMeta, ...cprofMeta };
+
         const detailedName = resolvePatientNameDetailed({
           oppRequesterName: r.opp_requester_name,
           oppPatientName: r.opp_patient_name,
@@ -369,15 +375,16 @@ export async function getConversations(
           customerDisplayName: r.customer_display_name,
           whatsappProfileName: r.wa_profile_name,
           phoneFallback: r.id,
-          metadata: {}
+          metadata: mergedMeta
         });
 
         // Resolve country and source via unified country resolver
         const detailedCountry = resolvePatientCountryDetailed({
           manualCountry: r.country,
+          customerProfileCountry: cprofMeta?.country || null,
           formCountry: null,
           phoneFallback: r.id || r.phone_number,
-          metadata: {}
+          metadata: mergedMeta
         });
 
         const resolvedDepartment = r.department || null;
@@ -1390,6 +1397,85 @@ export async function updateCrmData(phone: string, stage: string, department: st
           return { success: false, error: "Ülke net değil, lütfen listeden seçin." };
         }
         normCountry = val.country;
+      }
+
+      // Sync manual country changes to customer_profiles and conversations metadata with country_locked: true
+      if (country !== undefined && country !== null && country.trim()) {
+        const countryVal = normCountry || country;
+        try {
+          const profile = await ctx.db.executeSafe({
+            text: `SELECT id, metadata FROM customer_profiles WHERE primary_phone = $1 AND tenant_id = $2 LIMIT 1`,
+            values: [phone, ctx.tenantId]
+          }) as any[];
+          
+          if (profile.length > 0) {
+            const profileId = profile[0].id;
+            const currentMeta = typeof profile[0].metadata === 'string'
+              ? JSON.parse(profile[0].metadata)
+              : (profile[0].metadata || {});
+
+            const updatedMeta = {
+              ...currentMeta,
+              country: countryVal,
+              country_locked: true,
+              country_locked_by: ctx.userId,
+              country_locked_at: new Date().toISOString()
+            };
+
+            await ctx.db.executeSafe({
+              text: `UPDATE customer_profiles 
+                     SET metadata = $1::jsonb, updated_at = NOW() 
+                     WHERE id = $2 AND tenant_id = $3`,
+              values: [JSON.stringify(updatedMeta), profileId, ctx.tenantId]
+            });
+          } else {
+            const newMeta = {
+              country: countryVal,
+              country_locked: true,
+              country_locked_by: ctx.userId,
+              country_locked_at: new Date().toISOString()
+            };
+            await ctx.db.executeSafe({
+              text: `INSERT INTO customer_profiles (tenant_id, primary_phone, metadata, created_at, updated_at)
+                     VALUES ($1, $2, $3::jsonb, NOW(), NOW())
+                     ON CONFLICT (tenant_id, primary_phone) DO UPDATE
+                     SET metadata = customer_profiles.metadata || EXCLUDED.metadata, updated_at = NOW()`,
+              values: [ctx.tenantId, phone, JSON.stringify(newMeta)]
+            });
+          }
+        } catch (cprofErr) {
+          console.error("Failed to sync country to customer_profiles in updateCrmData:", cprofErr);
+        }
+
+        try {
+          const convs = await ctx.db.executeSafe({
+            text: `SELECT id, metadata FROM conversations WHERE phone_number = $1 AND tenant_id = $2`,
+            values: [phone, ctx.tenantId]
+          }) as any[];
+
+          for (const c of convs) {
+            const currentMeta = typeof c.metadata === 'string'
+              ? JSON.parse(c.metadata)
+              : (c.metadata || {});
+
+            const updatedMeta = {
+              ...currentMeta,
+              country: countryVal,
+              country_locked: true,
+              country_locked_by: ctx.userId,
+              country_locked_at: new Date().toISOString()
+            };
+
+            await ctx.db.executeSafe({
+              text: `UPDATE conversations 
+                     SET metadata = $1::jsonb, updated_at = NOW() 
+                     WHERE id = $2 AND tenant_id = $3`,
+              values: [JSON.stringify(updatedMeta), c.id, ctx.tenantId]
+            });
+          }
+        } catch (convMetaErr) {
+          console.error("Failed to sync country to conversations metadata in updateCrmData:", convMetaErr);
+        }
       }
 
       // Systemic Patient Name Sync (Propagates validated name updates to all opportunities, conversations, and leads)
@@ -3746,11 +3832,21 @@ export async function getCrmPanelBundleAction(conversationId: string) {
                  NULLIF(TRIM(CONCAT(cprof.first_name, ' ', cprof.last_name)), '') as customer_display_name,
                  cprof.metadata as customer_profile_metadata,
                  cprof.id as customer_profile_id,
-                 c.channel_id as channel_id
+                 c.channel_id as channel_id,
+                 wa.wa_profile_name
           FROM conversations c
           LEFT JOIN customer_profiles cprof
             ON cprof.id = c.customer_id
             AND cprof.tenant_id = c.tenant_id
+          LEFT JOIN LATERAL (
+            SELECT media_metadata->'native'->>'whatsapp_profile_name' as wa_profile_name
+            FROM messages
+            WHERE conversation_id = c.id 
+              AND tenant_id = c.tenant_id
+              AND media_metadata->'native'->>'whatsapp_profile_name' IS NOT NULL
+            ORDER BY created_at DESC
+            LIMIT 1
+          ) wa ON true
           LEFT JOIN LATERAL (
             SELECT id, form_name, raw_data, created_at, form_summary
             FROM (
@@ -4059,6 +4155,30 @@ export async function getCrmPanelBundleAction(conversationId: string) {
         typeof conv.form_raw_data === 'string' ? JSON.parse(conv.form_raw_data) : conv.form_raw_data
       ) : null;
 
+      const convMeta = typeof conv.metadata === 'string' ? JSON.parse(conv.metadata) : (conv.metadata || {});
+      const cprofMeta = typeof conv.customer_profile_metadata === 'string' ? JSON.parse(conv.customer_profile_metadata) : (conv.customer_profile_metadata || {});
+      const mergedMeta = { ...convMeta, ...cprofMeta };
+
+      const detailedName = resolvePatientNameDetailed({
+        oppRequesterName: conv.opp_requester_name,
+        oppPatientName: conv.opp_patient_name,
+        formRawDataName: null,
+        formPatientName: conv.form_patient_name,
+        convPatientName: conv.patient_name,
+        customerDisplayName: conv.customer_display_name,
+        whatsappProfileName: conv.wa_profile_name,
+        phoneFallback: conv.phone_number,
+        metadata: mergedMeta
+      });
+
+      const detailedCountry = resolvePatientCountryDetailed({
+        manualCountry: conv.country,
+        customerProfileCountry: cprofMeta?.country || null,
+        formCountry: formExtraction?.country || null,
+        phoneFallback: conv.phone_number,
+        metadata: mergedMeta
+      });
+
       const whatsapp24hWindow = await resolveWhatsApp24hWindow(conversationId, ctx.tenantId, ctx.db);
 
       const duration = performance.now() - startTime;
@@ -4066,10 +4186,10 @@ export async function getCrmPanelBundleAction(conversationId: string) {
 
       return {
         phoneNumber: conv.phone_number,
-        patientName: conv.patient_name || null,
+        patientName: detailedName.displayName,
         stage: conv.stage || null,
         department: conv.department || null,
-        country: conv.country || null,
+        country: detailedCountry.displayCountry,
         notes: conv.notes || null,
         botDirective: activeBotDirective ? activeBotDirective.text : null,
         activeBotDirective,

@@ -340,6 +340,40 @@ export function FormListTable({
                         };
                         const gateBadge = getGateBadge(gate);
 
+                        const mapExactGateReason = (gateState: string, reason: string): string => {
+                          const r = (reason || '').toLowerCase();
+                          const g = (gateState || '').toLowerCase();
+
+                          if (g === 'allowlist_missing' || r === 'tenant_not_allowlisted' || r === 'tenant_not_found') {
+                            return 'tenant_not_allowlisted';
+                          }
+                          if (g === 'live_locked' || r === 'phase_lock_outbound_blocked' || r === 'phase_lock_enabled') {
+                            return 'phase_lock_outbound_blocked';
+                          }
+                          if (g === 'global_disabled' || r === 'global_disabled') {
+                            return 'global_disabled';
+                          }
+                          if (g === 'dry_run' || r === 'dry_run' || r === 'dry_run_enabled') {
+                            return 'dry_run';
+                          }
+                          if (r === 'rollout_percentage_excluded' || r === 'rollout_excluded') {
+                            return 'rollout_excluded';
+                          }
+                          if (r === 'department_not_allowed') {
+                            return 'department_not_allowed';
+                          }
+                          if (r === 'meta_window_closed' || r === 'template_required' || r === 'template_not_available') {
+                            return 'outside_24h_window';
+                          }
+                          if (r === 'not_whatsapp_channel' || r === 'invalid_phone' || r === 'invalid_phone/channel') {
+                            return 'invalid_phone/channel';
+                          }
+                          
+                          if (g === 'feature_disabled') return 'global_disabled';
+                          
+                          return reason || gateState || 'unknown_reason';
+                        };
+
                         return (
                           <div className="flex flex-col items-start gap-1">
                             <div className="relative group inline-block">
@@ -369,11 +403,22 @@ export function FormListTable({
                             </div>
 
                             {gateBadge && (
-                              <span 
-                                className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold border uppercase tracking-wider text-slate-500 bg-slate-100 border-slate-200"
-                              >
-                                <span className="text-[9px]">{gateBadge.icon}</span> {gateBadge.label}
-                              </span>
+                              <div className="relative group inline-block mt-0.5">
+                                <span 
+                                  className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold border uppercase tracking-wider text-slate-500 bg-slate-100 border-slate-200 cursor-help transition-all hover:scale-[1.02]"
+                                >
+                                  <span className="text-[9px]">{gateBadge.icon}</span> {gateBadge.label}
+                                </span>
+                                {/* Exact Reason Tooltip */}
+                                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block w-48 p-2 bg-slate-950 text-white text-[9px] font-bold rounded shadow-lg z-50 text-center leading-normal border border-white/5">
+                                  <div className="text-gray-400 font-semibold mb-0.5">Kilit Gerekçesi</div>
+                                  <div className="text-orange-400 font-extrabold font-mono tracking-wider break-all">
+                                    {mapExactGateReason(gate, form.autopilotDecision.reason)}
+                                  </div>
+                                  {/* Tooltip Arrow */}
+                                  <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-950" />
+                                </div>
+                              </div>
                             )}
                           </div>
                         );

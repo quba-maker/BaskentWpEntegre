@@ -1,3 +1,13 @@
+import dotenv from "dotenv";
+dotenv.config({ path: ".env.test" });
+
+if (!process.env.DATABASE_URL || process.env.DATABASE_URL === '""') {
+  process.env.DATABASE_URL = "postgres://dummy:dummy@dummy.com/dummy";
+}
+if (!process.env.AUTH_SECRET || process.env.AUTH_SECRET === '""') {
+  process.env.AUTH_SECRET = "dummy-secret-key-123456";
+}
+
 // Force rate limiter to run in fallback in-memory mode during tests to avoid polluting/rate-limiting real Redis database
 process.env.UPSTASH_REDIS_REST_URL = "";
 process.env.UPSTASH_REDIS_REST_TOKEN = "";
@@ -7605,7 +7615,7 @@ test("P0.25: Soft-delete conversation action should flag metadata, rename phone,
     // 5. Verify getCrmPanelBundleAction returns error
     const crmAfter = await getCrmPanelBundleAction(testConvId);
     assert(crmAfter.success === false, "getCrmPanelBundleAction should fail after delete");
-    assert(crmAfter.error?.includes("silinmiştir"), "Should return deleted message");
+    assert(crmAfter.error?.includes("silinmiştir") === true, "Should return deleted message");
 
     // 6. Verify update query was called with renamed phone & metadata
     const updateCall = dbCalls.find(c => c.text.replace(/\s+/g, ' ').includes("UPDATE conversations SET metadata = $1::jsonb, phone_number = $2"));
@@ -7623,6 +7633,135 @@ test("P0.25: Soft-delete conversation action should flag metadata, rename phone,
     assert(auditCall.vals[1] === "conversation_soft_deleted", "Audit action should be conversation_soft_deleted");
 
   } finally {
+    (global as any).mockDb.executeSafe = originalExecuteSafe;
+    process.env.TEST_SESSION_BYPASS = oldBypass || "";
+    process.env.TEST_TENANT_ID = oldTenant || "";
+    process.env.TEST_USER_ROLE = oldRole || "";
+  }
+});
+
+test("P0.26: Identity Sync & Autopilot Defaults & Form Gate Tooltips", async () => {
+  const oldBypass = process.env.TEST_SESSION_BYPASS;
+  const oldTenant = process.env.TEST_TENANT_ID;
+  const oldRole = process.env.TEST_USER_ROLE;
+
+  process.env.TEST_SESSION_BYPASS = "true";
+  process.env.TEST_TENANT_ID = "caab9ea1-9591-45e4-bbc5-9c9b498982c8";
+  process.env.TEST_USER_ROLE = "admin";
+
+  const originalExecuteSafe = (global as any).mockDb.executeSafe;
+  const dbCalls: any[] = [];
+  let originalIsEnabled: any = null;
+  let ffService: any = null;
+
+  try {
+    const { checkNameValidity, resolvePatientNameDetailed } = await import("../lib/utils/patient-name-resolver");
+    const { resolvePatientCountryDetailed } = await import("../lib/utils/country-normalizer");
+    const { FeatureFlagService } = await import("../lib/services/feature-flag.service");
+    ffService = FeatureFlagService;
+    originalIsEnabled = FeatureFlagService.isEnabled;
+    FeatureFlagService.isEnabled = async (tenantId, flagKey, defaultValue) => {
+      if (flagKey === "whatsapp_auto_reply") return true;
+      return originalIsEnabled.call(FeatureFlagService, tenantId, flagKey, defaultValue);
+    };
+
+    // 1. Verify checkNameValidity placeholders
+    const invalidNames = ["İsimsiz", "Unknown", "null", "undefined", "+90 (554) 683 33 06", "123456", ""];
+    for (const name of invalidNames) {
+      assert(checkNameValidity(name).isValid === false, `Name "${name}" should be invalid`);
+    }
+    assert(checkNameValidity("Mustafa Ercan").isValid === true, "Mustafa Ercan should be valid");
+
+    // 2. Verify resolvePatientNameDetailed priority chain
+    const resolvedName1 = resolvePatientNameDetailed({
+      customerDisplayName: "Mustafa Ercan",
+      convPatientName: "WhatsApp Name",
+      phoneFallback: "+905546833306",
+      metadata: { name_locked: true }
+    });
+    assert(resolvedName1.displayName === "Mustafa Ercan", "Locked name should resolve to customer display name");
+
+    const resolvedName2 = resolvePatientNameDetailed({
+      customerDisplayName: "İsimsiz",
+      convPatientName: "Mustafa Ercan",
+      phoneFallback: "+905546833306",
+      metadata: {}
+    });
+    assert(resolvedName2.displayName === "Mustafa Ercan", "Should fallback from placeholder to convPatientName");
+
+    // 3. Verify resolvePatientCountryDetailed priority chain
+    const resolvedCountry1 = resolvePatientCountryDetailed({
+      customerProfileCountry: "Almanya",
+      manualCountry: "Türkiye",
+      phoneFallback: "+905546833306",
+      metadata: { country_locked: true }
+    });
+    assert(resolvedCountry1.country === "Almanya", "Locked country should resolve to customer profile country");
+
+    const resolvedCountry2 = resolvePatientCountryDetailed({
+      customerProfileCountry: null,
+      manualCountry: "Türkiye",
+      phoneFallback: "+905546833306",
+      metadata: {}
+    });
+    assert(resolvedCountry2.country === "Türkiye", "Should fallback to manualCountry");
+
+    // 4. Verify saveMessageIdempotent autopilot logic
+    // Mock db call queries to check features & settings
+    (global as any).mockDb.executeSafe = async (q: any) => {
+      const sqlText = typeof q === 'string' ? q : q.text;
+      dbCalls.push({ text: sqlText, vals: q.values || [] });
+
+      if (sqlText.includes("FROM feature_flags")) {
+        return [{ flag_key: "whatsapp_auto_reply", is_enabled: true }];
+      }
+      if (sqlText.includes("FROM ai_module_settings")) {
+        return [{ config: { enabled: true, dry_run: true } }];
+      }
+      if (sqlText.includes("FROM customer_profiles")) {
+        return []; // No overrides
+      }
+      if (sqlText.includes("FROM conversations")) {
+        return []; // No existing conversation
+      }
+      return [{ dup_id: null, msg_id: "msg-111", conv_id: "conv-222" }];
+    };
+
+    const msgService = new MessageService((global as any).mockDb);
+    const saveResult = await msgService.saveMessageIdempotent({
+      phoneNumber: "905546833306",
+      direction: "in",
+      content: "Hello",
+      channel: "whatsapp",
+      channelId: "channel-123"
+    });
+
+    assert(saveResult.success === true, "Should save message successfully");
+    
+    // Verify conversations insert query checks defaultStatus = 'bot' and defaultAutopilotEnabled = true
+    const insertCall = dbCalls.find(c => c.text.includes("INSERT INTO conversations"));
+    assert(!!insertCall, "Insert conversations query must be executed");
+    assert(insertCall.vals[21] === "bot", "Default status must be 'bot'");
+    assert(insertCall.vals[22] === true, "Default autopilot_enabled must be true");
+
+    // Verify PII-free audit logs query checks
+    const auditCall = dbCalls.find(c => c.text.includes("INSERT INTO ai_audit_logs"));
+    assert(!!auditCall, "Audit log query must be executed on insertion");
+    assert(auditCall.text.includes("'conversation_autopilot_initialized'"), "Audit action should be autopilot initialized");
+    assert(auditCall.text.includes("Autopilot state initialized on new conversation insertion"), "Audit reasoning should be correct");
+    assert(auditCall.vals[21] === "bot", "Result status should be bot");
+    assert(auditCall.vals[22] === true, "Result autopilot_enabled should be true");
+    
+    // Ensure the INSERT INTO ai_audit_logs block does not reference $2 (phoneNumber) or $4 (content)
+    const auditStartIndex = auditCall.text.indexOf("INSERT INTO ai_audit_logs");
+    const auditEndIndex = auditCall.text.indexOf("msg_insert AS", auditStartIndex);
+    const auditPart = auditCall.text.substring(auditStartIndex, auditEndIndex > 0 ? auditEndIndex : undefined);
+    assert(!/\$2\b/.test(auditPart) && !/\$4\b/.test(auditPart), "Audit log part must be PII-free (no phone or content references)");
+
+  } finally {
+    if (ffService && originalIsEnabled) {
+      ffService.isEnabled = originalIsEnabled;
+    }
     (global as any).mockDb.executeSafe = originalExecuteSafe;
     process.env.TEST_SESSION_BYPASS = oldBypass || "";
     process.env.TEST_TENANT_ID = oldTenant || "";
