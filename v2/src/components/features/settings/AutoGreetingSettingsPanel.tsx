@@ -370,7 +370,11 @@ export function AutoGreetingSettingsPanel({
                   type="checkbox"
                   disabled={!hasPermission}
                   checked={inboundConfig.enabled}
-                  onChange={(e) => setInboundConfig((prev: any) => ({ ...prev, enabled: e.target.checked }))}
+                  onChange={(e) => setInboundConfig((prev: any) => ({
+                    ...prev,
+                    enabled: e.target.checked,
+                    dry_run: e.target.checked ? false : true
+                  }))}
                   className="w-4.5 h-4.5 text-[#007AFF] rounded border-black/10 focus:ring-[#007AFF] cursor-pointer disabled:opacity-50"
                 />
               </div>
