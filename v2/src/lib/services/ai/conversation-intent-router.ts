@@ -31,6 +31,7 @@ export type ConversationIntent =
   | 'process_question'
   | 'callback_confirmation'
   | 'schedule_confirmation'
+  | 'arrival_date_answer'
   | 'generic_other';
 
 

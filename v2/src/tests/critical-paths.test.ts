@@ -7989,6 +7989,153 @@ test("P0.27 T3: workingHours Sunday-skipping shifts proposal date to Monday TRT"
 });
 
 // ==========================================
+// P0.28: Date Answer Slot Recovery & Fallback Tests
+// ==========================================
+
+test("P0.28 T1: DateAnswerResolver parse TR date expressions", () => {
+  const { DateAnswerResolver } = require("../lib/services/ai/date-answer-resolver");
+
+  const r1 = DateAnswerResolver.parse("10 temmuz olabilir");
+  assert(r1.raw === "10 Temmuz", `Expected 10 Temmuz, got: ${r1.raw}`);
+
+  const r2 = DateAnswerResolver.parse("15-20 temmuz arasi");
+  assert(r2.raw === "15-20 Temmuz", `Expected 15-20 Temmuz, got: ${r2.raw}`);
+
+  const r3 = DateAnswerResolver.parse("temmuz basi");
+  assert(r3.raw === "Temmuz başı", `Expected Temmuz başı, got: ${r3.raw}`);
+
+  const r4 = DateAnswerResolver.parse("ay sonu");
+  assert(r4.raw === "Ay sonu", `Expected Ay sonu, got: ${r4.raw}`);
+});
+
+test("P0.28 T2: arrival_date_answer bypasses LLM and saves PII-free date", async () => {
+  const { AIResponseOrchestrator } = require("../lib/services/ai/ai-response-orchestrator");
+  const dbCalls: any[] = [];
+  const db = {
+    executeSafe: async (query: any, params?: any[]) => {
+      const text = typeof query === 'string' ? query : query?.text || '';
+      const vals = typeof query === 'string' ? params : query?.values || [];
+      dbCalls.push({ text, vals });
+      
+      if (text.includes("SELECT metadata FROM conversations")) {
+        return [{ metadata: {} }];
+      }
+      if (text.includes("UPDATE conversations")) {
+        return [{ id: "conv-1" }];
+      }
+      if (text.includes("FROM ai_module_settings")) {
+        return [{
+          config: {
+            enabled: true,
+            dry_run: false,
+            rollout_percentage: 100,
+            department_mode: "all"
+          }
+        }];
+      }
+      if (text.includes("FROM tenants")) {
+        return [{ timezone: "Europe/Istanbul" }];
+      }
+      return [];
+    }
+  };
+
+  const brain = {
+    context: {
+      tenantId: "tenant-1",
+      config: { industry: "healthcare", timezone: "Europe/Istanbul" },
+      settings: {}
+    },
+    prompts: {
+      systemPrompt: "Mock system prompt",
+      metadata: { version: "1.0" }
+    }
+  };
+
+  const originalDb = (global as any).mockDb;
+  (global as any).mockDb = db;
+
+  try {
+    const res = await AIResponseOrchestrator.run({
+      tenantId: "tenant-1",
+      conversationId: "conv-1",
+      channel: "whatsapp",
+      channelId: "whatsapp",
+      inboundText: "10 temmuz olabilir",
+      phoneNumber: "905001234567",
+      sandbox: false,
+      brain,
+      history: [
+        { role: "user", content: "merhaba" },
+        { role: "assistant", content: "Gelmeyi düşündüğünüz bu önümüzdeki bir aylık dönem için tahmini bir tarih aralığı paylaşabilir misiniz?" },
+        { role: "user", content: "10 temmuz olabilir" }
+      ]
+    } as any);
+
+    assert(res.modelUsed === "bypass", `Expected bypass model, got: ${res.modelUsed}`);
+    assert(res.text.includes("geliş tarihi olarak 10 Temmuz dönemini not aldım"), `Expected date acknowledgement, got: ${res.text}`);
+    
+    const updateCall = dbCalls.find(c => c.text.includes("UPDATE conversations SET metadata = $1"));
+    assert(!!updateCall, "Should update conversation metadata");
+    
+    const updatedMeta = JSON.parse(updateCall.vals[0]);
+    assert(updatedMeta.arrival_date === "10 Temmuz", "Metadata should save parsed date");
+    assert(!updatedMeta.phone_number, "PII phone number must be deleted from metadata");
+  } finally {
+    (global as any).mockDb = originalDb;
+  }
+});
+
+test("P0.28 T3: MAX_TOKENS error with date question triggers date fallback", async () => {
+  const { AIResponseOrchestrator } = require("../lib/services/ai/ai-response-orchestrator");
+  const brain = {
+    context: {
+      tenantId: "tenant-1",
+      config: { industry: "healthcare", timezone: "Europe/Istanbul" },
+      settings: {}
+    },
+    prompts: {
+      systemPrompt: "Mock system prompt",
+      metadata: { version: "1.0" }
+    }
+  };
+
+  const { AIOrchestrator } = require("../lib/services/ai/orchestrator");
+  const originalGenerate = AIOrchestrator.prototype.generateResponse;
+  AIOrchestrator.prototype.generateResponse = async () => {
+    return {
+      text: "fallback text",
+      providerUsed: "fallback",
+      modelUsed: "fallback",
+      finishReason: "MAX_TOKENS"
+    };
+  };
+
+  try {
+    const res = await AIResponseOrchestrator.run({
+      tenantId: "tenant-1",
+      conversationId: "conv-1",
+      channel: "whatsapp",
+      channelId: "whatsapp",
+      inboundText: "10 temmuz olabilir mi?",
+      phoneNumber: "905001234567",
+      sandbox: true,
+      brain,
+      history: [
+        { role: "user", content: "merhaba" },
+        { role: "assistant", content: "Gelmeyi düşündüğünüz bu önümüzdeki bir aylık dönem için tahmini bir tarih aralığı paylaşabilir misiniz?" },
+        { role: "user", content: "10 temmuz olabilir mi?" }
+      ]
+    } as any);
+
+    assert(res.modelUsed === "fallback", `Expected fallback model, got: ${res.modelUsed}`);
+    assert(res.text.includes("geliş tarihi olarak 10 Temmuz dönemini not aldım"), `Expected date fallback text, got: ${res.text}`);
+  } finally {
+    AIOrchestrator.prototype.generateResponse = originalGenerate;
+  }
+});
+
+// ==========================================
 // SONUÇLAR
 // ==========================================
 

@@ -7,6 +7,7 @@ export type PendingSlot =
   | 'transfer_confirmation'
   | 'price_followup'
   | 'complaint_detail'
+  | 'arrival_date'
   | 'generic_none';
 
 export class PendingQuestionResolver {
@@ -157,6 +158,24 @@ export class PendingQuestionResolver {
       ];
       if (detailKeywords.some(kw => clean.includes(kw))) {
         return 'complaint_detail';
+      }
+
+      // 9. Arrival/Travel Date
+      const arrivalDateKeywords = [
+        'gelmeyi dusun',
+        'gelmeyi planla',
+        'ne zaman gel',
+        'ziyaret tarihi',
+        'tarih araligi',
+        'tahmini tarih',
+        'tahmini ziyaret',
+        'ne zaman gelebilir',
+        'ne zaman geleceksiniz',
+        'ne zaman gelmeyi dusun',
+        'ne zaman gelmeyi planliyor'
+      ];
+      if (arrivalDateKeywords.some(kw => clean.includes(kw)) || /gelmeyi.*dusun/i.test(clean) || /tahmini.*tarih/i.test(clean)) {
+        return 'arrival_date';
       }
     }
 

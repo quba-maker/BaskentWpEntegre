@@ -156,7 +156,8 @@ export class ContextAwareSafeFallbackResolver {
       rawPendingSlot,
       rawInterpretedIntent: interpretedIntent || '',
       routerIntent: rawIntent,
-      history
+      history,
+      unifiedContext
     });
 
     const detectedIntent = arbitration.effectiveIntent;

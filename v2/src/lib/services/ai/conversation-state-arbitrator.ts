@@ -27,6 +27,7 @@ export interface ArbitrationInput {
   routerIntent: ConversationIntent;
   history: { role: string; content: string }[];
   convMeta?: any;
+  unifiedContext?: any;
 }
 
 export interface ArbitrationResult {
@@ -58,7 +59,8 @@ const SLOT_OVERRIDE_INTENTS: ConversationIntent[] = [
   'continuation_short_reply',
   'process_question',
   'callback_confirmation',
-  'schedule_confirmation'
+  'schedule_confirmation',
+  'arrival_date_answer'
 ];
 
 export class ConversationStateArbitrator {
@@ -111,6 +113,50 @@ export class ConversationStateArbitrator {
     const lowerUser = (lastUserMessage || '').toLowerCase().trim();
     const affirmatives = ['evet', 'olur', 'tamam', 'ok', 'okay', 'yes', 'uygun', 'uygundur', 'evet uygun', 'kabul', 'tamamdir', 'hay hay', 'tabii', 'onaylıyorum', 'arayabilirsiniz', 'arayın', 'arayin', 'ararlar'];
     const isAffirmative = affirmatives.some(kw => lowerUser === kw || lowerUser.startsWith(kw + ' ') || lowerUser.endsWith(' ' + kw) || lowerUser.includes(' ' + kw + ' '));
+
+    // P0.28: arrival_date_answer check
+    const dateIndicators = [
+      'ocak', 'şubat', 'subat', 'mart', 'nisan', 'mayıs', 'mayis', 'haziran',
+      'temmuz', 'ağustos', 'agustos', 'eylül', 'eylul', 'ekim', 'kasım', 'kasim', 'aralık', 'aralik',
+      'ay sonu', 'ay başı', 'ay basi', 'ayın sonu', 'ayın başı'
+    ];
+    const isDateMessage = dateIndicators.some(kw => lowerUser.includes(kw)) || /\d{1,2}[./]\d{1,2}/.test(lowerUser);
+
+    const isArrivalDateQuestion = (text: string) => {
+      const lowerText = text.toLowerCase();
+      return [
+        'gelmeyi düşündüğünüz', 'gelmeyi dusundugunuz', 'ne zaman gelmeyi', 'ziyaret tarihi',
+        'tarih aralığı', 'tarih araligi', 'tahmini tarih', 'tahmini ziyaret', 'gelmeyi planlıyorsunuz',
+        'gelmeyi planliyorsunuz', 'geliş tarih'
+      ].some(kw => lowerText.includes(kw));
+    };
+
+    const formAwaitsArrivalDate = () => {
+      const uCtx = input.unifiedContext;
+      const hasForm = !!(uCtx?.latestForm || (Array.isArray(uCtx?.patient_known_facts) && uCtx.patient_known_facts.length > 0) || uCtx?.opportunity);
+      if (!hasForm) return false;
+
+      const hasFactsTravelDate = Array.isArray(uCtx?.patient_known_facts) && 
+        uCtx.patient_known_facts.some((f: string) => f.includes('Geliş zamanı') || f.includes('Ziyaret tarihi'));
+      
+      const hasOppTravelDate = !!(uCtx?.opportunity?.travel_date || uCtx?.opportunity?.metadata?.travel_date_raw);
+      const hasMetaTravelDate = !!(convMeta?.arrival_date || convMeta?.travel_date_raw);
+      
+      return !hasFactsTravelDate && !hasOppTravelDate && !hasMetaTravelDate;
+    };
+
+    const hasArrivalContext = 
+      isArrivalDateQuestion(lastAssistantMsg) ||
+      rawPendingSlot === 'arrival_date' ||
+      formAwaitsArrivalDate();
+
+    if (isDateMessage && hasArrivalContext) {
+      return {
+        effectivePendingSlot: 'arrival_date',
+        effectiveIntent: 'arrival_date_answer',
+        staleSlotSuppressed: false
+      };
+    }
 
     if (isSpecificCallTimeOffer(lastAssistantMsg) && isAffirmative) {
       return {
@@ -313,6 +359,15 @@ export class ConversationStateArbitrator {
 
       case 'price_followup': {
         return interpretedIntent === 'price_question' || lower.length > 10;
+      }
+
+      case 'arrival_date': {
+        const dateKeywords = [
+          'ocak', 'şubat', 'subat', 'mart', 'nisan', 'mayıs', 'mayis', 'haziran',
+          'temmuz', 'ağustos', 'agustos', 'eylül', 'eylul', 'ekim', 'kasım', 'kasim', 'aralık', 'aralik',
+          'ay sonu', 'ay başı', 'ay basi', 'ayın sonu', 'ayın başı'
+        ];
+        return dateKeywords.some(kw => lower.includes(kw)) || /\d{1,2}[./]\d{1,2}/.test(lower);
       }
 
       default:

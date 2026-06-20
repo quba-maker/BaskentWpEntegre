@@ -27,6 +27,8 @@ import { TurkishFinalQualityNormalizer } from './turkish-final-quality-normalize
 import { FinalPipelineEnforcer } from './final-pipeline-enforcer';
 // P0.19: Tenant-agnostic config resolver
 import { TenantConfigResolver } from './tenant-config-resolver';
+import { DateAnswerResolver } from './date-answer-resolver';
+import { ConversationKnownFactsResolver } from './conversation-known-facts-resolver';
 
 
 export interface OrchestratorParams {
@@ -876,7 +878,8 @@ export class AIResponseOrchestrator {
         rawInterpretedIntent: rawInterpretedIntent || 'none',
         routerIntent: routedIntent,
         history,
-        convMeta
+        convMeta,
+        unifiedContext
       });
 
       let effectiveIntent = arbitration.effectiveIntent;
@@ -1044,9 +1047,10 @@ export class AIResponseOrchestrator {
       const isOpenContinuationBypass = isOpenContinuationIntent && !cleanInbound.includes('?') && cleanInbound.length < 45;
 
       const isCallbackConfirmation = effectiveIntent === 'callback_confirmation' || effectiveIntent === 'schedule_confirmation';
+      const isArrivalDateAnswer = effectiveIntent === 'arrival_date_answer' && !inboundText.includes('?') && inboundText.length < 50;
 
       const isLlmBypassChallenge = isPromptChallenge || isBotAccusation || isAiAccusation || isAngryPromptChallenge || shouldBypassDoctorLookup || isRecallWithFacts || isNextStepRequest || isMultiIntentQuery || isDoctorNamesRequest
-        || isThanksButContinueBypass || isOpenContinuationBypass || isCannotTravelObjection || isDistanceObjection || isPoliteClose || isCallbackConfirmation; // P0.16-L
+        || isThanksButContinueBypass || isOpenContinuationBypass || isCannotTravelObjection || isDistanceObjection || isPoliteClose || isCallbackConfirmation || isArrivalDateAnswer; // P0.16-L
 
       let text = '';
       let bypassed = false;
@@ -1072,6 +1076,7 @@ export class AIResponseOrchestrator {
         if (isDistanceObjection)      intentList.push('distance_objection');
         if (isPoliteClose)            intentList.push('polite_close');
         if (isCallbackConfirmation)   intentList.push('callback_confirmation');
+        if (isArrivalDateAnswer)      intentList.push('arrival_date_answer');
 
         if (intentList.length > 0) {
           console.log(JSON.stringify({
@@ -1414,6 +1419,76 @@ export class AIResponseOrchestrator {
           }));
         }
 
+        // P0.28: arrival_date_answer bypass
+        if (!fallbackResult && isArrivalDateAnswer) {
+          const parsed = DateAnswerResolver.parse(inboundText, brain.context.config?.timezone || 'Europe/Istanbul');
+          const normalizedDate = parsed.raw || inboundText.trim();
+
+          const facts = ConversationKnownFactsResolver.resolve({
+            history: history.filter((m: any) => m.content != null).map((m: any) => ({ role: m.role, content: m.content as string })),
+            opportunity: unifiedContext?.opportunity,
+            profile: unifiedContext?.profile,
+            latestForm: unifiedContext?.latestForm,
+            conversation: unifiedContext?.conversation
+          });
+          const formTopic = (facts.formTopic || '').toLowerCase();
+          const complaint = (facts.complaint || '').toLowerCase();
+          const formNote = (facts.formNote || '').toLowerCase();
+          const isCheckup = formTopic.includes('check-up') || formTopic.includes('checkup') ||
+                            complaint.includes('check-up') || complaint.includes('checkup') ||
+                            formNote.includes('check-up') || formNote.includes('checkup');
+          
+          const subject = isCheckup ? 'check-up' : 'tedavi/muayene';
+
+          const callTime = facts.preferredCallTime || '';
+          let callTimeNote = '';
+          if (callTime) {
+            callTimeNote = ` ${callTime} aranmak istediğinizi de görüyorum;`;
+          }
+
+          const responseText = `Teşekkür ederim, geliş tarihi olarak ${normalizedDate} dönemini not aldım. Size uygun ${subject} planlaması için hasta danışmanımızın kısa bir bilgilendirme görüşmesi yapması faydalı olur.${callTimeNote} Türkiye saatiyle size uygun bir arama saati planlayabiliriz.`;
+
+          if (!sandbox) {
+            try {
+              const convCheck = await db.executeSafe({
+                text: `SELECT metadata FROM conversations WHERE id = $1 LIMIT 1`,
+                values: [conversationId]
+              }) as any[];
+              const existingMeta = convCheck[0]?.metadata || {};
+              const updatedMeta = {
+                ...existingMeta,
+                arrival_date: normalizedDate
+              };
+              delete updatedMeta.phone_number;
+              delete updatedMeta.patient_name;
+              delete updatedMeta.raw_message;
+
+              await db.executeSafe({
+                text: `UPDATE conversations SET metadata = $1, updated_at = NOW() WHERE id = $2`,
+                values: [JSON.stringify(updatedMeta), conversationId]
+              });
+
+              if (unifiedContext?.opportunity?.id) {
+                await db.executeSafe({
+                  text: `UPDATE opportunities SET travel_date = $1, updated_at = NOW() WHERE id = $2`,
+                  values: [normalizedDate, unifiedContext.opportunity.id]
+                });
+              }
+            } catch (dbErr) {
+              console.error('[AIResponseOrchestrator] Failed to update arrival date in DB:', dbErr);
+            }
+          }
+
+          fallbackResult = { text: responseText, finalPath: 'arrival_date_bypass' };
+          console.log(JSON.stringify({
+            tag: 'LIVE_TEST_PARITY_PATH_SELECTED',
+            path: 'arrival_date_bypass',
+            tenantId,
+            conversationId: conversationId || 'unknown',
+            workerPath
+          }));
+        }
+
         // ── Default: other bypass intents via ContextAwareSafeFallbackResolver ─
         if (!fallbackResult) {
           fallbackResult = ContextAwareSafeFallbackResolver.resolve({
@@ -1511,6 +1586,109 @@ export class AIResponseOrchestrator {
             reason: response.finishReason || "llm_generation_error",
             workerPath
           }));
+
+          // P0.28: Context-aware fallback resolution
+          const assistantHistory = history.filter((m: any) => m.role === 'assistant');
+          const lastAssistantMsg = assistantHistory.length > 0 ? (assistantHistory[assistantHistory.length - 1].content || '') : '';
+          const lowerUser = inboundText.toLowerCase().trim();
+
+          const isArrivalDateQuestion = (text: string) => {
+            const lowerText = text.toLowerCase();
+            return [
+              'gelmeyi düşündüğünüz', 'gelmeyi dusundugunuz', 'ne zaman gelmeyi', 'ziyaret tarihi',
+              'tarih aralığı', 'tarih araligi', 'tahmini tarih', 'tahmini ziyaret', 'gelmeyi planlıyorsunuz',
+              'gelmeyi planliyorsunuz', 'geliş tarih'
+            ].some(kw => lowerText.includes(kw));
+          };
+
+          const isSpecificCallTimeOffer = (text: string) => {
+            const lowerText = text.toLowerCase();
+            const hasCallKw = [
+              'görüşmek', 'gorusmek', 'arayalım', 'arayalim', 'arayebiliriz',
+              'arama planlama', 'telefon görüşmesi', 'telefon gorusmesi',
+              'danışmanımızla', 'danismanimizla', 'arama teklif', 'telefonla gorusalim', 'telefonla görüşelim'
+            ].some(kw => lowerText.includes(kw));
+            if (!hasCallKw) return false;
+
+            const hasTimeOrDate = [
+              'saat', 'saatiyle', 'saatinde', 'pazartesi', 'salı', 'sali', 'çarşamba', 'carsamba', 'perşembe', 'persembe', 'cuma', 'cumartesi', 'pazar',
+              'yarın', 'yarin', 'bugün', 'bugun', 'haziran', 'temmuz', 'ağustos', 'agustos', 'eylül', 'eylul', 'ekim', 'kasım', 'kasim', 'aralık', 'aralik'
+            ].some(kw => lowerText.includes(kw)) || /\d{1,2}[:.]\d{2}/.test(lowerText);
+
+            return hasTimeOrDate;
+          };
+
+          const dateIndicators = [
+            'ocak', 'şubat', 'subat', 'mart', 'nisan', 'mayıs', 'mayis', 'haziran',
+            'temmuz', 'ağustos', 'agustos', 'eylül', 'eylul', 'ekim', 'kasım', 'kasim', 'aralık', 'aralik',
+            'ay sonu', 'ay başı', 'ay basi', 'ayın sonu', 'ayın başı'
+          ];
+          const isDateMessage = dateIndicators.some(kw => lowerUser.includes(kw)) || /\d{1,2}[./]\d{1,2}/.test(lowerUser);
+
+          const affirmatives = ['evet', 'olur', 'tamam', 'ok', 'okay', 'yes', 'uygun', 'uygundur', 'evet uygun', 'kabul', 'tamamdir', 'hay hay', 'tabii', 'onaylıyorum', 'arayabilirsiniz', 'arayın', 'arayin', 'ararlar'];
+          const isAffirmative = affirmatives.some(kw => lowerUser === kw || lowerUser.startsWith(kw + ' ') || lowerUser.endsWith(' ' + kw) || lowerUser.includes(' ' + kw + ' '));
+
+          if (isArrivalDateQuestion(lastAssistantMsg) && isDateMessage) {
+            const parsed = DateAnswerResolver.parse(inboundText, brain.context.config?.timezone || 'Europe/Istanbul');
+            const normalizedDate = parsed.raw || inboundText.trim();
+
+            const facts = ConversationKnownFactsResolver.resolve({
+              history: history.filter((m: any) => m.content != null).map((m: any) => ({ role: m.role, content: m.content as string })),
+              opportunity: unifiedContext?.opportunity,
+              profile: unifiedContext?.profile,
+              latestForm: unifiedContext?.latestForm,
+              conversation: unifiedContext?.conversation
+            });
+            const formTopic = (facts.formTopic || '').toLowerCase();
+            const complaint = (facts.complaint || '').toLowerCase();
+            const formNote = (facts.formNote || '').toLowerCase();
+            const isCheckup = formTopic.includes('check-up') || formTopic.includes('checkup') ||
+                              complaint.includes('check-up') || complaint.includes('checkup') ||
+                              formNote.includes('check-up') || formNote.includes('checkup');
+            
+            const subject = isCheckup ? 'check-up' : 'tedavi/muayene';
+
+            const callTime = facts.preferredCallTime || '';
+            let callTimeNote = '';
+            if (callTime) {
+              callTimeNote = ` ${callTime} aranmak istediğinizi de görüyorum;`;
+            }
+
+            text = `Teşekkür ederim, geliş tarihi olarak ${normalizedDate} dönemini not aldım. Size uygun ${subject} planlaması için hasta danışmanımızın kısa bir bilgilendirme görüşmesi yapması faydalı olur.${callTimeNote} Türkiye saatiyle size uygun bir arama saati planlayabiliriz.`;
+            
+            if (!sandbox) {
+              try {
+                const convCheck = await db.executeSafe({
+                  text: `SELECT metadata FROM conversations WHERE id = $1 LIMIT 1`,
+                  values: [conversationId]
+                }) as any[];
+                const existingMeta = convCheck[0]?.metadata || {};
+                const updatedMeta = {
+                  ...existingMeta,
+                  arrival_date: normalizedDate
+                };
+                delete updatedMeta.phone_number;
+                delete updatedMeta.patient_name;
+                delete updatedMeta.raw_message;
+
+                await db.executeSafe({
+                  text: `UPDATE conversations SET metadata = $1, updated_at = NOW() WHERE id = $2`,
+                  values: [JSON.stringify(updatedMeta), conversationId]
+                });
+
+                if (unifiedContext?.opportunity?.id) {
+                  await db.executeSafe({
+                    text: `UPDATE opportunities SET travel_date = $1, updated_at = NOW() WHERE id = $2`,
+                    values: [normalizedDate, unifiedContext.opportunity.id]
+                  });
+                }
+              } catch (dbErr) {
+                console.error('[AIResponseOrchestrator] Failed to update arrival date in DB during fallback recovery:', dbErr);
+              }
+            }
+          } else if (isSpecificCallTimeOffer(lastAssistantMsg) && isAffirmative) {
+            text = `Harika, teyidinizi aldım. Telefon görüşmesi için belirttiğiniz zamanı ilgili hasta danışmanımıza iletiyorum. Görüşme saatinde telefonunuzun ulaşılabilir olması yeterlidir. 🙏`;
+          }
         }
       }
 
@@ -1578,7 +1756,7 @@ export class AIResponseOrchestrator {
           tenantId,
           conversationId: conversationId || 'unknown',
           workerPath,
-          responseSource: bypassed ? 'bypass' : 'llm',
+          responseSource: modelUsed === 'fallback' ? 'fallback/context_aware_fallback' : (bypassed ? 'bypass' : 'llm'),
           detectedPatterns: morphology.errors.map(e => e.pattern),
           changed: morphology.correctionApplied
         }));
@@ -1596,8 +1774,7 @@ export class AIResponseOrchestrator {
         tenantId,
         conversationId: conversationId || undefined,
         workerPath,
-        // P0.16-M: responseSource captured from bypass path above (fallbackResult not in scope here)
-        responseSource: bypassed ? (modelUsed === 'bypass' ? 'bypass' : 'bypass_unknown') : 'llm',
+        responseSource: modelUsed === 'fallback' ? 'fallback/context_aware_fallback' : (bypassed ? (modelUsed === 'bypass' ? 'bypass' : 'bypass_unknown') : 'llm'),
         complaint: selfParticipant?.complaint || undefined,
         location: locationLabel || undefined,
         channel: channelId ? 'whatsapp' : undefined,
