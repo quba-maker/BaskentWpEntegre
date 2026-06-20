@@ -44,14 +44,14 @@ async function run() {
 
   try {
     while (hasMore) {
-      const response = await list({
+      const res: any = await list({
         token,
         cursor,
         limit: 1000
       });
-      allBlobs = allBlobs.concat(response.blobs);
-      hasMore = response.hasMore;
-      cursor = response.cursor;
+      allBlobs = allBlobs.concat(res.blobs);
+      hasMore = res.hasMore;
+      cursor = res.cursor;
     }
   } catch (err: any) {
     console.error("Failed to fetch blobs from Vercel Blob store:", err.message);
@@ -89,12 +89,12 @@ async function run() {
 
   // Run queries in parallel/sequence to collect references
   try {
-    // messages (content, media_url, metadata)
-    const messagesData = await sql`SELECT content, media_url, metadata FROM messages`;
+    // messages (content, media_url, media_metadata)
+    const messagesData = await sql`SELECT content, media_url, media_metadata FROM messages`;
     messagesData.forEach((row: any) => {
       extractBlobUrls(row.content);
       extractBlobUrls(row.media_url);
-      extractBlobUrls(row.metadata);
+      extractBlobUrls(row.media_metadata);
     });
 
     // leads (message, raw_data, form_summary)
