@@ -48,7 +48,7 @@ async function run() {
 
   try {
     while (hasMore) {
-      const response = await list({
+      const response: any = await list({
         token,
         cursor,
         limit: 1000
@@ -191,7 +191,7 @@ async function run() {
 
   try {
     while (hasMoreCheck) {
-      const response = await list({
+      const response: any = await list({
         token,
         cursor: cursorCheck,
         limit: 1000
