@@ -198,6 +198,7 @@ export class AIResponseOrchestrator {
 
     let burstAnchorId = '';
     let responseDedupeKey = '';
+    let convMeta: any = {};
     let resolvedChannelId = channelId || '';
     let isDbLockAcquired = false;
     let isRedisLockAcquired = false;
@@ -217,7 +218,7 @@ export class AIResponseOrchestrator {
       const db = withTenantDB(tenantId);
       let lastOutboundTime = new Date(0).toISOString();
       resolvedChannelId = channelId || '';
-      let convMeta: any = {};
+      convMeta = {};
 
       if (!sandbox) {
         // A. Query the last outbound message created_at
@@ -874,7 +875,8 @@ export class AIResponseOrchestrator {
         rawPendingSlot: rawPendingSlot || 'generic_none',
         rawInterpretedIntent: rawInterpretedIntent || 'none',
         routerIntent: routedIntent,
-        history
+        history,
+        convMeta
       });
 
       let effectiveIntent = arbitration.effectiveIntent;
@@ -1041,8 +1043,10 @@ export class AIResponseOrchestrator {
       const isThanksButContinueBypass = isThanksButContinue && !cleanInbound.includes('?') && cleanInbound.length < 45;
       const isOpenContinuationBypass = isOpenContinuationIntent && !cleanInbound.includes('?') && cleanInbound.length < 45;
 
+      const isCallbackConfirmation = effectiveIntent === 'callback_confirmation' || effectiveIntent === 'schedule_confirmation';
+
       const isLlmBypassChallenge = isPromptChallenge || isBotAccusation || isAiAccusation || isAngryPromptChallenge || shouldBypassDoctorLookup || isRecallWithFacts || isNextStepRequest || isMultiIntentQuery || isDoctorNamesRequest
-        || isThanksButContinueBypass || isOpenContinuationBypass || isCannotTravelObjection || isDistanceObjection || isPoliteClose; // P0.16-L
+        || isThanksButContinueBypass || isOpenContinuationBypass || isCannotTravelObjection || isDistanceObjection || isPoliteClose || isCallbackConfirmation; // P0.16-L
 
       let text = '';
       let bypassed = false;
@@ -1067,6 +1071,7 @@ export class AIResponseOrchestrator {
         if (isCannotTravelObjection)  intentList.push('cannot_travel_objection');
         if (isDistanceObjection)      intentList.push('distance_objection');
         if (isPoliteClose)            intentList.push('polite_close');
+        if (isCallbackConfirmation)   intentList.push('callback_confirmation');
 
         if (intentList.length > 0) {
           console.log(JSON.stringify({
@@ -1279,6 +1284,132 @@ export class AIResponseOrchestrator {
             conversationId: conversationId || 'unknown',
             resolvedActiveDepartment: resolvedActiveDepartment || null,
             doctorPolicyMode: mixedDoctorPolicy.mode,
+            workerPath
+          }));
+        }
+
+        // ── P0.27: Callback Confirmation Bypass ──────────────────
+        if (!fallbackResult && isCallbackConfirmation) {
+          // 1. Try to read from conversation.metadata.last_callback_offer first
+          const lastOffer = convMeta?.last_callback_offer;
+          let parsedSugg: any = null;
+          
+          if (lastOffer && lastOffer.proposed_due_at) {
+            const dt = new Date(lastOffer.proposed_due_at);
+            if (!isNaN(dt.getTime())) {
+              const formatter = new Intl.DateTimeFormat('en-US', {
+                timeZone: 'Europe/Istanbul',
+                year: 'numeric', month: '2-digit', day: '2-digit',
+                hour: '2-digit', minute: '2-digit',
+                hour12: false
+              });
+              const parts = formatter.formatToParts(dt);
+              const getVal = (type: string) => parts.find(p => p.type === type)?.value || '';
+              const yyyy = getVal('year');
+              const mm = getVal('month');
+              const dd = getVal('day');
+              const hh = getVal('hour');
+              const min = getVal('minute');
+              
+              parsedSugg = {
+                suggested_date: `${yyyy}-${mm}-${dd}`,
+                suggested_time: `${hh}:${min}`,
+                proposed_date: lastOffer.proposed_due_at,
+                suggested_timezone_basis: lastOffer.timezone || 'Europe/Istanbul'
+              };
+            }
+          }
+          
+          // 2. Fallback to parsing from last assistant message
+          if (!parsedSugg) {
+            const assistantHistory = history.filter(m => m.role === 'assistant');
+            const lastAssistantMsg = assistantHistory.length > 0 ? assistantHistory[assistantHistory.length - 1].content : '';
+            const { parseDeterministicSuggestion } = require('../../utils/date-parser');
+            parsedSugg = parseDeterministicSuggestion(lastAssistantMsg, new Date(), null, null);
+          }
+          
+          let responseText = '';
+          const resolvedIndustry = brain.context.config?.industry || (brain.prompts.metadata as any)?.industry || '';
+          const isHealthcare = resolvedIndustry === 'healthcare' || resolvedIndustry === 'medical';
+          const agentLabel = isHealthcare ? 'Hasta danışmanımız' : 'Müşteri temsilcimiz';
+          
+          if (parsedSugg && parsedSugg.suggested_date && parsedSugg.suggested_time && parsedSugg.proposed_date) {
+            const [yyyy, mm, dd] = parsedSugg.suggested_date.split('-').map(Number);
+            const d = new Date(yyyy, mm - 1, dd);
+            const dayName = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'][d.getDay()];
+            const monthNames = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+            const formattedDate = `${dd} ${monthNames[mm - 1]} ${dayName}`;
+            
+            // Custom Turkish suffix rule
+            const hour = parseInt(parsedSugg.suggested_time.split(':')[0], 10);
+            const suffixes: Record<number, string> = {
+              0: 'de', 1: 'de', 2: 'de', 3: 'te', 4: 'te', 5: 'te', 6: 'da', 7: 'de', 8: 'de', 9: 'da',
+              10: 'da', 11: 'de', 12: 'de', 13: 'te', 14: 'te', 15: 'te', 16: 'da', 17: 'de', 18: 'de',
+              19: 'da', 20: 'de', 21: 'de', 22: 'de', 23: 'te'
+            };
+            const suffix = suffixes[hour] || 'da';
+            const formattedTime = `${parsedSugg.suggested_time}’${suffix}`;
+            
+            responseText = `Harika, not aldım. ${agentLabel} sizi ${formattedDate} Türkiye saatiyle ${formattedTime} arayacak şekilde planlayabilir. Görüşme saatinde telefonunuzun ulaşılabilir olması yeterlidir. 🙏`;
+            
+            // Create follow-up task idempotently
+            if (!sandbox) {
+              try {
+                // Task duplicate check on combined fields to enforce idempotency
+                const existing = await db.executeSafe({
+                  text: `SELECT id FROM follow_up_tasks 
+                         WHERE tenant_id = $1 
+                           AND conversation_id = $2 
+                           AND task_type = $3 
+                           AND due_at = $4 
+                           AND status IN ('pending', 'in_progress')`,
+                  values: [tenantId, conversationId, 'callback_scheduled', parsedSugg.proposed_date]
+                }) as any[];
+                
+                if (existing.length === 0) {
+                  const { TaskService } = require('../task.service');
+                  const taskService = new TaskService(db);
+                  const opportunityId = unifiedContext?.opportunity?.id || null;
+                  
+                  // Construct a unique hash for metadata idempotency control
+                  const crypto = require('crypto');
+                  const idempotencyKey = crypto.createHash('sha256')
+                    .update(`${tenantId}:${channelId || 'whatsapp'}:${conversationId}:callback_scheduled:${parsedSugg.proposed_date}`)
+                    .digest('hex');
+                  
+                  // Metadata is kept strictly PII-free (no raw phone, patient name, or message text)
+                  await taskService.create({
+                    tenantId,
+                    opportunityId: opportunityId || undefined,
+                    conversationId: conversationId || undefined,
+                    phoneNumber,
+                    taskType: 'callback_scheduled',
+                    title: '📞 Geri Arama',
+                    description: 'Telefon görüşmesi planlandı.',
+                    dueAt: parsedSugg.proposed_date,
+                    isAutomated: true,
+                    createdBy: 'system',
+                    metadata: {
+                      idempotency_key: idempotencyKey,
+                      callback_time_tr: parsedSugg.suggested_time,
+                      source: 'callback_confirmation_bypass'
+                    }
+                  });
+                }
+              } catch (taskErr) {
+                console.error('[AIResponseOrchestrator] Failed to create callback follow-up task:', taskErr);
+              }
+            }
+          } else {
+            responseText = `Harika, not aldım. ${agentLabel} sizi en kısa sürede arayacak şekilde planlayabilir. Görüşme saatinde telefonunuzun ulaşılabilir olması yeterlidir. 🙏`;
+          }
+          
+          fallbackResult = { text: responseText, finalPath: 'callback_confirmation_bypass' };
+          console.log(JSON.stringify({
+            tag: 'LIVE_TEST_PARITY_PATH_SELECTED',
+            path: 'callback_confirmation_bypass',
+            tenantId,
+            conversationId: conversationId || 'unknown',
             workerPath
           }));
         }
@@ -1506,6 +1637,38 @@ export class AIResponseOrchestrator {
 
       // 11. WhatsApp formatting policy applied
       text = ResponseFormattingPolicy.format(text);
+
+      // P0.27: Save last_callback_offer to conversation metadata if the bot response proposes a date/time
+      if (!sandbox && conversationId && text) {
+        try {
+          const { parseDeterministicSuggestion } = require('../../utils/date-parser');
+          const parsedSugg = parseDeterministicSuggestion(text, new Date(), null, null);
+          if (parsedSugg.suggested_date && parsedSugg.suggested_time && parsedSugg.proposed_date) {
+            const db = withTenantDB(tenantId);
+            // Fetch existing metadata to preserve other fields
+            const conv = await db.executeSafe({
+              text: `SELECT metadata FROM conversations WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+              values: [conversationId, tenantId]
+            }) as any[];
+            const currentMeta = conv[0]?.metadata || {};
+            const updatedMeta = {
+              ...currentMeta,
+              last_callback_offer: {
+                proposed_due_at: parsedSugg.proposed_date,
+                timezone: parsedSugg.suggested_timezone_basis || 'Europe/Istanbul',
+                source: 'bot_callback_offer',
+                offered_at: new Date().toISOString()
+              }
+            };
+            await db.executeSafe({
+              text: `UPDATE conversations SET metadata = $1 WHERE id = $2 AND tenant_id = $3`,
+              values: [JSON.stringify(updatedMeta), conversationId, tenantId]
+            });
+          }
+        } catch (err) {
+          console.error('[AIResponseOrchestrator] Failed to save last_callback_offer metadata:', err);
+        }
+      }
 
       if (conversationId) {
         console.log(JSON.stringify({

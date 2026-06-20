@@ -26,6 +26,7 @@ export interface ArbitrationInput {
   rawInterpretedIntent: string;
   routerIntent: ConversationIntent;
   history: { role: string; content: string }[];
+  convMeta?: any;
 }
 
 export interface ArbitrationResult {
@@ -55,7 +56,9 @@ const SLOT_OVERRIDE_INTENTS: ConversationIntent[] = [
   'call_scheduling_request',
   'name_intent',
   'continuation_short_reply',
-  'process_question'
+  'process_question',
+  'callback_confirmation',
+  'schedule_confirmation'
 ];
 
 export class ConversationStateArbitrator {
@@ -67,13 +70,17 @@ export class ConversationStateArbitrator {
    * the slot is suppressed and the router intent takes priority.
    */
   public static arbitrate(input: ArbitrationInput): ArbitrationResult {
-    const { lastUserMessage, rawPendingSlot, rawInterpretedIntent, routerIntent, history } = input;
+    const { lastUserMessage, rawPendingSlot, rawInterpretedIntent, routerIntent, history, convMeta } = input;
 
     // Check if the last bot message was a call offer and user confirmed it
     const assistantHistory = history.filter((m: any) => m.role === 'assistant');
     const lastAssistantMsg = assistantHistory.length > 0 ? assistantHistory[assistantHistory.length - 1].content : '';
     
+    const lastOffer = convMeta?.last_callback_offer;
+    const hasOfferInMeta = !!(lastOffer && lastOffer.proposed_due_at);
+
     const isCallOffer = (text: string) => {
+      if (hasOfferInMeta) return true;
       const lowerText = text.toLowerCase();
       return [
         'görüşmek', 'gorusmek', 'arayalım', 'arayalim', 'arayabiliriz',
@@ -82,16 +89,42 @@ export class ConversationStateArbitrator {
       ].some(kw => lowerText.includes(kw));
     };
 
+    const isSpecificCallTimeOffer = (text: string) => {
+      if (hasOfferInMeta) return true;
+      const lowerText = text.toLowerCase();
+      
+      const hasCallKw = [
+        'görüşmek', 'gorusmek', 'arayalım', 'arayalim', 'arayabiliriz',
+        'arama planlama', 'telefon görüşmesi', 'telefon gorusmesi',
+        'danışmanımızla', 'danismanimizla', 'arama teklif', 'telefonla gorusalim', 'telefonla görüşelim'
+      ].some(kw => lowerText.includes(kw));
+      if (!hasCallKw) return false;
+
+      const hasTimeOrDate = [
+        'saat', 'saatiyle', 'saatinde', 'pazartesi', 'salı', 'sali', 'çarşamba', 'carsamba', 'perşembe', 'persembe', 'cuma', 'cumartesi', 'pazar',
+        'yarın', 'yarin', 'bugün', 'bugun', 'haziran', 'temmuz', 'ağustos', 'agustos', 'eylül', 'eylul', 'ekim', 'kasım', 'kasim', 'aralık', 'aralik'
+      ].some(kw => lowerText.includes(kw)) || /\d{1,2}[:.]\d{2}/.test(lowerText);
+
+      return hasTimeOrDate;
+    };
+
     const lowerUser = (lastUserMessage || '').toLowerCase().trim();
-    const affirmatives = ['evet', 'olur', 'tamam', 'ok', 'okay', 'yes', 'uygun', 'kabul', 'tamamdir', 'hay hay', 'tabii', 'onaylıyorum', 'arayabilirsiniz', 'arayın', 'arayin', 'ararlar'];
+    const affirmatives = ['evet', 'olur', 'tamam', 'ok', 'okay', 'yes', 'uygun', 'uygundur', 'evet uygun', 'kabul', 'tamamdir', 'hay hay', 'tabii', 'onaylıyorum', 'arayabilirsiniz', 'arayın', 'arayin', 'ararlar'];
     const isAffirmative = affirmatives.some(kw => lowerUser === kw || lowerUser.startsWith(kw + ' ') || lowerUser.endsWith(' ' + kw) || lowerUser.includes(' ' + kw + ' '));
 
-    if (isCallOffer(lastAssistantMsg) && isAffirmative) {
+    if (isSpecificCallTimeOffer(lastAssistantMsg) && isAffirmative) {
+      return {
+        effectivePendingSlot: 'generic_none',
+        effectiveIntent: 'callback_confirmation',
+        staleSlotSuppressed: true,
+        suppressionReason: 'callback_confirmed'
+      };
+    } else if (isCallOffer(lastAssistantMsg) && isAffirmative) {
       return {
         effectivePendingSlot: 'generic_none',
         effectiveIntent: 'call_scheduling_request',
         staleSlotSuppressed: true,
-        suppressionReason: 'callback_confirmed'
+        suppressionReason: 'callback_general_confirmed'
       };
     }
 
@@ -240,7 +273,7 @@ export class ConversationStateArbitrator {
       }
 
       case 'confirmation_yes_no': {
-        const affirmatives = ['evet', 'olur', 'tamam', 'ok', 'okay', 'yes', 'uygun', 'kabul', 'tamamdir', 'hay hay', 'tabii', 'onaylıyorum', 'arayabilirsiniz', 'simdi degil', 'şimdi değil'];
+        const affirmatives = ['evet', 'olur', 'tamam', 'ok', 'okay', 'yes', 'uygun', 'uygundur', 'evet uygun', 'kabul', 'tamamdir', 'hay hay', 'tabii', 'onaylıyorum', 'arayabilirsiniz', 'simdi degil', 'şimdi değil'];
         const negatives = ['hayır', 'hayir', 'yok', 'olmaz', 'istemem', 'istemiyorum', 'no', 'iptal'];
         const isAffirmative = affirmatives.some(kw => lower === kw || lower.startsWith(kw + ' ') || lower.endsWith(' ' + kw) || lower.includes(' ' + kw + ' '));
         const isNegative = negatives.some(kw => lower === kw || lower.startsWith(kw + ' ') || lower.endsWith(' ' + kw) || lower.includes(' ' + kw + ' '));

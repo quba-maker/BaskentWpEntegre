@@ -355,7 +355,7 @@ export function buildTimeContext(
   tenantTz: string = TENANT_DEFAULT_TZ,
   patientCountry?: string | null,
   isHealthcare: boolean = false,
-  operatingHours: { start: string; end: string } | null = null
+  operatingHours: { start: string; end: string; days?: number[] } | null = null
 ): string {
   const now = new Date();
   const formatted = now.toLocaleString('tr-TR', {
@@ -381,12 +381,15 @@ export function buildTimeContext(
   let opRules = '';
   let comfortRules = '';
 
+  const isSundayClosed = !(operatingHours && Array.isArray(operatingHours.days) && operatingHours.days.includes(0));
+
   if (isHealthcare || operatingHours) {
     opRules = `
-OPERASYON SAATİ SINIRI (Türkiye Saati):
-- Koordinatörlerin çalışma saatleri Türkiye saatiyle ${opStart} - ${opEnd} arasındadır.
-- KURAL: Bu aralık dışındaki saatler için (örn: Türkiye saatiyle 23:00) arama/görüşme randevusu ONAYLAMA VEYA ÖNERME.
-- Eğer ${subject} operasyon saati dışında bir zaman önerirse: "Bu saat Türkiye saatiyle çalışma saatlerimizin (${opStart}-${opEnd}) dışında kalıyor. Size uygun Türkiye saatiyle ${opStart} ile ${opEnd} arasında başka bir saat belirleyebilir miyiz?" şeklinde alternatif iste.`;
+OPERASYON SAATİ VE GÜNÜ SINIRI (Türkiye Saati):
+- Koordinatörlerin çalışma saatleri Türkiye saatiyle ${opStart} - ${opEnd} arasındadır.${isSundayClosed ? ' Pazar günleri ise tamamen kapalıyız/mesai yapılmamaktadır.' : ''}
+- KURAL: ${isSundayClosed ? 'Pazar günleri veya ' : ''}çalışma saatleri dışındaki zamanlar için arama/görüşme planlaması yapma.
+- Eğer ${subject} operasyon saati dışında bir zaman önerirse: "Bu saat Türkiye saatiyle çalışma saatlerimizin (${opStart}-${opEnd}) dışında kalıyor. Size uygun Türkiye saatiyle ${opStart} ile ${opEnd} arasında başka bir saat belirleyebilir miyiz?" şeklinde alternatif iste.
+${isSundayClosed ? `- KURAL (PAZAR GÜNÜ ES GEÇME AÇIKLAMASI): Eğer hastanın istediği/önerdiğin gün Pazar gününe denk geliyorsa veya Pazar günü atlanıyorsa, bunu açıkça ve doğal bir şekilde gerekçelendirerek belirt: "Pazar günü arama planlaması yapılmadığı için, en yakın uygun zaman olarak [Tarih] Pazartesi Türkiye saatiyle [Saat] sizin için uygun olur mu?" şeklinde öneride bulun.` : ''}`;
   }
 
   if (patientCountry) {
@@ -608,7 +611,7 @@ export interface AdjustToOperatingHoursResult {
  * Automatically shift UTC dates falling outside the 09:00 - 21:00 Turkey time window
  * to the nearest valid operational window (09:00 TRT).
  */
-export function adjustToOperatingHours(utcDateString: string): AdjustToOperatingHoursResult {
+export function adjustToOperatingHours(utcDateString: string, operatingHours?: any): AdjustToOperatingHoursResult {
   const d = new Date(utcDateString);
   if (isNaN(d.getTime())) {
     throw new Error(`Invalid UTC date: ${utcDateString}`);
@@ -619,29 +622,48 @@ export function adjustToOperatingHours(utcDateString: string): AdjustToOperating
   const trTime = d.getTime() + 3 * 60 * 60 * 1000;
   const trDate = new Date(trTime);
 
+  const startMinutes = 9 * 60; // 09:00
+  const endMinutes = 21 * 60;  // 21:00
+
+  let adjusted = false;
+
+  const isDayOpen = (dateObj: Date) => {
+    const day = dateObj.getUTCDay(); // 0 is Sunday, 1 is Monday...
+    if (operatingHours && Array.isArray(operatingHours.days)) {
+      return operatingHours.days.includes(day);
+    }
+    // Default fallback: Sunday (0) is closed, all other days are open
+    return day !== 0;
+  };
+
+  // 1. If the day is closed, shift to the next open day at 09:00 local time
+  let loopCount = 0;
+  while (!isDayOpen(trDate) && loopCount < 7) {
+    trDate.setUTCDate(trDate.getUTCDate() + 1);
+    trDate.setUTCHours(9, 0, 0, 0);
+    adjusted = true;
+    loopCount++;
+  }
+
+  // 2. Adjust hour range (09:00 - 21:00) on the (possibly adjusted) open day
   const trHour = trDate.getUTCHours();
   const trMinute = trDate.getUTCMinutes();
   const trTotalMinutes = trHour * 60 + trMinute;
 
-  const startMinutes = 9 * 60; // 09:00
-  const endMinutes = 21 * 60;  // 21:00
-
-  if (trTotalMinutes >= startMinutes && trTotalMinutes <= endMinutes) {
-    return {
-      adjustedUtc: originalUtc,
-      adjusted: false,
-      originalUtc,
-    };
-  }
-
-  // Outside operating hours. Need to adjust.
-  // If TR hour is < 9 (or total minutes < 09:00) -> shift to 09:00 on the same TR day
   if (trTotalMinutes < startMinutes) {
     trDate.setUTCHours(9, 0, 0, 0);
-  } else {
-    // If TR hour is > 21 (or total minutes > 21:00) -> shift to 09:00 on the next TR day
+    adjusted = true;
+  } else if (trTotalMinutes > endMinutes) {
+    // If it's past the end hour, move to the next day
     trDate.setUTCDate(trDate.getUTCDate() + 1);
+    // Find next open day
+    let loopCount2 = 0;
+    while (!isDayOpen(trDate) && loopCount2 < 7) {
+      trDate.setUTCDate(trDate.getUTCDate() + 1);
+      loopCount2++;
+    }
     trDate.setUTCHours(9, 0, 0, 0);
+    adjusted = true;
   }
 
   // Convert back to UTC by shifting by -3 hours
@@ -649,7 +671,7 @@ export function adjustToOperatingHours(utcDateString: string): AdjustToOperating
 
   return {
     adjustedUtc,
-    adjusted: true,
+    adjusted: adjusted || (adjustedUtc !== originalUtc),
     originalUtc,
   };
 }

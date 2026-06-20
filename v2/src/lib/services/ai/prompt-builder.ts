@@ -512,8 +512,8 @@ MEDYA MESAJI KURALI:
         }
       }
       const wh = brain.context.settings?.workingHours;
-      const operatingHours = (wh && wh.enabled && wh.start && wh.end)
-        ? { start: wh.start, end: wh.end }
+      const operatingHours = (wh && wh.enabled)
+        ? { start: wh.start || '09:00', end: wh.end || '21:00', days: (wh as any).days }
         : null;
       timeContext = buildTimeContext(
         brain.context.config?.timezone || 'Europe/Istanbul',

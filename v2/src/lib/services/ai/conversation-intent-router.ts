@@ -29,6 +29,8 @@ export type ConversationIntent =
   | 'continuation_short_reply'
   | 'next_step_request'
   | 'process_question'
+  | 'callback_confirmation'
+  | 'schedule_confirmation'
   | 'generic_other';
 
 

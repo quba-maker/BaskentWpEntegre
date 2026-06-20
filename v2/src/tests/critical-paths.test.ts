@@ -4889,6 +4889,7 @@ test("P0.16 - 14: Hybrid lock — Redis aktifken Redis kilidi alınır ve serbes
   let evalCalled: boolean = false;
   
   setMockRedis({
+    get: async () => null,
     set: async (key: string, val: string, options: any) => {
       setCalled = true;
       assert(key.startsWith("lock:conversation:processing:"), "Redis key should start with correct prefix");
@@ -4952,8 +4953,9 @@ test("P0.16 - 15: Hybrid lock — Redis kilitliyken delayed worker işlem yapmad
   process.env.ENABLE_SELECTED_AUTOPILOT = "true";
 
   setMockRedis({
+    get: async () => "lock-token-123", // Already locked
     set: async () => {
-      return null; // Already locked
+      return null;
     }
   } as any);
 
@@ -7767,6 +7769,223 @@ test("P0.26: Identity Sync & Autopilot Defaults & Form Gate Tooltips", async () 
     process.env.TEST_TENANT_ID = oldTenant || "";
     process.env.TEST_USER_ROLE = oldRole || "";
   }
+});
+
+// ==========================================
+// P0.27 — CALLBACK CONFIRMATION TESTS
+// ==========================================
+
+test("P0.27 T1: callback_confirmation routed and handled via bypass returning Turkish suffix formatted response", async () => {
+  const { AIResponseOrchestrator } = require("../lib/services/ai/ai-response-orchestrator");
+  
+  let dbCalls: any[] = [];
+  const db = {
+    executeSafe: async (q: any) => {
+      const sqlText = typeof q === 'string' ? q : q.text;
+      dbCalls.push({ text: sqlText, vals: q.values || [] });
+      if (sqlText.includes("UPDATE conversations")) {
+        return [{ id: "conv-1" }];
+      }
+      if (sqlText.includes("FROM conversations")) {
+        return [{
+          id: "conv-1",
+          status: "active",
+          autopilot_enabled: true,
+          channel_id: "whatsapp",
+          customer_id: "cust-1",
+          metadata: {
+            last_callback_offer: {
+              proposed_due_at: "2026-06-22T07:00:00.000Z", // Monday 10:00 TRT
+              timezone: "Europe/Istanbul",
+              source: "bot_callback_offer"
+            }
+          }
+        }];
+      }
+      if (sqlText.includes("FROM ai_module_settings")) {
+        return [{
+          config: {
+            enabled: true,
+            dry_run: false,
+            rollout_percentage: 100,
+            department_mode: "all"
+          }
+        }];
+      }
+      if (sqlText.includes("FROM tenants")) {
+        return [{ timezone: "Europe/Istanbul" }];
+      }
+      if (sqlText.includes("FROM follow_up_tasks")) {
+        return []; // No existing tasks
+      }
+      if (sqlText.includes("INSERT INTO follow_up_tasks")) {
+        return [{ id: "task-1" }];
+      }
+      return [];
+    }
+  };
+
+  const brain = {
+    context: {
+      tenantId: "tenant-1",
+      config: { industry: "healthcare", timezone: "Europe/Istanbul" },
+      settings: {}
+    },
+    prompts: {
+      systemPrompt: "Mock system prompt",
+      metadata: { version: "1.0" }
+    }
+  };
+
+  const originalDb = (global as any).mockDb;
+  (global as any).mockDb = db;
+
+  try {
+    const res = await AIResponseOrchestrator.run({
+      tenantId: "tenant-1",
+      conversationId: "conv-1",
+      channel: "whatsapp",
+      channelId: "whatsapp",
+      inboundText: "uygundur",
+      phoneNumber: "905001234567",
+      sandbox: false,
+      brain,
+      history: [
+        { role: "user", content: "merhaba" },
+        { role: "assistant", content: "Yarın, 22 Haziran 2026 Pazartesi, Türkiye saatiyle 10:00 sizin için uygunsa arama planlayalım." },
+        { role: "user", content: "uygundur" }
+      ]
+    } as any);
+
+    const hasTurkishDateAndSuffix = res.text.includes("Hasta danışmanımız sizi 22 Haziran Pazartesi Türkiye saatiyle *10:00*’da arayacak") ||
+                                    res.text.includes("Hasta danışmanımız sizi 22 Haziran Pazartesi Türkiye saatiyle 10:00’da arayacak");
+    assert(hasTurkishDateAndSuffix, "Response must be formatted with Turkish date and suffix '10:00'da'");
+    
+    // Check task insert
+    const taskInsert = dbCalls.find(c => c.text.includes("INSERT INTO follow_up_tasks"));
+    assert(!!taskInsert, "Task must be created");
+    assert(taskInsert.vals[4] === "callback_scheduled", "Task type must be callback_scheduled");
+    
+    // Check PII-free metadata
+    const metadata = JSON.parse(taskInsert.vals[14]);
+    assert(!!metadata.idempotency_key, "Idempotency key must be written to metadata");
+    assert(!metadata.phone_number && !metadata.patient_name, "Metadata must be PII-free");
+  } finally {
+    (global as any).mockDb = originalDb;
+  }
+});
+
+test("P0.27 T2: callback_confirmation idempotency blocks duplicate task creation", async () => {
+  const { AIResponseOrchestrator } = require("../lib/services/ai/ai-response-orchestrator");
+  
+  let dbCalls: any[] = [];
+  const db = {
+    executeSafe: async (q: any) => {
+      const sqlText = typeof q === 'string' ? q : q.text;
+      dbCalls.push({ text: sqlText, vals: q.values || [] });
+      if (sqlText.includes("UPDATE conversations")) {
+        return [{ id: "conv-1" }];
+      }
+      if (sqlText.includes("FROM conversations")) {
+        return [{
+          id: "conv-1",
+          status: "active",
+          autopilot_enabled: true,
+          channel_id: "whatsapp",
+          customer_id: "cust-1",
+          metadata: {
+            last_callback_offer: {
+              proposed_due_at: "2026-06-22T07:00:00.000Z", // Monday 10:00 TRT
+              timezone: "Europe/Istanbul",
+              source: "bot_callback_offer"
+            }
+          }
+        }];
+      }
+      if (sqlText.includes("FROM ai_module_settings")) {
+        return [{
+          config: {
+            enabled: true,
+            dry_run: false,
+            rollout_percentage: 100,
+            department_mode: "all"
+          }
+        }];
+      }
+      if (sqlText.includes("FROM tenants")) {
+        return [{ timezone: "Europe/Istanbul" }];
+      }
+      if (sqlText.includes("FROM follow_up_tasks")) {
+        return [{ id: "task-existing-123" }]; // Already exists
+      }
+      if (sqlText.includes("INSERT INTO follow_up_tasks")) {
+        return [{ id: "task-1" }];
+      }
+      return [];
+    }
+  };
+
+  const brain = {
+    context: {
+      tenantId: "tenant-1",
+      config: { industry: "healthcare", timezone: "Europe/Istanbul" },
+      settings: {}
+    },
+    prompts: {
+      systemPrompt: "Mock system prompt",
+      metadata: { version: "1.0" }
+    }
+  };
+
+  const originalDb = (global as any).mockDb;
+  (global as any).mockDb = db;
+
+  try {
+    const res = await AIResponseOrchestrator.run({
+      tenantId: "tenant-1",
+      conversationId: "conv-1",
+      channel: "whatsapp",
+      channelId: "whatsapp",
+      inboundText: "uygundur",
+      phoneNumber: "905001234567",
+      sandbox: false,
+      brain,
+      history: [
+        { role: "user", content: "merhaba" },
+        { role: "assistant", content: "Yarın, 22 Haziran 2026 Pazartesi, Türkiye saatiyle 10:00 sizin için uygunsa arama planlayalım." },
+        { role: "user", content: "uygundur" }
+      ]
+    } as any);
+
+    const hasTurkishDateAndSuffix = res.text.includes("Hasta danışmanımız sizi 22 Haziran Pazartesi Türkiye saatiyle *10:00*’da arayacak") ||
+                                    res.text.includes("Hasta danışmanımız sizi 22 Haziran Pazartesi Türkiye saatiyle 10:00’da arayacak");
+    assert(hasTurkishDateAndSuffix, "Response must be formatted with Turkish date and suffix");
+    
+    const taskInsert = dbCalls.find(c => c.text.includes("INSERT INTO follow_up_tasks"));
+    assert(!taskInsert, "Duplicate task must not be created");
+  } finally {
+    (global as any).mockDb = originalDb;
+  }
+});
+
+test("P0.27 T3: workingHours Sunday-skipping shifts proposal date to Monday TRT", async () => {
+  const { adjustToOperatingHours } = require("../lib/utils/timezone");
+  
+  // Tenant closed on Sunday (0 is missing in days list)
+  const operatingHours = {
+    start: "09:00",
+    end: "21:00",
+    days: [1, 2, 3, 4, 5, 6] // Closed on Sunday (0)
+  };
+
+  // Sunday, 21 June 2026 12:00 TRT -> UTC: 2026-06-21T09:00:00.000Z
+  const sundayUtc = "2026-06-21T09:00:00.000Z";
+  const result = adjustToOperatingHours(sundayUtc, operatingHours);
+
+  assert(result.adjusted === true, "Must be adjusted");
+  
+  // Monday, 22 June 2026 09:00 TRT -> UTC: 2026-06-22T06:00:00.000Z
+  assert(result.adjustedUtc === "2026-06-22T06:00:00.000Z", "Must shift to Monday 09:00 TRT");
 });
 
 // ==========================================

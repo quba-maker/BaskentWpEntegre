@@ -415,7 +415,7 @@ export async function saveInboundAutopilotSettingsAction(tenantId: string, setti
   });
 }
 
-// Legacy wrapper to keep other features happy (delegates to saveFormAutopilotSettingsAction)
+// Legacy wrapper to update channel-specific settings
 export async function saveAutoGreetingChannelSettingsAction(channelId: string, settingsPatch: any) {
   return withActionGuard(
     { 
@@ -423,15 +423,65 @@ export async function saveAutoGreetingChannelSettingsAction(channelId: string, s
       roles: ['owner', 'admin']
     },
     async (ctx) => {
-      // Map legacy format to the new structure
-      const newPatch = {
-        enabled: settingsPatch.auto_greeting_enabled,
-        dry_run: settingsPatch.dry_run
+      // Fetch current row
+      const rows = await ctx.db.executeSafe({
+        text: `SELECT id, config FROM ai_module_settings WHERE tenant_id = $1 AND module_name = 'form_autopilot_for_open_meta_window' LIMIT 1`,
+        values: [ctx.tenantId]
+      }) as any[];
+
+      let currentConfig: any = {
+        enabled: false,
+        dry_run: true,
+        rollout_percentage: 100,
+        department_mode: 'all',
+        allowed_departments: [],
+        channels: {}
       };
-      const res = await saveFormAutopilotSettingsAction(ctx.tenantId, newPatch);
-      if (!res.success) {
-        throw new Error(res.error || "Form otopilot ayarları kaydedilemedi");
+      let rowId: string | null = null;
+
+      if (rows.length > 0) {
+        rowId = rows[0].id;
+        if (rows[0].config) {
+          const parsedConfig = typeof rows[0].config === 'string'
+            ? JSON.parse(rows[0].config)
+            : rows[0].config;
+          currentConfig = {
+            ...currentConfig,
+            ...parsedConfig
+          };
+        }
       }
+
+      if (!currentConfig.channels || typeof currentConfig.channels !== 'object') {
+        currentConfig.channels = {};
+      }
+
+      // Update specific channel config
+      currentConfig.channels[channelId] = {
+        auto_greeting_enabled: settingsPatch.auto_greeting_enabled,
+        dry_run: settingsPatch.dry_run !== undefined ? settingsPatch.dry_run : true
+      };
+
+      // Also sync top-level enabled/dry_run if updating whatsapp for backwards compatibility
+      if (channelId === 'whatsapp') {
+        currentConfig.enabled = settingsPatch.auto_greeting_enabled;
+        if (settingsPatch.dry_run !== undefined) {
+          currentConfig.dry_run = settingsPatch.dry_run;
+        }
+      }
+
+      if (rowId) {
+        await ctx.db.executeSafe({
+          text: `UPDATE ai_module_settings SET config = $1, updated_at = NOW() WHERE id = $2`,
+          values: [JSON.stringify(currentConfig), rowId]
+        });
+      } else {
+        await ctx.db.executeSafe({
+          text: `INSERT INTO ai_module_settings (tenant_id, module_name, is_active, config) VALUES ($1, 'form_autopilot_for_open_meta_window', true, $2)`,
+          values: [ctx.tenantId, JSON.stringify(currentConfig)]
+        });
+      }
+
       return { success: true };
     }
   ).then(res => {

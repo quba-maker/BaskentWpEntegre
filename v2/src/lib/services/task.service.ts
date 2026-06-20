@@ -190,7 +190,46 @@ export class TaskService {
 
     if (input.isAutomated) {
       try {
-        const adjustment = adjustToOperatingHours(input.dueAt);
+        let wh: any = null;
+        if (input.conversationId) {
+          try {
+            const v2Rows = await this.db.executeSafe({
+              text: `
+                SELECT cap.business_hours_json 
+                FROM conversations c
+                JOIN channels ch ON c.channel_id = ch.id
+                JOIN channel_groups cg ON ch.group_id = cg.id
+                JOIN channel_ai_profiles cap ON cap.group_id = cg.id
+                WHERE c.id = $1 AND c.tenant_id = $2
+                LIMIT 1
+              `,
+              values: [input.conversationId, input.tenantId]
+            }) as any[];
+            if (v2Rows && v2Rows.length > 0 && v2Rows[0].business_hours_json) {
+              wh = typeof v2Rows[0].business_hours_json === 'string'
+                ? JSON.parse(v2Rows[0].business_hours_json)
+                : v2Rows[0].business_hours_json;
+            }
+          } catch (e) {
+            console.warn('[TASK_SERVICE] V2 working hours resolution failed, falling back to V1:', e);
+          }
+        }
+        
+        if (!wh) {
+          try {
+            const v1Rows = await this.db.executeSafe({
+              text: `SELECT value FROM settings WHERE tenant_id = $1 AND key = 'working_hours' LIMIT 1`,
+              values: [input.tenantId]
+            }) as any[];
+            if (v1Rows && v1Rows.length > 0 && v1Rows[0].value) {
+              wh = typeof v1Rows[0].value === 'string' ? JSON.parse(v1Rows[0].value) : v1Rows[0].value;
+            }
+          } catch (e) {
+            console.warn('[TASK_SERVICE] V1 working hours resolution failed:', e);
+          }
+        }
+
+        const adjustment = adjustToOperatingHours(input.dueAt, wh);
         if (adjustment.adjusted) {
           dueAtToUse = adjustment.adjustedUtc;
           additionalMetadata.operation_window_adjusted = true;
