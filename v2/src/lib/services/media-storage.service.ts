@@ -46,9 +46,10 @@ export class MediaStorageService {
   ): Promise<{ blobUrl: string; fileSize: number } | null> {
     const maskedId = maskMediaId(mediaId);
     const is360dialog =
-      metadata.provider === "360dialog" ||
+      (metadata.provider === "360dialog" ||
       metadata.provider === "360dialog_whatsapp" ||
-      process.env.ENABLE_360DIALOG_COEXISTENCE === "true";
+      process.env.ENABLE_360DIALOG_COEXISTENCE === "true") &&
+      !(accessToken && accessToken.startsWith("EAA"));
     
     const endpointVariant = is360dialog ? "360dialog" : "meta_graph";
 
