@@ -42,6 +42,7 @@ export class MediaStorageService {
       mediaType: string;
       provider?: string;
       directUrl?: string;
+      credentialsProvider?: string;
     }
   ): Promise<{ blobUrl: string; fileSize: number } | null> {
     const maskedId = maskMediaId(mediaId);
@@ -49,7 +50,8 @@ export class MediaStorageService {
       (metadata.provider === "360dialog" ||
       metadata.provider === "360dialog_whatsapp" ||
       process.env.ENABLE_360DIALOG_COEXISTENCE === "true") &&
-      !(accessToken && accessToken.startsWith("EAA"));
+      !(accessToken && accessToken.startsWith("EAA")) &&
+      metadata.credentialsProvider !== "whatsapp";
     
     const endpointVariant = is360dialog ? "360dialog" : "meta_graph";
 
@@ -132,7 +134,18 @@ export class MediaStorageService {
       let rewrittenHost = "";
       let isHostRewritten = false;
 
-      if (is360dialog && (downloadUrl.includes("facebook.com") || downloadUrl.includes("fbsbx.com"))) {
+      let preventRewrite = false;
+      try {
+        const parsedUrl = new URL(downloadUrl);
+        const isMetaHost = parsedUrl.host === "lookaside.fbsbx.com" || parsedUrl.host.includes("facebook.com") || parsedUrl.host.includes("fbsbx.com");
+        const isMetaTokenFormat = !!(accessToken && accessToken.startsWith("EAA"));
+        const isWhatsappProvider = metadata.credentialsProvider === "whatsapp" || metadata.provider === "whatsapp";
+        preventRewrite = isMetaHost && (isMetaTokenFormat || isWhatsappProvider);
+      } catch (err) {
+        log.warn("[MEDIA_HOST_CHECK_FAILED] Failed to parse downloadUrl for rewrite prevention", { downloadUrl });
+      }
+
+      if (is360dialog && (downloadUrl.includes("facebook.com") || downloadUrl.includes("fbsbx.com")) && !preventRewrite) {
         try {
           const parsedUrl = new URL(downloadUrl);
           originalHost = parsedUrl.host;
@@ -175,7 +188,9 @@ export class MediaStorageService {
 
       // Step 2: Download the actual file with scoped credentials
       const headers: Record<string, string> = {};
-      if (is360dialog) {
+      if (preventRewrite) {
+        headers["Authorization"] = `Bearer ${accessToken}`;
+      } else if (is360dialog) {
         if (downloadUrl.includes("360dialog.io")) {
           headers["D360-API-KEY"] = accessToken;
         } else if (downloadUrl.includes("facebook.com") || downloadUrl.includes("fbsbx.com")) {

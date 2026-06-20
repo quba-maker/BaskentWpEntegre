@@ -54,7 +54,8 @@ const SLOT_OVERRIDE_INTENTS: ConversationIntent[] = [
   'price_question',
   'call_scheduling_request',
   'name_intent',
-  'continuation_short_reply'
+  'continuation_short_reply',
+  'process_question'
 ];
 
 export class ConversationStateArbitrator {

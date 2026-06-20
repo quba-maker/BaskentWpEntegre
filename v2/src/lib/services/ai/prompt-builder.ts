@@ -998,6 +998,9 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/hasta danışmanı arasında pla
           welcomeInstruction = `Devam eden konuşma kuralları: KESİNLİKLE kendini tanıtma, kurum adını söyleme veya karşılama/selamlama şablonlarını KESİNLİKLE kullanma. Doğrudan hastanın form doldurdum beyanını/sorusunu onaylayarak konuya gir (Örn: "Evet, form kaydınızı görüyorum. ...").`;
         }
         intentGuide = `Intent: form_followup\nHasta form doldurduğunu veya başvurusunu belirtiyor. YAPMA: "Hangi konuda yardımcı olabilirim?" veya "Kaydınızı göremiyorum" gibi generic/olumsuz ifadeler kullanma. ${welcomeInstruction} Sistemde form kaydı görünüyorsa şikayeti/konuyu referans al. Görünmüyorsa yine olumlu bir karşılık ver: "Başvurunuzu aldık, teşekkür ederiz." Ardından bilgilendirme görüşmesi için uygun gün/saat iste.`;
+      } else if (effectiveIntent === 'process_question') {
+        const compPhrase = resolvedFactsForGuide.complaint ? ` (${resolvedFactsForGuide.complaint} süreci)` : '';
+        intentGuide = `Intent: process_question\nHasta tedavi/check-up veya randevu sürecinin nasıl işleyeceğini, sonraki aşamaları soruyor. YAP: Sürecin önce kısa bir ön görüşmeyle başladığını, ardından geliş tarihine göre randevu planlandığını, hastaneye gelindiğinde tetkiklerin yapılıp uzman ekip tarafından değerlendirildiğini ve kişiye özel tedavi planı çıkarıldığını belirt. Detayların hastanın yaşına ve sağlık durumuna göre netleşeceğini vurgula. Sıcak ve güven verici bir ton kullan, telefon görüşmesi için uygun saat iste.`;
       } else if (effectiveIntent === 'greeting') {
         intentGuide = `Intent: greeting\nBu cevapta sadece hastanın/müşterinin selamına doğal ve kısa bir karşılık ver.\nEski CRM/şikayet özetini veya randevu konusunu bu aşamada açma.`;
       } else if (effectiveIntent === 'identity_question') {

@@ -28,6 +28,7 @@ export type ConversationIntent =
   | 'complaint_repeat_correction'
   | 'continuation_short_reply'
   | 'next_step_request'
+  | 'process_question'
   | 'generic_other';
 
 
@@ -136,7 +137,13 @@ export class ConversationIntentRouter {
       'geri zekalı', 'salak', 'aptal', 'mal', 'gerizekalı', 'siktir', 'seni şikayet',
       'idiot', 'stupid', 'asshole', 'fuck', 'shit'
     ];
-    if (abuseKeywords.some(kw => clean.includes(kw) || originalLower.includes(kw))) {
+    const hasAbuse = abuseKeywords.some(kw => {
+      if (kw === 'mal') {
+        return /\bmal\b/i.test(clean);
+      }
+      return clean.includes(kw) || originalLower.includes(kw);
+    });
+    if (hasAbuse) {
       return 'abuse_or_insult';
     }
 
@@ -148,6 +155,17 @@ export class ConversationIntentRouter {
     ];
     if (formKeywords.some(kw => clean.includes(kw) || originalLower.includes(kw))) {
       return 'form_followup';
+    }
+
+    // 7.5. Process Question (High Priority, overrides complaint_detail and others)
+    const processKeywords = [
+      'surec', 'süreç', 'nasil isliyor', 'nasıl işliyor', 'nasil calisir', 'nasıl çalışır',
+      'asamalar', 'aşamalar', 'nasil ilerler', 'nasil ilerliyor', 'nasıl ilerliyor',
+      'sonra ne olacak', 'check-up sureci', 'checkup sureci', 'check-up süreci',
+      'tedavi sureci', 'tedavi süreci', 'surec nasil', 'süreç nasıl'
+    ];
+    if (processKeywords.some(kw => clean.includes(kw))) {
+      return 'process_question';
     }
 
     // 8. Name Intent
@@ -444,9 +462,14 @@ export class ConversationIntentRouter {
     }
 
     // Process question
-    const processKeywords = ['surec', 'süreç', 'nasil isliyor', 'nasıl işliyor', 'nasil calisir', 'nasıl çalışır', 'asamalar', 'aşamalar', 'nasil ilerler'];
+    const processKeywords = [
+      'surec', 'süreç', 'nasil isliyor', 'nasıl işliyor', 'nasil calisir', 'nasıl çalışır',
+      'asamalar', 'aşamalar', 'nasil ilerler', 'nasil ilerliyor', 'nasıl ilerliyor',
+      'sonra ne olacak', 'check-up sureci', 'checkup sureci', 'check-up süreci',
+      'tedavi sureci', 'tedavi süreci', 'surec nasil', 'süreç nasıl'
+    ];
     if (processKeywords.some(kw => clean.includes(kw))) {
-      intents.push('process_question' as any);
+      intents.push('process_question');
     }
 
     // Time / callback

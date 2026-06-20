@@ -1141,6 +1141,7 @@ export class QueueWorkerEngine {
               provider: ((payload as any).routingSource === '360dialog_channel_id' || process.env.ENABLE_360DIALOG_COEXISTENCE === 'true')
                 ? '360dialog'
                 : (mediaCreds.provider || undefined),
+              credentialsProvider: mediaCreds.provider || undefined,
               directUrl: mediaUrl || undefined,
             }
           );

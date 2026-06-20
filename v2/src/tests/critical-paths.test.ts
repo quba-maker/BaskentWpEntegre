@@ -7423,6 +7423,62 @@ test("P3.03: Inbound Greeting-to-Form Elevation & Welcome Re-introduction Guard"
   assert(!systemPromptFirstTurn.includes("KRİTİK UYARI (DEVAM EDEN KONUŞMA)"), "First turn should not contain continuing conversation warning");
 });
 
+test("P3.04: Inbound Process Question Intent Routing & Arbitration", async () => {
+  const { ConversationIntentRouter } = require("../lib/services/ai/conversation-intent-router");
+  const { ConversationStateArbitrator } = require("../lib/services/ai/conversation-state-arbitrator");
+  const { PromptBuilder } = require("../lib/services/ai/prompt-builder");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+
+  // 1. Verify routing
+  const route1 = ConversationIntentRouter.route("süreç nasıl oluyor");
+  const route2 = ConversationIntentRouter.route("nasıl ilerliyor");
+  const route3 = ConversationIntentRouter.route("sonra ne olacak");
+  const route4 = ConversationIntentRouter.route("check-up süreci nasıl");
+  const route5 = ConversationIntentRouter.route("tedavi süreci nasıl");
+  const route6 = ConversationIntentRouter.route("aşamalar nedir");
+
+  assert(route1 === "process_question", "süreç nasıl oluyor should route to process_question");
+  assert(route2 === "process_question", "nasıl ilerliyor should route to process_question");
+  assert(route3 === "process_question", "sonra ne olacak should route to process_question");
+  assert(route4 === "process_question", "check-up süreci nasıl should route to process_question");
+  assert(route5 === "process_question", "tedavi süreci nasıl should route to process_question");
+  assert(route6 === "process_question", "aşamalar nedir should route to process_question");
+
+  // 2. Verify arbitration overrides pending slot
+  const resArbitrated = ConversationStateArbitrator.arbitrate({
+    lastUserMessage: "süreç nasıl oluyor",
+    rawPendingSlot: "timezone_clarification",
+    rawInterpretedIntent: "none",
+    routerIntent: "process_question",
+    history: []
+  });
+
+  assert(resArbitrated.effectiveIntent === "process_question", "Effective intent should be process_question");
+  assert(resArbitrated.effectivePendingSlot === "generic_none", "Pending slot timezone_clarification should be overridden/suppressed");
+
+  // 3. Verify Prompt Builder output for process_question
+  const mockBrain = createTenantBrain(
+    "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+    "whatsapp",
+    "payload1",
+    "Sen bir test asistanısın.",
+    { industry: "healthcare" }
+  );
+
+  const mockContext = {
+    history: [],
+    currentMessageText: "süreç nasıl oluyor",
+    effectiveIntent: "process_question",
+    patient_known_facts: [
+      "Hastanın şikayeti: kapsamlı check-up."
+    ]
+  };
+
+  const systemPrompt = PromptBuilder.buildSystemPrompt(mockBrain, "lead", false, mockContext);
+  assert(systemPrompt.includes("Intent: process_question"), "Prompt should contain process_question intent instructions");
+  assert(systemPrompt.includes("kısa bir ön görüşmeyle başladığını"), "Prompt should contain details about process flow");
+});
+
 // ==========================================
 // SONUÇLAR
 // ==========================================
