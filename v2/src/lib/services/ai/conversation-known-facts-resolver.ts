@@ -29,6 +29,7 @@ export type PatientKnownFacts = {
     time?: string;
     note?: string;
   };
+  formNote?: string;
 };
 
 
@@ -301,6 +302,11 @@ export class ConversationKnownFactsResolver {
       if (formDept && typeof formDept === 'string' && formDept.trim().length > 0) {
         facts.formDepartment = formDept.trim();
       }
+      
+      const formAppointmentPref = data?.randevu_tercihi || null;
+      if (formAppointmentPref && typeof formAppointmentPref === 'string' && formAppointmentPref.trim().length > 0) {
+        facts.formNote = formAppointmentPref.trim();
+      }
     }
 
 
@@ -467,6 +473,9 @@ export class ConversationKnownFactsResolver {
     }
     if (facts.formDepartment) {
       list.push(`Formdan gelen önerilen bölüm: ${facts.formDepartment}.`);
+    }
+    if (facts.formNote) {
+      list.push(`Hastanın form başvurusuna yazdığı not/mesaj: ${facts.formNote}`);
     }
 
     if (facts.previousDepartments && facts.previousDepartments.length > 0) {

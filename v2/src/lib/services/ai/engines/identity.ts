@@ -677,7 +677,7 @@ export class IdentityEngine {
 
         // Appointment preference / randevu tercihi (often contains the main complaint text)
         const appointKey = Object.keys(normalizedKeyMap).find(nk =>
-          nk.includes('randevu_tercihi') || nk.includes('appointment') || nk.includes('tercih') || nk.includes('aciklama') || nk.includes('mesaj')
+          nk.includes('randevu_tercihi') || nk.includes('appointment') || nk.includes('tercih') || nk.includes('aciklama') || nk.includes('mesaj') || nk.includes('arayalim') || nk.includes('arama') || nk.includes('tedavi') || nk.includes('not')
         );
         const appointVal = appointKey ? parsed[normalizedKeyMap[appointKey]] : null;
         if (appointVal) safeData.randevu_tercihi = String(appointVal).trim();
