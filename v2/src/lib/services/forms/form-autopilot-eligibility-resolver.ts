@@ -36,7 +36,7 @@ export async function getAutopilotSettings(tenantId: string, db: TenantDB) {
 
   try {
     const rows = await db.executeSafe({
-      text: `SELECT module_name, is_active, config_json FROM ai_module_settings WHERE tenant_id = $1`,
+      text: `SELECT module_name, is_active, config FROM ai_module_settings WHERE tenant_id = $1`,
       values: [tenantId]
     }) as any[];
 
@@ -46,9 +46,12 @@ export async function getAutopilotSettings(tenantId: string, db: TenantDB) {
       }
       if (row.module_name === 'form_autopilot_for_open_meta_window') {
         featureFlagEnabled = featureFlagEnabled || row.is_active;
-        if (row.config_json && typeof row.config_json === 'object') {
-          if (row.config_json.dry_run !== undefined) {
-            dryRun = row.config_json.dry_run;
+        if (row.config) {
+          const config = typeof row.config === 'string' ? JSON.parse(row.config) : row.config;
+          if (config && typeof config === 'object') {
+            if (config.dry_run !== undefined) {
+              dryRun = config.dry_run;
+            }
           }
         }
       }
@@ -76,18 +79,20 @@ export async function getInboundAutopilotSettings(tenantId: string, db: TenantDB
 
   try {
     const rows = await db.executeSafe({
-      text: `SELECT config_json FROM ai_module_settings WHERE tenant_id = $1 AND module_name = 'inbound_autopilot_settings' LIMIT 1`,
+      text: `SELECT config FROM ai_module_settings WHERE tenant_id = $1 AND module_name = 'inbound_autopilot_settings' LIMIT 1`,
       values: [tenantId]
     }) as any[];
 
-    if (rows.length > 0 && rows[0].config_json && typeof rows[0].config_json === 'object') {
-      const config = rows[0].config_json;
-      if (config.enabled !== undefined) enabled = config.enabled;
-      if (config.dry_run !== undefined) dryRun = config.dry_run;
-      if (config.rollout_percentage !== undefined) rolloutPercentage = Number(config.rollout_percentage);
-      if (config.department_mode !== undefined) departmentMode = config.department_mode;
-      if (config.allowed_departments !== undefined) {
-        allowedDepartments = Array.isArray(config.allowed_departments) ? config.allowed_departments : [];
+    if (rows.length > 0 && rows[0].config) {
+      const config = typeof rows[0].config === 'string' ? JSON.parse(rows[0].config) : rows[0].config;
+      if (config && typeof config === 'object') {
+        if (config.enabled !== undefined) enabled = config.enabled;
+        if (config.dry_run !== undefined) dryRun = config.dry_run;
+        if (config.rollout_percentage !== undefined) rolloutPercentage = Number(config.rollout_percentage);
+        if (config.department_mode !== undefined) departmentMode = config.department_mode;
+        if (config.allowed_departments !== undefined) {
+          allowedDepartments = Array.isArray(config.allowed_departments) ? config.allowed_departments : [];
+        }
       }
     }
   } catch {

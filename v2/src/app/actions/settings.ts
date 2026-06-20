@@ -136,7 +136,7 @@ export async function getAutoGreetingSettingsAction() {
 
       // 2. Fetch Form Outbound Autopilot Settings
       const formRows = await ctx.db.executeSafe({
-        text: `SELECT config_json FROM ai_module_settings WHERE tenant_id = $1 AND module_name = 'form_autopilot_for_open_meta_window' LIMIT 1`,
+        text: `SELECT config FROM ai_module_settings WHERE tenant_id = $1 AND module_name = 'form_autopilot_for_open_meta_window' LIMIT 1`,
         values: [ctx.tenantId]
       }) as any[];
 
@@ -155,16 +155,19 @@ export async function getAutoGreetingSettingsAction() {
       };
 
       let formAutopilotConfig = { ...defaultFormConfig };
-      if (formRows.length > 0 && formRows[0].config_json && typeof formRows[0].config_json === 'object') {
+      if (formRows.length > 0 && formRows[0].config) {
+        const parsedConfig = typeof formRows[0].config === 'string'
+          ? JSON.parse(formRows[0].config)
+          : formRows[0].config;
         formAutopilotConfig = {
           ...defaultFormConfig,
-          ...formRows[0].config_json
+          ...parsedConfig
         };
       }
 
       // 3. Fetch Inbound Autopilot Settings
       const inboundRows = await ctx.db.executeSafe({
-        text: `SELECT config_json FROM ai_module_settings WHERE tenant_id = $1 AND module_name = 'inbound_autopilot_settings' LIMIT 1`,
+        text: `SELECT config FROM ai_module_settings WHERE tenant_id = $1 AND module_name = 'inbound_autopilot_settings' LIMIT 1`,
         values: [ctx.tenantId]
       }) as any[];
 
@@ -177,10 +180,13 @@ export async function getAutoGreetingSettingsAction() {
       };
 
       let inboundAutopilotConfig = { ...defaultInboundConfig };
-      if (inboundRows.length > 0 && inboundRows[0].config_json && typeof inboundRows[0].config_json === 'object') {
+      if (inboundRows.length > 0 && inboundRows[0].config) {
+        const parsedConfig = typeof inboundRows[0].config === 'string'
+          ? JSON.parse(inboundRows[0].config)
+          : inboundRows[0].config;
         inboundAutopilotConfig = {
           ...defaultInboundConfig,
-          ...inboundRows[0].config_json
+          ...parsedConfig
         };
       }
 
@@ -230,7 +236,7 @@ export async function saveFormAutopilotSettingsAction(tenantId: string, settings
 
       // Fetch current row
       const rows = await ctx.db.executeSafe({
-        text: `SELECT id, config_json FROM ai_module_settings WHERE tenant_id = $1 AND module_name = 'form_autopilot_for_open_meta_window' LIMIT 1`,
+        text: `SELECT id, config FROM ai_module_settings WHERE tenant_id = $1 AND module_name = 'form_autopilot_for_open_meta_window' LIMIT 1`,
         values: [ctx.tenantId]
       }) as any[];
 
@@ -245,10 +251,13 @@ export async function saveFormAutopilotSettingsAction(tenantId: string, settings
 
       if (rows.length > 0) {
         rowId = rows[0].id;
-        if (rows[0].config_json && typeof rows[0].config_json === 'object') {
+        if (rows[0].config) {
+          const parsedConfig = typeof rows[0].config === 'string'
+            ? JSON.parse(rows[0].config)
+            : rows[0].config;
           currentConfig = {
             ...currentConfig,
-            ...rows[0].config_json
+            ...parsedConfig
           };
         }
       }
@@ -274,12 +283,12 @@ export async function saveFormAutopilotSettingsAction(tenantId: string, settings
 
       if (rowId) {
         await ctx.db.executeSafe({
-          text: `UPDATE ai_module_settings SET config_json = $1, updated_at = NOW() WHERE id = $2`,
+          text: `UPDATE ai_module_settings SET config = $1, updated_at = NOW() WHERE id = $2`,
           values: [JSON.stringify(currentConfig), rowId]
         });
       } else {
         await ctx.db.executeSafe({
-          text: `INSERT INTO ai_module_settings (tenant_id, module_name, is_active, config_json) VALUES ($1, 'form_autopilot_for_open_meta_window', true, $2)`,
+          text: `INSERT INTO ai_module_settings (tenant_id, module_name, is_active, config) VALUES ($1, 'form_autopilot_for_open_meta_window', true, $2)`,
           values: [ctx.tenantId, JSON.stringify(currentConfig)]
         });
       }
@@ -328,7 +337,7 @@ export async function saveInboundAutopilotSettingsAction(tenantId: string, setti
 
       // Fetch current row
       const rows = await ctx.db.executeSafe({
-        text: `SELECT id, config_json FROM ai_module_settings WHERE tenant_id = $1 AND module_name = 'inbound_autopilot_settings' LIMIT 1`,
+        text: `SELECT id, config FROM ai_module_settings WHERE tenant_id = $1 AND module_name = 'inbound_autopilot_settings' LIMIT 1`,
         values: [ctx.tenantId]
       }) as any[];
 
@@ -343,10 +352,13 @@ export async function saveInboundAutopilotSettingsAction(tenantId: string, setti
 
       if (rows.length > 0) {
         rowId = rows[0].id;
-        if (rows[0].config_json && typeof rows[0].config_json === 'object') {
+        if (rows[0].config) {
+          const parsedConfig = typeof rows[0].config === 'string'
+            ? JSON.parse(rows[0].config)
+            : rows[0].config;
           currentConfig = {
             ...currentConfig,
-            ...rows[0].config_json
+            ...parsedConfig
           };
         }
       }
@@ -363,12 +375,12 @@ export async function saveInboundAutopilotSettingsAction(tenantId: string, setti
 
       if (rowId) {
         await ctx.db.executeSafe({
-          text: `UPDATE ai_module_settings SET config_json = $1, updated_at = NOW() WHERE id = $2`,
+          text: `UPDATE ai_module_settings SET config = $1, updated_at = NOW() WHERE id = $2`,
           values: [JSON.stringify(currentConfig), rowId]
         });
       } else {
         await ctx.db.executeSafe({
-          text: `INSERT INTO ai_module_settings (tenant_id, module_name, is_active, config_json) VALUES ($1, 'inbound_autopilot_settings', true, $2)`,
+          text: `INSERT INTO ai_module_settings (tenant_id, module_name, is_active, config) VALUES ($1, 'inbound_autopilot_settings', true, $2)`,
           values: [ctx.tenantId, JSON.stringify(currentConfig)]
         });
       }

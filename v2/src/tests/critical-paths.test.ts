@@ -3604,7 +3604,7 @@ test("P0.14 T19: DB setting açık olsa bile env phase lock canlı gönderimi en
         return [{ id: "msg-1", last_inbound_at: new Date().toISOString() }];
       }
       if (sql.includes("ai_module_settings")) {
-        return [{ module_name: "form_autopilot_for_open_meta_window", is_active: true, config_json: { dry_run: false } }];
+        return [{ module_name: "form_autopilot_for_open_meta_window", is_active: true, config: { dry_run: false } }];
       }
       return [];
     }
@@ -3627,10 +3627,10 @@ test("P0.14 T20: Settings panel sadece ilgili channel config'ini patch eder, di�
     executeSafe: async (q: { text: string; values?: any[] }) => {
       mockDbCalls.push(q);
       const sql = q.text.replace(/\s+/g, ' ');
-      if (sql.includes("SELECT id, config_json FROM ai_module_settings")) {
+      if (sql.includes("SELECT id, config FROM ai_module_settings")) {
         return [{
           id: "row-123",
-          config_json: {
+          config: {
             channels: {
               whatsapp: { auto_greeting_enabled: true, dry_run: true },
               instagram: { auto_greeting_enabled: false, dry_run: true }
@@ -4183,7 +4183,7 @@ test("P0.14 UX 2: Dry-run açıkken baseCategory değişmez, sadece gateReasons/
     const normalizedText = text.replace(/\s+/g, ' ');
     if (normalizedText.includes("FROM tenants")) return [{ slug: 'test-tenant' }];
     if (normalizedText.includes("FROM ai_module_settings")) {
-      return [{ module_name: 'form_autopilot_for_open_meta_window', is_active: true, config_json: { dry_run: true } }];
+      return [{ module_name: 'form_autopilot_for_open_meta_window', is_active: true, config: { dry_run: true } }];
     }
     if (normalizedText.includes("FROM leads")) return [{ id: '123', phone_number: '+905555555555', raw_data: '{}', form_name: 'Test Form' }];
     if (normalizedText.includes("FROM conversations")) return [];
@@ -7134,7 +7134,7 @@ test("P3.02: Inbound Autopilot Permanent Override - Form Independence, Roles & A
         {
           module_name: "form_autopilot_for_open_meta_window",
           is_active: true,
-          config_json: { enabled: true, dry_run: false, rollout_percentage: 100, department_mode: "all" }
+          config: { enabled: true, dry_run: false, rollout_percentage: 100, department_mode: "all" }
         }
       ];
     }

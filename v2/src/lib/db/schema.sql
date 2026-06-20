@@ -174,7 +174,7 @@ CREATE TABLE IF NOT EXISTS ai_module_settings (
   tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   module_name TEXT NOT NULL,
   is_active BOOLEAN DEFAULT true,
-  config_json JSONB DEFAULT '{}'::jsonb,
+  config JSONB DEFAULT '{}'::jsonb,
   updated_at TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE(tenant_id, module_name)
 );
