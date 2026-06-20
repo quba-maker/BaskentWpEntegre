@@ -352,6 +352,7 @@ export function ContextPanel() {
   // Permanent override states
   const [showConfirmOverride, setShowConfirmOverride] = useState<boolean>(false);
   const [isTogglingOverride, setIsTogglingOverride] = useState<boolean>(false);
+  const [overrideError, setOverrideError] = useState<string | null>(null);
 
   // Reset local state when contact changes or active opp fields update
   // P1B: Granular deps ensure refresh on opp switch (same contact, different opp fields)
@@ -419,6 +420,7 @@ export function ContextPanel() {
       setIsLanguageUnclear(false);
       setShowConfirmOverride(false);
       setIsTogglingOverride(false);
+      setOverrideError(null);
     }
   }, [contactId, contactDept, contactCountry, contactNotes, contactStage, activeContact?.opp_requester_name, activeContact?.opp_patient_name, activeContact?.patient_name]);
 
@@ -596,20 +598,21 @@ export function ContextPanel() {
     const customerProfileId = crmData?.customerProfileId;
     const channelId = crmData?.channelId;
     if (!customerProfileId || !channelId) {
-      alert("Müşteri profili veya kanal bilgisi bulunamadı.");
+      setOverrideError("Müşteri profili veya kanal bilgisi bulunamadı.");
       return;
     }
     setIsTogglingOverride(true);
+    setOverrideError(null);
     try {
       const res = await toggleCustomerInboundAutopilotAction(customerProfileId, channelId, disabled);
       if (res.success) {
         queryClient.invalidateQueries({ queryKey: ['crm-panel', conversationId] });
         mutate((key) => Array.isArray(key) && key[0] === "conversations");
       } else {
-        alert(res.error || "İşlem başarısız oldu.");
+        setOverrideError(res.error || "İşlem başarısız oldu.");
       }
     } catch (err: any) {
-      alert("Hata: " + (err.message || "Bilinmeyen bir hata oluştu"));
+      setOverrideError("Hata: " + (err.message || "Bilinmeyen bir hata oluştu"));
     } finally {
       setIsTogglingOverride(false);
     }
@@ -1799,6 +1802,12 @@ export function ContextPanel() {
               {/* Kalıcı Otopilot Kilidi Kontrolleri */}
               <div className="p-3 rounded-2xl bg-[#F5F5F7]/80 border border-black/5 space-y-2.5 shadow-sm">
                 <span className="block text-[9px] font-bold text-[#86868B] uppercase tracking-widest border-b border-black/[0.03] pb-1.5">🔒 Kalıcı Otopilot Koruması</span>
+                {overrideError && (
+                  <div className="p-2 rounded-lg bg-rose-50 border border-rose-100 text-rose-800 text-[10px] font-medium leading-normal flex items-start gap-1">
+                    <AlertCircle className="w-3.5 h-3.5 text-rose-600 shrink-0 mt-0.5" />
+                    <span>{overrideError}</span>
+                  </div>
+                )}
                 {isOverrideActive ? (
                   <div className="space-y-2">
                     {['admin', 'owner', 'platform_admin'].includes(userRole) ? (
