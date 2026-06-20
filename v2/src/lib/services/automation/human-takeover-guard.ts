@@ -29,29 +29,31 @@ export class HumanTakeoverGuard {
         return { active: true, reason: 'status_human' };
       }
 
-      // 2. Query last outbound message
-      const lastOutboundRows = await db.executeSafe({
-        text: `
-          SELECT created_at, model_used, media_metadata
-          FROM messages
-          WHERE tenant_id = $1 AND conversation_id = $2 AND direction = 'out'
-          ORDER BY created_at DESC, id DESC
-          LIMIT 1
-        `,
-        values: [tenantId, conversationId]
-      }) as any[];
+      // 2. Query last outbound message (skip if status is explicitly 'bot' to avoid permanent lockout on manual reactivation)
+      if (convRows[0].status !== 'bot') {
+        const lastOutboundRows = await db.executeSafe({
+          text: `
+            SELECT created_at, model_used, media_metadata
+            FROM messages
+            WHERE tenant_id = $1 AND conversation_id = $2 AND direction = 'out'
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+          `,
+          values: [tenantId, conversationId]
+        }) as any[];
 
-      if (lastOutboundRows.length > 0) {
-        const lastOut = lastOutboundRows[0];
-        const modelUsed = lastOut.model_used;
-        const meta = lastOut.media_metadata || {};
-        
-        // A message is considered sent by a bot if model_used is set or metadata source matches bot/greeting otopilot keys.
-        const isBot = !!(modelUsed || meta.source === 'form_autopilot' || meta.source === 'bot_autopilot');
+        if (lastOutboundRows.length > 0) {
+          const lastOut = lastOutboundRows[0];
+          const modelUsed = lastOut.model_used;
+          const meta = lastOut.media_metadata || {};
+          
+          // A message is considered sent by a bot if model_used is set or metadata source matches bot/greeting otopilot keys.
+          const isBot = !!(modelUsed || meta.source === 'form_autopilot' || meta.source === 'bot_autopilot');
 
-        if (!isBot) {
-          // The last outbound message was sent by a human agent!
-          return { active: true, reason: 'last_message_by_human' };
+          if (!isBot) {
+            // The last outbound message was sent by a human agent!
+            return { active: true, reason: 'last_message_by_human' };
+          }
         }
       }
 
