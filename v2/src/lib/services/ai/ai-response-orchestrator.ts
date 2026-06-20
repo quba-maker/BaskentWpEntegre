@@ -859,6 +859,105 @@ export class AIResponseOrchestrator {
         unifiedContext.approvedLearningHints = [];
       }
 
+      // 5b. Resolve Intent Arbitration, Greeting-Only, and Intent Elevation
+      const { PendingQuestionResolver } = require('./pending-question-resolver');
+      const { ShortAnswerInterpreter } = require('./short-answer-interpreter');
+      const { ConversationStateArbitrator } = require('./conversation-state-arbitrator');
+
+      const _tenantDeptKw = TenantConfigResolver.getIntentDepartmentKeywords(brain) ?? undefined;
+      const rawPendingSlot = PendingQuestionResolver.resolve(history);
+      const rawInterpretedIntent = ShortAnswerInterpreter.interpret(inboundText, rawPendingSlot);
+      const routedIntent = ConversationIntentRouter.route(inboundText, _tenantDeptKw);
+
+      const arbitration = ConversationStateArbitrator.arbitrate({
+        lastUserMessage: inboundText,
+        rawPendingSlot: rawPendingSlot || 'generic_none',
+        rawInterpretedIntent: rawInterpretedIntent || 'none',
+        routerIntent: routedIntent,
+        history
+      });
+
+      let effectiveIntent = arbitration.effectiveIntent;
+      let overrideReason = 'none';
+
+      // Turn indicators: bot has not responded in this conversation yet?
+      const assistantHistory = history.filter(m => m.role === 'assistant');
+      const isFirstAssistantTurn = assistantHistory.length === 0;
+
+      // Has active/latest form or open opportunity?
+      const hasForm = !!(unifiedContext?.latestForm || (Array.isArray(unifiedContext?.patient_known_facts) && unifiedContext.patient_known_facts.length > 0) || unifiedContext?.opportunity);
+
+      // Check if the form/opportunity has already been addressed by the bot in this conversation
+      let formAlreadyAddressed = false;
+      if (hasForm) {
+        let latestFormCreatedAt: Date | null = null;
+        if (unifiedContext?.latestForm?.created_at) {
+          latestFormCreatedAt = new Date(unifiedContext.latestForm.created_at);
+        } else if (unifiedContext?.opportunity?.created_at) {
+          latestFormCreatedAt = new Date(unifiedContext.opportunity.created_at);
+        }
+
+        if (latestFormCreatedAt && !sandbox) {
+          try {
+            const outboundAfterForm = await db.executeSafe({
+              text: `SELECT id FROM messages 
+                     WHERE tenant_id = $1 AND conversation_id = $2 AND direction = 'out' AND created_at > $3 
+                     LIMIT 1`,
+              values: [tenantId, conversationId, latestFormCreatedAt]
+            }) as any[];
+            if (outboundAfterForm.length > 0) {
+              formAlreadyAddressed = true;
+            }
+          } catch (err) {
+            console.warn('[AIResponseOrchestrator] Failed to query outbound messages after form:', err);
+          }
+        }
+      }
+
+      // Elevate greeting if unaddressed form exists
+      if (effectiveIntent === 'greeting' && isFirstAssistantTurn && hasForm && !formAlreadyAddressed) {
+        effectiveIntent = 'form_followup';
+        overrideReason = 'greeting_with_active_unaddressed_form';
+        
+        console.log(JSON.stringify({
+          tag: 'INTENT_OVERRIDE',
+          tenantId,
+          conversationId,
+          originalIntent: routedIntent,
+          effectiveIntent,
+          overrideReason,
+          isFirstAssistantTurn,
+          hasForm,
+          formAlreadyAddressed
+        }));
+      }
+
+      // Populate unifiedContext values for prompt builder
+      unifiedContext.effectiveIntent = effectiveIntent;
+      unifiedContext.overrideReason = overrideReason;
+
+      // Resolve isGreetingOnly context for Bot Reply prompt generation
+      const hasQuotedReply = !!(mediaMetadata?.native?.quoted_message_snapshot || mediaMetadata?.native?.reply_to_provider_message_id);
+      if (inboundText && !hasQuotedReply) {
+        const lowerContent = inboundText.toLowerCase().trim();
+        const defaultGreetings = ['merhaba', 'merhabalar', 'selam', 'iyi günler', 'iyi akşamlar', 'iyi sabahlar', 'günaydın', 'kolay gelsin', 'iyi çalışmalar'];
+        const greetings: string[] = (brain?.context?.config?.greetingTokens && Array.isArray(brain.context.config.greetingTokens) && brain.context.config.greetingTokens.length > 0)
+          ? brain.context.config.greetingTokens.map((t: string) => t.toLowerCase().trim())
+          : defaultGreetings;
+        
+        const isInitialFormWelcome = !formAlreadyAddressed && isFirstAssistantTurn && hasForm;
+
+        if (greetings.includes(lowerContent) || (lowerContent.length < 20 && greetings.some(g => lowerContent.includes(g)))) {
+          if (!isInitialFormWelcome && effectiveIntent !== 'form_followup') {
+            unifiedContext.isGreetingOnly = true;
+          } else {
+            delete unifiedContext.isGreetingOnly;
+          }
+        } else {
+          delete unifiedContext.isGreetingOnly;
+        }
+      }
+
       // 6. Build Prompt
       const phase = unifiedContext.opportunity?.stage || 'lead';
       const systemPromptText = PromptBuilder.buildSystemPrompt(brain, phase, false, unifiedContext);
@@ -884,9 +983,6 @@ export class AIResponseOrchestrator {
       const isMixedDoctorProcess = isDoctorLookup && isProcessQuestion;
 
       // P0.16-K: Intent routing for next_step_request bypass (before LLM)
-      // P0.19: Pass tenant-specific department override for topic_switch detection
-      const _tenantDeptKw = TenantConfigResolver.getIntentDepartmentKeywords(brain) ?? undefined;
-      const routedIntent = ConversationIntentRouter.route(inboundText, _tenantDeptKw);
       const isNextStepRequest = routedIntent === 'next_step_request';
 
       // P0.16-K: Multi-intent detection (address+price+doctor+process in one message)
@@ -1287,9 +1383,6 @@ export class AIResponseOrchestrator {
         }
       }
 
-      // 8. Quality Gate & Retry Loop
-      const assistantHistory = history.filter((m: any) => m.role === 'assistant');
-      const isFirstAssistantTurn = assistantHistory.length === 0;
 
       let ctaOfferedRecently = false;
       if (Array.isArray(history)) {

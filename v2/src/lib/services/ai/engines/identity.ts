@@ -329,7 +329,7 @@ export class IdentityEngine {
       let lead = null;
       const leads = await db.executeSafe({
         text: `
-          SELECT id, form_name, raw_data, channel_id, tenant_id
+          SELECT id, form_name, raw_data, channel_id, tenant_id, created_at
           FROM leads 
           WHERE tenant_id = $1 AND customer_id = $2
           ORDER BY created_at DESC 
@@ -343,7 +343,7 @@ export class IdentityEngine {
         const suffix = profile.primary_phone.slice(-10);
         const fallbackLeads = await db.executeSafe({
           text: `
-            SELECT id, form_name, raw_data, channel_id, tenant_id
+            SELECT id, form_name, raw_data, channel_id, tenant_id, created_at
             FROM leads 
             WHERE tenant_id = $1 
               AND (phone_number = $2 OR RIGHT(phone_number, 10) = $3)
@@ -695,7 +695,8 @@ export class IdentityEngine {
 
         return {
           name: lead.form_name,
-          data: safeData
+          data: safeData,
+          created_at: lead.created_at
         };
       })() : null;
 

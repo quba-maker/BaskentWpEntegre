@@ -7272,6 +7272,157 @@ test("P3.02: Inbound Autopilot Permanent Override - Form Independence, Roles & A
   }
 });
 
+test("P3.03: Inbound Greeting-to-Form Elevation & Welcome Re-introduction Guard", async () => {
+  const { PromptBuilder } = require("../lib/services/ai/prompt-builder");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+
+  const mockBrain = createTenantBrain(
+    "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+    "whatsapp",
+    "payload1",
+    " Sen hasta danışmanı Rüya'sın. [Kurum] adına yazıyorsun.",
+    {
+      industry: "healthcare",
+      identity: {
+        personaName: "Rüya",
+        organizationShortName: "Başkent Konya"
+      }
+    },
+    null,
+    undefined,
+    undefined,
+    undefined,
+    {
+      identity: {
+        personaName: "Rüya",
+        organizationShortName: "Başkent Konya"
+      }
+    }
+  );
+
+  // Test Case A: First Turn, has Form, User says "Merhaba" -> Elevated to form_followup, isGreetingOnly is false
+  const mockContextFirstTurn = {
+    history: [],
+    currentMessageText: "merhaba",
+    latestForm: {
+      name: "Check-up Form",
+      created_at: new Date(Date.now() - 5000),
+      data: {
+        full_name: "Ayşe Yılmaz",
+        sikayet: "kapsamlı check-up",
+        randevu_ayi: "Önümüzdeki bir ay"
+      }
+    },
+    patient_known_facts: [
+      "Hastanın adı: Ayşe Yılmaz.",
+      "Hastanın şikayeti: kapsamlı check-up.",
+      "Geliş zamanı: Önümüzdeki bir ay."
+    ]
+  };
+
+  const { PendingQuestionResolver } = require("../lib/services/ai/pending-question-resolver");
+  const { ShortAnswerInterpreter } = require("../lib/services/ai/short-answer-interpreter");
+  const { ConversationStateArbitrator } = require("../lib/services/ai/conversation-state-arbitrator");
+  const { ConversationIntentRouter } = require("../lib/services/ai/conversation-intent-router");
+
+  const rawPendingSlot = PendingQuestionResolver.resolve(mockContextFirstTurn.history);
+  const rawInterpretedIntent = ShortAnswerInterpreter.interpret("merhaba", rawPendingSlot);
+  const routedIntent = ConversationIntentRouter.route("merhaba");
+
+  const arbitration = ConversationStateArbitrator.arbitrate({
+    lastUserMessage: "merhaba",
+    rawPendingSlot: rawPendingSlot || "generic_none",
+    rawInterpretedIntent: rawInterpretedIntent || "none",
+    routerIntent: routedIntent,
+    history: mockContextFirstTurn.history
+  });
+
+  let effectiveIntent = arbitration.effectiveIntent;
+  let overrideReason = "none";
+
+  const assistantHistory = mockContextFirstTurn.history.filter((m: any) => m.role === "assistant");
+  const isFirstAssistantTurn = assistantHistory.length === 0;
+  const hasForm = !!(mockContextFirstTurn.latestForm || mockContextFirstTurn.patient_known_facts.length > 0);
+
+  if (effectiveIntent === "greeting" && isFirstAssistantTurn && hasForm) {
+    effectiveIntent = "form_followup";
+    overrideReason = "greeting_with_active_unaddressed_form";
+  }
+
+  assert(effectiveIntent === "form_followup", "First turn greeting should be elevated to form_followup");
+  assert(overrideReason === "greeting_with_active_unaddressed_form", "Override reason should be set");
+
+  // Pass effectiveIntent into unifiedContext and build system prompt
+  (mockContextFirstTurn as any).effectiveIntent = effectiveIntent;
+  (mockContextFirstTurn as any).overrideReason = overrideReason;
+
+  const systemPromptFirstTurn = PromptBuilder.buildSystemPrompt(mockBrain, "lead", false, mockContextFirstTurn);
+  
+  // Ensure form followup guidelines are present and isGreetingOnly didn't suppress them
+  assert(systemPromptFirstTurn.includes("form_followup"), "Prompt should contain form_followup guidelines");
+  assert(!systemPromptFirstTurn.includes("GREETING ONLY"), "Greeting only should not be active for elevated first contact");
+  assert(systemPromptFirstTurn.includes("İlk mesaj karşılama kuralları"), "Should contain first contact welcome rules");
+
+  // Test Case B: Second Turn (Bot has replied, User says "form doldurmuştum") -> Intent is form_followup, isFirstAssistantTurn is false
+  const mockContextSecondTurn = {
+    history: [
+      { role: "user", content: "merhaba" },
+      { role: "assistant", content: "Merhaba Ayşe Hanım, nasıl yardımcı olabilirim?" }
+    ],
+    currentMessageText: "form doldurmuştum",
+    latestForm: {
+      name: "Check-up Form",
+      created_at: new Date(Date.now() - 60000),
+      data: {
+        full_name: "Ayşe Yılmaz",
+        sikayet: "kapsamlı check-up",
+        randevu_ayi: "Önümüzdeki bir ay"
+      }
+    },
+    patient_known_facts: [
+      "Hastanın adı: Ayşe Yılmaz.",
+      "Hastanın şikayeti: kapsamlı check-up.",
+      "Geliş zamanı: Önümüzdeki bir ay."
+    ]
+  };
+
+  const routedIntentSecond = ConversationIntentRouter.route("form doldurmuştum");
+  const arbitrationSecond = ConversationStateArbitrator.arbitrate({
+    lastUserMessage: "form doldurmuştum",
+    rawPendingSlot: "generic_none",
+    rawInterpretedIntent: "none",
+    routerIntent: routedIntentSecond,
+    history: mockContextSecondTurn.history
+  });
+
+  let effectiveIntentSecond = arbitrationSecond.effectiveIntent;
+  let overrideReasonSecond = "none";
+
+  const assistantHistorySecond = mockContextSecondTurn.history.filter((m: any) => m.role === "assistant");
+  const isFirstAssistantTurnSecond = assistantHistorySecond.length === 0;
+  const hasFormSecond = !!(mockContextSecondTurn.latestForm || mockContextSecondTurn.patient_known_facts.length > 0);
+
+  if (effectiveIntentSecond === "greeting" && isFirstAssistantTurnSecond && hasFormSecond) {
+    effectiveIntentSecond = "form_followup";
+    overrideReasonSecond = "greeting_with_active_unaddressed_form";
+  }
+
+  assert(effectiveIntentSecond === "form_followup", "Intent should be form_followup for explicit form mention");
+  assert(overrideReasonSecond === "none", "Should not elevate if already explicit form_followup");
+  assert(isFirstAssistantTurnSecond === false, "Second turn is not first assistant turn");
+
+  // Pass effectiveIntent into unifiedContext and build system prompt
+  (mockContextSecondTurn as any).effectiveIntent = effectiveIntentSecond;
+  (mockContextSecondTurn as any).overrideReason = overrideReasonSecond;
+
+  const systemPromptSecondTurn = PromptBuilder.buildSystemPrompt(mockBrain, "lead", false, mockContextSecondTurn);
+
+  // Ensure prompt forbids re-introducing or using welcome templates
+  assert(systemPromptSecondTurn.includes("KRİTİK UYARI (DEVAM EDEN KONUŞMA)"), "Prompt should inject strict continuing conversation warning");
+  assert(systemPromptSecondTurn.includes("Devam eden konuşma kuralları"), "Should contain continuing conversation rules");
+  assert(!systemPromptFirstTurn.includes("KRİTİK UYARI (DEVAM EDEN KONUŞMA)"), "First turn should not contain continuing conversation warning");
+});
+
 // ==========================================
 // SONUÇLAR
 // ==========================================

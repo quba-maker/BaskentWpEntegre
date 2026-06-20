@@ -99,6 +99,8 @@ export class PromptBuilder {
     let currentMessageTextLower = '';
 
     const history = unifiedContext?.history || [];
+    const assistantHistory = history.filter((m: any) => m.role === 'assistant');
+    const isFirstAssistantTurn = assistantHistory.length === 0;
     const { PendingQuestionResolver } = require('./pending-question-resolver');
     const { ShortAnswerInterpreter } = require('./short-answer-interpreter');
     
@@ -365,7 +367,11 @@ export class PromptBuilder {
     if (ctaOfferedRecently || angryPatientMode || (!isHumanHandover && !asksIdentity && !asksName) || asksIdentity || asksName || patientClaimsBot || unifiedContext?.patientProvidedAvailability) {
       dynamicBrakesContext += `\n\n=== 🚨 DİNAMİK KALİTE VE FREN KURALLARI (DYNAMIC QUALITY BRAKES) ===\n`;
       if (!isHumanHandover && !asksIdentity && !asksName) {
-        dynamicBrakesContext += `>> UYARI (DEVAM EDEN KONUŞMA): Bu konuşmanın devam mesajıdır ve hasta ismini/kimliğini sormamıştır. Kesinlikle ${pName ? `"${pName} ben", "ben ${pName}", ` : ''}${orgShort ? `"${orgShort}'dan yazıyorum", ` : ''}kendini tanıtan veya ismini söyleyen ifadeleri KULLANMA. Karşılamayı ilk mesajda zaten yaptın. Mesajına isimsiz, doğrudan hastanın sorusuna cevap vererek başla. Doğrudan konuya gir.\n`;
+        if (!isFirstAssistantTurn) {
+          dynamicBrakesContext += `>> KRİTİK UYARI (DEVAM EDEN KONUŞMA): Bu diyalog devam eden bir konuşmadır. Kesinlikle ${pName ? `"${pName}", ` : ''}${orgShort ? `"${orgShort}", ` : ''}"yazıyorum", "iletişime geçiyoruz", "doldurduğunuz form doğrultusunda" veya herhangi bir kurum/asistan tanıtımı veya outbound karşılama/selamlama kalıbını KULLANMA. Karşılamayı ilk mesajda zaten yaptın. Doğrudan kullanıcının sorusuna/beyanına cevap vererek devam et. Doğrudan konuya gir (Örn: "Evet, form kaydınızı görüyorum. ...").\n`;
+        } else {
+          dynamicBrakesContext += `>> UYARI (DEVAM EDEN KONUŞMA): Bu konuşmanın devam mesajıdır ve hasta ismini/kimliğini sormamıştır. Kesinlikle ${pName ? `"${pName} ben", "ben ${pName}", ` : ''}${orgShort ? `"${orgShort}'dan yazıyorum", ` : ''}kendini tanıtan veya ismini söyleyen ifadeleri KULLANMA. Karşılamayı ilk mesajda zaten yaptın. Mesajına isimsiz, doğrudan hastanın sorusuna cevap vererek başla. Doğrudan konuya gir.\n`;
+        }
       }
       if (angryPatientMode) {
         dynamicBrakesContext += `>> KIZGIN HASTA / KRİZ MODU DİREKTİFİ: Hasta memnuniyetsiz/kızgın görünmektedir. Kesinlikle yeni bir randevu, telefon araması teklif etme, uygun zaman sorma. Cevabına mutlaka 'Kusura bakmayın' veya 'Özür dilerim' ifadesiyle başla! Kısa ve net konuş. Sadece son sorduğu soruya odaklan, konuyu randevuya bağlama.\n`;
@@ -913,8 +919,6 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/hasta danışmanı arasında pla
     finalPrompt += `\n${safetyGuardrails}`;
 
     // P0.11: Human Tone Directive
-    const assistantHistory = history.filter((m: any) => m.role === 'assistant');
-    const isFirstAssistantTurn = assistantHistory.length === 0;
     const humanToneDirective = HumanTonePolicy.buildDirective({
       isHealthcare,
       isFirstAssistantTurn,
@@ -932,7 +936,7 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/hasta danışmanı arasında pla
 
     // P0.11: Dynamic Intent Guidance (State Arbitrated)
     let intentGuide = '';
-    const effectiveIntent = arbitration.effectiveIntent;
+    const effectiveIntent = unifiedContext?.effectiveIntent || arbitration.effectiveIntent;
 
     const { HealthcareProcessAnswerPolicy } = require('./healthcare-process-answer-policy');
     const { ConversationKnownFactsResolver } = require('./conversation-known-facts-resolver');
@@ -987,7 +991,13 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/hasta danışmanı arasında pla
     if (!intentGuide) {
       if (effectiveIntent === 'form_followup') {
         const compPhrase = resolvedFactsForGuide.complaint ? ` (${resolvedFactsForGuide.complaint} ile ilgili)` : '';
-        intentGuide = `Intent: form_followup\nHasta form doldurduğunu veya başvurusunu belirtiyor. YAPMA: "Hangi konuda yardımcı olabilirim?" veya "Kaydınızı göremiyorum" gibi generic/olumsuz ifadeler kullanma. YAP: Başvurunun alındığını sıcak bir şekilde onayla${compPhrase}. Sistemde form kaydı görünüyorsa şikayeti/konuyu referans al. Görünmüyorsa yine olumlu bir karşılık ver: "Başvurunuzu aldık, teşekkür ederiz." Ardından bilgilendirme görüşmesi için uygun gün/saat iste.`;
+        let welcomeInstruction = '';
+        if (isFirstAssistantTurn) {
+          welcomeInstruction = `İlk mesaj karşılama kuralları: Hasta ilk selamı verdi. YAP: Hastanın selamına sıcak bir şekilde karşılık ver, başvurunun/formun ulaştığını belirt${compPhrase} ve geçmiş olsun dile. UYARI: "doldurduğunuz form doğrultusunda sizinle iletişime geçiyoruz" gibi robotik/outbound bir cümle kurma, kullanıcı zaten yazmış durumdadır. Doğal bir karşılama yap.`;
+        } else {
+          welcomeInstruction = `Devam eden konuşma kuralları: KESİNLİKLE kendini tanıtma, kurum adını söyleme veya karşılama/selamlama şablonlarını KESİNLİKLE kullanma. Doğrudan hastanın form doldurdum beyanını/sorusunu onaylayarak konuya gir (Örn: "Evet, form kaydınızı görüyorum. ...").`;
+        }
+        intentGuide = `Intent: form_followup\nHasta form doldurduğunu veya başvurusunu belirtiyor. YAPMA: "Hangi konuda yardımcı olabilirim?" veya "Kaydınızı göremiyorum" gibi generic/olumsuz ifadeler kullanma. ${welcomeInstruction} Sistemde form kaydı görünüyorsa şikayeti/konuyu referans al. Görünmüyorsa yine olumlu bir karşılık ver: "Başvurunuzu aldık, teşekkür ederiz." Ardından bilgilendirme görüşmesi için uygun gün/saat iste.`;
       } else if (effectiveIntent === 'greeting') {
         intentGuide = `Intent: greeting\nBu cevapta sadece hastanın/müşterinin selamına doğal ve kısa bir karşılık ver.\nEski CRM/şikayet özetini veya randevu konusunu bu aşamada açma.`;
       } else if (effectiveIntent === 'identity_question') {
