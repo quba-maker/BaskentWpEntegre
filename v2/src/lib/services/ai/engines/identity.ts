@@ -306,8 +306,8 @@ export class IdentityEngine {
     if (country) facts.push(`Hastanın yaşadığı ülke/yer: ${country}.`);
     if (complaint) facts.push(`Hastanın şikayeti: ${complaint}.`);
     if (duration) facts.push(`Hastanın şikayet süresi: ${duration}.`);
-    if (randevu) facts.push(`Hastanın randevu/gelme planı: ${randevu}.`);
-    if (aramaSaati) facts.push(`Hastanın telefonla aranmak istediği saat/zaman dilimi: ${aramaSaati}.`);
+    if (randevu) facts.push(`Geliş zamanı: ${randevu}.`);
+    if (aramaSaati) facts.push(`Arama için uygun zaman: ${aramaSaati}.`);
     if (phone) facts.push(`Hastanın iletişim numarası: ${phone}.`);
 
     return facts;

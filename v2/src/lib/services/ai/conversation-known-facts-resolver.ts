@@ -489,10 +489,10 @@ export class ConversationKnownFactsResolver {
     }
 
     if (facts.availableTime) {
-      list.push(`Gelmek istediği/uygun olduğu tarih aralığı: ${facts.availableTime}.`);
+      list.push(`Geliş zamanı: ${facts.availableTime}.`);
     }
     if (facts.preferredCallTime) {
-      list.push(`Hastanın telefonla aranmak istediği uygun zaman dilimi: ${facts.preferredCallTime}.`);
+      list.push(`Arama için uygun zaman: ${facts.preferredCallTime}.`);
     }
     if (facts.formDepartment) {
       list.push(`Formdan gelen önerilen bölüm: ${facts.formDepartment}.`);

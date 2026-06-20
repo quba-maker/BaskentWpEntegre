@@ -239,8 +239,8 @@ export class PromptBuilder {
         });
         crmContext += `>> KURAL (MÜKERRER SORU YASAĞI): Yukarıdaki bilgileri (ad, yaş, ülke, şikayet, şikayet süresi, randevu tarihi/dönemi vb.) hastaya kesinlikle TEKRAR SORMA!\n`;
 
-        const hasArrivalFact = unifiedContext.patient_known_facts.some((f: string) => f.includes('Gelmek istediği/uygun olduğu tarih aralığı'));
-        const hasCallFact = unifiedContext.patient_known_facts.some((f: string) => f.includes('Hastanın telefonla aranmak istediği uygun zaman dilimi'));
+        const hasArrivalFact = unifiedContext.patient_known_facts.some((f: string) => f.includes('Geliş zamanı'));
+        const hasCallFact = unifiedContext.patient_known_facts.some((f: string) => f.includes('Arama için uygun zaman'));
         if (hasArrivalFact && hasCallFact) {
           crmContext += `>> KURAL (GELİŞ VE ARANMA SAATİ AYRIMI): Hastanın Türkiye'ye geleceği tarih aralığı ile telefonla aranmak istediği saat dilimi tamamen farklı konulardır. Kesinlikle bunları birleştirme! Örneğin "sabah saatlerinde gelmeyi düşündüğünüzü" deme (gelmek istediği zaman ile aranmak istediği saati karıştırma).\n`;
         }

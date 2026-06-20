@@ -119,7 +119,7 @@ export class AIResponseOrchestrator {
       }
     }
 
-    let replyLanguage = 'tr';
+    let replyLanguage: string | undefined = undefined;
 
     const buildResult = (data: Omit<OrchestratorResult, 'dryRun'>): OrchestratorResult => {
       return {
