@@ -5848,7 +5848,7 @@ test("P0.16-J: 4. multi-patient context: both bel fıtığı and annem kardiyolo
   const { ContextAwareSafeFallbackResolver } = await import("../lib/services/ai/context-aware-safe-fallback");
 
   const result = ContextAwareSafeFallbackResolver.resolve({
-    inboundText: 'ne zaman',
+    inboundText: 'belirleyelim', // P0.30: 'ne zaman' removed from next_step_request (too broad); 'belirleyelim' is explicit
     brain: {
       context: { config: { industry: 'healthcare' }, settings: {} },
       prompts: { metadata: {}, systemPrompt: '' }

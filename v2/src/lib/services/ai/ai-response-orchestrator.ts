@@ -1501,8 +1501,8 @@ export class AIResponseOrchestrator {
       const isProcessQuestion = ['süreç', 'surec', 'nasıl ışliyor', 'nasıl çalışıyor', 'nasıl yürüyor', 'tanı', 'tedavi', 'muayene', 'operasyon', 'ameliyat', 'aşama', 'adım'].some(kw => cleanInbound.includes(kw));
       const isMixedDoctorProcess = isDoctorLookup && isProcessQuestion;
 
-      // P0.16-K: Intent routing for next_step_request bypass (before LLM)
-      const isNextStepRequest = routedIntent === 'next_step_request';
+      // P0.30 Gate Diet: isNextStepRequest bypass removed — LLM handles next-step/process questions.
+      // 'ne zaman' was also removed from router keywords to prevent misrouting.
 
       // P0.16-K: Multi-intent detection (address+price+doctor+process in one message)
       const isMultiIntentQuery = MultiIntentConsultantComposer.isMultiIntent(inboundText);
@@ -1514,17 +1514,16 @@ export class AIResponseOrchestrator {
         /doktor\s+isim|hekim\s+isim|hangi\s+doktorlar/.test((m.content || '').toLowerCase())
       );
 
-      // P0.16-K: "başka bilgi" / open-ended continuation — must NOT close conversation
+      // P0.16-K: "başka bilgi" / open-ended continuation — kept for LLM hint injection only, NOT for bypass
       // P0.16-K: match both Turkish ş and ASCII s for real WhatsApp messages
       const isOpenContinuation = /ba(?:ş|s)ka\s+(?:bir\s+)?(bilgi|soru|[şs]ey)|ba(?:ş|s)ka\s+bir\s+(?:ş|s)ey\s+sorabilir|daha\s+fazla\s+bilgi|bir\s+(?:ş|s)ey\s+daha/i.test(inboundText);
 
-      // P0.16-L: routeAll — full intent matrix for new bypass paths
+      // P0.16-L: routeAll — full intent matrix
+      // P0.30 Gate Diet: isCannotTravelObjection, isDistanceObjection, isPoliteClose kept as
+      // detection variables but their bypass blocks are removed. LLM + tenant prompt handles these.
       const allIntents = ConversationIntentRouter.routeAll(inboundText, _tenantDeptKw);
       const isThanksButContinue = allIntents.includes('thanks_but_continue');
       const isOpenContinuationIntent = allIntents.includes('open_continuation') || isOpenContinuation;
-      const isCannotTravelObjection = allIntents.includes('cannot_travel_objection');
-      const isDistanceObjection = allIntents.includes('distance_objection');
-      const isPoliteClose = allIntents.includes('polite_close') && !isThanksButContinue && !isOpenContinuationIntent;
 
       // P0.16-L: Conversation frame (extends ConsultantConversationStateResolver with duration/objections)
       const safeHistoryForFrame = history.filter(m => m.content != null).map(m => ({ role: m.role, content: m.content as string }));
@@ -1554,29 +1553,44 @@ export class AIResponseOrchestrator {
       const recallSummary = buildRecallFactsSummary(history);
       const isRecallWithFacts = isRecallFrustration && recallSummary.length > 0;
 
-      // Safe guard: If it's thanks_but_continue or open_continuation, but contains a question mark '?'
-      // or is a longer text (possibly containing a specific question not caught by router regex),
-      // do NOT bypass LLM. Let Gemini handle the detailed question.
-      const isThanksButContinueBypass = isThanksButContinue && !cleanInbound.includes('?') && cleanInbound.length < 45;
-      const isOpenContinuationBypass = isOpenContinuationIntent && !cleanInbound.includes('?') && cleanInbound.length < 45;
+      // P0.30 Gate Diet: isThanksButContinueBypass and isOpenContinuationBypass removed.
+      // LLM handles these naturally via hint injection at L2121.
 
       const isCallbackConfirmation = effectiveIntent === 'callback_confirmation' || effectiveIntent === 'schedule_confirmation';
-      const isArrivalDateAnswer = effectiveIntent === 'arrival_date_answer' && !inboundText.includes('?') && inboundText.length < 50;
+      // P0.30 Gate Diet: Removed inboundText.length < 50 limit — arbitrary cap caused longer arrival answers to bypass LLM
+      const isArrivalDateAnswer = effectiveIntent === 'arrival_date_answer' && !inboundText.includes('?');
       const isCallbackTimeAnswer = effectiveIntent === 'callback_time_answer';
 
-      // Calculate shouldCreateTask for callback time answer bypass
+      // P0.30 Gate Diet: shouldCreateTask narrowed.
+      // Problem: Any 'görüşme' in ANY history msg caused new msgs to be treated as callback answers.
+      // Fix: history-based path now requires:
+      //   - Bot asked for time in LAST msg (lastBotAskedTime)
+      //   - User's CURRENT msg is callback_time_answer intent (giving time, not asking a question)
+      //   - Callback not already confirmed
+      // This allows "ertesi gün" → bypass when bot asked for time, but blocks
+      // "ne zaman gelebilirim" → generic_other → LLM (won't reach callback_time_answer intent).
       const isPositiveIntent = currentVisitIntent === 'turkey_visit_intent_positive';
-      const lastBotAskedTime = history.length > 0 && 
-        history[history.length - 1].role === 'assistant' && 
+      const lastBotAskedTime = history.length > 0 &&
+        history[history.length - 1].role === 'assistant' &&
         /saat|zaman|gün|gun|tarih|ne zaman|uygun/i.test(history[history.length - 1].content || '');
-      const isAppointmentContext = history.some(m => 
+      const isAppointmentContext = history.some(m =>
         /randevu|arama|görüşme|gorusme|telefon/i.test(m.content || '')
       );
-      const shouldCreateTask = isPositiveIntent || hasExplicitCall || (lastBotAskedTime && isAppointmentContext);
+      // Callback already confirmed if last_callback_offer was confirmed via bypass
+      const callbackAlreadyConfirmed = !!(convMeta?.last_callback_offer?.source === 'callback_confirmation_bypass');
+      // isCallbackTimeAnswer confirms user is providing time info (not asking a question)
+      const shouldCreateTask = isPositiveIntent || hasExplicitCall ||
+        (!callbackAlreadyConfirmed && lastBotAskedTime && isAppointmentContext && isCallbackTimeAnswer);
       const shouldBypassCallbackTimeAnswer = isCallbackTimeAnswer && shouldCreateTask;
 
-      const isLlmBypassChallenge = isPromptChallenge || isBotAccusation || isAiAccusation || isAngryPromptChallenge || shouldBypassDoctorLookup || isRecallWithFacts || isNextStepRequest || isMultiIntentQuery || isDoctorNamesRequest
-        || isThanksButContinueBypass || isOpenContinuationBypass || isPoliteClose || isCallbackConfirmation || isArrivalDateAnswer || shouldBypassCallbackTimeAnswer;
+
+      // P0.30 Gate Diet: Removed from bypass chain:
+      //   isNextStepRequest, isThanksButContinueBypass, isOpenContinuationBypass,
+      //   isCannotTravelObjection, isDistanceObjection, isPoliteClose
+      // These are conversational decisions — LLM + tenant prompt handles them better.
+      const isLlmBypassChallenge = isPromptChallenge || isBotAccusation || isAiAccusation || isAngryPromptChallenge
+        || shouldBypassDoctorLookup || isRecallWithFacts || isMultiIntentQuery || isDoctorNamesRequest
+        || isCallbackConfirmation || isArrivalDateAnswer || shouldBypassCallbackTimeAnswer;
 
       let text = '';
       let bypassed = false;
@@ -1589,21 +1603,16 @@ export class AIResponseOrchestrator {
         // P0.16-H/K Telemetry: intent list
         const intentList: string[] = [];
         if (shouldBypassDoctorLookup) intentList.push('doctor_lookup');
-        if (isRecallWithFacts) intentList.push('recall_frustration');
-        if (isPromptChallenge) intentList.push('prompt_challenge');
+        if (isRecallWithFacts)        intentList.push('recall_frustration');
+        if (isPromptChallenge)        intentList.push('prompt_challenge');
         if (isBotAccusation || isAiAccusation) intentList.push('identity_question');
-        if (isMixedDoctorProcess) intentList.push('process_question');
-        if (isNextStepRequest)    intentList.push('next_step_request');
-        if (isMultiIntentQuery)   intentList.push('multi_intent_query');
-        if (isDoctorNamesRequest) intentList.push('doctor_names_request');
-        // P0.16-L
-        if (isThanksButContinue)      intentList.push('thanks_but_continue');
-        if (isOpenContinuationIntent) intentList.push('open_continuation');
-        if (isCannotTravelObjection)  intentList.push('cannot_travel_objection');
-        if (isDistanceObjection)      intentList.push('distance_objection');
-        if (isPoliteClose)            intentList.push('polite_close');
+        if (isMixedDoctorProcess)     intentList.push('process_question');
+        if (isMultiIntentQuery)       intentList.push('multi_intent_query');
+        if (isDoctorNamesRequest)     intentList.push('doctor_names_request');
         if (isCallbackConfirmation)   intentList.push('callback_confirmation');
         if (isArrivalDateAnswer)      intentList.push('arrival_date_answer');
+        if (shouldBypassCallbackTimeAnswer) intentList.push('callback_time_answer');
+
 
         if (intentList.length > 0) {
           console.log(JSON.stringify({
@@ -1648,29 +1657,6 @@ export class AIResponseOrchestrator {
           }
         }
 
-        // ── P0.16-K: Next step request — ask for day/time slot ──────────────
-        if (!fallbackResult && isNextStepRequest) {
-          fallbackResult = ContextAwareSafeFallbackResolver.resolve({
-            inboundText,
-            brain,
-            identityConfig: brain.prompts.metadata?.identity || brain.context.config?.identity || {},
-            unifiedContext,
-            channelId,
-            systemPromptText,
-            resolvedActiveDepartment: resolvedActiveDepartment || null,
-            replyLanguage,
-            turkeyVisitIntent: currentVisitIntent,
-            formAlreadyAddressed
-          });
-          console.log(JSON.stringify({
-            tag: 'LIVE_TEST_PARITY_PATH_SELECTED',
-            path: 'next_step_consultant_ownership',
-            tenantId,
-            conversationId: conversationId || 'unknown',
-            workerPath
-          }));
-        }
-
         // ── P0.16-K: Doctor names request ────────────────────────────────────
         if (!fallbackResult && isDoctorNamesRequest) {
           // Collect departments from consultant state (multi-patient aware)
@@ -1684,106 +1670,6 @@ export class AIResponseOrchestrator {
           console.log(JSON.stringify({
             tag: 'LIVE_TEST_PARITY_PATH_SELECTED',
             path: `doctor_names_policy_${doctorPolicy.mode}`,
-            tenantId,
-            conversationId: conversationId || 'unknown',
-            workerPath
-          }));
-        }
-
-        // ── P0.16-L: Thanks but continue (teşekkür ama bir soru daha) ──────────
-        if (!fallbackResult && isThanksButContinueBypass) {
-          const selfComplaint = selfParticipant?.complaint;
-          const openPhrase = selfComplaint
-            ? `Tabii, memnuniyetle. ${selfComplaint} ile ilgili başka ne öğrenmek istersiniz?`
-            : 'Tabii, memnuniyetle. Başka hangi konuda bilgi almak istersiniz?';
-          fallbackResult = { text: openPhrase, finalPath: 'thanks_but_continue' };
-          console.log(JSON.stringify({
-            tag: 'LIVE_TEST_PARITY_PATH_SELECTED',
-            path: 'thanks_but_continue_handled',
-            tenantId,
-            conversationId: conversationId || 'unknown',
-            workerPath
-          }));
-        }
-
-        // ── P0.16-L: Open continuation (başka bilgi, bir soru daha) ─────────────
-        if (!fallbackResult && isOpenContinuationBypass && !isThanksButContinueBypass) {
-          fallbackResult = {
-            text: 'Tabii, hangi konuda bilgi almak istersiniz? Sormak istediğiniz her şeyi paylaşabilirsiniz.',
-            finalPath: 'open_continuation'
-          };
-          console.log(JSON.stringify({
-            tag: 'LIVE_TEST_PARITY_PATH_SELECTED',
-            path: 'open_continuation_handled',
-            tenantId,
-            conversationId: conversationId || 'unknown',
-            workerPath
-          }));
-        }
-
-        // ── P0.16-L: Cannot travel objection (yani ben gelemem) ──────────────────
-        if (!fallbackResult && isCannotTravelObjection) {
-          const locationNote = locationLabel ? `Almanya'dan` : 'Uzaktan';
-          const selfComp = selfParticipant?.complaint || 'şikayetiniz';
-          const cannotTravelText = [
-            `Anlıyorum, şu an gelmek zor olabilir. Bu tamamen doğal.`,
-            ``,
-            `${locationNote} gelen ziyaretçilerimiz için önce bir telefon görüşmesiyle süreci netleştiriyoruz. Bu görüşmede:`,
-            `• ${selfComp} için hangi branşın değerlendireceğini,`,
-            `• Varsa mevcut MR/tetkiklerinizin nasıl paylaşılabileceğini,`,
-            `• Geliş planı ve tahmini süreci,`,
-            `• Konaklama ve ulaşım seçeneklerini`,
-            ``,
-            `konuşabiliriz. Böylece gelmeden önce tabloyu net görürsünüz.`,
-            ``,
-            `Telefon görüşmesi için uygun olduğunuz gün ve saati paylaşır mısınız?`,
-          ].join('\n');
-          fallbackResult = { text: cannotTravelText, finalPath: 'cannot_travel_objection' };
-          console.log(JSON.stringify({
-            tag: 'LIVE_TEST_PARITY_PATH_SELECTED',
-            path: 'cannot_travel_handled',
-            tenantId,
-            conversationId: conversationId || 'unknown',
-            workerPath
-          }));
-        }
-
-        // ── P0.16-L: Distance objection (Konya uzak, ama devam) ─────────────────
-        if (!fallbackResult && isDistanceObjection && !isCannotTravelObjection) {
-          const selfComp = selfParticipant?.complaint || 'şikayetiniz';
-          const locNote = locationLabel ? `${locationLabel}'dan` : 'Uzaktan';
-          const distText = [
-            `Anlıyorum, uzaklık doğal bir endişe olabilir.`,
-            ``,
-            `${locNote} gelen ziyaretçilerimiz için süreci önce telefonla netleştiriyoruz. Bu görüşmede:`,
-            `• ${selfComp} için doğru branş ve uzman bilgisi,`,
-            `• Varsa tetkiklerinizin önceden değerlendirilebileceği,`,
-            `• Geliş, konaklama ve ulaşım planlaması,`,
-            `• Tahmini maliyet aralığı`,
-            ``,
-            `gibi konuları konuşabilirsiniz. Karar vermeden önce her şeyi net görmüş olursunuz.`,
-            ``,
-            `Telefon görüşmesi için uygun bir gün ve saat belirleyelim mi?`,
-          ].join('\n');
-          fallbackResult = { text: distText, finalPath: 'distance_objection' };
-          console.log(JSON.stringify({
-            tag: 'LIVE_TEST_PARITY_PATH_SELECTED',
-            path: 'distance_objection_handled',
-            tenantId,
-            conversationId: conversationId || 'unknown',
-            workerPath
-          }));
-        }
-
-        // ── P0.16-L: Polite close (yok sağolun, gerek kalmadı) ─────────────────
-        if (!fallbackResult && isPoliteClose) {
-          fallbackResult = {
-            text: 'Anladım, başka bir sorunuz olursa buradan yazabilirsiniz. Geçmiş olsun ve iyi günler dileriz 🙏',
-            finalPath: 'polite_close'
-          };
-          console.log(JSON.stringify({
-            tag: 'LIVE_TEST_PARITY_PATH_SELECTED',
-            path: 'polite_close_handled',
             tenantId,
             conversationId: conversationId || 'unknown',
             workerPath

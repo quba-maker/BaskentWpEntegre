@@ -391,11 +391,13 @@ export class ConversationIntentRouter {
     }
 
     // P0.16-J: Next Step / Consultant Ownership Intent
-    // Catches: "şimdi nasıl olacak", "ne zaman", "ee yani", "belirleyelim",
+    // Catches: "şimdi nasıl olacak", "ee yani", "belirleyelim",
     //          "yardımcı olmuyorsunuz", "beni kim arayacak", "ne yapmam gerekiyor"
+    // NOTE: 'ne zaman' intentionally excluded — matches arrival/business-hours questions
+    //       and was causing misrouting to next_step_request bypass (Gate Diet P0.30)
     const nextStepKeywords = [
       'simdi nasil olacak', 'simdi ne olacak', 'nasil olacak', 'ne olacak simdi',
-      'ee yani', 'e yani', 'yani ne', 'ne zaman',
+      'ee yani', 'e yani', 'yani ne',
       'belirleyelim', 'netlestirelim', 'kararlaştiralim', 'kararlaştiralim',
       'yardimci olmuyorsunuz', 'yardim etmiyorsunuz',
       'beni kim arayacak', 'kim arayacak', 'siz mi arayacaksiniz',
@@ -405,6 +407,7 @@ export class ConversationIntentRouter {
     if (nextStepKeywords.some(kw => clean.includes(kw))) {
       return 'next_step_request';
     }
+
 
     return 'generic_other';
   }
