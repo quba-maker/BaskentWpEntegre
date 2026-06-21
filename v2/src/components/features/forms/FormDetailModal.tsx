@@ -150,15 +150,56 @@ export function FormDetailModal({
       recommendedAction = 'bot_can_reply';
     }
 
+    const reasonMapping: Record<string, string> = {
+      feature_flag_disabled: 'Otomatik karşılama ayarı kapalı.',
+      dry_run_only: 'Dry-run açık, canlı gönderim kapalı.',
+      global_disabled: 'Sistem genel güvenlik kilidi açık.',
+      phase_lock_enabled: 'Canlı gönderim güvenlik kilidi açık.',
+      meta_window_closed: '24 saat penceresi kapalı.',
+      form_only_no_inbound: 'Hasta henüz WhatsApp’tan yazmadı.',
+      no_conversation: 'WhatsApp konuşması bulunamadı.',
+      tenant_mismatch: 'Güvenli tenant eşleşmesi sağlanamadı.',
+      channel_mismatch: 'Kanal eşleşmesi güvenli değil.',
+      template_required: 'Manuel şablon/taslak gerekir.',
+      already_processed: 'Bu kayıt daha önce işlenmiş.',
+      status_human: 'İnsan temsilci devralmış.',
+      bot_disabled: 'Bot kapalı.',
+      autopilot_disabled: 'Otomatik cevap kapalı.',
+      internal_error: 'Durum hesaplanamadı. Veri eksik veya bağlantı doğrulanamadı.'
+    };
+
+    const globalDisabled = !!elig.globalDisabled;
+    const featureFlagEnabled = !!elig.featureFlagEnabled;
+    const dryRun = !!elig.dryRun;
+    const isTenantAllowed = elig.isTenantAllowed !== false;
+    const phaseLockBlocked = elig.reason === 'phase_lock_enabled';
+
+    const gateReasons: any[] = [];
+    if (globalDisabled) gateReasons.push('global_disabled');
+    if (!isTenantAllowed) gateReasons.push('allowlist_missing');
+    if (!featureFlagEnabled) gateReasons.push('feature_flag_disabled');
+    if (phaseLockBlocked) gateReasons.push('phase_lock_enabled');
+    if (dryRun) gateReasons.push('dry_run_enabled');
+
+    let gateState = 'open';
+    if (globalDisabled) gateState = 'global_disabled';
+    else if (!isTenantAllowed) gateState = 'allowlist_missing';
+    else if (!featureFlagEnabled) gateState = 'feature_disabled';
+    else if (phaseLockBlocked) gateState = 'live_locked';
+    else if (dryRun) gateState = 'dry_run';
+
     return {
       source: 'form',
       category,
+      baseCategory: category === 'already_processed' ? 'already_open_inbox' : category,
+      gateState,
+      gateReasons,
       metaWindow,
       technicalEligible: elig.baseEligible,
       finalActionAllowed: elig.eligible,
       recommendedAction,
       reason: r,
-      userFriendlyReason: '',
+      userFriendlyReason: reasonMapping[r] || r || '',
       language: readiness.templateLanguage || 'tr',
       languageConfidence: 'medium',
       tenantId: elig.tenantId,

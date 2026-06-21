@@ -89,7 +89,8 @@ export const REASON_MAPPING: Record<string, string> = {
   form_only_outbound: 'Hasta henüz WhatsApp’tan yazmadı.',
   timezone_missing_not_eligible: 'Zaman dilimi eksik, otomasyon durduruldu.',
   department_not_allowed: 'Bu branş için otopilot izni bulunmuyor.',
-  rollout_percentage_excluded: 'Kademeli rollout havuzu dışında kaldı.'
+  rollout_percentage_excluded: 'Kademeli rollout havuzu dışında kaldı.',
+  multiple_conversations: 'Birden fazla aktif WhatsApp konuşması bulunduğu için eşleştirme askıya alındı (Kontrol Gerekli).'
 };
 
 export function mapUserFriendlyReason(reason: string): string {
@@ -187,9 +188,52 @@ export class FirstContactDecisionResolver {
       const phone = lead.phone_number;
       const suffix = phone.slice(-10);
 
+      const countRow = await db.executeSafe({
+        text: `
+          SELECT COUNT(*) as count 
+          FROM conversations 
+          WHERE tenant_id = $1 
+            AND RIGHT(REGEXP_REPLACE(phone_number, '\\D', '', 'g'), 10) = RIGHT(REGEXP_REPLACE($2, '\\D', '', 'g'), 10) 
+            AND (metadata IS NULL OR metadata->>'deleted_at' IS NULL)
+        `,
+        values: [tenantId, phone]
+      }) as any[];
+
+      const activeCount = parseInt(countRow[0]?.count || '0', 10);
+
+      if (activeCount > 1) {
+        const langDec = resolveLeadLanguage(lead.raw_data, lead.form_name, phone, 'tr');
+        return {
+          source: 'form',
+          category: 'not_eligible',
+          baseCategory: 'not_eligible',
+          gateState: gates.gateState,
+          gateReasons: gates.gateReasons,
+          metaWindow: 'unknown',
+          technicalEligible: false,
+          finalActionAllowed: false,
+          recommendedAction: 'no_action',
+          reason: 'multiple_conversations',
+          userFriendlyReason: 'Birden fazla aktif WhatsApp konuşması bulunduğu için eşleştirme askıya alındı (Kontrol Gerekli).',
+          userFriendlyTitle: 'Belirsiz',
+          language: langDec.language,
+          languageConfidence: langDec.confidence,
+          tenantId,
+          leadId
+        };
+      }
+
       const convRow = await db.executeSafe({
-        text: `SELECT id, status, autopilot_enabled, channel FROM conversations WHERE tenant_id = $1 AND RIGHT(phone_number, 10) = $2 AND (metadata IS NULL OR metadata->>'deleted_at' IS NULL) LIMIT 1`,
-        values: [tenantId, suffix]
+        text: `
+          SELECT id, status, autopilot_enabled, channel 
+          FROM conversations 
+          WHERE tenant_id = $1 
+            AND RIGHT(REGEXP_REPLACE(phone_number, '\\D', '', 'g'), 10) = RIGHT(REGEXP_REPLACE($2, '\\D', '', 'g'), 10) 
+            AND (metadata IS NULL OR metadata->>'deleted_at' IS NULL) 
+          ORDER BY updated_at DESC NULLS LAST, created_at DESC
+          LIMIT 1
+        `,
+        values: [tenantId, phone]
       }) as any[];
 
       if (convRow.length === 0) {
@@ -328,7 +372,7 @@ export class FirstContactDecisionResolver {
 
       // Base category is eligible
       const baseCategory = 'bot_auto_eligible';
-      const eligible = eligibility.baseEligible && eligibility.gateOpen;
+      const eligible = eligibility.baseEligible && eligibility.gateOpen && gates.gateState === 'open';
 
       let finalReason = eligibility.reason;
       if (!eligible) {

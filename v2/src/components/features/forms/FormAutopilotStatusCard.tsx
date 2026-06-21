@@ -102,7 +102,7 @@ export function FormAutopilotStatusCard({
         <div className="p-3 bg-amber-500/[0.04] border border-amber-500/10 rounded-xl flex items-start gap-2.5">
           <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
           <div className="text-[11px] leading-relaxed text-amber-800 font-semibold">
-            <span className="font-bold">Güvenlik Engeli:</span> {presentation.description}
+            <span className="font-bold">Güvenlik Engeli:</span> {decision.userFriendlyReason || decision.reason}
           </div>
         </div>
       )}

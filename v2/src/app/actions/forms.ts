@@ -143,11 +143,13 @@ export async function getForms(page: number = 1, search: string = "", source: st
                     SELECT c2.id, c2.status, c2.lead_stage, c2.country as conv_country, c2.department as conv_department, c2.autopilot_enabled as conv_autopilot_enabled, c2.channel as conv_channel
                     FROM conversations c2 
                     WHERE c2.tenant_id = l.tenant_id 
-                      AND RIGHT(c2.phone_number, 10) = RIGHT(l.phone_number, 10)
-                      AND l.customer_id IS NULL  -- Only use phone fallback when customer_id link unavailable
+                      AND RIGHT(REGEXP_REPLACE(c2.phone_number, '\\D', '', 'g'), 10) = RIGHT(REGEXP_REPLACE(l.phone_number, '\\D', '', 'g'), 10)
+                      AND (c2.metadata IS NULL OR c2.metadata->>'deleted_at' IS NULL)
                       AND (SELECT COUNT(*) FROM conversations cx 
                            WHERE cx.tenant_id = l.tenant_id 
-                           AND RIGHT(cx.phone_number, 10) = RIGHT(l.phone_number, 10)) = 1
+                           AND RIGHT(REGEXP_REPLACE(cx.phone_number, '\\D', '', 'g'), 10) = RIGHT(REGEXP_REPLACE(l.phone_number, '\\D', '', 'g'), 10)
+                           AND (cx.metadata IS NULL OR cx.metadata->>'deleted_at' IS NULL)) = 1
+                    ORDER BY c2.updated_at DESC NULLS LAST, c2.created_at DESC
                     LIMIT 1
                   ) c_phone ON c_identity.id IS NULL
                   -- Layer 4: Active opportunity preferred
@@ -757,11 +759,13 @@ export async function getFormStatusCounts() {
             SELECT c2.id
             FROM conversations c2 
             WHERE c2.tenant_id = l.tenant_id 
-              AND RIGHT(c2.phone_number, 10) = RIGHT(l.phone_number, 10)
-              AND l.customer_id IS NULL
+              AND RIGHT(REGEXP_REPLACE(c2.phone_number, '\\D', '', 'g'), 10) = RIGHT(REGEXP_REPLACE(l.phone_number, '\\D', '', 'g'), 10)
+              AND (c2.metadata IS NULL OR c2.metadata->>'deleted_at' IS NULL)
               AND (SELECT COUNT(*) FROM conversations cx 
                    WHERE cx.tenant_id = l.tenant_id 
-                   AND RIGHT(cx.phone_number, 10) = RIGHT(l.phone_number, 10)) = 1
+                   AND RIGHT(REGEXP_REPLACE(cx.phone_number, '\\D', '', 'g'), 10) = RIGHT(REGEXP_REPLACE(l.phone_number, '\\D', '', 'g'), 10)
+                   AND (cx.metadata IS NULL OR cx.metadata->>'deleted_at' IS NULL)) = 1
+            ORDER BY c2.updated_at DESC NULLS LAST, c2.created_at DESC
             LIMIT 1
           ) c_phone ON c.id IS NULL
           LEFT JOIN LATERAL (

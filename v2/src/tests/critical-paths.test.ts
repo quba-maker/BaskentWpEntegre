@@ -8472,7 +8472,23 @@ test("P0.28.2 T1: callback_time_answer skips Sunday, shifts to Monday, preserves
   const originalDb = (global as any).mockDb;
   (global as any).mockDb = db;
 
+  const resolvedPath = require.resolve("../lib/utils/date-parser");
+  const originalModule = require.cache[resolvedPath];
+  const mockedExports = { ...originalModule?.exports };
+  mockedExports.parseDeterministicSuggestion = (content: string, refDate: Date, prev: any, last: any) => {
+    // Force reference date to be Sunday, June 21, 2026 at 08:00:00 (before 10:00:00 TR time)
+    const mockRef = new Date("2026-06-21T05:00:00.000Z");
+    return originalModule?.exports.parseDeterministicSuggestion(content, mockRef, prev, last);
+  };
+  if (originalModule) {
+    require.cache[resolvedPath] = {
+      ...originalModule,
+      exports: mockedExports
+    };
+  }
+
   try {
+
     // Current time is Sunday: 2026-06-21T03:36:49+03:00.
     // User message sequence as requested:
     // 1. User: "pazar sabah 10"
@@ -8514,6 +8530,9 @@ test("P0.28.2 T1: callback_time_answer skips Sunday, shifts to Monday, preserves
     });
     assert(!lastCallbackOfferSaved, "last_callback_offer must not be saved for callback_time_answer path");
   } finally {
+    if (originalModule) {
+      require.cache[resolvedPath] = originalModule;
+    }
     (global as any).mockDb = originalDb;
   }
 });
@@ -9138,6 +9157,174 @@ test("P0.29 Pivot: Root-cause Fix tests for greeting loop, typos and opportuniti
   ];
   const rgResult = RepeatGuard.check(repeatHistory);
   assert(rgResult.isRepeating, "Should detect repetition of assistant greeting");
+});
+
+test("P0.30 - Form Yönetimi Status / Matching / 24h Window / Template Gate Fix", async () => {
+  const { FirstContactDecisionResolver } = require("../lib/services/automation/first-contact-decision-resolver");
+  const { resolveFirstContactCore } = require("../lib/utils/first-contact-status-resolver");
+  const { FormDecisionPresenter } = require("../lib/services/forms/form-autopilot-decision-presenter");
+
+  const originalMockDb = (global as any).mockDb;
+  const oldAllowed = process.env.FORM_AUTOPILOT_ALLOWED_TENANTS;
+  process.env.FORM_AUTOPILOT_ALLOWED_TENANTS = "baskent";
+
+  // Scenario 1: Suffix matching works when lead.customer_id is populated but conversation.customer_id is null.
+  const dbMock1 = {
+    executeSafe: async (q: { text: string; values?: any[] }) => {
+      const sql = q.text.replace(/\s+/g, ' ');
+      console.log("SQL QUERY IN MOCK:", sql);
+      // Fetching lead
+      if (sql.includes("FROM leads")) {
+        const res = [{
+          id: "lead-1",
+          phone_number: "+33695554294",
+          raw_data: "{}",
+          customer_id: "cust-1",
+          stage: "new",
+          tenant_id: "tenant-1"
+        }];
+        console.log("MOCK RETURN LEADS:", res);
+        return res;
+      }
+      // Related phones query in resolveFirstContactCore
+      if (sql.includes("DISTINCT c.phone_number")) {
+        const res = [{ phone: "+33695554294" }];
+        console.log("MOCK RETURN DISTINCT PHONES:", res);
+        return res;
+      }
+      // Fetching conversations - resolveForFormLead suffix lookup count check
+      if (sql.includes("SELECT COUNT(*)")) {
+        const res = [{ count: "1" }];
+        console.log("MOCK RETURN COUNT:", res);
+        return res;
+      }
+      // Fetching conversations
+      if (sql.includes("SELECT id, status") || sql.includes("SELECT c2.id") || sql.includes("FROM conversations")) {
+        const res = [{
+          id: "conv-1",
+          phone_number: "+33695554294",
+          customer_id: null, // not linked by ID yet
+          status: "bot",
+          autopilot_enabled: true,
+          channel: "whatsapp",
+          tenant_id: "tenant-1",
+          updated_at: new Date(),
+          created_at: new Date()
+        }];
+        console.log("MOCK RETURN CONVERSATIONS:", res);
+        return res;
+      }
+      // Outreach logs
+      if (sql.includes("FROM outreach_logs")) {
+        console.log("MOCK RETURN OUTREACH LOGS: []");
+        return [];
+      }
+      // Messages query: direction='in' received 2 hours ago (within 24h)
+      if (sql.includes("FROM messages")) {
+        const timeStr = new Date(Date.now() - 2 * 3600 * 1000).toISOString();
+        const res = [{
+          id: "msg-1",
+          conversation_id: "conv-1",
+          direction: "in",
+          content: "Merhaba",
+          phone: "+33695554294",
+          created_at: timeStr,
+          last_inbound_at: timeStr
+        }];
+        console.log("MOCK RETURN MESSAGES:", res);
+        return res;
+      }
+      // Tenants slug
+      if (sql.includes("FROM tenants")) {
+        const res = [{ slug: "baskent" }];
+        console.log("MOCK RETURN TENANTS:", res);
+        return res;
+      }
+      // AI module settings
+      if (sql.includes("FROM ai_module_settings")) {
+        const res = [
+          { module_name: "form_autopilot_for_open_meta_window", is_active: true, config: '{"dry_run": true}' }
+        ];
+        console.log("MOCK RETURN AI MODULE SETTINGS:", res);
+        return res;
+      }
+      console.log("MOCK RETURN DEFAULT []");
+      return [];
+    }
+  };
+
+  (global as any).mockDb = dbMock1;
+
+  try {
+    // 1. Check resolveFirstContactCore correctly resolves waiting_inbox_reply (patientLevelStatus)
+    const resolution = await resolveFirstContactCore(dbMock1, "tenant-1", "lead-1");
+    console.log("RESOLUTION:", JSON.stringify(resolution, null, 2));
+    assert(resolution.patientLevelStatus === "waiting_inbox_reply", `Expected waiting_inbox_reply, got ${resolution.patientLevelStatus}`);
+
+    // 2. Check resolveForFormLead returns open meta window, templateRequired false, category bot_auto_eligible but finalActionAllowed false
+    const decision = await FirstContactDecisionResolver.resolveForFormLead("tenant-1", "lead-1", dbMock1);
+    console.log("DECISION:", JSON.stringify(decision, null, 2));
+    assert(decision.category === "bot_auto_eligible", `Expected bot_auto_eligible, got ${decision.category}`);
+    assert(decision.baseCategory === "bot_auto_eligible", `Expected baseCategory bot_auto_eligible, got ${decision.baseCategory}`);
+    assert(decision.metaWindow === "open", `Expected metaWindow open, got ${decision.metaWindow}`);
+    assert(decision.finalActionAllowed === false, "finalActionAllowed should be false due to locks");
+
+    // 3. Test multiple active conversations: should fail to match
+    const dbMockMultiple = {
+      executeSafe: async (q: { text: string; values?: any[] }) => {
+        const sql = q.text.replace(/\s+/g, ' ');
+        if (sql.includes("FROM leads")) {
+          return [{ id: "lead-1", phone_number: "+33695554294", raw_data: "{}", customer_id: "cust-1", stage: "new", tenant_id: "tenant-1" }];
+        }
+        if (sql.includes("SELECT COUNT(*)")) {
+          return [{ count: "2" }]; // 2 active conversations!
+        }
+        if (sql.includes("FROM tenants")) {
+          return [{ slug: "baskent" }];
+        }
+        if (sql.includes("FROM ai_module_settings")) {
+          return [];
+        }
+        return [];
+      }
+    };
+    const decisionMult = await FirstContactDecisionResolver.resolveForFormLead("tenant-1", "lead-1", dbMockMultiple);
+    assert(decisionMult.category === "not_eligible", "Should be not_eligible when multiple active conversations exist");
+    assert(decisionMult.reason === "multiple_conversations", "Should report multiple_conversations reason");
+
+    // 4. Test presenter mapping
+    const presWithCategory = FormDecisionPresenter.present({
+      source: 'form',
+      category: 'bot_auto_eligible',
+      baseCategory: 'bot_auto_eligible',
+      gateState: 'open',
+      gateReasons: [],
+      metaWindow: 'open',
+      technicalEligible: true,
+      finalActionAllowed: false,
+      recommendedAction: 'bot_can_reply',
+      reason: 'phase_lock_enabled',
+      userFriendlyReason: 'Canlı gönderim kilidi aktif.'
+    });
+    assert(presWithCategory.title === "Otomatik Karşılama Aktif", `Expected 'Otomatik Karşılama Aktif', got '${presWithCategory.title}'`);
+    
+    const presWithoutCategory = FormDecisionPresenter.present({
+      source: 'form',
+      category: 'bot_auto_eligible',
+      gateState: 'open',
+      gateReasons: [],
+      metaWindow: 'open',
+      technicalEligible: true,
+      finalActionAllowed: false,
+      recommendedAction: 'bot_can_reply',
+      reason: 'phase_lock_enabled',
+      userFriendlyReason: 'Canlı gönderim kilidi aktif.'
+    } as any);
+    assert(presWithoutCategory.title === "Analiz Hatası", `Expected 'Analiz Hatası', got '${presWithoutCategory.title}'`);
+  } finally {
+    process.env.FORM_AUTOPILOT_ALLOWED_TENANTS = oldAllowed;
+    (global as any).mockDb = originalMockDb;
+  }
 });
 
 // ==========================================
