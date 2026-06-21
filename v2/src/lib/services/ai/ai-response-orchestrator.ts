@@ -1576,8 +1576,12 @@ export class AIResponseOrchestrator {
       const isAppointmentContext = history.some(m =>
         /randevu|arama|görüşme|gorusme|telefon/i.test(m.content || '')
       );
-      // Callback already confirmed if last_callback_offer was confirmed via bypass
-      const callbackAlreadyConfirmed = !!(convMeta?.last_callback_offer?.source === 'callback_confirmation_bypass');
+      // Callback already confirmed if: bypass source recorded OR DB-level confirmed_at set.
+      // Both must be checked — source covers in-memory bypass path, confirmed_at covers DB-written confirmations.
+      const callbackAlreadyConfirmed = !!(
+        convMeta?.last_callback_offer?.source === 'callback_confirmation_bypass' ||
+        convMeta?.last_callback_offer?.confirmed_at
+      );
       // isCallbackTimeAnswer confirms user is providing time info (not asking a question)
       const shouldCreateTask = isPositiveIntent || hasExplicitCall ||
         (!callbackAlreadyConfirmed && lastBotAskedTime && isAppointmentContext && isCallbackTimeAnswer);
