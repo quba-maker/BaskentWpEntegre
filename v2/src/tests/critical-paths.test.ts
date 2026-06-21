@@ -11003,6 +11003,477 @@ test("Başkent v62 Gate Diet T20: formAlreadyAddressed ignores soft-deleted conv
 });
 
 
+test("Başkent v69 Hotfix T21: Duration >= 180 min combined with working hours keywords filters out last_callback_offer, but broad slot alone is saved", async () => {
+  const { AIResponseOrchestrator } = require("../lib/services/ai/ai-response-orchestrator");
+  const { AIOrchestrator } = require("../lib/services/ai/orchestrator");
+  const originalGenerate = AIOrchestrator.prototype.generateResponse;
+
+  let savedMetadataStr = "";
+  let updateDbCalled: boolean = false;
+  const db = {
+    executeSafe: async (query: any, params?: any[]) => {
+      const text = typeof query === 'string' ? query : query?.text || '';
+      if (text.includes("UPDATE conversations SET metadata = $1")) {
+        const vals = params || (query && typeof query === 'object' && query.values) || [];
+        savedMetadataStr = vals[0] || "";
+        updateDbCalled = true;
+        return [{ id: "conv-1" }];
+      }
+      if (text.includes("UPDATE conversations")) {
+        return [{ id: "conv-1" }];
+      }
+      if (text.includes("FROM ai_module_settings")) {
+        return [{ config: { enabled: true, dry_run: false, rollout_percentage: 100, department_mode: "all" } }];
+      }
+      if (text.includes("FROM conversations")) {
+        return [{ metadata: {} }];
+      }
+      if (text.includes("FROM tenants")) {
+        return [{ timezone: "Europe/Istanbul" }];
+      }
+      return [];
+    }
+  };
+
+  const brain = {
+    context: {
+      tenantId: "tenant-1",
+      config: { industry: "healthcare", timezone: "Europe/Istanbul" },
+      settings: { aiModel: "gemini-2.5-flash" }
+    },
+    prompts: {
+      systemPrompt: "Mock system prompt",
+      metadata: { version: "1.0" }
+    }
+  };
+
+  const originalDb = (global as any).mockDb;
+  (global as any).mockDb = db;
+
+  const originalDate = global.Date;
+  // Sunday, June 21, 2026
+  const mockDate = new Date("2026-06-21T12:00:00+03:00");
+  (global as any).Date = class extends originalDate {
+    constructor(...args: any[]) {
+      if (args.length === 0) {
+        super(mockDate.getTime());
+        return;
+      }
+      super(...(args as [any, any?]));
+    }
+    static now() {
+      return mockDate.getTime();
+    }
+  } as any;
+
+  try {
+    // Case 1: Broad duration + keyword (mesai) -> Should not save last_callback_offer
+    AIOrchestrator.prototype.generateResponse = async () => {
+      return {
+        text: "Hafta içi 09:00-21:00 saatleri mesai saatlerimizdir.",
+        providerUsed: "gemini",
+        modelUsed: "gemini-2.5-flash"
+      };
+    };
+
+    updateDbCalled = false;
+    savedMetadataStr = "";
+    await AIResponseOrchestrator.run({
+      tenantId: "tenant-1",
+      conversationId: "conv-t21-1",
+      channel: "whatsapp",
+      channelId: "whatsapp",
+      inboundText: "merhaba",
+      phoneNumber: "905001234567",
+      sandbox: false,
+      brain,
+      history: [{ role: "user", content: "merhaba" }]
+    } as any, db);
+
+    assert(updateDbCalled === false || !savedMetadataStr.includes("last_callback_offer"), "Should not save last_callback_offer for broad working hours");
+
+    // Case 2: Broad duration (e.g. 14:00-18:00) but no operational keywords -> Should save
+    AIOrchestrator.prototype.generateResponse = async () => {
+      return {
+        text: "Sizi 22 Haziran Pazartesi günü 14:00-18:00 arasında arayabiliriz.",
+        providerUsed: "gemini",
+        modelUsed: "gemini-2.5-flash"
+      };
+    };
+
+    updateDbCalled = false;
+    savedMetadataStr = "";
+    await AIResponseOrchestrator.run({
+      tenantId: "tenant-1",
+      conversationId: "conv-t21-2",
+      channel: "whatsapp",
+      channelId: "whatsapp",
+      inboundText: "merhaba",
+      phoneNumber: "905001234567",
+      sandbox: false,
+      brain,
+      history: [{ role: "user", content: "merhaba" }]
+    } as any, db);
+
+    assert(updateDbCalled as any === true, "Should have called update metadata");
+    assert(savedMetadataStr.includes("last_callback_offer"), "Should have saved last_callback_offer for broad specific slot");
+
+  } finally {
+    AIOrchestrator.prototype.generateResponse = originalGenerate;
+    (global as any).mockDb = originalDb;
+    global.Date = originalDate;
+  }
+});
+
+
+test("Başkent v69 Hotfix T22: Route confirmation turns to callback_time_answer if user message contains explicit time/date/range", async () => {
+  const { AIResponseOrchestrator } = require("../lib/services/ai/ai-response-orchestrator");
+  const { ConversationStateArbitrator } = require("../lib/services/ai/conversation-state-arbitrator");
+  
+  const originalArbitrate = ConversationStateArbitrator.arbitrate;
+
+  const db = {
+    executeSafe: async (query: any, params?: any[]) => {
+      const text = typeof query === 'string' ? query : query?.text || '';
+      if (text.includes("UPDATE conversations")) {
+        return [{ id: "conv-1" }];
+      }
+      if (text.includes("FROM conversations")) {
+        return [{ 
+          id: "conv-1",
+          status: "active",
+          channel_id: "whatsapp",
+          metadata: { 
+            turkey_visit_intent: 'turkey_visit_intent_positive', 
+            patient_country: 'Netherlands', 
+            last_callback_offer: { 
+              proposed_due_at: '2026-06-22T11:00:00.000Z', 
+              source: 'bot_callback_offer',
+              timezone: 'Europe/Istanbul'
+            } 
+          } 
+        }];
+      }
+      if (text.includes("FROM ai_module_settings")) {
+        return [{ config: { enabled: true, dry_run: false, rollout_percentage: 100, department_mode: "all" } }];
+      }
+      if (text.includes("FROM tenants")) {
+        return [{ timezone: "Europe/Istanbul" }];
+      }
+      return [];
+    }
+  };
+
+  const brain = {
+    context: {
+      tenantId: "tenant-1",
+      config: { industry: "healthcare", timezone: "Europe/Istanbul" },
+      settings: {}
+    },
+    prompts: {
+      systemPrompt: "Mock system prompt",
+      metadata: { version: "1.0" }
+    }
+  };
+
+  const originalDb = (global as any).mockDb;
+  (global as any).mockDb = db;
+
+  const originalDate = global.Date;
+  const mockDate = new Date("2026-06-21T12:00:00+03:00");
+  (global as any).Date = class extends originalDate {
+    constructor(...args: any[]) {
+      if (args.length === 0) {
+        super(mockDate.getTime());
+        return;
+      }
+      super(...(args as [any, any?]));
+    }
+    static now() {
+      return mockDate.getTime();
+    }
+  } as any;
+
+  try {
+    // 1. Clean confirmation ("tamam")
+    ConversationStateArbitrator.arbitrate = () => ({
+      effectiveIntent: "callback_confirmation",
+      effectivePendingSlot: "generic_none"
+    });
+
+    const resClean = await AIResponseOrchestrator.run({
+      tenantId: "tenant-1",
+      conversationId: "conv-t22-1",
+      channel: "whatsapp",
+      channelId: "whatsapp",
+      inboundText: "tamam",
+      phoneNumber: "31612345678",
+      sandbox: true,
+      brain,
+      history: [
+        { role: "assistant", content: "22 Haziran Pazartesi günü saat 14:00'te arayabiliriz." },
+        { role: "user", content: "tamam" }
+      ]
+    } as any, db);
+
+    assert(resClean.modelUsed === "bypass", "Should bypass LLM for clean confirmation");
+    assert(resClean.text.includes("Pazartesi") && resClean.text.includes("14:00"), `Should confirm Monday at 14:00, got: ${resClean.text}`);
+
+    // 2. Confirmation containing new time ("pazartesi 16:30 olur")
+    const resWithTime = await AIResponseOrchestrator.run({
+      tenantId: "tenant-1",
+      conversationId: "conv-t22-2",
+      channel: "whatsapp",
+      channelId: "whatsapp",
+      inboundText: "pazartesi 16:30 olur",
+      phoneNumber: "31612345678",
+      sandbox: true,
+      brain,
+      history: [
+        { role: "assistant", content: "22 Haziran Pazartesi günü saat 14:00'te arayabiliriz." },
+        { role: "user", content: "pazartesi 16:30 olur" }
+      ]
+    } as any, db);
+
+    assert(resWithTime.modelUsed === "bypass", "Should bypass LLM for confirmation with time");
+    assert(resWithTime.text.includes("16:30"), "Should confirm the new time (16:30)");
+
+  } finally {
+    ConversationStateArbitrator.arbitrate = originalArbitrate;
+    (global as any).mockDb = originalDb;
+    global.Date = originalDate;
+  }
+});
+
+
+test("Başkent v69 Hotfix T23: Task scheduling conflicts are detected, task creation is aborted, and clarification is returned", async () => {
+  const { AIResponseOrchestrator } = require("../lib/services/ai/ai-response-orchestrator");
+  const { ConversationStateArbitrator } = require("../lib/services/ai/conversation-state-arbitrator");
+  
+  const originalArbitrate = ConversationStateArbitrator.arbitrate;
+
+  let taskCreated: boolean = false;
+  const db = {
+    executeSafe: async (query: any, params?: any[]) => {
+      const text = typeof query === 'string' ? query : query?.text || '';
+      if (text.includes("INSERT INTO follow_up_tasks")) {
+        taskCreated = true;
+        return [{ id: "task-1" }];
+      }
+      if (text.includes("UPDATE conversations")) {
+        return [{ id: "conv-1" }];
+      }
+      if (text.includes("FROM conversations")) {
+        return [{ 
+          id: "conv-1",
+          status: "active",
+          channel_id: "whatsapp",
+          metadata: { turkey_visit_intent: 'turkey_visit_intent_positive', patient_country: null } 
+        }];
+      }
+      if (text.includes("FROM ai_module_settings")) {
+        return [{ config: { enabled: true, dry_run: false, rollout_percentage: 100, department_mode: "all" } }];
+      }
+      if (text.includes("FROM tenants")) {
+        return [{ timezone: "Europe/Istanbul" }];
+      }
+      return [];
+    }
+  };
+
+  const brain = {
+    context: {
+      tenantId: "tenant-1",
+      config: { industry: "healthcare", timezone: "Europe/Istanbul" },
+      settings: {}
+    },
+    prompts: {
+      systemPrompt: "Mock system prompt",
+      metadata: { version: "1.0" }
+    }
+  };
+
+  const originalDb = (global as any).mockDb;
+  (global as any).mockDb = db;
+
+  const originalDate = global.Date;
+  const mockDate = new Date("2026-06-21T12:00:00+03:00");
+  (global as any).Date = class extends originalDate {
+    constructor(...args: any[]) {
+      if (args.length === 0) {
+        super(mockDate.getTime());
+        return;
+      }
+      super(...(args as [any, any?]));
+    }
+    static now() {
+      return mockDate.getTime();
+    }
+  } as any;
+
+  try {
+    ConversationStateArbitrator.arbitrate = () => ({
+      effectiveIntent: "callback_time_answer",
+      effectivePendingSlot: "generic_none"
+    });
+
+    // Case 1: Pazartesi 13:30 (No conflict)
+    taskCreated = false;
+    await AIResponseOrchestrator.run({
+      tenantId: "tenant-1",
+      conversationId: "conv-t23-1",
+      channel: "whatsapp",
+      channelId: "whatsapp",
+      inboundText: "pazartesi 13:30-16:00 arası",
+      phoneNumber: "31612345678",
+      sandbox: false,
+      brain,
+      history: [
+        { role: "assistant", content: "Pazartesi için arama saati seçebilirsiniz." },
+        { role: "user", content: "pazartesi 13:30-16:00 arası" }
+      ]
+    } as any, db);
+
+    assert(taskCreated as any === true, "Should create task since there is no conflict");
+
+    // Case 2: Pazartesi 23:00 (Conflicts, because it falls outside working hours 09:00-21:00 and shifts to Tuesday 09:00, which conflicts with 23:00)
+    taskCreated = false;
+    const resConflict = await AIResponseOrchestrator.run({
+      tenantId: "tenant-1",
+      conversationId: "conv-t23-2",
+      channel: "whatsapp",
+      channelId: "whatsapp",
+      inboundText: "pazartesi 23:00",
+      phoneNumber: "31612345678",
+      sandbox: false,
+      brain,
+      history: [
+        { role: "assistant", content: "Pazartesi için arama saati seçebilirsiniz." },
+        { role: "user", content: "pazartesi 23:00" }
+      ]
+    } as any, db);
+
+    assert(taskCreated === false, "Should not create task when there is a scheduling conflict due to working hours shift");
+    assert(resConflict.text.includes("çelişmektedir"), `Should ask for clarification on conflict, got: ${resConflict.text}`);
+
+  } finally {
+    ConversationStateArbitrator.arbitrate = originalArbitrate;
+    (global as any).mockDb = originalDb;
+    global.Date = originalDate;
+  }
+});
+
+
+test("Başkent v69 Hotfix T24: Genuine specific offer followed by a short confirmation schedules the task successfully", async () => {
+  const { AIResponseOrchestrator } = require("../lib/services/ai/ai-response-orchestrator");
+  const { ConversationStateArbitrator } = require("../lib/services/ai/conversation-state-arbitrator");
+  
+  const originalArbitrate = ConversationStateArbitrator.arbitrate;
+
+  let taskCreated: boolean = false;
+  const db = {
+    executeSafe: async (query: any, params?: any[]) => {
+      const text = typeof query === 'string' ? query : query?.text || '';
+      if (text.includes("INSERT INTO follow_up_tasks")) {
+        taskCreated = true;
+        return [{ id: "task-1" }];
+      }
+      if (text.includes("UPDATE conversations")) {
+        return [{ id: "conv-1" }];
+      }
+      if (text.includes("FROM conversations")) {
+        return [{ 
+          id: "conv-1",
+          status: "active",
+          channel_id: "whatsapp",
+          metadata: { 
+            turkey_visit_intent: 'turkey_visit_intent_positive', 
+            patient_country: null, 
+            last_callback_offer: { 
+              proposed_due_at: '2026-06-22T11:00:00.000Z', // 14:00 Turkey time
+              source: 'bot_callback_offer',
+              timezone: 'Europe/Istanbul'
+            } 
+          } 
+        }];
+      }
+      if (text.includes("FROM ai_module_settings")) {
+        return [{ config: { enabled: true, dry_run: false, rollout_percentage: 100, department_mode: "all" } }];
+      }
+      if (text.includes("FROM tenants")) {
+        return [{ timezone: "Europe/Istanbul" }];
+      }
+      return [];
+    }
+  };
+
+  const brain = {
+    context: {
+      tenantId: "tenant-1",
+      config: { industry: "healthcare", timezone: "Europe/Istanbul" },
+      settings: {}
+    },
+    prompts: {
+      systemPrompt: "Mock system prompt",
+      metadata: { version: "1.0" }
+    }
+  };
+
+  const originalDb = (global as any).mockDb;
+  (global as any).mockDb = db;
+
+  const originalDate = global.Date;
+  const mockDate = new Date("2026-06-21T12:00:00+03:00");
+  (global as any).Date = class extends originalDate {
+    constructor(...args: any[]) {
+      if (args.length === 0) {
+        super(mockDate.getTime());
+        return;
+      }
+      super(...(args as [any, any?]));
+    }
+    static now() {
+      return mockDate.getTime();
+    }
+  } as any;
+
+  try {
+    ConversationStateArbitrator.arbitrate = () => ({
+      effectiveIntent: "callback_confirmation",
+      effectivePendingSlot: "generic_none"
+    });
+
+    taskCreated = false;
+    const res = await AIResponseOrchestrator.run({
+      tenantId: "tenant-1",
+      conversationId: "conv-t24",
+      channel: "whatsapp",
+      channelId: "whatsapp",
+      inboundText: "tamam",
+      phoneNumber: "31612345678",
+      sandbox: false,
+      brain,
+      history: [
+        { role: "assistant", content: "22 Haziran Pazartesi günü Türkiye saatiyle 14:00'te arayabiliriz." },
+        { role: "user", content: "tamam" }
+      ]
+    } as any, db);
+
+    assert(taskCreated as any === true, "Should create task for genuine specific offer + short confirmation");
+    assert(res.modelUsed === "bypass", "Should use bypass");
+    assert(res.text.includes("Pazartesi"), "Should confirm Monday in response");
+    assert(res.text.includes("14:00"), "Should confirm 14:00 in response");
+
+  } finally {
+    ConversationStateArbitrator.arbitrate = originalArbitrate;
+    (global as any).mockDb = originalDb;
+    global.Date = originalDate;
+  }
+});
+
+
+
+
 
 async function runAllTests() {
   try {

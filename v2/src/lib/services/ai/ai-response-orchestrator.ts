@@ -204,6 +204,7 @@ export class AIResponseOrchestrator {
       db: any;
       isTurkeyBasisInherited: boolean;
       isPatientBasisInherited?: boolean;
+      inboundText?: string;
     }): Promise<{ responseText: string; isSuccess: boolean }> => {
       const {
         parsedSugg,
@@ -220,7 +221,8 @@ export class AIResponseOrchestrator {
         history,
         db,
         isTurkeyBasisInherited,
-        isPatientBasisInherited = false
+        isPatientBasisInherited = false,
+        inboundText
       } = input;
 
       const { resolvePatientTimezone } = require('../../utils/timezone');
@@ -373,6 +375,46 @@ export class AIResponseOrchestrator {
 
         const proposedUtc = new Date(trDate.getTime() - 3 * 60 * 60 * 1000).toISOString();
         parsedSugg.proposed_date = proposedUtc;
+
+        // Fix 3: Check for time conflict between user's current message (inboundText) and scheduled time (trDate)
+        if (inboundText) {
+          const { parseDeterministicSuggestion } = require('../../utils/date-parser');
+          const userParsed = parseDeterministicSuggestion(inboundText, new Date(), null, null);
+          if (userParsed.suggested_time) {
+            const tzToUse = timeZone || 'Europe/Istanbul';
+            const dtUser = new Date(proposedUtc);
+            const formatter = new Intl.DateTimeFormat('en-US', {
+              timeZone: tzToUse,
+              hour: '2-digit', minute: '2-digit', hour12: false
+            });
+            const formattedUserTz = formatter.format(dtUser); // "HH:MM"
+            const [trH, trM] = formattedUserTz.split(':').map(Number);
+            const [userH, userM] = userParsed.suggested_time.split(':').map(Number);
+            
+            const isMatchingTime = (userH === trH && userM === trM);
+            let isInsideRange = false;
+            if (userParsed.suggested_time_end) {
+              const [userEndH, userEndM] = userParsed.suggested_time_end.split(':').map(Number);
+              const userStartMin = userH * 60 + userM;
+              const userEndMin = userEndH * 60 + userEndM;
+              const trMinVal = trH * 60 + trM;
+              if (trMinVal >= userStartMin && trMinVal <= userEndMin) {
+                isInsideRange = true;
+              }
+            }
+            
+            if (!isMatchingTime && !isInsideRange) {
+              console.warn(`[processCallbackSuggestion] Time conflict detected: user specified ${userParsed.suggested_time} but proposed is ${trH}:${trM}. Aborting task creation.`);
+              let responseText = '';
+              if (lang === 'tr') {
+                responseText = `Belirttiğiniz ${inboundText.includes('-') || inboundText.includes('arası') || inboundText.includes('ve') ? 'saat aralığı' : 'saat'} ile planlanan arama saati (${String(trH).padStart(2, '0')}:${String(trM).padStart(2, '0')}) çelişmektedir. Hasta danışmanımızın sizi tam olarak hangi saatte aramasını istersiniz? 🙏`;
+              } else {
+                responseText = `The time you specified conflicts with the scheduled time (${String(trH).padStart(2, '0')}:${String(trM).padStart(2, '0')}). Exactly what time would you like our patient advisor to call you? 🙏`;
+              }
+              return { responseText, isSuccess: false };
+            }
+          }
+        }
 
         const formattedDate = formatLocalDate(trDate, lang);
 
@@ -1563,6 +1605,19 @@ export class AIResponseOrchestrator {
       const isArrivalDateAnswer = effectiveIntent === 'arrival_date_answer' && !inboundText.includes('?');
       const isCallbackTimeAnswer = effectiveIntent === 'callback_time_answer';
 
+      // Fix 2: Effective boolean flags for confirmation and time answer
+      let hasExplicitTimeInUserMsg = false;
+      if (isCallbackConfirmation && inboundText) {
+        const { parseDeterministicSuggestion } = require('../../utils/date-parser');
+        const userParsed = parseDeterministicSuggestion(inboundText, new Date(), null, null);
+        if (userParsed.suggested_time || userParsed.suggested_date) {
+          hasExplicitTimeInUserMsg = true;
+        }
+      }
+
+      const effectiveIsCallbackConfirmation = isCallbackConfirmation && !hasExplicitTimeInUserMsg;
+      const effectiveIsCallbackTimeAnswer = isCallbackTimeAnswer || (isCallbackConfirmation && hasExplicitTimeInUserMsg);
+
       // P0.30 Gate Diet: shouldCreateTask narrowed.
       // Problem: Any 'görüşme' in ANY history msg caused new msgs to be treated as callback answers.
       // Fix: history-based path now requires:
@@ -1586,8 +1641,8 @@ export class AIResponseOrchestrator {
       );
       // isCallbackTimeAnswer confirms user is providing time info (not asking a question)
       const shouldCreateTask = isPositiveIntent || hasExplicitCall ||
-        (!callbackAlreadyConfirmed && lastBotAskedTime && isAppointmentContext && isCallbackTimeAnswer);
-      const shouldBypassCallbackTimeAnswer = isCallbackTimeAnswer && shouldCreateTask;
+        (!callbackAlreadyConfirmed && lastBotAskedTime && isAppointmentContext && effectiveIsCallbackTimeAnswer);
+      const shouldBypassCallbackTimeAnswer = effectiveIsCallbackTimeAnswer && shouldCreateTask;
 
 
       // P0.30 Gate Diet: Removed from bypass chain:
@@ -1596,7 +1651,7 @@ export class AIResponseOrchestrator {
       // These are conversational decisions — LLM + tenant prompt handles them better.
       const isLlmBypassChallenge = isPromptChallenge || isBotAccusation || isAiAccusation || isAngryPromptChallenge
         || shouldBypassDoctorLookup || isRecallWithFacts || isMultiIntentQuery || isDoctorNamesRequest
-        || isCallbackConfirmation || isArrivalDateAnswer || shouldBypassCallbackTimeAnswer;
+        || effectiveIsCallbackConfirmation || isArrivalDateAnswer || shouldBypassCallbackTimeAnswer;
 
       let text = '';
       let bypassed = false;
@@ -1615,7 +1670,7 @@ export class AIResponseOrchestrator {
         if (isMixedDoctorProcess)     intentList.push('process_question');
         if (isMultiIntentQuery)       intentList.push('multi_intent_query');
         if (isDoctorNamesRequest)     intentList.push('doctor_names_request');
-        if (isCallbackConfirmation)   intentList.push('callback_confirmation');
+        if (effectiveIsCallbackConfirmation)   intentList.push('callback_confirmation');
         if (isArrivalDateAnswer)      intentList.push('arrival_date_answer');
         if (shouldBypassCallbackTimeAnswer) intentList.push('callback_time_answer');
 
@@ -1716,7 +1771,7 @@ export class AIResponseOrchestrator {
         }
 
         // ── P0.27: Callback Confirmation Bypass ──────────────────
-        if (!fallbackResult && isCallbackConfirmation) {
+        if (!fallbackResult && effectiveIsCallbackConfirmation) {
           // 1. Try to read from conversation.metadata.last_callback_offer first
           const lastOffer = convMeta?.last_callback_offer;
           let parsedSugg: any = null;
@@ -1792,7 +1847,8 @@ export class AIResponseOrchestrator {
               history,
               db,
               isTurkeyBasisInherited: hasRecentTurkeyTimeExplicit,
-              isPatientBasisInherited: hasRecentPatientTimeExplicit
+              isPatientBasisInherited: hasRecentPatientTimeExplicit,
+              inboundText
             });
             responseText = res.responseText;
             isSuccess = res.isSuccess;
@@ -1898,7 +1954,7 @@ export class AIResponseOrchestrator {
         }
 
         // P0.28.2: callback_time_answer bypass
-        if (!fallbackResult && isCallbackTimeAnswer) {
+        if (!fallbackResult && effectiveIsCallbackTimeAnswer) {
           if (!shouldCreateTask) {
             // Do NOT create task. Resolve using ContextAwareSafeFallbackResolver
             fallbackResult = ContextAwareSafeFallbackResolver.resolve({
@@ -1953,7 +2009,8 @@ export class AIResponseOrchestrator {
                 history,
                 db,
                 isTurkeyBasisInherited: hasRecentTurkeyTimeExplicit,
-                isPatientBasisInherited: hasRecentPatientTimeExplicit
+                isPatientBasisInherited: hasRecentPatientTimeExplicit,
+                inboundText
               });
               responseText = res.responseText;
               isSuccess = res.isSuccess;
@@ -2199,7 +2256,7 @@ export class AIResponseOrchestrator {
             // Deterministic cliches avoided per Rule 6 (no "temsilci" or "Müşteri temsilcimiz")
             const agentLabel = 'hasta danışmanımıza';
             text = `Teyidinizi aldım. Telefon görüşmesi için belirttiğiniz zamanı ilgili ${agentLabel} iletiyorum. Görüşmek üzere. 🙏`;
-          } else if (isCallbackTimeAnswer) {
+          } else if (effectiveIsCallbackTimeAnswer) {
             const { parseDeterministicSuggestion } = require('../../utils/date-parser');
             const parsedSugg = parseDeterministicSuggestion(inboundText, new Date(), null, lastAssistantMsg);
 
@@ -2228,7 +2285,8 @@ export class AIResponseOrchestrator {
                 history,
                 db,
                 isTurkeyBasisInherited: hasRecentTurkeyTimeExplicit,
-                isPatientBasisInherited: hasRecentPatientTimeExplicit
+                isPatientBasisInherited: hasRecentPatientTimeExplicit,
+                inboundText
               });
               responseText = res.responseText;
               isSuccess = res.isSuccess;
@@ -2377,31 +2435,54 @@ export class AIResponseOrchestrator {
       text = ResponseFormattingPolicy.format(text);
 
       // P0.27: Save last_callback_offer to conversation metadata if the bot response proposes a date/time
-      if (!sandbox && conversationId && text && !isCallbackTimeAnswerPath && effectiveIntent !== 'arrival_date_answer' && effectiveIntent !== 'callback_time_answer' && effectiveIntent !== 'call_time_answer') {
+      if (!sandbox && conversationId && text && !isCallbackTimeAnswerPath && effectiveIntent !== 'arrival_date_answer' && effectiveIntent !== 'callback_time_answer' && effectiveIntent !== 'call_time_answer' && !effectiveIsCallbackTimeAnswer) {
         try {
           const { parseDeterministicSuggestion } = require('../../utils/date-parser');
           const parsedSugg = parseDeterministicSuggestion(text, new Date(), null, null);
           if (parsedSugg.suggested_date && parsedSugg.suggested_time && parsedSugg.proposed_date) {
-            const db = withTenantDB(tenantId);
-            // Fetch existing metadata to preserve other fields
-            const conv = await db.executeSafe({
-              text: `SELECT metadata FROM conversations WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
-              values: [conversationId, tenantId]
-            }) as any[];
-            const currentMeta = conv[0]?.metadata || {};
-            const updatedMeta = {
-              ...currentMeta,
-              last_callback_offer: {
-                proposed_due_at: parsedSugg.proposed_date,
-                timezone: parsedSugg.suggested_timezone_basis || 'Europe/Istanbul',
-                source: 'bot_callback_offer',
-                offered_at: new Date().toISOString()
+            // Fix 1: Filter out broad working hours / mesai statements
+            let isBroadRange = false;
+            if (parsedSugg.suggested_time && parsedSugg.suggested_time_end) {
+              const [h1, m1] = parsedSugg.suggested_time.split(':').map(Number);
+              const [h2, m2] = parsedSugg.suggested_time_end.split(':').map(Number);
+              const diffMin = (h2 * 60 + m2) - (h1 * 60 + m1);
+              if (diffMin >= 180) { // 3 hours or more
+                isBroadRange = true;
               }
-            };
-            await db.executeSafe({
-              text: `UPDATE conversations SET metadata = $1 WHERE id = $2 AND tenant_id = $3`,
-              values: [JSON.stringify(updatedMeta), conversationId, tenantId]
-            });
+            }
+            const lowerText = text.toLowerCase();
+            const isWorkingHoursInfo = lowerText.includes('çalışma saat') || 
+                                       lowerText.includes('mesai') || 
+                                       lowerText.includes('hizmet vermekte') ||
+                                       lowerText.includes('pazar hariç') ||
+                                       lowerText.includes('pazar haric') ||
+                                       /09:00.*21:00/i.test(lowerText) ||
+                                       /09\.00.*21\.00/i.test(lowerText);
+            
+            const isBroadWorkingHours = isBroadRange && isWorkingHoursInfo;
+
+            if (!isBroadWorkingHours) {
+              const db = withTenantDB(tenantId);
+              // Fetch existing metadata to preserve other fields
+              const conv = await db.executeSafe({
+                text: `SELECT metadata FROM conversations WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+                values: [conversationId, tenantId]
+              }) as any[];
+              const currentMeta = conv[0]?.metadata || {};
+              const updatedMeta = {
+                ...currentMeta,
+                last_callback_offer: {
+                  proposed_due_at: parsedSugg.proposed_date,
+                  timezone: parsedSugg.suggested_timezone_basis || 'Europe/Istanbul',
+                  source: 'bot_callback_offer',
+                  offered_at: new Date().toISOString()
+                }
+              };
+              await db.executeSafe({
+                text: `UPDATE conversations SET metadata = $1 WHERE id = $2 AND tenant_id = $3`,
+                values: [JSON.stringify(updatedMeta), conversationId, tenantId]
+              });
+            }
           }
         } catch (err) {
           console.error('[AIResponseOrchestrator] Failed to save last_callback_offer metadata:', err);
