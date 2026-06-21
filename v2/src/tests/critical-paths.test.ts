@@ -9448,6 +9448,156 @@ test("Başkent v62 Ek T2: Hasta 'Türkiye saatiyle 13:30–16:00' derse sistem t
   }
 });
 
+test("Başkent v62 Ek T3: Bugün akşam olabilir (Pazar günü için) -> otopilot Pazartesi akşam saatlerini önerir", async () => {
+  const { AIResponseOrchestrator } = require("../lib/services/ai/ai-response-orchestrator");
+  const db = {
+    executeSafe: async (query: any, params?: any[]) => {
+      const text = typeof query === 'string' ? query : query?.text || '';
+      if (text.includes("FROM conversations")) {
+        return [{ metadata: { turkey_visit_intent: 'turkey_visit_intent_positive', patient_country: 'Germany' } }];
+      }
+      if (text.includes("FROM ai_module_settings")) {
+        return [{ config: { enabled: true, dry_run: false, rollout_percentage: 100, department_mode: "all" } }];
+      }
+      if (text.includes("FROM tenants")) {
+        return [{ timezone: "Europe/Istanbul" }];
+      }
+      return [];
+    }
+  };
+
+  const brain = {
+    context: {
+      tenantId: "tenant-1",
+      config: { industry: "healthcare", timezone: "Europe/Istanbul" },
+      settings: {}
+    },
+    prompts: {
+      systemPrompt: "Mock system prompt",
+      metadata: { version: "1.0" }
+    }
+  };
+
+  const originalDb = (global as any).mockDb;
+  (global as any).mockDb = db;
+
+  const originalDate = global.Date;
+  // Sunday, June 21, 2026
+  const mockDate = new Date("2026-06-21T12:00:00+03:00");
+  (global as any).Date = class extends originalDate {
+    constructor(...args: any[]) {
+      if (args.length === 0) {
+        super(mockDate.getTime());
+        return;
+      }
+      super(...(args as [any, any?]));
+    }
+    static now() {
+      return mockDate.getTime();
+    }
+  } as any;
+
+  try {
+    const res = await AIResponseOrchestrator.run({
+      tenantId: "tenant-1",
+      conversationId: "conv-1",
+      channel: "whatsapp",
+      channelId: "whatsapp",
+      inboundText: "bugün akşam olabilir",
+      phoneNumber: "491701234567",
+      sandbox: true,
+      brain,
+      history: [
+        { role: "user", content: "merhaba" },
+        { role: "assistant", content: "Uygun olduğunuz bir zamanı belirtin." },
+        { role: "user", content: "bugün akşam olabilir" }
+      ]
+    } as any);
+
+    assert(res.modelUsed === "bypass", `Expected bypass model, got: ${res.modelUsed}`);
+    assert(res.text.includes("Pazartesi akşam"), `Should suggest Pazartesi akşam for Sunday request, got: ${res.text}`);
+    assert(res.text.includes("uygunluk net olmayabilir"), `Should explain that Sunday is not clear, got: ${res.text}`);
+  } finally {
+    (global as any).mockDb = originalDb;
+    global.Date = originalDate;
+  }
+});
+
+test("Başkent v62 Ek T4: Yarın akşam olabilir (Pazar günü yazılırsa Pazartesi olur ve Berlin saati teyidi sorulur)", async () => {
+  const { AIResponseOrchestrator } = require("../lib/services/ai/ai-response-orchestrator");
+  const db = {
+    executeSafe: async (query: any, params?: any[]) => {
+      const text = typeof query === 'string' ? query : query?.text || '';
+      if (text.includes("FROM conversations")) {
+        return [{ metadata: { turkey_visit_intent: 'turkey_visit_intent_positive', patient_country: 'Germany' } }];
+      }
+      if (text.includes("FROM ai_module_settings")) {
+        return [{ config: { enabled: true, dry_run: false, rollout_percentage: 100, department_mode: "all" } }];
+      }
+      if (text.includes("FROM tenants")) {
+        return [{ timezone: "Europe/Istanbul" }];
+      }
+      return [];
+    }
+  };
+
+  const brain = {
+    context: {
+      tenantId: "tenant-1",
+      config: { industry: "healthcare", timezone: "Europe/Istanbul" },
+      settings: {}
+    },
+    prompts: {
+      systemPrompt: "Mock system prompt",
+      metadata: { version: "1.0" }
+    }
+  };
+
+  const originalDb = (global as any).mockDb;
+  (global as any).mockDb = db;
+
+  const originalDate = global.Date;
+  // Sunday, June 21, 2026. Tomorrow is Monday (June 22, 2026).
+  const mockDate = new Date("2026-06-21T12:00:00+03:00");
+  (global as any).Date = class extends originalDate {
+    constructor(...args: any[]) {
+      if (args.length === 0) {
+        super(mockDate.getTime());
+        return;
+      }
+      super(...(args as [any, any?]));
+    }
+    static now() {
+      return mockDate.getTime();
+    }
+  } as any;
+
+  try {
+    const res = await AIResponseOrchestrator.run({
+      tenantId: "tenant-1",
+      conversationId: "conv-1",
+      channel: "whatsapp",
+      channelId: "whatsapp",
+      inboundText: "yarın akşam olabilir",
+      phoneNumber: "491701234567",
+      sandbox: true,
+      brain,
+      history: [
+        { role: "user", content: "merhaba" },
+        { role: "assistant", content: "Uygun olduğunuz bir zamanı belirtin." },
+        { role: "user", content: "yarın akşam olabilir" }
+      ]
+    } as any);
+
+    assert(res.modelUsed === "bypass", `Expected bypass model, got: ${res.modelUsed}`);
+    assert(res.text.includes("Yarın akşam için not alabilirim"), `Should confirm tomorrow evening, got: ${res.text}`);
+    assert(res.text.includes("Almanya saatinize göre mi"), `Should ask for Germany timezone confirmation, got: ${res.text}`);
+  } finally {
+    (global as any).mockDb = originalDb;
+    global.Date = originalDate;
+  }
+});
+
 // ==========================================
 // SONUÇLAR
 // ==========================================

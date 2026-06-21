@@ -1711,12 +1711,13 @@ export class AIResponseOrchestrator {
             let isSuccess = false;
             let proposedDateStr: string | null = null;
             let shiftedDateStr: string | null = null;
+            const { resolvePatientTimezone } = require('../../utils/timezone');
+            const country = unifiedContext?.opportunity?.country || convMeta?.patient_country || null;
             
             const wh = (brain.context.settings?.workingHours || brain.context.config?.workingHours || { enabled: true, start: "09:00", end: "21:00" }) as any;
             
             if (parsedSugg && parsedSugg.suggested_date && parsedSugg.suggested_time) {
-              const { resolvePatientTimeDisplay, resolvePatientTimezone } = require('../../utils/timezone');
-              const country = unifiedContext?.opportunity?.country || convMeta?.patient_country || null;
+              const { resolvePatientTimeDisplay } = require('../../utils/timezone');
               const tzRes = resolvePatientTimezone(country);
               
               const timeZone = (parsedSugg.suggested_timezone_basis === 'turkey_time' || tzRes.timezone === 'Europe/Istanbul')
@@ -1832,8 +1833,12 @@ export class AIResponseOrchestrator {
             }
             
             if (!isSuccess) {
-              // Rule 3: Ask for clarification instead of uydurma when parsing fails
-              responseText = `Aranmak istediğiniz uygun bir gün ve saat aralığı belirtebilir misiniz? Görüşme talebinizi bu saat aralığıyla birlikte hasta danışmanımıza iletilmesi için not alıyorum. 🙏`;
+              if (hasRelativeOrPeriodKeywords(inboundText)) {
+                responseText = buildRelativeDaypartClarification(inboundText, country, convMeta, unifiedContext);
+              } else {
+                // Rule 3: Ask for clarification instead of uydurma when parsing fails
+                responseText = `Aranmak istediğiniz uygun bir gün ve saat aralığı belirtebilir misiniz? Görüşme talebinizi bu saat aralığıyla birlikte hasta danışmanımıza iletilmesi için not alıyorum. 🙏`;
+              }
             }
             
             if (isSuccess && shiftedDateStr && !sandbox) {
@@ -2119,12 +2124,13 @@ export class AIResponseOrchestrator {
             let responseText = '';
             let isSuccess = false;
             let shiftedDateStr: string | null = null;
+            const { resolvePatientTimezone } = require('../../utils/timezone');
+            const country = unifiedContext?.opportunity?.country || convMeta?.patient_country || null;
             
             const wh = (brain.context.settings?.workingHours || brain.context.config?.workingHours || { enabled: true, start: "09:00", end: "21:00" }) as any;
             
             if (parsedSugg && parsedSugg.suggested_date && parsedSugg.suggested_time) {
-              const { resolvePatientTimeDisplay, resolvePatientTimezone } = require('../../utils/timezone');
-              const country = unifiedContext?.opportunity?.country || convMeta?.patient_country || null;
+              const { resolvePatientTimeDisplay } = require('../../utils/timezone');
               const tzRes = resolvePatientTimezone(country);
               
               const timeZone = (parsedSugg.suggested_timezone_basis === 'turkey_time' || tzRes.timezone === 'Europe/Istanbul')
@@ -2239,7 +2245,11 @@ export class AIResponseOrchestrator {
             }
             
             if (!isSuccess) {
-              responseText = `Aranmak istediğiniz uygun bir gün ve saat aralığı belirtebilir misiniz? Görüşme talebinizi bu saat aralığıyla birlikte hasta danışmanımıza iletilmesi için not alıyorum. 🙏`;
+              if (hasRelativeOrPeriodKeywords(inboundText)) {
+                responseText = buildRelativeDaypartClarification(inboundText, country, convMeta, unifiedContext);
+              } else {
+                responseText = `Aranmak istediğiniz uygun bir gün ve saat aralığı belirtebilir misiniz? Görüşme talebinizi bu saat aralığıyla birlikte hasta danışmanımıza iletilmesi için not alıyorum. 🙏`;
+              }
             }
             
             if (isSuccess && shiftedDateStr && !sandbox) {
@@ -2528,5 +2538,128 @@ export class AIResponseOrchestrator {
         }
       }
     }
+  }
+}
+
+function hasRelativeOrPeriodKeywords(text: string): boolean {
+  const lower = text.toLowerCase();
+  return [
+    'bugün', 'bugun', 'yarın', 'yarin',
+    'sabah', 'öğle', 'öğlen', 'oglen', 'akşam', 'aksam', 'gece',
+    'pazartesi', 'salı', 'sali', 'çarşamba', 'carsamba', 'perşembe', 'persembe', 'cuma', 'cumartesi', 'pazar'
+  ].some(kw => lower.includes(kw));
+}
+
+function buildRelativeDaypartClarification(
+  inboundText: string,
+  country: string | null,
+  convMeta: any,
+  unifiedContext: any
+): string {
+  const lowerUser = inboundText.toLowerCase();
+
+  // Detect daypart
+  let requestedDaypart = '';
+  if (lowerUser.includes('sabah')) {
+    requestedDaypart = 'sabah';
+  } else if (lowerUser.includes('öğle') || lowerUser.includes('öğlen') || lowerUser.includes('oglen') || lowerUser.includes('öğleden sonra')) {
+    requestedDaypart = 'öğle';
+  } else if (lowerUser.includes('akşam') || lowerUser.includes('aksam') || lowerUser.includes('akşamüstü') || lowerUser.includes('aksamustu')) {
+    requestedDaypart = 'akşam';
+  } else if (lowerUser.includes('gece')) {
+    requestedDaypart = 'gece';
+  }
+
+  // Detect day
+  const weekdaysMap: { [key: string]: number } = {
+    pazartesi: 1, salı: 2, sali: 2, çarşamba: 3, carsamba: 3,
+    perşembe: 4, persembe: 4, cuma: 5, cumartesi: 6, pazar: 0
+  };
+  let matchedWeekday: string | null = null;
+  for (const dayName of Object.keys(weekdaysMap)) {
+    if (new RegExp(`\\b${dayName}\\b`, 'i').test(lowerUser)) {
+      matchedWeekday = dayName;
+      break;
+    }
+  }
+
+  const hasBugun = /\b(bugün|bu gün)\b/i.test(lowerUser);
+  const hasYarin = /\b(yarın|yarin)\b/i.test(lowerUser);
+
+  const getTrDate = (d: Date) => {
+    return new Date(d.getTime() + 3 * 3600000);
+  };
+  const nowTr = getTrDate(new Date());
+  const currentTrDay = nowTr.getUTCDay(); // 0 is Sunday, 1 is Monday, etc.
+
+  let targetDayOfWeek = currentTrDay;
+  let targetDayLabel = 'Bugün';
+
+  if (hasBugun) {
+    targetDayOfWeek = currentTrDay;
+    targetDayLabel = 'Bugün';
+  } else if (hasYarin) {
+    targetDayOfWeek = (currentTrDay + 1) % 7;
+    targetDayLabel = 'Yarın';
+  } else if (matchedWeekday) {
+    targetDayOfWeek = weekdaysMap[matchedWeekday];
+    targetDayLabel = matchedWeekday.charAt(0).toUpperCase() + matchedWeekday.slice(1);
+  } else {
+    // If no explicit day mentioned but daypart is mentioned, default to today
+    targetDayOfWeek = currentTrDay;
+    targetDayLabel = 'Bugün';
+  }
+
+  const isPastWorkingHours = nowTr.getUTCHours() >= 21;
+  const isSunday = targetDayOfWeek === 0;
+
+  // Sunday rule: counselors offline, suggest Monday
+  if (isSunday || (targetDayLabel === 'Bugün' && currentTrDay === 0) || (targetDayLabel === 'Yarın' && currentTrDay === 6 && isPastWorkingHours)) {
+    const daypartStr = requestedDaypart ? `${requestedDaypart} ` : '';
+    const dayLabelToUse = targetDayLabel === 'Bugün' ? 'Bugün' : (targetDayLabel === 'Yarın' ? 'Yarın' : `${targetDayLabel} günü`);
+    return `${dayLabelToUse} için uygunluk net olmayabilir. Pazartesi ${daypartStr}saatlerinde uygun olduğunuz aralığı yazarsanız hasta danışmanımıza iletilmesi için not alıyorum 🙏`;
+  }
+
+  // If requested today but working hours are already over
+  if (targetDayLabel === 'Bugün' && isPastWorkingHours) {
+    const daypartStr = requestedDaypart ? `${requestedDaypart} ` : '';
+    // If tomorrow is Sunday, suggest Monday
+    if (currentTrDay === 5) { // Friday past 21:00 -> tomorrow is Saturday (valid)
+      return `Bugün için çalışma saatlerimiz sona ermiştir. Yarın ${daypartStr}saatlerinde uygun olduğunuz aralığı yazarsanız hasta danışmanımıza iletilmesi için not alıyorum 🙏`;
+    } else if (currentTrDay === 6) { // Saturday past 21:00 -> tomorrow is Sunday (offline)
+      return `Bugün için çalışma saatlerimiz sona ermiştir. Pazartesi ${daypartStr}saatlerinde uygun olduğunuz aralığı yazarsanız hasta danışmanımıza iletilmesi için not alıyorum 🙏`;
+    } else {
+      return `Bugün için çalışma saatlerimiz sona ermiştir. Yarın ${daypartStr}saatlerinde uygun olduğunuz aralığı yazarsanız hasta danışmanımıza iletilmesi için not alıyorum 🙏`;
+    }
+  }
+
+  // Valid day/time requested, ask for specific hour range
+  const { resolvePatientTimezone } = require('../../utils/timezone');
+  const tzRes = resolvePatientTimezone(country);
+  const isDifferentTimezone = tzRes.timezone && tzRes.timezone !== 'Europe/Istanbul';
+
+  const daypartSuffix = requestedDaypart ? ` ${requestedDaypart}` : '';
+  const confirmPhrase = `${targetDayLabel}${daypartSuffix} için not alabilirim.`;
+
+  if (isDifferentTimezone) {
+    const countryLabels: { [key: string]: string } = {
+      'Almanya': 'Almanya', 'Germany': 'Almanya', 'DE': 'Almanya',
+      'Hollanda': 'Hollanda', 'Netherlands': 'Hollanda', 'NL': 'Hollanda',
+      'İngiltere': 'İngiltere', 'UK': 'İngiltere', 'GB': 'İngiltere',
+      'Fransa': 'Fransa', 'France': 'Fransa', 'FR': 'Fransa',
+      'Avusturya': 'Avusturya', 'Austria': 'Avusturya', 'AT': 'Avusturya',
+      'Belçika': 'Belçika', 'Belgium': 'Belçika', 'BE': 'Belçika',
+      'İsviçre': 'İsviçre', 'Switzerland': 'İsviçre', 'CH': 'İsviçre',
+      'Danimarka': 'Danimarka', 'Denmark': 'Danimarka', 'DK': 'Danimarka',
+      'İsveç': 'İsveç', 'Sweden': 'İsveç', 'SE': 'İsveç',
+    };
+    const patientCountryName = country ? (countryLabels[country] || country) : '';
+    const tzQuestion = patientCountryName 
+      ? `Saat aralığını ${patientCountryName} saatinize göre mi paylaşmıştınız?` 
+      : `Saat aralığını yerel saatinize göre mi paylaşmıştınız?`;
+    
+    return `${confirmPhrase} ${tzQuestion} Örneğin 18:00–21:00 arası gibi net bir aralık yazarsanız hasta danışmanımıza iletilmesi için not alıyorum 🙏`;
+  } else {
+    return `${confirmPhrase} Örneğin 18:00–21:00 arası gibi net bir saat aralığı belirtebilir misiniz? Görüşme talebinizi bu saat aralığıyla birlikte hasta danışmanımıza iletilmesi için not alıyorum 🙏`;
   }
 }
