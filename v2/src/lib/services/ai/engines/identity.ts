@@ -197,6 +197,32 @@ export class IdentityEngine {
           values: [cid, tenantId, normalizedPhone]
         });
 
+        // Opportunities exact match retroactive link
+        await db.executeSafe({
+          text: `
+            UPDATE opportunities
+            SET customer_id = $1
+            WHERE tenant_id = $2
+              AND customer_id IS NULL
+              AND (
+                phone_number = $3
+                OR conversation_id IN (
+                  SELECT id FROM conversations 
+                  WHERE tenant_id = $2 
+                    AND (customer_id = $1 OR phone_number = $3)
+                )
+              )
+          `,
+          values: [cid, tenantId, normalizedPhone]
+        });
+        console.log(JSON.stringify({
+          tag: 'RETROACTIVE_OPPORTUNITY_LINK',
+          tenantId,
+          customerId: cid,
+          phoneNumber: normalizedPhone,
+          matchReason: 'exact_phone_or_conversation_match'
+        }));
+
         // 2. Safe suffix match fallback (checked for uniqueness and country compatibility)
         const suffix = normalizedPhone.slice(-10);
 
@@ -231,6 +257,32 @@ export class IdentityEngine {
               text: `UPDATE conversations SET customer_id = $1 WHERE id = $2 AND tenant_id = $3`,
               values: [cid, cand.id, tenantId]
             });
+          }
+        }
+
+        // Opportunities suffix match retroactive link
+        const oppCandidates = await db.executeSafe({
+          text: `SELECT id, phone_number FROM opportunities WHERE tenant_id = $1 AND customer_id IS NULL AND RIGHT(phone_number, 10) = $2`,
+          values: [tenantId, suffix]
+        }) as any[];
+
+        if (oppCandidates.length === 1) {
+          const cand = oppCandidates[0];
+          const idCand = normalizePhoneForIdentity(cand.phone_number);
+          const idOrig = normalizePhoneForIdentity(normalizedPhone);
+          if (idCand.nationalSuffix === idOrig.nationalSuffix && idCand.countryHint === idOrig.countryHint) {
+            await db.executeSafe({
+              text: `UPDATE opportunities SET customer_id = $1 WHERE id = $2 AND tenant_id = $3`,
+              values: [cid, cand.id, tenantId]
+            });
+            console.log(JSON.stringify({
+              tag: 'RETROACTIVE_OPPORTUNITY_LINK',
+              tenantId,
+              opportunityId: cand.id,
+              customerId: cid,
+              phoneNumber: normalizedPhone,
+              matchReason: 'suffix_match'
+            }));
           }
         }
       } catch (mergeError) {
@@ -476,6 +528,27 @@ export class IdentityEngine {
         if (oppRows.length > 0) {
           opportunity = oppRows[0];
           resolvedFrom = 'inactive_conv_opp_fallback';
+        }
+      }
+
+      // ── Step 5: Fallback - Phone suffix match (Read-only recovery) ──
+      if (!opportunity && profile.primary_phone) {
+        const suffix = profile.primary_phone.slice(-10);
+        const oppRows = await db.executeSafe({
+          text: `
+            SELECT * FROM opportunities 
+            WHERE tenant_id = $1 
+              AND customer_id IS NULL 
+              AND (phone_number = $2 OR RIGHT(phone_number, 10) = $3)
+              AND stage NOT IN ('lost', 'not_qualified', 'arrived')
+            ORDER BY updated_at DESC
+            LIMIT 1
+          `,
+          values: [tenantId, profile.primary_phone, suffix]
+        }) as any[];
+        if (oppRows.length > 0) {
+          opportunity = oppRows[0];
+          resolvedFrom = 'phone_suffix_active_opp';
         }
       }
 

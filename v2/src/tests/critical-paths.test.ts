@@ -8998,6 +8998,148 @@ test("P0.29 T5: Arabic Conversation Chain mock validation", async () => {
   }
 });
 
+test("P0.29 Pivot: Root-cause Fix tests for greeting loop, typos and opportunities link", async () => {
+  const { ConversationIntentRouter } = require("../lib/services/ai/conversation-intent-router");
+  const { PromptBuilder } = require("../lib/services/ai/prompt-builder");
+  const { IdentityEngine } = require("../lib/services/ai/engines/identity");
+  const { AIResponseOrchestrator } = require("../lib/services/ai/ai-response-orchestrator");
+
+  // 1. form doldurmuştum -> form_followup yakalanır
+  const intent1 = ConversationIntentRouter.route("form doldurmuştum");
+  assert(intent1 === "form_followup", `Expected form_followup, got ${intent1}`);
+
+  // 2. form doldurmuştıum typo -> form_followup yakalanır
+  const intent2 = ConversationIntentRouter.route("form doldurmuştıum");
+  assert(intent2 === "form_followup", `Expected form_followup for typo, got ${intent2}`);
+
+  // 3. Diğer form keywords ve regex varyantları
+  assert(ConversationIntentRouter.route("başvurum var") === "form_followup", "başvurum var -> form_followup");
+  assert(ConversationIntentRouter.route("form kontrol") === "form_followup", "form kontrol -> form_followup");
+  assert(ConversationIntentRouter.route("form doldurdum") === "form_followup", "form doldurdum -> form_followup");
+  assert(ConversationIntentRouter.route("formu doldurdum") === "form_followup", "formu doldurdum -> form_followup");
+  assert(ConversationIntentRouter.route("başvuru yaptım") === "form_followup", "başvuru yaptım -> form_followup");
+  assert(ConversationIntentRouter.route("form gönderdim") === "form_followup", "form gönderdim -> form_followup");
+
+  // 4. İlk asistan turn + aktif form + form not addressed -> DEVAM EDEN KONUŞMA frenleri prompt’a girmez.
+  const brainMock = {
+    context: { tenantId: "tenant-1", config: { industry: "healthcare" } },
+    prompts: { systemPrompt: "Sen bir asistansın." }
+  };
+  const unifiedContextMock = {
+    effectiveIntent: 'form_followup',
+    history: [{ role: "user", content: "merhaba" }],
+    latestForm: { created_at: new Date() },
+    opportunity: { created_at: new Date() },
+    formAlreadyAddressed: false
+  };
+  const systemPrompt = PromptBuilder.buildSystemPrompt(brainMock as any, "greeting", false, unifiedContextMock);
+  assert(!systemPrompt.includes("DEVAM EDEN KONUŞMA"), "Should not include DEVAM EDEN KONUŞMA on first turn when unaddressed");
+  assert(!systemPrompt.includes("geçmiş bir konuşmanız var"), "Should not include geçmiş bir konuşmanız var when unaddressed");
+
+  // 5. İlk asistan turn + aktif form -> welcomeInstruction is first message karşılama
+  assert(systemPrompt.includes("İlk mesaj karşılama kuralları"), "Should contain first message welcome rules in form_followup context");
+
+  // 6. Form already addressed -> welcomeInstruction is devam eden konuşma kuralları, DEVAM EDEN KONUŞMA is active
+  const unifiedContextMockAddressed = {
+    effectiveIntent: 'form_followup',
+    history: [{ role: "user", content: "merhaba" }],
+    latestForm: { created_at: new Date() },
+    opportunity: { created_at: new Date() },
+    formAlreadyAddressed: true
+  };
+  const systemPromptAddressed = PromptBuilder.buildSystemPrompt(brainMock as any, "greeting", false, unifiedContextMockAddressed);
+  assert(systemPromptAddressed.includes("DEVAM EDEN KONUŞMA"), "Should include DEVAM EDEN KONUŞMA when form already addressed");
+  assert(systemPromptAddressed.includes("Devam eden konuşma kuralları"), "Should contain continuation rules");
+
+  // 7. If opportunity.customer_id is null, read-only recovery retrieves the opportunity context via phone suffix.
+  let selectQueryExecuted = false;
+  const dbMock = {
+    executeSafe: async (q: any) => {
+      const sql = typeof q === 'string' ? q : q.text;
+      if (sql.includes("SELECT * FROM customer_profiles")) {
+        return [{ id: "cust-1", primary_phone: "+905546833306" }];
+      }
+      if (sql.includes("SELECT id, form_name, raw_data")) {
+        return [];
+      }
+      if (sql.includes("SELECT * FROM conversations")) {
+        return [];
+      }
+      if (sql.includes("FROM opportunities") && sql.includes("customer_id IS NULL") && (sql.includes("RIGHT(phone_number, 10)") || sql.includes("phone_number, 10"))) {
+        selectQueryExecuted = true;
+        return [{ id: "opp-123", tenant_id: "tenant-1", summary: "Checkup summary", stage: "new_lead" }];
+      }
+      return [];
+    }
+  };
+  const originalDb = (global as any).mockDb;
+  (global as any).mockDb = dbMock;
+
+  try {
+    const context = await IdentityEngine.getContext("tenant-1", "cust-1", "conv-123");
+    assert(selectQueryExecuted, "Should query opportunities table by phone suffix");
+    assert(context?.opportunity?.id === "opp-123", "Should recover opportunity via phone suffix fallback");
+  } finally {
+    (global as any).mockDb = originalDb;
+  }
+
+  // 8. If DB update is done for retroactive opportunity link, it only updates exact tenant-scoped single match.
+  let updateOpportunitiesExecuted = false;
+  let updateWithSuffixExecuted = false;
+  const dbMockUpdate = {
+    executeSafe: async (q: any) => {
+      const sql = typeof q === 'string' ? q : q.text;
+      if (sql.includes("SELECT id, first_name, primary_phone FROM customer_profiles")) {
+        return [];
+      }
+      if (sql.includes("INSERT INTO customer_profiles")) {
+        return [{ id: "cust-1" }];
+      }
+      if (sql.includes("UPDATE leads")) {
+        return [];
+      }
+      if (sql.includes("UPDATE conversations")) {
+        return [];
+      }
+      if (sql.includes("UPDATE opportunities") && sql.includes("customer_id = $1") && sql.includes("tenant_id = $2") && sql.includes("conversation_id IN")) {
+        updateOpportunitiesExecuted = true;
+        return [];
+      }
+      if (sql.includes("SELECT") && sql.includes("FROM opportunities") && sql.includes("RIGHT(phone_number, 10) = $2")) {
+        return [{ id: "opp-123", phone_number: "+905546833306" }];
+      }
+      if (sql.includes("UPDATE opportunities") && sql.includes("SET customer_id = $1") && sql.includes("WHERE id = $2 AND tenant_id = $3")) {
+        updateWithSuffixExecuted = true;
+        return [];
+      }
+      return [];
+    }
+  };
+
+  (global as any).mockDb = dbMockUpdate;
+  try {
+    const cid = await IdentityEngine.resolveIdentity({
+      tenantId: "tenant-1",
+      phoneNumber: "+905546833306"
+    });
+    assert(cid === "cust-1", "Should resolve customer ID");
+    assert(updateOpportunitiesExecuted, "Should execute exact opportunities update query");
+    assert(updateWithSuffixExecuted, "Should execute suffix matching opportunities update query");
+  } finally {
+    (global as any).mockDb = originalDb;
+  }
+
+  // 9. Repeat guard check
+  const { RepeatGuard } = require("../lib/services/ai/repeat-guard");
+  const repeatHistory = [
+    { role: "assistant", content: "Merhaba, size yardımcı olmak üzere buradayım." },
+    { role: "user", content: "merhaba" },
+    { role: "assistant", content: "Merhaba, size yardımcı olmak üzere buradayım." }
+  ];
+  const rgResult = RepeatGuard.check(repeatHistory);
+  assert(rgResult.isRepeating, "Should detect repetition of assistant greeting");
+});
+
 // ==========================================
 // SONUÇLAR
 // ==========================================

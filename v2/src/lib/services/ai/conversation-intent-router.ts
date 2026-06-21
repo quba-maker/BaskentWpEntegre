@@ -160,7 +160,16 @@ export class ConversationIntentRouter {
       'form gondermistim', 'basvuru yapmistim', 'form doldurmustum', 'basvuru yapmıstım',
       'kontrol et', 'formumu kontrol et', 'basvurum vardi', 'basvurumu kontrol'
     ];
-    if (formKeywords.some(kw => clean.includes(kw) || originalLower.includes(kw))) {
+    const formRegexes = [
+      /form.*doldur/i,
+      /form.*gond/i,
+      /basvuru.*yap/i,
+      /basvurum.*var/i,
+      /form.*kontrol/i,
+      /basvuru.*kontrol/i
+    ];
+    if (formKeywords.some(kw => clean.includes(kw) || originalLower.includes(kw)) ||
+        formRegexes.some(rx => rx.test(clean) || rx.test(originalLower))) {
       return 'form_followup';
     }
 
@@ -496,6 +505,25 @@ export class ConversationIntentRouter {
     ];
     if (doctorKeywords.some(kw => clean.includes(kw))) {
       intents.push('doctor_lookup');
+    }
+
+    // Form Followup
+    const formKeywordsAll = [
+      'form doldurdum', 'basvuru yaptim', 'form gonderdim', 'formu doldurdum',
+      'form gondermistim', 'basvuru yapmistim', 'form doldurmustum', 'basvuru yapmıstım',
+      'kontrol et', 'formumu kontrol et', 'basvurum vardi', 'basvurumu kontrol'
+    ];
+    const formRegexesAll = [
+      /form.*doldur/i,
+      /form.*gond/i,
+      /basvuru.*yap/i,
+      /basvurum.*var/i,
+      /form.*kontrol/i,
+      /basvuru.*kontrol/i
+    ];
+    if (formKeywordsAll.some(kw => clean.includes(kw) || originalLower.includes(kw)) ||
+        formRegexesAll.some(rx => rx.test(clean) || rx.test(originalLower))) {
+      intents.push('form_followup');
     }
 
     // Price

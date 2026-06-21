@@ -267,8 +267,10 @@ export class PromptBuilder {
           if (suppressMemory) {
             crmContext += `- Özet: Müşteri/hasta bilgisi sistemde kayıtlı (geçmiş bağlam bu turda baskılanmıştır).\n`;
           }
-          // Only inject "resume context" rule when NOT greeting_only
-          crmContext += `>> KURAL: Bu kişiyle geçmiş bir konuşmanız var. Konuşmayı bu özet doğrultusunda, kaldığı yerden sürdür. Kendini ilk defa tanışıyormuş gibi tanıtma.\n`;
+          // Only inject "resume context" rule when NOT greeting_only and conversation is actually continuing
+          if (!isFirstAssistantTurn || unifiedContext?.formAlreadyAddressed === true) {
+            crmContext += `>> KURAL: Bu kişiyle geçmiş bir konuşmanız var. Konuşmayı bu özet doğrultusunda, kaldığı yerden sürdür. Kendini ilk defa tanışıyormuş gibi tanıtma.\n`;
+          }
         }
       } else if (unifiedContext.memory) {
         if (!suppressMemory) {
@@ -278,7 +280,9 @@ export class PromptBuilder {
         } else {
           crmContext += `- Önceki Görüşme Özeti: Geçmiş görüşme özeti (geçmiş bağlam bu turda baskılanmıştır).\n`;
         }
-        crmContext += `>> DİKKAT: Bu kişiyle geçmiş bir konuşmanız var. Konuşmayı bu özet doğrultusunda, kaldığı yerden sürdür. Kendini ilk defa tanışıyormuş gibi tanıtma.\n`;
+        if (!isFirstAssistantTurn || unifiedContext?.formAlreadyAddressed === true) {
+          crmContext += `>> DİKKAT: Bu kişiyle geçmiş bir konuşmanız var. Konuşmayı bu özet doğrultusunda, kaldığı yerden sürdür. Kendini ilk defa tanışıyormuş gibi tanıtma.\n`;
+        }
       }
 
       // ═══ P1: Form Lead Outreach Context ═══
@@ -367,10 +371,12 @@ export class PromptBuilder {
     if (ctaOfferedRecently || angryPatientMode || (!isHumanHandover && !asksIdentity && !asksName) || asksIdentity || asksName || patientClaimsBot || unifiedContext?.patientProvidedAvailability) {
       dynamicBrakesContext += `\n\n=== 🚨 DİNAMİK KALİTE VE FREN KURALLARI (DYNAMIC QUALITY BRAKES) ===\n`;
       if (!isHumanHandover && !asksIdentity && !asksName) {
-        if (!isFirstAssistantTurn) {
-          dynamicBrakesContext += `>> KRİTİK UYARI (DEVAM EDEN KONUŞMA): Bu diyalog devam eden bir konuşmadır. Kesinlikle ${pName ? `"${pName}", ` : ''}${orgShort ? `"${orgShort}", ` : ''}"yazıyorum", "iletişime geçiyoruz", "doldurduğunuz form doğrultusunda" veya herhangi bir kurum/asistan tanıtımı veya outbound karşılama/selamlama kalıbını KULLANMA. Karşılamayı ilk mesajda zaten yaptın. Doğrudan kullanıcının sorusuna/beyanına cevap vererek devam et. Doğrudan konuya gir (Örn: "Evet, form kaydınızı görüyorum. ...").\n`;
-        } else {
-          dynamicBrakesContext += `>> UYARI (DEVAM EDEN KONUŞMA): Bu konuşmanın devam mesajıdır ve hasta ismini/kimliğini sormamıştır. Kesinlikle ${pName ? `"${pName} ben", "ben ${pName}", ` : ''}${orgShort ? `"${orgShort}'dan yazıyorum", ` : ''}kendini tanıtan veya ismini söyleyen ifadeleri KULLANMA. Karşılamayı ilk mesajda zaten yaptın. Mesajına isimsiz, doğrudan hastanın sorusuna cevap vererek başla. Doğrudan konuya gir.\n`;
+        if (!isFirstAssistantTurn || unifiedContext?.formAlreadyAddressed === true) {
+          if (!isFirstAssistantTurn) {
+            dynamicBrakesContext += `>> KRİTİK UYARI (DEVAM EDEN KONUŞMA): Bu diyalog devam eden bir konuşmadır. Kesinlikle ${pName ? `"${pName}", ` : ''}${orgShort ? `"${orgShort}", ` : ''}"yazıyorum", "iletişime geçiyoruz", "doldurduğunuz form doğrultusunda" veya herhangi bir kurum/asistan tanıtımı veya outbound karşılama/selamlama kalıbını KULLANMA. Karşılamayı ilk mesajda zaten yaptın. Doğrudan kullanıcının sorusuna/beyanına cevap vererek devam et. Doğrudan konuya gir (Örn: "Evet, form kaydınızı görüyorum. ...").\n`;
+          } else {
+            dynamicBrakesContext += `>> UYARI (DEVAM EDEN KONUŞMA): Bu konuşmanın devam mesajıdır ve hasta ismini/kimliğini sormamıştır. Kesinlikle ${pName ? `"${pName} ben", "ben ${pName}", ` : ''}${orgShort ? `"${orgShort}'dan yazıyorum", ` : ''}kendini tanıtan veya ismini söyleyen ifadeleri KULLANMA. Karşılamayı ilk mesajda zaten yaptın. Mesajına isimsiz, doğrudan hastanın sorusuna cevap vererek başla. Doğrudan konuya gir.\n`;
+          }
         }
       }
       if (angryPatientMode) {
@@ -992,7 +998,7 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/hasta danışmanı arasında pla
       if (effectiveIntent === 'form_followup') {
         const compPhrase = resolvedFactsForGuide.complaint ? ` (${resolvedFactsForGuide.complaint} ile ilgili)` : '';
         let welcomeInstruction = '';
-        if (isFirstAssistantTurn) {
+        if (isFirstAssistantTurn && unifiedContext?.formAlreadyAddressed !== true) {
           welcomeInstruction = `İlk mesaj karşılama kuralları: Hasta ilk selamı verdi. YAP: Hastanın selamına sıcak bir şekilde karşılık ver, başvurunun/formun ulaştığını belirt${compPhrase} ve geçmiş olsun dile. UYARI: "doldurduğunuz form doğrultusunda sizinle iletişime geçiyoruz" gibi robotik/outbound bir cümle kurma, kullanıcı zaten yazmış durumdadır. Doğal bir karşılama yap.`;
         } else {
           welcomeInstruction = `Devam eden konuşma kuralları: KESİNLİKLE kendini tanıtma, kurum adını söyleme veya karşılama/selamlama şablonlarını KESİNLİKLE kullanma. Doğrudan hastanın form doldurdum beyanını/sorusunu onaylayarak konuya gir (Örn: "Evet, form kaydınızı görüyorum. ...").`;
