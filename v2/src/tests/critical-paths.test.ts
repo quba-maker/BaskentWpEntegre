@@ -10944,6 +10944,64 @@ test("Başkent v62 Gate Diet T19: 'tamam uygundur' + geçerli teklif yok → cal
   );
 });
 
+test("Başkent v62 Gate Diet T20: formAlreadyAddressed ignores soft-deleted conversations", async () => {
+  const { AIResponseOrchestrator } = require("../lib/services/ai/ai-response-orchestrator");
+  let capturedQueryText = "";
+  const db = {
+    executeSafe: async (query: any, params?: any[]) => {
+      const text = typeof query === 'string' ? query : query?.text || '';
+      console.log("TEST CAPTURED QUERY:", text);
+      if (text.includes("FROM conversations")) {
+        capturedQueryText = text;
+        return [];
+      }
+      if (text.includes("FROM ai_module_settings")) {
+        return [{ config: { enabled: true, dry_run: false, rollout_percentage: 100, department_mode: "all" } }];
+      }
+      if (text.includes("FROM tenants")) {
+        return [{ timezone: "Europe/Istanbul" }];
+      }
+      return [];
+    }
+  };
+
+  const brain = {
+    context: {
+      tenantId: "tenant-1",
+      config: { industry: "healthcare", timezone: "Europe/Istanbul" },
+      settings: {}
+    },
+    prompts: {
+      systemPrompt: "Mock system prompt",
+      metadata: { version: "1.0" }
+    }
+  };
+
+  const originalDb = (global as any).mockDb;
+  (global as any).mockDb = db;
+
+  try {
+    await AIResponseOrchestrator.run({
+      tenantId: "tenant-1",
+      conversationId: "conv-1",
+      channel: "whatsapp",
+      channelId: "whatsapp",
+      inboundText: "merhaba",
+      phoneNumber: "905001234567",
+      sandbox: true,
+      brain,
+      history: [{ role: "user", content: "merhaba" }],
+      unifiedContext: {
+        latestForm: { created_at: "2026-06-20T10:00:00Z", name: "Check-up" }
+      }
+    } as any);
+
+    assert(capturedQueryText.includes("metadata->>'deleted_at' IS NULL"), "Should filter out soft-deleted conversations in SELECT from conversations");
+  } finally {
+    (global as any).mockDb = originalDb;
+  }
+});
+
 
 
 async function runAllTests() {

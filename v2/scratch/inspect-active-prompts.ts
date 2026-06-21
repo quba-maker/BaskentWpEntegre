@@ -1,6 +1,6 @@
+import './preload';
 import { Pool } from '@neondatabase/serverless';
 import * as dotenv from 'dotenv';
-dotenv.config({ path: '.env.local' });
 
 const tenantId = 'caab9ea1-9591-45e4-bbc5-9c9b498982c8';
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });

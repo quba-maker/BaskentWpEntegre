@@ -496,7 +496,12 @@ export class AIOrchestrator {
       generationConfig: {
         temperature: config.temperature,
         maxOutputTokens: config.maxTokens,
-        responseMimeType: config.responseFormat === 'json' ? 'application/json' : undefined
+        responseMimeType: config.responseFormat === 'json' ? 'application/json' : undefined,
+        ...((config.modelId.includes('2.0') || config.modelId.includes('2.5')) ? {
+          thinkingConfig: {
+            thinkingBudget: 0
+          }
+        } : {})
       }
     };
 

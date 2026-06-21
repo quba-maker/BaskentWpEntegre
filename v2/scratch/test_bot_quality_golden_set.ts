@@ -1,6 +1,4 @@
-import dotenv from 'dotenv';
-import path from 'path';
-dotenv.config({ path: path.join(__dirname, '../.env.local') });
+import './preload';
 
 const testScenarios = [
   { id: 1, name: "Greeting Only (Merhabalar)", messages: [{ role: "user", content: "Merhabalar" }] },

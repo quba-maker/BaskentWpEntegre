@@ -1388,10 +1388,12 @@ export class AIResponseOrchestrator {
 
         if (!formAlreadyAddressed && latestFormCreatedAt) {
           try {
-            // Get all conversations for this customer or phone
+            // Get all conversations for this customer or phone, ignoring soft-deleted ones
             const convs = await db.executeSafe({
               text: `SELECT id, metadata FROM conversations 
-                     WHERE tenant_id = $1 AND (customer_id = $2 OR phone_number = $3)`,
+                     WHERE tenant_id = $1 
+                       AND (customer_id = $2 OR phone_number = $3)
+                       AND (metadata IS NULL OR metadata->>'deleted_at' IS NULL)`,
               values: [tenantId, customerId || null, phoneNumber || null]
             }) as any[];
 
