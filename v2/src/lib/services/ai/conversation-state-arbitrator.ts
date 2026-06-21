@@ -17,6 +17,7 @@
  */
 
 import { ConversationIntent, ConversationIntentRouter } from './conversation-intent-router';
+import { hasRealDatePattern } from '../../utils/date-parser';
 
 export type PendingSlot = string; // e.g. 'timezone_clarification', 'call_time', 'generic_none', etc.
 
@@ -176,7 +177,7 @@ export class ConversationStateArbitrator {
       'temmuz', 'ağustos', 'agustos', 'eylül', 'eylul', 'ekim', 'kasım', 'kasim', 'aralık', 'aralik',
       'ay sonu', 'ay başı', 'ay basi', 'ayın sonu', 'ayın başı'
     ];
-    const isDateMessage = dateIndicators.some(kw => lowerUser.includes(kw)) || /\d{1,2}[./]\d{1,2}/.test(lowerUser);
+    const isDateMessage = dateIndicators.some(kw => lowerUser.includes(kw)) || hasRealDatePattern(lowerUser);
 
     const isArrivalDateQuestion = (text: string) => {
       const lowerText = text.toLowerCase();
@@ -206,15 +207,7 @@ export class ConversationStateArbitrator {
       rawPendingSlot === 'arrival_date' ||
       formAwaitsArrivalDate();
 
-    if (isDateMessage && hasArrivalContext) {
-      return {
-        effectivePendingSlot: 'arrival_date',
-        effectiveIntent: 'arrival_date_answer',
-        staleSlotSuppressed: false
-      };
-    }
-
-    // P0.28.2: callback_time_answer check
+    // P0.28.2: callback_time_answer check variables prepared early for negative guard
     const { MultilingualTimeIntentResolver } = require('./multilingual-time-intent-resolver');
     const timeIntentRes = MultilingualTimeIntentResolver.resolve(lastUserMessage);
 
@@ -223,10 +216,7 @@ export class ConversationStateArbitrator {
       timeIntentRes.hasDaypart || 
       /(?:\b\d{1,2}[:. ]\d{2}\b|\b\d{1,2}\s*(?:de|da|te|ta|e|a|ye|ya|gibi|civari|civarinda|sularinda|sularında|olur|uygun|musait|müsait)\b)/.test(lowerUser);
 
-    const hasMonthKw = [
-      'ocak', 'şubat', 'subat', 'mart', 'nisan', 'mayıs', 'mayis', 'haziran',
-      'temmuz', 'ağustos', 'agustos', 'eylül', 'eylul', 'ekim', 'kasım', 'kasim', 'aralık', 'aralik'
-    ].some(kw => lowerUser.includes(kw)) || /\d{1,2}[./]\d{1,2}/.test(lowerUser);
+    const hasMonthKw = dateIndicators.some(kw => lowerUser.includes(kw)) || hasRealDatePattern(lowerUser);
 
     const isCallSchedulingContext = 
       rawPendingSlot === 'call_time' || 
@@ -237,12 +227,30 @@ export class ConversationStateArbitrator {
       routerIntent === 'time_availability' ||
       timeIntentRes.hasExplicitCallRequest;
 
+    const userIsAsking = this.containsQuestion(lastUserMessage);
+
+    const hasExplicitHourOrRange = /(?:\b\d{1,2}[:.]\d{2}\b|\b\d{1,2}\s*[-–]\s*\d{1,2}\b)/.test(lowerUser);
+    const callbackVerbs = ['arayin', 'arayın', 'arama', 'arayebilir', 'telefon', 'whatsapp', 'watsap', 'call', 'görüşme', 'gorusme', 'ulaşın', 'ulasin', 'ulaşabilirsiniz', 'ulasabilirsiniz'];
+    const hasCallbackVerb = callbackVerbs.some(verb => lowerUser.includes(verb));
+    const hasExplicitCallbackTimeRequest = hasExplicitHourOrRange && hasCallbackVerb;
+
+    // Check if the message is a callback time preference
+    const isCallbackTimePreference = (hasExplicitHourOrRange || (hasCallbackTimeKw && !hasMonthKw && isCallSchedulingContext)) && !userIsAsking;
+
+    const shouldBlockArrivalDateAnswer = hasExplicitCallbackTimeRequest || isCallbackTimePreference;
+
+    if (isDateMessage && hasArrivalContext && !shouldBlockArrivalDateAnswer) {
+      return {
+        effectivePendingSlot: 'arrival_date',
+        effectiveIntent: 'arrival_date_answer',
+        staleSlotSuppressed: false
+      };
+    }
+
     // === QUESTION GUARD ===
     // If the user's message is a question (business hours, availability, general inquiry),
     // ALL callback bypass gates below are disabled. The slot is suspended and intent
     // is handed back to the router for proper LLM answer.
-    const userIsAsking = this.containsQuestion(lastUserMessage);
-
     if (userIsAsking && rawPendingSlot && rawPendingSlot !== 'generic_none') {
       // Suspend pending slot — user asked something, don't hijack with callback flow
       return {
@@ -268,8 +276,6 @@ export class ConversationStateArbitrator {
     }
 
     // Rule 4: If message has explicit hours/hour-ranges AND is NOT a question, route to callback_time_answer.
-    const hasExplicitHourOrRange = /(?:\b\d{1,2}[:.]\d{2}\b|\b\d{1,2}\s*[-–]\s*\d{1,2}\b)/.test(lowerUser);
-
     if (hasExplicitHourOrRange && lowerUser !== '..' && !userIsAsking) {
       return {
         effectivePendingSlot: 'generic_none',
@@ -445,7 +451,7 @@ export class ConversationStateArbitrator {
           'temmuz', 'agustos', 'eylul', 'ekim', 'kasim', 'aralik'
         ];
         return dateKeywords.some(kw => lower.includes(kw)) ||
-          /\d{1,2}[./]\d{1,2}/.test(lower);
+          hasRealDatePattern(lower);
       }
 
       case 'confirmation_yes_no': {
@@ -497,7 +503,7 @@ export class ConversationStateArbitrator {
           'temmuz', 'ağustos', 'agustos', 'eylül', 'eylul', 'ekim', 'kasım', 'kasim', 'aralık', 'aralik',
           'ay sonu', 'ay başı', 'ay basi', 'ayın sonu', 'ayın başı'
         ];
-        return dateKeywords.some(kw => lower.includes(kw)) || /\d{1,2}[./]\d{1,2}/.test(lower);
+        return dateKeywords.some(kw => lower.includes(kw)) || hasRealDatePattern(lower);
       }
 
       default:

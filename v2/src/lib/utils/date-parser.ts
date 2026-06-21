@@ -406,3 +406,63 @@ export function parseDeterministicSuggestion(
     operation_window_valid: operationWindowValid
   };
 }
+
+export function hasRealDatePattern(text: string): boolean {
+  const lower = (text || '').toLowerCase();
+  
+  // 1. Check for 3-part dates like 22.06.2026 or 22/06/2026 or 22.06.26
+  const threePartRegex = /\b\d{1,2}[./]\d{1,2}[./]\d{2,4}\b/;
+  if (threePartRegex.test(lower)) {
+    return true;
+  }
+  
+  // 2. Check for 2-part patterns
+  const regex = /\b(\d{1,2})([./])(\d{1,2})\b/g;
+  let match;
+  
+  // Reset regex lastIndex
+  regex.lastIndex = 0;
+  
+  while ((match = regex.exec(lower)) !== null) {
+    const sep = match[2];
+    const num1 = parseInt(match[1], 10);
+    const num2 = parseInt(match[3], 10);
+    
+    if (sep === '/') {
+      // e.g. 22/06 is always a date
+      return true;
+    }
+    
+    if (sep === '.') {
+      if (num2 > 12 || num2 === 0) {
+        // e.g. 13.30 (num2=30) or 16.00 (num2=0) -> definitely a time, not a date
+        continue;
+      }
+      if (num1 > 23) {
+        // e.g. 24.06 or 25.06 -> definitely a date (since hours are 0-23)
+        return true;
+      }
+      
+      // Both parts are in hour/month ranges (e.g. 10.07 or 12.06)
+      // Check surrounding context (12 chars before and after the match)
+      const matchIndex = match.index;
+      const matchStr = match[0];
+      const start = Math.max(0, matchIndex - 12);
+      const end = Math.min(lower.length, matchIndex + matchStr.length + 12);
+      const context = lower.substring(start, end);
+      
+      const timeKeywords = ['saat', 'arası', 'arasi', 'aralarında', 'aralarinda', 'arayin', 'arayın', 'whatsapp', 'watsap', 'telefon', 'görüşme', 'gorusme', 'ulaşın', 'ulasin'];
+      const hasTimeContext = timeKeywords.some(kw => context.includes(kw));
+      
+      if (hasTimeContext) {
+        // It's accompanied by time indicators nearby, treat as time
+        continue;
+      }
+      
+      // Otherwise, assume it is a date
+      return true;
+    }
+  }
+  
+  return false;
+}

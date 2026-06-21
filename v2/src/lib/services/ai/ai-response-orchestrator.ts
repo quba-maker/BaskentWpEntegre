@@ -23,6 +23,7 @@ import { ConversationIntentRouter } from './conversation-intent-router';
 import { ConversationFrameResolver } from './conversation-frame-resolver';
 import { WhatsAppFormattingFinalizer } from './whatsapp-formatting-finalizer';
 import { TurkishFinalQualityNormalizer } from './turkish-final-quality-normalizer';
+import { hasRealDatePattern } from '../../utils/date-parser';
 // P0.16-M: Final pipeline enforcer — mandatory chain for all response paths
 import { FinalPipelineEnforcer } from './final-pipeline-enforcer';
 // P0.19: Tenant-agnostic config resolver
@@ -255,6 +256,30 @@ export class AIResponseOrchestrator {
         } else if (isPatientBasisInherited) {
           timezoneBasisToUse = 'patient_local_time';
         }
+        
+        const isPatientTzDifferent = tzRes.timezone && tzRes.timezone !== 'Europe/Istanbul';
+        const rangeStr = parsedSugg.suggested_time_end
+          ? `${parsedSugg.suggested_time}–${parsedSugg.suggested_time_end}`
+          : parsedSugg.suggested_time;
+
+        if (timezoneBasisToUse === 'unknown' && isPatientTzDifferent) {
+          const patientCountryName = country ? (countryTranslations[lang]?.[country] || (lang === 'tr' ? country : null) || countryTranslations.en[country] || country) : '';
+          
+          let responseText = '';
+          if (lang === 'tr') {
+            responseText = `${rangeStr} aralığını not alabilirim. Bu saat Türkiye saatiyle mi, ${patientCountryName} saatinizle mi? Ayrıca hangi gün için uygun olur? 🙏`;
+          } else if (lang === 'de') {
+            responseText = `Ich kann den Zeitraum ${rangeStr} notieren. Ist dies in Türkei-Zeit oder in Ihrer ${patientCountryName}-Zeit? Und an welchem Tag würde es Ihnen passen? 🙏`;
+          } else if (lang === 'nl') {
+            responseText = `Ik kan het tijdsbereik ${rangeStr} notieren. Is dit in Turkse tijd of in uw ${patientCountryName}-tijd? En op welke dag zou het schikken? 🙏`;
+          } else if (lang === 'ar') {
+            responseText = `يمكنني تسجيل الفترة الزمنية ${rangeStr}. هل هذا بتوقيت تركيا أم بتوقيتك المحلي في ${patientCountryName}؟ وأي يوم سيكون مناسباً لك؟ 🙏`;
+          } else {
+            responseText = `I can note the time range ${rangeStr}. Is this in Turkey time or your ${patientCountryName} time? And which day would be suitable? 🙏`;
+          }
+          return { responseText, isSuccess: false };
+        }
+
         const isTrTz = timezoneBasisToUse === 'turkey_time' || tzRes.timezone === 'Europe/Istanbul';
 
         const tzLabels: Record<string, Record<string, string>> = {
@@ -266,10 +291,6 @@ export class AIResponseOrchestrator {
         };
         const langLabels = tzLabels[lang] || tzLabels.en;
         const tzLabel = isTrTz ? langLabels.tr : langLabels.local;
-
-        const rangeStr = parsedSugg.suggested_time_end
-          ? `${parsedSugg.suggested_time}–${parsedSugg.suggested_time_end}`
-          : parsedSugg.suggested_time;
 
         let responseText = '';
         if (lang === 'tr') {
@@ -2174,7 +2195,7 @@ export class AIResponseOrchestrator {
             'temmuz', 'ağustos', 'agustos', 'eylül', 'eylul', 'ekim', 'kasım', 'kasim', 'aralık', 'aralik',
             'ay sonu', 'ay başı', 'ay basi', 'ayın sonu', 'ayın başı'
           ];
-          const isDateMessage = dateIndicators.some(kw => lowerUser.includes(kw)) || /\d{1,2}[./]\d{1,2}/.test(lowerUser);
+          const isDateMessage = dateIndicators.some(kw => lowerUser.includes(kw)) || hasRealDatePattern(lowerUser);
 
           const affirmatives = ['evet', 'olur', 'tamam', 'ok', 'okay', 'yes', 'uygun', 'uygundur', 'evet uygun', 'kabul', 'tamamdir', 'hay hay', 'tabii', 'onaylıyorum', 'arayabilirsiniz', 'arayın', 'arayin', 'ararlar'];
           const isAffirmative = affirmatives.some(kw => lowerUser === kw || lowerUser.startsWith(kw + ' ') || lowerUser.endsWith(' ' + kw) || lowerUser.includes(' ' + kw + ' '));

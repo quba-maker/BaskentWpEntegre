@@ -11472,7 +11472,141 @@ test("Başkent v69 Hotfix T24: Genuine specific offer followed by a short confir
 });
 
 
+test("Başkent v70 Hotfix T25: Verify HH.MM time is not treated as date, and correct daypart/timezone clarification is returned", async () => {
+  const { AIResponseOrchestrator } = require("../lib/services/ai/ai-response-orchestrator");
+  
+  const db = {
+    executeSafe: async (query: any, params?: any[]) => {
+      const text = typeof query === 'string' ? query : query?.text || '';
+      if (text.includes("UPDATE conversations")) {
+        return [{ id: "conv-1" }];
+      }
+      if (text.includes("FROM conversations")) {
+        return [{ 
+          id: "conv-1",
+          status: "active",
+          channel_id: "whatsapp",
+          metadata: { 
+            turkey_visit_intent: 'turkey_visit_intent_positive', 
+            patient_country: 'Belgium'
+          } 
+        }];
+      }
+      if (text.includes("FROM ai_module_settings")) {
+        return [{ config: { enabled: true, dry_run: false, rollout_percentage: 100, department_mode: "all" } }];
+      }
+      if (text.includes("FROM tenants")) {
+        return [{ timezone: "Europe/Istanbul" }];
+      }
+      return [];
+    }
+  };
 
+  const brain = {
+    context: {
+      tenantId: "tenant-1",
+      config: { industry: "healthcare", timezone: "Europe/Istanbul" },
+      settings: {}
+    },
+    prompts: {
+      systemPrompt: "Mock system prompt",
+      metadata: { version: "1.0" }
+    }
+  };
+
+  const originalDb = (global as any).mockDb;
+  (global as any).mockDb = db;
+
+  const originalDate = global.Date;
+  const mockDate = new Date("2026-06-21T12:00:00+03:00");
+  (global as any).Date = class extends originalDate {
+    constructor(...args: any[]) {
+      if (args.length === 0) {
+        super(mockDate.getTime());
+        return;
+      }
+      super(...(args as [any, any?]));
+    }
+    static now() {
+      return mockDate.getTime();
+    }
+  } as any;
+
+  try {
+    // 1. Patient country is Belgium (Europe/Brussels timezone, different from Turkey)
+    // Patient sends: "Saat 13.30 ve 16.00 arası watsap üzerinden arayin lütfen"
+    // Since day/date is missing, and timezone basis is unknown, it should ask for both.
+    const resBelgium = await AIResponseOrchestrator.run({
+      tenantId: "tenant-1",
+      conversationId: "conv-t25-1",
+      channel: "whatsapp",
+      channelId: "whatsapp",
+      inboundText: "Saat 13.30 ve 16.00 arası watsap üzerinden arayin lütfen",
+      phoneNumber: "32460123456",
+      sandbox: true,
+      brain,
+      history: [
+        { role: "assistant", content: "Arama saatinizi belirleyebiliriz." },
+        { role: "user", content: "Saat 13.30 ve 16.00 arası watsap üzerinden arayin lütfen" }
+      ]
+    } as any, db);
+
+    assert(resBelgium.modelUsed === "bypass", "Should use bypass for callback time preference");
+    assert(!resBelgium.text.includes("tarihinizi not aldım"), "Response must NOT contain 'tarihinizi not aldım'");
+    assert(!resBelgium.text.includes("sabah saatlerinde"), "Response must NOT contain 'sabah saatlerinde'");
+    assert(resBelgium.text.includes("Hangi gün için uygun olur") || resBelgium.text.includes("hangi gün için uygun olur"), "Response must ask 'hangi gün için uygun olur'");
+    assert(resBelgium.text.includes("Türkiye saatiyle mi") && resBelgium.text.includes("Belçika saatinizle mi"), "Response must ask to clarify timezone (TR vs Belgium)");
+
+    // 2. Patient country is Turkey (Europe/Istanbul timezone, same as Turkey)
+    // Patient sends the same message. Should only ask for day/date.
+    db.executeSafe = async (query: any, params?: any[]) => {
+      const text = typeof query === 'string' ? query : query?.text || '';
+      if (text.includes("FROM conversations")) {
+        return [{ 
+          id: "conv-1",
+          status: "active",
+          channel_id: "whatsapp",
+          metadata: { 
+            turkey_visit_intent: 'turkey_visit_intent_positive', 
+            patient_country: 'Turkey'
+          } 
+        }];
+      }
+      if (text.includes("FROM ai_module_settings")) {
+        return [{ config: { enabled: true, dry_run: false, rollout_percentage: 100, department_mode: "all" } }];
+      }
+      if (text.includes("FROM tenants")) {
+        return [{ timezone: "Europe/Istanbul" }];
+      }
+      return [];
+    };
+
+    const resTurkey = await AIResponseOrchestrator.run({
+      tenantId: "tenant-1",
+      conversationId: "conv-t25-2",
+      channel: "whatsapp",
+      channelId: "whatsapp",
+      inboundText: "Saat 13.30 ve 16.00 arası watsap üzerinden arayin lütfen",
+      phoneNumber: "905001234567",
+      sandbox: true,
+      brain,
+      history: [
+        { role: "assistant", content: "Arama saatinizi belirleyebiliriz." },
+        { role: "user", content: "Saat 13.30 ve 16.00 arası watsap üzerinden arayin lütfen" }
+      ]
+    } as any, db);
+
+    assert(resTurkey.modelUsed === "bypass", "Should use bypass");
+    assert(!resTurkey.text.includes("tarihinizi not aldım"), "Response must NOT contain 'tarihinizi not aldım'");
+    assert(!resTurkey.text.includes("sabah saatlerinde"), "Response must NOT contain 'sabah saatlerinde'");
+    assert(resTurkey.text.includes("Hangi gün için uygun olur") || resTurkey.text.includes("hangi gün için uygun olur"), "Response must ask 'hangi gün için uygun olur'");
+    assert(!resTurkey.text.includes("saatinizle mi?"), "Response must NOT ask for timezone clarification since timezone is Turkey");
+
+  } finally {
+    (global as any).mockDb = originalDb;
+    global.Date = originalDate;
+  }
+});
 
 
 async function runAllTests() {

@@ -1,3 +1,5 @@
+import { hasRealDatePattern } from '../../utils/date-parser';
+
 export type ConversationIntent =
   | 'greeting'
   | 'identity_question'
@@ -232,7 +234,7 @@ export class ConversationIntentRouter {
     const hasMonthKw = [
       'ocak', 'şubat', 'subat', 'mart', 'nisan', 'mayıs', 'mayis', 'haziran',
       'temmuz', 'ağustos', 'agustos', 'eylül', 'eylul', 'ekim', 'kasım', 'kasim', 'aralık', 'aralik'
-    ].some(kw => clean.includes(kw)) || /\d{1,2}[./]\d{1,2}/.test(clean);
+    ].some(kw => clean.includes(kw)) || hasRealDatePattern(clean);
 
     if (hasCallbackTimeKw && !hasMonthKw) {
       return 'callback_time_answer';
@@ -596,7 +598,7 @@ export class ConversationIntentRouter {
     const hasMonthKwAll = [
       'ocak', 'şubat', 'subat', 'mart', 'nisan', 'mayıs', 'mayis', 'haziran',
       'temmuz', 'ağustos', 'agustos', 'eylül', 'eylul', 'ekim', 'kasım', 'kasim', 'aralık', 'aralik'
-    ].some(kw => clean.includes(kw)) || /\d{1,2}[./]\d{1,2}/.test(clean);
+    ].some(kw => clean.includes(kw)) || hasRealDatePattern(clean);
 
     if (hasCallbackTimeKwAll && !hasMonthKwAll) {
       intents.push('callback_time_answer');
