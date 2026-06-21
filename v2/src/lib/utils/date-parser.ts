@@ -3,11 +3,93 @@ import { parseTurkeyLocalToUtc } from './timezone';
 export interface ParsedTimeSuggestion {
   suggested_date: string | null; // "YYYY-MM-DD"
   suggested_time: string | null; // "HH:MM"
+  suggested_time_end?: string | null; // "HH:MM"
   suggested_timezone_basis: 'turkey_time' | 'patient_local_time' | 'unknown';
   needs_date_clarification: boolean;
   needs_timezone_clarification: boolean;
   proposed_date: string | null; // ISO UTC string if complete, otherwise null
   operation_window_valid: boolean;
+}
+
+function extractTimeRange(text: string): { start: string; end: string } | null {
+  const clean = text.replace(/\s*-\s*/g, '-').replace(/\s+/g, ' ').trim();
+
+  // Pattern 1: HH:MM-HH:MM or HH.MM-HH.MM
+  const p1 = /\b(\d{1,2})[:.](\d{2})-(\d{1,2})[:.](\d{2})\b/;
+  const m1 = clean.match(p1);
+  if (m1) {
+    const h1 = parseInt(m1[1], 10);
+    const min1 = parseInt(m1[2], 10);
+    const h2 = parseInt(m1[3], 10);
+    const min2 = parseInt(m1[4], 10);
+    if (h1 >= 0 && h1 < 24 && min1 >= 0 && min1 < 60 && h2 >= 0 && h2 < 24 && min2 >= 0 && min2 < 60) {
+      return {
+        start: `${String(h1).padStart(2, '0')}:${String(min1).padStart(2, '0')}`,
+        end: `${String(h2).padStart(2, '0')}:${String(min2).padStart(2, '0')}`
+      };
+    }
+  }
+
+  // Pattern 2: HH:MM to/and/ile/ila/bis/en HH:MM
+  const p2 = /\b(\d{1,2})[:.](\d{2})\s*(?:ila|ile|ve|to|und|bis|en|and)\s*(\d{1,2})[:.](\d{2})\b/;
+  const m2 = clean.match(p2);
+  if (m2) {
+    const h1 = parseInt(m2[1], 10);
+    const min1 = parseInt(m2[2], 10);
+    const h2 = parseInt(m2[3], 10);
+    const min2 = parseInt(m2[4], 10);
+    if (h1 >= 0 && h1 < 24 && min1 >= 0 && min1 < 60 && h2 >= 0 && h2 < 24 && min2 >= 0 && min2 < 60) {
+      return {
+        start: `${String(h1).padStart(2, '0')}:${String(min1).padStart(2, '0')}`,
+        end: `${String(h2).padStart(2, '0')}:${String(min2).padStart(2, '0')}`
+      };
+    }
+  }
+
+  // Pattern 3: HH-HH (e.g. 13-16) or HH and HH (between 13 and 16)
+  const p3 = /\b(?:between|tussen)?\s*(\d{1,2})\s*(?:-|ila|ile|ve|to|und|bis|en|and)\s*(\d{1,2})\s*(?:arasi|arasinda|between|tussen)?\b/;
+  const m3 = clean.match(p3);
+  if (m3) {
+    const h1 = parseInt(m3[1], 10);
+    const h2 = parseInt(m3[2], 10);
+    if (h1 >= 0 && h1 < 24 && h2 >= 0 && h2 < 24) {
+      let startHour = h1;
+      let endHour = h2;
+      
+      const isPm = /\b(akşam|öğleden sonra|gece|öğlen|öğle|akşamüstü|evening|night|afternoon|nachmittag|abend|nacht|avond|vanavond|مساء|ظهر|بعد الظهر)\b/i.test(clean);
+      const isAm = /\b(sabah|öğleden önce|morning|ochtend|fruh|صباح)\b/i.test(clean);
+      
+      if (startHour >= 1 && startHour <= 12) {
+        if (isPm) {
+          if (startHour !== 12) startHour += 12;
+        } else if (isAm) {
+          if (startHour === 12) startHour = 0;
+        } else {
+          if (startHour <= 7) startHour += 12;
+        }
+      }
+      if (endHour >= 1 && endHour <= 12) {
+        if (isPm) {
+          if (endHour !== 12) endHour += 12;
+        } else if (isAm) {
+          if (endHour === 12) endHour = 0;
+        } else {
+          if (endHour <= 7) endHour += 12;
+        }
+      }
+
+      if (startHour > endHour && endHour < 12 && !isPm && !isAm) {
+        endHour += 12;
+      }
+
+      return {
+        start: `${String(startHour).padStart(2, '0')}:00`,
+        end: `${String(endHour).padStart(2, '0')}:00`
+      };
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -27,6 +109,7 @@ export function parseDeterministicSuggestion(
     .trim();
 
   let time: string | null = null;
+  let timeEnd: string | null = null;
   let date: string | null = null;
   let timezoneBasis: 'turkey_time' | 'patient_local_time' | 'unknown' = 'unknown';
 
@@ -115,47 +198,53 @@ export function parseDeterministicSuggestion(
   // ────────────────────────────────────────────────────────────────────────
   // 2. Time Extraction (run on the remaining text)
   // ────────────────────────────────────────────────────────────────────────
-  // Formats like: "17:00", "17.00", "14:30", "14.30"
-  const timeRegex = /\b(\d{1,2})[:.](\d{2})\b/;
-  const timeMatch = normalizedForTime.match(timeRegex);
-
-  if (timeMatch) {
-    const hh = parseInt(timeMatch[1], 10);
-    const mm = parseInt(timeMatch[2], 10);
-    if (hh >= 0 && hh < 24 && mm >= 0 && mm < 60) {
-      time = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
-    }
+  const range = extractTimeRange(normalizedForTime);
+  if (range) {
+    time = range.start;
+    timeEnd = range.end;
   } else {
-    // Formats like: "saat 17", "17 olur", "akşam 5", "sabah 10", "öğlen 2", "gece 11"
-    const hourRegex = /\b(?:saat\s*)?(\d{1,2})(?:\s*olur|\s*uygun|\s*gibi|\s*civari|\s*sularında|\b)/;
-    const hourMatch = normalizedForTime.match(hourRegex);
-    if (hourMatch) {
-      let hh = parseInt(hourMatch[1], 10);
-      
-      const isPm = /\b(akşam|öğleden sonra|gece|öğlen|öğle|akşamüstü|akşamüstü)\b/i.test(normalized);
-      const isAm = /\b(sabah|öğleden önce)\b/i.test(normalized);
-      
-      if (hh >= 1 && hh <= 12) {
-        if (isPm) {
-          if (/\bgece\b/i.test(normalized) && hh === 12) {
-            hh = 0;
-          } else if (hh !== 12) {
-            hh += 12;
-          }
-        } else if (isAm) {
-          if (hh === 12) hh = 0;
-        } else {
-          // If no am/pm meridian specified:
-          // In Turkish, "saat 5" or "5 olur" defaults to 17:00 unless marked morning.
-          // Single digit <= 7 is PM by default in patient scheduling context.
-          if (hh <= 7) {
-            hh += 12;
+    // Formats like: "17:00", "17.00", "14:30", "14.30"
+    const timeRegex = /\b(\d{1,2})[:.](\d{2})\b/;
+    const timeMatch = normalizedForTime.match(timeRegex);
+
+    if (timeMatch) {
+      const hh = parseInt(timeMatch[1], 10);
+      const mm = parseInt(timeMatch[2], 10);
+      if (hh >= 0 && hh < 24 && mm >= 0 && mm < 60) {
+        time = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+      }
+    } else {
+      // Formats like: "saat 17", "17 olur", "akşam 5", "sabah 10", "öğlen 2", "gece 11"
+      const hourRegex = /\b(?:saat\s*)?(\d{1,2})(?:\s*olur|\s*uygun|\s*gibi|\s*civari|\s*sularında|\b)/;
+      const hourMatch = normalizedForTime.match(hourRegex);
+      if (hourMatch) {
+        let hh = parseInt(hourMatch[1], 10);
+        
+        const isPm = /\b(akşam|öğleden sonra|gece|öğlen|öğle|akşamüstü|akşamüstü)\b/i.test(normalized);
+        const isAm = /\b(sabah|öğleden önce)\b/i.test(normalized);
+        
+        if (hh >= 1 && hh <= 12) {
+          if (isPm) {
+            if (/\bgece\b/i.test(normalized) && hh === 12) {
+              hh = 0;
+            } else if (hh !== 12) {
+              hh += 12;
+            }
+          } else if (isAm) {
+            if (hh === 12) hh = 0;
+          } else {
+            // If no am/pm meridian specified:
+            // In Turkish, "saat 5" or "5 olur" defaults to 17:00 unless marked morning.
+            // Single digit <= 7 is PM by default in patient scheduling context.
+            if (hh <= 7) {
+              hh += 12;
+            }
           }
         }
-      }
-      
-      if (hh >= 0 && hh < 24) {
-        time = `${String(hh).padStart(2, '0')}:00`;
+        
+        if (hh >= 0 && hh < 24) {
+          time = `${String(hh).padStart(2, '0')}:00`;
+        }
       }
     }
   }
@@ -234,7 +323,7 @@ export function parseDeterministicSuggestion(
   const mergedContext = `${normalized} ${lastAssistantMessage ? lastAssistantMessage.toLowerCase() : ''}`;
   
   const hasTurkeyBasis = /\b(türkiye|tr|sizin|konya|hastane|firma|bizim\s+taraf|oranın|istanbul|ts)\b/i.test(mergedContext);
-  const hasPatientBasis = /\b(bana|bize|benim|bizim|buradaki|buranın|local|yerel|kendi|saatime|saatimize|almanya|berlin|londra|new york)\b/i.test(mergedContext);
+  const hasPatientBasis = /\b(bana|bize|benim|bizim|buradaki|buranın|local|yerel|kendi|saatime|saatimize|almanya|berlin|londra|new york|hollanda|amsterdam|netherlands|nederland|belçika|belgium|isveç|sweden|isviçre|switzerland|fransa|france|danimarka|denmark|avusturya|austria|ingiltere|uk)\b/i.test(mergedContext);
 
   if (hasTurkeyBasis && !hasPatientBasis) {
     timezoneBasis = 'turkey_time';
@@ -278,6 +367,7 @@ export function parseDeterministicSuggestion(
   return {
     suggested_date: date,
     suggested_time: time,
+    suggested_time_end: timeEnd,
     suggested_timezone_basis: timezoneBasis,
     needs_date_clarification: needsDateClarification,
     needs_timezone_clarification: needsTimezoneClarification,
