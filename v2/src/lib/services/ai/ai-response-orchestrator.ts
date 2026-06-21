@@ -45,6 +45,7 @@ export interface OrchestratorParams {
   sandbox?: boolean;
   history?: ChatMessage[]; // Optional: passed in sandbox/test mode
   workerPath?: string; // Telemetry parameter (testBot | worker_immediate | worker_delayed)
+  unifiedContext?: any;
 }
 
 export interface OrchestratorResult {
@@ -99,7 +100,8 @@ export class AIResponseOrchestrator {
       customerId,
       sandbox = false,
       history: passedHistory,
-      workerPath = 'unknown'
+      workerPath = 'unknown',
+      unifiedContext: passedUnifiedContext
     } = params;
 
     const startTime = Date.now();
@@ -686,8 +688,8 @@ export class AIResponseOrchestrator {
     // ────────────────────────────────────────────────────────
     try {
       // 1. Fetch CRM / Identity Context
-      let unifiedContext: any = null;
-      if (conversationId && customerId && !sandbox) {
+      let unifiedContext: any = passedUnifiedContext || null;
+      if (!unifiedContext && conversationId && customerId && !sandbox) {
         try {
           unifiedContext = await IdentityEngine.getContext(tenantId, customerId, conversationId);
         } catch (e) {
@@ -1325,17 +1327,32 @@ export class AIResponseOrchestrator {
             }
           }
           
-          // 2. Fallback to parsing from last assistant message
+          // 2. Fallback to parsing from last assistant message (restricted)
           if (!parsedSugg) {
             const assistantHistory = history.filter(m => m.role === 'assistant');
-            const lastAssistantMsg = assistantHistory.length > 0 ? assistantHistory[assistantHistory.length - 1].content : '';
-            const { parseDeterministicSuggestion } = require('../../utils/date-parser');
-            parsedSugg = parseDeterministicSuggestion(lastAssistantMsg, new Date(), null, null);
+            const lastAssistantMsg = (assistantHistory.length > 0 ? assistantHistory[assistantHistory.length - 1].content : '') || '';
+            
+            const isGenuineOffer = 
+              lastOffer?.source === 'bot_callback_offer' || 
+              lastOffer?.source === 'callback_confirmation_bypass' ||
+              effectiveIntent === 'call_scheduling_request' || 
+              effectiveIntent === 'callback_confirmation';
+              
+            const isArrivalBypassResponse = 
+              lastAssistantMsg.includes('geliş tarihi') || 
+              lastAssistantMsg.includes('geliş tarihiniz') ||
+              lastAssistantMsg.includes('not aldım');
+
+            if (isGenuineOffer && !isArrivalBypassResponse) {
+              const { parseDeterministicSuggestion } = require('../../utils/date-parser');
+              parsedSugg = parseDeterministicSuggestion(lastAssistantMsg, new Date(), null, null);
+            }
           }
           
           let responseText = '';
           const resolvedIndustry = brain.context.config?.industry || (brain.prompts.metadata as any)?.industry || '';
           const isHealthcare = resolvedIndustry === 'healthcare' || resolvedIndustry === 'medical';
+          const agentLabelPossessive = isHealthcare ? 'Hasta danışmanımızın' : 'Müşteri temsilcimizin';
           const agentLabel = isHealthcare ? 'Hasta danışmanımız' : 'Müşteri temsilcimiz';
           
           if (parsedSugg && parsedSugg.suggested_date && parsedSugg.suggested_time && parsedSugg.proposed_date) {
@@ -1355,7 +1372,7 @@ export class AIResponseOrchestrator {
             const suffix = suffixes[hour] || 'da';
             const formattedTime = `${parsedSugg.suggested_time}’${suffix}`;
             
-            responseText = `Harika, not aldım. ${agentLabel} sizi ${formattedDate} Türkiye saatiyle ${formattedTime} arayacak şekilde planlayabilir. Görüşme saatinde telefonunuzun ulaşılabilir olması yeterlidir. 🙏`;
+            responseText = `Teyidinizi aldım. ${agentLabel} sizi ${formattedDate} Türkiye saatiyle ${formattedTime} arayacaktır 🙏`;
             
             // Create follow-up task idempotently
             if (!sandbox) {
@@ -1406,7 +1423,18 @@ export class AIResponseOrchestrator {
               }
             }
           } else {
-            responseText = `Harika, not aldım. ${agentLabel} sizi en kısa sürede arayacak şekilde planlayabilir. Görüşme saatinde telefonunuzun ulaşılabilir olması yeterlidir. 🙏`;
+            const { CallPreferenceLabelResolver } = require('./call-preference-label-resolver');
+            const facts = ConversationKnownFactsResolver.resolve({
+              history: history.filter((m: any) => m.content != null).map((m: any) => ({ role: m.role, content: m.content as string })),
+              opportunity: unifiedContext?.opportunity,
+              profile: unifiedContext?.profile,
+              latestForm: unifiedContext?.latestForm,
+              conversation: unifiedContext?.conversation
+            });
+            const callTime = facts.preferredCallTime || '';
+            const cleanCallTime = callTime ? CallPreferenceLabelResolver.resolve(callTime) : 'en yakın uygun çalışma saatlerinde';
+            
+            responseText = `Teyidinizi aldım. ${agentLabelPossessive} sizi ${cleanCallTime} araması için notunuzu iletiyorum 🙏`;
           }
           
           fallbackResult = { text: responseText, finalPath: 'callback_confirmation_bypass' };
@@ -1431,22 +1459,15 @@ export class AIResponseOrchestrator {
             latestForm: unifiedContext?.latestForm,
             conversation: unifiedContext?.conversation
           });
-          const formTopic = (facts.formTopic || '').toLowerCase();
-          const complaint = (facts.complaint || '').toLowerCase();
-          const formNote = (facts.formNote || '').toLowerCase();
-          const isCheckup = formTopic.includes('check-up') || formTopic.includes('checkup') ||
-                            complaint.includes('check-up') || complaint.includes('checkup') ||
-                            formNote.includes('check-up') || formNote.includes('checkup');
-          
-          const subject = isCheckup ? 'check-up' : 'tedavi/muayene';
-
+          const { CallPreferenceLabelResolver } = require('./call-preference-label-resolver');
           const callTime = facts.preferredCallTime || '';
-          let callTimeNote = '';
-          if (callTime) {
-            callTimeNote = ` ${callTime} aranmak istediğinizi de görüyorum;`;
-          }
+          const cleanCallTime = callTime ? CallPreferenceLabelResolver.resolve(callTime) : 'en yakın uygun çalışma saatlerinde';
 
-          const responseText = `Teşekkür ederim, geliş tarihi olarak ${normalizedDate} dönemini not aldım. Size uygun ${subject} planlaması için hasta danışmanımızın kısa bir bilgilendirme görüşmesi yapması faydalı olur.${callTimeNote} Türkiye saatiyle size uygun bir arama saati planlayabiliriz.`;
+          const resolvedIndustry = brain.context.config?.industry || (brain.prompts.metadata as any)?.industry || '';
+          const isHealthcare = resolvedIndustry === 'healthcare' || resolvedIndustry === 'medical';
+          const agentLabelPossessive = isHealthcare ? 'Hasta danışmanımızın' : 'Müşteri temsilcimizin';
+
+          const responseText = `Teşekkür ederim, ${normalizedDate} tarihini not aldım. ${agentLabelPossessive} sizi ${cleanCallTime} araması için notunuzu iletiyorum 🙏`;
 
           if (!sandbox) {
             try {
@@ -1462,6 +1483,27 @@ export class AIResponseOrchestrator {
               delete updatedMeta.phone_number;
               delete updatedMeta.patient_name;
               delete updatedMeta.raw_message;
+
+              // P0.28.1: Clean up old/stale last_callback_offer if it conflicts with arrival date or is unverified bot offer
+              if (updatedMeta.last_callback_offer) {
+                let shouldDeleteOffer = false;
+                const proposedDueAt = updatedMeta.last_callback_offer.proposed_due_at;
+                if (proposedDueAt) {
+                  const proposedDateOnly = proposedDueAt.split('T')[0]; // YYYY-MM-DD
+                  if (parsed.date) {
+                    const parsedDateOnly = parsed.date.toISOString().split('T')[0];
+                    if (proposedDateOnly === parsedDateOnly) {
+                      shouldDeleteOffer = true;
+                    }
+                  }
+                }
+                if (updatedMeta.last_callback_offer.source === 'bot_callback_offer') {
+                  shouldDeleteOffer = true;
+                }
+                if (shouldDeleteOffer) {
+                  delete updatedMeta.last_callback_offer;
+                }
+              }
 
               await db.executeSafe({
                 text: `UPDATE conversations SET metadata = $1, updated_at = NOW() WHERE id = $2`,
@@ -1639,22 +1681,15 @@ export class AIResponseOrchestrator {
               latestForm: unifiedContext?.latestForm,
               conversation: unifiedContext?.conversation
             });
-            const formTopic = (facts.formTopic || '').toLowerCase();
-            const complaint = (facts.complaint || '').toLowerCase();
-            const formNote = (facts.formNote || '').toLowerCase();
-            const isCheckup = formTopic.includes('check-up') || formTopic.includes('checkup') ||
-                              complaint.includes('check-up') || complaint.includes('checkup') ||
-                              formNote.includes('check-up') || formNote.includes('checkup');
-            
-            const subject = isCheckup ? 'check-up' : 'tedavi/muayene';
-
+            const { CallPreferenceLabelResolver } = require('./call-preference-label-resolver');
             const callTime = facts.preferredCallTime || '';
-            let callTimeNote = '';
-            if (callTime) {
-              callTimeNote = ` ${callTime} aranmak istediğinizi de görüyorum;`;
-            }
+            const cleanCallTime = callTime ? CallPreferenceLabelResolver.resolve(callTime) : 'en yakın uygun çalışma saatlerinde';
 
-            text = `Teşekkür ederim, geliş tarihi olarak ${normalizedDate} dönemini not aldım. Size uygun ${subject} planlaması için hasta danışmanımızın kısa bir bilgilendirme görüşmesi yapması faydalı olur.${callTimeNote} Türkiye saatiyle size uygun bir arama saati planlayabiliriz.`;
+            const resolvedIndustry = brain.context.config?.industry || (brain.prompts.metadata as any)?.industry || '';
+            const isHealthcare = resolvedIndustry === 'healthcare' || resolvedIndustry === 'medical';
+            const agentLabelPossessive = isHealthcare ? 'Hasta danışmanımızın' : 'Müşteri temsilcimizin';
+
+            text = `Teşekkür ederim, ${normalizedDate} tarihini not aldım. ${agentLabelPossessive} sizi ${cleanCallTime} araması için notunuzu iletiyorum 🙏`;
             
             if (!sandbox) {
               try {
@@ -1670,6 +1705,27 @@ export class AIResponseOrchestrator {
                 delete updatedMeta.phone_number;
                 delete updatedMeta.patient_name;
                 delete updatedMeta.raw_message;
+
+                // P0.28.1: Clean up old/stale last_callback_offer if it conflicts with arrival date or is unverified bot offer
+                if (updatedMeta.last_callback_offer) {
+                  let shouldDeleteOffer = false;
+                  const proposedDueAt = updatedMeta.last_callback_offer.proposed_due_at;
+                  if (proposedDueAt) {
+                    const proposedDateOnly = proposedDueAt.split('T')[0]; // YYYY-MM-DD
+                    if (parsed.date) {
+                      const parsedDateOnly = parsed.date.toISOString().split('T')[0];
+                      if (proposedDateOnly === parsedDateOnly) {
+                        shouldDeleteOffer = true;
+                      }
+                    }
+                  }
+                  if (updatedMeta.last_callback_offer.source === 'bot_callback_offer') {
+                    shouldDeleteOffer = true;
+                  }
+                  if (shouldDeleteOffer) {
+                    delete updatedMeta.last_callback_offer;
+                  }
+                }
 
                 await db.executeSafe({
                   text: `UPDATE conversations SET metadata = $1, updated_at = NOW() WHERE id = $2`,
@@ -1687,7 +1743,10 @@ export class AIResponseOrchestrator {
               }
             }
           } else if (isSpecificCallTimeOffer(lastAssistantMsg) && isAffirmative) {
-            text = `Harika, teyidinizi aldım. Telefon görüşmesi için belirttiğiniz zamanı ilgili hasta danışmanımıza iletiyorum. Görüşme saatinde telefonunuzun ulaşılabilir olması yeterlidir. 🙏`;
+            const resolvedIndustry = brain.context.config?.industry || (brain.prompts.metadata as any)?.industry || '';
+            const isHealthcare = resolvedIndustry === 'healthcare' || resolvedIndustry === 'medical';
+            const agentLabel = isHealthcare ? 'hasta danışmanımıza' : 'temsilcimize';
+            text = `Teyidinizi aldım. Telefon görüşmesi için belirttiğiniz zamanı ilgili ${agentLabel} iletiyorum. Görüşmek üzere. 🙏`;
           }
         }
       }

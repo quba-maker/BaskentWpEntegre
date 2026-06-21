@@ -85,9 +85,12 @@ export class ConversationStateArbitrator {
       if (hasOfferInMeta) return true;
       const lowerText = text.toLowerCase();
       return [
-        'görüşmek', 'gorusmek', 'arayalım', 'arayalim', 'arayabiliriz',
+        'görüşmek', 'gorusmek', 'görüşme', 'gorusme',
+        'arayalım', 'arayalim', 'arayabiliriz', 'arayabilir',
         'arama planlama', 'telefon görüşmesi', 'telefon gorusmesi',
-        'danışmanımızla', 'danismanimizla', 'arama teklif', 'telefonla gorusalim', 'telefonla görüşelim'
+        'danışmanımızla', 'danismanimizla', 'danışmanımız', 'danismanimiz', 'danışmanımızın', 'danismanimizin',
+        'arama teklif', 'telefonla gorusalim', 'telefonla görüşelim',
+        'araması', 'aramasi', 'aranması', 'aranmasi', 'ulaşılması', 'ulasilmasi', 'ulaşalım', 'ulasalim'
       ].some(kw => lowerText.includes(kw));
     };
 
@@ -95,11 +98,7 @@ export class ConversationStateArbitrator {
       if (hasOfferInMeta) return true;
       const lowerText = text.toLowerCase();
       
-      const hasCallKw = [
-        'görüşmek', 'gorusmek', 'arayalım', 'arayalim', 'arayabiliriz',
-        'arama planlama', 'telefon görüşmesi', 'telefon gorusmesi',
-        'danışmanımızla', 'danismanimizla', 'arama teklif', 'telefonla gorusalim', 'telefonla görüşelim'
-      ].some(kw => lowerText.includes(kw));
+      const hasCallKw = isCallOffer(text);
       if (!hasCallKw) return false;
 
       const hasTimeOrDate = [

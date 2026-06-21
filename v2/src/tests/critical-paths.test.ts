@@ -7857,8 +7857,8 @@ test("P0.27 T1: callback_confirmation routed and handled via bypass returning Tu
       ]
     } as any);
 
-    const hasTurkishDateAndSuffix = res.text.includes("Hasta danışmanımız sizi 22 Haziran Pazartesi Türkiye saatiyle *10:00*’da arayacak") ||
-                                    res.text.includes("Hasta danışmanımız sizi 22 Haziran Pazartesi Türkiye saatiyle 10:00’da arayacak");
+    const hasTurkishDateAndSuffix = res.text.includes("Hasta danışmanımız sizi 22 Haziran Pazartesi Türkiye saatiyle *10:00*’da arayacaktır") ||
+                                    res.text.includes("Hasta danışmanımız sizi 22 Haziran Pazartesi Türkiye saatiyle 10:00’da arayacaktır");
     assert(hasTurkishDateAndSuffix, "Response must be formatted with Turkish date and suffix '10:00'da'");
     
     // Check task insert
@@ -7957,8 +7957,8 @@ test("P0.27 T2: callback_confirmation idempotency blocks duplicate task creation
       ]
     } as any);
 
-    const hasTurkishDateAndSuffix = res.text.includes("Hasta danışmanımız sizi 22 Haziran Pazartesi Türkiye saatiyle *10:00*’da arayacak") ||
-                                    res.text.includes("Hasta danışmanımız sizi 22 Haziran Pazartesi Türkiye saatiyle 10:00’da arayacak");
+    const hasTurkishDateAndSuffix = res.text.includes("Hasta danışmanımız sizi 22 Haziran Pazartesi Türkiye saatiyle *10:00*’da arayacaktır") ||
+                                    res.text.includes("Hasta danışmanımız sizi 22 Haziran Pazartesi Türkiye saatiyle 10:00’da arayacaktır");
     assert(hasTurkishDateAndSuffix, "Response must be formatted with Turkish date and suffix");
     
     const taskInsert = dbCalls.find(c => c.text.includes("INSERT INTO follow_up_tasks"));
@@ -8017,7 +8017,7 @@ test("P0.28 T2: arrival_date_answer bypasses LLM and saves PII-free date", async
       const vals = typeof query === 'string' ? params : query?.values || [];
       dbCalls.push({ text, vals });
       
-      if (text.includes("SELECT metadata FROM conversations")) {
+      if (text.includes("FROM conversations")) {
         return [{ metadata: {} }];
       }
       if (text.includes("UPDATE conversations")) {
@@ -8073,7 +8073,7 @@ test("P0.28 T2: arrival_date_answer bypasses LLM and saves PII-free date", async
     } as any);
 
     assert(res.modelUsed === "bypass", `Expected bypass model, got: ${res.modelUsed}`);
-    assert(res.text.includes("geliş tarihi olarak 10 Temmuz dönemini not aldım"), `Expected date acknowledgement, got: ${res.text}`);
+    assert(res.text.includes("10 Temmuz tarihini not aldım"), `Expected date acknowledgement, got: ${res.text}`);
     
     const updateCall = dbCalls.find(c => c.text.includes("UPDATE conversations SET metadata = $1"));
     assert(!!updateCall, "Should update conversation metadata");
@@ -8129,9 +8129,299 @@ test("P0.28 T3: MAX_TOKENS error with date question triggers date fallback", asy
     } as any);
 
     assert(res.modelUsed === "fallback", `Expected fallback model, got: ${res.modelUsed}`);
-    assert(res.text.includes("geliş tarihi olarak 10 Temmuz dönemini not aldım"), `Expected date fallback text, got: ${res.text}`);
+    assert(res.text.includes("10 Temmuz tarihini not aldım"), `Expected date fallback text, got: ${res.text}`);
   } finally {
     AIOrchestrator.prototype.generateResponse = originalGenerate;
+  }
+});
+
+test("P0.28.1 T1: arrival_date_answer bypass does not write last_callback_offer and cleans up stale/conflicting offer", async () => {
+  const { AIResponseOrchestrator } = require("../lib/services/ai/ai-response-orchestrator");
+  const dbCalls: any[] = [];
+  const db = {
+    executeSafe: async (query: any, params?: any[]) => {
+      const text = typeof query === 'string' ? query : query?.text || '';
+      const vals = typeof query === 'string' ? params : query?.values || [];
+      dbCalls.push({ text, vals });
+      
+      if (text.includes("FROM conversations")) {
+        return [{ metadata: {
+          last_callback_offer: {
+            proposed_due_at: "2026-07-20T09:00:00.000Z",
+            source: "bot_callback_offer"
+          }
+        } }];
+      }
+      if (text.includes("UPDATE conversations")) {
+        return [{ id: "conv-1" }];
+      }
+      if (text.includes("FROM ai_module_settings")) {
+        return [{
+          config: {
+            enabled: true,
+            dry_run: false,
+            rollout_percentage: 100,
+            department_mode: "all"
+          }
+        }];
+      }
+      if (text.includes("FROM tenants")) {
+        return [{ timezone: "Europe/Istanbul" }];
+      }
+      return [];
+    }
+  };
+
+  const brain = {
+    context: {
+      tenantId: "tenant-1",
+      config: { industry: "healthcare", timezone: "Europe/Istanbul" },
+      settings: {}
+    },
+    prompts: {
+      systemPrompt: "Mock system prompt",
+      metadata: { version: "1.0" }
+    }
+  };
+
+  const originalDb = (global as any).mockDb;
+  (global as any).mockDb = db;
+
+  try {
+    const res = await AIResponseOrchestrator.run({
+      tenantId: "tenant-1",
+      conversationId: "conv-1",
+      channel: "whatsapp",
+      channelId: "whatsapp",
+      inboundText: "20 temmuz",
+      phoneNumber: "905001234567",
+      sandbox: false,
+      brain,
+      history: [
+        { role: "user", content: "merhaba" },
+        { role: "assistant", content: "Gelmeyi düşündüğünüz bu önümüzdeki bir aylık dönem için tahmini bir tarih aralığı paylaşabilir misiniz?" },
+        { role: "user", content: "20 temmuz" }
+      ]
+    } as any);
+
+    assert(res.modelUsed === "bypass", `Expected bypass model, got: ${res.modelUsed}`);
+    
+    const updateCall = dbCalls.find(c => c.text.includes("UPDATE conversations SET metadata = $1"));
+    assert(!!updateCall, "Should update conversation metadata");
+    
+    const updatedMeta = JSON.parse(updateCall.vals[0]);
+    assert(updatedMeta.arrival_date === "20 Temmuz", "Metadata should save parsed date");
+    assert(!updatedMeta.last_callback_offer, "Stale/conflicting last_callback_offer must be cleared during arrival_date_answer");
+  } finally {
+    (global as any).mockDb = originalDb;
+  }
+});
+
+test("P0.28.1 T2: preferred call time is normalized and does not leak technical DB values", async () => {
+  const { AIResponseOrchestrator } = require("../lib/services/ai/ai-response-orchestrator");
+  const db = {
+    executeSafe: async (query: any, params?: any[]) => {
+      const text = typeof query === 'string' ? query : query?.text || '';
+      if (text.includes("FROM conversations")) {
+        return [{ metadata: {} }];
+      }
+      if (text.includes("UPDATE conversations")) {
+        return [{ id: "conv-1" }];
+      }
+      if (text.includes("FROM ai_module_settings")) {
+        return [{ config: { enabled: true, dry_run: false, rollout_percentage: 100, department_mode: "all" } }];
+      }
+      if (text.includes("FROM tenants")) {
+        return [{ timezone: "Europe/Istanbul" }];
+      }
+      return [];
+    }
+  };
+
+  const brain = {
+    context: {
+      tenantId: "tenant-1",
+      config: { industry: "healthcare", timezone: "Europe/Istanbul" },
+      settings: {}
+    },
+    prompts: {
+      systemPrompt: "Mock system prompt",
+      metadata: { version: "1.0" }
+    }
+  };
+
+  const originalDb = (global as any).mockDb;
+  (global as any).mockDb = db;
+
+  try {
+    const res = await AIResponseOrchestrator.run({
+      tenantId: "tenant-1",
+      conversationId: "conv-1",
+      channel: "whatsapp",
+      channelId: "whatsapp",
+      inboundText: "20 temmuz",
+      phoneNumber: "905001234567",
+      sandbox: true,
+      brain,
+      unifiedContext: {
+        latestForm: {
+          data: {
+            preferred_call_time: "sabah_saatlerinde_(09:00_-_12:00)"
+          }
+        }
+      },
+      history: [
+        { role: "user", content: "merhaba" },
+        { role: "assistant", content: "Gelmeyi düşündüğünüz bu önümüzdeki bir aylık dönem için tahmini bir tarih aralığı paylaşabilir misiniz?" },
+        { role: "user", content: "20 temmuz" }
+      ]
+    } as any);
+
+    assert(res.text.includes("sabah saatlerinde"), "Technical call time string must be normalized");
+    assert(!res.text.includes("sabah_saatlerinde"), "Raw technical call time must not leak to user");
+    assert(!res.text.includes("Harika"), "Should not contain Harika cliché");
+    assert(!res.text.includes("planlayabilir"), "Should not contain planlayabilir cliché");
+  } finally {
+    (global as any).mockDb = originalDb;
+  }
+});
+
+test("P0.28.1 T3: olur confirmation does not schedule arama on arrival date if no genuine offer was made", async () => {
+  const { AIResponseOrchestrator } = require("../lib/services/ai/ai-response-orchestrator");
+  const db = {
+    executeSafe: async (query: any, params?: any[]) => {
+      const text = typeof query === 'string' ? query : query?.text || '';
+      if (text.includes("FROM conversations")) {
+        // No last_callback_offer in metadata
+        return [{ metadata: {} }];
+      }
+      if (text.includes("UPDATE conversations")) {
+        return [{ id: "conv-1" }];
+      }
+      if (text.includes("FROM ai_module_settings")) {
+        return [{ config: { enabled: true, dry_run: false, rollout_percentage: 100, department_mode: "all" } }];
+      }
+      if (text.includes("FROM tenants")) {
+        return [{ timezone: "Europe/Istanbul" }];
+      }
+      return [];
+    }
+  };
+
+  const brain = {
+    context: {
+      tenantId: "tenant-1",
+      config: { industry: "healthcare", timezone: "Europe/Istanbul" },
+      settings: {}
+    },
+    prompts: {
+      systemPrompt: "Mock system prompt",
+      metadata: { version: "1.0" }
+    }
+  };
+
+  const originalDb = (global as any).mockDb;
+  (global as any).mockDb = db;
+
+  try {
+    const res = await AIResponseOrchestrator.run({
+      tenantId: "tenant-1",
+      conversationId: "conv-1",
+      channel: "whatsapp",
+      channelId: "whatsapp",
+      inboundText: "olur",
+      phoneNumber: "905001234567",
+      sandbox: true,
+      brain,
+      unifiedContext: {
+        latestForm: {
+          data: {
+            preferred_call_time: "sabah_saatlerinde_(09:00_-_12:00)"
+          }
+        }
+      },
+      history: [
+        { role: "user", content: "20 temmuz" },
+        { role: "assistant", content: "Teşekkür ederim, 20 Temmuz tarihini not aldım. Hasta danışmanımızın sizi sabah saatlerinde araması için notunuzu iletiyorum 🙏" },
+        { role: "user", content: "olur" }
+      ]
+    } as any);
+
+    assert(res.modelUsed === "bypass", `Expected bypass model, got: ${res.modelUsed}`);
+    assert(res.text.includes("Teyidinizi aldım"), "Expected clean affirmation");
+    assert(res.text.includes("sabah saatlerinde araması için notunuzu iletiyorum"), "Expected safe preferred time callback note");
+    assert(!res.text.includes("20 Temmuz"), "Should not schedule callback on travel date (20 Temmuz)");
+    assert(!res.text.includes("planlayabilir"), "Should not contain robotic planlayabilir");
+  } finally {
+    (global as any).mockDb = originalDb;
+  }
+});
+
+test("P0.28.1 T4: genuine callback offer from last_callback_offer is confirmed successfully", async () => {
+  const { AIResponseOrchestrator } = require("../lib/services/ai/ai-response-orchestrator");
+  const db = {
+    executeSafe: async (query: any, params?: any[]) => {
+      const text = typeof query === 'string' ? query : query?.text || '';
+      if (text.includes("FROM conversations")) {
+        return [{ metadata: {
+          last_callback_offer: {
+            proposed_due_at: "2026-06-22T07:00:00.000Z", // 22 June, 10:00 TRT
+            source: "bot_callback_offer",
+            offered_at: "2026-06-21T00:00:00.000Z"
+          }
+        } }];
+      }
+      if (text.includes("UPDATE conversations")) {
+        return [{ id: "conv-1" }];
+      }
+      if (text.includes("FROM ai_module_settings")) {
+        return [{ config: { enabled: true, dry_run: false, rollout_percentage: 100, department_mode: "all" } }];
+      }
+      if (text.includes("FROM tenants")) {
+        return [{ timezone: "Europe/Istanbul" }];
+      }
+      return [];
+    }
+  };
+
+  const brain = {
+    context: {
+      tenantId: "tenant-1",
+      config: { industry: "healthcare", timezone: "Europe/Istanbul" },
+      settings: {}
+    },
+    prompts: {
+      systemPrompt: "Mock system prompt",
+      metadata: { version: "1.0" }
+    }
+  };
+
+  const originalDb = (global as any).mockDb;
+  (global as any).mockDb = db;
+
+  try {
+    const res = await AIResponseOrchestrator.run({
+      tenantId: "tenant-1",
+      conversationId: "conv-1",
+      channel: "whatsapp",
+      channelId: "whatsapp",
+      inboundText: "olur",
+      phoneNumber: "905001234567",
+      sandbox: true,
+      brain,
+      history: [
+        { role: "user", content: "uygun saat önerebilir misiniz" },
+        { role: "assistant", content: "Hasta danışmanımız sizi 22 Haziran Pazartesi Türkiye saatiyle 10:00'da arayabilir." },
+        { role: "user", content: "olur" }
+      ]
+    } as any);
+
+    assert(res.modelUsed === "bypass", `Expected bypass model, got: ${res.modelUsed}`);
+    assert(res.text.includes("Teyidinizi aldım"), "Expected clean affirmation");
+    assert(res.text.includes("22 Haziran Pazartesi"), "Should successfully schedule the genuine offer");
+    assert(res.text.includes("10:00") && res.text.includes("arayacaktır"), "Should format the confirmed time and suffix");
+  } finally {
+    (global as any).mockDb = originalDb;
   }
 });
 
