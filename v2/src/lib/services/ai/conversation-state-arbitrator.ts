@@ -182,6 +182,19 @@ export class ConversationStateArbitrator {
       routerIntent === 'time_availability' ||
       timeIntentRes.hasExplicitCallRequest;
 
+    // P0.28.3: timezone_clarification bypass routing
+    if (rawPendingSlot === 'timezone_clarification' && lowerUser !== '..') {
+      const isTzAnswer = this.isMessageRelevantToSlot(lastUserMessage, 'timezone_clarification', routerIntent);
+      if (isTzAnswer) {
+        return {
+          effectivePendingSlot: 'generic_none',
+          effectiveIntent: 'callback_time_answer',
+          staleSlotSuppressed: true,
+          suppressionReason: 'timezone_clarification_provided'
+        };
+      }
+    }
+
     // Rule 4: If message has explicit hours/hour-ranges, bypass must NOT run. Route it to callback_time_answer.
     const hasExplicitHourOrRange = /(?:\b\d{1,2}[:.]\d{2}\b|\b\d{1,2}\s*[-–]\s*\d{1,2}\b)/.test(lowerUser);
 

@@ -56,8 +56,8 @@ function extractTimeRange(text: string): { start: string; end: string } | null {
       let startHour = h1;
       let endHour = h2;
       
-      const isPm = /\b(akşam|öğleden sonra|gece|öğlen|öğle|akşamüstü|evening|night|afternoon|nachmittag|abend|nacht|avond|vanavond|مساء|ظهر|بعد الظهر)\b/i.test(clean);
-      const isAm = /\b(sabah|öğleden önce|morning|ochtend|fruh|صباح)\b/i.test(clean);
+      const isPm = /(?<![a-zçğışöü])(akşam|öğleden sonra|gece|öğlen|öğle|akşamüstü|evening|night|afternoon|nachmittag|abend|nacht|avond|vanavond|مساء|ظهر|بعد الظهر)(?![a-zçğışöü])/i.test(clean);
+      const isAm = /(?<![a-zçğışöü])(sabah|öğleden önce|morning|ochtend|fruh|صباح)(?![a-zçğışöü])/i.test(clean);
       
       if (startHour >= 1 && startHour <= 12) {
         if (isPm) {
@@ -176,18 +176,18 @@ export function parseDeterministicSuggestion(
   }
 
   // C. Check relative today/tomorrow keywords
-  if (/\b(bugün|bu gün)\b/i.test(normalized)) {
+  if (/(?<![a-zçğışöü])(bugün|bu gün)(?![a-zçğışöü])/i.test(normalized)) {
     hasBugun = true;
-    normalizedForTime = normalizedForTime.replace(/\b(bugün|bu gün)\b/gi, (match) => ' '.repeat(match.length));
+    normalizedForTime = normalizedForTime.replace(/(?<![a-zçğışöü])(bugün|bu gün)(?![a-zçğışöü])/gi, (match) => ' '.repeat(match.length));
   }
-  if (/\b(yarın|ertesi gün)\b/i.test(normalized)) {
+  if (/(?<![a-zçğışöü])(yarın|ertesi gün)(?![a-zçğışöü])/i.test(normalized)) {
     hasYarin = true;
-    normalizedForTime = normalizedForTime.replace(/\b(yarın|ertesi gün)\b/gi, (match) => ' '.repeat(match.length));
+    normalizedForTime = normalizedForTime.replace(/(?<![a-zçğışöü])(yarın|ertesi gün)(?![a-zçğışöü])/gi, (match) => ' '.repeat(match.length));
   }
 
   // D. Check relative weekday keywords
   for (const wd of weekdays) {
-    const wdPattern = new RegExp(`\\b${wd.name}\\b`, 'i');
+    const wdPattern = new RegExp(`(?<![a-zçğışöü])${wd.name}(?![a-zçğışöü])`, 'i');
     if (wdPattern.test(normalized)) {
       matchedWeekdayIndex = wd.index;
       normalizedForTime = normalizedForTime.replace(wdPattern, (match) => ' '.repeat(match.length));
@@ -220,8 +220,8 @@ export function parseDeterministicSuggestion(
       if (hourMatch) {
         let hh = parseInt(hourMatch[1], 10);
         
-        const isPm = /\b(akşam|öğleden sonra|gece|öğlen|öğle|akşamüstü|akşamüstü)\b/i.test(normalized);
-        const isAm = /\b(sabah|öğleden önce)\b/i.test(normalized);
+        const isPm = /(?<![a-zçğışöü])(akşam|öğleden sonra|gece|öğlen|öğle|akşamüstü)(?![a-zçğışöü])/i.test(normalized);
+        const isAm = /(?<![a-zçğışöü])(sabah|öğleden önce)(?![a-zçğışöü])/i.test(normalized);
         
         if (hh >= 1 && hh <= 12) {
           if (isPm) {
@@ -249,6 +249,18 @@ export function parseDeterministicSuggestion(
     }
   }
 
+  // Inherit proposed time and/or date from last assistant message if missing from user message
+  if ((!time || !date) && lastAssistantMessage) {
+    const assistantDet = parseDeterministicSuggestion(lastAssistantMessage, refDate, null, null);
+    if (!time && assistantDet.suggested_time) {
+      time = assistantDet.suggested_time;
+      timeEnd = assistantDet.suggested_time_end || null;
+    }
+    if (!date && assistantDet.suggested_date) {
+      date = assistantDet.suggested_date;
+    }
+  }
+
   // ────────────────────────────────────────────────────────────────────────
   // 3. Date Extraction/Resolution (Europe/Istanbul Reference)
   // ────────────────────────────────────────────────────────────────────────
@@ -272,12 +284,6 @@ export function parseDeterministicSuggestion(
       d.setUTCFullYear(currentYear + 1);
     }
     date = d.toISOString().split('T')[0];
-  } else if (hasBugun) {
-    const d = new Date(Date.UTC(currentYear, currentMonth, currentDate));
-    date = d.toISOString().split('T')[0];
-  } else if (hasYarin) {
-    const d = new Date(Date.UTC(currentYear, currentMonth, currentDate + 1));
-    date = d.toISOString().split('T')[0];
   } else if (matchedWeekdayIndex !== null) {
     let diff = matchedWeekdayIndex - currentDay;
     if (diff < 0) {
@@ -295,6 +301,12 @@ export function parseDeterministicSuggestion(
       }
     }
     const d = new Date(Date.UTC(currentYear, currentMonth, currentDate + diff));
+    date = d.toISOString().split('T')[0];
+  } else if (hasBugun) {
+    const d = new Date(Date.UTC(currentYear, currentMonth, currentDate));
+    date = d.toISOString().split('T')[0];
+  } else if (hasYarin) {
+    const d = new Date(Date.UTC(currentYear, currentMonth, currentDate + 1));
     date = d.toISOString().split('T')[0];
   }
 
@@ -322,16 +334,25 @@ export function parseDeterministicSuggestion(
   // Context-aware checking using current patient message and last assistant message
   const mergedContext = `${normalized} ${lastAssistantMessage ? lastAssistantMessage.toLowerCase() : ''}`;
   
-  const hasTurkeyBasis = /\b(türkiye|tr|sizin|konya|hastane|firma|bizim\s+taraf|oranın|istanbul|ts)\b/i.test(mergedContext);
-  const hasPatientBasis = /\b(bana|bize|benim|bizim|buradaki|buranın|local|yerel|kendi|saatime|saatimize|almanya|berlin|londra|new york|hollanda|amsterdam|netherlands|nederland|belçika|belgium|isveç|sweden|isviçre|switzerland|fransa|france|danimarka|denmark|avusturya|austria|ingiltere|uk)\b/i.test(mergedContext);
+  const userHasTurkey = /(?<![a-zçğışöü])(türkiye|tr|sizin|konya|hastane|firma|bizim\s+taraf|oranın|istanbul|ts)(?![a-zçğışöü])/i.test(normalized);
+  const userHasPatient = /(?<![a-zçğışöü])(bana|bize|benim|bizim|buradaki|buranın|local|yerel|kendi|saatime|saatimize|almanya|berlin|londra|new york|hollanda|amsterdam|netherlands|nederland|belçika|belgium|isveç|sweden|isviçre|switzerland|fransa|france|danimarka|denmark|avusturya|austria|ingiltere|uk)(?![a-zçğışöü])/i.test(normalized);
 
-  if (hasTurkeyBasis && !hasPatientBasis) {
+  if (userHasTurkey && !userHasPatient) {
     timezoneBasis = 'turkey_time';
-  } else if (hasPatientBasis && !hasTurkeyBasis) {
+  } else if (userHasPatient && !userHasTurkey) {
     timezoneBasis = 'patient_local_time';
   } else {
-    // If ambiguous or no contextual terms exist, mark it as unknown
-    timezoneBasis = 'unknown';
+    const hasTurkeyBasis = /(?<![a-zçğışöü])(türkiye|tr|sizin|konya|hastane|firma|bizim\s+taraf|oranın|istanbul|ts)(?![a-zçğışöü])/i.test(mergedContext);
+    const hasPatientBasis = /(?<![a-zçğışöü])(bana|bize|benim|bizim|buradaki|buranın|local|yerel|kendi|saatime|saatimize|almanya|berlin|londra|new york|hollanda|amsterdam|netherlands|nederland|belçika|belgium|isveç|sweden|isviçre|switzerland|fransa|france|danimarka|denmark|avusturya|austria|ingiltere|uk)(?![a-zçğışöü])/i.test(mergedContext);
+
+    if (hasTurkeyBasis && !hasPatientBasis) {
+      timezoneBasis = 'turkey_time';
+    } else if (hasPatientBasis && !hasTurkeyBasis) {
+      timezoneBasis = 'patient_local_time';
+    } else {
+      // If ambiguous or no contextual terms exist, mark it as unknown
+      timezoneBasis = 'unknown';
+    }
   }
 
   // ────────────────────────────────────────────────────────────────────────
