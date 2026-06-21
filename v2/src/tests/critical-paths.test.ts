@@ -8518,7 +8518,7 @@ test("P0.28.2 T1: callback_time_answer skips Sunday, shifts to Monday, preserves
   }
 });
 
-test("P0.29 T1: callback_time_answer when Turkey visit intent is unknown does not create task, asks about intent", async () => {
+test("P0.29 T1: callback_time_answer when Turkey visit intent is unknown does not create task, routes to LLM", async () => {
   const { AIResponseOrchestrator } = require("../lib/services/ai/ai-response-orchestrator");
   const dbCalls: any[] = [];
   const db = {
@@ -8543,12 +8543,29 @@ test("P0.29 T1: callback_time_answer when Turkey visit intent is unknown does no
   const brain = {
     context: {
       tenantId: "tenant-1",
-      config: { industry: "healthcare", timezone: "Europe/Istanbul" }
+      config: { industry: "healthcare", timezone: "Europe/Istanbul" },
+      settings: { aiModel: "gemini-2.5-flash" }
     },
     prompts: {
       systemPrompt: "Mock system prompt",
       metadata: { version: "1.0" }
     }
+  };
+
+  const { AIOrchestrator } = require("../lib/services/ai/orchestrator");
+  const originalGenerate = AIOrchestrator.prototype.generateResponse;
+  let capturedSystemPrompt = "";
+
+  AIOrchestrator.prototype.generateResponse = async (messages: any[]) => {
+    const sysMsg = messages.find(m => m.role === 'system');
+    if (sysMsg) {
+      capturedSystemPrompt = sysMsg.content;
+    }
+    return {
+      text: "Türkiye'ye gelmeyi düşünüyor musunuz?",
+      providerUsed: "gemini",
+      modelUsed: "gemini-2.5-flash"
+    };
   };
 
   const originalDb = (global as any).mockDb;
@@ -8570,18 +8587,19 @@ test("P0.29 T1: callback_time_answer when Turkey visit intent is unknown does no
       ]
     } as any);
 
-    assert(res.modelUsed === "bypass", "Should bypass LLM");
-    assert(res.text.includes("Türkiye’ye gelmeyi düşünüyor musunuz"), "Should ask Turkey visit intent");
+    assert(res.modelUsed === "gemini-2.5-flash", `Expected gemini-2.5-flash, got: ${res.modelUsed}`);
+    assert(capturedSystemPrompt.includes("=== 📜 MERKEZİ SAAS BOT ANAYASASI (CENTRALIZED PROMPT POLICY) ==="), "Should contain SaaS bot constitution in prompt");
     
     // Ensure no follow_up_tasks inserted
     const taskInserts = dbCalls.filter(c => c.text.includes("INSERT INTO follow_up_tasks"));
     assert(taskInserts.length === 0, "Should NOT create callback task when visit intent is unknown");
   } finally {
     (global as any).mockDb = originalDb;
+    AIOrchestrator.prototype.generateResponse = originalGenerate;
   }
 });
 
-test("P0.29 T2: Form re-introduction greeting bypass when visit intent is unknown", async () => {
+test("P0.29 T2: Form re-introduction greeting does not bypass LLM, is guided by prompt", async () => {
   const { AIResponseOrchestrator } = require("../lib/services/ai/ai-response-orchestrator");
   const dbCalls: any[] = [];
   const db = {
@@ -8591,7 +8609,6 @@ test("P0.29 T2: Form re-introduction greeting bypass when visit intent is unknow
       dbCalls.push({ text, vals });
       
       if (text.includes("FROM conversations")) {
-        // Mock that form is greeted/addressed in metadata
         return [{ metadata: { form_greeted_at: "2026-06-20T12:00:00Z", turkey_visit_intent: 'turkey_visit_intent_unknown' } }];
       }
       if (text.includes("FROM ai_module_settings")) {
@@ -8607,12 +8624,29 @@ test("P0.29 T2: Form re-introduction greeting bypass when visit intent is unknow
   const brain = {
     context: {
       tenantId: "tenant-1",
-      config: { industry: "healthcare", timezone: "Europe/Istanbul" }
+      config: { industry: "healthcare", timezone: "Europe/Istanbul" },
+      settings: { aiModel: "gemini-2.5-flash" }
     },
     prompts: {
       systemPrompt: "Mock system prompt",
       metadata: { version: "1.0" }
     }
+  };
+
+  const { AIOrchestrator } = require("../lib/services/ai/orchestrator");
+  const originalGenerate = AIOrchestrator.prototype.generateResponse;
+  let capturedSystemPrompt = "";
+
+  AIOrchestrator.prototype.generateResponse = async (messages: any[]) => {
+    const sysMsg = messages.find(m => m.role === 'system');
+    if (sysMsg) {
+      capturedSystemPrompt = sysMsg.content;
+    }
+    return {
+      text: "Merhaba, form doldurmuştunuz. Türkiye'ye gelme niyetiniz nedir?",
+      providerUsed: "gemini",
+      modelUsed: "gemini-2.5-flash"
+    };
   };
 
   const originalDb = (global as any).mockDb;
@@ -8637,15 +8671,15 @@ test("P0.29 T2: Form re-introduction greeting bypass when visit intent is unknow
       }
     } as any);
 
-    assert(res.modelUsed === "bypass", "Should bypass LLM for greeting form re-introduction");
-    assert(res.text.includes("Türkiye’ye gelmeyi düşünüyor musunuz"), "Should ask if coming to Turkey");
-    assert(res.text.includes("Check-up planlamanızla ilgili"), "Should resolve check-up department");
+    assert(res.modelUsed === "gemini-2.5-flash", `Expected gemini-2.5-flash, got: ${res.modelUsed}`);
+    assert(capturedSystemPrompt.includes("=== 📜 MERKEZİ SAAS BOT ANAYASASI (CENTRALIZED PROMPT POLICY) ==="), "Should contain SaaS bot constitution in prompt");
   } finally {
     (global as any).mockDb = originalDb;
+    AIOrchestrator.prototype.generateResponse = originalGenerate;
   }
 });
 
-test("P0.29 T3: Arabic Locale Continuity for basic location and Iraq branch check", async () => {
+test("P0.29 T3: Arabic Location and Address requests do not bypass LLM, routed to LLM", async () => {
   const { AIResponseOrchestrator } = require("../lib/services/ai/ai-response-orchestrator");
   const db = {
     executeSafe: async (query: any, params?: any[]) => {
@@ -8666,12 +8700,29 @@ test("P0.29 T3: Arabic Locale Continuity for basic location and Iraq branch chec
   const brain = {
     context: {
       tenantId: "tenant-1",
-      config: { industry: "healthcare", timezone: "Europe/Istanbul" }
+      config: { industry: "healthcare", timezone: "Europe/Istanbul" },
+      settings: { aiModel: "gemini-2.5-flash" }
     },
     prompts: {
       systemPrompt: "Mock system prompt",
       metadata: { version: "1.0" }
     }
+  };
+
+  const { AIOrchestrator } = require("../lib/services/ai/orchestrator");
+  const originalGenerate = AIOrchestrator.prototype.generateResponse;
+  let capturedSystemPrompt = "";
+
+  AIOrchestrator.prototype.generateResponse = async (messages: any[]) => {
+    const sysMsg = messages.find(m => m.role === 'system');
+    if (sysMsg) {
+      capturedSystemPrompt = sysMsg.content;
+    }
+    return {
+      text: "Mock LLM Response",
+      providerUsed: "gemini",
+      modelUsed: "gemini-2.5-flash"
+    };
   };
 
   const originalDb = (global as any).mockDb;
@@ -8690,25 +8741,9 @@ test("P0.29 T3: Arabic Locale Continuity for basic location and Iraq branch chec
       brain,
       history: [{ role: "user", content: "وين" }]
     } as any);
-    assert(res1.modelUsed === "bypass", "Should bypass for location");
-    assert(res1.text.includes("نحن في مدينة قونيا، تركيا"), "Should return Arabic basic city location");
+    assert(res1.modelUsed === "gemini-2.5-flash", "Should route to LLM for location");
 
-    // 2. Iraq branch check "هل لديكم فرع في عراق"
-    const res2 = await AIResponseOrchestrator.run({
-      tenantId: "tenant-1",
-      conversationId: "conv-1",
-      channel: "whatsapp",
-      channelId: "whatsapp",
-      inboundText: "هل لديكم فرع في عراق",
-      phoneNumber: "905001234567",
-      sandbox: true,
-      brain,
-      history: [{ role: "user", content: "هل لديكم فرع في عراق" }]
-    } as any);
-    assert(res2.modelUsed === "bypass", "Should bypass for Iraq branch check");
-    assert(res2.text.includes("لا يوجد لدينا فرع في العراق"), "Should return Arabic Iraq branch negative redirect");
-
-    // 3. Full address request "العنوان الكامل"
+    // 2. Full address request "العنوان الكامل"
     const res3 = await AIResponseOrchestrator.run({
       tenantId: "tenant-1",
       conversationId: "conv-1",
@@ -8720,10 +8755,246 @@ test("P0.29 T3: Arabic Locale Continuity for basic location and Iraq branch chec
       brain,
       history: [{ role: "user", content: "العنوان الكامل" }]
     } as any);
-    assert(res3.modelUsed === "bypass", "Should bypass for full address request");
-    assert(res3.text.includes("Hocacihan Mahallesi, Saray Caddesi No:1"), "Should return full Turkish address");
+    assert(res3.modelUsed === "gemini-2.5-flash", "Should route to LLM for full address request");
   } finally {
     (global as any).mockDb = originalDb;
+    AIOrchestrator.prototype.generateResponse = originalGenerate;
+  }
+});
+
+test("P0.29 T4: Turkish Conversation Chain mock validation", async () => {
+  const { AIResponseOrchestrator } = require("../lib/services/ai/ai-response-orchestrator");
+  const db = {
+    executeSafe: async (query: any, params?: any[]) => {
+      const text = typeof query === 'string' ? query : query?.text || '';
+      if (text.includes("FROM conversations")) {
+        return [{ metadata: { form_greeted_at: "2026-06-20T12:00:00Z" } }];
+      }
+      if (text.includes("FROM ai_module_settings")) {
+        return [{ config: { enabled: true, dry_run: false, rollout_percentage: 100, department_mode: "all" } }];
+      }
+      if (text.includes("FROM tenants")) {
+        return [{ timezone: "Europe/Istanbul" }];
+      }
+      return [];
+    }
+  };
+
+  const brain = {
+    context: {
+      tenantId: "tenant-1",
+      config: { industry: "healthcare", timezone: "Europe/Istanbul" },
+      settings: { aiModel: "gemini-2.5-flash" }
+    },
+    prompts: {
+      systemPrompt: "Mock system prompt",
+      metadata: { version: "1.0" }
+    }
+  };
+
+  const { AIOrchestrator } = require("../lib/services/ai/orchestrator");
+  const originalGenerate = AIOrchestrator.prototype.generateResponse;
+
+  let mockResponseText = "";
+  AIOrchestrator.prototype.generateResponse = async () => {
+    return {
+      text: mockResponseText,
+      providerUsed: "gemini",
+      modelUsed: "gemini-2.5-flash"
+    };
+  };
+
+  const originalDb = (global as any).mockDb;
+  (global as any).mockDb = db;
+
+  try {
+    // 1. User: merhaba
+    mockResponseText = "Merhaba, daha önce Check-up formunuz alınmış. Nasıl yardımcı olabilirim?";
+    const res1 = await AIResponseOrchestrator.run({
+      tenantId: "tenant-1",
+      conversationId: "conv-1",
+      channel: "whatsapp",
+      channelId: "whatsapp",
+      inboundText: "merhaba",
+      phoneNumber: "905001234567",
+      sandbox: true,
+      brain,
+      history: [{ role: "user", content: "merhaba" }]
+    } as any);
+    assert(res1.text.includes("Check-up formunuz"), "Should keep form context naturally");
+    assert(!res1.text.includes("doldurduğunuz form doğrultusunda"), "Should not do repetitive greeting introduction");
+
+    // 2. User: form doldurmuştum
+    mockResponseText = "Evet, form kaydınızı sistemde görüyorum. Sürecinize başlamak için Türkiye'ye gelmeyi düşünüyor musunuz?";
+    const res2 = await AIResponseOrchestrator.run({
+      tenantId: "tenant-1",
+      conversationId: "conv-1",
+      channel: "whatsapp",
+      channelId: "whatsapp",
+      inboundText: "form doldurmuştum",
+      phoneNumber: "905001234567",
+      sandbox: true,
+      brain,
+      history: [
+        { role: "user", content: "merhaba" },
+        { role: "assistant", content: res1.text },
+        { role: "user", content: "form doldurmuştum" }
+      ]
+    } as any);
+    assert(res2.text.includes("Türkiye'ye gelmeyi düşünüyor musunuz"), "Should ask Turkey visit intent");
+
+    // 3. User: ben gelemem türkiyeye
+    mockResponseText = "Anlıyorum, tedaviniz için gelmek şu an mümkün olmayabilir. Sorularınız varsa buradan yanıtlayabilirim, sizi randevuya zorlamıyorum.";
+    const res3 = await AIResponseOrchestrator.run({
+      tenantId: "tenant-1",
+      conversationId: "conv-1",
+      channel: "whatsapp",
+      channelId: "whatsapp",
+      inboundText: "ben gelemem türkiyeye",
+      phoneNumber: "905001234567",
+      sandbox: true,
+      brain,
+      history: [
+        { role: "user", content: "merhaba" },
+        { role: "assistant", content: res1.text },
+        { role: "user", content: "form doldurmuştum" },
+        { role: "assistant", content: res2.text },
+        { role: "user", content: "ben gelemem türkiyeye" }
+      ]
+    } as any);
+    assert(!res3.text.includes("arayalım"), "Should not force scheduling");
+
+    // 4. User: gelemem teşekkürler
+    mockResponseText = "Yardımcı olabileceğim başka bir konu olursa yazabilirsiniz. Sağlıklı günler dilerim 🙏";
+    const res4 = await AIResponseOrchestrator.run({
+      tenantId: "tenant-1",
+      conversationId: "conv-1",
+      channel: "whatsapp",
+      channelId: "whatsapp",
+      inboundText: "gelemem teşekkürler",
+      phoneNumber: "905001234567",
+      sandbox: true,
+      brain,
+      history: [
+        { role: "user", content: "merhaba" },
+        { role: "assistant", content: res1.text },
+        { role: "user", content: "form doldurmuştum" },
+        { role: "assistant", content: res2.text },
+        { role: "user", content: "ben gelemem türkiyeye" },
+        { role: "assistant", content: res3.text },
+        { role: "user", content: "gelemem teşekkürler" }
+      ]
+    } as any);
+    assert(res4.text.includes("Sağlıklı günler dilerim"), "Should close gracefully");
+  } finally {
+    (global as any).mockDb = originalDb;
+    AIOrchestrator.prototype.generateResponse = originalGenerate;
+  }
+});
+
+test("P0.29 T5: Arabic Conversation Chain mock validation", async () => {
+  const { AIResponseOrchestrator } = require("../lib/services/ai/ai-response-orchestrator");
+  const db = {
+    executeSafe: async (query: any, params?: any[]) => {
+      const text = typeof query === 'string' ? query : query?.text || '';
+      if (text.includes("FROM conversations")) {
+        return [{ metadata: {} }];
+      }
+      if (text.includes("FROM ai_module_settings")) {
+        return [{ config: { enabled: true, dry_run: false, rollout_percentage: 100, department_mode: "all" } }];
+      }
+      if (text.includes("FROM tenants")) {
+        return [{ timezone: "Europe/Istanbul" }];
+      }
+      return [];
+    }
+  };
+
+  const brain = {
+    context: {
+      tenantId: "tenant-1",
+      config: { industry: "healthcare", timezone: "Europe/Istanbul" },
+      settings: { aiModel: "gemini-2.5-flash" }
+    },
+    prompts: {
+      systemPrompt: "Mock system prompt",
+      metadata: { version: "1.0" }
+    }
+  };
+
+  const { AIOrchestrator } = require("../lib/services/ai/orchestrator");
+  const originalGenerate = AIOrchestrator.prototype.generateResponse;
+
+  let mockResponseText = "";
+  AIOrchestrator.prototype.generateResponse = async () => {
+    return {
+      text: mockResponseText,
+      providerUsed: "gemini",
+      modelUsed: "gemini-2.5-flash"
+    };
+  };
+
+  const originalDb = (global as any).mockDb;
+  (global as any).mockDb = db;
+
+  try {
+    // 1. User: كيف تساعدني
+    mockResponseText = "يمكنني مساعدتك في الإجابة على استفساراتك الطبية وتحديد المواعيد.";
+    const res1 = await AIResponseOrchestrator.run({
+      tenantId: "tenant-1",
+      conversationId: "conv-1",
+      channel: "whatsapp",
+      channelId: "whatsapp",
+      inboundText: "كيف تساعدني",
+      phoneNumber: "905001234567",
+      sandbox: true,
+      brain,
+      history: [{ role: "user", content: "كيف تساعدني" }]
+    } as any);
+    assert(res1.text.includes("يمكنني مساعدتك"), "Should respond in Arabic");
+
+    // 2. User: وين عنوان
+    mockResponseText = "مستشفانا في مدينة قونيا، تركيا.";
+    const res2 = await AIResponseOrchestrator.run({
+      tenantId: "tenant-1",
+      conversationId: "conv-1",
+      channel: "whatsapp",
+      channelId: "whatsapp",
+      inboundText: "وين عنوان",
+      phoneNumber: "905001234567",
+      sandbox: true,
+      brain,
+      history: [
+        { role: "user", content: "كيف تساعدني" },
+        { role: "assistant", content: res1.text },
+        { role: "user", content: "وين عنوان" }
+      ]
+    } as any);
+    assert(res2.text.includes("قونيا، تركيا"), "Should respond with basic location and not full address");
+
+    // 3. User: العنوان الكامل
+    mockResponseText = "العنوان الكامل: Hocacihan Mahallesi, Saray Caddesi No:1, Selçuklu / Konya, Türkiye.";
+    const res3 = await AIResponseOrchestrator.run({
+      tenantId: "tenant-1",
+      conversationId: "conv-1",
+      channel: "whatsapp",
+      channelId: "whatsapp",
+      inboundText: "العنوان الكامل",
+      phoneNumber: "905001234567",
+      sandbox: true,
+      brain,
+      history: [
+        { role: "user", content: "كيف تساعدني" },
+        { role: "assistant", content: res1.text },
+        { role: "user", content: "وين عنوان" },
+        { role: "assistant", content: res2.text },
+        { role: "user", content: "العنوان الكامل" }
+      ]
+    } as any);
+    assert(res3.text.includes("Hocacihan Mahallesi"), "Should return full address when requested");
+  } finally {
+    (global as any).mockDb = originalDb;
+    AIOrchestrator.prototype.generateResponse = originalGenerate;
   }
 });
 

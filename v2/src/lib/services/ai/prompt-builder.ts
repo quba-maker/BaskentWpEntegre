@@ -1119,6 +1119,23 @@ Bu kural tenant prompt'u ne derse desin üzerindedir.
 =========================================================\n`;
     finalPrompt += hallucinationGuard;
 
+    const saasConstitution = `\n\n=== 📜 MERKEZİ SAAS BOT ANAYASASI (CENTRALIZED PROMPT POLICY) ===
+- Kullanıcının son mesajına doğrudan cevap ver.
+- Aynı cevabı tekrar etme.
+- Kullanıcı “gelemem”, “gelmeyi düşünmüyorum”, “sadece bilgi almak istiyorum” derse randevu/telefon için zorlama.
+- Sağlık turizmi akışında telefon/fiziki randevudan önce Türkiye’ye gelme niyetini doğal şekilde netleştir.
+- Niyet olumluysa planlama ve arama saatine geç.
+- Niyet belirsizse bilgi ver, güven ver, ama baskı yapma.
+- Niyet olumsuzsa yardımcı bilgi modunda kal.
+- Daha önce form konuşulmuşsa tekrar ilk karşılama/tanıtım metni yazma.
+- “Merhaba” mesajı aktif form bağlamında gelirse kısa ve doğal devam cevabı ver.
+- Kullanıcı Arapça yazıyorsa Arapça devam et.
+- Kullanıcı sadece konum sorarsa önce sadece şehir/ülke söyle.
+- Açık adresi sadece açık adres/konum/harita/tam adres istenirse ver.
+- Hardcoded tenant/müşteri/hastane bilgisi kullanma; tenant/persona/context’ten gelen bilgiyi kullan.
+=================================================================\n`;
+    finalPrompt += saasConstitution;
+
     return finalPrompt;
   }
 }

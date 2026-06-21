@@ -1122,15 +1122,20 @@ export class AIResponseOrchestrator {
       const isCallbackConfirmation = effectiveIntent === 'callback_confirmation' || effectiveIntent === 'schedule_confirmation';
       const isArrivalDateAnswer = effectiveIntent === 'arrival_date_answer' && !inboundText.includes('?') && inboundText.length < 50;
       const isCallbackTimeAnswer = effectiveIntent === 'callback_time_answer';
-      const isGreeting = effectiveIntent === 'greeting';
-      const shouldBypassFormReintroduction = isGreeting && formAlreadyAddressed;
-      const isAddressFullRequest = effectiveIntent === 'address_full_request';
-      const isLocationDirection = effectiveIntent === 'location_direction';
-      const isCapabilityQuestion = effectiveIntent === 'capability_question';
+
+      // Calculate shouldCreateTask for callback time answer bypass
+      const isPositiveIntent = currentVisitIntent === 'turkey_visit_intent_positive';
+      const lastBotAskedTime = history.length > 0 && 
+        history[history.length - 1].role === 'assistant' && 
+        /saat|zaman|gün|gun|tarih|ne zaman|uygun/i.test(history[history.length - 1].content || '');
+      const isAppointmentContext = history.some(m => 
+        /randevu|arama|görüşme|gorusme|telefon/i.test(m.content || '')
+      );
+      const shouldCreateTask = isPositiveIntent || hasExplicitCall || (lastBotAskedTime && isAppointmentContext);
+      const shouldBypassCallbackTimeAnswer = isCallbackTimeAnswer && shouldCreateTask;
 
       const isLlmBypassChallenge = isPromptChallenge || isBotAccusation || isAiAccusation || isAngryPromptChallenge || shouldBypassDoctorLookup || isRecallWithFacts || isNextStepRequest || isMultiIntentQuery || isDoctorNamesRequest
-        || isThanksButContinueBypass || isOpenContinuationBypass || isCannotTravelObjection || isDistanceObjection || isPoliteClose || isCallbackConfirmation || isArrivalDateAnswer || isCallbackTimeAnswer || shouldBypassFormReintroduction
-        || isAddressFullRequest || isLocationDirection || isCapabilityQuestion; // P0.16-L
+        || isThanksButContinueBypass || isOpenContinuationBypass || isPoliteClose || isCallbackConfirmation || isArrivalDateAnswer || shouldBypassCallbackTimeAnswer;
 
       let text = '';
       let bypassed = false;
@@ -1617,17 +1622,6 @@ export class AIResponseOrchestrator {
 
         // P0.28.2: callback_time_answer bypass
         if (!fallbackResult && isCallbackTimeAnswer) {
-          const isPositiveIntent = currentVisitIntent === 'turkey_visit_intent_positive';
-          const hasExplicitCall = TurkeyVisitIntentResolver.hasExplicitCallRequest(inboundText);
-          const lastBotAskedTime = history.length > 0 && 
-            history[history.length - 1].role === 'assistant' && 
-            /saat|zaman|gün|gun|tarih|ne zaman|uygun/i.test(history[history.length - 1].content || '');
-          const isAppointmentContext = history.some(m => 
-            /randevu|arama|görüşme|gorusme|telefon/i.test(m.content || '')
-          );
-          
-          const shouldCreateTask = isPositiveIntent || hasExplicitCall || (lastBotAskedTime && isAppointmentContext);
-
           if (!shouldCreateTask) {
             // Do NOT create task. Resolve using ContextAwareSafeFallbackResolver
             fallbackResult = ContextAwareSafeFallbackResolver.resolve({
